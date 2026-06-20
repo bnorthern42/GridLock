@@ -244,28 +244,27 @@ void MainWindow::openFile() {
 }
 
 void MainWindow::loadSourceFile(const QString& filePath) {
-    QStringList searchPaths = { filePath, "../" + filePath, "../../" + filePath };
-    QString targetPath = "";
-    
-    for (const QString& path : searchPaths) {
-        if (QFile::exists(path)) {
-            targetPath = path;
-            break;
+    QFile file(filePath);
+    // Check direct path, then check fallback for meson build dirs
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        file.setFileName("../" + filePath); 
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            if (m_terminalDock) m_terminalDock->appendError("CRITICAL: Failed to load " + filePath + "\n");
+            return;
         }
     }
     
-    if (targetPath.isEmpty()) {
-        if (m_terminalDock) m_terminalDock->appendError("CRITICAL: File not found: " + filePath + "\n");
-        return;
+    QString code = file.readAll();
+    m_currentFile = file.fileName();
+    
+    if (m_sourceCodeView) {
+        m_sourceCodeView->setPlainText(code);
     }
     
-    QFile file(targetPath);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        m_currentFile = QFileInfo(targetPath).absoluteFilePath();
-        m_sourceCodeView->setPlainText(file.readAll());
-        if (m_terminalDock) m_terminalDock->appendText("Loaded: " + m_currentFile + "\n");
-        file.close();
+    if (m_terminalDock) {
+        m_terminalDock->appendText("Successfully loaded: " + m_currentFile + "\n");
     }
+    file.close();
 }
 
 void MainWindow::openPreferences() {
@@ -303,7 +302,7 @@ void MainWindow::openPreferences() {
 void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
     if (!m_coordinator) return;
     
-    if (m_currentFile.isEmpty()) {
+    if (m_currentFile.isEmpty() || m_sourceCodeView->toPlainText().trimmed().isEmpty()) {
         loadSourceFile("tests/matrix_multiply.cpp");
     }
 

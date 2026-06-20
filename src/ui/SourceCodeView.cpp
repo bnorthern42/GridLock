@@ -142,10 +142,10 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     font.setPointSize(11);
     setFont(font);
 
-    QPalette p = palette();
+    QPalette p = this->palette();
     p.setColor(QPalette::Base, QColor(30, 30, 30));
-    p.setColor(QPalette::Text, QColor(220, 220, 220));
-    setPalette(p);
+    p.setColor(QPalette::Text, QColor(240, 240, 240)); // Off-white text
+    this->setPalette(p);
 
     m_highlighter = new CppSyntaxHighlighter(document());
 }
