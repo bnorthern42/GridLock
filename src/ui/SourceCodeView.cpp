@@ -243,6 +243,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QWidget(parent) {
     layout->addWidget(m_textEdit);
 
     m_highlighter = new CppSyntaxHighlighter(m_textEdit->document());
+    setLayout(layout);
 }
 
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {

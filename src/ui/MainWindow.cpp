@@ -235,18 +235,27 @@ void MainWindow::openFile() {
 }
 
 void MainWindow::loadSourceFile(const QString& filePath) {
-    QFileInfo fileInfo(filePath);
-    QString absPath = fileInfo.absoluteFilePath();
-    QFile file(absPath);
+    QStringList searchPaths = { filePath, "../" + filePath, "../../" + filePath };
+    QString targetPath = "";
     
+    for (const QString& path : searchPaths) {
+        if (QFile::exists(path)) {
+            targetPath = path;
+            break;
+        }
+    }
+    
+    if (targetPath.isEmpty()) {
+        if (m_terminalDock) m_terminalDock->appendError("CRITICAL: File not found in any search path: " + filePath + "\n");
+        return;
+    }
+    
+    QFile file(targetPath);
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString content = file.readAll();
-        if (m_sourceCodeView) m_sourceCodeView->setPlainText(content);
-        if (m_terminalDock) m_terminalDock->appendText("Loaded source: " + absPath + "\n");
-        m_currentFile = absPath;
+        m_currentFile = QFileInfo(targetPath).absoluteFilePath();
+        m_sourceCodeView->setPlainText(file.readAll());
+        if (m_terminalDock) m_terminalDock->appendText("Loaded: " + m_currentFile + "\n");
         file.close();
-    } else {
-        if (m_terminalDock) m_terminalDock->appendError("CRITICAL: Failed to open source file: " + absPath + "\n");
     }
 }
 
