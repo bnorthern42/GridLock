@@ -16,7 +16,7 @@ GdbRankCoordinator::~GdbRankCoordinator() {
     terminateAllSessions();
 }
 
-void GdbRankCoordinator::addWatchVariable(const QString& name) {
+void GdbRankCoordinator::registerWatchVariable(const QString& name) {
     if (std::find(m_watchVariables.begin(), m_watchVariables.end(), name) == m_watchVariables.end()) {
         m_watchVariables.push_back(name);
     }
@@ -25,12 +25,9 @@ void GdbRankCoordinator::addWatchVariable(const QString& name) {
     
     for (size_t i = 0; i < m_processes.size(); ++i) {
         auto& rp = m_processes[i];
-        if (rp && rp->process && rp->state.currentState == "stopped") {
-            if (!rp->nameToVarId.contains(name)) {
+        if (rp && rp->process && rp->process->state() == QProcess::Running) {
+            if (!m_varNameMap[i].contains(name)) {
                 QString evalCmd = QString("30%1-var-create - * %2\n").arg(varIdx).arg(name);
-                rp->process->write(evalCmd.toUtf8());
-            } else {
-                QString evalCmd = QString("40%1-var-update 1 %2\n").arg(varIdx).arg(rp->nameToVarId[name]);
                 rp->process->write(evalCmd.toUtf8());
             }
         }
@@ -239,8 +236,8 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                         QString varName = m_watchVariables[varIdx];
                         QString varId = match.captured(2);
                         QString value = match.captured(3);
-                        rp->nameToVarId[varName] = varId;
-                        rp->varIdToName[varId] = varName;
+                        m_varNameMap[rankId][varName] = varId;
+                        m_varNameRevMap[rankId][varId] = varName;
                         rp->state.variableWatches[varName] = value;
                         emit rankStateChanged(rankId, rp->state);
                     }
@@ -256,23 +253,21 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                     }
                 }
             }
-        } else if (sv.starts_with("40")) {
-            if (line.contains("^done")) {
-                QRegularExpression changeRe("name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
-                auto i = changeRe.globalMatch(line);
-                bool updated = false;
-                while (i.hasNext()) {
-                    auto match = i.next();
-                    QString varId = match.captured(1);
-                    QString value = match.captured(2);
-                    if (rp->varIdToName.contains(varId)) {
-                        QString varName = rp->varIdToName[varId];
-                        rp->state.variableWatches[varName] = value;
-                        updated = true;
-                    }
+        } else if (line.contains("^done,changelist=")) {
+            QRegularExpression changeRe("name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
+            auto i = changeRe.globalMatch(line);
+            bool updated = false;
+            while (i.hasNext()) {
+                auto match = i.next();
+                QString varId = match.captured(1);
+                QString value = match.captured(2);
+                if (m_varNameRevMap.contains(rankId) && m_varNameRevMap[rankId].contains(varId)) {
+                    QString varName = m_varNameRevMap[rankId][varId];
+                    rp->state.variableWatches[varName] = value;
+                    updated = true;
                 }
-                if (updated) emit rankStateChanged(rankId, rp->state);
             }
+            if (updated) emit rankStateChanged(rankId, rp->state);
         } else if (sv.starts_with("200")) {
             if (line.contains("asm_insns=")) {
                 QString prettyAsm;
@@ -298,16 +293,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             }
             
             // Chain variable evaluation after disassembly finishes
-            for (size_t i = 0; i < m_watchVariables.size(); ++i) {
-                QString varName = m_watchVariables[i];
-                if (!rp->nameToVarId.contains(varName)) {
-                    QString evalCmd = QString("30%1-var-create - * %2\n").arg(i).arg(varName);
-                    rp->process->write(evalCmd.toUtf8());
-                } else {
-                    QString evalCmd = QString("40%1-var-update 1 %2\n").arg(i).arg(rp->nameToVarId[varName]);
-                    rp->process->write(evalCmd.toUtf8());
-                }
-            }
+            rp->process->write("-var-update - * \n");
         } else if (line.contains("^error") && !sv.starts_with("30") && !sv.starts_with("40") && !sv.starts_with("200")) {
             QRegularExpression errorRe("msg=\"([^\"]+)\"");
             auto match = errorRe.match(line);

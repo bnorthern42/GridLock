@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include "RankState.hpp"
+#include <QMap>
 
 namespace gridlock {
 
@@ -40,7 +41,7 @@ public slots:
     void runAll();
     void haltAll();
     void pauseFocusedRank(int rankId);
-    void addWatchVariable(const QString& name);
+    void registerWatchVariable(const QString& varName);
 
 public slots:
     void handleGdbOutput(int rankId);
@@ -51,10 +52,10 @@ private:
         std::unique_ptr<QProcess> process;
         RankState state;
         QString buffer;
-        std::unordered_map<QString, QString> varIdToName;
-        std::unordered_map<QString, QString> nameToVarId;
     };
     std::vector<std::unique_ptr<RankProcess>> m_processes;
+    QMap<int, QMap<QString, QString>> m_varNameMap; // rankId -> (varName -> varId)
+    QMap<int, QMap<QString, QString>> m_varNameRevMap; // rankId -> (varId -> varName)
     std::vector<QString> m_watchVariables;
 };
 
