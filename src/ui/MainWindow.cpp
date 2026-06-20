@@ -246,7 +246,7 @@ void MainWindow::loadSourceFile(const QString& filePath) {
     }
     
     if (targetPath.isEmpty()) {
-        if (m_terminalDock) m_terminalDock->appendError("CRITICAL: File not found in any search path: " + filePath + "\n");
+        if (m_terminalDock) m_terminalDock->appendError("CRITICAL: File not found: " + filePath + "\n");
         return;
     }
     

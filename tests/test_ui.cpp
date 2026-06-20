@@ -14,6 +14,7 @@ void TestMainWindowUI::testSourceFileLoading() {
     mainWindow.loadSourceFile(tempFile.fileName());
 
     QVERIFY(mainWindow.getSourceCodeView() != nullptr);
+    QVERIFY(mainWindow.getSourceCodeView()->layout() != nullptr);
     QCOMPARE(mainWindow.getSourceCodeView()->getPlainText().isEmpty(), false);
     QVERIFY(mainWindow.getSourceCodeView()->getPlainText().contains("int main"));
 }
