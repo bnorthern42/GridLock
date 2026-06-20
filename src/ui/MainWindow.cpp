@@ -23,6 +23,7 @@
 #include <QTabWidget>
 #include <QSettings>
 #include <QTimer>
+#include <QFileInfo>
 
 namespace gridlock::ui {
 
@@ -234,14 +235,18 @@ void MainWindow::openFile() {
 }
 
 void MainWindow::loadSourceFile(const QString& filePath) {
-    QFile file(filePath);
+    QFileInfo fileInfo(filePath);
+    QString absPath = fileInfo.absoluteFilePath();
+    QFile file(absPath);
+    
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        m_currentFile = filePath;
         QString content = file.readAll();
-        m_sourceCodeView->setPlainText(content);
+        if (m_sourceCodeView) m_sourceCodeView->setPlainText(content);
+        if (m_terminalDock) m_terminalDock->appendText("Loaded source: " + absPath + "\n");
+        m_currentFile = absPath;
         file.close();
     } else {
-        qDebug() << "Failed to open source file:" << filePath;
+        if (m_terminalDock) m_terminalDock->appendError("CRITICAL: Failed to open source file: " + absPath + "\n");
     }
 }
 
