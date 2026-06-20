@@ -57,6 +57,12 @@ void DifferentialGrid::setVariableData(int rank, const QString& varName, const Q
     updateHighlights();
 }
 
+void DifferentialGrid::setVariableData(int rank, const std::unordered_map<QString, QString>& variables) {
+    for (const auto& kv : variables) {
+        setVariableData(rank, kv.first, kv.second);
+    }
+}
+
 void DifferentialGrid::updateHighlights() {
     for (int col = 0; col < columnCount(); ++col) {
         std::unordered_map<QString, int> counts;

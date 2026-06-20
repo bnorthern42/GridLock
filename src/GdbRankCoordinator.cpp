@@ -141,10 +141,10 @@ void GdbRankCoordinator::requestDisassemblyFallback(int rankId) {
         qDebug() << "[GDB IN Rank" << rankId << "]: Sending Disassembly Command";
         rp->process->write("-thread-info\n");
         if (!rp->state.currentFile.isEmpty() && rp->state.currentLine > 0) {
-            QString disasmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(rp->state.currentFile).arg(rp->state.currentLine);
+            QString disasmCmd = QString("200-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(rp->state.currentFile).arg(rp->state.currentLine);
             rp->process->write(disasmCmd.toUtf8());
         } else {
-            rp->process->write("-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
+            rp->process->write("200-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
         }
     }
 }
@@ -186,11 +186,11 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             rp->state.currentLine = lineNum;
 
             if (!file.isEmpty()) {
-                QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(lineNum);
+                QString asmCmd = QString("200-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(lineNum);
                 rp->process->write(asmCmd.toUtf8());
             } else {
                 // Fallback if GDB didn't provide frame file info
-                rp->process->write("-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
+                rp->process->write("200-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
             }
 
             QRegularExpression threadRe("thread-id=\"(\\d+)\"");
@@ -203,34 +203,70 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                 rp->process->write("-thread-info\n");
             }
 
-            for (size_t i = 0; i < m_watchVariables.size(); ++i) {
-                QString evalCmd = QString("10%1-data-evaluate-expression %2\n").arg(i).arg(m_watchVariables[i]);
-                rp->process->write(evalCmd.toUtf8());
-            }
-
             emit rankStateChanged(rankId, rp->state);
         } else if (sv.starts_with("*running")) {
             rp->state.currentState = "running";
             rp->state.executionTimer.start();
             emit rankStateChanged(rankId, rp->state);
-        } else if (sv.starts_with("10") || line.contains("^done,value=")) { 
-            QRegularExpression evalRe("10(\\d+)\\^done,value=\"([^\"]+)\"");
-            auto match = evalRe.match(line);
-            if (match.hasMatch()) {
-                int varIdx = match.captured(1).toInt();
-                if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
-                    rp->state.variableWatches[m_watchVariables[varIdx]] = match.captured(2);
-                    emit rankStateChanged(rankId, rp->state);
+        } else if (sv.starts_with("10")) { 
+            if (line.contains("^done")) {
+                QRegularExpression evalRe("10(\\d+)\\^done,.*?value=\"([^\"]+)\"");
+                auto match = evalRe.match(line);
+                if (match.hasMatch()) {
+                    int varIdx = match.captured(1).toInt();
+                    if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
+                        rp->state.variableWatches[m_watchVariables[varIdx]] = match.captured(2);
+                        emit rankStateChanged(rankId, rp->state);
+                    }
+                }
+            } else if (line.contains("^error")) {
+                QRegularExpression errRe("10(\\d+)\\^error");
+                auto match = errRe.match(line);
+                if (match.hasMatch()) {
+                    int varIdx = match.captured(1).toInt();
+                    if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
+                        rp->state.variableWatches[m_watchVariables[varIdx]] = "N/A";
+                        emit rankStateChanged(rankId, rp->state);
+                    }
                 }
             }
-        } else if (line.contains("^error")) {
+        } else if (sv.starts_with("200")) {
+            if (line.contains("asm_insns=")) {
+                QString prettyAsm;
+                QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
+                auto i = instRe.globalMatch(line);
+                while (i.hasNext()) {
+                    auto match = i.next();
+                    prettyAsm += QString("%1: %2\n")
+                        .arg(match.captured(1))
+                        .arg(match.captured(2));
+                }
+                if (!prettyAsm.isEmpty()) {
+                    rp->state.disassemblyText = prettyAsm;
+                    emit rankStateChanged(rankId, rp->state);
+                }
+            } else if (line.contains("^error")) {
+                QRegularExpression errorRe("msg=\"([^\"]+)\"");
+                auto match = errorRe.match(line);
+                QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
+                
+                rp->state.disassemblyText = QString("; GDB Error: %1").arg(errMsg);
+                emit rankStateChanged(rankId, rp->state);
+            }
+            
+            // Chain variable evaluation after disassembly finishes
+            for (size_t i = 0; i < m_watchVariables.size(); ++i) {
+                QString evalCmd = QString("10%1-var-create - * %2\n").arg(i).arg(m_watchVariables[i]);
+                rp->process->write(evalCmd.toUtf8());
+            }
+        } else if (line.contains("^error") && !sv.starts_with("10") && !sv.starts_with("200")) {
             QRegularExpression errorRe("msg=\"([^\"]+)\"");
             auto match = errorRe.match(line);
             QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
             
             rp->state.disassemblyText = QString("; GDB Error: %1").arg(errMsg);
             emit rankStateChanged(rankId, rp->state);
-        } else if (line.contains("asm_insns=")) {
+        } else if (line.contains("asm_insns=") && !sv.starts_with("200")) {
             QString prettyAsm;
             QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
             auto i = instRe.globalMatch(line);

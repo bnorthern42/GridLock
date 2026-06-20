@@ -205,9 +205,7 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
         }
     }
     
-    for (const auto& kv : state.variableWatches) {
-        m_differentialGrid->setVariableData(rankId, kv.first, kv.second);
-    }
+    m_differentialGrid->setVariableData(rankId, state.variableWatches);
 }
 
 void MainWindow::onRankSelected(int rankId) {
@@ -221,9 +219,7 @@ void MainWindow::onRankSelected(int rankId) {
         }
         
         // Force update DifferentialGrid table matrix rows
-        for (const auto& kv : state.variableWatches) {
-            m_differentialGrid->setVariableData(rankId, kv.first, kv.second);
-        }
+        m_differentialGrid->setVariableData(rankId, state.variableWatches);
     } else {
         if (m_coordinator) m_coordinator->requestDisassemblyFallback(rankId);
     }

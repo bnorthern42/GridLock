@@ -13,6 +13,7 @@ public:
     ~DifferentialGrid() override = default;
 
     void setVariableData(int rank, const QString& varName, const QString& value);
+    void setVariableData(int rank, const std::unordered_map<QString, QString>& variables);
 
 private:
     std::vector<QString> m_headers;
