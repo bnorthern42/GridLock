@@ -36,6 +36,7 @@ public:
 
     void setSourceCode(const QString& code, int activeLine = -1);
     QString getPlainText() const { return toPlainText(); }
+    QMargins getViewportMargins() const { return viewportMargins(); }
 
     void lineNumberAreaPaintEvent(QPaintEvent *event);
     void lineNumberAreaMousePressEvent(QMouseEvent *event);

@@ -7,4 +7,7 @@ class TestMainWindowUI : public QObject {
 
 private slots:
     void testSourceFileLoading();
+    void testMainLayoutStructure();
+    void testSourceCodeViewportMargins();
+    void testServerRackStateUpdate();
 };
