@@ -238,6 +238,9 @@ void MainWindow::loadSourceFile(const QString& filePath) {
         m_currentFile = filePath;
         QString content = file.readAll();
         m_sourceCodeView->setPlainText(content);
+        file.close();
+    } else {
+        qDebug() << "Failed to open source file:" << filePath;
     }
 }
 
