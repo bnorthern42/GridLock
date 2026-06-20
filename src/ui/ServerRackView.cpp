@@ -28,7 +28,7 @@ void ServerRackView::paintEvent(QPaintEvent */*event*/) {
         QPainterPath path;
         path.addRoundedRect(rect, 5, 5);
 
-        painter.fillPath(path, QColor(35, 35, 35));
+        painter.setBrush(QColor(35, 35, 35));
         
         QPen borderPen(i == m_selectedRank ? QColor(100, 150, 255) : QColor(80, 80, 80));
         borderPen.setWidth(i == m_selectedRank ? 2 : 1);
