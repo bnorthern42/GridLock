@@ -121,6 +121,24 @@ void MainWindow::setupToolbar() {
     toolbar->setMovable(false);
     toolbar->setStyleSheet("QToolButton { color: #ff5555; font-weight: bold; }");
 
+    QAction* runAction = new QAction("▶ Run Target", this);
+    connect(runAction, &QAction::triggered, this, [this]() {
+        startDebuggingSession("build/test_bin", 4);
+    });
+    toolbar->addAction(runAction);
+
+    QAction* continueAction = new QAction("⏩ Continue", this);
+    connect(continueAction, &QAction::triggered, this, [this]() {
+        if (m_coordinator) m_coordinator->continueAll();
+    });
+    toolbar->addAction(continueAction);
+
+    QAction* stepAction = new QAction("↷ Step Inst", this);
+    connect(stepAction, &QAction::triggered, this, [this]() {
+        if (m_coordinator) m_coordinator->stepAll();
+    });
+    toolbar->addAction(stepAction);
+
     QAction* pauseAction = new QAction("Pause Rank", this);
     connect(pauseAction, &QAction::triggered, this, [this]() {
         if (m_coordinator) m_coordinator->pauseFocusedRank(m_focusedRank);
@@ -139,15 +157,6 @@ void MainWindow::setupDocks() {
 
     m_sourceCodeView = new SourceCodeView(masterHorizontalSplitter);
     m_sourceCodeView->setMinimumWidth(350);
-    connect(m_sourceCodeView, &SourceCodeView::runTargetRequested, this, [this]() {
-        startDebuggingSession("build/test_bin", 4);
-    });
-    connect(m_sourceCodeView, &SourceCodeView::continueRequested, this, [this]() {
-        if (m_coordinator) m_coordinator->continueAll();
-    });
-    connect(m_sourceCodeView, &SourceCodeView::stepInstRequested, this, [this]() {
-        if (m_coordinator) m_coordinator->stepAll();
-    });
     connect(m_sourceCodeView, &SourceCodeView::toggleBreakpointRequested, this, [this](const QString& loc) {
         if (m_coordinator) m_coordinator->insertBreakpoint(loc);
     });
