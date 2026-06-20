@@ -26,15 +26,19 @@ private:
     QTextCharFormat multiLineCommentFormat;
 };
 
-class SourceCodeView : public QWidget {
+class LineNumberArea;
+
+class SourceCodeView : public QPlainTextEdit {
     Q_OBJECT
 public:
     explicit SourceCodeView(QWidget *parent = nullptr);
     ~SourceCodeView() override = default;
 
     void setSourceCode(const QString& code, int activeLine = -1);
-    void setPlainText(const QString& text);
-    QString getPlainText() const;
+    QString getPlainText() const { return toPlainText(); }
+
+    void lineNumberAreaPaintEvent(QPaintEvent *event);
+    void lineNumberAreaMousePressEvent(QMouseEvent *event);
 
 signals:
     void runTargetRequested();
@@ -43,9 +47,17 @@ signals:
     void toggleBreakpointRequested(const QString& location);
     void breakpointToggled(const QString& file, int line);
 
+protected:
+    void resizeEvent(QResizeEvent *e) override;
+
+private slots:
+    void updateLineNumberAreaWidth(int newBlockCount);
+    void updateLineNumberArea(const QRect &rect, int dy);
+
 private:
-    QPlainTextEdit* m_textEdit;
+    LineNumberArea* m_lineNumberArea;
     CppSyntaxHighlighter* m_highlighter;
+    QSet<int> breakpoints;
 };
 
 } // namespace gridlock::ui

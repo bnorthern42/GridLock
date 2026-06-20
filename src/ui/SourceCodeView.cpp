@@ -119,136 +119,98 @@ void CppSyntaxHighlighter::highlightBlock(const QString &text) {
     }
 }
 
-class CodeEditor;
-
 class LineNumberArea : public QWidget {
 public:
-    LineNumberArea(CodeEditor *editor);
-    QSize sizeHint() const override;
+    LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {}
+    QSize sizeHint() const override { return QSize(35, 0); }
 protected:
-    void paintEvent(QPaintEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
+    void paintEvent(QPaintEvent *event) override { sourceCodeView->lineNumberAreaPaintEvent(event); }
+    void mousePressEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMousePressEvent(event); }
 private:
-    CodeEditor *codeEditor;
+    SourceCodeView *sourceCodeView;
 };
 
-class CodeEditor : public QPlainTextEdit {
-public:
-    CodeEditor(QWidget* parent, SourceCodeView* view) : QPlainTextEdit(parent), view(view) {
-        lineNumberArea = new LineNumberArea(this);
-        connect(document(), &QTextDocument::blockCountChanged, this, &CodeEditor::updateLineNumberAreaWidth);
-        connect(this, &CodeEditor::updateRequest, this, &CodeEditor::updateLineNumberArea);
-        updateLineNumberAreaWidth(0);
-    }
+SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
+    m_lineNumberArea = new LineNumberArea(this);
+    connect(document(), &QTextDocument::blockCountChanged, this, &SourceCodeView::updateLineNumberAreaWidth);
+    connect(this, &SourceCodeView::updateRequest, this, &SourceCodeView::updateLineNumberArea);
+    updateLineNumberAreaWidth(0);
 
-    void lineNumberAreaPaintEvent(QPaintEvent *event) {
-        QPainter painter(lineNumberArea);
-        painter.fillRect(event->rect(), QColor(40, 40, 40));
-        QTextBlock block = document()->begin();
-        int blockNumber = 0;
-        int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
-        int bottom = top + (int) blockBoundingRect(block).height();
-        
-        while (block.isValid() && top <= event->rect().bottom()) {
-            if (block.isVisible() && bottom >= event->rect().top()) {
-                QString number = QString::number(blockNumber + 1);
-                painter.setPen(QColor(120, 120, 120));
-                painter.drawText(0, top, lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
-                if (breakpoints.contains(blockNumber + 1)) {
-                    painter.setBrush(Qt::red);
-                    painter.drawEllipse(2, top + 2, 8, 8);
-                }
-            }
-            block = block.next();
-            top = bottom;
-            bottom = top + (int) blockBoundingRect(block).height();
-            ++blockNumber;
-        }
-    }
-
-    void lineNumberAreaMousePressEvent(QMouseEvent *event) {
-        int y = event->pos().y();
-        QTextBlock block = document()->begin();
-        int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
-        int bottom = top + (int) blockBoundingRect(block).height();
-        int blockNumber = 1;
-        while (block.isValid()) {
-            if (y >= top && y <= bottom) {
-                if (breakpoints.contains(blockNumber)) breakpoints.remove(blockNumber);
-                else breakpoints.insert(blockNumber);
-                lineNumberArea->update();
-                emit view->breakpointToggled("tests/matrix_multiply.cpp", blockNumber);
-                break;
-            }
-            block = block.next();
-            top = bottom;
-            bottom = top + (int) blockBoundingRect(block).height();
-            ++blockNumber;
-        }
-    }
-
-    void updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }
-    void updateLineNumberArea(const QRect &rect, int dy) {
-        if (dy) lineNumberArea->scroll(0, dy);
-        else lineNumberArea->update(0, rect.y(), lineNumberArea->width(), rect.height());
-        if (rect.contains(viewport()->rect())) lineNumberArea->resize(35, rect.height());
-    }
-    void resizeEvent(QResizeEvent *e) override {
-        QPlainTextEdit::resizeEvent(e);
-        QRect cr = contentsRect();
-        lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), 35, cr.height()));
-    }
-
-    LineNumberArea* lineNumberArea;
-    SourceCodeView* view;
-    QSet<int> breakpoints;
-};
-
-LineNumberArea::LineNumberArea(CodeEditor *editor) : QWidget(editor), codeEditor(editor) {}
-
-QSize LineNumberArea::sizeHint() const {
-    return QSize(35, 0);
-}
-
-void LineNumberArea::paintEvent(QPaintEvent *event) {
-    codeEditor->lineNumberAreaPaintEvent(event);
-}
-
-void LineNumberArea::mousePressEvent(QMouseEvent *event) {
-    codeEditor->lineNumberAreaMousePressEvent(event);
-}
-
-SourceCodeView::SourceCodeView(QWidget *parent) : QWidget(parent) {
-    QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-
-    QToolBar* toolbar = new QToolBar(this);
-    toolbar->addAction("▶ Run Target", this, &SourceCodeView::runTargetRequested);
-    toolbar->addAction("⏩ Continue", this, &SourceCodeView::continueRequested);
-    toolbar->addAction("↷ Step Inst", this, &SourceCodeView::stepInstRequested);
-    layout->addWidget(toolbar);
-
-    m_textEdit = new CodeEditor(this, this);
-    m_textEdit->setReadOnly(true);
+    setReadOnly(true);
     QFont font("monospace");
     font.setStyleHint(QFont::Monospace);
     font.setPointSize(11);
-    m_textEdit->setFont(font);
+    setFont(font);
 
-    QPalette p = m_textEdit->palette();
+    QPalette p = palette();
     p.setColor(QPalette::Base, QColor(30, 30, 30));
     p.setColor(QPalette::Text, QColor(220, 220, 220));
-    m_textEdit->setPalette(p);
+    setPalette(p);
 
-    layout->addWidget(m_textEdit);
+    m_highlighter = new CppSyntaxHighlighter(document());
+}
 
-    m_highlighter = new CppSyntaxHighlighter(m_textEdit->document());
-    setLayout(layout);
+void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
+    QPainter painter(m_lineNumberArea);
+    painter.fillRect(event->rect(), QColor(40, 40, 40));
+    QTextBlock block = document()->begin();
+    int blockNumber = 0;
+    int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
+    int bottom = top + (int) blockBoundingRect(block).height();
+    
+    while (block.isValid() && top <= event->rect().bottom()) {
+        if (block.isVisible() && bottom >= event->rect().top()) {
+            QString number = QString::number(blockNumber + 1);
+            painter.setPen(QColor(120, 120, 120));
+            painter.drawText(0, top, m_lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
+            if (breakpoints.contains(blockNumber + 1)) {
+                painter.setBrush(Qt::red);
+                painter.drawEllipse(2, top + 2, 8, 8);
+            }
+        }
+        block = block.next();
+        top = bottom;
+        bottom = top + (int) blockBoundingRect(block).height();
+        ++blockNumber;
+    }
+}
+
+void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
+    int y = event->pos().y();
+    QTextBlock block = document()->begin();
+    int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
+    int bottom = top + (int) blockBoundingRect(block).height();
+    int blockNumber = 1;
+    while (block.isValid()) {
+        if (y >= top && y <= bottom) {
+            if (breakpoints.contains(blockNumber)) breakpoints.remove(blockNumber);
+            else breakpoints.insert(blockNumber);
+            m_lineNumberArea->update();
+            emit breakpointToggled("tests/matrix_multiply.cpp", blockNumber);
+            break;
+        }
+        block = block.next();
+        top = bottom;
+        bottom = top + (int) blockBoundingRect(block).height();
+        ++blockNumber;
+    }
+}
+
+void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }
+void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
+    if (dy) m_lineNumberArea->scroll(0, dy);
+    else m_lineNumberArea->update(0, rect.y(), m_lineNumberArea->width(), rect.height());
+    if (rect.contains(viewport()->rect())) m_lineNumberArea->resize(35, rect.height());
+}
+void SourceCodeView::resizeEvent(QResizeEvent *e) {
+    QPlainTextEdit::resizeEvent(e);
+    QRect cr = contentsRect();
+    m_lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), 35, cr.height()));
 }
 
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
-    if (m_textEdit->toPlainText() != code) {
-        m_textEdit->setPlainText(code);
+    if (toPlainText() != code) {
+        QPlainTextEdit::setPlainText(code);
     }
     
     QList<QTextEdit::ExtraSelection> extraSelections;
@@ -257,23 +219,13 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
         selection.format.setBackground(QColor(80, 80, 0));
         selection.format.setProperty(QTextFormat::FullWidthSelection, true);
         
-        QTextCursor cursor(m_textEdit->document());
+        QTextCursor cursor(document());
         cursor.movePosition(QTextCursor::Start);
         cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, activeLine - 1);
         selection.cursor = cursor;
         extraSelections.append(selection);
     }
-    m_textEdit->setExtraSelections(extraSelections);
-}
-
-void SourceCodeView::setPlainText(const QString& text) {
-    if (m_textEdit) {
-        m_textEdit->setPlainText(text);
-    }
-}
-
-QString SourceCodeView::getPlainText() const {
-    return m_textEdit ? m_textEdit->toPlainText() : QString();
+    setExtraSelections(extraSelections);
 }
 
 } // namespace gridlock::ui
