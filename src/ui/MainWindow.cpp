@@ -236,7 +236,8 @@ void MainWindow::loadSourceFile(const QString& filePath) {
     QFile file(filePath);
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         m_currentFile = filePath;
-        m_sourceCodeView->setSourceCode(file.readAll());
+        QString content = file.readAll();
+        m_sourceCodeView->setPlainText(content);
     }
 }
 

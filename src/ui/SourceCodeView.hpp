@@ -33,6 +33,7 @@ public:
     ~SourceCodeView() override = default;
 
     void setSourceCode(const QString& code, int activeLine = -1);
+    void setPlainText(const QString& text);
 
 signals:
     void runTargetRequested();

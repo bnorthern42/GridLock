@@ -265,4 +265,10 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
     m_textEdit->setExtraSelections(extraSelections);
 }
 
+void SourceCodeView::setPlainText(const QString& text) {
+    if (m_textEdit) {
+        m_textEdit->setPlainText(text);
+    }
+}
+
 } // namespace gridlock::ui
