@@ -1,6 +1,7 @@
 #include "GdbRankCoordinator.hpp"
 #include <QDebug>
 #include <QRegularExpression>
+#include <QSettings>
 #include <iostream>
 
 namespace gridlock {
@@ -35,7 +36,13 @@ void GdbRankCoordinator::startDebugSession(int rankCount, const QString& executa
     launchParallelSession(executable, rankCount);
 }
 
-void GdbRankCoordinator::launchParallelSession(const QString& executable, int rankCount) {
+void GdbRankCoordinator::launchParallelSession(const QString& executable, int explicitRankCount) {
+    QSettings settings("GridLock", "Debugger");
+    QString mpiExec = settings.value("mpi_executable", "mpiexec").toString();
+    int rankCount = settings.value("rank_count", explicitRankCount > 0 ? explicitRankCount : 4).toInt();
+    QString extraArgsStr = settings.value("extra_args", "--oversubscribe").toString();
+    QStringList extraArgs = extraArgsStr.split(" ", Qt::SkipEmptyParts);
+
     for (int i = 0; i < rankCount; ++i) {
         auto rp = std::make_unique<RankProcess>();
         rp->id = i;
@@ -48,7 +55,12 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ra
             handleGdbOutput(id);
         });
 
-        rp->process->start("gdb", QStringList() << "--interpreter=mi3" << "--args" << executable);
+        // Construct the parallel job. Since we are running independent GDB instances
+        // attached to each rank conceptually, we use mpiexec to run one process
+        // or just invoke mpiexec directly for that rank.
+        QStringList args;
+        args << "-n" << "1" << extraArgs << "gdb" << "--interpreter=mi3" << "--args" << executable;
+        rp->process->start(mpiExec, args);
         
         m_processes.push_back(std::move(rp));
     }

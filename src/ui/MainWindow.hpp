@@ -35,6 +35,8 @@ public:
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);
     void onRankSelected(int rankId);
+    void openFile();
+    void openPreferences();
 
 protected:
     void closeEvent(QCloseEvent* event) override;

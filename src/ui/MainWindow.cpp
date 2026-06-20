@@ -21,6 +21,7 @@
 #include <QDialogButtonBox>
 #include <QProcess>
 #include <QTabWidget>
+#include <QSettings>
 
 namespace gridlock::ui {
 
@@ -67,35 +68,14 @@ void MainWindow::setupMenu() {
     });
 
     QAction* openAction = fileMenu->addAction("Open Source File");
-    connect(openAction, &QAction::triggered, this, [this]() {
-        QString fileName = QFileDialog::getOpenFileName(this, "Open Source File", "", "C++ Files (*.cpp *.hpp *.h *.c)");
-        if (!fileName.isEmpty()) {
-            QFile file(fileName);
-            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                m_currentFile = fileName;
-                m_sourceCodeView->setSourceCode(file.readAll());
-            }
-        }
-    });
+    connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
     fileMenu->addAction("Exit", this, &MainWindow::close);
 
     QMenu* editMenu = menuBar->addMenu("&Edit");
     editMenu->addAction("Undo");
     editMenu->addAction("Redo");
     QAction* prefAction = editMenu->addAction("Preferences");
-    connect(prefAction, &QAction::triggered, this, [this]() {
-        QDialog dialog(this);
-        dialog.setWindowTitle("Preferences");
-        QFormLayout* form = new QFormLayout(&dialog);
-        QLineEdit* gdbPathEdit = new QLineEdit(&dialog);
-        gdbPathEdit->setText("gdb");
-        form->addRow("GDB Path:", gdbPathEdit);
-        QDialogButtonBox* box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
-        form->addRow(box);
-        connect(box, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        dialog.exec();
-    });
+    connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
 
     QMenu* viewMenu = menuBar->addMenu("&View");
     viewMenu->addAction("Toggle Bottom Tabs");
@@ -243,6 +223,49 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         m_coordinator->terminateAllSessions();
     }
     event->accept();
+}
+
+void MainWindow::openFile() {
+    QString fileName = QFileDialog::getOpenFileName(this, "Open Source File", "", "C++ Files (*.cpp *.hpp *.h *.c)");
+    if (!fileName.isEmpty()) {
+        QFile file(fileName);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            m_currentFile = fileName;
+            m_sourceCodeView->setSourceCode(file.readAll());
+        }
+    }
+}
+
+void MainWindow::openPreferences() {
+    QDialog dialog(this);
+    dialog.setWindowTitle("Preferences");
+    QFormLayout* form = new QFormLayout(&dialog);
+    
+    QSettings settings("GridLock", "Debugger");
+
+    QLineEdit* mpiExecEdit = new QLineEdit(&dialog);
+    mpiExecEdit->setText(settings.value("mpi_executable", "mpiexec").toString());
+    form->addRow("MPI Executable:", mpiExecEdit);
+
+    QSpinBox* rankBox = new QSpinBox(&dialog);
+    rankBox->setMinimum(1);
+    rankBox->setValue(settings.value("rank_count", 4).toInt());
+    form->addRow("Rank Count:", rankBox);
+
+    QLineEdit* extraArgsEdit = new QLineEdit(&dialog);
+    extraArgsEdit->setText(settings.value("extra_args", "--oversubscribe").toString());
+    form->addRow("Extra Args:", extraArgsEdit);
+
+    QDialogButtonBox* box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
+    form->addRow(box);
+    connect(box, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        settings.setValue("mpi_executable", mpiExecEdit->text());
+        settings.setValue("rank_count", rankBox->value());
+        settings.setValue("extra_args", extraArgsEdit->text());
+    }
 }
 
 } // namespace gridlock::ui
