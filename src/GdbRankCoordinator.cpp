@@ -164,7 +164,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
 
         qDebug() << "[GDB OUT Rank" << rankId << "]:" << line;
 
-        if (sv.starts_with("*stopped")) {
+        if (sv.starts_with("*stopped") && !line.contains("reason=\"exited\"")) {
             rp->state.currentState = "stopped";
             if (rp->state.executionTimer.isValid()) {
                 rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
@@ -173,7 +173,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
 
             QRegularExpression rxFile("fullname=\"([^\"]+)\"");
             QRegularExpression rxLine("line=\"(\\d+)\"");
-            QString file;
+            QString file = rp->state.currentFile; // fallback to known file
             int lineNum = 1;
 
             auto matchFile = rxFile.match(line);
@@ -185,11 +185,29 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             rp->state.currentFile = file;
             rp->state.currentLine = lineNum;
 
-            // Query assembly immediately based on the stopped frame
-            QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(lineNum);
-            rp->process->write(asmCmd.toUtf8());
+            if (!file.isEmpty()) {
+                QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(lineNum);
+                rp->process->write(asmCmd.toUtf8());
+            } else {
+                // Fallback if GDB didn't provide frame file info
+                rp->process->write("-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
+            }
 
-            // Notify UI to turn LED amber
+            QRegularExpression threadRe("thread-id=\"(\\d+)\"");
+            auto matchThread = threadRe.match(line);
+            if (matchThread.hasMatch()) {
+                QString threadId = matchThread.captured(1);
+                QString threadCmd = QString("-thread-select %1\n").arg(threadId);
+                rp->process->write(threadCmd.toUtf8());
+            } else {
+                rp->process->write("-thread-info\n");
+            }
+
+            for (size_t i = 0; i < m_watchVariables.size(); ++i) {
+                QString evalCmd = QString("10%1-data-evaluate-expression %2\n").arg(i).arg(m_watchVariables[i]);
+                rp->process->write(evalCmd.toUtf8());
+            }
+
             emit rankStateChanged(rankId, rp->state);
         } else if (sv.starts_with("*running")) {
             rp->state.currentState = "running";
