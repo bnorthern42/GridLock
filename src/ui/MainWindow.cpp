@@ -22,6 +22,7 @@
 #include <QProcess>
 #include <QTabWidget>
 #include <QSettings>
+#include <QTimer>
 
 namespace gridlock::ui {
 
@@ -63,7 +64,7 @@ void MainWindow::setupMenu() {
         connect(box, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         if (dialog.exec() == QDialog::Accepted && m_coordinator) {
-            m_coordinator->launchParallelSession(binaryEdit->text(), rankBox->value());
+            startDebuggingSession(binaryEdit->text(), rankBox->value());
         }
     });
 
@@ -138,7 +139,7 @@ void MainWindow::setupDocks() {
     m_sourceCodeView = new SourceCodeView(masterHorizontalSplitter);
     m_sourceCodeView->setMinimumWidth(350);
     connect(m_sourceCodeView, &SourceCodeView::runTargetRequested, this, [this]() {
-        if (m_coordinator) m_coordinator->launchParallelSession("build/test_bin", 4);
+        startDebuggingSession("build/test_bin", 4);
     });
     connect(m_sourceCodeView, &SourceCodeView::continueRequested, this, [this]() {
         if (m_coordinator) m_coordinator->continueAll();
@@ -274,6 +275,25 @@ void MainWindow::openPreferences() {
         settings.setValue("rank_count", rankBox->value());
         settings.setValue("extra_args", extraArgsEdit->text());
     }
+}
+
+void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
+    if (!m_coordinator) return;
+    
+    // 1. Launch the processes
+    m_coordinator->launchParallelSession(binaryPath, ranks);
+    
+    // 2. Delay to allow GDB to spin up and load symbols
+    QTimer::singleShot(500, this, [this]() {
+        // 3. Fallback Breakpoint to prevent runaway execution
+        m_coordinator->broadcastCommand("-break-insert main\n");
+        
+        // 4. Inject visual breakpoints (if you have an active map)
+        // ...
+        
+        // 5. Fire execution
+        m_coordinator->runAll();
+    });
 }
 
 } // namespace gridlock::ui

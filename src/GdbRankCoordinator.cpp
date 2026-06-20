@@ -75,6 +75,14 @@ void GdbRankCoordinator::insertBreakpoint(const QString& location) {
     }
 }
 
+void GdbRankCoordinator::broadcastCommand(const QString& cmd) {
+    for (auto& rp : m_processes) {
+        if (rp->process && rp->process->state() == QProcess::Running) {
+            rp->process->write(cmd.toUtf8());
+        }
+    }
+}
+
 void GdbRankCoordinator::broadcastBreakpoint(const QString& file, int line) {
     QString location = QString("%1:%2").arg(file).arg(line);
     QString cmd = QString("-break-insert %1\n").arg(location);

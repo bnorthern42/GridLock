@@ -48,6 +48,9 @@ private:
     void setupToolbar();
     void setupDocks();
 
+private slots:
+    void startDebuggingSession(const QString& binaryPath, int ranks);
+
 signals:
     void runTargetRequested();
 
