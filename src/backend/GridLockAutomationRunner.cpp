@@ -83,24 +83,24 @@ bool GridLockAutomationRunner::generateAndCompileTestTarget() {
 void GridLockAutomationRunner::runNextStep() {
     m_step++;
     if (m_step == 1) {
-        std::cout << "[TEST] Tick 1: Compile & Launch\n";
-        if (generateAndCompileTestTarget()) {
-            QFile file("tests/matrix_multiply.cpp");
-            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                m_testSourceCode = file.readAll();
-            }
-            m_coordinator->launchParallelSession("build/test_bin", 4);
-            m_coordinator->insertBreakpoint("main");
-            m_mainWindow->sourceCodeView()->setSourceCode(m_testSourceCode);
+        std::cout << "[TEST] Tick 1: Initialize (Compile and Load)\n";
+        generateAndCompileTestTarget();
+        m_mainWindow->loadSourceFile("tests/matrix_multiply.cpp");
+        QFile file("tests/matrix_multiply.cpp");
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            m_testSourceCode = file.readAll();
         }
     } else if (m_step == 2) {
-        std::cout << "[TEST] Tick 2: Inject Breakpoint\n";
-        m_coordinator->insertBreakpoint("tests/matrix_multiply.cpp:18");
+        std::cout << "[TEST] Tick 2: Launch\n";
+        m_coordinator->launchParallelSession("build/test_bin", 4);
     } else if (m_step == 3) {
-        std::cout << "[TEST] Tick 3: Run All\n";
-        m_coordinator->runAll();
+        std::cout << "[TEST] Tick 3: Breakpoint\n";
+        m_coordinator->insertBreakpoint("tests/matrix_multiply.cpp:18");
     } else if (m_step == 4) {
-        std::cout << "[TEST] Tick 4: Simulation End. (Views auto-populated by GdbRankCoordinator events)\n";
+        std::cout << "[TEST] Tick 4: Execution\n";
+        m_coordinator->runAll(); // This already sends -exec-run
+    } else if (m_step == 5) {
+        std::cout << "[TEST] Tick 5: Simulation End. (Views auto-populated by GdbRankCoordinator events)\n";
         m_timer.stop();
     }
 }

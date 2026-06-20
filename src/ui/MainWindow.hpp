@@ -37,6 +37,7 @@ public slots:
     void onRankSelected(int rankId);
     void openFile();
     void openPreferences();
+    void loadSourceFile(const QString& filePath);
 
 protected:
     void closeEvent(QCloseEvent* event) override;

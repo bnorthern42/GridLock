@@ -228,11 +228,15 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 void MainWindow::openFile() {
     QString fileName = QFileDialog::getOpenFileName(this, "Open Source File", "", "C++ Files (*.cpp *.hpp *.h *.c)");
     if (!fileName.isEmpty()) {
-        QFile file(fileName);
-        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            m_currentFile = fileName;
-            m_sourceCodeView->setSourceCode(file.readAll());
-        }
+        loadSourceFile(fileName);
+    }
+}
+
+void MainWindow::loadSourceFile(const QString& filePath) {
+    QFile file(filePath);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        m_currentFile = filePath;
+        m_sourceCodeView->setSourceCode(file.readAll());
     }
 }
 
