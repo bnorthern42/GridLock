@@ -280,6 +280,10 @@ void MainWindow::openPreferences() {
 void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
     if (!m_coordinator) return;
     
+    if (m_currentFile.isEmpty()) {
+        loadSourceFile("tests/matrix_multiply.cpp");
+    }
+
     // 1. Launch the processes
     m_coordinator->launchParallelSession(binaryPath, ranks);
     

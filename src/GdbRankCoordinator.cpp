@@ -170,50 +170,26 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                 rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
                 rp->state.executionTimer.invalidate();
             }
-            
-            QRegularExpression lineRe("line=\"(\\d+)\"");
-            auto matchLine = lineRe.match(line);
-            if (matchLine.hasMatch()) rp->state.currentLine = matchLine.captured(1).toInt();
-            
-            QRegularExpression fileRe("fullname=\"([^\"]+)\"");
-            if (!fileRe.match(line).hasMatch()) fileRe = QRegularExpression("file=\"([^\"]+)\"");
-            auto matchFile = fileRe.match(line);
+
+            QRegularExpression rxFile("fullname=\"([^\"]+)\"");
+            QRegularExpression rxLine("line=\"(\\d+)\"");
             QString file;
-            if (matchFile.hasMatch()) {
-                file = matchFile.captured(1);
-                rp->state.currentFile = file;
-            }
+            int lineNum = 1;
 
-            QRegularExpression threadRe("thread-id=\"(\\d+)\"");
-            auto matchThread = threadRe.match(line);
-            if (matchThread.hasMatch()) {
-                QString threadId = matchThread.captured(1);
-                QString threadCmd = QString("-thread-select %1\n").arg(threadId);
-                rp->process->write(threadCmd.toUtf8());
-            } else {
-                rp->process->write("-thread-info\n");
-            }
+            auto matchFile = rxFile.match(line);
+            if (matchFile.hasMatch()) file = matchFile.captured(1);
 
-            if (line.contains("reason=\"breakpoint-hit\"") || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"")) {
-                QRegularExpression frameRe("frame=\\{.*?fullname=\"([^\"]+)\".*?line=\"(\\d+)\".*?\\}");
-                auto matchFrame = frameRe.match(line);
-                if (matchFrame.hasMatch()) {
-                    QString fullname = matchFrame.captured(1);
-                    QString lineNumStr = matchFrame.captured(2);
-                    QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(fullname).arg(lineNumStr);
-                    rp->process->write(asmCmd.toUtf8());
-                } else if (!file.isEmpty() && rp->state.currentLine > 0) {
-                    QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(rp->state.currentLine);
-                    rp->process->write(asmCmd.toUtf8());
-                } else {
-                    rp->process->write("-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
-                }
-            }
+            auto matchLine = rxLine.match(line);
+            if (matchLine.hasMatch()) lineNum = matchLine.captured(1).toInt();
 
-            for (size_t i = 0; i < m_watchVariables.size(); ++i) {
-                QString evalCmd = QString("10%1-data-evaluate-expression %2\n").arg(i).arg(m_watchVariables[i]);
-                rp->process->write(evalCmd.toUtf8());
-            }
+            rp->state.currentFile = file;
+            rp->state.currentLine = lineNum;
+
+            // Query assembly immediately based on the stopped frame
+            QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(lineNum);
+            rp->process->write(asmCmd.toUtf8());
+
+            // Notify UI to turn LED amber
             emit rankStateChanged(rankId, rp->state);
         } else if (sv.starts_with("*running")) {
             rp->state.currentState = "running";
