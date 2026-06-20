@@ -174,7 +174,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             QRegularExpression rxFile("fullname=\"([^\"]+)\"");
             QRegularExpression rxLine("line=\"(\\d+)\"");
             QString file = rp->state.currentFile; // fallback to known file
-            int lineNum = 1;
+            int lineNum = rp->state.currentLine > 0 ? rp->state.currentLine : 1; // fallback to known line
 
             auto matchFile = rxFile.match(line);
             if (matchFile.hasMatch()) file = matchFile.captured(1);

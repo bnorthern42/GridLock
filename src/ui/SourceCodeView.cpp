@@ -209,7 +209,7 @@ void SourceCodeView::resizeEvent(QResizeEvent *e) {
 }
 
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
-    if (toPlainText() != code) {
+    if (!code.isEmpty() && toPlainText() != code) {
         QPlainTextEdit::setPlainText(code);
     }
     
