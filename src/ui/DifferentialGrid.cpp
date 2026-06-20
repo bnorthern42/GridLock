@@ -59,7 +59,24 @@ void DifferentialGrid::setVariableData(int rank, const QString& varName, const Q
 
 void DifferentialGrid::setVariableData(int rank, const std::unordered_map<QString, QString>& variables) {
     for (const auto& kv : variables) {
-        setVariableData(rank, kv.first, kv.second);
+        updateVariable(rank, kv.first, kv.second);
+    }
+}
+
+void DifferentialGrid::updateVariable(int rankId, const QString& name, const QString& value) {
+    m_varData[rankId][name] = value;
+    auto it = std::find(m_headers.begin(), m_headers.end(), name);
+    if (it == m_headers.end() || rankId >= rowCount()) {
+        setVariableData(rankId, name, value);
+        return;
+    }
+    int col = std::distance(m_headers.begin(), it);
+    QTableWidgetItem* cellItem = item(rankId, col);
+    if (!cellItem) {
+        cellItem = new QTableWidgetItem(value);
+        setItem(rankId, col, cellItem);
+    } else {
+        cellItem->setText(value);
     }
 }
 

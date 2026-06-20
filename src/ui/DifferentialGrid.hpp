@@ -14,6 +14,7 @@ public:
 
     void setVariableData(int rank, const QString& varName, const QString& value);
     void setVariableData(int rank, const std::unordered_map<QString, QString>& variables);
+    void updateVariable(int rankId, const QString& name, const QString& value);
 
 private:
     std::vector<QString> m_headers;

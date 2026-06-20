@@ -50,6 +50,8 @@ private:
         std::unique_ptr<QProcess> process;
         RankState state;
         QString buffer;
+        std::unordered_map<QString, QString> varIdToName;
+        std::unordered_map<QString, QString> nameToVarId;
     };
     std::vector<std::unique_ptr<RankProcess>> m_processes;
     std::vector<QString> m_watchVariables;

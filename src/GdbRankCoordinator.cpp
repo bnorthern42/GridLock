@@ -208,19 +208,24 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             rp->state.currentState = "running";
             rp->state.executionTimer.start();
             emit rankStateChanged(rankId, rp->state);
-        } else if (sv.starts_with("10")) { 
+        } else if (sv.starts_with("30")) { 
             if (line.contains("^done")) {
-                QRegularExpression evalRe("10(\\d+)\\^done,.*?value=\"([^\"]+)\"");
+                QRegularExpression evalRe("30(\\d+)\\^done,name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
                 auto match = evalRe.match(line);
                 if (match.hasMatch()) {
                     int varIdx = match.captured(1).toInt();
                     if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
-                        rp->state.variableWatches[m_watchVariables[varIdx]] = match.captured(2);
+                        QString varName = m_watchVariables[varIdx];
+                        QString varId = match.captured(2);
+                        QString value = match.captured(3);
+                        rp->nameToVarId[varName] = varId;
+                        rp->varIdToName[varId] = varName;
+                        rp->state.variableWatches[varName] = value;
                         emit rankStateChanged(rankId, rp->state);
                     }
                 }
             } else if (line.contains("^error")) {
-                QRegularExpression errRe("10(\\d+)\\^error");
+                QRegularExpression errRe("30(\\d+)\\^error");
                 auto match = errRe.match(line);
                 if (match.hasMatch()) {
                     int varIdx = match.captured(1).toInt();
@@ -229,6 +234,23 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                         emit rankStateChanged(rankId, rp->state);
                     }
                 }
+            }
+        } else if (sv.starts_with("40")) {
+            if (line.contains("^done")) {
+                QRegularExpression changeRe("name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
+                auto i = changeRe.globalMatch(line);
+                bool updated = false;
+                while (i.hasNext()) {
+                    auto match = i.next();
+                    QString varId = match.captured(1);
+                    QString value = match.captured(2);
+                    if (rp->varIdToName.contains(varId)) {
+                        QString varName = rp->varIdToName[varId];
+                        rp->state.variableWatches[varName] = value;
+                        updated = true;
+                    }
+                }
+                if (updated) emit rankStateChanged(rankId, rp->state);
             }
         } else if (sv.starts_with("200")) {
             if (line.contains("asm_insns=")) {
@@ -256,10 +278,16 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             
             // Chain variable evaluation after disassembly finishes
             for (size_t i = 0; i < m_watchVariables.size(); ++i) {
-                QString evalCmd = QString("10%1-var-create - * %2\n").arg(i).arg(m_watchVariables[i]);
-                rp->process->write(evalCmd.toUtf8());
+                QString varName = m_watchVariables[i];
+                if (!rp->nameToVarId.contains(varName)) {
+                    QString evalCmd = QString("30%1-var-create - * %2\n").arg(i).arg(varName);
+                    rp->process->write(evalCmd.toUtf8());
+                } else {
+                    QString evalCmd = QString("40%1-var-update 1 %2\n").arg(i).arg(rp->nameToVarId[varName]);
+                    rp->process->write(evalCmd.toUtf8());
+                }
             }
-        } else if (line.contains("^error") && !sv.starts_with("10") && !sv.starts_with("200")) {
+        } else if (line.contains("^error") && !sv.starts_with("30") && !sv.starts_with("40") && !sv.starts_with("200")) {
             QRegularExpression errorRe("msg=\"([^\"]+)\"");
             auto match = errorRe.match(line);
             QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
