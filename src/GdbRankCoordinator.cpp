@@ -175,9 +175,16 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             }
 
             if (line.contains("reason=\"breakpoint-hit\"") || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"")) {
-                if (!file.isEmpty() && rp->state.currentLine > 0) {
-                    QString cmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(rp->state.currentLine);
-                    rp->process->write(cmd.toUtf8());
+                QRegularExpression frameRe("frame=\\{.*?fullname=\"([^\"]+)\".*?line=\"(\\d+)\".*?\\}");
+                auto matchFrame = frameRe.match(line);
+                if (matchFrame.hasMatch()) {
+                    QString fullname = matchFrame.captured(1);
+                    QString lineNumStr = matchFrame.captured(2);
+                    QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(fullname).arg(lineNumStr);
+                    rp->process->write(asmCmd.toUtf8());
+                } else if (!file.isEmpty() && rp->state.currentLine > 0) {
+                    QString asmCmd = QString("-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(rp->state.currentLine);
+                    rp->process->write(asmCmd.toUtf8());
                 } else {
                     rp->process->write("-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
                 }

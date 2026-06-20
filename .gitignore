@@ -47,3 +47,5 @@ compile_flags.txt
 # OS Specific
 .DS_Store
 Thumbs.db
+
+.cache/

@@ -36,6 +36,7 @@ public:
 
 signals:
     void runTargetRequested();
+    void continueRequested();
     void stepInstRequested();
     void toggleBreakpointRequested(const QString& location);
     void breakpointToggled(const QString& file, int line);

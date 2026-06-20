@@ -19,6 +19,7 @@ public:
 
 public slots:
     void runNextStep();
+    void startTestSequence();
 
 private slots:
     void onRankStateChanged(int rankId, const RankState& state);

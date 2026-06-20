@@ -224,6 +224,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QWidget(parent) {
 
     QToolBar* toolbar = new QToolBar(this);
     toolbar->addAction("▶ Run Target", this, &SourceCodeView::runTargetRequested);
+    toolbar->addAction("⏩ Continue", this, &SourceCodeView::continueRequested);
     toolbar->addAction("↷ Step Inst", this, &SourceCodeView::stepInstRequested);
     layout->addWidget(toolbar);
 

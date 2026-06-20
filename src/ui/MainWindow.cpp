@@ -157,7 +157,12 @@ void MainWindow::setupDocks() {
 
     m_sourceCodeView = new SourceCodeView(masterHorizontalSplitter);
     m_sourceCodeView->setMinimumWidth(350);
-    connect(m_sourceCodeView, &SourceCodeView::runTargetRequested, this, &MainWindow::runTargetRequested);
+    connect(m_sourceCodeView, &SourceCodeView::runTargetRequested, this, [this]() {
+        if (m_coordinator) m_coordinator->launchParallelSession("build/test_bin", 4);
+    });
+    connect(m_sourceCodeView, &SourceCodeView::continueRequested, this, [this]() {
+        if (m_coordinator) m_coordinator->continueAll();
+    });
     connect(m_sourceCodeView, &SourceCodeView::stepInstRequested, this, [this]() {
         if (m_coordinator) m_coordinator->stepAll();
     });

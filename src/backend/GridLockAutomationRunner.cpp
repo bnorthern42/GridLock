@@ -25,9 +25,14 @@ GridLockAutomationRunner::GridLockAutomationRunner(ui::MainWindow* mainWindow, Q
     connect(m_coordinator.get(), &GdbRankCoordinator::rankStateChanged,
             m_mainWindow, &ui::MainWindow::onRankStateChanged);
             
+    connect(m_mainWindow, &ui::MainWindow::runTargetRequested, this, &GridLockAutomationRunner::startTestSequence);
+            
     connect(&m_timer, &QTimer::timeout, this, &GridLockAutomationRunner::runNextStep);
     m_timer.setInterval(1500);
     m_timer.setSingleShot(false);
+}
+
+void GridLockAutomationRunner::startTestSequence() {
     m_timer.start();
 }
 
