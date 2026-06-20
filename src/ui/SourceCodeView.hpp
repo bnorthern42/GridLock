@@ -34,6 +34,7 @@ public:
 
     void setSourceCode(const QString& code, int activeLine = -1);
     void setPlainText(const QString& text);
+    QString getPlainText() const;
 
 signals:
     void runTargetRequested();

@@ -77,3 +77,41 @@ gridlock_tests = executable('gridlock_tests',
 )
 
 test('coordinator_tests', gridlock_tests)
+
+ui_test_src = [
+  'tests/test_ui.cpp',
+  'src/ui/MainWindow.cpp',
+  'src/ui/SourceCodeView.cpp',
+  'src/ui/ServerRackView.cpp',
+  'src/ui/DisassemblyView.cpp',
+  'src/ui/ReferenceDock.cpp',
+  'src/ui/DifferentialGrid.cpp',
+  'src/ui/TerminalDock.cpp',
+  'src/GdbRankCoordinator.cpp'
+]
+
+ui_test_moc_headers = [
+  'tests/test_ui.hpp',
+  'src/ui/MainWindow.hpp',
+  'src/ui/SourceCodeView.hpp',
+  'src/ui/ServerRackView.hpp',
+  'src/ui/DisassemblyView.hpp',
+  'src/ui/ReferenceDock.hpp',
+  'src/ui/DifferentialGrid.hpp',
+  'src/ui/TerminalDock.hpp',
+  'src/GdbRankCoordinator.hpp'
+]
+
+processed_ui_test_files = qt6.compile_moc(
+  headers : ui_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_ui_tests = executable('gridlock_ui_tests',
+  ui_test_src,
+  processed_ui_test_files,
+  include_directories : inc,
+  dependencies : qt6_dep
+)
+
+test('ui_tests', gridlock_ui_tests)

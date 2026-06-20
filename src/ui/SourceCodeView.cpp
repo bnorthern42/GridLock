@@ -271,4 +271,8 @@ void SourceCodeView::setPlainText(const QString& text) {
     }
 }
 
+QString SourceCodeView::getPlainText() const {
+    return m_textEdit ? m_textEdit->toPlainText() : QString();
+}
+
 } // namespace gridlock::ui

@@ -25,6 +25,7 @@ public:
 
     ServerRackView* serverRackView() const { return m_serverRackView; }
     SourceCodeView* sourceCodeView() const { return m_sourceCodeView; }
+    SourceCodeView* getSourceCodeView() const { return m_sourceCodeView; }
     DisassemblyView* disassemblyView() const { return m_disassemblyView; }
     ReferenceDock* referenceDock() const { return m_referenceDock; }
     DifferentialGrid* differentialGrid() const { return m_differentialGrid; }
