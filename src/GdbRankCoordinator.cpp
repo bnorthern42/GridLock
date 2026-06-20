@@ -16,6 +16,27 @@ GdbRankCoordinator::~GdbRankCoordinator() {
     terminateAllSessions();
 }
 
+void GdbRankCoordinator::addWatchVariable(const QString& name) {
+    if (std::find(m_watchVariables.begin(), m_watchVariables.end(), name) == m_watchVariables.end()) {
+        m_watchVariables.push_back(name);
+    }
+    
+    int varIdx = std::distance(m_watchVariables.begin(), std::find(m_watchVariables.begin(), m_watchVariables.end(), name));
+    
+    for (size_t i = 0; i < m_processes.size(); ++i) {
+        auto& rp = m_processes[i];
+        if (rp && rp->process && rp->state.currentState == "stopped") {
+            if (!rp->nameToVarId.contains(name)) {
+                QString evalCmd = QString("30%1-var-create - * %2\n").arg(varIdx).arg(name);
+                rp->process->write(evalCmd.toUtf8());
+            } else {
+                QString evalCmd = QString("40%1-var-update 1 %2\n").arg(varIdx).arg(rp->nameToVarId[name]);
+                rp->process->write(evalCmd.toUtf8());
+            }
+        }
+    }
+}
+
 void GdbRankCoordinator::terminateAllSessions() {
     for (auto& rp : m_processes) {
         if (rp && rp->process) {

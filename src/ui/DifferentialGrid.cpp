@@ -7,54 +7,66 @@ namespace gridlock::ui {
 DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     horizontalHeader()->setStretchLastSection(true);
     
-    m_headers = {"rank", "calc", "i"};
-    setColumnCount(m_headers.size());
+    m_watchVariables = {"rank", "calc", "i"};
+    
+    setColumnCount(m_numRanks + 1);
     QStringList headerLabels;
-    for (const auto& h : m_headers) headerLabels << h;
+    headerLabels << "Name";
+    for (int r = 0; r < m_numRanks; ++r) {
+        headerLabels << QString("Rank %1").arg(r);
+    }
     setHorizontalHeaderLabels(headerLabels);
     
-    int numRanks = 4;
-    setRowCount(numRanks);
-    for (int r = 0; r < numRanks; ++r) {
-        setVerticalHeaderItem(r, new QTableWidgetItem(QString("Rank %1").arg(r)));
-        for (size_t c = 0; c < m_headers.size(); ++c) {
-            setItem(r, c, new QTableWidgetItem("-"));
+    setRowCount(0);
+    
+    for (const QString& var : m_watchVariables) {
+        int row = rowCount();
+        insertRow(row);
+        auto* nameItem = new QTableWidgetItem(var);
+        setItem(row, 0, nameItem);
+        for (int c = 1; c <= m_numRanks; ++c) {
+            auto* valItem = new QTableWidgetItem("-");
+            valItem->setFlags(valItem->flags() & ~Qt::ItemIsEditable);
+            setItem(row, c, valItem);
         }
+    }
+    
+    addEmptyWatchRow();
+    
+    connect(this, &QTableWidget::cellChanged, this, [this](int row, int col) {
+        if (col == 0) {
+            QTableWidgetItem* item = this->item(row, col);
+            if (!item) return;
+            QString newVar = item->text().trimmed();
+            if (!newVar.isEmpty() && row == rowCount() - 1) {
+                m_watchVariables.push_back(newVar);
+                for (int c = 1; c <= m_numRanks; ++c) {
+                    this->item(row, c)->setText("...");
+                }
+                emit watchVariableAdded(newVar);
+                
+                this->blockSignals(true);
+                addEmptyWatchRow();
+                this->blockSignals(false);
+            }
+        }
+    });
+}
+
+void DifferentialGrid::addEmptyWatchRow() {
+    int row = rowCount();
+    insertRow(row);
+    auto* nameItem = new QTableWidgetItem("");
+    setItem(row, 0, nameItem);
+    for (int c = 1; c <= m_numRanks; ++c) {
+        auto* valItem = new QTableWidgetItem("");
+        valItem->setFlags(valItem->flags() & ~Qt::ItemIsEditable);
+        setItem(row, c, valItem);
     }
 }
 
 void DifferentialGrid::setVariableData(int rank, const QString& varName, const QString& value) {
-    m_varData[rank][varName] = value;
-    
-    if (std::find(m_headers.begin(), m_headers.end(), varName) == m_headers.end()) {
-        m_headers.push_back(varName);
-        setColumnCount(m_headers.size());
-        QStringList headerLabels;
-        for (const auto& h : m_headers) headerLabels << h;
-        setHorizontalHeaderLabels(headerLabels);
-    }
-    
-    if (rank >= rowCount()) {
-        int oldRow = rowCount();
-        setRowCount(rank + 1);
-        for(int r = oldRow; r <= rank; ++r) {
-            setVerticalHeaderItem(r, new QTableWidgetItem(QString("Rank %1").arg(r)));
-            for (int c = 0; c < columnCount(); ++c) {
-                if (!item(r, c)) setItem(r, c, new QTableWidgetItem("-"));
-            }
-        }
-    }
-    
-    int col = std::distance(m_headers.begin(), std::find(m_headers.begin(), m_headers.end(), varName));
-    QTableWidgetItem* cellItem = item(rank, col);
-    if (!cellItem) {
-        cellItem = new QTableWidgetItem(value);
-        setItem(rank, col, cellItem);
-    } else {
-        cellItem->setText(value);
-    }
-    
-    updateHighlights();
+    updateVariable(rank, varName, value);
 }
 
 void DifferentialGrid::setVariableData(int rank, const std::unordered_map<QString, QString>& variables) {
@@ -64,28 +76,38 @@ void DifferentialGrid::setVariableData(int rank, const std::unordered_map<QStrin
 }
 
 void DifferentialGrid::updateVariable(int rankId, const QString& name, const QString& value) {
-    m_varData[rankId][name] = value;
-    auto it = std::find(m_headers.begin(), m_headers.end(), name);
-    if (it == m_headers.end() || rankId >= rowCount()) {
-        setVariableData(rankId, name, value);
-        return;
+    if (rankId >= m_numRanks) {
+        m_numRanks = rankId + 1;
+        setColumnCount(m_numRanks + 1);
+        horizontalHeaderItem(m_numRanks)->setText(QString("Rank %1").arg(rankId));
+        for (int r = 0; r < rowCount(); ++r) {
+            auto* valItem = new QTableWidgetItem("-");
+            valItem->setFlags(valItem->flags() & ~Qt::ItemIsEditable);
+            setItem(r, m_numRanks, valItem);
+        }
     }
-    int col = std::distance(m_headers.begin(), it);
-    QTableWidgetItem* cellItem = item(rankId, col);
-    if (!cellItem) {
-        cellItem = new QTableWidgetItem(value);
-        setItem(rankId, col, cellItem);
+
+    auto it = std::find(m_watchVariables.begin(), m_watchVariables.end(), name);
+    int row = -1;
+    if (it == m_watchVariables.end()) {
+        return;
     } else {
+        row = std::distance(m_watchVariables.begin(), it);
+    }
+    
+    QTableWidgetItem* cellItem = item(row, rankId + 1);
+    if (cellItem) {
         cellItem->setText(value);
     }
+    updateHighlights();
 }
 
 void DifferentialGrid::updateHighlights() {
-    for (int col = 0; col < columnCount(); ++col) {
+    for (int row = 0; row < m_watchVariables.size(); ++row) {
         std::unordered_map<QString, int> counts;
-        for (int row = 0; row < rowCount(); ++row) {
+        for (int col = 1; col <= m_numRanks; ++col) {
             QTableWidgetItem* it = item(row, col);
-            if (it && it->text() != "-") counts[it->text()]++;
+            if (it && it->text() != "-" && it->text() != "..." && !it->text().isEmpty()) counts[it->text()]++;
         }
         
         QString majorityStr;
@@ -97,10 +119,10 @@ void DifferentialGrid::updateHighlights() {
             }
         }
         
-        for (int row = 0; row < rowCount(); ++row) {
+        for (int col = 1; col <= m_numRanks; ++col) {
             QTableWidgetItem* it = item(row, col);
             if (it) {
-                if (it->text() != "-" && it->text() != majorityStr && counts.size() > 1) {
+                if (it->text() != "-" && it->text() != "..." && !it->text().isEmpty() && it->text() != majorityStr && counts.size() > 1) {
                     it->setBackground(QColor(255, 200, 200));
                 } else {
                     it->setBackground(Qt::white);

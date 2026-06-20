@@ -40,6 +40,7 @@ public slots:
     void runAll();
     void haltAll();
     void pauseFocusedRank(int rankId);
+    void addWatchVariable(const QString& name);
 
 public slots:
     void handleGdbOutput(int rankId);

@@ -16,11 +16,15 @@ public:
     void setVariableData(int rank, const std::unordered_map<QString, QString>& variables);
     void updateVariable(int rankId, const QString& name, const QString& value);
 
+signals:
+    void watchVariableAdded(const QString& name);
+
 private:
-    std::vector<QString> m_headers;
-    std::unordered_map<int, std::unordered_map<QString, QString>> m_varData;
+    std::vector<QString> m_watchVariables;
+    int m_numRanks = 4;
     
     void updateHighlights();
+    void addEmptyWatchRow();
 };
 
 } // namespace gridlock::ui

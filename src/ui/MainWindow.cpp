@@ -182,6 +182,11 @@ void MainWindow::setupDocks() {
     
     m_terminalDock = new TerminalDock("Compiler Terminal", bottomTabs);
     m_differentialGrid = new DifferentialGrid(bottomTabs);
+    connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this, [this](const QString& name) {
+        if (m_coordinator) {
+            m_coordinator->addWatchVariable(name);
+        }
+    });
     m_referenceDock = new ReferenceDock(bottomTabs);
 
     bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
