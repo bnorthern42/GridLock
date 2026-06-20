@@ -1,0 +1,49 @@
+# -------------------------------------------------------------------
+# GridLock MPI Debugger - .gitignore
+# -------------------------------------------------------------------
+
+# Build System (Meson & Ninja)
+/build/
+/builddir/
+.ninja_deps
+.ninja_log
+compile_commands.json
+.mesonbuilder/
+
+# Compiled Object Files & Libraries
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.dylib
+
+# Compiled Executables (Standard & GridLock Test Targets)
+*.exe
+*.out
+*.app
+mock_mpi_test.cpp
+mock_mpi_test_bin
+matrix_multiply_bin
+test_bin
+gridlock_tests
+
+# Qt6 Specific Generated Files
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.qm
+*.pro.user
+
+# Editor / IDE Specific
+*.swp
+*.swo
+.*.kate-swp
+*~
+.vscode/
+.idea/
+compile_flags.txt
+
+# OS Specific
+.DS_Store
+Thumbs.db
