@@ -138,6 +138,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     updateLineNumberAreaWidth(0);
 
     setReadOnly(true);
+    setLineWrapMode(QPlainTextEdit::NoWrap);
     QFont font("monospace");
     font.setStyleHint(QFont::Monospace);
     font.setPointSize(11);
@@ -215,14 +216,16 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
     selection.format.setProperty(QTextFormat::FullWidthSelection, true);
     
     QTextBlock block = document()->findBlockByLineNumber(lineNumber - 1);
-    QTextCursor cursor(block);
-    selection.cursor = cursor;
-    extraSelections.append(selection);
-    setExtraSelections(extraSelections);
-    
-    setTextCursor(cursor);
-    ensureCursorVisible();
-    centerCursor();
+    if (block.isValid()) {
+        QTextCursor cursor(block);
+        selection.cursor = cursor;
+        extraSelections.append(selection);
+        setExtraSelections(extraSelections);
+        
+        setTextCursor(cursor);
+        ensureCursorVisible();
+        centerCursor();
+    }
 }
 
 void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }
@@ -249,11 +252,12 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
         selection.format.setBackground(activeColor);
         selection.format.setProperty(QTextFormat::FullWidthSelection, true);
         
-        QTextCursor cursor(document());
-        cursor.movePosition(QTextCursor::Start);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, activeLine - 1);
-        selection.cursor = cursor;
-        extraSelections.append(selection);
+        QTextBlock block = document()->findBlockByLineNumber(activeLine - 1);
+        if (block.isValid()) {
+            QTextCursor cursor(block);
+            selection.cursor = cursor;
+            extraSelections.append(selection);
+        }
     }
     setExtraSelections(extraSelections);
 }
