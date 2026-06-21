@@ -1,6 +1,7 @@
 #include "VariableTreeModel.hpp"
 #include "../GdbRankCoordinator.hpp"
 #include <QRegularExpression>
+#include <QFont>
 #include <functional>
 
 namespace gridlock {
@@ -51,11 +52,24 @@ int VariableTreeModel::columnCount(const QModelIndex& /*parent*/) const {
 }
 
 QVariant VariableTreeModel::data(const QModelIndex& index, int role) const {
-    if (!index.isValid() || role != Qt::DisplayRole) return QVariant();
+    if (!index.isValid()) return QVariant();
     VariableNode* node = getNode(index);
-    if (index.column() == 0) return node->name;
-    if (index.column() == 1) return node->value;
-    if (index.column() == 2) return node->type;
+
+    if (role == Qt::DisplayRole) {
+        if (index.column() == 0) return node->name;
+        if (index.column() == 1) return node->value;
+        if (index.column() == 2) return node->type;
+    } else if (role == Qt::FontRole) {
+        if (index.column() == 1 || index.column() == 2) {
+            QFont font("JetBrains Mono");
+            font.setStyleHint(QFont::Monospace);
+            return font;
+        }
+    } else if (role == Qt::TextAlignmentRole) {
+        if (index.column() == 2) {
+            return QVariant(Qt::AlignRight | Qt::AlignVCenter);
+        }
+    }
     return QVariant();
 }
 
