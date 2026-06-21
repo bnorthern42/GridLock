@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 #include "../GdbRankCoordinator.hpp"
 #include "../core/ConfigManager.hpp"
+#include "../core/LspCoordinator.hpp"
 #include "DifferentialGrid.hpp"
 #include "DisassemblyView.hpp"
 #include "GdbConsoleWidget.hpp"
@@ -36,6 +37,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setupDocks();
 
   // Eagerly load default source file so UI is populated before running
+  m_lspCoordinator = new gridlock::core::LspCoordinator(this);
+  m_lspCoordinator->start();
+  
+  connect(m_lspCoordinator, &gridlock::core::LspCoordinator::hoverResultReceived, this, [this](const QString &resultMarkdown, const QPoint &globalPos) {
+      if (m_sourceCodeView) {
+          QToolTip::showText(globalPos, resultMarkdown, m_sourceCodeView);
+      }
+  });
+
   loadSourceFile("tests/mpi_mm.c");
 
   // Load offline persistence TOML breakpoints
@@ -235,6 +245,12 @@ void MainWindow::setupDocks() {
       }
   });
 
+  connect(m_sourceCodeView, &SourceCodeView::semanticHoverRequested, this, [this](const QString &file, int line, int character, const QPoint &globalPos) {
+      if (m_lspCoordinator) {
+          m_lspCoordinator->requestHover(file, line, character, globalPos);
+      }
+  });
+
   connect(m_sourceCodeView, &SourceCodeView::pinVariableRequested, this, [this](const QString &varName) {
       if (m_coordinator) {
           m_coordinator->registerWatchVariable(varName);
@@ -333,6 +349,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   if (m_coordinator) {
     m_coordinator->terminateAllSessions();
   }
+  if (m_lspCoordinator) {
+    m_lspCoordinator->stop();
+  }
   event->accept();
 }
 
@@ -369,6 +388,9 @@ void MainWindow::loadSourceFile(const QString &filePath) {
       m_sourceCodeView->setBreakpoints(m_persistentBreakpoints[absolutePath]);
     } else {
       m_sourceCodeView->setBreakpoints(QSet<int>());
+    }
+    if (m_lspCoordinator) {
+      m_lspCoordinator->didOpen(m_currentFile, code);
     }
   }
 

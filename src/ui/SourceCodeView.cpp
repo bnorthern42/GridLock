@@ -288,6 +288,11 @@ void SourceCodeView::handleHoverTimeout() {
     if (cVarRegex.match(word).hasMatch()) {
         emit hoverVariableRequested(word, m_lastGlobalMousePos);
     }
+
+    int line = cursor.blockNumber();
+    int character = cursor.positionInBlock();
+    QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
+    emit semanticHoverRequested(emitPath, line, character, m_lastGlobalMousePos);
 }
 
 void SourceCodeView::mousePressEvent(QMouseEvent *event) {

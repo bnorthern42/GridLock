@@ -16,6 +16,7 @@ To compile and run GridLock, you must have the following dependencies installed 
 - **MPI Implementation:** MPICH or OpenMPI
 - **Debugger Backend:** GDB (GNU Debugger) with MI3 support
 - **Remote Target Server:** `gdbserver`
+- **Language Server:** `clangd` (for semantic code intelligence and LSP support)
 
 ## Build Instructions
 1. Clone the repository:

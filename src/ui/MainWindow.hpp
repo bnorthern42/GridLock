@@ -10,6 +10,10 @@ namespace gridlock {
 class GdbRankCoordinator;
 }
 
+namespace gridlock::core {
+class LspCoordinator;
+}
+
 namespace gridlock::ui {
 
 class ServerRackView;
@@ -70,6 +74,7 @@ private:
     QTabWidget* m_bottomTabs = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;
+    gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;
 
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;
