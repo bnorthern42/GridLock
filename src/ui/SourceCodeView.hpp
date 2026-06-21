@@ -35,6 +35,7 @@ public:
     ~SourceCodeView() override = default;
 
     void setSourceCode(const QString& code, int activeLine = -1);
+    void setCurrentFile(const QString& filePath) { m_currentFilePath = filePath; }
     QString getPlainText() const { return toPlainText(); }
     QMargins getViewportMargins() const { return viewportMargins(); }
 
@@ -59,6 +60,7 @@ private:
     LineNumberArea* m_lineNumberArea;
     CppSyntaxHighlighter* m_highlighter;
     QSet<int> breakpoints;
+    QString m_currentFilePath;
 };
 
 } // namespace gridlock::ui

@@ -102,11 +102,10 @@ void GdbRankCoordinator::broadcastCommand(const QString& cmd) {
 }
 
 void GdbRankCoordinator::broadcastBreakpoint(const QString& file, int line) {
-    QString location = QString("%1:%2").arg(file).arg(line);
-    QString cmd = QString("-break-insert %1\n").arg(location);
+    QString breakCmd = QString("-break-insert -f %1:%2\n").arg(file).arg(line);
     for (auto& rp : m_processes) {
         if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write(cmd.toUtf8());
+            rp->process->write(breakCmd.toUtf8());
         }
     }
 }
@@ -268,6 +267,16 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                 }
             }
             if (updated) emit rankStateChanged(rankId, rp->state);
+        } else if (line.startsWith("^done,bkpt={")) {
+            QRegularExpression bkptRe("number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");
+            auto match = bkptRe.match(line);
+            if (match.hasMatch()) {
+                int bkptId = match.captured(1).toInt();
+                QString file = match.captured(2);
+                QString lineNum = match.captured(3);
+                rp->state.breakpoints[bkptId] = QString("%1:%2").arg(file).arg(lineNum);
+                emit rankStateChanged(rankId, rp->state);
+            }
         } else if (sv.starts_with("200")) {
             if (line.contains("asm_insns=")) {
                 QString prettyAsm;

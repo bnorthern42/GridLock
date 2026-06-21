@@ -259,7 +259,8 @@ void MainWindow::loadSourceFile(const QString& filePath) {
     m_currentFile = file.fileName();
     
     if (m_sourceCodeView) {
-        m_sourceCodeView->setPlainText(code);
+        m_sourceCodeView->setSourceCode(code);
+        m_sourceCodeView->setCurrentFile(m_currentFile);
     }
     
     if (m_terminalDock) {
