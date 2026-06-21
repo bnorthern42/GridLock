@@ -22,6 +22,8 @@
 ## PHASE 4: IDE Experience & Productization
 
 * [ ] **Toolbar Robustness:** Fully decouple execution logic (Run, Continue, Step, Pause, Terminate) from UI lambdas; implement a Command Pattern for toolbar actions.
+* [ ] **Editor Tabs:** Support opening multiple source files simultaneously via a tabbed editor interface.
+* [ ] **Project Support:** Add a file explorer/project manager to handle entire repositories and directories.
 * [ ] **Asset/Branding Pipeline:** Integrate official app icon (`.ico`/.icns/.png), splash screen, and high-DPI resource handling using Qt Resource System (`.qrc`).
 * [ ] **Shortcut Manager:** Implement global IDE keybindings (Vim-style or CLion-style).
 * [ ] **Session Persistence:** Save/load debug configurations (binary arguments, custom GDB paths, watchlists).
