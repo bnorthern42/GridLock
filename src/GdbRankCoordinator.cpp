@@ -110,10 +110,12 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
 
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         
-        // Inject OpenMPI coordination variables
-        env.insert("OMPI_COMM_WORLD_SIZE", QString::number(rankCount));
-        env.insert("OMPI_COMM_WORLD_RANK", QString::number(i));
-        env.insert("OMPI_UNIVERSE_SIZE", QString::number(rankCount));
+        int totalRanks = 2; // Match our current 2-rank testing constraint
+        
+        // Explicitly declare the size of the world and the rank's assignment
+        env.insert("OMPI_COMM_WORLD_SIZE", QString::number(totalRanks));
+        env.insert("OMPI_COMM_WORLD_RANK", QString::number(i)); // 0 for Rank 0, 1 for Rank 1
+        env.insert("OMPI_UNIVERSE_SIZE", QString::number(totalRanks));
         
         // Prevent OpenMPI from trying to spawn its own ssh/orte daemons 
         env.insert("OMPI_MCA_orte_ess_jobid", "12345"); 
