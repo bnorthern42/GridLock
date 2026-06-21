@@ -1,6 +1,6 @@
 #include "VariablesDockWidget.hpp"
-#include "../GdbRankCoordinator.hpp"
-#include "ThemeManager.hpp"
+#include "../../core/hpc/GdbRankCoordinator.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>

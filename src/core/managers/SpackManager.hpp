@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/HpcBackend.hpp"
+#include "../hpc/HpcBackend.hpp"
 #include <QWidget>
 #include <QPlainTextEdit>
 #include <QLineEdit>

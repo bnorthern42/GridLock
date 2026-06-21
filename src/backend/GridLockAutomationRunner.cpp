@@ -1,11 +1,11 @@
 #include "GridLockAutomationRunner.hpp"
 #include "TestGenerator.hpp"
 #include "../ui/MainWindow.hpp"
-#include "../ui/ServerRackView.hpp"
-#include "../ui/SourceCodeView.hpp"
-#include "../ui/DisassemblyView.hpp"
-#include "../ui/DifferentialGrid.hpp"
-#include "../ui/TerminalDock.hpp"
+#include "../ui/views/ServerRackView.hpp"
+#include "../ui/views/SourceCodeView.hpp"
+#include "../ui/views/DisassemblyView.hpp"
+#include "../ui/widgets/DifferentialGrid.hpp"
+#include "../ui/docks/TerminalDock.hpp"
 #include <QDebug>
 #include <QDir>
 #include <QFile>

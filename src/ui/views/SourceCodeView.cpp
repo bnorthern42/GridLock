@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QSet>
 #include <QMouseEvent>
-#include "../core/ConfigManager.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
 

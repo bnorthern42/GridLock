@@ -1,7 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QTableWidget>
-#include "../RankState.hpp"
+#include "../../RankState.hpp"
 
 namespace gridlock::ui {
 

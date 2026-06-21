@@ -1,5 +1,5 @@
 #include "ServerRackView.hpp"
-#include "ThemeManager.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 #include <QPainter>
 #include <QPainterPath>
 #include <QStyledItemDelegate>

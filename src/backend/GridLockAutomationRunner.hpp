@@ -3,7 +3,7 @@
 #include <QTimer>
 #include <memory>
 #include <QString>
-#include "../GdbRankCoordinator.hpp"
+#include "../core/hpc/GdbRankCoordinator.hpp"
 
 namespace gridlock::ui {
 class MainWindow;

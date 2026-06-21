@@ -1,5 +1,5 @@
 #include "test_lsp.hpp"
-#include "../src/core/LspCoordinator.hpp"
+#include "../src/core/hpc/LspCoordinator.hpp"
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QSignalSpy>

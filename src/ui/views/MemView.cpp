@@ -1,5 +1,5 @@
 #include "MemView.hpp"
-#include "../core/ConfigManager.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>

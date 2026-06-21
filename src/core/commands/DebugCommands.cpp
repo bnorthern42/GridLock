@@ -1,7 +1,7 @@
 #include "DebugCommands.hpp"
-#include "../../GdbRankCoordinator.hpp"
+#include "../hpc/GdbRankCoordinator.hpp"
 #include "../../ui/MainWindow.hpp"
-#include "../../ui/SourceCodeView.hpp"
+#include "../../ui/views/SourceCodeView.hpp"
 
 namespace gridlock::core::commands {
 

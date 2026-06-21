@@ -2,8 +2,8 @@
 #include <QWidget>
 #include <QComboBox>
 #include <QTreeView>
-#include "../core/VariableTreeModel.hpp"
-#include "../RankState.hpp"
+#include "../../core/models/VariableTreeModel.hpp"
+#include "../../RankState.hpp"
 
 namespace gridlock {
 

@@ -1,5 +1,5 @@
 #include "test_config.hpp"
-#include "../src/core/ConfigManager.hpp"
+#include "../src/core/managers/ConfigManager.hpp"
 #include <QTemporaryDir>
 #include <QFile>
 #include <QDir>

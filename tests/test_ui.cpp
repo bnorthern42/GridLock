@@ -1,10 +1,10 @@
 #include "test_ui.hpp"
 #include <QTemporaryFile>
 #include "../src/ui/MainWindow.hpp"
-#include "../src/ui/SourceCodeView.hpp"
-#include "../src/ui/ServerRackView.hpp"
-#include "../src/ui/DisassemblyView.hpp"
-#include "../src/ui/DifferentialGrid.hpp"
+#include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/views/ServerRackView.hpp"
+#include "../src/ui/views/DisassemblyView.hpp"
+#include "../src/ui/widgets/DifferentialGrid.hpp"
 #include "../src/RankState.hpp"
 #include <QApplication>
 #include <QSplitter>
@@ -13,7 +13,7 @@
 #include <QHash>
 #include <QComboBox>
 #include <QLineEdit>
-#include "../src/core/ConfigManager.hpp"
+#include "../src/core/managers/ConfigManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;

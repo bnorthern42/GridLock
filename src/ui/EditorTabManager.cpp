@@ -1,6 +1,6 @@
 #include "EditorTabManager.hpp"
-#include "SourceCodeView.hpp"
-#include "../core/ConfigManager.hpp"
+#include "views/SourceCodeView.hpp"
+#include "../core/managers/ConfigManager.hpp"
 #include <QFileInfo>
 #include <QFile>
 

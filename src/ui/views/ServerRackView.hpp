@@ -2,7 +2,7 @@
 #include <QListWidget>
 #include <unordered_map>
 #include <QString>
-#include "../RankState.hpp"
+#include "../../RankState.hpp"
 
 namespace gridlock::ui {
 

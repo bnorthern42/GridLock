@@ -1,6 +1,6 @@
 #pragma once
 #include <QtTest>
-#include "../src/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/GdbRankCoordinator.hpp"
 
 class TestGdbCoordinator : public QObject {
     Q_OBJECT

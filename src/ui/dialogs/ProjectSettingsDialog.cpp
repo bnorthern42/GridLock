@@ -1,5 +1,5 @@
 #include "ProjectSettingsDialog.hpp"
-#include "../core/ConfigManager.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 #include <QFormLayout>
 #include <QDialogButtonBox>
 

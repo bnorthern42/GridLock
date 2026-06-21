@@ -7,7 +7,7 @@
 #include <QIcon>
 #include <QPixmap>
 #include "ui/MainWindow.hpp"
-#include "ui/ThemeManager.hpp"
+#include "core/managers/ThemeManager.hpp"
 #include "backend/GridLockAutomationRunner.hpp"
 
 int main(int argc, char *argv[]) {

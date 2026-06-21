@@ -1,7 +1,7 @@
 #include "RegisterView.hpp"
 #include <QVBoxLayout>
 #include <QHeaderView>
-#include "../core/ConfigManager.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
 

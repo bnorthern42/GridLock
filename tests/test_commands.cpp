@@ -1,6 +1,6 @@
 #include "test_commands.hpp"
 #include "../src/core/commands/DebugCommands.hpp"
-#include "../src/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/GdbRankCoordinator.hpp"
 
 class MockGdbCoordinator : public gridlock::GdbRankCoordinator {
 public:

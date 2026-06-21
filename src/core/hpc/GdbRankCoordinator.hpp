@@ -1,5 +1,5 @@
 #pragma once
-#include "RankState.hpp"
+#include "../../RankState.hpp"
 #include <QMap>
 #include <QPoint>
 #include <QObject>

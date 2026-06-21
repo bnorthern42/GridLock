@@ -1,5 +1,5 @@
 #include "ReferenceManualWidget.hpp"
-#include "../core/DocsetManager.hpp"
+#include "../../core/managers/DocsetManager.hpp"
 #include <QVBoxLayout>
 #include <QFile>
 #include <QSettings>

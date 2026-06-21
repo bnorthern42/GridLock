@@ -1,5 +1,5 @@
 #include "GdbRankCoordinator.hpp"
-#include "core/ConfigManager.hpp"
+#include "../managers/ConfigManager.hpp"
 #include <QDebug>
 #include <QFileInfo>
 #include <QRegularExpression>

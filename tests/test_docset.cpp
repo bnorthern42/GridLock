@@ -1,5 +1,5 @@
 #include "test_docset.hpp"
-#include "../src/core/DocsetManager.hpp"
+#include "../src/core/managers/DocsetManager.hpp"
 #include <QTemporaryDir>
 #include <QDir>
 #include <QSqlDatabase>

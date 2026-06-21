@@ -1,5 +1,5 @@
 #include "VariableTreeModel.hpp"
-#include "../GdbRankCoordinator.hpp"
+#include "../hpc/GdbRankCoordinator.hpp"
 #include <QRegularExpression>
 #include <QFont>
 #include <functional>

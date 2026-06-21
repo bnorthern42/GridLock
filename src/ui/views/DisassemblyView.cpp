@@ -1,5 +1,5 @@
 #include "DisassemblyView.hpp"
-#include "../core/ConfigManager.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
 

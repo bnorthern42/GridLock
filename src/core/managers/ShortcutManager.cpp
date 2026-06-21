@@ -1,11 +1,11 @@
 #include "ShortcutManager.hpp"
-#include "../ui/MainWindow.hpp"
-#include "../ui/SourceCodeView.hpp"
-#include "../ui/ProjectExplorerWidget.hpp"
-#include "../ui/EditorTabManager.hpp"
-#include "../GdbRankCoordinator.hpp"
+#include "../../ui/MainWindow.hpp"
+#include "../../ui/views/SourceCodeView.hpp"
+#include "../../ui/widgets/ProjectExplorerWidget.hpp"
+#include "../../ui/EditorTabManager.hpp"
+#include "../hpc/GdbRankCoordinator.hpp"
 #include "ConfigManager.hpp"
-#include "commands/DebugCommands.hpp"
+#include "../commands/DebugCommands.hpp"
 #include <QDebug>
 
 namespace gridlock::core {

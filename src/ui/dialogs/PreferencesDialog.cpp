@@ -5,8 +5,8 @@
 // source of truth for those values.
 
 #include "PreferencesDialog.hpp"
-#include "../core/ConfigManager.hpp"
-#include "../core/DocsetManager.hpp"
+#include "../../core/managers/ConfigManager.hpp"
+#include "../../core/managers/DocsetManager.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
