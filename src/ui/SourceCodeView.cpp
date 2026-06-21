@@ -150,6 +150,11 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     this->setPalette(p);
 
     m_highlighter = new CppSyntaxHighlighter(document());
+
+    viewport()->setMouseTracking(true);
+    m_hoverTimer = new QTimer(this);
+    m_hoverTimer->setSingleShot(true);
+    connect(m_hoverTimer, &QTimer::timeout, this, &SourceCodeView::handleHoverTimeout);
 }
 
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
@@ -260,6 +265,29 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
         }
     }
     setExtraSelections(extraSelections);
+}
+
+void SourceCodeView::mouseMoveEvent(QMouseEvent *event) {
+    QPlainTextEdit::mouseMoveEvent(event);
+    m_lastMousePos = event->pos();
+    m_lastGlobalMousePos = event->globalPosition().toPoint();
+    m_hoverTimer->start(400);
+}
+
+void SourceCodeView::leaveEvent(QEvent *event) {
+    m_hoverTimer->stop();
+    QPlainTextEdit::leaveEvent(event);
+}
+
+void SourceCodeView::handleHoverTimeout() {
+    QTextCursor cursor = cursorForPosition(m_lastMousePos);
+    cursor.select(QTextCursor::WordUnderCursor);
+    QString word = cursor.selectedText();
+
+    QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
+    if (cVarRegex.match(word).hasMatch()) {
+        emit hoverVariableRequested(word, m_lastGlobalMousePos);
+    }
 }
 
 } // namespace gridlock::ui

@@ -5,6 +5,8 @@
 #include <QSyntaxHighlighter>
 #include <QRegularExpression>
 #include <QTextCharFormat>
+#include <QTimer>
+#include <QPoint>
 
 namespace gridlock::ui {
 
@@ -50,19 +52,26 @@ signals:
     void stepInstRequested();
     void toggleBreakpointRequested(const QString& location);
     void breakpointToggled(const QString& file, int line);
+    void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
     void updateLineNumberArea(const QRect &rect, int dy);
+    void handleHoverTimeout();
 
 private:
     LineNumberArea* m_lineNumberArea;
     CppSyntaxHighlighter* m_highlighter;
     QSet<int> breakpoints;
     QString m_currentFilePath;
+    QTimer* m_hoverTimer;
+    QPoint m_lastMousePos;
+    QPoint m_lastGlobalMousePos;
 };
 
 } // namespace gridlock::ui

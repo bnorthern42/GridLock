@@ -285,6 +285,17 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
   processGdbOutput(rankId, QString::fromUtf8(rp->process->readAllStandardOutput()));
 }
 
+void GdbRankCoordinator::evaluateHoverVariable(int rankId, const QString& varName, QPoint globalPos) {
+  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
+  auto &rp = m_processes[rankId];
+  if (!rp || rp->state.currentState != "stopped") return;
+  
+  rp->lastHoverVarName = varName;
+  rp->lastHoverPos = globalPos;
+  QString cmd = QString("100-data-evaluate-expression %1\n").arg(varName);
+  writeCmd(rankId, cmd);
+}
+
 void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()))
     return;
@@ -470,6 +481,20 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           }
         } else {
           emit rankStateChanged(rankId, rp->state);
+        }
+      }
+    } else if (line.startsWith("100")) {
+      if (line.contains("^done")) {
+        QRegularExpression valRe("100\\^done,value=\"([^\"]+)\"");
+        auto match = valRe.match(line);
+        if (match.hasMatch()) {
+          emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
+        }
+      } else if (line.contains("^error")) {
+        QRegularExpression errRe("msg=\"([^\"]+)\"");
+        auto match = errRe.match(line);
+        if (match.hasMatch()) {
+          emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
         }
       }
     } else if (line.startsWith("200")) {

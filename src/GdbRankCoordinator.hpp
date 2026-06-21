@@ -1,6 +1,7 @@
 #pragma once
 #include "RankState.hpp"
 #include <QMap>
+#include <QPoint>
 #include <QObject>
 #include <QProcess>
 #include <memory>
@@ -42,6 +43,7 @@ signals:
   void gdbOutputReceived(int rankId, const QString &output);
   void commandSentToGdb(int rankId, const QString &cmd);
   void targetOutputReceived(const QString &text);
+  void hoverEvaluationComplete(QString varName, QString result, QPoint globalPos);
 
 public slots:
   void stepAll();
@@ -52,6 +54,7 @@ public slots:
   void registerWatchVariable(const QString &varName);
   void sendCommand(int rankId, const QString &cmd);
   void handleGdbOutput(int rankId);
+  void evaluateHoverVariable(int rankId, const QString& varName, QPoint globalPos);
 
 private:
   struct RankProcess {
@@ -59,6 +62,8 @@ private:
     std::unique_ptr<QProcess> process;
     RankState state;
     QString buffer;
+    QString lastHoverVarName;
+    QPoint lastHoverPos;
   };
   std::unique_ptr<QProcess> m_mpirunProcess;
   std::vector<std::unique_ptr<RankProcess>> m_processes;

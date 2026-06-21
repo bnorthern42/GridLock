@@ -26,6 +26,7 @@
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolTip>
 
 namespace gridlock::ui {
 
@@ -48,6 +49,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
 void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
   m_coordinator = coord;
+  if (m_coordinator) {
+    connect(m_coordinator, &GdbRankCoordinator::hoverEvaluationComplete, this, [this](QString varName, QString result, QPoint globalPos) {
+        if (m_sourceCodeView) {
+            QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), m_sourceCodeView);
+        }
+    });
+  }
   if (m_coordinator && m_gdbConsoleWidget) {
     connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived,
             m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
@@ -220,6 +228,12 @@ void MainWindow::setupDocks() {
               m_coordinator->broadcastBreakpoint(absoluteFilePath, line,
                                                  isAdded);
           });
+
+  connect(m_sourceCodeView, &SourceCodeView::hoverVariableRequested, this, [this](const QString &varName, const QPoint &globalPos) {
+      if (m_coordinator) {
+          m_coordinator->evaluateHoverVariable(m_focusedRank, varName, globalPos);
+      }
+  });
 
   m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
   m_serverRackView = new ServerRackView(masterHorizontalSplitter);
