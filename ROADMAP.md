@@ -45,3 +45,37 @@
 ## PHASE 7: The Plugin Marketplace (Productionization)
 
 * [ ] **Dynamic Loading:** Replace hardcoded language support with a `plugins/` directory system.
+
+## Field Testing & Validation (Remote HPC Workflows)
+
+> These items cannot be exercised in a local CI/CD pipeline. Each must be
+> validated against a real HPC login node before marking complete.
+
+### SSH Subsystem
+
+* [ ] **Successful Authentication:** Connect to a cluster login node using an Ed25519/RSA key configured in `Preferences → HPC Integration → SSH Key Path` and confirm the HPC Console shows a live prompt.
+* [ ] **Invalid Key Handling:** Supply a wrong or missing key path; verify GridLock surfaces a human-readable error in the HPC Console rather than hanging or crashing.
+* [ ] **Connection Timeout:** Configure an unreachable host; confirm the SSH process respects a reasonable timeout (≤ 30 s) and the UI remains responsive throughout.
+* [ ] **Reconnect Flow:** After a successful connection is dropped (e.g., network interruption), verify the "⟳ Refresh Packages" button attempts a new connection cleanly without leaking zombie processes.
+
+### Spack Integration
+
+* [ ] **`spack find` Parsing:** Run a refresh on a node where Spack is correctly sourced; confirm the package list populates in `SpackManager` and the count label is accurate.
+* [ ] **Unsourced Spack Environment:** Connect to a node where `spack` is not on `$PATH`; verify GridLock emits a clear `[ERR]` message (e.g., `command not found`) instead of silently showing an empty list.
+* [ ] **Package Filter:** With a non-trivial package list loaded, type a partial name into the search bar; confirm the filter updates in real time without a remote round-trip.
+* [ ] **Large Package Lists (> 500 entries):** Confirm the `QPlainTextEdit` block limit (`setMaximumBlockCount`) prevents excessive memory growth and the scroll-to-bottom behaviour still works.
+
+### SLURM Batch Submission
+
+* [ ] **`{FILE}` Token Replacement:** Open a source file in the editor, trigger "Submit SLURM Job", and confirm the generated script replaces `{FILE}` with the correct absolute path before being passed to `sbatch`.
+* [ ] **`sbatch` Execution:** Verify the job is accepted by the scheduler and a Job ID is echoed back to the HPC Console (e.g., `Submitted batch job 123456`).
+* [ ] **GPU Request Flag:** Enable "Request GPUs" with `gpusPerNode = 2`, submit a job, and inspect the generated `#SBATCH --gres=gpu:2` directive in the script that reaches the scheduler.
+* [ ] **Partition / Nodes / Tasks Propagation:** Change partition to a non-default value in `Preferences → HPC Integration`; verify the SLURM script header reflects the new values on the next submission.
+* [ ] **Submission Failure Handling:** Submit to a non-existent partition; confirm the stderr from `sbatch` is surfaced in the HPC Console and the IDE does not freeze.
+
+### MPI Edge Cases
+
+* [ ] **Strict Node Affinity:** Enable `Strict Node Affinity` in `Preferences → HPC / Cluster`; run a 4-rank job and confirm the MPI runtime pins ranks to the specified host set from the Hosts File.
+* [ ] **Custom Environment Variables:** Populate `MPI Environment Variables` with a `KEY=VALUE` pair; confirm the variable is visible inside the MPI ranks (e.g., via `getenv()` in the test program output).
+* [ ] **Hosts File Path:** Point `MPI Hosts File` at a valid multi-node hostfile; verify `mpirun` picks up the correct `-hostfile` argument and distributes ranks across nodes.
+* [ ] **Rank Count Propagation:** Set Default Rank Count to 8 in `Preferences → Debugger`; launch a session and confirm 8 GDB instances are spawned and all appear in the `ServerRackView`.
