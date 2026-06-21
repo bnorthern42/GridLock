@@ -10,6 +10,7 @@
 #include "RegisterView.hpp"
 #include "ReferenceDock.hpp"
 #include "ServerRackView.hpp"
+#include "PreferencesDialog.hpp"
 #include "SourceCodeView.hpp"
 #include "TerminalDock.hpp"
 #include <QAction>
@@ -434,41 +435,17 @@ void MainWindow::loadSourceFile(const QString &filePath) {
 }
 
 void MainWindow::openPreferences() {
-  QDialog dialog(this);
-  dialog.setWindowTitle("Preferences");
-  QFormLayout *form = new QFormLayout(&dialog);
+  auto *dlg = new PreferencesDialog(this);
+  dlg->setAttribute(Qt::WA_DeleteOnClose);
 
-  QSettings settings("GridLock", "Debugger");
+  // React to live Apply/OK so views refresh without a restart
+  connect(dlg, &PreferencesDialog::preferencesChanged, this, [this]() {
+    // SourceCodeView and RegisterView may want to re-read palette / font prefs.
+    if (m_sourceCodeView) m_sourceCodeView->update();
+    if (m_registerView)   m_registerView->update();
+  });
 
-  QLineEdit *mpiExecEdit = new QLineEdit(&dialog);
-  mpiExecEdit->setText(settings.value("mpi_executable", "mpiexec").toString());
-  form->addRow("MPI Executable:", mpiExecEdit);
-
-  QSpinBox *rankBox = new QSpinBox(&dialog);
-  rankBox->setMinimum(1);
-  rankBox->setValue(
-      settings
-          .value("rank_count",
-                 gridlock::core::ConfigManager::instance().getDefaultRanks())
-          .toInt());
-  form->addRow("Rank Count:", rankBox);
-
-  QLineEdit *extraArgsEdit = new QLineEdit(&dialog);
-  extraArgsEdit->setText(
-      settings.value("extra_args", "--oversubscribe").toString());
-  form->addRow("Extra Args:", extraArgsEdit);
-
-  QDialogButtonBox *box = new QDialogButtonBox(
-      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
-  form->addRow(box);
-  connect(box, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-  connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-  if (dialog.exec() == QDialog::Accepted) {
-    settings.setValue("mpi_executable", mpiExecEdit->text());
-    settings.setValue("rank_count", rankBox->value());
-    settings.setValue("extra_args", extraArgsEdit->text());
-  }
+  dlg->exec();
 }
 
 void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
