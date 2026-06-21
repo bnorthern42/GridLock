@@ -22,6 +22,7 @@ public:
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+    bool hasChildren(const QModelIndex& parent = QModelIndex()) const override;
 
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
@@ -45,6 +46,9 @@ private:
 
     QList<QString> m_createdVarobjs;
     QMap<QString, VariableNode*> m_varobjToNode;
+    
+    int m_evalCounter = 10000;
+    QMap<int, QString> m_evalTokenToVarobj;
 };
 
 } // namespace gridlock

@@ -46,13 +46,11 @@ void VariablesDockWidget::setupUi() {
     // Main Area
     m_variablesTree = new QTreeView(this);
     m_variablesTree->setModel(m_model);
-    m_variablesTree->setStyleSheet(R"(
-        QTreeView {
-            background-color: #181825;
-            color: #cdd6f4;
-            border: none;
-        }
-    )");
+    m_variablesTree->setRootIsDecorated(true);
+    m_variablesTree->setIndentation(16);
+    m_variablesTree->setItemsExpandable(true);
+    m_variablesTree->setExpandsOnDoubleClick(true);
+
     m_variablesTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_variablesTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_variablesTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);

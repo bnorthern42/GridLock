@@ -47,6 +47,13 @@ int VariableTreeModel::rowCount(const QModelIndex& parent) const {
     return node->children.size();
 }
 
+bool VariableTreeModel::hasChildren(const QModelIndex& parent) const {
+    VariableNode* node = getNode(parent);
+    if (!node) return false;
+    if (node->numChildren > 0) return true;
+    return node->children.size() > 0;
+}
+
 int VariableTreeModel::columnCount(const QModelIndex& /*parent*/) const {
     return 3;
 }
@@ -123,6 +130,27 @@ void VariableTreeModel::handleGdbOutput(int rankId, const QString& output) {
         parseVarCreate(output);
     } else if (output.startsWith("^done,numchild=") && output.contains("children=[")) {
         parseVarListChildren(output);
+    } else {
+        QRegularExpression evalRe("^(\\d+)\\^done,value=\"([^\"]+)\"");
+        QRegularExpressionMatch match = evalRe.match(output);
+        if (match.hasMatch()) {
+            int token = match.captured(1).toInt();
+            if (m_evalTokenToVarobj.contains(token)) {
+                QString varobjName = m_evalTokenToVarobj[token];
+                if (m_varobjToNode.contains(varobjName)) {
+                    VariableNode* node = m_varobjToNode[varobjName];
+                    QString result = match.captured(2);
+                    if (result.contains(" ")) {
+                        result = result.split(" ").first();
+                    }
+                    if (!node->value.contains("@") && node->value.startsWith("{")) {
+                        node->value = QString("%1 @ %2").arg(node->value).arg(result);
+                        emit layoutChanged();
+                    }
+                }
+                m_evalTokenToVarobj.remove(token);
+            }
+        }
     }
 }
 
@@ -169,6 +197,12 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
     m_rootNode->children.push_back(std::unique_ptr<VariableNode>(node));
     m_varobjToNode[varobjName] = node;
     m_createdVarobjs.append(varobjName);
+    
+    if (value == "{...}" || type.contains("struct") || type.contains("class") || type.contains("*") || type == "MPI_Status" || type.contains("MPI_")) {
+        m_evalCounter++;
+        m_evalTokenToVarobj[m_evalCounter] = varobjName;
+        m_coordinator->writeCmd(m_currentRankId, QString("%1-data-evaluate-expression &%2\n").arg(m_evalCounter).arg(name));
+    }
     
     endInsertRows();
 }

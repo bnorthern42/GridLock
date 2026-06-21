@@ -9,7 +9,7 @@ gdb_path = 'gdb'
 binaryArguments = ''
 customGdbPath = 'gdb'
 targetBinary = ''
-watchExpressions = []
+watchExpressions = [ 'numworkers', 'extra' ]
 workingDirectory = ''
 
 [theme.assembly]
