@@ -66,8 +66,16 @@ For upcoming features and architectural milestones, please see our [ROADMAP.md](
 ## Contributing
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for information on setting up the environment and submitting issues. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Acknowledgments
+## Acknowledgments & Attributions
 This project makes use of the excellent [toml++](https://github.com/marzer/tomlplusplus) library by mark gillard for parsing TOML configuration files.
+
+GridLock was also inspired by and built upon the ideas from the following projects:
+- **[GNU DDD](https://www.gnu.org/software/ddd/)**: For pioneering visual data display in debugging.
+- **[KDbg](https://www.kdbg.org/)**: For early inspiration on KDE/Qt-based GDB frontend wrappers.
+- **[gdbgui](https://www.gdbgui.com/)**: For demonstrating the power of browser-based debug visualization, which inspired our native `DifferentialGrid`.
+- **[Zeal](https://zealdocs.org/)**: For the open-source `.docset` standard and offline documentation workflows that power our Reference Manual.
+
+We also want to give a brief nod to the **Spack**, **SLURM**, and **OpenMPI** communities for the HPC tools GridLock orchestrates.
 
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

@@ -23,6 +23,7 @@
 #include <QInputDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
+#include <QMessageBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -194,7 +195,20 @@ void MainWindow::setupMenu() {
 
   QMenu *helpMenu = menuBar->addMenu("&Help");
   helpMenu->addAction("Documentation Index");
-  helpMenu->addAction("About GridLock");
+  QAction *aboutAction = helpMenu->addAction("About GridLock");
+  connect(aboutAction, &QAction::triggered, this, [this]() {
+    QMessageBox::about(this, "About GridLock",
+                       "<b>GridLock IDE</b><br><br>"
+                       "A high-performance graphical debugger for MPI applications.<br><br>"
+                       "<b>Acknowledgments & Attributions:</b><ul>"
+                       "<li><a href=\"https://www.gnu.org/software/ddd/\">GNU DDD</a>: For pioneering visual data display in debugging.</li>"
+                       "<li><a href=\"https://www.kdbg.org/\">KDbg</a>: For early inspiration on KDE/Qt-based GDB frontend wrappers.</li>"
+                       "<li><a href=\"https://www.gdbgui.com/\">gdbgui</a>: For demonstrating the power of browser-based debug visualization, which inspired our native DifferentialGrid.</li>"
+                       "<li><a href=\"https://zealdocs.org/\">Zeal</a>: For the open-source .docset standard and offline documentation workflows that power our Reference Manual.</li>"
+                       "</ul><br>"
+                       "Special thanks to the <b>Spack</b>, <b>SLURM</b>, and <b>OpenMPI</b> communities for the tools that power our HPC environments."
+                       );
+  });
 }
 
 void MainWindow::setupToolbar() {
