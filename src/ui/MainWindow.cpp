@@ -5,7 +5,9 @@
 #include "DifferentialGrid.hpp"
 #include "DisassemblyView.hpp"
 #include "GdbConsoleWidget.hpp"
+#include "GdbConsoleWidget.hpp"
 #include "MemView.hpp"
+#include "RegisterView.hpp"
 #include "ReferenceDock.hpp"
 #include "ServerRackView.hpp"
 #include "SourceCodeView.hpp"
@@ -13,6 +15,8 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDialog>
+#include <QInputDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QFileDialog>
@@ -225,12 +229,19 @@ void MainWindow::setupDocks() {
               m_coordinator->insertBreakpoint(loc);
           });
   connect(m_sourceCodeView, &SourceCodeView::breakpointToggled, this,
-          [this](const QString &file, int line) {
+          [this](const QString &file, int line, bool ctrlClicked) {
             QString absoluteFilePath = QFileInfo(file).absoluteFilePath();
             bool isAdded = true;
+            QString condition;
+
+            if (ctrlClicked) {
+                bool ok;
+                condition = QInputDialog::getText(this, "Conditional Breakpoint", "Enter condition (e.g. i == 5):", QLineEdit::Normal, "", &ok);
+                if (!ok) return; // Cancelled
+            }
 
             // Update persistent cache
-            if (m_persistentBreakpoints[absoluteFilePath].contains(line)) {
+            if (m_persistentBreakpoints[absoluteFilePath].contains(line) && condition.isEmpty() && !ctrlClicked) {
               m_persistentBreakpoints[absoluteFilePath].remove(line);
               isAdded = false;
             } else {
@@ -240,8 +251,7 @@ void MainWindow::setupDocks() {
                 m_persistentBreakpoints);
 
             if (m_coordinator)
-              m_coordinator->broadcastBreakpoint(absoluteFilePath, line,
-                                                 isAdded);
+              m_coordinator->broadcastBreakpoint(absoluteFilePath, line, condition);
           });
 
   connect(m_sourceCodeView, &SourceCodeView::hoverVariableRequested, this, [this](const QString &varName, const QPoint &globalPos) {
@@ -296,6 +306,7 @@ void MainWindow::setupDocks() {
   m_referenceDock = new ReferenceDock(m_bottomTabs);
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
   m_memView = new MemView(m_bottomTabs);
+  m_registerView = new RegisterView(m_bottomTabs);
 
   connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
     if (m_coordinator) {
@@ -308,6 +319,7 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_referenceDock, "Reference Manual");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");
+  m_bottomTabs->addTab(m_registerView, "Registers");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);
@@ -332,6 +344,9 @@ void MainWindow::onRankStateChanged(int rankId, const RankState &state) {
   }
 
   m_differentialGrid->setVariableData(rankId, state.variableWatches);
+  if (rankId == m_focusedRank && m_registerView) {
+      m_registerView->updateRegisters(state);
+  }
 }
 
 void MainWindow::onRankSelected(int rankId) {
@@ -352,6 +367,9 @@ void MainWindow::onRankSelected(int rankId) {
 
     // Force update DifferentialGrid table matrix rows
     m_differentialGrid->setVariableData(rankId, state.variableWatches);
+    if (m_registerView) {
+        m_registerView->updateRegisters(state);
+    }
   } else {
     if (m_coordinator)
       m_coordinator->requestDisassemblyFallback(rankId);

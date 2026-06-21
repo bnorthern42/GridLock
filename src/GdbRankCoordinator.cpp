@@ -204,28 +204,36 @@ void GdbRankCoordinator::sendCommand(int rankId, const QString &cmd) {
 }
 
 void GdbRankCoordinator::broadcastBreakpoint(const QString &file, int line,
-                                             bool isAdded) {
+                                             const QString& condition) {
   QString fileName = QFileInfo(file).fileName();
   QString locStr = QString("%1:%2").arg(fileName).arg(line);
 
   for (size_t i = 0; i < m_processes.size(); ++i) {
-    if (isAdded) {
-      QString breakCmd = QString("-break-insert -f %1\n").arg(locStr);
-      writeCmd(i, breakCmd);
+    auto &rp = m_processes[i];
+    int bkptIdToDelete = -1;
+    for (auto it = rp->state.breakpoints.constBegin();
+         it != rp->state.breakpoints.constEnd(); ++it) {
+      if (it.value() == locStr) {
+        bkptIdToDelete = it.key();
+        break;
+      }
+    }
+    
+    if (bkptIdToDelete != -1) {
+      writeCmd(i, QString("-break-delete %1\n").arg(bkptIdToDelete));
+      rp->state.breakpoints.remove(bkptIdToDelete);
+    }
+    
+    if (condition.isEmpty() && bkptIdToDelete != -1) {
+        // It was a toggle-off
     } else {
-      auto &rp = m_processes[i];
-      int bkptIdToDelete = -1;
-      for (auto it = rp->state.breakpoints.constBegin();
-           it != rp->state.breakpoints.constEnd(); ++it) {
-        if (it.value() == locStr) {
-          bkptIdToDelete = it.key();
-          break;
+        QString breakCmd;
+        if (!condition.isEmpty()) {
+            breakCmd = QString("-break-insert -f -c \"%1\" %2:%3\n").arg(condition).arg(fileName).arg(line);
+        } else {
+            breakCmd = QString("-break-insert -f %1\n").arg(locStr);
         }
-      }
-      if (bkptIdToDelete != -1) {
-        writeCmd(i, QString("-break-delete %1\n").arg(bkptIdToDelete));
-        rp->state.breakpoints.remove(bkptIdToDelete);
-      }
+        writeCmd(i, breakCmd);
     }
   }
 }
@@ -365,6 +373,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           QString("200-data-disassemble -s %1 -e \"%1 + 40\" -- 0\n").arg(stopAddress);
       writeCmd(rankId, asmCmd);
 
+      writeCmd(rankId, "-data-list-register-values r\n");
+
       QRegularExpression threadRe("thread-id=\"(\\d+)\"");
       auto matchThread = threadRe.match(line);
       if (matchThread.hasMatch()) {
@@ -480,6 +490,20 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         qint64 beginAddress = match.captured(1).toULongLong(&ok, 16);
         QString contents = match.captured(2);
         emit memoryDataReady(rankId, beginAddress, contents);
+      }
+    } else if (line.startsWith("^done,register-values=[")) {
+      QRegularExpression regRe("number=\"(\\d+)\".*?value=\"([^\"]+)\"");
+      auto i = regRe.globalMatch(line);
+      bool updated = false;
+      while (i.hasNext()) {
+        auto match = i.next();
+        int regNum = match.captured(1).toInt();
+        QString regVal = match.captured(2);
+        rp->state.registers[regNum] = regVal;
+        updated = true;
+      }
+      if (updated) {
+        emit rankStateChanged(rankId, rp->state);
       }
     } else if (line.startsWith("^done,bkpt={")) {
       QRegularExpression bkptRe(

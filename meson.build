@@ -25,7 +25,8 @@ src_files = [
   'src/ui/GdbConsoleWidget.cpp',
   'src/backend/TestGenerator.cpp',
   'src/backend/GridLockAutomationRunner.cpp',
-  'src/ui/MemView.cpp'
+  'src/ui/MemView.cpp',
+  'src/ui/RegisterView.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -42,7 +43,8 @@ moc_headers = [
   'src/ui/TerminalDock.hpp',
   'src/ui/GdbConsoleWidget.hpp',
   'src/backend/GridLockAutomationRunner.hpp',
-  'src/ui/MemView.hpp'
+  'src/ui/MemView.hpp',
+  'src/ui/RegisterView.hpp'
 ]
 
 # Process Qt6 files
@@ -125,7 +127,8 @@ ui_test_src = [
   'src/GdbRankCoordinator.cpp',
   'src/core/ConfigManager.cpp',
   'src/core/LspCoordinator.cpp',
-  'src/ui/MemView.cpp'
+  'src/ui/MemView.cpp',
+  'src/ui/RegisterView.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -140,7 +143,8 @@ ui_test_moc_headers = [
   'src/ui/GdbConsoleWidget.hpp',
   'src/GdbRankCoordinator.hpp',
   'src/core/LspCoordinator.hpp',
-  'src/ui/MemView.hpp'
+  'src/ui/MemView.hpp',
+  'src/ui/RegisterView.hpp'
 ]
 
 processed_ui_test_files = qt6.compile_moc(

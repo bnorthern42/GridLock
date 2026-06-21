@@ -13,5 +13,6 @@ private slots:
     void testMultiRankSync();
     void testBreakpointCacheFlush();
     void testRecreateWatchVariable();
+    void testRegisterValuesParsing();
     void cleanupTestCase();
 };

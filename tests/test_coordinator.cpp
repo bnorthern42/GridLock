@@ -180,6 +180,20 @@ void TestGdbCoordinator::testRecreateWatchVariable() {
     QCOMPARE(coord.getRankState(0).variableWatches["offset"], QString("123"));
 }
 
+void TestGdbCoordinator::testRegisterValuesParsing() {
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(1, false);
+    
+    // Simulate register response
+    QString rawOutput = "^done,register-values=[{number=\"0\",value=\"0x0000000000000000\"},{number=\"1\",value=\"0x12345678\"}]\n";
+    coord.processGdbOutput(0, rawOutput);
+    
+    gridlock::RankState state = coord.getRankState(0);
+    QCOMPARE(state.registers.size(), 2);
+    QCOMPARE(state.registers[0], QString("0x0000000000000000"));
+    QCOMPARE(state.registers[1], QString("0x12345678"));
+}
+
 void TestGdbCoordinator::cleanupTestCase() {
 }
 

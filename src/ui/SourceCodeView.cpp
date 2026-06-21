@@ -197,11 +197,12 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
             int lineNum = blockNumber + 1;
-            if (breakpoints.contains(lineNum)) breakpoints.remove(lineNum);
+            bool ctrlClicked = (event->modifiers() & Qt::ControlModifier);
+            if (breakpoints.contains(lineNum) && !ctrlClicked) breakpoints.remove(lineNum);
             else breakpoints.insert(lineNum);
             m_lineNumberArea->update();
             QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
-            emit breakpointToggled(emitPath, lineNum);
+            emit breakpointToggled(emitPath, lineNum, ctrlClicked);
             break;
         }
         block = block.next();

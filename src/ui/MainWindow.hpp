@@ -24,6 +24,7 @@ class DifferentialGrid;
 class TerminalDock;
 class GdbConsoleWidget;
 class MemView;
+class RegisterView;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -40,6 +41,7 @@ public:
     TerminalDock* terminalDock() const { return m_terminalDock; }
     GdbConsoleWidget* gdbConsoleWidget() const { return m_gdbConsoleWidget; }
     MemView* memView() const { return m_memView; }
+    RegisterView* registerView() const { return m_registerView; }
 
     void setCoordinator(gridlock::GdbRankCoordinator* coord);
 
@@ -74,6 +76,7 @@ private:
     TerminalDock* m_terminalDock = nullptr;
     GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
     MemView* m_memView = nullptr;
+    RegisterView* m_registerView = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;

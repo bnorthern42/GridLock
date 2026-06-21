@@ -2,6 +2,7 @@
 #include <QString>
 #include <vector>
 #include <QHash>
+#include <QMap>
 #include <QElapsedTimer>
 
 namespace gridlock {
@@ -15,6 +16,7 @@ struct RankState {
     QString disassemblyText;
     QHash<QString, QString> variableWatches; // watch variables
     QHash<int, QString> breakpoints; // bkpt number -> location
+    QMap<int, QString> registers; // register number -> value
     
     QElapsedTimer executionTimer;
     qint64 totalRuntimeMs = 0;

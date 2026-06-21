@@ -51,7 +51,7 @@ signals:
     void continueRequested();
     void stepInstRequested();
     void toggleBreakpointRequested(const QString& location);
-    void breakpointToggled(const QString& file, int line);
+    void breakpointToggled(const QString& file, int line, bool ctrlClicked = false);
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
     void semanticHoverRequested(const QString& file, int line, int character, const QPoint& globalPos);
     void pinVariableRequested(const QString& varName);
