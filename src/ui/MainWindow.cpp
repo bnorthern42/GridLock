@@ -152,7 +152,6 @@ void MainWindow::setupMenu() {
 void MainWindow::setupToolbar() {
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setMovable(false);
-  toolbar->setStyleSheet("QToolButton { color: #ff5555; font-weight: bold; }");
 
   QAction *runAction = new QAction("▶ Run Target", this);
   connect(runAction, &QAction::triggered, this, [this]() {
@@ -190,6 +189,7 @@ void MainWindow::setupToolbar() {
 
 void MainWindow::setupDocks() {
   QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
+  mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
 
   QSplitter *masterHorizontalSplitter =
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);

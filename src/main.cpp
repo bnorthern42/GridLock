@@ -1,10 +1,12 @@
 #include <QApplication>
+#include <QStyleFactory>
 #include <QCommandLineParser>
 #include "ui/MainWindow.hpp"
 #include "backend/GridLockAutomationRunner.hpp"
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+    QApplication::setStyle(QStyleFactory::create("Fusion"));
     
     QCommandLineParser parser;
     parser.setApplicationDescription("GridLock MPI Debugger");

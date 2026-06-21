@@ -88,7 +88,7 @@ void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName,
         font.setItalic(true);
         cellItem->setFont(font);
     } else {
-        cellItem->setForeground(Qt::black);
+        cellItem->setForeground(QBrush());
         QFont font = cellItem->font();
         font.setItalic(false);
         cellItem->setFont(font);
@@ -120,7 +120,7 @@ void DifferentialGrid::updateHighlights() {
                 if (it->text() != "-" && it->text() != majorityStr && counts.size() > 1) {
                     it->setBackground(QColor(255, 200, 200));
                 } else {
-                    it->setBackground(Qt::white);
+                    it->setBackground(QBrush());
                 }
             }
         }
