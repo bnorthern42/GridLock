@@ -150,9 +150,6 @@ void MainWindow::setupMenu() {
   QMenu *bookMenu = menuBar->addMenu("&Bookmarks");
   bookMenu->addAction("Saved Code Pointers");
 
-  QMenu *profMenu = menuBar->addMenu("&Profiles");
-  profMenu->addAction("MPI Cluster/Node Configurations");
-
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
   QAction *buildAction = toolsMenu->addAction("Build Target");
   connect(buildAction, &QAction::triggered, this, [this]() {

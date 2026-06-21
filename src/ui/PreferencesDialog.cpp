@@ -10,6 +10,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -22,6 +24,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QTextEdit>
 #include <QVBoxLayout>
 
 namespace gridlock::ui {
@@ -259,6 +262,92 @@ void DebuggerSettingsPage::loadFromSettings()
     m_rankBox->setValue(ds.defaultRanks);
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+//  HpcSettingsPage
+// ═════════════════════════════════════════════════════════════════════════
+
+HpcSettingsPage::HpcSettingsPage(QWidget *parent)
+    : QWidget(parent)
+{
+    auto *form = new QFormLayout(this);
+    form->setContentsMargins(24, 24, 24, 24);
+    form->setSpacing(14);
+    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    auto *heading = new QLabel(tr("<b>HPC / Cluster</b>"), this);
+    heading->setStyleSheet("font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+    form->addRow(heading);
+
+    auto *separator = new QLabel(this);
+    separator->setFixedHeight(1);
+    separator->setStyleSheet("background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+    form->addRow(separator);
+
+    // ── Hosts file ──────────────────────────────────────────────────────────
+    auto *hostsRow = new QHBoxLayout();
+    m_hostsFileEdit = new QLineEdit(this);
+    m_hostsFileEdit->setPlaceholderText(tr("(not set — use default hosts)"));
+    m_hostsFileEdit->setToolTip(tr(
+        "Path to an MPI hostfile. When set, --hostfile <path> is passed to the\n"
+        "MPI launcher. Leave empty to let the launcher choose nodes automatically."));
+    auto *browseBtn = new QPushButton(tr("Browse…"), this);
+    browseBtn->setFixedWidth(72);
+    connect(browseBtn, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Select MPI Hosts File"),
+            m_hostsFileEdit->text().isEmpty()
+                ? QDir::homePath() : m_hostsFileEdit->text(),
+            tr("All Files (*)"),
+            nullptr,
+            QFileDialog::DontUseNativeDialog);
+        if (!path.isEmpty())
+            m_hostsFileEdit->setText(path);
+    });
+    hostsRow->addWidget(m_hostsFileEdit);
+    hostsRow->addWidget(browseBtn);
+    form->addRow(tr("MPI Hosts File:"), hostsRow);
+
+    // ── Environment variables ────────────────────────────────────────────────
+    m_envVarsEdit = new QTextEdit(this);
+    m_envVarsEdit->setFixedHeight(90);
+    m_envVarsEdit->setPlaceholderText(tr(
+        "One key=value pair per line\n"
+        "e.g.  OMPI_MCA_btl=tcp,self\n"
+        "      UCX_NET_DEVICES=eth0"));
+    m_envVarsEdit->setToolTip(tr(
+        "MPI environment variables injected via -x KEY=VALUE flags.\n"
+        "One entry per line: KEY=VALUE"));
+    m_envVarsEdit->setAcceptRichText(false);
+    form->addRow(tr("MPI Env Vars:"), m_envVarsEdit);
+
+    // ── Strict affinity ─────────────────────────────────────────────────────
+    m_strictAffinityBox = new QCheckBox(tr("Bind ranks to individual nodes (--map-by node)"), this);
+    m_strictAffinityBox->setToolTip(tr(
+        "Passes --map-by node to the MPI launcher so each rank is pinned to\n"
+        "a separate physical node. Useful for NUMA-sensitive workloads."));
+    form->addRow(tr("Strict Node Affinity:"), m_strictAffinityBox);
+
+    auto *note = new QLabel(
+        tr("<small style='color:#888;'>Changes are applied on the <b>next</b> debug session launch.</small>"),
+        this);
+    note->setWordWrap(true);
+    form->addRow(QString(), note);
+
+    loadFromSettings();
+}
+
+QString HpcSettingsPage::hostsFile()      const { return m_hostsFileEdit->text().trimmed(); }
+QString HpcSettingsPage::envVars()        const { return m_envVarsEdit->toPlainText().trimmed(); }
+bool    HpcSettingsPage::strictAffinity() const { return m_strictAffinityBox->isChecked(); }
+
+void HpcSettingsPage::loadFromSettings()
+{
+    const auto hs = gridlock::core::ConfigManager::instance().getHpcSettings();
+    m_hostsFileEdit->setText(hs.hostsFile);
+    m_envVarsEdit->setPlainText(hs.envVars);
+    m_strictAffinityBox->setChecked(hs.strictAffinity);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  PreferencesDialog
 // ═══════════════════════════════════════════════════════════════════════════
@@ -401,6 +490,7 @@ void PreferencesDialog::setupSidebar()
         { tr("Editing"),    "document-edit"             },
         { tr("Behavior"),   "configure"                 },
         { tr("Debugger"),   "debug-run"                 },
+        { tr("HPC / Cluster"), "network-server"         },
     };
 
     for (const auto &e : entries) {
@@ -428,11 +518,13 @@ void PreferencesDialog::setupPages()
     m_editingPage    = new EditingSettingsPage(m_stack);
     m_behaviorPage   = new BehaviorSettingsPage(m_stack);
     m_debuggerPage   = new DebuggerSettingsPage(m_stack);
+    m_hpcPage        = new HpcSettingsPage(m_stack);
 
     m_stack->addWidget(m_appearancePage);
     m_stack->addWidget(m_editingPage);
     m_stack->addWidget(m_behaviorPage);
     m_stack->addWidget(m_debuggerPage);
+    m_stack->addWidget(m_hpcPage);
 
     m_stack->setCurrentIndex(0);
 }
@@ -469,13 +561,20 @@ void PreferencesDialog::apply()
     s.setValue("behavior/confirm_quit",        m_behaviorPage->confirmQuit());
     s.setValue("behavior/focus_on_stop",       m_behaviorPage->focusOnStop());
 
-    // ── Debugger — single source of truth via ConfigManager ─────────────
+    // ── Debugger — single source of truth via ConfigManager ────────────────
     gridlock::core::DebuggerSettings ds;
     ds.gdbPath       = m_debuggerPage->gdbPath();
     ds.mpiExecutable = m_debuggerPage->mpiExecutable();
     ds.mpiArgs       = m_debuggerPage->mpiArgs();
     ds.defaultRanks  = m_debuggerPage->defaultRanks();
     gridlock::core::ConfigManager::instance().saveDebuggerSettings(ds);
+
+    // ── HPC / Cluster — via ConfigManager ───────────────────────────────
+    gridlock::core::HpcSettings hs;
+    hs.hostsFile      = m_hpcPage->hostsFile();
+    hs.envVars        = m_hpcPage->envVars();
+    hs.strictAffinity = m_hpcPage->strictAffinity();
+    gridlock::core::ConfigManager::instance().saveHpcSettings(hs);
 
     s.sync();
 

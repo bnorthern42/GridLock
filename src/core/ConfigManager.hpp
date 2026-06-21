@@ -11,10 +11,17 @@ namespace gridlock::core {
 /// QSettings ("GridLock"/"Debugger") is the live layer;
 /// the TOML file holds theme colours and breakpoints.
 struct DebuggerSettings {
-    QString gdbPath      = "gdb";
+    QString gdbPath       = "gdb";
     QString mpiExecutable = "mpiexec";
-    QString mpiArgs      = "--oversubscribe";
-    int     defaultRanks = 2;
+    QString mpiArgs       = "--oversubscribe";
+    int     defaultRanks  = 2;
+};
+
+/// HPC cluster / node configuration. Stored in QSettings under hpc/*.
+struct HpcSettings {
+    QString hostsFile     = "";               ///< Path to MPI hostfile (empty = not used)
+    QString envVars       = "";               ///< Newline-separated key=value pairs
+    bool    strictAffinity = false;           ///< Pass --map-by node to the MPI launcher
 };
 
 class ConfigManager {
@@ -38,6 +45,10 @@ public:
     // ── Debugger settings (QSettings-backed, single source of truth) ─────
     DebuggerSettings getDebuggerSettings() const;
     void             saveDebuggerSettings(const DebuggerSettings &s);
+
+    // ── HPC / cluster settings (QSettings-backed) ─────────────────────────
+    HpcSettings getHpcSettings() const;
+    void        saveHpcSettings(const HpcSettings &s);
 
     /// Convenience shims used by existing call-sites.
     int     getDefaultRanks()   const;

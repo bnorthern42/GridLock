@@ -2,9 +2,11 @@
 #include <QDialog>
 #include <QListWidget>
 #include <QStackedWidget>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QSpinBox>
+#include <QTextEdit>
 #include <QWidget>
 #include <QDialogButtonBox>
 
@@ -78,6 +80,24 @@ private:
     QSpinBox  *m_rankBox      = nullptr;
 };
 
+/// HPC cluster / node configuration — hostsfile, env vars, affinity.
+/// Persists through ConfigManager::saveHpcSettings().
+class HpcSettingsPage : public QWidget {
+    Q_OBJECT
+public:
+    explicit HpcSettingsPage(QWidget *parent = nullptr);
+
+    QString hostsFile()      const;
+    QString envVars()        const;
+    bool    strictAffinity() const;
+    void    loadFromSettings();
+
+private:
+    QLineEdit *m_hostsFileEdit     = nullptr;
+    QTextEdit *m_envVarsEdit       = nullptr;
+    QCheckBox *m_strictAffinityBox = nullptr;
+};
+
 // ─── Main dialog ───────────────────────────────────────────────────────────
 
 class PreferencesDialog : public QDialog {
@@ -106,6 +126,7 @@ private:
     EditingSettingsPage    *m_editingPage    = nullptr;
     BehaviorSettingsPage   *m_behaviorPage   = nullptr;
     DebuggerSettingsPage   *m_debuggerPage   = nullptr;
+    HpcSettingsPage        *m_hpcPage        = nullptr;
 };
 
 } // namespace gridlock::ui

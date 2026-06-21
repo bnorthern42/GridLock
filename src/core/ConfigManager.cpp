@@ -105,6 +105,25 @@ void ConfigManager::saveDebuggerSettings(const DebuggerSettings &ds) {
     s.sync();
 }
 
+// ─── HPC settings ─────────────────────────────────────────────────────────────
+
+HpcSettings ConfigManager::getHpcSettings() const {
+    QSettings s(kOrg, kApp);
+    HpcSettings hs;
+    hs.hostsFile      = s.value("hpc/hosts_file",      "").toString();
+    hs.envVars        = s.value("hpc/env_vars",        "").toString();
+    hs.strictAffinity = s.value("hpc/strict_affinity", false).toBool();
+    return hs;
+}
+
+void ConfigManager::saveHpcSettings(const HpcSettings &hs) {
+    QSettings s(kOrg, kApp);
+    s.setValue("hpc/hosts_file",      hs.hostsFile);
+    s.setValue("hpc/env_vars",        hs.envVars);
+    s.setValue("hpc/strict_affinity", hs.strictAffinity);
+    s.sync();
+}
+
 // ─── Convenience shims ───────────────────────────────────────────────────────
 
 int     ConfigManager::getDefaultRanks()  const { return getDebuggerSettings().defaultRanks; }

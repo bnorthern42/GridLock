@@ -3,7 +3,6 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QRegularExpression>
-#include <QSettings>
 #include <QTimer>
 
 namespace gridlock {
@@ -99,20 +98,42 @@ void GdbRankCoordinator::startDebugSession(int rankCount,
 
 void GdbRankCoordinator::launchParallelSession(const QString &executable,
                                                int explicitRankCount) {
-  QSettings settings("GridLock", "Debugger");
-  QString mpiExec = settings.value("mpi_executable", "mpiexec").toString();
-  int rankCount =
-      settings
-          .value("rank_count", explicitRankCount > 0 ? explicitRankCount : 4)
-          .toInt();
+  // Read all launch parameters from ConfigManager — the single source of truth.
+  const auto ds = core::ConfigManager::instance().getDebuggerSettings();
+  const auto hs = core::ConfigManager::instance().getHpcSettings();
+
+  const QString mpiExec = ds.mpiExecutable.isEmpty() ? "mpiexec" : ds.mpiExecutable;
+  const int rankCount   = (explicitRankCount > 0) ? explicitRankCount : ds.defaultRanks;
 
   // 1. Terminate any previous stragglers
   terminateAllSessions();
 
-  // 2. Launch the underlying MPI context fabric via gdbserver
+  // 2. Build the mpiexec argument list
   m_mpirunProcess = std::make_unique<QProcess>();
   QStringList mpiArgs;
 
+  // -- Hosts file (hpc/hosts_file) ----------------------------------------
+  if (!hs.hostsFile.isEmpty()) {
+    mpiArgs << "--hostfile" << hs.hostsFile;
+  }
+
+  // -- Strict node affinity (hpc/strict_affinity) --------------------------
+  if (hs.strictAffinity) {
+    mpiArgs << "--map-by" << "node";
+  }
+
+  // -- User-defined environment variables (hpc/env_vars) -------------------
+  // Each line is expected to be KEY=VALUE; inject as -x KEY=VALUE.
+  if (!hs.envVars.isEmpty()) {
+    const QStringList pairs = hs.envVars.split('\n', Qt::SkipEmptyParts);
+    for (const QString &pair : pairs) {
+      const QString trimmed = pair.trimmed();
+      if (!trimmed.isEmpty())
+        mpiArgs << "-x" << trimmed;
+    }
+  }
+
+  // -- Per-rank gdbserver slots --------------------------------------------
   for (int i = 0; i < rankCount; ++i) {
     if (i > 0)
       mpiArgs << ":";
@@ -120,7 +141,7 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
             << "gdbserver" << QString("localhost:%1").arg(2000 + i)
             << executable;
   }
-  
+
   connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() {
       emit targetOutputReceived(QString::fromUtf8(m_mpirunProcess->readAllStandardOutput()));
   });
