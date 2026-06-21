@@ -214,6 +214,57 @@ gridlock_config_tests = executable('gridlock_config_tests',
 
 test('config_tests', gridlock_config_tests)
 
+docset_test_src = [
+  'tests/test_docset.cpp',
+  'src/core/DocsetManager.cpp',
+  'src/core/ConfigManager.cpp'
+]
+
+docset_test_moc_headers = [
+  'tests/test_docset.hpp',
+  'src/core/DocsetManager.hpp'
+]
+
+processed_docset_test_files = qt6.compile_moc(
+  headers : docset_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_docset_tests = executable('gridlock_docset_tests',
+  docset_test_src,
+  processed_docset_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('docset_tests', gridlock_docset_tests)
+
+commands_test_src = [
+  'tests/test_commands.cpp',
+  'src/core/commands/DebugCommands.cpp',
+  'src/GdbRankCoordinator.cpp',
+  'src/core/ConfigManager.cpp'
+]
+
+commands_test_moc_headers = [
+  'tests/test_commands.hpp',
+  'src/GdbRankCoordinator.hpp'
+]
+
+processed_commands_test_files = qt6.compile_moc(
+  headers : commands_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_commands_tests = executable('gridlock_commands_tests',
+  commands_test_src,
+  processed_commands_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('commands_tests', gridlock_commands_tests)
+
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
   output: 'mpi_mm_bin',

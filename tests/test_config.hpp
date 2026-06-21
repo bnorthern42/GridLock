@@ -11,4 +11,6 @@ private slots:
     void testFallbacks();
     void testMpiSettingsPersistence();
     void testSettingValidation();
+    void testSlurmSettingsPersistence();
+    void testSshSettingsPersistence();
 };

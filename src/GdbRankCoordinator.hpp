@@ -48,11 +48,11 @@ signals:
   void memoryDataReady(int rankId, qint64 beginAddress, const QString &hexContents);
 
 public slots:
-  void stepAll();
-  void continueAll();
-  void runAll();
-  void haltAll();
-  void pauseFocusedRank(int rankId);
+  virtual void stepAll();
+  virtual void continueAll();
+  virtual void runAll();
+  virtual void haltAll();
+  virtual void pauseFocusedRank(int rankId);
   void registerWatchVariable(const QString &varName);
   void sendCommand(int rankId, const QString &cmd);
   void handleGdbOutput(int rankId);

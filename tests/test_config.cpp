@@ -195,4 +195,54 @@ void TestConfig::testSettingValidation() {
     QDir::setCurrent(oldCwd);
 }
 
+void TestConfig::testSlurmSettingsPersistence() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString oldCwd = QDir::currentPath();
+    QDir::setCurrent(tempDir.path());
+
+    auto &mgr = gridlock::core::ConfigManager::instance();
+    gridlock::core::SlurmSettings slurm;
+    slurm.scriptTemplate = "sbatch --custom";
+    slurm.partition = "gpu";
+    slurm.nodes = 2;
+    slurm.tasksPerNode = 8;
+    slurm.requestGpus = true;
+    slurm.gpusPerNode = 4;
+    slurm.spackRoot = "/opt/spack_custom";
+    mgr.saveSlurmSettings(slurm);
+
+    const auto loaded = mgr.getSlurmSettings();
+    QCOMPARE(loaded.scriptTemplate, QString("sbatch --custom"));
+    QCOMPARE(loaded.partition, QString("gpu"));
+    QCOMPARE(loaded.nodes, 2);
+    QCOMPARE(loaded.tasksPerNode, 8);
+    QCOMPARE(loaded.requestGpus, true);
+    QCOMPARE(loaded.gpusPerNode, 4);
+    QCOMPARE(loaded.spackRoot, QString("/opt/spack_custom"));
+
+    QDir::setCurrent(oldCwd);
+}
+
+void TestConfig::testSshSettingsPersistence() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString oldCwd = QDir::currentPath();
+    QDir::setCurrent(tempDir.path());
+
+    auto &mgr = gridlock::core::ConfigManager::instance();
+    gridlock::core::SshSettings ssh;
+    ssh.host = "192.168.1.100";
+    ssh.user = "hpcuser";
+    ssh.keyPath = "~/.ssh/id_rsa_hpc";
+    mgr.saveSshSettings(ssh);
+
+    const auto loaded = mgr.getSshSettings();
+    QCOMPARE(loaded.host, QString("192.168.1.100"));
+    QCOMPARE(loaded.user, QString("hpcuser"));
+    QCOMPARE(loaded.keyPath, QString("~/.ssh/id_rsa_hpc"));
+
+    QDir::setCurrent(oldCwd);
+}
+
 QTEST_MAIN(TestConfig)
