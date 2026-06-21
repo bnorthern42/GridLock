@@ -9,6 +9,7 @@
 
 namespace gridlock {
 class GdbRankCoordinator;
+class VariablesDockWidget;
 }
 
 namespace gridlock::core {
@@ -54,6 +55,7 @@ public:
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
+    gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     gridlock::GdbRankCoordinator* coordinator() const { return m_coordinator; }
 
     void startDebuggingSession(const QString& binaryPath, int ranks);
@@ -95,6 +97,7 @@ private:
     MemView* m_memView = nullptr;
     RegisterView* m_registerView = nullptr;
     ExpressionEvaluatorWidget* m_expressionEvaluatorWidget = nullptr;
+    gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;

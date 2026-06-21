@@ -12,8 +12,10 @@ class GdbRankCoordinator;
 class VariablesDockWidget : public QDockWidget {
     Q_OBJECT
 public:
-    explicit VariablesDockWidget(GdbRankCoordinator* coordinator, QWidget* parent = nullptr);
+    explicit VariablesDockWidget(QWidget* parent = nullptr);
     ~VariablesDockWidget() override;
+
+    void setCoordinator(GdbRankCoordinator* coordinator);
 
 private slots:
     void onRankSelected(int index);

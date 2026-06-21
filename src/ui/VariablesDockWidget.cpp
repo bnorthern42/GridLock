@@ -8,18 +8,27 @@
 
 namespace gridlock {
 
-VariablesDockWidget::VariablesDockWidget(GdbRankCoordinator* coordinator, QWidget* parent)
-    : QDockWidget("Variables", parent), m_coordinator(coordinator), m_currentRankId(0) {
+VariablesDockWidget::VariablesDockWidget(QWidget* parent)
+    : QDockWidget("Variables", parent), m_coordinator(nullptr), m_currentRankId(0) {
     
-    m_model = new VariableTreeModel(coordinator, this);
+    m_model = new VariableTreeModel(nullptr, this);
     setupUi();
-
-    connect(m_coordinator, &GdbRankCoordinator::rankStateChanged, this, &VariablesDockWidget::onRankStateChanged);
-
-    onProcessCountChanged();
 }
 
 VariablesDockWidget::~VariablesDockWidget() = default;
+
+void VariablesDockWidget::setCoordinator(GdbRankCoordinator* coordinator) {
+    m_coordinator = coordinator;
+    m_model->deleteLater();
+    m_model = new VariableTreeModel(coordinator, this);
+    m_variablesTree->setModel(m_model);
+    connect(m_variablesTree, &QTreeView::expanded, m_model, &VariableTreeModel::fetchMore);
+
+    if (m_coordinator) {
+        connect(m_coordinator, &GdbRankCoordinator::rankStateChanged, this, &VariablesDockWidget::onRankStateChanged);
+        onProcessCountChanged();
+    }
+}
 
 void VariablesDockWidget::setupUi() {
     QWidget* container = new QWidget(this);
@@ -53,10 +62,12 @@ void VariablesDockWidget::setupUi() {
     setWidget(container);
 
     connect(m_rankSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &VariablesDockWidget::onRankSelected);
-    connect(m_variablesTree, &QTreeView::expanded, m_model, &VariableTreeModel::fetchMore);
+    // connect expanded is handled in setCoordinator because model changes
 }
 
 void VariablesDockWidget::onProcessCountChanged() {
+    if (!m_coordinator) return;
+    
     m_rankSelector->blockSignals(true);
     m_rankSelector->clear();
     int count = m_coordinator->getProcessCount();
@@ -76,13 +87,14 @@ void VariablesDockWidget::onProcessCountChanged() {
 }
 
 void VariablesDockWidget::onRankSelected(int index) {
-    if (index < 0) return;
+    if (index < 0 || !m_coordinator) return;
     int rankId = m_rankSelector->itemData(index).toInt();
     m_currentRankId = rankId;
     m_model->loadLocals(rankId);
 }
 
 void VariablesDockWidget::onRankStateChanged(int rankId, const RankState& state) {
+    if (!m_coordinator) return;
     if (m_rankSelector->count() != m_coordinator->getProcessCount()) {
         onProcessCountChanged();
     }

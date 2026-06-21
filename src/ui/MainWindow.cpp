@@ -21,6 +21,7 @@
 #include "../core/commands/DebugCommands.hpp"
 #include "../core/ShortcutManager.hpp"
 #include "SpackManager.hpp"
+#include "VariablesDockWidget.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
@@ -93,6 +94,9 @@ void MainWindow::executeCommand(std::unique_ptr<gridlock::core::commands::IDebug
 
 void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
   m_coordinator = coord;
+  if (m_variablesDockWidget) {
+      m_variablesDockWidget->setCoordinator(m_coordinator);
+  }
   if (m_coordinator) {
     connect(m_coordinator, &GdbRankCoordinator::hoverEvaluationComplete, this, [this](QString varName, QString result, QPoint globalPos) {
         if (getSourceCodeView()) {
@@ -286,6 +290,10 @@ void MainWindow::setupDocks() {
 
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
+
+  m_variablesDockWidget = new VariablesDockWidget(this);
+  addDockWidget(Qt::RightDockWidgetArea, m_variablesDockWidget);
+  
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked, this, [this](const QString& filePath) {
       if (m_editorTabManager) {
           loadSourceFile(filePath); // Actually loadSourceFile does everything needed, or we can just call m_editorTabManager->openFile(filePath) and m_lspCoordinator
