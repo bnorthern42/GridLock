@@ -1,4 +1,5 @@
 #include "ServerRackView.hpp"
+#include "ThemeManager.hpp"
 #include <QPainter>
 #include <QMouseEvent>
 #include <QLinearGradient>
@@ -13,7 +14,7 @@ ServerRackView::ServerRackView(QWidget *parent) : QWidget(parent) {
 void ServerRackView::paintEvent(QPaintEvent */*event*/) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(rect(), QColor(20, 20, 20));
+    painter.fillRect(rect(), QColor(ThemeManager::MANTLE));
     
     int bladeHeight = 35;
     int spacing = 10;
@@ -28,9 +29,9 @@ void ServerRackView::paintEvent(QPaintEvent */*event*/) {
         QPainterPath path;
         path.addRoundedRect(rect, 5, 5);
 
-        painter.setBrush(QColor(35, 35, 35));
-        
-        QPen borderPen(i == m_selectedRank ? QColor(100, 150, 255) : QColor(80, 80, 80));
+        painter.setBrush(QColor(ThemeManager::SURFACE0));
+
+        QPen borderPen(i == m_selectedRank ? QColor(ThemeManager::MAUVE) : QColor(ThemeManager::SURFACE1));
         borderPen.setWidth(i == m_selectedRank ? 2 : 1);
         painter.setPen(borderPen);
         painter.drawPath(path);
@@ -47,14 +48,14 @@ void ServerRackView::paintEvent(QPaintEvent */*event*/) {
         
         QColor ledColor;
         if (status == "running") {
-            ledColor = QColor(0, 230, 115);
+            ledColor = QColor(ThemeManager::GREEN);
         } else if (status == "stopped") {
-            ledColor = QColor(255, 191, 0);
+            ledColor = QColor(ThemeManager::YELLOW);
         } else {
-            ledColor = QColor(100, 100, 100);
+            ledColor = QColor(ThemeManager::SURFACE1);
         }
 
-        painter.setPen(QColor(220, 220, 220));
+        painter.setPen(QColor(ThemeManager::TEXT));
         QString titleStr = QString("R[%1] %2ms").arg(i).arg(runTime);
         painter.drawText(rect.left() + 15, rect.center().y() + 4, titleStr);
 

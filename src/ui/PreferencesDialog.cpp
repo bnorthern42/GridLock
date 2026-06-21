@@ -44,14 +44,12 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
   form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
   auto *heading = new QLabel(tr("<b>Appearance</b>"), this);
-  heading->setStyleSheet(
-      "font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  heading->setObjectName("heading");
   form->addRow(heading);
 
   auto *separator = new QLabel(this);
   separator->setFixedHeight(1);
-  separator->setStyleSheet(
-      "background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  separator->setObjectName("separator");
   form->addRow(separator);
 
   m_themeCombo = new QComboBox(this);
@@ -96,14 +94,12 @@ EditingSettingsPage::EditingSettingsPage(QWidget *parent) : QWidget(parent) {
   form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
   auto *heading = new QLabel(tr("<b>Editing</b>"), this);
-  heading->setStyleSheet(
-      "font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  heading->setObjectName("heading");
   form->addRow(heading);
 
   auto *separator = new QLabel(this);
   separator->setFixedHeight(1);
-  separator->setStyleSheet(
-      "background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  separator->setObjectName("separator");
   form->addRow(separator);
 
   m_tabWidthBox = new QSpinBox(this);
@@ -158,14 +154,12 @@ BehaviorSettingsPage::BehaviorSettingsPage(QWidget *parent) : QWidget(parent) {
   form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
   auto *heading = new QLabel(tr("<b>Behavior</b>"), this);
-  heading->setStyleSheet(
-      "font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  heading->setObjectName("heading");
   form->addRow(heading);
 
   auto *separator = new QLabel(this);
   separator->setFixedHeight(1);
-  separator->setStyleSheet(
-      "background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  separator->setObjectName("separator");
   form->addRow(separator);
 
   m_restoreBreakpointsCheck = new QComboBox(this);
@@ -232,14 +226,12 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
   form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
   auto *heading = new QLabel(tr("<b>Debugger</b>"), this);
-  heading->setStyleSheet(
-      "font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  heading->setObjectName("heading");
   form->addRow(heading);
 
   auto *separator = new QLabel(this);
   separator->setFixedHeight(1);
-  separator->setStyleSheet(
-      "background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  separator->setObjectName("separator");
   form->addRow(separator);
 
   m_gdbPathEdit = new QLineEdit(this);
@@ -304,14 +296,12 @@ HpcSettingsPage::HpcSettingsPage(QWidget *parent) : QWidget(parent) {
   form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
   auto *heading = new QLabel(tr("<b>HPC / Cluster</b>"), this);
-  heading->setStyleSheet(
-      "font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  heading->setObjectName("heading");
   form->addRow(heading);
 
   auto *separator = new QLabel(this);
   separator->setFixedHeight(1);
-  separator->setStyleSheet(
-      "background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  separator->setObjectName("separator");
   form->addRow(separator);
 
   // ── Hosts file ──────────────────────────────────────────────────────────
@@ -408,7 +398,7 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   // SSH
   // ────────────────────────────────────────────────────────────────────
   auto *sshLabel = new QLabel(tr("<b>Remote SSH Connection</b>"), container);
-  sshLabel->setStyleSheet("font-size: 13px; color: #89b4fa; padding-top: 6px;");
+  sshLabel->setObjectName("heading");
   form->addRow(sshLabel);
 
   m_sshHostEdit = new QLineEdit(container);
@@ -444,8 +434,7 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   // ────────────────────────────────────────────────────────────────────
   auto *slurmLabel =
       new QLabel(tr("<b>SLURM Batch Configuration</b>"), container);
-  slurmLabel->setStyleSheet(
-      "font-size: 13px; color: #89b4fa; padding-top: 10px;");
+  slurmLabel->setObjectName("heading");
   form->addRow(slurmLabel);
 
   m_partitionEdit = new QLineEdit(container);
@@ -501,8 +490,7 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   // Spack
   // ────────────────────────────────────────────────────────────────────
   auto *spackLabel = new QLabel(tr("<b>Spack Package Manager</b>"), container);
-  spackLabel->setStyleSheet(
-      "font-size: 13px; color: #89b4fa; padding-top: 10px;");
+  spackLabel->setObjectName("heading");
   form->addRow(spackLabel);
 
   m_spackRootEdit = new QLineEdit(container);
@@ -575,12 +563,12 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget *parent) : QWidget(parent) {
   layout->setSpacing(14);
 
   auto *heading = new QLabel(tr("<b>Offline Docsets</b>"), this);
-  heading->setStyleSheet("font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  heading->setObjectName("heading");
   layout->addWidget(heading);
 
   auto *separator = new QLabel(this);
   separator->setFixedHeight(1);
-  separator->setStyleSheet("background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  separator->setObjectName("separator");
   layout->addWidget(separator);
 
   auto *dirLayout = new QHBoxLayout();
@@ -645,92 +633,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   resize(860, 580);
 
   // ── Dark-panel stylesheet ────────────────────────────────────────────
-  setStyleSheet(R"(
-        QDialog {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-        }
-        QListWidget {
-            background-color: #181825;
-            border: none;
-            border-right: 1px solid rgba(255,255,255,0.07);
-            font-size: 13px;
-            color: #cdd6f4;
-            outline: 0;
-        }
-        QListWidget::item {
-            padding: 10px 18px;
-            border-radius: 0px;
-        }
-        QListWidget::item:selected {
-            background-color: #313244;
-            color: #cba6f7;
-            border-left: 3px solid #cba6f7;
-        }
-        QListWidget::item:hover:!selected {
-            background-color: #252535;
-        }
-        QStackedWidget {
-            background-color: #1e1e2e;
-        }
-        QWidget {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-        }
-        QLabel {
-            color: #cdd6f4;
-        }
-        QLineEdit, QSpinBox, QComboBox {
-            background-color: #313244;
-            color: #cdd6f4;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 5px;
-            padding: 5px 8px;
-            selection-background-color: #cba6f7;
-            selection-color: #1e1e2e;
-            min-height: 26px;
-        }
-        QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
-            border-color: #cba6f7;
-        }
-        QComboBox::drop-down {
-            border: none;
-            padding-right: 6px;
-        }
-        QComboBox QAbstractItemView {
-            background-color: #313244;
-            color: #cdd6f4;
-            selection-background-color: #cba6f7;
-            selection-color: #1e1e2e;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-        QDialogButtonBox QPushButton {
-            background-color: #45475a;
-            color: #cdd6f4;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 5px;
-            padding: 6px 18px;
-            min-width: 72px;
-        }
-        QDialogButtonBox QPushButton:hover {
-            background-color: #585b70;
-        }
-        QDialogButtonBox QPushButton[text="OK"],
-        QDialogButtonBox QPushButton[text="Apply"] {
-            background-color: #cba6f7;
-            color: #1e1e2e;
-            font-weight: 600;
-            border: none;
-        }
-        QDialogButtonBox QPushButton[text="OK"]:hover,
-        QDialogButtonBox QPushButton[text="Apply"]:hover {
-            background-color: #d4b9ff;
-        }
-        QFormLayout QLabel {
-            color: #a6adc8;
-        }
-    )");
-
+  // Global stylesheet is applied by ThemeManager via main.cpp
   auto *rootLayout = new QVBoxLayout(this);
   rootLayout->setContentsMargins(0, 0, 0, 0);
   rootLayout->setSpacing(0);
@@ -754,7 +657,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   // ── Separator line above button box ──────────────────────────────────
   auto *line = new QLabel(this);
   line->setFixedHeight(1);
-  line->setStyleSheet("background: rgba(255,255,255,0.08);");
+  line->setObjectName("separator");
   rootLayout->addWidget(line);
 
   setupButtonBox();
@@ -767,6 +670,7 @@ void PreferencesDialog::setupSidebar() {
   m_sidebar->setIconSize(QSize(20, 20));
   m_sidebar->setSpacing(0);
   m_sidebar->setFrameShape(QFrame::NoFrame);
+  m_sidebar->setProperty("role", "sidebar");
 
   struct Entry {
     QString label;

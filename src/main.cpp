@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QCommandLineParser>
 #include "ui/MainWindow.hpp"
+#include "ui/ThemeManager.hpp"
 #include "backend/GridLockAutomationRunner.hpp"
 
 int main(int argc, char *argv[]) {
@@ -45,7 +46,10 @@ int main(int argc, char *argv[]) {
     dark.setColor(QPalette::Disabled, QPalette::Text,       QColor(108, 112, 134));
     dark.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(108, 112, 134));
     QApplication::setPalette(dark);
-    
+
+    // Apply the centralized ThemeManager QSS on top of the Fusion palette.
+    gridlock::ui::ThemeManager::instance().applyGlobalTheme(app);
+
     QCommandLineParser parser;
     parser.setApplicationDescription("GridLock MPI Debugger");
     parser.addHelpOption();

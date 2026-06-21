@@ -31,7 +31,8 @@ src_files = [
   'src/core/MockHpcBackend.cpp',
   'src/ui/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp',
-  'src/core/DocsetManager.cpp'
+  'src/core/DocsetManager.cpp',
+  'src/ui/ThemeManager.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -143,7 +144,8 @@ ui_test_src = [
   'src/core/MockHpcBackend.cpp',
   'src/ui/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp',
-  'src/core/DocsetManager.cpp'
+  'src/core/DocsetManager.cpp',
+  'src/ui/ThemeManager.cpp'
 ]
 
 ui_test_moc_headers = [

@@ -29,7 +29,7 @@ SpackManager::SpackManager(gridlock::core::HpcBackend *backend, QWidget *parent)
     m_clearButton->setFixedWidth(56);
 
     m_statusLabel = new QLabel(tr("Idle"), this);
-    m_statusLabel->setStyleSheet("color: #a6adc8; font-size: 11px;");
+    m_statusLabel->setObjectName("status");
 
     toolbar->addWidget(m_filterEdit, 1);
     toolbar->addWidget(m_fetchButton);
