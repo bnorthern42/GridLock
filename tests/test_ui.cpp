@@ -11,7 +11,7 @@
 #include <QTextDocument>
 #include <QTextBlock>
 #include <QHash>
-
+#include "../src/core/ConfigManager.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -60,7 +60,7 @@ void TestMainWindowUI::testServerRackStateUpdate() {
 
 void TestMainWindowUI::testAsmSyntaxHighlighter() {
     QTextDocument doc;
-    doc.setPlainText("0x401000: mov eax, ebx\n0x401004: call 0x402000");
+    doc.setPlainText("0x00555: movl $0x2, %eax");
     gridlock::ui::AsmSyntaxHighlighter highlighter(&doc);
     
     // Force rehighlight
@@ -70,65 +70,86 @@ void TestMainWindowUI::testAsmSyntaxHighlighter() {
     QTextBlock block = doc.findBlockByLineNumber(0);
     QVector<QTextLayout::FormatRange> formats = block.layout()->formats();
     
-    // Just verify that formats were applied by the highlighter (opcodes, registers, addresses)
-    QVERIFY(formats.size() > 0);
+    QString opcodeColor = gridlock::core::ConfigManager::instance().getAssemblyOpcode();
+    QString registerColor = gridlock::core::ConfigManager::instance().getAssemblyRegister();
+    QString addressColor = gridlock::core::ConfigManager::instance().getAssemblyAddress();
+
+    bool foundOpcode = false;
+    bool foundRegister = false;
+    bool foundAddress = false;
+
+    for (const auto& fmt : formats) {
+        QString fmtColor = fmt.format.foreground().color().name(QColor::HexRgb);
+        if (fmtColor == QColor(opcodeColor).name(QColor::HexRgb)) foundOpcode = true;
+        if (fmtColor == QColor(registerColor).name(QColor::HexRgb)) foundRegister = true;
+        if (fmtColor == QColor(addressColor).name(QColor::HexRgb)) foundAddress = true;
+    }
+    
+    QVERIFY(foundOpcode);
+    QVERIFY(foundRegister);
+    QVERIFY(foundAddress);
 }
 
 void TestMainWindowUI::testSourceCodeHighlightBounds() {
     gridlock::ui::SourceCodeView view;
-    view.setPlainText("Line 1\nLine 2\nLine 3\nLine 4");
+    QString code;
+    for (int i = 1; i <= 100; ++i) {
+        code += QString("int line_%1 = 0;\n").arg(i);
+    }
+    view.setSourceCode(code);
     
-    // Highlight line 2 (GDB 1-based index) -> maps to block 1
-    view.highlightCurrentLine(2);
+    // Highlight line 83 (GDB 1-based index) -> maps to block 82
+    view.highlightCurrentLine(83);
+    
+    QTextBlock block = view.textCursor().block();
+    QCOMPARE(block.blockNumber(), 82);
     
     // Highlight out of bounds (should not crash)
-    view.highlightCurrentLine(100);
+    view.highlightCurrentLine(200);
     view.highlightCurrentLine(0);
     view.highlightCurrentLine(-1);
     
-    // Assert no exceptions and test pass
+    // Assert no exceptions
     QVERIFY(true);
 }
 
 void TestMainWindowUI::testDifferentialGridExpansion() {
     gridlock::ui::DifferentialGrid grid;
     
-    // Programmatically inject 15 variables across 6 ranks
+    // Programmatically inject 15 variables across 6 ranks via updateVariableDisplay
     for (int rankId = 0; rankId < 6; ++rankId) {
-        QHash<QString, QString> vars;
         for (int v = 0; v < 15; ++v) {
             QString varName = QString("var_%1").arg(v);
-            // Give rank 5 a diverging value for var_0
-            if (rankId == 5 && v == 0) {
-                vars[varName] = "divergent_value";
-            } else {
-                vars[varName] = "100";
-            }
+            QString value = (rankId == 5 && v == 0) ? "divergent_value" : "100";
+            grid.updateVariableDisplay(rankId, varName, value);
         }
-        grid.setVariableData(rankId, vars);
     }
     
-    // Verify row/col expansion
+    // Verify dynamic row/col expansion
     QCOMPARE(grid.rowCount(), 7); // 1 header + 6 ranks
     QCOMPARE(grid.columnCount(), 16); // 1 header + 15 variables
     
-    // Rank 0 var 0 (row 1, col 1 assuming var_0 is added first, but we can search or just check the cell)
-    // Actually, hash iteration is non-deterministic! So we must search for the column index.
+    // Find var_0 column
     int colVar0 = -1;
     for (int c = 1; c < grid.columnCount(); ++c) {
-        if (grid.horizontalHeaderItem(c)->text() == "var_0") colVar0 = c;
+        if (grid.horizontalHeaderItem(c)->text() == "var_0") {
+            colVar0 = c;
+            break;
+        }
     }
     QVERIFY(colVar0 != -1);
 
-    // Rank 0 var 0
+    // Assert majority-highlighting on Rank 0 (Normal)
     QTableWidgetItem* itemNormal = grid.item(1, colVar0);
     QVERIFY(itemNormal != nullptr);
     QCOMPARE(itemNormal->text(), QString("100"));
+    QCOMPARE(itemNormal->background(), QBrush());
     
-    // Rank 5 var 0 (divergent)
+    // Assert majority-highlighting on Rank 5 (Divergent)
     QTableWidgetItem* itemDivergent = grid.item(6, colVar0);
     QVERIFY(itemDivergent != nullptr);
     QCOMPARE(itemDivergent->text(), QString("divergent_value"));
+    QCOMPARE(itemDivergent->background().color(), QColor(255, 200, 200));
 }
 
 void TestMainWindowUI::testDifferentialGridEmits() {
