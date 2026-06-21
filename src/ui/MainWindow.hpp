@@ -25,7 +25,7 @@ namespace gridlock::ui {
 class ServerRackView;
 class SourceCodeView;
 class DisassemblyView;
-class ReferenceDock;
+class ReferenceManualWidget;
 class DifferentialGrid;
 class TerminalDock;
 class GdbConsoleWidget;
@@ -43,7 +43,7 @@ public:
     SourceCodeView* sourceCodeView() const { return m_sourceCodeView; }
     SourceCodeView* getSourceCodeView() const { return m_sourceCodeView; }
     DisassemblyView* disassemblyView() const { return m_disassemblyView; }
-    ReferenceDock* referenceDock() const { return m_referenceDock; }
+    ReferenceManualWidget* referenceManualWidget() const { return m_referenceManualWidget; }
     DifferentialGrid* differentialGrid() const { return m_differentialGrid; }
     TerminalDock* terminalDock() const { return m_terminalDock; }
     GdbConsoleWidget* gdbConsoleWidget() const { return m_gdbConsoleWidget; }
@@ -80,7 +80,7 @@ private:
     ServerRackView* m_serverRackView = nullptr;
     SourceCodeView* m_sourceCodeView = nullptr;
     DisassemblyView* m_disassemblyView = nullptr;
-    ReferenceDock* m_referenceDock = nullptr;
+    ReferenceManualWidget* m_referenceManualWidget = nullptr;
     DifferentialGrid* m_differentialGrid = nullptr;
     TerminalDock* m_terminalDock = nullptr;
     GdbConsoleWidget* m_gdbConsoleWidget = nullptr;

@@ -8,7 +8,7 @@
 #include "GdbConsoleWidget.hpp"
 #include "MemView.hpp"
 #include "RegisterView.hpp"
-#include "ReferenceDock.hpp"
+#include "ReferenceManualWidget.hpp"
 #include "ServerRackView.hpp"
 #include "PreferencesDialog.hpp"
 #include "SourceCodeView.hpp"
@@ -327,7 +327,7 @@ void MainWindow::setupDocks() {
               m_coordinator->registerWatchVariable(name);
             }
           });
-  m_referenceDock = new ReferenceDock(m_bottomTabs);
+  m_referenceManualWidget = new ReferenceManualWidget(m_bottomTabs);
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
   m_memView = new MemView(m_bottomTabs);
   m_registerView = new RegisterView(m_bottomTabs);
@@ -341,7 +341,7 @@ void MainWindow::setupDocks() {
 
   m_bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
   m_bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
-  m_bottomTabs->addTab(m_referenceDock, "Reference Manual");
+  m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");
   m_bottomTabs->addTab(m_registerView, "Registers");
