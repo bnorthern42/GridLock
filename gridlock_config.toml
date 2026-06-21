@@ -1,5 +1,5 @@
 [breakpoints]
-'/home/bradn44/Projects/current/Gridlock/tests/mpi_mm.c' = [ 87, 107, 132, 83 ]
+'tests/mpi_mm.c' = [ 87, 107, 132, 83 ]
 
 [debugger]
 default_ranks = 6

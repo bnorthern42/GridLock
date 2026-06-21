@@ -296,6 +296,15 @@ void GdbRankCoordinator::evaluateHoverVariable(int rankId, const QString& varNam
   writeCmd(rankId, cmd);
 }
 
+void GdbRankCoordinator::readMemory(int rankId, const QString &address, int length) {
+  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
+  auto &rp = m_processes[rankId];
+  if (!rp || rp->state.currentState != "stopped") return;
+  
+  QString cmd = QString("-data-read-memory-bytes %1 %2\n").arg(address).arg(length);
+  writeCmd(rankId, cmd);
+}
+
 void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()))
     return;
@@ -463,6 +472,15 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
       if (updated)
         emit rankStateChanged(rankId, rp->state);
+    } else if (line.startsWith("^done,memory=[")) {
+      QRegularExpression memRe("begin=\"([^\"]+)\".*?contents=\"([^\"]+)\"");
+      auto match = memRe.match(line);
+      if (match.hasMatch()) {
+        bool ok;
+        qint64 beginAddress = match.captured(1).toULongLong(&ok, 16);
+        QString contents = match.captured(2);
+        emit memoryDataReady(rankId, beginAddress, contents);
+      }
     } else if (line.startsWith("^done,bkpt={")) {
       QRegularExpression bkptRe(
           "number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");

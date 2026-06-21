@@ -36,6 +36,18 @@ To compile and run GridLock, you must have the following dependencies installed 
    ```bash
    ./build/gridlock
    ```
+   To run GridLock in test mode (useful for running tests without a physical MPI backend):
+   ```bash
+   ./build/gridlock --test-mode
+   ```
+
+## Example Workflow
+1. Load a target MPI source file (e.g., `mpi_mm.c`).
+2. Set a breakpoint by clicking the gutter.
+3. Click **▶ Run Target** in the main toolbar.
+4. Your program hits line 83 and pauses.
+5. You open the Memory tab, type `&offset` (or the raw hex address `0x7fffffffc498`), and hit Read Memory.
+6. It instantly pulls 256 bytes of raw application memory directly from GDB and formats it into a beautiful, classic Hex/ASCII grid.
 
 ## Roadmap
 For upcoming features and architectural milestones, please see our [ROADMAP.md](ROADMAP.md).

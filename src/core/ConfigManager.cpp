@@ -2,6 +2,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDir>
+#include <QFileInfo>
 #include <QDebug>
 #include <fstream>
 #include <iostream>
@@ -89,7 +90,7 @@ QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
                         lineSet.insert(val->get());
                     }
                 }
-                breakpoints[path] = lineSet;
+                breakpoints[QFileInfo(path).absoluteFilePath()] = lineSet;
             }
         }
     }
@@ -103,7 +104,8 @@ void ConfigManager::saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints)
         for (int line : it.value()) {
             linesArr.push_back(line);
         }
-        bpTable.insert(it.key().toStdString(), linesArr);
+        QString relPath = QDir::current().relativeFilePath(it.key());
+        bpTable.insert(relPath.toStdString(), linesArr);
     }
     m_config.insert_or_assign("breakpoints", bpTable);
     

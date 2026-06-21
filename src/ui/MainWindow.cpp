@@ -5,6 +5,7 @@
 #include "DifferentialGrid.hpp"
 #include "DisassemblyView.hpp"
 #include "GdbConsoleWidget.hpp"
+#include "MemView.hpp"
 #include "ReferenceDock.hpp"
 #include "ServerRackView.hpp"
 #include "SourceCodeView.hpp"
@@ -76,6 +77,11 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
       connect(m_coordinator, &GdbRankCoordinator::targetOutputReceived,
               m_terminalDock, &TerminalDock::appendText);
     }
+    connect(m_coordinator, &GdbRankCoordinator::memoryDataReady, this, [this](int rankId, qint64 beginAddress, const QString &hexContents) {
+      if (rankId == m_focusedRank && m_memView) {
+        m_memView->setMemoryData(beginAddress, hexContents);
+      }
+    });
   }
 }
 
@@ -289,11 +295,19 @@ void MainWindow::setupDocks() {
           });
   m_referenceDock = new ReferenceDock(m_bottomTabs);
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
+  m_memView = new MemView(m_bottomTabs);
+
+  connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
+    if (m_coordinator) {
+      m_coordinator->readMemory(m_focusedRank, address, length);
+    }
+  });
 
   m_bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
   m_bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
   m_bottomTabs->addTab(m_referenceDock, "Reference Manual");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
+  m_bottomTabs->addTab(m_memView, "Memory View");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);

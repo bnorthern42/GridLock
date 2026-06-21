@@ -26,6 +26,7 @@ public:
   void writeCmd(int rankId, const QString &cmd);
   void processGdbOutput(int rankId, const QString& output);
   void initializeMockSession(int rankCount, bool simulateInitialSync = false);
+  void readMemory(int rankId, const QString &address, int length);
 
   int getProcessCount() const { return m_processes.size(); }
   RankState getRankState(int rankId) const {
@@ -44,6 +45,7 @@ signals:
   void commandSentToGdb(int rankId, const QString &cmd);
   void targetOutputReceived(const QString &text);
   void hoverEvaluationComplete(QString varName, QString result, QPoint globalPos);
+  void memoryDataReady(int rankId, qint64 beginAddress, const QString &hexContents);
 
 public slots:
   void stepAll();

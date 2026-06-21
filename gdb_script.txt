@@ -1,0 +1,4 @@
+break main
+run
+-stack-list-variables --simple-values
+quit

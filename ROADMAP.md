@@ -2,16 +2,16 @@
 
 ## PHASE 1: Debugger Stability
 
-* [ ] Breakpoint sync: Sync gutter-selected breakpoints to GDB.
-* [ ] Rank Control: Implement individual rank-pausing (using specific GDB thread-apply/interrupt commands).
-* [ ] Layout Persistence: Ensure `QPlainTextEdit`/ViewportMargins are robust against layout regressions.
-* [ ] GDB Process Manager: Robust teardown sequence to prevent dangling zombie processes.
+* [ x] Breakpoint sync: Sync gutter-selected breakpoints to GDB.
+* [ x] Rank Control: Implement individual rank-pausing (using specific GDB thread-apply/interrupt commands).
+* [ x] Layout Persistence: Ensure `QPlainTextEdit`/ViewportMargins are robust against layout regressions.
+* [ x] GDB Process Manager: Robust teardown sequence to prevent dangling zombie processes.
 
 ## PHASE 2: Variable Watcher (The "CLion Clone")
 
 * [ ] Expression Evaluator: Handle arbitrary C++ expressions (e.g., `calc + 5`).
-* [ ] Tooltips: Hover-variables in the code editor to see values.
-* [ ] Differential View: Dynamic variable tracking via GDB `-var-update`.
+* [ x] Tooltips: Hover-variables in the code editor to see values.
+* [ x] Differential View: Dynamic variable tracking via GDB `-var-update`.
 
 ## PHASE 3: Advanced Debugger
 
