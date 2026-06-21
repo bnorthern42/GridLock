@@ -34,6 +34,9 @@ MainWindow::MainWindow(QWidget *parent)
     setupUi();
     setupMenu();
     setupDocks();
+    
+    // Eagerly load default source file so UI is populated before running
+    loadSourceFile("tests/mpi_mm.c");
 }
 
 void MainWindow::setCoordinator(gridlock::GdbRankCoordinator* coord) {
@@ -174,6 +177,14 @@ void MainWindow::setupDocks() {
     });
     connect(m_sourceCodeView, &SourceCodeView::breakpointToggled, this, [this](const QString& file, int line) {
         QString absoluteFilePath = QFileInfo(file).absoluteFilePath();
+        
+        // Update persistent cache
+        if (m_persistentBreakpoints[absoluteFilePath].contains(line)) {
+            m_persistentBreakpoints[absoluteFilePath].remove(line);
+        } else {
+            m_persistentBreakpoints[absoluteFilePath].insert(line);
+        }
+
         if (m_coordinator) m_coordinator->broadcastBreakpoint(absoluteFilePath, line);
     });
 
@@ -342,8 +353,13 @@ void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
         // 3. Fallback Breakpoint to prevent runaway execution
         m_coordinator->broadcastCommand("-break-insert main\n");
         
-        // 4. Inject visual breakpoints (if you have an active map)
-        // ...
+        // 4. Inject visual breakpoints from persistent cache
+        for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {
+            QString absoluteFilePath = it.key();
+            for (int line : it.value()) {
+                m_coordinator->broadcastBreakpoint(absoluteFilePath, line);
+            }
+        }
         
         // 5. Fire execution
         m_coordinator->runAll();

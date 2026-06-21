@@ -3,6 +3,8 @@
 #include "../RankState.hpp"
 #include <QCloseEvent>
 #include <unordered_map>
+#include <QSet>
+#include <QMap>
 
 namespace gridlock {
 class GdbRankCoordinator;
@@ -71,6 +73,7 @@ private:
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;
     QString m_currentFile = "tests/mpi_mm.c";
+    QMap<QString, QSet<int>> m_persistentBreakpoints;
 };
 
 } // namespace gridlock::ui
