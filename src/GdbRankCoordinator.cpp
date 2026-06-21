@@ -122,6 +122,14 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
             << "gdbserver" << QString("localhost:%1").arg(2000 + i)
             << executable;
   }
+  
+  connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() {
+      emit targetOutputReceived(QString::fromUtf8(m_mpirunProcess->readAllStandardOutput()));
+  });
+  connect(m_mpirunProcess.get(), &QProcess::readyReadStandardError, this, [this]() {
+      emit targetOutputReceived(QString::fromUtf8(m_mpirunProcess->readAllStandardError()));
+  });
+
   m_mpirunProcess->start(mpiExec, mpiArgs);
 
   // 3. Launch isolated GDB frontends to connect via TCP

@@ -39,6 +39,7 @@ signals:
   void rankStateChanged(int rankId, const RankState &state);
   void gdbOutputReceived(int rankId, const QString &output);
   void commandSentToGdb(int rankId, const QString &cmd);
+  void targetOutputReceived(const QString &text);
 
 public slots:
   void stepAll();

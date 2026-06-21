@@ -14,9 +14,6 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent) : QWidget(parent) {
     
     m_rankCombo = new QComboBox();
     m_rankCombo->addItem("All Ranks", -1);
-    for (int i = 0; i < 6; ++i) {
-        m_rankCombo->addItem(QString("Rank %1").arg(i), i);
-    }
 
     topLayout->addWidget(m_filterEdit);
     topLayout->addWidget(m_clearButton);
@@ -37,6 +34,16 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent) : QWidget(parent) {
     connect(m_commandEdit, &QLineEdit::returnPressed, this, &GdbConsoleWidget::onCommandReturnPressed);
     connect(m_filterEdit, &QLineEdit::textChanged, this, &GdbConsoleWidget::onFilterTextChanged);
     connect(m_rankCombo, &QComboBox::currentIndexChanged, this, &GdbConsoleWidget::onRankFilterChanged);
+}
+
+void GdbConsoleWidget::setRankCount(int count) {
+    m_rankCombo->blockSignals(true);
+    m_rankCombo->clear();
+    m_rankCombo->addItem("All Ranks", -1);
+    for (int i = 0; i < count; ++i) {
+        m_rankCombo->addItem(QString("Rank %1").arg(i), i);
+    }
+    m_rankCombo->blockSignals(false);
 }
 
 void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {

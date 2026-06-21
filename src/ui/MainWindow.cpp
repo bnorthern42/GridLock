@@ -55,6 +55,10 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
             m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
     connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
             m_coordinator, &GdbRankCoordinator::sendCommand);
+    if (m_terminalDock) {
+      connect(m_coordinator, &GdbRankCoordinator::targetOutputReceived,
+              m_terminalDock, &TerminalDock::appendText);
+    }
   }
 }
 
@@ -392,6 +396,10 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   if (m_currentFile.isEmpty() ||
       m_sourceCodeView->toPlainText().trimmed().isEmpty()) {
     loadSourceFile("tests/mpi_mm.c");
+  }
+
+  if (m_gdbConsoleWidget) {
+    m_gdbConsoleWidget->setRankCount(ranks);
   }
 
   // 1. Launch the unified OpenMPI backplane + GDB servers, then attach remote

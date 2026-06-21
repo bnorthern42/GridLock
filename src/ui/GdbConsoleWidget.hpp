@@ -14,6 +14,7 @@ class GdbConsoleWidget : public QWidget {
     Q_OBJECT
 public:
     explicit GdbConsoleWidget(QWidget* parent = nullptr);
+    void setRankCount(int count);
 
 public slots:
     void appendGdbOutput(int rank, const QString& output);
