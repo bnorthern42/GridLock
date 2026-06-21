@@ -34,6 +34,7 @@ class GdbConsoleWidget;
 class MemView;
 class RegisterView;
 class SpackManager;
+class ExpressionEvaluatorWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -90,6 +91,7 @@ private:
     GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
     MemView* m_memView = nullptr;
     RegisterView* m_registerView = nullptr;
+    ExpressionEvaluatorWidget* m_expressionEvaluatorWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;

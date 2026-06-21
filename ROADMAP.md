@@ -9,7 +9,7 @@
 
 ## PHASE 2: Variable Watcher (The "CLion Clone")
 
-* [ ] Expression Evaluator: Handle arbitrary C++ expressions (e.g., `calc + 5`).
+* [x] Expression Evaluator: Handle arbitrary C++ expressions (e.g., `calc + 5`).
 * [x] Tooltips: Hover-variables in the code editor to see values.
 * [x] Differential View: Dynamic variable tracking via GDB `-var-update`.
 

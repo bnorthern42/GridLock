@@ -16,6 +16,7 @@
 #include "ProjectExplorerWidget.hpp"
 #include "ProjectSettingsDialog.hpp"
 #include "TerminalDock.hpp"
+#include "ExpressionEvaluatorWidget.hpp"
 #include "../core/MockHpcBackend.hpp"
 #include "../core/commands/DebugCommands.hpp"
 #include "SpackManager.hpp"
@@ -92,6 +93,9 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
             QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), getSourceCodeView());
         }
     });
+    if (m_expressionEvaluatorWidget) {
+        connect(m_coordinator, &GdbRankCoordinator::expressionEvaluated, m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
+    }
   }
   if (m_coordinator && m_gdbConsoleWidget) {
     connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived,
@@ -373,6 +377,13 @@ void MainWindow::setupDocks() {
       }
   }
           
+  m_expressionEvaluatorWidget = new ExpressionEvaluatorWidget(m_bottomTabs);
+  connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::evaluateRequested, this, [this](const QString& expr) {
+      if (m_coordinator) {
+          m_coordinator->evaluateExpression(m_focusedRank, expr);
+      }
+  });
+          
   m_referenceManualWidget = new ReferenceManualWidget(m_bottomTabs);
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
   m_memView = new MemView(m_bottomTabs);
@@ -387,6 +398,7 @@ void MainWindow::setupDocks() {
 
   m_bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
   m_bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
+  m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");

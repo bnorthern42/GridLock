@@ -27,6 +27,7 @@ public:
   void processGdbOutput(int rankId, const QString& output);
   void initializeMockSession(int rankCount, bool simulateInitialSync = false);
   void readMemory(int rankId, const QString &address, int length);
+  void evaluateExpression(int rankId, const QString& expression);
 
   int getProcessCount() const { return m_processes.size(); }
   RankState getRankState(int rankId) const {
@@ -46,6 +47,7 @@ signals:
   void targetOutputReceived(const QString &text);
   void hoverEvaluationComplete(QString varName, QString result, QPoint globalPos);
   void memoryDataReady(int rankId, qint64 beginAddress, const QString &hexContents);
+  void expressionEvaluated(int rankId, const QString& expr, const QString& result);
 
 public slots:
   virtual void stepAll();
@@ -66,6 +68,7 @@ private:
     QString buffer;
     QString lastHoverVarName;
     QPoint lastHoverPos;
+    QString lastEvalExpression;
   };
   std::unique_ptr<QProcess> m_mpirunProcess;
   std::vector<std::unique_ptr<RankProcess>> m_processes;
