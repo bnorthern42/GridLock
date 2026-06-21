@@ -364,7 +364,12 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       if (isInternalSync) {
         flushCachedBreakpoints(rankId);
       } else {
-        emit rankStateChanged(rankId, rp->state);
+        if (rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") {
+            writeCmd(rankId, "-exec-continue\n");
+            rp->state.currentState = "running";
+        } else {
+            emit rankStateChanged(rankId, rp->state);
+        }
       }
     } else if (line.startsWith("*running")) {
       rp->state.currentState = "running";

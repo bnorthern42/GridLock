@@ -63,8 +63,8 @@ void TestGdbCoordinator::testMultiRankSync() {
     coord.initializeMockSession(4);
 
     // Simulate interleaved messages
-    coord.processGdbOutput(0, "*stopped,reason=\"breakpoint-hit\",frame={file=\"rank0.c\",line=\"10\"}\n");
-    coord.processGdbOutput(1, "*stopped,reason=\"breakpoint-hit\",frame={file=\"rank1.c\",line=\"20\"}\n");
+    coord.processGdbOutput(0, "*stopped,reason=\"breakpoint-hit\",frame={fullname=\"rank0.c\",line=\"10\"}\n");
+    coord.processGdbOutput(1, "*stopped,reason=\"breakpoint-hit\",frame={fullname=\"rank1.c\",line=\"20\"}\n");
     coord.processGdbOutput(2, "*running,thread-id=\"all\"\n");
     coord.processGdbOutput(3, "*stopped,reason=\"exited\"\n");
 

@@ -222,6 +222,7 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
     
     setTextCursor(cursor);
     ensureCursorVisible();
+    centerCursor();
 }
 
 void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }
