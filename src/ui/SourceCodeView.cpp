@@ -151,6 +151,11 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     m_highlighter = new CppSyntaxHighlighter(document());
 }
 
+void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
+    breakpoints = bps;
+    m_lineNumberArea->update();
+}
+
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     QPainter painter(m_lineNumberArea);
     painter.fillRect(event->rect(), QColor(40, 40, 40));

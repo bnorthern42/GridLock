@@ -37,6 +37,13 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Eagerly load default source file so UI is populated before running
     loadSourceFile("tests/mpi_mm.c");
+    
+    // Load offline persistence TOML breakpoints
+    m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
+    QString absolutePath = QFileInfo("tests/mpi_mm.c").absoluteFilePath();
+    if (m_persistentBreakpoints.contains(absolutePath) && m_sourceCodeView) {
+        m_sourceCodeView->setBreakpoints(m_persistentBreakpoints[absolutePath]);
+    }
 }
 
 void MainWindow::setCoordinator(gridlock::GdbRankCoordinator* coord) {
@@ -184,6 +191,7 @@ void MainWindow::setupDocks() {
         } else {
             m_persistentBreakpoints[absoluteFilePath].insert(line);
         }
+        gridlock::core::ConfigManager::instance().saveBreakpoints(m_persistentBreakpoints);
 
         if (m_coordinator) m_coordinator->broadcastBreakpoint(absoluteFilePath, line);
     });
@@ -298,6 +306,12 @@ void MainWindow::loadSourceFile(const QString& filePath) {
     if (m_sourceCodeView) {
         m_sourceCodeView->setSourceCode(code);
         m_sourceCodeView->setCurrentFile(m_currentFile);
+        QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
+        if (m_persistentBreakpoints.contains(absolutePath)) {
+            m_sourceCodeView->setBreakpoints(m_persistentBreakpoints[absolutePath]);
+        } else {
+            m_sourceCodeView->setBreakpoints(QSet<int>());
+        }
     }
     
     if (m_terminalDock) {
@@ -352,14 +366,6 @@ void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
     QTimer::singleShot(500, this, [this]() {
         // 3. Fallback Breakpoint to prevent runaway execution
         m_coordinator->broadcastCommand("-break-insert main\n");
-        
-        // 4. Inject visual breakpoints from persistent cache
-        for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {
-            QString absoluteFilePath = it.key();
-            for (int line : it.value()) {
-                m_coordinator->broadcastBreakpoint(absoluteFilePath, line);
-            }
-        }
         
         // 5. Fire execution
         m_coordinator->runAll();

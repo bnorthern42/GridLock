@@ -76,4 +76,38 @@ QString ConfigManager::getGdbPath() const {
     return QString::fromStdString(m_config["debugger"]["gdb_path"].value_or("gdb"));
 }
 
+QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
+    QMap<QString, QSet<int>> breakpoints;
+    if (auto* bps = m_config["breakpoints"].as_table()) {
+        for (auto& [file, lines] : *bps) {
+            if (auto* linesArr = lines.as_array()) {
+                QString path = QString::fromStdString(std::string(file.str()));
+                QSet<int> lineSet;
+                for (auto& elem : *linesArr) {
+                    if (auto* val = elem.as_integer()) {
+                        lineSet.insert(val->get());
+                    }
+                }
+                breakpoints[path] = lineSet;
+            }
+        }
+    }
+    return breakpoints;
+}
+
+void ConfigManager::saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints) {
+    toml::table bpTable;
+    for (auto it = breakpoints.constBegin(); it != breakpoints.constEnd(); ++it) {
+        toml::array linesArr;
+        for (int line : it.value()) {
+            linesArr.push_back(line);
+        }
+        bpTable.insert(it.key().toStdString(), linesArr);
+    }
+    m_config.insert_or_assign("breakpoints", bpTable);
+    
+    std::ofstream out("gridlock_config.toml");
+    out << m_config;
+}
+
 } // namespace gridlock::core

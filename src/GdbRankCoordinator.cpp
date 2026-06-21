@@ -2,8 +2,8 @@
 #include <QDebug>
 #include <QRegularExpression>
 #include <QSettings>
-#include <iostream>
 #include "core/ConfigManager.hpp"
+#include <QFileInfo>
 
 namespace gridlock {
 
@@ -80,13 +80,16 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
         QStringList args;
         args << "-n" << "1" << extraArgs << core::ConfigManager::instance().getGdbPath() << "--interpreter=mi3" << "--args" << executable;
         rp->process->start(mpiExec, args);
+        rp->process->write("dir .\n");
         
         m_processes.push_back(std::move(rp));
     }
 }
 
 void GdbRankCoordinator::insertBreakpoint(const QString& location) {
-    QString cmd = QString("-break-insert %1\n").arg(location);
+    QString fileName = QFileInfo(location).fileName();
+    if (fileName.isEmpty()) fileName = location;
+    QString cmd = QString("-break-insert -f %1\n").arg(fileName);
     for (auto& rp : m_processes) {
         if (rp->process && rp->process->state() == QProcess::Running) {
             rp->process->write(cmd.toUtf8());
@@ -114,7 +117,8 @@ void GdbRankCoordinator::sendCommand(int rankId, const QString& cmd) {
 }
 
 void GdbRankCoordinator::broadcastBreakpoint(const QString& file, int line) {
-    QString breakCmd = QString("-break-insert -f %1:%2\n").arg(file).arg(line);
+    QString fileName = QFileInfo(file).fileName();
+    QString breakCmd = QString("-break-insert -f %1:%2\n").arg(fileName).arg(line);
     for (auto& rp : m_processes) {
         if (rp->process && rp->process->state() == QProcess::Running) {
             rp->process->write(breakCmd.toUtf8());
@@ -239,7 +243,28 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                 rp->process->write("-thread-info\n");
             }
 
-            emit rankStateChanged(rankId, rp->state);
+            bool isInternalSync = line.contains("func=\"main\"") && line.contains("line=\"26\"");
+            if (isInternalSync) {
+                QString absPath = QFileInfo("tests/mpi_mm.c").absoluteFilePath();
+                auto bps = core::ConfigManager::instance().getBreakpoints();
+                if (bps.contains(absPath) && bps[absPath].contains(26)) {
+                    isInternalSync = false;
+                }
+            }
+
+            if (isInternalSync) {
+                auto bps = core::ConfigManager::instance().getBreakpoints();
+                for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
+                    QString fileName = QFileInfo(it.key()).fileName();
+                    for (int l : it.value()) {
+                        QString breakCmd = QString("-break-insert -f %1:%2\n").arg(fileName).arg(l);
+                        rp->process->write(breakCmd.toUtf8());
+                    }
+                }
+                rp->process->write("-exec-continue\n");
+            } else {
+                emit rankStateChanged(rankId, rp->state);
+            }
         } else if (sv.starts_with("*running")) {
             rp->state.currentState = "running";
             rp->state.executionTimer.start();

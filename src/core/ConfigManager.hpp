@@ -1,6 +1,8 @@
 #pragma once
 #include <QString>
 #include <toml++/toml.h>
+#include <QMap>
+#include <QSet>
 
 namespace gridlock::core {
 
@@ -23,6 +25,9 @@ public:
 
     int getDefaultRanks() const;
     QString getGdbPath() const;
+
+    QMap<QString, QSet<int>> getBreakpoints() const;
+    void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints);
 
 private:
     ConfigManager();
