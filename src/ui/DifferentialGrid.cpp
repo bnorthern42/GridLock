@@ -29,9 +29,9 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     });
 }
 
-void DifferentialGrid::setVariableData(int rankId, const std::unordered_map<QString, QString>& variables) {
-    for (const auto& kv : variables) {
-        updateVariableDisplay(rankId, kv.first, kv.second);
+void DifferentialGrid::setVariableData(int rankId, const QHash<QString, QString>& variables) {
+    for (auto it = variables.constBegin(); it != variables.constEnd(); ++it) {
+        updateVariableDisplay(rankId, it.key(), it.value());
     }
 }
 

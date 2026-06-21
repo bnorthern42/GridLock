@@ -1,7 +1,7 @@
 #pragma once
 #include <QString>
 #include <vector>
-#include <unordered_map>
+#include <QHash>
 #include <QElapsedTimer>
 
 namespace gridlock {
@@ -13,8 +13,8 @@ struct RankState {
     QString currentFile;
     QString currentFunction;
     QString disassemblyText;
-    std::unordered_map<QString, QString> variableWatches; // watch variables
-    std::unordered_map<int, QString> breakpoints; // bkpt number -> location
+    QHash<QString, QString> variableWatches; // watch variables
+    QHash<int, QString> breakpoints; // bkpt number -> location
     
     QElapsedTimer executionTimer;
     qint64 totalRuntimeMs = 0;

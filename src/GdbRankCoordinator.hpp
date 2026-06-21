@@ -1,67 +1,69 @@
 #pragma once
-#include <QObject>
-#include <QProcess>
-#include <vector>
-#include <memory>
 #include "RankState.hpp"
 #include <QMap>
+#include <QObject>
+#include <QProcess>
+#include <memory>
+#include <vector>
 
 namespace gridlock {
 
 class GdbRankCoordinator : public QObject {
-    Q_OBJECT
+  Q_OBJECT
 public:
-    explicit GdbRankCoordinator(QObject *parent = nullptr);
-    ~GdbRankCoordinator() override;
+  explicit GdbRankCoordinator(QObject *parent = nullptr);
+  ~GdbRankCoordinator() override;
 
-    void startDebugSession(int rankCount, const QString& executable);
-    void launchParallelSession(const QString& executable, int rankCount);
-    void insertBreakpoint(const QString& location);
-    void broadcastBreakpoint(const QString& file, int line);
-    void broadcastCommand(const QString& cmd);
-    void terminateAllSessions();
-    void requestDisassemblyFallback(int rankId);
-    void flushCachedBreakpoints(int rankId);
-    void writeCmd(int rankId, const QString& cmd);
-    
-    int getProcessCount() const { return m_processes.size(); }
-    RankState getRankState(int rankId) const {
-        if (rankId >= 0 && rankId < static_cast<int>(m_processes.size()) && m_processes[rankId]) {
-            return m_processes[rankId]->state;
-        }
-        RankState st;
-        st.currentState = "offline";
-        return st;
+  void startDebugSession(int rankCount, const QString &executable);
+  void launchParallelSession(const QString &executable, int rankCount);
+  void insertBreakpoint(const QString &location);
+  void broadcastBreakpoint(const QString &file, int line, bool isAdded = true);
+  void broadcastCommand(const QString &cmd);
+  void terminateAllSessions();
+  void requestDisassemblyFallback(int rankId);
+  void flushCachedBreakpoints(int rankId);
+  void writeCmd(int rankId, const QString &cmd);
+
+  int getProcessCount() const { return m_processes.size(); }
+  RankState getRankState(int rankId) const {
+    if (rankId >= 0 && rankId < static_cast<int>(m_processes.size()) &&
+        m_processes[rankId]) {
+      return m_processes[rankId]->state;
     }
+    RankState st;
+    st.currentState = "offline";
+    return st;
+  }
 
 signals:
-    void rankStateChanged(int rankId, const RankState& state);
-    void gdbOutputReceived(int rankId, const QString& output);
-    void commandSentToGdb(int rankId, const QString& cmd);
+  void rankStateChanged(int rankId, const RankState &state);
+  void gdbOutputReceived(int rankId, const QString &output);
+  void commandSentToGdb(int rankId, const QString &cmd);
 
 public slots:
-    void stepAll();
-    void continueAll();
-    void runAll();
-    void haltAll();
-    void pauseFocusedRank(int rankId);
-    void registerWatchVariable(const QString& varName);
-    void sendCommand(int rankId, const QString& cmd);
-
-public slots:
-    void handleGdbOutput(int rankId);
+  void stepAll();
+  void continueAll();
+  void runAll();
+  void haltAll();
+  void pauseFocusedRank(int rankId);
+  void registerWatchVariable(const QString &varName);
+  void sendCommand(int rankId, const QString &cmd);
+  void handleGdbOutput(int rankId);
 
 private:
-    struct RankProcess {
-        int id;
-        std::unique_ptr<QProcess> process;
-        RankState state;
-        QString buffer;
-    };
-    std::vector<std::unique_ptr<RankProcess>> m_processes;
-    QMap<int, QMap<QString, QString>> m_varNameMap; // rankId -> (varName -> varId)
-    QMap<int, QMap<QString, QString>> m_varNameRevMap; // rankId -> (varId -> varName)
-    std::vector<QString> m_watchVariables;
+  struct RankProcess {
+    int id;
+    std::unique_ptr<QProcess> process;
+    RankState state;
+    QString buffer;
+  };
+  std::unique_ptr<QProcess> m_mpirunProcess;
+  std::vector<std::unique_ptr<RankProcess>> m_processes;
+  QMap<int, QMap<QString, QString>>
+      m_varNameMap; // rankId -> (varName -> varId)
+  QMap<int, QMap<QString, QString>>
+      m_varNameRevMap; // rankId -> (varId -> varName)
+  std::vector<QString> m_watchVariables;
 };
 
 } // namespace gridlock

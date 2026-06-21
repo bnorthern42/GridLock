@@ -15,6 +15,7 @@ To compile and run GridLock, you must have the following dependencies installed 
 - **UI Framework:** Qt6 (Widgets, Core, Gui)
 - **MPI Implementation:** MPICH or OpenMPI
 - **Debugger Backend:** GDB (GNU Debugger) with MI3 support
+- **Remote Target Server:** `gdbserver`
 
 ## Build Instructions
 1. Clone the repository:

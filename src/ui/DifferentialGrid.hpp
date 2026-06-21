@@ -1,7 +1,7 @@
 #pragma once
 #include <QTableWidget>
 #include <QString>
-#include <unordered_map>
+#include <QHash>
 #include <vector>
 
 namespace gridlock::ui {
@@ -12,7 +12,7 @@ public:
     explicit DifferentialGrid(QWidget *parent = nullptr);
     ~DifferentialGrid() override = default;
 
-    void setVariableData(int rankId, const std::unordered_map<QString, QString>& variables);
+    void setVariableData(int rankId, const QHash<QString, QString>& variables);
 
 public slots:
     void updateVariableDisplay(int rankId, const QString& varName, const QString& value);
