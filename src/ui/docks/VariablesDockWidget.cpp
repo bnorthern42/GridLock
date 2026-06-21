@@ -47,7 +47,7 @@ void VariablesDockWidget::setupUi() {
     m_variablesTree = new QTreeView(this);
     m_variablesTree->setModel(m_model);
     m_variablesTree->setRootIsDecorated(true);
-    m_variablesTree->setIndentation(16);
+    m_variablesTree->setIndentation(20);
     m_variablesTree->setItemsExpandable(true);
     m_variablesTree->setExpandsOnDoubleClick(true);
 

@@ -320,18 +320,7 @@ QListWidget, QTreeWidget, QTreeView, QTableWidget {
     alternate-background-color: #1e1e2e;
     gridline-color: #313244;
     outline: none;
-}
-
-QTreeView::branch:has-children:!has-siblings:closed,
-QTreeView::branch:closed:has-children:has-siblings {
-    border-image: none;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23cdd6f4'><path d='M6 12l4-4-4-4v8z'/></svg>");
-}
-
-QTreeView::branch:open:has-children:!has-siblings,
-QTreeView::branch:open:has-children:has-siblings {
-    border-image: none;
-    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23cdd6f4'><path d='M4 6l4 4 4-4H4z'/></svg>");
+    show-decoration-selected: 1;
 }
 
 QListWidget::item, QTreeWidget::item, QTreeView::item, QTableWidget::item {

@@ -14,6 +14,7 @@
 #include <QComboBox>
 #include <QLineEdit>
 #include "../src/core/managers/ConfigManager.hpp"
+#include "../src/core/managers/ThemeManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
