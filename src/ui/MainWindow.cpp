@@ -388,9 +388,20 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 }
 
 void MainWindow::openFile() {
+  auto &cfg = gridlock::core::ConfigManager::instance();
+  const QString startDir = cfg.getLastOpenDir();
+
   QString fileName = QFileDialog::getOpenFileName(
-      this, "Open Source File", "", "C++ Files (*.cpp *.hpp *.h *.c)");
+      this,
+      tr("Open Source File"),
+      startDir,
+      tr("C/C++ Files (*.cpp *.hpp *.h *.c)"),
+      nullptr,
+      QFileDialog::DontUseNativeDialog);
+
   if (!fileName.isEmpty()) {
+    // Persist the directory so the next open picks up where we left off.
+    cfg.setLastOpenDir(QFileInfo(fileName).absolutePath());
     loadSourceFile(fileName);
   }
 }

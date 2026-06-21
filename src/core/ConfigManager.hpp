@@ -45,6 +45,11 @@ public:
     QString getMpiExecutable()  const;
     QString getMpiArgs()        const;
 
+    /// Persist the last directory visited by a file-open dialog so the IDE
+    /// restores it across launches.
+    QString getLastOpenDir()    const;
+    void    setLastOpenDir(const QString &path);
+
     // ── Breakpoints (TOML-backed) ─────────────────────────────────────────
     QMap<QString, QSet<int>> getBreakpoints() const;
     void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints);

@@ -112,6 +112,17 @@ QString ConfigManager::getGdbPath()       const { return getDebuggerSettings().g
 QString ConfigManager::getMpiExecutable() const { return getDebuggerSettings().mpiExecutable; }
 QString ConfigManager::getMpiArgs()       const { return getDebuggerSettings().mpiArgs; }
 
+QString ConfigManager::getLastOpenDir() const {
+    QSettings s(kOrg, kApp);
+    return s.value("ui/last_open_dir", QDir::currentPath()).toString();
+}
+
+void ConfigManager::setLastOpenDir(const QString &path) {
+    QSettings s(kOrg, kApp);
+    s.setValue("ui/last_open_dir", path);
+    s.sync();
+}
+
 // ─── Breakpoints (TOML) ──────────────────────────────────────────────────────
 
 QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
