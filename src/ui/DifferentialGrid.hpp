@@ -16,6 +16,7 @@ public:
 
 public slots:
     void updateVariableDisplay(int rankId, const QString& varName, const QString& value);
+    void addVariableColumn(const QString& name);
 
 signals:
     void watchVariableAdded(const QString& name);

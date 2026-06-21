@@ -67,6 +67,7 @@ private:
     DifferentialGrid* m_differentialGrid = nullptr;
     TerminalDock* m_terminalDock = nullptr;
     GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
+    QTabWidget* m_bottomTabs = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;
 

@@ -290,4 +290,30 @@ void SourceCodeView::handleHoverTimeout() {
     }
 }
 
+void SourceCodeView::mousePressEvent(QMouseEvent *event) {
+    if (event->modifiers() & Qt::ControlModifier) {
+        QTextCursor cursor = cursorForPosition(event->pos());
+        cursor.select(QTextCursor::WordUnderCursor);
+        QString word = cursor.selectedText();
+
+        QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
+        if (cVarRegex.match(word).hasMatch()) {
+            emit pinVariableRequested(word);
+        }
+    }
+    QPlainTextEdit::mousePressEvent(event);
+}
+
+void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
+    QTextCursor cursor = cursorForPosition(event->pos());
+    cursor.select(QTextCursor::WordUnderCursor);
+    QString word = cursor.selectedText();
+
+    QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
+    if (cVarRegex.match(word).hasMatch()) {
+        emit pinVariableRequested(word);
+    }
+    QPlainTextEdit::mouseDoubleClickEvent(event);
+}
+
 } // namespace gridlock::ui

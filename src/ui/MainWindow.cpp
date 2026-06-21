@@ -235,6 +235,18 @@ void MainWindow::setupDocks() {
       }
   });
 
+  connect(m_sourceCodeView, &SourceCodeView::pinVariableRequested, this, [this](const QString &varName) {
+      if (m_coordinator) {
+          m_coordinator->registerWatchVariable(varName);
+      }
+      if (m_differentialGrid) {
+          m_differentialGrid->addVariableColumn(varName);
+      }
+      if (m_bottomTabs) {
+          m_bottomTabs->setCurrentWidget(m_differentialGrid);
+      }
+  });
+
   m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
   m_serverRackView = new ServerRackView(masterHorizontalSplitter);
   connect(m_serverRackView, &ServerRackView::rankSelected, this,
@@ -250,25 +262,25 @@ void MainWindow::setupDocks() {
 
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
-  QTabWidget *bottomTabs = new QTabWidget(mainVerticalSplitter);
+  m_bottomTabs = new QTabWidget(mainVerticalSplitter);
 
-  m_terminalDock = new TerminalDock("Compiler Terminal", bottomTabs);
-  m_differentialGrid = new DifferentialGrid(bottomTabs);
+  m_terminalDock = new TerminalDock("Compiler Terminal", m_bottomTabs);
+  m_differentialGrid = new DifferentialGrid(m_bottomTabs);
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
             if (m_coordinator) {
               m_coordinator->registerWatchVariable(name);
             }
           });
-  m_referenceDock = new ReferenceDock(bottomTabs);
-  m_gdbConsoleWidget = new GdbConsoleWidget(bottomTabs);
+  m_referenceDock = new ReferenceDock(m_bottomTabs);
+  m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
 
-  bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
-  bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
-  bottomTabs->addTab(m_referenceDock, "Reference Manual");
-  bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
+  m_bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
+  m_bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
+  m_bottomTabs->addTab(m_referenceDock, "Reference Manual");
+  m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
 
-  mainVerticalSplitter->addWidget(bottomTabs);
+  mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);
   mainVerticalSplitter->setStretchFactor(1, 25);
 

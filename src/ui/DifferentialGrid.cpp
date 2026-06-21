@@ -35,6 +35,25 @@ void DifferentialGrid::setVariableData(int rankId, const QHash<QString, QString>
     }
 }
 
+void DifferentialGrid::addVariableColumn(const QString& name) {
+    int col = -1;
+    for (int c = 0; c < columnCount(); ++c) {
+        if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == name) {
+            col = c;
+            break;
+        }
+    }
+    
+    if (col == -1) {
+        col = columnCount();
+        setColumnCount(col + 1);
+        setHorizontalHeaderItem(col, new QTableWidgetItem(name));
+        for (int r = 0; r < rowCount(); ++r) {
+            setItem(r, col, new QTableWidgetItem("-"));
+        }
+    }
+}
+
 void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName, const QString& value) {
     int targetRow = rankId + 1;
     

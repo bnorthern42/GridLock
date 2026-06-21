@@ -53,10 +53,13 @@ signals:
     void toggleBreakpointRequested(const QString& location);
     void breakpointToggled(const QString& file, int line);
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
+    void pinVariableRequested(const QString& varName);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
 
 private slots:
