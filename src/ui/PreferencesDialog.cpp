@@ -6,6 +6,7 @@
 
 #include "PreferencesDialog.hpp"
 #include "../core/ConfigManager.hpp"
+#include "../core/DocsetManager.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -27,6 +28,7 @@
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
+#include <QHeaderView>
 
 namespace gridlock::ui {
 
@@ -564,6 +566,76 @@ void HpcIntegrationSettingsPage::loadFromSettings() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  DocsetSettingsPage
+// ═══════════════════════════════════════════════════════════════════════════
+
+DocsetSettingsPage::DocsetSettingsPage(QWidget *parent) : QWidget(parent) {
+  auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(24, 24, 24, 24);
+  layout->setSpacing(14);
+
+  auto *heading = new QLabel(tr("<b>Offline Docsets</b>"), this);
+  heading->setStyleSheet("font-size: 15px; color: #8ab4f8; padding-bottom: 4px;");
+  layout->addWidget(heading);
+
+  auto *separator = new QLabel(this);
+  separator->setFixedHeight(1);
+  separator->setStyleSheet("background: rgba(255,255,255,0.08); margin-bottom: 8px;");
+  layout->addWidget(separator);
+
+  auto *dirLayout = new QHBoxLayout();
+  dirLayout->addWidget(new QLabel("Docset Directory:", this));
+  m_dirEdit = new QLineEdit(this);
+  dirLayout->addWidget(m_dirEdit);
+  auto *browseBtn = new QPushButton("Browse...", this);
+  connect(browseBtn, &QPushButton::clicked, this, [this]() {
+    QString dir = QFileDialog::getExistingDirectory(this, "Select Docset Directory", m_dirEdit->text());
+    if (!dir.isEmpty()) m_dirEdit->setText(dir);
+  });
+  dirLayout->addWidget(browseBtn);
+  layout->addLayout(dirLayout);
+
+  m_autoDetectBtn = new QPushButton("Auto-Detect Needs", this);
+  connect(m_autoDetectBtn, &QPushButton::clicked, this, &DocsetSettingsPage::onAutoDetect);
+  layout->addWidget(m_autoDetectBtn, 0, Qt::AlignLeft);
+
+  m_table = new QTableWidget(0, 1, this);
+  m_table->setHorizontalHeaderLabels({"Installed Docsets"});
+  m_table->horizontalHeader()->setStretchLastSection(true);
+  layout->addWidget(m_table);
+
+  loadFromSettings();
+}
+
+QString DocsetSettingsPage::docsetDirectory() const { return m_dirEdit->text(); }
+
+void DocsetSettingsPage::loadFromSettings() {
+  m_dirEdit->setText(gridlock::core::ConfigManager::instance().getDocsetDirectory());
+  if (m_dirEdit->text().isEmpty()) {
+      m_dirEdit->setText(QDir::homePath() + "/.local/share/Zeal/Zeal/docsets");
+  }
+  refreshTable();
+}
+
+void DocsetSettingsPage::refreshTable() {
+  m_table->setRowCount(0);
+  auto paths = gridlock::core::DocsetManager::instance().getActiveDocsetPaths();
+  for (int i = 0; i < paths.size(); ++i) {
+    m_table->insertRow(i);
+    m_table->setItem(i, 0, new QTableWidgetItem(paths[i]));
+  }
+}
+
+void DocsetSettingsPage::onAutoDetect() {
+  QStringList suggestions = gridlock::core::DocsetManager::instance().suggestDocsets(QDir::currentPath());
+  if (suggestions.isEmpty()) {
+    m_autoDetectBtn->setText("No extra docsets needed");
+  } else {
+    m_autoDetectBtn->setText("Suggested: " + suggestions.join(", "));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  PreferencesDialog
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -707,6 +779,7 @@ void PreferencesDialog::setupSidebar() {
       {tr("Debugger"), "debug-run"},
       {tr("HPC / Cluster"), "network-server"},
       {tr("HPC Integration"), "server-database"},
+      {tr("Docsets"), "help-contents"},
   };
 
   for (const auto &e : entries) {
@@ -736,6 +809,7 @@ void PreferencesDialog::setupPages() {
   m_debuggerPage = new DebuggerSettingsPage(m_stack);
   m_hpcPage = new HpcSettingsPage(m_stack);
   m_hpcIntegrationPage = new HpcIntegrationSettingsPage(m_stack);
+  m_docsetPage = new DocsetSettingsPage(m_stack);
 
   m_stack->addWidget(m_appearancePage);
   m_stack->addWidget(m_editingPage);
@@ -743,6 +817,7 @@ void PreferencesDialog::setupPages() {
   m_stack->addWidget(m_debuggerPage);
   m_stack->addWidget(m_hpcPage);
   m_stack->addWidget(m_hpcIntegrationPage);
+  m_stack->addWidget(m_docsetPage);
 
   m_stack->setCurrentIndex(0);
 }
@@ -810,6 +885,13 @@ void PreferencesDialog::apply() {
   slurm.gpusPerNode = m_hpcIntegrationPage->gpusPerNode();
   slurm.spackRoot = m_hpcIntegrationPage->spackRoot();
   gridlock::core::ConfigManager::instance().saveSlurmSettings(slurm);
+
+  // ── Docsets ──────────────────────────────────────────────────────────
+  auto &docMgr = gridlock::core::DocsetManager::instance();
+  if (docMgr.getDocsetDirectory() != m_docsetPage->docsetDirectory()) {
+    docMgr.setDocsetDirectory(m_docsetPage->docsetDirectory());
+    m_docsetPage->refreshTable();
+  }
 
   s.sync();
 

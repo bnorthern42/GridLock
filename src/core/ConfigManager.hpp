@@ -58,6 +58,9 @@ public:
 
     QString getAssemblyOpcode() const;
     QString getAssemblyRegister() const;
+    
+    QString getDocsetDirectory() const;
+    void setDocsetDirectory(const QString& path);
     QString getAssemblyAddress() const;
 
     // ── Debugger settings (QSettings-backed, single source of truth) ─────

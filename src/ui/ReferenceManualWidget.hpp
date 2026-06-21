@@ -1,10 +1,9 @@
 #pragma once
 #include <QWidget>
 #include <QLineEdit>
-#include <QComboBox>
-#include <QPushButton>
+#include <QListWidget>
 #include <QTextBrowser>
-#include <QProcess>
+#include <QSplitter>
 
 namespace gridlock::ui {
 
@@ -16,15 +15,15 @@ public:
 
 private slots:
     void performSearch();
-    void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    void onResultClicked(int row);
 
 private:
     QLineEdit* m_searchEdit;
-    QComboBox* m_sectionCombo;
-    QPushButton* m_searchBtn;
+    QListWidget* m_resultsList;
     QTextBrowser* m_textBrowser;
-    QProcess* m_process;
-    QString m_currentQuery;
+    
+    // Store pairs of <Keyword, AbsoluteHTMLPath> for easy access
+    QList<QPair<QString, QString>> m_searchResults;
 };
 
 } // namespace gridlock::ui

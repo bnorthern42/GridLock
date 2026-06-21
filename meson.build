@@ -5,7 +5,7 @@ project('GridLock', 'cpp',
 
 # Dependencies
 qt6 = import('qt6')
-qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test'])
+qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 
 # Source files
@@ -30,7 +30,8 @@ src_files = [
   'src/ui/PreferencesDialog.cpp',
   'src/core/MockHpcBackend.cpp',
   'src/ui/SpackManager.cpp',
-  'src/core/commands/DebugCommands.cpp'
+  'src/core/commands/DebugCommands.cpp',
+  'src/core/DocsetManager.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -52,7 +53,8 @@ moc_headers = [
   'src/ui/PreferencesDialog.hpp',
   'src/core/HpcBackend.hpp',
   'src/core/MockHpcBackend.hpp',
-  'src/ui/SpackManager.hpp'
+  'src/ui/SpackManager.hpp',
+  'src/core/DocsetManager.hpp'
 ]
 
 # Process Qt6 files
@@ -140,7 +142,8 @@ ui_test_src = [
   'src/ui/PreferencesDialog.cpp',
   'src/core/MockHpcBackend.cpp',
   'src/ui/SpackManager.cpp',
-  'src/core/commands/DebugCommands.cpp'
+  'src/core/commands/DebugCommands.cpp',
+  'src/core/DocsetManager.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -160,7 +163,8 @@ ui_test_moc_headers = [
   'src/ui/PreferencesDialog.hpp',
   'src/core/HpcBackend.hpp',
   'src/core/MockHpcBackend.hpp',
-  'src/ui/SpackManager.hpp'
+  'src/ui/SpackManager.hpp',
+  'src/core/DocsetManager.hpp'
 ]
 
 processed_ui_test_files = qt6.compile_moc(

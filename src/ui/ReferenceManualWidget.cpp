@@ -1,76 +1,79 @@
 #include "ReferenceManualWidget.hpp"
+#include "../core/DocsetManager.hpp"
 #include <QVBoxLayout>
-#include <QHBoxLayout>
+#include <QFile>
 
 namespace gridlock::ui {
 
 ReferenceManualWidget::ReferenceManualWidget(QWidget *parent)
-    : QWidget(parent), m_process(new QProcess(this)) {
+    : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
 
-    auto* topLayout = new QHBoxLayout();
-    m_searchEdit = new QLineEdit(this);
-    m_searchEdit->setPlaceholderText("Search functions, types, MPI_... (Press Enter)");
+    QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
+
+    QWidget* leftWidget = new QWidget(splitter);
+    auto* leftLayout = new QVBoxLayout(leftWidget);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_searchEdit = new QLineEdit(leftWidget);
+    m_searchEdit->setPlaceholderText("Search Docsets...");
     
-    m_sectionCombo = new QComboBox(this);
-    m_sectionCombo->addItem("All Sections", "");
-    m_sectionCombo->addItem("Section 3 (Library/MPI)", "3");
-    m_sectionCombo->addItem("Section 2 (Syscalls)", "2");
+    m_resultsList = new QListWidget(leftWidget);
 
-    m_searchBtn = new QPushButton("Search", this);
+    leftLayout->addWidget(m_searchEdit);
+    leftLayout->addWidget(m_resultsList);
 
-    topLayout->addWidget(m_searchEdit);
-    topLayout->addWidget(m_sectionCombo);
-    topLayout->addWidget(m_searchBtn);
-
-    m_textBrowser = new QTextBrowser(this);
+    m_textBrowser = new QTextBrowser(splitter);
     m_textBrowser->setOpenExternalLinks(true);
     m_textBrowser->setReadOnly(true);
 
-    mainLayout->addLayout(topLayout);
-    mainLayout->addWidget(m_textBrowser);
+    splitter->addWidget(leftWidget);
+    splitter->addWidget(m_textBrowser);
+    
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 4);
 
-    connect(m_searchBtn, &QPushButton::clicked, this, &ReferenceManualWidget::performSearch);
-    connect(m_searchEdit, &QLineEdit::returnPressed, this, &ReferenceManualWidget::performSearch);
-    connect(m_process, &QProcess::finished, this, &ReferenceManualWidget::onProcessFinished);
+    mainLayout->addWidget(splitter);
+
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &ReferenceManualWidget::performSearch);
+    connect(m_resultsList, &QListWidget::currentRowChanged, this, &ReferenceManualWidget::onResultClicked);
 }
 
-ReferenceManualWidget::~ReferenceManualWidget() {
-    if (m_process->state() == QProcess::Running) {
-        m_process->kill();
-        m_process->waitForFinished();
-    }
-}
+ReferenceManualWidget::~ReferenceManualWidget() = default;
 
 void ReferenceManualWidget::performSearch() {
-    m_currentQuery = m_searchEdit->text().trimmed();
-    if (m_currentQuery.isEmpty()) return;
+    QString query = m_searchEdit->text().trimmed();
+    m_resultsList->clear();
+    m_searchResults.clear();
 
-    m_searchBtn->setEnabled(false);
-    m_textBrowser->setHtml("<div style='color: #cdd6f4; text-align: center; margin-top: 50px;'><h2>Loading...</h2></div>");
+    if (query.isEmpty()) return;
 
-    QStringList args;
-    args << "-Thtml";
-    QString section = m_sectionCombo->currentData().toString();
-    if (!section.isEmpty()) {
-        args << section;
+    m_searchResults = gridlock::core::DocsetManager::instance().search(query);
+    
+    for (const auto& result : m_searchResults) {
+        m_resultsList->addItem(result.first);
     }
-    args << m_currentQuery;
-
-    m_process->start("man", args);
 }
 
-void ReferenceManualWidget::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
-    m_searchBtn->setEnabled(true);
+void ReferenceManualWidget::onResultClicked(int row) {
+    if (row < 0 || row >= m_searchResults.size()) return;
 
-    if (exitStatus == QProcess::CrashExit || exitCode != 0) {
-        QString errorMsg = QString("<div style='color: #f38ba8; text-align: center; margin-top: 50px;'>"
-                                   "<h2>No manual entry found for '%1'</h2></div>").arg(m_currentQuery.toHtmlEscaped());
-        m_textBrowser->setHtml(errorMsg);
+    QString htmlPath = m_searchResults[row].second;
+    
+    // Strip anchors if any to open the file
+    QString filePath = htmlPath;
+    int hashIdx = filePath.indexOf('#');
+    if (hashIdx != -1) {
+        filePath = filePath.left(hashIdx);
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        m_textBrowser->setHtml("<div style='color: #f38ba8;'><h2>Error loading documentation.</h2></div>");
         return;
     }
 
-    QString htmlOutput = QString::fromUtf8(m_process->readAllStandardOutput());
+    QString htmlOutput = file.readAll();
     
     QString customCss = R"(
 <style>
@@ -109,10 +112,14 @@ void ReferenceManualWidget::onProcessFinished(int exitCode, QProcess::ExitStatus
     if (htmlOutput.contains("</head>")) {
         htmlOutput.replace("</head>", customCss + "</head>");
     } else {
-        htmlOutput = customCss + htmlOutput; // Fallback
+        htmlOutput = customCss + htmlOutput;
     }
 
     m_textBrowser->setHtml(htmlOutput);
+    
+    if (hashIdx != -1) {
+        m_textBrowser->scrollToAnchor(htmlPath.mid(hashIdx + 1));
+    }
 }
 
 } // namespace gridlock::ui

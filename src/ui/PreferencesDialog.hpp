@@ -10,6 +10,8 @@
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QWidget>
+#include <QTableWidget>
+#include <QPushButton>
 namespace gridlock::ui {
 
 // ─── Individual settings pages ─────────────────────────────────────────────
@@ -137,6 +139,24 @@ private:
   QLineEdit *m_spackRootEdit = nullptr;
 };
 
+class DocsetSettingsPage : public QWidget {
+  Q_OBJECT
+public:
+  explicit DocsetSettingsPage(QWidget *parent = nullptr);
+
+  QString docsetDirectory() const;
+  void loadFromSettings();
+  void refreshTable();
+
+private slots:
+  void onAutoDetect();
+
+private:
+  QLineEdit *m_dirEdit = nullptr;
+  QTableWidget *m_table = nullptr;
+  QPushButton *m_autoDetectBtn = nullptr;
+};
+
 // ─── Main dialog ───────────────────────────────────────────────────────────
 
 class PreferencesDialog : public QDialog {
@@ -167,6 +187,7 @@ private:
   DebuggerSettingsPage *m_debuggerPage = nullptr;
   HpcSettingsPage *m_hpcPage = nullptr;
   HpcIntegrationSettingsPage *m_hpcIntegrationPage = nullptr;
+  DocsetSettingsPage *m_docsetPage = nullptr;
 };
 
 } // namespace gridlock::ui

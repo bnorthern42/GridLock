@@ -188,6 +188,17 @@ void ConfigManager::setLastOpenDir(const QString &path) {
     s.sync();
 }
 
+QString ConfigManager::getDocsetDirectory() const {
+    QSettings s(kOrg, kApp);
+    return s.value("docsets/directory", "").toString();
+}
+
+void ConfigManager::setDocsetDirectory(const QString& path) {
+    QSettings s(kOrg, kApp);
+    s.setValue("docsets/directory", path);
+    s.sync();
+}
+
 // ─── Breakpoints (TOML) ──────────────────────────────────────────────────────
 
 QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
