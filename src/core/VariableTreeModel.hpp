@@ -41,6 +41,7 @@ private:
     GdbRankCoordinator* m_coordinator;
     std::unique_ptr<VariableNode> m_rootNode;
     int m_currentRankId;
+    int m_updateCounter = 0;
 
     QList<QString> m_createdVarobjs;
     QMap<QString, VariableNode*> m_varobjToNode;

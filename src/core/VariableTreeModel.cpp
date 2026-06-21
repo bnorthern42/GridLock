@@ -98,7 +98,7 @@ void VariableTreeModel::fetchMore(const QModelIndex& parent) {
 void VariableTreeModel::loadLocals(int rankId) {
     clear();
     m_currentRankId = rankId;
-    m_coordinator->writeCmd(m_currentRankId, QString("-stack-list-variables --thread %1 --frame 0 1\n").arg(rankId));
+    m_coordinator->writeCmd(m_currentRankId, QString("-stack-list-variables 1\n"));
 }
 
 void VariableTreeModel::clear() {
@@ -127,12 +127,14 @@ void VariableTreeModel::handleGdbOutput(int rankId, const QString& output) {
 }
 
 void VariableTreeModel::parseListVariables(const QString& output) {
+    m_updateCounter++;
     QRegularExpression re("\\{name=\"([^\"]+)\"");
     QRegularExpressionMatchIterator i = re.globalMatch(output);
     while (i.hasNext()) {
         QRegularExpressionMatch match = i.next();
         QString name = match.captured(1);
-        m_coordinator->writeCmd(m_currentRankId, QString("-var-create var_%1 * %1\n").arg(name));
+        QString varName = QString("var_%1_%2").arg(m_updateCounter).arg(name);
+        m_coordinator->writeCmd(m_currentRankId, QString("-var-create %1 * %2\n").arg(varName).arg(name));
     }
 }
 
@@ -151,7 +153,14 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
     QString type = typeRe.match(output).hasMatch() ? typeRe.match(output).captured(1) : "";
     QString value = valRe.match(output).hasMatch() ? valRe.match(output).captured(1) : "";
 
-    QString name = varobjName.mid(4);
+    QString name = varobjName;
+    if (name.startsWith("var_")) {
+        int firstUnderscore = name.indexOf('_');
+        int secondUnderscore = name.indexOf('_', firstUnderscore + 1);
+        if (secondUnderscore != -1) {
+            name = name.mid(secondUnderscore + 1);
+        }
+    }
 
     int newRow = m_rootNode->children.size();
     beginInsertRows(QModelIndex(), newRow, newRow);
