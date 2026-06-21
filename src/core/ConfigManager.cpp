@@ -41,6 +41,7 @@ void ConfigManager::loadConfig() {
         m_config = toml::parse_file(configPath.toStdString());
     } catch (const toml::parse_error& err) {
         std::cerr << "Parsing failed:\n" << err << "\n";
+        m_config = toml::table();
     }
 }
 
