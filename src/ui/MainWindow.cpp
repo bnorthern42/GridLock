@@ -6,6 +6,7 @@
 #include "DifferentialGrid.hpp"
 #include "TerminalDock.hpp"
 #include "../GdbRankCoordinator.hpp"
+#include "../core/ConfigManager.hpp"
 #include <QDockWidget>
 #include <QToolBar>
 #include <QAction>
@@ -56,7 +57,7 @@ void MainWindow::setupMenu() {
         QLineEdit* binaryEdit = new QLineEdit(&dialog);
         binaryEdit->setText("build/test_bin");
         QSpinBox* rankBox = new QSpinBox(&dialog);
-        rankBox->setValue(4);
+        rankBox->setValue(gridlock::core::ConfigManager::instance().getDefaultRanks());
         rankBox->setMinimum(1);
         form->addRow("Target Binary:", binaryEdit);
         form->addRow("Rank Count:", rankBox);
@@ -123,7 +124,7 @@ void MainWindow::setupToolbar() {
 
     QAction* runAction = new QAction("▶ Run Target", this);
     connect(runAction, &QAction::triggered, this, [this]() {
-        startDebuggingSession("build/test_bin", 4);
+        startDebuggingSession("build/test_bin", gridlock::core::ConfigManager::instance().getDefaultRanks());
     });
     toolbar->addAction(runAction);
 
@@ -289,7 +290,7 @@ void MainWindow::openPreferences() {
 
     QSpinBox* rankBox = new QSpinBox(&dialog);
     rankBox->setMinimum(1);
-    rankBox->setValue(settings.value("rank_count", 4).toInt());
+    rankBox->setValue(settings.value("rank_count", gridlock::core::ConfigManager::instance().getDefaultRanks()).toInt());
     form->addRow("Rank Count:", rankBox);
 
     QLineEdit* extraArgsEdit = new QLineEdit(&dialog);

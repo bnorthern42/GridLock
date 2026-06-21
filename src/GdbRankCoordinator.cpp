@@ -3,6 +3,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <iostream>
+#include "core/ConfigManager.hpp"
 
 namespace gridlock {
 
@@ -77,7 +78,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
         // attached to each rank conceptually, we use mpiexec to run one process
         // or just invoke mpiexec directly for that rank.
         QStringList args;
-        args << "-n" << "1" << extraArgs << "gdb" << "--interpreter=mi3" << "--args" << executable;
+        args << "-n" << "1" << extraArgs << core::ConfigManager::instance().getGdbPath() << "--interpreter=mi3" << "--args" << executable;
         rp->process->start(mpiExec, args);
         
         m_processes.push_back(std::move(rp));

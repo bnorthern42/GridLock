@@ -5,12 +5,14 @@ project('GridLock', 'cpp',
 # Dependencies
 qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test'])
+tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 
 # Source files
 src_files = [
   'src/main.cpp',
   'src/GridLockApp.cpp',
   'src/GdbRankCoordinator.cpp',
+  'src/core/ConfigManager.cpp',
   'src/ui/MainWindow.cpp',
   'src/ui/ServerRackView.cpp',
   'src/ui/SourceCodeView.cpp',
@@ -50,13 +52,14 @@ executable('gridlock',
   src_files,
   processed_qt_files,
   include_directories : inc,
-  dependencies : qt6_dep,
+  dependencies : [qt6_dep, tomlplusplus_dep],
   install : true)
 
 # Test executable
 test_src = [
   'tests/test_coordinator.cpp',
-  'src/GdbRankCoordinator.cpp'
+  'src/GdbRankCoordinator.cpp',
+  'src/core/ConfigManager.cpp'
 ]
 
 test_moc_headers = [
@@ -73,7 +76,7 @@ gridlock_tests = executable('gridlock_tests',
   test_src,
   processed_test_files,
   include_directories : inc,
-  dependencies : qt6_dep
+  dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
 test('coordinator_tests', gridlock_tests)
@@ -87,7 +90,8 @@ ui_test_src = [
   'src/ui/ReferenceDock.cpp',
   'src/ui/DifferentialGrid.cpp',
   'src/ui/TerminalDock.cpp',
-  'src/GdbRankCoordinator.cpp'
+  'src/GdbRankCoordinator.cpp',
+  'src/core/ConfigManager.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -111,7 +115,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   ui_test_src,
   processed_ui_test_files,
   include_directories : inc,
-  dependencies : qt6_dep
+  dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
 test('ui_tests', gridlock_ui_tests)

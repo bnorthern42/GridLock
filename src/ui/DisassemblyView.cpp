@@ -1,4 +1,5 @@
 #include "DisassemblyView.hpp"
+#include "../core/ConfigManager.hpp"
 
 namespace gridlock::ui {
 
@@ -9,7 +10,7 @@ AsmSyntaxHighlighter::AsmSyntaxHighlighter(QTextDocument *parent)
 
     // Opcodes: Light Green / Cyan
     QTextCharFormat opcodeFormat;
-    opcodeFormat.setForeground(QColor(100, 255, 200));
+    opcodeFormat.setForeground(QColor(gridlock::core::ConfigManager::instance().getAssemblyOpcode()));
     opcodeFormat.setFontWeight(QFont::Bold);
     const QString opcodePatterns[] = {
         QStringLiteral("\\bmov\\b"), QStringLiteral("\\bpush\\b"),
@@ -30,14 +31,14 @@ AsmSyntaxHighlighter::AsmSyntaxHighlighter(QTextDocument *parent)
 
     // Registers: Light Red / Orange
     QTextCharFormat registerFormat;
-    registerFormat.setForeground(QColor(255, 120, 80));
+    registerFormat.setForeground(QColor(gridlock::core::ConfigManager::instance().getAssemblyRegister()));
     rule.pattern = QRegularExpression(QStringLiteral("%[a-z0-9]+"));
     rule.format = registerFormat;
     highlightingRules.append(rule);
 
     // Hex values: Muted Green / Purple
     QTextCharFormat hexFormat;
-    hexFormat.setForeground(QColor(180, 100, 255));
+    hexFormat.setForeground(QColor(gridlock::core::ConfigManager::instance().getAssemblyAddress()));
     rule.pattern = QRegularExpression(QStringLiteral("0x[0-9a-fA-F]+"));
     rule.format = hexFormat;
     highlightingRules.append(rule);
@@ -61,8 +62,8 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QPlainTextEdit(parent) {
     setFont(font);
 
     QPalette p = this->palette();
-    p.setColor(QPalette::Base, QColor(30, 30, 30));
-    p.setColor(QPalette::Text, QColor(240, 240, 240));
+    p.setColor(QPalette::Base, QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
+    p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
     this->setPalette(p);
 
     m_highlighter = new AsmSyntaxHighlighter(document());

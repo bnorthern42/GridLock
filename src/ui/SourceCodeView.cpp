@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QSet>
 #include <QMouseEvent>
+#include "../core/ConfigManager.hpp"
 
 namespace gridlock::ui {
 
@@ -143,8 +144,8 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     setFont(font);
 
     QPalette p = this->palette();
-    p.setColor(QPalette::Base, QColor(30, 30, 30));
-    p.setColor(QPalette::Text, QColor(240, 240, 240)); // Off-white text
+    p.setColor(QPalette::Base, QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
+    p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
     this->setPalette(p);
 
     m_highlighter = new CppSyntaxHighlighter(document());
@@ -203,7 +204,9 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
     if (lineNumber <= 0) return;
     QList<QTextEdit::ExtraSelection> extraSelections;
     QTextEdit::ExtraSelection selection;
-    selection.format.setBackground(QColor(80, 80, 0, 100)); // Dark amber highlight
+    QColor activeColor(gridlock::core::ConfigManager::instance().getSourceActiveLine());
+    activeColor.setAlpha(100);
+    selection.format.setBackground(activeColor);
     selection.format.setProperty(QTextFormat::FullWidthSelection, true);
     
     QTextBlock block = document()->findBlockByLineNumber(lineNumber - 1);
@@ -236,7 +239,8 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
     QList<QTextEdit::ExtraSelection> extraSelections;
     if (activeLine > 0) {
         QTextEdit::ExtraSelection selection;
-        selection.format.setBackground(QColor(80, 80, 0));
+        QColor activeColor(gridlock::core::ConfigManager::instance().getSourceActiveLine());
+        selection.format.setBackground(activeColor);
         selection.format.setProperty(QTextFormat::FullWidthSelection, true);
         
         QTextCursor cursor(document());
