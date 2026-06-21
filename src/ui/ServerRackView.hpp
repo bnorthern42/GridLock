@@ -1,44 +1,29 @@
 #pragma once
-#include <QWidget>
+#include <QListWidget>
 #include <unordered_map>
 #include <QString>
 #include "../RankState.hpp"
 
 namespace gridlock::ui {
 
-class ServerRackView : public QWidget {
+class ServerRackView : public QListWidget {
     Q_OBJECT
 public:
     explicit ServerRackView(QWidget *parent = nullptr);
     ~ServerRackView() override = default;
 
-    void resetRanks(int count) {
-        m_rankCount = count;
-        m_states.clear();
-        m_hoveredRank = -1;
-        m_selectedRank = count > 0 ? 0 : -1;
-        update();
-    }
-
-    void updateRankState(int rank, const RankState& state) {
-        m_states[rank] = state;
-        update();
-    }
+    void resetRanks(int count);
+    void updateRankState(int rank, const RankState& state);
 
 signals:
     void rankSelected(int rankId);
 
-protected:
-    void paintEvent(QPaintEvent *event) override;
-    void mousePressEvent(QMouseEvent *event) override;
-    void mouseMoveEvent(QMouseEvent *event) override;
-    void leaveEvent(QEvent *event) override;
+private slots:
+    void onItemClicked(QListWidgetItem* item);
 
 private:
     int m_rankCount = 0;
     std::unordered_map<int, RankState> m_states;
-    int m_hoveredRank = -1;
-    int m_selectedRank = 0;
 };
 
 } // namespace gridlock::ui

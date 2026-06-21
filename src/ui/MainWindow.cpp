@@ -292,8 +292,8 @@ void MainWindow::setupDocks() {
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
 
   m_variablesDockWidget = new VariablesDockWidget(this);
-  addDockWidget(Qt::RightDockWidgetArea, m_variablesDockWidget);
-  
+  // It's no longer a dock widget, it will be added to the splitter
+
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked, this, [this](const QString& filePath) {
       if (m_editorTabManager) {
           loadSourceFile(filePath); // Actually loadSourceFile does everything needed, or we can just call m_editorTabManager->openFile(filePath) and m_lspCoordinator
@@ -358,18 +358,24 @@ void MainWindow::setupDocks() {
       }
   });
 
-  m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
-  m_serverRackView = new ServerRackView(masterHorizontalSplitter);
+  QSplitter* rightPaneSplitter = new QSplitter(Qt::Vertical, masterHorizontalSplitter);
+
+  m_disassemblyView = new DisassemblyView(rightPaneSplitter);
+  m_serverRackView = new ServerRackView(rightPaneSplitter);
   connect(m_serverRackView, &ServerRackView::rankSelected, this,
           &MainWindow::onRankSelected);
 
-  masterHorizontalSplitter->addWidget(m_editorTabManager);
-  masterHorizontalSplitter->addWidget(m_disassemblyView);
-  masterHorizontalSplitter->addWidget(m_serverRackView);
+  // m_variablesDockWidget already constructed above
+  rightPaneSplitter->addWidget(m_disassemblyView);
+  rightPaneSplitter->addWidget(m_serverRackView);
+  rightPaneSplitter->addWidget(m_variablesDockWidget);
+  rightPaneSplitter->setSizes({400, 200, 400});
 
-  masterHorizontalSplitter->setStretchFactor(0, 40);
-  masterHorizontalSplitter->setStretchFactor(1, 45);
-  masterHorizontalSplitter->setStretchFactor(2, 15);
+  masterHorizontalSplitter->addWidget(m_editorTabManager);
+  masterHorizontalSplitter->addWidget(rightPaneSplitter);
+
+  masterHorizontalSplitter->setStretchFactor(0, 60);
+  masterHorizontalSplitter->setStretchFactor(1, 40);
 
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 

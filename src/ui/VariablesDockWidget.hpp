@@ -1,5 +1,5 @@
 #pragma once
-#include <QDockWidget>
+#include <QWidget>
 #include <QComboBox>
 #include <QTreeView>
 #include "../core/VariableTreeModel.hpp"
@@ -9,7 +9,7 @@ namespace gridlock {
 
 class GdbRankCoordinator;
 
-class VariablesDockWidget : public QDockWidget {
+class VariablesDockWidget : public QWidget {
     Q_OBJECT
 public:
     explicit VariablesDockWidget(QWidget* parent = nullptr);

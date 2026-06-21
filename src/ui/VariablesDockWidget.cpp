@@ -9,7 +9,7 @@
 namespace gridlock {
 
 VariablesDockWidget::VariablesDockWidget(QWidget* parent)
-    : QDockWidget("Variables", parent), m_coordinator(nullptr), m_currentRankId(0) {
+    : QWidget(parent), m_coordinator(nullptr), m_currentRankId(0) {
     
     m_model = new VariableTreeModel(nullptr, this);
     setupUi();
@@ -31,21 +31,20 @@ void VariablesDockWidget::setCoordinator(GdbRankCoordinator* coordinator) {
 }
 
 void VariablesDockWidget::setupUi() {
-    QWidget* container = new QWidget(this);
-    QVBoxLayout* layout = new QVBoxLayout(container);
+    QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
     // Top Bar
     QHBoxLayout* topBar = new QHBoxLayout();
     topBar->setContentsMargins(5, 5, 5, 5);
-    QLabel* scopeLabel = new QLabel("Scope:", container);
-    m_rankSelector = new QComboBox(container);
+    QLabel* scopeLabel = new QLabel("Scope:", this);
+    m_rankSelector = new QComboBox(this);
     topBar->addWidget(scopeLabel);
     topBar->addWidget(m_rankSelector, 1);
     layout->addLayout(topBar);
 
     // Main Area
-    m_variablesTree = new QTreeView(container);
+    m_variablesTree = new QTreeView(this);
     m_variablesTree->setModel(m_model);
     m_variablesTree->setStyleSheet(R"(
         QTreeView {
@@ -59,7 +58,6 @@ void VariablesDockWidget::setupUi() {
     m_variablesTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
 
     layout->addWidget(m_variablesTree);
-    setWidget(container);
 
     connect(m_rankSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &VariablesDockWidget::onRankSelected);
     // connect expanded is handled in setCoordinator because model changes
