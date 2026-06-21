@@ -68,6 +68,11 @@ processed_qt_files = qt6.compile_moc(
   dependencies: qt6_dep
 )
 
+compiled_resources = qt6.compile_resources(
+  name: 'gridlock_resources',
+  sources: 'resources/gridlock.qrc'
+)
+
 # Include directories
 inc = include_directories('src')
 
@@ -75,9 +80,17 @@ inc = include_directories('src')
 executable('gridlock',
   src_files,
   processed_qt_files,
+  compiled_resources,
   include_directories : inc,
   dependencies : [qt6_dep, tomlplusplus_dep],
   install : true)
+
+install_data('data/gridlock.desktop', 
+             install_dir: get_option('datadir') / 'applications')
+
+install_data('resources/icon.png', 
+             rename: 'gridlock.png',
+             install_dir: get_option('datadir') / 'icons/hicolor/512x512/apps')
 
 # Test executable
 test_src = [

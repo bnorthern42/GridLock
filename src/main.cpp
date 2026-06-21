@@ -3,6 +3,9 @@
 #include <QPalette>
 #include <QColor>
 #include <QCommandLineParser>
+#include <QSplashScreen>
+#include <QIcon>
+#include <QPixmap>
 #include "ui/MainWindow.hpp"
 #include "ui/ThemeManager.hpp"
 #include "backend/GridLockAutomationRunner.hpp"
@@ -12,7 +15,8 @@ int main(int argc, char *argv[]) {
 
     // Set org/app identity so QSettings keys are consistent everywhere.
     QApplication::setOrganizationName("GridLock");
-    QApplication::setApplicationName("Debugger");
+    QApplication::setApplicationName("GridLock");
+    QApplication::setWindowIcon(QIcon(":/icon.png"));
 
     // Always use Fusion + an explicit Catppuccin-Mocha dark palette.
     // Breeze on CachyOS/KDE defaults to its light theme unless the user has
@@ -50,6 +54,14 @@ int main(int argc, char *argv[]) {
     // Apply the centralized ThemeManager QSS on top of the Fusion palette.
     gridlock::ui::ThemeManager::instance().applyGlobalTheme(app);
 
+    QPixmap splashPixmap(":/icon.png");
+    // Scale nicely for the splash screen
+    splashPixmap = splashPixmap.scaled(256, 256, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QSplashScreen *splash = new QSplashScreen(splashPixmap);
+    splash->show();
+    splash->showMessage("Loading environment...", Qt::AlignBottom | Qt::AlignCenter, Qt::white);
+    app.processEvents();
+
     QCommandLineParser parser;
     parser.setApplicationDescription("GridLock MPI Debugger");
     parser.addHelpOption();
@@ -67,5 +79,8 @@ int main(int argc, char *argv[]) {
         new gridlock::backend::GridLockAutomationRunner(&window, &app);
     }
     
+    splash->finish(&window);
+    splash->deleteLater();
+
     return app.exec();
 }

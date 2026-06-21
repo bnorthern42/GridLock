@@ -79,6 +79,11 @@ void TestConfig::testFallbacks() {
     QString oldCwd = QDir::currentPath();
     QDir::setCurrent(tempDir.path());
 
+    QSettings prod("GridLock", "Debugger");
+    prod.remove("debugger/default_ranks");
+    prod.remove("debugger/gdb_path");
+    prod.sync();
+
     QFile file("gridlock_config.toml");
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
     file.write("invalid = toml = syntax []\n[missing keys");

@@ -24,10 +24,10 @@
 * [x] **Toolbar Robustness:** Fully decouple execution logic (Run, Continue, Step, Pause, Terminate) from UI lambdas; implement a Command Pattern for toolbar actions.
 * [x] **Editor Tabs:** Support opening multiple source files simultaneously via a tabbed editor interface.
 * [x] **Project Support:** Add a file explorer/project manager to handle entire repositories and directories.
-* [ ] **Asset/Branding Pipeline:** Integrate official app icon (`.ico`/.icns/.png), splash screen, and high-DPI resource handling using Qt Resource System (`.qrc`).
+* [x] **Asset/Branding Pipeline:** Integrate official app icon (`.ico`/.icns/.png), splash screen, and high-DPI resource handling using Qt Resource System (`.qrc`).
 * [ ] **Shortcut Manager:** Implement global IDE keybindings (Vim-style or CLion-style).
 * [ ] **Session Persistence:** Save/load debug configurations (binary arguments, custom GDB paths, watchlists).
-* [ ] **Deployment:** Create standardized install targets (`meson install`), desktop entries (`.desktop` file), and directory structure for cross-platform distribution.
+* [x] **Deployment:** Create standardized install targets (`meson install`), desktop entries (`.desktop` file), and directory structure for cross-platform distribution.
 
 ## PHASE 5: The Polyglot Core (DAP Refactor)
 

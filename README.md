@@ -60,6 +60,11 @@ To compile and run GridLock, ensure the following dependencies are installed on 
    ninja -C build
    ```
 
+4. **Install the application (System-wide):**
+   ```bash
+   sudo meson install -C build
+   ```
+
 ### Running the Application
 
 * **Standard Execution:**
