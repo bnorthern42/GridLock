@@ -29,3 +29,21 @@
 * [ ] **Session Persistence:** Save/load debug configurations (binary arguments, custom GDB paths, watchlists).
 * [ ] **Deployment:** Create standardized install targets (`meson install`), desktop entries (`.desktop` file), and directory structure for cross-platform distribution.
 
+#### Phase 5: The Polyglot Core (DAP Refactor)
+    
+* [ ] **Refactor `DebuggerBackend`:** Transform your abstract `DebuggerBackend` into a `DapBackend`.
+* [ ] **Standardized Launch:** Implement the startup sequence for all language sessions:
+* [ ] GridLock spawns the adapter process.
+* [ ] GridLock performs a TCP handshake.
+* [ ] GridLock sends a standard JSON-RPC `launch` command.
+        
+        
+        
+#### Phase 6: Cross-Language Variable Inspector
+        
+* [ ] **Unified Grid:** Utilize the standard `VariablesRequest` enforced by DAP so `DifferentialGrid` works for all languages.
+* [ ] **The "Dream" Feature:** Enable simultaneous debugging of different language runtimes (e.g., C++, Python, Node.js) paused at the same logical simulation timestamp, with the `DifferentialGrid` tracking memory addresses and objects in parallel.
+        
+#### Phase 7: The Plugin Marketplace (Productionization)
+        
+* [ ] **Dynamic Loading:** Replace hardcoded language support with a `plugins/` directory system.
