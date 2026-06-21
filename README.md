@@ -47,6 +47,10 @@ To compile and run GridLock, you must have the following dependencies installed 
 - **Live Register View:** A dedicated `Registers` tab continuously tracks and updates CPU register states in real-time alongside execution.
 - **MemView Hex Dump:** Inspect raw memory chunks by supplying variable names or absolute pointer addresses directly into GDB, presented in a clean Hex/ASCII format.
 - **Semantic Hover Tooltips:** Powered by Clangd and GDB/MI, hover over any active variable in the editor to instantly see its live value.
+- **HPC Orchestration:** Submit and track SLURM batch jobs directly from the IDE using customizable bash templates (with built-in GPU request configurations).
+- **Remote Environment Management:** Integrated Spack GUI frontend acting as an HPC console, allowing you to browse, search, and monitor packages running on remote clusters.
+- **Remote SSH Configuration:** Configure secure access keys, target hostnames, and remote environments centrally from the Preferences dialog.
+
 
 ## Example Workflow
 1. Load a target MPI source file (e.g., `mpi_mm.c`).
@@ -71,4 +75,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Other
 
-Only tested on a single node system and we have no current way of adding remote compute nodes. This is a goal for the future. Also only supports a single file open/edit at a time and does not support debugging hybrid MPI/OpenMP programs. These are also goals for the future.
+GridLock currently supports debugging a single file open/edit at a time and does not yet support debugging hybrid MPI/OpenMP programs. These are active goals for the future.
