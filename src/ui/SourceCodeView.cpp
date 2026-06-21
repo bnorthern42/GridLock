@@ -153,10 +153,10 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     QPainter painter(m_lineNumberArea);
     painter.fillRect(event->rect(), QColor(40, 40, 40));
-    QTextBlock block = document()->begin();
-    int blockNumber = 0;
-    int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
-    int bottom = top + (int) blockBoundingRect(block).height();
+    QTextBlock block = firstVisibleBlock();
+    int blockNumber = block.blockNumber();
+    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
+    int bottom = top + qRound(blockBoundingRect(block).height());
     
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
@@ -170,31 +170,50 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
         }
         block = block.next();
         top = bottom;
-        bottom = top + (int) blockBoundingRect(block).height();
+        bottom = top + qRound(blockBoundingRect(block).height());
         ++blockNumber;
     }
 }
 
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     int y = event->pos().y();
-    QTextBlock block = document()->begin();
-    int top = (int) blockBoundingGeometry(block).translated(contentOffset()).top();
-    int bottom = top + (int) blockBoundingRect(block).height();
-    int blockNumber = 1;
+    QTextBlock block = firstVisibleBlock();
+    int blockNumber = block.blockNumber();
+    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
+    int bottom = top + qRound(blockBoundingRect(block).height());
+    
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
-            if (breakpoints.contains(blockNumber)) breakpoints.remove(blockNumber);
-            else breakpoints.insert(blockNumber);
+            int lineNum = blockNumber + 1;
+            if (breakpoints.contains(lineNum)) breakpoints.remove(lineNum);
+            else breakpoints.insert(lineNum);
             m_lineNumberArea->update();
             QString emitPath = m_currentFilePath.isEmpty() ? "tests/matrix_multiply.cpp" : m_currentFilePath;
-            emit breakpointToggled(emitPath, blockNumber);
+            emit breakpointToggled(emitPath, lineNum);
             break;
         }
         block = block.next();
         top = bottom;
-        bottom = top + (int) blockBoundingRect(block).height();
+        bottom = top + qRound(blockBoundingRect(block).height());
         ++blockNumber;
     }
+}
+
+void SourceCodeView::highlightCurrentLine(int lineNumber) {
+    if (lineNumber <= 0) return;
+    QList<QTextEdit::ExtraSelection> extraSelections;
+    QTextEdit::ExtraSelection selection;
+    selection.format.setBackground(QColor(80, 80, 0, 100)); // Dark amber highlight
+    selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+    
+    QTextBlock block = document()->findBlockByLineNumber(lineNumber - 1);
+    QTextCursor cursor(block);
+    selection.cursor = cursor;
+    extraSelections.append(selection);
+    setExtraSelections(extraSelections);
+    
+    setTextCursor(cursor);
+    ensureCursorVisible();
 }
 
 void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }

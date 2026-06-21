@@ -208,6 +208,9 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
         if (!state.disassemblyText.isEmpty()) {
             m_disassemblyView->updateDisassembly(state.disassemblyText);
         }
+        if (state.currentState == "stopped") {
+            m_sourceCodeView->highlightCurrentLine(state.currentLine);
+        }
     }
     
     m_differentialGrid->setVariableData(rankId, state.variableWatches);
@@ -221,6 +224,10 @@ void MainWindow::onRankSelected(int rankId) {
         
         if (state.disassemblyText.isEmpty() && m_coordinator) {
             m_coordinator->requestDisassemblyFallback(rankId);
+        }
+        
+        if (state.currentState == "stopped") {
+            m_sourceCodeView->highlightCurrentLine(state.currentLine);
         }
         
         // Force update DifferentialGrid table matrix rows

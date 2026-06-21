@@ -36,6 +36,7 @@ public:
 
     void setSourceCode(const QString& code, int activeLine = -1);
     void setCurrentFile(const QString& filePath) { m_currentFilePath = filePath; }
+    void highlightCurrentLine(int lineNumber);
     QString getPlainText() const { return toPlainText(); }
     QMargins getViewportMargins() const { return viewportMargins(); }
 

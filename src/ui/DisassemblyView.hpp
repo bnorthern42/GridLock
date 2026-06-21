@@ -1,26 +1,36 @@
 #pragma once
-#include <QWidget>
+#include <QPlainTextEdit>
 #include <QString>
+#include <QSyntaxHighlighter>
+#include <QRegularExpression>
 
 namespace gridlock::ui {
 
-class DisassemblyView : public QWidget {
+class AsmSyntaxHighlighter : public QSyntaxHighlighter {
+    Q_OBJECT
+public:
+    explicit AsmSyntaxHighlighter(QTextDocument *parent = nullptr);
+protected:
+    void highlightBlock(const QString &text) override;
+private:
+    struct HighlightingRule {
+        QRegularExpression pattern;
+        QTextCharFormat format;
+    };
+    QVector<HighlightingRule> highlightingRules;
+};
+
+class DisassemblyView : public QPlainTextEdit {
     Q_OBJECT
 public:
     explicit DisassemblyView(QWidget *parent = nullptr);
     ~DisassemblyView() override = default;
 
 public slots:
-    void updateDisassembly(const QString& asmCode) {
-        m_asmCode = asmCode;
-        update();
-    }
-
-protected:
-    void paintEvent(QPaintEvent *event) override;
+    void updateDisassembly(const QString& asmCode);
 
 private:
-    QString m_asmCode;
+    AsmSyntaxHighlighter* m_highlighter;
 };
 
 } // namespace gridlock::ui
