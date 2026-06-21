@@ -38,7 +38,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Eagerly load default source file so UI is populated before running
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
-  m_lspCoordinator->start();
   
   connect(m_lspCoordinator, &gridlock::core::LspCoordinator::hoverResultReceived, this, [this](const QString &resultMarkdown, const QPoint &globalPos) {
       if (m_sourceCodeView) {
@@ -390,6 +389,8 @@ void MainWindow::loadSourceFile(const QString &filePath) {
       m_sourceCodeView->setBreakpoints(QSet<int>());
     }
     if (m_lspCoordinator) {
+      m_lspCoordinator->stop();
+      m_lspCoordinator->start(absolutePath);
       m_lspCoordinator->didOpen(m_currentFile, code);
     }
   }

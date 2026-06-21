@@ -17,12 +17,22 @@ LspCoordinator::~LspCoordinator() {
     stop();
 }
 
-void LspCoordinator::start() {
+void LspCoordinator::start(const QString& targetFilePath) {
+    QString targetDir = QFileInfo(targetFilePath).absolutePath();
+    m_process->setWorkingDirectory(targetDir);
     m_process->start("clangd", QStringList() << "--compile-commands-dir=build" << "--header-insertion=never");
     
     QJsonObject params;
     params["processId"] = static_cast<int>(QCoreApplication::applicationPid());
-    params["rootUri"] = "file://" + QDir::currentPath();
+    params["rootUri"] = "file://" + targetDir;
+    
+    QJsonArray workspaceFolders;
+    QJsonObject folder;
+    folder["uri"] = "file://" + targetDir;
+    folder["name"] = QFileInfo(targetDir).fileName();
+    workspaceFolders.append(folder);
+    params["workspaceFolders"] = workspaceFolders;
+
     params["capabilities"] = QJsonObject();
 
     QJsonObject initReq;

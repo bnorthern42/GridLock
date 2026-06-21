@@ -15,7 +15,7 @@ public:
     explicit LspCoordinator(QObject *parent = nullptr);
     ~LspCoordinator() override;
 
-    void start();
+    void start(const QString& targetFilePath);
     void stop();
 
     void didOpen(const QString& file, const QString& text);
