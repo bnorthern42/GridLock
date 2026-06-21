@@ -16,7 +16,7 @@ class DisassemblyView;
 class ReferenceDock;
 class DifferentialGrid;
 class TerminalDock;
-class GdbConsoleDock;
+class GdbConsoleWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -31,7 +31,7 @@ public:
     ReferenceDock* referenceDock() const { return m_referenceDock; }
     DifferentialGrid* differentialGrid() const { return m_differentialGrid; }
     TerminalDock* terminalDock() const { return m_terminalDock; }
-    GdbConsoleDock* gdbConsoleDock() const { return m_gdbConsoleDock; }
+    GdbConsoleWidget* gdbConsoleWidget() const { return m_gdbConsoleWidget; }
 
     void setCoordinator(gridlock::GdbRankCoordinator* coord);
 
@@ -64,7 +64,7 @@ private:
     ReferenceDock* m_referenceDock = nullptr;
     DifferentialGrid* m_differentialGrid = nullptr;
     TerminalDock* m_terminalDock = nullptr;
-    GdbConsoleDock* m_gdbConsoleDock = nullptr;
+    GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;
 

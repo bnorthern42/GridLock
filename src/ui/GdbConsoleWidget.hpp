@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QDockWidget>
+#include <QWidget>
 #include <QPlainTextEdit>
 #include <QLineEdit>
 #include <QComboBox>
@@ -10,10 +10,10 @@
 
 namespace gridlock::ui {
 
-class GdbConsoleDock : public QDockWidget {
+class GdbConsoleWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit GdbConsoleDock(QWidget* parent = nullptr);
+    explicit GdbConsoleWidget(QWidget* parent = nullptr);
 
     void appendGdbOutput(int rank, const QString& output);
 

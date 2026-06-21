@@ -1,11 +1,10 @@
-#include "GdbConsoleDock.hpp"
+#include "GdbConsoleWidget.hpp"
 #include <QWidget>
 
 namespace gridlock::ui {
 
-GdbConsoleDock::GdbConsoleDock(QWidget* parent) : QDockWidget("GDB Console", parent) {
-    QWidget* container = new QWidget(this);
-    QVBoxLayout* layout = new QVBoxLayout(container);
+GdbConsoleWidget::GdbConsoleWidget(QWidget* parent) : QWidget(parent) {
+    QVBoxLayout* layout = new QVBoxLayout(this);
 
     QHBoxLayout* topLayout = new QHBoxLayout();
     m_filterEdit = new QLineEdit();
@@ -34,15 +33,13 @@ GdbConsoleDock::GdbConsoleDock(QWidget* parent) : QDockWidget("GDB Console", par
     layout->addWidget(m_consoleEdit);
     layout->addWidget(m_commandEdit);
 
-    setWidget(container);
-
-    connect(m_clearButton, &QPushButton::clicked, this, &GdbConsoleDock::onClearClicked);
-    connect(m_commandEdit, &QLineEdit::returnPressed, this, &GdbConsoleDock::onCommandReturnPressed);
-    connect(m_filterEdit, &QLineEdit::textChanged, this, &GdbConsoleDock::onFilterTextChanged);
-    connect(m_rankCombo, &QComboBox::currentIndexChanged, this, &GdbConsoleDock::onRankFilterChanged);
+    connect(m_clearButton, &QPushButton::clicked, this, &GdbConsoleWidget::onClearClicked);
+    connect(m_commandEdit, &QLineEdit::returnPressed, this, &GdbConsoleWidget::onCommandReturnPressed);
+    connect(m_filterEdit, &QLineEdit::textChanged, this, &GdbConsoleWidget::onFilterTextChanged);
+    connect(m_rankCombo, &QComboBox::currentIndexChanged, this, &GdbConsoleWidget::onRankFilterChanged);
 }
 
-void GdbConsoleDock::appendGdbOutput(int rank, const QString& output) {
+void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {
     m_logs.append({rank, output});
     
     int selectedRank = m_rankCombo->currentData().toInt();
@@ -54,12 +51,12 @@ void GdbConsoleDock::appendGdbOutput(int rank, const QString& output) {
     }
 }
 
-void GdbConsoleDock::onClearClicked() {
+void GdbConsoleWidget::onClearClicked() {
     m_logs.clear();
     m_consoleEdit->clear();
 }
 
-void GdbConsoleDock::onCommandReturnPressed() {
+void GdbConsoleWidget::onCommandReturnPressed() {
     QString cmd = m_commandEdit->text();
     if (cmd.isEmpty()) return;
     
@@ -69,15 +66,15 @@ void GdbConsoleDock::onCommandReturnPressed() {
     m_commandEdit->clear();
 }
 
-void GdbConsoleDock::onFilterTextChanged(const QString& /*text*/) {
+void GdbConsoleWidget::onFilterTextChanged(const QString& /*text*/) {
     applyFilter();
 }
 
-void GdbConsoleDock::onRankFilterChanged(int /*index*/) {
+void GdbConsoleWidget::onRankFilterChanged(int /*index*/) {
     applyFilter();
 }
 
-void GdbConsoleDock::applyFilter() {
+void GdbConsoleWidget::applyFilter() {
     m_consoleEdit->clear();
     int selectedRank = m_rankCombo->currentData().toInt();
     QString filterText = m_filterEdit->text();

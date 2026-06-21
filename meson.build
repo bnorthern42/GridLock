@@ -21,7 +21,7 @@ src_files = [
   'src/ui/ReferenceDock.cpp',
   'src/ui/DifferentialGrid.cpp',
   'src/ui/TerminalDock.cpp',
-  'src/ui/GdbConsoleDock.cpp',
+  'src/ui/GdbConsoleWidget.cpp',
   'src/backend/TestGenerator.cpp',
   'src/backend/GridLockAutomationRunner.cpp'
 ]
@@ -37,7 +37,7 @@ moc_headers = [
   'src/ui/ReferenceDock.hpp',
   'src/ui/DifferentialGrid.hpp',
   'src/ui/TerminalDock.hpp',
-  'src/ui/GdbConsoleDock.hpp',
+  'src/ui/GdbConsoleWidget.hpp',
   'src/backend/GridLockAutomationRunner.hpp'
 ]
 
@@ -93,7 +93,7 @@ ui_test_src = [
   'src/ui/ReferenceDock.cpp',
   'src/ui/DifferentialGrid.cpp',
   'src/ui/TerminalDock.cpp',
-  'src/ui/GdbConsoleDock.cpp',
+  'src/ui/GdbConsoleWidget.cpp',
   'src/GdbRankCoordinator.cpp',
   'src/core/ConfigManager.cpp'
 ]
@@ -107,7 +107,7 @@ ui_test_moc_headers = [
   'src/ui/ReferenceDock.hpp',
   'src/ui/DifferentialGrid.hpp',
   'src/ui/TerminalDock.hpp',
-  'src/ui/GdbConsoleDock.hpp',
+  'src/ui/GdbConsoleWidget.hpp',
   'src/GdbRankCoordinator.hpp'
 ]
 

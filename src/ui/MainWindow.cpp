@@ -5,7 +5,7 @@
 #include "ReferenceDock.hpp"
 #include "DifferentialGrid.hpp"
 #include "TerminalDock.hpp"
-#include "GdbConsoleDock.hpp"
+#include "GdbConsoleWidget.hpp"
 #include "../GdbRankCoordinator.hpp"
 #include "../core/ConfigManager.hpp"
 #include <QDockWidget>
@@ -38,10 +38,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::setCoordinator(gridlock::GdbRankCoordinator* coord) {
     m_coordinator = coord;
-    if (m_coordinator && m_gdbConsoleDock) {
+    if (m_coordinator && m_gdbConsoleWidget) {
         connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived,
-                m_gdbConsoleDock, &GdbConsoleDock::appendGdbOutput);
-        connect(m_gdbConsoleDock, &GdbConsoleDock::commandEntered,
+                m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
+        connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
                 m_coordinator, &GdbRankCoordinator::sendCommand);
     }
 }
@@ -200,12 +200,12 @@ void MainWindow::setupDocks() {
         }
     });
     m_referenceDock = new ReferenceDock(bottomTabs);
-    m_gdbConsoleDock = new GdbConsoleDock(bottomTabs);
+    m_gdbConsoleWidget = new GdbConsoleWidget(bottomTabs);
 
     bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
     bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
     bottomTabs->addTab(m_referenceDock, "Reference Manual");
-    bottomTabs->addTab(m_gdbConsoleDock, "GDB Console");
+    bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
 
     mainVerticalSplitter->addWidget(bottomTabs);
     mainVerticalSplitter->setStretchFactor(0, 75);
