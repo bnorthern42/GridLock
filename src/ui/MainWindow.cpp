@@ -173,7 +173,8 @@ void MainWindow::setupDocks() {
         if (m_coordinator) m_coordinator->insertBreakpoint(loc);
     });
     connect(m_sourceCodeView, &SourceCodeView::breakpointToggled, this, [this](const QString& file, int line) {
-        if (m_coordinator) m_coordinator->broadcastBreakpoint(file, line);
+        QString absoluteFilePath = QFileInfo(file).absoluteFilePath();
+        if (m_coordinator) m_coordinator->broadcastBreakpoint(absoluteFilePath, line);
     });
 
     m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
