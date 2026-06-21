@@ -9,4 +9,6 @@ private slots:
     void testSerialization();
     void testDeserialization();
     void testFallbacks();
+    void testMpiSettingsPersistence();
+    void testSettingValidation();
 };

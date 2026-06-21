@@ -29,46 +29,52 @@ class EditingSettingsPage : public QWidget {
 public:
     explicit EditingSettingsPage(QWidget *parent = nullptr);
 
-    int  tabWidth() const;
-    bool insertSpaces() const;
+    int  tabWidth()       const;
+    bool insertSpaces()   const;
     bool showWhitespace() const;
     void loadFromSettings();
 
 private:
-    QSpinBox   *m_tabWidthBox      = nullptr;
-    QComboBox  *m_indentModeCombo  = nullptr;
-    QComboBox  *m_whitespaceCombo  = nullptr;
+    QSpinBox  *m_tabWidthBox     = nullptr;
+    QComboBox *m_indentModeCombo = nullptr;
+    QComboBox *m_whitespaceCombo = nullptr;
 };
 
+/// Owns session-level UX preferences only.
+/// MPI / GDB fields live exclusively in DebuggerSettingsPage.
 class BehaviorSettingsPage : public QWidget {
     Q_OBJECT
 public:
     explicit BehaviorSettingsPage(QWidget *parent = nullptr);
 
-    QString mpiExecutable()  const;
-    QString extraArgs()      const;
-    int     defaultRanks()   const;
+    QString restoreBreakpoints() const;
+    bool    confirmQuit()        const;
+    bool    focusOnStop()        const;
     void    loadFromSettings();
 
 private:
-    QLineEdit *m_mpiExecEdit  = nullptr;
-    QLineEdit *m_extraArgEdit = nullptr;
-    QSpinBox  *m_rankBox      = nullptr;
+    QComboBox *m_restoreBreakpointsCheck = nullptr;
+    QComboBox *m_confirmQuitCheck        = nullptr;
+    QComboBox *m_focusOnStopCheck        = nullptr;
 };
 
+/// Sole owner of GDB path, MPI executable, MPI args, and default rank count.
+/// Persists through ConfigManager::saveDebuggerSettings().
 class DebuggerSettingsPage : public QWidget {
     Q_OBJECT
 public:
     explicit DebuggerSettingsPage(QWidget *parent = nullptr);
 
-    QString gdbPath()      const;
+    QString gdbPath()       const;
     QString mpiExecutable() const;
-    int     defaultRanks() const;
+    QString mpiArgs()       const;
+    int     defaultRanks()  const;
     void    loadFromSettings();
 
 private:
     QLineEdit *m_gdbPathEdit  = nullptr;
     QLineEdit *m_mpiExecEdit  = nullptr;
+    QLineEdit *m_mpiArgsEdit  = nullptr;
     QSpinBox  *m_rankBox      = nullptr;
 };
 

@@ -1,5 +1,8 @@
 // PreferencesDialog.cpp
 // Implements a Kate/KDevelop-style side-bar preferences dialog.
+// MPI / GDB settings are owned exclusively by DebuggerSettingsPage and
+// persisted through ConfigManager::saveDebuggerSettings() — the single
+// source of truth for those values.
 
 #include "PreferencesDialog.hpp"
 #include "../core/ConfigManager.hpp"
@@ -126,6 +129,8 @@ void EditingSettingsPage::loadFromSettings()
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  BehaviorSettingsPage
+//  MPI / rank fields removed — those are now exclusively in DebuggerSettingsPage.
+//  This page owns session-level UX preferences only.
 // ═══════════════════════════════════════════════════════════════════════════
 
 BehaviorSettingsPage::BehaviorSettingsPage(QWidget *parent)
@@ -145,40 +150,52 @@ BehaviorSettingsPage::BehaviorSettingsPage(QWidget *parent)
     separator->setStyleSheet("background: rgba(255,255,255,0.08); margin-bottom: 8px;");
     form->addRow(separator);
 
-    m_mpiExecEdit = new QLineEdit(this);
-    m_mpiExecEdit->setPlaceholderText("mpiexec");
-    m_mpiExecEdit->setToolTip(tr("Path or name of the MPI launcher executable (e.g. mpiexec, mpirun)."));
-    form->addRow(tr("MPI Executable:"), m_mpiExecEdit);
+    m_restoreBreakpointsCheck = new QComboBox(this);
+    m_restoreBreakpointsCheck->addItems({tr("Always"), tr("Ask"), tr("Never")});
+    m_restoreBreakpointsCheck->setToolTip(
+        tr("Whether to reload saved breakpoints when a source file is opened."));
+    form->addRow(tr("Restore Breakpoints:"), m_restoreBreakpointsCheck);
 
-    m_extraArgEdit = new QLineEdit(this);
-    m_extraArgEdit->setPlaceholderText("--oversubscribe");
-    m_extraArgEdit->setToolTip(tr("Extra flags forwarded to the MPI launcher on every run."));
-    form->addRow(tr("Extra MPI Args:"), m_extraArgEdit);
+    m_confirmQuitCheck = new QComboBox(this);
+    m_confirmQuitCheck->addItems({tr("Yes"), tr("No")});
+    m_confirmQuitCheck->setToolTip(
+        tr("Ask for confirmation before terminating an active debug session."));
+    form->addRow(tr("Confirm Quit:"), m_confirmQuitCheck);
 
-    m_rankBox = new QSpinBox(this);
-    m_rankBox->setRange(1, 256);
-    m_rankBox->setToolTip(tr("Default number of MPI ranks to spawn when launching a new session."));
-    form->addRow(tr("Default Rank Count:"), m_rankBox);
+    m_focusOnStopCheck = new QComboBox(this);
+    m_focusOnStopCheck->addItems({tr("Yes"), tr("No")});
+    m_focusOnStopCheck->setToolTip(
+        tr("Automatically raise the GridLock window when a rank hits a breakpoint."));
+    form->addRow(tr("Focus on Stop:"), m_focusOnStopCheck);
+
+    auto *note = new QLabel(
+        tr("<small style='color:#888;'>MPI executor and rank settings are in the "
+           "<b>Debugger</b> category.</small>"),
+        this);
+    note->setWordWrap(true);
+    form->addRow(QString(), note);
 
     loadFromSettings();
 }
 
-QString BehaviorSettingsPage::mpiExecutable() const { return m_mpiExecEdit->text(); }
-QString BehaviorSettingsPage::extraArgs()     const { return m_extraArgEdit->text(); }
-int     BehaviorSettingsPage::defaultRanks()  const { return m_rankBox->value(); }
+QString BehaviorSettingsPage::restoreBreakpoints() const { return m_restoreBreakpointsCheck->currentText(); }
+bool    BehaviorSettingsPage::confirmQuit()        const { return m_confirmQuitCheck->currentIndex() == 0; }
+bool    BehaviorSettingsPage::focusOnStop()        const { return m_focusOnStopCheck->currentIndex() == 0; }
 
 void BehaviorSettingsPage::loadFromSettings()
 {
     QSettings s("GridLock", "Debugger");
-    m_mpiExecEdit->setText(s.value("mpi_executable", "mpiexec").toString());
-    m_extraArgEdit->setText(s.value("extra_args", "--oversubscribe").toString());
-    m_rankBox->setValue(
-        s.value("rank_count",
-                gridlock::core::ConfigManager::instance().getDefaultRanks()).toInt());
+    int rbIdx = m_restoreBreakpointsCheck->findText(
+        s.value("behavior/restore_breakpoints", "Always").toString());
+    if (rbIdx >= 0) m_restoreBreakpointsCheck->setCurrentIndex(rbIdx);
+    m_confirmQuitCheck->setCurrentIndex(s.value("behavior/confirm_quit", true).toBool() ? 0 : 1);
+    m_focusOnStopCheck->setCurrentIndex(s.value("behavior/focus_on_stop", true).toBool() ? 0 : 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  DebuggerSettingsPage
+//  Sole owner of GDB path, MPI executable, MPI args, and default rank count.
+//  Reads/writes through ConfigManager::getDebuggerSettings / saveDebuggerSettings.
 // ═══════════════════════════════════════════════════════════════════════════
 
 DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent)
@@ -208,9 +225,14 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent)
     m_mpiExecEdit->setToolTip(tr("MPI launcher used when attaching the debugger to MPI ranks."));
     form->addRow(tr("MPI Executable:"), m_mpiExecEdit);
 
+    m_mpiArgsEdit = new QLineEdit(this);
+    m_mpiArgsEdit->setPlaceholderText("--oversubscribe");
+    m_mpiArgsEdit->setToolTip(tr("Extra flags forwarded to the MPI launcher on every debug session."));
+    form->addRow(tr("MPI Args:"), m_mpiArgsEdit);
+
     m_rankBox = new QSpinBox(this);
     m_rankBox->setRange(1, 256);
-    m_rankBox->setToolTip(tr("Default number of MPI ranks for debugger sessions."));
+    m_rankBox->setToolTip(tr("Default number of MPI ranks for debugger sessions (minimum 1)."));
     form->addRow(tr("Default Rank Count:"), m_rankBox);
 
     auto *note = new QLabel(
@@ -225,16 +247,16 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent)
 
 QString DebuggerSettingsPage::gdbPath()       const { return m_gdbPathEdit->text(); }
 QString DebuggerSettingsPage::mpiExecutable() const { return m_mpiExecEdit->text(); }
+QString DebuggerSettingsPage::mpiArgs()       const { return m_mpiArgsEdit->text(); }
 int     DebuggerSettingsPage::defaultRanks()  const { return m_rankBox->value(); }
 
 void DebuggerSettingsPage::loadFromSettings()
 {
-    QSettings s("GridLock", "Debugger");
-    m_gdbPathEdit->setText(s.value("debugger/gdb_path", "gdb").toString());
-    m_mpiExecEdit->setText(s.value("mpi_executable", "mpiexec").toString());
-    m_rankBox->setValue(
-        s.value("rank_count",
-                gridlock::core::ConfigManager::instance().getDefaultRanks()).toInt());
+    const auto ds = gridlock::core::ConfigManager::instance().getDebuggerSettings();
+    m_gdbPathEdit->setText(ds.gdbPath);
+    m_mpiExecEdit->setText(ds.mpiExecutable);
+    m_mpiArgsEdit->setText(ds.mpiArgs);
+    m_rankBox->setValue(ds.defaultRanks);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -351,7 +373,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({180, 680});
+    splitter->setSizes({190, 670});
 
     rootLayout->addWidget(splitter, 1);
 
@@ -373,13 +395,12 @@ void PreferencesDialog::setupSidebar()
     m_sidebar->setSpacing(0);
     m_sidebar->setFrameShape(QFrame::NoFrame);
 
-    // Category entries
     struct Entry { QString label; QString iconName; };
     const QList<Entry> entries = {
-        { tr("Appearance"), "preferences-desktop-theme"   },
-        { tr("Editing"),    "document-edit"               },
-        { tr("Behavior"),   "configure"                   },
-        { tr("Debugger"),   "debug-run"                   },
+        { tr("Appearance"), "preferences-desktop-theme" },
+        { tr("Editing"),    "document-edit"             },
+        { tr("Behavior"),   "configure"                 },
+        { tr("Debugger"),   "debug-run"                 },
     };
 
     for (const auto &e : entries) {
@@ -435,27 +456,26 @@ void PreferencesDialog::apply()
 {
     QSettings s("GridLock", "Debugger");
 
-    // Appearance
+    // ── Appearance ──────────────────────────────────────────────────────
     s.setValue("appearance/theme", m_appearancePage->selectedTheme());
 
-    // Editing
+    // ── Editing ─────────────────────────────────────────────────────────
     s.setValue("editing/tab_width",       m_editingPage->tabWidth());
     s.setValue("editing/insert_spaces",   m_editingPage->insertSpaces());
     s.setValue("editing/show_whitespace", m_editingPage->showWhitespace());
 
-    // Behavior (shared MPI settings used by New-Session dialog)
-    s.setValue("mpi_executable", m_behaviorPage->mpiExecutable());
-    s.setValue("extra_args",     m_behaviorPage->extraArgs());
-    s.setValue("rank_count",     m_behaviorPage->defaultRanks());
+    // ── Behavior (session UX prefs only — no MPI/rank here) ─────────────
+    s.setValue("behavior/restore_breakpoints", m_behaviorPage->restoreBreakpoints());
+    s.setValue("behavior/confirm_quit",        m_behaviorPage->confirmQuit());
+    s.setValue("behavior/focus_on_stop",       m_behaviorPage->focusOnStop());
 
-    // Debugger
-    s.setValue("debugger/gdb_path",   m_debuggerPage->gdbPath());
-    // Debugger page MPI fields shadow the Behavior-page ones if the user
-    // changed them; the Behavior page value is the canonical shared key.
-    if (!m_debuggerPage->mpiExecutable().isEmpty())
-        s.setValue("mpi_executable", m_debuggerPage->mpiExecutable());
-    if (m_debuggerPage->defaultRanks() > 0)
-        s.setValue("rank_count", m_debuggerPage->defaultRanks());
+    // ── Debugger — single source of truth via ConfigManager ─────────────
+    gridlock::core::DebuggerSettings ds;
+    ds.gdbPath       = m_debuggerPage->gdbPath();
+    ds.mpiExecutable = m_debuggerPage->mpiExecutable();
+    ds.mpiArgs       = m_debuggerPage->mpiArgs();
+    ds.defaultRanks  = m_debuggerPage->defaultRanks();
+    gridlock::core::ConfigManager::instance().saveDebuggerSettings(ds);
 
     s.sync();
 
