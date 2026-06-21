@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <QSet>
 #include <QMap>
+#include <memory>
 
 namespace gridlock {
 class GdbRankCoordinator;
@@ -12,6 +13,11 @@ class GdbRankCoordinator;
 
 namespace gridlock::core {
 class LspCoordinator;
+class HpcBackend;
+}
+
+namespace gridlock::core::commands {
+class IDebugCommand;
 }
 
 namespace gridlock::ui {
@@ -25,6 +31,7 @@ class TerminalDock;
 class GdbConsoleWidget;
 class MemView;
 class RegisterView;
+class SpackManager;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -44,6 +51,7 @@ public:
     RegisterView* registerView() const { return m_registerView; }
 
     void startDebuggingSession(const QString& binaryPath, int ranks);
+    void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
 
     void setCoordinator(gridlock::GdbRankCoordinator* coord);
 
@@ -82,6 +90,8 @@ private:
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;
+    gridlock::core::HpcBackend* m_hpcBackend = nullptr;
+    SpackManager* m_spackManager = nullptr;
 
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;

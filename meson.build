@@ -27,7 +27,10 @@ src_files = [
   'src/backend/GridLockAutomationRunner.cpp',
   'src/ui/MemView.cpp',
   'src/ui/RegisterView.cpp',
-  'src/ui/PreferencesDialog.cpp'
+  'src/ui/PreferencesDialog.cpp',
+  'src/core/MockHpcBackend.cpp',
+  'src/ui/SpackManager.cpp',
+  'src/core/commands/DebugCommands.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -46,7 +49,10 @@ moc_headers = [
   'src/backend/GridLockAutomationRunner.hpp',
   'src/ui/MemView.hpp',
   'src/ui/RegisterView.hpp',
-  'src/ui/PreferencesDialog.hpp'
+  'src/ui/PreferencesDialog.hpp',
+  'src/core/HpcBackend.hpp',
+  'src/core/MockHpcBackend.hpp',
+  'src/ui/SpackManager.hpp'
 ]
 
 # Process Qt6 files
@@ -131,7 +137,10 @@ ui_test_src = [
   'src/core/LspCoordinator.cpp',
   'src/ui/MemView.cpp',
   'src/ui/RegisterView.cpp',
-  'src/ui/PreferencesDialog.cpp'
+  'src/ui/PreferencesDialog.cpp',
+  'src/core/MockHpcBackend.cpp',
+  'src/ui/SpackManager.cpp',
+  'src/core/commands/DebugCommands.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -148,7 +157,10 @@ ui_test_moc_headers = [
   'src/core/LspCoordinator.hpp',
   'src/ui/MemView.hpp',
   'src/ui/RegisterView.hpp',
-  'src/ui/PreferencesDialog.hpp'
+  'src/ui/PreferencesDialog.hpp',
+  'src/core/HpcBackend.hpp',
+  'src/core/MockHpcBackend.hpp',
+  'src/ui/SpackManager.hpp'
 ]
 
 processed_ui_test_files = qt6.compile_moc(

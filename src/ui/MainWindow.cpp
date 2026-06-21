@@ -14,6 +14,7 @@
 #include "SourceCodeView.hpp"
 #include "TerminalDock.hpp"
 #include "../core/MockHpcBackend.hpp"
+#include "../core/commands/DebugCommands.hpp"
 #include "SpackManager.hpp"
 #include <QAction>
 #include <QCloseEvent>
@@ -62,6 +63,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   QString absolutePath = QFileInfo("tests/mpi_mm.c").absoluteFilePath();
   if (m_persistentBreakpoints.contains(absolutePath) && m_sourceCodeView) {
     m_sourceCodeView->setBreakpoints(m_persistentBreakpoints[absolutePath]);
+  }
+}
+
+void MainWindow::executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd) {
+  if (cmd) {
+    cmd->execute();
   }
 }
 
@@ -196,35 +203,38 @@ void MainWindow::setupToolbar() {
 
   QAction *runAction = new QAction("▶ Run Target", this);
   connect(runAction, &QAction::triggered, this, [this]() {
-    startDebuggingSession(
-        "build/mpi_mm_bin",
-        gridlock::core::ConfigManager::instance().getDefaultRanks());
+    auto cmd = std::make_unique<gridlock::core::commands::LaunchCommand>(
+        this, "build/mpi_mm_bin", gridlock::core::ConfigManager::instance().getDefaultRanks());
+    executeCommand(std::move(cmd));
   });
   toolbar->addAction(runAction);
 
   QAction *continueAction = new QAction("⏩ Continue", this);
   connect(continueAction, &QAction::triggered, this, [this]() {
-    if (m_coordinator)
-      m_coordinator->continueAll();
+    auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(m_coordinator);
+    executeCommand(std::move(cmd));
   });
   toolbar->addAction(continueAction);
 
   QAction *stepAction = new QAction("↷ Step Inst", this);
   connect(stepAction, &QAction::triggered, this, [this]() {
-    if (m_coordinator)
-      m_coordinator->stepAll();
+    auto cmd = std::make_unique<gridlock::core::commands::StepCommand>(m_coordinator);
+    executeCommand(std::move(cmd));
   });
   toolbar->addAction(stepAction);
 
   QAction *pauseAction = new QAction("Pause Rank", this);
   connect(pauseAction, &QAction::triggered, this, [this]() {
-    if (m_coordinator)
-      m_coordinator->pauseFocusedRank(m_focusedRank);
+    auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(m_coordinator, m_focusedRank);
+    executeCommand(std::move(cmd));
   });
   toolbar->addAction(pauseAction);
 
   QAction *exitAction = new QAction("Terminate Session", this);
-  connect(exitAction, &QAction::triggered, this, &MainWindow::close);
+  connect(exitAction, &QAction::triggered, this, [this]() {
+    auto cmd = std::make_unique<gridlock::core::commands::TerminateCommand>(this);
+    executeCommand(std::move(cmd));
+  });
   toolbar->addAction(exitAction);
 }
 
