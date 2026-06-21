@@ -13,6 +13,8 @@
 #include "PreferencesDialog.hpp"
 #include "SourceCodeView.hpp"
 #include "TerminalDock.hpp"
+#include "../core/MockHpcBackend.hpp"
+#include "SpackManager.hpp"
 #include <QAction>
 #include <QCloseEvent>
 #include <QDialog>
@@ -38,6 +40,7 @@
 namespace gridlock::ui {
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+  m_hpcBackend = new gridlock::core::MockHpcBackend(this);
   setupUi();
   setupMenu();
   setupDocks();
@@ -130,6 +133,19 @@ void MainWindow::setupMenu() {
 
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
+
+  QAction *slurmAction = fileMenu->addAction("Submit SLURM Job");
+  connect(slurmAction, &QAction::triggered, this, [this]() {
+    const auto slurm = gridlock::core::ConfigManager::instance().getSlurmSettings();
+    QString script = slurm.scriptTemplate;
+    script.replace("{FILE}", m_currentFile);
+    if (m_spackManager) {
+      m_spackManager->appendMessage("Submitting SLURM batch job...");
+      m_bottomTabs->setCurrentWidget(m_spackManager);
+    }
+    m_hpcBackend->submitSlurmJob(script);
+  });
+
   fileMenu->addAction("Exit", this, &MainWindow::close);
 
   QMenu *editMenu = menuBar->addMenu("&Edit");
@@ -305,6 +321,7 @@ void MainWindow::setupDocks() {
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
   m_memView = new MemView(m_bottomTabs);
   m_registerView = new RegisterView(m_bottomTabs);
+  m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
 
   connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
     if (m_coordinator) {
@@ -318,6 +335,7 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");
   m_bottomTabs->addTab(m_registerView, "Registers");
+  m_bottomTabs->addTab(m_spackManager, "HPC Console");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);

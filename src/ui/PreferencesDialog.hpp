@@ -114,6 +114,8 @@ public:
   QString slurmPartition() const;
   int slurmNodes() const;
   int slurmTasks() const;
+  bool requestGpus() const;
+  int gpusPerNode() const;
   // Spack
   QString spackRoot() const;
 
@@ -129,6 +131,8 @@ private:
   QLineEdit *m_partitionEdit = nullptr;
   QSpinBox *m_nodesBox = nullptr;
   QSpinBox *m_tasksBox = nullptr;
+  QCheckBox *m_gpuCheck = nullptr;
+  QSpinBox *m_gpusBox = nullptr;
   // Spack
   QLineEdit *m_spackRootEdit = nullptr;
 };

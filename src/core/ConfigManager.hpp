@@ -37,6 +37,8 @@ struct SlurmSettings {
     QString partition      = "batch";  ///< SLURM partition / queue
     int     nodes          = 1;
     int     tasksPerNode   = 4;
+    bool    requestGpus    = false;
+    int     gpusPerNode    = 1;
     QString spackRoot      = "/opt/spack"; ///< Spack install prefix on remote
 };
 

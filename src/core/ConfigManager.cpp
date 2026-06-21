@@ -152,6 +152,8 @@ SlurmSettings ConfigManager::getSlurmSettings() const {
     sl.partition      = s.value("slurm/partition",       "batch").toString();
     sl.nodes          = s.value("slurm/nodes",           1).toInt();
     sl.tasksPerNode   = s.value("slurm/tasks_per_node",  4).toInt();
+    sl.requestGpus    = s.value("slurm/request_gpus",    false).toBool();
+    sl.gpusPerNode    = s.value("slurm/gpus_per_node",   1).toInt();
     sl.spackRoot      = s.value("slurm/spack_root",      "/opt/spack").toString();
     return sl;
 }
@@ -162,6 +164,8 @@ void ConfigManager::saveSlurmSettings(const SlurmSettings &sl) {
     s.setValue("slurm/partition",       sl.partition);
     s.setValue("slurm/nodes",           qMax(1, sl.nodes));
     s.setValue("slurm/tasks_per_node",  qMax(1, sl.tasksPerNode));
+    s.setValue("slurm/request_gpus",    sl.requestGpus);
+    s.setValue("slurm/gpus_per_node",   qMax(1, sl.gpusPerNode));
     s.setValue("slurm/spack_root",      sl.spackRoot);
     s.sync();
 }

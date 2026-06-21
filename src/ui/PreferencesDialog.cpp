@@ -461,8 +461,19 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   m_tasksBox->setSuffix(tr(" task(s)/node"));
   form->addRow(tr("Tasks per Node:"), m_tasksBox);
 
-  auto *tplLabel = new QLabel(tr("Script Template (<tt>%%%%FILE%%%%</tt> is "
-                                 "replaced with the source path):"),
+  auto *gpuRow = new QHBoxLayout();
+  m_gpuCheck = new QCheckBox(tr("Request GPUs"), container);
+  m_gpusBox = new QSpinBox(container);
+  m_gpusBox->setRange(1, 16);
+  m_gpusBox->setSuffix(tr(" GPU(s)/node"));
+  m_gpusBox->setEnabled(false);
+  connect(m_gpuCheck, &QCheckBox::toggled, m_gpusBox, &QSpinBox::setEnabled);
+  gpuRow->addWidget(m_gpuCheck);
+  gpuRow->addWidget(m_gpusBox);
+  gpuRow->addStretch();
+  form->addRow(tr("GPUs:"), gpuRow);
+
+  auto *tplLabel = new QLabel(tr("Script Template (Use <tt>{FILE}</tt> as a placeholder for the target source code):"),
                               container);
   tplLabel->setTextFormat(Qt::RichText);
   form->addRow(tplLabel);
@@ -481,7 +492,7 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
                                      "#SBATCH --ntasks-per-node=4\n"
                                      "\n"
                                      "module load openmpi\n"
-                                     "mpirun -np 4 %%FILE%%");
+                                     "mpirun -np 4 {FILE}");
   form->addRow(m_templateEdit);
 
   // ────────────────────────────────────────────────────────────────────
@@ -524,6 +535,12 @@ int HpcIntegrationSettingsPage::slurmNodes() const {
 int HpcIntegrationSettingsPage::slurmTasks() const {
   return m_tasksBox->value();
 }
+bool HpcIntegrationSettingsPage::requestGpus() const {
+  return m_gpuCheck->isChecked();
+}
+int HpcIntegrationSettingsPage::gpusPerNode() const {
+  return m_gpusBox->value();
+}
 QString HpcIntegrationSettingsPage::spackRoot() const {
   return m_spackRootEdit->text().trimmed();
 }
@@ -541,6 +558,8 @@ void HpcIntegrationSettingsPage::loadFromSettings() {
   m_partitionEdit->setText(slurm.partition);
   m_nodesBox->setValue(slurm.nodes);
   m_tasksBox->setValue(slurm.tasksPerNode);
+  m_gpuCheck->setChecked(slurm.requestGpus);
+  m_gpusBox->setValue(slurm.gpusPerNode);
   m_spackRootEdit->setText(slurm.spackRoot);
 }
 
@@ -687,6 +706,7 @@ void PreferencesDialog::setupSidebar() {
       {tr("Behavior"), "configure"},
       {tr("Debugger"), "debug-run"},
       {tr("HPC / Cluster"), "network-server"},
+      {tr("HPC Integration"), "server-database"},
   };
 
   for (const auto &e : entries) {
@@ -715,12 +735,14 @@ void PreferencesDialog::setupPages() {
   m_behaviorPage = new BehaviorSettingsPage(m_stack);
   m_debuggerPage = new DebuggerSettingsPage(m_stack);
   m_hpcPage = new HpcSettingsPage(m_stack);
+  m_hpcIntegrationPage = new HpcIntegrationSettingsPage(m_stack);
 
   m_stack->addWidget(m_appearancePage);
   m_stack->addWidget(m_editingPage);
   m_stack->addWidget(m_behaviorPage);
   m_stack->addWidget(m_debuggerPage);
   m_stack->addWidget(m_hpcPage);
+  m_stack->addWidget(m_hpcIntegrationPage);
 
   m_stack->setCurrentIndex(0);
 }
@@ -771,6 +793,23 @@ void PreferencesDialog::apply() {
   hs.envVars = m_hpcPage->envVars();
   hs.strictAffinity = m_hpcPage->strictAffinity();
   gridlock::core::ConfigManager::instance().saveHpcSettings(hs);
+
+  // ── HPC Integration ───────────────────────────────────────────────────
+  gridlock::core::SshSettings ssh;
+  ssh.host = m_hpcIntegrationPage->sshHost();
+  ssh.user = m_hpcIntegrationPage->sshUser();
+  ssh.keyPath = m_hpcIntegrationPage->sshKeyPath();
+  gridlock::core::ConfigManager::instance().saveSshSettings(ssh);
+
+  gridlock::core::SlurmSettings slurm;
+  slurm.scriptTemplate = m_hpcIntegrationPage->slurmTemplate();
+  slurm.partition = m_hpcIntegrationPage->slurmPartition();
+  slurm.nodes = m_hpcIntegrationPage->slurmNodes();
+  slurm.tasksPerNode = m_hpcIntegrationPage->slurmTasks();
+  slurm.requestGpus = m_hpcIntegrationPage->requestGpus();
+  slurm.gpusPerNode = m_hpcIntegrationPage->gpusPerNode();
+  slurm.spackRoot = m_hpcIntegrationPage->spackRoot();
+  gridlock::core::ConfigManager::instance().saveSlurmSettings(slurm);
 
   s.sync();
 
