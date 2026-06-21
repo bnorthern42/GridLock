@@ -15,7 +15,9 @@ class GdbConsoleWidget : public QWidget {
 public:
     explicit GdbConsoleWidget(QWidget* parent = nullptr);
 
+public slots:
     void appendGdbOutput(int rank, const QString& output);
+    void appendGdbInput(int rank, const QString& input);
 
 signals:
     void commandEntered(int rank, const QString& command);
@@ -38,6 +40,7 @@ private:
     struct LogEntry {
         int rank;
         QString text;
+        bool isInput = false;
     };
     QList<LogEntry> m_logs;
 };

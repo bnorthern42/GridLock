@@ -19,6 +19,7 @@ struct RankState {
     QElapsedTimer executionTimer;
     qint64 totalRuntimeMs = 0;
     QString lastFiredTimestamp;
+    int pendingBreakpoints = 0;
 };
 
 } // namespace gridlock

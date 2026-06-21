@@ -40,7 +40,7 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent) : QWidget(parent) {
 }
 
 void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {
-    m_logs.append({rank, output});
+    m_logs.append({rank, output, false});
     
     int selectedRank = m_rankCombo->currentData().toInt();
     QString filterText = m_filterEdit->text();
@@ -48,6 +48,18 @@ void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {
     if ((selectedRank == -1 || selectedRank == rank) &&
         (filterText.isEmpty() || output.contains(filterText, Qt::CaseInsensitive))) {
         m_consoleEdit->appendPlainText(QString("[GDB OUT Rank %1]: %2").arg(rank).arg(output));
+    }
+}
+
+void GdbConsoleWidget::appendGdbInput(int rank, const QString& input) {
+    m_logs.append({rank, input, true});
+    
+    int selectedRank = m_rankCombo->currentData().toInt();
+    QString filterText = m_filterEdit->text();
+
+    if ((selectedRank == -1 || selectedRank == rank) &&
+        (filterText.isEmpty() || input.contains(filterText, Qt::CaseInsensitive))) {
+        m_consoleEdit->appendPlainText(QString("[GDB IN Rank %1]: %2").arg(rank).arg(input));
     }
 }
 
@@ -82,7 +94,8 @@ void GdbConsoleWidget::applyFilter() {
     for (const auto& log : m_logs) {
         if ((selectedRank == -1 || selectedRank == log.rank) &&
             (filterText.isEmpty() || log.text.contains(filterText, Qt::CaseInsensitive))) {
-            m_consoleEdit->appendPlainText(QString("[GDB OUT Rank %1]: %2").arg(log.rank).arg(log.text));
+            QString prefix = log.isInput ? "[GDB IN Rank %1]: %2" : "[GDB OUT Rank %1]: %2";
+            m_consoleEdit->appendPlainText(prefix.arg(log.rank).arg(log.text));
         }
     }
 }

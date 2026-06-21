@@ -51,6 +51,8 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator* coord) {
     if (m_coordinator && m_gdbConsoleWidget) {
         connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived,
                 m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
+        connect(m_coordinator, &GdbRankCoordinator::commandSentToGdb,
+                m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
         connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
                 m_coordinator, &GdbRankCoordinator::sendCommand);
     }

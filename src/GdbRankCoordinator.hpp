@@ -21,6 +21,8 @@ public:
     void broadcastCommand(const QString& cmd);
     void terminateAllSessions();
     void requestDisassemblyFallback(int rankId);
+    void flushCachedBreakpoints(int rankId);
+    void writeCmd(int rankId, const QString& cmd);
     
     int getProcessCount() const { return m_processes.size(); }
     RankState getRankState(int rankId) const {
@@ -35,6 +37,7 @@ public:
 signals:
     void rankStateChanged(int rankId, const RankState& state);
     void gdbOutputReceived(int rankId, const QString& output);
+    void commandSentToGdb(int rankId, const QString& cmd);
 
 public slots:
     void stepAll();

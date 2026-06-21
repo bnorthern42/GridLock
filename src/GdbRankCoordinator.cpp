@@ -17,6 +17,38 @@ GdbRankCoordinator::~GdbRankCoordinator() {
     terminateAllSessions();
 }
 
+void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
+    if (rankId >= 0 && rankId < static_cast<int>(m_processes.size())) {
+        auto& rp = m_processes[rankId];
+        if (rp && rp->process && rp->process->state() == QProcess::Running) {
+            rp->process->write(cmd.toUtf8());
+            emit commandSentToGdb(rankId, cmd.trimmed());
+        }
+    }
+}
+
+void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
+    auto bps = core::ConfigManager::instance().getBreakpoints();
+    auto& rp = m_processes[rankId];
+    int count = 0;
+    for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
+        QString fileName = QFileInfo(it.key()).fileName();
+        for (int line : it.value()) {
+            QString cmd = QString("-break-insert -f %1:%2\n").arg(fileName).arg(line);
+            writeCmd(rankId, cmd);
+            count++;
+        }
+    }
+    
+    if (count == 0) {
+        writeCmd(rankId, "-exec-continue\n");
+        rp->state.currentState = "running";
+    } else {
+        rp->state.pendingBreakpoints = count;
+        rp->state.currentState = "sync_flushing";
+    }
+}
+
 void GdbRankCoordinator::registerWatchVariable(const QString& name) {
     if (std::find(m_watchVariables.begin(), m_watchVariables.end(), name) == m_watchVariables.end()) {
         m_watchVariables.push_back(name);
@@ -29,16 +61,18 @@ void GdbRankCoordinator::registerWatchVariable(const QString& name) {
         if (rp && rp->process && rp->process->state() == QProcess::Running) {
             if (!m_varNameMap[i].contains(name)) {
                 QString evalCmd = QString("30%1-var-create - * %2\n").arg(varIdx).arg(name);
-                rp->process->write(evalCmd.toUtf8());
+                writeCmd(i, evalCmd);
             }
         }
     }
 }
 
 void GdbRankCoordinator::terminateAllSessions() {
-    for (auto& rp : m_processes) {
+    for (size_t i = 0; i < m_processes.size(); ++i) {
+        auto& rp = m_processes[i];
         if (rp && rp->process) {
             if (rp->process->state() == QProcess::Running) {
+                // Don't log this internal exit command to avoid clutter
                 rp->process->write("-gdb-exit\n");
                 rp->process->waitForFinished(500);
                 if (rp->process->state() == QProcess::Running) {
@@ -74,15 +108,12 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
             handleGdbOutput(id);
         });
 
-        // Construct the parallel job. Since we are running independent GDB instances
-        // attached to each rank conceptually, we use mpiexec to run one process
-        // or just invoke mpiexec directly for that rank.
         QStringList args;
         args << "-n" << "1" << extraArgs << core::ConfigManager::instance().getGdbPath() << "--interpreter=mi3" << "--args" << executable;
         rp->process->start(mpiExec, args);
-        rp->process->write("dir .\n");
         
         m_processes.push_back(std::move(rp));
+        writeCmd(i, "dir .\n");
     }
 }
 
@@ -90,80 +121,45 @@ void GdbRankCoordinator::insertBreakpoint(const QString& location) {
     QString fileName = QFileInfo(location).fileName();
     if (fileName.isEmpty()) fileName = location;
     QString cmd = QString("-break-insert -f %1\n").arg(fileName);
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write(cmd.toUtf8());
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, cmd);
 }
 
 void GdbRankCoordinator::broadcastCommand(const QString& cmd) {
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write(cmd.toUtf8());
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, cmd);
 }
 
 void GdbRankCoordinator::sendCommand(int rankId, const QString& cmd) {
     if (rankId == -1) {
         broadcastCommand(cmd + "\n");
-    } else if (rankId >= 0 && rankId < static_cast<int>(m_processes.size())) {
-        auto& rp = m_processes[rankId];
-        if (rp && rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write((cmd + "\n").toUtf8());
-        }
+    } else {
+        writeCmd(rankId, cmd + "\n");
     }
 }
 
 void GdbRankCoordinator::broadcastBreakpoint(const QString& file, int line) {
     QString fileName = QFileInfo(file).fileName();
     QString breakCmd = QString("-break-insert -f %1:%2\n").arg(fileName).arg(line);
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write(breakCmd.toUtf8());
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, breakCmd);
 }
 
 void GdbRankCoordinator::stepAll() {
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write("-exec-next\n");
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, "-exec-next\n");
 }
 
 void GdbRankCoordinator::continueAll() {
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write("-exec-continue\n");
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, "-exec-continue\n");
 }
 
 void GdbRankCoordinator::runAll() {
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write("-exec-run\n");
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, "-exec-run\n");
 }
 
 void GdbRankCoordinator::haltAll() {
-    for (auto& rp : m_processes) {
-        if (rp->process && rp->process->state() == QProcess::Running) {
-            rp->process->write("-exec-interrupt\n");
-        }
-    }
+    for (size_t i = 0; i < m_processes.size(); ++i) writeCmd(i, "-exec-interrupt\n");
 }
 
 void GdbRankCoordinator::pauseFocusedRank(int rankId) {
-    if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
-    auto& rp = m_processes[rankId];
-    if (rp && rp->process && rp->process->state() == QProcess::Running) {
-        rp->process->write("-exec-interrupt\n");
-    }
+    writeCmd(rankId, "-exec-interrupt\n");
 }
 
 void GdbRankCoordinator::requestDisassemblyFallback(int rankId) {
@@ -172,12 +168,12 @@ void GdbRankCoordinator::requestDisassemblyFallback(int rankId) {
     if (rp && rp->process && rp->process->state() == QProcess::Running) {
         if (rp->state.currentState != "stopped") return;
         qDebug() << "[GDB IN Rank" << rankId << "]: Sending Disassembly Command";
-        rp->process->write("-thread-info\n");
+        writeCmd(rankId, "-thread-info\n");
         if (!rp->state.currentFile.isEmpty() && rp->state.currentLine > 0) {
             QString disasmCmd = QString("200-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(rp->state.currentFile).arg(rp->state.currentLine);
-            rp->process->write(disasmCmd.toUtf8());
+            writeCmd(rankId, disasmCmd);
         } else {
-            rp->process->write("200-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
+            writeCmd(rankId, "200-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
         }
     }
 }
@@ -231,16 +227,16 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
 
             // Construct disassembly command for the exact stop address
             QString asmCmd = QString("200-data-disassemble -a %1 -- 0\n").arg(stopAddress);
-            rp->process->write(asmCmd.toUtf8());
+            writeCmd(rankId, asmCmd);
 
             QRegularExpression threadRe("thread-id=\"(\\d+)\"");
             auto matchThread = threadRe.match(line);
             if (matchThread.hasMatch()) {
                 QString threadId = matchThread.captured(1);
                 QString threadCmd = QString("-thread-select %1\n").arg(threadId);
-                rp->process->write(threadCmd.toUtf8());
+                writeCmd(rankId, threadCmd);
             } else {
-                rp->process->write("-thread-info\n");
+                writeCmd(rankId, "-thread-info\n");
             }
 
             bool isInternalSync = line.contains("func=\"main\"") && line.contains("line=\"26\"");
@@ -253,15 +249,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             }
 
             if (isInternalSync) {
-                auto bps = core::ConfigManager::instance().getBreakpoints();
-                for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
-                    QString fileName = QFileInfo(it.key()).fileName();
-                    for (int l : it.value()) {
-                        QString breakCmd = QString("-break-insert -f %1:%2\n").arg(fileName).arg(l);
-                        rp->process->write(breakCmd.toUtf8());
-                    }
-                }
-                rp->process->write("-exec-continue\n");
+                flushCachedBreakpoints(rankId);
             } else {
                 emit rankStateChanged(rankId, rp->state);
             }
@@ -319,7 +307,16 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                 QString file = match.captured(2);
                 QString lineNum = match.captured(3);
                 rp->state.breakpoints[bkptId] = QString("%1:%2").arg(file).arg(lineNum);
-                emit rankStateChanged(rankId, rp->state);
+                
+                if (rp->state.currentState == "sync_flushing") {
+                    rp->state.pendingBreakpoints--;
+                    if (rp->state.pendingBreakpoints <= 0) {
+                        writeCmd(rankId, "-exec-continue\n");
+                        rp->state.currentState = "running";
+                    }
+                } else {
+                    emit rankStateChanged(rankId, rp->state);
+                }
             }
         } else if (sv.starts_with("200")) {
             if (line.contains("asm_insns=")) {
@@ -346,7 +343,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             }
             
             // Chain variable evaluation after disassembly finishes
-            rp->process->write("-var-update 1 *\n");
+            writeCmd(rankId, "-var-update 1 *\n");
         } else if (line.contains("^error") && !sv.starts_with("30") && !sv.starts_with("40") && !sv.starts_with("200")) {
             QRegularExpression errorRe("msg=\"([^\"]+)\"");
             auto match = errorRe.match(line);
