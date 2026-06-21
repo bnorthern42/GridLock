@@ -108,6 +108,19 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
             handleGdbOutput(id);
         });
 
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        
+        // Inject OpenMPI coordination variables
+        env.insert("OMPI_COMM_WORLD_SIZE", QString::number(rankCount));
+        env.insert("OMPI_COMM_WORLD_RANK", QString::number(i));
+        env.insert("OMPI_UNIVERSE_SIZE", QString::number(rankCount));
+        
+        // Prevent OpenMPI from trying to spawn its own ssh/orte daemons 
+        env.insert("OMPI_MCA_orte_ess_jobid", "12345"); 
+        env.insert("OMPI_MCA_pmix", "^isolated");
+        
+        rp->process->setProcessEnvironment(env);
+
         QStringList args;
         args << "-n" << "1" << extraArgs << core::ConfigManager::instance().getGdbPath() << "--interpreter=mi3" << "--args" << executable;
         rp->process->start(mpiExec, args);
