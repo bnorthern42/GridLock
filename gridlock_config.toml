@@ -1,0 +1,13 @@
+[theme.source]
+background = "#1e1e1e"
+text = "#f0f0f0"
+active_line = "#505000"
+
+[theme.assembly]
+opcode = "#00ff7f"
+register = "#ff7f50"
+address = "#555555"
+
+[debugger]
+default_ranks = 6
+gdb_path = "gdb"

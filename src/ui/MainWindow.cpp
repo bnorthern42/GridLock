@@ -210,7 +210,9 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
             m_disassemblyView->updateDisassembly(state.disassemblyText);
         }
         if (state.currentState == "stopped") {
-            m_sourceCodeView->highlightCurrentLine(state.currentLine);
+            if (state.currentLine > 0) {
+                m_sourceCodeView->highlightCurrentLine(state.currentLine);
+            }
         }
     }
     
@@ -228,7 +230,9 @@ void MainWindow::onRankSelected(int rankId) {
         }
         
         if (state.currentState == "stopped") {
-            m_sourceCodeView->highlightCurrentLine(state.currentLine);
+            if (state.currentLine > 0) {
+                m_sourceCodeView->highlightCurrentLine(state.currentLine);
+            }
         }
         
         // Force update DifferentialGrid table matrix rows

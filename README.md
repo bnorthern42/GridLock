@@ -41,5 +41,8 @@ For upcoming features and architectural milestones, please see our [ROADMAP.md](
 ## Contributing
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for information on setting up the environment and submitting issues. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Acknowledgments
+This project makes use of the excellent [toml++](https://github.com/marzer/tomlplusplus) library by mark gillard for parsing TOML configuration files.
+
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

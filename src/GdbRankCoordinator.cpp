@@ -190,15 +190,20 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             }
 
             QRegularExpression rxFile("fullname=\"([^\"]+)\"");
-            QRegularExpression rxLine("line=\"(\\d+)\"");
+            QRegularExpression rxLine("frame=\\{[^}]*line=\"(\\d+)\"");
             QString file = rp->state.currentFile; // fallback to known file
-            int lineNum = rp->state.currentLine > 0 ? rp->state.currentLine : 1; // fallback to known line
+            int lineNum = rp->state.currentLine; // fallback to known line
 
             auto matchFile = rxFile.match(line);
             if (matchFile.hasMatch()) file = matchFile.captured(1);
 
             auto matchLine = rxLine.match(line);
-            if (matchLine.hasMatch()) lineNum = matchLine.captured(1).toInt();
+            if (matchLine.hasMatch()) {
+                lineNum = matchLine.captured(1).toInt();
+            } else {
+                qDebug() << "GDB PARSE WARNING: Could not find line token in stop event record:" << line;
+                if (lineNum <= 0) lineNum = -1; // Do not default to 1 blindly
+            }
 
             rp->state.currentFile = file;
             rp->state.currentLine = lineNum;
@@ -303,7 +308,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             }
             
             // Chain variable evaluation after disassembly finishes
-            rp->process->write("-var-update - * \n");
+            rp->process->write("-var-update 1 *\n");
         } else if (line.contains("^error") && !sv.starts_with("30") && !sv.starts_with("40") && !sv.starts_with("200")) {
             QRegularExpression errorRe("msg=\"([^\"]+)\"");
             auto match = errorRe.match(line);
