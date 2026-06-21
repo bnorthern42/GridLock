@@ -6,6 +6,8 @@
 #include <QUrl>
 #include <QDebug>
 #include <QFileInfo>
+#include <QPalette>
+#include <QColor>
 
 namespace gridlock::ui {
 
@@ -32,6 +34,12 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget *parent)
     m_textBrowser = new QTextBrowser(splitter);
     m_textBrowser->setOpenExternalLinks(true);
     m_textBrowser->setReadOnly(true);
+
+    QPalette pal = m_textBrowser->palette();
+    pal.setColor(QPalette::Base, QColor("#1e1e2e"));
+    pal.setColor(QPalette::Text, QColor("#cdd6f4"));
+    pal.setColor(QPalette::Link, QColor("#89b4fa"));
+    m_textBrowser->setPalette(pal);
 
     splitter->addWidget(leftWidget);
     splitter->addWidget(m_textBrowser);
@@ -89,34 +97,19 @@ void DocsetViewerWidget::onResultClicked(int row) {
     
     QString customCss = R"(
 <style>
-    body {
-        background-color: #1e1e2e;
-        color: #cdd6f4;
-        font-family: sans-serif;
-        padding: 20px;
+    html, body, div, p, table, tr, td, th, ul, li {
+        background-color: #1e1e2e !important;
+        background: none !important; 
+        color: #cdd6f4 !important;
     }
-    h1, h2, h3, h4 {
-        color: #89b4fa;
-        font-weight: bold;
+    a, a:visited, a:hover {
+        color: #89b4fa !important;
+        text-decoration: none !important;
     }
-    a {
-        color: #cba6f7;
-        text-decoration: none;
-    }
-    a:hover {
-        text-decoration: underline;
-    }
-    pre, code, tt {
-        background-color: #181825;
-        border-left: 3px solid #89b4fa;
-        font-family: 'JetBrains Mono', monospace;
-        padding: 4px;
-        display: block;
-        margin: 10px 0;
-        white-space: pre-wrap;
-    }
-    b, strong {
-        color: #f5c2e7;
+    pre, code, .mw-code {
+        background-color: #181825 !important;
+        border: 1px solid #313244 !important;
+        color: #cba6f7 !important;
     }
 </style>
 )";
