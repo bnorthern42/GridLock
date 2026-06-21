@@ -19,9 +19,12 @@
 #include "ExpressionEvaluatorWidget.hpp"
 #include "../core/MockHpcBackend.hpp"
 #include "../core/commands/DebugCommands.hpp"
+#include "../core/ShortcutManager.hpp"
 #include "SpackManager.hpp"
 #include <QAction>
+#include <QApplication>
 #include <QCloseEvent>
+#include <QKeyEvent>
 #include <QDialog>
 #include <QDialog>
 #include <QInputDialog>
@@ -58,6 +61,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setupUi();
   setupMenu();
   setupDocks();
+
+  gridlock::core::ShortcutManager::instance().initialize(this);
+  qApp->installEventFilter(this);
 
   // Eagerly load default source file so UI is populated before running
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
@@ -487,6 +493,16 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
   
   event->accept();
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (event->type() == QEvent::KeyPress) {
+    QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, keyEvent)) {
+      return true;
+    }
+  }
+  return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::openFile() {

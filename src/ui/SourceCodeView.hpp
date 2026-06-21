@@ -42,6 +42,7 @@ public:
     QString getPlainText() const { return toPlainText(); }
     QMargins getViewportMargins() const { return viewportMargins(); }
     void setBreakpoints(const QSet<int>& bps);
+    void toggleBreakpointOnCurrentLine();
 
     void lineNumberAreaPaintEvent(QPaintEvent *event);
     void lineNumberAreaMousePressEvent(QMouseEvent *event);

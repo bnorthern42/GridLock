@@ -53,6 +53,8 @@ public:
     GdbConsoleWidget* gdbConsoleWidget() const { return m_gdbConsoleWidget; }
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
+    ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
+    gridlock::GdbRankCoordinator* coordinator() const { return m_coordinator; }
 
     void startDebuggingSession(const QString& binaryPath, int ranks);
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
@@ -68,6 +70,7 @@ public slots:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void setupUi();

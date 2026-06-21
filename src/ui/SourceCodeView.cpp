@@ -162,6 +162,16 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     m_lineNumberArea->update();
 }
 
+void SourceCodeView::toggleBreakpointOnCurrentLine() {
+    QTextCursor cursor = textCursor();
+    int lineNum = cursor.blockNumber() + 1;
+    if (breakpoints.contains(lineNum)) breakpoints.remove(lineNum);
+    else breakpoints.insert(lineNum);
+    m_lineNumberArea->update();
+    QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
+    emit breakpointToggled(emitPath, lineNum, false);
+}
+
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     QPainter painter(m_lineNumberArea);
     painter.fillRect(event->rect(), QColor(40, 40, 40));

@@ -35,6 +35,7 @@ src_files = [
   'src/core/MockHpcBackend.cpp',
   'src/ui/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp',
+  'src/core/ShortcutManager.cpp',
   'src/core/DocsetManager.cpp',
   'src/ui/ThemeManager.cpp'
 ]
@@ -63,6 +64,7 @@ moc_headers = [
   'src/core/HpcBackend.hpp',
   'src/core/MockHpcBackend.hpp',
   'src/ui/SpackManager.hpp',
+  'src/core/ShortcutManager.hpp',
   'src/core/DocsetManager.hpp'
 ]
 
@@ -169,6 +171,7 @@ ui_test_src = [
   'src/core/MockHpcBackend.cpp',
   'src/ui/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp',
+  'src/core/ShortcutManager.cpp',
   'src/core/DocsetManager.cpp',
   'src/ui/ThemeManager.cpp'
 ]
@@ -195,6 +198,7 @@ ui_test_moc_headers = [
   'src/core/HpcBackend.hpp',
   'src/core/MockHpcBackend.hpp',
   'src/ui/SpackManager.hpp',
+  'src/core/ShortcutManager.hpp',
   'src/core/DocsetManager.hpp'
 ]
 
