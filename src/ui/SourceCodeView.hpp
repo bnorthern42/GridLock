@@ -42,7 +42,8 @@ public:
     QString getPlainText() const { return toPlainText(); }
     QMargins getViewportMargins() const { return viewportMargins(); }
     void setBreakpoints(const QSet<int>& bps);
-    void toggleBreakpointOnCurrentLine();
+    void toggleBreakpoint(int lineNum);
+    int getCurrentLineNumber() const;
 
     void lineNumberAreaPaintEvent(QPaintEvent *event);
     void lineNumberAreaMousePressEvent(QMouseEvent *event);
@@ -68,6 +69,7 @@ private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
     void updateLineNumberArea(const QRect &rect, int dy);
     void handleHoverTimeout();
+    void highlightCurrentLine();
 
 private:
     LineNumberArea* m_lineNumberArea;

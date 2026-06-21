@@ -5,6 +5,13 @@
 default_ranks = 6
 gdb_path = 'gdb'
 
+[project]
+binaryArguments = ''
+customGdbPath = 'gdb'
+targetBinary = ''
+watchExpressions = []
+workingDirectory = ''
+
 [theme.assembly]
 address = '#555555'
 opcode = '#00ff7f'

@@ -1,6 +1,7 @@
 #include "DebugCommands.hpp"
 #include "../../GdbRankCoordinator.hpp"
 #include "../../ui/MainWindow.hpp"
+#include "../../ui/SourceCodeView.hpp"
 
 namespace gridlock::core::commands {
 
@@ -46,6 +47,15 @@ TerminateCommand::TerminateCommand(gridlock::ui::MainWindow* mainWindow)
 void TerminateCommand::execute() {
     if (m_mainWindow) {
         m_mainWindow->close();
+    }
+}
+
+ToggleBreakpointCommand::ToggleBreakpointCommand(gridlock::ui::SourceCodeView* view, int line)
+    : m_view(view), m_line(line) {}
+
+void ToggleBreakpointCommand::execute() {
+    if (m_view) {
+        m_view->toggleBreakpoint(m_line);
     }
 }
 

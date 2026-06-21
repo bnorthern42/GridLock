@@ -268,12 +268,14 @@ commands_test_src = [
   'tests/test_commands.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/GdbRankCoordinator.cpp',
-  'src/core/ConfigManager.cpp'
+  'src/core/ConfigManager.cpp',
+  'src/ui/SourceCodeView.cpp'
 ]
 
 commands_test_moc_headers = [
   'tests/test_commands.hpp',
-  'src/GdbRankCoordinator.hpp'
+  'src/GdbRankCoordinator.hpp',
+  'src/ui/SourceCodeView.hpp'
 ]
 
 processed_commands_test_files = qt6.compile_moc(

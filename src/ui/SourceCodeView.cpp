@@ -138,6 +138,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     updateLineNumberAreaWidth(0);
 
     setReadOnly(true);
+    setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     setLineWrapMode(QPlainTextEdit::NoWrap);
     QFont font("monospace");
     font.setStyleHint(QFont::Monospace);
@@ -155,6 +156,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     m_hoverTimer = new QTimer(this);
     m_hoverTimer->setSingleShot(true);
     connect(m_hoverTimer, &QTimer::timeout, this, &SourceCodeView::handleHoverTimeout);
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
 }
 
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
@@ -162,14 +164,28 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     m_lineNumberArea->update();
 }
 
-void SourceCodeView::toggleBreakpointOnCurrentLine() {
-    QTextCursor cursor = textCursor();
-    int lineNum = cursor.blockNumber() + 1;
+int SourceCodeView::getCurrentLineNumber() const {
+    return textCursor().blockNumber() + 1;
+}
+
+void SourceCodeView::toggleBreakpoint(int lineNum) {
     if (breakpoints.contains(lineNum)) breakpoints.remove(lineNum);
     else breakpoints.insert(lineNum);
     m_lineNumberArea->update();
     QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
     emit breakpointToggled(emitPath, lineNum, false);
+}
+
+void SourceCodeView::highlightCurrentLine() {
+    QList<QTextEdit::ExtraSelection> selections;
+    QTextEdit::ExtraSelection selection;
+    QColor highlightColor("#313244");
+    selection.format.setBackground(highlightColor);
+    selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+    selection.cursor = textCursor();
+    selection.cursor.clearSelection();
+    selections.append(selection);
+    setExtraSelections(selections);
 }
 
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {

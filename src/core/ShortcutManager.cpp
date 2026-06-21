@@ -51,8 +51,12 @@ void ShortcutManager::initialize(gridlock::ui::MainWindow* mainWindow) {
     };
 
     m_actions[QKeySequence("Alt+B")] = [this]() {
-        if (m_mainWindow && m_mainWindow->getSourceCodeView()) {
-            m_mainWindow->getSourceCodeView()->toggleBreakpointOnCurrentLine();
+        if (m_mainWindow && m_mainWindow->editorTabManager()) {
+            if (auto view = m_mainWindow->editorTabManager()->currentSourceCodeView()) {
+                int lineNum = view->getCurrentLineNumber();
+                auto cmd = std::make_unique<commands::ToggleBreakpointCommand>(view, lineNum);
+                m_mainWindow->executeCommand(std::move(cmd));
+            }
         }
     };
 }

@@ -8,6 +8,7 @@ class GdbRankCoordinator;
 
 namespace gridlock::ui {
 class MainWindow;
+class SourceCodeView;
 }
 
 namespace gridlock::core::commands {
@@ -53,6 +54,15 @@ public:
     void execute() override;
 private:
     gridlock::ui::MainWindow* m_mainWindow;
+};
+
+class ToggleBreakpointCommand : public IDebugCommand {
+public:
+    ToggleBreakpointCommand(gridlock::ui::SourceCodeView* view, int line);
+    void execute() override;
+private:
+    gridlock::ui::SourceCodeView* m_view;
+    int m_line;
 };
 
 } // namespace gridlock::core::commands
