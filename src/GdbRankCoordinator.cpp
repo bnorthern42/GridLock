@@ -163,6 +163,22 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
   }
 }
 
+void GdbRankCoordinator::initializeMockSession(int rankCount, bool simulateInitialSync) {
+  terminateAllSessions();
+  for (int i = 0; i < rankCount; ++i) {
+    auto rp = std::make_unique<RankProcess>();
+    rp->id = i;
+    rp->process = nullptr; // mock has no process
+    rp->state.rankId = i;
+    rp->state.currentState = "running";
+    rp->state.currentLine = 0;
+    if (!simulateInitialSync) {
+      rp->state.lastFiredTimestamp = "mocked";
+    }
+    m_processes.push_back(std::move(rp));
+  }
+}
+
 void GdbRankCoordinator::insertBreakpoint(const QString &location) {
   QString fileName = QFileInfo(location).fileName();
   if (fileName.isEmpty())
@@ -264,19 +280,25 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
   if (!rp->process)
     return;
 
-  rp->buffer += QString::fromUtf8(rp->process->readAllStandardOutput());
+  processGdbOutput(rankId, QString::fromUtf8(rp->process->readAllStandardOutput()));
+}
+
+void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
+  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()))
+    return;
+  auto &rp = m_processes[rankId];
+
+  rp->buffer += output;
 
   int newlineIdx = -1;
   while ((newlineIdx = rp->buffer.indexOf('\n')) != -1) {
     QString line = rp->buffer.left(newlineIdx).trimmed();
     rp->buffer.remove(0, newlineIdx + 1);
-    std::string_view sv(line.toUtf8().constData(), line.toUtf8().length());
-
     emit gdbOutputReceived(rankId, line);
 
     qDebug() << "[GDB OUT Rank" << rankId << "]:" << line;
 
-    if (sv.starts_with("*stopped")) {
+    if (line.startsWith("*stopped")) {
       // Immediately catch and cleanly sink exit notifications to prevent Regex
       // parsing errors
       if (line.contains("reason=\"exited") ||
@@ -344,11 +366,11 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
       } else {
         emit rankStateChanged(rankId, rp->state);
       }
-    } else if (sv.starts_with("*running")) {
+    } else if (line.startsWith("*running")) {
       rp->state.currentState = "running";
       rp->state.executionTimer.start();
       emit rankStateChanged(rankId, rp->state);
-    } else if (sv.starts_with("30")) {
+    } else if (line.startsWith("30")) {
       if (line.contains("^done")) {
         QRegularExpression evalRe(
             "30(\\d+)\\^done,name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
@@ -415,7 +437,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
           emit rankStateChanged(rankId, rp->state);
         }
       }
-    } else if (sv.starts_with("200")) {
+    } else if (line.startsWith("200")) {
       if (line.contains("asm_insns=")) {
         QString prettyAsm;
         QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
@@ -440,15 +462,15 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
 
       // Chain variable evaluation after disassembly finishes
       writeCmd(rankId, "-var-update 1 *\n");
-    } else if (line.contains("^error") && !sv.starts_with("30") &&
-               !sv.starts_with("40") && !sv.starts_with("200")) {
+    } else if (line.contains("^error") && !line.startsWith("30") &&
+               !line.startsWith("40") && !line.startsWith("200")) {
       QRegularExpression errorRe("msg=\"([^\"]+)\"");
       auto match = errorRe.match(line);
       QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
 
       rp->state.disassemblyText = QString("; GDB Error: %1").arg(errMsg);
       emit rankStateChanged(rankId, rp->state);
-    } else if (line.contains("asm_insns=") && !sv.starts_with("200")) {
+    } else if (line.contains("asm_insns=") && !line.startsWith("200")) {
       QString prettyAsm;
       QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
       auto i = instRe.globalMatch(line);

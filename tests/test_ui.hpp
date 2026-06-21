@@ -10,4 +10,7 @@ private slots:
     void testMainLayoutStructure();
     void testSourceCodeViewportMargins();
     void testServerRackStateUpdate();
+    void testAsmSyntaxHighlighter();
+    void testSourceCodeHighlightBounds();
+    void testDifferentialGridExpansion();
 };

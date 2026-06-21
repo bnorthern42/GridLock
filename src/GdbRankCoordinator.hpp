@@ -23,6 +23,8 @@ public:
   void requestDisassemblyFallback(int rankId);
   void flushCachedBreakpoints(int rankId);
   void writeCmd(int rankId, const QString &cmd);
+  void processGdbOutput(int rankId, const QString& output);
+  void initializeMockSession(int rankCount, bool simulateInitialSync = false);
 
   int getProcessCount() const { return m_processes.size(); }
   RankState getRankState(int rankId) const {

@@ -125,6 +125,29 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
 
 test('ui_tests', gridlock_ui_tests)
 
+config_test_src = [
+  'tests/test_config.cpp',
+  'src/core/ConfigManager.cpp'
+]
+
+config_test_moc_headers = [
+  'tests/test_config.hpp'
+]
+
+processed_config_test_files = qt6.compile_moc(
+  headers : config_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_config_tests = executable('gridlock_config_tests',
+  config_test_src,
+  processed_config_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('config_tests', gridlock_config_tests)
+
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
   output: 'mpi_mm_bin',
