@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QPalette>
 #include <QColor>
+#include <QRegularExpression>
 
 namespace gridlock::ui {
 
@@ -94,6 +95,16 @@ void DocsetViewerWidget::onResultClicked(int row) {
     }
 
     QString htmlOutput = file.readAll();
+    
+    // "Scorched Earth" regex scrubbers
+    QRegularExpression::PatternOptions options = QRegularExpression::CaseInsensitiveOption;
+    htmlOutput.replace(QRegularExpression("background-color:\\s*(white|#fff|#ffffff);?", options), "background-color: #1e1e2e;");
+    htmlOutput.replace(QRegularExpression("background:\\s*(white|#fff|#ffffff);?", options), "background: #1e1e2e;");
+    htmlOutput.replace(QRegularExpression("color:\\s*(black|#000|#000000);?", options), "color: #cdd6f4;");
+    htmlOutput.replace(QRegularExpression("bgcolor=[\"']?(white|#ffffff)[\"']?", options), "bgcolor=\"#1e1e2e\"");
+    
+    htmlOutput.replace(QRegularExpression("<body[^>]*>", options), "<body style=\"background-color: #1e1e2e; color: #cdd6f4;\">");
+    htmlOutput.replace(QRegularExpression("<style[^>]*>.*?</style>", QRegularExpression::DotMatchesEverythingOption | options), "");
     
     QString customCss = R"(
 <style>
