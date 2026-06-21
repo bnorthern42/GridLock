@@ -55,13 +55,17 @@ void LspCoordinator::stop() {
     }
 }
 
-void LspCoordinator::sendPayload(const QJsonObject& payload) {
+QByteArray LspCoordinator::formatMessage(const QJsonObject& payload) {
     QJsonDocument doc(payload);
     QByteArray json = doc.toJson(QJsonDocument::Compact);
     QByteArray header = QString("Content-Length: %1\r\n\r\n").arg(json.size()).toUtf8();
-    
-    m_process->write(header);
-    m_process->write(json);
+    return header + json;
+}
+
+void LspCoordinator::sendPayload(const QJsonObject& payload) {
+    if (m_process->state() == QProcess::Running) {
+        m_process->write(formatMessage(payload));
+    }
 }
 
 void LspCoordinator::readyReadStandardError() {
@@ -69,7 +73,11 @@ void LspCoordinator::readyReadStandardError() {
 }
 
 void LspCoordinator::readyReadStandardOutput() {
-    m_buffer.append(m_process->readAllStandardOutput());
+    processRawOutput(m_process->readAllStandardOutput());
+}
+
+void LspCoordinator::processRawOutput(const QByteArray& data) {
+    m_buffer.append(data);
 
     while (true) {
         int headerEnd = m_buffer.indexOf("\r\n\r\n");
@@ -102,6 +110,14 @@ void LspCoordinator::readyReadStandardOutput() {
 void LspCoordinator::processMessage(const QJsonObject& message) {
     if (message.contains("id")) {
         int id = message["id"].toInt();
+        
+        if (!m_isInitialized && message.contains("result")) {
+            QJsonObject result = message["result"].toObject();
+            if (result.contains("capabilities")) {
+                m_isInitialized = true;
+            }
+        }
+        
         if (m_hoverRequests.contains(id)) {
             QPoint pos = m_hoverRequests.take(id);
             QString markdown = "";

@@ -21,6 +21,10 @@ public:
     void didOpen(const QString& file, const QString& text);
     void requestHover(const QString& file, int line, int character, QPoint globalPos = QPoint());
 
+    bool isInitialized() const { return m_isInitialized; }
+    static QByteArray formatMessage(const QJsonObject& payload);
+    void processRawOutput(const QByteArray& data);
+
 signals:
     void hoverResultReceived(const QString& resultMarkdown, const QPoint& globalPos);
 
@@ -36,6 +40,7 @@ private:
     QByteArray m_buffer;
     int m_nextRequestId = 1;
     QMap<int, QPoint> m_hoverRequests; // requestId -> globalPos
+    bool m_isInitialized = false;
 };
 
 } // namespace gridlock::core

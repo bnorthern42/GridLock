@@ -86,6 +86,30 @@ gridlock_tests = executable('gridlock_tests',
 
 test('coordinator_tests', gridlock_tests)
 
+lsp_test_src = [
+  'tests/test_lsp.cpp',
+  'src/core/LspCoordinator.cpp'
+]
+
+lsp_test_moc_headers = [
+  'tests/test_lsp.hpp',
+  'src/core/LspCoordinator.hpp'
+]
+
+processed_lsp_test_files = qt6.compile_moc(
+  headers : lsp_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_lsp_tests = executable('gridlock_lsp_tests',
+  lsp_test_src,
+  processed_lsp_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('lsp_tests', gridlock_lsp_tests)
+
 ui_test_src = [
   'tests/test_ui.cpp',
   'src/ui/MainWindow.cpp',
