@@ -144,6 +144,10 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
 
     // Delay the connection to give mpiexec and gdbserver time to bind to ports
     QTimer::singleShot(500, this, [this, id = i]() {
+        // OpenMPI relies heavily on internal socket pipelines that can occasionally 
+        // raise SIGPIPE. GDB intercepts this and halts. We must suppress it.
+        writeCmd(id, "-interpreter-exec console \"handle SIGPIPE nostop noprint pass\"\n");
+
         QString connectCmd =
             QString("-target-select remote localhost:%1\n").arg(2000 + id);
         writeCmd(id, connectCmd);
@@ -306,7 +310,7 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
           matchAddr.hasMatch() ? matchAddr.captured(1) : "$pc";
 
       QString asmCmd =
-          QString("200-data-disassemble -a %1 -- 0\n").arg(stopAddress);
+          QString("200-data-disassemble -s %1 -e \"%1 + 40\" -- 0\n").arg(stopAddress);
       writeCmd(rankId, asmCmd);
 
       QRegularExpression threadRe("thread-id=\"(\\d+)\"");
