@@ -2,71 +2,97 @@
 
 [![Build Status](https://github.com/bnorthern42/GridLock/actions/workflows/build.yml/badge.svg)](https://github.com/bnorthern42/GridLock/actions)
 
-## Overview
-GridLock is a specialized Integrated Development Environment (IDE) built entirely around the complexities of debugging parallel MPI (Message Passing Interface) applications. It acts as a graphical frontend to GDB/MI, allowing developers to inspect state, track variable execution, and visualize real-time x86_64 disassembly across multiple independent MPI ranks concurrently.
+GridLock is a Wayland-native, graphical GDB/MI frontend specifically designed for numerical methods and parallel MPI (Message Passing Interface) applications. It provides a specialized environment tailored to the complexities of parallel computing, allowing developers to inspect state, track execution, and visualize real-time x86_64 disassembly across multiple independent MPI ranks concurrently.
 
-## Disclaimer / WIP Warning
-**GridLock is currently in an Alpha/WIP state.** It is a personal project intended for research use. Use at your own risk. Features are subject to change and stability is not guaranteed.
+> [!WARNING]
+> **GridLock is currently in an Alpha/WIP state.** It is a personal project intended for research use. Use at your own risk. Features are subject to change and stability is not guaranteed.
 
-## Prerequisites
-To compile and run GridLock, you must have the following dependencies installed on your system:
-- **C++23 Compiler:** (GCC 13+ or Clang 16+)
-- **Build System:** Meson and Ninja
-- **UI Framework:** Qt6 (Widgets, Core, Gui)
-- **MPI Implementation:** MPICH or OpenMPI
-- **Debugger Backend:** GDB (GNU Debugger) with MI3 support
-- **Remote Target Server:** `gdbserver`
-- **Language Server:** `clangd` (for semantic code intelligence and LSP support)
+---
 
-## Build Instructions
-1. Clone the repository:
+## Core Capabilities
+
+### Multi-Rank Debugging
+* **Multi-Rank State Inspection:** Monitor and step through multiple independent MPI processes simultaneously within a unified interface.
+* **Visual Conditional Breakpoints:** Define, insert, and update conditional breakpoints directly in the code editor's gutter.
+* **Live Register View:** A dedicated CPU registers panel tracks and updates register states in real-time alongside target execution.
+* **Memory Hex/ASCII Dump:** Inspect raw memory chunks by supplying variable names or absolute pointer addresses directly to GDB, rendered in a structured Hex/ASCII format.
+
+### HPC Orchestration
+* **SLURM Job Integration:** Submit and track SLURM batch jobs directly from the IDE using customizable bash templates, with built-in support for GPU allocation.
+* **Spack Environment Integration:** Browse, search, and monitor Spack packages running on remote clusters through an integrated graphical frontend.
+* **Remote Environment & SSH Management:** Centrally configure hostnames, access keys, and remote execution environments from the preferences dialog.
+
+### Developer Experience
+* **Semantic Hover Tooltips:** Powered by a `clangd` language server backend and GDB/MI to instantly view live variable values on hover.
+* **Offline Reference Manual:** Access local documentation and system man pages via an integrated viewer that supports the open-source `.docset` standard.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+To compile and run GridLock, ensure the following dependencies are installed on your system:
+
+* **C++23 Compiler:** GCC 13+ or Clang 16+
+* **Build System:** Meson and Ninja
+* **UI Framework:** Qt6 (Widgets, Core, and Gui modules)
+* **MPI Implementation:** MPICH or OpenMPI
+* **Debugger Backend:** GDB (GNU Debugger) with MI3 support
+* **Remote Target Server:** `gdbserver`
+* **Language Server:** `clangd` (for semantic code intelligence and LSP support)
+
+### Building the Project
+
+1. **Clone the repository:**
    ```bash
    git clone git@github.com:bnorthern42/GridLock.git
    cd GridLock
    ```
-2. Setup the build directory using Meson:
+
+2. **Configure the build directory:**
    ```bash
    meson setup build
    ```
-3. Compile the project using Ninja:
+
+3. **Compile the application:**
    ```bash
    ninja -C build
    ```
-4. Run the executable:
-   ```bash
-   ./build/gridlock
-   ```
-   To run GridLock in test mode (useful for running tests without a physical MPI backend):
-   ```bash
-   ./build/gridlock --test-mode
-   ```
 
-## Key Features
-- **Multi-Rank State Inspection:** Seamlessly monitor and step through multiple MPI processes simultaneously.
-- **Conditional Breakpoints:** `Ctrl+Click` the gutter line numbers in the code editor to insert conditional breakpoints (e.g., `i == 5`). If a breakpoint already exists, `Ctrl+Click` updates its condition, while a regular click toggles it off.
-- **Live Register View:** A dedicated `Registers` tab continuously tracks and updates CPU register states in real-time alongside execution.
-- **MemView Hex Dump:** Inspect raw memory chunks by supplying variable names or absolute pointer addresses directly into GDB, presented in a clean Hex/ASCII format.
-- **Semantic Hover Tooltips:** Powered by Clangd and GDB/MI, hover over any active variable in the editor to instantly see its live value.
-- **HPC Orchestration:** Submit and track SLURM batch jobs directly from the IDE using customizable bash templates (with built-in GPU request configurations).
-- **Remote Environment Management:** Integrated Spack GUI frontend acting as an HPC console, allowing you to browse, search, and monitor packages running on remote clusters.
-- **Remote SSH Configuration:** Configure secure access keys, target hostnames, and remote environments centrally from the Preferences dialog.
+### Running the Application
 
+* **Standard Execution:**
+  To run GridLock under normal operating conditions:
+  ```bash
+  ./build/gridlock
+  ```
 
-## Example Workflow
-1. Load a target MPI source file (e.g., `mpi_mm.c`).
-2. Set a breakpoint by clicking the gutter.
-3. Click **▶ Run Target** in the main toolbar.
-4. Your program hits line 83 and pauses.
-5. You open the Memory tab, type `&offset` (or the raw hex address `0x7fffffffc498`), and hit Read Memory.
-6. It instantly pulls 256 bytes of raw application memory directly from GDB and formats it into a beautiful, classic Hex/ASCII grid.
+* **Test Mode:**
+  To run GridLock in test mode, which simulates the MPI environment without requiring a physical MPI backend:
+  ```bash
+  ./build/gridlock --test-mode
+  ```
 
-## Roadmap
-For upcoming features and architectural milestones, please see our [ROADMAP.md](ROADMAP.md).
+---
+
+## Known Limitations & Roadmap
+
+### Known Limitations
+* **Single-File Scope:** GridLock currently supports debugging and editing a single file at a time.
+* **No Hybrid Parallelism Support:** There is currently no support for debugging hybrid MPI/OpenMP applications.
+
+### Future Roadmap
+For upcoming features, architectural milestones, and proposed implementations, please refer to [ROADMAP.md](ROADMAP.md).
+
+---
 
 ## Contributing
+
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for information on setting up the environment and submitting issues. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Acknowledgments & Attributions
+
 This project makes use of the excellent [toml++](https://github.com/marzer/tomlplusplus) library by mark gillard for parsing TOML configuration files.
 
 GridLock was also inspired by and built upon the ideas from the following projects:
@@ -78,9 +104,5 @@ GridLock was also inspired by and built upon the ideas from the following projec
 We also want to give a brief nod to the **Spack**, **SLURM**, and **OpenMPI** communities for the HPC tools GridLock orchestrates.
 
 ## License
+
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-
-## Other
-
-GridLock currently supports debugging a single file open/edit at a time and does not yet support debugging hybrid MPI/OpenMP programs. These are active goals for the future.
