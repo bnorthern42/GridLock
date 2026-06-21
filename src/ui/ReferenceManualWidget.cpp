@@ -2,12 +2,15 @@
 #include "../core/DocsetManager.hpp"
 #include <QVBoxLayout>
 #include <QFile>
+#include <QSettings>
 
 namespace gridlock::ui {
 
-ReferenceManualWidget::ReferenceManualWidget(QWidget *parent)
+// --- DocsetViewerWidget ---
+DocsetViewerWidget::DocsetViewerWidget(QWidget *parent)
     : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
 
     QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
 
@@ -35,13 +38,13 @@ ReferenceManualWidget::ReferenceManualWidget(QWidget *parent)
 
     mainLayout->addWidget(splitter);
 
-    connect(m_searchEdit, &QLineEdit::textChanged, this, &ReferenceManualWidget::performSearch);
-    connect(m_resultsList, &QListWidget::currentRowChanged, this, &ReferenceManualWidget::onResultClicked);
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &DocsetViewerWidget::performSearch);
+    connect(m_resultsList, &QListWidget::currentRowChanged, this, &DocsetViewerWidget::onResultClicked);
 }
 
-ReferenceManualWidget::~ReferenceManualWidget() = default;
+DocsetViewerWidget::~DocsetViewerWidget() = default;
 
-void ReferenceManualWidget::performSearch() {
+void DocsetViewerWidget::performSearch() {
     QString query = m_searchEdit->text().trimmed();
     m_resultsList->clear();
     m_searchResults.clear();
@@ -55,7 +58,7 @@ void ReferenceManualWidget::performSearch() {
     }
 }
 
-void ReferenceManualWidget::onResultClicked(int row) {
+void DocsetViewerWidget::onResultClicked(int row) {
     if (row < 0 || row >= m_searchResults.size()) return;
 
     QString htmlPath = m_searchResults[row].second;
@@ -121,5 +124,121 @@ void ReferenceManualWidget::onResultClicked(int row) {
         m_textBrowser->scrollToAnchor(htmlPath.mid(hashIdx + 1));
     }
 }
+
+// --- ManPageViewerWidget ---
+ManPageViewerWidget::ManPageViewerWidget(QWidget *parent)
+    : QWidget(parent), m_process(new QProcess(this)) {
+    auto* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setPlaceholderText("Search Man Pages (e.g., printf)...");
+
+    m_textBrowser = new QTextBrowser(this);
+    m_textBrowser->setOpenExternalLinks(true);
+    m_textBrowser->setReadOnly(true);
+
+    mainLayout->addWidget(m_searchEdit);
+    mainLayout->addWidget(m_textBrowser);
+
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, &ManPageViewerWidget::performSearch);
+    connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, &ManPageViewerWidget::onProcessFinished);
+}
+
+ManPageViewerWidget::~ManPageViewerWidget() = default;
+
+void ManPageViewerWidget::performSearch() {
+    QString query = m_searchEdit->text().trimmed();
+    if (query.isEmpty()) return;
+
+    m_textBrowser->setHtml("<div style='color: #cdd6f4;'>Searching man pages for: " + query.toHtmlEscaped() + "...</div>");
+
+    if (m_process->state() == QProcess::Running) {
+        m_process->kill();
+        m_process->waitForFinished();
+    }
+
+    m_process->start("man", QStringList() << "-Thtml" << query);
+}
+
+void ManPageViewerWidget::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+    if (exitStatus == QProcess::CrashExit || exitCode != 0) {
+        QString errorOutput = m_process->readAllStandardError();
+        m_textBrowser->setHtml("<div style='color: #f38ba8;'><h2>Error loading man page.</h2><p>" + errorOutput.toHtmlEscaped() + "</p></div>");
+        return;
+    }
+
+    QString htmlOutput = m_process->readAllStandardOutput();
+
+    QString customCss = R"(
+<style>
+    body {
+        background-color: #1e1e2e;
+        color: #cdd6f4;
+        font-family: sans-serif;
+        padding: 20px;
+    }
+    h1, h2, h3, h4 {
+        color: #89b4fa;
+        font-weight: bold;
+    }
+    a {
+        color: #cba6f7;
+        text-decoration: none;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
+    pre, code, tt {
+        background-color: #181825;
+        border-left: 3px solid #89b4fa;
+        font-family: 'JetBrains Mono', monospace;
+        padding: 4px;
+        display: block;
+        margin: 10px 0;
+        white-space: pre-wrap;
+    }
+    b, strong {
+        color: #f5c2e7;
+    }
+</style>
+)";
+
+    if (htmlOutput.contains("</head>")) {
+        htmlOutput.replace("</head>", customCss + "</head>");
+    } else {
+        htmlOutput = customCss + htmlOutput;
+    }
+
+    m_textBrowser->setHtml(htmlOutput);
+}
+
+// --- ReferenceManualWidget ---
+ReferenceManualWidget::ReferenceManualWidget(QWidget *parent)
+    : QWidget(parent) {
+    auto* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_tabWidget = new QTabWidget(this);
+    m_tabWidget->setDocumentMode(true); // Gives a flat, modern appearance
+
+    m_tabWidget->addTab(new DocsetViewerWidget(m_tabWidget), "Docsets");
+    m_tabWidget->addTab(new ManPageViewerWidget(m_tabWidget), "Man Pages");
+
+    mainLayout->addWidget(m_tabWidget);
+
+    QSettings settings("GridLock", "Debugger");
+    int savedIndex = settings.value("ui/reference_manual_tab", 0).toInt();
+    if (savedIndex >= 0 && savedIndex < m_tabWidget->count()) {
+        m_tabWidget->setCurrentIndex(savedIndex);
+    }
+
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [](int index) {
+        QSettings settings("GridLock", "Debugger");
+        settings.setValue("ui/reference_manual_tab", index);
+    });
+}
+
+ReferenceManualWidget::~ReferenceManualWidget() = default;
 
 } // namespace gridlock::ui
