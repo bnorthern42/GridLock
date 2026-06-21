@@ -42,7 +42,16 @@
 * [ ] **Unified Grid:** Utilize the standard `VariablesRequest` enforced by DAP so `DifferentialGrid` works for all languages.
 * [ ] **The "Dream" Feature:** Enable simultaneous debugging of different language runtimes (e.g., C++, Python, Node.js) paused at the same logical simulation timestamp, with the `DifferentialGrid` tracking memory addresses and objects in parallel.
 
-## PHASE 7: The Plugin Marketplace (Productionization)
+## PHASE 7: Alternative Debugger Backends
+
+By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerBackend` can abstract the underlying engine, allowing seamless switching between GNU GDB, LLDB, and GPU-specific debuggers.
+
+* [ ] **LLVM/LLDB Integration:** Support `lldb-mi` or `lldb-dap` to provide native macOS support and better Clang AST parsing for modern C++.
+* [ ] **GPU Debugging (CUDA/ROCm):** Support `cuda-gdb` (NVIDIA) and `rocgdb` (AMD) as selectable engines for inspecting GPU wavefronts and device VRAM.
+* [ ] **Backend Selection UI:** Extend `DebuggerSettingsPage` with a "Debugger Engine" dropdown (GNU GDB, LLDB, CUDA-GDB, ROCGDB).
+* [ ] **Dynamic UI Capabilities:** Ensure the GridLock UI dynamically enables/disables features based on the selected backend (e.g., hiding the "Registers" view if a specific backend doesn't map them the same way, or showing a "Wavefronts" tab for ROCm).
+
+## PHASE 8: The Plugin Marketplace (Productionization)
 
 * [ ] **Dynamic Loading:** Replace hardcoded language support with a `plugins/` directory system.
 
