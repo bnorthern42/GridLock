@@ -8,8 +8,8 @@ class TestGdbCoordinator : public QObject {
 private slots:
     void initTestCase();
     void testInitialRankStates();
-    void testDataDrivenParser_data();
-    void testDataDrivenParser();
+    void testGdbMiParser_data();
+    void testGdbMiParser();
     void testMultiRankSync();
     void testBreakpointCacheFlush();
     void testRecreateWatchVariable();
