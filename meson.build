@@ -37,7 +37,8 @@ src_files = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/ShortcutManager.cpp',
   'src/core/DocsetManager.cpp',
-  'src/ui/ThemeManager.cpp'
+  'src/ui/ThemeManager.cpp',
+  'src/core/VariableTreeModel.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -65,7 +66,8 @@ moc_headers = [
   'src/core/MockHpcBackend.hpp',
   'src/ui/SpackManager.hpp',
   'src/core/ShortcutManager.hpp',
-  'src/core/DocsetManager.hpp'
+  'src/core/DocsetManager.hpp',
+  'src/core/VariableTreeModel.hpp'
 ]
 
 # Process Qt6 files
@@ -173,7 +175,8 @@ ui_test_src = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/ShortcutManager.cpp',
   'src/core/DocsetManager.cpp',
-  'src/ui/ThemeManager.cpp'
+  'src/ui/ThemeManager.cpp',
+  'src/core/VariableTreeModel.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -199,7 +202,8 @@ ui_test_moc_headers = [
   'src/core/MockHpcBackend.hpp',
   'src/ui/SpackManager.hpp',
   'src/core/ShortcutManager.hpp',
-  'src/core/DocsetManager.hpp'
+  'src/core/DocsetManager.hpp',
+  'src/core/VariableTreeModel.hpp'
 ]
 
 processed_ui_test_files = qt6.compile_moc(
