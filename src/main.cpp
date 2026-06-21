@@ -16,6 +16,10 @@ int main(int argc, char *argv[]) {
     // Set org/app identity so QSettings keys are consistent everywhere.
     QApplication::setOrganizationName("GridLock");
     QApplication::setApplicationName("GridLock");
+    
+    // CRITICAL FOR WAYLAND:
+    QGuiApplication::setDesktopFileName("gridlock.desktop"); 
+    
     QApplication::setWindowIcon(QIcon(":/icon.png"));
 
     // Always use Fusion + an explicit Catppuccin-Mocha dark palette.

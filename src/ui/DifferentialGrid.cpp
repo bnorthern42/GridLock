@@ -54,6 +54,17 @@ void DifferentialGrid::addVariableColumn(const QString& name) {
     }
 }
 
+std::vector<std::string> DifferentialGrid::getWatchExpressions() const {
+    std::vector<std::string> watches;
+    for (int c = 1; c < columnCount(); ++c) {
+        if (auto* item = horizontalHeaderItem(c)) {
+            QString name = item->text();
+            watches.push_back(name.toStdString());
+        }
+    }
+    return watches;
+}
+
 void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName, const QString& value) {
     int targetRow = rankId + 1;
     

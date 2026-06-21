@@ -14,6 +14,7 @@
 #include "SourceCodeView.hpp"
 #include "EditorTabManager.hpp"
 #include "ProjectExplorerWidget.hpp"
+#include "ProjectSettingsDialog.hpp"
 #include "TerminalDock.hpp"
 #include "../core/MockHpcBackend.hpp"
 #include "../core/commands/DebugCommands.hpp"
@@ -131,7 +132,8 @@ void MainWindow::setupMenu() {
     dialog.setWindowTitle("New Session");
     QFormLayout *form = new QFormLayout(&dialog);
     QLineEdit *binaryEdit = new QLineEdit(&dialog);
-    binaryEdit->setText("build/mpi_mm_bin");
+    auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+    binaryEdit->setText(ps.targetBinary.empty() ? "build/mpi_mm_bin" : QString::fromStdString(ps.targetBinary));
     QSpinBox *rankBox = new QSpinBox(&dialog);
     rankBox->setValue(
         gridlock::core::ConfigManager::instance().getDefaultRanks());
@@ -151,6 +153,12 @@ void MainWindow::setupMenu() {
 
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
+
+  QAction *projSetAction = fileMenu->addAction("Project Settings");
+  connect(projSetAction, &QAction::triggered, this, [this]() {
+    ProjectSettingsDialog dlg(this);
+    dlg.exec();
+  });
 
   QAction *slurmAction = fileMenu->addAction("Submit SLURM Job");
   connect(slurmAction, &QAction::triggered, this, [this]() {
@@ -357,6 +365,14 @@ void MainWindow::setupDocks() {
               m_coordinator->registerWatchVariable(name);
             }
           });
+          
+  auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+  for (const auto& w : ps.watchExpressions) {
+      if (!w.empty()) {
+          m_differentialGrid->addVariableColumn(QString::fromStdString(w));
+      }
+  }
+          
   m_referenceManualWidget = new ReferenceManualWidget(m_bottomTabs);
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
   m_memView = new MemView(m_bottomTabs);
@@ -451,6 +467,13 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   if (m_lspCoordinator) {
     m_lspCoordinator->stop();
   }
+  
+  if (m_differentialGrid) {
+      auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+      ps.watchExpressions = m_differentialGrid->getWatchExpressions();
+      gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+  }
+  
   event->accept();
 }
 
@@ -532,6 +555,13 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   }
   if (m_serverRackView) {
     m_serverRackView->resetRanks(ranks);
+  }
+  
+  if (m_differentialGrid) {
+      auto watches = m_differentialGrid->getWatchExpressions();
+      for (const auto& w : watches) {
+          m_coordinator->registerWatchVariable(QString::fromStdString(w));
+      }
   }
 }
 

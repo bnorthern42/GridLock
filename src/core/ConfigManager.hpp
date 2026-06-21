@@ -42,6 +42,14 @@ struct SlurmSettings {
     QString spackRoot      = "/opt/spack"; ///< Spack install prefix on remote
 };
 
+struct ProjectSettings {
+    std::string targetBinary;
+    std::string binaryArguments;
+    std::string workingDirectory;
+    std::string customGdbPath = "gdb";
+    std::vector<std::string> watchExpressions;
+};
+
 class ConfigManager {
 public:
     static ConfigManager& instance() {
@@ -93,6 +101,10 @@ public:
     // ── Breakpoints (TOML-backed) ─────────────────────────────────────────
     QMap<QString, QSet<int>> getBreakpoints() const;
     void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints);
+
+    // ── Project Settings (TOML-backed) ────────────────────────────────────
+    ProjectSettings loadProjectSettings(const QString& projectFile = "gridlock_config.toml") const;
+    void saveProjectSettings(const ProjectSettings& ps, const QString& projectFile = "gridlock_config.toml") const;
 
 private:
     ConfigManager();

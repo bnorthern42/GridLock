@@ -173,7 +173,9 @@ void ConfigManager::saveSlurmSettings(const SlurmSettings &sl) {
 // ─── Convenience shims ───────────────────────────────────────────────────────
 
 int     ConfigManager::getDefaultRanks()  const { return getDebuggerSettings().defaultRanks; }
-QString ConfigManager::getGdbPath()       const { return getDebuggerSettings().gdbPath; }
+QString ConfigManager::getGdbPath()       const { 
+    return QString::fromStdString(loadProjectSettings().customGdbPath); 
+}
 QString ConfigManager::getMpiExecutable() const { return getDebuggerSettings().mpiExecutable; }
 QString ConfigManager::getMpiArgs()       const { return getDebuggerSettings().mpiArgs; }
 
@@ -234,6 +236,59 @@ void ConfigManager::saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints)
 
     std::ofstream out("gridlock_config.toml");
     out << m_config;
+}
+
+ProjectSettings ConfigManager::loadProjectSettings(const QString& projectFile) const {
+    ProjectSettings ps;
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(projectFile.toStdString());
+    } catch (...) {
+        return ps;
+    }
+    
+    if (auto* proj = tbl["project"].as_table()) {
+        ps.targetBinary = (*proj)["targetBinary"].value_or("");
+        ps.binaryArguments = (*proj)["binaryArguments"].value_or("");
+        ps.workingDirectory = (*proj)["workingDirectory"].value_or("");
+        ps.customGdbPath = (*proj)["customGdbPath"].value_or("gdb");
+        if (auto* watches = (*proj)["watchExpressions"].as_array()) {
+            for (auto& elem : *watches) {
+                if (auto* str = elem.as_string()) {
+                    ps.watchExpressions.push_back(str->get());
+                }
+            }
+        }
+    }
+    return ps;
+}
+
+void ConfigManager::saveProjectSettings(const ProjectSettings& ps, const QString& projectFile) const {
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(projectFile.toStdString());
+    } catch (...) {}
+
+    toml::table projTbl;
+    projTbl.insert_or_assign("targetBinary", ps.targetBinary.empty() ? "" : ps.targetBinary);
+    projTbl.insert_or_assign("binaryArguments", ps.binaryArguments.empty() ? "" : ps.binaryArguments);
+    projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty() ? "" : ps.workingDirectory);
+    projTbl.insert_or_assign("customGdbPath", ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);
+
+    toml::array watches;
+    for (const auto& w : ps.watchExpressions) {
+        if (!w.empty()) {
+            watches.push_back(w);
+        }
+    }
+    projTbl.insert_or_assign("watchExpressions", watches);
+
+    tbl.insert_or_assign("project", projTbl);
+
+    std::ofstream out(projectFile.toStdString());
+    if (out.is_open()) {
+        out << tbl;
+    }
 }
 
 } // namespace gridlock::core

@@ -279,7 +279,8 @@ int DebuggerSettingsPage::defaultRanks() const { return m_rankBox->value(); }
 void DebuggerSettingsPage::loadFromSettings() {
   const auto ds =
       gridlock::core::ConfigManager::instance().getDebuggerSettings();
-  m_gdbPathEdit->setText(ds.gdbPath);
+  const auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+  m_gdbPathEdit->setText(QString::fromStdString(ps.customGdbPath));
   m_mpiExecEdit->setText(ds.mpiExecutable);
   m_mpiArgsEdit->setText(ds.mpiArgs);
   m_rankBox->setValue(ds.defaultRanks);
@@ -765,6 +766,10 @@ void PreferencesDialog::apply() {
   ds.mpiArgs = m_debuggerPage->mpiArgs();
   ds.defaultRanks = m_debuggerPage->defaultRanks();
   gridlock::core::ConfigManager::instance().saveDebuggerSettings(ds);
+
+  auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+  ps.customGdbPath = m_debuggerPage->gdbPath().toStdString();
+  gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
 
   // ── HPC / Cluster — via ConfigManager ───────────────────────────────
   gridlock::core::HpcSettings hs;

@@ -18,6 +18,8 @@ public slots:
     void updateVariableDisplay(int rankId, const QString& varName, const QString& value);
     void addVariableColumn(const QString& name);
 
+    std::vector<std::string> getWatchExpressions() const;
+
 signals:
     void watchVariableAdded(const QString& name);
 
