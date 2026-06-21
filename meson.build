@@ -121,8 +121,8 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
 
 test('ui_tests', gridlock_ui_tests)
 
-custom_target('test_bin',
-  input: 'tests/matrix_multiply.cpp',
-  output: 'test_bin',
+custom_target('mpi_mm_bin',
+  input: 'tests/mpi_mm.c',
+  output: 'mpi_mm_bin',
   command: ['mpicxx', '@INPUT@', '-g', '-O0', '-o', '@OUTPUT@'],
   build_by_default: true)

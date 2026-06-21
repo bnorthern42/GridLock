@@ -67,7 +67,7 @@ private:
 
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;
-    QString m_currentFile = "tests/matrix_multiply.cpp";
+    QString m_currentFile = "tests/mpi_mm.c";
 };
 
 } // namespace gridlock::ui

@@ -55,7 +55,7 @@ void MainWindow::setupMenu() {
         dialog.setWindowTitle("New Session");
         QFormLayout* form = new QFormLayout(&dialog);
         QLineEdit* binaryEdit = new QLineEdit(&dialog);
-        binaryEdit->setText("build/test_bin");
+        binaryEdit->setText("build/mpi_mm_bin");
         QSpinBox* rankBox = new QSpinBox(&dialog);
         rankBox->setValue(gridlock::core::ConfigManager::instance().getDefaultRanks());
         rankBox->setMinimum(1);
@@ -107,7 +107,7 @@ void MainWindow::setupMenu() {
         connect(proc, &QProcess::readyReadStandardError, this, [this, proc]() {
             m_terminalDock->appendError(proc->readAllStandardError());
         });
-        proc->start("ninja", QStringList() << "-C" << "build" << "test_bin");
+        proc->start("ninja", QStringList() << "-C" << "build" << "mpi_mm_bin");
     });
     QAction* runTestsAction = toolsMenu->addAction("Run Tests");
     connect(runTestsAction, &QAction::triggered, this, &MainWindow::runTargetRequested);
@@ -124,7 +124,7 @@ void MainWindow::setupToolbar() {
 
     QAction* runAction = new QAction("▶ Run Target", this);
     connect(runAction, &QAction::triggered, this, [this]() {
-        startDebuggingSession("build/test_bin", gridlock::core::ConfigManager::instance().getDefaultRanks());
+        startDebuggingSession("build/mpi_mm_bin", gridlock::core::ConfigManager::instance().getDefaultRanks());
     });
     toolbar->addAction(runAction);
 
@@ -317,7 +317,7 @@ void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
     if (!m_coordinator) return;
     
     if (m_currentFile.isEmpty() || m_sourceCodeView->toPlainText().trimmed().isEmpty()) {
-        loadSourceFile("tests/matrix_multiply.cpp");
+        loadSourceFile("tests/mpi_mm.c");
     }
 
     // 1. Launch the processes

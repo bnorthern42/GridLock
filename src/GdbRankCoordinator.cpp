@@ -183,7 +183,8 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
         qDebug() << "[GDB OUT Rank" << rankId << "]:" << line;
 
         if (sv.starts_with("*stopped") && !line.contains("reason=\"exited\"")) {
-            rp->state.currentState = "stopped";
+            bool isInternalSync = line.contains("reason=\"breakpoint-hit\"") && line.contains("func=\"main\"");
+            rp->state.currentState = isInternalSync ? "sync" : "stopped";
             if (rp->state.executionTimer.isValid()) {
                 rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
                 rp->state.executionTimer.invalidate();
@@ -226,7 +227,9 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
                 rp->process->write("-thread-info\n");
             }
 
-            emit rankStateChanged(rankId, rp->state);
+            if (!isInternalSync) {
+                emit rankStateChanged(rankId, rp->state);
+            }
         } else if (sv.starts_with("*running")) {
             rp->state.currentState = "running";
             rp->state.executionTimer.start();

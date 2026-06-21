@@ -189,7 +189,7 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
             if (breakpoints.contains(lineNum)) breakpoints.remove(lineNum);
             else breakpoints.insert(lineNum);
             m_lineNumberArea->update();
-            QString emitPath = m_currentFilePath.isEmpty() ? "tests/matrix_multiply.cpp" : m_currentFilePath;
+            QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
             emit breakpointToggled(emitPath, lineNum);
             break;
         }

@@ -37,11 +37,11 @@ void GridLockAutomationRunner::startTestSequence() {
 }
 
 bool GridLockAutomationRunner::generateAndCompileTestTarget() {
-    QString sourceFile = "tests/matrix_multiply.cpp";
+    QString sourceFile = "tests/mpi_mm.c";
     if (!QFile::exists(sourceFile)) {
-        qDebug() << "Test file missing: tests/matrix_multiply.cpp";
+        qDebug() << "Test file missing: tests/mpi_mm.c";
         if (m_mainWindow && m_mainWindow->terminalDock()) {
-            m_mainWindow->terminalDock()->appendError("Error: tests/matrix_multiply.cpp not found!\n");
+            m_mainWindow->terminalDock()->appendError("Error: tests/mpi_mm.c not found!\n");
         }
         return false;
     }
@@ -54,7 +54,7 @@ bool GridLockAutomationRunner::generateAndCompileTestTarget() {
         connect(&compiler, &QProcess::readyReadStandardError, [&]() {
             m_mainWindow->terminalDock()->appendError(QString::fromUtf8(compiler.readAllStandardError()));
         });
-        m_mainWindow->terminalDock()->appendText("Compiling tests/matrix_multiply.cpp...\n");
+        m_mainWindow->terminalDock()->appendText("Compiling tests/mpi_mm.c...\n");
     }
 
     QDir dir;
@@ -64,7 +64,7 @@ bool GridLockAutomationRunner::generateAndCompileTestTarget() {
 
     compiler.start("ninja", QStringList() << "-C" << "build" << "clean");
     compiler.waitForFinished();
-    compiler.start("ninja", QStringList() << "-C" << "build" << "test_bin");
+    compiler.start("ninja", QStringList() << "-C" << "build" << "mpi_mm_bin");
     compiler.waitForFinished();
     
     if (compiler.exitCode() != 0) {
@@ -87,17 +87,17 @@ void GridLockAutomationRunner::runNextStep() {
     if (m_step == 1) {
         std::cout << "[TEST] Tick 1: Initialize (Compile and Load)\n";
         generateAndCompileTestTarget();
-        m_mainWindow->loadSourceFile("tests/matrix_multiply.cpp");
-        QFile file("tests/matrix_multiply.cpp");
+        m_mainWindow->loadSourceFile("tests/mpi_mm.c");
+        QFile file("tests/mpi_mm.c");
         if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
             m_testSourceCode = file.readAll();
         }
     } else if (m_step == 2) {
         std::cout << "[TEST] Tick 2: Launch\n";
-        m_coordinator->launchParallelSession("build/test_bin", 4);
+        m_coordinator->launchParallelSession("build/mpi_mm_bin", 4);
     } else if (m_step == 3) {
         std::cout << "[TEST] Tick 3: Breakpoint\n";
-        m_coordinator->insertBreakpoint("tests/matrix_multiply.cpp:18");
+        m_coordinator->insertBreakpoint("tests/mpi_mm.c:18");
     } else if (m_step == 4) {
         std::cout << "[TEST] Tick 4: Execution\n";
         m_coordinator->runAll(); // This already sends -exec-run
