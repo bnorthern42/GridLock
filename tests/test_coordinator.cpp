@@ -90,6 +90,21 @@ void TestGdbCoordinator::testBreakpointCacheFlush() {
     QCOMPARE(coord.getRankState(0).lastFiredTimestamp, QString("synced"));
 }
 
+void TestGdbCoordinator::testRecreateWatchVariable() {
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(1);
+    
+    coord.registerWatchVariable("offset");
+    
+    coord.processGdbOutput(0, "300^error,msg=\"-var-create: unable to create variable object\"\n");
+    QCOMPARE(coord.getRankState(0).variableWatches["offset"], QString("N/A"));
+    
+    coord.processGdbOutput(0, "*stopped,reason=\"breakpoint-hit\",frame={fullname=\"mpi_mm.c\",line=\"79\"}\n");
+    coord.processGdbOutput(0, "300^done,name=\"var1\",numchild=\"0\",value=\"123\",type=\"int\"\n");
+    
+    QCOMPARE(coord.getRankState(0).variableWatches["offset"], QString("123"));
+}
+
 void TestGdbCoordinator::cleanupTestCase() {
 }
 

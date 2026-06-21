@@ -131,4 +131,23 @@ void TestMainWindowUI::testDifferentialGridExpansion() {
     QCOMPARE(itemDivergent->text(), QString("divergent_value"));
 }
 
+void TestMainWindowUI::testDifferentialGridEmits() {
+    gridlock::ui::DifferentialGrid grid;
+    int emitCount = 0;
+    QObject::connect(&grid, &gridlock::ui::DifferentialGrid::watchVariableAdded, [&emitCount](const QString& name) {
+        emitCount++;
+    });
+
+    QHash<QString, QString> vars;
+    vars["offset"] = "123";
+    grid.setVariableData(0, vars);
+    
+    // Should NOT emit watchVariableAdded for the placeholder "-" or anything else during setVariableData
+    QCOMPARE(emitCount, 0);
+
+    // Editing row 0 col 0 SHOULD emit
+    grid.item(0, 0)->setText("mtype");
+    QCOMPARE(emitCount, 1);
+}
+
 QTEST_MAIN(TestMainWindowUI)

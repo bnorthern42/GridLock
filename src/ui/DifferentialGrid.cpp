@@ -14,7 +14,7 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     setItem(0, 0, new QTableWidgetItem(""));
     
     connect(this, &QTableWidget::cellChanged, this, [this](int row, int col) {
-        if (row == 0) {
+        if (row == 0 && col == 0) {
             QTableWidgetItem* cell = item(row, col);
             if (!cell) return;
             QString newVarName = cell->text().trimmed();

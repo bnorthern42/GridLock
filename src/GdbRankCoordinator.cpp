@@ -165,6 +165,10 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
 
 void GdbRankCoordinator::initializeMockSession(int rankCount, bool simulateInitialSync) {
   terminateAllSessions();
+  m_processes.clear();
+  m_varNameMap.clear();
+  m_varNameRevMap.clear();
+  m_watchVariables.clear();
   for (int i = 0; i < rankCount; ++i) {
     auto rp = std::make_unique<RankProcess>();
     rp->id = i;
@@ -315,7 +319,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
 
       QRegularExpression rxFile("fullname=\"([^\"]+)\"");
-      QRegularExpression rxLine("frame=\\{[^}]*line=\"(\\d+)\"");
+      QRegularExpression rxLine("frame=\\{.*?line=\"(\\d+)\"");
       QString file = rp->state.currentFile;
       int lineNum = rp->state.currentLine;
 
@@ -368,6 +372,13 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
             writeCmd(rankId, "-exec-continue\n");
             rp->state.currentState = "running";
         } else {
+            for (int varIdx = 0; varIdx < static_cast<int>(m_watchVariables.size()); ++varIdx) {
+                QString varName = m_watchVariables[varIdx];
+                if (!m_varNameMap[rankId].contains(varName)) {
+                    QString evalCmd = QString("30%1-var-create - * %2\n").arg(varIdx).arg(varName);
+                    writeCmd(rankId, evalCmd);
+                }
+            }
             emit rankStateChanged(rankId, rp->state);
         }
       }
@@ -400,24 +411,45 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           int varIdx = match.captured(1).toInt();
           if (varIdx >= 0 &&
               varIdx < static_cast<int>(m_watchVariables.size())) {
-            rp->state.variableWatches[m_watchVariables[varIdx]] = "N/A";
+            QString varName = m_watchVariables[varIdx];
+            rp->state.variableWatches[varName] = "N/A";
+            m_varNameMap[rankId].remove(varName);
             emit rankStateChanged(rankId, rp->state);
           }
         }
       }
     } else if (line.contains("^done,changelist=")) {
-      QRegularExpression changeRe("name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
-      auto i = changeRe.globalMatch(line);
+      QRegularExpression objRe("\\{([^}]+)\\}");
+      auto i = objRe.globalMatch(line);
       bool updated = false;
       while (i.hasNext()) {
-        auto match = i.next();
-        QString varId = match.captured(1);
-        QString value = match.captured(2);
-        if (m_varNameRevMap.contains(rankId) &&
-            m_varNameRevMap[rankId].contains(varId)) {
-          QString varName = m_varNameRevMap[rankId][varId];
-          rp->state.variableWatches[varName] = value;
-          updated = true;
+        QString objStr = i.next().captured(1);
+        QRegularExpression nameRe("name=\"([^\"]+)\"");
+        QRegularExpression valRe("value=\"([^\"]+)\"");
+        QRegularExpression inScopeRe("in_scope=\"([^\"]+)\"");
+        
+        auto nameMatch = nameRe.match(objStr);
+        if (nameMatch.hasMatch()) {
+            QString varId = nameMatch.captured(1);
+            if (m_varNameRevMap.contains(rankId) && m_varNameRevMap[rankId].contains(varId)) {
+                QString varName = m_varNameRevMap[rankId][varId];
+                auto scopeMatch = inScopeRe.match(objStr);
+                bool inScope = !scopeMatch.hasMatch() || scopeMatch.captured(1) == "true";
+                
+                if (inScope) {
+                    auto valMatch = valRe.match(objStr);
+                    if (valMatch.hasMatch()) {
+                        rp->state.variableWatches[varName] = valMatch.captured(1);
+                        updated = true;
+                    }
+                } else {
+                    rp->state.variableWatches[varName] = "Out of scope";
+                    writeCmd(rankId, QString("-var-delete %1\n").arg(varId));
+                    m_varNameMap[rankId].remove(varName);
+                    m_varNameRevMap[rankId].remove(varId);
+                    updated = true;
+                }
+            }
         }
       }
       if (updated)

@@ -13,4 +13,5 @@ private slots:
     void testAsmSyntaxHighlighter();
     void testSourceCodeHighlightBounds();
     void testDifferentialGridExpansion();
+    void testDifferentialGridEmits();
 };
