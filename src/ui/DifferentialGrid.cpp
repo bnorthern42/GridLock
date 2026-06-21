@@ -82,6 +82,18 @@ void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName,
         cellItem->setText(value);
     }
     
+    if (value == "<Out of Scope>") {
+        cellItem->setForeground(Qt::gray);
+        QFont font = cellItem->font();
+        font.setItalic(true);
+        cellItem->setFont(font);
+    } else {
+        cellItem->setForeground(Qt::black);
+        QFont font = cellItem->font();
+        font.setItalic(false);
+        cellItem->setFont(font);
+    }
+    
     updateHighlights();
 }
 
