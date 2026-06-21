@@ -102,6 +102,17 @@ void GdbRankCoordinator::broadcastCommand(const QString& cmd) {
     }
 }
 
+void GdbRankCoordinator::sendCommand(int rankId, const QString& cmd) {
+    if (rankId == -1) {
+        broadcastCommand(cmd + "\n");
+    } else if (rankId >= 0 && rankId < static_cast<int>(m_processes.size())) {
+        auto& rp = m_processes[rankId];
+        if (rp && rp->process && rp->process->state() == QProcess::Running) {
+            rp->process->write((cmd + "\n").toUtf8());
+        }
+    }
+}
+
 void GdbRankCoordinator::broadcastBreakpoint(const QString& file, int line) {
     QString breakCmd = QString("-break-insert -f %1:%2\n").arg(file).arg(line);
     for (auto& rp : m_processes) {
@@ -179,6 +190,8 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
         QString line = rp->buffer.left(newlineIdx).trimmed();
         rp->buffer.remove(0, newlineIdx + 1);
         std::string_view sv(line.toUtf8().constData(), line.toUtf8().length());
+
+        emit gdbOutputReceived(rankId, line);
 
         qDebug() << "[GDB OUT Rank" << rankId << "]:" << line;
 

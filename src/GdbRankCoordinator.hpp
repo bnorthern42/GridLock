@@ -34,6 +34,7 @@ public:
 
 signals:
     void rankStateChanged(int rankId, const RankState& state);
+    void gdbOutputReceived(int rankId, const QString& output);
 
 public slots:
     void stepAll();
@@ -42,6 +43,7 @@ public slots:
     void haltAll();
     void pauseFocusedRank(int rankId);
     void registerWatchVariable(const QString& varName);
+    void sendCommand(int rankId, const QString& cmd);
 
 public slots:
     void handleGdbOutput(int rankId);

@@ -16,6 +16,7 @@ class DisassemblyView;
 class ReferenceDock;
 class DifferentialGrid;
 class TerminalDock;
+class GdbConsoleDock;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -30,8 +31,9 @@ public:
     ReferenceDock* referenceDock() const { return m_referenceDock; }
     DifferentialGrid* differentialGrid() const { return m_differentialGrid; }
     TerminalDock* terminalDock() const { return m_terminalDock; }
+    GdbConsoleDock* gdbConsoleDock() const { return m_gdbConsoleDock; }
 
-    void setCoordinator(gridlock::GdbRankCoordinator* coord) { m_coordinator = coord; }
+    void setCoordinator(gridlock::GdbRankCoordinator* coord);
 
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);
@@ -62,6 +64,7 @@ private:
     ReferenceDock* m_referenceDock = nullptr;
     DifferentialGrid* m_differentialGrid = nullptr;
     TerminalDock* m_terminalDock = nullptr;
+    GdbConsoleDock* m_gdbConsoleDock = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;
 

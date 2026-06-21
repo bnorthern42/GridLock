@@ -5,6 +5,7 @@
 #include "ReferenceDock.hpp"
 #include "DifferentialGrid.hpp"
 #include "TerminalDock.hpp"
+#include "GdbConsoleDock.hpp"
 #include "../GdbRankCoordinator.hpp"
 #include "../core/ConfigManager.hpp"
 #include <QDockWidget>
@@ -33,6 +34,16 @@ MainWindow::MainWindow(QWidget *parent)
     setupUi();
     setupMenu();
     setupDocks();
+}
+
+void MainWindow::setCoordinator(gridlock::GdbRankCoordinator* coord) {
+    m_coordinator = coord;
+    if (m_coordinator && m_gdbConsoleDock) {
+        connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived,
+                m_gdbConsoleDock, &GdbConsoleDock::appendGdbOutput);
+        connect(m_gdbConsoleDock, &GdbConsoleDock::commandEntered,
+                m_coordinator, &GdbRankCoordinator::sendCommand);
+    }
 }
 
 void MainWindow::setupUi() {
@@ -189,10 +200,12 @@ void MainWindow::setupDocks() {
         }
     });
     m_referenceDock = new ReferenceDock(bottomTabs);
+    m_gdbConsoleDock = new GdbConsoleDock(bottomTabs);
 
     bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
     bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
     bottomTabs->addTab(m_referenceDock, "Reference Manual");
+    bottomTabs->addTab(m_gdbConsoleDock, "GDB Console");
 
     mainVerticalSplitter->addWidget(bottomTabs);
     mainVerticalSplitter->setStretchFactor(0, 75);
