@@ -24,6 +24,7 @@ namespace gridlock::ui {
 
 class ServerRackView;
 class SourceCodeView;
+class EditorTabManager;
 class DisassemblyView;
 class ReferenceManualWidget;
 class DifferentialGrid;
@@ -40,8 +41,9 @@ public:
     ~MainWindow() override = default;
 
     ServerRackView* serverRackView() const { return m_serverRackView; }
-    SourceCodeView* sourceCodeView() const { return m_sourceCodeView; }
-    SourceCodeView* getSourceCodeView() const { return m_sourceCodeView; }
+    EditorTabManager* editorTabManager() const { return m_editorTabManager; }
+    SourceCodeView* sourceCodeView() const;
+    SourceCodeView* getSourceCodeView() const;
     DisassemblyView* disassemblyView() const { return m_disassemblyView; }
     ReferenceManualWidget* referenceManualWidget() const { return m_referenceManualWidget; }
     DifferentialGrid* differentialGrid() const { return m_differentialGrid; }
@@ -78,7 +80,7 @@ signals:
 
 private:
     ServerRackView* m_serverRackView = nullptr;
-    SourceCodeView* m_sourceCodeView = nullptr;
+    EditorTabManager* m_editorTabManager = nullptr;
     DisassemblyView* m_disassemblyView = nullptr;
     ReferenceManualWidget* m_referenceManualWidget = nullptr;
     DifferentialGrid* m_differentialGrid = nullptr;

@@ -12,6 +12,7 @@
 #include "ServerRackView.hpp"
 #include "PreferencesDialog.hpp"
 #include "SourceCodeView.hpp"
+#include "EditorTabManager.hpp"
 #include "TerminalDock.hpp"
 #include "../core/MockHpcBackend.hpp"
 #include "../core/commands/DebugCommands.hpp"
@@ -41,6 +42,14 @@
 
 namespace gridlock::ui {
 
+SourceCodeView* MainWindow::sourceCodeView() const {
+  return m_editorTabManager ? m_editorTabManager->currentSourceCodeView() : nullptr;
+}
+
+SourceCodeView* MainWindow::getSourceCodeView() const {
+  return sourceCodeView();
+}
+
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_hpcBackend = new gridlock::core::MockHpcBackend(this);
   setupUi();
@@ -51,8 +60,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
   
   connect(m_lspCoordinator, &gridlock::core::LspCoordinator::hoverResultReceived, this, [this](const QString &resultMarkdown, const QPoint &globalPos) {
-      if (m_sourceCodeView) {
-          QToolTip::showText(globalPos, resultMarkdown, m_sourceCodeView);
+      if (getSourceCodeView()) {
+          QToolTip::showText(globalPos, resultMarkdown, getSourceCodeView());
       }
   });
 
@@ -62,8 +71,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_persistentBreakpoints =
       gridlock::core::ConfigManager::instance().getBreakpoints();
   QString absolutePath = QFileInfo("tests/mpi_mm.c").absoluteFilePath();
-  if (m_persistentBreakpoints.contains(absolutePath) && m_sourceCodeView) {
-    m_sourceCodeView->setBreakpoints(m_persistentBreakpoints[absolutePath]);
+  if (m_persistentBreakpoints.contains(absolutePath) && getSourceCodeView()) {
+    getSourceCodeView()->setBreakpoints(m_persistentBreakpoints[absolutePath]);
   }
 }
 
@@ -77,8 +86,8 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
   m_coordinator = coord;
   if (m_coordinator) {
     connect(m_coordinator, &GdbRankCoordinator::hoverEvaluationComplete, this, [this](QString varName, QString result, QPoint globalPos) {
-        if (m_sourceCodeView) {
-            QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), m_sourceCodeView);
+        if (getSourceCodeView()) {
+            QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), getSourceCodeView());
         }
     });
   }
@@ -259,14 +268,14 @@ void MainWindow::setupDocks() {
   QSplitter *masterHorizontalSplitter =
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);
 
-  m_sourceCodeView = new SourceCodeView(masterHorizontalSplitter);
-  m_sourceCodeView->setMinimumWidth(350);
-  connect(m_sourceCodeView, &SourceCodeView::toggleBreakpointRequested, this,
+  m_editorTabManager = new EditorTabManager(masterHorizontalSplitter);
+  m_editorTabManager->setMinimumWidth(350);
+  connect(m_editorTabManager, &EditorTabManager::toggleBreakpointRequested, this,
           [this](const QString &loc) {
             if (m_coordinator)
               m_coordinator->insertBreakpoint(loc);
           });
-  connect(m_sourceCodeView, &SourceCodeView::breakpointToggled, this,
+  connect(m_editorTabManager, &EditorTabManager::breakpointToggled, this,
           [this](const QString &file, int line, bool ctrlClicked) {
             QString absoluteFilePath = QFileInfo(file).absoluteFilePath();
             QString condition;
@@ -290,19 +299,19 @@ void MainWindow::setupDocks() {
               m_coordinator->broadcastBreakpoint(absoluteFilePath, line, condition);
           });
 
-  connect(m_sourceCodeView, &SourceCodeView::hoverVariableRequested, this, [this](const QString &varName, const QPoint &globalPos) {
+  connect(m_editorTabManager, &EditorTabManager::hoverVariableRequested, this, [this](const QString &varName, const QPoint &globalPos) {
       if (m_coordinator) {
           m_coordinator->evaluateHoverVariable(m_focusedRank, varName, globalPos);
       }
   });
 
-  connect(m_sourceCodeView, &SourceCodeView::semanticHoverRequested, this, [this](const QString &file, int line, int character, const QPoint &globalPos) {
+  connect(m_editorTabManager, &EditorTabManager::semanticHoverRequested, this, [this](const QString &file, int line, int character, const QPoint &globalPos) {
       if (m_lspCoordinator) {
           m_lspCoordinator->requestHover(file, line, character, globalPos);
       }
   });
 
-  connect(m_sourceCodeView, &SourceCodeView::pinVariableRequested, this, [this](const QString &varName) {
+  connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this, [this](const QString &varName) {
       if (m_coordinator) {
           m_coordinator->registerWatchVariable(varName);
       }
@@ -319,7 +328,7 @@ void MainWindow::setupDocks() {
   connect(m_serverRackView, &ServerRackView::rankSelected, this,
           &MainWindow::onRankSelected);
 
-  masterHorizontalSplitter->addWidget(m_sourceCodeView);
+  masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(m_disassemblyView);
   masterHorizontalSplitter->addWidget(m_serverRackView);
 
@@ -376,7 +385,13 @@ void MainWindow::onRankStateChanged(int rankId, const RankState &state) {
     }
     if (state.currentState == "stopped") {
       if (state.currentLine > 0) {
-        m_sourceCodeView->highlightCurrentLine(state.currentLine);
+        if (!state.currentFile.isEmpty() && m_editorTabManager) {
+          if (auto view = m_editorTabManager->openFile(state.currentFile)) {
+            view->highlightCurrentLine(state.currentLine);
+          }
+        } else if (getSourceCodeView()) {
+          getSourceCodeView()->highlightCurrentLine(state.currentLine);
+        }
       }
     }
   }
@@ -399,7 +414,13 @@ void MainWindow::onRankSelected(int rankId) {
 
     if (state.currentState == "stopped") {
       if (state.currentLine > 0) {
-        m_sourceCodeView->highlightCurrentLine(state.currentLine);
+        if (!state.currentFile.isEmpty() && m_editorTabManager) {
+          if (auto view = m_editorTabManager->openFile(state.currentFile)) {
+            view->highlightCurrentLine(state.currentLine);
+          }
+        } else if (getSourceCodeView()) {
+          getSourceCodeView()->highlightCurrentLine(state.currentLine);
+        }
       }
     }
 
@@ -444,42 +465,24 @@ void MainWindow::openFile() {
 }
 
 void MainWindow::loadSourceFile(const QString &filePath) {
-  QFile file(filePath);
-  // Check direct path, then check fallback for meson build dirs
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-    file.setFileName("../" + filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-      if (m_terminalDock)
-        m_terminalDock->appendError("CRITICAL: Failed to load " + filePath +
-                                    "\n");
-      return;
-    }
-  }
-
-  QString code = file.readAll();
-  code.replace("\r\n", "\n");
-  m_currentFile = file.fileName();
-
-  if (m_sourceCodeView) {
-    m_sourceCodeView->setSourceCode(code);
-    m_sourceCodeView->setCurrentFile(m_currentFile);
-    QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
-    if (m_persistentBreakpoints.contains(absolutePath)) {
-      m_sourceCodeView->setBreakpoints(m_persistentBreakpoints[absolutePath]);
+  if (m_editorTabManager) {
+    if (auto view = m_editorTabManager->openFile(filePath)) {
+      m_currentFile = filePath; // Update active file tracked by MainWindow
+      QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
+      if (m_lspCoordinator) {
+        m_lspCoordinator->stop();
+        m_lspCoordinator->start(absolutePath);
+        m_lspCoordinator->didOpen(m_currentFile, view->getPlainText());
+      }
+      if (m_terminalDock) {
+        m_terminalDock->appendText("Successfully loaded: " + m_currentFile + "\n");
+      }
     } else {
-      m_sourceCodeView->setBreakpoints(QSet<int>());
-    }
-    if (m_lspCoordinator) {
-      m_lspCoordinator->stop();
-      m_lspCoordinator->start(absolutePath);
-      m_lspCoordinator->didOpen(m_currentFile, code);
+      if (m_terminalDock) {
+        m_terminalDock->appendError("CRITICAL: Failed to load " + filePath + "\n");
+      }
     }
   }
-
-  if (m_terminalDock) {
-    m_terminalDock->appendText("Successfully loaded: " + m_currentFile + "\n");
-  }
-  file.close();
 }
 
 void MainWindow::openPreferences() {
@@ -489,7 +492,13 @@ void MainWindow::openPreferences() {
   // React to live Apply/OK so views refresh without a restart
   connect(dlg, &PreferencesDialog::preferencesChanged, this, [this]() {
     // SourceCodeView and RegisterView may want to re-read palette / font prefs.
-    if (m_sourceCodeView) m_sourceCodeView->update();
+    if (m_editorTabManager) {
+        for (int i = 0; i < m_editorTabManager->count(); ++i) {
+            if (auto view = qobject_cast<SourceCodeView*>(m_editorTabManager->widget(i))) {
+                view->update();
+            }
+        }
+    }
     if (m_registerView)   m_registerView->update();
   });
 
@@ -501,7 +510,7 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
     return;
 
   if (m_currentFile.isEmpty() ||
-      m_sourceCodeView->toPlainText().trimmed().isEmpty()) {
+      (getSourceCodeView() && getSourceCodeView()->toPlainText().trimmed().isEmpty())) {
     loadSourceFile("tests/mpi_mm.c");
   }
 

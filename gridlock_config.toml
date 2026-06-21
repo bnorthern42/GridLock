@@ -1,5 +1,5 @@
 [breakpoints]
-'tests/mpi_mm.c' = [ 132 ]
+'tests/mpi_mm.c' = [ 68, 132 ]
 
 [debugger]
 default_ranks = 6
