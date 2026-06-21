@@ -124,6 +124,48 @@ void ConfigManager::saveHpcSettings(const HpcSettings &hs) {
     s.sync();
 }
 
+// ─── SSH settings ───────────────────────────────────────────────────────────
+
+SshSettings ConfigManager::getSshSettings() const {
+    QSettings s(kOrg, kApp);
+    SshSettings ss;
+    ss.host    = s.value("ssh/host",     "").toString();
+    ss.user    = s.value("ssh/user",     "").toString();
+    ss.keyPath = s.value("ssh/key_path", "").toString();
+    return ss;
+}
+
+void ConfigManager::saveSshSettings(const SshSettings &ss) {
+    QSettings s(kOrg, kApp);
+    s.setValue("ssh/host",     ss.host);
+    s.setValue("ssh/user",     ss.user);
+    s.setValue("ssh/key_path", ss.keyPath);
+    s.sync();
+}
+
+// ─── SLURM / Spack settings ────────────────────────────────────────────────
+
+SlurmSettings ConfigManager::getSlurmSettings() const {
+    QSettings s(kOrg, kApp);
+    SlurmSettings sl;
+    sl.scriptTemplate = s.value("slurm/script_template", "").toString();
+    sl.partition      = s.value("slurm/partition",       "batch").toString();
+    sl.nodes          = s.value("slurm/nodes",           1).toInt();
+    sl.tasksPerNode   = s.value("slurm/tasks_per_node",  4).toInt();
+    sl.spackRoot      = s.value("slurm/spack_root",      "/opt/spack").toString();
+    return sl;
+}
+
+void ConfigManager::saveSlurmSettings(const SlurmSettings &sl) {
+    QSettings s(kOrg, kApp);
+    s.setValue("slurm/script_template", sl.scriptTemplate);
+    s.setValue("slurm/partition",       sl.partition);
+    s.setValue("slurm/nodes",           qMax(1, sl.nodes));
+    s.setValue("slurm/tasks_per_node",  qMax(1, sl.tasksPerNode));
+    s.setValue("slurm/spack_root",      sl.spackRoot);
+    s.sync();
+}
+
 // ─── Convenience shims ───────────────────────────────────────────────────────
 
 int     ConfigManager::getDefaultRanks()  const { return getDebuggerSettings().defaultRanks; }

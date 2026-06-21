@@ -19,9 +19,25 @@ struct DebuggerSettings {
 
 /// HPC cluster / node configuration. Stored in QSettings under hpc/*.
 struct HpcSettings {
-    QString hostsFile     = "";               ///< Path to MPI hostfile (empty = not used)
-    QString envVars       = "";               ///< Newline-separated key=value pairs
-    bool    strictAffinity = false;           ///< Pass --map-by node to the MPI launcher
+    QString hostsFile      = "";               ///< Path to MPI hostfile (empty = not used)
+    QString envVars        = "";               ///< Newline-separated key=value pairs
+    bool    strictAffinity = false;            ///< Pass --map-by node to the MPI launcher
+};
+
+/// SSH connection to a remote HPC login node. Stored under ssh/*.
+struct SshSettings {
+    QString host    = "";   ///< hostname or IP of the login node
+    QString user    = "";   ///< login username
+    QString keyPath = "";   ///< path to private SSH key (~/.ssh/id_rsa style)
+};
+
+/// SLURM batch configuration. Stored under slurm/*.
+struct SlurmSettings {
+    QString scriptTemplate = ""; ///< Default sbatch script body (may contain %%FILE%% placeholder)
+    QString partition      = "batch";  ///< SLURM partition / queue
+    int     nodes          = 1;
+    int     tasksPerNode   = 4;
+    QString spackRoot      = "/opt/spack"; ///< Spack install prefix on remote
 };
 
 class ConfigManager {
@@ -47,8 +63,16 @@ public:
     void             saveDebuggerSettings(const DebuggerSettings &s);
 
     // ── HPC / cluster settings (QSettings-backed) ─────────────────────────
-    HpcSettings getHpcSettings() const;
-    void        saveHpcSettings(const HpcSettings &s);
+    HpcSettings  getHpcSettings()  const;
+    void         saveHpcSettings(const HpcSettings &s);
+
+    // ── SSH connection settings (QSettings-backed) ─────────────────────
+    SshSettings  getSshSettings()  const;
+    void         saveSshSettings(const SshSettings &s);
+
+    // ── SLURM / Spack settings (QSettings-backed) ────────────────────
+    SlurmSettings getSlurmSettings()  const;
+    void          saveSlurmSettings(const SlurmSettings &s);
 
     /// Convenience shims used by existing call-sites.
     int     getDefaultRanks()   const;
