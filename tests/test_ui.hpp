@@ -14,4 +14,6 @@ private slots:
     void testSourceCodeHighlightBounds();
     void testDifferentialGridExpansion();
     void testDifferentialGridEmits();
+    void testGdbConsoleFiltering();
+    void testGutterBreakpointPropagation();
 };

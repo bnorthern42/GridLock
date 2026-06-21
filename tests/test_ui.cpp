@@ -11,7 +11,10 @@
 #include <QTextDocument>
 #include <QTextBlock>
 #include <QHash>
+#include <QComboBox>
+#include <QLineEdit>
 #include "../src/core/ConfigManager.hpp"
+#include "../src/ui/GdbConsoleWidget.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -169,6 +172,68 @@ void TestMainWindowUI::testDifferentialGridEmits() {
     // Editing row 0 col 0 SHOULD emit
     grid.item(0, 0)->setText("mtype");
     QCOMPARE(emitCount, 1);
+}
+
+void TestMainWindowUI::testGdbConsoleFiltering() {
+    gridlock::ui::GdbConsoleWidget console;
+    console.setRankCount(4); // Creates Rank 0..3
+
+    console.appendGdbOutput(0, "Breakpoint hit at main");
+    console.appendGdbOutput(1, "Segfault encountered");
+    console.appendGdbOutput(0, "Variable x = 5");
+
+    QPlainTextEdit* consoleEdit = console.findChild<QPlainTextEdit*>();
+    QComboBox* rankCombo = console.findChild<QComboBox*>();
+    QLineEdit* filterEdit = console.findChild<QLineEdit*>();
+
+    QVERIFY(consoleEdit != nullptr);
+    QVERIFY(rankCombo != nullptr);
+    QVERIFY(filterEdit != nullptr);
+
+    // Verify Rank Filtering (Index 2 -> Rank 1, since Index 0 is "All Ranks", Index 1 is "Rank 0")
+    rankCombo->setCurrentIndex(2);
+    QCOMPARE(consoleEdit->toPlainText(), QString("[GDB OUT Rank 1]: Segfault encountered"));
+
+    // Verify Text Filtering
+    rankCombo->setCurrentIndex(0); // Reset to All Ranks
+    filterEdit->setText("Variable");
+    QCOMPARE(consoleEdit->toPlainText(), QString("[GDB OUT Rank 0]: Variable x = 5"));
+}
+
+void TestMainWindowUI::testGutterBreakpointPropagation() {
+    gridlock::ui::SourceCodeView view;
+    QString code;
+    for (int i = 1; i <= 10; ++i) {
+        code += QString("Line %1\n").arg(i);
+    }
+    view.setSourceCode(code);
+    view.setCurrentFile("/test/dummy.cpp");
+    
+    // Headless layout initialization
+    view.resize(800, 600);
+    QApplication::processEvents();
+
+    struct ViewSpy : public gridlock::ui::SourceCodeView {
+        int getY(int line) {
+            QTextBlock b = document()->findBlockByLineNumber(line - 1);
+            return qRound(blockBoundingGeometry(b).translated(contentOffset()).top()) + 2;
+        }
+    };
+    int yPos = static_cast<ViewSpy*>(&view)->getY(5);
+
+    int signalFired = 0;
+    int signaledLine = -1;
+    QObject::connect(&view, &gridlock::ui::SourceCodeView::breakpointToggled, [&](const QString& /*file*/, int line) {
+        signalFired++;
+        signaledLine = line;
+    });
+
+    // Simulate mouse press in the gutter area without launching the window
+    QMouseEvent event(QEvent::MouseButtonPress, QPoint(15, yPos), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    view.lineNumberAreaMousePressEvent(&event);
+
+    QCOMPARE(signalFired, 1);
+    QCOMPARE(signaledLine, 5);
 }
 
 QTEST_MAIN(TestMainWindowUI)
