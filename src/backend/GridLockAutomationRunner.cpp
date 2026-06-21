@@ -62,7 +62,9 @@ bool GridLockAutomationRunner::generateAndCompileTestTarget() {
         dir.mkpath("build");
     }
 
-    compiler.start("mpicxx", QStringList() << "tests/matrix_multiply.cpp" << "-g" << "-O0" << "-o" << "build/test_bin");
+    compiler.start("ninja", QStringList() << "-C" << "build" << "clean");
+    compiler.waitForFinished();
+    compiler.start("ninja", QStringList() << "-C" << "build" << "test_bin");
     compiler.waitForFinished();
     
     if (compiler.exitCode() != 0) {

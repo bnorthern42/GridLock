@@ -208,13 +208,13 @@ void GdbRankCoordinator::handleGdbOutput(int rankId) {
             rp->state.currentFile = file;
             rp->state.currentLine = lineNum;
 
-            if (!file.isEmpty()) {
-                QString asmCmd = QString("200-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(file).arg(lineNum);
-                rp->process->write(asmCmd.toUtf8());
-            } else {
-                // Fallback if GDB didn't provide frame file info
-                rp->process->write("200-data-disassemble -s $pc -e \"$pc + 40\" -- 0\n");
-            }
+            QRegularExpression rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
+            auto matchAddr = rxAddr.match(line);
+            QString stopAddress = matchAddr.hasMatch() ? matchAddr.captured(1) : "$pc";
+
+            // Construct disassembly command for the exact stop address
+            QString asmCmd = QString("200-data-disassemble -a %1 -- 0\n").arg(stopAddress);
+            rp->process->write(asmCmd.toUtf8());
 
             QRegularExpression threadRe("thread-id=\"(\\d+)\"");
             auto matchThread = threadRe.match(line);

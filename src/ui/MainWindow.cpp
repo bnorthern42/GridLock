@@ -107,7 +107,7 @@ void MainWindow::setupMenu() {
         connect(proc, &QProcess::readyReadStandardError, this, [this, proc]() {
             m_terminalDock->appendError(proc->readAllStandardError());
         });
-        proc->start("mpicxx", QStringList() << "tests/matrix_multiply.cpp" << "-g" << "-O0" << "-o" << "build/test_bin");
+        proc->start("ninja", QStringList() << "-C" << "build" << "test_bin");
     });
     QAction* runTestsAction = toolsMenu->addAction("Run Tests");
     connect(runTestsAction, &QAction::triggered, this, &MainWindow::runTargetRequested);
