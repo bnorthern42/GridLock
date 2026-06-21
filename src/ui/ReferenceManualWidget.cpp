@@ -3,6 +3,9 @@
 #include <QVBoxLayout>
 #include <QFile>
 #include <QSettings>
+#include <QUrl>
+#include <QDebug>
+#include <QFileInfo>
 
 namespace gridlock::ui {
 
@@ -65,13 +68,19 @@ void DocsetViewerWidget::onResultClicked(int row) {
     
     // Strip anchors if any to open the file
     QString filePath = htmlPath;
+    QString anchorString;
     int hashIdx = filePath.indexOf('#');
     if (hashIdx != -1) {
+        anchorString = filePath.mid(hashIdx + 1);
         filePath = filePath.left(hashIdx);
     }
+    
+    // Decode percent-encoded paths
+    filePath = QUrl::fromPercentEncoding(filePath.toUtf8());
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qDebug() << "DocsetViewerWidget: Failed to open absolute file path:" << filePath;
         m_textBrowser->setHtml("<div style='color: #f38ba8;'><h2>Error loading documentation.</h2></div>");
         return;
     }
@@ -118,10 +127,15 @@ void DocsetViewerWidget::onResultClicked(int row) {
         htmlOutput = customCss + htmlOutput;
     }
 
+    QFileInfo fileInfo(filePath);
+    QString absoluteDirPath = fileInfo.absolutePath();
+    // Use QUrl::fromLocalFile to ensure spaces and special chars are correctly converted into a file:// URL
+    m_textBrowser->document()->setBaseUrl(QUrl::fromLocalFile(absoluteDirPath + "/"));
+
     m_textBrowser->setHtml(htmlOutput);
     
-    if (hashIdx != -1) {
-        m_textBrowser->scrollToAnchor(htmlPath.mid(hashIdx + 1));
+    if (!anchorString.isEmpty()) {
+        m_textBrowser->scrollToAnchor(anchorString);
     }
 }
 
