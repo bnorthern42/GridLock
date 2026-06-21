@@ -41,6 +41,13 @@ To compile and run GridLock, you must have the following dependencies installed 
    ./build/gridlock --test-mode
    ```
 
+## Key Features
+- **Multi-Rank State Inspection:** Seamlessly monitor and step through multiple MPI processes simultaneously.
+- **Conditional Breakpoints:** `Ctrl+Click` the gutter line numbers in the code editor to insert conditional breakpoints (e.g., `i == 5`). If a breakpoint already exists, `Ctrl+Click` updates its condition, while a regular click toggles it off.
+- **Live Register View:** A dedicated `Registers` tab continuously tracks and updates CPU register states in real-time alongside execution.
+- **MemView Hex Dump:** Inspect raw memory chunks by supplying variable names or absolute pointer addresses directly into GDB, presented in a clean Hex/ASCII format.
+- **Semantic Hover Tooltips:** Powered by Clangd and GDB/MI, hover over any active variable in the editor to instantly see its live value.
+
 ## Example Workflow
 1. Load a target MPI source file (e.g., `mpi_mm.c`).
 2. Set a breakpoint by clicking the gutter.
