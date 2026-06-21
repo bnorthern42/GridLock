@@ -9,8 +9,6 @@
 namespace gridlock {
 
 GdbRankCoordinator::GdbRankCoordinator(QObject *parent) : QObject(parent) {
-  m_watchVariables.push_back("calc");
-  m_watchVariables.push_back("rank");
 }
 
 GdbRankCoordinator::~GdbRankCoordinator() { terminateAllSessions(); }
@@ -412,7 +410,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           if (varIdx >= 0 &&
               varIdx < static_cast<int>(m_watchVariables.size())) {
             QString varName = m_watchVariables[varIdx];
-            rp->state.variableWatches[varName] = "N/A";
+            rp->state.variableWatches[varName] = "<Out of Scope>";
             m_varNameMap[rankId].remove(varName);
             emit rankStateChanged(rankId, rp->state);
           }

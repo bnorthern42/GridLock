@@ -332,6 +332,7 @@ void MainWindow::loadSourceFile(const QString &filePath) {
   }
 
   QString code = file.readAll();
+  code.replace("\r\n", "\n");
   m_currentFile = file.fileName();
 
   if (m_sourceCodeView) {

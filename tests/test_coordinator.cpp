@@ -97,7 +97,7 @@ void TestGdbCoordinator::testRecreateWatchVariable() {
     coord.registerWatchVariable("offset");
     
     coord.processGdbOutput(0, "300^error,msg=\"-var-create: unable to create variable object\"\n");
-    QCOMPARE(coord.getRankState(0).variableWatches["offset"], QString("N/A"));
+    QCOMPARE(coord.getRankState(0).variableWatches["offset"], QString("<Out of Scope>"));
     
     coord.processGdbOutput(0, "*stopped,reason=\"breakpoint-hit\",frame={fullname=\"mpi_mm.c\",line=\"79\"}\n");
     coord.processGdbOutput(0, "300^done,name=\"var1\",numchild=\"0\",value=\"123\",type=\"int\"\n");
