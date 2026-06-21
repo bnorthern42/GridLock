@@ -255,7 +255,6 @@ void MainWindow::setupDocks() {
   connect(m_sourceCodeView, &SourceCodeView::breakpointToggled, this,
           [this](const QString &file, int line, bool ctrlClicked) {
             QString absoluteFilePath = QFileInfo(file).absoluteFilePath();
-            bool isAdded = true;
             QString condition;
 
             if (ctrlClicked) {
@@ -267,7 +266,6 @@ void MainWindow::setupDocks() {
             // Update persistent cache
             if (m_persistentBreakpoints[absoluteFilePath].contains(line) && condition.isEmpty() && !ctrlClicked) {
               m_persistentBreakpoints[absoluteFilePath].remove(line);
-              isAdded = false;
             } else {
               m_persistentBreakpoints[absoluteFilePath].insert(line);
             }

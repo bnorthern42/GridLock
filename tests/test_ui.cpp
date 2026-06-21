@@ -158,7 +158,7 @@ void TestMainWindowUI::testDifferentialGridExpansion() {
 void TestMainWindowUI::testDifferentialGridEmits() {
     gridlock::ui::DifferentialGrid grid;
     int emitCount = 0;
-    QObject::connect(&grid, &gridlock::ui::DifferentialGrid::watchVariableAdded, [&emitCount](const QString& name) {
+    QObject::connect(&grid, &gridlock::ui::DifferentialGrid::watchVariableAdded, [&emitCount](const QString& /*name*/) {
         emitCount++;
     });
 
@@ -228,8 +228,9 @@ void TestMainWindowUI::testGutterBreakpointPropagation() {
         signaledLine = line;
     });
 
-    // Simulate mouse press in the gutter area without launching the window
-    QMouseEvent event(QEvent::MouseButtonPress, QPoint(15, yPos), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    // Use the modern QMouseEvent constructor (device-aware, replaces the deprecated 5-arg form)
+    QMouseEvent event(QEvent::MouseButtonPress, QPointF(15, yPos), QPointF(15, yPos),
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     view.lineNumberAreaMousePressEvent(&event);
 
     QCOMPARE(signalFired, 1);

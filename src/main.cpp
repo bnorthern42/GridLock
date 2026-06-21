@@ -62,9 +62,9 @@ int main(int argc, char *argv[]) {
     gridlock::ui::MainWindow window;
     window.show();
 
-    gridlock::backend::GridLockAutomationRunner* runner = nullptr;
     if (parser.isSet(testModeOption)) {
-        runner = new gridlock::backend::GridLockAutomationRunner(&window, &app);
+        // Ownership is passed to 'window' via Qt parent chain; no local pointer needed.
+        new gridlock::backend::GridLockAutomationRunner(&window, &app);
     }
     
     return app.exec();
