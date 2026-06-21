@@ -73,8 +73,15 @@ QList<QPair<QString, QString>> DocsetManager::search(const QString& query) {
         if (q.exec(sql)) {
             while (q.next()) {
                 QString name = q.value(0).toString();
+                // Some docsets prepend <dash_entry_...> metadata tags to the path
+                QString rawPath = q.value(1).toString();
+                int lastBracket = rawPath.lastIndexOf('>');
+                if (lastBracket != -1) {
+                    rawPath = rawPath.mid(lastBracket + 1).trimmed();
+                }
+                
                 // Docset paths can include anchors, so we preserve the full path
-                QString path = m_activeDocsetPaths[i] + "/Contents/Resources/Documents/" + q.value(1).toString();
+                QString path = m_activeDocsetPaths[i] + "/Contents/Resources/Documents/" + rawPath;
                 results.append(qMakePair(name, path));
                 if (results.size() >= 50) return results;
             }
