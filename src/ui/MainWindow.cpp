@@ -13,6 +13,7 @@
 #include "PreferencesDialog.hpp"
 #include "SourceCodeView.hpp"
 #include "EditorTabManager.hpp"
+#include "ProjectExplorerWidget.hpp"
 #include "TerminalDock.hpp"
 #include "../core/MockHpcBackend.hpp"
 #include "../core/commands/DebugCommands.hpp"
@@ -264,6 +265,14 @@ void MainWindow::setupToolbar() {
 void MainWindow::setupDocks() {
   QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
   mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
+
+  m_projectExplorerWidget = new ProjectExplorerWidget(this);
+  addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
+  connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked, this, [this](const QString& filePath) {
+      if (m_editorTabManager) {
+          loadSourceFile(filePath); // Actually loadSourceFile does everything needed, or we can just call m_editorTabManager->openFile(filePath) and m_lspCoordinator
+      }
+  });
 
   QSplitter *masterHorizontalSplitter =
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);

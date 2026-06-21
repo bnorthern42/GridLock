@@ -313,7 +313,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 /* ── List/Tree/Table Widgets ── */
-QListWidget, QTreeWidget, QTableWidget {
+QListWidget, QTreeWidget, QTreeView, QTableWidget {
     background-color: #181825;
     color: #cdd6f4;
     border: none;
@@ -322,17 +322,17 @@ QListWidget, QTreeWidget, QTableWidget {
     outline: none;
 }
 
-QListWidget::item, QTreeWidget::item, QTableWidget::item {
+QListWidget::item, QTreeWidget::item, QTreeView::item, QTableWidget::item {
     padding: 4px 8px;
     border-radius: 3px;
 }
 
-QListWidget::item:selected, QTreeWidget::item:selected, QTableWidget::item:selected {
+QListWidget::item:selected, QTreeWidget::item:selected, QTreeView::item:selected, QTableWidget::item:selected {
     background-color: #313244;
     color: #cba6f7;
 }
 
-QListWidget::item:hover:!selected, QTreeWidget::item:hover:!selected,
+QListWidget::item:hover:!selected, QTreeWidget::item:hover:!selected, QTreeView::item:hover:!selected,
 QTableWidget::item:hover:!selected {
     background-color: #252535;
 }

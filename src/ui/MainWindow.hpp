@@ -29,6 +29,7 @@ class DisassemblyView;
 class ReferenceManualWidget;
 class DifferentialGrid;
 class TerminalDock;
+class ProjectExplorerWidget;
 class GdbConsoleWidget;
 class MemView;
 class RegisterView;
@@ -84,6 +85,7 @@ private:
     DisassemblyView* m_disassemblyView = nullptr;
     ReferenceManualWidget* m_referenceManualWidget = nullptr;
     DifferentialGrid* m_differentialGrid = nullptr;
+    ProjectExplorerWidget* m_projectExplorerWidget = nullptr;
     TerminalDock* m_terminalDock = nullptr;
     GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
     MemView* m_memView = nullptr;
