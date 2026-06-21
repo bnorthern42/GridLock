@@ -48,3 +48,8 @@ This project makes use of the excellent [toml++](https://github.com/marzer/tomlp
 
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+
+## Other
+
+Only tested on a single node system and we have no current way of adding remote compute nodes. This is a goal for the future. Also only supports a single file open/edit at a time and does not support debugging hybrid MPI/OpenMP programs. These are also goals for the future.
