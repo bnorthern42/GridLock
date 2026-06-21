@@ -94,7 +94,7 @@ void GridLockAutomationRunner::runNextStep() {
         }
     } else if (m_step == 2) {
         std::cout << "[TEST] Tick 2: Launch\n";
-        m_coordinator->launchParallelSession("build/mpi_mm_bin", 4);
+        m_mainWindow->startDebuggingSession("build/mpi_mm_bin", 2);
     } else if (m_step == 3) {
         std::cout << "[TEST] Tick 3: Breakpoint\n";
         m_coordinator->insertBreakpoint("tests/mpi_mm.c:18");

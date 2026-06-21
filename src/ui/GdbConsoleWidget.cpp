@@ -36,7 +36,9 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent) : QWidget(parent) {
     connect(m_rankCombo, &QComboBox::currentIndexChanged, this, &GdbConsoleWidget::onRankFilterChanged);
 }
 
-void GdbConsoleWidget::setRankCount(int count) {
+void GdbConsoleWidget::resetRanks(int count) {
+    m_logs.clear();
+    m_consoleEdit->clear();
     m_rankCombo->blockSignals(true);
     m_rankCombo->clear();
     m_rankCombo->addItem("All Ranks", -1);

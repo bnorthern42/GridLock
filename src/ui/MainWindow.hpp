@@ -43,6 +43,8 @@ public:
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
 
+    void startDebuggingSession(const QString& binaryPath, int ranks);
+
     void setCoordinator(gridlock::GdbRankCoordinator* coord);
 
 public slots:
@@ -61,8 +63,7 @@ private:
     void setupToolbar();
     void setupDocks();
 
-private slots:
-    void startDebuggingSession(const QString& binaryPath, int ranks);
+
 
 signals:
     void runTargetRequested();

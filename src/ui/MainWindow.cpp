@@ -480,14 +480,16 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
     loadSourceFile("tests/mpi_mm.c");
   }
 
-  if (m_gdbConsoleWidget) {
-    m_gdbConsoleWidget->setRankCount(ranks);
-  }
-
-  // 1. Launch the unified OpenMPI backplane + GDB servers, then attach remote
   // QProcess instances natively. Notice we REMOVED the QTimer and "-exec-run"
   // command here. The Coordinator handles it asynchronously.
   m_coordinator->launchParallelSession(binaryPath, ranks);
+
+  if (m_gdbConsoleWidget) {
+    m_gdbConsoleWidget->resetRanks(ranks);
+  }
+  if (m_serverRackView) {
+    m_serverRackView->resetRanks(ranks);
+  }
 }
 
 } // namespace gridlock::ui

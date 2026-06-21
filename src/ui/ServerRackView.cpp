@@ -22,7 +22,7 @@ void ServerRackView::paintEvent(QPaintEvent */*event*/) {
     monoFont.setStyleHint(QFont::Monospace);
     painter.setFont(monoFont);
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < m_rankCount; ++i) {
         QRect rect(10, 10 + i * (bladeHeight + spacing), width() - 20, bladeHeight);
         
         QPainterPath path;
@@ -69,7 +69,7 @@ void ServerRackView::mousePressEvent(QMouseEvent *event) {
     int bladeHeight = 35;
     int spacing = 10;
 
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < m_rankCount; ++i) {
         QRect rect(10, 10 + i * (bladeHeight + spacing), width() - 20, bladeHeight);
         if (rect.contains(event->pos())) {
             m_selectedRank = i;
@@ -85,7 +85,7 @@ void ServerRackView::mouseMoveEvent(QMouseEvent *event) {
     int spacing = 10;
     
     int newHover = -1;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < m_rankCount; ++i) {
         QRect rect(10, 10 + i * (bladeHeight + spacing), width() - 20, bladeHeight);
         if (rect.contains(event->pos())) {
             newHover = i;

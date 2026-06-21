@@ -176,7 +176,7 @@ void TestMainWindowUI::testDifferentialGridEmits() {
 
 void TestMainWindowUI::testGdbConsoleFiltering() {
     gridlock::ui::GdbConsoleWidget console;
-    console.setRankCount(4); // Creates Rank 0..3
+    console.resetRanks(4); // Creates Rank 0..3
 
     console.appendGdbOutput(0, "Breakpoint hit at main");
     console.appendGdbOutput(1, "Segfault encountered");

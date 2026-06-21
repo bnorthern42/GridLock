@@ -12,6 +12,14 @@ public:
     explicit ServerRackView(QWidget *parent = nullptr);
     ~ServerRackView() override = default;
 
+    void resetRanks(int count) {
+        m_rankCount = count;
+        m_states.clear();
+        m_hoveredRank = -1;
+        m_selectedRank = count > 0 ? 0 : -1;
+        update();
+    }
+
     void updateRankState(int rank, const RankState& state) {
         m_states[rank] = state;
         update();
@@ -27,6 +35,7 @@ protected:
     void leaveEvent(QEvent *event) override;
 
 private:
+    int m_rankCount = 0;
     std::unordered_map<int, RankState> m_states;
     int m_hoveredRank = -1;
     int m_selectedRank = 0;
