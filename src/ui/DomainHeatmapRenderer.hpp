@@ -1,6 +1,7 @@
 #pragma once
 #include <QVulkanWindow>
 #include <vector>
+#include <mutex>
 
 namespace gridlock::ui {
 
@@ -41,6 +42,8 @@ private:
     bool m_needsUpload = false;
     float m_minVal = 0.0f;
     float m_maxVal = 1.0f;
+
+    std::mutex m_dataMutex;
 };
 
 } // namespace gridlock::ui
