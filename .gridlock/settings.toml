@@ -1,5 +1,6 @@
 [project]
-binaryArguments = ''
 customGdbPath = 'gdb'
+environmentVariables = ''
+programArguments = ''
 targetBinary = ''
 workingDirectory = ''

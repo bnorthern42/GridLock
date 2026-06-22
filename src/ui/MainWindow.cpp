@@ -309,12 +309,28 @@ void MainWindow::setupMenu() {
   QMenu *helpMenu = menuBar->addMenu("&Help");
   QAction *aboutAction = helpMenu->addAction("About GridLock");
   connect(aboutAction, &QAction::triggered, this, [this]() {
+    QProcess gitProc;
+    gitProc.start("git", QStringList() << "ls-remote" << "--tags" << "--sort=v:refname" << "https://github.com/bnorthern42/GridLock.git");
+    gitProc.waitForFinished(3000);
+    QString latestTag = "v0.1.0-alpha"; // default fallback
+    if (gitProc.exitStatus() == QProcess::NormalExit && gitProc.exitCode() == 0) {
+        QString output = QString::fromUtf8(gitProc.readAllStandardOutput()).trimmed();
+        if (!output.isEmpty()) {
+            QStringList lines = output.split('\n');
+            QString lastLine = lines.last();
+            QString tag = lastLine.split('\t').last().replace("refs/tags/", "");
+            if (!tag.isEmpty()) {
+                latestTag = tag;
+            }
+        }
+    }
+
     QMessageBox msgBox(this);
     msgBox.setWindowTitle("About GridLock");
     msgBox.setIconPixmap(QPixmap(":/icon.png").scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     msgBox.setTextFormat(Qt::RichText);
     msgBox.setText(
-        "<b>GridLock IDE v0.1.0-alpha</b><br><br>"
+        QString("<b>GridLock IDE %1</b><br><br>"
         "A high-performance graphical debugger for MPI applications.<br><br>"
         "<a href=\"https://github.com/bnorthern42/GridLock\">GridLock on GitHub</a><br><br>"
         "<b>Acknowledgments & Attributions:</b><ul>"
@@ -323,7 +339,7 @@ void MainWindow::setupMenu() {
         "<li><a href=\"https://www.gdbgui.com/\">gdbgui</a>: For demonstrating the power of browser-based debug visualization, which inspired our native DifferentialGrid.</li>"
         "<li><a href=\"https://zealdocs.org/\">Zeal</a>: For the open-source .docset standard and offline documentation workflows that power our Reference Manual.</li>"
         "</ul><br>"
-        "Special thanks to the <b>Spack</b>, <b>SLURM</b>, and <b>OpenMPI</b> communities for the tools that power our HPC environments."
+        "Special thanks to the <b>Spack</b>, <b>SLURM</b>, and <b>OpenMPI</b> communities for the tools that power our HPC environments.").arg(latestTag)
     );
     msgBox.setTextInteractionFlags(Qt::TextBrowserInteraction);
     msgBox.exec();

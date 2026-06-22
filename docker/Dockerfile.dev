@@ -16,10 +16,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     qt6-base-dev \
     qt6-declarative-dev \
     ca-certificates \
+    gcovr \
+    lcov \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user matching the original setup
 RUN useradd -m -s /bin/bash gridlockuser
+
+# Bounding lcov to ignore GCC 14/Qt6 mismatch errors
+USER root
+RUN mv /usr/bin/lcov /usr/bin/lcov.real && \
+    echo '#!/bin/bash\n/usr/bin/lcov.real --ignore-errors mismatch,empty "$@"' > /usr/bin/lcov && \
+    chmod +x /usr/bin/lcov
+RUN echo "ignore_errors = mismatch,empty" >> /etc/lcovrc
 
 WORKDIR /workspace
 COPY . /workspace
