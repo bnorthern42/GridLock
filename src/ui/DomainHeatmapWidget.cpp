@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <QDebug>
+
+namespace gridlock::ui {
 
 static const char* vertexShaderSource = R"(
 #version 330 core
@@ -64,9 +67,15 @@ DomainHeatmapWidget::~DomainHeatmapWidget() {
 void DomainHeatmapWidget::initializeGL() {
     initializeOpenGLFunctions();
 
-    m_program.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource);
-    m_program.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource);
-    m_program.link();
+    if (!m_program.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource)) {
+        qWarning() << "Vertex shader error:" << m_program.log();
+    }
+    if (!m_program.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource)) {
+        qWarning() << "Fragment shader error:" << m_program.log();
+    }
+    if (!m_program.link()) {
+        qWarning() << "Shader program linking error:" << m_program.log();
+    }
 
     m_vao.create();
     m_vao.bind();
@@ -219,3 +228,5 @@ void DomainHeatmapWidget::mouseMoveEvent(QMouseEvent *event) {
         emit cellClicked(index, val, absoluteAddr);
     }
 }
+
+} // namespace gridlock::ui

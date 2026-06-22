@@ -8,6 +8,8 @@
 #include <vector>
 #include <cstdint>
 
+namespace gridlock::ui {
+
 class DomainHeatmapWidget : public QOpenGLWidget, protected QOpenGLExtraFunctions {
     Q_OBJECT
 
@@ -45,3 +47,5 @@ private:
     float m_dataMin = 0.0f;
     float m_dataMax = 1.0f;
 };
+
+} // namespace gridlock::ui

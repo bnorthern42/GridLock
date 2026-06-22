@@ -188,7 +188,8 @@ ui_test_src = [
   'src/core/managers/DocsetManager.cpp',
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
-  'src/ui/docks/VariablesDockWidget.cpp'
+  'src/ui/docks/VariablesDockWidget.cpp',
+  'src/ui/DomainHeatmapWidget.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -218,7 +219,8 @@ ui_test_moc_headers = [
   'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
-  'src/ui/docks/VariablesDockWidget.hpp'
+  'src/ui/docks/VariablesDockWidget.hpp',
+  'src/ui/DomainHeatmapWidget.hpp'
 ]
 
 processed_ui_test_files = qt6.compile_moc(

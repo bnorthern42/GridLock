@@ -22,6 +22,7 @@
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "docks/VariablesDockWidget.hpp"
+#include "DomainHeatmapWidget.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
@@ -221,6 +222,9 @@ void MainWindow::setupMenu() {
   viewMenu->addAction("Toggle Bottom Tabs");
   viewMenu->addAction("Zoom In");
   viewMenu->addAction("Zoom Out");
+  
+  QAction *testHeatmapAction = viewMenu->addAction("Test Domain Heatmap");
+  connect(testHeatmapAction, &QAction::triggered, this, &MainWindow::testHeatmapWidget);
 
   QMenu *historyMenu = menuBar->addMenu("&History");
   historyMenu->addAction("Recent Executions");
@@ -321,6 +325,11 @@ void MainWindow::setupDocks() {
 
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
+
+  m_domainHeatmapWidget = new DomainHeatmapWidget(this);
+  QDockWidget* heatmapDock = new QDockWidget("Domain Heatmap", this);
+  heatmapDock->setWidget(m_domainHeatmapWidget);
+  addDockWidget(Qt::RightDockWidgetArea, heatmapDock);
 
   m_variablesDockWidget = new VariablesDockWidget(this);
   // It's no longer a dock widget, it will be added to the splitter
@@ -636,6 +645,19 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
           m_coordinator->registerWatchVariable(QString::fromStdString(w));
       }
   }
+}
+
+void MainWindow::testHeatmapWidget() {
+    if (!m_domainHeatmapWidget) return;
+    int width = 1024;
+    int height = 1024;
+    std::vector<double> dummyData(width * height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            dummyData[y * width + x] = static_cast<double>((x ^ y) % 256);
+        }
+    }
+    m_domainHeatmapWidget->loadData(dummyData, width, height, 0);
 }
 
 } // namespace gridlock::ui
