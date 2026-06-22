@@ -112,6 +112,12 @@ void DomainHeatmapWidget::loadData(const std::vector<double>& rawData, int width
         dMax = 1.0;
     }
 
+    qDebug() << "[Heatmap] Matrix Extent:" << width << "x" << height;
+    qDebug() << "[Heatmap] Calculated Min:" << dMin << "Max:" << dMax;
+    if (rawData.size() > 0) {
+        qDebug() << "[Heatmap] First 3 values:" << rawData[0] << rawData[1] << rawData[2];
+    }
+
     m_dataMin = static_cast<float>(dMin);
     m_dataMax = static_cast<float>(dMax);
 

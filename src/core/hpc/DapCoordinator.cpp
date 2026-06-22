@@ -389,6 +389,8 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                     if (ok) {
                         try {
                             int count = req.rows * req.cols;
+                            qDebug() << "[Heatmap] LLDB Raw Evaluate Response:" << result;
+                            qDebug() << "[Heatmap] Parsed Hex Pointer:" << match.captured(1);
                             std::vector<double> doubles = NativeMemoryReader::readDoubles(m_rankToPid[req.rankId], baseAddress, count);
                             emit heatmapDataReady(doubles, req.rows, req.cols);
                         } catch (const std::exception& e) {
