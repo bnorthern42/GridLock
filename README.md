@@ -85,6 +85,7 @@ GridLock's development is broken into iterative phases. For a detailed breakdown
 * **Phase 8:** Alternative Debugger Backends
 * **Phase 9:** The Plugin Marketplace
 * **Phase 10:** Advanced Cluster Lifecycle & Detached Sessions
+* **Phase 11:** Deployment & AppImage Packaging
 
 ---
 

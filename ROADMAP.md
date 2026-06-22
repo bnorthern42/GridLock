@@ -68,6 +68,13 @@ By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerB
 * [ ] Background `squeue` polling for seamless DAP re-attachment.
 * [ ] Asynchronous `scancel` guillotine for safe UI teardowns and zombie process mitigation.
 
+## PHASE 11: Deployment & AppImage Packaging
+
+* [ ] Configure `linuxdeployqt` and `appimagetool` to bundle the Qt6, Wayland, and Vulkan runtime dependencies.
+* [ ] Ensure the native `process_vm_readv` memory extraction engines and `lldb-dap` adapters remain fully functional within the AppImage mount.
+* [ ] Create `.desktop` file and application icon integration for standard Linux desktop environments.
+* [ ] Set up GitHub Actions CI/CD to automatically build and attach `.AppImage` binaries to GitHub Releases.
+
 ## Field Testing & Validation (Remote HPC Workflows)
 
 > These items cannot be exercised in a local CI/CD pipeline. Each must be
