@@ -52,6 +52,8 @@ void main() {
 DomainHeatmapWidget::DomainHeatmapWidget(QWidget *parent)
     : QOpenGLWidget(parent), m_vbo(QOpenGLBuffer::VertexBuffer) {
     setMouseTracking(true);
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAttribute(Qt::WA_NoSystemBackground);
 }
 
 DomainHeatmapWidget::~DomainHeatmapWidget() {

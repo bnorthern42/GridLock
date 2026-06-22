@@ -326,11 +326,6 @@ void MainWindow::setupDocks() {
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
 
-  m_domainHeatmapWidget = new DomainHeatmapWidget(this);
-  QDockWidget* heatmapDock = new QDockWidget("Domain Heatmap", this);
-  heatmapDock->setWidget(m_domainHeatmapWidget);
-  addDockWidget(Qt::RightDockWidgetArea, heatmapDock);
-
   m_variablesDockWidget = new VariablesDockWidget(this);
   // It's no longer a dock widget, it will be added to the splitter
 
@@ -449,6 +444,7 @@ void MainWindow::setupDocks() {
   m_memView = new MemView(m_bottomTabs);
   m_registerView = new RegisterView(m_bottomTabs);
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
+  m_domainHeatmapWidget = new DomainHeatmapWidget(m_bottomTabs);
 
   connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
     if (m_coordinator) {
@@ -464,6 +460,7 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_memView, "Memory View");
   m_bottomTabs->addTab(m_registerView, "Registers");
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
+  m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);
