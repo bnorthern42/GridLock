@@ -21,7 +21,7 @@ public:
     void stopAdapter();
     void initializeAdapter();
     void sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
-    void sendRawMessage(const QJsonObject& message);
+    void processRawData(const QByteArray& data);
 
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
@@ -39,6 +39,11 @@ private slots:
     void handleMessage(const QJsonObject& message);
     void handleProcessError(QProcess::ProcessError error);
     void handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+
+protected:
+    virtual void sendRawMessage(const QJsonObject& message);
+    virtual bool isAdapterRunning() const;
+    virtual void writeToAdapter(const QByteArray& data);
 
 private:
     QProcess* m_process;

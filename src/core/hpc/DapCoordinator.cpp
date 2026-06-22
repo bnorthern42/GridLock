@@ -56,7 +56,7 @@ void DapCoordinator::sendRequest(const QString& command, const QJsonObject& argu
 }
 
 void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
-    if (m_process->state() != QProcess::Running) {
+    if (!isAdapterRunning()) {
         qWarning() << "Cannot send message: DAP adapter is not running.";
         return;
     }
@@ -70,7 +70,15 @@ void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
     message.append("\r\n\r\n");
     message.append(jsonBytes);
     
-    m_process->write(message);
+    writeToAdapter(message);
+}
+
+bool DapCoordinator::isAdapterRunning() const {
+    return m_process->state() == QProcess::Running;
+}
+
+void DapCoordinator::writeToAdapter(const QByteArray& data) {
+    m_process->write(data);
 }
 
 void DapCoordinator::stepOver(int threadId) {
@@ -98,7 +106,11 @@ void DapCoordinator::pauseExecution(int threadId) {
 }
 
 void DapCoordinator::readyReadStandardOutput() {
-    m_buffer.append(m_process->readAllStandardOutput());
+    processRawData(m_process->readAllStandardOutput());
+}
+
+void DapCoordinator::processRawData(const QByteArray& data) {
+    m_buffer.append(data);
     
     while (true) {
         int headerEndIndex = m_buffer.indexOf("\r\n\r\n");

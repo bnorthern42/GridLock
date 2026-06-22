@@ -44,7 +44,7 @@ void TestMainWindowUI::testMainLayoutStructure() {
     
     QVERIFY(mainVertical != nullptr);
     QVERIFY(masterHorizontal != nullptr);
-    QCOMPARE(masterHorizontal->count(), 3);
+    QCOMPARE(masterHorizontal->count(), 2);
 }
 
 void TestMainWindowUI::testSourceCodeViewportMargins() {

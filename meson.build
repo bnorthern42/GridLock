@@ -301,6 +301,59 @@ gridlock_commands_tests = executable('gridlock_commands_tests',
 )
 
 test('commands_tests', gridlock_commands_tests)
+  
+dap_parser_test_src = [
+  'tests/test_dap_parser.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+dap_parser_test_moc_headers = [
+  'tests/test_dap_parser.hpp',
+  'src/core/hpc/DapCoordinator.hpp'
+]
+
+processed_dap_parser_test_files = qt6.compile_moc(
+  headers : dap_parser_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_parser_tests = executable('gridlock_dap_parser_tests',
+  dap_parser_test_src,
+  processed_dap_parser_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_parser_tests', gridlock_dap_parser_tests)
+
+dap_commands_test_src = [
+  'tests/test_dap_commands.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/commands/DebugCommands.cpp',
+  'src/core/managers/ConfigManager.cpp',
+  'src/ui/views/SourceCodeView.cpp'
+]
+
+dap_commands_test_moc_headers = [
+  'tests/test_dap_commands.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/ui/views/SourceCodeView.hpp'
+]
+
+processed_dap_commands_test_files = qt6.compile_moc(
+  headers : dap_commands_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_commands_tests = executable('gridlock_dap_commands_tests',
+  dap_commands_test_src,
+  processed_dap_commands_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_commands_tests', gridlock_dap_commands_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
