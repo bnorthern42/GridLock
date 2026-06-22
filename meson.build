@@ -447,6 +447,32 @@ gridlock_dap_variables_tests = executable('gridlock_dap_variables_tests',
 
 test('dap_variables_tests', gridlock_dap_variables_tests)
 
+dap_evaluate_test_src = [
+  'tests/test_dap_evaluate.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+dap_evaluate_test_moc_headers = [
+  'tests/test_dap_evaluate.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
+]
+
+processed_dap_evaluate_test_files = qt6.compile_moc(
+  headers : dap_evaluate_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_evaluate_tests = executable('gridlock_dap_evaluate_tests',
+  dap_evaluate_test_src,
+  processed_dap_evaluate_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_evaluate_tests', gridlock_dap_evaluate_tests)
+
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
   output: 'mpi_mm_bin',

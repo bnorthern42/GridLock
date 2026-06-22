@@ -27,6 +27,7 @@ public:
     void requestStackTrace(int rankId);
     void requestScopes(int frameId, int rankId);
     void requestVariables(int rankId, int variablesReference);
+    void evaluateExpression(int rankId, const QString& expression) override;
 
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
@@ -37,6 +38,7 @@ signals:
     void executionStopped(int rankId, const QString& reason);
     void messageReceived(const QJsonObject& message);
     void localsUpdated(int rankId, const QJsonArray& variables);
+    void expressionEvaluated(int rankId, QString expr, QString result);
     void adapterStarted();
     void adapterExited(int exitCode, QProcess::ExitStatus exitStatus);
     void errorOccurred(const QString& errorString);
@@ -60,4 +62,6 @@ private:
     QMap<int, int> m_stackTraceRequests; // Map sequenceNumber to rankId
     QMap<int, int> m_scopesRequests;
     QMap<int, int> m_variablesRequests;
+    QMap<int, int> m_activeFrameIds;
+    QMap<int, QPair<int, QString>> m_evaluateRequests;
 };

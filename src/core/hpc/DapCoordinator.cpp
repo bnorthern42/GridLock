@@ -150,6 +150,17 @@ void DapCoordinator::requestVariables(int rankId, int variablesReference) {
     sendRequest("variables", args);
 }
 
+void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
+    QJsonObject args;
+    args["expression"] = expression;
+    args["context"] = "watch";
+    if (m_activeFrameIds.contains(rankId)) {
+        args["frameId"] = m_activeFrameIds[rankId];
+    }
+    m_evaluateRequests[m_sequenceNumber] = qMakePair(rankId, expression);
+    sendRequest("evaluate", args);
+}
+
 void DapCoordinator::readyReadStandardOutput() {
     processRawData(m_process->readAllStandardOutput());
 }
@@ -245,6 +256,7 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                         emit locationChanged(rankId, path, line);
                     }
                     int frameId = topFrame["id"].toInt();
+                    m_activeFrameIds[rankId] = frameId;
                     requestScopes(frameId, rankId);
                 }
             }
@@ -268,6 +280,15 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                 int rankId = m_variablesRequests.take(seq);
                 QJsonArray variables = message["body"].toObject()["variables"].toArray();
                 emit localsUpdated(rankId, variables);
+            }
+        } else if (command == "evaluate" && message["success"].toBool()) {
+            int seq = message["request_seq"].toInt();
+            if (m_evaluateRequests.contains(seq)) {
+                auto pair = m_evaluateRequests.take(seq);
+                int rankId = pair.first;
+                QString expr = pair.second;
+                QString result = message["body"].toObject()["result"].toString();
+                emit expressionEvaluated(rankId, expr, result);
             }
         }
     } else if (type == "event") {

@@ -13,7 +13,9 @@ public:
     virtual void stepInto(int threadId) = 0;
     virtual void continueExecution(int threadId) = 0;
     virtual void pauseExecution(int threadId) = 0;
+    virtual void evaluateExpression(int rankId, const QString& expression) = 0;
 
 signals:
     void locationChanged(int rankId, const QString& file, int line);
+    void expressionEvaluated(int rankId, const QString& expr, const QString& result);
 };
