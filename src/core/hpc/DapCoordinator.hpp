@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QString>
+#include <atomic>
 
 class DapCoordinator : public QObject {
     Q_OBJECT
@@ -17,7 +18,9 @@ public:
 
     void startAdapter(const QString& program);
     void stopAdapter();
-    void sendRequest(const QJsonObject& request);
+    void initializeAdapter();
+    void sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
+    void sendRawMessage(const QJsonObject& message);
 
 signals:
     void messageReceived(const QJsonObject& message);
@@ -27,10 +30,12 @@ signals:
 
 private slots:
     void readyReadStandardOutput();
+    void handleMessage(const QJsonObject& message);
     void handleProcessError(QProcess::ProcessError error);
     void handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
 
 private:
     QProcess* m_process;
     QByteArray m_buffer;
+    std::atomic<int> m_sequenceNumber{1};
 };

@@ -1,6 +1,8 @@
 #include "DapCoordinator.hpp"
 #include <QDebug>
 #include <QStringList>
+#include <QJsonArray>
+#include "core/managers/ConfigManager.hpp"
 
 DapCoordinator::DapCoordinator(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)) {
@@ -32,13 +34,34 @@ void DapCoordinator::stopAdapter() {
     }
 }
 
-void DapCoordinator::sendRequest(const QJsonObject& request) {
+void DapCoordinator::initializeAdapter() {
+    QJsonObject args;
+    args["clientID"] = "gridlock";
+    args["clientName"] = "GridLock IDE";
+    args["adapterID"] = "lldb";
+    args["linesStartAt1"] = true;
+    args["columnsStartAt1"] = true;
+    sendRequest("initialize", args);
+}
+
+void DapCoordinator::sendRequest(const QString& command, const QJsonObject& arguments) {
+    QJsonObject request;
+    request["type"] = "request";
+    request["seq"] = m_sequenceNumber++;
+    request["command"] = command;
+    if (!arguments.isEmpty()) {
+        request["arguments"] = arguments;
+    }
+    sendRawMessage(request);
+}
+
+void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
     if (m_process->state() != QProcess::Running) {
-        qWarning() << "Cannot send request: DAP adapter is not running.";
+        qWarning() << "Cannot send message: DAP adapter is not running.";
         return;
     }
     
-    QJsonDocument doc(request);
+    QJsonDocument doc(messageObj);
     QByteArray jsonBytes = doc.toJson(QJsonDocument::Compact);
     
     QByteArray message;
@@ -102,9 +125,39 @@ void DapCoordinator::readyReadStandardOutput() {
         }
         
         if (doc.isObject()) {
-            emit messageReceived(doc.object());
+            handleMessage(doc.object());
         }
     }
+}
+
+void DapCoordinator::handleMessage(const QJsonObject& message) {
+    QString type = message["type"].toString();
+    
+    if (type == "response") {
+        QString command = message["command"].toString();
+        if (command == "initialize" && message["success"].toBool(true)) {
+            auto settings = gridlock::core::ConfigManager::instance().loadProjectSettings();
+            QJsonObject launchArgs;
+            launchArgs["program"] = QString::fromStdString(settings.targetBinary);
+            
+            QString argsStr = QString::fromStdString(settings.binaryArguments);
+            QJsonArray argsArray;
+            for (const QString& arg : argsStr.split(" ", Qt::SkipEmptyParts)) {
+                argsArray.append(arg);
+            }
+            launchArgs["args"] = argsArray;
+            launchArgs["cwd"] = QString::fromStdString(settings.workingDirectory);
+            
+            sendRequest("launch", launchArgs);
+        }
+    } else if (type == "event") {
+        QString event = message["event"].toString();
+        if (event == "initialized") {
+            sendRequest("configurationDone");
+        }
+    }
+    
+    emit messageReceived(message);
 }
 
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
