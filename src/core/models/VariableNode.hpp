@@ -15,6 +15,8 @@ struct VariableNode {
     int variablesReference = 0;
     std::vector<std::unique_ptr<VariableNode>> children;
     VariableNode* parent = nullptr;
+    uintptr_t memoryBaseAddress = 0;
+    size_t memoryAllocatedBytes = 0;
 
     VariableNode(const QString& n = "", const QString& t = "", const QString& v = "",
                  const QString& vName = "", int nChildren = 0, int varRef = 0, VariableNode* p = nullptr)

@@ -13,6 +13,7 @@ src_files = [
   'src/main.cpp',
   'src/GridLockApp.cpp',
   'src/core/hpc/NativeMemoryReader.cpp',
+  'src/core/hpc/MemoryBoundsValidator.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/hpc/DapCoordinator.cpp',
   'src/core/managers/ConfigManager.cpp',
@@ -548,6 +549,29 @@ gridlock_hpc_memory_tests = executable('gridlock_hpc_memory_tests',
 )
 
 test('hpc_memory_tests', gridlock_hpc_memory_tests)
+
+stride_security_test_src = [
+  'tests/test_stride_security.cpp',
+  'src/core/hpc/MemoryBoundsValidator.cpp'
+]
+
+stride_security_test_moc_headers = [
+  'tests/test_stride_security.hpp'
+]
+
+processed_stride_security_test_files = qt6.compile_moc(
+  headers : stride_security_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_stride_security_tests = executable('gridlock_stride_security_tests',
+  stride_security_test_src,
+  processed_stride_security_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('stride_security_tests', gridlock_stride_security_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
