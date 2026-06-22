@@ -136,6 +136,20 @@ void DapCoordinator::requestStackTrace(int rankId) {
     sendRequest("stackTrace", args);
 }
 
+void DapCoordinator::requestScopes(int frameId, int rankId) {
+    QJsonObject args;
+    args["frameId"] = frameId;
+    m_scopesRequests[m_sequenceNumber] = rankId;
+    sendRequest("scopes", args);
+}
+
+void DapCoordinator::requestVariables(int rankId, int variablesReference) {
+    QJsonObject args;
+    args["variablesReference"] = variablesReference;
+    m_variablesRequests[m_sequenceNumber] = rankId;
+    sendRequest("variables", args);
+}
+
 void DapCoordinator::readyReadStandardOutput() {
     processRawData(m_process->readAllStandardOutput());
 }
@@ -230,7 +244,30 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                         int line = topFrame["line"].toInt();
                         emit locationChanged(rankId, path, line);
                     }
+                    int frameId = topFrame["id"].toInt();
+                    requestScopes(frameId, rankId);
                 }
+            }
+        } else if (command == "scopes" && message["success"].toBool()) {
+            int seq = message["request_seq"].toInt();
+            if (m_scopesRequests.contains(seq)) {
+                int rankId = m_scopesRequests.take(seq);
+                QJsonArray scopes = message["body"].toObject()["scopes"].toArray();
+                for (const QJsonValue& val : std::as_const(scopes)) {
+                    QJsonObject scope = val.toObject();
+                    if (scope["name"].toString() == "Locals") {
+                        int varRef = scope["variablesReference"].toInt();
+                        requestVariables(rankId, varRef);
+                        break;
+                    }
+                }
+            }
+        } else if (command == "variables" && message["success"].toBool()) {
+            int seq = message["request_seq"].toInt();
+            if (m_variablesRequests.contains(seq)) {
+                int rankId = m_variablesRequests.take(seq);
+                QJsonArray variables = message["body"].toObject()["variables"].toArray();
+                emit localsUpdated(rankId, variables);
             }
         }
     } else if (type == "event") {

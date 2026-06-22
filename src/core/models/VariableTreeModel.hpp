@@ -3,6 +3,7 @@
 #include <QString>
 #include <QList>
 #include <QMap>
+#include <QJsonArray>
 #include <memory>
 #include "VariableNode.hpp"
 
@@ -32,6 +33,7 @@ public:
 
 public slots:
     void handleGdbOutput(int rankId, const QString& output);
+    void onLocalsUpdated(int rankId, const QJsonArray& variables);
 
 private:
     VariableNode* getNode(const QModelIndex& index) const;

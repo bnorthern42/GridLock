@@ -417,6 +417,36 @@ gridlock_dap_stacktrace_tests = executable('gridlock_dap_stacktrace_tests',
 
 test('dap_stacktrace_tests', gridlock_dap_stacktrace_tests)
 
+dap_variables_test_src = [
+  'tests/test_dap_variables.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/GdbRankCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp',
+  'src/core/models/VariableTreeModel.cpp'
+]
+
+dap_variables_test_moc_headers = [
+  'tests/test_dap_variables.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp',
+  'src/core/models/VariableTreeModel.hpp'
+]
+
+processed_dap_variables_test_files = qt6.compile_moc(
+  headers : dap_variables_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_variables_tests = executable('gridlock_dap_variables_tests',
+  dap_variables_test_src,
+  processed_dap_variables_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_variables_tests', gridlock_dap_variables_tests)
+
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
   output: 'mpi_mm_bin',

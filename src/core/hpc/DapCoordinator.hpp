@@ -25,6 +25,8 @@ public:
     
     void toggleBreakpoint(const QString& file, int line);
     void requestStackTrace(int rankId);
+    void requestScopes(int frameId, int rankId);
+    void requestVariables(int rankId, int variablesReference);
 
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
@@ -34,6 +36,7 @@ public:
 signals:
     void executionStopped(int rankId, const QString& reason);
     void messageReceived(const QJsonObject& message);
+    void localsUpdated(int rankId, const QJsonArray& variables);
     void adapterStarted();
     void adapterExited(int exitCode, QProcess::ExitStatus exitStatus);
     void errorOccurred(const QString& errorString);
@@ -55,4 +58,6 @@ private:
     std::atomic<int> m_sequenceNumber{1};
     QMap<QString, QList<int>> m_breakpoints;
     QMap<int, int> m_stackTraceRequests; // Map sequenceNumber to rankId
+    QMap<int, int> m_scopesRequests;
+    QMap<int, int> m_variablesRequests;
 };

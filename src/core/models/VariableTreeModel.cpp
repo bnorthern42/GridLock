@@ -1,6 +1,8 @@
 #include "VariableTreeModel.hpp"
 #include "../hpc/GdbRankCoordinator.hpp"
 #include <QRegularExpression>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QFont>
 #include <functional>
 
@@ -9,7 +11,9 @@ namespace gridlock {
 VariableTreeModel::VariableTreeModel(GdbRankCoordinator* coordinator, QObject* parent)
     : QAbstractItemModel(parent), m_coordinator(coordinator), m_currentRankId(-1) {
     m_rootNode = std::make_unique<VariableNode>();
-    connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived, this, &VariableTreeModel::handleGdbOutput);
+    if (m_coordinator) {
+        connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived, this, &VariableTreeModel::handleGdbOutput);
+    }
 }
 
 VariableTreeModel::~VariableTreeModel() {
@@ -105,7 +109,33 @@ void VariableTreeModel::fetchMore(const QModelIndex& parent) {
 void VariableTreeModel::loadLocals(int rankId) {
     clear();
     m_currentRankId = rankId;
-    m_coordinator->writeCmd(m_currentRankId, QString("-stack-list-variables 1\n"));
+    m_coordinator->sendCommand(rankId, "-stack-list-variables --all-values");
+}
+
+void VariableTreeModel::onLocalsUpdated(int rankId, const QJsonArray& variables) {
+    if (m_currentRankId != -1 && rankId != m_currentRankId) return;
+    if (m_currentRankId == -1) m_currentRankId = rankId;
+
+    beginResetModel();
+    m_rootNode->children.clear();
+    m_rootNode->numChildren = 0;
+
+    for (const QJsonValue& val : variables) {
+        QJsonObject var = val.toObject();
+        QString name = var["name"].toString();
+        QString value = var["value"].toString();
+        QString type = var["type"].toString();
+        int varRef = var["variablesReference"].toInt(0);
+        
+        auto node = std::make_unique<VariableNode>(name, type, value, "", 0, varRef, m_rootNode.get());
+        if (varRef > 0) {
+            node->numChildren = 1; // Indicate it has children to allow expansion
+        }
+        m_rootNode->children.push_back(std::move(node));
+    }
+    
+    m_rootNode->numChildren = m_rootNode->children.size();
+    endResetModel();
 }
 
 void VariableTreeModel::clear() {
@@ -193,7 +223,7 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
     int newRow = m_rootNode->children.size();
     beginInsertRows(QModelIndex(), newRow, newRow);
     
-    VariableNode* node = new VariableNode(name, type, value, varobjName, numChildren, m_rootNode.get());
+    VariableNode* node = new VariableNode(name, type, value, varobjName, numChildren, 0, m_rootNode.get());
     m_rootNode->children.push_back(std::unique_ptr<VariableNode>(node));
     m_varobjToNode[varobjName] = node;
     m_createdVarobjs.append(varobjName);
@@ -270,7 +300,7 @@ void VariableTreeModel::parseVarListChildren(const QString& output) {
             QRegularExpression typeRe("type=\"([^\"]+)\"");
             QString type = typeRe.match(block).hasMatch() ? typeRe.match(block).captured(1) : "";
 
-            VariableNode* childNode = new VariableNode(exp, type, value, varobjName, numChildren, parentNode);
+            VariableNode* childNode = new VariableNode(exp, type, value, varobjName, numChildren, 0, parentNode);
             parentNode->children.push_back(std::unique_ptr<VariableNode>(childNode));
             m_varobjToNode[varobjName] = childNode;
             m_createdVarobjs.append(varobjName);
