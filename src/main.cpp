@@ -24,13 +24,13 @@ int main(int argc, char *argv[]) {
     format.setSwapInterval(1); // CRITICAL: Forces VSync
     QSurfaceFormat::setDefaultFormat(format);
 
+    QApplication app(argc, argv);
+
     QVulkanInstance inst;
     inst.setLayers({"VK_LAYER_KHRONOS_validation"});
     if (!inst.create()) {
         qFatal("Failed to create Vulkan instance");
     }
-
-    QApplication app(argc, argv);
 
     // Set org/app identity so QSettings keys are consistent everywhere.
     QApplication::setOrganizationName("GridLock");
