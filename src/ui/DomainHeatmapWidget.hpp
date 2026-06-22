@@ -41,6 +41,7 @@ public:
 
 signals:
     void cellClicked(int index, double value, uintptr_t absoluteMemoryAddress);
+    void requestRender(const QString& expression, int rows, int cols);
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;

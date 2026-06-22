@@ -29,7 +29,7 @@ public:
     void startAdapter(const QString& program);
     void stopAdapter();
     void initializeAdapter();
-    void sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
+    int sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
     void processRawData(const QByteArray& data);
     void terminateSession();
     

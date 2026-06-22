@@ -48,7 +48,10 @@ DomainHeatmapWidget::DomainHeatmapWidget(QWidget *parent)
     m_colsInput->setValue(500);
     
     m_renderButton = new QPushButton("Render Frame", this);
-    connect(m_renderButton, &QPushButton::clicked, this, [](){ qDebug() << "[Heatmap] Render Button Clicked! Waiting for DAP evaluation..."; });
+    connect(m_renderButton, &QPushButton::clicked, this, [this]() {
+        qDebug() << "[Heatmap] Render Button Clicked! Emitting request...";
+        emit requestRender(m_addressInput->text(), m_rowsInput->value(), m_colsInput->value());
+    });
     
     toolbar->addWidget(m_addressInput);
     toolbar->addWidget(m_rowsInput);

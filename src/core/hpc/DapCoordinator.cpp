@@ -55,15 +55,17 @@ void DapCoordinator::initializeAdapter() {
     sendRequest("initialize", args);
 }
 
-void DapCoordinator::sendRequest(const QString& command, const QJsonObject& arguments) {
+int DapCoordinator::sendRequest(const QString& command, const QJsonObject& arguments) {
+    int seq = m_sequenceNumber++;
     QJsonObject request;
     request["type"] = "request";
-    request["seq"] = m_sequenceNumber++;
+    request["seq"] = seq;
     request["command"] = command;
     if (!arguments.isEmpty()) {
         request["arguments"] = arguments;
     }
     sendRawMessage(request);
+    return seq;
 }
 
 void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
@@ -179,8 +181,9 @@ void DapCoordinator::requestHeatmapRender(int rankId, const QString& expression,
     if (m_activeFrameIds.contains(rankId)) {
         args["frameId"] = m_activeFrameIds[rankId];
     }
-    m_heatmapRequests[m_sequenceNumber] = {rankId, rows, cols};
-    sendRequest("evaluate", args);
+    int seq = sendRequest("evaluate", args);
+    m_heatmapRequests[seq] = {rankId, rows, cols};
+    qDebug() << "[Heatmap] Sent DAP evaluate request, seq:" << seq << "for" << expression;
 }
 
 void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int count) {
@@ -299,6 +302,10 @@ void DapCoordinator::processRawData(const QByteArray& data) {
 }
 
 void DapCoordinator::handleMessage(const QJsonObject& message) {
+    if (message["type"].toString() == "response" && message["command"].toString() == "evaluate") {
+        qDebug() << "[DAP Sniffer] Evaluate Response:" << QJsonDocument(message).toJson(QJsonDocument::Compact);
+    }
+
     QString type = message["type"].toString();
     
     if (type == "response") {
