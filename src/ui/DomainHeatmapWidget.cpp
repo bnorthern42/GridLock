@@ -17,7 +17,7 @@ QVulkanWindowRenderer *DomainHeatmapWindow::createRenderer() {
 
 void DomainHeatmapWindow::loadData(const std::vector<double>& rawData, int width, int height) {
     if (m_renderer) {
-        m_renderer->updateData(rawData, width, height);
+        m_renderer->uploadData(rawData, height, width);
         requestUpdate();
     }
 }

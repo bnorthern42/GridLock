@@ -15,13 +15,30 @@ public:
 
     void startNextFrame() override;
 
-    void updateData(const std::vector<double>& rawData, int width, int height);
+    void uploadData(const std::vector<double>& matrix, int rows, int cols);
 
 private:
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+
     QVulkanWindow *m_window;
-    std::vector<double> m_data;
-    int m_width = 0;
-    int m_height = 0;
+
+    VkImage m_image = VK_NULL_HANDLE;
+    VkDeviceMemory m_imageMemory = VK_NULL_HANDLE;
+    VkImageView m_imageView = VK_NULL_HANDLE;
+    VkSampler m_sampler = VK_NULL_HANDLE;
+
+    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
+
+    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
+    VkPipeline m_pipeline = VK_NULL_HANDLE;
+
+    std::vector<float> m_pendingUpload;
+    int m_pendingWidth = 0;
+    int m_pendingHeight = 0;
+    bool m_needsUpload = false;
 };
 
 } // namespace gridlock::ui
