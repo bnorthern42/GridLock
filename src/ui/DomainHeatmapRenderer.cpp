@@ -91,7 +91,7 @@ void DomainHeatmapRenderer::releaseSwapChainResources() {
 void DomainHeatmapRenderer::releaseResources() {
 }
 
-void DomainHeatmapRenderer::uploadData(const std::vector<double>& matrix, int rows, int cols) {
+void DomainHeatmapRenderer::uploadData(const std::vector<double>& matrix, int rows, int cols, float min_val, float max_val) {
     // 1. Convert double matrix to floats
     m_pendingUpload.resize(matrix.size());
     for(size_t i = 0; i < matrix.size(); ++i) {
@@ -116,6 +116,9 @@ void DomainHeatmapRenderer::uploadData(const std::vector<double>& matrix, int ro
 
     devFuncs->vkDestroyBuffer(dev, stagingBuffer, nullptr);
     devFuncs->vkFreeMemory(dev, stagingBufferMemory, nullptr);
+
+    m_minVal = min_val;
+    m_maxVal = max_val;
 
     m_needsUpload = true;
     m_window->requestUpdate();
@@ -155,6 +158,19 @@ void DomainHeatmapRenderer::startNextFrame() {
     
     // Shader rendering logic
     // devFuncs->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+    
+    // Push constants
+    struct {
+        float min_val;
+        float max_val;
+    } pc;
+    pc.min_val = m_minVal;
+    pc.max_val = m_maxVal;
+    
+    if (m_pipelineLayout != VK_NULL_HANDLE) {
+        devFuncs->vkCmdPushConstants(cb, m_pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+    }
+    
     // devFuncs->vkCmdDraw(cb, 3, 1, 0, 0); // screen-space quad/triangle
 
     devFuncs->vkCmdEndRenderPass(cb);

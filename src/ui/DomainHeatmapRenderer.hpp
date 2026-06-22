@@ -15,7 +15,7 @@ public:
 
     void startNextFrame() override;
 
-    void uploadData(const std::vector<double>& matrix, int rows, int cols);
+    void uploadData(const std::vector<double>& matrix, int rows, int cols, float min_val, float max_val);
 
 private:
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
@@ -39,6 +39,8 @@ private:
     int m_pendingWidth = 0;
     int m_pendingHeight = 0;
     bool m_needsUpload = false;
+    float m_minVal = 0.0f;
+    float m_maxVal = 1.0f;
 };
 
 } // namespace gridlock::ui

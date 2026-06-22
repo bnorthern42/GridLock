@@ -172,6 +172,17 @@ void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
     sendRequest("evaluate", args);
 }
 
+void DapCoordinator::requestHeatmapRender(int rankId, const QString& expression, int rows, int cols) {
+    QJsonObject args;
+    args["expression"] = expression;
+    args["context"] = "watch";
+    if (m_activeFrameIds.contains(rankId)) {
+        args["frameId"] = m_activeFrameIds[rankId];
+    }
+    m_heatmapRequests[m_sequenceNumber] = {rankId, rows, cols};
+    sendRequest("evaluate", args);
+}
+
 void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int count) {
     if (count > 1024 && m_rankToPid.contains(rankId)) {
         bool ok = false;
@@ -367,7 +378,25 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             }
         } else if (command == "evaluate" && message["success"].toBool()) {
             int seq = message["request_seq"].toInt();
-            if (m_evaluateRequests.contains(seq)) {
+            if (m_heatmapRequests.contains(seq)) {
+                auto req = m_heatmapRequests.take(seq);
+                QString result = message["body"].toObject()["result"].toString();
+                QRegularExpression re("(0x[0-9a-fA-F]+)");
+                QRegularExpressionMatch match = re.match(result);
+                if (match.hasMatch() && m_rankToPid.contains(req.rankId)) {
+                    bool ok;
+                    uintptr_t baseAddress = match.captured(1).toULongLong(&ok, 16);
+                    if (ok) {
+                        try {
+                            int count = req.rows * req.cols;
+                            std::vector<double> doubles = NativeMemoryReader::readDoubles(m_rankToPid[req.rankId], baseAddress, count);
+                            emit heatmapDataReady(doubles, req.rows, req.cols);
+                        } catch (const std::exception& e) {
+                            qWarning() << "Heatmap memory read failed:" << e.what();
+                        }
+                    }
+                }
+            } else if (m_evaluateRequests.contains(seq)) {
                 auto pair = m_evaluateRequests.take(seq);
                 int rankId = pair.first;
                 QString expr = pair.second;

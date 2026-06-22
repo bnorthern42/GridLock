@@ -15,9 +15,9 @@ QVulkanWindowRenderer *DomainHeatmapWindow::createRenderer() {
     return m_renderer;
 }
 
-void DomainHeatmapWindow::loadData(const std::vector<double>& rawData, int width, int height) {
+void DomainHeatmapWindow::loadData(const std::vector<double>& rawData, int width, int height, float min_val, float max_val) {
     if (m_renderer) {
-        m_renderer->uploadData(rawData, height, width);
+        m_renderer->uploadData(rawData, height, width, min_val, max_val);
         requestUpdate();
     }
 }
@@ -32,6 +32,27 @@ DomainHeatmapWidget::DomainHeatmapWidget(QWidget *parent)
     
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    
+    QHBoxLayout *toolbar = new QHBoxLayout();
+    m_addressInput = new QLineEdit(this);
+    m_addressInput->setPlaceholderText("Address or Variable, e.g., &a");
+    
+    m_rowsInput = new QSpinBox(this);
+    m_rowsInput->setPrefix("Rows: ");
+    m_rowsInput->setRange(1, 99999);
+    
+    m_colsInput = new QSpinBox(this);
+    m_colsInput->setPrefix("Cols: ");
+    m_colsInput->setRange(1, 99999);
+    
+    m_renderButton = new QPushButton("Render Heatmap", this);
+    
+    toolbar->addWidget(m_addressInput);
+    toolbar->addWidget(m_rowsInput);
+    toolbar->addWidget(m_colsInput);
+    toolbar->addWidget(m_renderButton);
+    
+    layout->addLayout(toolbar);
     layout->addWidget(m_container);
     setLayout(layout);
 }
@@ -96,7 +117,7 @@ void DomainHeatmapWidget::loadData(const std::vector<double>& rawData, int width
         m_previousData = rawData;
     }
 
-    m_vulkanWindow->loadData(m_currentData, width, height);
+    m_vulkanWindow->loadData(m_currentData, width, height, m_dataMin, m_dataMax);
 }
 
 void DomainHeatmapWidget::mousePressEvent(QMouseEvent *event) {

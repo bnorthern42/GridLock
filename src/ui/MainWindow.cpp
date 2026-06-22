@@ -111,6 +111,21 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
               }
           }
       });
+
+      if (m_domainHeatmapWidget) {
+          connect(m_domainHeatmapWidget->renderButton(), &QPushButton::clicked, this, [this, dapCoord]() {
+              QString expr = m_domainHeatmapWidget->addressInput()->text();
+              int rows = m_domainHeatmapWidget->rowsInput()->value();
+              int cols = m_domainHeatmapWidget->colsInput()->value();
+              if (!expr.isEmpty() && rows > 0 && cols > 0) {
+                  dapCoord->requestHeatmapRender(m_focusedRank, expr, rows, cols);
+              }
+          });
+          
+          connect(dapCoord, &DapCoordinator::heatmapDataReady, m_domainHeatmapWidget, [this](const std::vector<double>& data, int rows, int cols) {
+              m_domainHeatmapWidget->loadData(data, cols, rows);
+          });
+      }
   }
 
   if (m_variablesDockWidget) {

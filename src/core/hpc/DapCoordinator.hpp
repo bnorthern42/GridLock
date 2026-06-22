@@ -39,6 +39,7 @@ public:
     void requestVariables(int rankId, int variablesReference);
     void evaluateExpression(int rankId, const QString& expression) override;
     void readMemory(int rankId, const QString& memoryReference, int count) override;
+    void requestHeatmapRender(int rankId, const QString& expression, int rows, int cols);
 
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
@@ -52,6 +53,7 @@ signals:
     void expressionEvaluated(int rankId, QString expr, QString result);
     void targetOutputReceived(QString category, QString output);
     void memoryRead(int rankId, const QString& address, const QByteArray& data);
+    void heatmapDataReady(const std::vector<double>& data, int rows, int cols);
     void registersUpdated(int rankId, const QJsonArray& registers);
     void adapterStarted();
     void adapterExited(int exitCode, QProcess::ExitStatus exitStatus);
@@ -85,6 +87,14 @@ private:
     QMap<int, int> m_memoryRequests;
     QMap<int, int> m_activeFrameIds;
     QMap<int, QPair<int, QString>> m_evaluateRequests;
+    
+    struct HeatmapRequest {
+        int rankId;
+        int rows;
+        int cols;
+    };
+    QMap<int, HeatmapRequest> m_heatmapRequests;
+    
     SessionState m_state = SessionState::Disconnected;
     int m_slurmJobId = -1;
 };

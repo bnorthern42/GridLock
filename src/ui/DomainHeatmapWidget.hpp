@@ -4,6 +4,9 @@
 #include <QVulkanWindow>
 #include <vector>
 #include <cstdint>
+#include <QLineEdit>
+#include <QSpinBox>
+#include <QPushButton>
 
 namespace gridlock::ui {
 
@@ -14,7 +17,7 @@ class DomainHeatmapWindow : public QVulkanWindow {
 public:
     QVulkanWindowRenderer *createRenderer() override;
     void setRenderer(DomainHeatmapRenderer *renderer) { m_renderer = renderer; }
-    void loadData(const std::vector<double>& rawData, int width, int height);
+    void loadData(const std::vector<double>& rawData, int width, int height, float min_val, float max_val);
 
 private:
     DomainHeatmapRenderer *m_renderer = nullptr;
@@ -31,6 +34,11 @@ public:
     void setDifferentialMode(bool enabled);
     void setVulkanInstance(QVulkanInstance *inst);
 
+    QLineEdit* addressInput() const { return m_addressInput; }
+    QSpinBox* rowsInput() const { return m_rowsInput; }
+    QSpinBox* colsInput() const { return m_colsInput; }
+    QPushButton* renderButton() const { return m_renderButton; }
+
 signals:
     void cellClicked(int index, double value, uintptr_t absoluteMemoryAddress);
 
@@ -41,6 +49,11 @@ protected:
 private:
     DomainHeatmapWindow *m_vulkanWindow;
     QWidget *m_container;
+    
+    QLineEdit *m_addressInput = nullptr;
+    QSpinBox *m_rowsInput = nullptr;
+    QSpinBox *m_colsInput = nullptr;
+    QPushButton *m_renderButton = nullptr;
 
     int m_dataWidth = 0;
     int m_dataHeight = 0;
