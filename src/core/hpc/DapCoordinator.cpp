@@ -128,6 +128,14 @@ void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
     sendRequest("setBreakpoints", args);
 }
 
+void DapCoordinator::requestStackTrace(int rankId) {
+    QJsonObject args;
+    args["threadId"] = rankId + 1;
+    args["levels"] = 1;
+    m_stackTraceRequests[m_sequenceNumber] = rankId;
+    sendRequest("stackTrace", args);
+}
+
 void DapCoordinator::readyReadStandardOutput() {
     processRawData(m_process->readAllStandardOutput());
 }
@@ -208,6 +216,22 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             launchArgs["cwd"] = QString::fromStdString(settings.workingDirectory);
             
             sendRequest("launch", launchArgs);
+        } else if (command == "stackTrace" && message["success"].toBool()) {
+            int seq = message["request_seq"].toInt();
+            if (m_stackTraceRequests.contains(seq)) {
+                int rankId = m_stackTraceRequests.take(seq);
+                QJsonObject body = message["body"].toObject();
+                QJsonArray stackFrames = body["stackFrames"].toArray();
+                if (!stackFrames.isEmpty()) {
+                    QJsonObject topFrame = stackFrames[0].toObject();
+                    if (topFrame.contains("source")) {
+                        QJsonObject source = topFrame["source"].toObject();
+                        QString path = source["path"].toString();
+                        int line = topFrame["line"].toInt();
+                        emit locationChanged(rankId, path, line);
+                    }
+                }
+            }
         }
     } else if (type == "event") {
         QString event = message["event"].toString();
@@ -217,7 +241,9 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             QJsonObject body = message["body"].toObject();
             QString reason = body["reason"].toString();
             int threadId = body["threadId"].toInt();
-            emit executionStopped(threadId - 1, reason);
+            int rankId = threadId - 1;
+            emit executionStopped(rankId, reason);
+            requestStackTrace(rankId);
         }
     }
     

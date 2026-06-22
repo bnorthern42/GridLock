@@ -2,6 +2,7 @@
 #include <QObject>
 
 class IBackendCoordinator : public QObject {
+    Q_OBJECT
 public:
     explicit IBackendCoordinator(QObject* parent = nullptr) : QObject(parent) {}
     virtual ~IBackendCoordinator() = default;
@@ -12,4 +13,7 @@ public:
     virtual void stepInto(int threadId) = 0;
     virtual void continueExecution(int threadId) = 0;
     virtual void pauseExecution(int threadId) = 0;
+
+signals:
+    void locationChanged(int rankId, const QString& file, int line);
 };

@@ -98,6 +98,17 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
       m_variablesDockWidget->setCoordinator(m_coordinator);
   }
   if (m_coordinator) {
+    connect(m_coordinator, &IBackendCoordinator::locationChanged, this, [this](int rankId, const QString& file, int line) {
+        if (rankId == m_focusedRank) {
+            if (!file.isEmpty() && m_editorTabManager) {
+                if (auto view = m_editorTabManager->openFile(file)) {
+                    view->highlightCurrentLine(line);
+                }
+            } else if (getSourceCodeView()) {
+                getSourceCodeView()->highlightCurrentLine(line);
+            }
+        }
+    });
     connect(m_coordinator, &GdbRankCoordinator::hoverEvaluationComplete, this, [this](QString varName, QString result, QPoint globalPos) {
         if (getSourceCodeView()) {
             QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), getSourceCodeView());

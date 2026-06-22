@@ -61,6 +61,7 @@ moc_headers = [
   'src/ui/widgets/DifferentialGrid.hpp',
   'src/ui/docks/TerminalDock.hpp',
   'src/ui/GdbConsoleWidget.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp',
   'src/backend/GridLockAutomationRunner.hpp',
   'src/ui/views/MemView.hpp',
   'src/ui/views/RegisterView.hpp',
@@ -113,7 +114,8 @@ test_src = [
 
 test_moc_headers = [
   'tests/test_coordinator.hpp',
-  'src/core/hpc/GdbRankCoordinator.hpp'
+  'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
 ]
 
 processed_test_files = qt6.compile_moc(
@@ -201,6 +203,7 @@ ui_test_moc_headers = [
   'src/ui/GdbConsoleWidget.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp',
   'src/core/hpc/LspCoordinator.hpp',
   'src/ui/views/MemView.hpp',
   'src/ui/views/RegisterView.hpp',
@@ -289,6 +292,7 @@ commands_test_moc_headers = [
   'tests/test_commands.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp'
 ]
 
@@ -314,7 +318,8 @@ dap_parser_test_src = [
 
 dap_parser_test_moc_headers = [
   'tests/test_dap_parser.hpp',
-  'src/core/hpc/DapCoordinator.hpp'
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
 ]
 
 processed_dap_parser_test_files = qt6.compile_moc(
@@ -342,6 +347,7 @@ dap_commands_test_src = [
 dap_commands_test_moc_headers = [
   'tests/test_dap_commands.hpp',
   'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp'
 ]
 
@@ -367,7 +373,8 @@ dap_breakpoints_test_src = [
 
 dap_breakpoints_test_moc_headers = [
   'tests/test_dap_breakpoints.hpp',
-  'src/core/hpc/DapCoordinator.hpp'
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
 ]
 
 processed_dap_breakpoints_test_files = qt6.compile_moc(
@@ -383,6 +390,32 @@ gridlock_dap_breakpoints_tests = executable('gridlock_dap_breakpoints_tests',
 )
 
 test('dap_breakpoints_tests', gridlock_dap_breakpoints_tests)
+
+dap_stacktrace_test_src = [
+  'tests/test_dap_stacktrace.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+dap_stacktrace_test_moc_headers = [
+  'tests/test_dap_stacktrace.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
+]
+
+processed_dap_stacktrace_test_files = qt6.compile_moc(
+  headers : dap_stacktrace_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_stacktrace_tests = executable('gridlock_dap_stacktrace_tests',
+  dap_stacktrace_test_src,
+  processed_dap_stacktrace_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_stacktrace_tests', gridlock_dap_stacktrace_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',

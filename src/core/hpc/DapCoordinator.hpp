@@ -24,6 +24,7 @@ public:
     void processRawData(const QByteArray& data);
     
     void toggleBreakpoint(const QString& file, int line);
+    void requestStackTrace(int rankId);
 
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
@@ -53,4 +54,5 @@ private:
     QByteArray m_buffer;
     std::atomic<int> m_sequenceNumber{1};
     QMap<QString, QList<int>> m_breakpoints;
+    QMap<int, int> m_stackTraceRequests; // Map sequenceNumber to rankId
 };
