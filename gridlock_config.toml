@@ -1,8 +1,8 @@
 [breakpoints]
-'tests/mpi_mm.c' = [ 49, 132, 68 ]
+'tests/mpi_mm.c' = [ 49 ]
 
 [debugger]
-default_ranks = 6
+default_ranks = 3
 gdb_path = 'gdb'
 
 [project]

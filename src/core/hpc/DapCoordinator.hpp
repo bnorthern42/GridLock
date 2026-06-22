@@ -22,6 +22,8 @@ public:
     void initializeAdapter();
     void sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
     void processRawData(const QByteArray& data);
+    
+    void toggleBreakpoint(const QString& file, int line);
 
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
@@ -29,6 +31,7 @@ public:
     void pauseExecution(int threadId) override;
 
 signals:
+    void executionStopped(int rankId, const QString& reason);
     void messageReceived(const QJsonObject& message);
     void adapterStarted();
     void adapterExited(int exitCode, QProcess::ExitStatus exitStatus);
@@ -49,4 +52,5 @@ private:
     QProcess* m_process;
     QByteArray m_buffer;
     std::atomic<int> m_sequenceNumber{1};
+    QMap<QString, QList<int>> m_breakpoints;
 };

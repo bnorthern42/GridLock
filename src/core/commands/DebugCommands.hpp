@@ -7,6 +7,7 @@ class GdbRankCoordinator;
 }
 
 class IBackendCoordinator;
+class DapCoordinator;
 
 namespace gridlock::ui {
 class MainWindow;
@@ -63,10 +64,11 @@ private:
 
 class ToggleBreakpointCommand : public IDebugCommand {
 public:
-    ToggleBreakpointCommand(gridlock::ui::SourceCodeView* view, int line);
+    ToggleBreakpointCommand(DapCoordinator* coordinator, const QString& file, int line);
     void execute() override;
 private:
-    gridlock::ui::SourceCodeView* m_view;
+    DapCoordinator* m_coordinator;
+    QString m_file;
     int m_line;
 };
 

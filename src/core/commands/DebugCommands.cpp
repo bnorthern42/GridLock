@@ -3,6 +3,7 @@
 #include "../hpc/IBackendCoordinator.hpp"
 #include "../../ui/MainWindow.hpp"
 #include "../../ui/views/SourceCodeView.hpp"
+#include "../hpc/DapCoordinator.hpp"
 
 namespace gridlock::core::commands {
 
@@ -55,12 +56,12 @@ void TerminateCommand::execute() {
     }
 }
 
-ToggleBreakpointCommand::ToggleBreakpointCommand(gridlock::ui::SourceCodeView* view, int line)
-    : m_view(view), m_line(line) {}
+ToggleBreakpointCommand::ToggleBreakpointCommand(DapCoordinator* coordinator, const QString& file, int line)
+    : m_coordinator(coordinator), m_file(file), m_line(line) {}
 
 void ToggleBreakpointCommand::execute() {
-    if (m_view) {
-        m_view->toggleBreakpoint(m_line);
+    if (m_coordinator) {
+        m_coordinator->toggleBreakpoint(m_file, m_line);
     }
 }
 

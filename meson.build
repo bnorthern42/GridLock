@@ -169,6 +169,7 @@ ui_test_src = [
   'src/ui/docks/TerminalDock.cpp',
   'src/ui/GdbConsoleWidget.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/hpc/LspCoordinator.cpp',
   'src/ui/views/MemView.cpp',
@@ -199,6 +200,7 @@ ui_test_moc_headers = [
   'src/ui/docks/TerminalDock.hpp',
   'src/ui/GdbConsoleWidget.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/LspCoordinator.hpp',
   'src/ui/views/MemView.hpp',
   'src/ui/views/RegisterView.hpp',
@@ -278,6 +280,7 @@ commands_test_src = [
   'tests/test_commands.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp'
 ]
@@ -285,6 +288,7 @@ commands_test_src = [
 commands_test_moc_headers = [
   'tests/test_commands.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp'
 ]
 
@@ -354,6 +358,31 @@ gridlock_dap_commands_tests = executable('gridlock_dap_commands_tests',
 )
 
 test('dap_commands_tests', gridlock_dap_commands_tests)
+
+dap_breakpoints_test_src = [
+  'tests/test_dap_breakpoints.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+dap_breakpoints_test_moc_headers = [
+  'tests/test_dap_breakpoints.hpp',
+  'src/core/hpc/DapCoordinator.hpp'
+]
+
+processed_dap_breakpoints_test_files = qt6.compile_moc(
+  headers : dap_breakpoints_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_breakpoints_tests = executable('gridlock_dap_breakpoints_tests',
+  dap_breakpoints_test_src,
+  processed_dap_breakpoints_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_breakpoints_tests', gridlock_dap_breakpoints_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',

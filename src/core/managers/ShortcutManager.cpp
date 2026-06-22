@@ -4,6 +4,8 @@
 #include "../../ui/widgets/ProjectExplorerWidget.hpp"
 #include "../../ui/EditorTabManager.hpp"
 #include "../hpc/GdbRankCoordinator.hpp"
+#include "../hpc/DapCoordinator.hpp"
+#include "../hpc/IBackendCoordinator.hpp"
 #include "ConfigManager.hpp"
 #include "../commands/DebugCommands.hpp"
 #include <QDebug>
@@ -57,7 +59,9 @@ void ShortcutManager::initialize(gridlock::ui::MainWindow* mainWindow) {
         if (m_mainWindow && m_mainWindow->editorTabManager()) {
             if (auto view = m_mainWindow->editorTabManager()->currentSourceCodeView()) {
                 int lineNum = view->getCurrentLineNumber();
-                auto cmd = std::make_unique<commands::ToggleBreakpointCommand>(view, lineNum);
+                QString filePath = view->currentFile();
+                auto* dapCoord = dynamic_cast<DapCoordinator*>((IBackendCoordinator*)m_mainWindow->coordinator());
+                auto cmd = std::make_unique<commands::ToggleBreakpointCommand>(dapCoord, filePath, lineNum);
                 m_mainWindow->executeCommand(std::move(cmd));
             }
         }

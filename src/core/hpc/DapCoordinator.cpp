@@ -105,6 +105,29 @@ void DapCoordinator::pauseExecution(int threadId) {
     sendRequest("pause", args);
 }
 
+void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
+    if (m_breakpoints[file].contains(line)) {
+        m_breakpoints[file].removeOne(line);
+    } else {
+        m_breakpoints[file].append(line);
+    }
+    
+    QJsonObject args;
+    QJsonObject source;
+    source["path"] = file;
+    args["source"] = source;
+    
+    QJsonArray breakpointsArray;
+    for (int l : m_breakpoints[file]) {
+        QJsonObject bp;
+        bp["line"] = l;
+        breakpointsArray.append(bp);
+    }
+    args["breakpoints"] = breakpointsArray;
+    
+    sendRequest("setBreakpoints", args);
+}
+
 void DapCoordinator::readyReadStandardOutput() {
     processRawData(m_process->readAllStandardOutput());
 }
@@ -190,6 +213,11 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         QString event = message["event"].toString();
         if (event == "initialized") {
             sendRequest("configurationDone");
+        } else if (event == "stopped") {
+            QJsonObject body = message["body"].toObject();
+            QString reason = body["reason"].toString();
+            int threadId = body["threadId"].toInt();
+            emit executionStopped(threadId - 1, reason);
         }
     }
     
