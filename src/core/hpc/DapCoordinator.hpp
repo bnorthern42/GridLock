@@ -45,6 +45,7 @@ public:
     void stepInto(int threadId) override;
     void continueExecution(int threadId) override;
     void pauseExecution(int threadId) override;
+    void launchParallelSession(const QString& binaryPath, int ranks) override;
 
 signals:
     void executionStopped(int rankId, const QString& reason);

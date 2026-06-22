@@ -16,6 +16,7 @@ public:
     virtual void evaluateExpression(int rankId, const QString& expression) = 0;
     virtual void terminateSession() = 0;
     virtual void readMemory(int rankId, const QString& memoryReference, int count) = 0;
+    virtual void launchParallelSession(const QString& binaryPath, int ranks) = 0;
 
 signals:
     void locationChanged(int rankId, const QString& file, int line);

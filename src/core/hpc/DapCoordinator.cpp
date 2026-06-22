@@ -13,6 +13,7 @@ DapCoordinator::DapCoordinator(QObject* parent)
     connect(m_process, &QProcess::errorOccurred, this, &DapCoordinator::handleProcessError);
     connect(m_process, &QProcess::finished, this, &DapCoordinator::handleProcessFinished);
     connect(m_process, &QProcess::started, this, &DapCoordinator::adapterStarted);
+    connect(m_process, &QProcess::started, this, &DapCoordinator::initializeAdapter);
 }
 
 DapCoordinator::~DapCoordinator() {
@@ -116,6 +117,14 @@ void DapCoordinator::pauseExecution(int threadId) {
     QJsonObject args;
     args["threadId"] = threadId;
     sendRequest("pause", args);
+}
+
+void DapCoordinator::launchParallelSession(const QString& binaryPath, int ranks) {
+    Q_UNUSED(binaryPath);
+    Q_UNUSED(ranks);
+    qDebug() << "[DAP] Spawning DAP Adapter process (lldb-dap)...";
+    // Arch Linux LLVM packages use 'lldb-dap'. Fallback to 'lldb-vscode' if needed.
+    startAdapter("lldb-dap"); 
 }
 
 void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
@@ -457,7 +466,7 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
 }
 
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
-    Q_UNUSED(error);
+    qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
     emit errorOccurred(m_process->errorString());
 }
 

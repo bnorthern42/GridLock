@@ -672,11 +672,7 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
 
   // QProcess instances natively. Notice we REMOVED the QTimer and "-exec-run"
   // command here. The Coordinator handles it asynchronously.
-  if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
-      gdbCoord->launchParallelSession(binaryPath, ranks);
-  } else if (auto* dapCoord = dynamic_cast<DapCoordinator*>(m_coordinator)) {
-      dapCoord->startAdapter("lldb-dap");
-  }
+  m_coordinator->launchParallelSession(binaryPath, ranks);
 
   if (m_gdbConsoleWidget) {
     m_gdbConsoleWidget->resetRanks(ranks);
