@@ -48,6 +48,7 @@ DomainHeatmapWidget::DomainHeatmapWidget(QWidget *parent)
     m_colsInput->setValue(500);
     
     m_renderButton = new QPushButton("Render Frame", this);
+    connect(m_renderButton, &QPushButton::clicked, this, [](){ qDebug() << "[Heatmap] Render Button Clicked! Waiting for DAP evaluation..."; });
     
     toolbar->addWidget(m_addressInput);
     toolbar->addWidget(m_rowsInput);
@@ -81,11 +82,17 @@ void DomainHeatmapWidget::setDifferentialMode(bool enabled) {
 }
 
 void DomainHeatmapWidget::loadData(const std::vector<double>& rawData, int width, int height, uintptr_t baseAddress) {
+    qDebug() << "[Heatmap] Matrix Extent:" << width << "x" << height;
+    if (rawData.size() > 0) {
+        qDebug() << "[Heatmap] First 3 values:" << rawData[0] << rawData[1] << rawData[2];
+    }
+
     m_dataWidth = width;
     m_dataHeight = height;
     m_baseAddress = baseAddress;
 
     if (rawData.size() != static_cast<size_t>(width * height)) {
+        qDebug() << "[Heatmap] FATAL: Memory read size mismatch! Expected:" << (width * height) << "Got:" << rawData.size();
         return;
     }
 
@@ -112,11 +119,7 @@ void DomainHeatmapWidget::loadData(const std::vector<double>& rawData, int width
         dMax = 1.0;
     }
 
-    qDebug() << "[Heatmap] Matrix Extent:" << width << "x" << height;
     qDebug() << "[Heatmap] Calculated Min:" << dMin << "Max:" << dMax;
-    if (rawData.size() > 0) {
-        qDebug() << "[Heatmap] First 3 values:" << rawData[0] << rawData[1] << rawData[2];
-    }
 
     m_dataMin = static_cast<float>(dMin);
     m_dataMax = static_cast<float>(dMax);

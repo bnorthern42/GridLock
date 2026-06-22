@@ -1,6 +1,7 @@
 #include "NativeMemoryReader.hpp"
 #include <cstring>
 #include <cerrno>
+#include <QDebug>
 
 #ifdef __linux__
 #include <sys/uio.h>
@@ -23,12 +24,14 @@ std::vector<double> NativeMemoryReader::readDoubles(pid_t targetPid, uintptr_t b
 
     ssize_t bytesRead = process_vm_readv(targetPid, local, 1, remote, 1, 0);
     
-    if (bytesRead == -1) {
-        throw std::runtime_error("process_vm_readv failed: " + std::string(strerror(errno)));
+    if (bytesRead < 0) {
+        qDebug() << "[NativeMemory] process_vm_readv failed. Errno:" << errno << "-" << strerror(errno);
+        return std::vector<double>();
     }
     
     if (static_cast<size_t>(bytesRead) != count * sizeof(double)) {
-        throw std::runtime_error("process_vm_readv partial read");
+        qDebug() << "[NativeMemory] process_vm_readv partial read. Expected:" << (count * sizeof(double)) << "Got:" << bytesRead;
+        return std::vector<double>();
     }
 #else
     throw std::runtime_error("NativeMemoryReader is only supported on Linux");
