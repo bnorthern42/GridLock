@@ -35,17 +35,19 @@ DomainHeatmapWidget::DomainHeatmapWidget(QWidget *parent)
     
     QHBoxLayout *toolbar = new QHBoxLayout();
     m_addressInput = new QLineEdit(this);
-    m_addressInput->setPlaceholderText("Address or Variable, e.g., &a");
+    m_addressInput->setPlaceholderText("Variable/Address, e.g., &a");
     
     m_rowsInput = new QSpinBox(this);
     m_rowsInput->setPrefix("Rows: ");
     m_rowsInput->setRange(1, 99999);
+    m_rowsInput->setValue(500);
     
     m_colsInput = new QSpinBox(this);
     m_colsInput->setPrefix("Cols: ");
     m_colsInput->setRange(1, 99999);
+    m_colsInput->setValue(500);
     
-    m_renderButton = new QPushButton("Render Heatmap", this);
+    m_renderButton = new QPushButton("Render Frame", this);
     
     toolbar->addWidget(m_addressInput);
     toolbar->addWidget(m_rowsInput);

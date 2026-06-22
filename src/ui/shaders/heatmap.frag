@@ -11,12 +11,11 @@ layout(push_constant) uniform Constants {
 vec3 magma(float t) { return vec3(t, t*0.5, 0.2 + t*0.8); }
 
 void main() {
-    float val = texture(tex, v_texcoord).r;
-    float norm_val;
     if (pc.max_val == pc.min_val) {
-        norm_val = 0.5;
-    } else {
-        norm_val = (val - pc.min_val) / (pc.max_val - pc.min_val);
+        fragColor = vec4(0.2, 0.1, 0.3, 1.0);
+        return;
     }
+    float val = texture(tex, v_texcoord).r;
+    float norm_val = (val - pc.min_val) / (pc.max_val - pc.min_val);
     fragColor = vec4(magma(norm_val), 1.0);
 }
