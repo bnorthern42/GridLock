@@ -81,4 +81,10 @@ void EditorTabManager::onTabCloseRequested(int index) {
     widget->deleteLater();
 }
 
+void EditorTabManager::clearAllTabs() {
+    while (count() > 0) {
+        onTabCloseRequested(0);
+    }
+}
+
 } // namespace gridlock::ui

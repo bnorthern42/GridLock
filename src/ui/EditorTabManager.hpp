@@ -17,6 +17,7 @@ public:
     SourceCodeView* openFile(const QString& filePath);
     SourceCodeView* currentSourceCodeView() const;
     SourceCodeView* getSourceCodeViewForFile(const QString& filePath) const;
+    void clearAllTabs();
 
 signals:
     void toggleBreakpointRequested(const QString& location);

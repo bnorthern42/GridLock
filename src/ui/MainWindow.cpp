@@ -227,6 +227,23 @@ void MainWindow::setupMenu() {
     }
   });
 
+  QAction *openProjAction = fileMenu->addAction("Open Workspace...");
+  connect(openProjAction, &QAction::triggered, this, [this]() {
+      QString dir = QFileDialog::getExistingDirectory(this, "Open Workspace", QDir::currentPath());
+      if (!dir.isEmpty()) {
+          if (m_differentialGrid) m_differentialGrid->clearWatches();
+          if (m_editorTabManager) m_editorTabManager->clearAllTabs();
+          
+          gridlock::core::ConfigManager::instance().setWorkspace(dir);
+          m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
+          
+          auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+          for (const auto& w : ps.watchExpressions) {
+              if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
+          }
+      }
+  });
+
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
 

@@ -12,7 +12,12 @@ namespace gridlock::core {
 // ─── Construction / TOML loading ────────────────────────────────────────────
 
 ConfigManager::ConfigManager() {
+    m_workspacePath = QDir::currentPath();
     loadConfig();
+}
+
+void ConfigManager::setWorkspace(const QString& path) {
+    m_workspacePath = path;
 }
 
 void ConfigManager::loadConfig() {
@@ -205,10 +210,18 @@ void ConfigManager::setDocsetDirectory(const QString& path) {
 
 QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
     QMap<QString, QSet<int>> breakpoints;
-    if (auto* bps = m_config["breakpoints"].as_table()) {
+    if (m_workspacePath.isEmpty()) return breakpoints;
+    
+    QString workspaceFile = QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) { return breakpoints; }
+    
+    if (auto* bps = tbl["breakpoints"].as_table()) {
         for (auto& [file, lines] : *bps) {
             if (auto* linesArr = lines.as_array()) {
-                QString path = QString::fromStdString(std::string(file.str()));
+                QString path = QDir(m_workspacePath).filePath(QString::fromStdString(std::string(file.str())));
                 QSet<int> lineSet;
                 for (auto& elem : *linesArr) {
                     if (auto* val = elem.as_integer()) {
@@ -223,35 +236,56 @@ QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
 }
 
 void ConfigManager::saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints) {
+    if (m_workspacePath.isEmpty()) return;
+    
+    QDir dir(m_workspacePath);
+    if (!dir.exists(".gridlock")) dir.mkdir(".gridlock");
+    QString workspaceFile = dir.filePath(".gridlock/workspace.toml");
+    
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) {}
+    
     toml::table bpTable;
     for (auto it = breakpoints.constBegin(); it != breakpoints.constEnd(); ++it) {
         toml::array linesArr;
         for (int line : it.value()) {
             linesArr.push_back(line);
         }
-        QString relPath = QDir::current().relativeFilePath(it.key());
+        QString relPath = dir.relativeFilePath(it.key());
         bpTable.insert(relPath.toStdString(), linesArr);
     }
-    m_config.insert_or_assign("breakpoints", bpTable);
+    tbl.insert_or_assign("breakpoints", bpTable);
 
-    std::ofstream out("gridlock_config.toml");
-    out << m_config;
+    std::ofstream out(workspaceFile.toStdString());
+    if (out.is_open()) out << tbl;
 }
 
-ProjectSettings ConfigManager::loadProjectSettings(const QString& projectFile) const {
+ProjectSettings ConfigManager::loadProjectSettings() const {
     ProjectSettings ps;
+    if (m_workspacePath.isEmpty()) return ps;
+    
+    QString settingsFile = QDir(m_workspacePath).filePath(".gridlock/settings.toml");
     toml::table tbl;
     try {
-        tbl = toml::parse_file(projectFile.toStdString());
-    } catch (...) {
-        return ps;
-    }
+        tbl = toml::parse_file(settingsFile.toStdString());
+    } catch (...) {}
     
     if (auto* proj = tbl["project"].as_table()) {
         ps.targetBinary = (*proj)["targetBinary"].value_or("");
         ps.binaryArguments = (*proj)["binaryArguments"].value_or("");
         ps.workingDirectory = (*proj)["workingDirectory"].value_or("");
         ps.customGdbPath = (*proj)["customGdbPath"].value_or("gdb");
+    }
+    
+    QString workspaceFile = QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
+    toml::table wTbl;
+    try {
+        wTbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) {}
+    
+    if (auto* proj = wTbl["workspace"].as_table()) {
         if (auto* watches = (*proj)["watchExpressions"].as_array()) {
             for (auto& elem : *watches) {
                 if (auto* str = elem.as_string()) {
@@ -263,10 +297,16 @@ ProjectSettings ConfigManager::loadProjectSettings(const QString& projectFile) c
     return ps;
 }
 
-void ConfigManager::saveProjectSettings(const ProjectSettings& ps, const QString& projectFile) const {
+void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
+    if (m_workspacePath.isEmpty()) return;
+    
+    QDir dir(m_workspacePath);
+    if (!dir.exists(".gridlock")) dir.mkdir(".gridlock");
+    QString settingsFile = dir.filePath(".gridlock/settings.toml");
+    
     toml::table tbl;
     try {
-        tbl = toml::parse_file(projectFile.toStdString());
+        tbl = toml::parse_file(settingsFile.toStdString());
     } catch (...) {}
 
     toml::table projTbl;
@@ -275,20 +315,33 @@ void ConfigManager::saveProjectSettings(const ProjectSettings& ps, const QString
     projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty() ? "" : ps.workingDirectory);
     projTbl.insert_or_assign("customGdbPath", ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);
 
+    tbl.insert_or_assign("project", projTbl);
+
+    std::ofstream out(settingsFile.toStdString());
+    if (out.is_open()) out << tbl;
+    
+    QString workspaceFile = dir.filePath(".gridlock/workspace.toml");
+    toml::table wTbl;
+    try {
+        wTbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) {}
+    
+    toml::table wProjTbl;
+    if (auto* existing = wTbl["workspace"].as_table()) {
+        wProjTbl = *existing;
+    }
+    
     toml::array watches;
     for (const auto& w : ps.watchExpressions) {
         if (!w.empty()) {
             watches.push_back(w);
         }
     }
-    projTbl.insert_or_assign("watchExpressions", watches);
-
-    tbl.insert_or_assign("project", projTbl);
-
-    std::ofstream out(projectFile.toStdString());
-    if (out.is_open()) {
-        out << tbl;
-    }
+    wProjTbl.insert_or_assign("watchExpressions", watches);
+    wTbl.insert_or_assign("workspace", wProjTbl);
+    
+    std::ofstream wOut(workspaceFile.toStdString());
+    if (wOut.is_open()) wOut << wTbl;
 }
 
 } // namespace gridlock::core

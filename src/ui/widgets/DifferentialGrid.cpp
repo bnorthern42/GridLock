@@ -65,6 +65,13 @@ std::vector<std::string> DifferentialGrid::getWatchExpressions() const {
     return watches;
 }
 
+void DifferentialGrid::clearWatches() {
+    setColumnCount(1);
+    setHorizontalHeaderItem(0, new QTableWidgetItem("New Variable"));
+    setRowCount(1);
+    setItem(0, 0, new QTableWidgetItem(""));
+}
+
 void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName, const QString& value) {
     int targetRow = rankId + 1;
     

@@ -103,8 +103,11 @@ public:
     void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints);
 
     // ── Project Settings (TOML-backed) ────────────────────────────────────
-    ProjectSettings loadProjectSettings(const QString& projectFile = "gridlock_config.toml") const;
-    void saveProjectSettings(const ProjectSettings& ps, const QString& projectFile = "gridlock_config.toml") const;
+    ProjectSettings loadProjectSettings() const;
+    void saveProjectSettings(const ProjectSettings& ps) const;
+
+    void setWorkspace(const QString& path);
+    QString workspacePath() const { return m_workspacePath; }
 
 private:
     ConfigManager();
@@ -114,6 +117,7 @@ private:
     ConfigManager& operator=(const ConfigManager&) = delete;
 
     toml::table m_config;
+    QString m_workspacePath;
 
     static constexpr const char* kOrg = "GridLock";
     static constexpr const char* kApp = "Debugger";

@@ -19,6 +19,7 @@ public slots:
     void addVariableColumn(const QString& name);
 
     std::vector<std::string> getWatchExpressions() const;
+    void clearWatches();
 
 signals:
     void watchVariableAdded(const QString& name);
