@@ -23,6 +23,8 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
 * **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
 * **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
+* **Zero-Copy Memory Pipelines:** Extract large array states directly from the target kernel via lightning-fast `process_vm_readv` bypasses.
+  * *Note: The Vulkan Domain Heatmap UI is currently a Work-In-Progress and will be fully enabled in a future release.*
 
 > ⚠️ **EXPERIMENTAL FEATURE (USE AT YOUR OWN RISK):** SLURM job execution is currently in a basic, feature-incomplete state. While GridLock can submit jobs to the cluster, advanced lifecycle management—such as detached session rehydration, automatic `squeue` polling, and automated `scancel` cleanup—is not yet implemented. Long-running or pending jobs may require manual management via the terminal to prevent burning allocation hours.
 
@@ -66,7 +68,7 @@ GridLock's development is broken into iterative phases. For a detailed breakdown
 
 * **Phase 1-4:** (Complete) Stability, UI Foundations, Advanced Debugger, IDE Experience
 * **Phase 5:** (Complete) The Polyglot Core (DAP Refactor)
-* **Phase 6:** (In Progress) High-Performance Memory Visualizations (Zero-Copy pipelines, OpenGL Heatmaps, Stride Security)
+* **Phase 6:** (In Progress) Zero-Copy Memory & WIP Visualizer
 * **Phase 7:** Cross-Language Variable Inspector
 * **Phase 8:** Alternative Debugger Backends
 * **Phase 9:** The Plugin Marketplace

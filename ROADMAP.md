@@ -37,13 +37,12 @@
   * [x] GridLock performs a TCP handshake.
   * [x] GridLock sends a standard JSON-RPC `launch` command.
 
-## PHASE 6: High-Performance Memory Visualizations
+## PHASE 6: Zero-Copy Memory & WIP Visualizer
 
-* [ ] **Zero-Copy Memory Pipeline:** Bypass standard DAP/GDB string evaluation overhead for large arrays. Implement direct memory reads (e.g., `process_vm_readv`) mapped directly to CPU/GPU buffers for OpenGL/Vulkan Qt6 texture rendering.
-* [ ] **2D/3D Domain Heatmaps:** Build interactive visualizers for 1024x1024+ matrix slices, crucial for verifying domain decomposition in numerical methods.
-* [ ] **Differential (Δu) Visualization:** Cache memory states across debugger steps to plot delta changes between iterative solver steps, instantly flagging convergence or divergence.
-* [ ] **Hardware-to-UI Synchronization:** Ensure clicking a voxel/pixel in the heatmap instantly syncs the Hex Dump, Registers, and Hover Tooltips to that absolute physical memory address.
-* [ ] **Stride Security & Bounds Checking:** Implement an expression validation engine using `clangd` AST / DWARF symbols to prevent malicious or invalid matrix strides from causing out-of-bounds segfaults in the frontend.
+* [x] **Zero-Copy Native Memory Engine (`process_vm_readv`):** Bypass standard DAP/GDB string evaluation overhead for large arrays by reading directly from kernel memory.
+* [x] **Stride Security & Bounds Validation:** Implement an expression validation engine with overflow protection to prevent malicious or invalid matrix strides from causing out-of-bounds segfaults in the frontend.
+* [ ] **Hardware-Accelerated Vulkan (`QVulkanWindow`) UI Integration** (WIP - Deferred)
+* [ ] **Heatmap UI Controls and DAP Expression Evaluation Bridge** (WIP - Deferred)
 
 ## PHASE 7: Cross-Language Variable Inspector
 
