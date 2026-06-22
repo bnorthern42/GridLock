@@ -1,0 +1,14 @@
+FROM archlinux:base-devel
+
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm meson ninja cmake clang lldb openmpi qt6-base qt6-declarative
+
+RUN useradd -m -s /bin/bash gridlockuser
+
+WORKDIR /workspace
+COPY . /workspace
+RUN chown -R gridlockuser:gridlockuser /workspace
+
+USER gridlockuser
+
+RUN rm -rf build && meson setup build

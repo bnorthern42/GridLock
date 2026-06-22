@@ -60,6 +60,18 @@ sudo meson install -C build
 ./build/gridlock --test-mode
 ```
 
+### Testing with Docker
+
+Native Test-Driven Development (TDD) may fail on your host OS due to kernel hardening (e.g., blocked `ptrace` permissions) or missing dependencies like `lldb-dap`. 
+
+The officially supported way to run the test suite in an isolated, privileged sandbox is using Docker Compose:
+
+```bash
+docker-compose up --build
+```
+
+This spins up a secure environment with `SYS_PTRACE` capabilities and `seccomp:unconfined` to ensure the DAP adapter and memory readers function reliably.
+
 ---
 
 ## 🗺️ Roadmap Snapshot

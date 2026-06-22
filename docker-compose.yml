@@ -1,0 +1,13 @@
+services:
+  test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    volumes:
+      - .:/workspace
+      - /workspace/build
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    command: meson test -C build
