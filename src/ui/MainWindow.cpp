@@ -219,6 +219,8 @@ void MainWindow::setupMenu() {
           auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
           ps.targetBinary = dialog.getTargetBinary().toStdString();
           ps.workingDirectory = dialog.getBuildDir().toStdString();
+          ps.programArguments = dialog.getProgramArguments().toStdString();
+          ps.environmentVariables = dialog.getEnvironmentVariables().toStdString();
           gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
           
           auto dbgSettings = gridlock::core::ConfigManager::instance().getDebuggerSettings();

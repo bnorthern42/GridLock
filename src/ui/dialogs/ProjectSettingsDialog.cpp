@@ -25,14 +25,14 @@ ProjectSettingsDialog::ProjectSettingsDialog(QWidget* parent) : QDialog(parent) 
     
     auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
     m_targetBinary->setText(QString::fromStdString(ps.targetBinary));
-    m_binaryArguments->setText(QString::fromStdString(ps.binaryArguments));
+    m_binaryArguments->setText(QString::fromStdString(ps.programArguments));
     m_workingDirectory->setText(QString::fromStdString(ps.workingDirectory));
 }
 
 void ProjectSettingsDialog::accept() {
     auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
     ps.targetBinary = m_targetBinary->text().toStdString();
-    ps.binaryArguments = m_binaryArguments->text().toStdString();
+    ps.programArguments = m_binaryArguments->text().toStdString();
     ps.workingDirectory = m_workingDirectory->text().toStdString();
     gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
     QDialog::accept();

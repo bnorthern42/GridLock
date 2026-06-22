@@ -1,8 +1,24 @@
-FROM archlinux:base-devel
+FROM debian:stable-slim
 
-RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm meson ninja cmake clang lldb openmpi qt6-base qt6-declarative
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
 
+# Install system dependencies, build tools, MPI, and Qt6 development libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    meson \
+    ninja-build \
+    cmake \
+    clang \
+    lldb \
+    libopenmpi-dev \
+    openmpi-bin \
+    qt6-base-dev \
+    qt6-declarative-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user matching the original setup
 RUN useradd -m -s /bin/bash gridlockuser
 
 WORKDIR /workspace
@@ -11,4 +27,5 @@ RUN chown -R gridlockuser:gridlockuser /workspace
 
 USER gridlockuser
 
+# Configure the build system
 RUN rm -rf build && meson setup build

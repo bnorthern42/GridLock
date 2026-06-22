@@ -274,7 +274,8 @@ ProjectSettings ConfigManager::loadProjectSettings() const {
     
     if (auto* proj = tbl["project"].as_table()) {
         ps.targetBinary = (*proj)["targetBinary"].value_or("");
-        ps.binaryArguments = (*proj)["binaryArguments"].value_or("");
+        ps.programArguments = (*proj)["programArguments"].value_or("");
+        ps.environmentVariables = (*proj)["environmentVariables"].value_or("");
         ps.workingDirectory = (*proj)["workingDirectory"].value_or("");
         ps.customGdbPath = (*proj)["customGdbPath"].value_or("gdb");
     }
@@ -311,7 +312,8 @@ void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
 
     toml::table projTbl;
     projTbl.insert_or_assign("targetBinary", ps.targetBinary.empty() ? "" : ps.targetBinary);
-    projTbl.insert_or_assign("binaryArguments", ps.binaryArguments.empty() ? "" : ps.binaryArguments);
+    projTbl.insert_or_assign("programArguments", ps.programArguments.empty() ? "" : ps.programArguments);
+    projTbl.insert_or_assign("environmentVariables", ps.environmentVariables.empty() ? "" : ps.environmentVariables);
     projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty() ? "" : ps.workingDirectory);
     projTbl.insert_or_assign("customGdbPath", ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);
 

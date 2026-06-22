@@ -85,6 +85,15 @@ void ProjectWizardDialog::createWorkspacePanel() {
     targetLayout->addWidget(targetBtn);
     layout->addRow("Target Executable:", targetLayout);
     
+    // Program Arguments
+    m_programArgsEdit = new QLineEdit();
+    layout->addRow("Program Arguments:", m_programArgsEdit);
+    
+    // Environment Variables
+    m_envVarsEdit = new QLineEdit();
+    m_envVarsEdit->setPlaceholderText("FOO=bar BAZ=1");
+    layout->addRow("Environment Variables:", m_envVarsEdit);
+    
     m_stackedWidget->addWidget(panel);
 }
 
@@ -111,6 +120,8 @@ void ProjectWizardDialog::createMpiPanel() {
 QString ProjectWizardDialog::getProjectRoot() const { return m_projectRootEdit->text(); }
 QString ProjectWizardDialog::getBuildDir() const { return m_buildDirEdit->text(); }
 QString ProjectWizardDialog::getTargetBinary() const { return m_targetBinaryEdit->text(); }
+QString ProjectWizardDialog::getProgramArguments() const { return m_programArgsEdit->text(); }
+QString ProjectWizardDialog::getEnvironmentVariables() const { return m_envVarsEdit->text(); }
 QString ProjectWizardDialog::getMpiPath() const { return m_mpiPathEdit->text(); }
 int ProjectWizardDialog::getRanks() const { return m_ranksBox->value(); }
 QString ProjectWizardDialog::getMpiArgs() const { return m_mpiArgsEdit->text(); }

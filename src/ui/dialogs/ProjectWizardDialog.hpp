@@ -17,6 +17,8 @@ public:
     QString getProjectRoot() const;
     QString getBuildDir() const;
     QString getTargetBinary() const;
+    QString getProgramArguments() const;
+    QString getEnvironmentVariables() const;
     QString getMpiPath() const;
     int getRanks() const;
     QString getMpiArgs() const;
@@ -33,6 +35,8 @@ private:
     QLineEdit* m_projectRootEdit;
     QLineEdit* m_buildDirEdit;
     QLineEdit* m_targetBinaryEdit;
+    QLineEdit* m_programArgsEdit;
+    QLineEdit* m_envVarsEdit;
 
     // Panel 2: MPI Configuration
     QLineEdit* m_mpiPathEdit;

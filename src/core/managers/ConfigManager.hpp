@@ -44,7 +44,8 @@ struct SlurmSettings {
 
 struct ProjectSettings {
     std::string targetBinary;
-    std::string binaryArguments;
+    std::string programArguments;
+    std::string environmentVariables;
     std::string workingDirectory;
     std::string customGdbPath = "gdb";
     std::vector<std::string> watchExpressions;

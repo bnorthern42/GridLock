@@ -341,12 +341,22 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             launchArgs["program"] = QString::fromStdString(settings.targetBinary);
             launchArgs["stopOnEntry"] = true;
             
-            QString argsStr = QString::fromStdString(settings.binaryArguments);
+            QString argsStr = QString::fromStdString(settings.programArguments);
             QJsonArray argsArray;
             for (const QString& arg : argsStr.split(" ", Qt::SkipEmptyParts)) {
                 argsArray.append(arg);
             }
             launchArgs["args"] = argsArray;
+            
+            QString envStr = QString::fromStdString(settings.environmentVariables);
+            QJsonArray envArray;
+            for (const QString& envVar : envStr.split(" ", Qt::SkipEmptyParts)) {
+                envArray.append(envVar);
+            }
+            if (!envArray.isEmpty()) {
+                launchArgs["env"] = envArray;
+            }
+            
             launchArgs["cwd"] = QString::fromStdString(settings.workingDirectory);
             
             sendRequest("launch", launchArgs);
