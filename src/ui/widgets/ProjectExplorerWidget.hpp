@@ -22,6 +22,8 @@ class ProjectExplorerWidget : public QDockWidget {
 public:
     explicit ProjectExplorerWidget(QWidget* parent = nullptr);
     ~ProjectExplorerWidget() override = default;
+    
+    void setRootPath(const QString& path);
 
 signals:
     void fileDoubleClicked(const QString& filePath);

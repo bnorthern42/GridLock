@@ -1,0 +1,5 @@
+[project]
+binaryArguments = ''
+customGdbPath = 'gdb'
+targetBinary = ''
+workingDirectory = ''

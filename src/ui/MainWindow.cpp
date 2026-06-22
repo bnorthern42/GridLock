@@ -14,8 +14,10 @@
 #include "dialogs/PreferencesDialog.hpp"
 #include "views/SourceCodeView.hpp"
 #include "EditorTabManager.hpp"
+#include "DomainHeatmapWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
+#include "dialogs/ProjectWizardDialog.hpp"
 #include "docks/TerminalDock.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "../core/hpc/MockHpcBackend.hpp"
@@ -202,29 +204,37 @@ void MainWindow::setupMenu() {
   setMenuBar(menuBar);
 
   QMenu *fileMenu = menuBar->addMenu("&File");
-  QAction *newAction = fileMenu->addAction("New Session");
+  QAction *newAction = fileMenu->addAction("New Project...");
   connect(newAction, &QAction::triggered, this, [this]() {
-    QDialog dialog(this);
-    dialog.setWindowTitle("New Session");
-    QFormLayout *form = new QFormLayout(&dialog);
-    QLineEdit *binaryEdit = new QLineEdit(&dialog);
-    auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
-    binaryEdit->setText(ps.targetBinary.empty() ? "build/mpi_mm_bin" : QString::fromStdString(ps.targetBinary));
-    QSpinBox *rankBox = new QSpinBox(&dialog);
-    rankBox->setValue(
-        gridlock::core::ConfigManager::instance().getDefaultRanks());
-    rankBox->setMinimum(1);
-    form->addRow("Target Binary:", binaryEdit);
-    form->addRow("Rank Count:", rankBox);
-    QDialogButtonBox *box =
-        new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-                             Qt::Horizontal, &dialog);
-    form->addRow(box);
-    connect(box, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(box, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    if (dialog.exec() == QDialog::Accepted && m_coordinator) {
-      startDebuggingSession(binaryEdit->text(), rankBox->value());
-    }
+      gridlock::ui::dialogs::ProjectWizardDialog dialog(this);
+      if (dialog.exec() == QDialog::Accepted) {
+          QString projectRoot = dialog.getProjectRoot();
+          if (projectRoot.isEmpty()) return;
+          
+          if (m_differentialGrid) m_differentialGrid->clearWatches();
+          if (m_editorTabManager) m_editorTabManager->clearAllTabs();
+          
+          gridlock::core::ConfigManager::instance().setWorkspace(projectRoot);
+          
+          auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+          ps.targetBinary = dialog.getTargetBinary().toStdString();
+          ps.workingDirectory = dialog.getBuildDir().toStdString();
+          gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+          
+          auto dbgSettings = gridlock::core::ConfigManager::instance().getDebuggerSettings();
+          dbgSettings.mpiExecutable = dialog.getMpiPath();
+          dbgSettings.defaultRanks = dialog.getRanks();
+          dbgSettings.mpiArgs = dialog.getMpiArgs();
+          gridlock::core::ConfigManager::instance().saveDebuggerSettings(dbgSettings);
+          
+          if (m_projectExplorerWidget) {
+              m_projectExplorerWidget->setRootPath(projectRoot);
+          }
+          
+          if (m_coordinator) {
+              startDebuggingSession(dialog.getTargetBinary(), dialog.getRanks());
+          }
+      }
   });
 
   QAction *openProjAction = fileMenu->addAction("Open Workspace...");

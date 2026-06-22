@@ -122,6 +122,13 @@ void ProjectExplorerWidget::onOpenFolder() {
     }
 }
 
+void ProjectExplorerWidget::setRootPath(const QString& path) {
+    if (!path.isEmpty()) {
+        m_fileSystemModel->setRootPath(path);
+        m_treeView->setRootIndex(m_proxyModel->mapFromSource(m_fileSystemModel->index(path)));
+    }
+}
+
 void ProjectExplorerWidget::onDoubleClicked(const QModelIndex& index) {
     if (!index.isValid()) return;
     
