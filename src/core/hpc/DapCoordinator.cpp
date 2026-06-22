@@ -3,6 +3,7 @@
 #include <QStringList>
 #include <QJsonArray>
 #include "core/managers/ConfigManager.hpp"
+#include "NativeMemoryReader.hpp"
 
 DapCoordinator::DapCoordinator(QObject* parent)
     : IBackendCoordinator(parent), m_process(new QProcess(this)) {
@@ -162,6 +163,28 @@ void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
 }
 
 void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int count) {
+    if (count > 1024 && m_rankToPid.contains(rankId)) {
+        bool ok = false;
+        uintptr_t baseAddress = 0;
+        if (memoryReference.startsWith("0x", Qt::CaseInsensitive)) {
+            baseAddress = memoryReference.mid(2).toULongLong(&ok, 16);
+        } else {
+            baseAddress = memoryReference.toULongLong(&ok, 10);
+        }
+        
+        if (ok) {
+            try {
+                pid_t pid = m_rankToPid[rankId];
+                std::vector<double> doubles = NativeMemoryReader::readDoubles(pid, baseAddress, count);
+                QByteArray data(reinterpret_cast<const char*>(doubles.data()), doubles.size() * sizeof(double));
+                emit memoryRead(rankId, memoryReference, data);
+                return;
+            } catch (const std::exception& e) {
+                qWarning() << "Native memory read failed, falling back to DAP:" << e.what();
+            }
+        }
+    }
+
     QJsonObject args;
     args["memoryReference"] = memoryReference;
     args["count"] = count;
@@ -349,6 +372,12 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             QString category = body["category"].toString();
             QString output = body["output"].toString();
             emit targetOutputReceived(category, output);
+        } else if (event == "process") {
+            QJsonObject body = message["body"].toObject();
+            if (body.contains("systemProcessId")) {
+                pid_t pid = body["systemProcessId"].toInt();
+                m_rankToPid[m_rankToPid.size()] = pid;
+            }
         }
     }
     

@@ -8,6 +8,7 @@
 #include <QJsonParseError>
 #include <QString>
 #include <atomic>
+#include <sys/types.h>
 #include "IBackendCoordinator.hpp"
 
 class DapCoordinator : public IBackendCoordinator {
@@ -50,14 +51,18 @@ signals:
 
 private slots:
     void readyReadStandardOutput();
-    void handleMessage(const QJsonObject& message);
     void handleProcessError(QProcess::ProcessError error);
     void handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+
+protected slots:
+    void handleMessage(const QJsonObject& message);
 
 protected:
     virtual void sendRawMessage(const QJsonObject& message);
     virtual bool isAdapterRunning() const;
     virtual void writeToAdapter(const QByteArray& data);
+
+    QMap<int, pid_t> m_rankToPid;
 
 private:
     QProcess* m_process;

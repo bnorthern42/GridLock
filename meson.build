@@ -178,6 +178,7 @@ ui_test_src = [
   'src/ui/GdbConsoleWidget.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/hpc/LspCoordinator.cpp',
   'src/ui/views/MemView.cpp',
@@ -293,6 +294,7 @@ commands_test_src = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp'
 ]
@@ -322,6 +324,7 @@ test('commands_tests', gridlock_commands_tests)
 dap_parser_test_src = [
   'tests/test_dap_parser.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -348,6 +351,7 @@ test('dap_parser_tests', gridlock_dap_parser_tests)
 dap_commands_test_src = [
   'tests/test_dap_commands.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp'
@@ -377,6 +381,7 @@ test('dap_commands_tests', gridlock_dap_commands_tests)
 dap_breakpoints_test_src = [
   'tests/test_dap_breakpoints.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -403,6 +408,7 @@ test('dap_breakpoints_tests', gridlock_dap_breakpoints_tests)
 dap_stacktrace_test_src = [
   'tests/test_dap_stacktrace.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -429,6 +435,7 @@ test('dap_stacktrace_tests', gridlock_dap_stacktrace_tests)
 dap_variables_test_src = [
   'tests/test_dap_variables.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/models/VariableTreeModel.cpp'
@@ -459,6 +466,7 @@ test('dap_variables_tests', gridlock_dap_variables_tests)
 dap_evaluate_test_src = [
   'tests/test_dap_evaluate.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -485,6 +493,7 @@ test('dap_evaluate_tests', gridlock_dap_evaluate_tests)
 dap_lifecycle_test_src = [
   'tests/test_dap_lifecycle.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -511,6 +520,7 @@ test('dap_lifecycle_tests', gridlock_dap_lifecycle_tests)
 dap_memory_test_src = [
   'tests/test_dap_memory.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -579,6 +589,33 @@ gridlock_stride_security_tests = executable('gridlock_stride_security_tests',
 )
 
 test('stride_security_tests', gridlock_stride_security_tests)
+
+dap_native_bridge_test_src = [
+  'tests/test_dap_native_bridge.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+dap_native_bridge_test_moc_headers = [
+  'tests/test_dap_native_bridge.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
+]
+
+processed_dap_native_bridge_test_files = qt6.compile_moc(
+  headers : dap_native_bridge_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_native_bridge_tests = executable('gridlock_dap_native_bridge_tests',
+  dap_native_bridge_test_src,
+  processed_dap_native_bridge_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_native_bridge_tests', gridlock_dap_native_bridge_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
