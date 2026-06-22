@@ -7,7 +7,7 @@
 
 namespace gridlock {
 
-GdbRankCoordinator::GdbRankCoordinator(QObject *parent) : QObject(parent) {
+GdbRankCoordinator::GdbRankCoordinator(QObject *parent) : IBackendCoordinator(parent) {
 }
 
 GdbRankCoordinator::~GdbRankCoordinator() { terminateAllSessions(); }

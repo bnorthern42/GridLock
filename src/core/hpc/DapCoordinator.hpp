@@ -8,8 +8,9 @@
 #include <QJsonParseError>
 #include <QString>
 #include <atomic>
+#include "IBackendCoordinator.hpp"
 
-class DapCoordinator : public QObject {
+class DapCoordinator : public IBackendCoordinator {
     Q_OBJECT
 
 public:
@@ -21,6 +22,11 @@ public:
     void initializeAdapter();
     void sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
     void sendRawMessage(const QJsonObject& message);
+
+    void stepOver(int threadId) override;
+    void stepInto(int threadId) override;
+    void continueExecution(int threadId) override;
+    void pauseExecution(int threadId) override;
 
 signals:
     void messageReceived(const QJsonObject& message);

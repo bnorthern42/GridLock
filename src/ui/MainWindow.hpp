@@ -57,6 +57,7 @@ public:
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     gridlock::GdbRankCoordinator* coordinator() const { return m_coordinator; }
+    int focusedRank() const { return m_focusedRank; }
 
     void startDebuggingSession(const QString& binaryPath, int ranks);
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);

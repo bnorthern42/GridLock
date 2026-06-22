@@ -257,21 +257,21 @@ void MainWindow::setupToolbar() {
 
   QAction *continueAction = new QAction("⏩ Continue", this);
   connect(continueAction, &QAction::triggered, this, [this]() {
-    auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(m_coordinator);
+    auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(m_coordinator, m_focusedRank + 1);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(continueAction);
 
   QAction *stepAction = new QAction("↷ Step Inst", this);
   connect(stepAction, &QAction::triggered, this, [this]() {
-    auto cmd = std::make_unique<gridlock::core::commands::StepCommand>(m_coordinator);
+    auto cmd = std::make_unique<gridlock::core::commands::StepCommand>(m_coordinator, m_focusedRank + 1, false);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(stepAction);
 
   QAction *pauseAction = new QAction("Pause Rank", this);
   connect(pauseAction, &QAction::triggered, this, [this]() {
-    auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(m_coordinator, m_focusedRank);
+    auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(m_coordinator, m_focusedRank + 1);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(pauseAction);

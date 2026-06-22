@@ -5,7 +5,7 @@
 #include "core/managers/ConfigManager.hpp"
 
 DapCoordinator::DapCoordinator(QObject* parent)
-    : QObject(parent), m_process(new QProcess(this)) {
+    : IBackendCoordinator(parent), m_process(new QProcess(this)) {
     
     connect(m_process, &QProcess::readyReadStandardOutput, this, &DapCoordinator::readyReadStandardOutput);
     connect(m_process, &QProcess::errorOccurred, this, &DapCoordinator::handleProcessError);
@@ -71,6 +71,30 @@ void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
     message.append(jsonBytes);
     
     m_process->write(message);
+}
+
+void DapCoordinator::stepOver(int threadId) {
+    QJsonObject args;
+    args["threadId"] = threadId;
+    sendRequest("next", args);
+}
+
+void DapCoordinator::stepInto(int threadId) {
+    QJsonObject args;
+    args["threadId"] = threadId;
+    sendRequest("stepIn", args);
+}
+
+void DapCoordinator::continueExecution(int threadId) {
+    QJsonObject args;
+    args["threadId"] = threadId;
+    sendRequest("continue", args);
+}
+
+void DapCoordinator::pauseExecution(int threadId) {
+    QJsonObject args;
+    args["threadId"] = threadId;
+    sendRequest("pause", args);
 }
 
 void DapCoordinator::readyReadStandardOutput() {

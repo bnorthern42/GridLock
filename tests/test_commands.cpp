@@ -22,14 +22,14 @@ public:
 
 void TestCommands::testStepCommand() {
     MockGdbCoordinator mock;
-    gridlock::core::commands::StepCommand cmd(&mock);
+    gridlock::core::commands::StepCommand cmd(&mock, 1);
     cmd.execute();
     QVERIFY(mock.stepCalled);
 }
 
 void TestCommands::testPauseCommand() {
     MockGdbCoordinator mock;
-    gridlock::core::commands::PauseCommand cmd(&mock, 42);
+    gridlock::core::commands::PauseCommand cmd(&mock, 43);
     cmd.execute();
     QVERIFY(mock.pauseCalled);
     QCOMPARE(mock.pauseRankId, 42);

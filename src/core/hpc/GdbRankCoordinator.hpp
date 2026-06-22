@@ -6,10 +6,11 @@
 #include <QProcess>
 #include <memory>
 #include <vector>
+#include "IBackendCoordinator.hpp"
 
 namespace gridlock {
 
-class GdbRankCoordinator : public QObject {
+class GdbRankCoordinator : public IBackendCoordinator {
   Q_OBJECT
 public:
   explicit GdbRankCoordinator(QObject *parent = nullptr);
@@ -55,6 +56,13 @@ public slots:
   virtual void runAll();
   virtual void haltAll();
   virtual void pauseFocusedRank(int rankId);
+
+  // IBackendCoordinator overrides
+  void stepOver(int threadId) override { Q_UNUSED(threadId); stepAll(); }
+  void stepInto(int threadId) override { Q_UNUSED(threadId); stepAll(); }
+  void continueExecution(int threadId) override { Q_UNUSED(threadId); continueAll(); }
+  void pauseExecution(int threadId) override { pauseFocusedRank(threadId - 1); }
+
   void registerWatchVariable(const QString &varName);
   void sendCommand(int rankId, const QString &cmd);
   void handleGdbOutput(int rankId);

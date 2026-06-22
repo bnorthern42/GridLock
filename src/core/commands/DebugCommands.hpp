@@ -6,6 +6,8 @@ namespace gridlock {
 class GdbRankCoordinator;
 }
 
+class IBackendCoordinator;
+
 namespace gridlock::ui {
 class MainWindow;
 class SourceCodeView;
@@ -25,27 +27,30 @@ private:
 
 class ContinueCommand : public IDebugCommand {
 public:
-    ContinueCommand(gridlock::GdbRankCoordinator* coordinator);
+    ContinueCommand(IBackendCoordinator* coordinator, int threadId);
     void execute() override;
 private:
-    gridlock::GdbRankCoordinator* m_coordinator;
+    IBackendCoordinator* m_coordinator;
+    int m_threadId;
 };
 
 class StepCommand : public IDebugCommand {
 public:
-    StepCommand(gridlock::GdbRankCoordinator* coordinator);
+    StepCommand(IBackendCoordinator* coordinator, int threadId, bool stepInto = false);
     void execute() override;
 private:
-    gridlock::GdbRankCoordinator* m_coordinator;
+    IBackendCoordinator* m_coordinator;
+    int m_threadId;
+    bool m_stepInto;
 };
 
 class PauseCommand : public IDebugCommand {
 public:
-    PauseCommand(gridlock::GdbRankCoordinator* coordinator, int rankId);
+    PauseCommand(IBackendCoordinator* coordinator, int threadId);
     void execute() override;
 private:
-    gridlock::GdbRankCoordinator* m_coordinator;
-    int m_rankId;
+    IBackendCoordinator* m_coordinator;
+    int m_threadId;
 };
 
 class TerminateCommand : public IDebugCommand {

@@ -14,17 +14,20 @@ void ShortcutManager::initialize(gridlock::ui::MainWindow* mainWindow) {
     m_mainWindow = mainWindow;
 
     m_actions[QKeySequence(Qt::Key_F5)] = [this]() {
-        auto cmd = std::make_unique<commands::ContinueCommand>(m_mainWindow->coordinator());
+        int threadId = m_mainWindow->focusedRank() + 1; // Rank 0 maps to Thread 1
+        auto cmd = std::make_unique<commands::ContinueCommand>(m_mainWindow->coordinator(), threadId);
         m_mainWindow->executeCommand(std::move(cmd));
     };
 
     m_actions[QKeySequence(Qt::Key_F10)] = [this]() {
-        auto cmd = std::make_unique<commands::StepCommand>(m_mainWindow->coordinator());
+        int threadId = m_mainWindow->focusedRank() + 1;
+        auto cmd = std::make_unique<commands::StepCommand>(m_mainWindow->coordinator(), threadId, false);
         m_mainWindow->executeCommand(std::move(cmd));
     };
 
     m_actions[QKeySequence(Qt::Key_F11)] = [this]() {
-        auto cmd = std::make_unique<commands::StepCommand>(m_mainWindow->coordinator());
+        int threadId = m_mainWindow->focusedRank() + 1;
+        auto cmd = std::make_unique<commands::StepCommand>(m_mainWindow->coordinator(), threadId, true);
         m_mainWindow->executeCommand(std::move(cmd));
     };
 
