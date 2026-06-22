@@ -16,6 +16,7 @@ public:
     ~MemView() override = default;
 
     void setMemoryData(qint64 beginAddress, const QString& hexContents);
+    void setMemoryData(const QString& address, const QByteArray& data);
 
 signals:
     void requestMemory(const QString& address, int length);

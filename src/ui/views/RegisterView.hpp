@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QTableWidget>
+#include <QJsonArray>
 #include "../../RankState.hpp"
 
 namespace gridlock::ui {
@@ -13,6 +14,7 @@ public:
 
 public slots:
     void updateRegisters(const gridlock::RankState& state);
+    void updateRegisters(const QJsonArray& registers);
 
 private:
     QTableWidget* m_table;

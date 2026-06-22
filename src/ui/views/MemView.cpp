@@ -61,6 +61,13 @@ void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
     m_dumpEdit->setPlainText(formatHexDump(beginAddress, hexContents));
 }
 
+void MemView::setMemoryData(const QString& address, const QByteArray& data) {
+    bool ok;
+    qint64 startAddr = address.toULongLong(&ok, 16);
+    if (!ok) startAddr = 0;
+    setMemoryData(startAddr, data.toHex());
+}
+
 QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {
     QString result;
     int dataLen = hexData.length();

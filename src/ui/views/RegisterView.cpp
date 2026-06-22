@@ -1,6 +1,8 @@
 #include "RegisterView.hpp"
 #include <QVBoxLayout>
 #include <QHeaderView>
+#include <QJsonObject>
+#include <QJsonValue>
 #include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
@@ -57,6 +59,38 @@ void RegisterView::updateRegisters(const gridlock::RankState& state) {
         }
 
         row++;
+    }
+}
+
+void RegisterView::updateRegisters(const QJsonArray& registers) {
+    if (registers.isEmpty()) {
+        return;
+    }
+
+    if (m_table->rowCount() != registers.size()) {
+        m_table->setRowCount(registers.size());
+    }
+
+    for (int row = 0; row < registers.size(); ++row) {
+        QJsonObject reg = registers[row].toObject();
+        QString regName = reg["name"].toString();
+        QString regVal = reg["value"].toString();
+
+        QTableWidgetItem* nameItem = m_table->item(row, 0);
+        if (!nameItem) {
+            nameItem = new QTableWidgetItem(regName);
+            m_table->setItem(row, 0, nameItem);
+        } else {
+            nameItem->setText(regName);
+        }
+
+        QTableWidgetItem* valItem = m_table->item(row, 1);
+        if (!valItem) {
+            valItem = new QTableWidgetItem(regVal);
+            m_table->setItem(row, 1, valItem);
+        } else {
+            valItem->setText(regVal);
+        }
     }
 }
 

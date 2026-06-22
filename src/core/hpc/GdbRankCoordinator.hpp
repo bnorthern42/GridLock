@@ -27,7 +27,7 @@ public:
   void writeCmd(int rankId, const QString &cmd);
   void processGdbOutput(int rankId, const QString& output);
   void initializeMockSession(int rankCount, bool simulateInitialSync = false);
-  void readMemory(int rankId, const QString &address, int length);
+  void readMemory(int rankId, const QString &address, int length) override;
   void evaluateExpression(int rankId, const QString& expression);
 
   int getProcessCount() const { return m_processes.size(); }

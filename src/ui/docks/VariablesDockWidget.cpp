@@ -58,7 +58,15 @@ void VariablesDockWidget::setupUi() {
     layout->addWidget(m_variablesTree);
 
     connect(m_rankSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &VariablesDockWidget::onRankSelected);
-    // connect expanded is handled in setCoordinator because model changes
+    
+    connect(m_variablesTree, &QTreeView::clicked, this, [this](const QModelIndex& index) {
+        if (!index.isValid() || !m_coordinator) return;
+        QModelIndex valueIndex = m_model->index(index.row(), 1, index.parent());
+        QString valueStr = m_model->data(valueIndex, Qt::DisplayRole).toString();
+        if (valueStr.startsWith("0x")) {
+            m_coordinator->readMemory(m_currentRankId, valueStr, 256);
+        }
+    });
 }
 
 void VariablesDockWidget::onProcessCountChanged() {

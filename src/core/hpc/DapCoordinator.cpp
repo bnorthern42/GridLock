@@ -161,6 +161,14 @@ void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
     sendRequest("evaluate", args);
 }
 
+void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int count) {
+    QJsonObject args;
+    args["memoryReference"] = memoryReference;
+    args["count"] = count;
+    m_memoryRequests[m_sequenceNumber] = rankId;
+    sendRequest("readMemory", args);
+}
+
 void DapCoordinator::terminateSession() {
     QJsonObject args;
     args["terminateDebuggee"] = true;
@@ -285,7 +293,12 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                     if (scope["name"].toString() == "Locals") {
                         int varRef = scope["variablesReference"].toInt();
                         requestVariables(rankId, varRef);
-                        break;
+                    } else if (scope["name"].toString() == "Registers") {
+                        int varRef = scope["variablesReference"].toInt();
+                        QJsonObject args;
+                        args["variablesReference"] = varRef;
+                        m_registersRequests[m_sequenceNumber] = rankId;
+                        sendRequest("variables", args);
                     }
                 }
             }
@@ -295,6 +308,20 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                 int rankId = m_variablesRequests.take(seq);
                 QJsonArray variables = message["body"].toObject()["variables"].toArray();
                 emit localsUpdated(rankId, variables);
+            } else if (m_registersRequests.contains(seq)) {
+                int rankId = m_registersRequests.take(seq);
+                QJsonArray registers = message["body"].toObject()["variables"].toArray();
+                emit registersUpdated(rankId, registers);
+            }
+        } else if (command == "readMemory" && message["success"].toBool()) {
+            int seq = message["request_seq"].toInt();
+            if (m_memoryRequests.contains(seq)) {
+                int rankId = m_memoryRequests.take(seq);
+                QJsonObject body = message["body"].toObject();
+                QString address = body["address"].toString();
+                QString base64Data = body["data"].toString();
+                QByteArray data = QByteArray::fromBase64(base64Data.toUtf8());
+                emit memoryRead(rankId, address, data);
             }
         } else if (command == "evaluate" && message["success"].toBool()) {
             int seq = message["request_seq"].toInt();

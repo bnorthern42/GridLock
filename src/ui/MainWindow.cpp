@@ -136,6 +136,16 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
         m_memView->setMemoryData(beginAddress, hexContents);
       }
     });
+    connect(m_coordinator, &IBackendCoordinator::memoryRead, this, [this](int rankId, const QString& address, const QByteArray& data) {
+      if (rankId == m_focusedRank && m_memView) {
+        m_memView->setMemoryData(address, data);
+      }
+    });
+    connect(m_coordinator, &IBackendCoordinator::registersUpdated, this, [this](int rankId, const QJsonArray& registers) {
+      if (rankId == m_focusedRank && m_registerView) {
+        m_registerView->updateRegisters(registers);
+      }
+    });
   }
 }
 

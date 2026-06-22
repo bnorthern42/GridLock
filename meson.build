@@ -499,6 +499,32 @@ gridlock_dap_lifecycle_tests = executable('gridlock_dap_lifecycle_tests',
 
 test('dap_lifecycle_tests', gridlock_dap_lifecycle_tests)
 
+dap_memory_test_src = [
+  'tests/test_dap_memory.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+dap_memory_test_moc_headers = [
+  'tests/test_dap_memory.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
+]
+
+processed_dap_memory_test_files = qt6.compile_moc(
+  headers : dap_memory_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_dap_memory_tests = executable('gridlock_dap_memory_tests',
+  dap_memory_test_src,
+  processed_dap_memory_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('dap_memory_tests', gridlock_dap_memory_tests)
+
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
   output: 'mpi_mm_bin',
