@@ -37,12 +37,20 @@
   * [ ] GridLock performs a TCP handshake.
   * [ ] GridLock sends a standard JSON-RPC `launch` command.
 
-## PHASE 6: Cross-Language Variable Inspector
+## PHASE 6: High-Performance Memory Visualizations
+
+* [ ] **Zero-Copy Memory Pipeline:** Bypass standard DAP/GDB string evaluation overhead for large arrays. Implement direct memory reads (e.g., `process_vm_readv`) mapped directly to CPU/GPU buffers for OpenGL/Vulkan Qt6 texture rendering.
+* [ ] **2D/3D Domain Heatmaps:** Build interactive visualizers for 1024x1024+ matrix slices, crucial for verifying domain decomposition in numerical methods.
+* [ ] **Differential (Δu) Visualization:** Cache memory states across debugger steps to plot delta changes between iterative solver steps, instantly flagging convergence or divergence.
+* [ ] **Hardware-to-UI Synchronization:** Ensure clicking a voxel/pixel in the heatmap instantly syncs the Hex Dump, Registers, and Hover Tooltips to that absolute physical memory address.
+* [ ] **Stride Security & Bounds Checking:** Implement an expression validation engine using `clangd` AST / DWARF symbols to prevent malicious or invalid matrix strides from causing out-of-bounds segfaults in the frontend.
+
+## PHASE 7: Cross-Language Variable Inspector
 
 * [ ] **Unified Grid:** Utilize the standard `VariablesRequest` enforced by DAP so `DifferentialGrid` works for all languages.
 * [ ] **The "Dream" Feature:** Enable simultaneous debugging of different language runtimes (e.g., C++, Python, Node.js) paused at the same logical simulation timestamp, with the `DifferentialGrid` tracking memory addresses and objects in parallel.
 
-## PHASE 7: Alternative Debugger Backends
+## PHASE 8: Alternative Debugger Backends
 
 By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerBackend` can abstract the underlying engine, allowing seamless switching between GNU GDB, LLDB, and GPU-specific debuggers.
 
@@ -51,7 +59,7 @@ By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerB
 * [ ] **Backend Selection UI:** Extend `DebuggerSettingsPage` with a "Debugger Engine" dropdown (GNU GDB, LLDB, CUDA-GDB, ROCGDB).
 * [ ] **Dynamic UI Capabilities:** Ensure the GridLock UI dynamically enables/disables features based on the selected backend (e.g., hiding the "Registers" view if a specific backend doesn't map them the same way, or showing a "Wavefronts" tab for ROCm).
 
-## PHASE 8: The Plugin Marketplace (Productionization)
+## PHASE 9: The Plugin Marketplace (Productionization)
 
 * [ ] **Dynamic Loading:** Replace hardcoded language support with a `plugins/` directory system.
 
