@@ -1,5 +1,5 @@
 [breakpoints]
-'tests/mpi_mm.c' = [ 49 ]
+'tests/mpi_mm.c' = [ 81, 49 ]
 
 [debugger]
 default_ranks = 3
@@ -9,7 +9,7 @@ gdb_path = 'gdb'
 binaryArguments = ''
 customGdbPath = 'gdb'
 targetBinary = ''
-watchExpressions = [ 'numworkers', 'extra', 'i' ]
+watchExpressions = [ 'numworkers', 'extra', 'i', 'a' ]
 workingDirectory = ''
 
 [theme.assembly]

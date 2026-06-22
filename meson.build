@@ -5,7 +5,7 @@ project('GridLock', 'cpp',
 
 # Dependencies
 qt6 = import('qt6')
-qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network'])
+qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 
 # Source files
@@ -42,7 +42,8 @@ src_files = [
   'src/core/managers/DocsetManager.cpp',
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
-  'src/ui/docks/VariablesDockWidget.cpp'
+  'src/ui/docks/VariablesDockWidget.cpp',
+  'src/ui/DomainHeatmapWidget.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -74,7 +75,8 @@ moc_headers = [
   'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
-  'src/ui/docks/VariablesDockWidget.hpp'
+  'src/ui/docks/VariablesDockWidget.hpp',
+  'src/ui/DomainHeatmapWidget.hpp'
 ]
 
 # Process Qt6 files
