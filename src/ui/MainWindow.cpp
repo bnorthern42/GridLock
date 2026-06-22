@@ -277,28 +277,15 @@ void MainWindow::setupMenu() {
     m_hpcBackend->submitSlurmJob(script);
   });
 
-  fileMenu->addAction("Exit", this, &MainWindow::close);
-
-  QMenu *editMenu = menuBar->addMenu("&Edit");
-  editMenu->addAction("Undo");
-  editMenu->addAction("Redo");
-  QAction *prefAction = editMenu->addAction("Preferences");
+  QAction *prefAction = fileMenu->addAction("Preferences");
   connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
 
+  fileMenu->addSeparator();
+  fileMenu->addAction("Exit", this, &MainWindow::close);
+
   QMenu *viewMenu = menuBar->addMenu("&View");
-  viewMenu->addAction("Toggle Bottom Tabs");
-  viewMenu->addAction("Zoom In");
-  viewMenu->addAction("Zoom Out");
-  
   QAction *testHeatmapAction = viewMenu->addAction("Test Domain Heatmap");
   connect(testHeatmapAction, &QAction::triggered, this, &MainWindow::testHeatmapWidget);
-
-  QMenu *historyMenu = menuBar->addMenu("&History");
-  historyMenu->addAction("Recent Executions");
-  historyMenu->addAction("Session Logs");
-
-  QMenu *bookMenu = menuBar->addMenu("&Bookmarks");
-  bookMenu->addAction("Saved Code Pointers");
 
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
   QAction *buildAction = toolsMenu->addAction("Build Target");
@@ -320,20 +307,26 @@ void MainWindow::setupMenu() {
           &MainWindow::runTargetRequested);
 
   QMenu *helpMenu = menuBar->addMenu("&Help");
-  helpMenu->addAction("Documentation Index");
   QAction *aboutAction = helpMenu->addAction("About GridLock");
   connect(aboutAction, &QAction::triggered, this, [this]() {
-    QMessageBox::about(this, "About GridLock",
-                       "<b>GridLock IDE</b><br><br>"
-                       "A high-performance graphical debugger for MPI applications.<br><br>"
-                       "<b>Acknowledgments & Attributions:</b><ul>"
-                       "<li><a href=\"https://www.gnu.org/software/ddd/\">GNU DDD</a>: For pioneering visual data display in debugging.</li>"
-                       "<li><a href=\"https://www.kdbg.org/\">KDbg</a>: For early inspiration on KDE/Qt-based GDB frontend wrappers.</li>"
-                       "<li><a href=\"https://www.gdbgui.com/\">gdbgui</a>: For demonstrating the power of browser-based debug visualization, which inspired our native DifferentialGrid.</li>"
-                       "<li><a href=\"https://zealdocs.org/\">Zeal</a>: For the open-source .docset standard and offline documentation workflows that power our Reference Manual.</li>"
-                       "</ul><br>"
-                       "Special thanks to the <b>Spack</b>, <b>SLURM</b>, and <b>OpenMPI</b> communities for the tools that power our HPC environments."
-                       );
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("About GridLock");
+    msgBox.setIconPixmap(QPixmap(":/icon.png").scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    msgBox.setTextFormat(Qt::RichText);
+    msgBox.setText(
+        "<b>GridLock IDE v0.1.0-alpha</b><br><br>"
+        "A high-performance graphical debugger for MPI applications.<br><br>"
+        "<a href=\"https://github.com/bnorthern42/GridLock\">GridLock on GitHub</a><br><br>"
+        "<b>Acknowledgments & Attributions:</b><ul>"
+        "<li><a href=\"https://www.gnu.org/software/ddd/\">GNU DDD</a>: For pioneering visual data display in debugging.</li>"
+        "<li><a href=\"https://www.kdbg.org/\">KDbg</a>: For early inspiration on KDE/Qt-based GDB frontend wrappers.</li>"
+        "<li><a href=\"https://www.gdbgui.com/\">gdbgui</a>: For demonstrating the power of browser-based debug visualization, which inspired our native DifferentialGrid.</li>"
+        "<li><a href=\"https://zealdocs.org/\">Zeal</a>: For the open-source .docset standard and offline documentation workflows that power our Reference Manual.</li>"
+        "</ul><br>"
+        "Special thanks to the <b>Spack</b>, <b>SLURM</b>, and <b>OpenMPI</b> communities for the tools that power our HPC environments."
+    );
+    msgBox.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    msgBox.exec();
   });
 }
 
