@@ -3,6 +3,7 @@
 #include <QStringList>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QStandardPaths>
 #include "core/managers/ConfigManager.hpp"
 #include "NativeMemoryReader.hpp"
 
@@ -122,9 +123,19 @@ void DapCoordinator::pauseExecution(int threadId) {
 void DapCoordinator::launchParallelSession(const QString& binaryPath, int ranks) {
     Q_UNUSED(binaryPath);
     Q_UNUSED(ranks);
-    qDebug() << "[DAP] Spawning DAP Adapter process (lldb-dap)...";
-    // Arch Linux LLVM packages use 'lldb-dap'. Fallback to 'lldb-vscode' if needed.
-    startAdapter("lldb-dap"); 
+    qDebug() << "[DAP] Spawning DAP Adapter process...";
+    
+    QString adapterProgram = QStandardPaths::findExecutable("lldb-dap");
+    if (adapterProgram.isEmpty()) {
+        adapterProgram = QStandardPaths::findExecutable("lldb-vscode");
+    }
+    
+    if (adapterProgram.isEmpty()) {
+        qDebug() << "[DAP] FATAL: Could not find lldb-dap or lldb-vscode in PATH!";
+        return;
+    }
+    
+    startAdapter(adapterProgram); 
 }
 
 void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
@@ -184,6 +195,11 @@ void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
 }
 
 void DapCoordinator::requestHeatmapRender(int rankId, const QString& expression, int rows, int cols) {
+    if (!isAdapterRunning()) {
+        qWarning() << "[Heatmap] Aborting request: DAP adapter is not running.";
+        return;
+    }
+    
     QJsonObject args;
     args["expression"] = expression;
     args["context"] = "watch";
@@ -323,6 +339,7 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             auto settings = gridlock::core::ConfigManager::instance().loadProjectSettings();
             QJsonObject launchArgs;
             launchArgs["program"] = QString::fromStdString(settings.targetBinary);
+            launchArgs["stopOnEntry"] = true;
             
             QString argsStr = QString::fromStdString(settings.binaryArguments);
             QJsonArray argsArray;
@@ -468,8 +485,12 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
     qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
     emit errorOccurred(m_process->errorString());
+    m_state = SessionState::Disconnected;
+    emit stateChanged(m_state);
 }
 
 void DapCoordinator::handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     emit adapterExited(exitCode, exitStatus);
+    m_state = SessionState::Disconnected;
+    emit stateChanged(m_state);
 }
