@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QSet>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
@@ -346,6 +347,31 @@ void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
         emit pinVariableRequested(word);
     }
     QPlainTextEdit::mouseDoubleClickEvent(event);
+}
+
+void SourceCodeView::wheelEvent(QWheelEvent *event) {
+    if (event->modifiers() & Qt::ControlModifier) {
+        QFont currentFont = font();
+        int delta = event->angleDelta().y();
+        int newSize = currentFont.pointSize();
+        
+        if (delta > 0) {
+            newSize++;
+        } else if (delta < 0) {
+            newSize--;
+        }
+        
+        if (newSize < 6) newSize = 6;
+        if (newSize > 72) newSize = 72;
+        
+        currentFont.setPointSize(newSize);
+        setFont(currentFont);
+        
+        updateLineNumberAreaWidth(0);
+        event->accept();
+    } else {
+        QPlainTextEdit::wheelEvent(event);
+    }
 }
 
 } // namespace gridlock::ui
