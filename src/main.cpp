@@ -12,6 +12,10 @@
 #include "backend/GridLockAutomationRunner.hpp"
 
 int main(int argc, char *argv[]) {
+    // Wayland/Mesa environment overrides to prevent damage loops
+    qputenv("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
+    qputenv("vblank_mode", "3");
+
     QSurfaceFormat format;
     format.setVersion(4, 1);
     format.setProfile(QSurfaceFormat::CoreProfile);

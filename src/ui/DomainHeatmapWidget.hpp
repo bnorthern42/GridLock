@@ -29,6 +29,7 @@ protected:
     void paintGL() override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    bool event(QEvent *e) override;
 
 private:
     QOpenGLShaderProgram m_program;

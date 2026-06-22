@@ -54,6 +54,7 @@ DomainHeatmapWidget::DomainHeatmapWidget(QWidget *parent)
     setMouseTracking(true);
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground);
+    setUpdateBehavior(QOpenGLWidget::PartialUpdate);
 }
 
 DomainHeatmapWidget::~DomainHeatmapWidget() {
@@ -229,6 +230,13 @@ void DomainHeatmapWidget::mouseMoveEvent(QMouseEvent *event) {
         uintptr_t absoluteAddr = m_baseAddress + index * sizeof(double);
         emit cellClicked(index, val, absoluteAddr);
     }
+}
+
+bool DomainHeatmapWidget::event(QEvent *e) {
+    if (e->type() == QEvent::Paint || e->type() == QEvent::UpdateRequest) {
+        qDebug() << "Paint event triggered";
+    }
+    return QOpenGLWidget::event(e);
 }
 
 } // namespace gridlock::ui
