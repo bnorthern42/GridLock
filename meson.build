@@ -12,6 +12,7 @@ tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlpl
 src_files = [
   'src/main.cpp',
   'src/GridLockApp.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/hpc/DapCoordinator.cpp',
   'src/core/managers/ConfigManager.cpp',
@@ -524,6 +525,29 @@ gridlock_dap_memory_tests = executable('gridlock_dap_memory_tests',
 )
 
 test('dap_memory_tests', gridlock_dap_memory_tests)
+
+hpc_memory_test_src = [
+  'tests/test_hpc_memory.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp'
+]
+
+hpc_memory_test_moc_headers = [
+  'tests/test_hpc_memory.hpp'
+]
+
+processed_hpc_memory_test_files = qt6.compile_moc(
+  headers : hpc_memory_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_hpc_memory_tests = executable('gridlock_hpc_memory_tests',
+  hpc_memory_test_src,
+  processed_hpc_memory_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('hpc_memory_tests', gridlock_hpc_memory_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
