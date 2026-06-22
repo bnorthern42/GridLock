@@ -509,6 +509,7 @@ void MainWindow::setupDocks() {
   m_registerView = new RegisterView(m_bottomTabs);
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
   m_domainHeatmapWidget = new DomainHeatmapWidget(m_bottomTabs);
+  m_domainHeatmapWidget->hide();
 
   connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
     if (m_coordinator) {
