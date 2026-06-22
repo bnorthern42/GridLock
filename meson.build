@@ -13,6 +13,7 @@ src_files = [
   'src/main.cpp',
   'src/GridLockApp.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/hpc/LspCoordinator.cpp',
   'src/ui/MainWindow.cpp',
@@ -46,6 +47,7 @@ src_files = [
 moc_headers = [
   'src/GridLockApp.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/LspCoordinator.hpp',
   'src/ui/MainWindow.hpp',
   'src/ui/views/ServerRackView.hpp',
