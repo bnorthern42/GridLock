@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QFile>
 #include <QSurfaceFormat>
 #include <QVulkanInstance>
 #include <QStyleFactory>
@@ -15,7 +16,19 @@
 
 int main(int argc, char *argv[]) {
     // Wayland/Mesa environment overrides to prevent damage loops
-    qputenv("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
+    QString waylandDisplay = qEnvironmentVariable("WAYLAND_DISPLAY");
+    QFile versionFile("/proc/version");
+    bool isWsl = false;
+    if (versionFile.open(QIODevice::ReadOnly)) {
+        QString versionStr = QString::fromUtf8(versionFile.readAll()).toLower();
+        if (versionStr.contains("microsoft") || versionStr.contains("wsl")) {
+            isWsl = true;
+        }
+    }
+    
+    if (waylandDisplay.contains("wayland", Qt::CaseInsensitive) && !isWsl) {
+        qputenv("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
+    }
     qputenv("vblank_mode", "3");
 
     QSurfaceFormat format;

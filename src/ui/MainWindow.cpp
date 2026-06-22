@@ -529,7 +529,8 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_memView, "Memory View");
   m_bottomTabs->addTab(m_registerView, "Registers");
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
-  m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
+  // TODO (Phase 7): Re-enable Vulkan Heatmap once DAP data pipeline is stabilized
+  // m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);
