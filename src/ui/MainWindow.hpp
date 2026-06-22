@@ -7,6 +7,7 @@
 #include <QMap>
 #include <memory>
 
+class IBackendCoordinator;
 class QVulkanInstance;
 
 namespace gridlock {
@@ -62,13 +63,13 @@ public:
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
     DomainHeatmapWidget* domainHeatmapWidget() const { return m_domainHeatmapWidget; }
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
-    gridlock::GdbRankCoordinator* coordinator() const { return m_coordinator; }
+    IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
 
     void startDebuggingSession(const QString& binaryPath, int ranks);
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
 
-    void setCoordinator(gridlock::GdbRankCoordinator* coord);
+    void setCoordinator(IBackendCoordinator* coord);
 
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);
@@ -110,7 +111,7 @@ private:
     QTabWidget* m_bottomTabs = nullptr;
     QAction* m_runAction = nullptr;
 
-    gridlock::GdbRankCoordinator* m_coordinator = nullptr;
+    IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;
     gridlock::core::HpcBackend* m_hpcBackend = nullptr;
     SpackManager* m_spackManager = nullptr;

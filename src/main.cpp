@@ -11,6 +11,7 @@
 #include "ui/MainWindow.hpp"
 #include "core/managers/ThemeManager.hpp"
 #include "backend/GridLockAutomationRunner.hpp"
+#include "core/hpc/DapCoordinator.hpp"
 
 int main(int argc, char *argv[]) {
     // Wayland/Mesa environment overrides to prevent damage loops
@@ -96,6 +97,10 @@ int main(int argc, char *argv[]) {
 
     gridlock::ui::MainWindow window;
     window.setVulkanInstance(&inst);
+
+    auto* backend = new DapCoordinator(&window);
+    window.setCoordinator(backend);
+
     window.show();
 
     if (parser.isSet(testModeOption)) {

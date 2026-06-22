@@ -94,9 +94,10 @@ void MainWindow::executeCommand(std::unique_ptr<gridlock::core::commands::IDebug
   }
 }
 
-void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
+void MainWindow::setCoordinator(IBackendCoordinator *coord) {
   m_coordinator = coord;
-  if (auto* dapCoord = dynamic_cast<DapCoordinator*>(static_cast<IBackendCoordinator*>(coord))) {
+
+  if (auto* dapCoord = dynamic_cast<DapCoordinator*>(m_coordinator)) {
       connect(dapCoord, &DapCoordinator::stateChanged, this, [this](SessionState state) {
           if (m_runAction) {
               if (state == SessionState::Disconnected) {
@@ -113,7 +114,7 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
       });
 
       if (m_domainHeatmapWidget) {
-          connect(m_domainHeatmapWidget, &DomainHeatmapWidget::requestRender, this, [this, dapCoord](const QString& expr, int rows, int cols) {
+          connect(m_domainHeatmapWidget, &DomainHeatmapWidget::requestRender, this, [dapCoord](const QString& expr, int rows, int cols) {
               if (!expr.isEmpty() && rows > 0 && cols > 0) {
                   dapCoord->requestHeatmapRender(0, expr, rows, cols);
               }
@@ -126,8 +127,11 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
   }
 
   if (m_variablesDockWidget) {
-      m_variablesDockWidget->setCoordinator(m_coordinator);
+      if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+          m_variablesDockWidget->setCoordinator(gdbCoord);
+      }
   }
+
   if (m_coordinator) {
     connect(m_coordinator, &IBackendCoordinator::locationChanged, this, [this](int rankId, const QString& file, int line) {
         if (rankId == m_focusedRank) {
@@ -140,33 +144,37 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
             }
         }
     });
-    connect(m_coordinator, &GdbRankCoordinator::hoverEvaluationComplete, this, [this](QString varName, QString result, QPoint globalPos) {
-        if (getSourceCodeView()) {
-            QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), getSourceCodeView());
+
+    if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete, this, [this](QString varName, QString result, QPoint globalPos) {
+            if (getSourceCodeView()) {
+                QToolTip::showText(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result), getSourceCodeView());
+            }
+        });
+        if (m_expressionEvaluatorWidget) {
+            connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated, m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
         }
-    });
-    if (m_expressionEvaluatorWidget) {
-        connect(m_coordinator, &GdbRankCoordinator::expressionEvaluated, m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
+        if (m_gdbConsoleWidget) {
+            connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived,
+                    m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
+            connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb,
+                    m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
+            connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
+                    gdbCoord, &gridlock::GdbRankCoordinator::sendCommand);
+        }
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this, [this](int rankId, qint64 beginAddress, const QString &hexContents) {
+          if (rankId == m_focusedRank && m_memView) {
+            m_memView->setMemoryData(beginAddress, hexContents);
+          }
+        });
     }
-  }
-  if (m_coordinator && m_gdbConsoleWidget) {
-    connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived,
-            m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
-    connect(m_coordinator, &GdbRankCoordinator::commandSentToGdb,
-            m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
-    connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
-            m_coordinator, &GdbRankCoordinator::sendCommand);
+
     if (m_terminalDock) {
       connect(m_coordinator, &IBackendCoordinator::targetOutputReceived,
               m_terminalDock, [this](const QString& category, const QString& output) {
                   m_terminalDock->appendText(category, output);
               });
     }
-    connect(m_coordinator, &GdbRankCoordinator::memoryDataReady, this, [this](int rankId, qint64 beginAddress, const QString &hexContents) {
-      if (rankId == m_focusedRank && m_memView) {
-        m_memView->setMemoryData(beginAddress, hexContents);
-      }
-    });
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this, [this](int rankId, const QString& address, const QByteArray& data) {
       if (rankId == m_focusedRank && m_memView) {
         m_memView->setMemoryData(address, data);
@@ -372,8 +380,9 @@ void MainWindow::setupDocks() {
   m_editorTabManager->setMinimumWidth(350);
   connect(m_editorTabManager, &EditorTabManager::toggleBreakpointRequested, this,
           [this](const QString &loc) {
-            if (m_coordinator)
-              m_coordinator->insertBreakpoint(loc);
+            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+              gdbCoord->insertBreakpoint(loc);
+            }
           });
   connect(m_editorTabManager, &EditorTabManager::breakpointToggled, this,
           [this](const QString &file, int line, bool ctrlClicked) {
@@ -395,13 +404,16 @@ void MainWindow::setupDocks() {
             gridlock::core::ConfigManager::instance().saveBreakpoints(
                 m_persistentBreakpoints);
 
-            if (m_coordinator)
-              m_coordinator->broadcastBreakpoint(absoluteFilePath, line, condition);
+            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+              gdbCoord->broadcastBreakpoint(absoluteFilePath, line, condition);
+            } else if (auto* dapCoord = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+              dapCoord->toggleBreakpoint(absoluteFilePath, line);
+            }
           });
 
   connect(m_editorTabManager, &EditorTabManager::hoverVariableRequested, this, [this](const QString &varName, const QPoint &globalPos) {
-      if (m_coordinator) {
-          m_coordinator->evaluateHoverVariable(m_focusedRank, varName, globalPos);
+      if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+          gdbCoord->evaluateHoverVariable(m_focusedRank, varName, globalPos);
       }
   });
 
@@ -412,8 +424,8 @@ void MainWindow::setupDocks() {
   });
 
   connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this, [this](const QString &varName) {
-      if (m_coordinator) {
-          m_coordinator->registerWatchVariable(varName);
+      if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+          gdbCoord->registerWatchVariable(varName);
       }
       if (m_differentialGrid) {
           m_differentialGrid->addVariableColumn(varName);
@@ -450,8 +462,8 @@ void MainWindow::setupDocks() {
   m_differentialGrid = new DifferentialGrid(m_bottomTabs);
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
-            if (m_coordinator) {
-              m_coordinator->registerWatchVariable(name);
+            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+              gdbCoord->registerWatchVariable(name);
             }
           });
           
@@ -532,8 +544,10 @@ void MainWindow::onRankSelected(int rankId) {
     const auto &state = m_latestStates[rankId];
     m_disassemblyView->updateDisassembly(state.disassemblyText);
 
-    if (state.disassemblyText.isEmpty() && m_coordinator) {
-      m_coordinator->requestDisassemblyFallback(rankId);
+    if (state.disassemblyText.isEmpty()) {
+      if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+        gdbCoord->requestDisassemblyFallback(rankId);
+      }
     }
 
     if (state.currentState == "stopped") {
@@ -554,8 +568,9 @@ void MainWindow::onRankSelected(int rankId) {
         m_registerView->updateRegisters(state);
     }
   } else {
-    if (m_coordinator)
-      m_coordinator->requestDisassemblyFallback(rankId);
+    if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+      gdbCoord->requestDisassemblyFallback(rankId);
+    }
   }
 }
 
@@ -657,7 +672,11 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
 
   // QProcess instances natively. Notice we REMOVED the QTimer and "-exec-run"
   // command here. The Coordinator handles it asynchronously.
-  m_coordinator->launchParallelSession(binaryPath, ranks);
+  if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+      gdbCoord->launchParallelSession(binaryPath, ranks);
+  } else if (auto* dapCoord = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+      dapCoord->startAdapter("lldb-dap");
+  }
 
   if (m_gdbConsoleWidget) {
     m_gdbConsoleWidget->resetRanks(ranks);
@@ -668,8 +687,10 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   
   if (m_differentialGrid) {
       auto watches = m_differentialGrid->getWatchExpressions();
-      for (const auto& w : watches) {
-          m_coordinator->registerWatchVariable(QString::fromStdString(w));
+      if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+          for (const auto& w : watches) {
+              gdbCoord->registerWatchVariable(QString::fromStdString(w));
+          }
       }
   }
 }
