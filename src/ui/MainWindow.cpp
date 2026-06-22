@@ -1,5 +1,6 @@
 #include "MainWindow.hpp"
 #include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/hpc/DapCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/hpc/LspCoordinator.hpp"
 #include "widgets/DifferentialGrid.hpp"
@@ -95,6 +96,23 @@ void MainWindow::executeCommand(std::unique_ptr<gridlock::core::commands::IDebug
 
 void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
   m_coordinator = coord;
+  if (auto* dapCoord = dynamic_cast<DapCoordinator*>(static_cast<IBackendCoordinator*>(coord))) {
+      connect(dapCoord, &DapCoordinator::stateChanged, this, [this](SessionState state) {
+          if (m_runAction) {
+              if (state == SessionState::Disconnected) {
+                  m_runAction->setEnabled(true);
+                  m_runAction->setText("▶ Run Target");
+              } else {
+                  m_runAction->setEnabled(false);
+                  if (state == SessionState::Launching) m_runAction->setText("Launching...");
+                  else if (state == SessionState::Queued) m_runAction->setText("Queued in SLURM...");
+                  else if (state == SessionState::Running) m_runAction->setText("Running");
+                  else if (state == SessionState::Paused) m_runAction->setText("Paused");
+              }
+          }
+      });
+  }
+
   if (m_variablesDockWidget) {
       m_variablesDockWidget->setCoordinator(m_coordinator);
   }
@@ -274,13 +292,13 @@ void MainWindow::setupToolbar() {
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setMovable(false);
 
-  QAction *runAction = new QAction("▶ Run Target", this);
-  connect(runAction, &QAction::triggered, this, [this]() {
+  m_runAction = new QAction("▶ Run Target", this);
+  connect(m_runAction, &QAction::triggered, this, [this]() {
     auto cmd = std::make_unique<gridlock::core::commands::LaunchCommand>(
         this, "build/mpi_mm_bin", gridlock::core::ConfigManager::instance().getDefaultRanks());
     executeCommand(std::move(cmd));
   });
-  toolbar->addAction(runAction);
+  toolbar->addAction(m_runAction);
 
   QAction *continueAction = new QAction("⏩ Continue", this);
   connect(continueAction, &QAction::triggered, this, [this]() {

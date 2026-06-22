@@ -108,6 +108,7 @@ private:
     DomainHeatmapWidget* m_domainHeatmapWidget = nullptr;
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
+    QAction* m_runAction = nullptr;
 
     gridlock::GdbRankCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

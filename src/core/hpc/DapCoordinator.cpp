@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QStringList>
 #include <QJsonArray>
+#include <QRegularExpression>
 #include "core/managers/ConfigManager.hpp"
 #include "NativeMemoryReader.hpp"
 
@@ -19,10 +20,19 @@ DapCoordinator::~DapCoordinator() {
 }
 
 void DapCoordinator::startAdapter(const QString& program) {
-    if (m_process->state() != QProcess::NotRunning) {
-        qWarning() << "DAP Adapter is already running.";
+    if (m_state != SessionState::Disconnected) {
+        qWarning() << "DAP Adapter is already active or launching.";
         return;
     }
+    
+    if (m_process->state() != QProcess::NotRunning) {
+        qWarning() << "DAP Adapter process is already running.";
+        return;
+    }
+    
+    m_state = SessionState::Launching;
+    emit stateChanged(m_state);
+    
     m_process->start(program, QStringList());
 }
 
@@ -193,6 +203,11 @@ void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int 
 }
 
 void DapCoordinator::terminateSession() {
+    if (m_slurmJobId != -1) {
+        qDebug() << "Executing scancel for job" << m_slurmJobId << "...";
+        QProcess::execute("scancel", {QString::number(m_slurmJobId)});
+    }
+
     QJsonObject args;
     args["terminateDebuggee"] = true;
     sendRequest("disconnect", args);
@@ -205,6 +220,10 @@ void DapCoordinator::terminateSession() {
             }
         }
     }
+
+    m_slurmJobId = -1;
+    m_state = SessionState::Disconnected;
+    emit stateChanged(m_state);
 }
 
 void DapCoordinator::readyReadStandardOutput() {
@@ -360,17 +379,32 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         QString event = message["event"].toString();
         if (event == "initialized") {
             sendRequest("configurationDone");
+            m_state = SessionState::Running;
+            emit stateChanged(m_state);
         } else if (event == "stopped") {
             QJsonObject body = message["body"].toObject();
             QString reason = body["reason"].toString();
             int threadId = body["threadId"].toInt();
             int rankId = threadId - 1;
+            
+            m_state = SessionState::Paused;
+            emit stateChanged(m_state);
+            
             emit executionStopped(rankId, reason);
             requestStackTrace(rankId);
         } else if (event == "output") {
             QJsonObject body = message["body"].toObject();
             QString category = body["category"].toString();
             QString output = body["output"].toString();
+            
+            QRegularExpression re("(?:Submitted batch job |Granted job allocation )(\\d+)");
+            QRegularExpressionMatch match = re.match(output);
+            if (match.hasMatch()) {
+                m_slurmJobId = match.captured(1).toInt();
+                m_state = SessionState::Queued;
+                emit stateChanged(m_state);
+            }
+            
             emit targetOutputReceived(category, output);
         } else if (event == "process") {
             QJsonObject body = message["body"].toObject();

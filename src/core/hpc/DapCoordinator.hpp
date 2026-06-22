@@ -11,6 +11,14 @@
 #include <sys/types.h>
 #include "IBackendCoordinator.hpp"
 
+enum class SessionState {
+    Disconnected,
+    Launching,
+    Queued,
+    Running,
+    Paused
+};
+
 class DapCoordinator : public IBackendCoordinator {
     Q_OBJECT
 
@@ -48,6 +56,7 @@ signals:
     void adapterStarted();
     void adapterExited(int exitCode, QProcess::ExitStatus exitStatus);
     void errorOccurred(const QString& errorString);
+    void stateChanged(SessionState newState);
 
 private slots:
     void readyReadStandardOutput();
@@ -76,4 +85,6 @@ private:
     QMap<int, int> m_memoryRequests;
     QMap<int, int> m_activeFrameIds;
     QMap<int, QPair<int, QString>> m_evaluateRequests;
+    SessionState m_state = SessionState::Disconnected;
+    int m_slurmJobId = -1;
 };
