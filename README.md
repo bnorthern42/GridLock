@@ -24,6 +24,8 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
 * **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
 
+> ⚠️ **EXPERIMENTAL FEATURE (USE AT YOUR OWN RISK):** SLURM job execution is currently in a basic, feature-incomplete state. While GridLock can submit jobs to the cluster, advanced lifecycle management—such as detached session rehydration, automatic `squeue` polling, and automated `scancel` cleanup—is not yet implemented. Long-running or pending jobs may require manual management via the terminal to prevent burning allocation hours.
+
 ---
 
 ## 🛠️ Getting Started
@@ -68,6 +70,7 @@ GridLock's development is broken into iterative phases. For a detailed breakdown
 * **Phase 7:** Cross-Language Variable Inspector
 * **Phase 8:** Alternative Debugger Backends
 * **Phase 9:** The Plugin Marketplace
+* **Phase 10:** Advanced Cluster Lifecycle & Detached Sessions
 
 ---
 

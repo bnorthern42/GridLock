@@ -63,6 +63,12 @@ By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerB
 
 * [ ] **Dynamic Loading:** Replace hardcoded language support with a `plugins/` directory system.
 
+## PHASE 10: Advanced Cluster Lifecycle & Detached Sessions
+
+* [ ] TOML-based session persistence for pending cluster jobs.
+* [ ] Background `squeue` polling for seamless DAP re-attachment.
+* [ ] Asynchronous `scancel` guillotine for safe UI teardowns and zombie process mitigation.
+
 ## Field Testing & Validation (Remote HPC Workflows)
 
 > These items cannot be exercised in a local CI/CD pipeline. Each must be
