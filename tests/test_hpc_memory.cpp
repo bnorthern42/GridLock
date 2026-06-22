@@ -20,15 +20,18 @@ void TestHpcMemory::testDirectRead() {
     if (pid == 0) {
         // Child process
         close(pipefd[0]); // Close read end
+        
+        // Redirect stdout to pipe
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
 
-        std::vector<double> dummyData = {1.23, 4.56, 7.89, 10.11};
+        std::vector<double> dummyData = {1.0, 2.5, 3.14};
         uintptr_t address = reinterpret_cast<uintptr_t>(dummyData.data());
 
-        // Send the address to the parent
-        if (write(pipefd[1], &address, sizeof(address)) != sizeof(address)) {
-            exit(1);
-        }
-        
+        // Print PID and address to stdout
+        printf("%d %lu\n", getpid(), static_cast<unsigned long>(address));
+        fflush(stdout);
+
         // Wait for a signal to exit
         while (true) {
             sleep(1);
@@ -39,28 +42,31 @@ void TestHpcMemory::testDirectRead() {
         // Parent process
         close(pipefd[1]); // Close write end
         
-        uintptr_t address = 0;
-        if (read(pipefd[0], &address, sizeof(address)) != sizeof(address)) {
-            QFAIL("Failed to read address from child");
+        FILE* stream = fdopen(pipefd[0], "r");
+        int child_pid = 0;
+        unsigned long address_val = 0;
+        if (fscanf(stream, "%d %lu", &child_pid, &address_val) != 2) {
+            QFAIL("Failed to read PID and address from child stdout");
         }
-        close(pipefd[0]);
+        fclose(stream);
+        
+        uintptr_t address = static_cast<uintptr_t>(address_val);
 
         QVERIFY(address != 0);
 
         std::vector<double> result;
         try {
-            result = NativeMemoryReader::readDoubles(pid, address, 4);
-        } catch (const MemoryAccessException& e) {
+            result = NativeMemoryReader::readDoubles(pid, address, 3);
+        } catch (const std::runtime_error& e) {
             kill(pid, SIGTERM);
             waitpid(pid, nullptr, 0);
             QFAIL(e.what());
         }
 
-        QCOMPARE(result.size(), 4);
-        QCOMPARE(result[0], 1.23);
-        QCOMPARE(result[1], 4.56);
-        QCOMPARE(result[2], 7.89);
-        QCOMPARE(result[3], 10.11);
+        QCOMPARE(result.size(), 3);
+        QCOMPARE(result[0], 1.0);
+        QCOMPARE(result[1], 2.5);
+        QCOMPARE(result[2], 3.14);
 
         // Terminate child
         kill(pid, SIGTERM);

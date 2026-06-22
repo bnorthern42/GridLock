@@ -24,14 +24,14 @@ std::vector<double> NativeMemoryReader::readDoubles(pid_t targetPid, uintptr_t b
     ssize_t bytesRead = process_vm_readv(targetPid, local, 1, remote, 1, 0);
     
     if (bytesRead == -1) {
-        throw MemoryAccessException("process_vm_readv failed: " + std::string(strerror(errno)));
+        throw std::runtime_error("process_vm_readv failed: " + std::string(strerror(errno)));
     }
     
     if (static_cast<size_t>(bytesRead) != count * sizeof(double)) {
-        throw MemoryAccessException("process_vm_readv partial read");
+        throw std::runtime_error("process_vm_readv partial read");
     }
 #else
-    throw MemoryAccessException("NativeMemoryReader is only supported on Linux");
+    throw std::runtime_error("NativeMemoryReader is only supported on Linux");
 #endif
 
     return result;

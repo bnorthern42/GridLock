@@ -6,10 +6,6 @@
 #include <sys/types.h>
 #include <cstdint>
 
-class MemoryAccessException : public std::runtime_error {
-public:
-    explicit MemoryAccessException(const std::string& message) : std::runtime_error(message) {}
-};
 
 class NativeMemoryReader {
 public:
