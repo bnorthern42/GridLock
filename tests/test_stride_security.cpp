@@ -8,10 +8,8 @@ using namespace gridlock::hpc;
 void TestStrideSecurity::testValidStride() {
     uintptr_t baseAddress = 0x1000;
     size_t totalAllocatedBytes = 10000;
-    size_t rows = 100;
-    size_t cols = 50;
-    size_t requestedOffset = 0;
-    size_t requestedBytes = rows * cols; // 5000
+    size_t requestedOffset = 100;
+    size_t requestedBytes = 4000;
     std::string warning;
 
     bool result = MemoryBoundsValidator::validateBounds(baseAddress, totalAllocatedBytes, requestedOffset, requestedBytes, warning);

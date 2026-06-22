@@ -7,8 +7,7 @@
 namespace gridlock {
 namespace hpc {
 
-class MemoryBoundsValidator {
-public:
+struct MemoryBoundsValidator {
     static bool validateBounds(uintptr_t baseAddress, size_t totalAllocatedBytes, size_t requestedOffset, size_t requestedBytes, std::string& outWarning);
     
     static bool isSafeToRender(gridlock::VariableNode* node, size_t requestedStride, size_t renderCount, std::string& outWarning);
