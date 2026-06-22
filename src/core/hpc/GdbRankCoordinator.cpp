@@ -12,6 +12,10 @@ GdbRankCoordinator::GdbRankCoordinator(QObject *parent) : IBackendCoordinator(pa
 
 GdbRankCoordinator::~GdbRankCoordinator() { terminateAllSessions(); }
 
+void GdbRankCoordinator::terminateSession() {
+    terminateAllSessions();
+}
+
 void GdbRankCoordinator::writeCmd(int rankId, const QString &cmd) {
   if (rankId >= 0 && rankId < static_cast<int>(m_processes.size())) {
     auto &rp = m_processes[rankId];
@@ -143,10 +147,10 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
   }
 
   connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() {
-      emit targetOutputReceived(QString::fromUtf8(m_mpirunProcess->readAllStandardOutput()));
+      emit targetOutputReceived("stdout", QString::fromUtf8(m_mpirunProcess->readAllStandardOutput()));
   });
   connect(m_mpirunProcess.get(), &QProcess::readyReadStandardError, this, [this]() {
-      emit targetOutputReceived(QString::fromUtf8(m_mpirunProcess->readAllStandardError()));
+      emit targetOutputReceived("stderr", QString::fromUtf8(m_mpirunProcess->readAllStandardError()));
   });
 
   m_mpirunProcess->start(mpiExec, mpiArgs);

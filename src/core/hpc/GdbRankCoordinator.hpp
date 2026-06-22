@@ -45,7 +45,6 @@ signals:
   void rankStateChanged(int rankId, const RankState &state);
   void gdbOutputReceived(int rankId, const QString &output);
   void commandSentToGdb(int rankId, const QString &cmd);
-  void targetOutputReceived(const QString &text);
   void hoverEvaluationComplete(QString varName, QString result, QPoint globalPos);
   void memoryDataReady(int rankId, qint64 beginAddress, const QString &hexContents);
   void expressionEvaluated(int rankId, const QString& expr, const QString& result);
@@ -56,6 +55,8 @@ public slots:
   virtual void runAll();
   virtual void haltAll();
   virtual void pauseFocusedRank(int rankId);
+  
+  void terminateSession() override;
 
   // IBackendCoordinator overrides
   void stepOver(int threadId) override { Q_UNUSED(threadId); stepAll(); }

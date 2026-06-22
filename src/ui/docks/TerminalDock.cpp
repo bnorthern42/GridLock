@@ -24,8 +24,25 @@ TerminalDock::TerminalDock(const QString& title, QWidget *parent)
 }
 
 void TerminalDock::appendText(const QString& text) {
+    appendText("stdout", text);
+}
+
+void TerminalDock::appendText(const QString& category, const QString& text) {
     m_textEdit->moveCursor(QTextCursor::End);
+    
+    QTextCharFormat fmt;
+    if (category == "stderr" || category == "error") {
+        fmt.setForeground(QColor(255, 100, 100)); // Red
+    } else if (category == "console") {
+        fmt.setForeground(QColor(100, 200, 255)); // Blue-ish
+    } else {
+        fmt.setForeground(m_textEdit->palette().color(QPalette::Text)); // Default
+    }
+    m_textEdit->textCursor().mergeCharFormat(fmt);
+    
     m_textEdit->insertPlainText(text);
+    
+    m_textEdit->textCursor().setCharFormat(QTextCharFormat());
     m_textEdit->verticalScrollBar()->setValue(m_textEdit->verticalScrollBar()->maximum());
 }
 

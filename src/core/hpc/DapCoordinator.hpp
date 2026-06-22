@@ -22,6 +22,7 @@ public:
     void initializeAdapter();
     void sendRequest(const QString& command, const QJsonObject& arguments = QJsonObject());
     void processRawData(const QByteArray& data);
+    void terminateSession();
     
     void toggleBreakpoint(const QString& file, int line);
     void requestStackTrace(int rankId);
@@ -39,6 +40,7 @@ signals:
     void messageReceived(const QJsonObject& message);
     void localsUpdated(int rankId, const QJsonArray& variables);
     void expressionEvaluated(int rankId, QString expr, QString result);
+    void targetOutputReceived(QString category, QString output);
     void adapterStarted();
     void adapterExited(int exitCode, QProcess::ExitStatus exitStatus);
     void errorOccurred(const QString& errorString);

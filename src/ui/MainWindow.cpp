@@ -126,8 +126,10 @@ void MainWindow::setCoordinator(gridlock::GdbRankCoordinator *coord) {
     connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
             m_coordinator, &GdbRankCoordinator::sendCommand);
     if (m_terminalDock) {
-      connect(m_coordinator, &GdbRankCoordinator::targetOutputReceived,
-              m_terminalDock, &TerminalDock::appendText);
+      connect(m_coordinator, &IBackendCoordinator::targetOutputReceived,
+              m_terminalDock, [this](const QString& category, const QString& output) {
+                  m_terminalDock->appendText(category, output);
+              });
     }
     connect(m_coordinator, &GdbRankCoordinator::memoryDataReady, this, [this](int rankId, qint64 beginAddress, const QString &hexContents) {
       if (rankId == m_focusedRank && m_memView) {
@@ -286,6 +288,14 @@ void MainWindow::setupToolbar() {
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(pauseAction);
+
+  QAction *stopAction = new QAction("⏹ Stop", this);
+  connect(stopAction, &QAction::triggered, this, [this]() {
+    if (m_coordinator) {
+        m_coordinator->terminateSession();
+    }
+  });
+  toolbar->addAction(stopAction);
 
   QAction *exitAction = new QAction("Terminate Session", this);
   connect(exitAction, &QAction::triggered, this, [this]() {
@@ -505,7 +515,7 @@ void MainWindow::onRankSelected(int rankId) {
 
 void MainWindow::closeEvent(QCloseEvent *event) {
   if (m_coordinator) {
-    m_coordinator->terminateAllSessions();
+    m_coordinator->terminateSession();
   }
   if (m_lspCoordinator) {
     m_lspCoordinator->stop();

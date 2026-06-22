@@ -161,6 +161,21 @@ void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
     sendRequest("evaluate", args);
 }
 
+void DapCoordinator::terminateSession() {
+    QJsonObject args;
+    args["terminateDebuggee"] = true;
+    sendRequest("disconnect", args);
+    
+    if (m_process && m_process->state() == QProcess::Running) {
+        if (!m_process->waitForFinished(1000)) {
+            m_process->terminate();
+            if (!m_process->waitForFinished(1000)) {
+                m_process->kill();
+            }
+        }
+    }
+}
+
 void DapCoordinator::readyReadStandardOutput() {
     processRawData(m_process->readAllStandardOutput());
 }
@@ -302,6 +317,11 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             int rankId = threadId - 1;
             emit executionStopped(rankId, reason);
             requestStackTrace(rankId);
+        } else if (event == "output") {
+            QJsonObject body = message["body"].toObject();
+            QString category = body["category"].toString();
+            QString output = body["output"].toString();
+            emit targetOutputReceived(category, output);
         }
     }
     
