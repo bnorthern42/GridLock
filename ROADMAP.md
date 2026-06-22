@@ -31,11 +31,11 @@
 
 ## PHASE 5: The Polyglot Core (DAP Refactor)
 
-* [ ] **Refactor `DebuggerBackend`:** Transform your abstract `DebuggerBackend` into a `DapBackend`.
-* [ ] **Standardized Launch:** Implement the startup sequence for all language sessions:
-  * [ ] GridLock spawns the adapter process.
-  * [ ] GridLock performs a TCP handshake.
-  * [ ] GridLock sends a standard JSON-RPC `launch` command.
+* [x] **Refactor `DebuggerBackend`:** Transform your abstract `DebuggerBackend` into a `DapBackend`.
+* [x] **Standardized Launch:** Implement the startup sequence for all language sessions:
+  * [x] GridLock spawns the adapter process.
+  * [x] GridLock performs a TCP handshake.
+  * [x] GridLock sends a standard JSON-RPC `launch` command.
 
 ## PHASE 6: High-Performance Memory Visualizations
 
