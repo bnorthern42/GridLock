@@ -7,6 +7,8 @@
 #include <QMap>
 #include <memory>
 
+class QVulkanInstance;
+
 namespace gridlock {
 class GdbRankCoordinator;
 class VariablesDockWidget;
@@ -43,6 +45,8 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override = default;
+
+    void setVulkanInstance(QVulkanInstance *inst);
 
     ServerRackView* serverRackView() const { return m_serverRackView; }
     EditorTabManager* editorTabManager() const { return m_editorTabManager; }

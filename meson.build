@@ -7,6 +7,7 @@ project('GridLock', 'cpp',
 qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
+vulkan_dep = dependency('vulkan')
 
 # Source files
 src_files = [
@@ -43,7 +44,8 @@ src_files = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
-  'src/ui/DomainHeatmapWidget.cpp'
+  'src/ui/DomainHeatmapWidget.cpp',
+  'src/ui/DomainHeatmapRenderer.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -99,7 +101,7 @@ executable('gridlock',
   processed_qt_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep],
+  dependencies : [qt6_dep, tomlplusplus_dep, vulkan_dep],
   install : true)
 
 install_data('data/gridlock.desktop', 
@@ -189,7 +191,8 @@ ui_test_src = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
-  'src/ui/DomainHeatmapWidget.cpp'
+  'src/ui/DomainHeatmapWidget.cpp',
+  'src/ui/DomainHeatmapRenderer.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -232,7 +235,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   ui_test_src,
   processed_ui_test_files,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep]
+  dependencies : [qt6_dep, tomlplusplus_dep, vulkan_dep]
 )
 
 test('ui_tests', gridlock_ui_tests)

@@ -657,4 +657,10 @@ void MainWindow::testHeatmapWidget() {
     m_domainHeatmapWidget->loadData(dummyData, width, height, 0);
 }
 
+void MainWindow::setVulkanInstance(QVulkanInstance *inst) {
+    if (m_domainHeatmapWidget) {
+        m_domainHeatmapWidget->setVulkanInstance(inst);
+    }
+}
+
 } // namespace gridlock::ui

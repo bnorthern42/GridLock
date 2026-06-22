@@ -1,16 +1,26 @@
 #pragma once
 
-#include <QOpenGLWidget>
-#include <QOpenGLExtraFunctions>
-#include <QOpenGLShaderProgram>
-#include <QOpenGLBuffer>
-#include <QOpenGLVertexArrayObject>
+#include <QWidget>
+#include <QVulkanWindow>
 #include <vector>
 #include <cstdint>
 
 namespace gridlock::ui {
 
-class DomainHeatmapWidget : public QOpenGLWidget, protected QOpenGLExtraFunctions {
+class DomainHeatmapRenderer;
+
+class DomainHeatmapWindow : public QVulkanWindow {
+    Q_OBJECT
+public:
+    QVulkanWindowRenderer *createRenderer() override;
+    void setRenderer(DomainHeatmapRenderer *renderer) { m_renderer = renderer; }
+    void loadData(const std::vector<double>& rawData, int width, int height);
+
+private:
+    DomainHeatmapRenderer *m_renderer = nullptr;
+};
+
+class DomainHeatmapWidget : public QWidget {
     Q_OBJECT
 
 public:
@@ -19,23 +29,18 @@ public:
 
     void loadData(const std::vector<double>& rawData, int width, int height, uintptr_t baseAddress = 0);
     void setDifferentialMode(bool enabled);
+    void setVulkanInstance(QVulkanInstance *inst);
 
 signals:
     void cellClicked(int index, double value, uintptr_t absoluteMemoryAddress);
 
 protected:
-    void initializeGL() override;
-    void resizeGL(int w, int h) override;
-    void paintGL() override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
-    bool event(QEvent *e) override;
 
 private:
-    QOpenGLShaderProgram m_program;
-    QOpenGLVertexArrayObject m_vao;
-    QOpenGLBuffer m_vbo;
-    GLuint m_textureId = 0;
+    DomainHeatmapWindow *m_vulkanWindow;
+    QWidget *m_container;
 
     int m_dataWidth = 0;
     int m_dataHeight = 0;

@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QSurfaceFormat>
+#include <QVulkanInstance>
 #include <QStyleFactory>
 #include <QPalette>
 #include <QColor>
@@ -22,6 +23,12 @@ int main(int argc, char *argv[]) {
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
     format.setSwapInterval(1); // CRITICAL: Forces VSync
     QSurfaceFormat::setDefaultFormat(format);
+
+    QVulkanInstance inst;
+    inst.setLayers({"VK_LAYER_KHRONOS_validation"});
+    if (!inst.create()) {
+        qFatal("Failed to create Vulkan instance");
+    }
 
     QApplication app(argc, argv);
 
@@ -88,6 +95,7 @@ int main(int argc, char *argv[]) {
     parser.process(app);
 
     gridlock::ui::MainWindow window;
+    window.setVulkanInstance(&inst);
     window.show();
 
     if (parser.isSet(testModeOption)) {
