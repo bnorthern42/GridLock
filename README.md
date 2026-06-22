@@ -1,113 +1,84 @@
-# GridLock - A High-Performance MPI Graphical Debugger
+# GridLock - High-Performance MPI Graphical Debugger
 
-[![Build Status](https://github.com/bnorthern42/GridLock/actions/workflows/build.yml/badge.svg)](https://github.com/bnorthern42/GridLock/actions)
+![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/build.yml?branch=main&style=for-the-badge)
+![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
+![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
+![Wayland/Niri](https://img.shields.io/badge/Wayland-Niri_Native-orange.svg?style=for-the-badge)
+![Meson/Ninja](https://img.shields.io/badge/Build-Meson%20|%20Ninja-blue.svg?style=for-the-badge)
+![LLDB/DAP](https://img.shields.io/badge/Backend-LLDB%20|%20DAP-purple.svg?style=for-the-badge)
 
-GridLock is a Wayland-native, graphical GDB/MI frontend specifically designed for numerical methods and parallel MPI (Message Passing Interface) applications. It provides a specialized environment tailored to the complexities of parallel computing, allowing developers to inspect state, track execution, and visualize real-time x86_64 disassembly across multiple independent MPI ranks concurrently.
+GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Adapter Protocol (DAP). It provides a highly specialized environment tailored to the complexities of parallel computing, allowing developers to inspect state, track execution, and visualize real-time state across multiple independent MPI ranks concurrently.
 
-> [!WARNING]
-> **GridLock is currently in an Alpha/WIP state.** It is a personal project intended for research use. Use at your own risk. Features are subject to change and stability is not guaranteed.
-
----
-
-## Core Capabilities
-
-### Multi-Rank Debugging
-* **Multi-Rank State Inspection:** Monitor and step through multiple independent MPI processes simultaneously within a unified interface.
-* **Visual Conditional Breakpoints:** Define, insert, and update conditional breakpoints directly in the code editor's gutter.
-* **Live Register View:** A dedicated CPU registers panel tracks and updates register states in real-time alongside target execution.
-* **Memory Hex/ASCII Dump:** Inspect raw memory chunks by supplying variable names or absolute pointer addresses directly to GDB, rendered in a structured Hex/ASCII format.
-
-### HPC Orchestration
-* **SLURM Job Integration:** Submit and track SLURM batch jobs directly from the IDE using customizable bash templates, with built-in support for GPU allocation.
-* **Spack Environment Integration:** Browse, search, and monitor Spack packages running on remote clusters through an integrated graphical frontend.
-* **Remote Environment & SSH Management:** Centrally configure hostnames, access keys, and remote execution environments from the preferences dialog.
-
-### Developer Experience
-* **Semantic Hover Tooltips:** Powered by a `clangd` language server backend and GDB/MI to instantly view live variable values on hover.
-* **Offline Reference Manual:** Access local documentation and system man pages via an integrated viewer that supports the open-source `.docset` standard.
+> [!WARNING]  
+> **GridLock is currently in an Alpha/WIP state.** It is a personal project intended for research use. Features are subject to change and stability is not guaranteed.
 
 ---
 
-## Getting Started
+## 🚀 Key Features
+
+* **Lazy-Loading DAP Variable Trees:** Dynamically explore complex structs, pointers, and arrays efficiently without locking the UI.
+* **Integrated HPC Console & Hex Dump:** Seamlessly read raw memory via base64 DAP chunks, with 1:1 hardware-to-UI Hex dump synchronization.
+* **Vim-Style Chorded Shortcuts:** Leverage advanced command patterns (`Alt+B`, `Ctrl+W`) tailored for rapid iteration without mouse dependency.
+* **TOML Session Persistence:** Save and instantly restore robust HPC debug profiles (binary arguments, OpenMPI rank counts, watchlists).
+* **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
+* **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
+* **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
+
+---
+
+## 🛠️ Getting Started
 
 ### Prerequisites
-
-To compile and run GridLock, ensure the following dependencies are installed on your system:
-
 * **C++23 Compiler:** GCC 13+ or Clang 16+
 * **Build System:** Meson and Ninja
 * **UI Framework:** Qt6 (Widgets, Core, and Gui modules)
 * **MPI Implementation:** MPICH or OpenMPI
-* **Debugger Backend:** GDB (GNU Debugger) with MI3 support
-* **Remote Target Server:** `gdbserver`
-* **Language Server:** `clangd` (for semantic code intelligence and LSP support)
+* **Debugger Backend:** DAP-compliant debug adapter (e.g., `lldb-vscode` or `lldb-dap`)
+* **Language Server:** `clangd`
 
-### Building the Project
+### Building from Source
 
-1. **Clone the repository:**
-   ```bash
-   git clone git@github.com:bnorthern42/GridLock.git
-   cd GridLock
-   ```
+```bash
+git clone git@github.com:bnorthern42/GridLock.git
+cd GridLock
+meson setup build
+ninja -C build
+sudo meson install -C build
+```
 
-2. **Configure the build directory:**
-   ```bash
-   meson setup build
-   ```
+### Running the IDE
 
-3. **Compile the application:**
-   ```bash
-   ninja -C build
-   ```
+```bash
+# Standard execution
+./build/gridlock
 
-4. **Install the application (System-wide):**
-   ```bash
-   sudo meson install -C build
-   ```
-
-### Running the Application
-
-* **Standard Execution:**
-  To run GridLock under normal operating conditions:
-  ```bash
-  ./build/gridlock
-  ```
-
-* **Test Mode:**
-  To run GridLock in test mode, which simulates the MPI environment without requiring a physical MPI backend:
-  ```bash
-  ./build/gridlock --test-mode
-  ```
+# Test mode (simulates MPI/DAP environment)
+./build/gridlock --test-mode
+```
 
 ---
 
-## Known Limitations & Roadmap
+## 🗺️ Roadmap Snapshot
 
-### Known Limitations
-* **Single-File Scope:** GridLock currently supports debugging and editing a single file at a time.
-* **No Hybrid Parallelism Support:** There is currently no support for debugging hybrid MPI/OpenMP applications.
+GridLock's development is broken into iterative phases. For a detailed breakdown, see [ROADMAP.md](ROADMAP.md).
 
-### Future Roadmap
-For upcoming features, architectural milestones, and proposed implementations, please refer to [ROADMAP.md](ROADMAP.md).
+* **Phase 1-4:** (Complete) Stability, UI Foundations, Advanced Debugger, IDE Experience
+* **Phase 5:** (Complete) The Polyglot Core (DAP Refactor)
+* **Phase 6:** (In Progress) High-Performance Memory Visualizations (Zero-Copy pipelines, OpenGL Heatmaps, Stride Security)
+* **Phase 7:** Cross-Language Variable Inspector
+* **Phase 8:** Alternative Debugger Backends
+* **Phase 9:** The Plugin Marketplace
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for information on setting up the environment and submitting issues. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and issue submission. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Acknowledgments & Attributions
+## 🏆 Attributions
 
-This project makes use of the excellent [toml++](https://github.com/marzer/tomlplusplus) library by mark gillard for parsing TOML configuration files.
+GridLock orchestrates OpenMPI, SLURM, and Spack, relying on `tomlplusplus` for configuration. It draws inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
 
-GridLock was also inspired by and built upon the ideas from the following projects:
-- **[GNU DDD](https://www.gnu.org/software/ddd/)**: For pioneering visual data display in debugging.
-- **[KDbg](https://www.kdbg.org/)**: For early inspiration on KDE/Qt-based GDB frontend wrappers.
-- **[gdbgui](https://www.gdbgui.com/)**: For demonstrating the power of browser-based debug visualization, which inspired our native `DifferentialGrid`.
-- **[Zeal](https://zealdocs.org/)**: For the open-source `.docset` standard and offline documentation workflows that power our Reference Manual.
+## 📄 License
 
-We also want to give a brief nod to the **Spack**, **SLURM**, and **OpenMPI** communities for the HPC tools GridLock orchestrates.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Licensed under the MIT License. See [LICENSE](LICENSE).

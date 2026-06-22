@@ -22,7 +22,7 @@ The **Multi-Rank Differential Grid** ("Watch Expressions") solves this by displa
 
 For deep vertical inspection of complex nested C++ objects (e.g., `std::vector`, `std::map`, or custom scientific data structures), use the **Variables Dock**.
 
-* **Navigation**: The dock uses a lazy-loaded hierarchical tree model. Expanding a node triggers an on-demand evaluation of the object's members via the underlying GDB/MI backend, keeping the interface responsive even when inspecting massive data structures.
+* **Navigation**: The dock uses a lazy-loaded hierarchical tree model. Expanding a node triggers an on-demand evaluation of the object's members via the underlying DAP (Debug Adapter Protocol) backend, keeping the interface responsive even when inspecting massive data structures.
 * **Type Resolution**: GridLock automatically resolves dynamic types and displays the most derived class type, stripping away unnecessary boilerplate.
 
 ## Expression Evaluator
