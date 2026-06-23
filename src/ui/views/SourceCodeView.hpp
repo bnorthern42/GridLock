@@ -54,7 +54,7 @@ signals:
     void continueRequested();
     void stepInstRequested();
     void toggleBreakpointRequested(const QString& location);
-    void breakpointToggled(const QString& file, int line, bool ctrlClicked = false);
+    void breakpointToggled(const QString& file, int line, bool isSet, const QString& condition = QString());
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
     void semanticHoverRequested(const QString& file, int line, int character, const QPoint& globalPos);
     void pinVariableRequested(const QString& varName);
@@ -76,7 +76,7 @@ private slots:
 private:
     LineNumberArea* m_lineNumberArea;
     CppSyntaxHighlighter* m_highlighter;
-    QSet<int> breakpoints;
+    QMap<int, QString> breakpoints;
     QString m_currentFilePath;
     QTimer* m_hoverTimer;
     QPoint m_lastMousePos;

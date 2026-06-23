@@ -228,7 +228,7 @@ void GdbRankCoordinator::sendCommand(int rankId, const QString &cmd) {
   }
 }
 
-void GdbRankCoordinator::broadcastBreakpoint(const QString &file, int line,
+void GdbRankCoordinator::broadcastBreakpoint(const QString &file, int line, bool isSet,
                                              const QString& condition) {
   QString fileName = QFileInfo(file).fileName();
   QString locStr = QString("%1:%2").arg(fileName).arg(line);
@@ -249,14 +249,14 @@ void GdbRankCoordinator::broadcastBreakpoint(const QString &file, int line,
       rp->state.breakpoints.remove(bkptIdToDelete);
     }
     
-    if (condition.isEmpty() && bkptIdToDelete != -1) {
+    if (!isSet) {
         // It was a toggle-off
     } else {
         QString breakCmd;
         if (!condition.isEmpty()) {
-            breakCmd = QString("-break-insert -f -c \"%1\" %2:%3\n").arg(condition).arg(fileName).arg(line);
+            breakCmd = QString("-break-insert -c \"%1\" %2:%3\n").arg(condition).arg(fileName).arg(line);
         } else {
-            breakCmd = QString("-break-insert -f %1\n").arg(locStr);
+            breakCmd = QString("-break-insert %1\n").arg(locStr);
         }
         writeCmd(i, breakCmd);
     }

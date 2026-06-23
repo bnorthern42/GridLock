@@ -19,7 +19,7 @@ public:
   void startDebugSession(int rankCount, const QString &executable);
   void launchParallelSession(const QString &executable, int rankCount);
   void insertBreakpoint(const QString &location);
-  void broadcastBreakpoint(const QString &file, int line, const QString& condition = "");
+  void broadcastBreakpoint(const QString &file, int line, bool isSet, const QString& condition = QString());
   void broadcastCommand(const QString &cmd);
   void terminateAllSessions();
   void requestDisassemblyFallback(int rankId);

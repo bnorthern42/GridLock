@@ -9,6 +9,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include "../../core/managers/ConfigManager.hpp"
+#include "../dialogs/ConditionalBreakpointDialog.hpp"
 
 namespace gridlock::ui {
 
@@ -161,7 +162,10 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
 }
 
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
-    breakpoints = bps;
+    breakpoints.clear();
+    for (int bp : bps) {
+        breakpoints[bp] = QString();
+    }
     m_lineNumberArea->update();
 }
 
@@ -170,11 +174,17 @@ int SourceCodeView::getCurrentLineNumber() const {
 }
 
 void SourceCodeView::toggleBreakpoint(int lineNum) {
-    if (breakpoints.contains(lineNum)) breakpoints.remove(lineNum);
-    else breakpoints.insert(lineNum);
+    bool isSet = false;
+    if (breakpoints.contains(lineNum)) {
+        breakpoints.remove(lineNum);
+        isSet = false;
+    } else {
+        breakpoints.insert(lineNum, QString());
+        isSet = true;
+    }
     m_lineNumberArea->update();
     QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
-    emit breakpointToggled(emitPath, lineNum, false);
+    emit breakpointToggled(emitPath, lineNum, isSet, QString());
 }
 
 void SourceCodeView::highlightCurrentLine() {
@@ -203,7 +213,11 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             painter.setPen(QColor(120, 120, 120));
             painter.drawText(0, top, m_lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
             if (breakpoints.contains(blockNumber + 1)) {
-                painter.setBrush(Qt::red);
+                if (breakpoints[blockNumber + 1].isEmpty()) {
+                    painter.setBrush(Qt::red);
+                } else {
+                    painter.setBrush(QColor(255, 165, 0)); // Orange for conditional
+                }
                 painter.drawEllipse(2, top + 2, 8, 8);
             }
         }
@@ -224,12 +238,32 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
             int lineNum = blockNumber + 1;
-            bool ctrlClicked = (event->modifiers() & Qt::ControlModifier);
-            if (breakpoints.contains(lineNum) && !ctrlClicked) breakpoints.remove(lineNum);
-            else breakpoints.insert(lineNum);
-            m_lineNumberArea->update();
             QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
-            emit breakpointToggled(emitPath, lineNum, ctrlClicked);
+
+            if (event->button() == Qt::RightButton) {
+                // Right click opens condition dialog
+                QString currentCondition = breakpoints.value(lineNum, QString());
+                ConditionalBreakpointDialog dlg(currentCondition, this);
+                if (dlg.exec() == QDialog::Accepted) {
+                    QString newCondition = dlg.condition();
+                    if (!newCondition.isEmpty() || breakpoints.contains(lineNum)) {
+                        breakpoints.insert(lineNum, newCondition);
+                        emit breakpointToggled(emitPath, lineNum, true, newCondition);
+                    }
+                }
+            } else {
+                // Left click toggles unconditionally
+                bool isSet = false;
+                if (breakpoints.contains(lineNum)) {
+                    breakpoints.remove(lineNum);
+                    isSet = false;
+                } else {
+                    breakpoints.insert(lineNum, QString());
+                    isSet = true;
+                }
+                emit breakpointToggled(emitPath, lineNum, isSet, QString());
+            }
+            m_lineNumberArea->update();
             break;
         }
         block = block.next();

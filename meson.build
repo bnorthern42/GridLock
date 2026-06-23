@@ -25,6 +25,7 @@ src_files = [
   'src/ui/MainWindow.cpp',
   'src/ui/views/ServerRackView.cpp',
   'src/ui/views/SourceCodeView.cpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
   'src/ui/EditorTabManager.cpp',
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
@@ -64,6 +65,7 @@ moc_headers = [
   'src/ui/MainWindow.hpp',
   'src/ui/views/ServerRackView.hpp',
   'src/ui/views/SourceCodeView.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
   'src/ui/EditorTabManager.hpp',
   'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp',
@@ -175,6 +177,7 @@ ui_test_src = [
   'tests/test_ui.cpp',
   'src/ui/MainWindow.cpp',
   'src/ui/views/SourceCodeView.cpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
   'src/ui/EditorTabManager.cpp',
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
@@ -212,6 +215,7 @@ ui_test_moc_headers = [
   'tests/test_ui.hpp',
   'src/ui/MainWindow.hpp',
   'src/ui/views/SourceCodeView.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
   'src/ui/EditorTabManager.hpp',
   'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp',
@@ -311,7 +315,8 @@ commands_test_src = [
   'src/core/hpc/DapCoordinator.cpp',
   'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp',
-  'src/ui/views/SourceCodeView.cpp'
+  'src/ui/views/SourceCodeView.cpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp'
 ]
 
 commands_test_moc_headers = [
@@ -319,7 +324,8 @@ commands_test_moc_headers = [
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
-  'src/ui/views/SourceCodeView.hpp'
+  'src/ui/views/SourceCodeView.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp'
 ]
 
 processed_commands_test_files = qt6.compile_moc(
@@ -370,7 +376,8 @@ dap_commands_test_src = [
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp',
-  'src/ui/views/SourceCodeView.cpp'
+  'src/ui/views/SourceCodeView.cpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp'
 ]
 
 dap_commands_test_moc_headers = [
@@ -378,7 +385,8 @@ dap_commands_test_moc_headers = [
   'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
-  'src/ui/views/SourceCodeView.hpp'
+  'src/ui/views/SourceCodeView.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp'
 ]
 
 processed_dap_commands_test_files = qt6.compile_moc(
