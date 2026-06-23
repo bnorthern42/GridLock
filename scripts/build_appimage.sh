@@ -8,7 +8,6 @@ echo "Building GridLock..."
 meson setup builddir --prefix=/usr --buildtype=release
 
 echo "Installing into AppDir..."
-# FIX: Force DESTDIR to be absolute so it stages in the repository root, not inside builddir/
 DESTDIR="$(pwd)/AppDir" ninja -C builddir install
 
 echo "Setting up desktop file and icon..."
@@ -18,25 +17,24 @@ cp packaging/gridlock.desktop AppDir/usr/share/applications/
 
 if [ -f "packaging/gridlock.png" ]; then
     cp packaging/gridlock.png AppDir/usr/share/icons/hicolor/256x256/apps/gridlock.png
-else
-    echo "Warning: packaging/gridlock.png not found. Please add an icon later."
 fi
 
-echo "Downloading linuxdeploy and Qt plugin..."
-if [ ! -f linuxdeploy-x86_64.AppImage ]; then
-    wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-    chmod +x linuxdeploy-x86_64.AppImage
-fi
+echo "Installing CQtDeployer..."
+wget -c -nv https://github.com/QuasarApp/CQtDeployer/releases/download/v1.6.0/CQtDeployer_1.6.0_linux.run
+chmod +x CQtDeployer_1.6.0_linux.run
+./CQtDeployer_1.6.0_linux.run --script in
+export PATH="$PATH:$HOME/CQtDeployer/bin"
 
-if [ ! -f linuxdeploy-plugin-qt-x86_64.AppImage ]; then
-    wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-    chmod +x linuxdeploy-plugin-qt-x86_64.AppImage
-fi
+echo "Running CQtDeployer..."
+cqtdeployer -bin AppDir/usr/bin/gridlock \
+    -qmake $(which qmake6) \
+    -ext "wayland,xcb,vulkan" \
+    -name "GridLock" \
+    -targetDir AppDir
 
-echo "Running linuxdeploy..."
-export QMAKE=$(which qmake6)
-export EXTRA_QT_PLUGINS="wayland;xcb;vulkan"
-export VERSION="0.4.5"
-./linuxdeploy-x86_64.AppImage --appdir AppDir -e AppDir/usr/bin/gridlock -d AppDir/usr/share/applications/gridlock.desktop --plugin qt --output appimage
+echo "Packaging AppImage..."
+wget -c -nv "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+chmod +x appimagetool-x86_64.AppImage
+./appimagetool-x86_64.AppImage AppDir builddir/GridLock-x86_64.AppImage
 
 echo "Done!"

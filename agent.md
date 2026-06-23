@@ -46,11 +46,10 @@ If the compilation or tests fail, you must analyze the compiler error and attemp
 
 [Section: AppImage Packaging & CI]
 <Description>
-GridLock relies on standard Linux deployment mechanisms tailored for modern display servers.
+GridLock relies on CQtDeployer for Linux deployment due to its robust parsing of Qt6 and native Wayland modules.
 </Description>
 
 <Directives>
-- When modifying the deployment pipeline, `qmake6` MUST be explicitly passed to the deployment engine to prevent fallback to Qt5 modules.
-- The Wayland QPA (`libqwayland-generic.so`, `libqwayland-egl.so`) MUST be forcefully bundled via `EXTRA_QT_PLUGINS="wayland;xcb;vulkan"` to ensure the native Wayland compositor is engaged upon execution.
-- If dependencies related to `process_vm_readv` or `lldb-dap` fail to resolve at runtime, inspect the AppImage mount for stripped dynamically linked libraries.
+- When modifying the deployment pipeline, `CQtDeployer` MUST be used instead of `linuxdeploy`.
+- Wayland and Vulkan plugins MUST be forcefully bundled via `-ext "wayland,xcb,vulkan"`.
 </Directives>
