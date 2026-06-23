@@ -19,6 +19,7 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Lazy-Loading DAP Variable Trees:** Dynamically explore complex structs, pointers, and arrays efficiently without locking the UI.
 * **Integrated HPC Console & Hex Dump:** Seamlessly read raw memory via base64 DAP chunks, with 1:1 hardware-to-UI Hex dump synchronization.
 * **Vim-Style Chorded Shortcuts:** Leverage advanced command patterns (`Alt+B`, `Ctrl+W`) tailored for rapid iteration without mouse dependency.
+* **Project-Scoped Configuration (`.gridlock/`):** Each project maintains its own `.gridlock/settings.toml` to store execution parameters (binary path, rank count, MPI arguments) and `.gridlock/workspace.toml` for layout state. This isolates project configuration from the global environment and the user's home directory.
 * **TOML Session Persistence:** Save and instantly restore robust HPC debug profiles (binary arguments, OpenMPI rank counts, watchlists).
 * **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
 * **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
@@ -62,15 +63,16 @@ sudo meson install -C build
 
 ### Testing with Docker
 
-Native Test-Driven Development (TDD) may fail on your host OS due to kernel hardening (e.g., blocked `ptrace` permissions) or missing dependencies like `lldb-dap`. 
+> [!IMPORTANT]
+> **`docker-compose up` is the officially supported method for running the test suite.** Host kernel hardening (e.g., `ptrace` scope restrictions, missing `seccomp` overrides) will cause tests that rely on `ptrace` and `process_vm_readv` to fail silently or be blocked outright. Do not rely on `meson test` alone to validate the full pipeline.
 
-The officially supported way to run the test suite in an isolated, privileged sandbox is using Docker Compose:
+To run the full test suite in a correctly provisioned sandbox:
 
 ```bash
 docker-compose up --build
 ```
 
-This spins up a secure environment with `SYS_PTRACE` capabilities and `seccomp:unconfined` to ensure the DAP adapter and memory readers function reliably.
+The Docker environment is configured with `SYS_PTRACE` capabilities and `seccomp:unconfined`, ensuring that the LLDB/DAP adapter, `process_vm_readv` memory extraction, and `ptrace`-based syscall interception all function as they would on a permissive development kernel.
 
 ---
 
@@ -78,14 +80,14 @@ This spins up a secure environment with `SYS_PTRACE` capabilities and `seccomp:u
 
 GridLock's development is broken into iterative phases. For a detailed breakdown, see [ROADMAP.md](ROADMAP.md).
 
-* **Phase 1-4:** (Complete) Stability, UI Foundations, Advanced Debugger, IDE Experience
-* **Phase 5:** (Complete) The Polyglot Core (DAP Refactor)
-* **Phase 6:** (In Progress) Zero-Copy Memory & WIP Visualizer
-* **Phase 7:** Cross-Language Variable Inspector
-* **Phase 8:** Alternative Debugger Backends
-* **Phase 9:** The Plugin Marketplace
-* **Phase 10:** Advanced Cluster Lifecycle & Detached Sessions
-* **Phase 11:** Deployment & AppImage Packaging
+* **Phase 1–5:** ✅ Complete — Stability, UI, Advanced Debugger, IDE Experience, DAP Refactor
+* **Phase 6:** ✅ Complete — Zero-Copy Memory Engine & Vulkan Visualizer (deferred to post-AppImage)
+* **Phase 6.5:** ✅ Complete — Workspace Configuration (`.gridlock/`) & Dockerized TDD Pipeline
+* **Phase 11:** 🔄 **Active** — Deployment & AppImage Packaging
+* **Phase 7:** Upcoming — Cross-Language Variable Inspector
+* **Phase 8:** Upcoming — Alternative Debugger Backends
+* **Phase 9:** Upcoming — The Plugin Marketplace
+* **Phase 10:** Upcoming — Advanced Cluster Lifecycle & Detached Sessions
 
 ---
 

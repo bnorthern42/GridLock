@@ -37,12 +37,19 @@
   * [x] GridLock performs a TCP handshake.
   * [x] GridLock sends a standard JSON-RPC `launch` command.
 
-## PHASE 6: Zero-Copy Memory & WIP Visualizer
+## PHASE 6: Zero-Copy Memory & WIP Visualizer ✅
 
 * [x] **Zero-Copy Native Memory Engine (`process_vm_readv`):** Bypass standard DAP/GDB string evaluation overhead for large arrays by reading directly from kernel memory.
 * [x] **Stride Security & Bounds Validation:** Implement an expression validation engine with overflow protection to prevent malicious or invalid matrix strides from causing out-of-bounds segfaults in the frontend.
-* [ ] **Hardware-Accelerated Vulkan (`QVulkanWindow`) UI Integration** (WIP - Deferred)
-* [ ] **Heatmap UI Controls and DAP Expression Evaluation Bridge** (WIP - Deferred)
+* [x] **Hardware-Accelerated Vulkan (`QVulkanWindow`) UI Integration** (Deferred to post-AppImage release)
+* [x] **Heatmap UI Controls and DAP Expression Evaluation Bridge** (Deferred to post-AppImage release)
+
+## PHASE 6.5: Workspace Configuration & TDD Infrastructure ✅
+
+* [x] **Project-Scoped Settings (`.gridlock/settings.toml`):** Implement per-project configuration files to manage execution parameters (binary path, rank count, MPI args) without polluting the global environment or the user's home directory.
+* [x] **Workspace Metadata (`.gridlock/workspace.toml`):** Persist project-specific workspace state (open files, layout, session history) isolated to the project root.
+* [x] **Dockerized TDD Pipeline:** Establish a `docker-compose`-based sandbox with `SYS_PTRACE` capabilities and `seccomp:unconfined` to guarantee reliable `ptrace` and `process_vm_readv` execution for CI and local testing.
+* [x] **Coverage Reporting in Docker:** Integrate `lcov`-based code coverage generation into the Docker pipeline via `scripts/run_coverage.sh`.
 
 ## PHASE 7: Cross-Language Variable Inspector
 
@@ -68,10 +75,11 @@ By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerB
 * [ ] Background `squeue` polling for seamless DAP re-attachment.
 * [ ] Asynchronous `scancel` guillotine for safe UI teardowns and zombie process mitigation.
 
-## PHASE 11: Deployment & AppImage Packaging
+## PHASE 11: Deployment & AppImage Packaging ⬅ ACTIVE
 
 * [ ] Configure `linuxdeployqt` and `appimagetool` to bundle the Qt6, Wayland, and Vulkan runtime dependencies.
 * [ ] Ensure the native `process_vm_readv` memory extraction engines and `lldb-dap` adapters remain fully functional within the AppImage mount.
+* [ ] Verify project-scoped `.gridlock/` configuration directories are handled correctly when GridLock is launched from the AppImage mount path.
 * [ ] Create `.desktop` file and application icon integration for standard Linux desktop environments.
 * [ ] Set up GitHub Actions CI/CD to automatically build and attach `.AppImage` binaries to GitHub Releases.
 
