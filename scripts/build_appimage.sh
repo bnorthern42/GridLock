@@ -3,7 +3,7 @@ set -euo pipefail
 
 export APPIMAGE_EXTRACT_AND_RUN=1
 export NO_STRIP=1
-export VERSION="0.4.6"
+export VERSION="0.4.7"
 
 APP_NAME="GridLock"
 BIN_NAME="gridlock"

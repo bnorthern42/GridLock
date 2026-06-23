@@ -1,6 +1,6 @@
 # Architecture of Advanced Features
 
-GridLock v0.4.6 introduces several advanced debugging and memory analysis features. This document outlines the internal mechanics and GDB/MI orchestration required to implement these capabilities without blocking the primary UI thread.
+GridLock v0.4.7 introduces several advanced debugging and memory analysis features. This document outlines the internal mechanics and GDB/MI orchestration required to implement these capabilities without blocking the primary UI thread.
 
 ## Deadlock Detector (Barrier/Wait Analyzer)
 

@@ -1,4 +1,4 @@
-# GridLock - High-Performance MPI Graphical Debugger (v0.4.6)
+# GridLock - High-Performance MPI Graphical Debugger (v0.4.7)
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
