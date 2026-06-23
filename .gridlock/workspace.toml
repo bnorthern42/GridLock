@@ -1,2 +1,5 @@
+[breakpoints]
+'tests/mpi_mm.c' = [ 62 ]
+
 [workspace]
 watchExpressions = []

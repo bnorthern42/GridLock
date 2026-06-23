@@ -25,7 +25,7 @@
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "docks/VariablesDockWidget.hpp"
-#include "docks/DeadlockDockWidget.hpp"
+#include "widgets/MpiDiagnosticsWidget.hpp"
 #include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "DomainHeatmapWidget.hpp"
 #include <QAction>
@@ -136,11 +136,11 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
 
           if (!m_deadlockAnalyzer) {
               m_deadlockAnalyzer = new gridlock::core::DeadlockAnalyzer(gdbCoord, this);
-              if (m_deadlockDockWidget) {
+              if (m_mpiDiagnosticsWidget) {
                   connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected,
-                          m_deadlockDockWidget, &DeadlockDockWidget::onDeadlockDetected);
+                          m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onDeadlockDetected);
                   connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared,
-                          m_deadlockDockWidget, &DeadlockDockWidget::onRankCleared);
+                          m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onRankCleared);
               }
           }
       }
@@ -417,11 +417,6 @@ void MainWindow::setupDocks() {
   m_variablesDockWidget = new VariablesDockWidget(this);
   // It's no longer a dock widget, it will be added to the splitter
 
-  m_deadlockDockWidget = new DeadlockDockWidget(this);
-  addDockWidget(Qt::RightDockWidgetArea, m_deadlockDockWidget);
-
-  connect(m_deadlockDockWidget, &DeadlockDockWidget::jumpToFrameRequested, this, &MainWindow::onRankSelected);
-
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked, this, [this](const QString& filePath) {
       if (m_editorTabManager) {
           loadSourceFile(filePath); // Actually loadSourceFile does everything needed, or we can just call m_editorTabManager->openFile(filePath) and m_lspCoordinator
@@ -556,8 +551,12 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");
+  m_mpiDiagnosticsWidget = new MpiDiagnosticsWidget(m_bottomTabs);
+  connect(m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::jumpToFrameRequested, this, &MainWindow::onRankSelected);
+
   m_bottomTabs->addTab(m_registerView, "Registers");
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
+  m_bottomTabs->addTab(m_mpiDiagnosticsWidget, "MPI Diagnostics");
   // TODO (Phase 7): Re-enable Vulkan Heatmap once DAP data pipeline is stabilized
   // m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
 

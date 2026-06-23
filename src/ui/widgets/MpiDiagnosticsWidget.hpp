@@ -1,5 +1,6 @@
 #pragma once
-#include <QDockWidget>
+#include <QWidget>
+#include <QTabWidget>
 #include <QListWidget>
 
 namespace gridlock::core {
@@ -8,10 +9,10 @@ struct DeadlockInfo;
 
 namespace gridlock::ui {
 
-class DeadlockDockWidget : public QDockWidget {
+class MpiDiagnosticsWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit DeadlockDockWidget(QWidget* parent = nullptr);
+    explicit MpiDiagnosticsWidget(QWidget* parent = nullptr);
 
 signals:
     void jumpToFrameRequested(int rankId);
@@ -24,7 +25,8 @@ private slots:
     void onItemDoubleClicked(QListWidgetItem* item);
 
 private:
-    QListWidget* m_listWidget;
+    QTabWidget* m_tabWidget;
+    QListWidget* m_deadlockList;
 };
 
 } // namespace gridlock::ui

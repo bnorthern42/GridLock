@@ -41,7 +41,7 @@ class RegisterView;
 class SpackManager;
 class ExpressionEvaluatorWidget;
 class DomainHeatmapWidget;
-class DeadlockDockWidget;
+class MpiDiagnosticsWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -65,7 +65,7 @@ public:
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
     DomainHeatmapWidget* domainHeatmapWidget() const { return m_domainHeatmapWidget; }
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
-    DeadlockDockWidget* deadlockDockWidget() const { return m_deadlockDockWidget; }
+    MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
 
@@ -111,7 +111,7 @@ private:
     ExpressionEvaluatorWidget* m_expressionEvaluatorWidget = nullptr;
     DomainHeatmapWidget* m_domainHeatmapWidget = nullptr;
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
-    DeadlockDockWidget* m_deadlockDockWidget = nullptr;
+    MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
     QAction* m_runAction = nullptr;
 
