@@ -4,6 +4,8 @@
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QtConcurrent>
+#include <QFuture>
 #include "core/managers/ConfigManager.hpp"
 #include "NativeMemoryReader.hpp"
 
@@ -434,8 +436,12 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                             int count = req.rows * req.cols;
                             qDebug() << "[Heatmap] LLDB Raw Evaluate Response:" << result;
                             qDebug() << "[Heatmap] Parsed Target Hex Address:" << match.captured(1);
-                            std::vector<double> doubles = NativeMemoryReader::readDoubles(m_rankToPid[req.rankId], baseAddress, count);
-                            emit heatmapDataReady(doubles, req.rows, req.cols);
+                            QtConcurrent::run([this, pid = m_rankToPid[req.rankId], baseAddress, count = req.rows * req.cols, rows = req.rows, cols = req.cols]() {
+                                try {
+                                    std::vector<double> doubles = NativeMemoryReader::readDoubles(pid, baseAddress, count);
+                                    emit heatmapDataReady(doubles, rows, cols);
+                                } catch (...) {}
+                            });
                         } catch (const std::exception& e) {
                             qWarning() << "Heatmap memory read failed:" << e.what();
                         }

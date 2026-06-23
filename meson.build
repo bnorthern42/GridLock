@@ -5,7 +5,7 @@ project('GridLock', 'cpp',
 
 # Dependencies
 qt6 = import('qt6')
-qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets'])
+qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 vulkan_dep = dependency('vulkan')
 
