@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcovr \
     lcov \
     git \
+    mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user matching the original setup
