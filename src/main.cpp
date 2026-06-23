@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
     format.setVersion(4, 1);
     format.setProfile(QSurfaceFormat::CoreProfile);
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-    format.setSwapInterval(1); // CRITICAL: Forces VSync
+    format.setSwapInterval(0); // temporarily disabled for rendering latency profiling
     QSurfaceFormat::setDefaultFormat(format);
 
     QApplication app(argc, argv);
