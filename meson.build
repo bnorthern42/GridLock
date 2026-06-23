@@ -1,5 +1,5 @@
 project('GridLock', 'cpp',
-  version : '0.4.5',
+  version : '0.4.6',
   default_options : ['warning_level=3', 'cpp_std=c++23'],
   subproject_dir : 'external')
 
@@ -688,6 +688,36 @@ gridlock_obfuscator_tests = executable('gridlock_obfuscator_tests',
 )
 
 test('obfuscator_tests', gridlock_obfuscator_tests)
+
+advanced_features_test_src = [
+  'tests/test_advanced_features.cpp',
+  'src/core/hpc/DeadlockAnalyzer.cpp',
+  'src/core/hpc/GdbRankCoordinator.cpp',
+  'src/core/models/VariableTreeModel.cpp',
+  'src/core/managers/ConfigManager.cpp'
+]
+
+advanced_features_test_moc_headers = [
+  'tests/test_advanced_features.hpp',
+  'src/core/hpc/DeadlockAnalyzer.hpp',
+  'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/models/VariableTreeModel.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
+]
+
+processed_advanced_features_test_files = qt6.compile_moc(
+  headers : advanced_features_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_advanced_features_tests = executable('gridlock_advanced_features_tests',
+  advanced_features_test_src,
+  processed_advanced_features_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('advanced_features_tests', gridlock_advanced_features_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',

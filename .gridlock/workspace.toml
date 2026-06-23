@@ -1,5 +1,5 @@
 [breakpoints]
-'tests/mpi_mm.c' = [ 62, 114 ]
+'tests/mpi_mm.c' = [ 114, 62 ]
 
 [workspace]
 watchExpressions = []
