@@ -42,4 +42,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GridLock-AppImage
-          path: builddir/GridLock-*.AppImage
+          path: GridLock-*.AppImage

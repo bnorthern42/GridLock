@@ -8,7 +8,8 @@ echo "Building GridLock..."
 meson setup builddir --prefix=/usr --buildtype=release
 
 echo "Installing into AppDir..."
-DESTDIR=AppDir ninja -C builddir install
+# FIX: Force DESTDIR to be absolute so it stages in the repository root, not inside builddir/
+DESTDIR="$(pwd)/AppDir" ninja -C builddir install
 
 echo "Setting up desktop file and icon..."
 mkdir -p AppDir/usr/share/applications
