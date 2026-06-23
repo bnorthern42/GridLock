@@ -356,7 +356,6 @@ void DomainHeatmapRenderer::uploadData(const std::vector<double>& matrix, int ro
     m_minVal = min_val;
     m_maxVal = max_val;
     m_needsUpload = true;
-    m_window->requestUpdate();
 }
 
 void DomainHeatmapRenderer::startNextFrame() {
