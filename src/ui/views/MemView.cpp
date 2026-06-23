@@ -2,6 +2,7 @@
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/hpc/MemoryExporter.hpp"
 #include <QFileDialog>
+#include <QMessageBox>
 #include <QtConcurrent/QtConcurrent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -10,6 +11,7 @@
 #include <QSpinBox>
 #include <QPushButton>
 #include <QPlainTextEdit>
+#include <QComboBox>
 #include <QFont>
 #include <QPalette>
 
@@ -29,6 +31,13 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_lengthBox->setRange(1, 4096);
     m_lengthBox->setValue(256);
     topLayout->addWidget(m_lengthBox);
+
+    topLayout->addWidget(new QLabel("Type:"));
+    m_typeBox = new QComboBox();
+    m_typeBox->addItem("Int32");
+    m_typeBox->addItem("Float");
+    m_typeBox->addItem("Double");
+    topLayout->addWidget(m_typeBox);
 
     m_readBtn = new QPushButton("Read Memory");
     topLayout->addWidget(m_readBtn);
@@ -66,6 +75,7 @@ void MemView::onReadClicked() {
 }
 
 void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
+    m_lastRawData = QByteArray::fromHex(hexContents.toLatin1());
     m_dumpEdit->setPlainText(formatHexDump(beginAddress, hexContents));
 }
 
@@ -79,6 +89,7 @@ void MemView::setMemoryData(const QString& address, const QByteArray& data) {
 
 void MemView::onExportMatrixClicked() {
     if (m_lastRawData.isEmpty()) {
+        QMessageBox::warning(this, "No Data", "No memory data available to export. Please read memory first.");
         return;
     }
 
@@ -86,12 +97,24 @@ void MemView::onExportMatrixClicked() {
     if (fileName.isEmpty()) return;
 
     std::vector<uint8_t> buffer(m_lastRawData.begin(), m_lastRawData.end());
+    int typeIndex = m_typeBox->currentIndex();
 
-    QtConcurrent::run([buffer, fileName]() {
+    QtConcurrent::run([buffer, fileName, typeIndex]() {
         if (fileName.endsWith(".csv", Qt::CaseInsensitive)) {
-            int cols = buffer.size() / sizeof(float);
+            gridlock::core::hpc::DataType type = gridlock::core::hpc::DataType::Int32;
+            int typeSize = sizeof(int32_t);
+            
+            if (typeIndex == 1) {
+                type = gridlock::core::hpc::DataType::Float;
+                typeSize = sizeof(float);
+            } else if (typeIndex == 2) {
+                type = gridlock::core::hpc::DataType::Double;
+                typeSize = sizeof(double);
+            }
+            
+            int cols = buffer.size() / typeSize;
             if (cols == 0) cols = 1;
-            gridlock::core::hpc::MemoryExporter::exportToCsv(fileName.toStdString(), buffer, 1, cols, gridlock::core::hpc::DataType::Float);
+            gridlock::core::hpc::MemoryExporter::exportToCsv(fileName.toStdString(), buffer, 1, cols, type);
         } else {
             gridlock::core::hpc::MemoryExporter::exportToBinary(fileName.toStdString(), buffer);
         }

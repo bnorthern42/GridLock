@@ -6,6 +6,7 @@ class QLineEdit;
 class QSpinBox;
 class QPushButton;
 class QPlainTextEdit;
+class QComboBox;
 
 namespace gridlock::ui {
 
@@ -32,6 +33,7 @@ private:
     QSpinBox* m_lengthBox;
     QPushButton* m_readBtn;
     QPushButton* m_exportBtn;
+    QComboBox* m_typeBox;
     QPlainTextEdit* m_dumpEdit;
     QByteArray m_lastRawData;
 };
