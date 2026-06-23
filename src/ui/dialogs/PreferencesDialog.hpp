@@ -73,6 +73,7 @@ public:
   QString mpiExecutable() const;
   QString mpiArgs() const;
   int defaultRanks() const;
+  bool trapFpe() const;
   void loadFromSettings();
 
 private:
@@ -80,6 +81,7 @@ private:
   QLineEdit *m_mpiExecEdit = nullptr;
   QLineEdit *m_mpiArgsEdit = nullptr;
   QSpinBox *m_rankBox = nullptr;
+  QCheckBox *m_trapFpeCheck = nullptr;
 };
 
 /// HPC cluster / node configuration — hostsfile, env vars, affinity.

@@ -176,6 +176,14 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered,
                     gdbCoord, &gridlock::GdbRankCoordinator::sendCommand);
         }
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this, [this](int rankId, const QString& output) {
+            if (output.contains("reason=\"signal-received\"") && output.contains("signal-name=\"SIGFPE\"")) {
+                onRankSelected(rankId);
+                if (m_terminalDock) {
+                    m_terminalDock->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
+                }
+            }
+        });
         connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this, [this](int rankId, qint64 beginAddress, const QString &hexContents) {
           if (rankId == m_focusedRank && m_memView) {
             m_memView->setMemoryData(beginAddress, hexContents);

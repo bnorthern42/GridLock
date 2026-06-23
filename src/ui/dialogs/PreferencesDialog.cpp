@@ -258,6 +258,10 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
       tr("Default number of MPI ranks for debugger sessions (minimum 1)."));
   form->addRow(tr("Default Rank Count:"), m_rankBox);
 
+  m_trapFpeCheck = new QCheckBox(tr("Trap FPE (NaN/Overflow)"), this);
+  m_trapFpeCheck->setToolTip(tr("Automatically set GDB to catch floating-point traps."));
+  form->addRow(QString(), m_trapFpeCheck);
+
   auto *note = new QLabel(
       tr("<small style='color:#888;'>GDB must support the MI2 protocol "
          "(<code>--interpreter=mi2</code>).<br>"
@@ -275,6 +279,7 @@ QString DebuggerSettingsPage::mpiExecutable() const {
 }
 QString DebuggerSettingsPage::mpiArgs() const { return m_mpiArgsEdit->text(); }
 int DebuggerSettingsPage::defaultRanks() const { return m_rankBox->value(); }
+bool DebuggerSettingsPage::trapFpe() const { return m_trapFpeCheck->isChecked(); }
 
 void DebuggerSettingsPage::loadFromSettings() {
   const auto ds =
@@ -284,6 +289,7 @@ void DebuggerSettingsPage::loadFromSettings() {
   m_mpiExecEdit->setText(ds.mpiExecutable);
   m_mpiArgsEdit->setText(ds.mpiArgs);
   m_rankBox->setValue(ds.defaultRanks);
+  m_trapFpeCheck->setChecked(ds.trapFpe);
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -765,6 +771,7 @@ void PreferencesDialog::apply() {
   ds.mpiExecutable = m_debuggerPage->mpiExecutable();
   ds.mpiArgs = m_debuggerPage->mpiArgs();
   ds.defaultRanks = m_debuggerPage->defaultRanks();
+  ds.trapFpe = m_debuggerPage->trapFpe();
   gridlock::core::ConfigManager::instance().saveDebuggerSettings(ds);
 
   auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();

@@ -93,6 +93,7 @@ DebuggerSettings ConfigManager::getDebuggerSettings() const {
     ds.mpiExecutable = s.value("debugger/mpi_executable", "mpiexec").toString();
     ds.mpiArgs       = s.value("debugger/mpi_args",   "--oversubscribe").toString();
     ds.defaultRanks  = s.value("debugger/default_ranks", tomlRanks).toInt();
+    ds.trapFpe       = s.value("debugger/trap_fpe", false).toBool();
 
     // Safety clamp: reject non-positive values stored by an old/buggy write.
     if (ds.defaultRanks < 1) ds.defaultRanks = 1;
@@ -107,6 +108,7 @@ void ConfigManager::saveDebuggerSettings(const DebuggerSettings &ds) {
     s.setValue("debugger/mpi_args",       ds.mpiArgs);
     // Clamp before persisting so we never write an invalid value.
     s.setValue("debugger/default_ranks",  qMax(1, ds.defaultRanks));
+    s.setValue("debugger/trap_fpe",       ds.trapFpe);
     s.sync();
 }
 

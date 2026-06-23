@@ -15,6 +15,7 @@ struct DebuggerSettings {
     QString mpiExecutable = "mpiexec";
     QString mpiArgs       = "--oversubscribe";
     int     defaultRanks  = 2;
+    bool    trapFpe       = false;
 };
 
 /// HPC cluster / node configuration. Stored in QSettings under hpc/*.

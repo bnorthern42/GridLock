@@ -111,6 +111,7 @@ int main(int argc, char *argv[]) {
   /**************************** worker task
    * ************************************/
   if (taskid > MASTER) {
+    MPI_Barrier(MPI_COMM_WORLD);
     mtype = FROM_MASTER;
     MPI_Recv(&offset, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);
     MPI_Recv(&rows, 1, MPI_INT, MASTER, mtype, MPI_COMM_WORLD, &status);

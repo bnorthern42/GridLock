@@ -367,6 +367,7 @@ dap_commands_test_src = [
   'tests/test_dap_commands.cpp',
   'src/core/hpc/DapCoordinator.cpp',
   'src/core/hpc/NativeMemoryReader.cpp',
+  'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp'
@@ -375,6 +376,7 @@ dap_commands_test_src = [
 dap_commands_test_moc_headers = [
   'tests/test_dap_commands.hpp',
   'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp'
 ]

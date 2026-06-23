@@ -4,6 +4,7 @@
 #include "../../ui/MainWindow.hpp"
 #include "../../ui/views/SourceCodeView.hpp"
 #include "../hpc/DapCoordinator.hpp"
+#include "../managers/ConfigManager.hpp"
 
 namespace gridlock::core::commands {
 
@@ -13,6 +14,16 @@ LaunchCommand::LaunchCommand(gridlock::ui::MainWindow* mainWindow, const QString
 void LaunchCommand::execute() {
     if (m_mainWindow) {
         m_mainWindow->startDebuggingSession(m_binaryPath, m_ranks);
+
+        auto ds = gridlock::core::ConfigManager::instance().getDebuggerSettings();
+        if (ds.trapFpe) {
+            if (auto* coord = m_mainWindow->coordinator()) {
+                if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(coord)) {
+                    // Send to all ranks
+                    gdbCoord->sendCommand(-1, "-interpreter-exec console \"catch signal SIGFPE\"");
+                }
+            }
+        }
     }
 }
 
