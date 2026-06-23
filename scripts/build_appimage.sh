@@ -34,6 +34,6 @@ fi
 
 echo "Running linuxdeploy..."
 export QMAKE=/usr/bin/qmake6
-./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
+./linuxdeploy-x86_64.AppImage --appdir AppDir -e AppDir/usr/bin/gridlock -d AppDir/usr/share/applications/gridlock.desktop --plugin qt --output appimage
 
 echo "Done!"
