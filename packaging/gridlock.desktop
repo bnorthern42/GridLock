@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=GridLock
+Exec=gridlock
+Icon=gridlock
+Categories=Development;Debugger;
