@@ -24,6 +24,7 @@ src_files = [
   'src/core/hpc/LspCoordinator.cpp',
   'src/core/hpc/DeadlockAnalyzer.cpp',
   'src/ui/MainWindow.cpp',
+  'src/ui/widgets/CustomTitleBar.cpp',
   'src/ui/views/ServerRackView.cpp',
   'src/ui/views/SourceCodeView.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
@@ -64,6 +65,7 @@ moc_headers = [
   'src/core/hpc/DeadlockAnalyzer.hpp',
   'src/core/hpc/LspCoordinator.hpp',
   'src/ui/MainWindow.hpp',
+  'src/ui/widgets/CustomTitleBar.hpp',
   'src/ui/views/ServerRackView.hpp',
   'src/ui/views/SourceCodeView.hpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
@@ -177,6 +179,7 @@ test('lsp_tests', gridlock_lsp_tests)
 ui_test_src = [
   'tests/test_ui.cpp',
   'src/ui/MainWindow.cpp',
+  'src/ui/widgets/CustomTitleBar.cpp',
   'src/ui/views/SourceCodeView.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
   'src/ui/EditorTabManager.cpp',
@@ -216,6 +219,7 @@ ui_test_src = [
 ui_test_moc_headers = [
   'tests/test_ui.hpp',
   'src/ui/MainWindow.hpp',
+  'src/ui/widgets/CustomTitleBar.hpp',
   'src/ui/views/SourceCodeView.hpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
   'src/ui/EditorTabManager.hpp',
