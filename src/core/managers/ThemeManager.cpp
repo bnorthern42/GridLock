@@ -371,28 +371,10 @@ QListWidget[role="sidebar"]::item:hover:!selected {
 }
 
 /* ── Buttons ── */
-QPushButton {
-    background-color: #313244;
-    color: #cdd6f4;
-    border: none;
-    border-radius: 5px;
-    padding: 6px 14px;
-    min-width: 64px;
-    font-weight: 500;
-}
-
-QPushButton:hover {
-    background-color: #45475a;
-}
-
-QPushButton:pressed {
-    background-color: #585b70;
-}
-
-QPushButton:disabled {
-    color: #45475a;
-    background-color: #313244;
-}
+QPushButton { background-color: #45475a; color: #cdd6f4; border: 1px solid #313244; border-radius: 4px; padding: 6px 12px; outline: none; }
+QPushButton:hover { background-color: #585b70; border: 1px solid #cba6f7; }
+QPushButton:pressed { background-color: #313244; padding-top: 7px; padding-left: 13px; padding-bottom: 5px; padding-right: 11px; }
+QPushButton:disabled { background-color: #181825; color: #6c7086; border: 1px solid #1e1e2e; }
 
 /* Primary action buttons — object name "primaryBtn" */
 QPushButton#primaryBtn {
