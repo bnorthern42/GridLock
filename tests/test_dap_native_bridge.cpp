@@ -76,7 +76,7 @@ void TestDapNativeBridge::testRoutingLogic() {
     QCOMPARE(args.at(1).toString(), addressStr);
     
     QByteArray data = args.at(2).toByteArray();
-    QCOMPARE(data.size(), 2000 * sizeof(double));
+    QCOMPARE(static_cast<size_t>(data.size()), 2000 * sizeof(double));
     
     const double* returnedDoubles = reinterpret_cast<const double*>(data.constData());
     QCOMPARE(returnedDoubles[0], 3.14);

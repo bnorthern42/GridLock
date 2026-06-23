@@ -36,7 +36,7 @@ public:
         m_processes[rankId]) {
       return m_processes[rankId]->state;
     }
-    RankState st;
+    RankState st{};
     st.currentState = "offline";
     return st;
   }

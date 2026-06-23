@@ -43,5 +43,8 @@ QTEST_GUILESS_MAIN(TestDapCommands)
 
 #include "../src/ui/MainWindow.hpp"
 namespace gridlock::ui {
-    void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {}
+    void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
+        Q_UNUSED(binaryPath);
+        Q_UNUSED(ranks);
+    }
 }

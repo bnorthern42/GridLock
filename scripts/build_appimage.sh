@@ -33,6 +33,7 @@ if [ ! -f linuxdeploy-plugin-qt-x86_64.AppImage ]; then
 fi
 
 echo "Running linuxdeploy..."
+export QMAKE=/usr/bin/qmake6
 ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage
 
 echo "Done!"

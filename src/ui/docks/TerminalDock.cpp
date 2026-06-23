@@ -9,6 +9,7 @@ namespace gridlock::ui {
 TerminalDock::TerminalDock(const QString& title, QWidget *parent) 
     : QWidget(parent) 
 {
+    Q_UNUSED(title);
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
