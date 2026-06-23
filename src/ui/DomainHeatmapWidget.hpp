@@ -31,6 +31,7 @@ public:
     ~DomainHeatmapWidget() override;
 
     void loadData(const std::vector<double>& rawData, int width, int height, uintptr_t baseAddress = 0);
+    void loadData(const std::vector<double>& rawData, int width, int height, float min_val, float max_val);
     void setDifferentialMode(bool enabled);
     void setVulkanInstance(QVulkanInstance *inst);
 

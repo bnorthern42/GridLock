@@ -134,6 +134,23 @@ void DomainHeatmapWidget::loadData(const std::vector<double>& rawData, int width
     m_vulkanWindow->loadData(m_currentData, width, height, m_dataMin, m_dataMax);
 }
 
+void DomainHeatmapWidget::loadData(const std::vector<double>& rawData, int width, int height, float min_val, float max_val) {
+    m_dataWidth = width;
+    m_dataHeight = height;
+    m_currentData = rawData;
+    m_dataMin = min_val;
+    m_dataMax = max_val;
+    
+    // We set baseAddress to 0 since it's not provided in this overload
+    m_baseAddress = 0;
+    
+    if (!m_differentialMode) {
+        m_previousData = rawData;
+    }
+    
+    m_vulkanWindow->loadData(m_currentData, width, height, m_dataMin, m_dataMax);
+}
+
 void DomainHeatmapWidget::mousePressEvent(QMouseEvent *event) {
     mouseMoveEvent(event);
 }

@@ -52,6 +52,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolTip>
+#include <algorithm>
 
 namespace gridlock::ui {
 
@@ -124,8 +125,16 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
               }
           });
           
-          connect(dapCoord, &DapCoordinator::heatmapDataReady, m_domainHeatmapWidget, [this](const std::vector<double>& data, int rows, int cols) {
-              m_domainHeatmapWidget->loadData(data, cols, rows);
+          connect(dapCoord, &DapCoordinator::heatmapDataReady, this, [this](const std::vector<double>& data, int rows, int cols) {
+              if (data.empty()) return;
+              
+              // Find min and max for Vulkan color normalization
+              auto [min_it, max_it] = std::minmax_element(data.begin(), data.end());
+              float min_val = static_cast<float>(*min_it);
+              float max_val = static_cast<float>(*max_it);
+              
+              // Map cols to width, rows to height
+              m_domainHeatmapWidget->loadData(data, cols, rows, min_val, max_val);
           });
       }
   }
@@ -545,7 +554,6 @@ void MainWindow::setupDocks() {
   m_registerView = new RegisterView(m_bottomTabs);
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
   m_domainHeatmapWidget = new DomainHeatmapWidget(m_bottomTabs);
-  m_domainHeatmapWidget->hide();
 
   connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
     if (m_coordinator) {
@@ -565,8 +573,7 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_registerView, "Registers");
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
   m_bottomTabs->addTab(m_mpiDiagnosticsWidget, "MPI Diagnostics");
-  // TODO (Phase 7): Re-enable Vulkan Heatmap once DAP data pipeline is stabilized
-  // m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
+  m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);
