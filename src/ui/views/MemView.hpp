@@ -23,6 +23,7 @@ signals:
 
 private slots:
     void onReadClicked();
+    void onExportMatrixClicked();
 
 private:
     QString formatHexDump(qint64 startAddress, const QString& hexData);
@@ -30,7 +31,9 @@ private:
     QLineEdit* m_addressEdit;
     QSpinBox* m_lengthBox;
     QPushButton* m_readBtn;
+    QPushButton* m_exportBtn;
     QPlainTextEdit* m_dumpEdit;
+    QByteArray m_lastRawData;
 };
 
 } // namespace gridlock::ui

@@ -1,5 +1,8 @@
 #include "MemView.hpp"
 #include "../../core/managers/ConfigManager.hpp"
+#include "../../core/hpc/MemoryExporter.hpp"
+#include <QFileDialog>
+#include <QtConcurrent/QtConcurrent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -29,6 +32,10 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
 
     m_readBtn = new QPushButton("Read Memory");
     topLayout->addWidget(m_readBtn);
+
+    m_exportBtn = new QPushButton("Export Matrix");
+    topLayout->addWidget(m_exportBtn);
+
     topLayout->addStretch();
 
     mainLayout->addLayout(topLayout);
@@ -48,6 +55,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     mainLayout->addWidget(m_dumpEdit);
 
     connect(m_readBtn, &QPushButton::clicked, this, &MemView::onReadClicked);
+    connect(m_exportBtn, &QPushButton::clicked, this, &MemView::onExportMatrixClicked);
 }
 
 void MemView::onReadClicked() {
@@ -65,7 +73,29 @@ void MemView::setMemoryData(const QString& address, const QByteArray& data) {
     bool ok;
     qint64 startAddr = address.toULongLong(&ok, 16);
     if (!ok) startAddr = 0;
+    m_lastRawData = data;
     setMemoryData(startAddr, data.toHex());
+}
+
+void MemView::onExportMatrixClicked() {
+    if (m_lastRawData.isEmpty()) {
+        return;
+    }
+
+    QString fileName = QFileDialog::getSaveFileName(this, "Export Memory Matrix", "", "CSV Files (*.csv);;Binary Files (*.bin);;All Files (*)");
+    if (fileName.isEmpty()) return;
+
+    std::vector<uint8_t> buffer(m_lastRawData.begin(), m_lastRawData.end());
+
+    QtConcurrent::run([buffer, fileName]() {
+        if (fileName.endsWith(".csv", Qt::CaseInsensitive)) {
+            int cols = buffer.size() / sizeof(float);
+            if (cols == 0) cols = 1;
+            gridlock::core::hpc::MemoryExporter::exportToCsv(fileName.toStdString(), buffer, 1, cols, gridlock::core::hpc::DataType::Float);
+        } else {
+            gridlock::core::hpc::MemoryExporter::exportToBinary(fileName.toStdString(), buffer);
+        }
+    });
 }
 
 QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {

@@ -19,6 +19,7 @@ src_files = [
   'src/core/hpc/DapCoordinator.cpp',
   'src/core/hpc/MiSanitizer.cpp',
   'src/core/hpc/TelemetryObfuscator.cpp',
+  'src/core/hpc/MemoryExporter.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/hpc/LspCoordinator.cpp',
   'src/core/hpc/DeadlockAnalyzer.cpp',
@@ -194,6 +195,7 @@ ui_test_src = [
   'src/core/hpc/DeadlockAnalyzer.cpp',
   'src/core/hpc/DapCoordinator.cpp',
   'src/core/hpc/NativeMemoryReader.cpp',
+  'src/core/hpc/MemoryExporter.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/hpc/LspCoordinator.cpp',
   'src/ui/views/MemView.cpp',
@@ -718,6 +720,29 @@ gridlock_advanced_features_tests = executable('gridlock_advanced_features_tests'
 )
 
 test('advanced_features_tests', gridlock_advanced_features_tests)
+
+memory_export_test_src = [
+  'tests/test_memory_export.cpp',
+  'src/core/hpc/MemoryExporter.cpp'
+]
+
+memory_export_test_moc_headers = [
+  'tests/test_memory_export.hpp'
+]
+
+processed_memory_export_test_files = qt6.compile_moc(
+  headers : memory_export_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_memory_export_tests = executable('gridlock_memory_export_tests',
+  memory_export_test_src,
+  processed_memory_export_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('memory_export_tests', gridlock_memory_export_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
