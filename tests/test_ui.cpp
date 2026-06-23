@@ -224,7 +224,7 @@ void TestMainWindowUI::testGutterBreakpointPropagation() {
 
     int signalFired = 0;
     int signaledLine = -1;
-    QObject::connect(&view, &gridlock::ui::SourceCodeView::breakpointToggled, [&](const QString& /*file*/, int line, bool isSet, const QString& condition) {
+    QObject::connect(&view, &gridlock::ui::SourceCodeView::breakpointToggled, [&](const QString& /*file*/, int line, bool /*isSet*/, const QString& /*condition*/) {
         signalFired++;
         signaledLine = line;
     });
