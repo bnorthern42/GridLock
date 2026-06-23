@@ -1,5 +1,6 @@
 #include "ServerRackView.hpp"
-#include "../../core/managers/ThemeManager.hpp"
+#include <QApplication>
+#include <QPalette>
 #include <QPainter>
 #include <QPainterPath>
 #include <QStyledItemDelegate>
@@ -26,13 +27,13 @@ public:
 
         // Background
         if (isHovered) {
-            painter->setBrush(QColor(ThemeManager::SURFACE1));
+            painter->setBrush(QApplication::palette().color(QPalette::AlternateBase));
         } else {
-            painter->setBrush(QColor(ThemeManager::SURFACE0));
+            painter->setBrush(QApplication::palette().color(QPalette::Base));
         }
 
         // Border
-        QPen borderPen(isSelected ? QColor(ThemeManager::MAUVE) : QColor(ThemeManager::SURFACE1));
+        QPen borderPen(isSelected ? QApplication::palette().color(QPalette::Highlight) : QApplication::palette().color(QPalette::AlternateBase));
         borderPen.setWidth(isSelected ? 2 : 1);
         painter->setPen(borderPen);
         painter->drawPath(path);
@@ -47,18 +48,18 @@ public:
         QFont monoFont("monospace", 10, QFont::Bold);
         monoFont.setStyleHint(QFont::Monospace);
         painter->setFont(monoFont);
-        painter->setPen(QColor(ThemeManager::TEXT));
+        painter->setPen(QApplication::palette().color(QPalette::Text));
         QString titleStr = QString("R[%1] %2ms").arg(rankId).arg(runTime);
         painter->drawText(rect.left() + 15, rect.center().y() + 4, titleStr);
 
         // LED
         QColor ledColor;
         if (status == "running") {
-            ledColor = QColor(ThemeManager::GREEN);
+            ledColor = QColor(46, 204, 113); // Green
         } else if (status == "stopped") {
-            ledColor = QColor(ThemeManager::YELLOW);
+            ledColor = QColor(241, 196, 15); // Yellow
         } else {
-            ledColor = QColor(ThemeManager::SURFACE1);
+            ledColor = QApplication::palette().color(QPalette::AlternateBase);
         }
 
         painter->setBrush(ledColor);
@@ -83,8 +84,10 @@ ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     
-    // Apply Mantle background color as requested
-    setStyleSheet(QString("QListWidget { background-color: #181825; border: none; }"));
+    // Apply background via palette
+    QPalette p = palette();
+    p.setColor(QPalette::Base, QApplication::palette().color(QPalette::Base));
+    setPalette(p);
 
     setItemDelegate(new ServerNodeDelegate(this, this));
 

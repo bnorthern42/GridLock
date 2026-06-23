@@ -7,6 +7,7 @@
 #include "PreferencesDialog.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/DocsetManager.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -53,11 +54,20 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
   form->addRow(separator);
 
   m_themeCombo = new QComboBox(this);
-  m_themeCombo->addItems(
-      {tr("System Default"), tr("Breeze Dark"), tr("Breeze Light")});
-  m_themeCombo->setToolTip(tr(
-      "Select the application color theme. Changes are applied immediately."));
+  m_themeCombo->addItems(gridlock::core::managers::ThemeManager::instance().getAvailableThemes());
+  m_themeCombo->setToolTip(tr("Select the application color theme. Changes are applied immediately."));
   form->addRow(tr("Color Theme:"), m_themeCombo);
+
+  m_darkModeCheck = new QCheckBox(tr("Enable Dark Mode"), this);
+  form->addRow(QString(), m_darkModeCheck);
+
+  connect(m_themeCombo, &QComboBox::currentTextChanged, this, [this](const QString& theme) {
+      gridlock::core::managers::ThemeManager::instance().setTheme(theme, m_darkModeCheck->isChecked());
+  });
+  
+  connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool checked) {
+      gridlock::core::managers::ThemeManager::instance().setTheme(m_themeCombo->currentText(), checked);
+  });
 
   auto *fontNote =
       new QLabel(tr("<small style='color:#888;'>Font settings follow the "
@@ -74,10 +84,19 @@ QString AppearanceSettingsPage::selectedTheme() const {
   return m_themeCombo->currentText();
 }
 
+bool AppearanceSettingsPage::isDarkMode() const {
+  return m_darkModeCheck->isChecked();
+}
+
 void AppearanceSettingsPage::loadFromSettings() {
   QSettings s("GridLock", "Debugger");
-  const QString theme =
-      s.value("appearance/theme", "System Default").toString();
+  const QString theme = s.value("appearance/theme", "Fusion").toString();
+  bool isDark = s.value("appearance/dark_mode", true).toBool();
+  
+  m_darkModeCheck->blockSignals(true);
+  m_darkModeCheck->setChecked(isDark);
+  m_darkModeCheck->blockSignals(false);
+
   int idx = m_themeCombo->findText(theme);
   if (idx >= 0)
     m_themeCombo->setCurrentIndex(idx);
@@ -753,6 +772,7 @@ void PreferencesDialog::apply() {
 
   // ── Appearance ──────────────────────────────────────────────────────
   s.setValue("appearance/theme", m_appearancePage->selectedTheme());
+  s.setValue("appearance/dark_mode", m_appearancePage->isDarkMode());
 
   // ── Editing ─────────────────────────────────────────────────────────
   s.setValue("editing/tab_width", m_editingPage->tabWidth());

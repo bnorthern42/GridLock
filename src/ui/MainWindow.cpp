@@ -18,7 +18,6 @@
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizardDialog.hpp"
-#include "widgets/CustomTitleBar.hpp"
 #include "docks/TerminalDock.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "../core/hpc/MockHpcBackend.hpp"
@@ -228,7 +227,6 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
 }
 
 void MainWindow::setupUi() {
-  setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
   setWindowTitle("GridLock - MPI Graphical Debugger");
   setWindowIcon(QIcon());
   resize(1440, 900);
@@ -238,18 +236,8 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::setupMenu() {
-  QWidget* topContainer = new QWidget(this);
-  QVBoxLayout* topLayout = new QVBoxLayout(topContainer);
-  topLayout->setContentsMargins(0, 0, 0, 0);
-  topLayout->setSpacing(0);
-  
-  auto* titleBar = new gridlock::ui::widgets::CustomTitleBar(this);
-  topLayout->addWidget(titleBar);
-  
   QMenuBar *menuBar = new QMenuBar(this);
-  topLayout->addWidget(menuBar);
-  
-  setMenuWidget(topContainer);
+  setMenuBar(menuBar);
 
   QMenu *fileMenu = menuBar->addMenu("&File");
   QAction *newAction = fileMenu->addAction("New Project...");

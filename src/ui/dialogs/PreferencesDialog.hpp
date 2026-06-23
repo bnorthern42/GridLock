@@ -22,10 +22,12 @@ public:
   explicit AppearanceSettingsPage(QWidget *parent = nullptr);
 
   QString selectedTheme() const;
+  bool isDarkMode() const;
   void loadFromSettings();
 
 private:
   QComboBox *m_themeCombo = nullptr;
+  QCheckBox *m_darkModeCheck = nullptr;
 };
 
 class EditingSettingsPage : public QWidget {
