@@ -18,6 +18,10 @@
 * [x] MemView: Hex dump viewer for raw pointers (similar to `mcu-debug/memview`).
 * [x] Register Viewer: Real-time tracking of CPU registers (EAX/RAX, RSP, etc.).
 * [x] Conditional Breakpoints: Add logic for hit counts and conditions.
+* [x] Floating-Point Exception (FPE) Trapper: Catch NaNs and Infinities.
+* [x] Deadlock Detector (Barrier/Wait Analyzer): Flag hanging MPI processes.
+* [x] Value-Change Visual Highlighting: Variables and registers flash when values change.
+* [x] Raw Memory Export (CSV/Bin) & Multi-Rank Console Broadcasting.
 
 ## PHASE 4: IDE Experience & Productization
 
@@ -75,13 +79,13 @@ By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerB
 * [ ] Background `squeue` polling for seamless DAP re-attachment.
 * [ ] Asynchronous `scancel` guillotine for safe UI teardowns and zombie process mitigation.
 
-## PHASE 11: Deployment & AppImage Packaging ⬅ ACTIVE
+## PHASE 11: Deployment & AppImage Packaging ✅
 
-* [ ] Configure `linuxdeployqt` and `appimagetool` to bundle the Qt6, Wayland, and Vulkan runtime dependencies.
-* [ ] Ensure the native `process_vm_readv` memory extraction engines and `lldb-dap` adapters remain fully functional within the AppImage mount.
-* [ ] Verify project-scoped `.gridlock/` configuration directories are handled correctly when GridLock is launched from the AppImage mount path.
-* [ ] Create `.desktop` file and application icon integration for standard Linux desktop environments.
-* [ ] Set up GitHub Actions CI/CD to automatically build and attach `.AppImage` binaries to GitHub Releases.
+* [x] Configure `CQtDeployer` and `appimagetool` to bundle the Qt6, Wayland, XCB, and Vulkan runtime dependencies.
+* [x] Ensure the native `process_vm_readv` memory extraction engines and `lldb-dap` adapters remain fully functional within the AppImage mount.
+* [x] Verify project-scoped `.gridlock/` configuration directories are handled correctly when GridLock is launched from the AppImage mount path.
+* [x] Create `.desktop` file and application icon integration for standard Linux desktop environments.
+* [x] Set up GitHub Actions CI/CD to automatically build and attach `.AppImage` binaries to GitHub Releases using artifact uploaders.
 
 ## Field Testing & Validation (Remote HPC Workflows)
 
