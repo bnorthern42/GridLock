@@ -25,6 +25,16 @@ jobs:
       - name: Verify Script Permissions
         run: ls -la scripts/
 
+      - name: Verify Package Installations
+        run: |
+          cmake --version
+          pkg-config --version
+          qmake6 --version
+          mpirun --version
+          lldb --version
+          meson --version
+          ninja --version
+
       - name: Build AppImage
         run: bash scripts/build_appimage.sh
 
