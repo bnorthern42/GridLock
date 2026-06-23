@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Export NO_STRIP to keep debug symbols for stack traces
+export APPIMAGE_EXTRACT_AND_RUN=1
 export NO_STRIP=1
 
 echo "Building GridLock..."
