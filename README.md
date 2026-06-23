@@ -85,6 +85,15 @@ The Docker environment is configured with `SYS_PTRACE` capabilities and `seccomp
 
 ---
 
+## 📚 Documentation
+
+The GridLock documentation is divided into two primary suites:
+
+* 🧑‍💻 **[User Documentation](docs/user/README.md):** Guides on layout, MPI workflow, advanced debugging, and cluster configuration.
+* 🛠️ **[Developer Documentation](docs/developer/README.md):** Architectural overviews, build instructions, Wayland QPA specifics, and testing pipelines.
+
+---
+
 ## 🗺️ Roadmap Snapshot
 
 GridLock's development is broken into iterative phases. For a detailed breakdown, see [ROADMAP.md](ROADMAP.md).
