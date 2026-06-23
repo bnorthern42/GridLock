@@ -40,6 +40,7 @@ private:
     void parseListVariables(const QString& output);
     void parseVarCreate(const QString& output);
     void parseVarListChildren(const QString& output);
+    void storePreviousValues(VariableNode* node);
 
     GdbRankCoordinator* m_coordinator;
     std::unique_ptr<VariableNode> m_rootNode;
@@ -51,6 +52,7 @@ private:
     
     int m_evalCounter = 10000;
     QMap<int, QString> m_evalTokenToVarobj;
+    QMap<QString, QString> m_previousValues;
 };
 
 } // namespace gridlock

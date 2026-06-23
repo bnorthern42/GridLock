@@ -18,6 +18,7 @@ public slots:
 
 private:
     QTableWidget* m_table;
+    QMap<QString, QString> m_previousRegisters;
 };
 
 } // namespace gridlock::ui

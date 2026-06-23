@@ -42,6 +42,12 @@ void RegisterView::updateRegisters(const gridlock::RankState& state) {
         QString regName = QString("R%1").arg(it.key());
         QString regVal = it.value();
 
+        bool changed = false;
+        if (m_previousRegisters.contains(regName) && m_previousRegisters[regName] != regVal) {
+            changed = true;
+        }
+        m_previousRegisters[regName] = regVal;
+
         QTableWidgetItem* nameItem = m_table->item(row, 0);
         if (!nameItem) {
             nameItem = new QTableWidgetItem(regName);
@@ -56,6 +62,18 @@ void RegisterView::updateRegisters(const gridlock::RankState& state) {
             m_table->setItem(row, 1, valItem);
         } else {
             valItem->setText(regVal);
+        }
+
+        if (changed) {
+            valItem->setBackground(QColor("#f38ba8")); // Mocha Red
+            valItem->setForeground(QColor("#1e1e2e"));
+            nameItem->setBackground(QColor("#f38ba8"));
+            nameItem->setForeground(QColor("#1e1e2e"));
+        } else {
+            valItem->setBackground(QBrush());
+            valItem->setForeground(QBrush());
+            nameItem->setBackground(QBrush());
+            nameItem->setForeground(QBrush());
         }
 
         row++;
@@ -76,6 +94,12 @@ void RegisterView::updateRegisters(const QJsonArray& registers) {
         QString regName = reg["name"].toString();
         QString regVal = reg["value"].toString();
 
+        bool changed = false;
+        if (m_previousRegisters.contains(regName) && m_previousRegisters[regName] != regVal) {
+            changed = true;
+        }
+        m_previousRegisters[regName] = regVal;
+
         QTableWidgetItem* nameItem = m_table->item(row, 0);
         if (!nameItem) {
             nameItem = new QTableWidgetItem(regName);
@@ -90,6 +114,18 @@ void RegisterView::updateRegisters(const QJsonArray& registers) {
             m_table->setItem(row, 1, valItem);
         } else {
             valItem->setText(regVal);
+        }
+
+        if (changed) {
+            valItem->setBackground(QColor("#f38ba8")); // Mocha Red
+            valItem->setForeground(QColor("#1e1e2e"));
+            nameItem->setBackground(QColor("#f38ba8"));
+            nameItem->setForeground(QColor("#1e1e2e"));
+        } else {
+            valItem->setBackground(QBrush());
+            valItem->setForeground(QBrush());
+            nameItem->setBackground(QBrush());
+            nameItem->setForeground(QBrush());
         }
     }
 }

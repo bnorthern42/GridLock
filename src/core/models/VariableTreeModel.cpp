@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QFont>
+#include <QColor>
 #include <functional>
 
 namespace gridlock {
@@ -80,6 +81,18 @@ QVariant VariableTreeModel::data(const QModelIndex& index, int role) const {
         if (index.column() == 2) {
             return QVariant(Qt::AlignRight | Qt::AlignVCenter);
         }
+    } else if (role == Qt::BackgroundRole) {
+        if (m_previousValues.contains(node->name)) {
+            if (m_previousValues[node->name] != node->value) {
+                return QColor("#f38ba8"); // Catppuccin Mocha Red for changed value
+            }
+        }
+    } else if (role == Qt::ForegroundRole) {
+        if (m_previousValues.contains(node->name)) {
+            if (m_previousValues[node->name] != node->value) {
+                return QColor("#1e1e2e"); // Dark text for contrast against red background
+            }
+        }
     }
     return QVariant();
 }
@@ -107,6 +120,7 @@ void VariableTreeModel::fetchMore(const QModelIndex& parent) {
 }
 
 void VariableTreeModel::loadLocals(int rankId) {
+    storePreviousValues(m_rootNode.get());
     clear();
     m_currentRankId = rankId;
     m_coordinator->sendCommand(rankId, "-stack-list-variables --all-values");
@@ -319,6 +333,16 @@ VariableNode* VariableTreeModel::getNode(const QModelIndex& index) const {
         if (node) return node;
     }
     return m_rootNode.get();
+}
+
+void VariableTreeModel::storePreviousValues(VariableNode* node) {
+    if (!node) return;
+    if (!node->name.isEmpty() && !node->value.isEmpty() && node->value != "{...}") {
+        m_previousValues[node->name] = node->value;
+    }
+    for (const auto& child : node->children) {
+        storePreviousValues(child.get());
+    }
 }
 
 } // namespace gridlock
