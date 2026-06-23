@@ -12,20 +12,40 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-pip cmake pkg-config qt6-base-dev qt6-declarative-dev libvulkan-dev openmpi-bin libopenmpi-dev lldb llvm wget fuse
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            python3-pip \
+            cmake \
+            pkg-config \
+            wget \
+            ca-certificates \
+            file \
+            patchelf \
+            libfuse2 \
+            fuse \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-declarative-dev \
+            libvulkan-dev \
+            openmpi-bin \
+            libopenmpi-dev \
+            lldb \
+            llvm
 
-      - name: Install Latest Meson & Ninja
-        run: pip3 install meson ninja
+      - name: Install Meson and Ninja
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install meson ninja
 
-      - name: Verify Script Permissions
-        run: ls -la scripts/
-
-      - name: Verify Package Installations
+      - name: Verify package installations
         run: |
           cmake --version
           pkg-config --version

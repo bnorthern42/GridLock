@@ -1,6 +1,8 @@
 [Desktop Entry]
+Type=Application
 Name=GridLock
+Comment=High-performance computing debugger
 Exec=gridlock
 Icon=gridlock
-Type=Application
 Categories=Development;Debugger;
+Terminal=false

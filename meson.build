@@ -17,6 +17,8 @@ src_files = [
   'src/core/hpc/MemoryBoundsValidator.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/MiSanitizer.cpp',
+  'src/core/hpc/TelemetryObfuscator.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/hpc/LspCoordinator.cpp',
   'src/ui/MainWindow.cpp',
@@ -54,6 +56,7 @@ moc_headers = [
   'src/GridLockApp.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/DapCoordinator.hpp',
+  'src/core/hpc/TelemetryObfuscator.hpp',
   'src/core/hpc/LspCoordinator.hpp',
   'src/ui/MainWindow.hpp',
   'src/ui/views/ServerRackView.hpp',
@@ -620,6 +623,53 @@ gridlock_dap_native_bridge_tests = executable('gridlock_dap_native_bridge_tests'
 )
 
 test('dap_native_bridge_tests', gridlock_dap_native_bridge_tests)
+
+sanitizer_test_src = [
+  'tests/test_sanitizer.cpp',
+  'src/core/hpc/MiSanitizer.cpp'
+]
+
+sanitizer_test_moc_headers = [
+  'tests/test_sanitizer.hpp'
+]
+
+processed_sanitizer_test_files = qt6.compile_moc(
+  headers : sanitizer_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_sanitizer_tests = executable('gridlock_sanitizer_tests',
+  sanitizer_test_src,
+  processed_sanitizer_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('sanitizer_tests', gridlock_sanitizer_tests)
+
+obfuscator_test_src = [
+  'tests/test_obfuscator.cpp',
+  'src/core/hpc/TelemetryObfuscator.cpp'
+]
+
+obfuscator_test_moc_headers = [
+  'tests/test_obfuscator.hpp',
+  'src/core/hpc/TelemetryObfuscator.hpp'
+]
+
+processed_obfuscator_test_files = qt6.compile_moc(
+  headers : obfuscator_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_obfuscator_tests = executable('gridlock_obfuscator_tests',
+  obfuscator_test_src,
+  processed_obfuscator_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('obfuscator_tests', gridlock_obfuscator_tests)
 
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
