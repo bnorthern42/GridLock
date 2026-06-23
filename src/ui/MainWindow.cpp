@@ -116,9 +116,16 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                   else if (state == SessionState::Paused) m_runAction->setText("Paused");
               }
           }
+          if (m_domainHeatmapWidget && m_domainHeatmapWidget->renderButton()) {
+              m_domainHeatmapWidget->renderButton()->setEnabled(state == SessionState::Running || state == SessionState::Paused);
+          }
       });
 
       if (m_domainHeatmapWidget) {
+          if (m_domainHeatmapWidget->renderButton()) {
+              m_domainHeatmapWidget->renderButton()->setEnabled(false);
+          }
+          
           connect(m_domainHeatmapWidget, &DomainHeatmapWidget::requestRender, this, [dapCoord](const QString& expr, int rows, int cols) {
               if (!expr.isEmpty() && rows > 0 && cols > 0) {
                   dapCoord->requestHeatmapRender(0, expr, rows, cols);
