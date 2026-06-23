@@ -724,3 +724,25 @@ custom_target('mpi_mm_bin',
   output: 'mpi_mm_bin',
   command: ['mpicxx', '@INPUT@', '-g', '-O0', '-o', '@OUTPUT@'],
   build_by_default: true)
+
+vulkan_backend_test_src = [
+  'tests/test_vulkan_backend.cpp'
+]
+
+vulkan_backend_test_moc_headers = [
+  'tests/test_vulkan_backend.hpp'
+]
+
+processed_vulkan_backend_test_files = qt6.compile_moc(
+  headers : vulkan_backend_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_vulkan_backend_tests = executable('gridlock_vulkan_backend_tests',
+  vulkan_backend_test_src,
+  processed_vulkan_backend_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, vulkan_dep]
+)
+
+test('vulkan_backend_tests', gridlock_vulkan_backend_tests)
