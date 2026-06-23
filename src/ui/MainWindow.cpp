@@ -25,6 +25,8 @@
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "docks/VariablesDockWidget.hpp"
+#include "docks/DeadlockDockWidget.hpp"
+#include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "DomainHeatmapWidget.hpp"
 #include <QAction>
 #include <QApplication>
@@ -131,6 +133,16 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
   if (m_variablesDockWidget) {
       if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
           m_variablesDockWidget->setCoordinator(gdbCoord);
+
+          if (!m_deadlockAnalyzer) {
+              m_deadlockAnalyzer = new gridlock::core::DeadlockAnalyzer(gdbCoord, this);
+              if (m_deadlockDockWidget) {
+                  connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected,
+                          m_deadlockDockWidget, &DeadlockDockWidget::onDeadlockDetected);
+                  connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared,
+                          m_deadlockDockWidget, &DeadlockDockWidget::onRankCleared);
+              }
+          }
       }
   }
 
@@ -404,6 +416,11 @@ void MainWindow::setupDocks() {
 
   m_variablesDockWidget = new VariablesDockWidget(this);
   // It's no longer a dock widget, it will be added to the splitter
+
+  m_deadlockDockWidget = new DeadlockDockWidget(this);
+  addDockWidget(Qt::RightDockWidgetArea, m_deadlockDockWidget);
+
+  connect(m_deadlockDockWidget, &DeadlockDockWidget::jumpToFrameRequested, this, &MainWindow::onRankSelected);
 
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked, this, [this](const QString& filePath) {
       if (m_editorTabManager) {
