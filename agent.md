@@ -43,3 +43,14 @@ After generating and applying any code changes, you MUST execute the following s
 3. If both succeed: `git add . && git commit -m "Auto-commit: <concise summary of technical changes>"`
 
 If the compilation or tests fail, you must analyze the compiler error and attempt to fix your own code before halting.
+
+[Section: AppImage Packaging & CI]
+<Description>
+GridLock relies on standard Linux deployment mechanisms tailored for modern display servers.
+</Description>
+
+<Directives>
+- When modifying the deployment pipeline, `qmake6` MUST be explicitly passed to the deployment engine to prevent fallback to Qt5 modules.
+- The Wayland QPA (`libqwayland-generic.so`, `libqwayland-egl.so`) MUST be forcefully bundled via `EXTRA_QT_PLUGINS="wayland;xcb;vulkan"` to ensure the native Wayland compositor is engaged upon execution.
+- If dependencies related to `process_vm_readv` or `lldb-dap` fail to resolve at runtime, inspect the AppImage mount for stripped dynamically linked libraries.
+</Directives>

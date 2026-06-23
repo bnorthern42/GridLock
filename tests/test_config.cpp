@@ -13,6 +13,7 @@ void TestConfig::testSerialization() {
     QDir::setCurrent(tempDir.path());
 
     auto& manager = gridlock::core::ConfigManager::instance();
+    manager.setWorkspace(QDir::currentPath());
     manager.loadConfig(); // Loads defaults into the new dir
 
     QMap<QString, QSet<int>> breakpoints;
@@ -22,7 +23,7 @@ void TestConfig::testSerialization() {
 
     manager.saveBreakpoints(breakpoints);
 
-    QFile file("gridlock_config.toml");
+    QFile file(".gridlock/workspace.toml");
     QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
     QString content = file.readAll();
     file.close();
@@ -40,7 +41,9 @@ void TestConfig::testDeserialization() {
     QString oldCwd = QDir::currentPath();
     QDir::setCurrent(tempDir.path());
 
-    QFile file("gridlock_config.toml");
+    QDir dir(tempDir.path());
+    dir.mkdir(".gridlock");
+    QFile file(".gridlock/workspace.toml");
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
     QTextStream out(&file);
     out << "[breakpoints]\n";
@@ -50,6 +53,7 @@ void TestConfig::testDeserialization() {
     file.close();
 
     auto& manager = gridlock::core::ConfigManager::instance();
+    manager.setWorkspace(QDir::currentPath());
     manager.loadConfig();
 
     auto bps = manager.getBreakpoints();

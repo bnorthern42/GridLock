@@ -33,7 +33,9 @@ if [ ! -f linuxdeploy-plugin-qt-x86_64.AppImage ]; then
 fi
 
 echo "Running linuxdeploy..."
-export QMAKE=/usr/bin/qmake6
+export QMAKE=$(which qmake6)
+export EXTRA_QT_PLUGINS="wayland;xcb;vulkan"
+export VERSION="0.4.5"
 ./linuxdeploy-x86_64.AppImage --appdir AppDir -e AppDir/usr/bin/gridlock -d AppDir/usr/share/applications/gridlock.desktop --plugin qt --output appimage
 
 echo "Done!"
