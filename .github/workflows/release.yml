@@ -31,6 +31,7 @@ jobs:
             patchelf \
             libfuse2 \
             fuse \
+            imagemagick \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-declarative-dev \
@@ -54,6 +55,7 @@ jobs:
           lldb --version
           meson --version
           ninja --version
+          convert --version | head -n 2 || true
 
       - name: Build AppImage
         run: bash scripts/build_appimage.sh

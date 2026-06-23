@@ -24,12 +24,56 @@ rm -f "${APP_NAME}"-*.AppImage
 rm -f linuxdeploy-x86_64.AppImage
 rm -f linuxdeploy-plugin-qt-x86_64.AppImage
 
-echo "Building ${APP_NAME}..."
+echo "Configuring ${APP_NAME}..."
 meson setup builddir --prefix=/usr --buildtype=release
-ninja -C builddir
 
 echo "Installing into AppDir..."
 DESTDIR="${APPDIR}" ninja -C builddir install
+
+echo "Fixing icon resolutions..."
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/512x512/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/128x128/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/64x64/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/48x48/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/32x32/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/16x16/apps"
+
+ICON_SRC="${ROOT_DIR}/resources/icon.png"
+
+if [ ! -f "${ICON_SRC}" ]; then
+    echo "ERROR: Missing source icon at ${ICON_SRC}"
+    exit 1
+fi
+
+resize_icon() {
+    local size="$1"
+    local out="${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps/gridlock.png"
+
+    if command -v magick >/dev/null 2>&1; then
+        magick "${ICON_SRC}" -resize "${size}x${size}!" "${out}"
+    elif command -v convert >/dev/null 2>&1; then
+        convert "${ICON_SRC}" -resize "${size}x${size}!" "${out}"
+    else
+        echo "ERROR: ImageMagick not found. Install imagemagick in CI."
+        exit 1
+    fi
+
+    echo "Created icon: ${out}"
+    file "${out}"
+
+    if command -v identify >/dev/null 2>&1; then
+        identify -format "Icon geometry: %wx%h\n" "${out}"
+    fi
+}
+
+resize_icon 512
+resize_icon 256
+resize_icon 128
+resize_icon 64
+resize_icon 48
+resize_icon 32
+resize_icon 16
 
 echo "Verifying AppDir contents..."
 ls -lah "${APPDIR}/usr/bin"
@@ -123,7 +167,14 @@ echo "Running linuxdeploy..."
     --output appimage
 
 echo "Renaming AppImage..."
-FOUND_APPIMAGE="$(find "${ROOT_DIR}" -maxdepth 1 -type f -name '*.AppImage' ! -name 'linuxdeploy*.AppImage' | head -n 1 || true)"
+FOUND_APPIMAGE="$(
+    find "${ROOT_DIR}" \
+        -maxdepth 1 \
+        -type f \
+        -name '*.AppImage' \
+        ! -name 'linuxdeploy*.AppImage' \
+        | head -n 1 || true
+)"
 
 if [ -z "${FOUND_APPIMAGE}" ]; then
     echo "ERROR: AppImage was not created."
