@@ -579,8 +579,11 @@ void MainWindow::setupDocks() {
 
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
-  mainVerticalSplitter->setStretchFactor(0, 75);
-  mainVerticalSplitter->setStretchFactor(1, 25);
+  m_bottomTabs->setMinimumHeight(250);
+  
+  mainVerticalSplitter->setStretchFactor(0, 70);
+  mainVerticalSplitter->setStretchFactor(1, 30);
+  mainVerticalSplitter->setSizes({700, 300});
 
   setCentralWidget(mainVerticalSplitter);
 }
