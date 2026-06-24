@@ -63,7 +63,7 @@ void TestHpcMemory::testDirectRead() {
             QFAIL(e.what());
         }
 
-        QCOMPARE(result.size(), 3);
+        QCOMPARE(result.size(), 3UL);
         QCOMPARE(result[0], 1.0);
         QCOMPARE(result[1], 2.5);
         QCOMPARE(result[2], 3.14);

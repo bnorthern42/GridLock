@@ -1,7 +1,6 @@
 #include <QApplication>
 #include <QFile>
 #include <QSurfaceFormat>
-#include <QVulkanInstance>
 #include <QStyleFactory>
 #include <QPalette>
 #include <QColor>
@@ -40,12 +39,6 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
 
-    QVulkanInstance inst;
-    inst.setLayers({"VK_LAYER_KHRONOS_validation"});
-    if (!inst.create()) {
-        qFatal("Failed to create Vulkan instance");
-    }
-
     // Set org/app identity so QSettings keys are consistent everywhere.
     QApplication::setOrganizationName("GridLock");
     QApplication::setApplicationName("GridLock");
@@ -77,7 +70,6 @@ int main(int argc, char *argv[]) {
     parser.process(app);
 
     gridlock::ui::MainWindow window;
-    window.setVulkanInstance(&inst);
 
     auto* backend = new DapCoordinator(&window);
     window.setCoordinator(backend);
