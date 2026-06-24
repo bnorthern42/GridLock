@@ -49,9 +49,10 @@ int main(int argc, char *argv[]) {
     // Set org/app identity so QSettings keys are consistent everywhere.
     QApplication::setOrganizationName("GridLock");
     QApplication::setApplicationName("GridLock");
+    QApplication::setApplicationVersion("0.5.0");
     
     // CRITICAL FOR WAYLAND:
-    QGuiApplication::setDesktopFileName("gridlock.desktop"); 
+    QGuiApplication::setDesktopFileName("gridlock"); 
     
     QApplication::setWindowIcon(QIcon(":/icon.png"));
 
@@ -66,8 +67,9 @@ int main(int argc, char *argv[]) {
     app.processEvents();
 
     QCommandLineParser parser;
-    parser.setApplicationDescription("GridLock MPI Debugger");
+    parser.setApplicationDescription("GridLock MPI Debugger - v0.5.0\nFeaturing the new Zero-Copy Multi-Rank Memory Diff Engine.");
     parser.addHelpOption();
+    parser.addVersionOption();
     
     QCommandLineOption testModeOption("test-mode", "Run interactive visual simulation tests");
     parser.addOption(testModeOption);
