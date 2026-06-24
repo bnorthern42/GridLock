@@ -38,7 +38,8 @@ jobs:
             openmpi-bin \
             libopenmpi-dev \
             lldb \
-            llvm
+            llvm \
+            xvfb
 
       - name: Install Meson and Ninja
         run: |
@@ -59,7 +60,7 @@ jobs:
       - name: Configure and Test
         run: |
           meson setup builddir --prefix=/usr --buildtype=release
-          meson test -C builddir
+          xvfb-run -a meson test -C builddir
 
       - name: Build AppImage
         run: bash scripts/build_appimage.sh
