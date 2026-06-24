@@ -1,8 +1,9 @@
 #include "GdbConsoleWidget.hpp"
 #include <QWidget>
 
-namespace {
-QString formatLogEntry(int rank, const QString& text, bool isInput, bool showRaw) {
+namespace gridlock::ui {
+
+QString GdbConsoleWidget::formatLogEntry(int rank, const QString& text, bool isInput, bool showRaw) {
     if (showRaw) {
         QString prefix = isInput ? "[GDB IN Rank %1]: %2" : "[GDB OUT Rank %1]: %2";
         return prefix.arg(rank).arg(text);
@@ -20,9 +21,6 @@ QString formatLogEntry(int rank, const QString& text, bool isInput, bool showRaw
     
     return QString();
 }
-} // namespace
-
-namespace gridlock::ui {
 
 GdbConsoleWidget::GdbConsoleWidget(QWidget* parent) : QWidget(parent) {
     QVBoxLayout* layout = new QVBoxLayout(this);

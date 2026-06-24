@@ -744,6 +744,30 @@ gridlock_memory_export_tests = executable('gridlock_memory_export_tests',
 
 test('memory_export_tests', gridlock_memory_export_tests)
 
+mi_parser_test_src = [
+  'tests/test_mi_parser.cpp',
+  'src/ui/GdbConsoleWidget.cpp'
+]
+
+mi_parser_test_moc_headers = [
+  'src/ui/GdbConsoleWidget.hpp'
+]
+
+processed_mi_parser_test_files = qt6.compile_moc(
+  headers : mi_parser_test_moc_headers,
+  sources : 'tests/test_mi_parser.cpp',
+  dependencies: qt6_dep
+)
+
+gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
+  mi_parser_test_src,
+  processed_mi_parser_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('mi_parser_tests', gridlock_mi_parser_tests)
+
 custom_target('mpi_mm_bin',
   input: 'tests/mpi_mm.c',
   output: 'mpi_mm_bin',

@@ -179,9 +179,9 @@ void TestMainWindowUI::testGdbConsoleFiltering() {
     gridlock::ui::GdbConsoleWidget console;
     console.resetRanks(4); // Creates Rank 0..3
 
-    console.appendGdbOutput(0, "Breakpoint hit at main");
-    console.appendGdbOutput(1, "Segfault encountered");
-    console.appendGdbOutput(0, "Variable x = 5");
+    console.appendGdbOutput(0, "~\"Breakpoint hit at main\\n\"");
+    console.appendGdbOutput(1, "~\"Segfault encountered\\n\"");
+    console.appendGdbOutput(0, "~\"Variable x = 5\\n\"");
 
     QPlainTextEdit* consoleEdit = console.findChild<QPlainTextEdit*>();
     QComboBox* rankCombo = console.findChild<QComboBox*>();
@@ -193,12 +193,12 @@ void TestMainWindowUI::testGdbConsoleFiltering() {
 
     // Verify Rank Filtering (Index 2 -> Rank 1, since Index 0 is "All Ranks", Index 1 is "Rank 0")
     rankCombo->setCurrentIndex(2);
-    QCOMPARE(consoleEdit->toPlainText(), QString("[GDB OUT Rank 1]: Segfault encountered"));
+    QCOMPARE(consoleEdit->toPlainText(), QString("Segfault encountered"));
 
     // Verify Text Filtering
     rankCombo->setCurrentIndex(0); // Reset to All Ranks
     filterEdit->setText("Variable");
-    QCOMPARE(consoleEdit->toPlainText(), QString("[GDB OUT Rank 0]: Variable x = 5"));
+    QCOMPARE(consoleEdit->toPlainText(), QString("Variable x = 5"));
 }
 
 void TestMainWindowUI::testGutterBreakpointPropagation() {

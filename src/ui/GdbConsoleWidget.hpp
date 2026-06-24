@@ -16,6 +16,8 @@ class GdbConsoleWidget : public QWidget {
 public:
     explicit GdbConsoleWidget(QWidget* parent = nullptr);
     void resetRanks(int count);
+    
+    static QString formatLogEntry(int rank, const QString& text, bool isInput, bool showRaw);
 
 public slots:
     void appendGdbOutput(int rank, const QString& output);

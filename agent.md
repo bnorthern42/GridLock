@@ -41,8 +41,12 @@ After generating and applying any code changes, you MUST execute the following s
 1. `ninja -C build`
 2. `meson test -C build --print-errorlogs`
 3. If both succeed: `git add . && git commit -m "Auto-commit: <concise summary of technical changes>"`
-
+4. Test-Driven Development (TDD) Requirement (`tests/`):
+   - You must write comprehensive unit tests for this feature using our standard testing framework before finalizing the core logic.
+   - Ensure the tests cover standard use cases, edge cases, and expected failures (e.g., invalid memory access, malformed MI strings).
+   - Provide the test source file and the updated `tests/meson.build` diff showing the new test integration.
 If the compilation or tests fail, you must analyze the compiler error and attempt to fix your own code before halting.
+5. do not put code blocks into chat of files or diffs unless explicitly asked to.
 
 [Section: AppImage Packaging & CI]
 <Description>

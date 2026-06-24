@@ -3,7 +3,13 @@ set -euo pipefail
 
 export APPIMAGE_EXTRACT_AND_RUN=1
 export NO_STRIP=1
-export VERSION="0.4.8"
+
+# Dynamically set version from GitHub tag, default to 0.5.0 if not running in CI
+if [ -n "${GITHUB_REF_NAME:-}" ]; then
+    export VERSION="${GITHUB_REF_NAME#v}"
+else
+    export VERSION="0.5.0"
+fi
 
 APP_NAME="GridLock"
 BIN_NAME="gridlock"
@@ -18,6 +24,8 @@ if [ -z "${QMAKE_BIN}" ]; then
 fi
 
 export QMAKE="${QMAKE_BIN}"
+
+echo "Building GridLock Version: ${VERSION}"
 
 echo "Cleaning old build artifacts..."
 rm -rf builddir AppDir
