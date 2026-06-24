@@ -23,6 +23,8 @@
 #include "../core/hpc/MockHpcBackend.hpp"
 #include "../core/hpc/MemoryDiffer.hpp"
 #include "../core/commands/DebugCommands.hpp"
+#include "../core/managers/SessionManager.hpp"
+#include <QFileDialog>
 #include <QPointer>
 #include <QtConcurrent/QtConcurrent>
 #include "../core/managers/ShortcutManager.hpp"
@@ -271,6 +273,16 @@ void MainWindow::setupMenu() {
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
 
+  fileMenu->addSeparator();
+
+  QAction *saveSessionAction = fileMenu->addAction("Save Session As...");
+  connect(saveSessionAction, &QAction::triggered, this, &MainWindow::saveSessionAs);
+
+  QAction *loadSessionAction = fileMenu->addAction("Load Session...");
+  connect(loadSessionAction, &QAction::triggered, this, &MainWindow::loadSession);
+
+  fileMenu->addSeparator();
+
   QAction *projSetAction = fileMenu->addAction("Project Settings");
   connect(projSetAction, &QAction::triggered, this, [this]() {
     ProjectSettingsDialog dlg(this);
@@ -359,7 +371,7 @@ void MainWindow::setupMenu() {
 
 void MainWindow::setupToolbar() {
   QToolBar *toolbar = addToolBar("Main Toolbar");
-  toolbar->setMovable(false);
+  toolbar->setObjectName("MainToolbar");
 
   m_runAction = new QAction("▶ Run Target", this);
   connect(m_runAction, &QAction::triggered, this, [this]() {
@@ -772,6 +784,72 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
 
 void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {
 
+}
+
+void MainWindow::saveSessionAs() {
+    QString filePath = QFileDialog::getSaveFileName(this, "Save Session", QDir::currentPath(), "TOML Files (*.toml)");
+    if (filePath.isEmpty()) return;
+
+    gridlock::core::managers::SessionState state;
+    
+    if (m_differentialGrid) {
+        for (const auto& w : m_differentialGrid->getWatchExpressions()) {
+            state.watchedVariables.push_back(QString::fromStdString(w));
+        }
+    }
+
+    for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {
+        for (int line : it.value()) {
+            state.activeBreakpoints.push_back(QString("%1:%2").arg(it.key()).arg(line));
+        }
+    }
+
+    state.selectedRanks.push_back(m_focusedRank);
+
+    gridlock::core::managers::SessionManager::instance().saveSession(filePath, state);
+}
+
+void MainWindow::loadSession() {
+    QString filePath = QFileDialog::getOpenFileName(this, "Load Session", QDir::currentPath(), "TOML Files (*.toml)");
+    if (filePath.isEmpty()) return;
+
+    auto optState = gridlock::core::managers::SessionManager::instance().loadSession(filePath);
+    if (!optState) return;
+
+    const auto& state = *optState;
+
+    if (m_differentialGrid) m_differentialGrid->clearWatches();
+    for (const auto& w : state.watchedVariables) {
+        if (m_differentialGrid) m_differentialGrid->addVariableColumn(w);
+    }
+
+    m_persistentBreakpoints.clear();
+    for (const auto& bp : state.activeBreakpoints) {
+        auto parts = bp.split(':');
+        if (parts.size() == 2) {
+            QString file = parts[0];
+            int line = parts[1].toInt();
+            m_persistentBreakpoints[file].insert(line);
+            
+            if (m_editorTabManager) {
+                if (auto* view = m_editorTabManager->getSourceCodeViewForFile(file)) {
+                    view->setBreakpoints(m_persistentBreakpoints[file]);
+                }
+            }
+
+            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+                gdbCoord->broadcastBreakpoint(file, line, true, QString());
+            } else if (auto* dapCoord = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+                // If it's already set this will unset it, but session loading assumes fresh state
+                dapCoord->toggleBreakpoint(file, line);
+            }
+        }
+    }
+
+    if (!state.selectedRanks.empty()) {
+        m_focusedRank = state.selectedRanks.front();
+        onRankSelected(m_focusedRank);
+    }
 }
 
 } // namespace gridlock::ui

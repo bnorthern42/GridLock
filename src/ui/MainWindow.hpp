@@ -80,6 +80,8 @@ public slots:
     void openFile();
     void openPreferences();
     void loadSourceFile(const QString& filePath);
+    void saveSessionAs();
+    void loadSession();
 
 
 protected:
