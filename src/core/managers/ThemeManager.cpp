@@ -40,6 +40,8 @@ void ThemeManager::setTheme(const QString& styleName, bool isDark) {
         darkPalette.setColor(QPalette::Disabled, QPalette::Text, Qt::darkGray);
         darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, Qt::darkGray);
         darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, Qt::darkGray);
+        
+        darkPalette.setColor(QPalette::PlaceholderText, QColor(160, 160, 160));
 
         QApplication::setPalette(darkPalette);
     } else {
