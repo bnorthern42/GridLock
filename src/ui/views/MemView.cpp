@@ -114,7 +114,7 @@ void MemView::onExportMatrixClicked() {
     std::vector<uint8_t> buffer(m_lastRawData.begin(), m_lastRawData.end());
     int typeIndex = m_typeBox->currentIndex();
 
-    QtConcurrent::run([buffer, fileName, typeIndex]() {
+    (void)QtConcurrent::run([buffer, fileName, typeIndex]() {
         if (fileName.endsWith(".csv", Qt::CaseInsensitive)) {
             gridlock::core::hpc::DataType type = gridlock::core::hpc::DataType::Int32;
             int typeSize = sizeof(int32_t);
@@ -143,7 +143,7 @@ void MemView::onDiffClicked() {
     size_t length = m_lengthBox->value();
     
     bool ok;
-    quint64 addrInt = addrStr.toULongLong(&ok, 16);
+    (void)addrStr.toULongLong(&ok, 16);
     if (!ok) {
         QMessageBox::warning(this, "Invalid Address", "Please enter a valid hex address.");
         return;

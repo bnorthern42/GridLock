@@ -3,6 +3,8 @@ project('GridLock', 'cpp',
   default_options : ['warning_level=3', 'cpp_std=c++23'],
   subproject_dir : 'external')
 
+add_project_arguments('-Wall', '-Wextra', '-Wpedantic', '-Wunused-variable', '-Wunused-parameter', language: 'cpp')
+
 # Dependencies
 qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent'])

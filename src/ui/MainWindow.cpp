@@ -295,7 +295,7 @@ void MainWindow::setupMenu() {
   fileMenu->addSeparator();
   fileMenu->addAction("Exit", this, &MainWindow::close);
 
-  QMenu *viewMenu = menuBar->addMenu("&View");
+  menuBar->addMenu("&View");
 
 
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
@@ -554,7 +554,7 @@ void MainWindow::setupDocks() {
       void* remoteAddr = reinterpret_cast<void*>(addrInt);
 
       QPointer<MainWindow> weakThis(this);
-      QtConcurrent::run([weakThis, basePid, targetPid, remoteAddr, length]() {
+      (void)QtConcurrent::run([weakThis, basePid, targetPid, remoteAddr, length]() {
           auto result = gridlock::core::hpc::MemoryDiffer::compareMemory(basePid, targetPid, remoteAddr, length);
           QMetaObject::invokeMethod(weakThis, [weakThis, result, remoteAddr]() {
               if (weakThis && weakThis->m_memView) {
@@ -767,7 +767,7 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
 
 
 
-void MainWindow::setVulkanInstance(QVulkanInstance *inst) {
+void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {
 
 }
 

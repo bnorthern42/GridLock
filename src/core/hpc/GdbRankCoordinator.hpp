@@ -18,7 +18,7 @@ public:
 
   void startDebugSession(int rankCount, const QString &executable);
   void launchParallelSession(const QString &executable, int rankCount) override;
-  pid_t getPidForRank(int rankId) const override { return 0; }
+  pid_t getPidForRank([[maybe_unused]] int rankId) const override { return 0; }
   void insertBreakpoint(const QString &location);
   void broadcastBreakpoint(const QString &file, int line, bool isSet, const QString& condition = QString());
   void broadcastCommand(const QString &cmd);

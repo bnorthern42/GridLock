@@ -433,10 +433,7 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
                     uintptr_t baseAddress = match.captured(1).toULongLong(&ok, 16);
                     if (ok) {
                         try {
-                            int count = req.rows * req.cols;
-                            qDebug() << "[Heatmap] LLDB Raw Evaluate Response:" << result;
-                            qDebug() << "[Heatmap] Parsed Target Hex Address:" << match.captured(1);
-                            QtConcurrent::run([this, pid = m_rankToPid[req.rankId], baseAddress, count = req.rows * req.cols, rows = req.rows, cols = req.cols]() {
+                            (void)QtConcurrent::run([this, pid = m_rankToPid[req.rankId], baseAddress, count = req.rows * req.cols, rows = req.rows, cols = req.cols]() {
                                 try {
                                     std::vector<double> doubles = NativeMemoryReader::readDoubles(pid, baseAddress, count);
                                     emit heatmapDataReady(doubles, rows, cols);
