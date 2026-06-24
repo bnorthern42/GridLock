@@ -17,6 +17,7 @@ public:
     virtual void terminateSession() = 0;
     virtual void readMemory(int rankId, const QString& memoryReference, int count) = 0;
     virtual void launchParallelSession(const QString& binaryPath, int ranks) = 0;
+    virtual pid_t getPidForRank(int rankId) const = 0;
 
 signals:
     void locationChanged(int rankId, const QString& file, int line);

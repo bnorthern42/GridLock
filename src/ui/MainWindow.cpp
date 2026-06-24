@@ -21,7 +21,10 @@
 #include "docks/TerminalDock.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "../core/hpc/MockHpcBackend.hpp"
+#include "../core/hpc/MemoryDiffer.hpp"
 #include "../core/commands/DebugCommands.hpp"
+#include <QPointer>
+#include <QtConcurrent/QtConcurrent>
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "docks/VariablesDockWidget.hpp"
@@ -538,6 +541,27 @@ void MainWindow::setupDocks() {
     if (m_coordinator) {
       m_coordinator->readMemory(m_focusedRank, address, length);
     }
+  });
+
+  connect(m_memView, &MemView::requestMemoryDiff, this, [this](int baseRank, int targetRank, const QString& addrStr, int length) {
+      if (!m_coordinator) return;
+      pid_t basePid = m_coordinator->getPidForRank(baseRank);
+      pid_t targetPid = m_coordinator->getPidForRank(targetRank);
+      
+      bool ok;
+      quint64 addrInt = addrStr.toULongLong(&ok, 16);
+      if (!ok) return;
+      void* remoteAddr = reinterpret_cast<void*>(addrInt);
+
+      QPointer<MainWindow> weakThis(this);
+      QtConcurrent::run([weakThis, basePid, targetPid, remoteAddr, length]() {
+          auto result = gridlock::core::hpc::MemoryDiffer::compareMemory(basePid, targetPid, remoteAddr, length);
+          QMetaObject::invokeMethod(weakThis, [weakThis, result, remoteAddr]() {
+              if (weakThis && weakThis->m_memView) {
+                  weakThis->m_memView->displayMemoryDiff(result, remoteAddr);
+              }
+          });
+      });
   });
 
   m_bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
