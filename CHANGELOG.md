@@ -1,28 +1,18 @@
-## 🚀 GridLock v0.4.7: Performance Tuning & CI/CD Stabilization
+## [0.5.0] - 2026-06-23
 
-This release focuses on heavily optimizing the Qt6/Vulkan frontend, resolving CI/CD pipeline bottlenecks, and restoring the core HPC Domain Heatmap architecture.
+### Added
+- **Multi-Rank Memory Diff Engine**: Implemented simultaneous, zero-copy memory extraction via `process_vm_readv`, complete with byte-level visual discrepancy highlighting across MPI ranks.
+- **Session State Bookmarking**: Added a native `SessionManager` that serializes active breakpoints, watched variables, and UI states to lightweight `.toml` workspaces.
+- **Automated CI/CD**: Established an automated GitHub Actions pipeline for testing, packaging, and AppImage deployment.
 
-### ⚡ Performance & Core Architecture
+### Changed
+- **Architectural Pivot**: Completely purged explicit Vulkan dependencies and the Domain Heatmap feature to ensure pure CPU-bound deployment across all HPC distributions and reduce technical debt.
+- **CLI Polish**: Re-wired `QCommandLineParser` to properly output "GridLock v0.5.0" and highlight core feature sets in the help string.
 
-* **Asynchronous Memory Extraction:** Offloaded massive `process_vm_readv` MPI array reads to a background thread pool using `QtConcurrent`. The main Qt Event Loop is no longer blocked during high-speed matrix extraction.
-* **Event-Driven Vulkan Rendering:** Fixed a severe bug causing 100% GPU utilization. The `QVulkanWindow` render loop is now strictly event-driven and only requests frame updates when new data is successfully fetched from the DAP backend.
-* **VSync Profiling Hooks:** Added temporary overrides for Wayland/Vulkan swap intervals to allow for accurate rendering latency profiling.
+### Fixed
+- **GDB Protocol Leakage**: Implemented strict stream filtering to suppress raw MI protocol records (e.g., `^done`, `*stopped`) from bleeding into the user-facing console.
+- **Array Extraction Crash**: Injected `-gdb-set max-value-size unlimited` into the backend coordinator initialization sequence to prevent GDB from halting when parsing massive remote arrays.
+- **Accessibility**: Fixed a bug where dark-mode placeholder text in input fields lacked contrast by overriding `QPalette::PlaceholderText`.
 
-### 🎨 UX & Interface Enhancements
-
-* **Tactile UI Interactions:** Injected dynamic QSS pseudo-classes across the frontend. Buttons now provide visual, mechanical feedback (shifting on press, highlighting on hover) rather than relying on flat Fusion defaults.
-* **Domain Heatmap Restoration:** Brought the Vulkan-powered Domain Heatmap out of hidden state and officially wired it into the bottom tab manager.
-* **Lifecycle-Aware Controls:** Heatmap interactive controls (Render Frame, Row/Col inputs) are now safely locked to the DAP session lifecycle, preventing backend aborts from premature extraction requests.
-
-### 🛠️ CI/CD & Build System
-
-* **Automated AppImage Pipeline:** Fully configured GitHub Actions to build, package, and deploy GridLock AppImages on an `ubuntu-22.04` runner to guarantee broad `glibc` backward compatibility.
-* **Modern Toolchain Injection:** Bypassed default `apt` packages in favor of `pip`-installed Meson/Ninja to fully support `c++23` language standards in the CI environment.
-* **Headless Vulkan Testing:** Configured the testing sandbox to utilize `lavapipe` (Mesa software rasterizer) and `QOffscreenSurface`, allowing Vulkan shaders and buffers to be unit-tested in headless CI environments without crashing.
-* **Manual Pipeline Triggers:** Added `workflow_dispatch` to GitHub Actions, allowing the AppImage pipeline to be run manually and output artifacts without requiring a new Git tag release.
-
-### 🐛 Bug Fixes
-
-* **LinuxDeploy Target Resolution:** Fixed a critical bug where `linuxdeploy-plugin-qt` failed to find Wayland/Vulkan dependencies by explicitly forcing the QMake path to `qmake6` and explicitly passing the GridLock executable target.
-* **Compiler Strictness:** Silenced all CI build warnings, including zero-initializing `RankState`, safely casting `QCOMPARE` size types, and applying `Q_UNUSED` macros in test mocks.
-
+### Removed
+- Removed the `DomainHeatmapWidget`, Vulkan Fragment Shaders, and all associated rendering logic.
