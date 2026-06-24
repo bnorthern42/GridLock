@@ -7,7 +7,7 @@ project('GridLock', 'cpp',
 qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
-vulkan_dep = dependency('vulkan')
+
 
 # Source files
 src_files = [
@@ -51,8 +51,6 @@ src_files = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
-  'src/ui/DomainHeatmapWidget.cpp',
-  'src/ui/DomainHeatmapRenderer.cpp'
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -91,7 +89,6 @@ moc_headers = [
   'src/core/managers/ThemeManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/ui/docks/VariablesDockWidget.hpp',
-  'src/ui/DomainHeatmapWidget.hpp'
 ]
 
 # Process Qt6 files
@@ -114,7 +111,7 @@ executable('gridlock',
   processed_qt_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep, vulkan_dep],
+  dependencies : [qt6_dep, tomlplusplus_dep],
   install : true)
 
 install_data('data/gridlock.desktop', 
@@ -210,8 +207,6 @@ ui_test_src = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
-  'src/ui/DomainHeatmapWidget.cpp',
-  'src/ui/DomainHeatmapRenderer.cpp'
 ]
 
 ui_test_moc_headers = [
@@ -247,7 +242,6 @@ ui_test_moc_headers = [
   'src/core/managers/ThemeManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/ui/docks/VariablesDockWidget.hpp',
-  'src/ui/DomainHeatmapWidget.hpp'
 ]
 
 processed_ui_test_files = qt6.compile_moc(
@@ -259,7 +253,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   ui_test_src,
   processed_ui_test_files,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep, vulkan_dep]
+  dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
 test('ui_tests', gridlock_ui_tests)
@@ -751,25 +745,3 @@ custom_target('mpi_mm_bin',
   output: 'mpi_mm_bin',
   command: ['mpicxx', '@INPUT@', '-g', '-O0', '-o', '@OUTPUT@'],
   build_by_default: true)
-
-vulkan_backend_test_src = [
-  'tests/test_vulkan_backend.cpp'
-]
-
-vulkan_backend_test_moc_headers = [
-  'tests/test_vulkan_backend.hpp'
-]
-
-processed_vulkan_backend_test_files = qt6.compile_moc(
-  headers : vulkan_backend_test_moc_headers,
-  dependencies: qt6_dep
-)
-
-gridlock_vulkan_backend_tests = executable('gridlock_vulkan_backend_tests',
-  vulkan_backend_test_src,
-  processed_vulkan_backend_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep, vulkan_dep]
-)
-
-test('vulkan_backend_tests', gridlock_vulkan_backend_tests)

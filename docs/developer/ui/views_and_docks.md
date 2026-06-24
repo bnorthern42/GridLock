@@ -20,5 +20,3 @@ GridLock utilizes a dynamic `QSplitter`-based layout populated by custom Qt6 vie
 | **TerminalDock** | `TerminalDock.hpp`, `TerminalDock.cpp` | A standard interactive PTY overlay bound via `QProcess` to the system shell. |
 | **VariablesDockWidget** | `VariablesDockWidget.hpp`, `VariablesDockWidget.cpp` | The visual container wrapping the `VariableTreeModel`. |
 | **GdbConsoleWidget** | `GdbConsoleWidget.hpp`, `GdbConsoleWidget.cpp` | Provides a direct REPL interface to the target GDB rank with custom log filtering. |
-| **DomainHeatmapWidget** | `DomainHeatmapWidget.hpp`, `DomainHeatmapWidget.cpp` | The `QOffscreenSurface` UI frame that hosts the raw Vulkan render instance. |
-| **DomainHeatmapRenderer** | `DomainHeatmapRenderer.hpp`, `DomainHeatmapRenderer.cpp` | The Vulkan fragment/compute shader pipeline converting memory matrices into thermal maps. |

@@ -40,7 +40,7 @@ class MemView;
 class RegisterView;
 class SpackManager;
 class ExpressionEvaluatorWidget;
-class DomainHeatmapWidget;
+
 class MpiDiagnosticsWidget;
 
 class MainWindow : public QMainWindow {
@@ -63,7 +63,7 @@ public:
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
-    DomainHeatmapWidget* domainHeatmapWidget() const { return m_domainHeatmapWidget; }
+
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
@@ -80,7 +80,7 @@ public slots:
     void openFile();
     void openPreferences();
     void loadSourceFile(const QString& filePath);
-    void testHeatmapWidget();
+
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -109,7 +109,7 @@ private:
     MemView* m_memView = nullptr;
     RegisterView* m_registerView = nullptr;
     ExpressionEvaluatorWidget* m_expressionEvaluatorWidget = nullptr;
-    DomainHeatmapWidget* m_domainHeatmapWidget = nullptr;
+
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;

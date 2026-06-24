@@ -14,7 +14,7 @@
 #include "dialogs/PreferencesDialog.hpp"
 #include "views/SourceCodeView.hpp"
 #include "EditorTabManager.hpp"
-#include "DomainHeatmapWidget.hpp"
+
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizardDialog.hpp"
@@ -27,7 +27,7 @@
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "../core/hpc/DeadlockAnalyzer.hpp"
-#include "DomainHeatmapWidget.hpp"
+
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
@@ -116,34 +116,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                   else if (state == SessionState::Paused) m_runAction->setText("Paused");
               }
           }
-          if (m_domainHeatmapWidget && m_domainHeatmapWidget->renderButton()) {
-              m_domainHeatmapWidget->renderButton()->setEnabled(state == SessionState::Running || state == SessionState::Paused);
-          }
       });
-
-      if (m_domainHeatmapWidget) {
-          if (m_domainHeatmapWidget->renderButton()) {
-              m_domainHeatmapWidget->renderButton()->setEnabled(false);
-          }
-          
-          connect(m_domainHeatmapWidget, &DomainHeatmapWidget::requestRender, this, [dapCoord](const QString& expr, int rows, int cols) {
-              if (!expr.isEmpty() && rows > 0 && cols > 0) {
-                  dapCoord->requestHeatmapRender(0, expr, rows, cols);
-              }
-          });
-          
-          connect(dapCoord, &DapCoordinator::heatmapDataReady, this, [this](const std::vector<double>& data, int rows, int cols) {
-              if (data.empty()) return;
-              
-              // Find min and max for Vulkan color normalization
-              auto [min_it, max_it] = std::minmax_element(data.begin(), data.end());
-              float min_val = static_cast<float>(*min_it);
-              float max_val = static_cast<float>(*max_it);
-              
-              // Map cols to width, rows to height
-              m_domainHeatmapWidget->loadData(data, cols, rows, min_val, max_val);
-          });
-      }
   }
 
   if (m_variablesDockWidget) {
@@ -320,8 +293,7 @@ void MainWindow::setupMenu() {
   fileMenu->addAction("Exit", this, &MainWindow::close);
 
   QMenu *viewMenu = menuBar->addMenu("&View");
-  QAction *testHeatmapAction = viewMenu->addAction("Test Domain Heatmap");
-  connect(testHeatmapAction, &QAction::triggered, this, &MainWindow::testHeatmapWidget);
+
 
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
   QAction *buildAction = toolsMenu->addAction("Build Target");
@@ -560,7 +532,7 @@ void MainWindow::setupDocks() {
   m_memView = new MemView(m_bottomTabs);
   m_registerView = new RegisterView(m_bottomTabs);
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
-  m_domainHeatmapWidget = new DomainHeatmapWidget(m_bottomTabs);
+
 
   connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
     if (m_coordinator) {
@@ -580,7 +552,7 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_registerView, "Registers");
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
   m_bottomTabs->addTab(m_mpiDiagnosticsWidget, "MPI Diagnostics");
-  m_bottomTabs->addTab(m_domainHeatmapWidget, "Domain Heatmap");
+
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   mainVerticalSplitter->setStretchFactor(0, 75);
@@ -769,23 +741,10 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   }
 }
 
-void MainWindow::testHeatmapWidget() {
-    if (!m_domainHeatmapWidget) return;
-    int width = 1024;
-    int height = 1024;
-    std::vector<double> dummyData(width * height);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            dummyData[y * width + x] = static_cast<double>((x ^ y) % 256);
-        }
-    }
-    m_domainHeatmapWidget->loadData(dummyData, width, height, 0);
-}
+
 
 void MainWindow::setVulkanInstance(QVulkanInstance *inst) {
-    if (m_domainHeatmapWidget) {
-        m_domainHeatmapWidget->setVulkanInstance(inst);
-    }
+
 }
 
 } // namespace gridlock::ui

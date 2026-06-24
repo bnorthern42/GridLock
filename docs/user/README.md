@@ -16,8 +16,8 @@ Welcome to the official user documentation for **GridLock**, the next-generation
 
 GridLock was built from the ground up to solve the unique challenges of debugging massive parallel MPI applications, adhering to three core principles:
 
-> **1. Wayland-Native & GPU Accelerated**  
-> We bypass X11 legacy overhead. GridLock uses pure Wayland and Vulkan to render dense data streams at 60 FPS without tearing.
+> **1. Wayland-Native**  
+> We bypass X11 legacy overhead. GridLock uses pure Wayland to render dense data streams without tearing.
 
 > **2. Zero-Copy Architecture**  
 > Reading memory from 1,000 MPI ranks shouldn't freeze your IDE. We use `process_vm_readv` and shared memory to inspect debuggee state instantly, achieving zero-copy overhead.
