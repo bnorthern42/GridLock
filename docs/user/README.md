@@ -20,9 +20,12 @@ GridLock was built from the ground up to solve the unique challenges of debuggin
 > We bypass X11 legacy overhead. GridLock uses pure Wayland to render dense data streams without tearing.
 
 > **2. Zero-Copy Architecture**  
-> Reading memory from 1,000 MPI ranks shouldn't freeze your IDE. We use `process_vm_readv` and shared memory to inspect debuggee state instantly, achieving zero-copy overhead.
+> Reading memory from 1,000 MPI ranks shouldn't freeze your IDE. We use `process_vm_readv` and shared memory to inspect debuggee state instantly, achieving zero-copy overhead. Features like the **Memory Diff Engine** rely on this to compare massive memory regions simultaneously across ranks.
 
-> **3. Keyboard-Centric & Chorded**  
+> **3. Session Bookmarking**
+> Don't lose track of your work across multi-day debugging marathons. GridLock natively serializes your active breakpoints, watched variables, and UI state into lightweight TOML workspaces.
+
+> **4. Keyboard-Centric & Chorded**  
 > Mouse travel is wasted time. GridLock implements a global Command Pattern with Vim-style chorded shortcuts, allowing you to manipulate windows, toggle breakpoints, and step through code without lifting your hands.
 
 ```mermaid

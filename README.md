@@ -1,4 +1,4 @@
-# GridLock - High-Performance MPI Graphical Debugger (v0.4.8)
+# GridLock - High-Performance MPI Graphical Debugger (v0.5.0)
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
@@ -30,7 +30,8 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Value-Change Visual Highlighting:** Fast identification of mutated variables and registers across steps via instant color shifts.
 * **Raw Memory Export & Multi-Rank Broadcasts:** Deep hardware state inspection and mass cluster commanding.
 * **Zero-Copy Memory Pipelines:** Extract large array states directly from the target kernel via lightning-fast `process_vm_readv` bypasses.
-  * *Note: The Vulkan Domain Heatmap UI is currently a Work-In-Progress and will be fully enabled in a future release.*
+* **Memory Diff Engine:** Simultaneous, zero-copy memory extraction (`process_vm_readv`) across multiple MPI ranks with visual byte-level discrepancy highlighting.
+* **Session Bookmarking:** Serialize active breakpoints, watched variables, and UI states to lightweight TOML files for persistent workspaces.
 
 > ⚠️ **EXPERIMENTAL FEATURE (USE AT YOUR OWN RISK):** SLURM job execution is currently in a basic, feature-incomplete state. While GridLock can submit jobs to the cluster, advanced lifecycle management—such as detached session rehydration, automatic `squeue` polling, and automated `scancel` cleanup—is not yet implemented. Long-running or pending jobs may require manual management via the terminal to prevent burning allocation hours.
 
@@ -68,7 +69,7 @@ sudo meson install -C build
 
 ### Deployment & AppImage Packaging
 
-GridLock explicitly relies on **`CQtDeployer`** (replacing `linuxdeploy`) to package and deploy native binaries. This guarantees proper bundling of all Qt6 Wayland, XCB, and Vulkan QPA payloads, ensuring native Wayland support without crashing on missing libraries. AppImages are deployed automatically via GitHub Actions standard artifact pipelines.
+GridLock explicitly relies on **`CQtDeployer`** (replacing `linuxdeploy`) to package and deploy native binaries. This guarantees proper bundling of all Qt6 Wayland and XCB QPA payloads, ensuring native Wayland support without crashing on missing libraries. AppImages are deployed automatically via GitHub Actions standard artifact pipelines.
 
 ### Testing with Docker
 
@@ -99,7 +100,7 @@ The GridLock documentation is divided into two primary suites:
 GridLock's development is broken into iterative phases. For a detailed breakdown, see [ROADMAP.md](ROADMAP.md).
 
 * **Phase 1–5:** ✅ Complete — Stability, UI, Advanced Debugger, IDE Experience, DAP Refactor
-* **Phase 6:** ✅ Complete — Zero-Copy Memory Engine & Vulkan Visualizer (deferred to post-AppImage)
+* **Phase 6:** ✅ Complete — Zero-Copy Multi-Rank Memory Diff Engine & Session State Bookmarking
 * **Phase 6.5:** ✅ Complete — Workspace Configuration (`.gridlock/`) & Dockerized TDD Pipeline
 * **Phase 11:** ✅ Complete — Deployment & AppImage Packaging via CQtDeployer
 * **Phase 7:** Upcoming — Cross-Language Variable Inspector

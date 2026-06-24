@@ -335,7 +335,7 @@ void MainWindow::setupMenu() {
     QProcess gitProc;
     gitProc.start("git", QStringList() << "ls-remote" << "--tags" << "--sort=v:refname" << "https://github.com/bnorthern42/GridLock.git");
     gitProc.waitForFinished(3000);
-    QString latestTag = "v0.1.0-alpha"; // default fallback
+    QString latestTag = "v0.5.0"; // default fallback
     if (gitProc.exitStatus() == QProcess::NormalExit && gitProc.exitCode() == 0) {
         QString output = QString::fromUtf8(gitProc.readAllStandardOutput()).trimmed();
         if (!output.isEmpty()) {

@@ -1,5 +1,5 @@
 project('GridLock', 'cpp',
-  version : '0.4.8',
+  version : '0.5.0',
   default_options : ['warning_level=3', 'cpp_std=c++23'],
   subproject_dir : 'external')
 
