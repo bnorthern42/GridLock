@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 
@@ -28,12 +29,14 @@ private slots:
     void onCommandReturnPressed();
     void onFilterTextChanged(const QString& text);
     void onRankFilterChanged(int index);
+    void onRawMiToggled(bool checked);
 
 private:
     void applyFilter();
 
     QLineEdit* m_filterEdit;
     QPushButton* m_clearButton;
+    QCheckBox* m_rawMiCheckbox;
     QComboBox* m_rankCombo;
     QPlainTextEdit* m_consoleEdit;
     QLineEdit* m_commandEdit;

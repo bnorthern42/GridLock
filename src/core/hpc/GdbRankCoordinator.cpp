@@ -178,6 +178,7 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
         // OpenMPI relies heavily on internal socket pipelines that can occasionally 
         // raise SIGPIPE. GDB intercepts this and halts. We must suppress it.
         writeCmd(id, "-interpreter-exec console \"handle SIGPIPE nostop noprint pass\"\n");
+        writeCmd(id, "-gdb-set max-value-size unlimited\n");
 
         QString connectCmd =
             QString("-target-select remote localhost:%1\n").arg(2000 + id);
