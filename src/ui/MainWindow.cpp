@@ -401,7 +401,7 @@ void MainWindow::setupMenu() {
                              << "ls-remote" << "--tags" << "--sort=v:refname"
                              << "https://github.com/bnorthern42/GridLock.git");
     gitProc.waitForFinished(3000);
-    QString latestTag = "v0.5.0"; // default fallback
+    QString latestTag = "v0.5.1"; // default fallback
     if (gitProc.exitStatus() == QProcess::NormalExit &&
         gitProc.exitCode() == 0) {
       QString output =
