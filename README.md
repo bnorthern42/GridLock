@@ -10,7 +10,7 @@
 GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Adapter Protocol (DAP). It provides a highly specialized environment tailored to the complexities of parallel computing, allowing developers to inspect state, track execution, and visualize real-time state across multiple independent MPI ranks concurrently.
 
 > [!WARNING]  
-> **GridLock is currently in an Alpha/WIP state.** It is a personal project intended for research use. Features are subject to change and stability is not guaranteed.
+> **GridLock is currently in an Beta/WIP state.** It is a personal project intended for research use. Features are subject to change and stability is not guaranteed.
 
 ---
 
