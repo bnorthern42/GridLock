@@ -34,7 +34,7 @@ src_files = [
   'src/ui/EditorTabManager.cpp',
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
-  'src/ui/dialogs/ProjectWizardDialog.cpp',
+  'src/ui/dialogs/ProjectWizard.cpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.cpp',
   'src/ui/views/DisassemblyView.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp',
@@ -72,7 +72,7 @@ moc_headers = [
   'src/ui/EditorTabManager.hpp',
   'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp',
-  'src/ui/dialogs/ProjectWizardDialog.hpp',
+  'src/ui/dialogs/ProjectWizard.hpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.hpp',
   'src/ui/views/DisassemblyView.hpp',
   'src/ui/widgets/ReferenceManualWidget.hpp',
@@ -155,7 +155,8 @@ test('coordinator_tests', gridlock_tests)
 
 lsp_test_src = [
   'tests/test_lsp.cpp',
-  'src/core/hpc/LspCoordinator.cpp'
+  'src/core/hpc/LspCoordinator.cpp',
+  'src/core/managers/ConfigManager.cpp'
 ]
 
 lsp_test_moc_headers = [
@@ -185,7 +186,7 @@ ui_test_src = [
   'src/ui/EditorTabManager.cpp',
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
-  'src/ui/dialogs/ProjectWizardDialog.cpp',
+  'src/ui/dialogs/ProjectWizard.cpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.cpp',
   'src/ui/views/ServerRackView.cpp',
   'src/ui/views/DisassemblyView.cpp',
@@ -224,7 +225,7 @@ ui_test_moc_headers = [
   'src/ui/EditorTabManager.hpp',
   'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp',
-  'src/ui/dialogs/ProjectWizardDialog.hpp',
+  'src/ui/dialogs/ProjectWizard.hpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.hpp',
   'src/ui/views/ServerRackView.hpp',
   'src/ui/views/DisassemblyView.hpp',

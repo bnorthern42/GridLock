@@ -1,9 +1,9 @@
 #pragma once
-#include <QString>
-#include <QSettings>
-#include <toml++/toml.h>
 #include <QMap>
 #include <QSet>
+#include <QSettings>
+#include <QString>
+#include <toml++/toml.h>
 
 namespace gridlock::core {
 
@@ -11,130 +11,135 @@ namespace gridlock::core {
 /// QSettings ("GridLock"/"Debugger") is the live layer;
 /// the TOML file holds theme colours and breakpoints.
 struct DebuggerSettings {
-    QString gdbPath       = "gdb";
-    QString mpiExecutable = "mpiexec";
-    QString mpiArgs       = "--oversubscribe";
-    int     defaultRanks  = 2;
-    bool    trapFpe       = false;
+  QString gdbPath = "gdb";
+  QString mpiExecutable = "mpiexec";
+  QString mpiArgs = "--oversubscribe";
+  int defaultRanks = 2;
+  bool trapFpe = false;
 };
 
 /// HPC cluster / node configuration. Stored in QSettings under hpc/*.
 struct HpcSettings {
-    QString hostsFile      = "";               ///< Path to MPI hostfile (empty = not used)
-    QString envVars        = "";               ///< Newline-separated key=value pairs
-    bool    strictAffinity = false;            ///< Pass --map-by node to the MPI launcher
+  QString hostsFile = "";      ///< Path to MPI hostfile (empty = not used)
+  QString envVars = "";        ///< Newline-separated key=value pairs
+  bool strictAffinity = false; ///< Pass --map-by node to the MPI launcher
 };
 
 /// SSH connection to a remote HPC login node. Stored under ssh/*.
 struct SshSettings {
-    QString host    = "";   ///< hostname or IP of the login node
-    QString user    = "";   ///< login username
-    QString keyPath = "";   ///< path to private SSH key (~/.ssh/id_rsa style)
+  QString host = "";    ///< hostname or IP of the login node
+  QString user = "";    ///< login username
+  QString keyPath = ""; ///< path to private SSH key (~/.ssh/id_rsa style)
 };
 
 /// SLURM batch configuration. Stored under slurm/*.
 struct SlurmSettings {
-    QString scriptTemplate = ""; ///< Default sbatch script body (may contain %%FILE%% placeholder)
-    QString partition      = "batch";  ///< SLURM partition / queue
-    int     nodes          = 1;
-    int     tasksPerNode   = 4;
-    bool    requestGpus    = false;
-    int     gpusPerNode    = 1;
-    QString spackRoot      = "/opt/spack"; ///< Spack install prefix on remote
+  QString scriptTemplate =
+      ""; ///< Default sbatch script body (may contain %%FILE%% placeholder)
+  QString partition = "batch"; ///< SLURM partition / queue
+  int nodes = 1;
+  int tasksPerNode = 4;
+  bool requestGpus = false;
+  int gpusPerNode = 1;
+  QString spackRoot = "/opt/spack"; ///< Spack install prefix on remote
 };
 
 struct ProjectSettings {
-    std::string targetBinary;
-    std::string programArguments;
-    std::string environmentVariables;
-    std::string workingDirectory;
-    std::string customGdbPath = "gdb";
-    std::vector<std::string> watchExpressions;
+  std::string targetBinary;
+  std::string programArguments;
+  std::string environmentVariables;
+  std::string workingDirectory;
+  std::string customGdbPath = "gdb";
+  std::vector<std::string> watchExpressions;
 };
 
 class ConfigManager {
 public:
-    static ConfigManager& instance() {
-        static ConfigManager instance;
-        return instance;
-    }
+  static ConfigManager &instance() {
+    static ConfigManager instance;
+    return instance;
+  }
 
-    void loadConfig();
+  void loadConfig();
 
-    // ── Theme / colour accessors (TOML-backed) ───────────────────────────
-    QString getSourceBackground() const;
-    QString getSourceText() const;
-    QString getSourceActiveLine() const;
+  // ── Theme / colour accessors (TOML-backed) ───────────────────────────
+  QString getSourceBackground() const;
+  QString getSourceText() const;
+  QString getSourceActiveLine() const;
 
-    QString getAssemblyOpcode() const;
-    QString getAssemblyRegister() const;
-    
-    QString getDocsetDirectory() const;
-    void setDocsetDirectory(const QString& path);
-    QString getAssemblyAddress() const;
+  QString getAssemblyOpcode() const;
+  QString getAssemblyRegister() const;
 
-    // ── Debugger settings (QSettings-backed, single source of truth) ─────
-    DebuggerSettings getDebuggerSettings() const;
-    void             saveDebuggerSettings(const DebuggerSettings &s);
+  QString getDocsetDirectory() const;
+  void setDocsetDirectory(const QString &path);
+  QString getAssemblyAddress() const;
 
-    // ── HPC / cluster settings (QSettings-backed) ─────────────────────────
-    HpcSettings  getHpcSettings()  const;
-    void         saveHpcSettings(const HpcSettings &s);
+  // ── Debugger settings (QSettings-backed, single source of truth) ─────
+  DebuggerSettings getDebuggerSettings() const;
+  void saveDebuggerSettings(const DebuggerSettings &s);
 
-    // ── SSH connection settings (QSettings-backed) ─────────────────────
-    SshSettings  getSshSettings()  const;
-    void         saveSshSettings(const SshSettings &s);
+  // ── HPC / cluster settings (QSettings-backed) ─────────────────────────
+  HpcSettings getHpcSettings() const;
+  void saveHpcSettings(const HpcSettings &s);
 
-    // ── SLURM / Spack settings (QSettings-backed) ────────────────────
-    SlurmSettings getSlurmSettings()  const;
-    void          saveSlurmSettings(const SlurmSettings &s);
+  // ── SSH connection settings (QSettings-backed) ─────────────────────
+  SshSettings getSshSettings() const;
+  void saveSshSettings(const SshSettings &s);
 
-    /// Convenience shims used by existing call-sites.
-    int     getDefaultRanks()   const;
-    QString getGdbPath()        const;
-    QString getMpiExecutable()  const;
-    QString getMpiArgs()        const;
+  // ── SLURM / Spack settings (QSettings-backed) ────────────────────
+  SlurmSettings getSlurmSettings() const;
+  void saveSlurmSettings(const SlurmSettings &s);
 
-    /// Persist the last directory visited by a file-open dialog so the IDE
-    /// restores it across launches.
-    QString getLastOpenDir()    const;
-    void    setLastOpenDir(const QString &path);
+  /// Convenience shims used by existing call-sites.
+  int getDefaultRanks() const;
+  QString getGdbPath() const;
+  QString getMpiExecutable() const;
+  QString getMpiArgs() const;
 
-    // ── Breakpoints (TOML-backed) ─────────────────────────────────────────
-    QMap<QString, QSet<int>> getBreakpoints() const;
-    void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints);
+  /// Persist the last directory visited by a file-open dialog so the IDE
+  /// restores it across launches.
+  QString getLastOpenDir() const;
+  void setLastOpenDir(const QString &path);
 
-    // ── Project Settings (TOML-backed) ────────────────────────────────────
-    ProjectSettings loadProjectSettings() const;
-    void saveProjectSettings(const ProjectSettings& ps) const;
+  // ── Breakpoints (TOML-backed) ─────────────────────────────────────────
+  QMap<QString, QSet<int>> getBreakpoints() const;
+  void saveBreakpoints(const QMap<QString, QSet<int>> &breakpoints);
 
-    void setWorkspace(const QString& path);
-    QString workspacePath() const { return m_workspacePath; }
+  // ── Project Settings (TOML-backed) ────────────────────────────────────
+  ProjectSettings loadProjectSettings() const;
+  void saveProjectSettings(const ProjectSettings &ps) const;
 
-    QString getGlobalDapAdapterPath() const;
-    void setGlobalDapAdapterPath(const QString& path);
+  void setWorkspace(const QString &path);
+  QString workspacePath() const { return m_workspacePath; }
 
-    QString getGlobalGdbPath() const;
-    void setGlobalGdbPath(const QString& path);
+  // ── Global Tools (TOML-backed) ────────────────────────────────────────
+  QString getGlobalClangdPath() const;
+  void setGlobalClangdPath(const QString &path);
 
-    QString getGlobalMpiArgs() const;
-    void setGlobalMpiArgs(const QString& args);
+  QString getGlobalDapAdapterPath() const;
+  void setGlobalDapAdapterPath(const QString &path);
 
-    void saveGlobalConfig();
+  QString getGlobalGdbPath() const;
+  void setGlobalGdbPath(const QString &path);
+
+  QString getGlobalMpiArgs() const;
+  void setGlobalMpiArgs(const QString &args);
+
+  void saveGlobalConfig();
 
 private:
-    ConfigManager();
-    ~ConfigManager() = default;
+  ConfigManager();
+  ~ConfigManager() = default;
 
-    ConfigManager(const ConfigManager&) = delete;
-    ConfigManager& operator=(const ConfigManager&) = delete;
+  ConfigManager(const ConfigManager &) = delete;
+  ConfigManager &operator=(const ConfigManager &) = delete;
 
-    toml::table m_config;
-    QString m_workspacePath;
-    QString m_globalConfigPath;
+  toml::table m_config;
+  QString m_workspacePath;
+  QString m_globalConfigPath;
 
-    static constexpr const char* kOrg = "GridLock";
-    static constexpr const char* kApp = "Debugger";
+  static constexpr const char *kOrg = "GridLock";
+  static constexpr const char *kApp = "Debugger";
 };
 
 } // namespace gridlock::core

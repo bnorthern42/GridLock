@@ -22,7 +22,7 @@
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
-#include "dialogs/ProjectWizardDialog.hpp"
+#include "dialogs/ProjectWizard.hpp"
 #include "docks/TerminalDock.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
@@ -250,7 +250,7 @@ void MainWindow::setupMenu() {
   QMenu *fileMenu = menuBar->addMenu("&File");
   QAction *newAction = fileMenu->addAction("New Project...");
   connect(newAction, &QAction::triggered, this, [this]() {
-    gridlock::ui::dialogs::ProjectWizardDialog dialog(this);
+    gridlock::ui::dialogs::ProjectWizard dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
       QString projectRoot = dialog.getProjectRoot();
       if (projectRoot.isEmpty())
@@ -265,16 +265,20 @@ void MainWindow::setupMenu() {
 
       auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
       ps.targetBinary = dialog.getTargetBinary().toStdString();
-      ps.workingDirectory = dialog.getBuildDir().toStdString();
-      ps.programArguments = dialog.getProgramArguments().toStdString();
-      ps.environmentVariables = dialog.getEnvironmentVariables().toStdString();
+      ps.workingDirectory = dialog.getProjectRoot().toStdString();
       gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
 
       auto dbgSettings =
           gridlock::core::ConfigManager::instance().getDebuggerSettings();
-      dbgSettings.mpiExecutable = dialog.getMpiPath();
+      dbgSettings.mpiExecutable = "mpirun";
       dbgSettings.defaultRanks = dialog.getRanks();
-      dbgSettings.mpiArgs = dialog.getMpiArgs();
+      // Using the generated mpirun string for demonstration
+      dbgSettings.mpiArgs =
+          dialog.getMpiLaunchCommand()
+              .remove("mpirun ")
+              .remove("-np " + QString::number(dialog.getRanks()) + " ")
+              .remove(dialog.getTargetBinary())
+              .trimmed();
       gridlock::core::ConfigManager::instance().saveDebuggerSettings(
           dbgSettings);
 
@@ -323,6 +327,24 @@ void MainWindow::setupMenu() {
   connect(loadSessionAction, &QAction::triggered, this,
           &MainWindow::loadSession);
 
+  QMenu *recentMenu = fileMenu->addMenu("Recent Sessions");
+  connect(recentMenu, &QMenu::aboutToShow, this, [this, recentMenu]() {
+    recentMenu->clear();
+    QStringList mru =
+        gridlock::core::managers::SessionManager::instance().getMruSessions();
+    for (const QString &session : mru) {
+      QAction *act = recentMenu->addAction(session);
+      connect(act, &QAction::triggered, this, [this, session]() {
+        gridlock::core::managers::SessionManager::instance().loadSession(
+            session);
+      });
+    }
+    if (mru.isEmpty()) {
+      QAction *empty = recentMenu->addAction("No Recent Sessions");
+      empty->setEnabled(false);
+    }
+  });
+
   fileMenu->addSeparator();
 
   QAction *projSetAction = fileMenu->addAction("Project Settings");
@@ -344,12 +366,12 @@ void MainWindow::setupMenu() {
     m_hpcBackend->submitSlurmJob(script);
   });
 
-  QAction *prefAction = fileMenu->addAction("Preferences");
-  connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
-
   fileMenu->addSeparator();
   fileMenu->addAction("Exit", this, &MainWindow::close);
 
+  QMenu *editMenu = menuBar->addMenu("&Edit");
+  QAction *prefAction = editMenu->addAction("Preferences");
+  connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
   menuBar->addMenu("&View");
 
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
@@ -487,6 +509,10 @@ void MainWindow::setupDocks() {
 
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
+
+  connect(&gridlock::core::managers::SessionManager::instance(),
+          &gridlock::core::managers::SessionManager::sessionLoaded,
+          m_projectExplorerWidget, &ProjectExplorerWidget::setRootPath);
 
   m_variablesDockWidget = new VariablesDockWidget(this);
   // It's no longer a dock widget, it will be added to the splitter
@@ -824,11 +850,11 @@ void MainWindow::loadSourceFile(const QString &filePath) {
 }
 
 void MainWindow::openPreferences() {
+  // Removed the 'dialogs::' qualifier
   auto *dlg = new PreferencesDialog(this);
   dlg->setAttribute(Qt::WA_DeleteOnClose);
 
-  // React to live Apply/OK so views refresh without a restart
-  connect(dlg, &PreferencesDialog::preferencesChanged, this, [this]() {
+  connect(dlg, &QDialog::accepted, this, [this]() {
     // SourceCodeView and RegisterView may want to re-read palette / font prefs.
     if (m_editorTabManager) {
       for (int i = 0; i < m_editorTabManager->count(); ++i) {

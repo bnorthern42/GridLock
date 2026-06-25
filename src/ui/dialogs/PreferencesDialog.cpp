@@ -1,8 +1,7 @@
 // PreferencesDialog.cpp
 // Implements a Kate/KDevelop-style side-bar preferences dialog.
 // MPI / GDB settings are owned exclusively by DebuggerSettingsPage and
-// persisted through ConfigManager::saveDebuggerSettings() — the single
-// source of truth for those values.
+// persisted through ConfigManager.
 
 #include "PreferencesDialog.hpp"
 #include "../../core/managers/ConfigManager.hpp"
@@ -16,6 +15,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,7 +29,6 @@
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
-#include <QHeaderView>
 
 namespace gridlock::ui {
 
@@ -54,19 +53,24 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
   form->addRow(separator);
 
   m_themeCombo = new QComboBox(this);
-  m_themeCombo->addItems(gridlock::core::managers::ThemeManager::instance().getAvailableThemes());
-  m_themeCombo->setToolTip(tr("Select the application color theme. Changes are applied immediately."));
+  m_themeCombo->addItems(
+      gridlock::core::managers::ThemeManager::instance().getAvailableThemes());
+  m_themeCombo->setToolTip(tr(
+      "Select the application color theme. Changes are applied immediately."));
   form->addRow(tr("Color Theme:"), m_themeCombo);
 
   m_darkModeCheck = new QCheckBox(tr("Enable Dark Mode"), this);
   form->addRow(QString(), m_darkModeCheck);
 
-  connect(m_themeCombo, &QComboBox::currentTextChanged, this, [this](const QString& theme) {
-      gridlock::core::managers::ThemeManager::instance().setTheme(theme, m_darkModeCheck->isChecked());
-  });
-  
+  connect(m_themeCombo, &QComboBox::currentTextChanged, this,
+          [this](const QString &theme) {
+            gridlock::core::managers::ThemeManager::instance().setTheme(
+                theme, m_darkModeCheck->isChecked());
+          });
+
   connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool checked) {
-      gridlock::core::managers::ThemeManager::instance().setTheme(m_themeCombo->currentText(), checked);
+    gridlock::core::managers::ThemeManager::instance().setTheme(
+        m_themeCombo->currentText(), checked);
   });
 
   auto *fontNote =
@@ -92,7 +96,7 @@ void AppearanceSettingsPage::loadFromSettings() {
   QSettings s("GridLock", "Debugger");
   const QString theme = s.value("appearance/theme", "Fusion").toString();
   bool isDark = s.value("appearance/dark_mode", true).toBool();
-  
+
   m_darkModeCheck->blockSignals(true);
   m_darkModeCheck->setChecked(isDark);
   m_darkModeCheck->blockSignals(false);
@@ -233,9 +237,8 @@ void BehaviorSettingsPage::loadFromSettings() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  DebuggerSettingsPage
-//  Sole owner of GDB path, MPI executable, MPI args, and default rank count.
-//  Reads/writes through ConfigManager::getDebuggerSettings /
-//  saveDebuggerSettings.
+//  Sole owner of DAP Adapter, GDB path, MPI executable, MPI args, and rank
+//  count.
 // ═══════════════════════════════════════════════════════════════════════════
 
 DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
@@ -252,12 +255,58 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
   separator->setFixedHeight(1);
   separator->setObjectName("separator");
   form->addRow(separator);
+  // ── Clangd Path ─────────────────────────────────────────────────────────
+  auto *clangdRow = new QHBoxLayout();
+  m_clangdPathEdit = new QLineEdit(this);
+  m_clangdPathEdit->setPlaceholderText("clangd");
+  m_clangdPathEdit->setToolTip(
+      tr("Path to the clangd language server executable."));
 
+  auto *clangdBrowseBtn = new QPushButton(tr("Browse…"), this);
+  clangdBrowseBtn->setFixedWidth(72);
+  connect(clangdBrowseBtn, &QPushButton::clicked, this, [this]() {
+    QString path =
+        QFileDialog::getOpenFileName(this, tr("Select Clangd Executable"));
+    if (!path.isEmpty())
+      m_clangdPathEdit->setText(path);
+  });
+  clangdRow->addWidget(m_clangdPathEdit);
+  clangdRow->addWidget(clangdBrowseBtn);
+  form->addRow(tr("Clangd Path:"), clangdRow);
+  // ── DAP Adapter Path ────────────────────────────────────────────────────
+  auto *dapRow = new QHBoxLayout();
+  m_dapAdapterEdit = new QLineEdit(this);
+  m_dapAdapterEdit->setPlaceholderText("lldb-dap");
+  m_dapAdapterEdit->setToolTip(tr("Path to the DAP server (e.g. lldb-dap)."));
+
+  auto *dapBrowseBtn = new QPushButton(tr("Browse…"), this);
+  dapBrowseBtn->setFixedWidth(72);
+  connect(dapBrowseBtn, &QPushButton::clicked, this, [this]() {
+    QString path = QFileDialog::getOpenFileName(this, tr("Select DAP Adapter"));
+    if (!path.isEmpty())
+      m_dapAdapterEdit->setText(path);
+  });
+  dapRow->addWidget(m_dapAdapterEdit);
+  dapRow->addWidget(dapBrowseBtn);
+  form->addRow(tr("DAP Adapter Path:"), dapRow);
+
+  // ── GDB Path ────────────────────────────────────────────────────────────
+  auto *gdbRow = new QHBoxLayout();
   m_gdbPathEdit = new QLineEdit(this);
   m_gdbPathEdit->setPlaceholderText("gdb");
   m_gdbPathEdit->setToolTip(
       tr("Full path to the GDB binary, e.g. /usr/bin/gdb or a custom build."));
-  form->addRow(tr("GDB Path:"), m_gdbPathEdit);
+
+  auto *gdbBrowseBtn = new QPushButton(tr("Browse…"), this);
+  gdbBrowseBtn->setFixedWidth(72);
+  connect(gdbBrowseBtn, &QPushButton::clicked, this, [this]() {
+    QString path = QFileDialog::getOpenFileName(this, tr("Select GDB Path"));
+    if (!path.isEmpty())
+      m_gdbPathEdit->setText(path);
+  });
+  gdbRow->addWidget(m_gdbPathEdit);
+  gdbRow->addWidget(gdbBrowseBtn);
+  form->addRow(tr("GDB Path:"), gdbRow);
 
   m_mpiExecEdit = new QLineEdit(this);
   m_mpiExecEdit->setPlaceholderText("mpiexec");
@@ -278,7 +327,8 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
   form->addRow(tr("Default Rank Count:"), m_rankBox);
 
   m_trapFpeCheck = new QCheckBox(tr("Trap FPE (NaN/Overflow)"), this);
-  m_trapFpeCheck->setToolTip(tr("Automatically set GDB to catch floating-point traps."));
+  m_trapFpeCheck->setToolTip(
+      tr("Automatically set GDB to catch floating-point traps."));
   form->addRow(QString(), m_trapFpeCheck);
 
   auto *note = new QLabel(
@@ -291,19 +341,31 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
 
   loadFromSettings();
 }
-
+QString DebuggerSettingsPage::clangdPath() const {
+  return m_clangdPathEdit->text();
+}
+QString DebuggerSettingsPage::dapAdapterPath() const {
+  return m_dapAdapterEdit->text();
+}
 QString DebuggerSettingsPage::gdbPath() const { return m_gdbPathEdit->text(); }
 QString DebuggerSettingsPage::mpiExecutable() const {
   return m_mpiExecEdit->text();
 }
 QString DebuggerSettingsPage::mpiArgs() const { return m_mpiArgsEdit->text(); }
 int DebuggerSettingsPage::defaultRanks() const { return m_rankBox->value(); }
-bool DebuggerSettingsPage::trapFpe() const { return m_trapFpeCheck->isChecked(); }
+bool DebuggerSettingsPage::trapFpe() const {
+  return m_trapFpeCheck->isChecked();
+}
 
 void DebuggerSettingsPage::loadFromSettings() {
   const auto ds =
       gridlock::core::ConfigManager::instance().getDebuggerSettings();
-  const auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+  const auto ps =
+      gridlock::core::ConfigManager::instance().loadProjectSettings();
+  m_clangdPathEdit->setText(
+      gridlock::core::ConfigManager::instance().getGlobalClangdPath());
+  m_dapAdapterEdit->setText(
+      gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath());
   m_gdbPathEdit->setText(QString::fromStdString(ps.customGdbPath));
   m_mpiExecEdit->setText(ds.mpiExecutable);
   m_mpiArgsEdit->setText(ds.mpiArgs);
@@ -490,7 +552,8 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   gpuRow->addStretch();
   form->addRow(tr("GPUs:"), gpuRow);
 
-  auto *tplLabel = new QLabel(tr("Script Template (Use <tt>{FILE}</tt> as a placeholder for the target source code):"),
+  auto *tplLabel = new QLabel(tr("Script Template (Use <tt>{FILE}</tt> as a "
+                                 "placeholder for the target source code):"),
                               container);
   tplLabel->setTextFormat(Qt::RichText);
   form->addRow(tplLabel);
@@ -603,14 +666,17 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget *parent) : QWidget(parent) {
   dirLayout->addWidget(m_dirEdit);
   auto *browseBtn = new QPushButton("Browse...", this);
   connect(browseBtn, &QPushButton::clicked, this, [this]() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Select Docset Directory", m_dirEdit->text());
-    if (!dir.isEmpty()) m_dirEdit->setText(dir);
+    QString dir = QFileDialog::getExistingDirectory(
+        this, "Select Docset Directory", m_dirEdit->text());
+    if (!dir.isEmpty())
+      m_dirEdit->setText(dir);
   });
   dirLayout->addWidget(browseBtn);
   layout->addLayout(dirLayout);
 
   m_autoDetectBtn = new QPushButton("Auto-Detect Needs", this);
-  connect(m_autoDetectBtn, &QPushButton::clicked, this, &DocsetSettingsPage::onAutoDetect);
+  connect(m_autoDetectBtn, &QPushButton::clicked, this,
+          &DocsetSettingsPage::onAutoDetect);
   layout->addWidget(m_autoDetectBtn, 0, Qt::AlignLeft);
 
   m_table = new QTableWidget(0, 1, this);
@@ -621,12 +687,15 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget *parent) : QWidget(parent) {
   loadFromSettings();
 }
 
-QString DocsetSettingsPage::docsetDirectory() const { return m_dirEdit->text(); }
+QString DocsetSettingsPage::docsetDirectory() const {
+  return m_dirEdit->text();
+}
 
 void DocsetSettingsPage::loadFromSettings() {
-  m_dirEdit->setText(gridlock::core::ConfigManager::instance().getDocsetDirectory());
+  m_dirEdit->setText(
+      gridlock::core::ConfigManager::instance().getDocsetDirectory());
   if (m_dirEdit->text().isEmpty()) {
-      m_dirEdit->setText(QDir::homePath() + "/.local/share/Zeal/Zeal/docsets");
+    m_dirEdit->setText(QDir::homePath() + "/.local/share/Zeal/Zeal/docsets");
   }
   refreshTable();
 }
@@ -641,7 +710,9 @@ void DocsetSettingsPage::refreshTable() {
 }
 
 void DocsetSettingsPage::onAutoDetect() {
-  QStringList suggestions = gridlock::core::DocsetManager::instance().suggestDocsets(QDir::currentPath());
+  QStringList suggestions =
+      gridlock::core::DocsetManager::instance().suggestDocsets(
+          QDir::currentPath());
   if (suggestions.isEmpty()) {
     m_autoDetectBtn->setText("No extra docsets needed");
   } else {
@@ -786,6 +857,11 @@ void PreferencesDialog::apply() {
   s.setValue("behavior/focus_on_stop", m_behaviorPage->focusOnStop());
 
   // ── Debugger — single source of truth via ConfigManager ────────────────
+  gridlock::core::ConfigManager::instance().setGlobalClangdPath(
+      m_debuggerPage->clangdPath());
+  gridlock::core::ConfigManager::instance().setGlobalDapAdapterPath(
+      m_debuggerPage->dapAdapterPath());
+
   gridlock::core::DebuggerSettings ds;
   ds.gdbPath = m_debuggerPage->gdbPath();
   ds.mpiExecutable = m_debuggerPage->mpiExecutable();

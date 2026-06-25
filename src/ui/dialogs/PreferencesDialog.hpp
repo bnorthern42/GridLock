@@ -6,12 +6,13 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QTableWidget>
 #include <QTextEdit>
 #include <QWidget>
-#include <QTableWidget>
-#include <QPushButton>
+
 namespace gridlock::ui {
 
 // ─── Individual settings pages ─────────────────────────────────────────────
@@ -64,13 +65,15 @@ private:
   QComboBox *m_focusOnStopCheck = nullptr;
 };
 
-/// Sole owner of GDB path, MPI executable, MPI args, and default rank count.
-/// Persists through ConfigManager::saveDebuggerSettings().
+/// Sole owner of DAP/GDB paths, MPI executable, MPI args, and default rank
+/// count. Persists through ConfigManager.
 class DebuggerSettingsPage : public QWidget {
   Q_OBJECT
 public:
   explicit DebuggerSettingsPage(QWidget *parent = nullptr);
 
+  QString clangdPath() const;
+  QString dapAdapterPath() const;
   QString gdbPath() const;
   QString mpiExecutable() const;
   QString mpiArgs() const;
@@ -79,6 +82,8 @@ public:
   void loadFromSettings();
 
 private:
+  QLineEdit *m_clangdPathEdit = nullptr;
+  QLineEdit *m_dapAdapterEdit = nullptr;
   QLineEdit *m_gdbPathEdit = nullptr;
   QLineEdit *m_mpiExecEdit = nullptr;
   QLineEdit *m_mpiArgsEdit = nullptr;
