@@ -80,10 +80,20 @@ std::optional<SessionState> SessionManager::loadSession(const QString& filePath)
             }
         }
 
+        addMruSession(filePath);
+        emit sessionLoaded(filePath);
         return state;
     } catch (const std::exception& e) {
         qWarning() << "Exception while loading session:" << e.what();
         return std::nullopt;
+    }
+}
+
+void SessionManager::addMruSession(const QString& filePath) {
+    m_mruSessions.removeAll(filePath);
+    m_mruSessions.prepend(filePath);
+    if (m_mruSessions.size() > MAX_MRU) {
+        m_mruSessions.removeLast();
     }
 }
 

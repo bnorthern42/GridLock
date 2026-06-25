@@ -91,6 +91,7 @@ moc_headers = [
   'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp',
   'src/core/managers/ThemeManager.hpp',
+  'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/ui/docks/VariablesDockWidget.hpp',
 ]
@@ -246,6 +247,7 @@ ui_test_moc_headers = [
   'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp',
   'src/core/managers/ThemeManager.hpp',
+  'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/ui/docks/VariablesDockWidget.hpp',
 ]
@@ -286,6 +288,31 @@ gridlock_config_tests = executable('gridlock_config_tests',
 )
 
 test('config_tests', gridlock_config_tests)
+
+config_engine_test_src = [
+  'tests/test_config_engine.cpp',
+  'src/core/managers/ConfigManager.cpp',
+  'src/core/managers/SessionManager.cpp'
+]
+
+config_engine_test_moc_headers = [
+  'tests/test_config_engine.hpp',
+  'src/core/managers/SessionManager.hpp'
+]
+
+processed_config_engine_test_files = qt6.compile_moc(
+  headers : config_engine_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_config_engine_tests = executable('gridlock_config_engine_tests',
+  config_engine_test_src,
+  processed_config_engine_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('config_engine_tests', gridlock_config_engine_tests)
 
 docset_test_src = [
   'tests/test_docset.cpp',

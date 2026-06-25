@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <fstream>
 #include <iostream>
+#include <QStandardPaths>
 
 namespace gridlock::core {
 
@@ -21,12 +22,26 @@ void ConfigManager::setWorkspace(const QString& path) {
 }
 
 void ConfigManager::loadConfig() {
-    QString configPath = "gridlock_config.toml";
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
+        configDir = qEnvironmentVariable("GRIDLOCK_TEST_CONFIG_DIR");
+    }
 
-    if (!QFile::exists(configPath)) {
-        QFile file(configPath);
+    QDir dir(configDir);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+    m_globalConfigPath = dir.filePath("config.toml");
+
+    if (!QFile::exists(m_globalConfigPath)) {
+        QFile file(m_globalConfigPath);
         if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
             QTextStream out(&file);
+            out << "[global]\n";
+            out << "dap_adapter_path = \"lldb-dap\"\n";
+            out << "gdb_path = \"gdb\"\n";
+            out << "mpi_launch_args = \"--oversubscribe\"\n\n";
+
             out << "[theme.source]\n";
             out << "background = \"#1e1e1e\"\n";
             out << "text = \"#f0f0f0\"\n";
@@ -45,7 +60,7 @@ void ConfigManager::loadConfig() {
     }
 
     try {
-        m_config = toml::parse_file(configPath.toStdString());
+        m_config = toml::parse_file(m_globalConfigPath.toStdString());
     } catch (const toml::parse_error& err) {
         std::cerr << "Parsing failed:\n" << err << "\n";
         m_config = toml::table();
@@ -76,6 +91,45 @@ QString ConfigManager::getAssemblyRegister() const {
 
 QString ConfigManager::getAssemblyAddress() const {
     return QString::fromStdString(m_config["theme"]["assembly"]["address"].value_or("#555555"));
+}
+
+// ─── Global settings (TOML) ──────────────────────────────────────────────────
+
+QString ConfigManager::getGlobalDapAdapterPath() const {
+    return QString::fromStdString(m_config["global"]["dap_adapter_path"].value_or("lldb-dap"));
+}
+
+void ConfigManager::setGlobalDapAdapterPath(const QString& path) {
+    if (!m_config.contains("global")) m_config.insert("global", toml::table{});
+    m_config["global"].as_table()->insert_or_assign("dap_adapter_path", path.toStdString());
+    saveGlobalConfig();
+}
+
+QString ConfigManager::getGlobalGdbPath() const {
+    return QString::fromStdString(m_config["global"]["gdb_path"].value_or("gdb"));
+}
+
+void ConfigManager::setGlobalGdbPath(const QString& path) {
+    if (!m_config.contains("global")) m_config.insert("global", toml::table{});
+    m_config["global"].as_table()->insert_or_assign("gdb_path", path.toStdString());
+    saveGlobalConfig();
+}
+
+QString ConfigManager::getGlobalMpiArgs() const {
+    return QString::fromStdString(m_config["global"]["mpi_launch_args"].value_or("--oversubscribe"));
+}
+
+void ConfigManager::setGlobalMpiArgs(const QString& args) {
+    if (!m_config.contains("global")) m_config.insert("global", toml::table{});
+    m_config["global"].as_table()->insert_or_assign("mpi_launch_args", args.toStdString());
+    saveGlobalConfig();
+}
+
+void ConfigManager::saveGlobalConfig() {
+    std::ofstream out(m_globalConfigPath.toStdString());
+    if (out.is_open()) {
+        out << m_config;
+    }
 }
 
 // ─── Debugger settings — QSettings-backed single source of truth ─────────────

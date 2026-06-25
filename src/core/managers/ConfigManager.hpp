@@ -111,6 +111,17 @@ public:
     void setWorkspace(const QString& path);
     QString workspacePath() const { return m_workspacePath; }
 
+    QString getGlobalDapAdapterPath() const;
+    void setGlobalDapAdapterPath(const QString& path);
+
+    QString getGlobalGdbPath() const;
+    void setGlobalGdbPath(const QString& path);
+
+    QString getGlobalMpiArgs() const;
+    void setGlobalMpiArgs(const QString& args);
+
+    void saveGlobalConfig();
+
 private:
     ConfigManager();
     ~ConfigManager() = default;
@@ -120,6 +131,7 @@ private:
 
     toml::table m_config;
     QString m_workspacePath;
+    QString m_globalConfigPath;
 
     static constexpr const char* kOrg = "GridLock";
     static constexpr const char* kApp = "Debugger";
