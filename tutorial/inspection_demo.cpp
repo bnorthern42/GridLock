@@ -21,6 +21,17 @@ int main(int argc, char** argv) {
         data[i].coords.z = i * 3.3f;
     }
 
+    // GridLock Tutorial: Variable Inspection
+    // --------------------------------------
+    // This demo creates an array of deeply nested structures to demonstrate how
+    // GridLock handles complex data types in its Variables view.
+    //
+    // Instructions:
+    // 1. Look at the Variables Dock Widget (usually on the right side).
+    // 2. Expand the `data` array to inspect the elements.
+    // 3. Notice how GridLock handles arrays and nested structs gracefully.
+    // 4. Try pinning `data[1]` to the Watch Expressions tab using the context menu.
+
     // Inspect 'data' here
     printf("Inspection Demo Running...\n");
 

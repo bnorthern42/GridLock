@@ -51,7 +51,7 @@ private slots:
         QString relativePath = "tutorial/inspection_demo.cpp";
         QSet<int> expectedLines = gridlock::ui::TutorialDialog::getBreakpointsForFile(relativePath);
         QCOMPARE(expectedLines.size(), 1);
-        QVERIFY(expectedLines.contains(27));
+        QVERIFY(expectedLines.contains(76));
         
         QString absPath = QFileInfo(relativePath).absoluteFilePath();
         
