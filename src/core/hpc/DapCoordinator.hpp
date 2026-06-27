@@ -48,6 +48,7 @@ public:
     void pauseExecution(int threadId) override;
     void launchParallelSession(const QString& binaryPath, int ranks) override;
     pid_t getPidForRank(int rankId) const override { return m_rankToPid.value(rankId, 0); }
+    QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
 
 signals:
     void executionStopped(int rankId, const QString& reason);

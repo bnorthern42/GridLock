@@ -450,8 +450,12 @@ void MainWindow::setupToolbar() {
 
   m_runAction = new QAction("▶ Run Target", this);
   connect(m_runAction, &QAction::triggered, this, [this]() {
+    auto settings = gridlock::core::ConfigManager::instance().loadProjectSettings();
+    QString binary = m_coordinator && !m_coordinator->getCurrentBinaryPath().isEmpty() ? 
+                     m_coordinator->getCurrentBinaryPath() : 
+                     QString::fromStdString(settings.targetBinary);
     auto cmd = std::make_unique<gridlock::core::commands::LaunchCommand>(
-        this, "build/mpi_mm_bin",
+        this, binary,
         gridlock::core::ConfigManager::instance().getDefaultRanks());
     executeCommand(std::move(cmd));
   });

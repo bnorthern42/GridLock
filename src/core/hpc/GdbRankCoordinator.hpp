@@ -19,6 +19,7 @@ public:
   void startDebugSession(int rankCount, const QString &executable);
   void launchParallelSession(const QString &executable, int rankCount) override;
   pid_t getPidForRank([[maybe_unused]] int rankId) const override { return 0; }
+  QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
   void insertBreakpoint(const QString &location);
   void broadcastBreakpoint(const QString &file, int line, bool isSet, const QString& condition = QString());
   void broadcastCommand(const QString &cmd);
@@ -87,6 +88,7 @@ private:
   QMap<int, QMap<QString, QString>>
       m_varNameRevMap; // rankId -> (varId -> varName)
   std::vector<QString> m_watchVariables;
+  QString m_currentBinaryPath;
 };
 
 } // namespace gridlock

@@ -102,6 +102,7 @@ void GdbRankCoordinator::startDebugSession(int rankCount,
 
 void GdbRankCoordinator::launchParallelSession(const QString &executable,
                                                int explicitRankCount) {
+  m_currentBinaryPath = executable;
   // Read all launch parameters from ConfigManager — the single source of truth.
   const auto ds = core::ConfigManager::instance().getDebuggerSettings();
   const auto hs = core::ConfigManager::instance().getHpcSettings();

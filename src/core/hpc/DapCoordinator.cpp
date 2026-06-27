@@ -18,7 +18,13 @@ DapCoordinator::DapCoordinator(QObject *parent)
           &DapCoordinator::handleProcessError);
   connect(m_process, &QProcess::finished, this,
           &DapCoordinator::handleProcessFinished);
-  connect(m_process, &QProcess::started, this, &DapCoordinator::adapterStarted);
+  connect(m_process, &QProcess::started, this, [this]() {
+    emit adapterStarted();
+    qDebug() << "[DAP] Adapter process successfully started.";
+    m_state = SessionState::Running; 
+    emit stateChanged(m_state);
+    initializeAdapter();
+  });
 }
 
 DapCoordinator::~DapCoordinator() {
@@ -33,33 +39,6 @@ void DapCoordinator::startAdapter(const QString &program) {
     qWarning() << "DAP Adapter is already active or launching.";
     return;
   }
-
-  // Ensure we don't leak connections, but don't disconnect everything
-  // m_process->disconnect(); // Removed because it breaks constructor connections
-
-  // 1. Capture errors so we know WHY it failed
-  connect(m_process, &QProcess::errorOccurred, this,
-          [this](QProcess::ProcessError error) {
-            qDebug() << "[DAP] Process failed to launch! Error code:" << error;
-            m_state = SessionState::Disconnected;
-            emit stateChanged(m_state);
-          });
-
-  // 2. Confirm the process actually started
-  connect(m_process, &QProcess::started, this, [this]() {
-    qDebug() << "[DAP] Adapter process successfully started.";
-    m_state = SessionState::Running; // Or whatever your 'Ready' state is
-    emit stateChanged(m_state);
-    initializeAdapter();
-  });
-
-  // 3. Monitor for premature crashes
-  connect(m_process, &QProcess::finished, this,
-          [this](int exitCode, QProcess::ExitStatus exitStatus) {
-            qDebug() << "[DAP] Process exited with code:" << exitCode;
-            m_state = SessionState::Disconnected;
-            emit stateChanged(m_state);
-          });
 
   m_state = SessionState::Launching;
   emit stateChanged(m_state);
