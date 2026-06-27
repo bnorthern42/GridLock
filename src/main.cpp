@@ -17,6 +17,34 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QProcess>
+#include <cstdio>
+
+bool g_isVerbose = false;
+
+void gridlockMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+    if (!g_isVerbose && (type == QtDebugMsg || type == QtInfoMsg)) {
+        return;
+    }
+
+    QByteArray localMsg = msg.toLocal8Bit();
+    switch (type) {
+    case QtDebugMsg:
+        fprintf(stderr, "[DEBUG] %s\n", localMsg.constData());
+        break;
+    case QtInfoMsg:
+        fprintf(stderr, "[INFO] %s\n", localMsg.constData());
+        break;
+    case QtWarningMsg:
+        fprintf(stderr, "[WARNING] %s\n", localMsg.constData());
+        break;
+    case QtCriticalMsg:
+        fprintf(stderr, "[CRITICAL] %s\n", localMsg.constData());
+        break;
+    case QtFatalMsg:
+        fprintf(stderr, "[FATAL] %s\n", localMsg.constData());
+        abort();
+    }
+}
 
 int main(int argc, char *argv[]) {
   // Wayland/Mesa environment overrides to prevent damage loops
@@ -69,6 +97,9 @@ int main(int argc, char *argv[]) {
 
   gridlock::core::utils::CliParser parser;
   parser.process(app);
+
+  g_isVerbose = parser.isVerbose();
+  qInstallMessageHandler(gridlockMessageHandler);
 
   gridlock::ui::MainWindow window;
 

@@ -7,6 +7,7 @@ namespace utils {
 CliParser::CliParser() 
     : m_testModeOption("test-mode", "Run interactive visual simulation tests")
     , m_tutorialModeOption("tutorial-mode", "Launch the GridLock interactive tutorial suite")
+    , m_verboseOption(QStringList() << "v" << "verbose", "Enable verbose debug output")
 {
     m_parser.setApplicationDescription(
         "GridLock MPI Debugger - v0.5.2\nFeaturing the new Zero-Copy Multi-Rank "
@@ -22,6 +23,7 @@ CliParser::CliParser()
     
     m_parser.addOption(m_testModeOption);
     m_parser.addOption(m_tutorialModeOption);
+    m_parser.addOption(m_verboseOption);
 }
 
 bool CliParser::parse(const QStringList& args) {
@@ -38,6 +40,10 @@ bool CliParser::isTutorialMode() const {
 
 bool CliParser::isTestMode() const {
     return m_parser.isSet(m_testModeOption);
+}
+
+bool CliParser::isVerbose() const {
+    return m_parser.isSet(m_verboseOption);
 }
 
 QString CliParser::getTestFilePath() const {
