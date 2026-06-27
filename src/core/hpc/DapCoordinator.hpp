@@ -16,7 +16,8 @@ enum class SessionState {
     Launching,
     Queued,
     Running,
-    Paused
+    Paused,
+    Terminating
 };
 
 class DapCoordinator : public IBackendCoordinator {

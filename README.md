@@ -67,6 +67,7 @@ sudo meson install -C build
 ./build/gridlock --test-mode
 
 # Tutorial mode (experimental, WIP feature for testing debugger integrations)
+# Note: This feature currently only works when building locally and is not supported in the AppImage.
 ./build/gridlock --tutorial-mode
 ```
 

@@ -89,6 +89,9 @@ void DapCoordinator::initializeAdapter() {
 
 int DapCoordinator::sendRequest(const QString &command,
                                 const QJsonObject &arguments) {
+  if ((m_state == SessionState::Terminating || m_state == SessionState::Disconnected) && command != "disconnect") {
+      return -1;
+  }
   int seq = m_sequenceNumber++;
   QJsonObject request;
   request["type"] = "request";
@@ -102,7 +105,7 @@ int DapCoordinator::sendRequest(const QString &command,
 }
 
 void DapCoordinator::sendRawMessage(const QJsonObject &messageObj) {
-  if (m_state != SessionState::Running && m_state != SessionState::Paused) { 
+  if (m_state != SessionState::Running && m_state != SessionState::Paused && m_state != SessionState::Terminating) { 
     return; 
   }
 
@@ -281,6 +284,9 @@ void DapCoordinator::readMemory(int rankId, const QString &memoryReference,
 }
 
 void DapCoordinator::terminateSession() {
+  m_state = SessionState::Terminating;
+  emit stateChanged(m_state);
+
   if (m_slurmJobId != -1) {
     qDebug() << "Executing scancel for job" << m_slurmJobId << "...";
     QProcess::execute("scancel", {QString::number(m_slurmJobId)});
