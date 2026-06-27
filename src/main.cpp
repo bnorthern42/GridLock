@@ -5,7 +5,7 @@
 #include <QApplication>
 #include <QColor>
 #include "core/utils/CliParser.hpp"
-#include "ui/tutorial/TutorialWizard.hpp"
+#include "ui/tutorial/TutorialDialog.hpp"
 #include <QCommandLineParser>
 #include <QFile>
 #include <QIcon>
@@ -78,10 +78,10 @@ int main(int argc, char *argv[]) {
   window.show();
 
   if (parser.isTutorialMode()) {
-    gridlock::ui::tutorial::TutorialWizard wizard(&window);
-    if (wizard.exec() == QDialog::Accepted) {
-        // Logic for launching tutorial is handled by wizard
-    } else {
+    gridlock::ui::TutorialDialog dialog(&window);
+    QObject::connect(&dialog, &gridlock::ui::TutorialDialog::launchTutorialRequested,
+                     &window, &gridlock::ui::MainWindow::onTutorialLaunchRequested);
+    if (dialog.exec() == QDialog::Rejected) {
         return 0; // Exit if user cancels
     }
   }

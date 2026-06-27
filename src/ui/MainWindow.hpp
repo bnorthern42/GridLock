@@ -82,6 +82,7 @@ public slots:
     void loadSourceFile(const QString& filePath);
     void saveSessionAs();
     void loadSession();
+    void onTutorialLaunchRequested(const QString& absoluteFilePath);
 
 
 protected:
@@ -125,7 +126,7 @@ private:
 
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;
-    QString m_currentFile = "tests/mpi_mm.c";
+    QString m_currentFile;
     QMap<QString, QSet<int>> m_persistentBreakpoints;
 };
 

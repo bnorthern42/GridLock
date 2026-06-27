@@ -183,7 +183,7 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
         isSet = true;
     }
     m_lineNumberArea->update();
-    QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
+    QString emitPath = m_currentFilePath;
     emit breakpointToggled(emitPath, lineNum, isSet, QString());
 }
 
@@ -238,7 +238,7 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
             int lineNum = blockNumber + 1;
-            QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
+            QString emitPath = m_currentFilePath;
 
             if (event->button() == Qt::RightButton) {
                 // Right click opens condition dialog
@@ -353,7 +353,7 @@ void SourceCodeView::handleHoverTimeout() {
 
     int line = cursor.blockNumber();
     int character = cursor.positionInBlock();
-    QString emitPath = m_currentFilePath.isEmpty() ? "tests/mpi_mm.c" : m_currentFilePath;
+    QString emitPath = m_currentFilePath;
     emit semanticHoverRequested(emitPath, line, character, m_lastGlobalMousePos);
 }
 

@@ -56,8 +56,7 @@ src_files = [
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
-  'src/ui/tutorial/TutorialModel.cpp',
-  'src/ui/tutorial/TutorialWizard.cpp',
+  'src/ui/tutorial/TutorialDialog.cpp',
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -97,8 +96,7 @@ moc_headers = [
   'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/ui/docks/VariablesDockWidget.hpp',
-  'src/ui/tutorial/TutorialModel.hpp',
-  'src/ui/tutorial/TutorialWizard.hpp',
+  'src/ui/tutorial/TutorialDialog.hpp',
 ]
 
 # Process Qt6 files
@@ -806,11 +804,12 @@ test('mi_parser_tests', gridlock_mi_parser_tests)
 tutorial_test_src = [
   'tests/test_tutorial.cpp',
   'src/core/utils/CliParser.cpp',
-  'src/ui/tutorial/TutorialModel.cpp'
+  'src/core/managers/ConfigManager.cpp',
+  'src/ui/tutorial/TutorialDialog.cpp'
 ]
 
 tutorial_test_moc_headers = [
-  'src/ui/tutorial/TutorialModel.hpp'
+  'src/ui/tutorial/TutorialDialog.hpp'
 ]
 
 processed_tutorial_test_files = qt6.compile_moc(

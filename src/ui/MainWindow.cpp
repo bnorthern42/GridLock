@@ -88,15 +88,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         }
       });
 
-  loadSourceFile("tests/mpi_mm.c");
-
   // Load offline persistence TOML breakpoints
   m_persistentBreakpoints =
       gridlock::core::ConfigManager::instance().getBreakpoints();
-  QString absolutePath = QFileInfo("tests/mpi_mm.c").absoluteFilePath();
-  if (m_persistentBreakpoints.contains(absolutePath) && getSourceCodeView()) {
-    getSourceCodeView()->setBreakpoints(m_persistentBreakpoints[absolutePath]);
-  }
 }
 
 void MainWindow::executeCommand(
@@ -878,7 +872,7 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   if (m_currentFile.isEmpty() ||
       (getSourceCodeView() &&
        getSourceCodeView()->toPlainText().trimmed().isEmpty())) {
-    loadSourceFile("tests/mpi_mm.c");
+    // Graceful fallback removed
   }
 
   // QProcess instances natively. Notice we REMOVED the QTimer and "-exec-run"
@@ -984,6 +978,28 @@ void MainWindow::loadSession() {
     m_focusedRank = state.selectedRanks.front();
     onRankSelected(m_focusedRank);
   }
+}
+
+void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
+    loadSourceFile(absoluteFilePath);
+    
+    QFileInfo fi(absoluteFilePath);
+    QString compiler = fi.suffix() == "c" ? "mpicc" : "mpic++";
+    QString outDir = QDir::tempPath();
+    QString outBin = outDir + "/" + fi.baseName() + "_demo";
+
+    QProcess proc;
+    proc.start(compiler, QStringList() << absoluteFilePath << "-g" << "-O0" << "-o" << outBin);
+    proc.waitForFinished();
+    
+    if (proc.exitCode() == 0) {
+        int ranks = (fi.baseName() == "deadlock_demo") ? 2 : 3;
+        startDebuggingSession(outBin, ranks);
+    } else {
+        if (m_terminalDock) {
+            m_terminalDock->appendError("Tutorial compilation failed:\n" + proc.readAllStandardError());
+        }
+    }
 }
 
 } // namespace gridlock::ui

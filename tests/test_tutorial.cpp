@@ -4,8 +4,12 @@
 #include <QSignalSpy>
 
 // We will mock or include the models here
-#include "../src/ui/tutorial/TutorialModel.hpp"
+#include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/core/utils/CliParser.hpp"
+#include "../src/core/managers/ConfigManager.hpp"
+#include <QFileInfo>
+#include <QDir>
+#include <QSet>
 
 class TestTutorial : public QObject {
     Q_OBJECT
@@ -39,17 +43,31 @@ private slots:
     }
 
     void testTutorialModelInitialization() {
-        gridlock::ui::tutorial::TutorialModel model;
+        // Obsolete as TutorialModel is removed
+    }
+
+    void testBreakpointInjection() {
+        // Find inspection_demo.cpp
+        QString relativePath = "tutorial/inspection_demo.cpp";
+        QSet<int> expectedLines = gridlock::ui::TutorialDialog::getBreakpointsForFile(relativePath);
+        QCOMPARE(expectedLines.size(), 1);
+        QVERIFY(expectedLines.contains(27));
         
-        QCOMPARE(model.rowCount(), 5);
+        QString absPath = QFileInfo(relativePath).absoluteFilePath();
         
-        QModelIndex index0 = model.index(0, 0);
-        QCOMPARE(model.data(index0, Qt::DisplayRole).toString(), QString("Deadlock Demo"));
-        QCOMPARE(model.data(index0, Qt::UserRole).toString(), QString("tutorial/deadlock_demo.c"));
+        // Clear existing breakpoints
+        QMap<QString, QSet<int>> emptyBps;
+        gridlock::core::ConfigManager::instance().saveBreakpoints(emptyBps);
         
-        QModelIndex index1 = model.index(1, 0);
-        QCOMPARE(model.data(index1, Qt::DisplayRole).toString(), QString("Inspection Demo"));
-        QCOMPARE(model.data(index1, Qt::UserRole).toString(), QString("tutorial/inspection_demo.cpp"));
+        // Simulate injection
+        QMap<QString, QSet<int>> currentBps = gridlock::core::ConfigManager::instance().getBreakpoints();
+        currentBps[absPath].unite(expectedLines);
+        gridlock::core::ConfigManager::instance().saveBreakpoints(currentBps);
+        
+        // Verify
+        QMap<QString, QSet<int>> savedBps = gridlock::core::ConfigManager::instance().getBreakpoints();
+        QVERIFY(savedBps.contains(absPath));
+        QCOMPARE(savedBps[absPath], expectedLines);
     }
 };
 
