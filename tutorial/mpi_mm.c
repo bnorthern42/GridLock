@@ -3,16 +3,7 @@
  * DESCRIPTION:
  *   MPI Matrix Multiply - C Version
  *
- *   This version intentionally injects a deterministic MPI deadlock so GridLock
- *   can test deadlock detection.
- *
- *   Deadlock pattern:
- *     rank 0 synchronous-sends to rank 1
- *     rank 1 synchronous-sends to rank 2
- *     rank 2 synchronous-sends to rank 0
- *
- *   Since MPI_Ssend does not complete until the matching receive is posted,
- *   all three ranks block forever before any receive is reached.
+ *   This version performs a simple matrix multiplication.
  *
  * BUILD:
  *   mpicc -O0 -g -Wall -Wextra -o mpi_mm_deadlock mpi_mm_deadlock.c
@@ -33,56 +24,7 @@
 #define FROM_MASTER 1 /* setting a message type */
 #define FROM_WORKER 2 /* setting a message type */
 
-#define ENABLE_PURPOSEFUL_DEADLOCK 1
-#define DEADLOCK_TAG 999
 
-static void inject_purposeful_deadlock(int taskid, int numtasks) {
-  int token = taskid;
-  int recv_token = -1;
-  MPI_Status status;
-
-  if (numtasks != 3) {
-    if (taskid == MASTER) {
-      fprintf(stderr, "This deadlock test expects exactly 3 MPI ranks.\n"
-                      "Run with:\n"
-                      "  mpirun -np 3 ./mpi_mm_deadlock\n");
-    }
-
-    MPI_Abort(MPI_COMM_WORLD, 1);
-    exit(1);
-  }
-
-  MPI_Barrier(MPI_COMM_WORLD);
-
-  if (taskid == 0) {
-    printf(
-        "[rank 0] DEADLOCK TEST: MPI_Ssend to rank 1, then recv from rank 2\n");
-    fflush(stdout);
-
-    MPI_Ssend(&token, 1, MPI_INT, 1, DEADLOCK_TAG, MPI_COMM_WORLD);
-
-    /* Never reached */
-    MPI_Recv(&recv_token, 1, MPI_INT, 2, DEADLOCK_TAG, MPI_COMM_WORLD, &status);
-  } else if (taskid == 1) {
-    printf(
-        "[rank 1] DEADLOCK TEST: MPI_Ssend to rank 2, then recv from rank 0\n");
-    fflush(stdout);
-
-    MPI_Ssend(&token, 1, MPI_INT, 2, DEADLOCK_TAG, MPI_COMM_WORLD);
-
-    /* Never reached */
-    MPI_Recv(&recv_token, 1, MPI_INT, 0, DEADLOCK_TAG, MPI_COMM_WORLD, &status);
-  } else if (taskid == 2) {
-    printf(
-        "[rank 2] DEADLOCK TEST: MPI_Ssend to rank 0, then recv from rank 1\n");
-    fflush(stdout);
-
-    MPI_Ssend(&token, 1, MPI_INT, 0, DEADLOCK_TAG, MPI_COMM_WORLD);
-
-    /* Never reached */
-    MPI_Recv(&recv_token, 1, MPI_INT, 1, DEADLOCK_TAG, MPI_COMM_WORLD, &status);
-  }
-}
 
 int main(int argc, char *argv[]) {
   int numtasks,              /* number of tasks in partition */
@@ -105,9 +47,7 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank(MPI_COMM_WORLD, &taskid);
   MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
 
-#if ENABLE_PURPOSEFUL_DEADLOCK
-  inject_purposeful_deadlock(taskid, numtasks);
-#endif
+
 
   if (numtasks < 2) {
     printf("Need at least two MPI tasks. Quitting...\n");

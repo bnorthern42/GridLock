@@ -55,6 +55,9 @@ src_files = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
+  'src/core/utils/CliParser.cpp',
+  'src/ui/tutorial/TutorialModel.cpp',
+  'src/ui/tutorial/TutorialWizard.cpp',
 ]
 
 # Headers for MOC (Meta-Object Compiler)
@@ -94,6 +97,8 @@ moc_headers = [
   'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/ui/docks/VariablesDockWidget.hpp',
+  'src/ui/tutorial/TutorialModel.hpp',
+  'src/ui/tutorial/TutorialWizard.hpp',
 ]
 
 # Process Qt6 files
@@ -798,8 +803,34 @@ gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
 
 test('mi_parser_tests', gridlock_mi_parser_tests)
 
+tutorial_test_src = [
+  'tests/test_tutorial.cpp',
+  'src/core/utils/CliParser.cpp',
+  'src/ui/tutorial/TutorialModel.cpp'
+]
+
+tutorial_test_moc_headers = [
+  'src/ui/tutorial/TutorialModel.hpp'
+]
+
+processed_tutorial_test_files = qt6.compile_moc(
+  headers : tutorial_test_moc_headers,
+  sources : 'tests/test_tutorial.cpp',
+  dependencies: qt6_dep
+)
+
+gridlock_tutorial_tests = executable('gridlock_tutorial_tests',
+  tutorial_test_src,
+  processed_tutorial_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('tutorial_tests', gridlock_tutorial_tests)
+
+
 custom_target('mpi_mm_bin',
-  input: 'tests/mpi_mm.c',
+  input: 'tutorial/mpi_mm.c',
   output: 'mpi_mm_bin',
   command: ['mpicxx', '@INPUT@', '-g', '-O0', '-o', '@OUTPUT@'],
   build_by_default: true)
