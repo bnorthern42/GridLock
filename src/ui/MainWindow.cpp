@@ -23,6 +23,7 @@
 #include "../core/managers/SpackManager.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizard.hpp"
+#include "tutorial/TutorialDialog.hpp"
 #include "docks/TerminalDock.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
@@ -395,7 +396,7 @@ void MainWindow::setupMenu() {
                              << "ls-remote" << "--tags" << "--sort=v:refname"
                              << "https://github.com/bnorthern42/GridLock.git");
     gitProc.waitForFinished(3000);
-    QString latestTag = "v0.5.1"; // default fallback
+    QString latestTag = "v0.5.2"; // default fallback
     if (gitProc.exitStatus() == QProcess::NormalExit &&
         gitProc.exitCode() == 0) {
       QString output =
@@ -984,6 +985,10 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
     loadSourceFile(absoluteFilePath);
     
     QFileInfo fi(absoluteFilePath);
+    if (m_projectExplorerWidget) {
+        m_projectExplorerWidget->setRootPath(fi.absolutePath());
+    }
+
     QString compiler = fi.suffix() == "c" ? "mpicc" : "mpic++";
     QString outDir = QDir::tempPath();
     QString outBin = outDir + "/" + fi.baseName() + "_demo";
@@ -993,6 +998,28 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
     proc.waitForFinished();
     
     if (proc.exitCode() == 0) {
+        // Load the tutorial breakpoints injected into workspace.toml
+        m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
+        
+        // Push breakpoints to editor and coordinator
+        if (m_editorTabManager) {
+            if (auto* view = m_editorTabManager->getSourceCodeViewForFile(absoluteFilePath)) {
+                view->setBreakpoints(m_persistentBreakpoints[absoluteFilePath]);
+            }
+        }
+        
+        if (m_coordinator) {
+            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+                for (int line : m_persistentBreakpoints[absoluteFilePath]) {
+                    gdbCoord->broadcastBreakpoint(absoluteFilePath, line, true, QString());
+                }
+            } else if (auto* dapCoord = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+                for (int line : m_persistentBreakpoints[absoluteFilePath]) {
+                    dapCoord->toggleBreakpoint(absoluteFilePath, line);
+                }
+            }
+        }
+        
         int ranks = (fi.baseName() == "deadlock_demo") ? 2 : 3;
         startDebuggingSession(outBin, ranks);
     } else {
@@ -1000,6 +1027,17 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
             m_terminalDock->appendError("Tutorial compilation failed:\n" + proc.readAllStandardError());
         }
     }
+}
+
+bool MainWindow::execTutorialDialog() {
+    gridlock::ui::TutorialDialog dialog(this);
+    QObject::connect(&dialog, &gridlock::ui::TutorialDialog::launchTutorialRequested,
+                     this, &gridlock::ui::MainWindow::onTutorialLaunchRequested);
+    if (dialog.exec() == QDialog::Accepted) {
+        show();
+        return true;
+    }
+    return false;
 }
 
 } // namespace gridlock::ui

@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
   // Set org/app identity so QSettings keys are consistent everywhere.
   QApplication::setOrganizationName("GridLock");
   QApplication::setApplicationName("GridLock");
-  QApplication::setApplicationVersion("0.5.1");
+  QApplication::setApplicationVersion("0.5.2");
 
   // CRITICAL FOR WAYLAND:
   QGuiApplication::setDesktopFileName("gridlock");
@@ -75,15 +75,12 @@ int main(int argc, char *argv[]) {
   auto *backend = new DapCoordinator(&window);
   window.setCoordinator(backend);
 
-  window.show();
-
   if (parser.isTutorialMode()) {
-    gridlock::ui::TutorialDialog dialog(&window);
-    QObject::connect(&dialog, &gridlock::ui::TutorialDialog::launchTutorialRequested,
-                     &window, &gridlock::ui::MainWindow::onTutorialLaunchRequested);
-    if (dialog.exec() == QDialog::Rejected) {
+    if (!window.execTutorialDialog()) {
         return 0; // Exit if user cancels
     }
+  } else {
+    window.show();
   }
 
   if (parser.isTestMode()) {

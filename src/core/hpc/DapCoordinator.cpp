@@ -19,11 +19,14 @@ DapCoordinator::DapCoordinator(QObject *parent)
   connect(m_process, &QProcess::finished, this,
           &DapCoordinator::handleProcessFinished);
   connect(m_process, &QProcess::started, this, &DapCoordinator::adapterStarted);
-  connect(m_process, &QProcess::started, this,
-          &DapCoordinator::initializeAdapter);
 }
 
-DapCoordinator::~DapCoordinator() { stopAdapter(); }
+DapCoordinator::~DapCoordinator() {
+    if (m_process) {
+        m_process->disconnect();
+    }
+    stopAdapter();
+}
 
 void DapCoordinator::startAdapter(const QString &program) {
   if (m_state != SessionState::Disconnected) {
@@ -31,8 +34,8 @@ void DapCoordinator::startAdapter(const QString &program) {
     return;
   }
 
-  // Ensure the process is clean before starting
-  m_process->disconnect();
+  // Ensure we don't leak connections, but don't disconnect everything
+  // m_process->disconnect(); // Removed because it breaks constructor connections
 
   // 1. Capture errors so we know WHY it failed
   connect(m_process, &QProcess::errorOccurred, this,
@@ -47,6 +50,7 @@ void DapCoordinator::startAdapter(const QString &program) {
     qDebug() << "[DAP] Adapter process successfully started.";
     m_state = SessionState::Running; // Or whatever your 'Ready' state is
     emit stateChanged(m_state);
+    initializeAdapter();
   });
 
   // 3. Monitor for premature crashes
@@ -98,10 +102,11 @@ int DapCoordinator::sendRequest(const QString &command,
 }
 
 void DapCoordinator::sendRawMessage(const QJsonObject &messageObj) {
-  if (!isAdapterRunning()) {
-    qWarning() << "Cannot send message: DAP adapter is not running.";
-    return;
+  if (m_state != SessionState::Running && m_state != SessionState::Paused) { 
+    return; 
   }
+
+  qDebug() << "[DAP Sniffer] TX:" << QJsonDocument(messageObj).toJson(QJsonDocument::Compact);
 
   QJsonDocument doc(messageObj);
   QByteArray jsonBytes = doc.toJson(QJsonDocument::Compact);
@@ -149,9 +154,9 @@ void DapCoordinator::pauseExecution(int threadId) {
 
 void DapCoordinator::launchParallelSession(const QString &binaryPath,
                                            int ranks) {
-  Q_UNUSED(binaryPath);
   Q_UNUSED(ranks);
-  qDebug() << "[DAP] Spawning DAP Adapter process...";
+  m_currentBinaryPath = binaryPath;
+  qDebug() << "[DAP] Spawning DAP Adapter process for binary:" << binaryPath;
 
   QString adapterProgram = QStandardPaths::findExecutable("lldb-dap");
   if (adapterProgram.isEmpty()) {
@@ -366,6 +371,8 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
       message["command"].toString() == "evaluate") {
     qDebug() << "[DAP Sniffer] Evaluate Response:"
              << QJsonDocument(message).toJson(QJsonDocument::Compact);
+  } else {
+    qDebug() << "[DAP Sniffer] RX:" << QJsonDocument(message).toJson(QJsonDocument::Compact);
   }
 
   QString type = message["type"].toString();
@@ -376,8 +383,12 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
       auto settings =
           gridlock::core::ConfigManager::instance().loadProjectSettings();
       QJsonObject launchArgs;
-      launchArgs["program"] = QString::fromStdString(settings.targetBinary);
-      launchArgs["stopOnEntry"] = true;
+      QString programToLaunch = m_currentBinaryPath;
+      if (programToLaunch.isEmpty()) {
+          programToLaunch = QString::fromStdString(settings.targetBinary);
+      }
+      launchArgs["program"] = programToLaunch;
+      launchArgs["stopOnEntry"] = false;
 
       QString argsStr = QString::fromStdString(settings.programArguments);
       QJsonArray argsArray;
@@ -497,6 +508,23 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
   } else if (type == "event") {
     QString event = message["event"].toString();
     if (event == "initialized") {
+      for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
+        if (!it.value().isEmpty()) {
+            QJsonObject args;
+            QJsonObject source;
+            source["path"] = it.key();
+            args["source"] = source;
+
+            QJsonArray breakpointsArray;
+            for (int l : it.value()) {
+                QJsonObject bp;
+                bp["line"] = l;
+                breakpointsArray.append(bp);
+            }
+            args["breakpoints"] = breakpointsArray;
+            sendRequest("setBreakpoints", args);
+        }
+      }
       sendRequest("configurationDone");
       m_state = SessionState::Running;
       emit stateChanged(m_state);

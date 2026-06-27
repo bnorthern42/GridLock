@@ -5,9 +5,17 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.1] - 2026-06-24
+## [0.5.2] - 2026-06-27
 
 ### Added
+- **Tutorial Mode**: Initial scaffolding for `--tutorial-mode` (Note: This feature is currently a Work In Progress / WIP).
+
+### Fixed
+- **DAP Execution**: Fixed DAP `stopOnEntry` stalling the debugger on the assembly entry point instead of hitting user code.
+- **LSP Handshake**: Fixed Clangd LSP handshake failing due to a missing `initialized` notification.
+- **UI Lifecycle**: Fixed application windowing lifecycle duplicating windows at startup when launching dialogs.
+
+## [0.5.1] - 2026-06-24
 - **Global Configuration Engine:** Implemented a new TOML-based `ConfigManager` that persistently stores toolchain paths (`lldb-dap`, `gdb`, `clangd`) and default MPI launch arguments in `~/.config/gridlock/config.toml`.
 - **Unified Preferences UI:** Added a comprehensive, Kate/KDevelop-style sidebar `PreferencesDialog` (Edit -> Preferences) to manage Appearance, Editing, Behavior, Debugger tools, HPC/Cluster settings, SLURM integration, and Docsets.
 - **Project Creation Wizard:** Replaced the disjointed "New Project" menu with a linear, multi-page `QWizard`. Includes dynamic MPI launch string generation with quick-toggles for common OpenMPI flags (e.g., `--bind-to core`, `--map-by node`, `--oversubscribe`).

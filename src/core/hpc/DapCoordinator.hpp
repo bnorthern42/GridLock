@@ -99,4 +99,5 @@ private:
     
     SessionState m_state = SessionState::Disconnected;
     int m_slurmJobId = -1;
+    QString m_currentBinaryPath;
 };

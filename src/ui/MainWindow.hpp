@@ -83,7 +83,7 @@ public slots:
     void saveSessionAs();
     void loadSession();
     void onTutorialLaunchRequested(const QString& absoluteFilePath);
-
+    bool execTutorialDialog();
 
 protected:
     void closeEvent(QCloseEvent* event) override;

@@ -20,7 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lcov \
     git \
     mesa-vulkan-drivers \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/lldb-dap-19 /usr/bin/lldb-dap
 
 # Create a non-root user matching the original setup
 RUN useradd -m -s /bin/bash gridlockuser

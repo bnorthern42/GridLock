@@ -1,4 +1,4 @@
-# GridLock - High-Performance MPI Graphical Debugger (v0.5.1)
+# GridLock - High-Performance MPI Graphical Debugger (v0.5.2)
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
@@ -65,6 +65,9 @@ sudo meson install -C build
 
 # Test mode (simulates MPI/DAP environment)
 ./build/gridlock --test-mode
+
+# Tutorial mode (experimental, WIP feature for testing debugger integrations)
+./build/gridlock --tutorial-mode
 ```
 
 ### Deployment & AppImage Packaging

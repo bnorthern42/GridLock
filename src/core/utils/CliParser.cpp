@@ -9,8 +9,8 @@ CliParser::CliParser()
     , m_tutorialModeOption("tutorial-mode", "Launch the GridLock interactive tutorial suite")
 {
     m_parser.setApplicationDescription(
-        "GridLock MPI Debugger - v0.5.1\nFeaturing the new Zero-Copy Multi-Rank "
-        "Memory Diff Engine.");
+        "GridLock MPI Debugger - v0.5.2\nFeaturing the new Zero-Copy Multi-Rank "
+        "Domain Heatmap!");
     m_parser.addHelpOption();
     m_parser.addVersionOption();
     

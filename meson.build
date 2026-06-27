@@ -1,5 +1,5 @@
-project('GridLock', 'cpp',
-  version : '0.5.1',
+project('GridLock', 'cpp', 'c',
+  version : '0.5.2',
   default_options : ['warning_level=3', 'cpp_std=c++23'],
   subproject_dir : 'external')
 
@@ -190,6 +190,7 @@ ui_test_src = [
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
   'src/ui/dialogs/ProjectWizard.cpp',
+  'src/ui/tutorial/TutorialDialog.cpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.cpp',
   'src/ui/views/ServerRackView.cpp',
   'src/ui/views/DisassemblyView.cpp',
@@ -229,6 +230,7 @@ ui_test_moc_headers = [
   'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp',
   'src/ui/dialogs/ProjectWizard.hpp',
+  'src/ui/tutorial/TutorialDialog.hpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.hpp',
   'src/ui/views/ServerRackView.hpp',
   'src/ui/views/DisassemblyView.hpp',
@@ -825,11 +827,46 @@ gridlock_tutorial_tests = executable('gridlock_tutorial_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('tutorial_tests', gridlock_tutorial_tests)
+test('tutorial_tests', gridlock_tutorial_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
+
+tutorial_e2e_test_src = [
+  'tests/gui/test_tutorial_e2e.cpp'
+]
+
+# Get everything from ui_test_src except test_ui.cpp
+foreach f : ui_test_src
+  if f != 'tests/test_ui.cpp'
+    tutorial_e2e_test_src += f
+  endif
+endforeach
+
+tutorial_e2e_test_moc_headers = []
+
+foreach h : ui_test_moc_headers
+  if h != 'tests/test_ui.hpp'
+    tutorial_e2e_test_moc_headers += h
+  endif
+endforeach
+
+processed_tutorial_e2e_test_files = qt6.compile_moc(
+  headers : tutorial_e2e_test_moc_headers,
+  sources : 'tests/gui/test_tutorial_e2e.cpp',
+  dependencies: qt6_dep
+)
+
+gridlock_tutorial_e2e_tests = executable('gridlock_tutorial_e2e_tests',
+  tutorial_e2e_test_src,
+  processed_tutorial_e2e_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, tomlplusplus_dep]
+)
+
+test('tutorial_e2e_tests', gridlock_tutorial_e2e_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout: 180)
 
 custom_target('mpi_mm_bin',
   input: 'tutorial/mpi_mm.c',
-  output: 'mpi_mm_bin',
-  command: ['mpicxx', '@INPUT@', '-g', '-O0', '-o', '@OUTPUT@'],
-  build_by_default: true)
+  output: 'mpi_mm',
+  command: ['mpicc', '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
+  build_by_default: true
+)

@@ -1,0 +1,15 @@
+Content-Length: 104
+
+{"command":"initialize","seq":1,"type":"request","arguments":{"clientID":"test","clientName":"test"}}
+Content-Length: 147
+
+{"command":"launch","seq":2,"type":"request","arguments":{"program":"/home/bradn44/Projects/current/Gridlock/tutorial/deadlock_demo_demo"}}
+Content-Length: 260
+
+{"command":"setBreakpoints","seq":3,"type":"request","arguments":{"source":{"path":"/home/bradn44/Projects/current/Gridlock/tutorial/deadlock_demo.c"},"breakpoints":[{"line":25}]}}
+Content-Length: 55
+
+{"command":"configurationDone","seq":4,"type":"request"}
+Content-Length: 57
+
+{"command":"continue","seq":5,"type":"request","arguments":{"threadId":0}}

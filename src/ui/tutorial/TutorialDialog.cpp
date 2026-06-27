@@ -74,15 +74,15 @@ void TutorialDialog::populateList() {
 
 QSet<int> TutorialDialog::getBreakpointsForFile(const QString& filePath) {
     if (filePath.endsWith("deadlock_demo.c")) {
-        return {31, 34};
+        return {25, 28};
     } else if (filePath.endsWith("inspection_demo.cpp")) {
-        return {76};
+        return {36};
     } else if (filePath.endsWith("register_demo.cpp")) {
-        return {103, 117};
+        return {24, 37};
     } else if (filePath.endsWith("memview_demo.cpp")) {
-        return {131, 146};
+        return {25};
     } else if (filePath.endsWith("memview_diff_demo.cpp")) {
-        return {162, 181};
+        return {30};
     }
     return {};
 }

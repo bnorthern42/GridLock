@@ -118,12 +118,18 @@ void LspCoordinator::processMessage(const QJsonObject &message) {
   if (message.contains("id")) {
     int id = message["id"].toInt();
 
-    if (!m_isInitialized && message.contains("result")) {
-      QJsonObject result = message["result"].toObject();
-      if (result.contains("capabilities")) {
-        m_isInitialized = true;
+      if (!m_isInitialized && message.contains("result")) {
+        QJsonObject result = message["result"].toObject();
+        if (result.contains("capabilities")) {
+          m_isInitialized = true;
+          
+          QJsonObject initNotif;
+          initNotif["jsonrpc"] = "2.0";
+          initNotif["method"] = "initialized";
+          initNotif["params"] = QJsonObject();
+          sendPayload(initNotif);
+        }
       }
-    }
 
     if (m_hoverRequests.contains(id)) {
       QPoint pos = m_hoverRequests.take(id);
@@ -162,6 +168,8 @@ void LspCoordinator::didOpen(const QString &file, const QString &text) {
 
 void LspCoordinator::requestHover(const QString &file, int line, int character,
                                   QPoint globalPos) {
+  if (!m_isInitialized) return;
+
   QJsonObject textDocument;
   textDocument["uri"] = "file://" + QFileInfo(file).absoluteFilePath();
 
