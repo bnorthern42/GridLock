@@ -23,6 +23,10 @@ private slots:
     }
 
     void testTutorialsE2E() {
+        if (qEnvironmentVariableIsSet("GITHUB_ACTIONS")) {
+            QSKIP("Skipping E2E tutorial tests on GitHub Actions due to missing ptrace capabilities.");
+        }
+
         QStringList tutorials = {
             "Inspection Demo",
             "Register Demo",
