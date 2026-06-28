@@ -13,6 +13,7 @@
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
+#include "widgets/HoverWidget.hpp"
 
 #include "../core/commands/DebugCommands.hpp"
 #include "../core/hpc/DeadlockAnalyzer.hpp"
@@ -81,11 +82,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Eagerly load default source file so UI is populated before running
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
 
+  m_hoverWidget = new gridlock::ui::HoverWidget(this);
+
   connect(
       m_lspCoordinator, &gridlock::core::LspCoordinator::hoverResultReceived,
       this, [this](const QString &resultMarkdown, const QPoint &globalPos) {
         if (getSourceCodeView()) {
-          QToolTip::showText(globalPos, resultMarkdown, getSourceCodeView());
+          m_hoverWidget->showHoverData(globalPos, resultMarkdown);
         }
       });
 

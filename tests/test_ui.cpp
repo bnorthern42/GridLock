@@ -238,4 +238,19 @@ void TestMainWindowUI::testGutterBreakpointPropagation() {
     QCOMPARE(signaledLine, 5);
 }
 
+#include "../src/ui/widgets/HoverWidget.hpp"
+
+void TestMainWindowUI::testHoverWidgetLifecycle() {
+    gridlock::ui::HoverWidget* widget = new gridlock::ui::HoverWidget();
+    QVERIFY(widget != nullptr);
+    QCOMPARE(widget->windowFlags() & Qt::ToolTip, Qt::ToolTip);
+    QCOMPARE(widget->windowFlags() & Qt::FramelessWindowHint, Qt::FramelessWindowHint);
+    
+    // Test showing does not crash and behaves as floating
+    widget->showHoverData(QPoint(0, 0), "**Test**");
+    QVERIFY(widget->isVisible());
+    
+    delete widget; // Destroys cleanly without memory leaks
+}
+
 QTEST_MAIN(TestMainWindowUI)

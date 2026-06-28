@@ -16,4 +16,5 @@ private slots:
     void testDifferentialGridEmits();
     void testGdbConsoleFiltering();
     void testGutterBreakpointPropagation();
+    void testHoverWidgetLifecycle();
 };

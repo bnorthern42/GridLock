@@ -9,4 +9,5 @@ private slots:
     void testLspParser_data();
     void testLspParser();
     void testFragmentedStream();
+    void testHoverMarkdownExtraction();
 };

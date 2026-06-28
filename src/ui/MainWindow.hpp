@@ -42,6 +42,7 @@ class SpackManager;
 class ExpressionEvaluatorWidget;
 
 class MpiDiagnosticsWidget;
+class HoverWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -123,6 +124,7 @@ private:
     gridlock::core::HpcBackend* m_hpcBackend = nullptr;
     gridlock::core::DeadlockAnalyzer* m_deadlockAnalyzer = nullptr;
     SpackManager* m_spackManager = nullptr;
+    HoverWidget* m_hoverWidget = nullptr;
 
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;

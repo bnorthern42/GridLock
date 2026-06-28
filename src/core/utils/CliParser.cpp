@@ -7,7 +7,7 @@ namespace utils {
 CliParser::CliParser() 
     : m_testModeOption("test-mode", "Run interactive visual simulation tests")
     , m_tutorialModeOption("tutorial-mode", "Launch the GridLock interactive tutorial suite")
-    , m_verboseOption(QStringList() << "v" << "verbose", "Enable verbose debug output")
+    , m_verboseOption("verbose", "Enable verbose debug output")
 {
     m_parser.setApplicationDescription(
         "GridLock MPI Debugger - v0.5.2\nFeaturing the new Zero-Copy Multi-Rank "

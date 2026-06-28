@@ -49,3 +49,5 @@ compile_flags.txt
 Thumbs.db
 
 .cache/
+scratch/
+

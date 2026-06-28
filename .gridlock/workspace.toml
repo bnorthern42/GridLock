@@ -1,9 +1,9 @@
 [breakpoints]
-'tutorial/deadlock_demo.c' = [ 25, 34, 28, 31 ]
+'tutorial/deadlock_demo.c' = [ 25, 28, 34, 31 ]
 'tutorial/inspection_demo.cpp' = [ 36, 76 ]
 'tutorial/memview_demo.cpp' = [ 25, 131, 146 ]
-'tutorial/memview_diff_demo.cpp' = [ 30, 162, 181 ]
-'tutorial/register_demo.cpp' = [ 117, 37, 24, 103 ]
+'tutorial/memview_diff_demo.cpp' = [ 30, 181, 162 ]
+'tutorial/register_demo.cpp' = [ 37, 24, 117, 103 ]
 
 [workspace]
 watchExpressions = []
