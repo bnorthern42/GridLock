@@ -2,5 +2,5 @@
 customGdbPath = 'gdb'
 environmentVariables = 'OMPI_COMM_WORLD_SIZE=2 OMPI_COMM_WORLD_RANK=0 PMI_SIZE=2 PMI_RANK=0'
 programArguments = ''
-targetBinary = ''
+targetBinary = 'build/mpi_mm'
 workingDirectory = ''

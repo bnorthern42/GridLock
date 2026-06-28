@@ -135,14 +135,33 @@ void LspCoordinator::processMessage(const QJsonObject &message) {
       QPoint pos = m_hoverRequests.take(id);
       QString markdown = "";
       if (message.contains("result")) {
-        QJsonObject result = message["result"].toObject();
-        if (result.contains("contents")) {
-          QJsonObject contents = result["contents"].toObject();
-          markdown = contents["value"].toString();
+        QJsonValue resultVal = message["result"];
+        if (resultVal.isObject()) {
+          QJsonObject result = resultVal.toObject();
+          if (result.contains("contents")) {
+            QJsonValue contentsVal = result["contents"];
+            if (contentsVal.isObject()) {
+              QJsonObject contents = contentsVal.toObject();
+              if (contents.contains("value")) {
+                markdown = contents["value"].toString();
+              }
+            } else if (contentsVal.isString()) {
+              markdown = contentsVal.toString();
+            } else if (contentsVal.isArray()) {
+              QJsonArray arr = contentsVal.toArray();
+              for (const QJsonValue& val : arr) {
+                if (val.isObject()) {
+                  markdown += val.toObject()["value"].toString() + "\n";
+                } else if (val.isString()) {
+                  markdown += val.toString() + "\n";
+                }
+              }
+            }
+          }
         }
       }
-      if (!markdown.isEmpty()) {
-        emit hoverResultReceived(markdown, pos);
+      if (!markdown.trimmed().isEmpty()) {
+        emit hoverResultReceived(markdown.trimmed(), pos);
       }
     }
   }

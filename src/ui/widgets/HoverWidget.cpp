@@ -45,7 +45,18 @@ HoverWidget::HoverWidget(QWidget* parent)
     mainLayout->setContentsMargins(15, 15, 15, 15); // Leave space for shadow
     mainLayout->addWidget(m_frame);
 
-    // Install event filter on application to close tooltip when mouse moves away or clicks
+    m_checkTimer = new QTimer(this);
+    connect(m_checkTimer, &QTimer::timeout, this, [this]() {
+        if (isVisible()) {
+            QRect expandedRect = geometry().adjusted(-20, -20, 20, 20); // geometry() is in global coordinates for Qt::ToolTip
+            if (!expandedRect.contains(QCursor::pos())) {
+                hide();
+                m_checkTimer->stop();
+            }
+        }
+    });
+
+    // Install event filter on application to close tooltip when clicks occur
     if (qApp) {
         qApp->installEventFilter(this);
     }
@@ -88,18 +99,15 @@ void HoverWidget::showHoverData(const QPoint& globalPos, const QString& markdown
     
     move(pos);
     show();
+    m_checkTimer->start(100);
 }
 
 bool HoverWidget::eventFilter(QObject* obj, QEvent* event) {
     if (isVisible()) {
-        if (event->type() == QEvent::MouseMove) {
-            auto* mouseEvent = static_cast<QMouseEvent*>(event);
-            QRect expandedRect = geometry().adjusted(-20, -20, 20, 20); // Tolerance
-            if (!expandedRect.contains(mouseEvent->globalPosition().toPoint())) {
-                hide();
-            }
-        } else if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::KeyPress) {
+        int t = event->type();
+        if (t == QEvent::MouseButtonPress || t == QEvent::KeyPress || t == QEvent::MouseButtonDblClick) {
             hide();
+            m_checkTimer->stop();
         }
     }
     return QWidget::eventFilter(obj, event);

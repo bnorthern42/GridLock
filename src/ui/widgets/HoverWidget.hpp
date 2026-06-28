@@ -2,7 +2,8 @@
 #include <QWidget>
 #include <QTextBrowser>
 #include <QFrame>
-#include <QPoint>
+#include <QEvent>
+#include <QTimer>
 
 namespace gridlock::ui {
 
@@ -20,6 +21,7 @@ protected:
 private:
     QFrame* m_frame;
     QTextBrowser* m_textBrowser;
+    QTimer* m_checkTimer = nullptr;
 };
 
 } // namespace gridlock::ui
