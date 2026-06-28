@@ -42,6 +42,8 @@ public:
     void readMemory(int rankId, const QString& memoryReference, int count) override;
     void requestHeatmapRender(int rankId, const QString& expression, int rows, int cols);
 
+    int getActiveFrameId(int rankId) const { return m_activeFrameIds.value(rankId, -1); }
+
     void stepOver(int threadId) override;
     void stepInto(int threadId) override;
     void continueExecution(int threadId) override;
@@ -53,6 +55,7 @@ public:
 signals:
     void executionStopped(int rankId, const QString& reason);
     void messageReceived(const QJsonObject& message);
+    void scopesUpdated(int rankId, const QJsonArray& scopes);
     void localsUpdated(int rankId, int parentVarRef, const QJsonArray& variables);
     void expressionEvaluated(int rankId, QString expr, QString result);
     void targetOutputReceived(QString category, QString output);

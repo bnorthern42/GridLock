@@ -11,25 +11,19 @@ namespace gridlock::ui {
 
 HoverWidget::HoverWidget(QWidget* parent)
     : QWidget(parent) {
-    setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
-    setAttribute(Qt::WA_TranslucentBackground);
+    setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
     
+    // Apply styling directly to prevent white fallback
+    this->setStyleSheet("background-color: #1e1e2e; border: 1px solid #45475a; border-radius: 8px;");
+
     // UI Styling
     m_frame = new QFrame(this);
     m_frame->setObjectName("hoverFrame");
     m_frame->setStyleSheet(R"(
         #hoverFrame {
-            background-color: #1e1e2e;
-            border: 1px solid #45475a;
-            border-radius: 8px;
+            background-color: transparent;
         }
     )");
-
-    auto* shadow = new QGraphicsDropShadowEffect(this);
-    shadow->setBlurRadius(15);
-    shadow->setOffset(0, 4);
-    shadow->setColor(QColor(0, 0, 0, 100)); // semi-transparent black
-    m_frame->setGraphicsEffect(shadow);
 
     m_textBrowser = new QTextBrowser(m_frame);
     m_textBrowser->setFrameShape(QFrame::NoFrame);
@@ -42,7 +36,7 @@ HoverWidget::HoverWidget(QWidget* parent)
     layout->addWidget(m_textBrowser);
     
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(15, 15, 15, 15); // Leave space for shadow
+    mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->addWidget(m_frame);
 
     m_checkTimer = new QTimer(this);

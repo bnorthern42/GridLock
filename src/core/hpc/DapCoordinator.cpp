@@ -402,15 +402,15 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
         QJsonArray stackFrames = body["stackFrames"].toArray();
         if (!stackFrames.isEmpty()) {
           QJsonObject topFrame = stackFrames[0].toObject();
+          int frameId = topFrame["id"].toInt();
+          m_activeFrameIds[rankId] = frameId;
+          
           if (topFrame.contains("source")) {
             QJsonObject source = topFrame["source"].toObject();
             QString path = source["path"].toString();
             int line = topFrame["line"].toInt();
             emit locationChanged(rankId, path, line);
           }
-          int frameId = topFrame["id"].toInt();
-          m_activeFrameIds[rankId] = frameId;
-          requestScopes(frameId, rankId);
         }
       }
     } else if (command == "scopes" && message["success"].toBool()) {
@@ -418,19 +418,7 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
       if (m_scopesRequests.contains(seq)) {
         int rankId = m_scopesRequests.take(seq);
         QJsonArray scopes = message["body"].toObject()["scopes"].toArray();
-        for (const QJsonValue &val : std::as_const(scopes)) {
-          QJsonObject scope = val.toObject();
-          if (scope["name"].toString() == "Locals") {
-            int varRef = scope["variablesReference"].toInt();
-            requestVariables(rankId, varRef);
-          } else if (scope["name"].toString() == "Registers") {
-            int varRef = scope["variablesReference"].toInt();
-            QJsonObject args;
-            args["variablesReference"] = varRef;
-            m_registersRequests[m_sequenceNumber] = rankId;
-            sendRequest("variables", args);
-          }
-        }
+        emit scopesUpdated(rankId, scopes);
       }
     } else if (command == "variables" && message["success"].toBool()) {
       int seq = message["request_seq"].toInt();

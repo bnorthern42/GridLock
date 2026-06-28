@@ -22,6 +22,7 @@ protected:
 
 void TestDapVariables::testScopesFetch() {
     MockDapCoordinatorVars coordinator;
+    gridlock::VariableTreeModel model(&coordinator);
     
     coordinator.requestStackTrace(0); // rank=0, seq=1
     QByteArray json = "{\"type\":\"response\",\"command\":\"stackTrace\",\"success\":true,\"request_seq\":1,\"body\":{\"stackFrames\":[{\"id\":1000,\"name\":\"main\",\"source\":{\"path\":\"/test.cpp\"},\"line\":42}]}}";
@@ -35,6 +36,7 @@ void TestDapVariables::testScopesFetch() {
 
 void TestDapVariables::testVariablesFetch() {
     MockDapCoordinatorVars coordinator;
+    gridlock::VariableTreeModel model(&coordinator);
     
     coordinator.requestScopes(1000, 0); // rank=0, seq=1
     QByteArray json = "{\"type\":\"response\",\"command\":\"scopes\",\"success\":true,\"request_seq\":1,\"body\":{\"scopes\":[{\"name\":\"Locals\",\"variablesReference\":1001,\"expensive\":false}]}}";

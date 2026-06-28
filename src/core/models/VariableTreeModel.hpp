@@ -34,6 +34,7 @@ public:
 public slots:
     void handleGdbOutput(int rankId, const QString& output);
     void onLocalsUpdated(int rankId, int parentVarRef, const QJsonArray& variables);
+    void onScopesUpdated(int rankId, const QJsonArray& scopes);
 
 private:
     VariableNode* getNode(const QModelIndex& index) const;

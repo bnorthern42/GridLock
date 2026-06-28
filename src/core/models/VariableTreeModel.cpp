@@ -20,6 +20,12 @@ VariableTreeModel::VariableTreeModel(IBackendCoordinator* coordinator, QObject* 
         }
         if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
             connect(dap, &DapCoordinator::localsUpdated, this, &VariableTreeModel::onLocalsUpdated);
+            connect(dap, &DapCoordinator::scopesUpdated, this, &VariableTreeModel::onScopesUpdated);
+            connect(dap, &DapCoordinator::locationChanged, this, [this](int rankId, const QString&, int) {
+                if (m_currentRankId == rankId || m_currentRankId == -1) {
+                    loadLocals(rankId);
+                }
+            });
         }
     }
 }
@@ -139,7 +145,10 @@ void VariableTreeModel::loadLocals(int rankId) {
     if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
         gdb->sendCommand(rankId, "-stack-list-variables --all-values");
     } else if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
-        dap->requestStackTrace(rankId);
+        int activeFrame = dap->getActiveFrameId(rankId);
+        if (activeFrame >= 0) {
+            dap->requestScopes(activeFrame, rankId);
+        }
     }
 }
 
@@ -213,6 +222,21 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
         targetParent->childrenLoaded = true;
         if (variables.size() > 0) {
             endInsertRows();
+        }
+    }
+}
+
+void VariableTreeModel::onScopesUpdated(int rankId, const QJsonArray& scopes) {
+    if (m_currentRankId != -1 && rankId != m_currentRankId) return;
+
+    for (const QJsonValue& val : scopes) {
+        QJsonObject scope = val.toObject();
+        if (scope["name"].toString() == "Locals") {
+            int varRef = scope["variablesReference"].toInt();
+            if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+                dap->requestVariables(rankId, varRef);
+            }
+            break; // ONLY request the top-level Locals scope
         }
     }
 }
