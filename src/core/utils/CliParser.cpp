@@ -10,7 +10,7 @@ CliParser::CliParser()
     , m_verboseOption("verbose", "Enable verbose debug output")
 {
     m_parser.setApplicationDescription(
-        "GridLock MPI Debugger - v0.5.2\nFeaturing the new Zero-Copy Multi-Rank "
+        "GridLock MPI Debugger - v0.5.3\nFeaturing the new Zero-Copy Multi-Rank "
         "Domain Heatmap!");
     m_parser.addHelpOption();
     m_parser.addVersionOption();

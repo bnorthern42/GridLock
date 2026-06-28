@@ -5,9 +5,9 @@
 #include "../../core/models/VariableTreeModel.hpp"
 #include "../../RankState.hpp"
 
-namespace gridlock {
+class IBackendCoordinator;
 
-class GdbRankCoordinator;
+namespace gridlock {
 
 class VariablesDockWidget : public QWidget {
     Q_OBJECT
@@ -15,7 +15,7 @@ public:
     explicit VariablesDockWidget(QWidget* parent = nullptr);
     ~VariablesDockWidget() override;
 
-    void setCoordinator(GdbRankCoordinator* coordinator);
+    void setCoordinator(::IBackendCoordinator* coordinator);
 
 private slots:
     void onRankSelected(int index);
@@ -25,13 +25,14 @@ private slots:
 private:
     void setupUi();
 
-    GdbRankCoordinator* m_coordinator;
+    ::IBackendCoordinator* m_coordinator;
     VariableTreeModel* m_model;
     
     QComboBox* m_rankSelector;
     QTreeView* m_variablesTree;
     
     int m_currentRankId;
+    QMap<int, QString> m_lastRankStates;
 };
 
 } // namespace gridlock

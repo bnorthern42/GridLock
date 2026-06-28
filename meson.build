@@ -1,5 +1,5 @@
 project('GridLock', 'cpp', 'c',
-  version : '0.5.2',
+  version : '0.5.3',
   default_options : ['warning_level=3', 'cpp_std=c++23'],
   subproject_dir : 'external')
 
@@ -39,7 +39,6 @@ src_files = [
   'src/ui/views/DisassemblyView.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp',
   'src/ui/widgets/DifferentialGrid.cpp',
-  'src/ui/widgets/HoverWidget.cpp',
   'src/ui/docks/TerminalDock.cpp',
   'src/ui/widgets/MpiDiagnosticsWidget.cpp',
   'src/ui/GdbConsoleWidget.cpp',
@@ -80,7 +79,6 @@ moc_headers = [
   'src/ui/views/DisassemblyView.hpp',
   'src/ui/widgets/ReferenceManualWidget.hpp',
   'src/ui/widgets/DifferentialGrid.hpp',
-  'src/ui/widgets/HoverWidget.hpp',
   'src/ui/docks/TerminalDock.hpp',
   'src/ui/widgets/MpiDiagnosticsWidget.hpp',
   'src/ui/GdbConsoleWidget.hpp',
@@ -198,7 +196,6 @@ ui_test_src = [
   'src/ui/views/DisassemblyView.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp',
   'src/ui/widgets/DifferentialGrid.cpp',
-  'src/ui/widgets/HoverWidget.cpp',
   'src/ui/docks/TerminalDock.cpp',
   'src/ui/widgets/MpiDiagnosticsWidget.cpp',
   'src/ui/GdbConsoleWidget.cpp',
@@ -239,7 +236,6 @@ ui_test_moc_headers = [
   'src/ui/views/DisassemblyView.hpp',
   'src/ui/widgets/ReferenceManualWidget.hpp',
   'src/ui/widgets/DifferentialGrid.hpp',
-  'src/ui/widgets/HoverWidget.hpp',
   'src/ui/docks/TerminalDock.hpp',
   'src/ui/widgets/MpiDiagnosticsWidget.hpp',
   'src/ui/GdbConsoleWidget.hpp',
@@ -735,6 +731,8 @@ advanced_features_test_src = [
   'src/core/hpc/DeadlockAnalyzer.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
   'src/core/models/VariableTreeModel.cpp',
+  'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
@@ -742,6 +740,7 @@ advanced_features_test_moc_headers = [
   'tests/test_advanced_features.hpp',
   'src/core/hpc/DeadlockAnalyzer.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
   'src/core/models/VariableTreeModel.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -807,66 +806,6 @@ gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
 
 test('mi_parser_tests', gridlock_mi_parser_tests)
 
-tutorial_test_src = [
-  'tests/test_tutorial.cpp',
-  'src/core/utils/CliParser.cpp',
-  'src/core/managers/ConfigManager.cpp',
-  'src/ui/tutorial/TutorialDialog.cpp'
-]
-
-tutorial_test_moc_headers = [
-  'src/ui/tutorial/TutorialDialog.hpp'
-]
-
-processed_tutorial_test_files = qt6.compile_moc(
-  headers : tutorial_test_moc_headers,
-  sources : 'tests/test_tutorial.cpp',
-  dependencies: qt6_dep
-)
-
-gridlock_tutorial_tests = executable('gridlock_tutorial_tests',
-  tutorial_test_src,
-  processed_tutorial_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep]
-)
-
-test('tutorial_tests', gridlock_tutorial_tests, env: ['QT_QPA_PLATFORM=offscreen'])
-
-
-tutorial_e2e_test_src = [
-  'tests/gui/test_tutorial_e2e.cpp'
-]
-
-# Get everything from ui_test_src except test_ui.cpp
-foreach f : ui_test_src
-  if f != 'tests/test_ui.cpp'
-    tutorial_e2e_test_src += f
-  endif
-endforeach
-
-tutorial_e2e_test_moc_headers = []
-
-foreach h : ui_test_moc_headers
-  if h != 'tests/test_ui.hpp'
-    tutorial_e2e_test_moc_headers += h
-  endif
-endforeach
-
-processed_tutorial_e2e_test_files = qt6.compile_moc(
-  headers : tutorial_e2e_test_moc_headers,
-  sources : 'tests/gui/test_tutorial_e2e.cpp',
-  dependencies: qt6_dep
-)
-
-gridlock_tutorial_e2e_tests = executable('gridlock_tutorial_e2e_tests',
-  tutorial_e2e_test_src,
-  processed_tutorial_e2e_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep]
-)
-
-test('tutorial_e2e_tests', gridlock_tutorial_e2e_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout: 180)
 
 custom_target('mpi_mm_bin',
   input: 'tutorial/mpi_mm.c',

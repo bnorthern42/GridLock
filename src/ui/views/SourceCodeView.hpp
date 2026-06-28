@@ -56,7 +56,8 @@ signals:
     void toggleBreakpointRequested(const QString& location);
     void breakpointToggled(const QString& file, int line, bool isSet, const QString& condition = QString());
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
-    void semanticHoverRequested(const QString& file, int line, int character, const QPoint& globalPos);
+    void hideHoverTooltip();
+
     void pinVariableRequested(const QString& varName);
 
 protected:
@@ -78,6 +79,7 @@ private:
     CppSyntaxHighlighter* m_highlighter;
     QMap<int, QString> breakpoints;
     QString m_currentFilePath;
+    QString m_lastHoveredWord;
     QTimer* m_hoverTimer;
     QPoint m_lastMousePos;
     QPoint m_lastGlobalMousePos;

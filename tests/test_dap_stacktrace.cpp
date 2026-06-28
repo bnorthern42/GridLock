@@ -23,6 +23,8 @@ void TestDapStacktrace::testStackTraceRequest() {
     QByteArray data = "Content-Length: " + QByteArray::number(json.size()) + "\r\n\r\n" + json;
     
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QVERIFY(coordinator.lastWrittenData.contains("\"command\":\"stackTrace\""));
     QVERIFY(coordinator.lastWrittenData.contains("\"threadId\":1"));
@@ -47,6 +49,7 @@ void TestDapStacktrace::testStackTraceResponseParsing() {
     QByteArray stoppedJson = "{\"type\":\"event\",\"event\":\"stopped\",\"body\":{\"reason\":\"breakpoint\",\"threadId\":1}}";
     QByteArray stoppedData = "Content-Length: " + QByteArray::number(stoppedJson.size()) + "\r\n\r\n" + stoppedJson;
     coordinator.processRawData(stoppedData);
+    QTest::qWait(50);
     
     // Now we must parse the sequence number of the outgoing request to build the mock response!
     // But let's just make the coordinator map seq to threadId, or assume the latest stopped thread.
@@ -57,6 +60,7 @@ void TestDapStacktrace::testStackTraceResponseParsing() {
     QByteArray responseJson = "{\"type\":\"response\",\"command\":\"stackTrace\",\"success\":true,\"request_seq\":" + QByteArray::number(seq) + ",\"body\":{\"stackFrames\":[{\"id\":0,\"name\":\"main\",\"source\":{\"path\":\"/src/main.cpp\"},\"line\":42,\"column\":5}]}}";
     QByteArray responseData = "Content-Length: " + QByteArray::number(responseJson.size()) + "\r\n\r\n" + responseJson;
     coordinator.processRawData(responseData);
+    QTest::qWait(50);
     
     QCOMPARE(spy.count(), 1);
     QList<QVariant> args = spy.takeFirst();

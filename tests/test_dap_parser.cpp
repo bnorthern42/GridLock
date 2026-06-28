@@ -7,6 +7,8 @@ void TestDapParser::testFullMessage() {
     
     QByteArray data = "Content-Length: 38\r\n\r\n{\"type\":\"event\",\"event\":\"initialized\"}";
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QCOMPARE(spy.count(), 1);
     QJsonObject msg = spy.takeFirst().at(0).toJsonObject();
@@ -22,9 +24,11 @@ void TestDapParser::testFragmentedMessage() {
     QByteArray chunk2 = "\"event\":\"initialized\"}";
     
     coordinator.processRawData(chunk1);
+    QTest::qWait(50);
     QCOMPARE(spy.count(), 0);
     
     coordinator.processRawData(chunk2);
+    QTest::qWait(50);
     QCOMPARE(spy.count(), 1);
     
     QJsonObject msg = spy.takeFirst().at(0).toJsonObject();
@@ -37,6 +41,8 @@ void TestDapParser::testMultipleMessages() {
     
     QByteArray data = "Content-Length: 38\r\n\r\n{\"type\":\"event\",\"event\":\"initialized\"}Content-Length: 36\r\n\r\n{\"type\":\"response\",\"command\":\"next\"}";
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QCOMPARE(spy.count(), 2);
     QJsonObject msg1 = spy.takeFirst().at(0).toJsonObject();

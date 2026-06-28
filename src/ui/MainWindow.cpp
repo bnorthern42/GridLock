@@ -13,7 +13,6 @@
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
-#include "widgets/HoverWidget.hpp"
 
 #include "../core/commands/DebugCommands.hpp"
 #include "../core/hpc/DeadlockAnalyzer.hpp"
@@ -57,7 +56,40 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolTip>
+#include <QLabel>
+#include <QScreen>
+#include <QGuiApplication>
 #include <algorithm>
+
+namespace gridlock {
+class PlainJaneTooltip : public QLabel {
+public:
+    PlainJaneTooltip(QWidget* parent = nullptr) : QLabel(parent, Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::WindowTransparentForInput | Qt::WindowDoesNotAcceptFocus) {
+        setStyleSheet("background-color: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; padding: 4px; border-radius: 4px;");
+        setTextFormat(Qt::RichText);
+        setAttribute(Qt::WA_ShowWithoutActivating);
+    }
+    
+    void showTooltip(const QPoint& globalPos, const QString& text) {
+        setText(text);
+        adjustSize();
+        QPoint pos = globalPos + QPoint(10, 10);
+        if (QScreen* screen = QGuiApplication::screenAt(globalPos)) {
+            QRect avail = screen->availableGeometry();
+            if (pos.x() + width() > avail.right()) pos.setX(globalPos.x() - width() - 10);
+            if (pos.y() + height() > avail.bottom()) pos.setY(globalPos.y() - height() - 10);
+            pos.setX(qMax(pos.x(), avail.left()));
+            pos.setY(qMax(pos.y(), avail.top()));
+        }
+        move(pos);
+        show();
+    }
+    
+    void hideTooltip() {
+        hide();
+    }
+};
+}
 
 namespace gridlock::ui {
 
@@ -81,16 +113,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Eagerly load default source file so UI is populated before running
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
+  m_plainJaneTooltip = new gridlock::PlainJaneTooltip(this);
 
-  m_hoverWidget = new gridlock::ui::HoverWidget(this);
 
-  connect(
-      m_lspCoordinator, &gridlock::core::LspCoordinator::hoverResultReceived,
-      this, [this](const QString &resultMarkdown, const QPoint &globalPos) {
-        if (getSourceCodeView()) {
-          m_hoverWidget->showHoverData(globalPos, resultMarkdown);
-        }
-      });
 
   // Load offline persistence TOML breakpoints
   m_persistentBreakpoints =
@@ -109,7 +134,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
 
   if (auto *dapCoord = dynamic_cast<DapCoordinator *>(m_coordinator)) {
     connect(dapCoord, &DapCoordinator::stateChanged, this,
-            [this](SessionState state) {
+            [this, dapCoord](SessionState state) {
               if (m_runAction) {
                 if (state == SessionState::Disconnected) {
                   m_runAction->setEnabled(true);
@@ -120,23 +145,46 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                     m_runAction->setText("Launching...");
                   else if (state == SessionState::Queued)
                     m_runAction->setText("Queued in SLURM...");
-                  else if (state == SessionState::Running)
+                  else if (state == SessionState::Running) {
                     m_runAction->setText("Running");
-                  else if (state == SessionState::Paused)
+                    for (int i = 0; i < dapCoord->getProcessCount(); ++i) {
+                        RankState rs;
+                        if (m_latestStates.contains(i)) {
+                            rs = m_latestStates[i];
+                        }
+                        rs.currentState = "running";
+                        rs.executionTimer.start();
+                        onRankStateChanged(i, rs);
+                    }
+                  } else if (state == SessionState::Paused) {
                     m_runAction->setText("Paused");
+                  }
                 }
               }
+            });
+
+    connect(dapCoord, &DapCoordinator::executionStopped, this,
+            [this](int rankId, const QString& /*reason*/) {
+                RankState rs;
+                if (m_latestStates.contains(rankId)) {
+                    rs = m_latestStates[rankId];
+                }
+                rs.currentState = "stopped";
+                rs.totalRuntimeMs += rs.executionTimer.isValid() ? rs.executionTimer.elapsed() : 0;
+                onRankStateChanged(rankId, rs);
             });
   }
 
   if (m_variablesDockWidget) {
+    m_variablesDockWidget->setCoordinator(m_coordinator);
     if (auto *gdbCoord =
             dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-      m_variablesDockWidget->setCoordinator(gdbCoord);
 
       if (!m_deadlockAnalyzer) {
         m_deadlockAnalyzer =
             new gridlock::core::DeadlockAnalyzer(gdbCoord, this);
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged,
+                this, &MainWindow::onRankStateChanged);
         if (m_mpiDiagnosticsWidget) {
           connect(m_deadlockAnalyzer,
                   &gridlock::core::DeadlockAnalyzer::deadlockDetected,
@@ -168,11 +216,10 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
       connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete,
               this, [this](QString varName, QString result, QPoint globalPos) {
-                if (getSourceCodeView()) {
-                  QToolTip::showText(
+                if (getSourceCodeView() && m_plainJaneTooltip) {
+                  m_plainJaneTooltip->showTooltip(
                       globalPos,
-                      QString("<b>%1</b>: %2").arg(varName).arg(result),
-                      getSourceCodeView());
+                      QString("<b>%1</b>: %2").arg(varName).arg(result));
                 }
               });
       if (m_expressionEvaluatorWidget) {
@@ -399,7 +446,7 @@ void MainWindow::setupMenu() {
                              << "ls-remote" << "--tags" << "--sort=v:refname"
                              << "https://github.com/bnorthern42/GridLock.git");
     gitProc.waitForFinished(3000);
-    QString latestTag = "v0.5.2"; // default fallback
+    QString latestTag = "v0.5.3"; // default fallback
     if (gitProc.exitStatus() == QProcess::NormalExit &&
         gitProc.exitCode() == 0) {
       QString output =
@@ -583,13 +630,14 @@ void MainWindow::setupDocks() {
         }
       });
 
-  connect(m_editorTabManager, &EditorTabManager::semanticHoverRequested, this,
-          [this](const QString &file, int line, int character,
-                 const QPoint &globalPos) {
-            if (m_lspCoordinator) {
-              m_lspCoordinator->requestHover(file, line, character, globalPos);
+  connect(m_editorTabManager, &EditorTabManager::hideHoverTooltip, this,
+          [this]() {
+            if (m_plainJaneTooltip) {
+              m_plainJaneTooltip->hideTooltip();
             }
           });
+
+
 
   connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,
           [this](const QString &varName) {

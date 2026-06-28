@@ -42,6 +42,8 @@ void TestDapBreakpoints::testStopEventParsing() {
     QByteArray json = "{\"type\":\"event\",\"event\":\"stopped\",\"body\":{\"reason\":\"breakpoint\",\"threadId\":1}}";
     QByteArray data = "Content-Length: " + QByteArray::number(json.size()) + "\r\n\r\n" + json;
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QCOMPARE(spy.count(), 1);
     QList<QVariant> args = spy.takeFirst();

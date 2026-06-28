@@ -46,7 +46,7 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
     connect(view, &SourceCodeView::toggleBreakpointRequested, this, &EditorTabManager::toggleBreakpointRequested);
     connect(view, &SourceCodeView::breakpointToggled, this, &EditorTabManager::breakpointToggled);
     connect(view, &SourceCodeView::hoverVariableRequested, this, &EditorTabManager::hoverVariableRequested);
-    connect(view, &SourceCodeView::semanticHoverRequested, this, &EditorTabManager::semanticHoverRequested);
+    connect(view, &SourceCodeView::hideHoverTooltip, this, &EditorTabManager::hideHoverTooltip);
     connect(view, &SourceCodeView::pinVariableRequested, this, &EditorTabManager::pinVariableRequested);
 
     QFileInfo fi(file.fileName());

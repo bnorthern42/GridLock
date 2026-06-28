@@ -162,7 +162,7 @@ void GdbRankCoordinator::launchParallelSession(const QString &executable,
     rp->id = i;
     rp->process = std::make_unique<QProcess>();
     rp->state.rankId = i;
-    rp->state.currentState = "running";
+    rp->state.currentState = "launching";
     rp->state.currentLine = 0;
 
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this,
@@ -613,6 +613,14 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         auto match = errorRe.match(line);
         QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
 
+        if (errMsg.contains("Connection refused") || errMsg.contains("Connection timed out")) {
+            QTimer::singleShot(500, this, [this, rankId]() {
+                QString connectCmd = QString("-target-select remote localhost:%1\n").arg(2000 + rankId);
+                writeCmd(rankId, connectCmd);
+            });
+            return;
+        }
+
         rp->state.disassemblyText = QString("; GDB Error: %1").arg(errMsg);
         emit rankStateChanged(rankId, rp->state);
       }
@@ -624,6 +632,14 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       QRegularExpression errorRe("msg=\"([^\"]+)\"");
       auto match = errorRe.match(line);
       QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
+
+      if (errMsg.contains("Connection refused") || errMsg.contains("Connection timed out")) {
+          QTimer::singleShot(500, this, [this, rankId]() {
+              QString connectCmd = QString("-target-select remote localhost:%1\n").arg(2000 + rankId);
+              writeCmd(rankId, connectCmd);
+          });
+          return;
+      }
 
       rp->state.disassemblyText = QString("; GDB Error: %1").arg(errMsg);
       emit rankStateChanged(rankId, rp->state);

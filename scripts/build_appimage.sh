@@ -4,11 +4,11 @@ set -euo pipefail
 export APPIMAGE_EXTRACT_AND_RUN=1
 export NO_STRIP=1
 
-# Dynamically set version from GitHub tag, default to 0.5.2 if not running in CI
+# Dynamically set version from GitHub tag, default to 0.5.3 if not running in CI
 if [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
     export VERSION="${GITHUB_REF_NAME#v}"
 else
-    export VERSION="0.5.2"
+    export VERSION="0.5.3"
 fi
 
 APP_NAME="GridLock"

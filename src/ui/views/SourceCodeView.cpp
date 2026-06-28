@@ -338,6 +338,8 @@ void SourceCodeView::mouseMoveEvent(QMouseEvent *event) {
 
 void SourceCodeView::leaveEvent(QEvent *event) {
     m_hoverTimer->stop();
+    m_lastHoveredWord.clear();
+    emit hideHoverTooltip();
     QPlainTextEdit::leaveEvent(event);
 }
 
@@ -348,13 +350,18 @@ void SourceCodeView::handleHoverTimeout() {
 
     QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
     if (cVarRegex.match(word).hasMatch()) {
-        emit hoverVariableRequested(word, m_lastGlobalMousePos);
+        if (word != m_lastHoveredWord) {
+            m_lastHoveredWord = word;
+            emit hoverVariableRequested(word, m_lastGlobalMousePos);
+        }
+    } else {
+        if (!m_lastHoveredWord.isEmpty()) {
+            emit hideHoverTooltip();
+        }
+        m_lastHoveredWord.clear();
     }
 
-    int line = cursor.blockNumber();
-    int character = cursor.positionInBlock();
-    QString emitPath = m_currentFilePath;
-    emit semanticHoverRequested(emitPath, line, character, m_lastGlobalMousePos);
+
 }
 
 void SourceCodeView::mousePressEvent(QMouseEvent *event) {
@@ -368,6 +375,8 @@ void SourceCodeView::mousePressEvent(QMouseEvent *event) {
             emit pinVariableRequested(word);
         }
     }
+    m_lastHoveredWord.clear();
+    emit hideHoverTooltip();
     QPlainTextEdit::mousePressEvent(event);
 }
 

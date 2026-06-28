@@ -24,6 +24,9 @@ void TestDapCommands::testHandshake() {
     
     QByteArray data = "Content-Length: 38\r\n\r\n{\"type\":\"event\",\"event\":\"initialized\"}";
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QCOMPARE(coordinator.writeCount, 1);
     QVERIFY(coordinator.lastWrittenData.contains("\"command\":\"configurationDone\""));

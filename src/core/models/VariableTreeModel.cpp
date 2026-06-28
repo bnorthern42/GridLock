@@ -128,6 +128,7 @@ void VariableTreeModel::fetchMore(const QModelIndex& parent) {
     if (!parent.isValid()) return;
     VariableNode* node = getNode(parent);
     if (node && (node->numChildren > 0 || node->variablesReference > 0) && !node->childrenLoaded) {
+        node->childrenLoaded = true; // Prevent recursive or looped fetching
         if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
             gdb->writeCmd(m_currentRankId, QString("-var-list-children --all-values %1\n").arg(node->varobjName));
         } else if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {

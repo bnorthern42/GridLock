@@ -111,7 +111,7 @@ void TestAdvancedFeatures::testValueChangeHighlighting() {
     var1["type"] = "int";
     initialVars.append(var1);
     
-    model.onLocalsUpdated(0, initialVars);
+    model.onLocalsUpdated(0, 0, initialVars);
     
     // Assume my_var is at row 0, column 1
     QModelIndex index = model.index(0, 1);
@@ -131,7 +131,7 @@ void TestAdvancedFeatures::testValueChangeHighlighting() {
     var1_updated["type"] = "int";
     updatedVars.append(var1_updated);
     
-    model.onLocalsUpdated(0, updatedVars);
+    model.onLocalsUpdated(0, 0, updatedVars);
     
     QModelIndex updatedIndex = model.index(0, 1);
     QCOMPARE(model.data(updatedIndex, Qt::DisplayRole).toString(), QString("20"));

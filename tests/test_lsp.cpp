@@ -70,8 +70,8 @@ void TestLspCoordinator::testLspParser() {
         initResult["result"] = resultObj;
         coordinator.processRawOutput(LspCoordinator::formatMessage(initResult));
 
-        // Now m_isInitialized is true, so requestHover will work!
         // Our test data uses ID=2 for the hover.
+        // We call requestHover twice so m_nextRequestId hits 2 and registers it.
         coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10)); // Request ID 1
         coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10)); // Request ID 2
         

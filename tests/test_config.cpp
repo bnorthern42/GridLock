@@ -96,7 +96,7 @@ void TestConfig::testFallbacks() {
     auto& manager = gridlock::core::ConfigManager::instance();
     manager.loadConfig();
 
-    QCOMPARE(manager.getDefaultRanks(), 2);  // Updated: default changed from 6 → 2
+    QCOMPARE(manager.getDefaultRanks(), 4);  // Updated: default changed from 6 → 4
     QCOMPARE(manager.getGdbPath(), QString("gdb"));
     QCOMPARE(manager.getSourceBackground(), QString("#1e1e1e"));
     QCOMPARE(manager.getSourceText(), QString("#f0f0f0"));

@@ -27,6 +27,8 @@ void TestDapLifecycle::testOutputEvent() {
     QByteArray data = "Content-Length: " + QByteArray::number(json.size()) + "\r\n\r\n" + json;
     
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QCOMPARE(spy.count(), 1);
     QList<QVariant> args = spy.takeFirst();
@@ -41,6 +43,39 @@ void TestDapLifecycle::testDisconnectRequest() {
     
     QVERIFY(coordinator.lastWrittenData.contains("\"command\":\"disconnect\""));
     QVERIFY(coordinator.lastWrittenData.contains("\"terminateDebuggee\":true"));
+}
+
+void TestDapLifecycle::testRankStateBroadcasting() {
+    MockDapCoordinatorLifecycle coordinator;
+    
+    QSignalSpy spy(&coordinator, &DapCoordinator::executionStopped);
+    
+    // Simulating Rank 1 (threadId = 2)
+    QByteArray json1 = "{\"type\":\"event\",\"event\":\"stopped\",\"body\":{\"reason\":\"breakpoint\",\"threadId\":2}}";
+    QByteArray data1 = "Content-Length: " + QByteArray::number(json1.size()) + "\r\n\r\n" + json1;
+    
+    coordinator.processRawData(data1);
+    QTest::qWait(50);
+    QTest::qWait(50);
+    QTest::qWait(50); // allow QtConcurrent to process
+    
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().at(0).toInt(), 1); // Rank 1
+    QCOMPARE(spy.first().at(1).toString(), QString("breakpoint"));
+    spy.clear();
+    
+    // Simulating Rank 3 (threadId = 4)
+    QByteArray json3 = "{\"type\":\"event\",\"event\":\"stopped\",\"body\":{\"reason\":\"step\",\"threadId\":4}}";
+    QByteArray data3 = "Content-Length: " + QByteArray::number(json3.size()) + "\r\n\r\n" + json3;
+    
+    coordinator.processRawData(data3);
+    QTest::qWait(50);
+    QTest::qWait(50);
+    QTest::qWait(50);
+    
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().at(0).toInt(), 3); // Rank 3
+    QCOMPARE(spy.first().at(1).toString(), QString("step"));
 }
 
 QTEST_GUILESS_MAIN(TestDapLifecycle)

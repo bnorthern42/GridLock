@@ -41,7 +41,7 @@ Jump into the [**Interface Guide**](./interface_guide.md) to get started!
 
 ## 🎓 Tutorial Mode (Experimental)
 
-As of version `0.5.2`, GridLock includes an experimental, Work-In-Progress (WIP) interactive tutorial suite. This mode is designed for testing debugger integrations and demonstrating the IDE's core features (e.g., Deadlock Detection, Memory Diffing).
+As of version `0.5.3`, GridLock includes an experimental, Work-In-Progress (WIP) interactive tutorial suite. This mode is designed for testing debugger integrations and demonstrating the IDE's core features (e.g., Deadlock Detection, Memory Diffing).
 
 To launch the interactive tutorial:
 ```bash

@@ -12,6 +12,7 @@ namespace gridlock::ui {
 HoverWidget::HoverWidget(QWidget* parent)
     : QWidget(parent) {
     setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+    setAttribute(Qt::WA_StyledBackground, true);
     
     // Apply styling directly to prevent white fallback
     this->setStyleSheet("background-color: #1e1e2e; border: 1px solid #45475a; border-radius: 8px;");

@@ -23,7 +23,7 @@ signals:
     void toggleBreakpointRequested(const QString& location);
     void breakpointToggled(const QString& file, int line, bool isSet, const QString& condition);
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
-    void semanticHoverRequested(const QString& file, int line, int character, const QPoint& globalPos);
+    void hideHoverTooltip();
     void pinVariableRequested(const QString& varName);
 
 private slots:

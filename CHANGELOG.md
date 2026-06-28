@@ -5,6 +5,17 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-06-28
+
+### Changed
+- **Tooltip Rendering**: Removed heavy LSP Markdown tooltips and the `HoverWidget` to improve UI performance and stability. Reverted to a lightweight, custom `QLabel` plain-jane tooltip for GDB variable evaluations.
+- **Tutorial Subsystem**: Decoupled tutorial E2E tests from the main build pipeline, removing them from `meson.build` to migrate to a separate repository.
+
+### Fixed
+- **Wayland Tooltip Glitches**: Fixed tooltips rendering as blank white boxes on Wayland compositors by refactoring them to use `Qt::ToolTip | Qt::FramelessWindowHint` without translucent background attributes.
+- **Hover Jitter**: Implemented debouncing on `SourceCodeView` to eliminate rapid-fire GDB requests and UI flickering when moving the mouse cursor over the same variable.
+- **Variable Tree Performance**: Eliminated eager DAP variable fetches, significantly improving responsiveness and eliminating I/O bottlenecks when stepping through code.
+
 ## [0.5.2] - 2026-06-27
 
 ### Added

@@ -161,7 +161,6 @@ void LspCoordinator::processMessage(const QJsonObject &message) {
         }
       }
       if (!markdown.trimmed().isEmpty()) {
-        qDebug() << "[LSP Hover] Parsed Markdown:" << markdown.trimmed();
         emit hoverResultReceived(markdown.trimmed(), pos);
       }
     }

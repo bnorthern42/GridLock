@@ -9,4 +9,6 @@ private slots:
     void testVariablesFetch();
     void testVariableTreePopulation();
     void testVariableLazyLoading();
+    void testVariableTreePerformance();
+    void testStepVariableRefresh();
 };

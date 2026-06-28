@@ -1,3 +1,4 @@
+#include <QtConcurrent/QtConcurrent>
 #include "DapCoordinator.hpp"
 #include "NativeMemoryReader.hpp"
 #include "core/managers/ConfigManager.hpp"
@@ -136,7 +137,7 @@ void DapCoordinator::pauseExecution(int threadId) {
 
 void DapCoordinator::launchParallelSession(const QString &binaryPath,
                                            int ranks) {
-  Q_UNUSED(ranks);
+  m_processCount = ranks;
   m_currentBinaryPath = binaryPath;
   qDebug() << "[DAP] Spawning DAP Adapter process for binary:" << binaryPath;
 
@@ -332,22 +333,26 @@ void DapCoordinator::processRawData(const QByteArray &data) {
       break;
     }
 
-    // Extract payload
     QByteArray payloadData = m_buffer.mid(headerEndIndex + 4, contentLength);
     m_buffer.remove(0, totalMessageLength);
 
-    QJsonParseError parseError;
-    QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
+    QtConcurrent::run([this, payloadData]() {
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
 
-    if (parseError.error != QJsonParseError::NoError) {
-      qWarning() << "Failed to parse DAP JSON payload:"
-                 << parseError.errorString();
-      continue;
-    }
+        if (parseError.error != QJsonParseError::NoError) {
+          qWarning() << "Failed to parse DAP JSON payload:"
+                     << parseError.errorString();
+          return;
+        }
 
-    if (doc.isObject()) {
-      handleMessage(doc.object());
-    }
+        if (doc.isObject()) {
+          QJsonObject obj = doc.object();
+          QMetaObject::invokeMethod(this, [this, obj]() {
+              handleMessage(obj);
+          }, Qt::QueuedConnection);
+        }
+    });
   }
 }
 

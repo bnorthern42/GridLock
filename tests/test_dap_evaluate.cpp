@@ -26,6 +26,8 @@ void TestDapEvaluate::testEvaluateRequest() {
     QByteArray json = "{\"type\":\"response\",\"command\":\"stackTrace\",\"success\":true,\"request_seq\":1,\"body\":{\"stackFrames\":[{\"id\":1005,\"name\":\"main\",\"source\":{\"path\":\"/test.cpp\"},\"line\":42}]}}";
     QByteArray data = "Content-Length: " + QByteArray::number(json.size()) + "\r\n\r\n" + json;
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     coordinator.evaluateExpression(0, "sizeof(int)");
     
@@ -51,6 +53,8 @@ void TestDapEvaluate::testEvaluateResponse() {
     QByteArray json = "{\"type\":\"response\",\"command\":\"evaluate\",\"success\":true,\"request_seq\":1,\"body\":{\"result\":\"4\",\"variablesReference\":0}}";
     QByteArray data = "Content-Length: " + QByteArray::number(json.size()) + "\r\n\r\n" + json;
     coordinator.processRawData(data);
+    QTest::qWait(50);
+    QTest::qWait(50);
     
     QCOMPARE(spy.count(), 1);
     QList<QVariant> args = spy.takeFirst();

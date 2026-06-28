@@ -1,5 +1,7 @@
 #include "VariablesDockWidget.hpp"
+#include "../../core/hpc/IBackendCoordinator.hpp"
 #include "../../core/hpc/GdbRankCoordinator.hpp"
+#include "../../core/hpc/DapCoordinator.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -17,7 +19,7 @@ VariablesDockWidget::VariablesDockWidget(QWidget* parent)
 
 VariablesDockWidget::~VariablesDockWidget() = default;
 
-void VariablesDockWidget::setCoordinator(GdbRankCoordinator* coordinator) {
+void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
     m_coordinator = coordinator;
     m_model->deleteLater();
     m_model = new VariableTreeModel(coordinator, this);
@@ -25,7 +27,20 @@ void VariablesDockWidget::setCoordinator(GdbRankCoordinator* coordinator) {
     connect(m_variablesTree, &QTreeView::expanded, m_model, &VariableTreeModel::fetchMore);
 
     if (m_coordinator) {
-        connect(m_coordinator, &GdbRankCoordinator::rankStateChanged, this, &VariablesDockWidget::onRankStateChanged);
+        if (auto* gdb = dynamic_cast<GdbRankCoordinator*>(m_coordinator)) {
+            connect(gdb, &GdbRankCoordinator::rankStateChanged, this, &VariablesDockWidget::onRankStateChanged);
+        } else if (auto* dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+            connect(dap, &DapCoordinator::stateChanged, this, [this](SessionState state) {
+                if (state == SessionState::Paused) {
+                    RankState rs; rs.currentState = "stopped";
+                    onRankStateChanged(m_currentRankId, rs);
+                }
+            });
+            connect(dap, &DapCoordinator::executionStopped, this, [this](int rankId, const QString&) {
+                RankState rs; rs.currentState = "stopped";
+                onRankStateChanged(rankId, rs);
+            });
+        }
         onProcessCountChanged();
     }
 }
@@ -104,8 +119,11 @@ void VariablesDockWidget::onRankStateChanged(int rankId, const RankState& state)
     }
 
     if (rankId == m_currentRankId && state.currentState == "stopped") {
-        m_model->loadLocals(rankId);
+        if (m_lastRankStates.value(rankId) != "stopped") {
+            m_model->loadLocals(rankId);
+        }
     }
+    m_lastRankStates[rankId] = state.currentState;
 }
 
 } // namespace gridlock

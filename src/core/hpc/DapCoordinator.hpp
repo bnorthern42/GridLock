@@ -51,6 +51,7 @@ public:
     void launchParallelSession(const QString& binaryPath, int ranks) override;
     pid_t getPidForRank(int rankId) const override { return m_rankToPid.value(rankId, 0); }
     QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
+    int getProcessCount() const override { return m_processCount; }
 
 signals:
     void executionStopped(int rankId, const QString& reason);
@@ -81,6 +82,7 @@ protected:
     virtual void writeToAdapter(const QByteArray& data);
 
     SessionState m_state = SessionState::Disconnected;
+    int m_processCount = 0;
 
     QMap<int, pid_t> m_rankToPid;
 

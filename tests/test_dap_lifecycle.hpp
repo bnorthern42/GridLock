@@ -7,4 +7,5 @@ class TestDapLifecycle : public QObject {
 private slots:
     void testOutputEvent();
     void testDisconnectRequest();
+    void testRankStateBroadcasting();
 };
