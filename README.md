@@ -69,6 +69,9 @@ sudo meson install -C build
 # Tutorial mode (experimental, WIP feature for testing debugger integrations)
 # Note: This feature currently only works when building locally and is not supported in the AppImage.
 ./build/gridlock --tutorial-mode
+
+# Verbose mode (force stdout of internal DAP/LSP payloads and QtDebug traces)
+./build/gridlock --verbose
 ```
 
 ### Deployment & AppImage Packaging

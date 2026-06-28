@@ -61,9 +61,17 @@ void TestLspCoordinator::testLspParser() {
         coordinator.processRawOutput(rawStandardOutput.toUtf8());
         QVERIFY(coordinator.isInitialized());
     } else {
-        // Inject fake hover request to setup ID mapping
+        // Initialize first so requestHover is not ignored
+        QJsonObject initResult;
+        initResult["jsonrpc"] = "2.0";
+        initResult["id"] = 1;
+        QJsonObject resultObj;
+        resultObj["capabilities"] = QJsonObject();
+        initResult["result"] = resultObj;
+        coordinator.processRawOutput(LspCoordinator::formatMessage(initResult));
+
+        // Now m_isInitialized is true, so requestHover will work!
         // Our test data uses ID=2 for the hover.
-        // We call requestHover twice so m_nextRequestId hits 2 and registers it.
         coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10)); // Request ID 1
         coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10)); // Request ID 2
         
@@ -79,7 +87,16 @@ void TestLspCoordinator::testFragmentedStream() {
     LspCoordinator coordinator;
     QSignalSpy spy(&coordinator, &LspCoordinator::hoverResultReceived);
     
-    // Send one request to get ID=1
+    // Initialize first
+    QJsonObject initResult;
+    initResult["jsonrpc"] = "2.0";
+    initResult["id"] = 1;
+    QJsonObject resultObj;
+    resultObj["capabilities"] = QJsonObject();
+    initResult["result"] = resultObj;
+    coordinator.processRawOutput(LspCoordinator::formatMessage(initResult));
+
+    // Send one request to get ID=2
     coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10));
 
     QJsonObject hoverResult;

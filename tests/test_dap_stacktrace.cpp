@@ -3,6 +3,7 @@
 
 class MockDapCoordinator : public DapCoordinator {
 public:
+    MockDapCoordinator() { m_state = SessionState::Running; }
     QByteArray lastWrittenData;
 
 protected:

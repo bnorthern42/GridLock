@@ -87,7 +87,9 @@ private slots:
             // Breakpoint successfully hit. We can terminate and move to next tutorial.
             QSignalSpy spyDisconnect(coordinator, &DapCoordinator::adapterExited);
             coordinator->terminateSession();
-            QVERIFY(spyDisconnect.wait(10000)); // Give the slow CI runner up to 10 seconds to cleanly shut down
+            if (spyDisconnect.isEmpty()) {
+                QVERIFY(spyDisconnect.wait(10000)); // Give the slow CI runner up to 10 seconds to cleanly shut down
+            }
             
             // Clean up temporary compiled binaries
             QString outBin = QDir::tempPath() + "/" + QFileInfo(tutorialName.toLower().replace(" ", "_") + ".cpp").baseName() + "_demo";

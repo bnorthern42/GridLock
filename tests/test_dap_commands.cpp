@@ -4,6 +4,7 @@
 
 class MockDapCoordinator : public DapCoordinator {
 public:
+    MockDapCoordinator() { m_state = SessionState::Running; }
     QByteArray lastWrittenData;
     int writeCount = 0;
 

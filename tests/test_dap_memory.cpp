@@ -7,6 +7,8 @@
 
 class MockDapCoordinatorMemory : public DapCoordinator {
 public:
+    MockDapCoordinatorMemory() { m_state = SessionState::Running; }
+    
     QByteArray lastWrittenData;
 
 protected:

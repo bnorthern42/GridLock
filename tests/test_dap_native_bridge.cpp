@@ -14,6 +14,8 @@ class TestableDapCoordinator : public DapCoordinator {
 public:
     using DapCoordinator::handleMessage;
     using DapCoordinator::m_rankToPid;
+
+    TestableDapCoordinator() { m_state = SessionState::Running; }
     
     QJsonObject lastSentMessage;
     

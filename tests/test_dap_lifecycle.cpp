@@ -7,6 +7,8 @@
 
 class MockDapCoordinatorLifecycle : public DapCoordinator {
 public:
+    MockDapCoordinatorLifecycle() { m_state = SessionState::Running; }
+    
     QByteArray lastWrittenData;
 
 protected:

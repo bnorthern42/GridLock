@@ -7,6 +7,8 @@
 
 class MockDapCoordinatorEval : public DapCoordinator {
 public:
+    MockDapCoordinatorEval() { m_state = SessionState::Running; }
+    
     QByteArray lastWrittenData;
 
 protected:

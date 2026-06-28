@@ -77,6 +77,8 @@ protected:
     virtual bool isAdapterRunning() const;
     virtual void writeToAdapter(const QByteArray& data);
 
+    SessionState m_state = SessionState::Disconnected;
+
     QMap<int, pid_t> m_rankToPid;
 
 private:
@@ -99,7 +101,7 @@ private:
     };
     QMap<int, HeatmapRequest> m_heatmapRequests;
     
-    SessionState m_state = SessionState::Disconnected;
+
     int m_slurmJobId = -1;
     QString m_currentBinaryPath;
 };
