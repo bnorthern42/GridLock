@@ -93,7 +93,7 @@ bool AppearanceSettingsPage::isDarkMode() const {
 }
 
 void AppearanceSettingsPage::loadFromSettings() {
-  QSettings s("GridLock", "Debugger");
+  QSettings s("gridlock", "debugger");
   const QString theme = s.value("appearance/theme", "Fusion").toString();
   bool isDark = s.value("appearance/dark_mode", true).toBool();
 
@@ -156,7 +156,7 @@ bool EditingSettingsPage::showWhitespace() const {
 }
 
 void EditingSettingsPage::loadFromSettings() {
-  QSettings s("GridLock", "Debugger");
+  QSettings s("gridlock", "debugger");
   m_tabWidthBox->setValue(s.value("editing/tab_width", 4).toInt());
   m_indentModeCombo->setCurrentIndex(
       s.value("editing/insert_spaces", true).toBool() ? 0 : 1);
@@ -224,7 +224,7 @@ bool BehaviorSettingsPage::focusOnStop() const {
 }
 
 void BehaviorSettingsPage::loadFromSettings() {
-  QSettings s("GridLock", "Debugger");
+  QSettings s("gridlock", "debugger");
   int rbIdx = m_restoreBreakpointsCheck->findText(
       s.value("behavior/restore_breakpoints", "Always").toString());
   if (rbIdx >= 0)
@@ -366,7 +366,7 @@ void DebuggerSettingsPage::loadFromSettings() {
       gridlock::core::ConfigManager::instance().getGlobalClangdPath());
   m_dapAdapterEdit->setText(
       gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath());
-  m_gdbPathEdit->setText(QString::fromStdString(ps.customGdbPath));
+  m_gdbPathEdit->setText(ds.gdbPath);
   m_mpiExecEdit->setText(ds.mpiExecutable);
   m_mpiArgsEdit->setText(ds.mpiArgs);
   m_rankBox->setValue(ds.defaultRanks);
@@ -839,7 +839,7 @@ void PreferencesDialog::setupButtonBox() {
 // ── Private helpers ──────────────────────────────────────────────────────
 
 void PreferencesDialog::apply() {
-  QSettings s("GridLock", "Debugger");
+  QSettings s("gridlock", "debugger");
 
   // ── Appearance ──────────────────────────────────────────────────────
   s.setValue("appearance/theme", m_appearancePage->selectedTheme());

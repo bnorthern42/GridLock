@@ -74,8 +74,8 @@ int main(int argc, char *argv[]) {
   QApplication app(argc, argv);
 
   // Set org/app identity so QSettings keys are consistent everywhere.
-  QApplication::setOrganizationName("GridLock");
-  QApplication::setApplicationName("GridLock");
+  QApplication::setOrganizationName("gridlock");
+  QApplication::setApplicationName("gridlock");
   QApplication::setApplicationVersion("0.5.2");
 
   // CRITICAL FOR WAYLAND:

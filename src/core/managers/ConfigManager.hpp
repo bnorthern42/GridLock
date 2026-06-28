@@ -138,8 +138,8 @@ private:
   QString m_workspacePath;
   QString m_globalConfigPath;
 
-  static constexpr const char *kOrg = "GridLock";
-  static constexpr const char *kApp = "Debugger";
+  static constexpr const char *kOrg = "gridlock";
+  static constexpr const char *kApp = "debugger";
 };
 
 } // namespace gridlock::core
