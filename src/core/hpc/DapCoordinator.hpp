@@ -53,7 +53,7 @@ public:
 signals:
     void executionStopped(int rankId, const QString& reason);
     void messageReceived(const QJsonObject& message);
-    void localsUpdated(int rankId, const QJsonArray& variables);
+    void localsUpdated(int rankId, int parentVarRef, const QJsonArray& variables);
     void expressionEvaluated(int rankId, QString expr, QString result);
     void targetOutputReceived(QString category, QString output);
     void memoryRead(int rankId, const QString& address, const QByteArray& data);
@@ -88,7 +88,7 @@ private:
     QMap<QString, QList<int>> m_breakpoints;
     QMap<int, int> m_stackTraceRequests; // Map sequenceNumber to rankId
     QMap<int, int> m_scopesRequests;
-    QMap<int, int> m_variablesRequests;
+    QMap<int, QPair<int, int>> m_variablesRequests;
     QMap<int, int> m_registersRequests;
     QMap<int, int> m_memoryRequests;
     QMap<int, int> m_activeFrameIds;

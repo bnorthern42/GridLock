@@ -52,8 +52,8 @@ void TestDapVariables::testVariableTreePopulation() {
     gridlock::VariableTreeModel model(nullptr);
     MockDapCoordinatorVars coordinator;
     
-    QObject::connect(&coordinator, &DapCoordinator::localsUpdated, &model, [&model](int rankId, const QJsonArray& variables) {
-        model.onLocalsUpdated(rankId, variables);
+    QObject::connect(&coordinator, &DapCoordinator::localsUpdated, &model, [&model](int rankId, int parentVarRef, const QJsonArray& variables) {
+        model.onLocalsUpdated(rankId, parentVarRef, variables);
     });
     
     coordinator.requestVariables(0, 1001); // rank=0, varRef=1001, seq=1
@@ -73,6 +73,37 @@ void TestDapVariables::testVariableTreePopulation() {
     QCOMPARE(model.data(valueIndex, Qt::DisplayRole).toString(), QString("1"));
     QModelIndex typeIndex = model.index(0, 2);
     QCOMPARE(model.data(typeIndex, Qt::DisplayRole).toString(), QString("int"));
+}
+
+void TestDapVariables::testVariableLazyLoading() {
+    MockDapCoordinatorVars coordinator;
+    gridlock::VariableTreeModel model(&coordinator);
+    
+    QObject::connect(&coordinator, &DapCoordinator::localsUpdated, &model, [&model](int rankId, int parentVarRef, const QJsonArray& variables) {
+        model.onLocalsUpdated(rankId, parentVarRef, variables);
+    });
+    
+    coordinator.requestVariables(0, 1001); // seq 1
+    coordinator.lastWrittenData.clear();
+    
+    QByteArray json = "{\"type\":\"response\",\"command\":\"variables\",\"success\":true,\"request_seq\":1,\"body\":{\"variables\":[{\"name\":\"argv\",\"value\":\"0x1234\",\"type\":\"char**\",\"variablesReference\":5}]}}";
+    QByteArray data = "Content-Length: " + QByteArray::number(json.size()) + "\r\n\r\n" + json;
+    
+    coordinator.processRawData(data);
+    
+    // Verify no nested DAP request was sent eagerly
+    QVERIFY(coordinator.lastWrittenData.isEmpty());
+    
+    QModelIndex rootIndex = model.index(0, 0); // argv node
+    QVERIFY(rootIndex.isValid());
+    
+    // Trigger lazy load
+    QVERIFY(model.canFetchMore(rootIndex));
+    model.fetchMore(rootIndex);
+    
+    // Verify DAP request was sent for variablesReference = 5
+    QVERIFY(coordinator.lastWrittenData.contains("\"command\":\"variables\""));
+    QVERIFY(coordinator.lastWrittenData.contains("\"variablesReference\":5"));
 }
 
 QTEST_GUILESS_MAIN(TestDapVariables)

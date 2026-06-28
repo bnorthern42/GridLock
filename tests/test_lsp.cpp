@@ -125,7 +125,7 @@ void TestLspCoordinator::testFragmentedStream() {
     QCOMPARE(arguments.at(0).toString(), QString("Fragmented Markdown"));
 }
 
-void TestLspCoordinator::testHoverMarkdownExtraction() {
+void TestLspCoordinator::testLspHoverParsing() {
     LspCoordinator coordinator;
     QSignalSpy spy(&coordinator, &LspCoordinator::hoverResultReceived);
     
@@ -138,27 +138,50 @@ void TestLspCoordinator::testHoverMarkdownExtraction() {
     initResult["result"] = resultObj;
     coordinator.processRawOutput(LspCoordinator::formatMessage(initResult));
 
+    // 1. Object Test
     coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10));
-
-    QJsonObject hoverResult;
-    hoverResult["jsonrpc"] = "2.0";
-    hoverResult["id"] = 1; // It increments from 1. Since initialization used id 1, wait, start sends 1, requestHover sends 2? Let's trace.
-    // LspCoordinator m_nextRequestId starts at 1. start() uses 1, then increments. requestHover() uses the next ID. So it will be 1 or 2 depending on if start() was called.
-    // Here we bypassed start() and just mocked the initialization response.
-    // When we call requestHover, it sends a payload with ID=1 because m_nextRequestId is 1. Wait, requestHover calls sendPayload.
-    QJsonObject hResult;
-    QJsonObject hContents;
-    hContents["kind"] = "markdown";
-    hContents["value"] = "**Markdown** string!";
-    hResult["contents"] = hContents;
-    hoverResult["result"] = hResult;
-    
-    QByteArray fullBytes = LspCoordinator::formatMessage(hoverResult);
-    coordinator.processRawOutput(fullBytes);
-    
+    QJsonObject hoverObj;
+    hoverObj["jsonrpc"] = "2.0";
+    hoverObj["id"] = 1; 
+    QJsonObject hResultObj;
+    QJsonObject hContentsObj;
+    hContentsObj["kind"] = "markdown";
+    hContentsObj["value"] = "Object Markdown";
+    hResultObj["contents"] = hContentsObj;
+    hoverObj["result"] = hResultObj;
+    coordinator.processRawOutput(LspCoordinator::formatMessage(hoverObj));
     QCOMPARE(spy.count(), 1);
-    QList<QVariant> arguments = spy.takeFirst();
-    QCOMPARE(arguments.at(0).toString(), QString("**Markdown** string!"));
+    QCOMPARE(spy.takeFirst().at(0).toString(), QString("Object Markdown"));
+
+    // 2. String Test
+    coordinator.requestHover("dummy.cpp", 2, 2, QPoint(20, 20));
+    QJsonObject hoverStr;
+    hoverStr["jsonrpc"] = "2.0";
+    hoverStr["id"] = 2;
+    QJsonObject hResultStr;
+    hResultStr["contents"] = "String Markdown";
+    hoverStr["result"] = hResultStr;
+    coordinator.processRawOutput(LspCoordinator::formatMessage(hoverStr));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.takeFirst().at(0).toString(), QString("String Markdown"));
+
+    // 3. Array Test
+    coordinator.requestHover("dummy.cpp", 3, 3, QPoint(30, 30));
+    QJsonObject hoverArr;
+    hoverArr["jsonrpc"] = "2.0";
+    hoverArr["id"] = 3;
+    QJsonObject hResultArr;
+    QJsonArray hContentsArr;
+    hContentsArr.append("Array String");
+    QJsonObject objVal;
+    objVal["kind"] = "markdown";
+    objVal["value"] = "Array Object";
+    hContentsArr.append(objVal);
+    hResultArr["contents"] = hContentsArr;
+    hoverArr["result"] = hResultArr;
+    coordinator.processRawOutput(LspCoordinator::formatMessage(hoverArr));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.takeFirst().at(0).toString().trimmed(), QString("Array String\nArray Object"));
 }
 
 QTEST_MAIN(TestLspCoordinator)

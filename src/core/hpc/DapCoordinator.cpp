@@ -194,7 +194,7 @@ void DapCoordinator::requestScopes(int frameId, int rankId) {
 void DapCoordinator::requestVariables(int rankId, int variablesReference) {
   QJsonObject args;
   args["variablesReference"] = variablesReference;
-  m_variablesRequests[m_sequenceNumber] = rankId;
+  m_variablesRequests[m_sequenceNumber] = qMakePair(rankId, variablesReference);
   sendRequest("variables", args);
 }
 
@@ -435,10 +435,12 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
     } else if (command == "variables" && message["success"].toBool()) {
       int seq = message["request_seq"].toInt();
       if (m_variablesRequests.contains(seq)) {
-        int rankId = m_variablesRequests.take(seq);
+        auto pair = m_variablesRequests.take(seq);
+        int rankId = pair.first;
+        int varRef = pair.second;
         QJsonArray variables =
             message["body"].toObject()["variables"].toArray();
-        emit localsUpdated(rankId, variables);
+        emit localsUpdated(rankId, varRef, variables);
       } else if (m_registersRequests.contains(seq)) {
         int rankId = m_registersRequests.take(seq);
         QJsonArray registers =

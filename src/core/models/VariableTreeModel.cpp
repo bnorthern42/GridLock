@@ -1,5 +1,7 @@
 #include "VariableTreeModel.hpp"
+#include "../hpc/IBackendCoordinator.hpp"
 #include "../hpc/GdbRankCoordinator.hpp"
+#include "../hpc/DapCoordinator.hpp"
 #include <QRegularExpression>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -9,11 +11,16 @@
 
 namespace gridlock {
 
-VariableTreeModel::VariableTreeModel(GdbRankCoordinator* coordinator, QObject* parent)
+VariableTreeModel::VariableTreeModel(IBackendCoordinator* coordinator, QObject* parent)
     : QAbstractItemModel(parent), m_coordinator(coordinator), m_currentRankId(-1) {
     m_rootNode = std::make_unique<VariableNode>();
     if (m_coordinator) {
-        connect(m_coordinator, &GdbRankCoordinator::gdbOutputReceived, this, &VariableTreeModel::handleGdbOutput);
+        if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+            connect(gdb, &gridlock::GdbRankCoordinator::gdbOutputReceived, this, &VariableTreeModel::handleGdbOutput);
+        }
+        if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+            connect(dap, &DapCoordinator::localsUpdated, this, &VariableTreeModel::onLocalsUpdated);
+        }
     }
 }
 
@@ -108,14 +115,20 @@ QVariant VariableTreeModel::headerData(int section, Qt::Orientation orientation,
 
 bool VariableTreeModel::canFetchMore(const QModelIndex& parent) const {
     VariableNode* node = getNode(parent);
-    return node && node->numChildren > 0 && !node->childrenLoaded;
+    return node && (node->numChildren > 0 || node->variablesReference > 0) && !node->childrenLoaded;
 }
 
 void VariableTreeModel::fetchMore(const QModelIndex& parent) {
     if (!parent.isValid()) return;
     VariableNode* node = getNode(parent);
-    if (node && node->numChildren > 0 && !node->childrenLoaded) {
-        m_coordinator->writeCmd(m_currentRankId, QString("-var-list-children --all-values %1\n").arg(node->varobjName));
+    if (node && (node->numChildren > 0 || node->variablesReference > 0) && !node->childrenLoaded) {
+        if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+            gdb->writeCmd(m_currentRankId, QString("-var-list-children --all-values %1\n").arg(node->varobjName));
+        } else if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+            if (node->variablesReference > 0) {
+                dap->requestVariables(m_currentRankId, node->variablesReference);
+            }
+        }
     }
 }
 
@@ -123,16 +136,60 @@ void VariableTreeModel::loadLocals(int rankId) {
     storePreviousValues(m_rootNode.get());
     clear();
     m_currentRankId = rankId;
-    m_coordinator->sendCommand(rankId, "-stack-list-variables --all-values");
+    if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+        gdb->sendCommand(rankId, "-stack-list-variables --all-values");
+    } else if (auto dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+        dap->requestStackTrace(rankId);
+    }
 }
 
-void VariableTreeModel::onLocalsUpdated(int rankId, const QJsonArray& variables) {
+void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJsonArray& variables) {
     if (m_currentRankId != -1 && rankId != m_currentRankId) return;
     if (m_currentRankId == -1) m_currentRankId = rankId;
 
-    beginResetModel();
-    m_rootNode->children.clear();
-    m_rootNode->numChildren = 0;
+    std::function<VariableNode*(VariableNode*)> findNodeByRef = [&](VariableNode* n) -> VariableNode* {
+        if (!n) return nullptr;
+        if (n->variablesReference == parentVarRef) return n;
+        for (const auto& child : n->children) {
+            if (auto found = findNodeByRef(child.get())) return found;
+        }
+        return nullptr;
+    };
+
+    VariableNode* targetParent = nullptr;
+    if (parentVarRef > 0) {
+        targetParent = findNodeByRef(m_rootNode.get());
+    }
+    
+    std::function<QModelIndex(VariableNode*)> getIndex = [&](VariableNode* n) -> QModelIndex {
+        if (n == m_rootNode.get() || !n) return QModelIndex();
+        if (n->parent == m_rootNode.get()) {
+            for (size_t i = 0; i < m_rootNode->children.size(); ++i) {
+                if (m_rootNode->children[i].get() == n) return createIndex(i, 0, n);
+            }
+        } else {
+            QModelIndex pIdx = getIndex(n->parent);
+            if (!pIdx.isValid()) return QModelIndex();
+            for (size_t i = 0; i < n->parent->children.size(); ++i) {
+                if (n->parent->children[i].get() == n) return createIndex(i, 0, n);
+            }
+        }
+        return QModelIndex();
+    };
+
+    QModelIndex parentIdx;
+    if (!targetParent) {
+        beginResetModel();
+        m_rootNode->children.clear();
+        m_rootNode->numChildren = 0;
+        targetParent = m_rootNode.get();
+    } else {
+        if (targetParent->childrenLoaded) return;
+        parentIdx = getIndex(targetParent);
+        if (variables.size() > 0) {
+            beginInsertRows(parentIdx, 0, variables.size() - 1);
+        }
+    }
 
     for (const QJsonValue& val : variables) {
         QJsonObject var = val.toObject();
@@ -141,22 +198,32 @@ void VariableTreeModel::onLocalsUpdated(int rankId, const QJsonArray& variables)
         QString type = var["type"].toString();
         int varRef = var["variablesReference"].toInt(0);
         
-        auto node = std::make_unique<VariableNode>(name, type, value, "", 0, varRef, m_rootNode.get());
+        auto node = std::make_unique<VariableNode>(name, type, value, "", 0, varRef, targetParent);
         if (varRef > 0) {
             node->numChildren = 1; // Indicate it has children to allow expansion
         }
-        m_rootNode->children.push_back(std::move(node));
+        targetParent->children.push_back(std::move(node));
     }
     
-    m_rootNode->numChildren = m_rootNode->children.size();
-    endResetModel();
+    if (targetParent == m_rootNode.get()) {
+        m_rootNode->numChildren = m_rootNode->children.size();
+        endResetModel();
+    } else {
+        targetParent->numChildren = targetParent->children.size();
+        targetParent->childrenLoaded = true;
+        if (variables.size() > 0) {
+            endInsertRows();
+        }
+    }
 }
 
 void VariableTreeModel::clear() {
     beginResetModel();
     if (m_coordinator && m_currentRankId != -1) {
         for (const QString& varobj : m_createdVarobjs) {
-            m_coordinator->writeCmd(m_currentRankId, QString("-var-delete %1\n").arg(varobj));
+            if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+                gdb->writeCmd(m_currentRankId, QString("-var-delete %1\n").arg(varobj));
+            }
         }
     }
     m_createdVarobjs.clear();
@@ -206,7 +273,9 @@ void VariableTreeModel::parseListVariables(const QString& output) {
         QRegularExpressionMatch match = i.next();
         QString name = match.captured(1);
         QString varName = QString("var_%1_%2").arg(m_updateCounter).arg(name);
-        m_coordinator->writeCmd(m_currentRankId, QString("-var-create %1 * %2\n").arg(varName).arg(name));
+        if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+            gdb->writeCmd(m_currentRankId, QString("-var-create %1 * %2\n").arg(varName).arg(name));
+        }
     }
 }
 
@@ -245,7 +314,9 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
     if (value == "{...}" || type.contains("struct") || type.contains("class") || type.contains("*") || type == "MPI_Status" || type.contains("MPI_")) {
         m_evalCounter++;
         m_evalTokenToVarobj[m_evalCounter] = varobjName;
-        m_coordinator->writeCmd(m_currentRankId, QString("%1-data-evaluate-expression &%2\n").arg(m_evalCounter).arg(name));
+        if (auto gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+            gdb->writeCmd(m_currentRankId, QString("%1-data-evaluate-expression &%2\n").arg(m_evalCounter).arg(name));
+        }
     }
     
     endInsertRows();

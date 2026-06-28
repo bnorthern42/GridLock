@@ -8,4 +8,5 @@ private slots:
     void testScopesFetch();
     void testVariablesFetch();
     void testVariableTreePopulation();
+    void testVariableLazyLoading();
 };

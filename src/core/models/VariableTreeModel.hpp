@@ -7,14 +7,14 @@
 #include <memory>
 #include "VariableNode.hpp"
 
-namespace gridlock {
+class IBackendCoordinator;
 
-class GdbRankCoordinator;
+namespace gridlock {
 
 class VariableTreeModel : public QAbstractItemModel {
     Q_OBJECT
 public:
-    explicit VariableTreeModel(GdbRankCoordinator* coordinator, QObject* parent = nullptr);
+    explicit VariableTreeModel(IBackendCoordinator* coordinator, QObject* parent = nullptr);
     ~VariableTreeModel() override;
 
     QModelIndex index(int row, int column, const QModelIndex& parent = QModelIndex()) const override;
@@ -33,7 +33,7 @@ public:
 
 public slots:
     void handleGdbOutput(int rankId, const QString& output);
-    void onLocalsUpdated(int rankId, const QJsonArray& variables);
+    void onLocalsUpdated(int rankId, int parentVarRef, const QJsonArray& variables);
 
 private:
     VariableNode* getNode(const QModelIndex& index) const;
@@ -42,7 +42,7 @@ private:
     void parseVarListChildren(const QString& output);
     void storePreviousValues(VariableNode* node);
 
-    GdbRankCoordinator* m_coordinator;
+    IBackendCoordinator* m_coordinator;
     std::unique_ptr<VariableNode> m_rootNode;
     int m_currentRankId;
     int m_updateCounter = 0;
