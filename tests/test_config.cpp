@@ -83,12 +83,15 @@ void TestConfig::testFallbacks() {
     QString oldCwd = QDir::currentPath();
     QDir::setCurrent(tempDir.path());
 
-    QSettings prod("GridLock", "Debugger");
+    // Sandbox the global TOML config directory
+    qputenv("GRIDLOCK_TEST_CONFIG_DIR", tempDir.path().toUtf8());
+
+    QSettings prod("gridlock", "debugger");
     prod.remove("debugger/default_ranks");
     prod.remove("debugger/gdb_path");
     prod.sync();
 
-    QFile file("gridlock_config.toml");
+    QFile file(QDir(tempDir.path()).filePath("config.toml"));
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
     file.write("invalid = toml = syntax []\n[missing keys");
     file.close();
@@ -96,7 +99,7 @@ void TestConfig::testFallbacks() {
     auto& manager = gridlock::core::ConfigManager::instance();
     manager.loadConfig();
 
-    QCOMPARE(manager.getDefaultRanks(), 4);  // Updated: default changed from 6 → 4
+    QCOMPARE(manager.getDefaultRanks(), 2);  // Fallback when TOML is invalid and QSettings is empty
     QCOMPARE(manager.getGdbPath(), QString("gdb"));
     QCOMPARE(manager.getSourceBackground(), QString("#1e1e1e"));
     QCOMPARE(manager.getSourceText(), QString("#f0f0f0"));
@@ -106,6 +109,7 @@ void TestConfig::testFallbacks() {
     QCOMPARE(manager.getAssemblyAddress(), QString("#555555"));
     QCOMPARE(manager.getBreakpoints().size(), 0);
 
+    qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
     QDir::setCurrent(oldCwd);
 }
 
