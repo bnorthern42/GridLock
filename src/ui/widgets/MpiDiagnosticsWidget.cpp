@@ -1,5 +1,6 @@
 #include "MpiDiagnosticsWidget.hpp"
 #include "../../core/hpc/DeadlockAnalyzer.hpp"
+#include "MpiNetworkLogWidget.hpp"
 #include <QVBoxLayout>
 
 namespace gridlock::ui {
@@ -12,8 +13,10 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
 
     m_tabWidget = new QTabWidget(this);
     m_deadlockList = new QListWidget(this);
+    m_networkLogWidget = new MpiNetworkLogWidget("Network Log", this);
 
     m_tabWidget->addTab(m_deadlockList, "Deadlock Analyzer");
+    m_tabWidget->addTab(m_networkLogWidget, "Network Log");
     layout->addWidget(m_tabWidget);
 
     connect(m_deadlockList, &QListWidget::itemDoubleClicked,

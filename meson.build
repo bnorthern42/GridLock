@@ -9,6 +9,7 @@ add_project_arguments('-Wall', '-Wextra', '-Wpedantic', '-Wunused-variable', '-W
 qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent', 'Qml', 'Svg'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
+qtermwidget_dep = dependency('qtermwidget6')
 
 acss_proj = subproject('Qt-Advanced-Stylesheets')
 acss_dep = acss_proj.get_variable('acss_dep')
@@ -42,7 +43,8 @@ src_files = [
   'src/ui/views/DisassemblyView.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp',
   'src/ui/widgets/DifferentialGrid.cpp',
-  'src/ui/docks/TerminalDock.cpp',
+  'src/ui/widgets/MpiNetworkLogWidget.cpp',
+  'src/ui/docks/TerminalDockWidget.cpp',
   'src/ui/widgets/MpiDiagnosticsWidget.cpp',
   'src/ui/GdbConsoleWidget.cpp',
   'src/backend/TestGenerator.cpp',
@@ -82,7 +84,8 @@ moc_headers = [
   'src/ui/views/DisassemblyView.hpp',
   'src/ui/widgets/ReferenceManualWidget.hpp',
   'src/ui/widgets/DifferentialGrid.hpp',
-  'src/ui/docks/TerminalDock.hpp',
+  'src/ui/widgets/MpiNetworkLogWidget.hpp',
+  'src/ui/docks/TerminalDockWidget.hpp',
   'src/ui/widgets/MpiDiagnosticsWidget.hpp',
   'src/ui/GdbConsoleWidget.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
@@ -122,7 +125,7 @@ executable('gridlock',
   processed_qt_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep],
+  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep],
   install : true)
 
 install_data('data/gridlock.desktop', 
@@ -206,7 +209,8 @@ ui_test_src = [
   'src/ui/views/DisassemblyView.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp',
   'src/ui/widgets/DifferentialGrid.cpp',
-  'src/ui/docks/TerminalDock.cpp',
+  'src/ui/widgets/MpiNetworkLogWidget.cpp',
+  'src/ui/docks/TerminalDockWidget.cpp',
   'src/ui/widgets/MpiDiagnosticsWidget.cpp',
   'src/ui/GdbConsoleWidget.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
@@ -246,7 +250,8 @@ ui_test_moc_headers = [
   'src/ui/views/DisassemblyView.hpp',
   'src/ui/widgets/ReferenceManualWidget.hpp',
   'src/ui/widgets/DifferentialGrid.hpp',
-  'src/ui/docks/TerminalDock.hpp',
+  'src/ui/widgets/MpiNetworkLogWidget.hpp',
+  'src/ui/docks/TerminalDockWidget.hpp',
   'src/ui/widgets/MpiDiagnosticsWidget.hpp',
   'src/ui/GdbConsoleWidget.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
@@ -278,10 +283,34 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   processed_ui_test_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep]
+  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep]
 )
 
 test('ui_tests', gridlock_ui_tests)
+
+terminal_config_test_src = [
+  'tests/test_terminal_config.cpp',
+  'src/ui/docks/TerminalDockWidget.cpp',
+]
+
+terminal_config_test_moc_headers = [
+  'tests/test_terminal_config.hpp',
+  'src/ui/docks/TerminalDockWidget.hpp',
+]
+
+processed_terminal_config_test_files = qt6.compile_moc(
+  headers : terminal_config_test_moc_headers,
+  dependencies: qt6_dep
+)
+
+gridlock_terminal_config_tests = executable('gridlock_terminal_config_tests',
+  terminal_config_test_src,
+  processed_terminal_config_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep, qtermwidget_dep]
+)
+
+test('terminal_config_tests', gridlock_terminal_config_tests)
 
 config_test_src = [
   'tests/test_config.cpp',

@@ -34,7 +34,8 @@ class EditorTabManager;
 class DisassemblyView;
 class ReferenceManualWidget;
 class DifferentialGrid;
-class TerminalDock;
+class TerminalDockWidget;
+class MpiNetworkLogWidget;
 class ProjectExplorerWidget;
 class GdbConsoleWidget;
 class MemView;
@@ -59,7 +60,8 @@ public:
     DisassemblyView* disassemblyView() const { return m_disassemblyView; }
     ReferenceManualWidget* referenceManualWidget() const { return m_referenceManualWidget; }
     DifferentialGrid* differentialGrid() const { return m_differentialGrid; }
-    TerminalDock* terminalDock() const { return m_terminalDock; }
+    TerminalDockWidget* terminalDock() const { return m_terminalDock; }
+    MpiNetworkLogWidget* networkLog() const;
     GdbConsoleWidget* gdbConsoleWidget() const { return m_gdbConsoleWidget; }
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
@@ -108,7 +110,7 @@ private:
     ReferenceManualWidget* m_referenceManualWidget = nullptr;
     DifferentialGrid* m_differentialGrid = nullptr;
     ProjectExplorerWidget* m_projectExplorerWidget = nullptr;
-    TerminalDock* m_terminalDock = nullptr;
+    TerminalDockWidget* m_terminalDock = nullptr;
     GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
     MemView* m_memView = nullptr;
     RegisterView* m_registerView = nullptr;

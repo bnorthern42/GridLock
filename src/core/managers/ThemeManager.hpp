@@ -17,6 +17,7 @@ public:
     void initialize();
     QStringList getAvailableThemes() const;
     void setTheme(const QString& themeName, bool isDark = true);
+    void applyThemeAndFonts();
 
 private:
     ThemeManager();

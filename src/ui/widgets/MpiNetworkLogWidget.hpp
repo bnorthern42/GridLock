@@ -5,10 +5,10 @@
 
 namespace gridlock::ui {
 
-class TerminalDock : public QWidget {
+class MpiNetworkLogWidget : public QWidget {
     Q_OBJECT
 public:
-    explicit TerminalDock(const QString& title, QWidget *parent = nullptr);
+    explicit MpiNetworkLogWidget(const QString& title, QWidget *parent = nullptr);
     void appendText(const QString& text);
     void appendText(const QString& category, const QString& text);
     void appendError(const QString& text);

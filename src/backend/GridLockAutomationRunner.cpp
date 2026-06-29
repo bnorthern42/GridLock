@@ -5,7 +5,7 @@
 #include "../ui/views/SourceCodeView.hpp"
 #include "../ui/views/DisassemblyView.hpp"
 #include "../ui/widgets/DifferentialGrid.hpp"
-#include "../ui/docks/TerminalDock.hpp"
+#include "../ui/widgets/MpiNetworkLogWidget.hpp"
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -40,21 +40,21 @@ bool GridLockAutomationRunner::generateAndCompileTestTarget() {
     QString sourceFile = "tests/mpi_mm.c";
     if (!QFile::exists(sourceFile)) {
         qDebug() << "Test file missing: tests/mpi_mm.c";
-        if (m_mainWindow && m_mainWindow->terminalDock()) {
-            m_mainWindow->terminalDock()->appendError("Error: tests/mpi_mm.c not found!\n");
+        if (m_mainWindow && m_mainWindow->networkLog()) {
+            m_mainWindow->networkLog()->appendError("Error: tests/mpi_mm.c not found!\n");
         }
         return false;
     }
 
     QProcess compiler;
-    if (m_mainWindow && m_mainWindow->terminalDock()) {
+    if (m_mainWindow && m_mainWindow->networkLog()) {
         connect(&compiler, &QProcess::readyReadStandardOutput, [&]() {
-            m_mainWindow->terminalDock()->appendText(QString::fromUtf8(compiler.readAllStandardOutput()));
+            if (m_mainWindow->networkLog()) m_mainWindow->networkLog()->appendText(QString::fromUtf8(compiler.readAllStandardOutput()));
         });
         connect(&compiler, &QProcess::readyReadStandardError, [&]() {
-            m_mainWindow->terminalDock()->appendError(QString::fromUtf8(compiler.readAllStandardError()));
+            if (m_mainWindow->networkLog()) m_mainWindow->networkLog()->appendError(QString::fromUtf8(compiler.readAllStandardError()));
         });
-        m_mainWindow->terminalDock()->appendText("Compiling tests/mpi_mm.c...\n");
+        m_mainWindow->networkLog()->appendText("Compiling tests/mpi_mm.c...\n");
     }
 
     QDir dir;
@@ -69,14 +69,14 @@ bool GridLockAutomationRunner::generateAndCompileTestTarget() {
     
     if (compiler.exitCode() != 0) {
         qDebug() << "Compilation failed!";
-        if (m_mainWindow && m_mainWindow->terminalDock()) {
-            m_mainWindow->terminalDock()->appendError("Compilation failed!\n");
+        if (m_mainWindow && m_mainWindow->networkLog()) {
+            m_mainWindow->networkLog()->appendError("Compilation failed!\n");
         }
         return false;
     }
     
-    if (m_mainWindow && m_mainWindow->terminalDock()) {
-        m_mainWindow->terminalDock()->appendText("Compilation succeeded.\n");
+    if (m_mainWindow && m_mainWindow->networkLog()) {
+        m_mainWindow->networkLog()->appendText("Compilation succeeded.\n");
     }
 
     return true;

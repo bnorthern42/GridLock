@@ -1,4 +1,4 @@
-#include "TerminalDock.hpp"
+#include "MpiNetworkLogWidget.hpp"
 #include <QPalette>
 #include <QFont>
 #include <QScrollBar>
@@ -6,7 +6,7 @@
 
 namespace gridlock::ui {
 
-TerminalDock::TerminalDock(const QString& title, QWidget *parent) 
+MpiNetworkLogWidget::MpiNetworkLogWidget(const QString& title, QWidget *parent) 
     : QWidget(parent) 
 {
     Q_UNUSED(title);
@@ -24,11 +24,11 @@ TerminalDock::TerminalDock(const QString& title, QWidget *parent)
     layout->addWidget(m_textEdit);
 }
 
-void TerminalDock::appendText(const QString& text) {
+void MpiNetworkLogWidget::appendText(const QString& text) {
     appendText("stdout", text);
 }
 
-void TerminalDock::appendText(const QString& category, const QString& text) {
+void MpiNetworkLogWidget::appendText(const QString& category, const QString& text) {
     m_textEdit->moveCursor(QTextCursor::End);
     
     QTextCharFormat fmt;
@@ -47,7 +47,7 @@ void TerminalDock::appendText(const QString& category, const QString& text) {
     m_textEdit->verticalScrollBar()->setValue(m_textEdit->verticalScrollBar()->maximum());
 }
 
-void TerminalDock::appendError(const QString& text) {
+void MpiNetworkLogWidget::appendError(const QString& text) {
     m_textEdit->moveCursor(QTextCursor::End);
     
     QTextCharFormat fmt;

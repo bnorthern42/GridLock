@@ -8,6 +8,7 @@ struct DeadlockInfo;
 }
 
 namespace gridlock::ui {
+class MpiNetworkLogWidget;
 
 class MpiDiagnosticsWidget : public QWidget {
     Q_OBJECT
@@ -21,12 +22,15 @@ public slots:
     void onDeadlockDetected(const gridlock::core::DeadlockInfo& info);
     void onRankCleared(int rankId);
 
+    MpiNetworkLogWidget* networkLogWidget() const { return m_networkLogWidget; }
+
 private slots:
     void onItemDoubleClicked(QListWidgetItem* item);
 
 private:
     QTabWidget* m_tabWidget;
     QListWidget* m_deadlockList;
+    MpiNetworkLogWidget* m_networkLogWidget;
 };
 
 } // namespace gridlock::ui

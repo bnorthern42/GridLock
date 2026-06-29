@@ -25,10 +25,11 @@
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizard.hpp"
 #include "tutorial/TutorialDialog.hpp"
-#include "docks/TerminalDock.hpp"
+#include "widgets/MpiNetworkLogWidget.hpp"
+#include "widgets/MpiDiagnosticsWidget.hpp"
+#include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
-#include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include <QFileDialog>
 #include <QPointer>
@@ -93,6 +94,13 @@ public:
 }
 
 namespace gridlock::ui {
+
+MpiNetworkLogWidget* MainWindow::networkLog() const {
+    if (m_mpiDiagnosticsWidget) {
+        return m_mpiDiagnosticsWidget->networkLogWidget();
+    }
+    return nullptr;
+}
 
 SourceCodeView *MainWindow::sourceCodeView() const {
   return m_editorTabManager ? m_editorTabManager->currentSourceCodeView()
@@ -241,8 +249,8 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                 if (output.contains("reason=\"signal-received\"") &&
                     output.contains("signal-name=\"SIGFPE\"")) {
                   onRankSelected(rankId);
-                  if (m_terminalDock) {
-                    m_terminalDock->appendError(
+                  if (networkLog()) {
+                    networkLog()->appendError(
                         QString("SIGFPE (Floating-Point Exception) detected on "
                                 "Rank %1!\n")
                             .arg(rankId));
@@ -258,11 +266,11 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
           });
     }
 
-    if (m_terminalDock) {
+    if (networkLog()) {
       connect(m_coordinator, &IBackendCoordinator::targetOutputReceived,
-              m_terminalDock,
+              this,
               [this](const QString &category, const QString &output) {
-                m_terminalDock->appendText(category, output);
+                if (networkLog()) networkLog()->appendText(category, output);
               });
     }
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
@@ -423,15 +431,15 @@ void MainWindow::setupMenu() {
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
   QAction *buildAction = toolsMenu->addAction("Build Target");
   connect(buildAction, &QAction::triggered, this, [this]() {
-    if (!m_terminalDock)
+    if (!networkLog())
       return;
-    m_terminalDock->appendText("Building target...\n");
+    networkLog()->appendText("Building target...\n");
     QProcess *proc = new QProcess(this);
     connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
-      m_terminalDock->appendText(proc->readAllStandardOutput());
+      if (networkLog()) networkLog()->appendText(proc->readAllStandardOutput());
     });
     connect(proc, &QProcess::readyReadStandardError, this, [this, proc]() {
-      m_terminalDock->appendError(proc->readAllStandardError());
+      if (networkLog()) networkLog()->appendError(proc->readAllStandardError());
     });
     proc->start("ninja", QStringList() << "-C" << "build" << "mpi_mm_bin");
   });
@@ -683,7 +691,7 @@ void MainWindow::setupDocks() {
 
   m_bottomTabs = new QTabWidget(mainVerticalSplitter);
 
-  m_terminalDock = new TerminalDock("Compiler Terminal", m_bottomTabs);
+  m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
   m_differentialGrid = new DifferentialGrid(m_bottomTabs);
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
@@ -749,7 +757,7 @@ void MainWindow::setupDocks() {
         });
       });
 
-  m_bottomTabs->addTab(m_terminalDock, "Compiler Terminal");
+  m_bottomTabs->addTab(m_terminalDock, "Terminal");
   m_bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
   m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
@@ -915,13 +923,13 @@ void MainWindow::loadSourceFile(const QString &filePath) {
         m_lspCoordinator->start(absolutePath);
         m_lspCoordinator->didOpen(m_currentFile, view->getPlainText());
       }
-      if (m_terminalDock) {
-        m_terminalDock->appendText("Successfully loaded: " + m_currentFile +
+      if (networkLog()) {
+        networkLog()->appendText("Successfully loaded: " + m_currentFile +
                                    "\n");
       }
     } else {
-      if (m_terminalDock) {
-        m_terminalDock->appendError("CRITICAL: Failed to load " + filePath +
+      if (networkLog()) {
+        networkLog()->appendError("CRITICAL: Failed to load " + filePath +
                                     "\n");
       }
     }
@@ -1120,8 +1128,8 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
         int ranks = (fi.baseName() == "deadlock_demo") ? 2 : 3;
         startDebuggingSession(outBin, ranks);
     } else {
-        if (m_terminalDock) {
-            m_terminalDock->appendError("Tutorial compilation failed:\n" + proc.readAllStandardError());
+        if (networkLog()) {
+            networkLog()->appendError("Tutorial compilation failed:\n" + proc.readAllStandardError());
         }
     }
 }
