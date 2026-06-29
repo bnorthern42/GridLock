@@ -68,6 +68,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);

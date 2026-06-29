@@ -48,12 +48,16 @@ public:
   int tabWidth() const;
   bool insertSpaces() const;
   bool showWhitespace() const;
+  bool wordWrap() const;
+  int edgeColumn() const;
   void loadFromSettings();
 
 private:
   QSpinBox *m_tabWidthBox = nullptr;
   QComboBox *m_indentModeCombo = nullptr;
   QComboBox *m_whitespaceCombo = nullptr;
+  QCheckBox *m_wordWrapCheck = nullptr;
+  QSpinBox *m_edgeColumnBox = nullptr;
 };
 
 /// Owns session-level UX preferences only.

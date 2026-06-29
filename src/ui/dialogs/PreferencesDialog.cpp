@@ -180,6 +180,17 @@ EditingSettingsPage::EditingSettingsPage(QWidget *parent) : QWidget(parent) {
       tr("Show invisible whitespace characters in the editor."));
   form->addRow(tr("Whitespace:"), m_whitespaceCombo);
 
+  m_wordWrapCheck = new QCheckBox(tr("Enable Word Wrap"), this);
+  m_wordWrapCheck->setToolTip(tr("Wrap long lines at the edge of the editor view."));
+  form->addRow(QString(), m_wordWrapCheck);
+
+  m_edgeColumnBox = new QSpinBox(this);
+  m_edgeColumnBox->setRange(0, 300);
+  m_edgeColumnBox->setSpecialValueText(tr("Off"));
+  m_edgeColumnBox->setValue(80);
+  m_edgeColumnBox->setToolTip(tr("Show a vertical line at this column. Set to 0 to disable."));
+  form->addRow(tr("Edge Column:"), m_edgeColumnBox);
+
   loadFromSettings();
 }
 
@@ -190,6 +201,8 @@ bool EditingSettingsPage::insertSpaces() const {
 bool EditingSettingsPage::showWhitespace() const {
   return m_whitespaceCombo->currentIndex() == 1;
 }
+bool EditingSettingsPage::wordWrap() const { return m_wordWrapCheck->isChecked(); }
+int EditingSettingsPage::edgeColumn() const { return m_edgeColumnBox->value(); }
 
 void EditingSettingsPage::loadFromSettings() {
   QSettings s("gridlock", "debugger");
@@ -198,6 +211,8 @@ void EditingSettingsPage::loadFromSettings() {
       s.value("editing/insert_spaces", true).toBool() ? 0 : 1);
   m_whitespaceCombo->setCurrentIndex(
       s.value("editing/show_whitespace", false).toBool() ? 1 : 0);
+  m_wordWrapCheck->setChecked(s.value("editing/word_wrap", false).toBool());
+  m_edgeColumnBox->setValue(s.value("editing/edge_column", 80).toInt());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -896,6 +911,8 @@ void PreferencesDialog::apply() {
   s.setValue("editing/tab_width", m_editingPage->tabWidth());
   s.setValue("editing/insert_spaces", m_editingPage->insertSpaces());
   s.setValue("editing/show_whitespace", m_editingPage->showWhitespace());
+  s.setValue("editing/word_wrap", m_editingPage->wordWrap());
+  s.setValue("editing/edge_column", m_editingPage->edgeColumn());
 
   // ── Behavior (session UX prefs only — no MPI/rank here) ─────────────
   s.setValue("behavior/restore_breakpoints",

@@ -165,15 +165,18 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
 void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
     int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
+    bool wordWrap = s.value("editing/word_wrap", false).toBool();
+    
+    setLineWrapMode(wordWrap ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
 
-    QFont font("monospace");
-    font.setStyleHint(QFont::Monospace);
-    font.setPointSize(codeFontSize);
-    setFont(font);
-
-    // Apply an overlay using CSS so the code editor is visibly distinct from standard ACSS generic window panels.
-    // 30 is roughly 12% opacity. This gracefully darkens light themes and dark themes equally!
-    this->setStyleSheet("QPlainTextEdit { background-color: rgba(0, 0, 0, 30); }");
+    // The C++ setFont() gets overridden by ACSS global wildcard styles (* { font-size: ... }).
+    // So we MUST inject it directly into the local QSS.
+    this->setStyleSheet(QString(
+        "QPlainTextEdit { "
+        "   background-color: rgba(0, 0, 0, 30); "
+        "   font-size: %1pt; "
+        "}"
+    ).arg(codeFontSize));
 }
 
 int SourceCodeView::getCurrentLineNumber() const {
@@ -421,6 +424,21 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
         event->accept();
     } else {
         QPlainTextEdit::wheelEvent(event);
+    }
+}
+
+void SourceCodeView::paintEvent(QPaintEvent *event) {
+    QPlainTextEdit::paintEvent(event);
+    
+    QSettings s("gridlock", "debugger");
+    int edgeCol = s.value("editing/edge_column", 80).toInt();
+    if (edgeCol > 0) {
+        int x = fontMetrics().horizontalAdvance('x') * edgeCol + contentOffset().x() + document()->documentMargin();
+        QPainter painter(viewport());
+        QColor edgeColor(gridlock::core::ConfigManager::instance().getSourceText());
+        edgeColor.setAlpha(50);
+        painter.setPen(edgeColor);
+        painter.drawLine(x, 0, x, viewport()->height());
     }
 }
 
