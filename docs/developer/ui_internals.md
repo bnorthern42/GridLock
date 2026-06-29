@@ -4,7 +4,7 @@ GridLock's UI is written entirely in Qt6 C++, leveraging a heavily customized wi
 
 ## 🪟 Layout Logic
 
-*   **`MainWindow.cpp`**: Instantiates a central `QSplitter` that manages the three primary column views. It registers global event filters and mounts the `ThemeManager` stylesheet.
+*   **`MainWindow.cpp`**: Instantiates a central `QSplitter` that manages the three primary column views. It registers global event filters and mounts the `Qt-Advanced-Stylesheets` theming engine.
 
 ## 👁️ Core Views (The `QSplitter` Panes)
 
@@ -25,6 +25,6 @@ GridLock's UI is written entirely in Qt6 C++, leveraging a heavily customized wi
 ## 🧠 Models & Managers
 
 *   **`VariableTreeModel.cpp`**: Implements `QAbstractItemModel` for lazy-loading Deep GDB/MI struct evaluations.
-*   **`ThemeManager.cpp`**: A singleton that parses SCSS/QSS. Responsible for applying the Catppuccin Mocha palette across all custom widgets dynamically.
+*   **`Qt-Advanced-Stylesheets` (External)**: Replaces the legacy `ThemeManager`. It compiles and injects Material Design themes (`qt_material` / `dark_teal`) globally at runtime, allowing UI components to natively inherit SCSS/QSS rules without hardcoded styles.
 *   **`ShortcutManager.cpp`**: Intercepts `QEvent::KeyPress` globally. Implements a Vim-style chorded command pattern while safely skipping `QLineEdit` inputs.
 *   **`EditorTabManager.cpp`**: Manages the open document lifecycle, dirty states, and integrates with the `SourceCodeView` instances.

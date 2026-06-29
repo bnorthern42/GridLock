@@ -59,3 +59,15 @@ GridLock embraces a keyboard-centric philosophy using a global ShortcutManager.
 
 > [!TIP]
 > All shortcuts are intercepted globally but safely bypass input fields to ensure you never accidentally trigger a command while typing a variable name.
+
+---
+
+## 🎨 Customizing Appearance
+
+GridLock uses a unified Material Design theming engine powered by `Qt-Advanced-Stylesheets`. 
+To customize your visual experience, open the **Preferences** dialog (`Edit -> Preferences` or `Ctrl+Comma`) and navigate to the **Appearance** tab:
+
+* **File Tree Density:** Choose between *Compact*, *Comfortable*, or *Large* layouts for the Project Explorer.
+* **Colorize Icons:** Toggle this to enable/disable vibrant Nerd Font icons based on the Catppuccin Mocha color palette.
+
+These settings are applied instantly upon saving without requiring an application restart.
