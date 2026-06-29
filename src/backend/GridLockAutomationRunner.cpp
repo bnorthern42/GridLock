@@ -109,7 +109,9 @@ void GridLockAutomationRunner::runNextStep() {
 
 void GridLockAutomationRunner::onRankStateChanged(int /*rankId*/, const RankState& state) {
     if (state.currentState == "stopped" && state.currentLine > 0) {
-        m_mainWindow->sourceCodeView()->setSourceCode(m_testSourceCode, state.currentLine);
+        if (auto* scv = m_mainWindow->sourceCodeView()) {
+            scv->setSourceCode(m_testSourceCode, state.currentLine);
+        }
     }
 }
 

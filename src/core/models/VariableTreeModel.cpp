@@ -149,6 +149,8 @@ void VariableTreeModel::loadLocals(int rankId) {
         int activeFrame = dap->getActiveFrameId(rankId);
         if (activeFrame >= 0) {
             dap->requestScopes(activeFrame, rankId);
+        } else {
+            dap->requestStackTrace(rankId);
         }
     }
 }

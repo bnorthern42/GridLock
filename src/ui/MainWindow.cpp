@@ -948,6 +948,8 @@ void MainWindow::openPreferences() {
     }
     if (m_registerView)
       m_registerView->update();
+    if (m_disassemblyView)
+      m_disassemblyView->reloadStyle();
   });
 
   connect(dlg, &QDialog::accepted, this, [this]() {

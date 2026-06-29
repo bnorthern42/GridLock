@@ -10,6 +10,7 @@ class AsmSyntaxHighlighter : public QSyntaxHighlighter {
     Q_OBJECT
 public:
     explicit AsmSyntaxHighlighter(QTextDocument *parent = nullptr);
+    void reloadRules();
 protected:
     void highlightBlock(const QString &text) override;
 private:
@@ -28,6 +29,7 @@ public:
 
 public slots:
     void updateDisassembly(const QString& asmCode);
+    void reloadStyle();
 
 private:
     AsmSyntaxHighlighter* m_highlighter;

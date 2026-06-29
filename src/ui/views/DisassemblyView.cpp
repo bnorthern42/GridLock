@@ -1,10 +1,16 @@
 #include "DisassemblyView.hpp"
 #include "../../core/managers/ConfigManager.hpp"
+#include <QSettings>
 
 namespace gridlock::ui {
 
 AsmSyntaxHighlighter::AsmSyntaxHighlighter(QTextDocument *parent)
     : QSyntaxHighlighter(parent) {
+  reloadRules();
+}
+
+void AsmSyntaxHighlighter::reloadRules() {
+  highlightingRules.clear();
   HighlightingRule rule;
 
   // Opcodes: Light Green / Cyan
@@ -43,6 +49,8 @@ AsmSyntaxHighlighter::AsmSyntaxHighlighter(QTextDocument *parent)
   rule.pattern = QRegularExpression(QStringLiteral("0x[0-9a-fA-F]+"));
   rule.format = hexFormat;
   highlightingRules.append(rule);
+  
+  rehighlight();
 }
 
 void AsmSyntaxHighlighter::highlightBlock(const QString &text) {
@@ -58,20 +66,12 @@ void AsmSyntaxHighlighter::highlightBlock(const QString &text) {
 
 DisassemblyView::DisassemblyView(QWidget *parent) : QPlainTextEdit(parent) {
   setReadOnly(true);
-  QFont font("monospace");
-  font.setStyleHint(QFont::Monospace);
-  font.setPointSize(11);
-  setFont(font);
-
-  QPalette p = this->palette();
-  p.setColor(
-      QPalette::Base,
-      QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
-  p.setColor(QPalette::Text,
-             QColor(gridlock::core::ConfigManager::instance().getSourceText()));
-  this->setPalette(p);
+  QFont f("monospace");
+  f.setStyleHint(QFont::Monospace);
+  setFont(f);
 
   m_highlighter = new AsmSyntaxHighlighter(document());
+  reloadStyle();
 
   setPlainText(
       "No disassembly available. Start the program or select a running rank.");
@@ -81,6 +81,23 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   if (toPlainText() != asmCode) {
     setPlainText(asmCode.isEmpty() ? "; Select a rank to view disassembly..."
                                    : asmCode);
+  }
+}
+
+void DisassemblyView::reloadStyle() {
+  QSettings s("gridlock", "debugger");
+  int fontSize = s.value("appearance/code_font_size", 12).toInt();
+
+  QFont f = font();
+  f.setPointSize(fontSize);
+  setFont(f);
+
+  setStyleSheet(QString("QPlainTextEdit { background-color: %1; color: %2; }")
+                    .arg(gridlock::core::ConfigManager::instance().getSourceBackground())
+                    .arg(gridlock::core::ConfigManager::instance().getSourceText()));
+
+  if (m_highlighter) {
+    m_highlighter->reloadRules();
   }
 }
 

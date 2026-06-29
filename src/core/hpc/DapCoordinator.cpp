@@ -410,12 +410,16 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
           int frameId = topFrame["id"].toInt();
           m_activeFrameIds[rankId] = frameId;
           
+          QString path = "";
+          int line = 0;
           if (topFrame.contains("source")) {
             QJsonObject source = topFrame["source"].toObject();
-            QString path = source["path"].toString();
-            int line = topFrame["line"].toInt();
-            emit locationChanged(rankId, path, line);
+            path = source["path"].toString();
           }
+          if (topFrame.contains("line")) {
+            line = topFrame["line"].toInt();
+          }
+          emit locationChanged(rankId, path, line);
         }
       }
     } else if (command == "scopes" && message["success"].toBool()) {
