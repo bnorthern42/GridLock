@@ -12,6 +12,8 @@
 #include <QFont>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QWindow>
+#include <QMouseEvent>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -983,6 +985,18 @@ void PreferencesDialog::apply() {
 void PreferencesDialog::acceptAndApply() {
   apply();
   accept();
+}
+
+void PreferencesDialog::mousePressEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton && window()->windowHandle()) {
+    window()->windowHandle()->startSystemMove();
+  } else {
+    QDialog::mousePressEvent(event);
+  }
+}
+
+void PreferencesDialog::mouseMoveEvent(QMouseEvent *event) {
+  QDialog::mouseMoveEvent(event);
 }
 
 } // namespace gridlock::ui

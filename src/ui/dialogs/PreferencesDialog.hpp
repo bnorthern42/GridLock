@@ -196,6 +196,10 @@ private slots:
   void apply();
   void acceptAndApply();
 
+protected:
+  void mousePressEvent(QMouseEvent *event) override;
+  void mouseMoveEvent(QMouseEvent *event) override;
+
 private:
   void setupSidebar();
   void setupPages();

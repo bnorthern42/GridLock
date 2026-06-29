@@ -768,6 +768,28 @@ void MainWindow::setupDocks() {
 
   setCentralWidget(mainVerticalSplitter);
   resizeDocks({m_projectExplorerWidget}, {250}, Qt::Horizontal);
+
+  QMenu* viewMenu = nullptr;
+  for (QAction* action : menuBar()->actions()) {
+      if (action->menu() && action->text() == "&View") {
+          viewMenu = action->menu();
+          break;
+      }
+  }
+
+  for (auto* dock : findChildren<QDockWidget*>()) {
+      if (viewMenu) {
+          viewMenu->addAction(dock->toggleViewAction());
+      }
+      dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+      
+      connect(dock, &QDockWidget::topLevelChanged, dock, [dock](bool topLevel) {
+          if (topLevel) {
+              dock->setWindowFlags(dock->windowFlags() & ~Qt::FramelessWindowHint);
+              dock->show();
+          }
+      });
+  }
 }
 
 void MainWindow::onRankStateChanged(int rankId, const RankState &state) {
