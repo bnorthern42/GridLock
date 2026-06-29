@@ -25,7 +25,8 @@ GridLock's UI is written entirely in Qt6 C++, leveraging a heavily customized wi
 ## 🧠 Models & Managers
 
 *   **`VariableTreeModel.cpp`**: Implements `QAbstractItemModel` for lazy-loading Deep GDB/MI struct evaluations.
-*   **`Qt-Advanced-Stylesheets` (External)**: Replaces the legacy `ThemeManager`. It compiles and injects Material Design themes (`qt_material` / `dark_teal`) globally at runtime, allowing UI components to natively inherit SCSS/QSS rules without hardcoded styles.
+*   **`Qt-Advanced-Stylesheets` (External Submodule)**: Replaces the legacy `ThemeManager`. It compiles and injects Material Design themes (`qt_material` / `dark_teal`) globally at runtime, allowing UI components to natively inherit SCSS/QSS rules without hardcoded styles.
+    > **Note on modifying external submodules:** `Qt-Advanced-Stylesheets` is maintained upstream and imported as a git submodule. We do not modify its internal C++ source code. Any compiler warnings emitted by this library are suppressed at the build-system level via the wrapper `external/Qt-Advanced-Stylesheets/meson.build`.
     
     *Example: Instantiating the global stylesheet in `main.cpp`:*
     ```cpp
@@ -34,7 +35,7 @@ GridLock's UI is written entirely in Qt6 C++, leveraging a heavily customized wi
     
     // Fallback to install path if running from build/
     if (!QDir(stylesDir).exists()) {
-      stylesDir = "/usr/share/gridlock/styles"; 
+      stylesDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/styles"; 
     }
     
     advancedStylesheet.setStylesDirPath(stylesDir);

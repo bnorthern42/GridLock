@@ -123,7 +123,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and issue submissio
 
 ## 🏆 Attributions
 
-GridLock orchestrates OpenMPI, SLURM, and Spack, relying on `tomlplusplus` for configuration. It draws inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
+GridLock orchestrates OpenMPI, SLURM, and Spack, relying on `tomlplusplus` for configuration. The global UI theming engine is powered by [Qt-Advanced-Stylesheets](https://github.com/githubuser0xFFFF/Qt-Advanced-Stylesheets). It draws inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
 
 ## 📄 License
 
