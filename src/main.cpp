@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <QFontDatabase>
 
+#include "QtAdvancedStylesheet.h"
+
 bool g_isVerbose = false;
 
 void gridlockMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
@@ -86,7 +88,19 @@ int main(int argc, char *argv[]) {
 
   QApplication::setWindowIcon(QIcon(":/icon.png"));
 
-  gridlock::core::managers::ThemeManager::instance().setTheme("Fusion", true);
+  acss::QtAdvancedStylesheet advancedStylesheet;
+  QString stylesDir = QApplication::applicationDirPath() + "/styles";
+  if (!QDir(stylesDir).exists()) {
+    stylesDir = "/usr/share/gridlock/styles"; // Fallback install path
+  }
+  advancedStylesheet.setStylesDirPath(stylesDir);
+  advancedStylesheet.setOutputDirPath(QDir::tempPath() + "/gridlock_acss");
+  advancedStylesheet.setCurrentStyle("qt_material");
+  advancedStylesheet.setCurrentTheme("dark_teal");
+  app.setStyleSheet(advancedStylesheet.styleSheet());
+
+  // No longer use ThemeManager for Fusion theme:
+  // gridlock::core::managers::ThemeManager::instance().setTheme("Fusion", true);
 
   QPixmap splashPixmap(":/icon.png");
   // Scale nicely for the splash screen

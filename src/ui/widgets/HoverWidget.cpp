@@ -15,21 +15,15 @@ HoverWidget::HoverWidget(QWidget* parent)
     setAttribute(Qt::WA_StyledBackground, true);
     
     // Apply styling directly to prevent white fallback
-    this->setStyleSheet("background-color: #1e1e2e; border: 1px solid #45475a; border-radius: 8px;");
+    // Inherit from global theme now.
 
     // UI Styling
     m_frame = new QFrame(this);
     m_frame->setObjectName("hoverFrame");
-    m_frame->setStyleSheet(R"(
-        #hoverFrame {
-            background-color: transparent;
-        }
-    )");
 
     m_textBrowser = new QTextBrowser(m_frame);
     m_textBrowser->setFrameShape(QFrame::NoFrame);
     m_textBrowser->viewport()->setAutoFillBackground(false);
-    m_textBrowser->setStyleSheet("background: transparent; color: #cdd6f4;");
     m_textBrowser->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     
     auto* layout = new QVBoxLayout(m_frame);

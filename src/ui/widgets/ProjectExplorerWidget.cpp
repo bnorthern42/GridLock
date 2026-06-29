@@ -88,10 +88,8 @@ void ProjectExplorerWidget::reloadStyle() {
   }
 
   m_treeView->setStyleSheet(
-      QString("QTreeView { border: none; background: transparent; "
-              "show-decoration-selected: 1; font-size: %2px; }"
-              "QTreeView::item { padding: %1px; }"
-              "QTreeView::branch { border-image: none; image: none; }")
+      QString("QTreeView { font-size: %2px; }"
+              "QTreeView::item { padding: %1px; }")
           .arg(padding)
           .arg(fontSize));
 

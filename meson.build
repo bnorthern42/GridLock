@@ -7,9 +7,11 @@ add_project_arguments('-Wall', '-Wextra', '-Wpedantic', '-Wunused-variable', '-W
 
 # Dependencies
 qt6 = import('qt6')
-qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent'])
+qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent', 'Qml', 'Svg'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 
+acss_proj = subproject('Qt-Advanced-Stylesheets')
+acss_dep = acss_proj.get_variable('acss_dep')
 
 # Source files
 src_files = [
@@ -120,7 +122,7 @@ executable('gridlock',
   processed_qt_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep],
+  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep],
   install : true)
 
 install_data('data/gridlock.desktop', 
@@ -129,6 +131,12 @@ install_data('data/gridlock.desktop',
 install_data('resources/icon.png', 
              rename: 'gridlock.png',
              install_dir: get_option('datadir') / 'icons/hicolor/512x512/apps')
+
+install_subdir('external/Qt-Advanced-Stylesheets/styles',
+               install_dir: get_option('datadir') / 'gridlock')
+
+# Copy styles to build directory for development
+run_command('cp', '-r', meson.source_root() / 'external/Qt-Advanced-Stylesheets/styles', meson.build_root() / 'styles', check: false)
 
 # Test executable
 test_src = [

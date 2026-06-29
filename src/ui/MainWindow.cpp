@@ -65,7 +65,7 @@ namespace gridlock {
 class PlainJaneTooltip : public QLabel {
 public:
     PlainJaneTooltip(QWidget* parent = nullptr) : QLabel(parent, Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::WindowTransparentForInput | Qt::WindowDoesNotAcceptFocus) {
-        setStyleSheet("background-color: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; padding: 4px; border-radius: 4px;");
+        setStyleSheet("padding: 4px;");
         setTextFormat(Qt::RichText);
         setAttribute(Qt::WA_ShowWithoutActivating);
     }

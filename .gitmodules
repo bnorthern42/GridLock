@@ -1,0 +1,3 @@
+[submodule "external/Qt-Advanced-Stylesheets"]
+	path = external/Qt-Advanced-Stylesheets
+	url = https://github.com/githubuser0xFFFF/Qt-Advanced-Stylesheets.git
