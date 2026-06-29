@@ -551,6 +551,10 @@ void MainWindow::setupToolbar() {
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(exitAction);
+
+  for (QAction *action : toolbar->actions()) {
+      action->setToolTip(QString());
+  }
 }
 
 void MainWindow::setupDocks() {
