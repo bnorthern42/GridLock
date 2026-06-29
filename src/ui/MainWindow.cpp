@@ -673,6 +673,7 @@ void MainWindow::setupDocks() {
 
   masterHorizontalSplitter->setStretchFactor(0, 75);
   masterHorizontalSplitter->setStretchFactor(1, 25);
+  masterHorizontalSplitter->setSizes({1200, 400});
 
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
