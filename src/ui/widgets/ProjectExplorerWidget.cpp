@@ -28,13 +28,12 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   topLayout->setContentsMargins(4, 4, 2, 2);
 
   m_openFolderBtn = new QPushButton("Open Folder", topBar);
-  m_collapseAllBtn = new QPushButton(
-      topBar); // Use QPushButton with flat style for better ACSS support
-  m_collapseAllBtn->setText(QString::fromUtf8(
-      "\xEF\x86\x92")); // fa-compress-arrows-alt / collapse equivalent
-  m_collapseAllBtn->setFixedSize(28, 28);
+  m_collapseAllBtn = new QPushButton(topBar);
+  m_collapseAllBtn->setText(QString::fromUtf8("\xEF\x86\x92"));
+  m_collapseAllBtn->setFixedSize(32, 32);
   m_collapseAllBtn->setToolTip(tr("Collapse All Directories"));
-  m_collapseAllBtn->setStyleSheet("font-family: 'Symbols Nerd Font'; font-size: 20px; color: palette(text); background: transparent; border: none;");
+  m_collapseAllBtn->setFlat(true);
+  m_collapseAllBtn->setStyleSheet("font-family: 'Symbols Nerd Font'; font-size: 24px;");
 
   topLayout->addWidget(m_openFolderBtn);
   topLayout->addStretch();
