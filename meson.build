@@ -35,6 +35,7 @@ src_files = [
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
   'src/ui/dialogs/ProjectWizard.cpp',
+  'src/ui/widgets/FileIconProvider.cpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.cpp',
   'src/ui/views/DisassemblyView.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp',
@@ -190,6 +191,7 @@ ui_test_src = [
   'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp',
   'src/ui/dialogs/ProjectWizard.cpp',
+  'src/ui/widgets/FileIconProvider.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.cpp',
   'src/ui/views/ServerRackView.cpp',
@@ -266,6 +268,7 @@ processed_ui_test_files = qt6.compile_moc(
 gridlock_ui_tests = executable('gridlock_ui_tests',
   ui_test_src,
   processed_ui_test_files,
+  compiled_resources,
   include_directories : inc,
   dependencies : [qt6_dep, tomlplusplus_dep]
 )

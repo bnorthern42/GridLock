@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QProcess>
 #include <cstdio>
+#include <QFontDatabase>
 
 bool g_isVerbose = false;
 
@@ -72,6 +73,8 @@ int main(int argc, char *argv[]) {
   QSurfaceFormat::setDefaultFormat(format);
 
   QApplication app(argc, argv);
+
+  QFontDatabase::addApplicationFont(":/fonts/SymbolsNerdFont-Regular.ttf");
 
   // Set org/app identity so QSettings keys are consistent everywhere.
   QApplication::setOrganizationName("gridlock");

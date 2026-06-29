@@ -1,142 +1,132 @@
 #include "ProjectExplorerWidget.hpp"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHBoxLayout>
+#include <QHeaderView>
 #include <QPainter>
 #include <QPixmap>
-#include <QDir>
-#include <QHeaderView>
+#include <QSettings>
+#include <QVBoxLayout>
+
+#include "FileIconProvider.hpp"
 
 namespace gridlock::ui {
 
-IconProxyModel::IconProxyModel(QObject* parent) : QIdentityProxyModel(parent) {
+ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
+    : QDockWidget("Project Explorer", parent) {
+  m_iconProvider = nullptr;
+  QWidget *content = new QWidget(this);
+  QVBoxLayout *mainLayout = new QVBoxLayout(content);
+  mainLayout->setContentsMargins(0, 0, 0, 0);
+  mainLayout->setSpacing(0);
+
+  // Top bar
+  QWidget *topBar = new QWidget(content);
+  QHBoxLayout *topLayout = new QHBoxLayout(topBar);
+  topLayout->setContentsMargins(4, 4, 4, 4);
+
+  m_openFolderBtn = new QPushButton("Open Folder", topBar);
+  m_collapseAllBtn = new QToolButton(topBar);
+  m_collapseAllBtn->setText("-");
+  m_collapseAllBtn->setToolTip("Collapse All");
+
+  topLayout->addWidget(m_openFolderBtn);
+  topLayout->addStretch();
+  topLayout->addWidget(m_collapseAllBtn);
+
+  mainLayout->addWidget(topBar);
+
+  // Tree View
+  m_treeView = new QTreeView(content);
+  m_treeView->setHeaderHidden(true);
+
+  m_fileSystemModel = new QFileSystemModel(this);
+  m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs |
+                               QDir::Files);
+  // Set root path to current dir as default
+  m_fileSystemModel->setRootPath(QDir::currentPath());
+
+  m_iconProvider = new FileIconProvider();
+  m_fileSystemModel->setIconProvider(m_iconProvider);
+  m_treeView->setModel(m_fileSystemModel);
+  m_treeView->setRootIndex(m_fileSystemModel->index(QDir::currentPath()));
+
+  reloadStyle();
+
+  // Hide Size, Type, Date Modified (Columns 1, 2, 3)
+  m_treeView->hideColumn(1);
+  m_treeView->hideColumn(2);
+  m_treeView->hideColumn(3);
+
+  mainLayout->addWidget(m_treeView);
+  setWidget(content);
+
+  connect(m_openFolderBtn, &QPushButton::clicked, this,
+          &ProjectExplorerWidget::onOpenFolder);
+  connect(m_collapseAllBtn, &QToolButton::clicked, m_treeView,
+          &QTreeView::collapseAll);
+  connect(m_treeView, &QTreeView::doubleClicked, this,
+          &ProjectExplorerWidget::onDoubleClicked);
 }
 
-QIcon IconProxyModel::generateColorIcon(const QString& text, const QColor& color) const {
-    QPixmap pixmap(16, 16);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
-    painter.drawRoundedRect(0, 0, 16, 16, 4, 4);
-    
-    painter.setPen(Qt::white);
-    QFont font = painter.font();
-    font.setPixelSize(10);
-    font.setBold(true);
-    painter.setFont(font);
-    painter.drawText(0, 0, 16, 16, Qt::AlignCenter, text);
-    
-    return QIcon(pixmap);
-}
+ProjectExplorerWidget::~ProjectExplorerWidget() { delete m_iconProvider; }
 
-QVariant IconProxyModel::data(const QModelIndex& index, int role) const {
-    if (role == Qt::DecorationRole && index.column() == 0) {
-        if (sourceModel()) {
-            QFileSystemModel* fsModel = qobject_cast<QFileSystemModel*>(sourceModel());
-            if (fsModel) {
-                QFileInfo info = fsModel->fileInfo(mapToSource(index));
-                if (info.isDir()) {
-                    return generateColorIcon("D", QColor("#89b4fa")); // Blue
-                } else {
-                    QString ext = info.suffix().toLower();
-                    if (ext == "cpp" || ext == "c" || ext == "cxx") {
-                        return generateColorIcon("C", QColor("#89b4fa")); // Blue
-                    } else if (ext == "hpp" || ext == "h" || ext == "hxx") {
-                        return generateColorIcon("H", QColor("#a6e3a1")); // Green
-                    } else if (ext == "py") {
-                        return generateColorIcon("Py", QColor("#f9e2af")); // Yellow
-                    } else if (info.fileName() == "meson.build") {
-                        return generateColorIcon("M", QColor("#cba6f7")); // Purple
-                    } else if (ext == "md" || ext == "txt") {
-                        return generateColorIcon("T", QColor("#bac2de")); // Grey
-                    } else {
-                        // Fallback
-                        return generateColorIcon("?", QColor("#6c7086"));
-                    }
-                }
-            }
-        }
-    }
-    return QIdentityProxyModel::data(index, role);
-}
+void ProjectExplorerWidget::reloadStyle() {
+  QSettings s("gridlock", "debugger");
+  QString style =
+      s.value("appearance/file_tree_style", "Comfortable").toString();
 
-ProjectExplorerWidget::ProjectExplorerWidget(QWidget* parent) : QDockWidget("Project Explorer", parent) {
-    QWidget* content = new QWidget(this);
-    QVBoxLayout* mainLayout = new QVBoxLayout(content);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
-    mainLayout->setSpacing(0);
+  int padding = 4;
+  int fontSize = 13;
+  if (style == "Compact") {
+    padding = 2;
+    fontSize = 10;
+  } else if (style == "Large") {
+    padding = 6;
+    fontSize = 14;
+  }
 
-    // Top bar
-    QWidget* topBar = new QWidget(content);
-    QHBoxLayout* topLayout = new QHBoxLayout(topBar);
-    topLayout->setContentsMargins(4, 4, 4, 4);
-    
-    m_openFolderBtn = new QPushButton("Open Folder", topBar);
-    m_collapseAllBtn = new QToolButton(topBar);
-    m_collapseAllBtn->setText("-");
-    m_collapseAllBtn->setToolTip("Collapse All");
-    
-    topLayout->addWidget(m_openFolderBtn);
-    topLayout->addStretch();
-    topLayout->addWidget(m_collapseAllBtn);
-    
-    mainLayout->addWidget(topBar);
+  m_treeView->setStyleSheet(
+      QString("QTreeView { border: none; background: transparent; "
+              "show-decoration-selected: 1; font-size: %2px; }"
+              "QTreeView::item { padding: %1px; }"
+              "QTreeView::branch { border-image: none; image: none; }")
+          .arg(padding)
+          .arg(fontSize));
 
-    // Tree View
-    m_treeView = new QTreeView(content);
-    m_treeView->setHeaderHidden(true);
-
-    m_fileSystemModel = new QFileSystemModel(this);
-    m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
-    // Set root path to current dir as default
-    m_fileSystemModel->setRootPath(QDir::currentPath());
-
-    m_proxyModel = new IconProxyModel(this);
-    m_proxyModel->setSourceModel(m_fileSystemModel);
-
-    m_treeView->setModel(m_proxyModel);
-    m_treeView->setRootIndex(m_proxyModel->mapFromSource(m_fileSystemModel->index(QDir::currentPath())));
-    
-    // Hide Size, Type, Date Modified (Columns 1, 2, 3)
-    m_treeView->hideColumn(1);
-    m_treeView->hideColumn(2);
-    m_treeView->hideColumn(3);
-
-    mainLayout->addWidget(m_treeView);
-    setWidget(content);
-
-    connect(m_openFolderBtn, &QPushButton::clicked, this, &ProjectExplorerWidget::onOpenFolder);
-    connect(m_collapseAllBtn, &QToolButton::clicked, m_treeView, &QTreeView::collapseAll);
-    connect(m_treeView, &QTreeView::doubleClicked, this, &ProjectExplorerWidget::onDoubleClicked);
+  // Force model to recreate icons by passing a new provider (and deleting old)
+  auto *newProvider = new FileIconProvider();
+  m_fileSystemModel->setIconProvider(newProvider);
+  delete m_iconProvider;
+  m_iconProvider = newProvider;
 }
 
 void ProjectExplorerWidget::onOpenFolder() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Open Folder", QDir::currentPath(), QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-    if (!dir.isEmpty()) {
-        m_fileSystemModel->setRootPath(dir);
-        m_treeView->setRootIndex(m_proxyModel->mapFromSource(m_fileSystemModel->index(dir)));
-    }
+  QString dir = QFileDialog::getExistingDirectory(
+      this, "Open Folder", QDir::currentPath(),
+      QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+  if (!dir.isEmpty()) {
+    m_fileSystemModel->setRootPath(dir);
+    m_treeView->setRootIndex(m_fileSystemModel->index(dir));
+  }
 }
 
-void ProjectExplorerWidget::setRootPath(const QString& path) {
-    if (!path.isEmpty()) {
-        m_fileSystemModel->setRootPath(path);
-        m_treeView->setRootIndex(m_proxyModel->mapFromSource(m_fileSystemModel->index(path)));
-    }
+void ProjectExplorerWidget::setRootPath(const QString &path) {
+  if (!path.isEmpty()) {
+    m_fileSystemModel->setRootPath(path);
+    m_treeView->setRootIndex(m_fileSystemModel->index(path));
+  }
 }
 
-void ProjectExplorerWidget::onDoubleClicked(const QModelIndex& index) {
-    if (!index.isValid()) return;
-    
-    QModelIndex sourceIndex = m_proxyModel->mapToSource(index);
-    QFileInfo info = m_fileSystemModel->fileInfo(sourceIndex);
-    if (info.isFile()) {
-        emit fileDoubleClicked(info.absoluteFilePath());
-    }
+void ProjectExplorerWidget::onDoubleClicked(const QModelIndex &index) {
+  if (!index.isValid())
+    return;
+
+  QFileInfo info = m_fileSystemModel->fileInfo(index);
+  if (info.isFile()) {
+    emit fileDoubleClicked(info.absoluteFilePath());
+  }
 }
 
 } // namespace gridlock::ui

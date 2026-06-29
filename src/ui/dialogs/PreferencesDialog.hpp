@@ -24,11 +24,15 @@ public:
 
   QString selectedTheme() const;
   bool isDarkMode() const;
+  QString fileTreeStyle() const;
+  bool colorizeIcons() const;
   void loadFromSettings();
 
 private:
   QComboBox *m_themeCombo = nullptr;
   QCheckBox *m_darkModeCheck = nullptr;
+  QComboBox *m_fileTreeStyleCombo = nullptr;
+  QCheckBox *m_colorizeIconsCheck = nullptr;
 };
 
 class EditingSettingsPage : public QWidget {

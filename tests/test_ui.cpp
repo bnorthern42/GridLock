@@ -16,6 +16,12 @@
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
+#include <QFontDatabase>
+#include "../src/ui/widgets/FileIconProvider.hpp"
+#include <QIcon>
+#include <QFileInfo>
+#include <QDir>
+#include <QTemporaryDir>
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -236,6 +242,39 @@ void TestMainWindowUI::testGutterBreakpointPropagation() {
 
     QCOMPARE(signalFired, 1);
     QCOMPARE(signaledLine, 5);
+}
+
+
+void TestMainWindowUI::testNerdFontLoading() {
+    int fontId = QFontDatabase::addApplicationFont(":/fonts/SymbolsNerdFont-Regular.ttf");
+    QVERIFY(fontId != -1);
+    QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+    QVERIFY(!families.isEmpty());
+}
+
+void TestMainWindowUI::testFileIconProvider() {
+    gridlock::ui::FileIconProvider provider;
+    
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    
+    QFileInfo dirInfo(tempDir.path());
+    QIcon dirIcon = provider.icon(dirInfo);
+    QVERIFY(!dirIcon.isNull());
+    
+    QTemporaryFile tempCpp(tempDir.path() + "/test.cpp");
+    QVERIFY(tempCpp.open());
+    tempCpp.close();
+    QFileInfo cppInfo(tempCpp.fileName());
+    QIcon cppIcon = provider.icon(cppInfo);
+    QVERIFY(!cppIcon.isNull());
+    
+    QTemporaryFile tempMeson(tempDir.path() + "/meson.build");
+    QVERIFY(tempMeson.open());
+    tempMeson.close();
+    QFileInfo mesonInfo(tempMeson.fileName());
+    QIcon mesonIcon = provider.icon(mesonInfo);
+    QVERIFY(!mesonIcon.isNull());
 }
 
 

@@ -8,6 +8,8 @@
 #include "../../core/managers/DocsetManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
+#include <QPainter>
+#include <QFont>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -73,6 +75,15 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
         m_themeCombo->currentText(), checked);
   });
 
+  m_fileTreeStyleCombo = new QComboBox(this);
+  m_fileTreeStyleCombo->addItems({tr("Compact"), tr("Comfortable"), tr("Large")});
+  m_fileTreeStyleCombo->setToolTip(tr("Density of items in the Project Explorer tree."));
+  form->addRow(tr("File Tree Style:"), m_fileTreeStyleCombo);
+
+  m_colorizeIconsCheck = new QCheckBox(tr("Enable Colorful File Icons"), this);
+  m_colorizeIconsCheck->setToolTip(tr("Render file tree icons using vibrant colors based on file type."));
+  form->addRow(QString(), m_colorizeIconsCheck);
+
   auto *fontNote =
       new QLabel(tr("<small style='color:#888;'>Font settings follow the "
                     "system monospace font.<br>"
@@ -91,6 +102,12 @@ QString AppearanceSettingsPage::selectedTheme() const {
 bool AppearanceSettingsPage::isDarkMode() const {
   return m_darkModeCheck->isChecked();
 }
+QString AppearanceSettingsPage::fileTreeStyle() const {
+  return m_fileTreeStyleCombo->currentText();
+}
+bool AppearanceSettingsPage::colorizeIcons() const {
+  return m_colorizeIconsCheck->isChecked();
+}
 
 void AppearanceSettingsPage::loadFromSettings() {
   QSettings s("gridlock", "debugger");
@@ -104,6 +121,11 @@ void AppearanceSettingsPage::loadFromSettings() {
   int idx = m_themeCombo->findText(theme);
   if (idx >= 0)
     m_themeCombo->setCurrentIndex(idx);
+
+  int ftsIdx = m_fileTreeStyleCombo->findText(s.value("appearance/file_tree_style", "Comfortable").toString());
+  if (ftsIdx >= 0) m_fileTreeStyleCombo->setCurrentIndex(ftsIdx);
+  
+  m_colorizeIconsCheck->setChecked(s.value("appearance/colorize_icons", true).toBool());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -774,21 +796,28 @@ void PreferencesDialog::setupSidebar() {
     QString iconName;
   };
   const QList<Entry> entries = {
-      {tr("Appearance"), "preferences-desktop-theme"},
-      {tr("Editing"), "document-edit"},
-      {tr("Behavior"), "configure"},
-      {tr("Debugger"), "debug-run"},
-      {tr("HPC / Cluster"), "network-server"},
-      {tr("HPC Integration"), "server-database"},
-      {tr("Docsets"), "help-contents"},
+      {tr("Appearance"), "\uf1fc"},
+      {tr("Editing"), "\uf044"},
+      {tr("Behavior"), "\uf085"},
+      {tr("Debugger"), "\uf188"},
+      {tr("HPC / Cluster"), "\uf233"},
+      {tr("HPC Integration"), "\uf1c0"},
+      {tr("Docsets"), "\uf02d"},
   };
 
   for (const auto &e : entries) {
     auto *item = new QListWidgetItem(m_sidebar);
     item->setText(e.label);
-    QIcon icon = QIcon::fromTheme(e.iconName);
-    if (!icon.isNull())
-      item->setIcon(icon);
+    
+    QPixmap pixmap(20, 20);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setFont(QFont("Symbols Nerd Font", 14));
+    painter.setPen(QColor("#cdd6f4"));
+    painter.drawText(0, 0, 20, 20, Qt::AlignCenter, e.iconName);
+    item->setIcon(QIcon(pixmap));
+    
     item->setSizeHint(QSize(190, 44));
     m_sidebar->addItem(item);
   }
@@ -844,6 +873,8 @@ void PreferencesDialog::apply() {
   // ── Appearance ──────────────────────────────────────────────────────
   s.setValue("appearance/theme", m_appearancePage->selectedTheme());
   s.setValue("appearance/dark_mode", m_appearancePage->isDarkMode());
+  s.setValue("appearance/file_tree_style", m_appearancePage->fileTreeStyle());
+  s.setValue("appearance/colorize_icons", m_appearancePage->colorizeIcons());
 
   // ── Editing ─────────────────────────────────────────────────────────
   s.setValue("editing/tab_width", m_editingPage->tabWidth());

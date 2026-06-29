@@ -904,6 +904,12 @@ void MainWindow::openPreferences() {
   auto *dlg = new PreferencesDialog(this);
   dlg->setAttribute(Qt::WA_DeleteOnClose);
 
+  connect(dlg, &PreferencesDialog::preferencesChanged, this, [this]() {
+    if (m_projectExplorerWidget) {
+        m_projectExplorerWidget->reloadStyle();
+    }
+  });
+
   connect(dlg, &QDialog::accepted, this, [this]() {
     // SourceCodeView and RegisterView may want to re-read palette / font prefs.
     if (m_editorTabManager) {
