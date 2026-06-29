@@ -19,6 +19,7 @@
 #include <QProcess>
 #include <cstdio>
 #include <QFontDatabase>
+#include <QStandardPaths>
 
 #include "QtAdvancedStylesheet.h"
 
@@ -94,7 +95,7 @@ int main(int argc, char *argv[]) {
     stylesDir = "/usr/share/gridlock/styles"; // Fallback install path
   }
   advancedStylesheet.setStylesDirPath(stylesDir);
-  advancedStylesheet.setOutputDirPath(QDir::tempPath() + "/gridlock_acss");
+  advancedStylesheet.setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
   advancedStylesheet.setCurrentStyle("qt_material");
   advancedStylesheet.setCurrentTheme("dark_teal");
   app.setStyleSheet(advancedStylesheet.styleSheet());

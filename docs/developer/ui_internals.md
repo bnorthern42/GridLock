@@ -38,7 +38,7 @@ GridLock's UI is written entirely in Qt6 C++, leveraging a heavily customized wi
     }
     
     advancedStylesheet.setStylesDirPath(stylesDir);
-    advancedStylesheet.setOutputDirPath(QDir::tempPath() + "/gridlock_acss");
+    advancedStylesheet.setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
     advancedStylesheet.setCurrentStyle("qt_material");
     advancedStylesheet.setCurrentTheme("dark_teal");
     app.setStyleSheet(advancedStylesheet.styleSheet());
