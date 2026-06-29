@@ -72,7 +72,7 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
                 theme, m_darkModeCheck->isChecked());
           });
 
-  connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool checked) {
+  connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool /*checked*/) {
     // Dark Mode check logic is currently handled natively by the ACSS themes,
     // so we just pass it along (though it's ignored for XML-based coloring).
   });

@@ -25,7 +25,7 @@
 
 bool g_isVerbose = false;
 
-void gridlockMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+void gridlockMessageHandler(QtMsgType type, const QMessageLogContext &/*context*/, const QString &msg) {
     if (!g_isVerbose && (type == QtDebugMsg || type == QtInfoMsg)) {
         return;
     }
