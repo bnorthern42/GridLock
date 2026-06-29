@@ -26,5 +26,22 @@ GridLock's UI is written entirely in Qt6 C++, leveraging a heavily customized wi
 
 *   **`VariableTreeModel.cpp`**: Implements `QAbstractItemModel` for lazy-loading Deep GDB/MI struct evaluations.
 *   **`Qt-Advanced-Stylesheets` (External)**: Replaces the legacy `ThemeManager`. It compiles and injects Material Design themes (`qt_material` / `dark_teal`) globally at runtime, allowing UI components to natively inherit SCSS/QSS rules without hardcoded styles.
+    
+    *Example: Instantiating the global stylesheet in `main.cpp`:*
+    ```cpp
+    acss::QtAdvancedStylesheet advancedStylesheet;
+    QString stylesDir = QApplication::applicationDirPath() + "/styles";
+    
+    // Fallback to install path if running from build/
+    if (!QDir(stylesDir).exists()) {
+      stylesDir = "/usr/share/gridlock/styles"; 
+    }
+    
+    advancedStylesheet.setStylesDirPath(stylesDir);
+    advancedStylesheet.setOutputDirPath(QDir::tempPath() + "/gridlock_acss");
+    advancedStylesheet.setCurrentStyle("qt_material");
+    advancedStylesheet.setCurrentTheme("dark_teal");
+    app.setStyleSheet(advancedStylesheet.styleSheet());
+    ```
 *   **`ShortcutManager.cpp`**: Intercepts `QEvent::KeyPress` globally. Implements a Vim-style chorded command pattern while safely skipping `QLineEdit` inputs.
 *   **`EditorTabManager.cpp`**: Manages the open document lifecycle, dirty states, and integrates with the `SourceCodeView` instances.
