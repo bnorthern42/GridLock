@@ -27,6 +27,9 @@ export QMAKE="${QMAKE_BIN}"
 
 echo "Building GridLock Version: ${VERSION}"
 
+echo "Initializing git submodules..."
+git submodule update --init --recursive || true
+
 echo "Cleaning old build artifacts..."
 rm -rf builddir AppDir
 rm -f "${APP_NAME}"-*.AppImage
@@ -45,6 +48,11 @@ mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/128x128/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/64x64/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/48x48/apps"
+
+echo "Configuring styles directory for AppImage..."
+if [ -d "${APPDIR}/usr/share/gridlock/styles" ]; then
+    ln -s "../share/gridlock/styles" "${APPDIR}/usr/bin/styles"
+fi
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/32x32/apps"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/16x16/apps"
 
