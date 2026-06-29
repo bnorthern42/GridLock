@@ -671,8 +671,8 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(rightPaneSplitter);
 
-  masterHorizontalSplitter->setStretchFactor(0, 60);
-  masterHorizontalSplitter->setStretchFactor(1, 40);
+  masterHorizontalSplitter->setStretchFactor(0, 75);
+  masterHorizontalSplitter->setStretchFactor(1, 25);
 
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
@@ -766,6 +766,7 @@ void MainWindow::setupDocks() {
   mainVerticalSplitter->setSizes({700, 300});
 
   setCentralWidget(mainVerticalSplitter);
+  resizeDocks({m_projectExplorerWidget}, {250}, Qt::Horizontal);
 }
 
 void MainWindow::onRankStateChanged(int rankId, const RankState &state) {

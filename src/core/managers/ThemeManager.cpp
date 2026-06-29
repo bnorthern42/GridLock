@@ -38,7 +38,10 @@ void ThemeManager::initialize() {
     m_advancedStylesheet->setCurrentTheme(theme);
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     m_advancedStylesheet->updateStylesheet();
-    qApp->setStyleSheet(m_advancedStylesheet->styleSheet());
+    QString qss = m_advancedStylesheet->styleSheet();
+    qss += "\nQMainWindow::separator { width: 4px; height: 4px; background: transparent; }\n"
+           "QMainWindow::separator:hover { background: rgba(128, 128, 128, 128); }";
+    qApp->setStyleSheet(qss);
 
     QFont appFont = qApp->font();
     appFont.setPointSize(uiFontSize);
@@ -77,7 +80,10 @@ void ThemeManager::applyThemeAndFonts() {
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     
     m_advancedStylesheet->updateStylesheet();
-    qApp->setStyleSheet(m_advancedStylesheet->styleSheet());
+    QString qss = m_advancedStylesheet->styleSheet();
+    qss += "\nQMainWindow::separator { width: 4px; height: 4px; background: transparent; }\n"
+           "QMainWindow::separator:hover { background: rgba(128, 128, 128, 128); }";
+    qApp->setStyleSheet(qss);
 
     QFont appFont = qApp->font();
     appFont.setPointSize(uiFontSize);

@@ -431,6 +431,10 @@ void SourceCodeView::paintEvent(QPaintEvent *event) {
     QPlainTextEdit::paintEvent(event);
     
     QSettings s("gridlock", "debugger");
+    if (!s.value("editing/show_edge_column", true).toBool()) {
+        return;
+    }
+    
     int edgeCol = s.value("editing/edge_column", 80).toInt();
     if (edgeCol > 0) {
         int x = fontMetrics().horizontalAdvance('x') * edgeCol + contentOffset().x() + document()->documentMargin();

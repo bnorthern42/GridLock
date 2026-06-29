@@ -49,6 +49,7 @@ public:
   bool insertSpaces() const;
   bool showWhitespace() const;
   bool wordWrap() const;
+  bool showEdgeColumn() const;
   int edgeColumn() const;
   void loadFromSettings();
 
@@ -57,6 +58,7 @@ private:
   QComboBox *m_indentModeCombo = nullptr;
   QComboBox *m_whitespaceCombo = nullptr;
   QCheckBox *m_wordWrapCheck = nullptr;
+  QCheckBox *m_showEdgeColumnCheck = nullptr;
   QSpinBox *m_edgeColumnBox = nullptr;
 };
 

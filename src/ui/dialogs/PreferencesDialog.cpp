@@ -184,11 +184,14 @@ EditingSettingsPage::EditingSettingsPage(QWidget *parent) : QWidget(parent) {
   m_wordWrapCheck->setToolTip(tr("Wrap long lines at the edge of the editor view."));
   form->addRow(QString(), m_wordWrapCheck);
 
+  m_showEdgeColumnCheck = new QCheckBox(tr("Show Edge Column Line"), this);
+  m_showEdgeColumnCheck->setToolTip(tr("Display a vertical line at the specified edge column."));
+  form->addRow(QString(), m_showEdgeColumnCheck);
+
   m_edgeColumnBox = new QSpinBox(this);
-  m_edgeColumnBox->setRange(0, 300);
-  m_edgeColumnBox->setSpecialValueText(tr("Off"));
+  m_edgeColumnBox->setRange(1, 300);
   m_edgeColumnBox->setValue(80);
-  m_edgeColumnBox->setToolTip(tr("Show a vertical line at this column. Set to 0 to disable."));
+  m_edgeColumnBox->setToolTip(tr("The column index at which the edge line is drawn."));
   form->addRow(tr("Edge Column:"), m_edgeColumnBox);
 
   loadFromSettings();
@@ -202,6 +205,7 @@ bool EditingSettingsPage::showWhitespace() const {
   return m_whitespaceCombo->currentIndex() == 1;
 }
 bool EditingSettingsPage::wordWrap() const { return m_wordWrapCheck->isChecked(); }
+bool EditingSettingsPage::showEdgeColumn() const { return m_showEdgeColumnCheck->isChecked(); }
 int EditingSettingsPage::edgeColumn() const { return m_edgeColumnBox->value(); }
 
 void EditingSettingsPage::loadFromSettings() {
@@ -212,6 +216,7 @@ void EditingSettingsPage::loadFromSettings() {
   m_whitespaceCombo->setCurrentIndex(
       s.value("editing/show_whitespace", false).toBool() ? 1 : 0);
   m_wordWrapCheck->setChecked(s.value("editing/word_wrap", false).toBool());
+  m_showEdgeColumnCheck->setChecked(s.value("editing/show_edge_column", true).toBool());
   m_edgeColumnBox->setValue(s.value("editing/edge_column", 80).toInt());
 }
 
@@ -912,6 +917,7 @@ void PreferencesDialog::apply() {
   s.setValue("editing/insert_spaces", m_editingPage->insertSpaces());
   s.setValue("editing/show_whitespace", m_editingPage->showWhitespace());
   s.setValue("editing/word_wrap", m_editingPage->wordWrap());
+  s.setValue("editing/show_edge_column", m_editingPage->showEdgeColumn());
   s.setValue("editing/edge_column", m_editingPage->edgeColumn());
 
   // ── Behavior (session UX prefs only — no MPI/rank here) ─────────────
