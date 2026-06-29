@@ -2,10 +2,10 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QPainter>
-#include <QFont>
 #include <QPixmap>
 #include <QSettings>
 #include <QVBoxLayout>
@@ -29,10 +29,12 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   m_openFolderBtn = new QPushButton("Open Folder", topBar);
   m_collapseAllBtn = new QToolButton(topBar);
-  m_collapseAllBtn->setText(QString::fromUtf8("\xEF\x86\x92")); // fa-compress-arrows-alt / collapse equivalent
+  m_collapseAllBtn->setText(QString::fromUtf8(
+      "\xEF\x86\x92")); // fa-compress-arrows-alt / collapse equivalent
   m_collapseAllBtn->setFont(QFont("Symbols Nerd Font", 12));
   m_collapseAllBtn->setFixedSize(28, 28);
   m_collapseAllBtn->setToolTip(tr("Collapse All Directories"));
+  m_collapseAllBtn->setStyleSheet("color: palette(text);");
 
   topLayout->addWidget(m_openFolderBtn);
   topLayout->addStretch();
@@ -78,12 +80,12 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
     if (btn->objectName() == "qt_dockwidget_closebutton") {
       btn->setToolTip(tr("Close Project Explorer"));
       btn->setFixedSize(24, 24);
-      btn->setIconSize(QSize(16, 16));
+      btn->setIconSize(QSize(20, 20));
       btn->setCursor(Qt::PointingHandCursor);
     } else if (btn->objectName() == "qt_dockwidget_floatbutton") {
       btn->setToolTip(tr("Float / Detach Panel"));
       btn->setFixedSize(24, 24);
-      btn->setIconSize(QSize(16, 16));
+      btn->setIconSize(QSize(20, 20));
       btn->setCursor(Qt::PointingHandCursor);
     }
   }
@@ -106,11 +108,10 @@ void ProjectExplorerWidget::reloadStyle() {
     fontSize = 14;
   }
 
-  m_treeView->setStyleSheet(
-      QString("QTreeView { font-size: %2px; }"
-              "QTreeView::item { padding: %1px; }")
-          .arg(padding)
-          .arg(fontSize));
+  m_treeView->setStyleSheet(QString("QTreeView { font-size: %2px; }"
+                                    "QTreeView::item { padding: %1px; }")
+                                .arg(padding)
+                                .arg(fontSize));
 
   // Force model to recreate icons by passing a new provider (and deleting old)
   auto *newProvider = new FileIconProvider();
