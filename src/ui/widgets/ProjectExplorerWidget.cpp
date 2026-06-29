@@ -25,16 +25,16 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   // Top bar
   QWidget *topBar = new QWidget(content);
   QHBoxLayout *topLayout = new QHBoxLayout(topBar);
-  topLayout->setContentsMargins(4, 4, 4, 4);
+  topLayout->setContentsMargins(4, 4, 2, 2);
 
   m_openFolderBtn = new QPushButton("Open Folder", topBar);
-  m_collapseAllBtn = new QPushButton(topBar); // Use QPushButton with flat style for better ACSS support
+  m_collapseAllBtn = new QPushButton(
+      topBar); // Use QPushButton with flat style for better ACSS support
   m_collapseAllBtn->setText(QString::fromUtf8(
       "\xEF\x86\x92")); // fa-compress-arrows-alt / collapse equivalent
-  m_collapseAllBtn->setFont(QFont("Symbols Nerd Font", 12));
   m_collapseAllBtn->setFixedSize(28, 28);
   m_collapseAllBtn->setToolTip(tr("Collapse All Directories"));
-  m_collapseAllBtn->setFlat(true);
+  m_collapseAllBtn->setStyleSheet("font-family: 'Symbols Nerd Font'; font-size: 20px; color: palette(text); background: transparent; border: none;");
 
   topLayout->addWidget(m_openFolderBtn);
   topLayout->addStretch();
@@ -74,18 +74,20 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   connect(m_treeView, &QTreeView::doubleClicked, this,
           &ProjectExplorerWidget::onDoubleClicked);
 
+  // Set object name to increase CSS specificity against the global ACSS theme
+  this->setObjectName("ProjectExplorerWidget");
+
   // Override ACSS default sizing for QDockWidget title bar buttons
   this->setStyleSheet(
-      "QDockWidget::close-button, QDockWidget::float-button {"
-      "    icon-size: 16px;"
-      "    width: 24px;"
-      "    height: 24px;"
+      "#ProjectExplorerWidget::close-button, #ProjectExplorerWidget::float-button {"
+      "    icon-size: 20px;"
+      "    width: 28px;"
+      "    height: 28px;"
       "}"
-      "QDockWidget::close-button:hover, QDockWidget::float-button:hover {"
+      "#ProjectExplorerWidget::close-button:hover, #ProjectExplorerWidget::float-button:hover {"
       "    background: rgba(255, 255, 255, 0.1);"
       "    border-radius: 4px;"
-      "}"
-  );
+      "}");
 }
 
 ProjectExplorerWidget::~ProjectExplorerWidget() { delete m_iconProvider; }
