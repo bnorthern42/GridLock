@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QSettings>
+#include <QFont>
 #include "QtAdvancedStylesheet.h"
 
 namespace gridlock::core::managers {
@@ -35,6 +36,11 @@ void ThemeManager::initialize() {
     m_advancedStylesheet->setCurrentTheme(theme);
     m_advancedStylesheet->updateStylesheet();
     qApp->setStyleSheet(m_advancedStylesheet->styleSheet());
+
+    int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
+    QFont appFont = qApp->font();
+    appFont.setPointSize(uiFontSize);
+    qApp->setFont(appFont);
 }
 
 QStringList ThemeManager::getAvailableThemes() const {

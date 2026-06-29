@@ -84,6 +84,16 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
   m_colorizeIconsCheck->setToolTip(tr("Render file tree icons using vibrant colors based on file type."));
   form->addRow(QString(), m_colorizeIconsCheck);
 
+  m_uiFontSizeBox = new QSpinBox(this);
+  m_uiFontSizeBox->setRange(6, 36);
+  m_uiFontSizeBox->setToolTip(tr("Global font size for the IDE interface."));
+  form->addRow(tr("UI Font Size:"), m_uiFontSizeBox);
+
+  m_codeFontSizeBox = new QSpinBox(this);
+  m_codeFontSizeBox->setRange(6, 72);
+  m_codeFontSizeBox->setToolTip(tr("Font size for the source code editor."));
+  form->addRow(tr("Code Font Size:"), m_codeFontSizeBox);
+
   auto *fontNote =
       new QLabel(tr("<small style='color:#888;'>Font settings follow the "
                     "system monospace font.<br>"
@@ -108,6 +118,8 @@ QString AppearanceSettingsPage::fileTreeStyle() const {
 bool AppearanceSettingsPage::colorizeIcons() const {
   return m_colorizeIconsCheck->isChecked();
 }
+int AppearanceSettingsPage::uiFontSize() const { return m_uiFontSizeBox->value(); }
+int AppearanceSettingsPage::codeFontSize() const { return m_codeFontSizeBox->value(); }
 
 void AppearanceSettingsPage::loadFromSettings() {
   QSettings s("gridlock", "debugger");
@@ -126,6 +138,8 @@ void AppearanceSettingsPage::loadFromSettings() {
   if (ftsIdx >= 0) m_fileTreeStyleCombo->setCurrentIndex(ftsIdx);
   
   m_colorizeIconsCheck->setChecked(s.value("appearance/colorize_icons", true).toBool());
+  m_uiFontSizeBox->setValue(s.value("appearance/ui_font_size", 11).toInt());
+  m_codeFontSizeBox->setValue(s.value("appearance/code_font_size", 11).toInt());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -875,6 +889,8 @@ void PreferencesDialog::apply() {
   s.setValue("appearance/dark_mode", m_appearancePage->isDarkMode());
   s.setValue("appearance/file_tree_style", m_appearancePage->fileTreeStyle());
   s.setValue("appearance/colorize_icons", m_appearancePage->colorizeIcons());
+  s.setValue("appearance/ui_font_size", m_appearancePage->uiFontSize());
+  s.setValue("appearance/code_font_size", m_appearancePage->codeFontSize());
 
   // ── Editing ─────────────────────────────────────────────────────────
   s.setValue("editing/tab_width", m_editingPage->tabWidth());

@@ -142,15 +142,8 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     setReadOnly(true);
     setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     setLineWrapMode(QPlainTextEdit::NoWrap);
-    QFont font("monospace");
-    font.setStyleHint(QFont::Monospace);
-    font.setPointSize(11);
-    setFont(font);
-
-    QPalette p = this->palette();
-    p.setColor(QPalette::Base, QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
-    p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
-    this->setPalette(p);
+    
+    reloadStyle(); // Load initial font size and ACSS background overlay
 
     m_highlighter = new CppSyntaxHighlighter(document());
 
@@ -167,6 +160,20 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
         breakpoints[bp] = QString();
     }
     m_lineNumberArea->update();
+}
+
+void SourceCodeView::reloadStyle() {
+    QSettings s("gridlock", "debugger");
+    int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
+
+    QFont font("monospace");
+    font.setStyleHint(QFont::Monospace);
+    font.setPointSize(codeFontSize);
+    setFont(font);
+
+    // Apply an overlay using CSS so the code editor is visibly distinct from standard ACSS generic window panels.
+    // 30 is roughly 12% opacity. This gracefully darkens light themes and dark themes equally!
+    this->setStyleSheet("QPlainTextEdit { background-color: rgba(0, 0, 0, 30); }");
 }
 
 int SourceCodeView::getCurrentLineNumber() const {

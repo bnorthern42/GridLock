@@ -28,11 +28,16 @@ public:
   bool colorizeIcons() const;
   void loadFromSettings();
 
+  int uiFontSize() const;
+  int codeFontSize() const;
+
 private:
   QComboBox *m_themeCombo = nullptr;
   QCheckBox *m_darkModeCheck = nullptr;
   QComboBox *m_fileTreeStyleCombo = nullptr;
   QCheckBox *m_colorizeIconsCheck = nullptr;
+  QSpinBox *m_uiFontSizeBox = nullptr;
+  QSpinBox *m_codeFontSizeBox = nullptr;
 };
 
 class EditingSettingsPage : public QWidget {

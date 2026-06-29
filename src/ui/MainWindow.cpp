@@ -916,7 +916,7 @@ void MainWindow::openPreferences() {
       for (int i = 0; i < m_editorTabManager->count(); ++i) {
         if (auto view =
                 qobject_cast<SourceCodeView *>(m_editorTabManager->widget(i))) {
-          view->update();
+          view->reloadStyle();
         }
       }
     }

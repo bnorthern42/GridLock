@@ -45,6 +45,7 @@ public:
     void setBreakpoints(const QSet<int>& bps);
     void toggleBreakpoint(int lineNum);
     int getCurrentLineNumber() const;
+    void reloadStyle();
 
     void lineNumberAreaPaintEvent(QPaintEvent *event);
     void lineNumberAreaMousePressEvent(QMouseEvent *event);
