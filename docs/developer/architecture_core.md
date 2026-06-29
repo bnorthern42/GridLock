@@ -30,3 +30,11 @@ Because GridLock interacts with remote execution environments and processes user
 
 *   **`SpackManager.cpp`**: Queries the target environment for `spack env list` and resolves dependency paths, injecting them into the localized run environment.
 *   **`MockHpcBackend.cpp`**: A critical abstraction used in CI/TDD. Simulates a multi-node SLURM cluster to validate rank coordination logic without requiring physical HPC hardware.
+
+## 🧵 Threading and Memory Safety Rules
+
+To maintain high responsiveness when dealing with HPC workloads and strict ASAN compliance, GridLock enforces strict threading rules:
+
+1. **No UI Blocking**: Never perform blocking I/O, heavy JSON parsing, or `process_vm_readv` syscalls on the main GUI thread.
+2. **Use QtConcurrent**: All background workloads (like parsing large DAP payloads or reading matrices) must be dispatched via `QtConcurrent::run`.
+3. **Strict Signal/Slot Boundary**: Worker threads must never touch QWidgets directly. They must communicate results back to the main thread exclusively via Qt Signals (queued connections).

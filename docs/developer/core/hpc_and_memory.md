@@ -25,7 +25,25 @@ graph TD;
 
 ## ⚡ Zero-Copy Memory & Security Engine
 
-Direct memory interaction is critical for handling massive matrices (e.g. 5GB fluid dynamics arrays).
+Direct memory interaction is critical for handling massive matrices (e.g. 5GB fluid dynamics arrays). To maintain a responsive UI, memory syscalls are strictly dispatched to background threads using `QtConcurrent::run`, with results bridged back to the GUI via signals.
+
+*Example: Background memory read emitting a signal in `DapCoordinator`:*
+```cpp
+// Executed upon receiving an 'evaluate' DAP response yielding a raw pointer address
+(void)QtConcurrent::run([this, pid = m_rankToPid[req.rankId],
+                         baseAddress, count = req.rows * req.cols,
+                         rows = req.rows, cols = req.cols]() {
+  try {
+    // Perform blocking syscall in background thread
+    std::vector<double> doubles = NativeMemoryReader::readDoubles(pid, baseAddress, count);
+    
+    // Safely emit to the main GUI thread (QueuedConnection automatically used across thread boundaries)
+    emit heatmapDataReady(doubles, rows, cols);
+  } catch (const std::exception &e) {
+    qWarning() << "Heatmap memory read failed:" << e.what();
+  }
+});
+```
 
 | Component | Files | Description |
 | :--- | :--- | :--- |
