@@ -50,4 +50,6 @@ Thumbs.db
 
 .cache/
 scratch/
-
+outputLog.txt
+build_err.txt
+patch_mocks.py
