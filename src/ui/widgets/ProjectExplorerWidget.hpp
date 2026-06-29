@@ -31,7 +31,7 @@ private:
     QFileSystemModel* m_fileSystemModel;
     FileIconProvider* m_iconProvider;
     QPushButton* m_openFolderBtn;
-    QToolButton* m_collapseAllBtn;
+    QPushButton* m_collapseAllBtn;
 };
 
 } // namespace gridlock::ui

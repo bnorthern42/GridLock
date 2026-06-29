@@ -28,13 +28,13 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   topLayout->setContentsMargins(4, 4, 4, 4);
 
   m_openFolderBtn = new QPushButton("Open Folder", topBar);
-  m_collapseAllBtn = new QToolButton(topBar);
+  m_collapseAllBtn = new QPushButton(topBar); // Use QPushButton with flat style for better ACSS support
   m_collapseAllBtn->setText(QString::fromUtf8(
       "\xEF\x86\x92")); // fa-compress-arrows-alt / collapse equivalent
   m_collapseAllBtn->setFont(QFont("Symbols Nerd Font", 12));
   m_collapseAllBtn->setFixedSize(28, 28);
   m_collapseAllBtn->setToolTip(tr("Collapse All Directories"));
-  m_collapseAllBtn->setStyleSheet("color: palette(text);");
+  m_collapseAllBtn->setFlat(true);
 
   topLayout->addWidget(m_openFolderBtn);
   topLayout->addStretch();
@@ -69,26 +69,23 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   connect(m_openFolderBtn, &QPushButton::clicked, this,
           &ProjectExplorerWidget::onOpenFolder);
-  connect(m_collapseAllBtn, &QToolButton::clicked, m_treeView,
+  connect(m_collapseAllBtn, &QPushButton::clicked, m_treeView,
           &QTreeView::collapseAll);
   connect(m_treeView, &QTreeView::doubleClicked, this,
           &ProjectExplorerWidget::onDoubleClicked);
 
-  // Enhance QDockWidget default buttons
-  const auto buttons = this->findChildren<QAbstractButton *>();
-  for (auto *btn : buttons) {
-    if (btn->objectName() == "qt_dockwidget_closebutton") {
-      btn->setToolTip(tr("Close Project Explorer"));
-      btn->setFixedSize(24, 24);
-      btn->setIconSize(QSize(20, 20));
-      btn->setCursor(Qt::PointingHandCursor);
-    } else if (btn->objectName() == "qt_dockwidget_floatbutton") {
-      btn->setToolTip(tr("Float / Detach Panel"));
-      btn->setFixedSize(24, 24);
-      btn->setIconSize(QSize(20, 20));
-      btn->setCursor(Qt::PointingHandCursor);
-    }
-  }
+  // Override ACSS default sizing for QDockWidget title bar buttons
+  this->setStyleSheet(
+      "QDockWidget::close-button, QDockWidget::float-button {"
+      "    icon-size: 16px;"
+      "    width: 24px;"
+      "    height: 24px;"
+      "}"
+      "QDockWidget::close-button:hover, QDockWidget::float-button:hover {"
+      "    background: rgba(255, 255, 255, 0.1);"
+      "    border-radius: 4px;"
+      "}"
+  );
 }
 
 ProjectExplorerWidget::~ProjectExplorerWidget() { delete m_iconProvider; }
