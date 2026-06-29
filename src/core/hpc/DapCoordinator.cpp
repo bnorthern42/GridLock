@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QThreadPool>
 #include <QtConcurrent>
 
 DapCoordinator::DapCoordinator(QObject *parent)
@@ -336,7 +337,7 @@ void DapCoordinator::processRawData(const QByteArray &data) {
     QByteArray payloadData = m_buffer.mid(headerEndIndex + 4, contentLength);
     m_buffer.remove(0, totalMessageLength);
 
-    QtConcurrent::run([this, payloadData]() {
+    QThreadPool::globalInstance()->start([this, payloadData]() {
         QJsonParseError parseError;
         QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
 
