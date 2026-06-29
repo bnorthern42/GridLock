@@ -89,19 +89,8 @@ int main(int argc, char *argv[]) {
 
   QApplication::setWindowIcon(QIcon(":/icon.png"));
 
-  acss::QtAdvancedStylesheet advancedStylesheet;
-  QString stylesDir = QApplication::applicationDirPath() + "/styles";
-  if (!QDir(stylesDir).exists()) {
-    stylesDir = "/usr/share/gridlock/styles"; // Fallback install path
-  }
-  advancedStylesheet.setStylesDirPath(stylesDir);
-  advancedStylesheet.setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
-  advancedStylesheet.setCurrentStyle("qt_material");
-  advancedStylesheet.setCurrentTheme("dark_teal");
-  app.setStyleSheet(advancedStylesheet.styleSheet());
-
-  // No longer use ThemeManager for Fusion theme:
-  // gridlock::core::managers::ThemeManager::instance().setTheme("Fusion", true);
+  // Initialize ACSS through the ThemeManager
+  gridlock::core::managers::ThemeManager::instance().initialize();
 
   QPixmap splashPixmap(":/icon.png");
   // Scale nicely for the splash screen

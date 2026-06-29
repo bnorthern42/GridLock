@@ -1,9 +1,9 @@
 #include "ThemeManager.hpp"
-#include <QStyleFactory>
 #include <QApplication>
-#include <QPalette>
-#include <QColor>
-#include <QStyle>
+#include <QDir>
+#include <QStandardPaths>
+#include <QSettings>
+#include "QtAdvancedStylesheet.h"
 
 namespace gridlock::core::managers {
 
@@ -12,40 +12,43 @@ ThemeManager& ThemeManager::instance() {
     return instance;
 }
 
-QStringList ThemeManager::getAvailableThemes() const {
-    return QStyleFactory::keys();
+ThemeManager::ThemeManager() : m_advancedStylesheet(std::make_unique<acss::QtAdvancedStylesheet>()) {
 }
 
-void ThemeManager::setTheme(const QString& styleName, bool isDark) {
-    if (!styleName.isEmpty()) {
-        QApplication::setStyle(QStyleFactory::create(styleName));
+ThemeManager::~ThemeManager() = default;
+
+void ThemeManager::initialize() {
+    QString stylesDir = QApplication::applicationDirPath() + "/styles";
+    if (!QDir(stylesDir).exists()) {
+        stylesDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/styles"; // Fallback install path
+    }
+    m_advancedStylesheet->setStylesDirPath(stylesDir);
+    m_advancedStylesheet->setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
+    m_advancedStylesheet->setCurrentStyle("qt_material");
+    
+    QSettings s("gridlock", "debugger");
+    QString theme = s.value("appearance/theme", "dark_teal").toString();
+    if (!m_advancedStylesheet->themes().contains(theme) && !m_advancedStylesheet->themes().contains(theme + ".xml")) {
+        theme = "dark_teal";
     }
     
-    if (isDark) {
-        QPalette darkPalette;
-        darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-        darkPalette.setColor(QPalette::WindowText, Qt::white);
-        darkPalette.setColor(QPalette::Base, QColor(42, 42, 42));
-        darkPalette.setColor(QPalette::AlternateBase, QColor(66, 66, 66));
-        darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-        darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-        darkPalette.setColor(QPalette::Text, Qt::white);
-        darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-        darkPalette.setColor(QPalette::ButtonText, Qt::white);
-        darkPalette.setColor(QPalette::BrightText, Qt::red);
-        darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-        darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-        darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-        
-        darkPalette.setColor(QPalette::Disabled, QPalette::Text, Qt::darkGray);
-        darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, Qt::darkGray);
-        darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, Qt::darkGray);
-        
-        darkPalette.setColor(QPalette::PlaceholderText, QColor(160, 160, 160));
+    m_advancedStylesheet->setCurrentTheme(theme);
+    m_advancedStylesheet->updateStylesheet();
+    qApp->setStyleSheet(m_advancedStylesheet->styleSheet());
+}
 
-        QApplication::setPalette(darkPalette);
-    } else {
-        QApplication::setPalette(QApplication::style()->standardPalette());
+QStringList ThemeManager::getAvailableThemes() const {
+    if (m_advancedStylesheet) {
+        return m_advancedStylesheet->themes();
+    }
+    return QStringList();
+}
+
+void ThemeManager::setTheme(const QString& themeName, bool /*isDark*/) {
+    if (m_advancedStylesheet && !themeName.isEmpty()) {
+        m_advancedStylesheet->setCurrentTheme(themeName);
+        m_advancedStylesheet->updateStylesheet();
+        qApp->setStyleSheet(m_advancedStylesheet->styleSheet());
     }
 }
 

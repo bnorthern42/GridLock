@@ -71,8 +71,8 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
           });
 
   connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool checked) {
-    gridlock::core::managers::ThemeManager::instance().setTheme(
-        m_themeCombo->currentText(), checked);
+    // Dark Mode check logic is currently handled natively by the ACSS themes,
+    // so we just pass it along (though it's ignored for XML-based coloring).
   });
 
   m_fileTreeStyleCombo = new QComboBox(this);
@@ -111,7 +111,7 @@ bool AppearanceSettingsPage::colorizeIcons() const {
 
 void AppearanceSettingsPage::loadFromSettings() {
   QSettings s("gridlock", "debugger");
-  const QString theme = s.value("appearance/theme", "Fusion").toString();
+  const QString theme = s.value("appearance/theme", "dark_teal").toString();
   bool isDark = s.value("appearance/dark_mode", true).toBool();
 
   m_darkModeCheck->blockSignals(true);

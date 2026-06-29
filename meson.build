@@ -278,7 +278,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   processed_ui_test_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep]
+  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep]
 )
 
 test('ui_tests', gridlock_ui_tests)
