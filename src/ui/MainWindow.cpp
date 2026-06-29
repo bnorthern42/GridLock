@@ -21,6 +21,7 @@
 #include "../core/managers/SessionManager.hpp"
 #include "../core/managers/ShortcutManager.hpp"
 #include "../core/managers/SpackManager.hpp"
+#include "../core/managers/ThemeManager.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizard.hpp"
 #include "tutorial/TutorialDialog.hpp"
@@ -908,9 +909,10 @@ void MainWindow::openPreferences() {
     if (m_projectExplorerWidget) {
         m_projectExplorerWidget->reloadStyle();
     }
-  });
 
-  connect(dlg, &QDialog::accepted, this, [this]() {
+    // Apply UI theme and font size globally without restart
+    gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
+
     // SourceCodeView and RegisterView may want to re-read palette / font prefs.
     if (m_editorTabManager) {
       for (int i = 0; i < m_editorTabManager->count(); ++i) {
@@ -922,6 +924,10 @@ void MainWindow::openPreferences() {
     }
     if (m_registerView)
       m_registerView->update();
+  });
+
+  connect(dlg, &QDialog::accepted, this, [this]() {
+      // Unused, as preferencesChanged handles all dynamic styling
   });
 
   dlg->exec();
