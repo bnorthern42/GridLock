@@ -44,7 +44,9 @@ jobs:
             libfuse2t64 \
             fuse3 \
             imagemagick \
+            xauth \
             libgl1-mesa-dev \
+            libutf8proc-dev \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-tools-dev \
@@ -93,4 +95,3 @@ jobs:
           files: GridLock-*.AppImage
           generate_release_notes: true
           draft: false
-          prerelease: false
