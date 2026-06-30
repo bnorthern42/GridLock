@@ -102,8 +102,8 @@ public:
   void setLastOpenDir(const QString &path);
 
   // ── Breakpoints (TOML-backed) ─────────────────────────────────────────
-  QMap<QString, QSet<int>> getBreakpoints() const;
-  void saveBreakpoints(const QMap<QString, QSet<int>> &breakpoints);
+  QMap<QString, QSet<int>> getBreakpoints(QString targetExecutable = QString()) const;
+  void saveBreakpoints(const QMap<QString, QSet<int>> &breakpoints, QString targetExecutable = QString());
 
   // ── Project Settings (TOML-backed) ────────────────────────────────────
   ProjectSettings loadProjectSettings() const;

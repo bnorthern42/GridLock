@@ -27,13 +27,13 @@ void GdbRankCoordinator::writeCmd(int rankId, const QString &cmd) {
 }
 
 void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
-  auto bps = core::ConfigManager::instance().getBreakpoints();
+  auto bps = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
   auto &rp = m_processes[rankId];
   int count = 0;
   for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
-    QString fileName = QFileInfo(it.key()).fileName();
+    QString absPath = it.key();
     for (int line : it.value()) {
-      QString cmd = QString("-break-insert -f %1:%2\n").arg(fileName).arg(line);
+      QString cmd = QString("-break-insert -f %1:%2\n").arg(absPath).arg(line);
       writeCmd(rankId, cmd);
       count++;
     }
@@ -232,8 +232,8 @@ void GdbRankCoordinator::sendCommand(int rankId, const QString &cmd) {
 
 void GdbRankCoordinator::broadcastBreakpoint(const QString &file, int line, bool isSet,
                                              const QString& condition) {
-  QString fileName = QFileInfo(file).fileName();
-  QString locStr = QString("%1:%2").arg(fileName).arg(line);
+  QString absPath = file;
+  QString locStr = QString("%1:%2").arg(absPath).arg(line);
 
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto &rp = m_processes[i];
@@ -256,7 +256,7 @@ void GdbRankCoordinator::broadcastBreakpoint(const QString &file, int line, bool
     } else {
         QString breakCmd;
         if (!condition.isEmpty()) {
-            breakCmd = QString("-break-insert -c \"%1\" %2:%3\n").arg(condition).arg(fileName).arg(line);
+            breakCmd = QString("-break-insert -c \"%1\" %2:%3\n").arg(condition).arg(absPath).arg(line);
         } else {
             breakCmd = QString("-break-insert %1\n").arg(locStr);
         }

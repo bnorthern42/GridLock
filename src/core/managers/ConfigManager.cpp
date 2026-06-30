@@ -301,10 +301,14 @@ void ConfigManager::setDocsetDirectory(const QString &path) {
 
 // ─── Breakpoints (TOML) ──────────────────────────────────────────────────────
 
-QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
+QMap<QString, QSet<int>> ConfigManager::getBreakpoints(QString targetExecutable) const {
   QMap<QString, QSet<int>> breakpoints;
   if (m_workspacePath.isEmpty())
     return breakpoints;
+
+  if (targetExecutable.isEmpty()) {
+    targetExecutable = QString::fromStdString(loadProjectSettings().targetBinary);
+  }
 
   QString workspaceFile =
       QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
@@ -316,18 +320,24 @@ QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
   }
 
   if (auto *bps = tbl["breakpoints"].as_table()) {
-    for (auto &[file, lines] : *bps) {
-      if (auto *linesArr = lines.as_array()) {
-        QString path =
-            QDir(m_workspacePath)
-                .filePath(QString::fromStdString(std::string(file.str())));
-        QSet<int> lineSet;
-        for (auto &elem : *linesArr) {
-          if (auto *val = elem.as_integer()) {
-            lineSet.insert(val->get());
+    if (auto *targetBps = bps->get(targetExecutable.toStdString())) {
+      if (auto *targetTbl = targetBps->as_table()) {
+        for (auto &[file, lines] : *targetTbl) {
+          if (auto *linesArr = lines.as_array()) {
+            // Treat the key as an absolute path as requested (or resolve relative if needed, but we will save absolute paths).
+            QString path = QString::fromStdString(std::string(file.str()));
+            if (QFileInfo(path).isRelative()) {
+              path = QDir(m_workspacePath).filePath(path);
+            }
+            QSet<int> lineSet;
+            for (auto &elem : *linesArr) {
+              if (auto *val = elem.as_integer()) {
+                lineSet.insert(val->get());
+              }
+            }
+            breakpoints[QFileInfo(path).absoluteFilePath()] = lineSet;
           }
         }
-        breakpoints[QFileInfo(path).absoluteFilePath()] = lineSet;
       }
     }
   }
@@ -335,9 +345,13 @@ QMap<QString, QSet<int>> ConfigManager::getBreakpoints() const {
 }
 
 void ConfigManager::saveBreakpoints(
-    const QMap<QString, QSet<int>> &breakpoints) {
+    const QMap<QString, QSet<int>> &breakpoints, QString targetExecutable) {
   if (m_workspacePath.isEmpty())
     return;
+
+  if (targetExecutable.isEmpty()) {
+    targetExecutable = QString::fromStdString(loadProjectSettings().targetBinary);
+  }
 
   QDir dir(m_workspacePath);
   if (!dir.exists(".gridlock"))
@@ -350,16 +364,24 @@ void ConfigManager::saveBreakpoints(
   } catch (...) {
   }
 
-  toml::table bpTable;
+  toml::table allBpsTable;
+  if (auto *existingBps = tbl["breakpoints"].as_table()) {
+    allBpsTable = *existingBps;
+  }
+
+  toml::table targetBpsTable;
   for (auto it = breakpoints.constBegin(); it != breakpoints.constEnd(); ++it) {
     toml::array linesArr;
     for (int line : it.value()) {
       linesArr.push_back(line);
     }
-    QString relPath = dir.relativeFilePath(it.key());
-    bpTable.insert(relPath.toStdString(), linesArr);
+    // We were requested to store absolute paths to avoid 'No source file named...' issues
+    QString absPath = QFileInfo(it.key()).absoluteFilePath();
+    targetBpsTable.insert(absPath.toStdString(), linesArr);
   }
-  tbl.insert_or_assign("breakpoints", bpTable);
+  
+  allBpsTable.insert_or_assign(targetExecutable.toStdString(), targetBpsTable);
+  tbl.insert_or_assign("breakpoints", allBpsTable);
 
   std::ofstream out(workspaceFile.toStdString());
   if (out.is_open())
