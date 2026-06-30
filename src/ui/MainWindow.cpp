@@ -129,6 +129,25 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Load offline persistence TOML breakpoints
   m_persistentBreakpoints =
       gridlock::core::ConfigManager::instance().getBreakpoints();
+
+  // Restore layout state
+  QSettings settings("gridlock", "debugger");
+  if (settings.contains("MainWindow/Geometry")) {
+      restoreGeometry(settings.value("MainWindow/Geometry").toByteArray());
+  }
+  if (settings.contains("MainWindow/State")) {
+      restoreState(settings.value("MainWindow/State").toByteArray());
+  }
+  
+  // Restore splitter states
+  for (auto* splitter : findChildren<QSplitter*>()) {
+      if (!splitter->objectName().isEmpty()) {
+          auto state = settings.value("MainWindow/Splitter_" + splitter->objectName()).toByteArray();
+          if (!state.isEmpty()) {
+              splitter->restoreState(state);
+          }
+      }
+  }
 }
 
 void MainWindow::executeCommand(
@@ -567,9 +586,11 @@ void MainWindow::setupToolbar() {
 
 void MainWindow::setupDocks() {
   QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
+  mainVerticalSplitter->setObjectName("MainVerticalSplitter");
   mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
 
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
+  m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
 
   connect(&gridlock::core::managers::SessionManager::instance(),
@@ -577,6 +598,7 @@ void MainWindow::setupDocks() {
           m_projectExplorerWidget, &ProjectExplorerWidget::setRootPath);
 
   m_variablesDockWidget = new VariablesDockWidget(this);
+  m_variablesDockWidget->setObjectName("VariablesDock");
   // It's no longer a dock widget, it will be added to the splitter
 
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked,
@@ -592,6 +614,7 @@ void MainWindow::setupDocks() {
 
   QSplitter *masterHorizontalSplitter =
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);
+  masterHorizontalSplitter->setObjectName("MasterHorizontalSplitter");
 
   m_editorTabManager = new EditorTabManager(masterHorizontalSplitter);
   m_editorTabManager->setMinimumWidth(350);
@@ -668,6 +691,7 @@ void MainWindow::setupDocks() {
 
   QSplitter *rightPaneSplitter =
       new QSplitter(Qt::Vertical, masterHorizontalSplitter);
+  rightPaneSplitter->setObjectName("RightPaneSplitter");
 
   m_disassemblyView = new DisassemblyView(rightPaneSplitter);
   m_serverRackView = new ServerRackView(rightPaneSplitter);
@@ -692,7 +716,10 @@ void MainWindow::setupDocks() {
   m_bottomTabs = new QTabWidget(mainVerticalSplitter);
 
   m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
+  m_terminalDock->setObjectName("TerminalDock");
+  
   m_differentialGrid = new DifferentialGrid(m_bottomTabs);
+  m_differentialGrid->setObjectName("DifferentialGrid");
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
@@ -709,6 +736,7 @@ void MainWindow::setupDocks() {
   }
 
   m_expressionEvaluatorWidget = new ExpressionEvaluatorWidget(m_bottomTabs);
+  m_expressionEvaluatorWidget->setObjectName("ExpressionEvaluatorDock");
   connect(m_expressionEvaluatorWidget,
           &ExpressionEvaluatorWidget::evaluateRequested, this,
           [this](const QString &expr) {
@@ -718,10 +746,19 @@ void MainWindow::setupDocks() {
           });
 
   m_referenceManualWidget = new ReferenceManualWidget(m_bottomTabs);
+  m_referenceManualWidget->setObjectName("ReferenceManualWidget");
+  
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
+  m_gdbConsoleWidget->setObjectName("GdbConsoleWidget");
+  
   m_memView = new MemView(m_bottomTabs);
+  m_memView->setObjectName("MemViewDock");
+  
   m_registerView = new RegisterView(m_bottomTabs);
+  m_registerView->setObjectName("RegisterViewDock");
+  
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
+  m_spackManager->setObjectName("HpcConsoleDock");
 
   connect(m_memView, &MemView::requestMemory, this,
           [this](const QString &address, int length) {
@@ -881,6 +918,16 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
     ps.watchExpressions = m_differentialGrid->getWatchExpressions();
     gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+  }
+
+  QSettings settings("gridlock", "debugger");
+  settings.setValue("MainWindow/Geometry", saveGeometry());
+  settings.setValue("MainWindow/State", saveState());
+
+  for (auto* splitter : findChildren<QSplitter*>()) {
+      if (!splitter->objectName().isEmpty()) {
+          settings.setValue("MainWindow/Splitter_" + splitter->objectName(), splitter->saveState());
+      }
   }
 
   event->accept();
