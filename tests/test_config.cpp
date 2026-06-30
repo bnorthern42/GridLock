@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QTextStream>
 #include <QSettings>
+#include <fstream>
 
 void TestConfig::testSerialization() {
     QTemporaryDir tempDir;
@@ -47,6 +48,7 @@ void TestConfig::testDeserialization() {
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
     QTextStream out(&file);
     out << "[breakpoints]\n";
+    out << "[breakpoints.\"\"]\n"; // Empty target executable since it's the fallback
     out << "\"/test/parser.c\" = [42, 84]\n";
     out << "\"/test/network.c\" = [12, 13, 14]\n";
     out << "\"/test/math.c\" = [99]\n";
@@ -255,6 +257,61 @@ void TestConfig::testSshSettingsPersistence() {
     QCOMPARE(loaded.user, QString("hpcuser"));
     QCOMPARE(loaded.keyPath, QString("~/.ssh/id_rsa_hpc"));
 
+    QDir::setCurrent(oldCwd);
+}
+
+void TestConfig::testTerminalSettingsPersistence() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString oldCwd = QDir::currentPath();
+    QDir::setCurrent(tempDir.path());
+    
+    QByteArray oldTestDir = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
+    qputenv("GRIDLOCK_TEST_CONFIG_DIR", tempDir.path().toLocal8Bit());
+
+    auto &mgr = gridlock::core::ConfigManager::instance();
+    mgr.loadConfig();
+    gridlock::core::TerminalSettings term;
+    term.shellPath = "/bin/zsh";
+    term.fontFamily = "Hack";
+    term.fontSize = 14;
+    mgr.saveTerminalSettings(term);
+
+    const auto loaded = mgr.getTerminalSettings();
+    QCOMPARE(loaded.shellPath, QString("/bin/zsh"));
+    QCOMPARE(loaded.fontFamily, QString("Hack"));
+    QCOMPARE(loaded.fontSize, 14);
+
+    // Test fallback behavior
+    QString globalConfigPath = QDir(tempDir.path()).filePath("config.toml");
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(globalConfigPath.toStdString());
+    } catch (...) {}
+    if (auto* termTable = tbl["terminal"].as_table()) {
+        termTable->erase("shell_path");
+        termTable->erase("font_family");
+        termTable->erase("font_size");
+    }
+    std::ofstream out(globalConfigPath.toStdString());
+    if (out.is_open()) out << tbl;
+    out.close();
+
+    // Reload config
+    mgr.loadConfig();
+
+    const auto defaults = mgr.getTerminalSettings();
+    QString expectedShell = qEnvironmentVariable("SHELL");
+    if (expectedShell.isEmpty()) expectedShell = "/bin/bash";
+    QCOMPARE(defaults.shellPath, expectedShell);
+    QCOMPARE(defaults.fontFamily, QString("FiraCode Nerd Font"));
+    QCOMPARE(defaults.fontSize, 12);
+
+    if (oldTestDir.isEmpty()) {
+        qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
+    } else {
+        qputenv("GRIDLOCK_TEST_CONFIG_DIR", oldTestDir);
+    }
     QDir::setCurrent(oldCwd);
 }
 

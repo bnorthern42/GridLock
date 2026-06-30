@@ -949,6 +949,12 @@ void MainWindow::openPreferences() {
     // Apply UI theme and font size globally without restart
     gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
 
+    // Update Terminal font
+    if (m_terminalDock) {
+      const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
+      m_terminalDock->setTerminalFont(ts.fontFamily, ts.fontSize);
+    }
+
     // SourceCodeView and RegisterView may want to re-read palette / font prefs.
     if (m_editorTabManager) {
       for (int i = 0; i < m_editorTabManager->count(); ++i) {

@@ -3,6 +3,8 @@
 #include <QApplication>
 #include <qtermwidget.h>
 #include <QProcessEnvironment>
+#include <QTimer>
+#include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
 
@@ -14,13 +16,8 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
 
     m_termWidget = new QTermWidget(0, this);
-    
-    // Set default shell (or fallback to /bin/bash)
-    QString shell = qEnvironmentVariable("SHELL");
-    if (shell.isEmpty()) {
-        shell = "/bin/bash";
-    }
-    m_termWidget->setShellProgram(shell);
+    const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
+    m_termWidget->setShellProgram(ts.shellPath);
     
     // Set default environment
     QStringList env;
@@ -30,19 +27,24 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     // Set default dark theme styling
     setColorScheme("DarkPastels");
     
-    // Attempt to set a developer-friendly font if available
-    QFont font("FiraCode Nerd Font", 10);
-    font.setStyleHint(QFont::Monospace);
-    m_termWidget->setTerminalFont(font);
-    
     // Start terminal
     m_termWidget->startShellProgram();
+
+    // Set font based on ConfigManager AFTER starting the shell, 
+    // and delay it to the next event loop iteration. qtermwidget is notorious
+    // for resetting/ignoring fonts applied before it has fully spun up its VT100 emulator.
+    QTimer::singleShot(0, this, [this, ts]() {
+        QFont font(ts.fontFamily, ts.fontSize);
+        font.setStyleHint(QFont::Monospace);
+        m_termWidget->setTerminalFont(font);
+    });
     
     layout->addWidget(m_termWidget);
 }
 
 void TerminalDockWidget::setTerminalFont(const QString& family, int pointSize) {
     QFont font(family, pointSize);
+    font.setStyleHint(QFont::Monospace);
     m_termWidget->setTerminalFont(font);
 }
 

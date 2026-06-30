@@ -181,6 +181,22 @@ private:
   QPushButton *m_autoDetectBtn = nullptr;
 };
 
+class TerminalSettingsPage : public QWidget {
+  Q_OBJECT
+public:
+  explicit TerminalSettingsPage(QWidget *parent = nullptr);
+
+  QString shellPath() const;
+  QString fontFamily() const;
+  int fontSize() const;
+  void loadFromSettings();
+
+private:
+  QLineEdit *m_shellPathEdit = nullptr;
+  QComboBox *m_fontFamilyCombo = nullptr;
+  QSpinBox *m_fontSizeBox = nullptr;
+};
+
 // ─── Main dialog ───────────────────────────────────────────────────────────
 
 class PreferencesDialog : public QDialog {
@@ -216,6 +232,7 @@ private:
   HpcSettingsPage *m_hpcPage = nullptr;
   HpcIntegrationSettingsPage *m_hpcIntegrationPage = nullptr;
   DocsetSettingsPage *m_docsetPage = nullptr;
+  TerminalSettingsPage *m_terminalPage = nullptr;
 };
 
 } // namespace gridlock::ui

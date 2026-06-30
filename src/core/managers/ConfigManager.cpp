@@ -262,6 +262,36 @@ void ConfigManager::saveSlurmSettings(const SlurmSettings &sl) {
   s.sync();
 }
 
+// ─── Terminal settings ──────────────────────────────────────────────────────
+
+TerminalSettings ConfigManager::getTerminalSettings() const {
+  TerminalSettings ts;
+  
+  QString defaultShell = qEnvironmentVariable("SHELL");
+  if (defaultShell.isEmpty()) {
+    defaultShell = "/bin/bash";
+  }
+
+  ts.shellPath = QString::fromStdString(m_config["terminal"]["shell_path"].value_or(defaultShell.toStdString()));
+  ts.fontFamily = QString::fromStdString(m_config["terminal"]["font_family"].value_or("FiraCode Nerd Font"));
+  ts.fontSize = m_config["terminal"]["font_size"].value_or(12);
+  
+  return ts;
+}
+
+void ConfigManager::saveTerminalSettings(const TerminalSettings &ts) {
+  if (!m_config.contains("terminal")) {
+    m_config.insert("terminal", toml::table{});
+  }
+  
+  auto* table = m_config["terminal"].as_table();
+  table->insert_or_assign("shell_path", ts.shellPath.toStdString());
+  table->insert_or_assign("font_family", ts.fontFamily.toStdString());
+  table->insert_or_assign("font_size", qMax(1, ts.fontSize));
+  
+  saveGlobalConfig();
+}
+
 // ─── Convenience shims ───────────────────────────────────────────────────────
 
 int ConfigManager::getDefaultRanks() const {

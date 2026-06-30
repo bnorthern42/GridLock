@@ -779,6 +779,68 @@ void DocsetSettingsPage::onAutoDetect() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  TerminalSettingsPage
+// ═══════════════════════════════════════════════════════════════════════════
+
+TerminalSettingsPage::TerminalSettingsPage(QWidget *parent) : QWidget(parent) {
+  auto *form = new QFormLayout(this);
+  form->setContentsMargins(24, 24, 24, 24);
+  form->setSpacing(14);
+  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+  auto *heading = new QLabel(tr("<b>Terminal</b>"), this);
+  heading->setObjectName("heading");
+  form->addRow(heading);
+
+  auto *separator = new QLabel(this);
+  separator->setFixedHeight(1);
+  separator->setObjectName("separator");
+  form->addRow(separator);
+
+  // Shell Path
+  auto *shellRow = new QHBoxLayout();
+  m_shellPathEdit = new QLineEdit(this);
+  m_shellPathEdit->setPlaceholderText(tr("/bin/bash"));
+  m_shellPathEdit->setToolTip(tr("Path to the shell executable (e.g. /bin/bash, /bin/zsh). Requires terminal restart."));
+  auto *shellBrowseBtn = new QPushButton(tr("Browse…"), this);
+  shellBrowseBtn->setFixedWidth(72);
+  connect(shellBrowseBtn, &QPushButton::clicked, this, [this]() {
+    QString path = QFileDialog::getOpenFileName(this, tr("Select Shell Executable"), "/bin");
+    if (!path.isEmpty()) m_shellPathEdit->setText(path);
+  });
+  shellRow->addWidget(m_shellPathEdit);
+  shellRow->addWidget(shellBrowseBtn);
+  form->addRow(tr("Shell Path:"), shellRow);
+
+  // Font Family
+  m_fontFamilyCombo = new QComboBox(this);
+  m_fontFamilyCombo->addItems({"FiraCode Nerd Font", "Hack", "Monospace"});
+  m_fontFamilyCombo->setToolTip(tr("Monospace font for the embedded terminal."));
+  form->addRow(tr("Font Family:"), m_fontFamilyCombo);
+
+  // Font Size
+  m_fontSizeBox = new QSpinBox(this);
+  m_fontSizeBox->setRange(6, 72);
+  m_fontSizeBox->setToolTip(tr("Font size in points for the terminal."));
+  form->addRow(tr("Font Size:"), m_fontSizeBox);
+
+  loadFromSettings();
+}
+
+QString TerminalSettingsPage::shellPath() const { return m_shellPathEdit->text().trimmed(); }
+QString TerminalSettingsPage::fontFamily() const { return m_fontFamilyCombo->currentText(); }
+int TerminalSettingsPage::fontSize() const { return m_fontSizeBox->value(); }
+
+void TerminalSettingsPage::loadFromSettings() {
+  const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
+  m_shellPathEdit->setText(ts.shellPath);
+  int fIdx = m_fontFamilyCombo->findText(ts.fontFamily);
+  if (fIdx >= 0) m_fontFamilyCombo->setCurrentIndex(fIdx);
+  else m_fontFamilyCombo->setCurrentText(ts.fontFamily);
+  m_fontSizeBox->setValue(ts.fontSize);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  PreferencesDialog
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -838,6 +900,7 @@ void PreferencesDialog::setupSidebar() {
       {tr("Debugger"), "\uf188"},
       {tr("HPC / Cluster"), "\uf233"},
       {tr("HPC Integration"), "\uf1c0"},
+      {tr("Terminal"), "\uf120"},
       {tr("Docsets"), "\uf02d"},
   };
 
@@ -875,6 +938,7 @@ void PreferencesDialog::setupPages() {
   m_debuggerPage = new DebuggerSettingsPage(m_stack);
   m_hpcPage = new HpcSettingsPage(m_stack);
   m_hpcIntegrationPage = new HpcIntegrationSettingsPage(m_stack);
+  m_terminalPage = new TerminalSettingsPage(m_stack);
   m_docsetPage = new DocsetSettingsPage(m_stack);
 
   m_stack->addWidget(m_appearancePage);
@@ -883,6 +947,7 @@ void PreferencesDialog::setupPages() {
   m_stack->addWidget(m_debuggerPage);
   m_stack->addWidget(m_hpcPage);
   m_stack->addWidget(m_hpcIntegrationPage);
+  m_stack->addWidget(m_terminalPage);
   m_stack->addWidget(m_docsetPage);
 
   m_stack->setCurrentIndex(0);
@@ -976,6 +1041,13 @@ void PreferencesDialog::apply() {
     docMgr.setDocsetDirectory(m_docsetPage->docsetDirectory());
     m_docsetPage->refreshTable();
   }
+
+  // ── Terminal ──────────────────────────────────────────────────────────
+  gridlock::core::TerminalSettings ts;
+  ts.shellPath = m_terminalPage->shellPath();
+  ts.fontFamily = m_terminalPage->fontFamily();
+  ts.fontSize = m_terminalPage->fontSize();
+  gridlock::core::ConfigManager::instance().saveTerminalSettings(ts);
 
   s.sync();
 

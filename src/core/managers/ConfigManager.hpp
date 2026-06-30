@@ -44,6 +44,13 @@ struct SlurmSettings {
   QString spackRoot = "/opt/spack"; ///< Spack install prefix on remote
 };
 
+/// Terminal configuration for QTermWidget integration. Stored in QSettings under terminal/*.
+struct TerminalSettings {
+  QString shellPath = "";      ///< Shell executable path (defaults to $SHELL or /bin/bash if empty)
+  QString fontFamily = "FiraCode Nerd Font"; ///< Default monospace font
+  int fontSize = 12;           ///< Font size in points
+};
+
 struct ProjectSettings {
   std::string targetBinary;
   std::string programArguments;
@@ -89,6 +96,10 @@ public:
   // ── SLURM / Spack settings (QSettings-backed) ────────────────────
   SlurmSettings getSlurmSettings() const;
   void saveSlurmSettings(const SlurmSettings &s);
+
+  // ── Terminal settings (QSettings-backed) ─────────────────────────────
+  TerminalSettings getTerminalSettings() const;
+  void saveTerminalSettings(const TerminalSettings &s);
 
   /// Convenience shims used by existing call-sites.
   int getDefaultRanks() const;

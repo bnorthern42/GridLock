@@ -13,4 +13,5 @@ private slots:
     void testSettingValidation();
     void testSlurmSettingsPersistence();
     void testSshSettingsPersistence();
+    void testTerminalSettingsPersistence();
 };

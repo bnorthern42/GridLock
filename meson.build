@@ -10,9 +10,12 @@ qt6 = import('qt6')
 qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent', 'Qml', 'Svg'])
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 qtermwidget_dep = dependency('qtermwidget6')
-
-acss_proj = subproject('Qt-Advanced-Stylesheets')
-acss_dep = acss_proj.get_variable('acss_dep')
+acss_dep = dependency('QtAdvancedStylesheets', method: 'cmake', modules: 'QtAdvancedStylesheets::qtadvancedcss', required: false)
+if not acss_dep.found()
+  cpp = meson.get_compiler('cpp')
+  acss_lib = cpp.find_library('qtadvancedcss', dirs: [meson.current_source_dir() + '/external/Qt-Advanced-Stylesheets/build/lib'])
+  acss_dep = declare_dependency(dependencies: acss_lib, include_directories: include_directories('external/Qt-Advanced-Stylesheets/src'))
+endif
 
 # Source files
 src_files = [
@@ -291,6 +294,7 @@ test('ui_tests', gridlock_ui_tests)
 terminal_config_test_src = [
   'tests/test_terminal_config.cpp',
   'src/ui/docks/TerminalDockWidget.cpp',
+  'src/core/managers/ConfigManager.cpp'
 ]
 
 terminal_config_test_moc_headers = [
@@ -307,7 +311,7 @@ gridlock_terminal_config_tests = executable('gridlock_terminal_config_tests',
   terminal_config_test_src,
   processed_terminal_config_test_files,
   include_directories : inc,
-  dependencies : [qt6_dep, qtermwidget_dep]
+  dependencies : [qt6_dep, qtermwidget_dep, tomlplusplus_dep]
 )
 
 test('terminal_config_tests', gridlock_terminal_config_tests)
