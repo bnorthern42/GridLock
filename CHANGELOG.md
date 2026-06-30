@@ -5,6 +5,26 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-30
+
+### Added
+- **Integrated Interactive Terminal:** Real embedded terminal leveraging `qtermwidget`, providing a full PTY-backed interactive shell inside the IDE as `TerminalDockWidget`.
+- **Centralized `VersionManager`:** The `meson.build` file is now the single source of truth for the project version. A `VersionConfig.hpp.in` template is configured at build time, exposing `GRIDLOCK_VERSION_MAJOR`, `GRIDLOCK_VERSION_MINOR`, and `GRIDLOCK_VERSION_PATCH` constants to all C++ translation units via the `VersionManager` API.
+- **DAP Exception Handling:** The DAP lifecycle now catches fatal target exceptions (e.g., `SIGFPE`, segfaults). When `DapCoordinator` receives a stopped event with `reason: "exception"`, it emits a `targetCrashed(QString reason)` signal. `MainWindow` connects this signal to display a clean, non-blocking warning dialog rather than leaving the UI in a hung state.
+- **Project-Local Configuration Overrides:** `ConfigManager` now implements a two-tier resolution hierarchy. On startup and session load, it checks for `<project_root>/.gridlock/workspace.toml` first. If present, values in that file override global XDG settings (`~/.config/gridlock/config.toml`), enabling fully reproducible, project-portable debug configurations.
+- **Automated Stylesheet Asset Bundling:** `Qt-Advanced-Stylesheets` theme assets are now compiled directly into a Qt Resource (`.qrc`) file via a Meson `custom_target`. The generated `acss_resources.qrc` is processed by `qt.compile_resources()`, embedding all style assets into the binary for flawless zero-dependency deployment.
+- **Persistent Layout Restoration:** `MainWindow` now saves and restores `QMainWindow::saveGeometry()`, `QMainWindow::saveState()`, and individual dock widget positions between sessions using `QSettings`. The layout is persisted on close and fully restored on the next launch.
+
+### Changed
+- **Terminal Architecture Separation:** The old monolithic pseudo-terminal was split into two distinct docks: `MpiNetworkLogWidget` (read-only, captures DAP/GDB stdout streams for MPI Diagnostics) and `TerminalDockWidget` (a live, fully interactive shell via `qtermwidget`).
+- **`BreakpointManager` Scoping:** The `BreakpointManager` is now scoped to the active Workspace Directory. All breakpoint paths are stored as absolute paths relative to the project root. This prevents global breakpoint accumulation across projects and eliminates the flood of `<PENDING>` GDB/MI traffic that occurred when stale paths from other workspaces were sent to the debugger on session load.
+- **`ProjectWizardDialog` Persistent Memory:** The Project Wizard now automatically re-populates all fields (binary path, arguments, MPI rank count, working directory) with the values from the last session. Fields are persisted via `QSettings` and restored on the next time the wizard is opened.
+- **CI Pipeline Overhaul:** The GitHub Actions `release.yml` pipeline was updated to build all Qt6-native subproject dependencies from source on older Ubuntu runners. This includes `lxqt-build-tools`, `qtermwidget`, and `Qt-Advanced-Stylesheets` (pinned to their `2.0.0` tags), ensuring a reproducible and hermetic build environment.
+
+### Fixed
+- **Wayland/Niri Dock Regressions:** Resolved compositor-specific regressions affecting dock widget dragging and floating window management under Wayland compositors, specifically the Niri tiling compositor.
+- **`mpi_mm.c` Divide-by-Zero Crash:** Fixed a fatal divide-by-zero crash in the MPI matrix multiplication tutorial (`tutorial/mpi_mm.c`) that occurred when the program was executed in singleton mode (rank count of 1) without any worker ranks, causing an integer division by zero when computing the row distribution.
+
 ## [0.5.3] - 2026-06-28
 
 ### Changed

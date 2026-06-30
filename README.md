@@ -1,4 +1,4 @@
-# GridLock - High-Performance MPI Graphical Debugger (v0.5.3)
+# GridLock - High-Performance MPI Graphical Debugger (v0.6.0)
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
@@ -19,13 +19,15 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Lazy-Loading DAP Variable Trees:** Dynamically explore complex structs, pointers, and arrays efficiently without locking the UI.
 * **Integrated HPC Console & Hex Dump:** Seamlessly read raw memory via base64 DAP chunks, with 1:1 hardware-to-UI Hex dump synchronization.
 * **Vim-Style Chorded Shortcuts:** Leverage advanced command patterns (`Alt+B`, `Ctrl+W`) tailored for rapid iteration without mouse dependency.
-* **Project-Scoped Configuration (`.gridlock/`):** Each project maintains its own `.gridlock/settings.toml` to store execution parameters (binary path, rank count, MPI arguments) and `.gridlock/workspace.toml` for layout state. This isolates project configuration from the global environment and the user's home directory.
+* **Project-Scoped Configuration (`.gridlock/`):** Each project maintains its own `.gridlock/workspace.toml` to store execution parameters (binary path, rank count, MPI arguments) and override global user settings. Project configs are safe to commit to version control.
+* **Integrated Interactive Terminal:** A real PTY-backed terminal (`qtermwidget`) is embedded directly in the IDE. Run shell commands, inspect environment variables, and manage build artifacts without leaving the debugger.
+* **Persistent Layout & Wizard Memory:** Dock widget geometry and state are automatically saved on close and fully restored on the next launch. The Project Wizard auto-populates all fields with your last session's values.
 * **TOML Session Persistence:** Save and instantly restore robust HPC debug profiles (binary arguments, OpenMPI rank counts, watchlists).
 * **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
 * **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
 * **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
 * **Deadlock Detector (Barrier/Wait Analyzer):** Automatically parses `-stack-list-frames` to flag active MPI ranks blocked in collective synchronization.
-* **Floating-Point Exception (FPE) Trapper:** Halts execution instantly on divergent NaNs or infinities.
+* **Floating-Point Exception (FPE) Trapper:** Halts execution instantly on divergent NaNs or infinities. Fatal target exceptions (e.g., `SIGFPE`) now surface as a clean UI warning instead of leaving the session hung.
 * **Conditional Breakpoint Expressions:** Dynamically halt loops using evaluable C++ statements (e.g., `i == 100 && rank == 0`).
 * **Value-Change Visual Highlighting:** Fast identification of mutated variables and registers across steps via instant color shifts.
 * **Raw Memory Export & Multi-Rank Broadcasts:** Deep hardware state inspection and mass cluster commanding.
@@ -43,6 +45,7 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **C++23 Compiler:** GCC 13+ or Clang 16+
 * **Build System:** Meson and Ninja
 * **UI Framework:** Qt6 (Widgets, Core, and Gui modules)
+* **Terminal Widget:** `qtermwidget` (Qt6-native build; see CI pipeline for build-from-source instructions)
 * **MPI Implementation:** MPICH or OpenMPI
 * **Debugger Backend:** DAP-compliant debug adapter (e.g., `lldb-vscode` or `lldb-dap`)
 * **Language Server:** `clangd`
@@ -121,9 +124,18 @@ GridLock's development is broken into iterative phases. For a detailed breakdown
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and issue submission. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## 🏆 Attributions
+## 🏆 Third-Party Libraries & Acknowledgements
 
-GridLock orchestrates OpenMPI, SLURM, and Spack, relying on `tomlplusplus` for configuration. The global UI theming engine is powered by [Qt-Advanced-Stylesheets](https://github.com/githubuser0xFFFF/Qt-Advanced-Stylesheets). It draws inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
+GridLock would not be possible without the following open-source projects. Their inclusion in v0.6.0 is gratefully acknowledged.
+
+| Library | Purpose | License |
+| :--- | :--- | :--- |
+| [**qtermwidget**](https://github.com/lxqt/qtermwidget) | Provides the fully interactive, PTY-backed embedded terminal (`TerminalDockWidget`). A Qt6-native build is compiled from source as part of the CI pipeline. | GPL-2.0 |
+| [**Qt-Advanced-Stylesheets**](https://github.com/githubuser0xFFFF/Qt-Advanced-Stylesheets) | Powers the global Material Design theming engine. In v0.6.0, style assets are compiled into a `.qrc` resource bundle for zero-filesystem-dependency deployment. | MIT |
+| [**tomlplusplus**](https://github.com/marzer/tomlplusplus) | TOML parsing for all configuration files (`config.toml`, `workspace.toml`, session files). | MIT |
+| [**OpenMPI / MPICH**](https://www.open-mpi.org/) | The MPI runtime that GridLock orchestrates for parallel debugging sessions. | BSD-3-Clause |
+
+GridLock also draws design inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
 
 ## 📄 License
 
