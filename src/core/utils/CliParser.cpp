@@ -1,4 +1,5 @@
 #include "CliParser.hpp"
+#include "../Version.hpp"
 
 namespace gridlock {
 namespace core {
@@ -10,8 +11,8 @@ CliParser::CliParser()
     , m_verboseOption("verbose", "Enable verbose debug output")
 {
     m_parser.setApplicationDescription(
-        "GridLock MPI Debugger - v0.5.3\nFeaturing the new Zero-Copy Multi-Rank "
-        "Domain Heatmap!");
+        QString("GridLock MPI Debugger - v%1\nFeaturing the new Zero-Copy Multi-Rank "
+        "Domain Heatmap!").arg(gridlock::core::Version::getString()));
     m_parser.addHelpOption();
     m_parser.addVersionOption();
     

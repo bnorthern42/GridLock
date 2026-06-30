@@ -16,11 +16,18 @@ if not acss_dep.found()
   acss_lib = cpp.find_library('qtadvancedcss', dirs: [meson.current_source_dir() + '/external/Qt-Advanced-Stylesheets/build/lib'])
   acss_dep = declare_dependency(dependencies: acss_lib, include_directories: include_directories('external/Qt-Advanced-Stylesheets/src'))
 endif
+# Version generation
+conf_data = configuration_data()
+conf_data.set('GRIDLOCK_VERSION', meson.project_version())
+configure_file(input : 'src/core/VersionConfig.hpp.in',
+               output : 'VersionConfig.hpp',
+               configuration : conf_data)
 
 # Source files
 src_files = [
   'src/main.cpp',
   'src/GridLockApp.cpp',
+  'src/core/Version.cpp',
   'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/hpc/MemoryBoundsValidator.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp',
@@ -231,6 +238,7 @@ ui_test_src = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
+  'src/core/Version.cpp',
 ]
 
 ui_test_moc_headers = [
@@ -844,6 +852,27 @@ gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
 )
 
 test('mi_parser_tests', gridlock_mi_parser_tests)
+
+version_test_src = [
+  'tests/test_version.cpp',
+  'src/core/Version.cpp'
+]
+
+# Since test_version.cpp contains the class and the #include "test_version.moc", 
+# we need to pass it as source to compile_moc
+processed_version_test_files = qt6.compile_moc(
+  sources : 'tests/test_version.cpp',
+  dependencies: qt6_dep
+)
+
+gridlock_version_tests = executable('gridlock_version_tests',
+  version_test_src,
+  processed_version_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep]
+)
+
+test('version_tests', gridlock_version_tests)
 
 
 custom_target('mpi_mm_bin',

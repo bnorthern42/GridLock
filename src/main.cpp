@@ -6,6 +6,7 @@
 #include <QColor>
 #include "core/utils/CliParser.hpp"
 #include "ui/tutorial/TutorialDialog.hpp"
+#include "core/Version.hpp"
 #include <QCommandLineParser>
 #include <QFile>
 #include <QIcon>
@@ -82,7 +83,7 @@ int main(int argc, char *argv[]) {
   // Set org/app identity so QSettings keys are consistent everywhere.
   QApplication::setOrganizationName("gridlock");
   QApplication::setApplicationName("gridlock");
-  QApplication::setApplicationVersion("0.5.3");
+  QApplication::setApplicationVersion(gridlock::core::Version::getString());
 
   // CRITICAL FOR WAYLAND:
   QGuiApplication::setDesktopFileName("gridlock");

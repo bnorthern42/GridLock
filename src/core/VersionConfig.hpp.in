@@ -1,0 +1,2 @@
+#pragma once
+#define GRIDLOCK_VERSION_STRING "@GRIDLOCK_VERSION@"

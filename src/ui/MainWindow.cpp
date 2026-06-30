@@ -15,6 +15,7 @@
 #include "widgets/ReferenceManualWidget.hpp"
 
 #include "../core/commands/DebugCommands.hpp"
+#include "../core/Version.hpp"
 #include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "../core/hpc/MemoryDiffer.hpp"
 #include "../core/hpc/MockHpcBackend.hpp"
@@ -474,7 +475,7 @@ void MainWindow::setupMenu() {
                              << "ls-remote" << "--tags" << "--sort=v:refname"
                              << "https://github.com/bnorthern42/GridLock.git");
     gitProc.waitForFinished(3000);
-    QString latestTag = "v0.5.3"; // default fallback
+    QString latestTag = "v" + gridlock::core::Version::getString(); // default fallback
     if (gitProc.exitStatus() == QProcess::NormalExit &&
         gitProc.exitCode() == 0) {
       QString output =
