@@ -87,6 +87,8 @@ jobs:
 
       - name: Configure and Test
         run: |
+          sudo ldconfig
+          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
           meson setup builddir --prefix=/usr --buildtype=release
           xvfb-run -a meson test -C builddir
 
