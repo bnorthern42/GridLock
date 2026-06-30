@@ -35,6 +35,7 @@ jobs:
             libfuse2 \
             fuse \
             imagemagick \
+            libgl1-mesa-dev \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-tools-dev \
