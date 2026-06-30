@@ -15,13 +15,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install system dependencies
+      - name: Add LXQt PPA and install dependencies
         run: |
+          # Add the official LXQt PPA for updated Qt6 packages
+          sudo add-apt-repository -y ppa:lubuntu-dev/qt6-backports
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
@@ -42,6 +44,7 @@ jobs:
             qt6-tools-dev-tools \
             qt6-declarative-dev \
             libqt6svg6-dev \
+            libqtermwidget-qt6-dev \
             openmpi-bin \
             libopenmpi-dev \
             lldb \
@@ -53,43 +56,15 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install meson ninja
 
-      - name: Verify package installations
-        run: |
-          cmake --version
-          pkg-config --version
-          qmake6 --version
-          mpirun --version
-          lldb --version
-          meson --version
-          ninja --version
-          convert --version | head -n 2 || true
-
-      - name: Compile qtermwidget6 (Ubuntu 22.04 polyfill)
-        run: |
-          # Build lxqt-build-tools
-          git clone https://github.com/lxqt/lxqt-build-tools.git --depth=1 -b 2.0.0
-          cd lxqt-build-tools && mkdir build && cd build
-          cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu && make -j$(nproc) && sudo make install
-          cd ../..
-          
-          # Build qtermwidget6
-          git clone https://github.com/lxqt/qtermwidget.git --depth=1 -b 2.0.0
-          cd qtermwidget && mkdir build && cd build
-          cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu && make -j$(nproc) && sudo make install
-          cd ../..
-
       - name: Compile Qt-Advanced-Stylesheets
         run: |
           cd external/Qt-Advanced-Stylesheets
-          cmake -B build -S . -DQT_VERSION_MAJOR=6 -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu
+          cmake -B build -S . -DQT_VERSION_MAJOR=6 -DCMAKE_INSTALL_PREFIX=/usr
           cmake --build build -j$(nproc)
           sudo cmake --install build
 
       - name: Configure and Test
         run: |
-          sudo ldconfig
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:$PKG_CONFIG_PATH
-          export CMAKE_PREFIX_PATH=/usr/lib/x86_64-linux-gnu/cmake:/usr/lib/cmake:$CMAKE_PREFIX_PATH
           meson setup builddir --prefix=/usr --buildtype=release
           xvfb-run -a meson test -C builddir
 
@@ -97,7 +72,7 @@ jobs:
         run: bash scripts/build_appimage.sh
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: GridLock-*.AppImage
