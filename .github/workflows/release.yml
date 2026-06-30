@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Install system dependencies
         run: |
@@ -34,7 +37,10 @@ jobs:
             imagemagick \
             qt6-base-dev \
             qt6-base-dev-tools \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
             qt6-declarative-dev \
+            libqt6svg6-dev \
             openmpi-bin \
             libopenmpi-dev \
             lldb \
@@ -56,6 +62,27 @@ jobs:
           meson --version
           ninja --version
           convert --version | head -n 2 || true
+
+      - name: Compile qtermwidget6 (Ubuntu 22.04 polyfill)
+        run: |
+          # Build lxqt-build-tools (2.0.0 is the Qt6 release)
+          git clone https://github.com/lxqt/lxqt-build-tools.git --depth=1 -b 2.0.0
+          cd lxqt-build-tools && mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr && make -j$(nproc) && sudo make install
+          cd ../..
+          
+          # Build qtermwidget6 (2.0.0 is the Qt6 release)
+          git clone https://github.com/lxqt/qtermwidget.git --depth=1 -b 2.0.0
+          cd qtermwidget && mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr && make -j$(nproc) && sudo make install
+          cd ../..
+
+      - name: Compile Qt-Advanced-Stylesheets
+        run: |
+          cd external/Qt-Advanced-Stylesheets
+          cmake -B build -S . -DQT_VERSION_MAJOR=6 -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build -j$(nproc)
+          sudo cmake --install build
 
       - name: Configure and Test
         run: |

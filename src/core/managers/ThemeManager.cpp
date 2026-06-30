@@ -19,10 +19,7 @@ ThemeManager::ThemeManager() : m_advancedStylesheet(std::make_unique<acss::QtAdv
 ThemeManager::~ThemeManager() = default;
 
 void ThemeManager::initialize() {
-    QString stylesDir = QApplication::applicationDirPath() + "/styles";
-    if (!QDir(stylesDir).exists()) {
-        stylesDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/styles"; // Fallback install path
-    }
+    QString stylesDir = ":/styles";
     m_advancedStylesheet->setStylesDirPath(stylesDir);
     m_advancedStylesheet->setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
     m_advancedStylesheet->setCurrentStyle("qt_material");

@@ -116,7 +116,7 @@ processed_qt_files = qt6.compile_moc(
 
 compiled_resources = qt6.compile_resources(
   name: 'gridlock_resources',
-  sources: 'resources/gridlock.qrc'
+  sources: ['resources/gridlock.qrc', 'resources/styles.qrc']
 )
 
 # Include directories
@@ -138,11 +138,6 @@ install_data('resources/icon.png',
              rename: 'gridlock.png',
              install_dir: get_option('datadir') / 'icons/hicolor/512x512/apps')
 
-install_subdir('external/Qt-Advanced-Stylesheets/styles',
-               install_dir: get_option('datadir') / 'gridlock')
-
-# Copy styles to build directory for development
-run_command('cp', '-r', meson.source_root() / 'external/Qt-Advanced-Stylesheets/styles', meson.build_root() / 'styles', check: false)
 
 # Test executable
 test_src = [
