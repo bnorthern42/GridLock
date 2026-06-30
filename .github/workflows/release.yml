@@ -11,31 +11,38 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+
+    container:
+      image: debian:trixie
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      APPIMAGE_EXTRACT_AND_RUN: "1"
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      - name: Add LXQt PPA and install dependencies
+      - name: Install dependencies
         run: |
-          # Add the official LXQt PPA for updated Qt6 packages
-          sudo add-apt-repository -y ppa:lubuntu-dev/qt6-backports
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            bash \
+            git \
+            curl \
+            sudo \
+            ca-certificates \
             build-essential \
+            python3 \
             python3-pip \
+            python3-venv \
             cmake \
+            meson \
+            ninja-build \
             pkg-config \
             wget \
-            ca-certificates \
             file \
             patchelf \
-            libfuse2 \
-            fuse \
+            libfuse2t64 \
+            fuse3 \
             imagemagick \
             libgl1-mesa-dev \
             qt6-base-dev \
@@ -44,24 +51,31 @@ jobs:
             qt6-tools-dev-tools \
             qt6-declarative-dev \
             libqt6svg6-dev \
-            libqtermwidget-qt6-dev \
+            libqtermwidget-dev \
             openmpi-bin \
             libopenmpi-dev \
             lldb \
             llvm \
             xvfb
+          update-ca-certificates
+          ldconfig
 
-      - name: Install Meson and Ninja
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install meson ninja
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Compile Qt-Advanced-Stylesheets
         run: |
           cd external/Qt-Advanced-Stylesheets
-          cmake -B build -S . -DQT_VERSION_MAJOR=6 -DCMAKE_INSTALL_PREFIX=/usr
-          cmake --build build -j$(nproc)
-          sudo cmake --install build
+          cmake -B build -S . \
+            -DQT_VERSION_MAJOR=6 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build -j"$(nproc)"
+          cmake --install build
+          ldconfig
 
       - name: Configure and Test
         run: |
@@ -69,7 +83,8 @@ jobs:
           xvfb-run -a meson test -C builddir
 
       - name: Build AppImage
-        run: bash scripts/build_appimage.sh
+        run: |
+          bash scripts/build_appimage.sh
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
