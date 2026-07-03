@@ -26,8 +26,11 @@ jobs:
           apt-get update
           apt-get install -y \
             build-essential \
+            git \
             python3-pip \
             cmake \
+            meson \
+            ninja-build \
             pkg-config \
             wget \
             ca-certificates \
@@ -44,7 +47,7 @@ jobs:
             qt6-declarative-dev \
             libqt6svg6 \
             libqt6svg6-dev \
-            libqtermwidget-qt6-dev \
+            libqtermwidget-dev \
             openmpi-bin \
             libopenmpi-dev \
             lldb \
