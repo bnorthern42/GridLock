@@ -26,14 +26,20 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
 * **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
 * **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
+![HPC prefs](assets/hpc.png)
 * **Deadlock Detector (Barrier/Wait Analyzer):** Automatically parses `-stack-list-frames` to flag active MPI ranks blocked in collective synchronization.
 * **Floating-Point Exception (FPE) Trapper:** Halts execution instantly on divergent NaNs or infinities. Fatal target exceptions (e.g., `SIGFPE`) now surface as a clean UI warning instead of leaving the session hung.
 * **Conditional Breakpoint Expressions:** Dynamically halt loops using evaluable C++ statements (e.g., `i == 100 && rank == 0`).
 * **Value-Change Visual Highlighting:** Fast identification of mutated variables and registers across steps via instant color shifts.
 * **Raw Memory Export & Multi-Rank Broadcasts:** Deep hardware state inspection and mass cluster commanding.
+![mem viewer](assets/memView.png)
 * **Zero-Copy Memory Pipelines:** Extract large array states directly from the target kernel via lightning-fast `process_vm_readv` bypasses.
 * **Memory Diff Engine:** Simultaneous, zero-copy memory extraction (`process_vm_readv`) across multiple MPI ranks with visual byte-level discrepancy highlighting.
 * **Session Bookmarking:** Serialize active breakpoints, watched variables, and UI states to lightweight TOML files for persistent workspaces.
+
+* **Docsets and man pages:** Automatically index docsets and man pages for offline access.
+![Docsets](assets/docsets.png)
+![Man pages](assets/manpages.png)
 
 > ⚠️ **EXPERIMENTAL FEATURE (USE AT YOUR OWN RISK):** SLURM job execution is currently in a basic, feature-incomplete state. While GridLock can submit jobs to the cluster, advanced lifecycle management—such as detached session rehydration, automatic `squeue` polling, and automated `scancel` cleanup—is not yet implemented. Long-running or pending jobs may require manual management via the terminal to prevent burning allocation hours.
 
