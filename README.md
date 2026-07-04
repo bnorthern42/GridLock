@@ -26,7 +26,7 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 * **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
 * **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
 * **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
-![HPC prefs](assets/hpc.png)
+![HPC prefs](assets/HPC.png)
 * **Deadlock Detector (Barrier/Wait Analyzer):** Automatically parses `-stack-list-frames` to flag active MPI ranks blocked in collective synchronization.
 * **Floating-Point Exception (FPE) Trapper:** Halts execution instantly on divergent NaNs or infinities. Fatal target exceptions (e.g., `SIGFPE`) now surface as a clean UI warning instead of leaving the session hung.
 * **Conditional Breakpoint Expressions:** Dynamically halt loops using evaluable C++ statements (e.g., `i == 100 && rank == 0`).
