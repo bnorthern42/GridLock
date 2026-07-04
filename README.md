@@ -13,7 +13,7 @@ GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Ad
 > **GridLock is currently in an Beta/WIP state.** It is a personal project intended for research use. Features are subject to change and stability is not guaranteed.
 
 ---
-
+![main image](assets/main.png)
 ## 🚀 Key Features
 
 * **Lazy-Loading DAP Variable Trees:** Dynamically explore complex structs, pointers, and arrays efficiently without locking the UI.
