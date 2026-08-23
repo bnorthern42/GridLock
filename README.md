@@ -146,3 +146,7 @@ GridLock also draws design inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
 ## 📄 License
 
 Licensed under the MIT License. See [LICENSE](LICENSE).
+
+## Marketing assets
+
+See [docs/marketing/brand.md](docs/marketing/brand.md).
