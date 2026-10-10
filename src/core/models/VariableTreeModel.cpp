@@ -269,7 +269,7 @@ void VariableTreeModel::handleGdbOutput(int rankId, const QString& output) {
     } else if (output.startsWith("^done,numchild=") && output.contains("children=[")) {
         parseVarListChildren(output);
     } else {
-        QRegularExpression evalRe("^(\\d+)\\^done,value=\"([^\"]+)\"");
+        static const QRegularExpression evalRe("^(\\d+)\\^done,value=\"([^\"]+)\"");
         QRegularExpressionMatch match = evalRe.match(output);
         if (match.hasMatch()) {
             int token = match.captured(1).toInt();
@@ -294,7 +294,7 @@ void VariableTreeModel::handleGdbOutput(int rankId, const QString& output) {
 
 void VariableTreeModel::parseListVariables(const QString& output) {
     m_updateCounter++;
-    QRegularExpression re("\\{name=\"([^\"]+)\"");
+    static const QRegularExpression re("\\{name=\"([^\"]+)\"");
     QRegularExpressionMatchIterator i = re.globalMatch(output);
     while (i.hasNext()) {
         QRegularExpressionMatch match = i.next();
@@ -307,10 +307,10 @@ void VariableTreeModel::parseListVariables(const QString& output) {
 }
 
 void VariableTreeModel::parseVarCreate(const QString& output) {
-    QRegularExpression nameRe("name=\"([^\"]+)\"");
-    QRegularExpression numRe("numchild=\"(\\d+)\"");
-    QRegularExpression typeRe("type=\"([^\"]+)\"");
-    QRegularExpression valRe("value=\"([^\"]*)\"");
+    static const QRegularExpression nameRe("name=\"([^\"]+)\"");
+    static const QRegularExpression numRe("numchild=\"(\\d+)\"");
+    static const QRegularExpression typeRe("type=\"([^\"]+)\"");
+    static const QRegularExpression valRe("value=\"([^\"]*)\"");
 
     if (!nameRe.match(output).hasMatch()) return;
 
@@ -350,13 +350,13 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
 }
 
 void VariableTreeModel::parseVarListChildren(const QString& output) {
-    QRegularExpression childBlockRe("child=\\{([^}]+)\\}");
+    static const QRegularExpression childBlockRe("child=\\{([^}]+)\\}");
     QRegularExpressionMatchIterator it = childBlockRe.globalMatch(output);
 
     if (!it.hasNext()) return;
 
     QString firstChildBlock = it.peekNext().captured(1);
-    QRegularExpression nameRe("name=\"([^\"]+)\"");
+    static const QRegularExpression nameRe("name=\"([^\"]+)\"");
     QRegularExpressionMatch nameMatch = nameRe.match(firstChildBlock);
     if (!nameMatch.hasMatch()) return;
 
@@ -400,16 +400,16 @@ void VariableTreeModel::parseVarListChildren(const QString& output) {
 
             QString varobjName = nameRe.match(block).captured(1);
             
-            QRegularExpression expRe("exp=\"([^\"]+)\"");
+            static const QRegularExpression expRe("exp=\"([^\"]+)\"");
             QString exp = expRe.match(block).captured(1);
 
-            QRegularExpression numRe("numchild=\"(\\d+)\"");
+            static const QRegularExpression numRe("numchild=\"(\\d+)\"");
             int numChildren = numRe.match(block).hasMatch() ? numRe.match(block).captured(1).toInt() : 0;
 
-            QRegularExpression valRe("value=\"([^\"]*)\"");
+            static const QRegularExpression valRe("value=\"([^\"]*)\"");
             QString value = valRe.match(block).hasMatch() ? valRe.match(block).captured(1) : "";
 
-            QRegularExpression typeRe("type=\"([^\"]+)\"");
+            static const QRegularExpression typeRe("type=\"([^\"]+)\"");
             QString type = typeRe.match(block).hasMatch() ? typeRe.match(block).captured(1) : "";
 
             VariableNode* childNode = new VariableNode(exp, type, value, varobjName, numChildren, 0, parentNode);

@@ -358,7 +358,7 @@ void SourceCodeView::handleHoverTimeout() {
     cursor.select(QTextCursor::WordUnderCursor);
     QString word = cursor.selectedText();
 
-    QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
+    static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
     if (cVarRegex.match(word).hasMatch()) {
         if (word != m_lastHoveredWord) {
             m_lastHoveredWord = word;
@@ -380,7 +380,7 @@ void SourceCodeView::mousePressEvent(QMouseEvent *event) {
         cursor.select(QTextCursor::WordUnderCursor);
         QString word = cursor.selectedText();
 
-        QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
+        static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
         if (cVarRegex.match(word).hasMatch()) {
             emit pinVariableRequested(word);
         }
@@ -395,7 +395,7 @@ void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
     cursor.select(QTextCursor::WordUnderCursor);
     QString word = cursor.selectedText();
 
-    QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
+    static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
     if (cVarRegex.match(word).hasMatch()) {
         emit pinVariableRequested(word);
     }

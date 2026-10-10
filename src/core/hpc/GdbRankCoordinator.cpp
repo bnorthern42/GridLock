@@ -385,8 +385,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         rp->state.executionTimer.invalidate();
       }
 
-      QRegularExpression rxFile("fullname=\"([^\"]+)\"");
-      QRegularExpression rxLine("frame=\\{.*?line=\"(\\d+)\"");
+      static const QRegularExpression rxFile("fullname=\"([^\"]+)\"");
+      static const QRegularExpression rxLine("frame=\\{.*?line=\"(\\d+)\"");
       QString file = rp->state.currentFile;
       int lineNum = rp->state.currentLine;
 
@@ -405,7 +405,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       rp->state.currentFile = file;
       rp->state.currentLine = lineNum;
 
-      QRegularExpression rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
+      static const QRegularExpression rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
       auto matchAddr = rxAddr.match(line);
       QString stopAddress =
           matchAddr.hasMatch() ? matchAddr.captured(1) : "$pc";
@@ -416,7 +416,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
 
       writeCmd(rankId, "-data-list-register-values r\n");
 
-      QRegularExpression threadRe("thread-id=\"(\\d+)\"");
+      static const QRegularExpression threadRe("thread-id=\"(\\d+)\"");
       auto matchThread = threadRe.match(line);
       if (matchThread.hasMatch()) {
         QString threadId = matchThread.captured(1);
@@ -457,7 +457,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       emit rankStateChanged(rankId, rp->state);
     } else if (line.startsWith("30")) {
       if (line.contains("^done")) {
-        QRegularExpression evalRe(
+        static const QRegularExpression evalRe(
             "30(\\d+)\\^done,name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
         auto match = evalRe.match(line);
         if (match.hasMatch()) {
@@ -474,7 +474,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           }
         }
       } else if (line.contains("^error")) {
-        QRegularExpression errRe("30(\\d+)\\^error");
+        static const QRegularExpression errRe("30(\\d+)\\^error");
         auto match = errRe.match(line);
         if (match.hasMatch()) {
           int varIdx = match.captured(1).toInt();
@@ -488,14 +488,14 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         }
       }
     } else if (line.contains("^done,changelist=")) {
-      QRegularExpression objRe("\\{([^}]+)\\}");
+      static const QRegularExpression objRe("\\{([^}]+)\\}");
       auto i = objRe.globalMatch(line);
       bool updated = false;
       while (i.hasNext()) {
         QString objStr = i.next().captured(1);
-        QRegularExpression nameRe("name=\"([^\"]+)\"");
-        QRegularExpression valRe("value=\"([^\"]+)\"");
-        QRegularExpression inScopeRe("in_scope=\"([^\"]+)\"");
+        static const QRegularExpression nameRe("name=\"([^\"]+)\"");
+        static const QRegularExpression valRe("value=\"([^\"]+)\"");
+        static const QRegularExpression inScopeRe("in_scope=\"([^\"]+)\"");
         
         auto nameMatch = nameRe.match(objStr);
         if (nameMatch.hasMatch()) {
@@ -524,7 +524,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       if (updated)
         emit rankStateChanged(rankId, rp->state);
     } else if (line.startsWith("^done,memory=[")) {
-      QRegularExpression memRe("begin=\"([^\"]+)\".*?contents=\"([^\"]+)\"");
+      static const QRegularExpression memRe("begin=\"([^\"]+)\".*?contents=\"([^\"]+)\"");
       auto match = memRe.match(line);
       if (match.hasMatch()) {
         bool ok;
@@ -533,7 +533,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         emit memoryDataReady(rankId, beginAddress, contents);
       }
     } else if (line.startsWith("^done,register-values=[")) {
-      QRegularExpression regRe("number=\"(\\d+)\".*?value=\"([^\"]+)\"");
+      static const QRegularExpression regRe("number=\"(\\d+)\".*?value=\"([^\"]+)\"");
       auto i = regRe.globalMatch(line);
       bool updated = false;
       while (i.hasNext()) {
@@ -547,7 +547,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         emit rankStateChanged(rankId, rp->state);
       }
     } else if (line.startsWith("^done,bkpt={")) {
-      QRegularExpression bkptRe(
+      static const QRegularExpression bkptRe(
           "number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");
       auto match = bkptRe.match(line);
       if (match.hasMatch()) {
@@ -568,13 +568,13 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.startsWith("100")) {
       if (line.contains("^done")) {
-        QRegularExpression valRe("100\\^done,value=\"([^\"]+)\"");
+        static const QRegularExpression valRe("100\\^done,value=\"([^\"]+)\"");
         auto match = valRe.match(line);
         if (match.hasMatch()) {
           emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
         }
       } else if (line.contains("^error")) {
-        QRegularExpression errRe("msg=\"([^\"]+)\"");
+        static const QRegularExpression errRe("msg=\"([^\"]+)\"");
         auto match = errRe.match(line);
         if (match.hasMatch()) {
           emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
@@ -582,13 +582,13 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.startsWith("101")) {
       if (line.contains("^done")) {
-        QRegularExpression valRe("101\\^done,value=\"([^\"]+)\"");
+        static const QRegularExpression valRe("101\\^done,value=\"([^\"]+)\"");
         auto match = valRe.match(line);
         if (match.hasMatch()) {
           emit expressionEvaluated(rankId, rp->lastEvalExpression, match.captured(1));
         }
       } else if (line.contains("^error")) {
-        QRegularExpression errRe("msg=\"([^\"]+)\"");
+        static const QRegularExpression errRe("msg=\"([^\"]+)\"");
         auto match = errRe.match(line);
         if (match.hasMatch()) {
           emit expressionEvaluated(rankId, rp->lastEvalExpression, "Error: " + match.captured(1));
@@ -597,7 +597,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
     } else if (line.startsWith("200")) {
       if (line.contains("asm_insns=")) {
         QString prettyAsm;
-        QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
+        static const QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
         auto i = instRe.globalMatch(line);
         while (i.hasNext()) {
           auto match = i.next();
@@ -609,7 +609,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           emit rankStateChanged(rankId, rp->state);
         }
       } else if (line.contains("^error")) {
-        QRegularExpression errorRe("msg=\"([^\"]+)\"");
+        static const QRegularExpression errorRe("msg=\"([^\"]+)\"");
         auto match = errorRe.match(line);
         QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
 
@@ -629,7 +629,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       writeCmd(rankId, "-var-update 1 *\n");
     } else if (line.contains("^error") && !line.startsWith("30") &&
                !line.startsWith("40") && !line.startsWith("200")) {
-      QRegularExpression errorRe("msg=\"([^\"]+)\"");
+      static const QRegularExpression errorRe("msg=\"([^\"]+)\"");
       auto match = errorRe.match(line);
       QString errMsg = match.hasMatch() ? match.captured(1) : "Unknown Error";
 
@@ -645,7 +645,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       emit rankStateChanged(rankId, rp->state);
     } else if (line.contains("asm_insns=") && !line.startsWith("200")) {
       QString prettyAsm;
-      QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
+      static const QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
       auto i = instRe.globalMatch(line);
       while (i.hasNext()) {
         auto match = i.next();

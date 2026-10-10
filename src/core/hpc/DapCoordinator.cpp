@@ -460,7 +460,7 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
       if (m_heatmapRequests.contains(seq)) {
         auto req = m_heatmapRequests.take(seq);
         QString result = message["body"].toObject()["result"].toString();
-        QRegularExpression re("(0x[0-9a-fA-F]+)");
+        static const QRegularExpression re("(0x[0-9a-fA-F]+)");
         QRegularExpressionMatch match = re.match(result);
         if (match.hasMatch() && m_rankToPid.contains(req.rankId)) {
           bool ok;
@@ -529,7 +529,7 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
       QString category = body["category"].toString();
       QString output = body["output"].toString();
 
-      QRegularExpression re(
+      static const QRegularExpression re(
           "(?:Submitted batch job |Granted job allocation )(\\d+)");
       QRegularExpressionMatch match = re.match(output);
       if (match.hasMatch()) {
