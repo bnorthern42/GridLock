@@ -33,8 +33,8 @@ git submodule update --init --recursive || true
 echo "Cleaning old build artifacts..."
 rm -rf builddir AppDir
 rm -f "${APP_NAME}"-*.AppImage
-rm -f linuxdeploy-x86_64.AppImage
-rm -f linuxdeploy-plugin-qt-x86_64.AppImage
+rm -f CQtDeployer_*.run
+rm -rf .cqtdeployer
 
 echo "Configuring ${APP_NAME}..."
 meson setup builddir --prefix=/usr --buildtype=release
@@ -78,10 +78,6 @@ resize_icon() {
 
     echo "Created icon: ${out}"
     file "${out}"
-
-    if command -v identify >/dev/null 2>&1; then
-        identify -format "Icon geometry: %wx%h\n" "${out}"
-    fi
 }
 
 resize_icon 512
@@ -104,18 +100,7 @@ if [ ! -f "${APPDIR}/usr/bin/${BIN_NAME}" ]; then
     exit 1
 fi
 
-file "${APPDIR}/usr/bin/${BIN_NAME}"
 chmod +x "${APPDIR}/usr/bin/${BIN_NAME}"
-
-echo "Checking Qt linkage..."
-ldd "${APPDIR}/usr/bin/${BIN_NAME}" | grep -E "Qt6|not found" || true
-
-if ! ldd "${APPDIR}/usr/bin/${BIN_NAME}" | grep -q "Qt6"; then
-    echo "ERROR: ${BIN_NAME} does not appear to link against Qt6."
-    echo "Full ldd output:"
-    ldd "${APPDIR}/usr/bin/${BIN_NAME}" || true
-    exit 1
-fi
 
 echo "Bundling tomlplusplus if Meson built it locally..."
 mkdir -p "${APPDIR}/usr/lib"
@@ -139,73 +124,45 @@ fi
 
 export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH:-}"
 
-echo "Rechecking dependencies after bundling local libs..."
-ldd "${APPDIR}/usr/bin/${BIN_NAME}" | grep -E "tomlplusplus|Qt6|not found" || true
+echo "Downloading CQtDeployer..."
+wget -c -nv "https://github.com/QuasarApp/CQtDeployer/releases/download/v1.6.2441.67ee1ef/CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run"
+chmod +x CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run
 
-if ldd "${APPDIR}/usr/bin/${BIN_NAME}" | grep -q "not found"; then
-    echo "WARNING: Some dependencies are still unresolved before linuxdeploy."
-    echo "Full ldd output:"
-    ldd "${APPDIR}/usr/bin/${BIN_NAME}" || true
-fi
+echo "Installing CQtDeployer..."
+./CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run in .cqtdeployer
 
-if [ ! -f "${APPDIR}/usr/share/applications/gridlock.desktop" ]; then
-    echo "ERROR: Missing desktop file at ${APPDIR}/usr/share/applications/gridlock.desktop"
-    find "${APPDIR}" -name "*.desktop" -print
-    exit 1
-fi
-
-if [ ! -f "${APPDIR}/usr/share/icons/hicolor/512x512/apps/gridlock.png" ]; then
-    echo "ERROR: Missing icon at ${APPDIR}/usr/share/icons/hicolor/512x512/apps/gridlock.png"
-    find "${APPDIR}" -name "*.png" -print
-    exit 1
-fi
-
-echo "Checking desktop file..."
-grep -E "^(Name|Exec|Icon|Type|Categories)=" "${APPDIR}/usr/share/applications/gridlock.desktop" || true
-
-echo "Downloading linuxdeploy..."
-wget -c -nv \
-    "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-
-echo "Downloading linuxdeploy Qt plugin..."
-wget -c -nv \
-    "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
-
-chmod +x linuxdeploy-x86_64.AppImage
-chmod +x linuxdeploy-plugin-qt-x86_64.AppImage
-
-echo "Running linuxdeploy..."
-./linuxdeploy-x86_64.AppImage \
-    --appdir "${APPDIR}" \
-    --executable "${APPDIR}/usr/bin/${BIN_NAME}" \
-    --desktop-file "${APPDIR}/usr/share/applications/gridlock.desktop" \
-    --icon-file "${APPDIR}/usr/share/icons/hicolor/512x512/apps/gridlock.png" \
-    --plugin qt \
-    --output appimage
+echo "Running CQtDeployer..."
+./.cqtdeployer/cqtdeployer -bin "${APPDIR}/usr/bin/${BIN_NAME}" \
+    -qmake "${QMAKE}" \
+    -ext "wayland,xcb,vulkan" \
+    -appImage \
+    -targetDir "${APPDIR}" \
+    -icon "${APPDIR}/usr/share/icons/hicolor/512x512/apps/gridlock.png" \
+    -desktop "${APPDIR}/usr/share/applications/gridlock.desktop" \
+    -libDir "${APPDIR}/usr/lib"
 
 echo "Renaming AppImage..."
 FOUND_APPIMAGE="$(
-    find "${ROOT_DIR}" \
+    find . \
         -maxdepth 1 \
         -type f \
         -name '*.AppImage' \
-        ! -name 'linuxdeploy*.AppImage' \
         | head -n 1 || true
 )"
 
 if [ -z "${FOUND_APPIMAGE}" ]; then
     echo "ERROR: AppImage was not created."
-    find "${ROOT_DIR}" -maxdepth 2 -type f -name "*.AppImage" -print
+    find . -maxdepth 2 -type f -name "*.AppImage" -print
     exit 1
 fi
 
 chmod +x "${FOUND_APPIMAGE}"
 
-if [ "${FOUND_APPIMAGE}" != "${ROOT_DIR}/${APP_NAME}-x86_64.AppImage" ]; then
-    mv "${FOUND_APPIMAGE}" "${ROOT_DIR}/${APP_NAME}-x86_64.AppImage"
+if [ "${FOUND_APPIMAGE}" != "./${APP_NAME}-x86_64.AppImage" ]; then
+    mv "${FOUND_APPIMAGE}" "./${APP_NAME}-x86_64.AppImage"
 fi
 
 echo "Created:"
-ls -lah "${ROOT_DIR}/${APP_NAME}-x86_64.AppImage"
+ls -lah "./${APP_NAME}-x86_64.AppImage"
 
 echo "Done."
