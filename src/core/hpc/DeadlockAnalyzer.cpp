@@ -35,9 +35,9 @@ void DeadlockAnalyzer::onGdbOutputReceived(int rankId, const QString& output) {
     if (output.startsWith("^done,stack=[")) {
         m_pendingStackRequest[rankId] = false;
 
-        QRegularExpression funcRegex("func=\"([^\"]+)\"");
-        QRegularExpression fileRegex("file=\"([^\"]+)\"");
-        QRegularExpression lineRegex("line=\"(\\d+)\"");
+        static const QRegularExpression funcRegex("func=\"([^\"]+)\"");
+        static const QRegularExpression fileRegex("file=\"([^\"]+)\"");
+        static const QRegularExpression lineRegex("line=\"(\\d+)\"");
 
         QStringList blockingFuncs = {
             "MPI_Barrier", "MPI_Wait", "MPI_Waitall", "MPI_Recv", 
