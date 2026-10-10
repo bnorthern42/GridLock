@@ -26,6 +26,11 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
             build-essential \
             git \
             python3-pip \
@@ -94,7 +99,11 @@ jobs:
     name: Build Flatpak Bundle
     runs-on: ubuntu-latest
 
+
     steps:
+      - name: Install flatpak builder dependencies
+        run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder xvfb
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -129,6 +138,11 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
             build-essential \
             git \
             python3-pip \
@@ -138,6 +152,8 @@ jobs:
             pkg-config \
             sudo \
             e2fsprogs \
+            fdisk \
+            util-linux \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-tools-dev \
