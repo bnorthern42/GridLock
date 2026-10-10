@@ -8,7 +8,7 @@ export NO_STRIP=1
 if [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
     export VERSION="${GITHUB_REF_NAME#v}"
 else
-    export VERSION="0.5.3"
+    export VERSION="0.6.2"
 fi
 
 APP_NAME="GridLock"
