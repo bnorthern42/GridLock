@@ -1,0 +1,18 @@
+id: org.gridlock.GridLock
+runtime: org.kde.Platform
+runtime-version: '6.7' # Standard for Qt6
+sdk: org.kde.Sdk
+command: gridlock
+finish-args:
+  # Adjust permissions based on what your app needs
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri # For hardware acceleration / OpenGL
+  - --share=network
+modules:
+  - name: gridlock
+    buildsystem: meson
+    sources:
+      # This tells the builder to use the local repository code
+      - type: dir
+        path: .
