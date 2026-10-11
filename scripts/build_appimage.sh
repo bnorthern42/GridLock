@@ -5,7 +5,7 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 export NO_STRIP=1
 
 # Dynamically set version from GitHub tag, default to 0.5.3 if not running in CI
-if [ -n "$GITHUB_REF_NAME" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
     export VERSION="${GITHUB_REF_NAME#v}"
 else
     export VERSION="0.6.2"
@@ -129,10 +129,10 @@ wget -c -nv "https://github.com/QuasarApp/CQtDeployer/releases/download/v1.6.244
 chmod +x CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run
 
 echo "Installing CQtDeployer..."
-./CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run in .cqtdeployer
+./CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run install "CQtDeployer" -t $(pwd)/.cqtdeployer -c
 
 echo "Running CQtDeployer..."
-./.cqtdeployer/cqtdeployer -bin "${APPDIR}/usr/bin/${BIN_NAME}" \
+./.cqtdeployer/1.6/cqtdeployer.sh -bin "${APPDIR}/usr/bin/${BIN_NAME}" \
     -qmake "${QMAKE}" \
     -ext "wayland,xcb,vulkan" \
     -appImage \
