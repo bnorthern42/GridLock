@@ -1,6 +1,6 @@
 id: org.gridlock.GridLock
 runtime: org.kde.Platform
-runtime-version: '6.7' # Standard for Qt6
+runtime-version: '6.8' # Standard for Qt6
 sdk: org.kde.Sdk
 command: gridlock
 finish-args:
