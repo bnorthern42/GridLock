@@ -853,6 +853,26 @@ gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
 
 test('mi_parser_tests', gridlock_mi_parser_tests)
 
+cliparser_test_src = [
+  'tests/test_cliparser.cpp',
+  'src/core/utils/CliParser.cpp',
+  'src/core/Version.cpp'
+]
+
+processed_cliparser_test_files = qt6.compile_moc(
+  sources : 'tests/test_cliparser.cpp',
+  dependencies: qt6_dep
+)
+
+gridlock_cliparser_tests = executable('gridlock_cliparser_tests',
+  cliparser_test_src,
+  processed_cliparser_test_files,
+  include_directories : inc,
+  dependencies : [qt6_dep]
+)
+
+test('cliparser_tests', gridlock_cliparser_tests)
+
 version_test_src = [
   'tests/test_version.cpp',
   'src/core/Version.cpp'
