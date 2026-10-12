@@ -7,6 +7,29 @@
 
 namespace gridlock {
 
+namespace {
+QString escapeGdbMiString(const QString& str) {
+    QString res;
+    for (int i = 0; i < str.length(); ++i) {
+        QChar c = str[i];
+        if (c == '\\') {
+            res += "\\\\";
+        } else if (c == '"') {
+            res += "\\\"";
+        } else if (c == '\n') {
+            res += "\\n";
+        } else if (c == '\r') {
+            res += "\\r";
+        } else if (c == '\t') {
+            res += "\\t";
+        } else {
+            res += c;
+        }
+    }
+    return "\"" + res + "\"";
+}
+}
+
 GdbRankCoordinator::GdbRankCoordinator(QObject *parent) : IBackendCoordinator(parent) {
 }
 
@@ -327,7 +350,8 @@ void GdbRankCoordinator::evaluateHoverVariable(int rankId, const QString& varNam
   
   rp->lastHoverVarName = varName;
   rp->lastHoverPos = globalPos;
-  QString cmd = QString("100-data-evaluate-expression %1\n").arg(varName);
+  QString safeVar = escapeGdbMiString(varName);
+  QString cmd = QString("100-data-evaluate-expression %1\n").arg(safeVar);
   writeCmd(rankId, cmd);
 }
 
@@ -337,10 +361,7 @@ void GdbRankCoordinator::evaluateExpression(int rankId, const QString& expressio
   if (!rp || rp->state.currentState != "stopped") return;
   
   rp->lastEvalExpression = expression;
-  QString safeExpr = expression;
-  if (!safeExpr.startsWith("\"") && !safeExpr.endsWith("\"")) {
-      safeExpr = QString("\"%1\"").arg(safeExpr.replace("\"", "\\\""));
-  }
+  QString safeExpr = escapeGdbMiString(expression);
   QString cmd = QString("101-data-evaluate-expression %1\n").arg(safeExpr);
   writeCmd(rankId, cmd);
 }
