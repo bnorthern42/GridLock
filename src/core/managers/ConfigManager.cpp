@@ -402,7 +402,7 @@ void ConfigManager::saveBreakpoints(
   toml::table targetBpsTable;
   for (auto it = breakpoints.constBegin(); it != breakpoints.constEnd(); ++it) {
     toml::array linesArr;
-    for (int line : it.value()) {
+    for (int line : *it) {
       linesArr.push_back(line);
     }
     // We were requested to store absolute paths to avoid 'No source file named...' issues
