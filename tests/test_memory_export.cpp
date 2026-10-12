@@ -97,6 +97,8 @@ void TestMemoryExport::testExportBoundsCheck() {
 
     // 1 Int32 requires 4 bytes, this should safely return false.
     QVERIFY(!MemoryExporter::exportToCsv(path.toStdString(), buffer, 1, 1, DataType::Int32));
+    QVERIFY(!MemoryExporter::exportToCsv(path.toStdString(), buffer, 1, 1, DataType::Float));
+    QVERIFY(!MemoryExporter::exportToCsv(path.toStdString(), buffer, 1, 1, DataType::Double));
 }
 
 QTEST_MAIN(TestMemoryExport)
