@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QFont>
 #include <QCheckBox>
+#include <QFutureWatcher>
 #include <QComboBox>
 #include <QWindow>
 #include <QMouseEvent>
@@ -768,14 +769,22 @@ void DocsetSettingsPage::refreshTable() {
 }
 
 void DocsetSettingsPage::onAutoDetect() {
-  QStringList suggestions =
-      gridlock::core::DocsetManager::instance().suggestDocsets(
-          QDir::currentPath());
-  if (suggestions.isEmpty()) {
-    m_autoDetectBtn->setText("No extra docsets needed");
-  } else {
-    m_autoDetectBtn->setText("Suggested: " + suggestions.join(", "));
-  }
+  m_autoDetectBtn->setText("Detecting...");
+  m_autoDetectBtn->setEnabled(false);
+
+  auto watcher = new QFutureWatcher<QStringList>(this);
+  connect(watcher, &QFutureWatcher<QStringList>::finished, this, [this, watcher]() {
+    QStringList suggestions = watcher->result();
+    if (suggestions.isEmpty()) {
+      m_autoDetectBtn->setText("No extra docsets needed");
+    } else {
+      m_autoDetectBtn->setText("Suggested: " + suggestions.join(", "));
+    }
+    m_autoDetectBtn->setEnabled(true);
+    watcher->deleteLater();
+  });
+
+  watcher->setFuture(gridlock::core::DocsetManager::instance().suggestDocsets(QDir::currentPath()));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
