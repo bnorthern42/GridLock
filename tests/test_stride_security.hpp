@@ -11,4 +11,9 @@ private slots:
     void testOverflowStride();
     void testSafeToRenderValid();
     void testSafeToRenderInvalid();
+    void testBaseAddressOverflow();
+    void testNullNode();
+    void testRenderCountOverflow();
+    void testExactBoundary();
+    void testZeroBytes();
 };
