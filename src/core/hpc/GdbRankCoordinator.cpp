@@ -32,7 +32,7 @@ void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
   int count = 0;
   for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
     QString absPath = it.key();
-    for (int line : it.value()) {
+    for (int line : *it) {
       QString cmd = QString("-break-insert -f %1:%2\n").arg(absPath).arg(line);
       writeCmd(rankId, cmd);
       count++;

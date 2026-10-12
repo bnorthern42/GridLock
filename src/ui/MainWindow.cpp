@@ -1075,7 +1075,7 @@ void MainWindow::saveSessionAs() {
 
   for (auto it = m_persistentBreakpoints.constBegin();
        it != m_persistentBreakpoints.constEnd(); ++it) {
-    for (int line : it.value()) {
+    for (int line : *it) {
       state.activeBreakpoints.push_back(
           QString("%1:%2").arg(it.key()).arg(line));
     }

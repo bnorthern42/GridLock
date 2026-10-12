@@ -501,7 +501,7 @@ void DapCoordinator::handleMessage(const QJsonObject &message) {
             args["source"] = source;
 
             QJsonArray breakpointsArray;
-            for (int l : it.value()) {
+            for (int l : *it) {
                 QJsonObject bp;
                 bp["line"] = l;
                 breakpointsArray.append(bp);
