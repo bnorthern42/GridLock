@@ -6,6 +6,8 @@
 #include <QDirIterator>
 #include <QDebug>
 #include <QFile>
+#include <QtConcurrent/QtConcurrent>
+#include <atomic>
 
 namespace gridlock::core {
 
@@ -90,27 +92,41 @@ QList<QPair<QString, QString>> DocsetManager::search(const QString& query) {
     return results;
 }
 
-QStringList DocsetManager::suggestDocsets(const QString& projectRoot) {
-    QStringList suggestions;
-    QDirIterator it(projectRoot, QStringList() << "*.c" << "*.cpp" << "*.h" << "*.hpp", QDir::Files, QDirIterator::Subdirectories);
-    
-    bool wantsMpi = false;
-    bool wantsCpp = false;
-    
-    while (it.hasNext()) {
-        QFile file(it.next());
-        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QString content = file.readAll();
-            if (content.contains("<mpi.h>")) wantsMpi = true;
-            if (content.contains("<vector>") || content.contains("<iostream>")) wantsCpp = true;
+QFuture<QStringList> DocsetManager::suggestDocsets(const QString& projectRoot) {
+    return QtConcurrent::run([projectRoot]() {
+        QStringList suggestions;
+        QDirIterator it(projectRoot, QStringList() << "*.c" << "*.cpp" << "*.h" << "*.hpp", QDir::Files, QDirIterator::Subdirectories);
+
+        QStringList files;
+        while (it.hasNext()) {
+            files << it.next();
         }
-        if (wantsMpi && wantsCpp) break;
-    }
-    
-    if (wantsMpi) suggestions << "OpenMPI";
-    if (wantsCpp) suggestions << "C++";
-    
-    return suggestions;
+
+        std::atomic<bool> wantsMpi{false};
+        std::atomic<bool> wantsCpp{false};
+
+        auto checkFile = [&](const QString& filePath) {
+            if (wantsMpi.load(std::memory_order_relaxed) && wantsCpp.load(std::memory_order_relaxed)) return;
+
+            QFile file(filePath);
+            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                QString content = file.readAll();
+                if (!wantsMpi.load(std::memory_order_relaxed) && content.contains("<mpi.h>")) {
+                    wantsMpi.store(true, std::memory_order_relaxed);
+                }
+                if (!wantsCpp.load(std::memory_order_relaxed) && (content.contains("<vector>") || content.contains("<iostream>"))) {
+                    wantsCpp.store(true, std::memory_order_relaxed);
+                }
+            }
+        };
+
+        QtConcurrent::blockingMap(files, checkFile);
+
+        if (wantsMpi.load(std::memory_order_relaxed)) suggestions << "OpenMPI";
+        if (wantsCpp.load(std::memory_order_relaxed)) suggestions << "C++";
+
+        return suggestions;
+    });
 }
 
 QStringList DocsetManager::getActiveDocsetPaths() const {

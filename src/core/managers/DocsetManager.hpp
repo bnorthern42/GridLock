@@ -5,6 +5,7 @@
 #include <QList>
 #include <QPair>
 #include <QStringList>
+#include <QFuture>
 
 namespace gridlock::core {
 
@@ -21,7 +22,7 @@ public:
     void loadDocsets();
     
     // Suggests docsets to download based on file contents
-    QStringList suggestDocsets(const QString& projectRoot);
+    QFuture<QStringList> suggestDocsets(const QString& projectRoot);
 
     // Returns a list of <Keyword, AbsoluteHTMLPath> pairs
     QList<QPair<QString, QString>> search(const QString& query);
