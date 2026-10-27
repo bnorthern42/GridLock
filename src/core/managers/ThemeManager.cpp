@@ -130,6 +130,16 @@ static QString getCutterHighDensityQssOverlay() {
         "    background: #2c313a;\n"
         "    border: 1px solid #569cd6;\n"
         "}\n"
+        "#cutterMemHeader {\n"
+        "    background: #1a1d21;\n"
+        "    border-bottom: 1px solid #2b2b2b;\n"
+        "}\n"
+        "#cutterRegisterTable {\n"
+        "    background: #181a1f;\n"
+        "    border: none;\n"
+        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
+        "    font-size: 11px;\n"
+        "}\n"
     );
 }
 

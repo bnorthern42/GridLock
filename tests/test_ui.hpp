@@ -22,4 +22,5 @@ private slots:
     void testTutorialBreakpointInjection();
     void testCutterZoneGroupingAndSeekBar();
     void testCutterDisassemblyCfgAndBranchFlow();
+    void testCutterHexdumpDiffAndRegisterSeekSync();
 };

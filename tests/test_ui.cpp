@@ -28,6 +28,7 @@
 #include <QTabWidget>
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/MemView.hpp"
+#include "../src/ui/views/RegisterView.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -447,6 +448,73 @@ void TestMainWindowUI::testCutterDisassemblyCfgAndBranchFlow() {
     disassemblyView->setGraphMode(true);
     QVERIFY(mainWindow.captureWorkspaceSnapshot("/tmp/gridlock_cutter_v3_cfg.png"));
     disassemblyView->setGraphMode(false);
+}
+
+void TestMainWindowUI::testCutterHexdumpDiffAndRegisterSeekSync() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+
+    gridlock::ui::RegisterView* registerView = mainWindow.registerView();
+    gridlock::ui::MemView* memView = mainWindow.memView();
+    gridlock::ui::DisassemblyView* disassemblyView = mainWindow.disassemblyView();
+    QVERIFY(registerView != nullptr);
+    QVERIFY(memView != nullptr);
+    QVERIFY(disassemblyView != nullptr);
+
+    // 1. Register Delta Tracking
+    QMap<QString, QString> initialRegs = {
+        {"rip", "0x00401120"},
+        {"rax", "0x0"},
+        {"rsp", "0x7fffffffe480"}
+    };
+    registerView->updateRegisters(initialRegs);
+    QCOMPARE(registerView->changedRegisterCount(), 0);
+    QVERIFY(!registerView->isRegisterModified("rip"));
+
+    QMap<QString, QString> steppedRegs = {
+        {"rip", "0x0040113d"},
+        {"rax", "0x1"},
+        {"rsp", "0x7fffffffe480"}
+    };
+    registerView->updateRegisters(steppedRegs);
+    QCOMPARE(registerView->changedRegisterCount(), 2);
+    QVERIFY(registerView->isRegisterModified("rip"));
+    QVERIFY(registerView->isRegisterModified("rax"));
+    QVERIFY(!registerView->isRegisterModified("rsp"));
+
+    // 2. Hexdump Byte Diff Tracking & Seek
+    QByteArray bufA(16, '\x00');
+    bufA[0] = '\x55';
+    bufA[1] = '\x48';
+    bufA[2] = '\x89';
+    bufA[3] = '\xe5';
+    memView->setMemoryData("0x00401120", bufA);
+    QCOMPARE(memView->changedByteCount(), 0);
+
+    QByteArray bufB = bufA;
+    bufB[4] = '\x90';
+    bufB[8] = '\x01';
+    bufB[15] = '\xff';
+    memView->setMemoryData("0x00401120", bufB);
+    QCOMPARE(memView->changedByteCount(), 3);
+
+    QVERIFY(memView->seekToAddress(0x0040113dULL));
+    QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
+
+    // 3. End-to-End Cross-View Pointer Sync in MainWindow
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
+    QCOMPARE(memView->currentBaseAddress(), 0x00401120ULL);
+
+    QVERIFY(registerView->activateRegister("rip"));
+    auto* seekBar = mainWindow.findChild<QLineEdit*>("cutterSeekBar");
+    auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
+    QVERIFY(seekBar != nullptr);
+    QVERIFY(statusTelemetry != nullptr);
+    QVERIFY(seekBar->text().contains("40113d", Qt::CaseInsensitive));
+    QVERIFY(statusTelemetry->text().contains("40113d", Qt::CaseInsensitive));
+    QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL);
+    QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
 }
 
 QTEST_MAIN(TestMainWindowUI)

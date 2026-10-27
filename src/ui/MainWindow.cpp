@@ -139,17 +139,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Restore layout state (versioned for Cutter 4-zone workspace)
   QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry_v5")) {
-      restoreGeometry(settings.value("MainWindow/Geometry_v5").toByteArray());
+  if (settings.contains("MainWindow/Geometry_v6")) {
+      restoreGeometry(settings.value("MainWindow/Geometry_v6").toByteArray());
   }
-  if (settings.contains("MainWindow/State_v5")) {
-      restoreState(settings.value("MainWindow/State_v5").toByteArray());
+  if (settings.contains("MainWindow/State_v6")) {
+      restoreState(settings.value("MainWindow/State_v6").toByteArray());
   }
   
   // Restore splitter states
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          auto state = settings.value("MainWindow/Splitter_v5_" + splitter->objectName()).toByteArray();
+          auto state = settings.value("MainWindow/Splitter_v6_" + splitter->objectName()).toByteArray();
           if (!state.isEmpty()) {
               splitter->restoreState(state);
           }
@@ -427,8 +427,19 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
 
   updateStatusTelemetry(normalized);
 
+  // Parse hex address if applicable
+  bool hexOk = false;
+  QString hexPart = normalized;
+  if (hexPart.startsWith("0x", Qt::CaseInsensitive)) {
+    hexPart = hexPart.mid(2);
+  }
+  const uint64_t parsedAddr = hexPart.toULongLong(&hexOk, 16);
+
   // Synchronize with Memory View address bar and request memory if coordinator is active
   if (m_memView) {
+    if (hexOk && parsedAddr != 0ULL) {
+      m_memView->seekToAddress(parsedAddr);
+    }
     if (auto *addrEdit = m_memView->findChild<QLineEdit *>()) {
       addrEdit->setText(normalized);
     }
@@ -439,12 +450,6 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
 
   // Synchronize with DisassemblyView by forwarding hex addresses and highlighting symbols
   if (m_disassemblyView) {
-    bool hexOk = false;
-    QString hexPart = normalized;
-    if (hexPart.startsWith("0x", Qt::CaseInsensitive)) {
-      hexPart = hexPart.mid(2);
-    }
-    uint64_t parsedAddr = hexPart.toULongLong(&hexOk, 16);
     if (hexOk && parsedAddr != 0ULL) {
       m_disassemblyView->seekToAddress(parsedAddr);
     } else if (!m_disassemblyView->toPlainText().isEmpty()) {
@@ -855,12 +860,21 @@ void MainWindow::setupDocks() {
   QDockWidget *variablesDock = new QDockWidget("Variables", this);
   variablesDock->setObjectName("VariablesDock");
   variablesDock->setWidget(m_variablesDockWidget);
+  QWidget *emptyVarTitle = new QWidget(variablesDock);
+  emptyVarTitle->setFixedHeight(0);
+  variablesDock->setTitleBarWidget(emptyVarTitle);
 
   m_registerView = new RegisterView(this);
   m_registerView->setObjectName("RegisterViewWidget");
+  connect(m_registerView, &RegisterView::addressActivated, this, [this](uint64_t addr) {
+    seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+  });
   QDockWidget *registersDock = new QDockWidget("Registers", this);
   registersDock->setObjectName("RegisterViewDock");
   registersDock->setWidget(m_registerView);
+  QWidget *emptyRegTitle = new QWidget(registersDock);
+  emptyRegTitle->setFixedHeight(0);
+  registersDock->setTitleBarWidget(emptyRegTitle);
 
   m_differentialGrid = new DifferentialGrid(this);
   m_differentialGrid->setObjectName("DifferentialGrid");
@@ -895,7 +909,7 @@ void MainWindow::setupDocks() {
   tabifyDockWidget(variablesDock, registersDock);
   addDockWidget(Qt::RightDockWidgetArea, watchDock);
   addDockWidget(Qt::RightDockWidgetArea, serverRackDock);
-  variablesDock->raise();
+  registersDock->raise();
 
   connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,
           [this, watchDock](const QString &varName) {
@@ -939,6 +953,9 @@ void MainWindow::setupDocks() {
 
   m_expressionEvaluatorWidget = new ExpressionEvaluatorWidget(m_bottomTabs);
   m_expressionEvaluatorWidget->setObjectName("ExpressionEvaluatorDock");
+  QWidget *emptyEvalTitle = new QWidget(m_expressionEvaluatorWidget);
+  emptyEvalTitle->setFixedHeight(0);
+  m_expressionEvaluatorWidget->setTitleBarWidget(emptyEvalTitle);
   connect(m_expressionEvaluatorWidget,
           &ExpressionEvaluatorWidget::evaluateRequested, this,
           [this](const QString &expr) {
@@ -1004,6 +1021,7 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
   m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
+  m_bottomTabs->setCurrentWidget(m_memView);
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
   m_bottomTabs->setMinimumHeight(220);
@@ -1136,12 +1154,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
 
   QSettings settings("gridlock", "debugger");
-  settings.setValue("MainWindow/Geometry_v5", saveGeometry());
-  settings.setValue("MainWindow/State_v5", saveState());
+  settings.setValue("MainWindow/Geometry_v6", saveGeometry());
+  settings.setValue("MainWindow/State_v6", saveState());
 
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          settings.setValue("MainWindow/Splitter_v5_" + splitter->objectName(), splitter->saveState());
+          settings.setValue("MainWindow/Splitter_v6_" + splitter->objectName(), splitter->saveState());
       }
   }
 

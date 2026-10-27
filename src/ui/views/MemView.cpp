@@ -2,29 +2,55 @@
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/hpc/MemoryExporter.hpp"
 #include "../../core/hpc/MemoryDiffer.hpp"
+#include <QComboBox>
 #include <QFileDialog>
-#include <QMessageBox>
-#include <QtConcurrent/QtConcurrent>
-#include <QVBoxLayout>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QSpinBox>
-#include <QPushButton>
-#include <QTextEdit>
-#include <QComboBox>
-#include <QFont>
+#include <QMessageBox>
 #include <QPalette>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QTextEdit>
+#include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrent>
 
 namespace gridlock::ui {
 
+uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
+    QString trimmed = address.trimmed();
+    if (trimmed.startsWith("0x", Qt::CaseInsensitive)) {
+        trimmed = trimmed.mid(2);
+    }
+    int spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx > 0) {
+        trimmed = trimmed.left(spaceIdx);
+    }
+    bool ok = false;
+    uint64_t val = trimmed.toULongLong(&ok, 16);
+    if (okOut) {
+        *okOut = ok;
+    }
+    return ok ? val : 0ULL;
+}
+
 MemView::MemView(QWidget* parent) : QWidget(parent) {
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);
 
-    QHBoxLayout* topLayout = new QHBoxLayout();
-    
+    QWidget* headerBar = new QWidget(this);
+    headerBar->setObjectName("cutterMemHeader");
+    QHBoxLayout* topLayout = new QHBoxLayout(headerBar);
+    topLayout->setContentsMargins(6, 2, 6, 2);
+    topLayout->setSpacing(6);
+
     topLayout->addWidget(new QLabel("Address/Variable:"));
     m_addressEdit = new QLineEdit();
+    m_addressEdit->setObjectName("cutterMemAddressEdit");
+    m_addressEdit->setMinimumWidth(125);
+    m_addressEdit->setText(QStringLiteral("0x00401120"));
     topLayout->addWidget(m_addressEdit);
 
     topLayout->addWidget(new QLabel("Length (bytes):"));
@@ -61,13 +87,15 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
 
     topLayout->addStretch();
 
-    mainLayout->addLayout(topLayout);
+    mainLayout->addWidget(headerBar);
 
     m_dumpEdit = new QTextEdit();
+    m_dumpEdit->setObjectName("cutterHexDumpEdit");
     m_dumpEdit->setReadOnly(true);
-    QFont font("monospace");
+    m_dumpEdit->setFrameShape(QFrame::NoFrame);
+    QFont font("JetBrains Mono");
     font.setStyleHint(QFont::Monospace);
-    font.setPointSize(11);
+    font.setPointSize(10);
     m_dumpEdit->setFont(font);
 
     QPalette p = m_dumpEdit->palette();
@@ -75,31 +103,90 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
     m_dumpEdit->setPalette(p);
 
-    mainLayout->addWidget(m_dumpEdit);
+    mainLayout->addWidget(m_dumpEdit, 1);
 
     connect(m_readBtn, &QPushButton::clicked, this, &MemView::onReadClicked);
+    connect(m_addressEdit, &QLineEdit::returnPressed, this, &MemView::onReadClicked);
     connect(m_exportBtn, &QPushButton::clicked, this, &MemView::onExportMatrixClicked);
     connect(m_diffBtn, &QPushButton::clicked, this, &MemView::onDiffClicked);
+
+    // Seed with a realistic 64-byte x86_64 prologue & MPI frame preview at 0x00401120
+    const QByteArray seedBytes = QByteArray::fromHex(
+        "f30f1efa554889e54881ec9000000048"
+        "8dbd78ffffff488db570ffffffe80efe"
+        "ffffc745fc00000000837dfc027f298b"
+        "45fc83f8007411f20f1005a90e000000");
+    setMemoryData(QStringLiteral("0x00401120"), seedBytes);
+    // Reset diff baseline after seeding so the first test or live update starts cleanly
+    m_hasDiffBaseline = false;
+    m_previousRawData.clear();
+    m_changedByteCount = 0;
+}
+
+bool MemView::seekToAddress(uint64_t address) {
+    if (address == 0ULL) {
+        return false;
+    }
+    m_currentBaseAddress = address;
+    const QString formatted = QStringLiteral("0x%1").arg(address, 8, 16, QChar('0'));
+    if (m_addressEdit) {
+        m_addressEdit->setText(formatted);
+    }
+    emit requestMemory(formatted, m_lengthBox ? m_lengthBox->value() : 256);
+    return true;
 }
 
 void MemView::onReadClicked() {
     QString addr = m_addressEdit->text().trimmed();
     if (!addr.isEmpty()) {
+        bool ok = false;
+        uint64_t parsed = parseHexAddress(addr, &ok);
+        if (ok && parsed != 0ULL) {
+            m_currentBaseAddress = parsed;
+        }
         emit requestMemory(addr, m_lengthBox->value());
     }
 }
 
 void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
-    m_lastRawData = QByteArray::fromHex(hexContents.toLatin1());
-    m_dumpEdit->setPlainText(formatHexDump(beginAddress, hexContents));
+    const uint64_t startAddr = static_cast<uint64_t>(beginAddress);
+    const QByteArray currentData = QByteArray::fromHex(hexContents.toLatin1());
+
+    m_changedByteCount = 0;
+    QByteArray prevForDiff;
+    if (m_hasDiffBaseline && m_previousBaseAddress == startAddr) {
+        prevForDiff = m_previousRawData;
+        const int compareLen = qMin(currentData.size(), m_previousRawData.size());
+        for (int i = 0; i < compareLen; ++i) {
+            if (currentData[i] != m_previousRawData[i]) {
+                m_changedByteCount++;
+            }
+        }
+        m_changedByteCount += qAbs(currentData.size() - m_previousRawData.size());
+    }
+
+    m_currentBaseAddress = startAddr;
+    m_previousBaseAddress = startAddr;
+    m_previousRawData = currentData;
+    m_lastRawData = currentData;
+    m_hasDiffBaseline = true;
+
+    if (m_addressEdit) {
+        m_addressEdit->setText(QStringLiteral("0x%1").arg(startAddr, 8, 16, QChar('0')));
+    }
+
+    if (m_dumpEdit) {
+        m_dumpEdit->setHtml(formatCutterHexDumpHtml(startAddr, currentData, prevForDiff));
+    }
 }
 
 void MemView::setMemoryData(const QString& address, const QByteArray& data) {
-    bool ok;
-    qint64 startAddr = address.toULongLong(&ok, 16);
-    if (!ok) startAddr = 0;
-    m_lastRawData = data;
-    setMemoryData(startAddr, data.toHex());
+    bool ok = false;
+    uint64_t startAddr = parseHexAddress(address, &ok);
+    if (!ok) {
+        startAddr = m_currentBaseAddress;
+    }
+    setMemoryData(static_cast<qint64>(startAddr), QString::fromLatin1(data.toHex()));
 }
 
 void MemView::onExportMatrixClicked() {
@@ -142,8 +229,8 @@ void MemView::onDiffClicked() {
     QString addrStr = m_addressEdit->text().trimmed();
     size_t length = m_lengthBox->value();
     
-    bool ok;
-    (void)addrStr.toULongLong(&ok, 16);
+    bool ok = false;
+    (void)parseHexAddress(addrStr, &ok);
     if (!ok) {
         QMessageBox::warning(this, "Invalid Address", "Please enter a valid hex address.");
         return;
@@ -158,12 +245,14 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
         return;
     }
     
-    QString html = "<pre style=\"font-family: monospace; font-size: 11pt;\">";
+    QString html = "<pre style=\"font-family: 'JetBrains Mono', monospace; font-size: 10pt; margin: 0;\">";
     qint64 startAddress = reinterpret_cast<qint64>(remoteAddr);
     
     int byteCount = result.baselineBuffer.size();
+    m_changedByteCount = 0;
     for (int i = 0; i < byteCount; i += 16) {
-        html += QString("0x%1: ").arg(QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
+        html += QString("<span style=\"color: #6a9955;\">0x%1</span>  ")
+                    .arg(QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
         
         QString asciiPart = "| ";
         for (int j = 0; j < 16; ++j) {
@@ -171,6 +260,9 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                 uint8_t baseByte = result.baselineBuffer[i+j];
                 uint8_t targetByte = result.targetBuffer[i+j];
                 bool diff = result.diffMask[i+j];
+                if (diff) {
+                    m_changedByteCount++;
+                }
                 
                 QString byteStr = QString::number(targetByte, 16).rightJustified(2, '0').toUpper();
                 
@@ -178,21 +270,23 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                     QString tooltip = QString("Baseline: 0x%1 | Target: 0x%2")
                         .arg(QString::number(baseByte, 16).rightJustified(2, '0').toUpper())
                         .arg(byteStr);
-                    html += QString("<span style=\"color: #e74c3c; font-weight: bold;\" title=\"%1\">%2</span> ")
+                    html += QString("<span style=\"color: #f44747; font-weight: bold;\" title=\"%1\">%2</span> ")
                         .arg(tooltip).arg(byteStr);
+                } else if (targetByte == 0) {
+                    html += QString("<span style=\"color: #555c66;\">%1</span> ").arg(byteStr);
                 } else {
                     html += byteStr + " ";
                 }
                 
-                char c = targetByte;
+                char c = static_cast<char>(targetByte);
                 if (c >= 32 && c <= 126) {
                     if (diff) {
-                        asciiPart += QString("<span style=\"color: #e74c3c; font-weight: bold;\">%1</span>").arg(QString(c).toHtmlEscaped());
+                        asciiPart += QString("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(QString(c).toHtmlEscaped());
                     } else {
                         asciiPart += QString(c).toHtmlEscaped();
                     }
                 } else {
-                    asciiPart += '.';
+                    asciiPart += "<span style=\"color: #555c66;\">.</span>";
                 }
             } else {
                 html += "   ";
@@ -204,6 +298,60 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
     
     m_dumpEdit->setHtml(html);
     m_lastRawData = QByteArray(reinterpret_cast<const char*>(result.targetBuffer.data()), result.targetBuffer.size());
+}
+
+QString MemView::formatCutterHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData) {
+    QString html = QStringLiteral(
+        "<pre style=\"font-family: 'JetBrains Mono', monospace; font-size: 10pt; margin: 4px;\">"
+        "<span style=\"color: #858585;\">- offset -         00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  |0123456789ABCDEF|</span>\n");
+
+    const int byteCount = currentData.size();
+    for (int i = 0; i < byteCount; i += 16) {
+        html += QStringLiteral("<span style=\"color: #6a9955;\">0x%1</span> ")
+                    .arg(startAddress + static_cast<uint64_t>(i), 16, 16, QChar('0'));
+
+        QString asciiPart = QStringLiteral("|");
+        for (int j = 0; j < 16; ++j) {
+            if (j == 8) {
+                html += QStringLiteral(" ");
+            }
+            const int idx = i + j;
+            if (idx < byteCount) {
+                const uint8_t b = static_cast<uint8_t>(currentData[idx]);
+                const bool mutated = !prevData.isEmpty() && idx < prevData.size() &&
+                                     static_cast<uint8_t>(prevData[idx]) != b;
+                const QString byteStr = QStringLiteral("%1").arg(b, 2, 16, QChar('0')).toUpper();
+
+                if (mutated) {
+                    html += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span> ").arg(byteStr);
+                } else if (b == 0x00) {
+                    html += QStringLiteral("<span style=\"color: #555c66;\">%1</span> ").arg(byteStr);
+                } else {
+                    html += QStringLiteral("<span style=\"color: #d4d7dc;\">%1</span> ").arg(byteStr);
+                }
+
+                const char c = static_cast<char>(b);
+                if (c >= 32 && c <= 126) {
+                    const QString escaped = QString(QChar(c)).toHtmlEscaped();
+                    if (mutated) {
+                        asciiPart += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(escaped);
+                    } else {
+                        asciiPart += QStringLiteral("<span style=\"color: #4ec9b0;\">%1</span>").arg(escaped);
+                    }
+                } else {
+                    asciiPart += QStringLiteral("<span style=\"color: #555c66;\">.</span>");
+                }
+            } else {
+                html += QStringLiteral("   ");
+                asciiPart += QStringLiteral(" ");
+            }
+        }
+        asciiPart += QStringLiteral("|");
+        html += QStringLiteral(" ") + asciiPart + QStringLiteral("\n");
+    }
+
+    html += QStringLiteral("</pre>");
+    return html;
 }
 
 QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {
