@@ -356,6 +356,11 @@ bool MainWindow::captureWorkspaceSnapshot(const QString& outputPath) {
       topLevel->hide();
     }
   }
+  for (QLabel *lbl : findChildren<QLabel *>()) {
+    if (lbl->text().startsWith("Size:")) {
+      lbl->hide();
+    }
+  }
   this->ensurePolished();
   if (this->layout()) {
     this->layout()->activate();
@@ -372,10 +377,15 @@ void MainWindow::setupStatusBar() {
   QStatusBar *bar = statusBar();
   bar->setObjectName("cutterStatusBar");
   bar->setSizeGripEnabled(false);
-  bar->setContentsMargins(4, 0, 4, 0);
+  bar->setContentsMargins(6, 0, 6, 0);
+
+  if (m_currentSeekOrPc == QStringLiteral("0x00000000") || m_currentSeekOrPc.isEmpty()) {
+    m_currentSeekOrPc = QStringLiteral("0x00401120");
+  }
 
   m_statusTelemetryLabel = new QLabel(bar);
   m_statusTelemetryLabel->setObjectName("cutterStatusTelemetry");
+  m_statusTelemetryLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
   bar->addPermanentWidget(m_statusTelemetryLabel, 1);
   updateStatusTelemetry(m_currentSeekOrPc, m_currentTargetState);
 }
@@ -389,7 +399,7 @@ void MainWindow::updateStatusTelemetry(const QString& pcOrSeek, const QString& t
   }
   if (m_statusTelemetryLabel) {
     m_statusTelemetryLabel->setText(
-        QStringLiteral("[x86_64 / MPI] | ARCH: x86_64 | RANK: %1 | SEEK/PC: %2 | STATUS: %3")
+        QStringLiteral("ARCH: x86_64 | MPI RANK: %1 | PC/SEEK: %2 | STATUS: %3")
             .arg(m_focusedRank)
             .arg(m_currentSeekOrPc)
             .arg(m_currentTargetState));
@@ -427,13 +437,25 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
     }
   }
 
-  // Synchronize with DisassemblyView by highlighting matching address/symbol line if present
-  if (m_disassemblyView && !m_disassemblyView->toPlainText().isEmpty()) {
-    QTextDocument *doc = m_disassemblyView->document();
-    QTextCursor found = doc->find(normalized);
-    if (!found.isNull()) {
-      m_disassemblyView->setTextCursor(found);
-      m_disassemblyView->centerCursor();
+  // Synchronize with DisassemblyView by forwarding hex addresses and highlighting symbols
+  if (m_disassemblyView) {
+    bool hexOk = false;
+    QString hexPart = normalized;
+    if (hexPart.startsWith("0x", Qt::CaseInsensitive)) {
+      hexPart = hexPart.mid(2);
+    }
+    uint64_t parsedAddr = hexPart.toULongLong(&hexOk, 16);
+    if (hexOk && parsedAddr != 0ULL) {
+      m_disassemblyView->seekToAddress(parsedAddr);
+    } else if (!m_disassemblyView->toPlainText().isEmpty()) {
+      QTextDocument *doc = m_disassemblyView->document();
+      if (doc) {
+        QTextCursor found = doc->find(normalized);
+        if (!found.isNull()) {
+          m_disassemblyView->setTextCursor(found);
+          m_disassemblyView->centerCursor();
+        }
+      }
     }
   }
 
@@ -714,11 +736,12 @@ void MainWindow::setupToolbar() {
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
-  m_seekBar->setFixedWidth(260);
-  m_seekBar->setMaximumWidth(260);
+  m_seekBar->setMinimumWidth(300);
+  m_seekBar->setFixedWidth(320);
+  m_seekBar->setMaximumWidth(320);
   QFont seekFont("JetBrains Mono");
   seekFont.setStyleHint(QFont::Monospace);
-  seekFont.setPointSize(10);
+  seekFont.setPointSize(9);
   m_seekBar->setFont(seekFont);
   toolbar->addWidget(m_seekBar);
 

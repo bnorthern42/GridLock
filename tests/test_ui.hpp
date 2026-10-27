@@ -21,4 +21,5 @@ private slots:
     void testCutterDockDensityAndSnapshot();
     void testTutorialBreakpointInjection();
     void testCutterZoneGroupingAndSeekBar();
+    void testCutterDisassemblyCfgAndBranchFlow();
 };

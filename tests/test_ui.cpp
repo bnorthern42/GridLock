@@ -396,5 +396,57 @@ void TestMainWindowUI::testCutterZoneGroupingAndSeekBar() {
     }
 }
 
+void TestMainWindowUI::testCutterDisassemblyCfgAndBranchFlow() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+
+    gridlock::ui::DisassemblyView* disassemblyView = mainWindow.disassemblyView();
+    QVERIFY(disassemblyView != nullptr);
+
+    const QString asmListing =
+        "0x401120: cmp eax, 0x0\n"
+        "0x401123: je 0x401130\n"
+        "0x401125: mov eax, 0x1\n"
+        "0x40112a: jmp 0x401135\n"
+        "0x401130: xor eax, eax\n"
+        "0x401135: ret";
+
+    disassemblyView->updateDisassembly(asmListing);
+
+    // 1. Verify branch edges and basic block partitioning
+    QVERIFY(disassemblyView->branchArcCount() >= 2);
+    QVERIFY(disassemblyView->basicBlockCount() >= 3);
+
+    // 2. Verify Linear vs CFG Graph view mode toggling
+    QVERIFY(!disassemblyView->isGraphMode());
+    disassemblyView->toggleViewMode();
+    QVERIFY(disassemblyView->isGraphMode());
+    disassemblyView->toggleViewMode();
+    QVERIFY(!disassemblyView->isGraphMode());
+    disassemblyView->setGraphMode(true);
+    QVERIFY(disassemblyView->isGraphMode());
+    disassemblyView->setGraphMode(false);
+    QVERIFY(!disassemblyView->isGraphMode());
+
+    // 3. Verify seeking to address updates currentAddress in both DisassemblyView and MainWindow
+    QVERIFY(disassemblyView->seekToAddress(0x401130ULL));
+    QCOMPARE(disassemblyView->currentAddress(), 0x401130ULL);
+
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x401120"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x401120ULL);
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x401130"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x401130ULL);
+
+    // Capture Linear and CFG Graph mode snapshots for visual verification
+    gridlock::core::managers::ThemeManager::instance().initialize();
+    disassemblyView->updateDisassembly(QString());
+    disassemblyView->seekToAddress(0x401120ULL);
+    disassemblyView->setGraphMode(false);
+    mainWindow.show();
+    QVERIFY(mainWindow.captureWorkspaceSnapshot("/tmp/gridlock_cutter_v3_linear.png"));
+    disassemblyView->setGraphMode(true);
+    QVERIFY(mainWindow.captureWorkspaceSnapshot("/tmp/gridlock_cutter_v3_cfg.png"));
+    disassemblyView->setGraphMode(false);
+}
 
 QTEST_MAIN(TestMainWindowUI)
