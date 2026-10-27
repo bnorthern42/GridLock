@@ -76,6 +76,8 @@ public:
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
 
     void setCoordinator(IBackendCoordinator* coord);
+    bool captureWorkspaceSnapshot(const QString& outputPath);
+    void applyCutterWorkspaceLayout();
 
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);

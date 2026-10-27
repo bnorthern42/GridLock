@@ -18,4 +18,6 @@ private slots:
     void testGutterBreakpointPropagation();
     void testNerdFontLoading();
     void testFileIconProvider();
+    void testCutterDockDensityAndSnapshot();
+    void testTutorialBreakpointInjection();
 };

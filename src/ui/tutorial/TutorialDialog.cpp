@@ -76,7 +76,7 @@ QSet<int> TutorialDialog::getBreakpointsForFile(const QString& filePath) {
     if (filePath.endsWith("deadlock_demo.c")) {
         return {25, 28};
     } else if (filePath.endsWith("inspection_demo.cpp")) {
-        return {36};
+        return {76};
     } else if (filePath.endsWith("register_demo.cpp")) {
         return {24, 37};
     } else if (filePath.endsWith("memview_demo.cpp")) {

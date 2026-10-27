@@ -18,6 +18,62 @@ ThemeManager::ThemeManager() : m_advancedStylesheet(std::make_unique<acss::QtAdv
 
 ThemeManager::~ThemeManager() = default;
 
+static QString getCutterHighDensityQssOverlay() {
+    return QStringLiteral(
+        "\n/* Cutter Dark High-Density Workstation Overlay */\n"
+        "QMainWindow::separator { width: 1px; height: 1px; background: #2b2b2b; }\n"
+        "QMainWindow::separator:hover { background: #3d424b; }\n"
+        "QSplitter::handle { background: #2b2b2b; }\n"
+        "QSplitter::handle:horizontal { width: 1px; }\n"
+        "QSplitter::handle:vertical { height: 1px; }\n"
+        "QSplitter::handle:hover { background: #3d424b; }\n"
+        "QDockWidget { border: 1px solid #2b2b2b; }\n"
+        "QDockWidget::title {\n"
+        "    background: #1a1d21;\n"
+        "    color: #d4d7dc;\n"
+        "    padding: 3px 6px;\n"
+        "    border-bottom: 1px solid #2b2b2b;\n"
+        "    font-weight: 600;\n"
+        "}\n"
+        "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; }\n"
+        "QTabBar::tab {\n"
+        "    background: #1a1d21;\n"
+        "    color: #9da5b4;\n"
+        "    padding: 3px 8px;\n"
+        "    margin: 0px;\n"
+        "    border-right: 1px solid #2b2b2b;\n"
+        "    border-bottom: 1px solid #2b2b2b;\n"
+        "}\n"
+        "QTabBar::tab:selected {\n"
+        "    background: #23272e;\n"
+        "    color: #ffffff;\n"
+        "    border-bottom: 2px solid #009688;\n"
+        "}\n"
+        "QTreeView, QTableView, QTableWidget {\n"
+        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
+        "    gridline-color: #2b2b2b;\n"
+        "}\n"
+        "QTreeView::item, QTableView::item {\n"
+        "    padding: 1px 4px;\n"
+        "    min-height: 18px;\n"
+        "}\n"
+        "QHeaderView::section {\n"
+        "    background: #1a1d21;\n"
+        "    color: #b0b8c4;\n"
+        "    padding: 2px 6px;\n"
+        "    border: 0px;\n"
+        "    border-right: 1px solid #2b2b2b;\n"
+        "    border-bottom: 1px solid #2b2b2b;\n"
+        "}\n"
+        "QToolBar {\n"
+        "    background: #1a1d21;\n"
+        "    border-bottom: 1px solid #2b2b2b;\n"
+        "    spacing: 2px;\n"
+        "    padding: 1px 4px;\n"
+        "}\n"
+    );
+}
+
 void ThemeManager::initialize() {
     QString stylesDir = ":/styles";
     m_advancedStylesheet->setStylesDirPath(stylesDir);
@@ -35,9 +91,7 @@ void ThemeManager::initialize() {
     m_advancedStylesheet->setCurrentTheme(theme);
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     m_advancedStylesheet->updateStylesheet();
-    QString qss = m_advancedStylesheet->styleSheet();
-    qss += "\nQMainWindow::separator { width: 4px; height: 4px; background: transparent; }\n"
-           "QMainWindow::separator:hover { background: rgba(128, 128, 128, 128); }";
+    QString qss = m_advancedStylesheet->styleSheet() + getCutterHighDensityQssOverlay();
     qApp->setStyleSheet(qss);
 
     QFont appFont = qApp->font();
@@ -57,7 +111,7 @@ void ThemeManager::setTheme(const QString& themeName, bool /*isDark*/) {
         QString themePath = m_advancedStylesheet->themes().contains(themeName + ".xml") ? themeName + ".xml" : themeName;
         m_advancedStylesheet->setCurrentTheme(themePath);
         m_advancedStylesheet->updateStylesheet();
-        qApp->setStyleSheet(m_advancedStylesheet->styleSheet());
+        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getCutterHighDensityQssOverlay());
     }
 }
 
@@ -77,9 +131,7 @@ void ThemeManager::applyThemeAndFonts() {
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     
     m_advancedStylesheet->updateStylesheet();
-    QString qss = m_advancedStylesheet->styleSheet();
-    qss += "\nQMainWindow::separator { width: 4px; height: 4px; background: transparent; }\n"
-           "QMainWindow::separator:hover { background: rgba(128, 128, 128, 128); }";
+    QString qss = m_advancedStylesheet->styleSheet() + getCutterHighDensityQssOverlay();
     qApp->setStyleSheet(qss);
 
     QFont appFont = qApp->font();

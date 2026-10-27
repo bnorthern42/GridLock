@@ -312,9 +312,31 @@ void MainWindow::setupUi() {
   setWindowTitle("GridLock - MPI Graphical Debugger");
   setWindowIcon(QIcon());
   resize(1440, 900);
-  setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AnimatedDocks);
-  setDockNestingEnabled(true);
+  applyCutterWorkspaceLayout();
   setupToolbar();
+}
+
+void MainWindow::applyCutterWorkspaceLayout() {
+  setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AnimatedDocks);
+  setDockNestingEnabled(true);
+  setDocumentMode(true);
+  setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
+  setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
+  setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
+  setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
+}
+
+bool MainWindow::captureWorkspaceSnapshot(const QString& outputPath) {
+  this->ensurePolished();
+  if (this->layout()) {
+    this->layout()->activate();
+  }
+  QCoreApplication::processEvents();
+  QPixmap pixmap = this->grab();
+  if (pixmap.isNull()) {
+    return false;
+  }
+  return pixmap.save(outputPath, "PNG");
 }
 
 void MainWindow::setupMenu() {
@@ -589,6 +611,8 @@ void MainWindow::setupDocks() {
   QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
   mainVerticalSplitter->setObjectName("MainVerticalSplitter");
   mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
+  mainVerticalSplitter->setHandleWidth(1);
+  mainVerticalSplitter->setChildrenCollapsible(false);
 
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
@@ -616,9 +640,14 @@ void MainWindow::setupDocks() {
   QSplitter *masterHorizontalSplitter =
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);
   masterHorizontalSplitter->setObjectName("MasterHorizontalSplitter");
+  masterHorizontalSplitter->setContentsMargins(0, 0, 0, 0);
+  masterHorizontalSplitter->setHandleWidth(1);
+  masterHorizontalSplitter->setChildrenCollapsible(false);
 
   m_editorTabManager = new EditorTabManager(masterHorizontalSplitter);
   m_editorTabManager->setMinimumWidth(350);
+  m_editorTabManager->setDocumentMode(true);
+  m_editorTabManager->setContentsMargins(0, 0, 0, 0);
   connect(m_editorTabManager, &EditorTabManager::toggleBreakpointRequested,
           this, [this](const QString &loc) {
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
@@ -693,6 +722,9 @@ void MainWindow::setupDocks() {
   QSplitter *rightPaneSplitter =
       new QSplitter(Qt::Vertical, masterHorizontalSplitter);
   rightPaneSplitter->setObjectName("RightPaneSplitter");
+  rightPaneSplitter->setContentsMargins(0, 0, 0, 0);
+  rightPaneSplitter->setHandleWidth(1);
+  rightPaneSplitter->setChildrenCollapsible(false);
 
   m_disassemblyView = new DisassemblyView(rightPaneSplitter);
   m_serverRackView = new ServerRackView(rightPaneSplitter);
@@ -715,6 +747,8 @@ void MainWindow::setupDocks() {
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
   m_bottomTabs = new QTabWidget(mainVerticalSplitter);
+  m_bottomTabs->setDocumentMode(true);
+  m_bottomTabs->setContentsMargins(0, 0, 0, 0);
 
   m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
   m_terminalDock->setObjectName("TerminalDock");
@@ -832,6 +866,14 @@ void MainWindow::setupDocks() {
           viewMenu->addAction(dock->toggleViewAction());
       }
       dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+      dock->setContentsMargins(0, 0, 0, 0);
+      if (QWidget* inner = dock->widget()) {
+          inner->setContentsMargins(0, 0, 0, 0);
+          if (inner->layout()) {
+              inner->layout()->setContentsMargins(0, 0, 0, 0);
+              inner->layout()->setSpacing(0);
+          }
+      }
       
       connect(dock, &QDockWidget::topLevelChanged, dock, [dock](bool topLevel) {
           if (topLevel) {

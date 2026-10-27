@@ -104,6 +104,11 @@ int main(int argc, char *argv[]) {
   app.processEvents();
 
   gridlock::core::utils::CliParser parser;
+  QCommandLineOption snapshotOption(
+      QStringList() << "snapshot",
+      "Render the main window workspace and save a PNG snapshot to <file>, then exit.",
+      "file");
+  parser.getParser().addOption(snapshotOption);
   parser.process(app);
 
   g_isVerbose = parser.isVerbose();
@@ -113,6 +118,17 @@ int main(int argc, char *argv[]) {
 
   auto *backend = new DapCoordinator(&window);
   window.setCoordinator(backend);
+
+  if (parser.getParser().isSet(snapshotOption)) {
+    const QString snapshotPath = parser.getParser().value(snapshotOption);
+    splash->finish(&window);
+    splash->deleteLater();
+    window.show();
+    app.processEvents();
+    const bool ok = window.captureWorkspaceSnapshot(snapshotPath);
+    window.close();
+    return ok ? 0 : 1;
+  }
 
   if (parser.isTutorialMode()) {
     if (!window.execTutorialDialog()) {

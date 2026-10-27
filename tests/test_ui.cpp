@@ -22,6 +22,9 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QTemporaryDir>
+#include <QDockWidget>
+#include <QImage>
+#include "../src/ui/tutorial/TutorialDialog.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -275,6 +278,63 @@ void TestMainWindowUI::testFileIconProvider() {
     QFileInfo mesonInfo(tempMeson.fileName());
     QIcon mesonIcon = provider.icon(mesonInfo);
     QVERIFY(!mesonIcon.isNull());
+}
+
+void TestMainWindowUI::testCutterDockDensityAndSnapshot() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+
+    // 1. Verify dock nesting is enabled
+    QVERIFY(mainWindow.isDockNestingEnabled());
+
+    // 2. Verify all primary QDockWidget children have movable/floatable/closable features and zero inner contentsMargins
+    const QList<QDockWidget*> docks = mainWindow.findChildren<QDockWidget*>();
+    QVERIFY(!docks.isEmpty());
+    const auto requiredFeatures = QDockWidget::DockWidgetMovable |
+                                  QDockWidget::DockWidgetFloatable |
+                                  QDockWidget::DockWidgetClosable;
+    for (QDockWidget* dock : docks) {
+        QVERIFY((dock->features() & requiredFeatures) == requiredFeatures);
+        if (QWidget* inner = dock->widget()) {
+            QCOMPARE(inner->contentsMargins(), QMargins(0, 0, 0, 0));
+        }
+    }
+
+    // 3. Verify captureWorkspaceSnapshot returns true, writes non-empty PNG, and matches MainWindow size
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString snapshotPath = tempDir.path() + "/workspace_snapshot.png";
+
+    QVERIFY(mainWindow.captureWorkspaceSnapshot(snapshotPath));
+    QFileInfo snapshotInfo(snapshotPath);
+    QVERIFY(snapshotInfo.exists());
+    QVERIFY(snapshotInfo.size() > 0);
+
+    QImage capturedImage(snapshotPath);
+    QVERIFY(!capturedImage.isNull());
+    QCOMPARE(capturedImage.size() / capturedImage.devicePixelRatio(), mainWindow.size());
+}
+
+void TestMainWindowUI::testTutorialBreakpointInjection() {
+    const auto originalBps = gridlock::core::ConfigManager::instance().getBreakpoints();
+
+    QString relativePath = "tutorial/inspection_demo.cpp";
+    QSet<int> expectedLines = gridlock::ui::TutorialDialog::getBreakpointsForFile(relativePath);
+    QCOMPARE(expectedLines.size(), 1);
+    QVERIFY(expectedLines.contains(76));
+
+    QString absPath = QFileInfo(relativePath).absoluteFilePath();
+
+    QMap<QString, QSet<int>> emptyBps;
+    gridlock::core::ConfigManager::instance().saveBreakpoints(emptyBps);
+
+    gridlock::ui::TutorialDialog::injectBreakpoints(relativePath, absPath);
+
+    QMap<QString, QSet<int>> savedBps = gridlock::core::ConfigManager::instance().getBreakpoints();
+    QVERIFY(savedBps.contains(absPath));
+    QCOMPARE(savedBps[absPath], expectedLines);
+
+    gridlock::core::ConfigManager::instance().saveBreakpoints(originalBps);
 }
 
 
