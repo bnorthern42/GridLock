@@ -9,6 +9,8 @@
 
 class IBackendCoordinator;
 class QVulkanInstance;
+class QLineEdit;
+class QLabel;
 
 namespace gridlock {
 class GdbRankCoordinator;
@@ -78,6 +80,7 @@ public:
     void setCoordinator(IBackendCoordinator* coord);
     bool captureWorkspaceSnapshot(const QString& outputPath);
     void applyCutterWorkspaceLayout();
+    bool seekToAddressOrExpression(const QString& expr);
 
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);
@@ -99,6 +102,8 @@ private:
     void setupMenu();
     void setupToolbar();
     void setupDocks();
+    void setupStatusBar();
+    void updateStatusTelemetry(const QString& pcOrSeek = QString(), const QString& targetState = QString());
 
 
 
@@ -122,6 +127,10 @@ private:
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
     QAction* m_runAction = nullptr;
+    QLineEdit* m_seekBar = nullptr;
+    QLabel* m_statusTelemetryLabel = nullptr;
+    QString m_currentSeekOrPc = QStringLiteral("0x00000000");
+    QString m_currentTargetState = QStringLiteral("IDLE");
 
     IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

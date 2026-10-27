@@ -62,6 +62,10 @@
 #include <QLabel>
 #include <QScreen>
 #include <QGuiApplication>
+#include <QShortcut>
+#include <QStatusBar>
+#include <QTabBar>
+#include <QTextCursor>
 #include <algorithm>
 
 namespace gridlock {
@@ -117,6 +121,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setupUi();
   setupMenu();
   setupDocks();
+  setupStatusBar();
 
   gridlock::core::ShortcutManager::instance().initialize(this);
   qApp->installEventFilter(this);
@@ -124,30 +129,39 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Eagerly load default source file so UI is populated before running
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
   m_plainJaneTooltip = new gridlock::PlainJaneTooltip(this);
-
-
+  if (QFileInfo::exists("tutorial/inspection_demo.cpp")) {
+      loadSourceFile("tutorial/inspection_demo.cpp");
+  }
 
   // Load offline persistence TOML breakpoints
   m_persistentBreakpoints =
       gridlock::core::ConfigManager::instance().getBreakpoints();
 
-  // Restore layout state
+  // Restore layout state (versioned for Cutter 4-zone workspace)
   QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry")) {
-      restoreGeometry(settings.value("MainWindow/Geometry").toByteArray());
+  if (settings.contains("MainWindow/Geometry_v5")) {
+      restoreGeometry(settings.value("MainWindow/Geometry_v5").toByteArray());
   }
-  if (settings.contains("MainWindow/State")) {
-      restoreState(settings.value("MainWindow/State").toByteArray());
+  if (settings.contains("MainWindow/State_v5")) {
+      restoreState(settings.value("MainWindow/State_v5").toByteArray());
   }
   
   // Restore splitter states
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          auto state = settings.value("MainWindow/Splitter_" + splitter->objectName()).toByteArray();
+          auto state = settings.value("MainWindow/Splitter_v5_" + splitter->objectName()).toByteArray();
           if (!state.isEmpty()) {
               splitter->restoreState(state);
           }
       }
+  }
+
+  for (auto* tabBar : findChildren<QTabBar*>()) {
+      if (tabBar->count() == 0) {
+          tabBar->hide();
+      }
+      tabBar->setUsesScrollButtons(true);
+      tabBar->setElideMode(Qt::ElideNone);
   }
 }
 
@@ -168,14 +182,18 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                 if (state == SessionState::Disconnected) {
                   m_runAction->setEnabled(true);
                   m_runAction->setText("▶ Run Target");
+                  updateStatusTelemetry(QString(), QStringLiteral("IDLE"));
                 } else {
                   m_runAction->setEnabled(false);
-                  if (state == SessionState::Launching)
+                  if (state == SessionState::Launching) {
                     m_runAction->setText("Launching...");
-                  else if (state == SessionState::Queued)
+                    updateStatusTelemetry(QString(), QStringLiteral("LAUNCHING"));
+                  } else if (state == SessionState::Queued) {
                     m_runAction->setText("Queued in SLURM...");
-                  else if (state == SessionState::Running) {
+                    updateStatusTelemetry(QString(), QStringLiteral("QUEUED"));
+                  } else if (state == SessionState::Running) {
                     m_runAction->setText("Running");
+                    updateStatusTelemetry(QString(), QStringLiteral("RUNNING"));
                     for (int i = 0; i < dapCoord->getProcessCount(); ++i) {
                         RankState rs;
                         if (m_latestStates.contains(i)) {
@@ -187,6 +205,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                     }
                   } else if (state == SessionState::Paused) {
                     m_runAction->setText("Paused");
+                    updateStatusTelemetry(QString(), QStringLiteral("PAUSED"));
                   }
                 }
               }
@@ -320,6 +339,7 @@ void MainWindow::applyCutterWorkspaceLayout() {
   setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks | QMainWindow::AnimatedDocks);
   setDockNestingEnabled(true);
   setDocumentMode(true);
+  setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
   setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
@@ -327,6 +347,15 @@ void MainWindow::applyCutterWorkspaceLayout() {
 }
 
 bool MainWindow::captureWorkspaceSnapshot(const QString& outputPath) {
+  QToolTip::hideText();
+  if (m_plainJaneTooltip) {
+    m_plainJaneTooltip->hideTooltip();
+  }
+  for (QWidget *topLevel : QApplication::topLevelWidgets()) {
+    if (topLevel != this && (topLevel->windowFlags() & Qt::ToolTip)) {
+      topLevel->hide();
+    }
+  }
   this->ensurePolished();
   if (this->layout()) {
     this->layout()->activate();
@@ -337,6 +366,78 @@ bool MainWindow::captureWorkspaceSnapshot(const QString& outputPath) {
     return false;
   }
   return pixmap.save(outputPath, "PNG");
+}
+
+void MainWindow::setupStatusBar() {
+  QStatusBar *bar = statusBar();
+  bar->setObjectName("cutterStatusBar");
+  bar->setSizeGripEnabled(false);
+  bar->setContentsMargins(4, 0, 4, 0);
+
+  m_statusTelemetryLabel = new QLabel(bar);
+  m_statusTelemetryLabel->setObjectName("cutterStatusTelemetry");
+  bar->addPermanentWidget(m_statusTelemetryLabel, 1);
+  updateStatusTelemetry(m_currentSeekOrPc, m_currentTargetState);
+}
+
+void MainWindow::updateStatusTelemetry(const QString& pcOrSeek, const QString& targetState) {
+  if (!pcOrSeek.isEmpty()) {
+    m_currentSeekOrPc = pcOrSeek;
+  }
+  if (!targetState.isEmpty()) {
+    m_currentTargetState = targetState;
+  }
+  if (m_statusTelemetryLabel) {
+    m_statusTelemetryLabel->setText(
+        QStringLiteral("[x86_64 / MPI] | ARCH: x86_64 | RANK: %1 | SEEK/PC: %2 | STATUS: %3")
+            .arg(m_focusedRank)
+            .arg(m_currentSeekOrPc)
+            .arg(m_currentTargetState));
+  }
+}
+
+bool MainWindow::seekToAddressOrExpression(const QString& expr) {
+  const QString cleaned = expr.trimmed();
+  if (cleaned.isEmpty()) {
+    return false;
+  }
+
+  QString normalized = cleaned;
+  bool isHexWithoutPrefix = false;
+  if (!normalized.startsWith("0x", Qt::CaseInsensitive)) {
+    (void)normalized.toULongLong(&isHexWithoutPrefix, 16);
+    if (isHexWithoutPrefix && normalized.length() >= 4) {
+      normalized = QStringLiteral("0x") + normalized;
+    }
+  }
+
+  if (m_seekBar && m_seekBar->text() != normalized) {
+    m_seekBar->setText(normalized);
+  }
+
+  updateStatusTelemetry(normalized);
+
+  // Synchronize with Memory View address bar and request memory if coordinator is active
+  if (m_memView) {
+    if (auto *addrEdit = m_memView->findChild<QLineEdit *>()) {
+      addrEdit->setText(normalized);
+    }
+    if (m_coordinator && m_currentTargetState != QStringLiteral("IDLE")) {
+      m_coordinator->readMemory(m_focusedRank, normalized, 256);
+    }
+  }
+
+  // Synchronize with DisassemblyView by highlighting matching address/symbol line if present
+  if (m_disassemblyView && !m_disassemblyView->toPlainText().isEmpty()) {
+    QTextDocument *doc = m_disassemblyView->document();
+    QTextCursor found = doc->find(normalized);
+    if (!found.isNull()) {
+      m_disassemblyView->setTextCursor(found);
+      m_disassemblyView->centerCursor();
+    }
+  }
+
+  return true;
 }
 
 void MainWindow::setupMenu() {
@@ -605,15 +706,37 @@ void MainWindow::setupToolbar() {
   for (QAction *action : toolbar->actions()) {
       action->setToolTip(QString());
   }
+
+  QWidget *spacer = new QWidget(toolbar);
+  spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  toolbar->addWidget(spacer);
+
+  m_seekBar = new QLineEdit(toolbar);
+  m_seekBar->setObjectName("cutterSeekBar");
+  m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
+  m_seekBar->setFixedWidth(260);
+  m_seekBar->setMaximumWidth(260);
+  QFont seekFont("JetBrains Mono");
+  seekFont.setStyleHint(QFont::Monospace);
+  seekFont.setPointSize(10);
+  m_seekBar->setFont(seekFont);
+  toolbar->addWidget(m_seekBar);
+
+  connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() {
+    seekToAddressOrExpression(m_seekBar->text());
+  });
+
+  QShortcut *seekShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
+  connect(seekShortcut, &QShortcut::activated, this, [this]() {
+    if (m_seekBar) {
+      m_seekBar->setFocus(Qt::ShortcutFocusReason);
+      m_seekBar->selectAll();
+    }
+  });
 }
 
 void MainWindow::setupDocks() {
-  QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
-  mainVerticalSplitter->setObjectName("MainVerticalSplitter");
-  mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
-  mainVerticalSplitter->setHandleWidth(1);
-  mainVerticalSplitter->setChildrenCollapsible(false);
-
+  // Left Zone: Project Explorer / Symbols & Functions list
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
@@ -622,21 +745,21 @@ void MainWindow::setupDocks() {
           &gridlock::core::managers::SessionManager::sessionLoaded,
           m_projectExplorerWidget, &ProjectExplorerWidget::setRootPath);
 
-  m_variablesDockWidget = new VariablesDockWidget(this);
-  m_variablesDockWidget->setObjectName("VariablesDock");
-  // It's no longer a dock widget, it will be added to the splitter
-
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked,
           this, [this](const QString &filePath) {
             if (m_editorTabManager) {
-              loadSourceFile(
-                  filePath); // Actually loadSourceFile does everything needed,
-                             // or we can just call
-                             // m_editorTabManager->openFile(filePath) and
-                             // m_lspCoordinator
+              loadSourceFile(filePath);
             }
           });
 
+  // Center & Bottom Zone Splitter
+  QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
+  mainVerticalSplitter->setObjectName("MainVerticalSplitter");
+  mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
+  mainVerticalSplitter->setHandleWidth(1);
+  mainVerticalSplitter->setChildrenCollapsible(false);
+
+  // Center Zone: Source Code (Left) & Disassembly View (Right) side-by-side
   QSplitter *masterHorizontalSplitter =
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);
   masterHorizontalSplitter->setObjectName("MasterHorizontalSplitter");
@@ -648,6 +771,10 @@ void MainWindow::setupDocks() {
   m_editorTabManager->setMinimumWidth(350);
   m_editorTabManager->setDocumentMode(true);
   m_editorTabManager->setContentsMargins(0, 0, 0, 0);
+  if (m_editorTabManager->tabBar()) {
+    m_editorTabManager->tabBar()->setUsesScrollButtons(true);
+    m_editorTabManager->tabBar()->setElideMode(Qt::ElideNone);
+  }
   connect(m_editorTabManager, &EditorTabManager::toggleBreakpointRequested,
           this, [this](const QString &loc) {
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
@@ -676,10 +803,6 @@ void MainWindow::setupDocks() {
             } else if (auto *dapCoord =
                            dynamic_cast<DapCoordinator *>(m_coordinator)) {
               if (isSet) {
-                // DapCoordinator doesn't track conditions currently, so just
-                // toggle Note: to strictly toggle based on isSet, we would need
-                // dapCoord->setBreakpoint(..., isSet), but toggleBreakpoint
-                // toggles it. Since we are just toggling it, it's fine.
                 dapCoord->toggleBreakpoint(absoluteFilePath, line);
               } else {
                 dapCoord->toggleBreakpoint(absoluteFilePath, line);
@@ -703,57 +826,20 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Right Inspection Zone: Variables, Registers, Watch Expressions, and Server Rack
+  m_variablesDockWidget = new VariablesDockWidget(this);
+  m_variablesDockWidget->setObjectName("VariablesWidget");
+  QDockWidget *variablesDock = new QDockWidget("Variables", this);
+  variablesDock->setObjectName("VariablesDock");
+  variablesDock->setWidget(m_variablesDockWidget);
 
+  m_registerView = new RegisterView(this);
+  m_registerView->setObjectName("RegisterViewWidget");
+  QDockWidget *registersDock = new QDockWidget("Registers", this);
+  registersDock->setObjectName("RegisterViewDock");
+  registersDock->setWidget(m_registerView);
 
-  connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,
-          [this](const QString &varName) {
-            if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
-                    m_coordinator)) {
-              gdbCoord->registerWatchVariable(varName);
-            }
-            if (m_differentialGrid) {
-              m_differentialGrid->addVariableColumn(varName);
-            }
-            if (m_bottomTabs) {
-              m_bottomTabs->setCurrentWidget(m_differentialGrid);
-            }
-          });
-
-  QSplitter *rightPaneSplitter =
-      new QSplitter(Qt::Vertical, masterHorizontalSplitter);
-  rightPaneSplitter->setObjectName("RightPaneSplitter");
-  rightPaneSplitter->setContentsMargins(0, 0, 0, 0);
-  rightPaneSplitter->setHandleWidth(1);
-  rightPaneSplitter->setChildrenCollapsible(false);
-
-  m_disassemblyView = new DisassemblyView(rightPaneSplitter);
-  m_serverRackView = new ServerRackView(rightPaneSplitter);
-  connect(m_serverRackView, &ServerRackView::rankSelected, this,
-          &MainWindow::onRankSelected);
-
-  // m_variablesDockWidget already constructed above
-  rightPaneSplitter->addWidget(m_disassemblyView);
-  rightPaneSplitter->addWidget(m_serverRackView);
-  rightPaneSplitter->addWidget(m_variablesDockWidget);
-  rightPaneSplitter->setSizes({400, 200, 400});
-
-  masterHorizontalSplitter->addWidget(m_editorTabManager);
-  masterHorizontalSplitter->addWidget(rightPaneSplitter);
-
-  masterHorizontalSplitter->setStretchFactor(0, 75);
-  masterHorizontalSplitter->setStretchFactor(1, 25);
-  masterHorizontalSplitter->setSizes({1200, 400});
-
-  mainVerticalSplitter->addWidget(masterHorizontalSplitter);
-
-  m_bottomTabs = new QTabWidget(mainVerticalSplitter);
-  m_bottomTabs->setDocumentMode(true);
-  m_bottomTabs->setContentsMargins(0, 0, 0, 0);
-
-  m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
-  m_terminalDock->setObjectName("TerminalDock");
-  
-  m_differentialGrid = new DifferentialGrid(m_bottomTabs);
+  m_differentialGrid = new DifferentialGrid(this);
   m_differentialGrid->setObjectName("DifferentialGrid");
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
@@ -769,6 +855,64 @@ void MainWindow::setupDocks() {
       m_differentialGrid->addVariableColumn(QString::fromStdString(w));
     }
   }
+  QDockWidget *watchDock = new QDockWidget("Watch Expressions", this);
+  watchDock->setObjectName("WatchExpressionsDock");
+  watchDock->setWidget(m_differentialGrid);
+
+  m_serverRackView = new ServerRackView(this);
+  m_serverRackView->setObjectName("ServerRackViewWidget");
+  connect(m_serverRackView, &ServerRackView::rankSelected, this,
+          &MainWindow::onRankSelected);
+  QDockWidget *serverRackDock = new QDockWidget("Server Rack", this);
+  serverRackDock->setObjectName("ServerRackDock");
+  serverRackDock->setWidget(m_serverRackView);
+
+  addDockWidget(Qt::RightDockWidgetArea, variablesDock);
+  addDockWidget(Qt::RightDockWidgetArea, registersDock);
+  tabifyDockWidget(variablesDock, registersDock);
+  addDockWidget(Qt::RightDockWidgetArea, watchDock);
+  addDockWidget(Qt::RightDockWidgetArea, serverRackDock);
+  variablesDock->raise();
+
+  connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,
+          [this, watchDock](const QString &varName) {
+            if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
+                    m_coordinator)) {
+              gdbCoord->registerWatchVariable(varName);
+            }
+            if (m_differentialGrid) {
+              m_differentialGrid->addVariableColumn(varName);
+            }
+            if (watchDock) {
+              watchDock->show();
+              watchDock->raise();
+            }
+          });
+
+  m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
+  m_disassemblyView->setContentsMargins(0, 0, 0, 0);
+
+  masterHorizontalSplitter->addWidget(m_editorTabManager);
+  masterHorizontalSplitter->addWidget(m_disassemblyView);
+
+  masterHorizontalSplitter->setStretchFactor(0, 60);
+  masterHorizontalSplitter->setStretchFactor(1, 40);
+  masterHorizontalSplitter->setSizes({520, 360});
+
+  mainVerticalSplitter->addWidget(masterHorizontalSplitter);
+
+  // Bottom Zone: Reduced to 7 core I/O & memory inspection tabs
+  m_bottomTabs = new QTabWidget(mainVerticalSplitter);
+  m_bottomTabs->setObjectName("BottomConsoleTabs");
+  m_bottomTabs->setDocumentMode(true);
+  m_bottomTabs->setContentsMargins(0, 0, 0, 0);
+  if (m_bottomTabs->tabBar()) {
+    m_bottomTabs->tabBar()->setUsesScrollButtons(true);
+    m_bottomTabs->tabBar()->setElideMode(Qt::ElideNone);
+  }
+
+  m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
+  m_terminalDock->setObjectName("TerminalDock");
 
   m_expressionEvaluatorWidget = new ExpressionEvaluatorWidget(m_bottomTabs);
   m_expressionEvaluatorWidget->setObjectName("ExpressionEvaluatorDock");
@@ -788,9 +932,6 @@ void MainWindow::setupDocks() {
   
   m_memView = new MemView(m_bottomTabs);
   m_memView->setObjectName("MemViewDock");
-  
-  m_registerView = new RegisterView(m_bottomTabs);
-  m_registerView->setObjectName("RegisterViewDock");
   
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
   m_spackManager->setObjectName("HpcConsoleDock");
@@ -829,29 +970,32 @@ void MainWindow::setupDocks() {
         });
       });
 
-  m_bottomTabs->addTab(m_terminalDock, "Terminal");
-  m_bottomTabs->addTab(m_differentialGrid, "Watch Expressions");
-  m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
-  m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
-  m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
-  m_bottomTabs->addTab(m_memView, "Memory View");
   m_mpiDiagnosticsWidget = new MpiDiagnosticsWidget(m_bottomTabs);
   connect(m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::jumpToFrameRequested,
           this, &MainWindow::onRankSelected);
 
-  m_bottomTabs->addTab(m_registerView, "Registers");
-  m_bottomTabs->addTab(m_spackManager, "HPC Console");
+  m_bottomTabs->addTab(m_terminalDock, "Terminal");
+  m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
+  m_bottomTabs->addTab(m_memView, "Memory View");
   m_bottomTabs->addTab(m_mpiDiagnosticsWidget, "MPI Diagnostics");
+  m_bottomTabs->addTab(m_spackManager, "HPC Console");
+  m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
+  m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
-  m_bottomTabs->setMinimumHeight(250);
+  m_bottomTabs->setMinimumHeight(220);
 
-  mainVerticalSplitter->setStretchFactor(0, 70);
-  mainVerticalSplitter->setStretchFactor(1, 30);
-  mainVerticalSplitter->setSizes({700, 300});
+  mainVerticalSplitter->setStretchFactor(0, 68);
+  mainVerticalSplitter->setStretchFactor(1, 32);
+  mainVerticalSplitter->setSizes({600, 260});
 
   setCentralWidget(mainVerticalSplitter);
-  resizeDocks({m_projectExplorerWidget}, {250}, Qt::Horizontal);
+  variablesDock->setMinimumWidth(240);
+  registersDock->setMinimumWidth(240);
+  watchDock->setMinimumWidth(240);
+  serverRackDock->setMinimumWidth(240);
+  resizeDocks({m_projectExplorerWidget, variablesDock, watchDock, serverRackDock}, {200, 260, 260, 260}, Qt::Horizontal);
+  resizeDocks({variablesDock, watchDock, serverRackDock}, {340, 260, 240}, Qt::Vertical);
 
   QMenu* viewMenu = nullptr;
   for (QAction* action : menuBar()->actions()) {
@@ -892,6 +1036,8 @@ void MainWindow::onRankStateChanged(int rankId, const RankState &state) {
     if (!state.disassemblyText.isEmpty()) {
       m_disassemblyView->updateDisassembly(state.disassemblyText);
     }
+    const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
+    updateStatusTelemetry(pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
     if (state.currentState == "stopped") {
       if (state.currentLine > 0) {
         if (!state.currentFile.isEmpty() && m_editorTabManager) {
@@ -915,6 +1061,8 @@ void MainWindow::onRankSelected(int rankId) {
   m_focusedRank = rankId;
   if (m_latestStates.count(rankId)) {
     const auto &state = m_latestStates[rankId];
+    const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
+    updateStatusTelemetry(pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
     m_disassemblyView->updateDisassembly(state.disassemblyText);
 
     if (state.disassemblyText.isEmpty()) {
@@ -942,6 +1090,7 @@ void MainWindow::onRankSelected(int rankId) {
       m_registerView->updateRegisters(state);
     }
   } else {
+    updateStatusTelemetry();
     if (auto *gdbCoord =
             dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
       gdbCoord->requestDisassemblyFallback(rankId);
@@ -964,12 +1113,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
 
   QSettings settings("gridlock", "debugger");
-  settings.setValue("MainWindow/Geometry", saveGeometry());
-  settings.setValue("MainWindow/State", saveState());
+  settings.setValue("MainWindow/Geometry_v5", saveGeometry());
+  settings.setValue("MainWindow/State_v5", saveState());
 
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          settings.setValue("MainWindow/Splitter_" + splitter->objectName(), splitter->saveState());
+          settings.setValue("MainWindow/Splitter_v5_" + splitter->objectName(), splitter->saveState());
       }
   }
 

@@ -24,7 +24,10 @@
 #include <QTemporaryDir>
 #include <QDockWidget>
 #include <QImage>
+#include <QLabel>
+#include <QTabWidget>
 #include "../src/ui/tutorial/TutorialDialog.hpp"
+#include "../src/ui/views/MemView.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -335,6 +338,62 @@ void TestMainWindowUI::testTutorialBreakpointInjection() {
     QCOMPARE(savedBps[absPath], expectedLines);
 
     gridlock::core::ConfigManager::instance().saveBreakpoints(originalBps);
+}
+
+void TestMainWindowUI::testCutterZoneGroupingAndSeekBar() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+
+    // 1. Verify Registers and Watch Expressions docks are in RightDockWidgetArea,
+    //    and BottomDockWidgetArea / bottom tabs have at most 7 widgets.
+    QDockWidget* registersDock = nullptr;
+    QDockWidget* watchDock = nullptr;
+    int bottomDockCount = 0;
+
+    const QList<QDockWidget*> docks = mainWindow.findChildren<QDockWidget*>();
+    for (QDockWidget* dock : docks) {
+        if (dock->windowTitle().contains("Registers", Qt::CaseInsensitive) ||
+            dock->objectName().contains("Register", Qt::CaseInsensitive)) {
+            registersDock = dock;
+        }
+        if (dock->windowTitle().contains("Watch Expressions", Qt::CaseInsensitive) ||
+            dock->objectName().contains("Watch", Qt::CaseInsensitive)) {
+            watchDock = dock;
+        }
+        if (mainWindow.dockWidgetArea(dock) == Qt::BottomDockWidgetArea) {
+            bottomDockCount++;
+        }
+    }
+
+    QVERIFY(registersDock != nullptr);
+    QVERIFY(watchDock != nullptr);
+    QCOMPARE(mainWindow.dockWidgetArea(registersDock), Qt::RightDockWidgetArea);
+    QCOMPARE(mainWindow.dockWidgetArea(watchDock), Qt::RightDockWidgetArea);
+    QVERIFY(bottomDockCount <= 7);
+
+    for (QTabWidget* tabWidget : mainWindow.findChildren<QTabWidget*>()) {
+        if (tabWidget->objectName() == "BottomConsoleTabs") {
+            QVERIFY(tabWidget->count() <= 7);
+        }
+    }
+
+    // 2. Verify Cutter-style seek bar and status telemetry label exist
+    auto* seekBar = mainWindow.findChild<QLineEdit*>("cutterSeekBar");
+    auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
+    QVERIFY(seekBar != nullptr);
+    QVERIFY(statusTelemetry != nullptr);
+
+    // 3. Verify seekToAddressOrExpression updates telemetry and syncs with Memory View safely
+    QVERIFY(!mainWindow.seekToAddressOrExpression("   "));
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x401000"));
+    QCOMPARE(seekBar->text(), QString("0x401000"));
+    QVERIFY(statusTelemetry->text().contains("0x401000"));
+
+    if (mainWindow.memView()) {
+        if (auto* memAddrEdit = mainWindow.memView()->findChild<QLineEdit*>()) {
+            QCOMPARE(memAddrEdit->text(), QString("0x401000"));
+        }
+    }
 }
 
 

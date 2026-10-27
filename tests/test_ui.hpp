@@ -20,4 +20,5 @@ private slots:
     void testFileIconProvider();
     void testCutterDockDensityAndSnapshot();
     void testTutorialBreakpointInjection();
+    void testCutterZoneGroupingAndSeekBar();
 };
