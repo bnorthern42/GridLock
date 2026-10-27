@@ -10,6 +10,7 @@ namespace gridlock {
 namespace {
 QString escapeGdbMiString(const QString& str) {
     QString res;
+    res.reserve(str.length() * 2 + 2);
     for (int i = 0; i < str.length(); ++i) {
         QChar c = str[i];
         if (c == '\\') {
