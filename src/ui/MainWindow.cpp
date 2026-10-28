@@ -190,6 +190,38 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   auto& cfg = gridlock::core::ConfigManager::instance();
   applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
+  loadPreviewFixture();
+}
+
+void MainWindow::loadPreviewFixture() {
+  QList<RankState> fixtureRanks;
+  fixtureRanks.reserve(8);
+  for (int i = 0; i < 8; ++i) {
+    RankState st;
+    st.rankId = i;
+    st.currentState = (i == 0) ? QStringLiteral("stopped") : QStringLiteral("running");
+    if (i == 0) {
+      st.registers[16] = QStringLiteral("0x00401120");
+    } else if (i == 1) {
+      st.registers[16] = QStringLiteral("0x00401155");
+    } else {
+      st.registers[16] = QStringLiteral("0x00401157");
+    }
+    st.totalRuntimeMs = 12 + i * 3;
+    fixtureRanks.append(st);
+    m_latestStates[i] = st;
+  }
+  if (m_serverRackView) {
+    m_serverRackView->updateRanks(fixtureRanks);
+  } else if (m_disassemblyView) {
+    QMap<int, uint64_t> pcs;
+    pcs.insert(0, 0x00401120ULL);
+    pcs.insert(1, 0x00401155ULL);
+    for (int i = 2; i < 8; ++i) {
+      pcs.insert(i, 0x00401157ULL);
+    }
+    m_disassemblyView->setRankAddresses(pcs);
+  }
 }
 
 void MainWindow::executeCommand(

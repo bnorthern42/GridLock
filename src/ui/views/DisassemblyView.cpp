@@ -606,11 +606,6 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   spaceShortcut->setContext(Qt::WidgetWithChildrenShortcut);
   connect(spaceShortcut, &QShortcut::activated, this, &DisassemblyView::toggleViewMode);
 
-  m_rankAddresses = {
-      {0, 0x00401120ULL}, {1, 0x00401155ULL}, {2, 0x00401155ULL},
-      {3, 0x00401155ULL}, {4, 0x00401155ULL}, {5, 0x00401155ULL},
-      {6, 0x00401155ULL}, {7, 0x00401155ULL}};
-
   reloadStyle();
   updateDisassembly(defaultStartupDisassembly());
 }

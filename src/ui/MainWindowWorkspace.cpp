@@ -617,6 +617,12 @@ void MainWindow::setupDocks() {
 
   m_serverRackView = new ServerRackView(this);
   m_serverRackView->setObjectName("ServerRackViewWidget");
+  connect(m_serverRackView, &ServerRackView::ranksUpdated, this,
+          [this](const QMap<int, uint64_t> &rankPcMap) {
+            if (m_disassemblyView) {
+              m_disassemblyView->setRankAddresses(rankPcMap);
+            }
+          });
   connect(m_serverRackView, &ServerRackView::rankSelected, this,
           [this](int rankId, uint64_t pcAddr) {
             onRankSelected(rankId);

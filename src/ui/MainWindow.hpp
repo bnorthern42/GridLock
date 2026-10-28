@@ -92,6 +92,7 @@ public:
     QScreen* resolvePreferredScreen(const QString& monitorHint) const;
     void applyPreferredScreenRouting(const QString& monitorHint, bool openUnfocused);
     QString preferredMonitorHint() const { return m_preferredMonitorHint; }
+    void loadPreviewFixture();
 
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);

@@ -76,13 +76,10 @@ int main(int argc, char *argv[]) {
       0); // temporarily disabled for rendering latency profiling
   QSurfaceFormat::setDefaultFormat(format);
 
-  for (int i = 1; i < argc; ++i) {
-    if (QString::fromLocal8Bit(argv[i]) == QLatin1String("--snapshot") &&
-        qEnvironmentVariableIsEmpty("GRIDLOCK_LIVE_WAYLAND") &&
-        qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
-      qputenv("QT_QPA_PLATFORM", "offscreen");
-      break;
-    }
+  if (gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(argc, argv) &&
+      qEnvironmentVariableIsEmpty("GRIDLOCK_LIVE_WAYLAND") &&
+      qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+    qputenv("QT_QPA_PLATFORM", "offscreen");
   }
 
   QApplication app(argc, argv);
@@ -113,11 +110,6 @@ int main(int argc, char *argv[]) {
   app.processEvents();
 
   gridlock::core::utils::CliParser parser;
-  QCommandLineOption snapshotOption(
-      QStringList() << "snapshot",
-      "Render the main window workspace and save a PNG snapshot to <file>, then exit.",
-      "file");
-  parser.getParser().addOption(snapshotOption);
   parser.process(app);
 
   g_isVerbose = parser.isVerbose();
@@ -128,8 +120,8 @@ int main(int argc, char *argv[]) {
   auto *backend = new DapCoordinator(&window);
   window.setCoordinator(backend);
 
-  if (parser.getParser().isSet(snapshotOption)) {
-    const QString snapshotPath = parser.getParser().value(snapshotOption);
+  const QString snapshotPath = parser.snapshotFilePath();
+  if (!snapshotPath.isEmpty()) {
     splash->finish(&window);
     splash->deleteLater();
     window.show();

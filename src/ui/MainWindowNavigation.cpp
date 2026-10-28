@@ -93,6 +93,9 @@ void MainWindow::applyPreferredScreenRouting(const QString &monitorHint,
                                              bool openUnfocused) {
   m_preferredMonitorHint = monitorHint.trimmed();
   setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
+  if (m_preferredMonitorHint.isEmpty()) {
+    return;
+  }
   if (QScreen *target = resolvePreferredScreen(m_preferredMonitorHint)) {
     setScreen(target);
     if (windowHandle()) {

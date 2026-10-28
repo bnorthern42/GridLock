@@ -54,6 +54,41 @@ private slots:
         QVERIFY(!parser.isTutorialMode());
         QCOMPARE(parser.getTestFilePath(), QString("another_file.txt"));
     }
+
+    void testHeadlessFlagAndNormalLaunchDefault() {
+        {
+            gridlock::core::utils::CliParser parser;
+            QStringList args = {"gridlock"};
+            QVERIFY(parser.parse(args));
+            QVERIFY(!parser.isHeadless());
+        }
+        {
+            gridlock::core::utils::CliParser parser;
+            QStringList args = {"gridlock", "--headless"};
+            QVERIFY(parser.parse(args));
+            QVERIFY(parser.isHeadless());
+        }
+        {
+            gridlock::core::utils::CliParser parser;
+            QStringList args = {"gridlock", "--snapshot", "/tmp/out.png"};
+            QVERIFY(parser.parse(args));
+            QVERIFY(parser.isHeadless());
+        }
+        {
+            char arg0[] = "gridlock";
+            char* argvNormal[] = {arg0, nullptr};
+            QVERIFY(!gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(1, argvNormal));
+
+            char argHeadless[] = "--headless";
+            char* argvHeadless[] = {arg0, argHeadless, nullptr};
+            QVERIFY(gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(2, argvHeadless));
+
+            char argSnapshot[] = "--snapshot";
+            char argSnapPath[] = "/tmp/out.png";
+            char* argvSnapshot[] = {arg0, argSnapshot, argSnapPath, nullptr};
+            QVERIFY(gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(3, argvSnapshot));
+        }
+    }
 };
 
 QTEST_MAIN(TestCliParser)

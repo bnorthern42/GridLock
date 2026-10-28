@@ -43,6 +43,27 @@ GridLock is a multi-process graphical debugger for MPI (Message Passing Interfac
 ### 6. Native Domain Terminology
 * Never reference external third-party tool names in source comments, identifiers, test names, or git commit messages.
 
+### 7. Google C++ Style Guide Compliance
+* All C++ headers and implementation files MUST follow the **Google C++ Style Guide**:
+  * Use `#pragma once` at the top of every header file.
+  * Order `#include` blocks cleanly: corresponding header first, C system headers, C++ standard library headers, Qt/third-party library headers, and project headers.
+  * Enforce strict `const` correctness on methods, references, and local variables.
+  * Annotate all virtual method overrides with `override` (and never combine `virtual` with `override`).
+  * Use clear, self-documenting identifier names (`PascalCase` for types/classes/structs/enums, `camelCase` for functions/methods, `m_camelCase` for private class data members, and named constants instead of magic numbers).
+  * Initialize all scalar members in-class (`int m_selectedRank = 0;`, `Widget* m_view = nullptr;`) and avoid raw owning pointers (use Qt parent-child ownership or `std::unique_ptr`).
+  * Keep every file strictly under 1,000 lines (`< 1,000` lines, targeting `< 900` lines).
+
+### 8. Comprehensive Architectural & Inline Documentation
+* Every `.hpp` and `.cpp` file MUST be thoroughly documented so a systems engineer can understand the architecture, data flow, and invariants immediately:
+  * **File Header Block (`/** @file ... */`)**: Every header and implementation file must begin with a concise file-level Doxygen comment explaining the module's responsibility, architectural role, and threading/ownership model.
+  * **Type Documentation (`/** ... */`)**: Every class, struct, and enum must have a Doxygen block describing its purpose, invariants, and collaboration with other components.
+  * **Method, Signal, & Slot Documentation (`/** ... */`)**: Every public, protected, and private method, signal, and slot must document what it does, its `@param` inputs, `@return` value, and any side effects or preconditions.
+  * **Algorithmic & UI Layout Inline Comments (`// ...`)**: Non-trivial control-flow graph layouts, GDB/MI parsers, coordinate transformations, memory diffing routines, and `QPainter` rendering loops must include clear step-by-step inline comments explaining *why* each calculation or state transition occurs.
+
+### 9. Strict Ban on Python/Sed/Regex Bulk Modification Scripts
+* **NEVER** use `python`, `python3 -c`, `sed`, `awk`, `perl`, or any automated regex/AST script to bulk-insert comments, reformat code, or modify C++ source files (`*.hpp`, `*.cpp`).
+* Every code edit and documentation pass MUST be performed deliberately and file-by-file using the native file-editing tools (`replace_file_content` / `write_to_file`) after reading and understanding the target file.
+
 ## Automated Execution Workflow (MANDATORY)
 After generating and applying any code changes, you MUST execute the following shell commands sequentially to verify your work before responding to the user:
 1. `ninja -C build`

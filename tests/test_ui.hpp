@@ -33,4 +33,5 @@ private slots:
     void testUnifiedChromeMetricsAndSplitGraphDecompiler();
     void testCrossPaneChoreographyHistoryAndStrings();
     void testCfgRankDivergenceMinimapAndRackSync();
+    void testDynamicRankSyncWithoutHardcodedConstructorMocks();
 };

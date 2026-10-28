@@ -18,8 +18,12 @@ public:
     bool isTutorialMode() const;
     bool isTestMode() const;
     bool isVerbose() const;
+    bool isHeadless() const;
+    QString snapshotFilePath() const;
     QString getTestFilePath() const;
-    
+
+    static bool shouldUseOffscreenPlatform(int argc, char* argv[]);
+
     QCommandLineParser& getParser();
 
 private:
@@ -27,6 +31,8 @@ private:
     QCommandLineOption m_testModeOption;
     QCommandLineOption m_tutorialModeOption;
     QCommandLineOption m_verboseOption;
+    QCommandLineOption m_headlessOption;
+    QCommandLineOption m_snapshotOption;
 };
 
 } // namespace utils

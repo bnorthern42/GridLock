@@ -47,7 +47,7 @@ if [[ "${LIVE_MODE}" == "1" ]] && [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v 
     kill "${APP_PID}" 2>/dev/null || true
     wait "${APP_PID}" 2>/dev/null || true
 else
-    QT_QPA_PLATFORM=offscreen "${GRIDLOCK_BIN}" --snapshot "${RAW_IMG}"
+    QT_QPA_PLATFORM=offscreen "${GRIDLOCK_BIN}" --headless --snapshot "${RAW_IMG}"
 fi
 
 if [[ "${ANNOTATE}" == "1" ]] || [[ "${GRIDLOCK_USE_SATTY:-0}" == "1" ]]; then
