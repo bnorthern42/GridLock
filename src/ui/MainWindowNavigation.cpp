@@ -208,14 +208,10 @@ bool MainWindow::seekToAddressOrExpression(const QString &expr) {
       if (!hasSourceMapping) {
         m_showingDecompilerFallback = true;
         m_disassemblyView->setSplitGraphDecompilerMode(true);
-      } else {
+      } else if (m_showingDecompilerFallback) {
         m_showingDecompilerFallback = false;
-        if (m_disassemblyView->isSplitGraphDecompilerMode()) {
-          m_disassemblyView->setSplitGraphDecompilerMode(false);
-          m_disassemblyView->setGraphMode(false);
-        } else if (m_disassemblyView->isDecompilerMode()) {
-          m_disassemblyView->setDecompilerMode(false);
-        }
+        m_disassemblyView->setSplitGraphDecompilerMode(false);
+        m_disassemblyView->setGraphMode(false);
       }
     } else if (!m_disassemblyView->toPlainText().isEmpty()) {
       QTextDocument *doc = m_disassemblyView->document();

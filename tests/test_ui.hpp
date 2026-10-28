@@ -31,4 +31,5 @@ private slots:
     void testNavigationHistoryStringsAndBookmarks();
     void testCfgGraphDecompilerLanguagesAndSourceFallback();
     void testUnifiedChromeMetricsAndSplitGraphDecompiler();
+    void testCrossPaneChoreographyHistoryAndStrings();
 };

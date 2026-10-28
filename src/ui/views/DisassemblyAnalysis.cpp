@@ -327,7 +327,58 @@ void DisassemblyView::setDecompilerTargetLanguage(const QString &lang) {
 void DisassemblyView::refreshDecompilerView() {
   m_decompiledPseudocode = decompileToLanguage(m_targetLang);
   if (m_decompilerEdit) {
+    m_updatingDecompilerCursor = true;
     m_decompilerEdit->setPlainText(m_decompiledPseudocode);
+    m_updatingDecompilerCursor = false;
+  }
+  const int mappedLine = addressToDecompilerLine(m_currentAddress);
+  if (mappedLine > 0) {
+    m_currentDecompilerLine = mappedLine;
+  }
+  highlightActiveDecompilerLine();
+}
+
+uint64_t DisassemblyView::decompilerLineToAddress(int lineNumber) const {
+  return m_decompilerLineToAddr.value(lineNumber, 0ULL);
+}
+
+int DisassemblyView::addressToDecompilerLine(uint64_t address) const {
+  if (m_addrToDecompilerLine.contains(address)) {
+    return m_addrToDecompilerLine.value(address);
+  }
+  for (const DisasmBasicBlock &bb : m_basicBlocks) {
+    if (address >= bb.startAddress && address <= bb.endAddress) {
+      if (m_addrToDecompilerLine.contains(bb.startAddress)) {
+        return m_addrToDecompilerLine.value(bb.startAddress);
+      }
+      for (auto it = m_addrToDecompilerLine.constBegin();
+           it != m_addrToDecompilerLine.constEnd(); ++it) {
+        if (it.key() >= bb.startAddress && it.key() <= bb.endAddress) {
+          return it.value();
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+bool DisassemblyView::selectDecompilerLine(int lineNumber) {
+  if (!m_decompilerLineToAddr.contains(lineNumber)) {
+    return false;
+  }
+  m_currentDecompilerLine = lineNumber;
+  const uint64_t addr = m_decompilerLineToAddr.value(lineNumber);
+  seekToAddress(addr);
+  emit addressSelected(addr);
+  return true;
+}
+
+void DisassemblyView::highlightToken(const QString &token) {
+  m_highlightedToken = token.trimmed();
+  highlightActiveInstruction();
+  highlightActiveDecompilerLine();
+  if (m_graphMode) {
+    rebuildCfgScene();
   }
 }
 
@@ -346,8 +397,11 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
       QStringLiteral("\\[rbp-(0x[0-9a-fA-F]+)\\]"));
   static const QRegularExpression callSymRe(
       QStringLiteral("<([^+>]+?)(?:@plt)?(?:\\+\\d+)?>"));
+  static const QRegularExpression lineAddrRe(
+      QStringLiteral("^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)"));
 
   QSet<QString> stackOffsets;
+  QMap<QString, uint64_t> stackOffsetFirstAddr;
   QStringList callsFound;
   bool hasLoopBackEdge = false;
   bool hasCondBranch = false;
@@ -363,9 +417,22 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
 
   for (const DisasmBasicBlock &bb : m_basicBlocks) {
     for (const QString &line : bb.lines) {
+      uint64_t lineAddr = bb.startAddress;
+      QRegularExpressionMatch am = lineAddrRe.match(line);
+      if (am.hasMatch()) {
+        bool ok = false;
+        const uint64_t parsed = am.captured(1).toULongLong(&ok, 16);
+        if (ok) {
+          lineAddr = parsed;
+        }
+      }
       QRegularExpressionMatch sm = stackVarRe.match(line);
       if (sm.hasMatch()) {
-        stackOffsets.insert(sm.captured(1).mid(2));
+        const QString off = sm.captured(1).mid(2);
+        stackOffsets.insert(off);
+        if (!stackOffsetFirstAddr.contains(off)) {
+          stackOffsetFirstAddr.insert(off, lineAddr);
+        }
       }
       if (line.contains(QStringLiteral("call"))) {
         QRegularExpressionMatch cm = callSymRe.match(line);
@@ -379,29 +446,47 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
   QStringList sortedOffsets = stackOffsets.values();
   std::sort(sortedOffsets.begin(), sortedOffsets.end());
 
+  m_decompilerLineToAddr.clear();
+  m_addrToDecompilerLine.clear();
+
   QStringList out;
+  auto emitLine = [&](const QString &text, uint64_t addr, bool isPrimaryStmt) {
+    out << text;
+    const int lineNum = out.size();
+    if (addr != 0ULL) {
+      m_decompilerLineToAddr.insert(lineNum, addr);
+      if (isPrimaryStmt || !m_addrToDecompilerLine.contains(addr)) {
+        m_addrToDecompilerLine.insert(addr, lineNum);
+      }
+    }
+  };
+
+  const uint64_t entryAddr =
+      m_basicBlocks.isEmpty() ? 0x00401120ULL : m_basicBlocks.first().startAddress;
+
   if (isCpp) {
-    out << QStringLiteral("// DECOMPILED C++ / MPI | %1").arg(m_activeSymbol);
-    out << QStringLiteral("#include <mpi.h>");
-    out << QStringLiteral("#include <cstdint>");
-    out << QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol);
+    emitLine(QStringLiteral("// DECOMPILED C++ / MPI | %1").arg(m_activeSymbol), entryAddr, false);
+    emitLine(QStringLiteral("#include <mpi.h>"), entryAddr, false);
+    emitLine(QStringLiteral("#include <cstdint>"), entryAddr, false);
+    emitLine(QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol), entryAddr, true);
     for (const QString &off : sortedOffsets) {
-      out << QStringLiteral("  std::int32_t var_%1h = 0; // [rbp-0x%1]").arg(off);
+      emitLine(QStringLiteral("  std::int32_t var_%1h = 0; // [rbp-0x%1]").arg(off),
+               stackOffsetFirstAddr.value(off, entryAddr), false);
     }
   } else if (isPseudo) {
-    out << QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1")
-               .arg(m_activeSymbol);
-    out << QStringLiteral("proc %1(argc, argv):").arg(m_activeSymbol);
+    emitLine(QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1").arg(m_activeSymbol), entryAddr, false);
+    emitLine(QStringLiteral("proc %1(argc, argv):").arg(m_activeSymbol), entryAddr, true);
     for (const QString &off : sortedOffsets) {
-      out << QStringLiteral("  local var_%1h := 0").arg(off);
+      emitLine(QStringLiteral("  local var_%1h := 0").arg(off),
+               stackOffsetFirstAddr.value(off, entryAddr), false);
     }
   } else {
-    out << QStringLiteral("/* DECOMPILED APPROX C & XREFS | %1 */")
-               .arg(m_activeSymbol);
-    out << QStringLiteral("#include <stdint.h>");
-    out << QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol);
+    emitLine(QStringLiteral("/* DECOMPILED APPROX C & XREFS | %1 */").arg(m_activeSymbol), entryAddr, false);
+    emitLine(QStringLiteral("#include <stdint.h>"), entryAddr, false);
+    emitLine(QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol), entryAddr, true);
     for (const QString &off : sortedOffsets) {
-      out << QStringLiteral("  int32_t var_%1h = 0; /* [rbp-0x%1] */").arg(off);
+      emitLine(QStringLiteral("  int32_t var_%1h = 0; /* [rbp-0x%1] */").arg(off),
+               stackOffsetFirstAddr.value(off, entryAddr), false);
     }
   }
 
@@ -413,65 +498,106 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
         callerStrs
             << QStringLiteral("0x%1 (jmp)").arg(cAddr, 8, 16, QChar('0'));
       }
-      out << QStringLiteral("  // XREFS TO 0x%1: %2")
-                 .arg(bb.startAddress, 8, 16, QChar('0'))
-                 .arg(callerStrs.join(QStringLiteral(", ")));
+      emitLine(QStringLiteral("  // XREFS TO 0x%1: %2")
+                   .arg(bb.startAddress, 8, 16, QChar('0'))
+                   .arg(callerStrs.join(QStringLiteral(", "))),
+               bb.startAddress, false);
     }
-    out << QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0'));
+    emitLine(QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0')),
+             bb.startAddress, true);
+
+    int blockFirstStmtLine = out.size();
+    QVector<uint64_t> unmappedBlockAddrs;
 
     for (const QString &instLine : bb.lines) {
-      if (instLine.contains(QStringLiteral("MPI_Init"))) {
-        if (isCpp) {
-          out << QStringLiteral("  MPI::Init(argc, argv); // MPI_Init(&argc, &argv)");
-        } else if (isPseudo) {
-          out << QStringLiteral("  call MPI_Init(&argc, &argv)");
-        } else {
-          out << QStringLiteral("  MPI_Init(&argc, &argv);");
+      uint64_t instAddr = bb.startAddress;
+      QRegularExpressionMatch am = lineAddrRe.match(instLine);
+      if (am.hasMatch()) {
+        bool ok = false;
+        const uint64_t parsed = am.captured(1).toULongLong(&ok, 16);
+        if (ok) {
+          instAddr = parsed;
         }
-      } else if (instLine.contains(QStringLiteral("MPI_Finalize"))) {
+      }
+
+      if (instLine.contains(QStringLiteral("call")) &&
+          instLine.contains(QStringLiteral("MPI_Init"))) {
         if (isCpp) {
-          out << QStringLiteral("  MPI::Finalize();");
+          emitLine(QStringLiteral("  MPI::Init(argc, argv); // MPI_Init(&argc, &argv)"), instAddr, true);
         } else if (isPseudo) {
-          out << QStringLiteral("  call MPI_Finalize()");
+          emitLine(QStringLiteral("  call MPI_Init(&argc, &argv)"), instAddr, true);
         } else {
-          out << QStringLiteral("  MPI_Finalize();");
+          emitLine(QStringLiteral("  MPI_Init(&argc, &argv);"), instAddr, true);
         }
+        blockFirstStmtLine = out.size();
+      } else if (instLine.contains(QStringLiteral("call")) &&
+                 instLine.contains(QStringLiteral("MPI_Finalize"))) {
+        if (isCpp) {
+          emitLine(QStringLiteral("  MPI::Finalize();"), instAddr, true);
+        } else if (isPseudo) {
+          emitLine(QStringLiteral("  call MPI_Finalize()"), instAddr, true);
+        } else {
+          emitLine(QStringLiteral("  MPI_Finalize();"), instAddr, true);
+        }
+        blockFirstStmtLine = out.size();
       } else if (instLine.contains(QStringLiteral("jg "))) {
         if (isPseudo) {
-          out << QStringLiteral("  while (var_4h <= 2) do:");
+          emitLine(QStringLiteral("  while (var_4h <= 2) do:"), instAddr, true);
         } else {
-          out << QStringLiteral("  while (var_4h <= 2) { if (var_4h > 2) goto loc_0x%1; }")
-                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+          emitLine(QStringLiteral("  while (var_4h <= 2) { if (var_4h > 2) goto loc_0x%1; }")
+                       .arg(bb.trueTarget, 8, 16, QChar('0')),
+                   instAddr, true);
         }
+        m_addrToDecompilerLine.insert(bb.startAddress, out.size());
+        m_decompilerLineToAddr.insert(out.size(), bb.startAddress);
+        blockFirstStmtLine = out.size();
       } else if (instLine.contains(QStringLiteral("je "))) {
         if (isPseudo) {
-          out << QStringLiteral("  if (var_4h == 0) then goto loc_0x%1")
-                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+          emitLine(QStringLiteral("  if (var_4h == 0) then goto loc_0x%1")
+                       .arg(bb.trueTarget, 8, 16, QChar('0')),
+                   instAddr, true);
         } else {
-          out << QStringLiteral("  if (var_4h == 0) { goto loc_0x%1; } else { var_4h += 1; }")
-                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+          emitLine(QStringLiteral("  if (var_4h == 0) { goto loc_0x%1; } else { var_4h += 1; }")
+                       .arg(bb.trueTarget, 8, 16, QChar('0')),
+                   instAddr, true);
         }
+        blockFirstStmtLine = out.size();
       } else if (instLine.contains(QStringLiteral("jmp "))) {
         if (isPseudo) {
-          out << QStringLiteral("  jump loc_0x%1")
-                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+          emitLine(QStringLiteral("  jump loc_0x%1")
+                       .arg(bb.trueTarget, 8, 16, QChar('0')),
+                   instAddr, true);
         } else {
-          out << QStringLiteral("  goto loc_0x%1;")
-                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+          emitLine(QStringLiteral("  goto loc_0x%1;")
+                       .arg(bb.trueTarget, 8, 16, QChar('0')),
+                   instAddr, true);
         }
+        blockFirstStmtLine = out.size();
       } else if (instLine.contains(QStringLiteral("ret"))) {
-        out << (isPseudo ? QStringLiteral("  return 0")
-                         : QStringLiteral("  return 0;"));
+        emitLine(isPseudo ? QStringLiteral("  return 0")
+                          : QStringLiteral("  return 0;"),
+                 instAddr, true);
+        blockFirstStmtLine = out.size();
+      } else {
+        unmappedBlockAddrs.append(instAddr);
+      }
+    }
+
+    for (uint64_t uAddr : unmappedBlockAddrs) {
+      if (!m_addrToDecompilerLine.contains(uAddr)) {
+        m_addrToDecompilerLine.insert(uAddr, blockFirstStmtLine);
       }
     }
   }
 
   if (!hasLoopBackEdge && !hasCondBranch && m_basicBlocks.isEmpty()) {
-    out << QStringLiteral("  int32_t var_4h = 0;");
-    out << QStringLiteral("  if (var_4h == 0) { MPI_Init(&argc, &argv); }");
+    emitLine(QStringLiteral("  int32_t var_4h = 0;"), entryAddr, false);
+    emitLine(QStringLiteral("  if (var_4h == 0) { MPI_Init(&argc, &argv); }"), entryAddr, true);
   }
   if (!isPseudo) {
-    out << QStringLiteral("}");
+    const uint64_t endAddr =
+        m_basicBlocks.isEmpty() ? entryAddr : m_basicBlocks.last().endAddress;
+    emitLine(QStringLiteral("}"), endAddr, false);
   }
   return out.join('\n');
 }
@@ -544,12 +670,14 @@ void DisassemblyView::rebuildCfgScene() {
         QPen(isActiveBlock ? QColor("#569cd6") : QColor("#333842"),
              isActiveBlock ? 2.0 : 1.0),
         QBrush(QColor("#181a1f")));
+    rectItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     rectItem->setZValue(1.0);
 
     QRectF headerRect(boxX, currentY, boxW, headerH);
     auto *hdrItem = m_cfgScene->addRect(
         headerRect, QPen(Qt::NoPen),
         QBrush(isActiveBlock ? QColor("#1f3442") : QColor("#21252b")));
+    hdrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrItem->setZValue(2.0);
 
     auto *hdrText = m_cfgScene->addSimpleText(
@@ -559,11 +687,21 @@ void DisassemblyView::rebuildCfgScene() {
         monoFont);
     hdrText->setBrush(isActiveBlock ? QColor("#ffffff") : QColor("#4ec9b0"));
     hdrText->setPos(boxX + 8.0, currentY + 2.0);
+    hdrText->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrText->setZValue(3.0);
 
     qreal lineY = currentY + headerH + 3.0;
     for (const QString &instLine : renderLines) {
+      if (!m_highlightedToken.isEmpty() &&
+          instLine.contains(m_highlightedToken, Qt::CaseInsensitive)) {
+        auto *tokBg = m_cfgScene->addRect(
+            QRectF(boxX + 4.0, lineY - 1.0, boxW - 8.0, lineH),
+            QPen(Qt::NoPen), QBrush(QColor(0x3a, 0x3d, 0x41, 180)));
+        tokBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
+        tokBg->setZValue(2.5);
+      }
       auto *txt = m_cfgScene->addSimpleText(instLine, monoFont);
+      txt->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
       if (instLine.startsWith(QStringLiteral("(fcn)"))) {
         txt->setBrush(QColor("#dcdcaa"));
       } else if (instLine.startsWith(';')) {

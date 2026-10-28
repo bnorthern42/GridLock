@@ -349,7 +349,7 @@ void MainWindow::setupToolbar() {
       "QPushButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #242830; }");
 
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
-  m_navBackBtn->setObjectName("navBackBtn");
+  m_navBackBtn->setObjectName("navBackButton");
   m_navBackBtn->setFixedSize(22, 22);
   m_navBackBtn->setStyleSheet(navBtnStyle);
   m_navBackBtn->setEnabled(false);
@@ -357,7 +357,7 @@ void MainWindow::setupToolbar() {
   toolbar->addWidget(m_navBackBtn);
 
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
-  m_navForwardBtn->setObjectName("navForwardBtn");
+  m_navForwardBtn->setObjectName("navForwardButton");
   m_navForwardBtn->setFixedSize(22, 22);
   m_navForwardBtn->setStyleSheet(navBtnStyle);
   m_navForwardBtn->setEnabled(false);
@@ -651,6 +651,11 @@ void MainWindow::setupDocks() {
   m_disassemblyView->setSizePolicy(QSizePolicy::Expanding,
                                    QSizePolicy::Expanding);
   m_disassemblyView->setContentsMargins(0, 0, 0, 0);
+  connect(m_disassemblyView, &DisassemblyView::addressSelected, this,
+          [this](uint64_t addr) {
+            seekToAddressOrExpression(
+                QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+          });
 
   masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(m_disassemblyView);

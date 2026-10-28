@@ -97,16 +97,29 @@ public:
     void setSplitGraphDecompilerMode(bool enabled);
     bool isSplitGraphDecompilerMode() const { return m_splitGraphDecompiler; }
 
+    uint64_t decompilerLineToAddress(int lineNumber) const;
+    int addressToDecompilerLine(uint64_t address) const;
+    int currentDecompilerLine() const { return m_currentDecompilerLine; }
+    bool selectDecompilerLine(int lineNumber);
+    void highlightToken(const QString& token);
+    QString highlightedToken() const { return m_highlightedToken; }
+
     void setAddressComment(uint64_t address, const QString& comment);
     QString addressComment(uint64_t address) const;
     bool toggleBookmark(uint64_t address);
     bool isBookmarked(uint64_t address) const;
     QVector<uint64_t> bookmarkedAddresses() const;
 
+signals:
+    void addressSelected(uint64_t address);
+
 public slots:
     void updateDisassembly(const QString& asmCode);
     void setDisassembly(const QString& asmCode) { updateDisassembly(asmCode); }
     void reloadStyle();
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     friend class DisassemblyTextEdit;
@@ -116,6 +129,7 @@ private:
     void rebuildCfgScene();
     void updateViewModeLayout();
     void highlightActiveInstruction();
+    void highlightActiveDecompilerLine();
     QString applyUserCommentsToListing(const QString& rawCode) const;
     static QString defaultStartupDisassembly();
 
@@ -141,10 +155,14 @@ private:
     QVector<DisasmBasicBlock> m_basicBlocks;
     QMap<uint64_t, int> m_addrToLine;
     QMap<int, uint64_t> m_lineToAddr;
+    mutable QMap<int, uint64_t> m_decompilerLineToAddr;
+    mutable QMap<uint64_t, int> m_addrToDecompilerLine;
     QMap<uint64_t, QString> m_userComments;
     QSet<uint64_t> m_bookmarks;
     QString m_baseDisassembly;
     uint64_t m_currentAddress = 0x401120ULL;
+    int m_currentDecompilerLine = 1;
+    bool m_updatingDecompilerCursor = false;
     bool m_graphMode = false;
     bool m_decompilerMode = false;
     bool m_splitGraphDecompiler = false;
@@ -152,6 +170,7 @@ private:
     QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");
     QString m_targetLang = QStringLiteral("C");
     QString m_decompiledPseudocode;
+    QString m_highlightedToken;
 };
 
 } // namespace gridlock::ui

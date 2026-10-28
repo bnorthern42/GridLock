@@ -715,14 +715,10 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
 
 void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     gridlock::ui::MainWindow mainWindow;
-
-    // 1. No Unparented Dock Titlebars
     const auto docks = mainWindow.findChildren<QDockWidget*>();
     QVERIFY(!docks.isEmpty());
     for (QDockWidget* dock : docks) {
-        if (!dock) {
-            continue;
-        }
+        if (!dock) continue;
         if (QWidget* tb = dock->titleBarWidget()) {
             QVERIFY2(tb->parentWidget() == dock,
                      qPrintable(QString("Dock '%1' has titleBarWidget with parent '%2' instead of dock")
@@ -733,7 +729,6 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
         }
     }
 
-    // 2. Portable Monitor Resolution & Unfocused Routing
     QScreen* primary = QGuiApplication::primaryScreen();
     QVERIFY(primary != nullptr);
     QCOMPARE(mainWindow.resolvePreferredScreen(""), primary);
@@ -747,7 +742,6 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating));
     QCOMPARE(mainWindow.preferredMonitorHint(), QStringLiteral("2560x1440"));
 
-    // 3. ConfigManager TOML Persistence
     auto& cfg = gridlock::core::ConfigManager::instance();
     const QString prevMonitor = cfg.preferredMonitor();
     const bool prevUnfocused = cfg.openUnfocused();
@@ -762,7 +756,6 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     cfg.setOpenUnfocused(true);
     QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440"));
     QVERIFY(cfg.openUnfocused());
-
     cfg.loadConfig();
     QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440"));
     QVERIFY(cfg.openUnfocused());
@@ -771,16 +764,12 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     cfg.setOpenUnfocused(false);
     QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080"));
     QVERIFY(!cfg.openUnfocused());
-
     cfg.loadConfig();
     QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080"));
     QVERIFY(!cfg.openUnfocused());
 
-    if (prevTestDir.isEmpty()) {
-        qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
-    } else {
-        qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevTestDir);
-    }
+    if (prevTestDir.isEmpty()) qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
+    else qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevTestDir);
     cfg.loadConfig();
     cfg.setPreferredMonitor(prevMonitor);
     cfg.setOpenUnfocused(prevUnfocused);
@@ -795,14 +784,12 @@ void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
     QVERIFY(projectExplorer != nullptr);
     QVERIFY(memView != nullptr);
 
-    // 1. Seek History Back/Forward
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
     QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401149"));
     QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178"));
     QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
-
     QVERIFY(mainWindow.canNavigateBack());
     QVERIFY(!mainWindow.canNavigateForward());
 
@@ -810,12 +797,10 @@ void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
     QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
     QVERIFY(mainWindow.canNavigateBack());
     QVERIFY(mainWindow.canNavigateForward());
-
     QVERIFY(mainWindow.navigateForward());
     QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
     QVERIFY(!mainWindow.canNavigateForward());
 
-    // 2. Strings Sidebar Mode
     projectExplorer->setStringsMode(true);
     QVERIFY(projectExplorer->isStringsMode());
     QVERIFY(projectExplorer->stringCount() >= 4);
@@ -828,15 +813,12 @@ void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
     QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
     QVERIFY(mainWindow.canNavigateBack());
 
-    // 3. Disassembly Bookmarks & Inline Comments
     disassemblyView->setAddressComment(0x00401149ULL, " Outer loop rank check ");
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Outer loop rank check"));
-
     QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
     QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
     QVERIFY(disassemblyView->isBookmarked(0x00401149ULL));
     QVERIFY(disassemblyView->bookmarkedAddresses().contains(0x00401149ULL));
-
     QVERIFY(!disassemblyView->toggleBookmark(0x00401149ULL));
     QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
 }
@@ -846,7 +828,6 @@ void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
     auto* disassemblyView = mainWindow.disassemblyView();
     QVERIFY(disassemblyView != nullptr);
 
-    // 1. Multi-Language Decompilation
     disassemblyView->setDecompilerTargetLanguage("C");
     QCOMPARE(disassemblyView->decompilerTargetLanguage(), QStringLiteral("C"));
     const QString cOut = disassemblyView->decompileToLanguage("C");
@@ -856,25 +837,16 @@ void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
 
     const QString cppOut = disassemblyView->decompileToLanguage("C++");
     const QString pseudoOut = disassemblyView->decompileToLanguage("Pseudocode");
-    QVERIFY(!cppOut.isEmpty());
-    QVERIFY(!pseudoOut.isEmpty());
-    QVERIFY(cppOut != cOut);
-    QVERIFY(pseudoOut != cOut);
-    QVERIFY(cppOut != pseudoOut);
+    QVERIFY(!cppOut.isEmpty() && !pseudoOut.isEmpty());
+    QVERIFY(cppOut != cOut && pseudoOut != cOut && cppOut != pseudoOut);
 
-    // 2. CFG Graph Signature & Orthogonal Routing
     const QString sigHeader = disassemblyView->functionSignatureHeader();
-    QVERIFY(!sigHeader.isEmpty());
-    QVERIFY(sigHeader.contains("sym.main(int argc, char **argv)"));
-
+    QVERIFY(!sigHeader.isEmpty() && sigHeader.contains("sym.main(int argc, char **argv)"));
     disassemblyView->setGraphMode(true);
-    QVERIFY(disassemblyView->isGraphMode());
-    QVERIFY(disassemblyView->basicBlockCount() >= 3);
+    QVERIFY(disassemblyView->isGraphMode() && disassemblyView->basicBlockCount() >= 3);
 
-    // 3. Automatic Decompiler Fallback When Source Is Missing
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
     QVERIFY(!mainWindow.isShowingDecompilerFallback());
-
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401000"));
     QVERIFY(mainWindow.isShowingDecompilerFallback());
 }
@@ -888,8 +860,6 @@ void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
 
     auto* disassemblyView = mainWindow.disassemblyView();
     QVERIFY(disassemblyView != nullptr);
-
-    // 1. Side-by-Side Graph + Decompiler Mode
     disassemblyView->setSplitGraphDecompilerMode(true);
     QVERIFY(disassemblyView->isSplitGraphDecompilerMode());
     QCoreApplication::processEvents();
@@ -897,31 +867,62 @@ void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
     auto* cfgGraphView = disassemblyView->findChild<QGraphicsView*>("cutterCfgGraphView");
     auto* decompView = disassemblyView->findChild<QPlainTextEdit*>("cutterDecompilerView");
     QVERIFY(cfgGraphView && decompView);
-    QVERIFY(cfgGraphView->isVisibleTo(disassemblyView));
-    QVERIFY(decompView->isVisibleTo(disassemblyView));
-    QVERIFY(cfgGraphView->width() >= 180);
-    QVERIFY(decompView->width() >= 180);
+    QVERIFY(cfgGraphView->isVisibleTo(disassemblyView) && decompView->isVisibleTo(disassemblyView));
+    QVERIFY(cfgGraphView->width() >= 180 && decompView->width() >= 180);
     mainWindow.captureWorkspaceSnapshot("/tmp/gridlock_ui_v11_split.png");
 
-    // 2. Unified Compact Control Heights
     const QList<QWidget*> scopes = { &mainWindow, mainWindow.memView(), mainWindow.projectExplorerWidget(), disassemblyView };
     for (QWidget* s : scopes) {
         if (!s) continue;
-        for (auto* btn : s->findChildren<QPushButton*>()) {
-            if (btn->isVisible()) QVERIFY2(btn->height() <= 28, qPrintable(btn->objectName()));
-        }
-        for (auto* edit : s->findChildren<QLineEdit*>()) {
-            if (edit->isVisible()) QVERIFY2(edit->height() <= 28, qPrintable(edit->objectName()));
-        }
-        for (auto* combo : s->findChildren<QComboBox*>()) {
-            if (combo->isVisible()) QVERIFY2(combo->height() <= 28, qPrintable(combo->objectName()));
-        }
+        for (auto* btn : s->findChildren<QPushButton*>()) if (btn->isVisible()) QVERIFY2(btn->height() <= 28, qPrintable(btn->objectName()));
+        for (auto* edit : s->findChildren<QLineEdit*>()) if (edit->isVisible()) QVERIFY2(edit->height() <= 28, qPrintable(edit->objectName()));
+        for (auto* combo : s->findChildren<QComboBox*>()) if (combo->isVisible()) QVERIFY2(combo->height() <= 28, qPrintable(combo->objectName()));
     }
+    for (auto* tb : mainWindow.findChildren<QToolBar*>()) if (tb->isVisible()) QVERIFY2(tb->height() <= 36, qPrintable(tb->objectName()));
+}
 
-    // 3. Main Toolbar Compactness
-    for (auto* tb : mainWindow.findChildren<QToolBar*>()) {
-        if (tb->isVisible()) QVERIFY2(tb->height() <= 36, qPrintable(tb->objectName()));
-    }
+void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
+    gridlock::ui::MainWindow mainWindow;
+    auto* disassemblyView = mainWindow.disassemblyView();
+    auto* projectExplorer = mainWindow.projectExplorerWidget();
+    auto* memView = mainWindow.memView();
+    QVERIFY(disassemblyView && projectExplorer && memView);
+
+    disassemblyView->setSplitGraphDecompilerMode(true);
+    QVERIFY(disassemblyView->seekToAddress(0x0040113dULL));
+    const int initLine = disassemblyView->currentDecompilerLine();
+    QVERIFY(initLine > 0);
+    QCOMPARE(disassemblyView->decompilerLineToAddress(initLine), 0x0040113dULL);
+    QCOMPARE(disassemblyView->addressToDecompilerLine(0x0040113dULL), initLine);
+
+    const int loopLine = disassemblyView->addressToDecompilerLine(0x00401149ULL);
+    QVERIFY(loopLine > 0);
+    QVERIFY(disassemblyView->selectDecompilerLine(loopLine));
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
+    QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
+
+    disassemblyView->highlightToken("argc");
+    QCOMPARE(disassemblyView->highlightedToken(), QStringLiteral("argc"));
+
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x0040113d"));
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178"));
+    QVERIFY(mainWindow.canNavigateBack());
+    QVERIFY(mainWindow.navigateBack());
+    QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL);
+    QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
+    QVERIFY(mainWindow.navigateForward());
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
+
+    projectExplorer->setStringsMode(true);
+    QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4);
+    QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD"));
+    QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
+
+    disassemblyView->setAddressComment(0x00401149ULL, "Rank loop header");
+    QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Rank loop header"));
+    QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
+    QVERIFY(disassemblyView->isBookmarked(0x00401149ULL));
 }
 
 QTEST_MAIN(TestMainWindowUI)

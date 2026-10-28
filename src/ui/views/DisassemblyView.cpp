@@ -5,6 +5,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
 #include <QHBoxLayout>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPaintEvent>
@@ -437,6 +438,9 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_cfgView->setDragMode(QGraphicsView::ScrollHandDrag);
   m_cfgView->setBackgroundBrush(QColor(0x16, 0x18, 0x1d));
   m_cfgView->setMinimumWidth(180);
+  if (m_cfgView->viewport()) {
+    m_cfgView->viewport()->installEventFilter(this);
+  }
 
   m_stack->addWidget(m_linearEdit);
   m_stack->addWidget(m_cfgView);
@@ -457,6 +461,27 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_decompilerEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
   m_decompilerEdit->setFont(f);
   m_decompilerEdit->setMinimumWidth(180);
+  connect(m_decompilerEdit, &QPlainTextEdit::cursorPositionChanged, this,
+          [this]() {
+            if (m_updatingDecompilerCursor || !m_decompilerEdit) {
+              return;
+            }
+            const int lineNum =
+                m_decompilerEdit->textCursor().blockNumber() + 1;
+            if (m_decompilerLineToAddr.contains(lineNum) &&
+                lineNum != m_currentDecompilerLine) {
+              selectDecompilerLine(lineNum);
+            }
+          });
+  connect(m_decompilerEdit, &QPlainTextEdit::selectionChanged, this, [this]() {
+    if (m_updatingDecompilerCursor || !m_decompilerEdit) {
+      return;
+    }
+    const QString sel = m_decompilerEdit->textCursor().selectedText().trimmed();
+    if (sel.length() >= 2 && sel.length() <= 32 && !sel.contains(' ')) {
+      highlightToken(sel);
+    }
+  });
   decompilerLayout->addWidget(m_decompilerEdit, 1);
 
   auto *decompFooter = new QWidget(m_decompilerPage);
@@ -469,7 +494,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   footerLayout->setContentsMargins(6, 1, 6, 1);
   footerLayout->setSpacing(6);
 
-  m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto Refresh"), decompFooter);
+  m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto"), decompFooter);
   m_autoRefreshCheck->setObjectName("decompilerAutoRefreshCheck");
   m_autoRefreshCheck->setChecked(true);
 
@@ -479,7 +504,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   connect(m_refreshDecompilerBtn, &QPushButton::clicked, this,
           &DisassemblyView::refreshDecompilerView);
 
-  auto *targetLabel = new QLabel(QStringLiteral("Decompiler:"), decompFooter);
+  auto *targetLabel = new QLabel(QStringLiteral("Target:"), decompFooter);
   m_targetLangCombo = new QComboBox(decompFooter);
   m_targetLangCombo->setObjectName("decompilerTargetCombo");
   m_targetLangCombo->setFixedHeight(20);
@@ -643,6 +668,10 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
   }
 
   m_currentAddress = address;
+  const int mappedDecompLine = addressToDecompilerLine(address);
+  if (mappedDecompLine > 0) {
+    m_currentDecompilerLine = mappedDecompLine;
+  }
 
   if (m_headerBadge) {
     m_headerBadge->setText(
@@ -652,6 +681,7 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
   }
 
   highlightActiveInstruction();
+  highlightActiveDecompilerLine();
   if (m_graphMode) {
     rebuildCfgScene();
   }
@@ -672,6 +702,7 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   }
   parseDisassembly(effectiveCode);
   highlightActiveInstruction();
+  highlightActiveDecompilerLine();
   if (m_graphMode) {
     rebuildCfgScene();
   }
@@ -702,7 +733,78 @@ void DisassemblyView::highlightActiveInstruction() {
       selections.append(sel);
     }
   }
+
+  if (!m_highlightedToken.isEmpty() && m_linearEdit->document()) {
+    QTextCursor tc(m_linearEdit->document());
+    while (!(tc = m_linearEdit->document()->find(m_highlightedToken, tc))
+                .isNull()) {
+      QTextEdit::ExtraSelection tokSel;
+      tokSel.format.setBackground(QColor(0x3a, 0x44, 0x54));
+      tokSel.format.setForeground(QColor(0xff, 0xd7, 0x00));
+      tokSel.cursor = tc;
+      selections.append(tokSel);
+    }
+  }
   m_linearEdit->setExtraSelections(selections);
+}
+
+void DisassemblyView::highlightActiveDecompilerLine() {
+  if (!m_decompilerEdit || !m_decompilerEdit->document()) {
+    return;
+  }
+
+  QList<QTextEdit::ExtraSelection> selections;
+  if (m_currentDecompilerLine > 0) {
+    QTextBlock block = m_decompilerEdit->document()->findBlockByNumber(
+        m_currentDecompilerLine - 1);
+    if (block.isValid()) {
+      m_updatingDecompilerCursor = true;
+      QTextCursor cursor(block);
+      m_decompilerEdit->setTextCursor(cursor);
+      m_decompilerEdit->centerCursor();
+      m_updatingDecompilerCursor = false;
+
+      QTextEdit::ExtraSelection sel;
+      sel.format.setBackground(QColor(0x26, 0x4f, 0x78));
+      sel.format.setProperty(QTextFormat::FullWidthSelection, true);
+      sel.cursor = cursor;
+      sel.cursor.clearSelection();
+      selections.append(sel);
+    }
+  }
+
+  if (!m_highlightedToken.isEmpty()) {
+    QTextCursor tc(m_decompilerEdit->document());
+    while (!(tc = m_decompilerEdit->document()->find(m_highlightedToken, tc))
+                .isNull()) {
+      QTextEdit::ExtraSelection tokSel;
+      tokSel.format.setBackground(QColor(0x3a, 0x44, 0x54));
+      tokSel.format.setForeground(QColor(0xff, 0xd7, 0x00));
+      tokSel.cursor = tc;
+      selections.append(tokSel);
+    }
+  }
+  m_decompilerEdit->setExtraSelections(selections);
+}
+
+bool DisassemblyView::eventFilter(QObject *watched, QEvent *event) {
+  if (m_cfgView && watched == m_cfgView->viewport() &&
+      event->type() == QEvent::MouseButtonPress) {
+    auto *me = static_cast<QMouseEvent *>(event);
+    if (me->button() == Qt::LeftButton) {
+      if (QGraphicsItem *item = m_cfgView->itemAt(me->pos())) {
+        const QVariant v = item->data(Qt::UserRole);
+        if (v.isValid()) {
+          const uint64_t bbAddr = v.toULongLong();
+          if (bbAddr != 0ULL) {
+            seekToAddress(bbAddr);
+            emit addressSelected(bbAddr);
+          }
+        }
+      }
+    }
+  }
+  return QWidget::eventFilter(watched, event);
 }
 
 void DisassemblyView::reloadStyle() {
