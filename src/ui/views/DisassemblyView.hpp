@@ -80,6 +80,10 @@ public:
     const QVector<DisasmBasicBlock>& basicBlocks() const { return m_basicBlocks; }
     int lineForAddress(uint64_t address) const { return m_addrToLine.value(address, -1); }
     uint64_t addressForLine(int line) const { return m_lineToAddr.value(line, 0ULL); }
+    QVector<uint64_t> xrefsToAddress(uint64_t targetAddr) const;
+    QString decompiledPseudocode() const { return m_decompiledPseudocode; }
+    bool isDecompilerMode() const { return m_decompilerMode; }
+    void setDecompilerMode(bool enabled);
 
 public slots:
     void updateDisassembly(const QString& asmCode);
@@ -98,10 +102,12 @@ private:
     QLabel* m_headerBadge = nullptr;
     QLabel* m_statsBadge = nullptr;
     QPushButton* m_modeToggleBtn = nullptr;
+    QPushButton* m_decompilerToggleBtn = nullptr;
     QStackedWidget* m_stack = nullptr;
     DisassemblyTextEdit* m_linearEdit = nullptr;
     QGraphicsView* m_cfgView = nullptr;
     QGraphicsScene* m_cfgScene = nullptr;
+    QPlainTextEdit* m_decompilerEdit = nullptr;
     AsmSyntaxHighlighter* m_highlighter = nullptr;
 
     QVector<BranchArc> m_branchArcs;
@@ -110,7 +116,10 @@ private:
     QMap<int, uint64_t> m_lineToAddr;
     uint64_t m_currentAddress = 0x401120ULL;
     bool m_graphMode = false;
+    bool m_decompilerMode = false;
     QString m_activeSymbol = QStringLiteral("sym.main");
+    QString m_decompiledPseudocode;
 };
 
 } // namespace gridlock::ui
+

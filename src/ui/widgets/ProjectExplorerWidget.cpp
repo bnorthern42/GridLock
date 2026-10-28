@@ -16,10 +16,19 @@
 
 namespace gridlock::ui {
 
+namespace {
+class FlexibleDockContent : public QWidget {
+public:
+  using QWidget::QWidget;
+  QSize sizeHint() const override { return QSize(260, 500); }
+  QSize minimumSizeHint() const override { return QSize(150, 120); }
+};
+} // namespace
+
 ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
     : QDockWidget("Project / Symbols", parent) {
   m_iconProvider = nullptr;
-  QWidget *content = new QWidget(this);
+  QWidget *content = new FlexibleDockContent(this);
   QVBoxLayout *mainLayout = new QVBoxLayout(content);
   mainLayout->setContentsMargins(0, 0, 0, 0);
   mainLayout->setSpacing(0);
@@ -135,7 +144,13 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_stack->addWidget(symbolsPage);
 
   mainLayout->addWidget(m_stack, 1);
+  content->setMinimumWidth(150);
+  content->setMaximumWidth(QWIDGETSIZE_MAX);
+  content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   setWidget(content);
+  setMinimumWidth(150);
+  setMaximumWidth(QWIDGETSIZE_MAX);
+  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
   seedDefaultSymbols();
   populateSymbolsTable();

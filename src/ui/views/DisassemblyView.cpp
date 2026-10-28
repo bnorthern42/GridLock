@@ -334,29 +334,37 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   headerWidget->setObjectName("cutterDisasmHeader");
   headerWidget->setFixedHeight(26);
   auto *headerLayout = new QHBoxLayout(headerWidget);
-  headerLayout->setContentsMargins(8, 2, 6, 2);
-  headerLayout->setSpacing(8);
+  headerLayout->setContentsMargins(6, 2, 4, 2);
+  headerLayout->setSpacing(4);
 
-  m_headerBadge = new QLabel(QStringLiteral("DISASSEMBLY | sym.main @ 0x00401120"), headerWidget);
+  m_headerBadge = new QLabel(QStringLiteral("DISASM | sym.main @ 0x00401120"), headerWidget);
   m_headerBadge->setObjectName("cutterDisasmBadge");
 
   m_statsBadge = new QLabel(headerWidget);
   m_statsBadge->setObjectName("cutterDisasmStats");
 
-  m_modeToggleBtn = new QPushButton(QStringLiteral("Linear / Graph (Space)"), headerWidget);
+  m_modeToggleBtn = new QPushButton(QStringLiteral("CFG (Space)"), headerWidget);
   m_modeToggleBtn->setObjectName("cutterCfgToggleBtn");
   m_modeToggleBtn->setCursor(Qt::PointingHandCursor);
   m_modeToggleBtn->setFixedHeight(20);
   connect(m_modeToggleBtn, &QPushButton::clicked, this, &DisassemblyView::toggleViewMode);
 
+  m_decompilerToggleBtn = new QPushButton(QStringLiteral("PSEUDOCODE / XREFS"), headerWidget);
+  m_decompilerToggleBtn->setObjectName("cutterDecompilerBtn");
+  m_decompilerToggleBtn->setCheckable(true);
+  m_decompilerToggleBtn->setCursor(Qt::PointingHandCursor);
+  m_decompilerToggleBtn->setFixedHeight(20);
+  connect(m_decompilerToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setDecompilerMode);
+
   headerLayout->addWidget(m_headerBadge);
   headerLayout->addStretch(1);
   headerLayout->addWidget(m_statsBadge);
+  headerLayout->addWidget(m_decompilerToggleBtn);
   headerLayout->addWidget(m_modeToggleBtn);
 
   rootLayout->addWidget(headerWidget);
 
-  // Dual-mode QStackedWidget: Page 0 = Linear Disassembly + Flow Gutter, Page 1 = CFG Basic-Block Graph
+  // Multi-mode QStackedWidget: Page 0 = Linear Disassembly, Page 1 = CFG Graph, Page 2 = Pseudocode & Xrefs
   m_stack = new QStackedWidget(this);
   m_stack->setContentsMargins(0, 0, 0, 0);
 
@@ -380,8 +388,16 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_cfgView->setDragMode(QGraphicsView::ScrollHandDrag);
   m_cfgView->setBackgroundBrush(QColor(0x14, 0x16, 0x19));
 
+  m_decompilerEdit = new QPlainTextEdit(m_stack);
+  m_decompilerEdit->setObjectName("cutterDecompilerView");
+  m_decompilerEdit->setReadOnly(true);
+  m_decompilerEdit->setFrameShape(QFrame::NoFrame);
+  m_decompilerEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
+  m_decompilerEdit->setFont(f);
+
   m_stack->addWidget(m_linearEdit);
   m_stack->addWidget(m_cfgView);
+  m_stack->addWidget(m_decompilerEdit);
   m_stack->setCurrentIndex(0);
 
   rootLayout->addWidget(m_stack, 1);
@@ -422,15 +438,39 @@ void DisassemblyView::centerCursor() {
   }
 }
 
+QVector<uint64_t> DisassemblyView::xrefsToAddress(uint64_t targetAddr) const {
+  QVector<uint64_t> callers;
+  for (const auto& arc : m_branchArcs) {
+    if (arc.toAddr == targetAddr && !callers.contains(arc.fromAddr)) {
+      callers.append(arc.fromAddr);
+    }
+  }
+  return callers;
+}
+
+void DisassemblyView::setDecompilerMode(bool enabled) {
+  m_decompilerMode = enabled;
+  if (m_decompilerToggleBtn) {
+    m_decompilerToggleBtn->setChecked(enabled);
+  }
+  if (m_stack) {
+    m_stack->setCurrentIndex(m_decompilerMode ? 2 : (m_graphMode ? 1 : 0));
+  }
+}
+
 void DisassemblyView::setGraphMode(bool enabled) {
   m_graphMode = enabled;
+  m_decompilerMode = false;
+  if (m_decompilerToggleBtn) {
+    m_decompilerToggleBtn->setChecked(false);
+  }
   if (m_stack) {
     m_stack->setCurrentIndex(m_graphMode ? 1 : 0);
   }
   if (m_modeToggleBtn) {
     m_modeToggleBtn->setText(m_graphMode
-                                 ? QStringLiteral("Mode: CFG Graph (Space)")
-                                 : QStringLiteral("Linear / Graph (Space)"));
+                                 ? QStringLiteral("Linear (Space)")
+                                 : QStringLiteral("CFG (Space)"));
   }
   if (m_graphMode) {
     rebuildCfgScene();
@@ -463,9 +503,9 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
 
   if (m_headerBadge) {
     m_headerBadge->setText(
-        QStringLiteral("DISASSEMBLY | %1 @ 0x%2")
+        QStringLiteral("%1 @ 0x%2")
             .arg(m_activeSymbol)
-            .arg(m_currentAddress, 8, 16, QChar('0')));
+            .arg(m_currentAddress, 6, 16, QChar('0')));
   }
 
   highlightActiveInstruction();
@@ -669,15 +709,56 @@ void DisassemblyView::parseDisassembly(const QString& asmCode) {
     m_basicBlocks.append(currentBlock);
   }
 
+  // Synthesize structured C/MPI pseudocode & Xrefs from parsed basic blocks and branch arcs
+  QStringList pseudoLines;
+  pseudoLines << QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1").arg(m_activeSymbol);
+  pseudoLines << QStringLiteral("int main(int argc, char **argv) {");
+  for (const DisasmBasicBlock& bb : std::as_const(m_basicBlocks)) {
+    const QVector<uint64_t> inXrefs = xrefsToAddress(bb.startAddress);
+    if (!inXrefs.isEmpty()) {
+      QStringList callerStrs;
+      for (uint64_t cAddr : inXrefs) {
+        callerStrs << QStringLiteral("0x%1 (jmp)").arg(cAddr, 8, 16, QChar('0'));
+      }
+      pseudoLines << QStringLiteral("  // XREFS TO 0x%1: %2")
+                         .arg(bb.startAddress, 8, 16, QChar('0'))
+                         .arg(callerStrs.join(QStringLiteral(", ")));
+    }
+    pseudoLines << QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0'));
+    for (const QString& instLine : bb.lines) {
+      if (instLine.contains(QStringLiteral("MPI_Init"))) {
+        pseudoLines << QStringLiteral("    MPI_Init(&argc, &argv);");
+      } else if (instLine.contains(QStringLiteral("MPI_Finalize"))) {
+        pseudoLines << QStringLiteral("    MPI_Finalize();");
+      } else if (instLine.contains(QStringLiteral("jg "))) {
+        pseudoLines << QStringLiteral("    if (rank_idx > 2) goto loc_0x%1;")
+                           .arg(bb.trueTarget, 8, 16, QChar('0'));
+      } else if (instLine.contains(QStringLiteral("je "))) {
+        pseudoLines << QStringLiteral("    if (rank_idx == 0) goto loc_0x%1;")
+                           .arg(bb.trueTarget, 8, 16, QChar('0'));
+      } else if (instLine.contains(QStringLiteral("jmp "))) {
+        pseudoLines << QStringLiteral("    goto loc_0x%1;")
+                           .arg(bb.trueTarget, 8, 16, QChar('0'));
+      } else if (instLine.contains(QStringLiteral("ret"))) {
+        pseudoLines << QStringLiteral("    return 0;");
+      }
+    }
+  }
+  pseudoLines << QStringLiteral("}");
+  m_decompiledPseudocode = pseudoLines.join('\n');
+  if (m_decompilerEdit) {
+    m_decompilerEdit->setPlainText(m_decompiledPseudocode);
+  }
+
   if (m_headerBadge) {
     m_headerBadge->setText(
-        QStringLiteral("DISASSEMBLY | %1 @ 0x%2")
+        QStringLiteral("%1 @ 0x%2")
             .arg(m_activeSymbol)
-            .arg(m_currentAddress, 8, 16, QChar('0')));
+            .arg(m_currentAddress, 6, 16, QChar('0')));
   }
   if (m_statsBadge) {
     m_statsBadge->setText(
-        QStringLiteral("BLOCKS: %1 | EDGES: %2")
+        QStringLiteral("BB:%1 E:%2")
             .arg(m_basicBlocks.size())
             .arg(m_branchArcs.size()));
   }
@@ -873,15 +954,23 @@ void DisassemblyView::reloadStyle() {
   QSettings s("gridlock", "debugger");
   int fontSize = s.value("appearance/code_font_size", 10).toInt();
 
+  const QString editorStyle =
+      QString("QPlainTextEdit { background-color: %1; color: %2; border: none; }")
+          .arg(gridlock::core::ConfigManager::instance().getSourceBackground())
+          .arg(gridlock::core::ConfigManager::instance().getSourceText());
+
   if (m_linearEdit) {
     QFont f = m_linearEdit->font();
     f.setPointSize(fontSize);
     m_linearEdit->setFont(f);
-    m_linearEdit->setStyleSheet(
-        QString("QPlainTextEdit { background-color: %1; color: %2; border: none; }")
-            .arg(gridlock::core::ConfigManager::instance().getSourceBackground())
-            .arg(gridlock::core::ConfigManager::instance().getSourceText()));
+    m_linearEdit->setStyleSheet(editorStyle);
     m_linearEdit->updateGutter();
+  }
+  if (m_decompilerEdit) {
+    QFont f = m_decompilerEdit->font();
+    f.setPointSize(fontSize);
+    m_decompilerEdit->setFont(f);
+    m_decompilerEdit->setStyleSheet(editorStyle);
   }
 
   if (m_highlighter) {

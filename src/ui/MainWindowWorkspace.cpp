@@ -205,8 +205,7 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::applyCutterWorkspaceLayout() {
-  setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks |
-                 QMainWindow::AnimatedDocks);
+  setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
   setDockNestingEnabled(true);
   setDocumentMode(true);
   setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
@@ -486,8 +485,9 @@ void MainWindow::setupDocks() {
   // Center & Bottom Zone Splitter
   QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
   mainVerticalSplitter->setObjectName("MainVerticalSplitter");
+  mainVerticalSplitter->setMinimumWidth(240);
   mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
-  mainVerticalSplitter->setHandleWidth(1);
+  mainVerticalSplitter->setHandleWidth(4);
   mainVerticalSplitter->setChildrenCollapsible(false);
 
   // Center Zone: Source Code (Left) & Disassembly View (Right) side-by-side
@@ -495,11 +495,14 @@ void MainWindow::setupDocks() {
       new QSplitter(Qt::Horizontal, mainVerticalSplitter);
   masterHorizontalSplitter->setObjectName("MasterHorizontalSplitter");
   masterHorizontalSplitter->setContentsMargins(0, 0, 0, 0);
-  masterHorizontalSplitter->setHandleWidth(1);
+  masterHorizontalSplitter->setHandleWidth(4);
   masterHorizontalSplitter->setChildrenCollapsible(false);
 
   m_editorTabManager = new EditorTabManager(masterHorizontalSplitter);
-  m_editorTabManager->setMinimumWidth(350);
+  m_editorTabManager->setMinimumWidth(120);
+  m_editorTabManager->setMaximumWidth(QWIDGETSIZE_MAX);
+  m_editorTabManager->setSizePolicy(QSizePolicy::Expanding,
+                                    QSizePolicy::Expanding);
   m_editorTabManager->setDocumentMode(true);
   m_editorTabManager->setContentsMargins(0, 0, 0, 0);
   if (m_editorTabManager->tabBar()) {
@@ -684,6 +687,10 @@ void MainWindow::setupDocks() {
           });
 
   m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
+  m_disassemblyView->setMinimumWidth(120);
+  m_disassemblyView->setMaximumWidth(QWIDGETSIZE_MAX);
+  m_disassemblyView->setSizePolicy(QSizePolicy::Expanding,
+                                   QSizePolicy::Expanding);
   m_disassemblyView->setContentsMargins(0, 0, 0, 0);
 
   masterHorizontalSplitter->addWidget(m_editorTabManager);
@@ -698,6 +705,7 @@ void MainWindow::setupDocks() {
   // Bottom Zone: Reduced to 7 core I/O & memory inspection tabs
   m_bottomTabs = new QTabWidget(mainVerticalSplitter);
   m_bottomTabs->setObjectName("BottomConsoleTabs");
+  m_bottomTabs->setMinimumWidth(200);
   m_bottomTabs->setDocumentMode(true);
   m_bottomTabs->setContentsMargins(0, 0, 0, 0);
   if (m_bottomTabs->tabBar()) {
@@ -781,21 +789,34 @@ void MainWindow::setupDocks() {
   m_bottomTabs->setCurrentWidget(m_memView);
 
   mainVerticalSplitter->addWidget(m_bottomTabs);
-  m_bottomTabs->setMinimumHeight(220);
+  m_bottomTabs->setMinimumHeight(180);
 
   mainVerticalSplitter->setStretchFactor(0, 68);
   mainVerticalSplitter->setStretchFactor(1, 32);
   mainVerticalSplitter->setSizes({600, 260});
 
   setCentralWidget(mainVerticalSplitter);
-  m_projectExplorerWidget->setMinimumWidth(250);
-  variablesDock->setMinimumWidth(265);
-  registersDock->setMinimumWidth(265);
-  watchDock->setMinimumWidth(265);
-  serverRackDock->setMinimumWidth(265);
-  resizeDocks({m_projectExplorerWidget, variablesDock, watchDock, serverRackDock},
-              {260, 275, 275, 275}, Qt::Horizontal);
-  resizeDocks({variablesDock, watchDock, serverRackDock}, {320, 210, 290},
+
+  const QList<QDockWidget *> sideDocks = {
+      m_projectExplorerWidget, variablesDock, registersDock, watchDock,
+      serverRackDock};
+  for (QDockWidget *dock : sideDocks) {
+    if (!dock) {
+      continue;
+    }
+    dock->setMinimumWidth(150);
+    dock->setMaximumWidth(QWIDGETSIZE_MAX);
+    dock->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    if (QWidget *inner = dock->widget()) {
+      inner->setMinimumWidth(150);
+      inner->setMaximumWidth(QWIDGETSIZE_MAX);
+      inner->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    }
+  }
+
+  resizeDocks({m_projectExplorerWidget, registersDock}, {260, 290},
+              Qt::Horizontal);
+  resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290},
               Qt::Vertical);
 
   QMenu *viewMenu = nullptr;

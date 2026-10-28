@@ -563,9 +563,6 @@ void TestMainWindowUI::testSourceFileLineLimits() {
     }
     allFiles.sort();
     for (const QString& filePath : allFiles) {
-        if (filePath.endsWith("PreferencesDialog.cpp")) {
-            continue;
-        }
         QFile file(filePath);
         QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
         int lines = 0;
@@ -580,4 +577,69 @@ void TestMainWindowUI::testSourceFileLineLimits() {
     }
 }
 
+void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // 1. Left & Right Dock Resizability
+    QDockWidget* leftDock = nullptr;
+    QDockWidget* rightDock = nullptr;
+    const auto docks = mainWindow.findChildren<QDockWidget*>();
+    for (QDockWidget* dock : docks) {
+        const auto area = mainWindow.dockWidgetArea(dock);
+        if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
+            QVERIFY2(dock->minimumWidth() <= 200, qPrintable(dock->windowTitle()));
+            QVERIFY2(dock->maximumWidth() >= 1000, qPrintable(dock->windowTitle()));
+            if (dock->widget()) {
+                QVERIFY2(dock->widget()->minimumWidth() <= 200, qPrintable(dock->windowTitle()));
+                QVERIFY2(dock->widget()->maximumWidth() >= 1000, qPrintable(dock->windowTitle()));
+            }
+            if (area == Qt::LeftDockWidgetArea && !leftDock) {
+                leftDock = dock;
+            }
+            if (area == Qt::RightDockWidgetArea &&
+                dock->objectName() == QStringLiteral("RegisterViewDock")) {
+                rightDock = dock;
+            }
+        }
+    }
+    QVERIFY(leftDock != nullptr);
+    QVERIFY(rightDock != nullptr);
+
+    mainWindow.resizeDocks({leftDock}, {340}, Qt::Horizontal);
+    mainWindow.resizeDocks({rightDock}, {420}, Qt::Horizontal);
+    QTest::qWait(30);
+    QApplication::processEvents();
+
+    QVERIFY2(std::abs(leftDock->width() - 340) <= 30,
+             qPrintable(QString("Left dock width %1 did not resize near 340").arg(leftDock->width())));
+    QVERIFY2(std::abs(rightDock->width() - 420) <= 30,
+             qPrintable(QString("Right dock width %1 did not resize near 420").arg(rightDock->width())));
+
+    // 2. Xrefs & Decompiler Mode in DisassemblyView
+    auto* disassemblyView = mainWindow.disassemblyView();
+    QVERIFY(disassemblyView != nullptr);
+
+    const QVector<uint64_t> xrefs = disassemblyView->xrefsToAddress(0x00401149ULL);
+    QVERIFY2(xrefs.size() >= 2,
+             qPrintable(QString("Expected >= 2 xrefs to 0x00401149, got %1").arg(xrefs.size())));
+    QVERIFY(xrefs.contains(0x00401163ULL));
+    QVERIFY(xrefs.contains(0x0040116eULL));
+
+    const QString pseudocode = disassemblyView->decompiledPseudocode();
+    QVERIFY(!pseudocode.isEmpty());
+    QVERIFY(pseudocode.contains("int main(") || pseudocode.contains("sym.main"));
+    QVERIFY(pseudocode.contains("MPI_Init"));
+    QVERIFY(pseudocode.contains("401149"));
+
+    disassemblyView->setDecompilerMode(true);
+    QVERIFY(disassemblyView->isDecompilerMode());
+    disassemblyView->setDecompilerMode(false);
+    QVERIFY(!disassemblyView->isDecompilerMode());
+}
+
 QTEST_MAIN(TestMainWindowUI)
+

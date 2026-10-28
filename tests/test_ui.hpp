@@ -25,4 +25,6 @@ private slots:
     void testCutterHexdumpDiffAndRegisterSeekSync();
     void testSymbolSidebarAndNavRibbon();
     void testSourceFileLineLimits();
+    void testDockResizabilityAndXrefDecompiler();
 };
+

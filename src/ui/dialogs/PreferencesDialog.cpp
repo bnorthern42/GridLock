@@ -1,5 +1,5 @@
 // PreferencesDialog.cpp
-// Implements a Kate/KDevelop-style side-bar preferences dialog.
+// Implements a side-bar preferences dialog.
 // MPI / GDB settings are owned exclusively by DebuggerSettingsPage and
 // persisted through ConfigManager.
 
@@ -8,17 +8,14 @@
 #include "../../core/managers/DocsetManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
-#include <QPainter>
-#include <QFont>
 #include <QCheckBox>
-#include <QFutureWatcher>
 #include <QComboBox>
-#include <QWindow>
-#include <QMouseEvent>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFont>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -26,6 +23,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -34,8 +33,65 @@
 #include <QStackedWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
+#include <QWindow>
 
 namespace gridlock::ui {
+
+namespace {
+
+QFormLayout *createStandardPageForm(QWidget *parent, const QString &titleHtml,
+                                    int spacing = 14) {
+  auto *form = new QFormLayout(parent);
+  form->setContentsMargins(24, 24, 24, 24);
+  form->setSpacing(spacing);
+  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+  auto *heading = new QLabel(titleHtml, parent);
+  heading->setObjectName("heading");
+  form->addRow(heading);
+
+  auto *separator = new QLabel(parent);
+  separator->setFixedHeight(1);
+  separator->setObjectName("separator");
+  form->addRow(separator);
+  return form;
+}
+
+QLineEdit *addBrowsePathRow(QWidget *parent, QFormLayout *form,
+                            const QString &rowLabel,
+                            const QString &placeholder,
+                            const QString &toolTip,
+                            const QString &dialogTitle,
+                            const QString &defaultDir = QString()) {
+  auto *row = new QHBoxLayout();
+  auto *edit = new QLineEdit(parent);
+  edit->setPlaceholderText(placeholder);
+  if (!toolTip.isEmpty()) {
+    edit->setToolTip(toolTip);
+  }
+  auto *browseBtn = new QPushButton(QObject::tr("Browse…"), parent);
+  browseBtn->setFixedWidth(72);
+  QObject::connect(browseBtn, &QPushButton::clicked, parent,
+                   [parent, edit, dialogTitle, defaultDir]() {
+                     QString path = QFileDialog::getOpenFileName(
+                         parent, dialogTitle, defaultDir);
+                     if (!path.isEmpty()) {
+                       edit->setText(path);
+                     }
+                   });
+  row->addWidget(edit);
+  row->addWidget(browseBtn);
+  form->addRow(rowLabel, row);
+  return edit;
+}
+
+void addFormNote(QWidget *parent, QFormLayout *form, const QString &html) {
+  auto *note = new QLabel(html, parent);
+  note->setWordWrap(true);
+  form->addRow(QString(), note);
+}
+
+} // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  AppearanceSettingsPage
@@ -43,25 +99,13 @@ namespace gridlock::ui {
 
 AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
     : QWidget(parent) {
-  auto *form = new QFormLayout(this);
-  form->setContentsMargins(24, 24, 24, 24);
-  form->setSpacing(14);
-  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-  auto *heading = new QLabel(tr("<b>Appearance</b>"), this);
-  heading->setObjectName("heading");
-  form->addRow(heading);
-
-  auto *separator = new QLabel(this);
-  separator->setFixedHeight(1);
-  separator->setObjectName("separator");
-  form->addRow(separator);
+  auto *form = createStandardPageForm(this, tr("<b>Appearance</b>"));
 
   m_themeCombo = new QComboBox(this);
   m_themeCombo->addItems(
       gridlock::core::managers::ThemeManager::instance().getAvailableThemes());
-  m_themeCombo->setToolTip(tr(
-      "Select the application color theme. Changes are applied immediately."));
+  m_themeCombo->setToolTip(
+      tr("Select the application color theme. Changes are applied immediately."));
   form->addRow(tr("Color Theme:"), m_themeCombo);
 
   m_darkModeCheck = new QCheckBox(tr("Enable Dark Mode"), this);
@@ -72,19 +116,17 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
             gridlock::core::managers::ThemeManager::instance().setTheme(
                 theme, m_darkModeCheck->isChecked());
           });
-
-  connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool /*checked*/) {
-    // Dark Mode check logic is currently handled natively by the ACSS themes,
-    // so we just pass it along (though it's ignored for XML-based coloring).
-  });
+  connect(m_darkModeCheck, &QCheckBox::toggled, this, [](bool) {});
 
   m_fileTreeStyleCombo = new QComboBox(this);
   m_fileTreeStyleCombo->addItems({tr("Compact"), tr("Comfortable"), tr("Large")});
-  m_fileTreeStyleCombo->setToolTip(tr("Density of items in the Project Explorer tree."));
+  m_fileTreeStyleCombo->setToolTip(
+      tr("Density of items in the Project Explorer tree."));
   form->addRow(tr("File Tree Style:"), m_fileTreeStyleCombo);
 
   m_colorizeIconsCheck = new QCheckBox(tr("Enable Colorful File Icons"), this);
-  m_colorizeIconsCheck->setToolTip(tr("Render file tree icons using vibrant colors based on file type."));
+  m_colorizeIconsCheck->setToolTip(
+      tr("Render file tree icons using vibrant colors based on file type."));
   form->addRow(QString(), m_colorizeIconsCheck);
 
   m_uiFontSizeBox = new QSpinBox(this);
@@ -97,13 +139,10 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
   m_codeFontSizeBox->setToolTip(tr("Font size for the source code editor."));
   form->addRow(tr("Code Font Size:"), m_codeFontSizeBox);
 
-  auto *fontNote =
-      new QLabel(tr("<small style='color:#888;'>Font settings follow the "
-                    "system monospace font.<br>"
-                    "Restart may be required for full theme reload.</small>"),
-                 this);
-  fontNote->setWordWrap(true);
-  form->addRow(QString(), fontNote);
+  addFormNote(this, form,
+              tr("<small style='color:#888;'>Font settings follow the system "
+                 "monospace font.<br>Restart may be required for full theme "
+                 "reload.</small>"));
 
   loadFromSettings();
 }
@@ -111,7 +150,6 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget *parent)
 QString AppearanceSettingsPage::selectedTheme() const {
   return m_themeCombo->currentText();
 }
-
 bool AppearanceSettingsPage::isDarkMode() const {
   return m_darkModeCheck->isChecked();
 }
@@ -134,13 +172,16 @@ void AppearanceSettingsPage::loadFromSettings() {
   m_darkModeCheck->blockSignals(false);
 
   int idx = m_themeCombo->findText(theme);
-  if (idx >= 0)
+  if (idx >= 0) {
     m_themeCombo->setCurrentIndex(idx);
-
-  int ftsIdx = m_fileTreeStyleCombo->findText(s.value("appearance/file_tree_style", "Comfortable").toString());
-  if (ftsIdx >= 0) m_fileTreeStyleCombo->setCurrentIndex(ftsIdx);
-  
-  m_colorizeIconsCheck->setChecked(s.value("appearance/colorize_icons", true).toBool());
+  }
+  int ftsIdx = m_fileTreeStyleCombo->findText(
+      s.value("appearance/file_tree_style", "Comfortable").toString());
+  if (ftsIdx >= 0) {
+    m_fileTreeStyleCombo->setCurrentIndex(ftsIdx);
+  }
+  m_colorizeIconsCheck->setChecked(
+      s.value("appearance/colorize_icons", true).toBool());
   m_uiFontSizeBox->setValue(s.value("appearance/ui_font_size", 11).toInt());
   m_codeFontSizeBox->setValue(s.value("appearance/code_font_size", 11).toInt());
 }
@@ -150,19 +191,7 @@ void AppearanceSettingsPage::loadFromSettings() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 EditingSettingsPage::EditingSettingsPage(QWidget *parent) : QWidget(parent) {
-  auto *form = new QFormLayout(this);
-  form->setContentsMargins(24, 24, 24, 24);
-  form->setSpacing(14);
-  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-  auto *heading = new QLabel(tr("<b>Editing</b>"), this);
-  heading->setObjectName("heading");
-  form->addRow(heading);
-
-  auto *separator = new QLabel(this);
-  separator->setFixedHeight(1);
-  separator->setObjectName("separator");
-  form->addRow(separator);
+  auto *form = createStandardPageForm(this, tr("<b>Editing</b>"));
 
   m_tabWidthBox = new QSpinBox(this);
   m_tabWidthBox->setRange(1, 16);
@@ -173,8 +202,8 @@ EditingSettingsPage::EditingSettingsPage(QWidget *parent) : QWidget(parent) {
 
   m_indentModeCombo = new QComboBox(this);
   m_indentModeCombo->addItems({tr("Spaces"), tr("Tabs")});
-  m_indentModeCombo->setToolTip(tr(
-      "Whether to insert spaces or a real tab character when Tab is pressed."));
+  m_indentModeCombo->setToolTip(
+      tr("Whether to insert spaces or a real tab character when Tab is pressed."));
   form->addRow(tr("Indent With:"), m_indentModeCombo);
 
   m_whitespaceCombo = new QComboBox(this);
@@ -188,13 +217,15 @@ EditingSettingsPage::EditingSettingsPage(QWidget *parent) : QWidget(parent) {
   form->addRow(QString(), m_wordWrapCheck);
 
   m_showEdgeColumnCheck = new QCheckBox(tr("Show Edge Column Line"), this);
-  m_showEdgeColumnCheck->setToolTip(tr("Display a vertical line at the specified edge column."));
+  m_showEdgeColumnCheck->setToolTip(
+      tr("Display a vertical line at the specified edge column."));
   form->addRow(QString(), m_showEdgeColumnCheck);
 
   m_edgeColumnBox = new QSpinBox(this);
   m_edgeColumnBox->setRange(1, 300);
   m_edgeColumnBox->setValue(80);
-  m_edgeColumnBox->setToolTip(tr("The column index at which the edge line is drawn."));
+  m_edgeColumnBox->setToolTip(
+      tr("The column index at which the edge line is drawn."));
   form->addRow(tr("Edge Column:"), m_edgeColumnBox);
 
   loadFromSettings();
@@ -208,7 +239,9 @@ bool EditingSettingsPage::showWhitespace() const {
   return m_whitespaceCombo->currentIndex() == 1;
 }
 bool EditingSettingsPage::wordWrap() const { return m_wordWrapCheck->isChecked(); }
-bool EditingSettingsPage::showEdgeColumn() const { return m_showEdgeColumnCheck->isChecked(); }
+bool EditingSettingsPage::showEdgeColumn() const {
+  return m_showEdgeColumnCheck->isChecked();
+}
 int EditingSettingsPage::edgeColumn() const { return m_edgeColumnBox->value(); }
 
 void EditingSettingsPage::loadFromSettings() {
@@ -219,30 +252,17 @@ void EditingSettingsPage::loadFromSettings() {
   m_whitespaceCombo->setCurrentIndex(
       s.value("editing/show_whitespace", false).toBool() ? 1 : 0);
   m_wordWrapCheck->setChecked(s.value("editing/word_wrap", false).toBool());
-  m_showEdgeColumnCheck->setChecked(s.value("editing/show_edge_column", true).toBool());
+  m_showEdgeColumnCheck->setChecked(
+      s.value("editing/show_edge_column", true).toBool());
   m_edgeColumnBox->setValue(s.value("editing/edge_column", 80).toInt());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  BehaviorSettingsPage
-//  MPI / rank fields removed — those are now exclusively in
-//  DebuggerSettingsPage. This page owns session-level UX preferences only.
 // ═══════════════════════════════════════════════════════════════════════════
 
 BehaviorSettingsPage::BehaviorSettingsPage(QWidget *parent) : QWidget(parent) {
-  auto *form = new QFormLayout(this);
-  form->setContentsMargins(24, 24, 24, 24);
-  form->setSpacing(14);
-  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-  auto *heading = new QLabel(tr("<b>Behavior</b>"), this);
-  heading->setObjectName("heading");
-  form->addRow(heading);
-
-  auto *separator = new QLabel(this);
-  separator->setFixedHeight(1);
-  separator->setObjectName("separator");
-  form->addRow(separator);
+  auto *form = createStandardPageForm(this, tr("<b>Behavior</b>"));
 
   m_restoreBreakpointsCheck = new QComboBox(this);
   m_restoreBreakpointsCheck->addItems({tr("Always"), tr("Ask"), tr("Never")});
@@ -258,16 +278,13 @@ BehaviorSettingsPage::BehaviorSettingsPage(QWidget *parent) : QWidget(parent) {
 
   m_focusOnStopCheck = new QComboBox(this);
   m_focusOnStopCheck->addItems({tr("Yes"), tr("No")});
-  m_focusOnStopCheck->setToolTip(tr("Automatically raise the GridLock window "
-                                    "when a rank hits a breakpoint."));
+  m_focusOnStopCheck->setToolTip(
+      tr("Automatically raise the GridLock window when a rank hits a breakpoint."));
   form->addRow(tr("Focus on Stop:"), m_focusOnStopCheck);
 
-  auto *note = new QLabel(
-      tr("<small style='color:#888;'>MPI executor and rank settings are in the "
-         "<b>Debugger</b> category.</small>"),
-      this);
-  note->setWordWrap(true);
-  form->addRow(QString(), note);
+  addFormNote(this, form,
+              tr("<small style='color:#888;'>MPI executor and rank settings are "
+                 "in the <b>Debugger</b> category.</small>"));
 
   loadFromSettings();
 }
@@ -286,8 +303,9 @@ void BehaviorSettingsPage::loadFromSettings() {
   QSettings s("gridlock", "debugger");
   int rbIdx = m_restoreBreakpointsCheck->findText(
       s.value("behavior/restore_breakpoints", "Always").toString());
-  if (rbIdx >= 0)
+  if (rbIdx >= 0) {
     m_restoreBreakpointsCheck->setCurrentIndex(rbIdx);
+  }
   m_confirmQuitCheck->setCurrentIndex(
       s.value("behavior/confirm_quit", true).toBool() ? 0 : 1);
   m_focusOnStopCheck->setCurrentIndex(
@@ -296,76 +314,23 @@ void BehaviorSettingsPage::loadFromSettings() {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  DebuggerSettingsPage
-//  Sole owner of DAP Adapter, GDB path, MPI executable, MPI args, and rank
-//  count.
 // ═══════════════════════════════════════════════════════════════════════════
 
 DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
-  auto *form = new QFormLayout(this);
-  form->setContentsMargins(24, 24, 24, 24);
-  form->setSpacing(14);
-  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  auto *form = createStandardPageForm(this, tr("<b>Debugger</b>"));
 
-  auto *heading = new QLabel(tr("<b>Debugger</b>"), this);
-  heading->setObjectName("heading");
-  form->addRow(heading);
-
-  auto *separator = new QLabel(this);
-  separator->setFixedHeight(1);
-  separator->setObjectName("separator");
-  form->addRow(separator);
-  // ── Clangd Path ─────────────────────────────────────────────────────────
-  auto *clangdRow = new QHBoxLayout();
-  m_clangdPathEdit = new QLineEdit(this);
-  m_clangdPathEdit->setPlaceholderText("clangd");
-  m_clangdPathEdit->setToolTip(
-      tr("Path to the clangd language server executable."));
-
-  auto *clangdBrowseBtn = new QPushButton(tr("Browse…"), this);
-  clangdBrowseBtn->setFixedWidth(72);
-  connect(clangdBrowseBtn, &QPushButton::clicked, this, [this]() {
-    QString path =
-        QFileDialog::getOpenFileName(this, tr("Select Clangd Executable"));
-    if (!path.isEmpty())
-      m_clangdPathEdit->setText(path);
-  });
-  clangdRow->addWidget(m_clangdPathEdit);
-  clangdRow->addWidget(clangdBrowseBtn);
-  form->addRow(tr("Clangd Path:"), clangdRow);
-  // ── DAP Adapter Path ────────────────────────────────────────────────────
-  auto *dapRow = new QHBoxLayout();
-  m_dapAdapterEdit = new QLineEdit(this);
-  m_dapAdapterEdit->setPlaceholderText("lldb-dap");
-  m_dapAdapterEdit->setToolTip(tr("Path to the DAP server (e.g. lldb-dap)."));
-
-  auto *dapBrowseBtn = new QPushButton(tr("Browse…"), this);
-  dapBrowseBtn->setFixedWidth(72);
-  connect(dapBrowseBtn, &QPushButton::clicked, this, [this]() {
-    QString path = QFileDialog::getOpenFileName(this, tr("Select DAP Adapter"));
-    if (!path.isEmpty())
-      m_dapAdapterEdit->setText(path);
-  });
-  dapRow->addWidget(m_dapAdapterEdit);
-  dapRow->addWidget(dapBrowseBtn);
-  form->addRow(tr("DAP Adapter Path:"), dapRow);
-
-  // ── GDB Path ────────────────────────────────────────────────────────────
-  auto *gdbRow = new QHBoxLayout();
-  m_gdbPathEdit = new QLineEdit(this);
-  m_gdbPathEdit->setPlaceholderText("gdb");
-  m_gdbPathEdit->setToolTip(
-      tr("Full path to the GDB binary, e.g. /usr/bin/gdb or a custom build."));
-
-  auto *gdbBrowseBtn = new QPushButton(tr("Browse…"), this);
-  gdbBrowseBtn->setFixedWidth(72);
-  connect(gdbBrowseBtn, &QPushButton::clicked, this, [this]() {
-    QString path = QFileDialog::getOpenFileName(this, tr("Select GDB Path"));
-    if (!path.isEmpty())
-      m_gdbPathEdit->setText(path);
-  });
-  gdbRow->addWidget(m_gdbPathEdit);
-  gdbRow->addWidget(gdbBrowseBtn);
-  form->addRow(tr("GDB Path:"), gdbRow);
+  m_clangdPathEdit = addBrowsePathRow(
+      this, form, tr("Clangd Path:"), QStringLiteral("clangd"),
+      tr("Path to the clangd language server executable."),
+      tr("Select Clangd Executable"));
+  m_dapAdapterEdit = addBrowsePathRow(
+      this, form, tr("DAP Adapter Path:"), QStringLiteral("lldb-dap"),
+      tr("Path to the DAP server (e.g. lldb-dap)."),
+      tr("Select DAP Adapter"));
+  m_gdbPathEdit = addBrowsePathRow(
+      this, form, tr("GDB Path:"), QStringLiteral("gdb"),
+      tr("Full path to the GDB binary, e.g. /usr/bin/gdb or a custom build."),
+      tr("Select GDB Path"));
 
   m_mpiExecEdit = new QLineEdit(this);
   m_mpiExecEdit->setPlaceholderText("mpiexec");
@@ -390,37 +355,25 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget *parent) : QWidget(parent) {
       tr("Automatically set GDB to catch floating-point traps."));
   form->addRow(QString(), m_trapFpeCheck);
 
-  auto *note = new QLabel(
-      tr("<small style='color:#888;'>GDB must support the MI2 protocol "
-         "(<code>--interpreter=mi2</code>).<br>"
-         "Changes take effect on the next debug session launch.</small>"),
-      this);
-  note->setWordWrap(true);
-  form->addRow(QString(), note);
+  addFormNote(this, form,
+              tr("<small style='color:#888;'>GDB must support the MI2 protocol "
+                 "(<code>--interpreter=mi2</code>).<br>Changes take effect on "
+                 "the next debug session launch.</small>"));
 
   loadFromSettings();
 }
-QString DebuggerSettingsPage::clangdPath() const {
-  return m_clangdPathEdit->text();
-}
-QString DebuggerSettingsPage::dapAdapterPath() const {
-  return m_dapAdapterEdit->text();
-}
+
+QString DebuggerSettingsPage::clangdPath() const { return m_clangdPathEdit->text(); }
+QString DebuggerSettingsPage::dapAdapterPath() const { return m_dapAdapterEdit->text(); }
 QString DebuggerSettingsPage::gdbPath() const { return m_gdbPathEdit->text(); }
-QString DebuggerSettingsPage::mpiExecutable() const {
-  return m_mpiExecEdit->text();
-}
+QString DebuggerSettingsPage::mpiExecutable() const { return m_mpiExecEdit->text(); }
 QString DebuggerSettingsPage::mpiArgs() const { return m_mpiArgsEdit->text(); }
 int DebuggerSettingsPage::defaultRanks() const { return m_rankBox->value(); }
-bool DebuggerSettingsPage::trapFpe() const {
-  return m_trapFpeCheck->isChecked();
-}
+bool DebuggerSettingsPage::trapFpe() const { return m_trapFpeCheck->isChecked(); }
 
 void DebuggerSettingsPage::loadFromSettings() {
-  const auto ds =
-      gridlock::core::ConfigManager::instance().getDebuggerSettings();
-  const auto ps =
-      gridlock::core::ConfigManager::instance().loadProjectSettings();
+  const auto ds = gridlock::core::ConfigManager::instance().getDebuggerSettings();
+  (void)gridlock::core::ConfigManager::instance().loadProjectSettings();
   m_clangdPathEdit->setText(
       gridlock::core::ConfigManager::instance().getGlobalClangdPath());
   m_dapAdapterEdit->setText(
@@ -437,28 +390,14 @@ void DebuggerSettingsPage::loadFromSettings() {
 // ═════════════════════════════════════════════════════════════════════════
 
 HpcSettingsPage::HpcSettingsPage(QWidget *parent) : QWidget(parent) {
-  auto *form = new QFormLayout(this);
-  form->setContentsMargins(24, 24, 24, 24);
-  form->setSpacing(14);
-  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  auto *form = createStandardPageForm(this, tr("<b>HPC / Cluster</b>"));
 
-  auto *heading = new QLabel(tr("<b>HPC / Cluster</b>"), this);
-  heading->setObjectName("heading");
-  form->addRow(heading);
-
-  auto *separator = new QLabel(this);
-  separator->setFixedHeight(1);
-  separator->setObjectName("separator");
-  form->addRow(separator);
-
-  // ── Hosts file ──────────────────────────────────────────────────────────
   auto *hostsRow = new QHBoxLayout();
   m_hostsFileEdit = new QLineEdit(this);
   m_hostsFileEdit->setPlaceholderText(tr("(not set — use default hosts)"));
-  m_hostsFileEdit->setToolTip(tr(
-      "Path to an MPI hostfile. When set, --hostfile <path> is passed to the\n"
-      "MPI launcher. Leave empty to let the launcher choose nodes "
-      "automatically."));
+  m_hostsFileEdit->setToolTip(
+      tr("Path to an MPI hostfile. When set, --hostfile <path> is passed to the\n"
+         "MPI launcher. Leave empty to let the launcher choose nodes automatically."));
   auto *browseBtn = new QPushButton(tr("Browse…"), this);
   browseBtn->setFixedWidth(72);
   connect(browseBtn, &QPushButton::clicked, this, [this]() {
@@ -467,26 +406,23 @@ HpcSettingsPage::HpcSettingsPage(QWidget *parent) : QWidget(parent) {
         m_hostsFileEdit->text().isEmpty() ? QDir::homePath()
                                           : m_hostsFileEdit->text(),
         tr("All Files (*)"), nullptr, QFileDialog::DontUseNativeDialog);
-    if (!path.isEmpty())
+    if (!path.isEmpty()) {
       m_hostsFileEdit->setText(path);
+    }
   });
   hostsRow->addWidget(m_hostsFileEdit);
   hostsRow->addWidget(browseBtn);
   form->addRow(tr("MPI Hosts File:"), hostsRow);
 
-  // ── Environment variables ────────────────────────────────────────────────
   m_envVarsEdit = new QTextEdit(this);
   m_envVarsEdit->setFixedHeight(90);
-  m_envVarsEdit->setPlaceholderText(tr("One key=value pair per line\n"
-                                       "e.g.  OMPI_MCA_btl=tcp,self\n"
-                                       "      UCX_NET_DEVICES=eth0"));
+  m_envVarsEdit->setPlaceholderText(
+      tr("One key=value pair per line\ne.g.  OMPI_MCA_btl=tcp,self\n      UCX_NET_DEVICES=eth0"));
   m_envVarsEdit->setToolTip(
-      tr("MPI environment variables injected via -x KEY=VALUE flags.\n"
-         "One entry per line: KEY=VALUE"));
+      tr("MPI environment variables injected via -x KEY=VALUE flags.\nOne entry per line: KEY=VALUE"));
   m_envVarsEdit->setAcceptRichText(false);
   form->addRow(tr("MPI Env Vars:"), m_envVarsEdit);
 
-  // ── Strict affinity ─────────────────────────────────────────────────────
   m_strictAffinityBox =
       new QCheckBox(tr("Bind ranks to individual nodes (--map-by node)"), this);
   m_strictAffinityBox->setToolTip(
@@ -494,25 +430,16 @@ HpcSettingsPage::HpcSettingsPage(QWidget *parent) : QWidget(parent) {
          "a separate physical node. Useful for NUMA-sensitive workloads."));
   form->addRow(tr("Strict Node Affinity:"), m_strictAffinityBox);
 
-  auto *note =
-      new QLabel(tr("<small style='color:#888;'>Changes are applied on the "
-                    "<b>next</b> debug session launch.</small>"),
-                 this);
-  note->setWordWrap(true);
-  form->addRow(QString(), note);
+  addFormNote(this, form,
+              tr("<small style='color:#888;'>Changes are applied on the "
+                 "<b>next</b> debug session launch.</small>"));
 
   loadFromSettings();
 }
 
-QString HpcSettingsPage::hostsFile() const {
-  return m_hostsFileEdit->text().trimmed();
-}
-QString HpcSettingsPage::envVars() const {
-  return m_envVarsEdit->toPlainText().trimmed();
-}
-bool HpcSettingsPage::strictAffinity() const {
-  return m_strictAffinityBox->isChecked();
-}
+QString HpcSettingsPage::hostsFile() const { return m_hostsFileEdit->text().trimmed(); }
+QString HpcSettingsPage::envVars() const { return m_envVarsEdit->toPlainText().trimmed(); }
+bool HpcSettingsPage::strictAffinity() const { return m_strictAffinityBox->isChecked(); }
 
 void HpcSettingsPage::loadFromSettings() {
   const auto hs = gridlock::core::ConfigManager::instance().getHpcSettings();
@@ -541,12 +468,13 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   form->setSpacing(12);
   form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
-  // ────────────────────────────────────────────────────────────────────
-  // SSH
-  // ────────────────────────────────────────────────────────────────────
-  auto *sshLabel = new QLabel(tr("<b>Remote SSH Connection</b>"), container);
-  sshLabel->setObjectName("heading");
-  form->addRow(sshLabel);
+  auto addSectionHeading = [&](const QString &title) {
+    auto *lbl = new QLabel(title, container);
+    lbl->setObjectName("heading");
+    form->addRow(lbl);
+  };
+
+  addSectionHeading(tr("<b>Remote SSH Connection</b>"));
 
   m_sshHostEdit = new QLineEdit(container);
   m_sshHostEdit->setPlaceholderText(tr("e.g. login.hpc.university.edu"));
@@ -569,20 +497,15 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
         this, tr("Select SSH Private Key"), QDir::homePath(),
         tr("SSH Keys (id_rsa id_ed25519 *.pem);; All Files (*)"), nullptr,
         QFileDialog::DontUseNativeDialog);
-    if (!path.isEmpty())
+    if (!path.isEmpty()) {
       m_sshKeyEdit->setText(path);
+    }
   });
   keyRow->addWidget(m_sshKeyEdit);
   keyRow->addWidget(keyBrowse);
   form->addRow(tr("SSH Key Path:"), keyRow);
 
-  // ────────────────────────────────────────────────────────────────────
-  // SLURM
-  // ────────────────────────────────────────────────────────────────────
-  auto *slurmLabel =
-      new QLabel(tr("<b>SLURM Batch Configuration</b>"), container);
-  slurmLabel->setObjectName("heading");
-  form->addRow(slurmLabel);
+  addSectionHeading(tr("<b>SLURM Batch Configuration</b>"));
 
   m_partitionEdit = new QLineEdit(container);
   m_partitionEdit->setPlaceholderText(tr("batch"));
@@ -611,9 +534,9 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   gpuRow->addStretch();
   form->addRow(tr("GPUs:"), gpuRow);
 
-  auto *tplLabel = new QLabel(tr("Script Template (Use <tt>{FILE}</tt> as a "
-                                 "placeholder for the target source code):"),
-                              container);
+  auto *tplLabel = new QLabel(
+      tr("Script Template (Use <tt>{FILE}</tt> as a placeholder for the target source code):"),
+      container);
   tplLabel->setTextFormat(Qt::RichText);
   form->addRow(tplLabel);
 
@@ -623,23 +546,13 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   mono.setStyleHint(QFont::TypeWriter);
   mono.setPointSize(9);
   m_templateEdit->setFont(mono);
-  m_templateEdit->setPlaceholderText("#!/bin/bash\n"
-                                     "#SBATCH --job-name=gridlock_job\n"
-                                     "#SBATCH --output=gridlock_%j.log\n"
-                                     "#SBATCH --partition=batch\n"
-                                     "#SBATCH --nodes=1\n"
-                                     "#SBATCH --ntasks-per-node=4\n"
-                                     "\n"
-                                     "module load openmpi\n"
-                                     "mpirun -np 4 {FILE}");
+  m_templateEdit->setPlaceholderText("#!/bin/bash\n#SBATCH --job-name=gridlock_job\n"
+                                     "#SBATCH --output=gridlock_%j.log\n#SBATCH --partition=batch\n"
+                                     "#SBATCH --nodes=1\n#SBATCH --ntasks-per-node=4\n\n"
+                                     "module load openmpi\nmpirun -np 4 {FILE}");
   form->addRow(m_templateEdit);
 
-  // ────────────────────────────────────────────────────────────────────
-  // Spack
-  // ────────────────────────────────────────────────────────────────────
-  auto *spackLabel = new QLabel(tr("<b>Spack Package Manager</b>"), container);
-  spackLabel->setObjectName("heading");
-  form->addRow(spackLabel);
+  addSectionHeading(tr("<b>Spack Package Manager</b>"));
 
   m_spackRootEdit = new QLineEdit(container);
   m_spackRootEdit->setPlaceholderText(tr("/opt/spack"));
@@ -652,36 +565,16 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget *parent)
   loadFromSettings();
 }
 
-QString HpcIntegrationSettingsPage::sshHost() const {
-  return m_sshHostEdit->text().trimmed();
-}
-QString HpcIntegrationSettingsPage::sshUser() const {
-  return m_sshUserEdit->text().trimmed();
-}
-QString HpcIntegrationSettingsPage::sshKeyPath() const {
-  return m_sshKeyEdit->text().trimmed();
-}
-QString HpcIntegrationSettingsPage::slurmTemplate() const {
-  return m_templateEdit->toPlainText();
-}
-QString HpcIntegrationSettingsPage::slurmPartition() const {
-  return m_partitionEdit->text().trimmed();
-}
-int HpcIntegrationSettingsPage::slurmNodes() const {
-  return m_nodesBox->value();
-}
-int HpcIntegrationSettingsPage::slurmTasks() const {
-  return m_tasksBox->value();
-}
-bool HpcIntegrationSettingsPage::requestGpus() const {
-  return m_gpuCheck->isChecked();
-}
-int HpcIntegrationSettingsPage::gpusPerNode() const {
-  return m_gpusBox->value();
-}
-QString HpcIntegrationSettingsPage::spackRoot() const {
-  return m_spackRootEdit->text().trimmed();
-}
+QString HpcIntegrationSettingsPage::sshHost() const { return m_sshHostEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::sshUser() const { return m_sshUserEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::sshKeyPath() const { return m_sshKeyEdit->text().trimmed(); }
+QString HpcIntegrationSettingsPage::slurmTemplate() const { return m_templateEdit->toPlainText(); }
+QString HpcIntegrationSettingsPage::slurmPartition() const { return m_partitionEdit->text().trimmed(); }
+int HpcIntegrationSettingsPage::slurmNodes() const { return m_nodesBox->value(); }
+int HpcIntegrationSettingsPage::slurmTasks() const { return m_tasksBox->value(); }
+bool HpcIntegrationSettingsPage::requestGpus() const { return m_gpuCheck->isChecked(); }
+int HpcIntegrationSettingsPage::gpusPerNode() const { return m_gpusBox->value(); }
+QString HpcIntegrationSettingsPage::spackRoot() const { return m_spackRootEdit->text().trimmed(); }
 
 void HpcIntegrationSettingsPage::loadFromSettings() {
   auto &mgr = gridlock::core::ConfigManager::instance();
@@ -727,8 +620,9 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget *parent) : QWidget(parent) {
   connect(browseBtn, &QPushButton::clicked, this, [this]() {
     QString dir = QFileDialog::getExistingDirectory(
         this, "Select Docset Directory", m_dirEdit->text());
-    if (!dir.isEmpty())
+    if (!dir.isEmpty()) {
       m_dirEdit->setText(dir);
+    }
   });
   dirLayout->addWidget(browseBtn);
   layout->addLayout(dirLayout);
@@ -746,9 +640,7 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget *parent) : QWidget(parent) {
   loadFromSettings();
 }
 
-QString DocsetSettingsPage::docsetDirectory() const {
-  return m_dirEdit->text();
-}
+QString DocsetSettingsPage::docsetDirectory() const { return m_dirEdit->text(); }
 
 void DocsetSettingsPage::loadFromSettings() {
   m_dirEdit->setText(
@@ -772,19 +664,19 @@ void DocsetSettingsPage::onAutoDetect() {
   m_autoDetectBtn->setText("Detecting...");
   m_autoDetectBtn->setEnabled(false);
 
-  auto watcher = new QFutureWatcher<QStringList>(this);
-  connect(watcher, &QFutureWatcher<QStringList>::finished, this, [this, watcher]() {
-    QStringList suggestions = watcher->result();
-    if (suggestions.isEmpty()) {
-      m_autoDetectBtn->setText("No extra docsets needed");
-    } else {
-      m_autoDetectBtn->setText("Suggested: " + suggestions.join(", "));
-    }
-    m_autoDetectBtn->setEnabled(true);
-    watcher->deleteLater();
-  });
+  auto *watcher = new QFutureWatcher<QStringList>(this);
+  connect(watcher, &QFutureWatcher<QStringList>::finished, this,
+          [this, watcher]() {
+            QStringList suggestions = watcher->result();
+            m_autoDetectBtn->setText(
+                suggestions.isEmpty() ? "No extra docsets needed"
+                                      : "Suggested: " + suggestions.join(", "));
+            m_autoDetectBtn->setEnabled(true);
+            watcher->deleteLater();
+          });
 
-  watcher->setFuture(gridlock::core::DocsetManager::instance().suggestDocsets(QDir::currentPath()));
+  watcher->setFuture(
+      gridlock::core::DocsetManager::instance().suggestDocsets(QDir::currentPath()));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -792,42 +684,18 @@ void DocsetSettingsPage::onAutoDetect() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 TerminalSettingsPage::TerminalSettingsPage(QWidget *parent) : QWidget(parent) {
-  auto *form = new QFormLayout(this);
-  form->setContentsMargins(24, 24, 24, 24);
-  form->setSpacing(14);
-  form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  auto *form = createStandardPageForm(this, tr("<b>Terminal</b>"));
 
-  auto *heading = new QLabel(tr("<b>Terminal</b>"), this);
-  heading->setObjectName("heading");
-  form->addRow(heading);
+  m_shellPathEdit = addBrowsePathRow(
+      this, form, tr("Shell Path:"), tr("/bin/bash"),
+      tr("Path to the shell executable (e.g. /bin/bash, /bin/zsh). Requires terminal restart."),
+      tr("Select Shell Executable"), QStringLiteral("/bin"));
 
-  auto *separator = new QLabel(this);
-  separator->setFixedHeight(1);
-  separator->setObjectName("separator");
-  form->addRow(separator);
-
-  // Shell Path
-  auto *shellRow = new QHBoxLayout();
-  m_shellPathEdit = new QLineEdit(this);
-  m_shellPathEdit->setPlaceholderText(tr("/bin/bash"));
-  m_shellPathEdit->setToolTip(tr("Path to the shell executable (e.g. /bin/bash, /bin/zsh). Requires terminal restart."));
-  auto *shellBrowseBtn = new QPushButton(tr("Browse…"), this);
-  shellBrowseBtn->setFixedWidth(72);
-  connect(shellBrowseBtn, &QPushButton::clicked, this, [this]() {
-    QString path = QFileDialog::getOpenFileName(this, tr("Select Shell Executable"), "/bin");
-    if (!path.isEmpty()) m_shellPathEdit->setText(path);
-  });
-  shellRow->addWidget(m_shellPathEdit);
-  shellRow->addWidget(shellBrowseBtn);
-  form->addRow(tr("Shell Path:"), shellRow);
-
-  // Font Family
   m_fontFamilyCombo = new QComboBox(this);
   m_fontFamilyCombo->addItems({"FiraCode Nerd Font", "Hack", "Monospace"});
   m_fontFamilyCombo->setToolTip(tr("Monospace font for the embedded terminal."));
   form->addRow(tr("Font Family:"), m_fontFamilyCombo);
 
-  // Font Size
   m_fontSizeBox = new QSpinBox(this);
   m_fontSizeBox->setRange(6, 72);
   m_fontSizeBox->setToolTip(tr("Font size in points for the terminal."));
@@ -844,8 +712,11 @@ void TerminalSettingsPage::loadFromSettings() {
   const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
   m_shellPathEdit->setText(ts.shellPath);
   int fIdx = m_fontFamilyCombo->findText(ts.fontFamily);
-  if (fIdx >= 0) m_fontFamilyCombo->setCurrentIndex(fIdx);
-  else m_fontFamilyCombo->setCurrentText(ts.fontFamily);
+  if (fIdx >= 0) {
+    m_fontFamilyCombo->setCurrentIndex(fIdx);
+  } else {
+    m_fontFamilyCombo->setCurrentText(ts.fontFamily);
+  }
   m_fontSizeBox->setValue(ts.fontSize);
 }
 
@@ -858,13 +729,10 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   setMinimumSize(780, 540);
   resize(860, 580);
 
-  // ── Dark-panel stylesheet ────────────────────────────────────────────
-  // Global stylesheet is applied by ThemeManager via main.cpp
   auto *rootLayout = new QVBoxLayout(this);
   rootLayout->setContentsMargins(0, 0, 0, 0);
   rootLayout->setSpacing(0);
 
-  // ── Splitter: sidebar | page stack ──────────────────────────────────
   auto *splitter = new QSplitter(Qt::Horizontal, this);
   splitter->setHandleWidth(1);
   splitter->setChildrenCollapsible(false);
@@ -880,7 +748,6 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
   rootLayout->addWidget(splitter, 1);
 
-  // ── Separator line above button box ──────────────────────────────────
   auto *line = new QLabel(this);
   line->setFixedHeight(1);
   line->setObjectName("separator");
@@ -903,20 +770,16 @@ void PreferencesDialog::setupSidebar() {
     QString iconName;
   };
   const QList<Entry> entries = {
-      {tr("Appearance"), "\uf1fc"},
-      {tr("Editing"), "\uf044"},
-      {tr("Behavior"), "\uf085"},
-      {tr("Debugger"), "\uf188"},
-      {tr("HPC / Cluster"), "\uf233"},
-      {tr("HPC Integration"), "\uf1c0"},
-      {tr("Terminal"), "\uf120"},
-      {tr("Docsets"), "\uf02d"},
+      {tr("Appearance"), "\uf1fc"},      {tr("Editing"), "\uf044"},
+      {tr("Behavior"), "\uf085"},        {tr("Debugger"), "\uf188"},
+      {tr("HPC / Cluster"), "\uf233"},   {tr("HPC Integration"), "\uf1c0"},
+      {tr("Terminal"), "\uf120"},        {tr("Docsets"), "\uf02d"},
   };
 
   for (const auto &e : entries) {
     auto *item = new QListWidgetItem(m_sidebar);
     item->setText(e.label);
-    
+
     QPixmap pixmap(20, 20);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
@@ -925,16 +788,16 @@ void PreferencesDialog::setupSidebar() {
     painter.setPen(QColor("#cdd6f4"));
     painter.drawText(0, 0, 20, 20, Qt::AlignCenter, e.iconName);
     item->setIcon(QIcon(pixmap));
-    
+
     item->setSizeHint(QSize(190, 44));
     m_sidebar->addItem(item);
   }
 
   m_sidebar->setCurrentRow(0);
-
   connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
-    if (m_stack)
+    if (m_stack) {
       m_stack->setCurrentIndex(row);
+    }
   });
 }
 
@@ -950,15 +813,16 @@ void PreferencesDialog::setupPages() {
   m_terminalPage = new TerminalSettingsPage(m_stack);
   m_docsetPage = new DocsetSettingsPage(m_stack);
 
-  m_stack->addWidget(m_appearancePage);
-  m_stack->addWidget(m_editingPage);
-  m_stack->addWidget(m_behaviorPage);
-  m_stack->addWidget(m_debuggerPage);
-  m_stack->addWidget(m_hpcPage);
-  m_stack->addWidget(m_hpcIntegrationPage);
-  m_stack->addWidget(m_terminalPage);
-  m_stack->addWidget(m_docsetPage);
-
+  for (QWidget *page : {static_cast<QWidget *>(m_appearancePage),
+                        static_cast<QWidget *>(m_editingPage),
+                        static_cast<QWidget *>(m_behaviorPage),
+                        static_cast<QWidget *>(m_debuggerPage),
+                        static_cast<QWidget *>(m_hpcPage),
+                        static_cast<QWidget *>(m_hpcIntegrationPage),
+                        static_cast<QWidget *>(m_terminalPage),
+                        static_cast<QWidget *>(m_docsetPage)}) {
+    m_stack->addWidget(page);
+  }
   m_stack->setCurrentIndex(0);
 }
 
@@ -975,12 +839,9 @@ void PreferencesDialog::setupButtonBox() {
           this, &PreferencesDialog::apply);
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────
-
 void PreferencesDialog::apply() {
   QSettings s("gridlock", "debugger");
 
-  // ── Appearance ──────────────────────────────────────────────────────
   s.setValue("appearance/theme", m_appearancePage->selectedTheme());
   s.setValue("appearance/dark_mode", m_appearancePage->isDarkMode());
   s.setValue("appearance/file_tree_style", m_appearancePage->fileTreeStyle());
@@ -988,7 +849,6 @@ void PreferencesDialog::apply() {
   s.setValue("appearance/ui_font_size", m_appearancePage->uiFontSize());
   s.setValue("appearance/code_font_size", m_appearancePage->codeFontSize());
 
-  // ── Editing ─────────────────────────────────────────────────────────
   s.setValue("editing/tab_width", m_editingPage->tabWidth());
   s.setValue("editing/insert_spaces", m_editingPage->insertSpaces());
   s.setValue("editing/show_whitespace", m_editingPage->showWhitespace());
@@ -996,17 +856,14 @@ void PreferencesDialog::apply() {
   s.setValue("editing/show_edge_column", m_editingPage->showEdgeColumn());
   s.setValue("editing/edge_column", m_editingPage->edgeColumn());
 
-  // ── Behavior (session UX prefs only — no MPI/rank here) ─────────────
   s.setValue("behavior/restore_breakpoints",
              m_behaviorPage->restoreBreakpoints());
   s.setValue("behavior/confirm_quit", m_behaviorPage->confirmQuit());
   s.setValue("behavior/focus_on_stop", m_behaviorPage->focusOnStop());
 
-  // ── Debugger — single source of truth via ConfigManager ────────────────
-  gridlock::core::ConfigManager::instance().setGlobalClangdPath(
-      m_debuggerPage->clangdPath());
-  gridlock::core::ConfigManager::instance().setGlobalDapAdapterPath(
-      m_debuggerPage->dapAdapterPath());
+  auto &cfg = gridlock::core::ConfigManager::instance();
+  cfg.setGlobalClangdPath(m_debuggerPage->clangdPath());
+  cfg.setGlobalDapAdapterPath(m_debuggerPage->dapAdapterPath());
 
   gridlock::core::DebuggerSettings ds;
   ds.gdbPath = m_debuggerPage->gdbPath();
@@ -1014,25 +871,23 @@ void PreferencesDialog::apply() {
   ds.mpiArgs = m_debuggerPage->mpiArgs();
   ds.defaultRanks = m_debuggerPage->defaultRanks();
   ds.trapFpe = m_debuggerPage->trapFpe();
-  gridlock::core::ConfigManager::instance().saveDebuggerSettings(ds);
+  cfg.saveDebuggerSettings(ds);
 
-  auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+  auto ps = cfg.loadProjectSettings();
   ps.customGdbPath = m_debuggerPage->gdbPath().toStdString();
-  gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+  cfg.saveProjectSettings(ps);
 
-  // ── HPC / Cluster — via ConfigManager ───────────────────────────────
   gridlock::core::HpcSettings hs;
   hs.hostsFile = m_hpcPage->hostsFile();
   hs.envVars = m_hpcPage->envVars();
   hs.strictAffinity = m_hpcPage->strictAffinity();
-  gridlock::core::ConfigManager::instance().saveHpcSettings(hs);
+  cfg.saveHpcSettings(hs);
 
-  // ── HPC Integration ───────────────────────────────────────────────────
   gridlock::core::SshSettings ssh;
   ssh.host = m_hpcIntegrationPage->sshHost();
   ssh.user = m_hpcIntegrationPage->sshUser();
   ssh.keyPath = m_hpcIntegrationPage->sshKeyPath();
-  gridlock::core::ConfigManager::instance().saveSshSettings(ssh);
+  cfg.saveSshSettings(ssh);
 
   gridlock::core::SlurmSettings slurm;
   slurm.scriptTemplate = m_hpcIntegrationPage->slurmTemplate();
@@ -1042,24 +897,21 @@ void PreferencesDialog::apply() {
   slurm.requestGpus = m_hpcIntegrationPage->requestGpus();
   slurm.gpusPerNode = m_hpcIntegrationPage->gpusPerNode();
   slurm.spackRoot = m_hpcIntegrationPage->spackRoot();
-  gridlock::core::ConfigManager::instance().saveSlurmSettings(slurm);
+  cfg.saveSlurmSettings(slurm);
 
-  // ── Docsets ──────────────────────────────────────────────────────────
   auto &docMgr = gridlock::core::DocsetManager::instance();
   if (docMgr.getDocsetDirectory() != m_docsetPage->docsetDirectory()) {
     docMgr.setDocsetDirectory(m_docsetPage->docsetDirectory());
     m_docsetPage->refreshTable();
   }
 
-  // ── Terminal ──────────────────────────────────────────────────────────
   gridlock::core::TerminalSettings ts;
   ts.shellPath = m_terminalPage->shellPath();
   ts.fontFamily = m_terminalPage->fontFamily();
   ts.fontSize = m_terminalPage->fontSize();
-  gridlock::core::ConfigManager::instance().saveTerminalSettings(ts);
+  cfg.saveTerminalSettings(ts);
 
   s.sync();
-
   emit preferencesChanged();
 }
 

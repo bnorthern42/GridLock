@@ -151,19 +151,31 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Restore layout state
   QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry_v7")) {
-      restoreGeometry(settings.value("MainWindow/Geometry_v7").toByteArray());
+  if (settings.contains("MainWindow/Geometry_v8")) {
+      restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
   }
-  if (settings.contains("MainWindow/State_v7")) {
-      restoreState(settings.value("MainWindow/State_v7").toByteArray());
+  if (settings.contains("MainWindow/State_v8")) {
+      restoreState(settings.value("MainWindow/State_v8").toByteArray());
   }
   
   // Restore splitter states
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          auto state = settings.value("MainWindow/Splitter_v7_" + splitter->objectName()).toByteArray();
+          auto state = settings.value("MainWindow/Splitter_v8_" + splitter->objectName()).toByteArray();
           if (!state.isEmpty()) {
               splitter->restoreState(state);
+          }
+      }
+  }
+
+  for (auto* dock : findChildren<QDockWidget*>()) {
+      const auto area = dockWidgetArea(dock);
+      if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
+          dock->setMinimumWidth(150);
+          dock->setMaximumWidth(QWIDGETSIZE_MAX);
+          if (dock->widget()) {
+              dock->widget()->setMinimumWidth(150);
+              dock->widget()->setMaximumWidth(QWIDGETSIZE_MAX);
           }
       }
   }
@@ -630,12 +642,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
 
   QSettings settings("gridlock", "debugger");
-  settings.setValue("MainWindow/Geometry_v7", saveGeometry());
-  settings.setValue("MainWindow/State_v7", saveState());
+  settings.setValue("MainWindow/Geometry_v8", saveGeometry());
+  settings.setValue("MainWindow/State_v8", saveState());
 
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          settings.setValue("MainWindow/Splitter_v7_" + splitter->objectName(), splitter->saveState());
+          settings.setValue("MainWindow/Splitter_v8_" + splitter->objectName(), splitter->saveState());
       }
   }
 
