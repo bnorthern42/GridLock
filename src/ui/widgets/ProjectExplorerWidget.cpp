@@ -36,33 +36,36 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   // Mode switcher bar: FILES | SYMBOLS | STRINGS
   QWidget *modeBar = new QWidget(content);
   modeBar->setObjectName("projectModeBar");
+  modeBar->setFixedHeight(24);
   QHBoxLayout *modeLayout = new QHBoxLayout(modeBar);
-  modeLayout->setContentsMargins(2, 2, 2, 2);
+  modeLayout->setContentsMargins(3, 2, 3, 2);
   modeLayout->setSpacing(2);
 
   m_filesModeBtn = new QPushButton("FILES", modeBar);
   m_filesModeBtn->setObjectName("explorerFilesModeBtn");
   m_filesModeBtn->setCheckable(true);
   m_filesModeBtn->setChecked(true);
-  m_filesModeBtn->setFixedHeight(22);
+  m_filesModeBtn->setFixedHeight(20);
 
   m_symbolsModeBtn = new QPushButton("SYMBOLS", modeBar);
   m_symbolsModeBtn->setObjectName("explorerSymbolsModeBtn");
   m_symbolsModeBtn->setCheckable(true);
   m_symbolsModeBtn->setChecked(false);
-  m_symbolsModeBtn->setFixedHeight(22);
+  m_symbolsModeBtn->setFixedHeight(20);
 
   m_stringsModeBtn = new QPushButton("STRINGS", modeBar);
   m_stringsModeBtn->setObjectName("explorerStringsModeBtn");
   m_stringsModeBtn->setCheckable(true);
   m_stringsModeBtn->setChecked(false);
-  m_stringsModeBtn->setFixedHeight(22);
+  m_stringsModeBtn->setFixedHeight(20);
 
   modeBar->setStyleSheet(
-      "QPushButton { background: #23272e; color: #9da5b4; border: 1px solid #2b2b2b; "
+      "QWidget#projectModeBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
+      "QPushButton { background: #252932; color: #abb2bf; border: 1px solid #323844; "
       "border-radius: 2px; padding: 1px 6px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 10px; font-weight: 600; }"
-      "QPushButton:checked { background: #1e3038; color: #4ec9b0; border: 1px solid #009688; }");
+      "font-size: 10px; font-weight: 600; min-height: 18px; max-height: 20px; }"
+      "QPushButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
+      "QPushButton:checked { background: #2c3444; color: #ffffff; border: 1px solid #528bff; }");
 
   modeLayout->addWidget(m_filesModeBtn, 1);
   modeLayout->addWidget(m_symbolsModeBtn, 1);
@@ -78,17 +81,18 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   filesLayout->setSpacing(0);
 
   QWidget *topBar = new QWidget(filesPage);
+  topBar->setFixedHeight(24);
   QHBoxLayout *topLayout = new QHBoxLayout(topBar);
   topLayout->setContentsMargins(4, 2, 2, 2);
   topLayout->setSpacing(4);
 
   m_openFolderBtn = new QPushButton("Open Folder", topBar);
-  m_openFolderBtn->setFixedHeight(22);
+  m_openFolderBtn->setFixedHeight(20);
   m_collapseAllBtn = new QPushButton(topBar);
   m_collapseAllBtn->setText(QString::fromUtf8("\xEF\x86\x92"));
-  m_collapseAllBtn->setFixedSize(24, 22);
+  m_collapseAllBtn->setFixedSize(22, 20);
   m_collapseAllBtn->setFlat(true);
-  m_collapseAllBtn->setStyleSheet("font-family: 'Symbols Nerd Font'; font-size: 16px;");
+  m_collapseAllBtn->setStyleSheet("font-family: 'Symbols Nerd Font'; font-size: 14px;");
 
   topLayout->addWidget(m_openFolderBtn);
   topLayout->addStretch();
@@ -124,8 +128,9 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   symbolsLayout->setSpacing(0);
 
   QWidget *filterBar = new QWidget(symbolsPage);
+  filterBar->setFixedHeight(26);
   QHBoxLayout *filterLayout = new QHBoxLayout(filterBar);
-  filterLayout->setContentsMargins(3, 3, 3, 3);
+  filterLayout->setContentsMargins(3, 2, 3, 2);
   filterLayout->setSpacing(2);
 
   m_symbolFilterEdit = new QLineEdit(filterBar);

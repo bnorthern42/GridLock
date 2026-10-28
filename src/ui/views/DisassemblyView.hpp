@@ -94,6 +94,9 @@ public:
     QString functionSignatureHeader() const { return m_functionSignature; }
     void refreshDecompilerView();
 
+    void setSplitGraphDecompilerMode(bool enabled);
+    bool isSplitGraphDecompilerMode() const { return m_splitGraphDecompiler; }
+
     void setAddressComment(uint64_t address, const QString& comment);
     QString addressComment(uint64_t address) const;
     bool toggleBookmark(uint64_t address);
@@ -111,6 +114,7 @@ private:
 
     void parseDisassembly(const QString& asmCode);
     void rebuildCfgScene();
+    void updateViewModeLayout();
     void highlightActiveInstruction();
     QString applyUserCommentsToListing(const QString& rawCode) const;
     static QString defaultStartupDisassembly();
@@ -120,7 +124,10 @@ private:
     QLabel* m_statsBadge = nullptr;
     QPushButton* m_modeToggleBtn = nullptr;
     QPushButton* m_decompilerToggleBtn = nullptr;
+    QPushButton* m_splitToggleBtn = nullptr;
     QStackedWidget* m_stack = nullptr;
+    QWidget* m_splitViewContainer = nullptr;
+    QWidget* m_decompilerPage = nullptr;
     DisassemblyTextEdit* m_linearEdit = nullptr;
     QGraphicsView* m_cfgView = nullptr;
     QGraphicsScene* m_cfgScene = nullptr;
@@ -140,6 +147,7 @@ private:
     uint64_t m_currentAddress = 0x401120ULL;
     bool m_graphMode = false;
     bool m_decompilerMode = false;
+    bool m_splitGraphDecompiler = false;
     QString m_activeSymbol = QStringLiteral("sym.main");
     QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");
     QString m_targetLang = QStringLiteral("C");

@@ -266,6 +266,16 @@ void MainWindow::setupToolbar() {
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
   toolbar->setMovable(false);
+  toolbar->setFixedHeight(28);
+  toolbar->setContentsMargins(4, 1, 4, 1);
+  toolbar->setStyleSheet(
+      "QToolBar#MainToolbar { background: #1e2228; border-bottom: 1px solid #2c313a; "
+      "spacing: 4px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
+      "QToolBar#MainToolbar QToolButton { background: #252932; color: #d7dae0; "
+      "border: 1px solid #323844; border-radius: 2px; padding: 1px 8px; margin: 0px; "
+      "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; }"
+      "QToolBar#MainToolbar QToolButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
+      "QToolBar#MainToolbar QToolButton:pressed { background: #2c3444; border: 1px solid #528bff; }");
 
   m_runAction = new QAction("▶ Run Target", this);
   connect(m_runAction, &QAction::triggered, this, [this]() {
@@ -331,12 +341,12 @@ void MainWindow::setupToolbar() {
   toolbar->addWidget(spacer);
 
   const QString navBtnStyle = QStringLiteral(
-      "QPushButton { background: #23272e; color: #d4d7dc; border: 1px solid #333842; "
-      "border-radius: 2px; padding: 0px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 11px; font-weight: 700; min-width: 22px; max-width: 22px; "
-      "min-height: 22px; max-height: 22px; }"
-      "QPushButton:hover:enabled { background: #2c313a; border-color: #4ec9b0; color: #4ec9b0; }"
-      "QPushButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #282c34; }");
+      "QPushButton, QPushButton:disabled { background: #252932; color: #d7dae0; border: 1px solid #323844; "
+      "border-radius: 2px; padding: 0px; margin: 0px; font-family: 'JetBrains Mono', monospace; "
+      "font-size: 11px; font-weight: 700; width: 20px; min-width: 20px; max-width: 22px; "
+      "height: 20px; min-height: 20px; max-height: 22px; }"
+      "QPushButton:hover:enabled { background: #2c323d; border-color: #528bff; color: #ffffff; }"
+      "QPushButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #242830; }");
 
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
   m_navBackBtn->setObjectName("navBackBtn");
@@ -367,6 +377,7 @@ void MainWindow::setupToolbar() {
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
+  m_seekBar->setFixedHeight(22);
   m_seekBar->setMinimumWidth(300);
   m_seekBar->setFixedWidth(320);
   m_seekBar->setMaximumWidth(320);
@@ -394,6 +405,7 @@ void MainWindow::setupToolbar() {
   navToolbar->setObjectName("AddressNavToolbar");
   navToolbar->setMovable(false);
   navToolbar->setFloatable(false);
+  navToolbar->setFixedHeight(22);
   navToolbar->setContentsMargins(0, 0, 0, 0);
 
   m_addressNavBar = new AddressSpaceNavBar(

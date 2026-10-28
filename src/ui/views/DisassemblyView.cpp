@@ -13,6 +13,7 @@
 #include <QSet>
 #include <QSettings>
 #include <QShortcut>
+#include <QSplitter>
 #include <QTextBlock>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -345,10 +346,10 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   rootLayout->setContentsMargins(0, 0, 0, 0);
   rootLayout->setSpacing(0);
 
-  // High-density disassembly header bar
+  // High-density disassembly header bar (24px uniform height)
   auto *headerWidget = new QWidget(this);
   headerWidget->setObjectName("cutterDisasmHeader");
-  headerWidget->setFixedHeight(26);
+  headerWidget->setFixedHeight(24);
   auto *headerLayout = new QHBoxLayout(headerWidget);
   headerLayout->setContentsMargins(6, 2, 4, 2);
   headerLayout->setSpacing(4);
@@ -359,13 +360,21 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_statsBadge = new QLabel(headerWidget);
   m_statsBadge->setObjectName("cutterDisasmStats");
 
+  m_splitToggleBtn = new QPushButton(QStringLiteral("SPLIT (CFG+DECOMP)"), headerWidget);
+  m_splitToggleBtn->setObjectName("cutterSplitViewBtn");
+  m_splitToggleBtn->setCheckable(true);
+  m_splitToggleBtn->setCursor(Qt::PointingHandCursor);
+  m_splitToggleBtn->setFixedHeight(20);
+  connect(m_splitToggleBtn, &QPushButton::clicked, this,
+          &DisassemblyView::setSplitGraphDecompilerMode);
+
   m_modeToggleBtn = new QPushButton(QStringLiteral("CFG (Space)"), headerWidget);
   m_modeToggleBtn->setObjectName("cutterCfgToggleBtn");
   m_modeToggleBtn->setCursor(Qt::PointingHandCursor);
   m_modeToggleBtn->setFixedHeight(20);
   connect(m_modeToggleBtn, &QPushButton::clicked, this, &DisassemblyView::toggleViewMode);
 
-  m_decompilerToggleBtn = new QPushButton(QStringLiteral("PSEUDOCODE / XREFS"), headerWidget);
+  m_decompilerToggleBtn = new QPushButton(QStringLiteral("DECOMPILER"), headerWidget);
   m_decompilerToggleBtn->setObjectName("cutterDecompilerBtn");
   m_decompilerToggleBtn->setCheckable(true);
   m_decompilerToggleBtn->setCursor(Qt::PointingHandCursor);
@@ -375,6 +384,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   headerLayout->addWidget(m_headerBadge);
   headerLayout->addStretch(1);
   headerLayout->addWidget(m_statsBadge);
+  headerLayout->addWidget(m_splitToggleBtn);
   headerLayout->addWidget(m_decompilerToggleBtn);
   headerLayout->addWidget(m_modeToggleBtn);
 
@@ -385,7 +395,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   sigBar->setObjectName("disasmSignatureBar");
   sigBar->setFixedHeight(20);
   sigBar->setStyleSheet(
-      "background: #141619; border-bottom: 1px solid #2b2b2b;");
+      "background: #16181d; border-bottom: 1px solid #282c34;");
   auto *sigLayout = new QHBoxLayout(sigBar);
   sigLayout->setContentsMargins(8, 0, 8, 0);
   sigLayout->setSpacing(4);
@@ -396,8 +406,15 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   sigLayout->addWidget(m_signatureLabel, 1);
   rootLayout->addWidget(sigBar);
 
-  // Multi-mode QStackedWidget: Page 0 = Linear Disassembly, Page 1 = CFG Graph, Page 2 = Decompiler & Xrefs
-  m_stack = new QStackedWidget(this);
+  auto *splitSplitter = new QSplitter(Qt::Horizontal, this);
+  splitSplitter->setObjectName("disasmSplitContainer");
+  splitSplitter->setContentsMargins(0, 0, 0, 0);
+  splitSplitter->setHandleWidth(4);
+  splitSplitter->setChildrenCollapsible(false);
+  m_splitViewContainer = splitSplitter;
+
+  // Left pane of splitter: Stack of Page 0 = Linear Disassembly, Page 1 = CFG Graph
+  m_stack = new QStackedWidget(splitSplitter);
   m_stack->setContentsMargins(0, 0, 0, 0);
 
   m_linearEdit = new DisassemblyTextEdit(this, m_stack);
@@ -418,28 +435,36 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_cfgView->setFrameShape(QFrame::NoFrame);
   m_cfgView->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
   m_cfgView->setDragMode(QGraphicsView::ScrollHandDrag);
-  m_cfgView->setBackgroundBrush(QColor(0x14, 0x16, 0x19));
+  m_cfgView->setBackgroundBrush(QColor(0x16, 0x18, 0x1d));
+  m_cfgView->setMinimumWidth(180);
 
-  auto *decompilerPage = new QWidget(m_stack);
-  decompilerPage->setObjectName("decompilerPageContainer");
-  auto *decompilerLayout = new QVBoxLayout(decompilerPage);
+  m_stack->addWidget(m_linearEdit);
+  m_stack->addWidget(m_cfgView);
+  m_stack->setCurrentIndex(0);
+
+  // Right pane of splitter: Decompiler container with footer bar
+  m_decompilerPage = new QWidget(splitSplitter);
+  m_decompilerPage->setObjectName("decompilerPageContainer");
+  m_decompilerPage->setMinimumWidth(180);
+  auto *decompilerLayout = new QVBoxLayout(m_decompilerPage);
   decompilerLayout->setContentsMargins(0, 0, 0, 0);
   decompilerLayout->setSpacing(0);
 
-  m_decompilerEdit = new QPlainTextEdit(decompilerPage);
+  m_decompilerEdit = new QPlainTextEdit(m_decompilerPage);
   m_decompilerEdit->setObjectName("cutterDecompilerView");
   m_decompilerEdit->setReadOnly(true);
   m_decompilerEdit->setFrameShape(QFrame::NoFrame);
   m_decompilerEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
   m_decompilerEdit->setFont(f);
+  m_decompilerEdit->setMinimumWidth(180);
   decompilerLayout->addWidget(m_decompilerEdit, 1);
 
-  auto *decompFooter = new QWidget(decompilerPage);
+  auto *decompFooter = new QWidget(m_decompilerPage);
   decompFooter->setObjectName("decompilerFooterBar");
   decompFooter->setFixedHeight(24);
   decompFooter->setStyleSheet(
-      "background: #1a1d21; border-top: 1px solid #2b2b2b; "
-      "font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #9da5b4;");
+      "background: #21252b; border-top: 1px solid #2c313a; "
+      "font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #abb2bf;");
   auto *footerLayout = new QHBoxLayout(decompFooter);
   footerLayout->setContentsMargins(6, 1, 6, 1);
   footerLayout->setSpacing(6);
@@ -476,12 +501,13 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   footerLayout->addWidget(m_targetLangCombo);
   decompilerLayout->addWidget(decompFooter);
 
-  m_stack->addWidget(m_linearEdit);
-  m_stack->addWidget(m_cfgView);
-  m_stack->addWidget(decompilerPage);
-  m_stack->setCurrentIndex(0);
+  splitSplitter->addWidget(m_stack);
+  splitSplitter->addWidget(m_decompilerPage);
+  splitSplitter->setStretchFactor(0, 1);
+  splitSplitter->setStretchFactor(1, 1);
+  m_decompilerPage->hide();
 
-  rootLayout->addWidget(m_stack, 1);
+  rootLayout->addWidget(splitSplitter, 1);
 
   auto *spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
   spaceShortcut->setContext(Qt::WidgetWithChildrenShortcut);
@@ -519,38 +545,82 @@ void DisassemblyView::centerCursor() {
   }
 }
 
-void DisassemblyView::setDecompilerMode(bool enabled) {
-  m_decompilerMode = enabled;
+void DisassemblyView::updateViewModeLayout() {
   if (m_decompilerToggleBtn) {
-    m_decompilerToggleBtn->setChecked(enabled);
+    m_decompilerToggleBtn->setChecked(m_decompilerMode || m_splitGraphDecompiler);
   }
-  if (m_stack) {
-    m_stack->setCurrentIndex(m_decompilerMode ? 2 : (m_graphMode ? 1 : 0));
-  }
-  if (m_decompilerMode) {
-    refreshDecompilerView();
-  }
-}
-
-void DisassemblyView::setGraphMode(bool enabled) {
-  m_graphMode = enabled;
-  m_decompilerMode = false;
-  if (m_decompilerToggleBtn) {
-    m_decompilerToggleBtn->setChecked(false);
-  }
-  if (m_stack) {
-    m_stack->setCurrentIndex(m_graphMode ? 1 : 0);
+  if (m_splitToggleBtn) {
+    m_splitToggleBtn->setChecked(m_splitGraphDecompiler);
   }
   if (m_modeToggleBtn) {
     m_modeToggleBtn->setText(m_graphMode
                                  ? QStringLiteral("Linear (Space)")
                                  : QStringLiteral("CFG (Space)"));
   }
-  if (m_graphMode) {
+
+  if (m_splitGraphDecompiler) {
+    if (m_stack) {
+      m_stack->show();
+      m_stack->setCurrentIndex(1);
+    }
+    if (m_decompilerPage) {
+      m_decompilerPage->show();
+    }
+    if (auto *sp = qobject_cast<QSplitter *>(m_splitViewContainer)) {
+      const int totalW = qMax(420, width());
+      sp->setSizes({totalW / 2, totalW / 2});
+    }
     rebuildCfgScene();
-  } else if (m_linearEdit) {
-    m_linearEdit->updateGutter();
+    refreshDecompilerView();
+    return;
   }
+
+  if (m_decompilerMode) {
+    if (m_stack) {
+      m_stack->hide();
+    }
+    if (m_decompilerPage) {
+      m_decompilerPage->show();
+    }
+    refreshDecompilerView();
+  } else {
+    if (m_decompilerPage) {
+      m_decompilerPage->hide();
+    }
+    if (m_stack) {
+      m_stack->show();
+      m_stack->setCurrentIndex(m_graphMode ? 1 : 0);
+    }
+    if (m_graphMode) {
+      rebuildCfgScene();
+    } else if (m_linearEdit) {
+      m_linearEdit->updateGutter();
+    }
+  }
+}
+
+void DisassemblyView::setSplitGraphDecompilerMode(bool enabled) {
+  m_splitGraphDecompiler = enabled;
+  if (enabled) {
+    m_graphMode = true;
+    m_decompilerMode = true;
+  } else {
+    m_decompilerMode = false;
+  }
+  updateViewModeLayout();
+}
+
+void DisassemblyView::setDecompilerMode(bool enabled) {
+  m_decompilerMode = enabled;
+  m_splitGraphDecompiler = false;
+  updateViewModeLayout();
+}
+
+void DisassemblyView::setGraphMode(bool enabled) {
+  m_graphMode = enabled;
+  m_decompilerMode = false;
+  m_splitGraphDecompiler = false;
+  updateViewModeLayout();
 }
 
 void DisassemblyView::toggleViewMode() {

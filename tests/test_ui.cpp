@@ -27,6 +27,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QTabWidget>
+#include <QToolBar>
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
@@ -876,6 +877,51 @@ void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
 
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401000"));
     QVERIFY(mainWindow.isShowingDecompilerFallback());
+}
+
+void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
+    gridlock::core::managers::ThemeManager::instance().initialize();
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+
+    auto* disassemblyView = mainWindow.disassemblyView();
+    QVERIFY(disassemblyView != nullptr);
+
+    // 1. Side-by-Side Graph + Decompiler Mode
+    disassemblyView->setSplitGraphDecompilerMode(true);
+    QVERIFY(disassemblyView->isSplitGraphDecompilerMode());
+    QCoreApplication::processEvents();
+
+    auto* cfgGraphView = disassemblyView->findChild<QGraphicsView*>("cutterCfgGraphView");
+    auto* decompView = disassemblyView->findChild<QPlainTextEdit*>("cutterDecompilerView");
+    QVERIFY(cfgGraphView && decompView);
+    QVERIFY(cfgGraphView->isVisibleTo(disassemblyView));
+    QVERIFY(decompView->isVisibleTo(disassemblyView));
+    QVERIFY(cfgGraphView->width() >= 180);
+    QVERIFY(decompView->width() >= 180);
+    mainWindow.captureWorkspaceSnapshot("/tmp/gridlock_ui_v11_split.png");
+
+    // 2. Unified Compact Control Heights
+    const QList<QWidget*> scopes = { &mainWindow, mainWindow.memView(), mainWindow.projectExplorerWidget(), disassemblyView };
+    for (QWidget* s : scopes) {
+        if (!s) continue;
+        for (auto* btn : s->findChildren<QPushButton*>()) {
+            if (btn->isVisible()) QVERIFY2(btn->height() <= 28, qPrintable(btn->objectName()));
+        }
+        for (auto* edit : s->findChildren<QLineEdit*>()) {
+            if (edit->isVisible()) QVERIFY2(edit->height() <= 28, qPrintable(edit->objectName()));
+        }
+        for (auto* combo : s->findChildren<QComboBox*>()) {
+            if (combo->isVisible()) QVERIFY2(combo->height() <= 28, qPrintable(combo->objectName()));
+        }
+    }
+
+    // 3. Main Toolbar Compactness
+    for (auto* tb : mainWindow.findChildren<QToolBar*>()) {
+        if (tb->isVisible()) QVERIFY2(tb->height() <= 36, qPrintable(tb->objectName()));
+    }
 }
 
 QTEST_MAIN(TestMainWindowUI)

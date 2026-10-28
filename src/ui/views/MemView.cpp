@@ -42,13 +42,18 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
 
     QWidget* headerBar = new QWidget(this);
     headerBar->setObjectName("cutterMemHeader");
+    headerBar->setFixedHeight(26);
     headerBar->setStyleSheet(
+        "#cutterMemHeader { background: #21252b; border-bottom: 1px solid #2c313a; }"
+        "#cutterMemHeader QLabel { color: #abb2bf; font-size: 11px; font-weight: 600; }"
         "#cutterMemHeader QLineEdit, #cutterMemHeader QSpinBox, "
-        "#cutterMemHeader QComboBox { min-height: 22px; max-height: 24px; "
-        "padding: 0px 4px; margin: 0px; }"
-        "#cutterMemHeader QPushButton { padding: 2px 8px; min-height: 20px; }");
+        "#cutterMemHeader QComboBox { min-height: 20px; max-height: 22px; "
+        "padding: 0px 4px; margin: 0px; background: #16181d; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; }"
+        "#cutterMemHeader QPushButton { padding: 1px 8px; min-height: 20px; max-height: 22px; "
+        "background: #252932; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; font-size: 10px; font-weight: 600; }"
+        "#cutterMemHeader QPushButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }");
     QHBoxLayout* topLayout = new QHBoxLayout(headerBar);
-    topLayout->setContentsMargins(6, 3, 6, 3);
+    topLayout->setContentsMargins(6, 2, 6, 2);
     topLayout->setSpacing(4);
 
     auto configureToolbarButton = [](QPushButton* btn) {
@@ -58,8 +63,9 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
         const int textW = std::max(
             fm.horizontalAdvance(btn->text()),
             fm.horizontalAdvance(btn->text().toUpper()));
-        const int minW = textW + 24;
+        const int minW = textW + 20;
         btn->setMinimumWidth(minW);
+        btn->setFixedHeight(22);
         btn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     };
 
@@ -67,6 +73,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_addressEdit = new QLineEdit();
     m_addressEdit->setObjectName("cutterMemAddressEdit");
     m_addressEdit->setMinimumWidth(105);
+    m_addressEdit->setFixedHeight(22);
     m_addressEdit->setText(QStringLiteral("0x00401120"));
     topLayout->addWidget(m_addressEdit);
 
@@ -75,6 +82,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_lengthBox->setRange(1, 4096);
     m_lengthBox->setValue(256);
     m_lengthBox->setMinimumWidth(68);
+    m_lengthBox->setFixedHeight(22);
     topLayout->addWidget(m_lengthBox);
 
     topLayout->addWidget(new QLabel("Type:"));
@@ -83,6 +91,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_typeBox->addItem("Float");
     m_typeBox->addItem("Double");
     m_typeBox->setMinimumWidth(74);
+    m_typeBox->setFixedHeight(22);
     topLayout->addWidget(m_typeBox);
 
     m_readBtn = new QPushButton("Read");
@@ -97,12 +106,14 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_baselineRankBox = new QSpinBox();
     m_baselineRankBox->setRange(0, 1000);
     m_baselineRankBox->setMinimumWidth(56);
+    m_baselineRankBox->setFixedHeight(22);
     topLayout->addWidget(m_baselineRankBox);
 
     topLayout->addWidget(new QLabel("Target:"));
     m_targetRankBox = new QSpinBox();
     m_targetRankBox->setRange(0, 1000);
     m_targetRankBox->setMinimumWidth(56);
+    m_targetRankBox->setFixedHeight(22);
     topLayout->addWidget(m_targetRankBox);
 
     m_diffBtn = new QPushButton("Diff Ranks");

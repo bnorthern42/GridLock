@@ -207,11 +207,13 @@ bool MainWindow::seekToAddressOrExpression(const QString &expr) {
       m_disassemblyView->seekToAddress(parsedAddr);
       if (!hasSourceMapping) {
         m_showingDecompilerFallback = true;
-        m_disassemblyView->setGraphMode(true);
-        m_disassemblyView->setDecompilerMode(true);
+        m_disassemblyView->setSplitGraphDecompilerMode(true);
       } else {
         m_showingDecompilerFallback = false;
-        if (m_disassemblyView->isDecompilerMode()) {
+        if (m_disassemblyView->isSplitGraphDecompilerMode()) {
+          m_disassemblyView->setSplitGraphDecompilerMode(false);
+          m_disassemblyView->setGraphMode(false);
+        } else if (m_disassemblyView->isDecompilerMode()) {
           m_disassemblyView->setDecompilerMode(false);
         }
       }
@@ -246,8 +248,8 @@ bool MainWindow::seekToAddressOrExpression(const QString &expr) {
 void MainWindow::enableDecompilerFallback(bool enabled) {
   m_forceDecompilerFallback = enabled;
   m_showingDecompilerFallback = enabled;
-  if (enabled && m_disassemblyView) {
-    m_disassemblyView->setDecompilerMode(true);
+  if (m_disassemblyView) {
+    m_disassemblyView->setSplitGraphDecompilerMode(enabled);
   }
 }
 

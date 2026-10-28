@@ -30,4 +30,5 @@ private slots:
     void testOffscreenDefaultAndPreferredScreenRouting();
     void testNavigationHistoryStringsAndBookmarks();
     void testCfgGraphDecompilerLanguagesAndSourceFallback();
+    void testUnifiedChromeMetricsAndSplitGraphDecompiler();
 };
