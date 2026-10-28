@@ -785,4 +785,59 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     cfg.setOpenUnfocused(prevUnfocused);
 }
 
+void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
+    gridlock::ui::MainWindow mainWindow;
+    auto* disassemblyView = mainWindow.disassemblyView();
+    auto* projectExplorer = mainWindow.projectExplorerWidget();
+    auto* memView = mainWindow.memView();
+    QVERIFY(disassemblyView != nullptr);
+    QVERIFY(projectExplorer != nullptr);
+    QVERIFY(memView != nullptr);
+
+    // 1. Seek History Back/Forward
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401149"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
+
+    QVERIFY(mainWindow.canNavigateBack());
+    QVERIFY(!mainWindow.canNavigateForward());
+
+    QVERIFY(mainWindow.navigateBack());
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
+    QVERIFY(mainWindow.canNavigateBack());
+    QVERIFY(mainWindow.canNavigateForward());
+
+    QVERIFY(mainWindow.navigateForward());
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
+    QVERIFY(!mainWindow.canNavigateForward());
+
+    // 2. Strings Sidebar Mode
+    projectExplorer->setStringsMode(true);
+    QVERIFY(projectExplorer->isStringsMode());
+    QVERIFY(projectExplorer->stringCount() >= 4);
+
+    QSignalSpy spyStr(projectExplorer, &gridlock::ui::ProjectExplorerWidget::symbolAddressSelected);
+    QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD"));
+    QCOMPARE(spyStr.count(), 1);
+    const uint64_t strAddr = spyStr.at(0).at(0).toULongLong();
+    QCOMPARE(strAddr, 0x00402000ULL);
+    QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
+    QVERIFY(mainWindow.canNavigateBack());
+
+    // 3. Disassembly Bookmarks & Inline Comments
+    disassemblyView->setAddressComment(0x00401149ULL, " Outer loop rank check ");
+    QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Outer loop rank check"));
+
+    QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
+    QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
+    QVERIFY(disassemblyView->isBookmarked(0x00401149ULL));
+    QVERIFY(disassemblyView->bookmarkedAddresses().contains(0x00401149ULL));
+
+    QVERIFY(!disassemblyView->toggleBookmark(0x00401149ULL));
+    QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
+}
+
 QTEST_MAIN(TestMainWindowUI)

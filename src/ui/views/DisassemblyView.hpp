@@ -7,6 +7,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStackedWidget>
 #include <QString>
 #include <QStringList>
@@ -85,6 +86,12 @@ public:
     bool isDecompilerMode() const { return m_decompilerMode; }
     void setDecompilerMode(bool enabled);
 
+    void setAddressComment(uint64_t address, const QString& comment);
+    QString addressComment(uint64_t address) const;
+    bool toggleBookmark(uint64_t address);
+    bool isBookmarked(uint64_t address) const;
+    QVector<uint64_t> bookmarkedAddresses() const;
+
 public slots:
     void updateDisassembly(const QString& asmCode);
     void setDisassembly(const QString& asmCode) { updateDisassembly(asmCode); }
@@ -97,6 +104,7 @@ private:
     void parseDisassembly(const QString& asmCode);
     void rebuildCfgScene();
     void highlightActiveInstruction();
+    QString applyUserCommentsToListing(const QString& rawCode) const;
     static QString defaultStartupDisassembly();
 
     QLabel* m_headerBadge = nullptr;
@@ -114,6 +122,9 @@ private:
     QVector<DisasmBasicBlock> m_basicBlocks;
     QMap<uint64_t, int> m_addrToLine;
     QMap<int, uint64_t> m_lineToAddr;
+    QMap<uint64_t, QString> m_userComments;
+    QSet<uint64_t> m_bookmarks;
+    QString m_baseDisassembly;
     uint64_t m_currentAddress = 0x401120ULL;
     bool m_graphMode = false;
     bool m_decompilerMode = false;

@@ -5,12 +5,14 @@
 #include <unordered_map>
 #include <QSet>
 #include <QMap>
+#include <QVector>
 #include <memory>
 
 class IBackendCoordinator;
 class QVulkanInstance;
 class QLineEdit;
 class QLabel;
+class QPushButton;
 
 namespace gridlock {
 class GdbRankCoordinator;
@@ -81,6 +83,10 @@ public:
     bool captureWorkspaceSnapshot(const QString& outputPath);
     void applyCutterWorkspaceLayout();
     bool seekToAddressOrExpression(const QString& expr);
+    bool canNavigateBack() const;
+    bool canNavigateForward() const;
+    bool navigateBack();
+    bool navigateForward();
     QScreen* resolvePreferredScreen(const QString& monitorHint) const;
     void applyPreferredScreenRouting(const QString& monitorHint, bool openUnfocused);
     QString preferredMonitorHint() const { return m_preferredMonitorHint; }
@@ -107,6 +113,7 @@ private:
     void setupDocks();
     void setupStatusBar();
     void updateStatusTelemetry(const QString& pcOrSeek = QString(), const QString& targetState = QString());
+    void updateNavigationButtons();
     void hideHoverTooltipPopup();
 
 
@@ -131,12 +138,17 @@ private:
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
     QAction* m_runAction = nullptr;
+    QPushButton* m_navBackBtn = nullptr;
+    QPushButton* m_navForwardBtn = nullptr;
     QLineEdit* m_seekBar = nullptr;
     QWidget* m_addressNavBar = nullptr;
     QLabel* m_statusTelemetryLabel = nullptr;
     QString m_currentSeekOrPc = QStringLiteral("0x00000000");
     QString m_currentTargetState = QStringLiteral("IDLE");
     QString m_preferredMonitorHint;
+    QVector<QString> m_seekHistory;
+    int m_seekHistoryIndex = -1;
+    bool m_isNavigatingHistory = false;
 
     IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

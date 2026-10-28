@@ -113,6 +113,22 @@ public:
             painter.drawPolygon(arrow);
         }
 
+        // Draw gold bookmark markers on bookmarked instruction rows
+        for (uint64_t bmAddr : m_owner->bookmarkedAddresses()) {
+            const int bmLine = m_owner->lineForAddress(bmAddr);
+            if (bmLine >= 0 && lineCenterY.contains(bmLine)) {
+                const int cy = lineCenterY.value(bmLine);
+                QPolygon diamond;
+                diamond << QPoint(6, cy - 4)
+                        << QPoint(10, cy)
+                        << QPoint(6, cy + 4)
+                        << QPoint(2, cy);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(0xff, 0xcc, 0x00));
+                painter.drawPolygon(diamond);
+            }
+        }
+
         // Draw multi-lane branch flow arcs
         const auto& arcs = m_owner->branchArcs();
         const int laneCount = qMax(1, static_cast<int>(arcs.size()));
@@ -509,9 +525,10 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
 }
 
 void DisassemblyView::updateDisassembly(const QString &asmCode) {
-  const QString effectiveCode = asmCode.trimmed().isEmpty()
-                                    ? defaultStartupDisassembly()
-                                    : asmCode;
+  m_baseDisassembly = asmCode.trimmed().isEmpty()
+                          ? defaultStartupDisassembly()
+                          : asmCode;
+  const QString effectiveCode = applyUserCommentsToListing(m_baseDisassembly);
   if (m_linearEdit && m_linearEdit->toPlainText() != effectiveCode) {
     m_linearEdit->setPlainText(effectiveCode);
   }

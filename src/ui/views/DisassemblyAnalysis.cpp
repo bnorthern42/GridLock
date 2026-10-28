@@ -21,6 +21,76 @@ QVector<uint64_t> DisassemblyView::xrefsToAddress(uint64_t targetAddr) const {
   return callers;
 }
 
+void DisassemblyView::setAddressComment(uint64_t address,
+                                        const QString &comment) {
+  const QString trimmed = comment.trimmed();
+  if (trimmed.isEmpty()) {
+    m_userComments.remove(address);
+  } else {
+    m_userComments.insert(address, trimmed);
+  }
+  if (!m_baseDisassembly.isEmpty()) {
+    updateDisassembly(m_baseDisassembly);
+  }
+}
+
+QString DisassemblyView::addressComment(uint64_t address) const {
+  return m_userComments.value(address, QString());
+}
+
+bool DisassemblyView::toggleBookmark(uint64_t address) {
+  if (m_bookmarks.contains(address)) {
+    m_bookmarks.remove(address);
+  } else {
+    m_bookmarks.insert(address);
+  }
+  updateDisassembly(m_baseDisassembly.isEmpty() ? defaultStartupDisassembly()
+                                                : m_baseDisassembly);
+  return m_bookmarks.contains(address);
+}
+
+bool DisassemblyView::isBookmarked(uint64_t address) const {
+  return m_bookmarks.contains(address);
+}
+
+QVector<uint64_t> DisassemblyView::bookmarkedAddresses() const {
+  QVector<uint64_t> sorted;
+  sorted.reserve(m_bookmarks.size());
+  for (uint64_t addr : m_bookmarks) {
+    sorted.append(addr);
+  }
+  std::sort(sorted.begin(), sorted.end());
+  return sorted;
+}
+
+QString DisassemblyView::applyUserCommentsToListing(
+    const QString &rawCode) const {
+  if (m_userComments.isEmpty()) {
+    return rawCode;
+  }
+  static const QRegularExpression lineAddrRe(
+      QStringLiteral("^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)"));
+  QStringList lines = rawCode.split('\n');
+  for (QString &line : lines) {
+    QRegularExpressionMatch match = lineAddrRe.match(line);
+    if (!match.hasMatch()) {
+      continue;
+    }
+    bool ok = false;
+    const uint64_t addr = match.captured(1).toULongLong(&ok, 16);
+    if (ok && m_userComments.contains(addr)) {
+      const QString userNote = m_userComments.value(addr);
+      const int semiIdx = line.indexOf(';');
+      if (semiIdx >= 0) {
+        line = line.left(semiIdx).trimmed() + QStringLiteral("  ; ") + userNote;
+      } else {
+        line = line + QStringLiteral("  ; ") + userNote;
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
 void DisassemblyView::parseDisassembly(const QString &asmCode) {
   m_branchArcs.clear();
   m_basicBlocks.clear();

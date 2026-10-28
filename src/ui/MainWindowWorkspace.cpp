@@ -93,12 +93,20 @@ public:
   void setCurrentAddress(uint64_t addr) {
     if (addr != 0ULL) {
       m_currentAddr = addr;
+      setProperty("currentAddress", QVariant::fromValue<qulonglong>(addr));
       update();
     }
   }
 
 protected:
   void paintEvent(QPaintEvent * /*event*/) override {
+    const QVariant prop = property("currentAddress");
+    if (prop.isValid()) {
+      const uint64_t propAddr = prop.toULongLong();
+      if (propAddr != 0ULL) {
+        m_currentAddr = propAddr;
+      }
+    }
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, false);
     p.fillRect(rect(), QColor("#141619"));
@@ -219,74 +227,6 @@ void MainWindow::applyCutterWorkspaceLayout() {
   setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 }
 
-bool MainWindow::captureWorkspaceSnapshot(const QString &outputPath) {
-  QToolTip::hideText();
-  hideHoverTooltipPopup();
-  for (QWidget *topLevel : QApplication::topLevelWidgets()) {
-    if (topLevel != this && (topLevel->windowFlags() & Qt::ToolTip)) {
-      topLevel->hide();
-    }
-  }
-  for (QLabel *lbl : findChildren<QLabel *>()) {
-    if (lbl->text().startsWith("Size:")) {
-      lbl->hide();
-    }
-  }
-  this->ensurePolished();
-  if (this->layout()) {
-    this->layout()->activate();
-  }
-  QCoreApplication::processEvents();
-  QPixmap pixmap = this->grab();
-  if (pixmap.isNull()) {
-    return false;
-  }
-  return pixmap.save(outputPath, "PNG");
-}
-
-QScreen *MainWindow::resolvePreferredScreen(const QString &monitorHint) const {
-  const QList<QScreen *> screens = QGuiApplication::screens();
-  if (screens.isEmpty()) {
-    return nullptr;
-  }
-  const QString hint = monitorHint.trimmed();
-  if (hint.isEmpty()) {
-    return QGuiApplication::primaryScreen();
-  }
-  for (QScreen *scr : screens) {
-    if (!scr) {
-      continue;
-    }
-    const QRect geom = scr->geometry();
-    const QSizeF phys = scr->physicalSize();
-    const int diagInches =
-        qRound(std::hypot(phys.width(), phys.height()) / 25.4);
-    const QString meta = QString("%1 %2 %3 %4x%5 %6\" %6in")
-                             .arg(scr->name(), scr->model(),
-                                  scr->manufacturer())
-                             .arg(geom.width())
-                             .arg(geom.height())
-                             .arg(diagInches);
-    if (meta.contains(hint, Qt::CaseInsensitive)) {
-      return scr;
-    }
-  }
-  return QGuiApplication::primaryScreen();
-}
-
-void MainWindow::applyPreferredScreenRouting(const QString &monitorHint,
-                                             bool openUnfocused) {
-  m_preferredMonitorHint = monitorHint.trimmed();
-  setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
-  if (QScreen *target = resolvePreferredScreen(m_preferredMonitorHint)) {
-    setScreen(target);
-    if (windowHandle()) {
-      windowHandle()->setScreen(target);
-    }
-    move(target->availableGeometry().topLeft());
-  }
-}
-
 void MainWindow::setupStatusBar() {
   QStatusBar *bar = statusBar();
   bar->setObjectName("cutterStatusBar");
@@ -320,80 +260,6 @@ void MainWindow::updateStatusTelemetry(const QString &pcOrSeek,
             .arg(m_currentSeekOrPc)
             .arg(m_currentTargetState));
   }
-}
-
-bool MainWindow::seekToAddressOrExpression(const QString &expr) {
-  const QString cleaned = expr.trimmed();
-  if (cleaned.isEmpty()) {
-    return false;
-  }
-
-  QString normalized = cleaned;
-  bool isHexWithoutPrefix = false;
-  if (!normalized.startsWith("0x", Qt::CaseInsensitive)) {
-    (void)normalized.toULongLong(&isHexWithoutPrefix, 16);
-    if (isHexWithoutPrefix && normalized.length() >= 4) {
-      normalized = QStringLiteral("0x") + normalized;
-    }
-  }
-
-  // Parse hex address if applicable
-  bool hexOk = false;
-  QString hexPart = normalized;
-  if (hexPart.startsWith("0x", Qt::CaseInsensitive)) {
-    hexPart = hexPart.mid(2);
-  }
-  const uint64_t parsedAddr = hexPart.toULongLong(&hexOk, 16);
-
-  // If expr is a symbol name (not hex), check if ProjectExplorerWidget can resolve and activate it
-  if ((!hexOk || parsedAddr == 0ULL) && m_projectExplorerWidget) {
-    if (m_projectExplorerWidget->activateSymbol(cleaned)) {
-      return true;
-    }
-  }
-
-  if (m_seekBar && m_seekBar->text() != normalized) {
-    m_seekBar->setText(normalized);
-  }
-
-  updateStatusTelemetry(normalized);
-
-  if (auto *navBar = dynamic_cast<AddressSpaceNavBar *>(m_addressNavBar)) {
-    if (hexOk && parsedAddr != 0ULL) {
-      navBar->setCurrentAddress(parsedAddr);
-    }
-  }
-
-  // Synchronize with Memory View address bar and request memory if coordinator is active
-  if (m_memView) {
-    if (hexOk && parsedAddr != 0ULL) {
-      m_memView->seekToAddress(parsedAddr);
-    }
-    if (auto *addrEdit = m_memView->findChild<QLineEdit *>()) {
-      addrEdit->setText(normalized);
-    }
-    if (m_coordinator && m_currentTargetState != QStringLiteral("IDLE")) {
-      m_coordinator->readMemory(m_focusedRank, normalized, 256);
-    }
-  }
-
-  // Synchronize with DisassemblyView by forwarding hex addresses and highlighting symbols
-  if (m_disassemblyView) {
-    if (hexOk && parsedAddr != 0ULL) {
-      m_disassemblyView->seekToAddress(parsedAddr);
-    } else if (!m_disassemblyView->toPlainText().isEmpty()) {
-      QTextDocument *doc = m_disassemblyView->document();
-      if (doc) {
-        QTextCursor found = doc->find(normalized);
-        if (!found.isNull()) {
-          m_disassemblyView->setTextCursor(found);
-          m_disassemblyView->centerCursor();
-        }
-      }
-    }
-  }
-
-  return true;
 }
 
 void MainWindow::setupToolbar() {
@@ -463,6 +329,40 @@ void MainWindow::setupToolbar() {
   QWidget *spacer = new QWidget(toolbar);
   spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   toolbar->addWidget(spacer);
+
+  const QString navBtnStyle = QStringLiteral(
+      "QPushButton { background: #23272e; color: #d4d7dc; border: 1px solid #333842; "
+      "border-radius: 2px; padding: 0px; font-family: 'JetBrains Mono', monospace; "
+      "font-size: 11px; font-weight: 700; min-width: 22px; max-width: 22px; "
+      "min-height: 22px; max-height: 22px; }"
+      "QPushButton:hover:enabled { background: #2c313a; border-color: #4ec9b0; color: #4ec9b0; }"
+      "QPushButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #282c34; }");
+
+  m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
+  m_navBackBtn->setObjectName("navBackBtn");
+  m_navBackBtn->setFixedSize(22, 22);
+  m_navBackBtn->setStyleSheet(navBtnStyle);
+  m_navBackBtn->setEnabled(false);
+  connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
+  toolbar->addWidget(m_navBackBtn);
+
+  m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
+  m_navForwardBtn->setObjectName("navForwardBtn");
+  m_navForwardBtn->setFixedSize(22, 22);
+  m_navForwardBtn->setStyleSheet(navBtnStyle);
+  m_navForwardBtn->setEnabled(false);
+  connect(m_navForwardBtn, &QPushButton::clicked, this,
+          &MainWindow::navigateForward);
+  toolbar->addWidget(m_navForwardBtn);
+
+  QShortcut *navBackShortcut =
+      new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this);
+  connect(navBackShortcut, &QShortcut::activated, this,
+          &MainWindow::navigateBack);
+  QShortcut *navFwdShortcut =
+      new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this);
+  connect(navFwdShortcut, &QShortcut::activated, this,
+          &MainWindow::navigateForward);
 
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
