@@ -1,15 +1,28 @@
+/**
+ * @file test_docset.cpp
+ * @brief Implementation of DocsetManager indexing and search tests.
+ *
+ * Constructs a mock `.docset` directory with an embedded SQLite `docSet.dsidx` database,
+ * querying the index and verifying absolute document path resolution.
+ */
+
 #include "test_docset.hpp"
-#include "../src/core/managers/DocsetManager.hpp"
-#include <QTemporaryDir>
+
 #include <QDir>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QTemporaryDir>
 
+#include "../src/core/managers/DocsetManager.hpp"
+
+/**
+ * @brief Verifies symbol lookup and document path construction against SQLite docsets.
+ */
 void TestDocset::testSearch() {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
-    
-    // Create fake docset structure
+
+    // Create fake docset structure mimicking Dash/Zeal format.
     QDir dir(tempDir.path());
     dir.mkdir("Fake.docset");
     dir.cd("Fake.docset");
@@ -17,8 +30,8 @@ void TestDocset::testSearch() {
     dir.cd("Contents");
     dir.mkdir("Resources");
     dir.cd("Resources");
-    
-    // Create SQLite db
+
+    // Create SQLite db index.
     QString dbPath = dir.absoluteFilePath("docSet.dsidx");
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "test_setup_db");
@@ -30,14 +43,17 @@ void TestDocset::testSearch() {
         db.close();
     }
     QSqlDatabase::removeDatabase("test_setup_db");
-    
+
     auto& manager = gridlock::core::DocsetManager::instance();
-    manager.setDocsetDirectory(tempDir.path()); // This will call loadDocsets() and attach our fake DB.
-    
+    // This will call loadDocsets() and attach our fake DB.
+    manager.setDocsetDirectory(tempDir.path());
+
+    // Search for 'cout' and assert returned documentation path matches.
     auto results = manager.search("cout");
     QCOMPARE(results.size(), 1);
     QCOMPARE(results[0].first, QString("std::cout"));
-    // Docset path + /Contents/Resources/Documents/ + rawPath
+
+    // Expected docset path + /Contents/Resources/Documents/ + rawPath
     QString expectedPath = tempDir.path() + "/Fake.docset/Contents/Resources/Documents/cpp/io/cout.html";
     QCOMPARE(results[0].second, expectedPath);
 }

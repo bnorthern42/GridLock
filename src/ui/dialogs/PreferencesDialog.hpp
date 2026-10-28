@@ -1,4 +1,14 @@
+/**
+ * @file PreferencesDialog.hpp
+ * @brief Declaration of the Preferences dialog and modular settings page widgets.
+ *
+ * Defines the user interface dialog for configuring application appearance,
+ * editor preferences, runtime behavior, GDB/DAP debugger integration, HPC cluster
+ * topology, remote SSH/SLURM connections, Dash/Zeal docsets, and embedded terminal.
+ */
+
 #pragma once
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
@@ -15,224 +25,269 @@
 
 namespace gridlock::ui {
 
-// ─── Individual settings pages ─────────────────────────────────────────────
+// ============================================================================
+// Settings Page Widgets
+// ============================================================================
 
+/**
+ * @class AppearanceSettingsPage
+ * @brief Configuration panel for theme selection, dark mode, font sizes, and icon styling.
+ */
 class AppearanceSettingsPage : public QWidget {
-  Q_OBJECT
+    Q_OBJECT
+
 public:
-  explicit AppearanceSettingsPage(QWidget *parent = nullptr);
+    explicit AppearanceSettingsPage(QWidget* parent = nullptr);
 
-  QString selectedTheme() const;
-  bool isDarkMode() const;
-  QString fileTreeStyle() const;
-  bool colorizeIcons() const;
-  void loadFromSettings();
+    QString selectedTheme() const;
+    bool isDarkMode() const;
+    QString fileTreeStyle() const;
+    bool colorizeIcons() const;
+    int uiFontSize() const;
+    int codeFontSize() const;
 
-  int uiFontSize() const;
-  int codeFontSize() const;
+    void loadFromSettings();
 
 private:
-  QComboBox *m_themeCombo = nullptr;
-  QCheckBox *m_darkModeCheck = nullptr;
-  QComboBox *m_fileTreeStyleCombo = nullptr;
-  QCheckBox *m_colorizeIconsCheck = nullptr;
-  QSpinBox *m_uiFontSizeBox = nullptr;
-  QSpinBox *m_codeFontSizeBox = nullptr;
+    QComboBox* m_themeCombo = nullptr;
+    QCheckBox* m_darkModeCheck = nullptr;
+    QComboBox* m_fileTreeStyleCombo = nullptr;
+    QCheckBox* m_colorizeIconsCheck = nullptr;
+    QSpinBox* m_uiFontSizeBox = nullptr;
+    QSpinBox* m_codeFontSizeBox = nullptr;
 };
 
+/**
+ * @class EditingSettingsPage
+ * @brief Configuration panel for indentation, tab stops, whitespace, and margin guidelines.
+ */
 class EditingSettingsPage : public QWidget {
-  Q_OBJECT
-public:
-  explicit EditingSettingsPage(QWidget *parent = nullptr);
+    Q_OBJECT
 
-  int tabWidth() const;
-  bool insertSpaces() const;
-  bool showWhitespace() const;
-  bool wordWrap() const;
-  bool showEdgeColumn() const;
-  int edgeColumn() const;
-  void loadFromSettings();
+public:
+    explicit EditingSettingsPage(QWidget* parent = nullptr);
+
+    int tabWidth() const;
+    bool insertSpaces() const;
+    bool showWhitespace() const;
+    bool wordWrap() const;
+    bool showEdgeColumn() const;
+    int edgeColumn() const;
+
+    void loadFromSettings();
 
 private:
-  QSpinBox *m_tabWidthBox = nullptr;
-  QComboBox *m_indentModeCombo = nullptr;
-  QComboBox *m_whitespaceCombo = nullptr;
-  QCheckBox *m_wordWrapCheck = nullptr;
-  QCheckBox *m_showEdgeColumnCheck = nullptr;
-  QSpinBox *m_edgeColumnBox = nullptr;
+    QSpinBox* m_tabWidthBox = nullptr;
+    QComboBox* m_indentModeCombo = nullptr;
+    QComboBox* m_whitespaceCombo = nullptr;
+    QCheckBox* m_wordWrapCheck = nullptr;
+    QCheckBox* m_showEdgeColumnCheck = nullptr;
+    QSpinBox* m_edgeColumnBox = nullptr;
 };
 
-/// Owns session-level UX preferences only.
-/// MPI / GDB fields live exclusively in DebuggerSettingsPage.
+/**
+ * @class BehaviorSettingsPage
+ * @brief Configuration panel for session lifecycle and window focus behavior.
+ */
 class BehaviorSettingsPage : public QWidget {
-  Q_OBJECT
-public:
-  explicit BehaviorSettingsPage(QWidget *parent = nullptr);
+    Q_OBJECT
 
-  QString restoreBreakpoints() const;
-  bool confirmQuit() const;
-  bool focusOnStop() const;
-  void loadFromSettings();
+public:
+    explicit BehaviorSettingsPage(QWidget* parent = nullptr);
+
+    QString restoreBreakpoints() const;
+    bool confirmQuit() const;
+    bool focusOnStop() const;
+
+    void loadFromSettings();
 
 private:
-  QComboBox *m_restoreBreakpointsCheck = nullptr;
-  QComboBox *m_confirmQuitCheck = nullptr;
-  QComboBox *m_focusOnStopCheck = nullptr;
+    QComboBox* m_restoreBreakpointsCheck = nullptr;
+    QComboBox* m_confirmQuitCheck = nullptr;
+    QComboBox* m_focusOnStopCheck = nullptr;
 };
 
-/// Sole owner of DAP/GDB paths, MPI executable, MPI args, and default rank
-/// count. Persists through ConfigManager.
+/**
+ * @class DebuggerSettingsPage
+ * @brief Configuration panel for GDB, DAP adapter, Clangd LSP, and MPI launcher flags.
+ */
 class DebuggerSettingsPage : public QWidget {
-  Q_OBJECT
-public:
-  explicit DebuggerSettingsPage(QWidget *parent = nullptr);
+    Q_OBJECT
 
-  QString clangdPath() const;
-  QString dapAdapterPath() const;
-  QString gdbPath() const;
-  QString mpiExecutable() const;
-  QString mpiArgs() const;
-  int defaultRanks() const;
-  bool trapFpe() const;
-  void loadFromSettings();
+public:
+    explicit DebuggerSettingsPage(QWidget* parent = nullptr);
+
+    QString clangdPath() const;
+    QString dapAdapterPath() const;
+    QString gdbPath() const;
+    QString mpiExecutable() const;
+    QString mpiArgs() const;
+    int defaultRanks() const;
+    bool trapFpe() const;
+
+    void loadFromSettings();
 
 private:
-  QLineEdit *m_clangdPathEdit = nullptr;
-  QLineEdit *m_dapAdapterEdit = nullptr;
-  QLineEdit *m_gdbPathEdit = nullptr;
-  QLineEdit *m_mpiExecEdit = nullptr;
-  QLineEdit *m_mpiArgsEdit = nullptr;
-  QSpinBox *m_rankBox = nullptr;
-  QCheckBox *m_trapFpeCheck = nullptr;
+    QLineEdit* m_clangdPathEdit = nullptr;
+    QLineEdit* m_dapAdapterEdit = nullptr;
+    QLineEdit* m_gdbPathEdit = nullptr;
+    QLineEdit* m_mpiExecEdit = nullptr;
+    QLineEdit* m_mpiArgsEdit = nullptr;
+    QSpinBox* m_rankBox = nullptr;
+    QCheckBox* m_trapFpeCheck = nullptr;
 };
 
-/// HPC cluster / node configuration — hostsfile, env vars, affinity.
-/// Persists through ConfigManager::saveHpcSettings().
+/**
+ * @class HpcSettingsPage
+ * @brief Configuration panel for cluster hostfiles, environment variables, and node pinning.
+ */
 class HpcSettingsPage : public QWidget {
-  Q_OBJECT
-public:
-  explicit HpcSettingsPage(QWidget *parent = nullptr);
+    Q_OBJECT
 
-  QString hostsFile() const;
-  QString envVars() const;
-  bool strictAffinity() const;
-  void loadFromSettings();
+public:
+    explicit HpcSettingsPage(QWidget* parent = nullptr);
+
+    QString hostsFile() const;
+    QString envVars() const;
+    bool strictAffinity() const;
+
+    void loadFromSettings();
 
 private:
-  QLineEdit *m_hostsFileEdit = nullptr;
-  QTextEdit *m_envVarsEdit = nullptr;
-  QCheckBox *m_strictAffinityBox = nullptr;
+    QLineEdit* m_hostsFileEdit = nullptr;
+    QTextEdit* m_envVarsEdit = nullptr;
+    QCheckBox* m_strictAffinityBox = nullptr;
 };
 
-/// Remote HPC integration: SSH credentials, SLURM template, Spack root.
-/// Persists through ConfigManager::saveSshSettings() + saveSlurmSettings().
+/**
+ * @class HpcIntegrationSettingsPage
+ * @brief Configuration panel for remote SSH connections, SLURM templates, and Spack roots.
+ */
 class HpcIntegrationSettingsPage : public QWidget {
-  Q_OBJECT
+    Q_OBJECT
+
 public:
-  explicit HpcIntegrationSettingsPage(QWidget *parent = nullptr);
+    explicit HpcIntegrationSettingsPage(QWidget* parent = nullptr);
 
-  // SSH
-  QString sshHost() const;
-  QString sshUser() const;
-  QString sshKeyPath() const;
-  // SLURM
-  QString slurmTemplate() const;
-  QString slurmPartition() const;
-  int slurmNodes() const;
-  int slurmTasks() const;
-  bool requestGpus() const;
-  int gpusPerNode() const;
-  // Spack
-  QString spackRoot() const;
+    // SSH settings
+    QString sshHost() const;
+    QString sshUser() const;
+    QString sshKeyPath() const;
 
-  void loadFromSettings();
+    // SLURM batch settings
+    QString slurmTemplate() const;
+    QString slurmPartition() const;
+    int slurmNodes() const;
+    int slurmTasks() const;
+    bool requestGpus() const;
+    int gpusPerNode() const;
+
+    // Spack environment
+    QString spackRoot() const;
+
+    void loadFromSettings();
 
 private:
-  // SSH fields
-  QLineEdit *m_sshHostEdit = nullptr;
-  QLineEdit *m_sshUserEdit = nullptr;
-  QLineEdit *m_sshKeyEdit = nullptr;
-  // SLURM fields
-  QPlainTextEdit *m_templateEdit = nullptr;
-  QLineEdit *m_partitionEdit = nullptr;
-  QSpinBox *m_nodesBox = nullptr;
-  QSpinBox *m_tasksBox = nullptr;
-  QCheckBox *m_gpuCheck = nullptr;
-  QSpinBox *m_gpusBox = nullptr;
-  // Spack
-  QLineEdit *m_spackRootEdit = nullptr;
+    QLineEdit* m_sshHostEdit = nullptr;
+    QLineEdit* m_sshUserEdit = nullptr;
+    QLineEdit* m_sshKeyEdit = nullptr;
+    QPlainTextEdit* m_templateEdit = nullptr;
+    QLineEdit* m_partitionEdit = nullptr;
+    QSpinBox* m_nodesBox = nullptr;
+    QSpinBox* m_tasksBox = nullptr;
+    QCheckBox* m_gpuCheck = nullptr;
+    QSpinBox* m_gpusBox = nullptr;
+    QLineEdit* m_spackRootEdit = nullptr;
 };
 
+/**
+ * @class DocsetSettingsPage
+ * @brief Configuration panel for Dash/Zeal offline API docset storage and discovery.
+ */
 class DocsetSettingsPage : public QWidget {
-  Q_OBJECT
-public:
-  explicit DocsetSettingsPage(QWidget *parent = nullptr);
+    Q_OBJECT
 
-  QString docsetDirectory() const;
-  void loadFromSettings();
-  void refreshTable();
+public:
+    explicit DocsetSettingsPage(QWidget* parent = nullptr);
+
+    QString docsetDirectory() const;
+    void loadFromSettings();
+    void refreshTable();
 
 private slots:
-  void onAutoDetect();
+    void onAutoDetect();
 
 private:
-  QLineEdit *m_dirEdit = nullptr;
-  QTableWidget *m_table = nullptr;
-  QPushButton *m_autoDetectBtn = nullptr;
+    QLineEdit* m_dirEdit = nullptr;
+    QTableWidget* m_table = nullptr;
+    QPushButton* m_autoDetectBtn = nullptr;
 };
 
+/**
+ * @class TerminalSettingsPage
+ * @brief Configuration panel for embedded shell path, font family, and font size.
+ */
 class TerminalSettingsPage : public QWidget {
-  Q_OBJECT
-public:
-  explicit TerminalSettingsPage(QWidget *parent = nullptr);
+    Q_OBJECT
 
-  QString shellPath() const;
-  QString fontFamily() const;
-  int fontSize() const;
-  void loadFromSettings();
+public:
+    explicit TerminalSettingsPage(QWidget* parent = nullptr);
+
+    QString shellPath() const;
+    QString fontFamily() const;
+    int fontSize() const;
+
+    void loadFromSettings();
 
 private:
-  QLineEdit *m_shellPathEdit = nullptr;
-  QComboBox *m_fontFamilyCombo = nullptr;
-  QSpinBox *m_fontSizeBox = nullptr;
+    QLineEdit* m_shellPathEdit = nullptr;
+    QComboBox* m_fontFamilyCombo = nullptr;
+    QSpinBox* m_fontSizeBox = nullptr;
 };
 
-// ─── Main dialog ───────────────────────────────────────────────────────────
+// ============================================================================
+// Main Preferences Dialog
+// ============================================================================
 
+/**
+ * @class PreferencesDialog
+ * @brief Modal dialog orchestrating preference categories via sidebar navigation.
+ */
 class PreferencesDialog : public QDialog {
-  Q_OBJECT
+    Q_OBJECT
+
 public:
-  explicit PreferencesDialog(QWidget *parent = nullptr);
+    explicit PreferencesDialog(QWidget* parent = nullptr);
 
 signals:
-  /// Emitted after settings are written so live components can refresh.
-  void preferencesChanged();
+    /// Emitted after preferences are committed to disk to trigger live UI updates.
+    void preferencesChanged();
 
 private slots:
-  void apply();
-  void acceptAndApply();
+    void apply();
+    void acceptAndApply();
 
 protected:
-  void mousePressEvent(QMouseEvent *event) override;
-  void mouseMoveEvent(QMouseEvent *event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
 
 private:
-  void setupSidebar();
-  void setupPages();
-  void setupButtonBox();
+    void setupSidebar();
+    void setupPages();
+    void setupButtonBox();
 
-  QListWidget *m_sidebar = nullptr;
-  QStackedWidget *m_stack = nullptr;
-  QDialogButtonBox *m_buttonBox = nullptr;
+    QListWidget* m_sidebar = nullptr;
+    QStackedWidget* m_stack = nullptr;
+    QDialogButtonBox* m_buttonBox = nullptr;
 
-  AppearanceSettingsPage *m_appearancePage = nullptr;
-  EditingSettingsPage *m_editingPage = nullptr;
-  BehaviorSettingsPage *m_behaviorPage = nullptr;
-  DebuggerSettingsPage *m_debuggerPage = nullptr;
-  HpcSettingsPage *m_hpcPage = nullptr;
-  HpcIntegrationSettingsPage *m_hpcIntegrationPage = nullptr;
-  DocsetSettingsPage *m_docsetPage = nullptr;
-  TerminalSettingsPage *m_terminalPage = nullptr;
+    AppearanceSettingsPage* m_appearancePage = nullptr;
+    EditingSettingsPage* m_editingPage = nullptr;
+    BehaviorSettingsPage* m_behaviorPage = nullptr;
+    DebuggerSettingsPage* m_debuggerPage = nullptr;
+    HpcSettingsPage* m_hpcPage = nullptr;
+    HpcIntegrationSettingsPage* m_hpcIntegrationPage = nullptr;
+    DocsetSettingsPage* m_docsetPage = nullptr;
+    TerminalSettingsPage* m_terminalPage = nullptr;
 };
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui

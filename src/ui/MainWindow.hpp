@@ -1,34 +1,46 @@
+/**
+ * @file MainWindow.hpp
+ * @brief Declaration of the primary application window for GridLock.
+ *
+ * Defines the MainWindow class, which hosts the four-zone dockable workbench,
+ * multi-rank MPI coordination views, cross-pane address navigation, disassembly
+ * and decompiler synchronization, and session lifecycle management.
+ */
+
 #pragma once
-#include <QMainWindow>
+
 #include "../RankState.hpp"
+
 #include <QCloseEvent>
-#include <unordered_map>
-#include <QSet>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMainWindow>
 #include <QMap>
+#include <QPushButton>
+#include <QSet>
+#include <QString>
 #include <QVector>
 #include <memory>
+#include <unordered_map>
 
 class IBackendCoordinator;
 class QVulkanInstance;
-class QLineEdit;
-class QLabel;
-class QPushButton;
 
 namespace gridlock {
 class GdbRankCoordinator;
 class VariablesDockWidget;
 class PlainJaneTooltip;
-}
+}  // namespace gridlock
 
 namespace gridlock::core {
 class LspCoordinator;
 class HpcBackend;
 class DeadlockAnalyzer;
-}
+}  // namespace gridlock::core
 
 namespace gridlock::core::commands {
 class IDebugCommand;
-}
+}  // namespace gridlock::core::commands
 
 namespace gridlock::ui {
 
@@ -46,17 +58,37 @@ class MemView;
 class RegisterView;
 class SpackManager;
 class ExpressionEvaluatorWidget;
-
 class MpiDiagnosticsWidget;
 
+/**
+ * @class MainWindow
+ * @brief Central workstation window integrating all parallel debugging and disassembly views.
+ *
+ * Orchestrates docking layouts, command bus execution, multi-rank telemetry updates,
+ * navigation history, and secondary monitor display routing.
+ */
 class MainWindow : public QMainWindow {
     Q_OBJECT
+
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    /**
+     * @brief Constructs the MainWindow and initializes UI subsystems.
+     * @param parent Optional parent widget context.
+     */
+    explicit MainWindow(QWidget* parent = nullptr);
+
+    /**
+     * @brief Virtual destructor for clean resource teardown.
+     */
     ~MainWindow() override = default;
 
-    void setVulkanInstance(QVulkanInstance *inst);
+    /**
+     * @brief Associates an initialized Vulkan instance with the main window.
+     * @param inst Pointer to the active QVulkanInstance.
+     */
+    void setVulkanInstance(QVulkanInstance* inst);
 
+    // Subview Accessors
     ServerRackView* serverRackView() const { return m_serverRackView; }
     EditorTabManager* editorTabManager() const { return m_editorTabManager; }
     SourceCodeView* sourceCodeView() const;
@@ -70,28 +102,64 @@ public:
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
-
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
 
+    /**
+     * @brief Launches an MPI debug session on the specified target binary.
+     * @param binaryPath Path to executable.
+     * @param ranks Initial rank count.
+     */
     void startDebuggingSession(const QString& binaryPath, int ranks);
+
+    /**
+     * @brief Dispatches a debug command through the coordinator.
+     * @param cmd Unique pointer to command object.
+     */
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
 
+    /**
+     * @brief Attaches a backend coordinator instance.
+     * @param coord Pointer to backend coordinator.
+     */
     void setCoordinator(IBackendCoordinator* coord);
+
+    /**
+     * @brief Renders the entire workspace offscreen to an image file.
+     * @param outputPath Target file path.
+     * @return True on success.
+     */
     bool captureWorkspaceSnapshot(const QString& outputPath);
+
+    /**
+     * @brief Applies standard workstation dock arrangement and metric constraints.
+     */
     void applyCutterWorkspaceLayout();
+
+    /**
+     * @brief Seeks memory, disassembly, and decompiler views to an address or symbol.
+     * @param expr Address or symbolic expression.
+     * @return True if target location resolved and synchronized.
+     */
     bool seekToAddressOrExpression(const QString& expr);
+
     bool canNavigateBack() const;
     bool canNavigateForward() const;
     bool navigateBack();
     bool navigateForward();
+
     bool isShowingDecompilerFallback() const { return m_showingDecompilerFallback; }
     void enableDecompilerFallback(bool enabled);
+
     QScreen* resolvePreferredScreen(const QString& monitorHint) const;
     void applyPreferredScreenRouting(const QString& monitorHint, bool openUnfocused);
     QString preferredMonitorHint() const { return m_preferredMonitorHint; }
+
+    /**
+     * @brief Populates preview fixtures for automated headless snapshots.
+     */
     void loadPreviewFixture();
 
 public slots:
@@ -107,7 +175,7 @@ public slots:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
-    bool eventFilter(QObject *watched, QEvent *event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void setupUi();
@@ -115,11 +183,10 @@ private:
     void setupToolbar();
     void setupDocks();
     void setupStatusBar();
-    void updateStatusTelemetry(const QString& pcOrSeek = QString(), const QString& targetState = QString());
+    void updateStatusTelemetry(const QString& pcOrSeek = QString(),
+                               const QString& targetState = QString());
     void updateNavigationButtons();
     void hideHoverTooltipPopup();
-
-
 
 signals:
     void runTargetRequested();
@@ -168,4 +235,4 @@ private:
     QMap<QString, QSet<int>> m_persistentBreakpoints;
 };
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui

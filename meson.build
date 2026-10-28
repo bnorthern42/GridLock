@@ -66,6 +66,7 @@ src_files = [
   'src/ui/views/MemView.cpp',
   'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/PreferencesDialog.cpp',
+  'src/ui/dialogs/PreferencesDialogPages.cpp',
   'src/core/hpc/MockHpcBackend.cpp',
   'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp',
@@ -204,6 +205,7 @@ test('lsp_tests', gridlock_lsp_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 ui_test_src = [
   'tests/test_ui.cpp',
+  'tests/test_ui_aux.cpp',
   'src/ui/MainWindow.cpp',
   'src/ui/MainWindowWorkspace.cpp',
   'src/ui/MainWindowNavigation.cpp',
@@ -238,6 +240,7 @@ ui_test_src = [
   'src/ui/views/MemView.cpp',
   'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/PreferencesDialog.cpp',
+  'src/ui/dialogs/PreferencesDialogPages.cpp',
   'src/core/hpc/MockHpcBackend.cpp',
   'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp',

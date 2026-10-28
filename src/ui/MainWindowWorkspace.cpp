@@ -1,3 +1,12 @@
+/**
+ * @file MainWindowWorkspace.cpp
+ * @brief Implements the four-zone docking architecture and workspace layout choreography.
+ *
+ * Constructs and arranges the left symbol/project explorer dock, central source and
+ * disassembly/CFG splitters, right-hand CPU state inspection docks (Variables, Registers,
+ * Watch Expressions, Server Rack), and bottom console/memory tabs.
+ */
+
 #include "MainWindow.hpp"
 #include "../core/commands/DebugCommands.hpp"
 #include "../core/hpc/DapCoordinator.hpp"
@@ -57,157 +66,14 @@
 
 namespace gridlock::ui {
 
-namespace {
+QWidget* createAddressSpaceNavBar(MainWindow* window, QWidget* parent);
 
-class AddressSpaceNavBar : public QWidget {
-public:
-  struct Segment {
-    QString name;
-    uint64_t baseAddr;
-    uint64_t endAddr;
-    int weight;
-    QColor fillColor;
-    QColor textColor;
-  };
-
-  explicit AddressSpaceNavBar(std::function<void(uint64_t)> onSeek,
-                              QWidget *parent = nullptr)
-      : QWidget(parent), m_onSeek(std::move(onSeek)) {
-    setObjectName("addressNavBar");
-    setFixedHeight(20);
-    setCursor(Qt::PointingHandCursor);
-    m_segments = {
-        {QStringLiteral(".plt 0x401000"), 0x00401000ULL, 0x0040111fULL, 14,
-         QColor("#2c2238"), QColor("#c586c0")},
-        {QStringLiteral(".text 0x401120 (sym.main)"), 0x00401120ULL,
-         0x00401fffULL, 34, QColor("#1e3038"), QColor("#4ec9b0")},
-        {QStringLiteral(".rodata 0x402000"), 0x00402000ULL, 0x00403fffULL, 18,
-         QColor("#1e2836"), QColor("#569cd6")},
-        {QStringLiteral(".data 0x404000"), 0x00404000ULL, 0x00405fffULL, 16,
-         QColor("#2f291e"), QColor("#dcdcaa")},
-        {QStringLiteral("stack 0x7fffffffe000"), 0x7fffffffe000ULL,
-         0x7fffffffffffULL, 18, QColor("#332222"), QColor("#ce9178")},
-    };
-  }
-
-  void setCurrentAddress(uint64_t addr) {
-    if (addr != 0ULL) {
-      m_currentAddr = addr;
-      setProperty("currentAddress", QVariant::fromValue<qulonglong>(addr));
-      update();
-    }
-  }
-
-protected:
-  void paintEvent(QPaintEvent * /*event*/) override {
-    const QVariant prop = property("currentAddress");
-    if (prop.isValid()) {
-      const uint64_t propAddr = prop.toULongLong();
-      if (propAddr != 0ULL) {
-        m_currentAddr = propAddr;
-      }
-    }
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, false);
-    p.fillRect(rect(), QColor("#141619"));
-
-    int totalWeight = 0;
-    for (const auto &seg : m_segments) {
-      totalWeight += seg.weight;
-    }
-    if (totalWeight <= 0) {
-      return;
-    }
-
-    const int w = width();
-    const int h = height();
-    int x = 0;
-    int activeCursorX = -1;
-
-    QFont segFont("JetBrains Mono", 8, QFont::DemiBold);
-    segFont.setStyleHint(QFont::Monospace);
-    p.setFont(segFont);
-
-    for (size_t i = 0; i < m_segments.size(); ++i) {
-      const auto &seg = m_segments[i];
-      const int segW = (i + 1 == m_segments.size())
-                           ? (w - x)
-                           : (w * seg.weight) / totalWeight;
-      QRect segRect(x, 1, segW - 1, h - 2);
-      p.fillRect(segRect, seg.fillColor);
-      p.setPen(QColor("#2b2b2b"));
-      p.drawRect(segRect.adjusted(0, 0, -1, -1));
-
-      p.setPen(seg.textColor);
-      p.drawText(segRect.adjusted(6, 0, -6, 0),
-                 Qt::AlignVCenter | Qt::AlignLeft, seg.name);
-
-      if (m_currentAddr >= seg.baseAddr && m_currentAddr <= seg.endAddr) {
-        double ratio = 0.25;
-        if (seg.endAddr > seg.baseAddr) {
-          ratio = std::clamp(
-              static_cast<double>(m_currentAddr - seg.baseAddr) /
-                  static_cast<double>(std::min<uint64_t>(
-                      0x200ULL, seg.endAddr - seg.baseAddr)),
-              0.08, 0.92);
-        }
-        activeCursorX = x + static_cast<int>(segW * ratio);
-      }
-      x += segW;
-    }
-
-    if (activeCursorX < 0 && !m_segments.empty()) {
-      activeCursorX = (w * m_segments[0].weight) / totalWeight + 18;
-    }
-
-    if (activeCursorX >= 0) {
-      p.setPen(QPen(QColor("#ffcc00"), 1));
-      p.drawLine(activeCursorX, 0, activeCursorX, 4);
-      p.drawLine(activeCursorX, h - 4, activeCursorX, h);
-      QPolygon topMarker;
-      topMarker << QPoint(activeCursorX - 4, 0) << QPoint(activeCursorX + 4, 0)
-                << QPoint(activeCursorX, 4);
-      QPolygon botMarker;
-      botMarker << QPoint(activeCursorX - 4, h) << QPoint(activeCursorX + 4, h)
-                << QPoint(activeCursorX, h - 4);
-      p.setBrush(QColor("#ffcc00"));
-      p.setPen(Qt::NoPen);
-      p.drawPolygon(topMarker);
-      p.drawPolygon(botMarker);
-    }
-  }
-
-  void mousePressEvent(QMouseEvent *event) override {
-    int totalWeight = 0;
-    for (const auto &seg : m_segments) {
-      totalWeight += seg.weight;
-    }
-    const int w = std::max(1, width());
-    int x = 0;
-    for (size_t i = 0; i < m_segments.size(); ++i) {
-      const auto &seg = m_segments[i];
-      const int segW = (i + 1 == m_segments.size())
-                           ? (w - x)
-                           : (w * seg.weight) / totalWeight;
-      if (event->position().x() >= x && event->position().x() <= x + segW) {
-        setCurrentAddress(seg.baseAddr);
-        if (m_onSeek) {
-          m_onSeek(seg.baseAddr);
-        }
-        break;
-      }
-      x += segW;
-    }
-  }
-
-private:
-  std::vector<Segment> m_segments;
-  uint64_t m_currentAddr = 0x00401120ULL;
-  std::function<void(uint64_t)> m_onSeek;
-};
-
-} // namespace
-
+/**
+ * @brief Initializes main window geometry, Cutter-style dock layout, and toolbars.
+ *
+ * Configures the default 1440x900 desktop viewport, establishes dock nesting
+ * rules across the four peripheral zones, and binds top-level action controls.
+ */
 void MainWindow::setupUi() {
   setWindowTitle("GridLock - MPI Graphical Debugger");
   setWindowIcon(QIcon());
@@ -216,28 +82,40 @@ void MainWindow::setupUi() {
   setupToolbar();
 }
 
+/**
+ * @brief Configures modern reverse-engineering workstation docking rules.
+ *
+ * Enables nested docks, corner sharing favoring side panels over top/bottom,
+ * document tabs for tabified docks, and north-oriented tab placement.
+ */
 void MainWindow::applyCutterWorkspaceLayout() {
   setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
   setDockNestingEnabled(true);
   setDocumentMode(true);
   setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
+  // Favor vertical side docks over horizontal top/bottom docks at corners.
   setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
   setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 }
 
+/**
+ * @brief Constructs status bar displaying real-time MPI rank, PC, and execution state.
+ */
 void MainWindow::setupStatusBar() {
   QStatusBar *bar = statusBar();
   bar->setObjectName("cutterStatusBar");
   bar->setSizeGripEnabled(false);
   bar->setContentsMargins(6, 0, 6, 0);
 
+  // Initialize instruction pointer to main entry point if not previously set.
   if (m_currentSeekOrPc == QStringLiteral("0x00000000") ||
       m_currentSeekOrPc.isEmpty()) {
     m_currentSeekOrPc = QStringLiteral("0x00401120");
   }
 
+  // Construct permanent telemetry label spanning status bar width.
   m_statusTelemetryLabel = new QLabel(bar);
   m_statusTelemetryLabel->setObjectName("cutterStatusTelemetry");
   m_statusTelemetryLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
@@ -245,14 +123,22 @@ void MainWindow::setupStatusBar() {
   updateStatusTelemetry(m_currentSeekOrPc, m_currentTargetState);
 }
 
+/**
+ * @brief Updates the status bar telemetry banner with active rank, PC, and status.
+ * @param pcOrSeek Hexadecimal address string or symbol.
+ * @param targetState Execution state string (e.g. "RUNNING", "PAUSED", "IDLE").
+ */
 void MainWindow::updateStatusTelemetry(const QString &pcOrSeek,
                                        const QString &targetState) {
+  // Update internal address cache if parameter is non-empty.
   if (!pcOrSeek.isEmpty()) {
     m_currentSeekOrPc = pcOrSeek;
   }
+  // Update operational state cache if parameter is non-empty.
   if (!targetState.isEmpty()) {
     m_currentTargetState = targetState;
   }
+  // Format standardized breadcrumb displaying architecture, rank ID, address, and state.
   if (m_statusTelemetryLabel) {
     m_statusTelemetryLabel->setText(
         QStringLiteral("ARCH: x86_64 | MPI RANK: %1 | PC/SEEK: %2 | STATUS: %3")
@@ -262,7 +148,14 @@ void MainWindow::updateStatusTelemetry(const QString &pcOrSeek,
   }
 }
 
+/**
+ * @brief Constructs primary debugger control toolbar and secondary address space ribbon.
+ *
+ * Configures actions for Run, Continue, Step, Pause, Stop, and Terminate, along
+ * with history back/forward buttons, global seek bar, and address space visualizer.
+ */
 void MainWindow::setupToolbar() {
+  // Construct main debugger control toolbar.
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
   toolbar->setMovable(false);
@@ -277,14 +170,17 @@ void MainWindow::setupToolbar() {
       "QToolBar#MainToolbar QToolButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
       "QToolBar#MainToolbar QToolButton:pressed { background: #2c3444; border: 1px solid #528bff; }");
 
+  // Run Action: Starts target execution across all configured MPI ranks.
   m_runAction = new QAction("▶ Run Target", this);
   connect(m_runAction, &QAction::triggered, this, [this]() {
+    // Resolve target binary path from active coordinator or fallback project settings.
     auto settings =
         gridlock::core::ConfigManager::instance().loadProjectSettings();
     QString binary =
         m_coordinator && !m_coordinator->getCurrentBinaryPath().isEmpty()
             ? m_coordinator->getCurrentBinaryPath()
             : QString::fromStdString(settings.targetBinary);
+    // Instantiate polymorphic launch command targeting default MPI rank allocation.
     auto cmd = std::make_unique<gridlock::core::commands::LaunchCommand>(
         this, binary,
         gridlock::core::ConfigManager::instance().getDefaultRanks());
@@ -292,54 +188,67 @@ void MainWindow::setupToolbar() {
   });
   toolbar->addAction(m_runAction);
 
+  // Continue Action: Resumes suspended execution on active rank or process group.
   QAction *continueAction = new QAction("⏩ Continue", this);
   connect(continueAction, &QAction::triggered, this, [this]() {
+    // GDB coordinator commands use 1-based rank IDs internally (focusedRank + 1).
     auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(
         m_coordinator, m_focusedRank + 1);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(continueAction);
 
+  // Step Instruction Action: Executes single machine instruction on active rank.
   QAction *stepAction = new QAction("↷ Step Inst", this);
   connect(stepAction, &QAction::triggered, this, [this]() {
+    // Dispatch single instruction step without stepping over subroutines.
     auto cmd = std::make_unique<gridlock::core::commands::StepCommand>(
         m_coordinator, m_focusedRank + 1, false);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(stepAction);
 
+  // Pause Action: Interrupts running execution on active rank.
   QAction *pauseAction = new QAction("Pause Rank", this);
   connect(pauseAction, &QAction::triggered, this, [this]() {
+    // Deliver asynchronous interrupt signal (SIGINT) to pause target rank.
     auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(
         m_coordinator, m_focusedRank + 1);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(pauseAction);
 
+  // Stop Action: Sends termination request to active coordinator.
   QAction *stopAction = new QAction("⏹ Stop", this);
   connect(stopAction, &QAction::triggered, this, [this]() {
+    // Instruct coordinator to terminate all spawned worker processes.
     if (m_coordinator) {
       m_coordinator->terminateSession();
     }
   });
   toolbar->addAction(stopAction);
 
+  // Terminate Action: Closes debugging session and clears active state.
   QAction *exitAction = new QAction("Terminate Session", this);
   connect(exitAction, &QAction::triggered, this, [this]() {
+    // Execute top-level termination command to reset GUI and release resources.
     auto cmd =
         std::make_unique<gridlock::core::commands::TerminateCommand>(this);
     executeCommand(std::move(cmd));
   });
   toolbar->addAction(exitAction);
 
+  // Strip tooltips to maintain minimalist visual chrome.
   for (QAction *action : toolbar->actions()) {
     action->setToolTip(QString());
   }
 
+  // Expanding spacer separating debugger actions from navigation controls.
   QWidget *spacer = new QWidget(toolbar);
   spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   toolbar->addWidget(spacer);
 
+  // Navigation button stylesheet matching dark workstation theme.
   const QString navBtnStyle = QStringLiteral(
       "QPushButton, QPushButton:disabled { background: #252932; color: #d7dae0; border: 1px solid #323844; "
       "border-radius: 2px; padding: 0px; margin: 0px; font-family: 'JetBrains Mono', monospace; "
@@ -348,23 +257,28 @@ void MainWindow::setupToolbar() {
       "QPushButton:hover:enabled { background: #2c323d; border-color: #528bff; color: #ffffff; }"
       "QPushButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #242830; }");
 
+  // History back navigation button (<).
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
   m_navBackBtn->setObjectName("navBackButton");
   m_navBackBtn->setFixedSize(22, 22);
   m_navBackBtn->setStyleSheet(navBtnStyle);
   m_navBackBtn->setEnabled(false);
+  // Connect back button click to address stack pop operation.
   connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
   toolbar->addWidget(m_navBackBtn);
 
+  // History forward navigation button (>).
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
   m_navForwardBtn->setObjectName("navForwardButton");
   m_navForwardBtn->setFixedSize(22, 22);
   m_navForwardBtn->setStyleSheet(navBtnStyle);
   m_navForwardBtn->setEnabled(false);
+  // Connect forward button click to address stack forward traversal.
   connect(m_navForwardBtn, &QPushButton::clicked, this,
           &MainWindow::navigateForward);
   toolbar->addWidget(m_navForwardBtn);
 
+  // Global Alt+Left and Alt+Right keyboard shortcuts for navigation history.
   QShortcut *navBackShortcut =
       new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this);
   connect(navBackShortcut, &QShortcut::activated, this,
@@ -374,6 +288,7 @@ void MainWindow::setupToolbar() {
   connect(navFwdShortcut, &QShortcut::activated, this,
           &MainWindow::navigateForward);
 
+  // Universal seek bar allowing direct hexadecimal address or symbol navigation.
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
@@ -381,16 +296,19 @@ void MainWindow::setupToolbar() {
   m_seekBar->setMinimumWidth(300);
   m_seekBar->setFixedWidth(320);
   m_seekBar->setMaximumWidth(320);
+  // Apply monospace JetBrains Mono font for legible hex address formatting.
   QFont seekFont("JetBrains Mono");
   seekFont.setStyleHint(QFont::Monospace);
   seekFont.setPointSize(9);
   m_seekBar->setFont(seekFont);
   toolbar->addWidget(m_seekBar);
 
+  // Synchronize inspection views whenever user presses Return in seek bar.
   connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() {
     seekToAddressOrExpression(m_seekBar->text());
   });
 
+  // Ctrl+G shortcut to focus and select all text in the seek bar for rapid jumping.
   QShortcut *seekShortcut =
       new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
   connect(seekShortcut, &QShortcut::activated, this, [this]() {
@@ -400,6 +318,7 @@ void MainWindow::setupToolbar() {
     }
   });
 
+  // Secondary toolbar break for address space navigation ribbon.
   addToolBarBreak(Qt::TopToolBarArea);
   QToolBar *navToolbar = addToolBar("Address Space Navigation");
   navToolbar->setObjectName("AddressNavToolbar");
@@ -408,32 +327,37 @@ void MainWindow::setupToolbar() {
   navToolbar->setFixedHeight(22);
   navToolbar->setContentsMargins(0, 0, 0, 0);
 
-  m_addressNavBar = new AddressSpaceNavBar(
-      [this](uint64_t addr) {
-        seekToAddressOrExpression(
-            QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
-      },
-      navToolbar);
+  // Instantiate interactive address space navigation bar ribbon.
+  m_addressNavBar = createAddressSpaceNavBar(this, navToolbar);
   m_addressNavBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   navToolbar->addWidget(m_addressNavBar);
 }
 
+/**
+ * @brief Constructs and docks all secondary workspace inspection panels and editors.
+ *
+ * Assembles the left-hand project/symbol explorer, central editor and disassembly
+ * splitters, right-hand CPU/rank inspection tabs, and bottom console tabs.
+ */
 void MainWindow::setupDocks() {
   // Left Zone: Project Explorer / Symbols & Functions list
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
 
+  // Synchronize project explorer root directory when a saved session is restored.
   connect(&gridlock::core::managers::SessionManager::instance(),
           &gridlock::core::managers::SessionManager::sessionLoaded,
           m_projectExplorerWidget, &ProjectExplorerWidget::setRootPath);
 
+  // Route file double-clicks from project explorer directly into editor tabs.
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked,
           this, [this](const QString &filePath) {
             if (m_editorTabManager) {
               loadSourceFile(filePath);
             }
           });
+  // Route symbol clicks to synchronous multi-viewport address seek.
   connect(m_projectExplorerWidget,
           &ProjectExplorerWidget::symbolAddressSelected, this,
           [this](uint64_t address, const QString & /*symbolName*/) {
@@ -441,12 +365,13 @@ void MainWindow::setupDocks() {
                 QStringLiteral("0x%1").arg(address, 8, 16, QChar('0')));
           });
 
-  // Center & Bottom Zone Splitter
+  // Center & Bottom Zone Splitter: Divides central code/disassembly from bottom tabs.
   QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
   mainVerticalSplitter->setObjectName("MainVerticalSplitter");
   mainVerticalSplitter->setMinimumWidth(240);
   mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
   mainVerticalSplitter->setHandleWidth(4);
+  // Prevent child widgets from being collapsed completely via splitter drag.
   mainVerticalSplitter->setChildrenCollapsible(false);
 
   // Center Zone: Source Code (Left) & Disassembly View (Right) side-by-side
@@ -455,21 +380,27 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->setObjectName("MasterHorizontalSplitter");
   masterHorizontalSplitter->setContentsMargins(0, 0, 0, 0);
   masterHorizontalSplitter->setHandleWidth(4);
+  // Prevent source editor or disassembly panes from being zeroed out.
   masterHorizontalSplitter->setChildrenCollapsible(false);
 
+  // Instantiate multi-tab source code editor manager.
   m_editorTabManager = new EditorTabManager(masterHorizontalSplitter);
   m_editorTabManager->setMinimumWidth(120);
   m_editorTabManager->setMaximumWidth(QWIDGETSIZE_MAX);
   m_editorTabManager->setSizePolicy(QSizePolicy::Expanding,
                                     QSizePolicy::Expanding);
+  // Enable document mode for compact tab headers without excessive padding.
   m_editorTabManager->setDocumentMode(true);
   m_editorTabManager->setContentsMargins(0, 0, 0, 0);
   if (m_editorTabManager->tabBar()) {
+    // Enable horizontal tab scroll buttons when many source files are open.
     m_editorTabManager->tabBar()->setUsesScrollButtons(true);
     m_editorTabManager->tabBar()->setElideMode(Qt::ElideNone);
   }
+  // Connect gutter breakpoint toggles to active debugger backend.
   connect(m_editorTabManager, &EditorTabManager::toggleBreakpointRequested,
           this, [this](const QString &loc) {
+            // Forward location string to GDB backend coordinator.
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
                     m_coordinator)) {
               gdbCoord->insertBreakpoint(loc);
@@ -478,6 +409,7 @@ void MainWindow::setupDocks() {
   connect(m_editorTabManager, &EditorTabManager::breakpointToggled, this,
           [this](const QString &file, int line, bool isSet,
                  const QString &condition) {
+            // Normalize path to absolute filesystem coordinates.
             QString absoluteFilePath = QFileInfo(file).absoluteFilePath();
 
             // Update persistent cache (only tracks line numbers currently)
@@ -489,6 +421,7 @@ void MainWindow::setupDocks() {
             gridlock::core::ConfigManager::instance().saveBreakpoints(
                 m_persistentBreakpoints);
 
+            // Broadcast breakpoint toggle to all active ranks or DAP session.
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
                     m_coordinator)) {
               gdbCoord->broadcastBreakpoint(absoluteFilePath, line, isSet,
@@ -503,6 +436,7 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Evaluate variable under cursor on hover and display value popover.
   connect(
       m_editorTabManager, &EditorTabManager::hoverVariableRequested, this,
       [this](const QString &varName, const QPoint &globalPos) {
@@ -525,6 +459,7 @@ void MainWindow::setupDocks() {
   emptyVarTitle->setFixedSize(0, 0);
   variablesDock->setTitleBarWidget(emptyVarTitle);
 
+  // CPU Registers View: Renders hardware registers (GPRs, segment, flags) with change diffs.
   m_registerView = new RegisterView(this);
   m_registerView->setObjectName("RegisterViewWidget");
   connect(m_registerView, &RegisterView::addressActivated, this,
@@ -539,10 +474,14 @@ void MainWindow::setupDocks() {
   emptyRegTitle->setFixedSize(0, 0);
   registersDock->setTitleBarWidget(emptyRegTitle);
 
+  // Differential Grid: Cross-rank tabular matrix comparing watched variable values.
   m_differentialGrid = new DifferentialGrid(this);
   m_differentialGrid->setObjectName("DifferentialGrid");
+  // Set compact 20px row heights for dense tabular display.
   m_differentialGrid->verticalHeader()->setDefaultSectionSize(20);
+  // Default column width 96px accommodating standard variable names.
   m_differentialGrid->horizontalHeader()->setDefaultSectionSize(96);
+  // Connect column addition signal to backend GDB coordinator watch registration.
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
@@ -551,12 +490,15 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Restore project settings watch expressions into differential grid columns.
   auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
   for (const auto &w : ps.watchExpressions) {
     if (!w.empty()) {
+      // Append each persisted expression as a comparative matrix column.
       m_differentialGrid->addVariableColumn(QString::fromStdString(w));
     }
   }
+  // Populate initial synthetic fixture watch entries for baseline inspection.
   m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].id"),
                                             QStringLiteral("0 (int)"));
   m_differentialGrid->updateVariableDisplay(
@@ -569,36 +511,45 @@ void MainWindow::setupDocks() {
       1, QStringLiteral("data[0].coords.x"), QStringLiteral("1.5f (float)"));
   m_differentialGrid->updateVariableDisplay(1, QStringLiteral("mpi_rank"),
                                             QStringLiteral("1 (int)"));
+  // Hide row/column header indices to maximize data cell reading density.
   m_differentialGrid->setColumnHidden(0, true);
   m_differentialGrid->setRowHidden(0, true);
+  // Configure column sizing to fit variable names with trailing column stretch.
   m_differentialGrid->horizontalHeader()->setSectionResizeMode(
       QHeaderView::ResizeToContents);
   m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
 
+  // Watch Expressions container with custom inline expression add bar.
   QWidget *watchContainer = new QWidget(this);
   QVBoxLayout *watchLayout = new QVBoxLayout(watchContainer);
   watchLayout->setContentsMargins(0, 0, 0, 0);
   watchLayout->setSpacing(0);
 
+  // Compact header toolbar hosting watch input text field and submit button.
   QWidget *watchToolbar = new QWidget(watchContainer);
   watchToolbar->setObjectName("watchToolbar");
   QHBoxLayout *watchBarLayout = new QHBoxLayout(watchToolbar);
   watchBarLayout->setContentsMargins(3, 2, 3, 2);
   watchBarLayout->setSpacing(3);
 
+  // Expression input box allowing arbitrary C/C++ expressions (e.g. data[i]->val).
   QLineEdit *watchInput = new QLineEdit(watchToolbar);
   watchInput->setObjectName("watchExpressionInput");
   watchInput->setPlaceholderText("New watch expression...");
   watchInput->setFixedHeight(22);
 
+  // Submit button adding expression to active differential inspection grid.
   QPushButton *addWatchBtn = new QPushButton("+ Watch", watchToolbar);
   addWatchBtn->setObjectName("addWatchBtn");
   addWatchBtn->setFixedHeight(22);
 
+  // Helper lambda submitting new watch variable from text input to grid.
   auto submitWatch = [this, watchInput]() {
     const QString expr = watchInput->text().trimmed();
+    // Validate expression is non-empty before adding matrix column.
     if (!expr.isEmpty() && m_differentialGrid) {
       m_differentialGrid->addVariableColumn(expr);
+      // Emit signal notifying backend coordinator to evaluate expression on stopped ranks.
       emit m_differentialGrid->watchVariableAdded(expr);
       watchInput->clear();
     }
@@ -611,24 +562,29 @@ void MainWindow::setupDocks() {
   watchLayout->addWidget(watchToolbar);
   watchLayout->addWidget(m_differentialGrid, 1);
 
+  // Encapsulate watch container in a standard dockable QDockWidget.
   QDockWidget *watchDock = new QDockWidget("Watch Expressions", this);
   watchDock->setObjectName("WatchExpressionsDock");
   watchDock->setWidget(watchContainer);
 
+  // Server Rack Overview: Visualizes cluster node/rank topology and operational status.
   m_serverRackView = new ServerRackView(this);
   m_serverRackView->setObjectName("ServerRackViewWidget");
+  // Propagate updated rank addresses to disassembly view for divergence highlighting.
   connect(m_serverRackView, &ServerRackView::ranksUpdated, this,
           [this](const QMap<int, uint64_t> &rankPcMap) {
             if (m_disassemblyView) {
               m_disassemblyView->setRankAddresses(rankPcMap);
             }
           });
+  // Focus workspace inspection views on whichever rank node is clicked in rack.
   connect(m_serverRackView, &ServerRackView::rankSelected, this,
           [this](int rankId, uint64_t pcAddr) {
             onRankSelected(rankId);
             if (m_disassemblyView) {
               m_disassemblyView->setSelectedRank(rankId);
             }
+            // Navigate viewports to rank's current program counter if valid.
             if (pcAddr != 0ULL) {
               seekToAddressOrExpression(
                   QStringLiteral("0x%1").arg(pcAddr, 8, 16, QChar('0')));
@@ -640,6 +596,7 @@ void MainWindow::setupDocks() {
   serverRackDock->setObjectName("ServerRackDock");
   serverRackDock->setWidget(m_serverRackView);
 
+  // Dock right inspection widgets into RightDockWidgetArea with tabification.
   addDockWidget(Qt::RightDockWidgetArea, variablesDock);
   addDockWidget(Qt::RightDockWidgetArea, registersDock);
   tabifyDockWidget(variablesDock, registersDock);
@@ -647,6 +604,7 @@ void MainWindow::setupDocks() {
   addDockWidget(Qt::RightDockWidgetArea, serverRackDock);
   registersDock->raise();
 
+  // Pin variable context menu trigger from editor tabs into watch expressions.
   connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,
           [this, watchDock](const QString &varName) {
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
@@ -662,6 +620,7 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Disassembly & CFG Graph View: Dual-mode linear assembly and basic-block graph renderer.
   m_disassemblyView = new DisassemblyView(masterHorizontalSplitter);
   m_disassemblyView->setMinimumWidth(120);
   m_disassemblyView->setMaximumWidth(QWIDGETSIZE_MAX);
@@ -677,6 +636,7 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(m_disassemblyView);
 
+  // Allocate 45% width to source editor and 55% width to disassembly / CFG graph.
   masterHorizontalSplitter->setStretchFactor(0, 45);
   masterHorizontalSplitter->setStretchFactor(1, 55);
   masterHorizontalSplitter->setSizes({430, 520});
@@ -694,9 +654,11 @@ void MainWindow::setupDocks() {
     m_bottomTabs->tabBar()->setElideMode(Qt::ElideNone);
   }
 
+  // Embedded Interactive PTY Terminal: Spawns bash or user shell for command execution.
   m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
   m_terminalDock->setObjectName("TerminalDock");
 
+  // Dynamic Expression Evaluator: Supports ad-hoc C/C++ expression evaluation via GDB.
   m_expressionEvaluatorWidget = new ExpressionEvaluatorWidget(m_bottomTabs);
   m_expressionEvaluatorWidget->setObjectName("ExpressionEvaluatorDock");
   QWidget *emptyEvalTitle = new QWidget(m_expressionEvaluatorWidget);
@@ -710,18 +672,23 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Offline Reference Manual: Zeal/Dash compatible offline API and MPI manual viewer.
   m_referenceManualWidget = new ReferenceManualWidget(m_bottomTabs);
   m_referenceManualWidget->setObjectName("ReferenceManualWidget");
 
+  // Raw GDB Machine Interface Console: Displays low-level MI traffic and CLI input.
   m_gdbConsoleWidget = new GdbConsoleWidget(m_bottomTabs);
   m_gdbConsoleWidget->setObjectName("GdbConsoleWidget");
 
+  // Hexadecimal Memory Inspector: Renders binary byte arrays and ASCII representations.
   m_memView = new MemView(m_bottomTabs);
   m_memView->setObjectName("MemViewDock");
 
+  // Spack Environment & Package Manager: Visualizes active software stacks.
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
   m_spackManager->setObjectName("HpcConsoleDock");
 
+  // Connect memory inspection view read requests to coordinator backend.
   connect(m_memView, &MemView::requestMemory, this,
           [this](const QString &address, int length) {
             if (m_coordinator) {
@@ -729,6 +696,7 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Asynchronous Cross-Rank Memory Differ: Compares byte blocks between two MPI rank processes.
   connect(
       m_memView, &MemView::requestMemoryDiff, this,
       [this](int baseRank, int targetRank, const QString &addrStr, int length) {
@@ -743,11 +711,13 @@ void MainWindow::setupDocks() {
           return;
         void *remoteAddr = reinterpret_cast<void *>(addrInt);
 
+        // Run cross-process memory comparison in worker thread via QtConcurrent.
         QPointer<MainWindow> weakThis(this);
         (void)QtConcurrent::run([weakThis, basePid, targetPid, remoteAddr,
                                  length]() {
           auto result = gridlock::core::hpc::MemoryDiffer::compareMemory(
               basePid, targetPid, remoteAddr, length);
+          // Dispatch comparison result back to GUI thread for visualization.
           QMetaObject::invokeMethod(weakThis, [weakThis, result, remoteAddr]() {
             if (weakThis && weakThis->m_memView) {
               weakThis->m_memView->displayMemoryDiff(result, remoteAddr);
@@ -756,10 +726,12 @@ void MainWindow::setupDocks() {
         });
       });
 
+  // MPI Diagnostics & Deadlock Visualizer: Displays wait-for graphs and lock cycles.
   m_mpiDiagnosticsWidget = new MpiDiagnosticsWidget(m_bottomTabs);
   connect(m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::jumpToFrameRequested,
           this, &MainWindow::onRankSelected);
 
+  // Add all inspection and terminal widgets to bottom tabbed container.
   m_bottomTabs->addTab(m_terminalDock, "Terminal");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");
@@ -769,15 +741,20 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->setCurrentWidget(m_memView);
 
+  // Mount bottom tabbed container into central vertical splitter.
   mainVerticalSplitter->addWidget(m_bottomTabs);
   m_bottomTabs->setMinimumHeight(180);
 
+  // Allocate 68% height to code/disassembly and 32% to bottom console tabs.
   mainVerticalSplitter->setStretchFactor(0, 68);
   mainVerticalSplitter->setStretchFactor(1, 32);
   mainVerticalSplitter->setSizes({600, 260});
 
+  // Designate vertical splitter as the central QMainWindow widget.
+  // The central widget occupies remaining interior space between all four dock areas.
   setCentralWidget(mainVerticalSplitter);
 
+  // Enforce consistent minimum width constraints across all peripheral docks.
   const QList<QDockWidget *> sideDocks = {
       m_projectExplorerWidget, variablesDock, registersDock, watchDock,
       serverRackDock};
@@ -785,9 +762,11 @@ void MainWindow::setupDocks() {
     if (!dock) {
       continue;
     }
+    // Prevent side panels from collapsing below 150px during splitter adjustments.
     dock->setMinimumWidth(150);
     dock->setMaximumWidth(QWIDGETSIZE_MAX);
     dock->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // Apply matching size limits to internal child widgets to prevent layout clipping.
     if (QWidget *inner = dock->widget()) {
       inner->setMinimumWidth(150);
       inner->setMaximumWidth(QWIDGETSIZE_MAX);
@@ -795,12 +774,17 @@ void MainWindow::setupDocks() {
     }
   }
 
+  // Apply default pixel distributions for side explorer and inspection docks.
+  // 215px allocated to left explorer, 255px to right inspection zone.
   resizeDocks({m_projectExplorerWidget, registersDock}, {215, 255},
               Qt::Horizontal);
+  // Stack right-hand docks vertically: 320px registers, 210px watches, 290px server rack.
   resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290},
               Qt::Vertical);
 
+  // Locate or initialize View menu to register dock toggle actions.
   QMenu *viewMenu = nullptr;
+  // Traverse menu bar actions searching for top-level View menu container.
   for (QAction *action : menuBar()->actions()) {
     if (action->menu() && action->text() == "&View") {
       viewMenu = action->menu();
@@ -808,13 +792,17 @@ void MainWindow::setupDocks() {
     }
   }
 
+  // Register toggle actions and configure window flags for all child docks.
   for (auto *dock : findChildren<QDockWidget *>()) {
+    // Expose dynamic toggle checkboxes in View menu for showing/hiding each panel.
     if (viewMenu) {
       viewMenu->addAction(dock->toggleViewAction());
     }
+    // Allow panels to be closed, undocked into floating windows, or tabified.
     dock->setFeatures(QDockWidget::DockWidgetClosable |
                       QDockWidget::DockWidgetMovable |
                       QDockWidget::DockWidgetFloatable);
+    // Eliminate outer dock margins for seamless workstation borders.
     dock->setContentsMargins(0, 0, 0, 0);
     if (QWidget *inner = dock->widget()) {
       inner->setContentsMargins(0, 0, 0, 0);
@@ -824,14 +812,18 @@ void MainWindow::setupDocks() {
       }
     }
 
+    // Ensure floating top-level docks restore standard OS window chrome and shadows.
     connect(dock, &QDockWidget::topLevelChanged, dock, [dock](bool topLevel) {
       if (topLevel) {
+        // Strip custom frameless hints when detaching from main window.
         dock->setWindowFlags(dock->windowFlags() & ~Qt::FramelessWindowHint);
         dock->show();
       }
     });
   }
 
+  // Purge legacy geometry keys to guarantee fresh default workstation layout proportions.
+  // This clears stale v8 serialization entries that might distort default panel ratios.
   QSettings settings("gridlock", "debugger");
   settings.remove("MainWindow/Geometry_v8");
   settings.remove("MainWindow/State_v8");
@@ -839,4 +831,4 @@ void MainWindow::setupDocks() {
   settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
 }
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
