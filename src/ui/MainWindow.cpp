@@ -66,6 +66,12 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTextCursor>
+#include <QHeaderView>
+#include <QHBoxLayout>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <algorithm>
 
 namespace gridlock {
@@ -99,6 +105,150 @@ public:
 }
 
 namespace gridlock::ui {
+
+namespace {
+
+class AddressSpaceNavBar : public QWidget {
+public:
+  struct Segment {
+    QString name;
+    uint64_t baseAddr;
+    uint64_t endAddr;
+    int weight;
+    QColor fillColor;
+    QColor textColor;
+  };
+
+  explicit AddressSpaceNavBar(std::function<void(uint64_t)> onSeek,
+                              QWidget *parent = nullptr)
+      : QWidget(parent), m_onSeek(std::move(onSeek)) {
+    setObjectName("addressNavBar");
+    setFixedHeight(20);
+    setCursor(Qt::PointingHandCursor);
+    m_segments = {
+        {QStringLiteral(".plt 0x401000"), 0x00401000ULL, 0x0040111fULL, 14,
+         QColor("#2c2238"), QColor("#c586c0")},
+        {QStringLiteral(".text 0x401120 (sym.main)"), 0x00401120ULL,
+         0x00401fffULL, 34, QColor("#1e3038"), QColor("#4ec9b0")},
+        {QStringLiteral(".rodata 0x402000"), 0x00402000ULL, 0x00403fffULL, 18,
+         QColor("#1e2836"), QColor("#569cd6")},
+        {QStringLiteral(".data 0x404000"), 0x00404000ULL, 0x00405fffULL, 16,
+         QColor("#2f291e"), QColor("#dcdcaa")},
+        {QStringLiteral("stack 0x7fffffffe000"), 0x7fffffffe000ULL,
+         0x7fffffffffffULL, 18, QColor("#332222"), QColor("#ce9178")},
+    };
+  }
+
+  void setCurrentAddress(uint64_t addr) {
+    if (addr != 0ULL) {
+      m_currentAddr = addr;
+      update();
+    }
+  }
+
+protected:
+  void paintEvent(QPaintEvent * /*event*/) override {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, false);
+    p.fillRect(rect(), QColor("#141619"));
+
+    int totalWeight = 0;
+    for (const auto &seg : m_segments) {
+      totalWeight += seg.weight;
+    }
+    if (totalWeight <= 0) {
+      return;
+    }
+
+    const int w = width();
+    const int h = height();
+    int x = 0;
+    int activeCursorX = -1;
+
+    QFont segFont("JetBrains Mono", 8, QFont::DemiBold);
+    segFont.setStyleHint(QFont::Monospace);
+    p.setFont(segFont);
+
+    for (size_t i = 0; i < m_segments.size(); ++i) {
+      const auto &seg = m_segments[i];
+      const int segW = (i + 1 == m_segments.size())
+                           ? (w - x)
+                           : (w * seg.weight) / totalWeight;
+      QRect segRect(x, 1, segW - 1, h - 2);
+      p.fillRect(segRect, seg.fillColor);
+      p.setPen(QColor("#2b2b2b"));
+      p.drawRect(segRect.adjusted(0, 0, -1, -1));
+
+      p.setPen(seg.textColor);
+      p.drawText(segRect.adjusted(6, 0, -6, 0),
+                 Qt::AlignVCenter | Qt::AlignLeft, seg.name);
+
+      if (m_currentAddr >= seg.baseAddr && m_currentAddr <= seg.endAddr) {
+        double ratio = 0.25;
+        if (seg.endAddr > seg.baseAddr) {
+          ratio = std::clamp(
+              static_cast<double>(m_currentAddr - seg.baseAddr) /
+                  static_cast<double>(std::min<uint64_t>(
+                      0x200ULL, seg.endAddr - seg.baseAddr)),
+              0.08, 0.92);
+        }
+        activeCursorX = x + static_cast<int>(segW * ratio);
+      }
+      x += segW;
+    }
+
+    if (activeCursorX < 0 && !m_segments.empty()) {
+      activeCursorX = (w * m_segments[0].weight) / totalWeight + 18;
+    }
+
+    if (activeCursorX >= 0) {
+      p.setPen(QPen(QColor("#ffcc00"), 1));
+      p.drawLine(activeCursorX, 0, activeCursorX, 4);
+      p.drawLine(activeCursorX, h - 4, activeCursorX, h);
+      QPolygon topMarker;
+      topMarker << QPoint(activeCursorX - 4, 0) << QPoint(activeCursorX + 4, 0)
+                << QPoint(activeCursorX, 4);
+      QPolygon botMarker;
+      botMarker << QPoint(activeCursorX - 4, h) << QPoint(activeCursorX + 4, h)
+                << QPoint(activeCursorX, h - 4);
+      p.setBrush(QColor("#ffcc00"));
+      p.setPen(Qt::NoPen);
+      p.drawPolygon(topMarker);
+      p.drawPolygon(botMarker);
+    }
+  }
+
+  void mousePressEvent(QMouseEvent *event) override {
+    int totalWeight = 0;
+    for (const auto &seg : m_segments) {
+      totalWeight += seg.weight;
+    }
+    const int w = std::max(1, width());
+    int x = 0;
+    for (size_t i = 0; i < m_segments.size(); ++i) {
+      const auto &seg = m_segments[i];
+      const int segW = (i + 1 == m_segments.size())
+                           ? (w - x)
+                           : (w * seg.weight) / totalWeight;
+      if (event->position().x() >= x && event->position().x() <= x + segW) {
+        setCurrentAddress(seg.baseAddr);
+        if (m_onSeek) {
+          m_onSeek(seg.baseAddr);
+        }
+        break;
+      }
+      x += segW;
+    }
+  }
+
+private:
+  std::vector<Segment> m_segments;
+  uint64_t m_currentAddr = 0x00401120ULL;
+  std::function<void(uint64_t)> m_onSeek;
+};
+
+} // namespace
+
 
 MpiNetworkLogWidget* MainWindow::networkLog() const {
     if (m_mpiDiagnosticsWidget) {
@@ -137,19 +287,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_persistentBreakpoints =
       gridlock::core::ConfigManager::instance().getBreakpoints();
 
-  // Restore layout state (versioned for Cutter 4-zone workspace)
+  // Restore layout state
   QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry_v6")) {
-      restoreGeometry(settings.value("MainWindow/Geometry_v6").toByteArray());
+  if (settings.contains("MainWindow/Geometry_v7")) {
+      restoreGeometry(settings.value("MainWindow/Geometry_v7").toByteArray());
   }
-  if (settings.contains("MainWindow/State_v6")) {
-      restoreState(settings.value("MainWindow/State_v6").toByteArray());
+  if (settings.contains("MainWindow/State_v7")) {
+      restoreState(settings.value("MainWindow/State_v7").toByteArray());
   }
   
   // Restore splitter states
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          auto state = settings.value("MainWindow/Splitter_v6_" + splitter->objectName()).toByteArray();
+          auto state = settings.value("MainWindow/Splitter_v7_" + splitter->objectName()).toByteArray();
           if (!state.isEmpty()) {
               splitter->restoreState(state);
           }
@@ -421,12 +571,6 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
     }
   }
 
-  if (m_seekBar && m_seekBar->text() != normalized) {
-    m_seekBar->setText(normalized);
-  }
-
-  updateStatusTelemetry(normalized);
-
   // Parse hex address if applicable
   bool hexOk = false;
   QString hexPart = normalized;
@@ -434,6 +578,25 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
     hexPart = hexPart.mid(2);
   }
   const uint64_t parsedAddr = hexPart.toULongLong(&hexOk, 16);
+
+  // If expr is a symbol name (not hex), check if ProjectExplorerWidget can resolve and activate it
+  if ((!hexOk || parsedAddr == 0ULL) && m_projectExplorerWidget) {
+    if (m_projectExplorerWidget->activateSymbol(cleaned)) {
+      return true;
+    }
+  }
+
+  if (m_seekBar && m_seekBar->text() != normalized) {
+    m_seekBar->setText(normalized);
+  }
+
+  updateStatusTelemetry(normalized);
+
+  if (auto *navBar = dynamic_cast<AddressSpaceNavBar *>(m_addressNavBar)) {
+    if (hexOk && parsedAddr != 0ULL) {
+      navBar->setCurrentAddress(parsedAddr);
+    }
+  }
 
   // Synchronize with Memory View address bar and request memory if coordinator is active
   if (m_memView) {
@@ -676,6 +839,7 @@ void MainWindow::setupMenu() {
 void MainWindow::setupToolbar() {
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
+  toolbar->setMovable(false);
 
   m_runAction = new QAction("▶ Run Target", this);
   connect(m_runAction, &QAction::triggered, this, [this]() {
@@ -761,6 +925,22 @@ void MainWindow::setupToolbar() {
       m_seekBar->selectAll();
     }
   });
+
+  addToolBarBreak(Qt::TopToolBarArea);
+  QToolBar *navToolbar = addToolBar("Address Space Navigation");
+  navToolbar->setObjectName("AddressNavToolbar");
+  navToolbar->setMovable(false);
+  navToolbar->setFloatable(false);
+  navToolbar->setContentsMargins(0, 0, 0, 0);
+
+  m_addressNavBar = new AddressSpaceNavBar(
+      [this](uint64_t addr) {
+        seekToAddressOrExpression(
+            QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+      },
+      navToolbar);
+  m_addressNavBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  navToolbar->addWidget(m_addressNavBar);
 }
 
 void MainWindow::setupDocks() {
@@ -778,6 +958,11 @@ void MainWindow::setupDocks() {
             if (m_editorTabManager) {
               loadSourceFile(filePath);
             }
+          });
+  connect(m_projectExplorerWidget, &ProjectExplorerWidget::symbolAddressSelected,
+          this, [this](uint64_t address, const QString & /*symbolName*/) {
+            seekToAddressOrExpression(
+                QStringLiteral("0x%1").arg(address, 8, 16, QChar('0')));
           });
 
   // Center & Bottom Zone Splitter
@@ -878,6 +1063,8 @@ void MainWindow::setupDocks() {
 
   m_differentialGrid = new DifferentialGrid(this);
   m_differentialGrid->setObjectName("DifferentialGrid");
+  m_differentialGrid->verticalHeader()->setDefaultSectionSize(20);
+  m_differentialGrid->horizontalHeader()->setDefaultSectionSize(96);
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
           [this](const QString &name) {
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
@@ -892,9 +1079,56 @@ void MainWindow::setupDocks() {
       m_differentialGrid->addVariableColumn(QString::fromStdString(w));
     }
   }
+  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].id"), QStringLiteral("0 (int)"));
+  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].coords.x"), QStringLiteral("0.0f (float)"));
+  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("mpi_rank"), QStringLiteral("0 (int)"));
+  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].id"), QStringLiteral("1 (int)"));
+  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].coords.x"), QStringLiteral("1.5f (float)"));
+  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("mpi_rank"), QStringLiteral("1 (int)"));
+  m_differentialGrid->setColumnHidden(0, true);
+  m_differentialGrid->setRowHidden(0, true);
+  m_differentialGrid->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+  m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
+
+  QWidget *watchContainer = new QWidget(this);
+  QVBoxLayout *watchLayout = new QVBoxLayout(watchContainer);
+  watchLayout->setContentsMargins(0, 0, 0, 0);
+  watchLayout->setSpacing(0);
+
+  QWidget *watchToolbar = new QWidget(watchContainer);
+  watchToolbar->setObjectName("watchToolbar");
+  QHBoxLayout *watchBarLayout = new QHBoxLayout(watchToolbar);
+  watchBarLayout->setContentsMargins(3, 2, 3, 2);
+  watchBarLayout->setSpacing(3);
+
+  QLineEdit *watchInput = new QLineEdit(watchToolbar);
+  watchInput->setObjectName("watchExpressionInput");
+  watchInput->setPlaceholderText("New watch expression...");
+  watchInput->setFixedHeight(22);
+
+  QPushButton *addWatchBtn = new QPushButton("+ Watch", watchToolbar);
+  addWatchBtn->setObjectName("addWatchBtn");
+  addWatchBtn->setFixedHeight(22);
+
+  auto submitWatch = [this, watchInput]() {
+    const QString expr = watchInput->text().trimmed();
+    if (!expr.isEmpty() && m_differentialGrid) {
+      m_differentialGrid->addVariableColumn(expr);
+      emit m_differentialGrid->watchVariableAdded(expr);
+      watchInput->clear();
+    }
+  };
+  connect(addWatchBtn, &QPushButton::clicked, this, submitWatch);
+  connect(watchInput, &QLineEdit::returnPressed, this, submitWatch);
+
+  watchBarLayout->addWidget(watchInput, 1);
+  watchBarLayout->addWidget(addWatchBtn);
+  watchLayout->addWidget(watchToolbar);
+  watchLayout->addWidget(m_differentialGrid, 1);
+
   QDockWidget *watchDock = new QDockWidget("Watch Expressions", this);
   watchDock->setObjectName("WatchExpressionsDock");
-  watchDock->setWidget(m_differentialGrid);
+  watchDock->setWidget(watchContainer);
 
   m_serverRackView = new ServerRackView(this);
   m_serverRackView->setObjectName("ServerRackViewWidget");
@@ -1031,12 +1265,13 @@ void MainWindow::setupDocks() {
   mainVerticalSplitter->setSizes({600, 260});
 
   setCentralWidget(mainVerticalSplitter);
-  variablesDock->setMinimumWidth(240);
-  registersDock->setMinimumWidth(240);
-  watchDock->setMinimumWidth(240);
-  serverRackDock->setMinimumWidth(240);
-  resizeDocks({m_projectExplorerWidget, variablesDock, watchDock, serverRackDock}, {200, 260, 260, 260}, Qt::Horizontal);
-  resizeDocks({variablesDock, watchDock, serverRackDock}, {340, 260, 240}, Qt::Vertical);
+  m_projectExplorerWidget->setMinimumWidth(250);
+  variablesDock->setMinimumWidth(265);
+  registersDock->setMinimumWidth(265);
+  watchDock->setMinimumWidth(265);
+  serverRackDock->setMinimumWidth(265);
+  resizeDocks({m_projectExplorerWidget, variablesDock, watchDock, serverRackDock}, {260, 275, 275, 275}, Qt::Horizontal);
+  resizeDocks({variablesDock, watchDock, serverRackDock}, {320, 210, 290}, Qt::Vertical);
 
   QMenu* viewMenu = nullptr;
   for (QAction* action : menuBar()->actions()) {
@@ -1154,12 +1389,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
 
   QSettings settings("gridlock", "debugger");
-  settings.setValue("MainWindow/Geometry_v6", saveGeometry());
-  settings.setValue("MainWindow/State_v6", saveState());
+  settings.setValue("MainWindow/Geometry_v7", saveGeometry());
+  settings.setValue("MainWindow/State_v7", saveState());
 
   for (auto* splitter : findChildren<QSplitter*>()) {
       if (!splitter->objectName().isEmpty()) {
-          settings.setValue("MainWindow/Splitter_v6_" + splitter->objectName(), splitter->saveState());
+          settings.setValue("MainWindow/Splitter_v7_" + splitter->objectName(), splitter->saveState());
       }
   }
 

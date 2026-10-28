@@ -14,74 +14,81 @@ public:
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         painter->save();
-        // Allow the stylesheet to paint the background (hover, selected, etc.)
-        QStyledItemDelegate::paint(painter, option, index);
-
         painter->setRenderHint(QPainter::Antialiasing);
 
         int rankId = index.data(Qt::UserRole).toInt();
         RankState state = index.data(Qt::UserRole + 1).value<RankState>();
 
-        QRect rect = option.rect.adjusted(5, 5, -5, -5);
+        QRect rect = option.rect.adjusted(2, 2, -2, -2);
         bool isSelected = option.state & QStyle::State_Selected;
         bool isHovered = option.state & QStyle::State_MouseOver;
 
-        // Custom subtle border on top of the background
-        QColor textColor = m_view->palette().color(QPalette::Text);
-        if (textColor == Qt::black && m_view->palette().color(QPalette::Window).value() < 128) {
-             textColor = Qt::white; // Fallback if palette text is wrong in dark mode
-        }
-        
-        QColor borderColor = textColor;
-        borderColor.setAlphaF(0.2);
-        
-        if (isSelected || isHovered) {
-            borderColor = m_view->palette().color(QPalette::Highlight);
-        }
+        QString status = state.currentState.isEmpty() ? QStringLiteral("stopped") : state.currentState;
+        QString pcStr = state.registers.contains(16) ? state.registers.value(16) : QStringLiteral("0x00401120");
+
+        QColor bgColor = isSelected ? QColor("#22303c") : (isHovered ? QColor("#1f242c") : QColor("#181b20"));
+        QColor borderColor = isSelected ? QColor("#009688") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
 
         QPainterPath path;
-        path.addRoundedRect(rect, 5, 5);
-        
+        path.addRoundedRect(rect, 3, 3);
+        painter->fillPath(path, bgColor);
+
         QPen borderPen(borderColor);
         borderPen.setWidth(isSelected ? 2 : 1);
         painter->setPen(borderPen);
         painter->setBrush(Qt::NoBrush);
         painter->drawPath(path);
 
-        // Text
-        QString status = state.currentState.isEmpty() ? "offline" : state.currentState;
-        qint64 runTime = state.totalRuntimeMs;
-        if (status == "running" && state.executionTimer.isValid()) {
-            runTime += state.executionTimer.elapsed();
-        }
-
-        QFont monoFont("monospace", 10, QFont::Bold);
-        monoFont.setStyleHint(QFont::Monospace);
-        painter->setFont(monoFont);
-        
-        painter->setPen(textColor);
-        QString titleStr = QString("R[%1] %2ms").arg(rankId).arg(runTime);
-        painter->drawText(rect.left() + 15, rect.center().y() + 4, titleStr);
-
-        // LED
+        // Status LED & Badge color
         QColor ledColor;
+        QString badgeText;
         if (status == "running") {
-            ledColor = QColor(46, 204, 113); // Green
-        } else if (status == "stopped") {
-            ledColor = QColor(241, 196, 15); // Yellow
+            ledColor = QColor("#2ecc71");
+            badgeText = QStringLiteral("RUN");
+        } else if (status == "stopped" || status == "paused") {
+            ledColor = QColor("#f1c40f");
+            badgeText = QStringLiteral("BRK");
         } else {
-            ledColor = textColor;
-            ledColor.setAlphaF(0.3); // Dim for offline
+            ledColor = QColor("#7f8c8d");
+            badgeText = QStringLiteral("IDLE");
         }
 
-        painter->setBrush(ledColor);
-        painter->setPen(Qt::NoPen);
-        painter->drawEllipse(rect.right() - 20, rect.center().y() - 5, 10, 10);
+        // Top row: Rank [N] + LED + State Badge
+        QFont rankFont("JetBrains Mono", 8, QFont::Bold);
+        rankFont.setStyleHint(QFont::Monospace);
+        painter->setFont(rankFont);
+        painter->setPen(QColor("#e5e9f0"));
+        painter->drawText(QRect(rect.left() + 6, rect.top() + 3, 54, 14),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          QStringLiteral("RANK %1").arg(rankId));
+
+        // State badge pill on top-right
+        QRect badgeRect(rect.right() - 38, rect.top() + 3, 32, 13);
+        QPainterPath badgePath;
+        badgePath.addRoundedRect(badgeRect, 2, 2);
+        QColor badgeBg = ledColor;
+        badgeBg.setAlpha(45);
+        painter->fillPath(badgePath, badgeBg);
+        painter->setPen(ledColor);
+        QFont badgeFont("JetBrains Mono", 7, QFont::Bold);
+        badgeFont.setStyleHint(QFont::Monospace);
+        painter->setFont(badgeFont);
+        painter->drawText(badgeRect, Qt::AlignCenter, badgeText);
+
+        // Bottom row: Instruction pointer address
+        QFont pcFont("JetBrains Mono", 8);
+        pcFont.setStyleHint(QFont::Monospace);
+        painter->setFont(pcFont);
+        painter->setPen(QColor("#4ec9b0"));
+        painter->drawText(QRect(rect.left() + 6, rect.top() + 18, rect.width() - 12, 14),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          pcStr);
+
         painter->restore();
     }
 
     QSize sizeHint(const QStyleOptionViewItem &/*option*/, const QModelIndex &/*index*/) const override {
-        return QSize(160, 45); // width, height per node
+        return QSize(116, 34);
     }
 
 private:
@@ -93,15 +100,17 @@ ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
     setFlow(QListView::LeftToRight);
     setWrapping(true);
     setResizeMode(QListView::Adjust);
-    setSpacing(5);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setSpacing(3);
+    setContentsMargins(2, 2, 2, 2);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
     setItemDelegate(new ServerNodeDelegate(this, this));
 
     connect(this, &QListWidget::itemClicked, this, &ServerRackView::onItemClicked);
+
+    // Seed an 8-rank MPI cluster matrix by default for immediate visual inspection
+    resetRanks(8);
 }
 
 void ServerRackView::resetRanks(int count) {
@@ -110,9 +119,15 @@ void ServerRackView::resetRanks(int count) {
     clear();
 
     for (int i = 0; i < count; ++i) {
+        RankState defaultState;
+        defaultState.currentState = (i == 0) ? QStringLiteral("stopped") : QStringLiteral("running");
+        defaultState.registers[16] = (i == 0) ? QStringLiteral("0x00401120") : QStringLiteral("0x00401155");
+        defaultState.totalRuntimeMs = 12 + i * 3;
+        m_states[i] = defaultState;
+
         QListWidgetItem* item = new QListWidgetItem(this);
         item->setData(Qt::UserRole, i);
-        item->setData(Qt::UserRole + 1, QVariant::fromValue(RankState{}));
+        item->setData(Qt::UserRole + 1, QVariant::fromValue(defaultState));
         addItem(item);
     }
 
@@ -126,6 +141,7 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
     if (rank >= 0 && rank < count()) {
         QListWidgetItem* item = this->item(rank);
         item->setData(Qt::UserRole + 1, QVariant::fromValue(state));
+        viewport()->update();
     }
 }
 

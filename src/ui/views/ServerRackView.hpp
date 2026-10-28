@@ -14,6 +14,7 @@ public:
 
     void resetRanks(int count);
     void updateRankState(int rank, const RankState& state);
+    int rankNodeCount() const { return count(); }
 
 signals:
     void rankSelected(int rankId);

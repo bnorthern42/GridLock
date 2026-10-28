@@ -23,4 +23,5 @@ private slots:
     void testCutterZoneGroupingAndSeekBar();
     void testCutterDisassemblyCfgAndBranchFlow();
     void testCutterHexdumpDiffAndRegisterSeekSync();
+    void testSymbolSidebarAndNavRibbon();
 };

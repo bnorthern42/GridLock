@@ -29,6 +29,7 @@
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
+#include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -515,6 +516,35 @@ void TestMainWindowUI::testCutterHexdumpDiffAndRegisterSeekSync() {
     QVERIFY(statusTelemetry->text().contains("40113d", Qt::CaseInsensitive));
     QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL);
     QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
+}
+
+void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+
+    // 1. Address-Space Navigation Ribbon (#addressNavBar)
+    QWidget* navBar = mainWindow.findChild<QWidget*>("addressNavBar");
+    QVERIFY(navBar != nullptr);
+
+    // 2. ProjectExplorerWidget Symbols Mode & Symbol Activation
+    auto* projectExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
+    QVERIFY(projectExplorer != nullptr);
+    projectExplorer->setSymbolsMode(true);
+    QVERIFY(projectExplorer->isSymbolsMode());
+    QVERIFY(projectExplorer->symbolCount() >= 4);
+
+    QVERIFY(projectExplorer->activateSymbol("sym.main"));
+    QCOMPARE(mainWindow.disassemblyView()->currentAddress(), 0x00401120ULL);
+    QCOMPARE(mainWindow.memView()->currentBaseAddress(), 0x00401120ULL);
+
+    QVERIFY(projectExplorer->activateSymbol("MPI_Finalize@plt"));
+    QCOMPARE(mainWindow.disassemblyView()->currentAddress(), 0x00401060ULL);
+    QCOMPARE(mainWindow.memView()->currentBaseAddress(), 0x00401060ULL);
+
+    // 3. ServerRackView Populated Cluster Matrix
+    auto* serverRackView = mainWindow.findChild<gridlock::ui::ServerRackView*>();
+    QVERIFY(serverRackView != nullptr);
+    QVERIFY(serverRackView->rankNodeCount() >= 4);
 }
 
 QTEST_MAIN(TestMainWindowUI)

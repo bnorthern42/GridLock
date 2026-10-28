@@ -128,6 +128,7 @@ private:
     QTabWidget* m_bottomTabs = nullptr;
     QAction* m_runAction = nullptr;
     QLineEdit* m_seekBar = nullptr;
+    QWidget* m_addressNavBar = nullptr;
     QLabel* m_statusTelemetryLabel = nullptr;
     QString m_currentSeekOrPc = QStringLiteral("0x00000000");
     QString m_currentTargetState = QStringLiteral("IDLE");
