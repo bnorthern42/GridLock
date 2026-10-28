@@ -430,12 +430,80 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
 
   m_highlighter = new AsmSyntaxHighlighter(m_linearEdit->document());
 
+  class CfgGraphView : public QGraphicsView {
+  public:
+    explicit CfgGraphView(DisassemblyView *owner, QGraphicsScene *sc,
+                          QWidget *p = nullptr)
+        : QGraphicsView(sc, p), m_owner(owner) {}
+
+  protected:
+    void drawForeground(QPainter *painter, const QRectF & /*rect*/) override {
+      if (!m_owner || !m_owner->isGraphMinimapVisible() || !scene()) {
+        return;
+      }
+      const QRectF scRect = scene()->sceneRect();
+      if (scRect.width() <= 1.0 || scRect.height() <= 1.0) {
+        return;
+      }
+      painter->save();
+      painter->resetTransform();
+      const QRect mm = m_owner->minimapRect();
+      painter->setRenderHint(QPainter::Antialiasing, true);
+      painter->fillRect(mm, QColor(0x14, 0x16, 0x1b, 225));
+      painter->setPen(QPen(QColor("#323844"), 1));
+      painter->drawRect(mm.adjusted(0, 0, -1, -1));
+
+      const QRect inner = mm.adjusted(4, 4, -4, -4);
+      const qreal sx = inner.width() / scRect.width();
+      const qreal sy = inner.height() / scRect.height();
+
+      for (QGraphicsItem *item : scene()->items()) {
+        if (qAbs(item->zValue() - 1.0) < 0.05) {
+          const QRectF br = item->sceneBoundingRect();
+          const QRectF miniRect(
+              inner.left() + (br.left() - scRect.left()) * sx,
+              inner.top() + (br.top() - scRect.top()) * sy,
+              qMax(4.0, br.width() * sx), qMax(3.0, br.height() * sy));
+          const uint64_t bbAddr = item->data(Qt::UserRole).toULongLong();
+          const QVector<int> occ = m_owner->ranksAtBlock(bbAddr);
+          painter->fillRect(miniRect,
+                            occ.isEmpty() ? QColor("#252932")
+                                          : QColor("#1f3442"));
+          painter->setPen(QPen(
+              occ.isEmpty() ? QColor("#3e4452") : QColor("#4ec9b0"), 1));
+          painter->drawRect(miniRect);
+          if (!occ.isEmpty()) {
+            painter->setBrush(occ.contains(0) ? QColor("#dcdcaa")
+                                              : QColor("#4ec9b0"));
+            painter->setPen(Qt::NoPen);
+            painter->drawEllipse(miniRect.center(), 2.2, 2.2);
+          }
+        }
+      }
+
+      const QRectF visScene = mapToScene(viewport()->rect()).boundingRect();
+      const QRectF vpMini(
+          inner.left() + (visScene.left() - scRect.left()) * sx,
+          inner.top() + (visScene.top() - scRect.top()) * sy,
+          qMin<qreal>(inner.width(), visScene.width() * sx),
+          qMin<qreal>(inner.height(), visScene.height() * sy));
+      painter->setBrush(Qt::NoBrush);
+      painter->setPen(QPen(QColor("#528bff"), 1.2));
+      painter->drawRect(vpMini.intersected(QRectF(inner)));
+      painter->restore();
+    }
+
+  private:
+    DisassemblyView *m_owner = nullptr;
+  };
+
   m_cfgScene = new QGraphicsScene(this);
-  m_cfgView = new QGraphicsView(m_cfgScene, m_stack);
+  m_cfgView = new CfgGraphView(this, m_cfgScene, m_stack);
   m_cfgView->setObjectName("cutterCfgGraphView");
   m_cfgView->setFrameShape(QFrame::NoFrame);
   m_cfgView->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
   m_cfgView->setDragMode(QGraphicsView::ScrollHandDrag);
+  m_cfgView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
   m_cfgView->setBackgroundBrush(QColor(0x16, 0x18, 0x1d));
   m_cfgView->setMinimumWidth(180);
   if (m_cfgView->viewport()) {
@@ -537,6 +605,11 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   auto *spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
   spaceShortcut->setContext(Qt::WidgetWithChildrenShortcut);
   connect(spaceShortcut, &QShortcut::activated, this, &DisassemblyView::toggleViewMode);
+
+  m_rankAddresses = {
+      {0, 0x00401120ULL}, {1, 0x00401155ULL}, {2, 0x00401155ULL},
+      {3, 0x00401155ULL}, {4, 0x00401155ULL}, {5, 0x00401155ULL},
+      {6, 0x00401155ULL}, {7, 0x00401155ULL}};
 
   reloadStyle();
   updateDisassembly(defaultStartupDisassembly());
@@ -746,6 +819,7 @@ void DisassemblyView::highlightActiveInstruction() {
     }
   }
   m_linearEdit->setExtraSelections(selections);
+  m_linearEdit->updateGutter();
 }
 
 void DisassemblyView::highlightActiveDecompilerLine() {

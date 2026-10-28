@@ -27,7 +27,7 @@ public:
         QString pcStr = state.registers.contains(16) ? state.registers.value(16) : QStringLiteral("0x00401120");
 
         QColor bgColor = isSelected ? QColor("#22303c") : (isHovered ? QColor("#1f242c") : QColor("#181b20"));
-        QColor borderColor = isSelected ? QColor("#009688") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
+        QColor borderColor = isSelected ? QColor("#528bff") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
 
         QPainterPath path;
         path.addRoundedRect(rect, 3, 3);
@@ -115,6 +115,7 @@ ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
 
 void ServerRackView::resetRanks(int count) {
     m_rankCount = count;
+    m_selectedRank = 0;
     m_states.clear();
     clear();
 
@@ -145,10 +146,35 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
     }
 }
 
+bool ServerRackView::selectRank(int rankId) {
+    if (rankId < 0 || rankId >= count()) {
+        return false;
+    }
+    m_selectedRank = rankId;
+    setCurrentRow(rankId);
+    viewport()->update();
+
+    uint64_t pcAddr = (rankId == 0) ? 0x00401120ULL : 0x00401155ULL;
+    auto it = m_states.find(rankId);
+    if (it != m_states.end() && it->second.registers.contains(16)) {
+        QString pcStr = it->second.registers.value(16).trimmed();
+        if (pcStr.startsWith("0x", Qt::CaseInsensitive)) {
+            pcStr = pcStr.mid(2);
+        }
+        bool ok = false;
+        const uint64_t parsed = pcStr.toULongLong(&ok, 16);
+        if (ok && parsed != 0ULL) {
+            pcAddr = parsed;
+        }
+    }
+    emit rankSelected(rankId, pcAddr);
+    return true;
+}
+
 void ServerRackView::onItemClicked(QListWidgetItem* item) {
     if (item) {
         int rankId = item->data(Qt::UserRole).toInt();
-        emit rankSelected(rankId);
+        selectRank(rankId);
     }
 }
 

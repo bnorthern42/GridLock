@@ -460,51 +460,30 @@ void TestMainWindowUI::testCutterHexdumpDiffAndRegisterSeekSync() {
     gridlock::ui::RegisterView* registerView = mainWindow.registerView();
     gridlock::ui::MemView* memView = mainWindow.memView();
     gridlock::ui::DisassemblyView* disassemblyView = mainWindow.disassemblyView();
-    QVERIFY(registerView != nullptr);
-    QVERIFY(memView != nullptr);
-    QVERIFY(disassemblyView != nullptr);
+    QVERIFY(registerView != nullptr && memView != nullptr && disassemblyView != nullptr);
 
-    // 1. Register Delta Tracking
-    QMap<QString, QString> initialRegs = {
-        {"rip", "0x00401120"},
-        {"rax", "0x0"},
-        {"rsp", "0x7fffffffe480"}
-    };
+    QMap<QString, QString> initialRegs = {{"rip", "0x00401120"}, {"rax", "0x0"}, {"rsp", "0x7fffffffe480"}};
     registerView->updateRegisters(initialRegs);
     QCOMPARE(registerView->changedRegisterCount(), 0);
     QVERIFY(!registerView->isRegisterModified("rip"));
 
-    QMap<QString, QString> steppedRegs = {
-        {"rip", "0x0040113d"},
-        {"rax", "0x1"},
-        {"rsp", "0x7fffffffe480"}
-    };
+    QMap<QString, QString> steppedRegs = {{"rip", "0x0040113d"}, {"rax", "0x1"}, {"rsp", "0x7fffffffe480"}};
     registerView->updateRegisters(steppedRegs);
     QCOMPARE(registerView->changedRegisterCount(), 2);
-    QVERIFY(registerView->isRegisterModified("rip"));
-    QVERIFY(registerView->isRegisterModified("rax"));
-    QVERIFY(!registerView->isRegisterModified("rsp"));
+    QVERIFY(registerView->isRegisterModified("rip") && registerView->isRegisterModified("rax") && !registerView->isRegisterModified("rsp"));
 
-    // 2. Hexdump Byte Diff Tracking & Seek
     QByteArray bufA(16, '\x00');
-    bufA[0] = '\x55';
-    bufA[1] = '\x48';
-    bufA[2] = '\x89';
-    bufA[3] = '\xe5';
+    bufA[0] = '\x55'; bufA[1] = '\x48'; bufA[2] = '\x89'; bufA[3] = '\xe5';
     memView->setMemoryData("0x00401120", bufA);
     QCOMPARE(memView->changedByteCount(), 0);
 
     QByteArray bufB = bufA;
-    bufB[4] = '\x90';
-    bufB[8] = '\x01';
-    bufB[15] = '\xff';
+    bufB[4] = '\x90'; bufB[8] = '\x01'; bufB[15] = '\xff';
     memView->setMemoryData("0x00401120", bufB);
     QCOMPARE(memView->changedByteCount(), 3);
-
     QVERIFY(memView->seekToAddress(0x0040113dULL));
     QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
 
-    // 3. End-to-End Cross-View Pointer Sync in MainWindow
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
     QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
     QCOMPARE(memView->currentBaseAddress(), 0x00401120ULL);
@@ -512,8 +491,7 @@ void TestMainWindowUI::testCutterHexdumpDiffAndRegisterSeekSync() {
     QVERIFY(registerView->activateRegister("rip"));
     auto* seekBar = mainWindow.findChild<QLineEdit*>("cutterSeekBar");
     auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
-    QVERIFY(seekBar != nullptr);
-    QVERIFY(statusTelemetry != nullptr);
+    QVERIFY(seekBar != nullptr && statusTelemetry != nullptr);
     QVERIFY(seekBar->text().contains("40113d", Qt::CaseInsensitive));
     QVERIFY(statusTelemetry->text().contains("40113d", Qt::CaseInsensitive));
     QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL);
@@ -523,17 +501,13 @@ void TestMainWindowUI::testCutterHexdumpDiffAndRegisterSeekSync() {
 void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
     gridlock::ui::MainWindow mainWindow;
     mainWindow.resize(1440, 900);
-
-    // 1. Address-Space Navigation Ribbon (#addressNavBar)
     QWidget* navBar = mainWindow.findChild<QWidget*>("addressNavBar");
     QVERIFY(navBar != nullptr);
 
-    // 2. ProjectExplorerWidget Symbols Mode & Symbol Activation
     auto* projectExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
     QVERIFY(projectExplorer != nullptr);
     projectExplorer->setSymbolsMode(true);
-    QVERIFY(projectExplorer->isSymbolsMode());
-    QVERIFY(projectExplorer->symbolCount() >= 4);
+    QVERIFY(projectExplorer->isSymbolsMode() && projectExplorer->symbolCount() >= 4);
 
     QVERIFY(projectExplorer->activateSymbol("sym.main"));
     QCOMPARE(mainWindow.disassemblyView()->currentAddress(), 0x00401120ULL);
@@ -543,38 +517,26 @@ void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
     QCOMPARE(mainWindow.disassemblyView()->currentAddress(), 0x00401060ULL);
     QCOMPARE(mainWindow.memView()->currentBaseAddress(), 0x00401060ULL);
 
-    // 3. ServerRackView Populated Cluster Matrix
     auto* serverRackView = mainWindow.findChild<gridlock::ui::ServerRackView*>();
-    QVERIFY(serverRackView != nullptr);
-    QVERIFY(serverRackView->rankNodeCount() >= 4);
+    QVERIFY(serverRackView != nullptr && serverRackView->rankNodeCount() >= 4);
 }
 
 void TestMainWindowUI::testSourceFileLineLimits() {
     QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
-    if (!rootDir.exists("src")) {
-        rootDir = QDir::current();
-    }
+    if (!rootDir.exists("src")) rootDir = QDir::current();
     const QStringList dirsToScan = {rootDir.filePath("src"), rootDir.filePath("tests")};
     QStringList allFiles;
     for (const QString& dirPath : dirsToScan) {
         QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            allFiles.append(it.next());
-        }
+        while (it.hasNext()) allFiles.append(it.next());
     }
     allFiles.sort();
     for (const QString& filePath : allFiles) {
         QFile file(filePath);
         QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
         int lines = 0;
-        while (!file.atEnd()) {
-            file.readLine();
-            ++lines;
-        }
-        QVERIFY2(lines < 1000,
-                 qPrintable(QString("%1 exceeds 1000-line limit (%2 lines)")
-                                .arg(filePath)
-                                .arg(lines)));
+        while (!file.atEnd()) { file.readLine(); ++lines; }
+        QVERIFY2(lines < 1000, qPrintable(QString("%1 exceeds 1000-line limit (%2 lines)").arg(filePath).arg(lines)));
     }
 }
 
@@ -923,6 +885,43 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Rank loop header"));
     QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
     QVERIFY(disassemblyView->isBookmarked(0x00401149ULL));
+}
+
+void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+
+    auto* disassemblyView = mainWindow.disassemblyView();
+    auto* serverRackView = mainWindow.serverRackView();
+    auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
+    QVERIFY(disassemblyView && serverRackView && statusTelemetry);
+
+    disassemblyView->setSplitGraphDecompilerMode(true);
+    disassemblyView->setRankAddresses({
+        {0, 0x00401168ULL},
+        {1, 0x00401155ULL},
+        {2, 0x00401157ULL},
+        {3, 0x0040115fULL}
+    });
+    QCOMPARE(disassemblyView->ranksAtBlock(0x00401168ULL), QVector<int>{0});
+    QCOMPARE(disassemblyView->ranksAtBlock(0x0040114fULL), QVector<int>{1});
+    QCOMPARE(disassemblyView->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3}));
+
+    QVERIFY(disassemblyView->isGraphMinimapVisible());
+    const QRect mmRect = disassemblyView->minimapRect();
+    QVERIFY(mmRect.width() >= 80 && mmRect.height() >= 60);
+    disassemblyView->setGraphMinimapVisible(false);
+    QVERIFY(!disassemblyView->isGraphMinimapVisible());
+    disassemblyView->setGraphMinimapVisible(true);
+    QVERIFY(disassemblyView->isGraphMinimapVisible());
+
+    QVERIFY(serverRackView->selectRank(1));
+    QCOMPARE(serverRackView->selectedRank(), 1);
+    QVERIFY(statusTelemetry->text().contains("MPI RANK: 1"));
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401155ULL);
+    QVERIFY(disassemblyView->currentDecompilerLine() > 0);
 }
 
 QTEST_MAIN(TestMainWindowUI)

@@ -618,7 +618,18 @@ void MainWindow::setupDocks() {
   m_serverRackView = new ServerRackView(this);
   m_serverRackView->setObjectName("ServerRackViewWidget");
   connect(m_serverRackView, &ServerRackView::rankSelected, this,
-          &MainWindow::onRankSelected);
+          [this](int rankId, uint64_t pcAddr) {
+            onRankSelected(rankId);
+            if (m_disassemblyView) {
+              m_disassemblyView->setSelectedRank(rankId);
+            }
+            if (pcAddr != 0ULL) {
+              seekToAddressOrExpression(
+                  QStringLiteral("0x%1").arg(pcAddr, 8, 16, QChar('0')));
+            } else {
+              updateStatusTelemetry();
+            }
+          });
   QDockWidget *serverRackDock = new QDockWidget("Server Rack", this);
   serverRackDock->setObjectName("ServerRackDock");
   serverRackDock->setWidget(m_serverRackView);

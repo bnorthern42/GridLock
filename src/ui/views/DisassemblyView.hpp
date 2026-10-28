@@ -104,6 +104,15 @@ public:
     void highlightToken(const QString& token);
     QString highlightedToken() const { return m_highlightedToken; }
 
+    void setRankAddresses(const QMap<int, uint64_t>& rankPcs);
+    QVector<int> ranksAtBlock(uint64_t blockStartAddr) const;
+    void setSelectedRank(int rankId);
+    int selectedRank() const { return m_selectedRank; }
+
+    void setGraphMinimapVisible(bool visible);
+    bool isGraphMinimapVisible() const { return m_graphMinimapVisible; }
+    QRect minimapRect() const;
+
     void setAddressComment(uint64_t address, const QString& comment);
     QString addressComment(uint64_t address) const;
     bool toggleBookmark(uint64_t address);
@@ -155,17 +164,20 @@ private:
     QVector<DisasmBasicBlock> m_basicBlocks;
     QMap<uint64_t, int> m_addrToLine;
     QMap<int, uint64_t> m_lineToAddr;
+    QMap<int, uint64_t> m_rankAddresses;
     mutable QMap<int, uint64_t> m_decompilerLineToAddr;
     mutable QMap<uint64_t, int> m_addrToDecompilerLine;
     QMap<uint64_t, QString> m_userComments;
     QSet<uint64_t> m_bookmarks;
     QString m_baseDisassembly;
     uint64_t m_currentAddress = 0x401120ULL;
+    int m_selectedRank = 0;
     int m_currentDecompilerLine = 1;
     bool m_updatingDecompilerCursor = false;
     bool m_graphMode = false;
     bool m_decompilerMode = false;
     bool m_splitGraphDecompiler = false;
+    bool m_graphMinimapVisible = true;
     QString m_activeSymbol = QStringLiteral("sym.main");
     QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");
     QString m_targetLang = QStringLiteral("C");

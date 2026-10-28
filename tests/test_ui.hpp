@@ -32,4 +32,5 @@ private slots:
     void testCfgGraphDecompilerLanguagesAndSourceFallback();
     void testUnifiedChromeMetricsAndSplitGraphDecompiler();
     void testCrossPaneChoreographyHistoryAndStrings();
+    void testCfgRankDivergenceMinimapAndRackSync();
 };

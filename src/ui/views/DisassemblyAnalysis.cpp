@@ -602,6 +602,69 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
   return out.join('\n');
 }
 
+void DisassemblyView::setRankAddresses(const QMap<int, uint64_t> &rankPcs) {
+  m_rankAddresses = rankPcs;
+  highlightActiveInstruction();
+  if (m_graphMode) {
+    rebuildCfgScene();
+  }
+  if (m_cfgView && m_cfgView->viewport()) {
+    m_cfgView->viewport()->update();
+  }
+}
+
+QVector<int> DisassemblyView::ranksAtBlock(uint64_t blockStartAddr) const {
+  QVector<int> result;
+  for (const auto &block : m_basicBlocks) {
+    if (block.startAddress == blockStartAddr ||
+        (blockStartAddr >= block.startAddress &&
+         blockStartAddr <= block.endAddress)) {
+      for (auto it = m_rankAddresses.cbegin(); it != m_rankAddresses.cend();
+           ++it) {
+        if (it.value() >= block.startAddress &&
+            it.value() <= block.endAddress) {
+          result.append(it.key());
+        }
+      }
+      std::sort(result.begin(), result.end());
+      break;
+    }
+  }
+  return result;
+}
+
+void DisassemblyView::setSelectedRank(int rankId) {
+  m_selectedRank = rankId;
+  if (m_graphMode) {
+    rebuildCfgScene();
+  }
+  if (m_cfgView && m_cfgView->viewport()) {
+    m_cfgView->viewport()->update();
+  }
+}
+
+void DisassemblyView::setGraphMinimapVisible(bool visible) {
+  m_graphMinimapVisible = visible;
+  if (m_cfgView && m_cfgView->viewport()) {
+    m_cfgView->viewport()->update();
+  }
+}
+
+QRect DisassemblyView::minimapRect() const {
+  if (!m_graphMinimapVisible) {
+    return QRect();
+  }
+  const int mmW = 120;
+  const int mmH = 90;
+  if (m_cfgView && m_cfgView->viewport() &&
+      m_cfgView->viewport()->width() >= mmW + 16 &&
+      m_cfgView->viewport()->height() >= mmH + 16) {
+    const QRect vp = m_cfgView->viewport()->rect();
+    return QRect(vp.right() - mmW - 8, vp.bottom() - mmH - 8, mmW, mmH);
+  }
+  return QRect(8, 8, mmW, mmH);
+}
+
 void DisassemblyView::rebuildCfgScene() {
   if (!m_cfgScene) {
     return;
@@ -659,15 +722,19 @@ void DisassemblyView::rebuildCfgScene() {
     const qreal boxX = horizontalCenter - boxW * 0.5 + xOffset;
     const QRectF boxRect(boxX, currentY, boxW, boxH);
 
+    const QVector<int> occRanks = ranksAtBlock(bb.startAddress);
+    const bool hasSelectedRank = occRanks.contains(m_selectedRank);
     const bool isActiveBlock =
-        (m_currentAddress >= bb.startAddress && m_currentAddress <= bb.endAddress);
-    if (isActiveBlock || i == 0) {
+        (m_currentAddress >= bb.startAddress && m_currentAddress <= bb.endAddress) ||
+        hasSelectedRank;
+    if ((m_currentAddress >= bb.startAddress && m_currentAddress <= bb.endAddress) ||
+        activeBlockRect.isNull()) {
       activeBlockRect = boxRect;
     }
 
     auto *rectItem = m_cfgScene->addRect(
         boxRect,
-        QPen(isActiveBlock ? QColor("#569cd6") : QColor("#333842"),
+        QPen(isActiveBlock ? QColor("#528bff") : QColor("#333842"),
              isActiveBlock ? 2.0 : 1.0),
         QBrush(QColor("#181a1f")));
     rectItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
@@ -689,6 +756,33 @@ void DisassemblyView::rebuildCfgScene() {
     hdrText->setPos(boxX + 8.0, currentY + 2.0);
     hdrText->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrText->setZValue(3.0);
+
+    if (!occRanks.isEmpty()) {
+      QString rankLabel;
+      if (occRanks.size() == 1) {
+        rankLabel = QStringLiteral("[R%1]").arg(occRanks.first());
+      } else if (occRanks.last() - occRanks.first() + 1 == occRanks.size()) {
+        rankLabel = QStringLiteral("[R%1-R%2 (%3)]")
+                        .arg(occRanks.first())
+                        .arg(occRanks.last())
+                        .arg(occRanks.size());
+      } else {
+        QStringList rStrs;
+        for (int r : occRanks) {
+          rStrs << QStringLiteral("R%1").arg(r);
+        }
+        rankLabel = QStringLiteral("[%1]").arg(rStrs.join(','));
+      }
+      const QColor badgeCol =
+          occRanks.contains(0) ? QColor("#dcdcaa") : QColor("#4ec9b0");
+      auto *rankBadgeText = m_cfgScene->addSimpleText(rankLabel, monoFont);
+      rankBadgeText->setBrush(badgeCol);
+      const qreal badgeW = rankBadgeText->boundingRect().width();
+      rankBadgeText->setPos(boxX + boxW - badgeW - 8.0, currentY + 2.0);
+      rankBadgeText->setData(Qt::UserRole,
+                             QVariant::fromValue<qulonglong>(bb.startAddress));
+      rankBadgeText->setZValue(3.2);
+    }
 
     qreal lineY = currentY + headerH + 3.0;
     for (const QString &instLine : renderLines) {
@@ -754,7 +848,6 @@ void DisassemblyView::rebuildCfgScene() {
       QPointF startPt(srcRect.center().x() + portOffset, srcRect.bottom());
       QPointF endPt(dstRect.center().x(), dstRect.top());
 
-      // Strict 90-degree Manhattan orthogonal polyline routing
       QPainterPath path(startPt);
       if (dstRect.top() >= srcRect.bottom()) {
         const qreal midY = (startPt.y() + endPt.y()) * 0.5;
