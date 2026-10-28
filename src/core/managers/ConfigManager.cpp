@@ -56,7 +56,11 @@ void ConfigManager::loadConfig() {
 
       out << "[debugger]\n";
       out << "default_ranks = 2\n";
-      out << "gdb_path = \"gdb\"\n";
+      out << "gdb_path = \"gdb\"\n\n";
+
+      out << "[ui]\n";
+      out << "preferred_monitor = \"\"\n";
+      out << "open_unfocused = false\n";
       file.close();
     }
   }
@@ -151,6 +155,32 @@ void ConfigManager::setGlobalMpiArgs(const QString &args) {
     m_config.insert("global", toml::table{});
   m_config["global"].as_table()->insert_or_assign("mpi_launch_args",
                                                   args.toStdString());
+  saveGlobalConfig();
+}
+
+QString ConfigManager::preferredMonitor() const {
+  return QString::fromStdString(
+      m_config["ui"]["preferred_monitor"].value_or(""));
+}
+
+void ConfigManager::setPreferredMonitor(const QString &monitorHint) {
+  if (!m_config.contains("ui")) {
+    m_config.insert("ui", toml::table{});
+  }
+  m_config["ui"].as_table()->insert_or_assign("preferred_monitor",
+                                              monitorHint.toStdString());
+  saveGlobalConfig();
+}
+
+bool ConfigManager::openUnfocused() const {
+  return m_config["ui"]["open_unfocused"].value_or(false);
+}
+
+void ConfigManager::setOpenUnfocused(bool unfocused) {
+  if (!m_config.contains("ui")) {
+    m_config.insert("ui", toml::table{});
+  }
+  m_config["ui"].as_table()->insert_or_assign("open_unfocused", unfocused);
   saveGlobalConfig();
 }
 

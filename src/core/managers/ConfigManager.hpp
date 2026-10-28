@@ -136,6 +136,13 @@ public:
   QString getGlobalMpiArgs() const;
   void setGlobalMpiArgs(const QString &args);
 
+  // ── UI / Monitor Routing (TOML-backed) ────────────────────────────────
+  QString preferredMonitor() const;
+  void setPreferredMonitor(const QString &monitorHint);
+
+  bool openUnfocused() const;
+  void setOpenUnfocused(bool unfocused);
+
   void saveGlobalConfig();
 
 private:

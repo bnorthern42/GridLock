@@ -37,6 +37,8 @@
 #include <QPainter>
 #include <QPointer>
 #include <QPushButton>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStatusBar>
@@ -46,8 +48,10 @@
 #include <QToolBar>
 #include <QToolTip>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <QtConcurrent/QtConcurrent>
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -238,6 +242,49 @@ bool MainWindow::captureWorkspaceSnapshot(const QString &outputPath) {
     return false;
   }
   return pixmap.save(outputPath, "PNG");
+}
+
+QScreen *MainWindow::resolvePreferredScreen(const QString &monitorHint) const {
+  const QList<QScreen *> screens = QGuiApplication::screens();
+  if (screens.isEmpty()) {
+    return nullptr;
+  }
+  const QString hint = monitorHint.trimmed();
+  if (hint.isEmpty()) {
+    return QGuiApplication::primaryScreen();
+  }
+  for (QScreen *scr : screens) {
+    if (!scr) {
+      continue;
+    }
+    const QRect geom = scr->geometry();
+    const QSizeF phys = scr->physicalSize();
+    const int diagInches =
+        qRound(std::hypot(phys.width(), phys.height()) / 25.4);
+    const QString meta = QString("%1 %2 %3 %4x%5 %6\" %6in")
+                             .arg(scr->name(), scr->model(),
+                                  scr->manufacturer())
+                             .arg(geom.width())
+                             .arg(geom.height())
+                             .arg(diagInches);
+    if (meta.contains(hint, Qt::CaseInsensitive)) {
+      return scr;
+    }
+  }
+  return QGuiApplication::primaryScreen();
+}
+
+void MainWindow::applyPreferredScreenRouting(const QString &monitorHint,
+                                             bool openUnfocused) {
+  m_preferredMonitorHint = monitorHint.trimmed();
+  setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
+  if (QScreen *target = resolvePreferredScreen(m_preferredMonitorHint)) {
+    setScreen(target);
+    if (windowHandle()) {
+      windowHandle()->setScreen(target);
+    }
+    move(target->availableGeometry().topLeft());
+  }
 }
 
 void MainWindow::setupStatusBar() {
@@ -563,7 +610,7 @@ void MainWindow::setupDocks() {
   variablesDock->setObjectName("VariablesDock");
   variablesDock->setWidget(m_variablesDockWidget);
   QWidget *emptyVarTitle = new QWidget(variablesDock);
-  emptyVarTitle->setFixedHeight(0);
+  emptyVarTitle->setFixedSize(0, 0);
   variablesDock->setTitleBarWidget(emptyVarTitle);
 
   m_registerView = new RegisterView(this);
@@ -577,7 +624,7 @@ void MainWindow::setupDocks() {
   registersDock->setObjectName("RegisterViewDock");
   registersDock->setWidget(m_registerView);
   QWidget *emptyRegTitle = new QWidget(registersDock);
-  emptyRegTitle->setFixedHeight(0);
+  emptyRegTitle->setFixedSize(0, 0);
   registersDock->setTitleBarWidget(emptyRegTitle);
 
   m_differentialGrid = new DifferentialGrid(this);
@@ -719,7 +766,7 @@ void MainWindow::setupDocks() {
   m_expressionEvaluatorWidget = new ExpressionEvaluatorWidget(m_bottomTabs);
   m_expressionEvaluatorWidget->setObjectName("ExpressionEvaluatorDock");
   QWidget *emptyEvalTitle = new QWidget(m_expressionEvaluatorWidget);
-  emptyEvalTitle->setFixedHeight(0);
+  emptyEvalTitle->setFixedSize(0, 0);
   m_expressionEvaluatorWidget->setTitleBarWidget(emptyEvalTitle);
   connect(m_expressionEvaluatorWidget,
           &ExpressionEvaluatorWidget::evaluateRequested, this,

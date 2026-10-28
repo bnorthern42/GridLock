@@ -173,7 +173,7 @@ gridlock_tests = executable('gridlock_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('coordinator_tests', gridlock_tests)
+test('coordinator_tests', gridlock_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 lsp_test_src = [
   'tests/test_lsp.cpp',
@@ -198,7 +198,7 @@ gridlock_lsp_tests = executable('gridlock_lsp_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('lsp_tests', gridlock_lsp_tests)
+test('lsp_tests', gridlock_lsp_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 ui_test_src = [
   'tests/test_ui.cpp',
@@ -296,7 +296,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep]
 )
 
-test('ui_tests', gridlock_ui_tests)
+test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 terminal_config_test_src = [
   'tests/test_terminal_config.cpp',
@@ -321,7 +321,7 @@ gridlock_terminal_config_tests = executable('gridlock_terminal_config_tests',
   dependencies : [qt6_dep, qtermwidget_dep, tomlplusplus_dep]
 )
 
-test('terminal_config_tests', gridlock_terminal_config_tests)
+test('terminal_config_tests', gridlock_terminal_config_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 config_test_src = [
   'tests/test_config.cpp',
@@ -344,7 +344,7 @@ gridlock_config_tests = executable('gridlock_config_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('config_tests', gridlock_config_tests)
+test('config_tests', gridlock_config_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 config_engine_test_src = [
   'tests/test_config_engine.cpp',
@@ -369,7 +369,7 @@ gridlock_config_engine_tests = executable('gridlock_config_engine_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('config_engine_tests', gridlock_config_engine_tests)
+test('config_engine_tests', gridlock_config_engine_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 docset_test_src = [
   'tests/test_docset.cpp',
@@ -394,7 +394,7 @@ gridlock_docset_tests = executable('gridlock_docset_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('docset_tests', gridlock_docset_tests)
+test('docset_tests', gridlock_docset_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 commands_test_src = [
   'tests/test_commands.cpp',
@@ -428,7 +428,7 @@ gridlock_commands_tests = executable('gridlock_commands_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('commands_tests', gridlock_commands_tests)
+test('commands_tests', gridlock_commands_tests, env: ['QT_QPA_PLATFORM=offscreen'])
   
 dap_parser_test_src = [
   'tests/test_dap_parser.cpp',
@@ -455,7 +455,7 @@ gridlock_dap_parser_tests = executable('gridlock_dap_parser_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_parser_tests', gridlock_dap_parser_tests)
+test('dap_parser_tests', gridlock_dap_parser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_commands_test_src = [
   'tests/test_dap_commands.cpp',
@@ -489,7 +489,7 @@ gridlock_dap_commands_tests = executable('gridlock_dap_commands_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_commands_tests', gridlock_dap_commands_tests)
+test('dap_commands_tests', gridlock_dap_commands_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_breakpoints_test_src = [
   'tests/test_dap_breakpoints.cpp',
@@ -516,7 +516,7 @@ gridlock_dap_breakpoints_tests = executable('gridlock_dap_breakpoints_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_breakpoints_tests', gridlock_dap_breakpoints_tests)
+test('dap_breakpoints_tests', gridlock_dap_breakpoints_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_stacktrace_test_src = [
   'tests/test_dap_stacktrace.cpp',
@@ -543,7 +543,7 @@ gridlock_dap_stacktrace_tests = executable('gridlock_dap_stacktrace_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_stacktrace_tests', gridlock_dap_stacktrace_tests)
+test('dap_stacktrace_tests', gridlock_dap_stacktrace_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_variables_test_src = [
   'tests/test_dap_variables.cpp',
@@ -574,7 +574,7 @@ gridlock_dap_variables_tests = executable('gridlock_dap_variables_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_variables_tests', gridlock_dap_variables_tests)
+test('dap_variables_tests', gridlock_dap_variables_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_evaluate_test_src = [
   'tests/test_dap_evaluate.cpp',
@@ -601,7 +601,7 @@ gridlock_dap_evaluate_tests = executable('gridlock_dap_evaluate_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_evaluate_tests', gridlock_dap_evaluate_tests)
+test('dap_evaluate_tests', gridlock_dap_evaluate_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_lifecycle_test_src = [
   'tests/test_dap_lifecycle.cpp',
@@ -628,7 +628,7 @@ gridlock_dap_lifecycle_tests = executable('gridlock_dap_lifecycle_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_lifecycle_tests', gridlock_dap_lifecycle_tests)
+test('dap_lifecycle_tests', gridlock_dap_lifecycle_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_memory_test_src = [
   'tests/test_dap_memory.cpp',
@@ -655,7 +655,7 @@ gridlock_dap_memory_tests = executable('gridlock_dap_memory_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_memory_tests', gridlock_dap_memory_tests)
+test('dap_memory_tests', gridlock_dap_memory_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 hpc_memory_test_src = [
   'tests/test_hpc_memory.cpp',
@@ -678,7 +678,7 @@ gridlock_hpc_memory_tests = executable('gridlock_hpc_memory_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('hpc_memory_tests', gridlock_hpc_memory_tests)
+test('hpc_memory_tests', gridlock_hpc_memory_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 stride_security_test_src = [
   'tests/test_stride_security.cpp',
@@ -701,7 +701,7 @@ gridlock_stride_security_tests = executable('gridlock_stride_security_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('stride_security_tests', gridlock_stride_security_tests)
+test('stride_security_tests', gridlock_stride_security_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_native_bridge_test_src = [
   'tests/test_dap_native_bridge.cpp',
@@ -728,7 +728,7 @@ gridlock_dap_native_bridge_tests = executable('gridlock_dap_native_bridge_tests'
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('dap_native_bridge_tests', gridlock_dap_native_bridge_tests)
+test('dap_native_bridge_tests', gridlock_dap_native_bridge_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 sanitizer_test_src = [
   'tests/test_sanitizer.cpp',
@@ -751,7 +751,7 @@ gridlock_sanitizer_tests = executable('gridlock_sanitizer_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('sanitizer_tests', gridlock_sanitizer_tests)
+test('sanitizer_tests', gridlock_sanitizer_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 obfuscator_test_src = [
   'tests/test_obfuscator.cpp',
@@ -775,7 +775,7 @@ gridlock_obfuscator_tests = executable('gridlock_obfuscator_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('obfuscator_tests', gridlock_obfuscator_tests)
+test('obfuscator_tests', gridlock_obfuscator_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 advanced_features_test_src = [
   'tests/test_advanced_features.cpp',
@@ -808,7 +808,7 @@ gridlock_advanced_features_tests = executable('gridlock_advanced_features_tests'
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('advanced_features_tests', gridlock_advanced_features_tests)
+test('advanced_features_tests', gridlock_advanced_features_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 memory_export_test_src = [
   'tests/test_memory_export.cpp',
@@ -831,7 +831,7 @@ gridlock_memory_export_tests = executable('gridlock_memory_export_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('memory_export_tests', gridlock_memory_export_tests)
+test('memory_export_tests', gridlock_memory_export_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 mi_parser_test_src = [
   'tests/test_mi_parser.cpp',
@@ -855,7 +855,7 @@ gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
   dependencies : [qt6_dep, tomlplusplus_dep]
 )
 
-test('mi_parser_tests', gridlock_mi_parser_tests)
+test('mi_parser_tests', gridlock_mi_parser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 cliparser_test_src = [
   'tests/test_cliparser.cpp',
@@ -875,7 +875,7 @@ gridlock_cliparser_tests = executable('gridlock_cliparser_tests',
   dependencies : [qt6_dep]
 )
 
-test('cliparser_tests', gridlock_cliparser_tests)
+test('cliparser_tests', gridlock_cliparser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 version_test_src = [
   'tests/test_version.cpp',
@@ -896,7 +896,7 @@ gridlock_version_tests = executable('gridlock_version_tests',
   dependencies : [qt6_dep]
 )
 
-test('version_tests', gridlock_version_tests)
+test('version_tests', gridlock_version_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 
 custom_target('mpi_mm_bin',

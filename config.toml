@@ -16,3 +16,8 @@ address = "#555555"
 [debugger]
 default_ranks = 2
 gdb_path = "gdb"
+
+[ui]
+preferred_monitor = "2560x1440"
+open_unfocused = true
+

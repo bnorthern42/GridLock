@@ -76,6 +76,15 @@ int main(int argc, char *argv[]) {
       0); // temporarily disabled for rendering latency profiling
   QSurfaceFormat::setDefaultFormat(format);
 
+  for (int i = 1; i < argc; ++i) {
+    if (QString::fromLocal8Bit(argv[i]) == QLatin1String("--snapshot") &&
+        qEnvironmentVariableIsEmpty("GRIDLOCK_LIVE_WAYLAND") &&
+        qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+      qputenv("QT_QPA_PLATFORM", "offscreen");
+      break;
+    }
+  }
+
   QApplication app(argc, argv);
 
   QFontDatabase::addApplicationFont(":/fonts/SymbolsNerdFont-Regular.ttf");

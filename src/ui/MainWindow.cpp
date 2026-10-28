@@ -187,6 +187,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
       tabBar->setUsesScrollButtons(true);
       tabBar->setElideMode(Qt::ElideNone);
   }
+
+  auto& cfg = gridlock::core::ConfigManager::instance();
+  applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
 }
 
 void MainWindow::executeCommand(

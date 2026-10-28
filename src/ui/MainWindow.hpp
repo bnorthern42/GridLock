@@ -81,6 +81,9 @@ public:
     bool captureWorkspaceSnapshot(const QString& outputPath);
     void applyCutterWorkspaceLayout();
     bool seekToAddressOrExpression(const QString& expr);
+    QScreen* resolvePreferredScreen(const QString& monitorHint) const;
+    void applyPreferredScreenRouting(const QString& monitorHint, bool openUnfocused);
+    QString preferredMonitorHint() const { return m_preferredMonitorHint; }
 
 public slots:
     void onRankStateChanged(int rankId, const RankState& state);
@@ -133,6 +136,7 @@ private:
     QLabel* m_statusTelemetryLabel = nullptr;
     QString m_currentSeekOrPc = QStringLiteral("0x00000000");
     QString m_currentTargetState = QStringLiteral("IDLE");
+    QString m_preferredMonitorHint;
 
     IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

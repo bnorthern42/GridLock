@@ -2,12 +2,17 @@
 set -euo pipefail
 
 ANNOTATE=0
+LIVE_MODE=0
 OUTPUT_PATH="/tmp/gridlock_capture.png"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --annotate|-a)
             ANNOTATE=1
+            shift
+            ;;
+        --live)
+            LIVE_MODE=1
             shift
             ;;
         *)
@@ -34,7 +39,7 @@ if [[ "${ANNOTATE}" == "1" ]] || [[ "${GRIDLOCK_USE_SATTY:-0}" == "1" ]]; then
     RAW_IMG="$(mktemp /tmp/gridlock_raw_XXXXXX.png)"
 fi
 
-if [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v grim >/dev/null 2>&1 && [[ "${GRIDLOCK_USE_GRIM:-0}" == "1" ]]; then
+if [[ "${LIVE_MODE}" == "1" ]] && [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v grim >/dev/null 2>&1; then
     "${GRIDLOCK_BIN}" &
     APP_PID=$!
     sleep 1.5
@@ -42,7 +47,7 @@ if [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v grim >/dev/null 2>&1 && [[ "${G
     kill "${APP_PID}" 2>/dev/null || true
     wait "${APP_PID}" 2>/dev/null || true
 else
-    QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" "${GRIDLOCK_BIN}" --snapshot "${RAW_IMG}"
+    QT_QPA_PLATFORM=offscreen "${GRIDLOCK_BIN}" --snapshot "${RAW_IMG}"
 fi
 
 if [[ "${ANNOTATE}" == "1" ]] || [[ "${GRIDLOCK_USE_SATTY:-0}" == "1" ]]; then

@@ -712,4 +712,77 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     }
 }
 
+void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
+    gridlock::ui::MainWindow mainWindow;
+
+    // 1. No Unparented Dock Titlebars
+    const auto docks = mainWindow.findChildren<QDockWidget*>();
+    QVERIFY(!docks.isEmpty());
+    for (QDockWidget* dock : docks) {
+        if (!dock) {
+            continue;
+        }
+        if (QWidget* tb = dock->titleBarWidget()) {
+            QVERIFY2(tb->parentWidget() == dock,
+                     qPrintable(QString("Dock '%1' has titleBarWidget with parent '%2' instead of dock")
+                                    .arg(dock->objectName())
+                                    .arg(tb->parentWidget() ? tb->parentWidget()->objectName() : "nullptr")));
+            QVERIFY2(!tb->isWindow(),
+                     qPrintable(QString("Dock '%1' titleBarWidget is a top-level window").arg(dock->objectName())));
+        }
+    }
+
+    // 2. Portable Monitor Resolution & Unfocused Routing
+    QScreen* primary = QGuiApplication::primaryScreen();
+    QVERIFY(primary != nullptr);
+    QCOMPARE(mainWindow.resolvePreferredScreen(""), primary);
+    QCOMPARE(mainWindow.resolvePreferredScreen("nonexistent_monitor_xyz"), primary);
+
+    mainWindow.applyPreferredScreenRouting("27", true);
+    QVERIFY(mainWindow.testAttribute(Qt::WA_ShowWithoutActivating));
+    QCOMPARE(mainWindow.preferredMonitorHint(), QStringLiteral("27"));
+
+    mainWindow.applyPreferredScreenRouting("2560x1440", false);
+    QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating));
+    QCOMPARE(mainWindow.preferredMonitorHint(), QStringLiteral("2560x1440"));
+
+    // 3. ConfigManager TOML Persistence
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const QString prevMonitor = cfg.preferredMonitor();
+    const bool prevUnfocused = cfg.openUnfocused();
+
+    QTemporaryDir tmpConfigDir;
+    QVERIFY(tmpConfigDir.isValid());
+    const QByteArray prevTestDir = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
+    qputenv("GRIDLOCK_TEST_CONFIG_DIR", tmpConfigDir.path().toUtf8());
+    cfg.loadConfig();
+
+    cfg.setPreferredMonitor("2560x1440");
+    cfg.setOpenUnfocused(true);
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440"));
+    QVERIFY(cfg.openUnfocused());
+
+    cfg.loadConfig();
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440"));
+    QVERIFY(cfg.openUnfocused());
+
+    cfg.setPreferredMonitor("1920x1080");
+    cfg.setOpenUnfocused(false);
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080"));
+    QVERIFY(!cfg.openUnfocused());
+
+    cfg.loadConfig();
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080"));
+    QVERIFY(!cfg.openUnfocused());
+
+    if (prevTestDir.isEmpty()) {
+        qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
+    } else {
+        qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevTestDir);
+    }
+    cfg.loadConfig();
+    cfg.setPreferredMonitor(prevMonitor);
+    cfg.setOpenUnfocused(prevUnfocused);
+}
+
 QTEST_MAIN(TestMainWindowUI)
