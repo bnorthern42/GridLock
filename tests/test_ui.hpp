@@ -26,5 +26,5 @@ private slots:
     void testSymbolSidebarAndNavRibbon();
     void testSourceFileLineLimits();
     void testDockResizabilityAndXrefDecompiler();
+    void testMemViewToolbarNoTruncationAndDisassemblyLayout();
 };
-

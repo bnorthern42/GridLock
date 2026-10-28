@@ -696,9 +696,9 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(m_disassemblyView);
 
-  masterHorizontalSplitter->setStretchFactor(0, 60);
-  masterHorizontalSplitter->setStretchFactor(1, 40);
-  masterHorizontalSplitter->setSizes({520, 360});
+  masterHorizontalSplitter->setStretchFactor(0, 45);
+  masterHorizontalSplitter->setStretchFactor(1, 55);
+  masterHorizontalSplitter->setSizes({430, 520});
 
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
@@ -814,7 +814,7 @@ void MainWindow::setupDocks() {
     }
   }
 
-  resizeDocks({m_projectExplorerWidget, registersDock}, {260, 290},
+  resizeDocks({m_projectExplorerWidget, registersDock}, {215, 255},
               Qt::Horizontal);
   resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290},
               Qt::Vertical);
@@ -850,6 +850,12 @@ void MainWindow::setupDocks() {
       }
     });
   }
+
+  QSettings settings("gridlock", "debugger");
+  settings.remove("MainWindow/Geometry_v8");
+  settings.remove("MainWindow/State_v8");
+  settings.remove("MainWindow/Splitter_v8_MasterHorizontalSplitter");
+  settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
 }
 
 } // namespace gridlock::ui

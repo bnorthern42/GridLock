@@ -641,5 +641,75 @@ void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
     QVERIFY(!disassemblyView->isDecompilerMode());
 }
 
-QTEST_MAIN(TestMainWindowUI)
+void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QTest::qWait(30);
+    QApplication::processEvents();
 
+    // 1. MemView toolbar button & input non-truncation check
+    auto* memView = mainWindow.memView();
+    QVERIFY(memView != nullptr);
+    if (auto* bottomTabs = mainWindow.findChild<QTabWidget*>("BottomConsoleTabs")) {
+        bottomTabs->setCurrentWidget(memView);
+        QApplication::processEvents();
+    }
+
+    const auto buttons = memView->findChildren<QPushButton*>();
+    QVERIFY(!buttons.isEmpty());
+    for (QPushButton* btn : buttons) {
+        if (!btn->isVisible()) {
+            continue;
+        }
+        const int minRequiredW = btn->fontMetrics().horizontalAdvance(btn->text()) + 12;
+        QVERIFY2(btn->width() >= minRequiredW,
+                 qPrintable(QString("MemView button '%1' width (%2) is narrower than required (%3)")
+                                .arg(btn->text())
+                                .arg(btn->width())
+                                .arg(minRequiredW)));
+    }
+
+    auto* addrInput = memView->findChild<QLineEdit*>();
+    QVERIFY(addrInput != nullptr);
+    QVERIFY2(addrInput->width() >= 90,
+             qPrintable(QString("MemView address input width (%1) < 90").arg(addrInput->width())));
+
+    // 2. Central horizontal splitter gives DisassemblyView >= 420px on 1440x900
+    auto* disassemblyView = mainWindow.disassemblyView();
+    QVERIFY(disassemblyView != nullptr);
+    QVERIFY2(disassemblyView->width() >= 420,
+             qPrintable(QString("DisassemblyView width (%1) < 420 on 1440x900 window")
+                            .arg(disassemblyView->width())));
+
+    // 3. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
+    if (!rootDir.exists("src")) {
+        rootDir = QDir::current();
+    }
+    const QStringList dirsToScan = {rootDir.filePath("src"), rootDir.filePath("tests")};
+    QStringList allFiles;
+    for (const QString& dirPath : dirsToScan) {
+        QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            allFiles.append(it.next());
+        }
+    }
+    allFiles.sort();
+    for (const QString& filePath : allFiles) {
+        QFile file(filePath);
+        QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
+        int lines = 0;
+        while (!file.atEnd()) {
+            file.readLine();
+            ++lines;
+        }
+        QVERIFY2(lines < 950,
+                 qPrintable(QString("%1 exceeds 950-line headroom limit (%2 lines)")
+                                .arg(filePath)
+                                .arg(lines)));
+    }
+}
+
+QTEST_MAIN(TestMainWindowUI)

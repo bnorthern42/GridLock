@@ -42,21 +42,39 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
 
     QWidget* headerBar = new QWidget(this);
     headerBar->setObjectName("cutterMemHeader");
+    headerBar->setStyleSheet(
+        "#cutterMemHeader QLineEdit, #cutterMemHeader QSpinBox, "
+        "#cutterMemHeader QComboBox { min-height: 22px; max-height: 24px; "
+        "padding: 0px 4px; margin: 0px; }"
+        "#cutterMemHeader QPushButton { padding: 2px 8px; min-height: 20px; }");
     QHBoxLayout* topLayout = new QHBoxLayout(headerBar);
-    topLayout->setContentsMargins(6, 2, 6, 2);
-    topLayout->setSpacing(6);
+    topLayout->setContentsMargins(6, 3, 6, 3);
+    topLayout->setSpacing(4);
 
-    topLayout->addWidget(new QLabel("Address/Variable:"));
+    auto configureToolbarButton = [](QPushButton* btn) {
+        QFont boldFont = btn->font();
+        boldFont.setBold(true);
+        QFontMetrics fm(boldFont);
+        const int textW = std::max(
+            fm.horizontalAdvance(btn->text()),
+            fm.horizontalAdvance(btn->text().toUpper()));
+        const int minW = textW + 24;
+        btn->setMinimumWidth(minW);
+        btn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    };
+
+    topLayout->addWidget(new QLabel("Addr:"));
     m_addressEdit = new QLineEdit();
     m_addressEdit->setObjectName("cutterMemAddressEdit");
-    m_addressEdit->setMinimumWidth(125);
+    m_addressEdit->setMinimumWidth(105);
     m_addressEdit->setText(QStringLiteral("0x00401120"));
     topLayout->addWidget(m_addressEdit);
 
-    topLayout->addWidget(new QLabel("Length (bytes):"));
+    topLayout->addWidget(new QLabel("Bytes:"));
     m_lengthBox = new QSpinBox();
     m_lengthBox->setRange(1, 4096);
     m_lengthBox->setValue(256);
+    m_lengthBox->setMinimumWidth(68);
     topLayout->addWidget(m_lengthBox);
 
     topLayout->addWidget(new QLabel("Type:"));
@@ -64,25 +82,31 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_typeBox->addItem("Int32");
     m_typeBox->addItem("Float");
     m_typeBox->addItem("Double");
+    m_typeBox->setMinimumWidth(74);
     topLayout->addWidget(m_typeBox);
 
-    m_readBtn = new QPushButton("Read Memory");
+    m_readBtn = new QPushButton("Read");
+    configureToolbarButton(m_readBtn);
     topLayout->addWidget(m_readBtn);
 
-    m_exportBtn = new QPushButton("Export Matrix");
+    m_exportBtn = new QPushButton("Export");
+    configureToolbarButton(m_exportBtn);
     topLayout->addWidget(m_exportBtn);
 
-    topLayout->addWidget(new QLabel("Baseline Rank:"));
+    topLayout->addWidget(new QLabel("Base:"));
     m_baselineRankBox = new QSpinBox();
     m_baselineRankBox->setRange(0, 1000);
+    m_baselineRankBox->setMinimumWidth(56);
     topLayout->addWidget(m_baselineRankBox);
 
-    topLayout->addWidget(new QLabel("Target Rank:"));
+    topLayout->addWidget(new QLabel("Target:"));
     m_targetRankBox = new QSpinBox();
     m_targetRankBox->setRange(0, 1000);
+    m_targetRankBox->setMinimumWidth(56);
     topLayout->addWidget(m_targetRankBox);
 
     m_diffBtn = new QPushButton("Diff Ranks");
+    configureToolbarButton(m_diffBtn);
     topLayout->addWidget(m_diffBtn);
 
     topLayout->addStretch();
