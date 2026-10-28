@@ -1,32 +1,50 @@
+/**
+ * @file MockHpcBackend.hpp
+ * @brief Deterministic in-memory `HpcBackend` implementation for offline development and testing.
+ *
+ * Emits simulated Spack and SLURM responses asynchronously via `QTimer::singleShot`
+ * so UI callers exercise realistic non-blocking signal delivery without live SSH.
+ */
+
 #pragma once
-#include "HpcBackend.hpp"
+
 #include <QStringList>
+
+#include "HpcBackend.hpp"
 
 namespace gridlock::core {
 
-///
-/// MockHpcBackend — deterministic fake responses for offline development.
-///
-/// Emits signals via QTimer::singleShot so callers see realistic async
-/// behaviour (signal arrives after the call returns) without real SSH.
-///
+/**
+ * @class MockHpcBackend
+ * @brief Simulates `spack find`, `sbatch`, and `scancel` cluster operations locally.
+ */
 class MockHpcBackend : public HpcBackend {
-    Q_OBJECT
-public:
-    explicit MockHpcBackend(QObject *parent = nullptr);
+  Q_OBJECT
 
-    void fetchPackages()                       override;
-    void submitSlurmJob(const QString &script) override;
-    void cancelSlurmJob(int jobId)             override;
+ public:
+  /**
+   * @brief Constructs the mock backend pre-populated with a realistic HPC Spack environment.
+   */
+  explicit MockHpcBackend(QObject* parent = nullptr);
 
-    /// Inject a custom package list for test scenarios.
-    void setFakePackages(const QStringList &packages);
-    /// Force the next submitSlurmJob() to simulate a failure.
-    void setNextSubmitFails(bool fail);
+  /** @brief Asynchronously emits `packagesReady()` with `m_fakePackages`. */
+  void fetchPackages() override;
 
-private:
-    QStringList m_fakePackages;
-    bool        m_nextSubmitFails = false;
+  /** @brief Asynchronously emits `slurmJobSubmitted()` with a synthetic SLURM job ID. */
+  void submitSlurmJob(const QString& script) override;
+
+  /** @brief Asynchronously emits `commandFinished("scancel", ...)` for @p jobId. */
+  void cancelSlurmJob(int jobId) override;
+
+  /** @brief Overrides the list of Spack specs returned by `fetchPackages()`. */
+  void setFakePackages(const QStringList& packages);
+
+  /** @brief Forces the next `submitSlurmJob()` call to simulate a SLURM daemon connection error. */
+  void setNextSubmitFails(bool fail);
+
+ private:
+  QStringList m_fakePackages;      ///< Simulated Spack package specs.
+  bool m_nextSubmitFails = false;  ///< One-shot fault injection flag for `submitSlurmJob()`.
 };
 
-} // namespace gridlock::core
+}  // namespace gridlock::core

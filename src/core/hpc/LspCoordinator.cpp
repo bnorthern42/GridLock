@@ -1,5 +1,10 @@
+/**
+ * @file LspCoordinator.cpp
+ * @brief Implementation of the `clangd` JSON-RPC 2.0 Language Server Protocol client.
+ */
+
 #include "LspCoordinator.hpp"
-#include "../managers/ConfigManager.hpp"
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
@@ -7,9 +12,14 @@
 #include <QJsonArray>
 #include <QJsonParseError>
 
+#include "../managers/ConfigManager.hpp"
+
 namespace gridlock::core {
 
-LspCoordinator::LspCoordinator(QObject *parent)
+/**
+ * @brief Constructs `LspCoordinator` and connects `QProcess` stdout/stderr signals.
+ */
+LspCoordinator::LspCoordinator(QObject* parent)
     : QObject(parent), m_process(new QProcess(this)) {
   connect(m_process, &QProcess::readyReadStandardOutput, this,
           &LspCoordinator::readyReadStandardOutput);
@@ -17,16 +27,25 @@ LspCoordinator::LspCoordinator(QObject *parent)
           &LspCoordinator::readyReadStandardError);
 }
 
-LspCoordinator::~LspCoordinator() { stop(); }
+/**
+ * @brief Ensures the child `clangd` process is stopped when the coordinator is destroyed.
+ */
+LspCoordinator::~LspCoordinator() {
+  stop();
+}
 
-void LspCoordinator::start(const QString &targetFilePath) {
-  QString targetDir = QFileInfo(targetFilePath).absolutePath();
+/**
+ * @brief Launches `clangd` in @p targetFilePath's directory and transmits the LSP `initialize` request.
+ */
+void LspCoordinator::start(const QString& targetFilePath) {
+  const QString targetDir = QFileInfo(targetFilePath).absolutePath();
   m_process->setWorkingDirectory(targetDir);
-  QString clangdPath =
+  const QString clangdPath =
       gridlock::core::ConfigManager::instance().getGlobalClangdPath();
   m_process->start(clangdPath, QStringList() << "--compile-commands-dir=build"
                                              << "--header-insertion=never");
 
+  // Populate standard LSP `initialize` parameters including workspace root URI.
   QJsonObject params;
   params["processId"] = static_cast<int>(QCoreApplication::applicationPid());
   params["rootUri"] = "file://" + targetDir;
@@ -49,6 +68,9 @@ void LspCoordinator::start(const QString &targetFilePath) {
   sendPayload(initReq);
 }
 
+/**
+ * @brief Terminates the child `clangd` process, escalating to `SIGKILL` after 500 ms if needed.
+ */
 void LspCoordinator::stop() {
   if (m_process->state() == QProcess::Running) {
     m_process->terminate();
@@ -60,95 +82,121 @@ void LspCoordinator::stop() {
   }
 }
 
-QByteArray LspCoordinator::formatMessage(const QJsonObject &payload) {
-  QJsonDocument doc(payload);
-  QByteArray json = doc.toJson(QJsonDocument::Compact);
-  QByteArray header =
+/**
+ * @brief Encodes @p payload as compact UTF-8 JSON prefixed with `Content-Length: <bytes>\r\n\r\n`.
+ */
+QByteArray LspCoordinator::formatMessage(const QJsonObject& payload) {
+  const QJsonDocument doc(payload);
+  const QByteArray json = doc.toJson(QJsonDocument::Compact);
+  const QByteArray header =
       QString("Content-Length: %1\r\n\r\n").arg(json.size()).toUtf8();
   return header + json;
 }
 
-void LspCoordinator::sendPayload(const QJsonObject &payload) {
+/**
+ * @brief Writes a framed JSON-RPC message to `clangd` stdin if the process is running.
+ */
+void LspCoordinator::sendPayload(const QJsonObject& payload) {
   if (m_process->state() == QProcess::Running) {
     m_process->write(formatMessage(payload));
   }
 }
 
+/**
+ * @brief Logs `clangd` standard error output for diagnostic visibility.
+ */
 void LspCoordinator::readyReadStandardError() {
   qDebug() << "[clangd stderr]:" << m_process->readAllStandardError();
 }
 
+/**
+ * @brief Drains `clangd` standard output into the incremental frame parser.
+ */
 void LspCoordinator::readyReadStandardOutput() {
   processRawOutput(m_process->readAllStandardOutput());
 }
 
-void LspCoordinator::processRawOutput(const QByteArray &data) {
+/**
+ * @brief Parses one or more `Content-Length` framed JSON-RPC messages from `m_buffer`.
+ */
+void LspCoordinator::processRawOutput(const QByteArray& data) {
   m_buffer.append(data);
 
+  // Extract complete `Content-Length` frames in a loop until the buffer is exhausted.
   while (true) {
-    int headerEnd = m_buffer.indexOf("\r\n\r\n");
-    if (headerEnd == -1)
+    const int headerEnd = m_buffer.indexOf("\r\n\r\n");
+    if (headerEnd == -1) {
       break;
+    }
 
-    QString headers = QString::fromUtf8(m_buffer.left(headerEnd));
+    const QString headers = QString::fromUtf8(m_buffer.left(headerEnd));
     int contentLength = 0;
 
-    for (const QString &line : headers.split("\r\n")) {
+    for (const QString& line : headers.split("\r\n")) {
       if (line.startsWith("Content-Length: ")) {
         contentLength = line.mid(16).toInt();
       }
     }
 
+    // Wait for the full JSON body to arrive if the frame is still incomplete.
     if (contentLength == 0 || m_buffer.size() < headerEnd + 4 + contentLength) {
-      break; // Wait for more data
+      break;
     }
 
-    QByteArray payloadBytes = m_buffer.mid(headerEnd + 4, contentLength);
+    const QByteArray payloadBytes = m_buffer.mid(headerEnd + 4, contentLength);
     m_buffer.remove(0, headerEnd + 4 + contentLength);
 
     QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(payloadBytes, &err);
+    const QJsonDocument doc = QJsonDocument::fromJson(payloadBytes, &err);
     if (doc.isObject()) {
       processMessage(doc.object());
     }
   }
 }
 
-void LspCoordinator::processMessage(const QJsonObject &message) {
+/**
+ * @brief Handles `initialize` handshakes and extracts Markdown text from `textDocument/hover` replies.
+ * @param message Deserialized JSON-RPC 2.0 response or notification object.
+ */
+void LspCoordinator::processMessage(const QJsonObject& message) {
   if (message.contains("id")) {
-    int id = message["id"].toInt();
+    const int id = message["id"].toInt();
 
-      if (!m_isInitialized && message.contains("result")) {
-        QJsonObject result = message["result"].toObject();
-        if (result.contains("capabilities")) {
-          m_isInitialized = true;
-          
-          QJsonObject initNotif;
-          initNotif["jsonrpc"] = "2.0";
-          initNotif["method"] = "initialized";
-          initNotif["params"] = QJsonObject();
-          sendPayload(initNotif);
-        }
+    // Complete the LSP handshake upon receiving the server's capabilities object
+    // by immediately dispatching the required `initialized` notification.
+    if (!m_isInitialized && message.contains("result")) {
+      const QJsonObject result = message["result"].toObject();
+      if (result.contains("capabilities")) {
+        m_isInitialized = true;
+
+        QJsonObject initNotif;
+        initNotif["jsonrpc"] = "2.0";
+        initNotif["method"] = "initialized";
+        initNotif["params"] = QJsonObject();
+        sendPayload(initNotif);
       }
+    }
 
+    // Match hover response IDs against pending cursor coordinates and extract Markdown.
+    // Supports `MarkupContent` objects (`{kind, value}`), plain strings, and `MarkedString[]` arrays.
     if (m_hoverRequests.contains(id)) {
-      QPoint pos = m_hoverRequests.take(id);
+      const QPoint pos = m_hoverRequests.take(id);
       QString markdown = "";
       if (message.contains("result")) {
-        QJsonValue resultVal = message["result"];
+        const QJsonValue resultVal = message["result"];
         if (resultVal.isObject()) {
-          QJsonObject result = resultVal.toObject();
+          const QJsonObject result = resultVal.toObject();
           if (result.contains("contents")) {
-            QJsonValue contentsVal = result["contents"];
+            const QJsonValue contentsVal = result["contents"];
             if (contentsVal.isObject()) {
-              QJsonObject contents = contentsVal.toObject();
+              const QJsonObject contents = contentsVal.toObject();
               if (contents.contains("value")) {
                 markdown = contents["value"].toString();
               }
             } else if (contentsVal.isString()) {
               markdown = contentsVal.toString();
             } else if (contentsVal.isArray()) {
-              QJsonArray arr = contentsVal.toArray();
+              const QJsonArray arr = contentsVal.toArray();
               for (const QJsonValue& val : arr) {
                 if (val.isObject()) {
                   markdown += val.toObject()["value"].toString() + "\n";
@@ -167,10 +215,16 @@ void LspCoordinator::processMessage(const QJsonObject &message) {
   }
 }
 
-void LspCoordinator::didOpen(const QString &file, const QString &text) {
+/**
+ * @brief Registers an open source file buffer with `clangd` via `textDocument/didOpen`.
+ * @param file Local filesystem path to the opened C/C++ translation unit.
+ * @param text Full UTF-8 source buffer contents.
+ */
+void LspCoordinator::didOpen(const QString& file, const QString& text) {
+  // Construct the `TextDocumentItem` payload required by LSP 3.17 `didOpen`.
   QJsonObject textDocument;
   textDocument["uri"] = "file://" + QFileInfo(file).absoluteFilePath();
-  textDocument["languageId"] = "c"; // or cpp based on extension, c for mpi_mm.c
+  textDocument["languageId"] = "c";
   textDocument["version"] = 1;
   textDocument["text"] = text;
 
@@ -185,9 +239,21 @@ void LspCoordinator::didOpen(const QString &file, const QString &text) {
   sendPayload(notif);
 }
 
-void LspCoordinator::requestHover(const QString &file, int line, int character,
+/**
+ * @brief Requests symbol hover documentation at 0-based `(line, character)` in @p file.
+ * @param file Local filesystem path to the source document.
+ * @param line Zero-based line index.
+ * @param character Zero-based UTF-16 column offset.
+ * @param globalPos Global screen position where the hover tooltip should anchor.
+ */
+void LspCoordinator::requestHover(const QString& file,
+                                  int line,
+                                  int character,
                                   QPoint globalPos) {
-  if (!m_isInitialized) return;
+  // Drop hover requests sent before `clangd` completes its `initialize` handshake.
+  if (!m_isInitialized) {
+    return;
+  }
 
   QJsonObject textDocument;
   textDocument["uri"] = "file://" + QFileInfo(file).absoluteFilePath();
@@ -200,7 +266,7 @@ void LspCoordinator::requestHover(const QString &file, int line, int character,
   params["textDocument"] = textDocument;
   params["position"] = position;
 
-  int reqId = m_nextRequestId++;
+  const int reqId = m_nextRequestId++;
   m_hoverRequests[reqId] = globalPos;
 
   QJsonObject req;
@@ -212,4 +278,4 @@ void LspCoordinator::requestHover(const QString &file, int line, int character,
   sendPayload(req);
 }
 
-} // namespace gridlock::core
+}  // namespace gridlock::core

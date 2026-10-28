@@ -1,4 +1,18 @@
+/**
+ * @file ConfigManager.hpp
+ * @brief Central configuration manager bridging TOML files and QSettings persistence.
+ *
+ * Manages global toolchain paths (`config.toml`), per-workspace breakpoints and
+ * watch expressions (`.gridlock/workspace.toml`), project target settings
+ * (`.gridlock/settings.toml`), and user-level debugger/HPC/SSH/SLURM preferences
+ * stored via QSettings.
+ */
+
 #pragma once
+
+#include <string>
+#include <vector>
+
 #include <QMap>
 #include <QSet>
 #include <QSettings>
@@ -7,157 +21,219 @@
 
 namespace gridlock::core {
 
-/// Canonical storage for MPI/GDB configuration.
-/// QSettings ("GridLock"/"Debugger") is the live layer;
-/// the TOML file holds theme colours and breakpoints.
+/**
+ * @struct DebuggerSettings
+ * @brief Canonical configuration for local MPI and GDB process spawning.
+ */
 struct DebuggerSettings {
-  QString gdbPath = "gdb";
-  QString mpiExecutable = "mpiexec";
-  QString mpiArgs = "--oversubscribe";
-  int defaultRanks = 2;
-  bool trapFpe = false;
+  QString gdbPath = "gdb";                  ///< Path to the GDB executable.
+  QString mpiExecutable = "mpiexec";        ///< Path to the MPI launcher (`mpiexec` or `mpirun`).
+  QString mpiArgs = "--oversubscribe";      ///< Additional CLI flags passed to the MPI launcher.
+  int defaultRanks = 2;                     ///< Default number of MPI ranks to spawn.
+  bool trapFpe = false;                     ///< Whether to trap floating-point exceptions in GDB.
 };
 
-/// HPC cluster / node configuration. Stored in QSettings under hpc/*.
+/**
+ * @struct HpcSettings
+ * @brief Cluster hostfile, environment, and NUMA affinity parameters.
+ */
 struct HpcSettings {
-  QString hostsFile = "";      ///< Path to MPI hostfile (empty = not used)
-  QString envVars = "";        ///< Newline-separated key=value pairs
-  bool strictAffinity = false; ///< Pass --map-by node to the MPI launcher
+  QString hostsFile = "";      ///< Path to MPI hostfile (empty = local execution).
+  QString envVars = "";        ///< Newline-separated `KEY=VALUE` environment variables.
+  bool strictAffinity = false; ///< Pass `--map-by node` to enforce strict node affinity.
 };
 
-/// SSH connection to a remote HPC login node. Stored under ssh/*.
+/**
+ * @struct SshSettings
+ * @brief SSH credentials for connecting to a remote HPC login node.
+ */
 struct SshSettings {
-  QString host = "";    ///< hostname or IP of the login node
-  QString user = "";    ///< login username
-  QString keyPath = ""; ///< path to private SSH key (~/.ssh/id_rsa style)
+  QString host = "";    ///< Hostname or IP address of the remote login node.
+  QString user = "";    ///< SSH username on the remote cluster.
+  QString keyPath = ""; ///< Filesystem path to the private SSH key (`~/.ssh/id_ed25519`).
 };
 
-/// SLURM batch configuration. Stored under slurm/*.
+/**
+ * @struct SlurmSettings
+ * @brief SLURM batch job and remote Spack root configuration.
+ */
 struct SlurmSettings {
-  QString scriptTemplate =
-      ""; ///< Default sbatch script body (may contain %%FILE%% placeholder)
-  QString partition = "batch"; ///< SLURM partition / queue
-  int nodes = 1;
-  int tasksPerNode = 4;
-  bool requestGpus = false;
-  int gpusPerNode = 1;
-  QString spackRoot = "/opt/spack"; ///< Spack install prefix on remote
+  QString scriptTemplate = "";      ///< Default `sbatch` script body (`%%FILE%%` placeholder).
+  QString partition = "batch";      ///< SLURM partition or queue name.
+  int nodes = 1;                    ///< Number of compute nodes to allocate.
+  int tasksPerNode = 4;             ///< Number of MPI tasks per allocated node.
+  bool requestGpus = false;         ///< Whether to include `--gres=gpu` in the allocation.
+  int gpusPerNode = 1;              ///< Number of GPUs requested per node when `requestGpus` is true.
+  QString spackRoot = "/opt/spack"; ///< Spack installation prefix on the cluster.
 };
 
-/// Terminal configuration for QTermWidget integration. Stored in QSettings under terminal/*.
+/**
+ * @struct TerminalSettings
+ * @brief Embedded terminal shell and typography configuration.
+ */
 struct TerminalSettings {
-  QString shellPath = "";      ///< Shell executable path (defaults to $SHELL or /bin/bash if empty)
-  QString fontFamily = "FiraCode Nerd Font"; ///< Default monospace font
-  int fontSize = 12;           ///< Font size in points
+  QString shellPath = "";                    ///< Shell executable path (defaults to `$SHELL` or `/bin/bash`).
+  QString fontFamily = "FiraCode Nerd Font"; ///< Monospace font family for the embedded terminal.
+  int fontSize = 12;                         ///< Terminal font point size.
 };
 
+/**
+ * @struct ProjectSettings
+ * @brief Per-workspace target executable, arguments, environment, and watch list.
+ */
 struct ProjectSettings {
-  std::string targetBinary;
-  std::string programArguments;
-  std::string environmentVariables;
-  std::string workingDirectory;
-  std::string customGdbPath = "gdb";
-  std::vector<std::string> watchExpressions;
+  std::string targetBinary;                  ///< Path to the compiled target binary.
+  std::string programArguments;              ///< Command-line arguments passed to the target binary.
+  std::string environmentVariables;          ///< Environment overrides for the target process.
+  std::string workingDirectory;              ///< Initial working directory for the target process.
+  std::string customGdbPath = "gdb";         ///< Workspace-specific GDB executable override.
+  std::vector<std::string> watchExpressions; ///< Persisted watch expressions evaluated on stops.
 };
 
+/**
+ * @class ConfigManager
+ * @brief Singleton facade over `config.toml`, `.gridlock/` TOML files, and `QSettings`.
+ */
 class ConfigManager {
-public:
-  static ConfigManager &instance() {
+ public:
+  /**
+   * @brief Returns the process-wide ConfigManager singleton instance.
+   */
+  static ConfigManager& instance() {
     static ConfigManager instance;
     return instance;
   }
 
+  /**
+   * @brief Loads (or initializes if missing) the global `config.toml` file.
+   */
   void loadConfig();
 
-  // ── Theme / colour accessors (TOML-backed) ───────────────────────────
+  /** @brief Returns the configured source editor background color hex string. */
   QString getSourceBackground() const;
+  /** @brief Returns the configured source editor foreground text color hex string. */
   QString getSourceText() const;
+  /** @brief Returns the configured source editor active execution line color hex string. */
   QString getSourceActiveLine() const;
 
+  /** @brief Returns the configured assembly opcode syntax highlight color. */
   QString getAssemblyOpcode() const;
+  /** @brief Returns the configured assembly register syntax highlight color. */
   QString getAssemblyRegister() const;
-
-  QString getDocsetDirectory() const;
-  void setDocsetDirectory(const QString &path);
+  /** @brief Returns the configured assembly address gutter color. */
   QString getAssemblyAddress() const;
 
-  // ── Debugger settings (QSettings-backed, single source of truth) ─────
+  /** @brief Returns the offline Zeal/Dash docset root directory path. */
+  QString getDocsetDirectory() const;
+  /** @brief Persists the offline Zeal/Dash docset root directory path. */
+  void setDocsetDirectory(const QString& path);
+
+  /** @brief Reads the active MPI/GDB settings from QSettings (seeded from TOML). */
   DebuggerSettings getDebuggerSettings() const;
-  void saveDebuggerSettings(const DebuggerSettings &s);
+  /** @brief Persists MPI/GDB settings to QSettings. */
+  void saveDebuggerSettings(const DebuggerSettings& s);
 
-  // ── HPC / cluster settings (QSettings-backed) ─────────────────────────
+  /** @brief Reads HPC hostfile and affinity settings from QSettings. */
   HpcSettings getHpcSettings() const;
-  void saveHpcSettings(const HpcSettings &s);
+  /** @brief Persists HPC hostfile and affinity settings to QSettings. */
+  void saveHpcSettings(const HpcSettings& s);
 
-  // ── SSH connection settings (QSettings-backed) ─────────────────────
+  /** @brief Reads remote SSH login settings from QSettings. */
   SshSettings getSshSettings() const;
-  void saveSshSettings(const SshSettings &s);
+  /** @brief Persists remote SSH login settings to QSettings. */
+  void saveSshSettings(const SshSettings& s);
 
-  // ── SLURM / Spack settings (QSettings-backed) ────────────────────
+  /** @brief Reads SLURM batch and Spack settings from QSettings. */
   SlurmSettings getSlurmSettings() const;
-  void saveSlurmSettings(const SlurmSettings &s);
+  /** @brief Persists SLURM batch and Spack settings to QSettings. */
+  void saveSlurmSettings(const SlurmSettings& s);
 
-  // ── Terminal settings (QSettings-backed) ─────────────────────────────
+  /** @brief Reads embedded terminal shell and font settings from `config.toml`. */
   TerminalSettings getTerminalSettings() const;
-  void saveTerminalSettings(const TerminalSettings &s);
+  /** @brief Persists embedded terminal shell and font settings to `config.toml`. */
+  void saveTerminalSettings(const TerminalSettings& s);
 
-  /// Convenience shims used by existing call-sites.
+  /** @brief Convenience accessor returning the default MPI rank count. */
   int getDefaultRanks() const;
+  /** @brief Convenience accessor returning the project or global GDB path. */
   QString getGdbPath() const;
+  /** @brief Convenience accessor returning the configured MPI launcher executable. */
   QString getMpiExecutable() const;
+  /** @brief Convenience accessor returning the configured MPI launcher arguments. */
   QString getMpiArgs() const;
 
-  /// Persist the last directory visited by a file-open dialog so the IDE
-  /// restores it across launches.
+  /** @brief Returns the last directory visited by a file-open dialog. */
   QString getLastOpenDir() const;
-  void setLastOpenDir(const QString &path);
+  /** @brief Persists the last directory visited by a file-open dialog. */
+  void setLastOpenDir(const QString& path);
 
-  // ── Breakpoints (TOML-backed) ─────────────────────────────────────────
+  /**
+   * @brief Loads source-line breakpoints for @p targetExecutable from `.gridlock/workspace.toml`.
+   */
   QMap<QString, QSet<int>> getBreakpoints(QString targetExecutable = QString()) const;
-  void saveBreakpoints(const QMap<QString, QSet<int>> &breakpoints, QString targetExecutable = QString());
 
-  // ── Project Settings (TOML-backed) ────────────────────────────────────
+  /**
+   * @brief Saves source-line breakpoints for @p targetExecutable to `.gridlock/workspace.toml`.
+   */
+  void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints,
+                       QString targetExecutable = QString());
+
+  /** @brief Loads per-workspace target and watch settings from `.gridlock/settings.toml`. */
   ProjectSettings loadProjectSettings() const;
-  void saveProjectSettings(const ProjectSettings &ps) const;
+  /** @brief Saves per-workspace target and watch settings to `.gridlock/settings.toml`. */
+  void saveProjectSettings(const ProjectSettings& ps) const;
 
-  void setWorkspace(const QString &path);
+  /** @brief Sets the active project workspace root directory path. */
+  void setWorkspace(const QString& path);
+  /** @brief Returns the active project workspace root directory path. */
   QString workspacePath() const { return m_workspacePath; }
 
-  // ── Global Tools (TOML-backed) ────────────────────────────────────────
+  /** @brief Returns the global `clangd` executable path from `config.toml`. */
   QString getGlobalClangdPath() const;
-  void setGlobalClangdPath(const QString &path);
+  /** @brief Updates and saves the global `clangd` executable path in `config.toml`. */
+  void setGlobalClangdPath(const QString& path);
 
+  /** @brief Returns the global `lldb-dap` adapter path from `config.toml`. */
   QString getGlobalDapAdapterPath() const;
-  void setGlobalDapAdapterPath(const QString &path);
+  /** @brief Updates and saves the global `lldb-dap` adapter path in `config.toml`. */
+  void setGlobalDapAdapterPath(const QString& path);
 
+  /** @brief Returns the global `gdb` executable path from `config.toml`. */
   QString getGlobalGdbPath() const;
-  void setGlobalGdbPath(const QString &path);
+  /** @brief Updates and saves the global `gdb` executable path in `config.toml`. */
+  void setGlobalGdbPath(const QString& path);
 
+  /** @brief Returns the global MPI launcher arguments from `config.toml`. */
   QString getGlobalMpiArgs() const;
-  void setGlobalMpiArgs(const QString &args);
+  /** @brief Updates and saves the global MPI launcher arguments in `config.toml`. */
+  void setGlobalMpiArgs(const QString& args);
 
-  // ── UI / Monitor Routing (TOML-backed) ────────────────────────────────
+  /** @brief Returns the preferred output monitor name or substring from `[ui]` in `config.toml`. */
   QString preferredMonitor() const;
-  void setPreferredMonitor(const QString &monitorHint);
+  /** @brief Updates and saves the preferred output monitor hint in `config.toml`. */
+  void setPreferredMonitor(const QString& monitorHint);
 
+  /** @brief Returns whether `[ui] open_unfocused` is enabled in `config.toml`. */
   bool openUnfocused() const;
+  /** @brief Updates and saves `[ui] open_unfocused` in `config.toml`. */
   void setOpenUnfocused(bool unfocused);
 
+  /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 
-private:
+ private:
   ConfigManager();
   ~ConfigManager() = default;
 
-  ConfigManager(const ConfigManager &) = delete;
-  ConfigManager &operator=(const ConfigManager &) = delete;
+  ConfigManager(const ConfigManager&) = delete;
+  ConfigManager& operator=(const ConfigManager&) = delete;
 
-  toml::table m_config;
-  QString m_workspacePath;
-  QString m_globalConfigPath;
+  toml::table m_config;       ///< In-memory representation of the global `config.toml`.
+  QString m_workspacePath;    ///< Active project workspace root directory.
+  QString m_globalConfigPath; ///< Absolute path to the active `config.toml` file.
 
-  static constexpr const char *kOrg = "gridlock";
-  static constexpr const char *kApp = "debugger";
+  static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
+  static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.
 };
 
-} // namespace gridlock::core
+}  // namespace gridlock::core

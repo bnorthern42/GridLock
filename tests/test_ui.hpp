@@ -34,4 +34,5 @@ private slots:
     void testCrossPaneChoreographyHistoryAndStrings();
     void testCfgRankDivergenceMinimapAndRackSync();
     void testDynamicRankSyncWithoutHardcodedConstructorMocks();
+    void testCoreGoogleStyleAndDocumentation();
 };

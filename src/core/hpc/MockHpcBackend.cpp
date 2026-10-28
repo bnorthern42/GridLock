@@ -1,8 +1,15 @@
+/**
+ * @file MockHpcBackend.cpp
+ * @brief Implementation of simulated Spack and SLURM operations for `MockHpcBackend`.
+ */
+
 #include "MockHpcBackend.hpp"
+
 #include <QTimer>
 
 namespace gridlock::core {
 
+// Default list of realistic HPC Spack specs returned when no test override is set.
 static const QStringList kDefaultFakePackages = {
     "openmpi@4.1.5%gcc@12.3.0",
     "hdf5@1.14.0%gcc@12.3.0+mpi",
@@ -18,70 +25,84 @@ static const QStringList kDefaultFakePackages = {
     "valgrind@3.21.0%gcc@12.3.0+mpi",
 };
 
-MockHpcBackend::MockHpcBackend(QObject *parent)
-    : HpcBackend(parent)
-    , m_fakePackages(kDefaultFakePackages)
-{}
+/**
+ * @brief Initializes `MockHpcBackend` with the default 12-package HPC Spack catalog.
+ */
+MockHpcBackend::MockHpcBackend(QObject* parent)
+    : HpcBackend(parent), m_fakePackages(kDefaultFakePackages) {}
 
-void MockHpcBackend::setFakePackages(const QStringList &packages)
-{
-    m_fakePackages = packages;
+/**
+ * @brief Replaces the simulated Spack package list with @p packages.
+ */
+void MockHpcBackend::setFakePackages(const QStringList& packages) {
+  m_fakePackages = packages;
 }
 
-void MockHpcBackend::setNextSubmitFails(bool fail)
-{
-    m_nextSubmitFails = fail;
+/**
+ * @brief Configures whether the next `submitSlurmJob()` call simulates an `sbatch` failure.
+ */
+void MockHpcBackend::setNextSubmitFails(bool fail) {
+  m_nextSubmitFails = fail;
 }
 
-void MockHpcBackend::fetchPackages()
-{
-    // Simulate ~200 ms network latency then emit.
-    QTimer::singleShot(200, this, [this]() {
-        HpcResult r;
-        r.success = true;
-        r.output  = m_fakePackages.join('\n') +
-                    "\n\n[MOCK] 12 packages in environment / +dependencies";
-        emit packagesReady(r);
-    });
+/**
+ * @brief Simulates `spack find` with a 200 ms network delay before emitting `packagesReady()`.
+ */
+void MockHpcBackend::fetchPackages() {
+  // Simulate ~200 ms SSH round-trip latency before delivering the package list.
+  QTimer::singleShot(200, this, [this]() {
+    HpcResult r;
+    r.success = true;
+    r.output = m_fakePackages.join('\n') +
+               "\n\n[MOCK] 12 packages in environment / +dependencies";
+    emit packagesReady(r);
+  });
 }
 
-void MockHpcBackend::submitSlurmJob(const QString &script)
-{
-    const bool fail = m_nextSubmitFails;
-    m_nextSubmitFails = false;   // reset so next call succeeds
+/**
+ * @brief Simulates `sbatch` submission, parsing `#SBATCH --job-name` from @p script.
+ */
+void MockHpcBackend::submitSlurmJob(const QString& script) {
+  const bool fail = m_nextSubmitFails;
+  // Reset one-shot fault injection flag so subsequent submissions succeed normally.
+  m_nextSubmitFails = false;
 
-    QTimer::singleShot(300, this, [this, fail, script]() {
-        HpcResult r;
-        if (fail) {
-            r.success     = false;
-            r.errorOutput = "[MOCK] sbatch: error: Unable to connect to SLURM daemon\n";
-        } else {
-            // Extract #SBATCH --job-name if present, else use "gridlock_job"
-            QString jobName = "gridlock_job";
-            const QStringList lines = script.split('\n');
-            for (const QString &ln : lines) {
-                if (ln.startsWith("#SBATCH --job-name")) {
-                    jobName = ln.section('=', 1).trimmed();
-                    break;
-                }
-            }
-            static int s_jobCounter = 10000;
-            r.success = true;
-            r.output  = QString("[MOCK] Submitted batch job %1  (name: %2)\n")
-                            .arg(++s_jobCounter).arg(jobName);
+  QTimer::singleShot(300, this, [this, fail, script]() {
+    HpcResult r;
+    if (fail) {
+      r.success = false;
+      r.errorOutput =
+          "[MOCK] sbatch: error: Unable to connect to SLURM daemon\n";
+    } else {
+      // Extract `#SBATCH --job-name=<name>` if present; otherwise default to `gridlock_job`.
+      QString jobName = "gridlock_job";
+      const QStringList lines = script.split('\n');
+      for (const QString& ln : lines) {
+        if (ln.startsWith("#SBATCH --job-name")) {
+          jobName = ln.section('=', 1).trimmed();
+          break;
         }
-        emit slurmJobSubmitted(r);
-    });
+      }
+      static int s_jobCounter = 10000;
+      r.success = true;
+      r.output = QString("[MOCK] Submitted batch job %1  (name: %2)\n")
+                     .arg(++s_jobCounter)
+                     .arg(jobName);
+    }
+    emit slurmJobSubmitted(r);
+  });
 }
 
-void MockHpcBackend::cancelSlurmJob(int jobId)
-{
-    QTimer::singleShot(150, this, [this, jobId]() {
-        HpcResult r;
-        r.success = true;
-        r.output  = QString("[MOCK] scancel %1: job cancelled\n").arg(jobId);
-        emit commandFinished("scancel", r);
-    });
+/**
+ * @brief Simulates `scancel <jobId>` with a 150 ms network delay.
+ */
+void MockHpcBackend::cancelSlurmJob(int jobId) {
+  QTimer::singleShot(150, this, [this, jobId]() {
+    HpcResult r;
+    r.success = true;
+    r.output = QString("[MOCK] scancel %1: job cancelled\n").arg(jobId);
+    emit commandFinished("scancel", r);
+  });
 }
 
-} // namespace gridlock::core
+}  // namespace gridlock::core

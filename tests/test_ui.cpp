@@ -884,4 +884,46 @@ void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
     QCOMPARE(disasm->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3, 4, 5, 6, 7}));
 }
 
+void TestMainWindowUI::testCoreGoogleStyleAndDocumentation() {
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
+    if (!rootDir.exists("src")) rootDir = QDir::current();
+    QStringList targetFiles = { rootDir.filePath(QStringLiteral("src/main.cpp")) };
+    QDirIterator it(rootDir.filePath(QStringLiteral("src/core")), QStringList() << "*.hpp" << "*.cpp",
+                    QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        targetFiles.append(it.next());
+    }
+    targetFiles.sort();
+    QVERIFY(targetFiles.size() >= 45);
+
+    for (const QString& relPath : targetFiles) {
+        QFile f(relPath);
+        QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(relPath));
+        const QString content = QString::fromUtf8(f.readAll());
+        const QStringList lines = content.split('\n');
+        QVERIFY2(lines.size() < 950, qPrintable(QString("%1 has %2 lines (>= 950)").arg(relPath).arg(lines.size())));
+        QVERIFY2(content.contains("@file") && content.contains("@brief"),
+                 qPrintable(QString("%1 missing @file/@brief header banner").arg(relPath)));
+        if (content.contains("\nnamespace ") || content.startsWith("namespace ")) {
+            QVERIFY2(content.contains("// namespace "),
+                     qPrintable(QString("%1 missing Google C++ closing // namespace comment").arg(relPath)));
+        }
+        int nonEmptyLines = 0;
+        int commentLines = 0;
+        for (const QString& line : lines) {
+            const QString trimmed = line.trimmed();
+            if (trimmed.isEmpty()) continue;
+            ++nonEmptyLines;
+            if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
+                ++commentLines;
+            }
+        }
+        QVERIFY2(nonEmptyLines > 0, qPrintable(relPath));
+        const double ratio = static_cast<double>(commentLines) / static_cast<double>(nonEmptyLines);
+        QVERIFY2(ratio >= 0.20,
+                 qPrintable(QString("%1 comment ratio %2 (%3/%4) < 0.20")
+                                .arg(relPath).arg(ratio, 0, 'f', 3).arg(commentLines).arg(nonEmptyLines)));
+    }
+}
+
 QTEST_MAIN(TestMainWindowUI)
