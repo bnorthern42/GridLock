@@ -87,6 +87,8 @@ public:
     bool canNavigateForward() const;
     bool navigateBack();
     bool navigateForward();
+    bool isShowingDecompilerFallback() const { return m_showingDecompilerFallback; }
+    void enableDecompilerFallback(bool enabled);
     QScreen* resolvePreferredScreen(const QString& monitorHint) const;
     void applyPreferredScreenRouting(const QString& monitorHint, bool openUnfocused);
     QString preferredMonitorHint() const { return m_preferredMonitorHint; }
@@ -149,6 +151,8 @@ private:
     QVector<QString> m_seekHistory;
     int m_seekHistoryIndex = -1;
     bool m_isNavigatingHistory = false;
+    bool m_showingDecompilerFallback = false;
+    bool m_forceDecompilerFallback = false;
 
     IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

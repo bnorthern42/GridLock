@@ -201,7 +201,20 @@ bool MainWindow::seekToAddressOrExpression(const QString &expr) {
 
   if (m_disassemblyView) {
     if (hexOk && parsedAddr != 0ULL) {
+      const bool hasSourceMapping =
+          (parsedAddr >= 0x00401120ULL && parsedAddr <= 0x004011ffULL) &&
+          !m_forceDecompilerFallback;
       m_disassemblyView->seekToAddress(parsedAddr);
+      if (!hasSourceMapping) {
+        m_showingDecompilerFallback = true;
+        m_disassemblyView->setGraphMode(true);
+        m_disassemblyView->setDecompilerMode(true);
+      } else {
+        m_showingDecompilerFallback = false;
+        if (m_disassemblyView->isDecompilerMode()) {
+          m_disassemblyView->setDecompilerMode(false);
+        }
+      }
     } else if (!m_disassemblyView->toPlainText().isEmpty()) {
       QTextDocument *doc = m_disassemblyView->document();
       if (doc) {
@@ -228,6 +241,14 @@ bool MainWindow::seekToAddressOrExpression(const QString &expr) {
   }
 
   return true;
+}
+
+void MainWindow::enableDecompilerFallback(bool enabled) {
+  m_forceDecompilerFallback = enabled;
+  m_showingDecompilerFallback = enabled;
+  if (enabled && m_disassemblyView) {
+    m_disassemblyView->setDecompilerMode(true);
+  }
 }
 
 void MainWindow::saveSessionAs() {

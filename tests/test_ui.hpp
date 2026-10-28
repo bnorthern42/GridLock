@@ -29,4 +29,5 @@ private slots:
     void testMemViewToolbarNoTruncationAndDisassemblyLayout();
     void testOffscreenDefaultAndPreferredScreenRouting();
     void testNavigationHistoryStringsAndBookmarks();
+    void testCfgGraphDecompilerLanguagesAndSourceFallback();
 };

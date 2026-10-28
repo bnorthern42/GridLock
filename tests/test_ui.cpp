@@ -840,4 +840,42 @@ void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
     QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
 }
 
+void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
+    gridlock::ui::MainWindow mainWindow;
+    auto* disassemblyView = mainWindow.disassemblyView();
+    QVERIFY(disassemblyView != nullptr);
+
+    // 1. Multi-Language Decompilation
+    disassemblyView->setDecompilerTargetLanguage("C");
+    QCOMPARE(disassemblyView->decompilerTargetLanguage(), QStringLiteral("C"));
+    const QString cOut = disassemblyView->decompileToLanguage("C");
+    QVERIFY(cOut.contains("int32_t") || cOut.contains("var_"));
+    QVERIFY(cOut.contains("if (") || cOut.contains("while ("));
+    QVERIFY(cOut.contains("MPI_Init"));
+
+    const QString cppOut = disassemblyView->decompileToLanguage("C++");
+    const QString pseudoOut = disassemblyView->decompileToLanguage("Pseudocode");
+    QVERIFY(!cppOut.isEmpty());
+    QVERIFY(!pseudoOut.isEmpty());
+    QVERIFY(cppOut != cOut);
+    QVERIFY(pseudoOut != cOut);
+    QVERIFY(cppOut != pseudoOut);
+
+    // 2. CFG Graph Signature & Orthogonal Routing
+    const QString sigHeader = disassemblyView->functionSignatureHeader();
+    QVERIFY(!sigHeader.isEmpty());
+    QVERIFY(sigHeader.contains("sym.main(int argc, char **argv)"));
+
+    disassemblyView->setGraphMode(true);
+    QVERIFY(disassemblyView->isGraphMode());
+    QVERIFY(disassemblyView->basicBlockCount() >= 3);
+
+    // 3. Automatic Decompiler Fallback When Source Is Missing
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
+    QVERIFY(!mainWindow.isShowingDecompilerFallback());
+
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401000"));
+    QVERIFY(mainWindow.isShowingDecompilerFallback());
+}
+
 QTEST_MAIN(TestMainWindowUI)

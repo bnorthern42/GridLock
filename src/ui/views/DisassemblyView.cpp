@@ -380,7 +380,23 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
 
   rootLayout->addWidget(headerWidget);
 
-  // Multi-mode QStackedWidget: Page 0 = Linear Disassembly, Page 1 = CFG Graph, Page 2 = Pseudocode & Xrefs
+  // Compact sub-header bar displaying reconstructed function signature
+  auto *sigBar = new QWidget(this);
+  sigBar->setObjectName("disasmSignatureBar");
+  sigBar->setFixedHeight(20);
+  sigBar->setStyleSheet(
+      "background: #141619; border-bottom: 1px solid #2b2b2b;");
+  auto *sigLayout = new QHBoxLayout(sigBar);
+  sigLayout->setContentsMargins(8, 0, 8, 0);
+  sigLayout->setSpacing(4);
+  m_signatureLabel = new QLabel(m_functionSignature, sigBar);
+  m_signatureLabel->setObjectName("disasmSignatureLabel");
+  m_signatureLabel->setStyleSheet(
+      "color: #dcdcaa; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;");
+  sigLayout->addWidget(m_signatureLabel, 1);
+  rootLayout->addWidget(sigBar);
+
+  // Multi-mode QStackedWidget: Page 0 = Linear Disassembly, Page 1 = CFG Graph, Page 2 = Decompiler & Xrefs
   m_stack = new QStackedWidget(this);
   m_stack->setContentsMargins(0, 0, 0, 0);
 
@@ -404,16 +420,65 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_cfgView->setDragMode(QGraphicsView::ScrollHandDrag);
   m_cfgView->setBackgroundBrush(QColor(0x14, 0x16, 0x19));
 
-  m_decompilerEdit = new QPlainTextEdit(m_stack);
+  auto *decompilerPage = new QWidget(m_stack);
+  decompilerPage->setObjectName("decompilerPageContainer");
+  auto *decompilerLayout = new QVBoxLayout(decompilerPage);
+  decompilerLayout->setContentsMargins(0, 0, 0, 0);
+  decompilerLayout->setSpacing(0);
+
+  m_decompilerEdit = new QPlainTextEdit(decompilerPage);
   m_decompilerEdit->setObjectName("cutterDecompilerView");
   m_decompilerEdit->setReadOnly(true);
   m_decompilerEdit->setFrameShape(QFrame::NoFrame);
   m_decompilerEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
   m_decompilerEdit->setFont(f);
+  decompilerLayout->addWidget(m_decompilerEdit, 1);
+
+  auto *decompFooter = new QWidget(decompilerPage);
+  decompFooter->setObjectName("decompilerFooterBar");
+  decompFooter->setFixedHeight(24);
+  decompFooter->setStyleSheet(
+      "background: #1a1d21; border-top: 1px solid #2b2b2b; "
+      "font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #9da5b4;");
+  auto *footerLayout = new QHBoxLayout(decompFooter);
+  footerLayout->setContentsMargins(6, 1, 6, 1);
+  footerLayout->setSpacing(6);
+
+  m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto Refresh"), decompFooter);
+  m_autoRefreshCheck->setObjectName("decompilerAutoRefreshCheck");
+  m_autoRefreshCheck->setChecked(true);
+
+  m_refreshDecompilerBtn = new QPushButton(QStringLiteral("Refresh"), decompFooter);
+  m_refreshDecompilerBtn->setObjectName("decompilerRefreshBtn");
+  m_refreshDecompilerBtn->setFixedHeight(20);
+  connect(m_refreshDecompilerBtn, &QPushButton::clicked, this,
+          &DisassemblyView::refreshDecompilerView);
+
+  auto *targetLabel = new QLabel(QStringLiteral("Decompiler:"), decompFooter);
+  m_targetLangCombo = new QComboBox(decompFooter);
+  m_targetLangCombo->setObjectName("decompilerTargetCombo");
+  m_targetLangCombo->setFixedHeight(20);
+  m_targetLangCombo->addItem(QStringLiteral("Approx C"), QStringLiteral("C"));
+  m_targetLangCombo->addItem(QStringLiteral("C++ / MPI"), QStringLiteral("C++"));
+  m_targetLangCombo->addItem(QStringLiteral("Pseudocode"), QStringLiteral("Pseudocode"));
+  connect(m_targetLangCombo, &QComboBox::currentIndexChanged, this,
+          [this](int idx) {
+            if (m_targetLangCombo && idx >= 0) {
+              setDecompilerTargetLanguage(
+                  m_targetLangCombo->itemData(idx).toString());
+            }
+          });
+
+  footerLayout->addWidget(m_autoRefreshCheck);
+  footerLayout->addWidget(m_refreshDecompilerBtn);
+  footerLayout->addStretch(1);
+  footerLayout->addWidget(targetLabel);
+  footerLayout->addWidget(m_targetLangCombo);
+  decompilerLayout->addWidget(decompFooter);
 
   m_stack->addWidget(m_linearEdit);
   m_stack->addWidget(m_cfgView);
-  m_stack->addWidget(m_decompilerEdit);
+  m_stack->addWidget(decompilerPage);
   m_stack->setCurrentIndex(0);
 
   rootLayout->addWidget(m_stack, 1);
@@ -461,6 +526,9 @@ void DisassemblyView::setDecompilerMode(bool enabled) {
   }
   if (m_stack) {
     m_stack->setCurrentIndex(m_decompilerMode ? 2 : (m_graphMode ? 1 : 0));
+  }
+  if (m_decompilerMode) {
+    refreshDecompilerView();
   }
 }
 

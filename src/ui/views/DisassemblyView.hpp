@@ -1,4 +1,6 @@
 #pragma once
+#include <QCheckBox>
+#include <QComboBox>
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QLabel>
@@ -86,6 +88,12 @@ public:
     bool isDecompilerMode() const { return m_decompilerMode; }
     void setDecompilerMode(bool enabled);
 
+    void setDecompilerTargetLanguage(const QString& lang);
+    QString decompilerTargetLanguage() const { return m_targetLang; }
+    QString decompileToLanguage(const QString& lang) const;
+    QString functionSignatureHeader() const { return m_functionSignature; }
+    void refreshDecompilerView();
+
     void setAddressComment(uint64_t address, const QString& comment);
     QString addressComment(uint64_t address) const;
     bool toggleBookmark(uint64_t address);
@@ -108,6 +116,7 @@ private:
     static QString defaultStartupDisassembly();
 
     QLabel* m_headerBadge = nullptr;
+    QLabel* m_signatureLabel = nullptr;
     QLabel* m_statsBadge = nullptr;
     QPushButton* m_modeToggleBtn = nullptr;
     QPushButton* m_decompilerToggleBtn = nullptr;
@@ -116,6 +125,9 @@ private:
     QGraphicsView* m_cfgView = nullptr;
     QGraphicsScene* m_cfgScene = nullptr;
     QPlainTextEdit* m_decompilerEdit = nullptr;
+    QCheckBox* m_autoRefreshCheck = nullptr;
+    QPushButton* m_refreshDecompilerBtn = nullptr;
+    QComboBox* m_targetLangCombo = nullptr;
     AsmSyntaxHighlighter* m_highlighter = nullptr;
 
     QVector<BranchArc> m_branchArcs;
@@ -129,6 +141,8 @@ private:
     bool m_graphMode = false;
     bool m_decompilerMode = false;
     QString m_activeSymbol = QStringLiteral("sym.main");
+    QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");
+    QString m_targetLang = QStringLiteral("C");
     QString m_decompiledPseudocode;
 };
 

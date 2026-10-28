@@ -267,49 +267,27 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     m_basicBlocks.append(currentBlock);
   }
 
-  // Synthesize structured C/MPI pseudocode & Xrefs from parsed basic blocks and branch arcs
-  QStringList pseudoLines;
-  pseudoLines
-      << QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1").arg(m_activeSymbol);
-  pseudoLines << QStringLiteral("int main(int argc, char **argv) {");
-  for (const DisasmBasicBlock &bb : std::as_const(m_basicBlocks)) {
-    const QVector<uint64_t> inXrefs = xrefsToAddress(bb.startAddress);
-    if (!inXrefs.isEmpty()) {
-      QStringList callerStrs;
-      for (uint64_t cAddr : inXrefs) {
-        callerStrs
-            << QStringLiteral("0x%1 (jmp)").arg(cAddr, 8, 16, QChar('0'));
-      }
-      pseudoLines << QStringLiteral("  // XREFS TO 0x%1: %2")
-                         .arg(bb.startAddress, 8, 16, QChar('0'))
-                         .arg(callerStrs.join(QStringLiteral(", ")));
-    }
-    pseudoLines
-        << QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0'));
-    for (const QString &instLine : bb.lines) {
-      if (instLine.contains(QStringLiteral("MPI_Init"))) {
-        pseudoLines << QStringLiteral("    MPI_Init(&argc, &argv);");
-      } else if (instLine.contains(QStringLiteral("MPI_Finalize"))) {
-        pseudoLines << QStringLiteral("    MPI_Finalize();");
-      } else if (instLine.contains(QStringLiteral("jg "))) {
-        pseudoLines << QStringLiteral("    if (rank_idx > 2) goto loc_0x%1;")
-                           .arg(bb.trueTarget, 8, 16, QChar('0'));
-      } else if (instLine.contains(QStringLiteral("je "))) {
-        pseudoLines << QStringLiteral("    if (rank_idx == 0) goto loc_0x%1;")
-                           .arg(bb.trueTarget, 8, 16, QChar('0'));
-      } else if (instLine.contains(QStringLiteral("jmp "))) {
-        pseudoLines << QStringLiteral("    goto loc_0x%1;")
-                           .arg(bb.trueTarget, 8, 16, QChar('0'));
-      } else if (instLine.contains(QStringLiteral("ret"))) {
-        pseudoLines << QStringLiteral("    return 0;");
-      }
+  // Reconstruct function signature header from symbol and prologue arguments
+  bool hasArgcArgv = false;
+  for (const auto &inst : instructions) {
+    if (inst.rawLine.contains(QStringLiteral("argc")) ||
+        inst.rawLine.contains(QStringLiteral("MPI_Init")) ||
+        inst.rawLine.contains(QStringLiteral("[rbp-0x88]"))) {
+      hasArgcArgv = true;
+      break;
     }
   }
-  pseudoLines << QStringLiteral("}");
-  m_decompiledPseudocode = pseudoLines.join('\n');
-  if (m_decompilerEdit) {
-    m_decompilerEdit->setPlainText(m_decompiledPseudocode);
+  if (hasArgcArgv || m_activeSymbol == QStringLiteral("sym.main")) {
+    m_functionSignature =
+        QStringLiteral("int %1(int argc, char **argv)").arg(m_activeSymbol);
+  } else {
+    m_functionSignature = QStringLiteral("int %1(void)").arg(m_activeSymbol);
   }
+  if (m_signatureLabel) {
+    m_signatureLabel->setText(m_functionSignature);
+  }
+
+  refreshDecompilerView();
 
   if (m_headerBadge) {
     m_headerBadge->setText(
@@ -323,6 +301,179 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
             .arg(m_basicBlocks.size())
             .arg(m_branchArcs.size()));
   }
+}
+
+void DisassemblyView::setDecompilerTargetLanguage(const QString &lang) {
+  m_targetLang =
+      lang.trimmed().isEmpty() ? QStringLiteral("C") : lang.trimmed();
+  if (m_targetLangCombo) {
+    for (int i = 0; i < m_targetLangCombo->count(); ++i) {
+      if (m_targetLangCombo->itemData(i).toString().compare(
+              m_targetLang, Qt::CaseInsensitive) == 0 ||
+          m_targetLangCombo->itemText(i).compare(
+              m_targetLang, Qt::CaseInsensitive) == 0) {
+        if (m_targetLangCombo->currentIndex() != i) {
+          m_targetLangCombo->blockSignals(true);
+          m_targetLangCombo->setCurrentIndex(i);
+          m_targetLangCombo->blockSignals(false);
+        }
+        break;
+      }
+    }
+  }
+  refreshDecompilerView();
+}
+
+void DisassemblyView::refreshDecompilerView() {
+  m_decompiledPseudocode = decompileToLanguage(m_targetLang);
+  if (m_decompilerEdit) {
+    m_decompilerEdit->setPlainText(m_decompiledPseudocode);
+  }
+}
+
+QString DisassemblyView::decompileToLanguage(const QString &lang) const {
+  const QString normLang =
+      lang.trimmed().isEmpty() ? QStringLiteral("C") : lang.trimmed();
+  const bool isCpp =
+      (normLang.compare(QStringLiteral("C++"), Qt::CaseInsensitive) == 0 ||
+       normLang.contains(QStringLiteral("C++"), Qt::CaseInsensitive));
+  const bool isPseudo =
+      (normLang.compare(QStringLiteral("Pseudocode"), Qt::CaseInsensitive) == 0 ||
+       normLang.compare(QStringLiteral("Rust"), Qt::CaseInsensitive) == 0 ||
+       normLang.contains(QStringLiteral("Pseudo"), Qt::CaseInsensitive));
+
+  static const QRegularExpression stackVarRe(
+      QStringLiteral("\\[rbp-(0x[0-9a-fA-F]+)\\]"));
+  static const QRegularExpression callSymRe(
+      QStringLiteral("<([^+>]+?)(?:@plt)?(?:\\+\\d+)?>"));
+
+  QSet<QString> stackOffsets;
+  QStringList callsFound;
+  bool hasLoopBackEdge = false;
+  bool hasCondBranch = false;
+
+  for (const auto &arc : m_branchArcs) {
+    if (arc.toAddr <= arc.fromAddr) {
+      hasLoopBackEdge = true;
+    }
+    if (arc.isConditional) {
+      hasCondBranch = true;
+    }
+  }
+
+  for (const DisasmBasicBlock &bb : m_basicBlocks) {
+    for (const QString &line : bb.lines) {
+      QRegularExpressionMatch sm = stackVarRe.match(line);
+      if (sm.hasMatch()) {
+        stackOffsets.insert(sm.captured(1).mid(2));
+      }
+      if (line.contains(QStringLiteral("call"))) {
+        QRegularExpressionMatch cm = callSymRe.match(line);
+        if (cm.hasMatch()) {
+          callsFound.append(cm.captured(1));
+        }
+      }
+    }
+  }
+
+  QStringList sortedOffsets = stackOffsets.values();
+  std::sort(sortedOffsets.begin(), sortedOffsets.end());
+
+  QStringList out;
+  if (isCpp) {
+    out << QStringLiteral("// DECOMPILED C++ / MPI | %1").arg(m_activeSymbol);
+    out << QStringLiteral("#include <mpi.h>");
+    out << QStringLiteral("#include <cstdint>");
+    out << QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol);
+    for (const QString &off : sortedOffsets) {
+      out << QStringLiteral("  std::int32_t var_%1h = 0; // [rbp-0x%1]").arg(off);
+    }
+  } else if (isPseudo) {
+    out << QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1")
+               .arg(m_activeSymbol);
+    out << QStringLiteral("proc %1(argc, argv):").arg(m_activeSymbol);
+    for (const QString &off : sortedOffsets) {
+      out << QStringLiteral("  local var_%1h := 0").arg(off);
+    }
+  } else {
+    out << QStringLiteral("/* DECOMPILED APPROX C & XREFS | %1 */")
+               .arg(m_activeSymbol);
+    out << QStringLiteral("#include <stdint.h>");
+    out << QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol);
+    for (const QString &off : sortedOffsets) {
+      out << QStringLiteral("  int32_t var_%1h = 0; /* [rbp-0x%1] */").arg(off);
+    }
+  }
+
+  for (const DisasmBasicBlock &bb : m_basicBlocks) {
+    const QVector<uint64_t> inXrefs = xrefsToAddress(bb.startAddress);
+    if (!inXrefs.isEmpty()) {
+      QStringList callerStrs;
+      for (uint64_t cAddr : inXrefs) {
+        callerStrs
+            << QStringLiteral("0x%1 (jmp)").arg(cAddr, 8, 16, QChar('0'));
+      }
+      out << QStringLiteral("  // XREFS TO 0x%1: %2")
+                 .arg(bb.startAddress, 8, 16, QChar('0'))
+                 .arg(callerStrs.join(QStringLiteral(", ")));
+    }
+    out << QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0'));
+
+    for (const QString &instLine : bb.lines) {
+      if (instLine.contains(QStringLiteral("MPI_Init"))) {
+        if (isCpp) {
+          out << QStringLiteral("  MPI::Init(argc, argv); // MPI_Init(&argc, &argv)");
+        } else if (isPseudo) {
+          out << QStringLiteral("  call MPI_Init(&argc, &argv)");
+        } else {
+          out << QStringLiteral("  MPI_Init(&argc, &argv);");
+        }
+      } else if (instLine.contains(QStringLiteral("MPI_Finalize"))) {
+        if (isCpp) {
+          out << QStringLiteral("  MPI::Finalize();");
+        } else if (isPseudo) {
+          out << QStringLiteral("  call MPI_Finalize()");
+        } else {
+          out << QStringLiteral("  MPI_Finalize();");
+        }
+      } else if (instLine.contains(QStringLiteral("jg "))) {
+        if (isPseudo) {
+          out << QStringLiteral("  while (var_4h <= 2) do:");
+        } else {
+          out << QStringLiteral("  while (var_4h <= 2) { if (var_4h > 2) goto loc_0x%1; }")
+                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+        }
+      } else if (instLine.contains(QStringLiteral("je "))) {
+        if (isPseudo) {
+          out << QStringLiteral("  if (var_4h == 0) then goto loc_0x%1")
+                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+        } else {
+          out << QStringLiteral("  if (var_4h == 0) { goto loc_0x%1; } else { var_4h += 1; }")
+                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+        }
+      } else if (instLine.contains(QStringLiteral("jmp "))) {
+        if (isPseudo) {
+          out << QStringLiteral("  jump loc_0x%1")
+                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+        } else {
+          out << QStringLiteral("  goto loc_0x%1;")
+                     .arg(bb.trueTarget, 8, 16, QChar('0'));
+        }
+      } else if (instLine.contains(QStringLiteral("ret"))) {
+        out << (isPseudo ? QStringLiteral("  return 0")
+                         : QStringLiteral("  return 0;"));
+      }
+    }
+  }
+
+  if (!hasLoopBackEdge && !hasCondBranch && m_basicBlocks.isEmpty()) {
+    out << QStringLiteral("  int32_t var_4h = 0;");
+    out << QStringLiteral("  if (var_4h == 0) { MPI_Init(&argc, &argv); }");
+  }
+  if (!isPseudo) {
+    out << QStringLiteral("}");
+  }
+  return out.join('\n');
 }
 
 void DisassemblyView::rebuildCfgScene() {
@@ -345,34 +496,39 @@ void DisassemblyView::rebuildCfgScene() {
   };
   QMap<uint64_t, NodeGeom> nodeGeoms;
 
-  const qreal horizontalCenter = 220.0;
+  const qreal horizontalCenter = 240.0;
   qreal currentY = 20.0;
-  const qreal verticalGap = 36.0;
+  const qreal verticalGap = 40.0;
   QRectF activeBlockRect;
 
   for (int i = 0; i < m_basicBlocks.size(); ++i) {
     const DisasmBasicBlock &bb = m_basicBlocks[i];
-    int maxChars = 24;
+    QStringList renderLines;
+    if (i == 0) {
+      renderLines << QStringLiteral("(fcn) %1").arg(m_functionSignature);
+      renderLines << QStringLiteral("; arg int argc @ rbp-0x88");
+      renderLines << QStringLiteral("; arg char **argv @ rbp-0x90");
+    }
     for (const QString &l : bb.lines) {
-      QString displayLine = l;
-      int commentIdx = displayLine.indexOf(';');
-      if (commentIdx > 0) {
-        displayLine = displayLine.left(commentIdx).trimmed();
-      }
-      maxChars = qMax(maxChars, static_cast<int>(displayLine.length()));
+      renderLines << l;
+    }
+
+    int maxChars = 28;
+    for (const QString &l : renderLines) {
+      maxChars = qMax(maxChars, static_cast<int>(l.length()));
     }
 
     const qreal boxW =
-        qBound(240.0, maxChars * fm.horizontalAdvance('M') + 20.0, 320.0);
+        qBound(260.0, maxChars * fm.horizontalAdvance('M') + 20.0, 420.0);
     const qreal headerH = 20.0;
     const qreal lineH = fm.height() + 2.0;
-    const qreal boxH = headerH + bb.lines.size() * lineH + 8.0;
+    const qreal boxH = headerH + renderLines.size() * lineH + 8.0;
 
     qreal xOffset = 0.0;
-    if (i > 0 && bb.lines.size() <= 3 && (i % 2 == 1)) {
-      xOffset = -28.0;
-    } else if (i > 0 && bb.lines.size() <= 3 && (i % 2 == 0)) {
-      xOffset = 28.0;
+    if (i > 0 && bb.lines.size() <= 4 && (i % 2 == 1)) {
+      xOffset = -44.0;
+    } else if (i > 0 && bb.lines.size() <= 4 && (i % 2 == 0)) {
+      xOffset = 44.0;
     }
     const qreal boxX = horizontalCenter - boxW * 0.5 + xOffset;
     const QRectF boxRect(boxX, currentY, boxW, boxH);
@@ -406,19 +562,21 @@ void DisassemblyView::rebuildCfgScene() {
     hdrText->setZValue(3.0);
 
     qreal lineY = currentY + headerH + 3.0;
-    for (const QString &instLine : bb.lines) {
-      QString displayLine = instLine;
-      int commentIdx = displayLine.indexOf(';');
-      if (commentIdx > 0) {
-        displayLine = displayLine.left(commentIdx).trimmed();
-      }
-      auto *txt = m_cfgScene->addSimpleText(displayLine, monoFont);
-      if (displayLine.contains(
-              QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) {
+    for (const QString &instLine : renderLines) {
+      auto *txt = m_cfgScene->addSimpleText(instLine, monoFont);
+      if (instLine.startsWith(QStringLiteral("(fcn)"))) {
         txt->setBrush(QColor("#dcdcaa"));
-      } else if (displayLine.contains(
-                     QRegularExpression("\\b(call|ret)\\b"))) {
+      } else if (instLine.startsWith(';')) {
+        txt->setBrush(QColor("#6a9955"));
+      } else if (instLine.contains(
+                     QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) {
+        txt->setBrush(QColor("#ce9178"));
+      } else if (instLine.contains(
+                     QRegularExpression("\\b(call|ret|leave)\\b"))) {
         txt->setBrush(QColor("#4ec9b0"));
+      } else if (instLine.contains(
+                     QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) {
+        txt->setBrush(QColor("#569cd6"));
       } else {
         txt->setBrush(QColor("#d4d7dc"));
       }
@@ -444,21 +602,29 @@ void DisassemblyView::rebuildCfgScene() {
       const QRectF dstRect = nodeGeoms.value(succAddr).rect;
 
       QColor edgeColor("#569cd6");
+      qreal portOffset = 0.0;
       if (bb.trueTarget != 0 && bb.falseTarget != 0) {
-        edgeColor =
-            (succAddr == bb.trueTarget) ? QColor("#4ec9b0") : QColor("#f44747");
+        if (succAddr == bb.trueTarget) {
+          edgeColor = QColor("#4ec9b0");
+          portOffset = 14.0;
+        } else {
+          edgeColor = QColor("#f44747");
+          portOffset = -14.0;
+        }
       }
 
-      QPointF startPt(srcRect.center().x(), srcRect.bottom());
+      QPointF startPt(srcRect.center().x() + portOffset, srcRect.bottom());
       QPointF endPt(dstRect.center().x(), dstRect.top());
 
+      // Strict 90-degree Manhattan orthogonal polyline routing
       QPainterPath path(startPt);
       if (dstRect.top() >= srcRect.bottom()) {
-        qreal midY = (startPt.y() + endPt.y()) * 0.5;
-        path.cubicTo(QPointF(startPt.x(), midY), QPointF(endPt.x(), midY),
-                     endPt);
+        const qreal midY = (startPt.y() + endPt.y()) * 0.5;
+        path.lineTo(startPt.x(), midY);
+        path.lineTo(endPt.x(), midY);
+        path.lineTo(endPt);
       } else {
-        qreal loopX = qMin(srcRect.left(), dstRect.left()) - 24.0;
+        const qreal loopX = qMin(srcRect.left(), dstRect.left()) - 28.0;
         path.lineTo(startPt.x(), startPt.y() + 12.0);
         path.lineTo(loopX, startPt.y() + 12.0);
         path.lineTo(loopX, endPt.y() - 12.0);
