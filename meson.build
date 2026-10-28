@@ -41,6 +41,7 @@ src_files = [
   'src/core/hpc/LspCoordinator.cpp',
   'src/core/hpc/DeadlockAnalyzer.cpp',
   'src/ui/MainWindow.cpp',
+  'src/ui/MainWindowWorkspace.cpp',
   'src/ui/views/ServerRackView.cpp',
   'src/ui/views/SourceCodeView.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
@@ -201,6 +202,7 @@ test('lsp_tests', gridlock_lsp_tests)
 ui_test_src = [
   'tests/test_ui.cpp',
   'src/ui/MainWindow.cpp',
+  'src/ui/MainWindowWorkspace.cpp',
   'src/ui/views/SourceCodeView.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
   'src/ui/EditorTabManager.cpp',

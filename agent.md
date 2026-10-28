@@ -36,6 +36,13 @@ GridLock is a multi-process graphical debugger for MPI (Message Passing Interfac
 * Do not generate C++ test code via inline string streams (`QTextStream`). 
 * Automated simulation runners must rely on external physical files (e.g., `tests/matrix_multiply.cpp`).
 
+### 5. File Size & Modularity Ceiling (< 1,000 Lines)
+* Every `.cpp` and `.hpp` file in `src/` and `tests/` MUST remain strictly under 1,000 lines (`< 1000` lines).
+* Before adding code to a file approaching 900+ lines, decompose cohesive subsystems, dock builders, or view helpers into dedicated `.hpp`/`.cpp` translation units.
+
+### 6. Native Domain Terminology
+* Never reference external third-party tool names in source comments, identifiers, test names, or git commit messages.
+
 ## Automated Execution Workflow (MANDATORY)
 After generating and applying any code changes, you MUST execute the following shell commands sequentially to verify your work before responding to the user:
 1. `ninja -C build`

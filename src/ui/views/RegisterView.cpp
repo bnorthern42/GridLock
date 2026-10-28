@@ -175,15 +175,15 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
             valItem->setText(regVal);
         }
 
-        // Role-based Cutter color classification
+        // Role-based register color classification
         QColor roleColor("#d4d7dc");
         if (key == QStringLiteral("rip") || key == QStringLiteral("eip") || key == QStringLiteral("pc")) {
-            roleColor = QColor("#4ec9b0"); // Instruction pointer: Cutter teal
+            roleColor = QColor("#4ec9b0"); // Instruction pointer: teal
         } else if (key == QStringLiteral("rsp") || key == QStringLiteral("rbp") ||
                    key == QStringLiteral("esp") || key == QStringLiteral("ebp")) {
-            roleColor = QColor("#569cd6"); // Stack frame pointers: Cutter blue
+            roleColor = QColor("#569cd6"); // Stack frame pointers: blue
         } else if (key.contains(QStringLiteral("flags"))) {
-            roleColor = QColor("#dcdcaa"); // Status flags: Cutter gold
+            roleColor = QColor("#dcdcaa"); // Status flags: gold
         }
 
         if (changed) {
@@ -236,7 +236,7 @@ void RegisterView::updateRegisters(const QMap<QString, QString>& registers) {
     }
 
     QList<QPair<QString, QString>> ordered;
-    // Place rip, rsp, rbp first if present for Cutter ergonomics
+    // Place rip, rsp, rbp first if present for inspection ergonomics
     const QStringList priorityKeys = {QStringLiteral("rip"), QStringLiteral("rsp"), QStringLiteral("rbp")};
     QSet<QString> seen;
     for (const QString& pk : priorityKeys) {

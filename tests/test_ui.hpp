@@ -24,4 +24,5 @@ private slots:
     void testCutterDisassemblyCfgAndBranchFlow();
     void testCutterHexdumpDiffAndRegisterSeekSync();
     void testSymbolSidebarAndNavRibbon();
+    void testSourceFileLineLimits();
 };

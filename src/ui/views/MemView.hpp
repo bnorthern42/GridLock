@@ -38,7 +38,7 @@ private slots:
 
 private:
     QString formatHexDump(qint64 startAddress, const QString& hexData);
-    QString formatCutterHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData);
+    QString formatHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData);
     static uint64_t parseHexAddress(const QString& address, bool* okOut = nullptr);
 
     QLineEdit* m_addressEdit = nullptr;

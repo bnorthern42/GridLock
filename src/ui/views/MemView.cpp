@@ -176,7 +176,7 @@ void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
     }
 
     if (m_dumpEdit) {
-        m_dumpEdit->setHtml(formatCutterHexDumpHtml(startAddr, currentData, prevForDiff));
+        m_dumpEdit->setHtml(formatHexDumpHtml(startAddr, currentData, prevForDiff));
     }
 }
 
@@ -300,7 +300,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
     m_lastRawData = QByteArray(reinterpret_cast<const char*>(result.targetBuffer.data()), result.targetBuffer.size());
 }
 
-QString MemView::formatCutterHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData) {
+QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData) {
     QString html = QStringLiteral(
         "<pre style=\"font-family: 'JetBrains Mono', monospace; font-size: 10pt; margin: 4px;\">"
         "<span style=\"color: #858585;\">- offset -         00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  |0123456789ABCDEF|</span>\n");

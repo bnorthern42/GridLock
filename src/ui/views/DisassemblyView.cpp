@@ -113,7 +113,7 @@ public:
             painter.drawPolygon(arrow);
         }
 
-        // Draw Cutter-style branch flow arcs
+        // Draw multi-lane branch flow arcs
         const auto& arcs = m_owner->branchArcs();
         const int laneCount = qMax(1, static_cast<int>(arcs.size()));
         for (int idx = 0; idx < arcs.size(); ++idx) {
@@ -131,11 +131,11 @@ public:
             const bool isBackward = (yTo < yFrom);
             QColor arcColor;
             if (!arc.isConditional) {
-                arcColor = QColor(0x56, 0x9c, 0xd6); // Unconditional jump: Cutter blue
+                arcColor = QColor(0x56, 0x9c, 0xd6); // Unconditional jump: blue
             } else if (isBackward) {
-                arcColor = QColor(0xf4, 0x47, 0x47); // Loop back-edge: Cutter red/orange
+                arcColor = QColor(0xf4, 0x47, 0x47); // Loop back-edge: red/orange
             } else {
-                arcColor = QColor(0x4e, 0xc9, 0xb0); // Conditional forward branch: Cutter teal/green
+                arcColor = QColor(0x4e, 0xc9, 0xb0); // Conditional forward branch: teal/green
             }
 
             QPen pen(arcColor, 1.4);
@@ -329,7 +329,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   rootLayout->setContentsMargins(0, 0, 0, 0);
   rootLayout->setSpacing(0);
 
-  // Cutter-style header bar
+  // High-density disassembly header bar
   auto *headerWidget = new QWidget(this);
   headerWidget->setObjectName("cutterDisasmHeader");
   headerWidget->setFixedHeight(26);

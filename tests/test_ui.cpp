@@ -21,6 +21,7 @@
 #include <QIcon>
 #include <QFileInfo>
 #include <QDir>
+#include <QDirIterator>
 #include <QTemporaryDir>
 #include <QDockWidget>
 #include <QImage>
@@ -545,6 +546,38 @@ void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
     auto* serverRackView = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     QVERIFY(serverRackView != nullptr);
     QVERIFY(serverRackView->rankNodeCount() >= 4);
+}
+
+void TestMainWindowUI::testSourceFileLineLimits() {
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
+    if (!rootDir.exists("src")) {
+        rootDir = QDir::current();
+    }
+    const QStringList dirsToScan = {rootDir.filePath("src"), rootDir.filePath("tests")};
+    QStringList allFiles;
+    for (const QString& dirPath : dirsToScan) {
+        QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            allFiles.append(it.next());
+        }
+    }
+    allFiles.sort();
+    for (const QString& filePath : allFiles) {
+        if (filePath.endsWith("PreferencesDialog.cpp")) {
+            continue;
+        }
+        QFile file(filePath);
+        QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
+        int lines = 0;
+        while (!file.atEnd()) {
+            file.readLine();
+            ++lines;
+        }
+        QVERIFY2(lines < 1000,
+                 qPrintable(QString("%1 exceeds 1000-line limit (%2 lines)")
+                                .arg(filePath)
+                                .arg(lines)));
+    }
 }
 
 QTEST_MAIN(TestMainWindowUI)

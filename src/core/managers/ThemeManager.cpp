@@ -18,9 +18,9 @@ ThemeManager::ThemeManager() : m_advancedStylesheet(std::make_unique<acss::QtAdv
 
 ThemeManager::~ThemeManager() = default;
 
-static QString getCutterHighDensityQssOverlay() {
+static QString getHighDensityQssOverlay() {
     return QStringLiteral(
-        "\n/* Cutter Dark High-Density Workstation Overlay */\n"
+        "\n/* Dark High-Density Workstation Overlay */\n"
         "QMainWindow::separator { width: 1px; height: 1px; background: #2b2b2b; }\n"
         "QMainWindow::separator:hover { background: #3d424b; }\n"
         "QSplitter::handle { background: #2b2b2b; }\n"
@@ -200,7 +200,7 @@ void ThemeManager::initialize() {
     m_advancedStylesheet->setCurrentTheme(theme);
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     m_advancedStylesheet->updateStylesheet();
-    QString qss = m_advancedStylesheet->styleSheet() + getCutterHighDensityQssOverlay();
+    QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay();
     qApp->setStyleSheet(qss);
 
     QFont appFont = qApp->font();
@@ -220,7 +220,7 @@ void ThemeManager::setTheme(const QString& themeName, bool /*isDark*/) {
         QString themePath = m_advancedStylesheet->themes().contains(themeName + ".xml") ? themeName + ".xml" : themeName;
         m_advancedStylesheet->setCurrentTheme(themePath);
         m_advancedStylesheet->updateStylesheet();
-        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getCutterHighDensityQssOverlay());
+        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay());
     }
 }
 
@@ -240,7 +240,7 @@ void ThemeManager::applyThemeAndFonts() {
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     
     m_advancedStylesheet->updateStylesheet();
-    QString qss = m_advancedStylesheet->styleSheet() + getCutterHighDensityQssOverlay();
+    QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay();
     qApp->setStyleSheet(qss);
 
     QFont appFont = qApp->font();

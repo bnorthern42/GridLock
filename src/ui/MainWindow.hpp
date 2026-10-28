@@ -104,6 +104,7 @@ private:
     void setupDocks();
     void setupStatusBar();
     void updateStatusTelemetry(const QString& pcOrSeek = QString(), const QString& targetState = QString());
+    void hideHoverTooltipPopup();
 
 
 
