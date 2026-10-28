@@ -1,3 +1,11 @@
+/**
+ * @file ProjectExplorerWidget.cpp
+ * @brief Multi-mode project explorer, symbol table, and binary strings inspector implementation.
+ *
+ * Implements ProjectExplorerWidget, providing stacked views for filesystem directory browsing,
+ * ELF/PE symbol searching, and binary string inspection with synchronized address seek dispatches.
+ */
+
 #include "ProjectExplorerWidget.hpp"
 #include <QAbstractItemView>
 #include <QDir>
@@ -17,14 +25,27 @@
 namespace gridlock::ui {
 
 namespace {
+/**
+ * @class FlexibleDockContent
+ * @brief Container widget providing flexible layout size hints for docking.
+ */
 class FlexibleDockContent : public QWidget {
 public:
-  using QWidget::QWidget;
-  QSize sizeHint() const override { return QSize(260, 500); }
-  QSize minimumSizeHint() const override { return QSize(150, 120); }
+    using QWidget::QWidget;
+    QSize sizeHint() const override { return QSize(260, 500); }
+    QSize minimumSizeHint() const override { return QSize(150, 120); }
 };
-} // namespace
+}  // namespace
 
+/**
+ * @brief Constructs a new ProjectExplorerWidget dock panel.
+ *
+ * Initializes the top mode switcher buttons (FILES, SYMBOLS, STRINGS),
+ * constructs stacked pages for each inspection mode, wires search filters,
+ * and sets up selection signal connections.
+ *
+ * @param parent Optional parent widget.
+ */
 ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
     : QDockWidget("Project / Symbols", parent) {
   m_iconProvider = nullptr;
@@ -102,18 +123,22 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_treeView = new QTreeView(filesPage);
   m_treeView->setHeaderHidden(true);
 
+  // Initialize Qt standard file system model for directory traversal
   m_fileSystemModel = new QFileSystemModel(this);
   m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs |
                                QDir::Files);
   m_fileSystemModel->setRootPath(QDir::currentPath());
 
+  // Attach high-DPI theme-aware icon provider to model
   m_iconProvider = new FileIconProvider();
   m_fileSystemModel->setIconProvider(m_iconProvider);
   m_treeView->setModel(m_fileSystemModel);
   m_treeView->setRootIndex(m_fileSystemModel->index(QDir::currentPath()));
 
+  // Apply font size and item padding from configuration
   reloadStyle();
 
+  // Hide file size, type, and date columns in the compact sidebar
   m_treeView->hideColumn(1);
   m_treeView->hideColumn(2);
   m_treeView->hideColumn(3);
@@ -127,6 +152,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   symbolsLayout->setContentsMargins(0, 0, 0, 0);
   symbolsLayout->setSpacing(0);
 
+  // Filter bar housing live symbol substring search input
   QWidget *filterBar = new QWidget(symbolsPage);
   filterBar->setFixedHeight(26);
   QHBoxLayout *filterLayout = new QHBoxLayout(filterBar);
@@ -140,6 +166,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   filterLayout->addWidget(m_symbolFilterEdit);
   symbolsLayout->addWidget(filterBar);
 
+  // Three-column symbols table: SYMBOL, ADDRESS, SIZE
   m_symbolsTable = new QTableWidget(0, 3, symbolsPage);
   m_symbolsTable->setObjectName("symbolsTable");
   m_symbolsTable->setHorizontalHeaderLabels({"SYMBOL", "ADDRESS", "SIZE"});
@@ -152,6 +179,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_symbolsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_symbolsTable->horizontalHeader()->setMinimumSectionSize(34);
   m_symbolsTable->horizontalHeader()->setStretchLastSection(false);
+  // Column 0 stretches with window width, columns 1 and 2 have fixed widths
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
@@ -167,6 +195,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   stringsLayout->setContentsMargins(0, 0, 0, 0);
   stringsLayout->setSpacing(0);
 
+  // Filter bar housing live binary strings search input
   QWidget *strFilterBar = new QWidget(stringsPage);
   QHBoxLayout *strFilterLayout = new QHBoxLayout(strFilterBar);
   strFilterLayout->setContentsMargins(3, 3, 3, 3);
@@ -183,6 +212,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   strFilterLayout->addWidget(m_stringFilterEdit);
   stringsLayout->addWidget(strFilterBar);
 
+  // Three-column binary strings table: ADDRESS, SECTION, STRING
   m_stringsTable = new QTableWidget(0, 3, stringsPage);
   m_stringsTable->setObjectName("stringsTable");
   m_stringsTable->setStyleSheet(
@@ -198,6 +228,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_stringsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_stringsTable->horizontalHeader()->setMinimumSectionSize(34);
   m_stringsTable->horizontalHeader()->setStretchLastSection(true);
+  // Address and section columns have fixed widths, string value stretches
   m_stringsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
   m_stringsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
   m_stringsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
@@ -221,6 +252,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   seedDefaultStrings();
   populateStringsTable();
 
+  // Mode switcher button slots
   connect(m_filesModeBtn, &QPushButton::clicked, this, [this]() {
     setSymbolsMode(false);
   });
@@ -283,8 +315,15 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   setSymbolsMode(true);
 }
 
+
+/**
+ * @brief Destructor releasing the file icon provider.
+ */
 ProjectExplorerWidget::~ProjectExplorerWidget() { delete m_iconProvider; }
 
+/**
+ * @brief Seeds initial default binary symbols for simulation and preview fixtures.
+ */
 void ProjectExplorerWidget::seedDefaultSymbols() {
   m_symbols = {
       {QStringLiteral("_start"), 0x00401000ULL, 32},
@@ -296,6 +335,9 @@ void ProjectExplorerWidget::seedDefaultSymbols() {
   };
 }
 
+/**
+ * @brief Seeds initial binary strings from simulated .rodata and .dynstr sections.
+ */
 void ProjectExplorerWidget::seedDefaultStrings() {
   m_strings = {
       {0x00402000ULL, QStringLiteral(".rodata"),
@@ -311,6 +353,10 @@ void ProjectExplorerWidget::seedDefaultStrings() {
   };
 }
 
+/**
+ * @brief Populates the symbols QTableWidget, applying an optional substring filter.
+ * @param filterText Filter query matched against symbol name or hexadecimal address.
+ */
 void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
   if (!m_symbolsTable) {
     return;
@@ -318,6 +364,7 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
   const QString query = filterText.trimmed();
   m_symbolsTable->setRowCount(0);
 
+  // Iterate loaded symbols matching query
   for (const auto &entry : m_symbols) {
     const QString addrStr =
         QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
@@ -329,13 +376,16 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
     const int row = m_symbolsTable->rowCount();
     m_symbolsTable->insertRow(row);
 
+    // Symbol name in pastel yellow
     auto *nameItem = new QTableWidgetItem(entry.name);
     nameItem->setForeground(QColor("#dcdcaa"));
     nameItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
+    // Hex address in cyan
     auto *addrItem = new QTableWidgetItem(addrStr);
     addrItem->setForeground(QColor("#4ec9b0"));
 
+    // Size in bytes
     auto *sizeItem = new QTableWidgetItem(QString::number(entry.size));
     sizeItem->setForeground(QColor("#b5cea8"));
     sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -350,6 +400,10 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
   }
 }
 
+/**
+ * @brief Populates the binary strings QTableWidget with optional substring filtering.
+ * @param filterText Filter query matched against string value, section, or address.
+ */
 void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
   if (!m_stringsTable) {
     return;
@@ -357,6 +411,7 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
   const QString query = filterText.trimmed();
   m_stringsTable->setRowCount(0);
 
+  // Iterate strings matching filter
   for (const auto &entry : m_strings) {
     const QString addrStr =
         QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
@@ -390,6 +445,10 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
   }
 }
 
+/**
+ * @brief Switches the active view between Files mode (page 0) and Symbols mode (page 1).
+ * @param enabled True to show Symbols table; false to show Files tree.
+ */
 void ProjectExplorerWidget::setSymbolsMode(bool enabled) {
   if (m_stack) {
     m_stack->setCurrentIndex(enabled ? 1 : 0);
@@ -405,15 +464,27 @@ void ProjectExplorerWidget::setSymbolsMode(bool enabled) {
   }
 }
 
+/**
+ * @brief Checks if the active view is Symbols mode.
+ * @return True if showing Symbols table.
+ */
 bool ProjectExplorerWidget::isSymbolsMode() const {
   return m_stack && m_stack->currentIndex() == 1;
 }
 
+/**
+ * @brief Returns total number of visible symbols in the table.
+ * @return Row count.
+ */
 int ProjectExplorerWidget::symbolCount() const {
   return m_symbolsTable ? m_symbolsTable->rowCount()
                         : static_cast<int>(m_symbols.size());
 }
 
+/**
+ * @brief Switches the active stacked page to Strings mode (page 2).
+ * @param enabled True to show Strings table.
+ */
 void ProjectExplorerWidget::setStringsMode(bool enabled) {
   if (!enabled) {
     setSymbolsMode(true);
@@ -433,25 +504,42 @@ void ProjectExplorerWidget::setStringsMode(bool enabled) {
   }
 }
 
+/**
+ * @brief Checks if the active view is Strings mode.
+ * @return True if showing Strings table.
+ */
 bool ProjectExplorerWidget::isStringsMode() const {
   return m_stack && m_stack->currentIndex() == 2;
 }
 
+/**
+ * @brief Returns total number of visible strings in the table.
+ * @return Row count.
+ */
 int ProjectExplorerWidget::stringCount() const {
   return m_stringsTable ? m_stringsTable->rowCount()
                         : static_cast<int>(m_strings.size());
 }
 
+/**
+ * @brief Selects a symbol by name in the table and emits symbolAddressSelected.
+ * @param symbolName Target symbol name.
+ * @return True if symbol found; false otherwise.
+ */
 bool ProjectExplorerWidget::activateSymbol(const QString &symbolName) {
+  // Strip whitespace from query
   const QString query = symbolName.trimmed();
   if (query.isEmpty()) {
     return false;
   }
 
+  // Linear scan across registered binary symbols
   for (const auto &entry : m_symbols) {
+    // Match exact symbol name or alias "main" -> "sym.main"
     if (entry.name.compare(query, Qt::CaseInsensitive) == 0 ||
         (query.compare(QStringLiteral("main"), Qt::CaseInsensitive) == 0 &&
          entry.name == QStringLiteral("sym.main"))) {
+      // Synchronize visual selection in symbols table
       if (m_symbolsTable) {
         for (int r = 0; r < m_symbolsTable->rowCount(); ++r) {
           if (auto *item = m_symbolsTable->item(r, 0)) {
@@ -462,6 +550,7 @@ bool ProjectExplorerWidget::activateSymbol(const QString &symbolName) {
           }
         }
       }
+      // Emit signal to navigate disassembly, decompiler, and memory views
       emit symbolAddressSelected(entry.address, entry.name);
       return true;
     }
@@ -469,17 +558,26 @@ bool ProjectExplorerWidget::activateSymbol(const QString &symbolName) {
   return false;
 }
 
+/**
+ * @brief Selects a string by substring or hex address and emits symbolAddressSelected.
+ * @param queryText Query string.
+ * @return True if match found; false otherwise.
+ */
 bool ProjectExplorerWidget::activateString(const QString &queryText) {
+  // Clean input string
   const QString query = queryText.trimmed();
   if (query.isEmpty()) {
     return false;
   }
 
+  // Scan extracted strings table
   for (const auto &entry : m_strings) {
     const QString addrStr =
         QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
+    // Match against content substring or hexadecimal address
     if (entry.value.contains(query, Qt::CaseInsensitive) ||
         addrStr.compare(query, Qt::CaseInsensitive) == 0) {
+      // Select matching row in strings table
       if (m_stringsTable) {
         for (int r = 0; r < m_stringsTable->rowCount(); ++r) {
           if (auto *item = m_stringsTable->item(r, 2)) {
@@ -490,6 +588,7 @@ bool ProjectExplorerWidget::activateString(const QString &queryText) {
           }
         }
       }
+      // Emit signal to navigate views to this string's address
       emit symbolAddressSelected(entry.address, entry.value);
       return true;
     }
@@ -497,14 +596,25 @@ bool ProjectExplorerWidget::activateString(const QString &queryText) {
   return false;
 }
 
+/**
+ * @brief Filters the symbols table on query changes.
+ * @param filterText Search substring.
+ */
 void ProjectExplorerWidget::filterSymbols(const QString &filterText) {
   populateSymbolsTable(filterText);
 }
 
+/**
+ * @brief Filters the strings table on query changes.
+ * @param filterText Search substring.
+ */
 void ProjectExplorerWidget::filterStrings(const QString &filterText) {
   populateStringsTable(filterText);
 }
 
+/**
+ * @brief Reloads font size, item padding, and icon provider from configuration.
+ */
 void ProjectExplorerWidget::reloadStyle() {
   QSettings s("gridlock", "debugger");
   QString style =
@@ -522,8 +632,8 @@ void ProjectExplorerWidget::reloadStyle() {
 
   m_treeView->setStyleSheet(QString("QTreeView { font-size: %2px; }"
                                     "QTreeView::item { padding: %1px; }")
-                                .arg(padding)
-                                .arg(fontSize));
+                                 .arg(padding)
+                                 .arg(fontSize));
 
   auto *newProvider = new FileIconProvider();
   m_fileSystemModel->setIconProvider(newProvider);
@@ -531,6 +641,9 @@ void ProjectExplorerWidget::reloadStyle() {
   m_iconProvider = newProvider;
 }
 
+/**
+ * @brief Prompts user for a directory and opens it in the file tree view.
+ */
 void ProjectExplorerWidget::onOpenFolder() {
   QString dir = QFileDialog::getExistingDirectory(
       this, "Open Folder", QDir::currentPath(),
@@ -541,6 +654,10 @@ void ProjectExplorerWidget::onOpenFolder() {
   }
 }
 
+/**
+ * @brief Sets the root filesystem path displayed in the tree view.
+ * @param path Directory path.
+ */
 void ProjectExplorerWidget::setRootPath(const QString &path) {
   if (!path.isEmpty()) {
     m_fileSystemModel->setRootPath(path);
@@ -548,6 +665,10 @@ void ProjectExplorerWidget::setRootPath(const QString &path) {
   }
 }
 
+/**
+ * @brief Handles double clicking file items to emit fileDoubleClicked.
+ * @param index Model index of clicked node.
+ */
 void ProjectExplorerWidget::onDoubleClicked(const QModelIndex &index) {
   if (!index.isValid())
     return;
@@ -558,4 +679,5 @@ void ProjectExplorerWidget::onDoubleClicked(const QModelIndex &index) {
   }
 }
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
+

@@ -1,3 +1,11 @@
+/**
+ * @file MemView.hpp
+ * @brief Memory hex dump and differential inspection view widget.
+ *
+ * Provides synchronized hexadecimal and ASCII memory dumps, address seeking,
+ * MPI rank memory diff overlays with changed-byte highlighting, and binary/matrix export.
+ */
+
 #pragma once
 #include <QByteArray>
 #include <QString>
@@ -13,22 +21,33 @@ class QComboBox;
 
 namespace gridlock::ui {
 
+/**
+ * @brief Workstation memory inspector displaying hex dumps and cross-rank memory diffs.
+ */
 class MemView : public QWidget {
     Q_OBJECT
 public:
     explicit MemView(QWidget* parent = nullptr);
     ~MemView() override = default;
 
+    /// Loads raw hex string data starting at beginAddress.
     void setMemoryData(qint64 beginAddress, const QString& hexContents);
+    /// Loads binary byte array data at formatted address.
     void setMemoryData(const QString& address, const QByteArray& data);
+    /// Highlights memory differences between two MPI ranks.
     void displayMemoryDiff(const gridlock::core::hpc::CompareResult& result, void* remoteAddr);
 
+    /// Seeks memory dump viewport to 64-bit target address.
     bool seekToAddress(uint64_t address);
+    /// Returns active 64-bit base memory address.
     uint64_t currentBaseAddress() const { return m_currentBaseAddress; }
+    /// Returns number of modified bytes detected in the current view.
     int changedByteCount() const { return m_changedByteCount; }
 
 signals:
+    /// Emitted when user initiates a manual memory read.
     void requestMemory(const QString& address, int length);
+    /// Emitted when user requests cross-rank memory difference comparison.
     void requestMemoryDiff(int baseRank, int targetRank, const QString& address, int length);
 
 private slots:
@@ -59,4 +78,4 @@ private:
     bool m_hasDiffBaseline = false;
 };
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui

@@ -92,16 +92,19 @@ QScreen *MainWindow::resolvePreferredScreen(const QString &monitorHint) const {
 void MainWindow::applyPreferredScreenRouting(const QString &monitorHint,
                                              bool openUnfocused) {
   m_preferredMonitorHint = monitorHint.trimmed();
-  setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
   if (m_preferredMonitorHint.isEmpty()) {
+    setAttribute(Qt::WA_ShowWithoutActivating, false);
     return;
   }
+  setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
   if (QScreen *target = resolvePreferredScreen(m_preferredMonitorHint)) {
-    setScreen(target);
-    if (windowHandle()) {
-      windowHandle()->setScreen(target);
+    if (target != QGuiApplication::primaryScreen()) {
+      setScreen(target);
+      if (windowHandle()) {
+        windowHandle()->setScreen(target);
+      }
+      move(target->availableGeometry().topLeft());
     }
-    move(target->availableGeometry().topLeft());
   }
 }
 

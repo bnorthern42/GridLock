@@ -1,3 +1,12 @@
+/**
+ * @file ServerRackView.cpp
+ * @brief MPI rank topology rack visualizer and delegate renderer.
+ *
+ * Implements the ServerRackView widget and its custom item delegate ServerNodeDelegate,
+ * rendering each MPI rank as a hardware blade card with execution state indicators,
+ * program counter readouts, and cluster divergence telemetry.
+ */
+
 #include "ServerRackView.hpp"
 #include <QApplication>
 #include <QPalette>
@@ -7,15 +16,31 @@
 
 namespace gridlock::ui {
 
+/**
+ * @class ServerNodeDelegate
+ * @brief Custom styled item delegate rendering individual MPI rank blade cards.
+ */
 class ServerNodeDelegate : public QStyledItemDelegate {
 public:
+    /**
+     * @brief Constructs a new ServerNodeDelegate.
+     * @param view Pointer to the parent ServerRackView.
+     * @param parent Optional QObject parent.
+     */
     explicit ServerNodeDelegate(ServerRackView* view, QObject* parent = nullptr) 
         : QStyledItemDelegate(parent), m_view(view) {}
 
+    /**
+     * @brief Paints a single MPI rank blade node with LED and status pill badge.
+     * @param painter The QPainter instance.
+     * @param option View item style options (state, rect, palette).
+     * @param index Model index of the rank item.
+     */
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
 
+        // Retrieve rank metadata from item user roles
         int rankId = index.data(Qt::UserRole).toInt();
         RankState state = index.data(Qt::UserRole + 1).value<RankState>();
 
@@ -26,6 +51,7 @@ public:
         QString status = state.currentState.isEmpty() ? QStringLiteral("stopped") : state.currentState;
         QString pcStr = state.registers.contains(16) ? state.registers.value(16) : QStringLiteral("0x00401120");
 
+        // Determine background and outline colors based on selection and hover state
         QColor bgColor = isSelected ? QColor("#22303c") : (isHovered ? QColor("#1f242c") : QColor("#181b20"));
         QColor borderColor = isSelected ? QColor("#528bff") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
 
@@ -39,7 +65,7 @@ public:
         painter->setBrush(Qt::NoBrush);
         painter->drawPath(path);
 
-        // Status LED & Badge color
+        // Map execution state to LED status and pill badge color
         QColor ledColor;
         QString badgeText;
         if (status == "running") {
@@ -53,7 +79,7 @@ public:
             badgeText = QStringLiteral("IDLE");
         }
 
-        // Top row: Rank [N] + LED + State Badge
+        // Top row: Rank [N] header text
         QFont rankFont("JetBrains Mono", 8, QFont::Bold);
         rankFont.setStyleHint(QFont::Monospace);
         painter->setFont(rankFont);
@@ -62,7 +88,7 @@ public:
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("RANK %1").arg(rankId));
 
-        // State badge pill on top-right
+        // State badge pill rendered on top-right
         QRect badgeRect(rect.right() - 38, rect.top() + 3, 32, 13);
         QPainterPath badgePath;
         badgePath.addRoundedRect(badgeRect, 2, 2);
@@ -75,7 +101,7 @@ public:
         painter->setFont(badgeFont);
         painter->drawText(badgeRect, Qt::AlignCenter, badgeText);
 
-        // Bottom row: Instruction pointer address
+        // Bottom row: Program counter instruction pointer address
         QFont pcFont("JetBrains Mono", 8);
         pcFont.setStyleHint(QFont::Monospace);
         painter->setFont(pcFont);
@@ -87,6 +113,10 @@ public:
         painter->restore();
     }
 
+    /**
+     * @brief Computes the fixed card size hint for each rank blade item.
+     * @return Blade node dimensions (116 x 34 px).
+     */
     QSize sizeHint(const QStyleOptionViewItem &/*option*/, const QModelIndex &/*index*/) const override {
         return QSize(116, 34);
     }
@@ -95,7 +125,16 @@ private:
     ServerRackView* m_view;
 };
 
+/**
+ * @brief Constructs the ServerRackView widget.
+ *
+ * Configures the list view into horizontal wrapping icon mode to render a grid
+ * of compact server blade nodes.
+ *
+ * @param parent Optional parent widget.
+ */
 ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
+    // Layout nodes horizontally wrapping across available width
     setViewMode(QListView::IconMode);
     setFlow(QListView::LeftToRight);
     setWrapping(true);
@@ -105,12 +144,25 @@ ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
+    // Install the custom node painter delegate
     setItemDelegate(new ServerNodeDelegate(this, this));
 
+    // Connect user clicks to selection dispatcher
     connect(this, &QListWidget::itemClicked, this, &ServerRackView::onItemClicked);
 }
 
+/**
+ * @brief Parses or extracts a program counter address from rank state telemetry.
+ *
+ * Inspects register index 16 (RIP on x86_64) or currentFunction string, converting
+ * hex strings to uint64_t. Defaults to 0x00401120 for rank 0 or 0x00401155 for others.
+ *
+ * @param rankId Rank index.
+ * @param state Rank state structure.
+ * @return Extracted 64-bit instruction pointer address.
+ */
 uint64_t ServerRackView::extractPcFromState(int rankId, const RankState& state) {
+    // Helper to safely parse hexadecimal address strings
     auto tryParseHex = [](QString raw, uint64_t* outVal) -> bool {
         raw = raw.trimmed();
         if (raw.isEmpty()) {
@@ -133,15 +185,22 @@ uint64_t ServerRackView::extractPcFromState(int rankId, const RankState& state) 
     };
 
     uint64_t parsed = 0ULL;
+    // Check if register 16 (x86 RIP) contains a valid parseable address
     if (state.registers.contains(16) && tryParseHex(state.registers.value(16), &parsed)) {
         return parsed;
     }
+    // Check if current function string contains a hex address
     if (!state.currentFunction.isEmpty() && tryParseHex(state.currentFunction, &parsed)) {
         return parsed;
     }
+    // Fall back to standard synthetic test offsets
     return (rankId == 0) ? 0x00401120ULL : 0x00401155ULL;
 }
 
+/**
+ * @brief Resets the cluster rack view with default simulated rank states.
+ * @param count Number of rank nodes to generate.
+ */
 void ServerRackView::resetRanks(int count) {
     QList<RankState> initialRanks;
     initialRanks.reserve(count);
@@ -156,6 +215,10 @@ void ServerRackView::resetRanks(int count) {
     updateRanks(initialRanks);
 }
 
+/**
+ * @brief Batch updates all rank blade nodes in the rack view.
+ * @param ranks List of incoming RankState snapshots.
+ */
 void ServerRackView::updateRanks(const QList<RankState>& ranks) {
     m_rankCount = ranks.size();
     m_selectedRank = 0;
@@ -166,12 +229,14 @@ void ServerRackView::updateRanks(const QList<RankState>& ranks) {
         RankState st = ranks[i];
         const int rankId = (st.rankId >= 0 && st.rankId != 0) ? st.rankId : i;
         st.rankId = rankId;
+        // Ensure register 16 is populated with a valid formatted PC
         if (!st.registers.contains(16) || st.registers.value(16).trimmed().isEmpty()) {
             const uint64_t pc = extractPcFromState(rankId, st);
             st.registers[16] = QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0'));
         }
         m_states[rankId] = st;
 
+        // Allocate and associate item with rank data
         auto* item = new QListWidgetItem(this);
         item->setData(Qt::UserRole, rankId);
         item->setData(Qt::UserRole + 1, QVariant::fromValue(st));
@@ -182,9 +247,15 @@ void ServerRackView::updateRanks(const QList<RankState>& ranks) {
         setCurrentRow(0);
     }
     viewport()->update();
+    // Notify connected views (DisassemblyView) of all rank positions
     emit ranksUpdated(rankPcAddresses());
 }
 
+/**
+ * @brief Updates an individual rank's state, dynamically growing the item list if needed.
+ * @param rank Zero-based rank index.
+ * @param state Updated RankState.
+ */
 void ServerRackView::updateRankState(int rank, const RankState& state) {
     if (rank < 0) {
         return;
@@ -197,6 +268,7 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
     }
     m_states[rank] = normalized;
 
+    // Dynamically expand list items if the updated rank index exceeds current count
     while (count() <= rank) {
         const int idx = count();
         RankState placeholder;
@@ -219,6 +291,11 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
     emit ranksUpdated(rankPcAddresses());
 }
 
+/**
+ * @brief Returns the 64-bit program counter address for a specified rank.
+ * @param rankId Rank index.
+ * @return 64-bit address or 0 if rank not tracked.
+ */
 uint64_t ServerRackView::rankPcAddress(int rankId) const {
     auto it = m_states.find(rankId);
     if (it == m_states.end()) {
@@ -227,6 +304,10 @@ uint64_t ServerRackView::rankPcAddress(int rankId) const {
     return extractPcFromState(rankId, it->second);
 }
 
+/**
+ * @brief Constructs a mapping of all active ranks to their current program counters.
+ * @return Map of rank ID to 64-bit PC address.
+ */
 QMap<int, uint64_t> ServerRackView::rankPcAddresses() const {
     QMap<int, uint64_t> pcs;
     for (const auto& [rankId, st] : m_states) {
@@ -235,6 +316,11 @@ QMap<int, uint64_t> ServerRackView::rankPcAddresses() const {
     return pcs;
 }
 
+/**
+ * @brief Selects a rank node programmatically, updating highlights and firing rankSelected.
+ * @param rankId Zero-based rank index.
+ * @return True if rank was within range; false otherwise.
+ */
 bool ServerRackView::selectRank(int rankId) {
     if (rankId < 0 || rankId >= count()) {
         return false;
@@ -248,6 +334,10 @@ bool ServerRackView::selectRank(int rankId) {
     return true;
 }
 
+/**
+ * @brief Handles user click events on individual rank cards.
+ * @param item Pointer to the clicked list item.
+ */
 void ServerRackView::onItemClicked(QListWidgetItem* item) {
     if (item) {
         int rankId = item->data(Qt::UserRole).toInt();
@@ -255,4 +345,5 @@ void ServerRackView::onItemClicked(QListWidgetItem* item) {
     }
 }
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
+

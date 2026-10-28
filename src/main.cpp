@@ -106,10 +106,13 @@ int main(int argc, char* argv[]) {
   QSurfaceFormat::setDefaultFormat(format);
 
   // Route to the offscreen QPA platform ONLY when --headless or --snapshot is explicitly requested on the CLI.
-  if (gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(argc, argv) &&
-      qEnvironmentVariableIsEmpty("GRIDLOCK_LIVE_WAYLAND") &&
-      qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
-    qputenv("QT_QPA_PLATFORM", "offscreen");
+  if (gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(argc, argv)) {
+    if (qEnvironmentVariableIsEmpty("GRIDLOCK_LIVE_WAYLAND") &&
+        qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+      qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+  } else if (qgetenv("QT_QPA_PLATFORM") == QByteArrayLiteral("offscreen")) {
+    qunsetenv("QT_QPA_PLATFORM");
   }
 
   QApplication app(argc, argv);
@@ -129,13 +132,16 @@ int main(int argc, char* argv[]) {
   // Initialize the global workstation stylesheet and dark slate palette via ThemeManager.
   gridlock::core::managers::ThemeManager::instance().initialize();
 
-  // Construct and display the startup splash screen while docks and parsers initialize.
-  QPixmap splashPixmap(":/icon.png");
-  splashPixmap = splashPixmap.scaled(256, 256, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-  auto* splash = new QSplashScreen(splashPixmap);
-  splash->show();
-  splash->showMessage("Loading environment...", Qt::AlignBottom | Qt::AlignCenter, Qt::white);
-  app.processEvents();
+  // Construct and display the startup splash screen only during interactive desktop launches.
+  QSplashScreen* splash = nullptr;
+  if (!gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(argc, argv)) {
+    QPixmap splashPixmap(":/icon.png");
+    splashPixmap = splashPixmap.scaled(256, 256, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    splash = new QSplashScreen(splashPixmap);
+    splash->show();
+    splash->showMessage("Loading environment...", Qt::AlignBottom | Qt::AlignCenter, Qt::white);
+    app.processEvents();
+  }
 
   // Parse structured CLI flags (--headless, --snapshot, --tutorial-mode, --test-mode, --verbose).
   gridlock::core::utils::CliParser parser;
@@ -149,11 +155,19 @@ int main(int argc, char* argv[]) {
   auto* backend = new DapCoordinator(&window);
   window.setCoordinator(backend);
 
+  // Ensure initial geometry has suitable workstation dimensions before showing.
+  if (window.width() < 1440 || window.height() < 900) {
+    window.resize(1440, 900);
+  }
+
   // If --snapshot <file> was specified, render and save the workspace PNG immediately and exit.
   const QString snapshotPath = parser.snapshotFilePath();
   if (!snapshotPath.isEmpty()) {
-    splash->finish(&window);
-    splash->deleteLater();
+    if (splash) {
+      splash->finish(&window);
+      splash->deleteLater();
+      splash = nullptr;
+    }
     window.show();
     app.processEvents();
     const bool ok = window.captureWorkspaceSnapshot(snapshotPath);
@@ -163,11 +177,27 @@ int main(int argc, char* argv[]) {
 
   // Launch either the interactive tutorial modal or map the main workstation window visibly.
   if (parser.isTutorialMode()) {
+    if (splash) {
+      splash->finish(&window);
+      splash->deleteLater();
+      splash = nullptr;
+    }
     if (!window.execTutorialDialog()) {
       return 0;
     }
-  } else {
-    window.show();
+  }
+
+  // Ensure normal interactive launches always map visibly on the desktop compositor.
+  window.show();
+  if (!parser.isHeadless()) {
+    window.raise();
+    window.activateWindow();
+  }
+
+  if (splash) {
+    splash->finish(&window);
+    splash->deleteLater();
+    splash = nullptr;
   }
 
   // In automated test mode, optionally compile a positional MPI source file and start a 2-rank session.
@@ -189,9 +219,6 @@ int main(int argc, char* argv[]) {
     }
     new gridlock::backend::GridLockAutomationRunner(&window, &app);
   }
-
-  splash->finish(&window);
-  splash->deleteLater();
 
   return app.exec();
 }

@@ -35,4 +35,5 @@ private slots:
     void testCfgRankDivergenceMinimapAndRackSync();
     void testDynamicRankSyncWithoutHardcodedConstructorMocks();
     void testCoreGoogleStyleAndDocumentation();
+    void testUiViewsAndWidgetsGoogleStyleAndDocumentation();
 };

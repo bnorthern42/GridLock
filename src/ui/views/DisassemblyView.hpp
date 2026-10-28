@@ -1,3 +1,12 @@
+/**
+ * @file DisassemblyView.hpp
+ * @brief Interactive disassembly, control-flow graph, and decompiler view widget.
+ *
+ * Provides linear assembly browsing with branch flow arcs and bookmark gutter,
+ * an interactive 2D Control Flow Graph (CFG) canvas with Manhattan edge routing,
+ * MPI rank divergence indicators, and multi-language structured decompilation.
+ */
+
 #pragma once
 #include <QCheckBox>
 #include <QComboBox>
@@ -10,6 +19,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSplitter>
 #include <QStackedWidget>
 #include <QString>
 #include <QStringList>
@@ -22,23 +32,32 @@
 
 namespace gridlock::ui {
 
+/**
+ * @brief Represents a directed control-flow branch arc connecting two assembly lines.
+ */
 struct BranchArc {
-    int fromLine = -1;
-    int toLine = -1;
-    uint64_t fromAddr = 0;
-    uint64_t toAddr = 0;
-    bool isConditional = false;
+    int fromLine = -1;       ///< 0-based source instruction line index.
+    int toLine = -1;         ///< 0-based destination instruction line index.
+    uint64_t fromAddr = 0;   ///< Originating instruction pointer address.
+    uint64_t toAddr = 0;     ///< Target instruction pointer address.
+    bool isConditional = false; ///< True if branch is conditional; false if unconditional.
 };
 
+/**
+ * @brief Represents an isolated basic block of linear instructions for CFG analysis.
+ */
 struct DisasmBasicBlock {
-    uint64_t startAddress = 0;
-    uint64_t endAddress = 0;
-    QStringList lines;
-    QList<uint64_t> successors;
-    uint64_t trueTarget = 0;
-    uint64_t falseTarget = 0;
+    uint64_t startAddress = 0;  ///< Entry instruction pointer address.
+    uint64_t endAddress = 0;    ///< Terminating instruction pointer address.
+    QStringList lines;          ///< Raw formatted instruction text lines.
+    QList<uint64_t> successors; ///< List of outgoing successor basic block addresses.
+    uint64_t trueTarget = 0;    ///< Branch target address taken when condition evaluates true.
+    uint64_t falseTarget = 0;   ///< Fallthrough branch target address.
 };
 
+/**
+ * @brief Syntax highlighter for x86_64 and generic assembly listings.
+ */
 class AsmSyntaxHighlighter : public QSyntaxHighlighter {
     Q_OBJECT
 public:
@@ -57,18 +76,27 @@ private:
 class DisassemblyTextEdit;
 class BranchFlowGutter;
 
+/**
+ * @brief Interactive hybrid assembly listing, CFG graph, and decompiler widget.
+ */
 class DisassemblyView : public QWidget {
     Q_OBJECT
 public:
     explicit DisassemblyView(QWidget *parent = nullptr);
     ~DisassemblyView() override = default;
 
+    /// Number of detected branch flow arcs.
     int branchArcCount() const { return m_branchArcs.size(); }
+    /// Number of partitioned basic blocks.
     int basicBlockCount() const { return m_basicBlocks.size(); }
+    /// True if displaying the 2D CFG scene; false if linear assembly text.
     bool isGraphMode() const { return m_graphMode; }
     void setGraphMode(bool enabled);
+    /// Toggles view mode between linear assembly and 2D CFG graph.
     void toggleViewMode();
+    /// Seeks disassembly, graph, and decompiler views to an instruction address.
     bool seekToAddress(uint64_t address);
+    /// Returns the currently active 64-bit instruction pointer address.
     uint64_t currentAddress() const { return m_currentAddress; }
 
     // Compatibility helpers for QPlainTextEdit-like inspection
@@ -79,52 +107,89 @@ public:
     void setTextCursor(const QTextCursor& cursor);
     void centerCursor();
 
+    /// Returns list of detected control flow branch arcs.
     const QVector<BranchArc>& branchArcs() const { return m_branchArcs; }
+    /// Returns partitioned basic blocks.
     const QVector<DisasmBasicBlock>& basicBlocks() const { return m_basicBlocks; }
+    /// Maps 64-bit instruction address to linear line number.
     int lineForAddress(uint64_t address) const { return m_addrToLine.value(address, -1); }
+    /// Maps linear line number to 64-bit instruction address.
     uint64_t addressForLine(int line) const { return m_lineToAddr.value(line, 0ULL); }
+    /// Returns callers jumping or branching to targetAddr.
     QVector<uint64_t> xrefsToAddress(uint64_t targetAddr) const;
+    /// Returns currently generated decompiled source text.
     QString decompiledPseudocode() const { return m_decompiledPseudocode; }
+    /// Checks whether standalone decompiler mode is enabled.
     bool isDecompilerMode() const { return m_decompilerMode; }
+    /// Sets standalone decompiler mode active or inactive.
     void setDecompilerMode(bool enabled);
 
+    /// Sets active decompiler target language ("C", "C++", "Pseudocode").
     void setDecompilerTargetLanguage(const QString& lang);
+    /// Returns active decompiler target language.
     QString decompilerTargetLanguage() const { return m_targetLang; }
+    /// Translates active function instructions into target language.
     QString decompileToLanguage(const QString& lang) const;
+    /// Returns reconstructed high-level function signature.
     QString functionSignatureHeader() const { return m_functionSignature; }
+    /// Re-decompiles and refreshes the decompiler view.
     void refreshDecompilerView();
 
+    /// Sets side-by-side CFG + Decompiler split mode.
     void setSplitGraphDecompilerMode(bool enabled);
+    /// Checks whether side-by-side split mode is active.
     bool isSplitGraphDecompilerMode() const { return m_splitGraphDecompiler; }
 
+    /// Maps 1-based decompiler source line to assembly address.
     uint64_t decompilerLineToAddress(int lineNumber) const;
+    /// Maps assembly address to 1-based decompiler line.
     int addressToDecompilerLine(uint64_t address) const;
+    /// Returns currently active 1-based decompiler line.
     int currentDecompilerLine() const { return m_currentDecompilerLine; }
+    /// Selects decompiler line and seeks matching assembly address.
     bool selectDecompilerLine(int lineNumber);
+    /// Highlights token across disassembly and decompiler views.
     void highlightToken(const QString& token);
+    /// Returns currently highlighted search token.
     QString highlightedToken() const { return m_highlightedToken; }
 
+    /// Updates program counter locations for all active MPI ranks.
     void setRankAddresses(const QMap<int, uint64_t>& rankPcs);
+    /// Returns list of MPI ranks currently within the given basic block.
     QVector<int> ranksAtBlock(uint64_t blockStartAddr) const;
+    /// Sets the focused MPI rank ID.
     void setSelectedRank(int rankId);
+    /// Returns the currently focused MPI rank ID.
     int selectedRank() const { return m_selectedRank; }
 
+    /// Sets visibility of the CFG minimap overlay.
     void setGraphMinimapVisible(bool visible);
+    /// Checks whether the CFG minimap overlay is visible.
     bool isGraphMinimapVisible() const { return m_graphMinimapVisible; }
+    /// Computes viewport coordinates for the CFG minimap overlay.
     QRect minimapRect() const;
 
+    /// Attaches user comment annotation to an instruction address.
     void setAddressComment(uint64_t address, const QString& comment);
+    /// Retrieves user comment annotation for an instruction address.
     QString addressComment(uint64_t address) const;
+    /// Toggles user bookmark at an instruction address.
     bool toggleBookmark(uint64_t address);
+    /// Checks whether an address has an active user bookmark.
     bool isBookmarked(uint64_t address) const;
+    /// Returns sorted list of all active user bookmark addresses.
     QVector<uint64_t> bookmarkedAddresses() const;
 
 signals:
+    /// Emitted when an instruction address is selected by click or seek.
     void addressSelected(uint64_t address);
 
 public slots:
+    /// Loads and analyzes new assembly code listing.
     void updateDisassembly(const QString& asmCode);
+    /// Compatibility alias for updateDisassembly.
     void setDisassembly(const QString& asmCode) { updateDisassembly(asmCode); }
+    /// Reloads appearance styling and fonts from configuration.
     void reloadStyle();
 
 protected:
@@ -139,6 +204,7 @@ private:
     void updateViewModeLayout();
     void highlightActiveInstruction();
     void highlightActiveDecompilerLine();
+    void setupDecompilerUi(QSplitter* splitSplitter, const QFont& font);
     QString applyUserCommentsToListing(const QString& rawCode) const;
     static QString defaultStartupDisassembly();
 
@@ -185,5 +251,5 @@ private:
     QString m_highlightedToken;
 };
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
 

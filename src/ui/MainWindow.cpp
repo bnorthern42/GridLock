@@ -154,6 +154,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   if (settings.contains("MainWindow/Geometry_v8")) {
       restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
   }
+  if (width() < 800 || height() < 600) {
+      resize(1440, 900);
+  }
   if (settings.contains("MainWindow/State_v8")) {
       restoreState(settings.value("MainWindow/State_v8").toByteArray());
   }

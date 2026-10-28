@@ -1,3 +1,12 @@
+/**
+ * @file RegisterView.cpp
+ * @brief CPU register inspector implementation with mutation tracking.
+ *
+ * Implements the RegisterView widget displaying architectural CPU registers
+ * with color-coded role designations (instruction pointer, stack frames, status flags)
+ * and differential mutation detection across stepping events.
+ */
+
 #include "RegisterView.hpp"
 #include <QFont>
 #include <QHeaderView>
@@ -8,7 +17,14 @@
 
 namespace gridlock::ui {
 
+/**
+ * @brief Resolves a numeric hardware register index to its standard x86_64 mnemonic.
+ *
+ * @param idx Register index from the debugger/paged memory backend.
+ * @return Register mnemonic (e.g. "rax", "rip", "rsp").
+ */
 QString RegisterView::x86RegisterNameForIndex(int idx) {
+    // Lookup table for standard 64-bit general purpose and segment registers
     static const QMap<int, QString> kRegNames = {
         {0, QStringLiteral("rax")},    {1, QStringLiteral("rbx")},
         {2, QStringLiteral("rcx")},    {3, QStringLiteral("rdx")},
@@ -26,9 +42,19 @@ QString RegisterView::x86RegisterNameForIndex(int idx) {
     return kRegNames.value(idx, QStringLiteral("r%1").arg(idx));
 }
 
+/**
+ * @brief Normalizes diverse register value representations into a canonical hexadecimal string.
+ *
+ * Trims extra symbols, strips comments/symbol names, and converts to lowercase hex.
+ *
+ * @param val Raw register value string (e.g. "0x00401120 <main+0>").
+ * @return Canonical hex string (e.g. "0x401120") or lowercase trimmed string.
+ */
 QString RegisterView::normalizeRegValue(const QString& val) {
+    // Strip leading and trailing whitespace
     QString trimmed = val.trimmed();
     int spaceIdx = trimmed.indexOf(' ');
+    // Isolate address from any appended symbol annotations
     if (spaceIdx > 0) {
         trimmed = trimmed.left(spaceIdx);
     }
@@ -37,6 +63,7 @@ QString RegisterView::normalizeRegValue(const QString& val) {
     if (hexCandidate.startsWith("0x", Qt::CaseInsensitive)) {
         hexCandidate = hexCandidate.mid(2);
     }
+    // Attempt parsing as 64-bit hexadecimal integer
     uint64_t parsed = hexCandidate.toULongLong(&ok, 16);
     if (ok) {
         return QStringLiteral("0x%1").arg(parsed, 0, 16);
@@ -44,11 +71,21 @@ QString RegisterView::normalizeRegValue(const QString& val) {
     return trimmed.toLower();
 }
 
+/**
+ * @brief Constructs a new RegisterView instance.
+ *
+ * Initializes the two-column QTableWidget ("REG", "VALUE / ROLE"), configures
+ * monospace styling, and installs cell double-click navigation handlers.
+ *
+ * @param parent Optional parent widget.
+ */
 RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
+    // Configure zero-margin vertical layout
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
+    // Create monospace table widget
     m_table = new QTableWidget(this);
     m_table->setObjectName("cutterRegisterTable");
     m_table->setColumnCount(2);
@@ -66,11 +103,13 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     monoFont.setStyleHint(QFont::Monospace);
     m_table->setFont(monoFont);
 
+    // Synchronize background and foreground with theme configuration
     QPalette p = m_table->palette();
     p.setColor(QPalette::Base, QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
     p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
     m_table->setPalette(p);
 
+    // Double-clicking a register seeks the global disassembly or memory view
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row, int /*col*/) {
         if (QTableWidgetItem* nameItem = m_table->item(row, 0)) {
             activateRegister(nameItem->text());
@@ -100,10 +139,22 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     m_modifiedRegisters.clear();
 }
 
+/**
+ * @brief Checks if a named register underwent mutation in the last update.
+ *
+ * @param name Register identifier (e.g., "rax", "rip").
+ * @return True if register mutated, false otherwise.
+ */
 bool RegisterView::isRegisterModified(const QString& name) const {
     return m_modifiedRegisters.contains(name.trimmed().toLower());
 }
 
+/**
+ * @brief Activates a register by parsing its address and emitting addressActivated.
+ *
+ * @param name Register identifier.
+ * @return True if register contained a valid 64-bit hex address; false otherwise.
+ */
 bool RegisterView::activateRegister(const QString& name) {
     const QString key = name.trimmed().toLower();
     if (!m_currentRegisters.contains(key)) {
@@ -122,10 +173,20 @@ bool RegisterView::activateRegister(const QString& name) {
     if (!ok) {
         return false;
     }
+    // Emit signal to synchronize disassembly and memory views to this pointer
     emit addressActivated(addr);
     return true;
 }
 
+/**
+ * @brief Updates table items from an ordered list of register names and values.
+ *
+ * Checks values against previous snapshot to identify mutations, marks modified
+ * cells with red foreground and highlighted background, and applies role-based
+ * colors (instruction pointer, stack pointers, status flags).
+ *
+ * @param orderedRegs Ordered vector of register mnemonic and value pairs.
+ */
 void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& orderedRegs) {
     if (orderedRegs.isEmpty()) {
         return;
@@ -135,6 +196,7 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
     m_modifiedRegisters.clear();
     m_currentRegisters.clear();
 
+    // Adjust table row allocation to match incoming register count
     if (m_table->rowCount() != orderedRegs.size()) {
         m_table->setRowCount(orderedRegs.size());
     }
@@ -149,6 +211,7 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         const QString regVal = orderedRegs[row].second.trimmed();
         const QString normVal = normalizeRegValue(regVal);
 
+        // Detect register mutation against previous snapshot baseline
         bool changed = false;
         if (hasBaseline && m_previousRegisters.contains(key) &&
             m_previousRegisters.value(key) != normVal) {
@@ -159,6 +222,7 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         m_previousRegisters.insert(key, normVal);
         m_currentRegisters.insert(key, regVal);
 
+        // Populate or update name column item
         QTableWidgetItem* nameItem = m_table->item(row, 0);
         if (!nameItem) {
             nameItem = new QTableWidgetItem(key);
@@ -167,6 +231,7 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
             nameItem->setText(key);
         }
 
+        // Populate or update value column item
         QTableWidgetItem* valItem = m_table->item(row, 1);
         if (!valItem) {
             valItem = new QTableWidgetItem(regVal);
@@ -186,6 +251,7 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
             roleColor = QColor("#dcdcaa"); // Status flags: gold
         }
 
+        // Apply distinct styling for mutated vs stable registers
         if (changed) {
             nameItem->setForeground(QColor("#f44747"));
             valItem->setForeground(QColor("#f44747"));
@@ -204,6 +270,10 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
     }
 }
 
+/**
+ * @brief Slot to update registers from a RankState telemetry snapshot.
+ * @param state RankState struct containing integer-keyed register map.
+ */
 void RegisterView::updateRegisters(const gridlock::RankState& state) {
     if (state.registers.isEmpty()) {
         return;
@@ -216,6 +286,10 @@ void RegisterView::updateRegisters(const gridlock::RankState& state) {
     applyRegisterMap(ordered);
 }
 
+/**
+ * @brief Slot to update registers from a QJsonArray of register objects.
+ * @param registers JSON array of objects with "name" and "value" keys.
+ */
 void RegisterView::updateRegisters(const QJsonArray& registers) {
     if (registers.isEmpty()) {
         return;
@@ -230,6 +304,13 @@ void RegisterView::updateRegisters(const QJsonArray& registers) {
     applyRegisterMap(ordered);
 }
 
+/**
+ * @brief Slot to update registers from a string-keyed QMap.
+ *
+ * Orders critical architectural registers (RIP, RSP, RBP) first for optimal inspection ergonomics.
+ *
+ * @param registers Map of register names to string values.
+ */
 void RegisterView::updateRegisters(const QMap<QString, QString>& registers) {
     if (registers.isEmpty()) {
         return;
@@ -257,4 +338,5 @@ void RegisterView::updateRegisters(const QMap<QString, QString>& registers) {
     applyRegisterMap(ordered);
 }
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
+

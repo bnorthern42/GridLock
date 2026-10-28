@@ -32,6 +32,8 @@
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
+#include "../src/core/utils/CliParser.cpp"
+
 void TestMainWindowUI::testSourceFileLoading() {
     QTemporaryFile tempFile;
     QVERIFY(tempFile.open());
@@ -479,17 +481,11 @@ void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
                 QVERIFY2(dock->widget()->minimumWidth() <= 200, qPrintable(dock->windowTitle()));
                 QVERIFY2(dock->widget()->maximumWidth() >= 1000, qPrintable(dock->windowTitle()));
             }
-            if (area == Qt::LeftDockWidgetArea && !leftDock) {
-                leftDock = dock;
-            }
-            if (area == Qt::RightDockWidgetArea &&
-                dock->objectName() == QStringLiteral("RegisterViewDock")) {
-                rightDock = dock;
-            }
+            if (area == Qt::LeftDockWidgetArea && !leftDock) leftDock = dock;
+            if (area == Qt::RightDockWidgetArea && dock->objectName() == QStringLiteral("RegisterViewDock")) rightDock = dock;
         }
     }
-    QVERIFY(leftDock != nullptr);
-    QVERIFY(rightDock != nullptr);
+    QVERIFY(leftDock != nullptr && rightDock != nullptr);
 
     mainWindow.resizeDocks({leftDock}, {340}, Qt::Horizontal);
     mainWindow.resizeDocks({rightDock}, {420}, Qt::Horizontal);
@@ -818,12 +814,7 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
     QVERIFY(disassemblyView && serverRackView && statusTelemetry);
 
     disassemblyView->setSplitGraphDecompilerMode(true);
-    disassemblyView->setRankAddresses({
-        {0, 0x00401168ULL},
-        {1, 0x00401155ULL},
-        {2, 0x00401157ULL},
-        {3, 0x0040115fULL}
-    });
+    disassemblyView->setRankAddresses({{0, 0x00401168ULL}, {1, 0x00401155ULL}, {2, 0x00401157ULL}, {3, 0x0040115fULL}});
     QCOMPARE(disassemblyView->ranksAtBlock(0x00401168ULL), QVector<int>{0});
     QCOMPARE(disassemblyView->ranksAtBlock(0x0040114fULL), QVector<int>{1});
     QCOMPARE(disassemblyView->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3}));
@@ -884,18 +875,7 @@ void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
     QCOMPARE(disasm->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3, 4, 5, 6, 7}));
 }
 
-void TestMainWindowUI::testCoreGoogleStyleAndDocumentation() {
-    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
-    if (!rootDir.exists("src")) rootDir = QDir::current();
-    QStringList targetFiles = { rootDir.filePath(QStringLiteral("src/main.cpp")) };
-    QDirIterator it(rootDir.filePath(QStringLiteral("src/core")), QStringList() << "*.hpp" << "*.cpp",
-                    QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        targetFiles.append(it.next());
-    }
-    targetFiles.sort();
-    QVERIFY(targetFiles.size() >= 45);
-
+static void auditFilesGoogleStyleAndDocumentation(const QStringList& targetFiles) {
     for (const QString& relPath : targetFiles) {
         QFile f(relPath);
         QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(relPath));
@@ -908,15 +888,12 @@ void TestMainWindowUI::testCoreGoogleStyleAndDocumentation() {
             QVERIFY2(content.contains("// namespace "),
                      qPrintable(QString("%1 missing Google C++ closing // namespace comment").arg(relPath)));
         }
-        int nonEmptyLines = 0;
-        int commentLines = 0;
+        int nonEmptyLines = 0, commentLines = 0;
         for (const QString& line : lines) {
             const QString trimmed = line.trimmed();
             if (trimmed.isEmpty()) continue;
             ++nonEmptyLines;
-            if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
-                ++commentLines;
-            }
+            if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) ++commentLines;
         }
         QVERIFY2(nonEmptyLines > 0, qPrintable(relPath));
         const double ratio = static_cast<double>(commentLines) / static_cast<double>(nonEmptyLines);
@@ -924,6 +901,44 @@ void TestMainWindowUI::testCoreGoogleStyleAndDocumentation() {
                  qPrintable(QString("%1 comment ratio %2 (%3/%4) < 0.20")
                                 .arg(relPath).arg(ratio, 0, 'f', 3).arg(commentLines).arg(nonEmptyLines)));
     }
+}
+
+void TestMainWindowUI::testCoreGoogleStyleAndDocumentation() {
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
+    if (!rootDir.exists("src")) rootDir = QDir::current();
+    QStringList targetFiles = { rootDir.filePath(QStringLiteral("src/main.cpp")) };
+    QDirIterator it(rootDir.filePath(QStringLiteral("src/core")), QStringList() << "*.hpp" << "*.cpp",
+                    QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) targetFiles.append(it.next());
+    targetFiles.sort();
+    QVERIFY(targetFiles.size() >= 45);
+    auditFilesGoogleStyleAndDocumentation(targetFiles);
+}
+
+void TestMainWindowUI::testUiViewsAndWidgetsGoogleStyleAndDocumentation() {
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
+    if (!rootDir.exists("src")) rootDir = QDir::current();
+    QStringList targetFiles;
+    for (const QString& subDir : {QStringLiteral("src/ui/views"), QStringLiteral("src/ui/widgets")}) {
+        QDirIterator it(rootDir.filePath(subDir), QStringList() << "*.hpp" << "*.cpp",
+                        QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) targetFiles.append(it.next());
+    }
+    targetFiles.sort();
+    QVERIFY(targetFiles.size() >= 15);
+    auditFilesGoogleStyleAndDocumentation(targetFiles);
+
+    // Interactive launch assertions: normal CLI launch must not be invisible/offscreen
+    char appName[] = "gridlock";
+    char* normalArgv[] = { appName, nullptr };
+    QVERIFY(!gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(1, normalArgv));
+
+    gridlock::ui::MainWindow mainWindow;
+    QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating));
+    QVERIFY(!mainWindow.testAttribute(Qt::WA_DontShowOnScreen));
+    mainWindow.show();
+    QVERIFY(!mainWindow.isMinimized());
+    QVERIFY(!mainWindow.isHidden());
 }
 
 QTEST_MAIN(TestMainWindowUI)

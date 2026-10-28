@@ -1,3 +1,12 @@
+/**
+ * @file MemView.cpp
+ * @brief Memory inspection, hex dump display, and multi-rank diff viewer.
+ *
+ * Implements the MemView widget providing synchronized hex dumping,
+ * memory editing, multi-rank differential comparisons, and data matrix
+ * export capabilities for HPC and binary analysis workloads.
+ */
+
 #include "MemView.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/hpc/MemoryExporter.hpp"
@@ -18,15 +27,32 @@
 
 namespace gridlock::ui {
 
+/**
+ * @brief Parses a string representation of a hex address into a 64-bit integer.
+ *
+ * Strips optional "0x" prefixes, trims whitespace, and stops at the first
+ * space delimiter before parsing hexadecimal digits.
+ *
+ * @param address The input address string (e.g., "0x00401120").
+ * @param okOut Optional pointer receiving true on successful conversion.
+ * @return Parsed 64-bit address, or 0 on conversion failure.
+ */
 uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
+    // Trim leading/trailing whitespace
     QString trimmed = address.trimmed();
+
+    // Strip standard hexadecimal prefix if present
     if (trimmed.startsWith("0x", Qt::CaseInsensitive)) {
         trimmed = trimmed.mid(2);
     }
+
+    // Stop at any trailing comment or label offset separated by spaces
     int spaceIdx = trimmed.indexOf(' ');
     if (spaceIdx > 0) {
         trimmed = trimmed.left(spaceIdx);
     }
+
+    // Convert hex string to 64-bit unsigned integer
     bool ok = false;
     uint64_t val = trimmed.toULongLong(&ok, 16);
     if (okOut) {
@@ -35,11 +61,21 @@ uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
     return ok ? val : 0ULL;
 }
 
+/**
+ * @brief Constructs a new MemView widget.
+ *
+ * Initializes the compact toolbar controls (address, byte count, data type,
+ * read/export/diff buttons) and the read-only monospace hex dump text editor.
+ *
+ * @param parent Optional parent widget.
+ */
 MemView::MemView(QWidget* parent) : QWidget(parent) {
+    // Configure vertical root layout with zero margins for dock docking
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
+    // Build the compact slate toolbar header bar
     QWidget* headerBar = new QWidget(this);
     headerBar->setObjectName("cutterMemHeader");
     headerBar->setFixedHeight(26);
@@ -56,6 +92,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     topLayout->setContentsMargins(6, 2, 6, 2);
     topLayout->setSpacing(4);
 
+    // Helper lambda to measure button text and assign minimum width
     auto configureToolbarButton = [](QPushButton* btn) {
         QFont boldFont = btn->font();
         boldFont.setBold(true);
@@ -158,6 +195,15 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_changedByteCount = 0;
 }
 
+/**
+ * @brief Seeks the memory view to a specific 64-bit memory address.
+ *
+ * Updates the address text box and emits a requestMemory signal to query the
+ * underlying process memory subsystem.
+ *
+ * @param address The target 64-bit address.
+ * @return True if the address was non-zero and seek was dispatched; false otherwise.
+ */
 bool MemView::seekToAddress(uint64_t address) {
     if (address == 0ULL) {
         return false;
@@ -167,10 +213,16 @@ bool MemView::seekToAddress(uint64_t address) {
     if (m_addressEdit) {
         m_addressEdit->setText(formatted);
     }
+    // Dispatched memory read request for the specified byte length
     emit requestMemory(formatted, m_lengthBox ? m_lengthBox->value() : 256);
     return true;
 }
 
+/**
+ * @brief Handles user clicks on the Read button or pressing Enter in the address input.
+ *
+ * Parses the user-entered address string and fires the requestMemory signal.
+ */
 void MemView::onReadClicked() {
     QString addr = m_addressEdit->text().trimmed();
     if (!addr.isEmpty()) {
@@ -183,12 +235,23 @@ void MemView::onReadClicked() {
     }
 }
 
+/**
+ * @brief Populates the hex dump display with raw hexadecimal memory contents.
+ *
+ * Compares incoming bytes against the previous snapshot to detect mutated
+ * bytes, highlights changed values in red, and updates the HTML render.
+ *
+ * @param beginAddress 64-bit base address of the memory slice.
+ * @param hexContents Hex-encoded string of byte values.
+ */
 void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
     const uint64_t startAddr = static_cast<uint64_t>(beginAddress);
     const QByteArray currentData = QByteArray::fromHex(hexContents.toLatin1());
 
     m_changedByteCount = 0;
     QByteArray prevForDiff;
+
+    // Detect changed bytes if a previous snapshot at the same address exists
     if (m_hasDiffBaseline && m_previousBaseAddress == startAddr) {
         prevForDiff = m_previousRawData;
         const int compareLen = qMin(currentData.size(), m_previousRawData.size());
@@ -197,9 +260,11 @@ void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
                 m_changedByteCount++;
             }
         }
+        // Account for any difference in slice length
         m_changedByteCount += qAbs(currentData.size() - m_previousRawData.size());
     }
 
+    // Cache current state as new diff baseline
     m_currentBaseAddress = startAddr;
     m_previousBaseAddress = startAddr;
     m_previousRawData = currentData;
@@ -210,11 +275,18 @@ void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
         m_addressEdit->setText(QStringLiteral("0x%1").arg(startAddr, 8, 16, QChar('0')));
     }
 
+    // Render formatted monospace HTML with differential color tags
     if (m_dumpEdit) {
         m_dumpEdit->setHtml(formatHexDumpHtml(startAddr, currentData, prevForDiff));
     }
 }
 
+/**
+ * @brief Overloaded helper to set memory data from raw byte arrays.
+ *
+ * @param address Address string (e.g. "0x00401120").
+ * @param data Raw byte array.
+ */
 void MemView::setMemoryData(const QString& address, const QByteArray& data) {
     bool ok = false;
     uint64_t startAddr = parseHexAddress(address, &ok);
@@ -224,6 +296,11 @@ void MemView::setMemoryData(const QString& address, const QByteArray& data) {
     setMemoryData(static_cast<qint64>(startAddr), QString::fromLatin1(data.toHex()));
 }
 
+/**
+ * @brief Exports currently cached memory buffer to disk as CSV or raw binary.
+ *
+ * Prompts user for a save file path and invokes MemoryExporter asynchronously.
+ */
 void MemView::onExportMatrixClicked() {
     if (m_lastRawData.isEmpty()) {
         QMessageBox::warning(this, "No Data", "No memory data available to export. Please read memory first.");
@@ -236,6 +313,7 @@ void MemView::onExportMatrixClicked() {
     std::vector<uint8_t> buffer(m_lastRawData.begin(), m_lastRawData.end());
     int typeIndex = m_typeBox->currentIndex();
 
+    // Run file export in background thread pool to avoid blocking the GUI
     (void)QtConcurrent::run([buffer, fileName, typeIndex]() {
         if (fileName.endsWith(".csv", Qt::CaseInsensitive)) {
             gridlock::core::hpc::DataType type = gridlock::core::hpc::DataType::Int32;
@@ -258,6 +336,11 @@ void MemView::onExportMatrixClicked() {
     });
 }
 
+/**
+ * @brief Triggers a cross-rank memory differential analysis.
+ *
+ * Validates the entered address and emits the requestMemoryDiff signal.
+ */
 void MemView::onDiffClicked() {
     int baselineRank = m_baselineRankBox->value();
     int targetRank = m_targetRankBox->value();
@@ -274,6 +357,15 @@ void MemView::onDiffClicked() {
     emit requestMemoryDiff(baselineRank, targetRank, addrStr, length);
 }
 
+/**
+ * @brief Renders the visual diff output between two MPI ranks into the hex editor.
+ *
+ * Highlights divergence between baseline and target memory buffers with red spans
+ * and tooltips indicating baseline values.
+ *
+ * @param result The differential comparison result structure.
+ * @param remoteAddr Base pointer of the compared memory slice.
+ */
 void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result, void* remoteAddr) {
     if (!result.success) {
         QMessageBox::warning(this, "Diff Failed", "Failed to read memory from one or both PIDs.");
@@ -285,6 +377,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
     
     int byteCount = result.baselineBuffer.size();
     m_changedByteCount = 0;
+    // Iterate in 16-byte chunks representing traditional hex dump rows
     for (int i = 0; i < byteCount; i += 16) {
         html += QString("<span style=\"color: #6a9955;\">0x%1</span>  ")
                     .arg(QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
@@ -301,6 +394,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                 
                 QString byteStr = QString::number(targetByte, 16).rightJustified(2, '0').toUpper();
                 
+                // Color mutated bytes in red with tooltip, muted zeros in gray
                 if (diff) {
                     QString tooltip = QString("Baseline: 0x%1 | Target: 0x%2")
                         .arg(QString::number(baseByte, 16).rightJustified(2, '0').toUpper())
@@ -313,6 +407,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                     html += byteStr + " ";
                 }
                 
+                // Printable ASCII representation
                 char c = static_cast<char>(targetByte);
                 if (c >= 32 && c <= 126) {
                     if (diff) {
@@ -335,24 +430,37 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
     m_lastRawData = QByteArray(reinterpret_cast<const char*>(result.targetBuffer.data()), result.targetBuffer.size());
 }
 
+/**
+ * @brief Generates HTML-formatted hex dump with offset headers, syntax colors, and mutation diffs.
+ *
+ * @param startAddress 64-bit base offset for the first row.
+ * @param currentData Current byte array contents.
+ * @param prevData Previous snapshot byte array used for mutation highlighting.
+ * @return HTML string ready for display in QTextEdit.
+ */
 QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData) {
+    // Monospace header with offset markers 00 through 0F
     QString html = QStringLiteral(
         "<pre style=\"font-family: 'JetBrains Mono', monospace; font-size: 10pt; margin: 4px;\">"
         "<span style=\"color: #858585;\">- offset -         00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  |0123456789ABCDEF|</span>\n");
 
     const int byteCount = currentData.size();
+    // Format 16 bytes per line
     for (int i = 0; i < byteCount; i += 16) {
+        // Line address prefix in muted green
         html += QStringLiteral("<span style=\"color: #6a9955;\">0x%1</span> ")
                     .arg(startAddress + static_cast<uint64_t>(i), 16, 16, QChar('0'));
 
         QString asciiPart = QStringLiteral("|");
         for (int j = 0; j < 16; ++j) {
+            // Extra spacing at 8-byte boundary for readability
             if (j == 8) {
                 html += QStringLiteral(" ");
             }
             const int idx = i + j;
             if (idx < byteCount) {
                 const uint8_t b = static_cast<uint8_t>(currentData[idx]);
+                // Check if byte value mutated compared to previous snapshot
                 const bool mutated = !prevData.isEmpty() && idx < prevData.size() &&
                                      static_cast<uint8_t>(prevData[idx]) != b;
                 const QString byteStr = QStringLiteral("%1").arg(b, 2, 16, QChar('0')).toUpper();
@@ -365,6 +473,7 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
                     html += QStringLiteral("<span style=\"color: #d4d7dc;\">%1</span> ").arg(byteStr);
                 }
 
+                // Append printable character or dot for non-printables
                 const char c = static_cast<char>(b);
                 if (c >= 32 && c <= 126) {
                     const QString escaped = QString(QChar(c)).toHtmlEscaped();
@@ -389,11 +498,19 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
     return html;
 }
 
+/**
+ * @brief Generates a plain-text hex dump representation of hexadecimal contents.
+ *
+ * @param startAddress 64-bit base offset.
+ * @param hexData String containing raw hex characters.
+ * @return Plain text hex dump formatted with offsets and ASCII column.
+ */
 QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {
     QString result;
     int dataLen = hexData.length();
     int byteCount = dataLen / 2;
     
+    // Group hex digits into 16-byte lines
     for (int i = 0; i < byteCount; i += 16) {
         result += QString("0x%1: ").arg(QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
         
@@ -422,4 +539,5 @@ QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {
     return result;
 }
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
+

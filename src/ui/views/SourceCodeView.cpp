@@ -1,3 +1,11 @@
+/**
+ * @file SourceCodeView.cpp
+ * @brief Source code editor implementation with syntax highlighting and gutter controls.
+ *
+ * Implements the SourceCodeView text editor, CppSyntaxHighlighter for regex-based
+ * C++ lexical coloring, and LineNumberArea for gutter rendering and breakpoint interactions.
+ */
+
 #include "SourceCodeView.hpp"
 #include <QVBoxLayout>
 #include <QPainter>
@@ -13,12 +21,20 @@
 
 namespace gridlock::ui {
 
+/**
+ * @brief Constructs a new CppSyntaxHighlighter and initializes syntax rules.
+ *
+ * Configures regex patterns and text formats for C++ types, control flow keywords,
+ * preprocessor directives, MPI API symbols, string literals, and comments.
+ *
+ * @param parent Pointer to the underlying QTextDocument.
+ */
 CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
     : QSyntaxHighlighter(parent)
 {
     HighlightingRule rule;
 
-    // Types: soft blue
+    // Types: soft blue (#6496ff)
     QTextCharFormat typeFormat;
     typeFormat.setForeground(QColor(100, 150, 255));
     typeFormat.setFontWeight(QFont::Bold);
@@ -45,7 +61,7 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
         highlightingRules.append(rule);
     }
 
-    // Keywords: neon pink/orange
+    // Control flow keywords: neon pink/orange
     QTextCharFormat keywordFormat;
     keywordFormat.setForeground(QColor(255, 80, 150));
     keywordFormat.setFontWeight(QFont::Bold);
@@ -63,40 +79,46 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
         highlightingRules.append(rule);
     }
 
-    // Preprocessor: neon pink/orange
+    // Preprocessor directives: orange (#ff7850)
     QTextCharFormat preprocessorFormat;
     preprocessorFormat.setForeground(QColor(255, 120, 80));
     rule.pattern = QRegularExpression(QStringLiteral("#include[^\n]*"));
     rule.format = preprocessorFormat;
     highlightingRules.append(rule);
 
-    // MPI primitives: soft blue or purple
+    // MPI primitives: purple (#b464ff)
     QTextCharFormat mpiFormat;
     mpiFormat.setForeground(QColor(180, 100, 255));
     rule.pattern = QRegularExpression(QStringLiteral("\\bMPI_[A-Za-z0-9_]+\\b"));
     rule.format = mpiFormat;
     highlightingRules.append(rule);
 
-    // Strings: green
+    // String literals: vibrant green (#64ff64)
     QTextCharFormat stringFormat;
     stringFormat.setForeground(QColor(100, 255, 100));
     rule.pattern = QRegularExpression(QStringLiteral("\".*?\""));
     rule.format = stringFormat;
     highlightingRules.append(rule);
 
-    // Comments: dim gray
+    // Single-line comments: dim gray (#787878)
     QTextCharFormat singleLineCommentFormat;
     singleLineCommentFormat.setForeground(QColor(120, 120, 120));
     rule.pattern = QRegularExpression(QStringLiteral("//[^\n]*"));
     rule.format = singleLineCommentFormat;
     highlightingRules.append(rule);
 
+    // Multi-line block comments
     multiLineCommentFormat.setForeground(QColor(120, 120, 120));
     commentStartExpression = QRegularExpression(QStringLiteral("/\\*"));
     commentEndExpression = QRegularExpression(QStringLiteral("\\*/"));
 }
 
+/**
+ * @brief Scans a text block applying syntax highlighting rules and stateful block comments.
+ * @param text Content of the paragraph / block.
+ */
 void CppSyntaxHighlighter::highlightBlock(const QString &text) {
+    // Apply single-token regex rules
     for (const HighlightingRule &rule : std::as_const(highlightingRules)) {
         QRegularExpressionMatchIterator matchIterator = rule.pattern.globalMatch(text);
         while (matchIterator.hasNext()) {
@@ -104,6 +126,7 @@ void CppSyntaxHighlighter::highlightBlock(const QString &text) {
             setFormat(match.capturedStart(), match.capturedLength(), rule.format);
         }
     }
+    // Track multi-line comment state across blocks
     setCurrentBlockState(0);
     int startIndex = 0;
     if (previousBlockState() != 1) startIndex = text.indexOf(commentStartExpression);
@@ -122,18 +145,42 @@ void CppSyntaxHighlighter::highlightBlock(const QString &text) {
     }
 }
 
+/**
+ * @class LineNumberArea
+ * @brief Gutter widget displaying line numbers and breakpoint markers adjacent to the editor.
+ */
 class LineNumberArea : public QWidget {
 public:
+    /**
+     * @brief Constructs a new LineNumberArea.
+     * @param editor Pointer to the associated SourceCodeView.
+     */
     LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {}
+
+    /**
+     * @brief Returns the fixed width size hint for the gutter.
+     * @return QSize with 35px width.
+     */
     QSize sizeHint() const override { return QSize(35, 0); }
+
 protected:
     void paintEvent(QPaintEvent *event) override { sourceCodeView->lineNumberAreaPaintEvent(event); }
     void mousePressEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMousePressEvent(event); }
+
 private:
     SourceCodeView *sourceCodeView;
 };
 
+/**
+ * @brief Constructs a new SourceCodeView editor widget.
+ *
+ * Configures monospace font, line number gutter, syntax highlighting, hover inspection timer,
+ * and mouse tracking.
+ *
+ * @param parent Optional parent widget.
+ */
 SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
+    // Create and wire line number area gutter
     m_lineNumberArea = new LineNumberArea(this);
     connect(document(), &QTextDocument::blockCountChanged, this, &SourceCodeView::updateLineNumberAreaWidth);
     connect(this, &SourceCodeView::updateRequest, this, &SourceCodeView::updateLineNumberArea);
@@ -143,10 +190,12 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     setLineWrapMode(QPlainTextEdit::NoWrap);
     
-    reloadStyle(); // Load initial font size and ACSS background overlay
+    reloadStyle(); // Load initial font size and theme background overlay
 
+    // Install C++ syntax highlighter
     m_highlighter = new CppSyntaxHighlighter(document());
 
+    // Enable mouse tracking for interactive variable hover inspector
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this);
     m_hoverTimer->setSingleShot(true);
@@ -154,6 +203,10 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
 }
 
+/**
+ * @brief Sets active breakpoints from a set of 1-based line numbers.
+ * @param bps Set of line numbers.
+ */
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     breakpoints.clear();
     for (int bp : bps) {
@@ -162,6 +215,9 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     m_lineNumberArea->update();
 }
 
+/**
+ * @brief Reloads font size, word wrap, and stylesheet overlays from user configuration.
+ */
 void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
     int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
@@ -169,8 +225,7 @@ void SourceCodeView::reloadStyle() {
     
     setLineWrapMode(wordWrap ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
 
-    // The C++ setFont() gets overridden by ACSS global wildcard styles (* { font-size: ... }).
-    // So we MUST inject it directly into the local QSS.
+    // Inject explicit font-size rule into QPlainTextEdit stylesheet
     this->setStyleSheet(QString(
         "QPlainTextEdit { "
         "   background-color: rgba(0, 0, 0, 30); "
@@ -179,10 +234,18 @@ void SourceCodeView::reloadStyle() {
     ).arg(codeFontSize));
 }
 
+/**
+ * @brief Retrieves the 1-based line number containing the text cursor.
+ * @return 1-based line number.
+ */
 int SourceCodeView::getCurrentLineNumber() const {
     return textCursor().blockNumber() + 1;
 }
 
+/**
+ * @brief Toggles a breakpoint on the specified 1-based line.
+ * @param lineNum 1-based line number.
+ */
 void SourceCodeView::toggleBreakpoint(int lineNum) {
     bool isSet = false;
     if (breakpoints.contains(lineNum)) {
@@ -197,6 +260,9 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
     emit breakpointToggled(emitPath, lineNum, isSet, QString());
 }
 
+/**
+ * @brief Highlights the current cursor line with a subtle background selection.
+ */
 void SourceCodeView::highlightCurrentLine() {
     QList<QTextEdit::ExtraSelection> selections;
     QTextEdit::ExtraSelection selection;
@@ -209,6 +275,10 @@ void SourceCodeView::highlightCurrentLine() {
     setExtraSelections(selections);
 }
 
+/**
+ * @brief Paints the line number area gutter with line indices and breakpoint badges.
+ * @param event The QPaintEvent for the gutter rect.
+ */
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     QPainter painter(m_lineNumberArea);
     painter.fillRect(event->rect(), QColor(40, 40, 40));
@@ -217,16 +287,18 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
     
+    // Render visible blocks in view
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
             QString number = QString::number(blockNumber + 1);
             painter.setPen(QColor(120, 120, 120));
             painter.drawText(0, top, m_lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
+            // Render red breakpoint disc (or orange for conditional)
             if (breakpoints.contains(blockNumber + 1)) {
                 if (breakpoints[blockNumber + 1].isEmpty()) {
                     painter.setBrush(Qt::red);
                 } else {
-                    painter.setBrush(QColor(255, 165, 0)); // Orange for conditional
+                    painter.setBrush(QColor(255, 165, 0)); // Orange for conditional breakpoint
                 }
                 painter.drawEllipse(2, top + 2, 8, 8);
             }
@@ -238,6 +310,10 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     }
 }
 
+/**
+ * @brief Handles gutter mouse clicks for toggling unconditional or conditional breakpoints.
+ * @param event The mouse press event.
+ */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     int y = event->pos().y();
     QTextBlock block = firstVisibleBlock();
@@ -251,7 +327,7 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
             QString emitPath = m_currentFilePath;
 
             if (event->button() == Qt::RightButton) {
-                // Right click opens condition dialog
+                // Right click opens conditional breakpoint dialog
                 QString currentCondition = breakpoints.value(lineNum, QString());
                 ConditionalBreakpointDialog dlg(currentCondition, this);
                 if (dlg.exec() == QDialog::Accepted) {
@@ -262,7 +338,7 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
                     }
                 }
             } else {
-                // Left click toggles unconditionally
+                // Left click toggles standard breakpoint
                 bool isSet = false;
                 if (breakpoints.contains(lineNum)) {
                     breakpoints.remove(lineNum);
@@ -283,6 +359,10 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     }
 }
 
+/**
+ * @brief Highlights a specific 1-based execution line and scrolls into view.
+ * @param lineNumber 1-based line number.
+ */
 void SourceCodeView::highlightCurrentLine(int lineNumber) {
     if (lineNumber <= 0) return;
     QList<QTextEdit::ExtraSelection> extraSelections;
@@ -305,18 +385,37 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
     }
 }
 
+/**
+ * @brief Adjusts viewport margins to accommodate the gutter width.
+ */
 void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }
+
+/**
+ * @brief Handles scroll and geometry updates for the line number area.
+ * @param rect Updated dirty region.
+ * @param dy Vertical scroll delta.
+ */
 void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
     if (dy) m_lineNumberArea->scroll(0, dy);
     else m_lineNumberArea->update(0, rect.y(), m_lineNumberArea->width(), rect.height());
     if (rect.contains(viewport()->rect())) m_lineNumberArea->resize(35, rect.height());
 }
+
+/**
+ * @brief Synchronizes gutter height upon editor resize.
+ * @param e Resize event.
+ */
 void SourceCodeView::resizeEvent(QResizeEvent *e) {
     QPlainTextEdit::resizeEvent(e);
     QRect cr = contentsRect();
     m_lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), 35, cr.height()));
 }
 
+/**
+ * @brief Populates the editor with source code and optionally highlights an active line.
+ * @param code Source code string.
+ * @param activeLine Optional 1-based active line.
+ */
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
     if (!code.isEmpty() && toPlainText() != code) {
         QPlainTextEdit::setPlainText(code);
@@ -339,6 +438,10 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
     setExtraSelections(extraSelections);
 }
 
+/**
+ * @brief Restarts the hover evaluation debounce timer on mouse movement.
+ * @param event Mouse move event.
+ */
 void SourceCodeView::mouseMoveEvent(QMouseEvent *event) {
     QPlainTextEdit::mouseMoveEvent(event);
     m_lastMousePos = event->pos();
@@ -346,6 +449,10 @@ void SourceCodeView::mouseMoveEvent(QMouseEvent *event) {
     m_hoverTimer->start(400);
 }
 
+/**
+ * @brief Cancels active hover timers and hides tooltips when cursor exits the editor.
+ * @param event Leave event.
+ */
 void SourceCodeView::leaveEvent(QEvent *event) {
     m_hoverTimer->stop();
     m_lastHoveredWord.clear();
@@ -353,6 +460,9 @@ void SourceCodeView::leaveEvent(QEvent *event) {
     QPlainTextEdit::leaveEvent(event);
 }
 
+/**
+ * @brief Slot triggered after mouse rests on a word, dispatching variable hover requests.
+ */
 void SourceCodeView::handleHoverTimeout() {
     QTextCursor cursor = cursorForPosition(m_lastMousePos);
     cursor.select(QTextCursor::WordUnderCursor);
@@ -370,10 +480,12 @@ void SourceCodeView::handleHoverTimeout() {
         }
         m_lastHoveredWord.clear();
     }
-
-
 }
 
+/**
+ * @brief Handles mouse clicks in the editor body, supporting Ctrl+Click variable pinning.
+ * @param event Mouse press event.
+ */
 void SourceCodeView::mousePressEvent(QMouseEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QTextCursor cursor = cursorForPosition(event->pos());
@@ -390,6 +502,10 @@ void SourceCodeView::mousePressEvent(QMouseEvent *event) {
     QPlainTextEdit::mousePressEvent(event);
 }
 
+/**
+ * @brief Handles double click events to pin variables to the watch list.
+ * @param event Mouse double-click event.
+ */
 void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
     QTextCursor cursor = cursorForPosition(event->pos());
     cursor.select(QTextCursor::WordUnderCursor);
@@ -402,6 +518,10 @@ void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
     QPlainTextEdit::mouseDoubleClickEvent(event);
 }
 
+/**
+ * @brief Handles Ctrl+MouseWheel zooming of editor font size.
+ * @param event Wheel event.
+ */
 void SourceCodeView::wheelEvent(QWheelEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QFont currentFont = font();
@@ -427,6 +547,10 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
     }
 }
 
+/**
+ * @brief Paints the 80-column margin guide line if enabled in configuration.
+ * @param event Paint event.
+ */
 void SourceCodeView::paintEvent(QPaintEvent *event) {
     QPlainTextEdit::paintEvent(event);
     
@@ -446,4 +570,5 @@ void SourceCodeView::paintEvent(QPaintEvent *event) {
     }
 }
 
-} // namespace gridlock::ui
+}  // namespace gridlock::ui
+

@@ -1,4 +1,17 @@
+/**
+ * @file DisassemblyAnalysis.cpp
+ * @brief Control flow graph analysis, basic-block partitioning, and Xrefs for DisassemblyView.
+ *
+ * Implements linear assembly parsing into basic blocks and branch arcs, cross-reference
+ * resolution (`xrefsToAddress`), user address annotations and bookmarks, and the orthogonal
+ * 2D interactive CFG layout and minimap renderer.
+ */
+
 #include "DisassemblyView.hpp"
+
+#include <algorithm>
+#include <cmath>
+
 #include <QFontMetrics>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
@@ -6,11 +19,14 @@
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QSet>
-#include <algorithm>
-#include <cmath>
 
 namespace gridlock::ui {
 
+/**
+ * @brief Returns all unique caller addresses targeting @p targetAddr via branch/call arcs.
+ * @param targetAddr 64-bit destination instruction pointer address.
+ * @return List of unique originating instruction addresses.
+ */
 QVector<uint64_t> DisassemblyView::xrefsToAddress(uint64_t targetAddr) const {
   QVector<uint64_t> callers;
   for (const auto &arc : m_branchArcs) {
@@ -21,6 +37,11 @@ QVector<uint64_t> DisassemblyView::xrefsToAddress(uint64_t targetAddr) const {
   return callers;
 }
 
+/**
+ * @brief Sets a user comment for the instruction at @p address.
+ * @param address 64-bit instruction pointer address.
+ * @param comment User comment text, or empty string to delete existing comment.
+ */
 void DisassemblyView::setAddressComment(uint64_t address,
                                         const QString &comment) {
   const QString trimmed = comment.trimmed();
@@ -34,40 +55,68 @@ void DisassemblyView::setAddressComment(uint64_t address,
   }
 }
 
+/**
+ * @brief Retrieves the user comment associated with an instruction address.
+ * @param address 64-bit instruction pointer address.
+ * @return Comment string, or empty if no annotation exists.
+ */
 QString DisassemblyView::addressComment(uint64_t address) const {
   return m_userComments.value(address, QString());
 }
 
+/**
+ * @brief Toggles the user bookmark state for the specified instruction address.
+ * @param address 64-bit instruction pointer address.
+ * @return True if the address is now bookmarked; false if cleared.
+ */
 bool DisassemblyView::toggleBookmark(uint64_t address) {
+  // Toggle presence in the bookmark hash set
   if (m_bookmarks.contains(address)) {
     m_bookmarks.remove(address);
   } else {
     m_bookmarks.insert(address);
   }
+  // Refresh the disassembly listing to update bookmark gutter indicators
   updateDisassembly(m_baseDisassembly.isEmpty() ? defaultStartupDisassembly()
                                                 : m_baseDisassembly);
   return m_bookmarks.contains(address);
 }
 
+/**
+ * @brief Checks whether the given address is bookmarked.
+ * @param address 64-bit instruction pointer address.
+ * @return True if bookmarked.
+ */
 bool DisassemblyView::isBookmarked(uint64_t address) const {
   return m_bookmarks.contains(address);
 }
 
+/**
+ * @brief Returns a sorted list of all active user bookmark addresses.
+ * @return Ascending sorted vector of 64-bit addresses.
+ */
 QVector<uint64_t> DisassemblyView::bookmarkedAddresses() const {
   QVector<uint64_t> sorted;
   sorted.reserve(m_bookmarks.size());
   for (uint64_t addr : m_bookmarks) {
     sorted.append(addr);
   }
+  // Sort addresses in ascending numerical order for deterministic presentation
   std::sort(sorted.begin(), sorted.end());
   return sorted;
 }
 
+/**
+ * @brief Splices user comments into the raw disassembly text as trailing line annotations.
+ * @param rawCode Original disassembly text lines.
+ * @return Annotated disassembly text with appended `; comment` suffixes.
+ */
 QString DisassemblyView::applyUserCommentsToListing(
     const QString &rawCode) const {
   if (m_userComments.isEmpty()) {
     return rawCode;
   }
+  // Regular expression matching hexadecimal address at line beginning
   static const QRegularExpression lineAddrRe(
       QStringLiteral("^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)"));
   QStringList lines = rawCode.split('\n');
@@ -81,6 +130,7 @@ QString DisassemblyView::applyUserCommentsToListing(
     if (ok && m_userComments.contains(addr)) {
       const QString userNote = m_userComments.value(addr);
       const int semiIdx = line.indexOf(';');
+      // Replace existing comment or append new user annotation
       if (semiIdx >= 0) {
         line = line.left(semiIdx).trimmed() + QStringLiteral("  ; ") + userNote;
       } else {
@@ -91,12 +141,24 @@ QString DisassemblyView::applyUserCommentsToListing(
   return lines.join('\n');
 }
 
+/**
+ * @brief Parses raw disassembly text, extracting instructions, control-flow arcs, and basic blocks.
+ *
+ * Scans each line of the assembly listing to locate instruction offsets, mnemonics, operands,
+ * and branch targets. Identifies basic-block leaders (function entry, branch destinations,
+ * and instructions following control-flow transfers), partitions instructions into continuous
+ * basic blocks, reconstructs high-level function signatures, and triggers a decompiler refresh.
+ *
+ * @param asmCode Raw linear assembly code text.
+ */
 void DisassemblyView::parseDisassembly(const QString &asmCode) {
+  // Clear previous structural analysis state
   m_branchArcs.clear();
   m_basicBlocks.clear();
   m_addrToLine.clear();
   m_lineToAddr.clear();
 
+  // Internal record tracking parsed instruction fields
   struct ParsedInst {
     int lineIndex = -1;
     uint64_t address = 0;
@@ -111,6 +173,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
   QVector<ParsedInst> instructions;
   const QStringList lines = asmCode.split('\n');
 
+  // Regex patterns for line address, mnemonic/operands, and hex target
   static const QRegularExpression addrRegex(QStringLiteral(
       "^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)(?:\\s*<([^+>]+)(?:\\+\\d+)?>)?\\s*:?\\s*(.*)$"));
   static const QRegularExpression mnemRegex(
@@ -118,6 +181,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
   static const QRegularExpression targetHexRegex(
       QStringLiteral("(0x[0-9a-fA-F]+)"));
 
+  // Set of conditional branch mnemonics recognized for CFG edge generation
   static const QSet<QString> condBranches = {
       QStringLiteral("je"),  QStringLiteral("jz"),  QStringLiteral("jne"),
       QStringLiteral("jnz"), QStringLiteral("jg"),  QStringLiteral("jge"),
@@ -126,6 +190,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       QStringLiteral("js"),  QStringLiteral("jns"), QStringLiteral("jo"),
       QStringLiteral("jno")};
 
+  // Step 1: Parse instructions and extract mnemonic and jump targets
   for (int i = 0; i < lines.size(); ++i) {
     const QString &line = lines[i];
     QRegularExpressionMatch addrMatch = addrRegex.match(line);
@@ -139,6 +204,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       continue;
     }
 
+    // Capture the first symbol annotation encountered as the active function symbol
     if (!addrMatch.captured(2).isEmpty() && instructions.isEmpty()) {
       m_activeSymbol = QStringLiteral("sym.") + addrMatch.captured(2).trimmed();
     }
@@ -154,6 +220,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       inst.mnemonic = mnemMatch.captured(1).toLower();
       const QString operands = mnemMatch.captured(2);
 
+      // Classify control transfer instructions
       if (inst.mnemonic == QStringLiteral("jmp") ||
           inst.mnemonic == QStringLiteral("jmpq")) {
         inst.isUnconditionalBranch = true;
@@ -164,6 +231,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         inst.isRet = true;
       }
 
+      // Resolve destination target address if an immediate hex literal is present
       if (inst.isUnconditionalBranch || inst.isConditionalBranch) {
         QRegularExpressionMatch tMatch = targetHexRegex.match(operands);
         if (tMatch.hasMatch()) {
@@ -176,6 +244,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       }
     }
 
+    // Record bidirectional mapping between linear line index and instruction pointer
     m_addrToLine.insert(addr, i);
     m_lineToAddr.insert(i, addr);
     instructions.append(inst);
@@ -185,14 +254,16 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     return;
   }
 
+  // Ensure current address points to a valid instruction in the listing
   if (!m_addrToLine.contains(m_currentAddress)) {
     m_currentAddress = instructions.first().address;
   }
 
-  // Extract BranchArcs for all local branch instructions whose target exists in the listing
+  // Step 2: Identify basic block leaders (entry point, jump destinations, fallthroughs)
   QSet<uint64_t> blockLeaders;
   blockLeaders.insert(instructions.first().address);
 
+  // Scan instruction stream to flag control-transfer source and destination boundaries
   for (int idx = 0; idx < instructions.size(); ++idx) {
     const ParsedInst &inst = instructions[idx];
     if (inst.isConditionalBranch || inst.isUnconditionalBranch) {
@@ -205,17 +276,20 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         arc.isConditional = inst.isConditionalBranch;
         m_branchArcs.append(arc);
 
+        // Branch target starts a new basic block
         blockLeaders.insert(inst.targetAddr);
       }
+      // Instruction immediately following a branch starts a new basic block
       if (idx + 1 < instructions.size()) {
         blockLeaders.insert(instructions[idx + 1].address);
       }
     } else if (inst.isRet && idx + 1 < instructions.size()) {
+      // Instruction following a return starts a new block
       blockLeaders.insert(instructions[idx + 1].address);
     }
   }
 
-  // Partition instructions into DisasmBasicBlocks
+  // Step 3: Partition instructions into DisasmBasicBlocks
   DisasmBasicBlock currentBlock;
   bool hasCurrent = false;
 
@@ -239,6 +313,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         blockLeaders.contains(instructions[idx + 1].address);
     const bool isLast = (idx + 1 == instructions.size());
 
+    // Resolve outgoing successor edges upon block termination
     if (isNextLeader || isLast) {
       if (inst.isConditionalBranch) {
         if (inst.targetAddr != 0) {
@@ -267,7 +342,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     m_basicBlocks.append(currentBlock);
   }
 
-  // Reconstruct function signature header from symbol and prologue arguments
+  // Step 4: Reconstruct function signature header from symbol and prologue arguments
   bool hasArgcArgv = false;
   for (const auto &inst : instructions) {
     if (inst.rawLine.contains(QStringLiteral("argc")) ||
@@ -287,8 +362,10 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     m_signatureLabel->setText(m_functionSignature);
   }
 
+  // Refresh decompiler pseudocode representation
   refreshDecompilerView();
 
+  // Update header badges with symbol address and graph complexity metrics
   if (m_headerBadge) {
     m_headerBadge->setText(
         QStringLiteral("%1 @ 0x%2")
@@ -303,305 +380,14 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
   }
 }
 
-void DisassemblyView::setDecompilerTargetLanguage(const QString &lang) {
-  m_targetLang =
-      lang.trimmed().isEmpty() ? QStringLiteral("C") : lang.trimmed();
-  if (m_targetLangCombo) {
-    for (int i = 0; i < m_targetLangCombo->count(); ++i) {
-      if (m_targetLangCombo->itemData(i).toString().compare(
-              m_targetLang, Qt::CaseInsensitive) == 0 ||
-          m_targetLangCombo->itemText(i).compare(
-              m_targetLang, Qt::CaseInsensitive) == 0) {
-        if (m_targetLangCombo->currentIndex() != i) {
-          m_targetLangCombo->blockSignals(true);
-          m_targetLangCombo->setCurrentIndex(i);
-          m_targetLangCombo->blockSignals(false);
-        }
-        break;
-      }
-    }
-  }
-  refreshDecompilerView();
-}
-
-void DisassemblyView::refreshDecompilerView() {
-  m_decompiledPseudocode = decompileToLanguage(m_targetLang);
-  if (m_decompilerEdit) {
-    m_updatingDecompilerCursor = true;
-    m_decompilerEdit->setPlainText(m_decompiledPseudocode);
-    m_updatingDecompilerCursor = false;
-  }
-  const int mappedLine = addressToDecompilerLine(m_currentAddress);
-  if (mappedLine > 0) {
-    m_currentDecompilerLine = mappedLine;
-  }
-  highlightActiveDecompilerLine();
-}
-
-uint64_t DisassemblyView::decompilerLineToAddress(int lineNumber) const {
-  return m_decompilerLineToAddr.value(lineNumber, 0ULL);
-}
-
-int DisassemblyView::addressToDecompilerLine(uint64_t address) const {
-  if (m_addrToDecompilerLine.contains(address)) {
-    return m_addrToDecompilerLine.value(address);
-  }
-  for (const DisasmBasicBlock &bb : m_basicBlocks) {
-    if (address >= bb.startAddress && address <= bb.endAddress) {
-      if (m_addrToDecompilerLine.contains(bb.startAddress)) {
-        return m_addrToDecompilerLine.value(bb.startAddress);
-      }
-      for (auto it = m_addrToDecompilerLine.constBegin();
-           it != m_addrToDecompilerLine.constEnd(); ++it) {
-        if (it.key() >= bb.startAddress && it.key() <= bb.endAddress) {
-          return it.value();
-        }
-      }
-    }
-  }
-  return -1;
-}
-
-bool DisassemblyView::selectDecompilerLine(int lineNumber) {
-  if (!m_decompilerLineToAddr.contains(lineNumber)) {
-    return false;
-  }
-  m_currentDecompilerLine = lineNumber;
-  const uint64_t addr = m_decompilerLineToAddr.value(lineNumber);
-  seekToAddress(addr);
-  emit addressSelected(addr);
-  return true;
-}
-
-void DisassemblyView::highlightToken(const QString &token) {
-  m_highlightedToken = token.trimmed();
-  highlightActiveInstruction();
-  highlightActiveDecompilerLine();
-  if (m_graphMode) {
-    rebuildCfgScene();
-  }
-}
-
-QString DisassemblyView::decompileToLanguage(const QString &lang) const {
-  const QString normLang =
-      lang.trimmed().isEmpty() ? QStringLiteral("C") : lang.trimmed();
-  const bool isCpp =
-      (normLang.compare(QStringLiteral("C++"), Qt::CaseInsensitive) == 0 ||
-       normLang.contains(QStringLiteral("C++"), Qt::CaseInsensitive));
-  const bool isPseudo =
-      (normLang.compare(QStringLiteral("Pseudocode"), Qt::CaseInsensitive) == 0 ||
-       normLang.compare(QStringLiteral("Rust"), Qt::CaseInsensitive) == 0 ||
-       normLang.contains(QStringLiteral("Pseudo"), Qt::CaseInsensitive));
-
-  static const QRegularExpression stackVarRe(
-      QStringLiteral("\\[rbp-(0x[0-9a-fA-F]+)\\]"));
-  static const QRegularExpression callSymRe(
-      QStringLiteral("<([^+>]+?)(?:@plt)?(?:\\+\\d+)?>"));
-  static const QRegularExpression lineAddrRe(
-      QStringLiteral("^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)"));
-
-  QSet<QString> stackOffsets;
-  QMap<QString, uint64_t> stackOffsetFirstAddr;
-  QStringList callsFound;
-  bool hasLoopBackEdge = false;
-  bool hasCondBranch = false;
-
-  for (const auto &arc : m_branchArcs) {
-    if (arc.toAddr <= arc.fromAddr) {
-      hasLoopBackEdge = true;
-    }
-    if (arc.isConditional) {
-      hasCondBranch = true;
-    }
-  }
-
-  for (const DisasmBasicBlock &bb : m_basicBlocks) {
-    for (const QString &line : bb.lines) {
-      uint64_t lineAddr = bb.startAddress;
-      QRegularExpressionMatch am = lineAddrRe.match(line);
-      if (am.hasMatch()) {
-        bool ok = false;
-        const uint64_t parsed = am.captured(1).toULongLong(&ok, 16);
-        if (ok) {
-          lineAddr = parsed;
-        }
-      }
-      QRegularExpressionMatch sm = stackVarRe.match(line);
-      if (sm.hasMatch()) {
-        const QString off = sm.captured(1).mid(2);
-        stackOffsets.insert(off);
-        if (!stackOffsetFirstAddr.contains(off)) {
-          stackOffsetFirstAddr.insert(off, lineAddr);
-        }
-      }
-      if (line.contains(QStringLiteral("call"))) {
-        QRegularExpressionMatch cm = callSymRe.match(line);
-        if (cm.hasMatch()) {
-          callsFound.append(cm.captured(1));
-        }
-      }
-    }
-  }
-
-  QStringList sortedOffsets = stackOffsets.values();
-  std::sort(sortedOffsets.begin(), sortedOffsets.end());
-
-  m_decompilerLineToAddr.clear();
-  m_addrToDecompilerLine.clear();
-
-  QStringList out;
-  auto emitLine = [&](const QString &text, uint64_t addr, bool isPrimaryStmt) {
-    out << text;
-    const int lineNum = out.size();
-    if (addr != 0ULL) {
-      m_decompilerLineToAddr.insert(lineNum, addr);
-      if (isPrimaryStmt || !m_addrToDecompilerLine.contains(addr)) {
-        m_addrToDecompilerLine.insert(addr, lineNum);
-      }
-    }
-  };
-
-  const uint64_t entryAddr =
-      m_basicBlocks.isEmpty() ? 0x00401120ULL : m_basicBlocks.first().startAddress;
-
-  if (isCpp) {
-    emitLine(QStringLiteral("// DECOMPILED C++ / MPI | %1").arg(m_activeSymbol), entryAddr, false);
-    emitLine(QStringLiteral("#include <mpi.h>"), entryAddr, false);
-    emitLine(QStringLiteral("#include <cstdint>"), entryAddr, false);
-    emitLine(QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol), entryAddr, true);
-    for (const QString &off : sortedOffsets) {
-      emitLine(QStringLiteral("  std::int32_t var_%1h = 0; // [rbp-0x%1]").arg(off),
-               stackOffsetFirstAddr.value(off, entryAddr), false);
-    }
-  } else if (isPseudo) {
-    emitLine(QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1").arg(m_activeSymbol), entryAddr, false);
-    emitLine(QStringLiteral("proc %1(argc, argv):").arg(m_activeSymbol), entryAddr, true);
-    for (const QString &off : sortedOffsets) {
-      emitLine(QStringLiteral("  local var_%1h := 0").arg(off),
-               stackOffsetFirstAddr.value(off, entryAddr), false);
-    }
-  } else {
-    emitLine(QStringLiteral("/* DECOMPILED APPROX C & XREFS | %1 */").arg(m_activeSymbol), entryAddr, false);
-    emitLine(QStringLiteral("#include <stdint.h>"), entryAddr, false);
-    emitLine(QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol), entryAddr, true);
-    for (const QString &off : sortedOffsets) {
-      emitLine(QStringLiteral("  int32_t var_%1h = 0; /* [rbp-0x%1] */").arg(off),
-               stackOffsetFirstAddr.value(off, entryAddr), false);
-    }
-  }
-
-  for (const DisasmBasicBlock &bb : m_basicBlocks) {
-    const QVector<uint64_t> inXrefs = xrefsToAddress(bb.startAddress);
-    if (!inXrefs.isEmpty()) {
-      QStringList callerStrs;
-      for (uint64_t cAddr : inXrefs) {
-        callerStrs
-            << QStringLiteral("0x%1 (jmp)").arg(cAddr, 8, 16, QChar('0'));
-      }
-      emitLine(QStringLiteral("  // XREFS TO 0x%1: %2")
-                   .arg(bb.startAddress, 8, 16, QChar('0'))
-                   .arg(callerStrs.join(QStringLiteral(", "))),
-               bb.startAddress, false);
-    }
-    emitLine(QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0')),
-             bb.startAddress, true);
-
-    int blockFirstStmtLine = out.size();
-    QVector<uint64_t> unmappedBlockAddrs;
-
-    for (const QString &instLine : bb.lines) {
-      uint64_t instAddr = bb.startAddress;
-      QRegularExpressionMatch am = lineAddrRe.match(instLine);
-      if (am.hasMatch()) {
-        bool ok = false;
-        const uint64_t parsed = am.captured(1).toULongLong(&ok, 16);
-        if (ok) {
-          instAddr = parsed;
-        }
-      }
-
-      if (instLine.contains(QStringLiteral("call")) &&
-          instLine.contains(QStringLiteral("MPI_Init"))) {
-        if (isCpp) {
-          emitLine(QStringLiteral("  MPI::Init(argc, argv); // MPI_Init(&argc, &argv)"), instAddr, true);
-        } else if (isPseudo) {
-          emitLine(QStringLiteral("  call MPI_Init(&argc, &argv)"), instAddr, true);
-        } else {
-          emitLine(QStringLiteral("  MPI_Init(&argc, &argv);"), instAddr, true);
-        }
-        blockFirstStmtLine = out.size();
-      } else if (instLine.contains(QStringLiteral("call")) &&
-                 instLine.contains(QStringLiteral("MPI_Finalize"))) {
-        if (isCpp) {
-          emitLine(QStringLiteral("  MPI::Finalize();"), instAddr, true);
-        } else if (isPseudo) {
-          emitLine(QStringLiteral("  call MPI_Finalize()"), instAddr, true);
-        } else {
-          emitLine(QStringLiteral("  MPI_Finalize();"), instAddr, true);
-        }
-        blockFirstStmtLine = out.size();
-      } else if (instLine.contains(QStringLiteral("jg "))) {
-        if (isPseudo) {
-          emitLine(QStringLiteral("  while (var_4h <= 2) do:"), instAddr, true);
-        } else {
-          emitLine(QStringLiteral("  while (var_4h <= 2) { if (var_4h > 2) goto loc_0x%1; }")
-                       .arg(bb.trueTarget, 8, 16, QChar('0')),
-                   instAddr, true);
-        }
-        m_addrToDecompilerLine.insert(bb.startAddress, out.size());
-        m_decompilerLineToAddr.insert(out.size(), bb.startAddress);
-        blockFirstStmtLine = out.size();
-      } else if (instLine.contains(QStringLiteral("je "))) {
-        if (isPseudo) {
-          emitLine(QStringLiteral("  if (var_4h == 0) then goto loc_0x%1")
-                       .arg(bb.trueTarget, 8, 16, QChar('0')),
-                   instAddr, true);
-        } else {
-          emitLine(QStringLiteral("  if (var_4h == 0) { goto loc_0x%1; } else { var_4h += 1; }")
-                       .arg(bb.trueTarget, 8, 16, QChar('0')),
-                   instAddr, true);
-        }
-        blockFirstStmtLine = out.size();
-      } else if (instLine.contains(QStringLiteral("jmp "))) {
-        if (isPseudo) {
-          emitLine(QStringLiteral("  jump loc_0x%1")
-                       .arg(bb.trueTarget, 8, 16, QChar('0')),
-                   instAddr, true);
-        } else {
-          emitLine(QStringLiteral("  goto loc_0x%1;")
-                       .arg(bb.trueTarget, 8, 16, QChar('0')),
-                   instAddr, true);
-        }
-        blockFirstStmtLine = out.size();
-      } else if (instLine.contains(QStringLiteral("ret"))) {
-        emitLine(isPseudo ? QStringLiteral("  return 0")
-                          : QStringLiteral("  return 0;"),
-                 instAddr, true);
-        blockFirstStmtLine = out.size();
-      } else {
-        unmappedBlockAddrs.append(instAddr);
-      }
-    }
-
-    for (uint64_t uAddr : unmappedBlockAddrs) {
-      if (!m_addrToDecompilerLine.contains(uAddr)) {
-        m_addrToDecompilerLine.insert(uAddr, blockFirstStmtLine);
-      }
-    }
-  }
-
-  if (!hasLoopBackEdge && !hasCondBranch && m_basicBlocks.isEmpty()) {
-    emitLine(QStringLiteral("  int32_t var_4h = 0;"), entryAddr, false);
-    emitLine(QStringLiteral("  if (var_4h == 0) { MPI_Init(&argc, &argv); }"), entryAddr, true);
-  }
-  if (!isPseudo) {
-    const uint64_t endAddr =
-        m_basicBlocks.isEmpty() ? entryAddr : m_basicBlocks.last().endAddress;
-    emitLine(QStringLiteral("}"), endAddr, false);
-  }
-  return out.join('\n');
-}
-
+/**
+ * @brief Updates the program counter (PC) locations of all active MPI ranks.
+ *
+ * Re-highlights the active instruction in linear assembly and reconstructs the CFG
+ * canvas when in graph mode to reflect updated rank badges across basic blocks.
+ *
+ * @param rankPcs Map from MPI rank ID to current 64-bit instruction pointer.
+ */
 void DisassemblyView::setRankAddresses(const QMap<int, uint64_t> &rankPcs) {
   m_rankAddresses = rankPcs;
   highlightActiveInstruction();
@@ -613,6 +399,11 @@ void DisassemblyView::setRankAddresses(const QMap<int, uint64_t> &rankPcs) {
   }
 }
 
+/**
+ * @brief Returns sorted list of MPI ranks currently residing within a basic block.
+ * @param blockStartAddr Starting instruction address of the basic block.
+ * @return Sorted vector of MPI rank IDs present in the block.
+ */
 QVector<int> DisassemblyView::ranksAtBlock(uint64_t blockStartAddr) const {
   QVector<int> result;
   for (const auto &block : m_basicBlocks) {
@@ -633,6 +424,10 @@ QVector<int> DisassemblyView::ranksAtBlock(uint64_t blockStartAddr) const {
   return result;
 }
 
+/**
+ * @brief Sets the actively highlighted MPI rank in the CFG and linear views.
+ * @param rankId Zero-based MPI rank identifier.
+ */
 void DisassemblyView::setSelectedRank(int rankId) {
   m_selectedRank = rankId;
   if (m_graphMode) {
@@ -643,6 +438,10 @@ void DisassemblyView::setSelectedRank(int rankId) {
   }
 }
 
+/**
+ * @brief Toggles the visibility of the interactive CFG minimap overlay.
+ * @param visible True to paint the minimap overlay.
+ */
 void DisassemblyView::setGraphMinimapVisible(bool visible) {
   m_graphMinimapVisible = visible;
   if (m_cfgView && m_cfgView->viewport()) {
@@ -650,6 +449,10 @@ void DisassemblyView::setGraphMinimapVisible(bool visible) {
   }
 }
 
+/**
+ * @brief Computes the viewport geometry rectangle for the CFG minimap overlay.
+ * @return QRect in viewport coordinates, or empty rect if minimap is disabled.
+ */
 QRect DisassemblyView::minimapRect() const {
   if (!m_graphMinimapVisible) {
     return QRect();
@@ -660,11 +463,20 @@ QRect DisassemblyView::minimapRect() const {
       m_cfgView->viewport()->width() >= mmW + 16 &&
       m_cfgView->viewport()->height() >= mmH + 16) {
     const QRect vp = m_cfgView->viewport()->rect();
+    // Anchor minimap in the bottom-right corner of the CFG viewport
     return QRect(vp.right() - mmW - 8, vp.bottom() - mmH - 8, mmW, mmH);
   }
   return QRect(8, 8, mmW, mmH);
 }
 
+/**
+ * @brief Constructs the 2D interactive Control Flow Graph (CFG) scene.
+ *
+ * Traverses basic blocks, formats instruction text items with syntax highlighting
+ * (mnemonics, calls, branches, function headers), calculates bounding boxes, adds
+ * block headers with address intervals and MPI rank occupancy badges, and connects
+ * blocks with orthogonal Manhattan true (green), false (red), and unconditional (blue) edges.
+ */
 void DisassemblyView::rebuildCfgScene() {
   if (!m_cfgScene) {
     return;
@@ -707,12 +519,14 @@ void DisassemblyView::rebuildCfgScene() {
       maxChars = qMax(maxChars, static_cast<int>(l.length()));
     }
 
+    // Calculate bounding box dimensions based on font metrics and line count
     const qreal boxW =
         qBound(260.0, maxChars * fm.horizontalAdvance('M') + 20.0, 420.0);
     const qreal headerH = 20.0;
     const qreal lineH = fm.height() + 2.0;
     const qreal boxH = headerH + renderLines.size() * lineH + 8.0;
 
+    // Apply alternating horizontal offsets for compact branch branches
     qreal xOffset = 0.0;
     if (i > 0 && bb.lines.size() <= 4 && (i % 2 == 1)) {
       xOffset = -44.0;
@@ -722,6 +536,7 @@ void DisassemblyView::rebuildCfgScene() {
     const qreal boxX = horizontalCenter - boxW * 0.5 + xOffset;
     const QRectF boxRect(boxX, currentY, boxW, boxH);
 
+    // Determine whether this block is currently active (contains instruction pointer or selected rank)
     const QVector<int> occRanks = ranksAtBlock(bb.startAddress);
     const bool hasSelectedRank = occRanks.contains(m_selectedRank);
     const bool isActiveBlock =
@@ -732,6 +547,7 @@ void DisassemblyView::rebuildCfgScene() {
       activeBlockRect = boxRect;
     }
 
+    // Outer card container rectangle
     auto *rectItem = m_cfgScene->addRect(
         boxRect,
         QPen(isActiveBlock ? QColor("#528bff") : QColor("#333842"),
@@ -740,6 +556,7 @@ void DisassemblyView::rebuildCfgScene() {
     rectItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     rectItem->setZValue(1.0);
 
+    // Block header bar background
     QRectF headerRect(boxX, currentY, boxW, headerH);
     auto *hdrItem = m_cfgScene->addRect(
         headerRect, QPen(Qt::NoPen),
@@ -747,6 +564,7 @@ void DisassemblyView::rebuildCfgScene() {
     hdrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrItem->setZValue(2.0);
 
+    // Block title label displaying address interval [start .. end]
     auto *hdrText = m_cfgScene->addSimpleText(
         QStringLiteral("loc_0x%1  [0x%1 .. 0x%2]")
             .arg(bb.startAddress, 6, 16, QChar('0'))
@@ -784,8 +602,10 @@ void DisassemblyView::rebuildCfgScene() {
       rankBadgeText->setZValue(3.2);
     }
 
+    // Step 1.2: Render individual instruction lines within the basic-block body
     qreal lineY = currentY + headerH + 3.0;
     for (const QString &instLine : renderLines) {
+      // Highlight matching decompiler/assembly search token background if active
       if (!m_highlightedToken.isEmpty() &&
           instLine.contains(m_highlightedToken, Qt::CaseInsensitive)) {
         auto *tokBg = m_cfgScene->addRect(
@@ -796,20 +616,28 @@ void DisassemblyView::rebuildCfgScene() {
       }
       auto *txt = m_cfgScene->addSimpleText(instLine, monoFont);
       txt->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
+
+      // Apply syntax palette depending on mnemonic category
       if (instLine.startsWith(QStringLiteral("(fcn)"))) {
+        // Function signature definition (yellow)
         txt->setBrush(QColor("#dcdcaa"));
       } else if (instLine.startsWith(';')) {
+        // Assembly comments / stack argument notes (green)
         txt->setBrush(QColor("#6a9955"));
       } else if (instLine.contains(
                      QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) {
+        // Control flow conditional branches and jumps (orange-red)
         txt->setBrush(QColor("#ce9178"));
       } else if (instLine.contains(
                      QRegularExpression("\\b(call|ret|leave)\\b"))) {
+        // Procedure calls and frame teardown (teal)
         txt->setBrush(QColor("#4ec9b0"));
       } else if (instLine.contains(
                      QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) {
+        // Arithmetic, data movement, and stack ops (blue)
         txt->setBrush(QColor("#569cd6"));
       } else {
+        // General instructions and register operands (light slate)
         txt->setBrush(QColor("#d4d7dc"));
       }
       txt->setPos(boxX + 8.0, lineY);
@@ -821,6 +649,7 @@ void DisassemblyView::rebuildCfgScene() {
     currentY += boxH + verticalGap;
   }
 
+  // Step 2: Route orthogonal Manhattan edge connections between blocks
   for (const DisasmBasicBlock &bb : std::as_const(m_basicBlocks)) {
     if (!nodeGeoms.contains(bb.startAddress)) {
       continue;
@@ -833,6 +662,7 @@ void DisassemblyView::rebuildCfgScene() {
       }
       const QRectF dstRect = nodeGeoms.value(succAddr).rect;
 
+      // Color edges: green for true branch, red for false/fallthrough branch, blue for unconditional
       QColor edgeColor("#569cd6");
       qreal portOffset = 0.0;
       if (bb.trueTarget != 0 && bb.falseTarget != 0) {
@@ -848,13 +678,16 @@ void DisassemblyView::rebuildCfgScene() {
       QPointF startPt(srcRect.center().x() + portOffset, srcRect.bottom());
       QPointF endPt(dstRect.center().x(), dstRect.top());
 
+      // Manhattan orthogonal path routing
       QPainterPath path(startPt);
       if (dstRect.top() >= srcRect.bottom()) {
+        // Forward edge: step vertically half-way, step horizontally to destination X, step down
         const qreal midY = (startPt.y() + endPt.y()) * 0.5;
         path.lineTo(startPt.x(), midY);
         path.lineTo(endPt.x(), midY);
         path.lineTo(endPt);
       } else {
+        // Backward loop edge: route outward to the left margin, loop upward, and re-enter destination
         const qreal loopX = qMin(srcRect.left(), dstRect.left()) - 28.0;
         path.lineTo(startPt.x(), startPt.y() + 12.0);
         path.lineTo(loopX, startPt.y() + 12.0);
@@ -866,6 +699,7 @@ void DisassemblyView::rebuildCfgScene() {
       auto *edgeItem = m_cfgScene->addPath(path, QPen(edgeColor, 1.8));
       edgeItem->setZValue(0.5);
 
+      // Render triangular arrowhead pointing at destination block top center
       QPolygonF arrowHead;
       arrowHead << endPt << QPointF(endPt.x() - 4.0, endPt.y() - 7.0)
                 << QPointF(endPt.x() + 4.0, endPt.y() - 7.0);
@@ -875,6 +709,7 @@ void DisassemblyView::rebuildCfgScene() {
     }
   }
 
+  // Adjust scene rectangle with padding and center on the active block
   m_cfgScene->setSceneRect(
       m_cfgScene->itemsBoundingRect().adjusted(-24, -16, 24, 24));
   if (m_cfgView && !activeBlockRect.isNull()) {
@@ -882,4 +717,35 @@ void DisassemblyView::rebuildCfgScene() {
   }
 }
 
-} // namespace gridlock::ui
+/**
+ * @brief Provides the default canned x86_64 MPI initialization assembly snippet.
+ * @return Multi-line disassembly listing featuring an MPI rank initialization loop.
+ */
+QString DisassemblyView::defaultStartupDisassembly() {
+  return QStringLiteral(
+      "0x00401120 <main+0>:  endbr64                 ; MPI_Init prologue\n"
+      "0x00401124 <main+4>:  push  rbp\n"
+      "0x00401125 <main+5>:  mov   rbp, rsp\n"
+      "0x00401128 <main+8>:  sub   rsp, 0x90         ; DeeplyNested data[3]\n"
+      "0x0040112f <main+15>: lea   rdi, [rbp-0x88]   ; &argc\n"
+      "0x00401136 <main+22>: lea   rsi, [rbp-0x90]   ; &argv\n"
+      "0x0040113d <main+29>: call  0x00401050        ; <MPI_Init@plt>\n"
+      "0x00401142 <main+34>: mov   dword [rbp-0x4], 0x0\n"
+      "0x00401149 <main+41>: cmp   dword [rbp-0x4], 0x2\n"
+      "0x0040114d <main+45>: jg    0x00401178        ; exit rank init loop\n"
+      "0x0040114f <main+47>: mov   eax, dword [rbp-0x4]\n"
+      "0x00401152 <main+50>: cmp   eax, 0x0\n"
+      "0x00401155 <main+53>: je    0x00401168        ; branch if rank == 0\n"
+      "0x00401157 <main+55>: movsd xmm0, qword [rip+0xea9]\n"
+      "0x0040115f <main+63>: add   dword [rbp-0x4], 0x1\n"
+      "0x00401163 <main+67>: jmp   0x00401149        ; loop back -> 0x401149\n"
+      "0x00401168 <main+72>: xor   eax, eax          ; rank 0 coordinator\n"
+      "0x0040116a <main+74>: add   dword [rbp-0x4], 0x1\n"
+      "0x0040116e <main+78>: jmp   0x00401149        ; rejoin loop header\n"
+      "0x00401178 <main+88>: call  0x00401060        ; <MPI_Finalize@plt>\n"
+      "0x0040117d <main+93>: mov   eax, 0x0\n"
+      "0x00401182 <main+98>: leave\n"
+      "0x00401183 <main+99>: ret");
+}
+
+}  // namespace gridlock::ui
