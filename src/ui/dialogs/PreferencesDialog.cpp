@@ -44,6 +44,18 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setMinimumSize(780, 540);
     resize(860, 580);
 
+    // Apply unified dark-slate workstation dialog chrome and compact control heights.
+    setStyleSheet(QStringLiteral(
+        "QDialog { background: #16181d; color: #d7dae0; }"
+        "QGroupBox { background: #1b1e24; border: 1px solid #282c34; border-radius: 3px; "
+        "margin-top: 8px; padding-top: 10px; color: #d7dae0; }"
+        "QLineEdit, QComboBox, QSpinBox { background: #181a1f; color: #d7dae0; "
+        "border: 1px solid #323844; border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
+        "QPushButton { background: #282c34; color: #d7dae0; border: 1px solid #3b4048; "
+        "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
+        "QPushButton:hover { background: #323842; color: #ffffff; }"
+        "QLabel#separator { background: #2c313a; }"));
+
     // Root vertical layout containing the splitter and bottom action button bar.
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
@@ -61,7 +73,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({190, 670});
+    splitter->setSizes({170, 690});
 
     rootLayout->addWidget(splitter, 1);
 
@@ -73,22 +85,42 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
 
     setupButtonBox();
     rootLayout->addWidget(m_buttonBox);
+
+    // Harmonize control heights across all stacked settings pages and footer buttons.
+    for (QPushButton* btn : findChildren<QPushButton*>()) {
+        btn->setFixedHeight(24);
+    }
+    for (QLineEdit* edit : findChildren<QLineEdit*>()) {
+        edit->setFixedHeight(24);
+    }
+    for (QComboBox* combo : findChildren<QComboBox*>()) {
+        combo->setFixedHeight(24);
+    }
 }
 
 /**
  * @brief Builds the vertical category navigation list with icons.
  *
- * Populates a QListWidget with category labels and Nerd Font glyphs rendered
- * dynamically onto transparent QPixmaps. Connects selection changes to index
- * switching on the QStackedWidget.
+ * Populates a 170px QListWidget with category labels and Nerd Font glyphs rendered
+ * dynamically onto transparent QPixmaps. Suppresses horizontal scrollbars and
+ * applies a sleek 28px-row navigation style with a 2px #528bff active indicator bar.
  */
 void PreferencesDialog::setupSidebar() {
     m_sidebar = new QListWidget(this);
-    m_sidebar->setFixedWidth(190);
-    m_sidebar->setIconSize(QSize(20, 20));
+    m_sidebar->setFixedWidth(170);
+    m_sidebar->setIconSize(QSize(16, 16));
     m_sidebar->setSpacing(0);
     m_sidebar->setFrameShape(QFrame::NoFrame);
+    m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_sidebar->setProperty("role", "sidebar");
+    m_sidebar->setStyleSheet(QStringLiteral(
+        "QListWidget { background: #1e2128; color: #abb2bf; border: none; "
+        "border-right: 1px solid #2c313a; outline: none; font-size: 11px; }"
+        "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 2px solid transparent; }"
+        "QListWidget::item:hover { background: #252932; color: #ffffff; }"
+        "QListWidget::item:selected { background: #262b36; color: #ffffff; "
+        "border-left: 2px solid #528bff; font-weight: 600; }"));
 
     struct Entry {
         QString label;
@@ -101,21 +133,21 @@ void PreferencesDialog::setupSidebar() {
         {tr("Terminal"), "\uf120"},        {tr("Docsets"), "\uf02d"},
     };
 
-    // Render each category icon using Symbols Nerd Font into a 20x20 QPixmap.
+    // Render each category icon using Symbols Nerd Font into a 16x16 QPixmap.
     for (const auto& e : entries) {
         auto* item = new QListWidgetItem(m_sidebar);
         item->setText(e.label);
 
-        QPixmap pixmap(20, 20);
+        QPixmap pixmap(16, 16);
         pixmap.fill(Qt::transparent);
         QPainter painter(&pixmap);
         painter.setRenderHint(QPainter::Antialiasing);
-        painter.setFont(QFont("Symbols Nerd Font", 14));
+        painter.setFont(QFont("Symbols Nerd Font", 11));
         painter.setPen(QColor("#cdd6f4"));
-        painter.drawText(0, 0, 20, 20, Qt::AlignCenter, e.iconName);
+        painter.drawText(0, 0, 16, 16, Qt::AlignCenter, e.iconName);
         item->setIcon(QIcon(pixmap));
 
-        item->setSizeHint(QSize(190, 44));
+        item->setSizeHint(QSize(168, 28));
         m_sidebar->addItem(item);
     }
 
@@ -158,13 +190,16 @@ void PreferencesDialog::setupPages() {
 }
 
 /**
- * @brief Constructs standard Ok, Apply, and Cancel dialog buttons.
+ * @brief Constructs standard Ok, Apply, and Cancel dialog buttons with 24px height.
  */
 void PreferencesDialog::setupButtonBox() {
     m_buttonBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel,
         Qt::Horizontal, this);
-    m_buttonBox->setContentsMargins(12, 10, 12, 10);
+    m_buttonBox->setContentsMargins(12, 8, 12, 8);
+    for (QAbstractButton* btn : m_buttonBox->buttons()) {
+        btn->setFixedHeight(24);
+    }
 
     connect(m_buttonBox, &QDialogButtonBox::accepted, this,
             &PreferencesDialog::acceptAndApply);

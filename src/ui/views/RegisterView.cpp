@@ -85,13 +85,18 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Create monospace table widget
+    // Create borderless monospace table widget with alternating rows and 48px minimum section size
     m_table = new QTableWidget(this);
     m_table->setObjectName("cutterRegisterTable");
+    m_table->setFrameShape(QFrame::NoFrame);
+    m_table->setAlternatingRowColors(true);
     m_table->setColumnCount(2);
     m_table->setHorizontalHeaderLabels({"REG", "VALUE / ROLE"});
+    m_table->horizontalHeader()->setVisible(true);
+    m_table->horizontalHeader()->setMinimumSectionSize(48);
     m_table->horizontalHeader()->setStretchLastSection(true);
     m_table->horizontalHeader()->setDefaultSectionSize(76);
+    m_table->setColumnWidth(0, 76);
     m_table->verticalHeader()->setVisible(false);
     m_table->verticalHeader()->setDefaultSectionSize(20);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);

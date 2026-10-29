@@ -733,8 +733,13 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget* parent)
             &DocsetSettingsPage::onAutoDetect);
     layout->addWidget(m_autoDetectBtn, 0, Qt::AlignLeft);
 
+    // Configure borderless docsets table with alternating row colors and 48px minimum section size.
     m_table = new QTableWidget(0, 1, this);
+    m_table->setFrameShape(QFrame::NoFrame);
+    m_table->setAlternatingRowColors(true);
+    m_table->verticalHeader()->setVisible(false);
     m_table->setHorizontalHeaderLabels({"Installed Docsets"});
+    m_table->horizontalHeader()->setMinimumSectionSize(48);
     m_table->horizontalHeader()->setStretchLastSection(true);
     layout->addWidget(m_table);
 

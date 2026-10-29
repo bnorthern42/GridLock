@@ -46,15 +46,35 @@ TutorialDialog::TutorialDialog(QWidget* parent)
     : QDialog(parent) {
     setWindowTitle("Interactive Tutorials");
     setWindowFlags(Qt::Dialog | Qt::WindowTitleHint | Qt::WindowCloseButtonHint);
-    resize(600, 400);
+    setMinimumSize(600, 380);
+    resize(640, 420);
+    setStyleSheet(QStringLiteral(
+        "QDialog { background: #16181d; color: #d7dae0; }"
+        "QPushButton { background: #282c34; color: #d7dae0; border: 1px solid #3b4048; "
+        "border-radius: 2px; padding: 2px 12px; min-height: 22px; max-height: 24px; }"));
 
+    // Configure sleek 180px dark-slate navigation sidebar with 28px rows.
     m_listWidget = new QListWidget(this);
+    m_listWidget->setFixedWidth(180);
+    m_listWidget->setFrameShape(QFrame::NoFrame);
+    m_listWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_listWidget->setProperty("role", "sidebar");
+    m_listWidget->setStyleSheet(QStringLiteral(
+        "QListWidget { background: #1e2128; color: #abb2bf; border: none; "
+        "border-right: 1px solid #2c313a; outline: none; font-size: 11px; }"
+        "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 2px solid transparent; }"
+        "QListWidget::item:hover { background: #252932; color: #ffffff; }"
+        "QListWidget::item:selected { background: #262b36; color: #ffffff; "
+        "border-left: 2px solid #528bff; font-weight: 600; }"));
+
     m_stackedWidget = new QStackedWidget(this);
 
-    // Arrange sidebar list and preview card with 1:2 stretch ratio.
+    // Arrange sidebar list and preview card with flush zero-margin outer layout.
     auto* mainLayout = new QHBoxLayout(this);
-    mainLayout->addWidget(m_listWidget, 1);
-    mainLayout->addWidget(m_stackedWidget, 2);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);
+    mainLayout->addWidget(m_listWidget);
+    mainLayout->addWidget(m_stackedWidget, 1);
 
     // Switch preview card when user selects different catalog row.
     connect(m_listWidget, &QListWidget::currentRowChanged, this, &TutorialDialog::onSelectionChanged);
@@ -72,19 +92,23 @@ TutorialDialog::TutorialDialog(QWidget* parent)
  */
 void TutorialDialog::populateList() {
     for (const auto& item : TUTORIAL_DATA) {
-        m_listWidget->addItem(item.name);
+        auto* listItem = new QListWidgetItem(item.name, m_listWidget);
+        listItem->setSizeHint(QSize(176, 28));
 
-        // Construct description card widget for each tutorial entry.
+        // Construct dark-slate description card widget for each tutorial entry.
         QWidget* page = new QWidget();
         auto* pageLayout = new QVBoxLayout(page);
-        
+        pageLayout->setContentsMargins(16, 16, 16, 16);
+        pageLayout->setSpacing(8);
+
         QLabel* titleLabel = new QLabel(QString("<h2>%1</h2>").arg(item.name));
         QLabel* descLabel = new QLabel(item.description);
         descLabel->setWordWrap(true);
         descLabel->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-        
-        // Launch action button bound to tutorial submission.
+
+        // Launch action button capped at 24px height and bound to tutorial submission.
         QPushButton* launchBtn = new QPushButton("Launch Tutorial");
+        launchBtn->setFixedHeight(24);
         connect(launchBtn, &QPushButton::clicked, this, &TutorialDialog::onLaunchClicked);
 
         pageLayout->addWidget(titleLabel);

@@ -35,7 +35,9 @@ namespace gridlock::ui {
 XrefInspectorDialog::XrefInspectorDialog(QWidget* parent)
     : QDialog(parent) {
     setWindowTitle(QStringLiteral("Cross References & Call Graph"));
+    setMinimumSize(760, 460);
     resize(850, 520);
+    setStyleSheet(QStringLiteral("QDialog { background: #16181d; color: #d7dae0; }"));
     setupUi();
 }
 
@@ -63,10 +65,11 @@ void XrefInspectorDialog::setupUi() {
     m_filterEdit->setPlaceholderText(
         QStringLiteral("Filter xrefs by address, symbol, or mnemonic..."));
     m_filterEdit->setClearButtonEnabled(true);
+    m_filterEdit->setFixedHeight(24);
     m_filterEdit->setStyleSheet(
         QStringLiteral("QLineEdit { background: #21252b; color: #abb2bf; "
-                       "border: 1px solid #3b4048; border-radius: 3px; padding: 3px 6px; "
-                       "font-family: 'JetBrains Mono'; font-size: 11px; }"));
+                       "border: 1px solid #3b4048; border-radius: 3px; padding: 2px 6px; "
+                       "font-family: 'JetBrains Mono'; font-size: 11px; max-height: 24px; }"));
     headerLayout->addWidget(m_filterEdit, 1);
     mainLayout->addWidget(headerWidget);
 
@@ -78,7 +81,7 @@ void XrefInspectorDialog::setupUi() {
     auto* tableSplitter = new QSplitter(Qt::Horizontal, mainSplitter);
     tableSplitter->setHandleWidth(4);
 
-    // Helper lambda to create standardized reference tables
+    // Helper lambda to create standardized borderless reference tables
     auto createTable = [this](const QString& title) -> QTableWidget* {
         auto* container = new QWidget(this);
         auto* lay = new QVBoxLayout(container);
@@ -90,23 +93,32 @@ void XrefInspectorDialog::setupUi() {
         lay->addWidget(lbl);
 
         auto* tbl = new QTableWidget(container);
+        tbl->setFrameShape(QFrame::NoFrame);
+        tbl->setAlternatingRowColors(true);
         tbl->setColumnCount(4);
         tbl->setHorizontalHeaderLabels({QStringLiteral("TYPE"), QStringLiteral("FROM"),
                                         QStringLiteral("TO"), QStringLiteral("INSTRUCTION")});
-        tbl->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-        tbl->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-        tbl->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+        tbl->horizontalHeader()->setVisible(true);
+        tbl->horizontalHeader()->setMinimumSectionSize(48);
+        tbl->horizontalHeader()->setStretchLastSection(true);
+        tbl->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
+        tbl->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Interactive);
+        tbl->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Interactive);
         tbl->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+        tbl->setColumnWidth(0, 64);
+        tbl->setColumnWidth(1, 96);
+        tbl->setColumnWidth(2, 96);
         tbl->verticalHeader()->setVisible(false);
         tbl->setSelectionBehavior(QAbstractItemView::SelectRows);
         tbl->setSelectionMode(QAbstractItemView::SingleSelection);
         tbl->setEditTriggers(QAbstractItemView::NoEditTriggers);
         tbl->setStyleSheet(
-            QStringLiteral("QTableWidget { background: #1e2227; color: #abb2bf; "
-                           "gridline-color: #2c313c; font-family: 'JetBrains Mono'; font-size: 11px; }"
-                           "QHeaderView::section { background: #282c34; color: #5c6370; "
-                           "padding: 2px; border: 1px solid #1e2227; font-size: 10px; }"
-                           "QTableWidget::item:selected { background: #2c313a; color: #61afef; }"));
+            QStringLiteral("QTableWidget { background: #1e2227; alternate-background-color: #21252d; "
+                           "color: #abb2bf; border: none; gridline-color: #2c313c; "
+                           "font-family: 'JetBrains Mono'; font-size: 11px; }"
+                           "QHeaderView::section { background: #282c34; color: #abb2bf; "
+                           "padding: 2px 6px; border: 1px solid #1e2227; font-size: 10px; }"
+                           "QTableWidget::item:selected { background: #264f78; color: #ffffff; }"));
         lay->addWidget(tbl);
         return tbl;
     };

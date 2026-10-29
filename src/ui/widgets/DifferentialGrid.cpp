@@ -22,14 +22,21 @@ namespace gridlock::ui {
  * @param parent Optional parent widget.
  */
 DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
+    setFrameShape(QFrame::NoFrame);
+    setAlternatingRowColors(true);
+    horizontalHeader()->setVisible(true);
+    horizontalHeader()->setMinimumSectionSize(48);
+    horizontalHeader()->setDefaultSectionSize(110);
     horizontalHeader()->setStretchLastSection(true);
-    
+    verticalHeader()->setDefaultSectionSize(22);
+
     // Seed initial row/col for inline watch input
     setRowCount(1);
     setColumnCount(1);
     setVerticalHeaderItem(0, new QTableWidgetItem("Add Watch ->"));
     setHorizontalHeaderItem(0, new QTableWidgetItem("New Variable"));
     setItem(0, 0, new QTableWidgetItem(""));
+    setColumnWidth(0, 140);
     
     // When user types an expression in cell (0, 0), dispatch watchVariableAdded
     connect(this, &QTableWidget::cellChanged, this, [this](int row, int col) {

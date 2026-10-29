@@ -17,13 +17,29 @@
 namespace gridlock::ui::dialogs {
 
 /**
- * @brief Constructs wizard pages and sets modal window caption.
+ * @brief Constructs wizard pages, applies dark-slate chrome, and sets modal window geometry.
  * @param parent Optional parent widget.
  */
 ProjectWizard::ProjectWizard(QWidget *parent) : QWizard(parent) {
   setWindowTitle("New Project Wizard");
+  setMinimumSize(540, 380);
+  resize(580, 420);
+  setStyleSheet(QStringLiteral(
+      "QWizard, QWizardPage { background: #16181d; color: #d7dae0; }"
+      "QLineEdit, QSpinBox { background: #181a1f; color: #d7dae0; border: 1px solid #323844; "
+      "border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
+      "QPushButton { background: #282c34; color: #d7dae0; border: 1px solid #3b4048; "
+      "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"));
   addPage(createWorkspacePage());
   addPage(createMpiPage());
+
+  // Enforce 24px control height cap across all wizard inputs and navigation buttons.
+  for (QPushButton *btn : findChildren<QPushButton *>()) {
+    btn->setFixedHeight(24);
+  }
+  for (QLineEdit *edit : findChildren<QLineEdit *>()) {
+    edit->setFixedHeight(24);
+  }
 }
 
 /**
@@ -38,11 +54,14 @@ QWizardPage *ProjectWizard::createWorkspacePage() {
 
   // Project name field.
   m_projectNameEdit = new QLineEdit();
+  m_projectNameEdit->setFixedHeight(24);
   layout->addRow("Project Name:", m_projectNameEdit);
 
   // Workspace folder selector with directory browse button.
   m_workspaceDirEdit = new QLineEdit();
+  m_workspaceDirEdit->setFixedHeight(24);
   auto *dirBtn = new QPushButton("Browse...");
+  dirBtn->setFixedHeight(24);
   connect(dirBtn, &QPushButton::clicked, this, [this]() {
     QString dir =
         QFileDialog::getExistingDirectory(this, "Select Workspace Directory");
@@ -56,7 +75,9 @@ QWizardPage *ProjectWizard::createWorkspacePage() {
 
   // Target executable path with file browse button.
   m_targetExecEdit = new QLineEdit();
+  m_targetExecEdit->setFixedHeight(24);
   auto *execBtn = new QPushButton("Browse...");
+  execBtn->setFixedHeight(24);
   connect(execBtn, &QPushButton::clicked, this, [this]() {
     QString file =
         QFileDialog::getOpenFileName(this, "Select Target Executable");
@@ -70,6 +91,7 @@ QWizardPage *ProjectWizard::createWorkspacePage() {
 
   // CLI argument string passed to binary when launched.
   m_execArgsEdit = new QLineEdit();
+  m_execArgsEdit->setFixedHeight(24);
   m_execArgsEdit->setPlaceholderText("-v --config=file.txt");
   layout->addRow("Executable Arguments:", m_execArgsEdit);
 

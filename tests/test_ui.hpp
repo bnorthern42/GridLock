@@ -120,4 +120,7 @@ private slots:
 
     /** @brief Verifies workstation UI cohesion across all bottom tabs, F1 docset lookup, and tab audit snapshots. */
     void testWorkstationUiCohesionAndIntegratedDocViewer();
+
+    /** @brief Verifies dark-slate visual cohesion across modal dialogs, category sidebars, and table/tree headers. */
+    void testDialogsAndTablesVisualCohesion();
 };

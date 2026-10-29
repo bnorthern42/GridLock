@@ -88,6 +88,7 @@ void VariablesDockWidget::setupUi() {
     QLabel* scopeLabel = new QLabel(QStringLiteral("Scope:"), headerBar);
     m_rankSelector = new QComboBox(headerBar);
     m_rankSelector->setFixedHeight(22);
+    m_rankSelector->addItem(QStringLiteral("Rank 0 (Master)"), 0);
     topBar->addWidget(scopeLabel);
     topBar->addWidget(m_rankSelector, 1);
     layout->addWidget(headerBar);
@@ -102,10 +103,15 @@ void VariablesDockWidget::setupUi() {
     m_variablesTree->setItemsExpandable(true);
     m_variablesTree->setExpandsOnDoubleClick(true);
 
-    // Distribute tree column header widths across Name, Value, and Type.
+    // Distribute tree column header widths across Name, Value, and Type with >= 48px minimum section size.
+    m_variablesTree->header()->setVisible(true);
+    m_variablesTree->header()->setMinimumSectionSize(48);
+    m_variablesTree->header()->setDefaultSectionSize(96);
+    m_variablesTree->header()->setStretchLastSection(true);
     m_variablesTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_variablesTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_variablesTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_variablesTree->header()->setSectionResizeMode(2, QHeaderView::Interactive);
+    m_variablesTree->setColumnWidth(2, 72);
 
     layout->addWidget(m_variablesTree, 1);
 

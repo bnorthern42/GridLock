@@ -120,8 +120,14 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   topLayout->addWidget(m_collapseAllBtn);
   filesLayout->addWidget(topBar);
 
+  // Configure borderless file system tree view with visible column header and 48px minimum section size.
   m_treeView = new QTreeView(filesPage);
-  m_treeView->setHeaderHidden(true);
+  m_treeView->setFrameShape(QFrame::NoFrame);
+  m_treeView->setAlternatingRowColors(true);
+  m_treeView->setHeaderHidden(false);
+  m_treeView->header()->setVisible(true);
+  m_treeView->header()->setMinimumSectionSize(48);
+  m_treeView->header()->setStretchLastSection(true);
 
   // Initialize Qt standard file system model for directory traversal
   m_fileSystemModel = new QFileSystemModel(this);
@@ -169,6 +175,8 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   // Three-column symbols table: SYMBOL, ADDRESS, SIZE
   m_symbolsTable = new QTableWidget(0, 3, symbolsPage);
   m_symbolsTable->setObjectName("symbolsTable");
+  m_symbolsTable->setFrameShape(QFrame::NoFrame);
+  m_symbolsTable->setAlternatingRowColors(true);
   m_symbolsTable->setHorizontalHeaderLabels({"SYMBOL", "ADDRESS", "SIZE"});
   m_symbolsTable->verticalHeader()->setVisible(false);
   m_symbolsTable->verticalHeader()->setDefaultSectionSize(20);
@@ -177,14 +185,15 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_symbolsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
   m_symbolsTable->setShowGrid(true);
   m_symbolsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  m_symbolsTable->horizontalHeader()->setMinimumSectionSize(34);
+  m_symbolsTable->horizontalHeader()->setVisible(true);
+  m_symbolsTable->horizontalHeader()->setMinimumSectionSize(48);
   m_symbolsTable->horizontalHeader()->setStretchLastSection(false);
-  // Column 0 stretches with window width, columns 1 and 2 have fixed widths
+  // Column 0 stretches with window width, columns 1 and 2 have fixed widths >= 48px
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
   m_symbolsTable->setColumnWidth(1, 88);
-  m_symbolsTable->setColumnWidth(2, 44);
+  m_symbolsTable->setColumnWidth(2, 52);
 
   symbolsLayout->addWidget(m_symbolsTable, 1);
   m_stack->addWidget(symbolsPage);
@@ -215,6 +224,8 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   // Three-column binary strings table: ADDRESS, SECTION, STRING
   m_stringsTable = new QTableWidget(0, 3, stringsPage);
   m_stringsTable->setObjectName("stringsTable");
+  m_stringsTable->setFrameShape(QFrame::NoFrame);
+  m_stringsTable->setAlternatingRowColors(true);
   m_stringsTable->setStyleSheet(
       "background: #181a1f; border: none; font-family: 'JetBrains Mono', monospace; "
       "font-size: 11px;");
@@ -226,14 +237,15 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_stringsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
   m_stringsTable->setShowGrid(true);
   m_stringsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  m_stringsTable->horizontalHeader()->setMinimumSectionSize(34);
+  m_stringsTable->horizontalHeader()->setVisible(true);
+  m_stringsTable->horizontalHeader()->setMinimumSectionSize(48);
   m_stringsTable->horizontalHeader()->setStretchLastSection(true);
-  // Address and section columns have fixed widths, string value stretches
+  // Address and section columns have fixed widths >= 48px, string value stretches
   m_stringsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
   m_stringsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
   m_stringsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
   m_stringsTable->setColumnWidth(0, 82);
-  m_stringsTable->setColumnWidth(1, 58);
+  m_stringsTable->setColumnWidth(1, 64);
 
   stringsLayout->addWidget(m_stringsTable, 1);
   m_stack->addWidget(stringsPage);
