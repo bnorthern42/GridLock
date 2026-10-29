@@ -33,6 +33,7 @@
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/CliParser.cpp"
+#include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
@@ -612,4 +613,75 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
     mainWindow.show();
     QVERIFY(!mainWindow.isMinimized());
     QVERIFY(!mainWindow.isHidden());
+}
+
+/**
+ * @brief Tests ELF64 binary parsing, section and symbol extraction, and static target loading.
+ */
+void TestMainWindowUI::testElfBinaryInspectorAndStaticTargetLoad() {
+    // 1. Locate current test executable to serve as a valid 64-bit ELF binary target.
+    const QString appPath = QCoreApplication::applicationFilePath();
+    QVERIFY(!appPath.isEmpty());
+    QVERIFY(QFile::exists(appPath));
+
+    // 2. Parse binary using ElfBinaryInspector.
+    gridlock::core::ElfBinaryInspector inspector;
+    QVERIFY(inspector.loadFile(appPath));
+    QVERIFY(inspector.isValid());
+    QVERIFY(inspector.entryPoint() != 0ULL);
+
+    // 3. Inspect ELF section headers (.text, .rodata, .data, etc.).
+    const auto sections = inspector.sections();
+    QVERIFY(!sections.isEmpty());
+    bool hasTextSection = false;
+    uint64_t textVaddr = 0;
+    for (const auto& sec : sections) {
+        if (sec.name == QStringLiteral(".text")) {
+            hasTextSection = true;
+            textVaddr = sec.address;
+            break;
+        }
+    }
+    QVERIFY(hasTextSection);
+    QVERIFY(textVaddr != 0ULL);
+
+    // 4. Inspect extracted symbol table entries (functions and objects).
+    const auto symbols = inspector.symbols();
+    QVERIFY(symbols.size() > 20);
+
+    // 5. Inspect extracted printable ASCII strings from .rodata / string tables.
+    const auto strings = inspector.strings();
+    QVERIFY(strings.size() > 10);
+
+    // 6. Test virtual memory byte reading for the .text section.
+    const QByteArray textBytes = inspector.readVirtualMemory(textVaddr, 32);
+    QCOMPARE(textBytes.size(), 32);
+    // Code section bytes must not be completely all zeroes.
+    QVERIFY(textBytes != QByteArray(32, '\0'));
+
+    // 7. Verify disassembleRange produces formatted assembly lines.
+    const QString disasmOutput = inspector.disassembleRange(textVaddr, 32, QStringLiteral("entry"));
+    QVERIFY(!disasmOutput.isEmpty());
+
+    // 8. Test MainWindow static target loading and widget population.
+    gridlock::ui::MainWindow mainWindow;
+    QVERIFY(mainWindow.loadBinaryTarget(appPath));
+
+    // 9. Verify ProjectExplorerWidget contains populated symbols and strings.
+    auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
+    QVERIFY(explorer != nullptr);
+    QVERIFY(explorer->symbolCount() > 20);
+    QVERIFY(explorer->stringCount() > 10);
+
+    // 10. Verify address seek synchronizes MemView and DisassemblyView.
+    const QString hexAddrStr = QString("0x%1").arg(textVaddr, 0, 16);
+    QVERIFY(mainWindow.seekToAddressOrExpression(hexAddrStr));
+
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    QVERIFY(memView != nullptr);
+    QCOMPARE(memView->currentBaseAddress(), textVaddr);
+
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(disasmView != nullptr);
+    QVERIFY(!disasmView->toPlainText().isEmpty());
 }

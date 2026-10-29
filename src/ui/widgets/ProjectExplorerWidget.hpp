@@ -100,6 +100,18 @@ public:
     bool activateSymbol(const QString& symbolName);
 
     /**
+     * @brief Populates the symbols view with externally parsed symbols.
+     * @param symbols Vector of symbol entries.
+     */
+    void setSymbols(const std::vector<SymbolEntry>& symbols);
+
+    /**
+     * @brief Populates the strings view with externally parsed strings.
+     * @param strings Vector of string entries.
+     */
+    void setStrings(const std::vector<StringEntry>& strings);
+
+    /**
      * @brief Toggles the binary strings inspector mode.
      * @param enabled True for Strings mode.
      */

@@ -14,6 +14,7 @@
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/SessionManager.hpp"
 #include "../core/managers/ThemeManager.hpp"
+#include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "dialogs/PreferencesDialog.hpp"
 #include "docks/TerminalDockWidget.hpp"
@@ -472,6 +473,13 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
     if (m_memView) {
         if (hexOk && parsedAddr != 0ULL) {
             m_memView->seekToAddress(parsedAddr);
+            // If static ELF inspector is loaded, populate memory bytes directly from disk image.
+            if (m_elfInspector && m_elfInspector->isValid()) {
+                const QByteArray rawBytes = m_elfInspector->readVirtualMemory(parsedAddr, 256);
+                if (!rawBytes.isEmpty()) {
+                    m_memView->setMemoryData(normalized, rawBytes);
+                }
+            }
         }
         if (auto* addrEdit = m_memView->findChild<QLineEdit*>()) {
             addrEdit->setText(normalized);
@@ -485,6 +493,13 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
     // Synchronize Disassembly and Decompiler graph/linear viewports.
     if (m_disassemblyView) {
         if (hexOk && parsedAddr != 0ULL) {
+            // Disassemble region from static ELF image if active.
+            if (m_elfInspector && m_elfInspector->isValid()) {
+                const QString disasm = m_elfInspector->disassembleRange(parsedAddr, 64);
+                if (!disasm.isEmpty()) {
+                    m_disassemblyView->setPlainText(disasm);
+                }
+            }
             // Determine if source code mapping exists or if fallback decompiler is required.
             const bool hasSourceMapping =
                 (parsedAddr >= 0x00401120ULL && parsedAddr <= 0x004011ffULL) &&
@@ -791,6 +806,50 @@ bool MainWindow::execTutorialDialog() {
         return true;
     }
     return false;
+}
+
+/**
+ * @brief Loads a 64-bit ELF binary executable or shared object for static inspection.
+ *
+ * Parses section headers, symbol tables, and printable ASCII strings from the
+ * specified binary using native ELF64 structures, populates the ProjectExplorerWidget
+ * symbol and string tables, and synchronizes the memory and disassembly views.
+ *
+ * @param binaryPath Path to executable file on disk.
+ * @return True if file is valid ELF64 and successfully parsed; false otherwise.
+ */
+bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
+    auto inspector = std::make_unique<gridlock::core::ElfBinaryInspector>();
+    if (!inspector->loadFile(binaryPath)) {
+        return false;
+    }
+
+    m_elfInspector = std::move(inspector);
+
+    // Populate ProjectExplorerWidget with parsed ELF symbols and strings
+    if (m_projectExplorerWidget) {
+        std::vector<SymbolEntry> syms;
+        syms.reserve(m_elfInspector->symbols().size());
+        for (const auto& s : m_elfInspector->symbols()) {
+            syms.push_back({s.name, s.address, static_cast<uint32_t>(s.size)});
+        }
+        m_projectExplorerWidget->setSymbols(syms);
+
+        std::vector<StringEntry> strs;
+        strs.reserve(m_elfInspector->strings().size());
+        for (const auto& str : m_elfInspector->strings()) {
+            strs.push_back({str.address, str.section, str.value});
+        }
+        m_projectExplorerWidget->setStrings(strs);
+    }
+
+    // Seek to entry point if non-zero
+    const uint64_t entry = m_elfInspector->entryPoint();
+    if (entry != 0ULL) {
+        seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
+    }
+
+    return true;
 }
 
 }  // namespace gridlock::ui

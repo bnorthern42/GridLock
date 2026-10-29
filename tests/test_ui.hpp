@@ -105,4 +105,7 @@ private slots:
 
     /** @brief Audits entire repository for Google C++ Style and documentation. */
     void testFullRepoGoogleStyleAndDocumentation();
+
+    /** @brief Verifies native ELF64 binary parsing, symbols, .rodata strings, and target loading. */
+    void testElfBinaryInspectorAndStaticTargetLoad();
 };

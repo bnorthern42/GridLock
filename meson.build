@@ -76,6 +76,7 @@ src_files = [
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
 ]
 
@@ -249,6 +250,7 @@ ui_test_src = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp',
   'src/core/Version.cpp',
 ]
 

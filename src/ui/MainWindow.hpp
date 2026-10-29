@@ -10,6 +10,7 @@
 #pragma once
 
 #include "../RankState.hpp"
+#include "../core/utils/ElfBinaryInspector.hpp"
 
 #include <QCloseEvent>
 #include <QLabel>
@@ -145,6 +146,13 @@ public:
      */
     bool seekToAddressOrExpression(const QString& expr);
 
+    /**
+     * @brief Loads a 64-bit ELF binary executable or shared object for static inspection.
+     * @param binaryPath Path to executable file on disk.
+     * @return True if file is valid ELF64 and successfully parsed.
+     */
+    bool loadBinaryTarget(const QString& binaryPath);
+
     bool canNavigateBack() const;
     bool canNavigateForward() const;
     bool navigateBack();
@@ -233,6 +241,7 @@ private:
     std::unordered_map<int, RankState> m_latestStates;
     QString m_currentFile;
     QMap<QString, QSet<int>> m_persistentBreakpoints;
+    std::unique_ptr<gridlock::core::ElfBinaryInspector> m_elfInspector;
 };
 
 }  // namespace gridlock::ui

@@ -354,6 +354,24 @@ void ProjectExplorerWidget::seedDefaultStrings() {
 }
 
 /**
+ * @brief Sets externally parsed symbols and refreshes the symbols table view.
+ * @param symbols Vector of symbol entries.
+ */
+void ProjectExplorerWidget::setSymbols(const std::vector<SymbolEntry>& symbols) {
+  m_symbols = symbols;
+  populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
+}
+
+/**
+ * @brief Sets externally parsed strings and refreshes the strings table view.
+ * @param strings Vector of string entries.
+ */
+void ProjectExplorerWidget::setStrings(const std::vector<StringEntry>& strings) {
+  m_strings = strings;
+  populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+}
+
+/**
  * @brief Populates the symbols QTableWidget, applying an optional substring filter.
  * @param filterText Filter query matched against symbol name or hexadecimal address.
  */
