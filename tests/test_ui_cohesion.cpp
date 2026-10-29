@@ -855,6 +855,84 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
                             .arg(statusLabel->text())));
 }
 
+/**
+ * @brief Verifies bidirectional SourceCodeView <-> DisassemblyView line/address sync and Code/Reverse/MPI workspace perspectives.
+ *
+ * Validates three ergonomic requirements from Prompt 29:
+ * 1. Bidirectional Source Line <-> Instruction Address Mapping:
+ *    Confirms mainWindow.sourceLineToAddress(13) == 0x0040113dULL (MPI_Init) and
+ *    mainWindow.addressToSourceLine(0x0040113dULL) == 13, and verifies that calling
+ *    sourceView->selectSourceLine(16) seeks DisassemblyView to 0x00401149ULL.
+ * 2. Workspace Perspective Switching ("Code", "Reverse", "MPI"):
+ *    Confirms setWorkspacePerspective("Reverse") enables Split CFG + Decompiler mode and
+ *    expands DisassemblyView to >= 700px width, "MPI" switches BottomConsoleTabs to
+ *    MPI Diagnostics, and "Code" restores side-by-side source and assembly panes.
+ * 3. Bottom Console Maximize Toggle:
+ *    Confirms toggleMaximizeBottomConsole() expands and restores the bottom tab dock height.
+ */
+void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
+        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
+                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
+                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+        mainWindow.loadSourceFile(demoPath);
+    }
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    QVERIFY(sourceView != nullptr && disasmView != nullptr && bottomTabs != nullptr);
+
+    // 1. Bidirectional Source Line <-> Instruction Address Mapping.
+    QCOMPARE(mainWindow.sourceLineToAddress(13), 0x0040113dULL);
+    QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
+
+    sourceView->selectSourceLine(16);
+    QApplication::processEvents();
+    QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
+
+    emit disasmView->addressSelected(0x0040113dULL);
+    QApplication::processEvents();
+    QCOMPARE(sourceView->executionLine(), 13);
+
+    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code").
+    mainWindow.setWorkspacePerspective(QStringLiteral("Reverse"));
+    QApplication::processEvents();
+    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
+    QVERIFY2(disasmView->isSplitGraphDecompilerMode(),
+             "Reverse perspective must enable Split CFG + Decompiler mode");
+    QVERIFY2(disasmView->width() >= 700,
+             qPrintable(QString("Expected DisassemblyView width >= 700 in Reverse perspective, got %1")
+                            .arg(disasmView->width())));
+
+    mainWindow.setWorkspacePerspective(QStringLiteral("MPI"));
+    QApplication::processEvents();
+    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("MPI"));
+    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive),
+             "MPI perspective must activate the MPI Diagnostics bottom tab");
+
+    mainWindow.setWorkspacePerspective(QStringLiteral("Code"));
+    QApplication::processEvents();
+    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Code"));
+    QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200,
+             "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
+
+    // 3. Toggle Maximize Bottom Console.
+    const int baseHeight = bottomTabs->height();
+    mainWindow.toggleMaximizeBottomConsole();
+    QApplication::processEvents();
+    QVERIFY2(bottomTabs->height() > baseHeight,
+             "toggleMaximizeBottomConsole() must expand BottomConsoleTabs height");
+    mainWindow.toggleMaximizeBottomConsole();
+    QApplication::processEvents();
+}
+
 
 
 

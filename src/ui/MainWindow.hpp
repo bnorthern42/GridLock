@@ -153,6 +153,37 @@ public:
     void updateDebugToolbarState();
 
     /**
+     * @brief Maps a 1-based C/C++ source line number to its corresponding 64-bit instruction address.
+     * @param lineOneBased 1-based source line index.
+     * @return 64-bit virtual instruction address.
+     */
+    uint64_t sourceLineToAddress(int lineOneBased) const;
+
+    /**
+     * @brief Maps a 64-bit virtual instruction address to its corresponding 1-based C/C++ source line.
+     * @param address 64-bit virtual instruction address.
+     * @return 1-based source line number.
+     */
+    int addressToSourceLine(uint64_t address) const;
+
+    /**
+     * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
+     * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
+     */
+    void setWorkspacePerspective(const QString& perspective);
+
+    /**
+     * @brief Returns the currently active workspace perspective identifier ("Code", "Reverse", or "MPI").
+     * @return Active perspective name.
+     */
+    QString workspacePerspective() const { return m_workspacePerspective; }
+
+    /**
+     * @brief Toggles the bottom console dock between standard height (260px) and maximized height (65%).
+     */
+    void toggleMaximizeBottomConsole();
+
+    /**
      * @brief Dispatches a debug command through the coordinator.
      * @param cmd Unique pointer to command object.
      */
@@ -311,6 +342,11 @@ private:
     bool m_showingDecompilerFallback = false;
     bool m_forceDecompilerFallback = false;
     bool m_debugSessionActive = false;
+    bool m_bottomConsoleMaximized = false;
+    QString m_workspacePerspective = QStringLiteral("Code");
+    QPushButton* m_perspCodeBtn = nullptr;
+    QPushButton* m_perspReverseBtn = nullptr;
+    QPushButton* m_perspMpiBtn = nullptr;
 
     IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

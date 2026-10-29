@@ -430,6 +430,18 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
 }
 
 /**
+ * @brief Selects a 1-based source line, highlights it as active, and emits sourceLineSelected.
+ * @param lineOneBased 1-based source line number.
+ */
+void SourceCodeView::selectSourceLine(int lineOneBased) {
+    if (lineOneBased <= 0) {
+        return;
+    }
+    highlightExecutionLine(lineOneBased);
+    emit sourceLineSelected(lineOneBased);
+}
+
+/**
  * @brief Adjusts viewport margins to accommodate the gutter width with zero right margin.
  */
 void SourceCodeView::updateLineNumberAreaWidth(int) {
@@ -530,7 +542,7 @@ void SourceCodeView::handleHoverTimeout() {
 }
 
 /**
- * @brief Handles mouse clicks in the editor body, supporting Ctrl+Click variable pinning.
+ * @brief Handles mouse clicks in the editor body, supporting Ctrl+Click variable pinning and line selection sync.
  * @param event Mouse press event.
  */
 void SourceCodeView::mousePressEvent(QMouseEvent *event) {
@@ -547,6 +559,12 @@ void SourceCodeView::mousePressEvent(QMouseEvent *event) {
     m_lastHoveredWord.clear();
     emit hideHoverTooltip();
     QPlainTextEdit::mousePressEvent(event);
+    if (event->button() == Qt::LeftButton && !(event->modifiers() & Qt::ControlModifier)) {
+        const int clickedLine = textCursor().blockNumber() + 1;
+        if (clickedLine > 0) {
+            emit sourceLineSelected(clickedLine);
+        }
+    }
 }
 
 /**

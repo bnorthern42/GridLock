@@ -111,6 +111,12 @@ public:
     int executionLine() const { return m_executionLine; }
 
     /**
+     * @brief Selects a 1-based source line, highlights it, and emits sourceLineSelected.
+     * @param lineOneBased 1-based source line number.
+     */
+    void selectSourceLine(int lineOneBased);
+
+    /**
      * @brief Returns the plain text contents of the source document.
      * @return Plain text string.
      */
@@ -199,6 +205,9 @@ signals:
 
     /** @brief Emitted to pin a variable into the watch view. */
     void pinVariableRequested(const QString& varName);
+
+    /** @brief Emitted when a 1-based source line is selected or clicked by the user. */
+    void sourceLineSelected(int lineOneBased);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;

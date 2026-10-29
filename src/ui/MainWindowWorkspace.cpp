@@ -324,9 +324,9 @@ void MainWindow::setupToolbar() {
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
   m_seekBar->setFixedHeight(22);
-  m_seekBar->setMinimumWidth(300);
-  m_seekBar->setFixedWidth(320);
-  m_seekBar->setMaximumWidth(320);
+  m_seekBar->setMinimumWidth(160);
+  m_seekBar->setFixedWidth(180);
+  m_seekBar->setMaximumWidth(200);
   // Apply monospace JetBrains Mono font for legible hex address formatting.
   QFont seekFont("JetBrains Mono");
   seekFont.setStyleHint(QFont::Monospace);
@@ -659,11 +659,14 @@ void MainWindow::setupDocks() {
   m_disassemblyView->setSizePolicy(QSizePolicy::Expanding,
                                    QSizePolicy::Expanding);
   m_disassemblyView->setContentsMargins(0, 0, 0, 0);
-  // Synchronize all workspace views whenever an instruction address is clicked in DisassemblyView.
+  // Synchronize all workspace views and highlight matching C/C++ source line when an instruction is clicked.
   connect(m_disassemblyView, &DisassemblyView::addressSelected, this,
           [this](uint64_t addr) {
             seekToAddressOrExpression(
                 QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+            if (SourceCodeView *srcView = sourceCodeView()) {
+              srcView->highlightExecutionLine(addressToSourceLine(addr));
+            }
           });
   // Write patched instruction bytes back to the in-memory ELF binary image when edited in DisassemblyView.
   connect(m_disassemblyView, &DisassemblyView::instructionPatched, this,

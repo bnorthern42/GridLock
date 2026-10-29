@@ -138,6 +138,9 @@ private slots:
 
     /** @brief Verifies toolbar target/rank controls, state-aware debugger action enablement, and synchronized Run -> Step -> Register/Source/Rack -> Stop workflow. */
     void testEndToEndStepDebuggingWorkflowAndToolbarState();
+
+    /** @brief Verifies bidirectional SourceCodeView <-> DisassemblyView line/address sync and Code/Reverse/MPI workspace perspective switching. */
+    void testSourceToAssemblySyncAndWorkspacePerspectives();
 };
 
 
