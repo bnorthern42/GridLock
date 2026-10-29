@@ -199,6 +199,45 @@ public:
     uint64_t advanceRankProgramCounter(int rank, uint64_t currentPc);
 
     /**
+     * @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for a directory or source file.
+     * @param targetPath Project directory path or source file path.
+     * @return Detected build system identifier string.
+     */
+    QString detectBuildSystem(const QString& targetPath) const;
+
+    /**
+     * @brief Constructs the shell build command for a given project directory or standalone source file.
+     * @param targetPath Project directory path or source file path.
+     * @return Shell command string to compile the target.
+     */
+    QString buildCommandForPath(const QString& targetPath) const;
+
+    /**
+     * @brief Constructs the shell clean command for a given project directory or standalone source file.
+     * @param targetPath Project directory path or source file path.
+     * @return Shell command string to clean build artifacts.
+     */
+    QString cleanCommandForPath(const QString& targetPath) const;
+
+    /**
+     * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected build command.
+     * @return True if the build command was generated and dispatched to TerminalDockWidget.
+     */
+    bool buildTargetWorkflow();
+
+    /**
+     * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected clean command.
+     * @return True if the clean command was generated and dispatched to TerminalDockWidget.
+     */
+    bool cleanTargetWorkflow();
+
+    /**
+     * @brief Switches BottomConsoleTabs to Terminal and dispatches a chained clean && build command.
+     * @return True if the rebuild command was generated and dispatched to TerminalDockWidget.
+     */
+    bool rebuildTargetWorkflow();
+
+    /**
      * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
      * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
      */

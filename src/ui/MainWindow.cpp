@@ -609,22 +609,19 @@ void MainWindow::setupMenu() {
   connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
   menuBar->addMenu("&View");
 
-  // Construct Tools menu for external build tools, unit tests, and compilers.
+  // Construct Tools menu for smart build system compilation, cleaning, rebuilding, and unit tests.
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
   QAction *buildAction = toolsMenu->addAction("Build Target");
-  connect(buildAction, &QAction::triggered, this, [this]() {
-    if (!networkLog())
-      return;
-    networkLog()->appendText("Building target...\n");
-    QProcess *proc = new QProcess(this);
-    connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
-      if (networkLog()) networkLog()->appendText(proc->readAllStandardOutput());
-    });
-    connect(proc, &QProcess::readyReadStandardError, this, [this, proc]() {
-      if (networkLog()) networkLog()->appendError(proc->readAllStandardError());
-    });
-    proc->start("ninja", QStringList() << "-C" << "build" << "mpi_mm_bin");
-  });
+  buildAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
+  connect(buildAction, &QAction::triggered, this, &MainWindow::buildTargetWorkflow);
+
+  QAction *cleanAction = toolsMenu->addAction("Clean Target");
+  connect(cleanAction, &QAction::triggered, this, &MainWindow::cleanTargetWorkflow);
+
+  QAction *rebuildAction = toolsMenu->addAction("Rebuild Target");
+  connect(rebuildAction, &QAction::triggered, this, &MainWindow::rebuildTargetWorkflow);
+
+  toolsMenu->addSeparator();
   QAction *runTestsAction = toolsMenu->addAction("Run Tests");
   connect(runTestsAction, &QAction::triggered, this,
           &MainWindow::runTargetRequested);

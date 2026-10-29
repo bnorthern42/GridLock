@@ -199,4 +199,16 @@ QStringList TerminalDockWidget::environment() const {
     return m_environment;
 }
 
+/**
+ * @brief Dispatches a shell command to the embedded QTermWidget session and appends a newline.
+ * @param command Shell command string to execute in the terminal.
+ */
+void TerminalDockWidget::sendCommand(const QString& command) {
+    m_lastSentCommand = command.trimmed();
+    if (m_termWidget != nullptr && !m_lastSentCommand.isEmpty()) {
+        // Dispatch command text followed by newline to trigger interactive shell execution.
+        m_termWidget->sendText(m_lastSentCommand + QStringLiteral("\n"));
+    }
+}
+
 }  // namespace gridlock::ui

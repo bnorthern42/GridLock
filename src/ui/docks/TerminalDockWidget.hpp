@@ -95,12 +95,25 @@ public:
      */
     QStringList environment() const;
 
+    /**
+     * @brief Dispatches a shell command to the embedded QTermWidget session and appends a newline.
+     * @param command Shell command string to execute in the terminal.
+     */
+    void sendCommand(const QString& command);
+
+    /**
+     * @brief Retrieves the last command sent to the embedded terminal session.
+     * @return Trimmed command string most recently sent via sendCommand().
+     */
+    QString lastSentCommand() const { return m_lastSentCommand; }
+
 private:
     QTermWidget* m_termWidget{nullptr};    ///< Underlying QTermWidget instance.
     QFont m_requestedFont;                 ///< User-configured terminal font setting.
     QFont m_activeFont;                    ///< Active validated monospace font.
     QString m_colorScheme;                 ///< Active color scheme name.
     QStringList m_environment;             ///< Shell process environment array.
+    QString m_lastSentCommand;             ///< Most recent shell command sent via sendCommand().
 };
 
 }  // namespace gridlock::ui

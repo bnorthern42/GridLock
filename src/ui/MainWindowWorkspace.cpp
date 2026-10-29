@@ -225,6 +225,19 @@ void MainWindow::setupToolbar() {
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
 
+  // Build Action: Auto-detects Meson/CMake/Make/SingleFileMPI and compiles in the embedded Terminal tab.
+  // Switches BottomConsoleTabs to TerminalDockWidget and updates status bar telemetry to BUILDING.
+  QAction *toolbarBuildAct = new QAction("⚙ Build", this);
+  connect(toolbarBuildAct, &QAction::triggered, this, &MainWindow::buildTargetWorkflow);
+  toolbar->addAction(toolbarBuildAct);
+
+  // Clean Action: Auto-detects active build system and dispatches clean command to Terminal tab.
+  // Removes compiled binary artifacts or runs build-system target clean.
+  QAction *toolbarCleanAct = new QAction("✕ Clean", this);
+  connect(toolbarCleanAct, &QAction::triggered, this, &MainWindow::cleanTargetWorkflow);
+  toolbar->addAction(toolbarCleanAct);
+  toolbar->addSeparator();
+
   // Run Action: Starts target execution across all configured MPI ranks and pauses Rank 0 at entry.
   // Enabled in Idle state; disabled while an active debugging session is already running.
   m_runAction = new QAction("▶ Run Target", this);

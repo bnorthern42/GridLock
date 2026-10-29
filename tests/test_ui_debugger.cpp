@@ -10,14 +10,19 @@
 #include "test_ui.hpp"
 
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QLabel>
 #include <QString>
 #include <QTabWidget>
+#include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTextEdit>
 #include <QtTest/QtTest>
 
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
@@ -300,3 +305,132 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     QVERIFY2(!docContent.contains(QStringLiteral("MPI-3.1 Standard")),
              "Looking up 'mov' must NEVER display MPI-3.1 Standard text");
 }
+
+/**
+ * @brief Verifies smart Meson/CMake/Make/SingleFileMPI build system detection and Terminal build/clean/rebuild workflow.
+ *
+ * Test workflow:
+ * 1. Creates isolated temporary directories representing Meson, CMake, Make, and standalone MPI C++ projects.
+ * 2. Verifies detectBuildSystem(), buildCommandForPath(), and cleanCommandForPath() for each project type.
+ * 3. Loads a standalone source file in MainWindow, switches BottomConsoleTabs away from Terminal,
+ *    and invokes buildTargetWorkflow(), cleanTargetWorkflow(), and rebuildTargetWorkflow().
+ * 4. Verifies that BottomConsoleTabs switches to TerminalDockWidget, dispatches the build/clean
+ *    commands via sendCommand(), and updates #cutterStatusTelemetry.
+ */
+void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflow() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // =========================================================================
+    // Part 1: Smart Build System Detection Across Project Types
+    // =========================================================================
+    // Case A: Meson + Ninja project directory
+    {
+        QTemporaryDir mesonDir;
+        QVERIFY(mesonDir.isValid());
+        QFile mesonFile(mesonDir.filePath(QStringLiteral("meson.build")));
+        QVERIFY(mesonFile.open(QIODevice::WriteOnly));
+        mesonFile.write("project('demo', 'cpp')\n");
+        mesonFile.close();
+
+        QDir(mesonDir.path()).mkpath(QStringLiteral("builddir"));
+        QFile ninjaFile(mesonDir.filePath(QStringLiteral("builddir/build.ninja")));
+        QVERIFY(ninjaFile.open(QIODevice::WriteOnly));
+        ninjaFile.write("# ninja build file\n");
+        ninjaFile.close();
+
+        QCOMPARE(mainWindow.detectBuildSystem(mesonDir.path()), QStringLiteral("Meson"));
+        QVERIFY(mainWindow.buildCommandForPath(mesonDir.path()).contains(QStringLiteral("ninja -C")));
+        QVERIFY(mainWindow.cleanCommandForPath(mesonDir.path()).contains(QStringLiteral("clean")));
+    }
+
+    // Case B: CMake project directory
+    {
+        QTemporaryDir cmakeDir;
+        QVERIFY(cmakeDir.isValid());
+        QFile cmakeFile(cmakeDir.filePath(QStringLiteral("CMakeLists.txt")));
+        QVERIFY(cmakeFile.open(QIODevice::WriteOnly));
+        cmakeFile.write("cmake_minimum_required(VERSION 3.20)\nproject(demo)\n");
+        cmakeFile.close();
+
+        QCOMPARE(mainWindow.detectBuildSystem(cmakeDir.path()), QStringLiteral("CMake"));
+        QVERIFY(mainWindow.buildCommandForPath(cmakeDir.path()).contains(QStringLiteral("cmake --build")));
+        QVERIFY(mainWindow.cleanCommandForPath(cmakeDir.path()).contains(QStringLiteral("clean")));
+    }
+
+    // Case C: GNU Make project directory
+    {
+        QTemporaryDir makeDir;
+        QVERIFY(makeDir.isValid());
+        QFile makeFile(makeDir.filePath(QStringLiteral("Makefile")));
+        QVERIFY(makeFile.open(QIODevice::WriteOnly));
+        makeFile.write("all:\n\t@echo building\nclean:\n\t@echo cleaning\n");
+        makeFile.close();
+
+        QCOMPARE(mainWindow.detectBuildSystem(makeDir.path()), QStringLiteral("Make"));
+        QVERIFY(mainWindow.buildCommandForPath(makeDir.path()).contains(QStringLiteral("make")));
+        QVERIFY(mainWindow.cleanCommandForPath(makeDir.path()).contains(QStringLiteral("make clean")));
+    }
+
+    // Case D: Standalone MPI / C++ source file
+    QTemporaryDir singleFileDir;
+    QVERIFY(singleFileDir.isValid());
+    const QString demoSourcePath = singleFileDir.filePath(QStringLiteral("demo.cpp"));
+    {
+        QFile srcFile(demoSourcePath);
+        QVERIFY(srcFile.open(QIODevice::WriteOnly));
+        srcFile.write("#include <mpi.h>\nint main(int argc, char** argv) { return 0; }\n");
+        srcFile.close();
+
+        QCOMPARE(mainWindow.detectBuildSystem(demoSourcePath), QStringLiteral("SingleFileMPI"));
+        const QString singleBuildCmd = mainWindow.buildCommandForPath(demoSourcePath);
+        QVERIFY(singleBuildCmd.contains(QStringLiteral("-g")));
+        QVERIFY(singleBuildCmd.contains(QStringLiteral("-o")));
+        QVERIFY(mainWindow.cleanCommandForPath(demoSourcePath).contains(QStringLiteral("rm -f")));
+    }
+
+    // =========================================================================
+    // Part 2: Interactive Build / Clean / Rebuild Terminal Workflow
+    // =========================================================================
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
+    auto* statusLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
+    QVERIFY(bottomTabs != nullptr && terminalDock != nullptr && statusLabel != nullptr);
+
+    // Load the standalone source file and switch away from the Terminal tab.
+    mainWindow.loadSourceFile(demoSourcePath);
+    for (int i = 0; i < bottomTabs->count(); ++i) {
+        if (bottomTabs->widget(i) != terminalDock) {
+            bottomTabs->setCurrentIndex(i);
+            break;
+        }
+    }
+    QVERIFY(bottomTabs->currentWidget() != terminalDock);
+
+    // Trigger Build Target workflow: must focus Terminal tab, send compile command, and update telemetry.
+    QVERIFY(mainWindow.buildTargetWorkflow());
+    QApplication::processEvents();
+    QCOMPARE(bottomTabs->currentWidget(), terminalDock);
+    QVERIFY(!terminalDock->lastSentCommand().isEmpty());
+    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("-g")));
+    QVERIFY(statusLabel->text().contains(QStringLiteral("BUILDING"), Qt::CaseInsensitive));
+
+    // Trigger Clean Target workflow: must focus Terminal tab, send clean command, and update telemetry.
+    QVERIFY(mainWindow.cleanTargetWorkflow());
+    QApplication::processEvents();
+    QCOMPARE(bottomTabs->currentWidget(), terminalDock);
+    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) ||
+            terminalDock->lastSentCommand().contains(QStringLiteral("clean")));
+    QVERIFY(statusLabel->text().contains(QStringLiteral("CLEANING"), Qt::CaseInsensitive));
+
+    // Trigger Rebuild Target workflow: must chain clean and build commands in Terminal.
+    QVERIFY(mainWindow.rebuildTargetWorkflow());
+    QApplication::processEvents();
+    QCOMPARE(bottomTabs->currentWidget(), terminalDock);
+    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("&&")));
+}
+

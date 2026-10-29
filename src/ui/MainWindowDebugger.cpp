@@ -14,17 +14,22 @@
 #include <memory>
 
 #include <QApplication>
+#include <QComboBox>
+#include <QDir>
 #include <QFileInfo>
 #include <QLabel>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QString>
 #include <QStringList>
+#include <QTabWidget>
 
 #include "../RankState.hpp"
 #include "../core/commands/DebugCommands.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
+#include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/RegisterView.hpp"
@@ -288,99 +293,46 @@ int MainWindow::activeSteppingRank() const {
  * @return Next virtual instruction address.
  */
 uint64_t MainWindow::advanceRankProgramCounter(int rank, uint64_t currentPc) {
-    // 1. Loop initialization instruction: mov dword [rbp-0x4], 0x0
-    // Resets per-rank loop iteration counter to zero.
+    // 1. Loop initialization instruction: mov dword [rbp-0x4], 0x0 (resets per-rank loop counter).
     if (currentPc == 0x00401142ULL) {
         m_rankLoopCounter[rank] = 0;
         return 0x00401149ULL;
     }
-
-    // 2. Loop header comparison instruction: cmp dword [rbp-0x4], 0x2
-    // Evaluates loop condition boundary.
-    if (currentPc == 0x00401149ULL) {
-        return 0x0040114dULL;
-    }
-
-    // 3. Conditional jump instruction: jg 0x00401178
-    // Takes branch to MPI_Finalize after completing 3 iterations (i = 0, 1, 2; now i >= 3).
+    // 2. Loop header comparison instruction: cmp dword [rbp-0x4], 0x2.
+    if (currentPc == 0x00401149ULL) return 0x0040114dULL;
+    // 3. Conditional jump instruction: jg 0x00401178 (takes branch after 3 iterations: i = 0, 1, 2).
     if (currentPc == 0x0040114dULL) {
-        if (m_rankLoopCounter.value(rank, 0) >= 3) {
-            return 0x00401178ULL; // Branch to MPI_Finalize epilogue
-        }
-        return 0x0040114fULL;     // Fall through to inner loop body
+        return (m_rankLoopCounter.value(rank, 0) >= 3) ? 0x00401178ULL : 0x0040114fULL;
     }
-
-    // 4. Inner loop body: load loop counter into eax register.
-    if (currentPc == 0x0040114fULL) {
-        return 0x00401152ULL;
-    }
-    // Compare eax with 0 for rank distinction.
-    if (currentPc == 0x00401152ULL) {
-        return 0x00401155ULL;
-    }
-
-    // 5. Rank-conditional branch instruction: je 0x00401168
-    // Branches to coordinator block for rank 0; falls through to worker block for ranks > 0.
+    // 4. Inner loop body: load loop counter into eax and compare for rank distinction.
+    if (currentPc == 0x0040114fULL) return 0x00401152ULL;
+    if (currentPc == 0x00401152ULL) return 0x00401155ULL;
+    // 5. Rank-conditional branch instruction: je 0x00401168 (coordinator rank 0 vs worker rank > 0).
     if (currentPc == 0x00401155ULL) {
-        if (rank == 0) {
-            return 0x00401168ULL; // Coordinator block
-        }
-        return 0x00401157ULL;     // Worker block
+        return (rank == 0) ? 0x00401168ULL : 0x00401157ULL;
     }
-
-    // 6. Worker block execution flow:
-    // Floating point computation instruction: movsd
-    if (currentPc == 0x00401157ULL) {
-        return 0x0040115fULL;
-    }
-    // Increment loop variable: add dword [rbp-0x4], 0x1
+    // 6. Worker block execution flow: movsd -> add [rbp-4], 1 -> jmp 0x00401149.
+    if (currentPc == 0x00401157ULL) return 0x0040115fULL;
     if (currentPc == 0x0040115fULL) {
         m_rankLoopCounter[rank] = m_rankLoopCounter.value(rank, 0) + 1;
         return 0x00401163ULL;
     }
-    // Unconditional loop latch back-edge: jmp 0x00401149
-    if (currentPc == 0x00401163ULL) {
-        return 0x00401149ULL; // Jumps back to loop header
-    }
-
-    // 7. Coordinator block execution flow:
-    // Coordinator reset: xor eax, eax
-    if (currentPc == 0x00401168ULL) {
-        return 0x0040116aULL;
-    }
-    // Increment loop variable: add dword [rbp-0x4], 0x1
+    if (currentPc == 0x00401163ULL) return 0x00401149ULL;
+    // 7. Coordinator block execution flow: xor eax, eax -> add [rbp-4], 1 -> jmp 0x00401149.
+    if (currentPc == 0x00401168ULL) return 0x0040116aULL;
     if (currentPc == 0x0040116aULL) {
         m_rankLoopCounter[rank] = m_rankLoopCounter.value(rank, 0) + 1;
         return 0x0040116eULL;
     }
-    // Unconditional loop latch back-edge: jmp 0x00401149
-    if (currentPc == 0x0040116eULL) {
-        return 0x00401149ULL; // Jumps back to loop header
-    }
-
-    // 8. Epilogue execution flow:
-    // Call MPI_Finalize teardown procedure.
-    if (currentPc == 0x00401178ULL) {
-        return 0x0040117dULL;
-    }
-    // Zero return code: mov eax, 0
-    if (currentPc == 0x0040117dULL) {
-        return 0x00401182ULL;
-    }
-    // Stack frame cleanup: leave
-    if (currentPc == 0x00401182ULL) {
-        return 0x00401183ULL;
-    }
-    // Procedure return: ret
-    if (currentPc == 0x00401183ULL) {
-        return 0x00401183ULL;
-    }
+    if (currentPc == 0x0040116eULL) return 0x00401149ULL;
+    // 8. Epilogue execution flow: MPI_Finalize -> mov eax, 0 -> leave -> ret.
+    if (currentPc == 0x00401178ULL) return 0x0040117dULL;
+    if (currentPc == 0x0040117dULL) return 0x00401182ULL;
+    if (currentPc == 0x00401182ULL) return 0x00401183ULL;
+    if (currentPc == 0x00401183ULL) return 0x00401183ULL;
 
     // Fall back to sequential instruction lookup from DisassemblyView.
-    if (m_disassemblyView) {
-        return m_disassemblyView->nextInstructionAddress(currentPc);
-    }
-    return currentPc + 4;
+    return m_disassemblyView ? m_disassemblyView->nextInstructionAddress(currentPc) : (currentPc + 4);
 }
 
 /**
@@ -490,17 +442,13 @@ void MainWindow::startTargetWorkflow() {
  * @return True if the instruction pointer advanced; false otherwise.
  */
 bool MainWindow::stepInstructionWorkflow() {
-    if (!m_disassemblyView) {
-        return false;
-    }
+    if (!m_disassemblyView) return false;
     m_debugSessionActive = true;
     updateDebugToolbarState();
 
-    // Determine current active stepping rank context.
+    // Determine current active stepping rank context and advance PC.
     const int activeRank = activeSteppingRank();
     m_focusedRank = activeRank;
-
-    // Advance PC using control-flow branch and loop evaluator.
     const uint64_t currentPc =
         (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : 0x00401120ULL;
     const uint64_t nextPc = advanceRankProgramCounter(activeRank, currentPc);
@@ -510,15 +458,13 @@ bool MainWindow::stepInstructionWorkflow() {
     // Update rank telemetry cache record.
     RankState& st = m_latestStates[activeRank];
     st.rankId = activeRank;
-    st.currentState = (nextPc == 0x00401183ULL) ? QStringLiteral("stopped") : QStringLiteral("stopped");
+    st.currentState = QStringLiteral("stopped");
     st.registers[16] = nextPcHex;
     st.currentFunction = QStringLiteral("main");
     st.currentLine = nextLine;
 
     // Synchronize ServerRackView and MpiDiagnosticsWidget rows.
-    if (m_serverRackView) {
-        m_serverRackView->updateRankState(activeRank, st);
-    }
+    if (m_serverRackView) m_serverRackView->updateRankState(activeRank, st);
     if (m_mpiDiagnosticsWidget) {
         m_mpiDiagnosticsWidget->updateRankStateRow(
             activeRank,
@@ -529,9 +475,7 @@ bool MainWindow::stepInstructionWorkflow() {
 
     // Seek disassembly and memory views to stepped address.
     seekToAddressOrExpression(nextPcHex);
-    if (m_disassemblyView) {
-        m_disassemblyView->setActiveSteppingRank(activeRank, nextPc);
-    }
+    if (m_disassemblyView) m_disassemblyView->setActiveSteppingRank(activeRank, nextPc);
 
     // Update CPU register file table with current loop counter and instruction pointer.
     if (m_registerView) {
@@ -546,17 +490,12 @@ bool MainWindow::stepInstructionWorkflow() {
         });
     }
 
-    // Highlight corresponding source line in SourceCodeView editor.
-    if (SourceCodeView* srcView = sourceCodeView()) {
-        srcView->highlightExecutionLine(nextLine);
-    }
-
-    // Update bottom status bar telemetry strip.
+    // Highlight corresponding source line in SourceCodeView editor and update telemetry.
+    if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(nextLine);
     updateStatusTelemetry(
         nextPcHex,
         (nextPc == 0x00401183ULL) ? QStringLiteral("STATUS: COMPLETED (RET 0)") : QStringLiteral("PAUSED (STEP)"));
 
-    // Forward StepCommand to backend coordinator if attached.
     if (m_coordinator) {
         executeCommand(std::make_unique<gridlock::core::commands::StepCommand>(
             m_coordinator, m_focusedRank + 1, false));
@@ -569,9 +508,7 @@ bool MainWindow::stepInstructionWorkflow() {
  * @return True if execution advanced; false otherwise.
  */
 bool MainWindow::continueExecutionWorkflow() {
-    if (!m_disassemblyView) {
-        return false;
-    }
+    if (!m_disassemblyView) return false;
     m_debugSessionActive = true;
     updateDebugToolbarState();
 
@@ -609,15 +546,13 @@ bool MainWindow::continueExecutionWorkflow() {
             hitBreakpoint = true;
             break;
         }
-        if (cur == 0x00401183ULL) {
-            break;
-        }
+        if (cur == 0x00401183ULL) break;
     }
 
     const QString targetHex = QStringLiteral("0x%1").arg(targetPc, 8, 16, QChar('0'));
     const int targetLine = addressToSourceLine(targetPc);
 
-    // Update telemetry state record.
+    // Update telemetry state record and refresh ServerRackView / diagnostics widgets.
     RankState& st = m_latestStates[activeRank];
     st.rankId = activeRank;
     st.currentState = QStringLiteral("stopped");
@@ -625,10 +560,7 @@ bool MainWindow::continueExecutionWorkflow() {
     st.currentFunction = QStringLiteral("main");
     st.currentLine = targetLine;
 
-    // Refresh ServerRackView and diagnostics widgets.
-    if (m_serverRackView) {
-        m_serverRackView->updateRankState(activeRank, st);
-    }
+    if (m_serverRackView) m_serverRackView->updateRankState(activeRank, st);
     if (m_mpiDiagnosticsWidget) {
         m_mpiDiagnosticsWidget->updateRankStateRow(
             activeRank, hitBreakpoint ? QStringLiteral("PAUSED (BP)") : QStringLiteral("EXITED (0)"),
@@ -638,9 +570,7 @@ bool MainWindow::continueExecutionWorkflow() {
 
     // Synchronize disassembly, registers, and source line highlights.
     seekToAddressOrExpression(targetHex);
-    if (m_disassemblyView) {
-        m_disassemblyView->setActiveSteppingRank(activeRank, targetPc);
-    }
+    if (m_disassemblyView) m_disassemblyView->setActiveSteppingRank(activeRank, targetPc);
     if (m_registerView) {
         const uint64_t offset = (targetPc >= 0x00401120ULL) ? (targetPc - 0x00401120ULL) : 0ULL;
         m_registerView->updateRegisters({
@@ -651,13 +581,10 @@ bool MainWindow::continueExecutionWorkflow() {
             {QStringLiteral("eflags"), QStringLiteral("0x00000202 [ IF ]")}
         });
     }
-    if (SourceCodeView* srcView = sourceCodeView()) {
-        srcView->highlightExecutionLine(targetLine);
-    }
+    if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(targetLine);
     updateStatusTelemetry(
         targetHex, hitBreakpoint ? QStringLiteral("PAUSED (BREAKPOINT)") : QStringLiteral("EXITED (0)"));
 
-    // Forward ContinueCommand to backend coordinator.
     if (m_coordinator) {
         executeCommand(std::make_unique<gridlock::core::commands::ContinueCommand>(
             m_coordinator, m_focusedRank + 1));
@@ -672,15 +599,9 @@ void MainWindow::stopTargetWorkflow() {
     m_debugSessionActive = false;
     updateDebugToolbarState();
     m_rankLoopCounter.clear();
-
-    // Clear active execution marker in source code editor.
-    if (SourceCodeView* srcView = sourceCodeView()) {
-        srcView->highlightExecutionLine(-1);
-    }
+    if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
     updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE"));
-    if (m_coordinator) {
-        m_coordinator->terminateSession();
-    }
+    if (m_coordinator) m_coordinator->terminateSession();
 }
 
 /**
@@ -689,18 +610,10 @@ void MainWindow::stopTargetWorkflow() {
  * @return 64-bit virtual instruction address.
  */
 uint64_t MainWindow::sourceLineToAddress(int lineOneBased) const {
-    if (m_dynamicLineToAddress.isEmpty()) {
-        const_cast<MainWindow*>(this)->rebuildDynamicSourceLineMap();
-    }
-    if (m_dynamicLineToAddress.contains(lineOneBased)) {
-        return m_dynamicLineToAddress.value(lineOneBased);
-    }
-    // Nearest previous line mapping.
+    if (m_dynamicLineToAddress.isEmpty()) const_cast<MainWindow*>(this)->rebuildDynamicSourceLineMap();
+    if (m_dynamicLineToAddress.contains(lineOneBased)) return m_dynamicLineToAddress.value(lineOneBased);
     auto it = m_dynamicLineToAddress.upperBound(lineOneBased);
-    if (it != m_dynamicLineToAddress.begin()) {
-        --it;
-        return it.value();
-    }
+    if (it != m_dynamicLineToAddress.begin()) return (--it).value();
     return 0x00401120ULL;
 }
 
@@ -710,19 +623,183 @@ uint64_t MainWindow::sourceLineToAddress(int lineOneBased) const {
  * @return Corresponding 1-based source line number.
  */
 int MainWindow::addressToSourceLine(uint64_t address) const {
-    if (m_dynamicAddressToLine.isEmpty()) {
-        const_cast<MainWindow*>(this)->rebuildDynamicSourceLineMap();
-    }
-    if (m_dynamicAddressToLine.contains(address)) {
-        return m_dynamicAddressToLine.value(address);
-    }
-    // Nearest previous address mapping.
+    if (m_dynamicAddressToLine.isEmpty()) const_cast<MainWindow*>(this)->rebuildDynamicSourceLineMap();
+    if (m_dynamicAddressToLine.contains(address)) return m_dynamicAddressToLine.value(address);
     auto it = m_dynamicAddressToLine.upperBound(address);
-    if (it != m_dynamicAddressToLine.begin()) {
-        --it;
-        return it.value();
-    }
+    if (it != m_dynamicAddressToLine.begin()) return (--it).value();
     return 12;
+}
+
+/**
+ * @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for a directory or source file.
+ * @param targetPath Project directory path or source file path.
+ * @return Detected build system identifier string.
+ */
+QString MainWindow::detectBuildSystem(const QString& targetPath) const {
+    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : targetPath.trimmed();
+    const QFileInfo info(resolvedPath);
+    const QDir dir(info.isDir() ? info.absoluteFilePath() : info.absolutePath());
+
+    // Priority order: Meson -> CMake -> Make -> SingleFileMPI.
+    if (dir.exists(QStringLiteral("meson.build"))) return QStringLiteral("Meson");
+    if (dir.exists(QStringLiteral("CMakeLists.txt"))) return QStringLiteral("CMake");
+    if (dir.exists(QStringLiteral("Makefile")) || dir.exists(QStringLiteral("GNUmakefile"))) {
+        return QStringLiteral("Make");
+    }
+    return QStringLiteral("SingleFileMPI");
+}
+
+/**
+ * @brief Constructs the shell build command for a given project directory or standalone source file.
+ * @param targetPath Project directory path or source file path.
+ * @return Shell command string to compile the target.
+ */
+QString MainWindow::buildCommandForPath(const QString& targetPath) const {
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : targetPath.trimmed();
+    const QFileInfo info(resolvedPath);
+    const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    const QDir dir(dirPath);
+
+    // 1. Meson + Ninja build command.
+    if (buildSys == QStringLiteral("Meson")) {
+        if (dir.exists(QStringLiteral("builddir/build.ninja"))) {
+            return QStringLiteral("ninja -C \"%1/builddir\"").arg(dirPath);
+        }
+        if (dir.exists(QStringLiteral("build/build.ninja"))) {
+            return QStringLiteral("ninja -C \"%1/build\"").arg(dirPath);
+        }
+        return QStringLiteral("meson setup \"%1/builddir\" \"%1\" && ninja -C \"%1/builddir\"").arg(dirPath);
+    }
+    // 2. CMake debug configure and parallel build command.
+    if (buildSys == QStringLiteral("CMake")) {
+        return QStringLiteral("cmake -S \"%1\" -B \"%1/build\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/build\" -j")
+            .arg(dirPath);
+    }
+    // 3. GNU Make parallel build command.
+    if (buildSys == QStringLiteral("Make")) {
+        return QStringLiteral("make -C \"%1\" -j").arg(dirPath);
+    }
+
+    // 4. Standalone SingleFileMPI compilation using mpicxx/mpicc or g++/gcc fallback.
+    const QString srcFile = info.isFile()
+                                ? info.absoluteFilePath()
+                                : (!m_currentFile.isEmpty() ? QFileInfo(m_currentFile).absoluteFilePath()
+                                                            : QFileInfo(QStringLiteral("tutorial/inspection_demo.cpp")).absoluteFilePath());
+    const QFileInfo srcInfo(srcFile);
+    const QString outBin = srcInfo.dir().filePath(srcInfo.completeBaseName());
+    const bool isCFile = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
+    const QString compiler = isCFile
+                                 ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc"))
+                                 : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
+    return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(compiler, srcFile, outBin);
+}
+
+/**
+ * @brief Constructs the shell clean command for a given project directory or standalone source file.
+ * @param targetPath Project directory path or source file path.
+ * @return Shell command string to clean build artifacts.
+ */
+QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : targetPath.trimmed();
+    const QFileInfo info(resolvedPath);
+    const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    const QDir dir(dirPath);
+
+    // 1. Meson + Ninja clean target command.
+    if (buildSys == QStringLiteral("Meson")) {
+        const QString buildSubdir =
+            (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja")))
+                ? QStringLiteral("build")
+                : QStringLiteral("builddir");
+        return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, buildSubdir);
+    }
+    // 2. CMake clean target command.
+    if (buildSys == QStringLiteral("CMake")) {
+        return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
+    }
+    // 3. GNU Make clean command.
+    if (buildSys == QStringLiteral("Make")) {
+        return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
+    }
+    // 4. Standalone SingleFileMPI binary artifact removal.
+    const QString srcFile = info.isFile()
+                                ? info.absoluteFilePath()
+                                : (!m_currentFile.isEmpty() ? QFileInfo(m_currentFile).absoluteFilePath()
+                                                            : QFileInfo(QStringLiteral("tutorial/inspection_demo.cpp")).absoluteFilePath());
+    const QFileInfo srcInfo(srcFile);
+    return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
+}
+
+/**
+ * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected build command.
+ * @return True if the build command was generated and dispatched to TerminalDockWidget.
+ */
+bool MainWindow::buildTargetWorkflow() {
+    if (!m_terminalDock) return false;
+    QString targetPath = m_currentFile;
+    if (targetPath.isEmpty() && m_targetSelector) {
+        const QString selData = m_targetSelector->currentData().toString();
+        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) targetPath = selData;
+    }
+    if (targetPath.isEmpty()) targetPath = QDir::currentPath();
+
+    // Activate embedded Terminal tab and dispatch build command.
+    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString cmd = buildCommandForPath(targetPath);
+    if (cmd.isEmpty()) return false;
+    m_terminalDock->sendCommand(cmd);
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
+    return true;
+}
+
+/**
+ * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected clean command.
+ * @return True if the clean command was generated and dispatched to TerminalDockWidget.
+ */
+bool MainWindow::cleanTargetWorkflow() {
+    if (!m_terminalDock) return false;
+    QString targetPath = m_currentFile;
+    if (targetPath.isEmpty() && m_targetSelector) {
+        const QString selData = m_targetSelector->currentData().toString();
+        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) targetPath = selData;
+    }
+    if (targetPath.isEmpty()) targetPath = QDir::currentPath();
+
+    // Activate embedded Terminal tab and dispatch clean command.
+    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString cmd = cleanCommandForPath(targetPath);
+    if (cmd.isEmpty()) return false;
+    m_terminalDock->sendCommand(cmd);
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("CLEANING [%1]").arg(buildSys));
+    return true;
+}
+
+/**
+ * @brief Switches BottomConsoleTabs to Terminal and dispatches a chained clean && build command.
+ * @return True if the rebuild command was generated and dispatched to TerminalDockWidget.
+ */
+bool MainWindow::rebuildTargetWorkflow() {
+    if (!m_terminalDock) return false;
+    QString targetPath = m_currentFile;
+    if (targetPath.isEmpty() && m_targetSelector) {
+        const QString selData = m_targetSelector->currentData().toString();
+        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) targetPath = selData;
+    }
+    if (targetPath.isEmpty()) targetPath = QDir::currentPath();
+
+    // Activate embedded Terminal tab and dispatch chained clean && build command.
+    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString cleanCmd = cleanCommandForPath(targetPath);
+    const QString buildCmd = buildCommandForPath(targetPath);
+    if (cleanCmd.isEmpty() || buildCmd.isEmpty()) return false;
+    m_terminalDock->sendCommand(QStringLiteral("%1 && %2").arg(cleanCmd, buildCmd));
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
+    return true;
 }
 
 }  // namespace gridlock::ui
