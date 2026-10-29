@@ -129,4 +129,8 @@ private slots:
 
     /** @brief Verifies Zeal docset UI integration, unclipped CFG basic-block comments, and MpiDiagnosticsWidget rank wait-state table. */
     void testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable();
+
+    /** @brief Verifies SourceCodeView uniform canvas without right-half grey band, structured MpiNetworkLogWidget 6-column table, single-row ReferenceManualWidget header, and monochrome toolbar glyphs. */
+    void testSourceEditorCanvasNetworkLogTableAndHeaderDensity();
 };
+

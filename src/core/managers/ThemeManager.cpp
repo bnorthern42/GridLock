@@ -89,6 +89,7 @@ static QString getHighDensityQssOverlay() {
         // Tabbed dock and bottom console tab bar chrome with 2px royal-blue active indicator.
         // Zero-margin tab panes prevent double borders inside dock containers.
         "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background: #1b1e24; }\n"
+        "QTabWidget#EditorTabManager::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }\n"
         "QTabBar { background: #16181d; }\n"
         "QTabBar::tab {\n"
         "    background: #16181d;\n"
@@ -321,7 +322,7 @@ static QString getHighDensityQssOverlay() {
         "}\n"
         // Unified 24-26px sub-view header strips across all workstation panels and bottom tabs.
         "#cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar, "
-        "#evaluatorHeaderBar, #refManualHeaderBar, #mpiDiagnosticsHeaderBar, #variablesHeaderBar {\n"
+        "#evaluatorHeaderBar, #refManualHeaderBar, #mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
         "    background: #21252b;\n"
         "    border-bottom: 1px solid #2c313a;\n"
         "    min-height: 24px;\n"
@@ -370,7 +371,7 @@ static QString getHighDensityQssOverlay() {
         "    border: none;\n"
         "    border-top: 1px solid #282c34;\n"
         "}\n"
-        "#cutterRegisterTable, #symbolsTable, #stringsTable {\n"
+        "#cutterRegisterTable, #symbolsTable, #stringsTable, #mpiNetworkLogTable {\n"
         "    background: #181a1f;\n"
         "    border: none;\n"
         "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"

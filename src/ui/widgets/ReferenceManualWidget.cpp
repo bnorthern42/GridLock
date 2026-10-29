@@ -51,35 +51,23 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
     splitter->setContentsMargins(0, 0, 0, 0);
     splitter->setHandleWidth(1);
 
-    // Left pane container: 26px header bar above the borderless results list view.
+    // Left pane container: borderless results list view beneath the unified ReferenceManualWidget header.
     auto* leftWidget = new QWidget(splitter);
     auto* leftLayout = new QVBoxLayout(leftWidget);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
 
-    // Sub-header bar matching the 26px #21252b workstation header strip.
-    auto* searchBarContainer = new QWidget(leftWidget);
-    searchBarContainer->setObjectName(QStringLiteral("docsetSearchHeader"));
-    searchBarContainer->setFixedHeight(26);
-    searchBarContainer->setStyleSheet(QStringLiteral(
-        "#docsetSearchHeader { background: #21252b; border-bottom: 1px solid #2c313a; }"));
-    auto* searchBarLayout = new QHBoxLayout(searchBarContainer);
-    searchBarLayout->setContentsMargins(6, 2, 6, 2);
-    searchBarLayout->setSpacing(4);
-
     // Docset bundle filter dropdown (All Docsets, discovered Zeal docsets, and Built-in MPI/ABI).
-    m_docsetSelector = new QComboBox(searchBarContainer);
+    m_docsetSelector = new QComboBox(this);
     m_docsetSelector->setObjectName(QStringLiteral("docsetBundleSelector"));
     m_docsetSelector->setFixedHeight(22);
-    m_docsetSelector->setMinimumWidth(96);
-    searchBarLayout->addWidget(m_docsetSelector);
+    m_docsetSelector->setMinimumWidth(112);
 
     // Search query input field capped at 22px height.
-    m_searchEdit = new QLineEdit(searchBarContainer);
+    m_searchEdit = new QLineEdit(this);
     m_searchEdit->setObjectName(QStringLiteral("docsetSearchEdit"));
     m_searchEdit->setPlaceholderText(QStringLiteral("Search Zeal / MPI / C / C++ symbols..."));
     m_searchEdit->setFixedHeight(22);
-    searchBarLayout->addWidget(m_searchEdit, 1);
 
     // Results list widget populated dynamically by DocsetManager queries.
     m_resultsList = new QListWidget(leftWidget);
@@ -91,7 +79,6 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
         "QListWidget#docsetResultsList::item { padding: 3px 8px; min-height: 20px; }"
         "QListWidget#docsetResultsList::item:selected { background: #264f78; color: #ffffff; }"));
 
-    leftLayout->addWidget(searchBarContainer);
     leftLayout->addWidget(m_resultsList, 1);
 
     // Right pane container: flush HTML text browser with external link handling.
@@ -326,27 +313,16 @@ void DocsetViewerWidget::onResultClicked(int row) {
  */
 ManPageViewerWidget::ManPageViewerWidget(QWidget* parent)
     : QWidget(parent), m_process(new QProcess(this)) {
-    // Outer vertical layout with zero margins.
+    // Outer vertical layout with zero margins beneath the unified ReferenceManualWidget header.
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // 26px #21252b header bar containing the man page search box.
-    auto* headerBar = new QWidget(this);
-    headerBar->setObjectName(QStringLiteral("manPageHeaderBar"));
-    headerBar->setFixedHeight(26);
-    headerBar->setStyleSheet(QStringLiteral(
-        "#manPageHeaderBar { background: #21252b; border-bottom: 1px solid #2c313a; }"));
-    auto* headerLayout = new QHBoxLayout(headerBar);
-    headerLayout->setContentsMargins(6, 2, 6, 2);
-    headerLayout->setSpacing(6);
-
-    // Command / function search bar capped at 22px height.
-    m_searchEdit = new QLineEdit(headerBar);
+    // Command / function search bar capped at 22px height (hosted in ReferenceManualWidget's single 26px bar).
+    m_searchEdit = new QLineEdit(this);
     m_searchEdit->setObjectName(QStringLiteral("manPageSearchEdit"));
     m_searchEdit->setPlaceholderText(QStringLiteral("Search Man Pages (e.g., MPI_Init, printf)..."));
     m_searchEdit->setFixedHeight(22);
-    headerLayout->addWidget(m_searchEdit, 1);
 
     // Read-only HTML documentation viewport with borderless dark-slate canvas.
     m_textBrowser = new QTextBrowser(this);
@@ -359,7 +335,6 @@ ManPageViewerWidget::ManPageViewerWidget(QWidget* parent)
     m_textBrowser->setHtml(
         gridlock::core::DocsetManager::instance().lookupBuiltInManualHtml(QStringLiteral("MPI_Init")));
 
-    mainLayout->addWidget(headerBar);
     mainLayout->addWidget(m_textBrowser, 1);
 
     // Connect user return press to query dispatch and process finish to renderer.
@@ -465,12 +440,12 @@ void ManPageViewerWidget::onProcessFinished(int exitCode,
 // ============================================================================
 
 /**
- * @brief Constructs the composite reference manual widget.
+ * @brief Constructs the composite reference manual widget with a single 26px control strip.
  * @param parent Optional parent widget.
  *
- * Builds a unified 26px #21252b header bar with quick-jump topic pill buttons
- * (MPI_Init, MPI_Send, MPI_Recv, MPI_Barrier, MPI_Allreduce, MPI_Finalize,
- * gdb-mi, x86_64-abi) above the flush document-mode Docsets / Man Pages tab view.
+ * Consolidates the [DOCSETS | MAN PAGES] mode toggle buttons, Docset Selector combo box,
+ * Quick Topic (F1) selector, and symbol/man-page search input into one sleek 26px
+ * #21252b horizontal header bar above the split index/reader view.
  */
 ReferenceManualWidget::ReferenceManualWidget(QWidget* parent)
     : QWidget(parent) {
@@ -479,30 +454,60 @@ ReferenceManualWidget::ReferenceManualWidget(QWidget* parent)
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // Unified 26px #21252b top control bar with quick-jump topic pills.
-    auto* headerBar = new QWidget(this);
-    headerBar->setObjectName(QStringLiteral("refManualHeaderBar"));
-    headerBar->setFixedHeight(26);
-    headerBar->setStyleSheet(QStringLiteral(
+    // Instantiate stacked subviews for Dash/Zeal Docsets and groff Man Pages first so
+    // their selector/search controls can be mounted directly in the single 26px header bar.
+    m_stackedWidget = new QStackedWidget(this);
+    m_stackedWidget->setContentsMargins(0, 0, 0, 0);
+    m_docsetViewer = new DocsetViewerWidget(m_stackedWidget);
+    m_manPageViewer = new ManPageViewerWidget(m_stackedWidget);
+    m_stackedWidget->addWidget(m_docsetViewer);
+    m_stackedWidget->addWidget(m_manPageViewer);
+
+    // Single 26px #21252b top control bar housing mode toggles, docset selector, quick topics, and search input.
+    m_headerBar = new QWidget(this);
+    m_headerBar->setObjectName(QStringLiteral("refManualHeaderBar"));
+    m_headerBar->setFixedHeight(26);
+    m_headerBar->setStyleSheet(QStringLiteral(
         "#refManualHeaderBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
         "#refManualHeaderBar QLabel { color: #abb2bf; font-size: 10px; font-weight: 600; }"
-        "#refManualHeaderBar QPushButton { min-height: 18px; max-height: 20px; padding: 1px 6px; "
-        "background: #252932; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; "
+        "#refManualHeaderBar QPushButton { min-height: 18px; max-height: 20px; padding: 1px 8px; "
+        "background: #252932; color: #abb2bf; border: 1px solid #323844; border-radius: 2px; "
         "font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; }"
-        "#refManualHeaderBar QPushButton:hover { background: #2c3444; border: 1px solid #528bff; color: #ffffff; }"));
+        "#refManualHeaderBar QPushButton:hover { background: #2c323d; border: 1px solid #528bff; color: #ffffff; }"
+        "#refManualHeaderBar QPushButton:checked { background: #2c3444; border: 1px solid #528bff; color: #ffffff; }"));
 
-    // Arrange quick-jump topic buttons inside the 26px control strip.
-    auto* headerLayout = new QHBoxLayout(headerBar);
+    auto* headerLayout = new QHBoxLayout(m_headerBar);
     headerLayout->setContentsMargins(6, 2, 6, 2);
-    headerLayout->setSpacing(4);
+    headerLayout->setSpacing(6);
 
-    // Label indicating F1 context-sensitive documentation lookup support.
-    auto* badgeLabel = new QLabel(QStringLiteral("TOPICS (F1):"), headerBar);
-    headerLayout->addWidget(badgeLabel);
+    // Mode toggle buttons: DOCSETS | MAN PAGES.
+    m_docsetsModeBtn = new QPushButton(QStringLiteral("DOCSETS"), m_headerBar);
+    m_docsetsModeBtn->setObjectName(QStringLiteral("refDocsetsModeBtn"));
+    m_docsetsModeBtn->setCheckable(true);
+    m_docsetsModeBtn->setChecked(true);
+    m_docsetsModeBtn->setFixedHeight(20);
+    headerLayout->addWidget(m_docsetsModeBtn);
 
-    // Curated list of core MPI routines, GDB/MI protocol, and x86_64 System V ABI topics.
-    const QStringList quickTopics = {
-        QStringLiteral("MPI_Init"),
+    m_manPagesModeBtn = new QPushButton(QStringLiteral("MAN PAGES"), m_headerBar);
+    m_manPagesModeBtn->setObjectName(QStringLiteral("refManPagesModeBtn"));
+    m_manPagesModeBtn->setCheckable(true);
+    m_manPagesModeBtn->setChecked(false);
+    m_manPagesModeBtn->setFixedHeight(20);
+    headerLayout->addWidget(m_manPagesModeBtn);
+
+    // Mount the Docset Selector combo box on the same 26px row.
+    if (m_docsetViewer->docsetSelector()) {
+        m_docsetViewer->docsetSelector()->setParent(m_headerBar);
+        headerLayout->addWidget(m_docsetViewer->docsetSelector());
+    }
+
+    // Compact Quick Topic (F1) selector for immediate jump to core MPI and ABI manual cards.
+    m_quickTopicCombo = new QComboBox(m_headerBar);
+    m_quickTopicCombo->setObjectName(QStringLiteral("refQuickTopicCombo"));
+    m_quickTopicCombo->setFixedHeight(22);
+    m_quickTopicCombo->setMinimumWidth(132);
+    m_quickTopicCombo->addItems({
+        QStringLiteral("Quick Topic (F1): MPI_Init"),
         QStringLiteral("MPI_Send"),
         QStringLiteral("MPI_Recv"),
         QStringLiteral("MPI_Barrier"),
@@ -510,44 +515,60 @@ ReferenceManualWidget::ReferenceManualWidget(QWidget* parent)
         QStringLiteral("MPI_Finalize"),
         QStringLiteral("gdb-mi"),
         QStringLiteral("x86_64-abi")
-    };
-    for (const QString& topic : quickTopics) {
-        // Create compact 20px pill button for each built-in reference topic.
-        auto* btn = new QPushButton(topic, headerBar);
-        btn->setFixedHeight(20);
-        connect(btn, &QPushButton::clicked, this, [this, topic]() {
-            lookupSymbol(topic);
-        });
-        headerLayout->addWidget(btn);
+    });
+    connect(m_quickTopicCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+                if (!m_quickTopicCombo || idx < 0) {
+                    return;
+                }
+                QString topic = m_quickTopicCombo->itemText(idx);
+                if (topic.contains(QLatin1Char(':'))) {
+                    topic = topic.section(QLatin1Char(':'), 1).trimmed();
+                }
+                lookupSymbol(topic);
+            });
+    headerLayout->addWidget(m_quickTopicCombo);
+
+    // Mount both search inputs in the unified header bar and toggle visibility by active mode.
+    if (m_docsetViewer->searchEdit()) {
+        m_docsetViewer->searchEdit()->setParent(m_headerBar);
+        headerLayout->addWidget(m_docsetViewer->searchEdit(), 1);
     }
-    headerLayout->addStretch(1);
+    if (m_manPageViewer->searchEdit()) {
+        m_manPageViewer->searchEdit()->setParent(m_headerBar);
+        m_manPageViewer->searchEdit()->setVisible(false);
+        headerLayout->addWidget(m_manPageViewer->searchEdit(), 1);
+    }
 
-    // Document mode tab container for seamless border integration.
-    m_tabWidget = new QTabWidget(this);
-    m_tabWidget->setDocumentMode(true);
-    m_tabWidget->setContentsMargins(0, 0, 0, 0);
+    mainLayout->addWidget(m_headerBar);
+    mainLayout->addWidget(m_stackedWidget, 1);
 
-    // Instantiate tab subviews for Dash/Zeal Docsets and groff Man Pages.
-    m_docsetViewer = new DocsetViewerWidget(m_tabWidget);
-    m_manPageViewer = new ManPageViewerWidget(m_tabWidget);
-    m_tabWidget->addTab(m_docsetViewer, QStringLiteral("Docsets"));
-    m_tabWidget->addTab(m_manPageViewer, QStringLiteral("Man Pages"));
+    // Helper lambda switching between DOCSETS (0) and MAN PAGES (1) modes.
+    auto setModeIndex = [this](int index) {
+        const bool isDocsets = (index == 0);
+        m_docsetsModeBtn->setChecked(isDocsets);
+        m_manPagesModeBtn->setChecked(!isDocsets);
+        m_stackedWidget->setCurrentIndex(isDocsets ? 0 : 1);
+        if (m_docsetViewer && m_docsetViewer->docsetSelector()) {
+            m_docsetViewer->docsetSelector()->setVisible(isDocsets);
+        }
+        if (m_docsetViewer && m_docsetViewer->searchEdit()) {
+            m_docsetViewer->searchEdit()->setVisible(isDocsets);
+        }
+        if (m_manPageViewer && m_manPageViewer->searchEdit()) {
+            m_manPageViewer->searchEdit()->setVisible(!isDocsets);
+        }
+        QSettings settings("GridLock", "Debugger");
+        settings.setValue("ui/reference_manual_tab", isDocsets ? 0 : 1);
+    };
 
-    mainLayout->addWidget(headerBar);
-    mainLayout->addWidget(m_tabWidget, 1);
+    connect(m_docsetsModeBtn, &QPushButton::clicked, this, [setModeIndex]() { setModeIndex(0); });
+    connect(m_manPagesModeBtn, &QPushButton::clicked, this, [setModeIndex]() { setModeIndex(1); });
 
-    // Restore last visited tab from persistent application settings.
+    // Restore last visited mode from persistent application settings.
     QSettings settings("GridLock", "Debugger");
     const int savedIndex = settings.value("ui/reference_manual_tab", 0).toInt();
-    if (savedIndex >= 0 && savedIndex < m_tabWidget->count()) {
-        m_tabWidget->setCurrentIndex(savedIndex);
-    }
-
-    // Persist tab changes dynamically to user settings.
-    connect(m_tabWidget, &QTabWidget::currentChanged, this, [](int index) {
-        QSettings settings("GridLock", "Debugger");
-        settings.setValue("ui/reference_manual_tab", index);
-    });
+    setModeIndex(savedIndex == 1 ? 1 : 0);
 }
 
 /**
@@ -564,9 +585,9 @@ bool ReferenceManualWidget::lookupSymbol(const QString& rawSymbol) {
     if (!m_docsetViewer) {
         return false;
     }
-    // Ensure the Docsets sub-tab is active when displaying symbol manual cards.
-    if (m_tabWidget) {
-        m_tabWidget->setCurrentIndex(0);
+    // Activate the Docsets mode when displaying symbol manual cards.
+    if (m_stackedWidget && m_stackedWidget->currentIndex() != 0) {
+        m_docsetsModeBtn->click();
     }
     return m_docsetViewer->showSymbolDocumentation(rawSymbol);
 }
@@ -579,4 +600,13 @@ QStringList ReferenceManualWidget::loadedDocsetNames() const {
     return m_docsetViewer ? m_docsetViewer->loadedDocsetNames() : QStringList();
 }
 
+/**
+ * @brief Returns the pixel height of the consolidated top header bar (<= 26px).
+ * @return Header bar height in pixels.
+ */
+int ReferenceManualWidget::headerBarHeight() const {
+    return m_headerBar ? m_headerBar->height() : 0;
+}
+
 }  // namespace gridlock::ui
+

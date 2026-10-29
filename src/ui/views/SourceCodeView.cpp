@@ -180,7 +180,8 @@ private:
  * @param parent Optional parent widget.
  */
 SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
-    // Create and wire line number area gutter
+    // Configure borderless editor frame and line number area gutter.
+    setFrameShape(QFrame::NoFrame);
     m_lineNumberArea = new LineNumberArea(this);
     connect(document(), &QTextDocument::blockCountChanged, this, &SourceCodeView::updateLineNumberAreaWidth);
     connect(this, &SourceCodeView::updateRequest, this, &SourceCodeView::updateLineNumberArea);
@@ -190,7 +191,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     setLineWrapMode(QPlainTextEdit::NoWrap);
     
-    reloadStyle(); // Load initial font size and theme background overlay
+    reloadStyle(); // Load initial font size and uniform #16181d dark-slate surface
 
     // Install C++ syntax highlighter
     m_highlighter = new CppSyntaxHighlighter(document());
@@ -216,7 +217,7 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
 }
 
 /**
- * @brief Reloads font size, word wrap, and stylesheet overlays from user configuration.
+ * @brief Reloads font size, word wrap, and uniform #16181d dark-slate surface from user configuration.
  */
 void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
@@ -225,13 +226,26 @@ void SourceCodeView::reloadStyle() {
     
     setLineWrapMode(wordWrap ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
 
-    // Inject explicit font-size rule into QPlainTextEdit stylesheet
-    this->setStyleSheet(QString(
-        "QPlainTextEdit { "
-        "   background-color: rgba(0, 0, 0, 30); "
+    // Enforce solid #16181d dark-slate background across both QPlainTextEdit and its viewport
+    // to eliminate translucent alpha-compositing bands on partial repaints.
+    this->setStyleSheet(QStringLiteral(
+        "QPlainTextEdit, QPlainTextEdit QWidget { "
+        "   background-color: #16181d; "
+        "   color: #d7dae0; "
+        "   border: none; "
+        "   font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; "
         "   font-size: %1pt; "
         "}"
     ).arg(codeFontSize));
+
+    if (viewport()) {
+        QPalette pal = viewport()->palette();
+        pal.setColor(QPalette::Base, QColor("#16181d"));
+        pal.setColor(QPalette::Window, QColor("#16181d"));
+        pal.setColor(QPalette::Text, QColor("#d7dae0"));
+        viewport()->setPalette(pal);
+        viewport()->setAutoFillBackground(true);
+    }
 }
 
 /**
@@ -261,12 +275,12 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
 }
 
 /**
- * @brief Highlights the current cursor line with a subtle background selection.
+ * @brief Highlights the current cursor line with a subtle #1e222a full-width selection.
  */
 void SourceCodeView::highlightCurrentLine() {
     QList<QTextEdit::ExtraSelection> selections;
     QTextEdit::ExtraSelection selection;
-    QColor highlightColor("#313244");
+    QColor highlightColor("#1e222a");
     selection.format.setBackground(highlightColor);
     selection.format.setProperty(QTextFormat::FullWidthSelection, true);
     selection.cursor = textCursor();
@@ -281,7 +295,10 @@ void SourceCodeView::highlightCurrentLine() {
  */
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     QPainter painter(m_lineNumberArea);
-    painter.fillRect(event->rect(), QColor(40, 40, 40));
+    painter.fillRect(event->rect(), QColor("#16181d"));
+    painter.setPen(QColor("#282c34"));
+    painter.drawLine(m_lineNumberArea->width() - 1, event->rect().top(),
+                     m_lineNumberArea->width() - 1, event->rect().bottom());
     QTextBlock block = firstVisibleBlock();
     int blockNumber = block.blockNumber();
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
@@ -386,9 +403,12 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
 }
 
 /**
- * @brief Adjusts viewport margins to accommodate the gutter width.
+ * @brief Adjusts viewport margins to accommodate the gutter width with zero right margin.
  */
-void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 0, 0); }
+void SourceCodeView::updateLineNumberAreaWidth(int) {
+    // Ensure zero right-side viewport margin reservation in SourceCodeView.
+    setViewportMargins(lineNumberAreaWidth(), 0, 0, 0);
+}
 
 /**
  * @brief Handles scroll and geometry updates for the line number area.
@@ -398,7 +418,7 @@ void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(35, 0, 
 void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
     if (dy) m_lineNumberArea->scroll(0, dy);
     else m_lineNumberArea->update(0, rect.y(), m_lineNumberArea->width(), rect.height());
-    if (rect.contains(viewport()->rect())) m_lineNumberArea->resize(35, rect.height());
+    if (rect.contains(viewport()->rect())) m_lineNumberArea->resize(lineNumberAreaWidth(), rect.height());
 }
 
 /**
@@ -408,7 +428,7 @@ void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
 void SourceCodeView::resizeEvent(QResizeEvent *e) {
     QPlainTextEdit::resizeEvent(e);
     QRect cr = contentsRect();
-    m_lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), 35, cr.height()));
+    m_lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), lineNumberAreaWidth(), cr.height()));
 }
 
 /**
@@ -548,27 +568,13 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
 }
 
 /**
- * @brief Paints the 80-column margin guide line if enabled in configuration.
- * @param event Paint event.
+ * @brief Renders the source code editor viewport with a uniform #16181d dark-slate canvas.
+ * @param event Paint event covering the dirty viewport region.
  */
 void SourceCodeView::paintEvent(QPaintEvent *event) {
     QPlainTextEdit::paintEvent(event);
-    
-    QSettings s("gridlock", "debugger");
-    if (!s.value("editing/show_edge_column", true).toBool()) {
-        return;
-    }
-    
-    int edgeCol = s.value("editing/edge_column", 80).toInt();
-    if (edgeCol > 0) {
-        int x = fontMetrics().horizontalAdvance('x') * edgeCol + contentOffset().x() + document()->documentMargin();
-        QPainter painter(viewport());
-        QColor edgeColor(gridlock::core::ConfigManager::instance().getSourceText());
-        edgeColor.setAlpha(50);
-        painter.setPen(edgeColor);
-        painter.drawLine(x, 0, x, viewport()->height());
-    }
 }
 
 }  // namespace gridlock::ui
+
 

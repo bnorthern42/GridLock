@@ -111,6 +111,24 @@ public:
     QMargins getViewportMargins() const { return viewportMargins(); }
 
     /**
+     * @brief Returns the fixed pixel width of the left line-number and breakpoint gutter.
+     * @return Gutter width in pixels (35px).
+     */
+    int lineNumberAreaWidth() const { return 35; }
+
+    /**
+     * @brief Returns the right viewport margin reservation in pixels (strictly 0).
+     * @return Right viewport margin in pixels.
+     */
+    int rightViewportMargin() const { return viewportMargins().right(); }
+
+    /**
+     * @brief Indicates whether any 80-column right-margin fill or split band is active.
+     * @return Always false for the uniform dark-slate editor canvas.
+     */
+    bool hasRightMarginFill() const { return false; }
+
+    /**
      * @brief Sets the full set of active breakpoint lines.
      * @param bps Set of 1-based line numbers.
      */

@@ -26,6 +26,8 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTextBrowser>
+#include <QToolBar>
+#include <QToolButton>
 #include <QTreeView>
 #include <QtTest/QtTest>
 
@@ -39,9 +41,11 @@
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
+#include "../src/ui/views/SourceCodeView.hpp"
 #include "../src/ui/widgets/DifferentialGrid.hpp"
 #include "../src/ui/widgets/ExpressionEvaluatorWidget.hpp"
 #include "../src/ui/widgets/MpiDiagnosticsWidget.hpp"
+#include "../src/ui/widgets/MpiNetworkLogWidget.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 #include "../src/ui/widgets/ReferenceManualWidget.hpp"
 
@@ -542,4 +546,92 @@ void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable()
     QVERIFY2(refManual->lookupSymbol(QStringLiteral("MPI_Init")),
              "ReferenceManualWidget::lookupSymbol('MPI_Init') must succeed");
 }
+
+/**
+ * @brief Verifies SourceCodeView uniform canvas without right-half grey band,
+ *        structured MpiNetworkLogWidget 6-column table, single-row ReferenceManualWidget
+ *        header bar, and monochrome toolbar glyphs.
+ *
+ * Tests four visual cohesion requirements:
+ * 1. SourceCodeView Uniform Canvas & Gutter: Verifies rightViewportMargin() == 0,
+ *    hasRightMarginFill() == false, and pixel sampling at x = width * 0.25 and x = width * 0.85
+ *    on an empty row of sourceView->grab().toImage() yields identical #16181d RGB values.
+ * 2. Structured MpiNetworkLogWidget Table: Verifies MpiNetworkLogWidget contains a 6-column
+ *    QTableWidget with QFrame::NoFrame and appendLog() populates structured table rows
+ *    (logRowCount() >= 1).
+ * 3. Single-Row ReferenceManualWidget Header & Monochrome Toolbar Glyphs: Verifies
+ *    ReferenceManualWidget::headerBarHeight() <= 30 and zero QToolBar actions/buttons
+ *    contain multicolor emoji codepoints (U+23E9).
+ */
+void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.loadSourceFile(QStringLiteral("tutorial/inspection_demo.cpp"));
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // 1. SourceCodeView Uniform Canvas & Gutter.
+    auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
+    QVERIFY2(sourceView != nullptr, "Active SourceCodeView must exist in MainWindow");
+    QVERIFY2(sourceView->rightViewportMargin() == 0,
+             qPrintable(QString("SourceCodeView rightViewportMargin() %1 must be 0")
+                            .arg(sourceView->rightViewportMargin())));
+    QVERIFY2(!sourceView->hasRightMarginFill(),
+             "SourceCodeView::hasRightMarginFill() must be false");
+
+    const QImage editorImg = sourceView->viewport()->grab().toImage();
+    QVERIFY2(!editorImg.isNull() && editorImg.width() > 100 && editorImg.height() > 40,
+             "SourceCodeView snapshot image must be valid and non-empty");
+    // Sample on empty line 3 (between #include <stdio.h> and struct DeeplyNested) above any scrollbar.
+    const int sampleY = sourceView->fontMetrics().height() * 2 + sourceView->fontMetrics().height() / 2;
+    const int leftX = static_cast<int>(editorImg.width() * 0.25);
+    const int rightX = static_cast<int>(editorImg.width() * 0.85);
+    const QColor leftColor = editorImg.pixelColor(leftX, sampleY);
+    const QColor rightColor = editorImg.pixelColor(rightX, sampleY);
+    QVERIFY2(leftColor.rgb() == rightColor.rgb(),
+             qPrintable(QString("SourceCodeView split background detected: left(%1,%2)=%3 vs right(%4,%2)=%5")
+                            .arg(leftX)
+                            .arg(sampleY)
+                            .arg(leftColor.name())
+                            .arg(rightX)
+                            .arg(rightColor.name())));
+
+    // 2. Structured MpiNetworkLogWidget Table.
+    auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>();
+    QVERIFY2(netLog != nullptr, "MpiNetworkLogWidget must exist in MainWindow");
+    auto* netTable = netLog->findChild<QTableWidget*>();
+    QVERIFY2(netTable != nullptr, "MpiNetworkLogWidget must contain a structured QTableWidget");
+    QVERIFY2(netTable->columnCount() == 6,
+             qPrintable(QString("MpiNetworkLogWidget table columnCount %1 != 6").arg(netTable->columnCount())));
+    QVERIFY2(netTable->frameShape() == QFrame::NoFrame,
+             "MpiNetworkLogWidget table must use QFrame::NoFrame");
+
+    netLog->appendLog(QStringLiteral("[12:00:01.042] Rank 0 -> Rank 1 | MPI_Send | Tag=0 MPI_COMM_WORLD | 1024 B"));
+    QVERIFY2(netLog->logRowCount() >= 1,
+             qPrintable(QString("MpiNetworkLogWidget::logRowCount() %1 must be >= 1 after appendLog")
+                            .arg(netLog->logRowCount())));
+
+    // 3. Single-Row ReferenceManualWidget Header & Clean Monochrome Toolbar Labels.
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY2(refManual != nullptr, "ReferenceManualWidget must exist in MainWindow");
+    QVERIFY2(refManual->headerBarHeight() > 0 && refManual->headerBarHeight() <= 30,
+             qPrintable(QString("ReferenceManualWidget::headerBarHeight() %1 must be in (0, 30]")
+                            .arg(refManual->headerBarHeight())));
+
+    for (QToolBar* toolBar : mainWindow.findChildren<QToolBar*>()) {
+        for (QAction* act : toolBar->actions()) {
+            QVERIFY2(!act->text().contains(QStringLiteral("\U000023E9")),
+                     qPrintable(QString("Toolbar action '%1' must not contain multicolor emoji U+23E9")
+                                    .arg(act->text())));
+        }
+        for (QToolButton* btn : toolBar->findChildren<QToolButton*>()) {
+            QVERIFY2(!btn->text().contains(QStringLiteral("\U000023E9")),
+                     qPrintable(QString("Toolbar button '%1' must not contain multicolor emoji U+23E9")
+                                    .arg(btn->text())));
+        }
+    }
+}
+
 

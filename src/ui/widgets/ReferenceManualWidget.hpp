@@ -13,9 +13,10 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProcess>
+#include <QPushButton>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStringList>
-#include <QTabWidget>
 #include <QTextBrowser>
 #include <QWidget>
 
@@ -58,6 +59,18 @@ public:
      */
     QStringList loadedDocsetNames() const;
 
+    /**
+     * @brief Returns the docset bundle selector combo box so it can be hosted in the unified header.
+     * @return Pointer to the QComboBox selector.
+     */
+    QComboBox* docsetSelector() const { return m_docsetSelector; }
+
+    /**
+     * @brief Returns the symbol search input box so it can be hosted in the unified header.
+     * @return Pointer to the QLineEdit search input.
+     */
+    QLineEdit* searchEdit() const { return m_searchEdit; }
+
 private slots:
     /**
      * @brief Executes keyword search across available docset indices.
@@ -99,6 +112,12 @@ public:
      */
     ~ManPageViewerWidget() override;
 
+    /**
+     * @brief Returns the man page search input box so it can be hosted in the unified header.
+     * @return Pointer to the QLineEdit search input.
+     */
+    QLineEdit* searchEdit() const { return m_searchEdit; }
+
 private slots:
     /**
      * @brief Spawns asynchronous `man` process to retrieve manual page text.
@@ -120,14 +139,14 @@ private:
 
 /**
  * @class ReferenceManualWidget
- * @brief Tabbed container housing docset API references and system manual pages.
+ * @brief Unified single-header container housing docset API references and system manual pages.
  */
 class ReferenceManualWidget : public QWidget {
     Q_OBJECT
 
 public:
     /**
-     * @brief Constructs a new ReferenceManualWidget.
+     * @brief Constructs a new ReferenceManualWidget with a single 26px control strip.
      * @param parent Optional parent widget.
      */
     explicit ReferenceManualWidget(QWidget *parent = nullptr);
@@ -150,11 +169,22 @@ public:
      */
     QStringList loadedDocsetNames() const;
 
+    /**
+     * @brief Returns the pixel height of the consolidated top header bar (<= 26px).
+     * @return Header bar height in pixels.
+     */
+    int headerBarHeight() const;
+
 private:
-    QTabWidget* m_tabWidget = nullptr;
+    QWidget* m_headerBar = nullptr;
+    QPushButton* m_docsetsModeBtn = nullptr;
+    QPushButton* m_manPagesModeBtn = nullptr;
+    QComboBox* m_quickTopicCombo = nullptr;
+    QStackedWidget* m_stackedWidget = nullptr;
     DocsetViewerWidget* m_docsetViewer = nullptr;
     ManPageViewerWidget* m_manPageViewer = nullptr;
 };
 
 }  // namespace gridlock::ui
+
 

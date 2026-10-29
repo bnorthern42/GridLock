@@ -186,14 +186,14 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_symbolsTable->setShowGrid(true);
   m_symbolsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   m_symbolsTable->horizontalHeader()->setVisible(true);
-  m_symbolsTable->horizontalHeader()->setMinimumSectionSize(48);
+  m_symbolsTable->horizontalHeader()->setMinimumSectionSize(42);
   m_symbolsTable->horizontalHeader()->setStretchLastSection(false);
-  // Column 0 stretches with window width, columns 1 and 2 have fixed widths >= 48px
+  // Column 0 stretches with window width, columns 1 and 2 fit contents tightly (78px / 42px)
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-  m_symbolsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
-  m_symbolsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
-  m_symbolsTable->setColumnWidth(1, 88);
-  m_symbolsTable->setColumnWidth(2, 52);
+  m_symbolsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+  m_symbolsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+  m_symbolsTable->setColumnWidth(1, 78);
+  m_symbolsTable->setColumnWidth(2, 42);
 
   symbolsLayout->addWidget(m_symbolsTable, 1);
   m_stack->addWidget(symbolsPage);

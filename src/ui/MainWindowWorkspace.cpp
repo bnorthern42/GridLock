@@ -189,7 +189,7 @@ void MainWindow::setupToolbar() {
   toolbar->addAction(m_runAction);
 
   // Continue Action: Resumes suspended execution on active rank or process group.
-  QAction *continueAction = new QAction("⏩ Continue", this);
+  QAction *continueAction = new QAction("⏭ Continue", this);
   connect(continueAction, &QAction::triggered, this, [this]() {
     // GDB coordinator commands use 1-based rank IDs internally (focusedRank + 1).
     auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(
@@ -209,7 +209,7 @@ void MainWindow::setupToolbar() {
   toolbar->addAction(stepAction);
 
   // Pause Action: Interrupts running execution on active rank.
-  QAction *pauseAction = new QAction("Pause Rank", this);
+  QAction *pauseAction = new QAction("⏸ Pause Rank", this);
   connect(pauseAction, &QAction::triggered, this, [this]() {
     // Deliver asynchronous interrupt signal (SIGINT) to pause target rank.
     auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(
@@ -219,7 +219,7 @@ void MainWindow::setupToolbar() {
   toolbar->addAction(pauseAction);
 
   // Stop Action: Sends termination request to active coordinator.
-  QAction *stopAction = new QAction("⏹ Stop", this);
+  QAction *stopAction = new QAction("■ Stop", this);
   connect(stopAction, &QAction::triggered, this, [this]() {
     // Instruct coordinator to terminate all spawned worker processes.
     if (m_coordinator) {
@@ -229,7 +229,7 @@ void MainWindow::setupToolbar() {
   toolbar->addAction(stopAction);
 
   // Terminate Action: Closes debugging session and clears active state.
-  QAction *exitAction = new QAction("Terminate Session", this);
+  QAction *exitAction = new QAction("✕ Terminate Session", this);
   connect(exitAction, &QAction::triggered, this, [this]() {
     // Execute top-level termination command to reset GUI and release resources.
     auto cmd =
@@ -246,6 +246,7 @@ void MainWindow::setupToolbar() {
   // Expanding spacer separating debugger actions from navigation controls.
   QWidget *spacer = new QWidget(toolbar);
   spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
   toolbar->addWidget(spacer);
 
   // Navigation button stylesheet matching dark workstation theme.

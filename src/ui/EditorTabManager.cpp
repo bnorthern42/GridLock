@@ -21,8 +21,11 @@ namespace gridlock::ui {
  */
 EditorTabManager::EditorTabManager(QWidget* parent)
     : QTabWidget(parent) {
+    setObjectName(QStringLiteral("EditorTabManager"));
+    setDocumentMode(true);
     setTabsClosable(true);
     setMovable(true);
+    setContentsMargins(0, 0, 0, 0);
     connect(this, &QTabWidget::tabCloseRequested, this,
             &EditorTabManager::onTabCloseRequested);
 }
