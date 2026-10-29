@@ -114,4 +114,7 @@ private slots:
 
     /** @brief Verifies terminal monospace font enforcement, memory/disassembly live patching, and deadlock cycle badges. */
     void testTerminalFontIsolationLivePatchingAndDeadlockCycle();
+
+    /** @brief Verifies patched ELF export to disk, unified multi-domain workspace search, and deadlock propagation. */
+    void testPatchedElfExportWorkspaceSearchAndDeadlockPropagation();
 };

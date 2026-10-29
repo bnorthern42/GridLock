@@ -215,6 +215,8 @@ public:
 signals:
     /// Emitted when an instruction address is selected by click or seek.
     void addressSelected(uint64_t address);
+    /// Emitted when an assembly instruction is patched.
+    void instructionPatched(uint64_t address, const QByteArray& newBytes);
 
 public slots:
     /// Loads and analyzes new assembly code listing.

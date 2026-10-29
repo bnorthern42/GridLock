@@ -122,6 +122,16 @@ public:
     bool writeVirtualMemory(uint64_t vaddr, const QByteArray& data);
 
     /**
+     * @brief Saves the patched ELF binary image to disk with executable permissions.
+     * @param outputPath Target file system path.
+     * @return True if the binary was successfully written; false otherwise.
+     */
+    bool savePatchedBinary(const QString& outputPath) const;
+
+    /** @brief Returns total count of bytes patched into the loaded binary. */
+    int patchedByteCount() const { return m_patchedByteCount; }
+
+    /**
      * @brief Disassembles an instruction range into formatted assembly lines.
      * @param startAddr Starting virtual memory address.
      * @param size Byte size of region to disassemble.
@@ -148,6 +158,7 @@ private:
     QList<ElfSectionInfo> m_sections; ///< List of parsed section headers.
     QList<ElfSymbolInfo> m_symbols;   ///< List of parsed symbols.
     QList<ElfStringInfo> m_strings;   ///< List of extracted printable strings.
+    int m_patchedByteCount = 0;       ///< Total number of patched bytes.
 };
 
 namespace utils {

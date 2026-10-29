@@ -596,6 +596,17 @@ bool DisassemblyView::patchInstruction(uint64_t address,
   m_patchedInstructions.insert(address, newInstruction.trimmed());
   updateDisassembly(m_baseDisassembly);
   refreshDecompilerView();
+
+  QByteArray bytes;
+  if (newInstruction.trimmed().compare(QStringLiteral("nop"), Qt::CaseInsensitive) == 0) {
+    bytes = QByteArray("\x90", 1);
+  } else {
+    bytes = QByteArray::fromHex(newInstruction.toLatin1());
+    if (bytes.isEmpty()) {
+      bytes = newInstruction.toUtf8();
+    }
+  }
+  emit instructionPatched(address, bytes);
   return true;
 }
 

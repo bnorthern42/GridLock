@@ -89,6 +89,13 @@ public:
      */
     void setVulkanInstance(QVulkanInstance* inst);
 
+    struct WorkspaceSearchResult {
+        QString category;       ///< Domain classification ("Symbol", "String", "Disassembly", "Decompiler").
+        uint64_t address = 0;   ///< Associated 64-bit virtual memory address.
+        QString label;          ///< Symbol or identifier label.
+        QString contextSnippet; ///< Surrounding line or contextual snippet.
+    };
+
     // Subview Accessors
     ServerRackView* serverRackView() const { return m_serverRackView; }
     EditorTabManager* editorTabManager() const { return m_editorTabManager; }
@@ -103,6 +110,7 @@ public:
     MemView* memView() const { return m_memView; }
     RegisterView* registerView() const { return m_registerView; }
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
+    gridlock::core::ElfBinaryInspector* elfInspector() const { return m_elfInspector.get(); }
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
@@ -152,6 +160,27 @@ public:
      * @return True if file is valid ELF64 and successfully parsed.
      */
     bool loadBinaryTarget(const QString& binaryPath);
+
+    /**
+     * @brief Exports the in-memory patched ELF binary image to disk.
+     * @param outputPath Filesystem destination path.
+     * @return True if exported and permissions configured; false otherwise.
+     */
+    bool exportPatchedBinary(const QString& outputPath) const;
+
+    /**
+     * @brief Performs unified multi-domain case-insensitive search across the workspace.
+     * @param query Search string.
+     * @return List of matching results sorted by domain and address.
+     */
+    QVector<WorkspaceSearchResult> searchWorkspace(const QString& query) const;
+
+    /**
+     * @brief Detects wait-for cycle among MPI ranks and highlights deadlocked nodes.
+     * @param waitForGraph Directed edges where key rank waits for value rank.
+     * @return List of ranks participating in the deadlock cycle.
+     */
+    QVector<int> detectAndHighlightDeadlock(const QMap<int, int>& waitForGraph);
 
     bool canNavigateBack() const;
     bool canNavigateForward() const;

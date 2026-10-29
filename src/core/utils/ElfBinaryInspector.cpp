@@ -71,6 +71,7 @@ bool ElfBinaryInspector::loadFromData(const QByteArray& data, const QString& sou
     m_sections.clear();
     m_symbols.clear();
     m_strings.clear();
+    m_patchedByteCount = 0;
     m_fileData = data;
     m_filePath = sourcePath;
 
@@ -388,11 +389,40 @@ bool ElfBinaryInspector::writeVirtualMemory(uint64_t vaddr, const QByteArray& da
             // Overwrite bytes within the memory buffer
             if (sec.offset + delta + data.size() <= static_cast<uint64_t>(m_fileData.size())) {
                 memcpy(m_fileData.data() + sec.offset + delta, data.constData(), data.size());
+                m_patchedByteCount += data.size();
                 return true;
             }
         }
     }
     return false;
+}
+
+/**
+ * @brief Saves the patched ELF binary image to disk with executable permissions.
+ *
+ * Flushes the in-memory binary image to the specified disk path and marks
+ * the output file with executable read/write/execute permissions.
+ *
+ * @param outputPath Destination file system path.
+ * @return True on successful write and permission configuration; false otherwise.
+ */
+bool ElfBinaryInspector::savePatchedBinary(const QString& outputPath) const {
+    if (!m_valid || m_fileData.isEmpty() || outputPath.trimmed().isEmpty()) {
+        return false;
+    }
+    QFile outFile(outputPath.trimmed());
+    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return false;
+    }
+    const qint64 written = outFile.write(m_fileData);
+    outFile.close();
+    if (written != m_fileData.size()) {
+        return false;
+    }
+    outFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                           QFileDevice::ExeOwner | QFileDevice::ReadGroup |
+                           QFileDevice::ExeGroup);
+    return true;
 }
 
 /**

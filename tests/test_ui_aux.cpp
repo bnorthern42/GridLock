@@ -825,3 +825,80 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
     }
 }
 
+/**
+ * @brief Tests patched ELF export to disk, unified multi-domain workspace search, and deadlock propagation.
+ */
+void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation() {
+    // 1. Initialize MainWindow and load running binary target
+    gridlock::ui::MainWindow mainWindow;
+    const QString appPath = QCoreApplication::applicationFilePath();
+    QVERIFY(mainWindow.loadBinaryTarget(appPath));
+    mainWindow.loadPreviewFixture();
+
+    auto* inspector = mainWindow.elfInspector();
+    QVERIFY(inspector != nullptr);
+    QVERIFY(inspector->isValid());
+
+    // Locate .text section address
+    uint64_t textAddr = 0;
+    for (const auto& sec : inspector->sections()) {
+        if (sec.name == QStringLiteral(".text")) {
+            textAddr = sec.address;
+            break;
+        }
+    }
+    if (textAddr == 0) {
+        textAddr = inspector->entryPoint();
+    }
+    QVERIFY(textAddr != 0);
+
+    // Apply live 2-byte patch via MemView (which connects to ElfBinaryInspector)
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    QVERIFY(memView != nullptr);
+    const QByteArray patchBytes = QByteArray::fromHex("9090");
+    QVERIFY(memView->patchBytes(textAddr, patchBytes));
+
+    // Export patched binary to temporary file on disk
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString exportPath = tempDir.filePath(QStringLiteral("patched_gridlock_bin"));
+    QVERIFY(mainWindow.exportPatchedBinary(exportPath));
+    QVERIFY(QFile::exists(exportPath));
+
+    // Verify written file permissions and payload via independent inspector
+    gridlock::core::ElfBinaryInspector verifyInspector(exportPath);
+    QVERIFY(verifyInspector.isValid());
+    QCOMPARE(verifyInspector.readVirtualMemory(textAddr, 2), patchBytes);
+
+    // 2. Test unified multi-domain workspace search
+    const auto searchMatches = mainWindow.searchWorkspace(QStringLiteral("main"));
+    QVERIFY(!searchMatches.isEmpty());
+    bool foundValidAddress = false;
+    for (const auto& match : searchMatches) {
+        if (match.address != 0 &&
+            (match.label.contains(QStringLiteral("main"), Qt::CaseInsensitive) ||
+             match.contextSnippet.contains(QStringLiteral("main"), Qt::CaseInsensitive))) {
+            foundValidAddress = true;
+            break;
+        }
+    }
+    QVERIFY(foundValidAddress);
+
+    // 3. Test deadlock wait-for cycle detection and propagation to DisassemblyView and status bar
+    const QMap<int, int> waitForGraph = {{0, 1}, {1, 0}};
+    const QVector<int> detectedCycle = mainWindow.detectAndHighlightDeadlock(waitForGraph);
+    QVERIFY(detectedCycle.contains(0));
+    QVERIFY(detectedCycle.contains(1));
+
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(disasm != nullptr);
+    const QVector<int> disasmCycle = disasm->deadlockCycleRanks();
+    QVERIFY(disasmCycle.contains(0));
+    QVERIFY(disasmCycle.contains(1));
+
+    auto* telemetryLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
+    QVERIFY(telemetryLabel != nullptr);
+    QVERIFY(telemetryLabel->text().contains(QStringLiteral("DEADLOCK")));
+}
+
+

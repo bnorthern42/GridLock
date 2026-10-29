@@ -34,6 +34,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
@@ -41,6 +42,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QScreen>
+#include <QShortcut>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QToolTip>
@@ -250,13 +252,33 @@ private:
  * @return Fully configured QWidget pointer.
  */
 QWidget* createAddressSpaceNavBar(MainWindow* window, QWidget* parent) {
-    return new AddressSpaceNavBar(
+    auto* nav = new AddressSpaceNavBar(
         [window](uint64_t addr) {
             // Seek to hex representation of chosen memory segment base address.
             window->seekToAddressOrExpression(
                 QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
         },
         parent);
+
+    // Ctrl+Shift+F global workspace search shortcut
+    auto* searchShortcut =
+        new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F), window);
+    QObject::connect(searchShortcut, &QShortcut::activated, window, [window]() {
+        bool ok = false;
+        const QString query = QInputDialog::getText(
+            window, QObject::tr("Workspace Search"),
+            QObject::tr("Search symbols, strings, disassembly, and decompiler:"),
+            QLineEdit::Normal, QString(), &ok);
+        if (ok && !query.trimmed().isEmpty()) {
+            const auto matches = window->searchWorkspace(query.trimmed());
+            if (!matches.isEmpty()) {
+                window->seekToAddressOrExpression(
+                    QStringLiteral("0x%1").arg(matches.first().address, 8, 16, QChar('0')));
+            }
+        }
+    });
+
+    return nav;
 }
 
 /**
@@ -850,6 +872,77 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     }
 
     return true;
+}
+
+/**
+ * @brief Performs unified multi-domain case-insensitive search across the workspace.
+ *
+ * Scans loaded ELF symbols and strings, disassembly lines and user comments,
+ * and decompiled C statements for matching query occurrences.
+ *
+ * @param query Target search query substring.
+ * @return List of structured search match records.
+ */
+QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(
+    const QString& query) const {
+    QVector<WorkspaceSearchResult> matches;
+    const QString q = query.trimmed();
+    if (q.isEmpty()) {
+        return matches;
+    }
+
+    // 1. Search loaded ELF symbols
+    if (m_elfInspector && m_elfInspector->isValid()) {
+        for (const auto& s : m_elfInspector->symbols()) {
+            if (s.name.contains(q, Qt::CaseInsensitive)) {
+                matches.append({QStringLiteral("Symbol"), s.address, s.name,
+                                QStringLiteral("Symbol %1 (size %2 bytes)")
+                                    .arg(s.name)
+                                    .arg(s.size)});
+            }
+        }
+        // 2. Search loaded strings
+        for (const auto& str : m_elfInspector->strings()) {
+            if (str.value.contains(q, Qt::CaseInsensitive)) {
+                matches.append({QStringLiteral("String"), str.address, str.value,
+                                QStringLiteral("Section %1: \"%2\"")
+                                    .arg(str.section)
+                                    .arg(str.value)});
+            }
+        }
+    }
+
+    // 3. Search Disassembly lines and user comments
+    if (m_disassemblyView) {
+        const QString disasmText = m_disassemblyView->toPlainText();
+        const QStringList lines = disasmText.split('\n');
+        for (int i = 0; i < lines.size(); ++i) {
+            const QString& line = lines[i];
+            if (line.contains(q, Qt::CaseInsensitive)) {
+                const uint64_t addr = m_disassemblyView->addressForLine(i);
+                matches.append({QStringLiteral("Disassembly"), addr,
+                                QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')),
+                                line.trimmed()});
+            }
+        }
+
+        // 4. Search Decompiled C statements
+        const QString decompilerText = m_disassemblyView->decompiledPseudocode();
+        if (!decompilerText.isEmpty()) {
+            const QStringList decompilerLines = decompilerText.split('\n');
+            for (int i = 0; i < decompilerLines.size(); ++i) {
+                const QString& line = decompilerLines[i];
+                if (line.contains(q, Qt::CaseInsensitive)) {
+                    const uint64_t addr = m_disassemblyView->decompilerLineToAddress(i + 1);
+                    matches.append({QStringLiteral("Decompiler"), addr,
+                                    QStringLiteral("Line %1").arg(i + 1),
+                                    line.trimmed()});
+                }
+            }
+        }
+    }
+
+    return matches;
 }
 
 }  // namespace gridlock::ui
