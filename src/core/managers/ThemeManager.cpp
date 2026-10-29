@@ -469,6 +469,38 @@ static QString getHighDensityQssOverlay() {
         "    border-left: 2px solid #528bff;\n"
         "    font-weight: 600;\n"
         "}\n"
+        // Cohesive dark-slate popup menus and tooltips across all views.
+        // Enforces #1e222a popup container surface with 1px #323844 structural border.
+        "QMenu {\n"
+        "    background: #1e222a;\n"
+        "    color: #d7dae0;\n"
+        "    border: 1px solid #323844;\n"
+        "    padding: 3px 0px;\n"
+        "}\n"
+        // Standardize context menu item row padding and light-slate foreground text.
+        "QMenu::item {\n"
+        "    padding: 4px 20px;\n"
+        "    color: #d7dae0;\n"
+        "    background: transparent;\n"
+        "}\n"
+        // Highlight hovered/selected context menu actions with #264f78 accent fill.
+        "QMenu::item:selected {\n"
+        "    background: #264f78;\n"
+        "    color: #ffffff;\n"
+        "}\n"
+        // Render subtle 1px horizontal divider lines between grouped menu actions.
+        "QMenu::separator {\n"
+        "    height: 1px;\n"
+        "    background: #2c313a;\n"
+        "    margin: 3px 6px;\n"
+        "}\n"
+        // Unify floating hover tooltips with the dark-slate popup chrome palette.
+        "QToolTip {\n"
+        "    background: #1e222a;\n"
+        "    color: #d7dae0;\n"
+        "    border: 1px solid #323844;\n"
+        "    padding: 3px 6px;\n"
+        "}\n"
     );
 }
 

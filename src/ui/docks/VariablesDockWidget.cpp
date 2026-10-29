@@ -15,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QVBoxLayout>
 
 namespace gridlock {
@@ -31,6 +32,20 @@ VariablesDockWidget::VariablesDockWidget(QWidget* parent)
 }
 
 VariablesDockWidget::~VariablesDockWidget() = default;
+
+/**
+ * @brief Promotes a local variable name to the Watch Expressions differential grid.
+ * @param variableName Local variable or expression string to watch across MPI ranks.
+ * @return True if a non-empty variable name was promoted, false otherwise.
+ */
+bool VariablesDockWidget::promoteVariableToWatch(const QString& variableName) {
+    const QString trimmed = variableName.trimmed();
+    if (trimmed.isEmpty()) {
+        return false;
+    }
+    emit watchExpressionRequested(trimmed);
+    return true;
+}
 
 /**
  * @brief Binds a coordinator backend and re-initializes variable tree model.
@@ -102,6 +117,7 @@ void VariablesDockWidget::setupUi() {
     m_variablesTree->setIndentation(16);
     m_variablesTree->setItemsExpandable(true);
     m_variablesTree->setExpandsOnDoubleClick(true);
+    m_variablesTree->setContextMenuPolicy(Qt::CustomContextMenu);
 
     // Distribute tree column header widths across Name, Value, and Type with >= 48px minimum section size.
     m_variablesTree->header()->setVisible(true);
@@ -125,6 +141,24 @@ void VariablesDockWidget::setupUi() {
         QString valueStr = m_model->data(valueIndex, Qt::DisplayRole).toString();
         if (valueStr.startsWith("0x")) {
             m_coordinator->readMemory(m_currentRankId, valueStr, 256);
+        }
+    });
+
+    // Right-clicking a variable row opens a context menu to promote the variable into Watch Expressions.
+    connect(m_variablesTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QModelIndex index = m_variablesTree->indexAt(pos);
+        if (!index.isValid() || !m_model) {
+            return;
+        }
+        const QModelIndex nameIndex = m_model->index(index.row(), 0, index.parent());
+        const QString varName = m_model->data(nameIndex, Qt::DisplayRole).toString().trimmed();
+        if (varName.isEmpty()) {
+            return;
+        }
+        QMenu menu(this);
+        QAction* watchAct = menu.addAction(QStringLiteral("Add to Watch Expressions"));
+        if (menu.exec(m_variablesTree->viewport()->mapToGlobal(pos)) == watchAct) {
+            promoteVariableToWatch(varName);
         }
     });
 }

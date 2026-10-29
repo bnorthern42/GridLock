@@ -57,9 +57,16 @@ ExpressionEvaluatorWidget::ExpressionEvaluatorWidget(QWidget* parent)
     m_evaluateBtn->setObjectName(QStringLiteral("evaluatorSubmitBtn"));
     m_evaluateBtn->setFixedHeight(22);
 
+    // Compact "+ Watch" action button to promote tested expressions directly to DifferentialGrid.
+    m_watchBtn = new QPushButton(QStringLiteral("+ Watch"), headerBar);
+    m_watchBtn->setObjectName(QStringLiteral("evaluatorPromoteWatchBtn"));
+    m_watchBtn->setToolTip(QStringLiteral("Promote current expression to Watch Expressions dock"));
+    m_watchBtn->setFixedHeight(22);
+
     inputLayout->addWidget(promptLabel);
     inputLayout->addWidget(m_inputField, 1);
     inputLayout->addWidget(m_evaluateBtn);
+    inputLayout->addWidget(m_watchBtn);
 
     // Flush read-only multi-line history log on #16181d dark-slate canvas.
     m_historyArea = new QPlainTextEdit(content);
@@ -84,9 +91,36 @@ ExpressionEvaluatorWidget::ExpressionEvaluatorWidget(QWidget* parent)
         }
     };
 
-    // Connect evaluate button and Enter key to the trigger.
+    // Connect evaluate button, Enter key, and "+ Watch" promotion button.
     connect(m_evaluateBtn, &QPushButton::clicked, this, triggerEval);
     connect(m_inputField, &QLineEdit::returnPressed, this, triggerEval);
+    connect(m_watchBtn, &QPushButton::clicked, this, &ExpressionEvaluatorWidget::promoteCurrentToWatch);
+}
+
+/**
+ * @brief Sets the current expression input field text.
+ * @param expr Expression string to populate into the evaluator field.
+ */
+void ExpressionEvaluatorWidget::setExpression(const QString& expr) {
+    if (m_inputField) {
+        m_inputField->setText(expr);
+    }
+}
+
+/**
+ * @brief Promotes the currently entered expression to the Watch Expressions dock.
+ * @return True if a non-empty expression was promoted, false otherwise.
+ */
+bool ExpressionEvaluatorWidget::promoteCurrentToWatch() {
+    if (!m_inputField) {
+        return false;
+    }
+    const QString expr = m_inputField->text().trimmed();
+    if (expr.isEmpty()) {
+        return false;
+    }
+    emit watchExpressionRequested(expr);
+    return true;
 }
 
 /**

@@ -45,8 +45,10 @@
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "GdbConsoleWidget.hpp"
 #include "docks/TerminalDockWidget.hpp"
+#include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/MemView.hpp"
+#include "widgets/DifferentialGrid.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
@@ -214,6 +216,28 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         }
         lookupSymbolDocumentation(candidate);
     });
+
+    // 5. Wire cross-pane workflow bridges between Evaluator/Variables -> Watch Expressions and Disassembly -> Reference Manual.
+    auto addPromotedWatch = [this](const QString& expr) {
+        const QString trimmed = expr.trimmed();
+        if (trimmed.isEmpty() || !m_differentialGrid) {
+            return;
+        }
+        m_differentialGrid->addVariableColumn(trimmed);
+        m_differentialGrid->updateVariableDisplay(0, trimmed, QStringLiteral("0.0"));
+    };
+    if (m_expressionEvaluatorWidget) {
+        connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::watchExpressionRequested,
+                this, addPromotedWatch);
+    }
+    if (m_variablesDockWidget) {
+        connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::watchExpressionRequested,
+                this, addPromotedWatch);
+    }
+    if (m_disassemblyView) {
+        connect(m_disassemblyView, &DisassemblyView::documentationRequested,
+                this, &MainWindow::lookupSymbolDocumentation);
+    }
 }
 
 /**

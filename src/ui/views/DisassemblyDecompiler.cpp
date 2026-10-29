@@ -10,6 +10,7 @@
  */
 
 #include "DisassemblyView.hpp"
+#include "../dialogs/XrefInspectorDialog.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -19,6 +20,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMap>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -126,6 +128,21 @@ void DisassemblyView::setupDecompilerUi(QSplitter* splitSplitter, const QFont& f
   splitSplitter->setStretchFactor(0, 1);
   splitSplitter->setStretchFactor(1, 1);
   m_decompilerPage->hide();
+
+  // Wire right-click context menu on the linear disassembly editor page (page 0 of m_stack).
+  if (QWidget *linearWidget = (m_stack && m_stack->count() > 0) ? m_stack->widget(0) : nullptr) {
+    linearWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(linearWidget, &QWidget::customContextMenuRequested, this, [this, linearWidget](const QPoint &pos) {
+      QMenu menu(this);
+      const QStringList actions = contextActionNamesForAddress(m_currentAddress);
+      for (const QString &actName : actions) {
+        menu.addAction(actName);
+      }
+      if (QAction *chosen = menu.exec(linearWidget->mapToGlobal(pos))) {
+        triggerContextAction(m_currentAddress, chosen->text());
+      }
+    });
+  }
 }
 
 /**
@@ -617,6 +634,214 @@ void DisassemblyView::revertAllPatches() {
   m_patchedInstructions.clear();
   updateDisassembly(m_baseDisassembly);
   refreshDecompilerView();
+}
+
+/**
+ * @brief Toggles the user bookmark state for the specified instruction address.
+ * @param address 64-bit instruction pointer address.
+ * @return True if the address is now bookmarked; false if cleared.
+ */
+bool DisassemblyView::toggleBookmark(uint64_t address) {
+  // Toggle presence in the bookmark hash set
+  if (m_bookmarks.contains(address)) {
+    m_bookmarks.remove(address);
+  } else {
+    m_bookmarks.insert(address);
+  }
+  // Refresh the disassembly listing to update bookmark gutter indicators
+  updateDisassembly(m_baseDisassembly.isEmpty() ? defaultStartupDisassembly()
+                                                : m_baseDisassembly);
+  return m_bookmarks.contains(address);
+}
+
+/**
+ * @brief Checks whether the given address is bookmarked.
+ * @param address 64-bit instruction pointer address.
+ * @return True if bookmarked.
+ */
+bool DisassemblyView::isBookmarked(uint64_t address) const {
+  return m_bookmarks.contains(address);
+}
+
+/**
+ * @brief Returns a sorted list of all active user bookmark addresses.
+ * @return Ascending sorted vector of 64-bit addresses.
+ */
+QVector<uint64_t> DisassemblyView::bookmarkedAddresses() const {
+  QVector<uint64_t> sorted;
+  sorted.reserve(m_bookmarks.size());
+  for (uint64_t addr : m_bookmarks) {
+    sorted.append(addr);
+  }
+  // Sort addresses in ascending numerical order for deterministic presentation
+  std::sort(sorted.begin(), sorted.end());
+  return sorted;
+}
+
+/**
+ * @brief Returns all incoming branch, call, and loop edges targeting targetAddr.
+ *
+ * Scans internal cross-reference records and extracts all references whose destination
+ * address equals the requested target instruction address.
+ *
+ * @param targetAddr Target destination instruction address.
+ * @return List of incoming structured cross-references.
+ */
+QVector<XrefRecord> DisassemblyView::incomingXrefs(uint64_t targetAddr) const {
+  QVector<XrefRecord> results;
+  // Iterate through cached xref records matching target destination address
+  for (const auto &xr : m_xrefs) {
+    if (xr.toAddress == targetAddr) {
+      results.append(xr);
+    }
+  }
+  return results;
+}
+
+/**
+ * @brief Returns outgoing calls, branches, and data references from sourceAddr or containing function.
+ *
+ * Resolves the enclosing function boundaries from basic blocks and gathers all outgoing
+ * calls, jumps, conditional branches, and RIP-relative data references originating from
+ * the function or individual instruction address.
+ *
+ * @param sourceAddr Source instruction or function entrypoint address.
+ * @return List of outgoing structured cross-references.
+ */
+QVector<XrefRecord> DisassemblyView::outgoingXrefs(uint64_t sourceAddr) const {
+  QVector<XrefRecord> results;
+  // Step 1: Identify enclosing function boundaries from partitioned basic blocks
+  uint64_t funcStart = 0;
+  uint64_t funcEnd = UINT64_MAX;
+  if (!m_basicBlocks.isEmpty()) {
+    funcStart = m_basicBlocks.first().startAddress;
+    funcEnd = m_basicBlocks.last().endAddress;
+  }
+  // Step 2: Collect all outgoing control-flow and memory references in the function
+  for (const auto &xr : m_xrefs) {
+    if (sourceAddr == funcStart || (xr.fromAddress >= funcStart && xr.fromAddress <= funcEnd)) {
+      results.append(xr);
+    } else if (xr.fromAddress == sourceAddr) {
+      results.append(xr);
+    }
+  }
+  return results;
+}
+
+/**
+ * @brief Opens or refreshes the interactive Xref and call-graph inspector dialog.
+ *
+ * Instantiates the XrefInspectorDialog on first access, connects its addressActivated
+ * signal to the DisassemblyView addressSelected pipeline, builds a 5-line context preview
+ * around the target address, and activates the dialog window.
+ *
+ * @param targetAddr Focus virtual memory address.
+ * @return Pointer to the active XrefInspectorDialog.
+ */
+XrefInspectorDialog* DisassemblyView::openXrefInspector(uint64_t targetAddr) {
+  // Lazily construct dialog instance and connect navigation signal
+  if (!m_xrefDialog) {
+    m_xrefDialog = new XrefInspectorDialog(this);
+    connect(m_xrefDialog, &XrefInspectorDialog::addressActivated,
+            this, &DisassemblyView::addressSelected);
+  }
+
+  // Extract structured incoming and outgoing cross-references
+  const auto incoming = incomingXrefs(targetAddr);
+  const auto outgoing = outgoingXrefs(targetAddr);
+
+  // Build context preview snippet showing the surrounding disassembly window
+  QString preview;
+  int lineIdx = m_addrToLine.value(targetAddr, -1);
+  const QString fullText = toPlainText();
+  if (lineIdx >= 0 && !fullText.isEmpty()) {
+    const QStringList allLines = fullText.split('\n');
+    const int start = std::max(0, lineIdx - 2);
+    const int end = std::min(static_cast<int>(allLines.size()), lineIdx + 3);
+    for (int i = start; i < end; ++i) {
+      // Highlight target instruction pointer line with pointer arrow
+      preview += (i == lineIdx ? QStringLiteral("=> ") : QStringLiteral("   ")) +
+                 allLines[i] + QStringLiteral("\n");
+    }
+  } else {
+    // Fallback telemetry summary when linear line mapping is unavailable
+    preview = QStringLiteral("Address: 0x%1\nIncoming: %2\nOutgoing: %3")
+                  .arg(targetAddr, 8, 16, QChar('0'))
+                  .arg(incoming.size())
+                  .arg(outgoing.size());
+  }
+
+  // Populate dialog collections and present to user
+  m_xrefDialog->setTargetAddress(targetAddr);
+  m_xrefDialog->setXrefs(incoming, outgoing, preview);
+  m_xrefDialog->show();
+  m_xrefDialog->raise();
+  m_xrefDialog->activateWindow();
+  return m_xrefDialog;
+}
+
+/**
+ * @brief Returns ordered cross-view context menu action labels for an instruction address.
+ * @param address Target 64-bit instruction address.
+ * @return Ordered list of context action labels.
+ */
+QStringList DisassemblyView::contextActionNamesForAddress(uint64_t address) const {
+  Q_UNUSED(address);
+  return {
+      QStringLiteral("Seek in Memory View"),
+      QStringLiteral("Inspect Cross-References (X)"),
+      QStringLiteral("Lookup in Reference Manual (F1)"),
+      QStringLiteral("Toggle Bookmark"),
+      QStringLiteral("Patch Instruction")
+  };
+}
+
+/**
+ * @brief Executes a named cross-view context menu action for the specified instruction address.
+ * @param address Target 64-bit instruction address.
+ * @param actionName Action label from contextActionNamesForAddress().
+ * @return True if the action was recognized and dispatched, false otherwise.
+ */
+bool DisassemblyView::triggerContextAction(uint64_t address, const QString& actionName) {
+  if (actionName == QStringLiteral("Seek in Memory View")) {
+    seekToAddress(address);
+    emit addressSelected(address);
+    return true;
+  }
+  if (actionName == QStringLiteral("Inspect Cross-References (X)")) {
+    openXrefInspector(address);
+    return true;
+  }
+  if (actionName == QStringLiteral("Lookup in Reference Manual (F1)")) {
+    // Extract MPI symbol, PLT target, or instruction mnemonic from the disassembly line at address.
+    QString symbol = QStringLiteral("MPI_Init");
+    const int lineIdx = m_addrToLine.value(address, -1);
+    const QStringList lines = toPlainText().split('\n');
+    if (lineIdx >= 0 && lineIdx < lines.size()) {
+      const QString line = lines[lineIdx];
+      static const QRegularExpression mpiSymRe(QStringLiteral("\\b(MPI_[A-Za-z0-9_]+)\\b"));
+      static const QRegularExpression pltSymRe(QStringLiteral("<([A-Za-z0-9_]+)(?:@plt)?>"));
+      const QRegularExpressionMatch mpiMatch = mpiSymRe.match(line);
+      if (mpiMatch.hasMatch()) {
+        symbol = mpiMatch.captured(1);
+      } else {
+        const QRegularExpressionMatch pltMatch = pltSymRe.match(line);
+        if (pltMatch.hasMatch()) {
+          symbol = pltMatch.captured(1);
+        }
+      }
+    }
+    emit documentationRequested(symbol);
+    return true;
+  }
+  if (actionName == QStringLiteral("Toggle Bookmark")) {
+    toggleBookmark(address);
+    return true;
+  }
+  if (actionName == QStringLiteral("Patch Instruction")) {
+    return patchInstruction(address, QStringLiteral("nop"));
+  }
+  return false;
 }
 
 }  // namespace gridlock::ui

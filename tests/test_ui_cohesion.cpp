@@ -40,6 +40,7 @@
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/widgets/DifferentialGrid.hpp"
+#include "../src/ui/widgets/ExpressionEvaluatorWidget.hpp"
 #include "../src/ui/widgets/MpiDiagnosticsWidget.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 #include "../src/ui/widgets/ReferenceManualWidget.hpp"
@@ -373,4 +374,112 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
         verifyTableIntegrity(tbl, QStringLiteral("XrefInspectorDialog"));
     }
     xrefDlg->hide();
+}
+
+/**
+ * @brief Verifies cross-pane workflow bridges, DisassemblyView context actions, and DisassemblyAnalysis line rebalance.
+ *
+ * Tests three key architectural requirements:
+ * 1. Evaluator & Variables -> Watch Expressions Bridge: Promoting an expression from
+ *    ExpressionEvaluatorWidget or VariablesDockWidget emits watchExpressionRequested and
+ *    populates MainWindow's DifferentialGrid (Watch Expressions).
+ * 2. DisassemblyView Context Actions -> Reference Manual: Querying context actions at
+ *    0x0040113d (call <MPI_Init@plt>) returns the cohesive action list, and triggering
+ *    "Lookup in Reference Manual (F1)" switches BottomConsoleTabs to Reference Manual
+ *    and renders MPI_Init documentation.
+ * 3. File Line Headroom: Confirms src/ui/views/DisassemblyAnalysis.cpp is strictly < 850 lines.
+ */
+void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // 1. Evaluator & Variables -> Watch Expressions Bridge.
+    auto* evaluatorWidget = mainWindow.findChild<gridlock::ui::ExpressionEvaluatorWidget*>();
+    QVERIFY2(evaluatorWidget != nullptr, "ExpressionEvaluatorWidget must exist in MainWindow");
+
+    auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
+    QVERIFY2(diffGrid != nullptr, "DifferentialGrid must exist in MainWindow");
+
+    evaluatorWidget->setExpression(QStringLiteral("data[0].coords.z"));
+    QVERIFY2(evaluatorWidget->promoteCurrentToWatch(),
+             "promoteCurrentToWatch() must succeed for non-empty expression");
+    QCoreApplication::processEvents();
+
+    // Verify "data[0].coords.z" was added (case-insensitively) to DifferentialGrid watch expressions.
+    auto hasWatchExpression = [diffGrid](const QString& target) -> bool {
+        for (const std::string& w : diffGrid->getWatchExpressions()) {
+            if (QString::fromStdString(w).compare(target, Qt::CaseInsensitive) == 0) {
+                return true;
+            }
+        }
+        for (int col = 0; col < diffGrid->columnCount(); ++col) {
+            if (const QTableWidgetItem* hdr = diffGrid->horizontalHeaderItem(col)) {
+                if (hdr->text().compare(target, Qt::CaseInsensitive) == 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    QVERIFY2(hasWatchExpression(QStringLiteral("data[0].coords.z")),
+             "DifferentialGrid must contain promoted Evaluator expression 'data[0].coords.z'");
+
+    // Promote a variable from VariablesDockWidget to Watch Expressions.
+    auto* variablesDock = mainWindow.findChild<gridlock::VariablesDockWidget*>();
+    QVERIFY2(variablesDock != nullptr, "VariablesDockWidget must exist in MainWindow");
+    QVERIFY2(variablesDock->promoteVariableToWatch(QStringLiteral("rank_local_id")),
+             "VariablesDockWidget::promoteVariableToWatch('rank_local_id') must return true");
+    QCoreApplication::processEvents();
+    QVERIFY2(hasWatchExpression(QStringLiteral("rank_local_id")),
+             "DifferentialGrid must contain promoted variable 'rank_local_id'");
+
+    // 2. Cross-View Context Menu Actions in DisassemblyView.
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY2(disasm != nullptr, "DisassemblyView must exist in MainWindow");
+
+    const QStringList actionNames = disasm->contextActionNamesForAddress(0x0040113dULL);
+    QVERIFY2(actionNames.contains(QStringLiteral("Seek in Memory View")),
+             "DisassemblyView context actions must include 'Seek in Memory View'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Inspect Cross-References (X)")),
+             "DisassemblyView context actions must include 'Inspect Cross-References (X)'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Lookup in Reference Manual (F1)")),
+             "DisassemblyView context actions must include 'Lookup in Reference Manual (F1)'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Patch Instruction")),
+             "DisassemblyView context actions must include 'Patch Instruction'");
+
+    // Start on Terminal tab (index 0), then trigger "Lookup in Reference Manual (F1)" at 0x0040113d.
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    QVERIFY(bottomTabs != nullptr);
+    bottomTabs->setCurrentIndex(0);
+    QCoreApplication::processEvents();
+
+    QVERIFY2(disasm->triggerContextAction(0x0040113dULL, QStringLiteral("Lookup in Reference Manual (F1)")),
+             "triggerContextAction(0x0040113d, 'Lookup in Reference Manual (F1)') must succeed");
+    QCoreApplication::processEvents();
+
+    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"),
+                                                                      Qt::CaseInsensitive),
+             "Triggering 'Lookup in Reference Manual (F1)' must switch BottomConsoleTabs to Reference Manual");
+
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY(refManual != nullptr);
+    auto* browser = refManual->findChild<QTextBrowser*>();
+    QVERIFY(browser != nullptr);
+    QVERIFY2(browser->toPlainText().contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive),
+             "Reference Manual must display MPI_Init documentation after context action lookup");
+
+    // 3. File Line Headroom Verification for src/ui/views/DisassemblyAnalysis.cpp (< 850 lines).
+    QFile disasmAnalysisFile(QStringLiteral("../src/ui/views/DisassemblyAnalysis.cpp"));
+    if (!disasmAnalysisFile.exists()) {
+        disasmAnalysisFile.setFileName(QStringLiteral("src/ui/views/DisassemblyAnalysis.cpp"));
+    }
+    QVERIFY2(disasmAnalysisFile.open(QIODevice::ReadOnly | QIODevice::Text),
+             "Must open src/ui/views/DisassemblyAnalysis.cpp for line count verification");
+    const int lineCount = QString::fromUtf8(disasmAnalysisFile.readAll()).split('\n').size();
+    QVERIFY2(lineCount < 850,
+             qPrintable(QString("DisassemblyAnalysis.cpp has %1 lines (expected < 850)").arg(lineCount)));
 }

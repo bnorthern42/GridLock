@@ -66,48 +66,6 @@ QString DisassemblyView::addressComment(uint64_t address) const {
 }
 
 /**
- * @brief Toggles the user bookmark state for the specified instruction address.
- * @param address 64-bit instruction pointer address.
- * @return True if the address is now bookmarked; false if cleared.
- */
-bool DisassemblyView::toggleBookmark(uint64_t address) {
-  // Toggle presence in the bookmark hash set
-  if (m_bookmarks.contains(address)) {
-    m_bookmarks.remove(address);
-  } else {
-    m_bookmarks.insert(address);
-  }
-  // Refresh the disassembly listing to update bookmark gutter indicators
-  updateDisassembly(m_baseDisassembly.isEmpty() ? defaultStartupDisassembly()
-                                                : m_baseDisassembly);
-  return m_bookmarks.contains(address);
-}
-
-/**
- * @brief Checks whether the given address is bookmarked.
- * @param address 64-bit instruction pointer address.
- * @return True if bookmarked.
- */
-bool DisassemblyView::isBookmarked(uint64_t address) const {
-  return m_bookmarks.contains(address);
-}
-
-/**
- * @brief Returns a sorted list of all active user bookmark addresses.
- * @return Ascending sorted vector of 64-bit addresses.
- */
-QVector<uint64_t> DisassemblyView::bookmarkedAddresses() const {
-  QVector<uint64_t> sorted;
-  sorted.reserve(m_bookmarks.size());
-  for (uint64_t addr : m_bookmarks) {
-    sorted.append(addr);
-  }
-  // Sort addresses in ascending numerical order for deterministic presentation
-  std::sort(sorted.begin(), sorted.end());
-  return sorted;
-}
-
-/**
  * @brief Splices user comments into the raw disassembly text as trailing line annotations.
  * @param rawCode Original disassembly text lines.
  * @return Annotated disassembly text with appended `; comment` suffixes.
@@ -160,22 +118,30 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
   m_lineToAddr.clear();
   m_xrefs.clear();
 
-  // Internal record tracking parsed instruction fields
+  // Internal record tracking parsed instruction fields during basic-block leader pass.
   struct ParsedInst {
+    // Zero-based line index within the linear assembly listing.
     int lineIndex = -1;
+    // 64-bit virtual instruction pointer address.
     uint64_t address = 0;
+    // Trimmed raw assembly line text.
     QString rawLine;
+    // Lowercase opcode mnemonic (e.g., call, jmp, je, mov).
     QString mnemonic;
+    // Resolved immediate branch destination address, if any.
     uint64_t targetAddr = 0;
+    // True when mnemonic is an unconditional jump (jmp/jmpq).
     bool isUnconditionalBranch = false;
+    // True when mnemonic is a conditional jump (je, jne, jg, jl, etc.).
     bool isConditionalBranch = false;
+    // True when mnemonic returns from the current procedure (ret/retq).
     bool isRet = false;
   };
 
   QVector<ParsedInst> instructions;
   const QStringList lines = asmCode.split('\n');
 
-  // Regex patterns for line address, mnemonic/operands, and hex target
+  // Regex patterns for line address, mnemonic/operands, and hex target extraction.
   static const QRegularExpression addrRegex(QStringLiteral(
       "^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)(?:\\s*<([^+>]+)(?:\\+\\d+)?>)?\\s*:?\\s*(.*)$"));
   static const QRegularExpression mnemRegex(
@@ -183,7 +149,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
   static const QRegularExpression targetHexRegex(
       QStringLiteral("(0x[0-9a-fA-F]+)"));
 
-  // Set of conditional branch mnemonics recognized for CFG edge generation
+  // Set of conditional branch mnemonics recognized for CFG edge generation.
   static const QSet<QString> condBranches = {
       QStringLiteral("je"),  QStringLiteral("jz"),  QStringLiteral("jne"),
       QStringLiteral("jnz"), QStringLiteral("jg"),  QStringLiteral("jge"),
@@ -192,7 +158,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       QStringLiteral("js"),  QStringLiteral("jns"), QStringLiteral("jo"),
       QStringLiteral("jno")};
 
-  // Step 1: Parse instructions and extract mnemonic and jump targets
+  // Step 1: Parse instructions and extract mnemonic and jump targets.
   for (int i = 0; i < lines.size(); ++i) {
     const QString &line = lines[i];
     QRegularExpressionMatch addrMatch = addrRegex.match(line);
@@ -200,13 +166,14 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       continue;
     }
 
+    // Parse 64-bit hexadecimal instruction address from capture group 1.
     bool ok = false;
     uint64_t addr = addrMatch.captured(1).toULongLong(&ok, 16);
     if (!ok) {
       continue;
     }
 
-    // Capture the first symbol annotation encountered as the active function symbol
+    // Capture the first symbol annotation encountered as the active function symbol.
     if (!addrMatch.captured(2).isEmpty() && instructions.isEmpty()) {
       m_activeSymbol = QStringLiteral("sym.") + addrMatch.captured(2).trimmed();
     }
@@ -223,7 +190,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       inst.mnemonic = mnemMatch.captured(1).toLower();
       operands = mnemMatch.captured(2);
 
-      // Classify control transfer instructions
+      // Classify control transfer instructions into unconditional, conditional, or return.
       if (inst.mnemonic == QStringLiteral("jmp") ||
           inst.mnemonic == QStringLiteral("jmpq")) {
         inst.isUnconditionalBranch = true;
@@ -234,7 +201,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         inst.isRet = true;
       }
 
-      // Resolve destination target address if an immediate hex literal is present
+      // Resolve destination target address if an immediate hex literal is present.
       if (inst.isUnconditionalBranch || inst.isConditionalBranch) {
         QRegularExpressionMatch tMatch = targetHexRegex.match(operands);
         if (tMatch.hasMatch()) {
@@ -247,18 +214,20 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       }
     }
 
-    // Record bidirectional mapping between linear line index and instruction pointer
+    // Record bidirectional mapping between linear line index and instruction pointer.
     m_addrToLine.insert(addr, i);
     m_lineToAddr.insert(i, addr);
     instructions.append(inst);
 
-    // Classify control transfer and reference instructions for structured xrefs
+    // Classify control transfer and reference instructions for structured xrefs.
+    // Extracts CALL, JMP, CJMP, and RIP-relative DATA edges for XrefInspectorDialog.
     static const QRegularExpression symTargetRegex(QStringLiteral("<([^>]+)>"));
     static const QRegularExpression ripRegex(
         QStringLiteral("\\[rip\\s*([+-])\\s*(0x[0-9a-fA-F]+)\\]"));
 
     if (inst.mnemonic == QStringLiteral("call") ||
         inst.mnemonic == QStringLiteral("callq")) {
+      // Populate outgoing CALL cross-reference record with resolved PLT/function symbol.
       XrefRecord xr;
       xr.fromAddress = addr;
       xr.mnemonic = inst.mnemonic;
@@ -275,6 +244,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       }
       m_xrefs.append(xr);
     } else if (inst.isUnconditionalBranch) {
+      // Populate unconditional JMP cross-reference record.
       XrefRecord xr;
       xr.fromAddress = addr;
       xr.toAddress = inst.targetAddr;
@@ -283,6 +253,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       xr.type = QStringLiteral("JMP");
       m_xrefs.append(xr);
     } else if (inst.isConditionalBranch) {
+      // Populate conditional branch CJMP cross-reference record.
       XrefRecord xr;
       xr.fromAddress = addr;
       xr.toAddress = inst.targetAddr;
@@ -291,6 +262,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       xr.type = QStringLiteral("CJMP");
       m_xrefs.append(xr);
     } else {
+      // Check for RIP-relative memory operands (e.g., [rip+0xea9]) and record DATA xrefs.
       QRegularExpressionMatch ripMatch = ripRegex.match(operands);
       if (ripMatch.hasMatch()) {
         XrefRecord xr;
@@ -301,30 +273,34 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         bool tok = false;
         const uint64_t offset = ripMatch.captured(2).toULongLong(&tok, 16);
         const bool isPos = (ripMatch.captured(1) == QStringLiteral("+"));
+        // Compute effective RIP-relative target address using next-instruction displacement.
         xr.toAddress = isPos ? (addr + 7 + offset) : (addr + 7 - offset);
         m_xrefs.append(xr);
       }
     }
   }
 
+  // Abort basic-block partitioning if no valid assembly instructions were parsed.
   if (instructions.isEmpty()) {
     return;
   }
 
-  // Ensure current address points to a valid instruction in the listing
+  // Ensure current address points to a valid instruction in the listing.
   if (!m_addrToLine.contains(m_currentAddress)) {
     m_currentAddress = instructions.first().address;
   }
 
-  // Step 2: Identify basic block leaders (entry point, jump destinations, fallthroughs)
+  // Step 2: Identify basic block leaders (entry point, jump destinations, fallthroughs).
+  // Every leader address marks the first instruction of a distinct basic block node.
   QSet<uint64_t> blockLeaders;
   blockLeaders.insert(instructions.first().address);
 
-  // Scan instruction stream to flag control-transfer source and destination boundaries
+  // Scan instruction stream to flag control-transfer source and destination boundaries.
   for (int idx = 0; idx < instructions.size(); ++idx) {
     const ParsedInst &inst = instructions[idx];
     if (inst.isConditionalBranch || inst.isUnconditionalBranch) {
       if (inst.targetAddr != 0 && m_addrToLine.contains(inst.targetAddr)) {
+        // Record gutter branch arc linking source line to destination line.
         BranchArc arc;
         arc.fromLine = inst.lineIndex;
         arc.toLine = m_addrToLine.value(inst.targetAddr);
@@ -333,26 +309,28 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         arc.isConditional = inst.isConditionalBranch;
         m_branchArcs.append(arc);
 
-        // Branch target starts a new basic block
+        // Branch target starts a new basic block.
         blockLeaders.insert(inst.targetAddr);
       }
-      // Instruction immediately following a branch starts a new basic block
+      // Instruction immediately following a branch starts a new basic block.
       if (idx + 1 < instructions.size()) {
         blockLeaders.insert(instructions[idx + 1].address);
       }
     } else if (inst.isRet && idx + 1 < instructions.size()) {
-      // Instruction following a return starts a new block
+      // Instruction following a return starts a new block.
       blockLeaders.insert(instructions[idx + 1].address);
     }
   }
 
-  // Step 3: Partition instructions into DisasmBasicBlocks
+  // Step 3: Partition instructions into contiguous DisasmBasicBlocks.
+  // Each basic block spans from its leader address through the instruction preceding the next leader.
   DisasmBasicBlock currentBlock;
   bool hasCurrent = false;
 
   for (int idx = 0; idx < instructions.size(); ++idx) {
     const ParsedInst &inst = instructions[idx];
     if (blockLeaders.contains(inst.address)) {
+      // Flush the completed preceding basic block before initializing the new leader block.
       if (hasCurrent) {
         m_basicBlocks.append(currentBlock);
       }
@@ -362,6 +340,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
       hasCurrent = true;
     }
 
+    // Extend current basic block end address and append formatted instruction text.
     currentBlock.endAddress = inst.address;
     currentBlock.lines.append(inst.rawLine);
 
@@ -370,9 +349,10 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
         blockLeaders.contains(instructions[idx + 1].address);
     const bool isLast = (idx + 1 == instructions.size());
 
-    // Resolve outgoing successor edges upon block termination
+    // Resolve outgoing successor edges (trueTarget, falseTarget, or fallthrough) upon block termination.
     if (isNextLeader || isLast) {
       if (inst.isConditionalBranch) {
+        // Conditional branch: true edge goes to targetAddr, false edge falls through to next instruction.
         if (inst.targetAddr != 0) {
           currentBlock.trueTarget = inst.targetAddr;
           currentBlock.successors.append(inst.targetAddr);
@@ -384,6 +364,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
           }
         }
       } else if (inst.isUnconditionalBranch) {
+        // Unconditional jump: single outgoing edge to targetAddr.
         if (inst.targetAddr != 0) {
           currentBlock.trueTarget = inst.targetAddr;
           currentBlock.successors.append(inst.targetAddr);
@@ -594,7 +575,8 @@ void DisassemblyView::rebuildCfgScene() {
     const qreal lineH = fm.height() + 2.0;
     const qreal boxH = headerH + renderLines.size() * lineH + 8.0;
 
-    // Apply alternating horizontal offsets for compact branch branches
+    // Apply alternating horizontal offsets for compact branch blocks so sibling
+    // true/false basic blocks visually separate along the horizontal axis.
     qreal xOffset = 0.0;
     if (i > 0 && bb.lines.size() <= 4 && (i % 2 == 1)) {
       xOffset = -44.0;
@@ -604,7 +586,8 @@ void DisassemblyView::rebuildCfgScene() {
     const qreal boxX = horizontalCenter - boxW * 0.5 + xOffset;
     const QRectF boxRect(boxX, currentY, boxW, boxH);
 
-    // Determine whether this block is currently active (contains instruction pointer or selected rank)
+    // Determine whether this block is currently active (contains instruction pointer or selected rank).
+    // Active blocks receive a #528bff 2px highlight border and #1f3442 header fill.
     const QVector<int> occRanks = ranksAtBlock(bb.startAddress);
     const bool hasSelectedRank = occRanks.contains(m_selectedRank);
     const bool isActiveBlock =
@@ -615,7 +598,7 @@ void DisassemblyView::rebuildCfgScene() {
       activeBlockRect = boxRect;
     }
 
-    // Outer card container rectangle
+    // Outer card container rectangle on #181a1f dark-slate surface.
     auto *rectItem = m_cfgScene->addRect(
         boxRect,
         QPen(isActiveBlock ? QColor("#528bff") : QColor("#333842"),
@@ -624,7 +607,7 @@ void DisassemblyView::rebuildCfgScene() {
     rectItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     rectItem->setZValue(1.0);
 
-    // Block header bar background
+    // Block header bar background strip at top of basic-block node card.
     QRectF headerRect(boxX, currentY, boxW, headerH);
     auto *hdrItem = m_cfgScene->addRect(
         headerRect, QPen(Qt::NoPen),
@@ -632,7 +615,7 @@ void DisassemblyView::rebuildCfgScene() {
     hdrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrItem->setZValue(2.0);
 
-    // Block title label displaying address interval [start .. end]
+    // Block title label displaying symbolic leader label and address interval [start .. end].
     auto *hdrText = m_cfgScene->addSimpleText(
         QStringLiteral("loc_0x%1  [0x%1 .. 0x%2]")
             .arg(bb.startAddress, 6, 16, QChar('0'))
@@ -643,15 +626,19 @@ void DisassemblyView::rebuildCfgScene() {
     hdrText->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrText->setZValue(3.0);
 
+    // Render MPI rank occupancy badge and deadlock cycle alert indicator in block header.
+    // Collapses contiguous rank intervals (e.g., [R0-R3 (4)]) for compact high-density display.
     if (!occRanks.isEmpty()) {
       QString rankLabel;
       bool hasDeadlock = false;
+      // Check whether any rank paused inside this basic block participates in a wait-for cycle.
       for (int r : occRanks) {
         if (m_deadlockCycleRanks.contains(r)) {
           hasDeadlock = true;
           break;
         }
       }
+      // Format single-rank, contiguous-range, or comma-separated rank occupancy badge.
       if (occRanks.size() == 1) {
         rankLabel = QStringLiteral("[R%1]").arg(occRanks.first());
       } else if (occRanks.last() - occRanks.first() + 1 == occRanks.size()) {
@@ -666,12 +653,14 @@ void DisassemblyView::rebuildCfgScene() {
         }
         rankLabel = QStringLiteral("[%1]").arg(rStrs.join(','));
       }
+      // Prepend explicit [DEADLOCK] warning tag and switch badge to #f44747 crimson when deadlocked.
       if (hasDeadlock) {
         rankLabel = QStringLiteral("[DEADLOCK] ") + rankLabel;
       }
       const QColor badgeCol =
           hasDeadlock ? QColor("#f44747")
                       : (occRanks.contains(0) ? QColor("#dcdcaa") : QColor("#4ec9b0"));
+      // Anchor the rank occupancy badge flush-right inside the basic-block header strip.
       auto *rankBadgeText = m_cfgScene->addSimpleText(rankLabel, monoFont);
       rankBadgeText->setBrush(badgeCol);
       const qreal badgeW = rankBadgeText->boundingRect().width();
@@ -825,108 +814,6 @@ QString DisassemblyView::defaultStartupDisassembly() {
       "0x0040117d <main+93>: mov   eax, 0x0\n"
       "0x00401182 <main+98>: leave\n"
       "0x00401183 <main+99>: ret");
-}
-
-/**
- * @brief Returns all incoming branch, call, and loop edges targeting targetAddr.
- *
- * Scans internal cross-reference records and extracts all references whose destination
- * address equals the requested target instruction address.
- *
- * @param targetAddr Target destination instruction address.
- * @return List of incoming structured cross-references.
- */
-QVector<XrefRecord> DisassemblyView::incomingXrefs(uint64_t targetAddr) const {
-  QVector<XrefRecord> results;
-  // Iterate through cached xref records matching target destination address
-  for (const auto &xr : m_xrefs) {
-    if (xr.toAddress == targetAddr) {
-      results.append(xr);
-    }
-  }
-  return results;
-}
-
-/**
- * @brief Returns outgoing calls, branches, and data references from sourceAddr or containing function.
- *
- * Resolves the enclosing function boundaries from basic blocks and gathers all outgoing
- * calls, jumps, conditional branches, and RIP-relative data references originating from
- * the function or individual instruction address.
- *
- * @param sourceAddr Source instruction or function entrypoint address.
- * @return List of outgoing structured cross-references.
- */
-QVector<XrefRecord> DisassemblyView::outgoingXrefs(uint64_t sourceAddr) const {
-  QVector<XrefRecord> results;
-  // Step 1: Identify enclosing function boundaries from partitioned basic blocks
-  uint64_t funcStart = 0;
-  uint64_t funcEnd = UINT64_MAX;
-  if (!m_basicBlocks.isEmpty()) {
-    funcStart = m_basicBlocks.first().startAddress;
-    funcEnd = m_basicBlocks.last().endAddress;
-  }
-  // Step 2: Collect all outgoing control-flow and memory references in the function
-  for (const auto &xr : m_xrefs) {
-    if (sourceAddr == funcStart || (xr.fromAddress >= funcStart && xr.fromAddress <= funcEnd)) {
-      results.append(xr);
-    } else if (xr.fromAddress == sourceAddr) {
-      results.append(xr);
-    }
-  }
-  return results;
-}
-
-/**
- * @brief Opens or refreshes the interactive Xref and call-graph inspector dialog.
- *
- * Instantiates the XrefInspectorDialog on first access, connects its addressActivated
- * signal to the DisassemblyView addressSelected pipeline, builds a 5-line context preview
- * around the target address, and activates the dialog window.
- *
- * @param targetAddr Focus virtual memory address.
- * @return Pointer to the active XrefInspectorDialog.
- */
-XrefInspectorDialog* DisassemblyView::openXrefInspector(uint64_t targetAddr) {
-  // Lazily construct dialog instance and connect navigation signal
-  if (!m_xrefDialog) {
-    m_xrefDialog = new XrefInspectorDialog(this);
-    connect(m_xrefDialog, &XrefInspectorDialog::addressActivated,
-            this, &DisassemblyView::addressSelected);
-  }
-
-  // Extract structured incoming and outgoing cross-references
-  const auto incoming = incomingXrefs(targetAddr);
-  const auto outgoing = outgoingXrefs(targetAddr);
-
-  // Build context preview snippet showing the surrounding disassembly window
-  QString preview;
-  int lineIdx = m_addrToLine.value(targetAddr, -1);
-  const QString fullText = toPlainText();
-  if (lineIdx >= 0 && !fullText.isEmpty()) {
-    const QStringList allLines = fullText.split('\n');
-    const int start = std::max(0, lineIdx - 2);
-    const int end = std::min(static_cast<int>(allLines.size()), lineIdx + 3);
-    for (int i = start; i < end; ++i) {
-      // Highlight target instruction pointer line with pointer arrow
-      preview += (i == lineIdx ? QStringLiteral("=> ") : QStringLiteral("   ")) +
-                 allLines[i] + QStringLiteral("\n");
-    }
-  } else {
-    // Fallback telemetry summary when linear line mapping is unavailable
-    preview = QStringLiteral("Address: 0x%1\nIncoming: %2\nOutgoing: %3")
-                  .arg(targetAddr, 8, 16, QChar('0'))
-                  .arg(incoming.size())
-                  .arg(outgoing.size());
-  }
-
-  // Populate dialog collections and present to user
-  m_xrefDialog->setTargetAddress(targetAddr);
-  m_xrefDialog->setXrefs(incoming, outgoing, preview);
-  m_xrefDialog->show();
-  m_xrefDialog->raise();
-  m_xrefDialog->activateWindow();
-  return m_xrefDialog;
 }
 
 }  // namespace gridlock::ui

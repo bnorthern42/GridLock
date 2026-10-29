@@ -46,6 +46,20 @@ public:
      */
     void setCoordinator(::IBackendCoordinator* coordinator);
 
+    /**
+     * @brief Promotes a local variable name to the Watch Expressions differential grid.
+     * @param variableName Local variable or expression string to watch across MPI ranks.
+     * @return True if a non-empty variable name was promoted, false otherwise.
+     */
+    bool promoteVariableToWatch(const QString& variableName);
+
+signals:
+    /**
+     * @brief Emitted when a user promotes a variable from the tree into Watch Expressions.
+     * @param expression The variable or expression string to add to Watch Expressions.
+     */
+    void watchExpressionRequested(const QString& expression);
+
 private slots:
     /**
      * @brief Handles rank selection changes from the dropdown combo box.

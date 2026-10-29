@@ -212,11 +212,18 @@ public:
     /// Returns sorted list of all active user bookmark addresses.
     QVector<uint64_t> bookmarkedAddresses() const;
 
+    /// Returns ordered list of cross-view context menu action labels for an instruction address.
+    QStringList contextActionNamesForAddress(uint64_t address) const;
+    /// Executes a named cross-view context menu action for the specified instruction address.
+    bool triggerContextAction(uint64_t address, const QString& actionName);
+
 signals:
     /// Emitted when an instruction address is selected by click or seek.
     void addressSelected(uint64_t address);
     /// Emitted when an assembly instruction is patched.
     void instructionPatched(uint64_t address, const QByteArray& newBytes);
+    /// Emitted when the user requests Reference Manual documentation for a symbol or mnemonic.
+    void documentationRequested(const QString& symbol);
 
 public slots:
     /// Loads and analyzes new assembly code listing.

@@ -123,4 +123,7 @@ private slots:
 
     /** @brief Verifies dark-slate visual cohesion across modal dialogs, category sidebars, and table/tree headers. */
     void testDialogsAndTablesVisualCohesion();
+
+    /** @brief Verifies cross-pane workflow bridges (Evaluator/Variables -> Watch, Disassembly context actions -> Reference Manual) and DisassemblyAnalysis line count. */
+    void testCrossPaneWorkflowBridgesAndContextActions();
 };
