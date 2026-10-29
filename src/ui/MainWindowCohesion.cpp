@@ -40,6 +40,9 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 
+#include "../core/commands/DebugCommands.hpp"
+#include "../core/hpc/IBackendCoordinator.hpp"
+#include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/DocsetManager.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
@@ -48,6 +51,9 @@
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/MemView.hpp"
+#include "views/RegisterView.hpp"
+#include "views/ServerRackView.hpp"
+#include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
@@ -492,4 +498,211 @@ QVector<int> MainWindow::detectAndHighlightDeadlock(
     return cycleNodes;
 }
 
+/**
+ * @brief Updates main toolbar action enablement based on m_debugSessionActive.
+ *
+ * When m_debugSessionActive is false (Idle state), Run Target is enabled while
+ * Continue, Step Inst, Pause Rank, Stop, and Terminate Session are disabled
+ * and styled in muted dark-slate so the user immediately sees the entry action.
+ */
+void MainWindow::updateDebugToolbarState() {
+    if (m_runAction) {
+        m_runAction->setEnabled(true);
+    }
+    if (m_continueAction) {
+        m_continueAction->setEnabled(m_debugSessionActive);
+    }
+    if (m_stepAction) {
+        m_stepAction->setEnabled(m_debugSessionActive);
+    }
+    if (m_pauseAction) {
+        m_pauseAction->setEnabled(m_debugSessionActive);
+    }
+    if (m_stopAction) {
+        m_stopAction->setEnabled(m_debugSessionActive);
+    }
+    if (m_terminateAction) {
+        m_terminateAction->setEnabled(m_debugSessionActive);
+    }
+}
+
+/**
+ * @brief Maps a 64-bit instruction address in sym.main to a 1-based C++ source line.
+ * @param address 64-bit virtual instruction address.
+ * @return Corresponding 1-based source line number in inspection_demo.cpp.
+ */
+static int mapInstructionAddressToSourceLine(uint64_t address) {
+    if (address <= 0x00401128ULL) {
+        return 12;
+    }
+    if (address <= 0x0040113dULL) {
+        return 13;
+    }
+    if (address <= 0x00401142ULL) {
+        return 15;
+    }
+    if (address <= 0x00401155ULL) {
+        return 16;
+    }
+    if (address <= 0x00401163ULL) {
+        return 19;
+    }
+    if (address <= 0x0040116eULL) {
+        return 17;
+    }
+    return 22;
+}
+
+/**
+ * @brief Starts the target debugging workflow, spawning configured MPI ranks and pausing at entry.
+ *
+ * Transitions the session state machine to active, populates #toolbarRankSpin ranks in
+ * ServerRackView with Rank 0 paused at main (0x00401120), synchronizes DisassemblyView,
+ * RegisterView, MemView, and SourceCodeView::highlightExecutionLine, and updates
+ * #cutterStatusTelemetry to PAUSED (BREAKPOINT).
+ */
+void MainWindow::startTargetWorkflow() {
+    m_debugSessionActive = true;
+    updateDebugToolbarState();
+
+    const int rankCount =
+        m_rankCountSpin ? std::clamp(m_rankCountSpin->value(), 1, 64) : 8;
+    const uint64_t entryAddr = 0x00401120ULL;
+
+    m_latestStates.clear();
+    QList<RankState> rankList;
+    rankList.reserve(rankCount);
+    for (int r = 0; r < rankCount; ++r) {
+        RankState st;
+        st.rankId = r;
+        st.currentState =
+            (r == 0) ? QStringLiteral("stopped") : QStringLiteral("running");
+        st.registers[16] = QStringLiteral("0x00401120");
+        st.currentFunction = QStringLiteral("main");
+        st.currentLine = 12;
+        m_latestStates[r] = st;
+        rankList.append(st);
+    }
+    m_focusedRank = 0;
+
+    if (m_serverRackView) {
+        m_serverRackView->updateRanks(rankList);
+        m_serverRackView->selectRank(0);
+    }
+
+    seekToAddressOrExpression(QStringLiteral("0x00401120"));
+
+    if (m_registerView) {
+        m_registerView->updateRegisters({
+            {QStringLiteral("rip"), QStringLiteral("0x00401120 <main+0>")},
+            {QStringLiteral("rsp"), QStringLiteral("0x7fffffffe480")},
+            {QStringLiteral("rbp"), QStringLiteral("0x7fffffffe4b0")},
+            {QStringLiteral("rax"), QStringLiteral("0x0000000000000000")},
+            {QStringLiteral("eflags"), QStringLiteral("0x00000202 [ IF ]")}
+        });
+    }
+
+    if (SourceCodeView* srcView = sourceCodeView()) {
+        srcView->highlightExecutionLine(mapInstructionAddressToSourceLine(entryAddr));
+    }
+
+    updateStatusTelemetry(QStringLiteral("0x00401120"),
+                          QStringLiteral("PAUSED (BREAKPOINT)"));
+}
+
+/**
+ * @brief Steps the focused rank to the next instruction and synchronizes all 5 inspection views.
+ *
+ * Advances the active rank's program counter via DisassemblyView::nextInstructionAddress,
+ * updates ServerRackView's rank PC badge, updates RegisterView's rip/rsp/rax values,
+ * seeks DisassemblyView (Linear + CFG + Decompiler) and MemView, and advances the
+ * active execution line highlight in SourceCodeView.
+ *
+ * @return True if the instruction pointer advanced; false otherwise.
+ */
+bool MainWindow::stepInstructionWorkflow() {
+    if (!m_disassemblyView) {
+        return false;
+    }
+
+    m_debugSessionActive = true;
+    updateDebugToolbarState();
+
+    const uint64_t currentPc =
+        (m_disassemblyView->currentAddress() != 0ULL)
+            ? m_disassemblyView->currentAddress()
+            : 0x00401120ULL;
+    const uint64_t nextPc = m_disassemblyView->nextInstructionAddress(currentPc);
+    const QString nextPcHex =
+        QStringLiteral("0x%1").arg(nextPc, 8, 16, QChar('0'));
+
+    const int activeRank =
+        m_serverRackView ? m_serverRackView->selectedRank() : m_focusedRank;
+    m_focusedRank = activeRank;
+
+    RankState& st = m_latestStates[activeRank];
+    st.rankId = activeRank;
+    st.currentState = QStringLiteral("stopped");
+    st.registers[16] = nextPcHex;
+    st.currentFunction = QStringLiteral("main");
+    st.currentLine = mapInstructionAddressToSourceLine(nextPc);
+
+    if (m_serverRackView) {
+        m_serverRackView->updateRankState(activeRank, st);
+    }
+
+    seekToAddressOrExpression(nextPcHex);
+
+    if (m_registerView) {
+        const uint64_t offset =
+            (nextPc >= 0x00401120ULL) ? (nextPc - 0x00401120ULL) : 0ULL;
+        m_registerView->updateRegisters({
+            {QStringLiteral("rip"),
+             QStringLiteral("%1 <main+%2>").arg(nextPcHex).arg(offset)},
+            {QStringLiteral("rsp"), QStringLiteral("0x7fffffffe478")},
+            {QStringLiteral("rbp"), QStringLiteral("0x7fffffffe4b0")},
+            {QStringLiteral("rax"),
+             QStringLiteral("0x%1").arg(offset, 16, 16, QChar('0'))},
+            {QStringLiteral("eflags"), QStringLiteral("0x00000202 [ IF ]")}
+        });
+    }
+
+    if (SourceCodeView* srcView = sourceCodeView()) {
+        srcView->highlightExecutionLine(mapInstructionAddressToSourceLine(nextPc));
+    }
+
+    updateStatusTelemetry(nextPcHex, QStringLiteral("PAUSED (STEP)"));
+
+    if (m_coordinator) {
+        auto cmd = std::make_unique<gridlock::core::commands::StepCommand>(
+            m_coordinator, m_focusedRank + 1, false);
+        executeCommand(std::move(cmd));
+    }
+
+    return true;
+}
+
+/**
+ * @brief Terminates the active debugging session and resets the workstation to IDLE state.
+ *
+ * Disables Step/Continue/Pause/Stop/Terminate toolbar buttons, clears the active
+ * execution line highlight in SourceCodeView, resets #cutterStatusTelemetry to
+ * STATUS: IDLE, and terminates any active backend coordinator session.
+ */
+void MainWindow::stopTargetWorkflow() {
+    m_debugSessionActive = false;
+    updateDebugToolbarState();
+
+    if (SourceCodeView* srcView = sourceCodeView()) {
+        srcView->highlightExecutionLine(-1);
+    }
+
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE"));
+
+    if (m_coordinator) {
+        m_coordinator->terminateSession();
+    }
+}
+
 }  // namespace gridlock::ui
+

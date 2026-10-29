@@ -303,6 +303,12 @@ static QString getHighDensityQssOverlay() {
         "    border: 1px solid #528bff;\n"
         "    color: #ffffff;\n"
         "}\n"
+        // Disabled toolbar buttons recede into the dark toolbar chrome with muted #5c6370 text.
+        "QToolButton:disabled, QToolBar QToolButton:disabled {\n"
+        "    background: #181a1f;\n"
+        "    border: 1px solid #232730;\n"
+        "    color: #5c6370;\n"
+        "}\n"
         // Address seek bar (`#cutterSeekBar`) in the top toolbar uses monospace font and 22px height.
         "#cutterSeekBar {\n"
         "    background: #141619;\n"

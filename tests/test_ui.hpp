@@ -135,6 +135,10 @@ private slots:
 
     /** @brief Verifies DifferentialGrid uniform empty viewport without vertical header grey block, stretched watch columns, and GDB Console / Evaluator prompt bar cohesion. */
     void testWatchGridBackgroundAndConsolePromptCohesion();
+
+    /** @brief Verifies toolbar target/rank controls, state-aware debugger action enablement, and synchronized Run -> Step -> Register/Source/Rack -> Stop workflow. */
+    void testEndToEndStepDebuggingWorkflowAndToolbarState();
 };
+
 
 

@@ -894,5 +894,23 @@ void DisassemblyView::reloadStyle() {
   }
 }
 
+/**
+ * @brief Returns the address of the instruction immediately following currentAddr.
+ *
+ * Scans the parsed instruction stream for currentAddr and returns the address of
+ * the subsequent instruction, wrapping to the first instruction if at the end.
+ *
+ * @param currentAddr Current 64-bit instruction pointer address.
+ * @return 64-bit virtual address of the next sequential instruction.
+ */
+uint64_t DisassemblyView::nextInstructionAddress(uint64_t currentAddr) const {
+  const auto it = m_addrToLine.upperBound(currentAddr);
+  if (it != m_addrToLine.cend()) {
+    return it.key();
+  }
+  return m_addrToLine.isEmpty() ? currentAddr : m_addrToLine.firstKey();
+}
+
 }  // namespace gridlock::ui
+
 

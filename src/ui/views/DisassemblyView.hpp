@@ -218,6 +218,9 @@ public:
     bool triggerContextAction(uint64_t address, const QString& actionName);
     /// Returns the unclipped pixel width computed for the CFG basic block starting at blockStartAddr.
     int blockWidthForAddress(uint64_t blockStartAddr) const;
+    /// Returns the address of the instruction immediately following currentAddr in the parsed listing.
+    uint64_t nextInstructionAddress(uint64_t currentAddr) const;
+
 
 signals:
     /// Emitted when an instruction address is selected by click or seek.

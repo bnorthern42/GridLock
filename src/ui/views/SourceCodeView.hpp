@@ -99,6 +99,18 @@ public:
     void highlightCurrentLine(int lineNumber);
 
     /**
+     * @brief Highlights a 1-based line as the active debugger execution line (or clears if <= 0).
+     * @param lineOneBased 1-based source line number, or <= 0 to clear execution highlight.
+     */
+    void highlightExecutionLine(int lineOneBased);
+
+    /**
+     * @brief Returns the currently highlighted 1-based debugger execution line (-1 if none).
+     * @return 1-based execution line number, or -1 when idle.
+     */
+    int executionLine() const { return m_executionLine; }
+
+    /**
      * @brief Returns the plain text contents of the source document.
      * @return Plain text string.
      */
@@ -212,6 +224,7 @@ private:
     QTimer* m_hoverTimer;
     QPoint m_lastMousePos;
     QPoint m_lastGlobalMousePos;
+    int m_executionLine = -1;
 };
 
 }  // namespace gridlock::ui

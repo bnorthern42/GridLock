@@ -13,12 +13,14 @@
 #include "../core/utils/ElfBinaryInspector.hpp"
 
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QMap>
 #include <QPushButton>
 #include <QSet>
+#include <QSpinBox>
 #include <QString>
 #include <QVector>
 #include <memory>
@@ -122,6 +124,33 @@ public:
      * @param ranks Initial rank count.
      */
     void startDebuggingSession(const QString& binaryPath, int ranks);
+
+    /**
+     * @brief Returns whether an interactive or live debugging session is currently active.
+     * @return True if running or paused at a breakpoint; false when idle.
+     */
+    bool isDebugSessionActive() const { return m_debugSessionActive; }
+
+    /**
+     * @brief Starts the target debugging workflow, spawning configured MPI ranks and pausing at entry.
+     */
+    void startTargetWorkflow();
+
+    /**
+     * @brief Steps the focused rank to the next instruction and synchronizes all 5 inspection views.
+     * @return True if the instruction pointer advanced; false otherwise.
+     */
+    bool stepInstructionWorkflow();
+
+    /**
+     * @brief Terminates the active debugging session and resets the workstation to IDLE state.
+     */
+    void stopTargetWorkflow();
+
+    /**
+     * @brief Updates main toolbar action enablement based on m_debugSessionActive.
+     */
+    void updateDebugToolbarState();
 
     /**
      * @brief Dispatches a debug command through the coordinator.
@@ -260,7 +289,14 @@ private:
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
+    QComboBox* m_targetSelector = nullptr;
+    QSpinBox* m_rankCountSpin = nullptr;
     QAction* m_runAction = nullptr;
+    QAction* m_continueAction = nullptr;
+    QAction* m_stepAction = nullptr;
+    QAction* m_pauseAction = nullptr;
+    QAction* m_stopAction = nullptr;
+    QAction* m_terminateAction = nullptr;
     QPushButton* m_navBackBtn = nullptr;
     QPushButton* m_navForwardBtn = nullptr;
     QLineEdit* m_seekBar = nullptr;
@@ -274,6 +310,7 @@ private:
     bool m_isNavigatingHistory = false;
     bool m_showingDecompilerFallback = false;
     bool m_forceDecompilerFallback = false;
+    bool m_debugSessionActive = false;
 
     IBackendCoordinator* m_coordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;

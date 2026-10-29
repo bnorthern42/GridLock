@@ -275,7 +275,7 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
 }
 
 /**
- * @brief Highlights the current cursor line with a subtle #1e222a full-width selection.
+ * @brief Highlights the current cursor line and active debugger execution line.
  */
 void SourceCodeView::highlightCurrentLine() {
     QList<QTextEdit::ExtraSelection> selections;
@@ -286,11 +286,24 @@ void SourceCodeView::highlightCurrentLine() {
     selection.cursor = textCursor();
     selection.cursor.clearSelection();
     selections.append(selection);
+
+    // If a 1-based debugger execution line is active, layer a distinct emerald-slate highlight band.
+    if (m_executionLine > 0) {
+        QTextBlock execBlock = document()->findBlockByLineNumber(m_executionLine - 1);
+        if (execBlock.isValid()) {
+            QTextEdit::ExtraSelection execSel;
+            execSel.format.setBackground(QColor("#20342c"));
+            execSel.format.setProperty(QTextFormat::FullWidthSelection, true);
+            execSel.cursor = QTextCursor(execBlock);
+            execSel.cursor.clearSelection();
+            selections.append(execSel);
+        }
+    }
     setExtraSelections(selections);
 }
 
 /**
- * @brief Paints the line number area gutter with line indices and breakpoint badges.
+ * @brief Paints the line number area gutter with line indices, execution pointer, and breakpoint badges.
  * @param event The QPaintEvent for the gutter rect.
  */
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
@@ -307,17 +320,22 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     // Render visible blocks in view
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
-            QString number = QString::number(blockNumber + 1);
-            painter.setPen(QColor(120, 120, 120));
+            const int lineOneBased = blockNumber + 1;
+            QString number = QString::number(lineOneBased);
+            painter.setPen(lineOneBased == m_executionLine ? QColor("#4ec9b0") : QColor(120, 120, 120));
             painter.drawText(0, top, m_lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
             // Render red breakpoint disc (or orange for conditional)
-            if (breakpoints.contains(blockNumber + 1)) {
-                if (breakpoints[blockNumber + 1].isEmpty()) {
+            if (breakpoints.contains(lineOneBased)) {
+                if (breakpoints[lineOneBased].isEmpty()) {
                     painter.setBrush(Qt::red);
                 } else {
                     painter.setBrush(QColor(255, 165, 0)); // Orange for conditional breakpoint
                 }
                 painter.drawEllipse(2, top + 2, 8, 8);
+            } else if (lineOneBased == m_executionLine) {
+                painter.setPen(QColor("#4ec9b0"));
+                painter.drawText(2, top, 12, fontMetrics().height(), Qt::AlignLeft | Qt::AlignVCenter,
+                                 QStringLiteral("▶"));
             }
         }
         block = block.next();
@@ -377,29 +395,38 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
 }
 
 /**
- * @brief Highlights a specific 1-based execution line and scrolls into view.
- * @param lineNumber 1-based line number.
+ * @brief Highlights a 1-based line as the active debugger execution line (or clears if <= 0).
+ * @param lineOneBased 1-based source line number, or <= 0 to clear execution highlight.
  */
-void SourceCodeView::highlightCurrentLine(int lineNumber) {
-    if (lineNumber <= 0) return;
-    QList<QTextEdit::ExtraSelection> extraSelections;
-    QTextEdit::ExtraSelection selection;
-    QColor activeColor(gridlock::core::ConfigManager::instance().getSourceActiveLine());
-    activeColor.setAlpha(100);
-    selection.format.setBackground(activeColor);
-    selection.format.setProperty(QTextFormat::FullWidthSelection, true);
-    
-    QTextBlock block = document()->findBlockByLineNumber(lineNumber - 1);
+void SourceCodeView::highlightExecutionLine(int lineOneBased) {
+    if (lineOneBased <= 0) {
+        m_executionLine = -1;
+        highlightCurrentLine();
+        if (m_lineNumberArea) {
+            m_lineNumberArea->update();
+        }
+        return;
+    }
+    m_executionLine = lineOneBased;
+    QTextBlock block = document()->findBlockByLineNumber(lineOneBased - 1);
     if (block.isValid()) {
         QTextCursor cursor(block);
-        selection.cursor = cursor;
-        extraSelections.append(selection);
-        setExtraSelections(extraSelections);
-        
         setTextCursor(cursor);
         ensureCursorVisible();
         centerCursor();
     }
+    highlightCurrentLine();
+    if (m_lineNumberArea) {
+        m_lineNumberArea->update();
+    }
+}
+
+/**
+ * @brief Highlights a specific 1-based execution line and scrolls into view.
+ * @param lineNumber 1-based line number.
+ */
+void SourceCodeView::highlightCurrentLine(int lineNumber) {
+    highlightExecutionLine(lineNumber);
 }
 
 /**

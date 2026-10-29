@@ -164,79 +164,109 @@ void MainWindow::setupToolbar() {
   toolbar->setStyleSheet(
       "QToolBar#MainToolbar { background: #1e2228; border-bottom: 1px solid #2c313a; "
       "spacing: 4px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
+      "QToolBar#MainToolbar QLabel { background: transparent; color: #abb2bf; "
+      "font-size: 10px; font-weight: 700; padding: 0px 2px; border: none; }"
       "QToolBar#MainToolbar QToolButton { background: #252932; color: #d7dae0; "
       "border: 1px solid #323844; border-radius: 2px; padding: 1px 8px; margin: 0px; "
       "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; }"
-      "QToolBar#MainToolbar QToolButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
-      "QToolBar#MainToolbar QToolButton:pressed { background: #2c3444; border: 1px solid #528bff; }");
+      "QToolBar#MainToolbar QToolButton:hover:enabled { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
+      "QToolBar#MainToolbar QToolButton:pressed:enabled { background: #2c3444; border: 1px solid #528bff; }"
+      "QToolBar#MainToolbar QToolButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #232730; }");
 
-  // Run Action: Starts target execution across all configured MPI ranks.
-  m_runAction = new QAction("▶ Run Target", this);
-  connect(m_runAction, &QAction::triggered, this, [this]() {
-    // Resolve target binary path from active coordinator or fallback project settings.
-    auto settings =
-        gridlock::core::ConfigManager::instance().loadProjectSettings();
-    QString binary =
-        m_coordinator && !m_coordinator->getCurrentBinaryPath().isEmpty()
-            ? m_coordinator->getCurrentBinaryPath()
-            : QString::fromStdString(settings.targetBinary);
-    // Instantiate polymorphic launch command targeting default MPI rank allocation.
-    auto cmd = std::make_unique<gridlock::core::commands::LaunchCommand>(
-        this, binary,
-        gridlock::core::ConfigManager::instance().getDefaultRanks());
-    executeCommand(std::move(cmd));
+  // Inline Target binary selector and MPI Rank (-np) spinbox ahead of Run Target.
+  QLabel *targetLabel = new QLabel(QStringLiteral("TARGET:"), toolbar);
+  toolbar->addWidget(targetLabel);
+
+  // Inline Target Selector combo box allowing one-click switching between MPI targets or ELF binaries.
+  m_targetSelector = new QComboBox(toolbar);
+  m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
+  m_targetSelector->setFixedHeight(22);
+  m_targetSelector->setMinimumWidth(145);
+  // Populate default MPI demonstration targets and the Open ELF / Binary file dialog entry.
+  m_targetSelector->addItem(QStringLiteral("inspection_demo (MPI)"),
+                            QStringLiteral("tutorial/inspection_demo.cpp"));
+  m_targetSelector->addItem(QStringLiteral("deadlock_ring (MPI)"),
+                            QStringLiteral("tutorial/deadlock_ring.cpp"));
+  m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."),
+                            QStringLiteral("__open_binary__"));
+  // Trigger the binary/source file browser dialog when the user selects "Open ELF / Binary...".
+  connect(m_targetSelector, &QComboBox::activated, this, [this](int index) {
+    if (m_targetSelector &&
+        m_targetSelector->itemData(index).toString() ==
+            QStringLiteral("__open_binary__")) {
+      m_targetSelector->setCurrentIndex(0);
+      openFile();
+    }
   });
+  toolbar->addWidget(m_targetSelector);
+
+  // Inline MPI Rank Count (-np) label and spin box configuring spawned cluster ranks (1..64).
+  QLabel *ranksLabel = new QLabel(QStringLiteral("RANKS (-np):"), toolbar);
+  toolbar->addWidget(ranksLabel);
+
+  // Spin box controlling the number of MPI ranks launched by startTargetWorkflow().
+  m_rankCountSpin = new QSpinBox(toolbar);
+  m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
+  m_rankCountSpin->setRange(1, 64);
+  m_rankCountSpin->setValue(8);
+  m_rankCountSpin->setFixedHeight(22);
+  m_rankCountSpin->setFixedWidth(48);
+  toolbar->addWidget(m_rankCountSpin);
+  toolbar->addSeparator();
+
+  // Run Action: Starts target execution across all configured MPI ranks and pauses Rank 0 at entry.
+  // Enabled in Idle state; disabled while an active debugging session is already running.
+  m_runAction = new QAction("▶ Run Target", this);
+  connect(m_runAction, &QAction::triggered, this,
+          &MainWindow::startTargetWorkflow);
   toolbar->addAction(m_runAction);
 
   // Continue Action: Resumes suspended execution on active rank or process group.
-  QAction *continueAction = new QAction("⏭ Continue", this);
-  connect(continueAction, &QAction::triggered, this, [this]() {
-    // GDB coordinator commands use 1-based rank IDs internally (focusedRank + 1).
-    auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(
-        m_coordinator, m_focusedRank + 1);
-    executeCommand(std::move(cmd));
-  });
-  toolbar->addAction(continueAction);
-
-  // Step Instruction Action: Executes single machine instruction on active rank.
-  QAction *stepAction = new QAction("↷ Step Inst", this);
-  connect(stepAction, &QAction::triggered, this, [this]() {
-    // Dispatch single instruction step without stepping over subroutines.
-    auto cmd = std::make_unique<gridlock::core::commands::StepCommand>(
-        m_coordinator, m_focusedRank + 1, false);
-    executeCommand(std::move(cmd));
-  });
-  toolbar->addAction(stepAction);
-
-  // Pause Action: Interrupts running execution on active rank.
-  QAction *pauseAction = new QAction("⏸ Pause Rank", this);
-  connect(pauseAction, &QAction::triggered, this, [this]() {
-    // Deliver asynchronous interrupt signal (SIGINT) to pause target rank.
-    auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(
-        m_coordinator, m_focusedRank + 1);
-    executeCommand(std::move(cmd));
-  });
-  toolbar->addAction(pauseAction);
-
-  // Stop Action: Sends termination request to active coordinator.
-  QAction *stopAction = new QAction("■ Stop", this);
-  connect(stopAction, &QAction::triggered, this, [this]() {
-    // Instruct coordinator to terminate all spawned worker processes.
+  // Advances the synchronized execution cursor and dispatches ContinueCommand to the coordinator.
+  m_continueAction = new QAction("⏭ Continue", this);
+  connect(m_continueAction, &QAction::triggered, this, [this]() {
+    stepInstructionWorkflow();
     if (m_coordinator) {
-      m_coordinator->terminateSession();
+      auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(
+          m_coordinator, m_focusedRank + 1);
+      executeCommand(std::move(cmd));
     }
   });
-  toolbar->addAction(stopAction);
+  toolbar->addAction(m_continueAction);
 
-  // Terminate Action: Closes debugging session and clears active state.
-  QAction *exitAction = new QAction("✕ Terminate Session", this);
-  connect(exitAction, &QAction::triggered, this, [this]() {
-    // Execute top-level termination command to reset GUI and release resources.
-    auto cmd =
-        std::make_unique<gridlock::core::commands::TerminateCommand>(this);
-    executeCommand(std::move(cmd));
+  // Step Instruction Action: Executes a single machine instruction on the active rank
+  // and synchronizes DisassemblyView, RegisterView, ServerRackView, MemView, and SourceCodeView.
+  m_stepAction = new QAction("↷ Step Inst", this);
+  connect(m_stepAction, &QAction::triggered, this,
+          &MainWindow::stepInstructionWorkflow);
+  toolbar->addAction(m_stepAction);
+
+  // Pause Action: Interrupts running execution on the focused rank and updates status telemetry.
+  m_pauseAction = new QAction("⏸ Pause Rank", this);
+  connect(m_pauseAction, &QAction::triggered, this, [this]() {
+    updateStatusTelemetry(QString(), QStringLiteral("PAUSED"));
+    if (m_coordinator) {
+      auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(
+          m_coordinator, m_focusedRank + 1);
+      executeCommand(std::move(cmd));
+    }
   });
-  toolbar->addAction(exitAction);
+  toolbar->addAction(m_pauseAction);
+
+  // Stop Action: Sends termination request to active coordinator and resets session state to IDLE.
+  m_stopAction = new QAction("■ Stop", this);
+  connect(m_stopAction, &QAction::triggered, this,
+          &MainWindow::stopTargetWorkflow);
+  toolbar->addAction(m_stopAction);
+
+  // Terminate Action: Closes debugging session, clears execution line highlight, and resets toolbar state.
+  m_terminateAction = new QAction("✕ Terminate Session", this);
+  connect(m_terminateAction, &QAction::triggered, this,
+          &MainWindow::stopTargetWorkflow);
+  toolbar->addAction(m_terminateAction);
+
+  // Initialize state-aware toolbar button enablement (Idle by default: only Run Target enabled).
+  updateDebugToolbarState();
 
   // Strip tooltips to maintain minimalist visual chrome.
   for (QAction *action : toolbar->actions()) {
@@ -629,11 +659,13 @@ void MainWindow::setupDocks() {
   m_disassemblyView->setSizePolicy(QSizePolicy::Expanding,
                                    QSizePolicy::Expanding);
   m_disassemblyView->setContentsMargins(0, 0, 0, 0);
+  // Synchronize all workspace views whenever an instruction address is clicked in DisassemblyView.
   connect(m_disassemblyView, &DisassemblyView::addressSelected, this,
           [this](uint64_t addr) {
             seekToAddressOrExpression(
                 QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
           });
+  // Write patched instruction bytes back to the in-memory ELF binary image when edited in DisassemblyView.
   connect(m_disassemblyView, &DisassemblyView::instructionPatched, this,
           [this](uint64_t addr, const QByteArray &bytes) {
             if (m_elfInspector && m_elfInspector->isValid()) {
@@ -641,6 +673,7 @@ void MainWindow::setupDocks() {
             }
           });
 
+  // Mount Source Editor and Disassembly/CFG side-by-side in the master horizontal splitter.
   masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(m_disassemblyView);
 
@@ -649,9 +682,11 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->setStretchFactor(1, 55);
   masterHorizontalSplitter->setSizes({430, 520});
 
+  // Mount top horizontal splitter into the upper portion of the central vertical splitter.
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
   // Bottom Zone: Reduced to 7 core I/O & memory inspection tabs
+  // Configured with document mode and non-elided scrolling tab buttons for compact chrome.
   m_bottomTabs = new QTabWidget(mainVerticalSplitter);
   m_bottomTabs->setObjectName("BottomConsoleTabs");
   m_bottomTabs->setMinimumWidth(200);

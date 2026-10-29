@@ -17,11 +17,13 @@
 #include <QFileInfo>
 #include <QFrame>
 #include <QHeaderView>
+#include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -42,6 +44,7 @@
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
+#include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
 #include "../src/ui/widgets/DifferentialGrid.hpp"
 #include "../src/ui/widgets/ExpressionEvaluatorWidget.hpp"
@@ -722,6 +725,136 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
                  "ExpressionEvaluatorWidget output viewport must use QFrame::NoFrame");
     }
 }
+
+/**
+ * @brief Verifies toolbar target/rank controls, state-aware debugger action enablement, and synchronized Run -> Step -> Stop workflow.
+ *
+ * Validates two end-to-end UX requirements from Prompt 28:
+ * 1. Toolbar Target Selector, Rank SpinBox & Idle Button States:
+ *    Confirms that MainWindow exposes #toolbarTargetSelector (QComboBox) and #toolbarRankSpin (QSpinBox),
+ *    and that when isDebugSessionActive() == false (Idle state), Run Target is enabled while
+ *    Step Inst and Terminate Session are disabled.
+ * 2. End-to-End Interactive Run -> Step -> Register/Source/Rack Sync -> Stop Loop:
+ *    Sets #toolbarRankSpin to 4, triggers startTargetWorkflow(), confirms 4 ranks in ServerRackView
+ *    and entry PC at 0x00401120ULL, steps twice via stepInstructionWorkflow() (0x00401120 -> 0x00401124 -> 0x00401125)
+ *    verifying DisassemblyView, RegisterView, ServerRackView, and SourceCodeView::executionLine() stay
+ *    synchronized, and finally triggers stopTargetWorkflow() to confirm return to STATUS: IDLE.
+ */
+void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
+        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
+                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
+                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+        mainWindow.loadSourceFile(demoPath);
+    }
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // 1. Toolbar Target Selector, Rank SpinBox & Idle Button States.
+    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    QVERIFY2(targetCombo != nullptr, "MainToolbar must contain #toolbarTargetSelector QComboBox");
+    QVERIFY2(rankSpin != nullptr, "MainToolbar must contain #toolbarRankSpin QSpinBox");
+    QVERIFY2(targetCombo->count() >= 1, "#toolbarTargetSelector must be pre-populated with target options");
+
+    // Helper lambda to find a toolbar QAction by substring match.
+    auto findToolbarAction = [&mainWindow](const QString& labelSubstr) -> QAction* {
+        for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) {
+            for (QAction* act : tb->actions()) {
+                if (act->text().contains(labelSubstr, Qt::CaseInsensitive)) {
+                    return act;
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    QAction* runAction = findToolbarAction(QStringLiteral("Run Target"));
+    QAction* stepAction = findToolbarAction(QStringLiteral("Step Inst"));
+    QAction* terminateAction = findToolbarAction(QStringLiteral("Terminate Session"));
+    QVERIFY2(runAction != nullptr && stepAction != nullptr && terminateAction != nullptr,
+             "Run Target, Step Inst, and Terminate Session actions must exist on MainToolbar");
+
+    // Ensure session starts in or can be reset to Idle state.
+    mainWindow.stopTargetWorkflow();
+    QApplication::processEvents();
+    QVERIFY2(!mainWindow.isDebugSessionActive(),
+             "isDebugSessionActive() must be false in Idle state");
+    QVERIFY2(runAction->isEnabled(), "Run Target action must be enabled when Idle");
+    QVERIFY2(!terminateAction->isEnabled(), "Terminate Session action must be disabled when Idle");
+
+    // 2. End-to-End Interactive Run -> Step -> Register/Source/Rack Sync -> Stop Loop.
+    rankSpin->setValue(4);
+    mainWindow.startTargetWorkflow();
+    QApplication::processEvents();
+
+    QVERIFY2(mainWindow.isDebugSessionActive(),
+             "isDebugSessionActive() must be true after startTargetWorkflow()");
+    QVERIFY2(stepAction->isEnabled(), "Step Inst action must be enabled when session is active");
+    QVERIFY2(terminateAction->isEnabled(), "Terminate Session action must be enabled when session is active");
+
+    auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>();
+    auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
+    QVERIFY(serverRack != nullptr && disasmView != nullptr && regView != nullptr && sourceView != nullptr);
+
+    QCOMPARE(serverRack->rankNodeCount(), 4);
+    QCOMPARE(disasmView->currentAddress(), 0x00401120ULL);
+    QVERIFY2(sourceView->executionLine() > 0,
+             "SourceCodeView::executionLine() must highlight a valid 1-based line on startTargetWorkflow()");
+
+    // Step 1: 0x00401120 -> 0x00401124
+    QVERIFY2(mainWindow.stepInstructionWorkflow(), "First stepInstructionWorkflow() must succeed");
+    QApplication::processEvents();
+    QCOMPARE(disasmView->currentAddress(), 0x00401124ULL);
+    QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401124ULL);
+
+    // Step 2: 0x00401124 -> 0x00401125
+    QVERIFY2(mainWindow.stepInstructionWorkflow(), "Second stepInstructionWorkflow() must succeed");
+    QApplication::processEvents();
+    QCOMPARE(disasmView->currentAddress(), 0x00401125ULL);
+    QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401125ULL);
+    QVERIFY2(sourceView->executionLine() > 0,
+             "SourceCodeView::executionLine() must remain active across instruction steps");
+
+    // Verify RegisterView updated 'rip' to 0x00401125.
+    auto* regTable = regView->findChild<QTableWidget*>();
+    QVERIFY(regTable != nullptr);
+    bool foundRipMatch = false;
+    for (int r = 0; r < regTable->rowCount(); ++r) {
+        if (regTable->item(r, 0) && regTable->item(r, 0)->text().compare(QStringLiteral("rip"), Qt::CaseInsensitive) == 0) {
+            if (regTable->item(r, 1) && regTable->item(r, 1)->text().contains(QStringLiteral("401125"), Qt::CaseInsensitive)) {
+                foundRipMatch = true;
+            }
+        }
+    }
+    QVERIFY2(foundRipMatch, "RegisterView 'rip' row must update to 0x00401125 after second step");
+
+    // Capture full-window snapshot in active stepping state for visual audit.
+    const QPixmap snap = mainWindow.grab();
+    QVERIFY(!snap.isNull());
+    QVERIFY(snap.save(QStringLiteral("/tmp/gridlock_ui_v28.png")));
+
+    // Stop / Terminate Session -> returns to Idle.
+    mainWindow.stopTargetWorkflow();
+    QApplication::processEvents();
+    QVERIFY2(!mainWindow.isDebugSessionActive(),
+             "isDebugSessionActive() must be false after stopTargetWorkflow()");
+    QVERIFY2(!terminateAction->isEnabled(),
+             "Terminate Session action must be disabled after stopTargetWorkflow()");
+
+    auto* statusLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
+    QVERIFY(statusLabel != nullptr);
+    QVERIFY2(statusLabel->text().contains(QStringLiteral("STATUS: IDLE"), Qt::CaseInsensitive),
+             qPrintable(QString("Expected STATUS: IDLE after stopTargetWorkflow(), got '%1'")
+                            .arg(statusLabel->text())));
+}
+
 
 
 
