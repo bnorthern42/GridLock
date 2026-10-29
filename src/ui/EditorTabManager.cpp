@@ -12,6 +12,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QTabBar>
 
 namespace gridlock::ui {
 
@@ -36,7 +37,15 @@ EditorTabManager::EditorTabManager(QWidget* parent)
  * @return Active SourceCodeView pointer, or nullptr on I/O error.
  */
 SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
-    const QString absolutePath = QFileInfo(filePath).absoluteFilePath();
+    // Resolve relative paths when launched from builddir/ or workspace root.
+    QString resolvedPath = filePath;
+    if (!QFileInfo::exists(resolvedPath) && QFileInfo::exists(QStringLiteral("../") + filePath)) {
+        resolvedPath = QStringLiteral("../") + filePath;
+    }
+    const QFileInfo resolvedInfo(resolvedPath);
+    const QString absolutePath = !resolvedInfo.canonicalFilePath().isEmpty()
+                                     ? resolvedInfo.canonicalFilePath()
+                                     : resolvedInfo.absoluteFilePath();
 
     // If file is already open, activate its tab and return existing view.
     if (m_openFiles.contains(absolutePath)) {
@@ -44,13 +53,10 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
         return m_openFiles[absolutePath];
     }
 
-    // Attempt to open the file directly, with fallback to parent directory.
-    QFile file(filePath);
+    // Attempt to open the resolved file from disk.
+    QFile file(resolvedPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        file.setFileName("../" + filePath);
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            return nullptr;
-        }
+        return nullptr;
     }
 
     // Read full file text and normalize CRLF line endings to standard Unix LF.
@@ -62,7 +68,7 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
     auto* view = new SourceCodeView(this);
     view->setProperty("absolutePath", absolutePath);
     view->setSourceCode(code);
-    view->setCurrentFile(file.fileName());
+    view->setCurrentFile(absolutePath);
 
     // Restore persistent breakpoints associated with this file path.
     const auto breakpoints = core::ConfigManager::instance().getBreakpoints();
@@ -85,12 +91,15 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
             &EditorTabManager::pinVariableRequested);
 
     // Append new tab with base file name and full path tooltip.
-    const QFileInfo fi(file.fileName());
+    const QFileInfo fi(absolutePath);
     const int index = addTab(view, fi.fileName());
     setTabToolTip(index, absolutePath);
 
     m_openFiles[absolutePath] = view;
     setCurrentIndex(index);
+    if (tabBar() && tabBar()->isHidden()) {
+        tabBar()->show();
+    }
 
     return view;
 }
@@ -110,7 +119,14 @@ SourceCodeView* EditorTabManager::currentSourceCodeView() const {
  */
 SourceCodeView* EditorTabManager::getSourceCodeViewForFile(
     const QString& filePath) const {
-    const QString absolutePath = QFileInfo(filePath).absoluteFilePath();
+    QString resolvedPath = filePath;
+    if (!QFileInfo::exists(resolvedPath) && QFileInfo::exists(QStringLiteral("../") + filePath)) {
+        resolvedPath = QStringLiteral("../") + filePath;
+    }
+    const QFileInfo resolvedInfo(resolvedPath);
+    const QString absolutePath = !resolvedInfo.canonicalFilePath().isEmpty()
+                                     ? resolvedInfo.canonicalFilePath()
+                                     : resolvedInfo.absoluteFilePath();
     if (m_openFiles.contains(absolutePath)) {
         return m_openFiles[absolutePath];
     }

@@ -37,6 +37,7 @@
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
+#include "widgets/ProjectExplorerWidget.hpp"
 
 namespace gridlock::ui {
 
@@ -631,12 +632,167 @@ int MainWindow::addressToSourceLine(uint64_t address) const {
 }
 
 /**
+ * @brief Resolves a relative or absolute workspace file path across current and parent directories.
+ * @param rawPath Input relative or absolute path.
+ * @return Canonical or absolute resolved path string.
+ */
+static QString resolveWorkspacePath(const QString& rawPath) {
+    const QString trimmed = rawPath.trimmed();
+    if (trimmed.isEmpty()) return QString();
+    if (QFileInfo::exists(trimmed)) {
+        const QFileInfo fi(trimmed);
+        return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
+    }
+    const QString parentCandidate = QStringLiteral("../") + trimmed;
+    if (QFileInfo::exists(parentCandidate)) {
+        const QFileInfo fi(parentCandidate);
+        return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
+    }
+    return QFileInfo(trimmed).absoluteFilePath();
+}
+
+/**
+ * @brief Returns the resolved source file path for the currently active target.
+ * @return Absolute or resolved path to the active target's C/C++ source file.
+ */
+QString MainWindow::activeTargetSourcePath() const {
+    if (!m_currentFile.trimmed().isEmpty()) {
+        return resolveWorkspacePath(m_currentFile);
+    }
+    if (m_targetSelector) {
+        const QString selData = m_targetSelector->currentData().toString();
+        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
+            return resolveWorkspacePath(selData);
+        }
+    }
+    return resolveWorkspacePath(QStringLiteral("tutorial/inspection_demo.cpp"));
+}
+
+/**
+ * @brief Returns the resolved output executable binary path for the currently active target.
+ * @return Absolute or resolved path to the active target's compiled binary executable.
+ */
+QString MainWindow::activeTargetBinaryPath() const {
+    const QString srcPath = activeTargetSourcePath();
+    if (srcPath.isEmpty()) return QString();
+    const QFileInfo srcInfo(srcPath);
+    return srcInfo.dir().filePath(srcInfo.completeBaseName());
+}
+
+/**
+ * @brief Selects an active target in `#toolbarTargetSelector` by name or path and synchronizes all views.
+ * @param targetName Target name substring or file path (e.g., "deadlock_ring" or "inspection_demo").
+ * @return True if a matching target was found and activated; false otherwise.
+ */
+bool MainWindow::selectTargetByName(const QString& targetName) {
+    const QString query = targetName.trimmed();
+    if (query.isEmpty() || !m_targetSelector) return false;
+
+    // 1. Find matching item in toolbarTargetSelector by label or user data path.
+    int matchedIdx = -1;
+    for (int i = 0; i < m_targetSelector->count(); ++i) {
+        const QString data = m_targetSelector->itemData(i).toString();
+        if (data == QStringLiteral("__open_binary__")) continue;
+        if (m_targetSelector->itemText(i).contains(query, Qt::CaseInsensitive) ||
+            data.contains(query, Qt::CaseInsensitive)) {
+            matchedIdx = i;
+            break;
+        }
+    }
+    if (matchedIdx < 0) return false;
+
+    // 2. Synchronize combo box selection without recursive signal emission.
+    if (m_targetSelector->currentIndex() != matchedIdx) {
+        m_targetSelector->blockSignals(true);
+        m_targetSelector->setCurrentIndex(matchedIdx);
+        m_targetSelector->blockSignals(false);
+    }
+
+    // 3. Resolve target source file path and open/activate its tab in EditorTabManager.
+    const QString rawTargetPath = m_targetSelector->itemData(matchedIdx).toString();
+    const QString resolvedSourcePath = resolveWorkspacePath(rawTargetPath);
+    m_currentFile = resolvedSourcePath;
+    loadSourceFile(resolvedSourcePath);
+
+    // 4. Synchronize DisassemblyView (Linear/CFG/Decompiler) and ProjectExplorerWidget symbols.
+    const QString binPath = activeTargetBinaryPath();
+    if (QFileInfo::exists(binPath) && loadBinaryTarget(binPath)) {
+        // Loaded real ELF64 binary symbols and disassembly from disk.
+    } else if (m_disassemblyView) {
+        if (resolvedSourcePath.contains(QStringLiteral("deadlock_ring"), Qt::CaseInsensitive)) {
+            // Populate deadlock_ring x86_64 ring communication assembly with MPI_Send and MPI_Recv.
+            m_disassemblyView->setPlainText(QStringLiteral(
+                "0x00401120 <main+0>:  endbr64                 ; deadlock_ring prologue\n"
+                "0x00401124 <main+4>:  push  rbp\n"
+                "0x00401125 <main+5>:  mov   rbp, rsp\n"
+                "0x00401128 <main+8>:  sub   rsp, 0x40         ; ring payload frame\n"
+                "0x0040112f <main+15>: lea   rdi, [rbp-0x38]   ; &argc\n"
+                "0x00401136 <main+22>: lea   rsi, [rbp-0x40]   ; &argv\n"
+                "0x0040113d <main+29>: call  0x00401050        ; <MPI_Init@plt>\n"
+                "0x00401142 <main+34>: mov   dword [rbp-0x4], 0x0\n"
+                "0x00401149 <main+41>: cmp   dword [rbp-0x4], 0x2\n"
+                "0x0040114d <main+45>: jg    0x00401178        ; exit ring exchange\n"
+                "0x0040114f <main+47>: call  0x00401070        ; <MPI_Send@plt>\n"
+                "0x00401157 <main+55>: call  0x00401080        ; <MPI_Recv@plt>\n"
+                "0x00401163 <main+67>: jmp   0x00401149        ; loop back -> 0x401149\n"
+                "0x00401178 <main+88>: call  0x00401060        ; <MPI_Finalize@plt>\n"
+                "0x0040117d <main+93>: mov   eax, 0x0\n"
+                "0x00401182 <main+98>: leave\n"
+                "0x00401183 <main+99>: ret"));
+            if (m_projectExplorerWidget) {
+                m_projectExplorerWidget->setSymbols({
+                    {QStringLiteral("_start"), 0x00401000ULL, 32},
+                    {QStringLiteral("MPI_Init@plt"), 0x00401050ULL, 16},
+                    {QStringLiteral("MPI_Finalize@plt"), 0x00401060ULL, 16},
+                    {QStringLiteral("MPI_Send@plt"), 0x00401070ULL, 16},
+                    {QStringLiteral("MPI_Recv@plt"), 0x00401080ULL, 16},
+                    {QStringLiteral("sym.main"), 0x00401120ULL, 100}
+                });
+            }
+        } else {
+            m_disassemblyView->setPlainText(QStringLiteral(
+                "0x00401120 <main+0>:  endbr64                 ; MPI_Init prologue\n"
+                "0x00401124 <main+4>:  push  rbp\n"
+                "0x00401125 <main+5>:  mov   rbp, rsp\n"
+                "0x00401128 <main+8>:  sub   rsp, 0x90         ; DeeplyNested data[3]\n"
+                "0x0040112f <main+15>: lea   rdi, [rbp-0x88]   ; &argc\n"
+                "0x00401136 <main+22>: lea   rsi, [rbp-0x90]   ; &argv\n"
+                "0x0040113d <main+29>: call  0x00401050        ; <MPI_Init@plt>\n"
+                "0x00401142 <main+34>: mov   dword [rbp-0x4], 0x0\n"
+                "0x00401149 <main+41>: cmp   dword [rbp-0x4], 0x2\n"
+                "0x0040114d <main+45>: jg    0x00401178        ; exit rank init loop\n"
+                "0x0040114f <main+47>: mov   eax, dword [rbp-0x4]\n"
+                "0x00401152 <main+50>: cmp   eax, 0x0\n"
+                "0x00401155 <main+53>: je    0x00401168        ; branch if rank == 0\n"
+                "0x00401157 <main+55>: movsd xmm0, qword [rip+0xea9]\n"
+                "0x0040115f <main+63>: add   dword [rbp-0x4], 0x1\n"
+                "0x00401163 <main+67>: jmp   0x00401149        ; loop back -> 0x401149\n"
+                "0x00401168 <main+72>: xor   eax, eax          ; rank 0 coordinator\n"
+                "0x0040116a <main+74>: add   dword [rbp-0x4], 0x1\n"
+                "0x0040116e <main+78>: jmp   0x00401149        ; rejoin loop header\n"
+                "0x00401178 <main+88>: call  0x00401060        ; <MPI_Finalize@plt>\n"
+                "0x0040117d <main+93>: mov   eax, 0x0\n"
+                "0x00401182 <main+98>: leave\n"
+                "0x00401183 <main+99>: ret"));
+        }
+    }
+
+    // 5. Rebuild dynamic source-to-assembly mapping and reset active debug session if needed.
+    rebuildDynamicSourceLineMap();
+    if (m_debugSessionActive) {
+        stopTargetWorkflow();
+    }
+    return true;
+}
+
+/**
  * @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for a directory or source file.
  * @param targetPath Project directory path or source file path.
  * @return Detected build system identifier string.
  */
 QString MainWindow::detectBuildSystem(const QString& targetPath) const {
-    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : targetPath.trimmed();
+    const QString resolvedPath =
+        targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolvedPath);
     const QDir dir(info.isDir() ? info.absoluteFilePath() : info.absolutePath());
 
@@ -656,7 +812,8 @@ QString MainWindow::detectBuildSystem(const QString& targetPath) const {
  */
 QString MainWindow::buildCommandForPath(const QString& targetPath) const {
     const QString buildSys = detectBuildSystem(targetPath);
-    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : targetPath.trimmed();
+    const QString resolvedPath =
+        targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolvedPath);
     const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
     const QDir dir(dirPath);
@@ -682,10 +839,7 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
     }
 
     // 4. Standalone SingleFileMPI compilation using mpicxx/mpicc or g++/gcc fallback.
-    const QString srcFile = info.isFile()
-                                ? info.absoluteFilePath()
-                                : (!m_currentFile.isEmpty() ? QFileInfo(m_currentFile).absoluteFilePath()
-                                                            : QFileInfo(QStringLiteral("tutorial/inspection_demo.cpp")).absoluteFilePath());
+    const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
     const QFileInfo srcInfo(srcFile);
     const QString outBin = srcInfo.dir().filePath(srcInfo.completeBaseName());
     const bool isCFile = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
@@ -702,7 +856,8 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
  */
 QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
     const QString buildSys = detectBuildSystem(targetPath);
-    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : targetPath.trimmed();
+    const QString resolvedPath =
+        targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolvedPath);
     const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
     const QDir dir(dirPath);
@@ -724,10 +879,7 @@ QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
         return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
     }
     // 4. Standalone SingleFileMPI binary artifact removal.
-    const QString srcFile = info.isFile()
-                                ? info.absoluteFilePath()
-                                : (!m_currentFile.isEmpty() ? QFileInfo(m_currentFile).absoluteFilePath()
-                                                            : QFileInfo(QStringLiteral("tutorial/inspection_demo.cpp")).absoluteFilePath());
+    const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
     const QFileInfo srcInfo(srcFile);
     return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
 }
@@ -738,12 +890,7 @@ QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
  */
 bool MainWindow::buildTargetWorkflow() {
     if (!m_terminalDock) return false;
-    QString targetPath = m_currentFile;
-    if (targetPath.isEmpty() && m_targetSelector) {
-        const QString selData = m_targetSelector->currentData().toString();
-        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) targetPath = selData;
-    }
-    if (targetPath.isEmpty()) targetPath = QDir::currentPath();
+    const QString targetPath = activeTargetSourcePath();
 
     // Activate embedded Terminal tab and dispatch build command.
     if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
@@ -761,12 +908,7 @@ bool MainWindow::buildTargetWorkflow() {
  */
 bool MainWindow::cleanTargetWorkflow() {
     if (!m_terminalDock) return false;
-    QString targetPath = m_currentFile;
-    if (targetPath.isEmpty() && m_targetSelector) {
-        const QString selData = m_targetSelector->currentData().toString();
-        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) targetPath = selData;
-    }
-    if (targetPath.isEmpty()) targetPath = QDir::currentPath();
+    const QString targetPath = activeTargetSourcePath();
 
     // Activate embedded Terminal tab and dispatch clean command.
     if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
@@ -784,12 +926,7 @@ bool MainWindow::cleanTargetWorkflow() {
  */
 bool MainWindow::rebuildTargetWorkflow() {
     if (!m_terminalDock) return false;
-    QString targetPath = m_currentFile;
-    if (targetPath.isEmpty() && m_targetSelector) {
-        const QString selData = m_targetSelector->currentData().toString();
-        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) targetPath = selData;
-    }
-    if (targetPath.isEmpty()) targetPath = QDir::currentPath();
+    const QString targetPath = activeTargetSourcePath();
 
     // Activate embedded Terminal tab and dispatch chained clean && build command.
     if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);

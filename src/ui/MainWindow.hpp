@@ -238,6 +238,25 @@ public:
     bool rebuildTargetWorkflow();
 
     /**
+     * @brief Selects an active target in `#toolbarTargetSelector` by name or path and synchronizes all views.
+     * @param targetName Target name substring or file path (e.g., "deadlock_ring" or "inspection_demo").
+     * @return True if a matching target was found and activated; false otherwise.
+     */
+    bool selectTargetByName(const QString& targetName);
+
+    /**
+     * @brief Returns the resolved source file path for the currently active target.
+     * @return Absolute or resolved path to the active target's C/C++ source file.
+     */
+    QString activeTargetSourcePath() const;
+
+    /**
+     * @brief Returns the resolved output executable binary path for the currently active target.
+     * @return Absolute or resolved path to the active target's compiled binary executable.
+     */
+    QString activeTargetBinaryPath() const;
+
+    /**
      * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
      * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
      */

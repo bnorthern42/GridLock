@@ -200,13 +200,17 @@ void MainWindow::setupToolbar() {
                             QStringLiteral("tutorial/deadlock_ring.cpp"));
   m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."),
                             QStringLiteral("__open_binary__"));
-  // Trigger the binary/source file browser dialog when the user selects "Open ELF / Binary...".
-  connect(m_targetSelector, &QComboBox::activated, this, [this](int index) {
-    if (m_targetSelector &&
-        m_targetSelector->itemData(index).toString() ==
-            QStringLiteral("__open_binary__")) {
+  // Synchronize source editor, disassembly/CFG, and build paths when the user switches targets.
+  connect(m_targetSelector, &QComboBox::currentIndexChanged, this, [this](int index) {
+    if (!m_targetSelector || index < 0) return;
+    const QString data = m_targetSelector->itemData(index).toString();
+    if (data == QStringLiteral("__open_binary__")) {
+      m_targetSelector->blockSignals(true);
       m_targetSelector->setCurrentIndex(0);
+      m_targetSelector->blockSignals(false);
       openFile();
+    } else if (!data.isEmpty()) {
+      selectTargetByName(data);
     }
   });
   toolbar->addWidget(m_targetSelector);

@@ -27,6 +27,7 @@
 #include <cmath>
 
 #include "../src/core/managers/ThemeManager.hpp"
+#include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
@@ -553,5 +554,86 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
                  "Switching docset category must auto-preview first entry in that docset instead of keeping MPI_Init");
     }
 }
+
+/**
+ * @brief Verifies selecting a target in `#toolbarTargetSelector` switches the active source
+ * editor tab, updates DisassemblyView (Linear/CFG/Decompiler), and directs Build/Clean commands
+ * to the selected target's source and binary paths.
+ */
+void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildCommands() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QApplication::processEvents();
+
+    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(targetCombo != nullptr);
+    QVERIFY(terminalDock != nullptr);
+    QVERIFY(disasmView != nullptr);
+
+    // 1. Select "deadlock_ring" via MainWindow::selectTargetByName (and verify combo sync).
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")),
+             "selectTargetByName('deadlock_ring') must succeed and switch active target");
+    QApplication::processEvents();
+
+    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")),
+             qPrintable(QStringLiteral("Expected activeTargetSourcePath to end with deadlock_ring.cpp, got: %1")
+                            .arg(mainWindow.activeTargetSourcePath())));
+    QVERIFY2(mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")),
+             qPrintable(QStringLiteral("Expected activeTargetBinaryPath to end with deadlock_ring, got: %1")
+                            .arg(mainWindow.activeTargetBinaryPath())));
+
+    // Verify active SourceCodeView in EditorTabManager loaded deadlock_ring.cpp containing MPI_Send & MPI_Recv.
+    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
+    QVERIFY(editorTabs != nullptr);
+    auto* activeEditor = editorTabs->currentSourceCodeView();
+    QVERIFY(activeEditor != nullptr);
+    const QString editorText = activeEditor->toPlainText();
+    QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) &&
+                 editorText.contains(QStringLiteral("MPI_Recv")),
+             "Active SourceCodeView must display deadlock_ring.cpp with MPI_Send and MPI_Recv");
+
+    // Verify DisassemblyView updated its decompiler/disassembly preview to reflect deadlock_ring's MPI_Send/MPI_Recv.
+    const QString decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
+    QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) ||
+                 decompText.contains(QStringLiteral("MPI_Recv")),
+             qPrintable(QStringLiteral("DisassemblyView decompiler must reflect deadlock_ring (MPI_Send/MPI_Recv), got:\n%1")
+                            .arg(decompText)));
+
+    // 2. Verify Build & Clean commands operate on deadlock_ring.cpp / deadlock_ring (NOT inspection_demo.cpp).
+    mainWindow.buildTargetWorkflow();
+    QApplication::processEvents();
+    const QString buildCmd = terminalDock->lastSentCommand();
+    QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) &&
+                 buildCmd.contains(QStringLiteral("-o")) &&
+                 buildCmd.contains(QStringLiteral("deadlock_ring")) &&
+                 !buildCmd.contains(QStringLiteral("inspection_demo.cpp")),
+             qPrintable(QStringLiteral("Build command must compile deadlock_ring.cpp, got: %1").arg(buildCmd)));
+
+    mainWindow.cleanTargetWorkflow();
+    QApplication::processEvents();
+    const QString cleanCmd = terminalDock->lastSentCommand();
+    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) &&
+                 !cleanCmd.contains(QStringLiteral("inspection_demo")),
+             qPrintable(QStringLiteral("Clean command must remove deadlock_ring binary, got: %1").arg(cleanCmd)));
+
+    // 3. Switch back to "inspection_demo" and verify source path and build command restore inspection_demo.cpp.
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")),
+             "selectTargetByName('inspection_demo') must succeed");
+    QApplication::processEvents();
+    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")),
+             qPrintable(QStringLiteral("Expected activeTargetSourcePath to end with inspection_demo.cpp, got: %1")
+                            .arg(mainWindow.activeTargetSourcePath())));
+
+    mainWindow.buildTargetWorkflow();
+    QApplication::processEvents();
+    const QString buildDemoCmd = terminalDock->lastSentCommand();
+    QVERIFY2(buildDemoCmd.contains(QStringLiteral("inspection_demo.cpp")),
+             qPrintable(QStringLiteral("Build command after switching back must compile inspection_demo.cpp, got: %1")
+                            .arg(buildDemoCmd)));
+}
+
 
 

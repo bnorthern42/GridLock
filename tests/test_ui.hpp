@@ -156,4 +156,7 @@ private slots:
 
     /** @brief Verifies TerminalDockWidget eventFilter font/geometry lock during PreferencesDialog, Light Mode contrast, and ReferenceManualWidget docset auto-preview. */
     void testTerminalDialogEventFilterLightModeContrastAndDocsetAutoDetect();
+
+    /** @brief Verifies selecting a target in #toolbarTargetSelector switches SourceCodeView, DisassemblyView, and Build/Clean target paths. */
+    void testTargetSelectorSwitchesSourceDisassemblyAndBuildCommands();
 };
