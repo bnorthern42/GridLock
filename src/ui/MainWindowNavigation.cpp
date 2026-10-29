@@ -620,7 +620,7 @@ void MainWindow::openPreferences() {
         if (m_terminalDock) {
             const auto ts =
                 gridlock::core::ConfigManager::instance().getTerminalSettings();
-            m_terminalDock->setTerminalFont(ts.fontFamily, ts.fontSize);
+            m_terminalDock->setCustomFont(ts.fontFamily, ts.fontSize);
         }
 
         // Propagate updated font and color configurations across all open source editor tabs.

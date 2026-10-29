@@ -14,6 +14,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -543,6 +544,22 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
     openXrefInspector(m_currentAddress);
   });
 
+  // Live assembly instruction patch shortcut 'Ctrl+Shift+P'
+  auto *patchShortcut =
+      new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), this);
+  patchShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+  connect(patchShortcut, &QShortcut::activated, this, [this]() {
+    bool ok = false;
+    const QString newInst = QInputDialog::getText(
+        this, tr("Patch Instruction"),
+        tr("Enter replacement assembly instruction for 0x%1:")
+            .arg(m_currentAddress, 8, 16, QChar('0')),
+        QLineEdit::Normal, QStringLiteral("nop"), &ok);
+    if (ok && !newInst.trimmed().isEmpty()) {
+      patchInstruction(m_currentAddress, newInst.trimmed());
+    }
+  });
+
   reloadStyle();
   updateDisassembly(defaultStartupDisassembly());
 }
@@ -755,8 +772,9 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   m_baseDisassembly = asmCode.trimmed().isEmpty()
                           ? defaultStartupDisassembly()
                           : asmCode;
-  // Splice persistent user comments into the disassembly listing
-  const QString effectiveCode = applyUserCommentsToListing(m_baseDisassembly);
+  // Splice live instruction patches and user comments into the disassembly listing
+  const QString patchedCode = applyPatchesToListing(m_baseDisassembly);
+  const QString effectiveCode = applyUserCommentsToListing(patchedCode);
   if (m_linearEdit && m_linearEdit->toPlainText() != effectiveCode) {
     m_linearEdit->setPlainText(effectiveCode);
   }

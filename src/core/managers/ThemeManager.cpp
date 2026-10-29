@@ -71,6 +71,8 @@ static QString getHighDensityQssOverlay() {
         "QSplitter::handle:vertical { height: 4px; }\n"
         // Hovering any dock or splitter separator highlights the drag handle in royal blue.
         "QMainWindow::separator:hover, QSplitter::handle:hover { background: #528bff; }\n"
+        // Embedded terminal emulator cell geometry protection preventing PTY stair-stepping.
+        "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; }\n"
         // Dock container borders and compact 18-24px dock title bars.
         // Every dock widget has a 1px `#282c34` outline to separate adjacent panes cleanly.
         "QDockWidget { border: 1px solid #282c34; }\n"

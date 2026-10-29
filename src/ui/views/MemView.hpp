@@ -8,6 +8,7 @@
 
 #pragma once
 #include <QByteArray>
+#include <QMap>
 #include <QString>
 #include <QWidget>
 #include <cstdint>
@@ -43,8 +44,16 @@ public:
     uint64_t currentBaseAddress() const { return m_currentBaseAddress; }
     /// Returns number of modified bytes detected in the current view.
     int changedByteCount() const { return m_changedByteCount; }
+    /// Applies live byte patches at specified virtual memory address.
+    bool patchBytes(uint64_t address, const QByteArray& newBytes);
+    /// Returns total number of actively patched bytes.
+    int patchedByteCount() const { return m_patchedBytes.size(); }
+    /// Reverts all actively applied live byte patches and restores baseline memory.
+    void revertAllPatches();
 
 signals:
+    /// Emitted when bytes are patched at target memory address.
+    void bytesPatched(uint64_t address, const QByteArray& newBytes);
     /// Emitted when user initiates a manual memory read.
     void requestMemory(const QString& address, int length);
     /// Emitted when user requests cross-rank memory difference comparison.
@@ -72,6 +81,8 @@ private:
 
     QByteArray m_lastRawData;
     QByteArray m_previousRawData;
+    QByteArray m_unpatchedRawData;
+    QMap<uint64_t, char> m_patchedBytes;
     uint64_t m_currentBaseAddress = 0x00401120ULL;
     uint64_t m_previousBaseAddress = 0ULL;
     int m_changedByteCount = 0;

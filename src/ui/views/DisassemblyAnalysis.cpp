@@ -457,6 +457,17 @@ void DisassemblyView::setRankAddresses(const QMap<int, uint64_t> &rankPcs) {
 }
 
 /**
+ * @brief Sets the list of MPI ranks participating in a detected deadlock wait-for cycle.
+ * @param cycleRanks Vector of MPI rank IDs in the deadlock cycle.
+ */
+void DisassemblyView::setDeadlockCycleRanks(const QVector<int> &cycleRanks) {
+  m_deadlockCycleRanks = cycleRanks;
+  if (m_graphMode) {
+    rebuildCfgScene();
+  }
+}
+
+/**
  * @brief Returns sorted list of MPI ranks currently residing within a basic block.
  * @param blockStartAddr Starting instruction address of the basic block.
  * @return Sorted vector of MPI rank IDs present in the block.
@@ -634,6 +645,13 @@ void DisassemblyView::rebuildCfgScene() {
 
     if (!occRanks.isEmpty()) {
       QString rankLabel;
+      bool hasDeadlock = false;
+      for (int r : occRanks) {
+        if (m_deadlockCycleRanks.contains(r)) {
+          hasDeadlock = true;
+          break;
+        }
+      }
       if (occRanks.size() == 1) {
         rankLabel = QStringLiteral("[R%1]").arg(occRanks.first());
       } else if (occRanks.last() - occRanks.first() + 1 == occRanks.size()) {
@@ -648,8 +666,12 @@ void DisassemblyView::rebuildCfgScene() {
         }
         rankLabel = QStringLiteral("[%1]").arg(rStrs.join(','));
       }
+      if (hasDeadlock) {
+        rankLabel = QStringLiteral("[DEADLOCK] ") + rankLabel;
+      }
       const QColor badgeCol =
-          occRanks.contains(0) ? QColor("#dcdcaa") : QColor("#4ec9b0");
+          hasDeadlock ? QColor("#f44747")
+                      : (occRanks.contains(0) ? QColor("#dcdcaa") : QColor("#4ec9b0"));
       auto *rankBadgeText = m_cfgScene->addSimpleText(rankLabel, monoFont);
       rankBadgeText->setBrush(badgeCol);
       const qreal badgeW = rankBadgeText->boundingRect().width();

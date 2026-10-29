@@ -269,6 +269,7 @@ void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
     m_previousBaseAddress = startAddr;
     m_previousRawData = currentData;
     m_lastRawData = currentData;
+    m_unpatchedRawData = currentData;
     m_hasDiffBaseline = true;
 
     if (m_addressEdit) {
@@ -278,6 +279,49 @@ void MemView::setMemoryData(qint64 beginAddress, const QString& hexContents) {
     // Render formatted monospace HTML with differential color tags
     if (m_dumpEdit) {
         m_dumpEdit->setHtml(formatHexDumpHtml(startAddr, currentData, prevForDiff));
+    }
+}
+
+/**
+ * @brief Applies live byte patches at specified virtual memory address.
+ * @param address 64-bit target memory address.
+ * @param newBytes Byte array to write.
+ * @return True if byte payload was non-empty and recorded; false otherwise.
+ */
+bool MemView::patchBytes(uint64_t address, const QByteArray& newBytes) {
+    if (newBytes.isEmpty()) {
+        return false;
+    }
+    // Record each byte into active patch map
+    for (int i = 0; i < newBytes.size(); ++i) {
+        m_patchedBytes.insert(address + static_cast<uint64_t>(i), newBytes.at(i));
+    }
+    // If target address falls within current viewport slice, update local buffer
+    if (!m_lastRawData.isEmpty() && address >= m_currentBaseAddress &&
+        address < m_currentBaseAddress + static_cast<uint64_t>(m_lastRawData.size())) {
+        const uint64_t offset = address - m_currentBaseAddress;
+        const int copyLen = qMin(newBytes.size(), static_cast<int>(m_lastRawData.size() - offset));
+        for (int i = 0; i < copyLen; ++i) {
+            m_lastRawData[static_cast<qsizetype>(offset + i)] = newBytes.at(i);
+        }
+        if (m_dumpEdit) {
+            m_dumpEdit->setHtml(formatHexDumpHtml(m_currentBaseAddress, m_lastRawData, m_previousRawData));
+        }
+    }
+    emit bytesPatched(address, newBytes);
+    return true;
+}
+
+/**
+ * @brief Reverts all actively applied live byte patches and restores baseline memory buffer.
+ */
+void MemView::revertAllPatches() {
+    m_patchedBytes.clear();
+    if (!m_unpatchedRawData.isEmpty()) {
+        m_lastRawData = m_unpatchedRawData;
+        if (m_dumpEdit) {
+            m_dumpEdit->setHtml(formatHexDumpHtml(m_currentBaseAddress, m_lastRawData, m_previousRawData));
+        }
     }
 }
 
@@ -459,13 +503,17 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
             }
             const int idx = i + j;
             if (idx < byteCount) {
+                const uint64_t byteAddr = startAddress + static_cast<uint64_t>(idx);
+                const bool isPatched = m_patchedBytes.contains(byteAddr);
                 const uint8_t b = static_cast<uint8_t>(currentData[idx]);
                 // Check if byte value mutated compared to previous snapshot
                 const bool mutated = !prevData.isEmpty() && idx < prevData.size() &&
                                      static_cast<uint8_t>(prevData[idx]) != b;
                 const QString byteStr = QStringLiteral("%1").arg(b, 2, 16, QChar('0')).toUpper();
 
-                if (mutated) {
+                if (isPatched) {
+                    html += QStringLiteral("<span style=\"color: #e5c07b; font-weight: bold;\">%1</span> ").arg(byteStr);
+                } else if (mutated) {
                     html += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span> ").arg(byteStr);
                 } else if (b == 0x00) {
                     html += QStringLiteral("<span style=\"color: #555c66;\">%1</span> ").arg(byteStr);
@@ -477,13 +525,19 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
                 const char c = static_cast<char>(b);
                 if (c >= 32 && c <= 126) {
                     const QString escaped = QString(QChar(c)).toHtmlEscaped();
-                    if (mutated) {
+                    if (isPatched) {
+                        asciiPart += QStringLiteral("<span style=\"color: #e5c07b; font-weight: bold;\">%1</span>").arg(escaped);
+                    } else if (mutated) {
                         asciiPart += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(escaped);
                     } else {
                         asciiPart += QStringLiteral("<span style=\"color: #4ec9b0;\">%1</span>").arg(escaped);
                     }
                 } else {
-                    asciiPart += QStringLiteral("<span style=\"color: #555c66;\">.</span>");
+                    if (isPatched) {
+                        asciiPart += QStringLiteral("<span style=\"color: #e5c07b;\">.</span>");
+                    } else {
+                        asciiPart += QStringLiteral("<span style=\"color: #555c66;\">.</span>");
+                    }
                 }
             } else {
                 html += QStringLiteral("   ");

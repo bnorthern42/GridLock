@@ -41,10 +41,23 @@ public:
     void setTerminalFont(const QString& family, int pointSize);
 
     /**
+     * @brief Configures terminal font family and point size with strict monospace validation.
+     * @param family Desired font family name.
+     * @param pointSize Font size in points.
+     */
+    void setCustomFont(const QString& family, int pointSize);
+
+    /**
      * @brief Retrieves the active terminal emulator font.
      * @return Current QFont instance.
      */
     QFont terminalFont() const;
+
+    /**
+     * @brief Retrieves the active validated monospace terminal font.
+     * @return Validated fixed-pitch QFont instance.
+     */
+    QFont activeTerminalFont() const;
 
     /**
      * @brief Sets the active QTermWidget color scheme.
@@ -84,6 +97,8 @@ public:
 
 private:
     QTermWidget* m_termWidget{nullptr};    ///< Underlying QTermWidget instance.
+    QFont m_requestedFont;                 ///< User-configured terminal font setting.
+    QFont m_activeFont;                    ///< Active validated monospace font.
     QString m_colorScheme;                 ///< Active color scheme name.
     QStringList m_environment;             ///< Shell process environment array.
 };

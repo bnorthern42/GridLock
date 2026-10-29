@@ -359,6 +359,43 @@ QByteArray ElfBinaryInspector::readVirtualMemory(uint64_t vaddr, size_t length) 
 }
 
 /**
+ * @brief Writes bytes into the virtual memory image loaded in memory.
+ *
+ * Locates the ELF section containing the target virtual address, validates that
+ * the range fits within the section and file data buffer, and overwrites the bytes.
+ *
+ * @param vaddr Target virtual memory address.
+ * @param data Byte payload to write.
+ * @return True if written successfully; false otherwise.
+ */
+bool ElfBinaryInspector::writeVirtualMemory(uint64_t vaddr, const QByteArray& data) {
+    if (!m_valid || data.isEmpty()) {
+        return false;
+    }
+    // Search for section header containing vaddr
+    for (const auto& sec : m_sections) {
+        if (vaddr >= sec.address && vaddr < (sec.address + sec.size)) {
+            const uint64_t delta = vaddr - sec.address;
+            const uint64_t avail = sec.size - delta;
+            // Ensure payload fits within section boundaries
+            if (static_cast<uint64_t>(data.size()) > avail) {
+                return false;
+            }
+            // SHT_NOBITS (.bss) has no disk file backing
+            if (sec.isNobits) {
+                return false;
+            }
+            // Overwrite bytes within the memory buffer
+            if (sec.offset + delta + data.size() <= static_cast<uint64_t>(m_fileData.size())) {
+                memcpy(m_fileData.data() + sec.offset + delta, data.constData(), data.size());
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
  * @brief Disassembles an instruction range into formatted assembly lines.
  *
  * Attempts disassembly via objdump with Intel syntax bounded to the requested

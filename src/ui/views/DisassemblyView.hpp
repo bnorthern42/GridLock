@@ -182,6 +182,18 @@ public:
     /// Returns the currently focused MPI rank ID.
     int selectedRank() const { return m_selectedRank; }
 
+    /// Sets the list of MPI ranks participating in a detected deadlock wait-for cycle.
+    void setDeadlockCycleRanks(const QVector<int>& cycleRanks);
+    /// Returns the list of MPI ranks participating in a deadlock wait-for cycle.
+    QVector<int> deadlockCycleRanks() const { return m_deadlockCycleRanks; }
+
+    /// Applies live assembly instruction patch at instruction pointer address.
+    bool patchInstruction(uint64_t address, const QString& newInstruction);
+    /// Returns total number of actively patched assembly instructions.
+    int patchedInstructionCount() const { return m_patchedInstructions.size(); }
+    /// Reverts all actively applied instruction patches.
+    void revertAllPatches();
+
     /// Sets visibility of the CFG minimap overlay.
     void setGraphMinimapVisible(bool visible);
     /// Checks whether the CFG minimap overlay is visible.
@@ -226,6 +238,7 @@ private:
     void highlightActiveDecompilerLine();
     void setupDecompilerUi(QSplitter* splitSplitter, const QFont& font);
     QString applyUserCommentsToListing(const QString& rawCode) const;
+    QString applyPatchesToListing(const QString& rawCode) const;
     static QString defaultStartupDisassembly();
 
     QLabel* m_headerBadge = nullptr;
@@ -254,6 +267,8 @@ private:
     mutable QMap<int, uint64_t> m_decompilerLineToAddr;
     mutable QMap<uint64_t, int> m_addrToDecompilerLine;
     QMap<uint64_t, QString> m_userComments;
+    QMap<uint64_t, QString> m_patchedInstructions;
+    QVector<int> m_deadlockCycleRanks;
     QSet<uint64_t> m_bookmarks;
     QString m_baseDisassembly;
     uint64_t m_currentAddress = 0x401120ULL;

@@ -542,4 +542,71 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
   return out.join('\n');
 }
 
+/**
+ * @brief Splices live instruction patches into the base assembly code listing.
+ * @param rawCode Original assembly text lines.
+ * @return Assembly listing with patched instructions substituted at target addresses.
+ */
+QString DisassemblyView::applyPatchesToListing(const QString &rawCode) const {
+  if (m_patchedInstructions.isEmpty()) {
+    return rawCode;
+  }
+  static const QRegularExpression lineAddrRe(
+      QStringLiteral("^(\\s*(?:=>\\s*)?(?:0x[0-9a-fA-F]+)(?:\\s*<[^>]+>)?\\s*:?\\s*)([^;\\n]+)(.*)$"));
+  static const QRegularExpression addrRe(
+      QStringLiteral("0x[0-9a-fA-F]+"));
+
+  QStringList lines = rawCode.split('\n');
+  for (QString &line : lines) {
+    QRegularExpressionMatch match = lineAddrRe.match(line);
+    if (!match.hasMatch()) {
+      continue;
+    }
+    QRegularExpressionMatch aMatch = addrRe.match(match.captured(1));
+    if (!aMatch.hasMatch()) {
+      continue;
+    }
+    bool ok = false;
+    const uint64_t addr = aMatch.captured(0).toULongLong(&ok, 16);
+    if (ok && m_patchedInstructions.contains(addr)) {
+      const QString prefix = match.captured(1);
+      const QString newInst = m_patchedInstructions.value(addr);
+      const QString trailing = match.captured(3);
+      line = prefix + newInst + QStringLiteral("  ; [PATCHED]") + trailing;
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * @brief Applies live assembly instruction patch at instruction pointer address.
+ *
+ * Records the replacement instruction for the target address and triggers a
+ * full disassembly parse, CFG basic block rebuild, and decompiler regeneration pass.
+ *
+ * @param address 64-bit target instruction address.
+ * @param newInstruction New assembly instruction string (e.g. "nop").
+ * @return True on valid non-empty patch; false otherwise.
+ */
+bool DisassemblyView::patchInstruction(uint64_t address,
+                                       const QString &newInstruction) {
+  if (newInstruction.trimmed().isEmpty()) {
+    return false;
+  }
+  m_patchedInstructions.insert(address, newInstruction.trimmed());
+  updateDisassembly(m_baseDisassembly);
+  refreshDecompilerView();
+  return true;
+}
+
+/**
+ * @brief Reverts all actively applied instruction patches and restores original code.
+ */
+void DisassemblyView::revertAllPatches() {
+  m_patchedInstructions.clear();
+  updateDisassembly(m_baseDisassembly);
+  refreshDecompilerView();
+}
+
 }  // namespace gridlock::ui
+

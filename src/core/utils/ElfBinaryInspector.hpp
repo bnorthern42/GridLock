@@ -114,6 +114,14 @@ public:
     QByteArray readVirtualMemory(uint64_t vaddr, size_t length) const;
 
     /**
+     * @brief Writes bytes into the virtual memory image loaded in memory.
+     * @param vaddr Target virtual memory address.
+     * @param data Byte payload to write.
+     * @return True if vaddr maps to a valid writable section and data was written; false otherwise.
+     */
+    bool writeVirtualMemory(uint64_t vaddr, const QByteArray& data);
+
+    /**
      * @brief Disassembles an instruction range into formatted assembly lines.
      * @param startAddr Starting virtual memory address.
      * @param size Byte size of region to disassemble.

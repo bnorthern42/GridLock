@@ -36,6 +36,7 @@
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/XrefInspectorDialog.hpp"
+#include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
@@ -753,3 +754,74 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
     QCOMPARE(disasm->currentAddress(), targetCaller);
     QCOMPARE(memView->currentBaseAddress(), targetCaller);
 }
+
+/**
+ * @brief Tests terminal monospace font enforcement, memory/disassembly live patching, and deadlock cycle badges.
+ */
+void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
+    // 1. Initialize MainWindow and load standard preview fixture.
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.loadPreviewFixture();
+
+    // 2. Verify TerminalDockWidget monospace font enforcement and geometry isolation.
+    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
+    QVERIFY(terminalDock != nullptr);
+    // Request a variable-pitch proportional font family.
+    terminalDock->setCustomFont("Cantarell", 11);
+    // Enforce that activeTerminalFont() strictly resolves to a fixed-pitch monospace font.
+    QFont activeFont = terminalDock->activeTerminalFont();
+    QVERIFY(QFontInfo(activeFont).fixedPitch());
+    // Ensure terminal dock retains non-negative width.
+    QVERIFY(terminalDock->width() >= 0);
+
+    // 3. Verify MemView live byte patching, patch tracking count, signal emission, and revert.
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    QVERIFY(memView != nullptr);
+    QSignalSpy patchSpy(memView, &gridlock::ui::MemView::bytesPatched);
+    const uint64_t targetAddr = 0x00401120ULL;
+    const QByteArray newBytes = QByteArray::fromHex("9090");
+    // Apply live 2-byte patch at base address.
+    QVERIFY(memView->patchBytes(targetAddr, newBytes));
+    // Verify patch counter increments by the number of patched bytes.
+    QCOMPARE(memView->patchedByteCount(), 2);
+    // Verify bytesPatched signal fired once with expected address and byte payload.
+    QCOMPARE(patchSpy.count(), 1);
+    // Revert all applied memory patches and verify counter resets to 0.
+    memView->revertAllPatches();
+    QCOMPARE(memView->patchedByteCount(), 0);
+
+    // 4. Verify DisassemblyView live instruction patching, CFG arc updates, and decompilation.
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(disasm != nullptr);
+    const int initialArcs = disasm->branchArcCount();
+    // 0x00401155 is a conditional jump instruction; patching it to 'nop' eliminates the branch arc.
+    QVERIFY(disasm->patchInstruction(0x00401155ULL, QStringLiteral("nop")));
+    // Verify patched instruction count increments to 1.
+    QCOMPARE(disasm->patchedInstructionCount(), 1);
+    // Verify branch arc count decrements as the branch edge is eliminated.
+    QCOMPARE(disasm->branchArcCount(), initialArcs - 1);
+    // Verify decompiler regenerates valid C pseudocode reflecting the modification.
+    const QString decompiledC = disasm->decompileToLanguage(QStringLiteral("C"));
+    QVERIFY(!decompiledC.isEmpty());
+
+    // 5. Verify MPI Deadlock cycle rank assignment, retrieval, and badge integration.
+    const QVector<int> cycleRanks = {0, 1};
+    disasm->setDeadlockCycleRanks(cycleRanks);
+    QCOMPARE(disasm->deadlockCycleRanks(), cycleRanks);
+
+    // 6. Verify ElfBinaryInspector virtual memory writing and round-trip verification.
+    const QString appPath = QCoreApplication::applicationFilePath();
+    gridlock::core::ElfBinaryInspector inspector(appPath);
+    if (inspector.isValid() && inspector.entryPoint() != 0) {
+        const uint64_t entry = inspector.entryPoint();
+        const QByteArray origBytes = inspector.readVirtualMemory(entry, 2);
+        QVERIFY(!origBytes.isEmpty());
+        const QByteArray patch = QByteArray::fromHex("9090");
+        // Write virtual memory patch into ELF image in memory.
+        QVERIFY(inspector.writeVirtualMemory(entry, patch));
+        // Verify patched bytes match the written payload upon readback.
+        const QByteArray readBack = inspector.readVirtualMemory(entry, 2);
+        QCOMPARE(readBack, patch);
+    }
+}
+

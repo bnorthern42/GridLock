@@ -111,4 +111,7 @@ private slots:
 
     /** @brief Verifies interactive Xref extraction, incoming/outgoing call graph analysis, and inspector dialog sync. */
     void testInteractiveXrefInspectorAndCallGraphSync();
+
+    /** @brief Verifies terminal monospace font enforcement, memory/disassembly live patching, and deadlock cycle badges. */
+    void testTerminalFontIsolationLivePatchingAndDeadlockCycle();
 };

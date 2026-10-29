@@ -10,12 +10,51 @@
 #include "../../core/managers/ConfigManager.hpp"
 
 #include <QApplication>
+#include <QFontDatabase>
+#include <QFontInfo>
 #include <QProcessEnvironment>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <qtermwidget.h>
 
 namespace gridlock::ui {
+
+/**
+ * @brief Resolves a strict fixed-pitch monospace font, falling back to guaranteed system monospace fonts.
+ * @param family Candidate font family name.
+ * @param pointSize Desired point size.
+ * @return Validated fixed-pitch QFont instance.
+ */
+static QFont resolveMonospaceFont(const QString& family, int pointSize) {
+    QFont font(family, pointSize);
+    font.setFixedPitch(true);
+    font.setStyleHint(QFont::Monospace);
+    if (!QFontInfo(font).fixedPitch()) {
+        font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        if (pointSize > 0) {
+            font.setPointSize(pointSize);
+        }
+        font.setFixedPitch(true);
+        font.setStyleHint(QFont::Monospace);
+        if (!QFontInfo(font).fixedPitch()) {
+            static const QStringList fallbackFamilies = {
+                QStringLiteral("Liberation Mono"),
+                QStringLiteral("JetBrains Mono"),
+                QStringLiteral("Hack")
+            };
+            for (const QString& fam : fallbackFamilies) {
+                QFont candidate(fam, pointSize > 0 ? pointSize : 11);
+                candidate.setFixedPitch(true);
+                candidate.setStyleHint(QFont::Monospace);
+                if (QFontInfo(candidate).fixedPitch()) {
+                    font = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    return font;
+}
 
 /**
  * @brief Constructs the terminal widget, launches shell, and configures environment.
@@ -32,6 +71,10 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
 
     // Instantiate QTermWidget backend.
     m_termWidget = new QTermWidget(0, this);
+    // Isolate terminal canvas from external stylesheet cascading padding/margins.
+    m_termWidget->setStyleSheet(QStringLiteral(
+        "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; font-family: monospace; }"));
+
     const auto ts = gridlock::core::ConfigManager::instance().getTerminalSettings();
     m_termWidget->setShellProgram(ts.shellPath);
 
@@ -46,27 +89,53 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     // Launch underlying shell process.
     m_termWidget->startShellProgram();
 
+    // Enforce fixed-pitch monospace typography at startup.
+    m_activeFont = resolveMonospaceFont(ts.fontFamily, ts.fontSize);
+
     // Set font based on ConfigManager AFTER starting the shell, 
     // and delay it to the next event loop iteration. qtermwidget is notorious
     // for resetting/ignoring fonts applied before it has fully spun up its VT100 emulator.
-    QTimer::singleShot(0, this, [this, ts]() {
-        QFont font(ts.fontFamily, ts.fontSize);
-        font.setStyleHint(QFont::Monospace);
-        m_termWidget->setTerminalFont(font);
+    QTimer::singleShot(0, this, [this]() {
+        m_termWidget->setTerminalFont(m_activeFont);
+        m_termWidget->update();
     });
 
     layout->addWidget(m_termWidget);
 }
 
 /**
- * @brief Configures terminal font family and point size.
+ * @brief Configures terminal font family and point size with monospace fallback.
  * @param family Font family name.
- * @param pointSize Point size.
+ * @param pointSize Point size in points.
  */
 void TerminalDockWidget::setTerminalFont(const QString& family, int pointSize) {
     QFont font(family, pointSize);
+    font.setFixedPitch(true);
     font.setStyleHint(QFont::Monospace);
-    m_termWidget->setTerminalFont(font);
+    m_requestedFont = font;
+    m_activeFont = resolveMonospaceFont(family, pointSize);
+    m_termWidget->setTerminalFont(m_activeFont);
+    m_termWidget->update();
+}
+
+/**
+ * @brief Custom font setter validating fixed-pitch metrics before applying.
+ * @param family Candidate font family.
+ * @param pointSize Font size.
+ */
+void TerminalDockWidget::setCustomFont(const QString& family, int pointSize) {
+    setTerminalFont(family, pointSize);
+}
+
+/**
+ * @brief Retrieves the active validated fixed-pitch terminal font.
+ * @return Current fixed-pitch QFont instance.
+ */
+QFont TerminalDockWidget::activeTerminalFont() const {
+    if (m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch()) {
+        return m_activeFont;
+    }
+    return m_termWidget->getTerminalFont();
 }
 
 /**
@@ -74,7 +143,10 @@ void TerminalDockWidget::setTerminalFont(const QString& family, int pointSize) {
  * @return Current QFont instance.
  */
 QFont TerminalDockWidget::terminalFont() const {
-    return m_termWidget->getTerminalFont();
+    if (!m_requestedFont.family().isEmpty()) {
+        return m_requestedFont;
+    }
+    return activeTerminalFont();
 }
 
 /**
