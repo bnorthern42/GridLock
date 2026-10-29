@@ -10,23 +10,31 @@
 #include "test_ui.hpp"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QLabel>
 #include <QString>
 #include <QTabWidget>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTextEdit>
 #include <QtTest/QtTest>
+#include <cmath>
 
+#include "../src/core/managers/ThemeManager.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 #include "../src/ui/widgets/ReferenceManualWidget.hpp"
 
 /**
@@ -433,4 +441,117 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
     QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("&&")));
 }
+
+/**
+ * @brief Verifies TerminalDockWidget eventFilter font/geometry lock during PreferencesDialog,
+ *        Light Mode contrast on ProjectExplorerWidget, and ReferenceManualWidget docset auto-preview.
+ */
+void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAutoDetect() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
+    auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY(bottomTabs != nullptr && terminalDock != nullptr && explorer != nullptr && refManual != nullptr);
+
+    // =========================================================================
+    // Part 1: Terminal EventFilter Protection When Opening PreferencesDialog
+    // =========================================================================
+    bottomTabs->setCurrentWidget(terminalDock);
+    QApplication::processEvents();
+
+    // Open PreferencesDialog and simulate proportional FontChange / StyleChange events on terminal children.
+    gridlock::ui::PreferencesDialog prefsDialog(&mainWindow);
+    prefsDialog.show();
+    QApplication::processEvents();
+
+    QFont proportionalFont(QStringLiteral("Cantarell"), 11);
+    proportionalFont.setFixedPitch(false);
+    for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
+        child->setFont(proportionalFont);
+        QEvent fontEv(QEvent::FontChange);
+        QApplication::sendEvent(child, &fontEv);
+        QEvent styleEv(QEvent::StyleChange);
+        QApplication::sendEvent(child, &styleEv);
+    }
+    QApplication::processEvents();
+
+    // Verify all child widgets in TerminalDockWidget remain fixed-pitch and span >= 95% of dock width.
+    QVERIFY2(terminalDock->areAllChildWidgetsFixedPitch(),
+             "TerminalDockWidget eventFilter must restore fixed-pitch font across all child widgets");
+    for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
+        if (child->isVisible() && child->width() > 80) {
+            QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100,
+                     qPrintable(QStringLiteral("Child widget %1 shrunk to %2px vs dock %3px")
+                                    .arg(child->metaObject()->className())
+                                    .arg(child->width())
+                                    .arg(terminalDock->width())));
+        }
+    }
+    prefsDialog.close();
+
+    // =========================================================================
+    // Part 2: Light Mode Contrast Verification
+    // =========================================================================
+    gridlock::core::ThemeManager::instance().setDarkMode(false);
+    explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}});
+    QApplication::processEvents();
+
+    auto* symTable = explorer->findChild<QTableWidget*>();
+    QVERIFY(symTable != nullptr && symTable->rowCount() > 0);
+    QTableWidgetItem* symItem = symTable->item(0, 0);
+    QVERIFY(symItem != nullptr);
+
+    const QColor fgColor = symItem->foreground().color();
+    const QColor bgColor = symTable->palette().color(QPalette::Base);
+    const auto luminance = [](const QColor& c) -> int {
+        return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000;
+    };
+    const int contrastDiff = std::abs(luminance(fgColor) - luminance(bgColor));
+    QVERIFY2(contrastDiff >= 80,
+             qPrintable(QStringLiteral("Light mode symbol contrast too low (%1): fg=%2 bg=%3")
+                            .arg(contrastDiff)
+                            .arg(fgColor.name())
+                            .arg(bgColor.name())));
+
+    // Restore Dark Mode.
+    gridlock::core::ThemeManager::instance().setDarkMode(true);
+    QApplication::processEvents();
+
+    // =========================================================================
+    // Part 3: Selecting a Docset in ReferenceManualWidget Updates Right Pane
+    // =========================================================================
+    bottomTabs->setCurrentWidget(refManual);
+    refManual->lookupSymbol(QStringLiteral("MPI_Init"));
+    QApplication::processEvents();
+
+    auto* docCombo = refManual->findChild<QComboBox*>();
+    auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
+    QVERIFY(docCombo != nullptr && docBrowser != nullptr);
+    QVERIFY(docBrowser->toHtml().contains(QStringLiteral("MPI_Init")));
+
+    // Switch docset combo to a non-MPI category (e.g. "Intel x86_64 ISA" or another loaded docset).
+    int targetIdx = -1;
+    for (int i = 0; i < docCombo->count(); ++i) {
+        const QString label = docCombo->itemText(i);
+        if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) &&
+            !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) {
+            targetIdx = i;
+            break;
+        }
+    }
+    if (targetIdx >= 0) {
+        docCombo->setCurrentIndex(targetIdx);
+        QApplication::processEvents();
+        QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")),
+                 "Switching docset category must auto-preview first entry in that docset instead of keeping MPI_Init");
+    }
+}
+
 

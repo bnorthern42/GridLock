@@ -18,8 +18,10 @@
 #include "ThemeManager.hpp"
 
 #include <QApplication>
+#include <QColor>
 #include <QDir>
 #include <QFont>
+#include <QPalette>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -48,6 +50,82 @@ ThemeManager::ThemeManager()
 ThemeManager::~ThemeManager() = default;
 
 /**
+ * @brief Returns the high-contrast Light Mode workstation QSS overlay when dark mode is disabled.
+ *
+ * Replaces dark-slate `#16181d` backgrounds and light `#d7dae0` text with crisp `#ffffff` /
+ * `#f6f8fa` surfaces and `#1f2328` charcoal text so tables, trees, editors, and dock headers
+ * never render unreadable white-on-white text in Light Mode.
+ *
+ * @return High-contrast Light Mode QSS stylesheet string.
+ */
+static QString getHighContrastLightQssOverlay() {
+    return QStringLiteral(
+        // Root window and modal dialog light-slate canvas with dark charcoal foreground text.
+        "\n/* High-Contrast Light Workstation Design System */\n"
+        "QMainWindow, QWidget#centralWidget, QDialog, QWizard { background: #f6f8fa; color: #1f2328; }\n"
+        // Interactive 4px dock and splitter drag handles with royal-blue hover indicator.
+        "QMainWindow::separator, QSplitter::handle { width: 4px; height: 4px; background: #d0d7de; }\n"
+        "QMainWindow::separator:hover, QSplitter::handle:hover { background: #0969da; }\n"
+        // Zero-margin embedded terminal emulator container protection.
+        "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; }\n"
+        // Dock container borders and 24px uppercase dock title headers.
+        "QDockWidget { border: 1px solid #d0d7de; color: #1f2328; }\n"
+        "QDockWidget::title {\n"
+        "    background: #eaeef2; color: #1f2328; padding: 3px 8px; height: 24px;\n"
+        "    min-height: 20px; max-height: 24px; border-bottom: 1px solid #d0d7de;\n"
+        "    font-size: 11px; font-weight: 600; text-transform: uppercase;\n"
+        "}\n"
+        // Tabbed workspace and dock tab bars with 2px royal-blue active tab underline.
+        "QTabWidget::pane, QTabWidget#EditorTabManager::pane { border: 0px; background: #ffffff; }\n"
+        "QTabBar { background: #eaeef2; }\n"
+        "QTabBar::tab {\n"
+        "    background: #eaeef2; color: #57606a; padding: 3px 10px; height: 24px;\n"
+        "    min-height: 20px; max-height: 24px; border-right: 1px solid #d0d7de;\n"
+        "    border-bottom: 1px solid #d0d7de; font-size: 11px; font-weight: 600;\n"
+        "}\n"
+        // Active selected tab uses pure white surface and dark charcoal label text.
+        "QTabBar::tab:selected { background: #ffffff; color: #1f2328; border-bottom: 2px solid #0969da; }\n"
+        // Compact 20-22px push buttons and toolbar buttons with crisp #d0d7de borders.
+        "QPushButton, QToolButton, QToolBar QToolButton {\n"
+        "    height: 20px; min-height: 20px; max-height: 22px; padding: 1px 8px;\n"
+        "    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 2px;\n"
+        "    color: #1f2328; font-size: 10px; font-weight: 600;\n"
+        "}\n"
+        // Hover and disabled button states in Light Mode.
+        "QPushButton:hover:enabled, QToolButton:hover { background: #eaeef2; border: 1px solid #0969da; color: #0969da; }\n"
+        "QPushButton:disabled, QToolButton:disabled { background: #f6f8fa; color: #8c959f; border: 1px solid #d8dee4; }\n"
+        // Single-line inputs, spinboxes, combo boxes, and filter bars with #1f2328 text on #ffffff.
+        "QLineEdit, QSpinBox, QComboBox, #cutterSeekBar, #symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
+        "    height: 20px; min-height: 20px; max-height: 22px; padding: 0px 6px;\n"
+        "    background: #ffffff; border: 1px solid #d0d7de; border-radius: 2px; color: #1f2328; font-size: 11px;\n"
+        "}\n"
+        // Text editors, browsers, list widgets, and hex dump viewports.
+        "QTextEdit, QPlainTextEdit, QTextBrowser, QListWidget, #cutterHexDumpEdit {\n"
+        "    border: none; background: #ffffff; color: #1f2328;\n"
+        "}\n"
+        // High-contrast tables and trees with #ffffff base, #f6f8fa alternate rows, and #1f2328 text.
+        "QTreeView, QTableView, QTableWidget, #cutterRegisterTable, #symbolsTable, #stringsTable, #mpiNetworkLogTable {\n"
+        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
+        "    background: #ffffff; alternate-background-color: #f6f8fa; color: #1f2328;\n"
+        "    border: none; gridline-color: #d0d7de; selection-background-color: #ddf4ff; selection-color: #0969da;\n"
+        "}\n"
+        // Table and tree section headers capped at 20-22px height.
+        "QHeaderView, QHeaderView::section, QTableCornerButton::section {\n"
+        "    background-color: #eaeef2; color: #1f2328; border-right: 1px solid #d0d7de; border-bottom: 1px solid #d0d7de;\n"
+        "    height: 20px; min-height: 20px; max-height: 22px; font-size: 10px; font-weight: 600;\n"
+        "}\n"
+        // Unified 24-26px sub-view header strips and bottom status bar in Light Mode.
+        "QToolBar, QStatusBar, #cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar, "
+        "#evaluatorHeaderBar, #evaluatorPromptBar, #gdbConsoleHeaderBar, #gdbConsolePromptBar, "
+        "#refManualHeaderBar, #mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
+        "    background: #eaeef2; color: #1f2328; border-bottom: 1px solid #d0d7de; min-height: 24px; max-height: 26px;\n"
+        "}\n"
+        // Status bar telemetry badges, labels, and checkboxes use high-contrast #1f2328 foreground.
+        "#cutterStatusTelemetry, #cutterDisasmBadge, #cutterDisasmStats, QLabel, QCheckBox { color: #1f2328; }\n"
+    );
+}
+
+/**
  * @brief Returns the high-density dark-slate workstation QSS overlay appended to base themes.
  *
  * Enforces:
@@ -58,7 +136,10 @@ ThemeManager::~ThemeManager() = default;
  *
  * @return Complete QSS stylesheet string for the workstation chrome overlay.
  */
-static QString getHighDensityQssOverlay() {
+static QString getHighDensityQssOverlay(bool isDark = true) {
+    if (!isDark) {
+        return getHighContrastLightQssOverlay();
+    }
     return QStringLiteral(
         // Root window canvas and 4px interactive dock/splitter resize handles.
         // Dark slate `#16181d` matches the primary code and disassembly background.
@@ -530,6 +611,38 @@ static QString getHighDensityQssOverlay() {
 }
 
 /**
+ * @brief Synchronizes QApplication's base/text QPalette with the active dark or light mode.
+ *
+ * Ensures custom-painted widgets and QTableWidget viewports querying `QPalette::Base`
+ * or `QPalette::Text` receive high-contrast dark (`#16181d` / `#d7dae0`) or light
+ * (`#ffffff` / `#1f2328`) colors immediately on mode switches.
+ *
+ * @param isDark True for dark-slate palette; false for high-contrast light palette.
+ */
+static void applyApplicationPalette(bool isDark) {
+    if (!qApp) {
+        return;
+    }
+    QPalette pal = qApp->palette();
+    if (isDark) {
+        // Configure dark-slate base and light-slate text roles.
+        pal.setColor(QPalette::Window, QColor(0x16, 0x18, 0x1d));
+        pal.setColor(QPalette::WindowText, QColor(0xd7, 0xda, 0xe0));
+        pal.setColor(QPalette::Base, QColor(0x16, 0x18, 0x1d));
+        pal.setColor(QPalette::AlternateBase, QColor(0x18, 0x1b, 0x20));
+        pal.setColor(QPalette::Text, QColor(0xd7, 0xda, 0xe0));
+    } else {
+        // Configure pure white base and high-contrast charcoal text roles for Light Mode.
+        pal.setColor(QPalette::Window, QColor(0xf6, 0xf8, 0xfa));
+        pal.setColor(QPalette::WindowText, QColor(0x1f, 0x23, 0x28));
+        pal.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
+        pal.setColor(QPalette::AlternateBase, QColor(0xf6, 0xf8, 0xfa));
+        pal.setColor(QPalette::Text, QColor(0x1f, 0x23, 0x28));
+    }
+    qApp->setPalette(pal);
+}
+
+/**
  * @brief Initializes QtAdvancedStylesheet paths, loads user QSettings preferences, and applies QSS.
  */
 void ThemeManager::initialize() {
@@ -547,6 +660,7 @@ void ThemeManager::initialize() {
         !m_advancedStylesheet->themes().contains(theme + ".xml")) {
         theme = "dark_teal";
     }
+    m_darkMode = s.value("appearance/dark_mode", !theme.startsWith("light_")).toBool();
 
     const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
 
@@ -554,7 +668,8 @@ void ThemeManager::initialize() {
     m_advancedStylesheet->setCurrentTheme(theme);
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
     m_advancedStylesheet->updateStylesheet();
-    const QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay();
+    applyApplicationPalette(m_darkMode);
+    const QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode);
     qApp->setStyleSheet(qss);
 
     // Synchronize the global QApplication font point size with user preferences.
@@ -576,7 +691,8 @@ QStringList ThemeManager::getAvailableThemes() const {
 /**
  * @brief Dynamically switches the active XML theme and reapplies the workstation QSS overlay.
  */
-void ThemeManager::setTheme(const QString& themeName, bool /*isDark*/) {
+void ThemeManager::setTheme(const QString& themeName, bool isDark) {
+    m_darkMode = isDark && !themeName.startsWith(QStringLiteral("light_"), Qt::CaseInsensitive);
     if (m_advancedStylesheet && !themeName.isEmpty()) {
         // Resolve optional `.xml` extension required by the stylesheet catalog.
         const QString themePath = m_advancedStylesheet->themes().contains(themeName + ".xml")
@@ -584,8 +700,41 @@ void ThemeManager::setTheme(const QString& themeName, bool /*isDark*/) {
                                       : themeName;
         m_advancedStylesheet->setCurrentTheme(themePath);
         m_advancedStylesheet->updateStylesheet();
-        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay());
+        applyApplicationPalette(m_darkMode);
+        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode));
     }
+    emit themeModeChanged(m_darkMode);
+}
+
+/**
+ * @brief Switches between dark-slate (`true`) and high-contrast light (`false`) workstation palettes.
+ */
+void ThemeManager::setDarkMode(bool dark) {
+    m_darkMode = dark;
+    QSettings s("gridlock", "debugger");
+    s.setValue("appearance/dark_mode", dark);
+    applyApplicationPalette(m_darkMode);
+    if (m_advancedStylesheet) {
+        const QString fallbackTheme = dark ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
+        QString theme = s.value("appearance/theme", fallbackTheme).toString();
+        if (dark && theme.startsWith(QStringLiteral("light_"), Qt::CaseInsensitive)) {
+            theme = QStringLiteral("dark_teal");
+        } else if (!dark && theme.startsWith(QStringLiteral("dark_"), Qt::CaseInsensitive)) {
+            theme = QStringLiteral("light_blue");
+        }
+        if (m_advancedStylesheet->themes().contains(theme) ||
+            m_advancedStylesheet->themes().contains(theme + ".xml")) {
+            const QString themePath = m_advancedStylesheet->themes().contains(theme + ".xml")
+                                          ? theme + ".xml"
+                                          : theme;
+            m_advancedStylesheet->setCurrentTheme(themePath);
+            m_advancedStylesheet->updateStylesheet();
+        }
+        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode));
+    } else if (qApp) {
+        qApp->setStyleSheet(getHighDensityQssOverlay(m_darkMode));
+    }
+    emit themeModeChanged(m_darkMode);
 }
 
 /**
@@ -603,6 +752,7 @@ void ThemeManager::applyThemeAndFonts() {
         !m_advancedStylesheet->themes().contains(theme + ".xml")) {
         theme = "dark_teal";
     }
+    m_darkMode = s.value("appearance/dark_mode", !theme.startsWith("light_")).toBool();
 
     const QString themePath = m_advancedStylesheet->themes().contains(theme + ".xml")
                                   ? theme + ".xml"
@@ -614,13 +764,15 @@ void ThemeManager::applyThemeAndFonts() {
     m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
 
     m_advancedStylesheet->updateStylesheet();
-    const QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay();
+    applyApplicationPalette(m_darkMode);
+    const QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode);
     qApp->setStyleSheet(qss);
 
     // Apply the updated point size to the application font.
     QFont appFont = qApp->font();
     appFont.setPointSize(uiFontSize);
     qApp->setFont(appFont);
+    emit themeModeChanged(m_darkMode);
 }
 
 } // namespace gridlock::core::managers

@@ -20,6 +20,7 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include "../../core/managers/ThemeManager.hpp"
 #include "FileIconProvider.hpp"
 
 namespace gridlock::ui {
@@ -325,6 +326,13 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   // Default to Symbols view so the binary symbol table is immediately inspectable
   setSymbolsMode(true);
+
+  // Re-render symbol and string table foregrounds whenever Dark/Light mode toggles
+  connect(&gridlock::core::managers::ThemeManager::instance(),
+          &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
+            populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
+            populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+          });
 }
 
 
@@ -391,6 +399,12 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
   if (!m_symbolsTable) {
     return;
   }
+  const bool isDark = gridlock::core::managers::ThemeManager::instance().isDarkMode();
+  QPalette symPal = m_symbolsTable->palette();
+  symPal.setColor(QPalette::Base, isDark ? QColor("#16181d") : QColor("#ffffff"));
+  symPal.setColor(QPalette::Text, isDark ? QColor("#d7dae0") : QColor("#1f2328"));
+  m_symbolsTable->setPalette(symPal);
+
   const QString query = filterText.trimmed();
   m_symbolsTable->setRowCount(0);
 
@@ -406,18 +420,18 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
     const int row = m_symbolsTable->rowCount();
     m_symbolsTable->insertRow(row);
 
-    // Symbol name in pastel yellow
+    // Symbol name in pastel yellow (dark mode) or dark amber (light mode)
     auto *nameItem = new QTableWidgetItem(entry.name);
-    nameItem->setForeground(QColor("#dcdcaa"));
+    nameItem->setForeground(isDark ? QColor("#dcdcaa") : QColor("#953800"));
     nameItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
-    // Hex address in cyan
+    // Hex address in cyan (dark mode) or deep navy (light mode)
     auto *addrItem = new QTableWidgetItem(addrStr);
-    addrItem->setForeground(QColor("#4ec9b0"));
+    addrItem->setForeground(isDark ? QColor("#4ec9b0") : QColor("#0550ae"));
 
     // Size in bytes
     auto *sizeItem = new QTableWidgetItem(QString::number(entry.size));
-    sizeItem->setForeground(QColor("#b5cea8"));
+    sizeItem->setForeground(isDark ? QColor("#b5cea8") : QColor("#116329"));
     sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
     m_symbolsTable->setItem(row, 0, nameItem);
@@ -438,6 +452,12 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
   if (!m_stringsTable) {
     return;
   }
+  const bool isDark = gridlock::core::managers::ThemeManager::instance().isDarkMode();
+  QPalette strPal = m_stringsTable->palette();
+  strPal.setColor(QPalette::Base, isDark ? QColor("#16181d") : QColor("#ffffff"));
+  strPal.setColor(QPalette::Text, isDark ? QColor("#d7dae0") : QColor("#1f2328"));
+  m_stringsTable->setPalette(strPal);
+
   const QString query = filterText.trimmed();
   m_stringsTable->setRowCount(0);
 
@@ -455,15 +475,15 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
     m_stringsTable->insertRow(row);
 
     auto *addrItem = new QTableWidgetItem(addrStr);
-    addrItem->setForeground(QColor("#4ec9b0"));
+    addrItem->setForeground(isDark ? QColor("#4ec9b0") : QColor("#0550ae"));
     addrItem->setData(Qt::UserRole,
                       QVariant::fromValue<qulonglong>(entry.address));
 
     auto *secItem = new QTableWidgetItem(entry.section);
-    secItem->setForeground(QColor("#569cd6"));
+    secItem->setForeground(isDark ? QColor("#569cd6") : QColor("#0969da"));
 
     auto *valItem = new QTableWidgetItem(entry.value);
-    valItem->setForeground(QColor("#ce9178"));
+    valItem->setForeground(isDark ? QColor("#ce9178") : QColor("#953800"));
 
     m_stringsTable->setItem(row, 0, addrItem);
     m_stringsTable->setItem(row, 1, secItem);

@@ -339,6 +339,9 @@ QList<QPair<QString, QString>> DocsetManager::search(const QString& query,
     const bool filterBuiltInOnly =
         filterTrimmed.compare(QStringLiteral("Built-in MPI/ABI"), Qt::CaseInsensitive) == 0;
 
+    if (!filterBuiltInOnly && m_activeDocsetPaths.isEmpty()) {
+        discoverAndLoadSystemDocsets();
+    }
     if (!filterBuiltInOnly && m_db.isOpen() && !m_activeDocsetPaths.isEmpty()) {
         // Distribute per-docset row budget when browsing all docsets with an empty query
         // so every installed Zeal docset (C, C++, Bash, etc.) is represented in the list.
@@ -357,23 +360,25 @@ QList<QPair<QString, QString>> DocsetManager::search(const QString& query,
             }
 
             QSqlQuery q(m_db);
-            // Primary Dash/Zeal schema: searchIndex(name, type, path).
-            const QString sql =
-                QStringLiteral("SELECT name, path FROM db%1.searchIndex WHERE name LIKE '%%2%' LIMIT %3;")
-                    .arg(i)
-                    .arg(query)
-                    .arg(perDocsetLimit);
+            // Primary Dash/Zeal schema: rank canonical std::/MPI_/short identifiers ahead of experimental/sentinel noise.
+            const QString sql = QStringLiteral(
+                "SELECT name, path FROM db%1.searchIndex WHERE name LIKE '%%2%' "
+                "ORDER BY (CASE WHEN name LIKE '%experimental%' OR name LIKE '%sentinel%' OR name LIKE '%deduction guides%' THEN 2 "
+                "WHEN name LIKE 'std::%' OR name LIKE 'MPI_%' OR LENGTH(name) <= 16 THEN 0 ELSE 1 END), "
+                "LENGTH(name) ASC, name COLLATE NOCASE ASC LIMIT %3;")
+                .arg(i).arg(query).arg(perDocsetLimit);
             bool executed = q.exec(sql);
             if (!executed) {
-                // Fallback Apple Dash / CoreData ZTOKEN schema.
+                // Fallback Apple Dash / CoreData ZTOKEN schema with identical canonical ranking.
                 const QString zSql = QStringLiteral(
                     "SELECT t.ZTOKENNAME, f.ZPATH FROM db%1.ZTOKEN t "
                     "JOIN db%1.ZTOKENMETAINFORMATION m ON t.ZMETAINFORMATION = m.Z_PK "
                     "JOIN db%1.ZFILEPATH f ON m.ZFILE = f.Z_PK "
-                    "WHERE t.ZTOKENNAME LIKE '%%2%' LIMIT %3;")
-                    .arg(i)
-                    .arg(query)
-                    .arg(perDocsetLimit);
+                    "WHERE t.ZTOKENNAME LIKE '%%2%' "
+                    "ORDER BY (CASE WHEN t.ZTOKENNAME LIKE '%experimental%' OR t.ZTOKENNAME LIKE '%sentinel%' OR t.ZTOKENNAME LIKE '%deduction guides%' THEN 2 "
+                    "WHEN t.ZTOKENNAME LIKE 'std::%' OR t.ZTOKENNAME LIKE 'MPI_%' OR LENGTH(t.ZTOKENNAME) <= 16 THEN 0 ELSE 1 END), "
+                    "LENGTH(t.ZTOKENNAME) ASC, t.ZTOKENNAME COLLATE NOCASE ASC LIMIT %3;")
+                    .arg(i).arg(query).arg(perDocsetLimit);
                 executed = q.exec(zSql);
             }
             if (executed) {
@@ -407,6 +412,24 @@ QList<QPair<QString, QString>> DocsetManager::search(const QString& query,
         }
     }
     return results;
+}
+
+/**
+ * @brief Returns canonically ranked entries for a specific docset bundle, suppressing experimental noise.
+ */
+QVector<DocsetEntry> DocsetManager::entriesForDocset(const QString& docsetName) const {
+    QVector<DocsetEntry> entries;
+    const auto pairs = const_cast<DocsetManager*>(this)->search(QString(), docsetName);
+    entries.reserve(pairs.size());
+    for (const auto& pair : pairs) {
+        DocsetEntry entry;
+        entry.name = pair.first;
+        entry.title = pair.first;
+        entry.path = pair.second;
+        entry.docsetName = docsetName;
+        entries.append(entry);
+    }
+    return entries;
 }
 
 /**
@@ -567,53 +590,43 @@ QString DocsetManager::lookupBuiltInManualHtml(const QString& rawSymbol) const {
     // Match MPI_Init environment initialization routine.
     if (sym.compare(QStringLiteral("MPI_Init"), Qt::CaseInsensitive) == 0) {
         return formatManPage(
-            QStringLiteral("MPI_Init"),
-            QStringLiteral("MPI-3.1 Standard / Section 8.7"),
+            QStringLiteral("MPI_Init"), QStringLiteral("MPI-3.1 Standard / Section 8.7"),
             QStringLiteral("Initializes the MPI execution environment across all communicator ranks."),
             QStringLiteral("#include &lt;mpi.h&gt;\nint MPI_Init(int *argc, char ***argv);"),
-            QStringLiteral("<ul>"
-                           "<li><span class='param'>argc</span> [in/out]: Pointer to argument count from main() (RDI).</li>"
-                           "<li><span class='param'>argv</span> [in/out]: Pointer to argument vector from main() (RSI).</li>"
-                           "</ul>"),
+            QStringLiteral("<ul><li><span class='param'>argc</span> [in/out]: Pointer to argument count from main() (RDI).</li>"
+                           "<li><span class='param'>argv</span> [in/out]: Pointer to argument vector from main() (RSI).</li></ul>"),
             QStringLiteral("Must be invoked by every participating rank before any other MPI routine. "
                            "Initializes MPI_COMM_WORLD and establishes shared-memory / RDMA transport rings."));
     }
     // Match MPI_Send blocking point-to-point transmit routine.
     if (sym.compare(QStringLiteral("MPI_Send"), Qt::CaseInsensitive) == 0) {
         return formatManPage(
-            QStringLiteral("MPI_Send"),
-            QStringLiteral("MPI-3.1 Point-to-Point"),
+            QStringLiteral("MPI_Send"), QStringLiteral("MPI-3.1 Point-to-Point"),
             QStringLiteral("Performs a standard-mode blocking send operation to a destination rank."),
             QStringLiteral("#include &lt;mpi.h&gt;\nint MPI_Send(const void *buf, int count, MPI_Datatype datatype,\n"
                            "             int dest, int tag, MPI_Comm comm);"),
-            QStringLiteral("<ul>"
-                           "<li><span class='param'>buf</span> [in]: Initial address of send buffer (RDI).</li>"
+            QStringLiteral("<ul><li><span class='param'>buf</span> [in]: Initial address of send buffer (RDI).</li>"
                            "<li><span class='param'>count</span> [in]: Number of elements in send buffer (ESI).</li>"
-                           "<li><span class='param'>dest</span> [in]: Rank of destination process in communicator (ECX).</li>"
-                           "</ul>"),
+                           "<li><span class='param'>dest</span> [in]: Rank of destination process in communicator (ECX).</li></ul>"),
             QStringLiteral("May block if eager rendezvous threshold is exceeded until matching MPI_Recv "
                            "is posted by dest. Circular blocking MPI_Send calls across ranks cause wait-for deadlocks."));
     }
     // Match MPI_Recv blocking point-to-point receive routine.
     if (sym.compare(QStringLiteral("MPI_Recv"), Qt::CaseInsensitive) == 0) {
         return formatManPage(
-            QStringLiteral("MPI_Recv"),
-            QStringLiteral("MPI-3.1 Point-to-Point"),
+            QStringLiteral("MPI_Recv"), QStringLiteral("MPI-3.1 Point-to-Point"),
             QStringLiteral("Performs a blocking receive operation for a message matching source and tag."),
             QStringLiteral("#include &lt;mpi.h&gt;\nint MPI_Recv(void *buf, int count, MPI_Datatype datatype,\n"
                            "             int source, int tag, MPI_Comm comm, MPI_Status *status);"),
-            QStringLiteral("<ul>"
-                           "<li><span class='param'>buf</span> [out]: Initial address of receive buffer (RDI).</li>"
+            QStringLiteral("<ul><li><span class='param'>buf</span> [out]: Initial address of receive buffer (RDI).</li>"
                            "<li><span class='param'>source</span> [in]: Rank of source process or MPI_ANY_SOURCE (ECX).</li>"
-                           "<li><span class='param'>status</span> [out]: Status object or MPI_STATUS_IGNORE.</li>"
-                           "</ul>"),
+                           "<li><span class='param'>status</span> [out]: Status object or MPI_STATUS_IGNORE.</li></ul>"),
             QStringLiteral("Blocks calling rank until message buffer is populated from source rank."));
     }
     // Match MPI_Barrier collective communicator synchronization barrier.
     if (sym.compare(QStringLiteral("MPI_Barrier"), Qt::CaseInsensitive) == 0) {
         return formatManPage(
-            QStringLiteral("MPI_Barrier"),
-            QStringLiteral("MPI-3.1 Collective Synchronization"),
+            QStringLiteral("MPI_Barrier"), QStringLiteral("MPI-3.1 Collective Synchronization"),
             QStringLiteral("Blocks the caller until all processes in the communicator have called it."),
             QStringLiteral("#include &lt;mpi.h&gt;\nint MPI_Barrier(MPI_Comm comm);"),
             QStringLiteral("<ul><li><span class='param'>comm</span> [in]: Communicator handle (RDI).</li></ul>"),
@@ -623,23 +636,19 @@ QString DocsetManager::lookupBuiltInManualHtml(const QString& rawSymbol) const {
     // Match MPI_Allreduce collective reduction and broadcast routine.
     if (sym.compare(QStringLiteral("MPI_Allreduce"), Qt::CaseInsensitive) == 0) {
         return formatManPage(
-            QStringLiteral("MPI_Allreduce"),
-            QStringLiteral("MPI-3.1 Collective Reduction"),
+            QStringLiteral("MPI_Allreduce"), QStringLiteral("MPI-3.1 Collective Reduction"),
             QStringLiteral("Combines values from all processes and distributes the result back to all processes."),
             QStringLiteral("#include &lt;mpi.h&gt;\nint MPI_Allreduce(const void *sendbuf, void *recvbuf, int count,\n"
                            "                  MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);"),
-            QStringLiteral("<ul>"
-                           "<li><span class='param'>sendbuf</span> [in]: Starting address of send buffer (RDI).</li>"
+            QStringLiteral("<ul><li><span class='param'>sendbuf</span> [in]: Starting address of send buffer (RDI).</li>"
                            "<li><span class='param'>recvbuf</span> [out]: Starting address of receive buffer (RSI).</li>"
-                           "<li><span class='param'>op</span> [in]: Reduction operator such as MPI_SUM or MPI_MAX (R8).</li>"
-                           "</ul>"),
+                           "<li><span class='param'>op</span> [in]: Reduction operator such as MPI_SUM or MPI_MAX (R8).</li></ul>"),
             QStringLiteral("All ranks in comm must specify identical count and datatype arguments."));
     }
     // Match MPI_Finalize environment teardown routine.
     if (sym.compare(QStringLiteral("MPI_Finalize"), Qt::CaseInsensitive) == 0) {
         return formatManPage(
-            QStringLiteral("MPI_Finalize"),
-            QStringLiteral("MPI-3.1 Environment Teardown"),
+            QStringLiteral("MPI_Finalize"), QStringLiteral("MPI-3.1 Environment Teardown"),
             QStringLiteral("Terminates the MPI execution environment cleanly across all ranks."),
             QStringLiteral("#include &lt;mpi.h&gt;\nint MPI_Finalize(void);"),
             QStringLiteral("<ul><li><span class='param'>none</span>: Takes no arguments.</li></ul>"),

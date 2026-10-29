@@ -111,6 +111,10 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
             &DocsetViewerWidget::performSearch);
     connect(m_docsetSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
         performSearch();
+        if (m_resultsList && m_resultsList->count() > 0) {
+            m_resultsList->setCurrentRow(0);
+            onResultClicked(0);
+        }
     });
     connect(m_resultsList, &QListWidget::currentRowChanged, this,
             &DocsetViewerWidget::onResultClicked);

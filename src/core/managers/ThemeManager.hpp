@@ -45,11 +45,26 @@ public:
     /** @brief Re-reads theme and font preferences from QSettings and updates qApp immediately. */
     void applyThemeAndFonts();
 
+    /** @brief Returns true when the active workstation theme uses a dark palette. */
+    bool isDarkMode() const { return m_darkMode; }
+
+    /** @brief Switches between dark-slate (`true`) and high-contrast light (`false`) workstation palettes. */
+    void setDarkMode(bool dark);
+
+signals:
+    /** @brief Emitted whenever the dark/light workstation palette mode changes. */
+    void themeModeChanged(bool isDark);
+
 private:
     ThemeManager();
     ~ThemeManager() override;
 
     std::unique_ptr<acss::QtAdvancedStylesheet> m_advancedStylesheet;
+    bool m_darkMode{true};
 };
 
 } // namespace gridlock::core::managers
+
+namespace gridlock::core {
+using ThemeManager = managers::ThemeManager;
+} // namespace gridlock::core

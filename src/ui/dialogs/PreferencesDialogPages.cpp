@@ -28,8 +28,10 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QTableWidget>
 #include <QTextEdit>
+#include <QUrl>
 #include <QVBoxLayout>
 
 namespace gridlock::ui {
@@ -140,14 +142,6 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     m_darkModeCheck = new QCheckBox(tr("Enable Dark Mode"), this);
     form->addRow(QString(), m_darkModeCheck);
 
-    // Live preview theme when combobox changes.
-    connect(m_themeCombo, &QComboBox::currentTextChanged, this,
-            [this](const QString& theme) {
-                gridlock::core::managers::ThemeManager::instance().setTheme(
-                    theme, m_darkModeCheck->isChecked());
-            });
-    connect(m_darkModeCheck, &QCheckBox::toggled, this, [](bool) {});
-
     // File tree presentation density.
     m_fileTreeStyleCombo = new QComboBox(this);
     m_fileTreeStyleCombo->addItems({tr("Compact"), tr("Comfortable"), tr("Large")});
@@ -177,7 +171,18 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
                    "monospace font.<br>Restart may be required for full theme "
                    "reload.</small>"));
 
+    // Populate initial state with signals blocked before connecting live preview slots
+    // so opening PreferencesDialog never mutates global QSS or terminal fonts.
     loadFromSettings();
+
+    connect(m_themeCombo, &QComboBox::currentTextChanged, this,
+            [this](const QString& theme) {
+                gridlock::core::managers::ThemeManager::instance().setTheme(
+                    theme, m_darkModeCheck->isChecked());
+            });
+    connect(m_darkModeCheck, &QCheckBox::toggled, this, [](bool checked) {
+        gridlock::core::managers::ThemeManager::instance().setDarkMode(checked);
+    });
 }
 
 QString AppearanceSettingsPage::selectedTheme() const {
@@ -196,7 +201,7 @@ int AppearanceSettingsPage::uiFontSize() const { return m_uiFontSizeBox->value()
 int AppearanceSettingsPage::codeFontSize() const { return m_codeFontSizeBox->value(); }
 
 /**
- * @brief Loads persisted appearance preferences from user settings.
+ * @brief Loads persisted appearance preferences from user settings with signals blocked.
  */
 void AppearanceSettingsPage::loadFromSettings() {
     QSettings s("gridlock", "debugger");
@@ -204,9 +209,13 @@ void AppearanceSettingsPage::loadFromSettings() {
     const bool isDark = s.value("appearance/dark_mode", true).toBool();
 
     m_darkModeCheck->blockSignals(true);
-    m_darkModeCheck->setChecked(isDark);
-    m_darkModeCheck->blockSignals(false);
+    m_themeCombo->blockSignals(true);
+    m_fileTreeStyleCombo->blockSignals(true);
+    m_colorizeIconsCheck->blockSignals(true);
+    m_uiFontSizeBox->blockSignals(true);
+    m_codeFontSizeBox->blockSignals(true);
 
+    m_darkModeCheck->setChecked(isDark);
     const int idx = m_themeCombo->findText(theme);
     if (idx >= 0) {
         m_themeCombo->setCurrentIndex(idx);
@@ -220,6 +229,13 @@ void AppearanceSettingsPage::loadFromSettings() {
         s.value("appearance/colorize_icons", true).toBool());
     m_uiFontSizeBox->setValue(s.value("appearance/ui_font_size", 11).toInt());
     m_codeFontSizeBox->setValue(s.value("appearance/code_font_size", 11).toInt());
+
+    m_codeFontSizeBox->blockSignals(false);
+    m_uiFontSizeBox->blockSignals(false);
+    m_colorizeIconsCheck->blockSignals(false);
+    m_fileTreeStyleCombo->blockSignals(false);
+    m_themeCombo->blockSignals(false);
+    m_darkModeCheck->blockSignals(false);
 }
 
 // ============================================================================
@@ -713,21 +729,57 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget* parent)
     separator->setObjectName("separator");
     layout->addWidget(separator);
 
+    // Directory selection row with Browse dialog and 1-click Zeal auto-detection.
     auto* dirLayout = new QHBoxLayout();
     dirLayout->addWidget(new QLabel("Docset Directory:", this));
     m_dirEdit = new QLineEdit(this);
     dirLayout->addWidget(m_dirEdit);
     auto* browseBtn = new QPushButton("Browse...", this);
     connect(browseBtn, &QPushButton::clicked, this, [this]() {
-        const QString dir = QFileDialog::getExistingDirectory(
-            this, "Select Docset Directory", m_dirEdit->text());
-        if (!dir.isEmpty()) {
-            m_dirEdit->setText(dir);
+        // Resolve default Zeal docsets directory under XDG user data or fallback to Home.
+        const QString zealDir = QDir::homePath() + QStringLiteral("/.local/share/Zeal/Zeal/docsets");
+        QString startDir = m_dirEdit->text().trimmed();
+        if (startDir.isEmpty() || startDir == QStringLiteral("/") || !QDir(startDir).exists()) {
+            startDir = QDir(zealDir).exists() ? zealDir : QDir::homePath();
+        }
+        // Configure non-native directory chooser with quick-jump sidebar URLs.
+        QFileDialog dlg(this, tr("Select Docset Directory"), startDir);
+        dlg.setFileMode(QFileDialog::Directory);
+        dlg.setOption(QFileDialog::ShowDirsOnly, true);
+        dlg.setOption(QFileDialog::DontUseNativeDialog, true);
+        // Populate left sidebar with Home, Zeal Docsets, Documents, and workspace root.
+        dlg.setSidebarUrls({
+            QUrl::fromLocalFile(QDir::homePath()),
+            QUrl::fromLocalFile(zealDir),
+            QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)),
+            QUrl::fromLocalFile(QDir::currentPath())
+        });
+        // Persist selected directory path and immediately reload docset indices.
+        if (dlg.exec() == QDialog::Accepted && !dlg.selectedFiles().isEmpty()) {
+            const QString chosen = dlg.selectedFiles().first();
+            m_dirEdit->setText(chosen);
+            gridlock::core::DocsetManager::instance().setDocsetDirectory(chosen);
+            refreshTable();
         }
     });
     dirLayout->addWidget(browseBtn);
+
+    // One-click button to discover and attach installed Zeal docsets from standard paths.
+    auto* detectZealBtn = new QPushButton("Auto-Detect Zeal Docsets", this);
+    connect(detectZealBtn, &QPushButton::clicked, this, [this]() {
+        // Prefer ~/.local/share/Zeal/Zeal/docsets when present on the host system.
+        const QString zealDir = QDir::homePath() + QStringLiteral("/.local/share/Zeal/Zeal/docsets");
+        if (QDir(zealDir).exists()) {
+            m_dirEdit->setText(zealDir);
+        }
+        // Scan all system and user Zeal paths and repopulate the installed docsets table.
+        gridlock::core::DocsetManager::instance().discoverAndLoadSystemDocsets();
+        refreshTable();
+    });
+    dirLayout->addWidget(detectZealBtn);
     layout->addLayout(dirLayout);
 
+    // Heuristic source-tree scanner button recommending relevant HPC/C++ docsets.
     m_autoDetectBtn = new QPushButton("Auto-Detect Needs", this);
     connect(m_autoDetectBtn, &QPushButton::clicked, this,
             &DocsetSettingsPage::onAutoDetect);
@@ -752,11 +804,13 @@ QString DocsetSettingsPage::docsetDirectory() const { return m_dirEdit->text(); 
  * @brief Restores active docset directory path from settings or defaults to ~/.local/share/Zeal.
  */
 void DocsetSettingsPage::loadFromSettings() {
-    m_dirEdit->setText(
-        gridlock::core::ConfigManager::instance().getDocsetDirectory());
-    if (m_dirEdit->text().isEmpty()) {
-        m_dirEdit->setText(QDir::homePath() + "/.local/share/Zeal/Zeal/docsets");
+    // Avoid defaulting to root `/` when no custom docset directory has been saved yet.
+    QString configuredDir = gridlock::core::ConfigManager::instance().getDocsetDirectory().trimmed();
+    const QString zealDir = QDir::homePath() + QStringLiteral("/.local/share/Zeal/Zeal/docsets");
+    if (configuredDir.isEmpty() || configuredDir == QStringLiteral("/")) {
+        configuredDir = QDir(zealDir).exists() ? zealDir : QDir::homePath();
     }
+    m_dirEdit->setText(configuredDir);
     refreshTable();
 }
 

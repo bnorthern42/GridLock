@@ -120,6 +120,48 @@ void testZealDocsetAutoDiscoveryAndHtmlLoading() {
              "getEntryHtmlForPath must inject dark-slate #16181d reader stylesheet");
 }
 
+/**
+ * @brief Verifies that canonical symbols (e.g. std::vector) rank ahead of experimental and sentinel noise.
+ */
+void testCanonicalRankingSuppressesExperimentalNoise() {
+    QTemporaryDir tempRankDir;
+    QVERIFY(tempRankDir.isValid());
+
+    QDir rootDir(tempRankDir.path());
+    QVERIFY(rootDir.mkpath(QStringLiteral("Rank_Test.docset/Contents/Resources/Documents")));
+
+    const QString dsidxPath = rootDir.filePath(QStringLiteral("Rank_Test.docset/Contents/Resources/docSet.dsidx"));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("zeal_rank_test_setup"));
+        db.setDatabaseName(dsidxPath);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE searchIndex(id INTEGER PRIMARY KEY, name TEXT, type TEXT, path TEXT);")));
+        // Insert experimental and sentinel noise BEFORE std::vector so unranked or pure alphabetical queries fail.
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO searchIndex(name, type, path) VALUES('std::experimental::invocation_type', 'func', 'exp.html');")));
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO searchIndex(name, type, path) VALUES('operator-(ranges::enumerate_view::sentinel)', 'func', 'sent.html');")));
+        QVERIFY(q.exec(QStringLiteral(
+            "INSERT INTO searchIndex(name, type, path) VALUES('std::vector', 'cl', 'vec.html');")));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("zeal_rank_test_setup"));
+
+    auto& manager = gridlock::core::DocsetManager::instance();
+    manager.setDocsetDirectory(tempRankDir.path());
+
+    // 1. Verify entriesForDocset("Rank_Test") ranks "std::vector" first.
+    const auto entries = manager.entriesForDocset(QStringLiteral("Rank_Test"));
+    QVERIFY(entries.size() >= 3);
+    QCOMPARE(entries.first().title, QStringLiteral("std::vector"));
+
+    // 2. Verify search("") ranks "std::vector" first ahead of experimental and sentinel noise.
+    const auto searchResults = manager.search(QStringLiteral(""));
+    QVERIFY(searchResults.size() >= 3);
+    QCOMPARE(searchResults.first().first, QStringLiteral("std::vector"));
+}
+
 }  // namespace gridlock::tests
 
 /**
@@ -169,6 +211,9 @@ void TestDocset::testSearch() {
 
     // Run live SQLite query and Zeal discovery verification.
     gridlock::tests::testLiveSqliteQueryAndZealConfDiscovery();
+
+    // Run canonical symbol ranking verification.
+    gridlock::tests::testCanonicalRankingSuppressesExperimentalNoise();
 }
 
 QTEST_GUILESS_MAIN(TestDocset)

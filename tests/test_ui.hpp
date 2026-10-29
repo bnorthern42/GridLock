@@ -153,4 +153,7 @@ private slots:
 
     /** @brief Verifies smart Meson/CMake/Make/SingleFileMPI build system detection and Terminal build/clean/rebuild workflow. */
     void testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflow();
+
+    /** @brief Verifies TerminalDockWidget eventFilter font/geometry lock during PreferencesDialog, Light Mode contrast, and ReferenceManualWidget docset auto-preview. */
+    void testTerminalDialogEventFilterLightModeContrastAndDocsetAutoDetect();
 };

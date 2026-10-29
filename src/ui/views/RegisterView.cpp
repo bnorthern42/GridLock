@@ -14,6 +14,7 @@
 #include <QJsonValue>
 #include <QVBoxLayout>
 #include "../../core/managers/ConfigManager.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 
 namespace gridlock::ui {
 
@@ -142,6 +143,12 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     // Reset diff baseline after seeding so the first live/test update establishes the baseline
     m_previousRegisters.clear();
     m_modifiedRegisters.clear();
+
+    // Re-color register rows whenever Dark/Light mode toggles
+    connect(&gridlock::core::managers::ThemeManager::instance(),
+            &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
+                updateRegisters(m_currentRegisters);
+            });
 }
 
 /**
@@ -197,6 +204,12 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         return;
     }
 
+    const bool isDark = gridlock::core::managers::ThemeManager::instance().isDarkMode();
+    QPalette regPal = m_table->palette();
+    regPal.setColor(QPalette::Base, isDark ? QColor("#16181d") : QColor("#ffffff"));
+    regPal.setColor(QPalette::Text, isDark ? QColor("#d7dae0") : QColor("#1f2328"));
+    m_table->setPalette(regPal);
+
     const bool hasBaseline = !m_previousRegisters.isEmpty();
     m_modifiedRegisters.clear();
     m_currentRegisters.clear();
@@ -245,23 +258,25 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
             valItem->setText(regVal);
         }
 
-        // Role-based register color classification
-        QColor roleColor("#d4d7dc");
+        // Role-based register color classification with dark/light mode contrast awareness
+        QColor roleColor = isDark ? QColor("#d4d7dc") : QColor("#1f2328");
         if (key == QStringLiteral("rip") || key == QStringLiteral("eip") || key == QStringLiteral("pc")) {
-            roleColor = QColor("#4ec9b0"); // Instruction pointer: teal
+            roleColor = isDark ? QColor("#4ec9b0") : QColor("#116329"); // Instruction pointer
         } else if (key == QStringLiteral("rsp") || key == QStringLiteral("rbp") ||
                    key == QStringLiteral("esp") || key == QStringLiteral("ebp")) {
-            roleColor = QColor("#569cd6"); // Stack frame pointers: blue
+            roleColor = isDark ? QColor("#569cd6") : QColor("#0550ae"); // Stack frame pointers
         } else if (key.contains(QStringLiteral("flags"))) {
-            roleColor = QColor("#dcdcaa"); // Status flags: gold
+            roleColor = isDark ? QColor("#dcdcaa") : QColor("#953800"); // Status flags
         }
 
         // Apply distinct styling for mutated vs stable registers
         if (changed) {
-            nameItem->setForeground(QColor("#f44747"));
-            valItem->setForeground(QColor("#f44747"));
-            nameItem->setBackground(QColor(0x2d, 0x1b, 0x1e));
-            valItem->setBackground(QColor(0x2d, 0x1b, 0x1e));
+            const QColor diffFg = isDark ? QColor("#f44747") : QColor("#cf222e");
+            const QColor diffBg = isDark ? QColor(0x2d, 0x1b, 0x1e) : QColor(0xff, 0xeb, 0xe9);
+            nameItem->setForeground(diffFg);
+            valItem->setForeground(diffFg);
+            nameItem->setBackground(diffBg);
+            valItem->setBackground(diffBg);
             nameItem->setFont(boldFont);
             valItem->setFont(boldFont);
         } else {

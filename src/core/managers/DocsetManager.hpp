@@ -16,6 +16,7 @@
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace gridlock::core {
 
@@ -25,6 +26,7 @@ namespace gridlock::core {
  */
 struct DocsetEntry {
     QString name;         ///< Symbol or instruction name.
+    QString title;        ///< Canonical display title for the symbol entry.
     QString type;         ///< Entry classification type ("func", "Instruction", etc.).
     QString path;         ///< Filesystem path to documentation HTML.
     QString docsetName;   ///< Source docset bundle name.
@@ -97,6 +99,13 @@ public:
      */
     QList<QPair<QString, QString>> search(const QString& query,
                                           const QString& docsetFilter = QString());
+
+    /**
+     * @brief Returns canonically ranked entries for a specific docset bundle, suppressing experimental noise.
+     * @param docsetName Target docset bundle name (e.g., "C++", "C", "OpenMPI").
+     * @return Ordered vector of DocsetEntry descriptors.
+     */
+    QVector<DocsetEntry> entriesForDocset(const QString& docsetName) const;
 
     /** @brief Returns the list of absolute paths to all currently attached `.docset` bundles. */
     QStringList getActiveDocsetPaths() const;

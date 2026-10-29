@@ -107,13 +107,34 @@ public:
      */
     QString lastSentCommand() const { return m_lastSentCommand; }
 
+    /**
+     * @brief Verifies that QTermWidget and all internal display child widgets retain a fixed-pitch font.
+     * @return True if every child widget inside TerminalDockWidget reports fixed-pitch typography.
+     */
+    bool areAllChildWidgetsFixedPitch() const;
+
+protected:
+    /**
+     * @brief Intercepts FontChange, StyleChange, and ChildAdded events to lock fixed-pitch font and full-width geometry.
+     * @param watched Target QObject receiving the event.
+     * @param event Event payload.
+     * @return Base QWidget::eventFilter result.
+     */
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
+    /**
+     * @brief Re-applies validated monospace typography and full-width geometry across QTermWidget and its children.
+     */
+    void enforceMonospaceOnChildren();
+
     QTermWidget* m_termWidget{nullptr};    ///< Underlying QTermWidget instance.
     QFont m_requestedFont;                 ///< User-configured terminal font setting.
     QFont m_activeFont;                    ///< Active validated monospace font.
     QString m_colorScheme;                 ///< Active color scheme name.
     QStringList m_environment;             ///< Shell process environment array.
     QString m_lastSentCommand;             ///< Most recent shell command sent via sendCommand().
+    bool m_applyingFontGuard{false};       ///< Reentrancy guard preventing recursive FontChange loops.
 };
 
 }  // namespace gridlock::ui

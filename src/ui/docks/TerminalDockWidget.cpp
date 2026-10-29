@@ -10,9 +10,12 @@
 #include "../../core/managers/ConfigManager.hpp"
 
 #include <QApplication>
+#include <QChildEvent>
+#include <QEvent>
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QProcessEnvironment>
+#include <QSizePolicy>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <qtermwidget.h>
@@ -68,9 +71,11 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     // Layout without interior padding for edge-to-edge terminal display.
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
     // Instantiate QTermWidget backend.
     m_termWidget = new QTermWidget(0, this);
+    m_termWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     // Isolate terminal canvas from external stylesheet cascading padding/margins.
     m_termWidget->setStyleSheet(QStringLiteral(
         "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; font-family: monospace; }"));
@@ -89,18 +94,101 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     // Launch underlying shell process.
     m_termWidget->startShellProgram();
 
-    // Enforce fixed-pitch monospace typography at startup.
+    // Enforce fixed-pitch monospace typography at startup and install recursive event filters.
     m_activeFont = resolveMonospaceFont(ts.fontFamily, ts.fontSize);
+    installEventFilter(this);
+    enforceMonospaceOnChildren();
 
-    // Set font based on ConfigManager AFTER starting the shell, 
-    // and delay it to the next event loop iteration. qtermwidget is notorious
-    // for resetting/ignoring fonts applied before it has fully spun up its VT100 emulator.
+    // Delay second pass to next event loop iteration after VT100 TerminalDisplay is constructed.
     QTimer::singleShot(0, this, [this]() {
-        m_termWidget->setTerminalFont(m_activeFont);
-        m_termWidget->update();
+        enforceMonospaceOnChildren();
     });
 
-    layout->addWidget(m_termWidget);
+    layout->addWidget(m_termWidget, 1);
+}
+
+/**
+ * @brief Re-applies validated monospace typography and full-width geometry across QTermWidget and its children.
+ */
+void TerminalDockWidget::enforceMonospaceOnChildren() {
+    if (!m_activeFont.fixedPitch() && !QFontInfo(m_activeFont).fixedPitch()) {
+        m_activeFont = resolveMonospaceFont(QStringLiteral("JetBrains Mono"), 11);
+    }
+    m_activeFont.setFixedPitch(true);
+    m_activeFont.setStyleHint(QFont::Monospace);
+
+    setFont(m_activeFont);
+    if (!m_termWidget) {
+        return;
+    }
+
+    m_termWidget->installEventFilter(this);
+    m_termWidget->setFont(m_activeFont);
+    m_termWidget->setTerminalFont(m_activeFont);
+    m_termWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    const int parentW = width() > 24 ? width() : m_termWidget->width();
+    const int parentH = height() > 24 ? height() : m_termWidget->height();
+    if (parentW > 24 && m_termWidget->width() < parentW) {
+        m_termWidget->setGeometry(0, 0, parentW, parentH);
+    }
+
+    // Lock fixed-pitch font and full-width geometry on all internal QTermWidget child widgets (e.g. TerminalDisplay).
+    for (QWidget* child : findChildren<QWidget*>()) {
+        child->installEventFilter(this);
+        child->setFont(m_activeFont);
+        const QString cls = QString::fromLatin1(child->metaObject()->className());
+        if ((cls.contains(QStringLiteral("TerminalDisplay"), Qt::CaseInsensitive) || child->width() > 80) &&
+            parentW > 80 && child->width() < (parentW * 95) / 100) {
+            child->setGeometry(0, 0, parentW, parentH);
+        }
+    }
+    m_termWidget->updateGeometry();
+    m_termWidget->update();
+}
+
+/**
+ * @brief Intercepts FontChange, StyleChange, and ChildAdded events to lock fixed-pitch font and full-width geometry.
+ * @param watched Target QObject receiving the event.
+ * @param event Event payload.
+ * @return Base QWidget::eventFilter result.
+ */
+bool TerminalDockWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (!m_applyingFontGuard && event != nullptr) {
+        const QEvent::Type t = event->type();
+        if (t == QEvent::ChildAdded) {
+            if (auto* childWidget = qobject_cast<QWidget*>(static_cast<QChildEvent*>(event)->child())) {
+                childWidget->installEventFilter(this);
+                m_applyingFontGuard = true;
+                enforceMonospaceOnChildren();
+                m_applyingFontGuard = false;
+            }
+        } else if (t == QEvent::FontChange || t == QEvent::ApplicationFontChange ||
+                   t == QEvent::StyleChange || t == QEvent::Polish ||
+                   t == QEvent::Show || t == QEvent::Resize) {
+            m_applyingFontGuard = true;
+            enforceMonospaceOnChildren();
+            m_applyingFontGuard = false;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+/**
+ * @brief Verifies that QTermWidget and all internal display child widgets retain a fixed-pitch font.
+ * @return True if every child widget inside TerminalDockWidget reports fixed-pitch typography.
+ */
+bool TerminalDockWidget::areAllChildWidgetsFixedPitch() const {
+    if (!m_termWidget) {
+        return false;
+    }
+    for (const QWidget* child : findChildren<const QWidget*>()) {
+        if (!child->font().fixedPitch() && !QFontInfo(child->font()).fixedPitch()) {
+            return false;
+        }
+    }
+    return m_termWidget->getTerminalFont().fixedPitch() ||
+           QFontInfo(m_termWidget->getTerminalFont()).fixedPitch();
 }
 
 /**
@@ -114,8 +202,9 @@ void TerminalDockWidget::setTerminalFont(const QString& family, int pointSize) {
     font.setStyleHint(QFont::Monospace);
     m_requestedFont = font;
     m_activeFont = resolveMonospaceFont(family, pointSize);
-    m_termWidget->setTerminalFont(m_activeFont);
-    m_termWidget->update();
+    m_applyingFontGuard = true;
+    enforceMonospaceOnChildren();
+    m_applyingFontGuard = false;
 }
 
 /**
