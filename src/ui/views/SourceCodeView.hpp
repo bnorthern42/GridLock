@@ -129,10 +129,16 @@ public:
     QMargins getViewportMargins() const { return viewportMargins(); }
 
     /**
-     * @brief Returns the fixed pixel width of the left line-number and breakpoint gutter.
-     * @return Gutter width in pixels (35px).
+     * @brief Returns the pixel width reserved for the dedicated left vector icon lane in the gutter.
+     * @return Icon lane width in pixels (20px).
      */
-    int lineNumberAreaWidth() const { return 35; }
+    int gutterIconLaneWidth() const { return 20; }
+
+    /**
+     * @brief Returns the total pixel width of the two-lane left gutter (icon lane + right-aligned line numbers).
+     * @return Gutter width in pixels (>= 48px).
+     */
+    int lineNumberAreaWidth() const;
 
     /**
      * @brief Returns the right viewport margin reservation in pixels (strictly 0).
@@ -170,6 +176,20 @@ public:
      * @param lineNum 1-based line number.
      */
     void toggleBreakpoint(int lineNum);
+
+    /**
+     * @brief Sets or updates a conditional/rank-filtered breakpoint on a 1-based source line.
+     * @param lineOneBased 1-based source line number.
+     * @param condition Conditional expression (e.g., "rank == 0").
+     */
+    void setConditionalBreakpoint(int lineOneBased, const QString& condition);
+
+    /**
+     * @brief Returns the composite gutter badge state for a 1-based source line.
+     * @param lineOneBased 1-based source line number.
+     * @return One of "None", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
+     */
+    QString gutterMarkerStateForLine(int lineOneBased) const;
 
     /**
      * @brief Returns the current cursor line number (1-based).

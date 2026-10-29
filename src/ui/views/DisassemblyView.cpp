@@ -133,28 +133,32 @@ public:
             lineCenterY.insert(line, centerY);
         }
 
-        // Draw PC indicator badge on active instruction row
+        // Draw emerald-teal execution chevron (#4ec9b0) on active instruction row
         const int activeLine = m_owner->lineForAddress(m_owner->currentAddress());
         if (activeLine >= 0 && lineCenterY.contains(activeLine)) {
             const int cy = lineCenterY.value(activeLine);
             const QPolygon arrow({QPoint(m_gutter->width() - 10, cy - 4),
                                   QPoint(m_gutter->width() - 3, cy),
-                                  QPoint(m_gutter->width() - 10, cy + 4)});
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(QColor(0x00, 0x96, 0x88));
+                                  QPoint(m_gutter->width() - 10, cy + 4),
+                                  QPoint(m_gutter->width() - 8, cy)});
+            painter.setPen(QPen(QColor("#98c379"), 0.9));
+            painter.setBrush(QColor("#4ec9b0"));
             painter.drawPolygon(arrow);
         }
 
-        // Draw gold bookmark markers on bookmarked instruction rows
+        // Draw amber-gold diamond markers with center cutout on bookmarked instruction rows
         for (uint64_t bmAddr : m_owner->bookmarkedAddresses()) {
             const int bmLine = m_owner->lineForAddress(bmAddr);
             if (bmLine >= 0 && lineCenterY.contains(bmLine)) {
                 const int cy = lineCenterY.value(bmLine);
-                const QPolygon diamond({QPoint(6, cy - 4), QPoint(10, cy),
-                                        QPoint(6, cy + 4), QPoint(2, cy)});
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(0xff, 0xcc, 0x00));
+                const QPolygon diamond({QPoint(6, cy - 5), QPoint(11, cy),
+                                        QPoint(6, cy + 5), QPoint(1, cy)});
+                painter.setPen(QPen(QColor("#f0d090"), 0.9));
+                painter.setBrush(QColor("#e5c07b"));
                 painter.drawPolygon(diamond);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor("#16181d"));
+                painter.drawEllipse(QPoint(6, cy), 1, 1);
             }
         }
 

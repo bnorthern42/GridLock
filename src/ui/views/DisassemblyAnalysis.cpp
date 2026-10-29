@@ -703,49 +703,47 @@ void DisassemblyView::rebuildCfgScene() {
       const bool isCurrentInst = (instAddr != 0ULL && instAddr == m_currentAddress);
       const bool isBookmarkedInst = (instAddr != 0ULL && m_bookmarks.contains(instAddr));
 
-      // Paint full-width emerald-teal highlight band behind the active RIP instruction row.
-      if (isCurrentInst) {
-        auto *ripBg = m_cfgScene->addRect(
+      // Paint full-width emerald-teal highlight band behind the active RIP instruction row,
+      // or subtle translucent coral tint behind bookmarked/breakpoint instruction rows.
+      const qreal cy = lineY + lineH * 0.5 - 1.0, bx = boxX + 9.0;
+      if (isCurrentInst || isBookmarkedInst) {
+        auto *rowBg = m_cfgScene->addRect(
             QRectF(boxX + 2.0, lineY - 1.0, boxW - 4.0, lineH),
-            QPen(QColor("#4ec9b0"), 1.0), QBrush(QColor("#20342c")));
-        ripBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr));
-        ripBg->setZValue(2.4);
+            isCurrentInst ? QPen(QColor("#4ec9b0"), 1.0) : QPen(Qt::NoPen),
+            QBrush(isCurrentInst ? QColor("#20342c") : QColor(224, 108, 117, 25)));
+        rowBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr));
+        rowBg->setZValue(isCurrentInst ? 2.4 : 2.3);
       } else if (!m_highlightedToken.isEmpty() && instLine.contains(m_highlightedToken, Qt::CaseInsensitive)) {
-        auto *tokBg = m_cfgScene->addRect(
-            QRectF(boxX + 4.0, lineY - 1.0, boxW - 8.0, lineH),
-            QPen(Qt::NoPen), QBrush(QColor(0x3a, 0x3d, 0x41, 180)));
+        auto *tokBg = m_cfgScene->addRect(QRectF(boxX + 4.0, lineY - 1.0, boxW - 8.0, lineH),
+                                          QPen(Qt::NoPen), QBrush(QColor(0x3a, 0x3d, 0x41, 180)));
         tokBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
         tokBg->setZValue(2.5);
       }
 
-      QString displayLine = instLine;
-      if (isCurrentInst && isBookmarkedInst) {
-        displayLine = QStringLiteral("●▶ ") + instLine;
-      } else if (isCurrentInst) {
-        displayLine = QStringLiteral("▶ ") + instLine;
-      } else if (isBookmarkedInst) {
-        displayLine = QStringLiteral("● ") + instLine;
+      // Render vector breakpoint ring and/or emerald execution chevron in the basic-block left gutter.
+      if (isBookmarkedInst) {
+        m_cfgScene->addEllipse(QRectF(bx - 4.5, cy - 4.5, 9.0, 9.0), QPen(QColor("#ff949d"), 1.1),
+                               QBrush(isCurrentInst ? QColor("#24181c") : QColor("#e06c75")))->setZValue(3.1);
+      }
+      if (isCurrentInst) {
+        const QPolygonF chev({QPointF(bx - 2.5, cy - 3.2), QPointF(bx + 3.2, cy),
+                              QPointF(bx - 2.5, cy + 3.2), QPointF(bx - 1.0, cy)});
+        m_cfgScene->addPolygon(chev, QPen(QColor("#98c379"), 0.8), QBrush(QColor("#4ec9b0")))->setZValue(3.2);
       }
 
-      auto *txt = m_cfgScene->addSimpleText(displayLine, monoFont);
+      const QString prefix = (isCurrentInst && isBookmarkedInst) ? QStringLiteral("●▶ ")
+                           : (isCurrentInst ? QStringLiteral("▶ ") : (isBookmarkedInst ? QStringLiteral("● ") : QString()));
+      auto *txt = m_cfgScene->addSimpleText(prefix + instLine, monoFont);
       txt->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr != 0ULL ? instAddr : bb.startAddress));
 
       // Apply syntax palette depending on active RIP status or mnemonic category.
-      if (isCurrentInst) {
-        txt->setBrush(QColor("#ffffff"));
-      } else if (instLine.startsWith(QStringLiteral("(fcn)"))) {
-        txt->setBrush(QColor("#dcdcaa"));
-      } else if (instLine.startsWith(';')) {
-        txt->setBrush(QColor("#6a9955"));
-      } else if (instLine.contains(QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) {
-        txt->setBrush(QColor("#ce9178"));
-      } else if (instLine.contains(QRegularExpression("\\b(call|ret|leave)\\b"))) {
-        txt->setBrush(QColor("#4ec9b0"));
-      } else if (instLine.contains(QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) {
-        txt->setBrush(QColor("#569cd6"));
-      } else {
-        txt->setBrush(QColor("#d4d7dc"));
-      }
+      if (isCurrentInst) txt->setBrush(QColor("#ffffff"));
+      else if (instLine.startsWith(QStringLiteral("(fcn)"))) txt->setBrush(QColor("#dcdcaa"));
+      else if (instLine.startsWith(';')) txt->setBrush(QColor("#6a9955"));
+      else if (instLine.contains(QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) txt->setBrush(QColor("#ce9178"));
+      else if (instLine.contains(QRegularExpression("\\b(call|ret|leave)\\b"))) txt->setBrush(QColor("#4ec9b0"));
+      else if (instLine.contains(QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) txt->setBrush(QColor("#569cd6"));
+      else txt->setBrush(QColor("#d4d7dc"));
       txt->setPos(boxX + 8.0, lineY);
       txt->setZValue(3.0);
       lineY += lineH;

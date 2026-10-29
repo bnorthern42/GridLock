@@ -162,4 +162,7 @@ private slots:
 
     /** @brief Verifies Edit menu actions, dynamic UI/Code font scaling across QSS and editors, and 6 curated themes with human-readable titles. */
     void testEditMenuActionsDynamicFontScalingAndCuratedThemes();
+
+    /** @brief Verifies two-lane vector gutter geometry, distinct breakpoint/conditional/PC marker states, and non-overlapping antialiased rendering. */
+    void testModernVectorGutterIconsAndCombinedBreakpointPcState();
 };

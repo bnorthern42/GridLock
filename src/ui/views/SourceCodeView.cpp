@@ -9,6 +9,7 @@
 #include "SourceCodeView.hpp"
 #include <QVBoxLayout>
 #include <QPainter>
+#include <QPainterPath>
 #include <QTextBlock>
 #include <QToolBar>
 #include <QAction>
@@ -158,10 +159,10 @@ public:
     LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {}
 
     /**
-     * @brief Returns the fixed width size hint for the gutter.
-     * @return QSize with 35px width.
+     * @brief Returns the dynamic two-lane width size hint for the gutter.
+     * @return QSize with width >= 48px.
      */
-    QSize sizeHint() const override { return QSize(35, 0); }
+    QSize sizeHint() const override { return QSize(sourceCodeView->lineNumberAreaWidth(), 0); }
 
 protected:
     void paintEvent(QPaintEvent *event) override { sourceCodeView->lineNumberAreaPaintEvent(event); }
@@ -205,6 +206,21 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
 }
 
 /**
+ * @brief Computes the two-lane gutter width reserving 20px for vector badges plus right-aligned line digits.
+ * @return Total gutter width in pixels (>= 48px).
+ */
+int SourceCodeView::lineNumberAreaWidth() const {
+    int digits = 3;
+    int maxBlocks = qMax(1, blockCount());
+    while (maxBlocks >= 1000) {
+        maxBlocks /= 10;
+        ++digits;
+    }
+    const int digitsWidth = fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits;
+    return qMax(48, gutterIconLaneWidth() + digitsWidth + 18);
+}
+
+/**
  * @brief Sets active breakpoints from a set of 1-based line numbers.
  * @param bps Set of line numbers.
  */
@@ -213,6 +229,7 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     for (int bp : bps) {
         m_breakpoints[bp] = QString();
     }
+    highlightCurrentLine();
     m_lineNumberArea->update();
 }
 
@@ -331,13 +348,53 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
         m_breakpoints.insert(lineNum, QString());
         isSet = true;
     }
+    highlightCurrentLine();
     m_lineNumberArea->update();
     QString emitPath = m_currentFilePath;
     emit breakpointToggled(emitPath, lineNum, isSet, QString());
 }
 
 /**
- * @brief Highlights the current cursor line and active debugger execution line.
+ * @brief Registers or updates a conditional/rank-filtered breakpoint on a 1-based source line.
+ * @param lineOneBased 1-based source line number.
+ * @param condition Conditional expression string (e.g., "rank == 0").
+ */
+void SourceCodeView::setConditionalBreakpoint(int lineOneBased, const QString& condition) {
+    if (lineOneBased <= 0) {
+        return;
+    }
+    m_breakpoints.insert(lineOneBased, condition);
+    highlightCurrentLine();
+    if (m_lineNumberArea) {
+        m_lineNumberArea->update();
+    }
+    emit breakpointToggled(m_currentFilePath, lineOneBased, true, condition);
+}
+
+/**
+ * @brief Resolves the composite gutter marker badge state for a 1-based source line.
+ * @param lineOneBased 1-based source line number.
+ * @return "None", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
+ */
+QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
+    const bool hasBp = m_breakpoints.contains(lineOneBased);
+    const bool isExec = (lineOneBased > 0 && lineOneBased == m_executionLine);
+    if (hasBp && isExec) {
+        return QStringLiteral("BreakpointAndExecutionPc");
+    }
+    if (hasBp) {
+        const QString cond = m_breakpoints.value(lineOneBased).trimmed();
+        return cond.isEmpty() ? QStringLiteral("Breakpoint")
+                              : QStringLiteral("ConditionalBreakpoint");
+    }
+    if (isExec) {
+        return QStringLiteral("ExecutionPc");
+    }
+    return QStringLiteral("None");
+}
+
+/**
+ * @brief Highlights the current cursor line, breakpoint tint bands, and active debugger execution line.
  */
 void SourceCodeView::highlightCurrentLine() {
     QList<QTextEdit::ExtraSelection> selections;
@@ -348,6 +405,25 @@ void SourceCodeView::highlightCurrentLine() {
     selection.cursor = textCursor();
     selection.cursor.clearSelection();
     selections.append(selection);
+
+    // Layer subtle translucent crimson/amber background tint across breakpoint lines.
+    for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
+        const int bpLine = it.key();
+        if (bpLine <= 0 || bpLine == m_executionLine) {
+            continue;
+        }
+        QTextBlock bpBlock = document()->findBlockByLineNumber(bpLine - 1);
+        if (bpBlock.isValid()) {
+            QTextEdit::ExtraSelection bpSel;
+            const bool isCond = !it.value().trimmed().isEmpty();
+            bpSel.format.setBackground(isCond ? QColor(229, 192, 123, 22)
+                                              : QColor(224, 108, 117, 22));
+            bpSel.format.setProperty(QTextFormat::FullWidthSelection, true);
+            bpSel.cursor = QTextCursor(bpBlock);
+            bpSel.cursor.clearSelection();
+            selections.append(bpSel);
+        }
+    }
 
     // If a 1-based debugger execution line is active, layer a distinct emerald-slate highlight band.
     if (m_executionLine > 0) {
@@ -365,40 +441,105 @@ void SourceCodeView::highlightCurrentLine() {
 }
 
 /**
- * @brief Paints the line number area gutter with line indices, execution pointer, and breakpoint badges.
+ * @brief Paints the two-lane gutter with antialiased QPainterPath vector badges and right-aligned line numbers.
+ *
+ * Left Icon Lane (x = 0..20): Renders centered 11x11px vector badges for Breakpoint (crimson coral circle),
+ * ConditionalBreakpoint (amber diamond with dark center dot), ExecutionPc (emerald chevron), and
+ * BreakpointAndExecutionPc (crimson outer ring nesting an emerald chevron).
+ * Right Line-Number Lane (x = 22..width-8): Renders right-aligned monospace line digits with zero icon collision.
+ *
  * @param event The QPaintEvent for the gutter rect.
  */
 void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     QPainter painter(m_lineNumberArea);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    const int gutterW = m_lineNumberArea->width();
+    const int iconLaneW = gutterIconLaneWidth();
+
     painter.fillRect(event->rect(), QColor("#16181d"));
-    painter.setPen(QColor("#282c34"));
-    painter.drawLine(m_lineNumberArea->width() - 1, event->rect().top(),
-                     m_lineNumberArea->width() - 1, event->rect().bottom());
+    painter.setPen(QColor("#252932"));
+    painter.drawLine(gutterW - 1, event->rect().top(), gutterW - 1, event->rect().bottom());
+
     QTextBlock block = firstVisibleBlock();
     int blockNumber = block.blockNumber();
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
-    
-    // Render visible blocks in view
+
+    // Render visible blocks in view across two non-overlapping horizontal lanes.
     while (block.isValid() && top <= event->rect().bottom()) {
         if (block.isVisible() && bottom >= event->rect().top()) {
             const int lineOneBased = blockNumber + 1;
-            QString number = QString::number(lineOneBased);
-            painter.setPen(lineOneBased == m_executionLine ? QColor("#4ec9b0") : QColor(120, 120, 120));
-            painter.drawText(0, top, m_lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
-            // Render red breakpoint disc (or orange for conditional)
-            if (m_breakpoints.contains(lineOneBased)) {
-                if (m_breakpoints[lineOneBased].isEmpty()) {
-                    painter.setBrush(Qt::red);
-                } else {
-                    painter.setBrush(QColor(255, 165, 0)); // Orange for conditional breakpoint
-                }
-                painter.drawEllipse(2, top + 2, 8, 8);
-            } else if (lineOneBased == m_executionLine) {
-                painter.setPen(QColor("#4ec9b0"));
-                painter.drawText(2, top, 12, fontMetrics().height(), Qt::AlignLeft | Qt::AlignVCenter,
-                                 QStringLiteral("▶"));
+            const int rowH = qMax(14, bottom - top);
+            const qreal cx = iconLaneW * 0.5;
+            const qreal cy = top + rowH * 0.5;
+            const QString state = gutterMarkerStateForLine(lineOneBased);
+
+            // 1. Left Icon Lane (x = 0..20): Antialiased QPainterPath vector badges.
+            if (state == QStringLiteral("Breakpoint")) {
+                // Subtle outer halo + 10px crimson-coral disc (#e06c75) with #ff949d rim highlight.
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(224, 108, 117, 64));
+                painter.drawEllipse(QPointF(cx, cy), 6.1, 6.1);
+                painter.setPen(QPen(QColor("#ff949d"), 1.1));
+                painter.setBrush(QColor("#e06c75"));
+                painter.drawEllipse(QPointF(cx, cy), 4.7, 4.7);
+            } else if (state == QStringLiteral("ConditionalBreakpoint")) {
+                // Rotated 11px amber-gold diamond (#e5c07b) with 2.8px dark center cutout dot.
+                QPainterPath diamond;
+                diamond.moveTo(cx, cy - 5.4);
+                diamond.lineTo(cx + 5.4, cy);
+                diamond.lineTo(cx, cy + 5.4);
+                diamond.lineTo(cx - 5.4, cy);
+                diamond.closeSubpath();
+                painter.setPen(QPen(QColor("#f0d090"), 1.0));
+                painter.setBrush(QColor("#e5c07b"));
+                painter.drawPath(diamond);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor("#16181d"));
+                painter.drawEllipse(QPointF(cx, cy), 1.5, 1.5);
+            } else if (state == QStringLiteral("ExecutionPc")) {
+                // Sleek emerald-teal execution chevron (#4ec9b0) + 3px right gutter accent bar.
+                QPainterPath chev;
+                chev.moveTo(cx - 3.6, cy - 4.5);
+                chev.lineTo(cx + 4.6, cy);
+                chev.lineTo(cx - 3.6, cy + 4.5);
+                chev.lineTo(cx - 1.7, cy);
+                chev.closeSubpath();
+                painter.setPen(QPen(QColor("#98c379"), 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+                painter.setBrush(QColor("#4ec9b0"));
+                painter.drawPath(chev);
+                painter.fillRect(QRect(gutterW - 3, top, 2, rowH), QColor("#4ec9b0"));
+            } else if (state == QStringLiteral("BreakpointAndExecutionPc")) {
+                // Combined state: crimson outer breakpoint ring (#e06c75) with nested emerald PC chevron (#4ec9b0).
+                painter.setPen(QPen(QColor("#e06c75"), 1.8));
+                painter.setBrush(QColor("#24181c"));
+                painter.drawEllipse(QPointF(cx, cy), 5.3, 5.3);
+                QPainterPath innerChev;
+                innerChev.moveTo(cx - 2.2, cy - 3.0);
+                innerChev.lineTo(cx + 3.2, cy);
+                innerChev.lineTo(cx - 2.2, cy + 3.0);
+                innerChev.lineTo(cx - 1.0, cy);
+                innerChev.closeSubpath();
+                painter.setPen(QPen(QColor("#98c379"), 0.8));
+                painter.setBrush(QColor("#4ec9b0"));
+                painter.drawPath(innerChev);
+                painter.fillRect(QRect(gutterW - 3, top, 2, rowH), QColor("#4ec9b0"));
             }
+
+            // 2. Right Line-Number Lane (x = 22..gutterW-8): Right-aligned digits with zero overlap.
+            const QString number = QString::number(lineOneBased);
+            if (lineOneBased == m_executionLine) {
+                painter.setPen(QColor("#4ec9b0"));
+            } else if (m_breakpoints.contains(lineOneBased)) {
+                painter.setPen(QColor("#e06c75"));
+            } else {
+                painter.setPen(QColor("#6b7280"));
+            }
+            const int numLeft = iconLaneW + 2;
+            const int numWidth = qMax(12, gutterW - numLeft - 8);
+            painter.drawText(numLeft, top, numWidth, rowH, Qt::AlignRight | Qt::AlignVCenter, number);
         }
         block = block.next();
         top = bottom;

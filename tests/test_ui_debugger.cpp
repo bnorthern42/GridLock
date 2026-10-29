@@ -755,6 +755,65 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     QApplication::processEvents();
 }
 
+/**
+ * @brief Verifies two-lane vector gutter geometry, distinct breakpoint/conditional/PC marker states,
+ *        and non-overlapping antialiased vector badge rendering in SourceCodeView.
+ */
+void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState() {
+    gridlock::ui::SourceCodeView srcView;
+    QString sampleCode;
+    for (int i = 1; i <= 30; ++i) {
+        sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
+    }
+    srcView.setSourceCode(sampleCode);
+    srcView.resize(720, 560);
+    srcView.show();
+    QApplication::processEvents();
 
+    // 1. Dedicated Two-Lane Gutter Width (>= 48px) & Non-Overlapping Icon Lane (>= 18px).
+    QVERIFY2(srcView.lineNumberAreaWidth() >= 48,
+             qPrintable(QStringLiteral("Expected lineNumberAreaWidth() >= 48px, got %1")
+                            .arg(srcView.lineNumberAreaWidth())));
+    QVERIFY2(srcView.gutterIconLaneWidth() >= 18,
+             qPrintable(QStringLiteral("Expected gutterIconLaneWidth() >= 18px, got %1")
+                            .arg(srcView.gutterIconLaneWidth())));
 
+    // 2. Distinct Gutter Marker States (None, Breakpoint, ConditionalBreakpoint, ExecutionPc, BreakpointAndExecutionPc).
+    QCOMPARE(srcView.gutterMarkerStateForLine(1), QStringLiteral("None"));
 
+    srcView.toggleBreakpoint(15);
+    srcView.setConditionalBreakpoint(16, QStringLiteral("rank == 0"));
+    srcView.highlightExecutionLine(15);
+    QApplication::processEvents();
+
+    QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("BreakpointAndExecutionPc"));
+    QCOMPARE(srcView.gutterMarkerStateForLine(16), QStringLiteral("ConditionalBreakpoint"));
+
+    srcView.highlightExecutionLine(13);
+    QApplication::processEvents();
+    QCOMPARE(srcView.gutterMarkerStateForLine(13), QStringLiteral("ExecutionPc"));
+    QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("Breakpoint"));
+
+    // 3. Antialiased Vector Rendering in Gutter Snapshot with zero overlap against line numbers.
+    srcView.highlightExecutionLine(15);
+    QApplication::processEvents();
+    const QImage img = srcView.grab().toImage();
+    QVERIFY(!img.isNull());
+
+    const QColor gutterBg(0x16, 0x18, 0x1d);
+    bool foundBadgePixelInIconLane = false;
+    for (int y = 0; y < img.height(); ++y) {
+        for (int x = 3; x <= 16 && x < img.width(); ++x) {
+            const QColor px = img.pixelColor(x, y);
+            // Detect crimson (#e06c75), amber (#e5c07b), or emerald (#4ec9b0) vector badge pixels.
+            if (std::abs(px.red() - gutterBg.red()) > 35 ||
+                std::abs(px.green() - gutterBg.green()) > 35) {
+                foundBadgePixelInIconLane = true;
+                break;
+            }
+        }
+        if (foundBadgePixelInIconLane) break;
+    }
+    QVERIFY2(foundBadgePixelInIconLane,
+             "Expected antialiased crimson/emerald/amber vector badge pixels inside the left icon lane (x = 3..16)");
+}
