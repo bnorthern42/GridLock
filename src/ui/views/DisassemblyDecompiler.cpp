@@ -823,6 +823,7 @@ bool DisassemblyView::triggerContextAction(uint64_t address, const QString& acti
   if (actionName == QStringLiteral("Seek in Memory View")) {
     seekToAddress(address);
     emit addressSelected(address);
+    emit seekInMemoryViewRequested(address);
     return true;
   }
   if (actionName == QStringLiteral("Inspect Cross-References (X)")) {
@@ -830,23 +831,36 @@ bool DisassemblyView::triggerContextAction(uint64_t address, const QString& acti
     return true;
   }
   if (actionName == QStringLiteral("Lookup in Reference Manual (F1)")) {
-    // Extract MPI symbol, PLT target, or instruction mnemonic from the disassembly line at address.
-    QString symbol = QStringLiteral("MPI_Init");
+    // Extract called function symbol or instruction mnemonic from disassembly line at address.
+    QString symbol;
     const int lineIdx = m_addrToLine.value(address, -1);
     const QStringList lines = toPlainText().split('\n');
     if (lineIdx >= 0 && lineIdx < lines.size()) {
       const QString line = lines[lineIdx];
-      static const QRegularExpression mpiSymRe(QStringLiteral("\\b(MPI_[A-Za-z0-9_]+)\\b"));
-      static const QRegularExpression pltSymRe(QStringLiteral("<([A-Za-z0-9_]+)(?:@plt)?>"));
-      const QRegularExpressionMatch mpiMatch = mpiSymRe.match(line);
-      if (mpiMatch.hasMatch()) {
-        symbol = mpiMatch.captured(1);
+      // If line is a CALL instruction to a named symbol, extract target routine (e.g., MPI_Init).
+      static const QRegularExpression callRe(
+          QStringLiteral("\\bcall\\b[^<]*<([^>@]+)(?:@plt)?>"),
+          QRegularExpression::CaseInsensitiveOption);
+      const QRegularExpressionMatch callMatch = callRe.match(line);
+      if (callMatch.hasMatch()) {
+        symbol = callMatch.captured(1).trimmed();
       } else {
-        const QRegularExpressionMatch pltMatch = pltSymRe.match(line);
-        if (pltMatch.hasMatch()) {
-          symbol = pltMatch.captured(1);
+        // Strip address and label prefixes (e.g., "0x00401125 <main+5>: " -> "mov rbp, rsp").
+        QString stripped = line;
+        const int colonIdx = stripped.indexOf(QLatin1Char(':'));
+        if (colonIdx != -1) {
+          stripped = stripped.mid(colonIdx + 1).trimmed();
+        }
+        // Extract instruction mnemonic token (e.g., "mov", "cmp", "jg", "ret").
+        const QString mnemonic =
+            stripped.section(QRegularExpression(QStringLiteral("\\s+")), 0, 0).trimmed();
+        if (!mnemonic.isEmpty()) {
+          symbol = mnemonic;
         }
       }
+    }
+    if (symbol.isEmpty()) {
+      symbol = QStringLiteral("mov");
     }
     emit documentationRequested(symbol);
     return true;

@@ -147,4 +147,7 @@ private slots:
 
     /** @brief Verifies dynamic statement-based source line mapping, loop back-edge/branch control-flow stepping, and active rank context. */
     void testDynamicSourceMappingLoopBranchSteppingAndRankContext();
+
+    /** @brief Verifies Seek in Memory View tab switching, base address update, and mnemonic F1 doc lookup. */
+    void testSeekInMemoryViewAndMnemonicDocLookup();
 };

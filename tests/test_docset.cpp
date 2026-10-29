@@ -19,6 +19,52 @@
 namespace gridlock::tests {
 
 /**
+ * @brief Verifies direct SQLite searchIndex query for symbols and Zeal docset configuration.
+ */
+void testLiveSqliteQueryAndZealConfDiscovery() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QDir rootDir(tempDir.path());
+    QVERIFY(rootDir.mkpath(QStringLiteral("Deep_Index.docset/Contents/Resources/Documents/io")));
+
+    const QString dsidxPath = rootDir.filePath(QStringLiteral("Deep_Index.docset/Contents/Resources/docSet.dsidx"));
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("zeal_deep_setup"));
+        db.setDatabaseName(dsidxPath);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(QStringLiteral("CREATE TABLE searchIndex(id INTEGER PRIMARY KEY, name TEXT, type TEXT, path TEXT);")));
+        // Insert 250 dummy entries so printf is located beyond the initial 200 rows
+        for (int i = 0; i < 250; ++i) {
+            q.exec(QString("INSERT INTO searchIndex(name, type, path) VALUES('dummy_%1', 'func', 'io/dummy.html');").arg(i));
+        }
+        QVERIFY(q.exec(QStringLiteral("INSERT INTO searchIndex(name, type, path) VALUES('printf', 'func', 'io/printf.html');")));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("zeal_deep_setup"));
+
+    const QString htmlPath = rootDir.filePath(QStringLiteral("Deep_Index.docset/Contents/Resources/Documents/io/printf.html"));
+    {
+        QFile f(htmlPath);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        f.write("<html><body><h1>printf</h1><p>Formatted output to stdout</p></body></html>");
+        f.close();
+    }
+
+    auto& manager = gridlock::core::DocsetManager::instance();
+    manager.setDocsetDirectory(tempDir.path());
+
+    // Verify findBestEntry for "printf" queries SQLite searchIndex directly and returns valid DocsetEntry.
+    const auto entry = manager.findBestEntry(QStringLiteral("printf"));
+    QVERIFY2(entry.isValid(),
+             "findBestEntry('printf') must return a valid DocsetEntry querying SQLite searchIndex directly beyond 200 rows");
+    QVERIFY2(!entry.htmlContent.isEmpty(),
+             "DocsetEntry htmlContent must not be empty");
+    QVERIFY2(entry.htmlContent.contains(QStringLiteral("Formatted output to stdout")),
+             "DocsetEntry must contain valid HTML content matching printf");
+}
+
+/**
  * @brief Verifies Zeal .docset bundle auto-discovery, SQLite searchIndex lookup,
  *        fragment/anchor stripping (#top), and dark-slate HTML reader stylesheet injection.
  */
@@ -120,6 +166,9 @@ void TestDocset::testSearch() {
 
     // Run Zeal docset bundle discovery and HTML reader verification.
     gridlock::tests::testZealDocsetAutoDiscoveryAndHtmlLoading();
+
+    // Run live SQLite query and Zeal discovery verification.
+    gridlock::tests::testLiveSqliteQueryAndZealConfDiscovery();
 }
 
 QTEST_GUILESS_MAIN(TestDocset)

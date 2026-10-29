@@ -238,6 +238,13 @@ void MainWindow::harmonizeBottomConsoleTabs() {
     if (m_disassemblyView) {
         connect(m_disassemblyView, &DisassemblyView::documentationRequested,
                 this, &MainWindow::lookupSymbolDocumentation);
+        connect(m_disassemblyView, &DisassemblyView::seekInMemoryViewRequested,
+                this, [this](uint64_t addr) {
+                    if (m_bottomTabs && m_memView) {
+                        m_bottomTabs->setCurrentWidget(m_memView);
+                    }
+                    seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QLatin1Char('0')));
+                });
     }
 
     // 6. Wire bidirectional SourceCodeView::sourceLineSelected -> DisassemblyView seek choreography.

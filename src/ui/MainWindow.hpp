@@ -247,6 +247,14 @@ public:
     bool seekToAddressOrExpression(const QString& expr);
 
     /**
+     * @brief Synthesizes a deterministic memory window for preview/fallback targets.
+     * @param addr 64-bit virtual memory address.
+     * @param length Number of bytes to generate.
+     * @return Byte array containing section-specific machine code, rodata strings, or stack bytes.
+     */
+    QByteArray synthesizeMemoryWindow(uint64_t addr, int length) const;
+
+    /**
      * @brief Loads a 64-bit ELF binary executable or shared object for static inspection.
      * @param binaryPath Path to executable file on disk.
      * @return True if file is valid ELF64 and successfully parsed.

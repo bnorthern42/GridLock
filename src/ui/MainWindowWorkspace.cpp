@@ -741,6 +741,7 @@ void MainWindow::setupDocks() {
   // Connect memory inspection view read requests to coordinator backend.
   connect(m_memView, &MemView::requestMemory, this,
           [this](const QString &address, int length) {
+            seekToAddressOrExpression(address);
             if (m_coordinator) {
               m_coordinator->readMemory(m_focusedRank, address, length);
             }

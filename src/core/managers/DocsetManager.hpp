@@ -20,6 +20,21 @@
 namespace gridlock::core {
 
 /**
+ * @struct DocsetEntry
+ * @brief Represents a documentation entry resolved from offline SQLite indices or ISA reference.
+ */
+struct DocsetEntry {
+    QString name;         ///< Symbol or instruction name.
+    QString type;         ///< Entry classification type ("func", "Instruction", etc.).
+    QString path;         ///< Filesystem path to documentation HTML.
+    QString docsetName;   ///< Source docset bundle name.
+    QString htmlContent;  ///< Loaded dark-slate formatted HTML content.
+
+    /// Returns true if entry has a valid symbol name and accessible content.
+    bool isValid() const { return !name.isEmpty() && (!path.isEmpty() || !htmlContent.isEmpty()); }
+};
+
+/**
  * @brief Singleton manager for discovering, attaching, and querying offline documentation sets.
  */
 class DocsetManager : public QObject {
@@ -105,6 +120,41 @@ public:
      * @return Styled HTML document string, or empty string if symbol is empty.
      */
     QString lookupBuiltInManualHtml(const QString& rawSymbol) const;
+
+    /**
+     * @brief Queries attached SQLite docset databases for exact or prefix symbol match.
+     * @param query Symbol or function name to search for.
+     * @return Matching DocsetEntry with loaded and styled HTML content, or invalid entry.
+     */
+    DocsetEntry findBestEntry(const QString& query) const;
+
+    /**
+     * @brief Checks if a symbol represents an x86_64 assembly instruction mnemonic.
+     * @param sym Mnemonic name.
+     * @return True if recognized x86_64 mnemonic.
+     */
+    static bool isX86Instruction(const QString& sym);
+
+    /**
+     * @brief Generates dark-slate x86_64 Architectural Instruction Reference HTML.
+     * @param mnemonic x86_64 instruction mnemonic (e.g., "mov", "cmp", "jmp").
+     * @return Formatted HTML manual page, or empty string if mnemonic unrecognized.
+     */
+    QString lookupX86InstructionHtml(const QString& mnemonic) const;
+
+    /**
+     * @brief Retrieves and formats system man page content if available.
+     * @param query Command or symbol name.
+     * @return Formatted HTML man page, or empty string if not found.
+     */
+    QString lookupSystemManPageHtml(const QString& query) const;
+
+    /**
+     * @brief Generates fallback ELF/C symbol card without MPI boilerplate.
+     * @param rawSymbol Symbol name.
+     * @return Formatted HTML reference card.
+     */
+    QString lookupGenericSymbolHtml(const QString& rawSymbol) const;
 
 private:
     explicit DocsetManager(QObject* parent = nullptr);

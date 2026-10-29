@@ -232,6 +232,8 @@ public:
 signals:
     /// Emitted when an instruction address is selected by click or seek.
     void addressSelected(uint64_t address);
+    /// Emitted when the user selects "Seek in Memory View" on an instruction address.
+    void seekInMemoryViewRequested(uint64_t address);
     /// Emitted when an assembly instruction is patched.
     void instructionPatched(uint64_t address, const QByteArray& newBytes);
     /// Emitted when the user requests Reference Manual documentation for a symbol or mnemonic.

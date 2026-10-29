@@ -173,37 +173,60 @@ bool DocsetViewerWidget::showSymbolDocumentation(const QString& rawSymbol) {
     }
 
     auto& mgr = gridlock::core::DocsetManager::instance();
-    // Check if an installed Zeal docset has an exact symbol match (unless it is a built-in MPI/ABI topic).
-    if (!mgr.builtInTopics().contains(normalized, Qt::CaseInsensitive)) {
-        const auto zealHits = mgr.search(normalized);
-        for (const auto& hit : zealHits) {
-            if (hit.first.compare(normalized, Qt::CaseInsensitive) == 0 &&
-                !hit.second.startsWith(QStringLiteral("builtin://"))) {
-                const QString zealHtml = mgr.getEntryHtmlForPath(hit.second);
-                if (!zealHtml.isEmpty()) {
-                    m_textBrowser->setHtml(zealHtml);
-                    return true;
-                }
+
+    // 1. Installed Zeal .docset SQLite Exact/Prefix Match via open docSet.dsidx
+    const auto entry = mgr.findBestEntry(normalized);
+    if (entry.isValid() && !entry.htmlContent.isEmpty()) {
+        m_textBrowser->setHtml(entry.htmlContent);
+        m_resultsList->blockSignals(true);
+        for (int i = 0; i < m_resultsList->count(); ++i) {
+            if (m_resultsList->item(i)->text().compare(entry.name, Qt::CaseInsensitive) == 0) {
+                m_resultsList->setCurrentRow(i);
+                break;
             }
         }
+        m_resultsList->blockSignals(false);
+        return true;
     }
 
-    const QString html = mgr.lookupBuiltInManualHtml(normalized);
-    if (html.isEmpty()) {
-        return false;
-    }
-
-    m_textBrowser->setHtml(html);
-
-    // Highlight matching item in the left-hand topic list if present.
-    m_resultsList->blockSignals(true);
-    for (int i = 0; i < m_resultsList->count(); ++i) {
-        if (m_resultsList->item(i)->text().compare(normalized, Qt::CaseInsensitive) == 0) {
-            m_resultsList->setCurrentRow(i);
-            break;
+    // 2. x86_64 ISA Instruction Reference (mov, movsd, lea, push, pop, sub, cmp, jg, je, jmp, ret, etc.)
+    if (mgr.isX86Instruction(normalized)) {
+        const QString x86Html = mgr.lookupX86InstructionHtml(normalized);
+        if (!x86Html.isEmpty()) {
+            m_textBrowser->setHtml(x86Html);
+            return true;
         }
     }
-    m_resultsList->blockSignals(false);
+
+    // 3. System man page (man -P cat <query>)
+    const QString manHtml = mgr.lookupSystemManPageHtml(normalized);
+    if (!manHtml.isEmpty()) {
+        m_textBrowser->setHtml(manHtml);
+        return true;
+    }
+
+    // 4. Built-in MPI / GDB-MI / ABI Reference (only if starts with MPI_ or matches gdb-mi / x86_64-abi)
+    if (normalized.startsWith(QStringLiteral("MPI_"), Qt::CaseInsensitive) ||
+        normalized.compare(QStringLiteral("gdb-mi"), Qt::CaseInsensitive) == 0 ||
+        normalized.compare(QStringLiteral("x86_64-abi"), Qt::CaseInsensitive) == 0) {
+        const QString html = mgr.lookupBuiltInManualHtml(normalized);
+        if (!html.isEmpty()) {
+            m_textBrowser->setHtml(html);
+            m_resultsList->blockSignals(true);
+            for (int i = 0; i < m_resultsList->count(); ++i) {
+                if (m_resultsList->item(i)->text().compare(normalized, Qt::CaseInsensitive) == 0) {
+                    m_resultsList->setCurrentRow(i);
+                    break;
+                }
+            }
+            m_resultsList->blockSignals(false);
+            return true;
+        }
+    }
+
+    // 5. Clean generic ELF symbol card (never fall back to MPI_Init on non-MPI queries)
+    const QString genericHtml = mgr.lookupGenericSymbolHtml(normalized);
+    m_textBrowser->setHtml(genericHtml);
     return true;
 }
 

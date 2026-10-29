@@ -41,8 +41,11 @@ uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
     // Trim leading/trailing whitespace
     QString trimmed = address.trimmed();
 
-    // Strip standard hexadecimal prefix if present
-    if (trimmed.startsWith("0x", Qt::CaseInsensitive)) {
+    bool isDecimal = false;
+    if (trimmed.startsWith("0d", Qt::CaseInsensitive)) {
+        trimmed = trimmed.mid(2);
+        isDecimal = true;
+    } else if (trimmed.startsWith("0x", Qt::CaseInsensitive)) {
         trimmed = trimmed.mid(2);
     }
 
@@ -52,9 +55,13 @@ uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
         trimmed = trimmed.left(spaceIdx);
     }
 
-    // Convert hex string to 64-bit unsigned integer
+    // Convert hex string (or decimal) to 64-bit unsigned integer
     bool ok = false;
-    uint64_t val = trimmed.toULongLong(&ok, 16);
+    uint64_t val = isDecimal ? trimmed.toULongLong(&ok, 10)
+                             : trimmed.toULongLong(&ok, 16);
+    if (!ok && !isDecimal) {
+        val = trimmed.toULongLong(&ok, 10);
+    }
     if (okOut) {
         *okOut = ok;
     }

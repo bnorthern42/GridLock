@@ -16,7 +16,9 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -90,13 +92,32 @@ QStringList DocsetManager::defaultZealSearchPaths() const {
     if (!cfgPath.isEmpty()) {
         paths.append(cfgPath);
     }
-    // 2. Standard Qt GenericDataLocation for Zeal (`~/.local/share/Zeal/Zeal/docsets`).
+
+    // 2. Discover custom docset path from ~/.config/Zeal/Zeal.conf and Flatpak Zeal.conf
+    const QStringList confCandidates = {
+        QDir::homePath() + QStringLiteral("/.config/Zeal/Zeal.conf"),
+        QDir::homePath() + QStringLiteral("/.var/app/org.zealdocs.Zeal/config/Zeal/Zeal.conf")
+    };
+    for (const QString& confFile : confCandidates) {
+        if (QFile::exists(confFile)) {
+            QSettings zealSettings(confFile, QSettings::IniFormat);
+            const QString customPath = zealSettings.value(QStringLiteral("docsets/path")).toString().trimmed();
+            if (!customPath.isEmpty() && QDir(customPath).exists()) {
+                paths.append(customPath);
+            }
+        }
+    }
+
+    // 3. Standard Flatpak Zeal storage directory
+    paths.append(QDir::homePath() + QStringLiteral("/.var/app/org.zealdocs.Zeal/data/Zeal/Zeal/docsets"));
+
+    // 4. Standard Qt GenericDataLocation for Zeal (`~/.local/share/Zeal/Zeal/docsets`).
     const QString xdgData = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     if (!xdgData.isEmpty()) {
         paths.append(xdgData + QStringLiteral("/Zeal/Zeal/docsets"));
         paths.append(xdgData + QStringLiteral("/zeal/docsets"));
     }
-    // 3. Explicit home directory XDG paths and system-wide `/usr/share` locations.
+    // 5. Explicit home directory XDG paths and system-wide `/usr/share` locations.
     paths.append(QDir::homePath() + QStringLiteral("/.local/share/Zeal/Zeal/docsets"));
     paths.append(QDir::homePath() + QStringLiteral("/.local/share/zeal/docsets"));
     paths.append(QStringLiteral("/usr/share/zeal/docsets"));
@@ -664,6 +685,241 @@ QString DocsetManager::lookupBuiltInManualHtml(const QString& rawSymbol) const {
         QStringLiteral("/* Symbol Identifier: %1 */\nextern int %1(...);").arg(sym.toHtmlEscaped()),
         QStringLiteral("<ul><li><span class='param'>Calling Convention</span>: System V AMD64 ABI (RDI, RSI, RDX, RCX, R8, R9).</li></ul>"),
         QStringLiteral("Resolved via F1 symbol lookup. Press X in DisassemblyView to inspect incoming/outgoing cross-references."));
+}
+
+/**
+ * @brief Queries attached SQLite docset databases directly for exact or prefix symbol match.
+ * @param query Symbol or function name to search for.
+ * @return Matching DocsetEntry with loaded and styled HTML content, or invalid entry.
+ */
+DocsetEntry DocsetManager::findBestEntry(const QString& query) const {
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+        return DocsetEntry{};
+    }
+
+    if (m_activeDocsetPaths.isEmpty()) {
+        const_cast<DocsetManager*>(this)->discoverAndLoadSystemDocsets();
+    }
+    if (!m_db.isOpen() || m_activeDocsetPaths.isEmpty()) {
+        return DocsetEntry{};
+    }
+
+    auto extractEntry = [this](QSqlQuery& q, const QString& bundlePath,
+                               const QString& bundleName) -> DocsetEntry {
+        DocsetEntry entry;
+        entry.name = q.value(0).toString();
+        entry.type = q.value(1).toString();
+        QString rawPath = q.value(2).toString();
+        rawPath.remove(QRegularExpression(QStringLiteral("^(?:<[^>]+>)+")));
+        // Resolve disk path inside docset Documents folder
+        entry.path = bundlePath + QStringLiteral("/Contents/Resources/Documents/") + rawPath.trimmed();
+        entry.docsetName = bundleName;
+        // Load and format HTML content with dark-slate stylesheet
+        entry.htmlContent = getEntryHtmlForPath(entry.path);
+        return entry;
+    };
+
+    // 1. First priority: Exact case-insensitive match on attached searchIndex tables.
+    // This immediately resolves precise C/C++ library functions (e.g. printf, memcpy).
+    for (int i = 0; i < m_activeDocsetPaths.size(); ++i) {
+        const QString bundlePath = m_activeDocsetPaths[i];
+        const QString bundleName = QFileInfo(bundlePath).completeBaseName();
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT name, type, path FROM db%1.searchIndex WHERE name = ? COLLATE NOCASE LIMIT 1;").arg(i));
+        q.addBindValue(trimmed);
+        if (q.exec() && q.next()) {
+            DocsetEntry entry = extractEntry(q, bundlePath, bundleName);
+            if (!entry.htmlContent.isEmpty()) return entry;
+        }
+    }
+
+    // 2. Second priority: Prefix match (name LIKE 'query%') across attached databases.
+    // Handles partial symbol typings and namespace-prefixed library queries.
+    for (int i = 0; i < m_activeDocsetPaths.size(); ++i) {
+        const QString bundlePath = m_activeDocsetPaths[i];
+        const QString bundleName = QFileInfo(bundlePath).completeBaseName();
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT name, type, path FROM db%1.searchIndex WHERE name LIKE ? ESCAPE '\\' LIMIT 25;").arg(i));
+        q.addBindValue(trimmed + QStringLiteral("%"));
+        if (q.exec()) {
+            while (q.next()) {
+                DocsetEntry entry = extractEntry(q, bundlePath, bundleName);
+                if (!entry.htmlContent.isEmpty()) return entry;
+            }
+        }
+    }
+
+    // 3. Third priority: Fallback to CoreData ZTOKEN schema if searchIndex is absent.
+    // Supports older Apple Dash docsets formatted with CoreData object graphs.
+    for (int i = 0; i < m_activeDocsetPaths.size(); ++i) {
+        const QString bundlePath = m_activeDocsetPaths[i];
+        const QString bundleName = QFileInfo(bundlePath).completeBaseName();
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("SELECT t.ZTOKENNAME, 'Symbol', f.ZPATH FROM db%1.ZTOKEN t "
+                                 "JOIN db%1.ZTOKENMETAINFORMATION m ON t.ZMETAINFORMATION = m.Z_PK "
+                                 "JOIN db%1.ZFILEPATH f ON m.ZFILE = f.Z_PK "
+                                 "WHERE t.ZTOKENNAME LIKE ? LIMIT 10;").arg(i));
+        q.addBindValue(trimmed + QStringLiteral("%"));
+        if (q.exec()) {
+            while (q.next()) {
+                DocsetEntry entry = extractEntry(q, bundlePath, bundleName);
+                if (!entry.htmlContent.isEmpty()) return entry;
+            }
+        }
+    }
+
+    // Return empty entry if no matching documentation page was discovered
+    return DocsetEntry{};
+}
+
+/**
+ * @brief Checks if a symbol represents a recognized x86_64 assembly instruction mnemonic.
+ *
+ * Evaluates the query against common control-flow, data transfer, arithmetic,
+ * stack manipulation, and system call mnemonics.
+ *
+ * @param sym Mnemonic name.
+ * @return True if recognized x86_64 mnemonic.
+ */
+bool DocsetManager::isX86Instruction(const QString& sym) {
+    // Fast lookup hash set for common x86_64 assembly instruction mnemonics
+    static const QSet<QString> mnemonics = {
+        QStringLiteral("mov"), QStringLiteral("movsd"), QStringLiteral("lea"),
+        QStringLiteral("push"), QStringLiteral("pop"), QStringLiteral("sub"),
+        QStringLiteral("add"), QStringLiteral("xor"), QStringLiteral("cmp"),
+        QStringLiteral("test"), QStringLiteral("je"), QStringLiteral("jz"),
+        QStringLiteral("jne"), QStringLiteral("jnz"), QStringLiteral("jg"),
+        QStringLiteral("jge"), QStringLiteral("jl"), QStringLiteral("jle"),
+        QStringLiteral("jmp"), QStringLiteral("call"), QStringLiteral("leave"),
+        QStringLiteral("ret"), QStringLiteral("nop"), QStringLiteral("endbr64"),
+        QStringLiteral("syscall")
+    };
+    return mnemonics.contains(sym.trimmed().toLower());
+}
+
+/**
+ * @brief Generates dark-slate x86_64 Architectural Instruction Reference HTML.
+ * @param mnemonic x86_64 instruction mnemonic (e.g., "mov", "cmp", "jmp").
+ * @return Formatted HTML manual page, or empty string if mnemonic unrecognized.
+ */
+QString DocsetManager::lookupX86InstructionHtml(const QString& mnemonic) const {
+    const QString m = mnemonic.trimmed().toLower();
+    if (!isX86Instruction(m)) {
+        return QString();
+    }
+
+    struct X86Info {
+        const char* title;
+        const char* brief;
+        const char* syntax;
+        const char* operation;
+        const char* flags;
+        const char* details;
+    };
+
+    static const QMap<QString, X86Info> kDocs = {
+        {QStringLiteral("mov"), {"MOV — Move Data", "Copies data from source operand to destination operand.", "MOV reg, reg/mem\nMOV reg/mem, reg\nMOV reg/mem, imm", "DEST <- SRC;", "None affected.", "In 64-bit mode, 32-bit register writes zero-extend to 64 bits."}},
+        {QStringLiteral("movsd"), {"MOVSD — Move Scalar Double-Precision FP", "Moves 64-bit double-precision FP value between XMM registers or memory.", "MOVSD xmm1, xmm2/m64\nMOVSD m64, xmm1", "DEST[63:0] <- SRC[63:0];", "None affected.", "Scalar SSE2/AVX register transfers."}},
+        {QStringLiteral("lea"), {"LEA — Load Effective Address", "Computes effective memory address and places it in destination register.", "LEA reg, [base + index*scale + disp]", "DEST <- EffectiveAddress(SRC);", "None affected.", "Performs fast address arithmetic without modifying EFLAGS."}},
+        {QStringLiteral("cmp"), {"CMP — Compare Two Operands", "Compares first operand with second by subtracting second from first.", "CMP reg/mem, reg/imm", "temp <- DEST - SRC;", "CF, OF, SF, ZF, AF, PF set by subtraction difference.", "Operands are unmodified; conditional jumps test resulting status flags."}},
+        {QStringLiteral("jmp"), {"JMP — Jump Unconditionally", "Transfers program execution control to target instruction.", "JMP rel32\nJMP reg/mem64", "RIP <- TargetAddress;", "None affected.", "Used for loop back-edges, tail calls, and direct control-flow redirection."}},
+        {QStringLiteral("push"), {"PUSH — Push Word Onto Stack", "Pushes source operand onto execution stack.", "PUSH reg/mem64", "RSP <- RSP - 8; [RSP] <- SRC;", "None affected.", "RSP must maintain 16-byte alignment prior to CALL per System V ABI."}},
+        {QStringLiteral("pop"), {"POP — Pop Top of Stack", "Loads value from top of stack into destination register.", "POP reg/mem64", "DEST <- [RSP]; RSP <- RSP + 8;", "None affected.", "Restores callee-saved or frame base registers."}},
+        {QStringLiteral("call"), {"CALL — Call Procedure", "Calls subroutine, pushing return address onto stack.", "CALL rel32 / reg64", "PUSH RIP; RIP <- TargetAddress;", "None affected.", "Subroutine linkage follows System V AMD64 ABI convention."}},
+        {QStringLiteral("ret"), {"RET — Return from Procedure", "Transfers control to return address popped from stack.", "RET", "RIP <- POP();", "None affected.", "Restores instruction pointer and unwinds procedure call frame."}},
+        {QStringLiteral("leave"), {"LEAVE — High Level Procedure Exit", "Releases stack frame by copying RBP to RSP and popping old RBP.", "LEAVE", "RSP <- RBP; RBP <- POP();", "None affected.", "Equivalent to MOV RSP, RBP followed by POP RBP."}},
+        {QStringLiteral("nop"), {"NOP — No Operation", "Performs no execution operation; advances RIP.", "NOP", "/* None */", "None affected.", "Used for code alignment and live instruction patching."}},
+        {QStringLiteral("endbr64"), {"ENDBR64 — Terminate Indirect Branch 64-bit", "Signals indirect branch target for Intel CET shadow stack enforcement.", "ENDBR64", "/* CET verification */", "None affected.", "Hardware control-flow enforcement technology marker."}}
+    };
+
+    X86Info info;
+    if (kDocs.contains(m)) {
+        info = kDocs.value(m);
+    } else if (m.startsWith('j')) {
+        info = {"Conditional Jump", "Conditionally transfers control based on status flags.", "Jcc rel8 / rel32", "IF (ConditionMet) THEN RIP <- TargetAddress;", "None affected.", "Evaluates ZF, SF, OF, and CF status bits set by CMP/TEST."};
+    } else {
+        info = {"x86_64 Instruction", "Standard AMD64 / Intel 64 ISA instruction.", "INSN [operands]", "DEST <- SRC;", "Evaluated per Intel 64 & IA-32 specification.", "Documented in Intel 64 and IA-32 Architectures Manual."};
+    }
+
+    return QStringLiteral(
+        "<html><head><style>"
+        "body { background-color: #16181d; color: #d7dae0; font-family: 'Inter', sans-serif; "
+        "font-size: 12px; margin: 0px; padding: 12px 16px; }"
+        ".hdr { background-color: #1e222a; border: 1px solid #2c313a; padding: 6px 10px; margin-bottom: 10px; }"
+        ".title { color: #61afef; font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: bold; }"
+        ".badge { color: #98c379; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
+        ".sec { color: #e5c07b; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: bold; margin-top: 10px; margin-bottom: 4px; letter-spacing: 0.5px; }"
+        ".code { background-color: #1e222a; border: 1px solid #2c313a; border-left: 3px solid #528bff; color: #abb2bf; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 8px 10px; white-space: pre-wrap; margin: 4px 0px; }"
+        "p, li { color: #abb2bf; line-height: 1.45; margin: 3px 0px; }"
+        "</style></head><body>"
+        "<div class='hdr'><span class='title'>%1</span> &nbsp; <span class='badge'>[Intel 64 &amp; IA-32 Architectures Software Developer's Manual — Instruction Set Reference]</span></div>"
+        "<div class='sec'>NAME</div><p><b>%2</b> &mdash; %3</p>"
+        "<div class='sec'>SYNOPSIS</div><div class='code'>%4</div>"
+        "<div class='sec'>OPERATION</div><div class='code'>%5</div>"
+        "<div class='sec'>FLAGS AFFECTED</div><p>%6</p>"
+        "<div class='sec'>REGISTER &amp; PIPELINE SEMANTICS</div><p>%7</p>"
+        "</body></html>")
+        .arg(QString::fromUtf8(info.title), m.toUpper(), QString::fromUtf8(info.brief),
+             QString::fromUtf8(info.syntax), QString::fromUtf8(info.operation),
+             QString::fromUtf8(info.flags), QString::fromUtf8(info.details));
+}
+
+/**
+ * @brief Retrieves and formats system man page content if available.
+ * @param query Command or symbol name.
+ * @return Formatted HTML man page, or empty string if not found.
+ */
+QString DocsetManager::lookupSystemManPageHtml(const QString& query) const {
+    const QString cleaned = query.trimmed();
+    if (cleaned.isEmpty()) {
+        return QString();
+    }
+    QProcess proc;
+    // Launch man command with plain text output formatting (-P cat)
+    proc.start(QStringLiteral("man"), {QStringLiteral("-P"), QStringLiteral("cat"), cleaned});
+    if (!proc.waitForFinished(1000) || proc.exitCode() != 0) {
+        return QString();
+    }
+    const QString text = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    // Return empty string if system man page contains no printable content
+    if (text.isEmpty()) {
+        return QString();
+    }
+    return QStringLiteral(
+        "<html><head><style>"
+        "body { background-color: #16181d; color: #d7dae0; font-family: 'JetBrains Mono', monospace; "
+        "font-size: 11px; margin: 0px; padding: 12px 16px; white-space: pre-wrap; line-height: 1.45; }"
+        "h1, h2, h3 { color: #e5c07b; font-family: 'JetBrains Mono', monospace; }"
+        "</style></head><body><pre>%1</pre></body></html>").arg(text.toHtmlEscaped());
+}
+
+/**
+ * @brief Generates fallback ELF/C symbol card without MPI boilerplate.
+ * @param rawSymbol Symbol name.
+ * @return Formatted HTML reference card.
+ */
+QString DocsetManager::lookupGenericSymbolHtml(const QString& rawSymbol) const {
+    const QString sym = normalizeSymbolName(rawSymbol);
+    if (sym.isEmpty()) {
+        return QString();
+    }
+    return QStringLiteral(
+        "<html><head><style>"
+        "body { background-color: #16181d; color: #d7dae0; font-family: 'Inter', sans-serif; "
+        "font-size: 12px; margin: 0px; padding: 12px 16px; }"
+        ".hdr { background-color: #1e222a; border: 1px solid #2c313a; padding: 6px 10px; margin-bottom: 10px; }"
+        ".title { color: #61afef; font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: bold; }"
+        ".badge { color: #98c379; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
+        ".sec { color: #e5c07b; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: bold; margin-top: 10px; margin-bottom: 4px; }"
+        ".code { background-color: #1e222a; border: 1px solid #2c313a; border-left: 3px solid #528bff; color: #abb2bf; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 8px 10px; margin: 4px 0px; }"
+        "p, li { color: #abb2bf; line-height: 1.45; margin: 3px 0px; }"
+        "</style></head><body>"
+        "<div class='hdr'><span class='title'>%1</span> &nbsp; <span class='badge'>[ELF64 Symbol Reference]</span></div>"
+        "<div class='sec'>IDENTIFIER</div><p><b>%1</b> &mdash; Dynamic or static symbol token in active binary target.</p>"
+        "<div class='sec'>PROTOTYPE</div><div class='code'>/* Symbol Identifier: %1 */\nextern void* %1;</div>"
+        "<div class='sec'>CALLING CONVENTION</div><p>System V AMD64 ABI (Integer: RDI, RSI, RDX, RCX, R8, R9 | Return: RAX).</p>"
+        "</body></html>").arg(sym.toHtmlEscaped());
 }
 
 } // namespace gridlock::core

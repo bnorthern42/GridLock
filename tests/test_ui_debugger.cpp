@@ -12,12 +12,17 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QString>
+#include <QTabWidget>
+#include <QTextBrowser>
+#include <QTextEdit>
 #include <QtTest/QtTest>
 
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
+#include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/ReferenceManualWidget.hpp"
 
 /**
  * @brief Verifies dynamic statement mapping, loop back-edge/branch control-flow stepping, and rank context.
@@ -212,4 +217,86 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     // Stepping at 0x00401163 MUST jump back to loop header 0x00401149ULL.
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
+}
+
+/**
+ * @brief Verifies Seek in Memory View tab switching, base address update, and mnemonic F1 doc lookup.
+ *
+ * Test workflow:
+ * 1. Switches bottom console tabs away from MEMORY VIEW (e.g. to Terminal / index 0).
+ * 2. Triggers "Seek in Memory View" on instruction 0x00401149ULL in DisassemblyView.
+ * 3. Verifies that BottomConsoleTabs automatically switches to MEMORY VIEW, updates
+ *    currentBaseAddress() to 0x00401149ULL, and populates hex dump bytes starting with
+ *    instruction opcode bytes 83 7d fc 02 (cmp dword [rbp-0x4], 0x2).
+ * 4. Verifies seeking to .rodata string address 0x00402010ULL updates currentBaseAddress()
+ *    to 0x00402010ULL and displays string bytes.
+ * 5. Triggers "Lookup in Reference Manual (F1)" on 0x00401125ULL (mov rbp, rsp).
+ * 6. Verifies ReferenceManualWidget is shown, displays MOV instruction reference documentation,
+ *    and does NOT contain "MPI_Init" or "MPI-3.1 Standard".
+ */
+void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY(disasmView != nullptr && memView != nullptr && bottomTabs != nullptr && refManual != nullptr);
+
+    // =========================================================================
+    // Part 1: Seek in Memory View Switches Tab & Updates Base Address + Bytes
+    // =========================================================================
+    // Start by selecting a different tab (e.g. index 0: Terminal).
+    bottomTabs->setCurrentIndex(0);
+    QApplication::processEvents();
+    QVERIFY(bottomTabs->currentWidget() != memView);
+
+    // Trigger context menu action "Seek in Memory View" at loop header instruction 0x00401149ULL.
+    const bool seekTriggered = disasmView->triggerContextAction(0x00401149ULL, QStringLiteral("Seek in Memory View"));
+    QVERIFY2(seekTriggered, "triggerContextAction for 'Seek in Memory View' must succeed");
+    QApplication::processEvents();
+
+    // Verify MainWindow switched bottom console tabs to MEMORY VIEW.
+    QCOMPARE(bottomTabs->currentWidget(), memView);
+    // Verify MemView base address updated to requested virtual address.
+    QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
+
+    // Verify MemView hex dump contains the instruction bytes: 83 7d fc 02
+    auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
+    QVERIFY(dumpEdit != nullptr);
+    const QString hexDumpText = dumpEdit->toPlainText();
+    QVERIFY2(hexDumpText.contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive),
+             qPrintable(QStringLiteral("Expected 83 7d fc 02 in hex dump, got: %1").arg(hexDumpText)));
+
+    // Verify seeking to .rodata string address 0x00402010ULL updates MemView base address.
+    mainWindow.seekToAddressOrExpression(QStringLiteral("0x00402010"));
+    QApplication::processEvents();
+    QCOMPARE(memView->currentBaseAddress(), 0x00402010ULL);
+
+    // =========================================================================
+    // Part 2: Looking Up "mov" (F1 on mov rbp, rsp) Never Shows MPI Reference
+    // =========================================================================
+    // Trigger "Lookup in Reference Manual (F1)" on 0x00401125ULL (mov rbp, rsp).
+    const bool docTriggered = disasmView->triggerContextAction(0x00401125ULL, QStringLiteral("Lookup in Reference Manual (F1)"));
+    QVERIFY2(docTriggered, "triggerContextAction for 'Lookup in Reference Manual (F1)' must succeed");
+    QApplication::processEvents();
+
+    // Verify Reference Manual tab is activated in bottom console tabs.
+    QCOMPARE(bottomTabs->currentWidget(), refManual);
+
+    // Verify displayed documentation is for MOV and NEVER falls back to MPI_Init.
+    auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
+    QVERIFY(docBrowser != nullptr);
+    const QString docContent = docBrowser->toHtml();
+    QVERIFY2(docContent.contains(QStringLiteral("MOV"), Qt::CaseInsensitive),
+             "Reference Manual must display MOV instruction documentation");
+    QVERIFY2(!docContent.contains(QStringLiteral("MPI_Init")),
+             "Looking up 'mov' must NEVER show MPI_Init reference");
+    QVERIFY2(!docContent.contains(QStringLiteral("MPI-3.1 Standard")),
+             "Looking up 'mov' must NEVER display MPI-3.1 Standard text");
 }
