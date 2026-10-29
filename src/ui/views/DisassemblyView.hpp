@@ -44,6 +44,20 @@ struct BranchArc {
 };
 
 /**
+ * @brief Structured cross-reference record between two instruction addresses.
+ */
+struct XrefRecord {
+    uint64_t fromAddress = 0;   ///< Calling or branching originating address.
+    uint64_t toAddress = 0;     ///< Target destination address.
+    QString type;               ///< Reference classification ("CALL", "JMP", "CJMP", "DATA").
+    QString mnemonic;           ///< Instruction mnemonic (e.g. call, jmp, je, movsd).
+    QString instructionText;    ///< Full disassembly instruction string.
+    QString targetSymbol;       ///< Symbolic target or label annotation if resolved.
+};
+
+class XrefInspectorDialog;
+
+/**
  * @brief Represents an isolated basic block of linear instructions for CFG analysis.
  */
 struct DisasmBasicBlock {
@@ -117,6 +131,12 @@ public:
     uint64_t addressForLine(int line) const { return m_lineToAddr.value(line, 0ULL); }
     /// Returns callers jumping or branching to targetAddr.
     QVector<uint64_t> xrefsToAddress(uint64_t targetAddr) const;
+    /// Returns incoming branch, call, and loop edges targeting targetAddr.
+    QVector<XrefRecord> incomingXrefs(uint64_t targetAddr) const;
+    /// Returns outgoing calls, branches, and data references from sourceAddr or function.
+    QVector<XrefRecord> outgoingXrefs(uint64_t sourceAddr) const;
+    /// Opens or refreshes the interactive Xref and call-graph inspector dialog.
+    XrefInspectorDialog* openXrefInspector(uint64_t targetAddr);
     /// Returns currently generated decompiled source text.
     QString decompiledPseudocode() const { return m_decompiledPseudocode; }
     /// Checks whether standalone decompiler mode is enabled.
@@ -249,6 +269,8 @@ private:
     QString m_targetLang = QStringLiteral("C");
     QString m_decompiledPseudocode;
     QString m_highlightedToken;
+    XrefInspectorDialog* m_xrefDialog = nullptr;
+    QVector<XrefRecord> m_xrefs;
 };
 
 }  // namespace gridlock::ui

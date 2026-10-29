@@ -536,6 +536,13 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   spaceShortcut->setContext(Qt::WidgetWithChildrenShortcut);
   connect(spaceShortcut, &QShortcut::activated, this, &DisassemblyView::toggleViewMode);
 
+  // Cross-reference inspector shortcut 'X'
+  auto *xShortcut = new QShortcut(QKeySequence(Qt::Key_X), this);
+  xShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+  connect(xShortcut, &QShortcut::activated, this, [this]() {
+    openXrefInspector(m_currentAddress);
+  });
+
   reloadStyle();
   updateDisassembly(defaultStartupDisassembly());
 }

@@ -8,6 +8,7 @@
  */
 
 #include "DisassemblyView.hpp"
+#include "../dialogs/XrefInspectorDialog.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -157,6 +158,7 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
   m_basicBlocks.clear();
   m_addrToLine.clear();
   m_lineToAddr.clear();
+  m_xrefs.clear();
 
   // Internal record tracking parsed instruction fields
   struct ParsedInst {
@@ -215,10 +217,11 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     inst.rawLine = line.trimmed();
 
     const QString rest = addrMatch.captured(3).trimmed();
+    QString operands;
     QRegularExpressionMatch mnemMatch = mnemRegex.match(rest);
     if (mnemMatch.hasMatch()) {
       inst.mnemonic = mnemMatch.captured(1).toLower();
-      const QString operands = mnemMatch.captured(2);
+      operands = mnemMatch.captured(2);
 
       // Classify control transfer instructions
       if (inst.mnemonic == QStringLiteral("jmp") ||
@@ -248,6 +251,60 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     m_addrToLine.insert(addr, i);
     m_lineToAddr.insert(i, addr);
     instructions.append(inst);
+
+    // Classify control transfer and reference instructions for structured xrefs
+    static const QRegularExpression symTargetRegex(QStringLiteral("<([^>]+)>"));
+    static const QRegularExpression ripRegex(
+        QStringLiteral("\\[rip\\s*([+-])\\s*(0x[0-9a-fA-F]+)\\]"));
+
+    if (inst.mnemonic == QStringLiteral("call") ||
+        inst.mnemonic == QStringLiteral("callq")) {
+      XrefRecord xr;
+      xr.fromAddress = addr;
+      xr.mnemonic = inst.mnemonic;
+      xr.instructionText = line.trimmed();
+      xr.type = QStringLiteral("CALL");
+      QRegularExpressionMatch tMatch = targetHexRegex.match(operands);
+      if (tMatch.hasMatch()) {
+        bool tok = false;
+        xr.toAddress = tMatch.captured(1).toULongLong(&tok, 16);
+      }
+      QRegularExpressionMatch symMatch = symTargetRegex.match(operands);
+      if (symMatch.hasMatch()) {
+        xr.targetSymbol = symMatch.captured(1);
+      }
+      m_xrefs.append(xr);
+    } else if (inst.isUnconditionalBranch) {
+      XrefRecord xr;
+      xr.fromAddress = addr;
+      xr.toAddress = inst.targetAddr;
+      xr.mnemonic = inst.mnemonic;
+      xr.instructionText = line.trimmed();
+      xr.type = QStringLiteral("JMP");
+      m_xrefs.append(xr);
+    } else if (inst.isConditionalBranch) {
+      XrefRecord xr;
+      xr.fromAddress = addr;
+      xr.toAddress = inst.targetAddr;
+      xr.mnemonic = inst.mnemonic;
+      xr.instructionText = line.trimmed();
+      xr.type = QStringLiteral("CJMP");
+      m_xrefs.append(xr);
+    } else {
+      QRegularExpressionMatch ripMatch = ripRegex.match(operands);
+      if (ripMatch.hasMatch()) {
+        XrefRecord xr;
+        xr.fromAddress = addr;
+        xr.mnemonic = inst.mnemonic;
+        xr.instructionText = line.trimmed();
+        xr.type = QStringLiteral("DATA");
+        bool tok = false;
+        const uint64_t offset = ripMatch.captured(2).toULongLong(&tok, 16);
+        const bool isPos = (ripMatch.captured(1) == QStringLiteral("+"));
+        xr.toAddress = isPos ? (addr + 7 + offset) : (addr + 7 - offset);
+        m_xrefs.append(xr);
+      }
+    }
   }
 
   if (instructions.isEmpty()) {
@@ -746,6 +803,108 @@ QString DisassemblyView::defaultStartupDisassembly() {
       "0x0040117d <main+93>: mov   eax, 0x0\n"
       "0x00401182 <main+98>: leave\n"
       "0x00401183 <main+99>: ret");
+}
+
+/**
+ * @brief Returns all incoming branch, call, and loop edges targeting targetAddr.
+ *
+ * Scans internal cross-reference records and extracts all references whose destination
+ * address equals the requested target instruction address.
+ *
+ * @param targetAddr Target destination instruction address.
+ * @return List of incoming structured cross-references.
+ */
+QVector<XrefRecord> DisassemblyView::incomingXrefs(uint64_t targetAddr) const {
+  QVector<XrefRecord> results;
+  // Iterate through cached xref records matching target destination address
+  for (const auto &xr : m_xrefs) {
+    if (xr.toAddress == targetAddr) {
+      results.append(xr);
+    }
+  }
+  return results;
+}
+
+/**
+ * @brief Returns outgoing calls, branches, and data references from sourceAddr or containing function.
+ *
+ * Resolves the enclosing function boundaries from basic blocks and gathers all outgoing
+ * calls, jumps, conditional branches, and RIP-relative data references originating from
+ * the function or individual instruction address.
+ *
+ * @param sourceAddr Source instruction or function entrypoint address.
+ * @return List of outgoing structured cross-references.
+ */
+QVector<XrefRecord> DisassemblyView::outgoingXrefs(uint64_t sourceAddr) const {
+  QVector<XrefRecord> results;
+  // Step 1: Identify enclosing function boundaries from partitioned basic blocks
+  uint64_t funcStart = 0;
+  uint64_t funcEnd = UINT64_MAX;
+  if (!m_basicBlocks.isEmpty()) {
+    funcStart = m_basicBlocks.first().startAddress;
+    funcEnd = m_basicBlocks.last().endAddress;
+  }
+  // Step 2: Collect all outgoing control-flow and memory references in the function
+  for (const auto &xr : m_xrefs) {
+    if (sourceAddr == funcStart || (xr.fromAddress >= funcStart && xr.fromAddress <= funcEnd)) {
+      results.append(xr);
+    } else if (xr.fromAddress == sourceAddr) {
+      results.append(xr);
+    }
+  }
+  return results;
+}
+
+/**
+ * @brief Opens or refreshes the interactive Xref and call-graph inspector dialog.
+ *
+ * Instantiates the XrefInspectorDialog on first access, connects its addressActivated
+ * signal to the DisassemblyView addressSelected pipeline, builds a 5-line context preview
+ * around the target address, and activates the dialog window.
+ *
+ * @param targetAddr Focus virtual memory address.
+ * @return Pointer to the active XrefInspectorDialog.
+ */
+XrefInspectorDialog* DisassemblyView::openXrefInspector(uint64_t targetAddr) {
+  // Lazily construct dialog instance and connect navigation signal
+  if (!m_xrefDialog) {
+    m_xrefDialog = new XrefInspectorDialog(this);
+    connect(m_xrefDialog, &XrefInspectorDialog::addressActivated,
+            this, &DisassemblyView::addressSelected);
+  }
+
+  // Extract structured incoming and outgoing cross-references
+  const auto incoming = incomingXrefs(targetAddr);
+  const auto outgoing = outgoingXrefs(targetAddr);
+
+  // Build context preview snippet showing the surrounding disassembly window
+  QString preview;
+  int lineIdx = m_addrToLine.value(targetAddr, -1);
+  const QString fullText = toPlainText();
+  if (lineIdx >= 0 && !fullText.isEmpty()) {
+    const QStringList allLines = fullText.split('\n');
+    const int start = std::max(0, lineIdx - 2);
+    const int end = std::min(static_cast<int>(allLines.size()), lineIdx + 3);
+    for (int i = start; i < end; ++i) {
+      // Highlight target instruction pointer line with pointer arrow
+      preview += (i == lineIdx ? QStringLiteral("=> ") : QStringLiteral("   ")) +
+                 allLines[i] + QStringLiteral("\n");
+    }
+  } else {
+    // Fallback telemetry summary when linear line mapping is unavailable
+    preview = QStringLiteral("Address: 0x%1\nIncoming: %2\nOutgoing: %3")
+                  .arg(targetAddr, 8, 16, QChar('0'))
+                  .arg(incoming.size())
+                  .arg(outgoing.size());
+  }
+
+  // Populate dialog collections and present to user
+  m_xrefDialog->setTargetAddress(targetAddr);
+  m_xrefDialog->setXrefs(incoming, outgoing, preview);
+  m_xrefDialog->show();
+  m_xrefDialog->raise();
+  m_xrefDialog->activateWindow();
+  return m_xrefDialog;
 }
 
 }  // namespace gridlock::ui

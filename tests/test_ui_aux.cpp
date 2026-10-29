@@ -35,6 +35,7 @@
 #include "../src/core/utils/CliParser.cpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/XrefInspectorDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
@@ -684,4 +685,71 @@ void TestMainWindowUI::testElfBinaryInspectorAndStaticTargetLoad() {
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(disasmView != nullptr);
     QVERIFY(!disasmView->toPlainText().isEmpty());
+}
+
+/**
+ * @brief Tests interactive Xref extraction, incoming/outgoing call graph analysis, and inspector dialog sync.
+ */
+void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
+    gridlock::ui::MainWindow mainWindow;
+    // 1. Load preview fixture providing canonical multi-rank MPI loop disassembly
+    mainWindow.loadPreviewFixture();
+
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(disasm != nullptr);
+
+    // 2. Verify structured incoming cross-references targeting the barrier loop header 0x00401149
+    const auto incoming = disasm->incomingXrefs(0x00401149ULL);
+    QVERIFY(incoming.size() >= 2);
+    // Ensure back-edge jumps from loop bottom (0x401163, 0x40116e) are detected
+    bool foundBackEdge = false;
+    for (const auto& xr : incoming) {
+        QCOMPARE(xr.toAddress, 0x00401149ULL);
+        if (xr.fromAddress == 0x00401163ULL || xr.fromAddress == 0x0040116eULL) {
+            foundBackEdge = true;
+        }
+        QVERIFY(xr.type == QStringLiteral("JMP") || xr.type == QStringLiteral("CJMP"));
+    }
+    QVERIFY(foundBackEdge);
+
+    // 3. Verify structured outgoing cross-references originating from function 0x00401120
+    const auto outgoing = disasm->outgoingXrefs(0x00401120ULL);
+    QVERIFY(outgoing.size() >= 2);
+    bool foundMpiInitCall = false;
+    bool foundMpiFinalizeCall = false;
+    for (const auto& xr : outgoing) {
+        if (xr.type == QStringLiteral("CALL")) {
+            if (xr.toAddress == 0x00401050ULL || xr.instructionText.contains(QStringLiteral("MPI_Init"))) {
+                foundMpiInitCall = true;
+            }
+            if (xr.toAddress == 0x00401060ULL || xr.instructionText.contains(QStringLiteral("MPI_Finalize"))) {
+                foundMpiFinalizeCall = true;
+            }
+        }
+    }
+    QVERIFY(foundMpiInitCall);
+    QVERIFY(foundMpiFinalizeCall);
+
+    // 4. Open XrefInspectorDialog at address 0x00401149
+    auto* dialog = disasm->openXrefInspector(0x00401149ULL);
+    QVERIFY(dialog != nullptr);
+    QVERIFY(dialog->incomingRowCount() >= 2);
+    QVERIFY(dialog->outgoingRowCount() >= 2);
+    QVERIFY(!dialog->previewText().isEmpty());
+
+    // 5. Test filtering references by symbol substring
+    dialog->setFilterText(QStringLiteral("MPI_Init"));
+    QVERIFY(dialog->outgoingRowCount() >= 1);
+    dialog->setFilterText(QString());
+    QVERIFY(dialog->outgoingRowCount() >= 2);
+
+    // 6. Test activating an incoming xref row to trigger cross-pane address synchronization
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    QVERIFY(memView != nullptr);
+    const uint64_t targetCaller = incoming.first().fromAddress;
+    QVERIFY(dialog->activateIncomingXref(0));
+
+    // Verify DisassemblyView and MemView are synchronized to the caller address
+    QCOMPARE(disasm->currentAddress(), targetCaller);
+    QCOMPARE(memView->currentBaseAddress(), targetCaller);
 }

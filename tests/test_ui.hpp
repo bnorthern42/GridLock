@@ -108,4 +108,7 @@ private slots:
 
     /** @brief Verifies native ELF64 binary parsing, symbols, .rodata strings, and target loading. */
     void testElfBinaryInspectorAndStaticTargetLoad();
+
+    /** @brief Verifies interactive Xref extraction, incoming/outgoing call graph analysis, and inspector dialog sync. */
+    void testInteractiveXrefInspectorAndCallGraphSync();
 };
