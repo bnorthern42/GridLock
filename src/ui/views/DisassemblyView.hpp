@@ -216,6 +216,8 @@ public:
     QStringList contextActionNamesForAddress(uint64_t address) const;
     /// Executes a named cross-view context menu action for the specified instruction address.
     bool triggerContextAction(uint64_t address, const QString& actionName);
+    /// Returns the unclipped pixel width computed for the CFG basic block starting at blockStartAddr.
+    int blockWidthForAddress(uint64_t blockStartAddr) const;
 
 signals:
     /// Emitted when an instruction address is selected by click or seek.

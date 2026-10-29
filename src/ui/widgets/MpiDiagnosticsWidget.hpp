@@ -8,9 +8,13 @@
  * collective communication verification, and point-to-point network log tracking.
  */
 
-#include <QWidget>
-#include <QTabWidget>
+#include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
+#include <QPushButton>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QWidget>
 
 namespace gridlock::core {
 struct DeadlockInfo;
@@ -37,6 +41,12 @@ public:
      * @brief Destructor.
      */
     ~MpiDiagnosticsWidget() override = default;
+
+    /**
+     * @brief Returns the number of visible rank rows in the Deadlock Analyzer wait-state table.
+     * @return Number of populated rank wait-state rows.
+     */
+    int rankWaitTableRowCount() const;
 
 signals:
     /**
@@ -71,9 +81,29 @@ private slots:
      */
     void onItemDoubleClicked(QListWidgetItem* item);
 
+    /**
+     * @brief Filters rows in the rank wait-state table by rank ID, primitive, or state.
+     * @param filterText Substring filter query.
+     */
+    void filterRankTable(const QString& filterText);
+
 private:
+    /**
+     * @brief Populates default cluster rank wait-state telemetry rows into m_rankWaitTable.
+     */
+    void populateDefaultRankTelemetry();
+
     /// Tab widget container.
     QTabWidget* m_tabWidget = nullptr;
+
+    /// Status badge label in the 26px control strip.
+    QLabel* m_statusBadge = nullptr;
+
+    /// Filter input box in the 26px control strip.
+    QLineEdit* m_filterEdit = nullptr;
+
+    /// Structured 6-column rank wait-state table inside the Deadlock Analyzer tab.
+    QTableWidget* m_rankWaitTable = nullptr;
 
     /// Deadlock alert listing widget.
     QListWidget* m_deadlockList = nullptr;

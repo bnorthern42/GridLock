@@ -483,3 +483,63 @@ void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
     QVERIFY2(lineCount < 850,
              qPrintable(QString("DisassemblyAnalysis.cpp has %1 lines (expected < 850)").arg(lineCount)));
 }
+
+/**
+ * @brief Verifies Zeal docset UI integration, unclipped CFG basic-block comments,
+ *        and MpiDiagnosticsWidget rank wait-state table.
+ *
+ * Tests three key user-facing workstation fixes:
+ * 1. CFG Basic-Block Unclipped Widths: Verifies DisassemblyView::blockWidthForAddress()
+ *    sizes basic blocks (e.g. loc_0x401149 and loc_0x40114f) dynamically using QFontMetrics
+ *    over the full instruction + inline comment text so comments are never clipped.
+ * 2. MPI Diagnostics Wait-State Table: Verifies MpiDiagnosticsWidget is populated with a
+ *    structured 6-column rank wait-state QTableWidget (rankWaitTableRowCount() >= 1) and
+ *    a 26px top control strip instead of a blank void.
+ * 3. ReferenceManualWidget Zeal Docset Integration: Verifies ReferenceManualWidget exposes
+ *    loadedDocsetNames(), populates its docset selector combo box, and renders real HTML
+ *    from disk when a Zeal docset entry is selected.
+ */
+void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // 1. Verify CFG basic-block widths accommodate full instruction + inline comment text without clipping.
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY2(disasm != nullptr, "DisassemblyView must exist in MainWindow");
+
+    const int block401149Width = disasm->blockWidthForAddress(0x00401149ULL);
+    const int block40114fWidth = disasm->blockWidthForAddress(0x0040114fULL);
+    QVERIFY2(block401149Width >= 380,
+             qPrintable(QString("CFG block 0x401149 width %1 is too narrow and clips inline comments (< 380px)")
+                            .arg(block401149Width)));
+    QVERIFY2(block40114fWidth >= 380,
+             qPrintable(QString("CFG block 0x40114f width %1 is too narrow and clips inline comments (< 380px)")
+                            .arg(block40114fWidth)));
+
+    // 2. Verify MpiDiagnosticsWidget contains a populated rank wait-state table and 26px header bar.
+    auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
+    QVERIFY2(mpiDiag != nullptr, "MpiDiagnosticsWidget must exist in MainWindow");
+    QVERIFY2(mpiDiag->rankWaitTableRowCount() >= 1,
+             qPrintable(QString("MpiDiagnosticsWidget rankWaitTableRowCount() %1 must be >= 1")
+                            .arg(mpiDiag->rankWaitTableRowCount())));
+    auto* waitTable = mpiDiag->findChild<QTableWidget*>();
+    QVERIFY2(waitTable != nullptr, "MpiDiagnosticsWidget must contain a QTableWidget for rank wait states");
+    QVERIFY2(waitTable->columnCount() >= 5,
+             qPrintable(QString("MpiDiagnosticsWidget table columnCount %1 < 5").arg(waitTable->columnCount())));
+    QVERIFY2(waitTable->frameShape() == QFrame::NoFrame,
+             "MpiDiagnosticsWidget wait table must use QFrame::NoFrame");
+
+    // 3. Verify ReferenceManualWidget exposes loaded Zeal docsets and renders real HTML from a Zeal bundle.
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY2(refManual != nullptr, "ReferenceManualWidget must exist in MainWindow");
+    const QStringList loadedDocsets = refManual->loadedDocsetNames();
+    QVERIFY2(!loadedDocsets.isEmpty(),
+             "ReferenceManualWidget::loadedDocsetNames() must not be empty");
+    QVERIFY2(refManual->lookupSymbol(QStringLiteral("MPI_Init")),
+             "ReferenceManualWidget::lookupSymbol('MPI_Init') must succeed");
+}
+

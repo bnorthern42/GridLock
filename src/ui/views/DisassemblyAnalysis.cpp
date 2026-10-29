@@ -519,6 +519,51 @@ QRect DisassemblyView::minimapRect() const {
 }
 
 /**
+ * @brief Computes the unclipped pixel width for the CFG basic block starting at blockStartAddr.
+ *
+ * Uses QFontMetrics::horizontalAdvance over every formatted instruction line (including
+ * inline comments) and the block header bar (including rank occupancy and deadlock badges)
+ * plus 32px horizontal padding so zero text or badges are ever clipped at the right border.
+ *
+ * @param blockStartAddr 64-bit starting instruction address of the basic block.
+ * @return Computed basic-block box width in pixels, or 0 if blockStartAddr is not found.
+ */
+int DisassemblyView::blockWidthForAddress(uint64_t blockStartAddr) const {
+  QFont monoFont(QStringLiteral("JetBrains Mono"), 9);
+  monoFont.setStyleHint(QFont::Monospace);
+  const QFontMetrics fm(monoFont);
+
+  for (int i = 0; i < m_basicBlocks.size(); ++i) {
+    const DisasmBasicBlock &bb = m_basicBlocks[i];
+    if (bb.startAddress != blockStartAddr) {
+      continue;
+    }
+    QStringList renderLines;
+    if (i == 0) {
+      renderLines << QStringLiteral("(fcn) %1").arg(m_functionSignature);
+      renderLines << QStringLiteral("; arg int argc @ rbp-0x88");
+      renderLines << QStringLiteral("; arg char **argv @ rbp-0x90");
+    }
+    for (const QString &l : bb.lines) {
+      renderLines << l;
+    }
+
+    // Measure header title + rank occupancy badge width.
+    const QString hdrTitle = QStringLiteral("loc_0x%1  [0x%1 .. 0x%2]")
+                                 .arg(bb.startAddress, 6, 16, QChar('0'))
+                                 .arg(bb.endAddress, 6, 16, QChar('0'));
+    int maxPixelW = fm.horizontalAdvance(hdrTitle) + 96;
+    for (const QString &l : renderLines) {
+      // Measure full instruction + inline comment line using both exact advance and char-cell floor.
+      const int charCellW = static_cast<int>(l.length()) * qMax(7, fm.horizontalAdvance(QLatin1Char('M')));
+      maxPixelW = qMax(maxPixelW, qMax(fm.horizontalAdvance(l), charCellW));
+    }
+    return qMax(280, maxPixelW + 32);
+  }
+  return 0;
+}
+
+/**
  * @brief Constructs the 2D interactive Control Flow Graph (CFG) scene.
  *
  * Traverses basic blocks, formats instruction text items with syntax highlighting
@@ -563,14 +608,8 @@ void DisassemblyView::rebuildCfgScene() {
       renderLines << l;
     }
 
-    int maxChars = 28;
-    for (const QString &l : renderLines) {
-      maxChars = qMax(maxChars, static_cast<int>(l.length()));
-    }
-
-    // Calculate bounding box dimensions based on font metrics and line count
-    const qreal boxW =
-        qBound(260.0, maxChars * fm.horizontalAdvance('M') + 20.0, 420.0);
+    // Dynamically compute unclipped basic-block width across all instruction + comment lines and header badges.
+    const qreal boxW = static_cast<qreal>(blockWidthForAddress(bb.startAddress));
     const qreal headerH = 20.0;
     const qreal lineH = fm.height() + 2.0;
     const qreal boxH = headerH + renderLines.size() * lineH + 8.0;
@@ -719,32 +758,23 @@ void DisassemblyView::rebuildCfgScene() {
 
   // Step 2: Route orthogonal Manhattan edge connections between blocks
   for (const DisasmBasicBlock &bb : std::as_const(m_basicBlocks)) {
-    if (!nodeGeoms.contains(bb.startAddress)) {
-      continue;
-    }
+    if (!nodeGeoms.contains(bb.startAddress)) continue;
     const QRectF srcRect = nodeGeoms.value(bb.startAddress).rect;
 
     for (uint64_t succAddr : bb.successors) {
-      if (!nodeGeoms.contains(succAddr)) {
-        continue;
-      }
+      if (!nodeGeoms.contains(succAddr)) continue;
       const QRectF dstRect = nodeGeoms.value(succAddr).rect;
 
       // Color edges: green for true branch, red for false/fallthrough branch, blue for unconditional
       QColor edgeColor("#569cd6");
       qreal portOffset = 0.0;
       if (bb.trueTarget != 0 && bb.falseTarget != 0) {
-        if (succAddr == bb.trueTarget) {
-          edgeColor = QColor("#4ec9b0");
-          portOffset = 14.0;
-        } else {
-          edgeColor = QColor("#f44747");
-          portOffset = -14.0;
-        }
+        edgeColor = (succAddr == bb.trueTarget) ? QColor("#4ec9b0") : QColor("#f44747");
+        portOffset = (succAddr == bb.trueTarget) ? 14.0 : -14.0;
       }
 
-      QPointF startPt(srcRect.center().x() + portOffset, srcRect.bottom());
-      QPointF endPt(dstRect.center().x(), dstRect.top());
+      const QPointF startPt(srcRect.center().x() + portOffset, srcRect.bottom());
+      const QPointF endPt(dstRect.center().x(), dstRect.top());
 
       // Manhattan orthogonal path routing
       QPainterPath path(startPt);
@@ -764,25 +794,19 @@ void DisassemblyView::rebuildCfgScene() {
         path.lineTo(endPt);
       }
 
-      auto *edgeItem = m_cfgScene->addPath(path, QPen(edgeColor, 1.8));
-      edgeItem->setZValue(0.5);
+      m_cfgScene->addPath(path, QPen(edgeColor, 1.8))->setZValue(0.5);
 
       // Render triangular arrowhead pointing at destination block top center
       QPolygonF arrowHead;
       arrowHead << endPt << QPointF(endPt.x() - 4.0, endPt.y() - 7.0)
                 << QPointF(endPt.x() + 4.0, endPt.y() - 7.0);
-      auto *headItem = m_cfgScene->addPolygon(arrowHead, QPen(edgeColor),
-                                              QBrush(edgeColor));
-      headItem->setZValue(2.5);
+      m_cfgScene->addPolygon(arrowHead, QPen(edgeColor), QBrush(edgeColor))->setZValue(2.5);
     }
   }
 
   // Adjust scene rectangle with padding and center on the active block
-  m_cfgScene->setSceneRect(
-      m_cfgScene->itemsBoundingRect().adjusted(-24, -16, 24, 24));
-  if (m_cfgView && !activeBlockRect.isNull()) {
-    m_cfgView->centerOn(activeBlockRect.center());
-  }
+  m_cfgScene->setSceneRect(m_cfgScene->itemsBoundingRect().adjusted(-24, -16, 24, 24));
+  if (m_cfgView && !activeBlockRect.isNull()) m_cfgView->centerOn(activeBlockRect.center());
 }
 
 /**

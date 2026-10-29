@@ -40,8 +40,32 @@ public:
     /** @brief Returns the currently configured `.docset` root directory path. */
     QString getDocsetDirectory() const;
 
-    /** @brief Scans the docset directory and attaches up to 10 SQLite `docSet.dsidx` databases. */
+    /** @brief Scans the docset directory and attaches SQLite `docSet.dsidx` databases. */
     void loadDocsets();
+
+    /**
+     * @brief Returns the standard system and XDG user directories searched for Zeal `.docset` bundles.
+     * @return Ordered list of candidate Zeal docset directory paths.
+     */
+    QStringList defaultZealSearchPaths() const;
+
+    /**
+     * @brief Discovers and attaches all `.docset` bundles across configured and standard Zeal paths.
+     */
+    void discoverAndLoadSystemDocsets();
+
+    /**
+     * @brief Returns the display names of all currently loaded `.docset` bundles (e.g., "C", "C++", "Bash").
+     * @return List of loaded docset bundle names without the `.docset` suffix.
+     */
+    QStringList loadedDocsetNames() const;
+
+    /**
+     * @brief Loads and styles the HTML documentation file at fullPath with the dark-slate reader theme.
+     * @param fullPath Absolute file path inside a `.docset/Contents/Resources/Documents/` directory (may include `#anchor`).
+     * @return Dark-slate styled HTML content, or empty string if file cannot be read.
+     */
+    QString getEntryHtmlForPath(const QString& fullPath) const;
 
     /**
      * @brief Asynchronously inspects project source headers to recommend docsets (e.g., OpenMPI, C++).
@@ -51,11 +75,13 @@ public:
     QFuture<QStringList> suggestDocsets(const QString& projectRoot);
 
     /**
-     * @brief Searches all attached docset `searchIndex` tables for matching symbol names.
-     * @param query Substring keyword to match against `searchIndex.name`.
+     * @brief Searches attached docset `searchIndex` / `ZTOKEN` tables for matching symbol names.
+     * @param query Substring keyword to match against symbol names.
+     * @param docsetFilter Optional docset bundle name filter (empty or "All Docsets" searches all).
      * @return Up to 50 `<SymbolName, AbsoluteHtmlFilePath>` pairs.
      */
-    QList<QPair<QString, QString>> search(const QString& query);
+    QList<QPair<QString, QString>> search(const QString& query,
+                                          const QString& docsetFilter = QString());
 
     /** @brief Returns the list of absolute paths to all currently attached `.docset` bundles. */
     QStringList getActiveDocsetPaths() const;

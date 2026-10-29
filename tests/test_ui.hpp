@@ -126,4 +126,7 @@ private slots:
 
     /** @brief Verifies cross-pane workflow bridges (Evaluator/Variables -> Watch, Disassembly context actions -> Reference Manual) and DisassemblyAnalysis line count. */
     void testCrossPaneWorkflowBridgesAndContextActions();
+
+    /** @brief Verifies Zeal docset UI integration, unclipped CFG basic-block comments, and MpiDiagnosticsWidget rank wait-state table. */
+    void testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable();
 };

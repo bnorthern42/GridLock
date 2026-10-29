@@ -15,8 +15,12 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
+#include <QRegularExpression>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QtConcurrent/QtConcurrent>
 
 #include "ConfigManager.hpp"
@@ -31,17 +35,17 @@ constexpr int kMaxSearchResults = 50;
 } // namespace
 
 /**
- * @brief Initializes the named QSQLITE connection and loads docsets from the configured directory.
+ * @brief Initializes the named QSQLITE connection and discovers installed Zeal docsets.
  */
 DocsetManager::DocsetManager(QObject* parent) : QObject(parent) {
     // Register a dedicated SQLite connection handle for docset index queries.
     m_db = QSqlDatabase::addDatabase("QSQLITE", "DocsetDB");
     m_docsetDir = ConfigManager::instance().getDocsetDirectory();
-    if (m_docsetDir.isEmpty()) {
-        // Fall back to the standard XDG Zeal docset storage path on Linux.
+    if (m_docsetDir.isEmpty() || !QDir(m_docsetDir).exists()) {
+        // Fall back to the standard XDG Zeal docset storage path on Linux when unset or stale.
         m_docsetDir = QDir::homePath() + "/.local/share/Zeal/Zeal/docsets";
     }
-    loadDocsets();
+    discoverAndLoadSystemDocsets();
 }
 
 /**
@@ -54,11 +58,17 @@ DocsetManager::~DocsetManager() {
 }
 
 /**
- * @brief Persists a new docset directory path in ConfigManager and re-indexes `.docset` bundles.
+ * @brief Updates the active docset directory path and re-indexes `.docset` bundles inside it.
+ *
+ * Avoids persisting temporary `/tmp` test directories into user QSettings so unit tests
+ * never overwrite the user's configured Zeal docset path.
  */
 void DocsetManager::setDocsetDirectory(const QString& path) {
     m_docsetDir = path;
-    ConfigManager::instance().setDocsetDirectory(path);
+    const QString tempRoot = QDir::tempPath();
+    if (!path.startsWith(tempRoot) && !path.startsWith(QStringLiteral("/tmp/"))) {
+        ConfigManager::instance().setDocsetDirectory(path);
+    }
     loadDocsets();
 }
 
@@ -70,7 +80,33 @@ QString DocsetManager::getDocsetDirectory() const {
 }
 
 /**
- * @brief Discovers `.docset` subdirectories and attaches their `docSet.dsidx` SQLite files.
+ * @brief Returns standard system and user XDG directories searched for installed Zeal docsets.
+ * @return Ordered list of candidate Zeal docset directory paths.
+ */
+QStringList DocsetManager::defaultZealSearchPaths() const {
+    QStringList paths;
+    // 1. User-configured docset directory from ConfigManager (if valid).
+    const QString cfgPath = ConfigManager::instance().getDocsetDirectory().trimmed();
+    if (!cfgPath.isEmpty()) {
+        paths.append(cfgPath);
+    }
+    // 2. Standard Qt GenericDataLocation for Zeal (`~/.local/share/Zeal/Zeal/docsets`).
+    const QString xdgData = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (!xdgData.isEmpty()) {
+        paths.append(xdgData + QStringLiteral("/Zeal/Zeal/docsets"));
+        paths.append(xdgData + QStringLiteral("/zeal/docsets"));
+    }
+    // 3. Explicit home directory XDG paths and system-wide `/usr/share` locations.
+    paths.append(QDir::homePath() + QStringLiteral("/.local/share/Zeal/Zeal/docsets"));
+    paths.append(QDir::homePath() + QStringLiteral("/.local/share/zeal/docsets"));
+    paths.append(QStringLiteral("/usr/share/zeal/docsets"));
+    paths.append(QStringLiteral("/usr/local/share/zeal/docsets"));
+    paths.removeDuplicates();
+    return paths;
+}
+
+/**
+ * @brief Discovers `.docset` subdirectories in `m_docsetDir` and attaches their SQLite indices.
  */
 void DocsetManager::loadDocsets() {
     if (m_db.isOpen()) {
@@ -89,8 +125,13 @@ void DocsetManager::loadDocsets() {
         return;
     }
 
-    const QStringList filters = {QStringLiteral("*.docset")};
-    const QFileInfoList docsets = dir.entryInfoList(filters, QDir::Dirs | QDir::NoDotAndDotDot);
+    QFileInfoList docsets;
+    if (m_docsetDir.endsWith(QStringLiteral(".docset"), Qt::CaseInsensitive)) {
+        docsets.append(QFileInfo(m_docsetDir));
+    } else {
+        const QStringList filters = {QStringLiteral("*.docset")};
+        docsets = dir.entryInfoList(filters, QDir::Dirs | QDir::NoDotAndDotDot);
+    }
 
     int count = 0;
     for (const auto& ds : docsets) {
@@ -110,30 +151,221 @@ void DocsetManager::loadDocsets() {
 }
 
 /**
- * @brief Queries `searchIndex` across all attached docset databases for symbols matching query.
+ * @brief Scans all configured and default Zeal directories and attaches discovered `.docset` bundles.
+ *
+ * Iterates through candidate directories (`m_docsetDir` plus `defaultZealSearchPaths()`),
+ * supports both parent directories containing `*.docset` subdirectories and direct `.docset`
+ * bundle paths, deduplicates by bundle base name, and attaches up to `kMaxAttachedDocsets`
+ * SQLite `docSet.dsidx` databases into the in-memory coordinator connection.
  */
-QList<QPair<QString, QString>> DocsetManager::search(const QString& query) {
-    QList<QPair<QString, QString>> results;
-    if (m_db.isOpen() && !m_activeDocsetPaths.isEmpty()) {
-        // Iterate through each attached schema `db<i>` until up to kMaxSearchResults matches are collected.
-        for (int i = 0; i < m_activeDocsetPaths.size(); ++i) {
+void DocsetManager::discoverAndLoadSystemDocsets() {
+    // Close any previously opened in-memory SQLite coordinator database.
+    if (m_db.isOpen()) {
+        m_db.close();
+    }
+    m_activeDocsetPaths.clear();
+
+    // Open fresh in-memory coordinator database to host attached `db0..db9` schemas.
+    m_db.setDatabaseName(":memory:");
+    if (!m_db.open()) {
+        return;
+    }
+
+    // Collect deduplicated candidate search directories from user config and XDG Zeal paths.
+    QStringList candidateDirs;
+    if (!m_docsetDir.isEmpty()) {
+        candidateDirs.append(m_docsetDir);
+    }
+    candidateDirs.append(defaultZealSearchPaths());
+    candidateDirs.removeDuplicates();
+
+    // Track attached docset bundle names so duplicate installations are not attached twice.
+    QSet<QString> seenDocsetNames;
+    int count = 0;
+    for (const QString& rootPath : candidateDirs) {
+        const QFileInfo rootInfo(rootPath);
+        if (!rootInfo.exists()) {
+            continue;
+        }
+        // Resolve either a direct `.docset` bundle path or all `*.docset` children of a directory.
+        QFileInfoList bundles;
+        if (rootInfo.isDir() && rootPath.endsWith(QStringLiteral(".docset"), Qt::CaseInsensitive)) {
+            bundles.append(rootInfo);
+        } else if (rootInfo.isDir()) {
+            const QDir dir(rootPath);
+            bundles = dir.entryInfoList({QStringLiteral("*.docset")}, QDir::Dirs | QDir::NoDotAndDotDot);
+        }
+
+        // Attach each discovered bundle's `Contents/Resources/docSet.dsidx` SQLite index.
+        for (const QFileInfo& ds : bundles) {
+            const QString bundleName = ds.completeBaseName();
+            if (seenDocsetNames.contains(bundleName)) {
+                continue;
+            }
+            const QString dbPath = ds.absoluteFilePath() + QStringLiteral("/Contents/Resources/docSet.dsidx");
+            if (!QFile::exists(dbPath)) {
+                continue;
+            }
+            // Execute SQLite ATTACH DATABASE statement to mount bundle schema as `db<count>`.
+            const QString attachQuery = QStringLiteral("ATTACH DATABASE '%1' AS db%2").arg(dbPath).arg(count);
             QSqlQuery q(m_db);
-            const QString sql = QString("SELECT name, path FROM db%1.searchIndex WHERE name LIKE '%%2%' LIMIT %3;")
-                                    .arg(i)
-                                    .arg(query)
-                                    .arg(kMaxSearchResults);
-            if (q.exec(sql)) {
+            if (q.exec(attachQuery)) {
+                seenDocsetNames.insert(bundleName);
+                m_activeDocsetPaths.append(ds.absoluteFilePath());
+                count++;
+                // Stop once SQLite's per-connection attached database ceiling is reached.
+                if (count >= kMaxAttachedDocsets) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief Returns the display names of all currently attached `.docset` bundles.
+ * @return List of loaded docset bundle names without the `.docset` extension.
+ */
+QStringList DocsetManager::loadedDocsetNames() const {
+    QStringList names;
+    // Extract the bundle base name (e.g., "C", "C++", "Bash") from each active bundle path.
+    for (const QString& bundlePath : m_activeDocsetPaths) {
+        const QString base = QFileInfo(bundlePath).completeBaseName();
+        if (!base.isEmpty() && !names.contains(base)) {
+            names.append(base);
+        }
+    }
+    return names;
+}
+
+/**
+ * @brief Loads and styles a local `.docset` HTML file with the GridLock dark-slate reader theme.
+ *
+ * Strips Dash `<dash_entry_...>` metadata tags, URL `#fragment` anchors, and `?query` parameters
+ * before resolving the physical file on disk, scrubs `<script>` blocks and white backgrounds,
+ * and injects a cohesive `#16181d` dark-slate reader stylesheet.
+ *
+ * @param fullPath Full path to the HTML document inside `Contents/Resources/Documents/`.
+ * @return Dark-slate styled HTML string, or empty string if file cannot be read.
+ */
+QString DocsetManager::getEntryHtmlForPath(const QString& fullPath) const {
+    if (fullPath.startsWith(QStringLiteral("builtin://"))) {
+        return lookupBuiltInManualHtml(fullPath.mid(10));
+    }
+
+    // Strip any embedded <dash_entry_...> metadata tags, #fragment anchors, and ?query strings.
+    QString cleanPath = fullPath;
+    cleanPath.remove(QRegularExpression(QStringLiteral("<[^>]+>")));
+    const int hashIdx = cleanPath.indexOf(QLatin1Char('#'));
+    if (hashIdx != -1) {
+        cleanPath = cleanPath.left(hashIdx);
+    }
+    const int queryIdx = cleanPath.indexOf(QLatin1Char('?'));
+    if (queryIdx != -1) {
+        cleanPath = cleanPath.left(queryIdx);
+    }
+    cleanPath = QUrl::fromPercentEncoding(cleanPath.toUtf8());
+
+    QFile file(cleanPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+
+    QString htmlOutput = QString::fromUtf8(file.readAll());
+    const auto ciOpt = QRegularExpression::CaseInsensitiveOption |
+                       QRegularExpression::DotMatchesEverythingOption;
+
+    // Strip external JavaScript and legacy inline style blocks that force white backgrounds.
+    htmlOutput.replace(QRegularExpression(QStringLiteral("<script[^>]*>.*?</script>"), ciOpt), QString());
+    htmlOutput.replace(QRegularExpression(QStringLiteral("<style[^>]*>.*?</style>"), ciOpt), QString());
+    htmlOutput.replace(
+        QRegularExpression(QStringLiteral("<body[^>]*>"), QRegularExpression::CaseInsensitiveOption),
+        QStringLiteral("<body style=\"background-color: #16181d; color: #d7dae0;\">"));
+
+    // Inject GridLock dark-slate reader stylesheet so C/C++/Bash/MPI Zeal pages look native.
+    const QString darkReaderCss = QStringLiteral(
+        "<style>"
+        "html, body, div, p, ul, ol, li, dl, dt, dd, span { "
+        "background-color: #16181d !important; color: #d7dae0 !important; "
+        "font-family: 'Inter', sans-serif; font-size: 12px; line-height: 1.45; }"
+        "body { padding: 12px 16px; margin: 0px; }"
+        "h1, h2, h3, h4 { color: #e5c07b !important; font-family: 'JetBrains Mono', monospace; }"
+        "pre, code, tt, .t-dsc, .mw-geshi { background-color: #1e222a !important; "
+        "color: #4ec9b0 !important; border: 1px solid #2c313a !important; "
+        "font-family: 'JetBrains Mono', monospace; padding: 4px 6px; }"
+        "a, a:visited, a:hover { color: #61afef !important; text-decoration: none; }"
+        "table, tr, th, td { border-color: #2c313a !important; background-color: #1b1e24 !important; "
+        "color: #d7dae0 !important; border-collapse: collapse; padding: 3px 6px; }"
+        "</style>");
+
+    if (htmlOutput.contains(QStringLiteral("</head>"), Qt::CaseInsensitive)) {
+        htmlOutput.replace(QRegularExpression(QStringLiteral("</head>"),
+                                              QRegularExpression::CaseInsensitiveOption),
+                           darkReaderCss + QStringLiteral("</head>"));
+    } else {
+        htmlOutput = darkReaderCss + htmlOutput;
+    }
+    return htmlOutput;
+}
+
+/**
+ * @brief Queries `searchIndex` (with `ZTOKEN` CoreData fallback) across attached docsets.
+ */
+QList<QPair<QString, QString>> DocsetManager::search(const QString& query,
+                                                     const QString& docsetFilter) {
+    QList<QPair<QString, QString>> results;
+    const QString filterTrimmed = docsetFilter.trimmed();
+    const bool filterBuiltInOnly =
+        filterTrimmed.compare(QStringLiteral("Built-in MPI/ABI"), Qt::CaseInsensitive) == 0;
+
+    if (!filterBuiltInOnly && m_db.isOpen() && !m_activeDocsetPaths.isEmpty()) {
+        // Distribute per-docset row budget when browsing all docsets with an empty query
+        // so every installed Zeal docset (C, C++, Bash, etc.) is represented in the list.
+        const bool allDocsets =
+            filterTrimmed.isEmpty() ||
+            filterTrimmed.startsWith(QStringLiteral("All Docsets"), Qt::CaseInsensitive);
+        const int perDocsetLimit =
+            (query.trimmed().isEmpty() && allDocsets && m_activeDocsetPaths.size() > 1)
+                ? qMax(6, kMaxSearchResults / static_cast<int>(m_activeDocsetPaths.size()))
+                : kMaxSearchResults;
+
+        for (int i = 0; i < m_activeDocsetPaths.size(); ++i) {
+            const QString bundleName = QFileInfo(m_activeDocsetPaths[i]).completeBaseName();
+            if (!allDocsets && bundleName.compare(filterTrimmed, Qt::CaseInsensitive) != 0) {
+                continue;
+            }
+
+            QSqlQuery q(m_db);
+            // Primary Dash/Zeal schema: searchIndex(name, type, path).
+            const QString sql =
+                QStringLiteral("SELECT name, path FROM db%1.searchIndex WHERE name LIKE '%%2%' LIMIT %3;")
+                    .arg(i)
+                    .arg(query)
+                    .arg(perDocsetLimit);
+            bool executed = q.exec(sql);
+            if (!executed) {
+                // Fallback Apple Dash / CoreData ZTOKEN schema.
+                const QString zSql = QStringLiteral(
+                    "SELECT t.ZTOKENNAME, f.ZPATH FROM db%1.ZTOKEN t "
+                    "JOIN db%1.ZTOKENMETAINFORMATION m ON t.ZMETAINFORMATION = m.Z_PK "
+                    "JOIN db%1.ZFILEPATH f ON m.ZFILE = f.Z_PK "
+                    "WHERE t.ZTOKENNAME LIKE '%%2%' LIMIT %3;")
+                    .arg(i)
+                    .arg(query)
+                    .arg(perDocsetLimit);
+                executed = q.exec(zSql);
+            }
+            if (executed) {
                 while (q.next()) {
                     const QString name = q.value(0).toString();
-                    // Strip optional `<dash_entry_...>` metadata prefixes embedded in Dash docset paths.
+                    // Strip all leading `<dash_entry_...>` metadata tags embedded in Dash docset paths.
                     QString rawPath = q.value(1).toString();
-                    const int lastBracket = rawPath.lastIndexOf('>');
-                    if (lastBracket != -1) {
-                        rawPath = rawPath.mid(lastBracket + 1).trimmed();
-                    }
+                    rawPath.remove(QRegularExpression(QStringLiteral("^(?:<[^>]+>)+")));
+                    rawPath = rawPath.trimmed();
 
-                    // Resolve the relative HTML path (including any `#anchor` fragment) inside Documents/.
-                    const QString path = m_activeDocsetPaths[i] + "/Contents/Resources/Documents/" + rawPath;
+                    // Resolve the relative HTML path inside Contents/Resources/Documents/.
+                    const QString path =
+                        m_activeDocsetPaths[i] + QStringLiteral("/Contents/Resources/Documents/") + rawPath;
                     results.append(qMakePair(name, path));
                     if (results.size() >= kMaxSearchResults) {
                         return results;
@@ -141,10 +373,12 @@ QList<QPair<QString, QString>> DocsetManager::search(const QString& query) {
                 }
             }
         }
-        return results;
+        if (!results.isEmpty() || !allDocsets) {
+            return results;
+        }
     }
 
-    // Fallback to built-in offline reference manual topics when no external .docset bundle is mounted.
+    // Fallback to built-in offline reference manual topics when requested or when no external match is found.
     const QString cleaned = normalizeSymbolName(query);
     for (const QString& topic : builtInTopics()) {
         if (cleaned.isEmpty() || topic.contains(cleaned, Qt::CaseInsensitive)) {

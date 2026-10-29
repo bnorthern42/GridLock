@@ -67,12 +67,19 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
     searchBarLayout->setContentsMargins(6, 2, 6, 2);
     searchBarLayout->setSpacing(4);
 
+    // Docset bundle filter dropdown (All Docsets, discovered Zeal docsets, and Built-in MPI/ABI).
+    m_docsetSelector = new QComboBox(searchBarContainer);
+    m_docsetSelector->setObjectName(QStringLiteral("docsetBundleSelector"));
+    m_docsetSelector->setFixedHeight(22);
+    m_docsetSelector->setMinimumWidth(96);
+    searchBarLayout->addWidget(m_docsetSelector);
+
     // Search query input field capped at 22px height.
     m_searchEdit = new QLineEdit(searchBarContainer);
     m_searchEdit->setObjectName(QStringLiteral("docsetSearchEdit"));
-    m_searchEdit->setPlaceholderText(QStringLiteral("Filter MPI / ABI topics..."));
+    m_searchEdit->setPlaceholderText(QStringLiteral("Search Zeal / MPI / C / C++ symbols..."));
     m_searchEdit->setFixedHeight(22);
-    searchBarLayout->addWidget(m_searchEdit);
+    searchBarLayout->addWidget(m_searchEdit, 1);
 
     // Results list widget populated dynamically by DocsetManager queries.
     m_resultsList = new QListWidget(leftWidget);
@@ -107,19 +114,22 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
     splitter->addWidget(leftWidget);
     splitter->addWidget(m_textBrowser);
     splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 4);
-    splitter->setSizes({210, 790});
+    splitter->setStretchFactor(1, 3);
+    splitter->setSizes({260, 740});
 
     mainLayout->addWidget(splitter, 1);
 
-    // Wire live incremental search query filtering and item selection triggers.
+    // Wire live incremental search query filtering, docset selector changes, and item selection triggers.
     connect(m_searchEdit, &QLineEdit::textChanged, this,
             &DocsetViewerWidget::performSearch);
+    connect(m_docsetSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        performSearch();
+    });
     connect(m_resultsList, &QListWidget::currentRowChanged, this,
             &DocsetViewerWidget::onResultClicked);
 
-    // Populate default built-in topics and render MPI_Init reference manual initially.
-    performSearch();
+    // Discover installed Zeal docsets, populate selector and results list, and render MPI_Init initially.
+    refreshDocsets();
     showSymbolDocumentation(QStringLiteral("MPI_Init"));
 }
 
@@ -127,6 +137,42 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
  * @brief Default virtual destructor for DocsetViewerWidget.
  */
 DocsetViewerWidget::~DocsetViewerWidget() = default;
+
+/**
+ * @brief Re-discovers installed Zeal docset bundles on disk and repopulates the selector combo box.
+ */
+void DocsetViewerWidget::refreshDocsets() {
+    auto& mgr = gridlock::core::DocsetManager::instance();
+    if (mgr.loadedDocsetNames().isEmpty()) {
+        mgr.discoverAndLoadSystemDocsets();
+    }
+    const QStringList zealNames = mgr.loadedDocsetNames();
+
+    if (m_docsetSelector) {
+        m_docsetSelector->blockSignals(true);
+        m_docsetSelector->clear();
+        m_docsetSelector->addItem(
+            QStringLiteral("All Docsets (%1)").arg(zealNames.size() + 1),
+            QStringLiteral("All Docsets"));
+        for (const QString& dsName : zealNames) {
+            m_docsetSelector->addItem(dsName, dsName);
+        }
+        m_docsetSelector->addItem(QStringLiteral("Built-in MPI/ABI"),
+                                  QStringLiteral("Built-in MPI/ABI"));
+        m_docsetSelector->blockSignals(false);
+    }
+    performSearch();
+}
+
+/**
+ * @brief Returns the list of loaded Zeal docset bundle names (plus Built-in MPI/ABI).
+ * @return Non-empty list of active docset names.
+ */
+QStringList DocsetViewerWidget::loadedDocsetNames() const {
+    QStringList names = gridlock::core::DocsetManager::instance().loadedDocsetNames();
+    names.append(QStringLiteral("Built-in MPI/ABI"));
+    return names;
+}
 
 /**
  * @brief Looks up and renders formatted HTML documentation for the specified symbol.
@@ -139,7 +185,23 @@ bool DocsetViewerWidget::showSymbolDocumentation(const QString& rawSymbol) {
         return false;
     }
 
-    const QString html = gridlock::core::DocsetManager::instance().lookupBuiltInManualHtml(normalized);
+    auto& mgr = gridlock::core::DocsetManager::instance();
+    // Check if an installed Zeal docset has an exact symbol match (unless it is a built-in MPI/ABI topic).
+    if (!mgr.builtInTopics().contains(normalized, Qt::CaseInsensitive)) {
+        const auto zealHits = mgr.search(normalized);
+        for (const auto& hit : zealHits) {
+            if (hit.first.compare(normalized, Qt::CaseInsensitive) == 0 &&
+                !hit.second.startsWith(QStringLiteral("builtin://"))) {
+                const QString zealHtml = mgr.getEntryHtmlForPath(hit.second);
+                if (!zealHtml.isEmpty()) {
+                    m_textBrowser->setHtml(zealHtml);
+                    return true;
+                }
+            }
+        }
+    }
+
+    const QString html = mgr.lookupBuiltInManualHtml(normalized);
     if (html.isEmpty()) {
         return false;
     }
@@ -159,23 +221,43 @@ bool DocsetViewerWidget::showSymbolDocumentation(const QString& rawSymbol) {
 }
 
 /**
- * @brief Executes an indexed search against active Dash/Zeal docsets or built-in topics.
+ * @brief Executes an indexed search against active Dash/Zeal docsets and built-in topics.
  *
- * Retrieves search hits matching the current query string from DocsetManager.
- * Clears prior results and populates the list view with symbol tokens and
- * document titles.
+ * Retrieves search hits matching the current query string and selected docset filter
+ * from DocsetManager, prepending matching built-in MPI/ABI topics when "All Docsets"
+ * is active so both MPI reference cards and installed Zeal docsets are immediately visible.
  */
 void DocsetViewerWidget::performSearch() {
-    const QString query = m_searchEdit->text().trimmed();
+    const QString query = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+    const QString docsetFilter =
+        (m_docsetSelector && m_docsetSelector->currentIndex() >= 0)
+            ? m_docsetSelector->currentData().toString()
+            : QStringLiteral("All Docsets");
+
     m_resultsList->clear();
     m_searchResults.clear();
 
-    // Dispatch query to the global DocsetManager indexer (falls back to built-in topics).
-    m_searchResults = gridlock::core::DocsetManager::instance().search(query);
-    if (m_searchResults.isEmpty()) {
-        for (const QString& topic : gridlock::core::DocsetManager::instance().builtInTopics()) {
+    auto& mgr = gridlock::core::DocsetManager::instance();
+    const bool includeBuiltIn =
+        docsetFilter.isEmpty() ||
+        docsetFilter.startsWith(QStringLiteral("All Docsets"), Qt::CaseInsensitive) ||
+        docsetFilter.compare(QStringLiteral("Built-in MPI/ABI"), Qt::CaseInsensitive) == 0;
+
+    // Include built-in MPI/ABI topics first when browsing All Docsets or Built-in MPI/ABI.
+    if (includeBuiltIn) {
+        for (const QString& topic : mgr.builtInTopics()) {
             if (query.isEmpty() || topic.contains(query, Qt::CaseInsensitive)) {
                 m_searchResults.append(qMakePair(topic, QStringLiteral("builtin://") + topic));
+            }
+        }
+    }
+
+    // Append matching entries from installed Zeal SQLite docsets.
+    if (docsetFilter.compare(QStringLiteral("Built-in MPI/ABI"), Qt::CaseInsensitive) != 0) {
+        const auto zealResults = mgr.search(query, docsetFilter);
+        for (const auto& entry : zealResults) {
+            if (!entry.second.startsWith(QStringLiteral("builtin://"))) {
+                m_searchResults.append(entry);
             }
         }
     }
@@ -204,86 +286,31 @@ void DocsetViewerWidget::onResultClicked(int row) {
         return;
     }
 
-    // Separate fragment anchor (e.g. #method_name) from physical file path.
-    QString filePath = htmlPath;
+    // Extract optional #anchor for scrolling and load styled dark-slate HTML via DocsetManager.
     QString anchorString;
-    const int hashIdx = filePath.indexOf('#');
+    const int hashIdx = htmlPath.indexOf(QLatin1Char('#'));
     if (hashIdx != -1) {
-        anchorString = filePath.mid(hashIdx + 1);
-        filePath = filePath.left(hashIdx);
+        anchorString = htmlPath.mid(hashIdx + 1);
     }
 
-    // Decode URL percent-encoded characters (e.g., %20 -> space).
-    filePath = QUrl::fromPercentEncoding(filePath.toUtf8());
-
-    // Attempt to open the local HTML file on disk.
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    const QString htmlOutput = gridlock::core::DocsetManager::instance().getEntryHtmlForPath(htmlPath);
+    if (htmlOutput.isEmpty()) {
         showSymbolDocumentation(symbolName);
         return;
     }
 
-    QString htmlOutput = file.readAll();
-
-    // Apply regex sanitization to scrub hardcoded light backgrounds from older docsets.
-    const auto options = QRegularExpression::CaseInsensitiveOption;
-    htmlOutput.replace(
-        QRegularExpression("background-color:\\s*(white|#fff|#ffffff);?", options),
-        "background-color: #16181d;");
-    htmlOutput.replace(
-        QRegularExpression("background:\\s*(white|#fff|#ffffff);?", options),
-        "background: #16181d;");
-    htmlOutput.replace(
-        QRegularExpression("color:\\s*(black|#000|#000000);?", options),
-        "color: #d7dae0;");
-    htmlOutput.replace(
-        QRegularExpression("bgcolor=[\"']?(white|#ffffff)[\"']?", options),
-        "bgcolor=\"#16181d\"");
-
-    // Enforce dark canvas styling on <body> and strip incompatible inline style blocks.
-    htmlOutput.replace(QRegularExpression("<body[^>]*>", options),
-                       "<body style=\"background-color: #16181d; color: #d7dae0;\">");
-    htmlOutput.replace(
-        QRegularExpression("<style[^>]*>.*?</style>",
-                           QRegularExpression::DotMatchesEverythingOption | options),
-        "");
-
-    // Unified dark theme stylesheet override.
-    const QString customCss = R"(
-<style>
-    html, body, div, p, table, tr, td, th, ul, li {
-        background-color: #16181d !important;
-        background: none !important; 
-        color: #d7dae0 !important;
+    // Set base URL to local directory so relative images and CSS resources resolve.
+    QString cleanFilePath = htmlPath;
+    cleanFilePath.remove(QRegularExpression(QStringLiteral("<[^>]+>")));
+    if (hashIdx != -1) {
+        cleanFilePath = cleanFilePath.left(cleanFilePath.indexOf(QLatin1Char('#')));
     }
-    a, a:visited, a:hover {
-        color: #61afef !important;
-        text-decoration: none !important;
-    }
-    pre, code, .mw-code {
-        background-color: #1e222a !important;
-        border: 1px solid #2c313a !important;
-        color: #e5c07b !important;
-    }
-</style>
-)";
-
-    // Inject custom CSS into <head> if present, or prepend directly.
-    if (htmlOutput.contains("</head>")) {
-        htmlOutput.replace("</head>", customCss + "</head>");
-    } else {
-        htmlOutput = customCss + htmlOutput;
-    }
-
-    // Set base URL to local directory so relative images and resources resolve.
-    const QFileInfo fileInfo(filePath);
-    const QString absoluteDirPath = fileInfo.absolutePath();
-    m_textBrowser->document()->setBaseUrl(
-        QUrl::fromLocalFile(absoluteDirPath + "/"));
+    cleanFilePath = QUrl::fromPercentEncoding(cleanFilePath.toUtf8());
+    const QFileInfo fileInfo(cleanFilePath);
+    m_textBrowser->document()->setBaseUrl(QUrl::fromLocalFile(fileInfo.absolutePath() + QStringLiteral("/")));
 
     m_textBrowser->setHtml(htmlOutput);
 
-    // Scroll to the targeted anchor if one was specified in the index URL.
     if (!anchorString.isEmpty()) {
         m_textBrowser->scrollToAnchor(anchorString);
     }
@@ -542,6 +569,14 @@ bool ReferenceManualWidget::lookupSymbol(const QString& rawSymbol) {
         m_tabWidget->setCurrentIndex(0);
     }
     return m_docsetViewer->showSymbolDocumentation(rawSymbol);
+}
+
+/**
+ * @brief Returns the list of loaded Zeal docset bundle names available in the viewer.
+ * @return Non-empty list of discovered Zeal docsets (plus Built-in MPI/ABI).
+ */
+QStringList ReferenceManualWidget::loadedDocsetNames() const {
+    return m_docsetViewer ? m_docsetViewer->loadedDocsetNames() : QStringList();
 }
 
 }  // namespace gridlock::ui

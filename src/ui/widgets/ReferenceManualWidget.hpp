@@ -9,13 +9,15 @@
  * and Linux system man page rendering.
  */
 
-#include <QWidget>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QTextBrowser>
-#include <QSplitter>
-#include <QTabWidget>
 #include <QProcess>
+#include <QSplitter>
+#include <QStringList>
+#include <QTabWidget>
+#include <QTextBrowser>
+#include <QWidget>
 
 namespace gridlock::ui {
 
@@ -45,6 +47,17 @@ public:
      */
     bool showSymbolDocumentation(const QString& rawSymbol);
 
+    /**
+     * @brief Re-discovers installed Zeal docsets and refreshes the docset selector combo box.
+     */
+    void refreshDocsets();
+
+    /**
+     * @brief Returns the list of loaded Zeal docset names (or built-in fallback names).
+     * @return List of active docset names.
+     */
+    QStringList loadedDocsetNames() const;
+
 private slots:
     /**
      * @brief Executes keyword search across available docset indices.
@@ -58,6 +71,7 @@ private slots:
     void onResultClicked(int row);
 
 private:
+    QComboBox* m_docsetSelector = nullptr;
     QLineEdit* m_searchEdit = nullptr;
     QListWidget* m_resultsList = nullptr;
     QTextBrowser* m_textBrowser = nullptr;
@@ -129,6 +143,12 @@ public:
      * @return True if documentation was rendered; false if symbol is empty.
      */
     bool lookupSymbol(const QString& rawSymbol);
+
+    /**
+     * @brief Returns the list of loaded Zeal docset bundle names available in the viewer.
+     * @return Non-empty list of discovered Zeal docsets (plus Built-in MPI/ABI).
+     */
+    QStringList loadedDocsetNames() const;
 
 private:
     QTabWidget* m_tabWidget = nullptr;
