@@ -209,11 +209,32 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
  * @param bps Set of line numbers.
  */
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
-    breakpoints.clear();
+    m_breakpoints.clear();
     for (int bp : bps) {
-        breakpoints[bp] = QString();
+        m_breakpoints[bp] = QString();
     }
     m_lineNumberArea->update();
+}
+
+/**
+ * @brief Returns the set of active 1-based breakpoint line numbers.
+ * @return QSet<int> of 1-based breakpoint lines.
+ */
+QSet<int> SourceCodeView::breakpoints() const {
+    QSet<int> result;
+    for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
+        result.insert(it.key());
+    }
+    return result;
+}
+
+/**
+ * @brief Checks whether a breakpoint is set on the given 1-based line number.
+ * @param lineOneBased 1-based source line number.
+ * @return True if an active breakpoint is registered on lineOneBased.
+ */
+bool SourceCodeView::hasBreakpoint(int lineOneBased) const {
+    return m_breakpoints.contains(lineOneBased);
 }
 
 /**
@@ -262,11 +283,11 @@ int SourceCodeView::getCurrentLineNumber() const {
  */
 void SourceCodeView::toggleBreakpoint(int lineNum) {
     bool isSet = false;
-    if (breakpoints.contains(lineNum)) {
-        breakpoints.remove(lineNum);
+    if (m_breakpoints.contains(lineNum)) {
+        m_breakpoints.remove(lineNum);
         isSet = false;
     } else {
-        breakpoints.insert(lineNum, QString());
+        m_breakpoints.insert(lineNum, QString());
         isSet = true;
     }
     m_lineNumberArea->update();
@@ -325,8 +346,8 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             painter.setPen(lineOneBased == m_executionLine ? QColor("#4ec9b0") : QColor(120, 120, 120));
             painter.drawText(0, top, m_lineNumberArea->width() - 5, fontMetrics().height(), Qt::AlignRight, number);
             // Render red breakpoint disc (or orange for conditional)
-            if (breakpoints.contains(lineOneBased)) {
-                if (breakpoints[lineOneBased].isEmpty()) {
+            if (m_breakpoints.contains(lineOneBased)) {
+                if (m_breakpoints[lineOneBased].isEmpty()) {
                     painter.setBrush(Qt::red);
                 } else {
                     painter.setBrush(QColor(255, 165, 0)); // Orange for conditional breakpoint
@@ -363,23 +384,23 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
 
             if (event->button() == Qt::RightButton) {
                 // Right click opens conditional breakpoint dialog
-                QString currentCondition = breakpoints.value(lineNum, QString());
+                QString currentCondition = m_breakpoints.value(lineNum, QString());
                 ConditionalBreakpointDialog dlg(currentCondition, this);
                 if (dlg.exec() == QDialog::Accepted) {
                     QString newCondition = dlg.condition();
-                    if (!newCondition.isEmpty() || breakpoints.contains(lineNum)) {
-                        breakpoints.insert(lineNum, newCondition);
+                    if (!newCondition.isEmpty() || m_breakpoints.contains(lineNum)) {
+                        m_breakpoints.insert(lineNum, newCondition);
                         emit breakpointToggled(emitPath, lineNum, true, newCondition);
                     }
                 }
             } else {
                 // Left click toggles standard breakpoint
                 bool isSet = false;
-                if (breakpoints.contains(lineNum)) {
-                    breakpoints.remove(lineNum);
+                if (m_breakpoints.contains(lineNum)) {
+                    m_breakpoints.remove(lineNum);
                     isSet = false;
                 } else {
-                    breakpoints.insert(lineNum, QString());
+                    m_breakpoints.insert(lineNum, QString());
                     isSet = true;
                 }
                 emit breakpointToggled(emitPath, lineNum, isSet, QString());

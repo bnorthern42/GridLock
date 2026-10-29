@@ -17,6 +17,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QGraphicsSimpleTextItem>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMap>
@@ -411,34 +412,43 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
       m_basicBlocks.isEmpty() ? 0x00401120ULL : m_basicBlocks.first().startAddress;
 
   // Emit language-specific function header, includes, and local variable declarations
+  int sigLineNum = 1;
+  int stackDeclLineNum = 1;
   if (isCpp) {
     emitLine(QStringLiteral("// DECOMPILED C++ / MPI | %1").arg(m_activeSymbol), entryAddr, false);
     emitLine(QStringLiteral("#include <mpi.h>"), entryAddr, false);
     emitLine(QStringLiteral("#include <cstdint>"), entryAddr, false);
     emitLine(QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol), entryAddr, true);
+    sigLineNum = out.size();
     for (const QString &off : sortedOffsets) {
       emitLine(QStringLiteral("  std::int32_t var_%1h = 0; // [rbp-0x%1]").arg(off),
                stackOffsetFirstAddr.value(off, entryAddr), false);
+      if (stackDeclLineNum == 1) stackDeclLineNum = out.size();
     }
   } else if (isPseudo) {
     emitLine(QStringLiteral("// DECOMPILED PSEUDOCODE & XREFS | %1").arg(m_activeSymbol), entryAddr, false);
     emitLine(QStringLiteral("proc %1(argc, argv):").arg(m_activeSymbol), entryAddr, true);
+    sigLineNum = out.size();
     for (const QString &off : sortedOffsets) {
       emitLine(QStringLiteral("  local var_%1h := 0").arg(off),
                stackOffsetFirstAddr.value(off, entryAddr), false);
+      if (stackDeclLineNum == 1) stackDeclLineNum = out.size();
     }
   } else {
     emitLine(QStringLiteral("/* DECOMPILED APPROX C & XREFS | %1 */").arg(m_activeSymbol), entryAddr, false);
     emitLine(QStringLiteral("#include <stdint.h>"), entryAddr, false);
     emitLine(QStringLiteral("int %1(int argc, char **argv) {").arg(m_activeSymbol), entryAddr, true);
+    sigLineNum = out.size();
     for (const QString &off : sortedOffsets) {
       emitLine(QStringLiteral("  int32_t var_%1h = 0; /* [rbp-0x%1] */").arg(off),
                stackOffsetFirstAddr.value(off, entryAddr), false);
+      if (stackDeclLineNum == 1) stackDeclLineNum = out.size();
     }
   }
 
   // Decompile individual basic blocks with cross-reference comments
-  for (const DisasmBasicBlock &bb : m_basicBlocks) {
+  for (int bbIdx = 0; bbIdx < m_basicBlocks.size(); ++bbIdx) {
+    const DisasmBasicBlock &bb = m_basicBlocks[bbIdx];
     const QVector<uint64_t> inXrefs = xrefsToAddress(bb.startAddress);
     if (!inXrefs.isEmpty()) {
       QStringList callerStrs;
@@ -452,9 +462,9 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
                bb.startAddress, false);
     }
     emitLine(QStringLiteral("loc_0x%1:").arg(bb.startAddress, 8, 16, QChar('0')),
-             bb.startAddress, true);
+             bb.startAddress, bbIdx > 0);
 
-    int blockFirstStmtLine = out.size();
+    int blockFirstStmtLine = (bbIdx == 0) ? sigLineNum : out.size();
     QVector<uint64_t> unmappedBlockAddrs;
 
     for (const QString &instLine : bb.lines) {
@@ -468,9 +478,16 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
         }
       }
 
-      // Pattern-match canonical MPI call instructions and branch jumps
-      if (instLine.contains(QStringLiteral("call")) &&
-          instLine.contains(QStringLiteral("MPI_Init"))) {
+      // Pattern-match prologue, stack frame allocation, canonical MPI calls, and branches
+      if (instLine.contains(QStringLiteral("endbr64")) ||
+          instLine.contains(QStringLiteral("push  rbp")) ||
+          instLine.contains(QStringLiteral("mov   rbp, rsp"))) {
+        m_addrToDecompilerLine.insert(instAddr, sigLineNum);
+      } else if (instLine.contains(QStringLiteral("sub   rsp"))) {
+        m_addrToDecompilerLine.insert(instAddr, stackDeclLineNum);
+        m_decompilerLineToAddr.insert(stackDeclLineNum, instAddr);
+      } else if (instLine.contains(QStringLiteral("call")) &&
+                 instLine.contains(QStringLiteral("MPI_Init"))) {
         if (isCpp) {
           emitLine(QStringLiteral("  MPI::Init(argc, argv); // MPI_Init(&argc, &argv)"), instAddr, true);
         } else if (isPseudo) {
@@ -538,7 +555,7 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
       }
     }
 
-    // Associate unmapped preamble/prologue instructions with the first statement of the block
+    // Associate unmapped preamble/argument setup instructions with the primary statement of the block
     for (uint64_t uAddr : unmappedBlockAddrs) {
       if (!m_addrToDecompilerLine.contains(uAddr)) {
         m_addrToDecompilerLine.insert(uAddr, blockFirstStmtLine);
@@ -840,6 +857,29 @@ bool DisassemblyView::triggerContextAction(uint64_t address, const QString& acti
   }
   if (actionName == QStringLiteral("Patch Instruction")) {
     return patchInstruction(address, QStringLiteral("nop"));
+  }
+  return false;
+}
+
+/**
+ * @brief Checks whether the rendered CFG basic block containing addr displays an active ▶ instruction marker.
+ * @param addr 64-bit target instruction address.
+ * @return True if a CFG scene text item for addr is prefixed with the active ▶ execution marker.
+ */
+bool DisassemblyView::activeCfgBlockContainsInstructionMarker(uint64_t addr) const {
+  if (!m_cfgScene) {
+    return false;
+  }
+  const QString hex8 = QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0'));
+  const QString hex6 = QStringLiteral("0x%1").arg(addr, 6, 16, QChar('0'));
+  for (QGraphicsItem *item : m_cfgScene->items()) {
+    if (auto *txt = dynamic_cast<QGraphicsSimpleTextItem *>(item)) {
+      const QString t = txt->text();
+      if (t.contains(QStringLiteral("▶")) &&
+          (t.contains(hex8, Qt::CaseInsensitive) || t.contains(hex6, Qt::CaseInsensitive))) {
+        return true;
+      }
+    }
   }
   return false;
 }

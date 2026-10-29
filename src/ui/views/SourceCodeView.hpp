@@ -153,6 +153,19 @@ public:
     void setBreakpoints(const QSet<int>& bps);
 
     /**
+     * @brief Returns the set of active 1-based breakpoint line numbers.
+     * @return QSet<int> of 1-based breakpoint lines.
+     */
+    QSet<int> breakpoints() const;
+
+    /**
+     * @brief Checks whether a breakpoint is set on the given 1-based line number.
+     * @param lineOneBased 1-based source line number.
+     * @return True if an active breakpoint is registered on lineOneBased.
+     */
+    bool hasBreakpoint(int lineOneBased) const;
+
+    /**
      * @brief Toggles a breakpoint at the given 1-based line.
      * @param lineNum 1-based line number.
      */
@@ -227,7 +240,7 @@ private slots:
 private:
     LineNumberArea* m_lineNumberArea;
     CppSyntaxHighlighter* m_highlighter;
-    QMap<int, QString> breakpoints;
+    QMap<int, QString> m_breakpoints;
     QString m_currentFilePath;
     QString m_lastHoveredWord;
     QTimer* m_hoverTimer;

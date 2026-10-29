@@ -220,6 +220,8 @@ public:
     int blockWidthForAddress(uint64_t blockStartAddr) const;
     /// Returns the address of the instruction immediately following currentAddr in the parsed listing.
     uint64_t nextInstructionAddress(uint64_t currentAddr) const;
+    /// Checks whether the rendered CFG basic block containing addr displays an active instruction marker.
+    bool activeCfgBlockContainsInstructionMarker(uint64_t addr) const;
 
 
 signals:

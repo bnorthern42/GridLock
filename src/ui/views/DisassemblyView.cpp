@@ -753,9 +753,7 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
   // Synchronize highlights across linear disassembly, decompiler, and CFG
   highlightActiveInstruction();
   highlightActiveDecompilerLine();
-  if (m_graphMode) {
-    rebuildCfgScene();
-  }
+  rebuildCfgScene();
   if (m_linearEdit) {
     m_linearEdit->updateGutter();
   }
@@ -782,9 +780,7 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   parseDisassembly(effectiveCode);
   highlightActiveInstruction();
   highlightActiveDecompilerLine();
-  if (m_graphMode) {
-    rebuildCfgScene();
-  }
+  rebuildCfgScene();
   if (m_linearEdit) {
     m_linearEdit->updateGutter();
   }

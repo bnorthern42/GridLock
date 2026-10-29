@@ -221,17 +221,10 @@ void MainWindow::setupToolbar() {
           &MainWindow::startTargetWorkflow);
   toolbar->addAction(m_runAction);
 
-  // Continue Action: Resumes suspended execution on active rank or process group.
-  // Advances the synchronized execution cursor and dispatches ContinueCommand to the coordinator.
+  // Continue Action: Resumes suspended execution until the next active breakpoint or procedure exit.
   m_continueAction = new QAction("⏭ Continue", this);
-  connect(m_continueAction, &QAction::triggered, this, [this]() {
-    stepInstructionWorkflow();
-    if (m_coordinator) {
-      auto cmd = std::make_unique<gridlock::core::commands::ContinueCommand>(
-          m_coordinator, m_focusedRank + 1);
-      executeCommand(std::move(cmd));
-    }
-  });
+  connect(m_continueAction, &QAction::triggered, this,
+          &MainWindow::continueExecutionWorkflow);
   toolbar->addAction(m_continueAction);
 
   // Step Instruction Action: Executes a single machine instruction on the active rank

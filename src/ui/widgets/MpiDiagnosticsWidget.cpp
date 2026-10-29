@@ -193,6 +193,43 @@ int MpiDiagnosticsWidget::rankWaitTableRowCount() const {
 }
 
 /**
+ * @brief Dynamically updates or inserts a rank state row in the wait-state table.
+ * @param rankId Zero-based MPI rank identifier.
+ * @param stateText Execution state string (e.g. "PAUSED (BP)", "STEPPED", "RUNNING").
+ * @param primitive Active MPI primitive or instruction phase.
+ * @param target Peer rank or collective target description.
+ * @param pcAddr Active 64-bit program counter address.
+ * @param totalRanks Optional total cluster rank count to resize table rows.
+ */
+void MpiDiagnosticsWidget::updateRankStateRow(int rankId, const QString& stateText,
+                                              const QString& primitive, const QString& target,
+                                              uint64_t pcAddr, int totalRanks) {
+    if (!m_rankWaitTable || rankId < 0) {
+        return;
+    }
+    if (totalRanks > 0 && m_rankWaitTable->rowCount() != totalRanks) {
+        m_rankWaitTable->setRowCount(totalRanks);
+    }
+    if (rankId >= m_rankWaitTable->rowCount()) {
+        m_rankWaitTable->setRowCount(rankId + 1);
+    }
+    auto* rankItem = new QTableWidgetItem(QStringLiteral("Rank %1").arg(rankId));
+    rankItem->setData(Qt::UserRole, rankId);
+    m_rankWaitTable->setItem(rankId, 0, rankItem);
+    m_rankWaitTable->setItem(rankId, 1, new QTableWidgetItem(stateText));
+    m_rankWaitTable->setItem(rankId, 2, new QTableWidgetItem(primitive));
+    m_rankWaitTable->setItem(rankId, 3, new QTableWidgetItem(target));
+    m_rankWaitTable->setItem(rankId, 4, new QTableWidgetItem(QStringLiteral("MPI_COMM_WORLD")));
+    const int offset = (pcAddr >= 0x00401120ULL && pcAddr <= 0x00401190ULL)
+                           ? static_cast<int>(pcAddr - 0x00401120ULL)
+                           : 0;
+    m_rankWaitTable->setItem(rankId, 5,
+                             new QTableWidgetItem(QStringLiteral("0x%1 <main+%2>")
+                                                      .arg(pcAddr, 8, 16, QChar('0'))
+                                                      .arg(offset)));
+}
+
+/**
  * @brief Filters rows in the rank wait-state table matching the query substring.
  * @param filterText Substring filter query.
  */

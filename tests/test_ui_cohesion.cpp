@@ -580,10 +580,8 @@ void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
     QVERIFY2(sourceView != nullptr, "Active SourceCodeView must exist in MainWindow");
     QVERIFY2(sourceView->rightViewportMargin() == 0,
-             qPrintable(QString("SourceCodeView rightViewportMargin() %1 must be 0")
-                            .arg(sourceView->rightViewportMargin())));
-    QVERIFY2(!sourceView->hasRightMarginFill(),
-             "SourceCodeView::hasRightMarginFill() must be false");
+             qPrintable(QString("SourceCodeView rightViewportMargin() %1 must be 0").arg(sourceView->rightViewportMargin())));
+    QVERIFY2(!sourceView->hasRightMarginFill(), "SourceCodeView::hasRightMarginFill() must be false");
 
     const QImage editorImg = sourceView->viewport()->grab().toImage();
     QVERIFY2(!editorImg.isNull() && editorImg.width() > 100 && editorImg.height() > 40,
@@ -595,45 +593,27 @@ void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
     const QColor leftColor = editorImg.pixelColor(leftX, sampleY);
     const QColor rightColor = editorImg.pixelColor(rightX, sampleY);
     QVERIFY2(leftColor.rgb() == rightColor.rgb(),
-             qPrintable(QString("SourceCodeView split background detected: left(%1,%2)=%3 vs right(%4,%2)=%5")
-                            .arg(leftX)
-                            .arg(sampleY)
-                            .arg(leftColor.name())
-                            .arg(rightX)
-                            .arg(rightColor.name())));
+             qPrintable(QString("SourceCodeView split background: left=%1 vs right=%2").arg(leftColor.name(), rightColor.name())));
 
     // 2. Structured MpiNetworkLogWidget Table.
     auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>();
     QVERIFY2(netLog != nullptr, "MpiNetworkLogWidget must exist in MainWindow");
     auto* netTable = netLog->findChild<QTableWidget*>();
-    QVERIFY2(netTable != nullptr, "MpiNetworkLogWidget must contain a structured QTableWidget");
-    QVERIFY2(netTable->columnCount() == 6,
-             qPrintable(QString("MpiNetworkLogWidget table columnCount %1 != 6").arg(netTable->columnCount())));
-    QVERIFY2(netTable->frameShape() == QFrame::NoFrame,
-             "MpiNetworkLogWidget table must use QFrame::NoFrame");
-
+    QVERIFY2(netTable != nullptr && netTable->columnCount() == 6 && netTable->frameShape() == QFrame::NoFrame,
+             "MpiNetworkLogWidget must contain a 6-column QFrame::NoFrame QTableWidget");
     netLog->appendLog(QStringLiteral("[12:00:01.042] Rank 0 -> Rank 1 | MPI_Send | Tag=0 MPI_COMM_WORLD | 1024 B"));
-    QVERIFY2(netLog->logRowCount() >= 1,
-             qPrintable(QString("MpiNetworkLogWidget::logRowCount() %1 must be >= 1 after appendLog")
-                            .arg(netLog->logRowCount())));
+    QVERIFY2(netLog->logRowCount() >= 1, "MpiNetworkLogWidget::logRowCount() must be >= 1 after appendLog");
 
     // 3. Single-Row ReferenceManualWidget Header & Clean Monochrome Toolbar Labels.
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    QVERIFY2(refManual != nullptr, "ReferenceManualWidget must exist in MainWindow");
-    QVERIFY2(refManual->headerBarHeight() > 0 && refManual->headerBarHeight() <= 30,
-             qPrintable(QString("ReferenceManualWidget::headerBarHeight() %1 must be in (0, 30]")
-                            .arg(refManual->headerBarHeight())));
-
+    QVERIFY2(refManual != nullptr && refManual->headerBarHeight() > 0 && refManual->headerBarHeight() <= 30,
+             "ReferenceManualWidget::headerBarHeight() must be in (0, 30]");
     for (QToolBar* toolBar : mainWindow.findChildren<QToolBar*>()) {
         for (QAction* act : toolBar->actions()) {
-            QVERIFY2(!act->text().contains(QStringLiteral("\U000023E9")),
-                     qPrintable(QString("Toolbar action '%1' must not contain multicolor emoji U+23E9")
-                                    .arg(act->text())));
+            QVERIFY2(!act->text().contains(QStringLiteral("\U000023E9")), "Toolbar action must not contain U+23E9");
         }
         for (QToolButton* btn : toolBar->findChildren<QToolButton*>()) {
-            QVERIFY2(!btn->text().contains(QStringLiteral("\U000023E9")),
-                     qPrintable(QString("Toolbar button '%1' must not contain multicolor emoji U+23E9")
-                                    .arg(btn->text())));
+            QVERIFY2(!btn->text().contains(QStringLiteral("\U000023E9")), "Toolbar button must not contain U+23E9");
         }
     }
 }
@@ -662,10 +642,8 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
 
     // 1. DifferentialGrid (Watch Expressions) Uniform Empty Viewport & Stretch Headers.
     auto* watchGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
-    QVERIFY2(watchGrid != nullptr, "DifferentialGrid must exist in MainWindow");
-    QVERIFY2(watchGrid->horizontalHeaderStretchEnabled(),
-             "DifferentialGrid::horizontalHeaderStretchEnabled() must return true");
-
+    QVERIFY2(watchGrid != nullptr && watchGrid->horizontalHeaderStretchEnabled(),
+             "DifferentialGrid must exist and enable horizontalHeaderStretchEnabled()");
     watchGrid->resize(260, 220);
     watchGrid->show();
     QApplication::processEvents();
@@ -673,18 +651,14 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
     const QImage watchImg = watchGrid->grab().toImage();
     QVERIFY2(!watchImg.isNull() && watchImg.width() >= 200 && watchImg.height() >= 200,
              "DifferentialGrid grabbed image must be valid and at least 200x200");
-    const QColor leftEmptyColor = watchImg.pixelColor(25, 190);
-    const QColor rightEmptyColor = watchImg.pixelColor(180, 190);
-    QVERIFY2(leftEmptyColor.rgb() == rightEmptyColor.rgb(),
-             qPrintable(QString("DifferentialGrid vertical header grey block detected: left(25,190)=%1 vs right(180,190)=%2")
-                            .arg(leftEmptyColor.name(), rightEmptyColor.name())));
+    QVERIFY2(watchImg.pixelColor(25, 190).rgb() == watchImg.pixelColor(180, 190).rgb(),
+             "DifferentialGrid empty area must have uniform background color across left and right columns");
 
     // 2. GDB Console & Evaluator Prompt Bar & Header Cohesion.
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
-    QVERIFY(bottomTabs != nullptr);
-
     auto* gdbConsole = mainWindow.findChild<gridlock::ui::GdbConsoleWidget*>();
-    QVERIFY2(gdbConsole != nullptr, "GdbConsoleWidget must exist in MainWindow");
+    auto* evaluator = mainWindow.findChild<gridlock::ui::ExpressionEvaluatorWidget*>();
+    QVERIFY(bottomTabs != nullptr && gdbConsole != nullptr && evaluator != nullptr);
     for (int i = 0; i < bottomTabs->count(); ++i) {
         if (bottomTabs->tabText(i).contains(QStringLiteral("GDB Console"), Qt::CaseInsensitive) ||
             bottomTabs->tabText(i).contains(QStringLiteral("Evaluator"), Qt::CaseInsensitive)) {
@@ -692,37 +666,22 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
             QApplication::processEvents();
         }
     }
-
-    // Verify GdbConsoleWidget header/prompt strip height <= 30px, left margin <= 6, and QFrame::NoFrame viewport.
-    QVERIFY2(gdbConsole->headerBarHeight() > 0 && gdbConsole->headerBarHeight() <= 30,
-             qPrintable(QString("GdbConsoleWidget::headerBarHeight() %1 must be in (0, 30]")
-                            .arg(gdbConsole->headerBarHeight())));
-    QVERIFY2(gdbConsole->promptBarHeight() > 0 && gdbConsole->promptBarHeight() <= 30,
-             qPrintable(QString("GdbConsoleWidget::promptBarHeight() %1 must be in (0, 30]")
-                            .arg(gdbConsole->promptBarHeight())));
+    QVERIFY2(gdbConsole->headerBarHeight() > 0 && gdbConsole->headerBarHeight() <= 30 &&
+                 gdbConsole->promptBarHeight() > 0 && gdbConsole->promptBarHeight() <= 30,
+             "GdbConsoleWidget header and prompt bar heights must be in (0, 30]");
     if (QLayout* gdbLayout = gdbConsole->layout()) {
-        QVERIFY2(gdbLayout->contentsMargins().left() <= 6,
-                 qPrintable(QString("GdbConsoleWidget left margin %1 > 6")
-                                .arg(gdbLayout->contentsMargins().left())));
+        QVERIFY2(gdbLayout->contentsMargins().left() <= 6, "GdbConsoleWidget left margin must be <= 6");
     }
     for (QAbstractScrollArea* area : gdbConsole->findChildren<QAbstractScrollArea*>()) {
-        QVERIFY2(area->frameShape() == QFrame::NoFrame,
-                 "GdbConsoleWidget output viewport must use QFrame::NoFrame");
+        QVERIFY2(area->frameShape() == QFrame::NoFrame, "GdbConsoleWidget viewport must use QFrame::NoFrame");
     }
-
-    auto* evaluator = mainWindow.findChild<gridlock::ui::ExpressionEvaluatorWidget*>();
-    QVERIFY2(evaluator != nullptr, "ExpressionEvaluatorWidget must exist in MainWindow");
     QVERIFY2(evaluator->headerBarHeight() > 0 && evaluator->headerBarHeight() <= 30,
-             qPrintable(QString("ExpressionEvaluatorWidget::headerBarHeight() %1 must be in (0, 30]")
-                            .arg(evaluator->headerBarHeight())));
+             "ExpressionEvaluatorWidget::headerBarHeight() must be in (0, 30]");
     if (QLayout* evalLayout = evaluator->layout()) {
-        QVERIFY2(evalLayout->contentsMargins().left() <= 6,
-                 qPrintable(QString("ExpressionEvaluatorWidget left margin %1 > 6")
-                                .arg(evalLayout->contentsMargins().left())));
+        QVERIFY2(evalLayout->contentsMargins().left() <= 6, "ExpressionEvaluatorWidget left margin must be <= 6");
     }
     for (QAbstractScrollArea* area : evaluator->findChildren<QAbstractScrollArea*>()) {
-        QVERIFY2(area->frameShape() == QFrame::NoFrame,
-                 "ExpressionEvaluatorWidget output viewport must use QFrame::NoFrame");
+        QVERIFY2(area->frameShape() == QFrame::NoFrame, "ExpressionEvaluatorWidget viewport must use QFrame::NoFrame");
     }
 }
 
@@ -757,11 +716,9 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     // 1. Toolbar Target Selector, Rank SpinBox & Idle Button States.
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    QVERIFY2(targetCombo != nullptr, "MainToolbar must contain #toolbarTargetSelector QComboBox");
-    QVERIFY2(rankSpin != nullptr, "MainToolbar must contain #toolbarRankSpin QSpinBox");
-    QVERIFY2(targetCombo->count() >= 1, "#toolbarTargetSelector must be pre-populated with target options");
+    QVERIFY2(targetCombo != nullptr && rankSpin != nullptr && targetCombo->count() >= 1,
+             "MainToolbar must contain populated #toolbarTargetSelector and #toolbarRankSpin");
 
-    // Helper lambda to find a toolbar QAction by substring match.
     auto findToolbarAction = [&mainWindow](const QString& labelSubstr) -> QAction* {
         for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) {
             for (QAction* act : tb->actions()) {
@@ -779,80 +736,61 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     QVERIFY2(runAction != nullptr && stepAction != nullptr && terminateAction != nullptr,
              "Run Target, Step Inst, and Terminate Session actions must exist on MainToolbar");
 
-    // Ensure session starts in or can be reset to Idle state.
     mainWindow.stopTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(!mainWindow.isDebugSessionActive(),
-             "isDebugSessionActive() must be false in Idle state");
-    QVERIFY2(runAction->isEnabled(), "Run Target action must be enabled when Idle");
-    QVERIFY2(!terminateAction->isEnabled(), "Terminate Session action must be disabled when Idle");
+    QVERIFY2(!mainWindow.isDebugSessionActive() && runAction->isEnabled() && !terminateAction->isEnabled(),
+             "Idle state must enable Run Target and disable Terminate Session");
 
     // 2. End-to-End Interactive Run -> Step -> Register/Source/Rack Sync -> Stop Loop.
+    if (auto* sv = mainWindow.findChild<gridlock::ui::SourceCodeView*>()) sv->setBreakpoints(QSet<int>());
     rankSpin->setValue(4);
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
-
-    QVERIFY2(mainWindow.isDebugSessionActive(),
-             "isDebugSessionActive() must be true after startTargetWorkflow()");
-    QVERIFY2(stepAction->isEnabled(), "Step Inst action must be enabled when session is active");
-    QVERIFY2(terminateAction->isEnabled(), "Terminate Session action must be enabled when session is active");
+    QVERIFY2(mainWindow.isDebugSessionActive() && stepAction->isEnabled() && terminateAction->isEnabled(),
+             "Active session must enable Step Inst and Terminate Session");
 
     auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>();
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
     QVERIFY(serverRack != nullptr && disasmView != nullptr && regView != nullptr && sourceView != nullptr);
-
     QCOMPARE(serverRack->rankNodeCount(), 4);
     QCOMPARE(disasmView->currentAddress(), 0x00401120ULL);
-    QVERIFY2(sourceView->executionLine() > 0,
-             "SourceCodeView::executionLine() must highlight a valid 1-based line on startTargetWorkflow()");
+    QVERIFY2(sourceView->executionLine() > 0, "SourceCodeView::executionLine() must be valid on startTargetWorkflow()");
 
-    // Step 1: 0x00401120 -> 0x00401124
+    // Step 1 (0x00401120 -> 0x00401124) & Step 2 (0x00401124 -> 0x00401125).
     QVERIFY2(mainWindow.stepInstructionWorkflow(), "First stepInstructionWorkflow() must succeed");
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401124ULL);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401124ULL);
 
-    // Step 2: 0x00401124 -> 0x00401125
     QVERIFY2(mainWindow.stepInstructionWorkflow(), "Second stepInstructionWorkflow() must succeed");
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401125ULL);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401125ULL);
-    QVERIFY2(sourceView->executionLine() > 0,
-             "SourceCodeView::executionLine() must remain active across instruction steps");
+    QVERIFY2(sourceView->executionLine() > 0, "SourceCodeView::executionLine() must remain active across steps");
 
-    // Verify RegisterView updated 'rip' to 0x00401125.
     auto* regTable = regView->findChild<QTableWidget*>();
     QVERIFY(regTable != nullptr);
     bool foundRipMatch = false;
     for (int r = 0; r < regTable->rowCount(); ++r) {
-        if (regTable->item(r, 0) && regTable->item(r, 0)->text().compare(QStringLiteral("rip"), Qt::CaseInsensitive) == 0) {
-            if (regTable->item(r, 1) && regTable->item(r, 1)->text().contains(QStringLiteral("401125"), Qt::CaseInsensitive)) {
-                foundRipMatch = true;
-            }
+        if (regTable->item(r, 0) && regTable->item(r, 0)->text().compare(QStringLiteral("rip"), Qt::CaseInsensitive) == 0 &&
+            regTable->item(r, 1) && regTable->item(r, 1)->text().contains(QStringLiteral("401125"), Qt::CaseInsensitive)) {
+            foundRipMatch = true;
         }
     }
     QVERIFY2(foundRipMatch, "RegisterView 'rip' row must update to 0x00401125 after second step");
 
-    // Capture full-window snapshot in active stepping state for visual audit.
     const QPixmap snap = mainWindow.grab();
-    QVERIFY(!snap.isNull());
-    QVERIFY(snap.save(QStringLiteral("/tmp/gridlock_ui_v28.png")));
+    QVERIFY(!snap.isNull() && snap.save(QStringLiteral("/tmp/gridlock_ui_v28.png")));
 
-    // Stop / Terminate Session -> returns to Idle.
     mainWindow.stopTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(!mainWindow.isDebugSessionActive(),
-             "isDebugSessionActive() must be false after stopTargetWorkflow()");
-    QVERIFY2(!terminateAction->isEnabled(),
-             "Terminate Session action must be disabled after stopTargetWorkflow()");
-
     auto* statusLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
     QVERIFY(statusLabel != nullptr);
-    QVERIFY2(statusLabel->text().contains(QStringLiteral("STATUS: IDLE"), Qt::CaseInsensitive),
-             qPrintable(QString("Expected STATUS: IDLE after stopTargetWorkflow(), got '%1'")
-                            .arg(statusLabel->text())));
+    QVERIFY2(!mainWindow.isDebugSessionActive() && !terminateAction->isEnabled() &&
+                 statusLabel->text().contains(QStringLiteral("STATUS: IDLE"), Qt::CaseInsensitive),
+             "stopTargetWorkflow() must return session to STATUS: IDLE");
 }
 
 /**
@@ -892,24 +830,19 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     // 1. Bidirectional Source Line <-> Instruction Address Mapping.
     QCOMPARE(mainWindow.sourceLineToAddress(13), 0x0040113dULL);
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
-
     sourceView->selectSourceLine(16);
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
-
     emit disasmView->addressSelected(0x0040113dULL);
     QApplication::processEvents();
     QCOMPARE(sourceView->executionLine(), 13);
 
-    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code").
+    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code") & 3. Bottom Console Maximize Toggle.
     mainWindow.setWorkspacePerspective(QStringLiteral("Reverse"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
-    QVERIFY2(disasmView->isSplitGraphDecompilerMode(),
-             "Reverse perspective must enable Split CFG + Decompiler mode");
-    QVERIFY2(disasmView->width() >= 700,
-             qPrintable(QString("Expected DisassemblyView width >= 700 in Reverse perspective, got %1")
-                            .arg(disasmView->width())));
+    QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700,
+             "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
 
     mainWindow.setWorkspacePerspective(QStringLiteral("MPI"));
     QApplication::processEvents();
@@ -923,16 +856,83 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200,
              "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
 
-    // 3. Toggle Maximize Bottom Console.
     const int baseHeight = bottomTabs->height();
     mainWindow.toggleMaximizeBottomConsole();
     QApplication::processEvents();
-    QVERIFY2(bottomTabs->height() > baseHeight,
-             "toggleMaximizeBottomConsole() must expand BottomConsoleTabs height");
+    QVERIFY2(bottomTabs->height() > baseHeight, "toggleMaximizeBottomConsole() must expand BottomConsoleTabs height");
     mainWindow.toggleMaximizeBottomConsole();
     QApplication::processEvents();
 }
 
+/**
+ * @brief Verifies breakpoint-aware Run Target / Continue execution, granular source-to-RIP line mapping, and CFG active instruction markers.
+ *
+ * Validates three critical debugger workflow requirements from Prompt 31:
+ * 1. Granular Source Line <-> Instruction Mapping:
+ *    Confirms mainWindow.addressToSourceLine(0x00401120ULL) == 12 (prologue),
+ *    mainWindow.addressToSourceLine(0x00401128ULL) == 15 (DeeplyNested data[3] stack alloc),
+ *    mainWindow.addressToSourceLine(0x0040113dULL) == 13 (MPI_Init), and
+ *    mainWindow.addressToSourceLine(0x00401149ULL) == 16 (loop condition).
+ * 2. Breakpoint-Aware Run Target & Continue Workflow:
+ *    Sets breakpoints on lines 15 and 16 in SourceCodeView, triggers startTargetWorkflow(),
+ *    confirms execution advances to the first active breakpoint (line 15 / 0x00401128ULL),
+ *    then triggers continueExecutionWorkflow() and confirms execution advances to the next
+ *    active breakpoint (line 16 / 0x00401149ULL).
+ * 3. Visible Active Instruction Marker Inside CFG Basic Blocks:
+ *    Confirms DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) returns true.
+ */
+void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMarker() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
+        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
+                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
+                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+        mainWindow.loadSourceFile(demoPath);
+    }
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
 
+    auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
+    QVERIFY(sourceView != nullptr && disasmView != nullptr && serverRack != nullptr);
 
+    // 1. Granular Source Line <-> Instruction Address Mapping.
+    QCOMPARE(mainWindow.addressToSourceLine(0x00401120ULL), 12);
+    QCOMPARE(mainWindow.addressToSourceLine(0x00401128ULL), 15);
+    QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
+    QCOMPARE(mainWindow.addressToSourceLine(0x00401149ULL), 16);
+    QCOMPARE(mainWindow.sourceLineToAddress(15), 0x00401128ULL);
+    QCOMPARE(mainWindow.sourceLineToAddress(16), 0x00401149ULL);
+
+    // 2. Breakpoint-Aware Run Target & Continue Workflow.
+    mainWindow.stopTargetWorkflow();
+    sourceView->setBreakpoints(QSet<int>());
+    sourceView->toggleBreakpoint(15);
+    sourceView->toggleBreakpoint(16);
+    QVERIFY2(sourceView->hasBreakpoint(15) && sourceView->hasBreakpoint(16),
+             "SourceCodeView::toggleBreakpoint(15/16) must register active breakpoints");
+    QVERIFY2(sourceView->breakpoints().contains(15) && sourceView->breakpoints().contains(16),
+             "SourceCodeView::breakpoints() must contain lines 15 and 16");
+
+    mainWindow.startTargetWorkflow();
+    QApplication::processEvents();
+    QCOMPARE(disasmView->currentAddress(), 0x00401128ULL);
+    QCOMPARE(sourceView->executionLine(), 15);
+    QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401128ULL);
+
+    QVERIFY2(mainWindow.continueExecutionWorkflow(),
+             "MainWindow::continueExecutionWorkflow() must advance to the next active breakpoint");
+    QApplication::processEvents();
+    QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
+    QCOMPARE(sourceView->executionLine(), 16);
+    QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401149ULL);
+
+    // 3. Visible Active Instruction Marker Inside CFG Basic Blocks.
+    QVERIFY2(disasmView->activeCfgBlockContainsInstructionMarker(0x00401149ULL),
+             "DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) must be true");
+}
 

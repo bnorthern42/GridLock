@@ -143,6 +143,12 @@ public:
     bool stepInstructionWorkflow();
 
     /**
+     * @brief Continues execution from current PC until the next active breakpoint or procedure return.
+     * @return True if execution advanced; false otherwise.
+     */
+    bool continueExecutionWorkflow();
+
+    /**
      * @brief Terminates the active debugging session and resets the workstation to IDLE state.
      */
     void stopTargetWorkflow();

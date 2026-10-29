@@ -74,6 +74,18 @@ public slots:
      */
     MpiNetworkLogWidget* networkLogWidget() const { return m_networkLogWidget; }
 
+    /**
+     * @brief Dynamically updates or inserts a rank state row in the wait-state table.
+     * @param rankId Zero-based MPI rank identifier.
+     * @param stateText Execution state string (e.g. "PAUSED (BP)", "STEPPED", "RUNNING").
+     * @param primitive Active MPI primitive or instruction phase.
+     * @param target Peer rank or collective target description.
+     * @param pcAddr Active 64-bit program counter address.
+     * @param totalRanks Optional total cluster rank count to resize table rows.
+     */
+    void updateRankStateRow(int rankId, const QString& stateText, const QString& primitive,
+                            const QString& target, uint64_t pcAddr, int totalRanks = -1);
+
 private slots:
     /**
      * @brief Handles double-clicking deadlock alert items in the list.

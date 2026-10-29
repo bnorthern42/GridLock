@@ -639,17 +639,14 @@ void DisassemblyView::rebuildCfgScene() {
 
     // Outer card container rectangle on #181a1f dark-slate surface.
     auto *rectItem = m_cfgScene->addRect(
-        boxRect,
-        QPen(isActiveBlock ? QColor("#528bff") : QColor("#333842"),
-             isActiveBlock ? 2.0 : 1.0),
+        boxRect, QPen(isActiveBlock ? QColor("#528bff") : QColor("#333842"), isActiveBlock ? 2.0 : 1.0),
         QBrush(QColor("#181a1f")));
     rectItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     rectItem->setZValue(1.0);
 
     // Block header bar background strip at top of basic-block node card.
-    QRectF headerRect(boxX, currentY, boxW, headerH);
     auto *hdrItem = m_cfgScene->addRect(
-        headerRect, QPen(Qt::NoPen),
+        QRectF(boxX, currentY, boxW, headerH), QPen(Qt::NoPen),
         QBrush(isActiveBlock ? QColor("#1f3442") : QColor("#21252b")));
     hdrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrItem->setZValue(2.0);
@@ -666,85 +663,87 @@ void DisassemblyView::rebuildCfgScene() {
     hdrText->setZValue(3.0);
 
     // Render MPI rank occupancy badge and deadlock cycle alert indicator in block header.
-    // Collapses contiguous rank intervals (e.g., [R0-R3 (4)]) for compact high-density display.
     if (!occRanks.isEmpty()) {
       QString rankLabel;
       bool hasDeadlock = false;
-      // Check whether any rank paused inside this basic block participates in a wait-for cycle.
       for (int r : occRanks) {
         if (m_deadlockCycleRanks.contains(r)) {
           hasDeadlock = true;
           break;
         }
       }
-      // Format single-rank, contiguous-range, or comma-separated rank occupancy badge.
       if (occRanks.size() == 1) {
         rankLabel = QStringLiteral("[R%1]").arg(occRanks.first());
       } else if (occRanks.last() - occRanks.first() + 1 == occRanks.size()) {
-        rankLabel = QStringLiteral("[R%1-R%2 (%3)]")
-                        .arg(occRanks.first())
-                        .arg(occRanks.last())
-                        .arg(occRanks.size());
+        rankLabel = QStringLiteral("[R%1-R%2 (%3)]").arg(occRanks.first()).arg(occRanks.last()).arg(occRanks.size());
       } else {
         QStringList rStrs;
-        for (int r : occRanks) {
-          rStrs << QStringLiteral("R%1").arg(r);
-        }
+        for (int r : occRanks) rStrs << QStringLiteral("R%1").arg(r);
         rankLabel = QStringLiteral("[%1]").arg(rStrs.join(','));
       }
-      // Prepend explicit [DEADLOCK] warning tag and switch badge to #f44747 crimson when deadlocked.
-      if (hasDeadlock) {
-        rankLabel = QStringLiteral("[DEADLOCK] ") + rankLabel;
-      }
-      const QColor badgeCol =
-          hasDeadlock ? QColor("#f44747")
-                      : (occRanks.contains(0) ? QColor("#dcdcaa") : QColor("#4ec9b0"));
-      // Anchor the rank occupancy badge flush-right inside the basic-block header strip.
+      if (hasDeadlock) rankLabel = QStringLiteral("[DEADLOCK] ") + rankLabel;
+      const QColor badgeCol = hasDeadlock ? QColor("#f44747") : (occRanks.contains(0) ? QColor("#dcdcaa") : QColor("#4ec9b0"));
       auto *rankBadgeText = m_cfgScene->addSimpleText(rankLabel, monoFont);
       rankBadgeText->setBrush(badgeCol);
-      const qreal badgeW = rankBadgeText->boundingRect().width();
-      rankBadgeText->setPos(boxX + boxW - badgeW - 8.0, currentY + 2.0);
-      rankBadgeText->setData(Qt::UserRole,
-                             QVariant::fromValue<qulonglong>(bb.startAddress));
+      rankBadgeText->setPos(boxX + boxW - rankBadgeText->boundingRect().width() - 8.0, currentY + 2.0);
+      rankBadgeText->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
       rankBadgeText->setZValue(3.2);
     }
 
-    // Step 1.2: Render individual instruction lines within the basic-block body
+    // Step 1.2: Render individual instruction lines within the basic-block body.
+    static const QRegularExpression instAddrRe(QStringLiteral("^\\s*(?:=>\\s*)?(0x[0-9a-fA-F]+)"));
     qreal lineY = currentY + headerH + 3.0;
     for (const QString &instLine : renderLines) {
-      // Highlight matching decompiler/assembly search token background if active
-      if (!m_highlightedToken.isEmpty() &&
-          instLine.contains(m_highlightedToken, Qt::CaseInsensitive)) {
+      uint64_t instAddr = 0ULL;
+      const QRegularExpressionMatch addrMatch = instAddrRe.match(instLine);
+      if (addrMatch.hasMatch()) {
+        bool ok = false;
+        instAddr = addrMatch.captured(1).toULongLong(&ok, 16);
+      }
+      const bool isCurrentInst = (instAddr != 0ULL && instAddr == m_currentAddress);
+      const bool isBookmarkedInst = (instAddr != 0ULL && m_bookmarks.contains(instAddr));
+
+      // Paint full-width emerald-teal highlight band behind the active RIP instruction row.
+      if (isCurrentInst) {
+        auto *ripBg = m_cfgScene->addRect(
+            QRectF(boxX + 2.0, lineY - 1.0, boxW - 4.0, lineH),
+            QPen(QColor("#4ec9b0"), 1.0), QBrush(QColor("#20342c")));
+        ripBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr));
+        ripBg->setZValue(2.4);
+      } else if (!m_highlightedToken.isEmpty() && instLine.contains(m_highlightedToken, Qt::CaseInsensitive)) {
         auto *tokBg = m_cfgScene->addRect(
             QRectF(boxX + 4.0, lineY - 1.0, boxW - 8.0, lineH),
             QPen(Qt::NoPen), QBrush(QColor(0x3a, 0x3d, 0x41, 180)));
         tokBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
         tokBg->setZValue(2.5);
       }
-      auto *txt = m_cfgScene->addSimpleText(instLine, monoFont);
-      txt->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
 
-      // Apply syntax palette depending on mnemonic category
-      if (instLine.startsWith(QStringLiteral("(fcn)"))) {
-        // Function signature definition (yellow)
+      QString displayLine = instLine;
+      if (isCurrentInst && isBookmarkedInst) {
+        displayLine = QStringLiteral("●▶ ") + instLine;
+      } else if (isCurrentInst) {
+        displayLine = QStringLiteral("▶ ") + instLine;
+      } else if (isBookmarkedInst) {
+        displayLine = QStringLiteral("● ") + instLine;
+      }
+
+      auto *txt = m_cfgScene->addSimpleText(displayLine, monoFont);
+      txt->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr != 0ULL ? instAddr : bb.startAddress));
+
+      // Apply syntax palette depending on active RIP status or mnemonic category.
+      if (isCurrentInst) {
+        txt->setBrush(QColor("#ffffff"));
+      } else if (instLine.startsWith(QStringLiteral("(fcn)"))) {
         txt->setBrush(QColor("#dcdcaa"));
       } else if (instLine.startsWith(';')) {
-        // Assembly comments / stack argument notes (green)
         txt->setBrush(QColor("#6a9955"));
-      } else if (instLine.contains(
-                     QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) {
-        // Control flow conditional branches and jumps (orange-red)
+      } else if (instLine.contains(QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) {
         txt->setBrush(QColor("#ce9178"));
-      } else if (instLine.contains(
-                     QRegularExpression("\\b(call|ret|leave)\\b"))) {
-        // Procedure calls and frame teardown (teal)
+      } else if (instLine.contains(QRegularExpression("\\b(call|ret|leave)\\b"))) {
         txt->setBrush(QColor("#4ec9b0"));
-      } else if (instLine.contains(
-                     QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) {
-        // Arithmetic, data movement, and stack ops (blue)
+      } else if (instLine.contains(QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) {
         txt->setBrush(QColor("#569cd6"));
       } else {
-        // General instructions and register operands (light slate)
         txt->setBrush(QColor("#d4d7dc"));
       }
       txt->setPos(boxX + 8.0, lineY);
@@ -779,13 +778,11 @@ void DisassemblyView::rebuildCfgScene() {
       // Manhattan orthogonal path routing
       QPainterPath path(startPt);
       if (dstRect.top() >= srcRect.bottom()) {
-        // Forward edge: step vertically half-way, step horizontally to destination X, step down
         const qreal midY = (startPt.y() + endPt.y()) * 0.5;
         path.lineTo(startPt.x(), midY);
         path.lineTo(endPt.x(), midY);
         path.lineTo(endPt);
       } else {
-        // Backward loop edge: route outward to the left margin, loop upward, and re-enter destination
         const qreal loopX = qMin(srcRect.left(), dstRect.left()) - 28.0;
         path.lineTo(startPt.x(), startPt.y() + 12.0);
         path.lineTo(loopX, startPt.y() + 12.0);
@@ -795,8 +792,6 @@ void DisassemblyView::rebuildCfgScene() {
       }
 
       m_cfgScene->addPath(path, QPen(edgeColor, 1.8))->setZValue(0.5);
-
-      // Render triangular arrowhead pointing at destination block top center
       QPolygonF arrowHead;
       arrowHead << endPt << QPointF(endPt.x() - 4.0, endPt.y() - 7.0)
                 << QPointF(endPt.x() + 4.0, endPt.y() - 7.0);

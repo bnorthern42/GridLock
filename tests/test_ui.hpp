@@ -141,6 +141,9 @@ private slots:
 
     /** @brief Verifies bidirectional SourceCodeView <-> DisassemblyView line/address sync and Code/Reverse/MPI workspace perspective switching. */
     void testSourceToAssemblySyncAndWorkspacePerspectives();
+
+    /** @brief Verifies breakpoint-aware Run Target / Continue execution, granular source-to-RIP line mapping, and CFG active instruction markers. */
+    void testBreakpointAwareRunContinueAndActiveCfgInstructionMarker();
 };
 
 
