@@ -9,6 +9,7 @@
  * against active cluster ranks.
  */
 
+#include <QComboBox>
 #include <QDockWidget>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -48,6 +49,18 @@ public:
      */
     bool promoteCurrentToWatch();
 
+    /**
+     * @brief Returns the pixel height of the top target/action header strip.
+     * @return Header bar height in pixels.
+     */
+    int headerBarHeight() const;
+
+    /**
+     * @brief Returns the pixel height of the bottom eval> prompt strip.
+     * @return Prompt bar height in pixels.
+     */
+    int promptBarHeight() const;
+
 public slots:
     /**
      * @brief Appends evaluated expression results for a specific rank to the history console.
@@ -71,6 +84,15 @@ signals:
     void watchExpressionRequested(const QString& expression);
 
 private:
+    /// Top 26px control strip.
+    QWidget* m_headerBar = nullptr;
+
+    /// Bottom 26px eval> prompt strip.
+    QWidget* m_promptBar = nullptr;
+
+    /// Target MPI rank selector dropdown.
+    QComboBox* m_rankCombo = nullptr;
+
     /// Input field for typing expressions.
     QLineEdit* m_inputField = nullptr;
 
@@ -79,6 +101,9 @@ private:
 
     /// Promote-to-watch button in the header strip.
     QPushButton* m_watchBtn = nullptr;
+
+    /// Clear history button in the header strip.
+    QPushButton* m_clearBtn = nullptr;
 
     /// Monospace scrollable history output console.
     QPlainTextEdit* m_historyArea = nullptr;

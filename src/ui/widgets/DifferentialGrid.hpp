@@ -45,6 +45,13 @@ public:
      */
     void setVariableData(int rankId, const QHash<QString, QString>& variables);
 
+    /**
+     * @brief Returns whether horizontal header columns are configured to stretch evenly across the dock width.
+     * @return True if QHeaderView::Stretch is active on the horizontal header; false otherwise.
+     */
+    bool horizontalHeaderStretchEnabled() const;
+
+
 public slots:
     /**
      * @brief Updates or creates an individual cell for a given rank and variable.

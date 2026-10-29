@@ -73,35 +73,39 @@ static QString getHighDensityQssOverlay() {
         "QMainWindow::separator:hover, QSplitter::handle:hover { background: #528bff; }\n"
         // Embedded terminal emulator cell geometry protection preventing PTY stair-stepping.
         "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; }\n"
-        // Dock container borders and compact 18-24px dock title bars.
+        // Dock container borders and compact 24px dock title bars.
         // Every dock widget has a 1px `#282c34` outline to separate adjacent panes cleanly.
         "QDockWidget { border: 1px solid #282c34; }\n"
         "QDockWidget::title {\n"
         "    background: #21252b;\n"
         "    color: #abb2bf;\n"
         "    padding: 3px 8px;\n"
-        "    min-height: 18px;\n"
+        "    height: 24px;\n"
+        "    min-height: 20px;\n"
         "    max-height: 24px;\n"
         "    border-bottom: 1px solid #2c313a;\n"
         "    font-size: 11px;\n"
         "    font-weight: 600;\n"
+        "    text-transform: uppercase;\n"
         "}\n"
         // Tabbed dock and bottom console tab bar chrome with 2px royal-blue active indicator.
         // Zero-margin tab panes prevent double borders inside dock containers.
-        "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background: #1b1e24; }\n"
+        "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }\n"
         "QTabWidget#EditorTabManager::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }\n"
-        "QTabBar { background: #16181d; }\n"
+        "QTabBar { background: #181a1f; }\n"
         "QTabBar::tab {\n"
-        "    background: #16181d;\n"
-        "    color: #9da5b4;\n"
+        "    background: #181a1f;\n"
+        "    color: #abb2bf;\n"
         "    padding: 3px 10px;\n"
-        "    min-height: 18px;\n"
+        "    height: 24px;\n"
+        "    min-height: 20px;\n"
         "    max-height: 24px;\n"
         "    margin: 0px;\n"
         "    border-right: 1px solid #282c34;\n"
         "    border-bottom: 1px solid #2c313a;\n"
         "    font-size: 11px;\n"
         "    font-weight: 600;\n"
+        "    text-transform: uppercase;\n"
         "}\n"
         // Selected tab uses the `#21252b` header surface and a 2px `#528bff` underline.
         "QTabBar::tab:selected {\n"
@@ -171,7 +175,7 @@ static QString getHighDensityQssOverlay() {
         // Tree and table views enforce monospace typography, alternating rows, and royal-blue selection.
         "QTreeView, QTableView, QTableWidget {\n"
         "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    background: #1b1e24;\n"
+        "    background: #16181d;\n"
         "    alternate-background-color: #181b20;\n"
         "    color: #d7dae0;\n"
         "    border: none;\n"
@@ -190,10 +194,16 @@ static QString getHighDensityQssOverlay() {
         "    background: #264f78;\n"
         "    color: #ffffff;\n"
         "}\n"
+        // Table and tree header container background matches #16181d canvas so empty vertical
+        // header space below the last row in DifferentialGrid has zero grey column mismatch.
+        "QHeaderView, QHeaderView:vertical, QHeaderView:horizontal {\n"
+        "    background-color: #16181d;\n"
+        "    border: none;\n"
+        "}\n"
         // Table and tree column header sections capped at 20-22px height with 1px #2c313a border.
         // Matches the #21252b sub-view control strip palette across all side and bottom panes.
         "QHeaderView::section {\n"
-        "    background: #21252b;\n"
+        "    background-color: #21252b;\n"
         "    color: #abb2bf;\n"
         "    padding: 2px 6px;\n"
         "    height: 20px;\n"
@@ -204,6 +214,13 @@ static QString getHighDensityQssOverlay() {
         "    border-bottom: 1px solid #2c313a;\n"
         "    font-size: 10px;\n"
         "    font-weight: 600;\n"
+        "}\n"
+        // Top-left table corner button matches the #21252b header section surface.
+        "QTableCornerButton::section {\n"
+        "    background-color: #21252b;\n"
+        "    border: 0px;\n"
+        "    border-right: 1px solid #2c313a;\n"
+        "    border-bottom: 1px solid #2c313a;\n"
         "}\n"
         // Slim 8px vertical and horizontal scrollbars with zero arrow buttons.
         // Uses #16181d track background and #2c323c rounded thumb handle (#3e4452 on hover).
@@ -320,9 +337,10 @@ static QString getHighDensityQssOverlay() {
         "    min-height: 18px;\n"
         "    padding: 1px 4px;\n"
         "}\n"
-        // Unified 24-26px sub-view header strips across all workstation panels and bottom tabs.
+        // Unified 24-26px sub-view header and prompt strips across all workstation panels and bottom tabs.
         "#cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar, "
-        "#evaluatorHeaderBar, #refManualHeaderBar, #mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
+        "#evaluatorHeaderBar, #evaluatorPromptBar, #gdbConsoleHeaderBar, #gdbConsolePromptBar, "
+        "#refManualHeaderBar, #mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
         "    background: #21252b;\n"
         "    border-bottom: 1px solid #2c313a;\n"
         "    min-height: 24px;\n"

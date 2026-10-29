@@ -60,6 +60,18 @@ public:
     static QString formatLogEntry(int rank, const QString& text, bool isInput,
                                   bool showRaw);
 
+    /**
+     * @brief Returns the pixel height of the top filter/target header strip.
+     * @return Header bar height in pixels.
+     */
+    int headerBarHeight() const;
+
+    /**
+     * @brief Returns the pixel height of the bottom gdb> command prompt strip.
+     * @return Prompt bar height in pixels.
+     */
+    int promptBarHeight() const;
+
 public slots:
     /**
      * @brief Appends asynchronous output received from GDB for a rank.
@@ -96,8 +108,11 @@ private:
      */
     void applyFilter();
 
+    QWidget* m_headerBar = nullptr;
+    QWidget* m_promptBar = nullptr;
     QLineEdit* m_filterEdit = nullptr;
     QPushButton* m_clearButton = nullptr;
+    QPushButton* m_sendButton = nullptr;
     QCheckBox* m_rawMiCheckbox = nullptr;
     QComboBox* m_rankCombo = nullptr;
     QPlainTextEdit* m_consoleEdit = nullptr;

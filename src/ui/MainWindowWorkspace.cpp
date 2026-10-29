@@ -515,9 +515,10 @@ void MainWindow::setupDocks() {
   // Hide row/column header indices to maximize data cell reading density.
   m_differentialGrid->setColumnHidden(0, true);
   m_differentialGrid->setRowHidden(0, true);
-  // Configure column sizing to fit variable names with trailing column stretch.
+  // Configure column sizing to stretch evenly across the dock width without horizontal clipping.
+  m_differentialGrid->horizontalHeader()->setMinimumSectionSize(64);
   m_differentialGrid->horizontalHeader()->setSectionResizeMode(
-      QHeaderView::ResizeToContents);
+      QHeaderView::Stretch);
   m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
 
   // Watch Expressions container with custom inline expression add bar.

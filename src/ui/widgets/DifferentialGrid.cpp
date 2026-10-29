@@ -8,8 +8,11 @@
  */
 
 #include "DifferentialGrid.hpp"
-#include <QHeaderView>
+
 #include <algorithm>
+
+#include <QHeaderView>
+#include <QPalette>
 
 namespace gridlock::ui {
 
@@ -17,18 +20,60 @@ namespace gridlock::ui {
  * @brief Constructs a new DifferentialGrid widget.
  *
  * Configures the initial 1x1 table layout with an inline "New Variable"
- * input cell at (0, 0) and connects user editing signals to watch triggers.
+ * input cell at (0, 0), enforces QHeaderView::Stretch across watched columns,
+ * and unifies verticalHeader() and viewport() background palettes to #16181d
+ * so no lighter-grey column block appears underneath RANK 0 / RANK 1.
  *
  * @param parent Optional parent widget.
  */
 DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     setFrameShape(QFrame::NoFrame);
     setAlternatingRowColors(true);
+    setTextElideMode(Qt::ElideRight);
     horizontalHeader()->setVisible(true);
-    horizontalHeader()->setMinimumSectionSize(48);
-    horizontalHeader()->setDefaultSectionSize(110);
+    horizontalHeader()->setMinimumSectionSize(64);
+    horizontalHeader()->setDefaultSectionSize(96);
+    horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     horizontalHeader()->setStretchLastSection(true);
+    horizontalHeader()->setTextElideMode(Qt::ElideRight);
     verticalHeader()->setDefaultSectionSize(22);
+
+    // Synchronize palette and stylesheet across table viewport and vertical/horizontal headers
+    // so empty space below the last rank row renders uniformly as #16181d across all columns.
+    const QColor kDarkSlateCanvas(0x16, 0x18, 0x1d);
+    QPalette pal = palette();
+    pal.setColor(QPalette::Base, kDarkSlateCanvas);
+    pal.setColor(QPalette::AlternateBase, QColor(0x18, 0x1b, 0x20));
+    pal.setColor(QPalette::Window, kDarkSlateCanvas);
+    pal.setColor(QPalette::Button, kDarkSlateCanvas);
+    setPalette(pal);
+    if (viewport()) {
+        viewport()->setAutoFillBackground(true);
+        viewport()->setPalette(pal);
+    }
+    if (verticalHeader()) {
+        verticalHeader()->setAutoFillBackground(true);
+        verticalHeader()->setPalette(pal);
+        if (verticalHeader()->viewport()) {
+            verticalHeader()->viewport()->setAutoFillBackground(true);
+            verticalHeader()->viewport()->setPalette(pal);
+        }
+    }
+    if (horizontalHeader()) {
+        horizontalHeader()->setAutoFillBackground(true);
+        horizontalHeader()->setPalette(pal);
+    }
+
+    setStyleSheet(QStringLiteral(
+        "QTableWidget, QTableView { background-color: #16181d; alternate-background-color: #181b20; "
+        "color: #d7dae0; border: none; gridline-color: #282c34; }"
+        "QHeaderView, QHeaderView:vertical, QHeaderView:horizontal { background-color: #16181d; border: none; }"
+        "QHeaderView::section { background-color: #21252b; color: #abb2bf; padding: 2px 6px; "
+        "height: 20px; min-height: 20px; max-height: 22px; border: 0px; "
+        "border-right: 1px solid #2c313a; border-bottom: 1px solid #2c313a; "
+        "font-size: 10px; font-weight: 600; }"
+        "QTableCornerButton::section { background-color: #21252b; border: 0px; "
+        "border-right: 1px solid #2c313a; border-bottom: 1px solid #2c313a; }"));
 
     // Seed initial row/col for inline watch input
     setRowCount(1);
@@ -54,6 +99,15 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
             }
         }
     });
+}
+
+/**
+ * @brief Returns whether horizontal header columns are configured to stretch evenly across the dock width.
+ * @return True if QHeaderView::Stretch is active on the horizontal header; false otherwise.
+ */
+bool DifferentialGrid::horizontalHeaderStretchEnabled() const {
+    return horizontalHeader() != nullptr &&
+           horizontalHeader()->sectionResizeMode(0) == QHeaderView::Stretch;
 }
 
 /**
@@ -84,7 +138,9 @@ void DifferentialGrid::addVariableColumn(const QString& name) {
     if (col == -1) {
         col = columnCount();
         setColumnCount(col + 1);
-        setHorizontalHeaderItem(col, new QTableWidgetItem(name));
+        auto* hdrItem = new QTableWidgetItem(name);
+        hdrItem->setToolTip(name);
+        setHorizontalHeaderItem(col, hdrItem);
         for (int r = 0; r < rowCount(); ++r) {
             setItem(r, col, new QTableWidgetItem("-"));
         }
@@ -141,7 +197,9 @@ void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName,
     if (col == -1) {
         col = columnCount();
         setColumnCount(col + 1);
-        setHorizontalHeaderItem(col, new QTableWidgetItem(varName));
+        auto* hdrItem = new QTableWidgetItem(varName);
+        hdrItem->setToolTip(varName);
+        setHorizontalHeaderItem(col, hdrItem);
         for (int r = 0; r < rowCount(); ++r) {
             setItem(r, col, new QTableWidgetItem("-"));
         }

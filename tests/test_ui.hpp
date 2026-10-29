@@ -132,5 +132,9 @@ private slots:
 
     /** @brief Verifies SourceCodeView uniform canvas without right-half grey band, structured MpiNetworkLogWidget 6-column table, single-row ReferenceManualWidget header, and monochrome toolbar glyphs. */
     void testSourceEditorCanvasNetworkLogTableAndHeaderDensity();
+
+    /** @brief Verifies DifferentialGrid uniform empty viewport without vertical header grey block, stretched watch columns, and GDB Console / Evaluator prompt bar cohesion. */
+    void testWatchGridBackgroundAndConsolePromptCohesion();
 };
+
 

@@ -100,21 +100,13 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         if (QLayout* gdbLayout = m_gdbConsoleWidget->layout()) {
             gdbLayout->setContentsMargins(0, 0, 0, 0);
             gdbLayout->setSpacing(0);
-            // Configure top filter bar and bottom command bar margins for 26px header alignment.
-            if (auto* vbox = qobject_cast<QVBoxLayout*>(gdbLayout)) {
-                for (int i = 0; i < vbox->count(); ++i) {
-                    if (QLayout* subLayout = vbox->itemAt(i)->layout()) {
-                        subLayout->setContentsMargins(6, 2, 6, 2);
-                        subLayout->setSpacing(6);
-                    }
-                }
-            }
         }
         m_gdbConsoleWidget->setStyleSheet(QStringLiteral(
-            "#GdbConsoleWidget { background: #21252b; }"
+            "#GdbConsoleWidget { background: #16181d; }"
+            "#gdbConsoleHeaderBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
+            "#gdbConsolePromptBar { background: #21252b; border-top: 1px solid #2c313a; }"
             "#GdbConsoleWidget QPlainTextEdit { background: #16181d; color: #d7dae0; "
-            "border: none; border-top: 1px solid #2c313a; border-bottom: 1px solid #2c313a; "
-            "font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
+            "border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
     }
 
     // 2. Harmonize SpackManager (HPC Console tab) outer layout and control bar metrics.
@@ -136,9 +128,9 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         m_spackManager->setStyleSheet(QStringLiteral(
             "#HpcConsoleDock { background: #21252b; }"
             "#HpcConsoleDock QPlainTextEdit { background: #16181d; color: #d7dae0; "
-            "border: none; border-top: 1px solid #2c313a; "
+            "border: none; border-top: 1px solid #2c313a; border-bottom: 1px solid #2c313a; "
             "font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"
-            "#HpcConsoleDock QLabel { color: #abb2bf; font-size: 11px; font-weight: 600; padding: 0px 4px; }"));
+            "#HpcConsoleDock QLabel { color: #abb2bf; font-size: 10px; font-weight: 700; padding: 0px 4px; }"));
     }
 
     // 3. Enforce zero-gutter outer margins, compact <= 22px controls, and borderless frames on all tabs.

@@ -31,6 +31,7 @@
 #include <QTreeView>
 #include <QtTest/QtTest>
 
+#include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
@@ -633,5 +634,94 @@ void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
         }
     }
 }
+
+/**
+ * @brief Verifies DifferentialGrid uniform empty viewport, stretched watch headers, and GDB/Evaluator console prompt bars.
+ *
+ * Audits two critical UI surfaces from Prompt 27:
+ * 1. DifferentialGrid (Watch Expressions) Empty Viewport & Stretch Headers:
+ *    Renders DifferentialGrid at 260x220 with 2 ranks and 2 watch expressions, grabs an offscreen
+ *    image, and samples the empty area below the last row on the left (x = 25, y = 190) versus the
+ *    right (x = 180, y = 190). Confirms both pixels share the exact same dark-slate background color
+ *    (eliminating the lighter-grey vertical column under RANK 0 / RANK 1), and confirms
+ *    horizontalHeaderStretchEnabled() == true.
+ * 2. GDB Console & Evaluator Prompt Bar & Header Cohesion:
+ *    Confirms that both GdbConsoleWidget and ExpressionEvaluatorWidget expose compact 26px (<= 30px)
+ *    header/prompt strips with contentsMargins().left() <= 6 and a QFrame::NoFrame output viewport.
+ */
+void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // 1. DifferentialGrid (Watch Expressions) Uniform Empty Viewport & Stretch Headers.
+    auto* watchGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
+    QVERIFY2(watchGrid != nullptr, "DifferentialGrid must exist in MainWindow");
+    QVERIFY2(watchGrid->horizontalHeaderStretchEnabled(),
+             "DifferentialGrid::horizontalHeaderStretchEnabled() must return true");
+
+    watchGrid->resize(260, 220);
+    watchGrid->show();
+    QApplication::processEvents();
+
+    const QImage watchImg = watchGrid->grab().toImage();
+    QVERIFY2(!watchImg.isNull() && watchImg.width() >= 200 && watchImg.height() >= 200,
+             "DifferentialGrid grabbed image must be valid and at least 200x200");
+    const QColor leftEmptyColor = watchImg.pixelColor(25, 190);
+    const QColor rightEmptyColor = watchImg.pixelColor(180, 190);
+    QVERIFY2(leftEmptyColor.rgb() == rightEmptyColor.rgb(),
+             qPrintable(QString("DifferentialGrid vertical header grey block detected: left(25,190)=%1 vs right(180,190)=%2")
+                            .arg(leftEmptyColor.name(), rightEmptyColor.name())));
+
+    // 2. GDB Console & Evaluator Prompt Bar & Header Cohesion.
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    QVERIFY(bottomTabs != nullptr);
+
+    auto* gdbConsole = mainWindow.findChild<gridlock::ui::GdbConsoleWidget*>();
+    QVERIFY2(gdbConsole != nullptr, "GdbConsoleWidget must exist in MainWindow");
+    for (int i = 0; i < bottomTabs->count(); ++i) {
+        if (bottomTabs->tabText(i).contains(QStringLiteral("GDB Console"), Qt::CaseInsensitive) ||
+            bottomTabs->tabText(i).contains(QStringLiteral("Evaluator"), Qt::CaseInsensitive)) {
+            bottomTabs->setCurrentIndex(i);
+            QApplication::processEvents();
+        }
+    }
+
+    // Verify GdbConsoleWidget header/prompt strip height <= 30px, left margin <= 6, and QFrame::NoFrame viewport.
+    QVERIFY2(gdbConsole->headerBarHeight() > 0 && gdbConsole->headerBarHeight() <= 30,
+             qPrintable(QString("GdbConsoleWidget::headerBarHeight() %1 must be in (0, 30]")
+                            .arg(gdbConsole->headerBarHeight())));
+    QVERIFY2(gdbConsole->promptBarHeight() > 0 && gdbConsole->promptBarHeight() <= 30,
+             qPrintable(QString("GdbConsoleWidget::promptBarHeight() %1 must be in (0, 30]")
+                            .arg(gdbConsole->promptBarHeight())));
+    if (QLayout* gdbLayout = gdbConsole->layout()) {
+        QVERIFY2(gdbLayout->contentsMargins().left() <= 6,
+                 qPrintable(QString("GdbConsoleWidget left margin %1 > 6")
+                                .arg(gdbLayout->contentsMargins().left())));
+    }
+    for (QAbstractScrollArea* area : gdbConsole->findChildren<QAbstractScrollArea*>()) {
+        QVERIFY2(area->frameShape() == QFrame::NoFrame,
+                 "GdbConsoleWidget output viewport must use QFrame::NoFrame");
+    }
+
+    auto* evaluator = mainWindow.findChild<gridlock::ui::ExpressionEvaluatorWidget*>();
+    QVERIFY2(evaluator != nullptr, "ExpressionEvaluatorWidget must exist in MainWindow");
+    QVERIFY2(evaluator->headerBarHeight() > 0 && evaluator->headerBarHeight() <= 30,
+             qPrintable(QString("ExpressionEvaluatorWidget::headerBarHeight() %1 must be in (0, 30]")
+                            .arg(evaluator->headerBarHeight())));
+    if (QLayout* evalLayout = evaluator->layout()) {
+        QVERIFY2(evalLayout->contentsMargins().left() <= 6,
+                 qPrintable(QString("ExpressionEvaluatorWidget left margin %1 > 6")
+                                .arg(evalLayout->contentsMargins().left())));
+    }
+    for (QAbstractScrollArea* area : evaluator->findChildren<QAbstractScrollArea*>()) {
+        QVERIFY2(area->frameShape() == QFrame::NoFrame,
+                 "ExpressionEvaluatorWidget output viewport must use QFrame::NoFrame");
+    }
+}
+
 
 
