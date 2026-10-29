@@ -1,148 +1,130 @@
-# GridLock - High-Performance MPI Graphical Debugger (v0.6.0)
+# GridLock — High-Performance MPI Graphical Debugger & Binary Analysis Workstation
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
 ![Wayland/Niri](https://img.shields.io/badge/Wayland-Niri_Native-orange.svg?style=for-the-badge)
 ![Meson/Ninja](https://img.shields.io/badge/Build-Meson%20|%20Ninja-blue.svg?style=for-the-badge)
-![LLDB/DAP](https://img.shields.io/badge/Backend-LLDB%20|%20DAP-purple.svg?style=for-the-badge)
+![LLDB/DAP & GDB/MI3](https://img.shields.io/badge/Backend-LLDB--DAP%20|%20GDB--MI3-purple.svg?style=for-the-badge)
 
-GridLock is a Wayland-native, Qt6 graphical MPI debugger powered by the Debug Adapter Protocol (DAP). It provides a highly specialized environment tailored to the complexities of parallel computing, allowing developers to inspect state, track execution, and visualize real-time state across multiple independent MPI ranks concurrently.
-
-> [!WARNING]  
-> **GridLock is currently in an Beta/WIP state.** It is a personal project intended for research use. Features are subject to change and stability is not guaranteed.
-
----
-![main image](assets/main.png)
-## 🚀 Key Features
-
-* **Lazy-Loading DAP Variable Trees:** Dynamically explore complex structs, pointers, and arrays efficiently without locking the UI.
-* **Integrated HPC Console & Hex Dump:** Seamlessly read raw memory via base64 DAP chunks, with 1:1 hardware-to-UI Hex dump synchronization.
-* **Vim-Style Chorded Shortcuts:** Leverage advanced command patterns (`Alt+B`, `Ctrl+W`) tailored for rapid iteration without mouse dependency.
-* **Project-Scoped Configuration (`.gridlock/`):** Each project maintains its own `.gridlock/workspace.toml` to store execution parameters (binary path, rank count, MPI arguments) and override global user settings. Project configs are safe to commit to version control.
-* **Integrated Interactive Terminal:** A real PTY-backed terminal (`qtermwidget`) is embedded directly in the IDE. Run shell commands, inspect environment variables, and manage build artifacts without leaving the debugger.
-* **Persistent Layout & Wizard Memory:** Dock widget geometry and state are automatically saved on close and fully restored on the next launch. The Project Wizard auto-populates all fields with your last session's values.
-* **TOML Session Persistence:** Save and instantly restore robust HPC debug profiles (binary arguments, OpenMPI rank counts, watchlists).
-* **Multi-Rank State Inspection:** Step through multiple independent MPI processes simultaneously within a unified, responsive interface.
-* **Semantic Hover Tooltips:** Powered by `clangd` language server and DAP to instantly view live variable values on hover.
-* **HPC Orchestration (SLURM & Spack):** Submit remote batch jobs and monitor Spack environments right from the IDE.
-![HPC prefs](assets/HPC.png)
-* **Deadlock Detector (Barrier/Wait Analyzer):** Automatically parses `-stack-list-frames` to flag active MPI ranks blocked in collective synchronization. (Coming soon...)
-* **Floating-Point Exception (FPE) Trapper:** Halts execution instantly on divergent NaNs or infinities. Fatal target exceptions (e.g., `SIGFPE`) now surface as a clean UI warning instead of leaving the session hung.
-* **Conditional Breakpoint Expressions:** Dynamically halt loops using evaluable C++ statements (e.g., `i == 100 && rank == 0`).
-* **Value-Change Visual Highlighting:** Fast identification of mutated variables and registers across steps via instant color shifts.
-* **Raw Memory Export & Multi-Rank Broadcasts:** Deep hardware state inspection and mass cluster commanding.
-![mem viewer](assets/memView.png)
-* **Zero-Copy Memory Pipelines:** Extract large array states directly from the target kernel via lightning-fast `process_vm_readv` bypasses.
-* **Memory Diff Engine:** Simultaneous, zero-copy memory extraction (`process_vm_readv`) across multiple MPI ranks with visual byte-level discrepancy highlighting.
-* **Session Bookmarking:** Serialize active breakpoints, watched variables, and UI states to lightweight TOML files for persistent workspaces.
-
-* **Docsets and man pages:** Automatically index docsets and man pages for offline access.
-![Docsets](assets/docsets.png)
-![Man pages](assets/manpages.png)
-
-> ⚠️ **EXPERIMENTAL FEATURE (USE AT YOUR OWN RISK):** SLURM job execution is currently in a basic, feature-incomplete state. While GridLock can submit jobs to the cluster, advanced lifecycle management—such as detached session rehydration, automatic `squeue` polling, and automated `scancel` cleanup—is not yet implemented. Long-running or pending jobs may require manual management via the terminal to prevent burning allocation hours.
+**GridLock** is a Wayland-native, Qt6/C++23 graphical MPI debugger and binary analysis workstation engineered for parallel high-performance computing (HPC) and systems reverse engineering. It unifies multi-rank MPI execution control, cross-rank variable and memory diffing, native ELF64 binary inspection, orthogonal Control Flow Graph (CFG) visualization, and multi-target decompilation inside a zero-gutter `#16181d` dark-slate workstation layout.
 
 ---
 
-## 🛠️ Getting Started
+## Workstation Overview & Perspectives
+
+### 1. Code + Disassembly Perspective (`Alt+1` / `CODE`)
+Synchronized C/C++ source stepping (`SourceCodeView`), linear assembly with branch-flow arcs (`DisassemblyView`), live x86_64 register telemetry (`RegisterView`), cross-rank watch comparison (`DifferentialGrid`), 8-rank cluster status (`ServerRackView`), and zero-copy hexadecimal memory inspection (`MemView`).
+
+![GridLock Workspace Overview](docs/screenshots/workspace_overview.png)
+
+### 2. Reverse Engineering Perspective (`Alt+2` / `REVERSE`)
+One-click full-stage expansion combining the orthogonal basic-block Control Flow Graph (with per-block MPI rank occupancy badges `[R0]`, `[R1]`, `[R2-R7]` and interactive minimap overlay) alongside the synchronized multi-target (`Approx C`, `C++`, `Pseudocode`) decompiler and cross-reference (`XREF`) comments.
+
+![GridLock CFG & Decompiler Split Perspective](docs/screenshots/cfg_decompiler_split.png)
+
+### 3. MPI Cluster & Deadlock Diagnostics Perspective (`Alt+3` / `MPI`)
+Dedicated multi-rank wait-for cycle analysis (`DeadlockAnalyzer`), structured 6-column collective/point-to-point network telemetry (`MpiDiagnosticsWidget` / `MpiNetworkLogWidget`), and integrated offline Zeal `.docset` SQLite/HTML & system `man` documentation (`ReferenceManualWidget`).
+
+![GridLock MPI Diagnostics & Deadlock Analyzer](docs/screenshots/mpi_diagnostics_docsets.png)
+
+---
+
+## Core Workstation Capabilities
+
+### Parallel MPI Rank Debugging
+* **Inline Target & MPI Rank (`-np`) Toolbar Configuration:** Select MPI demonstration targets or load arbitrary ELF64 binaries directly from `#toolbarTargetSelector`, adjust cluster rank counts (`1..64`) via `#toolbarRankSpin`, and drive state-aware execution (`Run Target`, `Continue`, `Step Inst`, `Pause Rank`, `Stop`, `Terminate Session`).
+* **Synchronized Multi-View Step Execution:** Stepping instructions (`Step Inst`) advances the program counter across `DisassemblyView` (Linear, CFG Graph, and Decompiler), `SourceCodeView` (emerald `▶` gutter indicator and full-width active line highlight), `RegisterView` (`rip`, `rsp`, `rbp`, `rax`, `eflags`), `ServerRackView`, and `MemView`.
+* **Cross-Rank Watch Matrix (`DifferentialGrid`):** Compare arbitrary C/C++ expressions (e.g., `data[0].id`, `data[0].coords.x`, `mpi_rank`) across all active MPI ranks simultaneously, with one-click promotion from the `Variables` dock or `Evaluator` console.
+* **Circular Wait-For Deadlock Detection (`DeadlockAnalyzer`):** Detects directed wait-for cycles across blocked MPI ranks (`MPI_Send` / `MPI_Recv` / `MPI_Barrier`), badging affected nodes in both `ServerRackView` and the 2D Control Flow Graph with crimson `DEADLOCK CYCLE` alerts.
+* **Zero-Copy Cross-Rank Memory Differ (`MemoryDiffer`):** Extracts raw process memory via `process_vm_readv` and highlights byte-level discrepancies between any two MPI ranks in `MemView`.
+
+### Binary Analysis & Reverse Engineering
+* **Native ELF64 Binary Inspector (`ElfBinaryInspector`):** Parses 64-bit ELF headers, section tables (`.plt`, `.text`, `.rodata`, `.data`), `.symtab`/`.dynsym` symbol tables, and printable ASCII strings without external dependencies, mapped onto the interactive address-space navigation ribbon.
+* **Orthogonal Control Flow Graph & Rank Divergence Badges:** Partitions assembly listings into basic blocks connected by Manhattan-routed true (green), false (red), and unconditional (blue) edges, annotated with live MPI rank occupancy badges and a draggable corner minimap.
+* **Multi-Target Decompiler & Bidirectional Sync:** Reconstructs structured `Approx C`, `C++`, or `Pseudocode` with `XREFS TO` comments and function signatures. Clicking any C/C++ line in `SourceCodeView` or `Decompiler` automatically seeks `DisassemblyView`, `CFG`, and `MemView` to the corresponding virtual instruction address (and vice versa).
+* **Interactive Xref & Call-Graph Navigator (`XrefInspectorDialog`):** Press `X` on any instruction to inspect incoming callers/branches (`XREFS TO`) and outgoing calls/jumps (`XREFS FROM`) with live preview and double-click navigation.
+* **Live Instruction & Hex Byte Patching with ELF Export:** Assemble live instruction patches (`Ctrl+Shift+P` / `nop`, `ret`, `xor eax, eax`, `jmp`, `je`, `jne`) or edit raw hex bytes (`Ctrl+E` in `MemView`), and persist the modified image to disk as an executable ELF64 binary (`ElfBinaryInspector::savePatchedBinary`).
+
+### Integrated Developer Environment
+* **Zero-Gutter Dark-Slate Workstation Chrome:** Engineered around a two-tier panel architecture (`24px` `#21252b` header strips with `0px` outer viewport margins and `1px solid #2c313a` structural dividers) across all docks, bottom consoles, and modal dialogs.
+* **Offline Zeal Docsets & System Man Viewer (`ReferenceManualWidget`):** Auto-discovers installed Zeal `.docset` SQLite/HTML bundles (`~/.local/share/Zeal/Zeal/docsets`) alongside system `man` pages. Press `F1` on any symbol or instruction to open formatted dark-slate API documentation immediately.
+* **Isolated Fixed-Pitch PTY Terminal (`TerminalDockWidget`):** Embeds a real `QTermWidget` pseudo-terminal enforcing strict fixed-pitch font isolation (`JetBrains Mono` / `Cascadia Code` / `DejaVu Sans Mono`) so proportional UI themes never corrupt terminal character cell alignment.
+
+---
+
+## Keyboard Shortcuts & Perspectives Reference
+
+| Shortcut | Action | Scope |
+| :--- | :--- | :--- |
+| **`Alt+1`** | Switch to **Code** Perspective (`SourceCodeView` + `DisassemblyView`) | Global |
+| **`Alt+2`** | Switch to **Reverse** Perspective (Full-width Split `CFG` + `Decompiler`) | Global |
+| **`Alt+3`** | Switch to **MPI** Perspective (`MPI Diagnostics` & Cluster Focus) | Global |
+| **`Ctrl+M`** | Toggle Maximize / Restore Bottom Console Dock (`68%` height) | Global |
+| **`Ctrl+G`** | Focus Global Address / Symbol Seek Bar (`#cutterSeekBar`) | Global |
+| **`Alt+Left` / `Alt+Right`** | Navigate Backward / Forward in Address Seek History | Global |
+| **`Space`** | Toggle `DisassemblyView` between Linear Assembly and 2D CFG Graph | Disassembly / CFG |
+| **`X`** | Open Interactive Cross-Reference (`XrefInspectorDialog`) for Active Address | Disassembly / CFG |
+| **`F1`** | Context-Sensitive Symbol Lookup in `Reference Manual` (Zeal / Man) | Disassembly / Global |
+| **`Ctrl+Shift+P`** | Patch Active Instruction in `DisassemblyView` | Disassembly |
+| **`Ctrl+E`** | Patch Raw Hex Bytes at Active Address in `MemView` | Memory View |
+| **`Ctrl+Shift+F`** | Unified Multi-Domain Workspace Search (Symbols, Strings, Asm, Decompiler) | Global |
+| **`;`** | Add / Edit Inline User Comment at Active Instruction Address | Disassembly |
+| **`Ctrl+B`** | Toggle Address Bookmark on Active Instruction | Disassembly |
+
+---
+
+## Building, Testing & Headless Snapshots
 
 ### Prerequisites
 * **C++23 Compiler:** GCC 13+ or Clang 16+
-* **Build System:** Meson and Ninja
-* **UI Framework:** Qt6 (Widgets, Core, and Gui modules)
-* **Terminal Widget:** `qtermwidget` (Qt6-native build; see CI pipeline for build-from-source instructions)
-* **MPI Implementation:** MPICH or OpenMPI
-* **Debugger Backend:** DAP-compliant debug adapter (e.g., `lldb-vscode` or `lldb-dap`)
-* **Language Server:** `clangd`
+* **Build System:** Meson (`>= 1.1`) and Ninja
+* **Qt 6 Modules:** `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, `Qt6Sql`, `Qt6Concurrent`, `Qt6Svg`, `Qt6OpenGLWidgets`, `Qt6Test`
+* **Libraries:** `qtermwidget6`, `tomlplusplus`, and bundled `Qt-Advanced-Stylesheets`
 
-### Building from Source
-
+### Build & Run
 ```bash
-git clone git@github.com:bnorthern42/GridLock.git
-cd GridLock
-meson setup build
-ninja -C build
-sudo meson install -C build
+meson setup builddir
+ninja -C builddir
+
+# Launch interactive workstation
+./builddir/gridlock
 ```
 
-### Running the IDE
-
+### Running the Full Test Suite (Headless)
+GridLock includes 26 automated test suites (including 43 end-to-end UI cohesion, workflow, binary analysis, and repository-wide Google C++ Style / `< 950` LOC / `>= 20%` documentation audits):
 ```bash
-# Standard execution
-./build/gridlock
-
-# Test mode (simulates MPI/DAP environment)
-./build/gridlock --test-mode
-
-# Tutorial mode (experimental, WIP feature for testing debugger integrations)
-# Note: This feature currently only works when building locally and is not supported in the AppImage.
-./build/gridlock --tutorial-mode
-
-# Verbose mode (force stdout of internal DAP/LSP payloads and QtDebug traces)
-./build/gridlock --verbose
+find builddir -name "*.gcda" -delete && meson test -C builddir --print-errorlogs
 ```
 
-### Deployment & AppImage Packaging
-
-GridLock explicitly relies on **`CQtDeployer`** (replacing `linuxdeploy`) to package and deploy native binaries. This guarantees proper bundling of all Qt6 Wayland and XCB QPA payloads, ensuring native Wayland support without crashing on missing libraries. AppImages are deployed automatically via GitHub Actions standard artifact pipelines.
-
-### Testing with Docker
-
-> [!IMPORTANT]
-> **`docker-compose up` is the officially supported method for running the test suite.** Host kernel hardening (e.g., `ptrace` scope restrictions, missing `seccomp` overrides) will cause tests that rely on `ptrace` and `process_vm_readv` to fail silently or be blocked outright. Do not rely on `meson test` alone to validate the full pipeline.
-
-To run the full test suite in a correctly provisioned sandbox:
-
+### Headless Offscreen Snapshot Generation
+Capture deterministic `1440x900` PNG snapshots without opening a visible Wayland/X11 window:
 ```bash
-docker-compose up --build
+QT_QPA_PLATFORM=offscreen ./builddir/gridlock --headless --snapshot docs/screenshots/workspace_overview.png
 ```
 
-The Docker environment is configured with `SYS_PTRACE` capabilities and `seccomp:unconfined`, ensuring that the LLDB/DAP adapter, `process_vm_readv` memory extraction, and `ptrace`-based syscall interception all function as they would on a permissive development kernel.
+### Configuration (`config.toml` & `.gridlock/workspace.toml`)
+User preferences are stored in `~/.config/gridlock/config.toml` and per-project settings in `.gridlock/workspace.toml`:
+```toml
+[ui]
+preferred_monitor = "2560x1440"
+open_unfocused = false
+
+[docsets]
+paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
+```
 
 ---
 
-## 📚 Documentation
+## Documentation Index
 
-The GridLock documentation is divided into two primary suites:
-
-* 🧑‍💻 **[User Documentation](docs/user/README.md):** Guides on layout, MPI workflow, advanced debugging, and cluster configuration.
-* 🛠️ **[Developer Documentation](docs/developer/README.md):** Architectural overviews, build instructions, Wayland QPA specifics, and testing pipelines.
-
----
-
-## 🗺️ Roadmap Snapshot
-
-GridLock's development is broken into iterative phases. For a detailed breakdown, see [ROADMAP.md](ROADMAP.md).
-
-* **Phase 1–5:** ✅ Complete — Stability, UI, Advanced Debugger, IDE Experience, DAP Refactor
-* **Phase 6:** ✅ Complete — Zero-Copy Multi-Rank Memory Diff Engine & Session State Bookmarking
-* **Phase 6.5:** ✅ Complete — Workspace Configuration (`.gridlock/`) & Dockerized TDD Pipeline
-* **Phase 11:** ✅ Complete — Deployment & AppImage Packaging via CQtDeployer
-* **Phase 7:** Upcoming — Cross-Language Variable Inspector
-* **Phase 8:** Upcoming — Alternative Debugger Backends
-* **Phase 9:** Upcoming — The Plugin Marketplace
-* **Phase 10:** Upcoming — Advanced Cluster Lifecycle & Detached Sessions
+* [**Architecture & Modularity Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — 4-zone workstation layout, translation unit partitioning, signal choreography, and code quality invariants.
+* [**User Workflow Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Step-by-step guide to MPI rank debugging, CFG/Decompiler analysis, live binary patching, and Zeal docset integration.
+* [**User Documentation Suite (`docs/user/README.md`)**](docs/user/README.md) — Detailed interface, advanced debugging, and HPC cluster guides.
+* [**Developer Documentation Suite (`docs/developer/README.md`)**](docs/developer/README.md) — Core coordinators, security sanitizers, and UI internals.
 
 ---
 
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for environment setup and issue submission. All community interactions must adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## 🏆 Third-Party Libraries & Acknowledgements
-
-GridLock would not be possible without the following open-source projects. Their inclusion in v0.6.0 is gratefully acknowledged.
-
-| Library | Purpose | License |
-| :--- | :--- | :--- |
-| [**qtermwidget**](https://github.com/lxqt/qtermwidget) | Provides the fully interactive, PTY-backed embedded terminal (`TerminalDockWidget`). A Qt6-native build is compiled from source as part of the CI pipeline. | GPL-2.0 |
-| [**Qt-Advanced-Stylesheets**](https://github.com/githubuser0xFFFF/Qt-Advanced-Stylesheets) | Powers the global Material Design theming engine. In v0.6.0, style assets are compiled into a `.qrc` resource bundle for zero-filesystem-dependency deployment. | MIT |
-| [**tomlplusplus**](https://github.com/marzer/tomlplusplus) | TOML parsing for all configuration files (`config.toml`, `workspace.toml`, session files). | MIT |
-| [**OpenMPI / MPICH**](https://www.open-mpi.org/) | The MPI runtime that GridLock orchestrates for parallel debugging sessions. | BSD-3-Clause |
-
-GridLock also draws design inspiration from GNU DDD, KDbg, gdbgui, and Zeal.
-
-## 📄 License
+## License
 
 Licensed under the MIT License. See [LICENSE](LICENSE).
