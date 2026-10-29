@@ -182,6 +182,21 @@ public:
      */
     QVector<int> detectAndHighlightDeadlock(const QMap<int, int>& waitForGraph);
 
+    /**
+     * @brief Resolves symbol documentation (stripping @plt/@got suffixes), switches to Reference Manual, and renders HTML.
+     * @param rawSymbol Raw symbol name or topic identifier.
+     * @return True if documentation was rendered and tab activated; false otherwise.
+     */
+    bool lookupSymbolDocumentation(const QString& rawSymbol);
+
+    /**
+     * @brief Switches to the specified bottom console tab index and captures a PNG audit snapshot.
+     * @param tabIndex Zero-based index in BottomConsoleTabs.
+     * @param outputPath Destination PNG file path.
+     * @return True if PNG snapshot was rendered and saved; false otherwise.
+     */
+    bool captureTabAuditSnapshot(int tabIndex, const QString& outputPath);
+
     bool canNavigateBack() const;
     bool canNavigateForward() const;
     bool navigateBack();
@@ -220,6 +235,7 @@ private:
     void setupToolbar();
     void setupDocks();
     void setupStatusBar();
+    void harmonizeBottomConsoleTabs();
     void updateStatusTelemetry(const QString& pcOrSeek = QString(),
                                const QString& targetState = QString());
     void updateNavigationButtons();

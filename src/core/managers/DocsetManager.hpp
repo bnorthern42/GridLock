@@ -60,6 +60,26 @@ public:
     /** @brief Returns the list of absolute paths to all currently attached `.docset` bundles. */
     QStringList getActiveDocsetPaths() const;
 
+    /**
+     * @brief Strips PLT/GOT suffixes, angle brackets, and offsets from a raw symbol token.
+     * @param rawSymbol Raw symbol string (e.g., "MPI_Init@plt" or "<MPI_Send@plt>").
+     * @return Normalized canonical symbol identifier (e.g., "MPI_Init").
+     */
+    static QString normalizeSymbolName(const QString& rawSymbol);
+
+    /**
+     * @brief Returns ordered list of built-in offline HPC/MPI/ABI reference manual topics.
+     * @return List of canonical topic names.
+     */
+    QStringList builtInTopics() const;
+
+    /**
+     * @brief Generates rich dark-slate HTML documentation for a built-in MPI, C/POSIX, or ABI topic.
+     * @param rawSymbol Symbol or topic name to look up.
+     * @return Styled HTML document string, or empty string if symbol is empty.
+     */
+    QString lookupBuiltInManualHtml(const QString& rawSymbol) const;
+
 private:
     explicit DocsetManager(QObject* parent = nullptr);
     ~DocsetManager() override;

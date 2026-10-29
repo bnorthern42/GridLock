@@ -67,26 +67,38 @@ void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
 }
 
 /**
- * @brief Constructs the layout, rank selection top bar, and hierarchical tree view.
+ * @brief Constructs the layout, 26px rank selection header bar, and hierarchical tree view.
  */
 void VariablesDockWidget::setupUi() {
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
-    // Top Bar hosting Scope label and rank selector combo box.
-    QHBoxLayout* topBar = new QHBoxLayout();
-    topBar->setContentsMargins(5, 5, 5, 5);
-    QLabel* scopeLabel = new QLabel("Scope:", this);
-    m_rankSelector = new QComboBox(this);
+    // Unified 26px #21252b header strip hosting Scope label and rank selector combo box.
+    QWidget* headerBar = new QWidget(this);
+    headerBar->setObjectName(QStringLiteral("variablesHeaderBar"));
+    headerBar->setFixedHeight(26);
+    headerBar->setStyleSheet(QStringLiteral(
+        "#variablesHeaderBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
+        "#variablesHeaderBar QLabel { color: #abb2bf; font-size: 11px; font-weight: 600; }"));
+
+    QHBoxLayout* topBar = new QHBoxLayout(headerBar);
+    topBar->setContentsMargins(6, 2, 6, 2);
+    topBar->setSpacing(6);
+    QLabel* scopeLabel = new QLabel(QStringLiteral("Scope:"), headerBar);
+    m_rankSelector = new QComboBox(headerBar);
+    m_rankSelector->setFixedHeight(22);
     topBar->addWidget(scopeLabel);
     topBar->addWidget(m_rankSelector, 1);
-    layout->addLayout(topBar);
+    layout->addWidget(headerBar);
 
-    // Main Area: Tree view rendering variable names, values, and data types.
+    // Main Area: Borderless tree view rendering variable names, values, and data types.
     m_variablesTree = new QTreeView(this);
+    m_variablesTree->setFrameShape(QFrame::NoFrame);
+    m_variablesTree->setAlternatingRowColors(true);
     m_variablesTree->setModel(m_model);
     m_variablesTree->setRootIsDecorated(true);
-    m_variablesTree->setIndentation(20);
+    m_variablesTree->setIndentation(16);
     m_variablesTree->setItemsExpandable(true);
     m_variablesTree->setExpandsOnDoubleClick(true);
 
@@ -95,7 +107,7 @@ void VariablesDockWidget::setupUi() {
     m_variablesTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_variablesTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
 
-    layout->addWidget(m_variablesTree);
+    layout->addWidget(m_variablesTree, 1);
 
     // Re-query local variables when user changes active rank selection in combo box.
     connect(m_rankSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &VariablesDockWidget::onRankSelected);

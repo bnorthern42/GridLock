@@ -159,28 +159,38 @@ static QString getHighDensityQssOverlay() {
         "    border: 1px solid #528bff;\n"
         "    background: #1b1e24;\n"
         "}\n"
-        // Code editors, disassembly views, and tabular data grids.
-        "QTextEdit, QPlainTextEdit {\n"
-        "    border: 1px solid #282c34;\n"
+        // Code editors, disassembly views, documentation browsers, and tabular data grids.
+        "QTextEdit, QPlainTextEdit, QTextBrowser, QListWidget {\n"
+        "    border: none;\n"
         "    border-radius: 0px;\n"
         "    padding: 0px;\n"
         "    background: #16181d;\n"
         "    color: #d7dae0;\n"
         "}\n"
-        // Tree and table views enforce monospace typography for aligned hex/register columns.
+        // Tree and table views enforce monospace typography, alternating rows, and royal-blue selection.
         "QTreeView, QTableView, QTableWidget {\n"
         "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    background: #181a1f;\n"
+        "    background: #1b1e24;\n"
+        "    alternate-background-color: #181b20;\n"
+        "    color: #d7dae0;\n"
         "    border: none;\n"
         "    padding: 0px;\n"
         "    gridline-color: #282c34;\n"
+        "    selection-background-color: #264f78;\n"
+        "    selection-color: #ffffff;\n"
         "}\n"
         // Compact 18px minimum row height maximizes visible rows in symbol and register tables.
         "QTreeView::item, QTableView::item {\n"
         "    padding: 1px 4px;\n"
         "    min-height: 18px;\n"
         "}\n"
-        // Table and tree column header sections capped at 20-22px height.
+        // Selected tree and table rows highlight in #264f78 royal blue with crisp white text.
+        "QTreeView::item:selected, QTableView::item:selected, QTableWidget::item:selected {\n"
+        "    background: #264f78;\n"
+        "    color: #ffffff;\n"
+        "}\n"
+        // Table and tree column header sections capped at 20-22px height with 1px #2c313a border.
+        // Matches the #21252b sub-view control strip palette across all side and bottom panes.
         "QHeaderView::section {\n"
         "    background: #21252b;\n"
         "    color: #abb2bf;\n"
@@ -189,10 +199,55 @@ static QString getHighDensityQssOverlay() {
         "    min-height: 20px;\n"
         "    max-height: 22px;\n"
         "    border: 0px;\n"
-        "    border-right: 1px solid #282c34;\n"
+        "    border-right: 1px solid #2c313a;\n"
         "    border-bottom: 1px solid #2c313a;\n"
         "    font-size: 10px;\n"
         "    font-weight: 600;\n"
+        "}\n"
+        // Slim 8px vertical and horizontal scrollbars with zero arrow buttons.
+        // Uses #16181d track background and #2c323c rounded thumb handle (#3e4452 on hover).
+        "QScrollBar:vertical {\n"
+        "    background: #16181d;\n"
+        "    width: 8px;\n"
+        "    margin: 0px;\n"
+        "    border: none;\n"
+        "}\n"
+        // Vertical scrollbar thumb handle with 24px minimum grab height.
+        "QScrollBar::handle:vertical {\n"
+        "    background: #2c323c;\n"
+        "    min-height: 24px;\n"
+        "    border-radius: 3px;\n"
+        "}\n"
+        // Brighten vertical scrollbar thumb handle on mouse hover.
+        "QScrollBar::handle:vertical:hover {\n"
+        "    background: #3e4452;\n"
+        "}\n"
+        // Suppress legacy top/bottom stepper arrow buttons on vertical scrollbars.
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {\n"
+        "    height: 0px;\n"
+        "    background: none;\n"
+        "}\n"
+        // Horizontal 8px scrollbar track matching dark-slate viewport background.
+        "QScrollBar:horizontal {\n"
+        "    background: #16181d;\n"
+        "    height: 8px;\n"
+        "    margin: 0px;\n"
+        "    border: none;\n"
+        "}\n"
+        // Horizontal scrollbar thumb handle with 24px minimum grab width.
+        "QScrollBar::handle:horizontal {\n"
+        "    background: #2c323c;\n"
+        "    min-width: 24px;\n"
+        "    border-radius: 3px;\n"
+        "}\n"
+        // Brighten horizontal scrollbar thumb handle on mouse hover.
+        "QScrollBar::handle:horizontal:hover {\n"
+        "    background: #3e4452;\n"
+        "}\n"
+        // Suppress legacy left/right stepper arrow buttons on horizontal scrollbars.
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {\n"
+        "    width: 0px;\n"
+        "    background: none;\n"
         "}\n"
         // Top execution and navigation toolbar and tool buttons capped at 26-28px height.
         "QToolBar {\n"
@@ -264,12 +319,13 @@ static QString getHighDensityQssOverlay() {
         "    min-height: 18px;\n"
         "    padding: 1px 4px;\n"
         "}\n"
-        // Unified 24px sub-view header strips for Disassembly, Memory View, Explorer, and Watch panes.
-        "#cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar {\n"
+        // Unified 24-26px sub-view header strips across all workstation panels and bottom tabs.
+        "#cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar, "
+        "#evaluatorHeaderBar, #refManualHeaderBar, #mpiDiagnosticsHeaderBar, #variablesHeaderBar {\n"
         "    background: #21252b;\n"
         "    border-bottom: 1px solid #2c313a;\n"
         "    min-height: 24px;\n"
-        "    max-height: 24px;\n"
+        "    max-height: 26px;\n"
         "}\n"
         // Disassembly header title badge and basic-block/edge metrics label.
         "#cutterDisasmBadge {\n"

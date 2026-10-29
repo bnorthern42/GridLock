@@ -7,8 +7,9 @@
  */
 
 #include "MpiNetworkLogWidget.hpp"
-#include <QPalette>
 #include <QFont>
+#include <QFrame>
+#include <QPalette>
 #include <QScrollBar>
 #include <QVBoxLayout>
 
@@ -17,7 +18,7 @@ namespace gridlock::ui {
 /**
  * @brief Constructs a new MpiNetworkLogWidget.
  *
- * Configures the monospace text area with zero margins for dock docking.
+ * Configures the monospace text area with zero margins and borderless frame for dock docking.
  *
  * @param title Optional title banner string.
  * @param parent Optional parent widget.
@@ -28,17 +29,21 @@ MpiNetworkLogWidget::MpiNetworkLogWidget(const QString& title, QWidget *parent)
     Q_UNUSED(title);
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
-    // Initialize monospace text editor
+    // Initialize borderless monospace text editor on #16181d dark-slate canvas.
     m_textEdit = new QPlainTextEdit(this);
+    m_textEdit->setFrameShape(QFrame::NoFrame);
     m_textEdit->setReadOnly(true);
+    m_textEdit->setStyleSheet(QStringLiteral(
+        "QPlainTextEdit { background: #16181d; color: #d7dae0; border: none; padding: 4px 6px; }"));
     
     QFont font("monospace");
     font.setStyleHint(QFont::Monospace);
     font.setPointSize(10);
     m_textEdit->setFont(font);
 
-    layout->addWidget(m_textEdit);
+    layout->addWidget(m_textEdit, 1);
 }
 
 /**

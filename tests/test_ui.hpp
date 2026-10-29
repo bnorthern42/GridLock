@@ -117,4 +117,7 @@ private slots:
 
     /** @brief Verifies patched ELF export to disk, unified multi-domain workspace search, and deadlock propagation. */
     void testPatchedElfExportWorkspaceSearchAndDeadlockPropagation();
+
+    /** @brief Verifies workstation UI cohesion across all bottom tabs, F1 docset lookup, and tab audit snapshots. */
+    void testWorkstationUiCohesionAndIntegratedDocViewer();
 };

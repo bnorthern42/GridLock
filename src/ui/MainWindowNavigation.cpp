@@ -760,28 +760,38 @@ void MainWindow::loadSession() {
 /**
  * @brief Compiles tutorial demo target and initiates multi-rank debug session.
  * @param absoluteFilePath Path to the tutorial C/C++ source file.
+ *
+ * Opens the target source file in the editor tab strip, sets the project
+ * explorer root directory, invokes mpicc/mpic++ with debug symbols (-g -O0),
+ * restores persistent breakpoints, and starts an interactive multi-rank session.
  */
 void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
+    // Load the tutorial source file into the primary source code editor tab.
     loadSourceFile(absoluteFilePath);
 
+    // Synchronize the Project Explorer root path with the tutorial directory.
     const QFileInfo fi(absoluteFilePath);
     if (m_projectExplorerWidget) {
         m_projectExplorerWidget->setRootPath(fi.absolutePath());
     }
 
+    // Select the appropriate MPI wrapper compiler based on file extension.
     const QString compiler = fi.suffix() == "c" ? "mpicc" : "mpic++";
     const QString outDir = QDir::tempPath();
     const QString outBin = outDir + "/" + fi.baseName() + "_demo";
 
+    // Compile the tutorial source with full DWARF debug info and zero optimization.
     QProcess proc;
     proc.start(compiler, QStringList() << absoluteFilePath << "-g" << "-O0"
                                        << "-o" << outBin);
     proc.waitForFinished();
 
     if (proc.exitCode() == 0) {
+        // Reload persisted breakpoint line numbers from configuration storage.
         m_persistentBreakpoints =
             gridlock::core::ConfigManager::instance().getBreakpoints();
 
+        // Apply breakpoint markers to the active SourceCodeView editor gutter.
         if (m_editorTabManager) {
             if (auto* view =
                     m_editorTabManager->getSourceCodeViewForFile(absoluteFilePath)) {
@@ -789,6 +799,7 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
             }
         }
 
+        // Broadcast breakpoint locations to the active GDB/MI or DAP coordinator.
         if (m_coordinator) {
             if (auto* gdbCoord =
                     dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
@@ -804,9 +815,11 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
             }
         }
 
+        // Launch 2 ranks for the deadlock demo or 3 ranks for general MPI demos.
         const int ranks = (fi.baseName() == "deadlock_demo") ? 2 : 3;
         startDebuggingSession(outBin, ranks);
     } else {
+        // Surface compiler diagnostic stderr in the MPI Network Log console.
         if (networkLog()) {
             networkLog()->appendError("Tutorial compilation failed:\n" +
                                       proc.readAllStandardError());
@@ -819,6 +832,7 @@ void MainWindow::onTutorialLaunchRequested(const QString& absoluteFilePath) {
  * @return True if tutorial accepted and launched, false if rejected.
  */
 bool MainWindow::execTutorialDialog() {
+    // Instantiate modal tutorial selector and bind launch signal to MainWindow.
     gridlock::ui::TutorialDialog dialog(this);
     QObject::connect(&dialog,
                      &gridlock::ui::TutorialDialog::launchTutorialRequested, this,
@@ -828,121 +842,6 @@ bool MainWindow::execTutorialDialog() {
         return true;
     }
     return false;
-}
-
-/**
- * @brief Loads a 64-bit ELF binary executable or shared object for static inspection.
- *
- * Parses section headers, symbol tables, and printable ASCII strings from the
- * specified binary using native ELF64 structures, populates the ProjectExplorerWidget
- * symbol and string tables, and synchronizes the memory and disassembly views.
- *
- * @param binaryPath Path to executable file on disk.
- * @return True if file is valid ELF64 and successfully parsed; false otherwise.
- */
-bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
-    auto inspector = std::make_unique<gridlock::core::ElfBinaryInspector>();
-    if (!inspector->loadFile(binaryPath)) {
-        return false;
-    }
-
-    m_elfInspector = std::move(inspector);
-
-    // Populate ProjectExplorerWidget with parsed ELF symbols and strings
-    if (m_projectExplorerWidget) {
-        std::vector<SymbolEntry> syms;
-        syms.reserve(m_elfInspector->symbols().size());
-        for (const auto& s : m_elfInspector->symbols()) {
-            syms.push_back({s.name, s.address, static_cast<uint32_t>(s.size)});
-        }
-        m_projectExplorerWidget->setSymbols(syms);
-
-        std::vector<StringEntry> strs;
-        strs.reserve(m_elfInspector->strings().size());
-        for (const auto& str : m_elfInspector->strings()) {
-            strs.push_back({str.address, str.section, str.value});
-        }
-        m_projectExplorerWidget->setStrings(strs);
-    }
-
-    // Seek to entry point if non-zero
-    const uint64_t entry = m_elfInspector->entryPoint();
-    if (entry != 0ULL) {
-        seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
-    }
-
-    return true;
-}
-
-/**
- * @brief Performs unified multi-domain case-insensitive search across the workspace.
- *
- * Scans loaded ELF symbols and strings, disassembly lines and user comments,
- * and decompiled C statements for matching query occurrences.
- *
- * @param query Target search query substring.
- * @return List of structured search match records.
- */
-QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(
-    const QString& query) const {
-    QVector<WorkspaceSearchResult> matches;
-    const QString q = query.trimmed();
-    if (q.isEmpty()) {
-        return matches;
-    }
-
-    // 1. Search loaded ELF symbols
-    if (m_elfInspector && m_elfInspector->isValid()) {
-        for (const auto& s : m_elfInspector->symbols()) {
-            if (s.name.contains(q, Qt::CaseInsensitive)) {
-                matches.append({QStringLiteral("Symbol"), s.address, s.name,
-                                QStringLiteral("Symbol %1 (size %2 bytes)")
-                                    .arg(s.name)
-                                    .arg(s.size)});
-            }
-        }
-        // 2. Search loaded strings
-        for (const auto& str : m_elfInspector->strings()) {
-            if (str.value.contains(q, Qt::CaseInsensitive)) {
-                matches.append({QStringLiteral("String"), str.address, str.value,
-                                QStringLiteral("Section %1: \"%2\"")
-                                    .arg(str.section)
-                                    .arg(str.value)});
-            }
-        }
-    }
-
-    // 3. Search Disassembly lines and user comments
-    if (m_disassemblyView) {
-        const QString disasmText = m_disassemblyView->toPlainText();
-        const QStringList lines = disasmText.split('\n');
-        for (int i = 0; i < lines.size(); ++i) {
-            const QString& line = lines[i];
-            if (line.contains(q, Qt::CaseInsensitive)) {
-                const uint64_t addr = m_disassemblyView->addressForLine(i);
-                matches.append({QStringLiteral("Disassembly"), addr,
-                                QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')),
-                                line.trimmed()});
-            }
-        }
-
-        // 4. Search Decompiled C statements
-        const QString decompilerText = m_disassemblyView->decompiledPseudocode();
-        if (!decompilerText.isEmpty()) {
-            const QStringList decompilerLines = decompilerText.split('\n');
-            for (int i = 0; i < decompilerLines.size(); ++i) {
-                const QString& line = decompilerLines[i];
-                if (line.contains(q, Qt::CaseInsensitive)) {
-                    const uint64_t addr = m_disassemblyView->decompilerLineToAddress(i + 1);
-                    matches.append({QStringLiteral("Decompiler"), addr,
-                                    QStringLiteral("Line %1").arg(i + 1),
-                                    line.trimmed()});
-                }
-            }
-        }
-    }
-
-    return matches;
 }
 
 }  // namespace gridlock::ui

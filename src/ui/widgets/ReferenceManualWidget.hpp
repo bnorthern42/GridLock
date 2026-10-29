@@ -38,6 +38,13 @@ public:
      */
     ~DocsetViewerWidget() override;
 
+    /**
+     * @brief Looks up and renders formatted HTML documentation for the specified symbol.
+     * @param rawSymbol Symbol identifier (e.g., "MPI_Init@plt" or "MPI_Send").
+     * @return True if documentation was resolved and rendered; false if symbol is empty.
+     */
+    bool showSymbolDocumentation(const QString& rawSymbol);
+
 private slots:
     /**
      * @brief Executes keyword search across available docset indices.
@@ -116,8 +123,17 @@ public:
      */
     ~ReferenceManualWidget() override;
 
+    /**
+     * @brief Resolves and displays symbol documentation in the active Docset browser.
+     * @param rawSymbol Raw symbol or topic name (strips @plt/@got suffixes automatically).
+     * @return True if documentation was rendered; false if symbol is empty.
+     */
+    bool lookupSymbol(const QString& rawSymbol);
+
 private:
     QTabWidget* m_tabWidget = nullptr;
+    DocsetViewerWidget* m_docsetViewer = nullptr;
+    ManPageViewerWidget* m_manPageViewer = nullptr;
 };
 
 }  // namespace gridlock::ui

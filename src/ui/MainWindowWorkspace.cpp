@@ -744,6 +744,8 @@ void MainWindow::setupDocks() {
           this, &MainWindow::onRankSelected);
 
   // Add all inspection and terminal widgets to bottom tabbed container.
+  // Each bottom tab adheres to the two-tier workstation layout: a 24-26px #21252b
+  // header control strip paired with a 0px-margin flush dark-slate viewport.
   m_bottomTabs->addTab(m_terminalDock, "Terminal");
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
   m_bottomTabs->addTab(m_memView, "Memory View");
@@ -752,6 +754,9 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->setCurrentWidget(m_memView);
+
+  // Harmonize margins, control heights, borderless frames, and F1 lookup across all bottom tabs.
+  harmonizeBottomConsoleTabs();
 
   // Mount bottom tabbed container into central vertical splitter.
   mainVerticalSplitter->addWidget(m_bottomTabs);
@@ -767,6 +772,7 @@ void MainWindow::setupDocks() {
   setCentralWidget(mainVerticalSplitter);
 
   // Enforce consistent minimum width constraints across all peripheral docks.
+  // Side panels retain full horizontal/vertical resizability while preventing accidental collapse.
   const QList<QDockWidget *> sideDocks = {
       m_projectExplorerWidget, variablesDock, registersDock, watchDock,
       serverRackDock};
@@ -805,6 +811,7 @@ void MainWindow::setupDocks() {
   }
 
   // Register toggle actions and configure window flags for all child docks.
+  // Every dock widget has its outer margins stripped so 1px borders align cleanly.
   for (auto *dock : findChildren<QDockWidget *>()) {
     // Expose dynamic toggle checkboxes in View menu for showing/hiding each panel.
     if (viewMenu) {
@@ -841,89 +848,6 @@ void MainWindow::setupDocks() {
   settings.remove("MainWindow/State_v8");
   settings.remove("MainWindow/Splitter_v8_MasterHorizontalSplitter");
   settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
-}
-
-/**
- * @brief Exports the in-memory patched ELF binary image to disk.
- *
- * Checks that an active ELF inspector is present with a valid binary payload,
- * then delegates directly to ElfBinaryInspector::savePatchedBinary to write
- * the modified ELF byte stream with owner and group executable permissions.
- *
- * @param outputPath Destination file system path.
- * @return True if file was successfully written and marked executable; false otherwise.
- */
-bool MainWindow::exportPatchedBinary(const QString &outputPath) const {
-  if (!m_elfInspector || !m_elfInspector->isValid()) {
-    return false;
-  }
-  return m_elfInspector->savePatchedBinary(outputPath);
-}
-
-/**
- * @brief Detects wait-for cycle among MPI ranks and highlights deadlocked nodes.
- *
- * Performs deterministic cycle detection over directed rank wait-for edges
- * (e.g. rank 0 waiting for rank 1, rank 1 waiting for rank 0).
- * Any nodes identified within a cycle are propagated directly to DisassemblyView
- * to trigger amber/red deadlock indicator badges, and the cutter telemetry status
- * bar is appended with an explicit DEADLOCK DETECTED alert banner.
- *
- * @param waitForGraph Directed edges where key rank waits for value rank.
- * @return List of ranks participating in the deadlock cycle sorted in ascending order.
- */
-QVector<int> MainWindow::detectAndHighlightDeadlock(
-    const QMap<int, int> &waitForGraph) {
-  QVector<int> cycleNodes;
-  QSet<int> inCycle;
-
-  // Cycle detection via deterministic path tracing through directed wait-for edges.
-  for (auto it = waitForGraph.cbegin(); it != waitForGraph.cend(); ++it) {
-    int curr = it.key();
-    QVector<int> path;
-    QSet<int> visited;
-
-    // Follow dependency chain until a terminal node or previously visited node is reached.
-    while (waitForGraph.contains(curr) && !visited.contains(curr)) {
-      visited.insert(curr);
-      path.append(curr);
-      curr = waitForGraph.value(curr);
-    }
-
-    // If terminal node was encountered earlier in current path, a cycle exists.
-    if (waitForGraph.contains(curr)) {
-      int cycleStartIdx = path.indexOf(curr);
-      if (cycleStartIdx != -1) {
-        // Collect all participating rank IDs forming the deadlock loop.
-        for (int i = cycleStartIdx; i < path.size(); ++i) {
-          if (!inCycle.contains(path[i])) {
-            inCycle.insert(path[i]);
-            cycleNodes.append(path[i]);
-          }
-        }
-      }
-    }
-  }
-  std::sort(cycleNodes.begin(), cycleNodes.end());
-
-  // Propagate deadlocked rank IDs to DisassemblyView for visual edge/badge highlighting.
-  if (m_disassemblyView) {
-    m_disassemblyView->setDeadlockCycleRanks(cycleNodes);
-  }
-
-  // Update telemetry banner in bottom status bar with deadlock alert indicator.
-  if (auto *telemetryLabel =
-          findChild<QLabel *>(QStringLiteral("cutterStatusTelemetry"))) {
-    QString txt = telemetryLabel->text();
-    if (!cycleNodes.isEmpty()) {
-      if (!txt.contains(QStringLiteral("DEADLOCK"))) {
-        txt += QStringLiteral(" | STATUS: DEADLOCK DETECTED");
-      }
-    }
-    telemetryLabel->setText(txt);
-  }
-
-  return cycleNodes;
 }
 
 }  // namespace gridlock::ui
