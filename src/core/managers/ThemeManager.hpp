@@ -35,6 +35,18 @@ public:
     /** @brief Returns the list of available QtAdvancedStylesheet theme names. */
     QStringList getAvailableThemes() const;
 
+    /** @brief Returns the 6 curated GridLock workstation theme identifiers. */
+    QStringList availableThemeIds() const;
+
+    /** @brief Maps a theme identifier to its human-readable display title (zero underscores). */
+    static QString themeDisplayName(const QString& themeId);
+
+    /** @brief Returns 5 hex swatch colors (canvas, header, border, accent, text) for a theme ID. */
+    static QStringList themeSwatchColors(const QString& themeId);
+
+    /** @brief Returns the currently active compiled QSS stylesheet string. */
+    QString currentStyleSheet() const { return m_currentStyleSheet; }
+
     /**
      * @brief Switches the active base theme and reapplies the high-density workstation QSS overlay.
      * @param themeName Name of the theme (with or without `.xml` suffix).
@@ -61,6 +73,8 @@ private:
 
     std::unique_ptr<acss::QtAdvancedStylesheet> m_advancedStylesheet;
     bool m_darkMode{true};
+    QString m_activeThemeId{QStringLiteral("gridlock_slate")};
+    QString m_currentStyleSheet;
 };
 
 } // namespace gridlock::core::managers

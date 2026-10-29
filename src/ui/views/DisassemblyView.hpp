@@ -227,6 +227,8 @@ public:
     uint64_t nextInstructionAddress(uint64_t currentAddr) const;
     /// Checks whether the rendered CFG basic block containing addr displays an active instruction marker.
     bool activeCfgBlockContainsInstructionMarker(uint64_t addr) const;
+    /// Returns the active point size of the linear assembly and decompiler font.
+    int codeFontPointSize() const;
 
 
 signals:

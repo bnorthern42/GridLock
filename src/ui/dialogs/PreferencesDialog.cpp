@@ -222,8 +222,12 @@ void PreferencesDialog::apply() {
     s.setValue("appearance/dark_mode", m_appearancePage->isDarkMode());
     s.setValue("appearance/file_tree_style", m_appearancePage->fileTreeStyle());
     s.setValue("appearance/colorize_icons", m_appearancePage->colorizeIcons());
+    s.setValue("appearance/ui_font_family", m_appearancePage->uiFontFamily());
     s.setValue("appearance/ui_font_size", m_appearancePage->uiFontSize());
+    s.setValue("appearance/code_font_family", m_appearancePage->codeFontFamily());
     s.setValue("appearance/code_font_size", m_appearancePage->codeFontSize());
+    s.sync();
+    gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
 
     // 2. Editor options
     s.setValue("editing/tab_width", m_editingPage->tabWidth());

@@ -120,6 +120,7 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 
 * [**Architecture & Modularity Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — 4-zone workstation layout, translation unit partitioning, signal choreography, and code quality invariants.
 * [**User Workflow Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Step-by-step guide to MPI rank debugging, CFG/Decompiler analysis, live binary patching, and Zeal docset integration.
+* [**Workstation Color Themes & Typography Gallery (`docs/THEMES.md`)**](docs/THEMES.md) — Visual showcase and hex color matrices for all 6 curated workstation themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`, and `Daylight Paper`) and live font scaling.
 * [**User Documentation Suite (`docs/user/README.md`)**](docs/user/README.md) — Detailed interface, advanced debugging, and HPC cluster guides.
 * [**Developer Documentation Suite (`docs/developer/README.md`)**](docs/developer/README.md) — Core coordinators, security sanitizers, and UI internals.
 

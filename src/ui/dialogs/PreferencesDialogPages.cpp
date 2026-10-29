@@ -128,114 +128,149 @@ void addFormNote(QWidget* parent, QFormLayout* form, const QString& html) {
  */
 AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     : QWidget(parent) {
-    auto* form = createStandardPageForm(this, tr("<b>Appearance</b>"));
+    auto* form = createStandardPageForm(this, tr("<b>Appearance & Typography</b>"));
 
-    // Theme selector dropdown populated dynamically from ThemeManager.
+    // Curated workstation theme selector displaying human-readable titles (zero underscores).
     m_themeCombo = new QComboBox(this);
-    m_themeCombo->addItems(
-        gridlock::core::managers::ThemeManager::instance().getAvailableThemes());
+    m_themeCombo->setObjectName(QStringLiteral("themeSelectorCombo"));
+    const QStringList themeIds =
+        gridlock::core::managers::ThemeManager::instance().availableThemeIds();
+    for (const QString& id : themeIds) {
+        m_themeCombo->addItem(
+            gridlock::core::managers::ThemeManager::themeDisplayName(id), id);
+    }
     m_themeCombo->setToolTip(
-        tr("Select the application color theme. Changes are applied immediately."));
+        tr("Select a curated workstation color scheme. Changes apply live."));
     form->addRow(tr("Color Theme:"), m_themeCombo);
 
-    // Dark mode toggle checkbox.
+    // Live 5-color swatch preview strip (Canvas, Header, Border, Accent, Text).
+    auto* swatchRow = new QHBoxLayout();
+    swatchRow->setSpacing(6);
+    const QStringList roles = {tr("Canvas"), tr("Header"), tr("Border"), tr("Accent"), tr("Text")};
+    for (int i = 0; i < 5; ++i) {
+        auto* box = new QLabel(roles[i], this);
+        box->setAlignment(Qt::AlignCenter);
+        box->setFixedSize(64, 20);
+        m_swatchBoxes.append(box);
+        swatchRow->addWidget(box);
+    }
+    swatchRow->addStretch(1);
+    form->addRow(tr("Palette Swatches:"), swatchRow);
+
+    // Dark mode toggle checkbox synchronized with the active theme.
     m_darkModeCheck = new QCheckBox(tr("Enable Dark Mode"), this);
     form->addRow(QString(), m_darkModeCheck);
 
     // File tree presentation density.
     m_fileTreeStyleCombo = new QComboBox(this);
     m_fileTreeStyleCombo->addItems({tr("Compact"), tr("Comfortable"), tr("Large")});
-    m_fileTreeStyleCombo->setToolTip(
-        tr("Density of items in the Project Explorer tree."));
     form->addRow(tr("File Tree Style:"), m_fileTreeStyleCombo);
 
     // File icon colorization toggle.
     m_colorizeIconsCheck = new QCheckBox(tr("Enable Colorful File Icons"), this);
-    m_colorizeIconsCheck->setToolTip(
-        tr("Render file tree icons using vibrant colors based on file type."));
     form->addRow(QString(), m_colorizeIconsCheck);
 
-    // UI and code editor font sizing spinners.
+    // UI Font Family and Size selectors.
+    m_uiFontFamilyCombo = new QComboBox(this);
+    m_uiFontFamilyCombo->addItems({QStringLiteral("Inter"), QStringLiteral("Cantarell"),
+                                   QStringLiteral("Ubuntu"), QStringLiteral("JetBrains Mono"),
+                                   QStringLiteral("Monospace")});
+    form->addRow(tr("UI Font Family:"), m_uiFontFamilyCombo);
+
     m_uiFontSizeBox = new QSpinBox(this);
-    m_uiFontSizeBox->setRange(6, 36);
-    m_uiFontSizeBox->setToolTip(tr("Global font size for the IDE interface."));
+    m_uiFontSizeBox->setRange(7, 32);
     form->addRow(tr("UI Font Size:"), m_uiFontSizeBox);
 
+    // Code / Disassembly Font Family and Size selectors.
+    m_codeFontFamilyCombo = new QComboBox(this);
+    m_codeFontFamilyCombo->addItems({QStringLiteral("JetBrains Mono"), QStringLiteral("Fira Code"),
+                                     QStringLiteral("Source Code Pro"), QStringLiteral("Monospace")});
+    form->addRow(tr("Code Font Family:"), m_codeFontFamilyCombo);
+
     m_codeFontSizeBox = new QSpinBox(this);
-    m_codeFontSizeBox->setRange(6, 72);
-    m_codeFontSizeBox->setToolTip(tr("Font size for the source code editor."));
+    m_codeFontSizeBox->setRange(7, 48);
     form->addRow(tr("Code Font Size:"), m_codeFontSizeBox);
 
     addFormNote(this, form,
-                tr("<small style='color:#888;'>Font settings follow the system "
-                   "monospace font.<br>Restart may be required for full theme "
-                   "reload.</small>"));
+                tr("<small style='color:#888;'>All color themes, UI fonts, and code/disassembly "
+                   "typography scale live upon clicking Apply or OK.</small>"));
 
-    // Populate initial state with signals blocked before connecting live preview slots
-    // so opening PreferencesDialog never mutates global QSS or terminal fonts.
+    // Populate initial state with signals blocked so opening the dialog does not mutate QSS.
     loadFromSettings();
 
-    connect(m_themeCombo, &QComboBox::currentTextChanged, this,
-            [this](const QString& theme) {
-                gridlock::core::managers::ThemeManager::instance().setTheme(
-                    theme, m_darkModeCheck->isChecked());
-            });
-    connect(m_darkModeCheck, &QCheckBox::toggled, this, [](bool checked) {
+    connect(m_themeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
+        if (idx < 0) return;
+        const QString themeId = m_themeCombo->itemData(idx).toString();
+        const bool isDark = !themeId.contains(QStringLiteral("light"), Qt::CaseInsensitive);
+        m_darkModeCheck->blockSignals(true);
+        m_darkModeCheck->setChecked(isDark);
+        m_darkModeCheck->blockSignals(false);
+        updateSwatchPreview(themeId);
+        gridlock::core::managers::ThemeManager::instance().setTheme(themeId, isDark);
+    });
+    connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool checked) {
         gridlock::core::managers::ThemeManager::instance().setDarkMode(checked);
+        updateSwatchPreview(selectedTheme());
     });
 }
 
+/**
+ * @brief Updates the 5-swatch palette preview boxes (Canvas, Header, Border, Accent, Text)
+ *        for the given internal theme identifier.
+ */
+void AppearanceSettingsPage::updateSwatchPreview(const QString& themeId) {
+    const QStringList sw = gridlock::core::managers::ThemeManager::themeSwatchColors(themeId);
+    for (int i = 0; i < m_swatchBoxes.size() && i < sw.size(); ++i) {
+        m_swatchBoxes[i]->setStyleSheet(
+            QStringLiteral("background: %1; color: %2; border: 1px solid #3b4048; border-radius: 2px; font-size: 9px; font-weight: 700;")
+                .arg(sw[i], (i == 4) ? sw[0] : sw[4]));
+        m_swatchBoxes[i]->setToolTip(sw[i]);
+    }
+}
+
+/** @brief Returns the active internal theme identifier selected in the combo box. */
 QString AppearanceSettingsPage::selectedTheme() const {
-    return m_themeCombo->currentText();
+    return m_themeCombo->currentData().toString().isEmpty() ? m_themeCombo->currentText() : m_themeCombo->currentData().toString();
 }
-bool AppearanceSettingsPage::isDarkMode() const {
-    return m_darkModeCheck->isChecked();
-}
-QString AppearanceSettingsPage::fileTreeStyle() const {
-    return m_fileTreeStyleCombo->currentText();
-}
-bool AppearanceSettingsPage::colorizeIcons() const {
-    return m_colorizeIconsCheck->isChecked();
-}
+bool AppearanceSettingsPage::isDarkMode() const { return m_darkModeCheck->isChecked(); }
+QString AppearanceSettingsPage::fileTreeStyle() const { return m_fileTreeStyleCombo->currentText(); }
+bool AppearanceSettingsPage::colorizeIcons() const { return m_colorizeIconsCheck->isChecked(); }
+QString AppearanceSettingsPage::uiFontFamily() const { return m_uiFontFamilyCombo->currentText(); }
 int AppearanceSettingsPage::uiFontSize() const { return m_uiFontSizeBox->value(); }
+QString AppearanceSettingsPage::codeFontFamily() const { return m_codeFontFamilyCombo->currentText(); }
 int AppearanceSettingsPage::codeFontSize() const { return m_codeFontSizeBox->value(); }
 
-/**
- * @brief Loads persisted appearance preferences from user settings with signals blocked.
- */
+/** @brief Loads persisted appearance preferences from user settings with signals blocked. */
 void AppearanceSettingsPage::loadFromSettings() {
+    // Query persisted theme ID, polarity flag, and typography metrics from QSettings.
     QSettings s("gridlock", "debugger");
-    const QString theme = s.value("appearance/theme", "dark_teal").toString();
+    const QString theme = s.value("appearance/theme", "gridlock_slate").toString();
     const bool isDark = s.value("appearance/dark_mode", true).toBool();
-
-    m_darkModeCheck->blockSignals(true);
-    m_themeCombo->blockSignals(true);
-    m_fileTreeStyleCombo->blockSignals(true);
-    m_colorizeIconsCheck->blockSignals(true);
-    m_uiFontSizeBox->blockSignals(true);
-    m_codeFontSizeBox->blockSignals(true);
+    const QVector<QWidget*> ctrls = {m_darkModeCheck, m_themeCombo, m_fileTreeStyleCombo, m_colorizeIconsCheck,
+                                     m_uiFontFamilyCombo, m_uiFontSizeBox, m_codeFontFamilyCombo, m_codeFontSizeBox};
+    // Temporarily suppress change signals while populating initial form state.
+    for (QWidget* w : ctrls) w->blockSignals(true);
 
     m_darkModeCheck->setChecked(isDark);
-    const int idx = m_themeCombo->findText(theme);
-    if (idx >= 0) {
-        m_themeCombo->setCurrentIndex(idx);
-    }
-    const int ftsIdx = m_fileTreeStyleCombo->findText(
-        s.value("appearance/file_tree_style", "Comfortable").toString());
-    if (ftsIdx >= 0) {
-        m_fileTreeStyleCombo->setCurrentIndex(ftsIdx);
-    }
-    m_colorizeIconsCheck->setChecked(
-        s.value("appearance/colorize_icons", true).toBool());
+    int idx = m_themeCombo->findData(theme);
+    if (idx < 0) idx = m_themeCombo->findText(theme, Qt::MatchContains);
+    if (idx >= 0) m_themeCombo->setCurrentIndex(idx);
+    updateSwatchPreview(selectedTheme());
+
+    // Restore file tree density, icon colorization, and UI/Code font families and sizes.
+    const int ftsIdx = m_fileTreeStyleCombo->findText(s.value("appearance/file_tree_style", "Comfortable").toString());
+    if (ftsIdx >= 0) m_fileTreeStyleCombo->setCurrentIndex(ftsIdx);
+    m_colorizeIconsCheck->setChecked(s.value("appearance/colorize_icons", true).toBool());
+
+    const int uiFamIdx = m_uiFontFamilyCombo->findText(s.value("appearance/ui_font_family", "Inter").toString());
+    if (uiFamIdx >= 0) m_uiFontFamilyCombo->setCurrentIndex(uiFamIdx);
     m_uiFontSizeBox->setValue(s.value("appearance/ui_font_size", 11).toInt());
+
+    const int codeFamIdx = m_codeFontFamilyCombo->findText(s.value("appearance/code_font_family", "JetBrains Mono").toString());
+    if (codeFamIdx >= 0) m_codeFontFamilyCombo->setCurrentIndex(codeFamIdx);
     m_codeFontSizeBox->setValue(s.value("appearance/code_font_size", 11).toInt());
 
-    m_codeFontSizeBox->blockSignals(false);
-    m_uiFontSizeBox->blockSignals(false);
-    m_colorizeIconsCheck->blockSignals(false);
-    m_fileTreeStyleCombo->blockSignals(false);
-    m_themeCombo->blockSignals(false);
-    m_darkModeCheck->blockSignals(false);
+    for (QWidget* w : ctrls) w->blockSignals(false);
 }
 
 // ============================================================================

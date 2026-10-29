@@ -159,4 +159,7 @@ private slots:
 
     /** @brief Verifies selecting a target in #toolbarTargetSelector switches SourceCodeView, DisassemblyView, and Build/Clean target paths. */
     void testTargetSelectorSwitchesSourceDisassemblyAndBuildCommands();
+
+    /** @brief Verifies Edit menu actions, dynamic UI/Code font scaling across QSS and editors, and 6 curated themes with human-readable titles. */
+    void testEditMenuActionsDynamicFontScalingAndCuratedThemes();
 };

@@ -257,6 +257,25 @@ public:
     QString activeTargetBinaryPath() const;
 
     /**
+     * @brief Dispatches an Edit menu action ("Undo", "Redo", "Cut", "Copy", "Paste",
+     *        "Select All", "Find", "Go to Line", "Toggle Comment", or "Preferences")
+     *        to the currently focused or active source editor.
+     * @param actionName Name or substring of the Edit menu action.
+     * @return True if the action was recognized and executed; false otherwise.
+     */
+    bool triggerEditMenuAction(const QString& actionName);
+
+    /**
+     * @brief Applies UI and Code/Disassembly typography settings live across the entire workstation.
+     * @param uiFamily UI font family name.
+     * @param uiSize UI font point size.
+     * @param codeFamily Code/Disassembly monospace font family name.
+     * @param codeSize Code/Disassembly font point size.
+     */
+    void applyTypographySettings(const QString& uiFamily, int uiSize,
+                                 const QString& codeFamily, int codeSize);
+
+    /**
      * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
      * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
      */

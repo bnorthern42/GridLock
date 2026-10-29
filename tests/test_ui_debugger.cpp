@@ -635,5 +635,126 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
                             .arg(buildDemoCmd)));
 }
 
+/**
+ * @brief Verifies complete Edit menu actions, live UI/Code font scaling across QSS and editors,
+ *        and 6 curated color themes with human-readable display names (zero underscores).
+ */
+void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QApplication::processEvents();
+
+    // Ensure a source file is open in EditorTabManager.
+    mainWindow.selectTargetByName(QStringLiteral("inspection_demo"));
+    QApplication::processEvents();
+
+    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(editorTabs != nullptr && disasmView != nullptr);
+    auto* srcView = editorTabs->currentSourceCodeView();
+    QVERIFY(srcView != nullptr);
+
+    // 1. Verify Edit menu actions & focus-aware execution (Select All, Copy, Toggle Comment).
+    srcView->setFocus();
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")),
+             "triggerEditMenuAction('Select All') must succeed");
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Copy")),
+             "triggerEditMenuAction('Copy') must succeed");
+
+    // Toggle line comment on line 1 and verify '//' prefix is inserted and removed.
+    QTextCursor tc = srcView->textCursor();
+    tc.movePosition(QTextCursor::Start);
+    srcView->setTextCursor(tc);
+    const QString origFirstLine = srcView->document()->firstBlock().text();
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")),
+             "triggerEditMenuAction('Toggle Comment') must succeed");
+    const QString commentedLine = srcView->document()->firstBlock().text();
+    QVERIFY2(commentedLine != origFirstLine,
+             "Toggle Comment must modify the active source line");
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")),
+             "Second Toggle Comment must restore original line");
+    QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
+
+    // 2. Verify dynamic UI Font Size & Code Font Size scaling (no hardcoded 11px lock).
+    mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16);
+    QApplication::processEvents();
+
+    const QString activeQss = gridlock::core::ThemeManager::instance().currentStyleSheet();
+    QVERIFY2(activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px")),
+             qPrintable(QStringLiteral("Expected active QSS to interpolate UI font size 15, got snippet: %1")
+                            .arg(activeQss.left(300))));
+    QCOMPARE(srcView->font().pointSize(), 16);
+    QCOMPARE(disasmView->codeFontPointSize(), 16);
+
+    // Restore default typography.
+    mainWindow.applyTypographySettings(QStringLiteral("Inter"), 11, QStringLiteral("JetBrains Mono"), 10);
+    QApplication::processEvents();
+
+    // 3. Verify 6 curated color themes and zero underscores in PreferencesDialog Color Theme combo.
+    const QStringList themeIds = gridlock::core::ThemeManager::instance().availableThemeIds();
+    QVERIFY2(themeIds.size() >= 6,
+             qPrintable(QStringLiteral("Expected >= 6 curated themes, got %1").arg(themeIds.size())));
+
+    gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
+    auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo"));
+    QVERIFY2(themeCombo != nullptr, "PreferencesDialog must expose themeSelectorCombo");
+    QVERIFY(themeCombo->count() >= 6);
+    for (int i = 0; i < themeCombo->count(); ++i) {
+        const QString displayLabel = themeCombo->itemText(i);
+        QVERIFY2(!displayLabel.contains(QLatin1Char('_')),
+                 qPrintable(QStringLiteral("Theme combo item text must not contain raw underscores: '%1'")
+                                .arg(displayLabel)));
+    }
+
+    // 4. Generate 6 offscreen 1440x900 PNG screenshots of each curated theme in docs/screenshots/.
+    struct ThemeShotEntry {
+        QString themeId;
+        QString fileName;
+    };
+    const std::vector<ThemeShotEntry> shots = {
+        {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")},
+        {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
+        {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
+        {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
+        {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
+        {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
+    };
+
+    QString docsShotDir = QStringLiteral("docs/screenshots");
+    if (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) {
+        docsShotDir = QStringLiteral("../docs/screenshots");
+    }
+    QDir().mkpath(docsShotDir);
+
+    for (const auto& shot : shots) {
+        const bool isDark = !shot.themeId.contains(QStringLiteral("light"));
+        gridlock::core::ThemeManager::instance().setTheme(shot.themeId, isDark);
+        if (srcView) {
+            srcView->reloadStyle();
+        }
+        if (disasmView) {
+            disasmView->reloadStyle();
+        }
+        QApplication::processEvents();
+        const QString outPath = docsShotDir + QLatin1Char('/') + shot.fileName;
+        QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath),
+                 qPrintable(QStringLiteral("captureWorkspaceSnapshot failed for %1").arg(outPath)));
+        QVERIFY2(QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024,
+                 qPrintable(QStringLiteral("Expected non-empty theme screenshot at %1").arg(outPath)));
+    }
+
+    // Restore default GridLock Slate theme after screenshot export.
+    gridlock::core::ThemeManager::instance().setTheme(QStringLiteral("gridlock_slate"), true);
+    if (srcView) {
+        srcView->reloadStyle();
+    }
+    if (disasmView) {
+        disasmView->reloadStyle();
+    }
+    QApplication::processEvents();
+}
+
+
 
 

@@ -178,6 +178,11 @@ public:
     int getCurrentLineNumber() const;
 
     /**
+     * @brief Toggles single-line '//' comments on the active line or selection.
+     */
+    void toggleLineComment();
+
+    /**
      * @brief Reloads color palette and styling from ConfigManager.
      */
     void reloadStyle();

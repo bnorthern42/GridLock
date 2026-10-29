@@ -859,36 +859,42 @@ bool DisassemblyView::eventFilter(QObject *watched, QEvent *event) {
  * @brief Reloads font size, background color, and theme styles from ConfigManager.
  */
 void DisassemblyView::reloadStyle() {
-  // Query persisted code font size setting
+  // Query persisted code font size and family settings
   QSettings s("gridlock", "debugger");
-  int fontSize = s.value("appearance/code_font_size", 10).toInt();
+  const int fontSize = s.value("appearance/code_font_size", 10).toInt();
+  const QString fontFam = s.value("appearance/code_font_family", QStringLiteral("JetBrains Mono")).toString().trimmed();
 
-  // Construct editor stylesheet using dark theme tokens
+  // Construct editor stylesheet using theme tokens and explicit code font metrics
   const QString editorStyle =
-      QString("QPlainTextEdit { background-color: %1; color: %2; border: none; }")
+      QString("QPlainTextEdit { background-color: %1; color: %2; font-size: %3pt; font-family: \"%4\", monospace; border: none; }")
           .arg(gridlock::core::ConfigManager::instance().getSourceBackground())
-          .arg(gridlock::core::ConfigManager::instance().getSourceText());
+          .arg(gridlock::core::ConfigManager::instance().getSourceText())
+          .arg(fontSize)
+          .arg(fontFam.isEmpty() ? QStringLiteral("JetBrains Mono") : fontFam);
 
   // Apply styling to linear assembly editor
   if (m_linearEdit) {
+    m_linearEdit->setStyleSheet(editorStyle);
     QFont f = m_linearEdit->font();
+    if (!fontFam.isEmpty()) f.setFamily(fontFam);
     f.setPointSize(fontSize);
     m_linearEdit->setFont(f);
-    m_linearEdit->setStyleSheet(editorStyle);
     m_linearEdit->updateGutter();
   }
   // Apply styling to decompiler editor
   if (m_decompilerEdit) {
+    m_decompilerEdit->setStyleSheet(editorStyle);
     QFont f = m_decompilerEdit->font();
+    if (!fontFam.isEmpty()) f.setFamily(fontFam);
     f.setPointSize(fontSize);
     m_decompilerEdit->setFont(f);
-    m_decompilerEdit->setStyleSheet(editorStyle);
   }
+  if (m_highlighter) m_highlighter->reloadRules();
+}
 
-  // Re-read and compile syntax highlighter rules
-  if (m_highlighter) {
-    m_highlighter->reloadRules();
-  }
+/** @brief Returns the active point size of the linear assembly and decompiler font. */
+int DisassemblyView::codeFontPointSize() const {
+  return m_linearEdit ? m_linearEdit->font().pointSize() : font().pointSize();
 }
 
 /**
@@ -932,6 +938,3 @@ void DisassemblyView::setActiveSteppingRank(int rank, uint64_t pc) {
 }
 
 }  // namespace gridlock::ui
-
-
-

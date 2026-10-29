@@ -13,6 +13,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
@@ -21,6 +22,7 @@
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTextEdit>
+#include <QVector>
 #include <QWidget>
 
 namespace gridlock::ui {
@@ -43,17 +45,23 @@ public:
     bool isDarkMode() const;
     QString fileTreeStyle() const;
     bool colorizeIcons() const;
+    QString uiFontFamily() const;
     int uiFontSize() const;
+    QString codeFontFamily() const;
     int codeFontSize() const;
 
     void loadFromSettings();
+    void updateSwatchPreview(const QString& themeId);
 
 private:
     QComboBox* m_themeCombo = nullptr;
+    QVector<QLabel*> m_swatchBoxes;
     QCheckBox* m_darkModeCheck = nullptr;
     QComboBox* m_fileTreeStyleCombo = nullptr;
     QCheckBox* m_colorizeIconsCheck = nullptr;
+    QComboBox* m_uiFontFamilyCombo = nullptr;
     QSpinBox* m_uiFontSizeBox = nullptr;
+    QComboBox* m_codeFontFamilyCombo = nullptr;
     QSpinBox* m_codeFontSizeBox = nullptr;
 };
 

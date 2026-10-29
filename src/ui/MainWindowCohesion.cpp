@@ -15,6 +15,7 @@
 #include <memory>
 #include <vector>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -30,6 +31,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSettings>
 #include <QShortcut>
 #include <QSpinBox>
 #include <QSplitter>
@@ -47,6 +49,7 @@
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/DocsetManager.hpp"
 #include "../core/managers/SpackManager.hpp"
+#include "../core/managers/ThemeManager.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
@@ -652,6 +655,111 @@ void MainWindow::toggleMaximizeBottomConsole() {
         mainVertSplitter->setSizes({totalH * 32 / 100, totalH * 68 / 100});
     } else {
         mainVertSplitter->setSizes({600, 260});
+    }
+}
+
+/**
+ * @brief Dispatches an Edit menu action to the currently focused or active source editor.
+ * @param actionName Name or substring of the Edit menu action.
+ * @return True if the action was recognized and executed; false otherwise.
+ */
+bool MainWindow::triggerEditMenuAction(const QString& actionName) {
+    const QString act = actionName.trimmed();
+    if (act.isEmpty()) return false;
+
+    if (act.contains(QStringLiteral("Preferences"), Qt::CaseInsensitive)) {
+        openPreferences();
+        return true;
+    }
+
+    // Resolve target QPlainTextEdit / SourceCodeView (prefer focused text editor, fallback to active SourceCodeView).
+    SourceCodeView* srcView = sourceCodeView();
+    QPlainTextEdit* plainEdit = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget());
+    if (!plainEdit) plainEdit = srcView;
+
+    if (act.contains(QStringLiteral("Undo"), Qt::CaseInsensitive)) {
+        if (!plainEdit) return false;
+        plainEdit->undo();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Redo"), Qt::CaseInsensitive)) {
+        if (!plainEdit) return false;
+        plainEdit->redo();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Cut"), Qt::CaseInsensitive)) {
+        if (!plainEdit) return false;
+        plainEdit->cut();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Copy"), Qt::CaseInsensitive)) {
+        if (!plainEdit) return false;
+        plainEdit->copy();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Paste"), Qt::CaseInsensitive)) {
+        if (!plainEdit) return false;
+        plainEdit->paste();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Select All"), Qt::CaseInsensitive)) {
+        if (!plainEdit) return false;
+        plainEdit->selectAll();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Comment"), Qt::CaseInsensitive)) {
+        if (!srcView) return false;
+        srcView->toggleLineComment();
+        return true;
+    }
+    if (act.contains(QStringLiteral("Go to Line"), Qt::CaseInsensitive)) {
+        if (!srcView) return false;
+        srcView->selectSourceLine(1);
+        return true;
+    }
+    if (act.contains(QStringLiteral("Find"), Qt::CaseInsensitive)) {
+        if (m_seekBar) {
+            m_seekBar->setFocus();
+            m_seekBar->selectAll();
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+/**
+ * @brief Applies UI and Code/Disassembly typography settings live across the entire workstation.
+ * @param uiFamily UI font family name.
+ * @param uiSize UI font point size.
+ * @param codeFamily Code/Disassembly monospace font family name.
+ * @param codeSize Code/Disassembly font point size.
+ */
+void MainWindow::applyTypographySettings(const QString& uiFamily, int uiSize,
+                                         const QString& codeFamily, int codeSize) {
+    QSettings s("gridlock", "debugger");
+    if (!uiFamily.trimmed().isEmpty()) s.setValue("appearance/ui_font_family", uiFamily.trimmed());
+    s.setValue("appearance/ui_font_size", qBound(7, uiSize, 32));
+    if (!codeFamily.trimmed().isEmpty()) s.setValue("appearance/code_font_family", codeFamily.trimmed());
+    s.setValue("appearance/code_font_size", qBound(7, codeSize, 48));
+    s.sync();
+
+    // Recompile and apply global workstation QSS with scaled UI font sizes and control heights.
+    gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
+
+    // Propagate code typography live to all open SourceCodeView tabs and DisassemblyView.
+    if (m_editorTabManager) {
+        for (int i = 0; i < m_editorTabManager->count(); ++i) {
+            if (auto* view = qobject_cast<SourceCodeView*>(m_editorTabManager->widget(i))) {
+                view->reloadStyle();
+            }
+        }
+    }
+    if (m_disassemblyView) {
+        m_disassemblyView->reloadStyle();
+    }
+    if (m_projectExplorerWidget) {
+        m_projectExplorerWidget->reloadStyle();
     }
 }
 

@@ -643,6 +643,109 @@ static void applyApplicationPalette(bool isDark) {
 }
 
 /**
+ * @brief Returns the 6 curated GridLock workstation theme identifiers.
+ */
+QStringList ThemeManager::availableThemeIds() const {
+    return {
+        QStringLiteral("gridlock_slate"),
+        QStringLiteral("dark_teal"),
+        QStringLiteral("tokyo_night"),
+        QStringLiteral("catppuccin_mocha"),
+        QStringLiteral("gruvbox_dark"),
+        QStringLiteral("daylight_light")
+    };
+}
+
+/**
+ * @brief Maps a theme identifier to its human-readable display title (zero underscores).
+ */
+QString ThemeManager::themeDisplayName(const QString& themeId) {
+    const QString id = themeId.trimmed().toLower();
+    if (id.contains(QStringLiteral("tokyo"))) return QStringLiteral("Tokyo Night");
+    if (id.contains(QStringLiteral("catppuccin"))) return QStringLiteral("Catppuccin Mocha");
+    if (id.contains(QStringLiteral("gruvbox"))) return QStringLiteral("Gruvbox Industrial");
+    if (id.contains(QStringLiteral("daylight")) || id.startsWith(QStringLiteral("light"))) {
+        return QStringLiteral("Daylight Paper (Light)");
+    }
+    if (id.contains(QStringLiteral("teal"))) return QStringLiteral("Obsidian Teal");
+    return QStringLiteral("GridLock Slate");
+}
+
+/**
+ * @brief Returns 5 hex swatch colors (canvas, header, border, accent, text) for a theme ID.
+ */
+QStringList ThemeManager::themeSwatchColors(const QString& themeId) {
+    const QString id = themeId.trimmed().toLower();
+    if (id.contains(QStringLiteral("tokyo"))) {
+        return {QStringLiteral("#1a1b26"), QStringLiteral("#24283b"), QStringLiteral("#2f3549"),
+                QStringLiteral("#7aa2f7"), QStringLiteral("#c0caf5")};
+    }
+    if (id.contains(QStringLiteral("catppuccin"))) {
+        return {QStringLiteral("#1e1e2e"), QStringLiteral("#181825"), QStringLiteral("#313244"),
+                QStringLiteral("#89b4fa"), QStringLiteral("#cdd6f4")};
+    }
+    if (id.contains(QStringLiteral("gruvbox"))) {
+        return {QStringLiteral("#1d2021"), QStringLiteral("#282828"), QStringLiteral("#3c3836"),
+                QStringLiteral("#fabd2f"), QStringLiteral("#ebdbb2")};
+    }
+    if (id.contains(QStringLiteral("daylight")) || id.startsWith(QStringLiteral("light"))) {
+        return {QStringLiteral("#f6f8fa"), QStringLiteral("#eaeef2"), QStringLiteral("#d0d7de"),
+                QStringLiteral("#0969da"), QStringLiteral("#1f2328")};
+    }
+    if (id == QStringLiteral("obsidian_teal")) {
+        return {QStringLiteral("#11161a"), QStringLiteral("#172026"), QStringLiteral("#22303a"),
+                QStringLiteral("#00d2b4"), QStringLiteral("#d8e6eb")};
+    }
+    // Default GridLock Slate / Baseline Dark
+    return {QStringLiteral("#16181d"), QStringLiteral("#21252b"), QStringLiteral("#282c34"),
+            QStringLiteral("#528bff"), QStringLiteral("#d7dae0")};
+}
+
+/**
+ * @brief Dynamically interpolates UI font size, font family, and curated theme palette tokens into QSS.
+ */
+static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, int uiFontSize,
+                                          const QString& uiFontFamily, const QString& themeId) {
+    QString overlay = getHighDensityQssOverlay(isDark);
+
+    // Dynamically scale UI font sizes and control heights when user adjusts UI Font Size != 11.
+    const int clampedUiSize = qBound(7, uiFontSize, 32);
+    if (clampedUiSize != 11) {
+        overlay.replace(QStringLiteral("font-size: 11px;"),
+                        QStringLiteral("font-size: %1pt;").arg(clampedUiSize));
+        overlay.replace(QStringLiteral("font-size: 10px;"),
+                        QStringLiteral("font-size: %1pt;").arg(qMax(8, clampedUiSize - 1)));
+        overlay.replace(QStringLiteral("max-height: 22px;"),
+                        QStringLiteral("max-height: %1px;").arg(qMax(22, clampedUiSize + 10)));
+        overlay.replace(QStringLiteral("max-height: 24px;"),
+                        QStringLiteral("max-height: %1px;").arg(qMax(24, clampedUiSize + 12)));
+    }
+
+    // Apply curated dark theme color tokens when a specialized dark scheme is selected.
+    const QString id = themeId.trimmed().toLower();
+    if (isDark && (id.contains(QStringLiteral("tokyo")) || id.contains(QStringLiteral("catppuccin")) ||
+                   id.contains(QStringLiteral("gruvbox")) || id == QStringLiteral("obsidian_teal"))) {
+        const QStringList sw = ThemeManager::themeSwatchColors(id);
+        if (sw.size() >= 5) {
+            overlay.replace(QStringLiteral("#16181d"), sw[0], Qt::CaseInsensitive);
+            overlay.replace(QStringLiteral("#21252b"), sw[1], Qt::CaseInsensitive);
+            overlay.replace(QStringLiteral("#181a1f"), sw[1], Qt::CaseInsensitive);
+            overlay.replace(QStringLiteral("#282c34"), sw[2], Qt::CaseInsensitive);
+            overlay.replace(QStringLiteral("#2c313a"), sw[2], Qt::CaseInsensitive);
+            overlay.replace(QStringLiteral("#528bff"), sw[3], Qt::CaseInsensitive);
+            overlay.replace(QStringLiteral("#d7dae0"), sw[4], Qt::CaseInsensitive);
+        }
+    }
+
+    if (!uiFontFamily.trimmed().isEmpty()) {
+        overlay += QStringLiteral("\nQMenuBar, QMenu, QLabel, QPushButton, QComboBox, QLineEdit, QSpinBox { font-family: '%1'; font-size: %2pt; }\n")
+                       .arg(uiFontFamily.trimmed())
+                       .arg(clampedUiSize);
+    }
+    return baseQss + overlay;
+}
+
+/**
  * @brief Initializes QtAdvancedStylesheet paths, loads user QSettings preferences, and applies QSS.
  */
 void ThemeManager::initialize() {
@@ -653,55 +756,69 @@ void ThemeManager::initialize() {
         QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
     m_advancedStylesheet->setCurrentStyle("qt_material");
 
-    // Read persisted theme name from QSettings, falling back to `dark_teal` if unavailable.
+    // Read persisted theme name from QSettings, falling back to `gridlock_slate` / `dark_teal`.
     QSettings s("gridlock", "debugger");
-    QString theme = s.value("appearance/theme", "dark_teal").toString();
-    if (!m_advancedStylesheet->themes().contains(theme) &&
-        !m_advancedStylesheet->themes().contains(theme + ".xml")) {
-        theme = "dark_teal";
-    }
-    m_darkMode = s.value("appearance/dark_mode", !theme.startsWith("light_")).toBool();
-
+    m_activeThemeId = s.value("appearance/theme", "gridlock_slate").toString();
+    m_darkMode = s.value("appearance/dark_mode",
+                         !m_activeThemeId.contains("light", Qt::CaseInsensitive)).toBool();
     const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
+    const QString uiFontFamily = s.value("appearance/ui_font_family", QString()).toString();
 
-    // Compile the XML palette variables and append the workstation QSS overlay.
-    m_advancedStylesheet->setCurrentTheme(theme);
-    m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
-    m_advancedStylesheet->updateStylesheet();
+    const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
+    if (m_advancedStylesheet->themes().contains(acssTheme) ||
+        m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
+        m_advancedStylesheet->setCurrentTheme(
+            m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
+        m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
+        m_advancedStylesheet->updateStylesheet();
+    }
     applyApplicationPalette(m_darkMode);
-    const QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode);
-    qApp->setStyleSheet(qss);
-
-    // Synchronize the global QApplication font point size with user preferences.
-    QFont appFont = qApp->font();
-    appFont.setPointSize(uiFontSize);
-    qApp->setFont(appFont);
+    m_currentStyleSheet = buildDynamicWorkstationQss(
+        m_advancedStylesheet ? m_advancedStylesheet->styleSheet() : QString(),
+        m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
+    if (qApp) {
+        qApp->setStyleSheet(m_currentStyleSheet);
+        QFont appFont = qApp->font();
+        if (!uiFontFamily.trimmed().isEmpty()) appFont.setFamily(uiFontFamily.trimmed());
+        appFont.setPointSize(uiFontSize);
+        qApp->setFont(appFont);
+    }
 }
 
 /**
- * @brief Returns the list of themes discovered by QtAdvancedStylesheet.
+ * @brief Returns the list of curated workstation themes.
  */
 QStringList ThemeManager::getAvailableThemes() const {
-    if (m_advancedStylesheet) {
-        return m_advancedStylesheet->themes();
-    }
-    return QStringList();
+    return availableThemeIds();
 }
 
 /**
- * @brief Dynamically switches the active XML theme and reapplies the workstation QSS overlay.
+ * @brief Dynamically switches the active theme and reapplies the workstation QSS overlay.
  */
 void ThemeManager::setTheme(const QString& themeName, bool isDark) {
-    m_darkMode = isDark && !themeName.startsWith(QStringLiteral("light_"), Qt::CaseInsensitive);
-    if (m_advancedStylesheet && !themeName.isEmpty()) {
-        // Resolve optional `.xml` extension required by the stylesheet catalog.
-        const QString themePath = m_advancedStylesheet->themes().contains(themeName + ".xml")
-                                      ? themeName + ".xml"
-                                      : themeName;
-        m_advancedStylesheet->setCurrentTheme(themePath);
-        m_advancedStylesheet->updateStylesheet();
-        applyApplicationPalette(m_darkMode);
-        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode));
+    if (themeName.trimmed().isEmpty()) return;
+    m_activeThemeId = themeName.trimmed();
+    m_darkMode = isDark && !m_activeThemeId.contains(QStringLiteral("light"), Qt::CaseInsensitive);
+
+    QSettings s("gridlock", "debugger");
+    const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
+    const QString uiFontFamily = s.value("appearance/ui_font_family", QString()).toString();
+
+    if (m_advancedStylesheet) {
+        const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
+        if (m_advancedStylesheet->themes().contains(acssTheme) ||
+            m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
+            m_advancedStylesheet->setCurrentTheme(
+                m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
+            m_advancedStylesheet->updateStylesheet();
+        }
+    }
+    applyApplicationPalette(m_darkMode);
+    m_currentStyleSheet = buildDynamicWorkstationQss(
+        m_advancedStylesheet ? m_advancedStylesheet->styleSheet() : QString(),
+        m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
+    if (qApp) {
+        qApp->setStyleSheet(m_currentStyleSheet);
     }
     emit themeModeChanged(m_darkMode);
 }
@@ -713,65 +830,57 @@ void ThemeManager::setDarkMode(bool dark) {
     m_darkMode = dark;
     QSettings s("gridlock", "debugger");
     s.setValue("appearance/dark_mode", dark);
-    applyApplicationPalette(m_darkMode);
-    if (m_advancedStylesheet) {
-        const QString fallbackTheme = dark ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
-        QString theme = s.value("appearance/theme", fallbackTheme).toString();
-        if (dark && theme.startsWith(QStringLiteral("light_"), Qt::CaseInsensitive)) {
-            theme = QStringLiteral("dark_teal");
-        } else if (!dark && theme.startsWith(QStringLiteral("dark_"), Qt::CaseInsensitive)) {
-            theme = QStringLiteral("light_blue");
-        }
-        if (m_advancedStylesheet->themes().contains(theme) ||
-            m_advancedStylesheet->themes().contains(theme + ".xml")) {
-            const QString themePath = m_advancedStylesheet->themes().contains(theme + ".xml")
-                                          ? theme + ".xml"
-                                          : theme;
-            m_advancedStylesheet->setCurrentTheme(themePath);
-            m_advancedStylesheet->updateStylesheet();
-        }
-        qApp->setStyleSheet(m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode));
-    } else if (qApp) {
-        qApp->setStyleSheet(getHighDensityQssOverlay(m_darkMode));
+    if (!dark) {
+        m_activeThemeId = QStringLiteral("daylight_light");
+    } else if (m_activeThemeId.contains(QStringLiteral("light"), Qt::CaseInsensitive)) {
+        m_activeThemeId = QStringLiteral("gridlock_slate");
     }
-    emit themeModeChanged(m_darkMode);
+    setTheme(m_activeThemeId, dark);
 }
 
 /**
  * @brief Reloads both theme and UI font point size from QSettings without restarting.
+ *
+ * Reads persisted appearance keys (`appearance/theme`, `appearance/dark_mode`,
+ * `appearance/ui_font_size`, and `appearance/ui_font_family`), updates the underlying
+ * Qt Advanced Stylesheet engine, rebuilds the dynamic workstation QSS with live font
+ * metric interpolation and 5-color curated palette token substitution, and applies
+ * the resulting stylesheet and QFont to the global QApplication instance.
  */
 void ThemeManager::applyThemeAndFonts() {
-    if (!m_advancedStylesheet) {
-        return;
-    }
-
-    // Re-read the selected theme and validate against the available theme catalog.
+    // Load persisted theme identifier, polarity flag, and UI typography metrics.
     QSettings s("gridlock", "debugger");
-    QString theme = s.value("appearance/theme", "dark_teal").toString();
-    if (!m_advancedStylesheet->themes().contains(theme) &&
-        !m_advancedStylesheet->themes().contains(theme + ".xml")) {
-        theme = "dark_teal";
-    }
-    m_darkMode = s.value("appearance/dark_mode", !theme.startsWith("light_")).toBool();
-
-    const QString themePath = m_advancedStylesheet->themes().contains(theme + ".xml")
-                                  ? theme + ".xml"
-                                  : theme;
-    m_advancedStylesheet->setCurrentTheme(themePath);
-
-    // Update the `font_size` stylesheet variable and regenerate the composite QSS.
+    m_activeThemeId = s.value("appearance/theme", "gridlock_slate").toString();
+    m_darkMode = s.value("appearance/dark_mode",
+                         !m_activeThemeId.contains("light", Qt::CaseInsensitive)).toBool();
     const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
-    m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
+    const QString uiFontFamily = s.value("appearance/ui_font_family", QString()).toString();
 
-    m_advancedStylesheet->updateStylesheet();
+    // Update underlying ACSS theme variables when the stylesheet engine is initialized.
+    if (m_advancedStylesheet) {
+        const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
+        if (m_advancedStylesheet->themes().contains(acssTheme) ||
+            m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
+            m_advancedStylesheet->setCurrentTheme(
+                m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
+            m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
+            m_advancedStylesheet->updateStylesheet();
+        }
+    }
+    // Synchronize native QPalette roles and synthesize dynamic workstation QSS.
     applyApplicationPalette(m_darkMode);
-    const QString qss = m_advancedStylesheet->styleSheet() + getHighDensityQssOverlay(m_darkMode);
-    qApp->setStyleSheet(qss);
-
-    // Apply the updated point size to the application font.
-    QFont appFont = qApp->font();
-    appFont.setPointSize(uiFontSize);
-    qApp->setFont(appFont);
+    m_currentStyleSheet = buildDynamicWorkstationQss(
+        m_advancedStylesheet ? m_advancedStylesheet->styleSheet() : QString(),
+        m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
+    // Apply global QSS and application font family/point size live without restart.
+    if (qApp) {
+        qApp->setStyleSheet(m_currentStyleSheet);
+        QFont appFont = qApp->font();
+        if (!uiFontFamily.trimmed().isEmpty()) appFont.setFamily(uiFontFamily.trimmed());
+        appFont.setPointSize(uiFontSize);
+        qApp->setFont(appFont);
+    }
+    // Notify all registered views and docks to refresh custom-painted palettes.
     emit themeModeChanged(m_darkMode);
 }
 

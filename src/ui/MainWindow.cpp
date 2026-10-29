@@ -603,9 +603,36 @@ void MainWindow::setupMenu() {
   fileMenu->addSeparator();
   fileMenu->addAction("Exit", this, &MainWindow::close);
 
-  // Construct Edit menu with global preferences dialog action.
+  // Construct Edit menu with focus-aware editor operations and Preferences dialog trigger.
+  // Supports Undo/Redo, Clipboard (Cut/Copy/Paste/Select All), Search/Navigation
+  // (Find in View, Go to Line, Toggle Line Comment), and global Preferences.
   QMenu *editMenu = menuBar->addMenu("&Edit");
+  const QList<QPair<QString, QKeySequence>> editActions = {
+      {QStringLiteral("Undo"), QKeySequence::Undo},
+      {QStringLiteral("Redo"), QKeySequence::Redo},
+      {QStringLiteral("Cut"), QKeySequence::Cut},
+      {QStringLiteral("Copy"), QKeySequence::Copy},
+      {QStringLiteral("Paste"), QKeySequence::Paste},
+      {QStringLiteral("Select All"), QKeySequence::SelectAll},
+      {QStringLiteral("Find in View..."), QKeySequence::Find},
+      {QStringLiteral("Go to Line..."), QKeySequence(Qt::CTRL | Qt::Key_L)},
+      {QStringLiteral("Toggle Comment"), QKeySequence(Qt::CTRL | Qt::Key_Slash)}
+  };
+  // Register each action on the Edit menu and route its signal to triggerEditMenuAction().
+  for (int i = 0; i < editActions.size(); ++i) {
+    // Insert structural dividers between History, Clipboard, and Navigation groups.
+    if (i == 2 || i == 6) editMenu->addSeparator();
+    QAction *act = editMenu->addAction(editActions[i].first);
+    act->setShortcut(editActions[i].second);
+    const QString actLabel = editActions[i].first;
+    // Dispatch action by label to the currently focused editor or disassembly view.
+    connect(act, &QAction::triggered, this,
+            [this, actLabel]() { triggerEditMenuAction(actLabel); });
+  }
+  editMenu->addSeparator();
+  // Preferences Action: Launches the multi-page PreferencesDialog (Ctrl+,).
   QAction *prefAction = editMenu->addAction("Preferences");
+  prefAction->setShortcut(QKeySequence::Preferences);
   connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
   menuBar->addMenu("&View");
 

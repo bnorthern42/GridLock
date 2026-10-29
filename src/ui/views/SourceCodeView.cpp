@@ -238,14 +238,25 @@ bool SourceCodeView::hasBreakpoint(int lineOneBased) const {
 }
 
 /**
- * @brief Reloads font size, word wrap, and uniform #16181d dark-slate surface from user configuration.
+ * @brief Reloads font size, font family, word wrap, and uniform #16181d dark-slate surface from user configuration.
  */
 void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
-    int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
-    bool wordWrap = s.value("editing/word_wrap", false).toBool();
-    
+    const int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
+    const QString codeFontFamily =
+        s.value("appearance/code_font_family", QStringLiteral("JetBrains Mono")).toString();
+    const bool wordWrap = s.value("editing/word_wrap", false).toBool();
+
     setLineWrapMode(wordWrap ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
+
+    // Update widget QFont directly so font().pointSize() and fontMetrics() reflect live changes.
+    QFont codeFont = font();
+    if (!codeFontFamily.trimmed().isEmpty()) {
+        codeFont.setFamily(codeFontFamily.trimmed());
+    }
+    codeFont.setStyleHint(QFont::Monospace);
+    codeFont.setPointSize(codeFontSize);
+    setFont(codeFont);
 
     // Enforce solid #16181d dark-slate background across both QPlainTextEdit and its viewport
     // to eliminate translucent alpha-compositing bands on partial repaints.
@@ -254,10 +265,10 @@ void SourceCodeView::reloadStyle() {
         "   background-color: #16181d; "
         "   color: #d7dae0; "
         "   border: none; "
-        "   font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; "
+        "   font-family: '%2', 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; "
         "   font-size: %1pt; "
         "}"
-    ).arg(codeFontSize));
+    ).arg(codeFontSize).arg(codeFontFamily.isEmpty() ? QStringLiteral("JetBrains Mono") : codeFontFamily));
 
     if (viewport()) {
         QPalette pal = viewport()->palette();
@@ -267,6 +278,36 @@ void SourceCodeView::reloadStyle() {
         viewport()->setPalette(pal);
         viewport()->setAutoFillBackground(true);
     }
+    updateLineNumberAreaWidth(0);
+}
+
+/**
+ * @brief Toggles single-line '//' comments on the active line in the document.
+ */
+void SourceCodeView::toggleLineComment() {
+    QTextCursor tc = textCursor();
+    QTextBlock block = tc.block();
+    if (!block.isValid()) return;
+
+    const QString lineText = block.text();
+    int firstNonSpace = 0;
+    while (firstNonSpace < lineText.size() && lineText.at(firstNonSpace).isSpace()) {
+        ++firstNonSpace;
+    }
+
+    tc.beginEditBlock();
+    QTextCursor editCursor(block);
+    editCursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, firstNonSpace);
+    if (lineText.mid(firstNonSpace).startsWith(QStringLiteral("// "))) {
+        editCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 3);
+        editCursor.removeSelectedText();
+    } else if (lineText.mid(firstNonSpace).startsWith(QStringLiteral("//"))) {
+        editCursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 2);
+        editCursor.removeSelectedText();
+    } else {
+        editCursor.insertText(QStringLiteral("// "));
+    }
+    tc.endEditBlock();
 }
 
 /**
