@@ -448,6 +448,7 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
         QProcess proc;
         QStringList args = {
             QStringLiteral("-d"),
+            QStringLiteral("-l"),
             QStringLiteral("-M"),
             QStringLiteral("intel"),
             QStringLiteral("--no-show-raw-insn"),
@@ -466,9 +467,17 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
             QString currentSym = symbolName.isEmpty() ? QStringLiteral("entry") : symbolName;
             static const QRegularExpression symHeaderRegex(QStringLiteral("<([^>]+)>:"));
             static const QRegularExpression insnRegex(QStringLiteral("^\\s*([0-9a-fA-F]+):\\s*(.*)$"));
+            static const QRegularExpression dwarfRegex(QStringLiteral("^(/?[^:\n]+):(\\d+)"));
+            int currentDwarfLine = -1;
 
-            // Parse objdump output lines into standardized address:mnemonic format
+            // Parse objdump output lines into standardized address:mnemonic format with DWARF line markers
             for (const QString& line : lines) {
+                const QString trimmedLine = line.trimmed();
+                auto dwarfMatch = dwarfRegex.match(trimmedLine);
+                if (dwarfMatch.hasMatch()) {
+                    currentDwarfLine = dwarfMatch.captured(2).toInt();
+                    continue;
+                }
                 auto symMatch = symHeaderRegex.match(line);
                 if (symMatch.hasMatch()) {
                     currentSym = symMatch.captured(1);
@@ -482,11 +491,20 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
                         const QString body = insnMatch.captured(2).trimmed();
                         if (!body.isEmpty()) {
                             const uint64_t offset = (addr >= startAddr) ? (addr - startAddr) : 0;
-                            formatted += QStringLiteral("0x%1 <%2+0x%3>: %4\n")
-                                             .arg(addr, 8, 16, QChar('0'))
-                                             .arg(currentSym)
-                                             .arg(offset, 0, 16)
-                                             .arg(body);
+                            if (currentDwarfLine > 0) {
+                                formatted += QStringLiteral("0x%1 <%2+0x%3>: %4 ; line %5\n")
+                                                 .arg(addr, 8, 16, QChar('0'))
+                                                 .arg(currentSym)
+                                                 .arg(offset, 0, 16)
+                                                 .arg(body)
+                                                 .arg(currentDwarfLine);
+                            } else {
+                                formatted += QStringLiteral("0x%1 <%2+0x%3>: %4\n")
+                                                 .arg(addr, 8, 16, QChar('0'))
+                                                 .arg(currentSym)
+                                                 .arg(offset, 0, 16)
+                                                 .arg(body);
+                            }
                         }
                     }
                 }

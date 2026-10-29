@@ -173,6 +173,32 @@ public:
     int addressToSourceLine(uint64_t address) const;
 
     /**
+     * @brief Dynamically rebuilds the bidirectional source-line-to-instruction map.
+     */
+    void rebuildDynamicSourceLineMap();
+
+    /**
+     * @brief Finds the 1-based source line containing a specific statement pattern.
+     * @param pattern C/C++ token or statement text to match.
+     * @return 1-based line number, or -1 if not found.
+     */
+    int findSourceLineForStatement(const QString& pattern) const;
+
+    /**
+     * @brief Returns the index of the currently active MPI rank for debugging/stepping.
+     * @return 0-based rank index.
+     */
+    int activeSteppingRank() const;
+
+    /**
+     * @brief Computes the next instruction address for an MPI rank considering control-flow branches and loops.
+     * @param rank 0-based MPI rank index.
+     * @param currentPc Current instruction pointer address.
+     * @return Next instruction pointer address.
+     */
+    uint64_t advanceRankProgramCounter(int rank, uint64_t currentPc);
+
+    /**
      * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
      * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
      */
@@ -366,6 +392,10 @@ private:
     QString m_currentFile;
     QMap<QString, QSet<int>> m_persistentBreakpoints;
     std::unique_ptr<gridlock::core::ElfBinaryInspector> m_elfInspector;
+
+    QMap<int, uint64_t> m_dynamicLineToAddress;
+    QMap<uint64_t, int> m_dynamicAddressToLine;
+    QMap<int, int> m_rankLoopCounter;
 };
 
 }  // namespace gridlock::ui

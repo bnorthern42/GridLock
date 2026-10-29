@@ -155,6 +155,11 @@ public:
     /// Re-decompiles and refreshes the decompiler view.
     void refreshDecompilerView();
 
+    /// Updates the sub-header banner to prominently display the active stepping rank and current PC.
+    void setActiveSteppingRank(int rank, uint64_t pc);
+    /// Returns the sub-header banner label widget.
+    QLabel* functionBannerLabel() const { return m_functionBannerLabel; }
+
     /// Sets side-by-side CFG + Decompiler split mode.
     void setSplitGraphDecompilerMode(bool enabled);
     /// Checks whether side-by-side split mode is active.
@@ -259,6 +264,7 @@ private:
 
     QLabel* m_headerBadge = nullptr;
     QLabel* m_signatureLabel = nullptr;
+    QLabel* m_functionBannerLabel = nullptr;
     QLabel* m_statsBadge = nullptr;
     QPushButton* m_modeToggleBtn = nullptr;
     QPushButton* m_decompilerToggleBtn = nullptr;

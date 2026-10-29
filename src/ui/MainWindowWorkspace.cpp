@@ -140,11 +140,22 @@ void MainWindow::updateStatusTelemetry(const QString &pcOrSeek,
   }
   // Format standardized breadcrumb displaying architecture, rank ID, address, and state.
   if (m_statusTelemetryLabel) {
-    m_statusTelemetryLabel->setText(
-        QStringLiteral("ARCH: x86_64 | MPI RANK: %1 | PC/SEEK: %2 | STATUS: %3")
-            .arg(m_focusedRank)
-            .arg(m_currentSeekOrPc)
-            .arg(m_currentTargetState));
+    if (m_debugSessionActive) {
+      const int rank = activeSteppingRank();
+      const QString role = (rank == 0) ? QStringLiteral("COORDINATOR") : QStringLiteral("WORKER");
+      m_statusTelemetryLabel->setText(
+          QStringLiteral("ARCH: x86_64 | [STEPPING: RANK %1] | RANK %1 [%2] | sym.main @ %3 | STATUS: %4")
+              .arg(rank)
+              .arg(role)
+              .arg(m_currentSeekOrPc)
+              .arg(m_currentTargetState));
+    } else {
+      m_statusTelemetryLabel->setText(
+          QStringLiteral("ARCH: x86_64 | MPI RANK: %1 | PC/SEEK: %2 | STATUS: %3")
+              .arg(m_focusedRank)
+              .arg(m_currentSeekOrPc)
+              .arg(m_currentTargetState));
+    }
   }
 }
 

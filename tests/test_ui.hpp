@@ -144,7 +144,7 @@ private slots:
 
     /** @brief Verifies breakpoint-aware Run Target / Continue execution, granular source-to-RIP line mapping, and CFG active instruction markers. */
     void testBreakpointAwareRunContinueAndActiveCfgInstructionMarker();
+
+    /** @brief Verifies dynamic statement-based source line mapping, loop back-edge/branch control-flow stepping, and active rank context. */
+    void testDynamicSourceMappingLoopBranchSteppingAndRankContext();
 };
-
-
-
