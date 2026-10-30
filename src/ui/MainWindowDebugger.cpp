@@ -15,9 +15,12 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QLabel>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSpinBox>
@@ -25,10 +28,12 @@
 #include <QString>
 #include <QStringList>
 #include <QTabWidget>
+#include <QTextBlock>
 
 #include "../RankState.hpp"
 #include "../core/commands/DebugCommands.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
+#include "../core/utils/ElfBinaryInspector.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
@@ -42,115 +47,90 @@
 namespace gridlock::ui {
 
 /**
- * @brief Rebuilds the bidirectional source-line-to-instruction address map by dynamically scanning SourceCodeView.
+ * @brief Strips inline C-style block and single-line (`//`) comments from one source line.
+ * @param rawLine Raw source line text.
+ * @param inBlockComment Mutable state tracking multi-line block comments across lines.
+ * @return Trimmed executable code remainder on the line.
+ */
+static QString stripLineComments(const QString& rawLine, bool* inBlockComment) {
+    QString line = rawLine.trimmed();
+    // Resume consuming lines inside an unclosed multi-line /* ... */ block comment.
+    if (inBlockComment && *inBlockComment) {
+        const int endIdx = line.indexOf(QStringLiteral("*/"));
+        // Entire line remains inside block comment when closing delimiter is absent.
+        if (endIdx == -1) return QString();
+        *inBlockComment = false;
+        line = line.mid(endIdx + 2).trimmed();
+    }
+    // Strip any inline /* ... */ segments occurring on the current line.
+    while (line.contains(QStringLiteral("/*"))) {
+        const int startIdx = line.indexOf(QStringLiteral("/*"));
+        const int endIdx = line.indexOf(QStringLiteral("*/"), startIdx + 2);
+        if (endIdx != -1) {
+            // Excise closed inline block comment while preserving surrounding code tokens.
+            line = (line.left(startIdx) + line.mid(endIdx + 2)).trimmed();
+        } else {
+            // Opening delimiter extends onto subsequent lines; latch inBlockComment flag.
+            if (inBlockComment) *inBlockComment = true;
+            line = line.left(startIdx).trimmed();
+            break;
+        }
+    }
+    // Truncate trailing C++ single-line comment suffix if present.
+    const int singleCommentIdx = line.indexOf(QStringLiteral("//"));
+    return (singleCommentIdx != -1) ? line.left(singleCommentIdx).trimmed() : line;
+}
+
+/**
+ * @brief Rebuilds the bidirectional source-line-to-instruction address map from DWARF or SourceCodeView.
  *
- * Scans the active C/C++ source code text line-by-line, stripping single-line comments and multi-line
- * block comments. Identifies anchor statements (int main, MPI_Init, struct declarations,
- * for loops, inner loop body, printf, MPI_Finalize, return 0) and maps them to sym.main instruction addresses.
+ * When a real compiled ELF64 binary with DWARF `.debug_line` annotations is active, copies the
+ * genuine compiler-generated line-to-address and address-to-line tables directly. Otherwise,
+ * scans `SourceCodeView` statements for the preview fixture.
  */
 void MainWindow::rebuildDynamicSourceLineMap() {
-    // Clear previously cached line-to-address and address-to-line mappings.
     m_dynamicLineToAddress.clear();
     m_dynamicAddressToLine.clear();
 
-    // Verify presence of active source code view widget in current editor.
+    // Prefer genuine DWARF .debug_line tables parsed from the compiled ELF64 target binary.
+    if (m_useRealBinaryTarget && !m_dwarfLineToAddress.isEmpty()) {
+        m_dynamicLineToAddress = m_dwarfLineToAddress;
+        m_dynamicAddressToLine = m_dwarfAddressToLine;
+        return;
+    }
+
     SourceCodeView* srcView = sourceCodeView();
-    if (!srcView) {
-        return;
-    }
+    if (!srcView || srcView->toPlainText().isEmpty()) return;
 
-    // Retrieve full source text payload currently loaded into the editor canvas.
-    const QString code = srcView->toPlainText();
-    if (code.isEmpty()) {
-        return;
-    }
-
-    // Split source code into discrete lines for token and statement analysis.
-    const QStringList lines = code.split(QLatin1Char('\n'));
+    const QStringList lines = srcView->toPlainText().split(QLatin1Char('\n'));
     bool inBlockComment = false;
+    int mainLine = -1, initLine = -1, structLine = -1, forLoopLine = -1;
+    int dataIdLine = -1, coordsLine = -1, printfLine = -1, finalizeLine = -1, returnLine = -1;
 
-    // Anchor line trackers for standard MPI execution workflow statements.
-    int mainLine = -1;
-    int initLine = -1;
-    int structLine = -1;
-    int forLoopLine = -1;
-    int dataIdLine = -1;
-    int coordsLine = -1;
-    int printfLine = -1;
-    int finalizeLine = -1;
-    int returnLine = -1;
-
-    // Iterate through lines sequentially (1-based index calculation).
+    // Scan source lines sequentially (1-based) to anchor statement tokens for preview fixtures.
     for (int i = 0; i < lines.size(); ++i) {
         const int lineNum = i + 1;
-        QString line = lines[i].trimmed();
+        const QString line = stripLineComments(lines[i], &inBlockComment);
+        if (line.isEmpty()) continue;
 
-        // Check if currently inside a multi-line C-style comment block.
-        if (inBlockComment) {
-            const int endIdx = line.indexOf(QStringLiteral("*/"));
-            if (endIdx != -1) {
-                // Terminate multi-line comment block and inspect remaining suffix.
-                inBlockComment = false;
-                line = line.mid(endIdx + 2).trimmed();
-            } else {
-                // Entire line is subsumed within multi-line comment block.
-                continue;
-            }
-        }
-
-        // Strip any embedded block comments on the current line.
-        while (line.contains(QStringLiteral("/*"))) {
-            const int startIdx = line.indexOf(QStringLiteral("/*"));
-            const int endIdx = line.indexOf(QStringLiteral("*/"), startIdx + 2);
-            if (endIdx != -1) {
-                // Strip closed block comment from inline statement.
-                line = line.left(startIdx) + line.mid(endIdx + 2);
-                line = line.trimmed();
-            } else {
-                // Unclosed block comment spans into subsequent lines.
-                inBlockComment = true;
-                line = line.left(startIdx).trimmed();
-                break;
-            }
-        }
-
-        // Strip single-line trailing comment markers.
-        const int singleCommentIdx = line.indexOf(QStringLiteral("//"));
-        if (singleCommentIdx != -1) {
-            line = line.left(singleCommentIdx).trimmed();
-        }
-
-        // Skip blank lines or comments-only lines.
-        if (line.isEmpty()) {
-            continue;
-        }
-
-        // Match executable statement tokens dynamically against source text:
-        // 1. Function entry point prologue statement (main).
         if (mainLine == -1 && (line.contains(QStringLiteral("int main")) || line.contains(QStringLiteral("main(")))) {
             mainLine = lineNum;
-        // 2. MPI initialization call statement (MPI_Init).
         } else if (mainLine != -1 && initLine == -1 && line.contains(QStringLiteral("MPI_Init"))) {
             initLine = lineNum;
-        // 3. Stack allocation or aggregate struct declaration inside main.
-        } else if (mainLine != -1 && structLine == -1 && (line.contains(QStringLiteral("data[")) || (line.contains(QStringLiteral("DeeplyNested")) && line.contains(QStringLiteral("data"))))) {
+        } else if (mainLine != -1 && structLine == -1 &&
+                   (line.contains(QStringLiteral("data[")) ||
+                    (line.contains(QStringLiteral("DeeplyNested")) && line.contains(QStringLiteral("data"))))) {
             structLine = lineNum;
-        // 4. Primary outer loop header statement.
         } else if (forLoopLine == -1 && line.contains(QStringLiteral("for")) && line.contains(QStringLiteral("int i"))) {
             forLoopLine = lineNum;
-        // 5. Array element identifier assignment.
         } else if (dataIdLine == -1 && line.contains(QStringLiteral("data[i].id"))) {
             dataIdLine = lineNum;
-        // 6. Nested struct coordinate or inner loop assignment.
         } else if (coordsLine == -1 && (line.contains(QStringLiteral("coords")) || line.contains(QStringLiteral("values[")))) {
             coordsLine = lineNum;
-        // 7. Telemetry output logging statement.
         } else if (printfLine == -1 && line.contains(QStringLiteral("printf"))) {
             printfLine = lineNum;
-        // 8. MPI finalization teardown call statement (MPI_Finalize).
         } else if (finalizeLine == -1 && line.contains(QStringLiteral("MPI_Finalize"))) {
             finalizeLine = lineNum;
-        // 9. Procedure exit return statement (return 0).
         } else if (returnLine == -1 && line.contains(QStringLiteral("return 0"))) {
             returnLine = lineNum;
         }
@@ -167,43 +147,20 @@ void MainWindow::rebuildDynamicSourceLineMap() {
     if (finalizeLine == -1) finalizeLine = 24;
     if (returnLine == -1) returnLine = 25;
 
-    // Populate dynamic line-to-address forward index map.
-    // Maps 1-based source lines to exact virtual instruction addresses in sym.main.
-    m_dynamicLineToAddress[mainLine] = 0x00401120ULL;
-    m_dynamicLineToAddress[structLine] = 0x00401128ULL;
-    m_dynamicLineToAddress[initLine] = 0x0040113dULL;
-    m_dynamicLineToAddress[forLoopLine] = 0x00401149ULL;
-    m_dynamicLineToAddress[dataIdLine] = 0x0040114fULL;
-    m_dynamicLineToAddress[coordsLine] = 0x00401157ULL;
-    m_dynamicLineToAddress[printfLine] = 0x0040116eULL;
-    m_dynamicLineToAddress[finalizeLine] = 0x00401178ULL;
-    m_dynamicLineToAddress[returnLine] = 0x00401183ULL;
-
-    // Populate dynamic address-to-line reverse index map.
-    // Maps each assembly instruction in sym.main back to its owning high-level source statement.
-    m_dynamicAddressToLine[0x00401120ULL] = mainLine;
-    m_dynamicAddressToLine[0x00401124ULL] = mainLine;
-    m_dynamicAddressToLine[0x00401125ULL] = mainLine;
-    m_dynamicAddressToLine[0x00401128ULL] = structLine;
-    m_dynamicAddressToLine[0x0040112fULL] = structLine;
-    m_dynamicAddressToLine[0x00401136ULL] = structLine;
-    m_dynamicAddressToLine[0x0040113dULL] = initLine;
-    m_dynamicAddressToLine[0x00401142ULL] = forLoopLine;
-    m_dynamicAddressToLine[0x00401149ULL] = forLoopLine;
-    m_dynamicAddressToLine[0x0040114dULL] = forLoopLine;
-    m_dynamicAddressToLine[0x0040114fULL] = dataIdLine;
-    m_dynamicAddressToLine[0x00401152ULL] = dataIdLine;
-    m_dynamicAddressToLine[0x00401155ULL] = dataIdLine;
-    m_dynamicAddressToLine[0x00401157ULL] = coordsLine;
-    m_dynamicAddressToLine[0x0040115fULL] = coordsLine;
-    m_dynamicAddressToLine[0x00401163ULL] = coordsLine;
-    m_dynamicAddressToLine[0x00401168ULL] = coordsLine;
-    m_dynamicAddressToLine[0x0040116aULL] = coordsLine;
-    m_dynamicAddressToLine[0x0040116eULL] = printfLine;
-    m_dynamicAddressToLine[0x00401178ULL] = finalizeLine;
-    m_dynamicAddressToLine[0x0040117dULL] = finalizeLine;
-    m_dynamicAddressToLine[0x00401182ULL] = returnLine;
-    m_dynamicAddressToLine[0x00401183ULL] = returnLine;
+    // Populate forward (line -> address) and reverse (address -> line) maps for preview sym.main.
+    m_dynamicLineToAddress = {
+        {mainLine, 0x00401120ULL},     {structLine, 0x00401128ULL}, {initLine, 0x0040113dULL},
+        {forLoopLine, 0x00401149ULL},  {dataIdLine, 0x0040114fULL}, {coordsLine, 0x00401157ULL},
+        {printfLine, 0x0040116eULL},   {finalizeLine, 0x00401178ULL}, {returnLine, 0x00401183ULL}};
+    m_dynamicAddressToLine = {
+        {0x00401120ULL, mainLine},     {0x00401124ULL, mainLine},     {0x00401125ULL, mainLine},
+        {0x00401128ULL, structLine},   {0x0040112fULL, structLine},   {0x00401136ULL, structLine},
+        {0x0040113dULL, initLine},     {0x00401142ULL, forLoopLine},  {0x00401149ULL, forLoopLine},
+        {0x0040114dULL, forLoopLine},  {0x0040114fULL, dataIdLine},   {0x00401152ULL, dataIdLine},
+        {0x00401155ULL, dataIdLine},   {0x00401157ULL, coordsLine},   {0x0040115fULL, coordsLine},
+        {0x00401163ULL, coordsLine},   {0x00401168ULL, coordsLine},   {0x0040116aULL, coordsLine},
+        {0x0040116eULL, printfLine},   {0x00401178ULL, finalizeLine}, {0x0040117dULL, finalizeLine},
+        {0x00401182ULL, returnLine},   {0x00401183ULL, returnLine}};
 }
 
 /**
@@ -212,54 +169,14 @@ void MainWindow::rebuildDynamicSourceLineMap() {
  * @return 1-based line number if found, or -1.
  */
 int MainWindow::findSourceLineForStatement(const QString& pattern) const {
-    // Acquire source code editor instance.
     SourceCodeView* srcView = sourceCodeView();
-    if (!srcView) {
-        return -1;
-    }
+    if (!srcView) return -1;
 
-    // Split editor text contents into lines for substring matching.
-    const QString code = srcView->toPlainText();
-    const QStringList lines = code.split(QLatin1Char('\n'));
+    const QStringList lines = srcView->toPlainText().split(QLatin1Char('\n'));
     bool inBlockComment = false;
-
-    // Scan each line, stripping comments before testing token match.
     for (int i = 0; i < lines.size(); ++i) {
-        const int lineNum = i + 1;
-        QString line = lines[i].trimmed();
-
-        // Account for active multi-line comment state.
-        if (inBlockComment) {
-            const int endIdx = line.indexOf(QStringLiteral("*/"));
-            if (endIdx != -1) {
-                inBlockComment = false;
-                line = line.mid(endIdx + 2).trimmed();
-            } else {
-                continue;
-            }
-        }
-        while (line.contains(QStringLiteral("/*"))) {
-            const int startIdx = line.indexOf(QStringLiteral("/*"));
-            const int endIdx = line.indexOf(QStringLiteral("*/"), startIdx + 2);
-            if (endIdx != -1) {
-                line = line.left(startIdx) + line.mid(endIdx + 2);
-                line = line.trimmed();
-            } else {
-                inBlockComment = true;
-                line = line.left(startIdx).trimmed();
-                break;
-            }
-        }
-
-        // Strip single line comments.
-        const int singleCommentIdx = line.indexOf(QStringLiteral("//"));
-        if (singleCommentIdx != -1) {
-            line = line.left(singleCommentIdx).trimmed();
-        }
-
-        // Check if statement contains requested token pattern.
-        if (line.contains(pattern, Qt::CaseSensitive)) {
-            return lineNum;
+        if (stripLineComments(lines[i], &inBlockComment).contains(pattern, Qt::CaseSensitive)) {
+            return i + 1;
         }
     }
     return -1;
@@ -294,39 +211,60 @@ int MainWindow::activeSteppingRank() const {
  * @return Next virtual instruction address.
  */
 uint64_t MainWindow::advanceRankProgramCounter(int rank, uint64_t currentPc) {
-    // 1. Loop initialization instruction: mov dword [rbp-0x4], 0x0 (resets per-rank loop counter).
+    // Real ELF64 target mode: step along genuine disassembled x86_64 instructions in DisassemblyView.
+    if (m_useRealBinaryTarget && m_disassemblyView) {
+        const int lineIdx = m_disassemblyView->lineForAddress(currentPc);
+        if (lineIdx >= 0 && m_disassemblyView->document()) {
+            const QString insnText =
+                m_disassemblyView->document()->findBlockByNumber(lineIdx).text();
+            // Halt instruction pointer progression once procedure return (ret/retq) is reached.
+            static const QRegularExpression kRetRegex(QStringLiteral("\\b(ret|retq)\\b"));
+            if (kRetRegex.match(insnText).hasMatch()) {
+                return currentPc;
+            }
+            // Follow compiler-emitted unconditional forward jumps (e.g., GCC -O0 loop entry jump).
+            static const QRegularExpression kUncondJmpRegex(
+                QStringLiteral("\\bjmpq?\\s+0x([0-9a-fA-F]+)"));
+            const auto jmpMatch = kUncondJmpRegex.match(insnText);
+            if (jmpMatch.hasMatch()) {
+                bool ok = false;
+                const uint64_t jmpTarget = jmpMatch.captured(1).toULongLong(&ok, 16);
+                // Only follow forward targets within the loaded function body to prevent infinite spin.
+                if (ok && jmpTarget > currentPc && m_disassemblyView->lineForAddress(jmpTarget) >= 0) {
+                    return jmpTarget;
+                }
+            }
+        }
+        // Otherwise advance linearly to the next decoded instruction in DisassemblyView.
+        return m_disassemblyView->nextInstructionAddress(currentPc);
+    }
+
+    // Preview fixture mode: per-rank control-flow evaluation for sym.main.
     if (currentPc == 0x00401142ULL) {
         m_rankLoopCounter[rank] = 0;
         return 0x00401149ULL;
     }
-    // 2. Loop header comparison instruction: cmp dword [rbp-0x4], 0x2.
     if (currentPc == 0x00401149ULL) return 0x0040114dULL;
-    // 3. Conditional jump instruction: jg 0x00401178 (takes branch after 3 iterations: i = 0, 1, 2).
     if (currentPc == 0x0040114dULL) {
         return (m_rankLoopCounter.value(rank, 0) >= 3) ? 0x00401178ULL : 0x0040114fULL;
     }
-    // 4. Inner loop body: load loop counter into eax and compare for rank distinction.
     if (currentPc == 0x0040114fULL) return 0x00401152ULL;
     if (currentPc == 0x00401152ULL) return 0x00401155ULL;
-    // 5. Rank-conditional branch instruction: je 0x00401168 (coordinator rank 0 vs worker rank > 0).
     if (currentPc == 0x00401155ULL) {
         return (rank == 0) ? 0x00401168ULL : 0x00401157ULL;
     }
-    // 6. Worker block execution flow: movsd -> add [rbp-4], 1 -> jmp 0x00401149.
     if (currentPc == 0x00401157ULL) return 0x0040115fULL;
     if (currentPc == 0x0040115fULL) {
         m_rankLoopCounter[rank] = m_rankLoopCounter.value(rank, 0) + 1;
         return 0x00401163ULL;
     }
     if (currentPc == 0x00401163ULL) return 0x00401149ULL;
-    // 7. Coordinator block execution flow: xor eax, eax -> add [rbp-4], 1 -> jmp 0x00401149.
     if (currentPc == 0x00401168ULL) return 0x0040116aULL;
     if (currentPc == 0x0040116aULL) {
         m_rankLoopCounter[rank] = m_rankLoopCounter.value(rank, 0) + 1;
         return 0x0040116eULL;
     }
     if (currentPc == 0x0040116eULL) return 0x00401149ULL;
-    // 8. Epilogue execution flow: MPI_Finalize -> mov eax, 0 -> leave -> ret.
     if (currentPc == 0x00401178ULL) return 0x0040117dULL;
     if (currentPc == 0x0040117dULL) return 0x00401182ULL;
     if (currentPc == 0x00401182ULL) return 0x00401183ULL;
@@ -337,26 +275,41 @@ uint64_t MainWindow::advanceRankProgramCounter(int rank, uint64_t currentPc) {
 }
 
 /**
- * @brief Starts target debugging session, initializing ranks in ServerRackView and pausing at entry or first BP.
+ * @brief Starts target debugging session, advancing directly to the first user breakpoint or circular deadlock.
  */
 void MainWindow::startTargetWorkflow() {
-    // Transition session state machine to active.
+    if (m_useRealBinaryTarget) {
+        ensureTargetBinaryCompiled();
+    }
+
+    // Transition session state machine to active and latch Run Target button.
     m_debugSessionActive = true;
     updateDebugToolbarState();
     rebuildDynamicSourceLineMap();
+    if (m_disassemblyView) {
+        m_disassemblyView->setDeadlockCycleRanks({});
+    }
 
-    // Determine initial rank count and start address.
+    // Determine initial rank count and entry address for active target.
     const int rankCount = m_rankCountSpin ? std::clamp(m_rankCountSpin->value(), 1, 64) : 8;
-    uint64_t stopAddr = 0x00401120ULL;
+    const uint64_t entryAddr =
+        (m_useRealBinaryTarget && m_disassemblyView && m_disassemblyView->addressForLine(0) != 0ULL)
+            ? m_disassemblyView->addressForLine(0)
+            : 0x00401120ULL;
+    uint64_t stopAddr = entryAddr;
+    bool enteredDeadlock = false;
+    QMap<int, int> deadlockWaitGraph;
 
     // Collect active breakpoint instruction addresses from SourceCodeView and DisassemblyView.
     QSet<uint64_t> bpAddrs;
     if (SourceCodeView* srcView = sourceCodeView()) {
         for (int bpLine : srcView->breakpoints()) {
             const uint64_t a = sourceLineToAddress(bpLine);
-            bpAddrs.insert(a);
-            if (m_disassemblyView && !m_disassemblyView->isBookmarked(a)) {
-                m_disassemblyView->toggleBookmark(a);
+            if (a != 0ULL) {
+                bpAddrs.insert(a);
+                if (m_disassemblyView && !m_disassemblyView->isBookmarked(a)) {
+                    m_disassemblyView->toggleBookmark(a);
+                }
             }
         }
     }
@@ -364,17 +317,32 @@ void MainWindow::startTargetWorkflow() {
         for (uint64_t a : m_disassemblyView->bookmarkedAddresses()) {
             bpAddrs.insert(a);
         }
-        // Advance to first active breakpoint if entry point is not bookmarked.
-        if (!bpAddrs.isEmpty() && !bpAddrs.contains(stopAddr)) {
+    }
+
+    // Breakpoint-first Run semantics: stop directly at first user breakpoint, or detect circular MPI_Send deadlock.
+    if (!bpAddrs.isEmpty()) {
+        if (!bpAddrs.contains(stopAddr)) {
             uint64_t cur = stopAddr;
-            for (int step = 0; step < 32; ++step) {
+            for (int step = 0; step < 512; ++step) {
                 const uint64_t next = advanceRankProgramCounter(0, cur);
-                if (next <= cur && next != 0x00401149ULL) break;
+                if (next == cur || next == 0ULL) break;
+                if (!m_useRealBinaryTarget && next < cur && next != 0x00401149ULL) break;
                 cur = next;
                 if (bpAddrs.contains(cur)) {
                     stopAddr = cur;
                     break;
                 }
+            }
+        }
+    } else if (m_useRealBinaryTarget) {
+        const int sendLine = findSourceLineForStatement(QStringLiteral("MPI_Send("));
+        const int recvLine = findSourceLineForStatement(QStringLiteral("MPI_Recv("));
+        const QString srcCode = sourceCodeView() ? sourceCodeView()->toPlainText() : QString();
+        if (sendLine > 0 && recvLine > sendLine && !srcCode.contains(QStringLiteral("if (rank"))) {
+            stopAddr = sourceLineToAddress(sendLine);
+            enteredDeadlock = true;
+            for (int r = 0; r < rankCount; ++r) {
+                deadlockWaitGraph.insert(r, (r + 1) % rankCount);
             }
         }
     }
@@ -394,34 +362,52 @@ void MainWindow::startTargetWorkflow() {
     for (int r = 0; r < rankCount; ++r) {
         RankState st;
         st.rankId = r;
-        st.currentState = (r == preserveRank) ? QStringLiteral("stopped") : QStringLiteral("running");
+        st.currentState = (enteredDeadlock || r == preserveRank)
+                              ? QStringLiteral("stopped")
+                              : QStringLiteral("running");
         st.registers[16] = stopHex;
         st.currentFunction = QStringLiteral("main");
         st.currentLine = stopLine;
         m_latestStates[r] = st;
         rankList.append(st);
         if (m_mpiDiagnosticsWidget) {
+            const QString rowState =
+                enteredDeadlock
+                    ? QStringLiteral("DEADLOCK (MPI_Send)")
+                    : ((r == preserveRank) ? QStringLiteral("PAUSED (BP)") : QStringLiteral("RUNNING"));
             m_mpiDiagnosticsWidget->updateRankStateRow(
-                r, (r == preserveRank) ? QStringLiteral("PAUSED (BP)") : QStringLiteral("RUNNING"),
-                (stopAddr == 0x0040113dULL) ? QStringLiteral("MPI_Init") : QStringLiteral("sym.main"),
-                QStringLiteral("ALL RANKS"), stopAddr, rankCount);
+                r, rowState,
+                enteredDeadlock ? QStringLiteral("MPI_Send") : QStringLiteral("sym.main"),
+                enteredDeadlock ? QStringLiteral("RANK %1").arg((r + 1) % rankCount) : QStringLiteral("ALL RANKS"),
+                stopAddr, rankCount);
         }
     }
 
-    // Synchronize UI views to initial entry or breakpoint address.
+    // Synchronize UI views to initial entry, breakpoint, or circular deadlock address.
     m_focusedRank = preserveRank;
     if (m_serverRackView) {
         m_serverRackView->updateRanks(rankList);
         m_serverRackView->selectRank(preserveRank);
     }
+    const bool keepLinear =
+        m_disassemblyView && !m_disassemblyView->isGraphMode() &&
+        !m_disassemblyView->isDecompilerMode() &&
+        !m_disassemblyView->isSplitGraphDecompilerMode() &&
+        !m_forceDecompilerFallback &&
+        m_workspacePerspective == QStringLiteral("Code");
     seekToAddressOrExpression(stopHex);
+    if (keepLinear && m_disassemblyView) {
+        m_showingDecompilerFallback = false;
+        m_disassemblyView->setSplitGraphDecompilerMode(false);
+        m_disassemblyView->setGraphMode(false);
+    }
     if (m_disassemblyView) {
         m_disassemblyView->setActiveSteppingRank(preserveRank, stopAddr);
     }
 
     // Synchronize CPU registers for initial paused state.
     if (m_registerView) {
-        const uint64_t offset = (stopAddr >= 0x00401120ULL) ? (stopAddr - 0x00401120ULL) : 0ULL;
+        const uint64_t offset = (stopAddr >= entryAddr) ? (stopAddr - entryAddr) : 0ULL;
         m_registerView->updateRegisters({
             {QStringLiteral("rip"), QStringLiteral("%1 <main+%2>").arg(stopHex).arg(offset)},
             {QStringLiteral("rsp"), QStringLiteral("0x7fffffffe480")},
@@ -431,11 +417,17 @@ void MainWindow::startTargetWorkflow() {
         });
     }
 
-    // Highlight source execution line and update telemetry banner.
+    // Highlight source execution line and update telemetry banner (including deadlock alert if detected).
     if (SourceCodeView* srcView = sourceCodeView()) {
         srcView->highlightExecutionLine(stopLine);
     }
-    updateStatusTelemetry(stopHex, QStringLiteral("PAUSED (BREAKPOINT)"));
+    updateStatusTelemetry(
+        stopHex,
+        enteredDeadlock ? QStringLiteral("PAUSED (DEADLOCK @ MPI_Send)")
+                        : QStringLiteral("PAUSED (BREAKPOINT)"));
+    if (enteredDeadlock) {
+        detectAndHighlightDeadlock(deadlockWaitGraph);
+    }
 }
 
 /**
@@ -450,11 +442,16 @@ bool MainWindow::stepInstructionWorkflow() {
     // Determine current active stepping rank context and advance PC.
     const int activeRank = activeSteppingRank();
     m_focusedRank = activeRank;
+    const uint64_t entryAddr =
+        (m_useRealBinaryTarget && m_disassemblyView->addressForLine(0) != 0ULL)
+            ? m_disassemblyView->addressForLine(0)
+            : 0x00401120ULL;
     const uint64_t currentPc =
-        (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : 0x00401120ULL;
+        (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : entryAddr;
     const uint64_t nextPc = advanceRankProgramCounter(activeRank, currentPc);
     const QString nextPcHex = QStringLiteral("0x%1").arg(nextPc, 8, 16, QChar('0'));
     const int nextLine = addressToSourceLine(nextPc);
+    const bool atReturn = (nextPc == currentPc) || (!m_useRealBinaryTarget && nextPc == 0x00401183ULL);
 
     // Update rank telemetry cache record.
     RankState& st = m_latestStates[activeRank];
@@ -469,18 +466,29 @@ bool MainWindow::stepInstructionWorkflow() {
     if (m_mpiDiagnosticsWidget) {
         m_mpiDiagnosticsWidget->updateRankStateRow(
             activeRank,
-            (nextPc == 0x00401183ULL) ? QStringLiteral("STATUS: COMPLETED (RET 0)") : QStringLiteral("PAUSED (STEP)"),
+            atReturn ? QStringLiteral("STATUS: COMPLETED (RET 0)") : QStringLiteral("PAUSED (STEP)"),
             (nextPc == 0x0040113dULL) ? QStringLiteral("MPI_Init") : QStringLiteral("sym.main"),
             QStringLiteral("SINGLE STEP"), nextPc);
     }
 
-    // Seek disassembly and memory views to stepped address.
+    // Seek disassembly and memory views to stepped address while preserving linear mode in Code perspective.
+    const bool keepLinear =
+        !m_disassemblyView->isGraphMode() &&
+        !m_disassemblyView->isDecompilerMode() &&
+        !m_disassemblyView->isSplitGraphDecompilerMode() &&
+        !m_forceDecompilerFallback &&
+        m_workspacePerspective == QStringLiteral("Code");
     seekToAddressOrExpression(nextPcHex);
-    if (m_disassemblyView) m_disassemblyView->setActiveSteppingRank(activeRank, nextPc);
+    if (keepLinear) {
+        m_showingDecompilerFallback = false;
+        m_disassemblyView->setSplitGraphDecompilerMode(false);
+        m_disassemblyView->setGraphMode(false);
+    }
+    m_disassemblyView->setActiveSteppingRank(activeRank, nextPc);
 
     // Update CPU register file table with current loop counter and instruction pointer.
     if (m_registerView) {
-        const uint64_t offset = (nextPc >= 0x00401120ULL) ? (nextPc - 0x00401120ULL) : 0ULL;
+        const uint64_t offset = (nextPc >= entryAddr) ? (nextPc - entryAddr) : 0ULL;
         const int loopCounterVal = m_rankLoopCounter.value(activeRank, 0);
         m_registerView->updateRegisters({
             {QStringLiteral("rip"), QStringLiteral("%1 <main+%2>").arg(nextPcHex).arg(offset)},
@@ -495,7 +503,7 @@ bool MainWindow::stepInstructionWorkflow() {
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(nextLine);
     updateStatusTelemetry(
         nextPcHex,
-        (nextPc == 0x00401183ULL) ? QStringLiteral("STATUS: COMPLETED (RET 0)") : QStringLiteral("PAUSED (STEP)"));
+        atReturn ? QStringLiteral("STATUS: COMPLETED (RET 0)") : QStringLiteral("PAUSED (STEP)"));
 
     if (m_coordinator) {
         executeCommand(std::make_unique<gridlock::core::commands::StepCommand>(
@@ -505,7 +513,7 @@ bool MainWindow::stepInstructionWorkflow() {
 }
 
 /**
- * @brief Continues execution from current PC until the next active breakpoint or procedure return.
+ * @brief Continues execution past the current PC until the next active breakpoint or procedure return.
  * @return True if execution advanced; false otherwise.
  */
 bool MainWindow::continueExecutionWorkflow() {
@@ -517,27 +525,35 @@ bool MainWindow::continueExecutionWorkflow() {
     QSet<uint64_t> bpAddrs;
     if (SourceCodeView* srcView = sourceCodeView()) {
         for (int bpLine : srcView->breakpoints()) {
-            bpAddrs.insert(sourceLineToAddress(bpLine));
+            const uint64_t a = sourceLineToAddress(bpLine);
+            if (a != 0ULL) bpAddrs.insert(a);
         }
     }
     for (uint64_t a : m_disassemblyView->bookmarkedAddresses()) {
         bpAddrs.insert(a);
     }
 
-    // Determine active rank context for execution continuation.
+    // Determine active rank context and base entry address for execution continuation.
     const int activeRank = activeSteppingRank();
     m_focusedRank = activeRank;
-
+    const uint64_t entryAddr =
+        (m_useRealBinaryTarget && m_disassemblyView->addressForLine(0) != 0ULL)
+            ? m_disassemblyView->addressForLine(0)
+            : 0x00401120ULL;
     const uint64_t startPc =
-        (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : 0x00401120ULL;
+        (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : entryAddr;
     uint64_t targetPc = startPc;
     bool hitBreakpoint = false;
     uint64_t cur = startPc;
 
-    // Advance sequentially along control-flow edges until breakpoint or procedure exit.
-    for (int step = 0; step < 64; ++step) {
+    // Step past current PC and advance sequentially until the next user breakpoint or procedure exit.
+    for (int step = 0; step < 512; ++step) {
         const uint64_t next = advanceRankProgramCounter(activeRank, cur);
-        if (next <= cur && next != 0x00401149ULL) {
+        if (next == cur || next == 0ULL) {
+            targetPc = cur;
+            break;
+        }
+        if (!m_useRealBinaryTarget && next < cur && next != 0x00401149ULL) {
             targetPc = cur;
             break;
         }
@@ -547,7 +563,7 @@ bool MainWindow::continueExecutionWorkflow() {
             hitBreakpoint = true;
             break;
         }
-        if (cur == 0x00401183ULL) break;
+        if (!m_useRealBinaryTarget && cur == 0x00401183ULL) break;
     }
 
     const QString targetHex = QStringLiteral("0x%1").arg(targetPc, 8, 16, QChar('0'));
@@ -565,15 +581,27 @@ bool MainWindow::continueExecutionWorkflow() {
     if (m_mpiDiagnosticsWidget) {
         m_mpiDiagnosticsWidget->updateRankStateRow(
             activeRank, hitBreakpoint ? QStringLiteral("PAUSED (BP)") : QStringLiteral("EXITED (0)"),
-            (targetPc >= 0x00401178ULL) ? QStringLiteral("MPI_Finalize") : QStringLiteral("sym.main"),
+            (!m_useRealBinaryTarget && targetPc >= 0x00401178ULL) ? QStringLiteral("MPI_Finalize")
+                                                                  : QStringLiteral("sym.main"),
             QStringLiteral("ALL RANKS"), targetPc);
     }
 
-    // Synchronize disassembly, registers, and source line highlights.
+    // Synchronize disassembly, registers, and source line highlights while preserving linear mode.
+    const bool keepLinear =
+        !m_disassemblyView->isGraphMode() &&
+        !m_disassemblyView->isDecompilerMode() &&
+        !m_disassemblyView->isSplitGraphDecompilerMode() &&
+        !m_forceDecompilerFallback &&
+        m_workspacePerspective == QStringLiteral("Code");
     seekToAddressOrExpression(targetHex);
-    if (m_disassemblyView) m_disassemblyView->setActiveSteppingRank(activeRank, targetPc);
+    if (keepLinear) {
+        m_showingDecompilerFallback = false;
+        m_disassemblyView->setSplitGraphDecompilerMode(false);
+        m_disassemblyView->setGraphMode(false);
+    }
+    m_disassemblyView->setActiveSteppingRank(activeRank, targetPc);
     if (m_registerView) {
-        const uint64_t offset = (targetPc >= 0x00401120ULL) ? (targetPc - 0x00401120ULL) : 0ULL;
+        const uint64_t offset = (targetPc >= entryAddr) ? (targetPc - entryAddr) : 0ULL;
         m_registerView->updateRegisters({
             {QStringLiteral("rip"), QStringLiteral("%1 <main+%2>").arg(targetHex).arg(offset)},
             {QStringLiteral("rsp"), QStringLiteral("0x7fffffffe478")},
@@ -597,37 +625,54 @@ bool MainWindow::continueExecutionWorkflow() {
  * @brief Terminates the active debugging session and resets workstation state to IDLE.
  */
 void MainWindow::stopTargetWorkflow() {
+    // Unlatch active debugging state and refresh toolbar action enablement.
     m_debugSessionActive = false;
     updateDebugToolbarState();
     m_rankLoopCounter.clear();
+    // Clear any active circular deadlock overlays and editor execution chevrons.
+    if (m_disassemblyView) m_disassemblyView->setDeadlockCycleRanks({});
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
     updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE"));
+    // Notify attached HPC backend coordinator if a live GDB/MPI session is running.
     if (m_coordinator) m_coordinator->terminateSession();
 }
 
 /**
- * @brief Maps a 1-based source line index to virtual instruction address using dynamic statement mapping.
+ * @brief Maps a 1-based source line index to virtual instruction address using DWARF or dynamic mapping.
  * @param lineOneBased 1-based source line index.
  * @return 64-bit virtual instruction address.
  */
 uint64_t MainWindow::sourceLineToAddress(int lineOneBased) const {
+    // Lazily populate dynamic line-to-address tables on first query.
     if (m_dynamicLineToAddress.isEmpty()) const_cast<MainWindow*>(this)->rebuildDynamicSourceLineMap();
+    // Return exact compiler-emitted DWARF entry address when available for this source line.
     if (m_dynamicLineToAddress.contains(lineOneBased)) return m_dynamicLineToAddress.value(lineOneBased);
+    // For non-executable comment/blank lines in a real binary, snap forward to the next executable statement.
+    if (m_useRealBinaryTarget && !m_dynamicLineToAddress.isEmpty()) {
+        auto it = m_dynamicLineToAddress.lowerBound(lineOneBased);
+        if (it != m_dynamicLineToAddress.end()) return it.value();
+        return (--it).value();
+    }
+    // In preview fixture mode, snap to the nearest enclosing statement header at or above lineOneBased.
     auto it = m_dynamicLineToAddress.upperBound(lineOneBased);
     if (it != m_dynamicLineToAddress.begin()) return (--it).value();
     return 0x00401120ULL;
 }
 
 /**
- * @brief Maps a virtual instruction address to 1-based source line using dynamic statement mapping.
+ * @brief Maps a virtual instruction address to 1-based source line using DWARF or dynamic mapping.
  * @param address 64-bit virtual instruction address.
  * @return Corresponding 1-based source line number.
  */
 int MainWindow::addressToSourceLine(uint64_t address) const {
+    // Lazily initialize address-to-line lookup map if not yet built.
     if (m_dynamicAddressToLine.isEmpty()) const_cast<MainWindow*>(this)->rebuildDynamicSourceLineMap();
+    // Exact instruction match from DWARF .debug_line or preview table.
     if (m_dynamicAddressToLine.contains(address)) return m_dynamicAddressToLine.value(address);
+    // Mid-instruction or unannotated addresses inherit the closest preceding DWARF line record.
     auto it = m_dynamicAddressToLine.upperBound(address);
     if (it != m_dynamicAddressToLine.begin()) return (--it).value();
+    if (!m_dynamicAddressToLine.isEmpty()) return m_dynamicAddressToLine.begin().value();
     return 12;
 }
 
@@ -636,18 +681,21 @@ int MainWindow::addressToSourceLine(uint64_t address) const {
  * @param rawPath Input relative or absolute path.
  * @return Canonical or absolute resolved path string.
  */
-static QString resolveWorkspacePath(const QString& rawPath) {
+QString MainWindow::resolveWorkspacePath(const QString& rawPath) {
     const QString trimmed = rawPath.trimmed();
     if (trimmed.isEmpty()) return QString();
+    // Direct hit from current working directory (e.g., repo root launch).
     if (QFileInfo::exists(trimmed)) {
         const QFileInfo fi(trimmed);
         return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
     }
+    // Secondary lookup one level up when invoked from an out-of-source builddir/ test runner.
     const QString parentCandidate = QStringLiteral("../") + trimmed;
     if (QFileInfo::exists(parentCandidate)) {
         const QFileInfo fi(parentCandidate);
         return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
     }
+    // Return normalized absolute path even if the output artifact has not been compiled yet.
     return QFileInfo(trimmed).absoluteFilePath();
 }
 
@@ -656,15 +704,18 @@ static QString resolveWorkspacePath(const QString& rawPath) {
  * @return Absolute or resolved path to the active target's C/C++ source file.
  */
 QString MainWindow::activeTargetSourcePath() const {
+    // Prioritize explicitly opened source file path tracked by the active editor session.
     if (!m_currentFile.trimmed().isEmpty()) {
         return resolveWorkspacePath(m_currentFile);
     }
+    // Otherwise inspect user data bound to the selected item in #toolbarTargetSelector.
     if (m_targetSelector) {
         const QString selData = m_targetSelector->currentData().toString();
         if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
             return resolveWorkspacePath(selData);
         }
     }
+    // Default workstation startup fixture when no target has been explicitly chosen.
     return resolveWorkspacePath(QStringLiteral("tutorial/inspection_demo.cpp"));
 }
 
@@ -673,6 +724,7 @@ QString MainWindow::activeTargetSourcePath() const {
  * @return Absolute or resolved path to the active target's compiled binary executable.
  */
 QString MainWindow::activeTargetBinaryPath() const {
+    // Derive companion ELF executable path alongside the C/C++ source file (stripping extension).
     const QString srcPath = activeTargetSourcePath();
     if (srcPath.isEmpty()) return QString();
     const QFileInfo srcInfo(srcPath);
@@ -680,7 +732,79 @@ QString MainWindow::activeTargetBinaryPath() const {
 }
 
 /**
- * @brief Selects an active target in `#toolbarTargetSelector` by name or path and synchronizes all views.
+ * @brief Compiles the active C/C++ MPI target with `-g -O0` on-demand and loads its ELF64 + DWARF info.
+ * @return True if the target binary exists (or was compiled) and loaded into ElfBinaryInspector.
+ */
+bool MainWindow::ensureTargetBinaryCompiled() {
+    // Enable genuine ELF64 + DWARF disassembly mode for all subsequent view synchronizations.
+    m_useRealBinaryTarget = true;
+    const QString srcPath = activeTargetSourcePath();
+    const QString binPath = activeTargetBinaryPath();
+    if (binPath.isEmpty()) {
+        return false;
+    }
+
+    // Compare filesystem modification timestamps to determine whether recompilation is required.
+    const QFileInfo srcInfo(srcPath);
+    const QFileInfo binInfo(binPath);
+    const bool srcExists = !srcPath.isEmpty() && srcInfo.exists() && srcInfo.isFile();
+    const bool needCompile =
+        srcExists && (!binInfo.exists() || binInfo.lastModified() < srcInfo.lastModified());
+
+    // Compile with -g -O0 when the ELF executable is missing or older than its C/C++ source file.
+    if (needCompile) {
+        const bool isCFile = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
+        // Include standard Linux OpenMPI and MPICH wrapper directories in executable discovery.
+        const QStringList searchDirs = {
+            QStringLiteral("/usr/lib64/openmpi/bin"),
+            QStringLiteral("/usr/lib/openmpi/bin"),
+            QStringLiteral("/usr/lib64/mpich/bin"),
+            QStringLiteral("/usr/lib/mpich/bin"),
+            QStringLiteral("/usr/bin"),
+            QStringLiteral("/usr/local/bin")
+        };
+        // Prefer MPI compiler wrappers (mpicc/mpicxx), falling back cleanly to system GCC/G++.
+        const QString mpiName = isCFile ? QStringLiteral("mpicc") : QStringLiteral("mpicxx");
+        const QString gnuName = isCFile ? QStringLiteral("gcc") : QStringLiteral("g++");
+        QString compiler = QStandardPaths::findExecutable(mpiName);
+        if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(mpiName, searchDirs);
+        if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(gnuName);
+
+        // Invoke compiler synchronously with full DWARF debug symbols (-g) and unoptimized codegen (-O0).
+        if (!compiler.isEmpty()) {
+            QProcess proc;
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert(QStringLiteral("PATH"),
+                       searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') +
+                           env.value(QStringLiteral("PATH")));
+            proc.setProcessEnvironment(env);
+            proc.start(compiler, {QStringLiteral("-g"), QStringLiteral("-O0"), srcPath,
+                                  QStringLiteral("-o"), binPath});
+            proc.waitForFinished(10000);
+        }
+    }
+
+    // Abort if compilation failed to materialize an executable binary on disk.
+    if (!QFileInfo::exists(binPath)) {
+        return false;
+    }
+
+    // Reload ELF symbol tables, objdump -d -l disassembly, and DWARF line maps when binary changed.
+    const QString absBinPath = QFileInfo(binPath).absoluteFilePath();
+    if (needCompile || !m_elfInspector || !m_elfInspector->isValid() ||
+        m_loadedBinaryPath != absBinPath || m_dwarfLineToAddress.isEmpty()) {
+        if (!loadBinaryTarget(binPath)) {
+            return false;
+        }
+    }
+
+    // Synchronize m_dynamicLineToAddress and m_dynamicAddressToLine with loaded DWARF records.
+    rebuildDynamicSourceLineMap();
+    return true;
+}
+
+/**
+ * @brief Selects an active target in `#toolbarTargetSelector` by name or path and loads its real ELF + DWARF info.
  * @param targetName Target name substring or file path (e.g., "deadlock_ring" or "inspection_demo").
  * @return True if a matching target was found and activated; false otherwise.
  */
@@ -714,71 +838,23 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     m_currentFile = resolvedSourcePath;
     loadSourceFile(resolvedSourcePath);
 
-    // 4. Synchronize DisassemblyView (Linear/CFG/Decompiler) and ProjectExplorerWidget symbols.
-    const QString binPath = activeTargetBinaryPath();
-    if (QFileInfo::exists(binPath) && loadBinaryTarget(binPath)) {
-        // Loaded real ELF64 binary symbols and disassembly from disk.
-    } else if (m_disassemblyView) {
-        if (resolvedSourcePath.contains(QStringLiteral("deadlock_ring"), Qt::CaseInsensitive)) {
-            // Populate deadlock_ring x86_64 ring communication assembly with MPI_Send and MPI_Recv.
-            m_disassemblyView->setPlainText(QStringLiteral(
-                "0x00401120 <main+0>:  endbr64                 ; deadlock_ring prologue\n"
-                "0x00401124 <main+4>:  push  rbp\n"
-                "0x00401125 <main+5>:  mov   rbp, rsp\n"
-                "0x00401128 <main+8>:  sub   rsp, 0x40         ; ring payload frame\n"
-                "0x0040112f <main+15>: lea   rdi, [rbp-0x38]   ; &argc\n"
-                "0x00401136 <main+22>: lea   rsi, [rbp-0x40]   ; &argv\n"
-                "0x0040113d <main+29>: call  0x00401050        ; <MPI_Init@plt>\n"
-                "0x00401142 <main+34>: mov   dword [rbp-0x4], 0x0\n"
-                "0x00401149 <main+41>: cmp   dword [rbp-0x4], 0x2\n"
-                "0x0040114d <main+45>: jg    0x00401178        ; exit ring exchange\n"
-                "0x0040114f <main+47>: call  0x00401070        ; <MPI_Send@plt>\n"
-                "0x00401157 <main+55>: call  0x00401080        ; <MPI_Recv@plt>\n"
-                "0x00401163 <main+67>: jmp   0x00401149        ; loop back -> 0x401149\n"
-                "0x00401178 <main+88>: call  0x00401060        ; <MPI_Finalize@plt>\n"
-                "0x0040117d <main+93>: mov   eax, 0x0\n"
-                "0x00401182 <main+98>: leave\n"
-                "0x00401183 <main+99>: ret"));
-            if (m_projectExplorerWidget) {
-                m_projectExplorerWidget->setSymbols({
-                    {QStringLiteral("_start"), 0x00401000ULL, 32},
-                    {QStringLiteral("MPI_Init@plt"), 0x00401050ULL, 16},
-                    {QStringLiteral("MPI_Finalize@plt"), 0x00401060ULL, 16},
-                    {QStringLiteral("MPI_Send@plt"), 0x00401070ULL, 16},
-                    {QStringLiteral("MPI_Recv@plt"), 0x00401080ULL, 16},
-                    {QStringLiteral("sym.main"), 0x00401120ULL, 100}
-                });
-            }
-        } else {
-            m_disassemblyView->setPlainText(QStringLiteral(
-                "0x00401120 <main+0>:  endbr64                 ; MPI_Init prologue\n"
-                "0x00401124 <main+4>:  push  rbp\n"
-                "0x00401125 <main+5>:  mov   rbp, rsp\n"
-                "0x00401128 <main+8>:  sub   rsp, 0x90         ; DeeplyNested data[3]\n"
-                "0x0040112f <main+15>: lea   rdi, [rbp-0x88]   ; &argc\n"
-                "0x00401136 <main+22>: lea   rsi, [rbp-0x90]   ; &argv\n"
-                "0x0040113d <main+29>: call  0x00401050        ; <MPI_Init@plt>\n"
-                "0x00401142 <main+34>: mov   dword [rbp-0x4], 0x0\n"
-                "0x00401149 <main+41>: cmp   dword [rbp-0x4], 0x2\n"
-                "0x0040114d <main+45>: jg    0x00401178        ; exit rank init loop\n"
-                "0x0040114f <main+47>: mov   eax, dword [rbp-0x4]\n"
-                "0x00401152 <main+50>: cmp   eax, 0x0\n"
-                "0x00401155 <main+53>: je    0x00401168        ; branch if rank == 0\n"
-                "0x00401157 <main+55>: movsd xmm0, qword [rip+0xea9]\n"
-                "0x0040115f <main+63>: add   dword [rbp-0x4], 0x1\n"
-                "0x00401163 <main+67>: jmp   0x00401149        ; loop back -> 0x401149\n"
-                "0x00401168 <main+72>: xor   eax, eax          ; rank 0 coordinator\n"
-                "0x0040116a <main+74>: add   dword [rbp-0x4], 0x1\n"
-                "0x0040116e <main+78>: jmp   0x00401149        ; rejoin loop header\n"
-                "0x00401178 <main+88>: call  0x00401060        ; <MPI_Finalize@plt>\n"
-                "0x0040117d <main+93>: mov   eax, 0x0\n"
-                "0x00401182 <main+98>: leave\n"
-                "0x00401183 <main+99>: ret"));
+    // 4. Clear stale DisassemblyView bookmarks from previous target and compile/load real ELF + DWARF info.
+    if (m_disassemblyView) {
+        for (uint64_t oldBp : m_disassemblyView->bookmarkedAddresses()) {
+            m_disassemblyView->toggleBookmark(oldBp);
         }
     }
+    ensureTargetBinaryCompiled();
 
-    // 5. Rebuild dynamic source-to-assembly mapping and reset active debug session if needed.
-    rebuildDynamicSourceLineMap();
+    // 5. Synchronize active SourceCodeView breakpoints into DisassemblyView bookmarks and reset session if active.
+    if (SourceCodeView* sv = sourceCodeView()) {
+        for (int bpLine : sv->breakpoints()) {
+            const uint64_t addr = sourceLineToAddress(bpLine);
+            if (m_disassemblyView && addr != 0ULL && !m_disassemblyView->isBookmarked(addr)) {
+                m_disassemblyView->toggleBookmark(addr);
+            }
+        }
+    }
     if (m_debugSessionActive) {
         stopTargetWorkflow();
     }
@@ -847,96 +923,6 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
                                  ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc"))
                                  : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
     return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(compiler, srcFile, outBin);
-}
-
-/**
- * @brief Constructs the shell clean command for a given project directory or standalone source file.
- * @param targetPath Project directory path or source file path.
- * @return Shell command string to clean build artifacts.
- */
-QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString resolvedPath =
-        targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
-    const QFileInfo info(resolvedPath);
-    const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    const QDir dir(dirPath);
-
-    // 1. Meson + Ninja clean target command.
-    if (buildSys == QStringLiteral("Meson")) {
-        const QString buildSubdir =
-            (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja")))
-                ? QStringLiteral("build")
-                : QStringLiteral("builddir");
-        return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, buildSubdir);
-    }
-    // 2. CMake clean target command.
-    if (buildSys == QStringLiteral("CMake")) {
-        return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
-    }
-    // 3. GNU Make clean command.
-    if (buildSys == QStringLiteral("Make")) {
-        return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
-    }
-    // 4. Standalone SingleFileMPI binary artifact removal.
-    const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
-    const QFileInfo srcInfo(srcFile);
-    return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
-}
-
-/**
- * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected build command.
- * @return True if the build command was generated and dispatched to TerminalDockWidget.
- */
-bool MainWindow::buildTargetWorkflow() {
-    if (!m_terminalDock) return false;
-    const QString targetPath = activeTargetSourcePath();
-
-    // Activate embedded Terminal tab and dispatch build command.
-    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString cmd = buildCommandForPath(targetPath);
-    if (cmd.isEmpty()) return false;
-    m_terminalDock->sendCommand(cmd);
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
-    return true;
-}
-
-/**
- * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected clean command.
- * @return True if the clean command was generated and dispatched to TerminalDockWidget.
- */
-bool MainWindow::cleanTargetWorkflow() {
-    if (!m_terminalDock) return false;
-    const QString targetPath = activeTargetSourcePath();
-
-    // Activate embedded Terminal tab and dispatch clean command.
-    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString cmd = cleanCommandForPath(targetPath);
-    if (cmd.isEmpty()) return false;
-    m_terminalDock->sendCommand(cmd);
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("CLEANING [%1]").arg(buildSys));
-    return true;
-}
-
-/**
- * @brief Switches BottomConsoleTabs to Terminal and dispatches a chained clean && build command.
- * @return True if the rebuild command was generated and dispatched to TerminalDockWidget.
- */
-bool MainWindow::rebuildTargetWorkflow() {
-    if (!m_terminalDock) return false;
-    const QString targetPath = activeTargetSourcePath();
-
-    // Activate embedded Terminal tab and dispatch chained clean && build command.
-    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString cleanCmd = cleanCommandForPath(targetPath);
-    const QString buildCmd = buildCommandForPath(targetPath);
-    if (cleanCmd.isEmpty() || buildCmd.isEmpty()) return false;
-    m_terminalDock->sendCommand(QStringLiteral("%1 && %2").arg(cleanCmd, buildCmd));
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
-    return true;
 }
 
 }  // namespace gridlock::ui

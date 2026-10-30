@@ -13,6 +13,7 @@
 #include <elf.h>
 #include <QByteArray>
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <cstddef>
 #include <cstdint>
@@ -141,6 +142,35 @@ public:
     QString disassembleRange(uint64_t startAddr, uint64_t size,
                              const QString& symbolName = QString()) const;
 
+    /**
+     * @brief Sets an optional C/C++ source filename basename filter for DWARF line table extraction.
+     * @param sourceFileName Basename or path of primary source file (e.g., "deadlock_ring.cpp").
+     */
+    void setSourceFileFilter(const QString& sourceFileName);
+
+    /** @brief Returns the configured DWARF source filename filter. */
+    QString sourceFileFilter() const { return m_sourceFileFilter; }
+
+    /**
+     * @brief Disassembles a named function symbol (e.g. "main") using objdump -d -l -C -M intel
+     *        and populates DWARF source-line-to-address and address-to-line lookup maps.
+     * @param symbolName Function symbol name (e.g., "main" or "sym.main").
+     * @param sourceFilter Optional basename filter for DWARF file entries.
+     * @param outLineToAddr Optional output map of 1-based source line -> first instruction address.
+     * @param outAddrToLine Optional output map of instruction address -> 1-based source line.
+     * @return Formatted multiline disassembly text suitable for DisassemblyView.
+     */
+    QString disassembleSymbol(const QString& symbolName,
+                              const QString& sourceFilter = QString(),
+                              QMap<int, uint64_t>* outLineToAddr = nullptr,
+                              QMap<uint64_t, int>* outAddrToLine = nullptr) const;
+
+    /** @brief Returns the last extracted DWARF line-to-address map. */
+    const QMap<int, uint64_t>& dwarfLineToAddress() const { return m_dwarfLineToAddr; }
+
+    /** @brief Returns the last extracted DWARF address-to-line map. */
+    const QMap<uint64_t, int>& dwarfAddressToLine() const { return m_dwarfAddrToLine; }
+
 private:
     /** @brief Iterates section headers and populates m_sections. */
     void parseSections();
@@ -159,6 +189,13 @@ private:
     QList<ElfSymbolInfo> m_symbols;   ///< List of parsed symbols.
     QList<ElfStringInfo> m_strings;   ///< List of extracted printable strings.
     int m_patchedByteCount = 0;       ///< Total number of patched bytes.
+    QString m_sourceFileFilter;       ///< Optional source file basename filter for DWARF entries.
+    mutable QMap<int, uint64_t> m_dwarfLineToAddr; ///< Cached DWARF 1-based line -> first instruction address.
+    mutable QMap<uint64_t, int> m_dwarfAddrToLine; ///< Cached DWARF instruction address -> 1-based line.
+    mutable uint64_t m_cachedDisasmStart = 0;      ///< Start address of cached disassembly region.
+    mutable uint64_t m_cachedDisasmSize = 0;       ///< Byte size of cached disassembly region.
+    mutable int m_cachedPatchGen = -1;             ///< Patch generation counter of cached disassembly.
+    mutable QString m_cachedDisasmText;            ///< Cached formatted disassembly listing.
 };
 
 namespace utils {

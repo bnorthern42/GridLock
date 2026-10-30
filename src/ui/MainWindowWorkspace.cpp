@@ -176,13 +176,18 @@ void MainWindow::setupToolbar() {
       "QToolBar#MainToolbar { background: #1e2228; border-bottom: 1px solid #2c313a; "
       "spacing: 4px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
       "QToolBar#MainToolbar QLabel { background: transparent; color: #abb2bf; "
-      "font-size: 10px; font-weight: 700; padding: 0px 2px; border: none; }"
+      "font-size: 10px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
+      "QToolBar#MainToolbar QComboBox, QToolBar#MainToolbar QSpinBox, #toolbarTargetSelector { "
+      "background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; "
+      "padding: 0px 6px; height: 22px; min-height: 20px; max-height: 22px; "
+      "font-size: 11px; font-weight: 500; font-style: normal; }"
       "QToolBar#MainToolbar QToolButton { background: #252932; color: #d7dae0; "
       "border: 1px solid #323844; border-radius: 2px; padding: 1px 8px; margin: 0px; "
-      "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; }"
+      "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; font-style: normal; }"
       "QToolBar#MainToolbar QToolButton:hover:enabled { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
       "QToolBar#MainToolbar QToolButton:pressed:enabled { background: #2c3444; border: 1px solid #528bff; }"
-      "QToolBar#MainToolbar QToolButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #232730; }");
+      "QToolBar#MainToolbar QToolButton:checked { background: #19362b; color: #4ec9b0; border: 1px solid #2ea043; font-weight: 600; }"
+      "QToolBar#MainToolbar QToolButton:disabled { background: #14161b; color: #454c59; border: 1px solid #1e2128; }");
 
   // Inline Target binary selector and MPI Rank (-np) spinbox ahead of Run Target.
   QLabel *targetLabel = new QLabel(QStringLiteral("TARGET:"), toolbar);
@@ -193,6 +198,10 @@ void MainWindow::setupToolbar() {
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setFixedHeight(22);
   m_targetSelector->setMinimumWidth(145);
+  QFont selectorFont = m_targetSelector->font();
+  selectorFont.setItalic(false);
+  selectorFont.setWeight(QFont::Medium);
+  m_targetSelector->setFont(selectorFont);
   // Populate default MPI demonstration targets and the Open ELF / Binary file dialog entry.
   m_targetSelector->addItem(QStringLiteral("inspection_demo (MPI)"),
                             QStringLiteral("tutorial/inspection_demo.cpp"));
@@ -226,31 +235,33 @@ void MainWindow::setupToolbar() {
   m_rankCountSpin->setValue(8);
   m_rankCountSpin->setFixedHeight(22);
   m_rankCountSpin->setFixedWidth(48);
+  m_rankCountSpin->setFont(selectorFont);
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
 
   // Build Action: Auto-detects Meson/CMake/Make/SingleFileMPI and compiles in the embedded Terminal tab.
-  // Switches BottomConsoleTabs to TerminalDockWidget and updates status bar telemetry to BUILDING.
   QAction *toolbarBuildAct = new QAction("⚙ Build", this);
   connect(toolbarBuildAct, &QAction::triggered, this, &MainWindow::buildTargetWorkflow);
   toolbar->addAction(toolbarBuildAct);
 
   // Clean Action: Auto-detects active build system and dispatches clean command to Terminal tab.
-  // Removes compiled binary artifacts or runs build-system target clean.
   QAction *toolbarCleanAct = new QAction("✕ Clean", this);
   connect(toolbarCleanAct, &QAction::triggered, this, &MainWindow::cleanTargetWorkflow);
   toolbar->addAction(toolbarCleanAct);
   toolbar->addSeparator();
 
-  // Run Action: Starts target execution across all configured MPI ranks and pauses Rank 0 at entry.
-  // Enabled in Idle state; disabled while an active debugging session is already running.
+  // Run Action: Compiles active target on-demand, latches Running state, and advances to first BP or deadlock.
   m_runAction = new QAction("▶ Run Target", this);
-  connect(m_runAction, &QAction::triggered, this,
-          &MainWindow::startTargetWorkflow);
+  m_runAction->setCheckable(true);
+  connect(m_runAction, &QAction::triggered, this, [this]() {
+    ensureTargetBinaryCompiled();
+    startTargetWorkflow();
+  });
   toolbar->addAction(m_runAction);
 
   // Continue Action: Resumes suspended execution until the next active breakpoint or procedure exit.
   m_continueAction = new QAction("⏭ Continue", this);
+  // Route Continue clicks directly to breakpoint-aware continueExecutionWorkflow().
   connect(m_continueAction, &QAction::triggered, this,
           &MainWindow::continueExecutionWorkflow);
   toolbar->addAction(m_continueAction);
@@ -258,15 +269,18 @@ void MainWindow::setupToolbar() {
   // Step Instruction Action: Executes a single machine instruction on the active rank
   // and synchronizes DisassemblyView, RegisterView, ServerRackView, MemView, and SourceCodeView.
   m_stepAction = new QAction("↷ Step Inst", this);
+  // Route single-instruction step clicks to rank-aware stepInstructionWorkflow().
   connect(m_stepAction, &QAction::triggered, this,
           &MainWindow::stepInstructionWorkflow);
   toolbar->addAction(m_stepAction);
 
   // Pause Action: Interrupts running execution on the focused rank and updates status telemetry.
   m_pauseAction = new QAction("⏸ Pause Rank", this);
+  // Dispatch asynchronous PauseCommand to backend coordinator when active.
   connect(m_pauseAction, &QAction::triggered, this, [this]() {
     updateStatusTelemetry(QString(), QStringLiteral("PAUSED"));
     if (m_coordinator) {
+      // Ranks are 1-indexed inside backend PauseCommand wire messages.
       auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(
           m_coordinator, m_focusedRank + 1);
       executeCommand(std::move(cmd));
@@ -276,12 +290,14 @@ void MainWindow::setupToolbar() {
 
   // Stop Action: Sends termination request to active coordinator and resets session state to IDLE.
   m_stopAction = new QAction("■ Stop", this);
+  // Unlatch Run Target button and clear active PC cursor when Stop is pressed.
   connect(m_stopAction, &QAction::triggered, this,
           &MainWindow::stopTargetWorkflow);
   toolbar->addAction(m_stopAction);
 
   // Terminate Action: Closes debugging session, clears execution line highlight, and resets toolbar state.
   m_terminateAction = new QAction("✕ Terminate Session", this);
+  // Reuse stopTargetWorkflow() so Stop and Terminate share identical session teardown semantics.
   connect(m_terminateAction, &QAction::triggered, this,
           &MainWindow::stopTargetWorkflow);
   toolbar->addAction(m_terminateAction);
@@ -290,11 +306,13 @@ void MainWindow::setupToolbar() {
   updateDebugToolbarState();
 
   // Strip tooltips to maintain minimalist visual chrome.
+  // Prevents native OS hover popups from obscuring adjacent code/disassembly rows.
   for (QAction *action : toolbar->actions()) {
     action->setToolTip(QString());
   }
 
   // Expanding spacer separating debugger actions from navigation controls.
+  // Right-aligns history arrows, universal seek bar, and perspective pills on wide monitors.
   QWidget *spacer = new QWidget(toolbar);
   spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
@@ -473,6 +491,14 @@ void MainWindow::setupDocks() {
             gridlock::core::ConfigManager::instance().saveBreakpoints(
                 m_persistentBreakpoints);
 
+            // Synchronize corresponding instruction bookmark in DisassemblyView.
+            if (m_disassemblyView) {
+              const uint64_t bpAddr = sourceLineToAddress(line);
+              if (bpAddr != 0ULL && m_disassemblyView->isBookmarked(bpAddr) != isSet) {
+                m_disassemblyView->toggleBookmark(bpAddr);
+              }
+            }
+
             // Broadcast breakpoint toggle to all active ranks or DAP session.
             if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
                     m_coordinator)) {
@@ -480,11 +506,7 @@ void MainWindow::setupDocks() {
                                             condition);
             } else if (auto *dapCoord =
                            dynamic_cast<DapCoordinator *>(m_coordinator)) {
-              if (isSet) {
-                dapCoord->toggleBreakpoint(absoluteFilePath, line);
-              } else {
-                dapCoord->toggleBreakpoint(absoluteFilePath, line);
-              }
+              dapCoord->toggleBreakpoint(absoluteFilePath, line);
             }
           });
 

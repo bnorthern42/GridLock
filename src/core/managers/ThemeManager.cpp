@@ -93,11 +93,12 @@ static QString getHighContrastLightQssOverlay() {
         "}\n"
         // Hover and disabled button states in Light Mode.
         "QPushButton:hover:enabled, QToolButton:hover { background: #eaeef2; border: 1px solid #0969da; color: #0969da; }\n"
+        "QToolButton:checked, QToolBar QToolButton:checked { background: #dafbe1; color: #1a7f37; border: 1px solid #2ea043; font-weight: 600; }\n"
         "QPushButton:disabled, QToolButton:disabled { background: #f6f8fa; color: #8c959f; border: 1px solid #d8dee4; }\n"
         // Single-line inputs, spinboxes, combo boxes, and filter bars with #1f2328 text on #ffffff.
-        "QLineEdit, QSpinBox, QComboBox, #cutterSeekBar, #symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
-        "    height: 20px; min-height: 20px; max-height: 22px; padding: 0px 6px;\n"
-        "    background: #ffffff; border: 1px solid #d0d7de; border-radius: 2px; color: #1f2328; font-size: 11px;\n"
+        "QLineEdit, QSpinBox, QComboBox, #toolbarTargetSelector, #cutterSeekBar, #symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
+        "    height: 22px; min-height: 20px; max-height: 22px; padding: 0px 6px;\n"
+        "    background: #ffffff; border: 1px solid #d0d7de; border-radius: 2px; color: #1f2328; font-size: 11px; font-weight: 500; font-style: normal;\n"
         "}\n"
         // Text editors, browsers, list widgets, and hex dump viewports.
         "QTextEdit, QPlainTextEdit, QTextBrowser, QListWidget, #cutterHexDumpEdit {\n"
@@ -221,15 +222,15 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    border: 1px solid #528bff;\n"
         "    color: #ffffff;\n"
         "}\n"
-        // Disabled push buttons recede into the dark background with muted `#5c6370` text.
+        // Disabled push buttons recede into the dark background with muted `#454c59` text.
         "QPushButton:disabled {\n"
-        "    background: #181a1f;\n"
-        "    color: #5c6370;\n"
-        "    border: 1px solid #242830;\n"
+        "    background: #14161b;\n"
+        "    color: #454c59;\n"
+        "    border: 1px solid #1e2128;\n"
         "}\n"
-        // Compact single-line text inputs, spinboxes, and combo boxes capped at 22px height.
-        "QLineEdit, QLineEdit:disabled, QSpinBox, QSpinBox:disabled, QComboBox, QComboBox:disabled {\n"
-        "    height: 20px;\n"
+        // Compact single-line text inputs, spinboxes, and combo boxes capped at 22px height with non-italic font.
+        "QLineEdit, QLineEdit:disabled, QSpinBox, QSpinBox:disabled, QComboBox, QComboBox:disabled, #toolbarTargetSelector {\n"
+        "    height: 22px;\n"
         "    min-height: 20px;\n"
         "    max-height: 22px;\n"
         "    padding: 0px 6px;\n"
@@ -239,6 +240,8 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    border-radius: 2px;\n"
         "    color: #d7dae0;\n"
         "    font-size: 11px;\n"
+        "    font-weight: 500;\n"
+        "    font-style: normal;\n"
         "}\n"
         // Focused input controls highlight their border in `#528bff` for keyboard accessibility.
         "QLineEdit:focus, QSpinBox:focus, QComboBox:focus {\n"
@@ -378,17 +381,23 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    border: 1px solid #3e4452;\n"
         "    color: #ffffff;\n"
         "}\n"
-        // Toolbar button active/pressed/checked state.
-        "QToolButton:pressed, QToolBar QToolButton:pressed, QToolButton:checked, QToolBar QToolButton:checked {\n"
+        // Toolbar button pressed and latched Running (:checked) states.
+        "QToolButton:pressed, QToolBar QToolButton:pressed {\n"
         "    background: #2c3444;\n"
         "    border: 1px solid #528bff;\n"
         "    color: #ffffff;\n"
         "}\n"
-        // Disabled toolbar buttons recede into the dark toolbar chrome with muted #5c6370 text.
+        "QToolButton:checked, QToolBar QToolButton:checked {\n"
+        "    background-color: #19362b;\n"
+        "    color: #4ec9b0;\n"
+        "    border: 1px solid #2ea043;\n"
+        "    font-weight: 600;\n"
+        "}\n"
+        // Disabled toolbar buttons recede into low-contrast dark chrome when session is IDLE.
         "QToolButton:disabled, QToolBar QToolButton:disabled {\n"
-        "    background: #181a1f;\n"
-        "    border: 1px solid #232730;\n"
-        "    color: #5c6370;\n"
+        "    background-color: #14161b;\n"
+        "    border: 1px solid #1e2128;\n"
+        "    color: #454c59;\n"
         "}\n"
         // Address seek bar (`#cutterSeekBar`) in the top toolbar uses monospace font and 22px height.
         "#cutterSeekBar {\n"

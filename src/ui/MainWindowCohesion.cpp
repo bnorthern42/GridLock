@@ -19,6 +19,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QKeySequence>
@@ -35,6 +37,7 @@
 #include <QShortcut>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QStandardPaths>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTextBrowser>
@@ -258,8 +261,19 @@ void MainWindow::harmonizeBottomConsoleTabs() {
                 connect(srcView, &SourceCodeView::sourceLineSelected, this,
                         [this](int lineOneBased) {
                             const uint64_t addr = sourceLineToAddress(lineOneBased);
+                            const bool keepLinear =
+                                m_disassemblyView && !m_disassemblyView->isGraphMode() &&
+                                !m_disassemblyView->isDecompilerMode() &&
+                                !m_disassemblyView->isSplitGraphDecompilerMode() &&
+                                !m_forceDecompilerFallback &&
+                                m_workspacePerspective == QStringLiteral("Code");
                             seekToAddressOrExpression(
                                 QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+                            if (keepLinear && m_disassemblyView) {
+                                m_showingDecompilerFallback = false;
+                                m_disassemblyView->setSplitGraphDecompilerMode(false);
+                                m_disassemblyView->setGraphMode(false);
+                            }
                         });
             }
         }
@@ -400,9 +414,24 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         return false;
     }
 
+    const QFileInfo binInfo(binaryPath);
+    QString sourceFilter;
+    if (QFileInfo::exists(binaryPath + QStringLiteral(".cpp"))) {
+        sourceFilter = binInfo.fileName() + QStringLiteral(".cpp");
+    } else if (QFileInfo::exists(binaryPath + QStringLiteral(".c"))) {
+        sourceFilter = binInfo.fileName() + QStringLiteral(".c");
+    } else if (!m_currentFile.isEmpty() &&
+               QFileInfo(m_currentFile).completeBaseName() == binInfo.fileName()) {
+        sourceFilter = QFileInfo(m_currentFile).fileName();
+    }
+    inspector->setSourceFileFilter(sourceFilter);
+
     m_elfInspector = std::move(inspector);
+    m_loadedBinaryPath = binInfo.absoluteFilePath();
 
     // Populate ProjectExplorerWidget with parsed ELF symbols and strings.
+    uint64_t mainAddr = 0ULL;
+    QString mainSymName;
     if (m_projectExplorerWidget) {
         std::vector<SymbolEntry> syms;
         syms.reserve(m_elfInspector->symbols().size());
@@ -419,10 +448,41 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         m_projectExplorerWidget->setStrings(strs);
     }
 
-    // Seek to entry point if non-zero.
-    const uint64_t entry = m_elfInspector->entryPoint();
-    if (entry != 0ULL) {
-        seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
+    // Locate main symbol if present so user targets open directly at main with DWARF line info.
+    for (const auto& s : m_elfInspector->symbols()) {
+        if (s.isFunction && (s.name == QStringLiteral("main") || s.name == QStringLiteral("sym.main"))) {
+            mainAddr = s.address;
+            mainSymName = s.name;
+            break;
+        }
+    }
+
+    if (mainAddr != 0ULL && !sourceFilter.isEmpty()) {
+        const QString disasm = m_elfInspector->disassembleSymbol(
+            mainSymName, sourceFilter, &m_dwarfLineToAddress, &m_dwarfAddressToLine);
+        if (m_disassemblyView && !disasm.isEmpty()) {
+            m_disassemblyView->setPlainText(disasm);
+        }
+        const bool keepLinear =
+            m_disassemblyView && !m_disassemblyView->isGraphMode() &&
+            !m_disassemblyView->isDecompilerMode() &&
+            !m_disassemblyView->isSplitGraphDecompilerMode() &&
+            !m_forceDecompilerFallback &&
+            m_workspacePerspective == QStringLiteral("Code");
+        seekToAddressOrExpression(QStringLiteral("0x%1").arg(mainAddr, 8, 16, QChar('0')));
+        if (keepLinear && m_disassemblyView) {
+            m_showingDecompilerFallback = false;
+            m_disassemblyView->setSplitGraphDecompilerMode(false);
+            m_disassemblyView->setGraphMode(false);
+        }
+        rebuildDynamicSourceLineMap();
+    } else {
+        m_dwarfLineToAddress.clear();
+        m_dwarfAddressToLine.clear();
+        const uint64_t entry = (mainAddr != 0ULL) ? mainAddr : m_elfInspector->entryPoint();
+        if (entry != 0ULL) {
+            seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
+        }
     }
 
     return true;
@@ -588,12 +648,26 @@ QVector<int> MainWindow::detectAndHighlightDeadlock(
  * and styled in muted dark-slate so the user immediately sees the entry action.
  */
 void MainWindow::updateDebugToolbarState() {
-    if (m_runAction) m_runAction->setEnabled(true);
+    if (m_runAction) {
+        m_runAction->setEnabled(true);
+        m_runAction->setCheckable(true);
+        m_runAction->setChecked(m_debugSessionActive);
+        m_runAction->setText(m_debugSessionActive ? QStringLiteral("● Running")
+                                                  : QStringLiteral("▶ Run Target"));
+    }
     if (m_continueAction) m_continueAction->setEnabled(m_debugSessionActive);
     if (m_stepAction) m_stepAction->setEnabled(m_debugSessionActive);
     if (m_pauseAction) m_pauseAction->setEnabled(m_debugSessionActive);
     if (m_stopAction) m_stopAction->setEnabled(m_debugSessionActive);
     if (m_terminateAction) m_terminateAction->setEnabled(m_debugSessionActive);
+}
+
+/**
+ * @brief Checks whether the toolbar Run Target button is currently latched in Running state.
+ * @return True when an active debugging session has latched Run Target checked.
+ */
+bool MainWindow::isRunButtonLatched() const {
+    return m_debugSessionActive && m_runAction && m_runAction->isChecked();
 }
 
 /**
@@ -761,6 +835,106 @@ void MainWindow::applyTypographySettings(const QString& uiFamily, int uiSize,
     if (m_projectExplorerWidget) {
         m_projectExplorerWidget->reloadStyle();
     }
+}
+
+/**
+ * @brief Constructs the shell clean command for a given project directory or standalone source file.
+ * @param targetPath Project directory path or source file path.
+ * @return Shell command string to clean build artifacts.
+ */
+QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
+    // Detect active build system and normalize workspace path before constructing clean command.
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString resolvedPath =
+        targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
+    const QFileInfo info(resolvedPath);
+    const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    const QDir dir(dirPath);
+
+    // Dispatch build-system-specific clean commands (Meson, CMake, Make, or SingleFileMPI).
+    if (buildSys == QStringLiteral("Meson")) {
+        // Prefer builddir unless only build/build.ninja is already configured on disk.
+        const QString buildSubdir =
+            (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja")))
+                ? QStringLiteral("build")
+                : QStringLiteral("builddir");
+        return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, buildSubdir);
+    }
+    if (buildSys == QStringLiteral("CMake")) {
+        // Invoke CMake's generator-agnostic clean target inside the out-of-source build directory.
+        return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
+    }
+    if (buildSys == QStringLiteral("Make")) {
+        // Delegate cleanup directly to GNU Make in the detected project directory.
+        return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
+    }
+    // Single-file MPI targets remove the compiled output binary sharing the source basename.
+    const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
+    const QFileInfo srcInfo(srcFile);
+    return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
+}
+
+/**
+ * @brief Switches BottomConsoleTabs to Terminal, dispatches the build command, and reloads SingleFileMPI ELF output.
+ * @return True if the build command was generated and dispatched to TerminalDockWidget.
+ */
+bool MainWindow::buildTargetWorkflow() {
+    if (!m_terminalDock) return false;
+    const QString targetPath = activeTargetSourcePath();
+
+    // Activate embedded Terminal tab and dispatch build command.
+    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString cmd = buildCommandForPath(targetPath);
+    if (cmd.isEmpty()) return false;
+    m_terminalDock->sendCommand(cmd);
+    // Synchronize DisassemblyView and DWARF line mappings immediately for single-file MPI targets.
+    if (buildSys == QStringLiteral("SingleFileMPI")) {
+        ensureTargetBinaryCompiled();
+    }
+    // Reflect active build toolchain status in the main status bar telemetry badge.
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
+    return true;
+}
+
+/**
+ * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected clean command.
+ * @return True if the clean command was generated and dispatched to TerminalDockWidget.
+ */
+bool MainWindow::cleanTargetWorkflow() {
+    if (!m_terminalDock) return false;
+    const QString targetPath = activeTargetSourcePath();
+
+    // Activate embedded Terminal tab and dispatch clean command.
+    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString cmd = cleanCommandForPath(targetPath);
+    if (cmd.isEmpty()) return false;
+    m_terminalDock->sendCommand(cmd);
+    // Update status bar telemetry so the user sees which build system is being cleaned.
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("CLEANING [%1]").arg(buildSys));
+    return true;
+}
+
+/**
+ * @brief Switches BottomConsoleTabs to Terminal and dispatches a chained clean && build command.
+ * @return True if the rebuild command was generated and dispatched to TerminalDockWidget.
+ */
+bool MainWindow::rebuildTargetWorkflow() {
+    if (!m_terminalDock) return false;
+    const QString targetPath = activeTargetSourcePath();
+
+    // Activate embedded Terminal tab and dispatch chained clean && build command.
+    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
+    const QString buildSys = detectBuildSystem(targetPath);
+    const QString cleanCmd = cleanCommandForPath(targetPath);
+    const QString buildCmd = buildCommandForPath(targetPath);
+    if (cleanCmd.isEmpty() || buildCmd.isEmpty()) return false;
+    // Chain clean and build with short-circuit && so compilation only runs if clean succeeds.
+    m_terminalDock->sendCommand(QStringLiteral("%1 && %2").arg(cleanCmd, buildCmd));
+    // Reflect active rebuild operation in the main status bar telemetry badge.
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
+    return true;
 }
 
 }  // namespace gridlock::ui

@@ -154,9 +154,15 @@ public:
     void stopTargetWorkflow();
 
     /**
-     * @brief Updates main toolbar action enablement based on m_debugSessionActive.
+     * @brief Updates main toolbar action enablement and latched Run Target state.
      */
     void updateDebugToolbarState();
+
+    /**
+     * @brief Returns whether the checkable Run Target toolbar action is latched down as Running.
+     * @return True while an active debugging session latches Run Target; false when idle.
+     */
+    bool isRunButtonLatched() const;
 
     /**
      * @brief Maps a 1-based C/C++ source line number to its corresponding 64-bit instruction address.
@@ -243,6 +249,13 @@ public:
      * @return True if a matching target was found and activated; false otherwise.
      */
     bool selectTargetByName(const QString& targetName);
+
+    /**
+     * @brief Compiles the active C/C++ target on-demand with `-g -O0` if missing or stale,
+     *        loads its ELF64 binary into ElfBinaryInspector, and populates DWARF line mappings.
+     * @return True if a valid ELF64 target binary was compiled/loaded; false otherwise.
+     */
+    bool ensureTargetBinaryCompiled();
 
     /**
      * @brief Returns the resolved source file path for the currently active target.
@@ -478,9 +491,15 @@ private:
     QMap<QString, QSet<int>> m_persistentBreakpoints;
     std::unique_ptr<gridlock::core::ElfBinaryInspector> m_elfInspector;
 
+    static QString resolveWorkspacePath(const QString& rawPath);
+
     QMap<int, uint64_t> m_dynamicLineToAddress;
     QMap<uint64_t, int> m_dynamicAddressToLine;
+    QMap<int, uint64_t> m_dwarfLineToAddress;
+    QMap<uint64_t, int> m_dwarfAddressToLine;
     QMap<int, int> m_rankLoopCounter;
+    QString m_loadedBinaryPath;
+    bool m_useRealBinaryTarget = false;
 };
 
 }  // namespace gridlock::ui

@@ -165,4 +165,8 @@ private slots:
 
     /** @brief Verifies two-lane vector gutter geometry, distinct breakpoint/conditional/PC marker states, and non-overlapping antialiased rendering. */
     void testModernVectorGutterIconsAndCombinedBreakpointPcState();
+
+    /** @brief Verifies on-demand real ELF compilation, DWARF line mapping, breakpoint-first Run/Continue, and latched toolbar state. */
+    void testRealCompiledTargetDwarfMappingBreakpointRunAndLatchedToolbar();
 };
+

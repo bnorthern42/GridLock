@@ -11,6 +11,7 @@
 #include "ElfBinaryInspector.hpp"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QRegularExpression>
 #include <algorithm>
@@ -72,6 +73,12 @@ bool ElfBinaryInspector::loadFromData(const QByteArray& data, const QString& sou
     m_symbols.clear();
     m_strings.clear();
     m_patchedByteCount = 0;
+    m_dwarfLineToAddr.clear();
+    m_dwarfAddrToLine.clear();
+    m_cachedDisasmStart = 0;
+    m_cachedDisasmSize = 0;
+    m_cachedPatchGen = -1;
+    m_cachedDisasmText.clear();
     m_fileData = data;
     m_filePath = sourcePath;
 
@@ -248,9 +255,20 @@ void ElfBinaryInspector::parseSymbols() {
                           });
     m_symbols.erase(it, m_symbols.end());
 
-    // Cap loaded symbols at 500 to keep UI rendering responsive
-    if (m_symbols.size() > 500) {
-        m_symbols.resize(500);
+    // Cap loaded symbols at 800 for responsive UI tables while always preserving main
+    if (m_symbols.size() > 800) {
+        ElfSymbolInfo preservedMain;
+        for (int idx = 800; idx < m_symbols.size(); ++idx) {
+            if (m_symbols[idx].name == QStringLiteral("main") ||
+                m_symbols[idx].name == QStringLiteral("sym.main")) {
+                preservedMain = m_symbols[idx];
+                break;
+            }
+        }
+        m_symbols.resize(800);
+        if (!preservedMain.name.isEmpty()) {
+            m_symbols[799] = preservedMain;
+        }
     }
 }
 
@@ -426,11 +444,67 @@ bool ElfBinaryInspector::savePatchedBinary(const QString& outputPath) const {
 }
 
 /**
- * @brief Disassembles an instruction range into formatted assembly lines.
+ * @brief Sets an optional C/C++ source filename basename filter for DWARF line table extraction.
+ * @param sourceFileName Basename or path of primary source file (e.g., "deadlock_ring.cpp").
+ */
+void ElfBinaryInspector::setSourceFileFilter(const QString& sourceFileName) {
+    const QString cleaned = sourceFileName.trimmed().isEmpty()
+                                ? QString()
+                                : QFileInfo(sourceFileName.trimmed()).fileName();
+    if (m_sourceFileFilter != cleaned) {
+        m_sourceFileFilter = cleaned;
+        m_cachedDisasmText.clear();
+        m_cachedDisasmStart = 0;
+        m_cachedDisasmSize = 0;
+    }
+}
+
+/**
+ * @brief Disassembles a named function symbol using objdump -d -l -C -M intel and extracts DWARF lines.
+ * @param symbolName Function symbol name (e.g., "main" or "sym.main").
+ * @param sourceFilter Optional basename filter for DWARF file entries.
+ * @param outLineToAddr Optional output map of 1-based source line -> first instruction address.
+ * @param outAddrToLine Optional output map of instruction address -> 1-based source line.
+ * @return Formatted multiline disassembly text suitable for DisassemblyView.
+ */
+QString ElfBinaryInspector::disassembleSymbol(const QString& symbolName,
+                                              const QString& sourceFilter,
+                                              QMap<int, uint64_t>* outLineToAddr,
+                                              QMap<uint64_t, int>* outAddrToLine) const {
+    if (!m_valid) return {};
+    QString cleanSym = symbolName.trimmed();
+    if (cleanSym.startsWith(QStringLiteral("sym."))) {
+        cleanSym = cleanSym.mid(4);
+    }
+    if (!sourceFilter.trimmed().isEmpty()) {
+        const_cast<ElfBinaryInspector*>(this)->setSourceFileFilter(sourceFilter);
+    }
+
+    // Locate target symbol in parsed ELF symbol table.
+    uint64_t symAddr = 0;
+    uint64_t symSize = 0;
+    for (const auto& s : m_symbols) {
+        if (s.address != 0 && s.name == cleanSym) {
+            symAddr = s.address;
+            symSize = (s.size > 0) ? s.size : 256;
+            break;
+        }
+    }
+    if (symAddr == 0) return {};
+
+    const QString disasm = disassembleRange(symAddr, symSize, cleanSym);
+    if (outLineToAddr) *outLineToAddr = m_dwarfLineToAddr;
+    if (outAddrToLine) *outAddrToLine = m_dwarfAddrToLine;
+    return disasm;
+}
+
+/**
+ * @brief Disassembles an instruction range into formatted assembly lines with DWARF line markers.
  *
- * Attempts disassembly via objdump with Intel syntax bounded to the requested
- * address range. If objdump is unavailable or fails, falls back to a built-in
- * deterministic x86_64 instruction decoder and opcode formatter.
+ * Expands any address inside a known ELF function symbol to the full enclosing function
+ * boundaries so seeking mid-function preserves the complete procedure listing, invokes
+ * `objdump -d -l -C -M intel --no-show-raw-insn`, filters DWARF `<file>:<line>` entries
+ * against the primary source file basename, and normalizes branch target hex literals.
  *
  * @param startAddr Starting virtual memory address.
  * @param size Byte size of range to disassemble.
@@ -443,138 +517,190 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
         return {};
     }
 
-    // Step 1: Try invoking objdump if binary file path exists on disk
+    // Expand mid-function requests to full enclosing ELF function symbol bounds.
+    uint64_t effectiveStart = startAddr;
+    uint64_t effectiveSize = size;
+    QString effectiveSymName = symbolName;
+    for (const auto& s : m_symbols) {
+        if (s.isFunction && s.size > 0 && startAddr >= s.address && startAddr < (s.address + s.size)) {
+            effectiveStart = s.address;
+            effectiveSize = s.size;
+            if (effectiveSymName.isEmpty()) effectiveSymName = s.name;
+            break;
+        }
+    }
+
+    // Return cached function disassembly when bounds and patch generation are unchanged.
+    if (effectiveStart == m_cachedDisasmStart &&
+        effectiveSize == m_cachedDisasmSize &&
+        m_patchedByteCount == m_cachedPatchGen &&
+        !m_cachedDisasmText.isEmpty()) {
+        return m_cachedDisasmText;
+    }
+
+    // Step 1: Invoke objdump with C++ demangling (-C) and DWARF line numbers (-l) if binary exists on disk.
     if (!m_filePath.isEmpty() && QFile::exists(m_filePath)) {
         QProcess proc;
-        QStringList args = {
+        const QStringList args = {
             QStringLiteral("-d"),
             QStringLiteral("-l"),
+            QStringLiteral("-C"),
             QStringLiteral("-M"),
             QStringLiteral("intel"),
             QStringLiteral("--no-show-raw-insn"),
-            QStringLiteral("--start-address=0x%1").arg(startAddr, 0, 16),
-            QStringLiteral("--stop-address=0x%1").arg(startAddr + size, 0, 16),
+            QStringLiteral("--start-address=0x%1").arg(effectiveStart, 0, 16),
+            QStringLiteral("--stop-address=0x%1").arg(effectiveStart + effectiveSize, 0, 16),
             m_filePath
         };
         proc.start(QStringLiteral("objdump"), args);
-        // Wait up to 1 second for objdump execution to finish
-        if (proc.waitForFinished(1000) &&
+        if (proc.waitForFinished(2500) &&
             proc.exitStatus() == QProcess::NormalExit &&
             proc.exitCode() == 0) {
             const QString out = QString::fromUtf8(proc.readAllStandardOutput());
             const QStringList lines = out.split('\n');
             QString formatted;
-            QString currentSym = symbolName.isEmpty() ? QStringLiteral("entry") : symbolName;
-            static const QRegularExpression symHeaderRegex(QStringLiteral("<([^>]+)>:"));
+            QString currentSym = effectiveSymName.isEmpty() ? QStringLiteral("entry") : effectiveSymName;
+            static const QRegularExpression symHeaderRegex(QStringLiteral("^[0-9a-fA-F]+\\s+<([^>]+)>:"));
             static const QRegularExpression insnRegex(QStringLiteral("^\\s*([0-9a-fA-F]+):\\s*(.*)$"));
             static const QRegularExpression dwarfRegex(QStringLiteral("^(/?[^:\n]+):(\\d+)"));
-            int currentDwarfLine = -1;
+            static const QRegularExpression branchHexRegex(QStringLiteral(
+                "^((?:call|jmp|je|jz|jne|jnz|jg|jge|jl|jle|ja|jae|jb|jbe|js|jns|jo|jno)q?\\s+)([0-9a-fA-F]{4,16})(\\b.*)$"));
 
-            // Parse objdump output lines into standardized address:mnemonic format with DWARF line markers
+            int currentDwarfLine = -1;
+            QMap<int, uint64_t> parsedLineToAddr;
+            QMap<uint64_t, int> parsedAddrToLine;
+
+            // Parse objdump lines, filtering DWARF file annotations to primary target source file.
             for (const QString& line : lines) {
                 const QString trimmedLine = line.trimmed();
-                auto dwarfMatch = dwarfRegex.match(trimmedLine);
-                if (dwarfMatch.hasMatch()) {
-                    currentDwarfLine = dwarfMatch.captured(2).toInt();
-                    continue;
-                }
-                auto symMatch = symHeaderRegex.match(line);
+                const auto symMatch = symHeaderRegex.match(trimmedLine);
                 if (symMatch.hasMatch()) {
                     currentSym = symMatch.captured(1);
                     continue;
                 }
-                auto insnMatch = insnRegex.match(line);
-                if (insnMatch.hasMatch()) {
-                    bool ok = false;
-                    uint64_t addr = insnMatch.captured(1).toULongLong(&ok, 16);
-                    if (ok) {
-                        const QString body = insnMatch.captured(2).trimmed();
-                        if (!body.isEmpty()) {
-                            const uint64_t offset = (addr >= startAddr) ? (addr - startAddr) : 0;
-                            if (currentDwarfLine > 0) {
-                                formatted += QStringLiteral("0x%1 <%2+0x%3>: %4 ; line %5\n")
-                                                 .arg(addr, 8, 16, QChar('0'))
-                                                 .arg(currentSym)
-                                                 .arg(offset, 0, 16)
-                                                 .arg(body)
-                                                 .arg(currentDwarfLine);
-                            } else {
-                                formatted += QStringLiteral("0x%1 <%2+0x%3>: %4\n")
-                                                 .arg(addr, 8, 16, QChar('0'))
-                                                 .arg(currentSym)
-                                                 .arg(offset, 0, 16)
-                                                 .arg(body);
-                            }
-                        }
+                const auto dwarfMatch = dwarfRegex.match(trimmedLine);
+                if (dwarfMatch.hasMatch()) {
+                    const QString dwarfPath = dwarfMatch.captured(1).trimmed();
+                    const QString dwarfBase = QFileInfo(dwarfPath).fileName();
+                    const int parsedLine = dwarfMatch.captured(2).toInt();
+                    if (!m_sourceFileFilter.isEmpty()) {
+                        currentDwarfLine = (dwarfBase.compare(m_sourceFileFilter, Qt::CaseInsensitive) == 0)
+                                               ? parsedLine
+                                               : -1;
+                    } else {
+                        currentDwarfLine = !dwarfPath.startsWith(QStringLiteral("/usr/include"))
+                                               ? parsedLine
+                                               : -1;
+                    }
+                    continue;
+                }
+                const auto insnMatch = insnRegex.match(line);
+                if (!insnMatch.hasMatch()) continue;
+
+                bool ok = false;
+                const uint64_t addr = insnMatch.captured(1).toULongLong(&ok, 16);
+                if (!ok) continue;
+
+                QString body = insnMatch.captured(2).trimmed();
+                if (body.isEmpty()) continue;
+
+                // Prefix immediate branch/call hex targets with 0x for CFG & Xref parser compatibility.
+                const auto brMatch = branchHexRegex.match(body);
+                if (brMatch.hasMatch()) {
+                    bool brOk = false;
+                    const uint64_t targetAddr = brMatch.captured(2).toULongLong(&brOk, 16);
+                    if (brOk) {
+                        body = QStringLiteral("%10x%2%3")
+                                   .arg(brMatch.captured(1))
+                                   .arg(targetAddr, 8, 16, QChar('0'))
+                                   .arg(brMatch.captured(3));
                     }
                 }
+
+                const uint64_t offset = (addr >= effectiveStart) ? (addr - effectiveStart) : 0;
+                if (currentDwarfLine > 0) {
+                    if (!parsedLineToAddr.contains(currentDwarfLine)) {
+                        parsedLineToAddr.insert(currentDwarfLine, addr);
+                    }
+                    parsedAddrToLine.insert(addr, currentDwarfLine);
+                    formatted += QStringLiteral("0x%1 <%2+%3>: %4 ; line %5\n")
+                                     .arg(addr, 8, 16, QChar('0'))
+                                     .arg(currentSym)
+                                     .arg(offset)
+                                     .arg(body)
+                                     .arg(currentDwarfLine);
+                } else {
+                    formatted += QStringLiteral("0x%1 <%2+%3>: %4\n")
+                                     .arg(addr, 8, 16, QChar('0'))
+                                     .arg(currentSym)
+                                     .arg(offset)
+                                     .arg(body);
+                }
             }
-            if (!formatted.trimmed().isEmpty()) {
-                return formatted.trimmed();
+            const QString cleanFormatted = formatted.trimmed();
+            if (!cleanFormatted.isEmpty()) {
+                m_dwarfLineToAddr = parsedLineToAddr;
+                m_dwarfAddrToLine = parsedAddrToLine;
+                m_cachedDisasmStart = effectiveStart;
+                m_cachedDisasmSize = effectiveSize;
+                m_cachedPatchGen = m_patchedByteCount;
+                m_cachedDisasmText = cleanFormatted;
+                return cleanFormatted;
             }
         }
     }
 
     // Step 2: Fallback to built-in deterministic x86_64 disassembler
-    const QByteArray rawBytes = readVirtualMemory(startAddr, size);
+    const QByteArray rawBytes = readVirtualMemory(effectiveStart, effectiveSize);
     if (rawBytes.isEmpty()) {
         return {};
     }
 
-    const QString effectiveSym = symbolName.isEmpty() ? QStringLiteral("entry") : symbolName;
+    const QString effectiveSym = effectiveSymName.isEmpty() ? QStringLiteral("entry") : effectiveSymName;
     QString result;
     size_t i = 0;
     // Iterate raw bytes and match common x86_64 instruction opcodes
     while (i < static_cast<size_t>(rawBytes.size())) {
-        const uint64_t addr = startAddr + i;
+        const uint64_t addr = effectiveStart + i;
         const unsigned char b = static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i)]);
         QString mnemonic;
         size_t insnLen = 1;
 
         if (b == 0x55) {
-            // Function prologue push rbp
             mnemonic = QStringLiteral("push   rbp");
         } else if (b == 0x48 && i + 2 < static_cast<size_t>(rawBytes.size()) &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 1)]) == 0x89 &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 2)]) == 0xe5) {
-            // Stack frame setup mov rbp, rsp
             mnemonic = QStringLiteral("mov    rbp, rsp");
             insnLen = 3;
         } else if (b == 0x48 && i + 2 < static_cast<size_t>(rawBytes.size()) &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 1)]) == 0x83 &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 2)]) == 0xec) {
-            // Local stack allocation sub rsp, imm8
             mnemonic = QStringLiteral("sub    rsp, 0x20");
             insnLen = 4;
         } else if (b == 0xc3) {
-            // Function return
             mnemonic = QStringLiteral("ret");
         } else if (b == 0x90) {
-            // No operation padding
             mnemonic = QStringLiteral("nop");
         } else if (b == 0x5d) {
-            // Stack frame restore pop rbp
             mnemonic = QStringLiteral("pop    rbp");
         } else if (b == 0x31 && i + 1 < static_cast<size_t>(rawBytes.size()) &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 1)]) == 0xc0) {
-            // Return zero register clearing xor eax, eax
             mnemonic = QStringLiteral("xor    eax, eax");
             insnLen = 2;
         } else if (b == 0x0f && i + 3 < static_cast<size_t>(rawBytes.size()) &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 1)]) == 0x1e &&
                    static_cast<unsigned char>(rawBytes[static_cast<qsizetype>(i + 2)]) == 0xfa) {
-            // Intel Control-Flow Enforcement Technology endbr64
             mnemonic = QStringLiteral("endbr64");
             insnLen = 4;
         } else {
-            // Generic raw byte fallback representation
             mnemonic = QStringLiteral(".byte  0x%1").arg(static_cast<unsigned int>(b), 2, 16, QChar('0'));
         }
 
-        result += QStringLiteral("0x%1 <%2+0x%3>: %4\n")
+        result += QStringLiteral("0x%1 <%2+%3>: %4\n")
                       .arg(addr, 8, 16, QChar('0'))
                       .arg(effectiveSym)
-                      .arg(i, 0, 16)
+                      .arg(i)
                       .arg(mnemonic);
         i += insnLen;
     }
@@ -584,3 +710,4 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
 
 }  // namespace core
 }  // namespace gridlock
+

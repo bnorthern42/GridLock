@@ -817,3 +817,93 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
     QVERIFY2(foundBadgePixelInIconLane,
              "Expected antialiased crimson/emerald/amber vector badge pixels inside the left icon lane (x = 3..16)");
 }
+
+/**
+ * @brief Verifies on-demand ELF binary compilation, genuine DWARF source-to-instruction line
+ *        mapping for `deadlock_ring`, breakpoint-first Run/Continue execution, latched Run Target
+ *        toolbar visual state, and non-italic toolbar selector typography.
+ */
+void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatchedToolbar() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QApplication::processEvents();
+
+    // 1. Select deadlock_ring and compile its real ELF64 binary with DWARF debug info on-demand.
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")),
+             "selectTargetByName('deadlock_ring') must succeed");
+    QVERIFY2(mainWindow.ensureTargetBinaryCompiled(),
+             "ensureTargetBinaryCompiled() must compile deadlock_ring ELF binary on-demand");
+    QApplication::processEvents();
+
+    const QString binPath = mainWindow.activeTargetBinaryPath();
+    QVERIFY2(QFileInfo::exists(binPath),
+             qPrintable(QStringLiteral("Compiled ELF binary must exist on disk: %1").arg(binPath)));
+
+    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    QVERIFY(editorTabs != nullptr && disasmView != nullptr && targetCombo != nullptr);
+    auto* srcView = editorTabs->currentSourceCodeView();
+    QVERIFY(srcView != nullptr);
+
+    // Verify genuine compiler-emitted assembly (calls MPI_Send & MPI_Recv; zero hardcoded DeeplyNested).
+    const QString asmText = disasmView->toPlainText();
+    QVERIFY2(asmText.contains(QStringLiteral("MPI_Send")) &&
+                 asmText.contains(QStringLiteral("MPI_Recv")),
+             qPrintable(QStringLiteral("DisassemblyView must show real MPI_Send/MPI_Recv calls:\n%1")
+                            .arg(asmText.left(600))));
+    QVERIFY2(!asmText.contains(QStringLiteral("DeeplyNested")),
+             "DisassemblyView must NOT contain hardcoded DeeplyNested preview text");
+
+    // Resolve DWARF instruction addresses for MPI_Send and MPI_Recv lines in deadlock_ring.cpp.
+    const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send("));
+    const int recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
+    QVERIFY(sendLine > 0 && recvLine > sendLine);
+
+    const uint64_t sendAddr = mainWindow.sourceLineToAddress(sendLine);
+    const uint64_t recvAddr = mainWindow.sourceLineToAddress(recvLine);
+    QVERIFY2(sendAddr != 0ULL && recvAddr != 0ULL && sendAddr != recvAddr,
+             qPrintable(QStringLiteral("Expected distinct non-zero DWARF addresses: send=0x%1 recv=0x%2")
+                            .arg(sendAddr, 0, 16)
+                            .arg(recvAddr, 0, 16)));
+    QVERIFY(disasmView->lineForAddress(sendAddr) >= 0);
+    QVERIFY(disasmView->lineForAddress(recvAddr) >= 0);
+
+    // 2. Toggle breakpoints on sendLine and recvLine; Run Target must stop directly on sendLine!
+    for (int bp : srcView->breakpoints().values()) {
+        srcView->toggleBreakpoint(bp);
+    }
+    srcView->toggleBreakpoint(sendLine);
+    srcView->toggleBreakpoint(recvLine);
+
+    mainWindow.startTargetWorkflow();
+    QApplication::processEvents();
+
+    QCOMPARE(mainWindow.isDebugSessionActive(), true);
+    QCOMPARE(mainWindow.isRunButtonLatched(), true);
+    QCOMPARE(srcView->executionLine(), sendLine);
+    QCOMPARE(disasmView->currentAddress(), sendAddr);
+
+    // Continue must step past sendAddr and stop directly at the second user breakpoint (recvLine).
+    QVERIFY(mainWindow.continueExecutionWorkflow());
+    QApplication::processEvents();
+    QCOMPARE(srcView->executionLine(), recvLine);
+    QCOMPARE(disasmView->currentAddress(), recvAddr);
+
+    // 3. Stop session and verify Run Target unlatches and toolbar combo is non-italic.
+    mainWindow.stopTargetWorkflow();
+    QApplication::processEvents();
+    QCOMPARE(mainWindow.isDebugSessionActive(), false);
+    QCOMPARE(mainWindow.isRunButtonLatched(), false);
+    QCOMPARE(targetCombo->font().italic(), false);
+
+    // Zero-breakpoint Run Target on deadlock_ring must pause at MPI_Send circular deadlock.
+    srcView->toggleBreakpoint(sendLine);
+    srcView->toggleBreakpoint(recvLine);
+    mainWindow.startTargetWorkflow();
+    QApplication::processEvents();
+    QCOMPARE(srcView->executionLine(), sendLine);
+    mainWindow.stopTargetWorkflow();
+}
+
