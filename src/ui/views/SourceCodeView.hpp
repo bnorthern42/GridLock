@@ -16,6 +16,8 @@
 #include <QTextCharFormat>
 #include <QTimer>
 #include <QPoint>
+#include <QContextMenuEvent>
+#include <QMouseEvent>
 
 namespace gridlock::ui {
 
@@ -257,6 +259,26 @@ public:
      */
     void lineNumberAreaLeaveEvent(QEvent *event);
 
+    /**
+     * @brief Determines whether the standard editor context menu may open at the given widget coordinate.
+     * @param pos Position in SourceCodeView coordinates.
+     * @return False if pos falls within the gutter width or LineNumberArea geometry; true otherwise.
+     */
+    bool shouldOpenEditorContextMenuAt(const QPoint& pos) const;
+
+    /**
+     * @brief Commits or rolls back tentative breakpoint state after the anchored breakpoint popover closes.
+     * @param lineOneBased 1-based source line number.
+     * @param wasPreviouslySet True if a breakpoint already existed on lineOneBased prior to right-click.
+     * @param accepted True if the popover closed with QDialog::Accepted; false if canceled or dismissed.
+     * @param enabledChecked True if the breakpoint remains enabled (not unchecked and not removed).
+     * @param condition Optional C/C++ boolean condition expression.
+     * @param suspendScope Rank suspension scope ("All", "Rank", or "None").
+     */
+    void handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet, bool accepted,
+                                       bool enabledChecked, const QString& condition,
+                                       const QString& suspendScope);
+
 signals:
     /** @brief Emitted to request running the target application. */
     void runTargetRequested();
@@ -287,6 +309,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
@@ -312,6 +335,57 @@ private:
     QPoint m_lastGlobalMousePos;
     int m_executionLine = -1;
     int m_hoveredGutterLine = -1;
+};
+
+/**
+ * @class LineNumberArea
+ * @brief Gutter widget displaying line numbers, hover previews, and breakpoint markers adjacent to the editor.
+ */
+class LineNumberArea : public QWidget {
+public:
+    /**
+     * @brief Constructs a new LineNumberArea with live mouse hover tracking enabled.
+     * @param editor Pointer to the associated SourceCodeView.
+     */
+    explicit LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {
+        setMouseTracking(true);
+    }
+
+    /**
+     * @brief Returns the dynamic two-lane width size hint for the gutter.
+     * @return QSize with width >= 48px.
+     */
+    QSize sizeHint() const override { return QSize(sourceCodeView->lineNumberAreaWidth(), 0); }
+
+protected:
+    /** @brief Delegates gutter painting to SourceCodeView. */
+    void paintEvent(QPaintEvent *event) override { sourceCodeView->lineNumberAreaPaintEvent(event); }
+
+    /** @brief Delegates left/right gutter clicks to SourceCodeView. */
+    void mousePressEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMousePressEvent(event); }
+
+    /** @brief Consumes mouse button release inside the gutter so right-click release never triggers fallback menus. */
+    void mouseReleaseEvent(QMouseEvent *event) override {
+        if (event) {
+            event->accept();
+        }
+    }
+
+    /** @brief Delegates cursor hover tracking over the gutter to SourceCodeView. */
+    void mouseMoveEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMouseMoveEvent(event); }
+
+    /** @brief Clears hovered gutter state when cursor leaves LineNumberArea. */
+    void leaveEvent(QEvent *event) override { sourceCodeView->lineNumberAreaLeaveEvent(event); }
+
+    /** @brief Consumes QContextMenuEvent inside the gutter so right-clicks never bubble up to SourceCodeView. */
+    void contextMenuEvent(QContextMenuEvent *event) override {
+        if (event) {
+            event->accept();
+        }
+    }
+
+private:
+    SourceCodeView *sourceCodeView = nullptr;
 };
 
 }  // namespace gridlock::ui

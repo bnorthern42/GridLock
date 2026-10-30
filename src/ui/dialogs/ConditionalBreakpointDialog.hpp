@@ -15,6 +15,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QContextMenuEvent;
 class QLabel;
 class QLineEdit;
 class QPaintEvent;
@@ -126,6 +127,12 @@ protected:
      */
     void showEvent(QShowEvent* event) override;
 
+    /**
+     * @brief Consumes context menu events inside the popup so right-clicks never bubble to parent views.
+     * @param event Context menu event descriptor.
+     */
+    void contextMenuEvent(QContextMenuEvent* event) override;
+
 private:
     QLabel* m_titleLabel = nullptr;          ///< Header label displaying "Line <N> breakpoint".
     QCheckBox* m_enabledCheck = nullptr;     ///< Toggle checkbox enabling or removing the breakpoint.
@@ -136,6 +143,7 @@ private:
     QLineEdit* m_conditionEdit = nullptr;    ///< Single-line C/C++ boolean predicate input box.
     QComboBox* m_presetCombo = nullptr;      ///< Dropdown selector offering common MPI rank/loop presets.
     QPushButton* m_removeBtn = nullptr;      ///< Left-aligned button removing the breakpoint (F9).
+    QPushButton* m_cancelBtn = nullptr;      ///< Secondary button canceling popover changes cleanly.
     QPushButton* m_doneBtn = nullptr;        ///< Primary right-aligned confirmation button ("Done").
     int m_targetLine = -1;                   ///< 1-based line number associated with this popover.
     int m_caretCenterX = 22;                 ///< Horizontal center offset (px) of top callout triangle.

@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QDir>
 #include <QEvent>
 #include <QFile>
@@ -441,15 +442,11 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
     QApplication::processEvents();
 
     // Verify all child widgets in TerminalDockWidget remain fixed-pitch and span >= 95% of dock width.
-    QVERIFY2(terminalDock->areAllChildWidgetsFixedPitch(),
-             "TerminalDockWidget eventFilter must restore fixed-pitch font across all child widgets");
+    QVERIFY2(terminalDock->areAllChildWidgetsFixedPitch(), "TerminalDockWidget eventFilter must restore fixed-pitch font");
     for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
         if (child->isVisible() && child->width() > 80) {
             QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100,
-                     qPrintable(QStringLiteral("Child widget %1 shrunk to %2px vs dock %3px")
-                                    .arg(child->metaObject()->className())
-                                    .arg(child->width())
-                                    .arg(terminalDock->width())));
+                     qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
         }
     }
     prefsDialog.close();
@@ -468,15 +465,9 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
 
     const QColor fgColor = symItem->foreground().color();
     const QColor bgColor = symTable->palette().color(QPalette::Base);
-    const auto luminance = [](const QColor& c) -> int {
-        return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000;
-    };
+    const auto luminance = [](const QColor& c) { return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000; };
     const int contrastDiff = std::abs(luminance(fgColor) - luminance(bgColor));
-    QVERIFY2(contrastDiff >= 80,
-             qPrintable(QStringLiteral("Light mode symbol contrast too low (%1): fg=%2 bg=%3")
-                            .arg(contrastDiff)
-                            .arg(fgColor.name())
-                            .arg(bgColor.name())));
+    QVERIFY2(contrastDiff >= 80, qPrintable(QStringLiteral("Light mode symbol contrast too low (%1)").arg(contrastDiff)));
 
     // Restore Dark Mode.
     gridlock::core::ThemeManager::instance().setDarkMode(true);
@@ -498,8 +489,7 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
     int targetIdx = -1;
     for (int i = 0; i < docCombo->count(); ++i) {
         const QString label = docCombo->itemText(i);
-        if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) &&
-            !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) {
+        if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) {
             targetIdx = i;
             break;
         }
@@ -507,8 +497,7 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
     if (targetIdx >= 0) {
         docCombo->setCurrentIndex(targetIdx);
         QApplication::processEvents();
-        QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")),
-                 "Switching docset category must auto-preview first entry in that docset instead of keeping MPI_Init");
+        QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")), "Switching docset category must auto-preview first entry");
     }
 }
 
@@ -529,50 +518,40 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
     QVERIFY(targetCombo != nullptr && terminalDock != nullptr && disasmView != nullptr);
 
     // 1. Select "deadlock_ring" via MainWindow::selectTargetByName (and verify combo sync).
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")),
-             "selectTargetByName('deadlock_ring') must succeed and switch active target");
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName('deadlock_ring') must succeed");
     QApplication::processEvents();
-    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")),
-             qPrintable(mainWindow.activeTargetSourcePath()));
-    QVERIFY2(mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")),
-             qPrintable(mainWindow.activeTargetBinaryPath()));
+    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
+    QVERIFY2(mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")), qPrintable(mainWindow.activeTargetBinaryPath()));
 
     // Verify active SourceCodeView in EditorTabManager loaded deadlock_ring.cpp containing MPI_Send & MPI_Recv.
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
     QVERIFY(editorTabs != nullptr && editorTabs->currentSourceCodeView() != nullptr);
     const QString editorText = editorTabs->currentSourceCodeView()->toPlainText();
-    QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")),
-             "Active SourceCodeView must display deadlock_ring.cpp with MPI_Send and MPI_Recv");
+    QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")), "Must display deadlock_ring.cpp");
 
     // Verify DisassemblyView updated its decompiler/disassembly preview to reflect deadlock_ring's MPI_Send/MPI_Recv.
     const QString decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
-    QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv")),
-             qPrintable(decompText.left(400)));
+    QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv")), qPrintable(decompText.left(400)));
 
     // 2. Verify Build & Clean commands operate on deadlock_ring.cpp / deadlock_ring (NOT inspection_demo.cpp).
     mainWindow.buildTargetWorkflow();
     QApplication::processEvents();
     const QString buildCmd = terminalDock->lastSentCommand();
     QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) &&
-                 buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")),
-             qPrintable(buildCmd));
+                 buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")), qPrintable(buildCmd));
 
     mainWindow.cleanTargetWorkflow();
     QApplication::processEvents();
     const QString cleanCmd = terminalDock->lastSentCommand();
-    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) && !cleanCmd.contains(QStringLiteral("inspection_demo")),
-             qPrintable(cleanCmd));
+    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) && !cleanCmd.contains(QStringLiteral("inspection_demo")), qPrintable(cleanCmd));
 
     // 3. Switch back to "inspection_demo" and verify source path and build command restore inspection_demo.cpp.
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")),
-             "selectTargetByName('inspection_demo') must succeed");
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName('inspection_demo') must succeed");
     QApplication::processEvents();
-    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")),
-             qPrintable(mainWindow.activeTargetSourcePath()));
+    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
     mainWindow.buildTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")),
-             qPrintable(terminalDock->lastSentCommand()));
+    QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")), qPrintable(terminalDock->lastSentCommand()));
 }
 
 /**
@@ -635,16 +614,11 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     // 4. Generate 6 offscreen 1440x900 PNG screenshots of each curated theme in docs/screenshots/.
     struct ThemeShotEntry { QString themeId; QString fileName; };
     const std::vector<ThemeShotEntry> shots = {
-        {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")},
-        {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
-        {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
-        {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
-        {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
-        {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
+        {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}, {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
+        {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")}, {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
+        {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")}, {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
     };
-    const QString docsShotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists())
-                                    ? QStringLiteral("../docs/screenshots")
-                                    : QStringLiteral("docs/screenshots");
+    const QString docsShotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
     QDir().mkpath(docsShotDir);
 
     for (const auto& shot : shots) {
@@ -653,8 +627,7 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
         if (disasmView) disasmView->reloadStyle();
         QApplication::processEvents();
         const QString outPath = docsShotDir + QLatin1Char('/') + shot.fileName;
-        QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath), qPrintable(outPath));
-        QVERIFY2(QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024, qPrintable(outPath));
+        QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath) && QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024, qPrintable(outPath));
     }
 
     // Restore default GridLock Slate theme after screenshot export.
@@ -671,9 +644,7 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
 void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState() {
     gridlock::ui::SourceCodeView srcView;
     QString sampleCode;
-    for (int i = 1; i <= 30; ++i) {
-        sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
-    }
+    for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
     srcView.setSourceCode(sampleCode);
     srcView.resize(720, 560);
     srcView.show();
@@ -915,4 +886,44 @@ void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
 
     // 4. Verify MpiDiagnosticsWidget uses a single compact 26px header bar with hidden inner QTabBar.
     QVERIFY(mpiDiag->hasCompactSingleRowHeader());
+}
+
+/**
+ * @brief Verifies gutter `QContextMenuEvent` suppression (preventing editor Undo/Redo/Cut/Copy menu
+ *        bleed-through) and clean rollback of newly right-clicked breakpoints when canceled.
+ */
+void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly() {
+    gridlock::ui::SourceCodeView sourceCodeView;
+    QString sampleCode;
+    for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int rank_val_%1 = %1;\n").arg(i);
+    sourceCodeView.setSourceCode(sampleCode);
+    sourceCodeView.resize(720, 560);
+    sourceCodeView.show();
+    QApplication::processEvents();
+
+    // 1. Locate LineNumberArea child widget and verify QContextMenuEvent is accepted without bubbling.
+    QWidget* gutterWidget = nullptr;
+    for (QWidget* w : sourceCodeView.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+        if (w != sourceCodeView.viewport() && w->width() == sourceCodeView.lineNumberAreaWidth()) {
+            gutterWidget = w;
+            break;
+        }
+    }
+    QVERIFY(gutterWidget != nullptr);
+    QContextMenuEvent gutterMenuEv(QContextMenuEvent::Mouse, QPoint(10, 25), sourceCodeView.mapToGlobal(QPoint(10, 25)));
+    gutterMenuEv.ignore();
+    QApplication::sendEvent(gutterWidget, &gutterMenuEv);
+    QCOMPARE(gutterMenuEv.isAccepted(), true);
+    QCOMPARE(sourceCodeView.shouldOpenEditorContextMenuAt(QPoint(10, 25)), false);
+    QCOMPARE(sourceCodeView.shouldOpenEditorContextMenuAt(QPoint(120, 25)), true);
+
+    // 2. Canceling a newly right-clicked gutter breakpoint restores unmarked state on line 18.
+    QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
+    sourceCodeView.toggleBreakpoint(18);
+    sourceCodeView.handleBreakpointPopoverResult(18, false, false, false, QString(), QStringLiteral("All"));
+    QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
+    sourceCodeView.handleBreakpointPopoverResult(18, false, true, true, QStringLiteral("rank == 0"), QStringLiteral("Rank"));
+    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(18), QStringLiteral("ConditionalBreakpoint"));
+    sourceCodeView.handleBreakpointPopoverResult(18, true, true, false, QString(), QStringLiteral("All"));
+    QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
 }

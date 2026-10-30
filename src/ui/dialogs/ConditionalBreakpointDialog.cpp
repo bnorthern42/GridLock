@@ -13,6 +13,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -179,7 +180,7 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
 
     rootLayout->addStretch(1);
 
-    // Bottom Row: Left "Remove Breakpoint (F9)" link action + Right primary "Done" button.
+    // Bottom Row: Left "Remove Breakpoint (F9)" link action + Right "Cancel" and primary "Done" buttons.
     auto* bottomRow = new QHBoxLayout();
     bottomRow->setContentsMargins(0, 2, 0, 0);
     bottomRow->setSpacing(8);
@@ -188,6 +189,10 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     m_removeBtn->setObjectName(QStringLiteral("removeBreakpointBtn"));
     m_removeBtn->setFixedHeight(24);
 
+    m_cancelBtn = new QPushButton(QStringLiteral("Cancel"), this);
+    m_cancelBtn->setObjectName(QStringLiteral("cancelBreakpointBtn"));
+    m_cancelBtn->setFixedHeight(24);
+
     m_doneBtn = new QPushButton(QStringLiteral("Done"), this);
     m_doneBtn->setObjectName(QStringLiteral("doneBreakpointBtn"));
     m_doneBtn->setFixedHeight(24);
@@ -195,6 +200,7 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
 
     bottomRow->addWidget(m_removeBtn);
     bottomRow->addStretch(1);
+    bottomRow->addWidget(m_cancelBtn);
     bottomRow->addWidget(m_doneBtn);
     rootLayout->addLayout(bottomRow);
 
@@ -210,7 +216,8 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     auto* f9Shortcut = new QShortcut(QKeySequence(Qt::Key_F9), this);
     connect(f9Shortcut, &QShortcut::activated, this, triggerRemove);
 
-    // Wire primary Done button to accept changes and close popover.
+    // Wire Cancel to reject cleanly and primary Done button to accept changes and close popover.
+    connect(m_cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     connect(m_doneBtn, &QPushButton::clicked, this, &QDialog::accept);
 }
 
@@ -370,6 +377,16 @@ void ConditionalBreakpointDialog::showEvent(QShowEvent* event) {
     QDialog::showEvent(event);
     if (m_hasExplicitAnchor) {
         move(m_anchoredGlobalPos);
+    }
+}
+
+/**
+ * @brief Consumes context menu events inside the popup so right-clicks never bubble to parent views.
+ * @param event Context menu event descriptor.
+ */
+void ConditionalBreakpointDialog::contextMenuEvent(QContextMenuEvent* event) {
+    if (event) {
+        event->accept();
     }
 }
 

@@ -174,5 +174,8 @@ private slots:
 
     /** @brief Verifies left tool-window icon rail, linked contextual tab filtering, auto-group sync, and compact MPI Diagnostics header. */
     void testBottomToolWindowRailAndLinkedTabGroups();
+
+    /** @brief Verifies gutter QContextMenuEvent isolation from editor viewport menu and clean rollback of canceled breakpoints. */
+    void testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly();
 };
 

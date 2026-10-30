@@ -40,26 +40,15 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
     typeFormat.setForeground(QColor(100, 150, 255));
     typeFormat.setFontWeight(QFont::Bold);
     const QString typePatterns[] = {
-        QStringLiteral("\\bchar\\b"), QStringLiteral("\\bclass\\b"),
-        QStringLiteral("\\bconst\\b"), QStringLiteral("\\bdouble\\b"),
-        QStringLiteral("\\benum\\b"), QStringLiteral("\\bexplicit\\b"),
-        QStringLiteral("\\bfriend\\b"), QStringLiteral("\\binline\\b"),
-        QStringLiteral("\\bint\\b"), QStringLiteral("\\blong\\b"),
-        QStringLiteral("\\bnamespace\\b"), QStringLiteral("\\boperator\\b"),
-        QStringLiteral("\\bprivate\\b"), QStringLiteral("\\bprotected\\b"),
-        QStringLiteral("\\bpublic\\b"), QStringLiteral("\\bshort\\b"),
-        QStringLiteral("\\bsignals\\b"), QStringLiteral("\\bsigned\\b"),
-        QStringLiteral("\\bslots\\b"), QStringLiteral("\\bstatic\\b"),
-        QStringLiteral("\\bstruct\\b"), QStringLiteral("\\btemplate\\b"),
-        QStringLiteral("\\btypedef\\b"), QStringLiteral("\\btypename\\b"),
-        QStringLiteral("\\bunion\\b"), QStringLiteral("\\bunsigned\\b"),
-        QStringLiteral("\\bvirtual\\b"), QStringLiteral("\\bvoid\\b"),
-        QStringLiteral("\\bvolatile\\b"), QStringLiteral("\\bbool\\b")
+        QStringLiteral("\\bchar\\b"), QStringLiteral("\\bclass\\b"), QStringLiteral("\\bconst\\b"), QStringLiteral("\\bdouble\\b"), QStringLiteral("\\benum\\b"),
+        QStringLiteral("\\bexplicit\\b"), QStringLiteral("\\bfriend\\b"), QStringLiteral("\\binline\\b"), QStringLiteral("\\bint\\b"), QStringLiteral("\\blong\\b"),
+        QStringLiteral("\\bnamespace\\b"), QStringLiteral("\\boperator\\b"), QStringLiteral("\\bprivate\\b"), QStringLiteral("\\bprotected\\b"), QStringLiteral("\\bpublic\\b"),
+        QStringLiteral("\\bshort\\b"), QStringLiteral("\\bsignals\\b"), QStringLiteral("\\bsigned\\b"), QStringLiteral("\\bslots\\b"), QStringLiteral("\\bstatic\\b"),
+        QStringLiteral("\\bstruct\\b"), QStringLiteral("\\btemplate\\b"), QStringLiteral("\\btypedef\\b"), QStringLiteral("\\btypename\\b"), QStringLiteral("\\bunion\\b"),
+        QStringLiteral("\\bunsigned\\b"), QStringLiteral("\\bvirtual\\b"), QStringLiteral("\\bvoid\\b"), QStringLiteral("\\bvolatile\\b"), QStringLiteral("\\bbool\\b")
     };
     for (const QString &pattern : typePatterns) {
-        rule.pattern = QRegularExpression(pattern);
-        rule.format = typeFormat;
-        highlightingRules.append(rule);
+        highlightingRules.append({QRegularExpression(pattern), typeFormat});
     }
 
     // Control flow keywords: neon pink/orange
@@ -67,17 +56,12 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
     keywordFormat.setForeground(QColor(255, 80, 150));
     keywordFormat.setFontWeight(QFont::Bold);
     const QString keywordPatterns[] = {
-        QStringLiteral("\\bfor\\b"), QStringLiteral("\\breturn\\b"),
-        QStringLiteral("\\bif\\b"), QStringLiteral("\\belse\\b"),
-        QStringLiteral("\\bwhile\\b"), QStringLiteral("\\bdo\\b"),
-        QStringLiteral("\\bswitch\\b"), QStringLiteral("\\bcase\\b"),
-        QStringLiteral("\\bbreak\\b"), QStringLiteral("\\bcontinue\\b"),
-        QStringLiteral("\\bnew\\b"), QStringLiteral("\\bdelete\\b")
+        QStringLiteral("\\bfor\\b"), QStringLiteral("\\breturn\\b"), QStringLiteral("\\bif\\b"), QStringLiteral("\\belse\\b"),
+        QStringLiteral("\\bwhile\\b"), QStringLiteral("\\bdo\\b"), QStringLiteral("\\bswitch\\b"), QStringLiteral("\\bcase\\b"),
+        QStringLiteral("\\bbreak\\b"), QStringLiteral("\\bcontinue\\b"), QStringLiteral("\\bnew\\b"), QStringLiteral("\\bdelete\\b")
     };
     for (const QString &pattern : keywordPatterns) {
-        rule.pattern = QRegularExpression(pattern);
-        rule.format = keywordFormat;
-        highlightingRules.append(rule);
+        highlightingRules.append({QRegularExpression(pattern), keywordFormat});
     }
 
     // Preprocessor directives: orange (#ff7850)
@@ -145,36 +129,6 @@ void CppSyntaxHighlighter::highlightBlock(const QString &text) {
         startIndex = text.indexOf(commentStartExpression, startIndex + commentLength);
     }
 }
-
-/**
- * @class LineNumberArea
- * @brief Gutter widget displaying line numbers, hover previews, and breakpoint markers adjacent to the editor.
- */
-class LineNumberArea : public QWidget {
-public:
-    /**
-     * @brief Constructs a new LineNumberArea with live mouse hover tracking enabled.
-     * @param editor Pointer to the associated SourceCodeView.
-     */
-    explicit LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {
-        setMouseTracking(true);
-    }
-
-    /**
-     * @brief Returns the dynamic two-lane width size hint for the gutter.
-     * @return QSize with width >= 48px.
-     */
-    QSize sizeHint() const override { return QSize(sourceCodeView->lineNumberAreaWidth(), 0); }
-
-protected:
-    void paintEvent(QPaintEvent *event) override { sourceCodeView->lineNumberAreaPaintEvent(event); }
-    void mousePressEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMousePressEvent(event); }
-    void mouseMoveEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMouseMoveEvent(event); }
-    void leaveEvent(QEvent *event) override { sourceCodeView->lineNumberAreaLeaveEvent(event); }
-
-private:
-    SourceCodeView *sourceCodeView = nullptr;
-};
 
 /**
  * @brief Constructs a new SourceCodeView editor widget.
@@ -619,10 +573,82 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
 }
 
 /**
+ * @brief Determines whether the standard editor context menu may open at pos (suppressing gutter regions).
+ * @param pos Coordinate in SourceCodeView widget space.
+ * @return False when pos falls inside the gutter width or LineNumberArea geometry; true otherwise.
+ */
+bool SourceCodeView::shouldOpenEditorContextMenuAt(const QPoint& pos) const {
+    if (pos.x() < lineNumberAreaWidth()) return false;
+    if (m_lineNumberArea && m_lineNumberArea->geometry().contains(pos)) return false;
+    return true;
+}
+
+/**
+ * @brief Suppresses the standard Undo/Redo/Cut/Copy editor menu when right-clicking over the gutter.
+ * @param event Context menu event descriptor.
+ */
+void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
+    if (!event) return;
+    // Resolve mouse global coordinate into SourceCodeView space to distinguish gutter from column-1 code.
+    QPoint editorPos = event->pos();
+    if (event->reason() == QContextMenuEvent::Mouse && !event->globalPos().isNull()) {
+        const QPoint mapped = mapFromGlobal(event->globalPos());
+        if (rect().contains(mapped)) editorPos = mapped;
+    }
+    if (!shouldOpenEditorContextMenuAt(editorPos)) {
+        event->accept();
+        return;
+    }
+    QPlainTextEdit::contextMenuEvent(event);
+}
+
+/**
+ * @brief Commits or rolls back tentative breakpoint state after the anchored breakpoint popover closes.
+ * @param lineOneBased 1-based source line number.
+ * @param wasPreviouslySet True if lineOneBased already held a breakpoint before right-clicking.
+ * @param accepted True when the popover was accepted; false when canceled or dismissed.
+ * @param enabledChecked True when the breakpoint remains enabled (not unchecked or removed).
+ * @param condition Optional C/C++ boolean predicate string.
+ * @param suspendScope Rank suspension scope ("All", "Rank", or "None").
+ */
+void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet,
+                                                   bool accepted, bool enabledChecked,
+                                                   const QString& condition,
+                                                   const QString& suspendScope) {
+    if (lineOneBased <= 0) return;
+    // Remove breakpoint when newly canceled (!accepted && !wasPreviouslySet) or explicitly disabled/removed.
+    if ((!accepted && !wasPreviouslySet) || (accepted && !enabledChecked)) {
+        if (m_breakpoints.contains(lineOneBased)) {
+            m_breakpoints.remove(lineOneBased);
+            m_breakpointSuspendScopes.remove(lineOneBased);
+            highlightCurrentLine();
+            if (m_lineNumberArea) m_lineNumberArea->update();
+            emit breakpointToggled(m_currentFilePath, lineOneBased, false, QString());
+        }
+        return;
+    }
+    if (!accepted) return;
+
+    // Persist updated predicate expression and rank suspension scope on the active breakpoint.
+    const QString cleanCondition = condition.trimmed();
+    const QString cleanScope = suspendScope.trimmed().isEmpty() ? QStringLiteral("All") : suspendScope.trimmed();
+    m_breakpoints.insert(lineOneBased, cleanCondition);
+    m_breakpointSuspendScopes.insert(lineOneBased, cleanScope);
+    highlightCurrentLine();
+    if (m_lineNumberArea) m_lineNumberArea->update();
+    emit breakpointToggled(m_currentFilePath, lineOneBased, true, cleanCondition);
+}
+
+/**
  * @brief Handles gutter mouse clicks: left-click toggles breakpoint, right-click opens anchored popover.
  * @param event The mouse press event inside LineNumberArea.
  */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
+    if (!event) return;
+    // Explicitly consume left and right button presses at entry so they never propagate to parent views.
+    if (event->button() != Qt::LeftButton && event->button() != Qt::RightButton) return;
+    event->accept();
+
     const int y = event->pos().y();
     QTextBlock block = firstVisibleBlock();
     int blockNumber = block.blockNumber();
@@ -632,23 +658,15 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
             const int lineNum = blockNumber + 1;
-            const QString emitPath = m_currentFilePath;
-
             if (event->button() == Qt::RightButton) {
-                // Ensure an active breakpoint exists on the right-clicked line before opening the popover.
-                if (!m_breakpoints.contains(lineNum)) {
-                    m_breakpoints.insert(lineNum, QString());
-                    m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
-                    highlightCurrentLine();
-                    m_lineNumberArea->update();
-                    emit breakpointToggled(emitPath, lineNum, true, QString());
-                }
+                event->accept();
+                const bool wasPreviouslySet = hasBreakpoint(lineNum);
+                // Tentatively display the breakpoint marker above the callout caret while configuring.
+                if (!wasPreviouslySet) toggleBreakpoint(lineNum);
 
                 // Compute global bottom-center anchor point of the gutter breakpoint marker.
-                const int rowH = qMax(14, bottom - top);
-                const int lineBottomY = top + (rowH / 2) + 5;
                 const QPoint iconGlobalPos =
-                    m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, lineBottomY));
+                    m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, top + (qMax(14, bottom - top) / 2) + 5));
 
                 // Configure and anchor the callout popover directly beneath the breakpoint circle.
                 ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
@@ -656,36 +674,13 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
                 dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
                 dlg.positionNearAnchor(iconGlobalPos);
 
-                if (dlg.exec() == QDialog::Accepted) {
-                    if (!dlg.isBreakpointEnabled() || dlg.isRemoveRequested()) {
-                        // Unchecking Enabled or clicking Remove Breakpoint deletes the breakpoint.
-                        m_breakpoints.remove(lineNum);
-                        m_breakpointSuspendScopes.remove(lineNum);
-                        highlightCurrentLine();
-                        emit breakpointToggled(emitPath, lineNum, false, QString());
-                    } else {
-                        // Persist updated predicate expression and rank suspension scope.
-                        const QString newCondition = dlg.getCondition();
-                        m_breakpoints.insert(lineNum, newCondition);
-                        m_breakpointSuspendScopes.insert(lineNum, dlg.suspendScope());
-                        highlightCurrentLine();
-                        emit breakpointToggled(emitPath, lineNum, true, newCondition);
-                    }
-                }
+                const bool accepted = (dlg.exec() == QDialog::Accepted);
+                handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted,
+                                              dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(),
+                                              dlg.getCondition(), dlg.suspendScope());
             } else {
-                // Left-click toggles standard breakpoint on or off.
-                bool isSet = false;
-                if (m_breakpoints.contains(lineNum)) {
-                    m_breakpoints.remove(lineNum);
-                    m_breakpointSuspendScopes.remove(lineNum);
-                    isSet = false;
-                } else {
-                    m_breakpoints.insert(lineNum, QString());
-                    m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
-                    isSet = true;
-                }
-                highlightCurrentLine();
-                emit breakpointToggled(emitPath, lineNum, isSet, QString());
+                event->accept();
+                toggleBreakpoint(lineNum);
             }
             m_lineNumberArea->update();
             break;
