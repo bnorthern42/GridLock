@@ -1,44 +1,147 @@
 /**
  * @file ConditionalBreakpointDialog.hpp
- * @brief Modal dialog for specifying C/C++ breakpoint predicate expressions.
+ * @brief Cursor-anchored breakpoint configuration popover with rank suspend scope and predicate presets.
  *
- * Provides a text input interface allowing users to attach execution conditions
- * (such as "i == 42 && rank == 0") to source code breakpoints before broadcasting
- * them to GDB or DAP debugger backends.
+ * Provides a frameless dark-slate callout popover anchored directly beneath a source gutter
+ * breakpoint marker. Supports toggling breakpoint enablement, selecting multi-rank vs.
+ * single-rank suspension scope, and applying MPI-aware boolean condition presets.
  */
 
 #pragma once
 
 #include <QDialog>
-#include <QLineEdit>
+#include <QPoint>
 #include <QString>
+
+class QCheckBox;
+class QComboBox;
+class QLabel;
+class QLineEdit;
+class QPaintEvent;
+class QPushButton;
+class QRadioButton;
+class QShowEvent;
 
 namespace gridlock::ui {
 
 /**
  * @class ConditionalBreakpointDialog
- * @brief Modal dialog prompting for a conditional breakpoint expression.
+ * @brief Cursor-anchored callout popover for configuring line breakpoint state, rank scope, and conditions.
  */
 class ConditionalBreakpointDialog : public QDialog {
     Q_OBJECT
 
 public:
     /**
-     * @brief Constructs the dialog with an optional initial condition string.
-     * @param currentCondition Pre-existing predicate expression if editing, or empty for new.
+     * @brief Constructs the anchored breakpoint popover with an optional initial condition expression.
+     * @param currentCondition Pre-existing predicate expression if editing, or empty for unconditional.
      * @param parent Optional parent widget.
      */
-    explicit ConditionalBreakpointDialog(const QString& currentCondition = "",
+    explicit ConditionalBreakpointDialog(const QString& currentCondition = QString(),
                                          QWidget* parent = nullptr);
 
     /**
-     * @brief Retrieves the trimmed predicate condition string entered by user.
-     * @return Trimmed expression string.
+     * @brief Populates the popover header with the 1-based source line number and code preview snippet.
+     * @param lineOneBased 1-based source line number where the breakpoint resides.
+     * @param sourceSnippet Optional source statement snippet displayed in the elided title banner.
+     */
+    void setTargetLineContext(int lineOneBased, const QString& sourceSnippet = QString());
+
+    /**
+     * @brief Returns the formatted title summary banner (e.g., "Line 34 breakpoint — MPI_Send(...)").
+     * @return Header summary text string.
+     */
+    QString targetLineSummaryText() const;
+
+    /**
+     * @brief Indicates whether the breakpoint remains enabled when closing the popover.
+     * @return True if enabled and not marked for removal; false otherwise.
+     */
+    bool isBreakpointEnabled() const;
+
+    /**
+     * @brief Sets the enabled checkbox state for the breakpoint.
+     * @param enabled True to keep breakpoint active; false to disable/remove.
+     */
+    void setBreakpointEnabled(bool enabled);
+
+    /**
+     * @brief Indicates whether the user explicitly clicked Remove Breakpoint (F9).
+     * @return True if explicit removal was requested.
+     */
+    bool isRemoveRequested() const { return m_removeRequested; }
+
+    /**
+     * @brief Returns the active suspension scope ("All", "Rank", or "None").
+     * @return Suspension scope identifier string.
+     */
+    QString suspendScope() const;
+
+    /**
+     * @brief Configures the radio selection for suspension scope ("All" or "Rank").
+     * @param scope Scope identifier ("All" or "Rank").
+     */
+    void setSuspendScope(const QString& scope);
+
+    /**
+     * @brief Populates the condition input field with a quick-preset C/C++ MPI predicate expression.
+     * @param expr Boolean predicate expression (e.g., "rank == 0").
+     */
+    void applyQuickPreset(const QString& expr);
+
+    /**
+     * @brief Retrieves the trimmed predicate condition string entered by the user.
+     * @return Trimmed C/C++ boolean expression string.
      */
     QString condition() const;
 
+    /**
+     * @brief Alias accessor returning the trimmed predicate condition string.
+     * @return Trimmed C/C++ boolean expression string.
+     */
+    QString getCondition() const { return condition(); }
+
+    /**
+     * @brief Positions the popover directly beneath a global gutter icon coordinate, clamped to screen bounds.
+     * @param globalAnchorPos Global screen point at the bottom-center of the gutter breakpoint marker.
+     */
+    void positionNearAnchor(const QPoint& globalAnchorPos);
+
+    /**
+     * @brief Anchors the popover at globalAnchorPos and displays it immediately.
+     * @param globalAnchorPos Global screen coordinate of the clicked breakpoint marker.
+     */
+    void showAtGlobalPos(const QPoint& globalAnchorPos);
+
+protected:
+    /**
+     * @brief Renders the antialiased rounded dark-slate popover surface and top upward callout triangle.
+     * @param event Paint event descriptor.
+     */
+    void paintEvent(QPaintEvent* event) override;
+
+    /**
+     * @brief Re-applies explicit cursor-anchored coordinates on show so window managers do not re-center.
+     * @param event Show event descriptor.
+     */
+    void showEvent(QShowEvent* event) override;
+
 private:
-    QLineEdit* m_conditionEdit{nullptr};  ///< Single-line text input for predicate expression.
+    QLabel* m_titleLabel = nullptr;          ///< Header label displaying "Line <N> breakpoint".
+    QCheckBox* m_enabledCheck = nullptr;     ///< Toggle checkbox enabling or removing the breakpoint.
+    QCheckBox* m_suspendCheck = nullptr;     ///< Toggle checkbox controlling execution suspension.
+    QRadioButton* m_suspendAllRadio = nullptr;   ///< Radio option suspending all MPI ranks.
+    QRadioButton* m_suspendRankRadio = nullptr;  ///< Radio option suspending only the active rank/thread.
+    QPushButton* m_makeDefaultBtn = nullptr; ///< Button persisting chosen suspend scope as default.
+    QLineEdit* m_conditionEdit = nullptr;    ///< Single-line C/C++ boolean predicate input box.
+    QComboBox* m_presetCombo = nullptr;      ///< Dropdown selector offering common MPI rank/loop presets.
+    QPushButton* m_removeBtn = nullptr;      ///< Left-aligned button removing the breakpoint (F9).
+    QPushButton* m_doneBtn = nullptr;        ///< Primary right-aligned confirmation button ("Done").
+    int m_targetLine = -1;                   ///< 1-based line number associated with this popover.
+    int m_caretCenterX = 22;                 ///< Horizontal center offset (px) of top callout triangle.
+    bool m_removeRequested = false;          ///< Latched true when Remove Breakpoint (F9) is clicked.
+    bool m_hasExplicitAnchor = false;        ///< True once positionNearAnchor() has computed screen coords.
+    QPoint m_anchoredGlobalPos;              ///< Cached global top-left coordinate for anchored display.
 };
 
 }  // namespace gridlock::ui

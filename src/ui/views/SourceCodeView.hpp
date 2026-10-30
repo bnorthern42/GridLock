@@ -185,9 +185,35 @@ public:
     void setConditionalBreakpoint(int lineOneBased, const QString& condition);
 
     /**
+     * @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line.
+     * @param lineOneBased 1-based source line number.
+     * @return Trimmed condition expression, or empty string if unconditional/unset.
+     */
+    QString breakpointCondition(int lineOneBased) const;
+
+    /**
+     * @brief Returns the configured rank suspension scope ("All" or "Rank") for a breakpoint line.
+     * @param lineOneBased 1-based source line number.
+     * @return Suspension scope identifier string.
+     */
+    QString breakpointSuspendScope(int lineOneBased) const;
+
+    /**
+     * @brief Returns the 1-based line number currently hovered in the gutter (-1 when none).
+     * @return 1-based hovered gutter line number, or -1.
+     */
+    int hoveredGutterLine() const { return m_hoveredGutterLine; }
+
+    /**
+     * @brief Updates the 1-based hovered gutter line and triggers ghost breakpoint preview repaint.
+     * @param lineOneBased 1-based line number under cursor, or -1 to clear hover state.
+     */
+    void setHoveredGutterLine(int lineOneBased);
+
+    /**
      * @brief Returns the composite gutter badge state for a 1-based source line.
      * @param lineOneBased 1-based source line number.
-     * @return One of "None", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
+     * @return One of "None", "HoverPreview", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
      */
     QString gutterMarkerStateForLine(int lineOneBased) const;
 
@@ -208,16 +234,28 @@ public:
     void reloadStyle();
 
     /**
-     * @brief Paints the gutter line numbers and breakpoint markers.
+     * @brief Paints the gutter line numbers, hover highlights, and breakpoint markers.
      * @param event The paint event.
      */
     void lineNumberAreaPaintEvent(QPaintEvent *event);
 
     /**
-     * @brief Handles mouse clicks in the gutter to toggle breakpoints.
+     * @brief Handles mouse clicks in the gutter to toggle breakpoints or open the anchored popover.
      * @param event Mouse press event.
      */
     void lineNumberAreaMousePressEvent(QMouseEvent *event);
+
+    /**
+     * @brief Tracks cursor movement over the gutter to illuminate hovered line and ghost preview dot.
+     * @param event Mouse move event inside LineNumberArea.
+     */
+    void lineNumberAreaMouseMoveEvent(QMouseEvent *event);
+
+    /**
+     * @brief Clears gutter hover state when the mouse cursor exits LineNumberArea.
+     * @param event Leave event from LineNumberArea.
+     */
+    void lineNumberAreaLeaveEvent(QEvent *event);
 
 signals:
     /** @brief Emitted to request running the target application. */
@@ -263,15 +301,17 @@ private slots:
     void highlightCurrentLine();
 
 private:
-    LineNumberArea* m_lineNumberArea;
-    CppSyntaxHighlighter* m_highlighter;
+    LineNumberArea* m_lineNumberArea = nullptr;
+    CppSyntaxHighlighter* m_highlighter = nullptr;
     QMap<int, QString> m_breakpoints;
+    QMap<int, QString> m_breakpointSuspendScopes;
     QString m_currentFilePath;
     QString m_lastHoveredWord;
-    QTimer* m_hoverTimer;
+    QTimer* m_hoverTimer = nullptr;
     QPoint m_lastMousePos;
     QPoint m_lastGlobalMousePos;
     int m_executionLine = -1;
+    int m_hoveredGutterLine = -1;
 };
 
 }  // namespace gridlock::ui

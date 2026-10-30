@@ -168,5 +168,8 @@ private slots:
 
     /** @brief Verifies on-demand real ELF compilation, DWARF line mapping, breakpoint-first Run/Continue, and latched toolbar state. */
     void testRealCompiledTargetDwarfMappingBreakpointRunAndLatchedToolbar();
+
+    /** @brief Verifies gutter hover ghost preview tracking and cursor-anchored breakpoint popover controls/positioning. */
+    void testAnchoredBreakpointPopoverAndGutterHover();
 };
 

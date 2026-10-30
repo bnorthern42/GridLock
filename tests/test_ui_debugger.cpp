@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QLabel>
+#include <QRadioButton>
 #include <QString>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -29,6 +30,7 @@
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
@@ -569,70 +571,53 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(targetCombo != nullptr);
-    QVERIFY(terminalDock != nullptr);
-    QVERIFY(disasmView != nullptr);
+    QVERIFY(targetCombo != nullptr && terminalDock != nullptr && disasmView != nullptr);
 
     // 1. Select "deadlock_ring" via MainWindow::selectTargetByName (and verify combo sync).
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")),
              "selectTargetByName('deadlock_ring') must succeed and switch active target");
     QApplication::processEvents();
-
     QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")),
-             qPrintable(QStringLiteral("Expected activeTargetSourcePath to end with deadlock_ring.cpp, got: %1")
-                            .arg(mainWindow.activeTargetSourcePath())));
+             qPrintable(mainWindow.activeTargetSourcePath()));
     QVERIFY2(mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")),
-             qPrintable(QStringLiteral("Expected activeTargetBinaryPath to end with deadlock_ring, got: %1")
-                            .arg(mainWindow.activeTargetBinaryPath())));
+             qPrintable(mainWindow.activeTargetBinaryPath()));
 
     // Verify active SourceCodeView in EditorTabManager loaded deadlock_ring.cpp containing MPI_Send & MPI_Recv.
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
-    QVERIFY(editorTabs != nullptr);
-    auto* activeEditor = editorTabs->currentSourceCodeView();
-    QVERIFY(activeEditor != nullptr);
-    const QString editorText = activeEditor->toPlainText();
-    QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) &&
-                 editorText.contains(QStringLiteral("MPI_Recv")),
+    QVERIFY(editorTabs != nullptr && editorTabs->currentSourceCodeView() != nullptr);
+    const QString editorText = editorTabs->currentSourceCodeView()->toPlainText();
+    QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")),
              "Active SourceCodeView must display deadlock_ring.cpp with MPI_Send and MPI_Recv");
 
     // Verify DisassemblyView updated its decompiler/disassembly preview to reflect deadlock_ring's MPI_Send/MPI_Recv.
     const QString decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
-    QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) ||
-                 decompText.contains(QStringLiteral("MPI_Recv")),
-             qPrintable(QStringLiteral("DisassemblyView decompiler must reflect deadlock_ring (MPI_Send/MPI_Recv), got:\n%1")
-                            .arg(decompText)));
+    QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv")),
+             qPrintable(decompText.left(400)));
 
     // 2. Verify Build & Clean commands operate on deadlock_ring.cpp / deadlock_ring (NOT inspection_demo.cpp).
     mainWindow.buildTargetWorkflow();
     QApplication::processEvents();
     const QString buildCmd = terminalDock->lastSentCommand();
-    QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) &&
-                 buildCmd.contains(QStringLiteral("-o")) &&
-                 buildCmd.contains(QStringLiteral("deadlock_ring")) &&
-                 !buildCmd.contains(QStringLiteral("inspection_demo.cpp")),
-             qPrintable(QStringLiteral("Build command must compile deadlock_ring.cpp, got: %1").arg(buildCmd)));
+    QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) &&
+                 buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")),
+             qPrintable(buildCmd));
 
     mainWindow.cleanTargetWorkflow();
     QApplication::processEvents();
     const QString cleanCmd = terminalDock->lastSentCommand();
-    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) &&
-                 !cleanCmd.contains(QStringLiteral("inspection_demo")),
-             qPrintable(QStringLiteral("Clean command must remove deadlock_ring binary, got: %1").arg(cleanCmd)));
+    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) && !cleanCmd.contains(QStringLiteral("inspection_demo")),
+             qPrintable(cleanCmd));
 
     // 3. Switch back to "inspection_demo" and verify source path and build command restore inspection_demo.cpp.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")),
              "selectTargetByName('inspection_demo') must succeed");
     QApplication::processEvents();
     QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")),
-             qPrintable(QStringLiteral("Expected activeTargetSourcePath to end with inspection_demo.cpp, got: %1")
-                            .arg(mainWindow.activeTargetSourcePath())));
-
+             qPrintable(mainWindow.activeTargetSourcePath()));
     mainWindow.buildTargetWorkflow();
     QApplication::processEvents();
-    const QString buildDemoCmd = terminalDock->lastSentCommand();
-    QVERIFY2(buildDemoCmd.contains(QStringLiteral("inspection_demo.cpp")),
-             qPrintable(QStringLiteral("Build command after switching back must compile inspection_demo.cpp, got: %1")
-                            .arg(buildDemoCmd)));
+    QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")),
+             qPrintable(terminalDock->lastSentCommand()));
 }
 
 /**
@@ -657,33 +642,25 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
 
     // 1. Verify Edit menu actions & focus-aware execution (Select All, Copy, Toggle Comment).
     srcView->setFocus();
-    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")),
-             "triggerEditMenuAction('Select All') must succeed");
-    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Copy")),
-             "triggerEditMenuAction('Copy') must succeed");
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")), "Select All must succeed");
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Copy")), "Copy must succeed");
 
     // Toggle line comment on line 1 and verify '//' prefix is inserted and removed.
     QTextCursor tc = srcView->textCursor();
     tc.movePosition(QTextCursor::Start);
     srcView->setTextCursor(tc);
     const QString origFirstLine = srcView->document()->firstBlock().text();
-    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")),
-             "triggerEditMenuAction('Toggle Comment') must succeed");
-    const QString commentedLine = srcView->document()->firstBlock().text();
-    QVERIFY2(commentedLine != origFirstLine,
-             "Toggle Comment must modify the active source line");
-    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")),
-             "Second Toggle Comment must restore original line");
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")), "Toggle Comment must succeed");
+    QVERIFY2(srcView->document()->firstBlock().text() != origFirstLine, "Toggle Comment must modify active line");
+    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")), "Second Toggle Comment must restore");
     QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
 
     // 2. Verify dynamic UI Font Size & Code Font Size scaling (no hardcoded 11px lock).
     mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16);
     QApplication::processEvents();
-
     const QString activeQss = gridlock::core::ThemeManager::instance().currentStyleSheet();
     QVERIFY2(activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px")),
-             qPrintable(QStringLiteral("Expected active QSS to interpolate UI font size 15, got snippet: %1")
-                            .arg(activeQss.left(300))));
+             qPrintable(activeQss.left(200)));
     QCOMPARE(srcView->font().pointSize(), 16);
     QCOMPARE(disasmView->codeFontPointSize(), 16);
 
@@ -692,26 +669,16 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     QApplication::processEvents();
 
     // 3. Verify 6 curated color themes and zero underscores in PreferencesDialog Color Theme combo.
-    const QStringList themeIds = gridlock::core::ThemeManager::instance().availableThemeIds();
-    QVERIFY2(themeIds.size() >= 6,
-             qPrintable(QStringLiteral("Expected >= 6 curated themes, got %1").arg(themeIds.size())));
-
+    QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6);
     gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
     auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo"));
-    QVERIFY2(themeCombo != nullptr, "PreferencesDialog must expose themeSelectorCombo");
-    QVERIFY(themeCombo->count() >= 6);
+    QVERIFY(themeCombo != nullptr && themeCombo->count() >= 6);
     for (int i = 0; i < themeCombo->count(); ++i) {
-        const QString displayLabel = themeCombo->itemText(i);
-        QVERIFY2(!displayLabel.contains(QLatin1Char('_')),
-                 qPrintable(QStringLiteral("Theme combo item text must not contain raw underscores: '%1'")
-                                .arg(displayLabel)));
+        QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));
     }
 
     // 4. Generate 6 offscreen 1440x900 PNG screenshots of each curated theme in docs/screenshots/.
-    struct ThemeShotEntry {
-        QString themeId;
-        QString fileName;
-    };
+    struct ThemeShotEntry { QString themeId; QString fileName; };
     const std::vector<ThemeShotEntry> shots = {
         {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")},
         {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
@@ -720,38 +687,25 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
         {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
         {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
     };
-
-    QString docsShotDir = QStringLiteral("docs/screenshots");
-    if (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) {
-        docsShotDir = QStringLiteral("../docs/screenshots");
-    }
+    const QString docsShotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists())
+                                    ? QStringLiteral("../docs/screenshots")
+                                    : QStringLiteral("docs/screenshots");
     QDir().mkpath(docsShotDir);
 
     for (const auto& shot : shots) {
-        const bool isDark = !shot.themeId.contains(QStringLiteral("light"));
-        gridlock::core::ThemeManager::instance().setTheme(shot.themeId, isDark);
-        if (srcView) {
-            srcView->reloadStyle();
-        }
-        if (disasmView) {
-            disasmView->reloadStyle();
-        }
+        gridlock::core::ThemeManager::instance().setTheme(shot.themeId, !shot.themeId.contains(QStringLiteral("light")));
+        if (srcView) srcView->reloadStyle();
+        if (disasmView) disasmView->reloadStyle();
         QApplication::processEvents();
         const QString outPath = docsShotDir + QLatin1Char('/') + shot.fileName;
-        QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath),
-                 qPrintable(QStringLiteral("captureWorkspaceSnapshot failed for %1").arg(outPath)));
-        QVERIFY2(QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024,
-                 qPrintable(QStringLiteral("Expected non-empty theme screenshot at %1").arg(outPath)));
+        QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath), qPrintable(outPath));
+        QVERIFY2(QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024, qPrintable(outPath));
     }
 
     // Restore default GridLock Slate theme after screenshot export.
     gridlock::core::ThemeManager::instance().setTheme(QStringLiteral("gridlock_slate"), true);
-    if (srcView) {
-        srcView->reloadStyle();
-    }
-    if (disasmView) {
-        disasmView->reloadStyle();
-    }
+    if (srcView) srcView->reloadStyle();
+    if (disasmView) disasmView->reloadStyle();
     QApplication::processEvents();
 }
 
@@ -771,21 +725,15 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
     QApplication::processEvents();
 
     // 1. Dedicated Two-Lane Gutter Width (>= 48px) & Non-Overlapping Icon Lane (>= 18px).
-    QVERIFY2(srcView.lineNumberAreaWidth() >= 48,
-             qPrintable(QStringLiteral("Expected lineNumberAreaWidth() >= 48px, got %1")
-                            .arg(srcView.lineNumberAreaWidth())));
-    QVERIFY2(srcView.gutterIconLaneWidth() >= 18,
-             qPrintable(QStringLiteral("Expected gutterIconLaneWidth() >= 18px, got %1")
-                            .arg(srcView.gutterIconLaneWidth())));
+    QVERIFY2(srcView.lineNumberAreaWidth() >= 48, qPrintable(QString::number(srcView.lineNumberAreaWidth())));
+    QVERIFY2(srcView.gutterIconLaneWidth() >= 18, qPrintable(QString::number(srcView.gutterIconLaneWidth())));
 
     // 2. Distinct Gutter Marker States (None, Breakpoint, ConditionalBreakpoint, ExecutionPc, BreakpointAndExecutionPc).
     QCOMPARE(srcView.gutterMarkerStateForLine(1), QStringLiteral("None"));
-
     srcView.toggleBreakpoint(15);
     srcView.setConditionalBreakpoint(16, QStringLiteral("rank == 0"));
     srcView.highlightExecutionLine(15);
     QApplication::processEvents();
-
     QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("BreakpointAndExecutionPc"));
     QCOMPARE(srcView.gutterMarkerStateForLine(16), QStringLiteral("ConditionalBreakpoint"));
 
@@ -802,20 +750,17 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
 
     const QColor gutterBg(0x16, 0x18, 0x1d);
     bool foundBadgePixelInIconLane = false;
-    for (int y = 0; y < img.height(); ++y) {
+    for (int y = 0; y < img.height() && !foundBadgePixelInIconLane; ++y) {
         for (int x = 3; x <= 16 && x < img.width(); ++x) {
             const QColor px = img.pixelColor(x, y);
             // Detect crimson (#e06c75), amber (#e5c07b), or emerald (#4ec9b0) vector badge pixels.
-            if (std::abs(px.red() - gutterBg.red()) > 35 ||
-                std::abs(px.green() - gutterBg.green()) > 35) {
+            if (std::abs(px.red() - gutterBg.red()) > 35 || std::abs(px.green() - gutterBg.green()) > 35) {
                 foundBadgePixelInIconLane = true;
                 break;
             }
         }
-        if (foundBadgePixelInIconLane) break;
     }
-    QVERIFY2(foundBadgePixelInIconLane,
-             "Expected antialiased crimson/emerald/amber vector badge pixels inside the left icon lane (x = 3..16)");
+    QVERIFY2(foundBadgePixelInIconLane, "Expected vector badge pixels inside left icon lane (x = 3..16)");
 }
 
 /**
@@ -830,15 +775,10 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QApplication::processEvents();
 
     // 1. Select deadlock_ring and compile its real ELF64 binary with DWARF debug info on-demand.
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")),
-             "selectTargetByName('deadlock_ring') must succeed");
-    QVERIFY2(mainWindow.ensureTargetBinaryCompiled(),
-             "ensureTargetBinaryCompiled() must compile deadlock_ring ELF binary on-demand");
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
+    QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "ensureTargetBinaryCompiled must compile ELF binary");
     QApplication::processEvents();
-
-    const QString binPath = mainWindow.activeTargetBinaryPath();
-    QVERIFY2(QFileInfo::exists(binPath),
-             qPrintable(QStringLiteral("Compiled ELF binary must exist on disk: %1").arg(binPath)));
+    QVERIFY2(QFileInfo::exists(mainWindow.activeTargetBinaryPath()), qPrintable(mainWindow.activeTargetBinaryPath()));
 
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
@@ -849,34 +789,23 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
 
     // Verify genuine compiler-emitted assembly (calls MPI_Send & MPI_Recv; zero hardcoded DeeplyNested).
     const QString asmText = disasmView->toPlainText();
-    QVERIFY2(asmText.contains(QStringLiteral("MPI_Send")) &&
-                 asmText.contains(QStringLiteral("MPI_Recv")),
-             qPrintable(QStringLiteral("DisassemblyView must show real MPI_Send/MPI_Recv calls:\n%1")
-                            .arg(asmText.left(600))));
-    QVERIFY2(!asmText.contains(QStringLiteral("DeeplyNested")),
-             "DisassemblyView must NOT contain hardcoded DeeplyNested preview text");
+    QVERIFY2(asmText.contains(QStringLiteral("MPI_Send")) && asmText.contains(QStringLiteral("MPI_Recv")),
+             qPrintable(asmText.left(400)));
+    QVERIFY2(!asmText.contains(QStringLiteral("DeeplyNested")), "Must NOT contain hardcoded DeeplyNested preview");
 
     // Resolve DWARF instruction addresses for MPI_Send and MPI_Recv lines in deadlock_ring.cpp.
     const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send("));
     const int recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
     QVERIFY(sendLine > 0 && recvLine > sendLine);
-
     const uint64_t sendAddr = mainWindow.sourceLineToAddress(sendLine);
     const uint64_t recvAddr = mainWindow.sourceLineToAddress(recvLine);
-    QVERIFY2(sendAddr != 0ULL && recvAddr != 0ULL && sendAddr != recvAddr,
-             qPrintable(QStringLiteral("Expected distinct non-zero DWARF addresses: send=0x%1 recv=0x%2")
-                            .arg(sendAddr, 0, 16)
-                            .arg(recvAddr, 0, 16)));
-    QVERIFY(disasmView->lineForAddress(sendAddr) >= 0);
-    QVERIFY(disasmView->lineForAddress(recvAddr) >= 0);
+    QVERIFY(sendAddr != 0ULL && recvAddr != 0ULL && sendAddr != recvAddr);
+    QVERIFY(disasmView->lineForAddress(sendAddr) >= 0 && disasmView->lineForAddress(recvAddr) >= 0);
 
     // 2. Toggle breakpoints on sendLine and recvLine; Run Target must stop directly on sendLine!
-    for (int bp : srcView->breakpoints().values()) {
-        srcView->toggleBreakpoint(bp);
-    }
+    for (int bp : srcView->breakpoints().values()) srcView->toggleBreakpoint(bp);
     srcView->toggleBreakpoint(sendLine);
     srcView->toggleBreakpoint(recvLine);
-
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
 
@@ -907,3 +836,69 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     mainWindow.stopTargetWorkflow();
 }
 
+/**
+ * @brief Verifies gutter hover line tracking, ghost breakpoint preview state, cursor-anchored
+ *        breakpoint popover controls (Enabled, Suspend scope, Condition presets), and positioning.
+ */
+void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
+    gridlock::ui::SourceCodeView sourceCodeView;
+    QString sampleCode;
+    for (int i = 1; i <= 40; ++i) {
+        sampleCode += QStringLiteral("    MPI_Send(send_buf.data(), %1, MPI_INT, next, 0, MPI_COMM_WORLD);\n").arg(i);
+    }
+    sourceCodeView.setSourceCode(sampleCode);
+    sourceCodeView.resize(720, 560);
+    sourceCodeView.show();
+    QApplication::processEvents();
+
+    // 1. Gutter Hover Line Tracking & Ghost Preview State.
+    QCOMPARE(sourceCodeView.hoveredGutterLine(), -1);
+    sourceCodeView.setHoveredGutterLine(16);
+    QApplication::processEvents();
+    QCOMPARE(sourceCodeView.hoveredGutterLine(), 16);
+    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("HoverPreview"));
+
+    // Active breakpoint supersedes ghost hover preview; clearing hover restores None on unmarked lines.
+    sourceCodeView.toggleBreakpoint(16);
+    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("Breakpoint"));
+    sourceCodeView.toggleBreakpoint(16);
+    sourceCodeView.setHoveredGutterLine(-1);
+    QCOMPARE(sourceCodeView.hoveredGutterLine(), -1);
+    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("None"));
+
+    // 2. Breakpoint Popover Controls (Enabled, Suspend: All / Rank, Condition Presets).
+    gridlock::ui::ConditionalBreakpointDialog dialog(QString(), &sourceCodeView);
+    dialog.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
+    QVERIFY2(dialog.targetLineSummaryText().contains(QStringLiteral("Line 34")),
+             qPrintable(dialog.targetLineSummaryText()));
+    QCOMPARE(dialog.isBreakpointEnabled(), true);
+    QCOMPARE(dialog.suspendScope(), QStringLiteral("All"));
+
+    // Toggle the single-rank/thread radio button and verify suspendScope() transitions to "Rank".
+    QRadioButton* rankRadio = nullptr;
+    for (QRadioButton* rb : dialog.findChildren<QRadioButton*>()) {
+        if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) {
+            rankRadio = rb;
+            break;
+        }
+    }
+    QVERIFY2(rankRadio != nullptr, "ConditionalBreakpointDialog must expose a Rank/Thread suspend radio button");
+    rankRadio->setChecked(true);
+    QApplication::processEvents();
+    QCOMPARE(dialog.suspendScope(), QStringLiteral("Rank"));
+
+    // Apply quick preset expression and verify condition accessor updates immediately.
+    dialog.applyQuickPreset(QStringLiteral("rank == 0"));
+    QCOMPARE(dialog.getCondition(), QStringLiteral("rank == 0"));
+
+    // 3. Cursor-Anchored Positioning (directly beneath the gutter dot, not screen-centered).
+    const QPoint anchorGlobalPos(120, 340);
+    dialog.positionNearAnchor(anchorGlobalPos);
+    dialog.show();
+    QApplication::processEvents();
+    QVERIFY2(std::abs(dialog.pos().x() - anchorGlobalPos.x()) <= 40,
+             qPrintable(QStringLiteral("Popover x=%1 too far from anchor x=120").arg(dialog.pos().x())));
+    QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25,
+             qPrintable(QStringLiteral("Popover y=%1 too far from anchor y=340").arg(dialog.pos().y())));
+    dialog.hide();
+}

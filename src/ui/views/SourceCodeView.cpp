@@ -148,15 +148,17 @@ void CppSyntaxHighlighter::highlightBlock(const QString &text) {
 
 /**
  * @class LineNumberArea
- * @brief Gutter widget displaying line numbers and breakpoint markers adjacent to the editor.
+ * @brief Gutter widget displaying line numbers, hover previews, and breakpoint markers adjacent to the editor.
  */
 class LineNumberArea : public QWidget {
 public:
     /**
-     * @brief Constructs a new LineNumberArea.
+     * @brief Constructs a new LineNumberArea with live mouse hover tracking enabled.
      * @param editor Pointer to the associated SourceCodeView.
      */
-    LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {}
+    explicit LineNumberArea(SourceCodeView *editor) : QWidget(editor), sourceCodeView(editor) {
+        setMouseTracking(true);
+    }
 
     /**
      * @brief Returns the dynamic two-lane width size hint for the gutter.
@@ -167,9 +169,11 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override { sourceCodeView->lineNumberAreaPaintEvent(event); }
     void mousePressEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMousePressEvent(event); }
+    void mouseMoveEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMouseMoveEvent(event); }
+    void leaveEvent(QEvent *event) override { sourceCodeView->lineNumberAreaLeaveEvent(event); }
 
 private:
-    SourceCodeView *sourceCodeView;
+    SourceCodeView *sourceCodeView = nullptr;
 };
 
 /**
@@ -226,8 +230,10 @@ int SourceCodeView::lineNumberAreaWidth() const {
  */
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     m_breakpoints.clear();
+    m_breakpointSuspendScopes.clear();
     for (int bp : bps) {
         m_breakpoints[bp] = QString();
+        m_breakpointSuspendScopes[bp] = QStringLiteral("All");
     }
     highlightCurrentLine();
     m_lineNumberArea->update();
@@ -343,14 +349,16 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
     bool isSet = false;
     if (m_breakpoints.contains(lineNum)) {
         m_breakpoints.remove(lineNum);
+        m_breakpointSuspendScopes.remove(lineNum);
         isSet = false;
     } else {
         m_breakpoints.insert(lineNum, QString());
+        m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
         isSet = true;
     }
     highlightCurrentLine();
     m_lineNumberArea->update();
-    QString emitPath = m_currentFilePath;
+    const QString emitPath = m_currentFilePath;
     emit breakpointToggled(emitPath, lineNum, isSet, QString());
 }
 
@@ -364,6 +372,9 @@ void SourceCodeView::setConditionalBreakpoint(int lineOneBased, const QString& c
         return;
     }
     m_breakpoints.insert(lineOneBased, condition);
+    if (!m_breakpointSuspendScopes.contains(lineOneBased)) {
+        m_breakpointSuspendScopes.insert(lineOneBased, QStringLiteral("All"));
+    }
     highlightCurrentLine();
     if (m_lineNumberArea) {
         m_lineNumberArea->update();
@@ -372,9 +383,43 @@ void SourceCodeView::setConditionalBreakpoint(int lineOneBased, const QString& c
 }
 
 /**
+ * @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line.
+ * @param lineOneBased 1-based source line number.
+ * @return Trimmed condition expression, or empty string when unconditional or unset.
+ */
+QString SourceCodeView::breakpointCondition(int lineOneBased) const {
+    return m_breakpoints.value(lineOneBased).trimmed();
+}
+
+/**
+ * @brief Returns the configured rank suspension scope ("All" or "Rank") for a breakpoint line.
+ * @param lineOneBased 1-based source line number.
+ * @return Suspension scope identifier string.
+ */
+QString SourceCodeView::breakpointSuspendScope(int lineOneBased) const {
+    return m_breakpointSuspendScopes.value(lineOneBased, QStringLiteral("All"));
+}
+
+/**
+ * @brief Updates the 1-based hovered gutter line and schedules a gutter repaint.
+ * @param lineOneBased 1-based line number under the mouse cursor, or -1 to clear.
+ */
+void SourceCodeView::setHoveredGutterLine(int lineOneBased) {
+    const int normalized = (lineOneBased > 0) ? lineOneBased : -1;
+    if (m_hoveredGutterLine == normalized) {
+        return;
+    }
+    m_hoveredGutterLine = normalized;
+    if (m_lineNumberArea) {
+        m_lineNumberArea->setCursor(normalized > 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        m_lineNumberArea->update();
+    }
+}
+
+/**
  * @brief Resolves the composite gutter marker badge state for a 1-based source line.
  * @param lineOneBased 1-based source line number.
- * @return "None", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
+ * @return "None", "HoverPreview", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
  */
 QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
     const bool hasBp = m_breakpoints.contains(lineOneBased);
@@ -389,6 +434,9 @@ QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
     }
     if (isExec) {
         return QStringLiteral("ExecutionPc");
+    }
+    if (lineOneBased > 0 && lineOneBased == m_hoveredGutterLine) {
+        return QStringLiteral("HoverPreview");
     }
     return QStringLiteral("None");
 }
@@ -441,11 +489,11 @@ void SourceCodeView::highlightCurrentLine() {
 }
 
 /**
- * @brief Paints the two-lane gutter with antialiased QPainterPath vector badges and right-aligned line numbers.
+ * @brief Paints the two-lane gutter with hover previews, vector badges, and right-aligned line numbers.
  *
- * Left Icon Lane (x = 0..20): Renders centered 11x11px vector badges for Breakpoint (crimson coral circle),
- * ConditionalBreakpoint (amber diamond with dark center dot), ExecutionPc (emerald chevron), and
- * BreakpointAndExecutionPc (crimson outer ring nesting an emerald chevron).
+ * Left Icon Lane (x = 0..20): Renders centered vector badges for HoverPreview (translucent crimson ghost
+ * circle), Breakpoint (crimson coral circle), ConditionalBreakpoint (amber diamond with dark center dot),
+ * ExecutionPc (emerald chevron), and BreakpointAndExecutionPc (crimson outer ring nesting an emerald chevron).
  * Right Line-Number Lane (x = 22..width-8): Renders right-aligned monospace line digits with zero icon collision.
  *
  * @param event The QPaintEvent for the gutter rect.
@@ -457,6 +505,7 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
 
     const int gutterW = m_lineNumberArea->width();
     const int iconLaneW = gutterIconLaneWidth();
+    const QFont baseGutterFont = painter.font();
 
     painter.fillRect(event->rect(), QColor("#16181d"));
     painter.setPen(QColor("#252932"));
@@ -474,10 +523,25 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             const int rowH = qMax(14, bottom - top);
             const qreal cx = iconLaneW * 0.5;
             const qreal cy = top + rowH * 0.5;
+            const bool isHovered = (lineOneBased == m_hoveredGutterLine);
             const QString state = gutterMarkerStateForLine(lineOneBased);
 
-            // 1. Left Icon Lane (x = 0..20): Antialiased QPainterPath vector badges.
-            if (state == QStringLiteral("Breakpoint")) {
+            // Reset painter brush/pen explicitly at the top of each row iteration.
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(Qt::NoPen);
+
+            // Illuminate hovered gutter row background with subtle accent wash rgba(82, 139, 255, 0.14).
+            if (isHovered) {
+                painter.fillRect(QRect(0, top, gutterW - 1, rowH), QColor(82, 139, 255, 36));
+            }
+
+            // 1. Left Icon Lane (x = 0..20): Antialiased QPainterPath vector badges & ghost hover preview.
+            if (state == QStringLiteral("HoverPreview")) {
+                // Translucent ghost breakpoint preview circle rgba(224, 108, 117, 0.40) inside x = 4..16.
+                painter.setPen(QPen(QColor(255, 148, 157, 120), 1.0));
+                painter.setBrush(QColor(224, 108, 117, 102));
+                painter.drawEllipse(QPointF(cx, cy), 4.6, 4.6);
+            } else if (state == QStringLiteral("Breakpoint")) {
                 // Subtle outer halo + 10px crimson-coral disc (#e06c75) with #ff949d rim highlight.
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(224, 108, 117, 64));
@@ -528,10 +592,16 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
                 painter.fillRect(QRect(gutterW - 3, top, 2, rowH), QColor("#4ec9b0"));
             }
 
-            // 2. Right Line-Number Lane (x = 22..gutterW-8): Right-aligned digits with zero overlap.
+            // 2. Right Line-Number Lane (x = 22..gutterW-8): Right-aligned digits with hover emphasis.
+            QFont rowFont = baseGutterFont;
+            rowFont.setBold(isHovered || lineOneBased == m_executionLine);
+            painter.setFont(rowFont);
+
             const QString number = QString::number(lineOneBased);
             if (lineOneBased == m_executionLine) {
                 painter.setPen(QColor("#4ec9b0"));
+            } else if (isHovered) {
+                painter.setPen(QColor("#61afef"));
             } else if (m_breakpoints.contains(lineOneBased)) {
                 painter.setPen(QColor("#e06c75"));
             } else {
@@ -549,42 +619,72 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
 }
 
 /**
- * @brief Handles gutter mouse clicks for toggling unconditional or conditional breakpoints.
- * @param event The mouse press event.
+ * @brief Handles gutter mouse clicks: left-click toggles breakpoint, right-click opens anchored popover.
+ * @param event The mouse press event inside LineNumberArea.
  */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
-    int y = event->pos().y();
+    const int y = event->pos().y();
     QTextBlock block = firstVisibleBlock();
     int blockNumber = block.blockNumber();
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
-    
+
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
-            int lineNum = blockNumber + 1;
-            QString emitPath = m_currentFilePath;
+            const int lineNum = blockNumber + 1;
+            const QString emitPath = m_currentFilePath;
 
             if (event->button() == Qt::RightButton) {
-                // Right click opens conditional breakpoint dialog
-                QString currentCondition = m_breakpoints.value(lineNum, QString());
-                ConditionalBreakpointDialog dlg(currentCondition, this);
+                // Ensure an active breakpoint exists on the right-clicked line before opening the popover.
+                if (!m_breakpoints.contains(lineNum)) {
+                    m_breakpoints.insert(lineNum, QString());
+                    m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
+                    highlightCurrentLine();
+                    m_lineNumberArea->update();
+                    emit breakpointToggled(emitPath, lineNum, true, QString());
+                }
+
+                // Compute global bottom-center anchor point of the gutter breakpoint marker.
+                const int rowH = qMax(14, bottom - top);
+                const int lineBottomY = top + (rowH / 2) + 5;
+                const QPoint iconGlobalPos =
+                    m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, lineBottomY));
+
+                // Configure and anchor the callout popover directly beneath the breakpoint circle.
+                ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
+                dlg.setTargetLineContext(lineNum, block.text().trimmed());
+                dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
+                dlg.positionNearAnchor(iconGlobalPos);
+
                 if (dlg.exec() == QDialog::Accepted) {
-                    QString newCondition = dlg.condition();
-                    if (!newCondition.isEmpty() || m_breakpoints.contains(lineNum)) {
+                    if (!dlg.isBreakpointEnabled() || dlg.isRemoveRequested()) {
+                        // Unchecking Enabled or clicking Remove Breakpoint deletes the breakpoint.
+                        m_breakpoints.remove(lineNum);
+                        m_breakpointSuspendScopes.remove(lineNum);
+                        highlightCurrentLine();
+                        emit breakpointToggled(emitPath, lineNum, false, QString());
+                    } else {
+                        // Persist updated predicate expression and rank suspension scope.
+                        const QString newCondition = dlg.getCondition();
                         m_breakpoints.insert(lineNum, newCondition);
+                        m_breakpointSuspendScopes.insert(lineNum, dlg.suspendScope());
+                        highlightCurrentLine();
                         emit breakpointToggled(emitPath, lineNum, true, newCondition);
                     }
                 }
             } else {
-                // Left click toggles standard breakpoint
+                // Left-click toggles standard breakpoint on or off.
                 bool isSet = false;
                 if (m_breakpoints.contains(lineNum)) {
                     m_breakpoints.remove(lineNum);
+                    m_breakpointSuspendScopes.remove(lineNum);
                     isSet = false;
                 } else {
                     m_breakpoints.insert(lineNum, QString());
+                    m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
                     isSet = true;
                 }
+                highlightCurrentLine();
                 emit breakpointToggled(emitPath, lineNum, isSet, QString());
             }
             m_lineNumberArea->update();
@@ -598,6 +698,40 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
 }
 
 /**
+ * @brief Resolves the 1-based line under the mouse cursor inside LineNumberArea for live hover preview.
+ * @param event Mouse move event inside LineNumberArea.
+ */
+void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
+    const int y = event->pos().y();
+    QTextBlock block = firstVisibleBlock();
+    int blockNumber = block.blockNumber();
+    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
+    int bottom = top + qRound(blockBoundingRect(block).height());
+    int hoveredLine = -1;
+
+    while (block.isValid() && top <= m_lineNumberArea->height()) {
+        if (block.isVisible() && y >= top && y < bottom) {
+            hoveredLine = blockNumber + 1;
+            break;
+        }
+        block = block.next();
+        top = bottom;
+        bottom = top + qRound(blockBoundingRect(block).height());
+        ++blockNumber;
+    }
+    setHoveredGutterLine(hoveredLine);
+}
+
+/**
+ * @brief Resets hovered gutter line state when cursor leaves LineNumberArea.
+ * @param event Leave event from LineNumberArea.
+ */
+void SourceCodeView::lineNumberAreaLeaveEvent(QEvent *event) {
+    Q_UNUSED(event);
+    setHoveredGutterLine(-1);
+}
+
+/**
  * @brief Highlights a 1-based line as the active debugger execution line (or clears if <= 0).
  * @param lineOneBased 1-based source line number, or <= 0 to clear execution highlight.
  */
@@ -605,23 +739,18 @@ void SourceCodeView::highlightExecutionLine(int lineOneBased) {
     if (lineOneBased <= 0) {
         m_executionLine = -1;
         highlightCurrentLine();
-        if (m_lineNumberArea) {
-            m_lineNumberArea->update();
-        }
+        if (m_lineNumberArea) m_lineNumberArea->update();
         return;
     }
     m_executionLine = lineOneBased;
     QTextBlock block = document()->findBlockByLineNumber(lineOneBased - 1);
     if (block.isValid()) {
-        QTextCursor cursor(block);
-        setTextCursor(cursor);
+        setTextCursor(QTextCursor(block));
         ensureCursorVisible();
         centerCursor();
     }
     highlightCurrentLine();
-    if (m_lineNumberArea) {
-        m_lineNumberArea->update();
-    }
+    if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
 /**
@@ -637,9 +766,7 @@ void SourceCodeView::highlightCurrentLine(int lineNumber) {
  * @param lineOneBased 1-based source line number.
  */
 void SourceCodeView::selectSourceLine(int lineOneBased) {
-    if (lineOneBased <= 0) {
-        return;
-    }
+    if (lineOneBased <= 0) return;
     highlightExecutionLine(lineOneBased);
     emit sourceLineSelected(lineOneBased);
 }
@@ -669,7 +796,7 @@ void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
  */
 void SourceCodeView::resizeEvent(QResizeEvent *e) {
     QPlainTextEdit::resizeEvent(e);
-    QRect cr = contentsRect();
+    const QRect cr = contentsRect();
     m_lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), lineNumberAreaWidth(), cr.height()));
 }
 
@@ -682,18 +809,14 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
     if (!code.isEmpty() && toPlainText() != code) {
         QPlainTextEdit::setPlainText(code);
     }
-    
     QList<QTextEdit::ExtraSelection> extraSelections;
     if (activeLine > 0) {
-        QTextEdit::ExtraSelection selection;
-        QColor activeColor(gridlock::core::ConfigManager::instance().getSourceActiveLine());
-        selection.format.setBackground(activeColor);
-        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
-        
         QTextBlock block = document()->findBlockByLineNumber(activeLine - 1);
         if (block.isValid()) {
-            QTextCursor cursor(block);
-            selection.cursor = cursor;
+            QTextEdit::ExtraSelection selection;
+            selection.format.setBackground(QColor(gridlock::core::ConfigManager::instance().getSourceActiveLine()));
+            selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+            selection.cursor = QTextCursor(block);
             extraSelections.append(selection);
         }
     }
@@ -728,8 +851,7 @@ void SourceCodeView::leaveEvent(QEvent *event) {
 void SourceCodeView::handleHoverTimeout() {
     QTextCursor cursor = cursorForPosition(m_lastMousePos);
     cursor.select(QTextCursor::WordUnderCursor);
-    QString word = cursor.selectedText();
-
+    const QString word = cursor.selectedText();
     static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
     if (cVarRegex.match(word).hasMatch()) {
         if (word != m_lastHoveredWord) {
@@ -737,9 +859,7 @@ void SourceCodeView::handleHoverTimeout() {
             emit hoverVariableRequested(word, m_lastGlobalMousePos);
         }
     } else {
-        if (!m_lastHoveredWord.isEmpty()) {
-            emit hideHoverTooltip();
-        }
+        if (!m_lastHoveredWord.isEmpty()) emit hideHoverTooltip();
         m_lastHoveredWord.clear();
     }
 }
@@ -752,21 +872,16 @@ void SourceCodeView::mousePressEvent(QMouseEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QTextCursor cursor = cursorForPosition(event->pos());
         cursor.select(QTextCursor::WordUnderCursor);
-        QString word = cursor.selectedText();
-
+        const QString word = cursor.selectedText();
         static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
-        if (cVarRegex.match(word).hasMatch()) {
-            emit pinVariableRequested(word);
-        }
+        if (cVarRegex.match(word).hasMatch()) emit pinVariableRequested(word);
     }
     m_lastHoveredWord.clear();
     emit hideHoverTooltip();
     QPlainTextEdit::mousePressEvent(event);
     if (event->button() == Qt::LeftButton && !(event->modifiers() & Qt::ControlModifier)) {
         const int clickedLine = textCursor().blockNumber() + 1;
-        if (clickedLine > 0) {
-            emit sourceLineSelected(clickedLine);
-        }
+        if (clickedLine > 0) emit sourceLineSelected(clickedLine);
     }
 }
 
@@ -777,12 +892,9 @@ void SourceCodeView::mousePressEvent(QMouseEvent *event) {
 void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
     QTextCursor cursor = cursorForPosition(event->pos());
     cursor.select(QTextCursor::WordUnderCursor);
-    QString word = cursor.selectedText();
-
+    const QString word = cursor.selectedText();
     static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
-    if (cVarRegex.match(word).hasMatch()) {
-        emit pinVariableRequested(word);
-    }
+    if (cVarRegex.match(word).hasMatch()) emit pinVariableRequested(word);
     QPlainTextEdit::mouseDoubleClickEvent(event);
 }
 
@@ -793,21 +905,11 @@ void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
 void SourceCodeView::wheelEvent(QWheelEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QFont currentFont = font();
-        int delta = event->angleDelta().y();
-        int newSize = currentFont.pointSize();
-        
-        if (delta > 0) {
-            newSize++;
-        } else if (delta < 0) {
-            newSize--;
-        }
-        
-        if (newSize < 6) newSize = 6;
-        if (newSize > 72) newSize = 72;
-        
+        const int delta = event->angleDelta().y();
+        int newSize = currentFont.pointSize() + ((delta > 0) ? 1 : ((delta < 0) ? -1 : 0));
+        newSize = qBound(6, newSize, 72);
         currentFont.setPointSize(newSize);
         setFont(currentFont);
-        
         updateLineNumberAreaWidth(0);
         event->accept();
     } else {
@@ -824,5 +926,3 @@ void SourceCodeView::paintEvent(QPaintEvent *event) {
 }
 
 }  // namespace gridlock::ui
-
-
