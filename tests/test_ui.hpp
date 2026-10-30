@@ -183,5 +183,8 @@ private slots:
 
     /** @brief Verifies Preferences sidebar inactive contrast, luminance palette swatches, 15+ terminal fonts, and SLURM script auto-detection. */
     void testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDetect();
+
+    /** @brief Verifies multi-distro package manager auto-detection, Spack/Pacman/DNF/APT/Zypper CLI output parsing, and Table/List/Raw display views. */
+    void testMultiDistroPackageManagerParsingAndViewModes();
 };
 

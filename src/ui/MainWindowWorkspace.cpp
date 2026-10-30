@@ -26,6 +26,7 @@
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
+#include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
@@ -751,8 +752,8 @@ void MainWindow::setupDocks() {
   m_memView = new MemView(m_bottomTabs);
   m_memView->setObjectName("MemViewDock");
 
-  // Spack Environment & Package Manager: Visualizes active software stacks.
-  m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
+  // Multi-Distro HPC & System Package Manager Workstation: Visualizes Spack and system packages.
+  m_spackManager = new HpcConsoleWidget(m_hpcBackend, m_bottomTabs);
   m_spackManager->setObjectName("HpcConsoleDock");
 
   // Connect memory inspection view read and live-patch requests to coordinator and ELF image.
@@ -798,8 +799,8 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_memView, "Memory View");
   // 4. MPI cluster wait-for cycle and deadlock analysis tab.
   m_bottomTabs->addTab(m_mpiDiagnosticsWidget, "MPI Diagnostics");
-  // 5. Spack environment package manager tab.
-  m_bottomTabs->addTab(m_spackManager, "HPC Console");
+  // 5. Multi-distro HPC & system package manager tab.
+  m_bottomTabs->addTab(m_spackManager, QStringLiteral("Package Manager"));
   // 6. Dynamic C/C++ expression evaluator tab.
   m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
   // 7. Offline Dash/Zeal reference manual tab.
@@ -933,3 +934,5 @@ QWidget* MainWindow::setupDockTitleBar(QDockWidget* dock, const QString& titleTe
 }
 
 }  // namespace gridlock::ui
+
+#include "widgets/HpcConsoleWidget.cpp"

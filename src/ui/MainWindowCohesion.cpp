@@ -128,7 +128,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         }
         m_spackManager->setStyleSheet(QStringLiteral(
             "#HpcConsoleDock { background: #21252b; } #HpcConsoleDock QLabel { color: #abb2bf; font-size: 10px; font-weight: 700; padding: 0px 4px; }"
-            "#HpcConsoleDock QPlainTextEdit { background: #16181d; color: #d7dae0; border: none; border-top: 1px solid #2c313a; border-bottom: 1px solid #2c313a; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
+            "#HpcConsoleDock QTableWidget, #HpcConsoleDock QTextBrowser, #HpcConsoleDock QPlainTextEdit { background: #16181d; alternate-background-color: #1b1e24; color: #d7dae0; border: none; border-top: 1px solid #2c313a; border-bottom: 1px solid #2c313a; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 2px 4px; }"));
     }
 
     // 3. Enforce zero-gutter outer margins, compact <= 22px controls, and borderless frames on all tabs.
@@ -270,7 +270,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         struct RailSpec { const char* id; const char* tip; Qt::Key key; int iconKind; };
         static const RailSpec kSpecs[] = {
             {"Debug", "Debug Tools: GDB Console, Memory View & Evaluator (Alt+4)", Qt::Key_4, 0},
-            {"MPI", "MPI Telemetry: Deadlock Analyzer, Network Log & HPC Console (Alt+5)", Qt::Key_5, 1},
+            {"MPI", "MPI Telemetry: Deadlock Analyzer, Network Log & Package Manager (Alt+5)", Qt::Key_5, 1},
             {"Terminal", "Interactive Shell Terminal (Alt+6)", Qt::Key_6, 2},
             {"Docs", "Offline Reference Manual (Alt+7)", Qt::Key_7, 3},
         };
@@ -326,7 +326,8 @@ QString MainWindow::bottomToolGroupForTabIndex(int tabIndex) const {
     if (title.contains(QStringLiteral("Terminal"), Qt::CaseInsensitive)) return QStringLiteral("Terminal");
     if (title.contains(QStringLiteral("Reference"), Qt::CaseInsensitive)) return QStringLiteral("Docs");
     if (title.contains(QStringLiteral("MPI"), Qt::CaseInsensitive) ||
-        title.contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) return QStringLiteral("MPI");
+        title.contains(QStringLiteral("HPC"), Qt::CaseInsensitive) ||
+        title.contains(QStringLiteral("Package"), Qt::CaseInsensitive)) return QStringLiteral("MPI");
     return QStringLiteral("Debug");
 }
 
