@@ -40,13 +40,13 @@
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
-#include <QFileDialog>
 #include <QPointer>
 #include <QtConcurrent/QtConcurrent>
 
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QContextMenuEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
@@ -184,46 +184,36 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Restore saved geometry and dock configuration.
   QSettings settings("gridlock", "debugger");
   if (settings.contains("MainWindow/Geometry_v8")) {
-      restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
+    restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
   }
-  // Enforce minimum usable geometry to prevent microscopic window mapping.
-  if (width() < 800 || height() < 600) {
-      resize(1440, 900);
-  }
+  if (width() < 800 || height() < 600) resize(1440, 900);
   if (settings.contains("MainWindow/State_v8")) {
-      restoreState(settings.value("MainWindow/State_v8").toByteArray());
+    restoreState(settings.value("MainWindow/State_v8").toByteArray());
   }
-  
   // Restore individual splitter sash positions.
   for (auto* splitter : findChildren<QSplitter*>()) {
-      if (!splitter->objectName().isEmpty()) {
-          auto state = settings.value("MainWindow/Splitter_v8_" + splitter->objectName()).toByteArray();
-          if (!state.isEmpty()) {
-              splitter->restoreState(state);
-          }
-      }
+    if (!splitter->objectName().isEmpty()) {
+      auto st = settings.value("MainWindow/Splitter_v8_" + splitter->objectName()).toByteArray();
+      if (!st.isEmpty()) splitter->restoreState(st);
+    }
   }
-
   // Constrain side dock widths to prevent collapsing below 150px.
   for (auto* dock : findChildren<QDockWidget*>()) {
-      const auto area = dockWidgetArea(dock);
-      if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
-          dock->setMinimumWidth(150);
-          dock->setMaximumWidth(QWIDGETSIZE_MAX);
-          if (dock->widget()) {
-              dock->widget()->setMinimumWidth(150);
-              dock->widget()->setMaximumWidth(QWIDGETSIZE_MAX);
-          }
+    const auto area = dockWidgetArea(dock);
+    if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
+      dock->setMinimumWidth(150);
+      dock->setMaximumWidth(QWIDGETSIZE_MAX);
+      if (dock->widget()) {
+        dock->widget()->setMinimumWidth(150);
+        dock->widget()->setMaximumWidth(QWIDGETSIZE_MAX);
       }
+    }
   }
-
   // Hide empty tab bars and configure tab scrolling.
   for (auto* tabBar : findChildren<QTabBar*>()) {
-      if (tabBar->count() == 0) {
-          tabBar->hide();
-      }
-      tabBar->setUsesScrollButtons(true);
-      tabBar->setElideMode(Qt::ElideNone);
+    if (tabBar->count() == 0) tabBar->hide();
+    tabBar->setUsesScrollButtons(true);
+    tabBar->setElideMode(Qt::ElideNone);
   }
 
   // Route window to preferred monitor if specified in configuration.
@@ -522,22 +512,15 @@ void MainWindow::setupMenu() {
   // and project-level watch expressions into the differential matrix.
   QAction *openProjAction = fileMenu->addAction("Open Workspace...");
   connect(openProjAction, &QAction::triggered, this, [this]() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Open Workspace",
-                                                    QDir::currentPath());
+    QString dir = QFileDialog::getExistingDirectory(this, "Open Workspace", QDir::currentPath());
     if (!dir.isEmpty()) {
-      if (m_differentialGrid)
-        m_differentialGrid->clearWatches();
-      if (m_editorTabManager)
-        m_editorTabManager->clearAllTabs();
-
+      if (m_differentialGrid) m_differentialGrid->clearWatches();
+      if (m_editorTabManager) m_editorTabManager->clearAllTabs();
       gridlock::core::ConfigManager::instance().setWorkspace(dir);
-      m_persistentBreakpoints =
-          gridlock::core::ConfigManager::instance().getBreakpoints();
-
+      m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
       auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
       for (const auto &w : ps.watchExpressions) {
-        if (m_differentialGrid)
-          m_differentialGrid->addVariableColumn(QString::fromStdString(w));
+        if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
       }
     }
   });
@@ -545,36 +528,26 @@ void MainWindow::setupMenu() {
   // Open Source File Action: Direct file picker bypassing project hierarchy.
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
-
   fileMenu->addSeparator();
 
   // Session Serialization Actions: Export and restore active workspace layout,
   // breakpoint configurations, variable watches, and rank allocations.
   QAction *saveSessionAction = fileMenu->addAction("Save Session As...");
-  connect(saveSessionAction, &QAction::triggered, this,
-          &MainWindow::saveSessionAs);
-
+  connect(saveSessionAction, &QAction::triggered, this, &MainWindow::saveSessionAs);
   QAction *loadSessionAction = fileMenu->addAction("Load Session...");
-  connect(loadSessionAction, &QAction::triggered, this,
-          &MainWindow::loadSession);
+  connect(loadSessionAction, &QAction::triggered, this, &MainWindow::loadSession);
 
   // Recent Sessions Submenu: Dynamically populated with most-recently-used session files.
   QMenu *recentMenu = fileMenu->addMenu("Recent Sessions");
   connect(recentMenu, &QMenu::aboutToShow, this, [this, recentMenu]() {
     recentMenu->clear();
-    QStringList mru =
-        gridlock::core::managers::SessionManager::instance().getMruSessions();
-    for (const QString &session : mru) {
-      QAction *act = recentMenu->addAction(session);
-      connect(act, &QAction::triggered, this, [this, session]() {
-        gridlock::core::managers::SessionManager::instance().loadSession(
-            session);
+    QStringList mru = gridlock::core::managers::SessionManager::instance().getMruSessions();
+    for (const QString &s : mru) {
+      connect(recentMenu->addAction(s), &QAction::triggered, this, [s]() {
+        gridlock::core::managers::SessionManager::instance().loadSession(s);
       });
     }
-    if (mru.isEmpty()) {
-      QAction *empty = recentMenu->addAction("No Recent Sessions");
-      empty->setEnabled(false);
-    }
+    if (mru.isEmpty()) recentMenu->addAction("No Recent Sessions")->setEnabled(false);
   });
 
   fileMenu->addSeparator();
@@ -855,7 +828,56 @@ void MainWindow::closeEvent(QCloseEvent *event) {
  * @return True if event was handled, false otherwise.
  */
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
-  // Intercept key press events and query the application-wide ShortcutManager.
+  // 1. Intercept custom dock header interactions (double-click, drag, context menu).
+  if (watched && watched->objectName() == QStringLiteral("customDockHeader")) {
+    auto* header = qobject_cast<QWidget*>(watched);
+    auto* dock = header ? qobject_cast<QDockWidget*>(header->parentWidget()) : nullptr;
+    if (!dock && header) dock = reinterpret_cast<QDockWidget*>(header->property("associatedDock").value<void*>());
+    if (dock) {
+      // Double-clicking anywhere on custom title bar toggles floating vs docked state.
+      if (event->type() == QEvent::MouseButtonDblClick) {
+        toggleDockFloating(dock);
+        return true;
+      }
+      // Track initial mouse position when drag begins with left mouse button.
+      if (event->type() == QEvent::MouseButtonPress) {
+        auto* me = static_cast<QMouseEvent*>(event);
+        if (me->button() == Qt::LeftButton) {
+          m_draggingDock = dock;
+          m_dragOffset = me->globalPosition().toPoint() - dock->pos();
+        }
+      } else if (event->type() == QEvent::MouseMove) {
+        auto* me = static_cast<QMouseEvent*>(event);
+        // While dragging a floating dock panel by its header, move window smoothly.
+        if ((me->buttons() & Qt::LeftButton) && m_draggingDock == dock && isDockFloating(dock)) {
+          dock->move(me->globalPosition().toPoint() - m_dragOffset);
+          return true;
+        }
+      } else if (event->type() == QEvent::MouseButtonRelease) {
+        auto* me = static_cast<QMouseEvent*>(event);
+        // Release mouse: check if dropped in home dock zone and redock if so.
+        if (me->button() == Qt::LeftButton && m_draggingDock == dock) {
+          m_draggingDock = nullptr;
+          if (isDockFloating(dock)) {
+            handleDockDragRelease(dock, me->globalPosition().toPoint());
+            return true;
+          }
+        }
+      } else if (event->type() == QEvent::ContextMenu) {
+        // Show context menu with Redock / Pop Out options and Redock All.
+        auto* ce = static_cast<QContextMenuEvent*>(event);
+        QMenu menu(header);
+        const bool floating = isDockFloating(dock);
+        menu.addAction(floating ? QStringLiteral("Redock to Workspace") : QStringLiteral("Pop Out / Float Panel"),
+                       this, [this, dock]() { toggleDockFloating(dock); });
+        menu.addAction(QStringLiteral("Redock All Floating Panels"), this, &MainWindow::redockAllFloatingPanels);
+        menu.exec(ce->globalPos());
+        return true;
+      }
+    }
+  }
+
+  // 2. Intercept key press events and query the application-wide ShortcutManager.
   if (event->type() == QEvent::KeyPress) {
     auto *keyEvent = static_cast<QKeyEvent *>(event);
     // If a shortcut matches active key sequence, consume event immediately.

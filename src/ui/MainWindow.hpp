@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QMap>
+#include <QPointer>
 #include <QPushButton>
 #include <QSet>
 #include <QSpinBox>
@@ -30,6 +31,8 @@
 
 class IBackendCoordinator;
 class QVulkanInstance;
+class QDockWidget;
+class QSplitter;
 
 namespace gridlock {
 class GdbRankCoordinator;
@@ -326,6 +329,63 @@ public:
     void selectBottomToolGroup(const QString& groupName);
 
     /**
+     * @struct DockHomeSlot
+     * @brief Records the original splitter or QMainWindow dock area home container for a panel.
+     */
+    struct DockHomeSlot {
+        QSplitter* splitter = nullptr;
+        int splitterIndex = -1;
+        Qt::DockWidgetArea area = Qt::RightDockWidgetArea;
+    };
+
+    /**
+     * @brief Checks if a dock widget is currently detached in a top-level floating window.
+     * @param dock Pointer to the dock widget to inspect.
+     * @return True if dock is floating or detached as top-level window.
+     */
+    bool isDockFloating(const QDockWidget* dock) const;
+
+    /**
+     * @brief Toggles a dock widget between floating top-level state and docked workspace slot.
+     * @param dock Pointer to the dock widget to float or redock.
+     */
+    void toggleDockFloating(QDockWidget* dock);
+
+    /**
+     * @brief Re-docks a floating dock widget into its recorded home splitter or dock area.
+     * @param dock Pointer to the dock widget to re-dock.
+     */
+    void redockWidget(QDockWidget* dock);
+
+    /**
+     * @brief Calculates the global screen rectangle of a dock widget's home drop zone.
+     * @param dock Pointer to the dock widget.
+     * @return Global screen rectangle of the home dock or splitter region.
+     */
+    QRect dockHomeGlobalRect(const QDockWidget* dock) const;
+
+    /**
+     * @brief Evaluates mouse release position during dock drag and redocks if dropped in home zone.
+     * @param dock Pointer to the dock widget being dragged.
+     * @param globalReleasePos Global cursor release position.
+     * @return True if redocked, false otherwise.
+     */
+    bool handleDockDragRelease(QDockWidget* dock, const QPoint& globalReleasePos);
+
+    /**
+     * @brief Restores all floating or detached panels back into their home workstation slots.
+     */
+    void redockAllFloatingPanels();
+
+    /**
+     * @brief Creates and mounts a custom dark-slate title bar widget on the specified dock widget.
+     * @param dock Pointer to the target dock widget.
+     * @param titleText Header display title string.
+     * @return Pointer to created custom title bar header widget.
+     */
+    QWidget* setupDockTitleBar(QDockWidget* dock, const QString& titleText);
+
+    /**
      * @brief Dispatches a debug command through the coordinator.
      * @param cmd Unique pointer to command object.
      */
@@ -525,6 +585,9 @@ private:
     QMap<int, int> m_rankLoopCounter;
     QString m_loadedBinaryPath;
     bool m_useRealBinaryTarget = false;
+    QMap<QDockWidget*, DockHomeSlot> m_dockHomeSlots;
+    QPointer<QDockWidget> m_draggingDock = nullptr;
+    QPoint m_dragOffset;
 };
 
 }  // namespace gridlock::ui

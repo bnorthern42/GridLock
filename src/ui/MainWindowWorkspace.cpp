@@ -56,6 +56,8 @@
 #include <QTextCursor>
 #include <QToolBar>
 #include <QToolTip>
+#include <QToolButton>
+#include <QVariant>
 #include <QVBoxLayout>
 #include <QWindow>
 #include <QtConcurrent/QtConcurrent>
@@ -414,6 +416,8 @@ void MainWindow::setupDocks() {
   m_projectExplorerWidget = new ProjectExplorerWidget(this);
   m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
+  setupDockTitleBar(m_projectExplorerWidget, QStringLiteral("PROJECT / SYMBOLS"));
+  m_dockHomeSlots.insert(m_projectExplorerWidget, {nullptr, -1, Qt::LeftDockWidgetArea});
 
   // Synchronize project explorer root directory when a saved session is restored.
   connect(&gridlock::core::managers::SessionManager::instance(),
@@ -529,48 +533,33 @@ void MainWindow::setupDocks() {
   QDockWidget *variablesDock = new QDockWidget("Variables", this);
   variablesDock->setObjectName("VariablesDock");
   variablesDock->setWidget(m_variablesDockWidget);
-  QWidget *emptyVarTitle = new QWidget(variablesDock);
-  emptyVarTitle->setFixedSize(0, 0);
-  variablesDock->setTitleBarWidget(emptyVarTitle);
+  setupDockTitleBar(variablesDock, QStringLiteral("VARIABLES"));
+  m_dockHomeSlots.insert(variablesDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
   // CPU Registers View: Renders hardware registers (GPRs, segment, flags) with change diffs.
   m_registerView = new RegisterView(this);
   m_registerView->setObjectName("RegisterViewWidget");
   connect(m_registerView, &RegisterView::addressActivated, this,
-          [this](uint64_t addr) {
-            seekToAddressOrExpression(
-                QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
-          });
+          [this](uint64_t addr) { seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0'))); });
   QDockWidget *registersDock = new QDockWidget("Registers", this);
   registersDock->setObjectName("RegisterViewDock");
   registersDock->setWidget(m_registerView);
-  QWidget *emptyRegTitle = new QWidget(registersDock);
-  emptyRegTitle->setFixedSize(0, 0);
-  registersDock->setTitleBarWidget(emptyRegTitle);
+  setupDockTitleBar(registersDock, QStringLiteral("REGISTERS"));
+  m_dockHomeSlots.insert(registersDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
   // Differential Grid: Cross-rank tabular matrix comparing watched variable values.
   m_differentialGrid = new DifferentialGrid(this);
   m_differentialGrid->setObjectName("DifferentialGrid");
-  // Set compact 20px row heights for dense tabular display.
   m_differentialGrid->verticalHeader()->setDefaultSectionSize(20);
-  // Default column width 96px accommodating standard variable names.
   m_differentialGrid->horizontalHeader()->setDefaultSectionSize(96);
-  // Connect column addition signal to backend GDB coordinator watch registration.
-  connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this,
-          [this](const QString &name) {
-            if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(
-                    m_coordinator)) {
-              gdbCoord->registerWatchVariable(name);
-            }
-          });
+  connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this, [this](const QString &name) {
+    if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) gdbCoord->registerWatchVariable(name);
+  });
 
   // Restore project settings watch expressions into differential grid columns.
   auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
   for (const auto &w : ps.watchExpressions) {
-    if (!w.empty()) {
-      // Append each persisted expression as a comparative matrix column.
-      m_differentialGrid->addVariableColumn(QString::fromStdString(w));
-    }
+    if (!w.empty()) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
   }
   // Populate initial synthetic fixture watch entries for baseline inspection.
   m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].id"), QStringLiteral("0 (int)"));
@@ -579,10 +568,8 @@ void MainWindow::setupDocks() {
   m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].id"), QStringLiteral("1 (int)"));
   m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].coords.x"), QStringLiteral("1.5f (float)"));
   m_differentialGrid->updateVariableDisplay(1, QStringLiteral("mpi_rank"), QStringLiteral("1 (int)"));
-  // Hide row/column header indices to maximize data cell reading density.
   m_differentialGrid->setColumnHidden(0, true);
   m_differentialGrid->setRowHidden(0, true);
-  // Configure column sizing to stretch evenly across the dock width without horizontal clipping.
   m_differentialGrid->horizontalHeader()->setMinimumSectionSize(64);
   m_differentialGrid->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
   m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
@@ -593,31 +580,25 @@ void MainWindow::setupDocks() {
   watchLayout->setContentsMargins(0, 0, 0, 0);
   watchLayout->setSpacing(0);
 
-  // Compact header toolbar hosting watch input text field and submit button.
   QWidget *watchToolbar = new QWidget(watchContainer);
   watchToolbar->setObjectName("watchToolbar");
   QHBoxLayout *watchBarLayout = new QHBoxLayout(watchToolbar);
   watchBarLayout->setContentsMargins(3, 2, 3, 2);
   watchBarLayout->setSpacing(3);
 
-  // Expression input box allowing arbitrary C/C++ expressions (e.g. data[i]->val).
   QLineEdit *watchInput = new QLineEdit(watchToolbar);
   watchInput->setObjectName("watchExpressionInput");
   watchInput->setPlaceholderText("New watch expression...");
   watchInput->setFixedHeight(22);
 
-  // Submit button adding expression to active differential inspection grid.
   QPushButton *addWatchBtn = new QPushButton("+ Watch", watchToolbar);
   addWatchBtn->setObjectName("addWatchBtn");
   addWatchBtn->setFixedHeight(22);
 
-  // Helper lambda submitting new watch variable from text input to grid.
   auto submitWatch = [this, watchInput]() {
     const QString expr = watchInput->text().trimmed();
-    // Validate expression is non-empty before adding matrix column.
     if (!expr.isEmpty() && m_differentialGrid) {
       m_differentialGrid->addVariableColumn(expr);
-      // Emit signal notifying backend coordinator to evaluate expression on stopped ranks.
       emit m_differentialGrid->watchVariableAdded(expr);
       watchInput->clear();
     }
@@ -634,35 +615,26 @@ void MainWindow::setupDocks() {
   QDockWidget *watchDock = new QDockWidget("Watch Expressions", this);
   watchDock->setObjectName("WatchExpressionsDock");
   watchDock->setWidget(watchContainer);
+  setupDockTitleBar(watchDock, QStringLiteral("WATCH EXPRESSIONS"));
+  m_dockHomeSlots.insert(watchDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
   // Server Rack Overview: Visualizes cluster node/rank topology and operational status.
   m_serverRackView = new ServerRackView(this);
   m_serverRackView->setObjectName("ServerRackViewWidget");
-  // Propagate updated rank addresses to disassembly view for divergence highlighting.
-  connect(m_serverRackView, &ServerRackView::ranksUpdated, this,
-          [this](const QMap<int, uint64_t> &rankPcMap) {
-            if (m_disassemblyView) {
-              m_disassemblyView->setRankAddresses(rankPcMap);
-            }
-          });
-  // Focus workspace inspection views on whichever rank node is clicked in rack.
-  connect(m_serverRackView, &ServerRackView::rankSelected, this,
-          [this](int rankId, uint64_t pcAddr) {
-            onRankSelected(rankId);
-            if (m_disassemblyView) {
-              m_disassemblyView->setSelectedRank(rankId);
-            }
-            // Navigate viewports to rank's current program counter if valid.
-            if (pcAddr != 0ULL) {
-              seekToAddressOrExpression(
-                  QStringLiteral("0x%1").arg(pcAddr, 8, 16, QChar('0')));
-            } else {
-              updateStatusTelemetry();
-            }
-          });
+  connect(m_serverRackView, &ServerRackView::ranksUpdated, this, [this](const QMap<int, uint64_t> &rankPcMap) {
+    if (m_disassemblyView) m_disassemblyView->setRankAddresses(rankPcMap);
+  });
+  connect(m_serverRackView, &ServerRackView::rankSelected, this, [this](int rankId, uint64_t pcAddr) {
+    onRankSelected(rankId);
+    if (m_disassemblyView) m_disassemblyView->setSelectedRank(rankId);
+    if (pcAddr != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(pcAddr, 8, 16, QChar('0')));
+    else updateStatusTelemetry();
+  });
   QDockWidget *serverRackDock = new QDockWidget("Server Rack", this);
   serverRackDock->setObjectName("ServerRackDock");
   serverRackDock->setWidget(m_serverRackView);
+  setupDockTitleBar(serverRackDock, QStringLiteral("SERVER RACK"));
+  m_dockHomeSlots.insert(serverRackDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
   // Dock right inspection widgets into RightDockWidgetArea with tabification.
   addDockWidget(Qt::RightDockWidgetArea, variablesDock);
@@ -818,14 +790,19 @@ void MainWindow::setupDocks() {
   connect(m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::jumpToFrameRequested, this, &MainWindow::onRankSelected);
 
   // Add all inspection and terminal widgets to bottom tabbed container.
-  // Each bottom tab adheres to the two-tier workstation layout: a 24-26px #21252b
-  // header control strip paired with a 0px-margin flush dark-slate viewport.
+  // 1. Interactive bash/shell terminal tab.
   m_bottomTabs->addTab(m_terminalDock, "Terminal");
+  // 2. Raw GDB machine interface console tab.
   m_bottomTabs->addTab(m_gdbConsoleWidget, "GDB Console");
+  // 3. Hexadecimal memory inspector and live patching tab.
   m_bottomTabs->addTab(m_memView, "Memory View");
+  // 4. MPI cluster wait-for cycle and deadlock analysis tab.
   m_bottomTabs->addTab(m_mpiDiagnosticsWidget, "MPI Diagnostics");
+  // 5. Spack environment package manager tab.
   m_bottomTabs->addTab(m_spackManager, "HPC Console");
+  // 6. Dynamic C/C++ expression evaluator tab.
   m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
+  // 7. Offline Dash/Zeal reference manual tab.
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->setCurrentWidget(m_memView);
 
@@ -850,11 +827,9 @@ void MainWindow::setupDocks() {
       m_projectExplorerWidget, variablesDock, registersDock, watchDock, serverRackDock};
   for (QDockWidget *dock : sideDocks) {
     if (!dock) continue;
-    // Prevent side panels from collapsing below 150px during splitter adjustments.
     dock->setMinimumWidth(150);
     dock->setMaximumWidth(QWIDGETSIZE_MAX);
     dock->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    // Apply matching size limits to internal child widgets to prevent layout clipping.
     if (QWidget *inner = dock->widget()) {
       inner->setMinimumWidth(150);
       inner->setMaximumWidth(QWIDGETSIZE_MAX);
@@ -868,20 +843,22 @@ void MainWindow::setupDocks() {
   // Stack right-hand docks vertically: 320px registers, 210px watches, 290px server rack.
   resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290}, Qt::Vertical);
 
-  // Locate or initialize View menu to register dock toggle actions.
+  // Locate or initialize View menu to register dock toggle actions and redock command.
   QMenu *viewMenu = nullptr;
-  // Traverse menu bar actions searching for top-level View menu container.
   for (QAction *action : menuBar()->actions()) {
-    if (action->menu() && action->text() == "&View") {
-      viewMenu = action->menu();
-      break;
-    }
+    if (action->menu() && action->text() == "&View") { viewMenu = action->menu(); break; }
+  }
+  // Expose one-click batch recovery action in View menu to redock all floating panels.
+  if (viewMenu) {
+    viewMenu->addSeparator();
+    auto* redockAct = viewMenu->addAction(QStringLiteral("Redock All Floating Panels"),
+                                          this, &MainWindow::redockAllFloatingPanels);
+    redockAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
   }
 
   // Register toggle actions and configure window flags for all child docks.
-  // Every dock widget has its outer margins stripped so 1px borders align cleanly.
   for (auto *dock : findChildren<QDockWidget *>()) {
-    // Expose dynamic toggle checkboxes in View menu for showing/hiding each panel.
+    // Add dynamic toggle checkbox to View menu.
     if (viewMenu) viewMenu->addAction(dock->toggleViewAction());
     // Allow panels to be closed, undocked into floating windows, or tabified.
     dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
@@ -895,23 +872,64 @@ void MainWindow::setupDocks() {
         inner->layout()->setSpacing(0);
       }
     }
-    // Ensure floating top-level docks restore standard OS window chrome and shadows.
-    connect(dock, &QDockWidget::topLevelChanged, dock, [dock](bool topLevel) {
-      if (topLevel) {
-        // Strip custom frameless hints when detaching from main window.
-        dock->setWindowFlags(dock->windowFlags() & ~Qt::FramelessWindowHint);
-        dock->show();
-      }
-    });
   }
 
   // Purge legacy geometry keys to guarantee fresh default workstation layout proportions.
-  // This clears stale v8 serialization entries that might distort default panel ratios.
   QSettings settings("gridlock", "debugger");
   settings.remove("MainWindow/Geometry_v8");
   settings.remove("MainWindow/State_v8");
   settings.remove("MainWindow/Splitter_v8_MasterHorizontalSplitter");
   settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
+}
+
+/**
+ * @brief Constructs and installs a custom workstation title bar on a dock widget.
+ * @param dock Target dock widget.
+ * @param titleText Display title for the dock header.
+ * @return Constructed custom title bar header widget.
+ */
+QWidget* MainWindow::setupDockTitleBar(QDockWidget* dock, const QString& titleText) {
+  if (!dock) return nullptr;
+  // Instantiate custom header container with dark workstation styling.
+  auto* header = new QWidget(dock);
+  header->setObjectName(QStringLiteral("customDockHeader"));
+  header->setProperty("associatedDock", QVariant::fromValue(static_cast<void*>(dock)));
+  header->setFixedHeight(24);
+  header->setMinimumWidth(0);
+  header->setStyleSheet(QStringLiteral(
+      "#customDockHeader { background: #1e222a; border-bottom: 1px solid #282c34; } "
+      "#customDockHeader QLabel { color: #9da5b4; font-size: 11px; font-weight: 700; padding-left: 6px; } "
+      "#dockFloatBtn, #dockCloseBtn { background: transparent; color: #9da5b4; border: none; font-size: 11px; "
+      "font-weight: 700; min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; } "
+      "#dockFloatBtn:hover, #dockCloseBtn:hover { background: #282c34; color: #ffffff; border-radius: 2px; }"));
+  // Configure zero-margin horizontal layout with 4px element spacing.
+  auto* hLayout = new QHBoxLayout(header);
+  hLayout->setContentsMargins(4, 2, 4, 2);
+  hLayout->setSpacing(4);
+  // Add uppercase title label configured with zero minimum width to permit narrow docking.
+  auto* titleLabel = new QLabel(titleText, header);
+  titleLabel->setMinimumWidth(0);
+  titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  hLayout->addWidget(titleLabel, 1);
+  // Float / undock toggle button switching panel between floating and docked states.
+  auto* floatBtn = new QToolButton(header);
+  floatBtn->setObjectName(QStringLiteral("dockFloatBtn"));
+  floatBtn->setText(QStringLiteral("⧉"));
+  floatBtn->setToolTip(QStringLiteral("Pop Out / Float Panel"));
+  connect(floatBtn, &QToolButton::clicked, this, [this, dock]() { toggleDockFloating(dock); });
+  hLayout->addWidget(floatBtn);
+  // Close button allowing user to dismiss the dock widget.
+  auto* closeBtn = new QToolButton(header);
+  closeBtn->setObjectName(QStringLiteral("dockCloseBtn"));
+  closeBtn->setText(QStringLiteral("✕"));
+  closeBtn->setToolTip(QStringLiteral("Close Panel"));
+  connect(closeBtn, &QToolButton::clicked, dock, &QDockWidget::close);
+  hLayout->addWidget(closeBtn);
+  // Install MainWindow event filter to intercept drag, double-click, and context menu.
+  header->installEventFilter(this);
+  dock->setTitleBarWidget(header);
+  dock->setMinimumWidth(150);
+  return header;
 }
 
 }  // namespace gridlock::ui

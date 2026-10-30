@@ -79,16 +79,7 @@ constexpr int kMinAllowedColumnSectionWidthPx = 40;
 
 /**
  * @brief Verifies zero-gutter flush viewports across all bottom tabs, F1 docset lookup, and tab snapshots.
- *
- * Executes a three-stage workstation UI cohesion verification:
- * 1. Iterates across all pages of BottomConsoleTabs, ensuring top-level layout margins
- *    do not exceed 4px on left/right/bottom edges and all interactive header controls
- *    (QPushButton, QLineEdit, QComboBox) maintain compact height <= 28px.
- * 2. Invokes lookupSymbolDocumentation("MPI_Init@plt") to confirm @plt suffix stripping,
- *    automatic switching to the Reference Manual tab, and rendering of structured
- *    MPI_Init SYNOPSIS and MPI rank semantics.
- * 3. Captures an offscreen PNG snapshot of the active bottom tab via captureTabAuditSnapshot
- *    and validates that the written file exists and is non-empty on disk.
+ * Validates bottom tab margins, compact header controls, MPI_Init@plt symbol lookup, and audit snapshots.
  */
 void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     // Instantiate and expose the main workstation window at standard 1440x900 resolution.
@@ -107,11 +98,10 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     for (int i = 0; i < bottomTabs->count(); ++i) {
         bottomTabs->setCurrentIndex(i);
         QCoreApplication::processEvents();
-
+        // Obtain active tab page widget pointer.
         QWidget* page = bottomTabs->widget(i);
         QVERIFY(page != nullptr);
         const QString tabTitle = bottomTabs->tabText(i);
-
         // Verify top-level layout on the tab page has flush left/right/bottom margins (<= 4px).
         if (QLayout* pageLayout = page->layout()) {
             const QMargins margins = pageLayout->contentsMargins();
@@ -122,7 +112,6 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
             QVERIFY2(margins.bottom() <= gridlock::tests::kMaxAllowedTabMarginPx,
                      qPrintable(QString("Tab '%1' bottom margin %2 > 4").arg(tabTitle).arg(margins.bottom())));
         }
-
         // Verify every visible QPushButton inside the tab page has height <= 28px.
         const auto buttons = page->findChildren<QPushButton*>();
         for (const QPushButton* btn : buttons) {
@@ -132,7 +121,6 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
                                         .arg(tabTitle, btn->text()).arg(btn->height())));
             }
         }
-
         // Verify every visible QLineEdit inside the tab page has height <= 28px.
         const auto edits = page->findChildren<QLineEdit*>();
         for (const QLineEdit* edit : edits) {
@@ -143,7 +131,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
             }
         }
 
-        // Verify every visible QComboBox inside the tab page has height <= 28px.
+        // Audit combo box height constraints.
         const auto combos = page->findChildren<QComboBox*>();
         for (const QComboBox* combo : combos) {
             if (combo && combo->isVisible()) {
@@ -157,18 +145,18 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     // 2. Integrated Reference Manual (Docset / Man Viewer) Cohesion & F1 Symbol Lookup.
     bottomTabs->setCurrentIndex(0);
     QCoreApplication::processEvents();
-
+    // Trigger symbol documentation lookup via F1 provider.
     // Lookup symbol with PLT suffix; should strip '@plt', switch to Reference Manual, and render docs.
     const bool foundDoc = mainWindow.lookupSymbolDocumentation(QStringLiteral("MPI_Init@plt"));
     QVERIFY2(foundDoc, "lookupSymbolDocumentation('MPI_Init@plt') must succeed");
     QCoreApplication::processEvents();
-
+    // Validate tab switch to Reference Manual.
     // Confirm active bottom tab switched to Reference Manual.
     QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"),
                                                                       Qt::CaseInsensitive),
              qPrintable(QString("Expected Reference Manual tab active, got '%1'")
                             .arg(bottomTabs->tabText(bottomTabs->currentIndex()))));
-
+    // Inspect documentation content in browser.
     // Confirm ReferenceManualWidget browser contains MPI_Init and SYNOPSIS section header.
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(refManual != nullptr);
@@ -179,7 +167,6 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
              "Reference Manual content must include MPI_Init");
     QVERIFY2(docPlainText.contains(QStringLiteral("SYNOPSIS"), Qt::CaseInsensitive),
              "Reference Manual content must include SYNOPSIS section");
-
     // 3. Tab Audit Snapshot Capability.
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -187,7 +174,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     const int refManIdx = bottomTabs->currentIndex();
     QVERIFY2(mainWindow.captureTabAuditSnapshot(refManIdx, snapshotPath),
              "captureTabAuditSnapshot must return true for valid tab index and output path");
-
+    // Confirm output snapshot file exists on disk with non-zero size.
     const QFileInfo snapInfo(snapshotPath);
     QVERIFY(snapInfo.exists());
     QVERIFY(snapInfo.size() > 0);
@@ -195,17 +182,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
 
 /**
  * @brief Verifies dark-slate visual cohesion across modal dialogs, category sidebars, and table/tree headers.
- *
- * Audits two critical UI surfaces:
- * 1. Modal Dialog Control & Header Cohesion: Instantiates PreferencesDialog, ProjectSettingsDialog,
- *    ProjectWizard, ConditionalBreakpointDialog, TutorialDialog, and XrefInspectorDialog; confirms
- *    non-zero minimum dimensions (width >= 360, height >= 220), compact <= 30px control heights for
- *    QPushButton, QLineEdit, and QComboBox, and a sleek 140..220px category sidebar in PreferencesDialog
- *    with horizontal scrollbar suppression.
- * 2. Table & Tree Column Header Integrity: Confirms that every visible QTableWidget and QTreeView across
- *    ProjectExplorerWidget, RegisterView, DifferentialGrid, VariablesDockWidget, MpiDiagnosticsWidget,
- *    and XrefInspectorDialog enforces QFrame::NoFrame, alternatingRowColors, visible headers,
- *    minimumSectionSize >= 48, and zero collapsed columns (sectionSize >= 40).
+ * Audits dialog dimensions, compact control heights, and table/tree column header integrity.
  */
 void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     // Instantiate and expose MainWindow with standard preview fixture data.
@@ -262,35 +239,34 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
              "PreferencesDialog categoryList must suppress horizontal scrollbar clipping");
     prefsDlg.hide();
 
-    // Audit AttachProcessDialog, NewProjectDialog, AboutDialog, ProjectSettingsDialog,
-    // ProjectWizard, ConditionalBreakpointDialog, TutorialDialog, and XrefInspectorDialog.
+    // Audit AttachProcessDialog dimensions and controls.
     gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
     verifyDialogCohesion(&attachDlg, QStringLiteral("AttachProcessDialog"));
-
+    // Audit NewProjectDialog dimensions and controls.
     gridlock::ui::NewProjectDialog newProjDlg(&mainWindow);
     verifyDialogCohesion(&newProjDlg, QStringLiteral("NewProjectDialog"));
     newProjDlg.hide();
-
+    // Audit AboutDialog dimensions and controls.
     gridlock::ui::AboutDialog aboutDlg(&mainWindow);
     verifyDialogCohesion(&aboutDlg, QStringLiteral("AboutDialog"));
     aboutDlg.hide();
-
+    // Audit ProjectSettingsDialog dimensions and controls.
     gridlock::ui::ProjectSettingsDialog projSettingsDlg(&mainWindow);
     verifyDialogCohesion(&projSettingsDlg, QStringLiteral("ProjectSettingsDialog"));
     projSettingsDlg.hide();
-
+    // Audit ProjectWizard dimensions and controls.
     gridlock::ui::dialogs::ProjectWizard projectWizard(&mainWindow);
     verifyDialogCohesion(&projectWizard, QStringLiteral("ProjectWizard"));
     projectWizard.hide();
-
+    // Audit ConditionalBreakpointDialog dimensions and controls.
     gridlock::ui::ConditionalBreakpointDialog condBpDlg(QString(), &mainWindow);
     verifyDialogCohesion(&condBpDlg, QStringLiteral("ConditionalBreakpointDialog"));
     condBpDlg.hide();
-
+    // Audit TutorialDialog dimensions and controls.
     gridlock::ui::TutorialDialog tutorialDlg(&mainWindow);
     verifyDialogCohesion(&tutorialDlg, QStringLiteral("TutorialDialog"));
     tutorialDlg.hide();
-
+    // Audit XrefInspectorDialog dimensions and controls.
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(disasm != nullptr);
     auto* xrefDlg = disasm->openXrefInspector(0x00401149ULL);
@@ -352,32 +328,28 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
         }
     }
 
-    // Verify RegisterView table.
+    // Verify RegisterView table integrity and alternating row colors.
     auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>();
     QVERIFY(regView != nullptr);
     for (QTableWidget* tbl : regView->findChildren<QTableWidget*>()) {
         verifyTableIntegrity(tbl, QStringLiteral("RegisterView"));
     }
-
-    // Verify DifferentialGrid (Watch Expressions).
+    // Verify DifferentialGrid (Watch Expressions) table integrity.
     auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
     QVERIFY(diffGrid != nullptr);
     verifyTableIntegrity(diffGrid, QStringLiteral("DifferentialGrid"));
-
-    // Verify VariablesDockWidget tree.
+    // Verify VariablesDockWidget tree integrity and section sizes.
     auto* varsDock = mainWindow.findChild<gridlock::VariablesDockWidget*>();
     QVERIFY(varsDock != nullptr);
     for (QTreeView* tree : varsDock->findChildren<QTreeView*>()) {
         verifyTreeIntegrity(tree, QStringLiteral("VariablesDockWidget"));
     }
-
-    // Verify AttachProcessDialog table.
+    // Verify AttachProcessDialog table integrity.
     for (QTableWidget* tbl : attachDlg.findChildren<QTableWidget*>()) {
         verifyTableIntegrity(tbl, QStringLiteral("AttachProcessDialog"));
     }
     attachDlg.hide();
-
-    // Verify XrefInspectorDialog tables.
+    // Verify XrefInspectorDialog table integrity.
     for (QTableWidget* tbl : xrefDlg->findChildren<QTableWidget*>()) {
         verifyTableIntegrity(tbl, QStringLiteral("XrefInspectorDialog"));
     }
@@ -385,17 +357,8 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
 }
 
 /**
- * @brief Verifies cross-pane workflow bridges, DisassemblyView context actions, and DisassemblyAnalysis line rebalance.
- *
- * Tests three key architectural requirements:
- * 1. Evaluator & Variables -> Watch Expressions Bridge: Promoting an expression from
- *    ExpressionEvaluatorWidget or VariablesDockWidget emits watchExpressionRequested and
- *    populates MainWindow's DifferentialGrid (Watch Expressions).
- * 2. DisassemblyView Context Actions -> Reference Manual: Querying context actions at
- *    0x0040113d (call <MPI_Init@plt>) returns the cohesive action list, and triggering
- *    "Lookup in Reference Manual (F1)" switches BottomConsoleTabs to Reference Manual
- *    and renders MPI_Init documentation.
- * 3. File Line Headroom: Confirms src/ui/views/DisassemblyAnalysis.cpp is strictly < 850 lines.
+ * @brief Verifies cross-pane workflow bridges, DisassemblyView context actions, and line rebalance.
+ * Tests evaluator-to-watch promotion, disassembly context menu F1 manual lookup, and file headroom.
  */
 void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
     gridlock::ui::MainWindow mainWindow;
@@ -493,19 +456,8 @@ void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
 }
 
 /**
- * @brief Verifies Zeal docset UI integration, unclipped CFG basic-block comments,
- *        and MpiDiagnosticsWidget rank wait-state table.
- *
- * Tests three key user-facing workstation fixes:
- * 1. CFG Basic-Block Unclipped Widths: Verifies DisassemblyView::blockWidthForAddress()
- *    sizes basic blocks (e.g. loc_0x401149 and loc_0x40114f) dynamically using QFontMetrics
- *    over the full instruction + inline comment text so comments are never clipped.
- * 2. MPI Diagnostics Wait-State Table: Verifies MpiDiagnosticsWidget is populated with a
- *    structured 6-column rank wait-state QTableWidget (rankWaitTableRowCount() >= 1) and
- *    a 26px top control strip instead of a blank void.
- * 3. ReferenceManualWidget Zeal Docset Integration: Verifies ReferenceManualWidget exposes
- *    loadedDocsetNames(), populates its docset selector combo box, and renders real HTML
- *    from disk when a Zeal docset entry is selected.
+ * @brief Verifies Zeal docset UI integration, unclipped CFG comments, and MPI Diagnostics table.
+ * Tests basic-block comment formatting, MPI Diagnostics wait-state table, and docset HTML preview.
  */
 void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable() {
     gridlock::ui::MainWindow mainWindow;
@@ -552,20 +504,8 @@ void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable()
 }
 
 /**
- * @brief Verifies SourceCodeView uniform canvas without right-half grey band,
- *        structured MpiNetworkLogWidget 6-column table, single-row ReferenceManualWidget
- *        header bar, and monochrome toolbar glyphs.
- *
- * Tests four visual cohesion requirements:
- * 1. SourceCodeView Uniform Canvas & Gutter: Verifies rightViewportMargin() == 0,
- *    hasRightMarginFill() == false, and pixel sampling at x = width * 0.25 and x = width * 0.85
- *    on an empty row of sourceView->grab().toImage() yields identical #16181d RGB values.
- * 2. Structured MpiNetworkLogWidget Table: Verifies MpiNetworkLogWidget contains a 6-column
- *    QTableWidget with QFrame::NoFrame and appendLog() populates structured table rows
- *    (logRowCount() >= 1).
- * 3. Single-Row ReferenceManualWidget Header & Monochrome Toolbar Glyphs: Verifies
- *    ReferenceManualWidget::headerBarHeight() <= 30 and zero QToolBar actions/buttons
- *    contain multicolor emoji codepoints (U+23E9).
+ * @brief Verifies SourceCodeView uniform canvas, MpiNetworkLogWidget table, and header density.
+ * Confirms uniform editor background color, 6-column network log table, and monochrome glyphs.
  */
 void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
     gridlock::ui::MainWindow mainWindow;
@@ -619,18 +559,8 @@ void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
 }
 
 /**
- * @brief Verifies DifferentialGrid uniform empty viewport, stretched watch headers, and GDB/Evaluator console prompt bars.
- *
- * Audits two critical UI surfaces from Prompt 27:
- * 1. DifferentialGrid (Watch Expressions) Empty Viewport & Stretch Headers:
- *    Renders DifferentialGrid at 260x220 with 2 ranks and 2 watch expressions, grabs an offscreen
- *    image, and samples the empty area below the last row on the left (x = 25, y = 190) versus the
- *    right (x = 180, y = 190). Confirms both pixels share the exact same dark-slate background color
- *    (eliminating the lighter-grey vertical column under RANK 0 / RANK 1), and confirms
- *    horizontalHeaderStretchEnabled() == true.
- * 2. GDB Console & Evaluator Prompt Bar & Header Cohesion:
- *    Confirms that both GdbConsoleWidget and ExpressionEvaluatorWidget expose compact 26px (<= 30px)
- *    header/prompt strips with contentsMargins().left() <= 6 and a QFrame::NoFrame output viewport.
+ * @brief Verifies DifferentialGrid uniform empty viewport, stretched headers, and console prompt bars.
+ * Audits watch expressions background color, stretched headers, and compact console prompt strips.
  */
 void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
     gridlock::ui::MainWindow mainWindow;
@@ -686,18 +616,8 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
 }
 
 /**
- * @brief Verifies toolbar target/rank controls, state-aware debugger action enablement, and synchronized Run -> Step -> Stop workflow.
- *
- * Validates two end-to-end UX requirements from Prompt 28:
- * 1. Toolbar Target Selector, Rank SpinBox & Idle Button States:
- *    Confirms that MainWindow exposes #toolbarTargetSelector (QComboBox) and #toolbarRankSpin (QSpinBox),
- *    and that when isDebugSessionActive() == false (Idle state), Run Target is enabled while
- *    Step Inst and Terminate Session are disabled.
- * 2. End-to-End Interactive Run -> Step -> Register/Source/Rack Sync -> Stop Loop:
- *    Sets #toolbarRankSpin to 4, triggers startTargetWorkflow(), confirms 4 ranks in ServerRackView
- *    and entry PC at 0x00401120ULL, steps twice via stepInstructionWorkflow() (0x00401120 -> 0x00401124 -> 0x00401125)
- *    verifying DisassemblyView, RegisterView, ServerRackView, and SourceCodeView::executionLine() stay
- *    synchronized, and finally triggers stopTargetWorkflow() to confirm return to STATUS: IDLE.
+ * @brief Verifies toolbar target/rank controls, debugger actions, and synchronized Run/Step/Stop loop.
+ * Confirms state-aware toolbar buttons and cross-pane instruction stepping synchronization.
  */
 void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     gridlock::ui::MainWindow mainWindow;
@@ -828,58 +748,57 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     QVERIFY(sourceView != nullptr && disasmView != nullptr && bottomTabs != nullptr);
 
     // 1. Bidirectional Source Line <-> Instruction Address Mapping.
+    // Verify source line 13 maps to instruction address 0x0040113d.
     QCOMPARE(mainWindow.sourceLineToAddress(13), 0x0040113dULL);
+    // Verify instruction address 0x0040113d maps back to source line 13.
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
+    // Select line 16 in source editor.
     sourceView->selectSourceLine(16);
     QApplication::processEvents();
+    // Confirm disassembly viewport synchronized to instruction at line 16.
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
+    // Emit instruction address selection from disassembly view.
     emit disasmView->addressSelected(0x0040113dULL);
     QApplication::processEvents();
+    // Confirm source editor synchronized back to line 13.
     QCOMPARE(sourceView->executionLine(), 13);
 
-    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code") & 3. Bottom Console Maximize Toggle.
+    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code").
+    // Switch to Reverse Engineering perspective with split CFG and decompiler.
     mainWindow.setWorkspacePerspective(QStringLiteral("Reverse"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
     QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700,
              "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
 
+    // Switch to MPI perspective with diagnostics table front and center.
     mainWindow.setWorkspacePerspective(QStringLiteral("MPI"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("MPI"));
     QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive),
              "MPI perspective must activate the MPI Diagnostics bottom tab");
 
+    // Switch to Code perspective restoring balanced source and disassembly viewports.
     mainWindow.setWorkspacePerspective(QStringLiteral("Code"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Code"));
     QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200,
              "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
 
+    // 3. Bottom Console Maximize Toggle.
     const int baseHeight = bottomTabs->height();
+    // Maximize bottom console to inspect logs and diagnostics.
     mainWindow.toggleMaximizeBottomConsole();
     QApplication::processEvents();
     QVERIFY2(bottomTabs->height() > baseHeight, "toggleMaximizeBottomConsole() must expand BottomConsoleTabs height");
+    // Restore bottom console back to default workstation height.
     mainWindow.toggleMaximizeBottomConsole();
     QApplication::processEvents();
 }
 
 /**
- * @brief Verifies breakpoint-aware Run Target / Continue execution, granular source-to-RIP line mapping, and CFG active instruction markers.
- *
- * Validates three critical debugger workflow requirements from Prompt 31:
- * 1. Granular Source Line <-> Instruction Mapping:
- *    Confirms mainWindow.addressToSourceLine(0x00401120ULL) == 12 (prologue),
- *    mainWindow.addressToSourceLine(0x00401128ULL) == 15 (DeeplyNested data[3] stack alloc),
- *    mainWindow.addressToSourceLine(0x0040113dULL) == 13 (MPI_Init), and
- *    mainWindow.addressToSourceLine(0x00401149ULL) == 16 (loop condition).
- * 2. Breakpoint-Aware Run Target & Continue Workflow:
- *    Sets breakpoints on lines 15 and 16 in SourceCodeView, triggers startTargetWorkflow(),
- *    confirms execution advances to the first active breakpoint (line 15 / 0x00401128ULL),
- *    then triggers continueExecutionWorkflow() and confirms execution advances to the next
- *    active breakpoint (line 16 / 0x00401149ULL).
- * 3. Visible Active Instruction Marker Inside CFG Basic Blocks:
- *    Confirms DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) returns true.
+ * @brief Verifies breakpoint-aware Run/Continue, source-to-RIP line mapping, and CFG active instruction markers.
+ * Validates granular address-to-line mapping, breakpoint-aware target workflow, and active CFG block marker.
  */
 void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMarker() {
     gridlock::ui::MainWindow mainWindow;
@@ -901,15 +820,21 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
     QVERIFY(sourceView != nullptr && disasmView != nullptr && serverRack != nullptr);
 
     // 1. Granular Source Line <-> Instruction Address Mapping.
+    // Verify line 12 maps to prologue address 0x00401120.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401120ULL), 12);
+    // Verify line 15 maps to stack allocation at 0x00401128.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401128ULL), 15);
+    // Verify line 13 maps to MPI_Init call at 0x0040113d.
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
+    // Verify line 16 maps to loop condition at 0x00401149.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401149ULL), 16);
+    // Reverse lookup line 15 to instruction address.
     QCOMPARE(mainWindow.sourceLineToAddress(15), 0x00401128ULL);
+    // Reverse lookup line 16 to instruction address.
     QCOMPARE(mainWindow.sourceLineToAddress(16), 0x00401149ULL);
-
     // 2. Breakpoint-Aware Run Target & Continue Workflow.
     mainWindow.stopTargetWorkflow();
+    // Clear and set breakpoints on lines 15 and 16.
     sourceView->setBreakpoints(QSet<int>());
     sourceView->toggleBreakpoint(15);
     sourceView->toggleBreakpoint(16);
@@ -917,22 +842,86 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
              "SourceCodeView::toggleBreakpoint(15/16) must register active breakpoints");
     QVERIFY2(sourceView->breakpoints().contains(15) && sourceView->breakpoints().contains(16),
              "SourceCodeView::breakpoints() must contain lines 15 and 16");
-
+    // Launch target and verify stop at first active breakpoint.
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401128ULL);
     QCOMPARE(sourceView->executionLine(), 15);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401128ULL);
-
+    // Continue to next active breakpoint at line 16.
     QVERIFY2(mainWindow.continueExecutionWorkflow(),
              "MainWindow::continueExecutionWorkflow() must advance to the next active breakpoint");
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
     QCOMPARE(sourceView->executionLine(), 16);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401149ULL);
-
     // 3. Visible Active Instruction Marker Inside CFG Basic Blocks.
+    // Verify CFG basic block marker is visible for active instruction.
     QVERIFY2(disasmView->activeCfgBlockContainsInstructionMarker(0x00401149ULL),
              "DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) must be true");
 }
 
+/**
+ * @brief Verifies floating dock pop-out, drag-back redocking via drop zone, and 1-click/double-click restore.
+ *
+ * Validates three critical window-management and redocking workflows:
+ * 1. Pop Out (floatDockWidget) & 1-Click / Double-Click Redock (redockWidget):
+ *    Floats ServerRackDock and verifies visibility and floating state, then redocks it
+ *    and verifies original parent hierarchy and non-zero dimensions (> 50px).
+ * 2. Drag-Back Drop-Zone Redocking (handleDockDragRelease):
+ *    Floats ServerRackDock and simulates dragging over its home dock region center,
+ *    verifying that dropping over the home zone snaps it back into place.
+ * 3. redockAllFloatingPanels() Bulk Recovery:
+ *    Floats multiple side panels simultaneously (ServerRackDock and RegisterViewDock)
+ *    and validates that redockAllFloatingPanels() docks all of them cleanly.
+ */
+void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
+    // Instantiate and expose MainWindow with preview fixture data.
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // Query dock instances by their unique registered object names.
+    auto* serverRackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+    auto* registerDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+    QVERIFY2(serverRackDock != nullptr, "ServerRackDock must exist in MainWindow");
+    QVERIFY2(registerDock != nullptr, "RegisterViewDock must exist in MainWindow");
+
+    // 1. Pop Out (floatDockWidget) & 1-Click / Double-Click Redock (redockWidget).
+    QWidget* originalParent = serverRackDock->parentWidget();
+    mainWindow.toggleDockFloating(serverRackDock);
+    // Verify dock transitioned to top-level floating state and remains visible.
+    QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating after toggleDockFloating");
+    QVERIFY2(serverRackDock->isVisible(), "ServerRackDock must remain visible when floating");
+
+    mainWindow.redockWidget(serverRackDock);
+    // Verify dock returned to docked state with original parent and valid geometry.
+    QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must not be floating after redockWidget");
+    QCOMPARE(serverRackDock->parentWidget(), originalParent);
+    QVERIFY2(serverRackDock->isVisible(), "ServerRackDock must be visible after redocking");
+    QVERIFY2(serverRackDock->width() > 50 && serverRackDock->height() > 50,
+             "ServerRackDock must retain visible dimensions > 50px inside its dock/splitter slot");
+
+    // 2. Drag-Back Drop-Zone Redocking (handleDockDragRelease).
+    mainWindow.toggleDockFloating(serverRackDock);
+    QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating again");
+    // Calculate global screen center of dock's home drop zone.
+    const QPoint homeGlobalCenter = mainWindow.dockHomeGlobalRect(serverRackDock).center();
+    // Simulate mouse release over dock home drop zone.
+    mainWindow.handleDockDragRelease(serverRackDock, homeGlobalCenter);
+    QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must redock when dropped into its home drop zone");
+    QCOMPARE(serverRackDock->parentWidget(), originalParent);
+
+    // 3. redockAllFloatingPanels() Restores All Popped-Out Panels.
+    mainWindow.toggleDockFloating(serverRackDock);
+    mainWindow.toggleDockFloating(registerDock);
+    QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating");
+    QVERIFY2(mainWindow.isDockFloating(registerDock), "RegisterViewDock must be floating");
+    // Restore all floating panels in a single batch operation.
+    mainWindow.redockAllFloatingPanels();
+    QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be docked after redockAllFloatingPanels");
+    QVERIFY2(!mainWindow.isDockFloating(registerDock), "RegisterViewDock must be docked after redockAllFloatingPanels");
+}

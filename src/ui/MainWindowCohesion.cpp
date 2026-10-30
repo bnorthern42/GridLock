@@ -20,6 +20,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -89,67 +90,45 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         return;
     }
 
-    // Apply self-contained dark-slate workstation stylesheet directly to BottomConsoleTabs
-    // so tab bars, nested sub-tabs, inputs, buttons, and viewports render uniformly
-    // even when MainWindow is instantiated headlessly without global QApplication QSS.
+    // Apply self-contained dark-slate workstation stylesheet directly to BottomConsoleTabs.
     m_bottomTabs->setStyleSheet(QStringLiteral(
         "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }"
         "QTabBar { background: #181a1f; border-bottom: 1px solid #2c313a; }"
-        "QTabBar::tab { background: #181a1f; color: #9da5b4; padding: 3px 10px; "
-        "min-height: 18px; max-height: 22px; border-right: 1px solid #282c34; "
-        "border-bottom: 1px solid #2c313a; font-size: 11px; font-weight: 600; }"
+        "QTabBar::tab { background: #181a1f; color: #9da5b4; padding: 3px 10px; min-height: 18px; max-height: 22px; border-right: 1px solid #282c34; border-bottom: 1px solid #2c313a; font-size: 11px; font-weight: 600; }"
         "QTabBar::tab:selected { background: #21252b; color: #ffffff; border-bottom: 2px solid #528bff; }"
         "QTabBar::tab:hover:!selected { background: #1e222a; color: #d7dae0; }"
-        "QLineEdit, QComboBox, QSpinBox { background: #141619; color: #d7dae0; "
-        "border: 1px solid #323844; border-radius: 2px; padding: 0px 6px; "
-        "min-height: 20px; max-height: 22px; font-size: 11px; }"
+        "QLineEdit, QComboBox, QSpinBox { background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 11px; }"
         "QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid #528bff; background: #1b1e24; }"
-        "QPushButton { background: #252932; color: #d7dae0; border: 1px solid #323844; "
-        "border-radius: 2px; padding: 1px 8px; min-height: 20px; max-height: 22px; "
-        "font-size: 10px; font-weight: 600; }"
+        "QPushButton { background: #252932; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 10px; font-weight: 600; }"
         "QPushButton:hover { background: #2c323d; border: 1px solid #528bff; color: #ffffff; }"
         "QCheckBox { color: #abb2bf; font-size: 11px; font-weight: 600; spacing: 5px; }"
-        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background: #16181d; color: #d7dae0; "
-        "border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"));
+        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background: #16181d; color: #d7dae0; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"));
 
     // 1. Harmonize GdbConsoleWidget (GDB Console tab) outer layout and control bar metrics.
     if (m_gdbConsoleWidget) {
         m_gdbConsoleWidget->setAttribute(Qt::WA_StyledBackground, true);
         m_gdbConsoleWidget->setContentsMargins(0, 0, 0, 0);
-        if (QLayout* gdbLayout = m_gdbConsoleWidget->layout()) {
-            gdbLayout->setContentsMargins(0, 0, 0, 0);
-            gdbLayout->setSpacing(0);
-        }
+        if (QLayout* l = m_gdbConsoleWidget->layout()) { l->setContentsMargins(0, 0, 0, 0); l->setSpacing(0); }
         m_gdbConsoleWidget->setStyleSheet(QStringLiteral(
-            "#GdbConsoleWidget { background: #16181d; }"
-            "#gdbConsoleHeaderBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
-            "#gdbConsolePromptBar { background: #21252b; border-top: 1px solid #2c313a; }"
-            "#GdbConsoleWidget QPlainTextEdit { background: #16181d; color: #d7dae0; "
-            "border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
+            "#GdbConsoleWidget { background: #16181d; } #gdbConsoleHeaderBar, #gdbConsolePromptBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
+            "#GdbConsoleWidget QPlainTextEdit { background: #16181d; color: #d7dae0; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
     }
 
     // 2. Harmonize SpackManager (HPC Console tab) outer layout and control bar metrics.
     if (m_spackManager) {
         m_spackManager->setAttribute(Qt::WA_StyledBackground, true);
         m_spackManager->setContentsMargins(0, 0, 0, 0);
-        if (QLayout* spackLayout = m_spackManager->layout()) {
-            spackLayout->setContentsMargins(0, 0, 0, 0);
-            spackLayout->setSpacing(0);
-            if (auto* vbox = qobject_cast<QVBoxLayout*>(spackLayout)) {
+        if (QLayout* l = m_spackManager->layout()) {
+            l->setContentsMargins(0, 0, 0, 0); l->setSpacing(0);
+            if (auto* vbox = qobject_cast<QVBoxLayout*>(l)) {
                 for (int i = 0; i < vbox->count(); ++i) {
-                    if (QLayout* subLayout = vbox->itemAt(i)->layout()) {
-                        subLayout->setContentsMargins(6, 2, 6, 2);
-                        subLayout->setSpacing(6);
-                    }
+                    if (QLayout* sub = vbox->itemAt(i)->layout()) { sub->setContentsMargins(6, 2, 6, 2); sub->setSpacing(6); }
                 }
             }
         }
         m_spackManager->setStyleSheet(QStringLiteral(
-            "#HpcConsoleDock { background: #21252b; }"
-            "#HpcConsoleDock QPlainTextEdit { background: #16181d; color: #d7dae0; "
-            "border: none; border-top: 1px solid #2c313a; border-bottom: 1px solid #2c313a; "
-            "font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"
-            "#HpcConsoleDock QLabel { color: #abb2bf; font-size: 10px; font-weight: 700; padding: 0px 4px; }"));
+            "#HpcConsoleDock { background: #21252b; } #HpcConsoleDock QLabel { color: #abb2bf; font-size: 10px; font-weight: 700; padding: 0px 4px; }"
+            "#HpcConsoleDock QPlainTextEdit { background: #16181d; color: #d7dae0; border: none; border-top: 1px solid #2c313a; border-bottom: 1px solid #2c313a; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
     }
 
     // 3. Enforce zero-gutter outer margins, compact <= 22px controls, and borderless frames on all tabs.
@@ -157,22 +136,17 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         QWidget* page = m_bottomTabs->widget(i);
         if (!page) continue;
         page->setContentsMargins(0, 0, 0, 0);
-        if (QLayout* pageLayout = page->layout()) {
-            pageLayout->setContentsMargins(0, 0, 0, 0);
-            pageLayout->setSpacing(0);
-        }
-        // Cap push buttons, line edits, combo boxes, and spin boxes inside each tab page at 22px height.
-        for (auto* btn : page->findChildren<QPushButton*>()) if (btn->maximumHeight() > 24) btn->setFixedHeight(22);
-        for (auto* edit : page->findChildren<QLineEdit*>()) if (edit->maximumHeight() > 24) edit->setFixedHeight(22);
-        for (auto* combo : page->findChildren<QComboBox*>()) if (combo->maximumHeight() > 24) combo->setFixedHeight(22);
-        for (auto* spin : page->findChildren<QSpinBox*>()) if (spin->maximumHeight() > 24) spin->setFixedHeight(22);
+        if (QLayout* pl = page->layout()) { pl->setContentsMargins(0, 0, 0, 0); pl->setSpacing(0); }
+        // Cap interactive controls inside each tab page at 22px height.
+        for (auto* b : page->findChildren<QPushButton*>()) if (b->maximumHeight() > 24) b->setFixedHeight(22);
+        for (auto* e : page->findChildren<QLineEdit*>()) if (e->maximumHeight() > 24) e->setFixedHeight(22);
+        for (auto* c : page->findChildren<QComboBox*>()) if (c->maximumHeight() > 24) c->setFixedHeight(22);
+        for (auto* s : page->findChildren<QSpinBox*>()) if (s->maximumHeight() > 24) s->setFixedHeight(22);
         // Strip redundant QFrame borders from embedded text and list viewports.
-        for (auto* frame : page->findChildren<QFrame*>()) {
-            if (qobject_cast<QPlainTextEdit*>(frame) || qobject_cast<QTextEdit*>(frame) ||
-                qobject_cast<QTextBrowser*>(frame) || qobject_cast<QListWidget*>(frame) ||
-                qobject_cast<QTreeView*>(frame) || qobject_cast<QTableView*>(frame)) {
-                frame->setFrameShape(QFrame::NoFrame);
-            }
+        for (auto* f : page->findChildren<QFrame*>()) {
+            if (qobject_cast<QPlainTextEdit*>(f) || qobject_cast<QTextEdit*>(f) ||
+                qobject_cast<QTextBrowser*>(f) || qobject_cast<QListWidget*>(f) ||
+                qobject_cast<QTreeView*>(f) || qobject_cast<QTableView*>(f)) f->setFrameShape(QFrame::NoFrame);
         }
     }
 
@@ -239,20 +213,12 @@ void MainWindow::harmonizeBottomConsoleTabs() {
 
     // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
-        const QString perspBtnStyle = QStringLiteral(
-            "QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; "
-            "border-radius: 2px; padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; }"
-            "QPushButton:hover { background: #282c34; color: #ffffff; border-color: #528bff; }"
-            "QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
-        auto makePerspBtn = [&](const QString& label, const QString& objName, const QString& persp, bool checked) {
-            auto* btn = new QPushButton(label, mainToolbar);
-            btn->setObjectName(objName);
-            btn->setCheckable(true);
-            btn->setChecked(checked);
-            btn->setStyleSheet(perspBtnStyle);
-            connect(btn, &QPushButton::clicked, this, [this, persp]() { setWorkspacePerspective(persp); });
-            mainToolbar->addWidget(btn);
-            return btn;
+        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
+        auto makePerspBtn = [&](const QString& label, const QString& obj, const QString& persp, bool chk) {
+            auto* b = new QPushButton(label, mainToolbar);
+            b->setObjectName(obj); b->setCheckable(true); b->setChecked(chk); b->setStyleSheet(pStyle);
+            connect(b, &QPushButton::clicked, this, [this, persp]() { setWorkspacePerspective(persp); });
+            mainToolbar->addWidget(b); return b;
         };
         mainToolbar->addSeparator();
         m_perspCodeBtn = makePerspBtn(QStringLiteral("CODE"), QStringLiteral("perspectiveCodeBtn"), QStringLiteral("Code"), true);
@@ -270,24 +236,19 @@ void MainWindow::harmonizeBottomConsoleTabs() {
     if (m_bottomToolRail && !m_bottomToolRail->layout()) {
         m_bottomToolRail->setStyleSheet(QStringLiteral(
             "#bottomToolWindowRail { background: #181a1f; border-right: 1px solid #252932; }"
-            "#bottomToolWindowRail QToolButton { background: transparent; color: #9da5b4; border: 1px solid transparent; "
-            "border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; }"
+            "#bottomToolWindowRail QToolButton { background: transparent; color: #9da5b4; border: 1px solid transparent; border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; }"
             "#bottomToolWindowRail QToolButton:hover { background: #21252b; color: #ffffff; border: 1px solid #323844; }"
             "#bottomToolWindowRail QToolButton:checked { background: #21252b; color: #61afef; border: 1px solid #528bff; border-left: 2px solid #528bff; }"));
         auto* railLayout = new QVBoxLayout(m_bottomToolRail);
-        railLayout->setContentsMargins(3, 4, 3, 4);
-        railLayout->setSpacing(4);
+        railLayout->setContentsMargins(3, 4, 3, 4); railLayout->setSpacing(4);
 
         // Render crisp 16x16 antialiased vector icons for Debug, MPI, Terminal, and Docs rail buttons.
         auto makeRailIcon = [](int kind) -> QIcon {
-            QPixmap px(16, 16);
-            px.fill(Qt::transparent);
-            QPainter p(&px);
-            p.setRenderHint(QPainter::Antialiasing, true);
+            QPixmap px(16, 16); px.fill(Qt::transparent);
+            QPainter p(&px); p.setRenderHint(QPainter::Antialiasing, true);
             QPen pen(QColor(0xd7, 0xda, 0xe0), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
             if (kind == 0) { // Debug: inspection crosshair ring with center core
-                pen.setColor(QColor(0x61, 0xaf, 0xef)); p.setPen(pen);
-                p.drawEllipse(QRectF(3.0, 3.0, 10.0, 10.0));
+                pen.setColor(QColor(0x61, 0xaf, 0xef)); p.setPen(pen); p.drawEllipse(QRectF(3.0, 3.0, 10.0, 10.0));
                 p.drawLine(QPointF(8.0, 1.0), QPointF(8.0, 3.5)); p.drawLine(QPointF(8.0, 12.5), QPointF(8.0, 15.0));
                 p.setBrush(QColor(0x61, 0xaf, 0xef)); p.drawEllipse(QPointF(8.0, 8.0), 1.5, 1.5);
             } else if (kind == 1) { // MPI: 3-node cluster topology graph
@@ -301,8 +262,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
                 p.drawLine(QPointF(9.0, 11.5), QPointF(13.5, 11.5));
             } else { // Docs: open reference manual pages
                 pen.setColor(QColor(0xc6, 0x78, 0xdd)); p.setPen(pen);
-                p.drawRoundedRect(QRectF(2.5, 3.0, 11.0, 10.0), 1.5, 1.5);
-                p.drawLine(QPointF(8.0, 3.2), QPointF(8.0, 12.8));
+                p.drawRoundedRect(QRectF(2.5, 3.0, 11.0, 10.0), 1.5, 1.5); p.drawLine(QPointF(8.0, 3.2), QPointF(8.0, 12.8));
             }
             return QIcon(px);
         };
@@ -318,9 +278,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
             const QString groupId = QString::fromLatin1(sp.id);
             auto* btn = new QToolButton(m_bottomToolRail);
             btn->setObjectName(QStringLiteral("bottomRailBtn_") + groupId);
-            btn->setCheckable(true);
-            btn->setIcon(makeRailIcon(sp.iconKind));
-            btn->setIconSize(QSize(16, 16));
+            btn->setCheckable(true); btn->setIcon(makeRailIcon(sp.iconKind)); btn->setIconSize(QSize(16, 16));
             btn->setToolTip(QString::fromLatin1(sp.tip));
             connect(btn, &QToolButton::clicked, this, [this, groupId]() { selectBottomToolGroup(groupId); });
             connect(new QShortcut(QKeySequence(Qt::ALT | sp.key), this), &QShortcut::activated, this, [this, groupId]() { selectBottomToolGroup(groupId); });
@@ -380,10 +338,7 @@ void MainWindow::selectBottomToolGroup(const QString& groupName) {
     if (!m_bottomTabs || m_syncingBottomToolGroup) return;
     QString resolvedGroup;
     for (const QString& g : bottomToolGroups()) {
-        if (g.compare(groupName.trimmed(), Qt::CaseInsensitive) == 0) {
-            resolvedGroup = g;
-            break;
-        }
+        if (g.compare(groupName.trimmed(), Qt::CaseInsensitive) == 0) { resolvedGroup = g; break; }
     }
     if (resolvedGroup.isEmpty()) return;
 
@@ -395,26 +350,16 @@ void MainWindow::selectBottomToolGroup(const QString& groupName) {
         if (it.value()) it.value()->setChecked(it.key() == resolvedGroup);
     }
 
-    // Reveal all linked tabs belonging to resolvedGroup first so target index is selectable.
+    // Synchronize tab visibility and ensure an active tab from resolvedGroup is selected.
     int firstTabInGroup = -1;
     for (int i = 0; i < m_bottomTabs->count(); ++i) {
-        if (bottomToolGroupForTabIndex(i) == resolvedGroup) {
-            m_bottomTabs->setTabVisible(i, true);
-            if (firstTabInGroup < 0) firstTabInGroup = i;
-        }
+        const bool match = (bottomToolGroupForTabIndex(i) == resolvedGroup);
+        m_bottomTabs->setTabVisible(i, match);
+        if (match && firstTabInGroup < 0) firstTabInGroup = i;
     }
-
-    // Switch current tab into resolvedGroup before hiding unrelated tabs to prevent unintended fallback jumps.
     const int curIdx = m_bottomTabs->currentIndex();
     if (firstTabInGroup >= 0 && bottomToolGroupForTabIndex(curIdx) != resolvedGroup) {
         m_bottomTabs->setCurrentIndex(firstTabInGroup);
-    }
-
-    // Hide all tabs belonging to non-active tool groups.
-    for (int i = 0; i < m_bottomTabs->count(); ++i) {
-        if (bottomToolGroupForTabIndex(i) != resolvedGroup) {
-            m_bottomTabs->setTabVisible(i, false);
-        }
     }
     m_syncingBottomToolGroup = false;
 }
@@ -457,21 +402,15 @@ bool MainWindow::captureTabAuditSnapshot(int tabIndex, const QString& outputPath
 
     // Optional multi-tab visual audit export when GRIDLOCK_AUDIT_SNAPSHOTS=1 is set.
     if (qEnvironmentVariableIsSet("GRIDLOCK_AUDIT_SNAPSHOTS")) {
-        const QList<QPair<int, QString>> auditTargets = {
-            {1, QStringLiteral("/tmp/gridlock_tab_gdb.png")},
-            {3, QStringLiteral("/tmp/gridlock_tab_mpidiag.png")},
-            {5, QStringLiteral("/tmp/gridlock_tab_eval.png")},
-            {6, QStringLiteral("/tmp/gridlock_tab_refman.png")}
-        };
-        for (const auto& target : auditTargets) {
-            if (target.first >= 0 && target.first < m_bottomTabs->count()) {
-                m_bottomTabs->setCurrentIndex(target.first);
-                QCoreApplication::processEvents();
-                grab().save(target.second, "PNG");
+        const QList<QPair<int, QString>> targets = {
+            {1, QStringLiteral("/tmp/gridlock_tab_gdb.png")}, {3, QStringLiteral("/tmp/gridlock_tab_mpidiag.png")},
+            {5, QStringLiteral("/tmp/gridlock_tab_eval.png")}, {6, QStringLiteral("/tmp/gridlock_tab_refman.png")}};
+        for (const auto& tgt : targets) {
+            if (tgt.first >= 0 && tgt.first < m_bottomTabs->count()) {
+                m_bottomTabs->setCurrentIndex(tgt.first); QCoreApplication::processEvents(); grab().save(tgt.second, "PNG");
             }
         }
     }
-
     m_bottomTabs->setCurrentIndex(tabIndex);
     QCoreApplication::processEvents();
     const QPixmap pixmap = grab();
@@ -480,11 +419,6 @@ bool MainWindow::captureTabAuditSnapshot(int tabIndex, const QString& outputPath
 
 /**
  * @brief Loads a 64-bit ELF binary executable or shared object for static inspection.
- *
- * Parses section headers, symbol tables, and printable ASCII strings from the
- * specified binary using native ELF64 structures, populates the ProjectExplorerWidget
- * symbol and string tables, and synchronizes the memory and disassembly views.
- *
  * @param binaryPath Path to executable file on disk.
  * @return True if file is valid ELF64 and successfully parsed; false otherwise.
  */
@@ -521,9 +455,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     // Locate main symbol if present so user targets open directly at main with DWARF line info.
     for (const auto& s : m_elfInspector->symbols()) {
         if (s.isFunction && (s.name == QStringLiteral("main") || s.name == QStringLiteral("sym.main"))) {
-            mainAddr = s.address;
-            mainSymName = s.name;
-            break;
+            mainAddr = s.address; mainSymName = s.name; break;
         }
     }
 
@@ -541,8 +473,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         }
         rebuildDynamicSourceLineMap();
     } else {
-        m_dwarfLineToAddress.clear();
-        m_dwarfAddressToLine.clear();
+        m_dwarfLineToAddress.clear(); m_dwarfAddressToLine.clear();
         const uint64_t entry = (mainAddr != 0ULL) ? mainAddr : m_elfInspector->entryPoint();
         if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
@@ -551,11 +482,6 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
 
 /**
  * @brief Exports the in-memory patched ELF binary image to disk.
- *
- * Checks that an active ELF inspector is present with a valid binary payload,
- * then delegates directly to ElfBinaryInspector::savePatchedBinary to write
- * the modified ELF byte stream with owner and group executable permissions.
- *
  * @param outputPath Destination file system path.
  * @return True if file was successfully written and marked executable; false otherwise.
  */
@@ -565,10 +491,6 @@ bool MainWindow::exportPatchedBinary(const QString& outputPath) const {
 
 /**
  * @brief Performs unified multi-domain case-insensitive search across the workspace.
- *
- * Scans loaded ELF symbols and strings, disassembly lines and user comments,
- * and decompiled C statements for matching query occurrences.
- *
  * @param query Target search query substring.
  * @return List of structured search match records.
  */
@@ -596,17 +518,16 @@ QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(const QSt
         const QStringList lines = m_disassemblyView->toPlainText().split('\n');
         for (int i = 0; i < lines.size(); ++i) {
             if (lines[i].contains(q, Qt::CaseInsensitive)) {
-                const uint64_t addr = m_disassemblyView->addressForLine(i);
-                matches.append({QStringLiteral("Disassembly"), addr, QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')), lines[i].trimmed()});
+                const uint64_t a = m_disassemblyView->addressForLine(i);
+                matches.append({QStringLiteral("Disassembly"), a, QStringLiteral("0x%1").arg(a, 8, 16, QChar('0')), lines[i].trimmed()});
             }
         }
         const QString decompilerText = m_disassemblyView->decompiledPseudocode();
         if (!decompilerText.isEmpty()) {
-            const QStringList decompLines = decompilerText.split('\n');
-            for (int i = 0; i < decompLines.size(); ++i) {
-                if (decompLines[i].contains(q, Qt::CaseInsensitive)) {
-                    const uint64_t addr = m_disassemblyView->decompilerLineToAddress(i + 1);
-                    matches.append({QStringLiteral("Decompiler"), addr, QStringLiteral("Line %1").arg(i + 1), decompLines[i].trimmed()});
+            const QStringList dLines = decompilerText.split('\n');
+            for (int i = 0; i < dLines.size(); ++i) {
+                if (dLines[i].contains(q, Qt::CaseInsensitive)) {
+                    matches.append({QStringLiteral("Decompiler"), m_disassemblyView->decompilerLineToAddress(i + 1), QStringLiteral("Line %1").arg(i + 1), dLines[i].trimmed()});
                 }
             }
         }
@@ -616,13 +537,6 @@ QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(const QSt
 
 /**
  * @brief Detects wait-for cycle among MPI ranks and highlights deadlocked nodes.
- *
- * Performs deterministic cycle detection over directed rank wait-for edges
- * (e.g. rank 0 waiting for rank 1, rank 1 waiting for rank 0).
- * Any nodes identified within a cycle are propagated directly to DisassemblyView
- * to trigger amber/red deadlock indicator badges, and the cutter telemetry status
- * bar is appended with an explicit DEADLOCK DETECTED alert banner.
- *
  * @param waitForGraph Directed edges where key rank waits for value rank.
  * @return List of ranks participating in the deadlock cycle sorted in ascending order.
  */
@@ -705,6 +619,7 @@ bool MainWindow::isRunButtonLatched() const {
  * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
  */
 void MainWindow::setWorkspacePerspective(const QString& perspective) {
+    redockAllFloatingPanels();
     auto* masterSplitter = findChild<QSplitter*>(QStringLiteral("MasterHorizontalSplitter"));
     auto* mainVertSplitter = findChild<QSplitter*>(QStringLiteral("MainVerticalSplitter"));
 
@@ -903,4 +818,118 @@ bool MainWindow::rebuildTargetWorkflow() {
     return true;
 }
 
+/**
+ * @brief Checks if a dock widget is currently detached in a top-level floating window.
+ * @param dock Pointer to the dock widget to inspect.
+ * @return True if dock is floating or detached as top-level window.
+ */
+bool MainWindow::isDockFloating(const QDockWidget* dock) const {
+    return dock != nullptr && (dock->isFloating() || dock->isWindow() || (dock->windowFlags() & Qt::Window));
+}
+
+/**
+ * @brief Toggles a dock widget between floating top-level state and docked workspace slot.
+ * @param dock Pointer to the dock widget to float or redock.
+ */
+void MainWindow::toggleDockFloating(QDockWidget* dock) {
+    if (!dock) return;
+    if (isDockFloating(dock)) { redockWidget(dock); return; }
+    // Record home container (parent splitter or dock area) before detaching into floating window.
+    if (!m_dockHomeSlots.contains(dock)) {
+        DockHomeSlot slot;
+        if (auto* spl = qobject_cast<QSplitter*>(dock->parentWidget())) {
+            slot.splitter = spl; slot.splitterIndex = spl->indexOf(dock);
+        } else {
+            slot.splitter = nullptr; slot.area = dockWidgetArea(dock);
+            if (slot.area == Qt::NoDockWidgetArea) slot.area = Qt::RightDockWidgetArea;
+        }
+        m_dockHomeSlots.insert(dock, slot);
+    }
+    // Detach dock as top-level tool window positioned neatly over workspace.
+    dock->setParent(this, Qt::Tool | Qt::Window | Qt::CustomizeWindowHint);
+    dock->setFloating(true);
+    dock->resize((std::max)(280, dock->width()), (std::max)(220, dock->height()));
+    dock->move(mapToGlobal(rect().center()) - QPoint(dock->width() / 2, dock->height() / 2));
+    dock->show(); dock->raise();
+    if (auto* floatBtn = dock->findChild<QToolButton*>(QStringLiteral("dockFloatBtn"))) {
+        floatBtn->setToolTip(QStringLiteral("Redock Panel to Workspace (Double-Click Title Bar)"));
+    }
+}
+
+/**
+ * @brief Re-docks a floating dock widget into its recorded home splitter or dock area.
+ * @param dock Pointer to the dock widget to re-dock.
+ */
+void MainWindow::redockWidget(QDockWidget* dock) {
+    if (!dock) return;
+    if (m_dockHomeSlots.contains(dock)) {
+        const auto slot = m_dockHomeSlots.value(dock);
+        dock->setWindowFlags(Qt::Widget);
+        if (slot.splitter) {
+            slot.splitter->insertWidget(std::clamp(slot.splitterIndex, 0, slot.splitter->count()), dock);
+            dock->setFloating(false); dock->show();
+            // Restore visible dimensions inside splitter.
+            QList<int> sizes = slot.splitter->sizes();
+            int idx = slot.splitter->indexOf(dock);
+            if (idx >= 0 && idx < sizes.size() && sizes[idx] < 120) {
+                sizes[idx] = 160; slot.splitter->setSizes(sizes);
+            }
+        } else {
+            addDockWidget(slot.area, dock); dock->setFloating(false); dock->show();
+        }
+    } else {
+        dock->setWindowFlags(Qt::Widget); addDockWidget(Qt::RightDockWidgetArea, dock);
+        dock->setFloating(false); dock->show();
+    }
+    if (auto* floatBtn = dock->findChild<QToolButton*>(QStringLiteral("dockFloatBtn"))) {
+        floatBtn->setToolTip(QStringLiteral("Pop Out / Float Panel"));
+    }
+}
+
+/**
+ * @brief Calculates the global screen rectangle of a dock widget's home drop zone.
+ * @param dock Pointer to the dock widget.
+ * @return Global screen rectangle of the home dock or splitter region.
+ */
+QRect MainWindow::dockHomeGlobalRect(const QDockWidget* dock) const {
+    if (m_dockHomeSlots.contains(const_cast<QDockWidget*>(dock))) {
+        const auto& slot = m_dockHomeSlots[const_cast<QDockWidget*>(dock)];
+        if (slot.splitter && slot.splitter->isVisible()) return QRect(slot.splitter->mapToGlobal(QPoint(0, 0)), slot.splitter->size());
+        if (slot.area == Qt::LeftDockWidgetArea) return QRect(mapToGlobal(QPoint(0, 0)), QSize(280, height()));
+        if (slot.area == Qt::RightDockWidgetArea) return QRect(mapToGlobal(QPoint(width() - 280, 0)), QSize(280, height()));
+        if (slot.area == Qt::BottomDockWidgetArea) return QRect(mapToGlobal(QPoint(0, height() - 260)), QSize(width(), 260));
+    }
+    return QRect(mapToGlobal(QPoint(0, 0)), size());
+}
+
+/**
+ * @brief Evaluates mouse release position during dock drag and redocks if dropped in home zone.
+ * @param dock Pointer to the dock widget being dragged.
+ * @param globalReleasePos Global cursor release position.
+ * @return True if redocked, false otherwise.
+ */
+bool MainWindow::handleDockDragRelease(QDockWidget* dock, const QPoint& globalReleasePos) {
+    if (!dock) return false;
+    const QRect homeRect = dockHomeGlobalRect(dock).adjusted(-60, -60, 60, 60);
+    const QRect mainRect = QRect(mapToGlobal(QPoint(0, 0)), size()).adjusted(-40, -40, 40, 40);
+    if (homeRect.contains(globalReleasePos) || mainRect.contains(globalReleasePos)) {
+        redockWidget(dock);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Restores all floating or detached panels back into their home workstation slots.
+ */
+void MainWindow::redockAllFloatingPanels() {
+    for (auto* dock : m_dockHomeSlots.keys()) {
+        if (dock && isDockFloating(dock)) redockWidget(dock);
+    }
+    for (auto* dock : findChildren<QDockWidget*>()) {
+        if (dock && isDockFloating(dock)) redockWidget(dock);
+    }
+}
+
 }  // namespace gridlock::ui
+

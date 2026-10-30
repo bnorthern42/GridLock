@@ -177,5 +177,8 @@ private slots:
 
     /** @brief Verifies gutter QContextMenuEvent isolation from editor viewport menu and clean rollback of canceled breakpoints. */
     void testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly();
+
+    /** @brief Verifies floating dock pop-out, drag-back redocking via drop zone, and 1-click/double-click restore. */
+    void testFloatingDockPopOutAndDragBackRedock();
 };
 
