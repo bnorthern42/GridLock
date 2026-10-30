@@ -18,12 +18,14 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFont>
+#include <QFontDatabase>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPalette>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -37,6 +39,41 @@
 namespace gridlock::ui {
 
 namespace {
+
+/**
+ * @brief Returns a deduplicated list of 16+ curated and system-installed monospace font families.
+ */
+QStringList discoverMonospaceFontFamilies() {
+    // Seed with 16 curated developer monospace families so headless/CI environments always have >= 15 entries.
+    QStringList families = {
+        QStringLiteral("JetBrains Mono"),     QStringLiteral("Fira Code"),
+        QStringLiteral("FiraCode Nerd Font"), QStringLiteral("Hack"),
+        QStringLiteral("Source Code Pro"),    QStringLiteral("Cascadia Code"),
+        QStringLiteral("Iosevka"),            QStringLiteral("IBM Plex Mono"),
+        QStringLiteral("DejaVu Sans Mono"),   QStringLiteral("Liberation Mono"),
+        QStringLiteral("Ubuntu Mono"),        QStringLiteral("Noto Sans Mono"),
+        QStringLiteral("Inconsolata"),        QStringLiteral("Victor Mono"),
+        QStringLiteral("Terminus"),           QStringLiteral("Monospace")
+    };
+    // Merge all fixed-pitch or monospace-named system font families discovered via QFontDatabase.
+    const QStringList sysFamilies = QFontDatabase::families();
+    for (const QString& fam : sysFamilies) {
+        const bool isMono = QFontDatabase::isFixedPitch(fam) ||
+                            fam.contains(QStringLiteral("Mono"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Code"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Console"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Term"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Nerd"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Courier"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Iosevka"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Hack"), Qt::CaseInsensitive) ||
+                            fam.contains(QStringLiteral("Inconsolata"), Qt::CaseInsensitive);
+        if (isMono && !families.contains(fam, Qt::CaseInsensitive)) {
+            families.append(fam);
+        }
+    }
+    return families;
+}
 
 /**
  * @brief Builds a standardized form layout container for a preference page.
@@ -89,7 +126,7 @@ QLineEdit* addBrowsePathRow(QWidget* parent, QFormLayout* form,
         edit->setToolTip(toolTip);
     }
     auto* browseBtn = new QPushButton(QObject::tr("Browse…"), parent);
-    browseBtn->setFixedWidth(72);
+    browseBtn->setMinimumWidth(92);
     QObject::connect(browseBtn, &QPushButton::clicked, parent,
                      [parent, edit, dialogTitle, defaultDir]() {
                          const QString path = QFileDialog::getOpenFileName(
@@ -150,7 +187,7 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     for (int i = 0; i < 5; ++i) {
         auto* box = new QLabel(roles[i], this);
         box->setAlignment(Qt::AlignCenter);
-        box->setFixedSize(64, 20);
+        box->setMinimumSize(96, 28);
         m_swatchBoxes.append(box);
         swatchRow->addWidget(box);
     }
@@ -181,10 +218,9 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     m_uiFontSizeBox->setRange(7, 32);
     form->addRow(tr("UI Font Size:"), m_uiFontSizeBox);
 
-    // Code / Disassembly Font Family and Size selectors.
+    // Code / Disassembly Font Family and Size selectors populated with 16+ monospace fonts.
     m_codeFontFamilyCombo = new QComboBox(this);
-    m_codeFontFamilyCombo->addItems({QStringLiteral("JetBrains Mono"), QStringLiteral("Fira Code"),
-                                     QStringLiteral("Source Code Pro"), QStringLiteral("Monospace")});
+    m_codeFontFamilyCombo->addItems(discoverMonospaceFontFamilies());
     form->addRow(tr("Code Font Family:"), m_codeFontFamilyCombo);
 
     m_codeFontSizeBox = new QSpinBox(this);
@@ -216,15 +252,30 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
 
 /**
  * @brief Updates the 5-swatch palette preview boxes (Canvas, Header, Border, Accent, Text)
- *        for the given internal theme identifier.
+ *        with automatic WCAG luminance contrast and role + hex label text.
  */
 void AppearanceSettingsPage::updateSwatchPreview(const QString& themeId) {
     const QStringList sw = gridlock::core::managers::ThemeManager::themeSwatchColors(themeId);
-    for (int i = 0; i < m_swatchBoxes.size() && i < sw.size(); ++i) {
+    const QStringList roles = {tr("Canvas"), tr("Header"), tr("Border"), tr("Accent"), tr("Text")};
+    for (int i = 0; i < m_swatchBoxes.size() && i < sw.size() && i < roles.size(); ++i) {
+        const QColor bg(sw[i]);
+        // Compute perceived luminance L = 0.299*R + 0.587*G + 0.114*B for WCAG contrast.
+        const double lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue();
+        const QString fgHex = (lum >= 145.0) ? QStringLiteral("#16181d") : QStringLiteral("#ffffff");
+        const QColor fgColor(fgHex);
+
+        // Display both role name and hex code inside the swatch pill.
+        m_swatchBoxes[i]->setText(QStringLiteral("%1 %2").arg(roles[i], sw[i].toLower()));
+        QPalette pal = m_swatchBoxes[i]->palette();
+        pal.setColor(QPalette::All, QPalette::WindowText, fgColor);
+        pal.setColor(QPalette::All, QPalette::Text, fgColor);
+        m_swatchBoxes[i]->setPalette(pal);
         m_swatchBoxes[i]->setStyleSheet(
-            QStringLiteral("background: %1; color: %2; border: 1px solid #3b4048; border-radius: 2px; font-size: 9px; font-weight: 700;")
-                .arg(sw[i], (i == 4) ? sw[0] : sw[4]));
-        m_swatchBoxes[i]->setToolTip(sw[i]);
+            QStringLiteral("background-color: %1; color: %2; border: 1px solid #3b4048; "
+                           "border-radius: 4px; min-width: 96px; min-height: 28px; "
+                           "padding: 3px 8px; font-size: 11px; font-weight: 600;")
+                .arg(sw[i], fgHex));
+        m_swatchBoxes[i]->setToolTip(QStringLiteral("%1: %2").arg(roles[i], sw[i]));
     }
 }
 
@@ -510,238 +561,6 @@ void DebuggerSettingsPage::loadFromSettings() {
 }
 
 // ============================================================================
-// HpcSettingsPage Implementation
-// ============================================================================
-
-/**
- * @brief Constructs local cluster topology and environment settings page.
- * @param parent Optional parent widget.
- */
-HpcSettingsPage::HpcSettingsPage(QWidget* parent)
-    : QWidget(parent) {
-    auto* form = createStandardPageForm(this, tr("<b>HPC / Cluster</b>"));
-
-    // Hostfile browse input layout.
-    auto* hostsRow = new QHBoxLayout();
-    m_hostsFileEdit = new QLineEdit(this);
-    m_hostsFileEdit->setPlaceholderText(tr("(not set — use default hosts)"));
-    m_hostsFileEdit->setToolTip(
-        tr("Path to an MPI hostfile. When set, --hostfile <path> is passed to the\n"
-           "MPI launcher. Leave empty to let the launcher choose nodes automatically."));
-    auto* browseBtn = new QPushButton(tr("Browse…"), this);
-    browseBtn->setFixedWidth(72);
-    connect(browseBtn, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getOpenFileName(
-            this, tr("Select MPI Hosts File"),
-            m_hostsFileEdit->text().isEmpty() ? QDir::homePath()
-                                              : m_hostsFileEdit->text(),
-            tr("All Files (*)"), nullptr, QFileDialog::DontUseNativeDialog);
-        if (!path.isEmpty()) {
-            m_hostsFileEdit->setText(path);
-        }
-    });
-    hostsRow->addWidget(m_hostsFileEdit);
-    hostsRow->addWidget(browseBtn);
-    form->addRow(tr("MPI Hosts File:"), hostsRow);
-
-    // Multi-line environment variable key-value definitions.
-    m_envVarsEdit = new QTextEdit(this);
-    m_envVarsEdit->setFixedHeight(90);
-    m_envVarsEdit->setPlaceholderText(
-        tr("One key=value pair per line\ne.g.  OMPI_MCA_btl=tcp,self\n      "
-           "UCX_NET_DEVICES=eth0"));
-    m_envVarsEdit->setToolTip(
-        tr("MPI environment variables injected via -x KEY=VALUE flags.\nOne "
-           "entry per line: KEY=VALUE"));
-    m_envVarsEdit->setAcceptRichText(false);
-    form->addRow(tr("MPI Env Vars:"), m_envVarsEdit);
-
-    // Strict node affinity binding option.
-    m_strictAffinityBox =
-        new QCheckBox(tr("Bind ranks to individual nodes (--map-by node)"), this);
-    m_strictAffinityBox->setToolTip(
-        tr("Passes --map-by node to the MPI launcher so each rank is pinned to\n"
-           "a separate physical node. Useful for NUMA-sensitive workloads."));
-    form->addRow(tr("Strict Node Affinity:"), m_strictAffinityBox);
-
-    addFormNote(this, form,
-                tr("<small style='color:#888;'>Changes are applied on the "
-                   "<b>next</b> debug session launch.</small>"));
-
-    loadFromSettings();
-}
-
-QString HpcSettingsPage::hostsFile() const { return m_hostsFileEdit->text().trimmed(); }
-QString HpcSettingsPage::envVars() const { return m_envVarsEdit->toPlainText().trimmed(); }
-bool HpcSettingsPage::strictAffinity() const { return m_strictAffinityBox->isChecked(); }
-
-/**
- * @brief Restores cluster settings from ConfigManager.
- */
-void HpcSettingsPage::loadFromSettings() {
-    const auto hs = gridlock::core::ConfigManager::instance().getHpcSettings();
-    m_hostsFileEdit->setText(hs.hostsFile);
-    m_envVarsEdit->setPlainText(hs.envVars);
-    m_strictAffinityBox->setChecked(hs.strictAffinity);
-}
-
-// ============================================================================
-// HpcIntegrationSettingsPage Implementation
-// ============================================================================
-
-/**
- * @brief Constructs remote SSH, SLURM batch, and Spack integration page.
- * @param parent Optional parent widget.
- */
-HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
-    : QWidget(parent) {
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-    outer->addWidget(scroll);
-
-    auto* container = new QWidget();
-    scroll->setWidget(container);
-    auto* form = new QFormLayout(container);
-    form->setContentsMargins(24, 24, 24, 24);
-    form->setSpacing(12);
-    form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-    auto addSectionHeading = [&](const QString& title) {
-        auto* lbl = new QLabel(title, container);
-        lbl->setObjectName("heading");
-        form->addRow(lbl);
-    };
-
-    // SSH Remote node credentials.
-    addSectionHeading(tr("<b>Remote SSH Connection</b>"));
-
-    m_sshHostEdit = new QLineEdit(container);
-    m_sshHostEdit->setPlaceholderText(tr("e.g. login.hpc.university.edu"));
-    m_sshHostEdit->setToolTip(tr("Hostname or IP of the HPC login node."));
-    form->addRow(tr("SSH Host:"), m_sshHostEdit);
-
-    m_sshUserEdit = new QLineEdit(container);
-    m_sshUserEdit->setPlaceholderText(tr("your_hpc_username"));
-    form->addRow(tr("SSH User:"), m_sshUserEdit);
-
-    auto* keyRow = new QHBoxLayout();
-    m_sshKeyEdit = new QLineEdit(container);
-    m_sshKeyEdit->setPlaceholderText(tr("~/.ssh/id_rsa"));
-    m_sshKeyEdit->setToolTip(
-        tr("Path to the private SSH key file used for authentication."));
-    auto* keyBrowse = new QPushButton(tr("Browse…"), container);
-    keyBrowse->setFixedWidth(72);
-    connect(keyBrowse, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getOpenFileName(
-            this, tr("Select SSH Private Key"), QDir::homePath(),
-            tr("SSH Keys (id_rsa id_ed25519 *.pem);; All Files (*)"), nullptr,
-            QFileDialog::DontUseNativeDialog);
-        if (!path.isEmpty()) {
-            m_sshKeyEdit->setText(path);
-        }
-    });
-    keyRow->addWidget(m_sshKeyEdit);
-    keyRow->addWidget(keyBrowse);
-    form->addRow(tr("SSH Key Path:"), keyRow);
-
-    // SLURM batch job parameter configuration.
-    addSectionHeading(tr("<b>SLURM Batch Configuration</b>"));
-
-    m_partitionEdit = new QLineEdit(container);
-    m_partitionEdit->setPlaceholderText(tr("batch"));
-    m_partitionEdit->setToolTip(tr("SLURM partition / queue name."));
-    form->addRow(tr("Partition:"), m_partitionEdit);
-
-    m_nodesBox = new QSpinBox(container);
-    m_nodesBox->setRange(1, 9999);
-    m_nodesBox->setSuffix(tr(" node(s)"));
-    form->addRow(tr("Nodes:"), m_nodesBox);
-
-    m_tasksBox = new QSpinBox(container);
-    m_tasksBox->setRange(1, 9999);
-    m_tasksBox->setSuffix(tr(" task(s)/node"));
-    form->addRow(tr("Tasks per Node:"), m_tasksBox);
-
-    auto* gpuRow = new QHBoxLayout();
-    m_gpuCheck = new QCheckBox(tr("Request GPUs"), container);
-    m_gpusBox = new QSpinBox(container);
-    m_gpusBox->setRange(1, 16);
-    m_gpusBox->setSuffix(tr(" GPU(s)/node"));
-    m_gpusBox->setEnabled(false);
-    connect(m_gpuCheck, &QCheckBox::toggled, m_gpusBox, &QSpinBox::setEnabled);
-    gpuRow->addWidget(m_gpuCheck);
-    gpuRow->addWidget(m_gpusBox);
-    gpuRow->addStretch();
-    form->addRow(tr("GPUs:"), gpuRow);
-
-    auto* tplLabel = new QLabel(
-        tr("Script Template (Use <tt>{FILE}</tt> as a placeholder for the target source code):"),
-        container);
-    tplLabel->setTextFormat(Qt::RichText);
-    form->addRow(tplLabel);
-
-    m_templateEdit = new QPlainTextEdit(container);
-    m_templateEdit->setMinimumHeight(130);
-    QFont mono("Monospace");
-    mono.setStyleHint(QFont::TypeWriter);
-    mono.setPointSize(9);
-    m_templateEdit->setFont(mono);
-    m_templateEdit->setPlaceholderText("#!/bin/bash\n#SBATCH --job-name=gridlock_job\n"
-                                       "#SBATCH --output=gridlock_%j.log\n#SBATCH --partition=batch\n"
-                                       "#SBATCH --nodes=1\n#SBATCH --ntasks-per-node=4\n\n"
-                                       "module load openmpi\nmpirun -np 4 {FILE}");
-    form->addRow(m_templateEdit);
-
-    // Spack package manager environment configuration.
-    addSectionHeading(tr("<b>Spack Package Manager</b>"));
-
-    m_spackRootEdit = new QLineEdit(container);
-    m_spackRootEdit->setPlaceholderText(tr("/opt/spack"));
-    m_spackRootEdit->setToolTip(
-        tr("Absolute path to the Spack installation on the remote node.\n"
-           "GridLock will source \"<path>/share/spack/setup-env.sh\" before\n"
-           "running any spack commands."));
-    form->addRow(tr("Spack Install Path:"), m_spackRootEdit);
-
-    loadFromSettings();
-}
-
-QString HpcIntegrationSettingsPage::sshHost() const { return m_sshHostEdit->text().trimmed(); }
-QString HpcIntegrationSettingsPage::sshUser() const { return m_sshUserEdit->text().trimmed(); }
-QString HpcIntegrationSettingsPage::sshKeyPath() const { return m_sshKeyEdit->text().trimmed(); }
-QString HpcIntegrationSettingsPage::slurmTemplate() const { return m_templateEdit->toPlainText(); }
-QString HpcIntegrationSettingsPage::slurmPartition() const { return m_partitionEdit->text().trimmed(); }
-int HpcIntegrationSettingsPage::slurmNodes() const { return m_nodesBox->value(); }
-int HpcIntegrationSettingsPage::slurmTasks() const { return m_tasksBox->value(); }
-bool HpcIntegrationSettingsPage::requestGpus() const { return m_gpuCheck->isChecked(); }
-int HpcIntegrationSettingsPage::gpusPerNode() const { return m_gpusBox->value(); }
-QString HpcIntegrationSettingsPage::spackRoot() const { return m_spackRootEdit->text().trimmed(); }
-
-/**
- * @brief Restores remote SSH, SLURM, and Spack configurations from ConfigManager.
- */
-void HpcIntegrationSettingsPage::loadFromSettings() {
-    auto& mgr = gridlock::core::ConfigManager::instance();
-    const auto ssh = mgr.getSshSettings();
-    const auto slurm = mgr.getSlurmSettings();
-
-    m_sshHostEdit->setText(ssh.host);
-    m_sshUserEdit->setText(ssh.user);
-    m_sshKeyEdit->setText(ssh.keyPath);
-
-    m_templateEdit->setPlainText(slurm.scriptTemplate);
-    m_partitionEdit->setText(slurm.partition);
-    m_nodesBox->setValue(slurm.nodes);
-    m_tasksBox->setValue(slurm.tasksPerNode);
-    m_gpuCheck->setChecked(slurm.requestGpus);
-    m_gpusBox->setValue(slurm.gpusPerNode);
-    m_spackRootEdit->setText(slurm.spackRoot);
-}
-
-// ============================================================================
 // DocsetSettingsPage Implementation
 // ============================================================================
 
@@ -770,6 +589,7 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget* parent)
     m_dirEdit = new QLineEdit(this);
     dirLayout->addWidget(m_dirEdit);
     auto* browseBtn = new QPushButton("Browse...", this);
+    browseBtn->setMinimumWidth(92);
     connect(browseBtn, &QPushButton::clicked, this, [this]() {
         // Resolve default Zeal docsets directory under XDG user data or fallback to Home.
         const QString zealDir = QDir::homePath() + QStringLiteral("/.local/share/Zeal/Zeal/docsets");
@@ -901,9 +721,10 @@ TerminalSettingsPage::TerminalSettingsPage(QWidget* parent)
         tr("Path to the shell executable (e.g. /bin/bash, /bin/zsh). Requires terminal restart."),
         tr("Select Shell Executable"), QStringLiteral("/bin"));
 
-    // Terminal monospace font family combo.
+    // Terminal monospace font family combo populated with 16+ curated and system monospace fonts.
     m_fontFamilyCombo = new QComboBox(this);
-    m_fontFamilyCombo->addItems({"FiraCode Nerd Font", "Hack", "Monospace"});
+    m_fontFamilyCombo->setObjectName(QStringLiteral("terminalFontFamilyCombo"));
+    m_fontFamilyCombo->addItems(discoverMonospaceFontFamilies());
     m_fontFamilyCombo->setToolTip(tr("Monospace font for the embedded terminal."));
     form->addRow(tr("Font Family:"), m_fontFamilyCombo);
 

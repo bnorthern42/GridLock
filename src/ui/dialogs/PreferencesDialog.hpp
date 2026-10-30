@@ -190,6 +190,12 @@ public:
     bool requestGpus() const;
     int gpusPerNode() const;
 
+    // SLURM batch script auto-detection and directive accessors
+    bool parseSlurmBatchScript(const QString& scriptText);
+    bool loadSlurmBatchScriptFile(const QString& filePath);
+    QString generateSlurmBatchScript() const;
+    QString slurmFieldValue(const QString& key) const;
+
     // Spack environment
     QString spackRoot() const;
 
@@ -199,12 +205,28 @@ private:
     QLineEdit* m_sshHostEdit = nullptr;
     QLineEdit* m_sshUserEdit = nullptr;
     QLineEdit* m_sshKeyEdit = nullptr;
-    QPlainTextEdit* m_templateEdit = nullptr;
-    QLineEdit* m_partitionEdit = nullptr;
+
+    // 16-Directive SLURM Batch Configuration controls
+    QLineEdit* m_sbatchFilePathEdit = nullptr;
+    QLineEdit* m_jobNameEdit = nullptr;
+    QLineEdit* m_accountEdit = nullptr;
+    QComboBox* m_partitionCombo = nullptr;
+    QComboBox* m_qosCombo = nullptr;
+    QComboBox* m_timeCombo = nullptr;
     QSpinBox* m_nodesBox = nullptr;
     QSpinBox* m_tasksBox = nullptr;
+    QSpinBox* m_cpusPerTaskBox = nullptr;
+    QComboBox* m_memCombo = nullptr;
     QCheckBox* m_gpuCheck = nullptr;
+    QLineEdit* m_gpuTypeEdit = nullptr;
     QSpinBox* m_gpusBox = nullptr;
+    QLineEdit* m_constraintEdit = nullptr;
+    QComboBox* m_mpiLauncherCombo = nullptr;
+    QLineEdit* m_modulesEdit = nullptr;
+    QLineEdit* m_outputLogEdit = nullptr;
+    QComboBox* m_mailTypeCombo = nullptr;
+    QLineEdit* m_mailUserEdit = nullptr;
+    QPlainTextEdit* m_templateEdit = nullptr;
     QLineEdit* m_spackRootEdit = nullptr;
 };
 
@@ -266,6 +288,15 @@ class PreferencesDialog : public QDialog {
 
 public:
     explicit PreferencesDialog(QWidget* parent = nullptr);
+
+    /// Parses `#SBATCH` directives and module load lines into the SLURM settings page.
+    bool parseSlurmBatchScript(const QString& scriptText);
+    /// Loads a `.sbatch`/`.slurm` file from disk and populates the SLURM settings page.
+    bool loadSlurmBatchScriptFile(const QString& filePath);
+    /// Generates a formatted SLURM batch script from the current SLURM form fields.
+    QString generateSlurmBatchScript() const;
+    /// Returns the string value of a SLURM form field by key for testing and inspection.
+    QString slurmFieldValue(const QString& key) const;
 
 signals:
     /// Emitted after preferences are committed to disk to trigger live UI updates.

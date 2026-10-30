@@ -569,10 +569,12 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    min-width: 72px;\n"
         "    padding: 2px 10px;\n"
         "}\n"
-        // Sleek 28px-row dialog navigation sidebars with 2px solid #528bff active indicator.
-        "QListWidget[role=\"sidebar\"] {\n"
+        // Sleek 28px-row dialog navigation sidebars with 3px solid #528bff active indicator.
+        "QListWidget, QListWidget[role=\"sidebar\"] {\n"
         "    background: #1e2128;\n"
         "    color: #abb2bf;\n"
+        "    selection-background-color: #264f78;\n"
+        "    selection-color: #ffffff;\n"
         "    border: none;\n"
         "    border-right: 1px solid #2c313a;\n"
         "    outline: none;\n"
@@ -583,14 +585,19 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    padding: 2px 8px;\n"
         "    border-left: 2px solid transparent;\n"
         "}\n"
-        "QListWidget[role=\"sidebar\"]::item:hover {\n"
-        "    background: #252932;\n"
+        // Style hovered sidebar list items with bright white text on dark-slate fill.
+        "QListWidget::item:hover, QListWidget[role=\"sidebar\"]::item:hover {\n"
+        "    background-color: #252932;\n"
         "    color: #ffffff;\n"
         "}\n"
-        "QListWidget[role=\"sidebar\"]::item:selected {\n"
-        "    background: #262b36;\n"
+        // Keep selected list items bright white on #264f78 in both active and !active focus states.
+        "QListWidget::item:selected, QListWidget::item:selected:active,\n"
+        "QListWidget::item:selected:!active, QListWidget[role=\"sidebar\"]::item:selected,\n"
+        "QListWidget[role=\"sidebar\"]::item:selected:active,\n"
+        "QListWidget[role=\"sidebar\"]::item:selected:!active {\n"
+        "    background-color: #264f78;\n"
         "    color: #ffffff;\n"
-        "    border-left: 2px solid #528bff;\n"
+        "    border-left: 3px solid #528bff;\n"
         "    font-weight: 600;\n"
         "}\n"
         // Cohesive dark-slate popup menus and tooltips across all views.
@@ -657,6 +664,9 @@ static void applyApplicationPalette(bool isDark) {
         pal.setColor(QPalette::AlternateBase, QColor(0xf6, 0xf8, 0xfa));
         pal.setColor(QPalette::Text, QColor(0x1f, 0x23, 0x28));
     }
+    // Preserve high-contrast white HighlightedText on #264f78 Highlight across all ColorGroups.
+    pal.setColor(QPalette::All, QPalette::Highlight, QColor(0x26, 0x4f, 0x78));
+    pal.setColor(QPalette::All, QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
     qApp->setPalette(pal);
 }
 
@@ -796,6 +806,8 @@ void ThemeManager::initialize() {
         m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
     if (qApp) {
         qApp->setStyleSheet(m_currentStyleSheet);
+        // Re-assert application palette after setStyleSheet so Inactive HighlightedText stays #ffffff.
+        applyApplicationPalette(m_darkMode);
         QFont appFont = qApp->font();
         if (!uiFontFamily.trimmed().isEmpty()) appFont.setFamily(uiFontFamily.trimmed());
         appFont.setPointSize(uiFontSize);
@@ -837,6 +849,8 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark) {
         m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
     if (qApp) {
         qApp->setStyleSheet(m_currentStyleSheet);
+        // Re-assert application palette after setStyleSheet so Inactive HighlightedText stays #ffffff.
+        applyApplicationPalette(m_darkMode);
     }
     emit themeModeChanged(m_darkMode);
 }
@@ -893,6 +907,8 @@ void ThemeManager::applyThemeAndFonts() {
     // Apply global QSS and application font family/point size live without restart.
     if (qApp) {
         qApp->setStyleSheet(m_currentStyleSheet);
+        // Re-assert application palette after setStyleSheet so Inactive HighlightedText stays #ffffff.
+        applyApplicationPalette(m_darkMode);
         QFont appFont = qApp->font();
         if (!uiFontFamily.trimmed().isEmpty()) appFont.setFamily(uiFontFamily.trimmed());
         appFont.setPointSize(uiFontSize);

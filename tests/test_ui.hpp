@@ -180,5 +180,8 @@ private slots:
 
     /** @brief Verifies floating dock pop-out, drag-back redocking via drop zone, and 1-click/double-click restore. */
     void testFloatingDockPopOutAndDragBackRedock();
+
+    /** @brief Verifies Preferences sidebar inactive contrast, luminance palette swatches, 15+ terminal fonts, and SLURM script auto-detection. */
+    void testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDetect();
 };
 

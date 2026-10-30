@@ -383,44 +383,33 @@ void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
     // Verify "data[0].coords.z" was added (case-insensitively) to DifferentialGrid watch expressions.
     auto hasWatchExpression = [diffGrid](const QString& target) -> bool {
         for (const std::string& w : diffGrid->getWatchExpressions()) {
-            if (QString::fromStdString(w).compare(target, Qt::CaseInsensitive) == 0) {
-                return true;
-            }
+            if (QString::fromStdString(w).compare(target, Qt::CaseInsensitive) == 0) return true;
         }
         for (int col = 0; col < diffGrid->columnCount(); ++col) {
             if (const QTableWidgetItem* hdr = diffGrid->horizontalHeaderItem(col)) {
-                if (hdr->text().compare(target, Qt::CaseInsensitive) == 0) {
-                    return true;
-                }
+                if (hdr->text().compare(target, Qt::CaseInsensitive) == 0) return true;
             }
         }
         return false;
     };
-    QVERIFY2(hasWatchExpression(QStringLiteral("data[0].coords.z")),
-             "DifferentialGrid must contain promoted Evaluator expression 'data[0].coords.z'");
+    QVERIFY2(hasWatchExpression(QStringLiteral("data[0].coords.z")), "DifferentialGrid must contain promoted Evaluator expression 'data[0].coords.z'");
 
     // Promote a variable from VariablesDockWidget to Watch Expressions.
     auto* variablesDock = mainWindow.findChild<gridlock::VariablesDockWidget*>();
     QVERIFY2(variablesDock != nullptr, "VariablesDockWidget must exist in MainWindow");
-    QVERIFY2(variablesDock->promoteVariableToWatch(QStringLiteral("rank_local_id")),
-             "VariablesDockWidget::promoteVariableToWatch('rank_local_id') must return true");
+    QVERIFY2(variablesDock->promoteVariableToWatch(QStringLiteral("rank_local_id")), "VariablesDockWidget::promoteVariableToWatch('rank_local_id') must return true");
     QCoreApplication::processEvents();
-    QVERIFY2(hasWatchExpression(QStringLiteral("rank_local_id")),
-             "DifferentialGrid must contain promoted variable 'rank_local_id'");
+    QVERIFY2(hasWatchExpression(QStringLiteral("rank_local_id")), "DifferentialGrid must contain promoted variable 'rank_local_id'");
 
     // 2. Cross-View Context Menu Actions in DisassemblyView.
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY2(disasm != nullptr, "DisassemblyView must exist in MainWindow");
 
     const QStringList actionNames = disasm->contextActionNamesForAddress(0x0040113dULL);
-    QVERIFY2(actionNames.contains(QStringLiteral("Seek in Memory View")),
-             "DisassemblyView context actions must include 'Seek in Memory View'");
-    QVERIFY2(actionNames.contains(QStringLiteral("Inspect Cross-References (X)")),
-             "DisassemblyView context actions must include 'Inspect Cross-References (X)'");
-    QVERIFY2(actionNames.contains(QStringLiteral("Lookup in Reference Manual (F1)")),
-             "DisassemblyView context actions must include 'Lookup in Reference Manual (F1)'");
-    QVERIFY2(actionNames.contains(QStringLiteral("Patch Instruction")),
-             "DisassemblyView context actions must include 'Patch Instruction'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Seek in Memory View")), "DisassemblyView context actions must include 'Seek in Memory View'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Inspect Cross-References (X)")), "DisassemblyView context actions must include 'Inspect Cross-References (X)'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Lookup in Reference Manual (F1)")), "DisassemblyView context actions must include 'Lookup in Reference Manual (F1)'");
+    QVERIFY2(actionNames.contains(QStringLiteral("Patch Instruction")), "DisassemblyView context actions must include 'Patch Instruction'");
 
     // Start on Terminal tab (index 0), then trigger "Lookup in Reference Manual (F1)" at 0x0040113d.
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
@@ -428,31 +417,23 @@ void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
     bottomTabs->setCurrentIndex(0);
     QCoreApplication::processEvents();
 
-    QVERIFY2(disasm->triggerContextAction(0x0040113dULL, QStringLiteral("Lookup in Reference Manual (F1)")),
-             "triggerContextAction(0x0040113d, 'Lookup in Reference Manual (F1)') must succeed");
+    QVERIFY2(disasm->triggerContextAction(0x0040113dULL, QStringLiteral("Lookup in Reference Manual (F1)")), "triggerContextAction(0x0040113d, 'Lookup in Reference Manual (F1)') must succeed");
     QCoreApplication::processEvents();
 
-    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"),
-                                                                      Qt::CaseInsensitive),
-             "Triggering 'Lookup in Reference Manual (F1)' must switch BottomConsoleTabs to Reference Manual");
+    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"), Qt::CaseInsensitive), "Triggering 'Lookup in Reference Manual (F1)' must switch BottomConsoleTabs to Reference Manual");
 
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(refManual != nullptr);
     auto* browser = refManual->findChild<QTextBrowser*>();
     QVERIFY(browser != nullptr);
-    QVERIFY2(browser->toPlainText().contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive),
-             "Reference Manual must display MPI_Init documentation after context action lookup");
+    QVERIFY2(browser->toPlainText().contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive), "Reference Manual must display MPI_Init documentation after context action lookup");
 
     // 3. File Line Headroom Verification for src/ui/views/DisassemblyAnalysis.cpp (< 850 lines).
     QFile disasmAnalysisFile(QStringLiteral("../src/ui/views/DisassemblyAnalysis.cpp"));
-    if (!disasmAnalysisFile.exists()) {
-        disasmAnalysisFile.setFileName(QStringLiteral("src/ui/views/DisassemblyAnalysis.cpp"));
-    }
-    QVERIFY2(disasmAnalysisFile.open(QIODevice::ReadOnly | QIODevice::Text),
-             "Must open src/ui/views/DisassemblyAnalysis.cpp for line count verification");
+    if (!disasmAnalysisFile.exists()) disasmAnalysisFile.setFileName(QStringLiteral("src/ui/views/DisassemblyAnalysis.cpp"));
+    QVERIFY2(disasmAnalysisFile.open(QIODevice::ReadOnly | QIODevice::Text), "Must open src/ui/views/DisassemblyAnalysis.cpp for line count verification");
     const int lineCount = QString::fromUtf8(disasmAnalysisFile.readAll()).split('\n').size();
-    QVERIFY2(lineCount < 850,
-             qPrintable(QString("DisassemblyAnalysis.cpp has %1 lines (expected < 850)").arg(lineCount)));
+    QVERIFY2(lineCount < 850, qPrintable(QString("DisassemblyAnalysis.cpp has %1 lines (expected < 850)").arg(lineCount)));
 }
 
 /**
@@ -473,34 +454,20 @@ void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable()
 
     const int block401149Width = disasm->blockWidthForAddress(0x00401149ULL);
     const int block40114fWidth = disasm->blockWidthForAddress(0x0040114fULL);
-    QVERIFY2(block401149Width >= 380,
-             qPrintable(QString("CFG block 0x401149 width %1 is too narrow and clips inline comments (< 380px)")
-                            .arg(block401149Width)));
-    QVERIFY2(block40114fWidth >= 380,
-             qPrintable(QString("CFG block 0x40114f width %1 is too narrow and clips inline comments (< 380px)")
-                            .arg(block40114fWidth)));
+    QVERIFY2(block401149Width >= 380, qPrintable(QString("CFG block 0x401149 width %1 < 380px").arg(block401149Width)));
+    QVERIFY2(block40114fWidth >= 380, qPrintable(QString("CFG block 0x40114f width %1 < 380px").arg(block40114fWidth)));
 
     // 2. Verify MpiDiagnosticsWidget contains a populated rank wait-state table and 26px header bar.
     auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
     QVERIFY2(mpiDiag != nullptr, "MpiDiagnosticsWidget must exist in MainWindow");
-    QVERIFY2(mpiDiag->rankWaitTableRowCount() >= 1,
-             qPrintable(QString("MpiDiagnosticsWidget rankWaitTableRowCount() %1 must be >= 1")
-                            .arg(mpiDiag->rankWaitTableRowCount())));
+    QVERIFY2(mpiDiag->rankWaitTableRowCount() >= 1, qPrintable(QString("MpiDiagnosticsWidget rankWaitTableRowCount() %1 < 1").arg(mpiDiag->rankWaitTableRowCount())));
     auto* waitTable = mpiDiag->findChild<QTableWidget*>();
-    QVERIFY2(waitTable != nullptr, "MpiDiagnosticsWidget must contain a QTableWidget for rank wait states");
-    QVERIFY2(waitTable->columnCount() >= 5,
-             qPrintable(QString("MpiDiagnosticsWidget table columnCount %1 < 5").arg(waitTable->columnCount())));
-    QVERIFY2(waitTable->frameShape() == QFrame::NoFrame,
-             "MpiDiagnosticsWidget wait table must use QFrame::NoFrame");
+    QVERIFY2(waitTable != nullptr && waitTable->columnCount() >= 5 && waitTable->frameShape() == QFrame::NoFrame, "MpiDiagnosticsWidget must contain a >= 5 column QFrame::NoFrame wait table");
 
     // 3. Verify ReferenceManualWidget exposes loaded Zeal docsets and renders real HTML from a Zeal bundle.
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    QVERIFY2(refManual != nullptr, "ReferenceManualWidget must exist in MainWindow");
-    const QStringList loadedDocsets = refManual->loadedDocsetNames();
-    QVERIFY2(!loadedDocsets.isEmpty(),
-             "ReferenceManualWidget::loadedDocsetNames() must not be empty");
-    QVERIFY2(refManual->lookupSymbol(QStringLiteral("MPI_Init")),
-             "ReferenceManualWidget::lookupSymbol('MPI_Init') must succeed");
+    QVERIFY2(refManual != nullptr && !refManual->loadedDocsetNames().isEmpty(), "ReferenceManualWidget must exist and expose loaded docsets");
+    QVERIFY2(refManual->lookupSymbol(QStringLiteral("MPI_Init")), "ReferenceManualWidget::lookupSymbol('MPI_Init') must succeed");
 }
 
 /**
@@ -519,42 +486,30 @@ void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
     // 1. SourceCodeView Uniform Canvas & Gutter.
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
     QVERIFY2(sourceView != nullptr, "Active SourceCodeView must exist in MainWindow");
-    QVERIFY2(sourceView->rightViewportMargin() == 0,
-             qPrintable(QString("SourceCodeView rightViewportMargin() %1 must be 0").arg(sourceView->rightViewportMargin())));
-    QVERIFY2(!sourceView->hasRightMarginFill(), "SourceCodeView::hasRightMarginFill() must be false");
+    QVERIFY2(sourceView->rightViewportMargin() == 0 && !sourceView->hasRightMarginFill(), "SourceCodeView right margin must be 0 with no right-margin fill");
 
     const QImage editorImg = sourceView->viewport()->grab().toImage();
-    QVERIFY2(!editorImg.isNull() && editorImg.width() > 100 && editorImg.height() > 40,
-             "SourceCodeView snapshot image must be valid and non-empty");
+    QVERIFY2(!editorImg.isNull() && editorImg.width() > 100 && editorImg.height() > 40, "SourceCodeView snapshot image must be valid and non-empty");
     // Sample on empty line 3 (between #include <stdio.h> and struct DeeplyNested) above any scrollbar.
     const int sampleY = sourceView->fontMetrics().height() * 2 + sourceView->fontMetrics().height() / 2;
-    const int leftX = static_cast<int>(editorImg.width() * 0.25);
-    const int rightX = static_cast<int>(editorImg.width() * 0.85);
-    const QColor leftColor = editorImg.pixelColor(leftX, sampleY);
-    const QColor rightColor = editorImg.pixelColor(rightX, sampleY);
-    QVERIFY2(leftColor.rgb() == rightColor.rgb(),
-             qPrintable(QString("SourceCodeView split background: left=%1 vs right=%2").arg(leftColor.name(), rightColor.name())));
+    const QColor leftColor = editorImg.pixelColor(static_cast<int>(editorImg.width() * 0.25), sampleY);
+    const QColor rightColor = editorImg.pixelColor(static_cast<int>(editorImg.width() * 0.85), sampleY);
+    QVERIFY2(leftColor.rgb() == rightColor.rgb(), qPrintable(QString("SourceCodeView split background: left=%1 vs right=%2").arg(leftColor.name(), rightColor.name())));
 
     // 2. Structured MpiNetworkLogWidget Table.
     auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>();
     QVERIFY2(netLog != nullptr, "MpiNetworkLogWidget must exist in MainWindow");
     auto* netTable = netLog->findChild<QTableWidget*>();
-    QVERIFY2(netTable != nullptr && netTable->columnCount() == 6 && netTable->frameShape() == QFrame::NoFrame,
-             "MpiNetworkLogWidget must contain a 6-column QFrame::NoFrame QTableWidget");
+    QVERIFY2(netTable != nullptr && netTable->columnCount() == 6 && netTable->frameShape() == QFrame::NoFrame, "MpiNetworkLogWidget must contain a 6-column QFrame::NoFrame QTableWidget");
     netLog->appendLog(QStringLiteral("[12:00:01.042] Rank 0 -> Rank 1 | MPI_Send | Tag=0 MPI_COMM_WORLD | 1024 B"));
     QVERIFY2(netLog->logRowCount() >= 1, "MpiNetworkLogWidget::logRowCount() must be >= 1 after appendLog");
 
     // 3. Single-Row ReferenceManualWidget Header & Clean Monochrome Toolbar Labels.
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    QVERIFY2(refManual != nullptr && refManual->headerBarHeight() > 0 && refManual->headerBarHeight() <= 30,
-             "ReferenceManualWidget::headerBarHeight() must be in (0, 30]");
+    QVERIFY2(refManual != nullptr && refManual->headerBarHeight() > 0 && refManual->headerBarHeight() <= 30, "ReferenceManualWidget::headerBarHeight() must be in (0, 30]");
     for (QToolBar* toolBar : mainWindow.findChildren<QToolBar*>()) {
-        for (QAction* act : toolBar->actions()) {
-            QVERIFY2(!act->text().contains(QStringLiteral("\U000023E9")), "Toolbar action must not contain U+23E9");
-        }
-        for (QToolButton* btn : toolBar->findChildren<QToolButton*>()) {
-            QVERIFY2(!btn->text().contains(QStringLiteral("\U000023E9")), "Toolbar button must not contain U+23E9");
-        }
+        for (QAction* act : toolBar->actions()) QVERIFY2(!act->text().contains(QStringLiteral("\U000023E9")), "Toolbar action must not contain U+23E9");
+        for (QToolButton* btn : toolBar->findChildren<QToolButton*>()) QVERIFY2(!btn->text().contains(QStringLiteral("\U000023E9")), "Toolbar button must not contain U+23E9");
     }
 }
 
@@ -572,17 +527,14 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
 
     // 1. DifferentialGrid (Watch Expressions) Uniform Empty Viewport & Stretch Headers.
     auto* watchGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
-    QVERIFY2(watchGrid != nullptr && watchGrid->horizontalHeaderStretchEnabled(),
-             "DifferentialGrid must exist and enable horizontalHeaderStretchEnabled()");
+    QVERIFY2(watchGrid != nullptr && watchGrid->horizontalHeaderStretchEnabled(), "DifferentialGrid must exist and enable horizontalHeaderStretchEnabled()");
     watchGrid->resize(260, 220);
     watchGrid->show();
     QApplication::processEvents();
 
     const QImage watchImg = watchGrid->grab().toImage();
-    QVERIFY2(!watchImg.isNull() && watchImg.width() >= 200 && watchImg.height() >= 200,
-             "DifferentialGrid grabbed image must be valid and at least 200x200");
-    QVERIFY2(watchImg.pixelColor(25, 190).rgb() == watchImg.pixelColor(180, 190).rgb(),
-             "DifferentialGrid empty area must have uniform background color across left and right columns");
+    QVERIFY2(!watchImg.isNull() && watchImg.width() >= 200 && watchImg.height() >= 200, "DifferentialGrid grabbed image must be valid and at least 200x200");
+    QVERIFY2(watchImg.pixelColor(25, 190).rgb() == watchImg.pixelColor(180, 190).rgb(), "DifferentialGrid empty area must have uniform background color across left and right columns");
 
     // 2. GDB Console & Evaluator Prompt Bar & Header Cohesion.
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
@@ -599,20 +551,11 @@ void TestMainWindowUI::testWatchGridBackgroundAndConsolePromptCohesion() {
     QVERIFY2(gdbConsole->headerBarHeight() > 0 && gdbConsole->headerBarHeight() <= 30 &&
                  gdbConsole->promptBarHeight() > 0 && gdbConsole->promptBarHeight() <= 30,
              "GdbConsoleWidget header and prompt bar heights must be in (0, 30]");
-    if (QLayout* gdbLayout = gdbConsole->layout()) {
-        QVERIFY2(gdbLayout->contentsMargins().left() <= 6, "GdbConsoleWidget left margin must be <= 6");
-    }
-    for (QAbstractScrollArea* area : gdbConsole->findChildren<QAbstractScrollArea*>()) {
-        QVERIFY2(area->frameShape() == QFrame::NoFrame, "GdbConsoleWidget viewport must use QFrame::NoFrame");
-    }
-    QVERIFY2(evaluator->headerBarHeight() > 0 && evaluator->headerBarHeight() <= 30,
-             "ExpressionEvaluatorWidget::headerBarHeight() must be in (0, 30]");
-    if (QLayout* evalLayout = evaluator->layout()) {
-        QVERIFY2(evalLayout->contentsMargins().left() <= 6, "ExpressionEvaluatorWidget left margin must be <= 6");
-    }
-    for (QAbstractScrollArea* area : evaluator->findChildren<QAbstractScrollArea*>()) {
-        QVERIFY2(area->frameShape() == QFrame::NoFrame, "ExpressionEvaluatorWidget viewport must use QFrame::NoFrame");
-    }
+    if (QLayout* gdbLayout = gdbConsole->layout()) QVERIFY2(gdbLayout->contentsMargins().left() <= 6, "GdbConsoleWidget left margin must be <= 6");
+    for (QAbstractScrollArea* area : gdbConsole->findChildren<QAbstractScrollArea*>()) QVERIFY2(area->frameShape() == QFrame::NoFrame, "GdbConsoleWidget viewport must use QFrame::NoFrame");
+    QVERIFY2(evaluator->headerBarHeight() > 0 && evaluator->headerBarHeight() <= 30, "ExpressionEvaluatorWidget::headerBarHeight() must be in (0, 30]");
+    if (QLayout* evalLayout = evaluator->layout()) QVERIFY2(evalLayout->contentsMargins().left() <= 6, "ExpressionEvaluatorWidget left margin must be <= 6");
+    for (QAbstractScrollArea* area : evaluator->findChildren<QAbstractScrollArea*>()) QVERIFY2(area->frameShape() == QFrame::NoFrame, "ExpressionEvaluatorWidget viewport must use QFrame::NoFrame");
 }
 
 /**
@@ -642,9 +585,7 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     auto findToolbarAction = [&mainWindow](const QString& labelSubstr) -> QAction* {
         for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) {
             for (QAction* act : tb->actions()) {
-                if (act->text().contains(labelSubstr, Qt::CaseInsensitive)) {
-                    return act;
-                }
+                if (act->text().contains(labelSubstr, Qt::CaseInsensitive)) return act;
             }
         }
         return nullptr;
@@ -924,4 +865,69 @@ void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
     mainWindow.redockAllFloatingPanels();
     QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be docked after redockAllFloatingPanels");
     QVERIFY2(!mainWindow.isDockFloating(registerDock), "RegisterViewDock must be docked after redockAllFloatingPanels");
+}
+
+/**
+ * @brief Verifies Preferences sidebar `:selected:!active` contrast, luminance-aware palette swatches,
+ *        >= 15 terminal monospace font choices, unclipped Browse buttons, and 16-option SLURM auto-detection.
+ */
+void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDetect() {
+    gridlock::ui::PreferencesDialog dialog;
+    dialog.resize(860, 620);
+    dialog.show();
+    QApplication::processEvents();
+
+    // 1. Sidebar Inactive Selection Contrast (QPalette::Inactive HighlightedText is never black).
+    auto* categoryList = dialog.findChild<QListWidget*>();
+    QVERIFY(categoryList != nullptr);
+    QVERIFY2(categoryList->palette().color(QPalette::Inactive, QPalette::HighlightedText).lightness() >= 200, "Sidebar QListWidget Inactive HighlightedText must remain bright (>= 200 lightness)");
+    QVERIFY2(dialog.styleSheet().contains(QStringLiteral("QListWidget::item:selected:!active")), "PreferencesDialog stylesheet must explicitly style QListWidget::item:selected:!active");
+
+    // 2. Palette Swatch Auto-Contrast & Hex Display on Gruvbox Industrial (#fabd2f bright yellow accent).
+    for (QComboBox* cb : dialog.findChildren<QComboBox*>()) {
+        const int idx = cb->findData(QStringLiteral("gruvbox_dark"));
+        if (idx >= 0) { cb->setCurrentIndex(idx); break; }
+    }
+    QApplication::processEvents();
+    bool foundAccentDarkText = false;
+    bool foundCanvasLightText = false;
+    for (QLabel* lbl : dialog.findChildren<QLabel*>()) {
+        if (lbl->text().contains(QStringLiteral("Accent")) && lbl->text().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive)) {
+            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() < 60, "Bright #fabd2f Accent swatch must use dark text (< 60 lightness)");
+            foundAccentDarkText = true;
+        }
+        if (lbl->text().contains(QStringLiteral("Canvas")) && lbl->text().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive)) {
+            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() > 200, "Dark #1d2021 Canvas swatch must use light text (> 200 lightness)");
+            foundCanvasLightText = true;
+        }
+    }
+    QVERIFY2(foundAccentDarkText && foundCanvasLightText, "Palette swatches must include hex code and luminance-aware foreground contrast");
+
+    // 3. Terminal Font Family Combo Has >= 15 Monospace Options & Unclipped "Browse..." Buttons.
+    auto* termFontCombo = dialog.findChild<QComboBox*>(QStringLiteral("terminalFontFamilyCombo"));
+    QVERIFY2(termFontCombo != nullptr && termFontCombo->count() >= 15, "Terminal Font Family combo must offer >= 15 monospace font families");
+    for (QPushButton* btn : dialog.findChildren<QPushButton*>()) {
+        if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive))
+            QVERIFY2(btn->minimumWidth() >= 88, qPrintable(QStringLiteral("Browse button minWidth %1 < 88").arg(btn->minimumWidth())));
+    }
+
+    // 4. Comprehensive SLURM Fields (>= 14 Options) & Batch Script File Auto-Detection (parseSlurmBatchScript).
+    const QString sampleSbatch = QStringLiteral(
+        "#!/bin/bash\n#SBATCH --job-name=wpt_fem_solver\n#SBATCH --account=ttu_hpc\n#SBATCH --partition=gpu_a100\n"
+        "#SBATCH --qos=high\n#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=16\n#SBATCH --cpus-per-task=4\n"
+        "#SBATCH --mem=128G\n#SBATCH --time=06:30:00\n#SBATCH --gres=gpu:a100:2\n#SBATCH --constraint=nvlink\n"
+        "#SBATCH --output= solver_%j.out\nmodule load openmpi/5.0 gcc/13\nsrun --mpi=pmix ./solver {FILE}\n");
+    QVERIFY(dialog.parseSlurmBatchScript(sampleSbatch));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("job_name")), QStringLiteral("wpt_fem_solver"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("account")), QStringLiteral("ttu_hpc"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("partition")), QStringLiteral("gpu_a100"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("qos")), QStringLiteral("high"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("nodes")), QStringLiteral("4"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("ntasks_per_node")), QStringLiteral("16"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("cpus_per_task")), QStringLiteral("4"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("mem")), QStringLiteral("128G"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("time")), QStringLiteral("06:30:00"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("gres_gpu")), QStringLiteral("a100:2"));
+    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("constraint")), QStringLiteral("nvlink"));
+    QVERIFY(dialog.slurmFieldValue(QStringLiteral("modules")).contains(QStringLiteral("openmpi/5.0")));
 }

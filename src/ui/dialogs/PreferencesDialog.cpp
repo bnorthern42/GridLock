@@ -44,7 +44,8 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setMinimumSize(780, 540);
     resize(860, 580);
 
-    // Apply unified dark-slate workstation dialog chrome and compact control heights.
+    // Apply unified dark-slate workstation dialog chrome, compact control heights,
+    // and high-contrast active/inactive sidebar selection rules.
     setStyleSheet(QStringLiteral(
         "QDialog { background: #16181d; color: #d7dae0; }"
         "QGroupBox { background: #1b1e24; border: 1px solid #282c34; border-radius: 3px; "
@@ -54,6 +55,11 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
         "QPushButton { background: #282c34; color: #d7dae0; border: 1px solid #3b4048; "
         "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
         "QPushButton:hover { background: #323842; color: #ffffff; }"
+        "QListWidget { selection-background-color: #264f78; selection-color: #ffffff; }"
+        "QListWidget::item:hover { background-color: #252932; color: #ffffff; }"
+        "QListWidget::item:selected, QListWidget::item:selected:active, "
+        "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
+        "border-left: 3px solid #528bff; font-weight: 600; }"
         "QLabel#separator { background: #2c313a; }"));
 
     // Root vertical layout containing the splitter and bottom action button bar.
@@ -86,9 +92,12 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setupButtonBox();
     rootLayout->addWidget(m_buttonBox);
 
-    // Harmonize control heights across all stacked settings pages and footer buttons.
+    // Harmonize control heights across all stacked settings pages and ensure Browse buttons never clip.
     for (QPushButton* btn : findChildren<QPushButton*>()) {
         btn->setFixedHeight(24);
+        if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) {
+            btn->setMinimumWidth(92);
+        }
     }
     for (QLineEdit* edit : findChildren<QLineEdit*>()) {
         edit->setFixedHeight(24);
@@ -103,7 +112,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
  *
  * Populates a 170px QListWidget with category labels and Nerd Font glyphs rendered
  * dynamically onto transparent QPixmaps. Suppresses horizontal scrollbars and
- * applies a sleek 28px-row navigation style with a 2px #528bff active indicator bar.
+ * applies a sleek 28px-row navigation style with a 3px #528bff active indicator bar.
  */
 void PreferencesDialog::setupSidebar() {
     m_sidebar = new QListWidget(this);
@@ -115,12 +124,22 @@ void PreferencesDialog::setupSidebar() {
     m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_sidebar->setProperty("role", "sidebar");
     m_sidebar->setStyleSheet(QStringLiteral(
-        "QListWidget { background: #1e2128; color: #abb2bf; border: none; "
-        "border-right: 1px solid #2c313a; outline: none; font-size: 11px; }"
-        "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 2px solid transparent; }"
-        "QListWidget::item:hover { background: #252932; color: #ffffff; }"
-        "QListWidget::item:selected { background: #262b36; color: #ffffff; "
-        "border-left: 2px solid #528bff; font-weight: 600; }"));
+        "QListWidget { background: #1e2128; color: #abb2bf; selection-background-color: #264f78; "
+        "selection-color: #ffffff; border: none; border-right: 1px solid #2c313a; outline: none; font-size: 11px; }"
+        "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 3px solid transparent; }"
+        "QListWidget::item:hover { background-color: #252932; color: #ffffff; }"
+        "QListWidget::item:selected, QListWidget::item:selected:active, "
+        "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
+        "border-left: 3px solid #528bff; font-weight: 600; }"));
+    // Enforce white HighlightedText and #264f78 Highlight across Active, Inactive, and Disabled states.
+    m_sidebar->ensurePolished();
+    QPalette sidePal = m_sidebar->palette();
+    for (QPalette::ColorGroup cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+        sidePal.setColor(cg, QPalette::Highlight, QColor(0x26, 0x4f, 0x78));
+        sidePal.setColor(cg, QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
+    }
+    setPalette(sidePal);
+    m_sidebar->setPalette(sidePal);
 
     struct Entry {
         QString label;
@@ -326,6 +345,34 @@ void PreferencesDialog::mousePressEvent(QMouseEvent* event) {
  */
 void PreferencesDialog::mouseMoveEvent(QMouseEvent* event) {
     QDialog::mouseMoveEvent(event);
+}
+
+/**
+ * @brief Parses a SLURM batch script and populates the HPC Integration page controls.
+ */
+bool PreferencesDialog::parseSlurmBatchScript(const QString& scriptText) {
+    return m_hpcIntegrationPage ? m_hpcIntegrationPage->parseSlurmBatchScript(scriptText) : false;
+}
+
+/**
+ * @brief Loads a SLURM `.sbatch`/`.slurm` file from disk into the HPC Integration page.
+ */
+bool PreferencesDialog::loadSlurmBatchScriptFile(const QString& filePath) {
+    return m_hpcIntegrationPage ? m_hpcIntegrationPage->loadSlurmBatchScriptFile(filePath) : false;
+}
+
+/**
+ * @brief Generates a SLURM batch script from the current HPC Integration page fields.
+ */
+QString PreferencesDialog::generateSlurmBatchScript() const {
+    return m_hpcIntegrationPage ? m_hpcIntegrationPage->generateSlurmBatchScript() : QString();
+}
+
+/**
+ * @brief Queries a specific SLURM field value by key from the HPC Integration page.
+ */
+QString PreferencesDialog::slurmFieldValue(const QString& key) const {
+    return m_hpcIntegrationPage ? m_hpcIntegrationPage->slurmFieldValue(key) : QString();
 }
 
 }  // namespace gridlock::ui
