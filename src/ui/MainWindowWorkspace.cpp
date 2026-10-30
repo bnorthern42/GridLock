@@ -573,25 +573,18 @@ void MainWindow::setupDocks() {
     }
   }
   // Populate initial synthetic fixture watch entries for baseline inspection.
-  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].id"),
-                                            QStringLiteral("0 (int)"));
-  m_differentialGrid->updateVariableDisplay(
-      0, QStringLiteral("data[0].coords.x"), QStringLiteral("0.0f (float)"));
-  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("mpi_rank"),
-                                            QStringLiteral("0 (int)"));
-  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].id"),
-                                            QStringLiteral("1 (int)"));
-  m_differentialGrid->updateVariableDisplay(
-      1, QStringLiteral("data[0].coords.x"), QStringLiteral("1.5f (float)"));
-  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("mpi_rank"),
-                                            QStringLiteral("1 (int)"));
+  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].id"), QStringLiteral("0 (int)"));
+  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].coords.x"), QStringLiteral("0.0f (float)"));
+  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("mpi_rank"), QStringLiteral("0 (int)"));
+  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].id"), QStringLiteral("1 (int)"));
+  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].coords.x"), QStringLiteral("1.5f (float)"));
+  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("mpi_rank"), QStringLiteral("1 (int)"));
   // Hide row/column header indices to maximize data cell reading density.
   m_differentialGrid->setColumnHidden(0, true);
   m_differentialGrid->setRowHidden(0, true);
   // Configure column sizing to stretch evenly across the dock width without horizontal clipping.
   m_differentialGrid->horizontalHeader()->setMinimumSectionSize(64);
-  m_differentialGrid->horizontalHeader()->setSectionResizeMode(
-      QHeaderView::Stretch);
+  m_differentialGrid->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
   m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
 
   // Watch Expressions container with custom inline expression add bar.
@@ -731,17 +724,33 @@ void MainWindow::setupDocks() {
   // Mount top horizontal splitter into the upper portion of the central vertical splitter.
   mainVerticalSplitter->addWidget(masterHorizontalSplitter);
 
-  // Bottom Zone: Reduced to 7 core I/O & memory inspection tabs
-  // Configured with document mode and non-elided scrolling tab buttons for compact chrome.
-  m_bottomTabs = new QTabWidget(mainVerticalSplitter);
+  // Bottom Zone: Left 36px vertical tool-window icon rail paired with linked contextual sub-tabs.
+  QWidget *bottomDockContainer = new QWidget(mainVerticalSplitter);
+  bottomDockContainer->setObjectName(QStringLiteral("bottomDockContainer"));
+  bottomDockContainer->setMinimumHeight(180);
+  QHBoxLayout *bottomRowLayout = new QHBoxLayout(bottomDockContainer);
+  bottomRowLayout->setContentsMargins(0, 0, 0, 0);
+  bottomRowLayout->setSpacing(0);
+
+  // Left 36px activity rail hosting Debug, MPI, Terminal, and Docs tool-group buttons.
+  m_bottomToolRail = new QWidget(bottomDockContainer);
+  m_bottomToolRail->setObjectName(QStringLiteral("bottomToolWindowRail"));
+  m_bottomToolRail->setFixedWidth(36);
+  m_bottomToolRail->setAttribute(Qt::WA_StyledBackground, true);
+
+  // Expanding document-mode tab container hosting linked contextual tool views.
+  m_bottomTabs = new QTabWidget(bottomDockContainer);
   m_bottomTabs->setObjectName("BottomConsoleTabs");
   m_bottomTabs->setMinimumWidth(200);
+  m_bottomTabs->setMinimumHeight(180);
   m_bottomTabs->setDocumentMode(true);
   m_bottomTabs->setContentsMargins(0, 0, 0, 0);
   if (m_bottomTabs->tabBar()) {
     m_bottomTabs->tabBar()->setUsesScrollButtons(true);
     m_bottomTabs->tabBar()->setElideMode(Qt::ElideNone);
   }
+  bottomRowLayout->addWidget(m_bottomToolRail);
+  bottomRowLayout->addWidget(m_bottomTabs, 1);
 
   // Embedded Interactive PTY Terminal: Spawns bash or user shell for command execution.
   m_terminalDock = new TerminalDockWidget("Terminal", m_bottomTabs);
@@ -753,12 +762,9 @@ void MainWindow::setupDocks() {
   QWidget *emptyEvalTitle = new QWidget(m_expressionEvaluatorWidget);
   emptyEvalTitle->setFixedSize(0, 0);
   m_expressionEvaluatorWidget->setTitleBarWidget(emptyEvalTitle);
-  connect(m_expressionEvaluatorWidget,
-          &ExpressionEvaluatorWidget::evaluateRequested, this,
+  connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::evaluateRequested, this,
           [this](const QString &expr) {
-            if (m_coordinator) {
-              m_coordinator->evaluateExpression(m_focusedRank, expr);
-            }
+            if (m_coordinator) m_coordinator->evaluateExpression(m_focusedRank, expr);
           });
 
   // Offline Reference Manual: Zeal/Dash compatible offline API and MPI manual viewer.
@@ -777,55 +783,39 @@ void MainWindow::setupDocks() {
   m_spackManager = new SpackManager(m_hpcBackend, m_bottomTabs);
   m_spackManager->setObjectName("HpcConsoleDock");
 
-  // Connect memory inspection view read requests to coordinator backend.
-  connect(m_memView, &MemView::requestMemory, this,
-          [this](const QString &address, int length) {
-            seekToAddressOrExpression(address);
-            if (m_coordinator) {
-              m_coordinator->readMemory(m_focusedRank, address, length);
-            }
-          });
-  connect(m_memView, &MemView::bytesPatched, this,
-          [this](uint64_t addr, const QByteArray &bytes) {
-            if (m_elfInspector && m_elfInspector->isValid()) {
-              m_elfInspector->writeVirtualMemory(addr, bytes);
-            }
-          });
+  // Connect memory inspection view read and live-patch requests to coordinator and ELF image.
+  connect(m_memView, &MemView::requestMemory, this, [this](const QString &address, int length) {
+    seekToAddressOrExpression(address);
+    if (m_coordinator) m_coordinator->readMemory(m_focusedRank, address, length);
+  });
+  connect(m_memView, &MemView::bytesPatched, this, [this](uint64_t addr, const QByteArray &bytes) {
+    if (m_elfInspector && m_elfInspector->isValid()) m_elfInspector->writeVirtualMemory(addr, bytes);
+  });
 
   // Asynchronous Cross-Rank Memory Differ: Compares byte blocks between two MPI rank processes.
-  connect(
-      m_memView, &MemView::requestMemoryDiff, this,
-      [this](int baseRank, int targetRank, const QString &addrStr, int length) {
-        if (!m_coordinator)
-          return;
-        pid_t basePid = m_coordinator->getPidForRank(baseRank);
-        pid_t targetPid = m_coordinator->getPidForRank(targetRank);
-
-        bool ok;
-        quint64 addrInt = addrStr.toULongLong(&ok, 16);
-        if (!ok)
-          return;
-        void *remoteAddr = reinterpret_cast<void *>(addrInt);
-
-        // Run cross-process memory comparison in worker thread via QtConcurrent.
-        QPointer<MainWindow> weakThis(this);
-        (void)QtConcurrent::run([weakThis, basePid, targetPid, remoteAddr,
-                                 length]() {
-          auto result = gridlock::core::hpc::MemoryDiffer::compareMemory(
-              basePid, targetPid, remoteAddr, length);
-          // Dispatch comparison result back to GUI thread for visualization.
-          QMetaObject::invokeMethod(weakThis, [weakThis, result, remoteAddr]() {
-            if (weakThis && weakThis->m_memView) {
-              weakThis->m_memView->displayMemoryDiff(result, remoteAddr);
-            }
+  connect(m_memView, &MemView::requestMemoryDiff, this,
+          [this](int baseRank, int targetRank, const QString &addrStr, int length) {
+            if (!m_coordinator) return;
+            const pid_t basePid = m_coordinator->getPidForRank(baseRank);
+            const pid_t targetPid = m_coordinator->getPidForRank(targetRank);
+            bool ok = false;
+            const quint64 addrInt = addrStr.toULongLong(&ok, 16);
+            if (!ok) return;
+            void *remoteAddr = reinterpret_cast<void *>(addrInt);
+            // Run cross-process memory comparison in worker thread via QtConcurrent.
+            QPointer<MainWindow> weakThis(this);
+            (void)QtConcurrent::run([weakThis, basePid, targetPid, remoteAddr, length]() {
+              auto result = gridlock::core::hpc::MemoryDiffer::compareMemory(basePid, targetPid, remoteAddr, length);
+              // Dispatch comparison result back to GUI thread for visualization.
+              QMetaObject::invokeMethod(weakThis, [weakThis, result, remoteAddr]() {
+                if (weakThis && weakThis->m_memView) weakThis->m_memView->displayMemoryDiff(result, remoteAddr);
+              });
+            });
           });
-        });
-      });
 
   // MPI Diagnostics & Deadlock Visualizer: Displays wait-for graphs and lock cycles.
   m_mpiDiagnosticsWidget = new MpiDiagnosticsWidget(m_bottomTabs);
-  connect(m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::jumpToFrameRequested,
-          this, &MainWindow::onRankSelected);
+  connect(m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::jumpToFrameRequested, this, &MainWindow::onRankSelected);
 
   // Add all inspection and terminal widgets to bottom tabbed container.
   // Each bottom tab adheres to the two-tier workstation layout: a 24-26px #21252b
@@ -839,12 +829,11 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->setCurrentWidget(m_memView);
 
-  // Harmonize margins, control heights, borderless frames, and F1 lookup across all bottom tabs.
+  // Harmonize margins, control heights, borderless frames, tool-window rail, and F1 lookup across bottom tabs.
   harmonizeBottomConsoleTabs();
 
-  // Mount bottom tabbed container into central vertical splitter.
-  mainVerticalSplitter->addWidget(m_bottomTabs);
-  m_bottomTabs->setMinimumHeight(180);
+  // Mount bottom rail + contextual tab container into central vertical splitter.
+  mainVerticalSplitter->addWidget(bottomDockContainer);
 
   // Allocate 68% height to code/disassembly and 32% to bottom console tabs.
   mainVerticalSplitter->setStretchFactor(0, 68);
@@ -858,12 +847,9 @@ void MainWindow::setupDocks() {
   // Enforce consistent minimum width constraints across all peripheral docks.
   // Side panels retain full horizontal/vertical resizability while preventing accidental collapse.
   const QList<QDockWidget *> sideDocks = {
-      m_projectExplorerWidget, variablesDock, registersDock, watchDock,
-      serverRackDock};
+      m_projectExplorerWidget, variablesDock, registersDock, watchDock, serverRackDock};
   for (QDockWidget *dock : sideDocks) {
-    if (!dock) {
-      continue;
-    }
+    if (!dock) continue;
     // Prevent side panels from collapsing below 150px during splitter adjustments.
     dock->setMinimumWidth(150);
     dock->setMaximumWidth(QWIDGETSIZE_MAX);
@@ -878,11 +864,9 @@ void MainWindow::setupDocks() {
 
   // Apply default pixel distributions for side explorer and inspection docks.
   // 215px allocated to left explorer, 255px to right inspection zone.
-  resizeDocks({m_projectExplorerWidget, registersDock}, {215, 255},
-              Qt::Horizontal);
+  resizeDocks({m_projectExplorerWidget, registersDock}, {215, 255}, Qt::Horizontal);
   // Stack right-hand docks vertically: 320px registers, 210px watches, 290px server rack.
-  resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290},
-              Qt::Vertical);
+  resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290}, Qt::Vertical);
 
   // Locate or initialize View menu to register dock toggle actions.
   QMenu *viewMenu = nullptr;
@@ -898,12 +882,9 @@ void MainWindow::setupDocks() {
   // Every dock widget has its outer margins stripped so 1px borders align cleanly.
   for (auto *dock : findChildren<QDockWidget *>()) {
     // Expose dynamic toggle checkboxes in View menu for showing/hiding each panel.
-    if (viewMenu) {
-      viewMenu->addAction(dock->toggleViewAction());
-    }
+    if (viewMenu) viewMenu->addAction(dock->toggleViewAction());
     // Allow panels to be closed, undocked into floating windows, or tabified.
-    dock->setFeatures(QDockWidget::DockWidgetClosable |
-                      QDockWidget::DockWidgetMovable |
+    dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
                       QDockWidget::DockWidgetFloatable);
     // Eliminate outer dock margins for seamless workstation borders.
     dock->setContentsMargins(0, 0, 0, 0);
@@ -914,7 +895,6 @@ void MainWindow::setupDocks() {
         inner->layout()->setSpacing(0);
       }
     }
-
     // Ensure floating top-level docks restore standard OS window chrome and shadows.
     connect(dock, &QDockWidget::topLevelChanged, dock, [dock](bool topLevel) {
       if (topLevel) {

@@ -18,6 +18,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSplitter>
+#include <QTabBar>
 #include <QVBoxLayout>
 
 namespace gridlock::ui {
@@ -25,10 +26,10 @@ namespace gridlock::ui {
 /**
  * @brief Constructs a new MpiDiagnosticsWidget.
  *
- * Initializes the 26px #21252b status header bar with cycle status badge and
- * rank filter input, embeds a structured 6-column rank wait-state QTableWidget
- * and deadlock alert QListWidget inside the Deadlock Analyzer tab, and wires
- * double-click frame seek navigation.
+ * Initializes the single 26px #21252b status header bar with inline Deadlock Analyzer
+ * and Network Log mode toggle pills, cycle status badge, and rank filter input, hides
+ * the inner QTabBar to eliminate double-stacked horizontal tab bars, and embeds the
+ * structured 6-column rank wait-state QTableWidget and network log pages.
  *
  * @param parent Optional parent widget.
  */
@@ -40,18 +41,37 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Unified 26px #21252b header strip displaying telemetry, cycle status badge, and filter box.
+    // Unified 26px #21252b header strip displaying telemetry, inline mode pills, cycle badge, and filter box.
     QWidget* headerBar = new QWidget(this);
     headerBar->setObjectName(QStringLiteral("mpiDiagnosticsHeaderBar"));
     headerBar->setFixedHeight(26);
     headerBar->setStyleSheet(QStringLiteral(
         "#mpiDiagnosticsHeaderBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
         "#mpiDiagnosticsHeaderBar QLabel { color: #abb2bf; font-family: 'JetBrains Mono', monospace; "
-        "font-size: 11px; font-weight: 600; }"));
+        "font-size: 11px; font-weight: 600; }"
+        "#mpiDiagnosticsHeaderBar QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; "
+        "border-radius: 2px; padding: 0px 8px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; }"
+        "#mpiDiagnosticsHeaderBar QPushButton:hover { background: #282c34; color: #ffffff; border-color: #528bff; }"
+        "#mpiDiagnosticsHeaderBar QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }"));
     QHBoxLayout* headerLayout = new QHBoxLayout(headerBar);
     headerLayout->setContentsMargins(6, 2, 6, 2);
     headerLayout->setSpacing(6);
     headerLayout->addWidget(new QLabel(QStringLiteral("MPI COLLECTIVE & WAIT-FOR GRAPH TELEMETRY"), headerBar));
+
+    // Inline segmented mode toggle buttons replacing the redundant nested QTabBar row.
+    m_analyzerModeBtn = new QPushButton(QStringLiteral("DEADLOCK ANALYZER"), headerBar);
+    m_analyzerModeBtn->setObjectName(QStringLiteral("mpiModeAnalyzerBtn"));
+    m_analyzerModeBtn->setCheckable(true);
+    m_analyzerModeBtn->setChecked(true);
+    m_analyzerModeBtn->setFixedHeight(20);
+    headerLayout->addWidget(m_analyzerModeBtn);
+
+    m_networkLogModeBtn = new QPushButton(QStringLiteral("NETWORK LOG"), headerBar);
+    m_networkLogModeBtn->setObjectName(QStringLiteral("mpiModeNetworkLogBtn"));
+    m_networkLogModeBtn->setCheckable(true);
+    m_networkLogModeBtn->setChecked(false);
+    m_networkLogModeBtn->setFixedHeight(20);
+    headerLayout->addWidget(m_networkLogModeBtn);
 
     // Status pill badge indicating whether a circular wait-for cycle is currently active.
     m_statusBadge = new QLabel(QStringLiteral("STATUS: NO CYCLE"), headerBar);
@@ -70,7 +90,7 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
     m_filterEdit->setMaximumWidth(240);
     headerLayout->addWidget(m_filterEdit);
 
-    // Initialize document-mode tabs and borderless embedded widgets.
+    // Initialize borderless page container and hide its inner QTabBar to prevent double-stacked tab bars.
     m_tabWidget = new QTabWidget(this);
     m_tabWidget->setDocumentMode(true);
     m_tabWidget->setContentsMargins(0, 0, 0, 0);
@@ -121,13 +141,28 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
     analyzerLayout->addWidget(m_rankWaitTable, 1);
     analyzerLayout->addWidget(m_deadlockList);
 
-    // Second sub-tab: MPI point-to-point and collective network packet log.
+    // Second sub-page: MPI point-to-point and collective network packet log.
     m_networkLogWidget = new MpiNetworkLogWidget("Network Log", this);
 
     m_tabWidget->addTab(analyzerPage, "Deadlock Analyzer");
     m_tabWidget->addTab(m_networkLogWidget, "Network Log");
+    if (m_tabWidget->tabBar()) {
+        m_tabWidget->tabBar()->hide();
+    }
     layout->addWidget(headerBar);
     layout->addWidget(m_tabWidget, 1);
+
+    // Wire inline header mode toggle buttons and synchronize button checked state with active page.
+    connect(m_analyzerModeBtn, &QPushButton::clicked, this, [this]() {
+        m_tabWidget->setCurrentIndex(0);
+    });
+    connect(m_networkLogModeBtn, &QPushButton::clicked, this, [this]() {
+        m_tabWidget->setCurrentIndex(1);
+    });
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int idx) {
+        if (m_analyzerModeBtn) m_analyzerModeBtn->setChecked(idx == 0);
+        if (m_networkLogModeBtn) m_networkLogModeBtn->setChecked(idx == 1);
+    });
 
     // Populate initial rank wait-state telemetry rows so the Deadlock Analyzer is never a blank void.
     populateDefaultRankTelemetry();
@@ -190,6 +225,16 @@ void MpiDiagnosticsWidget::populateDefaultRankTelemetry() {
  */
 int MpiDiagnosticsWidget::rankWaitTableRowCount() const {
     return m_rankWaitTable ? m_rankWaitTable->rowCount() : 0;
+}
+
+/**
+ * @brief Reports whether the inner tab bar is hidden and view switching is driven by the single 26px header bar.
+ * @return True when the inner QTabBar is hidden and inline header toggle buttons control active sub-views.
+ */
+bool MpiDiagnosticsWidget::hasCompactSingleRowHeader() const {
+    return m_tabWidget != nullptr && m_tabWidget->tabBar() != nullptr &&
+           m_tabWidget->tabBar()->isHidden() && m_analyzerModeBtn != nullptr &&
+           m_networkLogModeBtn != nullptr;
 }
 
 /**

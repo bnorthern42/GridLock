@@ -28,6 +28,8 @@
 #include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -38,12 +40,14 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
 
@@ -151,47 +155,22 @@ void MainWindow::harmonizeBottomConsoleTabs() {
     // 3. Enforce zero-gutter outer margins, compact <= 22px controls, and borderless frames on all tabs.
     for (int i = 0; i < m_bottomTabs->count(); ++i) {
         QWidget* page = m_bottomTabs->widget(i);
-        if (!page) {
-            continue;
-        }
+        if (!page) continue;
         page->setContentsMargins(0, 0, 0, 0);
         if (QLayout* pageLayout = page->layout()) {
             pageLayout->setContentsMargins(0, 0, 0, 0);
             pageLayout->setSpacing(0);
         }
-
-        // Cap all push buttons inside the tab page at 22px height.
-        for (auto* btn : page->findChildren<QPushButton*>()) {
-            if (btn->maximumHeight() > 24) {
-                btn->setFixedHeight(22);
-            }
-        }
-        // Cap all single-line edits inside the tab page at 22px height.
-        for (auto* edit : page->findChildren<QLineEdit*>()) {
-            if (edit->maximumHeight() > 24) {
-                edit->setFixedHeight(22);
-            }
-        }
-        // Cap all combo boxes inside the tab page at 22px height.
-        for (auto* combo : page->findChildren<QComboBox*>()) {
-            if (combo->maximumHeight() > 24) {
-                combo->setFixedHeight(22);
-            }
-        }
-        // Cap all spin boxes inside the tab page at 22px height.
-        for (auto* spin : page->findChildren<QSpinBox*>()) {
-            if (spin->maximumHeight() > 24) {
-                spin->setFixedHeight(22);
-            }
-        }
+        // Cap push buttons, line edits, combo boxes, and spin boxes inside each tab page at 22px height.
+        for (auto* btn : page->findChildren<QPushButton*>()) if (btn->maximumHeight() > 24) btn->setFixedHeight(22);
+        for (auto* edit : page->findChildren<QLineEdit*>()) if (edit->maximumHeight() > 24) edit->setFixedHeight(22);
+        for (auto* combo : page->findChildren<QComboBox*>()) if (combo->maximumHeight() > 24) combo->setFixedHeight(22);
+        for (auto* spin : page->findChildren<QSpinBox*>()) if (spin->maximumHeight() > 24) spin->setFixedHeight(22);
         // Strip redundant QFrame borders from embedded text and list viewports.
         for (auto* frame : page->findChildren<QFrame*>()) {
-            if (qobject_cast<QPlainTextEdit*>(frame) ||
-                qobject_cast<QTextEdit*>(frame) ||
-                qobject_cast<QTextBrowser*>(frame) ||
-                qobject_cast<QListWidget*>(frame) ||
-                qobject_cast<QTreeView*>(frame) ||
-                qobject_cast<QTableView*>(frame)) {
+            if (qobject_cast<QPlainTextEdit*>(frame) || qobject_cast<QTextEdit*>(frame) ||
+                qobject_cast<QTextBrowser*>(frame) || qobject_cast<QListWidget*>(frame) ||
+                qobject_cast<QTreeView*>(frame) || qobject_cast<QTableView*>(frame)) {
                 frame->setFrameShape(QFrame::NoFrame);
             }
         }
@@ -206,51 +185,32 @@ void MainWindow::harmonizeBottomConsoleTabs() {
             candidate = cursor.selectedText().trimmed();
             if (candidate.isEmpty()) {
                 // Extract MPI_* or <symbol@plt> identifier from the active disassembly line.
-                const QString lineText = cursor.block().text();
-                static const QRegularExpression kSymRegex(
-                    QStringLiteral("(MPI_[A-Za-z0-9_]+|<[A-Za-z0-9_@]+>)"));
-                const QRegularExpressionMatch match = kSymRegex.match(lineText);
-                if (match.hasMatch()) {
-                    candidate = match.captured(1);
-                }
+                static const QRegularExpression kSymRegex(QStringLiteral("(MPI_[A-Za-z0-9_]+|<[A-Za-z0-9_@]+>)"));
+                const QRegularExpressionMatch match = kSymRegex.match(cursor.block().text());
+                if (match.hasMatch()) candidate = match.captured(1);
             }
         }
-        if (candidate.isEmpty() && m_seekBar && !m_seekBar->text().trimmed().isEmpty()) {
-            candidate = m_seekBar->text().trimmed();
-        }
-        if (candidate.isEmpty()) {
-            candidate = QStringLiteral("MPI_Init");
-        }
+        if (candidate.isEmpty() && m_seekBar && !m_seekBar->text().trimmed().isEmpty()) candidate = m_seekBar->text().trimmed();
+        if (candidate.isEmpty()) candidate = QStringLiteral("MPI_Init");
         lookupSymbolDocumentation(candidate);
     });
 
     // 5. Wire cross-pane workflow bridges between Evaluator/Variables -> Watch Expressions and Disassembly -> Reference Manual.
     auto addPromotedWatch = [this](const QString& expr) {
         const QString trimmed = expr.trimmed();
-        if (trimmed.isEmpty() || !m_differentialGrid) {
-            return;
-        }
+        if (trimmed.isEmpty() || !m_differentialGrid) return;
         m_differentialGrid->addVariableColumn(trimmed);
         m_differentialGrid->updateVariableDisplay(0, trimmed, QStringLiteral("0.0"));
     };
-    if (m_expressionEvaluatorWidget) {
-        connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::watchExpressionRequested,
-                this, addPromotedWatch);
-    }
-    if (m_variablesDockWidget) {
-        connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::watchExpressionRequested,
-                this, addPromotedWatch);
-    }
+    if (m_expressionEvaluatorWidget) connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::watchExpressionRequested, this, addPromotedWatch);
+    if (m_variablesDockWidget) connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::watchExpressionRequested, this, addPromotedWatch);
     if (m_disassemblyView) {
-        connect(m_disassemblyView, &DisassemblyView::documentationRequested,
-                this, &MainWindow::lookupSymbolDocumentation);
-        connect(m_disassemblyView, &DisassemblyView::seekInMemoryViewRequested,
-                this, [this](uint64_t addr) {
-                    if (m_bottomTabs && m_memView) {
-                        m_bottomTabs->setCurrentWidget(m_memView);
-                    }
-                    seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QLatin1Char('0')));
-                });
+        connect(m_disassemblyView, &DisassemblyView::documentationRequested, this, &MainWindow::lookupSymbolDocumentation);
+        connect(m_disassemblyView, &DisassemblyView::seekInMemoryViewRequested, this, [this](uint64_t addr) {
+            selectBottomToolGroup(QStringLiteral("Debug"));
+            if (m_bottomTabs && m_memView) m_bottomTabs->setCurrentWidget(m_memView);
+            seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QLatin1Char('0')));
+        });
     }
 
     // 6. Wire bidirectional SourceCodeView::sourceLineSelected -> DisassemblyView seek choreography.
@@ -258,80 +218,205 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         if (SourceCodeView* srcView = sourceCodeView()) {
             if (!srcView->property("gridlockSourceSyncBound").toBool()) {
                 srcView->setProperty("gridlockSourceSyncBound", true);
-                connect(srcView, &SourceCodeView::sourceLineSelected, this,
-                        [this](int lineOneBased) {
-                            const uint64_t addr = sourceLineToAddress(lineOneBased);
-                            const bool keepLinear =
-                                m_disassemblyView && !m_disassemblyView->isGraphMode() &&
-                                !m_disassemblyView->isDecompilerMode() &&
-                                !m_disassemblyView->isSplitGraphDecompilerMode() &&
-                                !m_forceDecompilerFallback &&
-                                m_workspacePerspective == QStringLiteral("Code");
-                            seekToAddressOrExpression(
-                                QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
-                            if (keepLinear && m_disassemblyView) {
-                                m_showingDecompilerFallback = false;
-                                m_disassemblyView->setSplitGraphDecompilerMode(false);
-                                m_disassemblyView->setGraphMode(false);
-                            }
-                        });
+                connect(srcView, &SourceCodeView::sourceLineSelected, this, [this](int lineOneBased) {
+                    const uint64_t addr = sourceLineToAddress(lineOneBased);
+                    const bool keepLinear = m_disassemblyView && !m_disassemblyView->isGraphMode() &&
+                                            !m_disassemblyView->isDecompilerMode() &&
+                                            !m_disassemblyView->isSplitGraphDecompilerMode() &&
+                                            !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
+                    seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+                    if (keepLinear && m_disassemblyView) {
+                        m_showingDecompilerFallback = false;
+                        m_disassemblyView->setSplitGraphDecompilerMode(false);
+                        m_disassemblyView->setGraphMode(false);
+                    }
+                });
             }
         }
     };
     bindActiveSourceView();
-    if (m_editorTabManager) {
-        connect(m_editorTabManager, &QTabWidget::currentChanged, this,
-                [bindActiveSourceView](int) { bindActiveSourceView(); });
-    }
+    if (m_editorTabManager) connect(m_editorTabManager, &QTabWidget::currentChanged, this, [bindActiveSourceView](int) { bindActiveSourceView(); });
 
-    // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE (CFG+C) | MPI CLUSTER) on MainToolbar.
+    // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
         const QString perspBtnStyle = QStringLiteral(
             "QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; "
-            "border-radius: 2px; padding: 0px 6px; font-size: 10px; font-weight: 700; "
-            "min-height: 20px; max-height: 20px; }"
+            "border-radius: 2px; padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; }"
             "QPushButton:hover { background: #282c34; color: #ffffff; border-color: #528bff; }"
             "QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
-
+        auto makePerspBtn = [&](const QString& label, const QString& objName, const QString& persp, bool checked) {
+            auto* btn = new QPushButton(label, mainToolbar);
+            btn->setObjectName(objName);
+            btn->setCheckable(true);
+            btn->setChecked(checked);
+            btn->setStyleSheet(perspBtnStyle);
+            connect(btn, &QPushButton::clicked, this, [this, persp]() { setWorkspacePerspective(persp); });
+            mainToolbar->addWidget(btn);
+            return btn;
+        };
         mainToolbar->addSeparator();
-        m_perspCodeBtn = new QPushButton(QStringLiteral("CODE"), mainToolbar);
-        m_perspCodeBtn->setObjectName(QStringLiteral("perspectiveCodeBtn"));
-        m_perspCodeBtn->setCheckable(true);
-        m_perspCodeBtn->setChecked(true);
-        m_perspCodeBtn->setStyleSheet(perspBtnStyle);
-        connect(m_perspCodeBtn, &QPushButton::clicked, this,
-                [this]() { setWorkspacePerspective(QStringLiteral("Code")); });
-        mainToolbar->addWidget(m_perspCodeBtn);
-
-        m_perspReverseBtn = new QPushButton(QStringLiteral("REVERSE"), mainToolbar);
-        m_perspReverseBtn->setObjectName(QStringLiteral("perspectiveReverseBtn"));
-        m_perspReverseBtn->setCheckable(true);
-        m_perspReverseBtn->setStyleSheet(perspBtnStyle);
-        connect(m_perspReverseBtn, &QPushButton::clicked, this,
-                [this]() { setWorkspacePerspective(QStringLiteral("Reverse")); });
-        mainToolbar->addWidget(m_perspReverseBtn);
-
-        m_perspMpiBtn = new QPushButton(QStringLiteral("MPI"), mainToolbar);
-        m_perspMpiBtn->setObjectName(QStringLiteral("perspectiveMpiBtn"));
-        m_perspMpiBtn->setCheckable(true);
-        m_perspMpiBtn->setStyleSheet(perspBtnStyle);
-        connect(m_perspMpiBtn, &QPushButton::clicked, this,
-                [this]() { setWorkspacePerspective(QStringLiteral("MPI")); });
-        mainToolbar->addWidget(m_perspMpiBtn);
+        m_perspCodeBtn = makePerspBtn(QStringLiteral("CODE"), QStringLiteral("perspectiveCodeBtn"), QStringLiteral("Code"), true);
+        m_perspReverseBtn = makePerspBtn(QStringLiteral("REVERSE"), QStringLiteral("perspectiveReverseBtn"), QStringLiteral("Reverse"), false);
+        m_perspMpiBtn = makePerspBtn(QStringLiteral("MPI"), QStringLiteral("perspectiveMpiBtn"), QStringLiteral("MPI"), false);
     }
 
-    // 8. Bind Alt+1 / Alt+2 / Alt+3 perspective shortcuts and Ctrl+M bottom console maximize toggle.
-    auto* alt1 = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_1), this);
-    connect(alt1, &QShortcut::activated, this,
-            [this]() { setWorkspacePerspective(QStringLiteral("Code")); });
-    auto* alt2 = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_2), this);
-    connect(alt2, &QShortcut::activated, this,
-            [this]() { setWorkspacePerspective(QStringLiteral("Reverse")); });
-    auto* alt3 = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_3), this);
-    connect(alt3, &QShortcut::activated, this,
-            [this]() { setWorkspacePerspective(QStringLiteral("MPI")); });
-    auto* ctrlM = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_M), this);
-    connect(ctrlM, &QShortcut::activated, this, &MainWindow::toggleMaximizeBottomConsole);
+    // 8. Bind Alt+1..3 perspective shortcuts, Ctrl+M maximize toggle, and populate #bottomToolWindowRail.
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_1), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Code")); });
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_2), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Reverse")); });
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_3), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("MPI")); });
+    connect(new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_M), this), &QShortcut::activated, this, &MainWindow::toggleMaximizeBottomConsole);
+
+    // 9. Populate the 36px left vertical tool-window icon rail (#bottomToolWindowRail) with 4 linked tool groups.
+    if (m_bottomToolRail && !m_bottomToolRail->layout()) {
+        m_bottomToolRail->setStyleSheet(QStringLiteral(
+            "#bottomToolWindowRail { background: #181a1f; border-right: 1px solid #252932; }"
+            "#bottomToolWindowRail QToolButton { background: transparent; color: #9da5b4; border: 1px solid transparent; "
+            "border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; }"
+            "#bottomToolWindowRail QToolButton:hover { background: #21252b; color: #ffffff; border: 1px solid #323844; }"
+            "#bottomToolWindowRail QToolButton:checked { background: #21252b; color: #61afef; border: 1px solid #528bff; border-left: 2px solid #528bff; }"));
+        auto* railLayout = new QVBoxLayout(m_bottomToolRail);
+        railLayout->setContentsMargins(3, 4, 3, 4);
+        railLayout->setSpacing(4);
+
+        // Render crisp 16x16 antialiased vector icons for Debug, MPI, Terminal, and Docs rail buttons.
+        auto makeRailIcon = [](int kind) -> QIcon {
+            QPixmap px(16, 16);
+            px.fill(Qt::transparent);
+            QPainter p(&px);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            QPen pen(QColor(0xd7, 0xda, 0xe0), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+            if (kind == 0) { // Debug: inspection crosshair ring with center core
+                pen.setColor(QColor(0x61, 0xaf, 0xef)); p.setPen(pen);
+                p.drawEllipse(QRectF(3.0, 3.0, 10.0, 10.0));
+                p.drawLine(QPointF(8.0, 1.0), QPointF(8.0, 3.5)); p.drawLine(QPointF(8.0, 12.5), QPointF(8.0, 15.0));
+                p.setBrush(QColor(0x61, 0xaf, 0xef)); p.drawEllipse(QPointF(8.0, 8.0), 1.5, 1.5);
+            } else if (kind == 1) { // MPI: 3-node cluster topology graph
+                pen.setColor(QColor(0x4e, 0xc9, 0xb0)); p.setPen(pen);
+                p.drawLine(QPointF(8.0, 4.0), QPointF(3.5, 12.0)); p.drawLine(QPointF(8.0, 4.0), QPointF(12.5, 12.0)); p.drawLine(QPointF(3.5, 12.0), QPointF(12.5, 12.0));
+                p.setBrush(QColor(0x18, 0x1a, 0x1f));
+                p.drawEllipse(QPointF(8.0, 4.0), 2.2, 2.2); p.drawEllipse(QPointF(3.5, 12.0), 2.2, 2.2); p.drawEllipse(QPointF(12.5, 12.0), 2.2, 2.2);
+            } else if (kind == 2) { // Terminal: >_ command prompt glyph
+                pen.setColor(QColor(0xe5, 0xc0, 0x7b)); p.setPen(pen);
+                p.drawLine(QPointF(3.0, 4.5), QPointF(7.5, 8.0)); p.drawLine(QPointF(7.5, 8.0), QPointF(3.0, 11.5));
+                p.drawLine(QPointF(9.0, 11.5), QPointF(13.5, 11.5));
+            } else { // Docs: open reference manual pages
+                pen.setColor(QColor(0xc6, 0x78, 0xdd)); p.setPen(pen);
+                p.drawRoundedRect(QRectF(2.5, 3.0, 11.0, 10.0), 1.5, 1.5);
+                p.drawLine(QPointF(8.0, 3.2), QPointF(8.0, 12.8));
+            }
+            return QIcon(px);
+        };
+
+        struct RailSpec { const char* id; const char* tip; Qt::Key key; int iconKind; };
+        static const RailSpec kSpecs[] = {
+            {"Debug", "Debug Tools: GDB Console, Memory View & Evaluator (Alt+4)", Qt::Key_4, 0},
+            {"MPI", "MPI Telemetry: Deadlock Analyzer, Network Log & HPC Console (Alt+5)", Qt::Key_5, 1},
+            {"Terminal", "Interactive Shell Terminal (Alt+6)", Qt::Key_6, 2},
+            {"Docs", "Offline Reference Manual (Alt+7)", Qt::Key_7, 3},
+        };
+        for (const auto& sp : kSpecs) {
+            const QString groupId = QString::fromLatin1(sp.id);
+            auto* btn = new QToolButton(m_bottomToolRail);
+            btn->setObjectName(QStringLiteral("bottomRailBtn_") + groupId);
+            btn->setCheckable(true);
+            btn->setIcon(makeRailIcon(sp.iconKind));
+            btn->setIconSize(QSize(16, 16));
+            btn->setToolTip(QString::fromLatin1(sp.tip));
+            connect(btn, &QToolButton::clicked, this, [this, groupId]() { selectBottomToolGroup(groupId); });
+            connect(new QShortcut(QKeySequence(Qt::ALT | sp.key), this), &QShortcut::activated, this, [this, groupId]() { selectBottomToolGroup(groupId); });
+            m_bottomRailButtons.insert(groupId, btn);
+            railLayout->addWidget(btn, 0, Qt::AlignHCenter);
+        }
+        railLayout->addStretch(1);
+    }
+
+    // Automatically synchronize the active tool-window group whenever BottomConsoleTabs changes programmatically.
+    connect(m_bottomTabs, &QTabWidget::currentChanged, this, [this](int index) {
+        if (m_syncingBottomToolGroup || index < 0) return;
+        const QString grp = bottomToolGroupForTabIndex(index);
+        if (!grp.isEmpty() && grp != m_activeBottomToolGroup) {
+            selectBottomToolGroup(grp);
+        }
+    });
+    selectBottomToolGroup(QStringLiteral("Debug"));
+}
+
+/**
+ * @brief Returns the ordered list of bottom tool-window icon rail group identifiers.
+ * @return Canonical list {"Debug", "MPI", "Terminal", "Docs"}.
+ */
+QStringList MainWindow::bottomToolGroups() const {
+    return {QStringLiteral("Debug"), QStringLiteral("MPI"),
+            QStringLiteral("Terminal"), QStringLiteral("Docs")};
+}
+
+/**
+ * @brief Maps a BottomConsoleTabs index to its parent tool-window rail group name.
+ * @param tabIndex Zero-based tab index inside m_bottomTabs.
+ * @return Group identifier ("Debug", "MPI", "Terminal", or "Docs"), or empty if out of range.
+ */
+QString MainWindow::bottomToolGroupForTabIndex(int tabIndex) const {
+    if (!m_bottomTabs || tabIndex < 0 || tabIndex >= m_bottomTabs->count()) return {};
+    const QWidget* page = m_bottomTabs->widget(tabIndex);
+    if (page == m_terminalDock) return QStringLiteral("Terminal");
+    if (page == m_referenceManualWidget) return QStringLiteral("Docs");
+    if (page == m_mpiDiagnosticsWidget || page == m_spackManager) return QStringLiteral("MPI");
+    if (page == m_gdbConsoleWidget || page == m_memView || page == m_expressionEvaluatorWidget) {
+        return QStringLiteral("Debug");
+    }
+    const QString title = m_bottomTabs->tabText(tabIndex);
+    if (title.contains(QStringLiteral("Terminal"), Qt::CaseInsensitive)) return QStringLiteral("Terminal");
+    if (title.contains(QStringLiteral("Reference"), Qt::CaseInsensitive)) return QStringLiteral("Docs");
+    if (title.contains(QStringLiteral("MPI"), Qt::CaseInsensitive) ||
+        title.contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) return QStringLiteral("MPI");
+    return QStringLiteral("Debug");
+}
+
+/**
+ * @brief Activates a bottom tool-window group, filtering visible tabs strictly to its linked views.
+ * @param groupName Target group name ("Debug", "MPI", "Terminal", or "Docs").
+ */
+void MainWindow::selectBottomToolGroup(const QString& groupName) {
+    if (!m_bottomTabs || m_syncingBottomToolGroup) return;
+    QString resolvedGroup;
+    for (const QString& g : bottomToolGroups()) {
+        if (g.compare(groupName.trimmed(), Qt::CaseInsensitive) == 0) {
+            resolvedGroup = g;
+            break;
+        }
+    }
+    if (resolvedGroup.isEmpty()) return;
+
+    m_syncingBottomToolGroup = true;
+    m_activeBottomToolGroup = resolvedGroup;
+
+    // Synchronize checked state across the 4 left vertical tool-window rail buttons.
+    for (auto it = m_bottomRailButtons.cbegin(); it != m_bottomRailButtons.cend(); ++it) {
+        if (it.value()) it.value()->setChecked(it.key() == resolvedGroup);
+    }
+
+    // Reveal all linked tabs belonging to resolvedGroup first so target index is selectable.
+    int firstTabInGroup = -1;
+    for (int i = 0; i < m_bottomTabs->count(); ++i) {
+        if (bottomToolGroupForTabIndex(i) == resolvedGroup) {
+            m_bottomTabs->setTabVisible(i, true);
+            if (firstTabInGroup < 0) firstTabInGroup = i;
+        }
+    }
+
+    // Switch current tab into resolvedGroup before hiding unrelated tabs to prevent unintended fallback jumps.
+    const int curIdx = m_bottomTabs->currentIndex();
+    if (firstTabInGroup >= 0 && bottomToolGroupForTabIndex(curIdx) != resolvedGroup) {
+        m_bottomTabs->setCurrentIndex(firstTabInGroup);
+    }
+
+    // Hide all tabs belonging to non-active tool groups.
+    for (int i = 0; i < m_bottomTabs->count(); ++i) {
+        if (bottomToolGroupForTabIndex(i) != resolvedGroup) {
+            m_bottomTabs->setTabVisible(i, false);
+        }
+    }
+    m_syncingBottomToolGroup = false;
 }
 
 /**
@@ -346,14 +431,10 @@ void MainWindow::harmonizeBottomConsoleTabs() {
  */
 bool MainWindow::lookupSymbolDocumentation(const QString& rawSymbol) {
     const QString normalized = gridlock::core::DocsetManager::normalizeSymbolName(rawSymbol);
-    if (normalized.isEmpty() || !m_referenceManualWidget || !m_bottomTabs) {
-        return false;
-    }
+    if (normalized.isEmpty() || !m_referenceManualWidget || !m_bottomTabs) return false;
+    if (!m_referenceManualWidget->lookupSymbol(normalized)) return false;
 
-    if (!m_referenceManualWidget->lookupSymbol(normalized)) {
-        return false;
-    }
-
+    selectBottomToolGroup(QStringLiteral("Docs"));
     m_bottomTabs->setCurrentWidget(m_referenceManualWidget);
     QCoreApplication::processEvents();
     return true;
@@ -370,8 +451,7 @@ bool MainWindow::lookupSymbolDocumentation(const QString& rawSymbol) {
  * @return True if PNG snapshot was rendered and saved; false otherwise.
  */
 bool MainWindow::captureTabAuditSnapshot(int tabIndex, const QString& outputPath) {
-    if (!m_bottomTabs || tabIndex < 0 || tabIndex >= m_bottomTabs->count() ||
-        outputPath.trimmed().isEmpty()) {
+    if (!m_bottomTabs || tabIndex < 0 || tabIndex >= m_bottomTabs->count() || outputPath.trimmed().isEmpty()) {
         return false;
     }
 
@@ -410,22 +490,16 @@ bool MainWindow::captureTabAuditSnapshot(int tabIndex, const QString& outputPath
  */
 bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     auto inspector = std::make_unique<gridlock::core::ElfBinaryInspector>();
-    if (!inspector->loadFile(binaryPath)) {
-        return false;
-    }
+    if (!inspector->loadFile(binaryPath)) return false;
 
     const QFileInfo binInfo(binaryPath);
     QString sourceFilter;
-    if (QFileInfo::exists(binaryPath + QStringLiteral(".cpp"))) {
-        sourceFilter = binInfo.fileName() + QStringLiteral(".cpp");
-    } else if (QFileInfo::exists(binaryPath + QStringLiteral(".c"))) {
-        sourceFilter = binInfo.fileName() + QStringLiteral(".c");
-    } else if (!m_currentFile.isEmpty() &&
-               QFileInfo(m_currentFile).completeBaseName() == binInfo.fileName()) {
+    if (QFileInfo::exists(binaryPath + QStringLiteral(".cpp"))) sourceFilter = binInfo.fileName() + QStringLiteral(".cpp");
+    else if (QFileInfo::exists(binaryPath + QStringLiteral(".c"))) sourceFilter = binInfo.fileName() + QStringLiteral(".c");
+    else if (!m_currentFile.isEmpty() && QFileInfo(m_currentFile).completeBaseName() == binInfo.fileName()) {
         sourceFilter = QFileInfo(m_currentFile).fileName();
     }
     inspector->setSourceFileFilter(sourceFilter);
-
     m_elfInspector = std::move(inspector);
     m_loadedBinaryPath = binInfo.absoluteFilePath();
 
@@ -435,16 +509,12 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     if (m_projectExplorerWidget) {
         std::vector<SymbolEntry> syms;
         syms.reserve(m_elfInspector->symbols().size());
-        for (const auto& s : m_elfInspector->symbols()) {
-            syms.push_back({s.name, s.address, static_cast<uint32_t>(s.size)});
-        }
+        for (const auto& s : m_elfInspector->symbols()) syms.push_back({s.name, s.address, static_cast<uint32_t>(s.size)});
         m_projectExplorerWidget->setSymbols(syms);
 
         std::vector<StringEntry> strs;
         strs.reserve(m_elfInspector->strings().size());
-        for (const auto& str : m_elfInspector->strings()) {
-            strs.push_back({str.address, str.section, str.value});
-        }
+        for (const auto& str : m_elfInspector->strings()) strs.push_back({str.address, str.section, str.value});
         m_projectExplorerWidget->setStrings(strs);
     }
 
@@ -458,17 +528,11 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     }
 
     if (mainAddr != 0ULL && !sourceFilter.isEmpty()) {
-        const QString disasm = m_elfInspector->disassembleSymbol(
-            mainSymName, sourceFilter, &m_dwarfLineToAddress, &m_dwarfAddressToLine);
-        if (m_disassemblyView && !disasm.isEmpty()) {
-            m_disassemblyView->setPlainText(disasm);
-        }
-        const bool keepLinear =
-            m_disassemblyView && !m_disassemblyView->isGraphMode() &&
-            !m_disassemblyView->isDecompilerMode() &&
-            !m_disassemblyView->isSplitGraphDecompilerMode() &&
-            !m_forceDecompilerFallback &&
-            m_workspacePerspective == QStringLiteral("Code");
+        const QString disasm = m_elfInspector->disassembleSymbol(mainSymName, sourceFilter, &m_dwarfLineToAddress, &m_dwarfAddressToLine);
+        if (m_disassemblyView && !disasm.isEmpty()) m_disassemblyView->setPlainText(disasm);
+        const bool keepLinear = m_disassemblyView && !m_disassemblyView->isGraphMode() &&
+                                !m_disassemblyView->isDecompilerMode() && !m_disassemblyView->isSplitGraphDecompilerMode() &&
+                                !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
         seekToAddressOrExpression(QStringLiteral("0x%1").arg(mainAddr, 8, 16, QChar('0')));
         if (keepLinear && m_disassemblyView) {
             m_showingDecompilerFallback = false;
@@ -480,11 +544,8 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         m_dwarfLineToAddress.clear();
         m_dwarfAddressToLine.clear();
         const uint64_t entry = (mainAddr != 0ULL) ? mainAddr : m_elfInspector->entryPoint();
-        if (entry != 0ULL) {
-            seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
-        }
+        if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
-
     return true;
 }
 
@@ -499,10 +560,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
  * @return True if file was successfully written and marked executable; false otherwise.
  */
 bool MainWindow::exportPatchedBinary(const QString& outputPath) const {
-    if (!m_elfInspector || !m_elfInspector->isValid()) {
-        return false;
-    }
-    return m_elfInspector->savePatchedBinary(outputPath);
+    return (m_elfInspector && m_elfInspector->isValid()) ? m_elfInspector->savePatchedBinary(outputPath) : false;
 }
 
 /**
@@ -514,63 +572,45 @@ bool MainWindow::exportPatchedBinary(const QString& outputPath) const {
  * @param query Target search query substring.
  * @return List of structured search match records.
  */
-QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(
-    const QString& query) const {
+QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(const QString& query) const {
     QVector<WorkspaceSearchResult> matches;
     const QString q = query.trimmed();
-    if (q.isEmpty()) {
-        return matches;
-    }
+    if (q.isEmpty()) return matches;
 
     // 1. Search loaded ELF symbols and strings.
     if (m_elfInspector && m_elfInspector->isValid()) {
         for (const auto& s : m_elfInspector->symbols()) {
             if (s.name.contains(q, Qt::CaseInsensitive)) {
-                matches.append({QStringLiteral("Symbol"), s.address, s.name,
-                                QStringLiteral("Symbol %1 (size %2 bytes)")
-                                    .arg(s.name)
-                                    .arg(s.size)});
+                matches.append({QStringLiteral("Symbol"), s.address, s.name, QStringLiteral("Symbol %1 (size %2 bytes)").arg(s.name).arg(s.size)});
             }
         }
         for (const auto& str : m_elfInspector->strings()) {
             if (str.value.contains(q, Qt::CaseInsensitive)) {
-                matches.append({QStringLiteral("String"), str.address, str.value,
-                                QStringLiteral("Section %1: \"%2\"")
-                                    .arg(str.section)
-                                    .arg(str.value)});
+                matches.append({QStringLiteral("String"), str.address, str.value, QStringLiteral("Section %1: \"%2\"").arg(str.section, str.value)});
             }
         }
     }
 
     // 2. Search Disassembly lines, user comments, and Decompiled C statements.
     if (m_disassemblyView) {
-        const QString disasmText = m_disassemblyView->toPlainText();
-        const QStringList lines = disasmText.split('\n');
+        const QStringList lines = m_disassemblyView->toPlainText().split('\n');
         for (int i = 0; i < lines.size(); ++i) {
-            const QString& line = lines[i];
-            if (line.contains(q, Qt::CaseInsensitive)) {
+            if (lines[i].contains(q, Qt::CaseInsensitive)) {
                 const uint64_t addr = m_disassemblyView->addressForLine(i);
-                matches.append({QStringLiteral("Disassembly"), addr,
-                                QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')),
-                                line.trimmed()});
+                matches.append({QStringLiteral("Disassembly"), addr, QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')), lines[i].trimmed()});
             }
         }
-
         const QString decompilerText = m_disassemblyView->decompiledPseudocode();
         if (!decompilerText.isEmpty()) {
-            const QStringList decompilerLines = decompilerText.split('\n');
-            for (int i = 0; i < decompilerLines.size(); ++i) {
-                const QString& line = decompilerLines[i];
-                if (line.contains(q, Qt::CaseInsensitive)) {
+            const QStringList decompLines = decompilerText.split('\n');
+            for (int i = 0; i < decompLines.size(); ++i) {
+                if (decompLines[i].contains(q, Qt::CaseInsensitive)) {
                     const uint64_t addr = m_disassemblyView->decompilerLineToAddress(i + 1);
-                    matches.append({QStringLiteral("Decompiler"), addr,
-                                    QStringLiteral("Line %1").arg(i + 1),
-                                    line.trimmed()});
+                    matches.append({QStringLiteral("Decompiler"), addr, QStringLiteral("Line %1").arg(i + 1), decompLines[i].trimmed()});
                 }
             }
         }
     }
-
     return matches;
 }
 
@@ -586,8 +626,7 @@ QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(
  * @param waitForGraph Directed edges where key rank waits for value rank.
  * @return List of ranks participating in the deadlock cycle sorted in ascending order.
  */
-QVector<int> MainWindow::detectAndHighlightDeadlock(
-    const QMap<int, int>& waitForGraph) {
+QVector<int> MainWindow::detectAndHighlightDeadlock(const QMap<int, int>& waitForGraph) {
     QVector<int> cycleNodes;
     QSet<int> inCycle;
 
@@ -596,47 +635,34 @@ QVector<int> MainWindow::detectAndHighlightDeadlock(
         int curr = it.key();
         QVector<int> path;
         QSet<int> visited;
-
         // Follow dependency chain until a terminal node or previously visited node is reached.
         while (waitForGraph.contains(curr) && !visited.contains(curr)) {
             visited.insert(curr);
             path.append(curr);
             curr = waitForGraph.value(curr);
         }
-
         // If terminal node was encountered earlier in current path, a cycle exists.
         if (waitForGraph.contains(curr)) {
             const int cycleStartIdx = path.indexOf(curr);
-            if (cycleStartIdx != -1) {
-                // Collect all participating rank IDs forming the deadlock loop.
-                for (int i = cycleStartIdx; i < path.size(); ++i) {
-                    if (!inCycle.contains(path[i])) {
-                        inCycle.insert(path[i]);
-                        cycleNodes.append(path[i]);
-                    }
+            for (int i = cycleStartIdx; cycleStartIdx != -1 && i < path.size(); ++i) {
+                if (!inCycle.contains(path[i])) {
+                    inCycle.insert(path[i]);
+                    cycleNodes.append(path[i]);
                 }
             }
         }
     }
     std::sort(cycleNodes.begin(), cycleNodes.end());
 
-    // Propagate deadlocked rank IDs to DisassemblyView for visual edge/badge highlighting.
-    if (m_disassemblyView) {
-        m_disassemblyView->setDeadlockCycleRanks(cycleNodes);
-    }
-
-    // Update telemetry banner in bottom status bar with deadlock alert indicator.
-    if (auto* telemetryLabel =
-            findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"))) {
+    // Propagate deadlocked rank IDs to DisassemblyView and bottom status bar telemetry.
+    if (m_disassemblyView) m_disassemblyView->setDeadlockCycleRanks(cycleNodes);
+    if (auto* telemetryLabel = findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"))) {
         QString txt = telemetryLabel->text();
-        if (!cycleNodes.isEmpty()) {
-            if (!txt.contains(QStringLiteral("DEADLOCK"))) {
-                txt += QStringLiteral(" | STATUS: DEADLOCK DETECTED");
-            }
+        if (!cycleNodes.isEmpty() && !txt.contains(QStringLiteral("DEADLOCK"))) {
+            txt += QStringLiteral(" | STATUS: DEADLOCK DETECTED");
         }
         telemetryLabel->setText(txt);
     }
-
     return cycleNodes;
 }
 
@@ -652,8 +678,7 @@ void MainWindow::updateDebugToolbarState() {
         m_runAction->setEnabled(true);
         m_runAction->setCheckable(true);
         m_runAction->setChecked(m_debugSessionActive);
-        m_runAction->setText(m_debugSessionActive ? QStringLiteral("● Running")
-                                                  : QStringLiteral("▶ Run Target"));
+        m_runAction->setText(m_debugSessionActive ? QStringLiteral("● Running") : QStringLiteral("▶ Run Target"));
     }
     if (m_continueAction) m_continueAction->setEnabled(m_debugSessionActive);
     if (m_stepAction) m_stepAction->setEnabled(m_debugSessionActive);
@@ -698,6 +723,7 @@ void MainWindow::setWorkspacePerspective(const QString& perspective) {
         if (m_editorTabManager) m_editorTabManager->setVisible(true);
         if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
         if (masterSplitter) masterSplitter->setSizes({420, 500});
+        selectBottomToolGroup(QStringLiteral("MPI"));
         if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
         if (mainVertSplitter) mainVertSplitter->setSizes({430, 410});
     } else {
@@ -724,12 +750,9 @@ void MainWindow::toggleMaximizeBottomConsole() {
     if (!mainVertSplitter) return;
     // Flip maximized state and adjust vertical splitter proportions accordingly.
     m_bottomConsoleMaximized = !m_bottomConsoleMaximized;
-    if (m_bottomConsoleMaximized) {
-        const int totalH = (std::max)(mainVertSplitter->height(), 760);
-        mainVertSplitter->setSizes({totalH * 32 / 100, totalH * 68 / 100});
-    } else {
-        mainVertSplitter->setSizes({600, 260});
-    }
+    const int totalH = (std::max)(mainVertSplitter->height(), 760);
+    mainVertSplitter->setSizes(m_bottomConsoleMaximized ? QList<int>{totalH * 32 / 100, totalH * 68 / 100}
+                                                        : QList<int>{600, 260});
 }
 
 /**
@@ -740,65 +763,22 @@ void MainWindow::toggleMaximizeBottomConsole() {
 bool MainWindow::triggerEditMenuAction(const QString& actionName) {
     const QString act = actionName.trimmed();
     if (act.isEmpty()) return false;
-
-    if (act.contains(QStringLiteral("Preferences"), Qt::CaseInsensitive)) {
-        openPreferences();
-        return true;
-    }
+    if (act.contains(QStringLiteral("Preferences"), Qt::CaseInsensitive)) { openPreferences(); return true; }
 
     // Resolve target QPlainTextEdit / SourceCodeView (prefer focused text editor, fallback to active SourceCodeView).
     SourceCodeView* srcView = sourceCodeView();
     QPlainTextEdit* plainEdit = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget());
     if (!plainEdit) plainEdit = srcView;
 
-    if (act.contains(QStringLiteral("Undo"), Qt::CaseInsensitive)) {
-        if (!plainEdit) return false;
-        plainEdit->undo();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Redo"), Qt::CaseInsensitive)) {
-        if (!plainEdit) return false;
-        plainEdit->redo();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Cut"), Qt::CaseInsensitive)) {
-        if (!plainEdit) return false;
-        plainEdit->cut();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Copy"), Qt::CaseInsensitive)) {
-        if (!plainEdit) return false;
-        plainEdit->copy();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Paste"), Qt::CaseInsensitive)) {
-        if (!plainEdit) return false;
-        plainEdit->paste();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Select All"), Qt::CaseInsensitive)) {
-        if (!plainEdit) return false;
-        plainEdit->selectAll();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Comment"), Qt::CaseInsensitive)) {
-        if (!srcView) return false;
-        srcView->toggleLineComment();
-        return true;
-    }
-    if (act.contains(QStringLiteral("Go to Line"), Qt::CaseInsensitive)) {
-        if (!srcView) return false;
-        srcView->selectSourceLine(1);
-        return true;
-    }
-    if (act.contains(QStringLiteral("Find"), Qt::CaseInsensitive)) {
-        if (m_seekBar) {
-            m_seekBar->setFocus();
-            m_seekBar->selectAll();
-            return true;
-        }
-        return false;
-    }
+    if (act.contains(QStringLiteral("Undo"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->undo(); return true; }
+    if (act.contains(QStringLiteral("Redo"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->redo(); return true; }
+    if (act.contains(QStringLiteral("Cut"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->cut(); return true; }
+    if (act.contains(QStringLiteral("Copy"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->copy(); return true; }
+    if (act.contains(QStringLiteral("Paste"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->paste(); return true; }
+    if (act.contains(QStringLiteral("Select All"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->selectAll(); return true; }
+    if (act.contains(QStringLiteral("Comment"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->toggleLineComment(); return true; }
+    if (act.contains(QStringLiteral("Go to Line"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->selectSourceLine(1); return true; }
+    if (act.contains(QStringLiteral("Find"), Qt::CaseInsensitive) && m_seekBar) { m_seekBar->setFocus(); m_seekBar->selectAll(); return true; }
     return false;
 }
 
@@ -821,20 +801,14 @@ void MainWindow::applyTypographySettings(const QString& uiFamily, int uiSize,
     // Recompile and apply global workstation QSS with scaled UI font sizes and control heights.
     gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
 
-    // Propagate code typography live to all open SourceCodeView tabs and DisassemblyView.
+    // Propagate code typography live to all open SourceCodeView tabs, DisassemblyView, and Explorer.
     if (m_editorTabManager) {
         for (int i = 0; i < m_editorTabManager->count(); ++i) {
-            if (auto* view = qobject_cast<SourceCodeView*>(m_editorTabManager->widget(i))) {
-                view->reloadStyle();
-            }
+            if (auto* view = qobject_cast<SourceCodeView*>(m_editorTabManager->widget(i))) view->reloadStyle();
         }
     }
-    if (m_disassemblyView) {
-        m_disassemblyView->reloadStyle();
-    }
-    if (m_projectExplorerWidget) {
-        m_projectExplorerWidget->reloadStyle();
-    }
+    if (m_disassemblyView) m_disassemblyView->reloadStyle();
+    if (m_projectExplorerWidget) m_projectExplorerWidget->reloadStyle();
 }
 
 /**
@@ -845,8 +819,7 @@ void MainWindow::applyTypographySettings(const QString& uiFamily, int uiSize,
 QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
     // Detect active build system and normalize workspace path before constructing clean command.
     const QString buildSys = detectBuildSystem(targetPath);
-    const QString resolvedPath =
-        targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
+    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolvedPath);
     const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
     const QDir dir(dirPath);
@@ -856,21 +829,13 @@ QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
         // Prefer builddir unless only build/build.ninja is already configured on disk.
         const QString buildSubdir =
             (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja")))
-                ? QStringLiteral("build")
-                : QStringLiteral("builddir");
+                ? QStringLiteral("build") : QStringLiteral("builddir");
         return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, buildSubdir);
     }
-    if (buildSys == QStringLiteral("CMake")) {
-        // Invoke CMake's generator-agnostic clean target inside the out-of-source build directory.
-        return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
-    }
-    if (buildSys == QStringLiteral("Make")) {
-        // Delegate cleanup directly to GNU Make in the detected project directory.
-        return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
-    }
+    if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
+    if (buildSys == QStringLiteral("Make")) return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
     // Single-file MPI targets remove the compiled output binary sharing the source basename.
-    const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
-    const QFileInfo srcInfo(srcFile);
+    const QFileInfo srcInfo(!info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath());
     return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
 }
 
@@ -882,16 +847,15 @@ bool MainWindow::buildTargetWorkflow() {
     if (!m_terminalDock) return false;
     const QString targetPath = activeTargetSourcePath();
 
-    // Activate embedded Terminal tab and dispatch build command.
+    // Activate embedded Terminal group and dispatch build command.
+    selectBottomToolGroup(QStringLiteral("Terminal"));
     if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
     const QString buildSys = detectBuildSystem(targetPath);
     const QString cmd = buildCommandForPath(targetPath);
     if (cmd.isEmpty()) return false;
     m_terminalDock->sendCommand(cmd);
     // Synchronize DisassemblyView and DWARF line mappings immediately for single-file MPI targets.
-    if (buildSys == QStringLiteral("SingleFileMPI")) {
-        ensureTargetBinaryCompiled();
-    }
+    if (buildSys == QStringLiteral("SingleFileMPI")) ensureTargetBinaryCompiled();
     // Reflect active build toolchain status in the main status bar telemetry badge.
     updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
     return true;
@@ -905,7 +869,8 @@ bool MainWindow::cleanTargetWorkflow() {
     if (!m_terminalDock) return false;
     const QString targetPath = activeTargetSourcePath();
 
-    // Activate embedded Terminal tab and dispatch clean command.
+    // Activate embedded Terminal group and dispatch clean command.
+    selectBottomToolGroup(QStringLiteral("Terminal"));
     if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
     const QString buildSys = detectBuildSystem(targetPath);
     const QString cmd = cleanCommandForPath(targetPath);
@@ -924,7 +889,8 @@ bool MainWindow::rebuildTargetWorkflow() {
     if (!m_terminalDock) return false;
     const QString targetPath = activeTargetSourcePath();
 
-    // Activate embedded Terminal tab and dispatch chained clean && build command.
+    // Activate embedded Terminal group and dispatch chained clean && build command.
+    selectBottomToolGroup(QStringLiteral("Terminal"));
     if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
     const QString buildSys = detectBuildSystem(targetPath);
     const QString cleanCmd = cleanCommandForPath(targetPath);

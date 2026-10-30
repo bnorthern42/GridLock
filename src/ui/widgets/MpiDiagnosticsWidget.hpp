@@ -48,6 +48,12 @@ public:
      */
     int rankWaitTableRowCount() const;
 
+    /**
+     * @brief Reports whether the inner tab bar is hidden and view switching is driven by the single 26px header bar.
+     * @return True when the inner QTabBar is hidden and inline header toggle buttons control active sub-views.
+     */
+    bool hasCompactSingleRowHeader() const;
+
 signals:
     /**
      * @brief Emitted when double-clicking a deadlock node to seek that rank's frame.
@@ -105,8 +111,14 @@ private:
      */
     void populateDefaultRankTelemetry();
 
-    /// Tab widget container.
+    /// Tab widget container (with hidden inner QTabBar for single-row header switching).
     QTabWidget* m_tabWidget = nullptr;
+
+    /// Inline header button activating the Deadlock Analyzer wait-state table view.
+    QPushButton* m_analyzerModeBtn = nullptr;
+
+    /// Inline header button activating the Network Log packet/collective trace view.
+    QPushButton* m_networkLogModeBtn = nullptr;
 
     /// Status badge label in the 26px control strip.
     QLabel* m_statusBadge = nullptr;

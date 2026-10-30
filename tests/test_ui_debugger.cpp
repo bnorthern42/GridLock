@@ -19,6 +19,7 @@
 #include <QLabel>
 #include <QRadioButton>
 #include <QString>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -37,6 +38,7 @@
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/MpiDiagnosticsWidget.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 #include "../src/ui/widgets/ReferenceManualWidget.hpp"
 
@@ -164,49 +166,24 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
 
-    // Loop Iteration 1:
-    mainWindow.stepInstructionWorkflow(); // -> 0x40114d
-    mainWindow.stepInstructionWorkflow(); // -> 0x40114f
-    mainWindow.stepInstructionWorkflow(); // -> 0x401152
-    mainWindow.stepInstructionWorkflow(); // -> 0x401155
-    mainWindow.stepInstructionWorkflow(); // -> 0x401168 (rank 0 coordinator)
-    mainWindow.stepInstructionWorkflow(); // -> 0x40116a
-    mainWindow.stepInstructionWorkflow(); // -> 0x40116e
-    QCOMPARE(disasmView->currentAddress(), 0x0040116eULL);
+    // Loop Iteration 1 & 2: execute 7 single-steps through coordinator body to jmp back-edge.
+    for (int iter = 1; iter <= 2; ++iter) {
+        for (int s = 0; s < 7; ++s) mainWindow.stepInstructionWorkflow();
+        QCOMPARE(disasmView->currentAddress(), 0x0040116eULL);
+        // Stepping at 0x0040116e MUST jump back to loop header 0x00401149ULL.
+        mainWindow.stepInstructionWorkflow();
+        QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
+    }
 
-    // Stepping at 0x0040116e on iteration 1 MUST jump back to loop header 0x00401149ULL.
-    mainWindow.stepInstructionWorkflow();
-    QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
-
-    // Loop Iteration 2:
-    mainWindow.stepInstructionWorkflow(); // -> 0x40114d
-    mainWindow.stepInstructionWorkflow(); // -> 0x40114f
-    mainWindow.stepInstructionWorkflow(); // -> 0x401152
-    mainWindow.stepInstructionWorkflow(); // -> 0x401155
-    mainWindow.stepInstructionWorkflow(); // -> 0x401168
-    mainWindow.stepInstructionWorkflow(); // -> 0x40116a (i becomes 3)
-    mainWindow.stepInstructionWorkflow(); // -> 0x40116e
-    QCOMPARE(disasmView->currentAddress(), 0x0040116eULL);
-
-    // Stepping at 0x0040116e on iteration 2 MUST jump back to loop header 0x00401149ULL.
-    mainWindow.stepInstructionWorkflow();
-    QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
-
-    // Loop Exit (i == 3 > 2):
+    // Loop Exit (i == 3 > 2): step through cmp to jg and take exit branch to MPI_Finalize.
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x0040114dULL);
-
-    // Stepping at 0x0040114d with i >= 3 MUST take the exit branch to MPI_Finalize (0x00401178ULL)!
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401178ULL);
 
-    // Step through MPI_Finalize call, leave, and ret:
-    mainWindow.stepInstructionWorkflow(); // -> 0x40117d
-    mainWindow.stepInstructionWorkflow(); // -> 0x401182 (leave)
-    mainWindow.stepInstructionWorkflow(); // -> 0x401183 (ret)
+    // Step through MPI_Finalize call, leave, and ret, verifying return 0 highlight.
+    for (int s = 0; s < 3; ++s) mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401183ULL);
-
-    // Verify ret highlights the return 0 statement in SourceCodeView.
     QCOMPARE(sourceView->executionLine(), returnLine);
 
     // Test Worker Rank (Rank 2) conditional branch behavior:
@@ -339,70 +316,48 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     // =========================================================================
     // Part 1: Smart Build System Detection Across Project Types
     // =========================================================================
+    const auto writeText = [](const QString& path, const QByteArray& bytes) {
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly)) { f.write(bytes); f.close(); }
+    };
     // Case A: Meson + Ninja project directory
     {
         QTemporaryDir mesonDir;
         QVERIFY(mesonDir.isValid());
-        QFile mesonFile(mesonDir.filePath(QStringLiteral("meson.build")));
-        QVERIFY(mesonFile.open(QIODevice::WriteOnly));
-        mesonFile.write("project('demo', 'cpp')\n");
-        mesonFile.close();
-
+        writeText(mesonDir.filePath(QStringLiteral("meson.build")), "project('demo', 'cpp')\n");
         QDir(mesonDir.path()).mkpath(QStringLiteral("builddir"));
-        QFile ninjaFile(mesonDir.filePath(QStringLiteral("builddir/build.ninja")));
-        QVERIFY(ninjaFile.open(QIODevice::WriteOnly));
-        ninjaFile.write("# ninja build file\n");
-        ninjaFile.close();
-
+        writeText(mesonDir.filePath(QStringLiteral("builddir/build.ninja")), "# ninja build file\n");
         QCOMPARE(mainWindow.detectBuildSystem(mesonDir.path()), QStringLiteral("Meson"));
         QVERIFY(mainWindow.buildCommandForPath(mesonDir.path()).contains(QStringLiteral("ninja -C")));
         QVERIFY(mainWindow.cleanCommandForPath(mesonDir.path()).contains(QStringLiteral("clean")));
     }
-
     // Case B: CMake project directory
     {
         QTemporaryDir cmakeDir;
         QVERIFY(cmakeDir.isValid());
-        QFile cmakeFile(cmakeDir.filePath(QStringLiteral("CMakeLists.txt")));
-        QVERIFY(cmakeFile.open(QIODevice::WriteOnly));
-        cmakeFile.write("cmake_minimum_required(VERSION 3.20)\nproject(demo)\n");
-        cmakeFile.close();
-
+        writeText(cmakeDir.filePath(QStringLiteral("CMakeLists.txt")), "cmake_minimum_required(VERSION 3.20)\nproject(demo)\n");
         QCOMPARE(mainWindow.detectBuildSystem(cmakeDir.path()), QStringLiteral("CMake"));
         QVERIFY(mainWindow.buildCommandForPath(cmakeDir.path()).contains(QStringLiteral("cmake --build")));
         QVERIFY(mainWindow.cleanCommandForPath(cmakeDir.path()).contains(QStringLiteral("clean")));
     }
-
     // Case C: GNU Make project directory
     {
         QTemporaryDir makeDir;
         QVERIFY(makeDir.isValid());
-        QFile makeFile(makeDir.filePath(QStringLiteral("Makefile")));
-        QVERIFY(makeFile.open(QIODevice::WriteOnly));
-        makeFile.write("all:\n\t@echo building\nclean:\n\t@echo cleaning\n");
-        makeFile.close();
-
+        writeText(makeDir.filePath(QStringLiteral("Makefile")), "all:\n\t@echo building\nclean:\n\t@echo cleaning\n");
         QCOMPARE(mainWindow.detectBuildSystem(makeDir.path()), QStringLiteral("Make"));
         QVERIFY(mainWindow.buildCommandForPath(makeDir.path()).contains(QStringLiteral("make")));
         QVERIFY(mainWindow.cleanCommandForPath(makeDir.path()).contains(QStringLiteral("make clean")));
     }
-
     // Case D: Standalone MPI / C++ source file
     QTemporaryDir singleFileDir;
     QVERIFY(singleFileDir.isValid());
     const QString demoSourcePath = singleFileDir.filePath(QStringLiteral("demo.cpp"));
-    {
-        QFile srcFile(demoSourcePath);
-        QVERIFY(srcFile.open(QIODevice::WriteOnly));
-        srcFile.write("#include <mpi.h>\nint main(int argc, char** argv) { return 0; }\n");
-        srcFile.close();
-
-        QCOMPARE(mainWindow.detectBuildSystem(demoSourcePath), QStringLiteral("SingleFileMPI"));
-        const QString singleBuildCmd = mainWindow.buildCommandForPath(demoSourcePath);
-        QVERIFY(singleBuildCmd.contains(QStringLiteral("-g")));
-        QVERIFY(singleBuildCmd.contains(QStringLiteral("-o")));
-        QVERIFY(mainWindow.cleanCommandForPath(demoSourcePath).contains(QStringLiteral("rm -f")));
-    }
+    writeText(demoSourcePath, "#include <mpi.h>\nint main(int argc, char** argv) { return 0; }\n");
+    QCOMPARE(mainWindow.detectBuildSystem(demoSourcePath), QStringLiteral("SingleFileMPI"));
+    const QString singleBuildCmd = mainWindow.buildCommandForPath(demoSourcePath);
+    QVERIFY(singleBuildCmd.contains(QStringLiteral("-g")) && singleBuildCmd.contains(QStringLiteral("-o")));
+    QVERIFY(mainWindow.cleanCommandForPath(demoSourcePath).contains(QStringLiteral("rm -f")));
 
     // =========================================================================
     // Part 2: Interactive Build / Clean / Rebuild Terminal Workflow
@@ -901,4 +856,63 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
     QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25,
              qPrintable(QStringLiteral("Popover y=%1 too far from anchor y=340").arg(dialog.pos().y())));
     dialog.hide();
+}
+
+/**
+ * @brief Verifies left vertical tool-window icon rail (`#bottomToolWindowRail`), linked contextual
+ *        tab filtering across Debug/MPI/Terminal/Docs, programmatic auto-sync, and flattened MPI header.
+ */
+void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.show();
+    QApplication::processEvents();
+
+    // 1. Verify #bottomToolWindowRail exists and exposes the 4 canonical tool groups.
+    auto* rail = mainWindow.findChild<QWidget*>(QStringLiteral("bottomToolWindowRail"));
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
+    QVERIFY(rail != nullptr && bottomTabs != nullptr && memView != nullptr);
+    QVERIFY(terminalDock != nullptr && refManual != nullptr && mpiDiag != nullptr);
+    QCOMPARE(mainWindow.bottomToolGroups(), (QStringList{QStringLiteral("Debug"), QStringLiteral("MPI"), QStringLiteral("Terminal"), QStringLiteral("Docs")}));
+
+    // Helper returning uppercased titles of currently visible tabs in BottomConsoleTabs.
+    const auto visibleTitles = [&]() {
+        QStringList vis;
+        for (int i = 0; i < bottomTabs->count(); ++i) {
+            if (bottomTabs->tabBar()->isTabVisible(i)) vis.append(bottomTabs->tabText(i).toUpper());
+        }
+        return vis;
+    };
+
+    // 2. Verify selecting Debug, MPI, Terminal, and Docs filters visible tabs strictly to linked views.
+    mainWindow.selectBottomToolGroup(QStringLiteral("Debug"));
+    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug"));
+    const QStringList debugVis = visibleTitles();
+    QCOMPARE(debugVis.size(), 3);
+    QVERIFY(debugVis.join(QLatin1Char('|')).contains(QStringLiteral("GDB")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("MEMORY")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("EVALUATOR")));
+
+    mainWindow.selectBottomToolGroup(QStringLiteral("MPI"));
+    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("MPI"));
+    QCOMPARE(visibleTitles().size(), 2);
+
+    mainWindow.selectBottomToolGroup(QStringLiteral("Terminal"));
+    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Terminal"));
+    QCOMPARE(bottomTabs->currentWidget(), terminalDock);
+
+    mainWindow.selectBottomToolGroup(QStringLiteral("Docs"));
+    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Docs"));
+    QCOMPARE(bottomTabs->currentWidget(), refManual);
+
+    // 3. Programmatically switching BottomConsoleTabs to MemView auto-syncs the Debug tool group.
+    bottomTabs->setCurrentWidget(memView);
+    QApplication::processEvents();
+    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug"));
+    QCOMPARE(visibleTitles().size(), 3);
+
+    // 4. Verify MpiDiagnosticsWidget uses a single compact 26px header bar with hidden inner QTabBar.
+    QVERIFY(mpiDiag->hasCompactSingleRowHeader());
 }

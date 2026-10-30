@@ -171,5 +171,8 @@ private slots:
 
     /** @brief Verifies gutter hover ghost preview tracking and cursor-anchored breakpoint popover controls/positioning. */
     void testAnchoredBreakpointPopoverAndGutterHover();
+
+    /** @brief Verifies left tool-window icon rail, linked contextual tab filtering, auto-group sync, and compact MPI Diagnostics header. */
+    void testBottomToolWindowRailAndLinkedTabGroups();
 };
 

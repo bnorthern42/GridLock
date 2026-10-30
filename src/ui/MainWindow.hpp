@@ -22,6 +22,8 @@
 #include <QSet>
 #include <QSpinBox>
 #include <QString>
+#include <QStringList>
+#include <QToolButton>
 #include <QVector>
 #include <memory>
 #include <unordered_map>
@@ -306,6 +308,24 @@ public:
     void toggleMaximizeBottomConsole();
 
     /**
+     * @brief Returns the ordered list of bottom tool-window icon rail group identifiers.
+     * @return List containing {"Debug", "MPI", "Terminal", "Docs"}.
+     */
+    QStringList bottomToolGroups() const;
+
+    /**
+     * @brief Returns the currently active bottom tool-window group identifier.
+     * @return Active group name ("Debug", "MPI", "Terminal", or "Docs").
+     */
+    QString activeBottomToolGroup() const { return m_activeBottomToolGroup; }
+
+    /**
+     * @brief Activates a bottom tool-window group, filtering visible tabs strictly to its linked views.
+     * @param groupName Target group name ("Debug", "MPI", "Terminal", or "Docs").
+     */
+    void selectBottomToolGroup(const QString& groupName);
+
+    /**
      * @brief Dispatches a debug command through the coordinator.
      * @param cmd Unique pointer to command object.
      */
@@ -426,6 +446,7 @@ private:
     void setupDocks();
     void setupStatusBar();
     void harmonizeBottomConsoleTabs();
+    QString bottomToolGroupForTabIndex(int tabIndex) const;
     void updateStatusTelemetry(const QString& pcOrSeek = QString(),
                                const QString& targetState = QString());
     void updateNavigationButtons();
@@ -449,7 +470,11 @@ private:
 
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
+    QWidget* m_bottomToolRail = nullptr;
     QTabWidget* m_bottomTabs = nullptr;
+    QMap<QString, QToolButton*> m_bottomRailButtons;
+    QString m_activeBottomToolGroup = QStringLiteral("Debug");
+    bool m_syncingBottomToolGroup = false;
     QComboBox* m_targetSelector = nullptr;
     QSpinBox* m_rankCountSpin = nullptr;
     QAction* m_runAction = nullptr;

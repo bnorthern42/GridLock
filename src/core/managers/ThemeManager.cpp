@@ -500,6 +500,15 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    padding: 0px;\n"
         "    spacing: 0px;\n"
         "}\n"
+        // Left vertical 36px tool-window activity rail (`#bottomToolWindowRail`) background and 1px right border.
+        "#bottomToolWindowRail { background: #181a1f; border-right: 1px solid #252932; }\n"
+        // Default 28x28px checkable icon-rail tool buttons inside `#bottomToolWindowRail`.
+        "#bottomToolWindowRail QToolButton { background: transparent; color: #9da5b4; border: 1px solid transparent; "
+        "border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; }\n"
+        // Hover highlight state for inactive tool-window rail buttons.
+        "#bottomToolWindowRail QToolButton:hover { background: #21252b; color: #ffffff; border: 1px solid #323844; }\n"
+        // Active checked state with left accent bar for the selected tool-window group.
+        "#bottomToolWindowRail QToolButton:checked { background: #21252b; color: #61afef; border: 1px solid #528bff; border-left: 2px solid #528bff; }\n"
         // ProjectExplorer mode buttons (FILES | SYMBOLS | STRINGS) and Watch expression add button.
         "#explorerFilesModeBtn, #explorerSymbolsModeBtn, #explorerStringsModeBtn, #addWatchBtn {\n"
         "    background: #252932;\n"
