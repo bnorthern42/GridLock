@@ -365,14 +365,31 @@ QJsonObject ClangdLspClient::readResponseForId(int requestId, int timeoutMs) {
  * @param partialExpression Partial C/C++ expression being typed.
  * @return Ordered list of matching member or variable completions.
  */
-QStringList ClangdLspClient::analyzeInScopeCompletions(const QString& sourceCode,
-                                                       int targetLineOneBased,
-                                                       const QString& partialExpression) {
-    // Map struct/type names to their ordered member names, and "Struct.member" to nested type names.
+/**
+ * @brief Resolves detailed completions with kind and type metadata for expression at target line.
+ * @param filePath Path to the active source file.
+ * @param sourceCode Full text of the source file.
+ * @param targetLineOneBased 1-based line number.
+ * @param partialExpression Partial C/C++ condition or editor expression.
+ * @param timeoutMs Timeout in milliseconds for LSP server response.
+ * @return Ordered list of structured LspCompletionItem objects.
+ */
+QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtLine(
+    const QString& filePath,
+    const QString& sourceCode,
+    int targetLineOneBased,
+    const QString& partialExpression,
+    int timeoutMs) {
+    // Maps struct type identifiers to their declared member field names.
     QMap<QString, QStringList> structMembers;
+    // Maps composite field access paths (e.g., Struct.field) to their resolved types.
     QMap<QString, QString> memberNestedTypes;
+    // Tracks in-scope local variable types declared prior to target line.
     QMap<QString, QString> varTypes;
+    // Stores structured LspCompletionItem definitions with kind badges and signatures.
+    QMap<QString, QVector<LspCompletionItem>> structDetailedMembers;
 
+    // Split the translation unit into individual lines for lexical scanning.
     const QStringList lines = sourceCode.split(QLatin1Char('\n'));
     QString currentOuterStruct;
     QString currentAnonStructFieldsPending;
@@ -380,13 +397,15 @@ QStringList ClangdLspClient::analyzeInScopeCompletions(const QString& sourceCode
 
     for (int idx = 0; idx < lines.size(); ++idx) {
         QString line = lines.at(idx).trimmed();
+        // Strip line comments before parsing C++ declarations.
         const int commentIdx = line.indexOf(QStringLiteral("//"));
         if (commentIdx >= 0) line = line.left(commentIdx).trimmed();
+        // Skip blank lines, header banners, and block comments.
         if (line.isEmpty() || line.startsWith(QLatin1Char('*')) || line.startsWith(QStringLiteral("/*"))) {
             continue;
         }
 
-        // Detect top-level `struct Name {` definition.
+        // Match outer struct declaration headers (e.g., 'struct WorkerData {').
         static const QRegularExpression kStructStartRe(QStringLiteral("^struct\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\{"));
         const QRegularExpressionMatch structMatch = kStructStartRe.match(line);
         if (structMatch.hasMatch() && currentOuterStruct.isEmpty()) {
@@ -395,25 +414,43 @@ QStringList ClangdLspClient::analyzeInScopeCompletions(const QString& sourceCode
         }
 
         if (!currentOuterStruct.isEmpty()) {
-            // Detect anonymous or named inner struct start: `struct {`
+            // Detect anonymous nested struct definition blocks inside outer structs.
             if (line.startsWith(QStringLiteral("struct")) && line.contains(QLatin1Char('{'))) {
                 inAnonNestedStruct = true;
                 currentAnonStructFieldsPending.clear();
                 continue;
             }
             if (inAnonNestedStruct) {
-                // Detect closing `} fieldName;` of anonymous nested struct.
+                // Parse anonymous nested struct closing brace and field identifier.
                 static const QRegularExpression kAnonEndRe(QStringLiteral("^\\}\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*;"));
                 const QRegularExpressionMatch anonEnd = kAnonEndRe.match(line);
                 if (anonEnd.hasMatch()) {
                     const QString nestedFieldName = anonEnd.captured(1);
+                    // Synthesize qualified pseudo-type name for nested anonymous member fields.
                     const QString syntheticType = currentOuterStruct + QStringLiteral("::") + nestedFieldName;
                     structMembers[currentOuterStruct].append(nestedFieldName);
                     memberNestedTypes[currentOuterStruct + QLatin1Char('.') + nestedFieldName] = syntheticType;
+
+                    // Record nested struct field candidate item for IntelliSense popup.
+                    LspCompletionItem anonItem;
+                    anonItem.label = nestedFieldName;
+                    anonItem.insertText = nestedFieldName;
+                    anonItem.kindLabel = QStringLiteral("Field");
+                    anonItem.detailType = QStringLiteral("struct ") + nestedFieldName;
+                    structDetailedMembers[currentOuterStruct].append(anonItem);
+
+                    // Parse declared inner member field names and associate float/int types.
                     for (const QString& stmt : currentAnonStructFieldsPending.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
-                        for (const QString& f : parseDeclaredNames(stmt)) {
+                        QString innerType;
+                        for (const QString& f : parseDeclaredNames(stmt, &innerType)) {
                             if (!structMembers[syntheticType].contains(f)) {
                                 structMembers[syntheticType].append(f);
+                                LspCompletionItem innerItem;
+                                innerItem.label = f;
+                                innerItem.insertText = f;
+                                innerItem.kindLabel = QStringLiteral("Field");
+                                innerItem.detailType = innerType.isEmpty() ? QStringLiteral("float") : innerType;
+                                structDetailedMembers[syntheticType].append(innerItem);
                             }
                         }
                     }
@@ -423,58 +460,78 @@ QStringList ClangdLspClient::analyzeInScopeCompletions(const QString& sourceCode
                 }
                 continue;
             }
-            // Detect end of outer struct `};`
+            // Handle outer struct closing delimiter.
             if (line.startsWith(QStringLiteral("};"))) {
                 currentOuterStruct.clear();
                 continue;
             }
-            // Parse regular struct member declarations on this line.
+            // Parse semicolon-separated member field declarations.
             for (const QString& stmt : line.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
                 QString fieldType;
                 for (const QString& f : parseDeclaredNames(stmt, &fieldType)) {
                     if (!structMembers[currentOuterStruct].contains(f)) {
                         structMembers[currentOuterStruct].append(f);
                     }
-                    if (!fieldType.isEmpty()) {
-                        memberNestedTypes[currentOuterStruct + QLatin1Char('.') + f] = fieldType;
+                    QString effectiveType = fieldType;
+                    // Check for fixed-size C-style array bounds (e.g., double values[5]).
+                    if (stmt.contains(f + QStringLiteral("["))) {
+                        int lb = stmt.indexOf(f + QStringLiteral("["));
+                        int rb = stmt.indexOf(QLatin1Char(']'), lb);
+                        if (rb > lb) {
+                            effectiveType = fieldType + stmt.mid(lb + f.length(), rb - (lb + f.length()) + 1);
+                        }
                     }
+                    if (effectiveType.isEmpty()) effectiveType = QStringLiteral("int");
+                    memberNestedTypes[currentOuterStruct + QLatin1Char('.') + f] = effectiveType;
+
+                    // Record structured completion item for the member field.
+                    LspCompletionItem item;
+                    item.label = f;
+                    item.insertText = f;
+                    item.kindLabel = QStringLiteral("Field");
+                    item.detailType = effectiveType;
+                    structDetailedMembers[currentOuterStruct].append(item);
                 }
             }
             continue;
         }
 
-        // Scan in-scope local variable and loop counter declarations up to targetLineOneBased.
         if (idx < targetLineOneBased) {
-            // Extract `for (int i = 0; ...)` loop initializer if present.
+            // Extract loop control variable declarations (e.g., for (int i = 0; ...)).
             static const QRegularExpression kForLoopRe(QStringLiteral("for\\s*\\(([^;]+);"));
             const QRegularExpressionMatch forMatch = kForLoopRe.match(line);
             if (forMatch.hasMatch()) {
                 QString loopType;
                 for (const QString& v : parseDeclaredNames(forMatch.captured(1), &loopType)) {
-                    varTypes[v] = loopType;
+                    varTypes[v] = loopType.isEmpty() ? QStringLiteral("int") : loopType;
                 }
             }
+            // Extract local variable declarations preceding the target line.
             for (const QString& stmt : line.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
                 QString declType;
                 for (const QString& v : parseDeclaredNames(stmt, &declType)) {
-                    varTypes[v] = declType;
+                    varTypes[v] = declType.isEmpty() ? QStringLiteral("int") : declType;
                 }
             }
         }
     }
 
-    // Determine whether partialExpression is a member access (`expr.` or `expr->`).
     const QString trimmedExpr = partialExpression.trimmed();
+    // Determine separator position (. or ->) in partial completion expression.
     const int lastDot = trimmedExpr.lastIndexOf(QLatin1Char('.'));
     const int lastArrow = trimmedExpr.lastIndexOf(QStringLiteral("->"));
     const int sepPos = std::max(lastDot, (lastArrow >= 0) ? (lastArrow + 1) : -1);
 
+    QVector<LspCompletionItem> candidates;
+    QString memberPrefix;
+
     if (sepPos >= 0) {
+        // Extract receiver expression chain preceding the member access separator.
         const int receiverEnd = (lastArrow > lastDot) ? lastArrow : lastDot;
         QString receiverChain = trimmedExpr.left(receiverEnd).trimmed();
-        const QString memberPrefix = trimmedExpr.mid(sepPos + 1).trimmed();
+        // Extract trailing identifier prefix after the member access operator.
+        memberPrefix = trimmedExpr.mid(sepPos + 1).trimmed();
 
-        // Extract the trailing primary expression chain if preceded by binary operators or parens.
         static const QRegularExpression kTrailingChainRe(QStringLiteral("([A-Za-z_][A-Za-z0-9_\\[\\]\\.\\->]*)$"));
         const QRegularExpressionMatch chainMatch = kTrailingChainRe.match(receiverChain);
         if (chainMatch.hasMatch()) {
@@ -484,54 +541,151 @@ QStringList ClangdLspClient::analyzeInScopeCompletions(const QString& sourceCode
         QString normChain = receiverChain;
         normChain.replace(QStringLiteral("->"), QStringLiteral("."));
         const QStringList segments = normChain.split(QLatin1Char('.'), Qt::SkipEmptyParts);
-        if (segments.isEmpty()) return {};
+        if (!segments.isEmpty()) {
+            const QString rootVar = stripSubscriptsAndCalls(segments.first());
+            QString activeType = varTypes.value(rootVar);
+            for (int s = 1; s < segments.size() && !activeType.isEmpty(); ++s) {
+                const QString fieldName = stripSubscriptsAndCalls(segments.at(s));
+                activeType = memberNestedTypes.value(activeType + QLatin1Char('.') + fieldName);
+            }
 
-        const QString rootVar = stripSubscriptsAndCalls(segments.first());
-        QString activeType = varTypes.value(rootVar);
-        for (int s = 1; s < segments.size() && !activeType.isEmpty(); ++s) {
-            const QString fieldName = stripSubscriptsAndCalls(segments.at(s));
-            activeType = memberNestedTypes.value(activeType + QLatin1Char('.') + fieldName);
-        }
-
-        QStringList candidates;
-        if (structMembers.contains(activeType)) {
-            candidates = structMembers.value(activeType);
-        } else if (activeType.contains(QStringLiteral("vector"))) {
-            candidates = {
-                QStringLiteral("data()"), QStringLiteral("size()"), QStringLiteral("empty()"),
-                QStringLiteral("front()"), QStringLiteral("back()"), QStringLiteral("at()"),
-                QStringLiteral("capacity()"), QStringLiteral("clear()")
-            };
-        } else if (activeType.contains(QStringLiteral("string"))) {
-            candidates = {
-                QStringLiteral("c_str()"), QStringLiteral("data()"), QStringLiteral("size()"),
-                QStringLiteral("length()"), QStringLiteral("empty()"), QStringLiteral("substr()")
-            };
-        }
-
-        if (memberPrefix.isEmpty()) {
-            return candidates;
-        }
-        QStringList filtered;
-        for (const QString& c : candidates) {
-            if (c.startsWith(memberPrefix, Qt::CaseInsensitive)) {
-                filtered.append(c);
+            if (structDetailedMembers.contains(activeType)) {
+                candidates = structDetailedMembers.value(activeType);
+            } else if (activeType.contains(QStringLiteral("vector"))) {
+                candidates = {
+                    {QStringLiteral("data()"), QStringLiteral("data()"), QStringLiteral("Method"), QStringLiteral("int*")},
+                    {QStringLiteral("size()"), QStringLiteral("size()"), QStringLiteral("Method"), QStringLiteral("size_t")},
+                    {QStringLiteral("empty()"), QStringLiteral("empty()"), QStringLiteral("Method"), QStringLiteral("bool")},
+                    {QStringLiteral("front()"), QStringLiteral("front()"), QStringLiteral("Method"), QStringLiteral("int&")},
+                    {QStringLiteral("back()"), QStringLiteral("back()"), QStringLiteral("Method"), QStringLiteral("int&")},
+                    {QStringLiteral("at()"), QStringLiteral("at()"), QStringLiteral("Method"), QStringLiteral("int&")},
+                    {QStringLiteral("capacity()"), QStringLiteral("capacity()"), QStringLiteral("Method"), QStringLiteral("size_t")},
+                    {QStringLiteral("clear()"), QStringLiteral("clear()"), QStringLiteral("Method"), QStringLiteral("void")}
+                };
+            } else if (activeType.contains(QStringLiteral("string"))) {
+                candidates = {
+                    {QStringLiteral("c_str()"), QStringLiteral("c_str()"), QStringLiteral("Method"), QStringLiteral("const char*")},
+                    {QStringLiteral("data()"), QStringLiteral("data()"), QStringLiteral("Method"), QStringLiteral("const char*")},
+                    {QStringLiteral("size()"), QStringLiteral("size()"), QStringLiteral("Method"), QStringLiteral("size_t")},
+                    {QStringLiteral("length()"), QStringLiteral("length()"), QStringLiteral("Method"), QStringLiteral("size_t")},
+                    {QStringLiteral("empty()"), QStringLiteral("empty()"), QStringLiteral("Method"), QStringLiteral("bool")},
+                    {QStringLiteral("substr()"), QStringLiteral("substr()"), QStringLiteral("Method"), QStringLiteral("std::string")}
+                };
             }
         }
-        return filtered;
-    }
-
-    // Top-level identifier completion: return in-scope local variables matching prefix.
-    QStringList locals = varTypes.keys();
-    locals.sort();
-    if (trimmedExpr.isEmpty()) return locals;
-    QStringList filteredLocals;
-    for (const QString& v : locals) {
-        if (v.startsWith(trimmedExpr, Qt::CaseInsensitive)) {
-            filteredLocals.append(v);
+    } else {
+        memberPrefix = trimmedExpr;
+        QStringList locals = varTypes.keys();
+        locals.sort();
+        for (const QString& v : locals) {
+            candidates.append({v, v, QStringLiteral("Variable"), varTypes.value(v, QStringLiteral("int"))});
         }
     }
-    return filteredLocals;
+
+    QVector<LspCompletionItem> filtered;
+    for (const auto& c : candidates) {
+        if (memberPrefix.isEmpty() || c.label.startsWith(memberPrefix, Qt::CaseInsensitive)) {
+            filtered.append(c);
+        }
+    }
+
+    if (timeoutMs > 0) {
+        int zeroLine = 0;
+        int zeroCol = 0;
+        const QString virtualDoc = buildVirtualCompletionDocument(
+            sourceCode, targetLineOneBased, partialExpression, &zeroLine, &zeroCol);
+        auto& cli = ClangdLspClient::instance();
+        const QFileInfo fi(filePath.isEmpty() ? QStringLiteral("virtual_breakpoint.cpp") : filePath);
+        const QString rootDir = fi.exists() ? fi.absolutePath() : QDir::currentPath();
+        if (cli.ensureServerInitialized(rootDir)) {
+            const QString docUri = QUrl::fromLocalFile(
+                fi.exists() ? fi.absoluteFilePath() : (rootDir + QStringLiteral("/virtual_breakpoint.cpp"))).toString();
+            if (!cli.m_activeDocumentUri.isEmpty()) {
+                cli.sendJsonRpc(QJsonObject{
+                    {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                    {QStringLiteral("method"), QStringLiteral("textDocument/didClose")},
+                    {QStringLiteral("params"), QJsonObject{
+                        {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), cli.m_activeDocumentUri}}}
+                    }}
+                });
+            }
+            cli.m_activeDocumentUri = docUri;
+            cli.sendJsonRpc(QJsonObject{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
+                {QStringLiteral("params"), QJsonObject{
+                    {QStringLiteral("textDocument"), QJsonObject{
+                        {QStringLiteral("uri"), docUri},
+                        {QStringLiteral("languageId"), QStringLiteral("cpp")},
+                        {QStringLiteral("version"), cli.m_documentVersion++},
+                        {QStringLiteral("text"), virtualDoc}
+                    }}
+                }}
+            });
+            const int compId = cli.m_nextRequestId++;
+            cli.sendJsonRpc(QJsonObject{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("id"), compId},
+                {QStringLiteral("method"), QStringLiteral("textDocument/completion")},
+                {QStringLiteral("params"), QJsonObject{
+                    {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
+                    {QStringLiteral("position"), QJsonObject{
+                        {QStringLiteral("line"), zeroLine},
+                        {QStringLiteral("character"), zeroCol}
+                    }}
+                }}
+            });
+            const QJsonObject compResp = cli.readResponseForId(compId, timeoutMs);
+            const QJsonValue resultVal = compResp.value(QStringLiteral("result"));
+            const QJsonArray items = resultVal.isObject()
+                                         ? resultVal.toObject().value(QStringLiteral("items")).toArray()
+                                         : resultVal.toArray();
+            for (const QJsonValue& val : items) {
+                const QJsonObject item = val.toObject();
+                const int kind = item.value(QStringLiteral("kind")).toInt(0);
+                if (kind != 2 && kind != 5 && kind != 6 && kind != 10) continue;
+                QString text = item.value(QStringLiteral("insertText")).toString().trimmed();
+                if (text.isEmpty()) text = item.value(QStringLiteral("label")).toString().trimmed();
+                while (text.startsWith(QLatin1Char('.')) || text.startsWith(QLatin1Char(' '))) text.remove(0, 1);
+                const int parenPos = text.indexOf(QLatin1Char('('));
+                if (parenPos > 0) text = text.left(parenPos) + QStringLiteral("()");
+                if (text.isEmpty() || text.startsWith(QStringLiteral("__"))) continue;
+                bool exists = false;
+                for (const auto& f : filtered) {
+                    if (f.label == text) { exists = true; break; }
+                }
+                if (!exists) {
+                    QString kLabel = (kind == 2) ? QStringLiteral("Method")
+                                   : (kind == 5) ? QStringLiteral("Field")
+                                   : (kind == 6) ? QStringLiteral("Variable")
+                                   : QStringLiteral("Field");
+                    QString dType = item.value(QStringLiteral("detail")).toString().trimmed();
+                    if (dType.isEmpty()) dType = (kLabel == QStringLiteral("Method")) ? QStringLiteral("void") : QStringLiteral("int");
+                    filtered.append({text, text, kLabel, dType});
+                }
+            }
+        }
+    }
+    return filtered;
+}
+
+/**
+ * @brief Performs structural C++ struct/nested-struct/STL scope completion analysis on sourceCode.
+ * @param sourceCode Full C/C++ translation unit text.
+ * @param targetLineOneBased 1-based line number where completion is requested.
+ * @param partialExpression Partial C/C++ expression being typed.
+ * @return Ordered list of matching member or variable completions.
+ */
+QStringList ClangdLspClient::analyzeInScopeCompletions(const QString& sourceCode,
+                                                       int targetLineOneBased,
+                                                       const QString& partialExpression) {
+    const auto detailed = completeDetailedAtLine(QString(), sourceCode, targetLineOneBased, partialExpression, 0);
+    QStringList labels;
+    labels.reserve(detailed.size());
+    for (const auto& item : detailed) {
+        labels.append(item.label);
+    }
+    return labels;
 }
 
 /**
@@ -548,88 +702,13 @@ QStringList ClangdLspClient::completeExpressionAtLine(const QString& filePath,
                                                       int targetLineOneBased,
                                                       const QString& partialExpression,
                                                       int timeoutMs) {
-    // 1. Compute deterministic structural C++ scope completions first.
-    QStringList merged = analyzeInScopeCompletions(sourceCode, targetLineOneBased, partialExpression);
-
-    // 2. Construct the virtual completion document and query live clangd over JSON-RPC 2.0.
-    int zeroLine = 0;
-    int zeroCol = 0;
-    const QString virtualDoc = buildVirtualCompletionDocument(
-        sourceCode, targetLineOneBased, partialExpression, &zeroLine, &zeroCol);
-
-    const QFileInfo fi(filePath.isEmpty() ? QStringLiteral("virtual_breakpoint.cpp") : filePath);
-    const QString rootDir = fi.exists() ? fi.absolutePath() : QDir::currentPath();
-    if (ensureServerInitialized(rootDir)) {
-        const QString docUri = QUrl::fromLocalFile(
-            fi.exists() ? fi.absoluteFilePath() : (rootDir + QStringLiteral("/virtual_breakpoint.cpp"))).toString();
-
-        if (!m_activeDocumentUri.isEmpty()) {
-            sendJsonRpc(QJsonObject{
-                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-                {QStringLiteral("method"), QStringLiteral("textDocument/didClose")},
-                {QStringLiteral("params"), QJsonObject{
-                    {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), m_activeDocumentUri}}}
-                }}
-            });
-        }
-
-        m_activeDocumentUri = docUri;
-        sendJsonRpc(QJsonObject{
-            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-            {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
-            {QStringLiteral("params"), QJsonObject{
-                {QStringLiteral("textDocument"), QJsonObject{
-                    {QStringLiteral("uri"), docUri},
-                    {QStringLiteral("languageId"), QStringLiteral("cpp")},
-                    {QStringLiteral("version"), m_documentVersion++},
-                    {QStringLiteral("text"), virtualDoc}
-                }}
-            }}
-        });
-
-        const int compId = m_nextRequestId++;
-        sendJsonRpc(QJsonObject{
-            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-            {QStringLiteral("id"), compId},
-            {QStringLiteral("method"), QStringLiteral("textDocument/completion")},
-            {QStringLiteral("params"), QJsonObject{
-                {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
-                {QStringLiteral("position"), QJsonObject{
-                    {QStringLiteral("line"), zeroLine},
-                    {QStringLiteral("character"), zeroCol}
-                }}
-            }}
-        });
-
-        const QJsonObject compResp = readResponseForId(compId, timeoutMs);
-        const QJsonValue resultVal = compResp.value(QStringLiteral("result"));
-        const QJsonArray items = resultVal.isObject()
-                                     ? resultVal.toObject().value(QStringLiteral("items")).toArray()
-                                     : resultVal.toArray();
-        for (const QJsonValue& val : items) {
-            const QJsonObject item = val.toObject();
-            const int kind = item.value(QStringLiteral("kind")).toInt(0);
-            // Prioritize Fields (5), Methods (2), Variables (6), and Properties (10).
-            if (kind != 2 && kind != 5 && kind != 6 && kind != 10) continue;
-
-            QString text = item.value(QStringLiteral("insertText")).toString().trimmed();
-            if (text.isEmpty()) {
-                text = item.value(QStringLiteral("label")).toString().trimmed();
-            }
-            while (text.startsWith(QLatin1Char('.')) || text.startsWith(QLatin1Char(' '))) {
-                text.remove(0, 1);
-            }
-            const int parenPos = text.indexOf(QLatin1Char('('));
-            if (parenPos > 0) {
-                text = text.left(parenPos) + QStringLiteral("()");
-            }
-            if (!text.isEmpty() && !text.startsWith(QStringLiteral("__")) && !merged.contains(text)) {
-                merged.append(text);
-            }
-        }
+    const auto detailed = completeDetailedAtLine(filePath, sourceCode, targetLineOneBased, partialExpression, timeoutMs);
+    QStringList labels;
+    labels.reserve(detailed.size());
+    for (const auto& item : detailed) {
+        labels.append(item.label);
     }
-
-    return merged;
+    return labels;
 }
 
 }  // namespace gridlock::core

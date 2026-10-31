@@ -14,9 +14,12 @@
 #include <QString>
 #include <QStringList>
 
+#include <QTreeWidget>
+#include <QVector>
+#include "../../core/utils/ClangdLspClient.hpp"
+
 class QCheckBox;
 class QComboBox;
-class QCompleter;
 class QContextMenuEvent;
 class QLabel;
 class QLineEdit;
@@ -24,9 +27,30 @@ class QPaintEvent;
 class QPushButton;
 class QRadioButton;
 class QShowEvent;
-class QStringListModel;
+class QTreeWidgetItem;
 
 namespace gridlock::ui {
+
+/**
+ * @class LspCompletionPopup
+ * @brief Sleek floating IntelliSense completion card with kind badge, identifier, and type signature.
+ */
+class LspCompletionPopup : public QTreeWidget {
+    Q_OBJECT
+public:
+    explicit LspCompletionPopup(QWidget* parent = nullptr);
+    void setItems(const QVector<core::ClangdLspClient::LspCompletionItem>& items);
+    void positionBelow(const QPoint& globalTopLeft, int preferredWidth = 320);
+    bool selectCurrent();
+    void selectNext();
+    void selectPrevious();
+
+signals:
+    void itemChosen(const QString& insertText);
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override;
+};
 
 /**
  * @class ConditionalBreakpointDialog
@@ -159,6 +183,11 @@ protected:
      */
     void contextMenuEvent(QContextMenuEvent* event) override;
 
+    /**
+     * @brief Intercepts arrow keys and enter/tab from condition editor to navigate LSP popup.
+     */
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     QLabel* m_titleLabel = nullptr;          ///< Header label displaying "Line <N> breakpoint".
     QCheckBox* m_enabledCheck = nullptr;     ///< Toggle checkbox enabling or removing the breakpoint.
@@ -167,8 +196,7 @@ private:
     QRadioButton* m_suspendRankRadio = nullptr;  ///< Radio option suspending only the active rank/thread.
     QPushButton* m_makeDefaultBtn = nullptr; ///< Button persisting chosen suspend scope as default.
     QLineEdit* m_conditionEdit = nullptr;    ///< Single-line C/C++ boolean predicate input box.
-    QCompleter* m_completer = nullptr;       ///< Popup completer displaying LSP struct/member items.
-    QStringListModel* m_completionModel = nullptr; ///< Dynamic string-list model backing m_completer.
+    LspCompletionPopup* m_completionPopup = nullptr; ///< Sleek floating IntelliSense completion card.
     QComboBox* m_presetCombo = nullptr;      ///< Dropdown selector offering common MPI rank/loop presets.
     QPushButton* m_removeBtn = nullptr;      ///< Left-aligned button removing the breakpoint (F9).
     QPushButton* m_cancelBtn = nullptr;      ///< Secondary button canceling popover changes cleanly.

@@ -207,6 +207,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   connect(&gridlock::core::ThemeManager::instance(),
           &gridlock::core::ThemeManager::themeModeChanged,
           this, [this]() { propagateThemeToAllWidgets(); });
+  // Restore persisted theme choice across application sessions.
+  gridlock::core::ThemeManager::instance().loadPersistedTheme();
   // Trigger initial theme synchronization across toolbar, ribbons, and dock headers.
   propagateThemeToAllWidgets();
 }
@@ -522,6 +524,17 @@ void MainWindow::setupMenu() {
   // Open Source File Action: Direct file picker bypassing project hierarchy.
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
+
+  // Save Source File Action: Saves active editor buffer directly to disk.
+  QAction *saveAction = fileMenu->addAction("Save Source File");
+  saveAction->setShortcut(QKeySequence::Save);
+  connect(saveAction, &QAction::triggered, this, [this]() {
+    for (auto* view : findChildren<SourceCodeView*>()) {
+      if (view && view->isVisible() && view->document()->isModified()) {
+        view->saveToFile();
+      }
+    }
+  });
   fileMenu->addSeparator();
 
   // Session Serialization Actions: Export and restore active workspace layout,
@@ -798,6 +811,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     ps.watchExpressions = m_differentialGrid->getWatchExpressions();
     gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
   }
+
+  // Persist current theme selection to disk across app sessions.
+  gridlock::core::ThemeManager::instance().savePersistedTheme();
 
   // Serialize window geometry, dock layouts, and splitter proportions to QSettings.
   QSettings settings("gridlock", "debugger");

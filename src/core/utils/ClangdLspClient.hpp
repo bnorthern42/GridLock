@@ -15,6 +15,7 @@
 #include <QProcess>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace gridlock::core {
 
@@ -34,6 +35,33 @@ public:
      * @brief Constructs a ClangdLspClient instance.
      */
     ClangdLspClient();
+
+    /**
+     * @struct LspCompletionItem
+     * @brief Structured LSP completion proposal with kind badge and C++ type signature.
+     */
+    struct LspCompletionItem {
+        QString label;      ///< Display and completion identifier (e.g., "coords", "size()").
+        QString insertText; ///< Suffix text inserted into code editor or condition input.
+        QString kindLabel;  ///< Kind category ("Field", "Method", "Variable", "Struct", "Keyword").
+        QString detailType; ///< C++ type signature (e.g., "int", "double[5]", "float", "size_t").
+    };
+
+    /**
+     * @brief Resolves detailed completions with kind and type metadata for expression at target line.
+     * @param filePath Path to the active source file.
+     * @param sourceCode Full text of the source file.
+     * @param targetLineOneBased 1-based line number.
+     * @param partialExpression Partial C/C++ condition or editor expression.
+     * @param timeoutMs Timeout in milliseconds for LSP server response.
+     * @return Ordered list of structured LspCompletionItem objects.
+     */
+    static QVector<LspCompletionItem> completeDetailedAtLine(
+        const QString& filePath,
+        const QString& sourceCode,
+        int targetLineOneBased,
+        const QString& partialExpression,
+        int timeoutMs = 450);
 
     /**
      * @brief Terminates any active clangd background process cleanly on destruction.

@@ -55,6 +55,7 @@ private:
 };
 
 class LineNumberArea;
+class LspCompletionPopup;
 
 /**
  * @class SourceCodeView
@@ -231,6 +232,28 @@ public:
     void toggleLineComment();
 
     /**
+     * @brief Returns member and variable completion strings for linePrefix at lineOneBased.
+     * @param lineOneBased 1-based line number.
+     * @param linePrefix Expression prefix before cursor (e.g., "data[i].").
+     * @return List of completion labels.
+     */
+    QStringList editorCompletionsAtLine(int lineOneBased, const QString& linePrefix) const;
+
+    /**
+     * @brief Triggers the floating LSP IntelliSense popup below cursorRect() at lineOneBased.
+     * @param linePrefix Expression prefix before cursor.
+     * @param lineOneBased 1-based line number.
+     */
+    void triggerCompletionPopupAtCursor(const QString& linePrefix, int lineOneBased);
+
+    /**
+     * @brief Saves the current editor document to disk.
+     * @param filePath Target file path, or empty to overwrite currentFile().
+     * @return True if successfully written; false otherwise.
+     */
+    bool saveToFile(const QString& filePath = QString());
+
+    /**
      * @brief Reloads color palette and styling from ConfigManager and ThemeManager.
      */
     Q_INVOKABLE void reloadStyle();
@@ -322,6 +345,7 @@ protected:
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
@@ -332,6 +356,7 @@ private slots:
 private:
     LineNumberArea* m_lineNumberArea = nullptr;
     CppSyntaxHighlighter* m_highlighter = nullptr;
+    LspCompletionPopup* m_completionPopup = nullptr;
     QMap<int, QString> m_breakpoints;
     QMap<int, QString> m_breakpointSuspendScopes;
     QString m_currentFilePath;

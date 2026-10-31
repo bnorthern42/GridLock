@@ -14,11 +14,15 @@
 #include <QToolBar>
 #include <QAction>
 #include <QDebug>
+#include <QFile>
+#include <QKeyEvent>
 #include <QSet>
+#include <QTextStream>
 #include <QApplication>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include "../../core/managers/ConfigManager.hpp"
+#include "../../core/utils/ClangdLspClient.hpp"
 #include "../dialogs/ConditionalBreakpointDialog.hpp"
 
 namespace gridlock::ui {
@@ -63,58 +67,32 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
     QTextCharFormat typeFormat;
     typeFormat.setForeground(QColor(55, 115, 225));
     typeFormat.setFontWeight(QFont::Bold);
-    const QString typePatterns[] = {
-        QStringLiteral("\\bchar\\b"), QStringLiteral("\\bclass\\b"), QStringLiteral("\\bconst\\b"), QStringLiteral("\\bdouble\\b"), QStringLiteral("\\benum\\b"),
-        QStringLiteral("\\bexplicit\\b"), QStringLiteral("\\bfriend\\b"), QStringLiteral("\\binline\\b"), QStringLiteral("\\bint\\b"), QStringLiteral("\\blong\\b"),
-        QStringLiteral("\\bnamespace\\b"), QStringLiteral("\\boperator\\b"), QStringLiteral("\\bprivate\\b"), QStringLiteral("\\bprotected\\b"), QStringLiteral("\\bpublic\\b"),
-        QStringLiteral("\\bshort\\b"), QStringLiteral("\\bsignals\\b"), QStringLiteral("\\bsigned\\b"), QStringLiteral("\\bslots\\b"), QStringLiteral("\\bstatic\\b"),
-        QStringLiteral("\\bstruct\\b"), QStringLiteral("\\btemplate\\b"), QStringLiteral("\\btypedef\\b"), QStringLiteral("\\btypename\\b"), QStringLiteral("\\bunion\\b"),
-        QStringLiteral("\\bunsigned\\b"), QStringLiteral("\\bvirtual\\b"), QStringLiteral("\\bvoid\\b"), QStringLiteral("\\bvolatile\\b"), QStringLiteral("\\bbool\\b")
-    };
-    for (const QString &pattern : typePatterns) {
-        highlightingRules.append({QRegularExpression(pattern), typeFormat});
-    }
+    highlightingRules.append({QRegularExpression(QStringLiteral(
+        "\\b(char|class|const|double|enum|explicit|friend|inline|int|long|namespace|operator|private|protected|"
+        "public|short|signals|signed|slots|static|struct|template|typedef|typename|union|unsigned|virtual|void|volatile|bool)\\b")), typeFormat});
 
     // Control flow keywords: crimson/magenta
     QTextCharFormat keywordFormat;
     keywordFormat.setForeground(QColor(215, 58, 125));
     keywordFormat.setFontWeight(QFont::Bold);
-    const QString keywordPatterns[] = {
-        QStringLiteral("\\bfor\\b"), QStringLiteral("\\breturn\\b"), QStringLiteral("\\bif\\b"), QStringLiteral("\\belse\\b"),
-        QStringLiteral("\\bwhile\\b"), QStringLiteral("\\bdo\\b"), QStringLiteral("\\bswitch\\b"), QStringLiteral("\\bcase\\b"),
-        QStringLiteral("\\bbreak\\b"), QStringLiteral("\\bcontinue\\b"), QStringLiteral("\\bnew\\b"), QStringLiteral("\\bdelete\\b")
-    };
-    for (const QString &pattern : keywordPatterns) {
-        highlightingRules.append({QRegularExpression(pattern), keywordFormat});
-    }
+    highlightingRules.append({QRegularExpression(QStringLiteral(
+        "\\b(for|return|if|else|while|do|switch|case|break|continue|new|delete)\\b")), keywordFormat});
 
     // Preprocessor directives: orange (#d65d0e)
-    QTextCharFormat preprocessorFormat;
-    preprocessorFormat.setForeground(QColor(214, 93, 14));
-    rule.pattern = QRegularExpression(QStringLiteral("#include[^\n]*"));
-    rule.format = preprocessorFormat;
-    highlightingRules.append(rule);
+    QTextCharFormat preprocessorFormat; preprocessorFormat.setForeground(QColor(214, 93, 14));
+    highlightingRules.append({QRegularExpression(QStringLiteral("#include[^\n]*")), preprocessorFormat});
 
     // MPI primitives: purple (#8959a8)
-    QTextCharFormat mpiFormat;
-    mpiFormat.setForeground(QColor(137, 89, 168));
-    rule.pattern = QRegularExpression(QStringLiteral("\\bMPI_[A-Za-z0-9_]+\\b"));
-    rule.format = mpiFormat;
-    highlightingRules.append(rule);
+    QTextCharFormat mpiFormat; mpiFormat.setForeground(QColor(137, 89, 168));
+    highlightingRules.append({QRegularExpression(QStringLiteral("\\bMPI_[A-Za-z0-9_]+\\b")), mpiFormat});
 
     // String literals: balanced emerald green (#2e8b57) legible on both light and dark canvases
-    QTextCharFormat stringFormat;
-    stringFormat.setForeground(QColor(60, 165, 85));
-    rule.pattern = QRegularExpression(QStringLiteral("\".*?\""));
-    rule.format = stringFormat;
-    highlightingRules.append(rule);
+    QTextCharFormat stringFormat; stringFormat.setForeground(QColor(60, 165, 85));
+    highlightingRules.append({QRegularExpression(QStringLiteral("\".*?\"")), stringFormat});
 
     // Single-line comments: slate gray (#787c85)
-    QTextCharFormat singleLineCommentFormat;
-    singleLineCommentFormat.setForeground(QColor(120, 124, 133));
-    rule.pattern = QRegularExpression(QStringLiteral("//[^\n]*"));
-    rule.format = singleLineCommentFormat;
-    highlightingRules.append(rule);
+    QTextCharFormat singleLineCommentFormat; singleLineCommentFormat.setForeground(QColor(120, 124, 133));
+    highlightingRules.append({QRegularExpression(QStringLiteral("//[^\n]*")), singleLineCommentFormat});
 
     // Multi-line block comments
     multiLineCommentFormat.setForeground(QColor(120, 124, 133));
@@ -170,8 +148,8 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     connect(this, &SourceCodeView::updateRequest, this, &SourceCodeView::updateLineNumberArea);
     updateLineNumberAreaWidth(0);
 
-    setReadOnly(true);
-    setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
+    setReadOnly(false);
+    setTextInteractionFlags(Qt::TextEditorInteraction);
     setLineWrapMode(QPlainTextEdit::NoWrap);
     reloadStyle(); // Load initial font size and active theme canvas surface
 
@@ -307,18 +285,16 @@ int SourceCodeView::getCurrentLineNumber() const {
 
 /** @brief Toggles a breakpoint on the specified 1-based line. */
 void SourceCodeView::toggleBreakpoint(int lineNum) {
-    bool isSet = false;
-    if (m_breakpoints.contains(lineNum)) {
-        m_breakpoints.remove(lineNum);
-        m_breakpointSuspendScopes.remove(lineNum);
-        isSet = false;
-    } else {
+    const bool isSet = !m_breakpoints.contains(lineNum);
+    if (isSet) {
         m_breakpoints.insert(lineNum, QString());
         m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
-        isSet = true;
+    } else {
+        m_breakpoints.remove(lineNum);
+        m_breakpointSuspendScopes.remove(lineNum);
     }
     highlightCurrentLine();
-    m_lineNumberArea->update();
+    if (m_lineNumberArea) m_lineNumberArea->update();
     emit breakpointToggled(m_currentFilePath, lineNum, isSet, QString());
 }
 
@@ -326,9 +302,7 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
 void SourceCodeView::setConditionalBreakpoint(int lineOneBased, const QString& condition) {
     if (lineOneBased <= 0) return;
     m_breakpoints.insert(lineOneBased, condition);
-    if (!m_breakpointSuspendScopes.contains(lineOneBased)) {
-        m_breakpointSuspendScopes.insert(lineOneBased, QStringLiteral("All"));
-    }
+    if (!m_breakpointSuspendScopes.contains(lineOneBased)) m_breakpointSuspendScopes.insert(lineOneBased, QStringLiteral("All"));
     highlightCurrentLine();
     if (m_lineNumberArea) m_lineNumberArea->update();
     emit breakpointToggled(m_currentFilePath, lineOneBased, true, condition);
@@ -483,11 +457,8 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             } else if (state == QStringLiteral("ConditionalBreakpoint")) {
                 // Rotated 11px amber-gold diamond (#e5c07b) with 2.8px dark center cutout dot.
                 QPainterPath diamond;
-                diamond.moveTo(cx, cy - 5.4);
-                diamond.lineTo(cx + 5.4, cy);
-                diamond.lineTo(cx, cy + 5.4);
-                diamond.lineTo(cx - 5.4, cy);
-                diamond.closeSubpath();
+                diamond.moveTo(cx, cy - 5.4); diamond.lineTo(cx + 5.4, cy);
+                diamond.lineTo(cx, cy + 5.4); diamond.lineTo(cx - 5.4, cy); diamond.closeSubpath();
                 painter.setPen(QPen(QColor("#f0d090"), 1.0));
                 painter.setBrush(QColor("#e5c07b"));
                 painter.drawPath(diamond);
@@ -497,11 +468,8 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             } else if (state == QStringLiteral("ExecutionPc")) {
                 // Sleek emerald-teal execution chevron (#4ec9b0) + 3px right gutter accent bar.
                 QPainterPath chev;
-                chev.moveTo(cx - 3.6, cy - 4.5);
-                chev.lineTo(cx + 4.6, cy);
-                chev.lineTo(cx - 3.6, cy + 4.5);
-                chev.lineTo(cx - 1.7, cy);
-                chev.closeSubpath();
+                chev.moveTo(cx - 3.6, cy - 4.5); chev.lineTo(cx + 4.6, cy);
+                chev.lineTo(cx - 3.6, cy + 4.5); chev.lineTo(cx - 1.7, cy); chev.closeSubpath();
                 painter.setPen(QPen(QColor("#98c379"), 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
                 painter.setBrush(QColor("#4ec9b0"));
                 painter.drawPath(chev);
@@ -512,11 +480,8 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
                 painter.setBrush(QColor("#24181c"));
                 painter.drawEllipse(QPointF(cx, cy), 5.3, 5.3);
                 QPainterPath innerChev;
-                innerChev.moveTo(cx - 2.2, cy - 3.0);
-                innerChev.lineTo(cx + 3.2, cy);
-                innerChev.lineTo(cx - 2.2, cy + 3.0);
-                innerChev.lineTo(cx - 1.0, cy);
-                innerChev.closeSubpath();
+                innerChev.moveTo(cx - 2.2, cy - 3.0); innerChev.lineTo(cx + 3.2, cy);
+                innerChev.lineTo(cx - 2.2, cy + 3.0); innerChev.lineTo(cx - 1.0, cy); innerChev.closeSubpath();
                 painter.setPen(QPen(QColor("#98c379"), 0.8));
                 painter.setBrush(QColor("#4ec9b0"));
                 painter.drawPath(innerChev);
@@ -529,15 +494,11 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             painter.setFont(rowFont);
 
             const QString number = QString::number(lineOneBased);
-            if (lineOneBased == m_executionLine) {
-                painter.setPen(QColor("#4ec9b0"));
-            } else if (isHovered) {
-                painter.setPen(QColor("#61afef"));
-            } else if (m_breakpoints.contains(lineOneBased)) {
-                painter.setPen(QColor("#e06c75"));
-            } else {
-                painter.setPen(QColor("#6b7280"));
-            }
+            const QColor numColor = (lineOneBased == m_executionLine) ? QColor("#4ec9b0")
+                                  : isHovered ? QColor("#61afef")
+                                  : m_breakpoints.contains(lineOneBased) ? QColor("#e06c75")
+                                  : QColor("#6b7280");
+            painter.setPen(numColor);
             const int numLeft = iconLaneW + 2;
             const int numWidth = qMax(12, gutterW - numLeft - 8);
             painter.drawText(numLeft, top, numWidth, rowH, Qt::AlignRight | Qt::AlignVCenter, number);
@@ -566,16 +527,12 @@ bool SourceCodeView::shouldOpenEditorContextMenuAt(const QPoint& pos) const {
  */
 void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
     if (!event) return;
-    // Resolve mouse global coordinate into SourceCodeView space to distinguish gutter from column-1 code.
     QPoint editorPos = event->pos();
     if (event->reason() == QContextMenuEvent::Mouse && !event->globalPos().isNull()) {
         const QPoint mapped = mapFromGlobal(event->globalPos());
         if (rect().contains(mapped)) editorPos = mapped;
     }
-    if (!shouldOpenEditorContextMenuAt(editorPos)) {
-        event->accept();
-        return;
-    }
+    if (!shouldOpenEditorContextMenuAt(editorPos)) { event->accept(); return; }
     QPlainTextEdit::contextMenuEvent(event);
 }
 
@@ -651,7 +608,6 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
                 dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
                 dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
                 dlg.positionNearAnchor(iconGlobalPos);
-
                 const bool accepted = (dlg.exec() == QDialog::Accepted);
                 handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted,
                                               dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(),
@@ -677,18 +633,12 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
 void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
     const int y = event->pos().y();
     QTextBlock block = firstVisibleBlock();
-    int blockNumber = block.blockNumber();
+    int blockNumber = block.blockNumber(), hoveredLine = -1;
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
-    int hoveredLine = -1;
-
     while (block.isValid() && top <= m_lineNumberArea->height()) {
-        if (block.isVisible() && y >= top && y < bottom) {
-            hoveredLine = blockNumber + 1;
-            break;
-        }
-        block = block.next();
-        top = bottom;
+        if (block.isVisible() && y >= top && y < bottom) { hoveredLine = blockNumber + 1; break; }
+        block = block.next(); top = bottom;
         bottom = top + qRound(blockBoundingRect(block).height());
         ++blockNumber;
     }
@@ -769,8 +719,7 @@ void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
  */
 void SourceCodeView::resizeEvent(QResizeEvent *e) {
     QPlainTextEdit::resizeEvent(e);
-    const QRect cr = contentsRect();
-    m_lineNumberArea->setGeometry(QRect(cr.left(), cr.top(), lineNumberAreaWidth(), cr.height()));
+    m_lineNumberArea->setGeometry(QRect(contentsRect().left(), contentsRect().top(), lineNumberAreaWidth(), contentsRect().height()));
 }
 
 /**
@@ -779,18 +728,16 @@ void SourceCodeView::resizeEvent(QResizeEvent *e) {
  * @param activeLine Optional 1-based active line.
  */
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
-    if (!code.isEmpty() && toPlainText() != code) {
-        QPlainTextEdit::setPlainText(code);
-    }
+    if (!code.isEmpty() && toPlainText() != code) QPlainTextEdit::setPlainText(code);
     QList<QTextEdit::ExtraSelection> extraSelections;
     if (activeLine > 0) {
         QTextBlock block = document()->findBlockByLineNumber(activeLine - 1);
         if (block.isValid()) {
-            QTextEdit::ExtraSelection selection;
-            selection.format.setBackground(QColor(gridlock::core::ConfigManager::instance().getSourceActiveLine()));
-            selection.format.setProperty(QTextFormat::FullWidthSelection, true);
-            selection.cursor = QTextCursor(block);
-            extraSelections.append(selection);
+            QTextEdit::ExtraSelection sel;
+            sel.format.setBackground(QColor(gridlock::core::ConfigManager::instance().getSourceActiveLine()));
+            sel.format.setProperty(QTextFormat::FullWidthSelection, true);
+            sel.cursor = QTextCursor(block);
+            extraSelections.append(sel);
         }
     }
     setExtraSelections(extraSelections);
@@ -826,12 +773,10 @@ void SourceCodeView::handleHoverTimeout() {
     cursor.select(QTextCursor::WordUnderCursor);
     const QString word = cursor.selectedText();
     static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
-    if (cVarRegex.match(word).hasMatch()) {
-        if (word != m_lastHoveredWord) {
-            m_lastHoveredWord = word;
-            emit hoverVariableRequested(word, m_lastGlobalMousePos);
-        }
-    } else {
+    if (cVarRegex.match(word).hasMatch() && word != m_lastHoveredWord) {
+        m_lastHoveredWord = word;
+        emit hoverVariableRequested(word, m_lastGlobalMousePos);
+    } else if (!cVarRegex.match(word).hasMatch()) {
         if (!m_lastHoveredWord.isEmpty()) emit hideHoverTooltip();
         m_lastHoveredWord.clear();
     }
@@ -879,8 +824,7 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QFont currentFont = font();
         const int delta = event->angleDelta().y();
-        int newSize = currentFont.pointSize() + ((delta > 0) ? 1 : ((delta < 0) ? -1 : 0));
-        newSize = qBound(6, newSize, 72);
+        const int newSize = qBound(6, currentFont.pointSize() + ((delta > 0) ? 1 : ((delta < 0) ? -1 : 0)), 72);
         currentFont.setPointSize(newSize);
         setFont(currentFont);
         updateLineNumberAreaWidth(0);
@@ -896,6 +840,99 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
  */
 void SourceCodeView::paintEvent(QPaintEvent *event) {
     QPlainTextEdit::paintEvent(event);
+}
+
+/**
+ * @brief Returns member and variable completion strings for linePrefix at lineOneBased.
+ * @param lineOneBased 1-based line number.
+ * @param linePrefix Expression prefix before cursor (e.g., "data[i].").
+ * @return List of completion labels.
+ */
+QStringList SourceCodeView::editorCompletionsAtLine(int lineOneBased, const QString& linePrefix) const {
+    const auto items = core::ClangdLspClient::completeDetailedAtLine(
+        m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
+    QStringList labels;
+    labels.reserve(items.size());
+    for (const auto& it : items) labels.append(it.label);
+    return labels;
+}
+
+/**
+ * @brief Triggers the floating LSP IntelliSense popup below cursorRect() at lineOneBased.
+ * @param linePrefix Expression prefix before cursor.
+ * @param lineOneBased 1-based line number.
+ */
+void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, int lineOneBased) {
+    const auto items = core::ClangdLspClient::completeDetailedAtLine(
+        m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
+    if (items.isEmpty()) {
+        if (m_completionPopup) m_completionPopup->hide();
+        return;
+    }
+    if (!m_completionPopup) {
+        m_completionPopup = new LspCompletionPopup(this);
+        connect(m_completionPopup, &LspCompletionPopup::itemChosen, this, [this](const QString& insertText) {
+            QTextCursor cur = textCursor();
+            const QString line = cur.block().text().left(cur.positionInBlock());
+            const int sepPos = qMax(line.lastIndexOf(QLatin1Char('.')),
+                                    qMax(line.lastIndexOf(QStringLiteral("->")) + 1,
+                                         line.lastIndexOf(QStringLiteral("::")) + 1));
+            if (sepPos >= 0 && line.length() > sepPos + 1) {
+                cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, line.length() - (sepPos + 1));
+            }
+            cur.insertText(insertText);
+            setTextCursor(cur);
+        });
+    }
+    m_completionPopup->setItems(items);
+    m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320);
+    m_completionPopup->show();
+}
+
+/**
+ * @brief Saves the current editor document to disk.
+ * @param filePath Target file path, or empty to overwrite currentFile().
+ * @return True if successfully written; false otherwise.
+ */
+bool SourceCodeView::saveToFile(const QString& filePath) {
+    const QString target = filePath.isEmpty() ? m_currentFilePath : filePath;
+    if (target.isEmpty()) return false;
+    QFile file(target);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    QTextStream(&file) << toPlainText();
+    file.close();
+    document()->setModified(false);
+    return true;
+}
+
+/**
+ * @brief Handles key press events for live LSP autocomplete navigation and invocation.
+ * @param event Key event.
+ */
+void SourceCodeView::keyPressEvent(QKeyEvent *event) {
+    if (!event) return;
+    if (m_completionPopup && m_completionPopup->isVisible()) {
+        if (event->key() == Qt::Key_Down) { m_completionPopup->selectNext(); event->accept(); return; }
+        if (event->key() == Qt::Key_Up) { m_completionPopup->selectPrevious(); event->accept(); return; }
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Tab) {
+            if (m_completionPopup->selectCurrent()) { event->accept(); return; }
+        }
+        if (event->key() == Qt::Key_Escape) { m_completionPopup->hide(); event->accept(); return; }
+    }
+    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Space) {
+        QTextCursor cur = textCursor();
+        triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
+        event->accept();
+        return;
+    }
+    QPlainTextEdit::keyPressEvent(event);
+    const QString txt = event->text();
+    if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":") ||
+        (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() &&
+         (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_')))) {
+        QTextCursor cur = textCursor();
+        triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
+    }
 }
 
 }  // namespace gridlock::ui

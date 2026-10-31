@@ -70,17 +70,24 @@ public:
      * @brief Applies a theme by identifier, automatically deriving dark/light polarity from the theme.
      * @param themeName Curated theme identifier (e.g., "gridlock_slate", "daylight_light", "solarized_light", "catppuccin_latte").
      */
-    void applyTheme(const QString& themeName);
+    void applyTheme(const QString& themeName, bool persist = true);
 
     /**
      * @brief Switches the active base theme and reapplies the high-density workstation QSS overlay.
      * @param themeName Name of the theme (with or without `.xml` suffix).
      * @param isDark True if the selected theme uses a dark palette.
+     * @param persist True to persist the selected theme to QSettings and ConfigManager.
      */
-    void setTheme(const QString& themeName, bool isDark = true);
+    void setTheme(const QString& themeName, bool isDark = true, bool persist = true);
 
     /** @brief Re-reads theme and font preferences from QSettings and updates qApp immediately. */
     void applyThemeAndFonts();
+
+    /** @brief Saves active theme and typography preferences to QSettings and ConfigManager. */
+    void savePersistedTheme() const;
+
+    /** @brief Restores active theme from ConfigManager and QSettings, applies it, and returns the theme ID. */
+    QString loadPersistedTheme();
 
     /** @brief Returns true when the active workstation theme uses a dark palette. */
     bool isDarkMode() const { return m_darkMode; }

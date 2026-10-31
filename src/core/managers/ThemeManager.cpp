@@ -16,6 +16,7 @@
  */
 
 #include "ThemeManager.hpp"
+#include "ConfigManager.hpp"
 
 #include <QApplication>
 #include <QColor>
@@ -512,80 +513,37 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "#bottomToolWindowRail QToolButton:checked { background: #21252b; color: #61afef; border: 1px solid #528bff; border-left: 2px solid #528bff; }\n"
         // ProjectExplorer mode buttons (FILES | SYMBOLS | STRINGS) and Watch expression add button.
         "#explorerFilesModeBtn, #explorerSymbolsModeBtn, #explorerStringsModeBtn, #addWatchBtn {\n"
-        "    background: #252932;\n"
-        "    color: #abb2bf;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    padding: 1px 6px;\n"
-        "    min-height: 18px;\n"
-        "    max-height: 20px;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 10px;\n"
-        "    font-weight: 600;\n"
+        "    background: #252932; color: #abb2bf; border: 1px solid #323844; border-radius: 2px;\n"
+        "    padding: 1px 6px; min-height: 18px; max-height: 20px;\n"
+        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: 10px; font-weight: 600;\n"
         "}\n"
         // Checked state for ProjectExplorer mode selector buttons.
         "#explorerFilesModeBtn:checked, #explorerSymbolsModeBtn:checked, #explorerStringsModeBtn:checked {\n"
-        "    background: #2c3444;\n"
-        "    color: #ffffff;\n"
-        "    border: 1px solid #528bff;\n"
+        "    background: #2c3444; color: #ffffff; border: 1px solid #528bff;\n"
         "}\n"
         // Filter inputs for Symbols, Strings, and Watch expressions.
         "#symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
-        "    background: #141619;\n"
-        "    color: #d7dae0;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    padding: 1px 5px;\n"
-        "    min-height: 18px;\n"
-        "    max-height: 22px;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 10px;\n"
+        "    background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 2px;\n"
+        "    padding: 1px 5px; min-height: 18px; max-height: 22px;\n"
+        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: 10px;\n"
         "}\n"
         // Modal Dialog Dark-Slate Chrome & Content Cards.
-        "QDialog, QWizard {\n"
-        "    background: #16181d;\n"
-        "    color: #d7dae0;\n"
-        "}\n"
+        "QDialog, QWizard { background: #16181d; color: #d7dae0; }\n"
         // Dialog QGroupBox content cards with 1px solid #2c313a border.
         "QGroupBox {\n"
-        "    background: #1b1e24;\n"
-        "    border: 1px solid #2c313a;\n"
-        "    border-radius: 3px;\n"
-        "    margin-top: 8px;\n"
-        "    padding-top: 10px;\n"
-        "    color: #d7dae0;\n"
-        "    font-weight: 600;\n"
+        "    background: #1b1e24; border: 1px solid #2c313a; border-radius: 3px;\n"
+        "    margin-top: 8px; padding-top: 10px; color: #d7dae0; font-weight: 600;\n"
         "}\n"
         // GroupBox title badge positioning.
-        "QGroupBox::title {\n"
-        "    subcontrol-origin: margin;\n"
-        "    subcontrol-position: top left;\n"
-        "    padding: 0px 6px;\n"
-        "    color: #61afef;\n"
-        "}\n"
+        "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0px 6px; color: #61afef; }\n"
         // Standardize 24px dialog footer action buttons inside QDialogButtonBox.
-        "QDialogButtonBox QPushButton {\n"
-        "    min-height: 22px;\n"
-        "    max-height: 24px;\n"
-        "    min-width: 72px;\n"
-        "    padding: 2px 10px;\n"
-        "}\n"
+        "QDialogButtonBox QPushButton { min-height: 22px; max-height: 24px; min-width: 72px; padding: 2px 10px; }\n"
         // Sleek 28px-row dialog navigation sidebars with 3px solid #528bff active indicator.
         "QListWidget, QListWidget[role=\"sidebar\"] {\n"
-        "    background: #1e2128;\n"
-        "    color: #abb2bf;\n"
-        "    selection-background-color: #264f78;\n"
-        "    selection-color: #ffffff;\n"
-        "    border: none;\n"
-        "    border-right: 1px solid #2c313a;\n"
-        "    outline: none;\n"
-        "    font-size: 11px;\n"
+        "    background: #1e2128; color: #abb2bf; selection-background-color: #264f78; selection-color: #ffffff;\n"
+        "    border: none; border-right: 1px solid #2c313a; outline: none; font-size: 11px;\n"
         "}\n"
-        "QListWidget[role=\"sidebar\"]::item {\n"
-        "    height: 28px;\n"
-        "    padding: 2px 8px;\n"
-        "    border-left: 2px solid transparent;\n"
-        "}\n"
+        "QListWidget[role=\"sidebar\"]::item { height: 28px; padding: 2px 8px; border-left: 2px solid transparent; }\n"
         // Style hovered sidebar list items with bright white text on dark-slate fill.
         "QListWidget::item:hover, QListWidget[role=\"sidebar\"]::item:hover {\n"
         "    background-color: #252932;\n"
@@ -804,75 +762,44 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
 }
 
 /**
- * @brief Initializes QtAdvancedStylesheet paths, loads user QSettings preferences, and applies QSS.
+ * @brief Initializes QtAdvancedStylesheet paths, loads user preferences, and applies persisted theme.
  */
 void ThemeManager::initialize() {
-    // Configure resource input directory and writable ACSS cache output path.
-    const QString stylesDir = ":/styles";
+    const QString stylesDir = QStringLiteral(":/styles");
     m_advancedStylesheet->setStylesDirPath(stylesDir);
-    m_advancedStylesheet->setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/acss");
-    m_advancedStylesheet->setCurrentStyle("qt_material");
-
-    // Read persisted theme name from QSettings, automatically deriving dark/light polarity.
-    QSettings s("gridlock", "debugger");
-    m_activeThemeId = s.value("appearance/theme", "gridlock_slate").toString();
-    const bool isLight = m_activeThemeId.contains("light", Qt::CaseInsensitive) || m_activeThemeId.contains("latte", Qt::CaseInsensitive);
-    m_darkMode = !isLight;
-    const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
-    const QString uiFontFamily = s.value("appearance/ui_font_family", QString()).toString();
-
-    const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
-    if (m_advancedStylesheet->themes().contains(acssTheme) || m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
-        m_advancedStylesheet->setCurrentTheme(m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
-        m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
-        m_advancedStylesheet->updateStylesheet();
-    }
-    applyApplicationPalette(m_darkMode);
-    m_currentStyleSheet = buildDynamicWorkstationQss(m_advancedStylesheet ? m_advancedStylesheet->styleSheet() : QString(),
-                                                     m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
-    if (qApp) {
-        qApp->setStyleSheet(m_currentStyleSheet);
-        // Re-assert application palette after setStyleSheet so Inactive HighlightedText stays #ffffff.
-        applyApplicationPalette(m_darkMode);
-        QFont appFont = qApp->font();
-        if (!uiFontFamily.trimmed().isEmpty()) appFont.setFamily(uiFontFamily.trimmed());
-        appFont.setPointSize(uiFontSize);
-        qApp->setFont(appFont);
-    }
+    m_advancedStylesheet->setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/acss"));
+    m_advancedStylesheet->setCurrentStyle(QStringLiteral("qt_material"));
+    loadPersistedTheme();
 }
 
 /** @brief Returns the list of curated workstation themes. */
 QStringList ThemeManager::getAvailableThemes() const { return availableThemeIds(); }
 
 /** @brief Applies a theme by identifier, automatically deriving dark/light polarity from the theme. */
-void ThemeManager::applyTheme(const QString& themeName) {
+void ThemeManager::applyTheme(const QString& themeName, bool persist) {
     const QString id = themeName.trimmed();
     const bool isLight = id.contains(QStringLiteral("light"), Qt::CaseInsensitive) ||
                          id.contains(QStringLiteral("latte"), Qt::CaseInsensitive);
-    setTheme(id, !isLight);
+    setTheme(id, !isLight, persist);
 }
 
 /**
- * @brief Dynamically switches the active theme and reapplies the workstation QSS overlay.
+ * @brief Dynamically switches the active theme, updates QSS overlay, and persists to settings.
  * @param themeName Internal theme identifier string (e.g. "gridlock_slate", "solarized_light").
  * @param isDark True for dark-slate polarity; false for high-contrast light polarity.
+ * @param persist True to persist the selected theme to QSettings and ConfigManager.
  */
-void ThemeManager::setTheme(const QString& themeName, bool isDark) {
+void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist) {
     if (themeName.trimmed().isEmpty()) return;
-    // Normalize theme identifier and derive intrinsic dark/light polarity from theme family.
     m_activeThemeId = themeName.trimmed();
     const bool isLightTheme = m_activeThemeId.contains(QStringLiteral("light"), Qt::CaseInsensitive) ||
                               m_activeThemeId.contains(QStringLiteral("latte"), Qt::CaseInsensitive);
     m_darkMode = isDark && !isLightTheme;
 
-    // Persist active theme identifier and polarity flag to user QSettings storage.
-    QSettings s("gridlock", "debugger");
-    s.setValue("appearance/theme", m_activeThemeId);
-    s.setValue("appearance/dark_mode", m_darkMode);
-    const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
-    const QString uiFontFamily = s.value("appearance/ui_font_family", QString()).toString();
+    QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    const int uiFontSize = s.value(QStringLiteral("appearance/ui_font_size"), 11).toInt();
+    const QString uiFontFamily = s.value(QStringLiteral("appearance/ui_font_family"), QString()).toString();
 
-    // Update QtAdvancedStylesheet base XML theme and font size variable when available.
     if (m_advancedStylesheet) {
         const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
         if (m_advancedStylesheet->themes().contains(acssTheme) || m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
@@ -881,17 +808,14 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark) {
             m_advancedStylesheet->updateStylesheet();
         }
     }
-    // Synchronize QApplication palette and compile the dynamic workstation QSS overlay.
     applyApplicationPalette(m_darkMode);
     m_currentStyleSheet = buildDynamicWorkstationQss(m_advancedStylesheet ? m_advancedStylesheet->styleSheet() : QString(),
                                                      m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
     if (qApp) {
-        // Export active theme properties to qApp so decoupled editor views resolve swatch tokens.
         qApp->setProperty("gridlock_active_theme", m_activeThemeId);
         qApp->setProperty("gridlock_dark_mode", m_darkMode);
         qApp->setProperty("gridlock_swatch_colors", themeSwatchColors(m_activeThemeId));
         qApp->setStyleSheet(m_currentStyleSheet);
-        // Re-assert application palette after setStyleSheet so Inactive HighlightedText stays #ffffff.
         applyApplicationPalette(m_darkMode);
         for (QWidget* w : QApplication::allWidgets()) {
             if (w && w->metaObject()->indexOfMethod("reloadStyle()") >= 0) {
@@ -899,14 +823,68 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark) {
             }
         }
     }
+    if (persist) savePersistedTheme();
     emit themeModeChanged(m_darkMode);
+}
+
+/**
+ * @brief Persists active theme identifier and typography settings to QSettings and ConfigManager.
+ */
+void ThemeManager::savePersistedTheme() const {
+    if (m_activeThemeId.trimmed().isEmpty()) return;
+    const QString id = m_activeThemeId.trimmed();
+    QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
+    s1.setValue(QStringLiteral("appearance/theme_id"), id);
+    s1.setValue(QStringLiteral("appearance/theme"), id);
+    s1.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
+
+    QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
+    s2.setValue(QStringLiteral("appearance/theme_id"), id);
+    s2.setValue(QStringLiteral("appearance/theme"), id);
+    s2.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
+
+    QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    s3.setValue(QStringLiteral("appearance/theme_id"), id);
+    s3.setValue(QStringLiteral("appearance/theme"), id);
+    s3.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
+
+    gridlock::core::ConfigManager::instance().setThemeName(id);
+}
+
+/**
+ * @brief Restores active theme from ConfigManager / QSettings, applies it, and returns the theme ID.
+ * @return Restored active theme identifier.
+ */
+QString ThemeManager::loadPersistedTheme() {
+    QString themeId = gridlock::core::ConfigManager::instance().getThemeName();
+    if (themeId.trimmed().isEmpty() || themeId == QStringLiteral("gridlock_slate")) {
+        QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
+        QString sVal = s1.value(QStringLiteral("appearance/theme_id")).toString();
+        if (!sVal.trimmed().isEmpty()) {
+            themeId = sVal;
+        } else {
+            QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
+            sVal = s2.value(QStringLiteral("appearance/theme_id")).toString();
+            if (!sVal.trimmed().isEmpty()) {
+                themeId = sVal;
+            } else {
+                QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+                sVal = s3.value(QStringLiteral("appearance/theme_id"),
+                                s3.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString();
+                if (!sVal.trimmed().isEmpty()) themeId = sVal;
+            }
+        }
+    }
+    if (!themeId.trimmed().isEmpty()) {
+        applyTheme(themeId, false);
+    }
+    return m_activeThemeId;
 }
 
 /**
  * @brief Switches between dark-slate (`true`) and high-contrast light (`false`) workstation palettes.
  */
 void ThemeManager::setDarkMode(bool dark) {
-    // Select default light or dark theme when toggling polarity across theme families.
     m_darkMode = dark;
     const bool currentlyLight = m_activeThemeId.contains(QStringLiteral("light"), Qt::CaseInsensitive) ||
                                 m_activeThemeId.contains(QStringLiteral("latte"), Qt::CaseInsensitive);
@@ -919,13 +897,11 @@ void ThemeManager::setDarkMode(bool dark) {
  * @brief Reloads both theme and UI font point size from QSettings without restarting.
  */
 void ThemeManager::applyThemeAndFonts() {
-    // Load persisted theme identifier, derive polarity, and apply UI typography metrics.
-    QSettings s("gridlock", "debugger");
-    const QString savedTheme = s.value("appearance/theme", "gridlock_slate").toString();
-    const int uiFontSize = s.value("appearance/ui_font_size", 11).toInt();
-    const QString uiFontFamily = s.value("appearance/ui_font_family", QString()).toString();
+    QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    const QString savedTheme = s.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate")).toString();
+    const int uiFontSize = s.value(QStringLiteral("appearance/ui_font_size"), 11).toInt();
+    const QString uiFontFamily = s.value(QStringLiteral("appearance/ui_font_family"), QString()).toString();
     applyTheme(savedTheme);
-    // Apply global UI font family and point size to QApplication after stylesheet update.
     if (qApp) {
         QFont appFont = qApp->font();
         if (!uiFontFamily.trimmed().isEmpty()) appFont.setFamily(uiFontFamily.trimmed());

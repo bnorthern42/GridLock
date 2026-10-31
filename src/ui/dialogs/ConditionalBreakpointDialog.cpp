@@ -15,11 +15,12 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
-#include <QCompleter>
 #include <QContextMenuEvent>
 #include <QFrame>
 #include <QGuiApplication>
+#include <QHeaderView>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -46,6 +47,195 @@ constexpr int kDefaultAnchorCaretOffsetPx = 18;
 constexpr int kAnchorVerticalGapPx = 6;
 constexpr int kScreenEdgeMarginPx = 8;
 }  // namespace
+
+/**
+ * @brief Constructs a new floating LSP completion card widget.
+ * @param parent Optional parent widget.
+ */
+LspCompletionPopup::LspCompletionPopup(QWidget* parent) : QTreeWidget(parent) {
+    setObjectName(QStringLiteral("lspCompletionPopup"));
+    setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint);
+    setColumnCount(3);
+    setHeaderHidden(true);
+    setRootIsDecorated(false);
+    setUniformRowHeights(true);
+    setSelectionMode(QAbstractItemView::SingleSelection);
+    setEditTriggers(QAbstractItemView::NoEditTriggers);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    if (header()) {
+        header()->setStretchLastSection(false);
+        header()->setSectionResizeMode(0, QHeaderView::Fixed);
+        header()->setSectionResizeMode(1, QHeaderView::Stretch);
+        header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    }
+    setColumnWidth(0, 32);
+
+    const bool isDark = !qApp || !qApp->property("gridlock_dark_mode").isValid() ||
+                        qApp->property("gridlock_dark_mode").toBool();
+    if (isDark) {
+        setStyleSheet(QStringLiteral(
+            "#lspCompletionPopup { background: #1e222a; border: 1px solid #528bff; border-radius: 6px; outline: none; }\n"
+            "#lspCompletionPopup::item { height: 28px; padding: 2px 6px; color: #d7dae0; }\n"
+            "#lspCompletionPopup::item:selected { background: #2c436b; color: #ffffff; border-radius: 4px; }\n"
+            "#lspCompletionPopup::item:hover { background: #282c34; }\n"));
+    } else {
+        setStyleSheet(QStringLiteral(
+            "#lspCompletionPopup { background: #ffffff; border: 1px solid #0969da; border-radius: 6px; outline: none; }\n"
+            "#lspCompletionPopup::item { height: 28px; padding: 2px 6px; color: #1f2328; }\n"
+            "#lspCompletionPopup::item:selected { background: #d0e2ff; color: #0969da; border-radius: 4px; }\n"
+            "#lspCompletionPopup::item:hover { background: #f6f8fa; }\n"));
+    }
+
+    connect(this, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* item) {
+        if (item) {
+            emit itemChosen(item->data(1, Qt::UserRole).toString());
+            hide();
+        }
+    });
+    connect(this, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item) {
+        if (item) {
+            emit itemChosen(item->data(1, Qt::UserRole).toString());
+            hide();
+        }
+    });
+}
+
+/**
+ * @brief Populates the completion items in the popup card.
+ * @param items List of structured completion proposals.
+ */
+void LspCompletionPopup::setItems(const QVector<core::ClangdLspClient::LspCompletionItem>& items) {
+    clear();
+    if (items.isEmpty()) {
+        hide();
+        return;
+    }
+    for (const auto& it : items) {
+        auto* treeItem = new QTreeWidgetItem(this);
+        QString badge = QStringLiteral("[v]");
+        QColor badgeColor(0x61, 0xaf, 0xef);
+        if (it.kindLabel == QStringLiteral("Field")) {
+            badge = QStringLiteral("[f]");
+            badgeColor = QColor(0xe5, 0xc0, 0x7b);
+        } else if (it.kindLabel == QStringLiteral("Method")) {
+            badge = QStringLiteral("[m]");
+            badgeColor = QColor(0xc6, 0x78, 0xdd);
+        } else if (it.kindLabel == QStringLiteral("Struct")) {
+            badge = QStringLiteral("[s]");
+            badgeColor = QColor(0x4e, 0xc9, 0xb0);
+        }
+        treeItem->setText(0, badge);
+        treeItem->setForeground(0, badgeColor);
+        treeItem->setTextAlignment(0, Qt::AlignCenter);
+
+        treeItem->setText(1, it.label);
+        treeItem->setData(1, Qt::UserRole, it.insertText.isEmpty() ? it.label : it.insertText);
+        QFont f = font();
+        f.setBold(true);
+        treeItem->setFont(1, f);
+        treeItem->setTextAlignment(1, Qt::AlignLeft | Qt::AlignVCenter);
+
+        treeItem->setText(2, it.detailType);
+        treeItem->setForeground(2, QColor(0x8c, 0x92, 0xa4));
+        treeItem->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+        treeItem->setSizeHint(0, QSize(0, 28));
+
+        addTopLevelItem(treeItem);
+    }
+    setCurrentItem(topLevelItem(0));
+    const int rowCount = std::min(8, topLevelItemCount());
+    resize(320, rowCount * 28 + 12);
+}
+
+/**
+ * @brief Positions and sizes the popup directly below a global coordinate.
+ * @param globalTopLeft Top-left coordinate in screen space.
+ * @param preferredWidth Target width in pixels.
+ */
+void LspCompletionPopup::positionBelow(const QPoint& globalTopLeft, int preferredWidth) {
+    const int rowCount = std::min(8, topLevelItemCount());
+    resize(preferredWidth, rowCount * 28 + 12);
+    move(globalTopLeft);
+}
+
+/**
+ * @brief Emits itemChosen with the currently selected item and closes popup.
+ * @return True if an item was chosen; false if empty.
+ */
+bool LspCompletionPopup::selectCurrent() {
+    auto* cur = currentItem();
+    if (cur) {
+        emit itemChosen(cur->data(1, Qt::UserRole).toString());
+        hide();
+        return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Advances the highlighted completion row to the next proposal.
+ */
+void LspCompletionPopup::selectNext() {
+    int curIdx = indexOfTopLevelItem(currentItem());
+    if (curIdx < topLevelItemCount() - 1) {
+        setCurrentItem(topLevelItem(curIdx + 1));
+    }
+}
+
+/**
+ * @brief Moves the highlighted completion row to the previous proposal.
+ */
+void LspCompletionPopup::selectPrevious() {
+    int curIdx = indexOfTopLevelItem(currentItem());
+    if (curIdx > 0) {
+        setCurrentItem(topLevelItem(curIdx - 1));
+    }
+}
+
+/**
+ * @brief Handles key navigation inside the popup.
+ */
+void LspCompletionPopup::keyPressEvent(QKeyEvent* event) {
+    if (!event) return;
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Tab) {
+        selectCurrent();
+        event->accept();
+        return;
+    }
+    if (event->key() == Qt::Key_Escape) {
+        hide();
+        event->accept();
+        return;
+    }
+    QTreeWidget::keyPressEvent(event);
+}
+
+/**
+ * @brief Intercepts arrow keys and enter/tab from condition editor to navigate LSP popup.
+ */
+bool ConditionalBreakpointDialog::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_conditionEdit && event->type() == QEvent::KeyPress && m_completionPopup && m_completionPopup->isVisible()) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Down) {
+            m_completionPopup->selectNext();
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Up) {
+            m_completionPopup->selectPrevious();
+            return true;
+        }
+        if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Tab) {
+            if (m_completionPopup->selectCurrent()) {
+                return true;
+            }
+        }
+        if (keyEvent->key() == Qt::Key_Escape) {
+            m_completionPopup->hide();
+            return true;
+        }
+    }
+    return QDialog::eventFilter(watched, event);
+}
 
 /**
  * @brief Constructs the frameless cursor-anchored breakpoint callout popover.
@@ -153,32 +343,26 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     m_conditionEdit = new QLineEdit(this);
     m_conditionEdit->setObjectName(QStringLiteral("breakpointConditionEdit"));
     m_conditionEdit->setFixedHeight(24);
-    m_conditionEdit->setPlaceholderText(QStringLiteral("C/C++ predicate (e.g. rank == 0)"));
+    m_conditionEdit->setPlaceholderText(QStringLiteral("e.g. rank == 0 && data[i].coords.x > 1.0"));
     m_conditionEdit->setText(currentCondition);
+    m_conditionEdit->installEventFilter(this);
 
-    // Attach dark-slate LSP member/variable completion popup to m_conditionEdit.
-    m_completionModel = new QStringListModel(this);
-    m_completer = new QCompleter(m_completionModel, this);
-    m_completer->setWidget(m_conditionEdit);
-    m_completer->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
-    m_completer->setCaseSensitivity(Qt::CaseInsensitive);
-    if (m_completer->popup()) {
-        m_completer->popup()->setStyleSheet(QStringLiteral(
-            "QAbstractItemView { background: #1e2128; color: #e5e9f0; border: 1px solid #528bff; "
-            "selection-background-color: #2c436b; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"));
-    }
-    connect(m_completer, QOverload<const QString&>::of(&QCompleter::activated),
-            this, [this](const QString& chosen) {
-                QTimer::singleShot(0, this, [this, chosen]() { applyCompletionItem(chosen); });
-            });
+    // Attach sleek floating LSP IntelliSense popup card.
+    m_completionPopup = new LspCompletionPopup(this);
+    connect(m_completionPopup, &LspCompletionPopup::itemChosen,
+            this, &ConditionalBreakpointDialog::applyCompletionItem);
     connect(m_conditionEdit, &QLineEdit::textEdited, this, [this](const QString& text) {
-        if (!m_completer || !m_completionModel || m_fullSourceText.isEmpty()) return;
-        const QStringList candidates = completionsForExpression(text);
-        m_completionModel->setStringList(candidates);
-        if (!candidates.isEmpty()) {
-            m_completer->complete();
-        } else if (m_completer->popup()) {
-            m_completer->popup()->hide();
+        if (!m_completionPopup || m_fullSourceText.isEmpty()) return;
+        const int line = std::max(1, m_targetLine);
+        const auto items = core::ClangdLspClient::completeDetailedAtLine(
+            m_sourceFilePath, m_fullSourceText, line, text);
+        if (!items.isEmpty()) {
+            m_completionPopup->setItems(items);
+            const QPoint belowPos = m_conditionEdit->mapToGlobal(QPoint(0, m_conditionEdit->height() + 2));
+            m_completionPopup->positionBelow(belowPos, std::max(320, m_conditionEdit->width()));
+            m_completionPopup->show();
+        } else {
+            m_completionPopup->hide();
         }
     });
 
@@ -334,6 +518,9 @@ void ConditionalBreakpointDialog::applyCompletionItem(const QString& completionL
     m_conditionEdit->setText(updated);
     m_conditionEdit->setCursorPosition(updated.length());
     m_conditionEdit->setFocus();
+    if (m_completionPopup) {
+        m_completionPopup->hide();
+    }
 }
 
 /**

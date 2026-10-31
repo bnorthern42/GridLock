@@ -719,4 +719,86 @@ void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
   }
 }
 
+/**
+ * @brief Returns the persisted theme identifier from .gridlock/workspace.toml or QSettings.
+ * @return Curated theme identifier string (e.g. "tokyo_night", "gridlock_slate").
+ */
+QString ConfigManager::getThemeName() const {
+  if (!m_workspacePath.isEmpty()) {
+    const QString workspaceFile =
+        QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
+    try {
+      auto tbl = toml::parse_file(workspaceFile.toStdString());
+      if (auto* app = tbl["appearance"].as_table()) {
+        if (auto val = app->get("theme_id"); val && val->is_string()) {
+          return QString::fromStdString(val->as_string()->get());
+        }
+      }
+      if (auto* thm = tbl["theme"].as_table()) {
+        if (auto val = thm->get("name"); val && val->is_string()) {
+          return QString::fromStdString(val->as_string()->get());
+        }
+      }
+    } catch (...) {
+    }
+  }
+
+  QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
+  QString t = s1.value(QStringLiteral("appearance/theme_id")).toString();
+  if (t.trimmed().isEmpty()) {
+    QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
+    t = s2.value(QStringLiteral("appearance/theme_id")).toString();
+  }
+  if (t.trimmed().isEmpty()) {
+    QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    t = s3.value(QStringLiteral("appearance/theme_id"),
+                 s3.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString();
+  }
+  return t.trimmed().isEmpty() ? QStringLiteral("gridlock_slate") : t.trimmed();
+}
+
+/**
+ * @brief Persists the theme identifier to .gridlock/workspace.toml and QSettings.
+ * @param name Selected theme identifier string.
+ */
+void ConfigManager::setThemeName(const QString& name) {
+  const QString id = name.trimmed().isEmpty() ? QStringLiteral("gridlock_slate") : name.trimmed();
+  if (!m_workspacePath.isEmpty()) {
+    QDir dir(m_workspacePath);
+    dir.mkpath(QStringLiteral(".gridlock"));
+    const QString workspaceFile = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    toml::table tbl;
+    try {
+      tbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) {
+    }
+    toml::table appTbl;
+    if (auto* existing = tbl["appearance"].as_table()) {
+      appTbl = *existing;
+    }
+    appTbl.insert_or_assign("theme_id", id.toStdString());
+    tbl.insert_or_assign("appearance", appTbl);
+
+    std::ofstream out(workspaceFile.toStdString());
+    if (out.is_open()) {
+      out << tbl;
+    }
+  }
+
+  QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
+  s1.setValue(QStringLiteral("appearance/theme_id"), id);
+  s1.setValue(QStringLiteral("appearance/theme"), id);
+  s1.sync();
+
+  QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
+  s2.setValue(QStringLiteral("appearance/theme_id"), id);
+  s2.setValue(QStringLiteral("appearance/theme"), id);
+  s2.sync();
+
+  QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+  s3.setValue(QStringLiteral("appearance/theme_id"), id);
+  s3.setValue(QStringLiteral("appearance/theme"), id);
+  s3.sync();
+}
+
 }  // namespace gridlock::core

@@ -218,6 +218,11 @@ class ConfigManager {
   /** @brief Updates and saves `[ui] open_unfocused` in `config.toml`. */
   void setOpenUnfocused(bool unfocused);
 
+  /** @brief Returns the persisted theme name from .gridlock/workspace.toml or QSettings. */
+  QString getThemeName() const;
+  /** @brief Persists the theme name to .gridlock/workspace.toml and QSettings. */
+  void setThemeName(const QString& name);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

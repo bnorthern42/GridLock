@@ -195,5 +195,8 @@ private slots:
 
     /** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and MainWindow*.cpp line count headroom. */
     void testFullWorkstationLightThemePropagationAndLineCountHeadroom();
+
+    /** @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained breakpoint popover, and theme persistence. */
+    void testEditableSourceViewModernLspPopupAndThemePersistence();
 };
 
