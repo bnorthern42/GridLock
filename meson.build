@@ -147,6 +147,8 @@ executable('gridlock',
   compiled_resources,
   include_directories : inc,
   dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep],
+  build_rpath : '$ORIGIN/../lib:' + meson.current_source_dir() + '/external/Qt-Advanced-Stylesheets/build/lib',
+  install_rpath : '$ORIGIN/../lib',
   install : true)
 
 install_data('data/gridlock.desktop', 

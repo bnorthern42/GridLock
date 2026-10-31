@@ -849,35 +849,22 @@ void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
     QVERIFY2(mainWindow.captureDocumentationScreenshots(shotDir), "captureDocumentationScreenshots must succeed");
 
     // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid >= 800x500 QImage.
-    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"),
-                              QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"),
-                              QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"),
-                              QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"),
-                              QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"),
-                              QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"),
-                              QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"),
-                              QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png")}) {
+    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png")}) {
         const QString fullPath = shotDir + QLatin1Char('/') + fn;
-        const QFileInfo fi(fullPath);
-        QVERIFY2(fi.exists() && fi.size() > 15000, qPrintable(fullPath));
         const QImage img(fullPath);
-        QVERIFY2(!img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath));
+        QVERIFY2(QFileInfo(fullPath).size() > 15000 && !img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath));
     }
 
     // 3. Verify docs/USER_GUIDE.md references breakpoint_popover.png and package_manager_mpi_search.png.
-    const QString guidePath = QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md"))
-                                  ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md");
-    QFile guideFile(guidePath);
+    QFile guideFile(QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md")) ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md"));
     QVERIFY(guideFile.open(QIODevice::ReadOnly));
     const QString guideText = QString::fromUtf8(guideFile.readAll());
-    QVERIFY2(guideText.contains(QStringLiteral("breakpoint_popover.png")) &&
-                 guideText.contains(QStringLiteral("package_manager_mpi_search.png")),
-             "docs/USER_GUIDE.md must embed breakpoint_popover.png and package_manager_mpi_search.png");
+    QVERIFY2(guideText.contains(QStringLiteral("breakpoint_popover.png")) && guideText.contains(QStringLiteral("package_manager_mpi_search.png")), "docs/USER_GUIDE.md must embed new assets");
 }
 
 /**
- * @brief Verifies v0.7.0 version alignment across `meson.build` and `CHANGELOG.md`,
- *        `scripts/build_appimage.sh` dependency and tutorial bundling, and CI workflow packages.
+ * @brief Verifies v0.7.0 version alignment, `scripts/build_appimage.sh` external `libqtadvancedcss.so`
+ *        bundling and `$ORIGIN/../lib` RPATH stamping, and direct `./AppDir/usr/bin/gridlock --version` execution.
  */
 void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
@@ -886,23 +873,34 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
         return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
     };
 
-    // 1. Verify meson.build declares version 0.7.0 and CHANGELOG.md documents [0.7.0].
+    // 1. Verify meson.build declares version 0.7.0 + $ORIGIN/../lib RPATH and CHANGELOG.md documents [0.7.0].
     const QString mesonText = readText(QStringLiteral("meson.build"));
-    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.7\\.0'"))),
-             "meson.build must declare version : '0.7.0'");
-    const QString changelogText = readText(QStringLiteral("CHANGELOG.md"));
-    QVERIFY2(changelogText.contains(QStringLiteral("[0.7.0]")), "CHANGELOG.md must contain [0.7.0] release section");
+    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.7\\.0'"))) &&
+                 mesonText.contains(QStringLiteral("$ORIGIN/../lib")),
+             "meson.build must declare version : '0.7.0' and install_rpath : '$ORIGIN/../lib'");
+    QVERIFY2(readText(QStringLiteral("CHANGELOG.md")).contains(QStringLiteral("[0.7.0]")), "CHANGELOG.md must contain [0.7.0]");
 
-    // 2. Verify scripts/build_appimage.sh is executable, sets 0.7.0, and bundles SQLite, QTermWidget, and tutorials.
+    // 2. Verify scripts/build_appimage.sh bundles libqtadvancedcss.so, sets $ORIGIN/../lib RPATH, and populates AppDir.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable(), "scripts/build_appimage.sh must exist and be executable");
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"),
-                               QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp")}) {
+    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
+    QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")), "AppDir/usr/lib/libqtadvancedcss.so.1 and AppDir/AppRun must exist");
 
-    // 3. Verify GitHub Actions workflows install full v0.7.0 dependencies and enforce AppImage-only packaging.
+    // 3. Verify direct execution of ./AppDir/usr/bin/gridlock --version with empty LD_LIBRARY_PATH succeeds cleanly.
+    QProcess proc;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove(QStringLiteral("LD_LIBRARY_PATH"));
+    env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    proc.setProcessEnvironment(env);
+    proc.start(rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock"), {QStringLiteral("--version")});
+    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0, "Direct ./AppDir/usr/bin/gridlock --version must exit 0");
+    const QString errOut = QString::fromUtf8(proc.readAllStandardError());
+    QVERIFY2(!errOut.contains(QStringLiteral("error while loading shared libraries")), qPrintable(errOut));
+
+    // 4. Verify GitHub Actions workflows install full v0.7.0 dependencies and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows"));
     const QStringList ymlFiles = wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files);
     QVERIFY2(!ymlFiles.isEmpty(), ".github/workflows must contain at least one workflow YAML file");
@@ -910,14 +908,9 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     for (const QString& fn : ymlFiles) {
         const QString content = readText(QStringLiteral(".github/workflows/") + fn);
         combinedYml += content + QLatin1Char('\n');
-        QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) &&
-                     !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")),
-                 qPrintable(QStringLiteral("Workflow must not build legacy packages: ") + fn));
+        QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) && !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")), qPrintable(fn));
     }
-    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"),
-                               QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"),
-                               QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"),
-                               QStringLiteral("gdb"), QStringLiteral("binutils")}) {
+    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"), QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
         QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing package: ") + pkg));
     }
 }
