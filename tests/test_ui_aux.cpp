@@ -863,8 +863,9 @@ void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
 }
 
 /**
- * @brief Verifies v0.7.0 version alignment, `scripts/build_appimage.sh` external `libqtadvancedcss.so`
- *        bundling and `$ORIGIN/../lib` RPATH stamping, and direct `./AppDir/usr/bin/gridlock --version` execution.
+ * @brief Verifies v0.7.0 version alignment, `build_by_default : false` on test targets,
+ *        `scripts/build_appimage.sh` `ninja -C "$BUILD_DIR" gridlock` + `libqtadvancedcss.so` RPATH bundling,
+ *        zero `*test*` binaries in `AppDir/usr/bin/`, and direct `./AppDir/usr/bin/gridlock --version` execution.
  */
 void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
@@ -873,21 +874,26 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
         return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
     };
 
-    // 1. Verify meson.build declares version 0.7.0 + $ORIGIN/../lib RPATH and CHANGELOG.md documents [0.7.0].
+    // 1. Verify meson.build declares version 0.7.0, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
     const QString mesonText = readText(QStringLiteral("meson.build"));
     QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.7\\.0'"))) &&
-                 mesonText.contains(QStringLiteral("$ORIGIN/../lib")),
-             "meson.build must declare version : '0.7.0' and install_rpath : '$ORIGIN/../lib'");
+                 mesonText.contains(QStringLiteral("$ORIGIN/../lib")) &&
+                 mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26,
+             "meson.build must declare version : '0.7.0', install_rpath : '$ORIGIN/../lib', and build_by_default : false on all 26 test executables");
     QVERIFY2(readText(QStringLiteral("CHANGELOG.md")).contains(QStringLiteral("[0.7.0]")), "CHANGELOG.md must contain [0.7.0]");
 
-    // 2. Verify scripts/build_appimage.sh bundles libqtadvancedcss.so, sets $ORIGIN/../lib RPATH, and populates AppDir.
+    // 2. Verify scripts/build_appimage.sh builds only the gridlock target, bundles libqtadvancedcss.so, and excludes *test* binaries.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable(), "scripts/build_appimage.sh must exist and be executable");
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf")}) {
+    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
+    QVERIFY2(appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))) &&
+                 !appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s*(\\n|$)"))),
+             "scripts/build_appimage.sh must invoke ninja -C \"$BUILD_DIR\" gridlock and not bare ninja -C \"$BUILD_DIR\"");
     QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")), "AppDir/usr/lib/libqtadvancedcss.so.1 and AppDir/AppRun must exist");
+    QVERIFY2(QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir/usr/bin must contain zero *test* binaries");
 
     // 3. Verify direct execution of ./AppDir/usr/bin/gridlock --version with empty LD_LIBRARY_PATH succeeds cleanly.
     QProcess proc;

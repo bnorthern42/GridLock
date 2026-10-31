@@ -100,12 +100,13 @@ jobs:
 
       - name: Configure and Run Full 26-Suite Test Harness (Headless)
         run: |
-          meson setup builddir --prefix=/usr --buildtype=release
-          ninja -C builddir
+          meson setup builddir --prefix=/usr --buildtype=release -Db_coverage=false
+          ninja -C builddir gridlock
           QT_QPA_PLATFORM=offscreen OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 meson test -C builddir --print-errorlogs
 
       - name: Build GridLock-0.7.0-x86_64.AppImage
         run: |
+          ninja -C builddir gridlock
           bash scripts/build_appimage.sh
           ls -lah GridLock-0.7.0-x86_64.AppImage GridLock-x86_64.AppImage
 

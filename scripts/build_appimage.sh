@@ -21,6 +21,7 @@ fi
 APP_NAME="GridLock"
 BIN_NAME="gridlock"
 ROOT_DIR="$(pwd)"
+BUILD_DIR="builddir"
 APPDIR="${ROOT_DIR}/AppDir"
 ACSS_LIB_DIR="${ROOT_DIR}/external/Qt-Advanced-Stylesheets/build/lib"
 
@@ -36,26 +37,29 @@ echo "Building ${APP_NAME} Version: ${VERSION} (APPDIR_ONLY=${APPDIR_ONLY})"
 if [ "${APPDIR_ONLY}" -eq 0 ]; then
     echo "Initializing git submodules..."
     git submodule update --init --recursive || true
-    rm -rf builddir "${APPDIR}"
+    rm -rf "${BUILD_DIR}" "${APPDIR}"
     rm -f "${APP_NAME}"-*.AppImage
     rm -f CQtDeployer_*.run
     rm -rf .cqtdeployer
-    meson setup builddir --prefix=/usr --buildtype=release
-    ninja -C builddir
+    meson setup "${BUILD_DIR}" --prefix=/usr --buildtype=release -Db_coverage=false
+    ninja -C "${BUILD_DIR}" gridlock
 else
     rm -rf "${APPDIR}"
-    if [ ! -f "./builddir/${BIN_NAME}" ]; then
-        meson setup builddir --prefix=/usr --buildtype=release
-        ninja -C builddir
+    if [ ! -f "./${BUILD_DIR}/${BIN_NAME}" ]; then
+        if [ ! -d "${BUILD_DIR}" ]; then
+            meson setup "${BUILD_DIR}" --prefix=/usr --buildtype=release -Db_coverage=false
+        fi
+        ninja -C "${BUILD_DIR}" gridlock
     fi
 fi
 
 echo "Installing into AppDir..."
-DESTDIR="${APPDIR}" ninja -C builddir install
+DESTDIR="${APPDIR}" ninja -C "${BUILD_DIR}" install
 mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/lib"
-if [ -f "./builddir/${BIN_NAME}" ]; then
-    cp -af "./builddir/${BIN_NAME}" "${APPDIR}/usr/bin/${BIN_NAME}"
+if [ -f "./${BUILD_DIR}/${BIN_NAME}" ]; then
+    cp -af "./${BUILD_DIR}/${BIN_NAME}" "${APPDIR}/usr/bin/${BIN_NAME}"
 fi
+rm -rf "${APPDIR}/usr/bin/"*test*
 chmod +x "${APPDIR}/usr/bin/${BIN_NAME}"
 
 echo "Bundling external/Qt-Advanced-Stylesheets/build/lib/libqtadvancedcss.so* and builddir shared libraries into AppDir/usr/lib/..."
