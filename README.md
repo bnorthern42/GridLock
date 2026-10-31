@@ -1,7 +1,7 @@
 # GridLock v0.7.0 — MPI Debugger & ELF Binary Inspector
 
 ![Version](https://img.shields.io/badge/Release-v0.7.0-brightgreen.svg?style=for-the-badge)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge&logo=githubactions&logoColor=white&label=CI%20%2F%20APPIMAGE)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
+[![Build Status](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml/badge.svg)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
 ![Wayland/Niri](https://img.shields.io/badge/Wayland-Niri_Native-orange.svg?style=for-the-badge)
