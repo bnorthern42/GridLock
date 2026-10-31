@@ -201,5 +201,8 @@ private slots:
 
     /** @brief Generates and verifies all 1600x960 documentation and theme PNG screenshots and USER_GUIDE.md image references. */
     void testGenerateAndVerifyUpdatedDocumentationScreenshots();
+
+    /** @brief Verifies v0.7.0 version alignment across meson.build/CHANGELOG.md, build_appimage.sh packaging, and CI workflow dependencies. */
+    void testReleaseVersion070AndAppImageWorkflowDependencies();
 };
 

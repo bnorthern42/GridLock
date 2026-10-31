@@ -1,4 +1,4 @@
-# GridLock User Workflow Guide
+# GridLock v0.7.0 User Workflow Guide
 
 ![GridLock Workspace Overview](screenshots/workspace_overview.png)
 

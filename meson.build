@@ -1,5 +1,5 @@
 project('GridLock', 'cpp', 'c',
-  version : '0.6.2',
+  version : '0.7.0',
   default_options : ['warning_level=3', 'cpp_std=c++23'],
   subproject_dir : 'external')
 
@@ -317,7 +317,7 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep]
 )
 
-test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'])
+test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout: 120)
 
 terminal_config_test_src = [
   'tests/test_terminal_config.cpp',

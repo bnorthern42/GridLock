@@ -5,6 +5,19 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-30
+
+### Added
+- **On-Demand ELF64 Compilation & DWARF `.debug_line` Disassembly Mapping (`ElfBinaryInspector::disassembleSymbolWithDwarf`):** Compiles C/C++ MPI targets on demand with `-g -O0` (`mpicxx` / `mpicc` / `g++`) and parses `.debug_line` and `.text` disassembly via `objdump`, `nm`, and `readelf` for exact bidirectional source-line to instruction-address synchronization.
+- **`ClangdLspClient` Virtual-Buffer JSON-RPC 2.0 Expression Autocomplete:** Real `clangd` Language Server Protocol client splicing breakpoint condition expressions into an in-memory C++ translation unit at target line `N` to provide context-aware struct, vector, and local variable completions inside `ConditionalBreakpointDialog` and `SourceCodeView`.
+- **Cursor-Anchored `Qt::Popup` Conditional Breakpoint Popover (`ConditionalBreakpointDialog`):** Frameless popover anchored directly beneath the gutter badge displaying target line context, an `Enabled` toggle, `Suspend: All | Rank` radio scope buttons, MPI condition preset pills, and live `clangd` completion.
+- **Two-Lane Antialiased Vector Gutter (`SourceCodeView`):** Dedicated `20px` left badge lane rendering `QPainterPath` vector indicators (`Breakpoint` circle, `ConditionalBreakpoint` amber diamond, `ExecutionPc` emerald chevron, and combined ring+chevron) isolated from right-aligned line numbers and editor context menus.
+- **36px Left Vertical Tool-Window Icon Rail (`#bottomToolWindowRail`):** Organizes the bottom dock into four linked contextual tool groups (`Debug`, `MPI`, `Terminal`, `Docs`) with a flattened single-row `MPI Diagnostics` header (`Deadlock Analyzer` and `Network Log`).
+- **Multi-Distro HPC & System Package Manager (`HpcConsoleWidget`):** Automatic backend discovery (`spack`, `pacman`, `dnf4`/`dnf5`, `apt`, `zypper`, `rpm`, `dpkg-query`, `eb`) with live two-stage local/repository querying and switchable `Table`, `List`, and `Raw` views.
+- **16-Directive SLURM `#SBATCH` Auto-Detector (`PreferencesDialogSlurm`):** Parses `.sbatch` / `.sh` job scripts to auto-populate 16 SLURM directives (`--job-name`, `--partition`, `--account`, `--qos`, `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`, `--gres`, `--mem`, `--time`, `--constraint`, `--reservation`, `--chdir`, `--output`, `--error`) and `module load` toolchains.
+- **8 Curated Dark & Light Workstation Themes (`ThemeManager`):** Full palette and QSS propagation across 5 dark themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`) and 3 high-contrast light themes (`Daylight Paper`, `Solarized Warm`, `Catppuccin Latte`) with live UI and code font scaling.
+- **Splitter-Aware Dock Pop-Out & Redocking:** Supports popping out `Variables`, `Registers`, `Server Rack`, and `Project Explorer` into floating windows with translucent drop-zone overlays and 1-click/double-click redocking across X11 and Wayland.
+
 ## [0.6.0] - 2026-06-30
 
 ### Added

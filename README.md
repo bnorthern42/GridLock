@@ -1,5 +1,6 @@
-# GridLock — High-Performance MPI Graphical Debugger & Binary Analysis Workstation
+# GridLock v0.7.0 — High-Performance MPI Graphical Debugger & Binary Analysis Workstation
 
+![Version](https://img.shields.io/badge/Release-v0.7.0-brightgreen.svg?style=for-the-badge)
 ![Build Status](https://img.shields.io/github/actions/workflow/status/bnorthern42/GridLock/release.yml?style=for-the-badge)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -7,7 +8,7 @@
 ![Meson/Ninja](https://img.shields.io/badge/Build-Meson%20|%20Ninja-blue.svg?style=for-the-badge)
 ![LLDB/DAP & GDB/MI3](https://img.shields.io/badge/Backend-LLDB--DAP%20|%20GDB--MI3-purple.svg?style=for-the-badge)
 
-**GridLock** is a Wayland-native, Qt6/C++23 graphical MPI debugger and binary analysis workstation engineered for parallel high-performance computing (HPC) and systems reverse engineering. It unifies multi-rank MPI execution control, cross-rank variable and memory diffing, native ELF64 binary inspection, orthogonal Control Flow Graph (CFG) visualization, and multi-target decompilation inside a zero-gutter `#16181d` dark-slate workstation layout.
+**GridLock (`v0.7.0`)** is a Wayland-native, Qt6/C++23 graphical MPI debugger and binary analysis workstation engineered for parallel high-performance computing (HPC) and systems reverse engineering. It unifies multi-rank MPI execution control, cross-rank variable and memory diffing, native ELF64 binary inspection, orthogonal Control Flow Graph (CFG) visualization, and multi-target decompilation inside a zero-gutter `#16181d` dark-slate workstation layout.
 
 ---
 
