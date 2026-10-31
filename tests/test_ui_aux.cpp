@@ -902,16 +902,21 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")), "AppDir/usr/lib/libqtadvancedcss.so.1 and AppDir/AppRun must exist");
     QVERIFY2(QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir/usr/bin must contain zero *test* binaries");
 
-    // 3. Verify direct execution of ./AppDir/usr/bin/gridlock --version with empty LD_LIBRARY_PATH succeeds cleanly.
+    // 3. Verify direct execution of ./AppDir/usr/bin/gridlock --version in a headless environment with empty LD_LIBRARY_PATH.
+    if (!QDir(rootPrefix + QStringLiteral("builddir")).entryList({QStringLiteral("*tomlplusplus*.so*")}, QDir::Files).isEmpty()) {
+        QVERIFY(!QDir(rootPrefix + QStringLiteral("AppDir/usr/lib")).entryList({QStringLiteral("libtomlplusplus.so*")}, QDir::Files).isEmpty());
+    }
     QProcess proc;
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.remove(QStringLiteral("LD_LIBRARY_PATH"));
+    for (const QString& k : {QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("DISPLAY"), QStringLiteral("WAYLAND_DISPLAY")}) env.remove(k);
     env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
     proc.setProcessEnvironment(env);
     proc.start(rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock"), {QStringLiteral("--version")});
-    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0, "Direct ./AppDir/usr/bin/gridlock --version must exit 0");
+    const bool finishedOk = proc.waitForFinished(5000);
+    const QString stdOut = QString::fromUtf8(proc.readAllStandardOutput());
     const QString errOut = QString::fromUtf8(proc.readAllStandardError());
-    QVERIFY2(!errOut.contains(QStringLiteral("error while loading shared libraries")), qPrintable(errOut));
+    if (!finishedOk || proc.exitCode() != 0) qWarning() << "AppDir gridlock --version stderr:" << errOut;
+    QVERIFY2(finishedOk && proc.exitCode() == 0 && stdOut.contains(QStringLiteral("0.7.0")) && !errOut.contains(QStringLiteral("error while loading shared libraries")), qPrintable(errOut));
 
     // 4. Verify GitHub Actions workflows install full v0.7.0 dependencies, fallback-build qtermwidget6 on Debian trixie, and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows"));

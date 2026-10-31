@@ -24,11 +24,9 @@ void TestDapParser::testFullMessage() {
     // Frame a single initialized event.
     QByteArray data = "Content-Length: 38\r\n\r\n{\"type\":\"event\",\"event\":\"initialized\"}";
     coordinator.processRawData(data);
-    QTest::qWait(50);
-    QTest::qWait(50);
 
-    // Verify signal caught single deserialized JSON object.
-    QCOMPARE(spy.count(), 1);
+    // Verify signal caught single deserialized JSON object deterministically on loaded CI runners.
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 5000);
     QJsonObject msg = spy.takeFirst().at(0).toJsonObject();
     QCOMPARE(msg["type"].toString(), QString("event"));
     QCOMPARE(msg["event"].toString(), QString("initialized"));
@@ -52,8 +50,7 @@ void TestDapParser::testFragmentedMessage() {
 
     // Second chunk completes the frame, triggering message delivery.
     coordinator.processRawData(chunk2);
-    QTest::qWait(50);
-    QCOMPARE(spy.count(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 5000);
 
     QJsonObject msg = spy.takeFirst().at(0).toJsonObject();
     QCOMPARE(msg["event"].toString(), QString("initialized"));
@@ -69,11 +66,9 @@ void TestDapParser::testMultipleMessages() {
     // Combine two consecutive messages into single buffer.
     QByteArray data = "Content-Length: 38\r\n\r\n{\"type\":\"event\",\"event\":\"initialized\"}Content-Length: 36\r\n\r\n{\"type\":\"response\",\"command\":\"next\"}";
     coordinator.processRawData(data);
-    QTest::qWait(50);
-    QTest::qWait(50);
 
     // Both messages should be parsed and emitted sequentially.
-    QCOMPARE(spy.count(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 2, 5000);
     QJsonObject msg1 = spy.takeFirst().at(0).toJsonObject();
     QCOMPARE(msg1["event"].toString(), QString("initialized"));
 

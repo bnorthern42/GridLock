@@ -113,6 +113,7 @@ jobs:
         run: |
           meson setup builddir --prefix=/usr --buildtype=release -Db_coverage=false
           ninja -C builddir gridlock
+          bash scripts/build_appimage.sh --appdir-only
           QT_QPA_PLATFORM=offscreen OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 meson test -C builddir --print-errorlogs
 
       - name: Build GridLock-0.7.0-x86_64.AppImage

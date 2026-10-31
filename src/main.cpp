@@ -80,6 +80,18 @@ void gridlockMessageHandler(QtMsgType type, const QMessageLogContext& /*context*
  * @return Process exit code (0 on clean shutdown or successful snapshot capture).
  */
 int main(int argc, char* argv[]) {
+  // Fast-path CLI version query before initializing any GUI/display platform plugin.
+  // This ensures `./gridlock --version` succeeds in headless containers without X11/Wayland.
+  for (int i = 1; i < argc; ++i) {
+    const QString arg = QString::fromUtf8(argv[i]);
+    if (arg == QLatin1String("--version") || arg == QLatin1String("-v")) {
+      // Print semantic version banner directly to stdout and exit with code 0.
+      fprintf(stdout, "gridlock %s\n", gridlock::core::Version::getString().toUtf8().constData());
+      fflush(stdout);
+      return 0;
+    }
+  }
+
   // Inspect WAYLAND_DISPLAY and /proc/version to detect native Wayland vs. WSLg environments.
   const QString waylandDisplay = qEnvironmentVariable("WAYLAND_DISPLAY");
   QFile versionFile("/proc/version");
@@ -105,17 +117,31 @@ int main(int argc, char* argv[]) {
   format.setSwapInterval(0);
   QSurfaceFormat::setDefaultFormat(format);
 
-  // Route to the offscreen QPA platform ONLY when --headless or --snapshot is explicitly requested on the CLI.
+  // Route to the offscreen QPA platform when --headless/--snapshot is passed or when no display server exists.
   if (gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(argc, argv)) {
     if (qEnvironmentVariableIsEmpty("GRIDLOCK_LIVE_WAYLAND") &&
         qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
       qputenv("QT_QPA_PLATFORM", "offscreen");
     }
-  } else if (qgetenv("QT_QPA_PLATFORM") == QByteArrayLiteral("offscreen")) {
+  } else if (qgetenv("QT_QPA_PLATFORM") == QByteArrayLiteral("offscreen") &&
+             (!qEnvironmentVariableIsEmpty("DISPLAY") ||
+              !qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY"))) {
+    // Restore interactive X11/Wayland platform plugin when a desktop display server is active.
     qunsetenv("QT_QPA_PLATFORM");
+  } else if (qEnvironmentVariableIsEmpty("DISPLAY") &&
+             qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY") &&
+             qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+    // Fallback to offscreen rendering when running inside a headless CI container.
+    qputenv("QT_QPA_PLATFORM", "offscreen");
   }
 
   QApplication app(argc, argv);
+
+  // Register relative ../plugins directory so AppDir/usr/bin/gridlock locates bundled Qt plugins.
+  const QString relPlugins = QCoreApplication::applicationDirPath() + QStringLiteral("/../plugins");
+  if (QDir(relPlugins).exists()) {
+    QCoreApplication::addLibraryPath(relPlugins);
+  }
 
   // Register the bundled Nerd Font symbol glyphs for file tree and status badges.
   QFontDatabase::addApplicationFont(":/fonts/SymbolsNerdFont-Regular.ttf");

@@ -74,25 +74,24 @@ echo "Bundling external/Qt-Advanced-Stylesheets/build/lib/libqtadvancedcss.so* a
 if [ -d "${ACSS_LIB_DIR}" ]; then
     cp -af "${ACSS_LIB_DIR}"/libqtadvancedcss.so* "${APPDIR}/usr/lib/" 2>/dev/null || true
 fi
-{ find "${ROOT_DIR}/external" "${ROOT_DIR}/${BUILD_DIR}" /usr/lib /usr/lib64 /usr/local/lib /usr/local/lib64 \
+find "${ROOT_DIR}/external" "${ROOT_DIR}/${BUILD_DIR}" \
+    \( -type f -o -type l \) -name "*.so*" -exec cp -af {} "${APPDIR}/usr/lib/" \; 2>/dev/null || true
+{ find /usr/lib /usr/lib64 /usr/local/lib /usr/local/lib64 \
     -name "libqtadvancedcss.so*" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r acss_path; do
     cp -af "${acss_path}" "${APPDIR}/usr/lib/" 2>/dev/null || true
-done
-{ find "${ROOT_DIR}/external" "${ROOT_DIR}/${BUILD_DIR}" \
-    -name "*.so*" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r ext_so; do
-    cp -af "${ext_so}" "${APPDIR}/usr/lib/" 2>/dev/null || true
 done
 
 echo "Bundling shared libraries (libqtermwidget6, libsqlite3, libQt6Sql, libQt6Network, libQt6Widgets, libQt6Gui, libQt6Core, libtomlplusplus)..."
 for lib_pattern in "libqtermwidget6.so*" "libsqlite3.so*" "libQt6Sql.so*" "libQt6Network.so*" "libQt6Widgets.so*" "libQt6Gui.so*" "libQt6Core.so*" "libQt6OpenGL*.so*" "libQt6Svg*.so*" "libQt6Qml*.so*" "libQt6Concurrent*.so*" "libtomlplusplus.so*"; do
     { find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib /usr/local/lib64 "${ROOT_DIR}/${BUILD_DIR}" \
-        -maxdepth 2 -name "${lib_pattern}" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r lib_path; do
+        -maxdepth 3 -name "${lib_pattern}" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r lib_path; do
         cp -af "${lib_path}" "${APPDIR}/usr/lib/" 2>/dev/null || true
     done
 done
 
-echo "Resolving ldd dependencies with LD_LIBRARY_PATH=${APPDIR}/usr/lib:${ACSS_LIB_DIR}..."
-LD_LIBRARY_PATH="${APPDIR}/usr/lib:${ACSS_LIB_DIR}:${LD_LIBRARY_PATH:-}" ldd "${APPDIR}/usr/bin/${BIN_NAME}" | awk '/=> \// {print $3}' | while IFS= read -r dep_lib; do
+TOML_BUILD_DIR="${ROOT_DIR}/${BUILD_DIR}/external/tomlplusplus-3.4.0/src"
+echo "Resolving ldd dependencies with LD_LIBRARY_PATH=${APPDIR}/usr/lib:${TOML_BUILD_DIR}:${ACSS_LIB_DIR}..."
+LD_LIBRARY_PATH="${APPDIR}/usr/lib:${TOML_BUILD_DIR}:${ACSS_LIB_DIR}:${LD_LIBRARY_PATH:-}" ldd "${APPDIR}/usr/bin/${BIN_NAME}" | awk '/=> \// {print $3}' | while IFS= read -r dep_lib; do
     case "$(basename "${dep_lib}")" in
         libc.so*|libm.so*|libdl.so*|librt.so*|libpthread.so*|ld-linux*.so*|libresolv.so*)
             ;;
@@ -104,12 +103,12 @@ LD_LIBRARY_PATH="${APPDIR}/usr/lib:${ACSS_LIB_DIR}:${LD_LIBRARY_PATH:-}" ldd "${
     esac
 done
 
-echo "Stamping \$ORIGIN/../lib RPATH onto AppDir/usr/bin/${BIN_NAME} and \$ORIGIN onto AppDir/usr/lib/libqtadvancedcss.so*..."
+echo "Stamping \$ORIGIN/../lib RPATH onto AppDir/usr/bin/${BIN_NAME} and \$ORIGIN onto AppDir/usr/lib/*.so*..."
 if command -v patchelf >/dev/null 2>&1; then
     patchelf --set-rpath '$ORIGIN/../lib' "${APPDIR}/usr/bin/${BIN_NAME}"
-    for acss_so in "${APPDIR}/usr/lib"/libqtadvancedcss.so*; do
-        if [ -f "${acss_so}" ] && [ ! -L "${acss_so}" ]; then
-            patchelf --set-rpath '$ORIGIN' "${acss_so}" || true
+    for bundled_so in "${APPDIR}/usr/lib"/*.so*; do
+        if [ -f "${bundled_so}" ] && [ ! -L "${bundled_so}" ]; then
+            patchelf --set-rpath '$ORIGIN' "${bundled_so}" 2>/dev/null || true
         fi
     done
 fi
