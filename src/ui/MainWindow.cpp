@@ -7,79 +7,61 @@
  */
 
 #include "MainWindow.hpp"
+#include "../core/Version.hpp"
 #include "../core/hpc/DapCoordinator.hpp"
+#include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/hpc/LspCoordinator.hpp"
+#include "../core/hpc/MockHpcBackend.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "../core/managers/SessionManager.hpp"
+#include "../core/commands/DebugCommands.hpp"
+#include "../core/managers/ShortcutManager.hpp"
+#include "../core/managers/SpackManager.hpp"
+#include "../core/managers/ThemeManager.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
 #include "dialogs/PreferencesDialog.hpp"
+#include "dialogs/ProjectSettingsDialog.hpp"
+#include "dialogs/ProjectWizard.hpp"
+#include "docks/VariablesDockWidget.hpp"
+#include "widgets/ProjectExplorerWidget.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/MemView.hpp"
 #include "views/RegisterView.hpp"
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
-#include "widgets/ReferenceManualWidget.hpp"
-
-#include "../core/commands/DebugCommands.hpp"
-#include "../core/Version.hpp"
-#include "../core/hpc/DeadlockAnalyzer.hpp"
-#include "../core/hpc/MemoryDiffer.hpp"
-#include "../core/hpc/MockHpcBackend.hpp"
-#include "../core/managers/SessionManager.hpp"
-#include "../core/managers/ShortcutManager.hpp"
-#include "../core/managers/SpackManager.hpp"
-#include "../core/managers/ThemeManager.hpp"
-#include "dialogs/ProjectSettingsDialog.hpp"
-#include "dialogs/ProjectWizard.hpp"
-#include "tutorial/TutorialDialog.hpp"
-#include "widgets/MpiNetworkLogWidget.hpp"
-#include "widgets/MpiDiagnosticsWidget.hpp"
-#include "docks/TerminalDockWidget.hpp"
-#include "docks/VariablesDockWidget.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
-#include "widgets/ProjectExplorerWidget.hpp"
-#include <QPointer>
-#include <QtConcurrent/QtConcurrent>
+#include "widgets/MpiDiagnosticsWidget.hpp"
+#include "widgets/MpiNetworkLogWidget.hpp"
 
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QContextMenuEvent>
 #include <QDialog>
-#include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QInputDialog>
+#include <QGuiApplication>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QProcess>
+#include <QPushButton>
+#include <QScreen>
 #include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
-#include <QTabWidget>
-#include <QTimer>
-#include <QToolBar>
-#include <QToolTip>
-#include <QLabel>
-#include <QScreen>
-#include <QGuiApplication>
-#include <QShortcut>
 #include <QStatusBar>
 #include <QTabBar>
-#include <QTextCursor>
-#include <QHeaderView>
-#include <QHBoxLayout>
-#include <QMouseEvent>
-#include <QPainter>
-#include <QPushButton>
-#include <QVBoxLayout>
+#include <QTabWidget>
+#include <QToolBar>
 #include <algorithm>
 
 namespace gridlock {
@@ -219,7 +201,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Route window to preferred monitor if specified in configuration.
   auto& cfg = gridlock::core::ConfigManager::instance();
   applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
+  // Pre-seed sample preview telemetry data for headless and offline demo runs.
   loadPreviewFixture();
+  // Listen for global theme mode change events from ThemeManager singleton.
+  connect(&gridlock::core::ThemeManager::instance(),
+          &gridlock::core::ThemeManager::themeModeChanged,
+          this, [this]() { propagateThemeToAllWidgets(); });
+  // Trigger initial theme synchronization across toolbar, ribbons, and dock headers.
+  propagateThemeToAllWidgets();
 }
 
 /**
@@ -229,17 +218,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
  * program counter registers across the .text segment.
  */
 void MainWindow::loadPreviewFixture() {
+  // Pre-allocate storage capacity for eight initial process rank descriptors.
   QList<RankState> fixtureRanks;
   fixtureRanks.reserve(8);
   for (int i = 0; i < 8; ++i) {
     RankState st;
     st.rankId = i;
+    // Rank 0 is stopped at coordinator breakpoint; worker ranks begin in running state.
     st.currentState = (i == 0) ? QStringLiteral("stopped") : QStringLiteral("running");
     if (i == 0) {
+      // Coordinator RIP pointing to sym.main entry point.
       st.registers[16] = QStringLiteral("0x00401120");
     } else if (i == 1) {
+      // Worker rank 1 program counter offset.
       st.registers[16] = QStringLiteral("0x00401155");
     } else {
+      // Remaining worker rank program counter values in computation loop.
       st.registers[16] = QStringLiteral("0x00401157");
     }
     st.totalRuntimeMs = 12 + i * 3;
@@ -829,110 +823,18 @@ void MainWindow::closeEvent(QCloseEvent *event) {
  */
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   // 1. Intercept custom dock header interactions (double-click, drag, context menu).
-  if (watched && watched->objectName() == QStringLiteral("customDockHeader")) {
-    auto* header = qobject_cast<QWidget*>(watched);
-    auto* dock = header ? qobject_cast<QDockWidget*>(header->parentWidget()) : nullptr;
-    if (!dock && header) dock = reinterpret_cast<QDockWidget*>(header->property("associatedDock").value<void*>());
-    if (dock) {
-      // Double-clicking anywhere on custom title bar toggles floating vs docked state.
-      if (event->type() == QEvent::MouseButtonDblClick) {
-        toggleDockFloating(dock);
-        return true;
-      }
-      // Track initial mouse position when drag begins with left mouse button.
-      if (event->type() == QEvent::MouseButtonPress) {
-        auto* me = static_cast<QMouseEvent*>(event);
-        if (me->button() == Qt::LeftButton) {
-          m_draggingDock = dock;
-          m_dragOffset = me->globalPosition().toPoint() - dock->pos();
-        }
-      } else if (event->type() == QEvent::MouseMove) {
-        auto* me = static_cast<QMouseEvent*>(event);
-        // While dragging a floating dock panel by its header, move window smoothly.
-        if ((me->buttons() & Qt::LeftButton) && m_draggingDock == dock && isDockFloating(dock)) {
-          dock->move(me->globalPosition().toPoint() - m_dragOffset);
-          return true;
-        }
-      } else if (event->type() == QEvent::MouseButtonRelease) {
-        auto* me = static_cast<QMouseEvent*>(event);
-        // Release mouse: check if dropped in home dock zone and redock if so.
-        if (me->button() == Qt::LeftButton && m_draggingDock == dock) {
-          m_draggingDock = nullptr;
-          if (isDockFloating(dock)) {
-            handleDockDragRelease(dock, me->globalPosition().toPoint());
-            return true;
-          }
-        }
-      } else if (event->type() == QEvent::ContextMenu) {
-        // Show context menu with Redock / Pop Out options and Redock All.
-        auto* ce = static_cast<QContextMenuEvent*>(event);
-        QMenu menu(header);
-        const bool floating = isDockFloating(dock);
-        menu.addAction(floating ? QStringLiteral("Redock to Workspace") : QStringLiteral("Pop Out / Float Panel"),
-                       this, [this, dock]() { toggleDockFloating(dock); });
-        menu.addAction(QStringLiteral("Redock All Floating Panels"), this, &MainWindow::redockAllFloatingPanels);
-        menu.exec(ce->globalPos());
-        return true;
-      }
-    }
+  if (handleDockHeaderEvent(watched, event)) {
+    return true;
   }
 
   // 2. Intercept key press events and query the application-wide ShortcutManager.
   if (event->type() == QEvent::KeyPress) {
     auto *keyEvent = static_cast<QKeyEvent *>(event);
-    // If a shortcut matches active key sequence, consume event immediately.
-    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched,
-                                                                   keyEvent)) {
+    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, keyEvent)) {
       return true;
     }
   }
-  // Delegate unhandled events to base QMainWindow implementation for default focus/tab behavior.
   return QMainWindow::eventFilter(watched, event);
 }
-
-/**
- * @brief Launches a multi-rank MPI debugging session.
- * @param binaryPath Executable path to target binary.
- * @param ranks Number of parallel MPI ranks to allocate.
- */
-void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
-  // Verify that an active coordinator exists before triggering launch.
-  if (!m_coordinator)
-    return;
-
-  // Launch session through attached coordinator with specified binary and rank count.
-  m_coordinator->launchParallelSession(binaryPath, ranks);
-
-  // Reset console and server rack view ranks to reflect new process topology.
-  if (m_gdbConsoleWidget) {
-    // Rebuild per-rank tab bars or prompt indicators in the GDB console widget.
-    m_gdbConsoleWidget->resetRanks(ranks);
-  }
-  if (m_serverRackView) {
-    // Reinitialize server rack slots to match newly spawned MPI worker count.
-    m_serverRackView->resetRanks(ranks);
-  }
-
-  // Register differential grid watch variables with GDB for automated evaluation.
-  if (m_differentialGrid) {
-    auto watches = m_differentialGrid->getWatchExpressions();
-    if (auto *gdbCoord =
-            dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-      // Loop over active watch strings and send subscription queries to GDB backend.
-      for (const auto &w : watches) {
-        gdbCoord->registerWatchVariable(QString::fromStdString(w));
-      }
-    }
-  }
-}
-
-/**
- * @brief No-op Vulkan instance configuration placeholder.
- * @param inst Active Vulkan instance pointer.
- *
- * Provides a hook for hardware-accelerated rendering surfaces when Vulkan
- * presentation windows are enabled in advanced high-performance profiles.
- */
-void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {}
 
 }  // namespace gridlock::ui

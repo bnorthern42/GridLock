@@ -51,6 +51,17 @@ public:
      */
     bool horizontalHeaderStretchEnabled() const;
 
+    /**
+     * @brief Returns active table canvas background color according to the theme.
+     * @return Resolved QColor corresponding to active theme canvas base.
+     */
+    QColor activeCanvasBackgroundColor() const;
+
+    /**
+     * @brief Reloads widget styling according to the active theme palette.
+     */
+    Q_INVOKABLE void reloadStyle();
+
 
 public slots:
     /**

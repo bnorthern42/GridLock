@@ -9,6 +9,7 @@
 
 #include "MemView.hpp"
 #include "../../core/managers/ConfigManager.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 #include "../../core/hpc/MemoryExporter.hpp"
 #include "../../core/hpc/MemoryDiffer.hpp"
 #include <QComboBox>
@@ -196,6 +197,10 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
         "ffffc745fc00000000837dfc027f298b"
         "45fc83f8007411f20f1005a90e000000");
     setMemoryData(QStringLiteral("0x00401120"), seedBytes);
+    reloadStyle();
+    connect(&gridlock::core::ThemeManager::instance(),
+            &gridlock::core::ThemeManager::themeModeChanged,
+            this, [this](bool) { reloadStyle(); });
     // Reset diff baseline after seeding so the first test or live update starts cleanly
     m_hasDiffBaseline = false;
     m_previousRawData.clear();
@@ -598,6 +603,58 @@ QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {
     }
     
     return result;
+}
+
+/**
+ * @brief Returns active canvas background QColor resolved from ThemeManager.
+ */
+QColor MemView::activeCanvasBackgroundColor() const {
+    if (m_dumpEdit) {
+        return m_dumpEdit->palette().color(QPalette::Base);
+    }
+    const auto pal = gridlock::core::ThemeManager::instance().paletteForTheme(
+        gridlock::core::ThemeManager::instance().activeThemeId());
+    return QColor(pal.canvasHex);
+}
+
+/**
+ * @brief Reloads hex dump viewport and control header styles from ThemeManager.
+ */
+void MemView::reloadStyle() {
+    auto& tm = gridlock::core::ThemeManager::instance();
+    const auto pal = tm.paletteForTheme(tm.activeThemeId());
+    if (m_dumpEdit) {
+        QPalette p = m_dumpEdit->palette();
+        p.setColor(QPalette::Base, QColor(pal.canvasHex));
+        p.setColor(QPalette::Window, QColor(pal.canvasHex));
+        p.setColor(QPalette::Text, QColor(pal.textHex));
+        m_dumpEdit->setPalette(p);
+        m_dumpEdit->setStyleSheet(QStringLiteral(
+            "QTextEdit#cutterHexDumpEdit { background-color: %1; color: %2; border: none; }")
+            .arg(pal.canvasHex, pal.textHex));
+        if (m_dumpEdit->viewport()) {
+            QPalette vp = m_dumpEdit->viewport()->palette();
+            vp.setColor(QPalette::Base, QColor(pal.canvasHex));
+            vp.setColor(QPalette::Window, QColor(pal.canvasHex));
+            vp.setColor(QPalette::Text, QColor(pal.textHex));
+            m_dumpEdit->viewport()->setPalette(vp);
+            m_dumpEdit->viewport()->setAutoFillBackground(true);
+        }
+    }
+    if (QWidget* headerBar = findChild<QWidget*>(QStringLiteral("cutterMemHeader"))) {
+        headerBar->setStyleSheet(QStringLiteral(
+            "#cutterMemHeader { background: %1; border-bottom: 1px solid %2; } "
+            "#cutterMemHeader QLabel { color: %3; font-size: 11px; font-weight: 600; } "
+            "#cutterMemHeader QLineEdit, #cutterMemHeader QSpinBox, #cutterMemHeader QComboBox { "
+            "min-height: 20px; max-height: 22px; padding: 0px 4px; margin: 0px; background: %4; color: %3; "
+            "border: 1px solid %2; border-radius: 2px; } "
+            "#cutterMemHeader QPushButton { padding: 1px 8px; min-height: 20px; max-height: 22px; "
+            "background: %5; color: %3; border: 1px solid %2; border-radius: 2px; font-size: 10px; font-weight: 600; } "
+            "#cutterMemHeader QPushButton:hover { background: %2; color: %3; }")
+            .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex,
+                 pal.isDark ? QStringLiteral("#252932") : QStringLiteral("#e0d8c3")));
+    }
+    update();
 }
 
 }  // namespace gridlock::ui

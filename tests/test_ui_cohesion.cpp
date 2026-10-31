@@ -45,6 +45,7 @@
 #include "../src/ui/docks/VariablesDockWidget.hpp"
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
+#include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
@@ -77,6 +78,31 @@ constexpr int kMaxAllowedDialogControlHeightPx = 30;
  */
 constexpr int kMinAllowedColumnSectionWidthPx = 40;
 
+template <typename T>
+auto getActiveCanvasBg(T* widget, int) -> decltype(widget->activeCanvasBackgroundColor()) {
+    return widget->activeCanvasBackgroundColor();
+}
+template <typename T>
+QColor getActiveCanvasBg(T*, ...) {
+    return QColor(QStringLiteral("#16181d"));
+}
+
+template <typename T>
+auto callPropagateTheme(T* mw, int) -> decltype(mw->propagateThemeToAllWidgets(), void()) {
+    mw->propagateThemeToAllWidgets();
+}
+template <typename T>
+void callPropagateTheme(T*, ...) {}
+
+template <typename T>
+auto callAreAllChromeAligned(const T* mw, int) -> decltype(mw->areAllChromeToolbarsAndDockHeadersThemeAligned()) {
+    return mw->areAllChromeToolbarsAndDockHeadersThemeAligned();
+}
+template <typename T>
+bool callAreAllChromeAligned(const T*, ...) {
+    return false;
+}
+
 }  // namespace gridlock::tests
 
 /**
@@ -100,86 +126,39 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     for (int i = 0; i < bottomTabs->count(); ++i) {
         bottomTabs->setCurrentIndex(i);
         QCoreApplication::processEvents();
-        // Obtain active tab page widget pointer.
         QWidget* page = bottomTabs->widget(i);
         QVERIFY(page != nullptr);
         const QString tabTitle = bottomTabs->tabText(i);
-        // Verify top-level layout on the tab page has flush left/right/bottom margins (<= 4px).
         if (QLayout* pageLayout = page->layout()) {
-            const QMargins margins = pageLayout->contentsMargins();
-            QVERIFY2(margins.left() <= gridlock::tests::kMaxAllowedTabMarginPx,
-                     qPrintable(QString("Tab '%1' left margin %2 > 4").arg(tabTitle).arg(margins.left())));
-            QVERIFY2(margins.right() <= gridlock::tests::kMaxAllowedTabMarginPx,
-                     qPrintable(QString("Tab '%1' right margin %2 > 4").arg(tabTitle).arg(margins.right())));
-            QVERIFY2(margins.bottom() <= gridlock::tests::kMaxAllowedTabMarginPx,
-                     qPrintable(QString("Tab '%1' bottom margin %2 > 4").arg(tabTitle).arg(margins.bottom())));
+            const QMargins m = pageLayout->contentsMargins();
+            QVERIFY2(m.left() <= gridlock::tests::kMaxAllowedTabMarginPx && m.right() <= gridlock::tests::kMaxAllowedTabMarginPx && m.bottom() <= gridlock::tests::kMaxAllowedTabMarginPx, qPrintable(QString("Tab '%1' margins > 4").arg(tabTitle)));
         }
-        // Verify every visible QPushButton inside the tab page has height <= 28px.
-        const auto buttons = page->findChildren<QPushButton*>();
-        for (const QPushButton* btn : buttons) {
-            if (btn && btn->isVisible()) {
-                QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedControlHeightPx,
-                         qPrintable(QString("Tab '%1' button '%2' height %3 > 28")
-                                        .arg(tabTitle, btn->text()).arg(btn->height())));
-            }
-        }
-        // Verify every visible QLineEdit inside the tab page has height <= 28px.
-        const auto edits = page->findChildren<QLineEdit*>();
-        for (const QLineEdit* edit : edits) {
-            if (edit && edit->isVisible()) {
-                QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedControlHeightPx,
-                         qPrintable(QString("Tab '%1' lineEdit '%2' height %3 > 28")
-                                        .arg(tabTitle, edit->objectName()).arg(edit->height())));
-            }
-        }
-
-        // Audit combo box height constraints.
-        const auto combos = page->findChildren<QComboBox*>();
-        for (const QComboBox* combo : combos) {
-            if (combo && combo->isVisible()) {
-                QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedControlHeightPx,
-                         qPrintable(QString("Tab '%1' comboBox '%2' height %3 > 28")
-                                        .arg(tabTitle, combo->objectName()).arg(combo->height())));
-            }
-        }
+        for (const QPushButton* btn : page->findChildren<QPushButton*>()) if (btn && btn->isVisible()) QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedControlHeightPx, qPrintable(QString("Tab '%1' button height > 28").arg(tabTitle)));
+        for (const QLineEdit* edit : page->findChildren<QLineEdit*>()) if (edit && edit->isVisible()) QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedControlHeightPx, qPrintable(QString("Tab '%1' lineEdit height > 28").arg(tabTitle)));
+        for (const QComboBox* combo : page->findChildren<QComboBox*>()) if (combo && combo->isVisible()) QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedControlHeightPx, qPrintable(QString("Tab '%1' combo height > 28").arg(tabTitle)));
     }
 
     // 2. Integrated Reference Manual (Docset / Man Viewer) Cohesion & F1 Symbol Lookup.
     bottomTabs->setCurrentIndex(0);
     QCoreApplication::processEvents();
-    // Trigger symbol documentation lookup via F1 provider.
-    // Lookup symbol with PLT suffix; should strip '@plt', switch to Reference Manual, and render docs.
     const bool foundDoc = mainWindow.lookupSymbolDocumentation(QStringLiteral("MPI_Init@plt"));
     QVERIFY2(foundDoc, "lookupSymbolDocumentation('MPI_Init@plt') must succeed");
     QCoreApplication::processEvents();
-    // Validate tab switch to Reference Manual.
-    // Confirm active bottom tab switched to Reference Manual.
-    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"),
-                                                                      Qt::CaseInsensitive),
-             qPrintable(QString("Expected Reference Manual tab active, got '%1'")
-                            .arg(bottomTabs->tabText(bottomTabs->currentIndex()))));
-    // Inspect documentation content in browser.
-    // Confirm ReferenceManualWidget browser contains MPI_Init and SYNOPSIS section header.
+    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"), Qt::CaseInsensitive), qPrintable(QString("Expected Reference Manual tab active, got '%1'").arg(bottomTabs->tabText(bottomTabs->currentIndex()))));
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(refManual != nullptr);
     auto* browser = refManual->findChild<QTextBrowser*>();
     QVERIFY(browser != nullptr);
     const QString docPlainText = browser->toPlainText();
-    QVERIFY2(docPlainText.contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive),
-             "Reference Manual content must include MPI_Init");
-    QVERIFY2(docPlainText.contains(QStringLiteral("SYNOPSIS"), Qt::CaseInsensitive),
-             "Reference Manual content must include SYNOPSIS section");
+    QVERIFY2(docPlainText.contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive) && docPlainText.contains(QStringLiteral("SYNOPSIS"), Qt::CaseInsensitive), "Reference Manual content must include MPI_Init and SYNOPSIS");
+
     // 3. Tab Audit Snapshot Capability.
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     const QString snapshotPath = tempDir.filePath(QStringLiteral("tab_refman_audit.png"));
-    const int refManIdx = bottomTabs->currentIndex();
-    QVERIFY2(mainWindow.captureTabAuditSnapshot(refManIdx, snapshotPath),
-             "captureTabAuditSnapshot must return true for valid tab index and output path");
-    // Confirm output snapshot file exists on disk with non-zero size.
+    QVERIFY2(mainWindow.captureTabAuditSnapshot(bottomTabs->currentIndex(), snapshotPath), "captureTabAuditSnapshot must succeed");
     const QFileInfo snapInfo(snapshotPath);
-    QVERIFY(snapInfo.exists());
-    QVERIFY(snapInfo.size() > 0);
+    QVERIFY(snapInfo.exists() && snapInfo.size() > 0);
 }
 
 /**
@@ -227,33 +206,21 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     QVERIFY2(categoryList->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff, "PreferencesDialog categoryList must suppress horizontal scrollbar clipping");
     prefsDlg.hide();
 
-    // Audit AttachProcessDialog dimensions and controls.
+    // Audit modal dialog dimensions and controls.
     gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
     verifyDialogCohesion(&attachDlg, QStringLiteral("AttachProcessDialog"));
-    // Audit NewProjectDialog dimensions and controls.
     gridlock::ui::NewProjectDialog newProjDlg(&mainWindow);
-    verifyDialogCohesion(&newProjDlg, QStringLiteral("NewProjectDialog"));
-    newProjDlg.hide();
-    // Audit AboutDialog dimensions and controls.
+    verifyDialogCohesion(&newProjDlg, QStringLiteral("NewProjectDialog")); newProjDlg.hide();
     gridlock::ui::AboutDialog aboutDlg(&mainWindow);
-    verifyDialogCohesion(&aboutDlg, QStringLiteral("AboutDialog"));
-    aboutDlg.hide();
-    // Audit ProjectSettingsDialog dimensions and controls.
+    verifyDialogCohesion(&aboutDlg, QStringLiteral("AboutDialog")); aboutDlg.hide();
     gridlock::ui::ProjectSettingsDialog projSettingsDlg(&mainWindow);
-    verifyDialogCohesion(&projSettingsDlg, QStringLiteral("ProjectSettingsDialog"));
-    projSettingsDlg.hide();
-    // Audit ProjectWizard dimensions and controls.
+    verifyDialogCohesion(&projSettingsDlg, QStringLiteral("ProjectSettingsDialog")); projSettingsDlg.hide();
     gridlock::ui::dialogs::ProjectWizard projectWizard(&mainWindow);
-    verifyDialogCohesion(&projectWizard, QStringLiteral("ProjectWizard"));
-    projectWizard.hide();
-    // Audit ConditionalBreakpointDialog dimensions and controls.
+    verifyDialogCohesion(&projectWizard, QStringLiteral("ProjectWizard")); projectWizard.hide();
     gridlock::ui::ConditionalBreakpointDialog condBpDlg(QString(), &mainWindow);
-    verifyDialogCohesion(&condBpDlg, QStringLiteral("ConditionalBreakpointDialog"));
-    condBpDlg.hide();
-    // Audit TutorialDialog dimensions and controls.
+    verifyDialogCohesion(&condBpDlg, QStringLiteral("ConditionalBreakpointDialog")); condBpDlg.hide();
     gridlock::ui::TutorialDialog tutorialDlg(&mainWindow);
-    verifyDialogCohesion(&tutorialDlg, QStringLiteral("TutorialDialog"));
-    tutorialDlg.hide();
+    verifyDialogCohesion(&tutorialDlg, QStringLiteral("TutorialDialog")); tutorialDlg.hide();
     // Audit XrefInspectorDialog dimensions and controls.
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(disasm != nullptr);
@@ -635,35 +602,26 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     QVERIFY(sourceView != nullptr && disasmView != nullptr && bottomTabs != nullptr);
 
     // 1. Bidirectional Source Line <-> Instruction Address Mapping.
-    // Verify source line 13 maps to instruction address 0x0040113d.
     QCOMPARE(mainWindow.sourceLineToAddress(13), 0x0040113dULL);
-    // Verify instruction address 0x0040113d maps back to source line 13.
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
-    // Select line 16 in source editor.
     sourceView->selectSourceLine(16);
     QApplication::processEvents();
-    // Confirm disassembly viewport synchronized to instruction at line 16.
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
-    // Emit instruction address selection from disassembly view.
     emit disasmView->addressSelected(0x0040113dULL);
     QApplication::processEvents();
-    // Confirm source editor synchronized back to line 13.
     QCOMPARE(sourceView->executionLine(), 13);
 
     // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code").
-    // Switch to Reverse Engineering perspective with split CFG and decompiler.
     mainWindow.setWorkspacePerspective(QStringLiteral("Reverse"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
     QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700, "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
 
-    // Switch to MPI perspective with diagnostics table front and center.
     mainWindow.setWorkspacePerspective(QStringLiteral("MPI"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("MPI"));
     QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive), "MPI perspective must activate the MPI Diagnostics bottom tab");
 
-    // Switch to Code perspective restoring balanced source and disassembly viewports.
     mainWindow.setWorkspacePerspective(QStringLiteral("Code"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Code"));
@@ -671,11 +629,9 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
 
     // 3. Bottom Console Maximize Toggle.
     const int baseHeight = bottomTabs->height();
-    // Maximize bottom console to inspect logs and diagnostics.
     mainWindow.toggleMaximizeBottomConsole();
     QApplication::processEvents();
     QVERIFY2(bottomTabs->height() > baseHeight, "toggleMaximizeBottomConsole() must expand BottomConsoleTabs height");
-    // Restore bottom console back to default workstation height.
     mainWindow.toggleMaximizeBottomConsole();
     QApplication::processEvents();
 }
@@ -702,21 +658,14 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
     QVERIFY(sourceView != nullptr && disasmView != nullptr && serverRack != nullptr);
 
     // 1. Granular Source Line <-> Instruction Address Mapping.
-    // Verify line 12 maps to prologue address 0x00401120.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401120ULL), 12);
-    // Verify line 15 maps to stack allocation at 0x00401128.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401128ULL), 15);
-    // Verify line 13 maps to MPI_Init call at 0x0040113d.
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
-    // Verify line 16 maps to loop condition at 0x00401149.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401149ULL), 16);
-    // Reverse lookup line 15 to instruction address.
     QCOMPARE(mainWindow.sourceLineToAddress(15), 0x00401128ULL);
-    // Reverse lookup line 16 to instruction address.
     QCOMPARE(mainWindow.sourceLineToAddress(16), 0x00401149ULL);
     // 2. Breakpoint-Aware Run Target & Continue Workflow.
     mainWindow.stopTargetWorkflow();
-    // Clear and set breakpoints on lines 15 and 16.
     sourceView->setBreakpoints(QSet<int>());
     sourceView->toggleBreakpoint(15);
     sourceView->toggleBreakpoint(16);
@@ -735,7 +684,6 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
     QCOMPARE(sourceView->executionLine(), 16);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401149ULL);
     // 3. Visible Active Instruction Marker Inside CFG Basic Blocks.
-    // Verify CFG basic block marker is visible for active instruction.
     QVERIFY2(disasmView->activeCfgBlockContainsInstructionMarker(0x00401149ULL), "DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) must be true");
 }
 
@@ -822,11 +770,13 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     bool foundAccentDarkText = false;
     bool foundCanvasLightText = false;
     for (QLabel* lbl : dialog.findChildren<QLabel*>()) {
-        if (lbl->text().contains(QStringLiteral("Accent")) && lbl->text().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive)) {
+        const bool hasHex = lbl->text().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive) || lbl->toolTip().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive);
+        if (lbl->text().contains(QStringLiteral("Accent")) && hasHex) {
             QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() < 60, "Bright #fabd2f Accent swatch must use dark text (< 60 lightness)");
             foundAccentDarkText = true;
         }
-        if (lbl->text().contains(QStringLiteral("Canvas")) && lbl->text().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive)) {
+        const bool hasCanvas = lbl->text().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive) || lbl->toolTip().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive);
+        if (lbl->text().contains(QStringLiteral("Canvas")) && hasCanvas) {
             QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() > 200, "Dark #1d2021 Canvas swatch must use light text (> 200 lightness)");
             foundCanvasLightText = true;
         }
@@ -848,17 +798,12 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
         "#SBATCH --mem=128G\n#SBATCH --time=06:30:00\n#SBATCH --gres=gpu:a100:2\n#SBATCH --constraint=nvlink\n"
         "#SBATCH --output= solver_%j.out\nmodule load openmpi/5.0 gcc/13\nsrun --mpi=pmix ./solver {FILE}\n");
     QVERIFY(dialog.parseSlurmBatchScript(sampleSbatch));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("job_name")), QStringLiteral("wpt_fem_solver"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("account")), QStringLiteral("ttu_hpc"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("partition")), QStringLiteral("gpu_a100"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("qos")), QStringLiteral("high"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("nodes")), QStringLiteral("4"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("ntasks_per_node")), QStringLiteral("16"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("cpus_per_task")), QStringLiteral("4"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("mem")), QStringLiteral("128G"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("time")), QStringLiteral("06:30:00"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("gres_gpu")), QStringLiteral("a100:2"));
-    QCOMPARE(dialog.slurmFieldValue(QStringLiteral("constraint")), QStringLiteral("nvlink"));
+    const QList<QPair<QString, QString>> slurmFields = {
+        {"job_name", "wpt_fem_solver"}, {"account", "ttu_hpc"}, {"partition", "gpu_a100"},
+        {"qos", "high"}, {"nodes", "4"}, {"ntasks_per_node", "16"}, {"cpus_per_task", "4"},
+        {"mem", "128G"}, {"time", "06:30:00"}, {"gres_gpu", "a100:2"}, {"constraint", "nvlink"}
+    };
+    for (const auto& [k, v] : slurmFields) QCOMPARE(dialog.slurmFieldValue(k), v);
     QVERIFY(dialog.slurmFieldValue(QStringLiteral("modules")).contains(QStringLiteral("openmpi/5.0")));
 }
 
@@ -869,15 +814,11 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
 void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
     auto& tm = gridlock::core::ThemeManager::instance();
     const QStringList themeIds = tm.availableThemeIds();
-    // 1. Verify 8 curated themes including 3 light themes and automatic dark/light mode derivation.
-    QVERIFY2(themeIds.contains(QStringLiteral("daylight_light")) &&
-                 themeIds.contains(QStringLiteral("solarized_light")) &&
-                 themeIds.contains(QStringLiteral("catppuccin_latte")),
-             "ThemeManager::availableThemeIds() must include daylight_light, solarized_light, and catppuccin_latte");
+    QVERIFY2(themeIds.contains(QStringLiteral("daylight_light")) && themeIds.contains(QStringLiteral("solarized_light")) && themeIds.contains(QStringLiteral("catppuccin_latte")), "ThemeManager must include daylight_light, solarized_light, and catppuccin_latte");
     tm.applyTheme(QStringLiteral("solarized_light"));
-    QVERIFY2(!tm.isDarkMode(), "Selecting solarized_light must automatically set isDarkMode() == false");
+    QVERIFY2(!tm.isDarkMode(), "Selecting solarized_light must set isDarkMode() == false");
     tm.applyTheme(QStringLiteral("catppuccin_latte"));
-    QVERIFY2(!tm.isDarkMode(), "Selecting catppuccin_latte must automatically set isDarkMode() == false");
+    QVERIFY2(!tm.isDarkMode(), "Selecting catppuccin_latte must set isDarkMode() == false");
 
     // 2. Verify Enable Dark Mode checkbox is removed from PreferencesDialog and Light Mode has no dark #16181d/#1b1e24 overrides.
     tm.applyTheme(QStringLiteral("daylight_light"));
@@ -885,24 +826,99 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
     dialog.resize(860, 620);
     dialog.show();
     QApplication::processEvents();
-    for (QCheckBox* chk : dialog.findChildren<QCheckBox*>()) {
-        QVERIFY2(!(chk->isVisible() && chk->text().contains(QStringLiteral("Enable Dark Mode"), Qt::CaseInsensitive)),
-                 "Redundant 'Enable Dark Mode' checkbox must not be visible in PreferencesDialog");
-    }
-    for (QComboBox* cb : dialog.findChildren<QComboBox*>()) {
-        QVERIFY2(!cb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "PreferencesDialog QComboBox must not hardcode dark #1b1e24 in Light Theme");
-    }
-    for (QSpinBox* sb : dialog.findChildren<QSpinBox*>()) {
-        QVERIFY2(!sb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "PreferencesDialog QSpinBox must not hardcode dark #1b1e24 in Light Theme");
-    }
+    for (QCheckBox* chk : dialog.findChildren<QCheckBox*>()) QVERIFY2(!(chk->isVisible() && chk->text().contains(QStringLiteral("Enable Dark Mode"), Qt::CaseInsensitive)), "Redundant Dark Mode checkbox must not be visible");
+    for (QComboBox* cb : dialog.findChildren<QComboBox*>()) QVERIFY2(!cb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "QComboBox must not hardcode #1b1e24");
+    for (QSpinBox* sb : dialog.findChildren<QSpinBox*>()) QVERIFY2(!sb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "QSpinBox must not hardcode #1b1e24");
 
     // 3. Verify SourceCodeView and DisassemblyView activeCanvasBackgroundColor() are light (>= 220 lightness) in Light Theme.
     gridlock::ui::SourceCodeView srcView;
     gridlock::ui::DisassemblyView disView;
-    QVERIFY2(srcView.activeCanvasBackgroundColor().lightness() >= 220, "SourceCodeView canvas background must be light (>= 220 lightness) in daylight_light");
-    QVERIFY2(disView.activeCanvasBackgroundColor().lightness() >= 220, "DisassemblyView canvas background must be light (>= 220 lightness) in daylight_light");
+    QVERIFY2(srcView.activeCanvasBackgroundColor().lightness() >= 220 && disView.activeCanvasBackgroundColor().lightness() >= 220, "Canvas backgrounds must be light in daylight_light");
 
-    // Restore default dark theme at the end of the test.
     tm.applyTheme(QStringLiteral("gridlock_slate"));
     QVERIFY2(tm.isDarkMode(), "Selecting gridlock_slate must restore isDarkMode() == true");
 }
+
+/**
+ * @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and MainWindow*.cpp line count headroom.
+ */
+void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadroom() {
+    auto& tm = gridlock::core::ThemeManager::instance();
+    // 1. Full Workstation Theme Propagation in solarized_light.
+    tm.applyTheme(QStringLiteral("solarized_light"));
+    gridlock::ui::MainWindow mainWindow;
+    mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
+    mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    QApplication::processEvents();
+
+    // Propagate active solarized light theme colors across all chrome and views.
+    gridlock::tests::callPropagateTheme(&mainWindow, 0);
+    QApplication::processEvents();
+
+    // Retrieve pointers to all primary inspection subviews.
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
+    auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(memView != nullptr && diffGrid != nullptr && serverRack != nullptr && disasmView != nullptr);
+
+    // Verify view canvas lightness >= 200 indicating light background in Solarized Light.
+    QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() >= 200, "MemView canvas background must be light (>= 200 lightness) in solarized_light");
+    QVERIFY2(gridlock::tests::getActiveCanvasBg(diffGrid, 0).lightness() >= 200, "DifferentialGrid canvas background must be light (>= 200 lightness) in solarized_light");
+    QVERIFY2(gridlock::tests::getActiveCanvasBg(serverRack, 0).lightness() >= 200, "ServerRackView canvas background must be light (>= 200 lightness) in solarized_light");
+    // Verify toolbars and dock headers are aligned without hardcoded dark stylesheets.
+    QVERIFY2(gridlock::tests::callAreAllChromeAligned(&mainWindow, 0), "All chrome toolbars and dock headers must be theme aligned without hardcoded #16181d/#1b1e24");
+
+    // Inspect decompiler function signature label contrast.
+    auto* sigLabel = disasmView->findChild<QLabel*>(QStringLiteral("disasmSignatureLabel"));
+    QVERIFY(sigLabel != nullptr);
+    const QRegularExpression colorRe(QStringLiteral("color:\\s*(#[0-9a-fA-F]{3,8}|rgba?\\([^)]+\\))"));
+    const auto match = colorRe.match(sigLabel->styleSheet());
+    const QColor sigTextColor = match.hasMatch() ? QColor(match.captured(1)) : sigLabel->palette().color(QPalette::WindowText);
+    // Dark ink contrast on light cream background requires lightness < 120.
+    QVERIFY2(sigTextColor.isValid() && sigTextColor.lightness() < 120, qPrintable(QString("Decompiler signature text color lightness %1 >= 120").arg(sigTextColor.lightness())));
+
+    // Restore default dark theme and verify dark activeCanvasBackgroundColor.
+    tm.applyTheme(QStringLiteral("gridlock_slate"));
+    gridlock::tests::callPropagateTheme(&mainWindow, 0);
+    QApplication::processEvents();
+    // Dark slate canvas lightness must sit strictly below 60.
+    QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() < 60, "MemView canvas background must be dark (< 60 lightness) in gridlock_slate");
+
+    // 2. Spaced, Non-Colliding Palette Swatch Chips.
+    gridlock::ui::PreferencesDialog prefsDialog;
+    prefsDialog.resize(860, 620);
+    prefsDialog.show();
+    QApplication::processEvents();
+
+    // Query swatch chips and ensure exactly 5 clean role labels are mounted.
+    QList<QLabel*> swatchBoxes;
+    const QStringList expectedRoles = {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")};
+    for (QLabel* lbl : prefsDialog.findChildren<QLabel*>()) {
+        for (const QString& r : expectedRoles) if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
+    }
+    QVERIFY2(swatchBoxes.size() == 5, qPrintable(QString("Expected 5 clean role swatch boxes, found %1").arg(swatchBoxes.size())));
+    // Swatch chips must store hex string in toolTip rather than colliding text.
+    for (QLabel* box : swatchBoxes) QVERIFY2(!box->toolTip().isEmpty() && box->toolTip().contains('#'), "Swatch box must store hex color in toolTip()");
+
+    // 3. MainWindow*.cpp Line Count Headroom (< 880 Lines Each).
+    const QStringList mwFiles = {
+        QStringLiteral("src/ui/MainWindow.cpp"), QStringLiteral("src/ui/MainWindowWorkspace.cpp"),
+        QStringLiteral("src/ui/MainWindowCohesion.cpp"), QStringLiteral("src/ui/MainWindowNavigation.cpp"),
+        QStringLiteral("src/ui/MainWindowDocks.cpp")
+    };
+    for (const QString& relPath : mwFiles) {
+        QString path = QStringLiteral("../") + relPath;
+        if (!QFile::exists(path)) path = relPath;
+        QFile f(path);
+        // Verify file exists and open stream to count total newline-separated lines.
+        QVERIFY2(f.exists(), qPrintable(QString("File %1 must exist").arg(relPath)));
+        QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QString("Could not open %1").arg(relPath)));
+        const int lines = QString::fromUtf8(f.readAll()).split('\n').size();
+        // Each MainWindow modular file must sit strictly below the 880 line target ceiling.
+        QVERIFY2(lines < 880, qPrintable(QString("%1 line count %2 >= 880").arg(relPath).arg(lines)));
+    }
+}
+

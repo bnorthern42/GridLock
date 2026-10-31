@@ -47,6 +47,22 @@ public:
     /** @brief Returns 5 hex swatch colors (canvas, header, border, accent, text) for a theme ID. */
     static QStringList themeSwatchColors(const QString& themeId);
 
+    /**
+     * @struct ThemePalette
+     * @brief Structured color palette tokens for a workstation theme.
+     */
+    struct ThemePalette {
+        QString canvasHex;
+        QString headerHex;
+        QString borderHex;
+        QString accentHex;
+        QString textHex;
+        bool isDark = true;
+    };
+
+    /** @brief Returns structured palette tokens for a given theme identifier. */
+    static ThemePalette paletteForTheme(const QString& themeId);
+
     /** @brief Returns the currently active compiled QSS stylesheet string. */
     QString currentStyleSheet() const { return m_currentStyleSheet; }
 

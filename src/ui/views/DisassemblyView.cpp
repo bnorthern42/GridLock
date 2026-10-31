@@ -422,8 +422,9 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_signatureLabel = new QLabel(m_functionSignature, sigBar);
   m_signatureLabel->setObjectName("disasmSignatureLabel");
   m_functionBannerLabel = m_signatureLabel;
+  const QString sigColor = gridlock::core::ThemeManager::instance().isDarkMode() ? QStringLiteral("#dcdcaa") : QStringLiteral("#1f2328");
   m_signatureLabel->setStyleSheet(
-      "color: #dcdcaa; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;");
+      QStringLiteral("color: %1; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;").arg(sigColor));
   sigLayout->addWidget(m_signatureLabel, 1);
   rootLayout->addWidget(sigBar);
 
@@ -854,6 +855,16 @@ void DisassemblyView::reloadStyle() {
   applyEditorPalette(m_decompilerEdit);
   if (auto *sigBar = findChild<QWidget *>(QStringLiteral("disasmSignatureBar"))) {
     sigBar->setStyleSheet(QStringLiteral("background: %1; border-bottom: 1px solid %2;").arg(bgHex, bdrHex));
+  }
+  if (m_signatureLabel) {
+    const QString sigTextColor = tm.isDarkMode() ? QStringLiteral("#dcdcaa") : QStringLiteral("#1f2328");
+    m_signatureLabel->setStyleSheet(
+        QStringLiteral("color: %1; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;").arg(sigTextColor));
+  }
+  if (auto *footer = findChild<QWidget *>(QStringLiteral("decompilerFooterBar"))) {
+    const QString footerBg = tm.isDarkMode() ? QStringLiteral("#21252b") : sw.value(1, QStringLiteral("#eee8d5"));
+    const QString footerBdr = tm.isDarkMode() ? QStringLiteral("#2c313a") : sw.value(2, QStringLiteral("#d3cbb7"));
+    footer->setStyleSheet(QStringLiteral("background: %1; border-top: 1px solid %2; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: %3;").arg(footerBg, footerBdr, fgHex));
   }
   if (m_cfgView) m_cfgView->setBackgroundBrush(QColor(bgHex));
   if (m_highlighter) m_highlighter->reloadRules();

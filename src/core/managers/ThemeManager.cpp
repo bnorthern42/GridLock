@@ -741,6 +741,25 @@ QStringList ThemeManager::themeSwatchColors(const QString& themeId) {
 }
 
 /**
+ * @brief Returns structured palette tokens for a given theme identifier.
+ */
+ThemeManager::ThemePalette ThemeManager::paletteForTheme(const QString& themeId) {
+    const QString id = themeId.trimmed().toLower();
+    const QStringList sw = themeSwatchColors(id);
+    const bool isLight = id.contains(QStringLiteral("light")) || id.contains(QStringLiteral("latte"));
+    ThemePalette p;
+    if (sw.size() >= 5) {
+        p.canvasHex = sw[0]; p.headerHex = sw[1]; p.borderHex = sw[2]; p.accentHex = sw[3]; p.textHex = sw[4];
+    } else {
+        p.canvasHex = QStringLiteral("#16181d"); p.headerHex = QStringLiteral("#21252b");
+        p.borderHex = QStringLiteral("#282c34"); p.accentHex = QStringLiteral("#528bff");
+        p.textHex = QStringLiteral("#d7dae0");
+    }
+    p.isDark = !isLight;
+    return p;
+}
+
+/**
  * @brief Dynamically interpolates UI font size, font family, and curated theme palette tokens into QSS.
  */
 static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, int uiFontSize,

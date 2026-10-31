@@ -11,6 +11,7 @@
 
 #include "DisassemblyView.hpp"
 #include "../dialogs/XrefInspectorDialog.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -83,9 +84,12 @@ void DisassemblyView::setupDecompilerUi(QSplitter* splitSplitter, const QFont& f
   auto *decompFooter = new QWidget(m_decompilerPage);
   decompFooter->setObjectName("decompilerFooterBar");
   decompFooter->setFixedHeight(24);
-  decompFooter->setStyleSheet(
-      "background: #21252b; border-top: 1px solid #2c313a; "
-      "font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #abb2bf;");
+  const auto& tm = gridlock::core::ThemeManager::instance();
+  const auto pal = tm.paletteForTheme(tm.activeThemeId());
+  decompFooter->setStyleSheet(QStringLiteral(
+      "background: %1; border-top: 1px solid %2; "
+      "font-family: 'JetBrains Mono', monospace; font-size: 10px; color: %3;")
+      .arg(pal.headerHex, pal.borderHex, pal.textHex));
   auto *footerLayout = new QHBoxLayout(decompFooter);
   footerLayout->setContentsMargins(6, 1, 6, 1);
   footerLayout->setSpacing(6);
@@ -165,8 +169,9 @@ void DisassemblyView::highlightActiveDecompilerLine() {
       m_decompilerEdit->centerCursor();
       m_updatingDecompilerCursor = false;
 
+      const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
       QTextEdit::ExtraSelection sel;
-      sel.format.setBackground(QColor(0x26, 0x4f, 0x78));
+      sel.format.setBackground(isDark ? QColor(0x26, 0x4f, 0x78) : QColor(0xcf, 0xe1, 0xf7));
       sel.format.setProperty(QTextFormat::FullWidthSelection, true);
       sel.cursor = cursor;
       sel.cursor.clearSelection();
@@ -175,11 +180,12 @@ void DisassemblyView::highlightActiveDecompilerLine() {
   }
 
   if (!m_highlightedToken.isEmpty()) {
+    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
     QTextCursor tc(m_decompilerEdit->document());
     while (!(tc = m_decompilerEdit->document()->find(m_highlightedToken, tc)).isNull()) {
       QTextEdit::ExtraSelection tokSel;
-      tokSel.format.setBackground(QColor(0x3a, 0x44, 0x54));
-      tokSel.format.setForeground(QColor(0xff, 0xd7, 0x00));
+      tokSel.format.setBackground(isDark ? QColor(0x3a, 0x44, 0x54) : QColor(0xff, 0xee, 0xaa));
+      tokSel.format.setForeground(isDark ? QColor(0xff, 0xd7, 0x00) : QColor(0x80, 0x55, 0x00));
       tokSel.cursor = tc;
       selections.append(tokSel);
     }

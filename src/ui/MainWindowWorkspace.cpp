@@ -33,7 +33,6 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QCoreApplication>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QFont>
@@ -44,28 +43,17 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMouseEvent>
-#include <QPainter>
-#include <QPointer>
 #include <QPushButton>
-#include <QGuiApplication>
-#include <QScreen>
 #include <QShortcut>
 #include <QSplitter>
-#include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
-#include <QTextCursor>
 #include <QToolBar>
-#include <QToolTip>
 #include <QToolButton>
 #include <QVariant>
 #include <QVBoxLayout>
-#include <QWindow>
 #include <QtConcurrent/QtConcurrent>
 #include <algorithm>
-#include <cmath>
-#include <functional>
-#include <vector>
 
 namespace gridlock::ui {
 
@@ -92,9 +80,12 @@ void MainWindow::setupUi() {
  * document tabs for tabified docks, and north-oriented tab placement.
  */
 void MainWindow::applyCutterWorkspaceLayout() {
+  // Allow docking panes to nest horizontally/vertically and tabify when dragged together.
   setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
   setDockNestingEnabled(true);
+  // Configure seamless document mode styling without redundant frame borders.
   setDocumentMode(true);
+  // Position dock tab bars along the north edge for consistent Cutter ergonomics.
   setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
   // Favor vertical side docks over horizontal top/bottom docks at corners.
   setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
@@ -103,64 +94,7 @@ void MainWindow::applyCutterWorkspaceLayout() {
   setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 }
 
-/**
- * @brief Constructs status bar displaying real-time MPI rank, PC, and execution state.
- */
-void MainWindow::setupStatusBar() {
-  QStatusBar *bar = statusBar();
-  bar->setObjectName("cutterStatusBar");
-  bar->setSizeGripEnabled(false);
-  bar->setContentsMargins(6, 0, 6, 0);
 
-  // Initialize instruction pointer to main entry point if not previously set.
-  if (m_currentSeekOrPc == QStringLiteral("0x00000000") ||
-      m_currentSeekOrPc.isEmpty()) {
-    m_currentSeekOrPc = QStringLiteral("0x00401120");
-  }
-
-  // Construct permanent telemetry label spanning status bar width.
-  m_statusTelemetryLabel = new QLabel(bar);
-  m_statusTelemetryLabel->setObjectName("cutterStatusTelemetry");
-  m_statusTelemetryLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
-  bar->addPermanentWidget(m_statusTelemetryLabel, 1);
-  updateStatusTelemetry(m_currentSeekOrPc, m_currentTargetState);
-}
-
-/**
- * @brief Updates the status bar telemetry banner with active rank, PC, and status.
- * @param pcOrSeek Hexadecimal address string or symbol.
- * @param targetState Execution state string (e.g. "RUNNING", "PAUSED", "IDLE").
- */
-void MainWindow::updateStatusTelemetry(const QString &pcOrSeek,
-                                       const QString &targetState) {
-  // Update internal address cache if parameter is non-empty.
-  if (!pcOrSeek.isEmpty()) {
-    m_currentSeekOrPc = pcOrSeek;
-  }
-  // Update operational state cache if parameter is non-empty.
-  if (!targetState.isEmpty()) {
-    m_currentTargetState = targetState;
-  }
-  // Format standardized breadcrumb displaying architecture, rank ID, address, and state.
-  if (m_statusTelemetryLabel) {
-    if (m_debugSessionActive) {
-      const int rank = activeSteppingRank();
-      const QString role = (rank == 0) ? QStringLiteral("COORDINATOR") : QStringLiteral("WORKER");
-      m_statusTelemetryLabel->setText(
-          QStringLiteral("ARCH: x86_64 | [STEPPING: RANK %1] | RANK %1 [%2] | sym.main @ %3 | STATUS: %4")
-              .arg(rank)
-              .arg(role)
-              .arg(m_currentSeekOrPc)
-              .arg(m_currentTargetState));
-    } else {
-      m_statusTelemetryLabel->setText(
-          QStringLiteral("ARCH: x86_64 | MPI RANK: %1 | PC/SEEK: %2 | STATUS: %3")
-              .arg(m_focusedRank)
-              .arg(m_currentSeekOrPc)
-              .arg(m_currentTargetState));
-    }
-  }
-}
 
 /**
  * @brief Constructs primary debugger control toolbar and secondary address space ribbon.
@@ -883,55 +817,7 @@ void MainWindow::setupDocks() {
   settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
 }
 
-/**
- * @brief Constructs and installs a custom workstation title bar on a dock widget.
- * @param dock Target dock widget.
- * @param titleText Display title for the dock header.
- * @return Constructed custom title bar header widget.
- */
-QWidget* MainWindow::setupDockTitleBar(QDockWidget* dock, const QString& titleText) {
-  if (!dock) return nullptr;
-  // Instantiate custom header container with dark workstation styling.
-  auto* header = new QWidget(dock);
-  header->setObjectName(QStringLiteral("customDockHeader"));
-  header->setProperty("associatedDock", QVariant::fromValue(static_cast<void*>(dock)));
-  header->setFixedHeight(24);
-  header->setMinimumWidth(0);
-  header->setStyleSheet(QStringLiteral(
-      "#customDockHeader { background: #1e222a; border-bottom: 1px solid #282c34; } "
-      "#customDockHeader QLabel { color: #9da5b4; font-size: 11px; font-weight: 700; padding-left: 6px; } "
-      "#dockFloatBtn, #dockCloseBtn { background: transparent; color: #9da5b4; border: none; font-size: 11px; "
-      "font-weight: 700; min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; } "
-      "#dockFloatBtn:hover, #dockCloseBtn:hover { background: #282c34; color: #ffffff; border-radius: 2px; }"));
-  // Configure zero-margin horizontal layout with 4px element spacing.
-  auto* hLayout = new QHBoxLayout(header);
-  hLayout->setContentsMargins(4, 2, 4, 2);
-  hLayout->setSpacing(4);
-  // Add uppercase title label configured with zero minimum width to permit narrow docking.
-  auto* titleLabel = new QLabel(titleText, header);
-  titleLabel->setMinimumWidth(0);
-  titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-  hLayout->addWidget(titleLabel, 1);
-  // Float / undock toggle button switching panel between floating and docked states.
-  auto* floatBtn = new QToolButton(header);
-  floatBtn->setObjectName(QStringLiteral("dockFloatBtn"));
-  floatBtn->setText(QStringLiteral("⧉"));
-  floatBtn->setToolTip(QStringLiteral("Pop Out / Float Panel"));
-  connect(floatBtn, &QToolButton::clicked, this, [this, dock]() { toggleDockFloating(dock); });
-  hLayout->addWidget(floatBtn);
-  // Close button allowing user to dismiss the dock widget.
-  auto* closeBtn = new QToolButton(header);
-  closeBtn->setObjectName(QStringLiteral("dockCloseBtn"));
-  closeBtn->setText(QStringLiteral("✕"));
-  closeBtn->setToolTip(QStringLiteral("Close Panel"));
-  connect(closeBtn, &QToolButton::clicked, dock, &QDockWidget::close);
-  hLayout->addWidget(closeBtn);
-  // Install MainWindow event filter to intercept drag, double-click, and context menu.
-  header->installEventFilter(this);
-  dock->setTitleBarWidget(header);
-  dock->setMinimumWidth(150);
-  return header;
-}
+
 
 }  // namespace gridlock::ui
 

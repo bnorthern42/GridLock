@@ -59,6 +59,17 @@ public:
     void updateRanks(const QList<RankState>& ranks);
 
     /**
+     * @brief Returns active list canvas background color according to the theme.
+     * @return Resolved QColor corresponding to active theme canvas base.
+     */
+    QColor activeCanvasBackgroundColor() const;
+
+    /**
+     * @brief Reloads widget styling according to the active theme palette.
+     */
+    Q_INVOKABLE void reloadStyle();
+
+    /**
      * @brief Updates the execution state of an individual rank node.
      * @param rank Zero-based rank index.
      * @param state New RankState.

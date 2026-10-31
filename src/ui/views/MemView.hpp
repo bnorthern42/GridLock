@@ -50,6 +50,10 @@ public:
     int patchedByteCount() const { return m_patchedBytes.size(); }
     /// Reverts all actively applied live byte patches and restores baseline memory.
     void revertAllPatches();
+    /// Returns the active canvas background QColor resolved from ThemeManager.
+    QColor activeCanvasBackgroundColor() const;
+    /// Reloads hex dump viewport and control header styles from ThemeManager.
+    Q_INVOKABLE void reloadStyle();
 
 signals:
     /// Emitted when bytes are patched at target memory address.

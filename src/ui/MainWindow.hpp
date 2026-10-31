@@ -329,6 +329,28 @@ public:
     void selectBottomToolGroup(const QString& groupName);
 
     /**
+     * @brief Synchronizes the bottom tool rail button state with the specified tab index.
+     * @param tabIndex Selected tab index in m_bottomTabs.
+     */
+    void syncBottomToolRailToTab(int tabIndex);
+
+    /**
+     * @brief Propagates the active ThemeManager palette across all chrome toolbars, dock headers, and workstation views.
+     */
+    Q_INVOKABLE void propagateThemeToAllWidgets();
+
+    /**
+     * @brief Reloads workstation theme styling according to ThemeManager palette.
+     */
+    Q_INVOKABLE void reloadStyle() { propagateThemeToAllWidgets(); }
+
+    /**
+     * @brief Verifies that all chrome toolbars, ribbons, and dock headers align with the active theme and avoid hardcoded dark styles.
+     * @return True if all inspected chrome elements are theme-aligned.
+     */
+    bool areAllChromeToolbarsAndDockHeadersThemeAligned() const;
+
+    /**
      * @struct DockHomeSlot
      * @brief Records the original splitter or QMainWindow dock area home container for a panel.
      */
@@ -376,6 +398,14 @@ public:
      * @brief Restores all floating or detached panels back into their home workstation slots.
      */
     void redockAllFloatingPanels();
+
+    /**
+     * @brief Intercepts and handles mouse/context-menu events on custom dock headers.
+     * @param watched Target QObject emitting the event.
+     * @param event QEvent payload to inspect.
+     * @return True if event was handled and should be consumed.
+     */
+    bool handleDockHeaderEvent(QObject* watched, QEvent* event);
 
     /**
      * @brief Creates and mounts a custom dark-slate title bar widget on the specified dock widget.

@@ -182,12 +182,14 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
 
     // Live 5-color swatch preview strip (Canvas, Header, Border, Accent, Text).
     auto* swatchRow = new QHBoxLayout();
-    swatchRow->setSpacing(6);
-    const QStringList roles = {tr("Canvas"), tr("Header"), tr("Border"), tr("Accent"), tr("Text")};
+    swatchRow->setSpacing(8);
+    swatchRow->setContentsMargins(0, 2, 0, 2);
+    const QStringList roles = {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")};
     for (int i = 0; i < 5; ++i) {
         auto* box = new QLabel(roles[i], this);
         box->setAlignment(Qt::AlignCenter);
-        box->setMinimumSize(96, 28);
+        box->setFixedHeight(26);
+        box->setMinimumWidth(82);
         m_swatchBoxes.append(box);
         swatchRow->addWidget(box);
     }
@@ -249,29 +251,32 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
 
 /**
  * @brief Updates the 5-swatch palette preview boxes (Canvas, Header, Border, Accent, Text)
- *        with automatic WCAG luminance contrast and role + hex label text.
+ *        with clean role text, rounded pill styling, and hex code in tooltip.
  */
 void AppearanceSettingsPage::updateSwatchPreview(const QString& themeId) {
     const QStringList sw = gridlock::core::managers::ThemeManager::themeSwatchColors(themeId);
-    const QStringList roles = {tr("Canvas"), tr("Header"), tr("Border"), tr("Accent"), tr("Text")};
+    const QStringList roles = {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")};
     for (int i = 0; i < m_swatchBoxes.size() && i < sw.size() && i < roles.size(); ++i) {
         const QColor bg(sw[i]);
         // Compute perceived luminance L = 0.299*R + 0.587*G + 0.114*B for WCAG contrast.
         const double lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue();
         const QString fgHex = (lum >= 145.0) ? QStringLiteral("#16181d") : QStringLiteral("#ffffff");
+        const QString bdrHex = (lum >= 145.0) ? QStringLiteral("#b8b09d") : QStringLiteral("#434955");
         const QColor fgColor(fgHex);
 
-        // Display both role name and hex code inside the swatch pill.
-        m_swatchBoxes[i]->setText(QStringLiteral("%1 %2").arg(roles[i], sw[i].toLower()));
+        // Display ONLY clean role name inside the rounded pill chip, with hex in tooltip.
+        m_swatchBoxes[i]->setText(roles[i]);
+        m_swatchBoxes[i]->setFixedHeight(26);
+        m_swatchBoxes[i]->setMinimumWidth(82);
         QPalette pal = m_swatchBoxes[i]->palette();
         pal.setColor(QPalette::All, QPalette::WindowText, fgColor);
         pal.setColor(QPalette::All, QPalette::Text, fgColor);
         m_swatchBoxes[i]->setPalette(pal);
         m_swatchBoxes[i]->setStyleSheet(
-            QStringLiteral("background-color: %1; color: %2; border: 1px solid #3b4048; "
-                           "border-radius: 4px; min-width: 96px; min-height: 28px; "
-                           "padding: 3px 8px; font-size: 11px; font-weight: 600;")
-                .arg(sw[i], fgHex));
+            QStringLiteral("background-color: %1; color: %2; border: 1px solid %3; "
+                           "border-radius: 6px; padding: 4px 10px; min-width: 68px; max-width: 84px; "
+                           "font-size: 11px; font-weight: 600;")
+                .arg(sw[i], fgHex, bdrHex));
         m_swatchBoxes[i]->setToolTip(QStringLiteral("%1: %2").arg(roles[i], sw[i]));
     }
 }

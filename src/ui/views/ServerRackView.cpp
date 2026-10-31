@@ -8,6 +8,7 @@
  */
 
 #include "ServerRackView.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 #include <QApplication>
 #include <QPalette>
 #include <QPainter>
@@ -52,8 +53,17 @@ public:
         QString pcStr = state.registers.contains(16) ? state.registers.value(16) : QStringLiteral("0x00401120");
 
         // Determine background and outline colors based on selection and hover state
-        QColor bgColor = isSelected ? QColor("#22303c") : (isHovered ? QColor("#1f242c") : QColor("#181b20"));
-        QColor borderColor = isSelected ? QColor("#528bff") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
+        const auto& tm = gridlock::core::ThemeManager::instance();
+        const auto pal = tm.paletteForTheme(tm.activeThemeId());
+        QColor bgColor;
+        QColor borderColor;
+        if (pal.isDark) {
+            bgColor = isSelected ? QColor("#22303c") : (isHovered ? QColor("#1f242c") : QColor("#181b20"));
+            borderColor = isSelected ? QColor("#528bff") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
+        } else {
+            bgColor = isSelected ? QColor("#ddf4ff") : (isHovered ? QColor(pal.headerHex).darker(108) : QColor(pal.headerHex));
+            borderColor = isSelected ? QColor(pal.accentHex) : (isHovered ? QColor(pal.accentHex).lighter(120) : QColor(pal.borderHex));
+        }
 
         QPainterPath path;
         path.addRoundedRect(rect, 3, 3);
@@ -83,7 +93,7 @@ public:
         QFont rankFont("JetBrains Mono", 8, QFont::Bold);
         rankFont.setStyleHint(QFont::Monospace);
         painter->setFont(rankFont);
-        painter->setPen(QColor("#e5e9f0"));
+        painter->setPen(pal.isDark ? QColor("#e5e9f0") : QColor(pal.textHex));
         painter->drawText(QRect(rect.left() + 6, rect.top() + 3, 54, 14),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("RANK %1").arg(rankId));
@@ -105,7 +115,7 @@ public:
         QFont pcFont("JetBrains Mono", 8);
         pcFont.setStyleHint(QFont::Monospace);
         painter->setFont(pcFont);
-        painter->setPen(QColor("#4ec9b0"));
+        painter->setPen(pal.isDark ? QColor("#4ec9b0") : QColor(pal.accentHex));
         painter->drawText(QRect(rect.left() + 6, rect.top() + 18, rect.width() - 12, 14),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           pcStr);
@@ -149,6 +159,10 @@ ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
 
     // Connect user clicks to selection dispatcher
     connect(this, &QListWidget::itemClicked, this, &ServerRackView::onItemClicked);
+    reloadStyle();
+    connect(&gridlock::core::ThemeManager::instance(),
+            &gridlock::core::ThemeManager::themeModeChanged,
+            this, [this](bool) { reloadStyle(); });
 }
 
 /**
@@ -343,6 +357,34 @@ void ServerRackView::onItemClicked(QListWidgetItem* item) {
         int rankId = item->data(Qt::UserRole).toInt();
         selectRank(rankId);
     }
+}
+
+/**
+ * @brief Returns active list canvas background color according to the theme.
+ */
+QColor ServerRackView::activeCanvasBackgroundColor() const {
+    return palette().color(QPalette::Base);
+}
+
+/**
+ * @brief Reloads widget styling according to the active theme palette.
+ */
+void ServerRackView::reloadStyle() {
+    auto& tm = gridlock::core::ThemeManager::instance();
+    const auto pal = tm.paletteForTheme(tm.activeThemeId());
+    QPalette p = palette();
+    p.setColor(QPalette::Base, QColor(pal.canvasHex));
+    p.setColor(QPalette::Window, QColor(pal.canvasHex));
+    p.setColor(QPalette::Text, QColor(pal.textHex));
+    setPalette(p);
+    setStyleSheet(QStringLiteral(
+        "QListWidget { background-color: %1; color: %2; border: none; }")
+        .arg(pal.canvasHex, pal.textHex));
+    if (viewport()) {
+        viewport()->setPalette(p);
+        viewport()->setStyleSheet(QStringLiteral("background-color: %1; border: none;").arg(pal.canvasHex));
+    }
+    update();
 }
 
 }  // namespace gridlock::ui

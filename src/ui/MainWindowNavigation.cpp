@@ -34,7 +34,6 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QGuiApplication>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -42,16 +41,12 @@
 #include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
-#include <QScreen>
 #include <QShortcut>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QToolTip>
 #include <QVariant>
-#include <QWindow>
 #include <algorithm>
-#include <cmath>
-#include <functional>
 #include <vector>
 
 namespace gridlock::ui {
@@ -317,126 +312,6 @@ bool MainWindow::captureWorkspaceSnapshot(const QString& outputPath) {
     return pixmap.save(outputPath, "PNG");
 }
 
-/**
- * @brief Resolves a monitor hint string to an active QScreen display.
- * @param monitorHint Substring match for screen name, manufacturer, or geometry.
- * @return Matched QScreen pointer or primaryScreen() fallback.
- */
-QScreen* MainWindow::resolvePreferredScreen(const QString& monitorHint) const {
-    const QList<QScreen*> screens = QGuiApplication::screens();
-    if (screens.isEmpty()) {
-        return nullptr;
-    }
-    const QString hint = monitorHint.trimmed();
-    if (hint.isEmpty()) {
-        return QGuiApplication::primaryScreen();
-    }
-    for (QScreen* scr : screens) {
-        if (!scr) {
-            continue;
-        }
-        const QRect geom = scr->geometry();
-        const QSizeF phys = scr->physicalSize();
-        const int diagInches =
-            qRound(std::hypot(phys.width(), phys.height()) / 25.4);
-        const QString meta = QString("%1 %2 %3 %4x%5 %6\" %6in")
-                                 .arg(scr->name(), scr->model(), scr->manufacturer())
-                                 .arg(geom.width())
-                                 .arg(geom.height())
-                                 .arg(diagInches);
-        if (meta.contains(hint, Qt::CaseInsensitive)) {
-            return scr;
-        }
-    }
-    return QGuiApplication::primaryScreen();
-}
-
-/**
- * @brief Moves and routes window placement to a preferred secondary monitor.
- * @param monitorHint Display descriptor query string.
- * @param openUnfocused Whether window should remain unfocused on launch.
- */
-void MainWindow::applyPreferredScreenRouting(const QString& monitorHint,
-                                             bool openUnfocused) {
-    m_preferredMonitorHint = monitorHint.trimmed();
-    if (m_preferredMonitorHint.isEmpty()) {
-        setAttribute(Qt::WA_ShowWithoutActivating, false);
-        return;
-    }
-    setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
-    if (QScreen* target = resolvePreferredScreen(m_preferredMonitorHint)) {
-        if (target != QGuiApplication::primaryScreen()) {
-            setScreen(target);
-            if (windowHandle()) {
-                windowHandle()->setScreen(target);
-            }
-            move(target->availableGeometry().topLeft());
-        }
-    }
-}
-
-/**
- * @brief Checks if backward history traversal is possible.
- * @return True if previous address entries exist in the history stack.
- */
-bool MainWindow::canNavigateBack() const { return m_seekHistoryIndex > 0; }
-
-/**
- * @brief Checks if forward history traversal is possible.
- * @return True if forward address entries exist beyond current index.
- */
-bool MainWindow::canNavigateForward() const {
-    return m_seekHistoryIndex >= 0 &&
-           m_seekHistoryIndex + 1 < m_seekHistory.size();
-}
-
-/**
- * @brief Synchronizes enabled/disabled state of toolbar navigation buttons.
- */
-void MainWindow::updateNavigationButtons() {
-    if (m_navBackBtn) {
-        m_navBackBtn->setEnabled(canNavigateBack());
-    }
-    if (m_navForwardBtn) {
-        m_navForwardBtn->setEnabled(canNavigateForward());
-    }
-}
-
-/**
- * @brief Navigates backward in the address seek history stack.
- * @return True if previous address was reached and synchronized.
- */
-bool MainWindow::navigateBack() {
-    if (!canNavigateBack()) {
-        return false;
-    }
-    // Decrement history cursor and seek without appending duplicate entries.
-    --m_seekHistoryIndex;
-    m_isNavigatingHistory = true;
-    const bool ok =
-        seekToAddressOrExpression(m_seekHistory.at(m_seekHistoryIndex));
-    m_isNavigatingHistory = false;
-    updateNavigationButtons();
-    return ok;
-}
-
-/**
- * @brief Navigates forward in the address seek history stack.
- * @return True if next address was reached and synchronized.
- */
-bool MainWindow::navigateForward() {
-    if (!canNavigateForward()) {
-        return false;
-    }
-    // Increment history cursor and seek without appending duplicate entries.
-    ++m_seekHistoryIndex;
-    m_isNavigatingHistory = true;
-    const bool ok =
-        seekToAddressOrExpression(m_seekHistory.at(m_seekHistoryIndex));
-    m_isNavigatingHistory = false;
-    updateNavigationButtons();
-    return ok;
-}
 
 /**
  * @brief Synchronizes all inspection views to an address or symbol expression.
@@ -734,15 +609,18 @@ void MainWindow::loadSession() {
 
     const auto& state = *optState;
 
+    // Reset watch expressions in DifferentialGrid before repopulating from session.
     if (m_differentialGrid) {
         m_differentialGrid->clearWatches();
     }
+    // Re-register each persisted watch expression as a variable column in DifferentialGrid.
     for (const auto& w : state.watchedVariables) {
         if (m_differentialGrid) {
             m_differentialGrid->addVariableColumn(w);
         }
     }
 
+    // Clear active session breakpoint cache and repopulate from file:line tuples.
     m_persistentBreakpoints.clear();
     for (const auto& bp : state.activeBreakpoints) {
         const auto parts = bp.split(':');
@@ -758,11 +636,14 @@ void MainWindow::loadSession() {
                 }
             }
 
+            // Synchronize active breakpoint markers to connected backend coordinators.
             if (auto* gdbCoord =
                     dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+                // Broadcast GDB breakpoint request to all monitored worker processes.
                 gdbCoord->broadcastBreakpoint(file, line, true, QString());
             } else if (auto* dapCoord =
                            dynamic_cast<DapCoordinator*>(m_coordinator)) {
+                // Toggle DAP coordinator breakpoint for the resolved source location.
                 dapCoord->toggleBreakpoint(file, line);
             }
         }

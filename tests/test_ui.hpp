@@ -192,5 +192,8 @@ private slots:
 
     /** @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector expression completion in ConditionalBreakpointDialog. */
     void testClangdLspBreakpointExpressionCompletion();
+
+    /** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and MainWindow*.cpp line count headroom. */
+    void testFullWorkstationLightThemePropagationAndLineCountHeadroom();
 };
 
