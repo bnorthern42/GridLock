@@ -1,4 +1,4 @@
-# GridLock v0.7.0 — High-Performance MPI Graphical Debugger & Binary Analysis Workstation
+# GridLock v0.7.0 — MPI Debugger & ELF Binary Inspector
 
 ![Version](https://img.shields.io/badge/Release-v0.7.0-brightgreen.svg?style=for-the-badge)
 [![Build Status](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml/badge.svg)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
@@ -8,116 +8,116 @@
 ![Meson/Ninja](https://img.shields.io/badge/Build-Meson%20|%20Ninja-blue.svg?style=for-the-badge)
 ![LLDB/DAP & GDB/MI3](https://img.shields.io/badge/Backend-LLDB--DAP%20|%20GDB--MI3-purple.svg?style=for-the-badge)
 
-**GridLock (`v0.7.0`)** is a Wayland-native, Qt6/C++23 graphical MPI debugger and binary analysis workstation engineered for parallel high-performance computing (HPC) and systems reverse engineering. It unifies multi-rank MPI execution control, cross-rank variable and memory diffing, native ELF64 binary inspection, orthogonal Control Flow Graph (CFG) visualization, and multi-target decompilation inside a zero-gutter `#16181d` dark-slate workstation layout.
+**GridLock (`v0.7.0`)** is a C++ and Qt6 debugger for multi-rank MPI applications and ELF binaries on Linux. It lets you step individual MPI ranks, compare variables and memory across processes, inspect disassembly and control-flow graphs, and catch communication deadlocks.
 
 ---
 
-## Workstation Overview & Perspectives
+## Workspace Perspectives
 
-### 1. Code + Disassembly Perspective (`Alt+1` / `CODE`)
-Synchronized C/C++ source stepping (`SourceCodeView`), linear assembly with branch-flow arcs (`DisassemblyView`), live x86_64 register telemetry (`RegisterView`), cross-rank watch comparison (`DifferentialGrid`), 8-rank cluster status (`ServerRackView`), and zero-copy hexadecimal memory inspection (`MemView`).
+### 1. Code + Disassembly (`Alt+1` / `CODE`)
+Side-by-side C/C++ source stepping (`SourceCodeView`), linear assembly with branch arcs (`DisassemblyView`), CPU registers (`RegisterView`), cross-rank watch comparisons (`DifferentialGrid`), rank status cards (`ServerRackView`), and a hex memory viewer (`MemView`).
 
 ![GridLock Workspace Overview](docs/screenshots/workspace_overview.png)
 
-### 2. Reverse Engineering Perspective (`Alt+2` / `REVERSE`)
-One-click full-stage expansion combining the orthogonal basic-block Control Flow Graph (with per-block MPI rank occupancy badges `[R0]`, `[R1]`, `[R2-R7]` and interactive minimap overlay) alongside the synchronized multi-target (`Approx C`, `C++`, `Pseudocode`) decompiler and cross-reference (`XREF`) comments.
+### 2. Reverse Engineering (`Alt+2` / `REVERSE`)
+Full-width split view pairing the basic-block Control Flow Graph (with per-block MPI rank badges `[R0]`, `[R1]`, `[R2-R7]` and a corner minimap) with a synchronized decompiler (`Approx C`, `C++`, `Pseudocode`) and cross-reference (`XREF`) comments.
 
 ![GridLock CFG & Decompiler Split Perspective](docs/screenshots/cfg_decompiler_split.png)
 
-### 3. MPI Cluster & Deadlock Diagnostics Perspective (`Alt+3` / `MPI`)
-Dedicated multi-rank wait-for cycle analysis (`DeadlockAnalyzer`), structured 6-column collective/point-to-point network telemetry (`MpiDiagnosticsWidget` / `MpiNetworkLogWidget`), and integrated offline Zeal `.docset` SQLite/HTML & system `man` documentation (`ReferenceManualWidget`).
+### 3. MPI Diagnostics (`Alt+3` / `MPI`)
+Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MPI point-to-point and collective message logs (`MpiDiagnosticsWidget` / `MpiNetworkLogWidget`), and offline documentation via Zeal docsets and system `man` pages (`ReferenceManualWidget`).
 
 ![GridLock MPI Diagnostics & Deadlock Analyzer](docs/screenshots/mpi_diagnostics_docsets.png)
 
 ---
 
-## Core Workstation Capabilities
+## Features
 
-### Parallel MPI Rank Debugging
-* **Inline Target & MPI Rank (`-np`) Toolbar Configuration:** Select MPI demonstration targets or load arbitrary ELF64 binaries directly from `#toolbarTargetSelector`, adjust cluster rank counts (`1..64`) via `#toolbarRankSpin`, and drive state-aware execution (`Run Target`, `Continue`, `Step Inst`, `Pause Rank`, `Stop`, `Terminate Session`).
-* **Synchronized Multi-View Step Execution:** Stepping instructions (`Step Inst`) advances the program counter across `DisassemblyView` (Linear, CFG Graph, and Decompiler), `SourceCodeView` (emerald `▶` gutter indicator and full-width active line highlight), `RegisterView` (`rip`, `rsp`, `rbp`, `rax`, `eflags`), `ServerRackView`, and `MemView`.
-* **Cross-Rank Watch Matrix (`DifferentialGrid`):** Compare arbitrary C/C++ expressions (e.g., `data[0].id`, `data[0].coords.x`, `mpi_rank`) across all active MPI ranks simultaneously, with one-click promotion from the `Variables` dock or `Evaluator` console.
-* **Circular Wait-For Deadlock Detection (`DeadlockAnalyzer`):** Detects directed wait-for cycles across blocked MPI ranks (`MPI_Send` / `MPI_Recv` / `MPI_Barrier`), badging affected nodes in both `ServerRackView` and the 2D Control Flow Graph with crimson `DEADLOCK CYCLE` alerts.
-* **Zero-Copy Cross-Rank Memory Differ (`MemoryDiffer`):** Extracts raw process memory via `process_vm_readv` and highlights byte-level discrepancies between any two MPI ranks in `MemView`.
+### Multi-Rank MPI Debugging
+* **Toolbar Target & Rank Controls:** Pick an MPI demo target or load any ELF64 binary from the toolbar, set the process count (`-np 1..64`), and run, step, pause, or stop individual ranks.
+* **Synchronized Source & Assembly Stepping:** Stepping an instruction updates the active address across the disassembly view, CFG, decompiler, source editor, register table, rank status panel, and hex memory view.
+* **Cross-Rank Watch Table (`DifferentialGrid`):** Evaluate C/C++ expressions (such as `data[0].id`, `data[0].coords.x`, or `mpi_rank`) across all active ranks at once, or promote variables directly from the `Variables` and `Evaluator` panels.
+* **Deadlock Cycle Detection (`DeadlockAnalyzer`):** Builds a wait-for graph across blocked `MPI_Send`, `MPI_Recv`, and `MPI_Barrier` calls and flags circular dependencies in both the rank rack and the control-flow graph.
+* **Cross-Rank Memory Diffing (`MemoryDiffer`):** Reads process memory directly via `process_vm_readv` and highlights byte differences between any two MPI ranks in `MemView`.
 
-### Binary Analysis & Reverse Engineering
-* **Native ELF64 Binary Inspector (`ElfBinaryInspector`):** Parses 64-bit ELF headers, section tables (`.plt`, `.text`, `.rodata`, `.data`), `.symtab`/`.dynsym` symbol tables, and printable ASCII strings without external dependencies, mapped onto the interactive address-space navigation ribbon.
-* **Orthogonal Control Flow Graph & Rank Divergence Badges:** Partitions assembly listings into basic blocks connected by Manhattan-routed true (green), false (red), and unconditional (blue) edges, annotated with live MPI rank occupancy badges and a draggable corner minimap.
-* **Multi-Target Decompiler & Bidirectional Sync:** Reconstructs structured `Approx C`, `C++`, or `Pseudocode` with `XREFS TO` comments and function signatures. Clicking any C/C++ line in `SourceCodeView` or `Decompiler` automatically seeks `DisassemblyView`, `CFG`, and `MemView` to the corresponding virtual instruction address (and vice versa).
-* **Interactive Xref & Call-Graph Navigator (`XrefInspectorDialog`):** Press `X` on any instruction to inspect incoming callers/branches (`XREFS TO`) and outgoing calls/jumps (`XREFS FROM`) with live preview and double-click navigation.
-* **Live Instruction & Hex Byte Patching with ELF Export:** Assemble live instruction patches (`Ctrl+Shift+P` / `nop`, `ret`, `xor eax, eax`, `jmp`, `je`, `jne`) or edit raw hex bytes (`Ctrl+E` in `MemView`), and persist the modified image to disk as an executable ELF64 binary (`ElfBinaryInspector::savePatchedBinary`).
+### Binary Inspection & Reverse Engineering
+* **ELF64 Parser (`ElfBinaryInspector`):** Reads ELF headers, sections (`.plt`, `.text`, `.rodata`, `.data`), symbol tables (`.symtab`, `.dynsym`), and printable strings directly from disk, displaying section layout in an address-space navigation bar.
+* **Control Flow Graph & Rank Badges:** Breaks assembly routines into basic blocks with true, false, and unconditional branch edges, showing which MPI ranks are stopped inside each block.
+* **Decompiler & Bidirectional Navigation:** Generates readable `Approx C`, `C++`, or `Pseudocode` alongside assembly. Clicking a line in the source editor or decompiler jumps the disassembly, CFG, and memory views to the matching instruction address, and vice versa.
+* **Cross-Reference Inspector (`XrefInspectorDialog`):** Press `X` on any instruction to list callers and incoming branches (`XREFS TO`) as well as outgoing calls and jumps (`XREFS FROM`).
+* **Instruction & Byte Patching:** Patch assembly instructions (`Ctrl+Shift+P`) or raw hex bytes (`Ctrl+E` in `MemView`) and write the modified ELF64 binary back to disk (`ElfBinaryInspector::savePatchedBinary`).
 
-### Integrated Developer Environment & Cluster Tooling
-* **Two-Lane Vector Gutter & Cursor-Anchored Breakpoint Popover (`SourceCodeView` + `ConditionalBreakpointDialog`):** Right-clicking any gutter line opens a frameless cursor-anchored popover displaying line context, rank suspension scope (`All MPI Ranks` vs. `Focused Rank Only`), and live `clangd` LSP virtual-buffer C++ expression completion (`ClangdLspClient`).
-* **Left Vertical Tool-Window Icon Rail (`#bottomToolWindowRail`):** Organizes the bottom dock into four linked tool groups (`Debug`, `MPI`, `Terminal`, `Docs`), pairing a `36px` vertical icon rail with contextual sub-tabs and a flattened single-row `MPI Diagnostics` header.
-* **Multi-Distro HPC & System Package Manager (`HpcConsoleWidget`):** Auto-detects `spack`, `pacman`, `dnf`, `apt`, `zypper`, `rpm`, `dpkg-query`, and `eb`, presenting `"mpi"` and system package queries across switchable `Table`, `List`, and `Raw` views.
-* **16-Directive SLURM Batch Auto-Detector & Smart Build System:** Parses `#SBATCH` job scripts directly inside `PreferencesDialog` (`HPC / Cluster`) and auto-detects `Meson`, `CMake`, `Make`, or standalone `mpicxx` builds (`F7`).
-* **Zero-Gutter Workstation Chrome & 8 Curated Themes:** Engineered around a two-tier panel architecture (`24px` header strips with `0px` outer viewport margins) across 5 dark themes and 3 high-contrast light themes (`Daylight Paper`, `Solarized Warm`, `Catppuccin Latte`).
-* **Offline Zeal Docsets & System Man Viewer (`ReferenceManualWidget`):** Auto-discovers installed Zeal `.docset` SQLite/HTML bundles (`~/.local/share/Zeal/Zeal/docsets`) alongside system `man` pages (`F1`).
-* **Isolated Fixed-Pitch PTY Terminal (`TerminalDockWidget`):** Embeds a real `QTermWidget` pseudo-terminal enforcing strict fixed-pitch font isolation (`DejaVu Sans Mono` / `Cascadia Code` / `Liberation Mono`).
+### Editor, Cluster Tools & Environment
+* **Gutter Breakpoint Popover & `clangd` Completion:** Right-clicking a line in the source gutter opens a compact popover right next to the cursor where you can filter breakpoints by rank (`All MPI Ranks` or `Focused Rank Only`) and write conditional expressions with live `clangd` autocomplete.
+* **Bottom Tool Rail:** Groups the bottom dock panels into four categories (`Debug`, `MPI`, `Terminal`, `Docs`) on a vertical icon rail so only relevant tabs are shown at a time.
+* **System & HPC Package Search (`HpcConsoleWidget`):** Queries `spack`, `pacman`, `dnf`, `apt`, `zypper`, `rpm`, `dpkg-query`, and `eb` from a single search tab with `Table`, `List`, and `Raw` output modes.
+* **SLURM Script Parser & Build Runner:** Imports `#SBATCH` directives and `module load` lines from existing batch scripts in `PreferencesDialog` (`HPC / Cluster`), and builds projects with `Meson`, `CMake`, `Make`, or `mpicxx` (`F7`).
+* **Dark & Light Themes:** Includes 5 dark themes and 3 light themes (`Daylight Paper`, `Solarized Warm`, `Catppuccin Latte`) with live UI and code font scaling in Preferences.
+* **Offline Zeal Docsets & Man Pages (`ReferenceManualWidget`):** Searches local Zeal `.docset` bundles (`~/.local/share/Zeal/Zeal/docsets`) and system `man` pages (`F1`).
+* **Embedded Terminal (`TerminalDockWidget`):** Built-in `QTermWidget` pseudo-terminal for running local shell or cluster commands.
 
-| Cursor-Anchored Breakpoint Popover | Multi-Distro Package Manager (`"mpi"` Search) |
+| Conditional Breakpoint Popover | Package Manager (`"mpi"` Search) |
 | :---: | :---: |
 | ![Breakpoint Popover](docs/screenshots/breakpoint_popover.png) | ![Package Manager MPI Search](docs/screenshots/package_manager_mpi_search.png) |
 
-| Bottom Tool Rail (`Debug` Mode) | 16-Directive `#SBATCH` Auto-Detection |
+| Bottom Tool Rail (`Debug` Mode) | `#SBATCH` Script Import |
 | :---: | :---: |
 | ![Tool Rail Debug Tabs](docs/screenshots/tool_rail_debug_tabs.png) | ![SLURM Auto-Detection](docs/screenshots/preferences_slurm_autodetect.png) |
 
 ---
 
-## Keyboard Shortcuts & Perspectives Reference
+## Keyboard Shortcuts
 
 | Shortcut | Action | Scope |
 | :--- | :--- | :--- |
-| **`Alt+1`** | Switch to **Code** Perspective (`SourceCodeView` + `DisassemblyView`) | Global |
-| **`Alt+2`** | Switch to **Reverse** Perspective (Full-width Split `CFG` + `Decompiler`) | Global |
-| **`Alt+3`** | Switch to **MPI** Perspective (`MPI Diagnostics` & Cluster Focus) | Global |
-| **`Ctrl+M`** | Toggle Maximize / Restore Bottom Console Dock (`68%` height) | Global |
-| **`Ctrl+G`** | Focus Global Address / Symbol Seek Bar (`#cutterSeekBar`) | Global |
-| **`Alt+Left` / `Alt+Right`** | Navigate Backward / Forward in Address Seek History | Global |
-| **`Space`** | Toggle `DisassemblyView` between Linear Assembly and 2D CFG Graph | Disassembly / CFG |
-| **`X`** | Open Interactive Cross-Reference (`XrefInspectorDialog`) for Active Address | Disassembly / CFG |
-| **`F1`** | Context-Sensitive Symbol Lookup in `Reference Manual` (Zeal / Man) | Disassembly / Global |
-| **`Ctrl+Shift+P`** | Patch Active Instruction in `DisassemblyView` | Disassembly |
-| **`Ctrl+E`** | Patch Raw Hex Bytes at Active Address in `MemView` | Memory View |
-| **`Ctrl+Shift+F`** | Unified Multi-Domain Workspace Search (Symbols, Strings, Asm, Decompiler) | Global |
-| **`;`** | Add / Edit Inline User Comment at Active Instruction Address | Disassembly |
-| **`Ctrl+B`** | Toggle Address Bookmark on Active Instruction | Disassembly |
+| **`Alt+1`** | Switch to **Code** perspective (`SourceCodeView` + `DisassemblyView`) | Global |
+| **`Alt+2`** | Switch to **Reverse** perspective (Split `CFG` + `Decompiler`) | Global |
+| **`Alt+3`** | Switch to **MPI** perspective (`MPI Diagnostics` & cluster views) | Global |
+| **`Ctrl+M`** | Toggle maximize / restore bottom dock | Global |
+| **`Ctrl+G`** | Focus address / symbol seek bar | Global |
+| **`Alt+Left` / `Alt+Right`** | Navigate backward / forward in address history | Global |
+| **`Space`** | Toggle `DisassemblyView` between linear assembly and CFG | Disassembly / CFG |
+| **`X`** | Open cross-reference dialog (`XrefInspectorDialog`) for current address | Disassembly / CFG |
+| **`F1`** | Look up symbol in Reference Manual (Zeal / `man`) | Disassembly / Global |
+| **`Ctrl+Shift+P`** | Patch instruction in `DisassemblyView` | Disassembly |
+| **`Ctrl+E`** | Edit hex bytes at active address in `MemView` | Memory View |
+| **`Ctrl+Shift+F`** | Search across symbols, strings, assembly, and decompiler output | Global |
+| **`;`** | Add or edit inline comment at active instruction address | Disassembly |
+| **`Ctrl+B`** | Toggle bookmark on active instruction | Disassembly |
 
 ---
 
-## Building, Testing & Headless Snapshots
+## Building & Running
 
-### Prerequisites
-* **C++23 Compiler:** GCC 13+ or Clang 16+
-* **Build System:** Meson (`>= 1.1`) and Ninja
-* **Qt 6 Modules:** `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, `Qt6Sql`, `Qt6Concurrent`, `Qt6Svg`, `Qt6OpenGLWidgets`, `Qt6Test`
+### Dependencies
+* **Compiler:** GCC 13+ or Clang 16+ (C++23)
+* **Build tools:** Meson (`>= 1.1`) and Ninja
+* **Qt 6:** `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, `Qt6Sql`, `Qt6Concurrent`, `Qt6Svg`, `Qt6OpenGLWidgets`, `Qt6Test`
 * **Libraries:** `qtermwidget6`, `tomlplusplus`, and bundled `Qt-Advanced-Stylesheets`
 
-### Build & Run
+### Compile & Launch
 ```bash
 meson setup builddir
-ninja -C builddir
+ninja -C builddir gridlock
 
-# Launch interactive workstation
+# Launch GridLock
 ./builddir/gridlock
 ```
 
-### Running the Full Test Suite (Headless)
-GridLock includes 26 automated test suites (including 43 end-to-end UI cohesion, workflow, binary analysis, and repository-wide Google C++ Style / `< 950` LOC / `>= 20%` documentation audits):
+### Running the Test Suite
+GridLock has 26 test suites covering the debugger backend, ELF/DWARF parsers, MPI deadlock detection, and UI workflows:
 ```bash
 find builddir -name "*.gcda" -delete && meson test -C builddir --print-errorlogs
 ```
 
-### Headless Offscreen Snapshot Generation
-Capture deterministic `1440x900` PNG snapshots without opening a visible Wayland/X11 window:
+### Headless Screenshot Capture
+Render a window snapshot offscreen without a display server:
 ```bash
 QT_QPA_PLATFORM=offscreen ./builddir/gridlock --headless --snapshot docs/screenshots/workspace_overview.png
 ```
 
 ### Configuration (`config.toml` & `.gridlock/workspace.toml`)
-User preferences are stored in `~/.config/gridlock/config.toml` and per-project settings in `.gridlock/workspace.toml`:
+Global settings live in `~/.config/gridlock/config.toml` and per-project overrides in `.gridlock/workspace.toml`:
 ```toml
 [ui]
 preferred_monitor = "2560x1440"
@@ -129,26 +129,26 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 
 ---
 
-## Documentation Index
+## Documentation
 
-* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed `v0.7.0` foundations and upcoming milestones across Phases 7–10.
-* [**Architecture & Modularity Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — 4-zone workstation layout, translation unit partitioning, signal choreography, and code quality invariants.
-* [**User Workflow Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Step-by-step guide to MPI rank debugging, CFG/Decompiler analysis, live binary patching, and Zeal docset integration.
-* [**Workstation Color Themes & Typography Gallery (`docs/THEMES.md`)**](docs/THEMES.md) — Visual showcase and hex color matrices for curated workstation themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`, `Daylight Paper`, `Solarized Warm`, and `Catppuccin Latte`) and live font scaling.
-* [**User Documentation Suite (`docs/user/README.md`)**](docs/user/README.md) — Detailed interface, advanced debugging, and HPC cluster guides.
-* [**Developer Documentation Suite (`docs/developer/README.md`)**](docs/developer/README.md) — Core coordinators, security sanitizers, and UI internals.
+* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Current `v0.7.0` feature set and planned work for `v0.8.0`.
+* [**Architecture Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — Window layout, module organization, and signal wiring.
+* [**User Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Walkthroughs for MPI debugging, conditional breakpoints, package search, SLURM import, and binary patching.
+* [**Themes & Fonts (`docs/THEMES.md`)**](docs/THEMES.md) — Screenshots and color reference table for the built-in dark and light themes.
+* [**User Manual (`docs/user/README.md`)**](docs/user/README.md) — Reference pages for panels, shortcuts, and cluster setup.
+* [**Developer Notes (`docs/developer/README.md`)**](docs/developer/README.md) — Internals on backend coordinators, sanitizers, and UI widgets.
 
 ---
 
 ## Roadmap (`v0.7.0` → `v0.8.0`)
 
-See [**ROADMAP.md**](ROADMAP.md) (and [`docs/ROADMAP.md`](docs/ROADMAP.md)) for full architectural details:
+See [**ROADMAP.md**](ROADMAP.md) (and [`docs/ROADMAP.md`](docs/ROADMAP.md)) for details:
 
-* **Completed Foundations (`Phases 1–6.5` & `v0.7.0` ✅):** Real ELF64/DWARF debugging (`objdump` + `.debug_line`), breakpoint-first execution, circular `MPI_Send` deadlock detection, zero-copy `process_vm_readv` memory inspection, cursor-anchored breakpoint popover with live `clangd` JSON-RPC 2.0 completion, `36px` Tool-Window Icon Rail, Wayland-compatible floating docks, 8 Dark/Light themes, 16-directive `#SBATCH` generator, multi-distro Package Manager (`rpm`/`dnf5`/`pacman`/`apt`/`zypper`/`spack`), and automated GitHub Actions `appimagetool` AppImage releases.
-* **Phase 7 — Continuous Bug Auditing, Static Analysis & Security Hardening:** Systematic `cppcheck`, `clang-tidy`, and JetBrains CLion inspection sweeps, SonarQube / SonarCloud quality gates, and ASan/UBSan/`MALLOC_PERTURB_` hardening across memory and ELF/DWARF parsers.
-* **Phase 8 — Qt6 Theme Engine Stabilization & UI Polish:** Light theme contrast fixes (`MemView`, `ProjectExplorerWidget`, section ribbon, mode buttons), `DisassemblyView` header layout polish, missing `Solarized Warm` / `Catppuccin Latte` gallery screenshots, and a tokenized Qt palette system (`Nord`, `One Dark Pro`, `One Light`, `Dracula`).
-* **Phase 9 — Guided Hands-On Tutorials (`docs/TUTORIAL.md`):** Step-by-step walkthrough covering `deadlock_ring.cpp` cycle diagnosis, rank-filtered conditional breakpoints with `clangd` completion on `inspection_demo.cpp`, cross-rank memory diffing, and Zeal docsets.
-* **Phase 10 (`v0.8.0`) — Workstation Editor Ergonomics & Deep `clangd` LSP:** Interactive Project Explorer file/folder CRUD, dirty buffer indicators (`●`) + split editors + Header/Source toggle (`F10`), live `clangd` diagnostics/hover/Go-to-Definition (`F12`)/rename (`Shift+F6`), Git diff gutter markers, and local debugger engine selection (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`).
+* **Completed in `v0.7.0`:** ELF64/DWARF line mapping (`objdump` + `.debug_line`), breakpoint-first execution, circular `MPI_Send` deadlock detection, `process_vm_readv` cross-rank memory inspection, conditional breakpoint popover with `clangd` completion, bottom tool-window icon rail, Wayland-friendly floating docks, 8 dark/light themes, `#SBATCH` script importer, multi-distro package search, and GitHub Actions AppImage builds.
+* **Phase 7 — Static Analysis & Hardening:** `cppcheck`, `clang-tidy`, CLion inspection cleanups, SonarQube quality checks, and ASan/UBSan fuzzing on ELF/DWARF and memory readers.
+* **Phase 8 — Theme & Layout Polish:** Light theme contrast fixes (`MemView`, `ProjectExplorerWidget`, section ribbon, mode buttons), `DisassemblyView` header spacing, missing `Solarized Warm` and `Catppuccin Latte` screenshots, and a shared palette token system.
+* **Phase 9 — Hands-On Tutorials (`docs/TUTORIAL.md`):** Step-by-step guides for diagnosing `deadlock_ring.cpp`, setting rank-filtered conditional breakpoints on `inspection_demo.cpp`, diffing memory across ranks, and browsing Zeal docsets.
+* **Phase 10 (`v0.8.0`) — Editor & `clangd` LSP Integration:** Project Explorer file creation/renaming, unsaved buffer markers, split editors, header/source switching (`F10`), live `clangd` diagnostics and Go-to-Definition (`F12`), Git diff gutter markers, and selectable debugger backends (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`).
 
 ---
 

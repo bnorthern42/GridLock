@@ -1,12 +1,12 @@
-# GridLock Workstation Color Themes & Typography Gallery
+# GridLock Themes & Font Settings
 
-GridLock provides **8 curated workstation color themes** (5 dark themes and 3 high-contrast light themes) engineered for zero-gutter multi-rank MPI debugging, x86_64/AArch64/RISC-V disassembly, Control Flow Graph (CFG) visualization, and multi-target decompilation.
+GridLock includes **8 built-in color themes** (5 dark and 3 light) for the editor, disassembly view, control-flow graph, and dock panels.
 
-All themes are selectable live in **`Edit -> Preferences (Ctrl+,) -> Appearance`** with zero raw underscore identifiers and an interactive 5-swatch palette preview strip (`Canvas`, `Header`, `Border`, `Accent`, `Text`). Selecting any theme automatically synchronizes workstation Dark/Light polarity across the main window, source editor, disassembly/CFG/decompiler views, and dialogs.
+You can switch themes at any time in **`Edit -> Preferences (Ctrl+,) -> Appearance`**. The dialog shows a 5-color swatch preview (`Canvas`, `Header`, `Border`, `Accent`, `Text`) for the selected theme and updates the main window, source editor, disassembly/CFG/decompiler views, and dialogs immediately when applied.
 
 ---
 
-## Curated Color Palette Matrix
+## Color Palette Reference Table
 
 | Theme Name | Internal ID | Canvas (`bg`) | Header (`hdr`) | Structural Border | Primary Accent | Primary Text | Polarity |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -15,71 +15,71 @@ All themes are selectable live in **`Edit -> Preferences (Ctrl+,) -> Appearance`
 | **Tokyo Night** | `tokyo_night` | `#1a1b26` | `#24283b` | `#3b4261` | `#7aa2f7` | `#c0caf5` | Dark |
 | **Catppuccin Mocha** | `catppuccin_mocha` | `#1e1e2e` | `#181825` | `#313244` | `#89b4fa` | `#cdd6f4` | Dark |
 | **Gruvbox Industrial** | `gruvbox_dark` | `#1d2021` | `#282828` | `#3c3836` | `#fe8019` | `#ebdbb2` | Dark |
-| **Daylight Paper (Light)** | `daylight_light` | `#f5f6f8` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#1f2328` | High-Contrast Light |
-| **Solarized Warm (Light)** | `solarized_light` | `#fdf6e3` | `#eee8d5` | `#d3cbb7` | `#268bd2` | `#586e75` | Warm Paper Light |
-| **Catppuccin Latte (Light)** | `catppuccin_latte` | `#eff1f5` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#4c4f69` | Crisp Pastel Light |
+| **Daylight Paper (Light)** | `daylight_light` | `#f5f6f8` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#1f2328` | Light |
+| **Solarized Warm (Light)** | `solarized_light` | `#fdf6e3` | `#eee8d5` | `#d3cbb7` | `#268bd2` | `#586e75` | Light |
+| **Catppuccin Latte (Light)** | `catppuccin_latte` | `#eff1f5` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#4c4f69` | Light |
 
 ---
 
-## Live Typography & Dynamic Control Scaling
+## Font Settings
 
-In **`Edit -> Preferences -> Appearance`**, GridLock provides four independent live typography controls that take effect immediately upon clicking **Apply** or **OK** (no application restart required):
+In **`Edit -> Preferences -> Appearance`**, you can adjust UI and code fonts independently without restarting GridLock:
 
-1. **UI Font Family (`appearance/ui_font_family`):** Scales menus, dock headers, tree/table views, buttons, and status strips (`Inter`, `Cantarell`, `Noto Sans`, `DejaVu Sans`, `Liberation Sans`, `System Default`).
-2. **UI Font Size (`appearance/ui_font_size`, `8 pt – 24 pt`):** Dynamically interpolates `font-size: %1pt` and proportional control heights across `ThemeManager`'s QSS engine (`QLineEdit`, `QComboBox`, `QSpinBox`, `QPushButton`, `QMenuBar`, `QMenu`, `QTableView`, `QTreeView`, `QTabBar`).
-3. **Code / Disassembly Font Family (`appearance/code_font_family`):** Sets the fixed-pitch font across `SourceCodeView`, `DisassemblyView` (Linear, CFG Graph, and Decompiler), and `MemView` (`Cascadia Code`, `Fira Code`, `DejaVu Sans Mono`, `Liberation Mono`, `Source Code Pro`, `Monospace`).
-4. **Code / Disassembly Font Size (`appearance/code_font_size`, `8 pt – 24 pt`):** Dynamically scales editor line numbers, assembly columns, CFG basic-block nodes, decompiler output, and hexadecimal memory views while keeping `TerminalDockWidget` strictly isolated on a fixed-pitch PTY grid.
+1. **UI Font Family (`appearance/ui_font_family`):** Font used for menus, dock headers, trees, tables, buttons, and status bars (`Inter`, `Cantarell`, `Noto Sans`, `DejaVu Sans`, `Liberation Sans`, or `System Default`).
+2. **UI Font Size (`appearance/ui_font_size`, `8 pt – 24 pt`):** Scales widget labels and control heights across menus, toolbars, tables, and tabs.
+3. **Code / Disassembly Font Family (`appearance/code_font_family`):** Monospace font used in `SourceCodeView`, `DisassemblyView` (linear assembly, CFG, and decompiler), and `MemView` (`Cascadia Code`, `Fira Code`, `DejaVu Sans Mono`, `Liberation Mono`, `Source Code Pro`, or `Monospace`).
+4. **Code / Disassembly Font Size (`appearance/code_font_size`, `8 pt – 24 pt`):** Scales editor line numbers, assembly listings, CFG nodes, decompiler output, and the hex memory viewer. The embedded terminal (`TerminalDockWidget`) maintains its own monospace terminal font so character grid alignment is preserved.
 
 ---
 
-## Workstation Theme Screenshots (`1600x960`)
+## Theme Screenshots
 
 ### 1. GridLock Slate (`gridlock_slate`)
-Default high-contrast dark slate palette (`#16181d` canvas, `#21252b` headers, `#00a2ff` azure accent).
+Default dark slate theme with blue accents.
 
 ![GridLock Slate Theme](screenshots/theme_gridlock_slate.png)
 
 ---
 
 ### 2. Obsidian Teal (`dark_teal`)
-Deep oceanic slate (`#111a1d` canvas, `#172429` headers, `#00bfa5` teal accent).
+Dark blue-green background with teal accents.
 
 ![Obsidian Teal Theme](screenshots/theme_obsidian_teal.png)
 
 ---
 
 ### 3. Tokyo Night (`tokyo_night`)
-Indigo-slate developer workstation palette (`#1a1b26` canvas, `#24283b` headers, `#7aa2f7` periwinkle blue accent).
+Dark indigo background with soft blue highlights.
 
 ![Tokyo Night Theme](screenshots/theme_tokyo_night.png)
 
 ---
 
 ### 4. Catppuccin Mocha (`catppuccin_mocha`)
-Warm pastel-on-charcoal palette (`#1e1e2e` canvas, `#181825` headers, `#89b4fa` sapphire accent).
+Charcoal background with pastel blue and lavender tones.
 
 ![Catppuccin Mocha Theme](screenshots/theme_catppuccin_mocha.png)
 
 ---
 
 ### 5. Gruvbox Industrial (`gruvbox_dark`)
-Warm retro-industrial hard contrast (`#1d2021` canvas, `#282828` headers, `#fe8019` amber-orange accent).
+Warm dark background with amber and orange highlights.
 
 ![Gruvbox Industrial Theme](screenshots/theme_gruvbox_dark.png)
 
 ---
 
 ### 6. Daylight Paper (`daylight_light`)
-High-contrast daylight paper theme (`#f5f6f8` canvas, `#e6e9ef` headers, `#1e66f5` cobalt accent) for bright environments and publication figures.
+Neutral light background with dark text and blue accents for bright rooms or screenshots.
 
 ![Daylight Paper Light Theme](screenshots/theme_daylight_light.png)
 
 ---
 
 ### 7. Solarized Warm (`solarized_light`)
-Warm cream precision daylight palette (`#fdf6e3` Base3 canvas, `#eee8d5` Base2 headers, `#268bd2` Solarized blue accent, `#586e75` Base01 text) engineered for low-glare extended reading.
+Warm cream background with muted slate text and blue accents based on Solarized Light.
 
 ---
 
 ### 8. Catppuccin Latte (`catppuccin_latte`)
-Soft alabaster-latte light workstation theme (`#eff1f5` Latte Base canvas, `#e6e9ef` Mantle headers, `#1e66f5` Sapphire/Blue accent, `#4c4f69` Text) with balanced contrast across editors, tables, and control-flow graphs.
+Soft light background with dark slate text and blue accents from the Catppuccin Latte palette.
