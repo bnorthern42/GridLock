@@ -448,38 +448,30 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     disassemblyView->setSplitGraphDecompilerMode(true);
     QVERIFY(disassemblyView->seekToAddress(0x0040113dULL));
     const int initLine = disassemblyView->currentDecompilerLine();
-    QVERIFY(initLine > 0);
-    QCOMPARE(disassemblyView->decompilerLineToAddress(initLine), 0x0040113dULL);
+    QVERIFY(initLine > 0 && disassemblyView->decompilerLineToAddress(initLine) == 0x0040113dULL);
     QCOMPARE(disassemblyView->addressToDecompilerLine(0x0040113dULL), initLine);
 
     // Select line in decompiler and verify memory view seeks to corresponding address.
     const int loopLine = disassemblyView->addressToDecompilerLine(0x00401149ULL);
-    QVERIFY(loopLine > 0);
-    QVERIFY(disassemblyView->selectDecompilerLine(loopLine));
+    QVERIFY(loopLine > 0 && disassemblyView->selectDecompilerLine(loopLine));
     QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
     QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
     // Highlight token in pseudocode and verify navigation history traversal.
     disassemblyView->highlightToken("argc");
     QCOMPARE(disassemblyView->highlightedToken(), QStringLiteral("argc"));
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x0040113d"));
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178"));
-    QVERIFY(mainWindow.canNavigateBack());
-    QVERIFY(mainWindow.navigateBack());
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120") && mainWindow.seekToAddressOrExpression("0x0040113d") && mainWindow.seekToAddressOrExpression("0x00401178"));
+    QVERIFY(mainWindow.canNavigateBack() && mainWindow.navigateBack());
     QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL);
     QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
-    QVERIFY(mainWindow.navigateForward());
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
+    QVERIFY(mainWindow.navigateForward() && disassemblyView->currentAddress() == 0x00401178ULL);
 
     // Activate string and verify memory view navigates to string address and address comment.
     projectExplorer->setStringsMode(true);
-    QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4);
-    QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD"));
+    QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4 && projectExplorer->activateString("MPI_COMM_WORLD"));
     QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
     disassemblyView->setAddressComment(0x00401149ULL, "Rank loop header");
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Rank loop header"));
-    QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
-    QVERIFY(disassemblyView->isBookmarked(0x00401149ULL));
+    QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL) && disassemblyView->isBookmarked(0x00401149ULL));
 }
 
 /**
@@ -505,20 +497,15 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
     QCOMPARE(disassemblyView->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3}));
 
     // Verify minimap visibility toggle and geometry constraints.
-    QVERIFY(disassemblyView->isGraphMinimapVisible());
-    const QRect mmRect = disassemblyView->minimapRect();
-    QVERIFY(mmRect.width() >= 80 && mmRect.height() >= 60);
+    QVERIFY(disassemblyView->isGraphMinimapVisible() && disassemblyView->minimapRect().width() >= 80 && disassemblyView->minimapRect().height() >= 60);
     disassemblyView->setGraphMinimapVisible(false);
     QVERIFY(!disassemblyView->isGraphMinimapVisible());
     disassemblyView->setGraphMinimapVisible(true);
     QVERIFY(disassemblyView->isGraphMinimapVisible());
 
     // Select rank 1 in ServerRackView and verify status telemetry and address update.
-    QVERIFY(serverRackView->selectRank(1));
-    QCOMPARE(serverRackView->selectedRank(), 1);
-    QVERIFY(statusTelemetry->text().contains("MPI RANK: 1"));
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401155ULL);
-    QVERIFY(disassemblyView->currentDecompilerLine() > 0);
+    QVERIFY(serverRackView->selectRank(1) && serverRackView->selectedRank() == 1);
+    QVERIFY(statusTelemetry->text().contains("MPI RANK: 1") && disassemblyView->currentAddress() == 0x00401155ULL && disassemblyView->currentDecompilerLine() > 0);
 }
 
 /**
@@ -678,22 +665,18 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
     }
     QVERIFY(foundMpiInitCall && foundMpiFinalizeCall);
 
-    // 4. Open XrefInspectorDialog at address 0x00401149 and test filtering
+    // 4. Open XrefInspectorDialog at address 0x00401149 and test filtering + incoming row activation
     auto* dialog = disasm->openXrefInspector(0x00401149ULL);
     QVERIFY(dialog != nullptr && dialog->incomingRowCount() >= 2 && dialog->outgoingRowCount() >= 2 && !dialog->previewText().isEmpty());
     dialog->setFilterText(QStringLiteral("MPI_Init"));
     QVERIFY(dialog->outgoingRowCount() >= 1);
     dialog->setFilterText(QString());
     QVERIFY(dialog->outgoingRowCount() >= 2);
-
-    // 6. Test activating an incoming xref row to trigger cross-pane address synchronization
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    QVERIFY(memView != nullptr);
-    const uint64_t targetCaller = incoming.first().fromAddress;
-    QVERIFY(dialog->activateIncomingXref(0));
+    QVERIFY(memView != nullptr && dialog->activateIncomingXref(0));
     // Verify DisassemblyView and MemView are synchronized to the caller address
-    QCOMPARE(disasm->currentAddress(), targetCaller);
-    QCOMPARE(memView->currentBaseAddress(), targetCaller);
+    QCOMPARE(disasm->currentAddress(), incoming.first().fromAddress);
+    QCOMPARE(memView->currentBaseAddress(), incoming.first().fromAddress);
 }
 
 /**
@@ -745,8 +728,7 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
         QVERIFY(!inspector.readVirtualMemory(entry, 2).isEmpty());
         const QByteArray patch = QByteArray::fromHex("9090");
         // Write virtual memory patch into ELF image in memory and verify upon readback.
-        QVERIFY(inspector.writeVirtualMemory(entry, patch));
-        QCOMPARE(inspector.readVirtualMemory(entry, 2), patch);
+        QVERIFY(inspector.writeVirtualMemory(entry, patch) && inspector.readVirtualMemory(entry, 2) == patch);
     }
 }
 
@@ -782,8 +764,7 @@ void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation
 
     // Verify written file permissions and payload via independent inspector
     gridlock::core::ElfBinaryInspector verifyInspector(exportPath);
-    QVERIFY(verifyInspector.isValid());
-    QCOMPARE(verifyInspector.readVirtualMemory(textAddr, 2), patchBytes);
+    QVERIFY(verifyInspector.isValid() && verifyInspector.readVirtualMemory(textAddr, 2) == patchBytes);
 
     // 2. Test unified multi-domain workspace search
     const auto searchMatches = mainWindow.searchWorkspace(QStringLiteral("main"));
@@ -808,18 +789,20 @@ void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation
 
 /**
  * @brief Verifies system package manager fallback detection, multi-distro CLI output parsing
- *        (`pacman`, `dnf`, `apt`, `zypper`), and switchable `Table` / `List` / `Raw` display modes.
+ *        (`pacman`, `dnf4`/`dnf5`, `apt`, `zypper`), switchable `Table` / `List` / `Raw` display modes,
+ *        and live host package querying with synchronized visible row count badges.
  *
  * Ensures that HpcConsoleWidget discovers a valid local package manager backend even when
- * Spack is absent, parses structured metadata columns from Arch, Fedora, Debian/Ubuntu,
- * and openSUSE CLI formats, and synchronizes all three presentation views cleanly.
+ * Spack is absent, parses structured metadata columns from Arch, Fedora (`dnf4` and `dnf5`),
+ * Debian/Ubuntu, and openSUSE CLI formats, and queries real host packages without a stale
+ * 12-package hardcoded badge.
  */
 void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     // 1. System Package Manager Fallback Detection When Spack Is Missing.
     gridlock::ui::HpcConsoleWidget widget;
     QVERIFY(!widget.activePackageManagerBackend().isEmpty());
 
-    // 2. Multi-Distro CLI Output Parsing (pacman, dnf, apt, zypper).
+    // 2. Multi-Distro CLI Output Parsing (pacman, dnf4, dnf5, apt, zypper).
     // Verify Arch Linux pacman -Ss two-line entry parsing with [installed] state badge.
     const QString pacmanOut = QStringLiteral(
         "extra/openmpi 5.0.5-1 [installed]\n    High performance message passing library (MPI)\n"
@@ -831,7 +814,7 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     QVERIFY(pacmanRecs[0].description.contains(QStringLiteral("message passing")));
     QVERIFY(pacmanRecs[1].name == QStringLiteral("hypre") && pacmanRecs[1].status == QStringLiteral("Available"));
 
-    // Verify Fedora/RHEL dnf search name.arch : summary parsing.
+    // Verify Fedora/RHEL dnf4 search name.arch : summary parsing.
     const QString dnfOut = QStringLiteral(
         "Last metadata expiration check...\n=== Name & Summary Matched: openmpi ===\n"
         "openmpi.x86_64 : Open Message Passing Interface\n"
@@ -840,6 +823,17 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     QCOMPARE(dnfRecs.size(), 2);
     QVERIFY(dnfRecs[0].name == QStringLiteral("openmpi") && dnfRecs[0].arch == QStringLiteral("x86_64"));
     QCOMPARE(dnfRecs[1].name, QStringLiteral("openmpi-devel"));
+
+    // Verify Fedora 40/41/42+ dnf5 tab/space-aligned output parsing for "fd" search.
+    const QString dnf5Out = QStringLiteral(
+        "Updating and loading repositories:\nRepositories loaded.\nMatched fields: name, summary\n"
+        " fd-find.x86_64\tFast and user-friendly alternative to find\n"
+        " fdupes.x86_64  Finds duplicate files in a given set of directories\n");
+    const auto dnf5Recs = widget.parsePackageManagerOutput(QStringLiteral("dnf"), dnf5Out);
+    QCOMPARE(dnf5Recs.size(), 2);
+    QVERIFY(dnf5Recs[0].name == QStringLiteral("fd-find") && dnf5Recs[0].arch == QStringLiteral("x86_64"));
+    QVERIFY(dnf5Recs[0].description.contains(QStringLiteral("alternative to find")));
+    QCOMPARE(dnf5Recs[1].name, QStringLiteral("fdupes"));
 
     // Verify Debian/Ubuntu apt-cache search name - summary parsing.
     const QString aptOut = QStringLiteral(
@@ -863,7 +857,6 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     // 3. Three Switchable Views (Table, List, Raw) & Non-Empty Table Population.
     widget.displayPackageRecords(pacmanRecs, pacmanOut);
     QCOMPARE(widget.packageTableRowCount(), 2);
-    // Verify switching across Table, List, and Raw views updates the stacked display.
     widget.setViewMode(QStringLiteral("Table"));
     QCOMPARE(widget.currentViewMode(), QStringLiteral("Table"));
     widget.setViewMode(QStringLiteral("List"));
@@ -873,14 +866,14 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     widget.setViewMode(QStringLiteral("Raw"));
     QCOMPARE(widget.currentViewMode(), QStringLiteral("Raw"));
 
-    // 4. Verify packageStatusFilterCombo generous width (>= 145px) avoiding text truncation.
+    // 4. Verify packageStatusFilterCombo generous width (>= 145px) and live host package query for "fd".
     auto* statusCombo = widget.findChild<QComboBox*>(QStringLiteral("packageStatusFilterCombo"));
-    // Verify status filter combo box exists and has width >= 145px.
-    QVERIFY(statusCombo != nullptr && statusCombo->minimumWidth() >= 145);
-    // Verify 3 curated filter status options.
-    QCOMPARE(statusCombo->count(), 3);
-    // Verify each filter status option has a rendered status badge icon.
+    QVERIFY(statusCombo != nullptr && statusCombo->minimumWidth() >= 145 && statusCombo->count() == 3);
     QVERIFY(!statusCombo->itemIcon(0).isNull() && !statusCombo->itemIcon(1).isNull() && !statusCombo->itemIcon(2).isNull());
+    // Execute live host query for "fd" and verify visiblePackageCount() matches actual visible table rows (> 0).
+    const int fdMatches = widget.searchPackagesSynchronously(QStringLiteral("fd"), 3500);
+    QVERIFY2(fdMatches > 0, "Live host package query for 'fd' must return > 0 real system/repo packages");
+    QCOMPARE(widget.visiblePackageCount(), fdMatches);
 }
 
 /**

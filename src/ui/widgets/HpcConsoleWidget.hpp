@@ -57,6 +57,7 @@ public:
      */
     explicit HpcConsoleWidget(gridlock::core::HpcBackend* backend = nullptr,
                               QWidget* parent = nullptr);
+    ~HpcConsoleWidget() override;
 
     /**
      * @brief Detects all installed HPC and system package managers in priority order.
@@ -112,7 +113,32 @@ public:
     int packageTableRowCount() const;
 
     /**
-     * @brief Executes a non-interactive package query against the active backend or fallback catalog.
+     * @brief Returns the current visible package count displayed in the table and count badge.
+     * @return Number of currently visible package rows.
+     */
+    int visiblePackageCount() const;
+
+    /**
+     * @brief Queries the local installed package database (`rpm -qa`, `dpkg-query -W`, `pacman -Qs`).
+     * @param backend Active package manager backend identifier.
+     * @param filterQuery Case-insensitive substring filter applied across name and summary.
+     * @param outRawLog Optional output string receiving the raw CLI command and matched lines.
+     * @return Vector of installed PackageRecord items from the host operating system.
+     */
+    QVector<PackageRecord> queryLocalInstalledPackages(const QString& backend,
+                                                       const QString& filterQuery,
+                                                       QString* outRawLog = nullptr) const;
+
+    /**
+     * @brief Synchronously queries local installed and remote repository packages for query.
+     * @param query Case-insensitive search query string (e.g., "fd", "mpi").
+     * @param timeoutMs Maximum wait time in milliseconds for the repository CLI subprocess.
+     * @return Total number of visible package rows populated into the table.
+     */
+    int searchPackagesSynchronously(const QString& query, int timeoutMs = 3000);
+
+    /**
+     * @brief Executes an asynchronous two-stage package query against the active host backend.
      * @param query Optional search query substring (defaults to current search bar text).
      */
     void executePackageSearch(const QString& query = QString());
@@ -129,13 +155,13 @@ private:
     void refreshFilteredViews();
 
     /**
-     * @brief Builds default curated HPC & developer toolchain package records when offline or on startup.
-     * @param backend Active backend label to stamp on fallback records.
-     * @param query Optional substring filter.
-     * @return Vector of baseline HPC and debugger toolchain PackageRecord entries.
+     * @brief Merges local installed records with repository records, deduplicating by name + arch.
+     * @param installed Local installed package records.
+     * @param repoRecords Remote repository search records.
+     * @return Deduplicated merged vector preserving Installed status and version metadata.
      */
-    QVector<PackageRecord> buildDefaultToolchainCatalog(const QString& backend,
-                                                        const QString& query) const;
+    static QVector<PackageRecord> mergePackageRecords(const QVector<PackageRecord>& installed,
+                                                      const QVector<PackageRecord>& repoRecords);
 
     QComboBox* m_backendCombo = nullptr;
     QComboBox* m_statusFilterCombo = nullptr;
@@ -152,11 +178,13 @@ private:
     QTextBrowser* m_listBrowser = nullptr;
     QPlainTextEdit* m_outputArea = nullptr;
     QTimer* m_searchDebounceTimer = nullptr;
+    QProcess* m_searchProcess = nullptr;
 
     QString m_detectedBackend;
     QString m_currentViewMode = QStringLiteral("Table");
     QVector<PackageRecord> m_allRecords;
     QString m_lastRawOutput;
+    int m_visibleCount = 0;
 };
 
 }  // namespace gridlock::ui

@@ -823,18 +823,10 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
     if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
     if (!saveGrab(QStringLiteral("tool_rail_mpi_diagnostics.png")) || !saveGrab(QStringLiteral("mpi_diagnostics_docsets.png"))) return false;
 
-    // 4. Populate Package Manager with realistic "mpi" search results in Table and List modes.
+    // 4. Populate Package Manager with live "mpi" search results in Table and List modes.
     if (auto* pkgWidget = static_cast<HpcConsoleWidget*>(m_spackManager)) {
         if (m_bottomTabs) m_bottomTabs->setCurrentWidget(pkgWidget);
-        if (auto* s = pkgWidget->findChild<QLineEdit*>(QStringLiteral("packageSearchInput"))) s->setText(QStringLiteral("mpi"));
-        pkgWidget->displayPackageRecords({
-            {QStringLiteral("openmpi"), QStringLiteral("5.0.5-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("High performance message passing library (MPI-4.1)")},
-            {QStringLiteral("openmpi-devel"), QStringLiteral("5.0.5-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("Development headers and mpicxx wrapper for OpenMPI")},
-            {QStringLiteral("mpich"), QStringLiteral("4.2.2-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Available"), QStringLiteral("High-performance portable implementation of MPI")},
-            {QStringLiteral("hypre"), QStringLiteral("2.31.0-2"), QStringLiteral("x86_64"), QStringLiteral("spack"), QStringLiteral("Installed"), QStringLiteral("Scalable multigrid linear solvers for MPI clusters")},
-            {QStringLiteral("fftw-mpi"), QStringLiteral("3.3.10-4"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("Distributed-memory Fast Fourier Transform C routines")},
-            {QStringLiteral("hdf5-openmpi"), QStringLiteral("1.14.4-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("Parallel HDF5 data model and file format for MPI-IO")},
-            {QStringLiteral("scalapack"), QStringLiteral("2.2.0-5"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Available"), QStringLiteral("Scalable linear algebra package for distributed HPC")}});
+        pkgWidget->searchPackagesSynchronously(QStringLiteral("mpi"), 3000);
         pkgWidget->setViewMode(QStringLiteral("Table"));
         if (!saveGrab(QStringLiteral("package_manager_mpi_search.png"))) return false;
         pkgWidget->setViewMode(QStringLiteral("List"));
