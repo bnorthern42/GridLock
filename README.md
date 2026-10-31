@@ -131,11 +131,24 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 
 ## Documentation Index
 
+* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed `v0.7.0` foundations and upcoming milestones across Phases 7–10.
 * [**Architecture & Modularity Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — 4-zone workstation layout, translation unit partitioning, signal choreography, and code quality invariants.
 * [**User Workflow Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Step-by-step guide to MPI rank debugging, CFG/Decompiler analysis, live binary patching, and Zeal docset integration.
-* [**Workstation Color Themes & Typography Gallery (`docs/THEMES.md`)**](docs/THEMES.md) — Visual showcase and hex color matrices for all 6 curated workstation themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`, and `Daylight Paper`) and live font scaling.
+* [**Workstation Color Themes & Typography Gallery (`docs/THEMES.md`)**](docs/THEMES.md) — Visual showcase and hex color matrices for curated workstation themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`, `Daylight Paper`, `Solarized Warm`, and `Catppuccin Latte`) and live font scaling.
 * [**User Documentation Suite (`docs/user/README.md`)**](docs/user/README.md) — Detailed interface, advanced debugging, and HPC cluster guides.
 * [**Developer Documentation Suite (`docs/developer/README.md`)**](docs/developer/README.md) — Core coordinators, security sanitizers, and UI internals.
+
+---
+
+## Roadmap (`v0.7.0` → `v0.8.0`)
+
+See [**ROADMAP.md**](ROADMAP.md) (and [`docs/ROADMAP.md`](docs/ROADMAP.md)) for full architectural details:
+
+* **Completed Foundations (`Phases 1–6.5` & `v0.7.0` ✅):** Real ELF64/DWARF debugging (`objdump` + `.debug_line`), breakpoint-first execution, circular `MPI_Send` deadlock detection, zero-copy `process_vm_readv` memory inspection, cursor-anchored breakpoint popover with live `clangd` JSON-RPC 2.0 completion, `36px` Tool-Window Icon Rail, Wayland-compatible floating docks, 8 Dark/Light themes, 16-directive `#SBATCH` generator, multi-distro Package Manager (`rpm`/`dnf5`/`pacman`/`apt`/`zypper`/`spack`), and automated GitHub Actions `appimagetool` AppImage releases.
+* **Phase 7 — Continuous Bug Auditing, Static Analysis & Security Hardening:** Systematic `cppcheck`, `clang-tidy`, and JetBrains CLion inspection sweeps, SonarQube / SonarCloud quality gates, and ASan/UBSan/`MALLOC_PERTURB_` hardening across memory and ELF/DWARF parsers.
+* **Phase 8 — Qt6 Theme Engine Stabilization & UI Polish:** Light theme contrast fixes (`MemView`, `ProjectExplorerWidget`, section ribbon, mode buttons), `DisassemblyView` header layout polish, missing `Solarized Warm` / `Catppuccin Latte` gallery screenshots, and a tokenized Qt palette system (`Nord`, `One Dark Pro`, `One Light`, `Dracula`).
+* **Phase 9 — Guided Hands-On Tutorials (`docs/TUTORIAL.md`):** Step-by-step walkthrough covering `deadlock_ring.cpp` cycle diagnosis, rank-filtered conditional breakpoints with `clangd` completion on `inspection_demo.cpp`, cross-rank memory diffing, and Zeal docsets.
+* **Phase 10 (`v0.8.0`) — Workstation Editor Ergonomics & Deep `clangd` LSP:** Interactive Project Explorer file/folder CRUD, dirty buffer indicators (`●`) + split editors + Header/Source toggle (`F10`), live `clangd` diagnostics/hover/Go-to-Definition (`F12`)/rename (`Shift+F6`), Git diff gutter markers, and local debugger engine selection (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`).
 
 ---
 

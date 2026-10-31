@@ -1,122 +1,69 @@
-# GridLock IDE Roadmap
+# GridLock Engineering Roadmap
 
-## PHASE 1: Debugger Stability
+GridLock is an actively maintained C++23 / Qt6 parallel MPI graphical debugger and binary analysis workstation. This roadmap tracks completed foundational releases (`Phases 1–6.5` through `v0.7.0`) alongside upcoming engineering milestones focused on static analysis, theme engine stabilization, guided tutorials, and `v0.8.0` IDE editor ergonomics.
 
-* [x] Breakpoint sync: Sync gutter-selected breakpoints to GDB.
-* [x] Rank Control: Implement individual rank-pausing (using specific GDB thread-apply/interrupt commands).
-* [x] Layout Persistence: Ensure `QPlainTextEdit`/ViewportMargins are robust against layout regressions.
-* [x] GDB Process Manager: Robust teardown sequence to prevent dangling zombie processes.
+---
 
-## PHASE 2: Variable Watcher (The "CLion Clone")
+## Completed Foundations (Phases 1–6.5 & `v0.7.0` Release ✅)
 
-* [x] Expression Evaluator: Handle arbitrary C++ expressions (e.g., `calc + 5`).
-* [x] Tooltips: Hover-variables in the code editor to see values.
-* [x] Differential View: Dynamic variable tracking via GDB `-var-update`.
+### Phase 1–3: Multi-Rank MPI Debugging & Binary Inspection Core ✅
+- [x] **Real ELF64/DWARF Debugging (`ElfBinaryInspector`, `GdbRankCoordinator`, `DapCoordinator`)**: Authentic disassembly via `objdump -d -M intel --insn-width=10`, symbol extraction via `nm`, and exact `.debug_line` source-to-address mapping via `objdump --dwarf=decodedline` / `readelf -wL`.
+- [x] **Breakpoint-First Execution & Circular Deadlock Detection (`DeadlockAnalyzer`)**: On-demand target compilation (`mpicxx -g -O0`), automatic halt at user-set breakpoints or `main()` entry, and directed wait-for cycle analysis across blocked `MPI_Send` / `MPI_Recv` / `MPI_Barrier` ranks.
+- [x] **Zero-Copy Process Memory & Cross-Rank Diffing (`NativeMemoryReader`, `MemoryDiffer`, `MemView`)**: Kernel-level `process_vm_readv` memory extraction with stride bounds validation (`MemoryBoundsValidator`), cross-rank byte diffing, and live hex/instruction binary patching (`savePatchedBinary`).
+- [x] **Cross-Rank Variable & Register Telemetry (`DifferentialGrid`, `VariablesDockWidget`, `RegisterView`)**: Simultaneous inspection of C/C++ expressions, local stack frames, and x86_64 registers across all active MPI ranks.
 
-## PHASE 3: Advanced Debugger
+### Phase 4–6.5: Workstation UI, `clangd` LSP & Linux Packaging (`v0.7.0`) ✅
+- [x] **Two-Lane Vector Gutter & Cursor-Anchored Breakpoint Popover (`SourceCodeView`, `ConditionalBreakpointDialog`)**: Dedicated breakpoint/PC gutter lanes and frameless cursor-anchored conditional breakpoint configuration (`All MPI Ranks` vs. `Focused Rank Only`).
+- [x] **Live `clangd` JSON-RPC 2.0 Completion Engine (`ClangdLspClient`)**: Asynchronous stdio JSON-RPC 2.0 client providing virtual-buffer C/C++ struct/member autocomplete inside both `ConditionalBreakpointDialog` and `SourceCodeView` (`Ctrl+Space` or `.`, `->`, `::`).
+- [x] **Workstation Layout & Wayland-Compatible Floating Docks**: Zero-gutter dark/light chrome, `36px` Left Vertical Tool-Window Icon Rail (`Debug`, `MPI`, `Terminal`, `Docs`), and native window-manager drag/redock support for floating panels (`ServerRackView`, `RegisterView`, `VariablesDockWidget`).
+- [x] **8 Curated Dark/Light Themes & 16-Directive SLURM Script Generator (`ThemeManager`, `PreferencesDialog`)**: Instant switching across 5 Dark (`gridlock_slate`, `dark_teal`, `tokyo_night`, `catppuccin_mocha`, `gruvbox_dark`) and 3 Light (`daylight_light`, `solarized_light`, `catppuccin_latte`) themes, plus 16-directive `#SBATCH` batch script parsing and export.
+- [x] **Live Multi-Distro Package Manager & Offline Zeal Docsets (`HpcConsoleWidget`, `DocsetManager`)**: Asynchronous two-stage host package search across `rpm`, `dnf5`/`dnf4`, `pacman`, `apt`, `zypper`, and `spack` with `Table`/`List`/`Raw` views, alongside SQLite3 Zeal `.docset` and system `man` lookup (`F1`) and isolated `QTermWidget` PTY terminals.
+- [x] **Automated GitHub Actions `appimagetool` Release Pipeline**: Self-contained `AppDir` bundling with `$ORIGIN/../lib` RPATH stamping, headless 26-suite Meson verification, and automated `GridLock-0.7.0-x86_64.AppImage` artifact publishing via `appimagetool`.
 
-* [x] MemView: Hex dump viewer for raw pointers (similar to `mcu-debug/memview`).
-* [x] Register Viewer: Real-time tracking of CPU registers (EAX/RAX, RSP, etc.).
-* [x] Conditional Breakpoints: Add logic for hit counts and conditions.
-* [x] Floating-Point Exception (FPE) Trapper: Catch NaNs and Infinities.
-* [x] Deadlock Detector (Barrier/Wait Analyzer): Flag hanging MPI processes.
-* [x] Value-Change Visual Highlighting: Variables and registers flash when values change.
-* [x] Raw Memory Export (CSV/Bin) & Multi-Rank Console Broadcasting.
+---
 
-## PHASE 4: IDE Experience & Productization
+## Phase 7: Continuous Bug Auditing, Static Analysis & Security Hardening
 
-* [x] **Toolbar Robustness:** Fully decouple execution logic (Run, Continue, Step, Pause, Terminate) from UI lambdas; implement a Command Pattern for toolbar actions.
-* [x] **Editor Tabs:** Support opening multiple source files simultaneously via a tabbed editor interface.
-* [x] **Project Support:** Add a file explorer/project manager to handle entire repositories and directories.
-* [x] **Asset/Branding Pipeline:** Integrate official app icon (`.ico`/.icns/.png), splash screen, and high-DPI resource handling using Qt Resource System (`.qrc`).
-* [x] **Shortcut Manager:** Implement global IDE keybindings (Vim-style or CLion-style).
-* [x] **Session Persistence:** Save/load debug configurations (binary arguments, custom GDB paths, watchlists).
-* [x] **Deployment:** Create standardized install targets (`meson install`), desktop entries (`.desktop` file), and directory structure for cross-platform distribution.
+- [ ] **External Static Analysis & Linting Sweeps (`cppcheck`, `clang-tidy`, CLion Inspections)**:
+  - Run systematic static analysis passes across `src/` and `tests/` using `cppcheck`, `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`), and JetBrains CLion inspection profiles to eliminate dead code, uninitialized members, variable shadowing, and subtle Qt `QObject` lifetime hazards.
+- [ ] **SonarQube / SonarCloud & Compiler Quality Gates**:
+  - Establish reproducible SonarQube / SonarCloud analysis configuration (`sonar-project.properties`) tracking cognitive complexity, code smells, and test coverage alongside strict zero-warning compiler gates (`-Wall -Wextra -Wpedantic`).
+- [ ] **Memory & Process Security Audit (ASan, UBSan, `MALLOC_PERTURB_`)**:
+  - Audit `process_vm_readv` stride bounds (`MemoryBoundsValidator`), ELF64/DWARF binary parser inputs (`ElfBinaryInspector`), MI/DAP wire parsers (`MiSanitizer`), and `QProcess` / `KPtyProcess` argument handling under AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and `MALLOC_PERTURB_`.
 
-## PHASE 5: The Polyglot Core (DAP Refactor)
+---
 
-* [x] **Refactor `DebuggerBackend`:** Transform your abstract `DebuggerBackend` into a `DapBackend`.
-* [x] **Standardized Launch:** Implement the startup sequence for all language sessions:
-  * [x] GridLock spawns the adapter process.
-  * [x] GridLock performs a TCP handshake.
-  * [x] GridLock sends a standard JSON-RPC `launch` command.
+## Phase 8: Qt6 Theme Engine Stabilization & UI Polish
 
-## PHASE 6: Zero-Copy Memory & WIP Visualizer ✅
+- [ ] **Light Theme Contrast & Custom Widget Polish (`daylight_light`, `solarized_light`, `catppuccin_latte`)**:
+  - Eliminate remaining hardcoded dark backgrounds and low-contrast hex text in Light themes across `MemView` hexdump byte cells, `ProjectExplorerWidget` (`FILES | SYMBOLS | STRINGS`) segmented buttons, the binary section navigation ribbon (`.plt`, `.text`, `.rodata`, `.data`), and `CODE | REVERSE` perspective toggle buttons.
+- [ ] **Disassembly Header Layout & Theme Gallery Completeness**:
+  - Fix clipped mode button labels (`SPLIT (CFG+DECOMP)`) in `DisassemblyView` header toolbars and generate/embed missing high-DPI preview screenshots for `Solarized Warm` (`theme_solarized_light.png`) and `Catppuccin Latte` (`theme_catppuccin_latte.png`) in `docs/THEMES.md`.
+- [ ] **Tokenized Qt Palette Architecture & Expanded Theme Catalog**:
+  - Migrate remaining inline widget QSS overrides to a unified semantic token architecture (modeled after Qt Creator and Rizin Cutter) and expand the built-in theme catalog with `Nord`, `One Dark Pro`, `One Light`, and `Dracula`.
 
-* [x] **Zero-Copy Native Memory Engine (`process_vm_readv`):** Bypass standard DAP/GDB string evaluation overhead for large arrays by reading directly from kernel memory.
-* [x] **Stride Security & Bounds Validation:** Implement an expression validation engine with overflow protection to prevent malicious or invalid matrix strides from causing out-of-bounds segfaults in the frontend.
-* [x] **Hardware-Accelerated Vulkan (`QVulkanWindow`) UI Integration** (Deferred to post-AppImage release)
-* [x] **Heatmap UI Controls and DAP Expression Evaluation Bridge** (Deferred to post-AppImage release)
+---
 
-## PHASE 6.5: Workspace Configuration & TDD Infrastructure ✅
+## Phase 9: Documentation & Guided Hands-On Tutorials (`docs/TUTORIAL.md`)
 
-* [x] **Project-Scoped Settings (`.gridlock/settings.toml`):** Implement per-project configuration files to manage execution parameters (binary path, rank count, MPI args) without polluting the global environment or the user's home directory.
-* [x] **Workspace Metadata (`.gridlock/workspace.toml`):** Persist project-specific workspace state (open files, layout, session history) isolated to the project root.
-* [x] **Dockerized TDD Pipeline:** Establish a `docker-compose`-based sandbox with `SYS_PTRACE` capabilities and `seccomp:unconfined` to guarantee reliable `ptrace` and `process_vm_readv` execution for CI and local testing.
-* [x] **Coverage Reporting in Docker:** Integrate `lcov`-based code coverage generation into the Docker pipeline via `scripts/run_coverage.sh`.
+- [ ] **End-to-End Hands-On Walkthrough (`docs/TUTORIAL.md`)**:
+  - Author a comprehensive, step-by-step `docs/TUTORIAL.md` with annotated screenshots guiding users through:
+    1. Diagnosing the 8-rank circular `MPI_Send` hang in `tutorial/deadlock_ring.cpp` using `ServerRackView`, `DeadlockAnalyzer`, and the 2D Control Flow Graph.
+    2. Setting rank-filtered conditional breakpoints with live `clangd` struct member autocomplete (`data[i].coords.x`) on `tutorial/inspection_demo.cpp`.
+    3. Comparing cross-rank watch expressions in `DifferentialGrid` and inspecting byte-level rank memory divergence in `MemView`.
+    4. Browsing offline MPI/C/C++ Zeal `.docset` documentation (`F1`) and generating `#SBATCH` batch scripts in `Preferences -> HPC / Cluster`.
 
-## PHASE 7: Cross-Language Variable Inspector
+---
 
-* [ ] **Unified Grid:** Utilize the standard `VariablesRequest` enforced by DAP so `DifferentialGrid` works for all languages.
-* [ ] **The "Dream" Feature:** Enable simultaneous debugging of different language runtimes (e.g., C++, Python, Node.js) paused at the same logical simulation timestamp, with the `DifferentialGrid` tracking memory addresses and objects in parallel.
+## Phase 10 (`v0.8.0`): Workstation Editor Ergonomics & Deep `clangd` LSP (No Live SLURM Runner)
 
-## PHASE 8: Alternative Debugger Backends
+> **Scope Note**: GridLock focuses on local and workstation MPI debugging and offline `#SBATCH` script generation; live remote SLURM job queue management is intentionally out of scope.
 
-By leveraging the MI2 protocol (and our future DAP architecture), our `DebuggerBackend` can abstract the underlying engine, allowing seamless switching between GNU GDB, LLDB, and GPU-specific debuggers.
-
-* [ ] **LLVM/LLDB Integration:** Support `lldb-mi` or `lldb-dap` to provide native macOS support and better Clang AST parsing for modern C++.
-* [ ] **GPU Debugging (CUDA/ROCm):** Support `cuda-gdb` (NVIDIA) and `rocgdb` (AMD) as selectable engines for inspecting GPU wavefronts and device VRAM.
-* [ ] **Backend Selection UI:** Extend `DebuggerSettingsPage` with a "Debugger Engine" dropdown (GNU GDB, LLDB, CUDA-GDB, ROCGDB).
-* [ ] **Dynamic UI Capabilities:** Ensure the GridLock UI dynamically enables/disables features based on the selected backend (e.g., hiding the "Registers" view if a specific backend doesn't map them the same way, or showing a "Wavefronts" tab for ROCm).
-
-## PHASE 9: The Plugin Marketplace (Productionization)
-
-* [ ] **Dynamic Loading:** Replace hardcoded language support with a `plugins/` directory system.
-
-## PHASE 10: Advanced Cluster Lifecycle & Detached Sessions
-
-* [ ] TOML-based session persistence for pending cluster jobs.
-* [ ] Background `squeue` polling for seamless DAP re-attachment.
-* [ ] Asynchronous `scancel` guillotine for safe UI teardowns and zombie process mitigation.
-
-## PHASE 11: Deployment & AppImage Packaging ✅
-
-* [x] Configure `CQtDeployer` and `appimagetool` to bundle the Qt6, Wayland, XCB, and Vulkan runtime dependencies.
-* [x] Ensure the native `process_vm_readv` memory extraction engines and `lldb-dap` adapters remain fully functional within the AppImage mount.
-* [x] Verify project-scoped `.gridlock/` configuration directories are handled correctly when GridLock is launched from the AppImage mount path.
-* [x] Create `.desktop` file and application icon integration for standard Linux desktop environments.
-* [x] Set up GitHub Actions CI/CD to automatically build and attach `.AppImage` binaries to GitHub Releases using artifact uploaders.
-
-## Field Testing & Validation (Remote HPC Workflows)
-
-> These items cannot be exercised in a local CI/CD pipeline. Each must be
-> validated against a real HPC login node before marking complete.
-
-### SSH Subsystem
-
-* [ ] **Successful Authentication:** Connect to a cluster login node using an Ed25519/RSA key configured in `Preferences → HPC Integration → SSH Key Path` and confirm the HPC Console shows a live prompt.
-* [ ] **Invalid Key Handling:** Supply a wrong or missing key path; verify GridLock surfaces a human-readable error in the HPC Console rather than hanging or crashing.
-* [ ] **Connection Timeout:** Configure an unreachable host; confirm the SSH process respects a reasonable timeout (≤ 30 s) and the UI remains responsive throughout.
-* [ ] **Reconnect Flow:** After a successful connection is dropped (e.g., network interruption), verify the "⟳ Refresh Packages" button attempts a new connection cleanly without leaking zombie processes.
-
-### Spack Integration
-
-* [ ] **`spack find` Parsing:** Run a refresh on a node where Spack is correctly sourced; confirm the package list populates in `SpackManager` and the count label is accurate.
-* [ ] **Unsourced Spack Environment:** Connect to a node where `spack` is not on `$PATH`; verify GridLock emits a clear `[ERR]` message (e.g., `command not found`) instead of silently showing an empty list.
-* [ ] **Package Filter:** With a non-trivial package list loaded, type a partial name into the search bar; confirm the filter updates in real time without a remote round-trip.
-* [ ] **Large Package Lists (> 500 entries):** Confirm the `QPlainTextEdit` block limit (`setMaximumBlockCount`) prevents excessive memory growth and the scroll-to-bottom behaviour still works.
-
-### SLURM Batch Submission
-
-* [ ] **`{FILE}` Token Replacement:** Open a source file in the editor, trigger "Submit SLURM Job", and confirm the generated script replaces `{FILE}` with the correct absolute path before being passed to `sbatch`.
-* [ ] **`sbatch` Execution:** Verify the job is accepted by the scheduler and a Job ID is echoed back to the HPC Console (e.g., `Submitted batch job 123456`).
-* [ ] **GPU Request Flag:** Enable "Request GPUs" with `gpusPerNode = 2`, submit a job, and inspect the generated `#SBATCH --gres=gpu:2` directive in the script that reaches the scheduler.
-* [ ] **Partition / Nodes / Tasks Propagation:** Change partition to a non-default value in `Preferences → HPC Integration`; verify the SLURM script header reflects the new values on the next submission.
-* [ ] **Submission Failure Handling:** Submit to a non-existent partition; confirm the stderr from `sbatch` is surfaced in the HPC Console and the IDE does not freeze.
-
-### MPI Edge Cases
-
-* [ ] **Strict Node Affinity:** Enable `Strict Node Affinity` in `Preferences → HPC / Cluster`; run a 4-rank job and confirm the MPI runtime pins ranks to the specified host set from the Hosts File.
-* [ ] **Custom Environment Variables:** Populate `MPI Environment Variables` with a `KEY=VALUE` pair; confirm the variable is visible inside the MPI ranks (e.g., via `getenv()` in the test program output).
-* [ ] **Hosts File Path:** Point `MPI Hosts File` at a valid multi-node hostfile; verify `mpirun` picks up the correct `-hostfile` argument and distributes ranks across nodes.
-* [ ] **Rank Count Propagation:** Set Default Rank Count to 8 in `Preferences → Debugger`; launch a session and confirm 8 GDB instances are spawned and all appear in the `ServerRackView`.
+- [ ] **Interactive Project File Tree CRUD (`ProjectExplorerWidget`)**:
+  - Right-click context menu on the `FILES` tree supporting `New Source File (.cpp)`, `New Header File (.hpp)`, `New Folder`, `Rename (F2)`, `Delete`, and optional 1-click target registration in `meson.build` or `CMakeLists.txt`.
+- [ ] **Dirty Buffer Lifecycle & Split Source Editors (`EditorTabManager`, `SourceCodeView`)**:
+  - Unsaved modification indicators (`●`) on editor tabs, close confirmation dialogs (`Save / Discard / Cancel`), `Ctrl+Shift+S` (*Save All*), side-by-side horizontal/vertical editor splits (`Split Right`, `Split Down`), Header/Source toggle (`F10`), and a sticky scope breadcrumb bar (`File > Namespace > Class > Function`).
+- [ ] **Deep `clangd` LSP Integration (`ClangdLspClient`)**:
+  - Live inline compiler error/warning squiggles (`textDocument/publishDiagnostics`), rich symbol & Doxygen hover cards (`textDocument/hover`), `F12` Go-to-Definition (`textDocument/definition`), Find References (`Shift+F12`), and `Shift+F6` workspace AST symbol rename.
+- [ ] **Git Diff Gutter & Local Debugger Engine Selector**:
+  - Live gutter change indicators (`git diff` added green, modified blue, and deleted red line markers in `SourceCodeView`) and selectable local debugger backend engines (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`) in `Preferences -> Debugger`.
