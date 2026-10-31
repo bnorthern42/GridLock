@@ -27,12 +27,12 @@ In **`Edit -> Preferences -> Appearance`**, GridLock provides four independent l
 
 1. **UI Font Family (`appearance/ui_font_family`):** Scales menus, dock headers, tree/table views, buttons, and status strips (`Inter`, `Cantarell`, `Noto Sans`, `DejaVu Sans`, `Liberation Sans`, `System Default`).
 2. **UI Font Size (`appearance/ui_font_size`, `8 pt – 24 pt`):** Dynamically interpolates `font-size: %1pt` and proportional control heights across `ThemeManager`'s QSS engine (`QLineEdit`, `QComboBox`, `QSpinBox`, `QPushButton`, `QMenuBar`, `QMenu`, `QTableView`, `QTreeView`, `QTabBar`).
-3. **Code / Disassembly Font Family (`appearance/code_font_family`):** Sets the fixed-pitch font across `SourceCodeView`, `DisassemblyView` (Linear, CFG Graph, and Decompiler), and `MemView` (`JetBrains Mono`, `Cascadia Code`, `Fira Code`, `DejaVu Sans Mono`, `Source Code Pro`, `Monospace`).
+3. **Code / Disassembly Font Family (`appearance/code_font_family`):** Sets the fixed-pitch font across `SourceCodeView`, `DisassemblyView` (Linear, CFG Graph, and Decompiler), and `MemView` (`Cascadia Code`, `Fira Code`, `DejaVu Sans Mono`, `Liberation Mono`, `Source Code Pro`, `Monospace`).
 4. **Code / Disassembly Font Size (`appearance/code_font_size`, `8 pt – 24 pt`):** Dynamically scales editor line numbers, assembly columns, CFG basic-block nodes, decompiler output, and hexadecimal memory views while keeping `TerminalDockWidget` strictly isolated on a fixed-pitch PTY grid.
 
 ---
 
-## Workstation Theme Screenshots (`1440x900`)
+## Workstation Theme Screenshots (`1600x960`)
 
 ### 1. GridLock Slate (`gridlock_slate`)
 Default high-contrast dark slate palette (`#16181d` canvas, `#21252b` headers, `#00a2ff` azure accent).

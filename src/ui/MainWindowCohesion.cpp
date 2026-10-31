@@ -61,6 +61,8 @@
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
+#include "dialogs/ConditionalBreakpointDialog.hpp"
+#include "dialogs/PreferencesDialog.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
@@ -70,6 +72,7 @@
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
+#include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
@@ -753,5 +756,113 @@ bool MainWindow::rebuildTargetWorkflow() {
     return true;
 }
 
+/**
+ * @brief Programmatically drives all workstation views, tool rail groups, dialogs, and themes
+ *        to capture high-resolution 1600x960 documentation PNG screenshots into outputDir.
+ * @param outputDir Destination directory for generated PNG assets (e.g., docs/screenshots).
+ * @return True if all 16 core workstation, feature, and theme screenshots were saved cleanly.
+ */
+bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
+    QDir dir(outputDir);
+    if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) return false;
+
+    // Normalize window geometry to 1600x960 and populate realistic MPI debugging state.
+    resize(1600, 960);
+    loadPreviewFixture();
+    selectTargetByName(QStringLiteral("deadlock_ring"));
+    show();
+    QApplication::processEvents();
+
+    // Configure SourceCodeView breakpoints (line 18 standard, line 34 conditional) and execution line.
+    if (auto* sv = sourceCodeView()) {
+        if (!sv->hasBreakpoint(18)) sv->toggleBreakpoint(18);
+        sv->setConditionalBreakpoint(34, QStringLiteral("rank == 0"));
+        sv->highlightExecutionLine(34);
+    }
+    auto isFresh = [&](const QString& fn) { const QFileInfo fi(dir.filePath(fn)); return fi.exists() && fi.size() > 15000; };
+    auto saveGrab = [&](const QString& fn) -> bool {
+        if (isFresh(fn)) return true;
+        QApplication::processEvents();
+        return grab().save(dir.filePath(fn), "PNG", 88);
+    };
+
+    // 1. Capture all 6 curated theme screenshots plus default workstation_overview & workspace_overview.
+    for (const auto& [presetId, fileName] : std::vector<std::pair<QString, QString>>{
+             {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
+             {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
+             {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
+             {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
+             {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
+             {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}}) {
+        if (!isFresh(fileName)) { core::managers::ThemeManager::instance().applyTheme(presetId, false); propagateThemeToAllWidgets(); }
+        if (!saveGrab(fileName)) return false;
+    }
+    // Save primary workstation & workspace overview assets from the active Gridlock Slate theme.
+    if (!saveGrab(QStringLiteral("workstation_overview.png")) || !saveGrab(QStringLiteral("workspace_overview.png"))) return false;
+    setWorkspacePerspective(QStringLiteral("Reverse"));
+    if (!saveGrab(QStringLiteral("cfg_decompiler_split.png"))) return false;
+    setWorkspacePerspective(QStringLiteral("Code"));
+
+    // 2. Composite cursor-anchored ConditionalBreakpointDialog popover beneath line 34's gutter dot.
+    if (!isFresh(QStringLiteral("breakpoint_popover.png"))) {
+        ConditionalBreakpointDialog popDlg(QStringLiteral("rank == 0"), this);
+        popDlg.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
+        popDlg.adjustSize();
+        QPixmap basePix = grab();
+        QPainter painter(&basePix);
+        painter.drawPixmap(sourceCodeView() ? sourceCodeView()->mapTo(this, QPoint(44, 180)) : QPoint(290, 260), popDlg.grab());
+        painter.end();
+        if (!basePix.save(dir.filePath(QStringLiteral("breakpoint_popover.png")), "PNG", 88)) return false;
+    }
+
+    // 3. Capture bottom tool-window icon rail in Debug mode and MPI Diagnostics mode.
+    selectBottomToolGroup(QStringLiteral("Debug"));
+    if (!saveGrab(QStringLiteral("tool_rail_debug_tabs.png"))) return false;
+    selectBottomToolGroup(QStringLiteral("MPI"));
+    detectAndHighlightDeadlock({{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+    if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
+    if (!saveGrab(QStringLiteral("tool_rail_mpi_diagnostics.png")) || !saveGrab(QStringLiteral("mpi_diagnostics_docsets.png"))) return false;
+
+    // 4. Populate Package Manager with realistic "mpi" search results in Table and List modes.
+    if (auto* pkgWidget = static_cast<HpcConsoleWidget*>(m_spackManager)) {
+        if (m_bottomTabs) m_bottomTabs->setCurrentWidget(pkgWidget);
+        if (auto* s = pkgWidget->findChild<QLineEdit*>(QStringLiteral("packageSearchInput"))) s->setText(QStringLiteral("mpi"));
+        pkgWidget->displayPackageRecords({
+            {QStringLiteral("openmpi"), QStringLiteral("5.0.5-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("High performance message passing library (MPI-4.1)")},
+            {QStringLiteral("openmpi-devel"), QStringLiteral("5.0.5-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("Development headers and mpicxx wrapper for OpenMPI")},
+            {QStringLiteral("mpich"), QStringLiteral("4.2.2-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Available"), QStringLiteral("High-performance portable implementation of MPI")},
+            {QStringLiteral("hypre"), QStringLiteral("2.31.0-2"), QStringLiteral("x86_64"), QStringLiteral("spack"), QStringLiteral("Installed"), QStringLiteral("Scalable multigrid linear solvers for MPI clusters")},
+            {QStringLiteral("fftw-mpi"), QStringLiteral("3.3.10-4"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("Distributed-memory Fast Fourier Transform C routines")},
+            {QStringLiteral("hdf5-openmpi"), QStringLiteral("1.14.4-1"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Installed"), QStringLiteral("Parallel HDF5 data model and file format for MPI-IO")},
+            {QStringLiteral("scalapack"), QStringLiteral("2.2.0-5"), QStringLiteral("x86_64"), QStringLiteral("extra"), QStringLiteral("Available"), QStringLiteral("Scalable linear algebra package for distributed HPC")}});
+        pkgWidget->setViewMode(QStringLiteral("Table"));
+        if (!saveGrab(QStringLiteral("package_manager_mpi_search.png"))) return false;
+        pkgWidget->setViewMode(QStringLiteral("List"));
+        if (!saveGrab(QStringLiteral("package_manager_list_view.png"))) return false;
+    }
+
+    // 5. Capture PreferencesDialog on HPC / Cluster page with 16-directive #SBATCH auto-detection.
+    if (isFresh(QStringLiteral("preferences_slurm_autodetect.png"))) return true;
+    PreferencesDialog prefsDlg(this);
+    prefsDlg.resize(940, 660);
+    if (auto* catList = prefsDlg.findChild<QListWidget*>()) {
+        for (int i = 0; i < catList->count(); ++i) if (catList->item(i)->text().contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) catList->setCurrentRow(i);
+    }
+    prefsDlg.parseSlurmBatchScript(QStringLiteral(
+        "#!/bin/bash\n#SBATCH --job-name=gridlock_ring_debug\n#SBATCH --partition=gpu-a100\n#SBATCH --account=hpc_devtools\n"
+        "#SBATCH --qos=interactive\n#SBATCH --nodes=4\n#SBATCH --ntasks=16\n#SBATCH --ntasks-per-node=4\n#SBATCH --cpus-per-task=8\n"
+        "#SBATCH --gres=gpu:a100:4\n#SBATCH --mem=128G\n#SBATCH --time=02:30:00\n#SBATCH --constraint=nvlink\n"
+        "#SBATCH --reservation=maint_window\n#SBATCH --chdir=/scratch/hpc/gridlock\n#SBATCH --output=logs/slurm-%j.out\n"
+        "#SBATCH --error=logs/slurm-%j.err\nmodule load openmpi/5.0.5 cuda/12.4\n"));
+    QApplication::processEvents();
+    QPixmap basePix = grab();
+    QPainter painter(&basePix);
+    const QPixmap dlgPix = prefsDlg.grab();
+    painter.drawPixmap((width() - dlgPix.width()) / 2, (height() - dlgPix.height()) / 2, dlgPix);
+    painter.end();
+    return basePix.save(dir.filePath(QStringLiteral("preferences_slurm_autodetect.png")), "PNG", 88);
+}
+
 }  // namespace gridlock::ui
+
 

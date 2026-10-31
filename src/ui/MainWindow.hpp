@@ -497,6 +497,13 @@ public:
      */
     bool captureTabAuditSnapshot(int tabIndex, const QString& outputPath);
 
+    /**
+     * @brief Captures all 1600x960 workstation, feature, and theme documentation screenshots into outputDir.
+     * @param outputDir Target directory path (e.g., "docs/screenshots").
+     * @return True if all screenshots were rendered and saved; false otherwise.
+     */
+    bool captureDocumentationScreenshots(const QString& outputDir);
+
     bool canNavigateBack() const;
     bool canNavigateForward() const;
     bool navigateBack();

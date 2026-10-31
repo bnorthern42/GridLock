@@ -494,7 +494,7 @@ void MainWindow::loadSourceFile(const QString& filePath) {
         if (auto* view = m_editorTabManager->openFile(filePath)) {
             m_currentFile = filePath;
             const QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
-            if (m_lspCoordinator) {
+            if (m_lspCoordinator && QGuiApplication::platformName() != QStringLiteral("offscreen")) {
                 m_lspCoordinator->stop();
                 m_lspCoordinator->start(absolutePath);
                 m_lspCoordinator->didOpen(m_currentFile, view->getPlainText());

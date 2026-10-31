@@ -202,14 +202,7 @@ bool DocsetViewerWidget::showSymbolDocumentation(const QString& rawSymbol) {
         }
     }
 
-    // 3. System man page (man -P cat <query>)
-    const QString manHtml = mgr.lookupSystemManPageHtml(normalized);
-    if (!manHtml.isEmpty()) {
-        m_textBrowser->setHtml(manHtml);
-        return true;
-    }
-
-    // 4. Built-in MPI / GDB-MI / ABI Reference (only if starts with MPI_ or matches gdb-mi / x86_64-abi)
+    // 3. Built-in MPI / GDB-MI / ABI Reference (fast in-memory lookup for MPI_* / gdb-mi / x86_64-abi)
     if (normalized.startsWith(QStringLiteral("MPI_"), Qt::CaseInsensitive) ||
         normalized.compare(QStringLiteral("gdb-mi"), Qt::CaseInsensitive) == 0 ||
         normalized.compare(QStringLiteral("x86_64-abi"), Qt::CaseInsensitive) == 0) {
@@ -226,6 +219,13 @@ bool DocsetViewerWidget::showSymbolDocumentation(const QString& rawSymbol) {
             m_resultsList->blockSignals(false);
             return true;
         }
+    }
+
+    // 4. System man page (man -P cat <query>)
+    const QString manHtml = mgr.lookupSystemManPageHtml(normalized);
+    if (!manHtml.isEmpty()) {
+        m_textBrowser->setHtml(manHtml);
+        return true;
     }
 
     // 5. Clean generic ELF symbol card (never fall back to MPI_Init on non-MPI queries)

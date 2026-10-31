@@ -77,6 +77,10 @@ QWidget* MainWindow::setupDockTitleBar(QDockWidget* dock, const QString& titleTe
   auto* titleLabel = new QLabel(titleText, header);
   titleLabel->setMinimumWidth(0);
   titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  // Make the title label transparent to mouse events and install the event filter so
+  // clicking/dragging the text label itself triggers header drag and double-click float.
+  titleLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+  titleLabel->installEventFilter(this);
   hLayout->addWidget(titleLabel, 1);
 
   auto* floatBtn = new QToolButton(header);
@@ -125,8 +129,11 @@ void MainWindow::toggleDockFloating(QDockWidget* dock) {
     }
     m_dockHomeSlots.insert(dock, slot);
   }
-  dock->setParent(this, Qt::Tool | Qt::Window | Qt::CustomizeWindowHint);
-  dock->setFloating(true);
+  // Detach into a top-level frameless tool window owned by MainWindow so our customDockHeader
+  // drives both X11/offscreen coordinate dragging and Wayland QWindow::startSystemMove() cleanly
+  // without triggering QDockWidget's internal grabMouse() warning on non-popup windows.
+  dock->setFloating(false);
+  dock->setParent(this, Qt::Tool | Qt::Window | Qt::FramelessWindowHint);
   dock->resize((std::max)(280, dock->width()), (std::max)(220, dock->height()));
   dock->move(mapToGlobal(rect().center()) - QPoint(dock->width() / 2, dock->height() / 2));
   dock->show(); dock->raise();
@@ -216,12 +223,18 @@ void MainWindow::redockAllFloatingPanels() {
  * @return True if event was handled and should be consumed.
  */
 bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
-  if (!watched || watched->objectName() != QStringLiteral("customDockHeader")) {
-    return false;
-  }
-  auto* header = qobject_cast<QWidget*>(watched);
-  auto* dock = header ? qobject_cast<QDockWidget*>(header->parentWidget()) : nullptr;
-  if (!dock && header) {
+  QWidget* w = qobject_cast<QWidget*>(watched);
+  if (!w) return false;
+  // Resolve customDockHeader whether the event targeted the header directly or its child QLabel.
+  QWidget* header = (w->objectName() == QStringLiteral("customDockHeader"))
+                        ? w
+                        : ((w->parentWidget() && w->parentWidget()->objectName() == QStringLiteral("customDockHeader"))
+                               ? w->parentWidget()
+                               : nullptr);
+  if (!header || qobject_cast<QToolButton*>(w)) return false;
+
+  auto* dock = qobject_cast<QDockWidget*>(header->parentWidget());
+  if (!dock) {
     dock = reinterpret_cast<QDockWidget*>(header->property("associatedDock").value<void*>());
   }
   if (!dock) return false;
@@ -229,21 +242,43 @@ bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
   // Double-clicking anywhere on custom title bar toggles floating vs docked state.
   if (event->type() == QEvent::MouseButtonDblClick) {
     toggleDockFloating(dock);
+    event->accept();
     return true;
   }
-  // Track initial mouse position when drag begins with left mouse button.
+  // Consume left-button press on the custom header so QDockWidgetPrivate::mousePressEvent
+  // never invokes grabMouse() (which fails on Wayland non-popup windows).
   if (event->type() == QEvent::MouseButtonPress) {
     auto* me = static_cast<QMouseEvent*>(event);
     if (me->button() == Qt::LeftButton) {
       m_draggingDock = dock;
       m_dragOffset = me->globalPosition().toPoint() - dock->pos();
+      event->accept();
+      return true;
     }
   } else if (event->type() == QEvent::MouseMove) {
     auto* me = static_cast<QMouseEvent*>(event);
-    // While dragging a floating dock panel by its header, move window smoothly.
-    if ((me->buttons() & Qt::LeftButton) && m_draggingDock == dock && isDockFloating(dock)) {
-      dock->move(me->globalPosition().toPoint() - m_dragOffset);
-      return true;
+    if ((me->buttons() & Qt::LeftButton) && m_draggingDock == dock) {
+      // If the user drags a docked panel header by > 10px, automatically pop it out so it can be dragged.
+      if (!isDockFloating(dock) &&
+          (me->globalPosition().toPoint() - (dock->pos() + m_dragOffset)).manhattanLength() > 10) {
+        toggleDockFloating(dock);
+        m_dragOffset = QPoint(dock->width() / 2, 12);
+      }
+      if (isDockFloating(dock)) {
+        // On Wayland, delegate interactive top-level window movement to the compositor via startSystemMove().
+        if (QGuiApplication::platformName().contains(QStringLiteral("wayland"), Qt::CaseInsensitive)) {
+          if (QWindow* win = dock->windowHandle()) {
+            if (win->startSystemMove()) {
+              m_draggingDock = nullptr;
+              event->accept();
+              return true;
+            }
+          }
+        }
+        dock->move(me->globalPosition().toPoint() - m_dragOffset);
+        event->accept();
+        return true;
+      }
     }
   } else if (event->type() == QEvent::MouseButtonRelease) {
     auto* me = static_cast<QMouseEvent*>(event);
@@ -252,8 +287,9 @@ bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
       m_draggingDock = nullptr;
       if (isDockFloating(dock)) {
         handleDockDragRelease(dock, me->globalPosition().toPoint());
-        return true;
       }
+      event->accept();
+      return true;
     }
   } else if (event->type() == QEvent::ContextMenu) {
     // Show context menu with Redock / Pop Out options and Redock All.

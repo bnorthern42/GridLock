@@ -800,26 +800,38 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
     const int uiFontSize = s.value(QStringLiteral("appearance/ui_font_size"), 11).toInt();
     const QString uiFontFamily = s.value(QStringLiteral("appearance/ui_font_family"), QString()).toString();
 
+    static QMap<QString, QString> s_acssCache;
+    QString baseAcss;
     if (m_advancedStylesheet) {
         const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
-        if (m_advancedStylesheet->themes().contains(acssTheme) || m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
+        const QString cacheKey = acssTheme + QLatin1Char(':') + QString::number(uiFontSize);
+        if (s_acssCache.contains(cacheKey)) {
+            baseAcss = s_acssCache.value(cacheKey);
+        } else if (m_advancedStylesheet->themes().contains(acssTheme) || m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
             m_advancedStylesheet->setCurrentTheme(m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
             m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
             m_advancedStylesheet->updateStylesheet();
+            baseAcss = m_advancedStylesheet->styleSheet();
+            s_acssCache.insert(cacheKey, baseAcss);
         }
     }
     applyApplicationPalette(m_darkMode);
-    m_currentStyleSheet = buildDynamicWorkstationQss(m_advancedStylesheet ? m_advancedStylesheet->styleSheet() : QString(),
-                                                     m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
+    m_currentStyleSheet = buildDynamicWorkstationQss(baseAcss, m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
     if (qApp) {
+        const bool themeOrQssChanged = (qApp->property("gridlock_active_theme").toString() != m_activeThemeId) ||
+                                       (qApp->styleSheet() != m_currentStyleSheet);
         qApp->setProperty("gridlock_active_theme", m_activeThemeId);
         qApp->setProperty("gridlock_dark_mode", m_darkMode);
         qApp->setProperty("gridlock_swatch_colors", themeSwatchColors(m_activeThemeId));
-        qApp->setStyleSheet(m_currentStyleSheet);
-        applyApplicationPalette(m_darkMode);
-        for (QWidget* w : QApplication::allWidgets()) {
-            if (w && w->metaObject()->indexOfMethod("reloadStyle()") >= 0) {
-                QMetaObject::invokeMethod(w, "reloadStyle", Qt::DirectConnection);
+        if (themeOrQssChanged) {
+            if (qApp->styleSheet() != m_currentStyleSheet) {
+                qApp->setStyleSheet(m_currentStyleSheet);
+            }
+            applyApplicationPalette(m_darkMode);
+            for (QWidget* w : QApplication::allWidgets()) {
+                if (w && w->metaObject()->indexOfMethod("reloadStyle()") >= 0) {
+                    QMetaObject::invokeMethod(w, "reloadStyle", Qt::DirectConnection);
+                }
             }
         }
     }
@@ -876,7 +888,9 @@ QString ThemeManager::loadPersistedTheme() {
         }
     }
     if (!themeId.trimmed().isEmpty()) {
-        applyTheme(themeId, false);
+        if (m_activeThemeId != themeId.trimmed() || m_currentStyleSheet.isEmpty()) {
+            applyTheme(themeId, false);
+        }
     }
     return m_activeThemeId;
 }

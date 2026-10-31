@@ -46,10 +46,22 @@ Dedicated multi-rank wait-for cycle analysis (`DeadlockAnalyzer`), structured 6-
 * **Interactive Xref & Call-Graph Navigator (`XrefInspectorDialog`):** Press `X` on any instruction to inspect incoming callers/branches (`XREFS TO`) and outgoing calls/jumps (`XREFS FROM`) with live preview and double-click navigation.
 * **Live Instruction & Hex Byte Patching with ELF Export:** Assemble live instruction patches (`Ctrl+Shift+P` / `nop`, `ret`, `xor eax, eax`, `jmp`, `je`, `jne`) or edit raw hex bytes (`Ctrl+E` in `MemView`), and persist the modified image to disk as an executable ELF64 binary (`ElfBinaryInspector::savePatchedBinary`).
 
-### Integrated Developer Environment
-* **Zero-Gutter Dark-Slate Workstation Chrome:** Engineered around a two-tier panel architecture (`24px` `#21252b` header strips with `0px` outer viewport margins and `1px solid #2c313a` structural dividers) across all docks, bottom consoles, and modal dialogs.
-* **Offline Zeal Docsets & System Man Viewer (`ReferenceManualWidget`):** Auto-discovers installed Zeal `.docset` SQLite/HTML bundles (`~/.local/share/Zeal/Zeal/docsets`) alongside system `man` pages. Press `F1` on any symbol or instruction to open formatted dark-slate API documentation immediately.
-* **Isolated Fixed-Pitch PTY Terminal (`TerminalDockWidget`):** Embeds a real `QTermWidget` pseudo-terminal enforcing strict fixed-pitch font isolation (`JetBrains Mono` / `Cascadia Code` / `DejaVu Sans Mono`) so proportional UI themes never corrupt terminal character cell alignment.
+### Integrated Developer Environment & Cluster Tooling
+* **Two-Lane Vector Gutter & Cursor-Anchored Breakpoint Popover (`SourceCodeView` + `ConditionalBreakpointDialog`):** Right-clicking any gutter line opens a frameless cursor-anchored popover displaying line context, rank suspension scope (`All MPI Ranks` vs. `Focused Rank Only`), and live `clangd` LSP virtual-buffer C++ expression completion (`ClangdLspClient`).
+* **Left Vertical Tool-Window Icon Rail (`#bottomToolWindowRail`):** Organizes the bottom dock into four linked tool groups (`Debug`, `MPI`, `Terminal`, `Docs`), pairing a `36px` vertical icon rail with contextual sub-tabs and a flattened single-row `MPI Diagnostics` header.
+* **Multi-Distro HPC & System Package Manager (`HpcConsoleWidget`):** Auto-detects `spack`, `pacman`, `dnf`, `apt`, `zypper`, `rpm`, `dpkg-query`, and `eb`, presenting `"mpi"` and system package queries across switchable `Table`, `List`, and `Raw` views.
+* **16-Directive SLURM Batch Auto-Detector & Smart Build System:** Parses `#SBATCH` job scripts directly inside `PreferencesDialog` (`HPC / Cluster`) and auto-detects `Meson`, `CMake`, `Make`, or standalone `mpicxx` builds (`F7`).
+* **Zero-Gutter Workstation Chrome & 8 Curated Themes:** Engineered around a two-tier panel architecture (`24px` header strips with `0px` outer viewport margins) across 5 dark themes and 3 high-contrast light themes (`Daylight Paper`, `Solarized Warm`, `Catppuccin Latte`).
+* **Offline Zeal Docsets & System Man Viewer (`ReferenceManualWidget`):** Auto-discovers installed Zeal `.docset` SQLite/HTML bundles (`~/.local/share/Zeal/Zeal/docsets`) alongside system `man` pages (`F1`).
+* **Isolated Fixed-Pitch PTY Terminal (`TerminalDockWidget`):** Embeds a real `QTermWidget` pseudo-terminal enforcing strict fixed-pitch font isolation (`DejaVu Sans Mono` / `Cascadia Code` / `Liberation Mono`).
+
+| Cursor-Anchored Breakpoint Popover | Multi-Distro Package Manager (`"mpi"` Search) |
+| :---: | :---: |
+| ![Breakpoint Popover](docs/screenshots/breakpoint_popover.png) | ![Package Manager MPI Search](docs/screenshots/package_manager_mpi_search.png) |
+
+| Bottom Tool Rail (`Debug` Mode) | 16-Directive `#SBATCH` Auto-Detection |
+| :---: | :---: |
+| ![Tool Rail Debug Tabs](docs/screenshots/tool_rail_debug_tabs.png) | ![SLURM Auto-Detection](docs/screenshots/preferences_slurm_autodetect.png) |
 
 ---
 

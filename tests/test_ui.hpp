@@ -198,5 +198,8 @@ private slots:
 
     /** @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained breakpoint popover, and theme persistence. */
     void testEditableSourceViewModernLspPopupAndThemePersistence();
+
+    /** @brief Generates and verifies all 1600x960 documentation and theme PNG screenshots and USER_GUIDE.md image references. */
+    void testGenerateAndVerifyUpdatedDocumentationScreenshots();
 };
 

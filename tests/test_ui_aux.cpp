@@ -405,7 +405,6 @@ void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
     mainWindow.resize(1440, 900);
     mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-
     auto* disassemblyView = mainWindow.disassemblyView();
     QVERIFY(disassemblyView != nullptr);
 
@@ -428,11 +427,9 @@ void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
     const QList<QWidget*> scopes = { &mainWindow, mainWindow.memView(), mainWindow.projectExplorerWidget(), disassemblyView };
     for (QWidget* s : scopes) {
         if (!s) continue;
-        // Verify buttons conform to compact ergonomics.
+        // Verify buttons, line edits, and combo boxes conform to compact ergonomics.
         for (auto* btn : s->findChildren<QPushButton*>()) if (btn->isVisible()) QVERIFY2(btn->height() <= 28, qPrintable(btn->objectName()));
-        // Verify line edits conform to compact ergonomics.
         for (auto* edit : s->findChildren<QLineEdit*>()) if (edit->isVisible()) QVERIFY2(edit->height() <= 28, qPrintable(edit->objectName()));
-        // Verify combo boxes conform to compact ergonomics.
         for (auto* combo : s->findChildren<QComboBox*>()) if (combo->isVisible()) QVERIFY2(combo->height() <= 28, qPrintable(combo->objectName()));
     }
     // Verify toolbars conform to compact height limit <= 36px.
@@ -448,7 +445,6 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     auto* projectExplorer = mainWindow.projectExplorerWidget();
     auto* memView = mainWindow.memView();
     QVERIFY(disassemblyView && projectExplorer && memView);
-
     disassemblyView->setSplitGraphDecompilerMode(true);
     QVERIFY(disassemblyView->seekToAddress(0x0040113dULL));
     const int initLine = disassemblyView->currentDecompilerLine();
@@ -462,12 +458,9 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     QVERIFY(disassemblyView->selectDecompilerLine(loopLine));
     QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
     QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
-
-    // Highlight token in pseudocode.
+    // Highlight token in pseudocode and verify navigation history traversal.
     disassemblyView->highlightToken("argc");
     QCOMPARE(disassemblyView->highlightedToken(), QStringLiteral("argc"));
-
-    // Verify navigation history traversal.
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
     QVERIFY(mainWindow.seekToAddressOrExpression("0x0040113d"));
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178"));
@@ -478,13 +471,11 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     QVERIFY(mainWindow.navigateForward());
     QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
 
-    // Activate string and verify memory view navigates to string address.
+    // Activate string and verify memory view navigates to string address and address comment.
     projectExplorer->setStringsMode(true);
     QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4);
     QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD"));
     QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
-
-    // Address comment verification.
     disassemblyView->setAddressComment(0x00401149ULL, "Rank loop header");
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Rank loop header"));
     QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
@@ -500,7 +491,6 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
     mainWindow.resize(1440, 900);
     mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-
     auto* disassemblyView = mainWindow.disassemblyView();
     auto* serverRackView = mainWindow.serverRackView();
     auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
@@ -509,36 +499,25 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
     // Set split graph decompiler and assign rank instruction pointers.
     disassemblyView->setSplitGraphDecompilerMode(true);
     disassemblyView->setRankAddresses({{0, 0x00401168ULL}, {1, 0x00401155ULL}, {2, 0x00401157ULL}, {3, 0x0040115fULL}});
-
-    // Verify Rank 0 maps to block 0x00401168.
+    // Verify Rank 0 maps to block 0x00401168, Rank 1 to 0x0040114f, Ranks 2 and 3 to 0x00401157.
     QCOMPARE(disassemblyView->ranksAtBlock(0x00401168ULL), QVector<int>{0});
-    // Verify Rank 1 maps to block 0x0040114f.
     QCOMPARE(disassemblyView->ranksAtBlock(0x0040114fULL), QVector<int>{1});
-    // Verify Ranks 2 and 3 map to block 0x00401157.
     QCOMPARE(disassemblyView->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3}));
 
     // Verify minimap visibility toggle and geometry constraints.
     QVERIFY(disassemblyView->isGraphMinimapVisible());
     const QRect mmRect = disassemblyView->minimapRect();
-    // Minimap rectangle must have positive dimensions.
     QVERIFY(mmRect.width() >= 80 && mmRect.height() >= 60);
-
-    // Toggle minimap visibility off.
     disassemblyView->setGraphMinimapVisible(false);
     QVERIFY(!disassemblyView->isGraphMinimapVisible());
-
-    // Toggle minimap visibility back on.
     disassemblyView->setGraphMinimapVisible(true);
     QVERIFY(disassemblyView->isGraphMinimapVisible());
 
     // Select rank 1 in ServerRackView and verify status telemetry and address update.
     QVERIFY(serverRackView->selectRank(1));
     QCOMPARE(serverRackView->selectedRank(), 1);
-    // Status telemetry banner must indicate active rank.
     QVERIFY(statusTelemetry->text().contains("MPI RANK: 1"));
-    // Disassembly view must seek to rank 1's instruction pointer.
     QCOMPARE(disassemblyView->currentAddress(), 0x00401155ULL);
-    // Active decompiler line must be non-zero.
     QVERIFY(disassemblyView->currentDecompilerLine() > 0);
 }
 
@@ -548,11 +527,8 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
 void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
     // 1. Standalone widgets start clean with zero hardcoded mock ranks
     gridlock::ui::ServerRackView standaloneRack;
-    // Rack node count should be zero initially.
     QCOMPARE(standaloneRack.rankNodeCount(), 0);
-
     gridlock::ui::DisassemblyView standaloneDisasm;
-    // Disassembly view should have no rank occupancy badges initially.
     QVERIFY(standaloneDisasm.ranksAtBlock(0x00401155ULL).isEmpty());
     QVERIFY(standaloneDisasm.ranksAtBlock(0x00401168ULL).isEmpty());
 
@@ -562,11 +538,9 @@ void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
         gridlock::RankState st;
         st.rankId = r;
         st.currentState = "stopped";
-        // RIP register at index 16.
         st.registers[16] = (r == 0) ? QStringLiteral("0x00401168") : QStringLiteral("0x00401155");
         states.append(st);
     }
-    // Feed telemetry into standalone rack.
     standaloneRack.updateRanks(states);
     QCOMPARE(standaloneRack.rankNodeCount(), 4);
     QCOMPARE(standaloneRack.rankPcAddress(0), 0x00401168ULL);
@@ -577,20 +551,15 @@ void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
     auto* rack = mainWindow.serverRackView();
     auto* disasm = mainWindow.disassemblyView();
     QVERIFY(rack && disasm);
-
-    // Synchronize ranks into main window rack.
     rack->updateRanks(states);
     QCOMPARE(rack->rankNodeCount(), 4);
-    // Disassembly view should reflect updated rank locations.
     QCOMPARE(disasm->ranksAtBlock(0x00401168ULL), QVector<int>{0});
     QCOMPARE(disasm->ranksAtBlock(0x0040114fULL), (QVector<int>{1, 2, 3}));
 
     // 4. loadPreviewFixture() populates 8 preview ranks via the dynamic pipeline
     mainWindow.loadPreviewFixture();
     QCOMPARE(rack->rankNodeCount(), 8);
-    // Rank 0 should reside at entrypoint 0x00401120.
     QCOMPARE(disasm->ranksAtBlock(0x00401120ULL), QVector<int>{0});
-    // Worker ranks 2..7 reside at barrier loop 0x00401157.
     QCOMPARE(disasm->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3, 4, 5, 6, 7}));
 }
 
@@ -738,18 +707,16 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
     // 2. Verify TerminalDockWidget monospace font enforcement and geometry isolation.
     auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
     QVERIFY(terminalDock != nullptr);
-    // Request a variable-pitch proportional font family.
+    // Request a variable-pitch proportional font family and enforce fixed-pitch monospace resolution.
     terminalDock->setCustomFont("Cantarell", 11);
-    // Enforce that activeTerminalFont() strictly resolves to a fixed-pitch monospace font.
     QVERIFY(QFontInfo(terminalDock->activeTerminalFont()).fixedPitch() && terminalDock->width() >= 0);
 
     // 3. Verify MemView live byte patching, patch tracking count, signal emission, and revert.
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     QVERIFY(memView != nullptr);
     QSignalSpy patchSpy(memView, &gridlock::ui::MemView::bytesPatched);
-    // Apply live 2-byte patch at base address.
+    // Apply live 2-byte patch at base address and verify counter + signal.
     QVERIFY(memView->patchBytes(0x00401120ULL, QByteArray::fromHex("9090")));
-    // Verify patch counter increments and bytesPatched signal fired once.
     QCOMPARE(memView->patchedByteCount(), 2);
     QCOMPARE(patchSpy.count(), 1);
     // Revert all applied memory patches and verify counter resets to 0.
@@ -842,6 +809,10 @@ void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation
 /**
  * @brief Verifies system package manager fallback detection, multi-distro CLI output parsing
  *        (`pacman`, `dnf`, `apt`, `zypper`), and switchable `Table` / `List` / `Raw` display modes.
+ *
+ * Ensures that HpcConsoleWidget discovers a valid local package manager backend even when
+ * Spack is absent, parses structured metadata columns from Arch, Fedora, Debian/Ubuntu,
+ * and openSUSE CLI formats, and synchronizes all three presentation views cleanly.
  */
 void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     // 1. System Package Manager Fallback Detection When Spack Is Missing.
@@ -849,37 +820,36 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     QVERIFY(!widget.activePackageManagerBackend().isEmpty());
 
     // 2. Multi-Distro CLI Output Parsing (pacman, dnf, apt, zypper).
+    // Verify Arch Linux pacman -Ss two-line entry parsing with [installed] state badge.
     const QString pacmanOut = QStringLiteral(
         "extra/openmpi 5.0.5-1 [installed]\n    High performance message passing library (MPI)\n"
         "extra/hypre 2.31.0-1\n    Parallel multigrid solvers\n");
     const auto pacmanRecs = widget.parsePackageManagerOutput(QStringLiteral("pacman"), pacmanOut);
     QCOMPARE(pacmanRecs.size(), 2);
-    QCOMPARE(pacmanRecs[0].name, QStringLiteral("openmpi"));
-    QCOMPARE(pacmanRecs[0].version, QStringLiteral("5.0.5-1"));
-    QCOMPARE(pacmanRecs[0].repository, QStringLiteral("extra"));
-    QCOMPARE(pacmanRecs[0].status, QStringLiteral("Installed"));
+    QVERIFY(pacmanRecs[0].name == QStringLiteral("openmpi") && pacmanRecs[0].version == QStringLiteral("5.0.5-1"));
+    QVERIFY(pacmanRecs[0].repository == QStringLiteral("extra") && pacmanRecs[0].status == QStringLiteral("Installed"));
     QVERIFY(pacmanRecs[0].description.contains(QStringLiteral("message passing")));
-    QCOMPARE(pacmanRecs[1].name, QStringLiteral("hypre"));
-    QCOMPARE(pacmanRecs[1].status, QStringLiteral("Available"));
+    QVERIFY(pacmanRecs[1].name == QStringLiteral("hypre") && pacmanRecs[1].status == QStringLiteral("Available"));
 
+    // Verify Fedora/RHEL dnf search name.arch : summary parsing.
     const QString dnfOut = QStringLiteral(
         "Last metadata expiration check...\n=== Name & Summary Matched: openmpi ===\n"
         "openmpi.x86_64 : Open Message Passing Interface\n"
         "openmpi-devel.x86_64 : Development headers for OpenMPI\n");
     const auto dnfRecs = widget.parsePackageManagerOutput(QStringLiteral("dnf"), dnfOut);
     QCOMPARE(dnfRecs.size(), 2);
-    QCOMPARE(dnfRecs[0].name, QStringLiteral("openmpi"));
-    QCOMPARE(dnfRecs[0].arch, QStringLiteral("x86_64"));
+    QVERIFY(dnfRecs[0].name == QStringLiteral("openmpi") && dnfRecs[0].arch == QStringLiteral("x86_64"));
     QCOMPARE(dnfRecs[1].name, QStringLiteral("openmpi-devel"));
 
+    // Verify Debian/Ubuntu apt-cache search name - summary parsing.
     const QString aptOut = QStringLiteral(
         "openmpi-bin - high performance message passing library -- binaries\n"
         "libopenmpi-dev - high performance message passing library -- header files\n");
     const auto aptRecs = widget.parsePackageManagerOutput(QStringLiteral("apt"), aptOut);
     QCOMPARE(aptRecs.size(), 2);
-    QCOMPARE(aptRecs[0].name, QStringLiteral("openmpi-bin"));
-    QCOMPARE(aptRecs[1].name, QStringLiteral("libopenmpi-dev"));
+    QVERIFY(aptRecs[0].name == QStringLiteral("openmpi-bin") && aptRecs[1].name == QStringLiteral("libopenmpi-dev"));
 
+    // Verify openSUSE zypper se -s pipe-delimited table parsing.
     const QString zypperOut = QStringLiteral(
         "S  | Name        | Type    | Version   | Arch   | Repository\n"
         "---+-------------+---------+-----------+--------+----------------\n"
@@ -887,14 +857,13 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
         "   | openmpi4-devel | package | 4.1.6-1.1 | x86_64 | Main Repository\n");
     const auto zypperRecs = widget.parsePackageManagerOutput(QStringLiteral("zypper"), zypperOut);
     QCOMPARE(zypperRecs.size(), 2);
-    QCOMPARE(zypperRecs[0].name, QStringLiteral("openmpi4"));
-    QCOMPARE(zypperRecs[0].status, QStringLiteral("Installed"));
-    QCOMPARE(zypperRecs[0].version, QStringLiteral("4.1.6-1.1"));
-    QCOMPARE(zypperRecs[1].status, QStringLiteral("Available"));
+    QVERIFY(zypperRecs[0].name == QStringLiteral("openmpi4") && zypperRecs[0].status == QStringLiteral("Installed"));
+    QVERIFY(zypperRecs[0].version == QStringLiteral("4.1.6-1.1") && zypperRecs[1].status == QStringLiteral("Available"));
 
     // 3. Three Switchable Views (Table, List, Raw) & Non-Empty Table Population.
     widget.displayPackageRecords(pacmanRecs, pacmanOut);
     QCOMPARE(widget.packageTableRowCount(), 2);
+    // Verify switching across Table, List, and Raw views updates the stacked display.
     widget.setViewMode(QStringLiteral("Table"));
     QCOMPARE(widget.currentViewMode(), QStringLiteral("Table"));
     widget.setViewMode(QStringLiteral("List"));
@@ -903,4 +872,57 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     QVERIFY(listBrowser != nullptr && listBrowser->toPlainText().contains(QStringLiteral("openmpi")));
     widget.setViewMode(QStringLiteral("Raw"));
     QCOMPARE(widget.currentViewMode(), QStringLiteral("Raw"));
+}
+
+/**
+ * @brief Generates and verifies all 1600x960 workstation, feature, and theme PNG screenshots in
+ *        `docs/screenshots/` and confirms `docs/USER_GUIDE.md` embeds the new visual assets.
+ *
+ * Exercises the headless documentation screenshot generator across all six curated color themes,
+ * the Code and Reverse perspectives, the cursor-anchored ConditionalBreakpointDialog popover,
+ * the bottom vertical tool-window icon rail (`Debug` and `MPI` modes), the multi-distro
+ * Package Manager (`Table` and `List` views), and the 16-directive SLURM batch auto-detector.
+ */
+void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
+    // Instantiate MainWindow and resolve the repository docs/screenshots output directory.
+    gridlock::ui::MainWindow mainWindow;
+    const QString shotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists())
+                                ? QStringLiteral("../docs/screenshots")
+                                : QStringLiteral("docs/screenshots");
+    // 1. Capture all workstation, feature, and theme screenshots via MainWindow::captureDocumentationScreenshots.
+    QVERIFY2(mainWindow.captureDocumentationScreenshots(shotDir), "captureDocumentationScreenshots must succeed");
+
+    // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid >= 800x500 QImage.
+    // Includes overview assets, feature highlights, and all 6 curated workstation theme snapshots.
+    const QStringList expectedFiles = {
+        QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"),
+        QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"),
+        QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"),
+        QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"),
+        QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"),
+        QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"),
+        QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"),
+        QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png")
+    };
+    // Audit each generated PNG asset on disk for non-trivial byte size and valid image dimensions.
+    for (const QString& fn : expectedFiles) {
+        const QString fullPath = shotDir + QLatin1Char('/') + fn;
+        const QFileInfo fi(fullPath);
+        QVERIFY2(fi.exists() && fi.size() > 15000, qPrintable(fullPath));
+        const QImage img(fullPath);
+        QVERIFY2(!img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath));
+    }
+
+    // 3. Verify docs/USER_GUIDE.md references breakpoint_popover.png and package_manager_mpi_search.png.
+    // Confirms user-facing documentation stays synchronized with the newly captured visual assets.
+    const QString guidePath = QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md"))
+                                  ? QStringLiteral("docs/USER_GUIDE.md")
+                                  : QStringLiteral("../docs/USER_GUIDE.md");
+    QFile guideFile(guidePath);
+    QVERIFY(guideFile.open(QIODevice::ReadOnly));
+    const QString guideText = QString::fromUtf8(guideFile.readAll());
+    // Both the cursor-anchored breakpoint popover and MPI package search table must be embedded.
+    QVERIFY2(guideText.contains(QStringLiteral("breakpoint_popover.png")) &&
+                 guideText.contains(QStringLiteral("package_manager_mpi_search.png")),
+             "docs/USER_GUIDE.md must embed breakpoint_popover.png and package_manager_mpi_search.png");
 }
