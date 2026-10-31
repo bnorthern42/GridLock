@@ -827,10 +827,12 @@ int HpcConsoleWidget::searchPackagesSynchronously(const QString& query, int time
     if (!prog.isEmpty()) {
         QProcess proc;
         proc.start(prog, args);
-        if (proc.waitForFinished(timeoutMs)) {
-            rawRepo = QString::fromUtf8(proc.readAllStandardOutput());
-            repoMatches = parsePackageManagerOutput(pm, rawRepo);
+        if (!proc.waitForFinished(timeoutMs) && proc.state() != QProcess::NotRunning) {
+            proc.kill();
+            proc.waitForFinished(500);
         }
+        rawRepo = QString::fromUtf8(proc.readAllStandardOutput());
+        repoMatches = parsePackageManagerOutput(pm, rawRepo);
     }
     const QVector<PackageRecord> merged = mergePackageRecords(localMatches, repoMatches);
     const QString combinedRaw = rawLocal + (rawRepo.isEmpty() ? QString() : (QStringLiteral("\n$ %1 %2\n").arg(prog, args.join(QLatin1Char(' '))) + rawRepo));
@@ -853,8 +855,9 @@ void HpcConsoleWidget::executePackageSearch(const QString& query) {
 
     // Stage 2: Launch asynchronous repository search via m_searchProcess.
     if (m_searchProcess->state() != QProcess::NotRunning) {
+        m_searchProcess->disconnect(this);
         m_searchProcess->kill();
-        m_searchProcess->waitForFinished(100);
+        m_searchProcess->waitForFinished(500);
     }
     m_searchProcess->disconnect();
     QString prog;
@@ -877,10 +880,11 @@ void HpcConsoleWidget::executePackageSearch(const QString& query) {
  * @brief Cleanly terminates any in-flight repository search subprocess before destruction.
  */
 HpcConsoleWidget::~HpcConsoleWidget() {
+    if (m_searchDebounceTimer) m_searchDebounceTimer->stop();
     if (m_searchProcess && m_searchProcess->state() != QProcess::NotRunning) {
-        m_searchProcess->disconnect();
+        m_searchProcess->disconnect(this);
         m_searchProcess->kill();
-        m_searchProcess->waitForFinished(100);
+        m_searchProcess->waitForFinished(500);
     }
 }
 

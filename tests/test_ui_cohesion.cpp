@@ -771,12 +771,12 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     bool foundCanvasLightText = false;
     for (QLabel* lbl : dialog.findChildren<QLabel*>()) {
         const bool hasHex = lbl->text().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive) || lbl->toolTip().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive);
-        if (lbl->text().contains(QStringLiteral("Accent")) && hasHex) {
-            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() < 60, "Bright #fabd2f Accent swatch must use dark text (< 60 lightness)");
+        if ((lbl->text().contains(QStringLiteral("Accent")) || lbl->toolTip().contains(QStringLiteral("Accent"))) && hasHex) {
+            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() < 60 && lbl->styleSheet().contains(QStringLiteral("#16181d"), Qt::CaseInsensitive), "Bright #fabd2f Accent swatch must use dark text (< 60 lightness)");
             foundAccentDarkText = true;
         }
         const bool hasCanvas = lbl->text().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive) || lbl->toolTip().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive);
-        if (lbl->text().contains(QStringLiteral("Canvas")) && hasCanvas) {
+        if ((lbl->text().contains(QStringLiteral("Canvas")) || lbl->toolTip().contains(QStringLiteral("Canvas"))) && hasCanvas) {
             QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() > 200, "Dark #1d2021 Canvas swatch must use light text (> 200 lightness)");
             foundCanvasLightText = true;
         }

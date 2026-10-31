@@ -244,8 +244,8 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
         m_darkModeCheck->blockSignals(true);
         m_darkModeCheck->setChecked(isDark);
         m_darkModeCheck->blockSignals(false);
-        updateSwatchPreview(themeId);
         gridlock::core::managers::ThemeManager::instance().applyTheme(themeId);
+        updateSwatchPreview(themeId);
     });
 }
 
@@ -257,9 +257,9 @@ void AppearanceSettingsPage::updateSwatchPreview(const QString& themeId) {
     const QStringList sw = gridlock::core::managers::ThemeManager::themeSwatchColors(themeId);
     const QStringList roles = {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")};
     for (int i = 0; i < m_swatchBoxes.size() && i < sw.size() && i < roles.size(); ++i) {
-        const QColor bg(sw[i]);
+        const QColor bgColor(sw[i]);
         // Compute perceived luminance L = 0.299*R + 0.587*G + 0.114*B for WCAG contrast.
-        const double lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue();
+        const double lum = 0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue();
         const QString fgHex = (lum >= 145.0) ? QStringLiteral("#16181d") : QStringLiteral("#ffffff");
         const QString bdrHex = (lum >= 145.0) ? QStringLiteral("#b8b09d") : QStringLiteral("#434955");
         const QColor fgColor(fgHex);
@@ -268,15 +268,20 @@ void AppearanceSettingsPage::updateSwatchPreview(const QString& themeId) {
         m_swatchBoxes[i]->setText(roles[i]);
         m_swatchBoxes[i]->setFixedHeight(26);
         m_swatchBoxes[i]->setMinimumWidth(82);
-        QPalette pal = m_swatchBoxes[i]->palette();
-        pal.setColor(QPalette::All, QPalette::WindowText, fgColor);
-        pal.setColor(QPalette::All, QPalette::Text, fgColor);
-        m_swatchBoxes[i]->setPalette(pal);
         m_swatchBoxes[i]->setStyleSheet(
             QStringLiteral("background-color: %1; color: %2; border: 1px solid %3; "
                            "border-radius: 6px; padding: 4px 10px; min-width: 68px; max-width: 84px; "
                            "font-size: 11px; font-weight: 600;")
                 .arg(sw[i], fgHex, bdrHex));
+        QPalette swPal = m_swatchBoxes[i]->palette();
+        for (auto grp : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+            swPal.setColor(grp, QPalette::WindowText, fgColor);
+            swPal.setColor(grp, QPalette::Text, fgColor);
+            swPal.setColor(grp, QPalette::ButtonText, fgColor);
+            swPal.setColor(grp, QPalette::Window, bgColor);
+            swPal.setColor(grp, QPalette::Base, bgColor);
+        }
+        m_swatchBoxes[i]->setPalette(swPal);
         m_swatchBoxes[i]->setToolTip(QStringLiteral("%1: %2").arg(roles[i], sw[i]));
     }
 }

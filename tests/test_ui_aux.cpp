@@ -892,6 +892,13 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     QVERIFY2(appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))) &&
                  !appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s*(\\n|$)"))),
              "scripts/build_appimage.sh must invoke ninja -C \"$BUILD_DIR\" gridlock and not bare ninja -C \"$BUILD_DIR\"");
+    if (!QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) ||
+        !QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1"))) {
+        QProcess prepProc;
+        prepProc.setWorkingDirectory(rootPrefix.isEmpty() ? QDir::currentPath() : QDir(rootPrefix).absolutePath());
+        prepProc.start(QStringLiteral("bash"), {QStringLiteral("scripts/build_appimage.sh"), QStringLiteral("--appdir-only")});
+        QVERIFY2(prepProc.waitForFinished(30000) && prepProc.exitCode() == 0, "scripts/build_appimage.sh --appdir-only must succeed");
+    }
     QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")), "AppDir/usr/lib/libqtadvancedcss.so.1 and AppDir/AppRun must exist");
     QVERIFY2(QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir/usr/bin must contain zero *test* binaries");
 

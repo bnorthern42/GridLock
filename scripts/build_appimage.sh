@@ -60,7 +60,9 @@ else
 fi
 
 echo "Installing into AppDir..."
-DESTDIR="${APPDIR}" ninja -C "${BUILD_DIR}" install
+if [ "${APPDIR_ONLY}" -eq 0 ] || [ ! -f "./${BUILD_DIR}/${BIN_NAME}" ]; then
+    DESTDIR="${APPDIR}" ninja -C "${BUILD_DIR}" install
+fi
 mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/lib"
 if [ -f "./${BUILD_DIR}/${BIN_NAME}" ]; then
     cp -af "./${BUILD_DIR}/${BIN_NAME}" "${APPDIR}/usr/bin/${BIN_NAME}"
@@ -70,16 +72,20 @@ chmod +x "${APPDIR}/usr/bin/${BIN_NAME}"
 
 echo "Bundling external/Qt-Advanced-Stylesheets/build/lib/libqtadvancedcss.so* and builddir shared libraries into AppDir/usr/lib/..."
 if [ -d "${ACSS_LIB_DIR}" ]; then
-    cp -af "${ACSS_LIB_DIR}"/libqtadvancedcss.so* "${APPDIR}/usr/lib/"
+    cp -af "${ACSS_LIB_DIR}"/libqtadvancedcss.so* "${APPDIR}/usr/lib/" 2>/dev/null || true
 fi
-find "${ROOT_DIR}/external" "${ROOT_DIR}/builddir" \
-    -name "*.so*" \( -type f -o -type l \) 2>/dev/null | while IFS= read -r ext_so; do
+{ find "${ROOT_DIR}/external" "${ROOT_DIR}/${BUILD_DIR}" /usr/lib /usr/lib64 /usr/local/lib /usr/local/lib64 \
+    -name "libqtadvancedcss.so*" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r acss_path; do
+    cp -af "${acss_path}" "${APPDIR}/usr/lib/" 2>/dev/null || true
+done
+{ find "${ROOT_DIR}/external" "${ROOT_DIR}/${BUILD_DIR}" \
+    -name "*.so*" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r ext_so; do
     cp -af "${ext_so}" "${APPDIR}/usr/lib/" 2>/dev/null || true
 done
 
 echo "Bundling shared libraries (libqtermwidget6, libsqlite3, libQt6Sql, libQt6Network, libQt6Widgets, libQt6Gui, libQt6Core, libtomlplusplus)..."
 for lib_pattern in "libqtermwidget6.so*" "libsqlite3.so*" "libQt6Sql.so*" "libQt6Network.so*" "libQt6Widgets.so*" "libQt6Gui.so*" "libQt6Core.so*" "libQt6OpenGL*.so*" "libQt6Svg*.so*" "libQt6Qml*.so*" "libQt6Concurrent*.so*" "libtomlplusplus.so*"; do
-    { find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu "${ROOT_DIR}/builddir" \
+    { find /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/local/lib /usr/local/lib64 "${ROOT_DIR}/${BUILD_DIR}" \
         -maxdepth 2 -name "${lib_pattern}" \( -type f -o -type l \) 2>/dev/null || true; } | while IFS= read -r lib_path; do
         cp -af "${lib_path}" "${APPDIR}/usr/lib/" 2>/dev/null || true
     done
