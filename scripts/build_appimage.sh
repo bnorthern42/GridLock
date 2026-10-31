@@ -34,6 +34,12 @@ export QMAKE="${QMAKE_BIN}"
 
 echo "Building ${APP_NAME} Version: ${VERSION} (APPDIR_ONLY=${APPDIR_ONLY})"
 
+if [ ! -f "${ACSS_LIB_DIR}/libqtadvancedcss.so" ] && [ -d "${ROOT_DIR}/external/Qt-Advanced-Stylesheets" ]; then
+    echo "Building external/Qt-Advanced-Stylesheets..."
+    cmake -S "${ROOT_DIR}/external/Qt-Advanced-Stylesheets" -B "${ROOT_DIR}/external/Qt-Advanced-Stylesheets/build" -GNinja -DQT_VERSION_MAJOR=6 -DCMAKE_BUILD_TYPE=Release
+    ninja -C "${ROOT_DIR}/external/Qt-Advanced-Stylesheets/build"
+fi
+
 if [ "${APPDIR_ONLY}" -eq 0 ]; then
     echo "Initializing git submodules..."
     git submodule update --init --recursive || true

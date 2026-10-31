@@ -31,7 +31,7 @@ jobs:
       - name: Install v0.7.0 system dependencies
         run: |
           apt-get update
-          apt-get install -y \
+          apt-get install -y --no-install-recommends \
             build-essential \
             g++ \
             clang \
@@ -41,16 +41,14 @@ jobs:
             ninja-build \
             pkg-config \
             git \
-            patchelf \
+            ca-certificates \
             qt6-base-dev \
             qt6-base-dev-tools \
             qt6-tools-dev \
             qt6-tools-dev-tools \
             qt6-declarative-dev \
             libqt6sql6-sqlite \
-            libqt6svg6 \
             libqt6svg6-dev \
-            libqtermwidget6-dev \
             libsqlite3-dev \
             openmpi-bin \
             libopenmpi-dev \
@@ -71,15 +69,28 @@ jobs:
             libxcb-xinerama0 \
             libxcb-cursor0 \
             libxcb-shape0 \
-            fuse \
-            libfuse2 \
-            wget \
-            ca-certificates \
-            imagemagick \
             desktop-file-utils \
+            patchelf \
+            wget \
+            curl \
+            imagemagick \
             appstream
+          apt-get install -y libfuse2t64 || apt-get install -y libfuse2 || true
           update-ca-certificates
           ldconfig
+
+      - name: Install or Build qtermwidget6 (Debian trixie / Ubuntu fallback)
+        run: |
+          apt-get install -y libqtermwidget6-dev || true
+          if ! pkg-config --exists qtermwidget6; then
+            git clone --depth 1 --branch 2.0.0 https://github.com/lxqt/lxqt-build-tools.git /tmp/lxqt-build-tools
+            cmake -S /tmp/lxqt-build-tools -B /tmp/lxqt-build-tools/build -GNinja -DCMAKE_INSTALL_PREFIX=/usr
+            ninja -C /tmp/lxqt-build-tools/build install
+            git clone --depth 1 --branch 2.0.1 https://github.com/lxqt/qtermwidget.git /tmp/qtermwidget
+            cmake -S /tmp/qtermwidget -B /tmp/qtermwidget/build -GNinja -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib
+            ninja -C /tmp/qtermwidget/build install
+            ldconfig
+          fi
 
       - name: Checkout repository and submodules
         uses: actions/checkout@v4
@@ -89,13 +100,13 @@ jobs:
 
       - name: Compile Qt-Advanced-Stylesheets
         run: |
-          cd external/Qt-Advanced-Stylesheets
-          cmake -B build -S . \
+          git submodule update --init --recursive || true
+          cmake -S external/Qt-Advanced-Stylesheets -B external/Qt-Advanced-Stylesheets/build -GNinja \
             -DQT_VERSION_MAJOR=6 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr
-          cmake --build build -j"$(nproc)"
-          cmake --install build
+          ninja -C external/Qt-Advanced-Stylesheets/build
+          ninja -C external/Qt-Advanced-Stylesheets/build install
           ldconfig
 
       - name: Configure and Run Full 26-Suite Test Harness (Headless)

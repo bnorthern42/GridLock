@@ -906,7 +906,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     const QString errOut = QString::fromUtf8(proc.readAllStandardError());
     QVERIFY2(!errOut.contains(QStringLiteral("error while loading shared libraries")), qPrintable(errOut));
 
-    // 4. Verify GitHub Actions workflows install full v0.7.0 dependencies and enforce AppImage-only packaging.
+    // 4. Verify GitHub Actions workflows install full v0.7.0 dependencies, fallback-build qtermwidget6 on Debian trixie, and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows"));
     const QStringList ymlFiles = wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files);
     QVERIFY2(!ymlFiles.isEmpty(), ".github/workflows must contain at least one workflow YAML file");
@@ -916,7 +916,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
         combinedYml += content + QLatin1Char('\n');
         QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) && !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")), qPrintable(fn));
     }
-    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"), QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
-        QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing package: ") + pkg));
+    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("lxqt/lxqt-build-tools"), QStringLiteral("lxqt/qtermwidget"), QStringLiteral("external/Qt-Advanced-Stylesheets/build"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("libfuse2t64"), QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"), QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
+        QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing requirement: ") + pkg));
     }
 }
