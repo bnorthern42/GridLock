@@ -246,8 +246,10 @@ public slots:
     void updateDisassembly(const QString& asmCode);
     /// Compatibility alias for updateDisassembly.
     void setDisassembly(const QString& asmCode) { updateDisassembly(asmCode); }
-    /// Reloads appearance styling and fonts from configuration.
+    /// Reloads appearance styling and fonts from configuration and ThemeManager.
     void reloadStyle();
+    /// Returns the active canvas background QColor resolved from ThemeManager.
+    QColor activeCanvasBackgroundColor() const;
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

@@ -9,6 +9,7 @@
 
 #include "DisassemblyView.hpp"
 #include "../dialogs/XrefInspectorDialog.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -637,17 +638,25 @@ void DisassemblyView::rebuildCfgScene() {
       activeBlockRect = boxRect;
     }
 
-    // Outer card container rectangle on #181a1f dark-slate surface.
+    // Outer card container rectangle on active theme surface.
+    auto &tm = gridlock::core::ThemeManager::instance();
+    const bool isDark = tm.isDarkMode();
+    const QStringList sw = gridlock::core::ThemeManager::themeSwatchColors(tm.activeThemeId());
+    const QColor cardBg(isDark ? QStringLiteral("#181a1f") : sw.value(0, QStringLiteral("#ffffff")));
+    const QColor cardBorder(isDark ? QStringLiteral("#333842") : sw.value(2, QStringLiteral("#d0d4dc")));
+    const QColor hdrBg(isDark ? (isActiveBlock ? QStringLiteral("#1f3442") : QStringLiteral("#21252b"))
+                              : sw.value(1, QStringLiteral("#e6e9ef")));
+    const QColor bodyFg(isDark ? QStringLiteral("#d4d7dc") : sw.value(4, QStringLiteral("#1f2328")));
+
     auto *rectItem = m_cfgScene->addRect(
-        boxRect, QPen(isActiveBlock ? QColor("#528bff") : QColor("#333842"), isActiveBlock ? 2.0 : 1.0),
-        QBrush(QColor("#181a1f")));
+        boxRect, QPen(isActiveBlock ? QColor("#528bff") : cardBorder, isActiveBlock ? 2.0 : 1.0),
+        QBrush(cardBg));
     rectItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     rectItem->setZValue(1.0);
 
     // Block header bar background strip at top of basic-block node card.
     auto *hdrItem = m_cfgScene->addRect(
-        QRectF(boxX, currentY, boxW, headerH), QPen(Qt::NoPen),
-        QBrush(isActiveBlock ? QColor("#1f3442") : QColor("#21252b")));
+        QRectF(boxX, currentY, boxW, headerH), QPen(Qt::NoPen), QBrush(hdrBg));
     hdrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrItem->setZValue(2.0);
 
@@ -657,7 +666,8 @@ void DisassemblyView::rebuildCfgScene() {
             .arg(bb.startAddress, 6, 16, QChar('0'))
             .arg(bb.endAddress, 6, 16, QChar('0')),
         monoFont);
-    hdrText->setBrush(isActiveBlock ? QColor("#ffffff") : QColor("#4ec9b0"));
+    hdrText->setBrush(isActiveBlock ? (isDark ? QColor("#ffffff") : QColor("#0969da"))
+                                    : (isDark ? QColor("#4ec9b0") : QColor("#116329")));
     hdrText->setPos(boxX + 8.0, currentY + 2.0);
     hdrText->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(bb.startAddress));
     hdrText->setZValue(3.0);
@@ -710,7 +720,7 @@ void DisassemblyView::rebuildCfgScene() {
         auto *rowBg = m_cfgScene->addRect(
             QRectF(boxX + 2.0, lineY - 1.0, boxW - 4.0, lineH),
             isCurrentInst ? QPen(QColor("#4ec9b0"), 1.0) : QPen(Qt::NoPen),
-            QBrush(isCurrentInst ? QColor("#20342c") : QColor(224, 108, 117, 25)));
+            QBrush(isCurrentInst ? (isDark ? QColor("#20342c") : QColor(46, 160, 67, 45)) : QColor(224, 108, 117, 25)));
         rowBg->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr));
         rowBg->setZValue(isCurrentInst ? 2.4 : 2.3);
       } else if (!m_highlightedToken.isEmpty() && instLine.contains(m_highlightedToken, Qt::CaseInsensitive)) {
@@ -737,13 +747,13 @@ void DisassemblyView::rebuildCfgScene() {
       txt->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(instAddr != 0ULL ? instAddr : bb.startAddress));
 
       // Apply syntax palette depending on active RIP status or mnemonic category.
-      if (isCurrentInst) txt->setBrush(QColor("#ffffff"));
-      else if (instLine.startsWith(QStringLiteral("(fcn)"))) txt->setBrush(QColor("#dcdcaa"));
-      else if (instLine.startsWith(';')) txt->setBrush(QColor("#6a9955"));
-      else if (instLine.contains(QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) txt->setBrush(QColor("#ce9178"));
-      else if (instLine.contains(QRegularExpression("\\b(call|ret|leave)\\b"))) txt->setBrush(QColor("#4ec9b0"));
-      else if (instLine.contains(QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) txt->setBrush(QColor("#569cd6"));
-      else txt->setBrush(QColor("#d4d7dc"));
+      if (isCurrentInst) txt->setBrush(isDark ? QColor("#ffffff") : bodyFg);
+      else if (instLine.startsWith(QStringLiteral("(fcn)"))) txt->setBrush(isDark ? QColor("#dcdcaa") : QColor("#9a6700"));
+      else if (instLine.startsWith(';')) txt->setBrush(isDark ? QColor("#6a9955") : QColor("#116329"));
+      else if (instLine.contains(QRegularExpression("\\b(je|jne|jg|jl|jmp|jz|jnz)\\b"))) txt->setBrush(isDark ? QColor("#ce9178") : QColor("#cf222e"));
+      else if (instLine.contains(QRegularExpression("\\b(call|ret|leave)\\b"))) txt->setBrush(isDark ? QColor("#4ec9b0") : QColor("#0550ae"));
+      else if (instLine.contains(QRegularExpression("\\b(push|pop|sub|add|lea|mov)\\b"))) txt->setBrush(isDark ? QColor("#569cd6") : QColor("#0969da"));
+      else txt->setBrush(bodyFg);
       txt->setPos(boxX + 8.0, lineY);
       txt->setZValue(3.0);
       lineY += lineH;

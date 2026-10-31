@@ -15,12 +15,36 @@
 #include <QAction>
 #include <QDebug>
 #include <QSet>
+#include <QApplication>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include "../../core/managers/ConfigManager.hpp"
 #include "../dialogs/ConditionalBreakpointDialog.hpp"
 
 namespace gridlock::ui {
+
+namespace {
+bool isAppDarkThemeActive() {
+    if (qApp && qApp->property("gridlock_dark_mode").isValid()) {
+        return qApp->property("gridlock_dark_mode").toBool();
+    }
+    return true;
+}
+
+QStringList activeAppSwatchColors() {
+    if (qApp && qApp->property("gridlock_swatch_colors").isValid()) {
+        const QStringList sw = qApp->property("gridlock_swatch_colors").toStringList();
+        if (sw.size() >= 5) return sw;
+    }
+    return isAppDarkThemeActive()
+               ? QStringList{QStringLiteral("#16181d"), QStringLiteral("#21252b"),
+                             QStringLiteral("#2c313a"), QStringLiteral("#00a2ff"),
+                             QStringLiteral("#d7dae0")}
+               : QStringList{QStringLiteral("#f5f6f8"), QStringLiteral("#e6e9ef"),
+                             QStringLiteral("#ccd0da"), QStringLiteral("#1e66f5"),
+                             QStringLiteral("#1f2328")};
+}
+}  // namespace
 
 /**
  * @brief Constructs a new CppSyntaxHighlighter and initializes syntax rules.
@@ -37,7 +61,7 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
 
     // Types: soft blue (#6496ff)
     QTextCharFormat typeFormat;
-    typeFormat.setForeground(QColor(100, 150, 255));
+    typeFormat.setForeground(QColor(55, 115, 225));
     typeFormat.setFontWeight(QFont::Bold);
     const QString typePatterns[] = {
         QStringLiteral("\\bchar\\b"), QStringLiteral("\\bclass\\b"), QStringLiteral("\\bconst\\b"), QStringLiteral("\\bdouble\\b"), QStringLiteral("\\benum\\b"),
@@ -51,9 +75,9 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
         highlightingRules.append({QRegularExpression(pattern), typeFormat});
     }
 
-    // Control flow keywords: neon pink/orange
+    // Control flow keywords: crimson/magenta
     QTextCharFormat keywordFormat;
-    keywordFormat.setForeground(QColor(255, 80, 150));
+    keywordFormat.setForeground(QColor(215, 58, 125));
     keywordFormat.setFontWeight(QFont::Bold);
     const QString keywordPatterns[] = {
         QStringLiteral("\\bfor\\b"), QStringLiteral("\\breturn\\b"), QStringLiteral("\\bif\\b"), QStringLiteral("\\belse\\b"),
@@ -64,36 +88,36 @@ CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent)
         highlightingRules.append({QRegularExpression(pattern), keywordFormat});
     }
 
-    // Preprocessor directives: orange (#ff7850)
+    // Preprocessor directives: orange (#d65d0e)
     QTextCharFormat preprocessorFormat;
-    preprocessorFormat.setForeground(QColor(255, 120, 80));
+    preprocessorFormat.setForeground(QColor(214, 93, 14));
     rule.pattern = QRegularExpression(QStringLiteral("#include[^\n]*"));
     rule.format = preprocessorFormat;
     highlightingRules.append(rule);
 
-    // MPI primitives: purple (#b464ff)
+    // MPI primitives: purple (#8959a8)
     QTextCharFormat mpiFormat;
-    mpiFormat.setForeground(QColor(180, 100, 255));
+    mpiFormat.setForeground(QColor(137, 89, 168));
     rule.pattern = QRegularExpression(QStringLiteral("\\bMPI_[A-Za-z0-9_]+\\b"));
     rule.format = mpiFormat;
     highlightingRules.append(rule);
 
-    // String literals: vibrant green (#64ff64)
+    // String literals: balanced emerald green (#2e8b57) legible on both light and dark canvases
     QTextCharFormat stringFormat;
-    stringFormat.setForeground(QColor(100, 255, 100));
+    stringFormat.setForeground(QColor(60, 165, 85));
     rule.pattern = QRegularExpression(QStringLiteral("\".*?\""));
     rule.format = stringFormat;
     highlightingRules.append(rule);
 
-    // Single-line comments: dim gray (#787878)
+    // Single-line comments: slate gray (#787c85)
     QTextCharFormat singleLineCommentFormat;
-    singleLineCommentFormat.setForeground(QColor(120, 120, 120));
+    singleLineCommentFormat.setForeground(QColor(120, 124, 133));
     rule.pattern = QRegularExpression(QStringLiteral("//[^\n]*"));
     rule.format = singleLineCommentFormat;
     highlightingRules.append(rule);
 
     // Multi-line block comments
-    multiLineCommentFormat.setForeground(QColor(120, 120, 120));
+    multiLineCommentFormat.setForeground(QColor(120, 124, 133));
     commentStartExpression = QRegularExpression(QStringLiteral("/\\*"));
     commentEndExpression = QRegularExpression(QStringLiteral("\\*/"));
 }
@@ -149,8 +173,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     setReadOnly(true);
     setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     setLineWrapMode(QPlainTextEdit::NoWrap);
-    
-    reloadStyle(); // Load initial font size and uniform #16181d dark-slate surface
+    reloadStyle(); // Load initial font size and active theme canvas surface
 
     // Install C++ syntax highlighter
     m_highlighter = new CppSyntaxHighlighter(document());
@@ -168,20 +191,13 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
  * @return Total gutter width in pixels (>= 48px).
  */
 int SourceCodeView::lineNumberAreaWidth() const {
-    int digits = 3;
-    int maxBlocks = qMax(1, blockCount());
-    while (maxBlocks >= 1000) {
-        maxBlocks /= 10;
-        ++digits;
-    }
+    int digits = 3, maxBlocks = qMax(1, blockCount());
+    while (maxBlocks >= 1000) { maxBlocks /= 10; ++digits; }
     const int digitsWidth = fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits;
     return qMax(48, gutterIconLaneWidth() + digitsWidth + 18);
 }
 
-/**
- * @brief Sets active breakpoints from a set of 1-based line numbers.
- * @param bps Set of line numbers.
- */
+/** @brief Sets active breakpoints from a set of 1-based line numbers. */
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     m_breakpoints.clear();
     m_breakpointSuspendScopes.clear();
@@ -193,29 +209,26 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     m_lineNumberArea->update();
 }
 
-/**
- * @brief Returns the set of active 1-based breakpoint line numbers.
- * @return QSet<int> of 1-based breakpoint lines.
- */
+/** @brief Returns the set of active 1-based breakpoint line numbers. */
 QSet<int> SourceCodeView::breakpoints() const {
     QSet<int> result;
-    for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
-        result.insert(it.key());
-    }
+    for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) result.insert(it.key());
     return result;
 }
 
-/**
- * @brief Checks whether a breakpoint is set on the given 1-based line number.
- * @param lineOneBased 1-based source line number.
- * @return True if an active breakpoint is registered on lineOneBased.
- */
+/** @brief Checks whether a breakpoint is set on the given 1-based line number. */
 bool SourceCodeView::hasBreakpoint(int lineOneBased) const {
     return m_breakpoints.contains(lineOneBased);
 }
 
+/** @brief Returns the active canvas background color resolved from the active workstation theme. */
+QColor SourceCodeView::activeCanvasBackgroundColor() const {
+    const QStringList sw = activeAppSwatchColors();
+    return QColor(sw.value(0, isAppDarkThemeActive() ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8")));
+}
+
 /**
- * @brief Reloads font size, font family, word wrap, and uniform #16181d dark-slate surface from user configuration.
+ * @brief Reloads font size, font family, word wrap, and active theme surface from user configuration.
  */
 void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
@@ -228,34 +241,36 @@ void SourceCodeView::reloadStyle() {
 
     // Update widget QFont directly so font().pointSize() and fontMetrics() reflect live changes.
     QFont codeFont = font();
-    if (!codeFontFamily.trimmed().isEmpty()) {
-        codeFont.setFamily(codeFontFamily.trimmed());
-    }
+    if (!codeFontFamily.trimmed().isEmpty()) codeFont.setFamily(codeFontFamily.trimmed());
     codeFont.setStyleHint(QFont::Monospace);
     codeFont.setPointSize(codeFontSize);
     setFont(codeFont);
 
-    // Enforce solid #16181d dark-slate background across both QPlainTextEdit and its viewport
-    // to eliminate translucent alpha-compositing bands on partial repaints.
+    // Resolve active canvas and text tokens from ThemeManager so Light and Dark themes render natively.
+    const bool isDark = isAppDarkThemeActive();
+    const QStringList sw = activeAppSwatchColors();
+    const QString canvasHex = sw.value(0, isDark ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8"));
+    const QString textHex = sw.value(4, isDark ? QStringLiteral("#d7dae0") : QStringLiteral("#1f2328"));
+
     this->setStyleSheet(QStringLiteral(
         "QPlainTextEdit, QPlainTextEdit QWidget { "
-        "   background-color: #16181d; "
-        "   color: #d7dae0; "
-        "   border: none; "
-        "   font-family: '%2', 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; "
-        "   font-size: %1pt; "
-        "}"
-    ).arg(codeFontSize).arg(codeFontFamily.isEmpty() ? QStringLiteral("JetBrains Mono") : codeFontFamily));
+        "   background-color: %3; color: %4; border: none; "
+        "   font-family: '%2', 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: %1pt; }"
+    ).arg(codeFontSize)
+     .arg(codeFontFamily.isEmpty() ? QStringLiteral("JetBrains Mono") : codeFontFamily)
+     .arg(canvasHex, textHex));
 
     if (viewport()) {
         QPalette pal = viewport()->palette();
-        pal.setColor(QPalette::Base, QColor("#16181d"));
-        pal.setColor(QPalette::Window, QColor("#16181d"));
-        pal.setColor(QPalette::Text, QColor("#d7dae0"));
+        pal.setColor(QPalette::Base, QColor(canvasHex));
+        pal.setColor(QPalette::Window, QColor(canvasHex));
+        pal.setColor(QPalette::Text, QColor(textHex));
         viewport()->setPalette(pal);
         viewport()->setAutoFillBackground(true);
     }
+    highlightCurrentLine();
     updateLineNumberAreaWidth(0);
+    if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
 /**
@@ -268,9 +283,7 @@ void SourceCodeView::toggleLineComment() {
 
     const QString lineText = block.text();
     int firstNonSpace = 0;
-    while (firstNonSpace < lineText.size() && lineText.at(firstNonSpace).isSpace()) {
-        ++firstNonSpace;
-    }
+    while (firstNonSpace < lineText.size() && lineText.at(firstNonSpace).isSpace()) ++firstNonSpace;
 
     tc.beginEditBlock();
     QTextCursor editCursor(block);
@@ -287,18 +300,12 @@ void SourceCodeView::toggleLineComment() {
     tc.endEditBlock();
 }
 
-/**
- * @brief Retrieves the 1-based line number containing the text cursor.
- * @return 1-based line number.
- */
+/** @brief Retrieves the 1-based line number containing the text cursor. */
 int SourceCodeView::getCurrentLineNumber() const {
     return textCursor().blockNumber() + 1;
 }
 
-/**
- * @brief Toggles a breakpoint on the specified 1-based line.
- * @param lineNum 1-based line number.
- */
+/** @brief Toggles a breakpoint on the specified 1-based line. */
 void SourceCodeView::toggleBreakpoint(int lineNum) {
     bool isSet = false;
     if (m_breakpoints.contains(lineNum)) {
@@ -312,57 +319,35 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
     }
     highlightCurrentLine();
     m_lineNumberArea->update();
-    const QString emitPath = m_currentFilePath;
-    emit breakpointToggled(emitPath, lineNum, isSet, QString());
+    emit breakpointToggled(m_currentFilePath, lineNum, isSet, QString());
 }
 
-/**
- * @brief Registers or updates a conditional/rank-filtered breakpoint on a 1-based source line.
- * @param lineOneBased 1-based source line number.
- * @param condition Conditional expression string (e.g., "rank == 0").
- */
+/** @brief Registers or updates a conditional/rank-filtered breakpoint on a 1-based source line. */
 void SourceCodeView::setConditionalBreakpoint(int lineOneBased, const QString& condition) {
-    if (lineOneBased <= 0) {
-        return;
-    }
+    if (lineOneBased <= 0) return;
     m_breakpoints.insert(lineOneBased, condition);
     if (!m_breakpointSuspendScopes.contains(lineOneBased)) {
         m_breakpointSuspendScopes.insert(lineOneBased, QStringLiteral("All"));
     }
     highlightCurrentLine();
-    if (m_lineNumberArea) {
-        m_lineNumberArea->update();
-    }
+    if (m_lineNumberArea) m_lineNumberArea->update();
     emit breakpointToggled(m_currentFilePath, lineOneBased, true, condition);
 }
 
-/**
- * @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line.
- * @param lineOneBased 1-based source line number.
- * @return Trimmed condition expression, or empty string when unconditional or unset.
- */
+/** @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line. */
 QString SourceCodeView::breakpointCondition(int lineOneBased) const {
     return m_breakpoints.value(lineOneBased).trimmed();
 }
 
-/**
- * @brief Returns the configured rank suspension scope ("All" or "Rank") for a breakpoint line.
- * @param lineOneBased 1-based source line number.
- * @return Suspension scope identifier string.
- */
+/** @brief Returns the configured rank suspension scope ("All" or "Rank") for a breakpoint line. */
 QString SourceCodeView::breakpointSuspendScope(int lineOneBased) const {
     return m_breakpointSuspendScopes.value(lineOneBased, QStringLiteral("All"));
 }
 
-/**
- * @brief Updates the 1-based hovered gutter line and schedules a gutter repaint.
- * @param lineOneBased 1-based line number under the mouse cursor, or -1 to clear.
- */
+/** @brief Updates the 1-based hovered gutter line and schedules a gutter repaint. */
 void SourceCodeView::setHoveredGutterLine(int lineOneBased) {
     const int normalized = (lineOneBased > 0) ? lineOneBased : -1;
-    if (m_hoveredGutterLine == normalized) {
-        return;
-    }
+    if (m_hoveredGutterLine == normalized) return;
     m_hoveredGutterLine = normalized;
     if (m_lineNumberArea) {
         m_lineNumberArea->setCursor(normalized > 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
@@ -370,28 +355,18 @@ void SourceCodeView::setHoveredGutterLine(int lineOneBased) {
     }
 }
 
-/**
- * @brief Resolves the composite gutter marker badge state for a 1-based source line.
- * @param lineOneBased 1-based source line number.
- * @return "None", "HoverPreview", "Breakpoint", "ConditionalBreakpoint", "ExecutionPc", or "BreakpointAndExecutionPc".
- */
+/** @brief Resolves the composite gutter marker badge state for a 1-based source line. */
 QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
     const bool hasBp = m_breakpoints.contains(lineOneBased);
     const bool isExec = (lineOneBased > 0 && lineOneBased == m_executionLine);
-    if (hasBp && isExec) {
-        return QStringLiteral("BreakpointAndExecutionPc");
-    }
+    if (hasBp && isExec) return QStringLiteral("BreakpointAndExecutionPc");
     if (hasBp) {
-        const QString cond = m_breakpoints.value(lineOneBased).trimmed();
-        return cond.isEmpty() ? QStringLiteral("Breakpoint")
-                              : QStringLiteral("ConditionalBreakpoint");
+        return m_breakpoints.value(lineOneBased).trimmed().isEmpty()
+                   ? QStringLiteral("Breakpoint")
+                   : QStringLiteral("ConditionalBreakpoint");
     }
-    if (isExec) {
-        return QStringLiteral("ExecutionPc");
-    }
-    if (lineOneBased > 0 && lineOneBased == m_hoveredGutterLine) {
-        return QStringLiteral("HoverPreview");
-    }
+    if (isExec) return QStringLiteral("ExecutionPc");
+    if (lineOneBased > 0 && lineOneBased == m_hoveredGutterLine) return QStringLiteral("HoverPreview");
     return QStringLiteral("None");
 }
 
@@ -401,7 +376,8 @@ QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
 void SourceCodeView::highlightCurrentLine() {
     QList<QTextEdit::ExtraSelection> selections;
     QTextEdit::ExtraSelection selection;
-    QColor highlightColor("#1e222a");
+    const bool isDark = isAppDarkThemeActive();
+    const QColor highlightColor = isDark ? QColor("#1e222a") : activeCanvasBackgroundColor().darker(104);
     selection.format.setBackground(highlightColor);
     selection.format.setProperty(QTextFormat::FullWidthSelection, true);
     selection.cursor = textCursor();
@@ -411,15 +387,12 @@ void SourceCodeView::highlightCurrentLine() {
     // Layer subtle translucent crimson/amber background tint across breakpoint lines.
     for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
         const int bpLine = it.key();
-        if (bpLine <= 0 || bpLine == m_executionLine) {
-            continue;
-        }
+        if (bpLine <= 0 || bpLine == m_executionLine) continue;
         QTextBlock bpBlock = document()->findBlockByLineNumber(bpLine - 1);
         if (bpBlock.isValid()) {
             QTextEdit::ExtraSelection bpSel;
             const bool isCond = !it.value().trimmed().isEmpty();
-            bpSel.format.setBackground(isCond ? QColor(229, 192, 123, 22)
-                                              : QColor(224, 108, 117, 22));
+            bpSel.format.setBackground(isCond ? QColor(229, 192, 123, 22) : QColor(224, 108, 117, 22));
             bpSel.format.setProperty(QTextFormat::FullWidthSelection, true);
             bpSel.cursor = QTextCursor(bpBlock);
             bpSel.cursor.clearSelection();
@@ -432,7 +405,7 @@ void SourceCodeView::highlightCurrentLine() {
         QTextBlock execBlock = document()->findBlockByLineNumber(m_executionLine - 1);
         if (execBlock.isValid()) {
             QTextEdit::ExtraSelection execSel;
-            execSel.format.setBackground(QColor("#20342c"));
+            execSel.format.setBackground(isDark ? QColor("#20342c") : QColor(46, 160, 67, 45));
             execSel.format.setProperty(QTextFormat::FullWidthSelection, true);
             execSel.cursor = QTextCursor(execBlock);
             execSel.cursor.clearSelection();
@@ -461,8 +434,12 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
     const int iconLaneW = gutterIconLaneWidth();
     const QFont baseGutterFont = painter.font();
 
-    painter.fillRect(event->rect(), QColor("#16181d"));
-    painter.setPen(QColor("#252932"));
+    const bool isDark = isAppDarkThemeActive();
+    const QStringList sw = activeAppSwatchColors();
+    const QColor gutterBg(sw.value(0, isDark ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8")));
+    const QColor gutterBorder(sw.value(2, isDark ? QStringLiteral("#252932") : QStringLiteral("#d0d4dc")));
+    painter.fillRect(event->rect(), gutterBg);
+    painter.setPen(gutterBorder);
     painter.drawLine(gutterW - 1, event->rect().top(), gutterW - 1, event->rect().bottom());
 
     QTextBlock block = firstVisibleBlock();

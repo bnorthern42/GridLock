@@ -186,5 +186,8 @@ private slots:
 
     /** @brief Verifies multi-distro package manager auto-detection, Spack/Pacman/DNF/APT/Zypper CLI output parsing, and Table/List/Raw display views. */
     void testMultiDistroPackageManagerParsingAndViewModes();
+
+    /** @brief Verifies removal of redundant Enable Dark Mode checkbox, 3 Light Themes (Daylight, Solarized, Catppuccin Latte), and light-mode canvas cohesion. */
+    void testLightThemesCohesionAndNoRedundantDarkModeCheckbox();
 };
 

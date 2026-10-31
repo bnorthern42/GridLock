@@ -1,8 +1,8 @@
 # GridLock Workstation Color Themes & Typography Gallery
 
-GridLock provides **6 curated workstation color themes** engineered for zero-gutter multi-rank MPI debugging, x86_64/AArch64/RISC-V disassembly, Control Flow Graph (CFG) visualization, and multi-target decompilation.
+GridLock provides **8 curated workstation color themes** (5 dark themes and 3 high-contrast light themes) engineered for zero-gutter multi-rank MPI debugging, x86_64/AArch64/RISC-V disassembly, Control Flow Graph (CFG) visualization, and multi-target decompilation.
 
-All themes are selectable live in **`Edit -> Preferences (Ctrl+,) -> Appearance`** with zero raw underscore identifiers and an interactive 5-swatch palette preview strip (`Canvas`, `Header`, `Border`, `Accent`, `Text`).
+All themes are selectable live in **`Edit -> Preferences (Ctrl+,) -> Appearance`** with zero raw underscore identifiers and an interactive 5-swatch palette preview strip (`Canvas`, `Header`, `Border`, `Accent`, `Text`). Selecting any theme automatically synchronizes workstation Dark/Light polarity across the main window, source editor, disassembly/CFG/decompiler views, and dialogs.
 
 ---
 
@@ -15,7 +15,9 @@ All themes are selectable live in **`Edit -> Preferences (Ctrl+,) -> Appearance`
 | **Tokyo Night** | `tokyo_night` | `#1a1b26` | `#24283b` | `#3b4261` | `#7aa2f7` | `#c0caf5` | Dark |
 | **Catppuccin Mocha** | `catppuccin_mocha` | `#1e1e2e` | `#181825` | `#313244` | `#89b4fa` | `#cdd6f4` | Dark |
 | **Gruvbox Industrial** | `gruvbox_dark` | `#1d2021` | `#282828` | `#3c3836` | `#fe8019` | `#ebdbb2` | Dark |
-| **Daylight Paper (Light)** | `daylight_light` | `#f5f6f8` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#4c4f69` | High-Contrast Light |
+| **Daylight Paper (Light)** | `daylight_light` | `#f5f6f8` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#1f2328` | High-Contrast Light |
+| **Solarized Warm (Light)** | `solarized_light` | `#fdf6e3` | `#eee8d5` | `#d3cbb7` | `#268bd2` | `#586e75` | Warm Paper Light |
+| **Catppuccin Latte (Light)** | `catppuccin_latte` | `#eff1f5` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#4c4f69` | Crisp Pastel Light |
 
 ---
 
@@ -71,3 +73,13 @@ Warm retro-industrial hard contrast (`#1d2021` canvas, `#282828` headers, `#fe80
 High-contrast daylight paper theme (`#f5f6f8` canvas, `#e6e9ef` headers, `#1e66f5` cobalt accent) for bright environments and publication figures.
 
 ![Daylight Paper Light Theme](screenshots/theme_daylight_light.png)
+
+---
+
+### 7. Solarized Warm (`solarized_light`)
+Warm cream precision daylight palette (`#fdf6e3` Base3 canvas, `#eee8d5` Base2 headers, `#268bd2` Solarized blue accent, `#586e75` Base01 text) engineered for low-glare extended reading.
+
+---
+
+### 8. Catppuccin Latte (`catppuccin_latte`)
+Soft alabaster-latte light workstation theme (`#eff1f5` Latte Base canvas, `#e6e9ef` Mantle headers, `#1e66f5` Sapphire/Blue accent, `#4c4f69` Text) with balanced contrast across editors, tables, and control-flow graphs.

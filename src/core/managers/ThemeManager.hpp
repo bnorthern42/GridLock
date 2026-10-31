@@ -35,8 +35,11 @@ public:
     /** @brief Returns the list of available QtAdvancedStylesheet theme names. */
     QStringList getAvailableThemes() const;
 
-    /** @brief Returns the 6 curated GridLock workstation theme identifiers. */
+    /** @brief Returns the 8 curated GridLock workstation theme identifiers (5 dark, 3 light). */
     QStringList availableThemeIds() const;
+
+    /** @brief Returns the currently active theme identifier string. */
+    QString activeThemeId() const { return m_activeThemeId; }
 
     /** @brief Maps a theme identifier to its human-readable display title (zero underscores). */
     static QString themeDisplayName(const QString& themeId);
@@ -46,6 +49,12 @@ public:
 
     /** @brief Returns the currently active compiled QSS stylesheet string. */
     QString currentStyleSheet() const { return m_currentStyleSheet; }
+
+    /**
+     * @brief Applies a theme by identifier, automatically deriving dark/light polarity from the theme.
+     * @param themeName Curated theme identifier (e.g., "gridlock_slate", "daylight_light", "solarized_light", "catppuccin_latte").
+     */
+    void applyTheme(const QString& themeName);
 
     /**
      * @brief Switches the active base theme and reapplies the high-density workstation QSS overlay.

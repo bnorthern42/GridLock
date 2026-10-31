@@ -9,6 +9,7 @@
 
 #include "DisassemblyView.hpp"
 #include "../../core/managers/ConfigManager.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 #include <QFontMetrics>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
@@ -69,17 +70,11 @@ public:
             setViewportMargins(gutterWidth(), 0, 0, 0);
         });
         // Forward scroll and repaint events to gutter widget
-        connect(this, &QPlainTextEdit::updateRequest, this,
-                [this](const QRect& rect, int dy) {
-                    if (dy != 0) {
-                        m_gutter->scroll(0, dy);
-                    } else {
-                        m_gutter->update(0, rect.y(), m_gutter->width(), rect.height());
-                    }
-                    if (rect.contains(viewport()->rect())) {
-                        setViewportMargins(gutterWidth(), 0, 0, 0);
-                    }
-                });
+        connect(this, &QPlainTextEdit::updateRequest, this, [this](const QRect& rect, int dy) {
+            if (dy != 0) m_gutter->scroll(0, dy);
+            else m_gutter->update(0, rect.y(), m_gutter->width(), rect.height());
+            if (rect.contains(viewport()->rect())) setViewportMargins(gutterWidth(), 0, 0, 0);
+        });
     }
 
     /// Fixed pixel width reserved for the branch arc gutter.
@@ -88,9 +83,7 @@ public:
     /// Re-evaluates viewport margin and triggers a gutter repaint.
     void updateGutter() {
         setViewportMargins(gutterWidth(), 0, 0, 0);
-        if (m_gutter) {
-            m_gutter->update();
-        }
+        if (m_gutter) m_gutter->update();
     }
 
     /**
@@ -101,19 +94,19 @@ public:
         QPainter painter(m_gutter);
         painter.setRenderHint(QPainter::Antialiasing, true);
 
-        // Fill gutter background with dark canvas palette
+        // Fill gutter background with active theme canvas palette
         const QRect area = event->rect();
+        const QColor gutterBg = m_owner ? m_owner->activeCanvasBackgroundColor() : QColor(0x16, 0x19, 0x1d);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor(0x16, 0x19, 0x1d));
+        painter.setBrush(gutterBg);
         painter.drawRect(area);
 
         // Right separator border dividing gutter from assembly text
-        painter.setPen(QPen(QColor(0x2b, 0x2b, 0x2b), 1));
+        const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+        painter.setPen(QPen(isDark ? QColor(0x2b, 0x2b, 0x2b) : gutterBg.darker(115), 1));
         painter.drawLine(m_gutter->width() - 1, area.top(), m_gutter->width() - 1, area.bottom());
 
-        if (!m_owner) {
-            return;
-        }
+        if (!m_owner) return;
 
         // Map visible and offscreen block Y centers to document lines
         QMap<int, int> lineCenterY;
@@ -566,82 +559,55 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   });
 
   reloadStyle();
+  connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
+          this, [this](bool) { reloadStyle(); });
   updateDisassembly(defaultStartupDisassembly());
 }
 
-/**
- * @brief Returns the raw plain text listing from the linear disassembly editor.
- */
+/** @brief Returns the raw plain text listing from the linear disassembly editor. */
 QString DisassemblyView::toPlainText() const {
   return m_linearEdit ? m_linearEdit->toPlainText() : QString();
 }
 
-/**
- * @brief Replaces current disassembly text and triggers structural re-parsing.
- * @param text New assembly listing text.
- */
+/** @brief Replaces current disassembly text and triggers structural re-parsing. */
 void DisassemblyView::setPlainText(const QString& text) {
   updateDisassembly(text);
 }
 
-/**
- * @brief Returns the underlying text document of the linear disassembly editor.
- */
+/** @brief Returns the underlying text document of the linear disassembly editor. */
 QTextDocument* DisassemblyView::document() const {
   return m_linearEdit ? m_linearEdit->document() : nullptr;
 }
 
-/**
- * @brief Returns current text cursor of the linear disassembly editor.
- */
+/** @brief Returns current text cursor of the linear disassembly editor. */
 QTextCursor DisassemblyView::textCursor() const {
   return m_linearEdit ? m_linearEdit->textCursor() : QTextCursor();
 }
 
-/**
- * @brief Sets current text cursor of the linear disassembly editor.
- * @param cursor Target text cursor.
- */
+/** @brief Sets current text cursor of the linear disassembly editor. */
 void DisassemblyView::setTextCursor(const QTextCursor& cursor) {
-  if (m_linearEdit) {
-    m_linearEdit->setTextCursor(cursor);
-  }
+  if (m_linearEdit) m_linearEdit->setTextCursor(cursor);
 }
 
-/**
- * @brief Centers the linear disassembly view viewport around the active cursor.
- */
+/** @brief Centers the linear disassembly view viewport around the active cursor. */
 void DisassemblyView::centerCursor() {
-  if (m_linearEdit) {
-    m_linearEdit->centerCursor();
-  }
+  if (m_linearEdit) m_linearEdit->centerCursor();
 }
 
 /**
  * @brief Synchronizes UI toggles, splitter ratios, and visible pages for the active view mode.
  */
 void DisassemblyView::updateViewModeLayout() {
-  if (m_decompilerToggleBtn) {
-    m_decompilerToggleBtn->setChecked(m_decompilerMode || m_splitGraphDecompiler);
-  }
-  if (m_splitToggleBtn) {
-    m_splitToggleBtn->setChecked(m_splitGraphDecompiler);
-  }
+  if (m_decompilerToggleBtn) m_decompilerToggleBtn->setChecked(m_decompilerMode || m_splitGraphDecompiler);
+  if (m_splitToggleBtn) m_splitToggleBtn->setChecked(m_splitGraphDecompiler);
   if (m_modeToggleBtn) {
-    m_modeToggleBtn->setText(m_graphMode
-                                 ? QStringLiteral("Linear (Space)")
-                                 : QStringLiteral("CFG (Space)"));
+    m_modeToggleBtn->setText(m_graphMode ? QStringLiteral("Linear (Space)") : QStringLiteral("CFG (Space)"));
   }
 
   // Handle Split mode: Side-by-side CFG Graph (left) + Decompiler (right)
   if (m_splitGraphDecompiler) {
-    if (m_stack) {
-      m_stack->show();
-      m_stack->setCurrentIndex(1);
-    }
-    if (m_decompilerPage) {
-      m_decompilerPage->show();
-    }
+    if (m_stack) { m_stack->show(); m_stack->setCurrentIndex(1); }
+    if (m_decompilerPage) m_decompilerPage->show();
     if (auto *sp = qobject_cast<QSplitter *>(m_splitViewContainer)) {
       const int totalW = qMax(420, width());
       sp->setSizes({totalW / 2, totalW / 2});
@@ -653,26 +619,14 @@ void DisassemblyView::updateViewModeLayout() {
 
   // Handle standalone Decompiler mode vs Linear/CFG stack
   if (m_decompilerMode) {
-    if (m_stack) {
-      m_stack->hide();
-    }
-    if (m_decompilerPage) {
-      m_decompilerPage->show();
-    }
+    if (m_stack) m_stack->hide();
+    if (m_decompilerPage) m_decompilerPage->show();
     refreshDecompilerView();
   } else {
-    if (m_decompilerPage) {
-      m_decompilerPage->hide();
-    }
-    if (m_stack) {
-      m_stack->show();
-      m_stack->setCurrentIndex(m_graphMode ? 1 : 0);
-    }
-    if (m_graphMode) {
-      rebuildCfgScene();
-    } else if (m_linearEdit) {
-      m_linearEdit->updateGutter();
-    }
+    if (m_decompilerPage) m_decompilerPage->hide();
+    if (m_stack) { m_stack->show(); m_stack->setCurrentIndex(m_graphMode ? 1 : 0); }
+    if (m_graphMode) rebuildCfgScene();
+    else if (m_linearEdit) m_linearEdit->updateGutter();
   }
 }
 
@@ -725,9 +679,7 @@ void DisassemblyView::toggleViewMode() {
  * @return True if address was located or contained within a known basic block.
  */
 bool DisassemblyView::seekToAddress(uint64_t address) {
-  if (address == 0ULL) {
-    return false;
-  }
+  if (address == 0ULL) return false;
 
   // Resolve containing block leader if exact instruction address is collapsed
   uint64_t resolvedAddress = address;
@@ -743,25 +695,18 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
   // Update current address and resolve matching decompiler line
   m_currentAddress = address;
   const int mappedDecompLine = addressToDecompilerLine(address);
-  if (mappedDecompLine > 0) {
-    m_currentDecompilerLine = mappedDecompLine;
-  }
+  if (mappedDecompLine > 0) m_currentDecompilerLine = mappedDecompLine;
 
   // Update top toolbar header badge with active address
   if (m_headerBadge) {
-    m_headerBadge->setText(
-        QStringLiteral("%1 @ 0x%2")
-            .arg(m_activeSymbol)
-            .arg(m_currentAddress, 6, 16, QChar('0')));
+    m_headerBadge->setText(QStringLiteral("%1 @ 0x%2").arg(m_activeSymbol).arg(m_currentAddress, 6, 16, QChar('0')));
   }
 
   // Synchronize highlights across linear disassembly, decompiler, and CFG
   highlightActiveInstruction();
   highlightActiveDecompilerLine();
   rebuildCfgScene();
-  if (m_linearEdit) {
-    m_linearEdit->updateGutter();
-  }
+  if (m_linearEdit) m_linearEdit->updateGutter();
 
   return m_addrToLine.contains(address) || m_addrToLine.contains(resolvedAddress) || !m_basicBlocks.isEmpty();
 }
@@ -772,9 +717,7 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
  */
 void DisassemblyView::updateDisassembly(const QString &asmCode) {
   // Fall back to default x86_64 canned snippet if empty code supplied
-  m_baseDisassembly = asmCode.trimmed().isEmpty()
-                          ? defaultStartupDisassembly()
-                          : asmCode;
+  m_baseDisassembly = asmCode.trimmed().isEmpty() ? defaultStartupDisassembly() : asmCode;
   // Splice live instruction patches and user comments into the disassembly listing
   const QString patchedCode = applyPatchesToListing(m_baseDisassembly);
   const QString effectiveCode = applyUserCommentsToListing(patchedCode);
@@ -786,20 +729,17 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   highlightActiveInstruction();
   highlightActiveDecompilerLine();
   rebuildCfgScene();
-  if (m_linearEdit) {
-    m_linearEdit->updateGutter();
-  }
+  if (m_linearEdit) m_linearEdit->updateGutter();
 }
 
 /**
  * @brief Highlights the active instruction pointer line in the linear assembly editor.
  */
 void DisassemblyView::highlightActiveInstruction() {
-  if (!m_linearEdit) {
-    return;
-  }
+  if (!m_linearEdit) return;
 
   // Find the text block mapped to current PC and apply full-width selection background
+  const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
   QList<QTextEdit::ExtraSelection> selections;
   int line = m_addrToLine.value(m_currentAddress, -1);
   if (line >= 0) {
@@ -811,7 +751,7 @@ void DisassemblyView::highlightActiveInstruction() {
 
       // Highlight active instruction line background
       QTextEdit::ExtraSelection sel;
-      sel.format.setBackground(QColor(0x1f, 0x34, 0x42));
+      sel.format.setBackground(isDark ? QColor(0x1f, 0x34, 0x42) : QColor(46, 160, 67, 45));
       sel.format.setProperty(QTextFormat::FullWidthSelection, true);
       sel.cursor = cursor;
       sel.cursor.clearSelection();
@@ -822,8 +762,7 @@ void DisassemblyView::highlightActiveInstruction() {
   // Highlight all matching identifier tokens if user selected a search token
   if (!m_highlightedToken.isEmpty() && m_linearEdit->document()) {
     QTextCursor tc(m_linearEdit->document());
-    while (!(tc = m_linearEdit->document()->find(m_highlightedToken, tc))
-                .isNull()) {
+    while (!(tc = m_linearEdit->document()->find(m_highlightedToken, tc)).isNull()) {
       QTextEdit::ExtraSelection tokSel;
       tokSel.format.setBackground(QColor(0x3a, 0x44, 0x54));
       tokSel.format.setForeground(QColor(0xff, 0xd7, 0x00));
@@ -860,40 +799,66 @@ bool DisassemblyView::eventFilter(QObject *watched, QEvent *event) {
 }
 
 /**
- * @brief Reloads font size, background color, and theme styles from ConfigManager.
+ * @brief Returns the active canvas background QColor resolved from ThemeManager.
+ */
+QColor DisassemblyView::activeCanvasBackgroundColor() const {
+  auto &tm = gridlock::core::ThemeManager::instance();
+  const QStringList sw = gridlock::core::ThemeManager::themeSwatchColors(tm.activeThemeId());
+  return QColor(sw.value(0, tm.isDarkMode() ? gridlock::core::ConfigManager::instance().getSourceBackground()
+                                            : QStringLiteral("#f5f6f8")));
+}
+
+/**
+ * @brief Reloads font size, background color, and theme styles from ConfigManager and ThemeManager.
  */
 void DisassemblyView::reloadStyle() {
-  // Query persisted code font size and family settings
+  // Query persisted code font size, family settings, and active ThemeManager palette tokens
   QSettings s("gridlock", "debugger");
   const int fontSize = s.value("appearance/code_font_size", 10).toInt();
   const QString fontFam = s.value("appearance/code_font_family", QStringLiteral("JetBrains Mono")).toString().trimmed();
+  auto &tm = gridlock::core::ThemeManager::instance();
+  const QStringList sw = gridlock::core::ThemeManager::themeSwatchColors(tm.activeThemeId());
+  const QString bgHex = sw.value(0, tm.isDarkMode() ? gridlock::core::ConfigManager::instance().getSourceBackground()
+                                                    : QStringLiteral("#f5f6f8"));
+  const QString fgHex = sw.value(4, tm.isDarkMode() ? gridlock::core::ConfigManager::instance().getSourceText()
+                                                    : QStringLiteral("#1f2328"));
+  const QString bdrHex = sw.value(2, tm.isDarkMode() ? QStringLiteral("#282c34") : QStringLiteral("#d0d4dc"));
 
   // Construct editor stylesheet using theme tokens and explicit code font metrics
   const QString editorStyle =
-      QString("QPlainTextEdit { background-color: %1; color: %2; font-size: %3pt; font-family: \"%4\", monospace; border: none; }")
-          .arg(gridlock::core::ConfigManager::instance().getSourceBackground())
-          .arg(gridlock::core::ConfigManager::instance().getSourceText())
+      QString("QPlainTextEdit, QPlainTextEdit QWidget { background-color: %1; color: %2; font-size: %3pt; font-family: \"%4\", monospace; border: none; }")
+          .arg(bgHex, fgHex)
           .arg(fontSize)
           .arg(fontFam.isEmpty() ? QStringLiteral("JetBrains Mono") : fontFam);
 
-  // Apply styling to linear assembly editor
-  if (m_linearEdit) {
-    m_linearEdit->setStyleSheet(editorStyle);
-    QFont f = m_linearEdit->font();
+  auto applyEditorPalette = [&](QPlainTextEdit *ed) {
+    if (!ed) return;
+    ed->setStyleSheet(editorStyle);
+    QFont f = ed->font();
     if (!fontFam.isEmpty()) f.setFamily(fontFam);
     f.setPointSize(fontSize);
-    m_linearEdit->setFont(f);
-    m_linearEdit->updateGutter();
+    ed->setFont(f);
+    if (ed->viewport()) {
+      QPalette pal = ed->viewport()->palette();
+      pal.setColor(QPalette::Base, QColor(bgHex));
+      pal.setColor(QPalette::Window, QColor(bgHex));
+      pal.setColor(QPalette::Text, QColor(fgHex));
+      ed->viewport()->setPalette(pal);
+      ed->viewport()->setAutoFillBackground(true);
+    }
+  };
+
+  // Apply styling to linear assembly editor, decompiler editor, signature bar, and CFG canvas
+  applyEditorPalette(m_linearEdit);
+  if (m_linearEdit) m_linearEdit->updateGutter();
+  applyEditorPalette(m_decompilerEdit);
+  if (auto *sigBar = findChild<QWidget *>(QStringLiteral("disasmSignatureBar"))) {
+    sigBar->setStyleSheet(QStringLiteral("background: %1; border-bottom: 1px solid %2;").arg(bgHex, bdrHex));
   }
-  // Apply styling to decompiler editor
-  if (m_decompilerEdit) {
-    m_decompilerEdit->setStyleSheet(editorStyle);
-    QFont f = m_decompilerEdit->font();
-    if (!fontFam.isEmpty()) f.setFamily(fontFam);
-    f.setPointSize(fontSize);
-    m_decompilerEdit->setFont(f);
-  }
+  if (m_cfgView) m_cfgView->setBackgroundBrush(QColor(bgHex));
   if (m_highlighter) m_highlighter->reloadRules();
+  highlightActiveInstruction();
+  rebuildCfgScene();
 }
 
 /** @brief Returns the active point size of the linear assembly and decompiler font. */
@@ -911,13 +876,9 @@ int DisassemblyView::codeFontPointSize() const {
  * @return 64-bit virtual address of the next sequential instruction.
  */
 uint64_t DisassemblyView::nextInstructionAddress(uint64_t currentAddr) const {
-  if (currentAddr == 0x00401163ULL || currentAddr == 0x0040116eULL) {
-    return 0x00401149ULL;
-  }
+  if (currentAddr == 0x00401163ULL || currentAddr == 0x0040116eULL) return 0x00401149ULL;
   const auto it = m_addrToLine.upperBound(currentAddr);
-  if (it != m_addrToLine.cend()) {
-    return it.key();
-  }
+  if (it != m_addrToLine.cend()) return it.key();
   return m_addrToLine.isEmpty() ? currentAddr : m_addrToLine.firstKey();
 }
 
@@ -931,14 +892,8 @@ void DisassemblyView::setActiveSteppingRank(int rank, uint64_t pc) {
   const QString role = (rank == 0) ? QStringLiteral("COORDINATOR") : QStringLiteral("WORKER");
   const QString pcHex = QStringLiteral("0x%1").arg(pc, 0, 16);
   const QString sym = m_activeSymbol.isEmpty() ? QStringLiteral("sym.main") : m_activeSymbol;
-  const QString banner = QStringLiteral("[STEPPING: RANK %1] | RANK %1 [%2] | %3 @ %4")
-                             .arg(rank)
-                             .arg(role)
-                             .arg(sym)
-                             .arg(pcHex);
-  if (m_functionBannerLabel) {
-    m_functionBannerLabel->setText(banner);
-  }
+  const QString banner = QStringLiteral("[STEPPING: RANK %1] | RANK %1 [%2] | %3 @ %4").arg(rank).arg(role, sym, pcHex);
+  if (m_functionBannerLabel) m_functionBannerLabel->setText(banner);
 }
 
 }  // namespace gridlock::ui

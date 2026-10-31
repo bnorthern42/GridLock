@@ -194,9 +194,9 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     swatchRow->addStretch(1);
     form->addRow(tr("Palette Swatches:"), swatchRow);
 
-    // Dark mode toggle checkbox synchronized with the active theme.
-    m_darkModeCheck = new QCheckBox(tr("Enable Dark Mode"), this);
-    form->addRow(QString(), m_darkModeCheck);
+    // Keep internal polarity state synchronized automatically with the selected theme.
+    m_darkModeCheck = new QCheckBox(this);
+    m_darkModeCheck->setVisible(false);
 
     // File tree presentation density.
     m_fileTreeStyleCombo = new QComboBox(this);
@@ -237,16 +237,13 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     connect(m_themeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
         if (idx < 0) return;
         const QString themeId = m_themeCombo->itemData(idx).toString();
-        const bool isDark = !themeId.contains(QStringLiteral("light"), Qt::CaseInsensitive);
+        const bool isDark = !(themeId.contains(QStringLiteral("light"), Qt::CaseInsensitive) ||
+                              themeId.contains(QStringLiteral("latte"), Qt::CaseInsensitive));
         m_darkModeCheck->blockSignals(true);
         m_darkModeCheck->setChecked(isDark);
         m_darkModeCheck->blockSignals(false);
         updateSwatchPreview(themeId);
-        gridlock::core::managers::ThemeManager::instance().setTheme(themeId, isDark);
-    });
-    connect(m_darkModeCheck, &QCheckBox::toggled, this, [this](bool checked) {
-        gridlock::core::managers::ThemeManager::instance().setDarkMode(checked);
-        updateSwatchPreview(selectedTheme());
+        gridlock::core::managers::ThemeManager::instance().applyTheme(themeId);
     });
 }
 
@@ -283,7 +280,10 @@ void AppearanceSettingsPage::updateSwatchPreview(const QString& themeId) {
 QString AppearanceSettingsPage::selectedTheme() const {
     return m_themeCombo->currentData().toString().isEmpty() ? m_themeCombo->currentText() : m_themeCombo->currentData().toString();
 }
-bool AppearanceSettingsPage::isDarkMode() const { return m_darkModeCheck->isChecked(); }
+bool AppearanceSettingsPage::isDarkMode() const {
+    const QString id = selectedTheme().toLower();
+    return !(id.contains(QStringLiteral("light")) || id.contains(QStringLiteral("latte")));
+}
 QString AppearanceSettingsPage::fileTreeStyle() const { return m_fileTreeStyleCombo->currentText(); }
 bool AppearanceSettingsPage::colorizeIcons() const { return m_colorizeIconsCheck->isChecked(); }
 QString AppearanceSettingsPage::uiFontFamily() const { return m_uiFontFamilyCombo->currentText(); }
@@ -295,17 +295,17 @@ int AppearanceSettingsPage::codeFontSize() const { return m_codeFontSizeBox->val
 void AppearanceSettingsPage::loadFromSettings() {
     // Query persisted theme ID, polarity flag, and typography metrics from QSettings.
     QSettings s("gridlock", "debugger");
-    const QString theme = s.value("appearance/theme", "gridlock_slate").toString();
-    const bool isDark = s.value("appearance/dark_mode", true).toBool();
+    const QString activeId = gridlock::core::managers::ThemeManager::instance().activeThemeId();
+    const QString theme = s.value("appearance/theme", activeId.isEmpty() ? QStringLiteral("gridlock_slate") : activeId).toString();
     const QVector<QWidget*> ctrls = {m_darkModeCheck, m_themeCombo, m_fileTreeStyleCombo, m_colorizeIconsCheck,
                                      m_uiFontFamilyCombo, m_uiFontSizeBox, m_codeFontFamilyCombo, m_codeFontSizeBox};
     // Temporarily suppress change signals while populating initial form state.
     for (QWidget* w : ctrls) w->blockSignals(true);
 
-    m_darkModeCheck->setChecked(isDark);
     int idx = m_themeCombo->findData(theme);
     if (idx < 0) idx = m_themeCombo->findText(theme, Qt::MatchContains);
     if (idx >= 0) m_themeCombo->setCurrentIndex(idx);
+    m_darkModeCheck->setChecked(isDarkMode());
     updateSwatchPreview(selectedTheme());
 
     // Restore file tree density, icon colorization, and UI/Code font families and sizes.

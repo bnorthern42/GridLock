@@ -44,23 +44,54 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setMinimumSize(780, 540);
     resize(860, 580);
 
-    // Apply unified dark-slate workstation dialog chrome, compact control heights,
-    // and high-contrast active/inactive sidebar selection rules.
-    setStyleSheet(QStringLiteral(
-        "QDialog { background: #16181d; color: #d7dae0; }"
-        "QGroupBox { background: #1b1e24; border: 1px solid #282c34; border-radius: 3px; "
-        "margin-top: 8px; padding-top: 10px; color: #d7dae0; }"
-        "QLineEdit, QComboBox, QSpinBox { background: #181a1f; color: #d7dae0; "
-        "border: 1px solid #323844; border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
-        "QPushButton { background: #282c34; color: #d7dae0; border: 1px solid #3b4048; "
-        "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
-        "QPushButton:hover { background: #323842; color: #ffffff; }"
-        "QListWidget { selection-background-color: #264f78; selection-color: #ffffff; }"
-        "QListWidget::item:hover { background-color: #252932; color: #ffffff; }"
-        "QListWidget::item:selected, QListWidget::item:selected:active, "
-        "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
-        "border-left: 3px solid #528bff; font-weight: 600; }"
-        "QLabel#separator { background: #2c313a; }"));
+    // Apply theme-aware workstation dialog chrome using active ThemeManager swatch tokens.
+    auto applyDialogThemeChrome = [this]() {
+        auto& tm = gridlock::core::managers::ThemeManager::instance();
+        const QStringList sw = gridlock::core::managers::ThemeManager::themeSwatchColors(tm.activeThemeId());
+        const QString canvas = sw.value(0, QStringLiteral("#16181d"));
+        const QString header = sw.value(1, QStringLiteral("#21252b"));
+        const QString border = sw.value(2, QStringLiteral("#282c34"));
+        const QString accent = sw.value(3, QStringLiteral("#528bff"));
+        const QString text = sw.value(4, QStringLiteral("#d7dae0"));
+        const QString hoverBg = tm.isDarkMode() ? QStringLiteral("#252932") : header;
+        const QString hoverFg = tm.isDarkMode() ? QStringLiteral("#ffffff") : text;
+
+        setStyleSheet(QStringLiteral(
+            "QDialog { background: %1; color: %5; }"
+            "QGroupBox { background: %2; border: 1px solid %3; border-radius: 3px; "
+            "margin-top: 8px; padding-top: 10px; color: %5; }"
+            "QLineEdit, QComboBox, QSpinBox { background: %1; color: %5; "
+            "border: 1px solid %3; border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
+            "QPushButton { background: %2; color: %5; border: 1px solid %3; "
+            "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
+            "QPushButton:hover { background: %6; color: %7; border-color: %4; }"
+            "QListWidget { background: %2; color: %5; selection-background-color: #264f78; selection-color: #ffffff; }"
+            "QListWidget::item:hover { background-color: %6; color: %7; }"
+            "QListWidget::item:selected, QListWidget::item:selected:active, "
+            "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
+            "border-left: 3px solid %4; font-weight: 600; }"
+            "QLabel#separator { background: %3; }")
+                          .arg(canvas, header, border, accent, text, hoverBg, hoverFg));
+        if (m_sidebar) {
+            m_sidebar->setStyleSheet(QStringLiteral(
+                "QListWidget { background: %1; color: %4; selection-background-color: #264f78; "
+                "selection-color: #ffffff; border: none; border-right: 1px solid %2; outline: none; font-size: 11px; }"
+                "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 3px solid transparent; }"
+                "QListWidget::item:hover { background-color: %5; color: %6; }"
+                "QListWidget::item:selected, QListWidget::item:selected:active, "
+                "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
+                "border-left: 3px solid %3; font-weight: 600; }")
+                                         .arg(header, border, accent, text, hoverBg, hoverFg));
+            m_sidebar->ensurePolished();
+            QPalette sidePal = m_sidebar->palette();
+            for (QPalette::ColorGroup cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+                sidePal.setColor(cg, QPalette::Highlight, QColor(0x26, 0x4f, 0x78));
+                sidePal.setColor(cg, QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
+            }
+            setPalette(sidePal);
+            m_sidebar->setPalette(sidePal);
+        }
+    };
 
     // Root vertical layout containing the splitter and bottom action button bar.
     auto* rootLayout = new QVBoxLayout(this);
@@ -74,6 +105,10 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
 
     setupSidebar();
     setupPages();
+    applyDialogThemeChrome();
+    connect(&gridlock::core::managers::ThemeManager::instance(),
+            &gridlock::core::managers::ThemeManager::themeModeChanged,
+            this, [applyDialogThemeChrome](bool) { applyDialogThemeChrome(); });
 
     splitter->addWidget(m_sidebar);
     splitter->addWidget(m_stack);
@@ -123,23 +158,6 @@ void PreferencesDialog::setupSidebar() {
     m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_sidebar->setProperty("role", "sidebar");
-    m_sidebar->setStyleSheet(QStringLiteral(
-        "QListWidget { background: #1e2128; color: #abb2bf; selection-background-color: #264f78; "
-        "selection-color: #ffffff; border: none; border-right: 1px solid #2c313a; outline: none; font-size: 11px; }"
-        "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 3px solid transparent; }"
-        "QListWidget::item:hover { background-color: #252932; color: #ffffff; }"
-        "QListWidget::item:selected, QListWidget::item:selected:active, "
-        "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
-        "border-left: 3px solid #528bff; font-weight: 600; }"));
-    // Enforce white HighlightedText and #264f78 Highlight across Active, Inactive, and Disabled states.
-    m_sidebar->ensurePolished();
-    QPalette sidePal = m_sidebar->palette();
-    for (QPalette::ColorGroup cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
-        sidePal.setColor(cg, QPalette::Highlight, QColor(0x26, 0x4f, 0x78));
-        sidePal.setColor(cg, QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
-    }
-    setPalette(sidePal);
-    m_sidebar->setPalette(sidePal);
 
     struct Entry {
         QString label;

@@ -231,9 +231,15 @@ public:
     void toggleLineComment();
 
     /**
-     * @brief Reloads color palette and styling from ConfigManager.
+     * @brief Reloads color palette and styling from ConfigManager and ThemeManager.
      */
-    void reloadStyle();
+    Q_INVOKABLE void reloadStyle();
+
+    /**
+     * @brief Returns the active canvas background QColor resolved from ThemeManager.
+     * @return Editor viewport background color (light >= 220 lightness in Light Mode).
+     */
+    QColor activeCanvasBackgroundColor() const;
 
     /**
      * @brief Paints the gutter line numbers, hover highlights, and breakpoint markers.

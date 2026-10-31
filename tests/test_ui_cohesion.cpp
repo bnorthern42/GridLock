@@ -11,6 +11,7 @@
 #include "test_ui.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QFile>
@@ -33,6 +34,7 @@
 #include <QTreeView>
 #include <QtTest/QtTest>
 
+#include "../src/core/managers/ThemeManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
@@ -199,31 +201,20 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
         dlg->show();
         QCoreApplication::processEvents();
 
-        QVERIFY2(dlg->width() >= 360,
-                 qPrintable(QString("Dialog '%1' width %2 < 360").arg(name).arg(dlg->width())));
-        QVERIFY2(dlg->height() >= 220,
-                 qPrintable(QString("Dialog '%1' height %2 < 220").arg(name).arg(dlg->height())));
+        QVERIFY2(dlg->width() >= 360, qPrintable(QString("Dialog '%1' width %2 < 360").arg(name).arg(dlg->width())));
+        QVERIFY2(dlg->height() >= 220, qPrintable(QString("Dialog '%1' height %2 < 220").arg(name).arg(dlg->height())));
 
         for (const QPushButton* btn : dlg->findChildren<QPushButton*>()) {
-            if (btn && btn->isVisible()) {
-                QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx,
-                         qPrintable(QString("Dialog '%1' button '%2' height %3 > 30")
-                                        .arg(name, btn->text()).arg(btn->height())));
-            }
+            if (btn && btn->isVisible())
+                QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' button '%2' height %3 > 30").arg(name, btn->text()).arg(btn->height())));
         }
         for (const QLineEdit* edit : dlg->findChildren<QLineEdit*>()) {
-            if (edit && edit->isVisible()) {
-                QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx,
-                         qPrintable(QString("Dialog '%1' lineEdit '%2' height %3 > 30")
-                                        .arg(name, edit->objectName()).arg(edit->height())));
-            }
+            if (edit && edit->isVisible())
+                QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' lineEdit '%2' height %3 > 30").arg(name, edit->objectName()).arg(edit->height())));
         }
         for (const QComboBox* combo : dlg->findChildren<QComboBox*>()) {
-            if (combo && combo->isVisible()) {
-                QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx,
-                         qPrintable(QString("Dialog '%1' comboBox '%2' height %3 > 30")
-                                        .arg(name, combo->objectName()).arg(combo->height())));
-            }
+            if (combo && combo->isVisible())
+                QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' comboBox '%2' height %3 > 30").arg(name, combo->objectName()).arg(combo->height())));
         }
     };
 
@@ -232,11 +223,8 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     verifyDialogCohesion(&prefsDlg, QStringLiteral("PreferencesDialog"));
     auto* categoryList = prefsDlg.findChild<QListWidget*>();
     QVERIFY2(categoryList != nullptr, "PreferencesDialog must contain a QListWidget category sidebar");
-    QVERIFY2(categoryList->width() >= 140 && categoryList->width() <= 220,
-             qPrintable(QString("PreferencesDialog categoryList width %1 not in [140, 220]")
-                            .arg(categoryList->width())));
-    QVERIFY2(categoryList->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff,
-             "PreferencesDialog categoryList must suppress horizontal scrollbar clipping");
+    QVERIFY2(categoryList->width() >= 140 && categoryList->width() <= 220, qPrintable(QString("PreferencesDialog categoryList width %1 not in [140, 220]").arg(categoryList->width())));
+    QVERIFY2(categoryList->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff, "PreferencesDialog categoryList must suppress horizontal scrollbar clipping");
     prefsDlg.hide();
 
     // Audit AttachProcessDialog dimensions and controls.
@@ -275,46 +263,28 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     // 2. Audit Table & Tree Column Header Integrity across workspace views and dialogs.
     auto verifyTableIntegrity = [](QTableWidget* table, const QString& ownerName) {
         QVERIFY2(table != nullptr, qPrintable(QString("Table in '%1' must not be null").arg(ownerName)));
-        QVERIFY2(table->frameShape() == QFrame::NoFrame,
-                 qPrintable(QString("Table in '%1' must have QFrame::NoFrame").arg(ownerName)));
-        QVERIFY2(table->alternatingRowColors(),
-                 qPrintable(QString("Table in '%1' must enable alternatingRowColors").arg(ownerName)));
+        QVERIFY2(table->frameShape() == QFrame::NoFrame, qPrintable(QString("Table in '%1' must have QFrame::NoFrame").arg(ownerName)));
+        QVERIFY2(table->alternatingRowColors(), qPrintable(QString("Table in '%1' must enable alternatingRowColors").arg(ownerName)));
         QHeaderView* hdr = table->horizontalHeader();
-        QVERIFY(hdr != nullptr);
-        QVERIFY2(hdr->isVisible(),
-                 qPrintable(QString("Table header in '%1' must be visible").arg(ownerName)));
-        QVERIFY2(hdr->minimumSectionSize() >= 48,
-                 qPrintable(QString("Table header in '%1' minimumSectionSize %2 < 48")
-                                .arg(ownerName).arg(hdr->minimumSectionSize())));
+        QVERIFY(hdr != nullptr && hdr->isVisible());
+        QVERIFY2(hdr->minimumSectionSize() >= 48, qPrintable(QString("Table header in '%1' minimumSectionSize %2 < 48").arg(ownerName).arg(hdr->minimumSectionSize())));
         for (int col = 0; col < table->columnCount(); ++col) {
-            if (!table->isColumnHidden(col)) {
-                QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx,
-                         qPrintable(QString("Table '%1' col %2 width %3 < 40")
-                                        .arg(ownerName).arg(col).arg(hdr->sectionSize(col))));
-            }
+            if (!table->isColumnHidden(col))
+                QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx, qPrintable(QString("Table '%1' col %2 width %3 < 40").arg(ownerName).arg(col).arg(hdr->sectionSize(col))));
         }
     };
 
     auto verifyTreeIntegrity = [](QTreeView* tree, const QString& ownerName) {
         QVERIFY2(tree != nullptr, qPrintable(QString("Tree in '%1' must not be null").arg(ownerName)));
-        QVERIFY2(tree->frameShape() == QFrame::NoFrame,
-                 qPrintable(QString("Tree in '%1' must have QFrame::NoFrame").arg(ownerName)));
-        QVERIFY2(tree->alternatingRowColors(),
-                 qPrintable(QString("Tree in '%1' must enable alternatingRowColors").arg(ownerName)));
+        QVERIFY2(tree->frameShape() == QFrame::NoFrame, qPrintable(QString("Tree in '%1' must have QFrame::NoFrame").arg(ownerName)));
+        QVERIFY2(tree->alternatingRowColors(), qPrintable(QString("Tree in '%1' must enable alternatingRowColors").arg(ownerName)));
         QHeaderView* hdr = tree->header();
-        QVERIFY(hdr != nullptr);
-        QVERIFY2(hdr->isVisible(),
-                 qPrintable(QString("Tree header in '%1' must be visible").arg(ownerName)));
-        QVERIFY2(hdr->minimumSectionSize() >= 48,
-                 qPrintable(QString("Tree header in '%1' minimumSectionSize %2 < 48")
-                                .arg(ownerName).arg(hdr->minimumSectionSize())));
+        QVERIFY(hdr != nullptr && hdr->isVisible());
+        QVERIFY2(hdr->minimumSectionSize() >= 48, qPrintable(QString("Tree header in '%1' minimumSectionSize %2 < 48").arg(ownerName).arg(hdr->minimumSectionSize())));
         if (tree->model()) {
             for (int col = 0; col < tree->model()->columnCount(); ++col) {
-                if (!tree->isColumnHidden(col)) {
-                    QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx,
-                             qPrintable(QString("Tree '%1' col %2 width %3 < 40")
-                                            .arg(ownerName).arg(col).arg(hdr->sectionSize(col))));
-                }
+                if (!tree->isColumnHidden(col))
+                    QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx, qPrintable(QString("Tree '%1' col %2 width %3 < 40").arg(ownerName).arg(col).arg(hdr->sectionSize(col))));
             }
         }
     };
@@ -322,18 +292,12 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     // Verify ProjectExplorerWidget trees.
     auto* projExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
     QVERIFY(projExplorer != nullptr);
-    for (QTreeView* tree : projExplorer->findChildren<QTreeView*>()) {
-        if (tree->isVisible()) {
-            verifyTreeIntegrity(tree, QStringLiteral("ProjectExplorerWidget"));
-        }
-    }
+    for (QTreeView* tree : projExplorer->findChildren<QTreeView*>()) if (tree->isVisible()) verifyTreeIntegrity(tree, QStringLiteral("ProjectExplorerWidget"));
 
     // Verify RegisterView table integrity and alternating row colors.
     auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>();
     QVERIFY(regView != nullptr);
-    for (QTableWidget* tbl : regView->findChildren<QTableWidget*>()) {
-        verifyTableIntegrity(tbl, QStringLiteral("RegisterView"));
-    }
+    for (QTableWidget* tbl : regView->findChildren<QTableWidget*>()) verifyTableIntegrity(tbl, QStringLiteral("RegisterView"));
     // Verify DifferentialGrid (Watch Expressions) table integrity.
     auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
     QVERIFY(diffGrid != nullptr);
@@ -341,18 +305,12 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     // Verify VariablesDockWidget tree integrity and section sizes.
     auto* varsDock = mainWindow.findChild<gridlock::VariablesDockWidget*>();
     QVERIFY(varsDock != nullptr);
-    for (QTreeView* tree : varsDock->findChildren<QTreeView*>()) {
-        verifyTreeIntegrity(tree, QStringLiteral("VariablesDockWidget"));
-    }
+    for (QTreeView* tree : varsDock->findChildren<QTreeView*>()) verifyTreeIntegrity(tree, QStringLiteral("VariablesDockWidget"));
     // Verify AttachProcessDialog table integrity.
-    for (QTableWidget* tbl : attachDlg.findChildren<QTableWidget*>()) {
-        verifyTableIntegrity(tbl, QStringLiteral("AttachProcessDialog"));
-    }
+    for (QTableWidget* tbl : attachDlg.findChildren<QTableWidget*>()) verifyTableIntegrity(tbl, QStringLiteral("AttachProcessDialog"));
     attachDlg.hide();
     // Verify XrefInspectorDialog table integrity.
-    for (QTableWidget* tbl : xrefDlg->findChildren<QTableWidget*>()) {
-        verifyTableIntegrity(tbl, QStringLiteral("XrefInspectorDialog"));
-    }
+    for (QTableWidget* tbl : xrefDlg->findChildren<QTableWidget*>()) verifyTableIntegrity(tbl, QStringLiteral("XrefInspectorDialog"));
     xrefDlg->hide();
 }
 
@@ -567,9 +525,7 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     mainWindow.resize(1440, 900);
     mainWindow.loadPreviewFixture();
     if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
-        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
-                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
-                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp")) ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
         mainWindow.loadSourceFile(demoPath);
     }
     mainWindow.show();
@@ -579,14 +535,11 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     // 1. Toolbar Target Selector, Rank SpinBox & Idle Button States.
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    QVERIFY2(targetCombo != nullptr && rankSpin != nullptr && targetCombo->count() >= 1,
-             "MainToolbar must contain populated #toolbarTargetSelector and #toolbarRankSpin");
+    QVERIFY2(targetCombo != nullptr && rankSpin != nullptr && targetCombo->count() >= 1, "MainToolbar must contain populated #toolbarTargetSelector and #toolbarRankSpin");
 
     auto findToolbarAction = [&mainWindow](const QString& labelSubstr) -> QAction* {
         for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) {
-            for (QAction* act : tb->actions()) {
-                if (act->text().contains(labelSubstr, Qt::CaseInsensitive)) return act;
-            }
+            for (QAction* act : tb->actions()) if (act->text().contains(labelSubstr, Qt::CaseInsensitive)) return act;
         }
         return nullptr;
     };
@@ -594,21 +547,18 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     QAction* runAction = findToolbarAction(QStringLiteral("Run Target"));
     QAction* stepAction = findToolbarAction(QStringLiteral("Step Inst"));
     QAction* terminateAction = findToolbarAction(QStringLiteral("Terminate Session"));
-    QVERIFY2(runAction != nullptr && stepAction != nullptr && terminateAction != nullptr,
-             "Run Target, Step Inst, and Terminate Session actions must exist on MainToolbar");
+    QVERIFY2(runAction != nullptr && stepAction != nullptr && terminateAction != nullptr, "Run Target, Step Inst, and Terminate Session actions must exist on MainToolbar");
 
     mainWindow.stopTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(!mainWindow.isDebugSessionActive() && runAction->isEnabled() && !terminateAction->isEnabled(),
-             "Idle state must enable Run Target and disable Terminate Session");
+    QVERIFY2(!mainWindow.isDebugSessionActive() && runAction->isEnabled() && !terminateAction->isEnabled(), "Idle state must enable Run Target and disable Terminate Session");
 
     // 2. End-to-End Interactive Run -> Step -> Register/Source/Rack Sync -> Stop Loop.
     if (auto* sv = mainWindow.findChild<gridlock::ui::SourceCodeView*>()) sv->setBreakpoints(QSet<int>());
     rankSpin->setValue(4);
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(mainWindow.isDebugSessionActive() && stepAction->isEnabled() && terminateAction->isEnabled(),
-             "Active session must enable Step Inst and Terminate Session");
+    QVERIFY2(mainWindow.isDebugSessionActive() && stepAction->isEnabled() && terminateAction->isEnabled(), "Active session must enable Step Inst and Terminate Session");
 
     auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
@@ -636,9 +586,7 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     bool foundRipMatch = false;
     for (int r = 0; r < regTable->rowCount(); ++r) {
         if (regTable->item(r, 0) && regTable->item(r, 0)->text().compare(QStringLiteral("rip"), Qt::CaseInsensitive) == 0 &&
-            regTable->item(r, 1) && regTable->item(r, 1)->text().contains(QStringLiteral("401125"), Qt::CaseInsensitive)) {
-            foundRipMatch = true;
-        }
+            regTable->item(r, 1) && regTable->item(r, 1)->text().contains(QStringLiteral("401125"), Qt::CaseInsensitive)) foundRipMatch = true;
     }
     QVERIFY2(foundRipMatch, "RegisterView 'rip' row must update to 0x00401125 after second step");
 
@@ -674,9 +622,7 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     mainWindow.resize(1440, 900);
     mainWindow.loadPreviewFixture();
     if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
-        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
-                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
-                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp")) ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
         mainWindow.loadSourceFile(demoPath);
     }
     mainWindow.show();
@@ -709,22 +655,19 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     mainWindow.setWorkspacePerspective(QStringLiteral("Reverse"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
-    QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700,
-             "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
+    QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700, "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
 
     // Switch to MPI perspective with diagnostics table front and center.
     mainWindow.setWorkspacePerspective(QStringLiteral("MPI"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("MPI"));
-    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive),
-             "MPI perspective must activate the MPI Diagnostics bottom tab");
+    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive), "MPI perspective must activate the MPI Diagnostics bottom tab");
 
     // Switch to Code perspective restoring balanced source and disassembly viewports.
     mainWindow.setWorkspacePerspective(QStringLiteral("Code"));
     QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Code"));
-    QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200,
-             "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
+    QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200, "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
 
     // 3. Bottom Console Maximize Toggle.
     const int baseHeight = bottomTabs->height();
@@ -746,9 +689,7 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
     mainWindow.resize(1440, 900);
     mainWindow.loadPreviewFixture();
     if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
-        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
-                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
-                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+        const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp")) ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
         mainWindow.loadSourceFile(demoPath);
     }
     mainWindow.show();
@@ -779,10 +720,8 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
     sourceView->setBreakpoints(QSet<int>());
     sourceView->toggleBreakpoint(15);
     sourceView->toggleBreakpoint(16);
-    QVERIFY2(sourceView->hasBreakpoint(15) && sourceView->hasBreakpoint(16),
-             "SourceCodeView::toggleBreakpoint(15/16) must register active breakpoints");
-    QVERIFY2(sourceView->breakpoints().contains(15) && sourceView->breakpoints().contains(16),
-             "SourceCodeView::breakpoints() must contain lines 15 and 16");
+    QVERIFY2(sourceView->hasBreakpoint(15) && sourceView->hasBreakpoint(16), "SourceCodeView::toggleBreakpoint(15/16) must register active breakpoints");
+    QVERIFY2(sourceView->breakpoints().contains(15) && sourceView->breakpoints().contains(16), "SourceCodeView::breakpoints() must contain lines 15 and 16");
     // Launch target and verify stop at first active breakpoint.
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
@@ -790,16 +729,14 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
     QCOMPARE(sourceView->executionLine(), 15);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401128ULL);
     // Continue to next active breakpoint at line 16.
-    QVERIFY2(mainWindow.continueExecutionWorkflow(),
-             "MainWindow::continueExecutionWorkflow() must advance to the next active breakpoint");
+    QVERIFY2(mainWindow.continueExecutionWorkflow(), "MainWindow::continueExecutionWorkflow() must advance to the next active breakpoint");
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
     QCOMPARE(sourceView->executionLine(), 16);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401149ULL);
     // 3. Visible Active Instruction Marker Inside CFG Basic Blocks.
     // Verify CFG basic block marker is visible for active instruction.
-    QVERIFY2(disasmView->activeCfgBlockContainsInstructionMarker(0x00401149ULL),
-             "DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) must be true");
+    QVERIFY2(disasmView->activeCfgBlockContainsInstructionMarker(0x00401149ULL), "DisassemblyView::activeCfgBlockContainsInstructionMarker(0x00401149ULL) must be true");
 }
 
 /**
@@ -828,30 +765,25 @@ void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
     // Query dock instances by their unique registered object names.
     auto* serverRackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
     auto* registerDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
-    QVERIFY2(serverRackDock != nullptr, "ServerRackDock must exist in MainWindow");
-    QVERIFY2(registerDock != nullptr, "RegisterViewDock must exist in MainWindow");
+    QVERIFY2(serverRackDock != nullptr && registerDock != nullptr, "ServerRackDock and RegisterViewDock must exist in MainWindow");
 
     // 1. Pop Out (floatDockWidget) & 1-Click / Double-Click Redock (redockWidget).
     QWidget* originalParent = serverRackDock->parentWidget();
     mainWindow.toggleDockFloating(serverRackDock);
     // Verify dock transitioned to top-level floating state and remains visible.
-    QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating after toggleDockFloating");
-    QVERIFY2(serverRackDock->isVisible(), "ServerRackDock must remain visible when floating");
+    QVERIFY2(mainWindow.isDockFloating(serverRackDock) && serverRackDock->isVisible(), "ServerRackDock must be floating and visible after toggleDockFloating");
 
     mainWindow.redockWidget(serverRackDock);
     // Verify dock returned to docked state with original parent and valid geometry.
     QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must not be floating after redockWidget");
     QCOMPARE(serverRackDock->parentWidget(), originalParent);
-    QVERIFY2(serverRackDock->isVisible(), "ServerRackDock must be visible after redocking");
-    QVERIFY2(serverRackDock->width() > 50 && serverRackDock->height() > 50,
-             "ServerRackDock must retain visible dimensions > 50px inside its dock/splitter slot");
+    QVERIFY2(serverRackDock->isVisible() && serverRackDock->width() > 50 && serverRackDock->height() > 50, "ServerRackDock must retain visible dimensions > 50px inside its dock/splitter slot");
 
     // 2. Drag-Back Drop-Zone Redocking (handleDockDragRelease).
     mainWindow.toggleDockFloating(serverRackDock);
     QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating again");
-    // Calculate global screen center of dock's home drop zone.
+    // Calculate global screen center of dock's home drop zone and simulate release.
     const QPoint homeGlobalCenter = mainWindow.dockHomeGlobalRect(serverRackDock).center();
-    // Simulate mouse release over dock home drop zone.
     mainWindow.handleDockDragRelease(serverRackDock, homeGlobalCenter);
     QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must redock when dropped into its home drop zone");
     QCOMPARE(serverRackDock->parentWidget(), originalParent);
@@ -859,12 +791,10 @@ void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
     // 3. redockAllFloatingPanels() Restores All Popped-Out Panels.
     mainWindow.toggleDockFloating(serverRackDock);
     mainWindow.toggleDockFloating(registerDock);
-    QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating");
-    QVERIFY2(mainWindow.isDockFloating(registerDock), "RegisterViewDock must be floating");
+    QVERIFY2(mainWindow.isDockFloating(serverRackDock) && mainWindow.isDockFloating(registerDock), "Both docks must be floating");
     // Restore all floating panels in a single batch operation.
     mainWindow.redockAllFloatingPanels();
-    QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be docked after redockAllFloatingPanels");
-    QVERIFY2(!mainWindow.isDockFloating(registerDock), "RegisterViewDock must be docked after redockAllFloatingPanels");
+    QVERIFY2(!mainWindow.isDockFloating(serverRackDock) && !mainWindow.isDockFloating(registerDock), "Both docks must be docked after redockAllFloatingPanels");
 }
 
 /**
@@ -930,4 +860,49 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     QCOMPARE(dialog.slurmFieldValue(QStringLiteral("gres_gpu")), QStringLiteral("a100:2"));
     QCOMPARE(dialog.slurmFieldValue(QStringLiteral("constraint")), QStringLiteral("nvlink"));
     QVERIFY(dialog.slurmFieldValue(QStringLiteral("modules")).contains(QStringLiteral("openmpi/5.0")));
+}
+
+/**
+ * @brief Verifies removal of redundant Enable Dark Mode checkbox, 3 Light Themes (Daylight, Solarized, Catppuccin Latte),
+ *        and end-to-end light-mode canvas cohesion across PreferencesDialog, SourceCodeView, and DisassemblyView.
+ */
+void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
+    auto& tm = gridlock::core::ThemeManager::instance();
+    const QStringList themeIds = tm.availableThemeIds();
+    // 1. Verify 8 curated themes including 3 light themes and automatic dark/light mode derivation.
+    QVERIFY2(themeIds.contains(QStringLiteral("daylight_light")) &&
+                 themeIds.contains(QStringLiteral("solarized_light")) &&
+                 themeIds.contains(QStringLiteral("catppuccin_latte")),
+             "ThemeManager::availableThemeIds() must include daylight_light, solarized_light, and catppuccin_latte");
+    tm.applyTheme(QStringLiteral("solarized_light"));
+    QVERIFY2(!tm.isDarkMode(), "Selecting solarized_light must automatically set isDarkMode() == false");
+    tm.applyTheme(QStringLiteral("catppuccin_latte"));
+    QVERIFY2(!tm.isDarkMode(), "Selecting catppuccin_latte must automatically set isDarkMode() == false");
+
+    // 2. Verify Enable Dark Mode checkbox is removed from PreferencesDialog and Light Mode has no dark #16181d/#1b1e24 overrides.
+    tm.applyTheme(QStringLiteral("daylight_light"));
+    gridlock::ui::PreferencesDialog dialog;
+    dialog.resize(860, 620);
+    dialog.show();
+    QApplication::processEvents();
+    for (QCheckBox* chk : dialog.findChildren<QCheckBox*>()) {
+        QVERIFY2(!(chk->isVisible() && chk->text().contains(QStringLiteral("Enable Dark Mode"), Qt::CaseInsensitive)),
+                 "Redundant 'Enable Dark Mode' checkbox must not be visible in PreferencesDialog");
+    }
+    for (QComboBox* cb : dialog.findChildren<QComboBox*>()) {
+        QVERIFY2(!cb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "PreferencesDialog QComboBox must not hardcode dark #1b1e24 in Light Theme");
+    }
+    for (QSpinBox* sb : dialog.findChildren<QSpinBox*>()) {
+        QVERIFY2(!sb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "PreferencesDialog QSpinBox must not hardcode dark #1b1e24 in Light Theme");
+    }
+
+    // 3. Verify SourceCodeView and DisassemblyView activeCanvasBackgroundColor() are light (>= 220 lightness) in Light Theme.
+    gridlock::ui::SourceCodeView srcView;
+    gridlock::ui::DisassemblyView disView;
+    QVERIFY2(srcView.activeCanvasBackgroundColor().lightness() >= 220, "SourceCodeView canvas background must be light (>= 220 lightness) in daylight_light");
+    QVERIFY2(disView.activeCanvasBackgroundColor().lightness() >= 220, "DisassemblyView canvas background must be light (>= 220 lightness) in daylight_light");
+
+    // Restore default dark theme at the end of the test.
+    tm.applyTheme(QStringLiteral("gridlock_slate"));
+    QVERIFY2(tm.isDarkMode(), "Selecting gridlock_slate must restore isDarkMode() == true");
 }
