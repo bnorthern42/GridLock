@@ -120,6 +120,7 @@ jobs:
         run: |
           ninja -C builddir gridlock
           bash scripts/build_appimage.sh
+          QT_QPA_PLATFORM=offscreen ./GridLock-0.7.0-x86_64.AppImage --appimage-extract-and-run --version
           ls -lah GridLock-0.7.0-x86_64.AppImage GridLock-x86_64.AppImage
 
       - name: Upload AppImage Build Artifact

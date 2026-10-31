@@ -43,11 +43,11 @@ fi
 if [ "${APPDIR_ONLY}" -eq 0 ]; then
     echo "Initializing git submodules..."
     git submodule update --init --recursive || true
-    rm -rf "${BUILD_DIR}" "${APPDIR}"
+    rm -rf "${APPDIR}"
     rm -f "${APP_NAME}"-*.AppImage
-    rm -f CQtDeployer_*.run
-    rm -rf .cqtdeployer
-    meson setup "${BUILD_DIR}" --prefix=/usr --buildtype=release -Db_coverage=false
+    if [ ! -d "${BUILD_DIR}" ]; then
+        meson setup "${BUILD_DIR}" --prefix=/usr --buildtype=release -Db_coverage=false
+    fi
     ninja -C "${BUILD_DIR}" gridlock
 else
     rm -rf "${APPDIR}"
@@ -60,7 +60,7 @@ else
 fi
 
 echo "Installing into AppDir..."
-if [ "${APPDIR_ONLY}" -eq 0 ] || [ ! -f "./${BUILD_DIR}/${BIN_NAME}" ]; then
+if [ ! -f "./${BUILD_DIR}/${BIN_NAME}" ]; then
     DESTDIR="${APPDIR}" ninja -C "${BUILD_DIR}" install
 fi
 mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/lib"
@@ -151,21 +151,17 @@ done
 
 echo "Generating AppDir/gridlock.desktop, AppDir/gridlock.svg, and hicolor icons..."
 mkdir -p "${APPDIR}/usr/share/applications"
-if [ -f "${ROOT_DIR}/packaging/gridlock.desktop" ]; then
-    cp -af "${ROOT_DIR}/packaging/gridlock.desktop" "${APPDIR}/usr/share/applications/gridlock.desktop"
-    cp -af "${ROOT_DIR}/packaging/gridlock.desktop" "${APPDIR}/gridlock.desktop"
-else
-    cat << 'EOF' > "${APPDIR}/gridlock.desktop"
+cat << 'EOF' > "${APPDIR}/gridlock.desktop"
 [Desktop Entry]
 Type=Application
 Name=GridLock
+Comment=HPC MPI & Reverse Engineering Workstation
 Exec=gridlock
 Icon=gridlock
-Categories=Development;Debugger;
+Categories=Development;Debugger;IDE;
 Terminal=false
 EOF
-    cp -af "${APPDIR}/gridlock.desktop" "${APPDIR}/usr/share/applications/gridlock.desktop"
-fi
+cp -af "${APPDIR}/gridlock.desktop" "${APPDIR}/usr/share/applications/gridlock.desktop"
 
 cat << 'EOF' > "${APPDIR}/gridlock.svg"
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
@@ -215,32 +211,18 @@ if [ "${APPDIR_ONLY}" -eq 1 ]; then
     exit 0
 fi
 
-export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH:-}"
-
-echo "Downloading and running CQtDeployer..."
-wget -c -nv "https://github.com/QuasarApp/CQtDeployer/releases/download/v1.6.2441.67ee1ef/CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run"
-chmod +x CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run
-./CQtDeployer_1.6.2441.67ee1ef_Linux_x86_64.run install "CQtDeployer" -t "$(pwd)/.cqtdeployer" -c
-
-./.cqtdeployer/1.6/cqtdeployer.sh -bin "${APPDIR}/usr/bin/${BIN_NAME}" \
-    -qmake "${QMAKE}" \
-    -ext "wayland,xcb,vulkan,sql" \
-    -appImage \
-    -targetDir "${APPDIR}" \
-    -icon "${APPDIR}/usr/share/icons/hicolor/512x512/apps/gridlock.png" \
-    -desktop "${APPDIR}/usr/share/applications/gridlock.desktop" \
-    -libDir "${APPDIR}/usr/lib"
-
-FOUND_APPIMAGE="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1 || true)"
-if [ -z "${FOUND_APPIMAGE}" ]; then
-    echo "ERROR: AppImage was not created."
-    exit 1
+APPIMAGETOOL="/tmp/appimagetool-x86_64.AppImage"
+if [ ! -x "${APPIMAGETOOL}" ]; then
+    echo "Downloading appimagetool-x86_64.AppImage..."
+    wget -q -O "${APPIMAGETOOL}" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" || \
+        curl -fsSL -o "${APPIMAGETOOL}" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+    chmod +x "${APPIMAGETOOL}"
 fi
-chmod +x "${FOUND_APPIMAGE}"
-cp -af "${FOUND_APPIMAGE}" "./${APP_NAME}-${VERSION}-x86_64.AppImage"
-if [ "${FOUND_APPIMAGE}" != "./${APP_NAME}-x86_64.AppImage" ]; then
-    mv "${FOUND_APPIMAGE}" "./${APP_NAME}-x86_64.AppImage"
-fi
+
+echo "Packaging AppDir into ${APP_NAME}-${VERSION}-x86_64.AppImage via appimagetool..."
+ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "${APPIMAGETOOL}" --appimage-extract-and-run "${APPDIR}" "${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage"
+chmod +x "${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage"
+cp -af "${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage" "${ROOT_DIR}/${APP_NAME}-x86_64.AppImage"
 
 echo "Created AppImage artifacts:"
-ls -lah "./${APP_NAME}-${VERSION}-x86_64.AppImage" "./${APP_NAME}-x86_64.AppImage"
+ls -lah "${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage" "${ROOT_DIR}/${APP_NAME}-x86_64.AppImage"

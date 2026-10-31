@@ -882,18 +882,18 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
              "meson.build must declare version : '0.7.0', install_rpath : '$ORIGIN/../lib', and build_by_default : false on all 26 test executables");
     QVERIFY2(readText(QStringLiteral("CHANGELOG.md")).contains(QStringLiteral("[0.7.0]")), "CHANGELOG.md must contain [0.7.0]");
 
-    // 2. Verify scripts/build_appimage.sh builds only the gridlock target, bundles libqtadvancedcss.so, and excludes *test* binaries.
+    // 2. Verify scripts/build_appimage.sh builds only the gridlock target, bundles libqtadvancedcss.so, and uses appimagetool (never CQtDeployer).
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable(), "scripts/build_appimage.sh must exist and be executable");
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock")}) {
+    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
+    QVERIFY2(!appImageScript.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive), "scripts/build_appimage.sh must not use CQtDeployer");
     QVERIFY2(appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))) &&
                  !appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s*(\\n|$)"))),
              "scripts/build_appimage.sh must invoke ninja -C \"$BUILD_DIR\" gridlock and not bare ninja -C \"$BUILD_DIR\"");
-    if (!QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) ||
-        !QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1"))) {
+    if (!QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) || !QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1"))) {
         QProcess prepProc;
         prepProc.setWorkingDirectory(rootPrefix.isEmpty() ? QDir::currentPath() : QDir(rootPrefix).absolutePath());
         prepProc.start(QStringLiteral("bash"), {QStringLiteral("scripts/build_appimage.sh"), QStringLiteral("--appdir-only")});
@@ -926,7 +926,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     for (const QString& fn : ymlFiles) {
         const QString content = readText(QStringLiteral(".github/workflows/") + fn);
         combinedYml += content + QLatin1Char('\n');
-        QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) && !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")), qPrintable(fn));
+        QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) && !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")) && !content.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive), qPrintable(fn));
     }
     for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("lxqt/lxqt-build-tools"), QStringLiteral("lxqt/qtermwidget"), QStringLiteral("external/Qt-Advanced-Stylesheets/build"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("libfuse2t64"), QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"), QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
         QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing requirement: ") + pkg));
