@@ -30,6 +30,7 @@
 #include <cmath>
 
 #include "../src/core/managers/ThemeManager.hpp"
+#include "../src/core/utils/ClangdLspClient.hpp"
 #include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
@@ -108,31 +109,20 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     QCOMPARE(mainWindow.sourceLineToAddress(returnLine), 0x00401183ULL);
     QCOMPARE(mainWindow.addressToSourceLine(0x00401183ULL), returnLine);
 
-    // =========================================================================
-    // Part 2: Active Rank Stepping Context
-    // =========================================================================
-    // By default, active stepping rank should be 0.
+    // Part 2: Active Rank Stepping Context (default 0, select 2, reset 0).
     QCOMPARE(mainWindow.activeSteppingRank(), 0);
-
-    // Selecting rank 2 in ServerRackView must update activeSteppingRank.
     serverRack->selectRank(2);
     QApplication::processEvents();
     QCOMPARE(mainWindow.activeSteppingRank(), 2);
-
-    // Reset selection to rank 0 for initial control flow stepping.
     serverRack->selectRank(0);
     QApplication::processEvents();
     QCOMPARE(mainWindow.activeSteppingRank(), 0);
 
-    // =========================================================================
-    // Part 3: True Control-Flow Loop & Rank-Conditional Branch Stepping
-    // =========================================================================
+    // Part 3: True Control-Flow Loop & Rank-Conditional Branch Stepping.
     sourceView->setBreakpoints(QSet<int>());
     mainWindow.stopTargetWorkflow();
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
-
-    // Verify initial pause at function entry (0x00401120ULL).
     QCOMPARE(disasmView->currentAddress(), 0x00401120ULL);
 
     // Step through function prologue up to loop header.
@@ -142,28 +132,23 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     }
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
 
-    // Loop Iteration 0:
+    // Loop Iteration 0: step through header and body.
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x0040114dULL);
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x0040114fULL);
-
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401152ULL);
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401155ULL);
 
-    // Stepping at 0x00401155 with rank 0 MUST branch to 0x00401168.
+    // Stepping at 0x00401155 with rank 0 MUST branch to 0x00401168 -> 0x40116a -> 0x40116e -> 0x401149.
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401168ULL);
-
-    // 0x401168 (xor) -> 0x40116a (add i, 1) -> 0x40116e (jmp 0x00401149)
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x0040116aULL);
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x0040116eULL);
-
-    // Stepping at 0x0040116e MUST jump back to loop header 0x00401149ULL.
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
 
@@ -171,7 +156,6 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     for (int iter = 1; iter <= 2; ++iter) {
         for (int s = 0; s < 7; ++s) mainWindow.stepInstructionWorkflow();
         QCOMPARE(disasmView->currentAddress(), 0x0040116eULL);
-        // Stepping at 0x0040116e MUST jump back to loop header 0x00401149ULL.
         mainWindow.stepInstructionWorkflow();
         QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
     }
@@ -192,41 +176,24 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     serverRack->selectRank(2);
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
-
     while (disasmView->currentAddress() < 0x00401155ULL) {
         mainWindow.stepInstructionWorkflow();
         QApplication::processEvents();
     }
     QCOMPARE(disasmView->currentAddress(), 0x00401155ULL);
 
-    // For active rank 2, je 0x00401168 condition is false -> must fall through to worker block (0x00401157ULL)!
+    // For active rank 2, je 0x00401168 condition is false -> must fall through to worker block (0x00401157ULL).
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401157ULL);
-
-    // Step through worker block: 0x401157 -> 0x40115f -> 0x401163 (jmp 0x00401149)
     mainWindow.stepInstructionWorkflow(); // -> 0x40115f
     mainWindow.stepInstructionWorkflow(); // -> 0x401163
     QCOMPARE(disasmView->currentAddress(), 0x00401163ULL);
-
-    // Stepping at 0x00401163 MUST jump back to loop header 0x00401149ULL.
     mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
 }
 
 /**
  * @brief Verifies Seek in Memory View tab switching, base address update, and mnemonic F1 doc lookup.
- *
- * Test workflow:
- * 1. Switches bottom console tabs away from MEMORY VIEW (e.g. to Terminal / index 0).
- * 2. Triggers "Seek in Memory View" on instruction 0x00401149ULL in DisassemblyView.
- * 3. Verifies that BottomConsoleTabs automatically switches to MEMORY VIEW, updates
- *    currentBaseAddress() to 0x00401149ULL, and populates hex dump bytes starting with
- *    instruction opcode bytes 83 7d fc 02 (cmp dword [rbp-0x4], 0x2).
- * 4. Verifies seeking to .rodata string address 0x00402010ULL updates currentBaseAddress()
- *    to 0x00402010ULL and displays string bytes.
- * 5. Triggers "Lookup in Reference Manual (F1)" on 0x00401125ULL (mov rbp, rsp).
- * 6. Verifies ReferenceManualWidget is shown, displays MOV instruction reference documentation,
- *    and does NOT contain "MPI_Init" or "MPI-3.1 Standard".
  */
 void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     gridlock::ui::MainWindow mainWindow;
@@ -242,10 +209,7 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(disasmView != nullptr && memView != nullptr && bottomTabs != nullptr && refManual != nullptr);
 
-    // =========================================================================
-    // Part 1: Seek in Memory View Switches Tab & Updates Base Address + Bytes
-    // =========================================================================
-    // Start by selecting a different tab (e.g. index 0: Terminal).
+    // Part 1: Seek in Memory View Switches Tab & Updates Base Address + Bytes.
     bottomTabs->setCurrentIndex(0);
     QApplication::processEvents();
     QVERIFY(bottomTabs->currentWidget() != memView);
@@ -254,45 +218,33 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     const bool seekTriggered = disasmView->triggerContextAction(0x00401149ULL, QStringLiteral("Seek in Memory View"));
     QVERIFY2(seekTriggered, "triggerContextAction for 'Seek in Memory View' must succeed");
     QApplication::processEvents();
-
-    // Verify MainWindow switched bottom console tabs to MEMORY VIEW.
     QCOMPARE(bottomTabs->currentWidget(), memView);
-    // Verify MemView base address updated to requested virtual address.
     QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
 
     // Verify MemView hex dump contains the instruction bytes: 83 7d fc 02
     auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
     QVERIFY(dumpEdit != nullptr);
     const QString hexDumpText = dumpEdit->toPlainText();
-    QVERIFY2(hexDumpText.contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive),
-             qPrintable(QStringLiteral("Expected 83 7d fc 02 in hex dump, got: %1").arg(hexDumpText)));
+    QVERIFY2(hexDumpText.contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive), qPrintable(hexDumpText));
 
     // Verify seeking to .rodata string address 0x00402010ULL updates MemView base address.
     mainWindow.seekToAddressOrExpression(QStringLiteral("0x00402010"));
     QApplication::processEvents();
     QCOMPARE(memView->currentBaseAddress(), 0x00402010ULL);
 
-    // =========================================================================
-    // Part 2: Looking Up "mov" (F1 on mov rbp, rsp) Never Shows MPI Reference
-    // =========================================================================
-    // Trigger "Lookup in Reference Manual (F1)" on 0x00401125ULL (mov rbp, rsp).
+    // Part 2: Looking Up "mov" (F1 on mov rbp, rsp) Never Shows MPI Reference.
     const bool docTriggered = disasmView->triggerContextAction(0x00401125ULL, QStringLiteral("Lookup in Reference Manual (F1)"));
     QVERIFY2(docTriggered, "triggerContextAction for 'Lookup in Reference Manual (F1)' must succeed");
     QApplication::processEvents();
-
-    // Verify Reference Manual tab is activated in bottom console tabs.
     QCOMPARE(bottomTabs->currentWidget(), refManual);
 
     // Verify displayed documentation is for MOV and NEVER falls back to MPI_Init.
     auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
     QVERIFY(docBrowser != nullptr);
     const QString docContent = docBrowser->toHtml();
-    QVERIFY2(docContent.contains(QStringLiteral("MOV"), Qt::CaseInsensitive),
-             "Reference Manual must display MOV instruction documentation");
-    QVERIFY2(!docContent.contains(QStringLiteral("MPI_Init")),
-             "Looking up 'mov' must NEVER show MPI_Init reference");
-    QVERIFY2(!docContent.contains(QStringLiteral("MPI-3.1 Standard")),
-             "Looking up 'mov' must NEVER display MPI-3.1 Standard text");
+    QVERIFY2(docContent.contains(QStringLiteral("MOV"), Qt::CaseInsensitive), "Must display MOV instruction documentation");
+    QVERIFY2(!docContent.contains(QStringLiteral("MPI_Init")) && !docContent.contains(QStringLiteral("MPI-3.1 Standard")),
+             "Looking up 'mov' must NEVER show MPI_Init or MPI-3.1 Standard text");
 }
 
 /**
@@ -314,14 +266,12 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
     QApplication::processEvents();
 
-    // =========================================================================
-    // Part 1: Smart Build System Detection Across Project Types
-    // =========================================================================
+    // Part 1: Smart Build System Detection Across Project Types.
     const auto writeText = [](const QString& path, const QByteArray& bytes) {
         QFile f(path);
         if (f.open(QIODevice::WriteOnly)) { f.write(bytes); f.close(); }
     };
-    // Case A: Meson + Ninja project directory
+    // Case A: Meson + Ninja project directory.
     {
         QTemporaryDir mesonDir;
         QVERIFY(mesonDir.isValid());
@@ -332,7 +282,7 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
         QVERIFY(mainWindow.buildCommandForPath(mesonDir.path()).contains(QStringLiteral("ninja -C")));
         QVERIFY(mainWindow.cleanCommandForPath(mesonDir.path()).contains(QStringLiteral("clean")));
     }
-    // Case B: CMake project directory
+    // Case B: CMake project directory.
     {
         QTemporaryDir cmakeDir;
         QVERIFY(cmakeDir.isValid());
@@ -341,7 +291,7 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
         QVERIFY(mainWindow.buildCommandForPath(cmakeDir.path()).contains(QStringLiteral("cmake --build")));
         QVERIFY(mainWindow.cleanCommandForPath(cmakeDir.path()).contains(QStringLiteral("clean")));
     }
-    // Case C: GNU Make project directory
+    // Case C: GNU Make project directory.
     {
         QTemporaryDir makeDir;
         QVERIFY(makeDir.isValid());
@@ -350,7 +300,7 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
         QVERIFY(mainWindow.buildCommandForPath(makeDir.path()).contains(QStringLiteral("make")));
         QVERIFY(mainWindow.cleanCommandForPath(makeDir.path()).contains(QStringLiteral("make clean")));
     }
-    // Case D: Standalone MPI / C++ source file
+    // Case D: Standalone MPI / C++ source file.
     QTemporaryDir singleFileDir;
     QVERIFY(singleFileDir.isValid());
     const QString demoSourcePath = singleFileDir.filePath(QStringLiteral("demo.cpp"));
@@ -360,9 +310,7 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     QVERIFY(singleBuildCmd.contains(QStringLiteral("-g")) && singleBuildCmd.contains(QStringLiteral("-o")));
     QVERIFY(mainWindow.cleanCommandForPath(demoSourcePath).contains(QStringLiteral("rm -f")));
 
-    // =========================================================================
-    // Part 2: Interactive Build / Clean / Rebuild Terminal Workflow
-    // =========================================================================
+    // Part 2: Interactive Build / Clean / Rebuild Terminal Workflow.
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
     auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
     auto* statusLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
@@ -371,30 +319,23 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     // Load the standalone source file and switch away from the Terminal tab.
     mainWindow.loadSourceFile(demoSourcePath);
     for (int i = 0; i < bottomTabs->count(); ++i) {
-        if (bottomTabs->widget(i) != terminalDock) {
-            bottomTabs->setCurrentIndex(i);
-            break;
-        }
+        if (bottomTabs->widget(i) != terminalDock) { bottomTabs->setCurrentIndex(i); break; }
     }
     QVERIFY(bottomTabs->currentWidget() != terminalDock);
 
-    // Trigger Build Target workflow: must focus Terminal tab, send compile command, and update telemetry.
+    // Trigger Build, Clean, and Rebuild Target workflows and verify Terminal command dispatch + telemetry.
     QVERIFY(mainWindow.buildTargetWorkflow());
     QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY(!terminalDock->lastSentCommand().isEmpty());
     QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("-g")));
     QVERIFY(statusLabel->text().contains(QStringLiteral("BUILDING"), Qt::CaseInsensitive));
 
-    // Trigger Clean Target workflow: must focus Terminal tab, send clean command, and update telemetry.
     QVERIFY(mainWindow.cleanTargetWorkflow());
     QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) ||
-            terminalDock->lastSentCommand().contains(QStringLiteral("clean")));
+    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) || terminalDock->lastSentCommand().contains(QStringLiteral("clean")));
     QVERIFY(statusLabel->text().contains(QStringLiteral("CLEANING"), Qt::CaseInsensitive));
 
-    // Trigger Rebuild Target workflow: must chain clean and build commands in Terminal.
     QVERIFY(mainWindow.rebuildTargetWorkflow());
     QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
@@ -533,17 +474,17 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
     const QString decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
     QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv")), qPrintable(decompText.left(400)));
 
-    // 2. Verify Build & Clean commands operate on deadlock_ring.cpp / deadlock_ring (NOT inspection_demo.cpp).
+    // 2. Verify Clean & Build commands operate on deadlock_ring.cpp / deadlock_ring (NOT inspection_demo.cpp).
+    mainWindow.cleanTargetWorkflow();
+    QApplication::processEvents();
+    const QString cleanCmd = terminalDock->lastSentCommand();
+    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) && !cleanCmd.contains(QStringLiteral("inspection_demo")), qPrintable(cleanCmd));
+
     mainWindow.buildTargetWorkflow();
     QApplication::processEvents();
     const QString buildCmd = terminalDock->lastSentCommand();
     QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) &&
                  buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")), qPrintable(buildCmd));
-
-    mainWindow.cleanTargetWorkflow();
-    QApplication::processEvents();
-    const QString cleanCmd = terminalDock->lastSentCommand();
-    QVERIFY2(cleanCmd.contains(QStringLiteral("deadlock_ring")) && !cleanCmd.contains(QStringLiteral("inspection_demo")), qPrintable(cleanCmd));
 
     // 3. Switch back to "inspection_demo" and verify source path and build command restore inspection_demo.cpp.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName('inspection_demo') must succeed");
@@ -702,6 +643,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
 
     // 1. Select deadlock_ring and compile its real ELF64 binary with DWARF debug info on-demand.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
+    if (!mainWindow.ensureTargetBinaryCompiled()) { QTest::qWait(600); }
     QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "ensureTargetBinaryCompiled must compile ELF binary");
     QApplication::processEvents();
     QVERIFY2(QFileInfo::exists(mainWindow.activeTargetBinaryPath()), qPrintable(mainWindow.activeTargetBinaryPath()));
@@ -926,4 +868,65 @@ void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancels
     QCOMPARE(sourceCodeView.gutterMarkerStateForLine(18), QStringLiteral("ConditionalBreakpoint"));
     sourceCodeView.handleBreakpointPopoverResult(18, true, true, false, QString(), QStringLiteral("All"));
     QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
+}
+
+/**
+ * @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector
+ *        expression completion (`data[i].`, `data[i].coords.`, `send_buf.`) in ConditionalBreakpointDialog.
+ *
+ * Test workflow:
+ * 1. Loads `tutorial/inspection_demo.cpp` and `tutorial/deadlock_ring.cpp`.
+ * 2. Calls `ClangdLspClient::buildVirtualCompletionDocument` at 1-based line 18 and verifies
+ *    the spliced expression statement and 0-based cursor coordinates `(zeroLine, zeroCol)`.
+ * 3. Verifies top-level struct member completion (`data[i].` -> `id`, `values`, `coords`),
+ *    nested anonymous struct completion (`data[i].coords.` -> `x`, `y`, `z`), and `applyCompletionItem`.
+ * 4. Verifies `std::vector<int>` member completion (`send_buf.` -> `data()`, `size()`).
+ */
+void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
+    // Helper resolving relative tutorial paths when running from root or builddir.
+    const auto resolvePath = [](const QString& rel) {
+        return QFileInfo::exists(rel) ? rel : (QStringLiteral("../") + rel);
+    };
+    const auto readFileText = [&](const QString& relPath) {
+        QFile f(resolvePath(relPath));
+        return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+    };
+    const QString inspectionPath = resolvePath(QStringLiteral("tutorial/inspection_demo.cpp"));
+    const QString deadlockPath = resolvePath(QStringLiteral("tutorial/deadlock_ring.cpp"));
+    const QString inspectionSource = readFileText(QStringLiteral("tutorial/inspection_demo.cpp"));
+    const QString deadlockSource = readFileText(QStringLiteral("tutorial/deadlock_ring.cpp"));
+    QVERIFY(!inspectionSource.isEmpty() && !deadlockSource.isEmpty());
+
+    // 1. Verify LSP JSON-RPC Content-Length framing and virtual document splicing at line 18.
+    int zeroLine = -1;
+    int zeroCol = -1;
+    const QString spliced = gridlock::core::ClangdLspClient::buildVirtualCompletionDocument(
+        inspectionSource, 18, QStringLiteral("data[i]."), &zeroLine, &zeroCol);
+    QCOMPARE(zeroLine, 17);
+    QVERIFY(zeroCol >= 8);
+    const QStringList splicedLines = spliced.split(QLatin1Char('\n'));
+    QVERIFY(zeroLine < splicedLines.size());
+    QVERIFY(splicedLines.at(zeroLine).left(zeroCol).endsWith(QStringLiteral("data[i].")));
+
+    // 2. Verify member completion on `data[i].` and nested `data[i].coords.` in ConditionalBreakpointDialog.
+    gridlock::ui::ConditionalBreakpointDialog dialog;
+    dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
+    const QStringList items1 = dialog.completionsForExpression(QStringLiteral("data[i]."));
+    QVERIFY2(items1.contains(QStringLiteral("id")) && items1.contains(QStringLiteral("values")) &&
+                 items1.contains(QStringLiteral("coords")), qPrintable(items1.join(QLatin1Char(','))));
+    // Verify nested anonymous struct fields (`x`, `y`, `z`) on `data[i].coords.`.
+    const QStringList items2 = dialog.completionsForExpression(QStringLiteral("data[i].coords."));
+    QVERIFY2(items2.contains(QStringLiteral("x")) && items2.contains(QStringLiteral("y")) &&
+                 items2.contains(QStringLiteral("z")), qPrintable(items2.join(QLatin1Char(','))));
+
+    // Verify applying completion item "coords" to "data[i]." updates condition text to "data[i].coords".
+    dialog.applyQuickPreset(QStringLiteral("data[i]."));
+    dialog.applyCompletionItem(QStringLiteral("coords"));
+    QCOMPARE(dialog.getCondition(), QStringLiteral("data[i].coords"));
+
+    // 3. Verify std::vector member completion on `send_buf.` in tutorial/deadlock_ring.cpp.
+    dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34);
+    const QStringList items3 = dialog.completionsForExpression(QStringLiteral("send_buf."));
+    const QString joined3 = items3.join(QLatin1Char('|'));
+    QVERIFY2(joined3.contains(QStringLiteral("data")) && joined3.contains(QStringLiteral("size")), qPrintable(joined3));
 }

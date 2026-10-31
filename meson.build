@@ -79,7 +79,7 @@ src_files = [
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
-  'src/core/utils/ElfBinaryInspector.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
 ]
 
@@ -259,7 +259,7 @@ ui_test_src = [
   'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp',
   'src/ui/docks/VariablesDockWidget.cpp',
-  'src/core/utils/ElfBinaryInspector.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp',
   'src/core/Version.cpp',
 ]
 
@@ -423,7 +423,7 @@ commands_test_src = [
   'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp'
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp'
 ]
 
 commands_test_moc_headers = [
@@ -484,7 +484,7 @@ dap_commands_test_src = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp'
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp'
 ]
 
 dap_commands_test_moc_headers = [

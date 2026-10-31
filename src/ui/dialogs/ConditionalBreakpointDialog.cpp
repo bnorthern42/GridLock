@@ -8,11 +8,14 @@
  */
 
 #include "ConditionalBreakpointDialog.hpp"
+#include "core/utils/ClangdLspClient.hpp"
 
 #include <algorithm>
 
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QContextMenuEvent>
 #include <QFrame>
 #include <QGuiApplication>
@@ -29,6 +32,8 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QShowEvent>
+#include <QStringListModel>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace gridlock::ui {
@@ -151,6 +156,32 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     m_conditionEdit->setPlaceholderText(QStringLiteral("C/C++ predicate (e.g. rank == 0)"));
     m_conditionEdit->setText(currentCondition);
 
+    // Attach dark-slate LSP member/variable completion popup to m_conditionEdit.
+    m_completionModel = new QStringListModel(this);
+    m_completer = new QCompleter(m_completionModel, this);
+    m_completer->setWidget(m_conditionEdit);
+    m_completer->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
+    m_completer->setCaseSensitivity(Qt::CaseInsensitive);
+    if (m_completer->popup()) {
+        m_completer->popup()->setStyleSheet(QStringLiteral(
+            "QAbstractItemView { background: #1e2128; color: #e5e9f0; border: 1px solid #528bff; "
+            "selection-background-color: #2c436b; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"));
+    }
+    connect(m_completer, QOverload<const QString&>::of(&QCompleter::activated),
+            this, [this](const QString& chosen) {
+                QTimer::singleShot(0, this, [this, chosen]() { applyCompletionItem(chosen); });
+            });
+    connect(m_conditionEdit, &QLineEdit::textEdited, this, [this](const QString& text) {
+        if (!m_completer || !m_completionModel || m_fullSourceText.isEmpty()) return;
+        const QStringList candidates = completionsForExpression(text);
+        m_completionModel->setStringList(candidates);
+        if (!candidates.isEmpty()) {
+            m_completer->complete();
+        } else if (m_completer->popup()) {
+            m_completer->popup()->hide();
+        }
+    });
+
     m_presetCombo = new QComboBox(this);
     m_presetCombo->setObjectName(QStringLiteral("breakpointPresetCombo"));
     m_presetCombo->setFixedHeight(24);
@@ -238,6 +269,71 @@ void ConditionalBreakpointDialog::setTargetLineContext(int lineOneBased, const Q
                                 ? QStringLiteral("Line %1 breakpoint").arg(lineOneBased)
                                 : QStringLiteral("Line %1 breakpoint — %2").arg(lineOneBased).arg(snippet);
     m_titleLabel->setText(summary);
+}
+
+/**
+ * @brief Stores full source document context for virtual-buffer `clangd` LSP expression completion.
+ * @param filePath Active source file path.
+ * @param fullSourceText Full text of the active editor document.
+ * @param lineOneBased 1-based breakpoint line number.
+ */
+void ConditionalBreakpointDialog::setSourceDocumentContext(const QString& filePath,
+                                                           const QString& fullSourceText,
+                                                           int lineOneBased) {
+    m_sourceFilePath = filePath;
+    m_fullSourceText = fullSourceText;
+    if (lineOneBased > 0) {
+        m_targetLine = lineOneBased;
+    }
+}
+
+/**
+ * @brief Queries ClangdLspClient for member/symbol completions matching expr at m_targetLine.
+ * @param expr Partial C/C++ condition expression (e.g., "data[i]." or "send_buf.").
+ * @return Ordered list of completion candidates.
+ */
+QStringList ConditionalBreakpointDialog::completionsForExpression(const QString& expr) const {
+    if (m_fullSourceText.isEmpty()) return {};
+    const int line = std::max(1, m_targetLine);
+    return core::ClangdLspClient::instance().completeExpressionAtLine(
+        m_sourceFilePath, m_fullSourceText, line, expr);
+}
+
+/**
+ * @brief Appends or replaces the trailing member/identifier token in m_conditionEdit with completionLabel.
+ * @param completionLabel Selected member or variable completion string.
+ */
+void ConditionalBreakpointDialog::applyCompletionItem(const QString& completionLabel) {
+    if (!m_conditionEdit || completionLabel.trimmed().isEmpty()) return;
+
+    const QString current = m_conditionEdit->text();
+    const int lastDot = current.lastIndexOf(QLatin1Char('.'));
+    const int lastArrow = current.lastIndexOf(QStringLiteral("->"));
+    const int lastScope = current.lastIndexOf(QStringLiteral("::"));
+
+    int replaceStart = 0;
+    if (lastArrow >= 0 && lastArrow + 2 > replaceStart) {
+        replaceStart = lastArrow + 2;
+    }
+    if (lastScope >= 0 && lastScope + 2 > replaceStart) {
+        replaceStart = lastScope + 2;
+    }
+    if (lastDot >= 0 && lastDot + 1 > replaceStart) {
+        replaceStart = lastDot + 1;
+    }
+    if (replaceStart == 0) {
+        // Replace only the trailing identifier token if no '.', '->', or '::' separator is present.
+        int idx = current.length();
+        while (idx > 0 && (current.at(idx - 1).isLetterOrNumber() || current.at(idx - 1) == QLatin1Char('_'))) {
+            --idx;
+        }
+        replaceStart = idx;
+    }
+
+    const QString updated = current.left(replaceStart) + completionLabel.trimmed();
+    m_conditionEdit->setText(updated);
+    m_conditionEdit->setCursorPosition(updated.length());
+    m_conditionEdit->setFocus();
 }
 
 /**

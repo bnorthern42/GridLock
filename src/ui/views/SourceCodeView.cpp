@@ -648,6 +648,7 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
                 // Configure and anchor the callout popover directly beneath the breakpoint circle.
                 ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
                 dlg.setTargetLineContext(lineNum, block.text().trimmed());
+                dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
                 dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
                 dlg.positionNearAnchor(iconGlobalPos);
 

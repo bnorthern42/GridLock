@@ -12,9 +12,11 @@
 #include <QDialog>
 #include <QPoint>
 #include <QString>
+#include <QStringList>
 
 class QCheckBox;
 class QComboBox;
+class QCompleter;
 class QContextMenuEvent;
 class QLabel;
 class QLineEdit;
@@ -22,6 +24,7 @@ class QPaintEvent;
 class QPushButton;
 class QRadioButton;
 class QShowEvent;
+class QStringListModel;
 
 namespace gridlock::ui {
 
@@ -47,6 +50,29 @@ public:
      * @param sourceSnippet Optional source statement snippet displayed in the elided title banner.
      */
     void setTargetLineContext(int lineOneBased, const QString& sourceSnippet = QString());
+
+    /**
+     * @brief Provides full source document context for virtual-buffer `clangd` LSP expression completion.
+     * @param filePath Path to the source file being edited.
+     * @param fullSourceText Complete text of the active source document.
+     * @param lineOneBased 1-based line number of the conditional breakpoint.
+     */
+    void setSourceDocumentContext(const QString& filePath,
+                                  const QString& fullSourceText,
+                                  int lineOneBased);
+
+    /**
+     * @brief Queries ClangdLspClient for member or variable completions matching expr at the breakpoint line.
+     * @param expr Partial C/C++ condition expression (e.g., "data[i]." or "send_buf.").
+     * @return Ordered list of completion candidates.
+     */
+    QStringList completionsForExpression(const QString& expr) const;
+
+    /**
+     * @brief Appends or replaces the trailing member/identifier token in the condition input with completionLabel.
+     * @param completionLabel Selected completion member or variable label (e.g., "coords").
+     */
+    void applyCompletionItem(const QString& completionLabel);
 
     /**
      * @brief Returns the formatted title summary banner (e.g., "Line 34 breakpoint — MPI_Send(...)").
@@ -141,10 +167,14 @@ private:
     QRadioButton* m_suspendRankRadio = nullptr;  ///< Radio option suspending only the active rank/thread.
     QPushButton* m_makeDefaultBtn = nullptr; ///< Button persisting chosen suspend scope as default.
     QLineEdit* m_conditionEdit = nullptr;    ///< Single-line C/C++ boolean predicate input box.
+    QCompleter* m_completer = nullptr;       ///< Popup completer displaying LSP struct/member items.
+    QStringListModel* m_completionModel = nullptr; ///< Dynamic string-list model backing m_completer.
     QComboBox* m_presetCombo = nullptr;      ///< Dropdown selector offering common MPI rank/loop presets.
     QPushButton* m_removeBtn = nullptr;      ///< Left-aligned button removing the breakpoint (F9).
     QPushButton* m_cancelBtn = nullptr;      ///< Secondary button canceling popover changes cleanly.
     QPushButton* m_doneBtn = nullptr;        ///< Primary right-aligned confirmation button ("Done").
+    QString m_sourceFilePath;                ///< Active file path for virtual-buffer LSP completion.
+    QString m_fullSourceText;                ///< Full editor document text for virtual-buffer splicing.
     int m_targetLine = -1;                   ///< 1-based line number associated with this popover.
     int m_caretCenterX = 22;                 ///< Horizontal center offset (px) of top callout triangle.
     bool m_removeRequested = false;          ///< Latched true when Remove Breakpoint (F9) is clicked.
