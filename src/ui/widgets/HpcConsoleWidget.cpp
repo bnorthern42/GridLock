@@ -16,6 +16,9 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
+#include <QPainter>
+#include <QPen>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -23,7 +26,80 @@
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include "../../core/managers/ThemeManager.hpp"
+
 namespace gridlock::ui {
+
+namespace {
+
+/**
+ * @brief Generates a crisp, antialiased circular status indicator icon for package filters.
+ * @param color Fill or stroke color for the badge.
+ * @param outlineOnly If true, paints a hollow ring (Available); otherwise a filled circle (Installed).
+ * @return 14x14 high-DPI status badge QIcon.
+ */
+QIcon createStatusBadgeIcon(const QColor& color, bool outlineOnly) {
+    // Allocate 14x14 transparent canvas for vector status badge indicator.
+    QPixmap pix(14, 14);
+    pix.fill(Qt::transparent);
+    QPainter p(&pix);
+    p.setRenderHint(QPainter::Antialiasing);
+    if (outlineOnly) {
+        // Draw 2px outline circle for Available packages.
+        p.setPen(QPen(color, 2.0));
+        p.setBrush(Qt::NoBrush);
+    } else {
+        // Draw solid filled circle for Installed packages.
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+    }
+    p.drawEllipse(QRectF(2.0, 2.0, 10.0, 10.0));
+    return QIcon(pix);
+}
+
+/**
+ * @brief Generates a stylized multi-status layer/grid badge icon for the "All Packages" filter.
+ * @return 14x14 high-DPI layer badge QIcon.
+ */
+QIcon createAllPackagesBadgeIcon() {
+    // Allocate 14x14 transparent canvas for All Packages multi-layer badge.
+    QPixmap pix(14, 14);
+    pix.fill(Qt::transparent);
+    QPainter p(&pix);
+    p.setRenderHint(QPainter::Antialiasing);
+    // Outer rounded card with royal-blue stroke and translucent fill.
+    p.setPen(QPen(QColor(QStringLiteral("#528bff")), 1.4));
+    p.setBrush(QColor(0x26, 0x4f, 0x78, 140));
+    p.drawRoundedRect(QRectF(1.5, 1.5, 11.0, 11.0), 3.0, 3.0);
+    // Centered accent core circle.
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(QStringLiteral("#528bff")));
+    p.drawEllipse(QRectF(4.5, 4.5, 5.0, 5.0));
+    return QIcon(pix);
+}
+
+/**
+ * @brief Generates a package backend terminal/cube icon for the Backend selector.
+ * @return 14x14 high-DPI backend icon.
+ */
+QIcon createBackendIcon() {
+    // Allocate 14x14 transparent canvas for Backend package manager icon.
+    QPixmap pix(14, 14);
+    pix.fill(Qt::transparent);
+    QPainter p(&pix);
+    p.setRenderHint(QPainter::Antialiasing);
+    // Draw gold container with dark slate fill.
+    p.setPen(QPen(QColor(QStringLiteral("#e5c07b")), 1.3));
+    p.setBrush(QColor(0x3e, 0x44, 0x51, 100));
+    p.drawRoundedRect(QRectF(1.5, 1.5, 11.0, 11.0), 2.5, 2.5);
+    // Draw horizontal terminal prompt bar.
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(QStringLiteral("#e5c07b")));
+    p.drawRect(QRectF(4.0, 6.0, 6.0, 2.0));
+    return QIcon(pix);
+}
+
+}  // namespace (anonymous)
 
 /**
  * @brief Constructs the multi-backend Package Manager workstation widget.
@@ -66,21 +142,29 @@ HpcConsoleWidget::HpcConsoleWidget(gridlock::core::HpcBackend* backend,
     m_backendCombo = new QComboBox(this);
     m_backendCombo->setObjectName(QStringLiteral("packageBackendCombo"));
     m_backendCombo->setFixedHeight(22);
-    m_backendCombo->setMinimumWidth(118);
-    m_backendCombo->addItem(QStringLiteral("Auto (%1)").arg(m_detectedBackend), QStringLiteral("auto"));
+    m_backendCombo->setMinimumWidth(130);
+    m_backendCombo->addItem(createBackendIcon(), QStringLiteral("Auto (%1)").arg(m_detectedBackend), QStringLiteral("auto"));
     for (const QString& pm : {QStringLiteral("spack"), QStringLiteral("pacman"),
                               QStringLiteral("dnf"), QStringLiteral("apt"),
                               QStringLiteral("zypper"), QStringLiteral("rpm")}) {
-        m_backendCombo->addItem(pm, pm);
+        m_backendCombo->addItem(createBackendIcon(), pm, pm);
     }
     m_backendCombo->setToolTip(tr("Select active HPC or system package manager backend."));
 
-    // Build Status filter combo box (All / Installed Only / Available Only).
+    // Build Status filter combo box (All / Installed Only / Available Only) with icons and generous width.
     m_statusFilterCombo = new QComboBox(this);
     m_statusFilterCombo->setObjectName(QStringLiteral("packageStatusFilterCombo"));
     m_statusFilterCombo->setFixedHeight(22);
-    m_statusFilterCombo->setMinimumWidth(110);
-    m_statusFilterCombo->addItems({tr("All Packages"), tr("Installed Only"), tr("Available Only")});
+    m_statusFilterCombo->setMinimumWidth(152);
+    m_statusFilterCombo->setToolTip(tr("Filter package catalog by installation status."));
+    m_statusFilterCombo->addItem(createAllPackagesBadgeIcon(), tr("All Packages"));
+    m_statusFilterCombo->addItem(createStatusBadgeIcon(QColor(QStringLiteral("#98c379")), false), tr("Installed Only"));
+    m_statusFilterCombo->addItem(createStatusBadgeIcon(QColor(QStringLiteral("#61afef")), true), tr("Available Only"));
+
+    // Apply initial modern theme styling to combo boxes and listen for global theme mode changes.
+    reloadStyle();
+    connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
+            this, [this](bool) { reloadStyle(); });
 
     // Configure search input placeholder and 350ms live debounce timer.
     if (m_searchEdit) {
@@ -790,6 +874,68 @@ QVector<PackageRecord> HpcConsoleWidget::buildDefaultToolchainCatalog(
         }
     }
     return matched.isEmpty() ? base : matched;
+}
+
+/**
+ * @brief Applies modern dark/light themed QSS to package filter combo boxes.
+ *
+ * Implements high-contrast borders, rounded pill corners, dedicated drop-down button
+ * regions, and styled popup menus matching the workstation design system.
+ */
+void HpcConsoleWidget::reloadStyle() {
+    // Query active dark/light mode state from ThemeManager singleton.
+    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+    // Dark workstation QSS for package filter and backend combo boxes.
+    const QString darkQss = QStringLiteral(
+        "QComboBox#packageStatusFilterCombo, QComboBox#packageBackendCombo { "
+        "background: #1e222a; color: #d7dae0; border: 1px solid #3e4451; border-radius: 4px; "
+        "padding: 1px 22px 1px 8px; font-size: 11px; font-weight: 600; min-height: 20px; max-height: 22px; }"
+        "QComboBox#packageStatusFilterCombo:hover, QComboBox#packageBackendCombo:hover, "
+        "QComboBox#packageStatusFilterCombo:focus, QComboBox#packageBackendCombo:focus { "
+        "background: #242933; border: 1px solid #528bff; color: #ffffff; }"
+        "QComboBox#packageStatusFilterCombo::drop-down, QComboBox#packageBackendCombo::drop-down { "
+        "subcontrol-origin: padding; subcontrol-position: top right; width: 18px; "
+        "border-left: 1px solid #2d323b; border-top-right-radius: 4px; border-bottom-right-radius: 4px; background: #181b21; }"
+        "QComboBox#packageStatusFilterCombo::drop-down:hover, QComboBox#packageBackendCombo::drop-down:hover { background: #282c34; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView, QComboBox#packageBackendCombo QAbstractItemView { "
+        "background-color: #1e222a; border: 1px solid #3e4451; border-radius: 6px; padding: 4px; "
+        "selection-background-color: #264f78; selection-color: #ffffff; color: #d7dae0; font-size: 11px; outline: none; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView::item, QComboBox#packageBackendCombo QAbstractItemView::item { "
+        "min-height: 24px; padding: 2px 8px; border-radius: 2px; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView::item:hover, QComboBox#packageBackendCombo QAbstractItemView::item:hover { "
+        "background-color: #282c34; color: #528bff; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView::item:selected, QComboBox#packageBackendCombo QAbstractItemView::item:selected { "
+        "background-color: #264f78; color: #ffffff; }");
+
+    // Light workstation QSS with crisp GitHub-style borders and high-contrast text.
+    const QString lightQss = QStringLiteral(
+        "QComboBox#packageStatusFilterCombo, QComboBox#packageBackendCombo { "
+        "background: #ffffff; color: #1f2328; border: 1px solid #d0d7de; border-radius: 4px; "
+        "padding: 1px 22px 1px 8px; font-size: 11px; font-weight: 600; min-height: 20px; max-height: 22px; }"
+        "QComboBox#packageStatusFilterCombo:hover, QComboBox#packageBackendCombo:hover { "
+        "background: #f6f8fa; border: 1px solid #0969da; color: #0969da; }"
+        "QComboBox#packageStatusFilterCombo:focus, QComboBox#packageBackendCombo:focus { "
+        "background: #ffffff; border: 1px solid #0969da; color: #1f2328; }"
+        "QComboBox#packageStatusFilterCombo::drop-down, QComboBox#packageBackendCombo::drop-down { "
+        "subcontrol-origin: padding; subcontrol-position: top right; width: 18px; "
+        "border-left: 1px solid #e1e4e8; border-top-right-radius: 4px; border-bottom-right-radius: 4px; background: #f6f8fa; }"
+        "QComboBox#packageStatusFilterCombo::drop-down:hover, QComboBox#packageBackendCombo::drop-down:hover { background: #eaeef2; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView, QComboBox#packageBackendCombo QAbstractItemView { "
+        "background-color: #ffffff; border: 1px solid #d0d7de; border-radius: 6px; padding: 4px; "
+        "selection-background-color: #ddf4ff; selection-color: #0969da; color: #1f2328; font-size: 11px; outline: none; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView::item, QComboBox#packageBackendCombo QAbstractItemView::item { "
+        "min-height: 24px; padding: 2px 8px; border-radius: 2px; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView::item:hover, QComboBox#packageBackendCombo QAbstractItemView::item:hover { "
+        "background-color: #eaeef2; color: #0969da; }"
+        "QComboBox#packageStatusFilterCombo QAbstractItemView::item:selected, QComboBox#packageBackendCombo QAbstractItemView::item:selected { "
+        "background-color: #ddf4ff; color: #0969da; }");
+
+    // Assign tailored stylesheet based on active color theme mode.
+    const QString& activeQss = isDark ? darkQss : lightQss;
+    // Update package status filter combo stylesheet.
+    if (m_statusFilterCombo) m_statusFilterCombo->setStyleSheet(activeQss);
+    // Update package manager backend combo stylesheet.
+    if (m_backendCombo) m_backendCombo->setStyleSheet(activeQss);
 }
 
 }  // namespace gridlock::ui

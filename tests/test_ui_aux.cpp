@@ -872,6 +872,15 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     QVERIFY(listBrowser != nullptr && listBrowser->toPlainText().contains(QStringLiteral("openmpi")));
     widget.setViewMode(QStringLiteral("Raw"));
     QCOMPARE(widget.currentViewMode(), QStringLiteral("Raw"));
+
+    // 4. Verify packageStatusFilterCombo generous width (>= 145px) avoiding text truncation.
+    auto* statusCombo = widget.findChild<QComboBox*>(QStringLiteral("packageStatusFilterCombo"));
+    // Verify status filter combo box exists and has width >= 145px.
+    QVERIFY(statusCombo != nullptr && statusCombo->minimumWidth() >= 145);
+    // Verify 3 curated filter status options.
+    QCOMPARE(statusCombo->count(), 3);
+    // Verify each filter status option has a rendered status badge icon.
+    QVERIFY(!statusCombo->itemIcon(0).isNull() && !statusCombo->itemIcon(1).isNull() && !statusCombo->itemIcon(2).isNull());
 }
 
 /**

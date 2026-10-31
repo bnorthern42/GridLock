@@ -117,6 +117,11 @@ public:
      */
     void executePackageSearch(const QString& query = QString());
 
+    /**
+     * @brief Applies modern dark/light themed QSS to package filter combo boxes.
+     */
+    Q_INVOKABLE void reloadStyle();
+
 private:
     /**
      * @brief Re-renders m_packageTable and m_listBrowser applying the active status filter.
