@@ -35,8 +35,11 @@ public:
     /** @brief Returns the list of available QtAdvancedStylesheet theme names. */
     QStringList getAvailableThemes() const;
 
-    /** @brief Returns the 8 curated GridLock workstation theme identifiers (5 dark, 3 light). */
+    /** @brief Returns the 12 curated GridLock workstation theme identifiers (8 dark, 4 light). */
     QStringList availableThemeIds() const;
+
+    /** @brief Alias returning the 12 curated GridLock workstation theme identifiers. */
+    QStringList availableThemes() const { return availableThemeIds(); }
 
     /** @brief Returns the currently active theme identifier string. */
     QString activeThemeId() const { return m_activeThemeId; }

@@ -816,7 +816,16 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
 void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
     auto& tm = gridlock::core::ThemeManager::instance();
     const QStringList themeIds = tm.availableThemeIds();
-    QVERIFY2(themeIds.contains(QStringLiteral("daylight_light")) && themeIds.contains(QStringLiteral("solarized_light")) && themeIds.contains(QStringLiteral("catppuccin_latte")), "ThemeManager must include daylight_light, solarized_light, and catppuccin_latte");
+    // 1. Verify all 12 curated themes (8 dark, 4 light) including nord_dark, one_dark_pro, one_light, and dracula_dark.
+    for (const QString& reqId : {QStringLiteral("daylight_light"), QStringLiteral("solarized_light"), QStringLiteral("catppuccin_latte"), QStringLiteral("one_light"), QStringLiteral("nord_dark"), QStringLiteral("one_dark_pro"), QStringLiteral("dracula_dark")}) {
+        QVERIFY2(themeIds.contains(reqId), qPrintable(QStringLiteral("ThemeManager missing theme: ") + reqId));
+    }
+    QVERIFY2(themeIds.size() >= 12 && !tm.paletteForTheme(QStringLiteral("one_light")).isDark && tm.paletteForTheme(QStringLiteral("nord_dark")).isDark && tm.paletteForTheme(QStringLiteral("one_dark_pro")).isDark && tm.paletteForTheme(QStringLiteral("dracula_dark")).isDark, "ThemeManager must expose >= 12 themes with accurate isDark polarity");
+    // Verify QApplication::palette() roles synchronize when switching between one_light and nord_dark.
+    tm.applyTheme(QStringLiteral("one_light"));
+    QVERIFY(!tm.isDarkMode() && QApplication::palette().color(QPalette::Base) == QColor(QStringLiteral("#fafafa")) && QApplication::palette().color(QPalette::WindowText) == QColor(QStringLiteral("#383a42")) && QApplication::palette().color(QPalette::Highlight) == QColor(QStringLiteral("#4078f2")));
+    tm.applyTheme(QStringLiteral("nord_dark"));
+    QVERIFY(tm.isDarkMode() && QApplication::palette().color(QPalette::Base) == QColor(QStringLiteral("#2e3440")) && QApplication::palette().color(QPalette::WindowText) == QColor(QStringLiteral("#eceff4")) && QApplication::palette().color(QPalette::Highlight) == QColor(QStringLiteral("#88c0d0")));
     tm.applyTheme(QStringLiteral("solarized_light")); QVERIFY2(!tm.isDarkMode(), "Selecting solarized_light must set isDarkMode() == false");
     tm.applyTheme(QStringLiteral("catppuccin_latte")); QVERIFY2(!tm.isDarkMode(), "Selecting catppuccin_latte must set isDarkMode() == false");
 

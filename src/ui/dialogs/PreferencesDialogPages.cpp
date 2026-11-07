@@ -167,11 +167,11 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     : QWidget(parent) {
     auto* form = createStandardPageForm(this, tr("<b>Appearance & Typography</b>"));
 
-    // Curated workstation theme selector displaying human-readable titles (zero underscores).
+    // Curated workstation theme selector displaying human-readable titles (zero underscores) for all 12 themes.
     m_themeCombo = new QComboBox(this);
     m_themeCombo->setObjectName(QStringLiteral("themeSelectorCombo"));
     const QStringList themeIds =
-        gridlock::core::managers::ThemeManager::instance().availableThemeIds();
+        gridlock::core::managers::ThemeManager::instance().availableThemes();
     for (const QString& id : themeIds) {
         m_themeCombo->addItem(
             gridlock::core::managers::ThemeManager::themeDisplayName(id), id);
@@ -239,8 +239,7 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     connect(m_themeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
         if (idx < 0) return;
         const QString themeId = m_themeCombo->itemData(idx).toString();
-        const bool isDark = !(themeId.contains(QStringLiteral("light"), Qt::CaseInsensitive) ||
-                              themeId.contains(QStringLiteral("latte"), Qt::CaseInsensitive));
+        const bool isDark = gridlock::core::managers::ThemeManager::paletteForTheme(themeId).isDark;
         m_darkModeCheck->blockSignals(true);
         m_darkModeCheck->setChecked(isDark);
         m_darkModeCheck->blockSignals(false);
@@ -291,8 +290,7 @@ QString AppearanceSettingsPage::selectedTheme() const {
     return m_themeCombo->currentData().toString().isEmpty() ? m_themeCombo->currentText() : m_themeCombo->currentData().toString();
 }
 bool AppearanceSettingsPage::isDarkMode() const {
-    const QString id = selectedTheme().toLower();
-    return !(id.contains(QStringLiteral("light")) || id.contains(QStringLiteral("latte")));
+    return gridlock::core::managers::ThemeManager::paletteForTheme(selectedTheme()).isDark;
 }
 QString AppearanceSettingsPage::fileTreeStyle() const { return m_fileTreeStyleCombo->currentText(); }
 bool AppearanceSettingsPage::colorizeIcons() const { return m_colorizeIconsCheck->isChecked(); }

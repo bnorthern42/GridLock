@@ -1,8 +1,8 @@
 # GridLock Themes & Font Settings
 
-GridLock includes **8 built-in color themes** (5 dark and 3 light) for the editor, disassembly view, control-flow graph, and dock panels.
+GridLock includes **12 built-in color themes** (8 dark and 4 light) for the editor, disassembly view, control-flow graph, and dock panels.
 
-You can switch themes at any time in **`Edit -> Preferences (Ctrl+,) -> Appearance`**. The dialog shows a 5-color swatch preview (`Canvas`, `Header`, `Border`, `Accent`, `Text`) for the selected theme and updates the main window, source editor, disassembly/CFG/decompiler views, and dialogs immediately when applied.
+You can switch themes at any time in **`Edit -> Preferences (Ctrl+,) -> Appearance`**. The dialog shows a 5-color swatch preview (`Canvas`, `Header`, `Border`, `Accent`, `Text`) for the selected theme and updates the main window, source editor, disassembly/CFG/decompiler views, `QApplication::palette()`, and dialogs immediately when applied.
 
 ---
 
@@ -15,9 +15,13 @@ You can switch themes at any time in **`Edit -> Preferences (Ctrl+,) -> Appearan
 | **Tokyo Night** | `tokyo_night` | `#1a1b26` | `#24283b` | `#3b4261` | `#7aa2f7` | `#c0caf5` | Dark |
 | **Catppuccin Mocha** | `catppuccin_mocha` | `#1e1e2e` | `#181825` | `#313244` | `#89b4fa` | `#cdd6f4` | Dark |
 | **Gruvbox Industrial** | `gruvbox_dark` | `#1d2021` | `#282828` | `#3c3836` | `#fe8019` | `#ebdbb2` | Dark |
+| **Nord** | `nord_dark` | `#2e3440` | `#3b4252` | `#4c566a` | `#88c0d0` | `#eceff4` | Dark |
+| **One Dark Pro** | `one_dark_pro` | `#282c34` | `#21252b` | `#3e4451` | `#61afef` | `#abb2bf` | Dark |
+| **Dracula** | `dracula_dark` | `#282a36` | `#21222c` | `#44475a` | `#bd93f9` | `#f8f8f2` | Dark |
 | **Daylight Paper (Light)** | `daylight_light` | `#f5f6f8` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#1f2328` | Light |
 | **Solarized Warm (Light)** | `solarized_light` | `#fdf6e3` | `#eee8d5` | `#d3cbb7` | `#268bd2` | `#586e75` | Light |
 | **Catppuccin Latte (Light)** | `catppuccin_latte` | `#eff1f5` | `#e6e9ef` | `#ccd0da` | `#1e66f5` | `#4c4f69` | Light |
+| **One Light (Light)** | `one_light` | `#fafafa` | `#f0f0f1` | `#d3d4d8` | `#4078f2` | `#383a42` | Light |
 
 ---
 

@@ -595,53 +595,47 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
 }
 
 /**
- * @brief Synchronizes QApplication's base/text QPalette with the active dark or light mode.
+ * @brief Synchronizes QApplication's QPalette roles with the active ThemePalette tokens.
  *
- * Ensures custom-painted widgets and QTableWidget viewports querying `QPalette::Base`
- * or `QPalette::Text` receive high-contrast dark (`#16181d` / `#d7dae0`) or light
- * (`#ffffff` / `#1f2328`) colors immediately on mode switches.
+ * Ensures standard Qt widgets and custom-painted viewports querying `QPalette::Window`,
+ * `QPalette::Base`, `QPalette::AlternateBase`, `QPalette::Text`, `QPalette::WindowText`,
+ * `QPalette::Button`, `QPalette::ButtonText`, or `QPalette::Highlight` inherit the active theme's
+ * semantic palette tokens immediately on theme changes.
  *
- * @param isDark True for dark-slate palette; false for high-contrast light palette.
+ * @param tp Structured ThemePalette tokens for the active workstation theme.
  */
-static void applyApplicationPalette(bool isDark) {
-    if (!qApp) {
-        return;
-    }
+static void applyApplicationPalette(const ThemeManager::ThemePalette& tp) {
+    if (!qApp) return;
     QPalette pal = qApp->palette();
-    if (isDark) {
-        // Configure dark-slate base and light-slate text roles.
-        pal.setColor(QPalette::Window, QColor(0x16, 0x18, 0x1d));
-        pal.setColor(QPalette::WindowText, QColor(0xd7, 0xda, 0xe0));
-        pal.setColor(QPalette::Base, QColor(0x16, 0x18, 0x1d));
-        pal.setColor(QPalette::AlternateBase, QColor(0x18, 0x1b, 0x20));
-        pal.setColor(QPalette::Text, QColor(0xd7, 0xda, 0xe0));
-    } else {
-        // Configure pure white base and high-contrast charcoal text roles for Light Mode.
-        pal.setColor(QPalette::Window, QColor(0xf6, 0xf8, 0xfa));
-        pal.setColor(QPalette::WindowText, QColor(0x1f, 0x23, 0x28));
-        pal.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
-        pal.setColor(QPalette::AlternateBase, QColor(0xf6, 0xf8, 0xfa));
-        pal.setColor(QPalette::Text, QColor(0x1f, 0x23, 0x28));
-    }
-    // Preserve high-contrast white HighlightedText on #264f78 Highlight across all ColorGroups.
-    pal.setColor(QPalette::All, QPalette::Highlight, QColor(0x26, 0x4f, 0x78));
+    // Map semantic ThemePalette hex tokens to standard QPalette color roles across all ColorGroups.
+    const QColor canvasCol(tp.canvasHex);
+    const QColor headerCol(tp.headerHex);
+    const QColor textCol(tp.textHex);
+    const QColor accentCol(tp.accentHex);
+    pal.setColor(QPalette::Window, tp.isDark ? canvasCol : headerCol);
+    pal.setColor(QPalette::WindowText, textCol);
+    pal.setColor(QPalette::Base, canvasCol);
+    pal.setColor(QPalette::AlternateBase, headerCol);
+    pal.setColor(QPalette::Text, textCol);
+    pal.setColor(QPalette::Button, headerCol);
+    pal.setColor(QPalette::ButtonText, textCol);
+    // Preserve high-contrast white HighlightedText on theme accent Highlight across all ColorGroups.
+    pal.setColor(QPalette::All, QPalette::Highlight, accentCol);
     pal.setColor(QPalette::All, QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
     qApp->setPalette(pal);
 }
 
 /**
- * @brief Returns the 8 curated GridLock workstation theme identifiers (5 dark, 3 light).
+ * @brief Returns the 12 curated GridLock workstation theme identifiers (8 dark, 4 light).
  */
 QStringList ThemeManager::availableThemeIds() const {
     return {
-        QStringLiteral("gridlock_slate"),
-        QStringLiteral("dark_teal"),
-        QStringLiteral("tokyo_night"),
-        QStringLiteral("catppuccin_mocha"),
-        QStringLiteral("gruvbox_dark"),
-        QStringLiteral("daylight_light"),
-        QStringLiteral("solarized_light"),
-        QStringLiteral("catppuccin_latte")
+        QStringLiteral("gridlock_slate"), QStringLiteral("dark_teal"),
+        QStringLiteral("tokyo_night"),    QStringLiteral("catppuccin_mocha"),
+        QStringLiteral("gruvbox_dark"),   QStringLiteral("nord_dark"),
+        QStringLiteral("one_dark_pro"),   QStringLiteral("dracula_dark"),
+        QStringLiteral("daylight_light"), QStringLiteral("solarized_light"),
+        QStringLiteral("catppuccin_latte"), QStringLiteral("one_light")
     };
 }
 
@@ -650,9 +644,13 @@ QStringList ThemeManager::availableThemeIds() const {
  */
 QString ThemeManager::themeDisplayName(const QString& themeId) {
     const QString id = themeId.trimmed().toLower();
+    if (id.contains(QStringLiteral("one_light"))) return QStringLiteral("One Light (Light)");
     if (id.contains(QStringLiteral("solarized"))) return QStringLiteral("Solarized Warm (Light)");
     if (id.contains(QStringLiteral("latte"))) return QStringLiteral("Catppuccin Latte (Light)");
     if (id.contains(QStringLiteral("daylight")) || id.startsWith(QStringLiteral("light"))) return QStringLiteral("Daylight Paper (Light)");
+    if (id.contains(QStringLiteral("nord"))) return QStringLiteral("Nord");
+    if (id.contains(QStringLiteral("one_dark"))) return QStringLiteral("One Dark Pro");
+    if (id.contains(QStringLiteral("dracula"))) return QStringLiteral("Dracula");
     if (id.contains(QStringLiteral("tokyo"))) return QStringLiteral("Tokyo Night");
     if (id.contains(QStringLiteral("catppuccin"))) return QStringLiteral("Catppuccin Mocha");
     if (id.contains(QStringLiteral("gruvbox"))) return QStringLiteral("Gruvbox Industrial");
@@ -665,37 +663,41 @@ QString ThemeManager::themeDisplayName(const QString& themeId) {
  */
 QStringList ThemeManager::themeSwatchColors(const QString& themeId) {
     const QString id = themeId.trimmed().toLower();
+    if (id.contains(QStringLiteral("one_light"))) {
+        return {QStringLiteral("#fafafa"), QStringLiteral("#f0f0f1"), QStringLiteral("#d3d4d8"), QStringLiteral("#4078f2"), QStringLiteral("#383a42")};
+    }
     if (id.contains(QStringLiteral("solarized"))) {
-        return {QStringLiteral("#fdf6e3"), QStringLiteral("#eee8d5"), QStringLiteral("#d3cbb7"),
-                QStringLiteral("#268bd2"), QStringLiteral("#586e75")};
+        return {QStringLiteral("#fdf6e3"), QStringLiteral("#eee8d5"), QStringLiteral("#d3cbb7"), QStringLiteral("#268bd2"), QStringLiteral("#586e75")};
     }
     if (id.contains(QStringLiteral("latte"))) {
-        return {QStringLiteral("#eff1f5"), QStringLiteral("#e6e9ef"), QStringLiteral("#ccd0da"),
-                QStringLiteral("#1e66f5"), QStringLiteral("#4c4f69")};
+        return {QStringLiteral("#eff1f5"), QStringLiteral("#e6e9ef"), QStringLiteral("#ccd0da"), QStringLiteral("#1e66f5"), QStringLiteral("#4c4f69")};
     }
     if (id.contains(QStringLiteral("daylight")) || id.startsWith(QStringLiteral("light"))) {
-        return {QStringLiteral("#ffffff"), QStringLiteral("#eaeef2"), QStringLiteral("#d0d7de"),
-                QStringLiteral("#0969da"), QStringLiteral("#1f2328")};
+        return {QStringLiteral("#ffffff"), QStringLiteral("#eaeef2"), QStringLiteral("#d0d7de"), QStringLiteral("#0969da"), QStringLiteral("#1f2328")};
+    }
+    if (id.contains(QStringLiteral("nord"))) {
+        return {QStringLiteral("#2e3440"), QStringLiteral("#3b4252"), QStringLiteral("#4c566a"), QStringLiteral("#88c0d0"), QStringLiteral("#eceff4")};
+    }
+    if (id.contains(QStringLiteral("one_dark"))) {
+        return {QStringLiteral("#282c34"), QStringLiteral("#21252b"), QStringLiteral("#3e4451"), QStringLiteral("#61afef"), QStringLiteral("#abb2bf")};
+    }
+    if (id.contains(QStringLiteral("dracula"))) {
+        return {QStringLiteral("#282a36"), QStringLiteral("#21222c"), QStringLiteral("#44475a"), QStringLiteral("#bd93f9"), QStringLiteral("#f8f8f2")};
     }
     if (id.contains(QStringLiteral("tokyo"))) {
-        return {QStringLiteral("#1a1b26"), QStringLiteral("#24283b"), QStringLiteral("#2f3549"),
-                QStringLiteral("#7aa2f7"), QStringLiteral("#c0caf5")};
+        return {QStringLiteral("#1a1b26"), QStringLiteral("#24283b"), QStringLiteral("#2f3549"), QStringLiteral("#7aa2f7"), QStringLiteral("#c0caf5")};
     }
     if (id.contains(QStringLiteral("catppuccin"))) {
-        return {QStringLiteral("#1e1e2e"), QStringLiteral("#181825"), QStringLiteral("#313244"),
-                QStringLiteral("#89b4fa"), QStringLiteral("#cdd6f4")};
+        return {QStringLiteral("#1e1e2e"), QStringLiteral("#181825"), QStringLiteral("#313244"), QStringLiteral("#89b4fa"), QStringLiteral("#cdd6f4")};
     }
     if (id.contains(QStringLiteral("gruvbox"))) {
-        return {QStringLiteral("#1d2021"), QStringLiteral("#282828"), QStringLiteral("#3c3836"),
-                QStringLiteral("#fabd2f"), QStringLiteral("#ebdbb2")};
+        return {QStringLiteral("#1d2021"), QStringLiteral("#282828"), QStringLiteral("#3c3836"), QStringLiteral("#fabd2f"), QStringLiteral("#ebdbb2")};
     }
     if (id == QStringLiteral("obsidian_teal") || id.contains(QStringLiteral("teal"))) {
-        return {QStringLiteral("#11161a"), QStringLiteral("#172026"), QStringLiteral("#22303a"),
-                QStringLiteral("#00d2b4"), QStringLiteral("#d8e6eb")};
+        return {QStringLiteral("#11161a"), QStringLiteral("#172026"), QStringLiteral("#22303a"), QStringLiteral("#00d2b4"), QStringLiteral("#d8e6eb")};
     }
     // Default GridLock Slate / Baseline Dark
-    return {QStringLiteral("#16181d"), QStringLiteral("#21252b"), QStringLiteral("#282c34"),
-            QStringLiteral("#528bff"), QStringLiteral("#d7dae0")};
+    return {QStringLiteral("#16181d"), QStringLiteral("#21252b"), QStringLiteral("#282c34"), QStringLiteral("#528bff"), QStringLiteral("#d7dae0")};
 }
 
 /**
@@ -710,8 +712,7 @@ ThemeManager::ThemePalette ThemeManager::paletteForTheme(const QString& themeId)
         p.canvasHex = sw[0]; p.headerHex = sw[1]; p.borderHex = sw[2]; p.accentHex = sw[3]; p.textHex = sw[4];
     } else {
         p.canvasHex = QStringLiteral("#16181d"); p.headerHex = QStringLiteral("#21252b");
-        p.borderHex = QStringLiteral("#282c34"); p.accentHex = QStringLiteral("#528bff");
-        p.textHex = QStringLiteral("#d7dae0");
+        p.borderHex = QStringLiteral("#282c34"); p.accentHex = QStringLiteral("#528bff"); p.textHex = QStringLiteral("#d7dae0");
     }
     p.isDark = !isLight;
     return p;
@@ -736,8 +737,7 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
     // Apply curated dark or light theme color tokens when a specialized palette is selected.
     const QString id = themeId.trimmed().toLower();
     const QStringList sw = ThemeManager::themeSwatchColors(id);
-    if (isDark && sw.size() >= 5 && (id.contains(QStringLiteral("tokyo")) || id.contains(QStringLiteral("catppuccin")) ||
-                                     id.contains(QStringLiteral("gruvbox")) || id.contains(QStringLiteral("teal")))) {
+    if (isDark && sw.size() >= 5 && id != QStringLiteral("gridlock_slate")) {
         overlay.replace(QStringLiteral("#16181d"), sw[0], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#21252b"), sw[1], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#181a1f"), sw[1], Qt::CaseInsensitive);
@@ -745,7 +745,7 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
         overlay.replace(QStringLiteral("#2c313a"), sw[2], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#528bff"), sw[3], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#d7dae0"), sw[4], Qt::CaseInsensitive);
-    } else if (!isDark && sw.size() >= 5 && (id.contains(QStringLiteral("solarized")) || id.contains(QStringLiteral("latte")))) {
+    } else if (!isDark && sw.size() >= 5 && !id.contains(QStringLiteral("daylight"))) {
         overlay.replace(QStringLiteral("#ffffff"), sw[0], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#f6f8fa"), sw[0], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#eaeef2"), sw[1], Qt::CaseInsensitive);
@@ -815,7 +815,8 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
             s_acssCache.insert(cacheKey, baseAcss);
         }
     }
-    applyApplicationPalette(m_darkMode);
+    const ThemePalette activePal = paletteForTheme(m_activeThemeId);
+    applyApplicationPalette(activePal);
     m_currentStyleSheet = buildDynamicWorkstationQss(baseAcss, m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
     if (qApp) {
         const bool themeOrQssChanged = (qApp->property("gridlock_active_theme").toString() != m_activeThemeId) ||
@@ -827,7 +828,7 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
             if (qApp->styleSheet() != m_currentStyleSheet) {
                 qApp->setStyleSheet(m_currentStyleSheet);
             }
-            applyApplicationPalette(m_darkMode);
+            applyApplicationPalette(activePal);
             for (QWidget* w : QApplication::allWidgets()) {
                 if (w && w->metaObject()->indexOfMethod("reloadStyle()") >= 0) {
                     QMetaObject::invokeMethod(w, "reloadStyle", Qt::DirectConnection);
