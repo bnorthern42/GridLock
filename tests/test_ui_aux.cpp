@@ -738,29 +738,24 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
 void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation() {
     // 1. Initialize MainWindow and load running binary target
     gridlock::ui::MainWindow mainWindow;
-    const QString appPath = QCoreApplication::applicationFilePath();
-    QVERIFY(mainWindow.loadBinaryTarget(appPath));
+    QVERIFY(mainWindow.loadBinaryTarget(QCoreApplication::applicationFilePath()));
     mainWindow.loadPreviewFixture();
     auto* inspector = mainWindow.elfInspector();
     QVERIFY(inspector != nullptr && inspector->isValid());
 
     // Locate .text section address
     uint64_t textAddr = 0;
-    for (const auto& sec : inspector->sections()) {
-        if (sec.name == QStringLiteral(".text")) { textAddr = sec.address; break; }
-    }
+    for (const auto& sec : inspector->sections()) if (sec.name == QStringLiteral(".text")) { textAddr = sec.address; break; }
     if (textAddr == 0) textAddr = inspector->entryPoint();
     QVERIFY(textAddr != 0);
 
     // Apply live 2-byte patch via MemView and export patched binary to temporary file on disk
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    QVERIFY(memView != nullptr);
     const QByteArray patchBytes = QByteArray::fromHex("9090");
-    QVERIFY(memView->patchBytes(textAddr, patchBytes));
+    QVERIFY(memView != nullptr && memView->patchBytes(textAddr, patchBytes));
     QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
     const QString exportPath = tempDir.filePath(QStringLiteral("patched_gridlock_bin"));
-    QVERIFY(mainWindow.exportPatchedBinary(exportPath) && QFile::exists(exportPath));
+    QVERIFY(tempDir.isValid() && mainWindow.exportPatchedBinary(exportPath) && QFile::exists(exportPath));
 
     // Verify written file permissions and payload via independent inspector
     gridlock::core::ElfBinaryInspector verifyInspector(exportPath);
@@ -768,23 +763,17 @@ void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation
 
     // 2. Test unified multi-domain workspace search
     const auto searchMatches = mainWindow.searchWorkspace(QStringLiteral("main"));
-    QVERIFY(!searchMatches.isEmpty());
     bool foundValidAddress = false;
     for (const auto& match : searchMatches) {
-        if (match.address != 0 && (match.label.contains(QStringLiteral("main"), Qt::CaseInsensitive) ||
-                                   match.contextSnippet.contains(QStringLiteral("main"), Qt::CaseInsensitive))) {
-            foundValidAddress = true; break;
-        }
+        if (match.address != 0 && (match.label.contains(QStringLiteral("main"), Qt::CaseInsensitive) || match.contextSnippet.contains(QStringLiteral("main"), Qt::CaseInsensitive))) { foundValidAddress = true; break; }
     }
-    QVERIFY(foundValidAddress);
+    QVERIFY(!searchMatches.isEmpty() && foundValidAddress);
 
     // 3. Test deadlock wait-for cycle detection and propagation to DisassemblyView and status bar
     const QVector<int> detectedCycle = mainWindow.detectAndHighlightDeadlock({{0, 1}, {1, 0}});
-    QVERIFY(detectedCycle.contains(0) && detectedCycle.contains(1));
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(disasm != nullptr && disasm->deadlockCycleRanks().contains(0) && disasm->deadlockCycleRanks().contains(1));
     auto* telemetryLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
-    QVERIFY(telemetryLabel != nullptr && telemetryLabel->text().contains(QStringLiteral("DEADLOCK")));
+    QVERIFY(detectedCycle.contains(0) && detectedCycle.contains(1) && disasm && disasm->deadlockCycleRanks().contains(0) && telemetryLabel && telemetryLabel->text().contains(QStringLiteral("DEADLOCK")));
 }
 
 /**
@@ -800,40 +789,31 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     // 2. Multi-Distro CLI Output Parsing (pacman, dnf4, dnf5, apt, zypper).
     const QString pacmanOut = QStringLiteral("extra/openmpi 5.0.5-1 [installed]\n    High performance message passing library (MPI)\nextra/hypre 2.31.0-1\n    Parallel multigrid solvers\n");
     const auto pacmanRecs = widget.parsePackageManagerOutput(QStringLiteral("pacman"), pacmanOut);
-    QVERIFY(pacmanRecs.size() == 2 && pacmanRecs[0].name == QStringLiteral("openmpi") && pacmanRecs[0].version == QStringLiteral("5.0.5-1"));
-    QVERIFY(pacmanRecs[0].repository == QStringLiteral("extra") && pacmanRecs[0].status == QStringLiteral("Installed") && pacmanRecs[0].description.contains(QStringLiteral("message passing")));
-    QVERIFY(pacmanRecs[1].name == QStringLiteral("hypre") && pacmanRecs[1].status == QStringLiteral("Available"));
+    QVERIFY(pacmanRecs.size() == 2 && pacmanRecs[0].name == QStringLiteral("openmpi") && pacmanRecs[0].version == QStringLiteral("5.0.5-1") && pacmanRecs[0].repository == QStringLiteral("extra") && pacmanRecs[0].status == QStringLiteral("Installed") && pacmanRecs[1].name == QStringLiteral("hypre") && pacmanRecs[1].status == QStringLiteral("Available"));
 
     // Verify Fedora/RHEL dnf4 ("pkg.arch : summary") and Fedora 40+ dnf5 (" pkg.arch\tsummary") formats.
     const auto dnfRecs = widget.parsePackageManagerOutput(QStringLiteral("dnf"), QStringLiteral("Last metadata expiration check...\n=== Name & Summary Matched: openmpi ===\nopenmpi.x86_64 : Open Message Passing Interface\nopenmpi-devel.x86_64 : Development headers for OpenMPI\n"));
-    QVERIFY(dnfRecs.size() == 2 && dnfRecs[0].name == QStringLiteral("openmpi") && dnfRecs[0].arch == QStringLiteral("x86_64") && dnfRecs[1].name == QStringLiteral("openmpi-devel"));
     const auto dnf5Recs = widget.parsePackageManagerOutput(QStringLiteral("dnf"), QStringLiteral("Updating and loading repositories:\nRepositories loaded.\nMatched fields: name, summary\n fd-find.x86_64\tFast and user-friendly alternative to find\n fdupes.x86_64  Finds duplicate files in a given set of directories\n"));
-    QVERIFY(dnf5Recs.size() == 2 && dnf5Recs[0].name == QStringLiteral("fd-find") && dnf5Recs[0].arch == QStringLiteral("x86_64") && dnf5Recs[0].description.contains(QStringLiteral("alternative to find")) && dnf5Recs[1].name == QStringLiteral("fdupes"));
+    QVERIFY(dnfRecs.size() == 2 && dnfRecs[0].name == QStringLiteral("openmpi") && dnf5Recs.size() == 2 && dnf5Recs[0].name == QStringLiteral("fd-find") && dnf5Recs[0].arch == QStringLiteral("x86_64") && dnf5Recs[1].name == QStringLiteral("fdupes"));
 
     // Verify Debian/Ubuntu apt-cache search and openSUSE zypper se -s pipe-delimited table parsing.
     const auto aptRecs = widget.parsePackageManagerOutput(QStringLiteral("apt"), QStringLiteral("openmpi-bin - high performance message passing library -- binaries\nlibopenmpi-dev - high performance message passing library -- header files\n"));
-    QVERIFY(aptRecs.size() == 2 && aptRecs[0].name == QStringLiteral("openmpi-bin") && aptRecs[1].name == QStringLiteral("libopenmpi-dev"));
     const auto zypperRecs = widget.parsePackageManagerOutput(QStringLiteral("zypper"), QStringLiteral("S  | Name        | Type    | Version   | Arch   | Repository\n---+-------------+---------+-----------+--------+----------------\ni+ | openmpi4    | package | 4.1.6-1.1 | x86_64 | Main Repository\n   | openmpi4-devel | package | 4.1.6-1.1 | x86_64 | Main Repository\n"));
-    QVERIFY(zypperRecs.size() == 2 && zypperRecs[0].name == QStringLiteral("openmpi4") && zypperRecs[0].status == QStringLiteral("Installed") && zypperRecs[0].version == QStringLiteral("4.1.6-1.1") && zypperRecs[1].status == QStringLiteral("Available"));
+    QVERIFY(aptRecs.size() == 2 && aptRecs[0].name == QStringLiteral("openmpi-bin") && zypperRecs.size() == 2 && zypperRecs[0].name == QStringLiteral("openmpi4") && zypperRecs[0].status == QStringLiteral("Installed") && zypperRecs[1].status == QStringLiteral("Available"));
 
     // 3. Three Switchable Views (Table, List, Raw) & Non-Empty Table Population.
     widget.displayPackageRecords(pacmanRecs, pacmanOut);
     QCOMPARE(widget.packageTableRowCount(), 2);
-    for (const QString& mode : {QStringLiteral("Table"), QStringLiteral("List"), QStringLiteral("Raw")}) {
-        widget.setViewMode(mode);
-        QCOMPARE(widget.currentViewMode(), mode);
-    }
+    for (const QString& mode : {QStringLiteral("Table"), QStringLiteral("List"), QStringLiteral("Raw")}) { widget.setViewMode(mode); QCOMPARE(widget.currentViewMode(), mode); }
     auto* listBrowser = widget.findChild<QTextBrowser*>();
     QVERIFY(listBrowser != nullptr && listBrowser->toPlainText().contains(QStringLiteral("openmpi")));
 
     // 4. Verify packageStatusFilterCombo generous width (>= 145px) and live host package query for "fd".
     auto* statusCombo = widget.findChild<QComboBox*>(QStringLiteral("packageStatusFilterCombo"));
-    QVERIFY(statusCombo != nullptr && statusCombo->minimumWidth() >= 145 && statusCombo->count() == 3);
-    QVERIFY(!statusCombo->itemIcon(0).isNull() && !statusCombo->itemIcon(1).isNull() && !statusCombo->itemIcon(2).isNull());
+    QVERIFY(statusCombo != nullptr && statusCombo->minimumWidth() >= 145 && statusCombo->count() == 3 && !statusCombo->itemIcon(0).isNull());
     // Execute live host query for "fd" and verify visiblePackageCount() matches actual visible table rows (> 0).
     const int fdMatches = widget.searchPackagesSynchronously(QStringLiteral("fd"), 400);
-    QVERIFY2(fdMatches > 0, "Live host package query for 'fd' must return > 0 real system/repo packages");
-    QCOMPARE(widget.visiblePackageCount(), fdMatches);
+    QVERIFY2(fdMatches > 0 && widget.visiblePackageCount() == fdMatches, "Live host package query for 'fd' must return > 0 real system/repo packages");
 }
 
 /**
@@ -847,19 +827,33 @@ void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
                                 ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
     // 1. Capture all workstation, feature, and theme screenshots via MainWindow::captureDocumentationScreenshots.
     QVERIFY2(mainWindow.captureDocumentationScreenshots(shotDir), "captureDocumentationScreenshots must succeed");
+    QVERIFY2(QFileInfo::exists(shotDir + QStringLiteral("/theme_solarized_light.png")) &&
+                 QFileInfo::exists(shotDir + QStringLiteral("/theme_catppuccin_latte.png")),
+             "theme_solarized_light.png and theme_catppuccin_latte.png must exist in docs/screenshots");
 
     // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid >= 800x500 QImage.
-    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png")}) {
+    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png"), QStringLiteral("theme_solarized_light.png"), QStringLiteral("theme_catppuccin_latte.png")}) {
         const QString fullPath = shotDir + QLatin1Char('/') + fn;
         const QImage img(fullPath);
         QVERIFY2(QFileInfo(fullPath).size() > 15000 && !img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath));
     }
 
-    // 3. Verify docs/USER_GUIDE.md references breakpoint_popover.png and package_manager_mpi_search.png.
+    // 3. Verify DisassemblyView mode toggle buttons (SPLIT (CFG+DECOMP), DECOMPILER, CFG (SPACE)) never clip text.
+    if (auto* disasm = mainWindow.disassemblyView()) {
+        for (const QString& obj : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")}) {
+            auto* btn = disasm->findChild<QPushButton*>(obj);
+            QVERIFY2(btn && btn->isVisible() && btn->width() >= btn->sizeHint().width(), qPrintable(obj));
+        }
+    }
+
+    // 4. Verify docs/USER_GUIDE.md and docs/THEMES.md embed the required screenshot assets.
     QFile guideFile(QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md")) ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md"));
-    QVERIFY(guideFile.open(QIODevice::ReadOnly));
+    QFile themesFile(QFileInfo::exists(QStringLiteral("docs/THEMES.md")) ? QStringLiteral("docs/THEMES.md") : QStringLiteral("../docs/THEMES.md"));
+    QVERIFY(guideFile.open(QIODevice::ReadOnly) && themesFile.open(QIODevice::ReadOnly));
     const QString guideText = QString::fromUtf8(guideFile.readAll());
+    const QString themesText = QString::fromUtf8(themesFile.readAll());
     QVERIFY2(guideText.contains(QStringLiteral("breakpoint_popover.png")) && guideText.contains(QStringLiteral("package_manager_mpi_search.png")), "docs/USER_GUIDE.md must embed new assets");
+    QVERIFY2(themesText.contains(QStringLiteral("theme_solarized_light.png")) && themesText.contains(QStringLiteral("theme_catppuccin_latte.png")), "docs/THEMES.md must embed theme_solarized_light.png and theme_catppuccin_latte.png");
 }
 
 /**

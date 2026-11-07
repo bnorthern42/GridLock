@@ -79,7 +79,11 @@ Neutral light background with dark text and blue accents for bright rooms or scr
 ### 7. Solarized Warm (`solarized_light`)
 Warm cream background with muted slate text and blue accents based on Solarized Light.
 
+![Solarized Warm Light Theme](screenshots/theme_solarized_light.png)
+
 ---
 
 ### 8. Catppuccin Latte (`catppuccin_latte`)
 Soft light background with dark slate text and blue accents from the Catppuccin Latte palette.
+
+![Catppuccin Latte Light Theme](screenshots/theme_catppuccin_latte.png)

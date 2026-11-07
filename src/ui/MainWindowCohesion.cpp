@@ -786,16 +786,23 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
         return grab().save(dir.filePath(fn), "PNG", 88);
     };
 
-    // 1. Capture all 6 curated theme screenshots plus default workstation_overview & workspace_overview.
+    // 1. Capture all 8 curated theme screenshots plus default workstation_overview & workspace_overview.
+    setWorkspacePerspective(QStringLiteral("Code"));
     for (const auto& [presetId, fileName] : std::vector<std::pair<QString, QString>>{
              {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
              {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
              {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
              {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
              {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
+             {QStringLiteral("solarized_light"), QStringLiteral("theme_solarized_light.png")},
+             {QStringLiteral("catppuccin_latte"), QStringLiteral("theme_catppuccin_latte.png")},
              {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}}) {
         if (!isFresh(fileName)) { core::managers::ThemeManager::instance().applyTheme(presetId, false); propagateThemeToAllWidgets(); }
         if (!saveGrab(fileName)) return false;
+    }
+    if (core::managers::ThemeManager::instance().activeThemeId() != QStringLiteral("gridlock_slate")) {
+        core::managers::ThemeManager::instance().applyTheme(QStringLiteral("gridlock_slate"), false);
+        propagateThemeToAllWidgets();
     }
     // Save primary workstation & workspace overview assets from the active Gridlock Slate theme.
     if (!saveGrab(QStringLiteral("workstation_overview.png")) || !saveGrab(QStringLiteral("workspace_overview.png"))) return false;
