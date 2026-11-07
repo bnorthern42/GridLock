@@ -38,9 +38,20 @@ class MiSanitizer {
   };
 
   /**
-   * @brief Sanitizes @p payload, truncating oversized lines and rejecting excessive nesting.
+   * @brief Sanitizes @p payload, truncating oversized lines and rejecting excessive nesting,
+   *        embedded NUL bytes, shell metacharacters, and newline command-chaining injections.
+   * @param payload Input GDB/MI record, user watch expression, or binary path.
+   * @return SanitizationResult describing whether the payload was accepted, truncated, or dropped.
    */
   static SanitizationResult sanitize(std::string_view payload);
+
+  /**
+   * @brief Validates that a user watch expression or binary path is free of NUL bytes,
+   *        newlines, control characters, and shell metacharacters.
+   * @param input User-supplied expression or path string.
+   * @return True if safe to pass to GDB/MI or process arguments; false otherwise.
+   */
+  static bool isSafeUserInput(std::string_view input);
 };
 
 }  // namespace gridlock::core

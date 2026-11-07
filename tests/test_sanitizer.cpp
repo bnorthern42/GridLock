@@ -64,7 +64,8 @@ void TestSanitizer::testTruncation() {
 }
 
 /**
- * @brief Tests escaping of non-printable ASCII control characters.
+ * @brief Tests escaping of non-printable ASCII control characters and rejection of
+ *        embedded NUL bytes, shell metacharacters, and newline command injections.
  */
 void TestSanitizer::testControlCharacterEscaping() {
     std::string payload = "test\x01\x02\n\r\t";
@@ -75,6 +76,26 @@ void TestSanitizer::testControlCharacterEscaping() {
     // Assert \x01 and \x02 were converted to printable hex escape representations.
     std::string expected = "test\\x01\\x02\n\r\t";
     QCOMPARE(QString::fromStdString(result.sanitizedPayload), QString::fromStdString(expected));
+
+    // Verify embedded NUL bytes (\0) in watch expressions or paths are rejected.
+    const std::string nulInjection("watch_var\0-interpreter-exec console \"shell id\"", 46);
+    const auto nulResult = gridlock::core::MiSanitizer::sanitize(nulInjection);
+    QVERIFY(nulResult.dropped);
+
+    // Verify newline command-chaining injections (\n-interpreter-exec console ...) are rejected.
+    const std::string newlineInjection = "rank_buf[0]\n-interpreter-exec console \"shell uname -a\"";
+    const auto newlineResult = gridlock::core::MiSanitizer::sanitize(newlineInjection);
+    QVERIFY(newlineResult.dropped);
+
+    // Verify shell metacharacters in watch expressions and binary paths are rejected.
+    const auto semicolonResult = gridlock::core::MiSanitizer::sanitize("matrix[0]; rm -rf /");
+    QVERIFY(semicolonResult.dropped);
+
+    const auto subshellResult = gridlock::core::MiSanitizer::sanitize("/opt/mpi/bin/$(whoami)");
+    QVERIFY(subshellResult.dropped);
+
+    const auto backtickResult = gridlock::core::MiSanitizer::sanitize("/tmp/`id`/app");
+    QVERIFY(backtickResult.dropped);
 }
 
 QTEST_MAIN(TestSanitizer)

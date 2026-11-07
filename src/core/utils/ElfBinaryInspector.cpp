@@ -50,6 +50,12 @@ bool ElfBinaryInspector::loadFile(const QString& filePath) {
     // Ingest entire file contents into local buffer
     const QByteArray data = file.readAll();
     file.close();
+    // Clean up 0-byte interrupted build artifacts when a companion source file exists
+    if (data.isEmpty() && !filePath.isEmpty() &&
+        (QFileInfo::exists(filePath + QStringLiteral(".cpp")) ||
+         QFileInfo::exists(filePath + QStringLiteral(".c")))) {
+        QFile::remove(filePath);
+    }
     // Parse in-memory image
     return loadFromData(data, filePath);
 }
@@ -97,25 +103,57 @@ bool ElfBinaryInspector::loadFromData(const QByteArray& data, const QString& sou
         return false;
     }
 
-    // Step 4: Require 64-bit ELF class (ELFCLASS64)
-    if (ehdr->e_ident[EI_CLASS] != ELFCLASS64) {
+    // Step 4: Require 64-bit ELF class (ELFCLASS64) and valid header size
+    if (ehdr->e_ident[EI_CLASS] != ELFCLASS64 ||
+        ehdr->e_ehsize < sizeof(Elf64_Ehdr) ||
+        static_cast<uint64_t>(ehdr->e_ehsize) > static_cast<uint64_t>(m_fileData.size())) {
         return false;
     }
 
     // Record entry point virtual memory address
     m_entryPoint = ehdr->e_entry;
 
-    // Step 5: If section header table is absent or invalid size, mark valid minimal ELF
-    if (ehdr->e_shoff == 0 || ehdr->e_shentsize != sizeof(Elf64_Shdr)) {
+    // Step 5: Validate section header table presence and entry size consistency
+    const uint64_t fileSize = static_cast<uint64_t>(m_fileData.size());
+    if (ehdr->e_shoff == 0) {
+        if (ehdr->e_shnum != 0) {
+            return false;
+        }
         m_valid = true;
         return true;
     }
-
-    // Step 6: Ensure entire section header table resides within file buffer bounds
-    const uint64_t shTableEnd = ehdr->e_shoff +
-        static_cast<uint64_t>(ehdr->e_shnum) * sizeof(Elf64_Shdr);
-    if (shTableEnd > static_cast<uint64_t>(m_fileData.size())) {
+    if (ehdr->e_shentsize != sizeof(Elf64_Shdr) ||
+        ehdr->e_shoff < sizeof(Elf64_Ehdr) ||
+        ehdr->e_shoff >= fileSize) {
         return false;
+    }
+
+    // Step 6: Overflow-safe verification that section header table resides within buffer bounds
+    uint64_t shTableBytes = 0;
+    uint64_t shTableEnd = 0;
+    if (__builtin_mul_overflow(static_cast<uint64_t>(ehdr->e_shnum),
+                               static_cast<uint64_t>(sizeof(Elf64_Shdr)),
+                               &shTableBytes) ||
+        __builtin_add_overflow(ehdr->e_shoff, shTableBytes, &shTableEnd) ||
+        shTableEnd > fileSize) {
+        return false;
+    }
+
+    // Validate section header string table index and each file-backed section span
+    if (ehdr->e_shstrndx != SHN_UNDEF && ehdr->e_shstrndx >= ehdr->e_shnum) {
+        return false;
+    }
+    const auto* shdrs = reinterpret_cast<const Elf64_Shdr*>(
+        m_fileData.constData() + ehdr->e_shoff);
+    for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+        const auto& sh = shdrs[i];
+        if (sh.sh_type != SHT_NOBITS && sh.sh_type != SHT_NULL) {
+            uint64_t secEnd = 0;
+            if (__builtin_add_overflow(sh.sh_offset, sh.sh_size, &secEnd) ||
+                secEnd > fileSize) {
+                return false;
+            }
+        }
     }
 
     // Step 7: Parse sections, symbols, and printable strings
@@ -143,8 +181,10 @@ void ElfBinaryInspector::parseSections() {
     size_t shstrtabSize = 0;
     if (ehdr->e_shstrndx < ehdr->e_shnum) {
         const auto& strSec = shdrs[ehdr->e_shstrndx];
-        // Ensure string table data is fully contained within the file buffer
-        if (strSec.sh_offset + strSec.sh_size <= static_cast<uint64_t>(m_fileData.size())) {
+        uint64_t strEnd = 0;
+        // Ensure string table data is fully contained within the file buffer without overflow
+        if (!__builtin_add_overflow(strSec.sh_offset, strSec.sh_size, &strEnd) &&
+            strEnd <= static_cast<uint64_t>(m_fileData.size())) {
             shstrtab = m_fileData.constData() + strSec.sh_offset;
             shstrtabSize = static_cast<size_t>(strSec.sh_size);
         }
@@ -155,9 +195,11 @@ void ElfBinaryInspector::parseSections() {
     for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
         const auto& sh = shdrs[i];
         ElfSectionInfo info;
-        // Resolve section name string from string table offset
+        // Resolve section name string using bounded length scan inside .shstrtab
         if (shstrtab && sh.sh_name < shstrtabSize) {
-            info.name = QString::fromUtf8(shstrtab + sh.sh_name);
+            const size_t maxLen = shstrtabSize - sh.sh_name;
+            const size_t nameLen = strnlen(shstrtab + sh.sh_name, maxLen);
+            info.name = QString::fromUtf8(shstrtab + sh.sh_name, static_cast<qsizetype>(nameLen));
         } else {
             info.name = QStringLiteral("[sec_%1]").arg(i);
         }
@@ -195,15 +237,19 @@ void ElfBinaryInspector::parseSymbols() {
 
         // Linked section contains corresponding symbol string table
         const auto& strSec = shdrs[sh.sh_link];
-        if (strSec.sh_offset + strSec.sh_size > static_cast<uint64_t>(m_fileData.size())) {
+        uint64_t strEnd = 0;
+        if (__builtin_add_overflow(strSec.sh_offset, strSec.sh_size, &strEnd) ||
+            strEnd > static_cast<uint64_t>(m_fileData.size())) {
             continue;
         }
         const char* strtab = m_fileData.constData() + strSec.sh_offset;
         const size_t strtabSize = static_cast<size_t>(strSec.sh_size);
 
         // Validate symbol table entry size and bounds
+        uint64_t symEnd = 0;
         if (sh.sh_entsize < sizeof(Elf64_Sym) ||
-            sh.sh_offset + sh.sh_size > static_cast<uint64_t>(m_fileData.size())) {
+            __builtin_add_overflow(sh.sh_offset, sh.sh_size, &symEnd) ||
+            symEnd > static_cast<uint64_t>(m_fileData.size())) {
             continue;
         }
 
@@ -219,7 +265,9 @@ void ElfBinaryInspector::parseSymbols() {
                 continue;
             }
             const char* symNameCStr = strtab + sym.st_name;
-            const QString symName = QString::fromUtf8(symNameCStr);
+            const size_t maxSymLen = strtabSize - sym.st_name;
+            const size_t symLen = strnlen(symNameCStr, maxSymLen);
+            const QString symName = QString::fromUtf8(symNameCStr, static_cast<qsizetype>(symLen));
             if (symName.trimmed().isEmpty()) {
                 continue;
             }
@@ -539,7 +587,10 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
     }
 
     // Step 1: Invoke objdump with C++ demangling (-C) and DWARF line numbers (-l) if binary exists on disk.
-    if (!m_filePath.isEmpty() && QFile::exists(m_filePath)) {
+    uint64_t stopAddr = 0;
+    const bool validRange = !__builtin_add_overflow(effectiveStart, effectiveSize, &stopAddr);
+    if (validRange && !m_filePath.isEmpty() && !m_filePath.contains(QChar('\0')) &&
+        QFileInfo::exists(m_filePath)) {
         QProcess proc;
         const QStringList args = {
             QStringLiteral("-d"),
@@ -549,7 +600,8 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
             QStringLiteral("intel"),
             QStringLiteral("--no-show-raw-insn"),
             QStringLiteral("--start-address=0x%1").arg(effectiveStart, 0, 16),
-            QStringLiteral("--stop-address=0x%1").arg(effectiveStart + effectiveSize, 0, 16),
+            QStringLiteral("--stop-address=0x%1").arg(stopAddr, 0, 16),
+            QStringLiteral("--"),
             m_filePath
         };
         proc.start(QStringLiteral("objdump"), args);

@@ -8,13 +8,16 @@
 
 #include "test_stride_security.hpp"
 
+#include <limits>
 #include <string>
 
 #include <QTest>
 
 #include "../src/core/hpc/MemoryBoundsValidator.hpp"
+#include "../src/core/utils/ElfBinaryInspector.cpp"
 
 using namespace gridlock::hpc;
+using namespace gridlock::core;
 
 /**
  * @brief Tests validation of legitimate memory request within allocated boundaries.
@@ -46,6 +49,13 @@ void TestStrideSecurity::testOutOfBoundsStride() {
     bool result = MemoryBoundsValidator::validateBounds(baseAddress, totalAllocatedBytes, requestedOffset, requestedBytes, warning);
     QVERIFY(!result);
     QVERIFY(warning.find("Memory bounds violation") != std::string::npos);
+
+    // Reject single-read requests exceeding the maximum safe IPC cap (64 MiB).
+    const size_t hugeAlloc = 256ULL * 1024ULL * 1024ULL;
+    const size_t excessiveRead = 128ULL * 1024ULL * 1024ULL;
+    warning.clear();
+    QVERIFY(!MemoryBoundsValidator::validateBounds(baseAddress, hugeAlloc, 0, excessiveRead, warning));
+    QVERIFY(!warning.empty());
 }
 
 /**
@@ -82,7 +92,8 @@ void TestStrideSecurity::testSafeToRenderValid() {
 }
 
 /**
- * @brief Tests isSafeToRender rejection when requested stride exceeds allocation.
+ * @brief Tests isSafeToRender rejection when requested stride exceeds allocation,
+ *        or when negative/zero strides or unaligned/null base addresses are used.
  */
 void TestStrideSecurity::testSafeToRenderInvalid() {
     gridlock::VariableNode node;
@@ -96,6 +107,30 @@ void TestStrideSecurity::testSafeToRenderInvalid() {
     bool result = MemoryBoundsValidator::isSafeToRender(&node, requestedStride, renderCount, warning);
     QVERIFY(!result);
     QVERIFY(warning.find("Memory bounds violation") != std::string::npos);
+
+    // Reject zero stride.
+    warning.clear();
+    QVERIFY(!MemoryBoundsValidator::isSafeToRender(&node, 0, 10, warning));
+    QVERIFY(!warning.empty());
+
+    // Reject negative stride cast to size_t.
+    warning.clear();
+    const size_t negativeStride = static_cast<size_t>(static_cast<ptrdiff_t>(-8));
+    QVERIFY(!MemoryBoundsValidator::isSafeToRender(&node, negativeStride, 1, warning));
+    QVERIFY(!warning.empty());
+
+    // Reject null/low guard page base addresses (0x0 to 0xfff).
+    warning.clear();
+    QVERIFY(!MemoryBoundsValidator::validateBounds(0x0, 4096, 0, 64, warning));
+    warning.clear();
+    QVERIFY(!MemoryBoundsValidator::validateBounds(0xfff, 4096, 0, 64, warning));
+
+    // Reject unaligned base address for multi-byte stride rendering.
+    gridlock::VariableNode unalignedNode;
+    unalignedNode.memoryBaseAddress = 0x2003;
+    unalignedNode.memoryAllocatedBytes = 4096;
+    warning.clear();
+    QVERIFY(!MemoryBoundsValidator::isSafeToRender(&unalignedNode, 8, 4, warning));
 }
 
 /**
@@ -127,7 +162,8 @@ void TestStrideSecurity::testNullNode() {
 }
 
 /**
- * @brief Tests multiplication overflow when computing requestedStride * renderCount.
+ * @brief Tests multiplication overflow when computing count * stride * elementSize
+ *        and validates ElfBinaryInspector against truncated/corrupted ELF64 headers.
  */
 void TestStrideSecurity::testRenderCountOverflow() {
     gridlock::VariableNode node;
@@ -141,6 +177,49 @@ void TestStrideSecurity::testRenderCountOverflow() {
     bool result = MemoryBoundsValidator::isSafeToRender(&node, requestedStride, renderCount, warning);
     QVERIFY(!result);
     QVERIFY(warning.find("requested bytes calculation") != std::string::npos);
+
+    // Verify count * stride * elementSize wrap-around rejection with std::numeric_limits<size_t>::max().
+    gridlock::VariableNode typedNode;
+    typedNode.type = QStringLiteral("double");
+    typedNode.memoryBaseAddress = 0x4000;
+    typedNode.memoryAllocatedBytes = std::numeric_limits<size_t>::max();
+    const size_t wrapCount = (std::numeric_limits<size_t>::max() / sizeof(double)) + 1ULL;
+    warning.clear();
+    QVERIFY(!MemoryBoundsValidator::isSafeToRender(&typedNode, 1, wrapCount, warning));
+    QVERIFY(!warning.empty());
+
+    // Verify ElfBinaryInspector rejects truncated (< 64 bytes), bad magic, and corrupted section offsets.
+    ElfBinaryInspector inspector;
+    const QByteArray truncatedElf("\x7f""ELF\x02\x01\x01", 7);
+    QVERIFY(!inspector.loadFromData(truncatedElf) && !inspector.isValid());
+
+    QByteArray badMagicElf(sizeof(Elf64_Ehdr), '\0');
+    badMagicElf[0] = 0x7f;
+    badMagicElf[1] = 'B';
+    badMagicElf[2] = 'A';
+    badMagicElf[3] = 'D';
+    QVERIFY(!inspector.loadFromData(badMagicElf) && !inspector.isValid());
+
+    // Construct a 128-byte ELF64 image with a corrupted section header entry size / offset.
+    QByteArray bogusShdrElf(128, '\0');
+    auto* ehdr = reinterpret_cast<Elf64_Ehdr*>(bogusShdrElf.data());
+    ehdr->e_ident[EI_MAG0] = ELFMAG0;
+    ehdr->e_ident[EI_MAG1] = ELFMAG1;
+    ehdr->e_ident[EI_MAG2] = ELFMAG2;
+    ehdr->e_ident[EI_MAG3] = ELFMAG3;
+    ehdr->e_ident[EI_CLASS] = ELFCLASS64;
+    ehdr->e_ident[EI_DATA] = ELFDATA2LSB;
+    ehdr->e_ehsize = sizeof(Elf64_Ehdr);
+    ehdr->e_shoff = sizeof(Elf64_Ehdr);
+    ehdr->e_shentsize = 1; // Corrupted section header entry size
+    ehdr->e_shnum = 2;
+    QVERIFY(!inspector.loadFromData(bogusShdrElf) && !inspector.isValid());
+
+    // Construct an ELF64 header with section header offset wrapping uint64_t arithmetic.
+    ehdr->e_shentsize = sizeof(Elf64_Shdr);
+    ehdr->e_shoff = std::numeric_limits<uint64_t>::max() - 32ULL;
+    ehdr->e_shnum = 2;
+    QVERIFY(!inspector.loadFromData(bogusShdrElf) && !inspector.isValid());
 }
 
 /**
