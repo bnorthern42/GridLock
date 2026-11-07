@@ -263,6 +263,44 @@ void TestLspCoordinator::testLspHoverParsing() {
     };
     QVERIFY2(checkDiagnosticsAndHover(ClangdLspClient::instance()),
              "ClangdLspClient must support parsePublishDiagnostics, analyzeSourceDiagnostics, and requestHoverInfo");
+
+    // 5. Verify F12 Go-to-Definition, Shift+F12 Find References, & Shift+F6 AST Symbol Rename.
+    // Define an in-memory C++ source buffer with struct DeeplyNested, local variable `data`, and comment.
+    const QString navSource = QStringLiteral(
+        "struct DeeplyNested { int id; double val; };\n"
+        "int main() {\n"
+        "    // Comment mentioning data should not be corrupted by AST symbol rename.\n"
+        "    DeeplyNested data{1, 2.5};\n"
+        "    data.id += 10;\n"
+        "    return data.id;\n"
+        "}\n");
+    auto checkDefinitionRefsAndRename = [&](auto& client) -> bool {
+        if constexpr (requires {
+                          client.findDefinition(navSource, 5, 5, 2000);
+                          client.findReferences(navSource, 4, 18, 2000);
+                          client.renameSymbolInSource(navSource, 4, 18, QStringLiteral("rank_payload"), 2000);
+                      }) {
+            // 1. Resolve declaration of `data` used on line 5 (1-based) back to line 4.
+            const auto defLoc = client.findDefinition(navSource, 5, 5, 2000);
+            if (defLoc.line != 4 || defLoc.column < 4) return false;
+            // Also verify resolving declaration of `DeeplyNested` on line 4 back to line 1.
+            const auto typeDefLoc = client.findDefinition(navSource, 4, 6, 2000);
+            if (typeDefLoc.line != 1) return false;
+            // 2. Find all references to `data` across main() (lines 4, 5, and 6).
+            const auto refs = client.findReferences(navSource, 4, 18, 2000);
+            if (refs.size() < 3) return false;
+            // 3. Rename `data` to `rank_payload` and ensure code references update while comments stay intact.
+            const QString renamed = client.renameSymbolInSource(navSource, 4, 18, QStringLiteral("rank_payload"), 2000);
+            return renamed.contains(QStringLiteral("DeeplyNested rank_payload{1, 2.5};")) &&
+                   renamed.contains(QStringLiteral("rank_payload.id += 10;")) &&
+                   renamed.contains(QStringLiteral("return rank_payload.id;")) &&
+                   renamed.contains(QStringLiteral("// Comment mentioning data should not be corrupted"));
+        } else {
+            return false;
+        }
+    };
+    QVERIFY2(checkDefinitionRefsAndRename(ClangdLspClient::instance()),
+             "ClangdLspClient must support findDefinition, findReferences, and renameSymbolInSource");
 }
 
 QTEST_MAIN(TestLspCoordinator)

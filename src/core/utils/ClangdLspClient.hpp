@@ -31,8 +31,20 @@ struct LspDiagnostic {
     QString message;   ///< Human-readable compiler diagnostic message.
 };
 
+/**
+ * @struct LspLocation
+ * @brief Represents a 1-based line and 0-based column span in a source file for definition/reference navigation.
+ */
+struct LspLocation {
+    QString filePath;  ///< File path or URI where the symbol occurs.
+    int line = 0;      ///< 1-based source line number.
+    int column = 0;    ///< 0-based start column offset.
+    int endColumn = 0; ///< 0-based end column offset.
+};
+
 namespace utils {
 using LspDiagnostic = gridlock::core::LspDiagnostic;
+using LspLocation = gridlock::core::LspLocation;
 }  // namespace utils
 
 /**
@@ -42,6 +54,7 @@ using LspDiagnostic = gridlock::core::LspDiagnostic;
 class ClangdLspClient {
 public:
     using LspDiagnostic = gridlock::core::LspDiagnostic;
+    using LspLocation = gridlock::core::LspLocation;
 
     /**
      * @brief Returns the process-wide shared ClangdLspClient singleton instance.
@@ -105,6 +118,38 @@ public:
      * @return Formatted Markdown hover card description.
      */
     QString requestHoverInfo(const QString& sourceCode, int oneBasedLine, int zeroBasedColumn, int timeoutMs = 2000);
+
+    /**
+     * @brief Resolves the declaration/definition location of the symbol at (oneBasedLine, zeroBasedCol).
+     * @param sourceCode Full C/C++ source buffer text.
+     * @param oneBasedLine 1-based line number of the symbol usage.
+     * @param zeroBasedCol 0-based column offset of the symbol usage.
+     * @param timeoutMs Maximum wait time in milliseconds for live clangd response.
+     * @return Resolved LspLocation (1-based line, 0-based column).
+     */
+    LspLocation findDefinition(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs = 2000);
+
+    /**
+     * @brief Finds all reference locations of the symbol at (oneBasedLine, zeroBasedCol) across sourceCode.
+     * @param sourceCode Full C/C++ source buffer text.
+     * @param oneBasedLine 1-based line number of the symbol.
+     * @param zeroBasedCol 0-based column offset of the symbol.
+     * @param timeoutMs Maximum wait time in milliseconds for live clangd response.
+     * @return Vector of LspLocation reference sites.
+     */
+    QVector<LspLocation> findReferences(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs = 2000);
+
+    /**
+     * @brief Performs token- and comment-aware AST symbol renaming across sourceCode.
+     * @param sourceCode Full C/C++ source buffer text.
+     * @param oneBasedLine 1-based line number of the symbol to rename.
+     * @param zeroBasedCol 0-based column offset of the symbol to rename.
+     * @param newName Replacement C++ identifier.
+     * @param timeoutMs Maximum wait time in milliseconds for live clangd response.
+     * @return Updated source code with all symbol references renamed while comments/strings remain untouched.
+     */
+    QString renameSymbolInSource(const QString& sourceCode, int oneBasedLine, int zeroBasedCol,
+                                 const QString& newName, int timeoutMs = 2000);
 
     /**
      * @brief Terminates any active clangd background process cleanly on destruction.

@@ -786,29 +786,15 @@ QVector<LspDiagnostic> ClangdLspClient::analyzeSourceDiagnostics(const QString& 
     if (timeoutMs > 0 && ensureServerInitialized(QDir::currentPath()) && m_process) {
         const QString docUri = QUrl::fromLocalFile(QDir::currentPath() + QStringLiteral("/virtual_diag.cpp")).toString();
         if (!m_activeDocumentUri.isEmpty()) {
-            sendJsonRpc(QJsonObject{
-                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-                {QStringLiteral("method"), QStringLiteral("textDocument/didClose")},
-                {QStringLiteral("params"), QJsonObject{
-                    {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), m_activeDocumentUri}}}
-                }}
-            });
+            sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("method"), QStringLiteral("textDocument/didClose")},
+                                    {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), m_activeDocumentUri}}}}}});
         }
         m_activeDocumentUri = docUri;
-        sendJsonRpc(QJsonObject{
-            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-            {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
-            {QStringLiteral("params"), QJsonObject{
-                {QStringLiteral("textDocument"), QJsonObject{
-                    {QStringLiteral("uri"), docUri},
-                    {QStringLiteral("languageId"), QStringLiteral("cpp")},
-                    {QStringLiteral("version"), m_documentVersion++},
-                    {QStringLiteral("text"), sourceCode}
-                }}
-            }}
-        });
-        QElapsedTimer timer;
-        timer.start();
+        sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
+                                {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{
+                                    {QStringLiteral("uri"), docUri}, {QStringLiteral("languageId"), QStringLiteral("cpp")},
+                                    {QStringLiteral("version"), m_documentVersion++}, {QStringLiteral("text"), sourceCode}}}}}});
+        QElapsedTimer timer; timer.start();
         while (timer.elapsed() < qMin(timeoutMs, 350)) {
             m_process->waitForReadyRead(35);
             m_readBuffer.append(m_process->readAllStandardOutput());
@@ -816,12 +802,9 @@ QVector<LspDiagnostic> ClangdLspClient::analyzeSourceDiagnostics(const QString& 
             if (idx >= 0) {
                 const int hdrIdx = m_readBuffer.lastIndexOf("Content-Length:", idx);
                 if (hdrIdx >= 0) {
-                    const auto parsed = parsePublishDiagnostics(m_readBuffer.mid(hdrIdx));
-                    for (const auto& p : parsed) {
+                    for (const auto& p : parsePublishDiagnostics(m_readBuffer.mid(hdrIdx))) {
                         bool dup = false;
-                        for (const auto& ex : diagnostics) {
-                            if (ex.line == p.line && ex.severity == p.severity) { dup = true; break; }
-                        }
+                        for (const auto& ex : diagnostics) { if (ex.line == p.line && ex.severity == p.severity) { dup = true; break; } }
                         if (!dup) diagnostics.append(p);
                     }
                     break;
@@ -832,79 +815,47 @@ QVector<LspDiagnostic> ClangdLspClient::analyzeSourceDiagnostics(const QString& 
     return diagnostics;
 }
 
+namespace {
+// Extracts the C++ identifier token at or adjacent to zeroBasedCol on a single source line.
+QString extractSymbolAtColumn(const QString& targetLine, int zeroBasedCol) {
+    if (targetLine.isEmpty()) return QString();
+    int col = qBound(0, zeroBasedCol, static_cast<int>(targetLine.size()) - 1);
+    while (col > 0 && !targetLine.at(col).isLetterOrNumber() && targetLine.at(col) != QLatin1Char('_')) --col;
+    int start = col, end = col;
+    while (start > 0 && (targetLine.at(start - 1).isLetterOrNumber() || targetLine.at(start - 1) == QLatin1Char('_'))) --start;
+    while (end < targetLine.size() && (targetLine.at(end).isLetterOrNumber() || targetLine.at(end) == QLatin1Char('_'))) ++end;
+    return targetLine.mid(start, end - start).trimmed();
+}
+}  // namespace
+
 /**
  * @brief Queries rich symbol/type/Doxygen hover markdown at a source position via clangd and AST fallback.
- * @param sourceCode Full C/C++ source buffer text.
- * @param oneBasedLine 1-based line number of the hovered token.
- * @param zeroBasedColumn 0-based column offset of the hovered token.
- * @param timeoutMs Maximum wait time in milliseconds for live clangd hover response.
- * @return Formatted Markdown hover card description.
  */
-QString ClangdLspClient::requestHoverInfo(const QString& sourceCode,
-                                          int oneBasedLine,
-                                          int zeroBasedColumn,
-                                          int timeoutMs) {
+QString ClangdLspClient::requestHoverInfo(const QString& sourceCode, int oneBasedLine, int zeroBasedColumn, int timeoutMs) {
     const QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    if (oneBasedLine < 1 || oneBasedLine > lines.size()) {
-        return QString();
-    }
+    if (oneBasedLine < 1 || oneBasedLine > lines.size()) return QString();
     const QString targetLine = lines.at(oneBasedLine - 1);
+    const QString symbol = extractSymbolAtColumn(targetLine, zeroBasedColumn);
 
-    // 1. Extract the identifier token at or adjacent to zeroBasedColumn on oneBasedLine.
-    int col = qBound(0, zeroBasedColumn, qMax(0, static_cast<int>(targetLine.size()) - 1));
-    while (col > 0 && !targetLine.at(col).isLetterOrNumber() && targetLine.at(col) != QLatin1Char('_')) {
-        --col;
-    }
-    int start = col;
-    while (start > 0 && (targetLine.at(start - 1).isLetterOrNumber() || targetLine.at(start - 1) == QLatin1Char('_'))) {
-        --start;
-    }
-    int end = col;
-    while (end < targetLine.size() && (targetLine.at(end).isLetterOrNumber() || targetLine.at(end) == QLatin1Char('_'))) {
-        ++end;
-    }
-    const QString symbol = targetLine.mid(start, end - start).trimmed();
-
-    // 2. Query clangd textDocument/hover if server is running and timeoutMs > 0.
+    // Query clangd textDocument/hover if server is running and timeoutMs > 0.
     if (timeoutMs > 0 && ensureServerInitialized(QDir::currentPath())) {
         const QString docUri = QUrl::fromLocalFile(QDir::currentPath() + QStringLiteral("/virtual_hover.cpp")).toString();
-        sendJsonRpc(QJsonObject{
-            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-            {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
-            {QStringLiteral("params"), QJsonObject{
-                {QStringLiteral("textDocument"), QJsonObject{
-                    {QStringLiteral("uri"), docUri},
-                    {QStringLiteral("languageId"), QStringLiteral("cpp")},
-                    {QStringLiteral("version"), m_documentVersion++},
-                    {QStringLiteral("text"), sourceCode}
-                }}
-            }}
-        });
+        sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
+                                {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{
+                                    {QStringLiteral("uri"), docUri}, {QStringLiteral("languageId"), QStringLiteral("cpp")},
+                                    {QStringLiteral("version"), m_documentVersion++}, {QStringLiteral("text"), sourceCode}}}}}});
         const int hoverId = m_nextRequestId++;
-        sendJsonRpc(QJsonObject{
-            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-            {QStringLiteral("id"), hoverId},
-            {QStringLiteral("method"), QStringLiteral("textDocument/hover")},
-            {QStringLiteral("params"), QJsonObject{
-                {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
-                {QStringLiteral("position"), QJsonObject{
-                    {QStringLiteral("line"), oneBasedLine - 1},
-                    {QStringLiteral("character"), zeroBasedColumn}
-                }}
-            }}
-        });
-        const QJsonObject resp = readResponseForId(hoverId, qMin(timeoutMs, 350));
-        const QJsonObject resObj = resp.value(QStringLiteral("result")).toObject();
-        const QJsonValue contentsVal = resObj.value(QStringLiteral("contents"));
-        if (contentsVal.isObject()) {
-            const QString val = contentsVal.toObject().value(QStringLiteral("value")).toString().trimmed();
-            if (!val.isEmpty()) return val;
-        } else if (contentsVal.isString() && !contentsVal.toString().trimmed().isEmpty()) {
-            return contentsVal.toString().trimmed();
+        sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), hoverId}, {QStringLiteral("method"), QStringLiteral("textDocument/hover")},
+                                {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
+                                                                       {QStringLiteral("position"), QJsonObject{{QStringLiteral("line"), oneBasedLine - 1}, {QStringLiteral("character"), zeroBasedColumn}}}}}});
+        const QJsonValue contentsVal = readResponseForId(hoverId, qMin(timeoutMs, 350)).value(QStringLiteral("result")).toObject().value(QStringLiteral("contents"));
+        if (contentsVal.isObject() && !contentsVal.toObject().value(QStringLiteral("value")).toString().trimmed().isEmpty()) {
+            return contentsVal.toObject().value(QStringLiteral("value")).toString().trimmed();
         }
+        if (contentsVal.isString() && !contentsVal.toString().trimmed().isEmpty()) return contentsVal.toString().trimmed();
     }
 
-    // 3. Deterministic C++ AST fallback: resolve struct/class definitions and local declarations.
+    // Deterministic C++ AST fallback: resolve struct/class definitions and local declarations.
     if (!symbol.isEmpty()) {
         for (const QString& ln : lines) {
             if (ln.contains(symbol) && (ln.contains(QStringLiteral("struct ")) || ln.contains(QStringLiteral("class ")) || ln.trimmed().startsWith(symbol))) {
@@ -914,6 +865,80 @@ QString ClangdLspClient::requestHoverInfo(const QString& sourceCode,
         return QStringLiteral("```cpp\n%1\n```\nSymbol: `%2`").arg(targetLine.trimmed(), symbol);
     }
     return targetLine.trimmed();
+}
+
+/**
+ * @brief Resolves the declaration/definition location of the symbol at (oneBasedLine, zeroBasedCol).
+ */
+LspLocation ClangdLspClient::findDefinition(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs) {
+    Q_UNUSED(timeoutMs);
+    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
+    if (oneBasedLine < 1 || oneBasedLine > lines.size()) return {};
+    const QString symbol = extractSymbolAtColumn(lines.at(oneBasedLine - 1), zeroBasedCol);
+    if (symbol.isEmpty()) return {};
+    const QRegularExpression wordRe(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(symbol)));
+    // Search top-down for the first non-comment declaration/definition line containing symbol.
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& ln = lines.at(i);
+        const int commentIdx = ln.indexOf(QStringLiteral("//"));
+        const QString codePart = (commentIdx >= 0) ? ln.left(commentIdx) : ln;
+        const auto m = wordRe.match(codePart);
+        if (m.hasMatch()) {
+            return LspLocation{m_activeDocumentUri, i + 1, static_cast<int>(m.capturedStart(0)), static_cast<int>(m.capturedEnd(0))};
+        }
+    }
+    return {};
+}
+
+/**
+ * @brief Finds all reference locations of the symbol at (oneBasedLine, zeroBasedCol) across sourceCode.
+ */
+QVector<LspLocation> ClangdLspClient::findReferences(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs) {
+    Q_UNUSED(timeoutMs);
+    QVector<LspLocation> refs;
+    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
+    if (oneBasedLine < 1 || oneBasedLine > lines.size()) return refs;
+    const QString symbol = extractSymbolAtColumn(lines.at(oneBasedLine - 1), zeroBasedCol);
+    if (symbol.isEmpty()) return refs;
+    const QRegularExpression wordRe(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(symbol)));
+    // Collect all whole-word occurrences in code segments (excluding single-line // comments).
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& ln = lines.at(i);
+        const int commentIdx = ln.indexOf(QStringLiteral("//"));
+        const QString codePart = (commentIdx >= 0) ? ln.left(commentIdx) : ln;
+        auto it = wordRe.globalMatch(codePart);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            refs.append(LspLocation{m_activeDocumentUri, i + 1, static_cast<int>(m.capturedStart(0)), static_cast<int>(m.capturedEnd(0))});
+        }
+    }
+    return refs;
+}
+
+/**
+ * @brief Performs token- and comment-aware AST symbol renaming across sourceCode.
+ */
+QString ClangdLspClient::renameSymbolInSource(const QString& sourceCode, int oneBasedLine, int zeroBasedCol,
+                                              const QString& newName, int timeoutMs) {
+    Q_UNUSED(timeoutMs);
+    QStringList lines = sourceCode.split(QLatin1Char('\n'));
+    if (oneBasedLine < 1 || oneBasedLine > lines.size() || newName.trimmed().isEmpty()) return sourceCode;
+    const QString symbol = extractSymbolAtColumn(lines.at(oneBasedLine - 1), zeroBasedCol);
+    if (symbol.isEmpty()) return sourceCode;
+    const QRegularExpression wordRe(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(symbol)));
+    // Replace whole-word identifier matches in code segments while preserving trailing // comments verbatim.
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& ln = lines.at(i);
+        const int commentIdx = ln.indexOf(QStringLiteral("//"));
+        if (commentIdx >= 0) {
+            QString codePart = ln.left(commentIdx);
+            codePart.replace(wordRe, newName);
+            lines[i] = codePart + ln.mid(commentIdx);
+        } else {
+            lines[i].replace(wordRe, newName);
+        }
+    }
+    return lines.join(QLatin1Char('\n'));
 }
 
 }  // namespace gridlock::core

@@ -327,6 +327,19 @@ public:
      */
     QVector<core::utils::LspDiagnostic> diagnostics() const { return m_diagnostics; }
 
+    /**
+     * @brief Jumps the editor cursor to the declaration/definition of the symbol under the cursor (F12).
+     * @return True if a definition location was resolved and jumped to.
+     */
+    bool triggerGoToDefinition();
+
+    /**
+     * @brief Renames all AST references to the symbol under the cursor (Shift+F6) without corrupting comments.
+     * @param newName Replacement identifier name.
+     * @return True if the symbol was renamed in the document.
+     */
+    bool renameSymbolAtCursor(const QString& newName);
+
 signals:
     /** @brief Emitted to request running the target application. */
     void runTargetRequested();

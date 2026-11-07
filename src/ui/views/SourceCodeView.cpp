@@ -870,26 +870,17 @@ void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, i
     m_completionPopup->show();
 }
 
-/**
- * @brief Saves the current editor document to disk and clears its modified state.
- * @param filePath Target file path, or empty to overwrite currentFile().
- * @return True if successfully written; false otherwise.
- */
+/** @brief Saves the current editor document to disk and clears its modified state. */
 bool SourceCodeView::saveToFile(const QString& filePath) {
     const QString target = filePath.isEmpty() ? m_currentFilePath : filePath;
     if (target.isEmpty()) return false;
     QFile file(target);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
-    QTextStream(&file) << toPlainText();
-    file.close();
-    document()->setModified(false);
+    QTextStream(&file) << toPlainText(); file.close(); document()->setModified(false);
     return true;
 }
 
-/**
- * @brief Computes the enclosing C/C++ lexical scope breadcrumb at the current cursor line.
- * @return Breadcrumb string formatted as "filename > Class/Struct > function".
- */
+/** @brief Computes the enclosing C/C++ lexical scope breadcrumb ("filename > Class/Struct > function"). */
 QString SourceCodeView::currentScopeBreadcrumb() const {
     const QString fileLabel = m_currentFilePath.isEmpty() ? QStringLiteral("buffer.cpp") : QFileInfo(m_currentFilePath).fileName();
     const int targetBlock = textCursor().blockNumber();
@@ -910,12 +901,31 @@ QString SourceCodeView::currentScopeBreadcrumb() const {
     return parts.join(QStringLiteral(" > "));
 }
 
-/**
- * @brief Handles key press events for live LSP autocomplete navigation and invocation.
- * @param event Key event.
- */
+/** @brief Jumps the editor cursor to the declaration/definition of the symbol under the cursor (F12). */
+bool SourceCodeView::triggerGoToDefinition() {
+    const QTextCursor cur = textCursor();
+    const auto loc = core::ClangdLspClient::instance().findDefinition(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock());
+    if (loc.line <= 0) return false;
+    QTextBlock b = document()->findBlockByNumber(loc.line - 1);
+    if (!b.isValid()) return false;
+    QTextCursor dest(b); dest.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, qMax(0, loc.column));
+    setTextCursor(dest); ensureCursorVisible();
+    return true;
+}
+
+/** @brief Renames all AST references to the symbol under the cursor (Shift+F6) without corrupting comments. */
+bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
+    const QTextCursor cur = textCursor();
+    const QString updated = core::ClangdLspClient::instance().renameSymbolInSource(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock(), newName);
+    if (updated == toPlainText()) return false;
+    setPlainText(updated); document()->setModified(true);
+    return true;
+}
+
+/** @brief Handles key press events for live LSP autocomplete navigation, F12 Go-to-Definition, and invocation. */
 void SourceCodeView::keyPressEvent(QKeyEvent *event) {
     if (!event) return;
+    if (event->key() == Qt::Key_F12 && !(event->modifiers() & Qt::ShiftModifier)) { triggerGoToDefinition(); event->accept(); return; }
     if (m_completionPopup && m_completionPopup->isVisible()) {
         if (event->key() == Qt::Key_Down) { m_completionPopup->selectNext(); event->accept(); return; }
         if (event->key() == Qt::Key_Up) { m_completionPopup->selectPrevious(); event->accept(); return; }
@@ -923,17 +933,14 @@ void SourceCodeView::keyPressEvent(QKeyEvent *event) {
         if (event->key() == Qt::Key_Escape) { m_completionPopup->hide(); event->accept(); return; }
     }
     if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Space) {
-        QTextCursor cur = textCursor();
-        triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
-        event->accept();
-        return;
+        QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
+        event->accept(); return;
     }
     QPlainTextEdit::keyPressEvent(event);
     const QString txt = event->text();
     if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":") ||
         (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() && (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_')))) {
-        QTextCursor cur = textCursor();
-        triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
+        QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
     }
 }
 
