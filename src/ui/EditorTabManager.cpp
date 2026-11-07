@@ -13,7 +13,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMenu>
+#include <QResizeEvent>
 #include <QTabBar>
+#include <algorithm>
 
 namespace gridlock::ui {
 
@@ -30,6 +33,20 @@ EditorTabManager::EditorTabManager(QWidget* parent)
     setContentsMargins(0, 0, 0, 0);
     connect(this, &QTabWidget::tabCloseRequested, this,
             &EditorTabManager::onTabCloseRequested);
+
+    // Configure right-click context menu on the tab bar for split editor actions.
+    if (tabBar()) {
+        tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(tabBar(), &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+            QMenu menu(this);
+            menu.addAction(QStringLiteral("Split Editor Right"), this, [this]() { splitEditor(Qt::Horizontal); });
+            menu.addAction(QStringLiteral("Split Editor Down"), this, [this]() { splitEditor(Qt::Vertical); });
+            menu.addAction(QStringLiteral("Close Split"), this, &EditorTabManager::closeSplit);
+            menu.addSeparator();
+            menu.addAction(QStringLiteral("Switch Header/Source (F10)"), this, &EditorTabManager::switchHeaderSource);
+            menu.exec(tabBar()->mapToGlobal(pos));
+        });
+    }
 }
 
 /**
@@ -217,6 +234,99 @@ bool EditorTabManager::switchHeaderSource() {
         }
     }
     return false;
+}
+
+/**
+ * @brief Opens or reorients the secondary side-by-side split editor pane.
+ * @param orientation Horizontal (Split Right) or Vertical (Split Down) orientation.
+ */
+void EditorTabManager::splitEditor(Qt::Orientation orientation) {
+    // Lazily construct the internal QSplitter and secondary QTabWidget/SourceCodeView on first split.
+    if (!m_splitContainer) {
+        m_splitContainer = new QSplitter(orientation, this);
+        m_splitContainer->setObjectName(QStringLiteral("EditorInternalSplitter"));
+        m_splitContainer->setChildrenCollapsible(false);
+        m_secondaryTabWidget = new QTabWidget(m_splitContainer);
+        m_secondaryTabWidget->setDocumentMode(true);
+        m_secondaryTabWidget->setTabsClosable(true);
+        connect(m_secondaryTabWidget, &QTabWidget::tabCloseRequested, this, [this](int) { closeSplit(); });
+        m_secondaryEditorView = new SourceCodeView(m_secondaryTabWidget);
+        m_secondaryTabWidget->addTab(m_secondaryEditorView, QStringLiteral("split"));
+        m_splitContainer->addWidget(m_secondaryTabWidget);
+    }
+
+    // Update split orientation and latch active state.
+    m_splitOrientation = orientation;
+    m_splitContainer->setOrientation(orientation);
+    m_splitActive = true;
+
+    // Load companion header/source file if available, or clone active editor document.
+    if (auto* primaryView = currentSourceCodeView()) {
+        const QString activePath = primaryView->property("absolutePath").toString();
+        const QFileInfo fi(activePath);
+        QString targetPath = activePath;
+        QString targetCode = primaryView->toPlainText();
+        if (fi.exists()) {
+            const QString ext = fi.suffix().toLower();
+            const bool isHdr = (ext == QStringLiteral("hpp") || ext == QStringLiteral("h") || ext == QStringLiteral("hxx"));
+            const QStringList exts = isHdr ? QStringList{QStringLiteral("cpp"), QStringLiteral("c")}
+                                           : QStringList{QStringLiteral("hpp"), QStringLiteral("h")};
+            for (const QString& e : exts) {
+                const QString cand = fi.dir().filePath(fi.completeBaseName() + QLatin1Char('.') + e);
+                QFile cf(cand);
+                if (cf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    targetPath = cand;
+                    targetCode = QString::fromUtf8(cf.readAll());
+                    break;
+                }
+            }
+        }
+        m_secondaryEditorView->setSourceCode(targetCode);
+        m_secondaryEditorView->setCurrentFile(targetPath);
+        m_secondaryTabWidget->setTabText(0, QFileInfo(targetPath).fileName().isEmpty()
+                                                ? QStringLiteral("split")
+                                                : QFileInfo(targetPath).fileName());
+    }
+
+    updateSplitGeometry();
+    m_splitContainer->show();
+    m_splitContainer->raise();
+}
+
+/**
+ * @brief Collapses and hides the secondary split editor pane.
+ */
+void EditorTabManager::closeSplit() {
+    m_splitActive = false;
+    if (m_splitContainer) {
+        m_splitContainer->hide();
+    }
+}
+
+/**
+ * @brief Repositions the active split editor container when the tab widget resizes.
+ * @param event Qt resize event details.
+ */
+void EditorTabManager::resizeEvent(QResizeEvent* event) {
+    QTabWidget::resizeEvent(event);
+    if (m_splitActive) {
+        updateSplitGeometry();
+    }
+}
+
+/**
+ * @brief Updates the bounding geometry of the internal split editor container.
+ */
+void EditorTabManager::updateSplitGeometry() {
+    if (!m_splitContainer) return;
+    const int topOffset = (tabBar() && !tabBar()->isHidden()) ? tabBar()->height() : 28;
+    const int availW = std::max(100, width());
+    const int availH = std::max(60, height() - topOffset);
+    if (m_splitOrientation == Qt::Horizontal) {
+        m_splitContainer->setGeometry(availW / 2, topOffset, availW - (availW / 2), availH);
+    } else {
+        m_splitContainer->setGeometry(0, topOffset + (availH / 2), availW, availH - (availH / 2));
+    }
 }
 
 }  // namespace gridlock::ui

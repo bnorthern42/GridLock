@@ -11,6 +11,7 @@
 
 #include <QMap>
 #include <QPoint>
+#include <QSplitter>
 #include <QString>
 #include <QTabWidget>
 
@@ -85,6 +86,42 @@ public:
      */
     bool switchHeaderSource();
 
+    /**
+     * @brief Opens or reorients the secondary side-by-side split editor pane.
+     * @param orientation Horizontal (Split Right) or Vertical (Split Down) orientation.
+     */
+    void splitEditor(Qt::Orientation orientation);
+
+    /**
+     * @brief Collapses and hides the secondary split editor pane.
+     */
+    void closeSplit();
+
+    /**
+     * @brief Returns whether the secondary split editor pane is currently active.
+     * @return True when a horizontal or vertical split view is active.
+     */
+    bool isSplitActive() const { return m_splitActive; }
+
+    /**
+     * @brief Returns the active split orientation (Qt::Horizontal or Qt::Vertical).
+     * @return Current split orientation.
+     */
+    Qt::Orientation splitOrientation() const { return m_splitOrientation; }
+
+    /**
+     * @brief Returns the secondary SourceCodeView instance when a split is active.
+     * @return Pointer to the secondary SourceCodeView, or nullptr if unsplit.
+     */
+    SourceCodeView* secondaryEditorView() const { return m_splitActive ? m_secondaryEditorView : nullptr; }
+
+protected:
+    /**
+     * @brief Repositions the active split editor container when the tab widget resizes.
+     * @param event Qt resize event details.
+     */
+    void resizeEvent(QResizeEvent* event) override;
+
 signals:
     /// Emitted when a breakpoint toggle request is dispatched via location string.
     void toggleBreakpointRequested(const QString& location);
@@ -110,8 +147,23 @@ private slots:
     void onTabCloseRequested(int index);
 
 private:
+    /**
+     * @brief Updates the bounding geometry of the internal split editor container.
+     */
+    void updateSplitGeometry();
+
     /// Map of canonical absolute file system paths to active SourceCodeView pointers.
     QMap<QString, SourceCodeView*> m_openFiles;
+    /// Internal QSplitter hosting the on-demand secondary editor tab pane.
+    QSplitter* m_splitContainer = nullptr;
+    /// Secondary QTabWidget displayed inside the split pane.
+    QTabWidget* m_secondaryTabWidget = nullptr;
+    /// Secondary SourceCodeView instance for viewing companion header/source files.
+    SourceCodeView* m_secondaryEditorView = nullptr;
+    /// Whether the secondary split editor pane is currently active.
+    bool m_splitActive = false;
+    /// Active orientation of the split editor pane (Horizontal = Right, Vertical = Down).
+    Qt::Orientation m_splitOrientation = Qt::Horizontal;
 };
 
 }  // namespace gridlock::ui

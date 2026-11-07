@@ -783,9 +783,23 @@ void MainWindow::setupDocks() {
   for (QAction *action : menuBar()->actions()) {
     if (action->menu() && action->text() == "&View") { viewMenu = action->menu(); break; }
   }
-  // Expose one-click batch recovery action in View menu to redock all floating panels.
+  // Expose one-click batch recovery and split editor actions in the View menu.
   if (viewMenu) {
     viewMenu->addSeparator();
+    // Register Split Editor Right (horizontal side-by-side split pane).
+    viewMenu->addAction(QStringLiteral("Split Editor Right"), this, [this]() {
+      if (m_editorTabManager) m_editorTabManager->splitEditor(Qt::Horizontal);
+    });
+    // Register Split Editor Down (vertical stacked split pane).
+    viewMenu->addAction(QStringLiteral("Split Editor Down"), this, [this]() {
+      if (m_editorTabManager) m_editorTabManager->splitEditor(Qt::Vertical);
+    });
+    // Register Close Split to collapse the secondary split editor pane.
+    viewMenu->addAction(QStringLiteral("Close Split"), this, [this]() {
+      if (m_editorTabManager) m_editorTabManager->closeSplit();
+    });
+    viewMenu->addSeparator();
+    // Register Redock All Floating Panels action with Ctrl+Shift+R shortcut.
     auto* redockAct = viewMenu->addAction(QStringLiteral("Redock All Floating Panels"),
                                           this, &MainWindow::redockAllFloatingPanels);
     redockAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));

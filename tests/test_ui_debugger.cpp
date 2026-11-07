@@ -765,40 +765,29 @@ void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
  *        bleed-through) and clean rollback of newly right-clicked breakpoints when canceled.
  */
 void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly() {
-    gridlock::ui::SourceCodeView sourceCodeView;
-    QString sampleCode;
+    // Configure sample 30-line source code buffer to test gutter context menu and breakpoint rollback.
+    gridlock::ui::SourceCodeView sourceCodeView; QString sampleCode;
     for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int rank_val_%1 = %1;\n").arg(i);
-    sourceCodeView.setSourceCode(sampleCode);
-    sourceCodeView.resize(720, 560);
-    sourceCodeView.show();
-    QApplication::processEvents();
+    sourceCodeView.setSourceCode(sampleCode); sourceCodeView.resize(720, 560); sourceCodeView.show(); QApplication::processEvents();
 
     // 1. Locate LineNumberArea child widget and verify QContextMenuEvent is accepted without bubbling.
     QWidget* gutterWidget = nullptr;
     for (QWidget* w : sourceCodeView.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
-        if (w != sourceCodeView.viewport() && w->width() == sourceCodeView.lineNumberAreaWidth()) {
-            gutterWidget = w;
-            break;
-        }
+        if (w != sourceCodeView.viewport() && w->width() == sourceCodeView.lineNumberAreaWidth()) { gutterWidget = w; break; }
     }
     QVERIFY(gutterWidget != nullptr);
     QContextMenuEvent gutterMenuEv(QContextMenuEvent::Mouse, QPoint(10, 25), sourceCodeView.mapToGlobal(QPoint(10, 25)));
-    gutterMenuEv.ignore();
-    // Dispatch gutter context menu event.
-    QApplication::sendEvent(gutterWidget, &gutterMenuEv);
-    QCOMPARE(gutterMenuEv.isAccepted(), true);
+    gutterMenuEv.ignore(); QApplication::sendEvent(gutterWidget, &gutterMenuEv); QCOMPARE(gutterMenuEv.isAccepted(), true);
     // Verify context menu suppression within gutter boundaries.
     QCOMPARE(sourceCodeView.shouldOpenEditorContextMenuAt(QPoint(10, 25)), false); QCOMPARE(sourceCodeView.shouldOpenEditorContextMenuAt(QPoint(120, 25)), true);
 
     // 2. Canceling a newly right-clicked gutter breakpoint restores unmarked state on line 18.
     sourceCodeView.toggleBreakpoint(18);
-    sourceCodeView.handleBreakpointPopoverResult(18, false, false, false, QString(), QStringLiteral("All"));
-    QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
+    sourceCodeView.handleBreakpointPopoverResult(18, false, false, false, QString(), QStringLiteral("All")); QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
     // Accept conditional breakpoint and remove on second accept.
     sourceCodeView.handleBreakpointPopoverResult(18, false, true, true, QStringLiteral("rank == 0"), QStringLiteral("Rank"));
     QCOMPARE(sourceCodeView.gutterMarkerStateForLine(18), QStringLiteral("ConditionalBreakpoint"));
-    sourceCodeView.handleBreakpointPopoverResult(18, true, true, false, QString(), QStringLiteral("All"));
-    QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
+    sourceCodeView.handleBreakpointPopoverResult(18, true, true, false, QString(), QStringLiteral("All")); QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
 }
 
 namespace {
@@ -837,22 +826,19 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
 
     // 1. Verify LSP JSON-RPC Content-Length framing and virtual document splicing at line 18.
     int zeroLine = -1, zeroCol = -1;
-    const QString spliced = gridlock::core::ClangdLspClient::buildVirtualCompletionDocument(
-        inspectionSource, 18, QStringLiteral("data[i]."), &zeroLine, &zeroCol);
+    const QString spliced = gridlock::core::ClangdLspClient::buildVirtualCompletionDocument(inspectionSource, 18, QStringLiteral("data[i]."), &zeroLine, &zeroCol);
     const QStringList splicedLines = spliced.split(QLatin1Char('\n'));
     QVERIFY(zeroLine == 17 && zeroCol >= 8 && zeroLine < splicedLines.size() && splicedLines.at(zeroLine).left(zeroCol).endsWith(QStringLiteral("data[i].")));
 
     // 2. Verify member completion on `data[i].` and nested `data[i].coords.` in ConditionalBreakpointDialog.
-    gridlock::ui::ConditionalBreakpointDialog dialog;
-    dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
+    gridlock::ui::ConditionalBreakpointDialog dialog; dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
     const QStringList items1 = dialog.completionsForExpression(QStringLiteral("data[i]."));
     const QStringList items2 = dialog.completionsForExpression(QStringLiteral("data[i].coords."));
     QVERIFY(items1.contains(QStringLiteral("id")) && items1.contains(QStringLiteral("values")) && items1.contains(QStringLiteral("coords")));
     QVERIFY(items2.contains(QStringLiteral("x")) && items2.contains(QStringLiteral("y")) && items2.contains(QStringLiteral("z")));
 
     // 3. Verify applying completion item "coords" to "data[i]." and std::vector completion on `send_buf.`.
-    dialog.applyQuickPreset(QStringLiteral("data[i]."));
-    dialog.applyCompletionItem(QStringLiteral("coords"));
+    dialog.applyQuickPreset(QStringLiteral("data[i].")); dialog.applyCompletionItem(QStringLiteral("coords"));
     QCOMPARE(dialog.getCondition(), QStringLiteral("data[i].coords"));
     dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34);
     const QString joined3 = dialog.completionsForExpression(QStringLiteral("send_buf.")).join(QLatin1Char('|'));
@@ -862,7 +848,7 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
 /**
  * @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained
  *        breakpoint popover suffix insertion, theme persistence, dirty tab indicators (`●`),
- *        `saveAllModifiedTabs()`, `switchHeaderSource()`, and scope breadcrumbs (`File > Scope`).
+ *        `saveAllModifiedTabs()`, `switchHeaderSource()`, scope breadcrumbs, and split editors.
  */
 void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence() {
     // Load the tutorial inspection demo source code for editor and completion verification.
@@ -872,8 +858,7 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
 
     // 1. SourceCodeView must be editable by default (isReadOnly() == false) & support live completions.
     // Verify that both basic and detailed ClangdLspClient completion endpoints return struct fields.
-    gridlock::ui::SourceCodeView srcView;
-    QVERIFY2(!srcView.isReadOnly(), "SourceCodeView must be editable (isReadOnly() == false)");
+    gridlock::ui::SourceCodeView srcView; QVERIFY2(!srcView.isReadOnly(), "SourceCodeView must be editable (isReadOnly() == false)");
     srcView.setSourceCode(inspectionSource);
     verifyCompletions(callEditorCompletionsAtLine(&srcView, 18, QStringLiteral("data[i]."), 0));
     callTriggerCompletionPopup(&srcView, QStringLiteral("data[i]."), 18, 0);
@@ -881,16 +866,13 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
 
     // 2. Modern Breakpoint Popover Chained Member Insertion (data[i]. -> data[i].coords -> data[i].coords.x).
     // Verify that suffix completion preserves the boolean prefix expression ("i == 0 && ").
-    gridlock::ui::ConditionalBreakpointDialog dialog;
-    dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
-    dialog.applyQuickPreset(QStringLiteral("i == 0 && data[i]."));
-    dialog.applyCompletionItem(QStringLiteral("coords"));
+    gridlock::ui::ConditionalBreakpointDialog dialog; dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
+    dialog.applyQuickPreset(QStringLiteral("i == 0 && data[i].")); dialog.applyCompletionItem(QStringLiteral("coords"));
     QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords"));
     dialog.applyQuickPreset(dialog.getCondition() + QStringLiteral("."));
     const QStringList subItems = dialog.completionsForExpression(dialog.getCondition());
     QVERIFY(subItems.contains(QStringLiteral("x")) && subItems.contains(QStringLiteral("y")) && subItems.contains(QStringLiteral("z")));
-    dialog.applyCompletionItem(QStringLiteral("x"));
-    QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords.x"));
+    dialog.applyCompletionItem(QStringLiteral("x")); QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords.x"));
 
     // 3. Theme Persistence Across App Restart (savePersistedTheme / loadPersistedTheme).
     // Verify that saving tokyo_night persists across transient switches to gridlock_slate.
@@ -928,4 +910,19 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     const QString bc = breadcrumb(tabView);
     QVERIFY2(bc.contains(QStringLiteral("inspection_demo.cpp")) && (bc.contains(QStringLiteral("main")) || bc.contains(QStringLiteral("DeeplyNested"))), qPrintable(bc));
     QVERIFY2(switchHdr(tabManager) && tabManager.tabText(tabManager.currentIndex()).contains(QStringLiteral("inspection_demo.hpp")), "switchHeaderSource() must switch to inspection_demo.hpp");
+
+    // 5. Horizontal and Vertical Side-by-Side Split Editors (`splitEditor`, `closeSplit`, `secondaryEditorView`).
+    // Verify initial unsplit state, horizontal/vertical split orientation toggling, and split collapse.
+    auto checkSplits = [](auto& m) -> bool {
+        if constexpr (requires { m.isSplitActive(); m.splitEditor(Qt::Horizontal); m.splitOrientation(); m.secondaryEditorView(); m.closeSplit(); }) {
+            if (m.isSplitActive()) return false;
+            m.splitEditor(Qt::Horizontal);
+            if (!m.isSplitActive() || m.splitOrientation() != Qt::Horizontal || m.secondaryEditorView() == nullptr) return false;
+            m.splitEditor(Qt::Vertical);
+            if (!m.isSplitActive() || m.splitOrientation() != Qt::Vertical) return false;
+            m.closeSplit();
+            return !m.isSplitActive();
+        } else { return false; }
+    };
+    QVERIFY2(checkSplits(tabManager), "EditorTabManager must support horizontal/vertical splitEditor() and closeSplit()");
 }
