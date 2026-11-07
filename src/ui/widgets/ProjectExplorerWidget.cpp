@@ -9,14 +9,19 @@
 #include "ProjectExplorerWidget.hpp"
 #include <QAbstractItemView>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
+#include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
 #include <QSettings>
+#include <QShortcut>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
@@ -81,14 +86,6 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_stringsModeBtn->setChecked(false);
   m_stringsModeBtn->setFixedHeight(20);
 
-  modeBar->setStyleSheet(
-      "QWidget#projectModeBar { background: #21252b; border-bottom: 1px solid #2c313a; }"
-      "QPushButton { background: #252932; color: #abb2bf; border: 1px solid #323844; "
-      "border-radius: 2px; padding: 1px 6px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 10px; font-weight: 600; min-height: 18px; max-height: 20px; }"
-      "QPushButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
-      "QPushButton:checked { background: #2c3444; color: #ffffff; border: 1px solid #528bff; }");
-
   modeLayout->addWidget(m_filesModeBtn, 1);
   modeLayout->addWidget(m_symbolsModeBtn, 1);
   modeLayout->addWidget(m_stringsModeBtn, 1);
@@ -129,11 +126,11 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_treeView->header()->setVisible(true);
   m_treeView->header()->setMinimumSectionSize(48);
   m_treeView->header()->setStretchLastSection(true);
+  m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
 
   // Initialize Qt standard file system model for directory traversal
   m_fileSystemModel = new QFileSystemModel(this);
-  m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs |
-                               QDir::Files);
+  m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
   m_fileSystemModel->setRootPath(QDir::currentPath());
 
   // Attach high-DPI theme-aware icon provider to model
@@ -215,10 +212,6 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_stringFilterEdit->setObjectName("stringFilterEdit");
   m_stringFilterEdit->setPlaceholderText("Filter strings...");
   m_stringFilterEdit->setFixedHeight(22);
-  m_stringFilterEdit->setStyleSheet(
-      "background: #141619; color: #d4d7dc; border: 1px solid #333842; "
-      "border-radius: 2px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 10px;");
   strFilterLayout->addWidget(m_stringFilterEdit);
   stringsLayout->addWidget(strFilterBar);
 
@@ -227,9 +220,6 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_stringsTable->setObjectName("stringsTable");
   m_stringsTable->setFrameShape(QFrame::NoFrame);
   m_stringsTable->setAlternatingRowColors(true);
-  m_stringsTable->setStyleSheet(
-      "background: #181a1f; border: none; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 11px;");
   m_stringsTable->setHorizontalHeaderLabels({"ADDRESS", "SECTION", "STRING"});
   m_stringsTable->verticalHeader()->setVisible(false);
   m_stringsTable->verticalHeader()->setDefaultSectionSize(20);
@@ -266,63 +256,48 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   populateStringsTable();
 
   // Mode switcher button slots
-  connect(m_filesModeBtn, &QPushButton::clicked, this, [this]() {
-    setSymbolsMode(false);
-  });
-  connect(m_symbolsModeBtn, &QPushButton::clicked, this, [this]() {
-    setSymbolsMode(true);
-  });
-  connect(m_stringsModeBtn, &QPushButton::clicked, this, [this]() {
-    setStringsMode(true);
-  });
-  connect(m_symbolFilterEdit, &QLineEdit::textChanged, this,
-          &ProjectExplorerWidget::filterSymbols);
-  connect(m_stringFilterEdit, &QLineEdit::textChanged, this,
-          &ProjectExplorerWidget::filterStrings);
+  connect(m_filesModeBtn, &QPushButton::clicked, this, [this]() { setSymbolsMode(false); });
+  connect(m_symbolsModeBtn, &QPushButton::clicked, this, [this]() { setSymbolsMode(true); });
+  connect(m_stringsModeBtn, &QPushButton::clicked, this, [this]() { setStringsMode(true); });
+  connect(m_symbolFilterEdit, &QLineEdit::textChanged, this, &ProjectExplorerWidget::filterSymbols);
+  connect(m_stringFilterEdit, &QLineEdit::textChanged, this, &ProjectExplorerWidget::filterStrings);
   connect(m_symbolsTable, &QTableWidget::cellDoubleClicked, this,
           [this](int row, int /*col*/) {
-            if (auto *symItem = m_symbolsTable->item(row, 0)) {
-              activateSymbol(symItem->text());
-            }
+            if (auto *symItem = m_symbolsTable->item(row, 0)) activateSymbol(symItem->text());
           });
   connect(m_symbolsTable, &QTableWidget::cellActivated, this,
           [this](int row, int /*col*/) {
-            if (auto *symItem = m_symbolsTable->item(row, 0)) {
-              activateSymbol(symItem->text());
-            }
+            if (auto *symItem = m_symbolsTable->item(row, 0)) activateSymbol(symItem->text());
           });
   connect(m_stringsTable, &QTableWidget::cellDoubleClicked, this,
           [this](int row, int /*col*/) {
-            if (auto *strItem = m_stringsTable->item(row, 2)) {
-              activateString(strItem->text());
-            }
+            if (auto *strItem = m_stringsTable->item(row, 2)) activateString(strItem->text());
           });
   connect(m_stringsTable, &QTableWidget::cellActivated, this,
           [this](int row, int /*col*/) {
-            if (auto *strItem = m_stringsTable->item(row, 2)) {
-              activateString(strItem->text());
-            }
+            if (auto *strItem = m_stringsTable->item(row, 2)) activateString(strItem->text());
           });
 
-  connect(m_openFolderBtn, &QPushButton::clicked, this,
-          &ProjectExplorerWidget::onOpenFolder);
-  connect(m_collapseAllBtn, &QPushButton::clicked, m_treeView,
-          &QTreeView::collapseAll);
-  connect(m_treeView, &QTreeView::doubleClicked, this,
-          &ProjectExplorerWidget::onDoubleClicked);
+  connect(m_openFolderBtn, &QPushButton::clicked, this, &ProjectExplorerWidget::onOpenFolder);
+  connect(m_collapseAllBtn, &QPushButton::clicked, m_treeView, &QTreeView::collapseAll);
+  connect(m_treeView, &QTreeView::doubleClicked, this, &ProjectExplorerWidget::onDoubleClicked);
+  connect(m_treeView, &QTreeView::customContextMenuRequested, this, &ProjectExplorerWidget::onTreeCustomContextMenu);
+
+  // Wire F2 rename shortcut on the FILES tree view
+  auto *renameShortcut = new QShortcut(QKeySequence(Qt::Key_F2), m_treeView);
+  connect(renameShortcut, &QShortcut::activated, this, [this]() {
+    const QModelIndex idx = m_treeView->currentIndex();
+    if (!idx.isValid() || !m_fileSystemModel) return;
+    const QFileInfo fi = m_fileSystemModel->fileInfo(idx);
+    bool ok = false;
+    const QString newName = QInputDialog::getText(this, tr("Rename Entry"), tr("New name:"), QLineEdit::Normal, fi.fileName(), &ok);
+    if (ok && !newName.trimmed().isEmpty()) renameEntry(fi.absoluteFilePath(), newName.trimmed());
+  });
 
   this->setObjectName("ProjectExplorerWidget");
-
   this->setStyleSheet(
-      "#ProjectExplorerWidget::close-button, #ProjectExplorerWidget::float-button {"
-      "    icon-size: 14px;"
-      "    width: 20px;"
-      "    height: 20px;"
-      "}"
-      "#ProjectExplorerWidget::close-button:hover, #ProjectExplorerWidget::float-button:hover {"
-      "    background: rgba(255, 255, 255, 0.1);"
-      "    border-radius: 3px;"
-      "}");
+      "#ProjectExplorerWidget::close-button, #ProjectExplorerWidget::float-button { icon-size: 14px; width: 20px; height: 20px; }"
+      "#ProjectExplorerWidget::close-button:hover, #ProjectExplorerWidget::float-button:hover { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }");
 
   // Default to Symbols view so the binary symbol table is immediately inspectable
   setSymbolsMode(true);
@@ -500,18 +475,10 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
  * @param enabled True to show Symbols table; false to show Files tree.
  */
 void ProjectExplorerWidget::setSymbolsMode(bool enabled) {
-  if (m_stack) {
-    m_stack->setCurrentIndex(enabled ? 1 : 0);
-  }
-  if (m_filesModeBtn) {
-    m_filesModeBtn->setChecked(!enabled);
-  }
-  if (m_symbolsModeBtn) {
-    m_symbolsModeBtn->setChecked(enabled);
-  }
-  if (m_stringsModeBtn) {
-    m_stringsModeBtn->setChecked(false);
-  }
+  if (m_stack) m_stack->setCurrentIndex(enabled ? 1 : 0);
+  if (m_filesModeBtn) m_filesModeBtn->setChecked(!enabled);
+  if (m_symbolsModeBtn) m_symbolsModeBtn->setChecked(enabled);
+  if (m_stringsModeBtn) m_stringsModeBtn->setChecked(false);
 }
 
 /**
@@ -527,8 +494,7 @@ bool ProjectExplorerWidget::isSymbolsMode() const {
  * @return Row count.
  */
 int ProjectExplorerWidget::symbolCount() const {
-  return m_symbolsTable ? m_symbolsTable->rowCount()
-                        : static_cast<int>(m_symbols.size());
+  return m_symbolsTable ? m_symbolsTable->rowCount() : static_cast<int>(m_symbols.size());
 }
 
 /**
@@ -536,22 +502,11 @@ int ProjectExplorerWidget::symbolCount() const {
  * @param enabled True to show Strings table.
  */
 void ProjectExplorerWidget::setStringsMode(bool enabled) {
-  if (!enabled) {
-    setSymbolsMode(true);
-    return;
-  }
-  if (m_stack) {
-    m_stack->setCurrentIndex(2);
-  }
-  if (m_filesModeBtn) {
-    m_filesModeBtn->setChecked(false);
-  }
-  if (m_symbolsModeBtn) {
-    m_symbolsModeBtn->setChecked(false);
-  }
-  if (m_stringsModeBtn) {
-    m_stringsModeBtn->setChecked(true);
-  }
+  if (!enabled) { setSymbolsMode(true); return; }
+  if (m_stack) m_stack->setCurrentIndex(2);
+  if (m_filesModeBtn) m_filesModeBtn->setChecked(false);
+  if (m_symbolsModeBtn) m_symbolsModeBtn->setChecked(false);
+  if (m_stringsModeBtn) m_stringsModeBtn->setChecked(true);
 }
 
 /**
@@ -567,8 +522,7 @@ bool ProjectExplorerWidget::isStringsMode() const {
  * @return Row count.
  */
 int ProjectExplorerWidget::stringCount() const {
-  return m_stringsTable ? m_stringsTable->rowCount()
-                        : static_cast<int>(m_strings.size());
+  return m_stringsTable ? m_stringsTable->rowCount() : static_cast<int>(m_strings.size());
 }
 
 /**
@@ -579,24 +533,19 @@ int ProjectExplorerWidget::stringCount() const {
 bool ProjectExplorerWidget::activateSymbol(const QString &symbolName) {
   // Strip whitespace from query
   const QString query = symbolName.trimmed();
-  if (query.isEmpty()) {
-    return false;
-  }
+  if (query.isEmpty()) return false;
 
   // Linear scan across registered binary symbols
   for (const auto &entry : m_symbols) {
     // Match exact symbol name or alias "main" -> "sym.main"
     if (entry.name.compare(query, Qt::CaseInsensitive) == 0 ||
-        (query.compare(QStringLiteral("main"), Qt::CaseInsensitive) == 0 &&
-         entry.name == QStringLiteral("sym.main"))) {
+        (query.compare(QStringLiteral("main"), Qt::CaseInsensitive) == 0 && entry.name == QStringLiteral("sym.main"))) {
       // Synchronize visual selection in symbols table
       if (m_symbolsTable) {
         for (int r = 0; r < m_symbolsTable->rowCount(); ++r) {
-          if (auto *item = m_symbolsTable->item(r, 0)) {
-            if (item->text().compare(entry.name, Qt::CaseInsensitive) == 0) {
-              m_symbolsTable->selectRow(r);
-              break;
-            }
+          if (auto *item = m_symbolsTable->item(r, 0); item && item->text().compare(entry.name, Qt::CaseInsensitive) == 0) {
+            m_symbolsTable->selectRow(r);
+            break;
           }
         }
       }
@@ -616,25 +565,19 @@ bool ProjectExplorerWidget::activateSymbol(const QString &symbolName) {
 bool ProjectExplorerWidget::activateString(const QString &queryText) {
   // Clean input string
   const QString query = queryText.trimmed();
-  if (query.isEmpty()) {
-    return false;
-  }
+  if (query.isEmpty()) return false;
 
   // Scan extracted strings table
   for (const auto &entry : m_strings) {
-    const QString addrStr =
-        QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
+    const QString addrStr = QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
     // Match against content substring or hexadecimal address
-    if (entry.value.contains(query, Qt::CaseInsensitive) ||
-        addrStr.compare(query, Qt::CaseInsensitive) == 0) {
+    if (entry.value.contains(query, Qt::CaseInsensitive) || addrStr.compare(query, Qt::CaseInsensitive) == 0) {
       // Select matching row in strings table
       if (m_stringsTable) {
         for (int r = 0; r < m_stringsTable->rowCount(); ++r) {
-          if (auto *item = m_stringsTable->item(r, 2)) {
-            if (item->text() == entry.value) {
-              m_stringsTable->selectRow(r);
-              break;
-            }
+          if (auto *item = m_stringsTable->item(r, 2); item && item->text() == entry.value) {
+            m_stringsTable->selectRow(r);
+            break;
           }
         }
       }
@@ -650,17 +593,13 @@ bool ProjectExplorerWidget::activateString(const QString &queryText) {
  * @brief Filters the symbols table on query changes.
  * @param filterText Search substring.
  */
-void ProjectExplorerWidget::filterSymbols(const QString &filterText) {
-  populateSymbolsTable(filterText);
-}
+void ProjectExplorerWidget::filterSymbols(const QString &filterText) { populateSymbolsTable(filterText); }
 
 /**
  * @brief Filters the strings table on query changes.
  * @param filterText Search substring.
  */
-void ProjectExplorerWidget::filterStrings(const QString &filterText) {
-  populateStringsTable(filterText);
-}
+void ProjectExplorerWidget::filterStrings(const QString &filterText) { populateStringsTable(filterText); }
 
 /**
  * @brief Reloads font size, item padding, mode buttons, filter bars, and icon provider from active theme and configuration.
@@ -673,19 +612,12 @@ void ProjectExplorerWidget::filterStrings(const QString &filterText) {
 void ProjectExplorerWidget::reloadStyle() {
   // Read user-configured tree row density from persistent settings.
   QSettings s("gridlock", "debugger");
-  const QString style =
-      s.value("appearance/file_tree_style", "Comfortable").toString();
+  const QString style = s.value("appearance/file_tree_style", "Comfortable").toString();
 
   // Compute vertical item padding and font size from selected density preset.
-  int padding = 2;
-  int fontSize = 11;
-  if (style == "Compact") {
-    padding = 1;
-    fontSize = 10;
-  } else if (style == "Large") {
-    padding = 4;
-    fontSize = 13;
-  }
+  int padding = 2, fontSize = 11;
+  if (style == "Compact") { padding = 1; fontSize = 10; }
+  else if (style == "Large") { padding = 4; fontSize = 13; }
 
   // Resolve active workstation color palette and dark/light polarity from ThemeManager.
   auto& tm = gridlock::core::managers::ThemeManager::instance();
@@ -693,7 +625,7 @@ void ProjectExplorerWidget::reloadStyle() {
   const bool isDark = tm.isDarkMode();
   const QString btnBg = isDark ? QStringLiteral("#252932") : pal.canvasHex;
   const QString btnCheckedBg = isDark ? QStringLiteral("#2c3444") : pal.accentHex;
-  const QString btnCheckedFg = isDark ? QStringLiteral("#ffffff") : QStringLiteral("#ffffff");
+  const QString btnCheckedFg = QStringLiteral("#ffffff");
 
   // Style the FILES | SYMBOLS | STRINGS segmented mode bar and buttons from active theme palette.
   const QString btnStyle = QStringLiteral(
@@ -706,42 +638,24 @@ void ProjectExplorerWidget::reloadStyle() {
 
   // Apply header background and border to #projectModeBar container.
   if (auto* modeBar = findChild<QWidget*>(QStringLiteral("projectModeBar"))) {
-    modeBar->setStyleSheet(
-        QStringLiteral("QWidget#projectModeBar { background: %1; border-bottom: 1px solid %2; } ")
-            .arg(pal.headerHex, pal.borderHex) +
-        btnStyle);
+    modeBar->setStyleSheet(QStringLiteral("QWidget#projectModeBar { background: %1; border-bottom: 1px solid %2; } ").arg(pal.headerHex, pal.borderHex) + btnStyle);
   }
   // Propagate segmented button stylesheet to FILES, SYMBOLS, and STRINGS toggle buttons.
   for (QPushButton* btn : {m_filesModeBtn, m_symbolsModeBtn, m_stringsModeBtn}) {
-    if (btn) {
-      btn->setStyleSheet(btnStyle);
-    }
+    if (btn) btn->setStyleSheet(btnStyle);
   }
 
   // Style the symbol and string filter inputs dynamically from active theme palette.
   const QString filterStyle = QStringLiteral(
       "QLineEdit { background: %1; color: %2; border: 1px solid %3; "
-      "border-radius: 2px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 10px; }"
-      "QLineEdit:focus { border: 1px solid %4; }")
-      .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex);
+      "border-radius: 2px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }"
+      "QLineEdit:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex);
 
-  // Update symbol filter bar and QLineEdit stylesheet.
-  if (m_symbolFilterEdit) {
-    m_symbolFilterEdit->setStyleSheet(filterStyle);
-    if (m_symbolFilterEdit->parentWidget()) {
-      m_symbolFilterEdit->parentWidget()->setStyleSheet(
-          QStringLiteral("background: %1; border-bottom: 1px solid %2;")
-              .arg(pal.headerHex, pal.borderHex));
-    }
-  }
-  // Update string filter bar and QLineEdit stylesheet.
-  if (m_stringFilterEdit) {
-    m_stringFilterEdit->setStyleSheet(filterStyle);
-    if (m_stringFilterEdit->parentWidget()) {
-      m_stringFilterEdit->parentWidget()->setStyleSheet(
-          QStringLiteral("background: %1; border-bottom: 1px solid %2;")
-              .arg(pal.headerHex, pal.borderHex));
+  // Update symbol and string filter bars and QLineEdit stylesheets.
+  for (QLineEdit* edit : {m_symbolFilterEdit, m_stringFilterEdit}) {
+    if (edit) {
+      edit->setStyleSheet(filterStyle);
+      if (edit->parentWidget()) edit->parentWidget()->setStyleSheet(QStringLiteral("background: %1; border-bottom: 1px solid %2;").arg(pal.headerHex, pal.borderHex));
     }
   }
 
@@ -750,15 +664,13 @@ void ProjectExplorerWidget::reloadStyle() {
       "QTableWidget { background: %1; color: %2; gridline-color: %3; border: none; "
       "font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
       "QHeaderView::section { background: %4; color: %2; border: 1px solid %3; "
-      "padding: 2px 4px; font-size: 10px; font-weight: 700; }")
-      .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex);
+      "padding: 2px 4px; font-size: 10px; font-weight: 700; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex);
 
-  // Refresh symbols table stylesheet and re-populate items with theme-aware foreground colors.
+  // Refresh symbols and strings table stylesheets and re-populate items with theme-aware foreground colors.
   if (m_symbolsTable) {
     m_symbolsTable->setStyleSheet(tableStyle);
     populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
   }
-  // Refresh strings table stylesheet and re-populate items with theme-aware foreground colors.
   if (m_stringsTable) {
     m_stringsTable->setStyleSheet(tableStyle);
     populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
@@ -766,12 +678,8 @@ void ProjectExplorerWidget::reloadStyle() {
 
   // Apply canvas background, text color, and item padding to the filesystem tree view.
   if (m_treeView) {
-    m_treeView->setStyleSheet(
-        QStringLiteral("QTreeView { background: %3; color: %4; font-size: %2px; border: none; }"
-                       "QTreeView::item { padding: %1px; }")
-            .arg(padding)
-            .arg(fontSize)
-            .arg(pal.canvasHex, pal.textHex));
+    m_treeView->setStyleSheet(QStringLiteral("QTreeView { background: %3; color: %4; font-size: %2px; border: none; } QTreeView::item { padding: %1px; }")
+                                  .arg(padding).arg(fontSize).arg(pal.canvasHex, pal.textHex));
   }
 
   // Rebuild FileIconProvider so folder and source icons reflect the current theme.
@@ -787,13 +695,8 @@ void ProjectExplorerWidget::reloadStyle() {
  * @brief Prompts user for a directory and opens it in the file tree view.
  */
 void ProjectExplorerWidget::onOpenFolder() {
-  QString dir = QFileDialog::getExistingDirectory(
-      this, "Open Folder", QDir::currentPath(),
-      QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-  if (!dir.isEmpty()) {
-    m_fileSystemModel->setRootPath(dir);
-    m_treeView->setRootIndex(m_fileSystemModel->index(dir));
-  }
+  QString dir = QFileDialog::getExistingDirectory(this, "Open Folder", QDir::currentPath(), QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+  if (!dir.isEmpty()) setRootPath(dir);
 }
 
 /**
@@ -812,13 +715,196 @@ void ProjectExplorerWidget::setRootPath(const QString &path) {
  * @param index Model index of clicked node.
  */
 void ProjectExplorerWidget::onDoubleClicked(const QModelIndex &index) {
-  if (!index.isValid())
-    return;
-
+  if (!index.isValid()) return;
   QFileInfo info = m_fileSystemModel->fileInfo(index);
-  if (info.isFile()) {
-    emit fileDoubleClicked(info.absoluteFilePath());
+  if (info.isFile()) emit fileDoubleClicked(info.absoluteFilePath());
+}
+
+/**
+ * @brief Refreshes the QFileSystemModel root directory and optionally selects focusPath in the tree view.
+ * @param focusPath Optional file or directory path to expand and select.
+ */
+void ProjectExplorerWidget::refreshTreeViewPath(const QString &focusPath) {
+  if (!m_fileSystemModel || !m_treeView) return;
+  const QString root = m_fileSystemModel->rootPath();
+  m_fileSystemModel->setRootPath(QString());
+  m_fileSystemModel->setRootPath(root);
+  m_treeView->setRootIndex(m_fileSystemModel->index(root));
+  if (!focusPath.isEmpty()) {
+    const QModelIndex idx = m_fileSystemModel->index(focusPath);
+    if (idx.isValid()) {
+      m_treeView->expand(idx.parent());
+      m_treeView->setCurrentIndex(idx);
+    }
   }
+}
+
+/**
+ * @brief Creates a new source or header file on disk with a standard boilerplate stub and emits fileCreated(path).
+ * @param parentDir Parent directory path on disk.
+ * @param fileName File name including extension.
+ * @return True if created and written successfully.
+ */
+bool ProjectExplorerWidget::createNewFile(const QString &parentDir, const QString &fileName) {
+  const QString cleanName = fileName.trimmed();
+  if (cleanName.isEmpty() || cleanName.contains(QStringLiteral(".."))) return false;
+  const QString baseDir = parentDir.trimmed().isEmpty()
+                              ? (m_fileSystemModel ? m_fileSystemModel->rootPath() : QDir::currentPath())
+                              : parentDir.trimmed();
+  QDir dir(baseDir);
+  if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) return false;
+  const QString fullPath = QFileInfo(dir.filePath(cleanName)).absoluteFilePath();
+  QFileInfo targetInfo(fullPath);
+  if (!targetInfo.dir().exists() && !targetInfo.dir().mkpath(QStringLiteral("."))) return false;
+
+  // Write standard C/C++ header guard or implementation stub based on file extension.
+  QFile file(fullPath);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return false;
+  const QString ext = targetInfo.suffix().toLower();
+  if (ext == QStringLiteral("hpp") || ext == QStringLiteral("hxx") || ext == QStringLiteral("hh") || ext == QStringLiteral("h")) {
+    file.write(QStringLiteral("#pragma once\n\n// %1\n").arg(targetInfo.fileName()).toUtf8());
+  } else {
+    file.write(QStringLiteral("#include <cstdint>\n\n// %1\n").arg(targetInfo.fileName()).toUtf8());
+  }
+  file.close();
+  refreshTreeViewPath(fullPath);
+  emit fileCreated(fullPath);
+  return true;
+}
+
+/**
+ * @brief Creates a new subdirectory inside parentDir and refreshes the file tree view.
+ * @param parentDir Parent directory path on disk.
+ * @param folderName Subdirectory name to create.
+ * @return True if the directory exists or was created.
+ */
+bool ProjectExplorerWidget::createNewFolder(const QString &parentDir, const QString &folderName) {
+  const QString cleanName = folderName.trimmed();
+  if (cleanName.isEmpty() || cleanName.contains(QStringLiteral(".."))) return false;
+  const QString baseDir = parentDir.trimmed().isEmpty()
+                              ? (m_fileSystemModel ? m_fileSystemModel->rootPath() : QDir::currentPath())
+                              : parentDir.trimmed();
+  QDir dir(baseDir);
+  if (!dir.mkpath(cleanName)) return false;
+  refreshTreeViewPath(dir.filePath(cleanName));
+  return true;
+}
+
+/**
+ * @brief Renames an existing file or folder on disk and emits fileRenamed(oldPath, newPath).
+ * @param oldPath Existing absolute path.
+ * @param newName New base name within the same directory.
+ * @return True if rename succeeded on disk.
+ */
+bool ProjectExplorerWidget::renameEntry(const QString &oldPath, const QString &newName) {
+  const QString cleanName = newName.trimmed();
+  QFileInfo oldInfo(oldPath);
+  if (!oldInfo.exists() || cleanName.isEmpty() || cleanName.contains(QLatin1Char('/')) || cleanName.contains(QStringLiteral(".."))) {
+    return false;
+  }
+  const QString absOld = oldInfo.absoluteFilePath();
+  const QString absNew = oldInfo.dir().filePath(cleanName);
+  if (absOld == absNew) return true;
+  if (!QDir().rename(absOld, absNew)) return false;
+  refreshTreeViewPath(absNew);
+  emit fileRenamed(absOld, absNew);
+  return true;
+}
+
+/**
+ * @brief Removes an existing file or directory from disk and emits fileDeleted(path).
+ * @param targetPath Target file or directory path.
+ * @return True if removed from disk.
+ */
+bool ProjectExplorerWidget::deleteEntry(const QString &targetPath) {
+  QFileInfo info(targetPath);
+  if (!info.exists()) return false;
+  const QString absTarget = info.absoluteFilePath();
+  const bool ok = info.isDir() ? QDir(absTarget).removeRecursively() : QFile::remove(absTarget);
+  if (!ok) return false;
+  refreshTreeViewPath();
+  emit fileDeleted(absTarget);
+  return true;
+}
+
+/**
+ * @brief Registers a relative source file path in a Meson (meson.build) or CMake (CMakeLists.txt) build specification.
+ * @param buildFilePath Absolute path to meson.build or CMakeLists.txt.
+ * @param relativeSourcePath Relative path of the source file to register.
+ * @return True if updated and written to disk.
+ */
+bool ProjectExplorerWidget::registerSourceInBuildFile(const QString &buildFilePath, const QString &relativeSourcePath) {
+  const QString cleanRel = relativeSourcePath.trimmed();
+  if (cleanRel.isEmpty() || !QFileInfo::exists(buildFilePath)) return false;
+  QFile bf(buildFilePath);
+  if (!bf.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+  QString content = QString::fromUtf8(bf.readAll());
+  bf.close();
+  if (content.contains(cleanRel)) return true;
+
+  // Insert source entry into Meson executable/library/files block or CMake add_executable/add_library block.
+  const bool isMeson = buildFilePath.endsWith(QStringLiteral("meson.build"), Qt::CaseInsensitive);
+  const int closeParen = content.lastIndexOf(QLatin1Char(')'));
+  if (closeParen > 0) {
+    const QString entry = isMeson ? QStringLiteral("  '%1',\n").arg(cleanRel) : QStringLiteral("  %1\n").arg(cleanRel);
+    content.insert(closeParen, entry);
+  } else {
+    content += isMeson ? QStringLiteral("\n# Added source: '%1'\n").arg(cleanRel)
+                       : QStringLiteral("\n# Added source: %1\n").arg(cleanRel);
+  }
+  if (!bf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return false;
+  bf.write(content.toUtf8());
+  bf.close();
+  return true;
+}
+
+/**
+ * @brief Displays the interactive right-click CRUD context menu on the FILES tree view.
+ * @param pos Local viewport click coordinate.
+ */
+void ProjectExplorerWidget::onTreeCustomContextMenu(const QPoint &pos) {
+  if (!m_treeView || !m_fileSystemModel) return;
+  const QModelIndex idx = m_treeView->indexAt(pos);
+  const QFileInfo selInfo = idx.isValid() ? m_fileSystemModel->fileInfo(idx) : QFileInfo(m_fileSystemModel->rootPath());
+  const QString targetDir = selInfo.isDir() ? selInfo.absoluteFilePath() : selInfo.absolutePath();
+
+  // Construct context menu with source/header creation, folder creation, rename, delete, and build registration.
+  QMenu menu(this);
+  QAction *newCppAct = menu.addAction(tr("New Source File (.cpp)..."));
+  QAction *newHppAct = menu.addAction(tr("New Header File (.hpp)..."));
+  QAction *newFolderAct = menu.addAction(tr("New Folder..."));
+  menu.addSeparator();
+  QAction *renameAct = menu.addAction(tr("Rename...\tF2"));
+  QAction *deleteAct = menu.addAction(tr("Delete..."));
+  renameAct->setEnabled(idx.isValid());
+  deleteAct->setEnabled(idx.isValid());
+
+  connect(newCppAct, &QAction::triggered, this, [this, targetDir]() {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New Source File"), tr("File name:"), QLineEdit::Normal, QStringLiteral("new_kernel.cpp"), &ok);
+    if (ok && !name.trimmed().isEmpty()) createNewFile(targetDir, name.trimmed());
+  });
+  connect(newHppAct, &QAction::triggered, this, [this, targetDir]() {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New Header File"), tr("Header name:"), QLineEdit::Normal, QStringLiteral("new_kernel.hpp"), &ok);
+    if (ok && !name.trimmed().isEmpty()) createNewFile(targetDir, name.trimmed());
+  });
+  connect(newFolderAct, &QAction::triggered, this, [this, targetDir]() {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New Folder"), tr("Folder name:"), QLineEdit::Normal, QStringLiteral("kernels"), &ok);
+    if (ok && !name.trimmed().isEmpty()) createNewFolder(targetDir, name.trimmed());
+  });
+  connect(renameAct, &QAction::triggered, this, [this, selInfo]() {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("Rename Entry"), tr("New name:"), QLineEdit::Normal, selInfo.fileName(), &ok);
+    if (ok && !name.trimmed().isEmpty()) renameEntry(selInfo.absoluteFilePath(), name.trimmed());
+  });
+  connect(deleteAct, &QAction::triggered, this, [this, selInfo]() {
+    if (QMessageBox::question(this, tr("Delete Entry"), tr("Delete '%1' from disk?").arg(selInfo.fileName())) == QMessageBox::Yes) {
+      deleteEntry(selInfo.absoluteFilePath());
+    }
+  });
+  menu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }
 
 }  // namespace gridlock::ui

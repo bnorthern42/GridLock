@@ -204,5 +204,8 @@ private slots:
 
     /** @brief Verifies v0.7.0 version alignment across meson.build/CHANGELOG.md, build_appimage.sh packaging, and CI workflow dependencies. */
     void testReleaseVersion070AndAppImageWorkflowDependencies();
+
+    /** @brief Verifies ProjectExplorerWidget file/folder CRUD operations, signals, and meson.build/CMakeLists.txt source registration. */
+    void testProjectExplorerFileCrudAndBuildRegistration();
 };
 

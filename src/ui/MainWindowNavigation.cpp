@@ -490,24 +490,51 @@ void MainWindow::openFile() {
  * @param filePath Path to file on disk.
  */
 void MainWindow::loadSourceFile(const QString& filePath) {
+    // Ensure ProjectExplorerWidget CRUD signals (fileCreated, fileRenamed, fileDeleted) are connected once.
+    if (m_projectExplorerWidget && !m_projectExplorerWidget->property("crudWired").toBool()) {
+        m_projectExplorerWidget->setProperty("crudWired", true);
+        // Automatically open newly created files in the central source code editor tab strip.
+        connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileCreated, this,
+                [this](const QString& path) { loadSourceFile(path); });
+        // Synchronize open editor tabs when a file is renamed on disk via the project explorer.
+        connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileRenamed, this,
+                [this](const QString& oldPath, const QString& newPath) {
+                    if (m_editorTabManager) {
+                        // Close the stale tab for oldPath and open the renamed file at newPath.
+                        if (auto* v = m_editorTabManager->getSourceCodeViewForFile(oldPath)) {
+                            const int idx = m_editorTabManager->indexOf(v);
+                            if (idx >= 0) emit m_editorTabManager->tabCloseRequested(idx);
+                            loadSourceFile(newPath);
+                        }
+                    }
+                });
+        // Close any open editor tab whose underlying file was deleted from disk.
+        connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDeleted, this,
+                [this](const QString& path) {
+                    if (m_editorTabManager) {
+                        if (auto* v = m_editorTabManager->getSourceCodeViewForFile(path)) {
+                            const int idx = m_editorTabManager->indexOf(v);
+                            if (idx >= 0) emit m_editorTabManager->tabCloseRequested(idx);
+                        }
+                    }
+                });
+    }
+    // Open the requested source file in EditorTabManager and notify Clangd LSP coordinator.
     if (m_editorTabManager) {
         if (auto* view = m_editorTabManager->openFile(filePath)) {
             m_currentFile = filePath;
             const QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
+            // Restart Clangd LSP session on the newly opened file when running interactively.
             if (m_lspCoordinator && QGuiApplication::platformName() != QStringLiteral("offscreen")) {
                 m_lspCoordinator->stop();
                 m_lspCoordinator->start(absolutePath);
                 m_lspCoordinator->didOpen(m_currentFile, view->getPlainText());
             }
             if (networkLog()) {
-                networkLog()->appendText("Successfully loaded: " + m_currentFile +
-                                         "\n");
+                networkLog()->appendText("Successfully loaded: " + m_currentFile + "\n");
             }
-        } else {
-            if (networkLog()) {
-                networkLog()->appendError("CRITICAL: Failed to load " + filePath +
-                                          "\n");
-            }
+        } else if (networkLog()) {
+            networkLog()->appendError("CRITICAL: Failed to load " + filePath + "\n");
         }
     }
 }
