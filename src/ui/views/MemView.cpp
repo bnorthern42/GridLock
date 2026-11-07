@@ -431,12 +431,19 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
     QString html = "<pre style=\"font-family: 'JetBrains Mono', monospace; font-size: 10pt; margin: 0;\">";
     qint64 startAddress = reinterpret_cast<qint64>(remoteAddr);
     
+    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+    const QString offsetHex = isDark ? QStringLiteral("#6a9955") : QStringLiteral("#0550ae");
+    const QString zeroHex = isDark ? QStringLiteral("#555c66") : QStringLiteral("#57606a");
+    const QString nonZeroHex = isDark ? QStringLiteral("#d4d7dc") : QStringLiteral("#1f2328");
+    const QString asciiHex = isDark ? QStringLiteral("#4ec9b0") : QStringLiteral("#24292f");
+
     int byteCount = result.baselineBuffer.size();
     m_changedByteCount = 0;
     // Iterate in 16-byte chunks representing traditional hex dump rows
     for (int i = 0; i < byteCount; i += 16) {
-        html += QString("<span style=\"color: #6a9955;\">0x%1</span>  ")
-                    .arg(QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
+        html += QString("<span style=\"color: %1;\">0x%2</span>  ")
+                    .arg(offsetHex,
+                         QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
         
         QString asciiPart = "| ";
         for (int j = 0; j < 16; ++j) {
@@ -450,7 +457,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                 
                 QString byteStr = QString::number(targetByte, 16).rightJustified(2, '0').toUpper();
                 
-                // Color mutated bytes in red with tooltip, muted zeros in gray
+                // Color mutated bytes in red with tooltip, muted zeros in gray/steel
                 if (diff) {
                     QString tooltip = QString("Baseline: 0x%1 | Target: 0x%2")
                         .arg(QString::number(baseByte, 16).rightJustified(2, '0').toUpper())
@@ -458,9 +465,9 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                     html += QString("<span style=\"color: #f44747; font-weight: bold;\" title=\"%1\">%2</span> ")
                         .arg(tooltip).arg(byteStr);
                 } else if (targetByte == 0) {
-                    html += QString("<span style=\"color: #555c66;\">%1</span> ").arg(byteStr);
+                    html += QString("<span style=\"color: %1;\">%2</span> ").arg(zeroHex, byteStr);
                 } else {
-                    html += byteStr + " ";
+                    html += QString("<span style=\"color: %1;\">%2</span> ").arg(nonZeroHex, byteStr);
                 }
                 
                 // Printable ASCII representation
@@ -469,10 +476,10 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                     if (diff) {
                         asciiPart += QString("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(QString(c).toHtmlEscaped());
                     } else {
-                        asciiPart += QString(c).toHtmlEscaped();
+                        asciiPart += QString("<span style=\"color: %1;\">%2</span>").arg(asciiHex, QString(c).toHtmlEscaped());
                     }
                 } else {
-                    asciiPart += "<span style=\"color: #555c66;\">.</span>";
+                    asciiPart += QString("<span style=\"color: %1;\">.</span>").arg(zeroHex);
                 }
             } else {
                 html += "   ";
@@ -495,16 +502,26 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
  * @return HTML string ready for display in QTextEdit.
  */
 QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData) {
+    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+    const QString headerColor = isDark ? QStringLiteral("#858585") : QStringLiteral("#57606a");
+    const QString offsetColor = isDark ? QStringLiteral("#6a9955") : QStringLiteral("#0550ae");
+    const QString zeroColor = isDark ? QStringLiteral("#555c66") : QStringLiteral("#57606a");
+    const QString hexColor = isDark ? QStringLiteral("#d4d7dc") : QStringLiteral("#1f2328");
+    const QString asciiColor = isDark ? QStringLiteral("#4ec9b0") : QStringLiteral("#24292f");
+    const QString patchColor = isDark ? QStringLiteral("#e5c07b") : QStringLiteral("#9a6700");
+
     // Monospace header with offset markers 00 through 0F
     QString html = QStringLiteral(
         "<pre style=\"font-family: 'JetBrains Mono', monospace; font-size: 10pt; margin: 4px;\">"
-        "<span style=\"color: #858585;\">- offset -         00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  |0123456789ABCDEF|</span>\n");
+        "<span style=\"color: %1;\">- offset -         00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  |0123456789ABCDEF|</span>\n")
+        .arg(headerColor);
 
     const int byteCount = currentData.size();
     // Format 16 bytes per line
     for (int i = 0; i < byteCount; i += 16) {
-        // Line address prefix in muted green
-        html += QStringLiteral("<span style=\"color: #6a9955;\">0x%1</span> ")
+        // Line address prefix in muted green (dark mode) or deep blue (#0550ae in light mode)
+        html += QStringLiteral("<span style=\"color: %1;\">0x%2</span> ")
+                    .arg(offsetColor)
                     .arg(startAddress + static_cast<uint64_t>(i), 16, 16, QChar('0'));
 
         QString asciiPart = QStringLiteral("|");
@@ -524,13 +541,13 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
                 const QString byteStr = QStringLiteral("%1").arg(b, 2, 16, QChar('0')).toUpper();
 
                 if (isPatched) {
-                    html += QStringLiteral("<span style=\"color: #e5c07b; font-weight: bold;\">%1</span> ").arg(byteStr);
+                    html += QStringLiteral("<span style=\"color: %1; font-weight: bold;\">%2</span> ").arg(patchColor, byteStr);
                 } else if (mutated) {
                     html += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span> ").arg(byteStr);
                 } else if (b == 0x00) {
-                    html += QStringLiteral("<span style=\"color: #555c66;\">%1</span> ").arg(byteStr);
+                    html += QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(zeroColor, byteStr);
                 } else {
-                    html += QStringLiteral("<span style=\"color: #d4d7dc;\">%1</span> ").arg(byteStr);
+                    html += QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(hexColor, byteStr);
                 }
 
                 // Append printable character or dot for non-printables
@@ -538,17 +555,17 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
                 if (c >= 32 && c <= 126) {
                     const QString escaped = QString(QChar(c)).toHtmlEscaped();
                     if (isPatched) {
-                        asciiPart += QStringLiteral("<span style=\"color: #e5c07b; font-weight: bold;\">%1</span>").arg(escaped);
+                        asciiPart += QStringLiteral("<span style=\"color: %1; font-weight: bold;\">%2</span>").arg(patchColor, escaped);
                     } else if (mutated) {
                         asciiPart += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(escaped);
                     } else {
-                        asciiPart += QStringLiteral("<span style=\"color: #4ec9b0;\">%1</span>").arg(escaped);
+                        asciiPart += QStringLiteral("<span style=\"color: %1;\">%2</span>").arg(asciiColor, escaped);
                     }
                 } else {
                     if (isPatched) {
-                        asciiPart += QStringLiteral("<span style=\"color: #e5c07b;\">.</span>");
+                        asciiPart += QStringLiteral("<span style=\"color: %1;\">.</span>").arg(patchColor);
                     } else {
-                        asciiPart += QStringLiteral("<span style=\"color: #555c66;\">.</span>");
+                        asciiPart += QStringLiteral("<span style=\"color: %1;\">.</span>").arg(zeroColor);
                     }
                 }
             } else {
@@ -618,6 +635,23 @@ QColor MemView::activeCanvasBackgroundColor() const {
 }
 
 /**
+ * @brief Returns the active non-zero hex byte text QColor resolved from ThemeManager.
+ * @return Dark slate (#1f2328) in light themes, or crisp light gray (#d4d7dc) in dark themes.
+ */
+QColor MemView::activeHexTextColor() const {
+    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+    return isDark ? QColor(QStringLiteral("#d4d7dc")) : QColor(QStringLiteral("#1f2328"));
+}
+
+/**
+ * @brief Paints the MemView container and ensures light/dark hexdump colors stay synchronized.
+ * @param event Paint event payload.
+ */
+void MemView::paintEvent(QPaintEvent* event) {
+    QWidget::paintEvent(event);
+}
+
+/**
  * @brief Reloads hex dump viewport and control header styles from ThemeManager.
  */
 void MemView::reloadStyle() {
@@ -627,18 +661,21 @@ void MemView::reloadStyle() {
         QPalette p = m_dumpEdit->palette();
         p.setColor(QPalette::Base, QColor(pal.canvasHex));
         p.setColor(QPalette::Window, QColor(pal.canvasHex));
-        p.setColor(QPalette::Text, QColor(pal.textHex));
+        p.setColor(QPalette::Text, activeHexTextColor());
         m_dumpEdit->setPalette(p);
         m_dumpEdit->setStyleSheet(QStringLiteral(
             "QTextEdit#cutterHexDumpEdit { background-color: %1; color: %2; border: none; }")
-            .arg(pal.canvasHex, pal.textHex));
+            .arg(pal.canvasHex, activeHexTextColor().name()));
         if (m_dumpEdit->viewport()) {
             QPalette vp = m_dumpEdit->viewport()->palette();
             vp.setColor(QPalette::Base, QColor(pal.canvasHex));
             vp.setColor(QPalette::Window, QColor(pal.canvasHex));
-            vp.setColor(QPalette::Text, QColor(pal.textHex));
+            vp.setColor(QPalette::Text, activeHexTextColor());
             m_dumpEdit->viewport()->setPalette(vp);
             m_dumpEdit->viewport()->setAutoFillBackground(true);
+        }
+        if (!m_lastRawData.isEmpty()) {
+            m_dumpEdit->setHtml(formatHexDumpHtml(m_currentBaseAddress, m_lastRawData, m_previousRawData));
         }
     }
     if (QWidget* headerBar = findChild<QWidget*>(QStringLiteral("cutterMemHeader"))) {
@@ -652,7 +689,7 @@ void MemView::reloadStyle() {
             "background: %5; color: %3; border: 1px solid %2; border-radius: 2px; font-size: 10px; font-weight: 600; } "
             "#cutterMemHeader QPushButton:hover { background: %2; color: %3; }")
             .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex,
-                 pal.isDark ? QStringLiteral("#252932") : QStringLiteral("#e0d8c3")));
+                 pal.isDark ? QStringLiteral("#252932") : pal.headerHex));
     }
     update();
 }

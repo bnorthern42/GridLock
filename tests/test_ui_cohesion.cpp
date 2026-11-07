@@ -83,9 +83,11 @@ auto getActiveCanvasBg(T* widget, int) -> decltype(widget->activeCanvasBackgroun
     return widget->activeCanvasBackgroundColor();
 }
 template <typename T>
-QColor getActiveCanvasBg(T*, ...) {
-    return QColor(QStringLiteral("#16181d"));
-}
+QColor getActiveCanvasBg(T*, ...) { return QColor(QStringLiteral("#16181d")); }
+template <typename T>
+auto getActiveHexText(T* widget, int) -> decltype(widget->activeHexTextColor()) { return widget->activeHexTextColor(); }
+template <typename T>
+QColor getActiveHexText(T*, ...) { return QColor(QStringLiteral("#c8ccd4")); }
 
 template <typename T>
 auto callPropagateTheme(T* mw, int) -> decltype(mw->propagateThemeToAllWidgets(), void()) {
@@ -815,28 +817,33 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
     auto& tm = gridlock::core::ThemeManager::instance();
     const QStringList themeIds = tm.availableThemeIds();
     QVERIFY2(themeIds.contains(QStringLiteral("daylight_light")) && themeIds.contains(QStringLiteral("solarized_light")) && themeIds.contains(QStringLiteral("catppuccin_latte")), "ThemeManager must include daylight_light, solarized_light, and catppuccin_latte");
-    tm.applyTheme(QStringLiteral("solarized_light"));
-    QVERIFY2(!tm.isDarkMode(), "Selecting solarized_light must set isDarkMode() == false");
-    tm.applyTheme(QStringLiteral("catppuccin_latte"));
-    QVERIFY2(!tm.isDarkMode(), "Selecting catppuccin_latte must set isDarkMode() == false");
+    tm.applyTheme(QStringLiteral("solarized_light")); QVERIFY2(!tm.isDarkMode(), "Selecting solarized_light must set isDarkMode() == false");
+    tm.applyTheme(QStringLiteral("catppuccin_latte")); QVERIFY2(!tm.isDarkMode(), "Selecting catppuccin_latte must set isDarkMode() == false");
 
     // 2. Verify Enable Dark Mode checkbox is removed from PreferencesDialog and Light Mode has no dark #16181d/#1b1e24 overrides.
     tm.applyTheme(QStringLiteral("daylight_light"));
-    gridlock::ui::PreferencesDialog dialog;
-    dialog.resize(860, 620);
-    dialog.show();
-    QApplication::processEvents();
+    gridlock::ui::PreferencesDialog dialog; dialog.resize(860, 620); dialog.show(); QApplication::processEvents();
     for (QCheckBox* chk : dialog.findChildren<QCheckBox*>()) QVERIFY2(!(chk->isVisible() && chk->text().contains(QStringLiteral("Enable Dark Mode"), Qt::CaseInsensitive)), "Redundant Dark Mode checkbox must not be visible");
     for (QComboBox* cb : dialog.findChildren<QComboBox*>()) QVERIFY2(!cb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "QComboBox must not hardcode #1b1e24");
     for (QSpinBox* sb : dialog.findChildren<QSpinBox*>()) QVERIFY2(!sb->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive), "QSpinBox must not hardcode #1b1e24");
 
-    // 3. Verify SourceCodeView and DisassemblyView activeCanvasBackgroundColor() are light (>= 220 lightness) in Light Theme.
-    gridlock::ui::SourceCodeView srcView;
-    gridlock::ui::DisassemblyView disView;
+    // 3. Verify MainWindow light-theme propagation across MemView hex ink, ProjectExplorer, section ribbon, and CODE | REVERSE buttons.
+    gridlock::ui::MainWindow mainWindow; gridlock::tests::callPropagateTheme(&mainWindow, 0);
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
+    QVERIFY(memView != nullptr && explorer != nullptr);
+    QVERIFY2(gridlock::tests::getActiveHexText(memView, 0).lightness() < 110, "MemView activeHexTextColor must be dark ink (< 110 lightness) in daylight_light");
+    for (const QString& objName : {QStringLiteral("projectModeBar"), QStringLiteral("explorerFilesModeBtn"), QStringLiteral("explorerSymbolsModeBtn"), QStringLiteral("explorerStringsModeBtn"), QStringLiteral("symbolFilterEdit"), QStringLiteral("stringFilterEdit")}) {
+        auto* w = explorer->findChild<QWidget*>(objName);
+        QVERIFY2(w != nullptr && !w->styleSheet().contains(QStringLiteral("#21252b"), Qt::CaseInsensitive) && !w->styleSheet().contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive) && !w->styleSheet().contains(QStringLiteral("#141619"), Qt::CaseInsensitive), qPrintable(objName));
+    }
+    for (const QString& objName : {QStringLiteral("addressNavBar"), QStringLiteral("perspectiveCodeBtn"), QStringLiteral("perspectiveReverseBtn")}) {
+        auto* w = mainWindow.findChild<QWidget*>(objName);
+        QVERIFY2(w != nullptr && !w->styleSheet().isEmpty() && !w->styleSheet().contains(QStringLiteral("#16181d"), Qt::CaseInsensitive) && !w->styleSheet().contains(QStringLiteral("#21252b"), Qt::CaseInsensitive) && !w->styleSheet().contains(QStringLiteral("#1e222a"), Qt::CaseInsensitive), qPrintable(objName));
+    }
+    gridlock::ui::SourceCodeView srcView; gridlock::ui::DisassemblyView disView;
     QVERIFY2(srcView.activeCanvasBackgroundColor().lightness() >= 220 && disView.activeCanvasBackgroundColor().lightness() >= 220, "Canvas backgrounds must be light in daylight_light");
-
-    tm.applyTheme(QStringLiteral("gridlock_slate"));
-    QVERIFY2(tm.isDarkMode(), "Selecting gridlock_slate must restore isDarkMode() == true");
+    tm.applyTheme(QStringLiteral("gridlock_slate")); QVERIFY2(tm.isDarkMode(), "Selecting gridlock_slate must restore isDarkMode() == true");
 }
 
 /**
@@ -846,16 +853,11 @@ void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadr
     auto& tm = gridlock::core::ThemeManager::instance();
     // 1. Full Workstation Theme Propagation in solarized_light.
     tm.applyTheme(QStringLiteral("solarized_light"));
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // Propagate active solarized light theme colors across all chrome and views.
-    gridlock::tests::callPropagateTheme(&mainWindow, 0);
-    QApplication::processEvents();
+    gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
 
     // Retrieve pointers to all primary inspection subviews.
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
@@ -882,16 +884,12 @@ void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadr
 
     // Restore default dark theme and verify dark activeCanvasBackgroundColor.
     tm.applyTheme(QStringLiteral("gridlock_slate"));
-    gridlock::tests::callPropagateTheme(&mainWindow, 0);
-    QApplication::processEvents();
+    gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
     // Dark slate canvas lightness must sit strictly below 60.
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() < 60, "MemView canvas background must be dark (< 60 lightness) in gridlock_slate");
 
     // 2. Spaced, Non-Colliding Palette Swatch Chips.
-    gridlock::ui::PreferencesDialog prefsDialog;
-    prefsDialog.resize(860, 620);
-    prefsDialog.show();
-    QApplication::processEvents();
+    gridlock::ui::PreferencesDialog prefsDialog; prefsDialog.resize(860, 620); prefsDialog.show(); QApplication::processEvents();
 
     // Query swatch chips and ensure exactly 5 clean role labels are mounted.
     QList<QLabel*> swatchBoxes;
@@ -914,8 +912,7 @@ void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadr
         if (!QFile::exists(path)) path = relPath;
         QFile f(path);
         // Verify file exists and open stream to count total newline-separated lines.
-        QVERIFY2(f.exists(), qPrintable(QString("File %1 must exist").arg(relPath)));
-        QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QString("Could not open %1").arg(relPath)));
+        QVERIFY2(f.exists() && f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QString("Could not open %1").arg(relPath)));
         const int lines = QString::fromUtf8(f.readAll()).split('\n').size();
         // Each MainWindow modular file must sit strictly below the 880 line target ceiling.
         QVERIFY2(lines < 880, qPrintable(QString("%1 line count %2 >= 880").arg(relPath).arg(lines)));

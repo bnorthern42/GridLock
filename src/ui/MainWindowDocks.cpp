@@ -562,9 +562,35 @@ void MainWindow::propagateThemeToAllWidgets() {
              isDark ? QStringLiteral("#19362b") : pal.accentHex));
   }
 
-  // 2. Re-style Address Space Section Ribbon (#addressNavBar)
+  // 2. Re-style Address Space Section Ribbon (#addressNavBar) and Perspective Switcher (CODE | REVERSE | MPI)
   if (m_addressNavBar) {
+    QPalette navPal = m_addressNavBar->palette();
+    navPal.setColor(QPalette::Window, QColor(pal.headerHex));
+    navPal.setColor(QPalette::Base, QColor(pal.canvasHex));
+    navPal.setColor(QPalette::WindowText, QColor(pal.textHex));
+    m_addressNavBar->setPalette(navPal);
+    m_addressNavBar->setStyleSheet(QStringLiteral(
+        "#addressNavBar { background: %1; color: %2; border-bottom: 1px solid %3; }")
+        .arg(pal.headerHex, pal.textHex, pal.borderHex));
     m_addressNavBar->update();
+  }
+
+  const QString perspStyle = QStringLiteral(
+      "QPushButton { background: %1; color: %2; border: 1px solid %3; border-radius: 2px; "
+      "padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } "
+      "QPushButton:hover { background: %3; color: %2; border-color: %4; } "
+      "QPushButton:checked { background: %5; color: %6; border: 1px solid %4; }")
+      .arg(isDark ? QStringLiteral("#252932") : pal.canvasHex,
+           pal.textHex,
+           pal.borderHex,
+           pal.accentHex,
+           isDark ? QStringLiteral("#2c313c") : pal.accentHex,
+           isDark ? QStringLiteral("#61afef") : QStringLiteral("#ffffff"));
+
+  for (QPushButton* btn : {m_perspCodeBtn, m_perspReverseBtn, m_perspMpiBtn}) {
+    if (btn) {
+      btn->setStyleSheet(perspStyle);
+    }
   }
 
   // 3. Re-style Bottom Tool Window Rail (#bottomToolWindowRail)

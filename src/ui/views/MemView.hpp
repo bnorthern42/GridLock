@@ -52,8 +52,14 @@ public:
     void revertAllPatches();
     /// Returns the active canvas background QColor resolved from ThemeManager.
     QColor activeCanvasBackgroundColor() const;
+    /// Returns the active non-zero hex byte text QColor resolved from ThemeManager.
+    QColor activeHexTextColor() const;
     /// Reloads hex dump viewport and control header styles from ThemeManager.
     Q_INVOKABLE void reloadStyle();
+
+protected:
+    /// Paints the memory inspector container and synchronizes theme-dependent hex colors.
+    void paintEvent(QPaintEvent* event) override;
 
 signals:
     /// Emitted when bytes are patched at target memory address.

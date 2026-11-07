@@ -326,12 +326,12 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   // Default to Symbols view so the binary symbol table is immediately inspectable
   setSymbolsMode(true);
+  reloadStyle();
 
-  // Re-render symbol and string table foregrounds whenever Dark/Light mode toggles
+  // Re-render styles, symbol table, and string table foregrounds whenever Dark/Light mode toggles
   connect(&gridlock::core::managers::ThemeManager::instance(),
           &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
-            populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
-            populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+            reloadStyle();
           });
 }
 
@@ -663,13 +663,20 @@ void ProjectExplorerWidget::filterStrings(const QString &filterText) {
 }
 
 /**
- * @brief Reloads font size, item padding, and icon provider from configuration.
+ * @brief Reloads font size, item padding, mode buttons, filter bars, and icon provider from active theme and configuration.
+ *
+ * Queries QSettings for file tree density preferences ("Compact", "Comfortable", "Large"),
+ * resolves the active ThemeManager palette, and updates the stylesheets of the segmented
+ * mode switcher bar (`FILES | SYMBOLS | STRINGS`), filter inputs, symbol/string tables,
+ * and directory tree view without hardcoded dark hex colors.
  */
 void ProjectExplorerWidget::reloadStyle() {
+  // Read user-configured tree row density from persistent settings.
   QSettings s("gridlock", "debugger");
-  QString style =
+  const QString style =
       s.value("appearance/file_tree_style", "Comfortable").toString();
 
+  // Compute vertical item padding and font size from selected density preset.
   int padding = 2;
   int fontSize = 11;
   if (style == "Compact") {
@@ -680,15 +687,100 @@ void ProjectExplorerWidget::reloadStyle() {
     fontSize = 13;
   }
 
-  m_treeView->setStyleSheet(QString("QTreeView { font-size: %2px; }"
-                                    "QTreeView::item { padding: %1px; }")
-                                 .arg(padding)
-                                 .arg(fontSize));
+  // Resolve active workstation color palette and dark/light polarity from ThemeManager.
+  auto& tm = gridlock::core::managers::ThemeManager::instance();
+  const auto pal = tm.paletteForTheme(tm.activeThemeId());
+  const bool isDark = tm.isDarkMode();
+  const QString btnBg = isDark ? QStringLiteral("#252932") : pal.canvasHex;
+  const QString btnCheckedBg = isDark ? QStringLiteral("#2c3444") : pal.accentHex;
+  const QString btnCheckedFg = isDark ? QStringLiteral("#ffffff") : QStringLiteral("#ffffff");
 
-  auto *newProvider = new FileIconProvider();
-  m_fileSystemModel->setIconProvider(newProvider);
-  delete m_iconProvider;
-  m_iconProvider = newProvider;
+  // Style the FILES | SYMBOLS | STRINGS segmented mode bar and buttons from active theme palette.
+  const QString btnStyle = QStringLiteral(
+      "QPushButton { background: %1; color: %2; border: 1px solid %3; "
+      "border-radius: 2px; padding: 1px 6px; font-family: 'JetBrains Mono', monospace; "
+      "font-size: 10px; font-weight: 600; min-height: 18px; max-height: 20px; }"
+      "QPushButton:hover { background: %3; border: 1px solid %4; color: %2; }"
+      "QPushButton:checked { background: %5; color: %6; border: 1px solid %4; }")
+      .arg(btnBg, pal.textHex, pal.borderHex, pal.accentHex, btnCheckedBg, btnCheckedFg);
+
+  // Apply header background and border to #projectModeBar container.
+  if (auto* modeBar = findChild<QWidget*>(QStringLiteral("projectModeBar"))) {
+    modeBar->setStyleSheet(
+        QStringLiteral("QWidget#projectModeBar { background: %1; border-bottom: 1px solid %2; } ")
+            .arg(pal.headerHex, pal.borderHex) +
+        btnStyle);
+  }
+  // Propagate segmented button stylesheet to FILES, SYMBOLS, and STRINGS toggle buttons.
+  for (QPushButton* btn : {m_filesModeBtn, m_symbolsModeBtn, m_stringsModeBtn}) {
+    if (btn) {
+      btn->setStyleSheet(btnStyle);
+    }
+  }
+
+  // Style the symbol and string filter inputs dynamically from active theme palette.
+  const QString filterStyle = QStringLiteral(
+      "QLineEdit { background: %1; color: %2; border: 1px solid %3; "
+      "border-radius: 2px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; "
+      "font-size: 10px; }"
+      "QLineEdit:focus { border: 1px solid %4; }")
+      .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex);
+
+  // Update symbol filter bar and QLineEdit stylesheet.
+  if (m_symbolFilterEdit) {
+    m_symbolFilterEdit->setStyleSheet(filterStyle);
+    if (m_symbolFilterEdit->parentWidget()) {
+      m_symbolFilterEdit->parentWidget()->setStyleSheet(
+          QStringLiteral("background: %1; border-bottom: 1px solid %2;")
+              .arg(pal.headerHex, pal.borderHex));
+    }
+  }
+  // Update string filter bar and QLineEdit stylesheet.
+  if (m_stringFilterEdit) {
+    m_stringFilterEdit->setStyleSheet(filterStyle);
+    if (m_stringFilterEdit->parentWidget()) {
+      m_stringFilterEdit->parentWidget()->setStyleSheet(
+          QStringLiteral("background: %1; border-bottom: 1px solid %2;")
+              .arg(pal.headerHex, pal.borderHex));
+    }
+  }
+
+  // Style tables and file tree from active theme palette.
+  const QString tableStyle = QStringLiteral(
+      "QTableWidget { background: %1; color: %2; gridline-color: %3; border: none; "
+      "font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
+      "QHeaderView::section { background: %4; color: %2; border: 1px solid %3; "
+      "padding: 2px 4px; font-size: 10px; font-weight: 700; }")
+      .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex);
+
+  // Refresh symbols table stylesheet and re-populate items with theme-aware foreground colors.
+  if (m_symbolsTable) {
+    m_symbolsTable->setStyleSheet(tableStyle);
+    populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
+  }
+  // Refresh strings table stylesheet and re-populate items with theme-aware foreground colors.
+  if (m_stringsTable) {
+    m_stringsTable->setStyleSheet(tableStyle);
+    populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+  }
+
+  // Apply canvas background, text color, and item padding to the filesystem tree view.
+  if (m_treeView) {
+    m_treeView->setStyleSheet(
+        QStringLiteral("QTreeView { background: %3; color: %4; font-size: %2px; border: none; }"
+                       "QTreeView::item { padding: %1px; }")
+            .arg(padding)
+            .arg(fontSize)
+            .arg(pal.canvasHex, pal.textHex));
+  }
+
+  // Rebuild FileIconProvider so folder and source icons reflect the current theme.
+  if (m_fileSystemModel) {
+    auto *newProvider = new FileIconProvider();
+    m_fileSystemModel->setIconProvider(newProvider);
+    delete m_iconProvider;
+    m_iconProvider = newProvider;
+  }
 }
 
 /**
