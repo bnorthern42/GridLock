@@ -66,6 +66,25 @@ public:
      */
     void clearAllTabs();
 
+    /**
+     * @brief Returns whether the editor tab at index has unsaved document modifications.
+     * @param index Zero-based tab index.
+     * @return True if the underlying SourceCodeView document is modified.
+     */
+    bool isTabModified(int index) const;
+
+    /**
+     * @brief Saves all currently modified editor tabs to disk and clears their dirty indicators.
+     * @return Number of modified tabs written to disk.
+     */
+    int saveAllModifiedTabs();
+
+    /**
+     * @brief Toggles the active editor tab between corresponding C/C++ header (.hpp/.h) and source (.cpp/.c) files.
+     * @return True if a matching counterpart file was found and activated.
+     */
+    bool switchHeaderSource();
+
 signals:
     /// Emitted when a breakpoint toggle request is dispatched via location string.
     void toggleBreakpointRequested(const QString& location);

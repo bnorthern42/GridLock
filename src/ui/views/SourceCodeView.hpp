@@ -254,6 +254,12 @@ public:
     bool saveToFile(const QString& filePath = QString());
 
     /**
+     * @brief Computes the enclosing C/C++ lexical scope breadcrumb at the current cursor line.
+     * @return Breadcrumb string formatted as "filename > Class/Struct > function".
+     */
+    QString currentScopeBreadcrumb() const;
+
+    /**
      * @brief Reloads color palette and styling from ConfigManager and ThemeManager.
      */
     Q_INVOKABLE void reloadStyle();
@@ -335,6 +341,9 @@ signals:
 
     /** @brief Emitted when a 1-based source line is selected or clicked by the user. */
     void sourceLineSelected(int lineOneBased);
+
+    /** @brief Emitted when the underlying QTextDocument modification state changes. */
+    void modificationStateChanged(bool modified);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;

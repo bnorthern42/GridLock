@@ -529,11 +529,21 @@ void MainWindow::setupMenu() {
   QAction *saveAction = fileMenu->addAction("Save Source File");
   saveAction->setShortcut(QKeySequence::Save);
   connect(saveAction, &QAction::triggered, this, [this]() {
-    for (auto* view : findChildren<SourceCodeView*>()) {
-      if (view && view->isVisible() && view->document()->isModified()) {
-        view->saveToFile();
-      }
-    }
+    if (auto* v = getSourceCodeView(); v && v->document()->isModified()) v->saveToFile();
+  });
+
+  // Save All Action (Ctrl+Shift+S): Saves all dirty open editor buffers and clears dirty tab indicators.
+  QAction *saveAllAction = fileMenu->addAction("Save All");
+  saveAllAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+  connect(saveAllAction, &QAction::triggered, this, [this]() {
+    if (m_editorTabManager) m_editorTabManager->saveAllModifiedTabs();
+  });
+
+  // Switch Header/Source Action (F10): Toggles between corresponding .cpp/.c and .hpp/.h files.
+  QAction *switchHdrAct = fileMenu->addAction("Switch Header/Source");
+  switchHdrAct->setShortcut(QKeySequence(Qt::Key_F10));
+  connect(switchHdrAct, &QAction::triggered, this, [this]() {
+    if (m_editorTabManager) m_editorTabManager->switchHeaderSource();
   });
   fileMenu->addSeparator();
 

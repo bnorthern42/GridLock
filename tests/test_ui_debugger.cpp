@@ -792,13 +792,11 @@ void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancels
 
     // 2. Canceling a newly right-clicked gutter breakpoint restores unmarked state on line 18.
     sourceCodeView.toggleBreakpoint(18);
-    // Cancel tentative popover.
     sourceCodeView.handleBreakpointPopoverResult(18, false, false, false, QString(), QStringLiteral("All"));
     QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
-    // Accept conditional breakpoint.
+    // Accept conditional breakpoint and remove on second accept.
     sourceCodeView.handleBreakpointPopoverResult(18, false, true, true, QStringLiteral("rank == 0"), QStringLiteral("Rank"));
     QCOMPARE(sourceCodeView.gutterMarkerStateForLine(18), QStringLiteral("ConditionalBreakpoint"));
-    // Remove breakpoint on second dialog accept.
     sourceCodeView.handleBreakpointPopoverResult(18, true, true, false, QString(), QStringLiteral("All"));
     QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
 }
@@ -830,10 +828,9 @@ template <typename T, typename M> void verifyLoadedTheme(const T&, M& tm) { if c
  *        expression completion (`data[i].`, `data[i].coords.`, `send_buf.`) in ConditionalBreakpointDialog.
  */
 void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
-    // Resolve tutorial sample file paths.
+    // Resolve tutorial sample file paths and read source code contents for LSP splicing tests.
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp"));
     const QString deadlockPath = resolveTutorialPath(QStringLiteral("tutorial/deadlock_ring.cpp"));
-    // Read source code contents for LSP splicing tests.
     const QString inspectionSource = readTutorialFile(QStringLiteral("tutorial/inspection_demo.cpp"));
     const QString deadlockSource = readTutorialFile(QStringLiteral("tutorial/deadlock_ring.cpp"));
     QVERIFY(!inspectionSource.isEmpty() && !deadlockSource.isEmpty());
@@ -842,87 +839,93 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     int zeroLine = -1, zeroCol = -1;
     const QString spliced = gridlock::core::ClangdLspClient::buildVirtualCompletionDocument(
         inspectionSource, 18, QStringLiteral("data[i]."), &zeroLine, &zeroCol);
-    QCOMPARE(zeroLine, 17);
-    QVERIFY(zeroCol >= 8);
     const QStringList splicedLines = spliced.split(QLatin1Char('\n'));
-    // Verify target spliced line ends with the expression prefix.
-    QVERIFY(zeroLine < splicedLines.size() && splicedLines.at(zeroLine).left(zeroCol).endsWith(QStringLiteral("data[i].")));
+    QVERIFY(zeroLine == 17 && zeroCol >= 8 && zeroLine < splicedLines.size() && splicedLines.at(zeroLine).left(zeroCol).endsWith(QStringLiteral("data[i].")));
 
     // 2. Verify member completion on `data[i].` and nested `data[i].coords.` in ConditionalBreakpointDialog.
     gridlock::ui::ConditionalBreakpointDialog dialog;
     dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
-    // Verify member completion on data[i]. contains id, values, and coords.
     const QStringList items1 = dialog.completionsForExpression(QStringLiteral("data[i]."));
-    QVERIFY(items1.contains(QStringLiteral("id")) && items1.contains(QStringLiteral("values")) && items1.contains(QStringLiteral("coords")));
-    // Verify nested member completion on data[i].coords. contains x, y, and z.
     const QStringList items2 = dialog.completionsForExpression(QStringLiteral("data[i].coords."));
+    QVERIFY(items1.contains(QStringLiteral("id")) && items1.contains(QStringLiteral("values")) && items1.contains(QStringLiteral("coords")));
     QVERIFY(items2.contains(QStringLiteral("x")) && items2.contains(QStringLiteral("y")) && items2.contains(QStringLiteral("z")));
 
-    // 3. Verify applying completion item "coords" to "data[i]." updates condition text to "data[i].coords".
+    // 3. Verify applying completion item "coords" to "data[i]." and std::vector completion on `send_buf.`.
     dialog.applyQuickPreset(QStringLiteral("data[i]."));
     dialog.applyCompletionItem(QStringLiteral("coords"));
     QCOMPARE(dialog.getCondition(), QStringLiteral("data[i].coords"));
-
-    // 4. Verify std::vector member completion on `send_buf.` in tutorial/deadlock_ring.cpp.
     dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34);
-    const QStringList items3 = dialog.completionsForExpression(QStringLiteral("send_buf."));
-    const QString joined3 = items3.join(QLatin1Char('|'));
-    // Verify send_buf vector completions contain data and size methods.
+    const QString joined3 = dialog.completionsForExpression(QStringLiteral("send_buf.")).join(QLatin1Char('|'));
     QVERIFY2(joined3.contains(QStringLiteral("data")) && joined3.contains(QStringLiteral("size")), qPrintable(joined3));
 }
 
 /**
  * @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained
- *        breakpoint popover suffix insertion, and theme persistence across app restarts.
+ *        breakpoint popover suffix insertion, theme persistence, dirty tab indicators (`●`),
+ *        `saveAllModifiedTabs()`, `switchHeaderSource()`, and scope breadcrumbs (`File > Scope`).
  */
 void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence() {
-    // Resolve tutorial path for inspection demo.
+    // Load the tutorial inspection demo source code for editor and completion verification.
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp"));
-    // Read source code content from tutorial file.
     const QString inspectionSource = readTutorialFile(QStringLiteral("tutorial/inspection_demo.cpp"));
     QVERIFY(!inspectionSource.isEmpty());
 
     // 1. SourceCodeView must be editable by default (isReadOnly() == false) & support live completions.
+    // Verify that both basic and detailed ClangdLspClient completion endpoints return struct fields.
     gridlock::ui::SourceCodeView srcView;
-    // Verify editor is editable by default.
     QVERIFY2(!srcView.isReadOnly(), "SourceCodeView must be editable (isReadOnly() == false)");
     srcView.setSourceCode(inspectionSource);
-    // Query completions at line 18 for data[i].
     verifyCompletions(callEditorCompletionsAtLine(&srcView, 18, QStringLiteral("data[i]."), 0));
-    // Trigger floating completion popup at cursor.
     callTriggerCompletionPopup(&srcView, QStringLiteral("data[i]."), 18, 0);
-
-    // Verify structured LspCompletionItem details (Field, int, double[5]).
     verifyDetailed(callCompleteDetailed<gridlock::core::ClangdLspClient>(0, inspectionPath, inspectionSource, 18, QStringLiteral("data[i].")));
 
     // 2. Modern Breakpoint Popover Chained Member Insertion (data[i]. -> data[i].coords -> data[i].coords.x).
+    // Verify that suffix completion preserves the boolean prefix expression ("i == 0 && ").
     gridlock::ui::ConditionalBreakpointDialog dialog;
     dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
-    // Apply prefix condition expression.
     dialog.applyQuickPreset(QStringLiteral("i == 0 && data[i]."));
-    // Select coords member completion.
     dialog.applyCompletionItem(QStringLiteral("coords"));
     QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords"));
-    // Chain with nested dot operator.
     dialog.applyQuickPreset(dialog.getCondition() + QStringLiteral("."));
     const QStringList subItems = dialog.completionsForExpression(dialog.getCondition());
-    // Verify nested member completions contain x, y, and z.
     QVERIFY(subItems.contains(QStringLiteral("x")) && subItems.contains(QStringLiteral("y")) && subItems.contains(QStringLiteral("z")));
-    // Apply nested member completion x.
     dialog.applyCompletionItem(QStringLiteral("x"));
     QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords.x"));
 
     // 3. Theme Persistence Across App Restart (savePersistedTheme / loadPersistedTheme).
+    // Verify that saving tokyo_night persists across transient switches to gridlock_slate.
     auto& tm = gridlock::core::ThemeManager::instance();
-    // Apply Tokyo Night theme and persist.
-    tm.applyTheme(QStringLiteral("tokyo_night"));
-    callSavePersistedTheme(tm, 0);
-    // Reset in-memory theme to gridlock_slate without persisting.
-    tm.applyTheme(QStringLiteral("gridlock_slate"), false);
-    QCOMPARE(tm.activeThemeId(), QStringLiteral("gridlock_slate"));
-    // Verify loading persisted theme restores tokyo_night.
+    tm.applyTheme(QStringLiteral("tokyo_night")); callSavePersistedTheme(tm, 0);
+    tm.applyTheme(QStringLiteral("gridlock_slate"), false); QCOMPARE(tm.activeThemeId(), QStringLiteral("gridlock_slate"));
     verifyLoadedTheme(callLoadPersistedTheme(tm, 0), tm);
-    // Restore default theme state at test conclusion.
-    tm.applyTheme(QStringLiteral("gridlock_slate"));
-    callSavePersistedTheme(tm, 0);
+    tm.applyTheme(QStringLiteral("gridlock_slate")); callSavePersistedTheme(tm, 0);
+
+    // 4. Dirty Buffer Tab Indicators ("●"), saveAllModifiedTabs(), switchHeaderSource(), & Scope Breadcrumbs.
+    // Create temporary .cpp and .hpp companion files to exercise dirty buffer and F10 toggle workflows.
+    QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
+    const QString tempCpp = tempDir.filePath(QStringLiteral("inspection_demo.cpp"));
+    const QString tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
+    { QFile fc(tempCpp); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(inspectionSource.toUtf8()); }
+    { QFile fh(tempHpp); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nstruct DeeplyNested {};\n"); }
+
+    // Open the temporary C++ source file in EditorTabManager and define SFINAE-safe helper lambdas.
+    gridlock::ui::EditorTabManager tabManager;
+    auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr);
+    const int idx = tabManager.currentIndex();
+    auto isDirty = [](auto& m, int i) { if constexpr (requires { m.isTabModified(i); }) return m.isTabModified(i); else return false; };
+    auto saveAll = [](auto& m) { if constexpr (requires { m.saveAllModifiedTabs(); }) return m.saveAllModifiedTabs(); else return -1; };
+    auto switchHdr = [](auto& m) { if constexpr (requires { m.switchHeaderSource(); }) return m.switchHeaderSource(); else return false; };
+    auto breadcrumb = [](auto* v) { if constexpr (requires { v->currentScopeBreadcrumb(); }) return v->currentScopeBreadcrumb(); else return QString(); };
+
+    // Modify text in tabView and verify dirty indicator ("●") and isTabModified(idx) == true.
+    // Then invoke saveAllModifiedTabs() and verify dirty state is cleared on disk and tab bar.
+    tabView->textCursor().insertText(QStringLiteral("// dirty edit\n")); QApplication::processEvents();
+    QVERIFY2(isDirty(tabManager, idx) && tabManager.tabText(idx).contains(QStringLiteral("●")), "Modified tab must report isTabModified(idx) == true and include '●' in tabText");
+    QVERIFY2(saveAll(tabManager) >= 1 && !isDirty(tabManager, idx) && !tabManager.tabText(idx).contains(QStringLiteral("●")), "saveAllModifiedTabs() must save dirty buffer and remove '●'");
+
+    // Move cursor into main() or DeeplyNested and verify currentScopeBreadcrumb(), then toggle header/source.
+    tabView->setTextCursor(QTextCursor(tabView->document()->findBlockByNumber(16)));
+    const QString bc = breadcrumb(tabView);
+    QVERIFY2(bc.contains(QStringLiteral("inspection_demo.cpp")) && (bc.contains(QStringLiteral("main")) || bc.contains(QStringLiteral("DeeplyNested"))), qPrintable(bc));
+    QVERIFY2(switchHdr(tabManager) && tabManager.tabText(tabManager.currentIndex()).contains(QStringLiteral("inspection_demo.hpp")), "switchHeaderSource() must switch to inspection_demo.hpp");
 }

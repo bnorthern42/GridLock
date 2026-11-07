@@ -10,6 +10,7 @@
 #include "../core/managers/ConfigManager.hpp"
 #include "views/SourceCodeView.hpp"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTabBar>
@@ -92,8 +93,17 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
 
     // Append new tab with base file name and full path tooltip.
     const QFileInfo fi(absolutePath);
-    const int index = addTab(view, fi.fileName());
+    const QString baseName = fi.fileName();
+    const int index = addTab(view, baseName);
     setTabToolTip(index, absolutePath);
+
+    // Update tab title with dirty indicator ("● ") whenever the document modification state changes.
+    connect(view, &SourceCodeView::modificationStateChanged, this, [this, view, baseName](bool modified) {
+        const int tabIdx = indexOf(view);
+        if (tabIdx >= 0) {
+            setTabText(tabIdx, modified ? (QStringLiteral("● ") + baseName) : baseName);
+        }
+    });
 
     m_openFiles[absolutePath] = view;
     setCurrentIndex(index);
@@ -154,6 +164,59 @@ void EditorTabManager::clearAllTabs() {
     while (count() > 0) {
         onTabCloseRequested(0);
     }
+}
+
+/**
+ * @brief Returns whether the editor tab at index has unsaved document modifications.
+ * @param index Zero-based tab index.
+ * @return True if the underlying SourceCodeView document is modified.
+ */
+bool EditorTabManager::isTabModified(int index) const {
+    auto* view = qobject_cast<SourceCodeView*>(widget(index));
+    return view && view->document() && view->document()->isModified();
+}
+
+/**
+ * @brief Saves all currently modified editor tabs to disk and clears their dirty indicators.
+ * @return Number of modified tabs written to disk.
+ */
+int EditorTabManager::saveAllModifiedTabs() {
+    int savedCount = 0;
+    for (int i = 0; i < count(); ++i) {
+        if (auto* view = qobject_cast<SourceCodeView*>(widget(i))) {
+            if (view->document() && view->document()->isModified() && view->saveToFile()) {
+                const QString baseName = QFileInfo(view->property("absolutePath").toString()).fileName();
+                setTabText(i, baseName);
+                ++savedCount;
+            }
+        }
+    }
+    return savedCount;
+}
+
+/**
+ * @brief Toggles the active editor tab between corresponding C/C++ header (.hpp/.h) and source (.cpp/.c) files.
+ * @return True if a matching counterpart file was found and activated.
+ */
+bool EditorTabManager::switchHeaderSource() {
+    auto* view = currentSourceCodeView();
+    if (!view) return false;
+    const QFileInfo fi(view->property("absolutePath").toString());
+    if (!fi.exists()) return false;
+    const QString ext = fi.suffix().toLower();
+    const bool isHeader = (ext == QStringLiteral("hpp") || ext == QStringLiteral("hxx") ||
+                           ext == QStringLiteral("hh") || ext == QStringLiteral("h"));
+    const QStringList candidates = isHeader
+                                       ? QStringList{QStringLiteral("cpp"), QStringLiteral("cxx"), QStringLiteral("cc"), QStringLiteral("c")}
+                                       : QStringList{QStringLiteral("hpp"), QStringLiteral("h"), QStringLiteral("hxx"), QStringLiteral("hh")};
+    // Search same directory first for matching stem + counterpart extension.
+    for (const QString& targetExt : candidates) {
+        const QString candidatePath = fi.dir().filePath(fi.completeBaseName() + QLatin1Char('.') + targetExt);
+        if (QFileInfo::exists(candidatePath)) {
+            return openFile(candidatePath) != nullptr;
+        }
+    }
+    return false;
 }
 
 }  // namespace gridlock::ui

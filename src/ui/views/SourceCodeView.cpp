@@ -15,6 +15,7 @@
 #include <QAction>
 #include <QDebug>
 #include <QFile>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QSet>
 #include <QTextStream>
@@ -156,12 +157,13 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     // Install C++ syntax highlighter
     m_highlighter = new CppSyntaxHighlighter(document());
 
-    // Enable mouse tracking for interactive variable hover inspector
+    // Enable mouse tracking for interactive variable hover inspector and dirty state propagation
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this);
     m_hoverTimer->setSingleShot(true);
     connect(m_hoverTimer, &QTimer::timeout, this, &SourceCodeView::handleHoverTimeout);
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
+    connect(document(), &QTextDocument::modificationChanged, this, &SourceCodeView::modificationStateChanged);
 }
 
 /**
@@ -667,56 +669,35 @@ void SourceCodeView::highlightExecutionLine(int lineOneBased) {
     }
     m_executionLine = lineOneBased;
     QTextBlock block = document()->findBlockByLineNumber(lineOneBased - 1);
-    if (block.isValid()) {
-        setTextCursor(QTextCursor(block));
-        ensureCursorVisible();
-        centerCursor();
-    }
+    if (block.isValid()) { setTextCursor(QTextCursor(block)); ensureCursorVisible(); centerCursor(); }
     highlightCurrentLine();
     if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
-/**
- * @brief Highlights a specific 1-based execution line and scrolls into view.
- * @param lineNumber 1-based line number.
- */
-void SourceCodeView::highlightCurrentLine(int lineNumber) {
-    highlightExecutionLine(lineNumber);
-}
+/** @brief Highlights a specific 1-based execution line and scrolls into view. */
+void SourceCodeView::highlightCurrentLine(int lineNumber) { highlightExecutionLine(lineNumber); }
 
-/**
- * @brief Selects a 1-based source line, highlights it as active, and emits sourceLineSelected.
- * @param lineOneBased 1-based source line number.
- */
+/** @brief Selects a 1-based source line, highlights it as active, and emits sourceLineSelected. */
 void SourceCodeView::selectSourceLine(int lineOneBased) {
     if (lineOneBased <= 0) return;
     highlightExecutionLine(lineOneBased);
     emit sourceLineSelected(lineOneBased);
 }
 
-/**
- * @brief Adjusts viewport margins to accommodate the gutter width with zero right margin.
- */
+/** @brief Adjusts viewport margins to accommodate the gutter width with zero right margin. */
 void SourceCodeView::updateLineNumberAreaWidth(int) {
     // Ensure zero right-side viewport margin reservation in SourceCodeView.
     setViewportMargins(lineNumberAreaWidth(), 0, 0, 0);
 }
 
-/**
- * @brief Handles scroll and geometry updates for the line number area.
- * @param rect Updated dirty region.
- * @param dy Vertical scroll delta.
- */
+/** @brief Handles scroll and geometry updates for the line number area. */
 void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
     if (dy) m_lineNumberArea->scroll(0, dy);
     else m_lineNumberArea->update(0, rect.y(), m_lineNumberArea->width(), rect.height());
     if (rect.contains(viewport()->rect())) m_lineNumberArea->resize(lineNumberAreaWidth(), rect.height());
 }
 
-/**
- * @brief Synchronizes gutter height upon editor resize.
- * @param e Resize event.
- */
+/** @brief Synchronizes gutter height upon editor resize. */
 void SourceCodeView::resizeEvent(QResizeEvent *e) {
     QPlainTextEdit::resizeEvent(e);
     m_lineNumberArea->setGeometry(QRect(contentsRect().left(), contentsRect().top(), lineNumberAreaWidth(), contentsRect().height()));
@@ -728,7 +709,7 @@ void SourceCodeView::resizeEvent(QResizeEvent *e) {
  * @param activeLine Optional 1-based active line.
  */
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
-    if (!code.isEmpty() && toPlainText() != code) QPlainTextEdit::setPlainText(code);
+    if (!code.isEmpty() && toPlainText() != code) { QPlainTextEdit::setPlainText(code); document()->setModified(false); }
     QList<QTextEdit::ExtraSelection> extraSelections;
     if (activeLine > 0) {
         QTextBlock block = document()->findBlockByLineNumber(activeLine - 1);
@@ -824,8 +805,7 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QFont currentFont = font();
         const int delta = event->angleDelta().y();
-        const int newSize = qBound(6, currentFont.pointSize() + ((delta > 0) ? 1 : ((delta < 0) ? -1 : 0)), 72);
-        currentFont.setPointSize(newSize);
+        currentFont.setPointSize(qBound(6, currentFont.pointSize() + ((delta > 0) ? 1 : ((delta < 0) ? -1 : 0)), 72));
         setFont(currentFont);
         updateLineNumberAreaWidth(0);
         event->accept();
@@ -834,13 +814,8 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
     }
 }
 
-/**
- * @brief Renders the source code editor viewport with a uniform #16181d dark-slate canvas.
- * @param event Paint event covering the dirty viewport region.
- */
-void SourceCodeView::paintEvent(QPaintEvent *event) {
-    QPlainTextEdit::paintEvent(event);
-}
+/** @brief Renders the source code editor viewport. */
+void SourceCodeView::paintEvent(QPaintEvent *event) { QPlainTextEdit::paintEvent(event); }
 
 /**
  * @brief Returns member and variable completion strings for linePrefix at lineOneBased.
@@ -849,10 +824,8 @@ void SourceCodeView::paintEvent(QPaintEvent *event) {
  * @return List of completion labels.
  */
 QStringList SourceCodeView::editorCompletionsAtLine(int lineOneBased, const QString& linePrefix) const {
-    const auto items = core::ClangdLspClient::completeDetailedAtLine(
-        m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
-    QStringList labels;
-    labels.reserve(items.size());
+    const auto items = core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
+    QStringList labels; labels.reserve(items.size());
     for (const auto& it : items) labels.append(it.label);
     return labels;
 }
@@ -863,23 +836,15 @@ QStringList SourceCodeView::editorCompletionsAtLine(int lineOneBased, const QStr
  * @param lineOneBased 1-based line number.
  */
 void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, int lineOneBased) {
-    const auto items = core::ClangdLspClient::completeDetailedAtLine(
-        m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
-    if (items.isEmpty()) {
-        if (m_completionPopup) m_completionPopup->hide();
-        return;
-    }
+    const auto items = core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
+    if (items.isEmpty()) { if (m_completionPopup) m_completionPopup->hide(); return; }
     if (!m_completionPopup) {
         m_completionPopup = new LspCompletionPopup(this);
         connect(m_completionPopup, &LspCompletionPopup::itemChosen, this, [this](const QString& insertText) {
             QTextCursor cur = textCursor();
             const QString line = cur.block().text().left(cur.positionInBlock());
-            const int sepPos = qMax(line.lastIndexOf(QLatin1Char('.')),
-                                    qMax(line.lastIndexOf(QStringLiteral("->")) + 1,
-                                         line.lastIndexOf(QStringLiteral("::")) + 1));
-            if (sepPos >= 0 && line.length() > sepPos + 1) {
-                cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, line.length() - (sepPos + 1));
-            }
+            const int sepPos = qMax(line.lastIndexOf(QLatin1Char('.')), qMax(line.lastIndexOf(QStringLiteral("->")) + 1, line.lastIndexOf(QStringLiteral("::")) + 1));
+            if (sepPos >= 0 && line.length() > sepPos + 1) cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, line.length() - (sepPos + 1));
             cur.insertText(insertText);
             setTextCursor(cur);
         });
@@ -890,7 +855,7 @@ void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, i
 }
 
 /**
- * @brief Saves the current editor document to disk.
+ * @brief Saves the current editor document to disk and clears its modified state.
  * @param filePath Target file path, or empty to overwrite currentFile().
  * @return True if successfully written; false otherwise.
  */
@@ -906,6 +871,30 @@ bool SourceCodeView::saveToFile(const QString& filePath) {
 }
 
 /**
+ * @brief Computes the enclosing C/C++ lexical scope breadcrumb at the current cursor line.
+ * @return Breadcrumb string formatted as "filename > Class/Struct > function".
+ */
+QString SourceCodeView::currentScopeBreadcrumb() const {
+    const QString fileLabel = m_currentFilePath.isEmpty() ? QStringLiteral("buffer.cpp") : QFileInfo(m_currentFilePath).fileName();
+    const int targetBlock = textCursor().blockNumber();
+    static const QRegularExpression typeRe(QStringLiteral("^\\s*(?:struct|class)\\s+([A-Za-z_][A-Za-z0-9_]*)"));
+    static const QRegularExpression funcRe(QStringLiteral("^\\s*(?:[A-Za-z_][A-Za-z0-9_:<>*&\\s]+\\s+)?([A-Za-z_][A-Za-z0-9_:]*)\\s*\\([^;]*\\)\\s*(?:const\\s*)?\\{?\\s*$"));
+    QString activeType, activeFunc;
+    for (QTextBlock b = document()->begin(); b.isValid() && b.blockNumber() <= targetBlock; b = b.next()) {
+        const QString line = b.text();
+        if (const auto tm = typeRe.match(line); tm.hasMatch()) activeType = tm.captured(1);
+        if (const auto fm = funcRe.match(line); fm.hasMatch()) {
+            const QString fn = fm.captured(1);
+            if (fn != QStringLiteral("if") && fn != QStringLiteral("for") && fn != QStringLiteral("while") && fn != QStringLiteral("switch")) activeFunc = fn;
+        }
+    }
+    QStringList parts{fileLabel};
+    if (!activeType.isEmpty()) parts.append(activeType);
+    if (!activeFunc.isEmpty()) parts.append(activeFunc);
+    return parts.join(QStringLiteral(" > "));
+}
+
+/**
  * @brief Handles key press events for live LSP autocomplete navigation and invocation.
  * @param event Key event.
  */
@@ -914,9 +903,7 @@ void SourceCodeView::keyPressEvent(QKeyEvent *event) {
     if (m_completionPopup && m_completionPopup->isVisible()) {
         if (event->key() == Qt::Key_Down) { m_completionPopup->selectNext(); event->accept(); return; }
         if (event->key() == Qt::Key_Up) { m_completionPopup->selectPrevious(); event->accept(); return; }
-        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Tab) {
-            if (m_completionPopup->selectCurrent()) { event->accept(); return; }
-        }
+        if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Tab) && m_completionPopup->selectCurrent()) { event->accept(); return; }
         if (event->key() == Qt::Key_Escape) { m_completionPopup->hide(); event->accept(); return; }
     }
     if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Space) {
@@ -928,8 +915,7 @@ void SourceCodeView::keyPressEvent(QKeyEvent *event) {
     QPlainTextEdit::keyPressEvent(event);
     const QString txt = event->text();
     if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":") ||
-        (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() &&
-         (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_')))) {
+        (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() && (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_')))) {
         QTextCursor cur = textCursor();
         triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
     }
