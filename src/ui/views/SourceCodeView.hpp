@@ -18,6 +18,7 @@
 #include <QPoint>
 #include <QContextMenuEvent>
 #include <QMouseEvent>
+#include "../../core/utils/ClangdLspClient.hpp"
 
 namespace gridlock::ui {
 
@@ -314,6 +315,18 @@ public:
                                        bool enabledChecked, const QString& condition,
                                        const QString& suspendScope);
 
+    /**
+     * @brief Applies compiler diagnostics as wavy underlines (#f7768e errors, #e0af68 warnings) and tooltips.
+     * @param diagnostics Vector of LspDiagnostic records.
+     */
+    void setDiagnostics(const QVector<core::utils::LspDiagnostic>& diagnostics);
+
+    /**
+     * @brief Returns the currently active compiler diagnostics on this editor buffer.
+     * @return Vector of LspDiagnostic records.
+     */
+    QVector<core::utils::LspDiagnostic> diagnostics() const { return m_diagnostics; }
+
 signals:
     /** @brief Emitted to request running the target application. */
     void runTargetRequested();
@@ -368,6 +381,7 @@ private:
     LspCompletionPopup* m_completionPopup = nullptr;
     QMap<int, QString> m_breakpoints;
     QMap<int, QString> m_breakpointSuspendScopes;
+    QVector<core::utils::LspDiagnostic> m_diagnostics;
     QString m_currentFilePath;
     QString m_lastHoveredWord;
     QTimer* m_hoverTimer = nullptr;

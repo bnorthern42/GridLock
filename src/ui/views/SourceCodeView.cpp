@@ -388,8 +388,24 @@ void SourceCodeView::highlightCurrentLine() {
             selections.append(execSel);
         }
     }
+    // Render inline wavy underlines (#f7768e crimson for errors, #e0af68 amber for warnings).
+    for (const auto& diag : m_diagnostics) {
+        QTextBlock dBlock = document()->findBlockByLineNumber(qMax(0, diag.line - 1));
+        if (!dBlock.isValid()) continue;
+        QTextEdit::ExtraSelection dSel; dSel.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
+        dSel.format.setUnderlineColor(diag.severity == 1 ? QColor(QStringLiteral("#f7768e")) : QColor(QStringLiteral("#e0af68")));
+        dSel.format.setToolTip(diag.message); dSel.cursor = QTextCursor(dBlock);
+        const int sCol = qBound(0, diag.column, qMax(0, dBlock.length() - 1));
+        const int eCol = (diag.endColumn > sCol) ? qMin(diag.endColumn, qMax(0, dBlock.length() - 1)) : qMax(0, dBlock.length() - 1);
+        dSel.cursor.setPosition(dBlock.position() + sCol);
+        dSel.cursor.setPosition(dBlock.position() + eCol, QTextCursor::KeepAnchor);
+        selections.append(dSel);
+    }
     setExtraSelections(selections);
 }
+
+/** @brief Applies compiler diagnostics as wavy underlines and updates gutter markers. */
+void SourceCodeView::setDiagnostics(const QVector<core::utils::LspDiagnostic>& diagnostics) { m_diagnostics = diagnostics; highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update(); }
 
 /**
  * @brief Paints the two-lane gutter with hover previews, vector badges, and right-aligned line numbers.

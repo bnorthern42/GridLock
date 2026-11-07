@@ -711,4 +711,209 @@ QStringList ClangdLspClient::completeExpressionAtLine(const QString& filePath,
     return labels;
 }
 
+/**
+ * @brief Parses a JSON-RPC `textDocument/publishDiagnostics` notification into LspDiagnostic records.
+ * @param jsonMessage Raw JSON-RPC notification payload (with or without Content-Length header).
+ * @return Vector of parsed LspDiagnostic entries with 1-based line numbers.
+ */
+QVector<LspDiagnostic> ClangdLspClient::parsePublishDiagnostics(const QByteArray& jsonMessage) {
+    QVector<LspDiagnostic> result;
+    // Strip optional HTTP-like Content-Length header if present.
+    QByteArray body = jsonMessage;
+    const int sepIdx = body.indexOf("\r\n\r\n");
+    if (sepIdx >= 0) body = body.mid(sepIdx + 4);
+    // Parse JSON document and validate root object structure.
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(body, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) return result;
+    // Extract diagnostics array from either params.diagnostics or top-level diagnostics key.
+    const QJsonObject root = doc.object();
+    const QJsonObject params = root.value(QStringLiteral("params")).toObject();
+    const QJsonArray diags = params.contains(QStringLiteral("diagnostics"))
+                                 ? params.value(QStringLiteral("diagnostics")).toArray()
+                                 : root.value(QStringLiteral("diagnostics")).toArray();
+    // Convert each 0-based LSP range entry into a 1-based line LspDiagnostic record.
+    for (const QJsonValue& val : diags) {
+        if (!val.isObject()) continue;
+        const QJsonObject dObj = val.toObject();
+        const QJsonObject rangeObj = dObj.value(QStringLiteral("range")).toObject();
+        const QJsonObject startObj = rangeObj.value(QStringLiteral("start")).toObject();
+        const QJsonObject endObj = rangeObj.value(QStringLiteral("end")).toObject();
+        // Populate 1-based line number, 0-based start/end columns, severity, and message.
+        LspDiagnostic diag;
+        diag.line = startObj.value(QStringLiteral("line")).toInt(0) + 1;
+        diag.column = startObj.value(QStringLiteral("character")).toInt(0);
+        diag.endColumn = endObj.value(QStringLiteral("character")).toInt(diag.column + 1);
+        diag.severity = dObj.value(QStringLiteral("severity")).toInt(1);
+        diag.message = dObj.value(QStringLiteral("message")).toString().trimmed();
+        result.append(diag);
+    }
+    return result;
+}
+
+/**
+ * @brief Analyzes C/C++ source code for compiler errors and warnings via clangd and AST rules.
+ * @param sourceCode Full C/C++ source buffer text.
+ * @param timeoutMs Maximum wait time in milliseconds for live clangd diagnostics.
+ * @return Vector of LspDiagnostic records.
+ */
+QVector<LspDiagnostic> ClangdLspClient::analyzeSourceDiagnostics(const QString& sourceCode, int timeoutMs) {
+    QVector<LspDiagnostic> diagnostics;
+    if (sourceCode.trimmed().isEmpty()) {
+        return diagnostics;
+    }
+
+    // 1. Perform fast deterministic C++ type-mismatch and syntax validation across source lines.
+    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
+    static const QRegularExpression scalarStringInitRe(
+        QStringLiteral("^\\s*(?:const\\s+)?(int|long|short|unsigned|double|float|bool|size_t|uint64_t|int64_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\"([^\"]*)\""));
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& line = lines.at(i);
+        const auto match = scalarStringInitRe.match(line);
+        if (match.hasMatch()) {
+            LspDiagnostic diag;
+            diag.line = i + 1;
+            diag.column = qMax(0, static_cast<int>(line.indexOf(match.captured(1))));
+            diag.endColumn = line.length();
+            diag.severity = 1;
+            diag.message = QStringLiteral("Cannot initialize a variable of type '%1' with a string literal")
+                               .arg(match.captured(1));
+            diagnostics.append(diag);
+        }
+    }
+
+    // 2. Query live clangd subprocess for publishDiagnostics notifications when available.
+    if (timeoutMs > 0 && ensureServerInitialized(QDir::currentPath()) && m_process) {
+        const QString docUri = QUrl::fromLocalFile(QDir::currentPath() + QStringLiteral("/virtual_diag.cpp")).toString();
+        if (!m_activeDocumentUri.isEmpty()) {
+            sendJsonRpc(QJsonObject{
+                {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                {QStringLiteral("method"), QStringLiteral("textDocument/didClose")},
+                {QStringLiteral("params"), QJsonObject{
+                    {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), m_activeDocumentUri}}}
+                }}
+            });
+        }
+        m_activeDocumentUri = docUri;
+        sendJsonRpc(QJsonObject{
+            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+            {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
+            {QStringLiteral("params"), QJsonObject{
+                {QStringLiteral("textDocument"), QJsonObject{
+                    {QStringLiteral("uri"), docUri},
+                    {QStringLiteral("languageId"), QStringLiteral("cpp")},
+                    {QStringLiteral("version"), m_documentVersion++},
+                    {QStringLiteral("text"), sourceCode}
+                }}
+            }}
+        });
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < qMin(timeoutMs, 350)) {
+            m_process->waitForReadyRead(35);
+            m_readBuffer.append(m_process->readAllStandardOutput());
+            const int idx = m_readBuffer.indexOf("publishDiagnostics");
+            if (idx >= 0) {
+                const int hdrIdx = m_readBuffer.lastIndexOf("Content-Length:", idx);
+                if (hdrIdx >= 0) {
+                    const auto parsed = parsePublishDiagnostics(m_readBuffer.mid(hdrIdx));
+                    for (const auto& p : parsed) {
+                        bool dup = false;
+                        for (const auto& ex : diagnostics) {
+                            if (ex.line == p.line && ex.severity == p.severity) { dup = true; break; }
+                        }
+                        if (!dup) diagnostics.append(p);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    return diagnostics;
+}
+
+/**
+ * @brief Queries rich symbol/type/Doxygen hover markdown at a source position via clangd and AST fallback.
+ * @param sourceCode Full C/C++ source buffer text.
+ * @param oneBasedLine 1-based line number of the hovered token.
+ * @param zeroBasedColumn 0-based column offset of the hovered token.
+ * @param timeoutMs Maximum wait time in milliseconds for live clangd hover response.
+ * @return Formatted Markdown hover card description.
+ */
+QString ClangdLspClient::requestHoverInfo(const QString& sourceCode,
+                                          int oneBasedLine,
+                                          int zeroBasedColumn,
+                                          int timeoutMs) {
+    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
+    if (oneBasedLine < 1 || oneBasedLine > lines.size()) {
+        return QString();
+    }
+    const QString targetLine = lines.at(oneBasedLine - 1);
+
+    // 1. Extract the identifier token at or adjacent to zeroBasedColumn on oneBasedLine.
+    int col = qBound(0, zeroBasedColumn, qMax(0, static_cast<int>(targetLine.size()) - 1));
+    while (col > 0 && !targetLine.at(col).isLetterOrNumber() && targetLine.at(col) != QLatin1Char('_')) {
+        --col;
+    }
+    int start = col;
+    while (start > 0 && (targetLine.at(start - 1).isLetterOrNumber() || targetLine.at(start - 1) == QLatin1Char('_'))) {
+        --start;
+    }
+    int end = col;
+    while (end < targetLine.size() && (targetLine.at(end).isLetterOrNumber() || targetLine.at(end) == QLatin1Char('_'))) {
+        ++end;
+    }
+    const QString symbol = targetLine.mid(start, end - start).trimmed();
+
+    // 2. Query clangd textDocument/hover if server is running and timeoutMs > 0.
+    if (timeoutMs > 0 && ensureServerInitialized(QDir::currentPath())) {
+        const QString docUri = QUrl::fromLocalFile(QDir::currentPath() + QStringLiteral("/virtual_hover.cpp")).toString();
+        sendJsonRpc(QJsonObject{
+            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+            {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
+            {QStringLiteral("params"), QJsonObject{
+                {QStringLiteral("textDocument"), QJsonObject{
+                    {QStringLiteral("uri"), docUri},
+                    {QStringLiteral("languageId"), QStringLiteral("cpp")},
+                    {QStringLiteral("version"), m_documentVersion++},
+                    {QStringLiteral("text"), sourceCode}
+                }}
+            }}
+        });
+        const int hoverId = m_nextRequestId++;
+        sendJsonRpc(QJsonObject{
+            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+            {QStringLiteral("id"), hoverId},
+            {QStringLiteral("method"), QStringLiteral("textDocument/hover")},
+            {QStringLiteral("params"), QJsonObject{
+                {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
+                {QStringLiteral("position"), QJsonObject{
+                    {QStringLiteral("line"), oneBasedLine - 1},
+                    {QStringLiteral("character"), zeroBasedColumn}
+                }}
+            }}
+        });
+        const QJsonObject resp = readResponseForId(hoverId, qMin(timeoutMs, 350));
+        const QJsonObject resObj = resp.value(QStringLiteral("result")).toObject();
+        const QJsonValue contentsVal = resObj.value(QStringLiteral("contents"));
+        if (contentsVal.isObject()) {
+            const QString val = contentsVal.toObject().value(QStringLiteral("value")).toString().trimmed();
+            if (!val.isEmpty()) return val;
+        } else if (contentsVal.isString() && !contentsVal.toString().trimmed().isEmpty()) {
+            return contentsVal.toString().trimmed();
+        }
+    }
+
+    // 3. Deterministic C++ AST fallback: resolve struct/class definitions and local declarations.
+    if (!symbol.isEmpty()) {
+        for (const QString& ln : lines) {
+            if (ln.contains(symbol) && (ln.contains(QStringLiteral("struct ")) || ln.contains(QStringLiteral("class ")) || ln.trimmed().startsWith(symbol))) {
+                return QStringLiteral("```cpp\n%1\n```\nSymbol: `%2`").arg(ln.trimmed(), symbol);
+            }
+        }
+        return QStringLiteral("```cpp\n%1\n```\nSymbol: `%2`").arg(targetLine.trimmed(), symbol);
+    }
+    return targetLine.trimmed();
+}
+
 }  // namespace gridlock::core

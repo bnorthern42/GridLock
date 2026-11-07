@@ -20,11 +20,29 @@
 namespace gridlock::core {
 
 /**
+ * @struct LspDiagnostic
+ * @brief Represents a compiler diagnostic (error or warning) reported by clangd or AST analysis.
+ */
+struct LspDiagnostic {
+    int line = 0;      ///< 1-based source line number.
+    int column = 0;    ///< 0-based start column offset.
+    int endColumn = 0; ///< 0-based end column offset.
+    int severity = 1;  ///< LSP DiagnosticSeverity: 1 = Error, 2 = Warning, 3 = Information, 4 = Hint.
+    QString message;   ///< Human-readable compiler diagnostic message.
+};
+
+namespace utils {
+using LspDiagnostic = gridlock::core::LspDiagnostic;
+}  // namespace utils
+
+/**
  * @class ClangdLspClient
  * @brief Provides C/C++ expression and member completion at a target source line via clangd LSP.
  */
 class ClangdLspClient {
 public:
+    using LspDiagnostic = gridlock::core::LspDiagnostic;
+
     /**
      * @brief Returns the process-wide shared ClangdLspClient singleton instance.
      * @return Reference to the singleton ClangdLspClient.
@@ -62,6 +80,31 @@ public:
         int targetLineOneBased,
         const QString& partialExpression,
         int timeoutMs = 450);
+
+    /**
+     * @brief Parses a JSON-RPC `textDocument/publishDiagnostics` notification into LspDiagnostic records.
+     * @param jsonMessage Raw JSON-RPC notification payload (with or without Content-Length header).
+     * @return Vector of parsed LspDiagnostic entries with 1-based line numbers.
+     */
+    static QVector<LspDiagnostic> parsePublishDiagnostics(const QByteArray& jsonMessage);
+
+    /**
+     * @brief Analyzes C/C++ source code for compiler errors and warnings via clangd and AST rules.
+     * @param sourceCode Full C/C++ source buffer text.
+     * @param timeoutMs Maximum wait time in milliseconds for live clangd diagnostics.
+     * @return Vector of LspDiagnostic records.
+     */
+    QVector<LspDiagnostic> analyzeSourceDiagnostics(const QString& sourceCode, int timeoutMs = 2500);
+
+    /**
+     * @brief Queries rich symbol/type/Doxygen hover markdown at a source position via clangd and AST fallback.
+     * @param sourceCode Full C/C++ source buffer text.
+     * @param oneBasedLine 1-based line number of the hovered token.
+     * @param zeroBasedColumn 0-based column offset of the hovered token.
+     * @param timeoutMs Maximum wait time in milliseconds for live clangd hover response.
+     * @return Formatted Markdown hover card description.
+     */
+    QString requestHoverInfo(const QString& sourceCode, int oneBasedLine, int zeroBasedColumn, int timeoutMs = 2000);
 
     /**
      * @brief Terminates any active clangd background process cleanly on destruction.
