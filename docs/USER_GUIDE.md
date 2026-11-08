@@ -1,5 +1,7 @@
 # GridLock User Guide
 
+> Looking for a hands-on walkthrough with the sample MPI programs? See the [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](TUTORIAL.md).
+
 ![GridLock Workspace Overview](screenshots/workspace_overview.png)
 
 ## 1. Launching & Stepping an MPI Target
