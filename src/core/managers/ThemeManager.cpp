@@ -70,37 +70,37 @@ static QString getHighContrastLightQssOverlay() {
         "QMainWindow::separator:hover, QSplitter::handle:hover { background: #0969da; }\n"
         // Zero-margin embedded terminal emulator container protection.
         "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; }\n"
-        // Dock container borders and 24px uppercase dock title headers.
+        // Dock container borders and uppercase dock title headers (>= 12px UI sans-serif).
         "QDockWidget { border: 1px solid #d0d7de; color: #1f2328; }\n"
         "QDockWidget::title {\n"
-        "    background: #eaeef2; color: #1f2328; padding: 3px 8px; height: 24px;\n"
-        "    min-height: 20px; max-height: 24px; border-bottom: 1px solid #d0d7de;\n"
-        "    font-size: 11px; font-weight: 600; text-transform: uppercase;\n"
+        "    background: #eaeef2; color: #1f2328; padding: 3px 8px; height: 26px;\n"
+        "    min-height: 22px; max-height: 26px; border-bottom: 1px solid #d0d7de;\n"
+        "    font-size: 12px; font-weight: 600; text-transform: uppercase;\n"
         "}\n"
         // Tabbed workspace and dock tab bars with 2px royal-blue active tab underline.
         "QTabWidget::pane, QTabWidget#EditorTabManager::pane { border: 0px; background: #ffffff; }\n"
         "QTabBar { background: #eaeef2; }\n"
         "QTabBar::tab {\n"
-        "    background: #eaeef2; color: #57606a; padding: 3px 10px; height: 24px;\n"
-        "    min-height: 20px; max-height: 24px; border-right: 1px solid #d0d7de;\n"
-        "    border-bottom: 1px solid #d0d7de; font-size: 11px; font-weight: 600;\n"
+        "    background: #eaeef2; color: #57606a; padding: 3px 10px; height: 26px;\n"
+        "    min-height: 22px; max-height: 26px; border-right: 1px solid #d0d7de;\n"
+        "    border-bottom: 1px solid #d0d7de; font-size: 12px; font-weight: 600;\n"
         "}\n"
         // Active selected tab uses pure white surface and dark charcoal label text.
         "QTabBar::tab:selected { background: #ffffff; color: #1f2328; border-bottom: 2px solid #0969da; }\n"
-        // Compact 20-22px push buttons and toolbar buttons with crisp #d0d7de borders.
+        // Push buttons and toolbar buttons with crisp #d0d7de borders and 12px UI sans-serif font.
         "QPushButton, QToolButton, QToolBar QToolButton {\n"
-        "    height: 20px; min-height: 20px; max-height: 22px; padding: 1px 8px;\n"
-        "    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 2px;\n"
-        "    color: #1f2328; font-size: 10px; font-weight: 600;\n"
+        "    height: 22px; min-height: 20px; max-height: 24px; padding: 1px 8px;\n"
+        "    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 3px;\n"
+        "    color: #1f2328; font-size: 12px; font-weight: 600;\n"
         "}\n"
         // Hover and disabled button states in Light Mode.
         "QPushButton:hover:enabled, QToolButton:hover { background: #eaeef2; border: 1px solid #0969da; color: #0969da; }\n"
         "QToolButton:checked, QToolBar QToolButton:checked { background: #dafbe1; color: #1a7f37; border: 1px solid #2ea043; font-weight: 600; }\n"
         "QPushButton:disabled, QToolButton:disabled { background: #f6f8fa; color: #8c959f; border: 1px solid #d8dee4; }\n"
-        // Single-line inputs, spinboxes, combo boxes, and filter bars with #1f2328 text on #ffffff.
+        // Single-line inputs, spinboxes, combo boxes, and filter bars with 12px UI sans-serif text.
         "QLineEdit, QSpinBox, QComboBox, #toolbarTargetSelector, #cutterSeekBar, #symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
-        "    height: 22px; min-height: 20px; max-height: 22px; padding: 0px 6px;\n"
-        "    background: #ffffff; border: 1px solid #d0d7de; border-radius: 2px; color: #1f2328; font-size: 11px; font-weight: 500; font-style: normal;\n"
+        "    height: 24px; min-height: 22px; max-height: 24px; padding: 0px 6px;\n"
+        "    background: #ffffff; border: 1px solid #d0d7de; border-radius: 3px; color: #1f2328; font-size: 12px; font-weight: 500; font-style: normal;\n"
         "}\n"
         // Text editors, browsers, list widgets, and hex dump viewports.
         "QTextEdit, QPlainTextEdit, QTextBrowser, QListWidget, #cutterHexDumpEdit {\n"
@@ -112,19 +112,25 @@ static QString getHighContrastLightQssOverlay() {
         "    background: #ffffff; alternate-background-color: #f6f8fa; color: #1f2328;\n"
         "    border: none; gridline-color: #d0d7de; selection-background-color: #ddf4ff; selection-color: #0969da;\n"
         "}\n"
-        // Table and tree section headers capped at 20-22px height.
+        // Table and tree section headers use 12px UI sans-serif typography.
         "QHeaderView, QHeaderView::section, QTableCornerButton::section {\n"
+        "    font-family: 'Inter', sans-serif;\n"
         "    background-color: #eaeef2; color: #1f2328; border-right: 1px solid #d0d7de; border-bottom: 1px solid #d0d7de;\n"
-        "    height: 20px; min-height: 20px; max-height: 22px; font-size: 10px; font-weight: 600;\n"
+        "    height: 22px; min-height: 22px; max-height: 24px; font-size: 12px; font-weight: 600;\n"
         "}\n"
-        // Unified 24-26px sub-view header strips and bottom status bar in Light Mode.
-        "QToolBar, QStatusBar, #cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar, "
-        "#evaluatorHeaderBar, #evaluatorPromptBar, #gdbConsoleHeaderBar, #gdbConsolePromptBar, "
-        "#refManualHeaderBar, #mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
+        // Unified sub-view header strips and bottom status bar in Light Mode.
+        "QStatusBar, #cutterMemHeader, #watchToolbar, #evaluatorHeaderBar, #evaluatorPromptBar, "
+        "#gdbConsoleHeaderBar, #gdbConsolePromptBar, #refManualHeaderBar, #mpiDiagnosticsHeaderBar, "
+        "#mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
         "    background: #eaeef2; color: #1f2328; border-bottom: 1px solid #d0d7de; min-height: 24px; max-height: 26px;\n"
         "}\n"
-        // Status bar telemetry badges, labels, and checkboxes use high-contrast #1f2328 foreground.
-        "#cutterStatusTelemetry, #cutterDisasmBadge, #cutterDisasmStats, QLabel, QCheckBox { color: #1f2328; }\n"
+        "QToolBar, #cutterDisasmHeader, #projectModeBar {\n"
+        "    background: #eaeef2; color: #1f2328; border-bottom: 1px solid #d0d7de; min-height: 28px; max-height: 30px;\n"
+        "}\n"
+        // Menus and modal dialog chrome use 13px UI sans-serif typography.
+        "QMenuBar, QMenu, QDialog, QWizard { font-size: 13px; }\n"
+        // Status bar telemetry badges, labels, and checkboxes use high-contrast 12px #1f2328 foreground.
+        "#cutterStatusTelemetry, #cutterDisasmBadge, #cutterDisasmStats, QLabel, QCheckBox { color: #1f2328; font-size: 12px; }\n"
     );
 }
 
@@ -157,20 +163,13 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "QMainWindow::separator:hover, QSplitter::handle:hover { background: #528bff; }\n"
         // Embedded terminal emulator cell geometry protection preventing PTY stair-stepping.
         "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; }\n"
-        // Dock container borders and compact 24px dock title bars.
+        // Dock container borders and 26px dock title bars in 12px UI sans-serif.
         // Every dock widget has a 1px `#282c34` outline to separate adjacent panes cleanly.
         "QDockWidget { border: 1px solid #282c34; }\n"
         "QDockWidget::title {\n"
-        "    background: #21252b;\n"
-        "    color: #abb2bf;\n"
-        "    padding: 3px 8px;\n"
-        "    height: 24px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 24px;\n"
-        "    border-bottom: 1px solid #2c313a;\n"
-        "    font-size: 11px;\n"
-        "    font-weight: 600;\n"
-        "    text-transform: uppercase;\n"
+        "    background: #21252b; color: #abb2bf; padding: 3px 8px; height: 26px;\n"
+        "    min-height: 22px; max-height: 26px; border-bottom: 1px solid #2c313a;\n"
+        "    font-size: 12px; font-weight: 600; text-transform: uppercase;\n"
         "}\n"
         // Tabbed dock and bottom console tab bar chrome with 2px royal-blue active indicator.
         // Zero-margin tab panes prevent double borders inside dock containers.
@@ -178,329 +177,171 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "QTabWidget#EditorTabManager::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }\n"
         "QTabBar { background: #181a1f; }\n"
         "QTabBar::tab {\n"
-        "    background: #181a1f;\n"
-        "    color: #abb2bf;\n"
-        "    padding: 3px 10px;\n"
-        "    height: 24px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 24px;\n"
-        "    margin: 0px;\n"
-        "    border-right: 1px solid #282c34;\n"
-        "    border-bottom: 1px solid #2c313a;\n"
-        "    font-size: 11px;\n"
-        "    font-weight: 600;\n"
-        "    text-transform: uppercase;\n"
+        "    background: #181a1f; color: #abb2bf; padding: 3px 10px; height: 26px;\n"
+        "    min-height: 22px; max-height: 26px; margin: 0px; border-right: 1px solid #282c34;\n"
+        "    border-bottom: 1px solid #2c313a; font-size: 12px; font-weight: 600; text-transform: uppercase;\n"
         "}\n"
         // Selected tab uses the `#21252b` header surface and a 2px `#528bff` underline.
         "QTabBar::tab:selected {\n"
-        "    background: #21252b;\n"
-        "    color: #ffffff;\n"
-        "    border-bottom: 2px solid #528bff;\n"
+        "    background: #21252b; color: #ffffff; border-bottom: 2px solid #528bff;\n"
         "}\n"
-        // Standard push button states (normal, hover, pressed/checked, disabled) capped at 22px height.
+        // Standard push button states (normal, hover, pressed/checked, disabled) in 12px UI sans-serif.
         // Muted `#323844` borders replace loud neon outlines across all control bars.
         "QPushButton, QPushButton:disabled, QPushButton:flat:disabled {\n"
-        "    height: 20px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 22px;\n"
-        "    padding: 1px 8px;\n"
-        "    margin: 0px;\n"
-        "    background: #252932;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    color: #d7dae0;\n"
-        "    font-size: 10px;\n"
-        "    font-weight: 600;\n"
+        "    height: 22px; min-height: 20px; max-height: 24px; padding: 1px 8px; margin: 0px;\n"
+        "    background: #252932; border: 1px solid #323844; border-radius: 3px;\n"
+        "    color: #d7dae0; font-size: 12px; font-weight: 600;\n"
         "}\n"
         // Hovering an enabled push button subtly brightens the fill and border.
         "QPushButton:hover:enabled {\n"
-        "    background: #2c323d;\n"
-        "    border: 1px solid #3e4452;\n"
-        "    color: #ffffff;\n"
+        "    background: #2c323d; border: 1px solid #3e4452; color: #ffffff;\n"
         "}\n"
         // Active/checked push buttons display a 1px `#528bff` royal-blue accent border.
         "QPushButton:pressed, QPushButton:checked {\n"
-        "    background: #2c3444;\n"
-        "    border: 1px solid #528bff;\n"
-        "    color: #ffffff;\n"
+        "    background: #2c3444; border: 1px solid #528bff; color: #ffffff;\n"
         "}\n"
         // Disabled push buttons recede into the dark background with muted `#454c59` text.
         "QPushButton:disabled {\n"
-        "    background: #14161b;\n"
-        "    color: #454c59;\n"
-        "    border: 1px solid #1e2128;\n"
+        "    background: #14161b; color: #454c59; border: 1px solid #1e2128;\n"
         "}\n"
-        // Compact single-line text inputs, spinboxes, and combo boxes capped at 22px height with non-italic font.
+        // Single-line text inputs, spinboxes, and combo boxes in 12px UI sans-serif.
         "QLineEdit, QLineEdit:disabled, QSpinBox, QSpinBox:disabled, QComboBox, QComboBox:disabled, #toolbarTargetSelector {\n"
-        "    height: 22px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 22px;\n"
-        "    padding: 0px 6px;\n"
-        "    margin: 0px;\n"
-        "    background: #16181d;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    color: #d7dae0;\n"
-        "    font-size: 11px;\n"
-        "    font-weight: 500;\n"
-        "    font-style: normal;\n"
+        "    height: 24px; min-height: 22px; max-height: 24px; padding: 0px 6px; margin: 0px;\n"
+        "    background: #16181d; border: 1px solid #323844; border-radius: 3px;\n"
+        "    color: #d7dae0; font-size: 12px; font-weight: 500; font-style: normal;\n"
         "}\n"
         // Focused input controls highlight their border in `#528bff` for keyboard accessibility.
         "QLineEdit:focus, QSpinBox:focus, QComboBox:focus {\n"
-        "    border: 1px solid #528bff;\n"
-        "    background: #1b1e24;\n"
+        "    border: 1px solid #528bff; background: #1b1e24;\n"
         "}\n"
         // Code editors, disassembly views, documentation browsers, and tabular data grids.
         "QTextEdit, QPlainTextEdit, QTextBrowser, QListWidget {\n"
-        "    border: none;\n"
-        "    border-radius: 0px;\n"
-        "    padding: 0px;\n"
-        "    background: #16181d;\n"
-        "    color: #d7dae0;\n"
+        "    border: none; border-radius: 0px; padding: 0px; background: #16181d; color: #d7dae0;\n"
         "}\n"
-        // Tree and table views enforce monospace typography, alternating rows, and royal-blue selection.
+        // Tree and table views enforce monospace data typography, alternating rows, and royal-blue selection.
         "QTreeView, QTableView, QTableWidget {\n"
         "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    background: #16181d;\n"
-        "    alternate-background-color: #181b20;\n"
-        "    color: #d7dae0;\n"
-        "    border: none;\n"
-        "    padding: 0px;\n"
-        "    gridline-color: #282c34;\n"
-        "    selection-background-color: #264f78;\n"
-        "    selection-color: #ffffff;\n"
+        "    background: #16181d; alternate-background-color: #181b20; color: #d7dae0;\n"
+        "    border: none; padding: 0px; gridline-color: #282c34;\n"
+        "    selection-background-color: #264f78; selection-color: #ffffff;\n"
         "}\n"
         // Compact 18px minimum row height maximizes visible rows in symbol and register tables.
-        "QTreeView::item, QTableView::item {\n"
-        "    padding: 1px 4px;\n"
-        "    min-height: 18px;\n"
-        "}\n"
+        "QTreeView::item, QTableView::item { padding: 1px 4px; min-height: 18px; }\n"
         // Selected tree and table rows highlight in #264f78 royal blue with crisp white text.
         "QTreeView::item:selected, QTableView::item:selected, QTableWidget::item:selected {\n"
-        "    background: #264f78;\n"
-        "    color: #ffffff;\n"
+        "    background: #264f78; color: #ffffff;\n"
         "}\n"
         // Table and tree header container background matches #16181d canvas so empty vertical
         // header space below the last row in DifferentialGrid has zero grey column mismatch.
         "QHeaderView, QHeaderView:vertical, QHeaderView:horizontal {\n"
-        "    background-color: #16181d;\n"
-        "    border: none;\n"
+        "    background-color: #16181d; border: none;\n"
         "}\n"
-        // Table and tree column header sections capped at 20-22px height with 1px #2c313a border.
+        // Table and tree column header sections use 12px UI sans-serif with 1px #2c313a border.
         // Matches the #21252b sub-view control strip palette across all side and bottom panes.
         "QHeaderView::section {\n"
-        "    background-color: #21252b;\n"
-        "    color: #abb2bf;\n"
-        "    padding: 2px 6px;\n"
-        "    height: 20px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 22px;\n"
-        "    border: 0px;\n"
-        "    border-right: 1px solid #2c313a;\n"
-        "    border-bottom: 1px solid #2c313a;\n"
-        "    font-size: 10px;\n"
-        "    font-weight: 600;\n"
+        "    font-family: 'Inter', sans-serif; background-color: #21252b; color: #abb2bf;\n"
+        "    padding: 2px 6px; height: 22px; min-height: 22px; max-height: 24px;\n"
+        "    border: 0px; border-right: 1px solid #2c313a; border-bottom: 1px solid #2c313a;\n"
+        "    font-size: 12px; font-weight: 600;\n"
         "}\n"
         // Top-left table corner button matches the #21252b header section surface.
         "QTableCornerButton::section {\n"
-        "    background-color: #21252b;\n"
-        "    border: 0px;\n"
-        "    border-right: 1px solid #2c313a;\n"
-        "    border-bottom: 1px solid #2c313a;\n"
+        "    background-color: #21252b; border: 0px; border-right: 1px solid #2c313a; border-bottom: 1px solid #2c313a;\n"
         "}\n"
         // Slim 8px vertical and horizontal scrollbars with zero arrow buttons.
         // Uses #16181d track background and #2c323c rounded thumb handle (#3e4452 on hover).
-        "QScrollBar:vertical {\n"
-        "    background: #16181d;\n"
-        "    width: 8px;\n"
-        "    margin: 0px;\n"
-        "    border: none;\n"
-        "}\n"
+        "QScrollBar:vertical { background: #16181d; width: 8px; margin: 0px; border: none; }\n"
         // Vertical scrollbar thumb handle with 24px minimum grab height.
-        "QScrollBar::handle:vertical {\n"
-        "    background: #2c323c;\n"
-        "    min-height: 24px;\n"
-        "    border-radius: 3px;\n"
-        "}\n"
+        "QScrollBar::handle:vertical { background: #2c323c; min-height: 24px; border-radius: 3px; }\n"
         // Brighten vertical scrollbar thumb handle on mouse hover.
-        "QScrollBar::handle:vertical:hover {\n"
-        "    background: #3e4452;\n"
-        "}\n"
+        "QScrollBar::handle:vertical:hover { background: #3e4452; }\n"
         // Suppress legacy top/bottom stepper arrow buttons on vertical scrollbars.
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {\n"
-        "    height: 0px;\n"
-        "    background: none;\n"
-        "}\n"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; background: none; }\n"
         // Horizontal 8px scrollbar track matching dark-slate viewport background.
-        "QScrollBar:horizontal {\n"
-        "    background: #16181d;\n"
-        "    height: 8px;\n"
-        "    margin: 0px;\n"
-        "    border: none;\n"
-        "}\n"
+        "QScrollBar:horizontal { background: #16181d; height: 8px; margin: 0px; border: none; }\n"
         // Horizontal scrollbar thumb handle with 24px minimum grab width.
-        "QScrollBar::handle:horizontal {\n"
-        "    background: #2c323c;\n"
-        "    min-width: 24px;\n"
-        "    border-radius: 3px;\n"
-        "}\n"
+        "QScrollBar::handle:horizontal { background: #2c323c; min-width: 24px; border-radius: 3px; }\n"
         // Brighten horizontal scrollbar thumb handle on mouse hover.
-        "QScrollBar::handle:horizontal:hover {\n"
-        "    background: #3e4452;\n"
-        "}\n"
+        "QScrollBar::handle:horizontal:hover { background: #3e4452; }\n"
         // Suppress legacy left/right stepper arrow buttons on horizontal scrollbars.
-        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {\n"
-        "    width: 0px;\n"
-        "    background: none;\n"
-        "}\n"
-        // Top execution and navigation toolbar and tool buttons capped at 26-28px height.
+        "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; background: none; }\n"
+        // Top execution and navigation toolbar accommodating 24px segmented perspective toggles.
         "QToolBar {\n"
-        "    height: 26px;\n"
-        "    max-height: 28px;\n"
-        "    min-height: 24px;\n"
-        "    padding: 1px 4px;\n"
-        "    spacing: 4px;\n"
-        "    background: #1e2228;\n"
-        "    border-bottom: 1px solid #2c313a;\n"
+        "    height: 30px; max-height: 32px; min-height: 28px; padding: 1px 4px; spacing: 4px;\n"
+        "    background: #1e2228; border-bottom: 1px solid #2c313a;\n"
         "}\n"
-        // Toolbar buttons share the same 20-22px height and `#252932` slate surface as push buttons.
+        // Toolbar buttons use 12px UI sans-serif and `#252932` slate surface.
         "QToolButton, QToolBar QToolButton {\n"
-        "    height: 20px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 22px;\n"
-        "    padding: 1px 8px;\n"
-        "    margin: 0px;\n"
-        "    background: #252932;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    color: #d7dae0;\n"
-        "    font-size: 11px;\n"
-        "    font-weight: 600;\n"
+        "    height: 22px; min-height: 20px; max-height: 24px; padding: 1px 8px; margin: 0px;\n"
+        "    background: #252932; border: 1px solid #323844; border-radius: 3px;\n"
+        "    color: #d7dae0; font-size: 12px; font-weight: 600;\n"
         "}\n"
         // Toolbar button hover state.
         "QToolButton:hover, QToolBar QToolButton:hover {\n"
-        "    background: #2c323d;\n"
-        "    border: 1px solid #3e4452;\n"
-        "    color: #ffffff;\n"
+        "    background: #2c323d; border: 1px solid #3e4452; color: #ffffff;\n"
         "}\n"
         // Toolbar button pressed and latched Running (:checked) states.
         "QToolButton:pressed, QToolBar QToolButton:pressed {\n"
-        "    background: #2c3444;\n"
-        "    border: 1px solid #528bff;\n"
-        "    color: #ffffff;\n"
+        "    background: #2c3444; border: 1px solid #528bff; color: #ffffff;\n"
         "}\n"
         "QToolButton:checked, QToolBar QToolButton:checked {\n"
-        "    background-color: #19362b;\n"
-        "    color: #4ec9b0;\n"
-        "    border: 1px solid #2ea043;\n"
-        "    font-weight: 600;\n"
+        "    background-color: #19362b; color: #4ec9b0; border: 1px solid #2ea043; font-weight: 600;\n"
         "}\n"
         // Disabled toolbar buttons recede into low-contrast dark chrome when session is IDLE.
         "QToolButton:disabled, QToolBar QToolButton:disabled {\n"
-        "    background-color: #14161b;\n"
-        "    border: 1px solid #1e2128;\n"
-        "    color: #454c59;\n"
+        "    background-color: #14161b; border: 1px solid #1e2128; color: #454c59;\n"
         "}\n"
-        // Address seek bar (`#cutterSeekBar`) in the top toolbar uses monospace font and 22px height.
+        // Address seek bar (`#cutterSeekBar`) in the top toolbar uses 12px UI typography and 24px height.
         "#cutterSeekBar {\n"
-        "    background: #141619;\n"
-        "    color: #d7dae0;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    padding: 1px 6px;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 22px;\n"
-        "    font-size: 11px;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
+        "    background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 3px;\n"
+        "    padding: 1px 6px; min-height: 22px; max-height: 24px; font-size: 12px;\n"
         "}\n"
         // Focused address seek bar highlights border in royal blue.
-        "#cutterSeekBar:focus {\n"
-        "    border: 1px solid #528bff;\n"
-        "    background: #181a1f;\n"
-        "}\n"
+        "#cutterSeekBar:focus { border: 1px solid #528bff; background: #181a1f; }\n"
         // Bottom status bar (`QStatusBar`) and live debugger telemetry strip (`#cutterStatusTelemetry`).
         "QStatusBar {\n"
-        "    background: #181a1f;\n"
-        "    color: #abb2bf;\n"
-        "    border-top: 1px solid #282c34;\n"
-        "    min-height: 22px;\n"
-        "    max-height: 24px;\n"
-        "    padding: 1px 8px;\n"
+        "    background: #181a1f; color: #abb2bf; border-top: 1px solid #282c34;\n"
+        "    min-height: 24px; max-height: 26px; padding: 1px 8px;\n"
         "}\n"
         "QStatusBar::item { border: none; }\n"
         "#cutterStatusTelemetry {\n"
-        "    color: #abb2bf;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 11px;\n"
-        "    min-height: 18px;\n"
-        "    padding: 1px 4px;\n"
+        "    color: #abb2bf; font-size: 12px; min-height: 18px; padding: 1px 4px;\n"
         "}\n"
-        // Unified 24-26px sub-view header and prompt strips across all workstation panels and bottom tabs.
-        "#cutterDisasmHeader, #cutterMemHeader, #projectModeBar, #watchToolbar, "
-        "#evaluatorHeaderBar, #evaluatorPromptBar, #gdbConsoleHeaderBar, #gdbConsolePromptBar, "
-        "#refManualHeaderBar, #mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
-        "    background: #21252b;\n"
-        "    border-bottom: 1px solid #2c313a;\n"
-        "    min-height: 24px;\n"
-        "    max-height: 26px;\n"
+        // Unified sub-view header and prompt strips across all workstation panels and bottom tabs.
+        "#cutterMemHeader, #watchToolbar, #evaluatorHeaderBar, #evaluatorPromptBar, "
+        "#gdbConsoleHeaderBar, #gdbConsolePromptBar, #refManualHeaderBar, "
+        "#mpiDiagnosticsHeaderBar, #mpiNetworkLogHeaderBar, #variablesHeaderBar {\n"
+        "    background: #21252b; border-bottom: 1px solid #2c313a; min-height: 24px; max-height: 26px;\n"
         "}\n"
-        // Disassembly header title badge and basic-block/edge metrics label.
-        "#cutterDisasmBadge {\n"
-        "    color: #abb2bf;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 11px;\n"
-        "    font-weight: 600;\n"
+        "#cutterDisasmHeader, #projectModeBar {\n"
+        "    background: #21252b; border-bottom: 1px solid #2c313a; min-height: 28px; max-height: 30px;\n"
         "}\n"
-        "#cutterDisasmStats {\n"
-        "    color: #7f848e;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 10px;\n"
-        "}\n"
-        // Disassembly mode toggle buttons (CFG, Decompiler, Split CFG+Decompiler).
+        // Disassembly header title badge and basic-block/edge metrics label in 12px UI sans-serif.
+        "#cutterDisasmBadge { color: #abb2bf; font-size: 12px; font-weight: 600; }\n"
+        "#cutterDisasmStats { color: #7f848e; font-size: 12px; }\n"
+        // Unified 24px segmented Disassembly mode buttons (CFG, Decompiler, Split CFG+Decompiler).
         "#cutterCfgToggleBtn, #cutterDecompilerBtn, #cutterSplitViewBtn {\n"
-        "    background: #252932;\n"
-        "    color: #abb2bf;\n"
-        "    border: 1px solid #323844;\n"
-        "    border-radius: 2px;\n"
-        "    padding: 1px 6px;\n"
-        "    min-height: 18px;\n"
-        "    max-height: 20px;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 9px;\n"
-        "    font-weight: 600;\n"
+        "    background: #21252b; color: #d7dae0; border: 1px solid #282c34; border-radius: 3px;\n"
+        "    padding: 0px 10px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600;\n"
         "}\n"
-        // Checked state for Decompiler and Split CFG+Decompiler buttons.
-        "#cutterDecompilerBtn:checked, #cutterSplitViewBtn:checked {\n"
-        "    background: #2c3444;\n"
-        "    color: #ffffff;\n"
-        "    border: 1px solid #528bff;\n"
+        // Checked state for Disassembly segmented mode buttons uses theme accent fill and white text.
+        "#cutterCfgToggleBtn:checked, #cutterDecompilerBtn:checked, #cutterSplitViewBtn:checked {\n"
+        "    background: #528bff; color: #ffffff; border: 1px solid #528bff;\n"
         "}\n"
         // Hover state for Disassembly header mode buttons.
         "#cutterCfgToggleBtn:hover, #cutterDecompilerBtn:hover, #cutterSplitViewBtn:hover {\n"
-        "    background: #2c323d;\n"
-        "    border: 1px solid #528bff;\n"
-        "    color: #ffffff;\n"
+        "    background: #282c34; border: 1px solid #528bff; color: #ffffff;\n"
         "}\n"
         // Hexdump, register table, symbol table, string table, and address-space ribbon selectors.
-        "#cutterHexDumpEdit {\n"
-        "    background: #16181d;\n"
-        "    border: none;\n"
-        "    border-top: 1px solid #282c34;\n"
-        "}\n"
+        "#cutterHexDumpEdit { background: #16181d; border: none; border-top: 1px solid #282c34; }\n"
         "#cutterRegisterTable, #symbolsTable, #stringsTable, #mpiNetworkLogTable {\n"
-        "    background: #181a1f;\n"
-        "    border: none;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace;\n"
-        "    font-size: 11px;\n"
+        "    background: #181a1f; border: none;\n"
+        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: 12px;\n"
         "}\n"
         // Top virtual address-space map ribbon bar (`#AddressNavToolbar`).
         "#AddressNavToolbar {\n"
-        "    background: #141619;\n"
-        "    border-bottom: 1px solid #282c34;\n"
-        "    min-height: 20px;\n"
-        "    max-height: 22px;\n"
-        "    padding: 0px;\n"
-        "    spacing: 0px;\n"
+        "    background: #141619; border-bottom: 1px solid #282c34;\n"
+        "    min-height: 20px; max-height: 22px; padding: 0px; spacing: 0px;\n"
         "}\n"
         // Left vertical 36px tool-window activity rail (`#bottomToolWindowRail`) background and 1px right border.
         "#bottomToolWindowRail { background: #181a1f; border-right: 1px solid #252932; }\n"
@@ -511,85 +352,67 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "#bottomToolWindowRail QToolButton:hover { background: #21252b; color: #ffffff; border: 1px solid #323844; }\n"
         // Active checked state with left accent bar for the selected tool-window group.
         "#bottomToolWindowRail QToolButton:checked { background: #21252b; color: #61afef; border: 1px solid #528bff; border-left: 2px solid #528bff; }\n"
-        // ProjectExplorer mode buttons (FILES | SYMBOLS | STRINGS) and Watch expression add button.
-        "#explorerFilesModeBtn, #explorerSymbolsModeBtn, #explorerStringsModeBtn, #addWatchBtn {\n"
-        "    background: #252932; color: #abb2bf; border: 1px solid #323844; border-radius: 2px;\n"
-        "    padding: 1px 6px; min-height: 18px; max-height: 20px;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: 10px; font-weight: 600;\n"
+        // Unified 24px ProjectExplorer segmented mode buttons (FILES | SYMBOLS | STRINGS) and Watch add button.
+        "#explorerFilesModeBtn, #explorerSymbolsModeBtn, #explorerStringsModeBtn {\n"
+        "    background: #21252b; color: #d7dae0; border: 1px solid #282c34; border-radius: 3px;\n"
+        "    padding: 0px 10px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600;\n"
         "}\n"
-        // Checked state for ProjectExplorer mode selector buttons.
+        "#addWatchBtn {\n"
+        "    background: #21252b; color: #d7dae0; border: 1px solid #282c34; border-radius: 3px;\n"
+        "    padding: 0px 8px; min-height: 22px; max-height: 24px; font-size: 12px; font-weight: 600;\n"
+        "}\n"
+        // Checked state for ProjectExplorer mode selector buttons uses theme accent fill and white text.
         "#explorerFilesModeBtn:checked, #explorerSymbolsModeBtn:checked, #explorerStringsModeBtn:checked {\n"
-        "    background: #2c3444; color: #ffffff; border: 1px solid #528bff;\n"
+        "    background: #528bff; color: #ffffff; border: 1px solid #528bff;\n"
         "}\n"
-        // Filter inputs for Symbols, Strings, and Watch expressions.
+        // Filter inputs for Symbols, Strings, and Watch expressions in 12px UI sans-serif.
         "#symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
-        "    background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 2px;\n"
-        "    padding: 1px 5px; min-height: 18px; max-height: 22px;\n"
-        "    font-family: 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: 10px;\n"
+        "    background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 3px;\n"
+        "    padding: 1px 6px; min-height: 20px; max-height: 24px; font-size: 12px;\n"
         "}\n"
-        // Modal Dialog Dark-Slate Chrome & Content Cards.
-        "QDialog, QWizard { background: #16181d; color: #d7dae0; }\n"
+        // Modal Dialog Dark-Slate Chrome & Content Cards (13px dialog typography).
+        "QDialog, QWizard { background: #16181d; color: #d7dae0; font-size: 13px; }\n"
         // Dialog QGroupBox content cards with 1px solid #2c313a border.
         "QGroupBox {\n"
         "    background: #1b1e24; border: 1px solid #2c313a; border-radius: 3px;\n"
-        "    margin-top: 8px; padding-top: 10px; color: #d7dae0; font-weight: 600;\n"
+        "    margin-top: 8px; padding-top: 10px; color: #d7dae0; font-size: 13px; font-weight: 600;\n"
         "}\n"
         // GroupBox title badge positioning.
         "QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0px 6px; color: #61afef; }\n"
-        // Standardize 24px dialog footer action buttons inside QDialogButtonBox.
-        "QDialogButtonBox QPushButton { min-height: 22px; max-height: 24px; min-width: 72px; padding: 2px 10px; }\n"
-        // Sleek 28px-row dialog navigation sidebars with 3px solid #528bff active indicator.
+        // Standardize dialog footer action buttons inside QDialogButtonBox in 13px UI sans-serif.
+        "QDialogButtonBox QPushButton { min-height: 16px; max-height: 18px; min-width: 72px; padding: 4px 14px; margin: 0px; font-size: 13px; }\n"
+        // Sleek dialog navigation sidebars with 3px solid #528bff active indicator and 13px typography.
         "QListWidget, QListWidget[role=\"sidebar\"] {\n"
         "    background: #1e2128; color: #abb2bf; selection-background-color: #264f78; selection-color: #ffffff;\n"
-        "    border: none; border-right: 1px solid #2c313a; outline: none; font-size: 11px;\n"
+        "    border: none; border-right: 1px solid #2c313a; outline: none; font-size: 13px;\n"
         "}\n"
         "QListWidget[role=\"sidebar\"]::item { height: 28px; padding: 2px 8px; border-left: 2px solid transparent; }\n"
         // Style hovered sidebar list items with bright white text on dark-slate fill.
         "QListWidget::item:hover, QListWidget[role=\"sidebar\"]::item:hover {\n"
-        "    background-color: #252932;\n"
-        "    color: #ffffff;\n"
+        "    background-color: #252932; color: #ffffff;\n"
         "}\n"
         // Keep selected list items bright white on #264f78 in both active and !active focus states.
         "QListWidget::item:selected, QListWidget::item:selected:active,\n"
         "QListWidget::item:selected:!active, QListWidget[role=\"sidebar\"]::item:selected,\n"
         "QListWidget[role=\"sidebar\"]::item:selected:active,\n"
         "QListWidget[role=\"sidebar\"]::item:selected:!active {\n"
-        "    background-color: #264f78;\n"
-        "    color: #ffffff;\n"
-        "    border-left: 3px solid #528bff;\n"
-        "    font-weight: 600;\n"
+        "    background-color: #264f78; color: #ffffff; border-left: 3px solid #528bff; font-weight: 600;\n"
         "}\n"
-        // Cohesive dark-slate popup menus and tooltips across all views.
+        // Cohesive 13px menu bar and dark-slate popup menus across all views.
         // Enforces #1e222a popup container surface with 1px #323844 structural border.
+        "QMenuBar { font-size: 13px; }\n"
         "QMenu {\n"
-        "    background: #1e222a;\n"
-        "    color: #d7dae0;\n"
-        "    border: 1px solid #323844;\n"
-        "    padding: 3px 0px;\n"
+        "    background: #1e222a; color: #d7dae0; border: 1px solid #323844; padding: 3px 0px; font-size: 13px;\n"
         "}\n"
         // Standardize context menu item row padding and light-slate foreground text.
-        "QMenu::item {\n"
-        "    padding: 4px 20px;\n"
-        "    color: #d7dae0;\n"
-        "    background: transparent;\n"
-        "}\n"
+        "QMenu::item { padding: 4px 20px; color: #d7dae0; background: transparent; }\n"
         // Highlight hovered/selected context menu actions with #264f78 accent fill.
-        "QMenu::item:selected {\n"
-        "    background: #264f78;\n"
-        "    color: #ffffff;\n"
-        "}\n"
+        "QMenu::item:selected { background: #264f78; color: #ffffff; }\n"
         // Render subtle 1px horizontal divider lines between grouped menu actions.
-        "QMenu::separator {\n"
-        "    height: 1px;\n"
-        "    background: #2c313a;\n"
-        "    margin: 3px 6px;\n"
-        "}\n"
-        // Unify floating hover tooltips with the dark-slate popup chrome palette.
+        "QMenu::separator { height: 1px; background: #2c313a; margin: 3px 6px; }\n"
+        // Unify floating hover tooltips with the dark-slate popup chrome palette in 12px font.
         "QToolTip {\n"
-        "    background: #1e222a;\n"
-        "    color: #d7dae0;\n"
-        "    border: 1px solid #323844;\n"
-        "    padding: 3px 6px;\n"
+        "    background: #1e222a; color: #d7dae0; border: 1px solid #323844; padding: 3px 6px; font-size: 12px;\n"
         "}\n"
     );
 }
@@ -725,12 +548,10 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
                                           const QString& uiFontFamily, const QString& themeId) {
     QString overlay = getHighDensityQssOverlay(isDark);
 
-    // Dynamically scale UI font sizes and control heights when user adjusts UI Font Size != 11.
-    const int clampedUiSize = qBound(7, uiFontSize, 32);
-    if (clampedUiSize != 11) {
-        overlay.replace(QStringLiteral("font-size: 11px;"), QStringLiteral("font-size: %1pt;").arg(clampedUiSize));
-        overlay.replace(QStringLiteral("font-size: 10px;"), QStringLiteral("font-size: %1pt;").arg(qMax(8, clampedUiSize - 1)));
-        overlay.replace(QStringLiteral("max-height: 22px;"), QStringLiteral("max-height: %1px;").arg(qMax(22, clampedUiSize + 10)));
+    // Enforce >= 12px UI typography floor and scale up when user selects a larger UI font size.
+    const int clampedUiSize = qBound(12, uiFontSize, 32);
+    if (uiFontSize > 12) {
+        overlay.replace(QStringLiteral("font-size: 12px;"), QStringLiteral("font-size: %1px;").arg(clampedUiSize));
         overlay.replace(QStringLiteral("max-height: 24px;"), QStringLiteral("max-height: %1px;").arg(qMax(24, clampedUiSize + 12)));
     }
 
@@ -760,10 +581,15 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
     }
 
     if (!uiFontFamily.trimmed().isEmpty()) {
-        overlay += QStringLiteral("\nQMenuBar, QMenu, QLabel, QPushButton, QComboBox, QLineEdit, QSpinBox { font-family: '%1'; font-size: %2pt; }\n")
-                       .arg(uiFontFamily.trimmed()).arg(clampedUiSize);
+        overlay += QStringLiteral("\nQMenuBar, QMenu { font-family: '%1'; font-size: %2px; }\nQLabel, QPushButton, QComboBox, QLineEdit, QSpinBox { font-family: '%1'; font-size: %3px; }\n")
+                       .arg(uiFontFamily.trimmed()).arg(qMax(13, clampedUiSize)).arg(clampedUiSize);
     }
-    return baseQss + overlay;
+    // Upgrade any sub-12px rules emitted by the upstream qt_material template before appending overlay.
+    QString sanitizedBase = baseQss;
+    for (int subPx : {8, 9, 10, 11}) {
+        sanitizedBase.replace(QStringLiteral("font-size: %1px").arg(subPx), QStringLiteral("font-size: 12px"), Qt::CaseInsensitive);
+    }
+    return sanitizedBase + overlay;
 }
 
 /**

@@ -61,16 +61,16 @@ QWidget* MainWindow::setupDockTitleBar(QDockWidget* dock, const QString& titleTe
   auto* header = new QWidget(dock);
   header->setObjectName(QStringLiteral("customDockHeader"));
   header->setProperty("associatedDock", QVariant::fromValue(static_cast<void*>(dock)));
-  header->setFixedHeight(24);
+  header->setFixedHeight(26);
   header->setMinimumWidth(0);
 
   const auto& tm = gridlock::core::ThemeManager::instance();
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
   header->setStyleSheet(QStringLiteral(
       "#customDockHeader { background: %1; border-bottom: 1px solid %2; } "
-      "#customDockHeader QLabel { color: %3; font-size: 11px; font-weight: 700; padding-left: 6px; } "
-      "#dockFloatBtn, #dockCloseBtn { background: transparent; color: %3; border: none; font-size: 11px; "
-      "font-weight: 700; min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; } "
+      "#customDockHeader QLabel { color: %3; font-size: 12px; font-weight: 700; padding-left: 6px; } "
+      "#dockFloatBtn, #dockCloseBtn { background: transparent; color: %3; border: none; font-size: 12px; "
+      "font-weight: 700; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; } "
       "#dockFloatBtn:hover, #dockCloseBtn:hover { background: %2; color: %3; border-radius: 2px; }")
       .arg(pal.headerHex, pal.borderHex, pal.textHex));
 
@@ -647,20 +647,20 @@ void MainWindow::propagateThemeToAllWidgets() {
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
   const bool isDark = pal.isDark;
 
-  // 1. Re-style Main Toolbar (#MainToolbar) and target selector (#toolbarTargetSelector)
+  // 1. Re-style Main Toolbar (#MainToolbar) and target selector (#toolbarTargetSelector) in 12px UI sans-serif
   if (auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
     mainToolBar->setStyleSheet(QStringLiteral(
         "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; "
-        "spacing: 3px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
+        "spacing: 2px; padding: 1px 2px; height: 30px; min-height: 28px; max-height: 30px; }"
         "QToolBar#MainToolbar QLabel { background: transparent; color: %3; "
-        "font-size: 10px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
+        "font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
         "QToolBar#MainToolbar QComboBox, QToolBar#MainToolbar QSpinBox, #toolbarTargetSelector { "
-        "background-color: %4; color: %3; border: 1px solid %2; border-radius: 2px; "
+        "background-color: %4; color: %3; border: 1px solid %2; border-radius: 3px; "
         "padding: 0px 5px; height: 22px; min-height: 20px; max-height: 22px; "
-        "font-size: 11px; font-weight: 500; font-style: normal; }"
+        "font-size: 12px; font-weight: 500; font-style: normal; }"
         "QToolBar#MainToolbar QToolButton { background-color: %1; color: %3; "
-        "border: 1px solid %2; border-radius: 2px; padding: 1px 5px; margin: 0px; "
-        "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; font-style: normal; }"
+        "border: 1px solid %2; border-radius: 3px; padding: 0px 5px; margin: 0px; "
+        "height: 22px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; font-style: normal; }"
         "QToolBar#MainToolbar QToolButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
         "QToolBar#MainToolbar QToolButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
         "QToolBar#MainToolbar QToolButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
@@ -693,11 +693,11 @@ void MainWindow::propagateThemeToAllWidgets() {
     m_addressNavBar->update();
   }
 
-  // Style history navigation buttons (< / >) and global address seek bar dynamically.
+  // Style history navigation buttons (< / >) and global address seek bar dynamically in 12px UI sans-serif.
   const QString navBtnStyle = QStringLiteral(
-      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 2px; "
-      "padding: 0px; margin: 0px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; "
-      "min-width: 20px; max-width: 22px; min-height: 20px; max-height: 22px; }"
+      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
+      "padding: 0px; margin: 0px; font-size: 12px; font-weight: 700; "
+      "min-width: 22px; max-width: 24px; min-height: 22px; max-height: 24px; }"
       "QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; }"
       "QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex,
@@ -708,20 +708,18 @@ void MainWindow::propagateThemeToAllWidgets() {
   if (m_seekBar) {
     m_seekBar->setStyleSheet(QStringLiteral(
         "QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; "
-        "border-radius: 2px; padding: 0px 6px; min-height: 20px; max-height: 22px; } "
+        "border-radius: 3px; padding: 0px 6px; min-height: 22px; max-height: 24px; font-size: 12px; } "
         "QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }")
         .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
   }
 
-  // Style CODE | REVERSE | MPI perspective buttons with pal.headerHex unselected and pal.canvasHex/pal.accentHex checked.
+  // Style CODE | REVERSE | MPI segmented mode buttons: 24px height, 0px 10px padding, 12px font, pal.headerHex / pal.accentHex.
   const QString perspStyle = QStringLiteral(
-      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 2px; "
-      "padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } "
-      "QPushButton:hover { background-color: %3; color: %2; border-color: %4; } "
-      "QPushButton:checked { background-color: %5; color: %6; border: 1px solid %4; }")
-      .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex,
-           isDark ? QStringLiteral("#2c313c") : pal.canvasHex,
-           isDark ? QStringLiteral("#61afef") : pal.accentHex);
+      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
+      "padding: 0px 10px; font-size: 12px; font-weight: 600; min-height: 24px; max-height: 24px; } "
+      "QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } "
+      "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
+      .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
   for (QPushButton* btn : {m_perspCodeBtn, m_perspReverseBtn, m_perspMpiBtn}) {
     if (btn) btn->setStyleSheet(perspStyle);
   }
@@ -738,30 +736,30 @@ void MainWindow::propagateThemeToAllWidgets() {
         .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));
   }
 
-  // 4. Re-style Bottom Console Tabs (m_bottomTabs)
+  // 4. Re-style Bottom Console Tabs (m_bottomTabs) with >= 12px UI chrome and monospace console viewports
   if (m_bottomTabs) {
     m_bottomTabs->setStyleSheet(QStringLiteral(
         "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background-color: %1; }"
         "QTabBar { background-color: %2; border-bottom: 1px solid %3; }"
-        "QTabBar::tab { background-color: %2; color: %4; padding: 3px 10px; min-height: 18px; max-height: 22px; "
-        "border-right: 1px solid %3; border-bottom: 1px solid %3; font-size: 11px; font-weight: 600; }"
+        "QTabBar::tab { background-color: %2; color: %4; padding: 3px 10px; min-height: 20px; max-height: 24px; "
+        "border-right: 1px solid %3; border-bottom: 1px solid %3; font-size: 12px; font-weight: 600; }"
         "QTabBar::tab:selected { background-color: %1; color: %4; border-bottom: 2px solid %5; }"
         "QTabBar::tab:hover:!selected { background-color: %3; color: %4; }"
-        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %4; border: 1px solid %3; border-radius: 2px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 11px; }"
+        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %4; border: 1px solid %3; border-radius: 3px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 12px; }"
         "QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid %5; background-color: %1; }"
-        "QPushButton { background-color: %2; color: %4; border: 1px solid %3; border-radius: 2px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 10px; font-weight: 600; }"
+        "QPushButton { background-color: %2; color: %4; border: 1px solid %3; border-radius: 3px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; }"
         "QPushButton:hover { background-color: %3; border: 1px solid %5; color: %4; }"
-        "QCheckBox { color: %4; font-size: 11px; font-weight: 600; spacing: 5px; }"
-        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background-color: %1; color: %4; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; }")
+        "QCheckBox { color: %4; font-size: 12px; font-weight: 600; spacing: 5px; }"
+        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background-color: %1; color: %4; border: none; font-family: 'JetBrains Mono', monospace; font-size: 12px; }")
         .arg(pal.canvasHex, pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
   }
 
-  // 5. Re-style all custom dock headers (#customDockHeader)
+  // 5. Re-style all custom dock headers (#customDockHeader) in 12px UI sans-serif
   const QString dockHeaderStyle = QStringLiteral(
       "#customDockHeader { background-color: %1; border-bottom: 1px solid %2; } "
-      "#customDockHeader QLabel { color: %3; font-size: 11px; font-weight: 700; padding-left: 6px; } "
-      "#dockFloatBtn, #dockCloseBtn { background-color: transparent; color: %3; border: none; font-size: 11px; "
-      "font-weight: 700; min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; } "
+      "#customDockHeader QLabel { color: %3; font-size: 12px; font-weight: 700; padding-left: 6px; } "
+      "#dockFloatBtn, #dockCloseBtn { background-color: transparent; color: %3; border: none; font-size: 12px; "
+      "font-weight: 700; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; } "
       "#dockFloatBtn:hover, #dockCloseBtn:hover { background: %2; color: %3; border-radius: 2px; }")
       .arg(pal.headerHex, pal.borderHex, pal.textHex);
 

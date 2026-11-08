@@ -60,31 +60,28 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   mainLayout->setContentsMargins(0, 0, 0, 0);
   mainLayout->setSpacing(0);
 
-  // Mode switcher bar: FILES | SYMBOLS | STRINGS
+  // Mode switcher bar: FILES | SYMBOLS | STRINGS (30px strip hosting 24px segmented buttons)
   QWidget *modeBar = new QWidget(content);
   modeBar->setObjectName("projectModeBar");
-  modeBar->setFixedHeight(24);
+  modeBar->setFixedHeight(30);
   QHBoxLayout *modeLayout = new QHBoxLayout(modeBar);
-  modeLayout->setContentsMargins(3, 2, 3, 2);
-  modeLayout->setSpacing(2);
+  modeLayout->setContentsMargins(4, 2, 4, 2);
+  modeLayout->setSpacing(4);
 
   m_filesModeBtn = new QPushButton("FILES", modeBar);
   m_filesModeBtn->setObjectName("explorerFilesModeBtn");
   m_filesModeBtn->setCheckable(true);
   m_filesModeBtn->setChecked(true);
-  m_filesModeBtn->setFixedHeight(20);
 
   m_symbolsModeBtn = new QPushButton("SYMBOLS", modeBar);
   m_symbolsModeBtn->setObjectName("explorerSymbolsModeBtn");
   m_symbolsModeBtn->setCheckable(true);
   m_symbolsModeBtn->setChecked(false);
-  m_symbolsModeBtn->setFixedHeight(20);
 
   m_stringsModeBtn = new QPushButton("STRINGS", modeBar);
   m_stringsModeBtn->setObjectName("explorerStringsModeBtn");
   m_stringsModeBtn->setCheckable(true);
   m_stringsModeBtn->setChecked(false);
-  m_stringsModeBtn->setFixedHeight(20);
 
   modeLayout->addWidget(m_filesModeBtn, 1);
   modeLayout->addWidget(m_symbolsModeBtn, 1);
@@ -101,16 +98,15 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   QWidget *topBar = new QWidget(filesPage);
   topBar->setObjectName(QStringLiteral("explorerFilesTopBar"));
-  topBar->setFixedHeight(24);
+  topBar->setFixedHeight(30);
   QHBoxLayout *topLayout = new QHBoxLayout(topBar);
-  topLayout->setContentsMargins(4, 2, 2, 2);
+  topLayout->setContentsMargins(4, 2, 4, 2);
   topLayout->setSpacing(4);
 
   m_openFolderBtn = new QPushButton("Open Folder", topBar);
-  m_openFolderBtn->setFixedHeight(20);
   m_collapseAllBtn = new QPushButton(topBar);
   m_collapseAllBtn->setText(QString::fromUtf8("\xEF\x86\x92"));
-  m_collapseAllBtn->setFixedSize(22, 20);
+  m_collapseAllBtn->setFixedSize(24, 24);
   m_collapseAllBtn->setFlat(true);
 
   topLayout->addWidget(m_openFolderBtn);
@@ -158,7 +154,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   // Filter bar housing live symbol substring search input
   QWidget *filterBar = new QWidget(symbolsPage);
-  filterBar->setFixedHeight(26);
+  filterBar->setFixedHeight(28);
   QHBoxLayout *filterLayout = new QHBoxLayout(filterBar);
   filterLayout->setContentsMargins(3, 2, 3, 2);
   filterLayout->setSpacing(2);
@@ -166,7 +162,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_symbolFilterEdit = new QLineEdit(filterBar);
   m_symbolFilterEdit->setObjectName("symbolFilterEdit");
   m_symbolFilterEdit->setPlaceholderText("Filter functions / symbols...");
-  m_symbolFilterEdit->setFixedHeight(22);
+  m_symbolFilterEdit->setFixedHeight(24);
   filterLayout->addWidget(m_symbolFilterEdit);
   symbolsLayout->addWidget(filterBar);
 
@@ -186,12 +182,12 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_symbolsTable->horizontalHeader()->setVisible(true);
   m_symbolsTable->horizontalHeader()->setMinimumSectionSize(42);
   m_symbolsTable->horizontalHeader()->setStretchLastSection(false);
-  // Column 0 stretches with window width, columns 1 and 2 fit contents tightly (78px / 42px)
+  // Column 0 stretches with window width, columns 1 and 2 fit contents tightly (82px / 48px)
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
   m_symbolsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-  m_symbolsTable->setColumnWidth(1, 78);
-  m_symbolsTable->setColumnWidth(2, 42);
+  m_symbolsTable->setColumnWidth(1, 82);
+  m_symbolsTable->setColumnWidth(2, 48);
 
   symbolsLayout->addWidget(m_symbolsTable, 1);
   m_stack->addWidget(symbolsPage);
@@ -204,14 +200,15 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
 
   // Filter bar housing live binary strings search input
   QWidget *strFilterBar = new QWidget(stringsPage);
+  strFilterBar->setFixedHeight(28);
   QHBoxLayout *strFilterLayout = new QHBoxLayout(strFilterBar);
-  strFilterLayout->setContentsMargins(3, 3, 3, 3);
+  strFilterLayout->setContentsMargins(3, 2, 3, 2);
   strFilterLayout->setSpacing(2);
 
   m_stringFilterEdit = new QLineEdit(strFilterBar);
   m_stringFilterEdit->setObjectName("stringFilterEdit");
   m_stringFilterEdit->setPlaceholderText("Filter strings...");
-  m_stringFilterEdit->setFixedHeight(22);
+  m_stringFilterEdit->setFixedHeight(24);
   strFilterLayout->addWidget(m_stringFilterEdit);
   stringsLayout->addWidget(strFilterBar);
 
@@ -614,24 +611,24 @@ void ProjectExplorerWidget::filterStrings(const QString &filterText) { populateS
  * and directory tree view without hardcoded dark hex colors.
  */
 void ProjectExplorerWidget::reloadStyle() {
-  // Read user-configured tree row density from persistent settings.
+  // Read user-configured tree row density from persistent settings with a strict >= 12px typography floor.
   QSettings s("gridlock", "debugger");
   const QString style = s.value("appearance/file_tree_style", "Comfortable").toString();
 
-  // Compute vertical item padding and font size from selected density preset.
-  int padding = 2, fontSize = 11;
-  if (style == "Compact") { padding = 1; fontSize = 10; }
+  // Compute vertical item padding and >= 12px font size from selected density preset.
+  int padding = 2, fontSize = 12;
+  if (style == "Compact") { padding = 1; fontSize = 12; }
   else if (style == "Large") { padding = 4; fontSize = 13; }
 
   // Resolve active workstation color palette from ThemeManager without hardcoded dark hex values.
   auto& tm = gridlock::core::managers::ThemeManager::instance();
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
 
-  // Style the FILES | SYMBOLS | STRINGS segmented mode bar: pal.headerHex unselected, pal.accentHex checked.
+  // Style the FILES | SYMBOLS | STRINGS segmented mode bar: 24px height, 0px 10px padding, 12px font, pal.headerHex / pal.accentHex.
   const QString btnStyle = QStringLiteral(
       "QPushButton { background-color: %1; color: %2; border: 1px solid %3; "
-      "border-radius: 2px; padding: 1px 6px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 10px; font-weight: 600; min-height: 18px; max-height: 20px; }"
+      "border-radius: 3px; padding: 0px 10px; font-size: 12px; font-weight: 600; "
+      "min-height: 24px; max-height: 24px; }"
       "QPushButton:hover { background-color: %3; border: 1px solid %4; color: %2; }"
       "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
@@ -646,17 +643,23 @@ void ProjectExplorerWidget::reloadStyle() {
   if (auto* filesTop = findChild<QWidget*>(QStringLiteral("explorerFilesTopBar"))) {
     filesTop->setStyleSheet(QStringLiteral("QWidget#explorerFilesTopBar { background-color: %1; border-bottom: 1px solid %2; }").arg(pal.headerHex, pal.borderHex));
   }
-  if (m_openFolderBtn) m_openFolderBtn->setStyleSheet(btnStyle);
+  if (m_openFolderBtn) {
+    m_openFolderBtn->setStyleSheet(QStringLiteral(
+        "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
+        "padding: 0px 10px; font-size: 12px; font-weight: 600; min-height: 22px; max-height: 24px; }"
+        "QPushButton:hover { background-color: %3; border: 1px solid %4; color: %2; }")
+        .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex));
+  }
   if (m_collapseAllBtn) {
     m_collapseAllBtn->setStyleSheet(QStringLiteral(
         "QPushButton { background-color: transparent; color: %1; border: none; font-family: 'Symbols Nerd Font'; font-size: 14px; }"
-        "QPushButton:hover { background-color: %2; border-radius: 2px; }").arg(pal.textHex, pal.borderHex));
+        "QPushButton:hover { background-color: %2; border-radius: 3px; }").arg(pal.textHex, pal.borderHex));
   }
 
-  // Style the symbol and string filter inputs dynamically from active theme palette.
+  // Style the symbol and string filter inputs dynamically in 12px UI sans-serif from active theme palette.
   const QString filterStyle = QStringLiteral(
       "QLineEdit { background-color: %1; color: %2; border: 1px solid %3; "
-      "border-radius: 2px; padding: 1px 5px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }"
+      "border-radius: 3px; padding: 1px 6px; font-size: 12px; }"
       "QLineEdit:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex);
 
   // Update symbol and string filter bars and QLineEdit stylesheets.
@@ -667,12 +670,13 @@ void ProjectExplorerWidget::reloadStyle() {
     }
   }
 
-  // Style tables and file tree from active theme palette.
+  // Style tables (12px monospace cells) and table column headers (12px UI sans-serif) from active theme palette.
   const QString tableStyle = QStringLiteral(
       "QTableWidget { background-color: %1; color: %2; gridline-color: %3; border: none; "
-      "font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
-      "QHeaderView::section { background-color: %4; color: %2; border: 1px solid %3; "
-      "padding: 2px 4px; font-size: 10px; font-weight: 700; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex);
+      "font-family: 'JetBrains Mono', monospace; font-size: 12px; }"
+      "QHeaderView::section { font-family: 'Inter', sans-serif; background-color: %4; color: %2; "
+      "border: 1px solid %3; padding: 2px 4px; font-size: 12px; font-weight: 600; }")
+      .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex);
 
   // Refresh symbols and strings table stylesheets and re-populate items with theme-aware foreground colors.
   if (m_symbolsTable) {
@@ -684,12 +688,13 @@ void ProjectExplorerWidget::reloadStyle() {
     populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
   }
 
-  // Apply canvas background, header section style, text color, and item padding to the filesystem tree view.
+  // Apply canvas background, 12px UI sans-serif header style, text color, and item padding to the filesystem tree view.
   if (m_treeView) {
     m_treeView->setStyleSheet(QStringLiteral(
         "QTreeView { background-color: %3; color: %4; font-size: %2px; border: none; } "
         "QTreeView::item { padding: %1px; } "
-        "QHeaderView::section { background-color: %5; color: %4; border: 1px solid %6; padding: 2px 4px; font-size: 10px; font-weight: 700; }")
+        "QHeaderView::section { font-family: 'Inter', sans-serif; background-color: %5; color: %4; "
+        "border: 1px solid %6; padding: 2px 4px; font-size: 12px; font-weight: 600; }")
         .arg(padding).arg(fontSize).arg(pal.canvasHex, pal.textHex, pal.headerHex, pal.borderHex));
   }
 

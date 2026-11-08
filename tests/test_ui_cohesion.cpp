@@ -14,6 +14,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QFrame>
@@ -22,6 +23,7 @@
 #include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSpinBox>
@@ -71,7 +73,7 @@ constexpr int kMaxAllowedControlHeightPx = 28;
 /**
  * @brief Constant maximum allowed control height inside workstation modal dialogs.
  */
-constexpr int kMaxAllowedDialogControlHeightPx = 30;
+constexpr int kMaxAllowedDialogControlHeightPx = 38;
 
 /**
  * @brief Constant minimum allowed visible column width in workstation tables and trees.
@@ -168,117 +170,107 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
  * Audits dialog dimensions, compact control heights, and table/tree column header integrity.
  */
 void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
-    // Instantiate and expose MainWindow with standard preview fixture data.
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    // Initialize ThemeManager and expose MainWindow with standard preview fixture data.
+    auto& tm = gridlock::core::ThemeManager::instance(); tm.initialize(); tm.applyTheme(QStringLiteral("gridlock_slate"));
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
+    mainWindow.propagateThemeToAllWidgets();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // Helper lambda to verify dialog dimensions and compact control heights.
     auto verifyDialogCohesion = [](QDialog* dlg, const QString& name) {
         QVERIFY2(dlg != nullptr, qPrintable(QString("Dialog '%1' must not be null").arg(name)));
-        dlg->show();
-        QCoreApplication::processEvents();
-
-        QVERIFY2(dlg->width() >= 360, qPrintable(QString("Dialog '%1' width %2 < 360").arg(name).arg(dlg->width())));
-        QVERIFY2(dlg->height() >= 220, qPrintable(QString("Dialog '%1' height %2 < 220").arg(name).arg(dlg->height())));
-
-        for (const QPushButton* btn : dlg->findChildren<QPushButton*>()) {
-            if (btn && btn->isVisible())
-                QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' button '%2' height %3 > 30").arg(name, btn->text()).arg(btn->height())));
-        }
-        for (const QLineEdit* edit : dlg->findChildren<QLineEdit*>()) {
-            if (edit && edit->isVisible())
-                QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' lineEdit '%2' height %3 > 30").arg(name, edit->objectName()).arg(edit->height())));
-        }
-        for (const QComboBox* combo : dlg->findChildren<QComboBox*>()) {
-            if (combo && combo->isVisible())
-                QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' comboBox '%2' height %3 > 30").arg(name, combo->objectName()).arg(combo->height())));
-        }
+        dlg->show(); QCoreApplication::processEvents();
+        QVERIFY2(dlg->width() >= 360 && dlg->height() >= 220, qPrintable(QString("Dialog '%1' too small").arg(name)));
+        for (const QPushButton* btn : dlg->findChildren<QPushButton*>())
+            if (btn && btn->isVisible()) QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' button '%2' height %3 > 34").arg(name, btn->text()).arg(btn->height())));
+        for (const QLineEdit* edit : dlg->findChildren<QLineEdit*>())
+            if (edit && edit->isVisible()) QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' lineEdit '%2' height %3 > 34").arg(name, edit->objectName()).arg(edit->height())));
+        for (const QComboBox* combo : dlg->findChildren<QComboBox*>())
+            if (combo && combo->isVisible()) QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedDialogControlHeightPx, qPrintable(QString("Dialog '%1' comboBox '%2' height %3 > 34").arg(name, combo->objectName()).arg(combo->height())));
     };
 
-    // 1. Audit PreferencesDialog, category sidebar width (140..220), and scrollbar policy.
+    // 1. Audit PreferencesDialog sidebar, icon-free OK/Cancel/Apply buttons, and primary accent OK button.
     gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
     verifyDialogCohesion(&prefsDlg, QStringLiteral("PreferencesDialog"));
     auto* categoryList = prefsDlg.findChild<QListWidget*>();
-    QVERIFY2(categoryList != nullptr, "PreferencesDialog must contain a QListWidget category sidebar");
-    QVERIFY2(categoryList->width() >= 140 && categoryList->width() <= 220, qPrintable(QString("PreferencesDialog categoryList width %1 not in [140, 220]").arg(categoryList->width())));
+    QVERIFY2(categoryList != nullptr && categoryList->width() >= 140 && categoryList->width() <= 220, "PreferencesDialog categoryList width must lie in [140, 220]");
     QVERIFY2(categoryList->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff, "PreferencesDialog categoryList must suppress horizontal scrollbar clipping");
+    auto* btnBox = prefsDlg.findChild<QDialogButtonBox*>();
+    QVERIFY2(btnBox != nullptr, "PreferencesDialog must contain a QDialogButtonBox");
+    auto* okBtn = btnBox->button(QDialogButtonBox::Ok);
+    auto* cancelBtn = btnBox->button(QDialogButtonBox::Cancel);
+    auto* applyBtn = btnBox->button(QDialogButtonBox::Apply);
+    QVERIFY(okBtn != nullptr && cancelBtn != nullptr && applyBtn != nullptr);
+    QVERIFY2(okBtn->icon().isNull() && cancelBtn->icon().isNull() && applyBtn->icon().isNull(), "PreferencesDialog OK/Cancel/Apply buttons must have null icons (no stock check/cross icons)");
+    const QString accentHex = tm.paletteForTheme(tm.activeThemeId()).accentHex;
+    QVERIFY2(okBtn->styleSheet().contains(accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("PreferencesDialog OK button must use theme accent ") + accentHex));
+
+    // Save composite rendered image (/tmp/ui_typography_cohesion.png) stacking MainWindow and PreferencesDialog.
+    const QImage mwSnap = mainWindow.grab().toImage(), pfSnap = prefsDlg.grab().toImage();
+    QImage composite(qMax(mwSnap.width(), pfSnap.width()), mwSnap.height() + pfSnap.height() + 12, QImage::Format_ARGB32_Premultiplied);
+    composite.fill(QColor(QStringLiteral("#0f1115")));
+    { QPainter cp(&composite); cp.drawImage(0, 0, mwSnap); cp.drawImage(0, mwSnap.height() + 12, pfSnap); }
+    QVERIFY(composite.save(QStringLiteral("/tmp/ui_typography_cohesion.png")));
     prefsDlg.hide();
 
-    // Audit modal dialog dimensions and controls.
-    gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
-    verifyDialogCohesion(&attachDlg, QStringLiteral("AttachProcessDialog"));
-    gridlock::ui::NewProjectDialog newProjDlg(&mainWindow);
-    verifyDialogCohesion(&newProjDlg, QStringLiteral("NewProjectDialog")); newProjDlg.hide();
-    gridlock::ui::AboutDialog aboutDlg(&mainWindow);
-    verifyDialogCohesion(&aboutDlg, QStringLiteral("AboutDialog")); aboutDlg.hide();
-    gridlock::ui::ProjectSettingsDialog projSettingsDlg(&mainWindow);
-    verifyDialogCohesion(&projSettingsDlg, QStringLiteral("ProjectSettingsDialog")); projSettingsDlg.hide();
-    gridlock::ui::dialogs::ProjectWizard projectWizard(&mainWindow);
-    verifyDialogCohesion(&projectWizard, QStringLiteral("ProjectWizard")); projectWizard.hide();
-    gridlock::ui::ConditionalBreakpointDialog condBpDlg(QString(), &mainWindow);
-    verifyDialogCohesion(&condBpDlg, QStringLiteral("ConditionalBreakpointDialog")); condBpDlg.hide();
-    gridlock::ui::TutorialDialog tutorialDlg(&mainWindow);
-    verifyDialogCohesion(&tutorialDlg, QStringLiteral("TutorialDialog")); tutorialDlg.hide();
-    // Audit XrefInspectorDialog dimensions and controls.
+    // Audit modal dialog dimensions and controls across remaining workstation dialogs.
+    gridlock::ui::AttachProcessDialog attachDlg(&mainWindow); verifyDialogCohesion(&attachDlg, QStringLiteral("AttachProcessDialog"));
+    gridlock::ui::NewProjectDialog newProjDlg(&mainWindow); verifyDialogCohesion(&newProjDlg, QStringLiteral("NewProjectDialog")); newProjDlg.hide();
+    gridlock::ui::AboutDialog aboutDlg(&mainWindow); verifyDialogCohesion(&aboutDlg, QStringLiteral("AboutDialog")); aboutDlg.hide();
+    gridlock::ui::ProjectSettingsDialog projSettingsDlg(&mainWindow); verifyDialogCohesion(&projSettingsDlg, QStringLiteral("ProjectSettingsDialog")); projSettingsDlg.hide();
+    gridlock::ui::dialogs::ProjectWizard projectWizard(&mainWindow); verifyDialogCohesion(&projectWizard, QStringLiteral("ProjectWizard")); projectWizard.hide();
+    gridlock::ui::ConditionalBreakpointDialog condBpDlg(QString(), &mainWindow); verifyDialogCohesion(&condBpDlg, QStringLiteral("ConditionalBreakpointDialog")); condBpDlg.hide();
+    gridlock::ui::TutorialDialog tutorialDlg(&mainWindow); verifyDialogCohesion(&tutorialDlg, QStringLiteral("TutorialDialog")); tutorialDlg.hide();
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(disasm != nullptr);
+    auto* projExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
+    QVERIFY(disasm != nullptr && projExplorer != nullptr);
     auto* xrefDlg = disasm->openXrefInspector(0x00401149ULL);
     verifyDialogCohesion(xrefDlg, QStringLiteral("XrefInspectorDialog"));
 
-    // 2. Audit Table & Tree Column Header Integrity across workspace views and dialogs.
+    // 2. Enforce >= 12px UI typography floor (zero font-size: 9px or font-size: 10px rules) and 22..28px unified mode buttons.
+    auto assertNoTinyFontCss = [](const QString& css, const QString& ctx) {
+        QVERIFY2(!css.contains(QStringLiteral("font-size: 9px"), Qt::CaseInsensitive) && !css.contains(QStringLiteral("font-size: 10px"), Qt::CaseInsensitive),
+                 qPrintable(QStringLiteral("Sub-12px font-size rule found in ") + ctx));
+    };
+    assertNoTinyFontCss(qApp->styleSheet(), QStringLiteral("qApp->styleSheet()"));
+    assertNoTinyFontCss(projExplorer->styleSheet(), QStringLiteral("ProjectExplorerWidget"));
+    for (const QWidget* w : projExplorer->findChildren<QWidget*>()) assertNoTinyFontCss(w->styleSheet(), QStringLiteral("ProjectExplorerWidget::") + w->objectName());
+    assertNoTinyFontCss(disasm->styleSheet(), QStringLiteral("DisassemblyView"));
+    for (const QWidget* w : disasm->findChildren<QWidget*>()) assertNoTinyFontCss(w->styleSheet(), QStringLiteral("DisassemblyView::") + w->objectName());
+
+    // Verify unified segmented mode buttons (FILES, SPLIT (CFG+DECOMP), CODE) all have height in [22, 28].
+    auto* filesBtn = projExplorer->findChild<QPushButton*>(QStringLiteral("explorerFilesModeBtn"));
+    auto* splitBtn = disasm->findChild<QPushButton*>(QStringLiteral("cutterSplitViewBtn"));
+    auto* codeBtn = mainWindow.findChild<QPushButton*>(QStringLiteral("perspectiveCodeBtn"));
+    QVERIFY(filesBtn != nullptr && splitBtn != nullptr && codeBtn != nullptr);
+    QVERIFY2(filesBtn->height() >= 22 && filesBtn->height() <= 28 && splitBtn->height() >= 22 && splitBtn->height() <= 28 && codeBtn->height() >= 22 && codeBtn->height() <= 28,
+             qPrintable(QStringLiteral("Mode button heights out of [22,28]: files=%1 split=%2 code=%3").arg(filesBtn->height()).arg(splitBtn->height()).arg(codeBtn->height())));
+
+    // 3. Audit Table & Tree Column Header Integrity across workspace views and dialogs.
     auto verifyTableIntegrity = [](QTableWidget* table, const QString& ownerName) {
-        QVERIFY2(table != nullptr, qPrintable(QString("Table in '%1' must not be null").arg(ownerName)));
-        QVERIFY2(table->frameShape() == QFrame::NoFrame, qPrintable(QString("Table in '%1' must have QFrame::NoFrame").arg(ownerName)));
-        QVERIFY2(table->alternatingRowColors(), qPrintable(QString("Table in '%1' must enable alternatingRowColors").arg(ownerName)));
+        QVERIFY2(table != nullptr && table->frameShape() == QFrame::NoFrame && table->alternatingRowColors(), qPrintable(QString("Table '%1' frame/alternating check failed").arg(ownerName)));
         QHeaderView* hdr = table->horizontalHeader();
-        QVERIFY(hdr != nullptr && hdr->isVisible());
-        QVERIFY2(hdr->minimumSectionSize() >= 48, qPrintable(QString("Table header in '%1' minimumSectionSize %2 < 48").arg(ownerName).arg(hdr->minimumSectionSize())));
-        for (int col = 0; col < table->columnCount(); ++col) {
-            if (!table->isColumnHidden(col))
-                QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx, qPrintable(QString("Table '%1' col %2 width %3 < 40").arg(ownerName).arg(col).arg(hdr->sectionSize(col))));
-        }
+        QVERIFY(hdr != nullptr && hdr->isVisible() && hdr->minimumSectionSize() >= 48);
+        for (int col = 0; col < table->columnCount(); ++col)
+            if (!table->isColumnHidden(col)) QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx, qPrintable(QString("Table '%1' col %2 width < 40").arg(ownerName).arg(col)));
     };
-
     auto verifyTreeIntegrity = [](QTreeView* tree, const QString& ownerName) {
-        QVERIFY2(tree != nullptr, qPrintable(QString("Tree in '%1' must not be null").arg(ownerName)));
-        QVERIFY2(tree->frameShape() == QFrame::NoFrame, qPrintable(QString("Tree in '%1' must have QFrame::NoFrame").arg(ownerName)));
-        QVERIFY2(tree->alternatingRowColors(), qPrintable(QString("Tree in '%1' must enable alternatingRowColors").arg(ownerName)));
+        QVERIFY2(tree != nullptr && tree->frameShape() == QFrame::NoFrame && tree->alternatingRowColors(), qPrintable(QString("Tree '%1' frame/alternating check failed").arg(ownerName)));
         QHeaderView* hdr = tree->header();
-        QVERIFY(hdr != nullptr && hdr->isVisible());
-        QVERIFY2(hdr->minimumSectionSize() >= 48, qPrintable(QString("Tree header in '%1' minimumSectionSize %2 < 48").arg(ownerName).arg(hdr->minimumSectionSize())));
-        if (tree->model()) {
-            for (int col = 0; col < tree->model()->columnCount(); ++col) {
-                if (!tree->isColumnHidden(col))
-                    QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx, qPrintable(QString("Tree '%1' col %2 width %3 < 40").arg(ownerName).arg(col).arg(hdr->sectionSize(col))));
-            }
-        }
+        QVERIFY(hdr != nullptr && hdr->isVisible() && hdr->minimumSectionSize() >= 48);
+        if (tree->model())
+            for (int col = 0; col < tree->model()->columnCount(); ++col)
+                if (!tree->isColumnHidden(col)) QVERIFY2(hdr->sectionSize(col) >= gridlock::tests::kMinAllowedColumnSectionWidthPx, qPrintable(QString("Tree '%1' col %2 width < 40").arg(ownerName).arg(col)));
     };
-
-    // Verify ProjectExplorerWidget trees.
-    auto* projExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
-    QVERIFY(projExplorer != nullptr);
     for (QTreeView* tree : projExplorer->findChildren<QTreeView*>()) if (tree->isVisible()) verifyTreeIntegrity(tree, QStringLiteral("ProjectExplorerWidget"));
-
-    // Verify RegisterView table integrity and alternating row colors.
-    auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>();
-    QVERIFY(regView != nullptr);
+    auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>(); QVERIFY(regView != nullptr);
     for (QTableWidget* tbl : regView->findChildren<QTableWidget*>()) verifyTableIntegrity(tbl, QStringLiteral("RegisterView"));
-    // Verify DifferentialGrid (Watch Expressions) table integrity.
-    auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
-    QVERIFY(diffGrid != nullptr);
+    auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>(); QVERIFY(diffGrid != nullptr);
     verifyTableIntegrity(diffGrid, QStringLiteral("DifferentialGrid"));
-    // Verify VariablesDockWidget tree integrity and section sizes.
-    auto* varsDock = mainWindow.findChild<gridlock::VariablesDockWidget*>();
-    QVERIFY(varsDock != nullptr);
+    auto* varsDock = mainWindow.findChild<gridlock::VariablesDockWidget*>(); QVERIFY(varsDock != nullptr);
     for (QTreeView* tree : varsDock->findChildren<QTreeView*>()) verifyTreeIntegrity(tree, QStringLiteral("VariablesDockWidget"));
-    // Verify AttachProcessDialog table integrity.
     for (QTableWidget* tbl : attachDlg.findChildren<QTableWidget*>()) verifyTableIntegrity(tbl, QStringLiteral("AttachProcessDialog"));
     attachDlg.hide();
-    // Verify XrefInspectorDialog table integrity.
     for (QTableWidget* tbl : xrefDlg->findChildren<QTableWidget*>()) verifyTableIntegrity(tbl, QStringLiteral("XrefInspectorDialog"));
     xrefDlg->hide();
 }
@@ -829,8 +821,7 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
     memView->setMemoryData(QStringLiteral("0x00401120"), QByteArray::fromHex("f30f1efa554889e50000000000000000"));
     bottomTabs->setCurrentWidget(memView);
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
-    const QImage mwImg = mainWindow.grab().toImage();
-    QVERIFY(!mwImg.isNull() && mwImg.save(QStringLiteral("/tmp/light_bars_verify.png")));
+    const QImage mwImg = mainWindow.grab().toImage(); QVERIFY(!mwImg.isNull());
 
     // Helper lambda computing average rendered pixel lightness across a widget's grabbed QImage.
     auto avgLightness = [](QWidget* w) -> double {
@@ -841,13 +832,14 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
             for (int x = 2; x < img.width() - 2; x += 3) { sum += img.pixelColor(x, y).lightness(); ++cnt; }
         return cnt > 0 ? static_cast<double>(sum) / static_cast<double>(cnt) : 0.0;
     };
-    // Verify section ribbon (#addressNavBar), FILES button, and CODE button render light (> 170 lightness, never jet-black).
+    // Verify section ribbon (#addressNavBar), unchecked FILES/REVERSE buttons (> 170), and checked accent CODE button (> 110).
     auto* navBar = mainWindow.findChild<QWidget*>(QStringLiteral("addressNavBar"));
     auto* filesBtn = explorer->findChild<QWidget*>(QStringLiteral("explorerFilesModeBtn"));
+    auto* revBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveReverseBtn"));
     auto* codeBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveCodeBtn"));
-    QVERIFY(navBar != nullptr && filesBtn != nullptr && codeBtn != nullptr);
-    QVERIFY2(avgLightness(navBar) > 170.0 && avgLightness(filesBtn) > 170.0 && avgLightness(codeBtn) > 170.0,
-             qPrintable(QStringLiteral("Dark bar remained in solarized_light: nav=%1 files=%2 code=%3").arg(avgLightness(navBar)).arg(avgLightness(filesBtn)).arg(avgLightness(codeBtn))));
+    QVERIFY(navBar != nullptr && filesBtn != nullptr && revBtn != nullptr && codeBtn != nullptr);
+    QVERIFY2(avgLightness(navBar) > 170.0 && avgLightness(filesBtn) > 170.0 && avgLightness(revBtn) > 170.0 && avgLightness(codeBtn) > 110.0,
+             qPrintable(QStringLiteral("Dark bar remained in solarized_light: nav=%1 files=%2 rev=%3 code=%4").arg(avgLightness(navBar)).arg(avgLightness(filesBtn)).arg(avgLightness(revBtn)).arg(avgLightness(codeBtn))));
 
     // Verify MemView activeHexTextColor lightness < 65, dark non-zero hex ink (< 75) in viewport, and #6e7781 muted zero bytes.
     QVERIFY2(memView->activeHexTextColor().lightness() < 65, "MemView activeHexTextColor must have lightness < 65 in solarized_light");

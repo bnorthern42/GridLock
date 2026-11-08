@@ -59,13 +59,9 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     splitter->setHandleWidth(1);
     splitter->setChildrenCollapsible(false);
 
-    // Construct navigation sidebar, stacked settings pages, and synchronize theme chrome immediately.
+    // Construct navigation sidebar and stacked settings pages.
     setupSidebar();
     setupPages();
-    applyDialogThemeChrome();
-    connect(&gridlock::core::managers::ThemeManager::instance(),
-            &gridlock::core::managers::ThemeManager::themeModeChanged,
-            this, [this](bool) { applyDialogThemeChrome(); });
 
     // Mount sidebar and stacked page container with fixed sidebar stretch (0) and expanding content (1).
     splitter->addWidget(m_sidebar);
@@ -85,19 +81,26 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setupButtonBox();
     rootLayout->addWidget(m_buttonBox);
 
-    // Harmonize control heights across all stacked settings pages and ensure Browse buttons never clip.
+    // Harmonize 26px control heights across settings pages while preserving modern footer button padding.
     for (QPushButton* btn : findChildren<QPushButton*>()) {
-        btn->setFixedHeight(24);
+        if (m_buttonBox && m_buttonBox->buttons().contains(btn)) continue;
+        btn->setFixedHeight(26);
         if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) {
-            btn->setMinimumWidth(92);
+            btn->setMinimumWidth(96);
         }
     }
     for (QLineEdit* edit : findChildren<QLineEdit*>()) {
-        edit->setFixedHeight(24);
+        edit->setFixedHeight(26);
     }
     for (QComboBox* combo : findChildren<QComboBox*>()) {
-        combo->setFixedHeight(24);
+        combo->setFixedHeight(26);
     }
+
+    // Synchronize dialog theme chrome, sidebar contrast, and primary/secondary footer action buttons.
+    applyDialogThemeChrome();
+    connect(&gridlock::core::managers::ThemeManager::instance(),
+            &gridlock::core::managers::ThemeManager::themeModeChanged,
+            this, [this](bool) { applyDialogThemeChrome(); });
 }
 
 /**
@@ -124,17 +127,18 @@ void PreferencesDialog::applyDialogThemeChrome() {
     const QString hoverBg = pal.isDark ? QStringLiteral("#252932") : canvas;
     const QString hoverFg = pal.isDark ? QStringLiteral("#ffffff") : text;
 
-    // Style root dialog, stacked pages, group boxes, inputs, buttons, and divider explicitly.
+    // Style root dialog, stacked pages, group boxes, 13px dialog controls, buttons, and divider explicitly.
     setStyleSheet(QStringLiteral(
         "QDialog, QDialog#PreferencesDialog, QWidget#PreferencesDialog, "
-        "QStackedWidget, QStackedWidget > QWidget, QScrollArea { background-color: %1; color: %5; }"
-        "QGroupBox { background-color: %2; border: 1px solid %3; border-radius: 3px; "
-        "margin-top: 8px; padding-top: 10px; color: %5; }"
+        "QStackedWidget, QStackedWidget > QWidget, QScrollArea { background-color: %1; color: %5; font-size: 13px; }"
+        "QLabel, QCheckBox { color: %5; font-size: 13px; }"
+        "QGroupBox { background-color: %2; border: 1px solid %3; border-radius: 4px; "
+        "margin-top: 8px; padding-top: 10px; color: %5; font-size: 13px; font-weight: 600; }"
         "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %5; "
-        "border: 1px solid %3; border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
-        "QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
-        "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
-        "QPushButton:hover { background-color: %6; color: %7; border-color: %4; }"
+        "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 22px; max-height: 26px; font-size: 13px; }"
+        "QStackedWidget QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
+        "border-radius: 3px; padding: 2px 10px; min-height: 22px; max-height: 26px; font-size: 13px; }"
+        "QStackedWidget QPushButton:hover { background-color: %6; color: %7; border-color: %4; }"
         "QLabel#separator { background-color: %3; }")
                       .arg(canvas, header, border, accent, text, hoverBg, hoverFg));
     ensurePolished();
@@ -215,6 +219,47 @@ void PreferencesDialog::applyDialogThemeChrome() {
             m_sidebar->viewport()->setAutoFillBackground(true);
         }
         refreshSidebarIcons();
+    }
+
+    // Style modern icon-free footer buttons: primary accent OK and secondary bordered Cancel / Apply.
+    // Using 16..18px content box height plus 6px vertical padding and 1px border yields a crisp 32px button.
+    if (m_buttonBox) {
+        // Primary action button (OK): solid theme accent fill with crisp white 13px bold label text (30px outer height).
+        const QString okCss = QStringLiteral(
+            "QPushButton, QPushButton#prefsOkBtn { background-color: %1; color: #ffffff; border: 1px solid %1; "
+            "font-size: 13px; font-weight: 600; text-transform: none; padding: 6px 18px; margin: 0px; border-radius: 4px; "
+            "min-height: 16px; max-height: 16px; }"
+            "QPushButton:hover, QPushButton#prefsOkBtn:hover { background-color: %1; color: #ffffff; border: 1px solid %2; }")
+                                  .arg(accent, text);
+        // Secondary action buttons (Cancel, Apply): subtle header fill with 1px theme border and 13px text (30px outer height).
+        const QString secCss = QStringLiteral(
+            "QPushButton, QPushButton#prefsSecBtn { background-color: %1; color: %2; border: 1px solid %3; "
+            "font-size: 13px; text-transform: none; padding: 6px 16px; margin: 0px; border-radius: 4px; "
+            "min-height: 16px; max-height: 16px; }"
+            "QPushButton:hover, QPushButton#prefsSecBtn:hover { background-color: %4; color: %5; border: 1px solid %6; }")
+                                   .arg(header, text, border, hoverBg, hoverFg, accent);
+        // Apply primary style to OK and force immediate polish before clearing stock icons.
+        if (auto* okBtn = m_buttonBox->button(QDialogButtonBox::Ok)) {
+            okBtn->setObjectName(QStringLiteral("prefsOkBtn"));
+            okBtn->setStyleSheet(okCss);
+            okBtn->ensurePolished();
+        }
+        // Apply secondary bordered style to Cancel and Apply buttons.
+        for (auto role : {QDialogButtonBox::Cancel, QDialogButtonBox::Apply}) {
+            if (auto* secBtn = m_buttonBox->button(role)) {
+                secBtn->setObjectName(QStringLiteral("prefsSecBtn"));
+                secBtn->setStyleSheet(secCss);
+                secBtn->ensurePolished();
+            }
+        }
+        // Clear stock check/cross icons after QStyleSheetStyle polish so QDialogButtonBox cannot restore them.
+        // Setting iconSize(0, 0) also eliminates left icon-gutter whitespace inside each button.
+        for (QAbstractButton* btn : m_buttonBox->buttons()) {
+            if (btn) {
+                btn->setIcon(QIcon());
+                btn->setIconSize(QSize(0, 0));
+            }
+        }
     }
 }
 
@@ -345,17 +390,42 @@ void PreferencesDialog::setupPages() {
 }
 
 /**
- * @brief Constructs standard Ok, Apply, and Cancel dialog buttons with 24px height.
+ * @brief Constructs modern icon-free Ok, Apply, and Cancel dialog action buttons.
  */
 void PreferencesDialog::setupButtonBox() {
+    // Event filter intercepting Qt style/polish/show events so QDialogButtonBox never restores stock icons.
+    class IconStripFilter final : public QObject {
+    public:
+        // Bind filter lifetime to the QDialogButtonBox parent widget.
+        explicit IconStripFilter(QDialogButtonBox* box) : QObject(box), m_box(box) {}
+        // Strip non-null button icons whenever QStyleSheetStyle re-polishes the button box.
+        bool eventFilter(QObject* w, QEvent* ev) override {
+            if (m_box && (ev->type() == QEvent::StyleChange || ev->type() == QEvent::Polish || ev->type() == QEvent::Show)) {
+                for (QAbstractButton* b : m_box->buttons())
+                    if (b && !b->icon().isNull()) { b->setIcon(QIcon()); b->setIconSize(QSize(0, 0)); }
+            }
+            return QObject::eventFilter(w, ev);
+        }
+    private:
+        // Non-owning pointer to the monitored QDialogButtonBox instance.
+        QDialogButtonBox* m_box = nullptr;
+    };
+
+    // Instantiate standard horizontal Ok / Apply / Cancel button bar with 12px/8px footer margins.
     m_buttonBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel,
         Qt::Horizontal, this);
     m_buttonBox->setContentsMargins(12, 8, 12, 8);
+    // Strip stock check/cross icons immediately and guard against QStyleChange icon restoration.
     for (QAbstractButton* btn : m_buttonBox->buttons()) {
-        btn->setFixedHeight(24);
+        if (btn) {
+            btn->setIcon(QIcon());
+            btn->setIconSize(QSize(0, 0));
+        }
     }
+    m_buttonBox->installEventFilter(new IconStripFilter(m_buttonBox));
 
+    // Wire accepted, rejected, and Apply signals to persistent settings flush slots.
     connect(m_buttonBox, &QDialogButtonBox::accepted, this,
             &PreferencesDialog::acceptAndApply);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);

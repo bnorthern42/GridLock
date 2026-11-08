@@ -10,6 +10,7 @@
 #include "DisassemblyView.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
+#include <QChildEvent>
 #include <QFontMetrics>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
@@ -364,31 +365,30 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   rootLayout->setContentsMargins(0, 0, 0, 0);
   rootLayout->setSpacing(0);
 
-  // High-density disassembly header bar (24px uniform workstation height)
+  // Disassembly header bar (30px height hosting 24px segmented mode buttons)
   auto *headerWidget = new QWidget(this);
   headerWidget->setObjectName("cutterDisasmHeader");
-  headerWidget->setFixedHeight(24);
+  headerWidget->setFixedHeight(30);
   auto *headerLayout = new QHBoxLayout(headerWidget);
-  headerLayout->setContentsMargins(6, 2, 4, 2);
+  headerLayout->setContentsMargins(6, 2, 6, 2);
   headerLayout->setSpacing(4);
 
   // Address and active symbol indicator badge (flexible width so it never crushes right-side mode buttons)
   m_headerBadge = new QLabel(QStringLiteral("DISASM | sym.main @ 0x00401120"), headerWidget);
   m_headerBadge->setObjectName("cutterDisasmBadge");
   m_headerBadge->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-  m_headerBadge->setMinimumWidth(40);
+  m_headerBadge->setMinimumWidth(0);
   // Basic block and edge count statistic badge
   m_statsBadge = new QLabel(headerWidget);
   m_statsBadge->setObjectName("cutterDisasmStats");
-  m_statsBadge->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+  m_statsBadge->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
   m_statsBadge->setMinimumWidth(0);
 
-  // Side-by-side CFG + Decompiler toggle button
+  // Side-by-side CFG + Decompiler toggle button (styled as unified 24px segmented button in reloadStyle())
   m_splitToggleBtn = new QPushButton(QStringLiteral("SPLIT (CFG+DECOMP)"), headerWidget);
   m_splitToggleBtn->setObjectName("cutterSplitViewBtn");
   m_splitToggleBtn->setCheckable(true);
   m_splitToggleBtn->setCursor(Qt::PointingHandCursor);
-  m_splitToggleBtn->setFixedHeight(20);
   m_splitToggleBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
   connect(m_splitToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setSplitGraphDecompilerMode);
 
@@ -396,7 +396,6 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_modeToggleBtn = new QPushButton(QStringLiteral("CFG (Space)"), headerWidget);
   m_modeToggleBtn->setObjectName("cutterCfgToggleBtn");
   m_modeToggleBtn->setCursor(Qt::PointingHandCursor);
-  m_modeToggleBtn->setFixedHeight(20);
   m_modeToggleBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
   connect(m_modeToggleBtn, &QPushButton::clicked, this, &DisassemblyView::toggleViewMode);
 
@@ -405,22 +404,21 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_decompilerToggleBtn->setObjectName("cutterDecompilerBtn");
   m_decompilerToggleBtn->setCheckable(true);
   m_decompilerToggleBtn->setCursor(Qt::PointingHandCursor);
-  m_decompilerToggleBtn->setFixedHeight(20);
   m_decompilerToggleBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
   connect(m_decompilerToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setDecompilerMode);
 
-  // Assemble header toolbar items with stretchable left symbol badge and unclipped right mode buttons
-  headerLayout->addWidget(m_headerBadge, 1);
-  headerLayout->addWidget(m_statsBadge, 0);
+  // Assemble header toolbar items with stretchable left badges and unclipped right mode buttons
+  headerLayout->addWidget(m_headerBadge, 2);
+  headerLayout->addWidget(m_statsBadge, 1);
   headerLayout->addWidget(m_splitToggleBtn, 0);
   headerLayout->addWidget(m_decompilerToggleBtn, 0);
   headerLayout->addWidget(m_modeToggleBtn, 0);
   rootLayout->addWidget(headerWidget);
 
-  // Compact sub-header bar displaying reconstructed function signature
+  // Sub-header bar displaying reconstructed function signature in 12px monospace
   auto *sigBar = new QWidget(this);
   sigBar->setObjectName("disasmSignatureBar");
-  sigBar->setFixedHeight(20);
+  sigBar->setFixedHeight(22);
   sigBar->setStyleSheet("background: #16181d; border-bottom: 1px solid #282c34;");
   auto *sigLayout = new QHBoxLayout(sigBar);
   sigLayout->setContentsMargins(8, 0, 8, 0);
@@ -430,7 +428,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_functionBannerLabel = m_signatureLabel;
   const QString sigColor = gridlock::core::ThemeManager::instance().isDarkMode() ? QStringLiteral("#dcdcaa") : QStringLiteral("#1f2328");
   m_signatureLabel->setStyleSheet(
-      QStringLiteral("color: %1; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;").arg(sigColor));
+      QStringLiteral("color: %1; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600;").arg(sigColor));
   sigLayout->addWidget(m_signatureLabel, 1);
   rootLayout->addWidget(sigBar);
 
@@ -565,6 +563,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
     }
   });
 
+  installEventFilter(this);
   reloadStyle();
   connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
           this, [this](bool) { reloadStyle(); });
@@ -787,6 +786,21 @@ void DisassemblyView::highlightActiveInstruction() {
  * @brief Filters viewport events to detect mouse clicks on CFG basic-block nodes.
  */
 bool DisassemblyView::eventFilter(QObject *watched, QEvent *event) {
+  // Upgrade any sub-12px CSS rules on dynamically spawned child dialogs (e.g., XrefInspectorDialog)
+  if (watched == this && event->type() == QEvent::ChildPolished) {
+    if (auto *cw = qobject_cast<QWidget *>(static_cast<QChildEvent *>(event)->child())) {
+      QList<QWidget *> targets = cw->findChildren<QWidget *>();
+      targets.prepend(cw);
+      for (QWidget *w : targets) {
+        QString ss = w->styleSheet();
+        if (ss.contains(QStringLiteral("font-size: 9px")) || ss.contains(QStringLiteral("font-size: 10px"))) {
+          ss.replace(QStringLiteral("font-size: 9px"), QStringLiteral("font-size: 12px"));
+          ss.replace(QStringLiteral("font-size: 10px"), QStringLiteral("font-size: 12px"));
+          w->setStyleSheet(ss);
+        }
+      }
+    }
+  }
   // Intercept left clicks on CFG scene items to seek disassembly and broadcast address
   if (m_cfgView && watched == m_cfgView->viewport() &&
       event->type() == QEvent::MouseButtonPress) {
@@ -794,12 +808,9 @@ bool DisassemblyView::eventFilter(QObject *watched, QEvent *event) {
     if (me->button() == Qt::LeftButton) {
       if (QGraphicsItem *item = m_cfgView->itemAt(me->pos())) {
         const QVariant v = item->data(Qt::UserRole);
-        if (v.isValid()) {
-          const uint64_t bbAddr = v.toULongLong();
-          if (bbAddr != 0ULL) {
-            seekToAddress(bbAddr);
-            emit addressSelected(bbAddr);
-          }
+        if (v.isValid() && v.toULongLong() != 0ULL) {
+          seekToAddress(v.toULongLong());
+          emit addressSelected(v.toULongLong());
         }
       }
     }
@@ -861,34 +872,29 @@ void DisassemblyView::reloadStyle() {
   applyEditorPalette(m_linearEdit);
   if (m_linearEdit) m_linearEdit->updateGutter();
   applyEditorPalette(m_decompilerEdit);
-  // Style top header strip, symbol/stats badges, and mode toggle buttons from the active theme palette
+  // Style top header strip, 12px UI sans-serif badges, and unified 24px segmented mode toggle buttons
   if (auto *hdr = findChild<QWidget *>(QStringLiteral("cutterDisasmHeader"))) {
     const auto pal = gridlock::core::ThemeManager::paletteForTheme(tm.activeThemeId());
-    // Resolve button background, checked background, and foreground contrast colors for dark and light polarity
-    const QString btnBg = tm.isDarkMode() ? QStringLiteral("#252932") : pal.canvasHex;
-    const QString btnChkBg = tm.isDarkMode() ? QStringLiteral("#2c3444") : pal.accentHex;
-    const QString btnChkFg = QStringLiteral("#ffffff");
-    // Enforce compact 6px horizontal button padding so SPLIT (CFG+DECOMP), DECOMPILER, and CFG (Space) never clip
-    hdr->setStyleSheet(QStringLiteral("#cutterDisasmHeader { background: %1; border-bottom: 1px solid %2; } #cutterDisasmBadge { color: %3; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; } #cutterDisasmStats { color: %3; font-family: 'JetBrains Mono', monospace; font-size: 10px; } #cutterCfgToggleBtn, #cutterDecompilerBtn, #cutterSplitViewBtn { background: %4; color: %3; border: 1px solid %2; border-radius: 2px; padding: 1px 6px; min-height: 18px; max-height: 20px; font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 600; } #cutterCfgToggleBtn:hover, #cutterDecompilerBtn:hover, #cutterSplitViewBtn:hover { background: %2; border: 1px solid %5; color: %3; } #cutterDecompilerBtn:checked, #cutterSplitViewBtn:checked { background: %6; color: %7; border: 1px solid %5; }").arg(pal.headerHex, pal.borderHex, pal.textHex, btnBg, pal.accentHex, btnChkBg, btnChkFg));
+    hdr->setStyleSheet(QStringLiteral("#cutterDisasmHeader { background-color: %1; border-bottom: 1px solid %2; } #cutterDisasmBadge { color: %3; font-size: 12px; font-weight: 600; } #cutterDisasmStats { color: %3; font-size: 12px; } #cutterCfgToggleBtn, #cutterDecompilerBtn, #cutterSplitViewBtn { background-color: %1; color: %3; border: 1px solid %2; border-radius: 3px; padding: 0px 10px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; } #cutterCfgToggleBtn:hover, #cutterDecompilerBtn:hover, #cutterSplitViewBtn:hover { background-color: %2; border: 1px solid %4; color: %3; } #cutterCfgToggleBtn:checked, #cutterDecompilerBtn:checked, #cutterSplitViewBtn:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
   }
-  // Synchronize minimum widths on all three header mode buttons to prevent horizontal label truncation
+  // Ensure each segmented mode button meets its polished sizeHint width without horizontal clipping
   for (QPushButton *btn : {m_splitToggleBtn, m_decompilerToggleBtn, m_modeToggleBtn}) {
-    if (btn) btn->setMinimumWidth(qMax(btn->sizeHint().width(), btn->fontMetrics().horizontalAdvance(btn->text()) + 14));
+    if (btn) { btn->ensurePolished(); btn->setMinimumWidth(btn->sizeHint().width()); }
   }
-  // Style reconstructed function signature banner strip and label
+  // Style reconstructed function signature banner strip and label in 12px monospace
   if (auto *sigBar = findChild<QWidget *>(QStringLiteral("disasmSignatureBar"))) {
     sigBar->setStyleSheet(QStringLiteral("background: %1; border-bottom: 1px solid %2;").arg(bgHex, bdrHex));
   }
   // Apply high-contrast gold (dark) or charcoal (light) foreground to the signature label
   if (m_signatureLabel) {
     const QString sigTextColor = tm.isDarkMode() ? QStringLiteral("#dcdcaa") : QStringLiteral("#1f2328");
-    m_signatureLabel->setStyleSheet(QStringLiteral("color: %1; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;").arg(sigTextColor));
+    m_signatureLabel->setStyleSheet(QStringLiteral("color: %1; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600;").arg(sigTextColor));
   }
-  // Style bottom decompiler status bar to match active theme header and border tokens
+  // Style bottom decompiler status bar in 12px UI typography to match active theme header and border tokens
   if (auto *footer = findChild<QWidget *>(QStringLiteral("decompilerFooterBar"))) {
     const QString footerBg = tm.isDarkMode() ? QStringLiteral("#21252b") : sw.value(1, QStringLiteral("#eee8d5"));
     const QString footerBdr = tm.isDarkMode() ? QStringLiteral("#2c313a") : sw.value(2, QStringLiteral("#d3cbb7"));
-    footer->setStyleSheet(QStringLiteral("background: %1; border-top: 1px solid %2; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: %3;").arg(footerBg, footerBdr, fgHex));
+    footer->setStyleSheet(QStringLiteral("background: %1; border-top: 1px solid %2; font-size: 12px; color: %3;").arg(footerBg, footerBdr, fgHex));
   }
   // Refresh CFG scene background, assembly syntax highlighter rules, and active PC highlight
   if (m_cfgView) m_cfgView->setBackgroundBrush(QColor(bgHex));

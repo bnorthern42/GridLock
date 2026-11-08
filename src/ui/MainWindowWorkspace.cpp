@@ -107,8 +107,8 @@ void MainWindow::setupToolbar() {
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
   toolbar->setMovable(false);
-  toolbar->setFixedHeight(28);
-  toolbar->setContentsMargins(4, 1, 4, 1);
+  toolbar->setFixedHeight(32);
+  toolbar->setContentsMargins(2, 1, 2, 1);
 
   // Inline Target binary selector and MPI Rank (-np) spinbox ahead of Run Target.
   QLabel *targetLabel = new QLabel(QStringLiteral("TARGET:"), toolbar);
@@ -117,8 +117,9 @@ void MainWindow::setupToolbar() {
   // Inline Target Selector combo box allowing one-click switching between MPI targets or ELF binaries.
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
-  m_targetSelector->setFixedHeight(22);
-  m_targetSelector->setMinimumWidth(130);
+  m_targetSelector->setFixedHeight(24);
+  m_targetSelector->setMinimumWidth(112);
+  m_targetSelector->setMaximumWidth(148);
   QFont selectorFont = m_targetSelector->font();
   selectorFont.setItalic(false);
   selectorFont.setWeight(QFont::Medium);
@@ -154,8 +155,8 @@ void MainWindow::setupToolbar() {
   m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
   m_rankCountSpin->setRange(1, 64);
   m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setFixedHeight(22);
-  m_rankCountSpin->setFixedWidth(48);
+  m_rankCountSpin->setFixedHeight(24);
+  m_rankCountSpin->setFixedWidth(44);
   m_rankCountSpin->setFont(selectorFont);
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
@@ -242,7 +243,7 @@ void MainWindow::setupToolbar() {
   // History back navigation button (<) styled dynamically by propagateThemeToAllWidgets().
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
   m_navBackBtn->setObjectName("navBackButton");
-  m_navBackBtn->setFixedSize(22, 22);
+  m_navBackBtn->setFixedSize(24, 24);
   m_navBackBtn->setEnabled(false);
   // Connect back button click to address stack pop operation.
   connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
@@ -251,7 +252,7 @@ void MainWindow::setupToolbar() {
   // History forward navigation button (>) styled dynamically by propagateThemeToAllWidgets().
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
   m_navForwardBtn->setObjectName("navForwardButton");
-  m_navForwardBtn->setFixedSize(22, 22);
+  m_navForwardBtn->setFixedSize(24, 24);
   m_navForwardBtn->setEnabled(false);
   // Connect forward button click to address stack forward traversal.
   connect(m_navForwardBtn, &QPushButton::clicked, this,
@@ -268,18 +269,13 @@ void MainWindow::setupToolbar() {
   connect(navFwdShortcut, &QShortcut::activated, this,
           &MainWindow::navigateForward);
 
-  // Universal seek bar allowing direct hexadecimal address or symbol navigation.
+  // Universal seek bar allowing direct hexadecimal address or symbol navigation in 12px UI sans-serif.
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
-  m_seekBar->setFixedHeight(22);
-  m_seekBar->setMinimumWidth(125);
-  m_seekBar->setMaximumWidth(155);
-  // Apply monospace JetBrains Mono font for legible hex address formatting.
-  QFont seekFont("JetBrains Mono");
-  seekFont.setStyleHint(QFont::Monospace);
-  seekFont.setPointSize(9);
-  m_seekBar->setFont(seekFont);
+  m_seekBar->setFixedHeight(24);
+  m_seekBar->setMinimumWidth(96);
+  m_seekBar->setMaximumWidth(135);
   toolbar->addWidget(m_seekBar);
 
   // Synchronize inspection views whenever user presses Return in seek bar.
