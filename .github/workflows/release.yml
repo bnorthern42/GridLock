@@ -1,4 +1,4 @@
-name: Build, Test, and Release AppImage (v0.7.0)
+name: Build, Test, and Release AppImage (v0.8.0)
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Build, Test & Package GridLock v0.7.0 AppImage
+    name: Build, Test & Package GridLock v0.8.0 AppImage
     runs-on: ubuntu-24.04
 
     container:
@@ -28,7 +28,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
 
     steps:
-      - name: Install v0.7.0 system dependencies
+      - name: Install v0.8.0 system dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
@@ -116,19 +116,19 @@ jobs:
           bash scripts/build_appimage.sh --appdir-only
           QT_QPA_PLATFORM=offscreen OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 meson test -C builddir --print-errorlogs
 
-      - name: Build GridLock-0.7.0-x86_64.AppImage
+      - name: Build GridLock-0.8.0-x86_64.AppImage
         run: |
           ninja -C builddir gridlock
           bash scripts/build_appimage.sh
-          QT_QPA_PLATFORM=offscreen ./GridLock-0.7.0-x86_64.AppImage --appimage-extract-and-run --version
-          ls -lah GridLock-0.7.0-x86_64.AppImage GridLock-x86_64.AppImage
+          QT_QPA_PLATFORM=offscreen ./GridLock-0.8.0-x86_64.AppImage --appimage-extract-and-run --version
+          ls -lah GridLock-0.8.0-x86_64.AppImage GridLock-x86_64.AppImage
 
       - name: Upload AppImage Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GridLock-0.7.0-x86_64.AppImage
+          name: GridLock-0.8.0-x86_64.AppImage
           path: |
-            GridLock-0.7.0-x86_64.AppImage
+            GridLock-0.8.0-x86_64.AppImage
             GridLock-x86_64.AppImage
 
       - name: Publish GitHub Release
@@ -136,7 +136,7 @@ jobs:
         if: github.event_name == 'release'
         with:
           files: |
-            GridLock-0.7.0-x86_64.AppImage
+            GridLock-0.8.0-x86_64.AppImage
             GridLock-x86_64.AppImage
           generate_release_notes: true
           draft: false

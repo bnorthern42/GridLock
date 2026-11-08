@@ -11,11 +11,11 @@ for arg in "$@"; do
     fi
 done
 
-# Dynamically set version from GitHub tag, defaulting to v0.7.0
+# Dynamically set version from GitHub tag, defaulting to v0.8.0
 if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
     export VERSION="${GITHUB_REF_NAME#v}"
 else
-    export VERSION="0.7.0"
+    export VERSION="0.8.0"
 fi
 
 APP_NAME="GridLock"
@@ -113,9 +113,9 @@ if command -v patchelf >/dev/null 2>&1; then
     done
 fi
 
-echo "Bundling v0.7.0 tutorial C++ MPI targets into AppDir/usr/share/gridlock/tutorial/..."
+echo "Bundling v0.8.0 tutorial C++ MPI targets into AppDir/usr/share/gridlock/tutorial/..."
 mkdir -p "${APPDIR}/usr/share/gridlock/tutorial"
-for src_target in "tutorial/inspection_demo.cpp" "tutorial/deadlock_ring.cpp"; do
+for src_target in "tutorial/inspection_demo.cpp" "tutorial/deadlock_ring.cpp" "tutorial/collective_mismatch.cpp" "tutorial/ghost_cell_drift.cpp" "tutorial/heap_imbalance.cpp" "tutorial/tag_mismatch_stall.cpp" "tutorial/simd_struct_watch.cpp"; do
     if [ -f "${ROOT_DIR}/${src_target}" ]; then
         cp -af "${ROOT_DIR}/${src_target}" "${APPDIR}/usr/share/gridlock/tutorial/"
     fi
