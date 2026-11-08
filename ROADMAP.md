@@ -26,8 +26,8 @@ This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks f
 
 - [x] **External Static Analysis Passes (`cppcheck`, `clang-tidy`)**:
   - Ran `cppcheck` and `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`) across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
-- [ ] **SonarQube / SonarCloud & Compiler Quality Gates**:
-  - Add `sonar-project.properties` for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
+- [x] **SonarQube / SonarCloud & Compiler Quality Gates**:
+  - Added `sonar-project.properties` for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
 - [x] **Memory & Process Security Audit (`MemoryBoundsValidator`, `ElfBinaryInspector`, `MiSanitizer`)**:
   - Validated `uint64_t` overflow guards in `MemoryBoundsValidator`, corrupt/truncated ELF header rejection in `ElfBinaryInspector`, shell metacharacter filtering in `MiSanitizer`, and direct argument-list process spawning across all `QProcess` and `KPtyProcess` call sites under ASan, UBSan, and `MALLOC_PERTURB_`.
 

@@ -563,11 +563,18 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
         const auto m = uninitPtrOrScalarRe.match(QString::fromUtf8(hf.readAll()));
         QVERIFY2(!m.hasMatch(), qPrintable(QStringLiteral("Uninitialized member in %1: %2").arg(fPath, m.captured(0))));
     }
-    // 3. Roadmap audit: verify ROADMAP.md and docs/ROADMAP.md omit CLion and mark External Static Analysis Passes [x].
+    // 3. Roadmap & SonarQube / Compiler Quality Gates audit: verify sonar-project.properties, meson.build flags, and ROADMAP [x].
+    QFile sonarFile(rootDir.filePath(QStringLiteral("sonar-project.properties")));
+    QVERIFY2(sonarFile.exists() && sonarFile.open(QIODevice::ReadOnly | QIODevice::Text), "sonar-project.properties must exist at repository root");
+    const QString sonarText = QString::fromUtf8(sonarFile.readAll());
+    QVERIFY2(sonarText.contains(QStringLiteral("sonar.projectKey")) && sonarText.contains(QStringLiteral("sonar.sources=src")) && sonarText.contains(QStringLiteral("sonar.tests=tests")) && (sonarText.contains(QStringLiteral("sonar.cfamily.compile-commands=builddir/compile_commands.json")) || sonarText.contains(QStringLiteral("sonar.cxx.compileCommands=builddir/compile_commands.json"))), "sonar-project.properties must define projectKey, sources, tests, and compile_commands.json");
+    QFile mesonBuildFile(rootDir.filePath(QStringLiteral("meson.build"))); QVERIFY(mesonBuildFile.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString mesonBuildText = QString::fromUtf8(mesonBuildFile.readAll());
+    QVERIFY2(mesonBuildText.contains(QStringLiteral("-Wall")) && mesonBuildText.contains(QStringLiteral("-Wextra")) && mesonBuildText.contains(QStringLiteral("-Wpedantic")), "meson.build must enforce -Wall, -Wextra, and -Wpedantic");
     for (const QString& rmRel : {QStringLiteral("ROADMAP.md"), QStringLiteral("docs/ROADMAP.md")}) {
         QFile rf(rootDir.filePath(rmRel)); QVERIFY(rf.open(QIODevice::ReadOnly | QIODevice::Text));
         const QString rmText = QString::fromUtf8(rf.readAll());
-        QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))), qPrintable(QStringLiteral("Roadmap static analysis item not updated in ") + rmRel));
+        QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*SonarQube / SonarCloud & Compiler Quality Gates"))), qPrintable(QStringLiteral("Roadmap static analysis / SonarQube item not updated in ") + rmRel));
     }
 }
 
@@ -892,40 +899,20 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
         "@@ -18,2 +20,0 @@\n-int removed1 = 0;\n-int removed2 = 0;\n");
     auto checkGitDiffAndEngine = [&](auto& view, auto& cfg) -> bool {
         using ViewT = std::decay_t<decltype(view)>;
-        if constexpr (requires {
-                          ViewT::parseUnifiedGitDiff(sampleDiff);
-                          view.setGitLineStates(ViewT::parseUnifiedGitDiff(sampleDiff));
-                          view.gitLineState(4);
-                          cfg.debuggerEngine();
-                          cfg.setDebuggerEngine(QStringLiteral("gdb"));
-                      }) {
+        if constexpr (requires { ViewT::parseUnifiedGitDiff(sampleDiff); view.setGitLineStates(ViewT::parseUnifiedGitDiff(sampleDiff)); view.gitLineState(4); cfg.debuggerEngine(); cfg.setDebuggerEngine(QStringLiteral("gdb")); }) {
             // Parse unified diff hunks and apply line states to SourceCodeView.
             const auto states = ViewT::parseUnifiedGitDiff(sampleDiff);
             view.setGitLineStates(states);
-            if (view.gitLineState(4) != ViewT::GitLineState::Added ||
-                view.gitLineState(5) != ViewT::GitLineState::Added ||
-                view.gitLineState(12) != ViewT::GitLineState::Modified ||
-                view.gitLineState(20) != ViewT::GitLineState::Deleted ||
-                view.gitLineState(1) != ViewT::GitLineState::Unchanged) {
-                return false;
-            }
+            if (view.gitLineState(4) != ViewT::GitLineState::Added || view.gitLineState(5) != ViewT::GitLineState::Added || view.gitLineState(12) != ViewT::GitLineState::Modified || view.gitLineState(20) != ViewT::GitLineState::Deleted || view.gitLineState(1) != ViewT::GitLineState::Unchanged) return false;
             // 2 & 3. Verify PreferencesDialog debuggerEngineCombo and ConfigManager persistence.
             gridlock::ui::PreferencesDialog dlg;
             auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"));
-            if (!combo || combo->findData(QStringLiteral("gdb")) < 0 ||
-                combo->findData(QStringLiteral("lldb-dap")) < 0 ||
-                combo->findData(QStringLiteral("cuda-gdb")) < 0 ||
-                combo->findData(QStringLiteral("rocgdb")) < 0) {
-                return false;
-            }
+            if (!combo || combo->findData(QStringLiteral("gdb")) < 0 || combo->findData(QStringLiteral("lldb-dap")) < 0 || combo->findData(QStringLiteral("cuda-gdb")) < 0 || combo->findData(QStringLiteral("rocgdb")) < 0) return false;
             cfg.setDebuggerEngine(QStringLiteral("rocgdb"));
             if (cfg.debuggerEngine() != QStringLiteral("rocgdb")) return false;
             cfg.setDebuggerEngine(QStringLiteral("gdb"));
             return cfg.debuggerEngine() == QStringLiteral("gdb");
-        } else {
-            return false;
-        }
+        } else return false;
     };
-    QVERIFY2(checkGitDiffAndEngine(srcView, gridlock::core::ConfigManager::instance()),
-             "SourceCodeView Git diff gutter states and PreferencesDialog debuggerEngineCombo must succeed");
+    QVERIFY2(checkGitDiffAndEngine(srcView, gridlock::core::ConfigManager::instance()), "SourceCodeView Git diff gutter states and PreferencesDialog debuggerEngineCombo must succeed");
 }
