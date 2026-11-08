@@ -1,6 +1,6 @@
 # GridLock Engineering Roadmap
 
-This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
+This roadmap tracks completed milestones (`Phases 1–10` / `v0.8.0`) for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
 
 ---
 
@@ -27,7 +27,7 @@ This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks f
 - [x] **External Static Analysis Passes (`cppcheck`, `clang-tidy`)**:
   - Ran `cppcheck` and `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`) across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
 - [x] **SonarQube / SonarCloud & Compiler Quality Gates**:
-  - Added `sonar-project.properties` for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
+  - Added `sonar-project.properties` (`sonar.projectVersion=0.8.0`) for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
 - [x] **Memory & Process Security Audit (`MemoryBoundsValidator`, `ElfBinaryInspector`, `MiSanitizer`)**:
   - Validated `uint64_t` overflow guards in `MemoryBoundsValidator`, corrupt/truncated ELF header rejection in `ElfBinaryInspector`, shell metacharacter filtering in `MiSanitizer`, and direct argument-list process spawning across all `QProcess` and `KPtyProcess` call sites under ASan, UBSan, and `MALLOC_PERTURB_`.
 
@@ -41,6 +41,8 @@ This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks f
   - Fixed horizontal label clipping on the `SPLIT (CFG+DECOMP)`, `DECOMPILER`, and `CFG (SPACE)` buttons in `DisassemblyView` and generated preview screenshots for `Solarized Warm` (`theme_solarized_light.png`) and `Catppuccin Latte` (`theme_catppuccin_latte.png`) in `docs/THEMES.md`.
 - [x] **Palette Token Struct & 12 Built-In Themes (`ThemePalette`, `ThemeManager`)**:
   - Added semantic `ThemePalette` tokens (`canvasBg`, `panelBg`, `headerBg`, `border`, `accent`, `textPrimary`, `textMuted`, `selectionBg`, `disasmOpcode`, `disasmRegister`, `disasmAddress`, `cfgEdgeTrue`, `cfgEdgeFalse`, `cfgEdgeUncond`) and expanded the catalog to 12 themes with `Nord` (`nord_dark`), `One Dark Pro` (`one_dark_pro`), `One Light` (`one_light`), and `Dracula` (`dracula_dark`).
+- [x] **Movable Toolbars, Live CFG Map Default & Status Bar Memory Telemetry (`MainWindow`, `DisassemblyView`, `ElfBinaryInspector`)**:
+  - Enabled movable toolbars, made the multi-block Control Flow Graph (`MAP (CFG)`) the persistent default disassembly view across live stepping, and added real-time per-rank `STACK` and `HEAP` telemetry alongside host `RAM` and `CPU %` in the bottom status bar ribbon.
 
 ---
 

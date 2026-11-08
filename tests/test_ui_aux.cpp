@@ -808,16 +808,18 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
     auto readText = [&](const QString& relPath) -> QString { QFile f(rootPrefix + relPath); return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(); };
 
-    // 1. Verify meson.build declares version 0.7.0, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
+    // 1. Verify meson.build declares version 0.8.0, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
     const QString mesonText = readText(QStringLiteral("meson.build"));
-    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.7\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build must declare version 0.7.0, RPATH, and build_by_default : false");
-    QVERIFY2(readText(QStringLiteral("CHANGELOG.md")).contains(QStringLiteral("[0.7.0]")), "CHANGELOG.md must contain [0.7.0]");
+    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build must declare version 0.8.0, RPATH, and build_by_default : false");
+    QVERIFY2(gridlock::core::Version::getString() == QStringLiteral("0.8.0") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.0"), "Version::getString() / applicationVersion() must report 0.8.0");
+    QVERIFY2(readText(QStringLiteral("README.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("sonar-project.properties")).contains(QStringLiteral("0.8.0")), "README.md, ROADMAP.md, docs/ROADMAP.md, and sonar-project.properties must reference 0.8.0");
+    QVERIFY2(!readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "All ROADMAP.md and docs/ROADMAP.md checklist items must be marked [x]");
 
     // 2. Verify scripts/build_appimage.sh builds only the gridlock target, bundles libqtadvancedcss.so, and uses appimagetool (never CQtDeployer).
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable(), "scripts/build_appimage.sh must exist and be executable");
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    for (const QString& req : {QStringLiteral("0.7.0"), QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
+    for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
     QVERIFY2(!appImageScript.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive) && appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))) && !appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s*(\\n|$)"))), "scripts/build_appimage.sh must invoke ninja -C \"$BUILD_DIR\" gridlock");
@@ -828,13 +830,14 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     }
     QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) && QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir must bundle libqtadvancedcss.so.1 and zero *test* binaries");
 
-    // 3. Verify direct execution of ./AppDir/usr/bin/gridlock --version in a headless environment with empty LD_LIBRARY_PATH.
+    // 3. Verify direct execution of ./builddir/gridlock --version in a headless environment with empty LD_LIBRARY_PATH.
     QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     for (const QString& k : {QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("DISPLAY"), QStringLiteral("WAYLAND_DISPLAY")}) env.remove(k);
     env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
     proc.setProcessEnvironment(env);
-    proc.start(rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock"), {QStringLiteral("--version")});
-    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.7.0")), "AppDir gridlock --version must succeed");
+    const QString binCandidate = QFileInfo::exists(rootPrefix + QStringLiteral("builddir/gridlock")) ? (rootPrefix + QStringLiteral("builddir/gridlock")) : (rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock"));
+    proc.start(binCandidate, {QStringLiteral("--version")});
+    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.0")), "gridlock --version must report 0.8.0");
 
     // 4. Verify GitHub Actions workflows install full v0.7.0 dependencies and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows"));
