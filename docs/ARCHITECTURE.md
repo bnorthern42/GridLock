@@ -9,7 +9,7 @@ flowchart TD
     MW["MainWindow"]
     TB["Top Zone: MainToolbar + AddressNavToolbar (ELF Section Ribbon)"]
     LEFT["Left Dock Area: ProjectExplorerWidget (FILES | SYMBOLS | STRINGS)"]
-    CENTER["Center Stage: MasterHorizontalSplitter (SourceCodeView + DisassemblyView)"]
+    CENTER["Center Stage: MasterHorizontalSplitter (EditorTabManager + DisassemblyView)"]
     BOTTOM["Bottom Console Zone: Tool-Window Icon Rail + Grouped Sub-Tabs"]
     RIGHT["Right Dock Area: Variables | Registers | Watch Expressions | Server Rack"]
     STATUS["Bottom Status Bar: Architecture | Active MPI Rank | PC/Seek | Session Status"]
@@ -24,9 +24,9 @@ flowchart TD
 
 ### Panel Layout & Bottom Tool Rail
 Dock widgets and bottom console tabs share a consistent layout managed by `ThemeManager` and `MainWindow::harmonizeBottomConsoleTabs()`:
-1. **Header Bar:** Each panel has a compact top bar containing its title, view mode buttons, and filter inputs.
-2. **Content Area:** Tables, trees, text editors, and custom canvas views sit flush inside the panel without nested frames or redundant scrollbars.
-3. **Bottom Tool Rail (`#bottomToolWindowRail`):** A vertical icon strip on the left side of the bottom dock groups the seven bottom panels into four modes (`Debug`: `GDB Console`, `Memory View`, `Evaluator`; `MPI`: `MPI Diagnostics`, `Package Manager`; `Terminal`: `Terminal`; `Docs`: `Reference Manual`).
+1. **Header Bar:** Each panel has a top bar containing its title, view mode buttons, and filter inputs.
+2. **Content Area:** Tables, trees, text editors, and canvas views sit inside the panel without nested frames or redundant scrollbars.
+3. **Bottom Tool Rail:** A vertical icon strip on the left side of the bottom dock groups the seven bottom panels into four modes (`Debug`: `GDB Console`, `Memory View`, `Evaluator`; `MPI`: `MPI Diagnostics`, `Package Manager`; `Terminal`: `Terminal`; `Docs`: `Reference Manual`).
 
 ---
 
@@ -37,11 +37,12 @@ To keep compilation fast and individual files easy to navigate, UI and backend s
 | Subsystem | Translation Units | Responsibility |
 | :--- | :--- | :--- |
 | **MainWindow** | `src/ui/MainWindow.cpp`<br>`src/ui/MainWindowWorkspace.cpp`<br>`src/ui/MainWindowNavigation.cpp`<br>`src/ui/MainWindowDocks.cpp`<br>`src/ui/MainWindowDebugger.cpp`<br>`src/ui/MainWindowCohesion.cpp` | Window lifecycle and rank slots (`MainWindow.cpp`), dock/splitter/toolbar setup (`MainWindowWorkspace.cpp`), address navigation (`MainWindowNavigation.cpp`), detachable docks (`MainWindowDocks.cpp`), stepping and breakpoint handlers (`MainWindowDebugger.cpp`), and theme updates, project build runner, and screenshot capture (`MainWindowCohesion.cpp`). |
-| **Source Editor, Breakpoint Popover & LSP** | `src/ui/views/SourceCodeView.cpp`<br>`src/ui/dialogs/ConditionalBreakpointDialog.cpp`<br>`src/core/lsp/ClangdLspClient.cpp` | Editor gutter and hover preview (`SourceCodeView.cpp`), conditional breakpoint popover (`ConditionalBreakpointDialog.cpp`), and JSON-RPC 2.0 `clangd` expression completion (`ClangdLspClient.cpp`). |
+| **Source Editor, Tabs & `clangd` LSP** | `src/ui/EditorTabManager.cpp`<br>`src/ui/views/SourceCodeView.cpp`<br>`src/ui/dialogs/ConditionalBreakpointDialog.cpp`<br>`src/core/utils/ClangdLspClient.cpp` | Multi-tab and split-pane editor management, dirty buffer tracking, and header/source switching (`EditorTabManager.cpp`), editor gutter, Git diff indicators, inline diagnostics, and scope breadcrumbs (`SourceCodeView.cpp`), conditional breakpoint popover (`ConditionalBreakpointDialog.cpp`), and JSON-RPC 2.0 `clangd` completion, diagnostics, hover, definition, references, and rename (`ClangdLspClient.cpp`). |
+| **Project Explorer & Binary Inspector** | `src/ui/widgets/ProjectExplorerWidget.cpp`<br>`src/core/utils/ElfBinaryInspector.cpp`<br>`src/core/utils/MemoryBoundsValidator.hpp`<br>`src/core/utils/MiSanitizer.cpp` | File tree CRUD operations (`New File`, `New Folder`, `Rename`, `Delete`), build file registration, and ELF symbol/string tables (`ProjectExplorerWidget.cpp`), ELF64/DWARF parsing and binary patching (`ElfBinaryInspector.cpp`), memory read bounds checks (`MemoryBoundsValidator.hpp`), and GDB/MI command sanitization (`MiSanitizer.cpp`). |
 | **MPI Diagnostics & Package Manager** | `src/ui/widgets/MpiDiagnosticsWidget.cpp`<br>`src/ui/widgets/HpcConsoleWidget.cpp` | `Deadlock Analyzer` and `Network Log` views (`MpiDiagnosticsWidget.cpp`), plus `Spack`/`Pacman`/`DNF`/`APT`/`Zypper`/`RPM` package search across `Table`/`List`/`Raw` modes (`HpcConsoleWidget.cpp`). |
 | **Disassembly, CFG & Decompiler** | `src/ui/views/DisassemblyView.cpp`<br>`src/ui/views/DisassemblyAnalysis.cpp`<br>`src/ui/views/DisassemblyDecompiler.cpp` | Linear assembly view (`DisassemblyView.cpp`), basic-block splitting, CFG edge routing, rank badges, minimap, and cross-references (`DisassemblyAnalysis.cpp`), and `Approx C`/`C++`/`Pseudocode` decompilation (`DisassemblyDecompiler.cpp`). |
-| **Preferences & SLURM Importer** | `src/ui/dialogs/PreferencesDialog.cpp`<br>`src/ui/dialogs/PreferencesDialogPages.cpp` | Preferences dialog shell (`PreferencesDialog.cpp`) and settings pages including the `#SBATCH` script importer (`PreferencesDialogPages.cpp`). |
-| **UI Integration Tests** | `tests/test_ui.cpp`<br>`tests/test_ui_aux.cpp`<br>`tests/test_ui_cohesion.cpp`<br>`tests/test_ui_debugger.cpp` | Core widget and layout tests (`test_ui.cpp`), CFG/decompiler/style and screenshot tests (`test_ui_aux.cpp`), ELF64/Xrefs/theme tests (`test_ui_cohesion.cpp`), and breakpoint/LSP/tool-rail/package-manager tests (`test_ui_debugger.cpp`). |
+| **Themes, Config & Preferences** | `src/core/managers/ThemeManager.cpp`<br>`src/core/managers/ConfigManager.cpp`<br>`src/ui/dialogs/PreferencesDialog.cpp`<br>`src/ui/dialogs/PreferencesDialogPages.cpp` | Semantic `ThemePalette` tokens across 12 dark and light themes (`ThemeManager.cpp`), TOML and `QSettings` persistence including the debugger backend engine (`ConfigManager.cpp`), and Preferences pages including the `#SBATCH` script importer (`PreferencesDialog.cpp`, `PreferencesDialogPages.cpp`). |
+| **UI Integration Tests** | `tests/test_ui.cpp`<br>`tests/test_ui_aux.cpp`<br>`tests/test_ui_cohesion.cpp`<br>`tests/test_ui_debugger.cpp` | Core widget and layout tests (`test_ui.cpp`), file CRUD, Git diff gutter, debugger engine, CFG/decompiler, style, and screenshot tests (`test_ui_aux.cpp`), ELF64/Xrefs/theme palette tests (`test_ui_cohesion.cpp`), and split editor, dirty tab, breakpoint, LSP, tool-rail, and package-manager tests (`test_ui_debugger.cpp`). |
 
 ---
 
@@ -52,8 +53,9 @@ Views stay synchronized through Qt signal/slot connections set up in `MainWindow
 1. **Source <-> Disassembly Sync:**
    * Clicking a line in `SourceCodeView` emits `SourceCodeView::sourceLineSelected(int lineOneBased)`, which looks up the corresponding instruction address via `MainWindow::sourceLineToAddress(lineOneBased)` and jumps `DisassemblyView` (linear, CFG, and decompiler) and `MemView` to that address.
    * Clicking an instruction or basic block in `DisassemblyView` emits `DisassemblyView::addressSelected(uint64_t addr)`, which updates `MemView` and highlights the matching source line via `MainWindow::addressToSourceLine(addr)` in `SourceCodeView`.
-2. **Breakpoint Popover & `clangd` Completion:**
-   * Right-clicking line `N` in `LineNumberArea` opens `ConditionalBreakpointDialog` next to the gutter dot and swallows the `QContextMenuEvent` so the default text editor menu does not appear on top of it. As the user types a condition, `ClangdLspClient::buildVirtualCompletionDocument` splices the expression into line `N` of an in-memory buffer and requests `textDocument/completion` results from `clangd`.
+2. **Editor Tabs, Splits & `clangd` LSP:**
+   * Modifying text in `SourceCodeView` emits `modificationStateChanged(bool)`, which updates the `●` dirty tab prefix in `EditorTabManager` and refreshes the `File > Class/Struct > Function` scope breadcrumb bar.
+   * Right-clicking line `N` in `LineNumberArea` opens `ConditionalBreakpointDialog` next to the gutter dot and consumes the `QContextMenuEvent` so the default text editor menu does not open on top of it. As the user types a condition, `ClangdLspClient::buildVirtualCompletionDocument` splices the expression into line `N` of an in-memory buffer and requests `textDocument/completion` results from `clangd`.
 3. **Stepping Workflow (`startTargetWorkflow` / `stepInstructionWorkflow` / `stopTargetWorkflow`):**
    * Starting or stepping a target advances the active rank's program counter via `DisassemblyView::nextInstructionAddress`, refreshes the rank cards in `ServerRackView`, updates `RegisterView` (`rip`, `rsp`, `rbp`, `rax`, `eflags`), scrolls `MemView`, and moves the current-line arrow in `SourceCodeView`.
 4. **Watch Promotion & Context Menus:**

@@ -1,69 +1,69 @@
 # GridLock Engineering Roadmap
 
-GridLock is an actively maintained C++23 / Qt6 parallel MPI graphical debugger and binary analysis workstation. This roadmap tracks completed foundational releases (`Phases 1–6.5` through `v0.7.0`) alongside upcoming engineering milestones focused on static analysis, theme engine stabilization, guided tutorials, and `v0.8.0` IDE editor ergonomics.
+This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
 
 ---
 
-## Completed Foundations (Phases 1–6.5 & `v0.7.0` Release ✅)
+## Completed Foundations (Phases 1–6.5 / `v0.7.0`)
 
-### Phase 1–3: Multi-Rank MPI Debugging & Binary Inspection Core ✅
-- [x] **Real ELF64/DWARF Debugging (`ElfBinaryInspector`, `GdbRankCoordinator`, `DapCoordinator`)**: Authentic disassembly via `objdump -d -M intel --insn-width=10`, symbol extraction via `nm`, and exact `.debug_line` source-to-address mapping via `objdump --dwarf=decodedline` / `readelf -wL`.
-- [x] **Breakpoint-First Execution & Circular Deadlock Detection (`DeadlockAnalyzer`)**: On-demand target compilation (`mpicxx -g -O0`), automatic halt at user-set breakpoints or `main()` entry, and directed wait-for cycle analysis across blocked `MPI_Send` / `MPI_Recv` / `MPI_Barrier` ranks.
-- [x] **Zero-Copy Process Memory & Cross-Rank Diffing (`NativeMemoryReader`, `MemoryDiffer`, `MemView`)**: Kernel-level `process_vm_readv` memory extraction with stride bounds validation (`MemoryBoundsValidator`), cross-rank byte diffing, and live hex/instruction binary patching (`savePatchedBinary`).
-- [x] **Cross-Rank Variable & Register Telemetry (`DifferentialGrid`, `VariablesDockWidget`, `RegisterView`)**: Simultaneous inspection of C/C++ expressions, local stack frames, and x86_64 registers across all active MPI ranks.
+### Phase 1–3: Multi-Rank MPI Debugging & Binary Inspection
+- [x] **ELF64 & DWARF Debugging (`ElfBinaryInspector`, `GdbRankCoordinator`, `DapCoordinator`)**: Disassembly via `objdump -d -M intel --insn-width=10`, symbol extraction via `nm`, and `.debug_line` source-to-address mapping via `objdump --dwarf=decodedline` / `readelf -wL`.
+- [x] **Breakpoint-First Execution & Deadlock Detection (`DeadlockAnalyzer`)**: On-demand target compilation (`mpicxx -g -O0`), automatic halt at user-set breakpoints or `main()` entry, and wait-for cycle detection across blocked `MPI_Send`, `MPI_Recv`, and `MPI_Barrier` calls.
+- [x] **Process Memory Reading & Cross-Rank Diffing (`NativeMemoryReader`, `MemoryDiffer`, `MemView`)**: `process_vm_readv` memory reads with stride bounds validation (`MemoryBoundsValidator`), cross-rank byte diffing, and live hex/instruction binary patching (`savePatchedBinary`).
+- [x] **Cross-Rank Variables & Registers (`DifferentialGrid`, `VariablesDockWidget`, `RegisterView`)**: Side-by-side inspection of C/C++ expressions, stack frames, and x86_64 registers across active MPI ranks.
 
-### Phase 4–6.5: Workstation UI, `clangd` LSP & Linux Packaging (`v0.7.0`) ✅
-- [x] **Two-Lane Vector Gutter & Cursor-Anchored Breakpoint Popover (`SourceCodeView`, `ConditionalBreakpointDialog`)**: Dedicated breakpoint/PC gutter lanes and frameless cursor-anchored conditional breakpoint configuration (`All MPI Ranks` vs. `Focused Rank Only`).
-- [x] **Live `clangd` JSON-RPC 2.0 Completion Engine (`ClangdLspClient`)**: Asynchronous stdio JSON-RPC 2.0 client providing virtual-buffer C/C++ struct/member autocomplete inside both `ConditionalBreakpointDialog` and `SourceCodeView` (`Ctrl+Space` or `.`, `->`, `::`).
-- [x] **Workstation Layout & Wayland-Compatible Floating Docks**: Zero-gutter dark/light chrome, `36px` Left Vertical Tool-Window Icon Rail (`Debug`, `MPI`, `Terminal`, `Docs`), and native window-manager drag/redock support for floating panels (`ServerRackView`, `RegisterView`, `VariablesDockWidget`).
-- [x] **8 Curated Dark/Light Themes & 16-Directive SLURM Script Generator (`ThemeManager`, `PreferencesDialog`)**: Instant switching across 5 Dark (`gridlock_slate`, `dark_teal`, `tokyo_night`, `catppuccin_mocha`, `gruvbox_dark`) and 3 Light (`daylight_light`, `solarized_light`, `catppuccin_latte`) themes, plus 16-directive `#SBATCH` batch script parsing and export.
-- [x] **Live Multi-Distro Package Manager & Offline Zeal Docsets (`HpcConsoleWidget`, `DocsetManager`)**: Asynchronous two-stage host package search across `rpm`, `dnf5`/`dnf4`, `pacman`, `apt`, `zypper`, and `spack` with `Table`/`List`/`Raw` views, alongside SQLite3 Zeal `.docset` and system `man` lookup (`F1`) and isolated `QTermWidget` PTY terminals.
-- [x] **Automated GitHub Actions `appimagetool` Release Pipeline**: Self-contained `AppDir` bundling with `$ORIGIN/../lib` RPATH stamping, headless 26-suite Meson verification, and automated `GridLock-0.7.0-x86_64.AppImage` artifact publishing via `appimagetool`.
+### Phase 4–6.5: UI Panels, `clangd` Completion & Linux Packaging (`v0.7.0`)
+- [x] **Editor Gutter & Breakpoint Popover (`SourceCodeView`, `ConditionalBreakpointDialog`)**: Separate gutter columns for breakpoints, current instruction pointer, and line numbers, plus a right-click popover for rank-filtered conditional breakpoints (`All MPI Ranks` or `Focused Rank Only`).
+- [x] **`clangd` JSON-RPC 2.0 Completion (`ClangdLspClient`)**: Asynchronous stdio client providing C/C++ struct and member completion inside `ConditionalBreakpointDialog` and `SourceCodeView` (`Ctrl+Space` or `.`, `->`, `::`).
+- [x] **Dock Layout & Wayland Support**: Left vertical icon rail (`Debug`, `MPI`, `Terminal`, `Docs`) for the bottom dock and native drag/redock behavior for floating panels (`ServerRackView`, `RegisterView`, `VariablesDockWidget`).
+- [x] **Themes & SLURM Script Importer (`ThemeManager`, `PreferencesDialog`)**: Live theme switching and `#SBATCH` batch script import/export for 16 common SLURM directives.
+- [x] **System Package Search & Offline Docsets (`HpcConsoleWidget`, `DocsetManager`)**: Package search across `rpm`, `dnf5`/`dnf4`, `pacman`, `apt`, `zypper`, and `spack` with `Table`, `List`, and `Raw` views, SQLite3 Zeal `.docset` and `man` lookup (`F1`), and embedded `QTermWidget` PTY terminals.
+- [x] **GitHub Actions `appimagetool` Release Pipeline**: Self-contained `AppDir` bundling with `$ORIGIN/../lib` RPATH configuration, headless Meson test runs, and `AppImage` packaging.
 
 ---
 
-## Phase 7: Continuous Bug Auditing, Static Analysis & Security Hardening
+## Phase 7: Static Analysis & Security Hardening
 
-- [ ] **External Static Analysis & Linting Sweeps (`cppcheck`, `clang-tidy`, CLion Inspections)**:
-  - Run systematic static analysis passes across `src/` and `tests/` using `cppcheck`, `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`), and JetBrains CLion inspection profiles to eliminate dead code, uninitialized members, variable shadowing, and subtle Qt `QObject` lifetime hazards.
+- [ ] **External Static Analysis Passes (`cppcheck`, `clang-tidy`, CLion Inspections)**:
+  - Run `cppcheck`, `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`), and CLion inspection checks across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
 - [ ] **SonarQube / SonarCloud & Compiler Quality Gates**:
-  - Establish reproducible SonarQube / SonarCloud analysis configuration (`sonar-project.properties`) tracking cognitive complexity, code smells, and test coverage alongside strict zero-warning compiler gates (`-Wall -Wextra -Wpedantic`).
-- [ ] **Memory & Process Security Audit (ASan, UBSan, `MALLOC_PERTURB_`)**:
-  - Audit `process_vm_readv` stride bounds (`MemoryBoundsValidator`), ELF64/DWARF binary parser inputs (`ElfBinaryInspector`), MI/DAP wire parsers (`MiSanitizer`), and `QProcess` / `KPtyProcess` argument handling under AddressSanitizer (ASan), UndefinedBehaviorSanitizer (UBSan), and `MALLOC_PERTURB_`.
+  - Add `sonar-project.properties` for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
+- [x] **Memory & Process Security Audit (`MemoryBoundsValidator`, `ElfBinaryInspector`, `MiSanitizer`)**:
+  - Validated `uint64_t` overflow guards in `MemoryBoundsValidator`, corrupt/truncated ELF header rejection in `ElfBinaryInspector`, shell metacharacter filtering in `MiSanitizer`, and direct argument-list process spawning across all `QProcess` and `KPtyProcess` call sites under ASan, UBSan, and `MALLOC_PERTURB_`.
 
 ---
 
-## Phase 8: Qt6 Theme Engine Stabilization & UI Polish
+## Phase 8: Theme Engine & UI Fixes
 
-- [ ] **Light Theme Contrast & Custom Widget Polish (`daylight_light`, `solarized_light`, `catppuccin_latte`)**:
-  - Eliminate remaining hardcoded dark backgrounds and low-contrast hex text in Light themes across `MemView` hexdump byte cells, `ProjectExplorerWidget` (`FILES | SYMBOLS | STRINGS`) segmented buttons, the binary section navigation ribbon (`.plt`, `.text`, `.rodata`, `.data`), and `CODE | REVERSE` perspective toggle buttons.
-- [ ] **Disassembly Header Layout & Theme Gallery Completeness**:
-  - Fix clipped mode button labels (`SPLIT (CFG+DECOMP)`) in `DisassemblyView` header toolbars and generate/embed missing high-DPI preview screenshots for `Solarized Warm` (`theme_solarized_light.png`) and `Catppuccin Latte` (`theme_catppuccin_latte.png`) in `docs/THEMES.md`.
-- [ ] **Tokenized Qt Palette Architecture & Expanded Theme Catalog**:
-  - Migrate remaining inline widget QSS overrides to a unified semantic token architecture (modeled after Qt Creator and Rizin Cutter) and expand the built-in theme catalog with `Nord`, `One Dark Pro`, `One Light`, and `Dracula`.
-
----
-
-## Phase 9: Documentation & Guided Hands-On Tutorials (`docs/TUTORIAL.md`)
-
-- [ ] **End-to-End Hands-On Walkthrough (`docs/TUTORIAL.md`)**:
-  - Author a comprehensive, step-by-step `docs/TUTORIAL.md` with annotated screenshots guiding users through:
-    1. Diagnosing the 8-rank circular `MPI_Send` hang in `tutorial/deadlock_ring.cpp` using `ServerRackView`, `DeadlockAnalyzer`, and the 2D Control Flow Graph.
-    2. Setting rank-filtered conditional breakpoints with live `clangd` struct member autocomplete (`data[i].coords.x`) on `tutorial/inspection_demo.cpp`.
-    3. Comparing cross-rank watch expressions in `DifferentialGrid` and inspecting byte-level rank memory divergence in `MemView`.
-    4. Browsing offline MPI/C/C++ Zeal `.docset` documentation (`F1`) and generating `#SBATCH` batch scripts in `Preferences -> HPC / Cluster`.
+- [x] **Light Theme Contrast Fixes (`daylight_light`, `solarized_light`, `catppuccin_latte`)**:
+  - Replaced hardcoded dark backgrounds in `MemView` byte cells, `ProjectExplorerWidget` (`FILES | SYMBOLS | STRINGS`) buttons, the binary section navigation bar (`.plt`, `.text`, `.rodata`, `.data`, `stack`), and `CODE | REVERSE` toggle buttons with theme-aware colors.
+- [x] **Disassembly Header Sizing & Theme Screenshots**:
+  - Fixed horizontal label clipping on the `SPLIT (CFG+DECOMP)`, `DECOMPILER`, and `CFG (SPACE)` buttons in `DisassemblyView` and generated preview screenshots for `Solarized Warm` (`theme_solarized_light.png`) and `Catppuccin Latte` (`theme_catppuccin_latte.png`) in `docs/THEMES.md`.
+- [x] **Palette Token Struct & 12 Built-In Themes (`ThemePalette`, `ThemeManager`)**:
+  - Added semantic `ThemePalette` tokens (`canvasBg`, `panelBg`, `headerBg`, `border`, `accent`, `textPrimary`, `textMuted`, `selectionBg`, `disasmOpcode`, `disasmRegister`, `disasmAddress`, `cfgEdgeTrue`, `cfgEdgeFalse`, `cfgEdgeUncond`) and expanded the catalog to 12 themes with `Nord` (`nord_dark`), `One Dark Pro` (`one_dark_pro`), `One Light` (`one_light`), and `Dracula` (`dracula_dark`).
 
 ---
 
-## Phase 10 (`v0.8.0`): Workstation Editor Ergonomics & Deep `clangd` LSP (No Live SLURM Runner)
+## Phase 9: Guided Tutorials (`docs/TUTORIAL.md`)
 
-> **Scope Note**: GridLock focuses on local and workstation MPI debugging and offline `#SBATCH` script generation; live remote SLURM job queue management is intentionally out of scope.
+- [ ] **Step-by-Step Walkthrough (`docs/TUTORIAL.md`)**:
+  - Write a hands-on guide covering:
+    1. Diagnosing the 8-rank circular `MPI_Send` deadlock in `tutorial/deadlock_ring.cpp` with `ServerRackView`, `DeadlockAnalyzer`, and the CFG view.
+    2. Setting rank-filtered conditional breakpoints with `clangd` completion (`data[i].coords.x`) on `tutorial/inspection_demo.cpp`.
+    3. Comparing cross-rank watch expressions in `DifferentialGrid` and inspecting memory differences across ranks in `MemView`.
+    4. Looking up MPI and C/C++ functions in offline Zeal docsets (`F1`) and importing `#SBATCH` scripts in `Preferences -> HPC / Cluster`.
 
-- [ ] **Interactive Project File Tree CRUD (`ProjectExplorerWidget`)**:
-  - Right-click context menu on the `FILES` tree supporting `New Source File (.cpp)`, `New Header File (.hpp)`, `New Folder`, `Rename (F2)`, `Delete`, and optional 1-click target registration in `meson.build` or `CMakeLists.txt`.
-- [ ] **Dirty Buffer Lifecycle & Split Source Editors (`EditorTabManager`, `SourceCodeView`)**:
-  - Unsaved modification indicators (`●`) on editor tabs, close confirmation dialogs (`Save / Discard / Cancel`), `Ctrl+Shift+S` (*Save All*), side-by-side horizontal/vertical editor splits (`Split Right`, `Split Down`), Header/Source toggle (`F10`), and a sticky scope breadcrumb bar (`File > Namespace > Class > Function`).
-- [ ] **Deep `clangd` LSP Integration (`ClangdLspClient`)**:
-  - Live inline compiler error/warning squiggles (`textDocument/publishDiagnostics`), rich symbol & Doxygen hover cards (`textDocument/hover`), `F12` Go-to-Definition (`textDocument/definition`), Find References (`Shift+F12`), and `Shift+F6` workspace AST symbol rename.
-- [ ] **Git Diff Gutter & Local Debugger Engine Selector**:
-  - Live gutter change indicators (`git diff` added green, modified blue, and deleted red line markers in `SourceCodeView`) and selectable local debugger backend engines (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`) in `Preferences -> Debugger`.
+---
+
+## Phase 10 (`v0.8.0`): Source Editor & `clangd` LSP Features
+
+> **Scope Note**: GridLock focuses on local and workstation MPI debugging and offline `#SBATCH` script generation; live remote SLURM queue submission is out of scope.
+
+- [x] **Project File Tree Operations (`ProjectExplorerWidget`)**:
+  - Added right-click context menu actions and programmatic helpers on the `FILES` tree for `New Source File (.cpp)`, `New Header File (.hpp)`, `New Folder`, `Rename (F2)`, `Delete`, and 1-click source registration in `meson.build` or `CMakeLists.txt`.
+- [x] **Dirty Buffer Tracking & Split Editors (`EditorTabManager`, `SourceCodeView`)**:
+  - Added unsaved buffer indicators (`●`) on editor tabs, close prompts, `Ctrl+Shift+S` (*Save All*), horizontal and vertical split editor panes (`Split Right`, `Split Down`), Header/Source switching (`F10`), and a scope breadcrumb bar (`File > Class/Struct > Function`).
+- [x] **`clangd` Diagnostics, Hover & Navigation (`ClangdLspClient`, `SourceCodeView`)**:
+  - Added inline compiler error and warning underlines (`textDocument/publishDiagnostics`), symbol/Doxygen hover tooltips (`textDocument/hover`), `F12` Go-to-Definition (`textDocument/definition`), `Shift+F12` Find References (`textDocument/references`), and `Shift+F6` AST symbol rename (`textDocument/rename`).
+- [x] **Git Diff Gutter & Debugger Engine Selector (`SourceCodeView`, `PreferencesDialog`, `ConfigManager`)**:
+  - Added `git diff` gutter indicators (added, modified, and deleted line markers) in `SourceCodeView` and a debugger backend selector (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`) in `Preferences -> Debugger`.

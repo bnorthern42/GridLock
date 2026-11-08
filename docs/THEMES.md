@@ -1,6 +1,6 @@
 # GridLock Themes & Font Settings
 
-GridLock includes **12 built-in color themes** (8 dark and 4 light) for the editor, disassembly view, control-flow graph, and dock panels.
+GridLock includes **12 built-in color themes** (8 dark and 4 light) for the source editor, disassembly view, control-flow graph, and dock panels.
 
 You can switch themes at any time in **`Edit -> Preferences (Ctrl+,) -> Appearance`**. The dialog shows a 5-color swatch preview (`Canvas`, `Header`, `Border`, `Accent`, `Text`) for the selected theme and updates the main window, source editor, disassembly/CFG/decompiler views, `QApplication::palette()`, and dialogs immediately when applied.
 
@@ -31,7 +31,7 @@ In **`Edit -> Preferences -> Appearance`**, you can adjust UI and code fonts ind
 
 1. **UI Font Family (`appearance/ui_font_family`):** Font used for menus, dock headers, trees, tables, buttons, and status bars (`Inter`, `Cantarell`, `Noto Sans`, `DejaVu Sans`, `Liberation Sans`, or `System Default`).
 2. **UI Font Size (`appearance/ui_font_size`, `8 pt – 24 pt`):** Scales widget labels and control heights across menus, toolbars, tables, and tabs.
-3. **Code / Disassembly Font Family (`appearance/code_font_family`):** Monospace font used in `SourceCodeView`, `DisassemblyView` (linear assembly, CFG, and decompiler), and `MemView` (`Cascadia Code`, `Fira Code`, `DejaVu Sans Mono`, `Liberation Mono`, `Source Code Pro`, or `Monospace`).
+3. **Code / Disassembly Font Family (`appearance/code_font_family`):** Monospace font used in `SourceCodeView`, `DisassemblyView` (linear assembly, CFG, and decompiler), and `MemView` (`JetBrains Mono`, `Cascadia Code`, `Fira Code`, `DejaVu Sans Mono`, `Liberation Mono`, `Source Code Pro`, or `Monospace`).
 4. **Code / Disassembly Font Size (`appearance/code_font_size`, `8 pt – 24 pt`):** Scales editor line numbers, assembly listings, CFG nodes, decompiler output, and the hex memory viewer. The embedded terminal (`TerminalDockWidget`) maintains its own monospace terminal font so character grid alignment is preserved.
 
 ---
@@ -74,7 +74,7 @@ Warm dark background with amber and orange highlights.
 ---
 
 ### 6. Daylight Paper (`daylight_light`)
-Neutral light background with dark text and blue accents for bright rooms or screenshots.
+Neutral light background with dark text and blue accents.
 
 ![Daylight Paper Light Theme](screenshots/theme_daylight_light.png)
 

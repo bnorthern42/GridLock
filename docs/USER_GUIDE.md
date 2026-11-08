@@ -1,4 +1,4 @@
-# GridLock v0.7.0 User Guide
+# GridLock User Guide
 
 ![GridLock Workspace Overview](screenshots/workspace_overview.png)
 
@@ -7,38 +7,52 @@
 1. **Select a Target and Rank Count (`-np`):**
    * Pick one of the bundled MPI programs (`inspection_demo (MPI)`, `deadlock_ring (MPI)`) or choose `Open ELF / Binary...` in the **TARGET** dropdown on the main toolbar.
    * Set the number of MPI processes (`1..64`) in the **RANKS (-np)** spin box.
-2. **Start the Session (`▶ Run Target`):**
+2. **Choose a Debugger Backend (`Edit -> Preferences -> Debugger`):**
+   * Select the local debugger backend in the **Debugger Engine** dropdown: `GNU GDB (gdb)`, `LLVM LLDB-DAP (lldb-dap)`, `NVIDIA CUDA-GDB (cuda-gdb)`, or `AMD ROCm GDB (rocgdb)`.
+3. **Start the Session (`▶ Run Target`):**
    * While idle, only `▶ Run Target` is enabled; stepping and stop buttons remain disabled until a target is running.
    * Clicking `▶ Run Target` starts the MPI ranks in the **Server Rack** panel, pauses Rank 0 at `main`, marks the active source line in `SourceCodeView`, and enables the stepping controls.
-3. **Step Instructions (`↷ Step Inst`):**
+4. **Step Instructions (`↷ Step Inst`):**
    * Clicking `↷ Step Inst` advances the active rank's instruction pointer (`rip`) and updates the disassembly view, CFG, decompiler, registers, rank status cards, memory view, and source editor together.
-4. **Stop or Terminate (`■ Stop` / `✕ Terminate Session`):**
+5. **Stop or Terminate (`■ Stop` / `✕ Terminate Session`):**
    * Ends the debugging session, clears the execution marker, and returns the toolbar to its idle state.
 
 ---
 
-## 2. Editor Gutter & Conditional Breakpoint Popover
+## 2. Source Editing, Split Views & Project Tree Operations
+
+* **Project Explorer (`FILES` Tab):** Right-click inside the `FILES` tree in `ProjectExplorerWidget` to create a new source file (`New Source File (.cpp)`), create a header (`New Header File (.hpp)` with `#pragma once`), create a directory (`New Folder`), rename an entry (`F2`), or delete a file. Newly created `.cpp` files can be registered directly in `meson.build` or `CMakeLists.txt`.
+* **Unsaved Buffer Markers & Saving:** Edited tabs display a `●` prefix (`● main.cpp`) until saved with `Ctrl+S` (or `Ctrl+Shift+S` to save all modified tabs). Closing a modified tab prompts to save or discard changes.
+* **Split Editors & Header/Source Toggle (`F10`):** Split the editor horizontally (`Split Right`) or vertically (`Split Down`) in `EditorTabManager` to view two files at once, and press `F10` to jump between a `.hpp` header and its matching `.cpp` implementation file.
+* **Scope Breadcrumb Bar & Git Diff Gutter:** The bar at the top of the editor shows the current file, struct/class, and function (`File > Class > Function`). The right edge of the line-number gutter marks lines added, modified, or deleted relative to `git diff`.
+
+---
+
+## 3. Editor Gutter, Conditional Breakpoints & `clangd` LSP
 
 ![Cursor-Anchored Breakpoint Popover](screenshots/breakpoint_popover.png)
 
 * **Two-Lane Gutter (`SourceCodeView`):** The source editor gutter keeps breakpoint markers (`●`), conditional breakpoint badges (`?`), and the current execution arrow (`▶`) in their own column next to the line numbers so they never overlap.
-* **Hover Preview:** Moving the cursor over the gutter highlights the line and shows a faint preview dot where a click will toggle a breakpoint.
-* **Conditional Breakpoint Popover (`ConditionalBreakpointDialog`):** Right-clicking a line in the gutter opens a compact popover right next to the cursor:
+* **Hover Preview:** Moving the cursor over the gutter highlights the line and shows a preview dot where a click will toggle a breakpoint.
+* **Conditional Breakpoint Popover (`ConditionalBreakpointDialog`):** Right-clicking a line in the gutter opens a compact popover next to the cursor:
   * **Line Preview:** Shows the line number and the C/C++ statement at that line.
   * **Rank Filter:** Choose **All MPI Ranks** or **Focused Rank Only** to control which ranks stop at the breakpoint.
   * **`clangd` Autocomplete:** As you type a condition (such as `rank == 0` or `data[i].`), GridLock feeds the expression to `clangd` at that line in the file so you get completion suggestions for local variables and struct fields.
   * **Save or Remove:** Press `Enter` (`Done`) to apply the condition, or click **Remove Breakpoint** to delete it.
+* **Inline Diagnostics & AST Navigation (`ClangdLspClient`):**
+  * **Diagnostics & Hover:** Compiler errors and warnings are underlined directly in the editor, and hovering over a symbol shows its type signature and Doxygen summary.
+  * **Go to Definition (`F12`), Find References (`Shift+F12`), and Rename (`Shift+F6`):** Jump to a symbol's declaration/definition with `F12`, list all references in the document with `Shift+F12`, or rename an identifier across the AST without touching comments or string literals with `Shift+F6`.
 
 ---
 
-## 3. Bottom Tool Rail & Panel Groups
+## 4. Bottom Tool Rail & Panel Groups
 
 ![Bottom Tool-Window Rail — Debug Mode](screenshots/tool_rail_debug_tabs.png)
 
-Instead of cramming all seven bottom panels into a single crowded tab bar, the bottom dock uses a vertical icon rail on the left to switch between four focused groups:
+The bottom dock uses a vertical icon rail on the left to switch between four panel groups:
 
 * **`Debug`:** Shows **GDB Console**, **Memory View**, and **Evaluator** for low-level process inspection.
-* **`MPI`:** Shows **MPI Diagnostics** and **Package Manager**. Inside **MPI Diagnostics**, a single toolbar switches between the `DEADLOCK ANALYZER` and `NETWORK LOG` views, displays a quick rank summary, and lets you export a diagnostic report.
+* **`MPI`:** Shows **MPI Diagnostics** and **Package Manager**. Inside **MPI Diagnostics**, a toolbar switches between the `DEADLOCK ANALYZER` and `NETWORK LOG` views, displays a rank summary, and exports diagnostic reports.
 * **`Terminal`:** Opens the embedded PTY **Terminal** (`QTermWidget`).
 * **`Docs`:** Opens the offline **Reference Manual** for browsing Zeal docsets and system `man` pages.
 
@@ -46,11 +60,11 @@ Instead of cramming all seven bottom panels into a single crowded tab bar, the b
 
 ---
 
-## 4. Searching HPC & System Packages (`"mpi"` Walkthrough)
+## 5. Searching HPC & System Packages (`"mpi"` Walkthrough)
 
 ![Package Manager — MPI Table View](screenshots/package_manager_mpi_search.png)
 
-The **Package Manager** tab (`HpcConsoleWidget`) lets you check which MPI libraries and development packages are installed on your workstation or cluster node without leaving the debugger:
+The **Package Manager** tab (`HpcConsoleWidget`) checks which MPI libraries and development packages are installed on your machine or cluster node:
 
 1. **Supported Package Managers:** Checks for available backends automatically in order: **Spack** (`spack`), **Pacman** (`pacman`), **DNF** (`dnf`), **APT** (`apt` / `dpkg-query`), **Zypper** (`zypper`), **RPM** (`rpm`), and **EasyBuild** (`eb`).
 2. **Searching for `"mpi"` Packages:**
@@ -66,13 +80,13 @@ The **Package Manager** tab (`HpcConsoleWidget`) lets you check which MPI librar
 
 ---
 
-## 5. SLURM Batch Script Import & Project Build Runner
+## 6. SLURM Batch Script Import & Project Build Runner
 
 ![Preferences — 16-Directive SLURM Batch Auto-Detection](screenshots/preferences_slurm_autodetect.png)
 
 ### Importing `#SBATCH` Job Scripts (`Edit -> Preferences -> HPC / Cluster`)
 * Click **Browse / Load Batch Script...** or paste a SLURM batch script into the **SLURM Batch Script Auto-Detector** box in `PreferencesDialog`.
-* GridLock reads common `#SBATCH` flags (`--job-name`, `--partition`, `--account`, `--qos`, `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`, `--gres`, `--mem`, `--time`, `--constraint`, `--reservation`, `--chdir`, `--output`, `--error`) along with `module load` lines and fills in the cluster launch settings automatically.
+* GridLock reads `#SBATCH` flags (`--job-name`, `--partition`, `--account`, `--qos`, `--nodes`, `--ntasks`, `--ntasks-per-node`, `--cpus-per-task`, `--gres`, `--mem`, `--time`, `--constraint`, `--reservation`, `--chdir`, `--output`, `--error`) along with `module load` lines and fills in the cluster launch settings automatically.
 
 ### Building Projects (`Build -> Build Target (F7)` / `Clean` / `Rebuild`)
 * GridLock checks the project directory and runs the matching build tool:
@@ -83,9 +97,9 @@ The **Package Manager** tab (`HpcConsoleWidget`) lets you check which MPI librar
 
 ---
 
-## 6. Switching Perspectives (`Alt+1` / `Alt+2` / `Alt+3`)
+## 7. Switching Perspectives (`Alt+1` / `Alt+2` / `Alt+3`)
 
-* **`CODE` (`Alt+1`):** Side-by-side C/C++ source editor and disassembly view for normal source and instruction stepping.
+* **`CODE` (`Alt+1`):** Side-by-side C/C++ source editor and disassembly view for source and instruction stepping.
 * **`REVERSE` (`Alt+2`):** Hides the source editor and gives the full center area to the split **CFG + Decompiler** view.
 * **`MPI` (`Alt+3`):** Focuses the **MPI Diagnostics** panel (`Deadlock Analyzer` and `Network Log`) and expands the bottom dock.
 * **Maximize Bottom Dock (`Ctrl+M`):** Toggles the bottom dock between its normal height and an expanded view when reading long logs or documentation.
@@ -94,7 +108,7 @@ The **Package Manager** tab (`HpcConsoleWidget`) lets you check which MPI librar
 
 ---
 
-## 7. Binary Navigation, Cross-References, Patching & Docs (`F1`)
+## 8. Binary Navigation, Cross-References, Patching & Docs (`F1`)
 
 ![GridLock MPI Diagnostics](screenshots/mpi_diagnostics_docsets.png)
 
