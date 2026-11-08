@@ -28,11 +28,15 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QDockWidget>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPushButton>
 #include <QScreen>
 #include <QSplitter>
 #include <QStatusBar>
@@ -529,108 +533,234 @@ void MainWindow::applyPreferredScreenRouting(const QString& monitorHint, bool op
   }
 }
 
+namespace {
+
+/**
+ * @brief Paint event filter rendering the ELF section ribbon (#addressNavBar) with theme-aware palettes.
+ *
+ * Replaces hardcoded dark #141619 segment fills in light themes with pal.headerHex/pal.canvasHex
+ * surfaces and high-contrast semantic inks (#b42318 .plt, #1d4ed8 .text, #0f766e .rodata,
+ * #15803d .data, #b45309 stack) while preserving native click-to-seek behavior.
+ */
+class AddressRibbonThemeFilter final : public QObject {
+ public:
+  // Construct event filter attached to the ribbon widget lifetime.
+  explicit AddressRibbonThemeFilter(QObject* parent = nullptr) : QObject(parent) {}
+
+ protected:
+  // Intercept QEvent::Paint on #addressNavBar to render light/dark theme-aligned ELF segments.
+  bool eventFilter(QObject* watched, QEvent* event) override {
+    if (event->type() != QEvent::Paint) return QObject::eventFilter(watched, event);
+    auto* bar = qobject_cast<QWidget*>(watched);
+    if (!bar) return false;
+
+    // Resolve active ThemePalette and current seek address property.
+    const auto& tm = gridlock::core::ThemeManager::instance();
+    const auto pal = tm.paletteForTheme(tm.activeThemeId());
+    uint64_t curAddr = 0x00401120ULL;
+    const QVariant prop = bar->property("currentAddress");
+    if (prop.isValid() && prop.toULongLong() != 0ULL) curAddr = prop.toULongLong();
+
+    // Standard x86_64 ELF section descriptors with dark and light semantic accent inks.
+    struct SegSpec {
+      const char* label;
+      uint64_t base;
+      uint64_t end;
+      int weight;
+      const char* darkFill;
+      const char* darkFg;
+      const char* lightFg;
+    };
+    // Configure .plt, .text, .rodata, .data, and stack section bounds and contrast-verified inks.
+    static constexpr SegSpec kSegs[] = {
+        {".plt 0x401000", 0x00401000ULL, 0x0040111fULL, 14, "#2c2238", "#c586c0", "#b42318"},
+        {".text 0x401120 (sym.main)", 0x00401120ULL, 0x00401fffULL, 34, "#1e3038", "#4ec9b0", "#1d4ed8"},
+        {".rodata 0x402000", 0x00402000ULL, 0x00403fffULL, 18, "#1e2836", "#569cd6", "#0f766e"},
+        {".data 0x404000", 0x00404000ULL, 0x00405fffULL, 16, "#2f291e", "#dcdcaa", "#15803d"},
+        {"stack 0x7fffffffe000", 0x7fffffffe000ULL, 0x7fffffffffffULL, 18, "#332222", "#ce9178", "#b45309"},
+    };
+
+    // Initialize crisp non-antialiased pixel painter and monospace label font.
+    QPainter p(bar);
+    p.setRenderHint(QPainter::Antialiasing, false);
+    p.fillRect(bar->rect(), QColor(pal.isDark ? pal.canvasHex : pal.headerHex));
+    QFont segFont(QStringLiteral("JetBrains Mono"), 8, QFont::DemiBold);
+    segFont.setStyleHint(QFont::Monospace);
+    p.setFont(segFont);
+
+    // Compute proportional horizontal layout across the 100-unit section weight sum.
+    const int w = bar->width(), h = bar->height(), totalWeight = 100;
+    int x = 0, activeCursorX = -1;
+    // Draw each proportional section cell, semantic accent underline, and label text.
+    for (size_t i = 0; i < 5; ++i) {
+      const auto& seg = kSegs[i];
+      const int segW = (i == 4) ? (w - x) : (w * seg.weight) / totalWeight;
+      const bool inSeg = (curAddr >= seg.base && curAddr <= seg.end);
+      const QRect segRect(x, 1, std::max(1, segW - 1), std::max(2, h - 2));
+      // Use pal.headerHex / pal.canvasHex in light themes so no black ribbon bar remains.
+      const QColor fill = pal.isDark ? QColor(QLatin1String(seg.darkFill))
+                                     : QColor(inSeg ? pal.canvasHex : pal.headerHex);
+      const QColor fg = QColor(QLatin1String(pal.isDark ? seg.darkFg : seg.lightFg));
+      p.fillRect(segRect, fill);
+      // Paint a 2px semantic bottom accent bar in light mode for section boundary legibility.
+      if (!pal.isDark) p.fillRect(QRect(segRect.left(), segRect.bottom() - 1, segRect.width(), 2), fg);
+      p.setPen(QColor(pal.borderHex));
+      p.drawRect(segRect.adjusted(0, 0, -1, -1));
+      p.setPen(fg);
+      p.drawText(segRect.adjusted(6, 0, -6, -1), Qt::AlignVCenter | Qt::AlignLeft, QLatin1String(seg.label));
+      // Track active instruction pointer horizontal coordinate within matching ELF segment.
+      if (inSeg && seg.end > seg.base) {
+        const double ratio = std::clamp(static_cast<double>(curAddr - seg.base) /
+                                            static_cast<double>(std::min<uint64_t>(0x200ULL, seg.end - seg.base)),
+                                        0.08, 0.92);
+        activeCursorX = x + static_cast<int>(segW * ratio);
+      }
+      x += segW;
+    }
+    // Fall back to .text entry offset when curAddr lies outside preconfigured ranges.
+    if (activeCursorX < 0) activeCursorX = (w * kSegs[0].weight) / totalWeight + 18;
+
+    // Render active instruction / seek needle with dual triangular arrowheads.
+    const QColor needle = pal.isDark ? QColor(QStringLiteral("#ffcc00")) : QColor(pal.accentHex);
+    p.setPen(QPen(needle, 1));
+    p.drawLine(activeCursorX, 0, activeCursorX, 4);
+    p.drawLine(activeCursorX, h - 4, activeCursorX, h);
+    p.setBrush(needle);
+    p.setPen(Qt::NoPen);
+    p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, 0), QPoint(activeCursorX + 4, 0), QPoint(activeCursorX, 4)}));
+    p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, h), QPoint(activeCursorX + 4, h), QPoint(activeCursorX, h - 4)}));
+    return true;
+  }
+};
+
+}  // namespace
+
 /**
  * @brief Propagates the active ThemeManager palette across all chrome toolbars, dock headers, and workstation views.
+ *
+ * Updates MainToolbar, AddressNavToolbar, #addressNavBar, history buttons, seek bar,
+ * CODE | REVERSE | MPI perspective buttons, bottom tool rail, console tabs, and dock headers.
  */
 void MainWindow::propagateThemeToAllWidgets() {
+  // Query active theme palette tokens and polarity from ThemeManager singleton.
   auto& tm = gridlock::core::ThemeManager::instance();
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
-  const bool isDark = tm.isDarkMode();
+  const bool isDark = pal.isDark;
 
   // 1. Re-style Main Toolbar (#MainToolbar) and target selector (#toolbarTargetSelector)
-  auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"));
-  if (mainToolBar) {
+  if (auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
     mainToolBar->setStyleSheet(QStringLiteral(
-        "QToolBar#MainToolbar { background: %1; border-bottom: 1px solid %2; "
-        "spacing: 4px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
+        "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; "
+        "spacing: 3px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
         "QToolBar#MainToolbar QLabel { background: transparent; color: %3; "
         "font-size: 10px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
         "QToolBar#MainToolbar QComboBox, QToolBar#MainToolbar QSpinBox, #toolbarTargetSelector { "
-        "background: %4; color: %3; border: 1px solid %2; border-radius: 2px; "
-        "padding: 0px 6px; height: 22px; min-height: 20px; max-height: 22px; "
+        "background-color: %4; color: %3; border: 1px solid %2; border-radius: 2px; "
+        "padding: 0px 5px; height: 22px; min-height: 20px; max-height: 22px; "
         "font-size: 11px; font-weight: 500; font-style: normal; }"
-        "QToolBar#MainToolbar QToolButton { background: %5; color: %3; "
-        "border: 1px solid %2; border-radius: 2px; padding: 1px 8px; margin: 0px; "
+        "QToolBar#MainToolbar QToolButton { background-color: %1; color: %3; "
+        "border: 1px solid %2; border-radius: 2px; padding: 1px 5px; margin: 0px; "
         "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; font-style: normal; }"
-        "QToolBar#MainToolbar QToolButton:hover:enabled { background: %2; border: 1px solid %6; color: %3; }"
-        "QToolBar#MainToolbar QToolButton:pressed:enabled { background: %4; border: 1px solid %6; }"
-        "QToolBar#MainToolbar QToolButton:checked { background: %7; color: #ffffff; border: 1px solid %6; font-weight: 600; }"
-        "QToolBar#MainToolbar QToolButton:disabled { background: %1; color: #888888; border: 1px solid %2; }")
-        .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex,
-             isDark ? QStringLiteral("#252932") : QStringLiteral("#e0d8c3"),
-             pal.accentHex,
-             isDark ? QStringLiteral("#19362b") : pal.accentHex));
+        "QToolBar#MainToolbar QToolButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
+        "QToolBar#MainToolbar QToolButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
+        "QToolBar#MainToolbar QToolButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
+        "QToolBar#MainToolbar QToolButton:disabled { background-color: %1; color: %7; border: 1px solid %2; }")
+        .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex,
+             isDark ? QStringLiteral("#19362b") : pal.accentHex,
+             isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
   }
 
-  // 2. Re-style Address Space Section Ribbon (#addressNavBar) and Perspective Switcher (CODE | REVERSE | MPI)
+  // 2. Re-style Address Space Section Ribbon (#AddressNavToolbar / #addressNavBar), Nav Arrows, Seek Bar, & CODE | REVERSE | MPI
+  if (auto* navToolBar = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) {
+    navToolBar->setStyleSheet(QStringLiteral(
+        "QToolBar#AddressNavToolbar { background-color: %1; border-bottom: 1px solid %2; padding: 0px; margin: 0px; }")
+        .arg(pal.headerHex, pal.borderHex));
+  }
+  // Attach theme-aware paint filter once and refresh #addressNavBar palette and QSS.
   if (m_addressNavBar) {
+    if (!m_addressNavBar->property("gl_ribbon_filter").toBool()) {
+      m_addressNavBar->installEventFilter(new AddressRibbonThemeFilter(m_addressNavBar));
+      m_addressNavBar->setProperty("gl_ribbon_filter", true);
+    }
     QPalette navPal = m_addressNavBar->palette();
     navPal.setColor(QPalette::Window, QColor(pal.headerHex));
     navPal.setColor(QPalette::Base, QColor(pal.canvasHex));
     navPal.setColor(QPalette::WindowText, QColor(pal.textHex));
     m_addressNavBar->setPalette(navPal);
     m_addressNavBar->setStyleSheet(QStringLiteral(
-        "#addressNavBar { background: %1; color: %2; border-bottom: 1px solid %3; }")
+        "#addressNavBar { background-color: %1; color: %2; border-bottom: 1px solid %3; }")
         .arg(pal.headerHex, pal.textHex, pal.borderHex));
     m_addressNavBar->update();
   }
 
-  const QString perspStyle = QStringLiteral(
-      "QPushButton { background: %1; color: %2; border: 1px solid %3; border-radius: 2px; "
-      "padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } "
-      "QPushButton:hover { background: %3; color: %2; border-color: %4; } "
-      "QPushButton:checked { background: %5; color: %6; border: 1px solid %4; }")
-      .arg(isDark ? QStringLiteral("#252932") : pal.canvasHex,
-           pal.textHex,
-           pal.borderHex,
-           pal.accentHex,
-           isDark ? QStringLiteral("#2c313c") : pal.accentHex,
-           isDark ? QStringLiteral("#61afef") : QStringLiteral("#ffffff"));
+  // Style history navigation buttons (< / >) and global address seek bar dynamically.
+  const QString navBtnStyle = QStringLiteral(
+      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 2px; "
+      "padding: 0px; margin: 0px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; "
+      "min-width: 20px; max-width: 22px; min-height: 20px; max-height: 22px; }"
+      "QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; }"
+      "QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }")
+      .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex,
+           isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
+  for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) {
+    if (btn) btn->setStyleSheet(navBtnStyle);
+  }
+  if (m_seekBar) {
+    m_seekBar->setStyleSheet(QStringLiteral(
+        "QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; "
+        "border-radius: 2px; padding: 0px 6px; min-height: 20px; max-height: 22px; } "
+        "QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }")
+        .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
+  }
 
+  // Style CODE | REVERSE | MPI perspective buttons with pal.headerHex unselected and pal.canvasHex/pal.accentHex checked.
+  const QString perspStyle = QStringLiteral(
+      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 2px; "
+      "padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } "
+      "QPushButton:hover { background-color: %3; color: %2; border-color: %4; } "
+      "QPushButton:checked { background-color: %5; color: %6; border: 1px solid %4; }")
+      .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex,
+           isDark ? QStringLiteral("#2c313c") : pal.canvasHex,
+           isDark ? QStringLiteral("#61afef") : pal.accentHex);
   for (QPushButton* btn : {m_perspCodeBtn, m_perspReverseBtn, m_perspMpiBtn}) {
-    if (btn) {
-      btn->setStyleSheet(perspStyle);
-    }
+    if (btn) btn->setStyleSheet(perspStyle);
   }
 
   // 3. Re-style Bottom Tool Window Rail (#bottomToolWindowRail)
   if (m_bottomToolRail) {
     m_bottomToolRail->setStyleSheet(QStringLiteral(
-        "#bottomToolWindowRail { background: %1; border-right: 1px solid %2; }"
-        "#bottomToolWindowRail QToolButton { background: transparent; color: %3; "
+        "#bottomToolWindowRail { background-color: %1; border-right: 1px solid %2; }"
+        "#bottomToolWindowRail QToolButton { background-color: transparent; color: %3; "
         "border: 1px solid transparent; border-radius: 4px; min-width: 28px; max-width: 28px; "
         "min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; }"
-        "#bottomToolWindowRail QToolButton:hover { background: %4; color: %3; border: 1px solid %2; }"
-        "#bottomToolWindowRail QToolButton:checked { background: %4; color: %5; border: 1px solid %5; border-left: 2px solid %5; }")
-        .arg(pal.headerHex, pal.borderHex, pal.textHex,
-             isDark ? QStringLiteral("#21252b") : pal.canvasHex, pal.accentHex));
+        "#bottomToolWindowRail QToolButton:hover { background-color: %4; color: %3; border: 1px solid %2; }"
+        "#bottomToolWindowRail QToolButton:checked { background-color: %4; color: %5; border: 1px solid %5; border-left: 2px solid %5; }")
+        .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));
   }
 
   // 4. Re-style Bottom Console Tabs (m_bottomTabs)
   if (m_bottomTabs) {
     m_bottomTabs->setStyleSheet(QStringLiteral(
-        "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background: %1; }"
-        "QTabBar { background: %2; border-bottom: 1px solid %3; }"
-        "QTabBar::tab { background: %2; color: %4; padding: 3px 10px; min-height: 18px; max-height: 22px; "
+        "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background-color: %1; }"
+        "QTabBar { background-color: %2; border-bottom: 1px solid %3; }"
+        "QTabBar::tab { background-color: %2; color: %4; padding: 3px 10px; min-height: 18px; max-height: 22px; "
         "border-right: 1px solid %3; border-bottom: 1px solid %3; font-size: 11px; font-weight: 600; }"
-        "QTabBar::tab:selected { background: %1; color: %4; border-bottom: 2px solid %5; }"
-        "QTabBar::tab:hover:!selected { background: %6; color: %4; }"
-        "QLineEdit, QComboBox, QSpinBox { background: %1; color: %4; border: 1px solid %3; border-radius: 2px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 11px; }"
-        "QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid %5; background: %1; }"
-        "QPushButton { background: %7; color: %4; border: 1px solid %3; border-radius: 2px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 10px; font-weight: 600; }"
-        "QPushButton:hover { background: %3; border: 1px solid %5; color: %4; }"
+        "QTabBar::tab:selected { background-color: %1; color: %4; border-bottom: 2px solid %5; }"
+        "QTabBar::tab:hover:!selected { background-color: %3; color: %4; }"
+        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %4; border: 1px solid %3; border-radius: 2px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 11px; }"
+        "QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid %5; background-color: %1; }"
+        "QPushButton { background-color: %2; color: %4; border: 1px solid %3; border-radius: 2px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 10px; font-weight: 600; }"
+        "QPushButton:hover { background-color: %3; border: 1px solid %5; color: %4; }"
         "QCheckBox { color: %4; font-size: 11px; font-weight: 600; spacing: 5px; }"
-        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background: %1; color: %4; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; }")
-        .arg(pal.canvasHex, pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex,
-             isDark ? QStringLiteral("#1e222a") : pal.headerHex,
-             isDark ? QStringLiteral("#252932") : QStringLiteral("#e0d8c3")));
+        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background-color: %1; color: %4; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; }")
+        .arg(pal.canvasHex, pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
   }
 
   // 5. Re-style all custom dock headers (#customDockHeader)
   const QString dockHeaderStyle = QStringLiteral(
-      "#customDockHeader { background: %1; border-bottom: 1px solid %2; } "
+      "#customDockHeader { background-color: %1; border-bottom: 1px solid %2; } "
       "#customDockHeader QLabel { color: %3; font-size: 11px; font-weight: 700; padding-left: 6px; } "
-      "#dockFloatBtn, #dockCloseBtn { background: transparent; color: %3; border: none; font-size: 11px; "
+      "#dockFloatBtn, #dockCloseBtn { background-color: transparent; color: %3; border: none; font-size: 11px; "
       "font-weight: 700; min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; } "
       "#dockFloatBtn:hover, #dockCloseBtn:hover { background: %2; color: %3; border-radius: 2px; }")
       .arg(pal.headerHex, pal.borderHex, pal.textHex);

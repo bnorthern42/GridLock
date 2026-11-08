@@ -70,9 +70,9 @@ public:
     void setRootPath(const QString& path);
 
     /**
-     * @brief Reloads fonts and palette settings.
+     * @brief Reloads fonts and palette settings from active ThemeManager theme.
      */
-    void reloadStyle();
+    Q_INVOKABLE void reloadStyle();
 
     /**
      * @brief Toggles between Files view and Symbols table view.

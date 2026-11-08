@@ -83,19 +83,10 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // Build the compact slate toolbar header bar
+    // Build the compact toolbar header bar (styled dynamically by reloadStyle()).
     QWidget* headerBar = new QWidget(this);
     headerBar->setObjectName("cutterMemHeader");
     headerBar->setFixedHeight(26);
-    headerBar->setStyleSheet(
-        "#cutterMemHeader { background: #21252b; border-bottom: 1px solid #2c313a; }"
-        "#cutterMemHeader QLabel { color: #abb2bf; font-size: 11px; font-weight: 600; }"
-        "#cutterMemHeader QLineEdit, #cutterMemHeader QSpinBox, "
-        "#cutterMemHeader QComboBox { min-height: 20px; max-height: 22px; "
-        "padding: 0px 4px; margin: 0px; background: #16181d; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; }"
-        "#cutterMemHeader QPushButton { padding: 1px 8px; min-height: 20px; max-height: 22px; "
-        "background: #252932; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; font-size: 10px; font-weight: 600; }"
-        "#cutterMemHeader QPushButton:hover { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }");
     QHBoxLayout* topLayout = new QHBoxLayout(headerBar);
     topLayout->setContentsMargins(6, 2, 6, 2);
     topLayout->setSpacing(4);
@@ -433,9 +424,9 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
     
     const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
     const QString offsetHex = isDark ? QStringLiteral("#6a9955") : QStringLiteral("#0550ae");
-    const QString zeroHex = isDark ? QStringLiteral("#555c66") : QStringLiteral("#57606a");
+    const QString zeroHex = isDark ? QStringLiteral("#555c66") : QStringLiteral("#6e7781");
     const QString nonZeroHex = isDark ? QStringLiteral("#d4d7dc") : QStringLiteral("#1f2328");
-    const QString asciiHex = isDark ? QStringLiteral("#4ec9b0") : QStringLiteral("#24292f");
+    const QString asciiHex = isDark ? QStringLiteral("#4ec9b0") : QStringLiteral("#1f2328");
 
     int byteCount = result.baselineBuffer.size();
     m_changedByteCount = 0;
@@ -457,7 +448,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                 
                 QString byteStr = QString::number(targetByte, 16).rightJustified(2, '0').toUpper();
                 
-                // Color mutated bytes in red with tooltip, muted zeros in gray/steel
+                // Color mutated bytes in red with tooltip, muted zeros in steel (#6e7781), non-zero in #1f2328
                 if (diff) {
                     QString tooltip = QString("Baseline: 0x%1 | Target: 0x%2")
                         .arg(QString::number(baseByte, 16).rightJustified(2, '0').toUpper())
@@ -467,7 +458,7 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
                 } else if (targetByte == 0) {
                     html += QString("<span style=\"color: %1;\">%2</span> ").arg(zeroHex, byteStr);
                 } else {
-                    html += QString("<span style=\"color: %1;\">%2</span> ").arg(nonZeroHex, byteStr);
+                    html += QString("<span style=\"color: %1; font-weight: 500;\">%2</span> ").arg(nonZeroHex, byteStr);
                 }
                 
                 // Printable ASCII representation
@@ -502,12 +493,14 @@ void MemView::displayMemoryDiff(const gridlock::core::hpc::CompareResult& result
  * @return HTML string ready for display in QTextEdit.
  */
 QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData) {
-    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+    const auto& tm = gridlock::core::ThemeManager::instance();
+    const auto pal = tm.paletteForTheme(tm.activeThemeId());
+    const bool isDark = pal.isDark;
     const QString headerColor = isDark ? QStringLiteral("#858585") : QStringLiteral("#57606a");
     const QString offsetColor = isDark ? QStringLiteral("#6a9955") : QStringLiteral("#0550ae");
-    const QString zeroColor = isDark ? QStringLiteral("#555c66") : QStringLiteral("#57606a");
+    const QString zeroColor = isDark ? QStringLiteral("#555c66") : QStringLiteral("#6e7781");
     const QString hexColor = isDark ? QStringLiteral("#d4d7dc") : QStringLiteral("#1f2328");
-    const QString asciiColor = isDark ? QStringLiteral("#4ec9b0") : QStringLiteral("#24292f");
+    const QString asciiColor = isDark ? QStringLiteral("#4ec9b0") : QStringLiteral("#1f2328");
     const QString patchColor = isDark ? QStringLiteral("#e5c07b") : QStringLiteral("#9a6700");
 
     // Monospace header with offset markers 00 through 0F
@@ -547,7 +540,9 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
                 } else if (b == 0x00) {
                     html += QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(zeroColor, byteStr);
                 } else {
-                    html += QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(hexColor, byteStr);
+                    html += isDark
+                                ? QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(hexColor, byteStr)
+                                : QStringLiteral("<span style=\"color: %1; font-weight: 500;\">%2</span> ").arg(hexColor, byteStr);
                 }
 
                 // Append printable character or dot for non-printables
@@ -648,6 +643,10 @@ QColor MemView::activeHexTextColor() const {
  * @param event Paint event payload.
  */
 void MemView::paintEvent(QPaintEvent* event) {
+    const QString activeTheme = gridlock::core::ThemeManager::instance().activeThemeId();
+    if (m_lastStyledThemeId != activeTheme) {
+        reloadStyle();
+    }
     QWidget::paintEvent(event);
 }
 
@@ -656,7 +655,8 @@ void MemView::paintEvent(QPaintEvent* event) {
  */
 void MemView::reloadStyle() {
     auto& tm = gridlock::core::ThemeManager::instance();
-    const auto pal = tm.paletteForTheme(tm.activeThemeId());
+    m_lastStyledThemeId = tm.activeThemeId();
+    const auto pal = tm.paletteForTheme(m_lastStyledThemeId);
     if (m_dumpEdit) {
         QPalette p = m_dumpEdit->palette();
         p.setColor(QPalette::Base, QColor(pal.canvasHex));
@@ -680,16 +680,15 @@ void MemView::reloadStyle() {
     }
     if (QWidget* headerBar = findChild<QWidget*>(QStringLiteral("cutterMemHeader"))) {
         headerBar->setStyleSheet(QStringLiteral(
-            "#cutterMemHeader { background: %1; border-bottom: 1px solid %2; } "
+            "#cutterMemHeader { background-color: %1; border-bottom: 1px solid %2; } "
             "#cutterMemHeader QLabel { color: %3; font-size: 11px; font-weight: 600; } "
             "#cutterMemHeader QLineEdit, #cutterMemHeader QSpinBox, #cutterMemHeader QComboBox { "
-            "min-height: 20px; max-height: 22px; padding: 0px 4px; margin: 0px; background: %4; color: %3; "
+            "min-height: 20px; max-height: 22px; padding: 0px 4px; margin: 0px; background-color: %4; color: %3; "
             "border: 1px solid %2; border-radius: 2px; } "
             "#cutterMemHeader QPushButton { padding: 1px 8px; min-height: 20px; max-height: 22px; "
-            "background: %5; color: %3; border: 1px solid %2; border-radius: 2px; font-size: 10px; font-weight: 600; } "
-            "#cutterMemHeader QPushButton:hover { background: %2; color: %3; }")
-            .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex,
-                 pal.isDark ? QStringLiteral("#252932") : pal.headerHex));
+            "background-color: %1; color: %3; border: 1px solid %2; border-radius: 2px; font-size: 10px; font-weight: 600; } "
+            "#cutterMemHeader QPushButton:hover { background-color: %2; color: %3; }")
+            .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex));
     }
     update();
 }

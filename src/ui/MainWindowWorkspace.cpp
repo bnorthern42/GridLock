@@ -103,28 +103,12 @@ void MainWindow::applyCutterWorkspaceLayout() {
  * with history back/forward buttons, global seek bar, and address space visualizer.
  */
 void MainWindow::setupToolbar() {
-  // Construct main debugger control toolbar.
+  // Construct main debugger control toolbar (styled dynamically by propagateThemeToAllWidgets()).
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
   toolbar->setMovable(false);
   toolbar->setFixedHeight(28);
   toolbar->setContentsMargins(4, 1, 4, 1);
-  toolbar->setStyleSheet(
-      "QToolBar#MainToolbar { background: #1e2228; border-bottom: 1px solid #2c313a; "
-      "spacing: 4px; padding: 1px 4px; height: 26px; min-height: 26px; max-height: 28px; }"
-      "QToolBar#MainToolbar QLabel { background: transparent; color: #abb2bf; "
-      "font-size: 10px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
-      "QToolBar#MainToolbar QComboBox, QToolBar#MainToolbar QSpinBox, #toolbarTargetSelector { "
-      "background: #141619; color: #d7dae0; border: 1px solid #323844; border-radius: 2px; "
-      "padding: 0px 6px; height: 22px; min-height: 20px; max-height: 22px; "
-      "font-size: 11px; font-weight: 500; font-style: normal; }"
-      "QToolBar#MainToolbar QToolButton { background: #252932; color: #d7dae0; "
-      "border: 1px solid #323844; border-radius: 2px; padding: 1px 8px; margin: 0px; "
-      "height: 20px; min-height: 20px; max-height: 22px; font-size: 11px; font-weight: 600; font-style: normal; }"
-      "QToolBar#MainToolbar QToolButton:hover:enabled { background: #2c323d; border: 1px solid #3e4452; color: #ffffff; }"
-      "QToolBar#MainToolbar QToolButton:pressed:enabled { background: #2c3444; border: 1px solid #528bff; }"
-      "QToolBar#MainToolbar QToolButton:checked { background: #19362b; color: #4ec9b0; border: 1px solid #2ea043; font-weight: 600; }"
-      "QToolBar#MainToolbar QToolButton:disabled { background: #14161b; color: #454c59; border: 1px solid #1e2128; }");
 
   // Inline Target binary selector and MPI Rank (-np) spinbox ahead of Run Target.
   QLabel *targetLabel = new QLabel(QStringLiteral("TARGET:"), toolbar);
@@ -134,7 +118,7 @@ void MainWindow::setupToolbar() {
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setFixedHeight(22);
-  m_targetSelector->setMinimumWidth(145);
+  m_targetSelector->setMinimumWidth(130);
   QFont selectorFont = m_targetSelector->font();
   selectorFont.setItalic(false);
   selectorFont.setWeight(QFont::Medium);
@@ -255,30 +239,19 @@ void MainWindow::setupToolbar() {
   spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
   toolbar->addWidget(spacer);
 
-  // Navigation button stylesheet matching dark workstation theme.
-  const QString navBtnStyle = QStringLiteral(
-      "QPushButton, QPushButton:disabled { background: #252932; color: #d7dae0; border: 1px solid #323844; "
-      "border-radius: 2px; padding: 0px; margin: 0px; font-family: 'JetBrains Mono', monospace; "
-      "font-size: 11px; font-weight: 700; width: 20px; min-width: 20px; max-width: 22px; "
-      "height: 20px; min-height: 20px; max-height: 22px; }"
-      "QPushButton:hover:enabled { background: #2c323d; border-color: #528bff; color: #ffffff; }"
-      "QPushButton:disabled { background: #181a1f; color: #5c6370; border: 1px solid #242830; }");
-
-  // History back navigation button (<).
+  // History back navigation button (<) styled dynamically by propagateThemeToAllWidgets().
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
   m_navBackBtn->setObjectName("navBackButton");
   m_navBackBtn->setFixedSize(22, 22);
-  m_navBackBtn->setStyleSheet(navBtnStyle);
   m_navBackBtn->setEnabled(false);
   // Connect back button click to address stack pop operation.
   connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
   toolbar->addWidget(m_navBackBtn);
 
-  // History forward navigation button (>).
+  // History forward navigation button (>) styled dynamically by propagateThemeToAllWidgets().
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
   m_navForwardBtn->setObjectName("navForwardButton");
   m_navForwardBtn->setFixedSize(22, 22);
-  m_navForwardBtn->setStyleSheet(navBtnStyle);
   m_navForwardBtn->setEnabled(false);
   // Connect forward button click to address stack forward traversal.
   connect(m_navForwardBtn, &QPushButton::clicked, this,
@@ -300,9 +273,8 @@ void MainWindow::setupToolbar() {
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
   m_seekBar->setFixedHeight(22);
-  m_seekBar->setMinimumWidth(160);
-  m_seekBar->setFixedWidth(180);
-  m_seekBar->setMaximumWidth(200);
+  m_seekBar->setMinimumWidth(125);
+  m_seekBar->setMaximumWidth(155);
   // Apply monospace JetBrains Mono font for legible hex address formatting.
   QFont seekFont("JetBrains Mono");
   seekFont.setStyleHint(QFont::Monospace);

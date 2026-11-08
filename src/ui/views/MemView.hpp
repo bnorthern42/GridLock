@@ -97,6 +97,7 @@ private:
     uint64_t m_previousBaseAddress = 0ULL;
     int m_changedByteCount = 0;
     bool m_hasDiffBaseline = false;
+    QString m_lastStyledThemeId;
 };
 
 }  // namespace gridlock::ui
