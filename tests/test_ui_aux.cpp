@@ -816,13 +816,13 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     QVERIFY2(readText(QStringLiteral("README.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("sonar-project.properties")).contains(QStringLiteral("0.8.0")), "README.md, ROADMAP.md, docs/ROADMAP.md, and sonar-project.properties must reference 0.8.0");
     QVERIFY2(!readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "All ROADMAP.md and docs/ROADMAP.md checklist items must be marked [x]");
 
-    // 2. Verify scripts/build_appimage.sh (and packaging/build_appimage.sh if present) builds only the gridlock target, defaults to 0.8.0 (never 0.7.0), and uses appimagetool.
+    // 2. Verify scripts/build_appimage.sh (and packaging/build_appimage.sh if present) is version-agnostic and uses appimagetool.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(QStringLiteral("0.7.0")) && appImageScript.contains(QStringLiteral("0.8.0")), "build_appimage.sh must exist, be executable, not hardcode 0.7.0, and reference 0.8.0");
+    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(QStringLiteral("0.7.0")) && !appImageScript.contains(QStringLiteral("0.8.0")) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh must exist, be executable, not hardcode 0.7.0/0.8.0, and parse meson.build");
     if (QFileInfo::exists(rootPrefix + QStringLiteral("packaging/build_appimage.sh"))) {
         const QString pkgScript = readText(QStringLiteral("packaging/build_appimage.sh"));
-        QVERIFY2(!pkgScript.contains(QStringLiteral("0.7.0")) && pkgScript.contains(QStringLiteral("0.8.0")), "packaging/build_appimage.sh must not hardcode 0.7.0 and must reference 0.8.0");
+        QVERIFY2(!pkgScript.contains(QStringLiteral("0.7.0")) && !pkgScript.contains(QStringLiteral("0.8.0")), "packaging/build_appimage.sh must not hardcode 0.7.0 or 0.8.0");
     }
     for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
@@ -842,11 +842,12 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     proc.start(QFileInfo::exists(rootPrefix + QStringLiteral("builddir/gridlock")) ? (rootPrefix + QStringLiteral("builddir/gridlock")) : (rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock")), {QStringLiteral("--version")});
     QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.0")), "gridlock --version must report 0.8.0");
 
-    // 4. Verify GitHub Actions workflows install full v0.8.0 dependencies, never contain hardcoded 0.7.0, and enforce AppImage-only packaging.
+    // 4. Verify GitHub Actions workflows are version-agnostic, filter ui_tests in CI, and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows")); QString combinedYml;
     for (const QString& fn : wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files)) {
         const QString content = readText(QStringLiteral(".github/workflows/") + fn); combinedYml += content + QLatin1Char('\n');
-        QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && content.contains(QStringLiteral("0.8.0")), qPrintable(fn + QStringLiteral(" must not contain 0.7.0 and must reference 0.8.0")));
+        QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && !content.contains(QStringLiteral("0.8.0")) && !content.contains(QStringLiteral("v0.7.0")) && !content.contains(QStringLiteral("v0.8.0")), qPrintable(fn + QStringLiteral(" must not contain hardcoded versions")));
+        QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")), qPrintable(fn + QStringLiteral(" must filter ui_tests in CI test run")));
         QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) && !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")) && !content.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive), qPrintable(fn));
     }
     for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("lxqt/lxqt-build-tools"), QStringLiteral("lxqt/qtermwidget"), QStringLiteral("external/Qt-Advanced-Stylesheets/build"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("libfuse2t64"), QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"), QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {

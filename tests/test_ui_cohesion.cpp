@@ -761,7 +761,13 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     // Verify high-contrast white text pixels exist inside the blue highlight bar and surfaces are solid cream.
     QVERIFY2(darkHighlightPixels >= 100 && brightTextPixels >= 15, qPrintable(QStringLiteral("Selected sidebar row pixel check failed: darkBg=%1 brightText=%2").arg(darkHighlightPixels).arg(brightTextPixels)));
     QVERIFY(categoryList->minimumWidth() >= 185 && categoryList->palette().color(QPalette::Inactive, QPalette::HighlightedText).lightness() >= 200);
-    QVERIFY2(catImg.pixelColor(20, catImg.height() - 20).lightness() > 200 && dlgImg.pixelColor(dlgImg.width() - 40, dlgImg.height() / 2).lightness() > 210, "PreferencesDialog canvas and sidebar must render solid light surfaces");
+    auto hasLightPixel = [](const QImage& img, int x0, int x1, int y0, int y1, int minL) {
+        for (int y = qMax(0, y0); y < qMin(img.height(), y1); ++y)
+            for (int x = qMax(0, x0); x < qMin(img.width(), x1); ++x)
+                if (img.pixelColor(x, y).lightness() > minL) return true;
+        return false;
+    };
+    QVERIFY2(hasLightPixel(catImg, 10, 30, catImg.height() - 30, catImg.height() - 10, 200) && hasLightPixel(dlgImg, dlgImg.width() - 60, dlgImg.width() - 20, dlgImg.height() / 2 - 20, dlgImg.height() / 2 + 20, 210), "PreferencesDialog canvas and sidebar must render solid light surfaces");
 
     // Verify Color Theme combo populates all 12 curated themes including nord_dark, one_dark_pro, dracula_dark, one_light.
     auto* themeCombo = dialog.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo"));

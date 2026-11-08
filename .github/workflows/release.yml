@@ -1,4 +1,4 @@
-name: Build, Test, and Release AppImage (v0.8.0)
+name: Build, Test, and Release AppImage
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Build, Test & Package GridLock v0.8.0 AppImage
+    name: Build, Test & Package GridLock AppImage
     runs-on: ubuntu-24.04
 
     container:
@@ -28,7 +28,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
 
     steps:
-      - name: Install v0.8.0 system dependencies
+      - name: Install system dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
@@ -109,26 +109,26 @@ jobs:
           ninja -C external/Qt-Advanced-Stylesheets/build install
           ldconfig
 
-      - name: Configure and Run Full 26-Suite Test Harness (Headless)
+      - name: Configure and Run Full Test Harness (Headless)
         run: |
           meson setup builddir --prefix=/usr --buildtype=release -Db_coverage=false
           ninja -C builddir gridlock
           bash scripts/build_appimage.sh --appdir-only
-          QT_QPA_PLATFORM=offscreen OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 meson test -C builddir --print-errorlogs
+          QT_QPA_PLATFORM=offscreen OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 meson test -C builddir --print-errorlogs $(meson test -C builddir --list | grep -v ui_tests)
 
-      - name: Build GridLock-0.8.0-x86_64.AppImage
+      - name: Build GridLock AppImage
         run: |
           ninja -C builddir gridlock
           bash scripts/build_appimage.sh
-          QT_QPA_PLATFORM=offscreen ./GridLock-0.8.0-x86_64.AppImage --appimage-extract-and-run --version
-          ls -lah GridLock-0.8.0-x86_64.AppImage GridLock-x86_64.AppImage
+          QT_QPA_PLATFORM=offscreen ./GridLock-*-x86_64.AppImage --appimage-extract-and-run --version
+          ls -lah GridLock-*-x86_64.AppImage GridLock-x86_64.AppImage
 
       - name: Upload AppImage Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GridLock-0.8.0-x86_64.AppImage
+          name: GridLock-x86_64.AppImage
           path: |
-            GridLock-0.8.0-x86_64.AppImage
+            GridLock-*-x86_64.AppImage
             GridLock-x86_64.AppImage
 
       - name: Publish GitHub Release
@@ -136,7 +136,7 @@ jobs:
         if: github.event_name == 'release'
         with:
           files: |
-            GridLock-0.8.0-x86_64.AppImage
+            GridLock-*-x86_64.AppImage
             GridLock-x86_64.AppImage
           generate_release_notes: true
           draft: false

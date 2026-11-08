@@ -11,17 +11,23 @@ for arg in "$@"; do
     fi
 done
 
-# Dynamically set version from GitHub tag, defaulting to v0.8.0
-if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
-    export VERSION="${GITHUB_REF_NAME#v}"
-else
-    export VERSION="0.8.0"
-fi
-
-APP_NAME="GridLock"
-BIN_NAME="gridlock"
 ROOT_DIR="$(pwd)"
 BUILD_DIR="builddir"
+APP_NAME="GridLock"
+BIN_NAME="gridlock"
+
+# Dynamically determine version: environment variable > git tag > meson.build project version
+if [ -n "${GRIDLOCK_VERSION:-}" ]; then
+    export VERSION="${GRIDLOCK_VERSION}"
+elif [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+    export VERSION="${GITHUB_REF_NAME#v}"
+else
+    export VERSION="$(grep -E "version\s*:\s*'" "${ROOT_DIR}/meson.build" 2>/dev/null | head -n1 | sed -E "s/.*version\s*:\s*'([^']+)'.*/\1/")"
+    if [ -z "${VERSION}" ]; then
+        VERSION="$(grep -E "version\s*:\s*'" meson.build 2>/dev/null | head -n1 | sed -E "s/.*version\s*:\s*'([^']+)'.*/\1/")"
+    fi
+fi
+
 APPDIR="${ROOT_DIR}/AppDir"
 ACSS_LIB_DIR="${ROOT_DIR}/external/Qt-Advanced-Stylesheets/build/lib"
 
@@ -113,7 +119,7 @@ if command -v patchelf >/dev/null 2>&1; then
     done
 fi
 
-echo "Bundling v0.8.0 tutorial C++ MPI targets into AppDir/usr/share/gridlock/tutorial/..."
+echo "Bundling tutorial C++ MPI targets into AppDir/usr/share/gridlock/tutorial/..."
 mkdir -p "${APPDIR}/usr/share/gridlock/tutorial"
 for src_target in "tutorial/inspection_demo.cpp" "tutorial/deadlock_ring.cpp" "tutorial/collective_mismatch.cpp" "tutorial/ghost_cell_drift.cpp" "tutorial/heap_imbalance.cpp" "tutorial/tag_mismatch_stall.cpp" "tutorial/simd_struct_watch.cpp"; do
     if [ -f "${ROOT_DIR}/${src_target}" ]; then

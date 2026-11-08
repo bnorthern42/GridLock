@@ -566,6 +566,18 @@ void PreferencesDialog::mouseMoveEvent(QMouseEvent* event) {
 }
 
 /**
+ * @brief Ensures the dialog background renders solid canvas surface behind child widgets.
+ * @param event The paint event.
+ */
+void PreferencesDialog::paintEvent(QPaintEvent* event) {
+    QPainter painter(this);
+    auto& tm = gridlock::core::managers::ThemeManager::instance();
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
+    painter.fillRect(rect(), QColor(pal.canvasHex));
+    QDialog::paintEvent(event);
+}
+
+/**
  * @brief Parses a SLURM batch script and populates the HPC Integration page controls.
  */
 bool PreferencesDialog::parseSlurmBatchScript(const QString& scriptText) {
