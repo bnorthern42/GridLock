@@ -120,13 +120,10 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void commandSentToGdb(int rankId, const QString& cmd);
 
   /** @brief Emitted when a source editor hover expression (`100-data-evaluate-expression`) resolves. */
-  void hoverEvaluationComplete(QString varName, QString result, QPoint globalPos);
+  void hoverEvaluationComplete(const QString& varName, const QString& result, QPoint globalPos);
 
   /** @brief Emitted when `-data-read-memory-bytes` returns hex contents starting at @p beginAddress. */
   void memoryDataReady(int rankId, qint64 beginAddress, const QString& hexContents);
-
-  /** @brief Emitted when `101-data-evaluate-expression` completes on @p rankId. */
-  void expressionEvaluated(int rankId, const QString& expr, const QString& result);
 
  public slots:
   /** @brief Broadcasts `-exec-next` across all MPI ranks. */
@@ -182,7 +179,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
    * @brief Per-rank GDB process handle, line accumulation buffer, and telemetry state.
    */
   struct RankProcess {
-    int id;                            ///< Zero-based MPI rank index.
+    int id = 0;                        ///< Zero-based MPI rank index.
     std::unique_ptr<QProcess> process; ///< Dedicated `gdb --interpreter=mi3` child process.
     RankState state;                   ///< Live execution, location, register, and watch telemetry.
     QString buffer;                    ///< Partial line accumulation buffer for GDB stdout.

@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QToolBar>
@@ -58,22 +59,16 @@
 static void auditFilesGoogleStyleAndDocumentation(const QStringList& targetFiles) {
     for (const QString& relPath : targetFiles) {
         QFile f(relPath);
-        // Verify file can be opened.
+        // Verify file can be opened, stays < 950 lines, and has @file/@brief header banner.
         QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(relPath));
         const QString content = QString::fromUtf8(f.readAll());
         const QStringList lines = content.split('\n');
-
-        // Check line limit ceiling (< 950 lines).
         QVERIFY2(lines.size() < 950, qPrintable(QString("%1 has %2 lines (>= 950)").arg(relPath).arg(lines.size())));
-
-        // Check required Doxygen file header banner.
-        QVERIFY2(content.contains("@file") && content.contains("@brief"),
-                 qPrintable(QString("%1 missing @file/@brief header banner").arg(relPath)));
+        QVERIFY2(content.contains("@file") && content.contains("@brief"), qPrintable(QString("%1 missing @file/@brief header banner").arg(relPath)));
 
         // Check Google C++ namespace closing comments.
         if (content.contains("\nnamespace ") || content.startsWith("namespace ")) {
-            QVERIFY2(content.contains("// namespace "),
-                     qPrintable(QString("%1 missing Google C++ closing // namespace comment").arg(relPath)));
+            QVERIFY2(content.contains("// namespace "), qPrintable(QString("%1 missing Google C++ closing // namespace comment").arg(relPath)));
         }
 
         // Compute comment density ratio (comments / non-empty lines >= 0.20).
@@ -86,9 +81,7 @@ static void auditFilesGoogleStyleAndDocumentation(const QStringList& targetFiles
         }
         QVERIFY2(nonEmptyLines > 0, qPrintable(relPath));
         const double ratio = static_cast<double>(commentLines) / static_cast<double>(nonEmptyLines);
-        QVERIFY2(ratio >= 0.20,
-                 qPrintable(QString("%1 comment ratio %2 (%3/%4) < 0.20")
-                                .arg(relPath).arg(ratio, 0, 'f', 3).arg(commentLines).arg(nonEmptyLines)));
+        QVERIFY2(ratio >= 0.20, qPrintable(QString("%1 comment ratio %2 (%3/%4) < 0.20").arg(relPath).arg(ratio, 0, 'f', 3).arg(commentLines).arg(nonEmptyLines)));
     }
 }
 
@@ -96,11 +89,8 @@ static void auditFilesGoogleStyleAndDocumentation(const QStringList& targetFiles
  * @brief Tests side dock resizability limits and xref / decompiler integration.
  */
 void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // 1. Left & Right Dock Resizability
     QDockWidget* leftDock = nullptr;
@@ -556,9 +546,29 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
     // Interactive launch assertions: normal CLI launch must not be invisible/offscreen.
     char appName[] = "gridlock"; char* normalArgv[] = { appName, nullptr };
     QVERIFY(!gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(1, normalArgv));
-    gridlock::ui::MainWindow mainWindow;
-    QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating) && !mainWindow.testAttribute(Qt::WA_DontShowOnScreen));
-    mainWindow.show(); QVERIFY(!mainWindow.isMinimized() && !mainWindow.isHidden());
+    gridlock::ui::MainWindow mainWindow; mainWindow.show();
+    QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating) && !mainWindow.testAttribute(Qt::WA_DontShowOnScreen) && !mainWindow.isMinimized() && !mainWindow.isHidden());
+
+    // 1. Static analysis sweep: run cppcheck with warning/performance/portability checks when present on PATH.
+    if (const QString cppcheckBin = QStandardPaths::findExecutable(QStringLiteral("cppcheck")); !cppcheckBin.isEmpty()) {
+        QProcess cppProc; cppProc.setWorkingDirectory(rootDir.absolutePath());
+        cppProc.start(cppcheckBin, {QStringLiteral("--enable=warning,performance,portability"), QStringLiteral("--std=c++23"), QStringLiteral("--suppress=missingIncludeSystem"), QStringLiteral("--suppress=unknownMacro"), QStringLiteral("--suppress=syntaxError"), QStringLiteral("--error-exitcode=1"), QStringLiteral("-I"), QStringLiteral("src"), QStringLiteral("src/")});
+        QVERIFY2(cppProc.waitForFinished(30000) && cppProc.exitCode() == 0, qPrintable(QString::fromUtf8(cppProc.readAllStandardError())));
+    }
+    // 2. Member initialization audit: verify pointer and scalar fields in src/ headers use explicit default initializers.
+    const QRegularExpression uninitPtrOrScalarRe(QStringLiteral("(?:\\*\\s*m_[A-Za-z0-9_]+|\\b(?:int|bool|double|float|quint64|uint64_t|qint64|size_t)\\s+(?:m_[A-Za-z0-9_]+|rankId|rows|cols|line|id|wasTruncated|dropped|depthExceeded))\\s*;"));
+    for (const QString& fPath : targetFiles) {
+        if (!fPath.endsWith(QStringLiteral(".hpp")) || !fPath.contains(QStringLiteral("/src/"))) continue;
+        QFile hf(fPath); QVERIFY(hf.open(QIODevice::ReadOnly | QIODevice::Text));
+        const auto m = uninitPtrOrScalarRe.match(QString::fromUtf8(hf.readAll()));
+        QVERIFY2(!m.hasMatch(), qPrintable(QStringLiteral("Uninitialized member in %1: %2").arg(fPath, m.captured(0))));
+    }
+    // 3. Roadmap audit: verify ROADMAP.md and docs/ROADMAP.md omit CLion and mark External Static Analysis Passes [x].
+    for (const QString& rmRel : {QStringLiteral("ROADMAP.md"), QStringLiteral("docs/ROADMAP.md")}) {
+        QFile rf(rootDir.filePath(rmRel)); QVERIFY(rf.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString rmText = QString::fromUtf8(rf.readAll());
+        QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))), qPrintable(QStringLiteral("Roadmap static analysis item not updated in ") + rmRel));
+    }
 }
 
 /**

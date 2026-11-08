@@ -25,10 +25,10 @@ namespace gridlock::core {
  * @brief Describes an MPI rank stalled inside a blocking MPI call.
  */
 struct DeadlockInfo {
-  int rankId;               ///< Zero-based MPI rank index.
+  int rankId = 0;           ///< Zero-based MPI rank index.
   QString blockedFunction;  ///< Name of the blocking MPI/PMPI routine (`MPI_Recv`, `MPI_Barrier`, etc.).
   QString file;             ///< Source file path of the caller frame.
-  int line;                 ///< 1-based source line number of the caller frame.
+  int line = 0;             ///< 1-based source line number of the caller frame.
 };
 
 /**
@@ -60,8 +60,8 @@ class DeadlockAnalyzer : public QObject {
   void onGdbOutputReceived(int rankId, const QString& output);
 
  private:
-  gridlock::GdbRankCoordinator* m_coordinator; ///< Non-owning pointer to the GDB rank coordinator.
-  QMap<int, bool> m_pendingStackRequest;       ///< Tracks ranks awaiting a `-stack-list-frames` reply.
+  gridlock::GdbRankCoordinator* m_coordinator = nullptr; ///< Non-owning pointer to the GDB rank coordinator.
+  QMap<int, bool> m_pendingStackRequest;                 ///< Tracks ranks awaiting a `-stack-list-frames` reply.
 };
 
 }  // namespace gridlock::core

@@ -93,7 +93,7 @@ void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
   auto& rp = m_processes[rankId];
   int count = 0;
   for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
-    const QString absPath = it.key();
+    const QString& absPath = it.key();
     for (int line : *it) {
       const QString cmd =
           QString("-break-insert -f %1:%2\n").arg(absPath).arg(line);
@@ -351,7 +351,7 @@ void GdbRankCoordinator::broadcastBreakpoint(const QString& file,
                                              int line,
                                              bool isSet,
                                              const QString& condition) {
-  const QString absPath = file;
+  const QString& absPath = file;
   const QString locStr = QString("%1:%2").arg(absPath).arg(line);
 
   for (size_t i = 0; i < m_processes.size(); ++i) {

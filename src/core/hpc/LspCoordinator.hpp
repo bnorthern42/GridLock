@@ -92,7 +92,7 @@ class LspCoordinator : public QObject {
   /** @brief Dispatches a complete JSON-RPC response object by its `id`. */
   void processMessage(const QJsonObject& message);
 
-  QProcess* m_process;                ///< Child `clangd` process handle.
+  QProcess* m_process = nullptr;      ///< Child `clangd` process handle.
   QByteArray m_buffer;                ///< Accumulation buffer for partial LSP frames.
   int m_nextRequestId = 1;            ///< Monotonically increasing JSON-RPC request ID.
   QMap<int, QPoint> m_hoverRequests;  ///< Maps pending hover request IDs to screen coordinates.

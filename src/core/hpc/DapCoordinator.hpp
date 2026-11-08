@@ -147,20 +147,8 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Emitted when `variables` arrive for @p parentVarRef on @p rankId. */
   void localsUpdated(int rankId, int parentVarRef, const QJsonArray& variables);
 
-  /** @brief Emitted when `evaluate` completes for @p expr on @p rankId. */
-  void expressionEvaluated(int rankId, QString expr, QString result);
-
-  /** @brief Emitted when target stdout/stderr output arrives via DAP `output` events. */
-  void targetOutputReceived(QString category, QString output);
-
-  /** @brief Emitted when raw bytes are read from @p address on @p rankId. */
-  void memoryRead(int rankId, const QString& address, const QByteArray& data);
-
   /** @brief Emitted when a 2D `double` matrix has been transferred for the heatmap widget. */
   void heatmapDataReady(const std::vector<double>& data, int rows, int cols);
-
-  /** @brief Emitted when register variables are updated for @p rankId. */
-  void registersUpdated(int rankId, const QJsonArray& registers);
 
   /** @brief Emitted once the child adapter process has started. */
   void adapterStarted();
@@ -199,7 +187,7 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, pid_t> m_rankToPid;                      ///< Maps zero-based rank ID to OS `pid_t`.
 
  private:
-  QProcess* m_process;                               ///< Underlying `lldb-dap` child process.
+  QProcess* m_process = nullptr;                     ///< Underlying `lldb-dap` child process.
   QByteArray m_buffer;                               ///< Receive buffer for partial DAP frames.
   std::atomic<int> m_sequenceNumber{1};              ///< Monotonic DAP `seq` counter.
   QMap<QString, QList<int>> m_breakpoints;           ///< Active breakpoints keyed by source file path.
@@ -216,9 +204,9 @@ class DapCoordinator : public IBackendCoordinator {
    * @brief Tracks dimensions for an in-flight heatmap pointer evaluation request.
    */
   struct HeatmapRequest {
-    int rankId; ///< Target MPI rank index.
-    int rows;   ///< Matrix row count.
-    int cols;   ///< Matrix column count.
+    int rankId = 0; ///< Target MPI rank index.
+    int rows = 0;   ///< Matrix row count.
+    int cols = 0;   ///< Matrix column count.
   };
   QMap<int, HeatmapRequest> m_heatmapRequests; ///< Maps `request_seq` to `HeatmapRequest`.
 

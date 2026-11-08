@@ -842,7 +842,7 @@ bool DisassemblyView::triggerContextAction(uint64_t address, const QString& acti
     const int lineIdx = m_addrToLine.value(address, -1);
     const QStringList lines = toPlainText().split('\n');
     if (lineIdx >= 0 && lineIdx < lines.size()) {
-      const QString line = lines[lineIdx];
+      const QString& line = lines[lineIdx];
       // If line is a CALL instruction to a named symbol, extract target routine (e.g., MPI_Init).
       static const QRegularExpression callRe(
           QStringLiteral("\\bcall\\b[^<]*<([^>@]+)(?:@plt)?>"),

@@ -842,7 +842,7 @@ QString DocsetManager::lookupX86InstructionHtml(const QString& mnemonic) const {
         {QStringLiteral("endbr64"), {"ENDBR64 — Terminate Indirect Branch 64-bit", "Signals indirect branch target for Intel CET shadow stack enforcement.", "ENDBR64", "/* CET verification */", "None affected.", "Hardware control-flow enforcement technology marker."}}
     };
 
-    X86Info info;
+    X86Info info{};
     if (kDocs.contains(m)) {
         info = kDocs.value(m);
     } else if (m.startsWith('j')) {

@@ -32,9 +32,9 @@ class MiSanitizer {
    */
   struct SanitizationResult {
     std::string sanitizedPayload; ///< Scrubbed MI payload safe for downstream parsing.
-    bool wasTruncated;            ///< `true` if the input exceeded `MAX_PAYLOAD_BYTES`.
-    bool dropped;                 ///< `true` if the packet was rejected entirely.
-    bool depthExceeded;           ///< `true` if tuple/list nesting exceeded `MAX_MI_NESTING_DEPTH`.
+    bool wasTruncated = false;    ///< `true` if the input exceeded `MAX_PAYLOAD_BYTES`.
+    bool dropped = false;         ///< `true` if the packet was rejected entirely.
+    bool depthExceeded = false;   ///< `true` if tuple/list nesting exceeded `MAX_MI_NESTING_DEPTH`.
   };
 
   /**

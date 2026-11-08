@@ -653,7 +653,7 @@ void MainWindow::loadSession() {
     for (const auto& bp : state.activeBreakpoints) {
         const auto parts = bp.split(':');
         if (parts.size() == 2) {
-            const QString file = parts[0];
+            const QString& file = parts[0];
             const int line = parts[1].toInt();
             m_persistentBreakpoints[file].insert(line);
 

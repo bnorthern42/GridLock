@@ -197,7 +197,7 @@ void LspCoordinator::processMessage(const QJsonObject& message) {
               markdown = contentsVal.toString();
             } else if (contentsVal.isArray()) {
               const QJsonArray arr = contentsVal.toArray();
-              for (const QJsonValue& val : arr) {
+              for (const QJsonValue val : arr) {
                 if (val.isObject()) {
                   markdown += val.toObject()["value"].toString() + "\n";
                 } else if (val.isString()) {

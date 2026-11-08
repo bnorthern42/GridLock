@@ -24,8 +24,8 @@ This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks f
 
 ## Phase 7: Static Analysis & Security Hardening
 
-- [ ] **External Static Analysis Passes (`cppcheck`, `clang-tidy`, CLion Inspections)**:
-  - Run `cppcheck`, `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`), and CLion inspection checks across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
+- [x] **External Static Analysis Passes (`cppcheck`, `clang-tidy`)**:
+  - Ran `cppcheck` and `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`) across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
 - [ ] **SonarQube / SonarCloud & Compiler Quality Gates**:
   - Add `sonar-project.properties` for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
 - [x] **Memory & Process Security Audit (`MemoryBoundsValidator`, `ElfBinaryInspector`, `MiSanitizer`)**:

@@ -293,7 +293,7 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
     }
 
     // Materialize a VariableNode for each JSON entry returned in the DAP `variables` array.
-    for (const QJsonValue& val : variables) {
+    for (const QJsonValue val : variables) {
         const QJsonObject var = val.toObject();
         const QString name = var["name"].toString();
         const QString value = var["value"].toString();
@@ -327,7 +327,7 @@ void VariableTreeModel::onScopesUpdated(int rankId, const QJsonArray& scopes) {
     if (m_currentRankId != -1 && rankId != m_currentRankId) return;
 
     // Inspect the frame's scopes and automatically fetch variables for the "Locals" scope.
-    for (const QJsonValue& val : scopes) {
+    for (const QJsonValue val : scopes) {
         const QJsonObject scope = val.toObject();
         if (scope["name"].toString() == "Locals") {
             const int varRef = scope["variablesReference"].toInt();

@@ -29,16 +29,16 @@ CompareResult MemoryDiffer::compareMemory(pid_t baselinePid,
   result.diffMask.resize(length, false);
 
   // Set up local iovec descriptors for both destination buffers.
-  struct iovec local_iov_baseline;
+  struct iovec local_iov_baseline{};
   local_iov_baseline.iov_base = result.baselineBuffer.data();
   local_iov_baseline.iov_len = length;
 
-  struct iovec local_iov_target;
+  struct iovec local_iov_target{};
   local_iov_target.iov_base = result.targetBuffer.data();
   local_iov_target.iov_len = length;
 
   // Both ranks are queried at the same virtual address.
-  struct iovec remote_iov;
+  struct iovec remote_iov{};
   remote_iov.iov_base = remoteAddress;
   remote_iov.iov_len = length;
 

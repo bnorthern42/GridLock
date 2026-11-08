@@ -640,7 +640,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
             const QJsonArray items = resultVal.isObject()
                                          ? resultVal.toObject().value(QStringLiteral("items")).toArray()
                                          : resultVal.toArray();
-            for (const QJsonValue& val : items) {
+            for (const QJsonValue val : items) {
                 const QJsonObject item = val.toObject();
                 const int kind = item.value(QStringLiteral("kind")).toInt(0);
                 if (kind != 2 && kind != 5 && kind != 6 && kind != 10) continue;
@@ -733,7 +733,7 @@ QVector<LspDiagnostic> ClangdLspClient::parsePublishDiagnostics(const QByteArray
                                  ? params.value(QStringLiteral("diagnostics")).toArray()
                                  : root.value(QStringLiteral("diagnostics")).toArray();
     // Convert each 0-based LSP range entry into a 1-based line LspDiagnostic record.
-    for (const QJsonValue& val : diags) {
+    for (const QJsonValue val : diags) {
         if (!val.isObject()) continue;
         const QJsonObject dObj = val.toObject();
         const QJsonObject rangeObj = dObj.value(QStringLiteral("range")).toObject();
@@ -834,7 +834,7 @@ QString extractSymbolAtColumn(const QString& targetLine, int zeroBasedCol) {
 QString ClangdLspClient::requestHoverInfo(const QString& sourceCode, int oneBasedLine, int zeroBasedColumn, int timeoutMs) {
     const QStringList lines = sourceCode.split(QLatin1Char('\n'));
     if (oneBasedLine < 1 || oneBasedLine > lines.size()) return QString();
-    const QString targetLine = lines.at(oneBasedLine - 1);
+    const QString& targetLine = lines.at(oneBasedLine - 1);
     const QString symbol = extractSymbolAtColumn(targetLine, zeroBasedColumn);
 
     // Query clangd textDocument/hover if server is running and timeoutMs > 0.

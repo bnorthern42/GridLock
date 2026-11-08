@@ -361,7 +361,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
       // Connect variable hover evaluation popover to display rich tooltip.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete,
-              this, [this](QString varName, QString result, QPoint globalPos) {
+              this, [this](const QString &varName, const QString &result, QPoint globalPos) {
                 if (getSourceCodeView() && m_plainJaneTooltip) {
                   m_plainJaneTooltip->showTooltip(
                       globalPos,
@@ -654,7 +654,7 @@ void MainWindow::setupMenu() {
           QString::fromUtf8(gitProc.readAllStandardOutput()).trimmed();
       if (!output.isEmpty()) {
         QStringList lines = output.split('\n');
-        QString lastLine = lines.last();
+        const QString &lastLine = lines.last();
         QString tag = lastLine.split('\t').last().replace("refs/tags/", "");
         if (!tag.isEmpty()) {
           latestTag = tag;

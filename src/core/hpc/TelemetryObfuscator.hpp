@@ -57,8 +57,8 @@ class TelemetryObfuscator : public QObject {
   void onFlush();
 
  private:
-  QByteArray m_buffer;      ///< Queued unpadded telemetry payload bytes.
-  QTimer* m_timer;          ///< Periodic 50 ms flush timer.
+  QByteArray m_buffer;          ///< Queued unpadded telemetry payload bytes.
+  QTimer* m_timer = nullptr;    ///< Periodic 50 ms flush timer.
   std::mt19937_64 m_prng;   ///< 64-bit Mersenne Twister used to generate random tail padding.
   std::mutex m_mutex;       ///< Protects `m_buffer` across producer/consumer threads.
 };
