@@ -662,20 +662,18 @@ void MainWindow::propagateThemeToAllWidgets() {
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
   const bool isDark = pal.isDark;
 
-  // 1. Re-style Main Toolbar (#MainToolbar) and target selector (#toolbarTargetSelector) in 12px UI sans-serif
+  // 1. Re-style Main Toolbar (#MainToolbar), target combo, rank spinbox, and 26px toolbar buttons in 12px UI sans-serif
   if (auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
+    mainToolBar->setMovable(true);
     mainToolBar->setStyleSheet(QStringLiteral(
-        "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; "
-        "spacing: 2px; padding: 1px 2px; height: 30px; min-height: 28px; max-height: 30px; }"
-        "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 3px; }"
-        "QToolBar#MainToolbar QLabel { background: transparent; color: %3; "
-        "font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
-        "QToolBar#MainToolbar QComboBox, QToolBar#MainToolbar QSpinBox, #toolbarTargetSelector { "
-        "background-color: %4; color: %3; border: 1px solid %2; border-radius: 3px; "
-        "padding: 0px 5px; height: 22px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 500; }"
-        "QToolBar#MainToolbar QToolButton { background-color: %1; color: %3; "
-        "border: 1px solid %2; border-radius: 3px; padding: 0px 5px; margin: 0px; "
-        "height: 22px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; }"
+        "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; spacing: 2px; padding: 1px 3px; height: 28px; min-height: 28px; max-height: 30px; }"
+        "QToolBar#MainToolbar::handle { background-color: %2; width: 5px; margin: 4px 2px; border-radius: 2px; }"
+        "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 2px; }"
+        "QToolBar#MainToolbar QLabel { background: transparent; color: %3; font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
+        "QToolBar#MainToolbar QComboBox, #toolbarTargetSelector { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 6px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
+        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 6px; padding-right: 18px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
+        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 16px; margin-right: 1px; }"
+        "QToolBar#MainToolbar QToolButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 7px; margin: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; }"
         "QToolBar#MainToolbar QToolButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
         "QToolBar#MainToolbar QToolButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
         "QToolBar#MainToolbar QToolButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
@@ -683,14 +681,18 @@ void MainWindow::propagateThemeToAllWidgets() {
         .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex,
              isDark ? QStringLiteral("#19362b") : pal.accentHex,
              isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
-    // Highlight Run Target (m_runAction) as the distinct primary call-to-action button on MainToolbar.
+    for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) btn->setFixedHeight(26);
+    if (m_rankCountSpin) {
+      m_rankCountSpin->setMinimumWidth(72); m_rankCountSpin->setFixedHeight(26);
+      if (auto* spinEdit = m_rankCountSpin->findChild<QLineEdit*>()) spinEdit->setMinimumWidth(40);
+    }
+    if (m_targetSelector) { m_targetSelector->setMinimumWidth(195); m_targetSelector->setFixedHeight(26); }
+    // Highlight Run Target (m_runAction) via theme accent fill while preserving identical 26px height and padding.
     if (m_runAction) {
       if (QWidget* runBtn = mainToolBar->widgetForAction(m_runAction)) {
-        runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
+        runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn")); runBtn->setFixedHeight(26);
         runBtn->setStyleSheet(QStringLiteral(
-            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; "
-            "font-size: 12px; font-weight: 600; border: 1px solid %1; border-radius: 4px; "
-            "padding: 3px 12px; min-height: 18px; max-height: 18px; }"
+            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; font-size: 12px; font-weight: 600; border: 1px solid %1; border-radius: 4px; padding: 0px 8px; margin: 0px; height: 24px; min-height: 24px; max-height: 24px; }"
             "QToolButton:hover:enabled { background-color: %1; color: #ffffff; border: 1px solid %2; }"
             "QToolButton:checked { background-color: %3; color: #ffffff; border: 1px solid %1; font-weight: 600; }"
             "QToolButton:disabled { background-color: %4; color: %5; border: 1px solid %4; }")
@@ -702,8 +704,10 @@ void MainWindow::propagateThemeToAllWidgets() {
 
   // 2. Re-style Address Space Section Ribbon (#AddressNavToolbar / #addressNavBar), Nav Arrows, Seek Bar, & CODE | REVERSE | MPI
   if (auto* navToolBar = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) {
+    navToolBar->setMovable(true);
     navToolBar->setStyleSheet(QStringLiteral(
-        "QToolBar#AddressNavToolbar { background-color: %1; border-bottom: 1px solid %2; padding: 0px; margin: 0px; }")
+        "QToolBar#AddressNavToolbar { background-color: %1; border-bottom: 1px solid %2; padding: 0px; margin: 0px; }"
+        "QToolBar#AddressNavToolbar::handle { background-color: %2; width: 4px; margin: 3px 2px; border-radius: 1px; }")
         .arg(pal.headerHex, pal.borderHex));
   }
   // Attach theme-aware paint filter once and refresh #addressNavBar palette and QSS.

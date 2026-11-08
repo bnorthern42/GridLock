@@ -99,9 +99,11 @@ static QString getHighContrastLightQssOverlay() {
         "QPushButton:disabled, QToolButton:disabled { background: #f6f8fa; color: #8c959f; border: 1px solid #d8dee4; }\n"
         // Single-line inputs, spinboxes, combo boxes, and filter bars with 12px UI sans-serif text.
         "QLineEdit, QSpinBox, QComboBox, #toolbarTargetSelector, #cutterSeekBar, #symbolFilterEdit, #stringFilterEdit, #watchExpressionInput {\n"
-        "    height: 24px; min-height: 22px; max-height: 24px; padding: 0px 6px;\n"
+        "    height: 24px; min-height: 22px; max-height: 26px; padding: 0px 6px;\n"
         "    background: #ffffff; border: 1px solid #d0d7de; border-radius: 3px; color: #1f2328; font-size: 12px; font-weight: 500; font-style: normal;\n"
         "}\n"
+        "QSpinBox { padding-left: 6px; padding-right: 18px; }\n"
+        "QSpinBox::up-button, QSpinBox::down-button { width: 16px; margin-right: 1px; }\n"
         // Text editors, browsers, list widgets, and hex dump viewports.
         "QTextEdit, QPlainTextEdit, QTextBrowser, QListWidget, #cutterHexDumpEdit {\n"
         "    border: none; background: #ffffff; color: #1f2328;\n"
@@ -127,6 +129,7 @@ static QString getHighContrastLightQssOverlay() {
         "QToolBar, #cutterDisasmHeader, #projectModeBar {\n"
         "    background: #eaeef2; color: #1f2328; border-bottom: 1px solid #d0d7de; min-height: 28px; max-height: 30px;\n"
         "}\n"
+        "QToolBar::handle { background: #d0d7de; width: 5px; margin: 4px 3px; border-radius: 2px; }\n"
         // Menus and modal dialog chrome use 13px UI sans-serif typography.
         "QMenuBar, QMenu, QDialog, QWizard { font-size: 13px; }\n"
         // Status bar telemetry badges, labels, and checkboxes use high-contrast 12px #1f2328 foreground.
@@ -206,10 +209,12 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "}\n"
         // Single-line text inputs, spinboxes, and combo boxes in 12px UI sans-serif.
         "QLineEdit, QLineEdit:disabled, QSpinBox, QSpinBox:disabled, QComboBox, QComboBox:disabled, #toolbarTargetSelector {\n"
-        "    height: 24px; min-height: 22px; max-height: 24px; padding: 0px 6px; margin: 0px;\n"
+        "    height: 24px; min-height: 22px; max-height: 26px; padding: 0px 6px; margin: 0px;\n"
         "    background: #16181d; border: 1px solid #323844; border-radius: 3px;\n"
         "    color: #d7dae0; font-size: 12px; font-weight: 500; font-style: normal;\n"
         "}\n"
+        "QSpinBox { padding-left: 6px; padding-right: 18px; }\n"
+        "QSpinBox::up-button, QSpinBox::down-button { width: 16px; margin-right: 1px; }\n"
         // Focused input controls highlight their border in `#528bff` for keyboard accessibility.
         "QLineEdit:focus, QSpinBox:focus, QComboBox:focus {\n"
         "    border: 1px solid #528bff; background: #1b1e24;\n"
@@ -265,15 +270,16 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "QScrollBar::handle:horizontal:hover { background: #3e4452; }\n"
         // Suppress legacy left/right stepper arrow buttons on horizontal scrollbars.
         "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; background: none; }\n"
-        // Top execution and navigation toolbar accommodating 24px segmented perspective toggles.
+        // Top execution and navigation toolbar accommodating 26px toolbar controls and movable handle.
         "QToolBar {\n"
-        "    height: 30px; max-height: 32px; min-height: 28px; padding: 1px 4px; spacing: 4px;\n"
+        "    height: 28px; max-height: 30px; min-height: 28px; padding: 1px 4px; spacing: 4px;\n"
         "    background: #1e2228; border-bottom: 1px solid #2c313a;\n"
         "}\n"
-        // Toolbar buttons use 12px UI sans-serif and `#252932` slate surface.
+        "QToolBar::handle { background: #323844; width: 5px; margin: 4px 3px; border-radius: 2px; }\n"
+        // Toolbar buttons use 12px UI sans-serif and `#252932` slate surface at 26px height.
         "QToolButton, QToolBar QToolButton {\n"
-        "    height: 22px; min-height: 20px; max-height: 24px; padding: 1px 8px; margin: 0px;\n"
-        "    background: #252932; border: 1px solid #323844; border-radius: 3px;\n"
+        "    height: 24px; min-height: 24px; max-height: 24px; padding: 0px 10px; margin: 0px;\n"
+        "    background: #252932; border: 1px solid #323844; border-radius: 4px;\n"
         "    color: #d7dae0; font-size: 12px; font-weight: 600;\n"
         "}\n"
         // Toolbar button hover state.

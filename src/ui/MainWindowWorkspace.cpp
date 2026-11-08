@@ -106,9 +106,9 @@ void MainWindow::setupToolbar() {
   // Construct main debugger control toolbar (styled dynamically by propagateThemeToAllWidgets()).
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
-  toolbar->setMovable(false);
+  toolbar->setMovable(true);
   toolbar->setFixedHeight(32);
-  toolbar->setContentsMargins(2, 1, 2, 1);
+  toolbar->setContentsMargins(2, 0, 2, 0);
 
   // Inline Target binary selector and MPI Rank (-np) spinbox ahead of Run Target.
   QLabel *targetLabel = new QLabel(QStringLiteral("TARGET:"), toolbar);
@@ -117,9 +117,9 @@ void MainWindow::setupToolbar() {
   // Inline Target Selector combo box allowing one-click switching between MPI targets or ELF binaries.
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
-  m_targetSelector->setFixedHeight(24);
-  m_targetSelector->setMinimumWidth(112);
-  m_targetSelector->setMaximumWidth(148);
+  m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+  m_targetSelector->setMinimumWidth(195);
+  m_targetSelector->setFixedHeight(26);
   QFont selectorFont = m_targetSelector->font();
   selectorFont.setItalic(false);
   selectorFont.setWeight(QFont::Medium);
@@ -146,18 +146,21 @@ void MainWindow::setupToolbar() {
   });
   toolbar->addWidget(m_targetSelector);
 
-  // Inline MPI Rank Count (-np) label and spin box configuring spawned cluster ranks (1..64).
+  // Inline MPI Rank Count (-np) label and spin box configuring spawned cluster ranks (1..256).
   QLabel *ranksLabel = new QLabel(QStringLiteral("RANKS (-np):"), toolbar);
   toolbar->addWidget(ranksLabel);
 
   // Spin box controlling the number of MPI ranks launched by startTargetWorkflow().
   m_rankCountSpin = new QSpinBox(toolbar);
   m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
-  m_rankCountSpin->setRange(1, 64);
+  m_rankCountSpin->setRange(1, 256);
   m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setFixedHeight(24);
-  m_rankCountSpin->setFixedWidth(44);
+  m_rankCountSpin->setMinimumWidth(72);
+  m_rankCountSpin->setFixedHeight(26);
   m_rankCountSpin->setFont(selectorFont);
+  if (auto *spinEdit = m_rankCountSpin->findChild<QLineEdit *>()) {
+    spinEdit->setMinimumWidth(40);
+  }
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
 
@@ -231,10 +234,12 @@ void MainWindow::setupToolbar() {
   // Initialize state-aware toolbar button enablement (Idle by default: only Run Target enabled).
   updateDebugToolbarState();
 
-  // Strip tooltips to maintain minimalist visual chrome.
-  // Prevents native OS hover popups from obscuring adjacent code/disassembly rows.
+  // Enforce uniform 26px height across all toolbar QToolButtons and strip tooltips.
   for (QAction *action : toolbar->actions()) {
     action->setToolTip(QString());
+    if (QWidget *btn = toolbar->widgetForAction(action)) {
+      if (qobject_cast<QToolButton *>(btn)) btn->setFixedHeight(26);
+    }
   }
 
   // Expanding spacer separating debugger actions from navigation controls.
@@ -247,7 +252,7 @@ void MainWindow::setupToolbar() {
   // History back navigation button (<) styled dynamically by propagateThemeToAllWidgets().
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
   m_navBackBtn->setObjectName("navBackButton");
-  m_navBackBtn->setFixedSize(24, 24);
+  m_navBackBtn->setFixedSize(26, 26);
   m_navBackBtn->setEnabled(false);
   // Connect back button click to address stack pop operation.
   connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
@@ -256,7 +261,7 @@ void MainWindow::setupToolbar() {
   // History forward navigation button (>) styled dynamically by propagateThemeToAllWidgets().
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
   m_navForwardBtn->setObjectName("navForwardButton");
-  m_navForwardBtn->setFixedSize(24, 24);
+  m_navForwardBtn->setFixedSize(26, 26);
   m_navForwardBtn->setEnabled(false);
   // Connect forward button click to address stack forward traversal.
   connect(m_navForwardBtn, &QPushButton::clicked, this,
@@ -277,7 +282,7 @@ void MainWindow::setupToolbar() {
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
-  m_seekBar->setFixedHeight(24);
+  m_seekBar->setFixedHeight(26);
   m_seekBar->setMinimumWidth(96);
   m_seekBar->setMaximumWidth(135);
   toolbar->addWidget(m_seekBar);
@@ -301,7 +306,7 @@ void MainWindow::setupToolbar() {
   addToolBarBreak(Qt::TopToolBarArea);
   QToolBar *navToolbar = addToolBar("Address Space Navigation");
   navToolbar->setObjectName("AddressNavToolbar");
-  navToolbar->setMovable(false);
+  navToolbar->setMovable(true);
   navToolbar->setFloatable(false);
   navToolbar->setFixedHeight(22);
   navToolbar->setContentsMargins(0, 0, 0, 0);
@@ -759,13 +764,22 @@ void MainWindow::setupDocks() {
   // Stack right-hand docks vertically: 320px registers, 210px watches, 290px server rack.
   resizeDocks({registersDock, watchDock, serverRackDock}, {320, 210, 290}, Qt::Vertical);
 
-  // Locate or initialize View menu to register dock toggle actions and redock command.
+  // Locate or initialize View menu to register toolbar/dock toggle actions and redock command.
   QMenu *viewMenu = nullptr;
   for (QAction *action : menuBar()->actions()) {
     if (action->menu() && action->text() == "&View") { viewMenu = action->menu(); break; }
   }
-  // Expose one-click batch recovery and split editor actions in the View menu.
+  // Expose Toolbars submenu, split editor actions, and batch recovery in the View menu.
   if (viewMenu) {
+    QMenu *toolbarsMenu = viewMenu->addMenu(QStringLiteral("Toolbars"));
+    for (auto *tb : findChildren<QToolBar *>()) {
+      tb->setMovable(true);
+      toolbarsMenu->addAction(tb->toggleViewAction());
+    }
+    toolbarsMenu->addSeparator();
+    toolbarsMenu->addAction(QStringLiteral("Reset Toolbars"), this, [this]() {
+      for (auto *tb : findChildren<QToolBar *>()) { tb->show(); addToolBar(Qt::TopToolBarArea, tb); }
+    });
     viewMenu->addSeparator();
     // Register Split Editor Right (horizontal side-by-side split pane).
     viewMenu->addAction(QStringLiteral("Split Editor Right"), this, [this]() {
