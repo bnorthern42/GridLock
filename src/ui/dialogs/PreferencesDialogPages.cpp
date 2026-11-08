@@ -171,7 +171,7 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     m_themeCombo = new QComboBox(this);
     m_themeCombo->setObjectName(QStringLiteral("themeSelectorCombo"));
     const QStringList themeIds =
-        gridlock::core::managers::ThemeManager::instance().availableThemes();
+        gridlock::core::managers::ThemeManager::instance().availableThemeIds();
     for (const QString& id : themeIds) {
         m_themeCombo->addItem(
             gridlock::core::managers::ThemeManager::themeDisplayName(id), id);
@@ -301,10 +301,12 @@ int AppearanceSettingsPage::codeFontSize() const { return m_codeFontSizeBox->val
 
 /** @brief Loads persisted appearance preferences from user settings with signals blocked. */
 void AppearanceSettingsPage::loadFromSettings() {
-    // Query persisted theme ID, polarity flag, and typography metrics from QSettings.
+    // Query live active theme ID first (falling back to persisted QSettings), plus typography metrics.
     QSettings s("gridlock", "debugger");
-    const QString activeId = gridlock::core::managers::ThemeManager::instance().activeThemeId();
-    const QString theme = s.value("appearance/theme", activeId.isEmpty() ? QStringLiteral("gridlock_slate") : activeId).toString();
+    const QString activeId = gridlock::core::managers::ThemeManager::instance().activeThemeId().trimmed();
+    const QString theme = !activeId.isEmpty()
+                              ? activeId
+                              : s.value("appearance/theme", QStringLiteral("gridlock_slate")).toString();
     const QVector<QWidget*> ctrls = {m_darkModeCheck, m_themeCombo, m_fileTreeStyleCombo, m_colorizeIconsCheck,
                                      m_uiFontFamilyCombo, m_uiFontSizeBox, m_codeFontFamilyCombo, m_codeFontSizeBox};
     // Temporarily suppress change signals while populating initial form state.

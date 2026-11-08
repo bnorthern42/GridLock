@@ -753,6 +753,11 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
         overlay.replace(QStringLiteral("#0969da"), sw[3], Qt::CaseInsensitive);
         overlay.replace(QStringLiteral("#1f2328"), sw[4], Qt::CaseInsensitive);
     }
+    // Override qt_material's dark selection-color on QListView/QListWidget selected rows in light themes.
+    if (!isDark && sw.size() >= 4) {
+        const QString selFg = (QColor(sw[3]).lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
+        overlay += QStringLiteral("\nQListView::item:selected, QListView::item:selected:focus, QListWidget::item:selected, QListWidget::item:selected:focus, QListWidget::item:selected:active, QListWidget::item:selected:!active { background-color: %1; selection-background-color: %1; color: %2; selection-color: %2; }\n").arg(sw[3], selFg);
+    }
 
     if (!uiFontFamily.trimmed().isEmpty()) {
         overlay += QStringLiteral("\nQMenuBar, QMenu, QLabel, QPushButton, QComboBox, QLineEdit, QSpinBox { font-family: '%1'; font-size: %2pt; }\n")

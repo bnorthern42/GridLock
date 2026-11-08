@@ -587,55 +587,48 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
  *    Confirms toggleMaximizeBottomConsole() expands and restores the bottom tab dock height.
  */
 void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
+    // Initialize MainWindow with preview fixture and ensure tutorial source file is mounted.
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
         const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp")) ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
         mainWindow.loadSourceFile(demoPath);
     }
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
+    // Locate central source editor, disassembly canvas, and bottom console tab widget.
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
     QVERIFY(sourceView != nullptr && disasmView != nullptr && bottomTabs != nullptr);
 
-    // 1. Bidirectional Source Line <-> Instruction Address Mapping.
+    // 1. Bidirectional Source Line <-> Instruction Address Mapping across views.
     QCOMPARE(mainWindow.sourceLineToAddress(13), 0x0040113dULL);
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
-    sourceView->selectSourceLine(16);
-    QApplication::processEvents();
+    sourceView->selectSourceLine(16); QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
-    emit disasmView->addressSelected(0x0040113dULL);
-    QApplication::processEvents();
+    emit disasmView->addressSelected(0x0040113dULL); QApplication::processEvents();
     QCOMPARE(sourceView->executionLine(), 13);
 
-    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code").
-    mainWindow.setWorkspacePerspective(QStringLiteral("Reverse"));
-    QApplication::processEvents();
+    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code") and width checks.
+    mainWindow.setWorkspacePerspective(QStringLiteral("Reverse")); QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
     QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700, "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
 
-    mainWindow.setWorkspacePerspective(QStringLiteral("MPI"));
-    QApplication::processEvents();
+    // Verify MPI perspective activates the MPI Diagnostics tab in BottomConsoleTabs.
+    mainWindow.setWorkspacePerspective(QStringLiteral("MPI")); QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("MPI"));
     QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive), "MPI perspective must activate the MPI Diagnostics bottom tab");
 
-    mainWindow.setWorkspacePerspective(QStringLiteral("Code"));
-    QApplication::processEvents();
+    // Verify Code perspective restores side-by-side SourceCodeView and DisassemblyView panes.
+    mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Code"));
     QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200, "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
 
-    // 3. Bottom Console Maximize Toggle.
+    // 3. Bottom Console Maximize Toggle expands and restores bottom dock height.
     const int baseHeight = bottomTabs->height();
-    mainWindow.toggleMaximizeBottomConsole();
-    QApplication::processEvents();
+    mainWindow.toggleMaximizeBottomConsole(); QApplication::processEvents();
     QVERIFY2(bottomTabs->height() > baseHeight, "toggleMaximizeBottomConsole() must expand BottomConsoleTabs height");
-    mainWindow.toggleMaximizeBottomConsole();
-    QApplication::processEvents();
+    mainWindow.toggleMaximizeBottomConsole(); QApplication::processEvents();
 }
 
 /**
@@ -643,43 +636,38 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
  * Validates granular address-to-line mapping, breakpoint-aware target workflow, and active CFG block marker.
  */
 void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMarker() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
+    // Launch MainWindow with fixture data and load tutorial source if not yet mounted.
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
         const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp")) ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
         mainWindow.loadSourceFile(demoPath);
     }
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
+    // Retrieve SourceCodeView, DisassemblyView, and ServerRackView pointers.
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     QVERIFY(sourceView != nullptr && disasmView != nullptr && serverRack != nullptr);
 
-    // 1. Granular Source Line <-> Instruction Address Mapping.
+    // 1. Granular Source Line <-> Instruction Address Mapping assertions.
     QCOMPARE(mainWindow.addressToSourceLine(0x00401120ULL), 12);
     QCOMPARE(mainWindow.addressToSourceLine(0x00401128ULL), 15);
     QCOMPARE(mainWindow.addressToSourceLine(0x0040113dULL), 13);
     QCOMPARE(mainWindow.addressToSourceLine(0x00401149ULL), 16);
     QCOMPARE(mainWindow.sourceLineToAddress(15), 0x00401128ULL);
     QCOMPARE(mainWindow.sourceLineToAddress(16), 0x00401149ULL);
-    // 2. Breakpoint-Aware Run Target & Continue Workflow.
-    mainWindow.stopTargetWorkflow();
-    sourceView->setBreakpoints(QSet<int>());
-    sourceView->toggleBreakpoint(15);
-    sourceView->toggleBreakpoint(16);
+    // 2. Breakpoint-Aware Run Target & Continue Workflow at lines 15 and 16.
+    mainWindow.stopTargetWorkflow(); sourceView->setBreakpoints(QSet<int>());
+    sourceView->toggleBreakpoint(15); sourceView->toggleBreakpoint(16);
     QVERIFY2(sourceView->hasBreakpoint(15) && sourceView->hasBreakpoint(16), "SourceCodeView::toggleBreakpoint(15/16) must register active breakpoints");
     QVERIFY2(sourceView->breakpoints().contains(15) && sourceView->breakpoints().contains(16), "SourceCodeView::breakpoints() must contain lines 15 and 16");
-    // Launch target and verify stop at first active breakpoint.
-    mainWindow.startTargetWorkflow();
-    QApplication::processEvents();
+    // Launch target and verify execution stops at first active breakpoint (line 15).
+    mainWindow.startTargetWorkflow(); QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401128ULL);
     QCOMPARE(sourceView->executionLine(), 15);
     QCOMPARE(serverRack->rankPcAddress(serverRack->selectedRank()), 0x00401128ULL);
-    // Continue to next active breakpoint at line 16.
+    // Continue to next active breakpoint at line 16 and verify RIP synchronization.
     QVERIFY2(mainWindow.continueExecutionWorkflow(), "MainWindow::continueExecutionWorkflow() must advance to the next active breakpoint");
     QApplication::processEvents();
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
@@ -705,12 +693,8 @@ void TestMainWindowUI::testBreakpointAwareRunContinueAndActiveCfgInstructionMark
  */
 void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
     // Instantiate and expose MainWindow with preview fixture data.
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // Query dock instances by their unique registered object names.
     auto* serverRackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
@@ -720,66 +704,84 @@ void TestMainWindowUI::testFloatingDockPopOutAndDragBackRedock() {
     // 1. Pop Out (floatDockWidget) & 1-Click / Double-Click Redock (redockWidget).
     QWidget* originalParent = serverRackDock->parentWidget();
     mainWindow.toggleDockFloating(serverRackDock);
-    // Verify dock transitioned to top-level floating state and remains visible.
     QVERIFY2(mainWindow.isDockFloating(serverRackDock) && serverRackDock->isVisible(), "ServerRackDock must be floating and visible after toggleDockFloating");
-
     mainWindow.redockWidget(serverRackDock);
-    // Verify dock returned to docked state with original parent and valid geometry.
     QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must not be floating after redockWidget");
     QCOMPARE(serverRackDock->parentWidget(), originalParent);
-    QVERIFY2(serverRackDock->isVisible() && serverRackDock->width() > 50 && serverRackDock->height() > 50, "ServerRackDock must retain visible dimensions > 50px inside its dock/splitter slot");
+    QVERIFY2(serverRackDock->isVisible() && serverRackDock->width() > 50 && serverRackDock->height() > 50, "ServerRackDock must retain visible dimensions > 50px");
 
-    // 2. Drag-Back Drop-Zone Redocking (handleDockDragRelease).
+    // 2. Drag-Back Drop-Zone Redocking (handleDockDragRelease) & 3. Bulk redockAllFloatingPanels().
     mainWindow.toggleDockFloating(serverRackDock);
     QVERIFY2(mainWindow.isDockFloating(serverRackDock), "ServerRackDock must be floating again");
-    // Calculate global screen center of dock's home drop zone and simulate release.
-    const QPoint homeGlobalCenter = mainWindow.dockHomeGlobalRect(serverRackDock).center();
-    mainWindow.handleDockDragRelease(serverRackDock, homeGlobalCenter);
-    QVERIFY2(!mainWindow.isDockFloating(serverRackDock), "ServerRackDock must redock when dropped into its home drop zone");
-    QCOMPARE(serverRackDock->parentWidget(), originalParent);
-
-    // 3. redockAllFloatingPanels() Restores All Popped-Out Panels.
-    mainWindow.toggleDockFloating(serverRackDock);
-    mainWindow.toggleDockFloating(registerDock);
+    mainWindow.handleDockDragRelease(serverRackDock, mainWindow.dockHomeGlobalRect(serverRackDock).center());
+    QVERIFY2(!mainWindow.isDockFloating(serverRackDock) && serverRackDock->parentWidget() == originalParent, "ServerRackDock must redock when dropped into home zone");
+    mainWindow.toggleDockFloating(serverRackDock); mainWindow.toggleDockFloating(registerDock);
     QVERIFY2(mainWindow.isDockFloating(serverRackDock) && mainWindow.isDockFloating(registerDock), "Both docks must be floating");
-    // Restore all floating panels in a single batch operation.
     mainWindow.redockAllFloatingPanels();
     QVERIFY2(!mainWindow.isDockFloating(serverRackDock) && !mainWindow.isDockFloating(registerDock), "Both docks must be docked after redockAllFloatingPanels");
 }
 
 /**
- * @brief Verifies Preferences sidebar `:selected:!active` contrast, luminance-aware palette swatches,
- *        >= 15 terminal monospace font choices, unclipped Browse buttons, and 16-option SLURM auto-detection.
+ * @brief Verifies Preferences sidebar pixel-level selected item contrast under solarized_light,
+ *        opaque background, 12-theme selector dropdown, >= 15 terminal fonts, and SLURM auto-detection.
+ *
+ * Ensures qt_material's QListView::item:selected:focus rule never paints dark text on dark blue,
+ * validates opaque cream surfaces across dialog and sidebar, and checks all 12 curated themes.
  */
 void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDetect() {
-    gridlock::ui::PreferencesDialog dialog;
-    dialog.resize(860, 620);
-    dialog.show();
-    QApplication::processEvents();
+    // 1. Initialize qt_material base stylesheet (matching main.cpp), switch to solarized_light, and capture rendered PNG.
+    auto& tm = gridlock::core::ThemeManager::instance();
+    tm.initialize(); tm.applyTheme(QStringLiteral("solarized_light"));
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1280, 800); mainWindow.loadPreviewFixture();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
-    // 1. Sidebar Inactive Selection Contrast (QPalette::Inactive HighlightedText is never black).
+    // Open PreferencesDialog over MainWindow and save rendered offscreen PNG for visual & pixel verification.
+    gridlock::ui::PreferencesDialog dialog(&mainWindow);
+    dialog.resize(860, 620); dialog.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&dialog)); QApplication::processEvents();
+    const QImage dlgImg = dialog.grab().toImage();
+    QVERIFY(!dlgImg.isNull() && dlgImg.save(QStringLiteral("/tmp/prefs_solarized_verify.png")));
+
+    // Scan actual rendered pixels of selected row 0 ("Appearance") in the sidebar viewport.
     auto* categoryList = dialog.findChild<QListWidget*>();
-    QVERIFY(categoryList != nullptr);
-    QVERIFY2(categoryList->palette().color(QPalette::Inactive, QPalette::HighlightedText).lightness() >= 200, "Sidebar QListWidget Inactive HighlightedText must remain bright (>= 200 lightness)");
-    QVERIFY2(dialog.styleSheet().contains(QStringLiteral("QListWidget::item:selected:!active")), "PreferencesDialog stylesheet must explicitly style QListWidget::item:selected:!active");
+    QVERIFY(categoryList != nullptr && categoryList->viewport() != nullptr && categoryList->item(0) != nullptr);
+    const QImage catImg = categoryList->viewport()->grab().toImage();
+    const QRect itemRect = categoryList->visualItemRect(categoryList->item(0)).intersected(catImg.rect());
+    int darkHighlightPixels = 0, brightTextPixels = 0;
+    // Count dark accent highlight pixels (lightness < 150) and bright white glyph pixels (lightness > 210).
+    for (int y = itemRect.top() + 3; y <= itemRect.bottom() - 3; ++y) {
+        for (int x = itemRect.left() + 42; x <= itemRect.right() - 6; ++x) {
+            const int l = catImg.pixelColor(x, y).lightness();
+            if (l < 150) ++darkHighlightPixels;
+            else if (l > 210) ++brightTextPixels;
+        }
+    }
+    // Verify high-contrast white text pixels exist inside the blue highlight bar and surfaces are solid cream.
+    QVERIFY2(darkHighlightPixels >= 100 && brightTextPixels >= 15,
+             qPrintable(QStringLiteral("Selected sidebar row pixel check failed: darkBg=%1 brightText=%2").arg(darkHighlightPixels).arg(brightTextPixels)));
+    QVERIFY(categoryList->minimumWidth() >= 185);
+    QVERIFY2(catImg.pixelColor(20, catImg.height() - 20).lightness() > 200 && dlgImg.pixelColor(dlgImg.width() - 40, dlgImg.height() / 2).lightness() > 210,
+             "PreferencesDialog page canvas and sidebar empty region must render solid light surfaces in solarized_light");
+    QVERIFY2(categoryList->palette().color(QPalette::Inactive, QPalette::HighlightedText).lightness() >= 200, "Sidebar Inactive HighlightedText must remain bright");
+
+    // Verify Color Theme combo populates all 12 curated themes including nord_dark, one_dark_pro, dracula_dark, one_light.
+    auto* themeCombo = dialog.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo"));
+    QVERIFY2(themeCombo != nullptr && themeCombo->count() == 12, qPrintable(QStringLiteral("Expected 12 themes, got %1").arg(themeCombo ? themeCombo->count() : -1)));
+    for (const QString& reqTheme : {QStringLiteral("nord_dark"), QStringLiteral("one_dark_pro"), QStringLiteral("dracula_dark"), QStringLiteral("one_light")})
+        QVERIFY2(themeCombo->findData(reqTheme) >= 0, qPrintable(QStringLiteral("Missing theme in combo: ") + reqTheme));
 
     // 2. Palette Swatch Auto-Contrast & Hex Display on Gruvbox Industrial (#fabd2f bright yellow accent).
-    for (QComboBox* cb : dialog.findChildren<QComboBox*>()) {
-        const int idx = cb->findData(QStringLiteral("gruvbox_dark"));
-        if (idx >= 0) { cb->setCurrentIndex(idx); break; }
-    }
-    QApplication::processEvents();
-    bool foundAccentDarkText = false;
-    bool foundCanvasLightText = false;
+    themeCombo->setCurrentIndex(themeCombo->findData(QStringLiteral("gruvbox_dark"))); QApplication::processEvents();
+    bool foundAccentDarkText = false, foundCanvasLightText = false;
     for (QLabel* lbl : dialog.findChildren<QLabel*>()) {
         const bool hasHex = lbl->text().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive) || lbl->toolTip().contains(QStringLiteral("#fabd2f"), Qt::CaseInsensitive);
         if ((lbl->text().contains(QStringLiteral("Accent")) || lbl->toolTip().contains(QStringLiteral("Accent"))) && hasHex) {
-            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() < 60 && lbl->styleSheet().contains(QStringLiteral("#16181d"), Qt::CaseInsensitive), "Bright #fabd2f Accent swatch must use dark text (< 60 lightness)");
+            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() < 60 && lbl->styleSheet().contains(QStringLiteral("#16181d"), Qt::CaseInsensitive), "Bright #fabd2f Accent swatch must use dark text");
             foundAccentDarkText = true;
         }
         const bool hasCanvas = lbl->text().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive) || lbl->toolTip().contains(QStringLiteral("#1d2021"), Qt::CaseInsensitive);
         if ((lbl->text().contains(QStringLiteral("Canvas")) || lbl->toolTip().contains(QStringLiteral("Canvas"))) && hasCanvas) {
-            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() > 200, "Dark #1d2021 Canvas swatch must use light text (> 200 lightness)");
+            QVERIFY2(lbl->palette().color(QPalette::WindowText).lightness() > 200, "Dark #1d2021 Canvas swatch must use light text");
             foundCanvasLightText = true;
         }
     }
@@ -788,12 +790,11 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     // 3. Terminal Font Family Combo Has >= 15 Monospace Options & Unclipped "Browse..." Buttons.
     auto* termFontCombo = dialog.findChild<QComboBox*>(QStringLiteral("terminalFontFamilyCombo"));
     QVERIFY2(termFontCombo != nullptr && termFontCombo->count() >= 15, "Terminal Font Family combo must offer >= 15 monospace font families");
-    for (QPushButton* btn : dialog.findChildren<QPushButton*>()) {
+    for (QPushButton* btn : dialog.findChildren<QPushButton*>())
         if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive))
             QVERIFY2(btn->minimumWidth() >= 88, qPrintable(QStringLiteral("Browse button minWidth %1 < 88").arg(btn->minimumWidth())));
-    }
 
-    // 4. Comprehensive SLURM Fields (>= 14 Options) & Batch Script File Auto-Detection (parseSlurmBatchScript).
+    // 4. Comprehensive SLURM Fields & Batch Script File Auto-Detection (parseSlurmBatchScript).
     const QString sampleSbatch = QStringLiteral(
         "#!/bin/bash\n#SBATCH --job-name=wpt_fem_solver\n#SBATCH --account=ttu_hpc\n#SBATCH --partition=gpu_a100\n"
         "#SBATCH --qos=high\n#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=16\n#SBATCH --cpus-per-task=4\n"
@@ -807,6 +808,7 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     };
     for (const auto& [k, v] : slurmFields) QCOMPARE(dialog.slurmFieldValue(k), v);
     QVERIFY(dialog.slurmFieldValue(QStringLiteral("modules")).contains(QStringLiteral("openmpi/5.0")));
+    tm.applyTheme(QStringLiteral("gridlock_slate"));
 }
 
 /**
@@ -817,9 +819,8 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
     auto& tm = gridlock::core::ThemeManager::instance();
     const QStringList themeIds = tm.availableThemeIds();
     // 1. Verify all 12 curated themes (8 dark, 4 light) including nord_dark, one_dark_pro, one_light, and dracula_dark.
-    for (const QString& reqId : {QStringLiteral("daylight_light"), QStringLiteral("solarized_light"), QStringLiteral("catppuccin_latte"), QStringLiteral("one_light"), QStringLiteral("nord_dark"), QStringLiteral("one_dark_pro"), QStringLiteral("dracula_dark")}) {
+    for (const QString& reqId : {QStringLiteral("daylight_light"), QStringLiteral("solarized_light"), QStringLiteral("catppuccin_latte"), QStringLiteral("one_light"), QStringLiteral("nord_dark"), QStringLiteral("one_dark_pro"), QStringLiteral("dracula_dark")})
         QVERIFY2(themeIds.contains(reqId), qPrintable(QStringLiteral("ThemeManager missing theme: ") + reqId));
-    }
     QVERIFY2(themeIds.size() >= 12 && !tm.paletteForTheme(QStringLiteral("one_light")).isDark && tm.paletteForTheme(QStringLiteral("nord_dark")).isDark && tm.paletteForTheme(QStringLiteral("one_dark_pro")).isDark && tm.paletteForTheme(QStringLiteral("dracula_dark")).isDark, "ThemeManager must expose >= 12 themes with accurate isDark polarity");
     // Verify QApplication::palette() roles synchronize when switching between one_light and nord_dark.
     tm.applyTheme(QStringLiteral("one_light"));
@@ -860,54 +861,44 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
  */
 void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadroom() {
     auto& tm = gridlock::core::ThemeManager::instance();
-    // 1. Full Workstation Theme Propagation in solarized_light.
+    // 1. Full Workstation Theme Propagation in solarized_light across primary inspection views.
     tm.applyTheme(QStringLiteral("solarized_light"));
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
-
-    // Propagate active solarized light theme colors across all chrome and views.
     gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
 
-    // Retrieve pointers to all primary inspection subviews.
+    // Retrieve pointers to all primary inspection subviews and verify light canvas lightness >= 200.
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
     auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(memView != nullptr && diffGrid != nullptr && serverRack != nullptr && disasmView != nullptr);
-
-    // Verify view canvas lightness >= 200 indicating light background in Solarized Light.
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() >= 200, "MemView canvas background must be light (>= 200 lightness) in solarized_light");
     QVERIFY2(gridlock::tests::getActiveCanvasBg(diffGrid, 0).lightness() >= 200, "DifferentialGrid canvas background must be light (>= 200 lightness) in solarized_light");
     QVERIFY2(gridlock::tests::getActiveCanvasBg(serverRack, 0).lightness() >= 200, "ServerRackView canvas background must be light (>= 200 lightness) in solarized_light");
     // Verify toolbars and dock headers are aligned without hardcoded dark stylesheets.
     QVERIFY2(gridlock::tests::callAreAllChromeAligned(&mainWindow, 0), "All chrome toolbars and dock headers must be theme aligned without hardcoded #16181d/#1b1e24");
 
-    // Inspect decompiler function signature label contrast.
+    // Inspect decompiler function signature label contrast (dark ink < 120 lightness on light cream background).
     auto* sigLabel = disasmView->findChild<QLabel*>(QStringLiteral("disasmSignatureLabel"));
     QVERIFY(sigLabel != nullptr);
     const QRegularExpression colorRe(QStringLiteral("color:\\s*(#[0-9a-fA-F]{3,8}|rgba?\\([^)]+\\))"));
     const auto match = colorRe.match(sigLabel->styleSheet());
     const QColor sigTextColor = match.hasMatch() ? QColor(match.captured(1)) : sigLabel->palette().color(QPalette::WindowText);
-    // Dark ink contrast on light cream background requires lightness < 120.
     QVERIFY2(sigTextColor.isValid() && sigTextColor.lightness() < 120, qPrintable(QString("Decompiler signature text color lightness %1 >= 120").arg(sigTextColor.lightness())));
 
-    // Restore default dark theme and verify dark activeCanvasBackgroundColor.
+    // Restore default dark theme and verify dark activeCanvasBackgroundColor (< 60 lightness).
     tm.applyTheme(QStringLiteral("gridlock_slate"));
     gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
-    // Dark slate canvas lightness must sit strictly below 60.
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() < 60, "MemView canvas background must be dark (< 60 lightness) in gridlock_slate");
 
-    // 2. Spaced, Non-Colliding Palette Swatch Chips.
+    // 2. Spaced, Non-Colliding Palette Swatch Chips with hex colors stored in toolTip().
     gridlock::ui::PreferencesDialog prefsDialog; prefsDialog.resize(860, 620); prefsDialog.show(); QApplication::processEvents();
-
-    // Query swatch chips and ensure exactly 5 clean role labels are mounted.
     QList<QLabel*> swatchBoxes;
     const QStringList expectedRoles = {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")};
-    for (QLabel* lbl : prefsDialog.findChildren<QLabel*>()) {
+    for (QLabel* lbl : prefsDialog.findChildren<QLabel*>())
         for (const QString& r : expectedRoles) if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
-    }
     QVERIFY2(swatchBoxes.size() == 5, qPrintable(QString("Expected 5 clean role swatch boxes, found %1").arg(swatchBoxes.size())));
-    // Swatch chips must store hex string in toolTip rather than colliding text.
     for (QLabel* box : swatchBoxes) QVERIFY2(!box->toolTip().isEmpty() && box->toolTip().contains('#'), "Swatch box must store hex color in toolTip()");
 
     // 3. MainWindow*.cpp Line Count Headroom (< 880 Lines Each).
@@ -917,13 +908,11 @@ void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadr
         QStringLiteral("src/ui/MainWindowDocks.cpp")
     };
     for (const QString& relPath : mwFiles) {
-        QString path = QStringLiteral("../") + relPath;
-        if (!QFile::exists(path)) path = relPath;
+        QString path = QFile::exists(QStringLiteral("../") + relPath) ? (QStringLiteral("../") + relPath) : relPath;
         QFile f(path);
-        // Verify file exists and open stream to count total newline-separated lines.
+        // Verify file exists and sits strictly below the 880 line target ceiling.
         QVERIFY2(f.exists() && f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QString("Could not open %1").arg(relPath)));
         const int lines = QString::fromUtf8(f.readAll()).split('\n').size();
-        // Each MainWindow modular file must sit strictly below the 880 line target ceiling.
         QVERIFY2(lines < 880, qPrintable(QString("%1 line count %2 >= 880").arg(relPath).arg(lines)));
     }
 }

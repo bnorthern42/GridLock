@@ -40,88 +40,46 @@ namespace gridlock::ui {
  */
 PreferencesDialog::PreferencesDialog(QWidget* parent)
     : QDialog(parent) {
+    setObjectName(QStringLiteral("PreferencesDialog"));
     setWindowTitle(tr("Preferences — GridLock"));
     setMinimumSize(780, 540);
     resize(860, 580);
 
-    // Apply theme-aware workstation dialog chrome using active ThemeManager swatch tokens.
-    auto applyDialogThemeChrome = [this]() {
-        auto& tm = gridlock::core::managers::ThemeManager::instance();
-        const QStringList sw = gridlock::core::managers::ThemeManager::themeSwatchColors(tm.activeThemeId());
-        const QString canvas = sw.value(0, QStringLiteral("#16181d"));
-        const QString header = sw.value(1, QStringLiteral("#21252b"));
-        const QString border = sw.value(2, QStringLiteral("#282c34"));
-        const QString accent = sw.value(3, QStringLiteral("#528bff"));
-        const QString text = sw.value(4, QStringLiteral("#d7dae0"));
-        const QString hoverBg = tm.isDarkMode() ? QStringLiteral("#252932") : header;
-        const QString hoverFg = tm.isDarkMode() ? QStringLiteral("#ffffff") : text;
+    // Enable styled QSS background painting and solid palette auto-fill so editor text never bleeds through.
+    setAttribute(Qt::WA_StyledBackground, true);
+    setAutoFillBackground(true);
 
-        setStyleSheet(QStringLiteral(
-            "QDialog { background: %1; color: %5; }"
-            "QGroupBox { background: %2; border: 1px solid %3; border-radius: 3px; "
-            "margin-top: 8px; padding-top: 10px; color: %5; }"
-            "QLineEdit, QComboBox, QSpinBox { background: %1; color: %5; "
-            "border: 1px solid %3; border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
-            "QPushButton { background: %2; color: %5; border: 1px solid %3; "
-            "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
-            "QPushButton:hover { background: %6; color: %7; border-color: %4; }"
-            "QListWidget { background: %2; color: %5; selection-background-color: #264f78; selection-color: #ffffff; }"
-            "QListWidget::item:hover { background-color: %6; color: %7; }"
-            "QListWidget::item:selected, QListWidget::item:selected:active, "
-            "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
-            "border-left: 3px solid %4; font-weight: 600; }"
-            "QLabel#separator { background: %3; }")
-                          .arg(canvas, header, border, accent, text, hoverBg, hoverFg));
-        if (m_sidebar) {
-            m_sidebar->setStyleSheet(QStringLiteral(
-                "QListWidget { background: %1; color: %4; selection-background-color: #264f78; "
-                "selection-color: #ffffff; border: none; border-right: 1px solid %2; outline: none; font-size: 11px; }"
-                "QListWidget::item { height: 28px; padding: 2px 8px; border-left: 3px solid transparent; }"
-                "QListWidget::item:hover { background-color: %5; color: %6; }"
-                "QListWidget::item:selected, QListWidget::item:selected:active, "
-                "QListWidget::item:selected:!active { background-color: #264f78; color: #ffffff; "
-                "border-left: 3px solid %3; font-weight: 600; }")
-                                         .arg(header, border, accent, text, hoverBg, hoverFg));
-            m_sidebar->ensurePolished();
-            QPalette sidePal = m_sidebar->palette();
-            for (QPalette::ColorGroup cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
-                sidePal.setColor(cg, QPalette::Highlight, QColor(0x26, 0x4f, 0x78));
-                sidePal.setColor(cg, QPalette::HighlightedText, QColor(0xff, 0xff, 0xff));
-            }
-            setPalette(sidePal);
-            m_sidebar->setPalette(sidePal);
-        }
-    };
-
-    // Root vertical layout containing the splitter and bottom action button bar.
+    // Root vertical layout containing the horizontal category splitter and bottom action button bar.
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    // Horizontal splitter separating the sidebar list from the active page stack.
+    // Horizontal splitter separating the 195px category sidebar list from the active settings page stack.
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setHandleWidth(1);
     splitter->setChildrenCollapsible(false);
 
+    // Construct navigation sidebar, stacked settings pages, and synchronize theme chrome immediately.
     setupSidebar();
     setupPages();
     applyDialogThemeChrome();
     connect(&gridlock::core::managers::ThemeManager::instance(),
             &gridlock::core::managers::ThemeManager::themeModeChanged,
-            this, [applyDialogThemeChrome](bool) { applyDialogThemeChrome(); });
+            this, [this](bool) { applyDialogThemeChrome(); });
 
+    // Mount sidebar and stacked page container with fixed sidebar stretch (0) and expanding content (1).
     splitter->addWidget(m_sidebar);
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({170, 690});
+    splitter->setSizes({195, 665});
 
     rootLayout->addWidget(splitter, 1);
 
-    // Subtle 1px divider above the button box.
+    // Subtle 1px horizontal divider line separating the page stack from the Ok/Cancel/Apply bar.
     auto* line = new QLabel(this);
     line->setFixedHeight(1);
-    line->setObjectName("separator");
+    line->setObjectName(QStringLiteral("separator"));
     rootLayout->addWidget(line);
 
     setupButtonBox();
@@ -143,21 +101,184 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
 }
 
 /**
- * @brief Builds the vertical category navigation list with icons.
+ * @brief Synchronizes opaque dialog surfaces, sidebar typography, QSS rules, and QPalettes with the active theme.
  *
- * Populates a 170px QListWidget with category labels and Nerd Font glyphs rendered
- * dynamically onto transparent QPixmaps. Suppresses horizontal scrollbars and
- * applies a sleek 28px-row navigation style with a 3px #528bff active indicator bar.
+ * Queries semantic ThemePalette hex tokens (`canvasHex`, `headerHex`, `borderHex`, `accentHex`, `textHex`)
+ * from ThemeManager and applies both explicit QSS rules and `Active`/`Inactive`/`Disabled` QPalette roles
+ * across `PreferencesDialog`, `m_stack`, `m_sidebar`, and `m_sidebar->viewport()`.
+ */
+void PreferencesDialog::applyDialogThemeChrome() {
+    auto& tm = gridlock::core::managers::ThemeManager::instance();
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
+    const QString canvas = pal.canvasHex;
+    const QString header = pal.headerHex;
+    const QString border = pal.borderHex;
+    const QString accent = pal.accentHex;
+    const QString text = pal.textHex;
+
+    // Select crisp white (#ffffff) text when accent lightness < 165, otherwise dark charcoal (#16181d).
+    const QColor accentCol(accent);
+    const QString selFg = (accentCol.lightness() < 165)
+                              ? QStringLiteral("#ffffff")
+                              : QStringLiteral("#16181d");
+    const QString hoverBg = pal.isDark ? QStringLiteral("#252932") : canvas;
+    const QString hoverFg = pal.isDark ? QStringLiteral("#ffffff") : text;
+
+    // Style root dialog, stacked pages, group boxes, inputs, buttons, and divider explicitly.
+    setStyleSheet(QStringLiteral(
+        "QDialog, QDialog#PreferencesDialog, QWidget#PreferencesDialog, "
+        "QStackedWidget, QStackedWidget > QWidget, QScrollArea { background-color: %1; color: %5; }"
+        "QGroupBox { background-color: %2; border: 1px solid %3; border-radius: 3px; "
+        "margin-top: 8px; padding-top: 10px; color: %5; }"
+        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %5; "
+        "border: 1px solid %3; border-radius: 2px; padding: 1px 6px; min-height: 20px; max-height: 24px; }"
+        "QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
+        "border-radius: 2px; padding: 2px 10px; min-height: 22px; max-height: 24px; }"
+        "QPushButton:hover { background-color: %6; color: %7; border-color: %4; }"
+        "QLabel#separator { background-color: %3; }")
+                      .arg(canvas, header, border, accent, text, hoverBg, hoverFg));
+    ensurePolished();
+
+    const QColor canvasCol(canvas);
+    const QColor headerCol(header);
+    const QColor textCol(text);
+    const QColor selFgCol(selFg);
+
+    // Apply solid opaque QPalette roles across Active, Inactive, and Disabled groups for dialog & pages.
+    QPalette dlgPal = palette();
+    for (QPalette::ColorGroup cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+        dlgPal.setColor(cg, QPalette::Window, canvasCol);
+        dlgPal.setColor(cg, QPalette::Base, canvasCol);
+        dlgPal.setColor(cg, QPalette::AlternateBase, headerCol);
+        dlgPal.setColor(cg, QPalette::WindowText, textCol);
+        dlgPal.setColor(cg, QPalette::Text, textCol);
+        dlgPal.setColor(cg, QPalette::Button, headerCol);
+        dlgPal.setColor(cg, QPalette::ButtonText, textCol);
+        dlgPal.setColor(cg, QPalette::Highlight, accentCol);
+        dlgPal.setColor(cg, QPalette::HighlightedText, selFgCol);
+    }
+    setPalette(dlgPal);
+    // Re-assert autoFillBackground after QStyleSheetStyle::polish so backing-store erase stays active.
+    setAttribute(Qt::WA_StyledBackground, true);
+    setAutoFillBackground(true);
+
+    if (m_stack) {
+        m_stack->setAttribute(Qt::WA_StyledBackground, true);
+        m_stack->setPalette(dlgPal);
+        m_stack->setAutoFillBackground(true);
+        for (int i = 0; i < m_stack->count(); ++i) {
+            if (QWidget* page = m_stack->widget(i)) {
+                page->setAttribute(Qt::WA_StyledBackground, true);
+                page->setPalette(dlgPal);
+                page->setAutoFillBackground(true);
+            }
+        }
+    }
+
+    // Apply opaque header surface, 13px typography, 8px 12px padding, and high-contrast selection to m_sidebar + viewport().
+    if (m_sidebar) {
+        m_sidebar->setStyleSheet(QStringLiteral(
+            "QListWidget, QListView, QListWidget#preferencesCategoryList { "
+            "background-color: %1; color: %4; selection-background-color: %3; selection-color: %7; "
+            "padding: 0px; margin: 0px; border: none; border-right: 1px solid %2; border-radius: 0px; "
+            "outline: none; font-size: 13px; }"
+            "QListWidget::item, QListView::item { "
+            "padding: 8px 12px; min-height: 20px; background-color: %1; color: %4; "
+            "selection-background-color: %3; selection-color: %7; }"
+            "QListWidget::item:hover, QListView::item:hover { background-color: %5; color: %6; }"
+            "QListWidget::item:selected, QListWidget::item:selected:focus, "
+            "QListWidget::item:selected:active, QListWidget::item:selected:!active, "
+            "QListWidget::item:selected:hover, QListView::item:selected, "
+            "QListView::item:selected:focus, QListView::item:selected:active, "
+            "QListView::item:selected:!active, QListView::item:selected:hover { "
+            "background-color: %3; selection-background-color: %3; "
+            "color: %7; selection-color: %7; font-weight: 600; }")
+                                     .arg(header, border, accent, text, hoverBg, hoverFg, selFg));
+        m_sidebar->ensurePolished();
+
+        // Synchronize Highlight and HighlightedText on both m_sidebar and m_sidebar->viewport() across all groups.
+        QPalette sidePal = m_sidebar->palette();
+        for (QPalette::ColorGroup cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+            sidePal.setColor(cg, QPalette::Window, headerCol);
+            sidePal.setColor(cg, QPalette::Base, headerCol);
+            sidePal.setColor(cg, QPalette::AlternateBase, headerCol);
+            sidePal.setColor(cg, QPalette::WindowText, textCol);
+            sidePal.setColor(cg, QPalette::Text, textCol);
+            sidePal.setColor(cg, QPalette::Highlight, accentCol);
+            sidePal.setColor(cg, QPalette::HighlightedText, selFgCol);
+        }
+        m_sidebar->setPalette(sidePal);
+        m_sidebar->setAttribute(Qt::WA_StyledBackground, true);
+        m_sidebar->setAutoFillBackground(true);
+        if (m_sidebar->viewport()) {
+            m_sidebar->viewport()->setPalette(sidePal);
+            m_sidebar->viewport()->setAutoFillBackground(true);
+        }
+        refreshSidebarIcons();
+    }
+}
+
+/**
+ * @brief Re-renders sidebar Nerd Font icons with contrast-matched ink for selected and unselected rows.
+ *
+ * Ensures the active category row's glyph matches the selected text contrast (`#ffffff` on dark/medium
+ * accents or `#16181d` on bright accents) while unselected category rows use `pal.textHex` so icons
+ * remain legible on both dark slate and warm light cream sidebars.
+ */
+void PreferencesDialog::refreshSidebarIcons() {
+    if (!m_sidebar) return;
+    auto& tm = gridlock::core::managers::ThemeManager::instance();
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
+    const QColor accentCol(pal.accentHex);
+    const QColor selFgCol = (accentCol.lightness() < 165) ? QColor(QStringLiteral("#ffffff"))
+                                                          : QColor(QStringLiteral("#16181d"));
+    const QColor textCol(pal.textHex);
+    const int activeRow = m_sidebar->currentRow();
+
+    // Repaint each 16x16 transparent glyph pixmap with anti-aliased Symbols Nerd Font ink.
+    for (int i = 0; i < m_sidebar->count(); ++i) {
+        QListWidgetItem* item = m_sidebar->item(i);
+        if (!item) continue;
+        const QString glyph = item->data(Qt::UserRole).toString();
+        const QColor iconColor = (i == activeRow) ? selFgCol : textCol;
+        QPixmap pixmap(16, 16);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setFont(QFont(QStringLiteral("Symbols Nerd Font"), 11));
+        painter.setPen(iconColor);
+        painter.drawText(0, 0, 16, 16, Qt::AlignCenter, glyph);
+        item->setIcon(QIcon(pixmap));
+    }
+}
+
+/**
+ * @brief Builds the vertical category navigation list with icons and opaque surface attributes.
+ *
+ * Configures a 195px sidebar (`minimumWidth >= 185px`) with 13px typography, 36px row height,
+ * suppressed horizontal scrollbars, and dynamic Nerd Font glyph rendering.
  */
 void PreferencesDialog::setupSidebar() {
     m_sidebar = new QListWidget(this);
-    m_sidebar->setFixedWidth(170);
+    m_sidebar->setObjectName(QStringLiteral("preferencesCategoryList"));
+    m_sidebar->setMinimumWidth(190);
+    m_sidebar->setFixedWidth(195);
     m_sidebar->setIconSize(QSize(16, 16));
     m_sidebar->setSpacing(0);
     m_sidebar->setFrameShape(QFrame::NoFrame);
     m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_sidebar->setProperty("role", "sidebar");
+    m_sidebar->setAttribute(Qt::WA_StyledBackground, true);
+    m_sidebar->setAutoFillBackground(true);
+    if (m_sidebar->viewport()) {
+        m_sidebar->viewport()->setAutoFillBackground(true);
+    }
+
+    // Apply clean 13px UI font sizing to category navigation labels.
+    QFont sideFont = m_sidebar->font();
+    sideFont.setPixelSize(13);
+    m_sidebar->setFont(sideFont);
 
     struct Entry {
         QString label;
@@ -170,38 +291,33 @@ void PreferencesDialog::setupSidebar() {
         {tr("Terminal"), "\uf120"},        {tr("Docsets"), "\uf02d"},
     };
 
-    // Render each category icon using Symbols Nerd Font into a 16x16 QPixmap.
+    // Populate category items with spacious 36px row hints and stored Nerd Font glyph metadata.
     for (const auto& e : entries) {
         auto* item = new QListWidgetItem(m_sidebar);
         item->setText(e.label);
-
-        QPixmap pixmap(16, 16);
-        pixmap.fill(Qt::transparent);
-        QPainter painter(&pixmap);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setFont(QFont("Symbols Nerd Font", 11));
-        painter.setPen(QColor("#cdd6f4"));
-        painter.drawText(0, 0, 16, 16, Qt::AlignCenter, e.iconName);
-        item->setIcon(QIcon(pixmap));
-
-        item->setSizeHint(QSize(168, 28));
+        item->setData(Qt::UserRole, e.iconName);
+        item->setSizeHint(QSize(190, 36));
         m_sidebar->addItem(item);
     }
 
-    // Default to the first page (Appearance) and connect selection updates.
+    // Default to the first page (Appearance) and keep icons & stacked page synchronized on selection.
     m_sidebar->setCurrentRow(0);
+    refreshSidebarIcons();
     connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
         if (m_stack) {
             m_stack->setCurrentIndex(row);
         }
+        refreshSidebarIcons();
     });
 }
 
 /**
- * @brief Instantiates and registers all individual settings pages in the stack.
+ * @brief Instantiates and registers all individual settings pages in the opaque stack.
  */
 void PreferencesDialog::setupPages() {
     m_stack = new QStackedWidget(this);
+    m_stack->setAttribute(Qt::WA_StyledBackground, true);
+    m_stack->setAutoFillBackground(true);
 
     m_appearancePage = new AppearanceSettingsPage(m_stack);
     m_editingPage = new EditingSettingsPage(m_stack);
@@ -221,6 +337,8 @@ void PreferencesDialog::setupPages() {
                           static_cast<QWidget*>(m_hpcIntegrationPage),
                           static_cast<QWidget*>(m_terminalPage),
                           static_cast<QWidget*>(m_docsetPage)}) {
+        page->setAttribute(Qt::WA_StyledBackground, true);
+        page->setAutoFillBackground(true);
         m_stack->addWidget(page);
     }
     m_stack->setCurrentIndex(0);

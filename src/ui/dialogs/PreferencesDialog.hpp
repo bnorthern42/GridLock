@@ -314,6 +314,8 @@ private:
     void setupSidebar();
     void setupPages();
     void setupButtonBox();
+    void applyDialogThemeChrome();
+    void refreshSidebarIcons();
 
     QListWidget* m_sidebar = nullptr;
     QStackedWidget* m_stack = nullptr;
