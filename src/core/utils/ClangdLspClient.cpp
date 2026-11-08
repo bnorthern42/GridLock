@@ -131,7 +131,7 @@ ClangdLspClient::ClangdLspClient() = default;
 ClangdLspClient::~ClangdLspClient() {
     if (m_process) {
         if (m_process->state() != QProcess::NotRunning) {
-            m_process->closeWriteChannel();
+            if (m_process->isOpen() && m_process->isWritable()) m_process->closeWriteChannel();
             m_process->kill();
             m_process->waitForFinished(1000);
         }
@@ -170,12 +170,8 @@ QString ClangdLspClient::buildVirtualCompletionDocument(const QString& sourceCod
     lines.insert(insertIdx, injectedLine);
 
     // Populate 0-based LSP Position coordinates pointing directly at the end of partialExpression.
-    if (outZeroBasedLine) {
-        *outZeroBasedLine = insertIdx;
-    }
-    if (outZeroBasedCharacter) {
-        *outZeroBasedCharacter = static_cast<int>(statementPrefix.length() + partialExpression.length());
-    }
+    if (outZeroBasedLine) *outZeroBasedLine = insertIdx;
+    if (outZeroBasedCharacter) *outZeroBasedCharacter = static_cast<int>(statementPrefix.length() + partialExpression.length());
     return lines.join(QLatin1Char('\n'));
 }
 
@@ -205,9 +201,7 @@ QByteArray ClangdLspClient::encodeLspMessage(const QJsonObject& payload) {
  * @return True if clangd is running and initialized.
  */
 bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
-    if (m_process && m_process->state() == QProcess::Running && m_initialized) {
-        return true;
-    }
+    if (m_process && m_process->state() == QProcess::Running && m_initialized) return true;
 
     // Locate clangd executable on PATH or standard system toolchain locations.
     QString clangdBin = QStandardPaths::findExecutable(QStringLiteral("clangd"));
@@ -216,9 +210,7 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
             QStringLiteral("clangd"),
             {QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin"), QStringLiteral("/llvm/bin")});
     }
-    if (clangdBin.isEmpty()) {
-        return false;
-    }
+    if (clangdBin.isEmpty()) return false;
 
     if (!m_process) {
         m_process = new QProcess();
@@ -226,7 +218,7 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         if (QCoreApplication::instance()) {
             QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
                 if (m_process && m_process->state() != QProcess::NotRunning) {
-                    m_process->closeWriteChannel();
+                    if (m_process->isOpen() && m_process->isWritable()) m_process->closeWriteChannel();
                     m_process->kill();
                     m_process->waitForFinished(500);
                 }
@@ -237,14 +229,8 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         m_initialized = false;
         m_readBuffer.clear();
         m_activeDocumentUri.clear();
-        m_process->start(clangdBin, {
-            QStringLiteral("--log=error"),
-            QStringLiteral("--background-index=false"),
-            QStringLiteral("--header-insertion=never")
-        });
-        if (!m_process->waitForStarted(600)) {
-            return false;
-        }
+        m_process->start(clangdBin, {QStringLiteral("--log=error"), QStringLiteral("--background-index=false"), QStringLiteral("--header-insertion=never")});
+        if (!m_process->waitForStarted(600)) return false;
     }
 
     // Build initialize request with fallback flags for C++20 and OpenMPI/MPICH include paths.
@@ -252,11 +238,8 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
     const QString cleanRoot = rootDir.isEmpty() ? QDir::currentPath() : QFileInfo(rootDir).absoluteFilePath();
     QJsonObject initOptions;
     initOptions[QStringLiteral("fallbackFlags")] = QJsonArray{
-        QStringLiteral("-std=c++20"),
-        QStringLiteral("-I/usr/include/openmpi-x86_64"),
-        QStringLiteral("-I/usr/lib/x86_64-linux-gnu/openmpi/include"),
-        QStringLiteral("-I/usr/include/mpich")
-    };
+        QStringLiteral("-std=c++20"), QStringLiteral("-I/usr/include/openmpi-x86_64"),
+        QStringLiteral("-I/usr/lib/x86_64-linux-gnu/openmpi/include"), QStringLiteral("-I/usr/include/mpich")};
 
     QJsonObject params;
     params[QStringLiteral("processId")] = static_cast<qint64>(QCoreApplication::applicationPid());
@@ -270,24 +253,15 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         }}
     };
 
-    sendJsonRpc(QJsonObject{
-        {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-        {QStringLiteral("id"), initId},
-        {QStringLiteral("method"), QStringLiteral("initialize")},
-        {QStringLiteral("params"), params}
-    });
+    sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), initId},
+                            {QStringLiteral("method"), QStringLiteral("initialize")}, {QStringLiteral("params"), params}});
 
     const QJsonObject resp = readResponseForId(initId, 800);
-    if (resp.isEmpty()) {
-        return false;
-    }
+    if (resp.isEmpty()) return false;
 
     // Dispatch `initialized` notification completing the LSP handshake.
-    sendJsonRpc(QJsonObject{
-        {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
-        {QStringLiteral("method"), QStringLiteral("initialized")},
-        {QStringLiteral("params"), QJsonObject{}}
-    });
+    sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+                            {QStringLiteral("method"), QStringLiteral("initialized")}, {QStringLiteral("params"), QJsonObject{}}});
     m_initialized = true;
     return true;
 }
@@ -297,7 +271,9 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
  * @param payload JSON-RPC object.
  */
 void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
-    if (!m_process || m_process->state() != QProcess::Running) return;
+    if (!m_process) return;
+    if (m_process->state() == QProcess::Starting) m_process->waitForStarted(1000);
+    if (m_process->state() != QProcess::Running || !m_process->isOpen() || !m_process->isWritable()) return;
     const QByteArray frame = encodeLspMessage(payload);
     m_process->write(frame);
     m_process->waitForBytesWritten(150);

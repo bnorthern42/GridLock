@@ -294,7 +294,8 @@ QStringList TerminalDockWidget::environment() const {
  */
 void TerminalDockWidget::sendCommand(const QString& command) {
     m_lastSentCommand = command.trimmed();
-    if (m_termWidget != nullptr && !m_lastSentCommand.isEmpty()) {
+    if (m_termWidget != nullptr && !m_lastSentCommand.isEmpty() &&
+        m_termWidget->getShellPID() > 0) {
         // Dispatch command text followed by newline to trigger interactive shell execution.
         m_termWidget->sendText(m_lastSentCommand + QStringLiteral("\n"));
     }

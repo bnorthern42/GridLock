@@ -74,9 +74,15 @@ void GdbRankCoordinator::terminateSession() {
 void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
   if (rankId >= 0 && rankId < static_cast<int>(m_processes.size())) {
     auto& rp = m_processes[rankId];
-    if (rp && rp->process && rp->process->state() != QProcess::NotRunning) {
-      rp->process->write(cmd.toUtf8());
-      emit commandSentToGdb(rankId, cmd.trimmed());
+    if (rp && rp->process) {
+      if (rp->process->state() == QProcess::Starting) {
+        rp->process->waitForStarted(1000);
+      }
+      if (rp->process->state() == QProcess::Running && rp->process->isOpen() &&
+          rp->process->isWritable()) {
+        rp->process->write(cmd.toUtf8());
+        emit commandSentToGdb(rankId, cmd.trimmed());
+      }
     }
   }
 }
@@ -144,12 +150,16 @@ void GdbRankCoordinator::terminateAllSessions() {
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     if (rp && rp->process) {
-      if (rp->process->state() == QProcess::Running) {
+      rp->process->disconnect();
+      if (rp->process->state() == QProcess::Running && rp->process->isOpen() &&
+          rp->process->isWritable()) {
         rp->process->write("-gdb-exit\n");
+      }
+      if (rp->process->state() != QProcess::NotRunning) {
         rp->process->waitForFinished(500);
-        if (rp->process->state() == QProcess::Running) {
+        if (rp->process->state() != QProcess::NotRunning) {
           rp->process->kill();
-          rp->process->waitForFinished();
+          rp->process->waitForFinished(500);
         }
       }
     }

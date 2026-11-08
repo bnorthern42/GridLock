@@ -72,12 +72,16 @@ void LspCoordinator::start(const QString& targetFilePath) {
  * @brief Terminates the child `clangd` process, escalating to `SIGKILL` after 500 ms if needed.
  */
 void LspCoordinator::stop() {
-  if (m_process->state() == QProcess::Running) {
+  if (!m_process) return;
+  if (m_process->state() == QProcess::Starting) {
+    m_process->waitForStarted(500);
+  }
+  if (m_process->state() != QProcess::NotRunning) {
     m_process->terminate();
     m_process->waitForFinished(500);
-    if (m_process->state() == QProcess::Running) {
+    if (m_process->state() != QProcess::NotRunning) {
       m_process->kill();
-      m_process->waitForFinished();
+      m_process->waitForFinished(500);
     }
   }
 }
@@ -94,10 +98,15 @@ QByteArray LspCoordinator::formatMessage(const QJsonObject& payload) {
 }
 
 /**
- * @brief Writes a framed JSON-RPC message to `clangd` stdin if the process is running.
+ * @brief Writes a framed JSON-RPC message to `clangd` stdin if the process is running and writable.
  */
 void LspCoordinator::sendPayload(const QJsonObject& payload) {
-  if (m_process->state() == QProcess::Running) {
+  if (!m_process) return;
+  if (m_process->state() == QProcess::Starting) {
+    m_process->waitForStarted(1000);
+  }
+  if (m_process->state() == QProcess::Running && m_process->isOpen() &&
+      m_process->isWritable()) {
     m_process->write(formatMessage(payload));
   }
 }

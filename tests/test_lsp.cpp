@@ -14,6 +14,7 @@
 #include <QSignalSpy>
 
 #include "../src/core/hpc/LspCoordinator.hpp"
+#include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/utils/ClangdLspClient.cpp"
 
 using namespace gridlock::core;
@@ -301,6 +302,55 @@ void TestLspCoordinator::testLspHoverParsing() {
     };
     QVERIFY2(checkDefinitionRefsAndRename(ClangdLspClient::instance()),
              "ClangdLspClient must support findDefinition, findReferences, and renameSymbolInSource");
+
+    // 6. Verify zero "QIODevice::write (QProcess): device not open" warnings when invoking
+    // LspCoordinator or ClangdLspClient before start or after process exit / closed write channel.
+    // Install a custom QtMessageHandler to intercept any runtime QtWarningMsg diagnostics emitted
+    // by QProcess or QIODevice when writing to closed, unstarted, or terminating child processes.
+    static QStringList s_capturedWriteWarnings;
+    s_capturedWriteWarnings.clear();
+    const QtMessageHandler prevHandler = qInstallMessageHandler(
+        [](QtMsgType type, const QMessageLogContext&, const QString& msg) {
+            if (type == QtWarningMsg &&
+                (msg.contains(QStringLiteral("QIODevice::write"), Qt::CaseInsensitive) ||
+                 msg.contains(QStringLiteral("device not open"), Qt::CaseInsensitive) ||
+                 msg.contains(QStringLiteral("Destroyed while process"), Qt::CaseInsensitive))) {
+                s_capturedWriteWarnings.append(msg);
+            }
+        });
+
+    {
+        // Exercise LspCoordinator when pointing to a running process whose QIODevice is closed.
+        // Forcefully closing the underlying QIODevice while QProcess remains in Running state
+        // verifies that sendPayload() checks both isOpen() and isWritable() prior to write().
+        gridlock::core::ConfigManager::instance().setGlobalClangdPath(QStringLiteral("/bin/cat"));
+        LspCoordinator deadLsp;
+        deadLsp.start(QStringLiteral("/tmp/nonexistent_test.cpp"));
+        QTest::qWait(30);
+        if (auto* proc = deadLsp.findChild<QProcess*>()) {
+            proc->QIODevice::close();
+            deadLsp.didOpen(QStringLiteral("/tmp/nonexistent_test.cpp"), QStringLiteral("int main() {}"));
+            deadLsp.requestHover(QStringLiteral("/tmp/nonexistent_test.cpp"), 1, 1, QPoint(0, 0));
+        }
+        deadLsp.stop();
+
+        // Exercise LspCoordinator with a non-existent binary path so QProcess transitions from
+        // Starting to NotRunning, verifying waitForStarted() and ~QProcess teardown guards.
+        gridlock::core::ConfigManager::instance().setGlobalClangdPath(QStringLiteral("/nonexistent/clangd_missing_bin"));
+        LspCoordinator missingLsp;
+        missingLsp.start(QStringLiteral("/tmp/nonexistent_test.cpp"));
+        missingLsp.didOpen(QStringLiteral("/tmp/nonexistent_test.cpp"), QStringLiteral("int main() {}"));
+        missingLsp.stop();
+        gridlock::core::ConfigManager::instance().setGlobalClangdPath(QStringLiteral("clangd"));
+
+        // Exercise ClangdLspClient JSON-RPC dispatch and fallback paths under warning capture.
+        ClangdLspClient::instance().requestHoverInfo(navSource, 4, 18, 50);
+    }
+
+    // Restore the default Qt message handler and assert zero QIODevice::write warnings occurred.
+    qInstallMessageHandler(prevHandler);
+    QVERIFY2(s_capturedWriteWarnings.isEmpty(),
+             qPrintable(QStringLiteral("Unexpected QIODevice::write warnings: ") + s_capturedWriteWarnings.join(QStringLiteral(" | "))));
 }
 
 QTEST_MAIN(TestLspCoordinator)

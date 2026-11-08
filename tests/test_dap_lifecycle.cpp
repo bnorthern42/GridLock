@@ -78,6 +78,40 @@ void TestDapLifecycle::testDisconnectRequest() {
     // Verify disconnect request payload.
     QVERIFY(coordinator.lastWrittenData.contains("\"command\":\"disconnect\""));
     QVERIFY(coordinator.lastWrittenData.contains("\"terminateDebuggee\":true"));
+
+    // Verify real DapCoordinator emits zero "QIODevice::write (QProcess): device not open"
+    // warnings when sendRawMessage / evaluateExpression / stepOver / continueExecution / terminateSession
+    // are called BEFORE startAdapter() and AFTER the adapter process has exited.
+    static QStringList s_dapWriteWarnings;
+    s_dapWriteWarnings.clear();
+    const QtMessageHandler prevHandler = qInstallMessageHandler(
+        [](QtMsgType type, const QMessageLogContext&, const QString& msg) {
+            if (type == QtWarningMsg &&
+                (msg.contains(QStringLiteral("QIODevice::write"), Qt::CaseInsensitive) ||
+                 msg.contains(QStringLiteral("device not open"), Qt::CaseInsensitive))) {
+                s_dapWriteWarnings.append(msg);
+            }
+        });
+
+    DapCoordinator realDap;
+    realDap.evaluateExpression(0, QStringLiteral("rank"));
+    realDap.stepOver(1);
+    realDap.continueExecution(1);
+    realDap.terminateSession();
+
+    realDap.startAdapter(QStringLiteral("/bin/cat"));
+    QTest::qWait(50);
+    if (auto* dapProc = realDap.findChild<QProcess*>()) {
+        dapProc->closeWriteChannel();
+    }
+    realDap.evaluateExpression(0, QStringLiteral("rank"));
+    realDap.stepOver(1);
+    realDap.continueExecution(1);
+    realDap.terminateSession();
+
+    qInstallMessageHandler(prevHandler);
+    QVERIFY2(s_dapWriteWarnings.isEmpty(),
+             qPrintable(QStringLiteral("Unexpected DAP QIODevice::write warnings: ") + s_dapWriteWarnings.join(QStringLiteral(" | "))));
 }
 
 /**

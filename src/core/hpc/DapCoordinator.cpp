@@ -72,10 +72,15 @@ void DapCoordinator::startAdapter(const QString& program) {
  * @brief Gracefully terminates the adapter process, escalating to `SIGKILL` after 3 seconds.
  */
 void DapCoordinator::stopAdapter() {
+  if (!m_process) return;
+  if (m_process->state() == QProcess::Starting) {
+    m_process->waitForStarted(500);
+  }
   if (m_process->state() != QProcess::NotRunning) {
     m_process->terminate();
     if (!m_process->waitForFinished(3000)) {
       m_process->kill();
+      m_process->waitForFinished(500);
     }
   }
 }
@@ -144,13 +149,22 @@ void DapCoordinator::sendRawMessage(const QJsonObject& messageObj) {
  * @brief Returns `true` when the child `QProcess` is in `QProcess::Running` state.
  */
 bool DapCoordinator::isAdapterRunning() const {
-  return m_process->state() == QProcess::Running;
+  return m_process && m_process->state() == QProcess::Running &&
+         m_process->isOpen() && m_process->isWritable();
 }
 
 /**
- * @brief Writes raw framed bytes to the child adapter's standard input.
+ * @brief Writes raw framed bytes to the child adapter's standard input if open and writable.
  */
 void DapCoordinator::writeToAdapter(const QByteArray& data) {
+  if (!m_process) return;
+  if (m_process->state() == QProcess::Starting) {
+    m_process->waitForStarted(1000);
+  }
+  if (m_process->state() != QProcess::Running || !m_process->isOpen() ||
+      !m_process->isWritable()) {
+    return;
+  }
   m_process->write(data);
 }
 
@@ -364,16 +378,19 @@ void DapCoordinator::terminateSession() {
     QProcess::execute("scancel", {QString::number(m_slurmJobId)});
   }
 
-  QJsonObject args;
-  args["terminateDebuggee"] = true;
-  sendRequest("disconnect", args);
+  if (isAdapterRunning()) {
+    QJsonObject args;
+    args["terminateDebuggee"] = true;
+    sendRequest("disconnect", args);
+  }
 
   // Wait briefly for clean exit before sending SIGTERM / SIGKILL.
-  if (m_process && m_process->state() == QProcess::Running) {
+  if (m_process && m_process->state() != QProcess::NotRunning) {
     if (!m_process->waitForFinished(1000)) {
       m_process->terminate();
       if (!m_process->waitForFinished(1000)) {
         m_process->kill();
+        m_process->waitForFinished(500);
       }
     }
   }
