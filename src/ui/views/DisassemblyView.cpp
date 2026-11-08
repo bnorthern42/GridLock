@@ -604,7 +604,7 @@ void DisassemblyView::centerCursor() {
  * @brief Synchronizes UI toggles, splitter ratios, and visible pages for the active view mode.
  */
 void DisassemblyView::updateViewModeLayout() {
-  if (m_decompilerToggleBtn) m_decompilerToggleBtn->setChecked(m_decompilerMode || m_splitGraphDecompiler);
+  if (m_decompilerToggleBtn) m_decompilerToggleBtn->setChecked(m_decompilerMode && !m_splitGraphDecompiler);
   if (m_splitToggleBtn) m_splitToggleBtn->setChecked(m_splitGraphDecompiler);
   if (m_modeToggleBtn) {
     m_modeToggleBtn->setText(m_graphMode ? QStringLiteral("Linear (Space)") : QStringLiteral("CFG (Space)"));

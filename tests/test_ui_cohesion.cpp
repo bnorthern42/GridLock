@@ -154,7 +154,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QVERIFY2(mainWindow.captureTabAuditSnapshot(bottomTabs->currentIndex(), snapshotPath), "captureTabAuditSnapshot must succeed");
     const QFileInfo snapInfo(snapshotPath); QVERIFY(snapInfo.exists() && snapInfo.size() > 0);
 
-    // 4. Right-Sidebar 2-Zone Consolidation (VARIABLES | REGISTERS | WATCH EXPRESSIONS tabbed above SERVER RACK).
+    // 4. Right-Sidebar 2-Zone Consolidation & Concise WATCH Tab without Scroll Arrows.
     auto* variablesDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
     auto* registersDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
     auto* watchDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
@@ -162,15 +162,41 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     const QList<QDockWidget*> tabified = mainWindow.tabifiedDockWidgets(variablesDock);
     QVERIFY2(tabified.contains(registersDock) && tabified.contains(watchDock), "VariablesDock, RegisterViewDock, and WatchExpressionsDock must share top-right tabbed dock group");
 
-    // Verify active top-right dock group height >= 260px at 1600x950 and capture /tmp/layout_hierarchy_verify.png.
+    // Assert watchDock title / tab text is "WATCH" (concise, <= 8 chars).
+    QVERIFY2(watchDock->windowTitle().compare(QStringLiteral("WATCH"), Qt::CaseInsensitive) == 0 && watchDock->windowTitle().size() <= 8, "watchDock title must be concise 'WATCH'");
+
+    // Verify all dock QTabBar instances disable scroll buttons and fit all tabs within tabBar width.
+    QTabBar* rightDockTabBar = nullptr;
+    for (QTabBar* tb : mainWindow.findChildren<QTabBar*>()) {
+        QVERIFY2(!tb->usesScrollButtons(), "Every dock QTabBar in MainWindow must have usesScrollButtons() == false");
+        for (int i = 0; i < tb->count(); ++i) {
+            if (tb->tabText(i).contains(QStringLiteral("VARIABLES"), Qt::CaseInsensitive)) { rightDockTabBar = tb; break; }
+        }
+    }
+    QVERIFY2(rightDockTabBar != nullptr && rightDockTabBar->count() >= 3, "Right dock QTabBar with 3 tabs must exist");
+    QVERIFY2(rightDockTabBar->tabRect(0).left() >= 0 && rightDockTabBar->tabRect(rightDockTabBar->count() - 1).right() <= rightDockTabBar->width(), "All 3 tabs (VARIABLES, REGISTERS, WATCH) must fit completely inside QTabBar::width()");
+
+    // Verify active top-right dock group height >= 260px at 1600x950.
     mainWindow.resize(1600, 950); mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents(); QTest::qWait(20);
     const int varsActiveH = variablesDock->height();
-    watchDock->raise(); QApplication::processEvents();
-    const int watchActiveH = watchDock->height();
+    watchDock->raise(); QApplication::processEvents(); const int watchActiveH = watchDock->height();
     variablesDock->raise(); QApplication::processEvents();
     QVERIFY2(varsActiveH >= 260 && watchActiveH >= 260, qPrintable(QStringLiteral("Top-right dock crushed: varsH=%1 watchH=%2").arg(varsActiveH).arg(watchActiveH)));
 
-    // 5. Verify Run Target toolbar QToolButton uses distinct primary theme accent CTA styling.
+    // 5. Verify DisassemblyView mode buttons are strictly mutually exclusive (at most 1 checked button).
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
+    auto countCheckedModeBtns = [disasm]() -> int {
+        int cnt = 0;
+        for (const QString& id : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")})
+            if (auto* b = disasm->findChild<QPushButton*>(id)) if (b->isChecked()) ++cnt;
+        return cnt;
+    };
+    disasm->setGraphMode(false); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Linear mode checked buttons > 1");
+    disasm->setGraphMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "CFG mode checked buttons > 1");
+    disasm->setDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Decompiler mode checked buttons > 1");
+    disasm->setSplitGraphDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Split CFG+Decomp mode checked buttons > 1");
+
+    // 6. Verify Run Target toolbar QToolButton uses distinct primary theme accent CTA styling.
     auto* mainToolBar = mainWindow.findChild<QToolBar*>(QStringLiteral("MainToolbar")); QVERIFY(mainToolBar != nullptr);
     QToolButton* runBtn = nullptr;
     for (QAction* act : mainToolBar->actions()) {
@@ -178,7 +204,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     }
     const auto pal = tm.paletteForTheme(tm.activeThemeId());
     QVERIFY2(runBtn != nullptr && runBtn->styleSheet().contains(pal.accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("Run Target QToolButton must include primary accent ") + pal.accentHex));
-    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/layout_hierarchy_verify.png")));
+    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/tabs_and_disasm_verify.png")));
 }
 
 /**
@@ -206,35 +232,24 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     };
 
     // 1. Audit PreferencesDialog sidebar, icon-free OK/Cancel/Apply buttons, and primary accent OK button.
-    gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
-    verifyDialogCohesion(&prefsDlg, QStringLiteral("PreferencesDialog"));
-    auto* categoryList = prefsDlg.findChild<QListWidget*>();
-    QVERIFY2(categoryList != nullptr && categoryList->width() >= 140 && categoryList->width() <= 220, "PreferencesDialog categoryList width must lie in [140, 220]");
-    QVERIFY2(categoryList->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff, "PreferencesDialog categoryList must suppress horizontal scrollbar clipping");
-    auto* btnBox = prefsDlg.findChild<QDialogButtonBox*>();
+    gridlock::ui::PreferencesDialog prefsDlg(&mainWindow); verifyDialogCohesion(&prefsDlg, QStringLiteral("PreferencesDialog"));
+    auto* categoryList = prefsDlg.findChild<QListWidget*>(); auto* btnBox = prefsDlg.findChild<QDialogButtonBox*>();
+    QVERIFY2(categoryList != nullptr && categoryList->width() >= 140 && categoryList->width() <= 220 && categoryList->horizontalScrollBarPolicy() == Qt::ScrollBarAlwaysOff, "PreferencesDialog categoryList checks failed");
     QVERIFY2(btnBox != nullptr, "PreferencesDialog must contain a QDialogButtonBox");
-    auto* okBtn = btnBox->button(QDialogButtonBox::Ok);
-    auto* cancelBtn = btnBox->button(QDialogButtonBox::Cancel);
-    auto* applyBtn = btnBox->button(QDialogButtonBox::Apply);
-    QVERIFY(okBtn != nullptr && cancelBtn != nullptr && applyBtn != nullptr);
-    QVERIFY2(okBtn->icon().isNull() && cancelBtn->icon().isNull() && applyBtn->icon().isNull(), "PreferencesDialog OK/Cancel/Apply buttons must have null icons (no stock check/cross icons)");
+    auto *okBtn = btnBox->button(QDialogButtonBox::Ok), *cancelBtn = btnBox->button(QDialogButtonBox::Cancel), *applyBtn = btnBox->button(QDialogButtonBox::Apply);
+    QVERIFY(okBtn != nullptr && cancelBtn != nullptr && applyBtn != nullptr && okBtn->icon().isNull() && cancelBtn->icon().isNull() && applyBtn->icon().isNull());
     const QString accentHex = tm.paletteForTheme(tm.activeThemeId()).accentHex;
-    QVERIFY2(okBtn->styleSheet().contains(accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("PreferencesDialog OK button must use theme accent ") + accentHex));
+    QVERIFY2(okBtn->styleSheet().contains(accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("PreferencesDialog OK button must use accent ") + accentHex));
     prefsDlg.hide();
 
     // Audit modal dialog dimensions and controls across remaining workstation dialogs.
     gridlock::ui::AttachProcessDialog attachDlg(&mainWindow); verifyDialogCohesion(&attachDlg, QStringLiteral("AttachProcessDialog"));
-    gridlock::ui::NewProjectDialog newProjDlg(&mainWindow); verifyDialogCohesion(&newProjDlg, QStringLiteral("NewProjectDialog")); newProjDlg.hide();
-    gridlock::ui::AboutDialog aboutDlg(&mainWindow); verifyDialogCohesion(&aboutDlg, QStringLiteral("AboutDialog")); aboutDlg.hide();
-    gridlock::ui::ProjectSettingsDialog projSettingsDlg(&mainWindow); verifyDialogCohesion(&projSettingsDlg, QStringLiteral("ProjectSettingsDialog")); projSettingsDlg.hide();
-    gridlock::ui::dialogs::ProjectWizard projectWizard(&mainWindow); verifyDialogCohesion(&projectWizard, QStringLiteral("ProjectWizard")); projectWizard.hide();
-    gridlock::ui::ConditionalBreakpointDialog condBpDlg(QString(), &mainWindow); verifyDialogCohesion(&condBpDlg, QStringLiteral("ConditionalBreakpointDialog")); condBpDlg.hide();
-    gridlock::ui::TutorialDialog tutorialDlg(&mainWindow); verifyDialogCohesion(&tutorialDlg, QStringLiteral("TutorialDialog")); tutorialDlg.hide();
-    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    auto* projExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
+    for (QDialog* d : QList<QDialog*>{new gridlock::ui::NewProjectDialog(&mainWindow), new gridlock::ui::AboutDialog(&mainWindow), new gridlock::ui::ProjectSettingsDialog(&mainWindow), new gridlock::ui::dialogs::ProjectWizard(&mainWindow), new gridlock::ui::ConditionalBreakpointDialog(QString(), &mainWindow), new gridlock::ui::TutorialDialog(&mainWindow)}) {
+        verifyDialogCohesion(d, d->metaObject()->className()); d->deleteLater();
+    }
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); auto* projExplorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
     QVERIFY(disasm != nullptr && projExplorer != nullptr);
-    auto* xrefDlg = disasm->openXrefInspector(0x00401149ULL);
-    verifyDialogCohesion(xrefDlg, QStringLiteral("XrefInspectorDialog"));
+    auto* xrefDlg = disasm->openXrefInspector(0x00401149ULL); verifyDialogCohesion(xrefDlg, QStringLiteral("XrefInspectorDialog"));
 
     // 2. Enforce >= 12px UI typography floor (zero font-size: 9px or font-size: 10px rules) and 22..28px unified mode buttons.
     auto assertNoTinyFontCss = [](const QString& css, const QString& ctx) {

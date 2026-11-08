@@ -193,11 +193,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
       }
     }
   }
-  // Hide empty tab bars and configure tab scrolling.
+  // Hide empty tab bars, disable scroll buttons, and prevent horizontal tab expansion.
   for (auto* tabBar : findChildren<QTabBar*>()) {
     if (tabBar->count() == 0) tabBar->hide();
-    tabBar->setUsesScrollButtons(true);
+    tabBar->setUsesScrollButtons(false);
     tabBar->setElideMode(Qt::ElideNone);
+    tabBar->setExpanding(false);
   }
 
   // Route window to preferred monitor if specified in configuration.

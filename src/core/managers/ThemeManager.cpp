@@ -81,9 +81,9 @@ static QString getHighContrastLightQssOverlay() {
         "QTabWidget::pane, QTabWidget#EditorTabManager::pane { border: 0px; background: #ffffff; }\n"
         "QTabBar { background: #eaeef2; }\n"
         "QTabBar::tab {\n"
-        "    background: #eaeef2; color: #57606a; padding: 3px 10px; height: 26px;\n"
+        "    background: #eaeef2; color: #57606a; padding: 4px 10px; height: 26px;\n"
         "    min-height: 22px; max-height: 26px; border-right: 1px solid #d0d7de;\n"
-        "    border-bottom: 1px solid #d0d7de; font-size: 12px; font-weight: 600;\n"
+        "    border-bottom: 1px solid #d0d7de; font-size: 11px; font-weight: 600;\n"
         "}\n"
         // Active selected tab uses pure white surface and dark charcoal label text.
         "QTabBar::tab:selected { background: #ffffff; color: #1f2328; border-bottom: 2px solid #0969da; }\n"
@@ -177,9 +177,9 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "QTabWidget#EditorTabManager::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }\n"
         "QTabBar { background: #181a1f; }\n"
         "QTabBar::tab {\n"
-        "    background: #181a1f; color: #abb2bf; padding: 3px 10px; height: 26px;\n"
+        "    background: #181a1f; color: #abb2bf; padding: 4px 10px; height: 26px;\n"
         "    min-height: 22px; max-height: 26px; margin: 0px; border-right: 1px solid #282c34;\n"
-        "    border-bottom: 1px solid #2c313a; font-size: 12px; font-weight: 600; text-transform: uppercase;\n"
+        "    border-bottom: 1px solid #2c313a; font-size: 11px; font-weight: 600; text-transform: uppercase;\n"
         "}\n"
         // Selected tab uses the `#21252b` header surface and a 2px `#528bff` underline.
         "QTabBar::tab:selected {\n"

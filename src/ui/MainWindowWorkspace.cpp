@@ -518,11 +518,11 @@ void MainWindow::setupDocks() {
   watchLayout->addWidget(watchToolbar);
   watchLayout->addWidget(m_differentialGrid, 1);
 
-  // Encapsulate watch container in a standard dockable QDockWidget.
-  QDockWidget *watchDock = new QDockWidget("Watch Expressions", this);
+  // Encapsulate watch container in a standard dockable QDockWidget with concise WATCH title.
+  QDockWidget *watchDock = new QDockWidget("WATCH", this);
   watchDock->setObjectName("WatchExpressionsDock");
   watchDock->setWidget(watchContainer);
-  setupDockTitleBar(watchDock, QStringLiteral("WATCH EXPRESSIONS"));
+  setupDockTitleBar(watchDock, QStringLiteral("WATCH"));
   m_dockHomeSlots.insert(watchDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
   // Server Rack Overview: Visualizes cluster node/rank topology and operational status.
@@ -544,7 +544,7 @@ void MainWindow::setupDocks() {
   m_dockHomeSlots.insert(serverRackDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
   // Consolidate right sidebar into two balanced vertical zones:
-  // Top Right (55%): Tabbed VARIABLES | REGISTERS | WATCH EXPRESSIONS inspection pane.
+  // Top Right (55%): Tabbed VARIABLES | REGISTERS | WATCH inspection pane.
   // Bottom Right (45%): SERVER RACK multi-rank cluster topology status grid.
   addDockWidget(Qt::RightDockWidgetArea, variablesDock);
   splitDockWidget(variablesDock, serverRackDock, Qt::Vertical);
@@ -553,6 +553,12 @@ void MainWindow::setupDocks() {
   variablesDock->raise();
   resizeDocks({variablesDock, serverRackDock}, {520, 380}, Qt::Vertical);
   resizeDocks({variablesDock}, {340}, Qt::Horizontal);
+  // Configure dock tab bars to avoid scroll buttons and fit tabs side-by-side.
+  for (auto *tb : findChildren<QTabBar *>()) {
+    tb->setUsesScrollButtons(false);
+    tb->setElideMode(Qt::ElideNone);
+    tb->setExpanding(false);
+  }
 
   // Pin variable context menu trigger from editor tabs into watch expressions.
   connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,

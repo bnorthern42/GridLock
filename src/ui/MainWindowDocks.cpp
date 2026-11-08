@@ -802,7 +802,14 @@ void MainWindow::propagateThemeToAllWidgets() {
     }
   }
 
-  // 6. Propagate theme to subviews and Variables scope strip
+  // 6. Ensure all QTabBar instances suppress scroll buttons and fit tabs compactly.
+  for (auto* tb : findChildren<QTabBar*>()) {
+    tb->setUsesScrollButtons(false);
+    tb->setElideMode(Qt::ElideNone);
+    tb->setExpanding(false);
+  }
+
+  // 7. Propagate theme to subviews and Variables scope strip
   if (m_variablesDockWidget) {
     if (auto* varHdr = m_variablesDockWidget->findChild<QWidget*>(QStringLiteral("variablesHeaderBar"))) {
       varHdr->setStyleSheet(QStringLiteral("#variablesHeaderBar { background-color: %1; border-bottom: 1px solid %2; } #variablesHeaderBar QLabel { color: %3; font-size: 12px; font-weight: 600; }").arg(pal.headerHex, pal.borderHex, pal.textHex));
