@@ -18,10 +18,14 @@ compile_commands.json
 *.dll
 *.dylib
 
-# Compiled Executables (Standard & GridLock Test Targets)
+# Compiled Executables & AppImage Staging
 *.exe
 *.out
 *.app
+/AppDir/
+*.AppImage
+/tutorial/deadlock_ring
+/tutorial/inspection_demo
 mock_mpi_test.cpp
 mock_mpi_test_bin
 matrix_multiply_bin
