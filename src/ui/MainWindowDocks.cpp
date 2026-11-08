@@ -165,6 +165,21 @@ void MainWindow::redockWidget(QDockWidget* dock) {
       }
     } else {
       addDockWidget(slot.area, dock); dock->setFloating(false); dock->show();
+      // Preserve 2-zone right-sidebar hierarchy (tabbed Variables/Registers/Watch over ServerRack) on redock.
+      if (slot.area == Qt::RightDockWidgetArea) {
+        auto* vars = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+        auto* regs = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+        auto* watch = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+        auto* rack = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+        if (dock == rack && vars && !isDockFloating(vars)) {
+          splitDockWidget(vars, rack, Qt::Vertical);
+          resizeDocks({vars, rack}, {520, 380}, Qt::Vertical);
+        } else if ((dock == regs || dock == watch) && vars && !isDockFloating(vars)) {
+          tabifyDockWidget(vars, dock);
+        } else if (dock == vars && regs && !isDockFloating(regs)) {
+          tabifyDockWidget(regs, vars);
+        }
+      }
     }
   } else {
     dock->setWindowFlags(Qt::Widget); addDockWidget(Qt::RightDockWidgetArea, dock);
@@ -652,15 +667,15 @@ void MainWindow::propagateThemeToAllWidgets() {
     mainToolBar->setStyleSheet(QStringLiteral(
         "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; "
         "spacing: 2px; padding: 1px 2px; height: 30px; min-height: 28px; max-height: 30px; }"
+        "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 3px; }"
         "QToolBar#MainToolbar QLabel { background: transparent; color: %3; "
         "font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
         "QToolBar#MainToolbar QComboBox, QToolBar#MainToolbar QSpinBox, #toolbarTargetSelector { "
         "background-color: %4; color: %3; border: 1px solid %2; border-radius: 3px; "
-        "padding: 0px 5px; height: 22px; min-height: 20px; max-height: 22px; "
-        "font-size: 12px; font-weight: 500; font-style: normal; }"
+        "padding: 0px 5px; height: 22px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 500; }"
         "QToolBar#MainToolbar QToolButton { background-color: %1; color: %3; "
         "border: 1px solid %2; border-radius: 3px; padding: 0px 5px; margin: 0px; "
-        "height: 22px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; font-style: normal; }"
+        "height: 22px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; }"
         "QToolBar#MainToolbar QToolButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
         "QToolBar#MainToolbar QToolButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
         "QToolBar#MainToolbar QToolButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
@@ -668,6 +683,21 @@ void MainWindow::propagateThemeToAllWidgets() {
         .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex,
              isDark ? QStringLiteral("#19362b") : pal.accentHex,
              isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
+    // Highlight Run Target (m_runAction) as the distinct primary call-to-action button on MainToolbar.
+    if (m_runAction) {
+      if (QWidget* runBtn = mainToolBar->widgetForAction(m_runAction)) {
+        runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
+        runBtn->setStyleSheet(QStringLiteral(
+            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; "
+            "font-size: 12px; font-weight: 600; border: 1px solid %1; border-radius: 4px; "
+            "padding: 3px 12px; min-height: 18px; max-height: 18px; }"
+            "QToolButton:hover:enabled { background-color: %1; color: #ffffff; border: 1px solid %2; }"
+            "QToolButton:checked { background-color: %3; color: #ffffff; border: 1px solid %1; font-weight: 600; }"
+            "QToolButton:disabled { background-color: %4; color: %5; border: 1px solid %4; }")
+            .arg(pal.accentHex, pal.textHex, isDark ? QStringLiteral("#1f6f4a") : pal.accentHex,
+                 pal.borderHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
+      }
+    }
   }
 
   // 2. Re-style Address Space Section Ribbon (#AddressNavToolbar / #addressNavBar), Nav Arrows, Seek Bar, & CODE | REVERSE | MPI
@@ -772,7 +802,12 @@ void MainWindow::propagateThemeToAllWidgets() {
     }
   }
 
-  // 6. Propagate theme to subviews
+  // 6. Propagate theme to subviews and Variables scope strip
+  if (m_variablesDockWidget) {
+    if (auto* varHdr = m_variablesDockWidget->findChild<QWidget*>(QStringLiteral("variablesHeaderBar"))) {
+      varHdr->setStyleSheet(QStringLiteral("#variablesHeaderBar { background-color: %1; border-bottom: 1px solid %2; } #variablesHeaderBar QLabel { color: %3; font-size: 12px; font-weight: 600; }").arg(pal.headerHex, pal.borderHex, pal.textHex));
+    }
+  }
   if (m_memView) m_memView->reloadStyle();
   if (m_differentialGrid) m_differentialGrid->reloadStyle();
   if (m_serverRackView) m_serverRackView->reloadStyle();
@@ -786,32 +821,19 @@ void MainWindow::propagateThemeToAllWidgets() {
  * @return True if all inspected chrome elements are theme-aligned.
  */
 bool MainWindow::areAllChromeToolbarsAndDockHeadersThemeAligned() const {
-  const auto& tm = gridlock::core::ThemeManager::instance();
-  const bool isDark = tm.isDarkMode();
-  if (!isDark) {
-    auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"));
-    if (mainToolBar) {
+  if (!gridlock::core::ThemeManager::instance().isDarkMode()) {
+    if (auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
       const QString ss = mainToolBar->styleSheet();
-      if (ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive) ||
-          ss.contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive) ||
-          ss.contains(QStringLiteral("#1e2228"), Qt::CaseInsensitive)) {
-        return false;
-      }
+      if (ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#1e2228"), Qt::CaseInsensitive)) return false;
     }
     if (m_bottomToolRail) {
       const QString ss = m_bottomToolRail->styleSheet();
-      if (ss.contains(QStringLiteral("#181a1f"), Qt::CaseInsensitive) ||
-          ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) {
-        return false;
-      }
+      if (ss.contains(QStringLiteral("#181a1f"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) return false;
     }
     for (auto* dock : findChildren<QDockWidget*>()) {
       if (dock && dock->titleBarWidget()) {
         const QString ss = dock->titleBarWidget()->styleSheet();
-        if (ss.contains(QStringLiteral("#1e222a"), Qt::CaseInsensitive) ||
-            ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) {
-          return false;
-        }
+        if (ss.contains(QStringLiteral("#1e222a"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) return false;
       }
     }
   }
@@ -825,22 +847,12 @@ bool MainWindow::areAllChromeToolbarsAndDockHeadersThemeAligned() const {
  */
 void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   if (!m_coordinator) return;
-
   m_coordinator->launchParallelSession(binaryPath, ranks);
-
-  if (m_gdbConsoleWidget) {
-    m_gdbConsoleWidget->resetRanks(ranks);
-  }
-  if (m_serverRackView) {
-    m_serverRackView->resetRanks(ranks);
-  }
-
+  if (m_gdbConsoleWidget) m_gdbConsoleWidget->resetRanks(ranks);
+  if (m_serverRackView) m_serverRackView->resetRanks(ranks);
   if (m_differentialGrid) {
-    auto watches = m_differentialGrid->getWatchExpressions();
     if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-      for (const auto &w : watches) {
-        gdbCoord->registerWatchVariable(QString::fromStdString(w));
-      }
+      for (const auto &w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
     }
   }
 }

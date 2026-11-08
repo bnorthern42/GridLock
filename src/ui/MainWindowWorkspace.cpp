@@ -180,6 +180,10 @@ void MainWindow::setupToolbar() {
     startTargetWorkflow();
   });
   toolbar->addAction(m_runAction);
+  if (QWidget *runBtn = toolbar->widgetForAction(m_runAction)) {
+    runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
+  }
+  toolbar->addSeparator();
 
   // Continue Action: Resumes suspended execution until the next active breakpoint or procedure exit.
   m_continueAction = new QAction("⏭ Continue", this);
@@ -539,13 +543,16 @@ void MainWindow::setupDocks() {
   setupDockTitleBar(serverRackDock, QStringLiteral("SERVER RACK"));
   m_dockHomeSlots.insert(serverRackDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
-  // Dock right inspection widgets into RightDockWidgetArea with tabification.
+  // Consolidate right sidebar into two balanced vertical zones:
+  // Top Right (55%): Tabbed VARIABLES | REGISTERS | WATCH EXPRESSIONS inspection pane.
+  // Bottom Right (45%): SERVER RACK multi-rank cluster topology status grid.
   addDockWidget(Qt::RightDockWidgetArea, variablesDock);
-  addDockWidget(Qt::RightDockWidgetArea, registersDock);
+  splitDockWidget(variablesDock, serverRackDock, Qt::Vertical);
   tabifyDockWidget(variablesDock, registersDock);
-  addDockWidget(Qt::RightDockWidgetArea, watchDock);
-  addDockWidget(Qt::RightDockWidgetArea, serverRackDock);
-  registersDock->raise();
+  tabifyDockWidget(registersDock, watchDock);
+  variablesDock->raise();
+  resizeDocks({variablesDock, serverRackDock}, {520, 380}, Qt::Vertical);
+  resizeDocks({variablesDock}, {340}, Qt::Horizontal);
 
   // Pin variable context menu trigger from editor tabs into watch expressions.
   connect(m_editorTabManager, &EditorTabManager::pinVariableRequested, this,

@@ -110,28 +110,24 @@ bool callAreAllChromeAligned(const T*, ...) {
 }  // namespace gridlock::tests
 
 /**
- * @brief Verifies zero-gutter flush viewports across all bottom tabs, F1 docset lookup, and tab snapshots.
- * Validates bottom tab margins, compact header controls, MPI_Init@plt symbol lookup, and audit snapshots.
+ * @brief Verifies zero-gutter flush viewports across bottom tabs, F1 docset lookup, 2-zone right dock hierarchy, and primary Run Target CTA.
+ * Validates bottom tab margins, MPI_Init@plt symbol lookup, tabified Variables/Registers/Watch docks (>= 260px height), and accented Run Target button.
  */
 void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
-    // Instantiate and expose the main workstation window at standard 1440x900 resolution.
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    // Instantiate and expose the main workstation window with active theme palette propagated.
+    auto& tm = gridlock::core::ThemeManager::instance(); tm.initialize();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture(); mainWindow.propagateThemeToAllWidgets();
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // Locate the bottom console tab widget container by its canonical objectName.
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
-    QVERIFY2(bottomTabs != nullptr, "BottomConsoleTabs QTabWidget must exist in MainWindow");
-    QVERIFY(bottomTabs->count() >= 7);
+    QVERIFY2(bottomTabs != nullptr && bottomTabs->count() >= 7, "BottomConsoleTabs QTabWidget must exist with >= 7 tabs");
 
     // 1. Zero-Gutter Flush Viewports & Compact Control Heights Across All Bottom Tabs.
     for (int i = 0; i < bottomTabs->count(); ++i) {
-        bottomTabs->setCurrentIndex(i);
-        QCoreApplication::processEvents();
-        QWidget* page = bottomTabs->widget(i);
-        QVERIFY(page != nullptr);
+        bottomTabs->setCurrentIndex(i); QCoreApplication::processEvents();
+        QWidget* page = bottomTabs->widget(i); QVERIFY(page != nullptr);
         const QString tabTitle = bottomTabs->tabText(i);
         if (QLayout* pageLayout = page->layout()) {
             const QMargins m = pageLayout->contentsMargins();
@@ -143,26 +139,46 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     }
 
     // 2. Integrated Reference Manual (Docset / Man Viewer) Cohesion & F1 Symbol Lookup.
-    bottomTabs->setCurrentIndex(0);
-    QCoreApplication::processEvents();
-    const bool foundDoc = mainWindow.lookupSymbolDocumentation(QStringLiteral("MPI_Init@plt"));
-    QVERIFY2(foundDoc, "lookupSymbolDocumentation('MPI_Init@plt') must succeed");
+    bottomTabs->setCurrentIndex(0); QCoreApplication::processEvents();
+    QVERIFY2(mainWindow.lookupSymbolDocumentation(QStringLiteral("MPI_Init@plt")), "lookupSymbolDocumentation('MPI_Init@plt') must succeed");
     QCoreApplication::processEvents();
     QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"), Qt::CaseInsensitive), qPrintable(QString("Expected Reference Manual tab active, got '%1'").arg(bottomTabs->tabText(bottomTabs->currentIndex()))));
-    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    QVERIFY(refManual != nullptr);
-    auto* browser = refManual->findChild<QTextBrowser*>();
-    QVERIFY(browser != nullptr);
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>(); QVERIFY(refManual != nullptr);
+    auto* browser = refManual->findChild<QTextBrowser*>(); QVERIFY(browser != nullptr);
     const QString docPlainText = browser->toPlainText();
     QVERIFY2(docPlainText.contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive) && docPlainText.contains(QStringLiteral("SYNOPSIS"), Qt::CaseInsensitive), "Reference Manual content must include MPI_Init and SYNOPSIS");
 
     // 3. Tab Audit Snapshot Capability.
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
+    QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
     const QString snapshotPath = tempDir.filePath(QStringLiteral("tab_refman_audit.png"));
     QVERIFY2(mainWindow.captureTabAuditSnapshot(bottomTabs->currentIndex(), snapshotPath), "captureTabAuditSnapshot must succeed");
-    const QFileInfo snapInfo(snapshotPath);
-    QVERIFY(snapInfo.exists() && snapInfo.size() > 0);
+    const QFileInfo snapInfo(snapshotPath); QVERIFY(snapInfo.exists() && snapInfo.size() > 0);
+
+    // 4. Right-Sidebar 2-Zone Consolidation (VARIABLES | REGISTERS | WATCH EXPRESSIONS tabbed above SERVER RACK).
+    auto* variablesDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+    auto* registersDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+    auto* watchDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+    QVERIFY(variablesDock != nullptr && registersDock != nullptr && watchDock != nullptr);
+    const QList<QDockWidget*> tabified = mainWindow.tabifiedDockWidgets(variablesDock);
+    QVERIFY2(tabified.contains(registersDock) && tabified.contains(watchDock), "VariablesDock, RegisterViewDock, and WatchExpressionsDock must share top-right tabbed dock group");
+
+    // Verify active top-right dock group height >= 260px at 1600x950 and capture /tmp/layout_hierarchy_verify.png.
+    mainWindow.resize(1600, 950); mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents(); QTest::qWait(20);
+    const int varsActiveH = variablesDock->height();
+    watchDock->raise(); QApplication::processEvents();
+    const int watchActiveH = watchDock->height();
+    variablesDock->raise(); QApplication::processEvents();
+    QVERIFY2(varsActiveH >= 260 && watchActiveH >= 260, qPrintable(QStringLiteral("Top-right dock crushed: varsH=%1 watchH=%2").arg(varsActiveH).arg(watchActiveH)));
+
+    // 5. Verify Run Target toolbar QToolButton uses distinct primary theme accent CTA styling.
+    auto* mainToolBar = mainWindow.findChild<QToolBar*>(QStringLiteral("MainToolbar")); QVERIFY(mainToolBar != nullptr);
+    QToolButton* runBtn = nullptr;
+    for (QAction* act : mainToolBar->actions()) {
+        if (act && act->text().contains(QStringLiteral("Run Target"), Qt::CaseInsensitive)) { runBtn = qobject_cast<QToolButton*>(mainToolBar->widgetForAction(act)); break; }
+    }
+    const auto pal = tm.paletteForTheme(tm.activeThemeId());
+    QVERIFY2(runBtn != nullptr && runBtn->styleSheet().contains(pal.accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("Run Target QToolButton must include primary accent ") + pal.accentHex));
+    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/layout_hierarchy_verify.png")));
 }
 
 /**
@@ -204,13 +220,6 @@ void TestMainWindowUI::testDialogsAndTablesVisualCohesion() {
     QVERIFY2(okBtn->icon().isNull() && cancelBtn->icon().isNull() && applyBtn->icon().isNull(), "PreferencesDialog OK/Cancel/Apply buttons must have null icons (no stock check/cross icons)");
     const QString accentHex = tm.paletteForTheme(tm.activeThemeId()).accentHex;
     QVERIFY2(okBtn->styleSheet().contains(accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("PreferencesDialog OK button must use theme accent ") + accentHex));
-
-    // Save composite rendered image (/tmp/ui_typography_cohesion.png) stacking MainWindow and PreferencesDialog.
-    const QImage mwSnap = mainWindow.grab().toImage(), pfSnap = prefsDlg.grab().toImage();
-    QImage composite(qMax(mwSnap.width(), pfSnap.width()), mwSnap.height() + pfSnap.height() + 12, QImage::Format_ARGB32_Premultiplied);
-    composite.fill(QColor(QStringLiteral("#0f1115")));
-    { QPainter cp(&composite); cp.drawImage(0, 0, mwSnap); cp.drawImage(0, mwSnap.height() + 12, pfSnap); }
-    QVERIFY(composite.save(QStringLiteral("/tmp/ui_typography_cohesion.png")));
     prefsDlg.hide();
 
     // Audit modal dialog dimensions and controls across remaining workstation dialogs.

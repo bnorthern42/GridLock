@@ -560,18 +560,28 @@ void MainWindow::setWorkspacePerspective(const QString& perspective) {
     redockAllFloatingPanels();
     auto* masterSplitter = findChild<QSplitter*>(QStringLiteral("MasterHorizontalSplitter"));
     auto* mainVertSplitter = findChild<QSplitter*>(QStringLiteral("MainVerticalSplitter"));
+    auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+    auto* regsDock = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+    auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+    auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+
+    // Ensure right sidebar maintains the 2-zone layout (tabbed Variables/Registers/Watch above ServerRack).
+    if (varsDock && regsDock && watchDock && rackDock) {
+        if (!tabifiedDockWidgets(varsDock).contains(regsDock) || !tabifiedDockWidgets(varsDock).contains(watchDock)) {
+            splitDockWidget(varsDock, rackDock, Qt::Vertical);
+            tabifyDockWidget(varsDock, regsDock);
+            tabifyDockWidget(regsDock, watchDock);
+        }
+    }
 
     if (perspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0) {
         // Reverse perspective: full-width Split CFG + Decompiler view.
         m_workspacePerspective = QStringLiteral("Reverse");
         if (m_editorTabManager) m_editorTabManager->setVisible(false);
-        if (m_disassemblyView) {
-            m_disassemblyView->setSplitGraphDecompilerMode(true);
-            m_disassemblyView->setMinimumWidth(720);
-        }
+        if (m_disassemblyView) { m_disassemblyView->setSplitGraphDecompilerMode(true); m_disassemblyView->setMinimumWidth(720); }
         if (masterSplitter) masterSplitter->setSizes({0, (std::max)(width() - 360, 860)});
     } else if (perspective.compare(QStringLiteral("MPI"), Qt::CaseInsensitive) == 0) {
-        // MPI perspective: focus MPI Diagnostics wait-state table and network log.
+        // MPI perspective: focus MPI Diagnostics wait-state table and 55%/45% right dock balance.
         m_workspacePerspective = QStringLiteral("MPI");
         if (m_editorTabManager) m_editorTabManager->setVisible(true);
         if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
@@ -579,13 +589,15 @@ void MainWindow::setWorkspacePerspective(const QString& perspective) {
         selectBottomToolGroup(QStringLiteral("MPI"));
         if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
         if (mainVertSplitter) mainVertSplitter->setSizes({430, 410});
+        if (varsDock && rackDock) { varsDock->raise(); resizeDocks({varsDock}, {340}, Qt::Horizontal); resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical); }
     } else {
-        // Code perspective: balanced side-by-side SourceCodeView and DisassemblyView.
+        // Code perspective: balanced side-by-side SourceCodeView/DisassemblyView and 55%/45% right dock balance.
         m_workspacePerspective = QStringLiteral("Code");
         if (m_editorTabManager) m_editorTabManager->setVisible(true);
         if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
         if (masterSplitter) masterSplitter->setSizes({440, 520});
         if (mainVertSplitter) mainVertSplitter->setSizes({600, 260});
+        if (varsDock && rackDock) { varsDock->raise(); resizeDocks({varsDock}, {340}, Qt::Horizontal); resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical); }
         m_bottomConsoleMaximized = false;
     }
 
@@ -842,8 +854,7 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
 
     // 5. Capture PreferencesDialog on HPC / Cluster page with 16-directive #SBATCH auto-detection.
     if (isFresh(QStringLiteral("preferences_slurm_autodetect.png"))) return true;
-    PreferencesDialog prefsDlg(this);
-    prefsDlg.resize(940, 660);
+    PreferencesDialog prefsDlg(this); prefsDlg.resize(940, 660);
     if (auto* catList = prefsDlg.findChild<QListWidget*>()) {
         for (int i = 0; i < catList->count(); ++i) if (catList->item(i)->text().contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) catList->setCurrentRow(i);
     }
@@ -854,14 +865,9 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
         "#SBATCH --reservation=maint_window\n#SBATCH --chdir=/scratch/hpc/gridlock\n#SBATCH --output=logs/slurm-%j.out\n"
         "#SBATCH --error=logs/slurm-%j.err\nmodule load openmpi/5.0.5 cuda/12.4\n"));
     QApplication::processEvents();
-    QPixmap basePix = grab();
-    QPainter painter(&basePix);
-    const QPixmap dlgPix = prefsDlg.grab();
-    painter.drawPixmap((width() - dlgPix.width()) / 2, (height() - dlgPix.height()) / 2, dlgPix);
-    painter.end();
+    QPixmap basePix = grab(); QPainter painter(&basePix); const QPixmap dlgPix = prefsDlg.grab();
+    painter.drawPixmap((width() - dlgPix.width()) / 2, (height() - dlgPix.height()) / 2, dlgPix); painter.end();
     return basePix.save(dir.filePath(QStringLiteral("preferences_slurm_autodetect.png")), "PNG", 88);
 }
 
 }  // namespace gridlock::ui
-
-

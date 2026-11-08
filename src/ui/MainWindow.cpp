@@ -59,6 +59,8 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolBar>
@@ -204,13 +206,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Pre-seed sample preview telemetry data for headless and offline demo runs.
   loadPreviewFixture();
   // Listen for global theme mode change events from ThemeManager singleton.
-  connect(&gridlock::core::ThemeManager::instance(),
-          &gridlock::core::ThemeManager::themeModeChanged,
+  connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
           this, [this]() { propagateThemeToAllWidgets(); });
-  // Restore persisted theme choice across application sessions.
+  // Restore persisted theme choice and synchronize toolbar CTA, ribbons, and dock headers.
   gridlock::core::ThemeManager::instance().loadPersistedTheme();
-  // Trigger initial theme synchronization across toolbar, ribbons, and dock headers.
   propagateThemeToAllWidgets();
+  // Balance right-sidebar zones: 340px wide, 55% top tabbed inspector, 45% bottom Server Rack.
+  if (auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"))) {
+    resizeDocks({varsDock}, {340}, Qt::Horizontal);
+    if (auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"))) resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical);
+  }
 }
 
 /**
@@ -221,38 +226,41 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
  */
 void MainWindow::loadPreviewFixture() {
   // Pre-allocate storage capacity for eight initial process rank descriptors.
-  QList<RankState> fixtureRanks;
-  fixtureRanks.reserve(8);
+  QList<RankState> fixtureRanks; fixtureRanks.reserve(8);
   for (int i = 0; i < 8; ++i) {
-    RankState st;
-    st.rankId = i;
+    RankState st; st.rankId = i;
     // Rank 0 is stopped at coordinator breakpoint; worker ranks begin in running state.
     st.currentState = (i == 0) ? QStringLiteral("stopped") : QStringLiteral("running");
-    if (i == 0) {
-      // Coordinator RIP pointing to sym.main entry point.
-      st.registers[16] = QStringLiteral("0x00401120");
-    } else if (i == 1) {
-      // Worker rank 1 program counter offset.
-      st.registers[16] = QStringLiteral("0x00401155");
-    } else {
-      // Remaining worker rank program counter values in computation loop.
-      st.registers[16] = QStringLiteral("0x00401157");
-    }
+    // Assign realistic .text RIP offsets for coordinator (0x401120) and workers (0x401155/0x401157).
+    st.registers[16] = (i == 0) ? QStringLiteral("0x00401120") : (i == 1 ? QStringLiteral("0x00401155") : QStringLiteral("0x00401157"));
     st.totalRuntimeMs = 12 + i * 3;
-    fixtureRanks.append(st);
-    m_latestStates[i] = st;
+    fixtureRanks.append(st); m_latestStates[i] = st;
   }
-  // Propagate fixture ranks to ServerRackView or DisassemblyView.
+  // Propagate fixture ranks to ServerRackView or fallback DisassemblyView PC badges.
   if (m_serverRackView) {
     m_serverRackView->updateRanks(fixtureRanks);
   } else if (m_disassemblyView) {
-    QMap<int, uint64_t> pcs;
-    pcs.insert(0, 0x00401120ULL);
-    pcs.insert(1, 0x00401155ULL);
-    for (int i = 2; i < 8; ++i) {
-      pcs.insert(i, 0x00401157ULL);
-    }
+    QMap<int, uint64_t> pcs{{0, 0x00401120ULL}, {1, 0x00401155ULL}};
+    for (int i = 2; i < 8; ++i) pcs.insert(i, 0x00401157ULL);
     m_disassemblyView->setRankAddresses(pcs);
+  }
+  // Seed stack-frame local variables into VariableTreeModel when empty so Variables tab displays 10+ rows.
+  if (m_variablesDockWidget) {
+    if (auto* varModel = m_variablesDockWidget->findChild<gridlock::VariableTreeModel*>()) {
+      if (varModel->rowCount() == 0) {
+        // Construct DAP-compatible variable descriptors for rank 0's active sym.main stack frame.
+        auto mkVar = [](const char* n, const char* v, const char* t) {
+          return QJsonObject{{QStringLiteral("name"), QLatin1String(n)}, {QStringLiteral("value"), QLatin1String(v)}, {QStringLiteral("type"), QLatin1String(t)}};
+        };
+        // Populate 11 representative MPI ring and struct fields for unclipped table inspection.
+        varModel->onLocalsUpdated(0, 0, QJsonArray{
+            mkVar("mpi_rank", "0", "int"), mkVar("world_size", "8", "int"), mkVar("argc", "1", "int"),
+            mkVar("argv", "0x7fffffffe5a8", "char **"), mkVar("data[0].id", "0", "int"),
+            mkVar("data[0].coords.x", "0.0f", "float"), mkVar("data[0].coords.y", "1.25f", "float"),
+            mkVar("send_buf", "0x00404040", "double *"), mkVar("recv_buf", "0x00404140", "double *"),
+            mkVar("tag", "42", "int"), mkVar("comm", "MPI_COMM_WORLD", "MPI_Comm")});
+      }
+    }
   }
 }
 
@@ -832,9 +840,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
   // Store individual named splitter positions to restore precise panel distributions.
   for (auto* splitter : findChildren<QSplitter*>()) {
-      if (!splitter->objectName().isEmpty()) {
-          settings.setValue("MainWindow/Splitter_v8_" + splitter->objectName(), splitter->saveState());
-      }
+    if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v8_" + splitter->objectName(), splitter->saveState());
   }
 
   // Accept window close event allowing Qt to proceed with widget teardown.
@@ -849,16 +855,22 @@ void MainWindow::closeEvent(QCloseEvent *event) {
  */
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   // 1. Intercept custom dock header interactions (double-click, drag, context menu).
-  if (handleDockHeaderEvent(watched, event)) {
-    return true;
+  if (handleDockHeaderEvent(watched, event)) return true;
+
+  // 2. Keep inactive tabified sibling docks synchronized with their active tab group's dimensions.
+  if (event->type() == QEvent::Resize) {
+    if (auto *dock = qobject_cast<QDockWidget *>(watched)) {
+      if (dock->parentWidget() == this && !dock->isFloating() && dock->width() > 155 && dock->height() > 155) {
+        for (QDockWidget *sib : tabifiedDockWidgets(dock)) {
+          if (sib && !sib->isFloating() && sib->size() != dock->size()) sib->resize(dock->size());
+        }
+      }
+    }
   }
 
-  // 2. Intercept key press events and query the application-wide ShortcutManager.
+  // 3. Intercept key press events and query the application-wide ShortcutManager.
   if (event->type() == QEvent::KeyPress) {
-    auto *keyEvent = static_cast<QKeyEvent *>(event);
-    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, keyEvent)) {
-      return true;
-    }
+    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, static_cast<QKeyEvent *>(event))) return true;
   }
   return QMainWindow::eventFilter(watched, event);
 }
