@@ -690,55 +690,48 @@ void DisassemblyView::toggleViewMode() { setGraphMode(!m_graphMode); }
  */
 bool DisassemblyView::seekToAddress(uint64_t address) {
   if (address == 0ULL) return false;
-
   // Resolve containing block leader if exact instruction address is collapsed
   uint64_t resolvedAddress = address;
   if (!m_addrToLine.contains(address) && !m_addrToLine.isEmpty()) {
-    for (const DisasmBasicBlock& bb : std::as_const(m_basicBlocks)) {
-      if (address >= bb.startAddress && address <= bb.endAddress) {
-        resolvedAddress = bb.startAddress;
-        break;
-      }
-    }
+    for (const DisasmBasicBlock& bb : std::as_const(m_basicBlocks))
+      if (address >= bb.startAddress && address <= bb.endAddress) { resolvedAddress = bb.startAddress; break; }
   }
-
   // Update current address and resolve matching decompiler line
   m_currentAddress = address;
   const int mappedDecompLine = addressToDecompilerLine(address);
   if (mappedDecompLine > 0) m_currentDecompilerLine = mappedDecompLine;
-
-  // Update top toolbar header badge with active address
-  if (m_headerBadge) {
-    m_headerBadge->setText(QStringLiteral("%1 @ 0x%2").arg(m_activeSymbol).arg(m_currentAddress, 6, 16, QChar('0')));
-  }
-
-  // Synchronize highlights across linear disassembly, decompiler, and CFG
-  highlightActiveInstruction();
-  highlightActiveDecompilerLine();
-  rebuildCfgScene();
+  // Update top toolbar header badge with active address and synchronize view highlights
+  if (m_headerBadge) m_headerBadge->setText(QStringLiteral("%1 @ 0x%2").arg(m_activeSymbol).arg(m_currentAddress, 6, 16, QChar('0')));
+  highlightActiveInstruction(); highlightActiveDecompilerLine(); rebuildCfgScene();
   if (m_linearEdit) m_linearEdit->updateGutter();
-
   return m_addrToLine.contains(address) || m_addrToLine.contains(resolvedAddress) || !m_basicBlocks.isEmpty();
 }
 
 /**
- * @brief Updates linear assembly code, applies user annotations, and rebuilds views.
+ * @brief Updates linear assembly code, normalizes live GDB branch syntax, and rebuilds CFG views.
  * @param asmCode Raw assembly listing text.
  */
 void DisassemblyView::updateDisassembly(const QString &asmCode) {
-  // Fall back to default x86_64 canned snippet if empty code supplied
-  m_baseDisassembly = asmCode.trimmed().isEmpty() ? defaultStartupDisassembly() : asmCode;
-  // Splice live instruction patches and user comments into the disassembly listing
-  const QString patchedCode = applyPatchesToListing(m_baseDisassembly);
-  const QString effectiveCode = applyUserCommentsToListing(patchedCode);
-  if (m_linearEdit && m_linearEdit->toPlainText() != effectiveCode) {
-    m_linearEdit->setPlainText(effectiveCode);
+  // Normalize live GDB/objdump lines (<main+0x1aa>xjmp 00400650 -> <main+426>: jmp 0x00400650) for CFG partitioning.
+  QString normalized = asmCode.trimmed().isEmpty() ? defaultStartupDisassembly() : asmCode;
+  static const QRegularExpression symHexOffRe(QStringLiteral("<([^+>]+)\\+0x([0-9a-fA-F]+)>\\s*:?\\s*"));
+  static const QRegularExpression xMnemRe(QStringLiteral("(>\\s*:?\\s*)x(jmpq?|callq?|je|jz|jne|jnz|jg|jge|jl|jle|ja|jae|jb|jbe)\\b"), QRegularExpression::CaseInsensitiveOption);
+  static const QRegularExpression bareTargetRe(QStringLiteral("\\b(jmpq?|callq?|je|jz|jne|jnz|jg|jge|jl|jle|ja|jae|jb|jbe|js|jns|jo|jno)\\s+(?!0x)([0-9a-fA-F]{4,16})\\b"), QRegularExpression::CaseInsensitiveOption);
+  normalized.replace(xMnemRe, QStringLiteral("\\1\\2"));
+  QRegularExpressionMatchIterator symIt = symHexOffRe.globalMatch(normalized);
+  while (symIt.hasNext()) {
+    const QRegularExpressionMatch m = symIt.next();
+    bool ok = false; const uint64_t off = m.captured(2).toULongLong(&ok, 16);
+    if (ok) normalized.replace(m.captured(0), QStringLiteral("<%1+%2>: ").arg(m.captured(1)).arg(off));
   }
+  normalized.replace(bareTargetRe, QStringLiteral("\\1 0x\\2"));
+  m_baseDisassembly = normalized;
+  // Splice live instruction patches and user comments into the disassembly listing
+  const QString effectiveCode = applyUserCommentsToListing(applyPatchesToListing(m_baseDisassembly));
+  if (m_linearEdit && m_linearEdit->toPlainText() != effectiveCode) m_linearEdit->setPlainText(effectiveCode);
   // Re-run basic block partitioning and branch arc extraction
   parseDisassembly(effectiveCode);
-  highlightActiveInstruction();
-  highlightActiveDecompilerLine();
-  rebuildCfgScene();
+  highlightActiveInstruction(); highlightActiveDecompilerLine(); rebuildCfgScene();
   if (m_linearEdit) m_linearEdit->updateGutter();
 }
 

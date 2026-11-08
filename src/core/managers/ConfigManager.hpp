@@ -233,6 +233,11 @@ class ConfigManager {
   /** @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor. */
   void setShowDecompilerWithSource(bool show);
 
+  /** @brief Returns the default DisassemblyView presentation mode ("cfg", "linear", or "split"; default: "cfg"). */
+  QString defaultDisassemblyMode() const;
+  /** @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split"). */
+  void setDefaultDisassemblyMode(const QString& mode);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

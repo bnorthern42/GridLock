@@ -29,6 +29,7 @@
 #include <QtTest/QtTest>
 #include <cmath>
 
+#include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/ClangdLspClient.hpp"
 #include "../src/ui/EditorTabManager.hpp"
@@ -46,57 +47,36 @@
 
 /**
  * @brief Verifies dynamic statement mapping, loop back-edge/branch control-flow stepping,
- *        and active rank context synchronization between ServerRackView and MainWindow.
+ *        active rank context sync, live GDB disassembly CFG parsing, and default CFG Map mode.
  */
 void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     // Ensure tutorial/inspection_demo.cpp is loaded in SourceCodeView.
     if (!mainWindow.findChild<gridlock::ui::SourceCodeView*>()) {
         const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
-                                     ? QStringLiteral("tutorial/inspection_demo.cpp")
-                                     : QStringLiteral("../tutorial/inspection_demo.cpp");
+                                     ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
         mainWindow.loadSourceFile(demoPath);
     }
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
-
+    mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     QVERIFY(sourceView != nullptr && disasmView != nullptr && serverRack != nullptr);
 
-    // =========================================================================
-    // Part 1: Dynamic Statement-Based Source Line Resolution (No Hardcoding)
-    // =========================================================================
+    // Part 1: Dynamic Statement-Based Source Line Resolution (No Hardcoding).
     // Prepend 5 comment lines to shift all subsequent statement line numbers by 5.
     const QString originalCode = sourceView->toPlainText();
-    const QString shiftedCode = QStringLiteral(
-        "// Comment banner line 1\n"
-        "// Comment banner line 2\n"
-        "// Comment banner line 3\n"
-        "// Comment banner line 4\n"
-        "// Comment banner line 5\n") + originalCode;
-    sourceView->setPlainText(shiftedCode);
-    mainWindow.rebuildDynamicSourceLineMap();
-
+    const QString shiftedCode = QStringLiteral("// 1\n// 2\n// 3\n// 4\n// 5\n") + originalCode;
+    sourceView->setPlainText(shiftedCode); mainWindow.rebuildDynamicSourceLineMap();
     const int initLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Init"));
     const int finalizeLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Finalize"));
     const int returnLine = mainWindow.findSourceLineForStatement(QStringLiteral("return 0"));
 
     // Statements must be dynamically located at shifted positions.
-    QVERIFY2(initLine > 5, "Dynamic scanner must find MPI_Init below inserted comments");
-    QVERIFY2(finalizeLine > initLine, "Dynamic scanner must locate MPI_Finalize below MPI_Init");
-    QVERIFY2(returnLine >= finalizeLine, "Dynamic scanner must locate return 0 below MPI_Finalize");
-
+    QVERIFY2(initLine > 5 && finalizeLine > initLine && returnLine >= finalizeLine, "Dynamic scanner must locate shifted statements");
     // Dynamic bidirectional mapping must match instructions to shifted source lines.
     auto checkLine = [&](int l, uint64_t a) { QCOMPARE(mainWindow.sourceLineToAddress(l), a); QCOMPARE(mainWindow.addressToSourceLine(a), l); };
-    checkLine(initLine, 0x0040113dULL);
-    checkLine(finalizeLine, 0x00401178ULL);
-    checkLine(returnLine, 0x00401183ULL);
+    checkLine(initLine, 0x0040113dULL); checkLine(finalizeLine, 0x00401178ULL); checkLine(returnLine, 0x00401183ULL);
 
     // Part 2: Active Rank Stepping Context (default 0, select 2, reset 0).
     QCOMPARE(mainWindow.activeSteppingRank(), 0);
@@ -104,61 +84,68 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     serverRack->selectRank(0); QApplication::processEvents(); QCOMPARE(mainWindow.activeSteppingRank(), 0);
 
     // Part 3: True Control-Flow Loop & Rank-Conditional Branch Stepping.
-    sourceView->setBreakpoints(QSet<int>());
-    mainWindow.stopTargetWorkflow();
-    mainWindow.startTargetWorkflow();
-    QApplication::processEvents();
-    QCOMPARE(disasmView->currentAddress(), 0x00401120ULL);
+    sourceView->setBreakpoints(QSet<int>()); mainWindow.stopTargetWorkflow(); mainWindow.startTargetWorkflow();
+    QApplication::processEvents(); QCOMPARE(disasmView->currentAddress(), 0x00401120ULL);
 
     // Step through function prologue up to loop header.
-    while (disasmView->currentAddress() < 0x00401149ULL) {
-        mainWindow.stepInstructionWorkflow();
-        QApplication::processEvents();
-    }
+    while (disasmView->currentAddress() < 0x00401149ULL) { mainWindow.stepInstructionWorkflow(); QApplication::processEvents(); }
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
 
     // Loop Iteration 0: step through header and body.
     auto stepTo = [&](uint64_t addr) { mainWindow.stepInstructionWorkflow(); QCOMPARE(disasmView->currentAddress(), addr); };
-    stepTo(0x0040114dULL);
-    stepTo(0x0040114fULL);
-    stepTo(0x00401152ULL);
-    stepTo(0x00401155ULL);
-
+    stepTo(0x0040114dULL); stepTo(0x0040114fULL); stepTo(0x00401152ULL); stepTo(0x00401155ULL);
     // Stepping at 0x00401155 with rank 0 MUST branch to 0x00401168 -> 0x40116a -> 0x40116e -> 0x401149.
-    stepTo(0x00401168ULL);
-    stepTo(0x0040116aULL);
-    stepTo(0x0040116eULL);
-    stepTo(0x00401149ULL);
+    stepTo(0x00401168ULL); stepTo(0x0040116aULL); stepTo(0x0040116eULL); stepTo(0x00401149ULL);
 
     // Loop Iteration 1 & 2: execute 7 single-steps through coordinator body to jmp back-edge.
     for (int iter = 1; iter <= 2; ++iter) {
         for (int s = 0; s < 7; ++s) mainWindow.stepInstructionWorkflow();
-        QCOMPARE(disasmView->currentAddress(), 0x0040116eULL);
-        stepTo(0x00401149ULL);
+        QCOMPARE(disasmView->currentAddress(), 0x0040116eULL); stepTo(0x00401149ULL);
     }
 
     // Loop Exit (i == 3 > 2): step through cmp to jg and take exit branch to MPI_Finalize.
-    stepTo(0x0040114dULL);
-    stepTo(0x00401178ULL);
-
+    stepTo(0x0040114dULL); stepTo(0x00401178ULL);
     // Step through MPI_Finalize call, leave, and ret, verifying return 0 highlight.
     for (int s = 0; s < 3; ++s) mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401183ULL); QCOMPARE(sourceView->executionLine(), returnLine);
 
     // Test Worker Rank (Rank 2) conditional branch behavior:
-    mainWindow.stopTargetWorkflow(); serverRack->selectRank(2);
-    mainWindow.startTargetWorkflow(); QApplication::processEvents();
-    while (disasmView->currentAddress() < 0x00401155ULL) {
-        mainWindow.stepInstructionWorkflow();
-        QApplication::processEvents();
-    }
+    mainWindow.stopTargetWorkflow(); serverRack->selectRank(2); mainWindow.startTargetWorkflow(); QApplication::processEvents();
+    while (disasmView->currentAddress() < 0x00401155ULL) { mainWindow.stepInstructionWorkflow(); QApplication::processEvents(); }
     QCOMPARE(disasmView->currentAddress(), 0x00401155ULL);
-
     // For active rank 2, je 0x00401168 condition is false -> must fall through to worker block (0x00401157ULL).
-    stepTo(0x00401157ULL);
-    mainWindow.stepInstructionWorkflow(); // -> 0x40115f
-    stepTo(0x00401163ULL);
-    stepTo(0x00401149ULL);
+    stepTo(0x00401157ULL); mainWindow.stepInstructionWorkflow(); stepTo(0x00401163ULL); stepTo(0x00401149ULL);
+
+    // Part 4: Live GDB Disassembly CFG Basic-Block Splitting & Default CFG Map View Mode.
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    auto getDefMode = [](const auto& c) { if constexpr (requires { c.defaultDisassemblyMode(); }) return c.defaultDisassemblyMode(); else return QString(); };
+    auto getEdgeCnt = [](const auto* d) { if constexpr (requires { d->cfgEdgeCount(); }) return d->cfgEdgeCount(); else return -1; };
+    QCOMPARE(getDefMode(cfg), QStringLiteral("cfg"));
+    const QString liveGdbAsm = QStringLiteral(
+        "0x00400550 <main+0x0>: push rbp ; line 12\n"
+        "0x00400554 <main+0x4>: mov rbp, rsp ; line 12\n"
+        "0x00400560 <main+0x10>xcall 00400420 <MPI_Init@plt> ; line 14\n"
+        "0x0040056b <main+0x1b>: cmp dword [rbp-0x4], 0x2 ; line 16\n"
+        "0x0040056f <main+0x1f>: jg 00400658 ; line 16\n"
+        "0x00400575 <main+0x25>: cmp dword [rbp-0x8], 0x0 ; line 17\n"
+        "0x00400579 <main+0x29>: je 00400600 ; line 17\n"
+        "0x0040057f <main+0x2f>: add dword [rbp-0x4], 0x1 ; line 18\n"
+        "0x00400585 <main+0xc5>xjmp 0040056b ; line 18\n"
+        "0x00400600 <main+0xb0>: xor eax, eax ; line 19\n"
+        "0x00400602 <main+0x1aa>xjmp 00400650 ; line 16\n"
+        "0x00400650 <main+0x100>: add dword [rbp-0x4], 0x1 ; line 20\n"
+        "0x00400654 <main+0x104>: jmp 0040056b ; line 20\n"
+        "0x00400658 <main+0x108>: leave ; line 22\n"
+        "0x00400659 <main+0x109>: ret ; line 22");
+    disasmView->setGraphMode(true); disasmView->updateDisassembly(liveGdbAsm); QApplication::processEvents();
+    QVERIFY2(disasmView->basicBlockCount() >= 4 && getEdgeCnt(disasmView) >= 3,
+             qPrintable(QStringLiteral("CFG collapsed: BB=%1 E=%2").arg(disasmView->basicBlockCount()).arg(getEdgeCnt(disasmView))));
+    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/cfg_live_stepping_verify.png")));
+    disasmView->seekToAddress(0x0040056bULL); mainWindow.stopTargetWorkflow(); QApplication::processEvents();
+    QVERIFY2(disasmView->isGraphMode() && disasmView->basicBlockCount() >= 4, "DisassemblyView must remain in multi-block CFG Map mode across seek and stop");
+    gridlock::ui::PreferencesDialog prefsCfgDlg(&mainWindow);
+    auto* defModeCombo = prefsCfgDlg.findChild<QComboBox*>(QStringLiteral("defaultDisassemblyModeCombo"));
+    QVERIFY2(defModeCombo != nullptr && defModeCombo->count() >= 3, "PreferencesDialog Debugger page must expose defaultDisassemblyModeCombo");
 }
 
 /**

@@ -101,6 +101,8 @@ public:
 
     /// Number of detected branch flow arcs.
     int branchArcCount() const { return m_branchArcs.size(); }
+    /// Number of CFG edges connecting basic blocks.
+    int cfgEdgeCount() const { return m_branchArcs.size(); }
     /// Number of partitioned basic blocks.
     int basicBlockCount() const { return m_basicBlocks.size(); }
     /// True if displaying the 2D CFG scene; false if linear assembly text.
@@ -110,12 +112,15 @@ public:
     void toggleViewMode();
     /// Seeks disassembly, graph, and decompiler views to an instruction address.
     bool seekToAddress(uint64_t address);
+    /// Alias updating active PC highlight without resetting CFG mode.
+    void setCurrentAddress(uint64_t address) { seekToAddress(address); }
     /// Returns the currently active 64-bit instruction pointer address.
     uint64_t currentAddress() const { return m_currentAddress; }
 
     // Compatibility helpers for QPlainTextEdit-like inspection
     QString toPlainText() const;
     void setPlainText(const QString& text);
+    void setInstructions(const QString& text) { updateDisassembly(text); }
     QTextDocument* document() const;
     QTextCursor textCursor() const;
     void setTextCursor(const QTextCursor& cursor);

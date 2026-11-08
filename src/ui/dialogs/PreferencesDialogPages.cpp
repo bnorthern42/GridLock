@@ -507,6 +507,16 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget* parent)
         tr("Select the local debugger backend engine used for target attachment and MI/DAP sessions."));
     form->addRow(tr("Debugger Engine:"), engineCombo);
 
+    // Default disassembly presentation view mode selector (CFG Map, Linear Assembly, Split CFG + Decompiler).
+    auto* defModeCombo = new QComboBox(this);
+    defModeCombo->setObjectName(QStringLiteral("defaultDisassemblyModeCombo"));
+    defModeCombo->addItem(tr("Control Flow Graph (Map)"), QStringLiteral("cfg"));
+    defModeCombo->addItem(tr("Linear Assembly List"), QStringLiteral("linear"));
+    defModeCombo->addItem(tr("Split CFG + Decompiler"), QStringLiteral("split"));
+    defModeCombo->setToolTip(
+        tr("Default presentation mode for DisassemblyView across debugging sessions."));
+    form->addRow(tr("Default Disassembly View:"), defModeCombo);
+
     // Language server and adapter executable path browse inputs.
     m_clangdPathEdit = addBrowsePathRow(
         this, form, tr("Clangd Path:"), QStringLiteral("clangd"),
@@ -580,9 +590,11 @@ void DebuggerSettingsPage::loadFromSettings() {
     (void)cfg.loadProjectSettings();
     if (auto* engineCombo = findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"))) {
         const int idx = engineCombo->findData(cfg.debuggerEngine());
-        if (idx >= 0) {
-            engineCombo->setCurrentIndex(idx);
-        }
+        if (idx >= 0) engineCombo->setCurrentIndex(idx);
+    }
+    if (auto* defModeCombo = findChild<QComboBox*>(QStringLiteral("defaultDisassemblyModeCombo"))) {
+        const int idx = defModeCombo->findData(cfg.defaultDisassemblyMode());
+        if (idx >= 0) defModeCombo->setCurrentIndex(idx);
     }
     if (auto* showDecompCheck = findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"))) {
         showDecompCheck->setChecked(cfg.showDecompilerWithSource());

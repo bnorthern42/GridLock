@@ -906,4 +906,40 @@ void ConfigManager::setShowDecompilerWithSource(bool show) {
   s.sync();
 }
 
+/**
+ * @brief Returns the default DisassemblyView presentation mode ("cfg", "linear", or "split"; default: "cfg").
+ */
+QString ConfigManager::defaultDisassemblyMode() const {
+  if (!m_workspacePath.isEmpty()) {
+    const QString wf = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
+    try {
+      auto tbl = toml::parse_file(wf.toStdString());
+      if (auto* dbg = tbl["debugger"].as_table())
+        if (auto val = dbg->get("default_disassembly_mode"); val && val->is_string())
+          return QString::fromStdString(val->as_string()->get());
+    } catch (...) {}
+  }
+  QSettings s(kOrg, kApp);
+  return s.value(QStringLiteral("debugger/default_disassembly_mode"), QStringLiteral("cfg")).toString();
+}
+
+/**
+ * @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split").
+ */
+void ConfigManager::setDefaultDisassemblyMode(const QString& mode) {
+  const QString clean = mode.trimmed().isEmpty() ? QStringLiteral("cfg") : mode.trimmed().toLower();
+  if (!m_workspacePath.isEmpty()) {
+    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
+    const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
+    toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
+    dbgTbl.insert_or_assign("default_disassembly_mode", clean.toStdString());
+    tbl.insert_or_assign("debugger", dbgTbl);
+    std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
+  }
+  QSettings s(kOrg, kApp);
+  s.setValue(QStringLiteral("debugger/default_disassembly_mode"), clean);
+  s.sync();
+}
+
 }  // namespace gridlock::core

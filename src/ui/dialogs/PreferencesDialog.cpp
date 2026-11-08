@@ -473,6 +473,9 @@ void PreferencesDialog::apply() {
     if (auto* engineCombo = m_debuggerPage->findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"))) {
         cfg.setDebuggerEngine(engineCombo->currentData().toString());
     }
+    if (auto* defModeCombo = m_debuggerPage->findChild<QComboBox*>(QStringLiteral("defaultDisassemblyModeCombo"))) {
+        cfg.setDefaultDisassemblyMode(defModeCombo->currentData().toString());
+    }
     if (auto* showDecompCheck = m_debuggerPage->findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"))) {
         cfg.setShowDecompilerWithSource(showDecompCheck->isChecked());
     }
