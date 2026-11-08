@@ -812,6 +812,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     const QString mesonText = readText(QStringLiteral("meson.build"));
     QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build must declare version 0.8.0, RPATH, and build_by_default : false");
     QVERIFY2(gridlock::core::Version::getString() == QStringLiteral("0.8.0") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.0"), "Version::getString() / applicationVersion() must report 0.8.0");
+    QVERIFY2(readText(QStringLiteral("CHANGELOG.md")).contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.0\\]|v0\\.8\\.0)"))), "CHANGELOG.md must contain ## [0.8.0]");
     QVERIFY2(readText(QStringLiteral("README.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("sonar-project.properties")).contains(QStringLiteral("0.8.0")), "README.md, ROADMAP.md, docs/ROADMAP.md, and sonar-project.properties must reference 0.8.0");
     QVERIFY2(!readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "All ROADMAP.md and docs/ROADMAP.md checklist items must be marked [x]");
 

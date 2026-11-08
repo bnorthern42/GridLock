@@ -5,6 +5,30 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-08
+
+### Added
+- **File Tree CRUD Operations & Build Registration (`ProjectExplorerWidget`):** Added context-menu and programmatic operations for creating source/header files, creating folders, renaming (`F2`), and deleting entries, with external filesystem synchronization and 1-click source registration in `meson.build` and `CMakeLists.txt`.
+- **Split Source Editors & Dirty Buffer Tracking (`EditorTabManager`, `SourceCodeView`):** Added horizontal (`Split Right`) and vertical (`Split Down`) split editor views, unsaved buffer markers (`*` / `●`) with save/discard prompts, `Ctrl+Shift+S` (*Save All*), Header/Source switching (`F10`), and a scope breadcrumb bar.
+- **`clangd` Diagnostics, Hover & AST Navigation (`ClangdLspClient`):** Added inline compiler error and warning underlines (`textDocument/publishDiagnostics`), hover type and Doxygen tooltips (`textDocument/hover`), `F12` go-to-definition (`textDocument/definition`), `Shift+F12` find references (`textDocument/references`), `Shift+F6` AST symbol rename (`textDocument/rename`), and `Ctrl+Space` auto-completion.
+- **Git Diff Gutter Indicators (`SourceCodeView`):** Added gutter line markers for added, modified, and deleted lines parsed from unified `git diff` hunks.
+- **Configurable Debugger Backend Engine (`PreferencesDialog`, `ConfigManager`):** Added debugger backend selection (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`), custom binary path configuration, and `mpirun` launch argument settings in `Preferences -> Debugger`.
+- **12-Theme Palette Catalog (`ThemePalette`, `ThemeManager`):** Expanded the theme engine to 12 built-in themes (8 Dark, 4 Light), adding `Nord`, `One Dark Pro`, `Dracula`, and `One Light`.
+- **Live Status Bar Resource Telemetry (`ElfBinaryInspector`, `MainWindow`):** Added real-time per-rank `STACK` and `HEAP` memory usage alongside system `RAM` (in GB/total or `%`) and `CPU %` in the bottom status bar ribbon, with a configurable display format in `Preferences`.
+- **5 New MPI Debugging Showcase Examples & Expanded Tutorial (`tutorial/`, `docs/TUTORIAL.md`):** Added `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, and `simd_struct_watch.cpp` (bringing the suite to 7 runnable examples registered in the `TARGET:` selector) and expanded `docs/TUTORIAL.md` with step-by-step walkthroughs.
+- **Static Analysis & Compiler Quality Gates (`sonar-project.properties`, `meson.build`):** Added `sonar-project.properties` for complexity and coverage tracking, ran `cppcheck` and `clang-tidy` sweeps across `src/` and `tests/`, and enforced `-Wall -Wextra -Wpedantic` with zero compiler warnings.
+
+### Changed
+- **Default Control Flow Graph & Conditional Decompiler Visibility (`DisassemblyView`):** Defaulted `DisassemblyView` to the multi-block Control Flow Graph (`MAP (CFG)`) view and hid the redundant pseudo-C decompiler pane when the C++ source editor is visible (configurable in `Preferences -> Debugger`).
+- **Right-Sidebar Dock Consolidation & Movable Toolbars (`MainWindow`):** Tabified `Watch` into the top-right `VARIABLES | REGISTERS | WATCH` dock tab group above `SERVER RACK` and enabled movable main toolbars (`setMovable(true)`).
+- **Documentation Overhaul (`README.md`, `ROADMAP.md`, `docs/*.md`):** Rewrote project documentation, architecture guides, and user manuals in concise developer prose.
+
+### Fixed
+- **Live GDB Disassembly CFG Splitting (`DisassemblyView`):** Fixed the `BB:1 E:0` Control Flow Graph collapse when stepping through live GDB disassembly containing `<symbol+offset>xjmp` annotations.
+- **Light-Theme Contrast (`ThemeManager`, `MemView`, `ProjectExplorerWidget`):** Fixed light-theme contrast across the `Preferences` category sidebar, binary section ribbon, `FILES | SYMBOLS | STRINGS` toggles, `CODE | REVERSE | MPI` switches, and non-zero `MemView` hex bytes.
+- **Main Toolbar Control Sizing (`MainWindowWorkspace`):** Fixed clipped digits in the `RANKS (-np)` spinbox, truncated text in the `TARGET:` dropdown, and oversized `Run Target` button height.
+- **Subprocess Pipe Guards (`DapCoordinator`, `LspCoordinator`, `GdbRankCoordinator`, `ClangdLspClient`, `TerminalDockWidget`):** Guarded `QProcess::write` and `closeWriteChannel` calls against closed or unstarted pipes.
+
 ## [0.7.0] - 2026-10-30
 
 ### Added
