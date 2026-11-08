@@ -451,6 +451,16 @@ BehaviorSettingsPage::BehaviorSettingsPage(QWidget* parent)
         tr("Automatically raise the GridLock window when a rank hits a breakpoint."));
     form->addRow(tr("Focus on Stop:"), m_focusOnStopCheck);
 
+    // Status bar live Stack/Heap and system RAM/CPU telemetry presentation format selector.
+    auto* telemetryFormatCombo = new QComboBox(this);
+    telemetryFormatCombo->setObjectName(QStringLiteral("telemetryFormatCombo"));
+    telemetryFormatCombo->addItem(tr("GB / Total GB + CPU %"), QStringLiteral("gb"));
+    telemetryFormatCombo->addItem(tr("Percentage (%) Only"), QStringLiteral("percent"));
+    telemetryFormatCombo->addItem(tr("Both (GB / Total GB + %)"), QStringLiteral("both"));
+    telemetryFormatCombo->setToolTip(
+        tr("Choose how system RAM and CPU utilization are formatted alongside per-rank Stack and Heap in the bottom status bar."));
+    form->addRow(tr("Status Bar Resource Format:"), telemetryFormatCombo);
+
     addFormNote(this, form,
                 tr("<small style='color:#888;'>MPI executor and rank settings are "
                    "in the <b>Debugger</b> category.</small>"));
@@ -482,6 +492,11 @@ void BehaviorSettingsPage::loadFromSettings() {
         s.value("behavior/confirm_quit", true).toBool() ? 0 : 1);
     m_focusOnStopCheck->setCurrentIndex(
         s.value("behavior/focus_on_stop", true).toBool() ? 0 : 1);
+    if (auto* telemetryCombo = findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"))) {
+        const QString fmt = gridlock::core::ConfigManager::instance().telemetryDisplayFormat();
+        const int fmtIdx = telemetryCombo->findData(fmt);
+        telemetryCombo->setCurrentIndex(fmtIdx >= 0 ? fmtIdx : 0);
+    }
 }
 
 // ============================================================================

@@ -367,8 +367,9 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
         m_seekBar->setText(normalized);
     }
 
-    // Update status bar breadcrumb with active seek address.
+    // Update status bar breadcrumb with active seek address and live process/host memory telemetry.
     updateStatusTelemetry(normalized);
+    refreshStatusBarMemoryTelemetry();
 
     // Update address ribbon marker position.
     if (m_addressNavBar && hexOk && parsedAddr != 0ULL) {

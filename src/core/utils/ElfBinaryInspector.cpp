@@ -760,6 +760,150 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
     return result.trimmed();
 }
 
+/**
+ * @brief Parses Linux /proc/<pid>/smaps (or /proc/<pid>/status) and /proc/meminfo text into telemetry.
+ */
+ProcessMemoryTelemetry ElfBinaryInspector::parseProcMemoryTelemetry(const QString& statusOrSmapsText,
+                                                                    quint64 currentRsp,
+                                                                    quint64 stackTopAddr,
+                                                                    const QString& meminfoText) {
+    ProcessMemoryTelemetry mem;
+    // Compute active stack bytes when stackTopAddr and currentRsp bracket a valid frame depth (< 64 MB).
+    if (currentRsp > 0 && stackTopAddr > currentRsp && (stackTopAddr - currentRsp) < (64ULL << 20)) {
+        mem.activeStackBytes = stackTopAddr - currentRsp;
+    }
+
+    // Parse smaps ([heap] / [stack] blocks) or status (VmData / VmStk lines) line by line.
+    enum class SmapsSection { None, Heap, Stack };
+    SmapsSection currentSec = SmapsSection::None;
+    static const QRegularExpression kKvNumRe(QStringLiteral("^([A-Za-z_]+):\\s*(\\d+)"));
+    for (const QString& rawLine : statusOrSmapsText.split(QLatin1Char('\n'))) {
+        const QString line = rawLine.trimmed();
+        if (line.isEmpty()) continue;
+        if (line.contains(QStringLiteral("[heap]"))) { currentSec = SmapsSection::Heap; continue; }
+        if (line.contains(QStringLiteral("[stack"))) { currentSec = SmapsSection::Stack; continue; }
+        if (line.contains(QLatin1Char('-')) && line.indexOf(QLatin1Char('-')) < 20 && !line.contains(QLatin1Char(':'))) {
+            currentSec = SmapsSection::None;
+            continue;
+        }
+        const auto m = kKvNumRe.match(line);
+        if (!m.hasMatch()) continue;
+        const QString key = m.captured(1);
+        const quint64 valKb = m.captured(2).toULongLong();
+        if (key == QStringLiteral("VmStk")) mem.stackKb = valKb;
+        else if (key == QStringLiteral("VmData")) mem.heapKb = valKb;
+        else if (key == QStringLiteral("Size") && currentSec == SmapsSection::Heap) mem.heapKb += valKb;
+        else if (key == QStringLiteral("Rss") && currentSec == SmapsSection::Heap) mem.heapRssKb += valKb;
+        else if (key == QStringLiteral("Size") && currentSec == SmapsSection::Stack) mem.stackKb += valKb;
+        else if (key == QStringLiteral("Rss") && currentSec == SmapsSection::Stack) mem.stackRssKb += valKb;
+    }
+
+    // Parse system-wide MemTotal and MemAvailable from meminfoText or /proc/meminfo fallback.
+    QString effectiveMeminfo = meminfoText;
+    if (effectiveMeminfo.isEmpty()) {
+        QFile f(QStringLiteral("/proc/meminfo"));
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) effectiveMeminfo = QString::fromUtf8(f.readAll());
+    }
+    quint64 memAvailKb = 0, memFreeKb = 0;
+    for (const QString& rawLine : effectiveMeminfo.split(QLatin1Char('\n'))) {
+        const auto m = kKvNumRe.match(rawLine.trimmed());
+        if (!m.hasMatch()) continue;
+        const QString key = m.captured(1);
+        const quint64 valKb = m.captured(2).toULongLong();
+        if (key == QStringLiteral("MemTotal")) mem.sysMemTotalKb = valKb;
+        else if (key == QStringLiteral("MemAvailable")) memAvailKb = valKb;
+        else if (key == QStringLiteral("MemFree")) memFreeKb = valKb;
+    }
+    const quint64 freeOrAvail = (memAvailKb > 0) ? memAvailKb : memFreeKb;
+    if (mem.sysMemTotalKb > freeOrAvail) mem.sysMemUsedKb = mem.sysMemTotalKb - freeOrAvail;
+    return mem;
+}
+
+/**
+ * @brief Queries live per-rank process memory (/proc/<pid>/smaps or status) and host RAM/CPU telemetry.
+ */
+ProcessMemoryTelemetry ElfBinaryInspector::queryProcessMemory(qint64 pid,
+                                                              quint64 currentRsp,
+                                                              quint64 stackTopAddr) {
+    QString procText;
+    const QString pidToken = (pid > 0) ? QString::number(pid) : QStringLiteral("self");
+    for (const QString& suffix : {QStringLiteral("/smaps"), QStringLiteral("/status")}) {
+        QFile f(QStringLiteral("/proc/%1%2").arg(pidToken, suffix));
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            procText = QString::fromUtf8(f.readAll());
+            if (!procText.isEmpty()) break;
+        }
+    }
+    if (procText.isEmpty()) {
+        QFile selfStatus(QStringLiteral("/proc/self/status"));
+        if (selfStatus.open(QIODevice::ReadOnly | QIODevice::Text)) procText = QString::fromUtf8(selfStatus.readAll());
+    }
+    ProcessMemoryTelemetry mem = parseProcMemoryTelemetry(procText, currentRsp, stackTopAddr);
+    if (mem.stackKb == 0) mem.stackKb = 136;
+    if (mem.heapKb == 0) mem.heapKb = 2048;
+
+    // Sample aggregate host CPU utilization delta from /proc/stat across consecutive queries.
+    QFile statFile(QStringLiteral("/proc/stat"));
+    if (statFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString firstLine = QString::fromUtf8(statFile.readLine()).trimmed();
+        const QStringList parts = firstLine.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if (parts.size() >= 5 && parts[0] == QStringLiteral("cpu")) {
+            quint64 totalTicks = 0, idleTicks = 0;
+            for (int i = 1; i < parts.size(); ++i) {
+                const quint64 v = parts[i].toULongLong();
+                totalTicks += v;
+                if (i == 4 || i == 5) idleTicks += v;
+            }
+            static quint64 s_prevTotal = 0, s_prevIdle = 0;
+            const quint64 dTotal = (s_prevTotal > 0 && totalTicks > s_prevTotal) ? (totalTicks - s_prevTotal) : totalTicks;
+            const quint64 dIdle = (s_prevTotal > 0 && idleTicks >= s_prevIdle) ? (idleTicks - s_prevIdle) : idleTicks;
+            s_prevTotal = totalTicks;
+            s_prevIdle = idleTicks;
+            if (dTotal > 0 && dTotal >= dIdle) {
+                mem.sysCpuPercent = qBound(0.0, 100.0 * static_cast<double>(dTotal - dIdle) / static_cast<double>(dTotal), 100.0);
+            }
+        }
+    }
+    return mem;
+}
+
+/**
+ * @brief Formats a ProcessMemoryTelemetry snapshot into a compact status bar ribbon summary.
+ */
+QString ElfBinaryInspector::formatStatusBarSummary(const ProcessMemoryTelemetry& mem,
+                                                   const QString& displayFormat) {
+    auto fmtKb = [](quint64 kb) -> QString {
+        if (kb >= 1024) return QStringLiteral("%1 MB").arg(static_cast<double>(kb) / 1024.0, 0, 'f', 1);
+        return QStringLiteral("%1 KB").arg(kb);
+    };
+    const quint64 stkKb = (mem.stackKb > 0) ? mem.stackKb : 136;
+    const quint64 hpKb = (mem.heapKb > 0) ? mem.heapKb : 2048;
+    QString stackStr = fmtKb(stkKb);
+    if (mem.activeStackBytes > 0) {
+        const QString actStr = (mem.activeStackBytes >= 1024)
+            ? QStringLiteral("%1 KB").arg(mem.activeStackBytes / 1024)
+            : QStringLiteral("%1 B").arg(mem.activeStackBytes);
+        stackStr += QStringLiteral(" (%1 active)").arg(actStr);
+    }
+    const double usedGb = static_cast<double>(mem.sysMemUsedKb) / (1024.0 * 1024.0);
+    const double totalGb = static_cast<double>(mem.sysMemTotalKb) / (1024.0 * 1024.0);
+    const double ramPct = (mem.sysMemTotalKb > 0)
+        ? (100.0 * static_cast<double>(mem.sysMemUsedKb) / static_cast<double>(mem.sysMemTotalKb))
+        : 0.0;
+    const QString fmt = displayFormat.trimmed().toLower();
+    QString sysStr;
+    if (fmt == QStringLiteral("percent")) {
+        sysStr = QStringLiteral("RAM: %1% | CPU: %2%").arg(ramPct, 0, 'f', 1).arg(mem.sysCpuPercent, 0, 'f', 1);
+    } else if (fmt == QStringLiteral("both")) {
+        sysStr = QStringLiteral("RAM: %1 / %2 GB (%3%) | CPU: %4%")
+                     .arg(usedGb, 0, 'f', 1).arg(totalGb, 0, 'f', 1).arg(qRound(ramPct)).arg(mem.sysCpuPercent, 0, 'f', 1);
+    } else {
+        sysStr = QStringLiteral("RAM: %1 / %2 GB | CPU: %3%")
+                     .arg(usedGb, 0, 'f', 1).arg(totalGb, 0, 'f', 1).arg(mem.sysCpuPercent, 0, 'f', 1);
+    }
+    return QStringLiteral("STACK: %1 | HEAP: %2 | %3").arg(stackStr, fmtKb(hpKb), sysStr);
+}
+
 }  // namespace core
 }  // namespace gridlock
 

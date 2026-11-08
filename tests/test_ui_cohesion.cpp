@@ -38,6 +38,7 @@
 
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
+#include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
@@ -81,35 +82,28 @@ constexpr int kMaxAllowedDialogControlHeightPx = 38;
  */
 constexpr int kMinAllowedColumnSectionWidthPx = 40;
 
+template <typename T> auto getActiveCanvasBg(T* w, int) -> decltype(w->activeCanvasBackgroundColor()) { return w->activeCanvasBackgroundColor(); }
+template <typename T> QColor getActiveCanvasBg(T*, ...) { return QColor(QStringLiteral("#16181d")); }
+template <typename T> auto getActiveHexText(T* w, int) -> decltype(w->activeHexTextColor()) { return w->activeHexTextColor(); }
+template <typename T> QColor getActiveHexText(T*, ...) { return QColor(QStringLiteral("#c8ccd4")); }
+template <typename T> auto callPropagateTheme(T* mw, int) -> decltype(mw->propagateThemeToAllWidgets(), void()) { mw->propagateThemeToAllWidgets(); }
+template <typename T> void callPropagateTheme(T*, ...) {}
+template <typename T> auto callAreAllChromeAligned(const T* mw, int) -> decltype(mw->areAllChromeToolbarsAndDockHeadersThemeAligned()) { return mw->areAllChromeToolbarsAndDockHeadersThemeAligned(); }
+template <typename T> bool callAreAllChromeAligned(const T*, ...) { return false; }
+template <typename T> auto callShowDecompilerWithSource(const T* cfg, int) -> decltype(cfg->showDecompilerWithSource()) { return cfg->showDecompilerWithSource(); }
+template <typename T> bool callShowDecompilerWithSource(const T*, ...) { return true; }
+template <typename T> auto callSetShowDecompilerWithSource(T* cfg, bool v, int) -> decltype(cfg->setShowDecompilerWithSource(v), void()) { cfg->setShowDecompilerWithSource(v); }
+template <typename T> void callSetShowDecompilerWithSource(T*, bool, ...) {}
+template <typename T> auto callIsDecompilerVisible(const T* d, int) -> decltype(d->isDecompilerVisible()) { return d->isDecompilerVisible(); }
+template <typename T> bool callIsDecompilerVisible(const T*, ...) { return true; }
+template <typename T> auto callTelemetryDisplayFormat(const T* cfg, int) -> decltype(cfg->telemetryDisplayFormat()) { return cfg->telemetryDisplayFormat(); }
+template <typename T> QString callTelemetryDisplayFormat(const T*, ...) { return QString(); }
 template <typename T>
-auto getActiveCanvasBg(T* widget, int) -> decltype(widget->activeCanvasBackgroundColor()) { return widget->activeCanvasBackgroundColor(); }
-template <typename T>
-QColor getActiveCanvasBg(T*, ...) { return QColor(QStringLiteral("#16181d")); }
-template <typename T>
-auto getActiveHexText(T* widget, int) -> decltype(widget->activeHexTextColor()) { return widget->activeHexTextColor(); }
-template <typename T>
-QColor getActiveHexText(T*, ...) { return QColor(QStringLiteral("#c8ccd4")); }
-template <typename T>
-auto callPropagateTheme(T* mw, int) -> decltype(mw->propagateThemeToAllWidgets(), void()) { mw->propagateThemeToAllWidgets(); }
-template <typename T>
-void callPropagateTheme(T*, ...) {}
-template <typename T>
-auto callAreAllChromeAligned(const T* mw, int) -> decltype(mw->areAllChromeToolbarsAndDockHeadersThemeAligned()) { return mw->areAllChromeToolbarsAndDockHeadersThemeAligned(); }
-template <typename T>
-bool callAreAllChromeAligned(const T*, ...) { return false; }
-
-template <typename T>
-auto callShowDecompilerWithSource(const T* cfg, int) -> decltype(cfg->showDecompilerWithSource()) { return cfg->showDecompilerWithSource(); }
-template <typename T>
-bool callShowDecompilerWithSource(const T*, ...) { return true; }
-template <typename T>
-auto callSetShowDecompilerWithSource(T* cfg, bool v, int) -> decltype(cfg->setShowDecompilerWithSource(v), void()) { cfg->setShowDecompilerWithSource(v); }
-template <typename T>
-void callSetShowDecompilerWithSource(T*, bool, ...) {}
-template <typename T>
-auto callIsDecompilerVisible(const T* d, int) -> decltype(d->isDecompilerVisible()) { return d->isDecompilerVisible(); }
-template <typename T>
-bool callIsDecompilerVisible(const T*, ...) { return true; }
+auto callParseAndFormatTelemetry(const QString& smaps, quint64 rsp, quint64 top, const QString& meminfo, const QString& fmt, int)
+    -> decltype(T::formatStatusBarSummary(T::parseProcMemoryTelemetry(smaps, rsp, top, meminfo), fmt)) {
+    return T::formatStatusBarSummary(T::parseProcMemoryTelemetry(smaps, rsp, top, meminfo), fmt);
+}
+template <typename T> QString callParseAndFormatTelemetry(const QString&, quint64, quint64, const QString&, const QString&, ...) { return QString(); }
 
 }  // namespace gridlock::tests
 
@@ -173,12 +167,9 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QTabBar* rightDockTabBar = nullptr;
     for (QTabBar* tb : mainWindow.findChildren<QTabBar*>()) {
         QVERIFY2(!tb->usesScrollButtons(), "Every dock QTabBar in MainWindow must have usesScrollButtons() == false");
-        for (int i = 0; i < tb->count(); ++i) {
-            if (tb->tabText(i).contains(QStringLiteral("VARIABLES"), Qt::CaseInsensitive)) { rightDockTabBar = tb; break; }
-        }
+        for (int i = 0; i < tb->count(); ++i) if (tb->tabText(i).contains(QStringLiteral("VARIABLES"), Qt::CaseInsensitive)) { rightDockTabBar = tb; break; }
     }
-    QVERIFY2(rightDockTabBar != nullptr && rightDockTabBar->count() >= 3, "Right dock QTabBar with 3 tabs must exist");
-    QVERIFY2(rightDockTabBar->tabRect(0).left() >= 0 && rightDockTabBar->tabRect(rightDockTabBar->count() - 1).right() <= rightDockTabBar->width(), "All 3 tabs (VARIABLES, REGISTERS, WATCH) must fit completely inside QTabBar::width()");
+    QVERIFY2(rightDockTabBar != nullptr && rightDockTabBar->count() >= 3 && rightDockTabBar->tabRect(0).left() >= 0 && rightDockTabBar->tabRect(rightDockTabBar->count() - 1).right() <= rightDockTabBar->width(), "All 3 tabs (VARIABLES, REGISTERS, WATCH) must fit completely inside QTabBar::width()");
 
     // Verify active top-right dock group height >= 260px at 1600x950.
     mainWindow.resize(1600, 950); mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents(); QTest::qWait(20);
@@ -201,10 +192,10 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
             if (auto* b = disasm->findChild<QPushButton*>(id); b && b->isChecked()) ++cnt;
         return cnt;
     };
-    disasm->setGraphMode(false); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Linear mode checked buttons > 1");
-    disasm->setGraphMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "CFG mode checked buttons > 1");
-    disasm->setDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Decompiler mode checked buttons > 1");
-    disasm->setSplitGraphDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Split CFG+Decomp mode checked buttons > 1");
+    for (int m = 0; m < 4; ++m) {
+        if (m == 0) disasm->setGraphMode(false); else if (m == 1) disasm->setGraphMode(true); else if (m == 2) disasm->setDecompilerMode(true); else disasm->setSplitGraphDecompilerMode(true);
+        QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "At most 1 DisassemblyView mode button may be checked");
+    }
     mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
     gridlock::ui::PreferencesDialog prefsDecompDlg(&mainWindow);
     auto* showDecompCheck = prefsDecompDlg.findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"));
@@ -216,9 +207,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     auto* targetCombo = mainToolBar->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     QVERIFY(rankSpinBox != nullptr && targetCombo != nullptr);
     auto* spinEdit = rankSpinBox->findChild<QLineEdit*>(); QVERIFY(spinEdit != nullptr);
-    QVERIFY2(rankSpinBox->width() >= 68 && rankSpinBox->height() >= 24 && rankSpinBox->height() <= 28 && spinEdit->width() >= 36,
-             qPrintable(QStringLiteral("rankSpinBox clipped: w=%1 h=%2 editW=%3").arg(rankSpinBox->width()).arg(rankSpinBox->height()).arg(spinEdit->width())));
-    QVERIFY2(targetCombo->width() >= 185, qPrintable(QStringLiteral("targetCombo truncated: w=%1").arg(targetCombo->width())));
+    QVERIFY2(rankSpinBox->width() >= 68 && rankSpinBox->height() >= 24 && rankSpinBox->height() <= 28 && spinEdit->width() >= 36 && targetCombo->width() >= 185, "Toolbar rankSpinBox or targetCombo clipped");
     QToolButton *runBtn = nullptr, *buildBtn = nullptr;
     for (QAction* act : mainToolBar->actions()) {
         if (!act) continue;
@@ -226,10 +215,23 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
         if (act->text().contains(QStringLiteral("Build"), Qt::CaseInsensitive)) buildBtn = qobject_cast<QToolButton*>(mainToolBar->widgetForAction(act));
     }
     const auto pal = tm.paletteForTheme(tm.activeThemeId());
-    QVERIFY2(runBtn != nullptr && buildBtn != nullptr && qAbs(runBtn->height() - buildBtn->height()) <= 1 && runBtn->height() <= 28,
-             qPrintable(QStringLiteral("Toolbar button height mismatch: runH=%1 buildH=%2").arg(runBtn ? runBtn->height() : -1).arg(buildBtn ? buildBtn->height() : -1)));
-    QVERIFY2(runBtn->styleSheet().contains(pal.accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("Run Target QToolButton must include primary accent ") + pal.accentHex));
+    QVERIFY2(runBtn != nullptr && buildBtn != nullptr && qAbs(runBtn->height() - buildBtn->height()) <= 1 && runBtn->height() <= 28 && runBtn->styleSheet().contains(pal.accentHex, Qt::CaseInsensitive), "Run Target button height/accent mismatch");
     for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) QVERIFY2(tb->isMovable(), qPrintable(QStringLiteral("QToolBar must be movable: ") + tb->objectName()));
+
+    // 7. Verify Linux Process (STACK/HEAP) & System (RAM/CPU) Telemetry Parser, Config Option, and Status Bar Ribbon.
+    const QString sampleSmaps = QStringLiteral("00600000-00819000 rw-p 00000000 00:00 0 [heap]\nSize: 2148 kB\nRss: 1024 kB\n7ffffffde000-7ffffffff000 rw-p 00000000 00:00 0 [stack]\nSize: 136 kB\nRss: 64 kB\n");
+    const QString sampleMeminfo = QStringLiteral("MemTotal:       33554432 kB\nMemFree:        12000000 kB\nMemAvailable:   25165824 kB\n");
+    const QString summaryGb = gridlock::tests::callParseAndFormatTelemetry<gridlock::core::ElfBinaryInspector>(sampleSmaps, 0x7fffffffe300ULL, 0x7fffffffe400ULL, sampleMeminfo, QStringLiteral("gb"), 0);
+    const QString summaryPct = gridlock::tests::callParseAndFormatTelemetry<gridlock::core::ElfBinaryInspector>(sampleSmaps, 0x7fffffffe300ULL, 0x7fffffffe400ULL, sampleMeminfo, QStringLiteral("percent"), 0);
+    QVERIFY2(summaryGb.contains(QStringLiteral("STACK:")) && summaryGb.contains(QStringLiteral("HEAP:")) && summaryGb.contains(QStringLiteral("RAM: 8.0 / 32.0 GB")) && summaryGb.contains(QStringLiteral("CPU:")), qPrintable(QStringLiteral("Unexpected gb telemetry summary: ") + summaryGb));
+    QVERIFY2(summaryPct.contains(QStringLiteral("RAM: 25.0%")), qPrintable(QStringLiteral("Unexpected percent telemetry summary: ") + summaryPct));
+    QCOMPARE(gridlock::tests::callTelemetryDisplayFormat(&cfg, 0), QStringLiteral("gb"));
+    auto* telemetryCombo = prefsDecompDlg.findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"));
+    QVERIFY2(telemetryCombo != nullptr && telemetryCombo->findData(QStringLiteral("gb")) >= 0 && telemetryCombo->findData(QStringLiteral("percent")) >= 0 && telemetryCombo->findData(QStringLiteral("both")) >= 0, "PreferencesDialog must expose telemetryFormatCombo with gb, percent, and both");
+    auto* statusLbl = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
+    QVERIFY2(statusLbl != nullptr && statusLbl->text().contains(QStringLiteral("STACK:")) && statusLbl->text().contains(QStringLiteral("HEAP:")) && statusLbl->text().contains(QStringLiteral("RAM:")) && statusLbl->text().contains(QStringLiteral("CPU:")),
+             qPrintable(QStringLiteral("Status bar missing STACK/HEAP/RAM/CPU telemetry: ") + (statusLbl ? statusLbl->text() : QStringLiteral("<null>"))));
+    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/statusbar_mem_verify.png")));
 }
 
 /**

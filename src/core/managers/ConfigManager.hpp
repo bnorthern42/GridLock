@@ -238,6 +238,11 @@ class ConfigManager {
   /** @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split"). */
   void setDefaultDisassemblyMode(const QString& mode);
 
+  /** @brief Returns the status bar resource telemetry display format ("gb", "percent", or "both"; default: "gb"). */
+  QString telemetryDisplayFormat() const;
+  /** @brief Sets and persists the status bar resource telemetry display format ("gb", "percent", or "both"). */
+  void setTelemetryDisplayFormat(const QString& fmt);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

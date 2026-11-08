@@ -63,6 +63,7 @@
 #include <QJsonObject>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTimer>
 #include <QToolBar>
 #include <algorithm>
 
@@ -74,10 +75,9 @@ public:
         setTextFormat(Qt::RichText);
         setAttribute(Qt::WA_ShowWithoutActivating);
     }
-    
+
     void showTooltip(const QPoint& globalPos, const QString& text) {
-        setText(text);
-        adjustSize();
+        setText(text); adjustSize();
         QPoint pos = globalPos + QPoint(10, 10);
         if (QScreen* screen = QGuiApplication::screenAt(globalPos)) {
             QRect avail = screen->availableGeometry();
@@ -86,13 +86,10 @@ public:
             pos.setX(qMax(pos.x(), avail.left()));
             pos.setY(qMax(pos.y(), avail.top()));
         }
-        move(pos);
-        show();
+        move(pos); show();
     }
-    
-    void hideTooltip() {
-        hide();
-    }
+
+    void hideTooltip() { hide(); }
 };
 }  // namespace gridlock
 
@@ -102,9 +99,7 @@ namespace gridlock::ui {
  * @brief Dismisses any visible tooltip popover displayed by PlainJaneTooltip.
  */
 void MainWindow::hideHoverTooltipPopup() {
-    if (m_plainJaneTooltip) {
-        m_plainJaneTooltip->hideTooltip();
-    }
+    if (m_plainJaneTooltip) m_plainJaneTooltip->hideTooltip();
 }
 
 /**
@@ -112,10 +107,7 @@ void MainWindow::hideHoverTooltipPopup() {
  * @return MpiNetworkLogWidget pointer, or nullptr if diagnostics widget unavailable.
  */
 MpiNetworkLogWidget* MainWindow::networkLog() const {
-    if (m_mpiDiagnosticsWidget) {
-        return m_mpiDiagnosticsWidget->networkLogWidget();
-    }
-    return nullptr;
+    return m_mpiDiagnosticsWidget ? m_mpiDiagnosticsWidget->networkLogWidget() : nullptr;
 }
 
 /**
@@ -123,8 +115,7 @@ MpiNetworkLogWidget* MainWindow::networkLog() const {
  * @return Currently displayed SourceCodeView or nullptr.
  */
 SourceCodeView *MainWindow::sourceCodeView() const {
-  return m_editorTabManager ? m_editorTabManager->currentSourceCodeView()
-                            : nullptr;
+  return m_editorTabManager ? m_editorTabManager->currentSourceCodeView() : nullptr;
 }
 
 /**
@@ -157,23 +148,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Eagerly load default source file so UI is populated before running.
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
   m_plainJaneTooltip = new gridlock::PlainJaneTooltip(this);
-  if (QFileInfo::exists("tutorial/inspection_demo.cpp")) {
-      loadSourceFile("tutorial/inspection_demo.cpp");
-  }
+  if (QFileInfo::exists("tutorial/inspection_demo.cpp")) loadSourceFile("tutorial/inspection_demo.cpp");
 
   // Load offline persistence TOML breakpoints from user preferences.
-  m_persistentBreakpoints =
-      gridlock::core::ConfigManager::instance().getBreakpoints();
+  m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
 
   // Restore saved geometry and dock configuration.
   QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry_v8")) {
-    restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
-  }
+  if (settings.contains("MainWindow/Geometry_v8")) restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
   if (width() < 800 || height() < 600) resize(1440, 900);
-  if (settings.contains("MainWindow/State_v8")) {
-    restoreState(settings.value("MainWindow/State_v8").toByteArray());
-  }
+  if (settings.contains("MainWindow/State_v8")) restoreState(settings.value("MainWindow/State_v8").toByteArray());
   // Restore individual splitter sash positions.
   for (auto* splitter : findChildren<QSplitter*>()) {
     if (!splitter->objectName().isEmpty()) {
@@ -185,20 +169,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   for (auto* dock : findChildren<QDockWidget*>()) {
     const auto area = dockWidgetArea(dock);
     if (area == Qt::LeftDockWidgetArea || area == Qt::RightDockWidgetArea) {
-      dock->setMinimumWidth(150);
-      dock->setMaximumWidth(QWIDGETSIZE_MAX);
-      if (dock->widget()) {
-        dock->widget()->setMinimumWidth(150);
-        dock->widget()->setMaximumWidth(QWIDGETSIZE_MAX);
-      }
+      dock->setMinimumWidth(150); dock->setMaximumWidth(QWIDGETSIZE_MAX);
+      if (dock->widget()) { dock->widget()->setMinimumWidth(150); dock->widget()->setMaximumWidth(QWIDGETSIZE_MAX); }
     }
   }
   // Hide empty tab bars, disable scroll buttons, and prevent horizontal tab expansion.
   for (auto* tabBar : findChildren<QTabBar*>()) {
     if (tabBar->count() == 0) tabBar->hide();
-    tabBar->setUsesScrollButtons(false);
-    tabBar->setElideMode(Qt::ElideNone);
-    tabBar->setExpanding(false);
+    tabBar->setUsesScrollButtons(false); tabBar->setElideMode(Qt::ElideNone); tabBar->setExpanding(false);
   }
 
   // Route window to preferred monitor if specified in configuration.
@@ -217,6 +195,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     resizeDocks({varsDock}, {340}, Qt::Horizontal);
     if (auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"))) resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical);
   }
+  // Populate initial status bar Stack/Heap/RAM/CPU telemetry and start 1500ms refresh timer.
+  refreshStatusBarMemoryTelemetry();
+  auto* telemetryTimer = new QTimer(this);
+  connect(telemetryTimer, &QTimer::timeout, this, &MainWindow::refreshStatusBarMemoryTelemetry);
+  telemetryTimer->start(1500);
 }
 
 /**
@@ -729,25 +712,17 @@ void MainWindow::onRankStateChanged(int rankId, const RankState &state) {
   // If the stopped or updated rank is currently focused, update detail inspection views.
   if (rankId == m_focusedRank) {
     // Refresh disassembly text if updated assembly instructions are present.
-    if (!state.disassemblyText.isEmpty()) {
-      m_disassemblyView->updateDisassembly(state.disassemblyText);
-    }
+    if (!state.disassemblyText.isEmpty()) m_disassemblyView->updateDisassembly(state.disassemblyText);
     // Update top status bar with new PC register address and operational state.
     const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
     updateStatusTelemetry(pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
+    refreshStatusBarMemoryTelemetry();
     // If execution has suspended, reposition editor tabs to the active source file and line.
-    if (state.currentState == "stopped") {
-      if (state.currentLine > 0) {
-        // Attempt to open the source file in a tab; fall back to the central source code view.
-        if (!state.currentFile.isEmpty() && m_editorTabManager) {
-          if (auto view = m_editorTabManager->openFile(state.currentFile)) {
-            // Apply line highlight styling to the stopped execution line.
-            view->highlightCurrentLine(state.currentLine);
-          }
-        } else if (getSourceCodeView()) {
-          // Highlight line on default source code viewer widget when tabs are uninitialized.
-          getSourceCodeView()->highlightCurrentLine(state.currentLine);
-        }
+    if (state.currentState == "stopped" && state.currentLine > 0) {
+      if (!state.currentFile.isEmpty() && m_editorTabManager) {
+        if (auto view = m_editorTabManager->openFile(state.currentFile)) view->highlightCurrentLine(state.currentLine);
+      } else if (getSourceCodeView()) {
+        getSourceCodeView()->highlightCurrentLine(state.currentLine);
       }
     }
   }
@@ -755,9 +730,7 @@ void MainWindow::onRankStateChanged(int rankId, const RankState &state) {
   // Synchronize watched variable column matrix across all ranks in the differential grid.
   m_differentialGrid->setVariableData(rankId, state.variableWatches);
   // Forward register values to register view only if the changed rank is focused.
-  if (rankId == m_focusedRank && m_registerView) {
-    m_registerView->updateRegisters(state);
-  }
+  if (rankId == m_focusedRank && m_registerView) m_registerView->updateRegisters(state);
 }
 
 /**
@@ -772,42 +745,53 @@ void MainWindow::onRankSelected(int rankId) {
     const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
     // Refresh header telemetry breadcrumb with selected rank's status.
     updateStatusTelemetry(pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
+    refreshStatusBarMemoryTelemetry();
     m_disassemblyView->updateDisassembly(state.disassemblyText);
 
     // If disassembly is empty, trigger an asynchronous disassembly request.
     if (state.disassemblyText.isEmpty()) {
-      if (auto *gdbCoord =
-              dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-        gdbCoord->requestDisassemblyFallback(rankId);
-      }
+      if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) gdbCoord->requestDisassemblyFallback(rankId);
     }
 
     // Scroll source code editor to the current execution line for stopped ranks.
-    if (state.currentState == "stopped") {
-      if (state.currentLine > 0) {
-        if (!state.currentFile.isEmpty() && m_editorTabManager) {
-          if (auto view = m_editorTabManager->openFile(state.currentFile)) {
-            view->highlightCurrentLine(state.currentLine);
-          }
-        } else if (getSourceCodeView()) {
-          getSourceCodeView()->highlightCurrentLine(state.currentLine);
-        }
+    if (state.currentState == "stopped" && state.currentLine > 0) {
+      if (!state.currentFile.isEmpty() && m_editorTabManager) {
+        if (auto view = m_editorTabManager->openFile(state.currentFile)) view->highlightCurrentLine(state.currentLine);
+      } else if (getSourceCodeView()) {
+        getSourceCodeView()->highlightCurrentLine(state.currentLine);
       }
     }
 
-    // Force update DifferentialGrid table matrix rows
+    // Force update DifferentialGrid table matrix rows and RegisterView values.
     m_differentialGrid->setVariableData(rankId, state.variableWatches);
-    if (m_registerView) {
-      m_registerView->updateRegisters(state);
-    }
+    if (m_registerView) m_registerView->updateRegisters(state);
   } else {
     // Fallback status telemetry when state has not yet been cached.
     updateStatusTelemetry();
-    if (auto *gdbCoord =
-            dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-      gdbCoord->requestDisassemblyFallback(rankId);
-    }
+    refreshStatusBarMemoryTelemetry();
+    if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) gdbCoord->requestDisassemblyFallback(rankId);
   }
+}
+
+/**
+ * @brief Appends live per-rank Stack/Heap and host RAM/CPU telemetry to the bottom status bar label.
+ */
+void MainWindow::refreshStatusBarMemoryTelemetry() {
+  if (!m_statusTelemetryLabel) return;
+  quint64 currentRsp = 0, stackTop = 0;
+  if (m_latestStates.count(m_focusedRank)) {
+    const QString rspStr = m_latestStates[m_focusedRank].registers.value(7);
+    bool ok = false;
+    currentRsp = rspStr.trimmed().mid(rspStr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0).toULongLong(&ok, 16);
+    if (ok && currentRsp > 0) stackTop = (currentRsp & ~0xfffULL) + 0x1000ULL;
+  }
+  const auto mem = gridlock::core::ElfBinaryInspector::queryProcessMemory(QCoreApplication::applicationPid(), currentRsp, stackTop);
+  const QString summary = gridlock::core::ElfBinaryInspector::formatStatusBarSummary(
+      mem, gridlock::core::ConfigManager::instance().telemetryDisplayFormat());
+  QString base = m_statusTelemetryLabel->text();
+  const int stackIdx = base.indexOf(QStringLiteral(" | STACK:"));
+  if (stackIdx >= 0) base = base.left(stackIdx);
+  m_statusTelemetryLabel->setText(base + QStringLiteral(" | ") + summary);
 }
 
 /**
@@ -816,13 +800,9 @@ void MainWindow::onRankSelected(int rankId) {
  */
 void MainWindow::closeEvent(QCloseEvent *event) {
   // Gracefully terminate active debug sessions across all spawned ranks and DAP processes.
-  if (m_coordinator) {
-    m_coordinator->terminateSession();
-  }
+  if (m_coordinator) m_coordinator->terminateSession();
   // Terminate language server daemon to avoid dangling background LSP processes.
-  if (m_lspCoordinator) {
-    m_lspCoordinator->stop();
-  }
+  if (m_lspCoordinator) m_lspCoordinator->stop();
 
   // Persist project settings watch expressions so user watches survive restarts.
   if (m_differentialGrid) {
@@ -855,6 +835,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
  * @return True if event was handled, false otherwise.
  */
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  // 0. Ensure status bar telemetry label always retains STACK/HEAP/RAM/CPU suffix before painting.
+  if (watched == m_statusTelemetryLabel && (event->type() == QEvent::Paint || event->type() == QEvent::Show)) {
+    if (m_statusTelemetryLabel && !m_statusTelemetryLabel->text().contains(QStringLiteral("STACK:"))) refreshStatusBarMemoryTelemetry();
+  }
   // 1. Intercept custom dock header interactions (double-click, drag, context menu).
   if (handleDockHeaderEvent(watched, event)) return true;
 

@@ -55,6 +55,21 @@ struct ElfStringInfo {
 };
 
 /**
+ * @struct ProcessMemoryTelemetry
+ * @brief Per-rank process stack/heap footprint and system-wide RAM/CPU utilization telemetry.
+ */
+struct ProcessMemoryTelemetry {
+    quint64 stackKb = 0;          ///< Mapped stack virtual size in KiB.
+    quint64 stackRssKb = 0;       ///< Resident stack memory in KiB.
+    quint64 heapKb = 0;           ///< Mapped heap/data virtual size in KiB.
+    quint64 heapRssKb = 0;        ///< Resident heap memory in KiB.
+    quint64 activeStackBytes = 0; ///< Active stack depth (stackTopAddr - currentRsp) in bytes.
+    quint64 sysMemUsedKb = 0;     ///< System-wide used physical RAM in KiB.
+    quint64 sysMemTotalKb = 0;    ///< System-wide total physical RAM in KiB.
+    double sysCpuPercent = 0.0;   ///< System-wide aggregate CPU utilization percentage (0.0..100.0).
+};
+
+/**
  * @class ElfBinaryInspector
  * @brief Native 64-bit ELF executable and shared library binary inspector.
  *
@@ -171,6 +186,39 @@ public:
     /** @brief Returns the last extracted DWARF address-to-line map. */
     const QMap<uint64_t, int>& dwarfAddressToLine() const { return m_dwarfAddrToLine; }
 
+    /**
+     * @brief Parses Linux /proc/<pid>/smaps (or /proc/<pid>/status) and /proc/meminfo text into telemetry.
+     * @param statusOrSmapsText Raw text of /proc/<pid>/smaps or /proc/<pid>/status.
+     * @param currentRsp Current stack pointer register value ($rsp), or 0 if unavailable.
+     * @param stackTopAddr Stack top base address, or 0 if unavailable.
+     * @param meminfoText Optional raw text of /proc/meminfo (reads /proc/meminfo from disk if empty).
+     * @return Populated ProcessMemoryTelemetry structure.
+     */
+    static ProcessMemoryTelemetry parseProcMemoryTelemetry(const QString& statusOrSmapsText,
+                                                           quint64 currentRsp = 0,
+                                                           quint64 stackTopAddr = 0,
+                                                           const QString& meminfoText = QString());
+
+    /**
+     * @brief Queries live per-rank process memory (/proc/<pid>/smaps or status) and host RAM/CPU telemetry.
+     * @param pid Target rank OS process identifier (falls back to current process if <= 0).
+     * @param currentRsp Current stack pointer register ($rsp).
+     * @param stackTopAddr Stack base top address.
+     * @return Live ProcessMemoryTelemetry snapshot.
+     */
+    static ProcessMemoryTelemetry queryProcessMemory(qint64 pid,
+                                                     quint64 currentRsp = 0,
+                                                     quint64 stackTopAddr = 0);
+
+    /**
+     * @brief Formats a ProcessMemoryTelemetry snapshot into a compact status bar ribbon summary.
+     * @param mem Telemetry snapshot to format.
+     * @param displayFormat Display mode: "gb" (default), "percent", or "both".
+     * @return Formatted string (e.g. "STACK: 136 KB | HEAP: 2.1 MB | RAM: 8.0 / 32.0 GB | CPU: 14.2%").
+     */
+    static QString formatStatusBarSummary(const ProcessMemoryTelemetry& mem,
+                                          const QString& displayFormat = QStringLiteral("gb"));
+
 private:
     /** @brief Iterates section headers and populates m_sections. */
     void parseSections();
@@ -203,6 +251,7 @@ namespace utils {
 using ElfSectionInfo = core::ElfSectionInfo;
 using ElfSymbolInfo = core::ElfSymbolInfo;
 using ElfStringInfo = core::ElfStringInfo;
+using ProcessMemoryTelemetry = core::ProcessMemoryTelemetry;
 using ElfBinaryInspector = core::ElfBinaryInspector;
 }  // namespace utils
 

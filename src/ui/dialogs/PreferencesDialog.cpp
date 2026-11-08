@@ -470,6 +470,9 @@ void PreferencesDialog::apply() {
 
     // 4. Debugger engine & launcher configurations
     auto& cfg = gridlock::core::ConfigManager::instance();
+    if (auto* telemetryCombo = m_behaviorPage->findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"))) {
+        cfg.setTelemetryDisplayFormat(telemetryCombo->currentData().toString());
+    }
     if (auto* engineCombo = m_debuggerPage->findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"))) {
         cfg.setDebuggerEngine(engineCombo->currentData().toString());
     }

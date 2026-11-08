@@ -546,6 +546,7 @@ private:
     QString bottomToolGroupForTabIndex(int tabIndex) const;
     void updateStatusTelemetry(const QString& pcOrSeek = QString(),
                                const QString& targetState = QString());
+    void refreshStatusBarMemoryTelemetry();
     void updateNavigationButtons();
     void hideHoverTooltipPopup();
 
