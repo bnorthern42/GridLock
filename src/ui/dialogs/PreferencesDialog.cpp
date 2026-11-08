@@ -473,6 +473,9 @@ void PreferencesDialog::apply() {
     if (auto* engineCombo = m_debuggerPage->findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"))) {
         cfg.setDebuggerEngine(engineCombo->currentData().toString());
     }
+    if (auto* showDecompCheck = m_debuggerPage->findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"))) {
+        cfg.setShowDecompilerWithSource(showDecompCheck->isChecked());
+    }
     cfg.setGlobalClangdPath(m_debuggerPage->clangdPath());
     cfg.setGlobalDapAdapterPath(m_debuggerPage->dapAdapterPath());
 

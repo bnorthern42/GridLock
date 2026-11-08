@@ -609,6 +609,25 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->addWidget(m_editorTabManager);
   masterHorizontalSplitter->addWidget(m_disassemblyView);
 
+  // Synchronize DisassemblyView decompiler suppression whenever Source Editor is shown or hidden.
+  class SourceEditorVisibilitySync final : public QObject {
+  public:
+    // Bind filter lifetime to m_editorTabManager and notify m_disassemblyView on Show/Hide.
+    SourceEditorVisibilitySync(QWidget *ed, DisassemblyView *dv) : QObject(ed), m_ed(ed), m_dv(dv) {}
+    bool eventFilter(QObject *w, QEvent *ev) override {
+      if (w == m_ed && m_dv && (ev->type() == QEvent::Show || ev->type() == QEvent::ShowToParent ||
+                                ev->type() == QEvent::Hide || ev->type() == QEvent::HideToParent)) {
+        m_dv->setSourceEditorActive(!m_ed->isHidden());
+      }
+      return QObject::eventFilter(w, ev);
+    }
+  private:
+    QWidget *m_ed = nullptr;
+    DisassemblyView *m_dv = nullptr;
+  };
+  m_editorTabManager->installEventFilter(new SourceEditorVisibilitySync(m_editorTabManager, m_disassemblyView));
+  m_disassemblyView->setSourceEditorActive(!m_editorTabManager->isHidden());
+
   // Allocate 45% width to source editor and 55% width to disassembly / CFG graph.
   masterHorizontalSplitter->setStretchFactor(0, 45);
   masterHorizontalSplitter->setStretchFactor(1, 55);

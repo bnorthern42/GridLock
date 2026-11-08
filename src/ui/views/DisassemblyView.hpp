@@ -164,6 +164,10 @@ public:
     void setSplitGraphDecompilerMode(bool enabled);
     /// Checks whether side-by-side split mode is active.
     bool isSplitGraphDecompilerMode() const { return m_splitGraphDecompiler; }
+    /// Notifies DisassemblyView whether the C++ SourceCodeView editor is currently visible alongside it.
+    void setSourceEditorActive(bool sourceVisible);
+    /// Returns true if the pseudo-C decompiler pane is currently visible inside DisassemblyView.
+    bool isDecompilerVisible() const;
 
     /// Maps 1-based decompiler source line to assembly address.
     uint64_t decompilerLineToAddress(int lineNumber) const;
@@ -306,6 +310,7 @@ private:
     bool m_graphMode = false;
     bool m_decompilerMode = false;
     bool m_splitGraphDecompiler = false;
+    bool m_sourceEditorActive = true;
     bool m_graphMinimapVisible = true;
     QString m_activeSymbol = QStringLiteral("sym.main");
     QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");

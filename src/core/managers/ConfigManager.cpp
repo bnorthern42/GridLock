@@ -856,4 +856,54 @@ void ConfigManager::setDebuggerEngine(const QString& engine) {
   s.sync();
 }
 
+/**
+ * @brief Returns whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor (default: false).
+ */
+bool ConfigManager::showDecompilerWithSource() const {
+  if (!m_workspacePath.isEmpty()) {
+    const QString workspaceFile = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
+    try {
+      auto tbl = toml::parse_file(workspaceFile.toStdString());
+      if (auto* dbg = tbl["debugger"].as_table()) {
+        if (auto val = dbg->get("show_decompiler_with_source"); val && val->is_boolean()) {
+          return val->as_boolean()->get();
+        }
+      }
+    } catch (...) {
+    }
+  }
+  QSettings s(kOrg, kApp);
+  return s.value(QStringLiteral("debugger/show_decompiler_with_source"), false).toBool();
+}
+
+/**
+ * @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor.
+ * @param show True to allow Decompiler/Split views in CODE/MPI perspectives; false for pure assembly.
+ */
+void ConfigManager::setShowDecompilerWithSource(bool show) {
+  if (!m_workspacePath.isEmpty()) {
+    QDir dir(m_workspacePath);
+    dir.mkpath(QStringLiteral(".gridlock"));
+    const QString workspaceFile = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    toml::table tbl;
+    try {
+      tbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) {
+    }
+    toml::table dbgTbl;
+    if (auto* existing = tbl["debugger"].as_table()) {
+      dbgTbl = *existing;
+    }
+    dbgTbl.insert_or_assign("show_decompiler_with_source", show);
+    tbl.insert_or_assign("debugger", dbgTbl);
+    std::ofstream out(workspaceFile.toStdString());
+    if (out.is_open()) {
+      out << tbl;
+    }
+  }
+  QSettings s(kOrg, kApp);
+  s.setValue(QStringLiteral("debugger/show_decompiler_with_source"), show);
+  s.sync();
+}
+
 }  // namespace gridlock::core

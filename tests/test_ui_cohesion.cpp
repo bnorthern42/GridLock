@@ -36,6 +36,7 @@
 #include <QTreeView>
 #include <QtTest/QtTest>
 
+#include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
@@ -81,31 +82,34 @@ constexpr int kMaxAllowedDialogControlHeightPx = 38;
 constexpr int kMinAllowedColumnSectionWidthPx = 40;
 
 template <typename T>
-auto getActiveCanvasBg(T* widget, int) -> decltype(widget->activeCanvasBackgroundColor()) {
-    return widget->activeCanvasBackgroundColor();
-}
+auto getActiveCanvasBg(T* widget, int) -> decltype(widget->activeCanvasBackgroundColor()) { return widget->activeCanvasBackgroundColor(); }
 template <typename T>
 QColor getActiveCanvasBg(T*, ...) { return QColor(QStringLiteral("#16181d")); }
 template <typename T>
 auto getActiveHexText(T* widget, int) -> decltype(widget->activeHexTextColor()) { return widget->activeHexTextColor(); }
 template <typename T>
 QColor getActiveHexText(T*, ...) { return QColor(QStringLiteral("#c8ccd4")); }
-
 template <typename T>
-auto callPropagateTheme(T* mw, int) -> decltype(mw->propagateThemeToAllWidgets(), void()) {
-    mw->propagateThemeToAllWidgets();
-}
+auto callPropagateTheme(T* mw, int) -> decltype(mw->propagateThemeToAllWidgets(), void()) { mw->propagateThemeToAllWidgets(); }
 template <typename T>
 void callPropagateTheme(T*, ...) {}
+template <typename T>
+auto callAreAllChromeAligned(const T* mw, int) -> decltype(mw->areAllChromeToolbarsAndDockHeadersThemeAligned()) { return mw->areAllChromeToolbarsAndDockHeadersThemeAligned(); }
+template <typename T>
+bool callAreAllChromeAligned(const T*, ...) { return false; }
 
 template <typename T>
-auto callAreAllChromeAligned(const T* mw, int) -> decltype(mw->areAllChromeToolbarsAndDockHeadersThemeAligned()) {
-    return mw->areAllChromeToolbarsAndDockHeadersThemeAligned();
-}
+auto callShowDecompilerWithSource(const T* cfg, int) -> decltype(cfg->showDecompilerWithSource()) { return cfg->showDecompilerWithSource(); }
 template <typename T>
-bool callAreAllChromeAligned(const T*, ...) {
-    return false;
-}
+bool callShowDecompilerWithSource(const T*, ...) { return true; }
+template <typename T>
+auto callSetShowDecompilerWithSource(T* cfg, bool v, int) -> decltype(cfg->setShowDecompilerWithSource(v), void()) { cfg->setShowDecompilerWithSource(v); }
+template <typename T>
+void callSetShowDecompilerWithSource(T*, bool, ...) {}
+template <typename T>
+auto callIsDecompilerVisible(const T* d, int) -> decltype(d->isDecompilerVisible()) { return d->isDecompilerVisible(); }
+template <typename T>
+bool callIsDecompilerVisible(const T*, ...) { return true; }
 
 }  // namespace gridlock::tests
 
@@ -116,6 +120,8 @@ bool callAreAllChromeAligned(const T*, ...) {
 void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     // Instantiate and expose the main workstation window with active theme palette propagated.
     auto& tm = gridlock::core::ThemeManager::instance(); tm.initialize();
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    gridlock::tests::callSetShowDecompilerWithSource(&cfg, false, 0);
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900);
     mainWindow.loadPreviewFixture(); mainWindow.propagateThemeToAllWidgets();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
@@ -161,8 +167,6 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QVERIFY(variablesDock != nullptr && registersDock != nullptr && watchDock != nullptr);
     const QList<QDockWidget*> tabified = mainWindow.tabifiedDockWidgets(variablesDock);
     QVERIFY2(tabified.contains(registersDock) && tabified.contains(watchDock), "VariablesDock, RegisterViewDock, and WatchExpressionsDock must share top-right tabbed dock group");
-
-    // Assert watchDock title / tab text is "WATCH" (concise, <= 8 chars).
     QVERIFY2(watchDock->windowTitle().compare(QStringLiteral("WATCH"), Qt::CaseInsensitive) == 0 && watchDock->windowTitle().size() <= 8, "watchDock title must be concise 'WATCH'");
 
     // Verify all dock QTabBar instances disable scroll buttons and fit all tabs within tabBar width.
@@ -178,23 +182,33 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
 
     // Verify active top-right dock group height >= 260px at 1600x950.
     mainWindow.resize(1600, 950); mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents(); QTest::qWait(20);
-    const int varsActiveH = variablesDock->height();
-    watchDock->raise(); QApplication::processEvents(); const int watchActiveH = watchDock->height();
-    variablesDock->raise(); QApplication::processEvents();
+    const int varsActiveH = variablesDock->height(); watchDock->raise(); QApplication::processEvents(); const int watchActiveH = watchDock->height(); variablesDock->raise(); QApplication::processEvents();
     QVERIFY2(varsActiveH >= 260 && watchActiveH >= 260, qPrintable(QStringLiteral("Top-right dock crushed: varsH=%1 watchH=%2").arg(varsActiveH).arg(watchActiveH)));
 
-    // 5. Verify DisassemblyView mode buttons are strictly mutually exclusive (at most 1 checked button).
+    // 5. Verify DisassemblyView mode buttons and pseudo-C decompiler suppression when C++ SourceCodeView is visible.
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
+    QVERIFY2(!gridlock::tests::callShowDecompilerWithSource(&cfg, 0), "ConfigManager::showDecompilerWithSource() must default to false");
+    mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
+    QVERIFY2(!gridlock::tests::callIsDecompilerVisible(disasm, 0), "Pseudo-C decompiler must be hidden in CODE perspective when showDecompilerWithSource() == false");
+    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/disasm_no_decomp_verify.png")));
+    mainWindow.setWorkspacePerspective(QStringLiteral("MPI")); QApplication::processEvents();
+    QVERIFY2(!gridlock::tests::callIsDecompilerVisible(disasm, 0), "Pseudo-C decompiler must be hidden in MPI perspective when showDecompilerWithSource() == false");
+    mainWindow.setWorkspacePerspective(QStringLiteral("Reverse")); disasm->setSplitGraphDecompilerMode(true); QApplication::processEvents();
+    QVERIFY2(gridlock::tests::callIsDecompilerVisible(disasm, 0), "Pseudo-C decompiler must be visible in REVERSE perspective");
     auto countCheckedModeBtns = [disasm]() -> int {
         int cnt = 0;
         for (const QString& id : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")})
-            if (auto* b = disasm->findChild<QPushButton*>(id)) if (b->isChecked()) ++cnt;
+            if (auto* b = disasm->findChild<QPushButton*>(id); b && b->isChecked()) ++cnt;
         return cnt;
     };
     disasm->setGraphMode(false); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Linear mode checked buttons > 1");
     disasm->setGraphMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "CFG mode checked buttons > 1");
     disasm->setDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Decompiler mode checked buttons > 1");
     disasm->setSplitGraphDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "Split CFG+Decomp mode checked buttons > 1");
+    mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
+    gridlock::ui::PreferencesDialog prefsDecompDlg(&mainWindow);
+    auto* showDecompCheck = prefsDecompDlg.findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"));
+    QVERIFY2(showDecompCheck != nullptr && !showDecompCheck->isChecked(), "PreferencesDialog Debugger page must expose unchecked showDecompilerWithSourceCheck");
 
     // 6. Verify MainToolbar spinbox/combobox widths, 26px button height parity, movable toolbars, and Run Target accent.
     auto* mainToolBar = mainWindow.findChild<QToolBar*>(QStringLiteral("MainToolbar")); QVERIFY(mainToolBar != nullptr);
@@ -216,7 +230,6 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
              qPrintable(QStringLiteral("Toolbar button height mismatch: runH=%1 buildH=%2").arg(runBtn ? runBtn->height() : -1).arg(buildBtn ? buildBtn->height() : -1)));
     QVERIFY2(runBtn->styleSheet().contains(pal.accentHex, Qt::CaseInsensitive), qPrintable(QStringLiteral("Run Target QToolButton must include primary accent ") + pal.accentHex));
     for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) QVERIFY2(tb->isMovable(), qPrintable(QStringLiteral("QToolBar must be movable: ") + tb->objectName()));
-    QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/toolbar_verify.png")));
 }
 
 /**

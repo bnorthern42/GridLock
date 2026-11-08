@@ -228,6 +228,11 @@ class ConfigManager {
   /** @brief Sets and persists the local debugger backend engine in workspace.toml and QSettings. */
   void setDebuggerEngine(const QString& engine);
 
+  /** @brief Returns whether the pseudo-C decompiler is allowed to stay visible alongside the C++ Source Editor (default: false). */
+  bool showDecompilerWithSource() const;
+  /** @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor. */
+  void setShowDecompilerWithSource(bool show);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

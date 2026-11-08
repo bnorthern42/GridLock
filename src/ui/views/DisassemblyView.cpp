@@ -571,33 +571,43 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
 }
 
 /** @brief Returns the raw plain text listing from the linear disassembly editor. */
-QString DisassemblyView::toPlainText() const {
-  return m_linearEdit ? m_linearEdit->toPlainText() : QString();
-}
+QString DisassemblyView::toPlainText() const { return m_linearEdit ? m_linearEdit->toPlainText() : QString(); }
 
 /** @brief Replaces current disassembly text and triggers structural re-parsing. */
-void DisassemblyView::setPlainText(const QString& text) {
-  updateDisassembly(text);
-}
+void DisassemblyView::setPlainText(const QString& text) { updateDisassembly(text); }
 
 /** @brief Returns the underlying text document of the linear disassembly editor. */
-QTextDocument* DisassemblyView::document() const {
-  return m_linearEdit ? m_linearEdit->document() : nullptr;
-}
+QTextDocument* DisassemblyView::document() const { return m_linearEdit ? m_linearEdit->document() : nullptr; }
 
 /** @brief Returns current text cursor of the linear disassembly editor. */
-QTextCursor DisassemblyView::textCursor() const {
-  return m_linearEdit ? m_linearEdit->textCursor() : QTextCursor();
-}
+QTextCursor DisassemblyView::textCursor() const { return m_linearEdit ? m_linearEdit->textCursor() : QTextCursor(); }
 
 /** @brief Sets current text cursor of the linear disassembly editor. */
-void DisassemblyView::setTextCursor(const QTextCursor& cursor) {
-  if (m_linearEdit) m_linearEdit->setTextCursor(cursor);
-}
+void DisassemblyView::setTextCursor(const QTextCursor& cursor) { if (m_linearEdit) m_linearEdit->setTextCursor(cursor); }
 
 /** @brief Centers the linear disassembly view viewport around the active cursor. */
-void DisassemblyView::centerCursor() {
-  if (m_linearEdit) m_linearEdit->centerCursor();
+void DisassemblyView::centerCursor() { if (m_linearEdit) m_linearEdit->centerCursor(); }
+
+/**
+ * @brief Notifies DisassemblyView whether the C++ SourceCodeView editor is visible alongside it.
+ *
+ * When sourceVisible is true and ConfigManager::showDecompilerWithSource() is false,
+ * collapses any active pseudo-C decompiler or split view so pure assembly is displayed.
+ */
+void DisassemblyView::setSourceEditorActive(bool sourceVisible) {
+  m_sourceEditorActive = sourceVisible;
+  if (sourceVisible && !gridlock::core::ConfigManager::instance().showDecompilerWithSource()) {
+    m_splitGraphDecompiler = false;
+    m_decompilerMode = false;
+  }
+  updateViewModeLayout();
+}
+
+/**
+ * @brief Returns true if the pseudo-C decompiler pane is currently visible inside DisassemblyView.
+ */
+bool DisassemblyView::isDecompilerVisible() const {
+  return m_decompilerPage && !m_decompilerPage->isHidden() && (m_decompilerMode || m_splitGraphDecompiler);
 }
 
 /**
@@ -644,12 +654,8 @@ void DisassemblyView::updateViewModeLayout() {
  */
 void DisassemblyView::setSplitGraphDecompilerMode(bool enabled) {
   m_splitGraphDecompiler = enabled;
-  if (enabled) {
-    m_graphMode = true;
-    m_decompilerMode = true;
-  } else {
-    m_decompilerMode = false;
-  }
+  if (enabled) { m_graphMode = true; m_decompilerMode = true; }
+  else { m_decompilerMode = false; }
   updateViewModeLayout();
 }
 
@@ -674,12 +680,8 @@ void DisassemblyView::setGraphMode(bool enabled) {
   updateViewModeLayout();
 }
 
-/**
- * @brief Toggles between Linear Disassembly and CFG Graph views (bound to Space shortcut).
- */
-void DisassemblyView::toggleViewMode() {
-  setGraphMode(!m_graphMode);
-}
+/** @brief Toggles between Linear Disassembly and CFG Graph views (bound to Space shortcut). */
+void DisassemblyView::toggleViewMode() { setGraphMode(!m_graphMode); }
 
 /**
  * @brief Seeks linear disassembly, CFG canvas, and decompiler views to instruction address.

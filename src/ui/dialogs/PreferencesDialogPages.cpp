@@ -548,6 +548,13 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget* parent)
         tr("Automatically set GDB to catch floating-point traps."));
     form->addRow(QString(), m_trapFpeCheck);
 
+    // Toggle for displaying the Pseudo-C Decompiler pane when the C++ Source Editor is also open.
+    auto* showDecompCheck = new QCheckBox(tr("Show Pseudo-C Decompiler when Source Editor is visible"), this);
+    showDecompCheck->setObjectName(QStringLiteral("showDecompilerWithSourceCheck"));
+    showDecompCheck->setToolTip(
+        tr("When unchecked, Disassembly displays pure assembly in CODE and MPI perspectives."));
+    form->addRow(QString(), showDecompCheck);
+
     addFormNote(this, form,
                 tr("<small style='color:#888;'>GDB must support the MI2 protocol "
                    "(<code>--interpreter=mi2</code>).<br>Changes take effect on "
@@ -576,6 +583,9 @@ void DebuggerSettingsPage::loadFromSettings() {
         if (idx >= 0) {
             engineCombo->setCurrentIndex(idx);
         }
+    }
+    if (auto* showDecompCheck = findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"))) {
+        showDecompCheck->setChecked(cfg.showDecompilerWithSource());
     }
     m_clangdPathEdit->setText(cfg.getGlobalClangdPath());
     m_dapAdapterEdit->setText(cfg.getGlobalDapAdapterPath());
