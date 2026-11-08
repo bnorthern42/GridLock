@@ -223,6 +223,11 @@ class ConfigManager {
   /** @brief Persists the theme name to .gridlock/workspace.toml and QSettings. */
   void setThemeName(const QString& name);
 
+  /** @brief Returns the configured local debugger backend engine ("gdb", "lldb-dap", "cuda-gdb", "rocgdb"). */
+  QString debuggerEngine() const;
+  /** @brief Sets and persists the local debugger backend engine in workspace.toml and QSettings. */
+  void setDebuggerEngine(const QString& engine);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 
@@ -236,6 +241,7 @@ class ConfigManager {
   toml::table m_config;       ///< In-memory representation of the global `config.toml`.
   QString m_workspacePath;    ///< Active project workspace root directory.
   QString m_globalConfigPath; ///< Absolute path to the active `config.toml` file.
+  QString m_debuggerEngine = QStringLiteral("gdb"); ///< Active local debugger backend engine identifier.
 
   static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
   static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.

@@ -207,5 +207,8 @@ private slots:
 
     /** @brief Verifies ProjectExplorerWidget file/folder CRUD operations, signals, and meson.build/CMakeLists.txt source registration. */
     void testProjectExplorerFileCrudAndBuildRegistration();
+
+    /** @brief Verifies SourceCodeView unified Git diff gutter parsing/markers and PreferencesDialog debugger engine selector. */
+    void testGitDiffGutterAndDebuggerEngineSelector();
 };
 

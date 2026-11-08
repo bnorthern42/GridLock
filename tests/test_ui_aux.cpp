@@ -36,12 +36,14 @@
 #include "../src/core/utils/CliParser.cpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/dialogs/XrefInspectorDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
+#include "../src/ui/views/SourceCodeView.hpp"
 #if __has_include("../src/ui/widgets/HpcConsoleWidget.hpp")
 #include "../src/ui/widgets/HpcConsoleWidget.hpp"
 #else
@@ -512,42 +514,29 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
  * @brief Tests dynamic rank state updates without relying on constructor mocks.
  */
 void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
-    // 1. Standalone widgets start clean with zero hardcoded mock ranks
-    gridlock::ui::ServerRackView standaloneRack;
-    QCOMPARE(standaloneRack.rankNodeCount(), 0);
+    // 1. Standalone widgets start clean with zero hardcoded mock ranks.
+    gridlock::ui::ServerRackView standaloneRack; QCOMPARE(standaloneRack.rankNodeCount(), 0);
     gridlock::ui::DisassemblyView standaloneDisasm;
-    QVERIFY(standaloneDisasm.ranksAtBlock(0x00401155ULL).isEmpty());
-    QVERIFY(standaloneDisasm.ranksAtBlock(0x00401168ULL).isEmpty());
+    QVERIFY(standaloneDisasm.ranksAtBlock(0x00401155ULL).isEmpty() && standaloneDisasm.ranksAtBlock(0x00401168ULL).isEmpty());
 
-    // 2. Dynamic updateRanks(QList<RankState>) populates rank cards and PC addresses
+    // 2. Dynamic updateRanks(QList<RankState>) populates rank cards and PC addresses.
     QList<gridlock::RankState> states;
     for (int r = 0; r < 4; ++r) {
-        gridlock::RankState st;
-        st.rankId = r;
-        st.currentState = "stopped";
+        gridlock::RankState st; st.rankId = r; st.currentState = "stopped";
         st.registers[16] = (r == 0) ? QStringLiteral("0x00401168") : QStringLiteral("0x00401155");
         states.append(st);
     }
     standaloneRack.updateRanks(states);
-    QCOMPARE(standaloneRack.rankNodeCount(), 4);
-    QCOMPARE(standaloneRack.rankPcAddress(0), 0x00401168ULL);
-    QCOMPARE(standaloneRack.rankPcAddress(1), 0x00401155ULL);
+    QCOMPARE(standaloneRack.rankNodeCount(), 4); QCOMPARE(standaloneRack.rankPcAddress(0), 0x00401168ULL); QCOMPARE(standaloneRack.rankPcAddress(1), 0x00401155ULL);
 
-    // 3. MainWindow dynamic rank synchronization from ServerRackView -> DisassemblyView
+    // 3 & 4. MainWindow dynamic rank synchronization and loadPreviewFixture() 8-rank pipeline.
     gridlock::ui::MainWindow mainWindow;
-    auto* rack = mainWindow.serverRackView();
-    auto* disasm = mainWindow.disassemblyView();
+    auto* rack = mainWindow.serverRackView(); auto* disasm = mainWindow.serverRackView() ? mainWindow.disassemblyView() : nullptr;
     QVERIFY(rack && disasm);
-    rack->updateRanks(states);
-    QCOMPARE(rack->rankNodeCount(), 4);
-    QCOMPARE(disasm->ranksAtBlock(0x00401168ULL), QVector<int>{0});
-    QCOMPARE(disasm->ranksAtBlock(0x0040114fULL), (QVector<int>{1, 2, 3}));
-
-    // 4. loadPreviewFixture() populates 8 preview ranks via the dynamic pipeline
-    mainWindow.loadPreviewFixture();
-    QCOMPARE(rack->rankNodeCount(), 8);
-    QCOMPARE(disasm->ranksAtBlock(0x00401120ULL), QVector<int>{0});
-    QCOMPARE(disasm->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3, 4, 5, 6, 7}));
+    rack->updateRanks(states); QCOMPARE(rack->rankNodeCount(), 4);
+    QCOMPARE(disasm->ranksAtBlock(0x00401168ULL), QVector<int>{0}); QCOMPARE(disasm->ranksAtBlock(0x0040114fULL), (QVector<int>{1, 2, 3}));
+    mainWindow.loadPreviewFixture(); QCOMPARE(rack->rankNodeCount(), 8);
+    QCOMPARE(disasm->ranksAtBlock(0x00401120ULL), QVector<int>{0}); QCOMPARE(disasm->ranksAtBlock(0x00401157ULL), (QVector<int>{2, 3, 4, 5, 6, 7}));
 }
 
 /**
@@ -558,88 +547,59 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
     if (!rootDir.exists("src")) rootDir = QDir::current();
     QStringList targetFiles;
     for (const QString& subDir : {QStringLiteral("src"), QStringLiteral("tests")}) {
-        QDirIterator it(rootDir.filePath(subDir), QStringList() << "*.hpp" << "*.cpp",
-                        QDir::Files, QDirIterator::Subdirectories);
+        QDirIterator it(rootDir.filePath(subDir), QStringList() << "*.hpp" << "*.cpp", QDir::Files, QDirIterator::Subdirectories);
         while (it.hasNext()) targetFiles.append(it.next());
     }
-    targetFiles.sort();
-    QVERIFY(targetFiles.size() >= 80);
+    targetFiles.sort(); QVERIFY(targetFiles.size() >= 80);
     auditFilesGoogleStyleAndDocumentation(targetFiles);
 
-    // Interactive launch assertions: normal CLI launch must not be invisible/offscreen
-    char appName[] = "gridlock";
-    char* normalArgv[] = { appName, nullptr };
+    // Interactive launch assertions: normal CLI launch must not be invisible/offscreen.
+    char appName[] = "gridlock"; char* normalArgv[] = { appName, nullptr };
     QVERIFY(!gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(1, normalArgv));
-
     gridlock::ui::MainWindow mainWindow;
     QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating) && !mainWindow.testAttribute(Qt::WA_DontShowOnScreen));
-    mainWindow.show();
-    QVERIFY(!mainWindow.isMinimized() && !mainWindow.isHidden());
+    mainWindow.show(); QVERIFY(!mainWindow.isMinimized() && !mainWindow.isHidden());
 }
 
 /**
  * @brief Tests ELF64 binary parsing, section and symbol extraction, and static target loading.
  */
 void TestMainWindowUI::testElfBinaryInspectorAndStaticTargetLoad() {
-    // 1. Locate current test executable to serve as a valid 64-bit ELF binary target.
-    const QString appPath = QCoreApplication::applicationFilePath();
-    QVERIFY(!appPath.isEmpty() && QFile::exists(appPath));
-
-    // 2. Parse binary using ElfBinaryInspector.
+    // 1 & 2. Locate current test executable and parse ELF64 binary using ElfBinaryInspector.
+    const QString appPath = QCoreApplication::applicationFilePath(); QVERIFY(!appPath.isEmpty() && QFile::exists(appPath));
     gridlock::core::ElfBinaryInspector inspector;
     QVERIFY(inspector.loadFile(appPath) && inspector.isValid() && inspector.entryPoint() != 0ULL);
 
-    // 3. Inspect ELF section headers (.text, .rodata, .data, etc.).
-    const auto sections = inspector.sections();
-    QVERIFY(!sections.isEmpty());
-    bool hasTextSection = false;
-    uint64_t textVaddr = 0;
-    for (const auto& sec : sections) {
-        if (sec.name == QStringLiteral(".text")) { hasTextSection = true; textVaddr = sec.address; break; }
-    }
-    QVERIFY(hasTextSection && textVaddr != 0ULL);
+    // 3 & 4. Inspect ELF section headers (.text, .rodata, .data), symbol table, and printable ASCII strings.
+    const auto sections = inspector.sections(); QVERIFY(!sections.isEmpty());
+    bool hasTextSection = false; uint64_t textVaddr = 0;
+    for (const auto& sec : sections) if (sec.name == QStringLiteral(".text")) { hasTextSection = true; textVaddr = sec.address; break; }
+    QVERIFY(hasTextSection && textVaddr != 0ULL && inspector.symbols().size() > 20 && inspector.strings().size() > 10);
 
-    // 4. Inspect extracted symbol table entries and printable ASCII strings.
-    QVERIFY(inspector.symbols().size() > 20 && inspector.strings().size() > 10);
-
-    // 6. Test virtual memory byte reading for the .text section.
+    // 6 & 7. Test virtual memory byte reading and disassembleRange for the .text section.
     const QByteArray textBytes = inspector.readVirtualMemory(textVaddr, 32);
-    // Code section bytes must not be completely all zeroes.
-    QVERIFY(textBytes.size() == 32 && textBytes != QByteArray(32, '\0'));
+    QVERIFY(textBytes.size() == 32 && textBytes != QByteArray(32, '\0') && !inspector.disassembleRange(textVaddr, 32, QStringLiteral("entry")).isEmpty());
 
-    // 7. Verify disassembleRange produces formatted assembly lines.
-    QVERIFY(!inspector.disassembleRange(textVaddr, 32, QStringLiteral("entry")).isEmpty());
-
-    // 8. Test MainWindow static target loading and widget population.
-    gridlock::ui::MainWindow mainWindow;
-    QVERIFY(mainWindow.loadBinaryTarget(appPath));
-
-    // 9. Verify ProjectExplorerWidget contains populated symbols and strings.
+    // 8, 9 & 10. Test MainWindow static target loading, ProjectExplorerWidget population, and address seek sync.
+    gridlock::ui::MainWindow mainWindow; QVERIFY(mainWindow.loadBinaryTarget(appPath));
     auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
     QVERIFY(explorer != nullptr && explorer->symbolCount() > 20 && explorer->stringCount() > 10);
-
-    // 10. Verify address seek synchronizes MemView and DisassemblyView.
     QVERIFY(mainWindow.seekToAddressOrExpression(QString("0x%1").arg(textVaddr, 0, 16)));
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    QVERIFY(memView != nullptr && memView->currentBaseAddress() == textVaddr);
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(disasmView != nullptr && !disasmView->toPlainText().isEmpty());
+    QVERIFY(memView != nullptr && memView->currentBaseAddress() == textVaddr && disasmView != nullptr && !disasmView->toPlainText().isEmpty());
 }
 
 /**
  * @brief Tests interactive Xref extraction, incoming/outgoing call graph analysis, and inspector dialog sync.
  */
 void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
-    gridlock::ui::MainWindow mainWindow;
-    // 1. Load preview fixture providing canonical multi-rank MPI loop disassembly
-    mainWindow.loadPreviewFixture();
-    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(disasm != nullptr);
+    // 1. Load preview fixture providing canonical multi-rank MPI loop disassembly.
+    gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
 
-    // 2. Verify structured incoming cross-references targeting the barrier loop header 0x00401149
-    const auto incoming = disasm->incomingXrefs(0x00401149ULL);
-    QVERIFY(incoming.size() >= 2);
-    // Ensure back-edge jumps from loop bottom (0x401163, 0x40116e) are detected
+    // 2. Verify structured incoming cross-references targeting the barrier loop header 0x00401149.
+    const auto incoming = disasm->incomingXrefs(0x00401149ULL); QVERIFY(incoming.size() >= 2);
     bool foundBackEdge = false;
     for (const auto& xr : incoming) {
         QCOMPARE(xr.toAddress, 0x00401149ULL);
@@ -648,9 +608,8 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
     }
     QVERIFY(foundBackEdge);
 
-    // 3. Verify structured outgoing cross-references originating from function 0x00401120
-    const auto outgoing = disasm->outgoingXrefs(0x00401120ULL);
-    QVERIFY(outgoing.size() >= 2);
+    // 3. Verify structured outgoing cross-references originating from function 0x00401120.
+    const auto outgoing = disasm->outgoingXrefs(0x00401120ULL); QVERIFY(outgoing.size() >= 2);
     bool foundMpiInitCall = false, foundMpiFinalizeCall = false;
     for (const auto& xr : outgoing) {
         if (xr.type == QStringLiteral("CALL")) {
@@ -660,14 +619,13 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
     }
     QVERIFY(foundMpiInitCall && foundMpiFinalizeCall);
 
-    // 4. Open XrefInspectorDialog at address 0x00401149 and test filtering + incoming row activation
+    // 4. Open XrefInspectorDialog at address 0x00401149 and test filtering + incoming row activation.
     auto* dialog = disasm->openXrefInspector(0x00401149ULL);
     QVERIFY(dialog != nullptr && dialog->incomingRowCount() >= 2 && dialog->outgoingRowCount() >= 2 && !dialog->previewText().isEmpty());
     dialog->setFilterText(QStringLiteral("MPI_Init")); QVERIFY(dialog->outgoingRowCount() >= 1);
     dialog->setFilterText(QString()); QVERIFY(dialog->outgoingRowCount() >= 2);
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     QVERIFY(memView != nullptr && dialog->activateIncomingXref(0));
-    // Verify DisassemblyView and MemView are synchronized to the caller address
     QCOMPARE(disasm->currentAddress(), incoming.first().fromAddress);
     QCOMPARE(memView->currentBaseAddress(), incoming.first().fromAddress);
 }
@@ -676,42 +634,31 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
  * @brief Tests terminal monospace font enforcement, memory/disassembly live patching, and deadlock cycle badges.
  */
 void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
-    // 1. Initialize MainWindow and load standard preview fixture.
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.loadPreviewFixture();
-
-    // 2. Verify TerminalDockWidget monospace font enforcement and geometry isolation.
-    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
-    QVERIFY(terminalDock != nullptr);
+    // 1 & 2. Initialize MainWindow, load preview fixture, and verify TerminalDockWidget monospace font enforcement.
+    gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
+    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>(); QVERIFY(terminalDock != nullptr);
     terminalDock->setCustomFont("Cantarell", 11);
     QVERIFY(QFontInfo(terminalDock->activeTerminalFont()).fixedPitch() && terminalDock->width() >= 0);
 
     // 3. Verify MemView live byte patching, patch tracking count, signal emission, and revert.
-    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    QVERIFY(memView != nullptr);
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); QVERIFY(memView != nullptr);
     QSignalSpy patchSpy(memView, &gridlock::ui::MemView::bytesPatched);
     QVERIFY(memView->patchBytes(0x00401120ULL, QByteArray::fromHex("9090")));
     QCOMPARE(memView->patchedByteCount(), 2); QCOMPARE(patchSpy.count(), 1);
     memView->revertAllPatches(); QCOMPARE(memView->patchedByteCount(), 0);
 
-    // 4. Verify DisassemblyView live instruction patching, CFG arc updates, and decompilation.
-    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(disasm != nullptr);
+    // 4 & 5. Verify DisassemblyView live instruction patching, CFG arc updates, decompilation, and deadlock badges.
+    auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
     const int initialArcs = disasm->branchArcCount();
     QVERIFY(disasm->patchInstruction(0x00401155ULL, QStringLiteral("nop")));
     QCOMPARE(disasm->patchedInstructionCount(), 1); QCOMPARE(disasm->branchArcCount(), initialArcs - 1);
     QVERIFY(!disasm->decompileToLanguage(QStringLiteral("C")).isEmpty());
-
-    // 5. Verify MPI Deadlock cycle rank assignment, retrieval, and badge integration.
-    const QVector<int> cycleRanks = {0, 1};
-    disasm->setDeadlockCycleRanks(cycleRanks);
-    QCOMPARE(disasm->deadlockCycleRanks(), cycleRanks);
+    const QVector<int> cycleRanks = {0, 1}; disasm->setDeadlockCycleRanks(cycleRanks); QCOMPARE(disasm->deadlockCycleRanks(), cycleRanks);
 
     // 6. Verify ElfBinaryInspector virtual memory writing and round-trip verification.
     gridlock::core::ElfBinaryInspector inspector(QCoreApplication::applicationFilePath());
     if (inspector.isValid() && inspector.entryPoint() != 0) {
-        const uint64_t entry = inspector.entryPoint();
-        const QByteArray patch = QByteArray::fromHex("9090");
+        const uint64_t entry = inspector.entryPoint(); const QByteArray patch = QByteArray::fromHex("9090");
         QVERIFY(!inspector.readVirtualMemory(entry, 2).isEmpty() && inspector.writeVirtualMemory(entry, patch) && inspector.readVirtualMemory(entry, 2) == patch);
     }
 }
@@ -720,40 +667,31 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
  * @brief Tests patched ELF export to disk, unified multi-domain workspace search, and deadlock propagation.
  */
 void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation() {
-    // 1. Initialize MainWindow and load running binary target
-    gridlock::ui::MainWindow mainWindow;
-    QVERIFY(mainWindow.loadBinaryTarget(QCoreApplication::applicationFilePath()));
+    // 1. Initialize MainWindow, load running binary target, and locate .text section address.
+    gridlock::ui::MainWindow mainWindow; QVERIFY(mainWindow.loadBinaryTarget(QCoreApplication::applicationFilePath()));
     mainWindow.loadPreviewFixture();
-    auto* inspector = mainWindow.elfInspector();
-    QVERIFY(inspector != nullptr && inspector->isValid());
-
-    // Locate .text section address
+    auto* inspector = mainWindow.elfInspector(); QVERIFY(inspector != nullptr && inspector->isValid());
     uint64_t textAddr = 0;
     for (const auto& sec : inspector->sections()) if (sec.name == QStringLiteral(".text")) { textAddr = sec.address; break; }
     if (textAddr == 0) textAddr = inspector->entryPoint();
     QVERIFY(textAddr != 0);
 
-    // Apply live 2-byte patch via MemView and export patched binary to temporary file on disk
+    // Apply live 2-byte patch via MemView and export patched binary to temporary file on disk.
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     const QByteArray patchBytes = QByteArray::fromHex("9090");
     QVERIFY(memView != nullptr && memView->patchBytes(textAddr, patchBytes));
-    QTemporaryDir tempDir;
-    const QString exportPath = tempDir.filePath(QStringLiteral("patched_gridlock_bin"));
+    QTemporaryDir tempDir; const QString exportPath = tempDir.filePath(QStringLiteral("patched_gridlock_bin"));
     QVERIFY(tempDir.isValid() && mainWindow.exportPatchedBinary(exportPath) && QFile::exists(exportPath));
-
-    // Verify written file permissions and payload via independent inspector
     gridlock::core::ElfBinaryInspector verifyInspector(exportPath);
     QVERIFY(verifyInspector.isValid() && verifyInspector.readVirtualMemory(textAddr, 2) == patchBytes);
 
-    // 2. Test unified multi-domain workspace search
+    // 2 & 3. Test unified multi-domain workspace search and deadlock wait-for cycle propagation.
     const auto searchMatches = mainWindow.searchWorkspace(QStringLiteral("main"));
     bool foundValidAddress = false;
     for (const auto& match : searchMatches) {
         if (match.address != 0 && (match.label.contains(QStringLiteral("main"), Qt::CaseInsensitive) || match.contextSnippet.contains(QStringLiteral("main"), Qt::CaseInsensitive))) { foundValidAddress = true; break; }
     }
     QVERIFY(!searchMatches.isEmpty() && foundValidAddress);
-
-    // 3. Test deadlock wait-for cycle detection and propagation to DisassemblyView and status bar
     const QVector<int> detectedCycle = mainWindow.detectAndHighlightDeadlock({{0, 1}, {1, 0}});
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* telemetryLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
@@ -928,4 +866,56 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QVERIFY2(callRegister(explorer, mesonBuildPath, QStringLiteral("src/mpi_solver_kernel.cpp")), "registerSourceInBuildFile must succeed on meson.build");
     QFile mfCheck(mesonBuildPath); QVERIFY(mfCheck.open(QIODevice::ReadOnly) && QString::fromUtf8(mfCheck.readAll()).contains(QStringLiteral("src/mpi_solver_kernel.cpp")));
     QVERIFY2(callDelete(explorer, renamedPath) && !QFileInfo::exists(renamedPath) && deletedCount == 1, "deleteEntry must remove file from disk and emit fileDeleted");
+}
+
+/**
+ * @brief Verifies unified Git diff hunk parsing (`Added`, `Modified`, `Deleted` gutter line states)
+ *        in `SourceCodeView` and the `debuggerEngineCombo` selector (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`)
+ *        in `PreferencesDialog` and `ConfigManager`.
+ */
+void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
+    // 1. Verify SourceCodeView::parseUnifiedGitDiff() and gitLineState(oneBasedLine).
+    gridlock::ui::SourceCodeView srcView;
+    const QString sampleDiff = QStringLiteral(
+        "@@ -3,0 +4,2 @@\n+int added1 = 1;\n+int added2 = 2;\n"
+        "@@ -10,1 +12,1 @@\n-int oldVal = 0;\n+int newVal = 1;\n"
+        "@@ -18,2 +20,0 @@\n-int removed1 = 0;\n-int removed2 = 0;\n");
+    auto checkGitDiffAndEngine = [&](auto& view, auto& cfg) -> bool {
+        using ViewT = std::decay_t<decltype(view)>;
+        if constexpr (requires {
+                          ViewT::parseUnifiedGitDiff(sampleDiff);
+                          view.setGitLineStates(ViewT::parseUnifiedGitDiff(sampleDiff));
+                          view.gitLineState(4);
+                          cfg.debuggerEngine();
+                          cfg.setDebuggerEngine(QStringLiteral("gdb"));
+                      }) {
+            // Parse unified diff hunks and apply line states to SourceCodeView.
+            const auto states = ViewT::parseUnifiedGitDiff(sampleDiff);
+            view.setGitLineStates(states);
+            if (view.gitLineState(4) != ViewT::GitLineState::Added ||
+                view.gitLineState(5) != ViewT::GitLineState::Added ||
+                view.gitLineState(12) != ViewT::GitLineState::Modified ||
+                view.gitLineState(20) != ViewT::GitLineState::Deleted ||
+                view.gitLineState(1) != ViewT::GitLineState::Unchanged) {
+                return false;
+            }
+            // 2 & 3. Verify PreferencesDialog debuggerEngineCombo and ConfigManager persistence.
+            gridlock::ui::PreferencesDialog dlg;
+            auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"));
+            if (!combo || combo->findData(QStringLiteral("gdb")) < 0 ||
+                combo->findData(QStringLiteral("lldb-dap")) < 0 ||
+                combo->findData(QStringLiteral("cuda-gdb")) < 0 ||
+                combo->findData(QStringLiteral("rocgdb")) < 0) {
+                return false;
+            }
+            cfg.setDebuggerEngine(QStringLiteral("rocgdb"));
+            if (cfg.debuggerEngine() != QStringLiteral("rocgdb")) return false;
+            cfg.setDebuggerEngine(QStringLiteral("gdb"));
+            return cfg.debuggerEngine() == QStringLiteral("gdb");
+        } else {
+            return false;
+        }
+    };
+    QVERIFY2(checkGitDiffAndEngine(srcView, gridlock::core::ConfigManager::instance()),
+             "SourceCodeView Git diff gutter states and PreferencesDialog debuggerEngineCombo must succeed");
 }

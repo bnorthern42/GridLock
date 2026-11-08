@@ -494,6 +494,17 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget* parent)
     : QWidget(parent) {
     auto* form = createStandardPageForm(this, tr("<b>Debugger</b>"));
 
+    // Local debugger backend engine selector (GDB, LLDB-DAP, CUDA-GDB, ROCm GDB).
+    auto* engineCombo = new QComboBox(this);
+    engineCombo->setObjectName(QStringLiteral("debuggerEngineCombo"));
+    engineCombo->addItem(tr("GNU GDB (gdb)"), QStringLiteral("gdb"));
+    engineCombo->addItem(tr("LLVM LLDB-DAP (lldb-dap)"), QStringLiteral("lldb-dap"));
+    engineCombo->addItem(tr("NVIDIA CUDA-GDB (cuda-gdb)"), QStringLiteral("cuda-gdb"));
+    engineCombo->addItem(tr("AMD ROCm GDB (rocgdb)"), QStringLiteral("rocgdb"));
+    engineCombo->setToolTip(
+        tr("Select the local debugger backend engine used for target attachment and MI/DAP sessions."));
+    form->addRow(tr("Debugger Engine:"), engineCombo);
+
     // Language server and adapter executable path browse inputs.
     m_clangdPathEdit = addBrowsePathRow(
         this, form, tr("Clangd Path:"), QStringLiteral("clangd"),
@@ -555,12 +566,17 @@ bool DebuggerSettingsPage::trapFpe() const { return m_trapFpeCheck->isChecked();
  * @brief Restores debugger settings from global ConfigManager singleton.
  */
 void DebuggerSettingsPage::loadFromSettings() {
-    const auto ds = gridlock::core::ConfigManager::instance().getDebuggerSettings();
-    (void)gridlock::core::ConfigManager::instance().loadProjectSettings();
-    m_clangdPathEdit->setText(
-        gridlock::core::ConfigManager::instance().getGlobalClangdPath());
-    m_dapAdapterEdit->setText(
-        gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath());
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const auto ds = cfg.getDebuggerSettings();
+    (void)cfg.loadProjectSettings();
+    if (auto* engineCombo = findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"))) {
+        const int idx = engineCombo->findData(cfg.debuggerEngine());
+        if (idx >= 0) {
+            engineCombo->setCurrentIndex(idx);
+        }
+    }
+    m_clangdPathEdit->setText(cfg.getGlobalClangdPath());
+    m_dapAdapterEdit->setText(cfg.getGlobalDapAdapterPath());
     m_gdbPathEdit->setText(ds.gdbPath);
     m_mpiExecEdit->setText(ds.mpiExecutable);
     m_mpiArgsEdit->setText(ds.mpiArgs);

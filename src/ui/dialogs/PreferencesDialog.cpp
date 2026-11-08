@@ -282,6 +282,9 @@ void PreferencesDialog::apply() {
 
     // 4. Debugger engine & launcher configurations
     auto& cfg = gridlock::core::ConfigManager::instance();
+    if (auto* engineCombo = m_debuggerPage->findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"))) {
+        cfg.setDebuggerEngine(engineCombo->currentData().toString());
+    }
     cfg.setGlobalClangdPath(m_debuggerPage->clangdPath());
     cfg.setGlobalDapAdapterPath(m_debuggerPage->dapAdapterPath());
 

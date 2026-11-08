@@ -334,6 +334,34 @@ public:
     bool triggerGoToDefinition();
 
     /**
+     * @enum GitLineState
+     * @brief Per-line unified Git diff change state rendered in the SourceCodeView gutter.
+     */
+    enum class GitLineState { Unchanged, Added, Modified, Deleted };
+
+    /**
+     * @brief Parses unified Git diff (`git diff -U0`) output into 1-based line change states.
+     * @param unifiedDiff Unified diff output string containing `@@ -old +new @@` hunk headers.
+     * @return Map of 1-based line numbers to GitLineState values.
+     */
+    static QHash<int, GitLineState> parseUnifiedGitDiff(const QString& unifiedDiff);
+
+    /**
+     * @brief Sets the active per-line Git diff gutter states and schedules a gutter repaint.
+     * @param states Map of 1-based line numbers to GitLineState values.
+     */
+    void setGitLineStates(const QHash<int, GitLineState>& states);
+
+    /**
+     * @brief Returns the Git diff change state for a 1-based source line.
+     * @param oneBasedLine 1-based source line number.
+     * @return GitLineState (Unchanged if not present in the diff map).
+     */
+    GitLineState gitLineState(int oneBasedLine) const {
+        return m_gitLineStates.value(oneBasedLine, GitLineState::Unchanged);
+    }
+
+    /**
      * @brief Renames all AST references to the symbol under the cursor (Shift+F6) without corrupting comments.
      * @param newName Replacement identifier name.
      * @return True if the symbol was renamed in the document.
@@ -394,6 +422,7 @@ private:
     LspCompletionPopup* m_completionPopup = nullptr;
     QMap<int, QString> m_breakpoints;
     QMap<int, QString> m_breakpointSuspendScopes;
+    QHash<int, GitLineState> m_gitLineStates;
     QVector<core::utils::LspDiagnostic> m_diagnostics;
     QString m_currentFilePath;
     QString m_lastHoveredWord;

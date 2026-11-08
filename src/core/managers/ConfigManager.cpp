@@ -801,4 +801,59 @@ void ConfigManager::setThemeName(const QString& name) {
   s3.sync();
 }
 
+/**
+ * @brief Returns the configured local debugger backend engine ("gdb", "lldb-dap", "cuda-gdb", "rocgdb").
+ */
+QString ConfigManager::debuggerEngine() const {
+  if (!m_debuggerEngine.trimmed().isEmpty()) {
+    return m_debuggerEngine.trimmed();
+  }
+  if (!m_workspacePath.isEmpty()) {
+    const QString workspaceFile = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
+    try {
+      auto tbl = toml::parse_file(workspaceFile.toStdString());
+      if (auto* dbg = tbl["debugger"].as_table()) {
+        if (auto val = dbg->get("engine"); val && val->is_string()) {
+          return QString::fromStdString(val->as_string()->get());
+        }
+      }
+    } catch (...) {
+    }
+  }
+  QSettings s(kOrg, kApp);
+  return s.value(QStringLiteral("debugger/engine"), QStringLiteral("gdb")).toString();
+}
+
+/**
+ * @brief Sets and persists the local debugger backend engine in workspace.toml and QSettings.
+ * @param engine Backend identifier ("gdb", "lldb-dap", "cuda-gdb", or "rocgdb").
+ */
+void ConfigManager::setDebuggerEngine(const QString& engine) {
+  const QString clean = engine.trimmed().isEmpty() ? QStringLiteral("gdb") : engine.trimmed();
+  m_debuggerEngine = clean;
+  if (!m_workspacePath.isEmpty()) {
+    QDir dir(m_workspacePath);
+    dir.mkpath(QStringLiteral(".gridlock"));
+    const QString workspaceFile = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    toml::table tbl;
+    try {
+      tbl = toml::parse_file(workspaceFile.toStdString());
+    } catch (...) {
+    }
+    toml::table dbgTbl;
+    if (auto* existing = tbl["debugger"].as_table()) {
+      dbgTbl = *existing;
+    }
+    dbgTbl.insert_or_assign("engine", clean.toStdString());
+    tbl.insert_or_assign("debugger", dbgTbl);
+    std::ofstream out(workspaceFile.toStdString());
+    if (out.is_open()) {
+      out << tbl;
+    }
+  }
+  QSettings s(kOrg, kApp);
+  s.setValue(QStringLiteral("debugger/engine"), clean);
+  s.sync();
+}
+
 }  // namespace gridlock::core
