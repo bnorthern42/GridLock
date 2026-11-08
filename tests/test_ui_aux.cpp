@@ -576,6 +576,13 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
         const QString rmText = QString::fromUtf8(rf.readAll());
         QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*SonarQube / SonarCloud & Compiler Quality Gates"))), qPrintable(QStringLiteral("Roadmap static analysis / SonarQube item not updated in ") + rmRel));
     }
+    // 4. Tutorial showcase suite audit: verify all 7 MPI tutorial C++ programs exist on disk and are selectable in MainWindow TARGET combo.
+    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    QVERIFY2(targetCombo != nullptr, "MainWindow toolbarTargetSelector must exist");
+    for (const QString& tutRel : {QStringLiteral("tutorial/deadlock_ring.cpp"), QStringLiteral("tutorial/inspection_demo.cpp"), QStringLiteral("tutorial/collective_mismatch.cpp"), QStringLiteral("tutorial/ghost_cell_drift.cpp"), QStringLiteral("tutorial/heap_imbalance.cpp"), QStringLiteral("tutorial/tag_mismatch_stall.cpp"), QStringLiteral("tutorial/simd_struct_watch.cpp")}) {
+        QVERIFY2(QFileInfo::exists(rootDir.filePath(tutRel)), qPrintable(QStringLiteral("Missing tutorial showcase file: ") + tutRel));
+        QVERIFY2(targetCombo->findData(tutRel) >= 0, qPrintable(QStringLiteral("toolbarTargetSelector missing entry for: ") + tutRel));
+    }
 }
 
 /**

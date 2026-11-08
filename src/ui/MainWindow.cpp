@@ -39,6 +39,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QContextMenuEvent>
 #include <QDialog>
 #include <QDockWidget>
@@ -148,6 +149,24 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Eagerly load default source file so UI is populated before running.
   m_lspCoordinator = new gridlock::core::LspCoordinator(this);
   m_plainJaneTooltip = new gridlock::PlainJaneTooltip(this);
+  if (m_targetSelector) {
+    // Register the full 7-program MPI showcase suite ahead of the Open ELF / Binary... item.
+    const QList<QPair<QString, QString>> showcaseTargets = {
+        {QStringLiteral("inspection_demo (MPI)"), QStringLiteral("tutorial/inspection_demo.cpp")},
+        {QStringLiteral("deadlock_ring (MPI)"), QStringLiteral("tutorial/deadlock_ring.cpp")},
+        {QStringLiteral("collective_mismatch (MPI)"), QStringLiteral("tutorial/collective_mismatch.cpp")},
+        {QStringLiteral("ghost_cell_drift (MPI)"), QStringLiteral("tutorial/ghost_cell_drift.cpp")},
+        {QStringLiteral("heap_imbalance (MPI)"), QStringLiteral("tutorial/heap_imbalance.cpp")},
+        {QStringLiteral("tag_mismatch_stall (MPI)"), QStringLiteral("tutorial/tag_mismatch_stall.cpp")},
+        {QStringLiteral("simd_struct_watch (MPI)"), QStringLiteral("tutorial/simd_struct_watch.cpp")}};
+    for (const auto& entry : showcaseTargets) {
+      if (m_targetSelector->findData(entry.second) < 0) {
+        const int openIdx = m_targetSelector->findData(QStringLiteral("__open_binary__"));
+        if (openIdx >= 0) m_targetSelector->insertItem(openIdx, entry.first, entry.second);
+        else m_targetSelector->addItem(entry.first, entry.second);
+      }
+    }
+  }
   if (QFileInfo::exists("tutorial/inspection_demo.cpp")) loadSourceFile("tutorial/inspection_demo.cpp");
 
   // Load offline persistence TOML breakpoints from user preferences.
@@ -317,23 +336,16 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
   // Connect variable inspection dock and deadlock analyzer.
   if (m_variablesDockWidget) {
     m_variablesDockWidget->setCoordinator(m_coordinator);
-    if (auto *gdbCoord =
-            dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-
+    if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
       // Instantiate deadlock analyzer daemon monitoring lock hierarchies.
       if (!m_deadlockAnalyzer) {
-        m_deadlockAnalyzer =
-            new gridlock::core::DeadlockAnalyzer(gdbCoord, this);
-        connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged,
-                this, &MainWindow::onRankStateChanged);
+        m_deadlockAnalyzer = new gridlock::core::DeadlockAnalyzer(gdbCoord, this);
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged, this, &MainWindow::onRankStateChanged);
         if (m_mpiDiagnosticsWidget) {
           // Connect deadlock notifications to diagnostic widget banners.
-          connect(m_deadlockAnalyzer,
-                  &gridlock::core::DeadlockAnalyzer::deadlockDetected,
-                  m_mpiDiagnosticsWidget,
-                  &MpiDiagnosticsWidget::onDeadlockDetected);
-          connect(m_deadlockAnalyzer,
-                  &gridlock::core::DeadlockAnalyzer::rankCleared,
+          connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected,
+                  m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onDeadlockDetected);
+          connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared,
                   m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onRankCleared);
         }
       }
@@ -347,9 +359,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             [this](int rankId, const QString &file, int line) {
               if (rankId == m_focusedRank) {
                 if (!file.isEmpty() && m_editorTabManager) {
-                  if (auto view = m_editorTabManager->openFile(file)) {
-                    view->highlightCurrentLine(line);
-                  }
+                  if (auto view = m_editorTabManager->openFile(file)) view->highlightCurrentLine(line);
                 } else if (getSourceCodeView()) {
                   getSourceCodeView()->highlightCurrentLine(line);
                 }
@@ -357,60 +367,43 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             });
 
     // Wire GDB-specific signals if coordinator is a GdbRankCoordinator.
-    if (auto *gdbCoord =
-            dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
+    if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
       // Connect variable hover evaluation popover to display rich tooltip.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete,
               this, [this](const QString &varName, const QString &result, QPoint globalPos) {
                 if (getSourceCodeView() && m_plainJaneTooltip) {
-                  m_plainJaneTooltip->showTooltip(
-                      globalPos,
-                      QString("<b>%1</b>: %2").arg(varName).arg(result));
+                  m_plainJaneTooltip->showTooltip(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result));
                 }
               });
       // Stream expression evaluator widget evaluations.
       if (m_expressionEvaluatorWidget) {
         connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated,
-                m_expressionEvaluatorWidget,
-                &ExpressionEvaluatorWidget::appendResult);
+                m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
       }
       // Stream GDB console traffic (stdout and command inputs).
       if (m_gdbConsoleWidget) {
-        connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived,
-                m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
-        connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb,
-                m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
-        connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered, gdbCoord,
-                &gridlock::GdbRankCoordinator::sendCommand);
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
+        connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered, gdbCoord, &gridlock::GdbRankCoordinator::sendCommand);
       }
       // Trap floating-point exceptions (SIGFPE) across MPI ranks.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this,
               [this](int rankId, const QString &output) {
-                if (output.contains("reason=\"signal-received\"") &&
-                    output.contains("signal-name=\"SIGFPE\"")) {
+                if (output.contains("reason=\"signal-received\"") && output.contains("signal-name=\"SIGFPE\"")) {
                   onRankSelected(rankId);
-                  if (networkLog()) {
-                    networkLog()->appendError(
-                        QString("SIGFPE (Floating-Point Exception) detected on "
-                                "Rank %1!\n")
-                            .arg(rankId));
-                  }
+                  if (networkLog()) networkLog()->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
                 }
               });
       // Stream memory hex dumps directly to the hex inspection view.
-      connect(
-          gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this,
-          [this](int rankId, qint64 beginAddress, const QString &hexContents) {
-            if (rankId == m_focusedRank && m_memView) {
-              m_memView->setMemoryData(beginAddress, hexContents);
-            }
-          });
+      connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this,
+              [this](int rankId, qint64 beginAddress, const QString &hexContents) {
+                if (rankId == m_focusedRank && m_memView) m_memView->setMemoryData(beginAddress, hexContents);
+              });
     }
 
     // Connect generic process stdout/stderr to network console log.
     if (networkLog()) {
-      connect(m_coordinator, &IBackendCoordinator::targetOutputReceived,
-              this,
+      connect(m_coordinator, &IBackendCoordinator::targetOutputReceived, this,
               [this](const QString &category, const QString &output) {
                 if (networkLog()) networkLog()->appendText(category, output);
               });
@@ -418,16 +411,12 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
     // Update memory dump on raw byte buffer reception.
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
             [this](int rankId, const QString &address, const QByteArray &data) {
-              if (rankId == m_focusedRank && m_memView) {
-                m_memView->setMemoryData(address, data);
-              }
+              if (rankId == m_focusedRank && m_memView) m_memView->setMemoryData(address, data);
             });
     // Forward JSON register values to register inspection panel.
     connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,
             [this](int rankId, const QJsonArray &registers) {
-              if (rankId == m_focusedRank && m_registerView) {
-                m_registerView->updateRegisters(registers);
-              }
+              if (rankId == m_focusedRank && m_registerView) m_registerView->updateRegisters(registers);
             });
   }
 }
