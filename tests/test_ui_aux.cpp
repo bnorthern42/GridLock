@@ -574,15 +574,16 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
     for (const QString& rmRel : {QStringLiteral("ROADMAP.md"), QStringLiteral("docs/ROADMAP.md")}) {
         QFile rf(rootDir.filePath(rmRel)); QVERIFY(rf.open(QIODevice::ReadOnly | QIODevice::Text));
         const QString rmText = QString::fromUtf8(rf.readAll());
-        QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*SonarQube / SonarCloud & Compiler Quality Gates"))), qPrintable(QStringLiteral("Roadmap static analysis / SonarQube item not updated in ") + rmRel));
+        QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*SonarQube / SonarCloud & Compiler Quality Gates"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*Step-by-Step Walkthrough"))), qPrintable(QStringLiteral("Roadmap static analysis / SonarQube / Phase 9 item not updated in ") + rmRel));
     }
-    // 4. Tutorial showcase suite audit: verify all 7 MPI tutorial C++ programs exist on disk and are selectable in MainWindow TARGET combo.
+    // 4. Tutorial showcase suite & docs/TUTORIAL.md audit: verify all 7 MPI tutorial C++ programs exist on disk, are selectable in TARGET, and are documented.
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    QVERIFY2(targetCombo != nullptr, "MainWindow toolbarTargetSelector must exist");
+    QFile tutDoc(rootDir.filePath(QStringLiteral("docs/TUTORIAL.md"))); QVERIFY(targetCombo != nullptr && tutDoc.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString tutText = QString::fromUtf8(tutDoc.readAll());
     for (const QString& tutRel : {QStringLiteral("tutorial/deadlock_ring.cpp"), QStringLiteral("tutorial/inspection_demo.cpp"), QStringLiteral("tutorial/collective_mismatch.cpp"), QStringLiteral("tutorial/ghost_cell_drift.cpp"), QStringLiteral("tutorial/heap_imbalance.cpp"), QStringLiteral("tutorial/tag_mismatch_stall.cpp"), QStringLiteral("tutorial/simd_struct_watch.cpp")}) {
-        QVERIFY2(QFileInfo::exists(rootDir.filePath(tutRel)), qPrintable(QStringLiteral("Missing tutorial showcase file: ") + tutRel));
-        QVERIFY2(targetCombo->findData(tutRel) >= 0, qPrintable(QStringLiteral("toolbarTargetSelector missing entry for: ") + tutRel));
+        QVERIFY2(QFileInfo::exists(rootDir.filePath(tutRel)) && targetCombo->findData(tutRel) >= 0 && tutText.contains(tutRel), qPrintable(QStringLiteral("Missing or undocumented tutorial showcase file: ") + tutRel));
     }
+    QVERIFY2(tutText.contains(QStringLiteral("DIFF RANKS")) && tutText.contains(QStringLiteral("EXPORT")) && tutText.contains(QStringLiteral("F1")) && tutText.contains(QStringLiteral("PACKAGE MANAGER")), "docs/TUTORIAL.md must document DIFF RANKS, EXPORT, F1, and PACKAGE MANAGER");
 }
 
 /**

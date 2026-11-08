@@ -1,13 +1,13 @@
 # GridLock User Guide
 
-> Looking for a hands-on walkthrough with the sample MPI programs? See the [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](TUTORIAL.md).
+> Looking for a hands-on walkthrough with the 7 bundled MPI showcase programs (`deadlock_ring.cpp`, `inspection_demo.cpp`, `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, and `simd_struct_watch.cpp`)? See the [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](TUTORIAL.md) for step-by-step examples, `MemView` `DIFF RANKS` and `EXPORT`, offline `man` / Zeal docsets (`F1`), and the `PACKAGE MANAGER` dock.
 
 ![GridLock Workspace Overview](screenshots/workspace_overview.png)
 
 ## 1. Launching & Stepping an MPI Target
 
 1. **Select a Target and Rank Count (`-np`):**
-   * Pick one of the bundled MPI programs (`inspection_demo (MPI)`, `deadlock_ring (MPI)`) or choose `Open ELF / Binary...` in the **TARGET** dropdown on the main toolbar.
+   * Pick one of the 7 bundled MPI showcase programs (`inspection_demo (MPI)`, `deadlock_ring (MPI)`, `collective_mismatch (MPI)`, `ghost_cell_drift (MPI)`, `heap_imbalance (MPI)`, `tag_mismatch_stall (MPI)`, `simd_struct_watch (MPI)`) or choose `Open ELF / Binary...` in the **TARGET** dropdown on the main toolbar.
    * Set the number of MPI processes (`1..64`) in the **RANKS (-np)** spin box.
 2. **Choose a Debugger Backend (`Edit -> Preferences -> Debugger`):**
    * Select the local debugger backend in the **Debugger Engine** dropdown: `GNU GDB (gdb)`, `LLVM LLDB-DAP (lldb-dap)`, `NVIDIA CUDA-GDB (cuda-gdb)`, or `AMD ROCm GDB (rocgdb)`.

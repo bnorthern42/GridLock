@@ -46,12 +46,12 @@ This roadmap tracks completed milestones (`Phases 1–10`) and remaining tasks f
 
 ## Phase 9: Guided Tutorials (`docs/TUTORIAL.md`)
 
-- [ ] **Step-by-Step Walkthrough (`docs/TUTORIAL.md`)**:
-  - Write a hands-on guide covering:
-    1. Diagnosing the 8-rank circular `MPI_Send` deadlock in `tutorial/deadlock_ring.cpp` with `ServerRackView`, `DeadlockAnalyzer`, and the CFG view.
-    2. Setting rank-filtered conditional breakpoints with `clangd` completion (`data[i].coords.x`) on `tutorial/inspection_demo.cpp`.
-    3. Comparing cross-rank watch expressions in `DifferentialGrid` and inspecting memory differences across ranks in `MemView`.
-    4. Looking up MPI and C/C++ functions in offline Zeal docsets (`F1`) and importing `#SBATCH` scripts in `Preferences -> HPC / Cluster`.
+- [x] **Step-by-Step Walkthrough (`docs/TUTORIAL.md`)**:
+  - Expanded the hands-on developer guide covering:
+    1. Building and selecting all 7 bundled MPI showcase examples (`deadlock_ring.cpp`, `inspection_demo.cpp`, `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, `simd_struct_watch.cpp`) from the `TARGET:` toolbar selector or CLI.
+    2. Diagnosing circular `MPI_Send` deadlocks, `MPI_Bcast` vs. `MPI_Barrier` collective divergence, 1D stencil `NaN` propagation, per-rank `STACK` / `HEAP` telemetry imbalance, and point-to-point tag stalls.
+    3. Comparing cross-rank watch expressions in `DifferentialGrid`, highlighting memory differences across ranks with `DIFF RANKS`, and saving memory slices with `EXPORT` in `MemView`.
+    4. Looking up C/C++, MPI, and x86_64/ARM64 assembly documentation in offline Zeal docsets and `man` pages (`F1`), importing `#SBATCH` scripts, and searching dependencies in the `PACKAGE MANAGER` dock.
 
 ---
 

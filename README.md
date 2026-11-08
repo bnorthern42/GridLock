@@ -147,7 +147,7 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 
 ## Documentation
 
-* [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](docs/TUTORIAL.md) — Step-by-step walkthroughs using `tutorial/deadlock_ring.cpp` and `tutorial/inspection_demo.cpp`.
+* [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](docs/TUTORIAL.md) — Step-by-step walkthroughs for all 7 bundled MPI showcase programs (`deadlock_ring.cpp`, `inspection_demo.cpp`, `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, `simd_struct_watch.cpp`), `MemView` rank diffing (`DIFF RANKS`) & memory export (`EXPORT`), offline `man` pages & Zeal docsets (`F1`), and the `PACKAGE MANAGER` dock.
 * [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed milestones through `v0.8.0` and remaining tasks.
 * [**Architecture Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — Window layout, module organization, and signal wiring.
 * [**User Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Walkthroughs for MPI debugging, source editing, conditional breakpoints, package search, SLURM import, and binary patching.
