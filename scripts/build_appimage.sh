@@ -119,11 +119,24 @@ if command -v patchelf >/dev/null 2>&1; then
     done
 fi
 
-echo "Bundling tutorial C++ MPI targets into AppDir/usr/share/gridlock/tutorial/..."
+echo "Bundling and compiling tutorial C++ MPI targets into AppDir/usr/share/gridlock/tutorial/ and AppDir/tutorial/..."
 mkdir -p "${APPDIR}/usr/share/gridlock/tutorial"
+mkdir -p "${APPDIR}/usr/bin/tutorial"
+mkdir -p "${APPDIR}/tutorial"
+MPICXX_BIN="$(command -v mpicxx || command -v mpic++ || command -v g++ || true)"
 for src_target in "tutorial/inspection_demo.cpp" "tutorial/deadlock_ring.cpp" "tutorial/collective_mismatch.cpp" "tutorial/ghost_cell_drift.cpp" "tutorial/heap_imbalance.cpp" "tutorial/tag_mismatch_stall.cpp" "tutorial/simd_struct_watch.cpp"; do
     if [ -f "${ROOT_DIR}/${src_target}" ]; then
+        base="$(basename "${src_target}" .cpp)"
         cp -af "${ROOT_DIR}/${src_target}" "${APPDIR}/usr/share/gridlock/tutorial/"
+        cp -af "${ROOT_DIR}/${src_target}" "${APPDIR}/tutorial/"
+        if [ -n "${MPICXX_BIN}" ]; then
+            echo "Compiling ${src_target} -> ${base}..."
+            "${MPICXX_BIN}" -g -O0 "${ROOT_DIR}/${src_target}" -o "${APPDIR}/usr/share/gridlock/tutorial/${base}" || true
+            if [ -f "${APPDIR}/usr/share/gridlock/tutorial/${base}" ]; then
+                cp -af "${APPDIR}/usr/share/gridlock/tutorial/${base}" "${APPDIR}/usr/bin/tutorial/${base}"
+                cp -af "${APPDIR}/usr/share/gridlock/tutorial/${base}" "${APPDIR}/tutorial/${base}"
+            fi
+        fi
     fi
 done
 

@@ -35,6 +35,7 @@
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/MpiNetworkLogWidget.hpp"
+#include "MainWindowExecution.cpp"
 
 #include <QAction>
 #include <QApplication>
@@ -151,6 +152,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   m_plainJaneTooltip = new gridlock::PlainJaneTooltip(this);
   if (m_targetSelector) {
     // Register the full 7-program MPI showcase suite ahead of the Open ELF / Binary... item.
+    // Each target is mapped to its relative tutorial source code path.
     const QList<QPair<QString, QString>> showcaseTargets = {
         {QStringLiteral("inspection_demo (MPI)"), QStringLiteral("tutorial/inspection_demo.cpp")},
         {QStringLiteral("deadlock_ring (MPI)"), QStringLiteral("tutorial/deadlock_ring.cpp")},
@@ -160,14 +162,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         {QStringLiteral("tag_mismatch_stall (MPI)"), QStringLiteral("tutorial/tag_mismatch_stall.cpp")},
         {QStringLiteral("simd_struct_watch (MPI)"), QStringLiteral("tutorial/simd_struct_watch.cpp")}};
     for (const auto& entry : showcaseTargets) {
-      if (m_targetSelector->findData(entry.second) < 0) {
+      // Determine if tutorial source file exists relative to working tree or parent builddir.
+      const bool localExists = QFileInfo::exists(entry.second) || QFileInfo::exists(QStringLiteral("../") + entry.second);
+      // Fall back to read-only AppImage share path ($APPDIR/usr/share/gridlock/tutorial/) if external.
+      const QString targetData = localExists ? entry.second : resolveTutorialTarget(entry.second);
+      // Update existing default items (inspection_demo, deadlock_ring) or insert new tutorial targets.
+      const int existingIdx = m_targetSelector->findText(entry.first);
+      if (existingIdx >= 0) {
+        // Synchronize item data with resolved file path so toolbar selection activates proper source.
+        m_targetSelector->setItemData(existingIdx, targetData);
+      } else {
+        // Position new tutorial entries directly before the open binary file chooser item.
         const int openIdx = m_targetSelector->findData(QStringLiteral("__open_binary__"));
-        if (openIdx >= 0) m_targetSelector->insertItem(openIdx, entry.first, entry.second);
-        else m_targetSelector->addItem(entry.first, entry.second);
+        if (openIdx >= 0) m_targetSelector->insertItem(openIdx, entry.first, targetData);
+        else m_targetSelector->addItem(entry.first, targetData);
       }
     }
   }
-  if (QFileInfo::exists("tutorial/inspection_demo.cpp")) loadSourceFile("tutorial/inspection_demo.cpp");
+  // Resolve initial demonstration source file across local workspace and AppImage paths.
+  const QString initialSource = resolveTutorialTarget(QStringLiteral("tutorial/inspection_demo.cpp"));
+  // Eagerly load resolved demo source file into editor canvas if present on disk.
+  if (QFileInfo::exists(initialSource)) loadSourceFile(initialSource);
 
   // Load offline persistence TOML breakpoints from user preferences.
   m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();

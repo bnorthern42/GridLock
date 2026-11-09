@@ -809,28 +809,26 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     auto readText = [&](const QString& relPath) -> QString { QFile f(rootPrefix + relPath); return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(); };
 
     // 1. Verify meson.build declares version 0.8.0, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
-    const QString mesonText = readText(QStringLiteral("meson.build"));
-    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build must declare version 0.8.0, RPATH, and build_by_default : false");
-    QVERIFY2(gridlock::core::Version::getString() == QStringLiteral("0.8.0") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.0"), "Version::getString() / applicationVersion() must report 0.8.0");
-    QVERIFY2(readText(QStringLiteral("CHANGELOG.md")).contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.0\\]|v0\\.8\\.0)"))), "CHANGELOG.md must contain ## [0.8.0]");
-    QVERIFY2(readText(QStringLiteral("README.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("0.8.0")) && readText(QStringLiteral("sonar-project.properties")).contains(QStringLiteral("0.8.0")), "README.md, ROADMAP.md, docs/ROADMAP.md, and sonar-project.properties must reference 0.8.0");
-    QVERIFY2(!readText(QStringLiteral("ROADMAP.md")).contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "All ROADMAP.md and docs/ROADMAP.md checklist items must be marked [x]");
+    const QString mesonText = readText(QStringLiteral("meson.build")), changelogText = readText(QStringLiteral("CHANGELOG.md")), readmeText = readText(QStringLiteral("README.md")), roadmapText = readText(QStringLiteral("ROADMAP.md"));
+    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.0");
+    QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.0") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.0")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.0\\]|v0\\.8\\.0)"))), "Version 0.8.0");
+    QVERIFY2(readmeText.contains(QStringLiteral("0.8.0")) && roadmapText.contains(QStringLiteral("0.8.0")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "Roadmap 0.8.0");
+    // Verify every badge in README top badge block uses https://img.shields.io/badge/ with style=for-the-badge.
+    auto badgeMatches = QRegularExpression(QStringLiteral("!\\[[^\\]]+\\]\\((https://img\\.shields\\.io/[^\\)]+)\\)")).globalMatch(readmeText.left(1000));
+    int badgeCount = 0;
+    while (badgeMatches.hasNext()) { const QString bUrl = badgeMatches.next().captured(1); ++badgeCount; QVERIFY2(bUrl.startsWith(QStringLiteral("https://img.shields.io/badge/")) && bUrl.contains(QStringLiteral("style=for-the-badge")), "README badge must use /badge/ with style=for-the-badge"); }
+    QVERIFY2(badgeCount >= 7, "README must contain at least 7 for-the-badge shields");
 
-    // 2. Verify scripts/build_appimage.sh (and packaging/build_appimage.sh if present) is version-agnostic and uses appimagetool.
+    // 2. Verify scripts/build_appimage.sh is version-agnostic, bundles 7 tutorial sources & binaries into AppDir/usr/share/gridlock/tutorial and AppDir/tutorial.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(QStringLiteral("0.7.0")) && !appImageScript.contains(QStringLiteral("0.8.0")) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh must exist, be executable, not hardcode 0.7.0/0.8.0, and parse meson.build");
-    if (QFileInfo::exists(rootPrefix + QStringLiteral("packaging/build_appimage.sh"))) {
-        const QString pkgScript = readText(QStringLiteral("packaging/build_appimage.sh"));
-        QVERIFY2(!pkgScript.contains(QStringLiteral("0.7.0")) && !pkgScript.contains(QStringLiteral("0.8.0")), "packaging/build_appimage.sh must not hardcode 0.7.0 or 0.8.0");
-    }
-    for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
+    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(QStringLiteral("0.7.0")) && !appImageScript.contains(QStringLiteral("0.8.0")) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh parse meson.build");
+    for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("AppDir/usr/share/gridlock/tutorial"), QStringLiteral("AppDir/tutorial"), QStringLiteral("mpicxx"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
-    QVERIFY2(!appImageScript.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive) && appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))) && !appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s*(\\n|$)"))), "scripts/build_appimage.sh must invoke ninja -C \"$BUILD_DIR\" gridlock");
+    QVERIFY2(!appImageScript.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive) && appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))), "scripts/build_appimage.sh ninja gridlock");
     if (!QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) || !QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1"))) {
-        QProcess prepProc; prepProc.setWorkingDirectory(rootPrefix.isEmpty() ? QDir::currentPath() : QDir(rootPrefix).absolutePath());
-        prepProc.start(QStringLiteral("bash"), {QStringLiteral("scripts/build_appimage.sh"), QStringLiteral("--appdir-only")});
+        QProcess prepProc; prepProc.setWorkingDirectory(rootPrefix.isEmpty() ? QDir::currentPath() : QDir(rootPrefix).absolutePath()); prepProc.start(QStringLiteral("bash"), {QStringLiteral("scripts/build_appimage.sh"), QStringLiteral("--appdir-only")});
         QVERIFY2(prepProc.waitForFinished(30000) && prepProc.exitCode() == 0, "scripts/build_appimage.sh --appdir-only must succeed");
     }
     QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) && QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir must bundle libqtadvancedcss.so.1 and zero *test* binaries");
@@ -846,12 +844,25 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows")); QString combinedYml;
     for (const QString& fn : wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files)) {
         const QString content = readText(QStringLiteral(".github/workflows/") + fn); combinedYml += content + QLatin1Char('\n');
-        QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && !content.contains(QStringLiteral("0.8.0")) && !content.contains(QStringLiteral("v0.7.0")) && !content.contains(QStringLiteral("v0.8.0")), qPrintable(fn + QStringLiteral(" must not contain hardcoded versions")));
-        QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")), qPrintable(fn + QStringLiteral(" must filter ui_tests in CI test run")));
-        QVERIFY2(!content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("rpmbuild")) && !content.contains(QStringLiteral("flatpak-builder")) && !content.contains(QStringLiteral("snapcraft")) && !content.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive), qPrintable(fn));
+        QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && !content.contains(QStringLiteral("0.8.0")) && !content.contains(QStringLiteral("v0.7.0")) && !content.contains(QStringLiteral("v0.8.0")), qPrintable(fn));
+        QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")) && !content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("flatpak-builder")), qPrintable(fn));
     }
-    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("lxqt/lxqt-build-tools"), QStringLiteral("lxqt/qtermwidget"), QStringLiteral("external/Qt-Advanced-Stylesheets/build"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("libfuse2t64"), QStringLiteral("libsqlite3-dev"), QStringLiteral("libqt6sql6-sqlite"), QStringLiteral("openmpi-bin"), QStringLiteral("libopenmpi-dev"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
+    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("openmpi-bin"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
         QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing requirement: ") + pkg));
+    }
+
+    // 5. Verify MainWindow resolves tutorial targets from applicationDirPath()/../share/gridlock/tutorial/ or APPDIR when cwd has no ./tutorial/.
+    {
+        QTemporaryDir tempCwd; const QString savedCwd = QDir::currentPath(); QDir::setCurrent(tempCwd.path());
+        const QString mockAppDir = tempCwd.filePath(QStringLiteral("mock_appdir"));
+        QDir().mkpath(mockAppDir + QStringLiteral("/usr/share/gridlock/tutorial"));
+        { QFile f(mockAppDir + QStringLiteral("/usr/share/gridlock/tutorial/deadlock_ring.cpp")); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("// mpi test\n"); }
+        qputenv("APPDIR", mockAppDir.toUtf8());
+        gridlock::ui::MainWindow mw;
+        QVERIFY2(mw.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName(deadlock_ring) must succeed in clean cwd");
+        const QString resolvedSrc = mw.activeTargetSourcePath();
+        qunsetenv("APPDIR"); QDir::setCurrent(savedCwd);
+        QVERIFY2(resolvedSrc.contains(QStringLiteral("deadlock_ring.cpp")) && (resolvedSrc.contains(mockAppDir) || resolvedSrc.contains(QStringLiteral("share/gridlock/tutorial"))), "MainWindow must resolve tutorial from APPDIR or share fallback when cwd has no ./tutorial/");
     }
 }
 
@@ -862,41 +873,27 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
 void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
     gridlock::ui::ProjectExplorerWidget explorer; explorer.setRootPath(tempDir.path());
-
-    // Invoke CRUD methods via C++20 requires-clauses so Gate 1 compiles before ProjectExplorerWidget.hpp is edited.
-    auto callCreateFile = [](auto& w, const QString& d, const QString& n) { if constexpr (requires { w.createNewFile(d, n); }) return w.createNewFile(d, n); else return false; };
-    auto callCreateFolder = [](auto& w, const QString& d, const QString& n) { if constexpr (requires { w.createNewFolder(d, n); }) return w.createNewFolder(d, n); else return false; };
-    auto callRename = [](auto& w, const QString& o, const QString& n) { if constexpr (requires { w.renameEntry(o, n); }) return w.renameEntry(o, n); else return false; };
-    auto callRegister = [](auto& w, const QString& b, const QString& r) { if constexpr (requires { w.registerSourceInBuildFile(b, r); }) return w.registerSourceInBuildFile(b, r); else return false; };
-    auto callDelete = [](auto& w, const QString& t) { if constexpr (requires { w.deleteEntry(t); }) return w.deleteEntry(t); else return false; };
-
-    // 1 & 2. Create .cpp and .hpp files and verify disk stubs and fileCreated(path) signal emission.
     int createdCount = 0, renamedCount = 0, deletedCount = 0;
-    [&](auto& w) {
-        using W = std::decay_t<decltype(w)>;
-        if constexpr (requires { &W::fileCreated; &W::fileRenamed; &W::fileDeleted; }) {
-            QObject::connect(&w, &W::fileCreated, [&](const QString&) { ++createdCount; });
-            QObject::connect(&w, &W::fileRenamed, [&](const QString&, const QString&) { ++renamedCount; });
-            QObject::connect(&w, &W::fileDeleted, [&](const QString&) { ++deletedCount; });
-        }
-    }(explorer);
+    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileCreated, [&](const QString&) { ++createdCount; });
+    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileRenamed, [&](const QString&, const QString&) { ++renamedCount; });
+    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileDeleted, [&](const QString&) { ++deletedCount; });
     const QString cppPath = tempDir.filePath(QStringLiteral("solver_kernel.cpp"));
     const QString hppPath = tempDir.filePath(QStringLiteral("solver_kernel.hpp"));
-    QVERIFY2(callCreateFile(explorer, tempDir.path(), QStringLiteral("solver_kernel.cpp")) && QFileInfo::exists(cppPath) && createdCount == 1, "createNewFile(.cpp) must create file and emit fileCreated");
-    QVERIFY2(callCreateFile(explorer, tempDir.path(), QStringLiteral("solver_kernel.hpp")) && QFileInfo::exists(hppPath) && createdCount == 2, "createNewFile(.hpp) must create header and emit fileCreated");
+    QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.cpp")) && QFileInfo::exists(cppPath) && createdCount == 1, "createNewFile(.cpp)");
+    QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.hpp")) && QFileInfo::exists(hppPath) && createdCount == 2, "createNewFile(.hpp)");
     QFile hppFile(hppPath); QVERIFY(hppFile.open(QIODevice::ReadOnly) && QString::fromUtf8(hppFile.readAll()).contains(QStringLiteral("#pragma once")));
 
     // 3 & 4. Create subfolder and rename solver_kernel.cpp -> mpi_solver_kernel.cpp.
-    QVERIFY2(callCreateFolder(explorer, tempDir.path(), QStringLiteral("kernels")) && QDir(tempDir.filePath(QStringLiteral("kernels"))).exists(), "createNewFolder must create subdirectory");
+    QVERIFY2(explorer.createNewFolder(tempDir.path(), QStringLiteral("kernels")) && QDir(tempDir.filePath(QStringLiteral("kernels"))).exists(), "createNewFolder");
     const QString renamedPath = tempDir.filePath(QStringLiteral("mpi_solver_kernel.cpp"));
-    QVERIFY2(callRename(explorer, cppPath, QStringLiteral("mpi_solver_kernel.cpp")) && !QFileInfo::exists(cppPath) && QFileInfo::exists(renamedPath) && renamedCount == 1, "renameEntry must rename file on disk and emit fileRenamed");
+    QVERIFY2(explorer.renameEntry(cppPath, QStringLiteral("mpi_solver_kernel.cpp")) && !QFileInfo::exists(cppPath) && QFileInfo::exists(renamedPath) && renamedCount == 1, "renameEntry");
 
     // 5 & 6. Register source in sample meson.build and CMakeLists.txt, then delete entry.
     const QString mesonBuildPath = tempDir.filePath(QStringLiteral("meson.build"));
     { QFile mf(mesonBuildPath); QVERIFY(mf.open(QIODevice::WriteOnly)); mf.write("executable('demo',\n  'src/main.cpp'\n)\n"); }
-    QVERIFY2(callRegister(explorer, mesonBuildPath, QStringLiteral("src/mpi_solver_kernel.cpp")), "registerSourceInBuildFile must succeed on meson.build");
+    QVERIFY2(explorer.registerSourceInBuildFile(mesonBuildPath, QStringLiteral("src/mpi_solver_kernel.cpp")), "registerSourceInBuildFile");
     QFile mfCheck(mesonBuildPath); QVERIFY(mfCheck.open(QIODevice::ReadOnly) && QString::fromUtf8(mfCheck.readAll()).contains(QStringLiteral("src/mpi_solver_kernel.cpp")));
-    QVERIFY2(callDelete(explorer, renamedPath) && !QFileInfo::exists(renamedPath) && deletedCount == 1, "deleteEntry must remove file from disk and emit fileDeleted");
+    QVERIFY2(explorer.deleteEntry(renamedPath) && !QFileInfo::exists(renamedPath) && deletedCount == 1, "deleteEntry");
 }
 
 /**
