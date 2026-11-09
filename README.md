@@ -100,6 +100,19 @@ Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MP
 
 ---
 
+## Installation & AppImage Downloads
+
+Standalone AppImages for Linux x86_64 are available from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases):
+* **`GridLock-<version>-x86_64.AppImage` (Lite / Core Edition)**: Lean standalone distribution packaging the full GridLock workstation IDE, syntax highlighters, and debugger backends without bundled demo sources.
+* **`GridLock-<version>-Tutorials-x86_64.AppImage` (Full / Tutorials Edition)**: Includes all 7 interactive MPI showcase programs (`deadlock_ring`, `inspection_demo`, `collective_mismatch`, `ghost_cell_drift`, `heap_imbalance`, `tag_mismatch_stall`, `simd_struct_watch`) with both `.cpp` sources and pre-compiled debug binaries for out-of-the-box exploration.
+
+```bash
+chmod +x GridLock-*-x86_64.AppImage
+./GridLock-*-x86_64.AppImage
+```
+
+---
+
 ## Building & Running
 
 ### Dependencies

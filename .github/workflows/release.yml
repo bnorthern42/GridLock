@@ -120,16 +120,20 @@ jobs:
         run: |
           ninja -C builddir gridlock
           bash scripts/build_appimage.sh
-          QT_QPA_PLATFORM=offscreen ./GridLock-*-x86_64.AppImage --appimage-extract-and-run --version
-          ls -lah GridLock-*-x86_64.AppImage GridLock-x86_64.AppImage
+          for app in GridLock-*-x86_64.AppImage GridLock-*-Tutorials-x86_64.AppImage; do
+            if [ -f "$app" ]; then
+              QT_QPA_PLATFORM=offscreen ./"$app" --appimage-extract-and-run --version
+            fi
+          done
+          ls -lah GridLock-*-x86_64.AppImage GridLock-*-Tutorials-x86_64.AppImage
 
-      - name: Upload AppImage Build Artifact
+      - name: Upload AppImage Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GridLock-x86_64.AppImage
+          name: GridLock-AppImages
           path: |
             GridLock-*-x86_64.AppImage
-            GridLock-x86_64.AppImage
+            GridLock-*-Tutorials-x86_64.AppImage
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -137,6 +141,6 @@ jobs:
         with:
           files: |
             GridLock-*-x86_64.AppImage
-            GridLock-x86_64.AppImage
+            GridLock-*-Tutorials-x86_64.AppImage
           generate_release_notes: true
           draft: false

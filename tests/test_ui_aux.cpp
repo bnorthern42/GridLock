@@ -813,16 +813,19 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.0");
     QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.0") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.0")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.0\\]|v0\\.8\\.0)"))), "Version 0.8.0");
     QVERIFY2(readmeText.contains(QStringLiteral("0.8.0")) && roadmapText.contains(QStringLiteral("0.8.0")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "Roadmap 0.8.0");
+    QVERIFY2(readmeText.contains(QStringLiteral("Tutorials-x86_64.AppImage")) && readmeText.contains(QStringLiteral("Lite")), "README.md must document Lite and Tutorials AppImage editions");
     // Verify every badge in README top badge block uses https://img.shields.io/badge/ with style=for-the-badge.
     auto badgeMatches = QRegularExpression(QStringLiteral("!\\[[^\\]]+\\]\\((https://img\\.shields\\.io/[^\\)]+)\\)")).globalMatch(readmeText.left(1000));
     int badgeCount = 0;
     while (badgeMatches.hasNext()) { const QString bUrl = badgeMatches.next().captured(1); ++badgeCount; QVERIFY2(bUrl.startsWith(QStringLiteral("https://img.shields.io/badge/")) && bUrl.contains(QStringLiteral("style=for-the-badge")), "README badge must use /badge/ with style=for-the-badge"); }
     QVERIFY2(badgeCount >= 7, "README must contain at least 7 for-the-badge shields");
 
-    // 2. Verify scripts/build_appimage.sh is version-agnostic, bundles 7 tutorial sources & binaries into AppDir/usr/share/gridlock/tutorial and AppDir/tutorial.
+    // 2. Verify scripts/build_appimage.sh supports Lite and Tutorials editions without duplicate unversioned alias.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
     QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(QStringLiteral("0.7.0")) && !appImageScript.contains(QStringLiteral("0.8.0")) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh parse meson.build");
+    QVERIFY2(appImageScript.contains(QStringLiteral("--lite")) && appImageScript.contains(QStringLiteral("--with-tutorials")) && appImageScript.contains(QStringLiteral("Tutorials")), "build_appimage.sh must support --lite and --with-tutorials");
+    QVERIFY2(!appImageScript.contains(QStringLiteral("cp -af \"${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage\" \"${ROOT_DIR}/${APP_NAME}-x86_64.AppImage\"")), "build_appimage.sh must not create unversioned alias");
     for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("AppDir/usr/share/gridlock/tutorial"), QStringLiteral("AppDir/tutorial"), QStringLiteral("mpicxx"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
@@ -847,6 +850,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
         QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && !content.contains(QStringLiteral("0.8.0")) && !content.contains(QStringLiteral("v0.7.0")) && !content.contains(QStringLiteral("v0.8.0")), qPrintable(fn));
         QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")) && !content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("flatpak-builder")), qPrintable(fn));
     }
+    QVERIFY2(combinedYml.contains(QStringLiteral("GridLock-*-Tutorials-x86_64.AppImage")) && !combinedYml.contains(QStringLiteral("GridLock-x86_64.AppImage")), "release.yml must upload Tutorials edition and no unversioned alias");
     for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("openmpi-bin"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
         QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing requirement: ") + pkg));
     }
