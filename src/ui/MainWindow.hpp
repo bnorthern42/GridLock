@@ -159,6 +159,24 @@ public:
     void stopTargetWorkflow();
 
     /**
+     * @brief Steps over the current source line on the active MPI rank (`IBackendCoordinator::stepOver`).
+     * @return True if a live coordinator step-over request was dispatched; false otherwise.
+     */
+    bool stepOverWorkflow();
+
+    /**
+     * @brief Steps into the callee on the active MPI rank (`IBackendCoordinator::stepInto`).
+     * @return True if a live coordinator step-into request was dispatched; false otherwise.
+     */
+    bool stepIntoWorkflow();
+
+    /**
+     * @brief Interrupts/pauses execution on the active MPI rank (`IBackendCoordinator::pauseRank`).
+     * @return True if a live coordinator pause request was dispatched; false otherwise.
+     */
+    bool pauseRankWorkflow();
+
+    /**
      * @brief Updates main toolbar action enablement and latched Run Target state.
      */
     void updateDebugToolbarState();
@@ -428,6 +446,12 @@ public:
     void setCoordinator(IBackendCoordinator* coord);
 
     /**
+     * @brief Instantiates or switches the active `IBackendCoordinator` (`GdbRankCoordinator` vs `DapCoordinator`)
+     *        to match `ConfigManager::instance().debuggerEngine()` when no debugging session is running.
+     */
+    void syncCoordinatorWithConfig();
+
+    /**
      * @brief Renders the entire workspace offscreen to an image file.
      * @param outputPath Target file path.
      * @return True on success.
@@ -602,6 +626,7 @@ private:
     QPushButton* m_perspMpiBtn = nullptr;
 
     IBackendCoordinator* m_coordinator = nullptr;
+    IBackendCoordinator* m_ownedCoordinator = nullptr;
     gridlock::core::LspCoordinator* m_lspCoordinator = nullptr;
     PlainJaneTooltip* m_plainJaneTooltip = nullptr;
     gridlock::core::HpcBackend* m_hpcBackend = nullptr;
@@ -623,6 +648,7 @@ private:
     QMap<int, int> m_rankLoopCounter;
     QString m_loadedBinaryPath;
     bool m_useRealBinaryTarget = false;
+    bool m_previewFixtureOnly = false;
     QMap<QDockWidget*, DockHomeSlot> m_dockHomeSlots;
     QPointer<QDockWidget> m_draggingDock = nullptr;
     QPoint m_dragOffset;

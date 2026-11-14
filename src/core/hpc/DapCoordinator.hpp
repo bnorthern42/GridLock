@@ -114,14 +114,39 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Sends a DAP `stepIn` request for @p threadId. */
   void stepInto(int threadId) override;
 
+  /** @brief Sends a machine-instruction granularity `stepIn` request for @p threadId. */
+  void stepInstruction(int threadId) override;
+
   /** @brief Sends a DAP `continue` request for @p threadId. */
   void continueExecution(int threadId) override;
 
   /** @brief Sends a DAP `pause` request for @p threadId. */
   void pauseExecution(int threadId) override;
 
+  /** @brief Pauses 0-based MPI rank @p rankId (`threadId = rankId + 1`). */
+  void pauseRank(int rankId) override { pauseExecution(rankId + 1); }
+
   /** @brief Locates `lldb-dap` / `lldb-vscode` in `PATH` and launches a session for @p binaryPath. */
   void launchParallelSession(const QString& binaryPath, int ranks) override;
+
+  /** @brief Launches a DAP session with explicit MPI launcher arguments @p mpiArgs. */
+  void launchParallelSession(const QString& binaryPath,
+                             int ranks,
+                             const QString& mpiArgs) override;
+
+  /** @brief Sets a source-line breakpoint (with optional @p condition) and syncs via `setBreakpoints`. */
+  void setBreakpoint(const QString& file,
+                     int line,
+                     const QString& condition = QString(),
+                     int rankFilter = -1) override;
+
+  /** @brief Clears all active breakpoints across tracked source files. */
+  void clearBreakpoints() override;
+
+  /** @brief Returns `"lldb-dap"` as the active debugger engine identifier. */
+  QString activeEngineName() const override {
+    return QStringLiteral("lldb-dap");
+  }
 
   /** @brief Returns the OS PID mapped to @p rankId, or `0` if unmapped. */
   pid_t getPidForRank(int rankId) const override {
@@ -212,4 +237,6 @@ class DapCoordinator : public IBackendCoordinator {
 
   int m_slurmJobId = -1;       ///< Active SLURM job ID parsed from target output, or `-1`.
   QString m_currentBinaryPath; ///< Filesystem path of the target binary being debugged.
+  QString m_mpiArgs;           ///< Optional MPI launcher arguments passed to `launchParallelSession`.
+  QMap<QString, QMap<int, QString>> m_breakpointConditions; ///< Optional conditional expressions per `(file, line)`.
 };

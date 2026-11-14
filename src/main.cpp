@@ -5,8 +5,9 @@
  * Configures Wayland/Mesa surface parameters, evaluates pre-GUI command-line flags
  * (--headless and --snapshot) to select the Qt offscreen platform plugin when
  * running non-interactively, initializes the global ThemeManager and font database,
- * wires the DapCoordinator backend to MainWindow, and dispatches either snapshot
- * capture, interactive tutorial mode, automated test mode, or the standard GUI event loop.
+ * synchronizes the configured live debugger coordinator (`gdb` or `lldb-dap`) on MainWindow,
+ * and dispatches either snapshot capture, interactive tutorial mode, automated test mode,
+ * or the standard GUI event loop.
  */
 
 #include <cstdio>
@@ -31,7 +32,6 @@
 #include "QtAdvancedStylesheet.h"
 #include "backend/GridLockAutomationRunner.hpp"
 #include "core/Version.hpp"
-#include "core/hpc/DapCoordinator.hpp"
 #include "core/managers/ThemeManager.hpp"
 #include "core/utils/CliParser.hpp"
 #include "ui/MainWindow.hpp"
@@ -176,10 +176,9 @@ int main(int argc, char* argv[]) {
   g_isVerbose = parser.isVerbose();
   qInstallMessageHandler(gridlockMessageHandler);
 
-  // Instantiate the primary workstation window and attach the Debug Adapter Protocol coordinator.
+  // Instantiate the primary workstation window and synchronize its live debugger coordinator (`gdb` or `lldb-dap`).
   gridlock::ui::MainWindow window;
-  auto* backend = new DapCoordinator(&window);
-  window.setCoordinator(backend);
+  window.syncCoordinatorWithConfig();
 
   // Ensure initial geometry has suitable workstation dimensions before showing.
   if (window.width() < 1440 || window.height() < 900) {

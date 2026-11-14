@@ -10,6 +10,11 @@
 
 #include "MainWindow.hpp"
 
+#include "../core/hpc/DapCoordinator.hpp"
+#include "../core/hpc/DeadlockAnalyzer.hpp"
+#include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/managers/ConfigManager.hpp"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -117,6 +122,223 @@ QString ensureWritableTutorialBinaryPath(const QString& sourcePath) {
         return targetBin;
     }
     return companionBin;
+}
+
+/**
+ * @brief Synchronizes `m_coordinator` with `ConfigManager::instance().debuggerEngine()` when idle.
+ *
+ * Instantiates `GdbRankCoordinator` by default (for `"gdb"`, `"cuda-gdb"`, and `"rocgdb"`) so
+ * multi-rank MPI debugging works out of the box, or switches to `DapCoordinator` when `"lldb-dap"`
+ * is selected in Preferences while no active debugging session is running.
+ */
+void MainWindow::syncCoordinatorWithConfig() {
+    // Never hot-swap the active coordinator backend mid-session while inferiors are attached.
+    if (m_debugSessionActive) return;
+
+    const QString rawEngine =
+        gridlock::core::ConfigManager::instance().debuggerEngine().trimmed().toLower();
+    const QString desired = (rawEngine == QStringLiteral("lldb-dap"))
+                                ? QStringLiteral("lldb-dap")
+                                : QStringLiteral("gdb");
+
+    // Preserve the existing coordinator instance when its engine identifier already matches.
+    if (m_coordinator && m_coordinator->activeEngineName() == desired) return;
+
+    if (m_coordinator) m_coordinator->disconnect();
+    if (m_deadlockAnalyzer) {
+        delete m_deadlockAnalyzer;
+        m_deadlockAnalyzer = nullptr;
+    }
+    if (m_ownedCoordinator) {
+        m_ownedCoordinator->terminateSession();
+        delete m_ownedCoordinator;
+        m_ownedCoordinator = nullptr;
+    }
+    m_coordinator = nullptr;
+
+    // Instantiate the requested live backend coordinator and wire all workstation signal routes.
+    if (desired == QStringLiteral("lldb-dap")) {
+        m_ownedCoordinator = new DapCoordinator(this);
+    } else {
+        m_ownedCoordinator = new gridlock::GdbRankCoordinator(this);
+    }
+    setCoordinator(m_ownedCoordinator);
+}
+
+/**
+ * @brief Dispatches a live source-level step-over (`-exec-next` / DAP `next`) on the active rank.
+ * @return True if an active session coordinator accepted the step-over request.
+ */
+bool MainWindow::stepOverWorkflow() {
+    if (!m_debugSessionActive || !m_coordinator) return false;
+    const int activeRank = activeSteppingRank();
+    m_focusedRank = activeRank;
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
+    m_coordinator->stepOver(activeRank + 1);
+    return true;
+}
+
+/**
+ * @brief Dispatches a live source-level step-into (`-exec-step` / DAP `stepIn`) on the active rank.
+ * @return True if an active session coordinator accepted the step-into request.
+ */
+bool MainWindow::stepIntoWorkflow() {
+    if (!m_debugSessionActive || !m_coordinator) return false;
+    const int activeRank = activeSteppingRank();
+    m_focusedRank = activeRank;
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
+    m_coordinator->stepInto(activeRank + 1);
+    return true;
+}
+
+/**
+ * @brief Interrupts execution on the currently focused MPI rank (`SIGINT` + `-exec-interrupt` / DAP `pause`).
+ * @return True if a coordinator instance received the pause request.
+ */
+bool MainWindow::pauseRankWorkflow() {
+    if (!m_coordinator) return false;
+    const int activeRank = activeSteppingRank();
+    m_focusedRank = activeRank;
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("PAUSED"));
+    m_coordinator->pauseRank(activeRank);
+    return true;
+}
+
+/**
+ * @brief Updates workspace views upon receiving live state changes for an MPI rank.
+ * @param rankId Zero-based MPI rank index.
+ * @param state Snapshot containing current execution state, active PC, source line, and registers.
+ */
+void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
+    // Cache the newest rank state and reflect it on the Server Rack overview widget.
+    m_latestStates[rankId] = state;
+    if (m_serverRackView) m_serverRackView->updateRankState(rankId, state);
+
+    // Parse the 64-bit instruction pointer from $rip (register slot 16) for CFG/disassembly sync.
+    const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
+    const QString pcToken = pcAddr.section(QLatin1Char(' '), 0, 0);
+    bool pcOk = false;
+    const uint64_t pcVal = pcToken
+                               .mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0)
+                               .toULongLong(&pcOk, 16);
+
+    // Push per-rank live status into the MPI Diagnostics table dock.
+    if (m_mpiDiagnosticsWidget) {
+        const QString diagStatus = (state.currentState == QLatin1String("stopped"))
+                                       ? QStringLiteral("PAUSED")
+                                       : state.currentState.toUpper();
+        m_mpiDiagnosticsWidget->updateRankStateRow(
+            rankId, diagStatus.isEmpty() ? QStringLiteral("IDLE") : diagStatus,
+            state.currentFunction.isEmpty() ? QStringLiteral("main") : state.currentFunction,
+            QStringLiteral("LIVE"), pcOk ? pcVal : 0ULL,
+            m_coordinator ? std::max(1, m_coordinator->getProcessCount()) : 1);
+    }
+
+    // Synchronize detail inspection views when the updated rank is currently focused.
+    if (rankId == m_focusedRank) {
+        if (m_disassemblyView && !state.disassemblyText.isEmpty() &&
+            (!m_useRealBinaryTarget || !pcOk || pcVal == 0ULL ||
+             m_disassemblyView->lineForAddress(pcVal) < 0)) {
+            m_disassemblyView->updateDisassembly(state.disassemblyText);
+        }
+        // Highlight the active hardware instruction address in both Linear ASM and CFG views.
+        if (m_disassemblyView && pcOk && pcVal != 0ULL) {
+            m_disassemblyView->setCurrentAddress(pcVal);
+            m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
+        }
+        updateStatusTelemetry(
+            pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
+        refreshStatusBarMemoryTelemetry();
+        // Open or focus the resolved DWARF source file and move the yellow PC arrow to currentLine.
+        if (state.currentState == "stopped" && state.currentLine > 0) {
+            SourceCodeView* view =
+                (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
+                    ? m_editorTabManager->openFile(state.currentFile)
+                    : getSourceCodeView();
+            if (view) {
+                view->highlightCurrentLine(state.currentLine);
+                view->highlightExecutionLine(state.currentLine);
+            }
+        }
+        if (m_registerView && !state.registers.isEmpty()) m_registerView->updateRegisters(state);
+    }
+
+    // Update cross-rank variable matrix values for differential comparison.
+    if (m_differentialGrid) m_differentialGrid->setVariableData(rankId, state.variableWatches);
+
+    // Automatically unlatch Run Target when every rank in an active session has exited cleanly.
+    if (m_debugSessionActive && m_coordinator && m_coordinator->getProcessCount() > 0) {
+        bool allExited = true;
+        for (int r = 0; r < m_coordinator->getProcessCount(); ++r) {
+            if (!m_latestStates.contains(r) ||
+                m_latestStates[r].currentState != QLatin1String("exited")) {
+                allExited = false;
+                break;
+            }
+        }
+        if (allExited) {
+            m_debugSessionActive = false;
+            updateDebugToolbarState();
+            if (SourceCodeView* sv = getSourceCodeView()) sv->highlightExecutionLine(-1);
+            updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("EXITED (0)"));
+        }
+    }
+}
+
+/**
+ * @brief Focuses inspection views (Disassembly, Registers, Memory, Source) on a selected MPI rank.
+ * @param rankId The target 0-based rank index selected by the user.
+ */
+void MainWindow::onRankSelected(int rankId) {
+    // Track newly focused rank and immediately rebind all inspection panes to its cached snapshot.
+    m_focusedRank = rankId;
+    if (m_latestStates.count(rankId)) {
+        const auto& state = m_latestStates[rankId];
+        const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
+        const QString pcToken = pcAddr.section(QLatin1Char(' '), 0, 0);
+        bool pcOk = false;
+        const uint64_t pcVal = pcToken
+                                   .mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0)
+                                   .toULongLong(&pcOk, 16);
+
+        updateStatusTelemetry(
+            pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
+        refreshStatusBarMemoryTelemetry();
+        if (m_disassemblyView && !state.disassemblyText.isEmpty() &&
+            (!m_useRealBinaryTarget || !pcOk || pcVal == 0ULL ||
+             m_disassemblyView->lineForAddress(pcVal) < 0)) {
+            m_disassemblyView->updateDisassembly(state.disassemblyText);
+        }
+        if (m_disassemblyView && pcOk && pcVal != 0ULL) {
+            m_disassemblyView->setCurrentAddress(pcVal);
+            m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
+        }
+        // Trigger on-demand GDB disassembly fallback when no cached text is present for this rank.
+        if (state.disassemblyText.isEmpty()) {
+            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+                gdbCoord->requestDisassemblyFallback(rankId);
+            }
+        }
+        if (state.currentState == "stopped" && state.currentLine > 0) {
+            SourceCodeView* view =
+                (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
+                    ? m_editorTabManager->openFile(state.currentFile)
+                    : getSourceCodeView();
+            if (view) {
+                view->highlightCurrentLine(state.currentLine);
+                view->highlightExecutionLine(state.currentLine);
+            }
+        }
+        if (m_differentialGrid) m_differentialGrid->setVariableData(rankId, state.variableWatches);
+        if (m_registerView && !state.registers.isEmpty()) m_registerView->updateRegisters(state);
+    } else {
+        // Refresh baseline telemetry and request initial disassembly if rank state has not arrived yet.
+        updateStatusTelemetry();
+        refreshStatusBarMemoryTelemetry();
+        if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+            gdbCoord->requestDisassemblyFallback(rankId);
+        }
+    }
 }
 
 }  // namespace gridlock::ui

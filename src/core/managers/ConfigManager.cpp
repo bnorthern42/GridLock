@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -33,6 +34,7 @@ namespace gridlock::core {
  */
 ConfigManager::ConfigManager() {
   m_workspacePath = QDir::currentPath();
+  m_debuggerEngine.clear();
   loadConfig();
 }
 
@@ -41,6 +43,7 @@ ConfigManager::ConfigManager() {
  */
 void ConfigManager::setWorkspace(const QString& path) {
   m_workspacePath = path;
+  m_debuggerEngine.clear();
 }
 
 /**
@@ -792,12 +795,15 @@ QString ConfigManager::debuggerEngine() const {
     try {
       auto tbl = toml::parse_file(wf.toStdString());
       if (auto* dbg = tbl["debugger"].as_table())
-        if (auto val = dbg->get("engine"); val && val->is_string())
-          return QString::fromStdString(val->as_string()->get());
+        if (auto val = dbg->get("engine"); val && val->is_string()) {
+          const QString eng = QString::fromStdString(val->as_string()->get()).trimmed();
+          if (!eng.isEmpty()) return eng;
+        }
     } catch (...) {}
   }
   QSettings s(kOrg, kApp);
-  return s.value(QStringLiteral("debugger/engine"), QStringLiteral("gdb")).toString();
+  const QString persisted = s.value(QStringLiteral("debugger/engine"), QStringLiteral("gdb")).toString().trimmed();
+  return persisted.isEmpty() ? QStringLiteral("gdb") : persisted;
 }
 
 /**
@@ -817,6 +823,8 @@ void ConfigManager::setDebuggerEngine(const QString& engine) {
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/engine"), clean); s.sync();
+  // Broadcast dynamic property update on qApp so active MainWindow instances switch coordinators live.
+  if (auto* app = QCoreApplication::instance()) app->setProperty("gridlock_debugger_engine", clean);
 }
 
 /**

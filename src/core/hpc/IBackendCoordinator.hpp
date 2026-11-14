@@ -43,11 +43,17 @@ class IBackendCoordinator : public QObject {
   /** @brief Steps into the function call on the current line for @p threadId. */
   virtual void stepInto(int threadId) = 0;
 
+  /** @brief Steps a single machine instruction on @p threadId (`rankId + 1`). */
+  virtual void stepInstruction(int threadId) = 0;
+
   /** @brief Resumes execution of @p threadId until the next breakpoint or signal. */
   virtual void continueExecution(int threadId) = 0;
 
-  /** @brief Interrupts/pauses execution of @p threadId. */
+  /** @brief Interrupts/pauses execution of 1-based @p threadId (`rankId + 1`). */
   virtual void pauseExecution(int threadId) = 0;
+
+  /** @brief Interrupts/pauses execution of 0-based MPI rank @p rankId. */
+  virtual void pauseRank(int rankId) { pauseExecution(rankId + 1); }
 
   /** @brief Evaluates @p expression in the current stack frame of @p rankId. */
   virtual void evaluateExpression(int rankId, const QString& expression) = 0;
@@ -60,6 +66,30 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Spawns a parallel debugging session for @p binaryPath across @p ranks processes. */
   virtual void launchParallelSession(const QString& binaryPath, int ranks) = 0;
+
+  /**
+   * @brief Spawns a parallel debugging session with explicit MPI launcher arguments @p mpiArgs.
+   */
+  virtual void launchParallelSession(const QString& binaryPath,
+                                     int ranks,
+                                     const QString& mpiArgs) {
+    Q_UNUSED(mpiArgs);
+    launchParallelSession(binaryPath, ranks);
+  }
+
+  /**
+   * @brief Registers an active breakpoint at `file:line` with optional @p condition and @p rankFilter (`-1` = all ranks).
+   */
+  virtual void setBreakpoint(const QString& file,
+                             int line,
+                             const QString& condition = QString(),
+                             int rankFilter = -1) = 0;
+
+  /** @brief Clears all active breakpoints tracked by this coordinator. */
+  virtual void clearBreakpoints() = 0;
+
+  /** @brief Returns the canonical engine identifier (`"gdb"` or `"lldb-dap"`). */
+  virtual QString activeEngineName() const = 0;
 
   /** @brief Returns the OS process ID (`pid_t`) of the target rank @p rankId. */
   virtual pid_t getPidForRank(int rankId) const = 0;

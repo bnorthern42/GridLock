@@ -10,6 +10,7 @@
 #include "DapCoordinator.hpp"
 
 #include <QDebug>
+#include <QFileInfo>
 #include <QFuture>
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -182,7 +183,17 @@ void DapCoordinator::stepOver(int threadId) {
  */
 void DapCoordinator::stepInto(int threadId) {
   QJsonObject args;
-  args["threadId"] = threadId;
+  args["threadId"] = (threadId > 0) ? threadId : 1;
+  sendRequest("stepIn", args);
+}
+
+/**
+ * @brief Steps a single machine instruction on @p threadId via DAP `stepIn` with `"instruction"` granularity.
+ */
+void DapCoordinator::stepInstruction(int threadId) {
+  QJsonObject args;
+  args["threadId"] = (threadId > 0) ? threadId : 1;
+  args["granularity"] = "instruction";
   sendRequest("stepIn", args);
 }
 
@@ -191,7 +202,7 @@ void DapCoordinator::stepInto(int threadId) {
  */
 void DapCoordinator::continueExecution(int threadId) {
   QJsonObject args;
-  args["threadId"] = threadId;
+  args["threadId"] = (threadId > 0) ? threadId : 1;
   sendRequest("continue", args);
 }
 
@@ -200,7 +211,7 @@ void DapCoordinator::continueExecution(int threadId) {
  */
 void DapCoordinator::pauseExecution(int threadId) {
   QJsonObject args;
-  args["threadId"] = threadId;
+  args["threadId"] = (threadId > 0) ? threadId : 1;
   sendRequest("pause", args);
 }
 
@@ -209,21 +220,91 @@ void DapCoordinator::pauseExecution(int threadId) {
  */
 void DapCoordinator::launchParallelSession(const QString& binaryPath,
                                            int ranks) {
-  m_processCount = ranks;
-  m_currentBinaryPath = binaryPath;
-  qDebug() << "[DAP] Spawning DAP Adapter process for binary:" << binaryPath;
+  launchParallelSession(binaryPath, ranks,
+                        gridlock::core::ConfigManager::instance().getMpiArgs());
+}
 
-  QString adapterProgram = QStandardPaths::findExecutable("lldb-dap");
+/**
+ * @brief Resolves the configured DAP adapter and starts a debugging session with @p mpiArgs.
+ */
+void DapCoordinator::launchParallelSession(const QString& binaryPath,
+                                           int ranks,
+                                           const QString& mpiArgs) {
+  if (m_state != SessionState::Disconnected) {
+    terminateSession();
+  }
+  m_processCount = std::max(1, ranks);
+  m_currentBinaryPath = binaryPath;
+  m_mpiArgs = mpiArgs;
+
+  QString adapterProgram =
+      gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath().trimmed();
+  if (!adapterProgram.isEmpty() && !QFileInfo::exists(adapterProgram)) {
+    adapterProgram = QStandardPaths::findExecutable(adapterProgram);
+  }
+  if (adapterProgram.isEmpty()) {
+    adapterProgram = QStandardPaths::findExecutable("lldb-dap");
+  }
   if (adapterProgram.isEmpty()) {
     adapterProgram = QStandardPaths::findExecutable("lldb-vscode");
   }
-
   if (adapterProgram.isEmpty()) {
-    qDebug() << "[DAP] FATAL: Could not find lldb-dap or lldb-vscode in PATH!";
+    qWarning() << "[DAP] Could not find lldb-dap or lldb-vscode in PATH.";
     return;
   }
 
   startAdapter(adapterProgram);
+}
+
+/**
+ * @brief Registers a breakpoint at `(file, line)` with optional @p condition and syncs via DAP `setBreakpoints`.
+ */
+void DapCoordinator::setBreakpoint(const QString& file,
+                                   int line,
+                                   const QString& condition,
+                                   int rankFilter) {
+  Q_UNUSED(rankFilter);
+  if (file.isEmpty() || line <= 0) return;
+  if (!m_breakpoints[file].contains(line)) {
+    m_breakpoints[file].append(line);
+  }
+  if (!condition.trimmed().isEmpty()) {
+    m_breakpointConditions[file][line] = condition.trimmed();
+  } else {
+    m_breakpointConditions[file].remove(line);
+  }
+
+  if (m_state != SessionState::Running && m_state != SessionState::Paused) {
+    return;
+  }
+
+  QJsonObject args;
+  args["source"] = QJsonObject{{"path", file}};
+  QJsonArray breakpointsArray;
+  for (int l : m_breakpoints[file]) {
+    QJsonObject bp{{"line", l}};
+    const QString cond = m_breakpointConditions.value(file).value(l);
+    if (!cond.isEmpty()) bp["condition"] = cond;
+    breakpointsArray.append(bp);
+  }
+  args["breakpoints"] = breakpointsArray;
+  sendRequest("setBreakpoints", args);
+}
+
+/**
+ * @brief Clears all active breakpoints across tracked files and notifies any running adapter.
+ */
+void DapCoordinator::clearBreakpoints() {
+  if (m_state == SessionState::Running || m_state == SessionState::Paused) {
+    for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
+      QJsonObject args;
+      args["source"] = QJsonObject{{"path", it.key()}};
+      args["breakpoints"] = QJsonArray();
+      sendRequest("setBreakpoints", args);
+    }
+  }
+  m_breakpoints.clear();
+  m_breakpointConditions.clear();
 }
 
 /**
@@ -232,6 +313,7 @@ void DapCoordinator::launchParallelSession(const QString& binaryPath,
 void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
   if (m_breakpoints[file].contains(line)) {
     m_breakpoints[file].removeOne(line);
+    m_breakpointConditions[file].remove(line);
   } else {
     m_breakpoints[file].append(line);
   }
@@ -245,6 +327,8 @@ void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
   for (int l : m_breakpoints[file]) {
     QJsonObject bp;
     bp["line"] = l;
+    const QString cond = m_breakpointConditions.value(file).value(l);
+    if (!cond.isEmpty()) bp["condition"] = cond;
     breakpointsArray.append(bp);
   }
   args["breakpoints"] = breakpointsArray;
@@ -396,6 +480,9 @@ void DapCoordinator::terminateSession() {
   }
 
   m_slurmJobId = -1;
+  m_processCount = 0;
+  m_rankToPid.clear();
+  m_activeFrameIds.clear();
   m_state = SessionState::Disconnected;
   emit stateChanged(m_state);
 }
@@ -563,6 +650,17 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         const QJsonArray scopes =
             message["body"].toObject()["scopes"].toArray();
         emit scopesUpdated(rankId, scopes);
+        // Automatically query the "Registers" scope so RegisterView receives live CPU registers.
+        for (const QJsonValue& scVal : scopes) {
+          const QJsonObject scObj = scVal.toObject();
+          if (scObj["name"].toString().contains("Register", Qt::CaseInsensitive)) {
+            const int regRef = scObj["variablesReference"].toInt();
+            if (regRef > 0) {
+              m_registersRequests[m_sequenceNumber] = rankId;
+              sendRequest("variables", QJsonObject{{"variablesReference", regRef}});
+            }
+          }
+        }
       }
     } else if (command == "variables" && message["success"].toBool()) {
       // Route the returned `variables` array to either the Local Variables tree model
@@ -628,10 +726,13 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         }
       } else if (m_evaluateRequests.contains(seq)) {
         // Forward interactive watch expression results to the UI console/evaluator.
+        // Pop the tracked request sequence entry so each DAP response emits once.
         const auto pair = m_evaluateRequests.take(seq);
         const int rankId = pair.first;
         const QString expr = pair.second;
+        // Extract formatted string value returned by lldb-dap for the evaluated expression.
         const QString result = message["body"].toObject()["result"].toString();
+        // Broadcast expression evaluation result to VariablesDockWidget and GdbConsoleWidget.
         emit expressionEvaluated(rankId, expr, result);
       }
     }
@@ -640,9 +741,12 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
     const QString event = message["event"].toString();
     if (event == "initialized") {
       // Flush all registered breakpoints followed by `configurationDone` to release execution.
+      // Per the Debug Adapter Protocol specification, `setBreakpoints` may only be sent
+      // after the adapter emits `initialized` and prior to `configurationDone`.
       for (auto it = m_breakpoints.constBegin();
            it != m_breakpoints.constEnd(); ++it) {
         if (!it.value().isEmpty()) {
+          // Package source file path and conditional line descriptors into a single batch request.
           QJsonObject args;
           QJsonObject source;
           source["path"] = it.key();
@@ -652,22 +756,28 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
           for (int l : *it) {
             QJsonObject bp;
             bp["line"] = l;
+            // Attach optional expression predicate so lldb-dap filters hits in-process.
+            const QString cond = m_breakpointConditions.value(it.key()).value(l);
+            if (!cond.isEmpty()) bp["condition"] = cond;
             breakpointsArray.append(bp);
           }
           args["breakpoints"] = breakpointsArray;
           sendRequest("setBreakpoints", args);
         }
       }
+      // Complete initial launch handshake and transition workstation state to Running.
       sendRequest("configurationDone");
       m_state = SessionState::Running;
       emit stateChanged(m_state);
     } else if (event == "stopped") {
       // Map 1-based DAP `threadId` back to 0-based MPI `rankId` and request top stack frame.
+      // Subsequent `stackTrace` -> `scopes` -> `variables` requests hydrate registers and locals.
       const QJsonObject body = message["body"].toObject();
       const QString reason = body["reason"].toString();
       const int threadId = body["threadId"].toInt();
       const int rankId = threadId - 1;
 
+      // Notify UI toolbars and rack tiles that target execution is now halted.
       m_state = SessionState::Paused;
       emit stateChanged(m_state);
 
@@ -709,9 +819,12 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
  * @param error The `QProcess::ProcessError` code reported by the OS.
  */
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
+  // Surface adapter spawn/pipe failures immediately to connected workstation listeners.
   qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-"
            << m_process->errorString();
   emit errorOccurred(m_process->errorString());
+  // Reset active rank count and mark coordinator disconnected on fatal transport fault.
+  m_processCount = 0;
   m_state = SessionState::Disconnected;
   emit stateChanged(m_state);
 }
@@ -723,6 +836,9 @@ void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
  */
 void DapCoordinator::handleProcessFinished(int exitCode,
                                            QProcess::ExitStatus exitStatus) {
+  // Clear tracked inferior PIDs and notify observers that the debug adapter exited.
+  m_processCount = 0;
+  m_rankToPid.clear();
   emit adapterExited(exitCode, exitStatus);
   m_state = SessionState::Disconnected;
   emit stateChanged(m_state);

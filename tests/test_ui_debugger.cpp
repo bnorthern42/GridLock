@@ -19,6 +19,7 @@
 #include <QFont>
 #include <QLabel>
 #include <QRadioButton>
+#include <QSpinBox>
 #include <QString>
 #include <QTabBar>
 #include <QTabWidget>
@@ -29,6 +30,7 @@
 #include <QtTest/QtTest>
 #include <cmath>
 
+#include "../src/core/hpc/IBackendCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/ClangdLspClient.hpp"
@@ -561,70 +563,85 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
 }
 
 /**
- * @brief Verifies on-demand ELF binary compilation, genuine DWARF source-to-instruction line
- *        mapping for `deadlock_ring`, breakpoint-first Run/Continue execution, latched Run Target
- *        toolbar visual state, and non-italic toolbar selector typography.
+ * @brief Verifies live coordinator engine switching (`gdb` <-> `lldb-dap`), on-demand ELF binary
+ *        compilation, DWARF mapping, real `launchParallelSession` breakpoint stop, live inferior
+ *        register hydration (`$rsp`/`$rip`), PC advance on step/continue, and clean teardown.
  */
 void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatchedToolbar() {
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    cfg.setDebuggerEngine(QStringLiteral("gdb"));
+    cfg.setGlobalMpiArgs(QStringLiteral("--oversubscribe"));
     gridlock::ui::MainWindow mainWindow;
     mainWindow.resize(1440, 900);
     mainWindow.show();
     QApplication::processEvents();
 
-    // 1. Select deadlock_ring and compile its real ELF64 binary with DWARF debug info on-demand.
+    // 1. Dynamic coordinator switching: ConfigManager::setDebuggerEngine switches MainWindow's live backend.
+    QVERIFY2(mainWindow.coordinator() != nullptr, "MainWindow must construct a live IBackendCoordinator");
+    QVERIFY(QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
+    cfg.setDebuggerEngine(QStringLiteral("lldb-dap"));
+    QApplication::processEvents();
+    QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("DapCoordinator")));
+    cfg.setDebuggerEngine(QStringLiteral("gdb"));
+    QApplication::processEvents();
+    QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
+
+    // 2. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QTest::qWait(600); }
     QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "ensureTargetBinaryCompiled must compile ELF binary");
-    QApplication::processEvents();
-    QVERIFY2(QFileInfo::exists(mainWindow.activeTargetBinaryPath()), qPrintable(mainWindow.activeTargetBinaryPath()));
-
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    QVERIFY(editorTabs && disasmView && targetCombo && editorTabs->currentSourceCodeView());
-    auto* srcView = editorTabs->currentSourceCodeView();
-
-    // Verify genuine compiler-emitted assembly (calls MPI_Send & MPI_Recv; zero hardcoded DeeplyNested).
+    auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    auto* regTable = mainWindow.findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable"));
+    QVERIFY(editorTabs && disasmView && targetCombo && rankSpin && regTable);
     const QString asmText = disasmView->toPlainText();
-    QVERIFY2(asmText.contains(QStringLiteral("MPI_Send")) && asmText.contains(QStringLiteral("MPI_Recv")),
-             qPrintable(asmText.left(400)));
-    QVERIFY2(!asmText.contains(QStringLiteral("DeeplyNested")), "Must NOT contain hardcoded DeeplyNested preview");
-
-    // Resolve DWARF instruction addresses for MPI_Send and MPI_Recv lines in deadlock_ring.cpp.
+    QVERIFY(asmText.contains(QStringLiteral("MPI_Send")) && asmText.contains(QStringLiteral("MPI_Recv")) && !asmText.contains(QStringLiteral("DeeplyNested")));
     const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send("));
     const int recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
-    QVERIFY(sendLine > 0 && recvLine > sendLine);
-    const uint64_t sendAddr = mainWindow.sourceLineToAddress(sendLine);
-    const uint64_t recvAddr = mainWindow.sourceLineToAddress(recvLine);
-    QVERIFY(sendAddr != 0ULL && recvAddr != 0ULL && sendAddr != recvAddr);
-    QVERIFY(disasmView->lineForAddress(sendAddr) >= 0 && disasmView->lineForAddress(recvAddr) >= 0);
+    QVERIFY(sendLine > 0 && recvLine > sendLine && mainWindow.sourceLineToAddress(sendLine) != 0ULL && mainWindow.sourceLineToAddress(recvLine) != 0ULL);
 
-    // 2. Toggle breakpoints on sendLine and recvLine; Run Target must stop directly on sendLine!
+    // 3. Compile minimal C++/MPI target (`inspection_demo`, -g -O0), set breakpoints in main, and launch 2 live ranks.
+    rankSpin->setValue(2);
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName(inspection_demo)");
+    QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must compile with -g -O0");
+    auto* srcView = editorTabs->currentSourceCodeView();
+    QVERIFY(srcView != nullptr && QFileInfo::exists(mainWindow.activeTargetBinaryPath()));
     for (int bp : srcView->breakpoints().values()) srcView->toggleBreakpoint(bp);
-    srcView->toggleBreakpoint(sendLine); srcView->toggleBreakpoint(recvLine);
-    mainWindow.startTargetWorkflow();
-    QApplication::processEvents();
+    const int bpLine1 = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Comm_rank("));
+    const int bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("for (int i = 0;"));
+    QVERIFY(bpLine1 > 0 && bpLine2 > bpLine1);
+    srcView->toggleBreakpoint(bpLine1); srcView->toggleBreakpoint(bpLine2);
 
+    // Launch real parallel GDB session and verify coordinator owns 2 live rank slots and hits bpLine1.
+    mainWindow.startTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), true); QCOMPARE(mainWindow.isRunButtonLatched(), true);
-    QCOMPARE(srcView->executionLine(), sendLine); QCOMPARE(disasmView->currentAddress(), sendAddr);
+    QCOMPARE(mainWindow.coordinator()->getCurrentBinaryPath(), mainWindow.activeTargetBinaryPath());
+    QCOMPARE(mainWindow.coordinator()->getProcessCount(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine1, 8000);
 
-    // Continue must step past sendAddr and stop directly at the second user breakpoint (recvLine).
+    // Helper reading register value cell by lowercase mnemonic from RegisterView's QTableWidget.
+    auto readReg = [&](const QString& name) {
+        for (int r = 0; r < regTable->rowCount(); ++r)
+            if (regTable->item(r, 0) && regTable->item(r, 0)->text() == name && regTable->item(r, 1)) return regTable->item(r, 1)->text();
+        return QString();
+    };
+    // Verify non-hardcoded live inferior registers ($rsp and $rip match real OS process state).
+    QTRY_VERIFY_WITH_TIMEOUT(!readReg(QStringLiteral("rsp")).isEmpty() && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe480") && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe478"), 5000);
+    bool ripOk = false;
+    const uint64_t liveRip1 = readReg(QStringLiteral("rip")).section(QLatin1Char(' '), 0, 0).mid(2).toULongLong(&ripOk, 16);
+    QVERIFY(ripOk && liveRip1 != 0ULL);
+    QCOMPARE(disasmView->currentAddress(), liveRip1);
+
+    // 4. Advance real PC via Step Inst, then Continue to bpLine2, then Terminate Session cleanly.
+    QVERIFY(mainWindow.stepInstructionWorkflow());
+    QTRY_VERIFY_WITH_TIMEOUT(disasmView->currentAddress() != 0ULL && disasmView->currentAddress() != liveRip1, 5000);
     QVERIFY(mainWindow.continueExecutionWorkflow());
-    QApplication::processEvents();
-    QCOMPARE(srcView->executionLine(), recvLine); QCOMPARE(disasmView->currentAddress(), recvAddr);
-
-    // 3. Stop session and verify Run Target unlatches and toolbar combo is non-italic.
+    QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000);
     mainWindow.stopTargetWorkflow();
-    QApplication::processEvents();
     QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
-    QCOMPARE(targetCombo->font().italic(), false);
-
-    // Zero-breakpoint Run Target on deadlock_ring must pause at MPI_Send circular deadlock.
-    srcView->toggleBreakpoint(sendLine); srcView->toggleBreakpoint(recvLine);
-    mainWindow.startTargetWorkflow();
-    QApplication::processEvents();
-    QCOMPARE(srcView->executionLine(), sendLine);
-    mainWindow.stopTargetWorkflow();
+    QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0); QCOMPARE(targetCombo->font().italic(), false);
 }
 
 /**

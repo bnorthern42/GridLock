@@ -12,10 +12,12 @@
 #include <memory>
 #include <vector>
 
+#include <QJsonArray>
 #include <QMap>
 #include <QObject>
 #include <QPoint>
 #include <QProcess>
+#include <QSocketNotifier>
 #include <QString>
 
 #include "../../RankState.hpp"
@@ -25,7 +27,7 @@ namespace gridlock {
 
 /**
  * @class GdbRankCoordinator
- * @brief Orchestrates parallel GDB/MI3 processes attached to MPI ranks via `gdbserver`.
+ * @brief Orchestrates parallel GDB/MI3 processes attached to MPI ranks via FIFO pipes or `gdbserver`.
  */
 class GdbRankCoordinator : public IBackendCoordinator {
   Q_OBJECT
@@ -44,11 +46,28 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Convenience wrapper delegating to `launchParallelSession(executable, rankCount)`. */
   void startDebugSession(int rankCount, const QString& executable);
 
-  /** @brief Spawns `mpiexec` with per-rank `gdbserver` slots and connects `rankCount` GDB frontends. */
+  /** @brief Spawns `mpiexec`/`mpirun` across @p rankCount GDB/MI3 instances. */
   void launchParallelSession(const QString& executable, int rankCount) override;
 
-  /** @brief Returns the OS PID for @p rankId (`0` when managed via remote TCP `gdbserver`). */
-  pid_t getPidForRank([[maybe_unused]] int rankId) const override { return 0; }
+  /** @brief Spawns `mpiexec`/`mpirun` across @p rankCount GDB/MI3 instances with @p mpiArgs. */
+  void launchParallelSession(const QString& executable,
+                             int rankCount,
+                             const QString& mpiArgs) override;
+
+  /** @brief Returns the live inferior OS PID for @p rankId, or `0` if not running. */
+  pid_t getPidForRank(int rankId) const override;
+
+  /** @brief Returns `"gdb"` as the canonical backend engine identifier. */
+  QString activeEngineName() const override { return QStringLiteral("gdb"); }
+
+  /** @brief Registers an active source-line breakpoint (with optional @p condition and @p rankFilter). */
+  void setBreakpoint(const QString& file,
+                     int line,
+                     const QString& condition = QString(),
+                     int rankFilter = -1) override;
+
+  /** @brief Clears all pending and live breakpoints across all rank sessions. */
+  void clearBreakpoints() override;
 
   /** @brief Returns the filesystem path of the target executable. */
   QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
@@ -76,7 +95,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Pushes persisted workspace breakpoints to @p rankId during initial attach sync. */
   void flushCachedBreakpoints(int rankId);
 
-  /** @brief Writes a raw MI command line to @p rankId's GDB stdin pipe. */
+  /** @brief Writes a raw MI command line to @p rankId's GDB stdin pipe or FIFO. */
   void writeCmd(int rankId, const QString& cmd);
 
   /** @brief Parses one or more newline-delimited GDB/MI records from @p rankId. */
@@ -113,6 +132,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Emitted whenever @p rankId's execution state, location, registers, or watches change. */
   void rankStateChanged(int rankId, const RankState& state);
 
+  /** @brief Emitted when stack frame local variables (`201-stack-list-variables`) arrive for @p rankId. */
+  void localsUpdated(int rankId, const QJsonArray& locals);
+
   /** @brief Emitted for every raw GDB/MI line received from @p rankId. */
   void gdbOutputReceived(int rankId, const QString& output);
 
@@ -126,15 +148,15 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void memoryDataReady(int rankId, qint64 beginAddress, const QString& hexContents);
 
  public slots:
-  /** @brief Broadcasts `-exec-next` across all MPI ranks. */
+  /** @brief Broadcasts `-exec-next` across stopped MPI ranks. */
   virtual void stepAll();
-  /** @brief Broadcasts `-exec-continue` across all MPI ranks. */
+  /** @brief Broadcasts `-exec-continue` across stopped MPI ranks. */
   virtual void continueAll();
   /** @brief Broadcasts `-exec-run` across all MPI ranks. */
   virtual void runAll();
   /** @brief Broadcasts `-exec-interrupt` across all MPI ranks. */
   virtual void haltAll();
-  /** @brief Sends `-exec-interrupt` to a single focused rank @p rankId. */
+  /** @brief Sends `SIGINT` / `-exec-interrupt` to a single focused rank @p rankId. */
   virtual void pauseFocusedRank(int rankId);
 
   /** @brief Implements `IBackendCoordinator::terminateSession()` via `terminateAllSessions()`. */
@@ -146,11 +168,11 @@ class GdbRankCoordinator : public IBackendCoordinator {
     stepAll();
   }
 
-  /** @brief `IBackendCoordinator` step-into shim routing to `stepAll()`. */
-  void stepInto(int threadId) override {
-    Q_UNUSED(threadId);
-    stepAll();
-  }
+  /** @brief Steps into callees (`-exec-step`) on @p threadId (`rankId + 1`). */
+  void stepInto(int threadId) override;
+
+  /** @brief Steps one machine instruction (`-exec-step-instruction`) on @p threadId (`rankId + 1`). */
+  void stepInstruction(int threadId) override;
 
   /** @brief `IBackendCoordinator` continue shim routing to `continueAll()`. */
   void continueExecution(int threadId) override {
@@ -161,13 +183,16 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief `IBackendCoordinator` pause shim routing to `pauseFocusedRank(threadId - 1)`. */
   void pauseExecution(int threadId) override { pauseFocusedRank(threadId - 1); }
 
+  /** @brief Interrupts 0-based MPI rank @p rankId directly. */
+  void pauseRank(int rankId) override { pauseFocusedRank(rankId); }
+
   /** @brief Registers @p varName as a tracked GDB/MI variable object (`-var-create`) across all ranks. */
   void registerWatchVariable(const QString& varName);
 
   /** @brief Sends a user or console command to @p rankId (or all ranks when `rankId == -1`). */
   void sendCommand(int rankId, const QString& cmd);
 
-  /** @brief Slot triggered by `QProcess::readyReadStandardOutput` for @p rankId. */
+  /** @brief Slot triggered by `QProcess::readyReadStandardOutput` or FIFO notifier for @p rankId. */
   void handleGdbOutput(int rankId);
 
   /** @brief Evaluates @p varName for an editor hover tooltip at screen coordinate @p globalPos. */
@@ -175,21 +200,38 @@ class GdbRankCoordinator : public IBackendCoordinator {
 
  private:
   /**
-   * @struct RankProcess
-   * @brief Per-rank GDB process handle, line accumulation buffer, and telemetry state.
+   * @struct PendingBreakpoint
+   * @brief Cached breakpoint specification synchronized to GDB rank slots on launch or live edit.
    */
-  struct RankProcess {
-    int id = 0;                        ///< Zero-based MPI rank index.
-    std::unique_ptr<QProcess> process; ///< Dedicated `gdb --interpreter=mi3` child process.
-    RankState state;                   ///< Live execution, location, register, and watch telemetry.
-    QString buffer;                    ///< Partial line accumulation buffer for GDB stdout.
-    QString lastHoverVarName;          ///< Variable name for pending token `100` hover evaluation.
-    QPoint lastHoverPos;               ///< Screen position for pending token `100` hover tooltip.
-    QString lastEvalExpression;        ///< Expression string for pending token `101` evaluation.
+  struct PendingBreakpoint {
+    QString file;       ///< Source file path.
+    int line = 0;       ///< One-based source line number.
+    QString condition;  ///< Optional conditional expression (`-c`).
+    int rankFilter = -1; ///< Target zero-based rank index, or `-1` for all ranks.
   };
 
-  std::unique_ptr<QProcess> m_mpirunProcess;             ///< Master `mpiexec` launcher process.
+  /**
+   * @struct RankProcess
+   * @brief Per-rank GDB process/FIFO handle, line accumulation buffer, and telemetry state.
+   */
+  struct RankProcess {
+    int id = 0;                          ///< Zero-based MPI rank index.
+    std::unique_ptr<QProcess> process;   ///< Optional standalone `gdb` child process.
+    int fifoInFd = -1;                   ///< Non-blocking FIFO write descriptor to rank GDB stdin.
+    int fifoOutFd = -1;                  ///< Non-blocking FIFO read descriptor from rank GDB stdout.
+    QSocketNotifier* fifoNotifier = nullptr; ///< Event-loop read notifier on `fifoOutFd`.
+    pid_t inferiorPid = 0;               ///< Live target rank OS PID reported by `=thread-group-started`.
+    RankState state;                     ///< Live execution, location, register, and watch telemetry.
+    QString buffer;                      ///< Partial line accumulation buffer for GDB stdout.
+    QString lastHoverVarName;            ///< Variable name for pending token `100` hover evaluation.
+    QPoint lastHoverPos;                 ///< Screen position for pending token `100` hover tooltip.
+    QString lastEvalExpression;          ///< Expression string for pending token `101` evaluation.
+  };
+
+  std::unique_ptr<QProcess> m_mpirunProcess;             ///< Master `mpirun`/`mpiexec` launcher process.
   std::vector<std::unique_ptr<RankProcess>> m_processes; ///< Per-rank GDB frontend slots.
+  std::vector<PendingBreakpoint> m_pendingBreakpoints;   ///< Configured breakpoints synced across launches.
+  QString m_fifoTempDir;                                 ///< Temporary directory owning per-rank MI FIFOs.
   QMap<int, QMap<QString, QString>> m_varNameMap;        ///< `rankId -> (varName -> gdbVarId)`.
   QMap<int, QMap<QString, QString>> m_varNameRevMap;     ///< `rankId -> (gdbVarId -> varName)`.
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
