@@ -286,11 +286,11 @@ void GdbRankCoordinator::terminateAllSessions() {
       }
     }
   }
-  // Clear rank process slots, OS PID map, and per-rank GDB variable-object lookup tables.
-  m_processes.clear();
-  m_rankPids.clear();
-  m_varNameMap.clear();
-  m_varNameRevMap.clear();
+  // Clear rank process slots, OS PID map, stack/thread caches, and GDB variable-object lookup tables.
+  const bool hadActiveSession = !m_processes.empty() || !m_rankFrames.isEmpty() || !m_rankThreads.isEmpty();
+  m_processes.clear(); m_rankPids.clear(); m_varNameMap.clear(); m_varNameRevMap.clear();
+  m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear(); m_pendingFrameSelect.clear();
+  if (hadActiveSession) { emit stackTraceUpdated(0, {}); emit threadsUpdated(0, {}); }
 
   // Terminate and reap the master `mpirun` / `mpiexec` launcher process cleanly.
   if (m_mpirunProcess) {
@@ -764,6 +764,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           const QString& varName = m_watchVariables[varIdx];
           if (!m_varNameMap[rankId].contains(varName)) writeCmd(rankId, QString("30%1-var-create - * %2\n").arg(varIdx).arg(varName));
         }
+        if (matchThread.hasMatch()) m_activeThreadIds[rankId] = matchThread.captured(1).toInt();
+        requestStackAndThreads(rankId);
         emit rankStateChanged(rankId, rp->state);
         if (rp->state.currentLine > 0) emit locationChanged(rankId, rp->state.currentFile, rp->state.currentLine);
       }
@@ -917,6 +919,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
                                   {"variablesReference", 0}});
       }
       emit localsUpdated(rankId, locals);
+    } else if (handleMiStackOrThreadRecord(rankId, line)) {
+      // Token 202/203: Multi-frame backtrace and OS/OpenMP thread list parsed in GdbRankInspection.cpp.
     } else if (line.contains("asm_insns=")) {
       // Untokenized fallback `-data-disassemble` response handler.
       const QString prettyAsm = formatMiDisassembly(line);

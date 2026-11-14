@@ -118,6 +118,14 @@ class GdbRankCoordinator : public IBackendCoordinator {
     return static_cast<int>(m_processes.size());
   }
 
+  /** @brief Queries `-stack-list-frames 0 63` and `-thread-info` on @p rank when paused. */
+  void requestStackAndThreads(int rank) override;
+
+  /**
+   * @brief Switches @p rank to @p threadId and @p frameLevel, refreshing locals, registers, and source location.
+   */
+  void selectStackFrame(int rank, int threadId, int frameLevel) override;
+
   /**
    * @brief Returns a snapshot of `RankState` for @p rankId, or an `"offline"` state if out of range.
    */
@@ -202,6 +210,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void evaluateHoverVariable(int rankId, const QString& varName, QPoint globalPos);
 
  private:
+  /** @brief Parses MI `202^done,stack=[...]` and `203^done,threads=[...]` result records for @p rankId. */
+  bool handleMiStackOrThreadRecord(int rankId, const QString& line);
+
   /**
    * @struct PendingBreakpoint
    * @brief Cached breakpoint specification synchronized to GDB rank slots on launch or live edit.
@@ -238,6 +249,10 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QMap<QString, QString>> m_varNameMap;        ///< `rankId -> (varName -> gdbVarId)`.
   QMap<int, QMap<QString, QString>> m_varNameRevMap;     ///< `rankId -> (gdbVarId -> varName)`.
   QMap<int, qint64> m_rankPids;                          ///< Live target OS PID per MPI rank index.
+  QMap<int, QVector<StackFrameEntry>> m_rankFrames;      ///< Cached 64-frame call stack per MPI rank.
+  QMap<int, QVector<ThreadEntry>> m_rankThreads;         ///< Cached OS/OpenMP threads per MPI rank.
+  QMap<int, int> m_activeThreadIds;                      ///< Active 1-based GDB thread ID per MPI rank.
+  QMap<int, int> m_pendingFrameSelect;                   ///< Deferred frame level after cross-thread switch.
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
 };

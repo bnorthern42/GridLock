@@ -162,6 +162,12 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Returns the number of MPI ranks configured for the session. */
   int getProcessCount() const override { return m_processCount; }
 
+  /** @brief Queries DAP `threads` and 64-frame `stackTrace` for @p rank. */
+  void requestStackAndThreads(int rank) override;
+
+  /** @brief Switches active DAP thread/frame on @p rank and refreshes `scopes` -> `variables` + `Registers`. */
+  void selectStackFrame(int rank, int threadId, int frameLevel) override;
+
  signals:
   /** @brief Emitted when @p rankId stops due to @p reason (e.g., `"breakpoint"`, `"step"`). */
   void executionStopped(int rankId, const QString& reason);
@@ -224,7 +230,10 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, QPair<int, int>> m_variablesRequests;    ///< Maps `request_seq` to `(rankId, varRef)`.
   QMap<int, int> m_registersRequests;                ///< Maps `request_seq` to `rankId`.
   QMap<int, int> m_memoryRequests;                   ///< Maps `request_seq` to `rankId`.
-  QMap<int, int> m_activeFrameIds;                   ///< Maps `rankId` to top stack `frameId`.
+  QMap<int, int> m_activeFrameIds;                   ///< Maps `rankId` to active stack `frameId`.
+  QMap<int, int> m_activeThreadIds;                  ///< Maps `rankId` to active 1-based DAP `threadId`.
+  QMap<int, QVector<StackFrameEntry>> m_rankFrames;  ///< Cached 64-frame call stack per rank.
+  QMap<int, QVector<ThreadEntry>> m_rankThreads;     ///< Cached thread descriptors per rank.
   QMap<int, QPair<int, QString>> m_evaluateRequests; ///< Maps `request_seq` to `(rankId, expr)`.
 
   /**

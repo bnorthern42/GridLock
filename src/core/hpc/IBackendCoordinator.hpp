@@ -12,8 +12,40 @@
 
 #include <QByteArray>
 #include <QJsonArray>
+#include <QMetaType>
 #include <QObject>
 #include <QString>
+#include <QVector>
+
+/**
+ * @struct StackFrameEntry
+ * @brief Represents a single unwound call-stack frame for an MPI rank thread.
+ */
+struct StackFrameEntry {
+  int level = 0;        ///< Zero-based frame depth (`0` = innermost active frame).
+  int frameId = 0;      ///< Backend-specific frame identifier (e.g., DAP `frameId` or `level`).
+  quint64 address = 0;  ///< Instruction pointer or return-site virtual address.
+  QString function;     ///< Demangled C/C++ function or symbol name.
+  QString file;         ///< Resolved DWARF source file path, if available.
+  int line = 0;         ///< One-based DWARF source line number, or `0` if unknown.
+};
+
+/**
+ * @struct ThreadEntry
+ * @brief Describes a live OS or OpenMP thread inside an MPI rank process.
+ */
+struct ThreadEntry {
+  int threadId = 1;         ///< One-based debugger thread identifier.
+  QString name;             ///< Thread name or OS target descriptor (e.g., `"main"`).
+  QString state;            ///< Operational state string (`"stopped"`, `"running"`, etc.).
+  QString topFrameSummary;  ///< Summary of the thread's top frame (`func @ file:line`).
+  bool isCurrent = false;   ///< True when this thread is currently selected in the debugger.
+};
+
+Q_DECLARE_METATYPE(StackFrameEntry)
+Q_DECLARE_METATYPE(QVector<StackFrameEntry>)
+Q_DECLARE_METATYPE(ThreadEntry)
+Q_DECLARE_METATYPE(QVector<ThreadEntry>)
 
 /**
  * @class IBackendCoordinator
@@ -106,6 +138,18 @@ class IBackendCoordinator : public QObject {
   /** @brief Returns the number of MPI rank processes in the active session. */
   virtual int getProcessCount() const = 0;
 
+  /** @brief Queries up to 64 call-stack frames and OS/OpenMP threads for @p rank. */
+  virtual void requestStackAndThreads(int rank) { Q_UNUSED(rank); }
+
+  /**
+   * @brief Selects @p threadId and @p frameLevel on @p rank, refreshing locals, registers, and source location.
+   */
+  virtual void selectStackFrame(int rank, int threadId, int frameLevel) {
+    Q_UNUSED(rank);
+    Q_UNUSED(threadId);
+    Q_UNUSED(frameLevel);
+  }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -121,4 +165,10 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when CPU register values for @p rankId are refreshed. */
   void registersUpdated(int rankId, const QJsonArray& registers);
+
+  /** @brief Emitted when up to 64 call-stack frames are parsed for @p rank. */
+  void stackTraceUpdated(int rank, const QVector<StackFrameEntry>& frames);
+
+  /** @brief Emitted when OS/OpenMP thread descriptors are parsed for @p rank. */
+  void threadsUpdated(int rank, const QVector<ThreadEntry>& threads);
 };

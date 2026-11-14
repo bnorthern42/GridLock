@@ -11,6 +11,7 @@
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "../core/managers/ThemeManager.hpp"
+#include "docks/CallStackDockWidget.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
@@ -49,6 +50,30 @@
 #include <cmath>
 
 namespace gridlock::ui {
+
+/**
+ * @brief Registers `CallStackDockWidget` (`CallStackDock` / `"CALL STACK"`) in the top-right tabbed dock group.
+ */
+void MainWindow::setupCallStackDock() {
+  // Instantiate CallStackDockWidget and wrap it in a custom-titled right-area QDockWidget.
+  m_callStackDockWidget = new CallStackDockWidget(this);
+  auto* callStackDock = new QDockWidget(QStringLiteral("CALL STACK"), this);
+  callStackDock->setObjectName(QStringLiteral("CallStackDock"));
+  callStackDock->setWidget(m_callStackDockWidget);
+  callStackDock->installEventFilter(this);
+  setupDockTitleBar(callStackDock, QStringLiteral("CALL STACK"));
+  addDockWidget(Qt::RightDockWidgetArea, callStackDock);
+  m_dockHomeSlots[callStackDock] = {nullptr, -1, Qt::RightDockWidgetArea};
+
+  // Tabify alongside VARIABLES | REGISTERS | WATCH and keep VARIABLES raised as default startup tab.
+  auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+  auto* regsDock = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+  auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+  if (QDockWidget* anchor = watchDock ? watchDock : (regsDock ? regsDock : varsDock)) {
+    tabifyDockWidget(anchor, callStackDock);
+  }
+  if (varsDock) varsDock->raise();
+}
 
 /**
  * @brief Creates and mounts a custom title bar widget on the specified dock widget.
@@ -160,21 +185,19 @@ void MainWindow::redockWidget(QDockWidget* dock) {
       dock->setFloating(false); dock->show();
       QList<int> sizes = slot.splitter->sizes();
       int idx = slot.splitter->indexOf(dock);
-      if (idx >= 0 && idx < sizes.size() && sizes[idx] < 120) {
-        sizes[idx] = 160; slot.splitter->setSizes(sizes);
-      }
+      if (idx >= 0 && idx < sizes.size() && sizes[idx] < 120) { sizes[idx] = 160; slot.splitter->setSizes(sizes); }
     } else {
       addDockWidget(slot.area, dock); dock->setFloating(false); dock->show();
-      // Preserve 2-zone right-sidebar hierarchy (tabbed Variables/Registers/Watch over ServerRack) on redock.
+      // Preserve 2-zone right-sidebar hierarchy (tabbed Variables/Registers/Watch/CallStack over ServerRack).
       if (slot.area == Qt::RightDockWidgetArea) {
         auto* vars = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
         auto* regs = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
         auto* watch = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+        auto* cstack = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
         auto* rack = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
         if (dock == rack && vars && !isDockFloating(vars)) {
-          splitDockWidget(vars, rack, Qt::Vertical);
-          resizeDocks({vars, rack}, {520, 380}, Qt::Vertical);
-        } else if ((dock == regs || dock == watch) && vars && !isDockFloating(vars)) {
+          splitDockWidget(vars, rack, Qt::Vertical); resizeDocks({vars, rack}, {520, 380}, Qt::Vertical);
+        } else if ((dock == regs || dock == watch || dock == cstack) && vars && !isDockFloating(vars)) {
           tabifyDockWidget(vars, dock);
         } else if (dock == vars && regs && !isDockFloating(regs)) {
           tabifyDockWidget(regs, vars);
@@ -253,26 +276,20 @@ bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
   if (!header || qobject_cast<QToolButton*>(w)) return false;
 
   auto* dock = qobject_cast<QDockWidget*>(header->parentWidget());
-  if (!dock) {
-    dock = reinterpret_cast<QDockWidget*>(header->property("associatedDock").value<void*>());
-  }
+  if (!dock) dock = reinterpret_cast<QDockWidget*>(header->property("associatedDock").value<void*>());
   if (!dock) return false;
 
   // Double-clicking anywhere on custom title bar toggles floating vs docked state.
   if (event->type() == QEvent::MouseButtonDblClick) {
-    toggleDockFloating(dock);
-    event->accept();
-    return true;
+    toggleDockFloating(dock); event->accept(); return true;
   }
   // Consume left-button press on the custom header so QDockWidgetPrivate::mousePressEvent
   // never invokes grabMouse() (which fails on Wayland non-popup windows).
   if (event->type() == QEvent::MouseButtonPress) {
     auto* me = static_cast<QMouseEvent*>(event);
     if (me->button() == Qt::LeftButton) {
-      m_draggingDock = dock;
-      m_dragOffset = me->globalPosition().toPoint() - dock->pos();
-      event->accept();
-      return true;
+      m_draggingDock = dock; m_dragOffset = me->globalPosition().toPoint() - dock->pos();
+      event->accept(); return true;
     }
   } else if (event->type() == QEvent::MouseMove) {
     auto* me = static_cast<QMouseEvent*>(event);
@@ -280,23 +297,17 @@ bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
       // If the user drags a docked panel header by > 10px, automatically pop it out so it can be dragged.
       if (!isDockFloating(dock) &&
           (me->globalPosition().toPoint() - (dock->pos() + m_dragOffset)).manhattanLength() > 10) {
-        toggleDockFloating(dock);
-        m_dragOffset = QPoint(dock->width() / 2, 12);
+        toggleDockFloating(dock); m_dragOffset = QPoint(dock->width() / 2, 12);
       }
       if (isDockFloating(dock)) {
         // On Wayland, delegate interactive top-level window movement to the compositor via startSystemMove().
         if (QGuiApplication::platformName().contains(QStringLiteral("wayland"), Qt::CaseInsensitive)) {
-          if (QWindow* win = dock->windowHandle()) {
-            if (win->startSystemMove()) {
-              m_draggingDock = nullptr;
-              event->accept();
-              return true;
-            }
+          if (QWindow* win = dock->windowHandle(); win && win->startSystemMove()) {
+            m_draggingDock = nullptr; event->accept(); return true;
           }
         }
         dock->move(me->globalPosition().toPoint() - m_dragOffset);
-        event->accept();
-        return true;
+        event->accept(); return true;
       }
     }
   } else if (event->type() == QEvent::MouseButtonRelease) {
@@ -304,11 +315,8 @@ bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
     // Release mouse: check if dropped in home dock zone and redock if so.
     if (me->button() == Qt::LeftButton && m_draggingDock == dock) {
       m_draggingDock = nullptr;
-      if (isDockFloating(dock)) {
-        handleDockDragRelease(dock, me->globalPosition().toPoint());
-      }
-      event->accept();
-      return true;
+      if (isDockFloating(dock)) handleDockDragRelease(dock, me->globalPosition().toPoint());
+      event->accept(); return true;
     }
   } else if (event->type() == QEvent::ContextMenu) {
     // Show context menu with Redock / Pop Out options and Redock All.
@@ -330,13 +338,8 @@ bool MainWindow::handleDockHeaderEvent(QObject* watched, QEvent* event) {
 void MainWindow::setupStatusBar() {
   QStatusBar *bar = statusBar();
   bar->setObjectName(QStringLiteral("cutterStatusBar"));
-  bar->setSizeGripEnabled(false);
-  bar->setContentsMargins(6, 0, 6, 0);
-
-  if (m_currentSeekOrPc == QStringLiteral("0x00000000") || m_currentSeekOrPc.isEmpty()) {
-    m_currentSeekOrPc = QStringLiteral("0x00401120");
-  }
-
+  bar->setSizeGripEnabled(false); bar->setContentsMargins(6, 0, 6, 0);
+  if (m_currentSeekOrPc == QStringLiteral("0x00000000") || m_currentSeekOrPc.isEmpty()) m_currentSeekOrPc = QStringLiteral("0x00401120");
   m_statusTelemetryLabel = new QLabel(bar);
   m_statusTelemetryLabel->setObjectName(QStringLiteral("cutterStatusTelemetry"));
   m_statusTelemetryLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
@@ -350,12 +353,8 @@ void MainWindow::setupStatusBar() {
  * @param targetState Execution state string (e.g. "RUNNING", "PAUSED", "IDLE").
  */
 void MainWindow::updateStatusTelemetry(const QString &pcOrSeek, const QString &targetState) {
-  if (!pcOrSeek.isEmpty()) {
-    m_currentSeekOrPc = pcOrSeek;
-  }
-  if (!targetState.isEmpty()) {
-    m_currentTargetState = targetState;
-  }
+  if (!pcOrSeek.isEmpty()) m_currentSeekOrPc = pcOrSeek;
+  if (!targetState.isEmpty()) m_currentTargetState = targetState;
   if (m_statusTelemetryLabel) {
     if (m_debugSessionActive) {
       const int rank = activeSteppingRank();
@@ -503,13 +502,9 @@ void MainWindow::syncBottomToolRailToTab(int tabIndex) {
  */
 QScreen* MainWindow::resolvePreferredScreen(const QString& monitorHint) const {
   const QList<QScreen*> screens = QGuiApplication::screens();
-  if (screens.isEmpty()) {
-    return nullptr;
-  }
+  if (screens.isEmpty()) return nullptr;
   const QString hint = monitorHint.trimmed();
-  if (hint.isEmpty()) {
-    return QGuiApplication::primaryScreen();
-  }
+  if (hint.isEmpty()) return QGuiApplication::primaryScreen();
   for (QScreen* scr : screens) {
     if (!scr) continue;
     const QRect geom = scr->geometry();
@@ -518,9 +513,7 @@ QScreen* MainWindow::resolvePreferredScreen(const QString& monitorHint) const {
     const QString meta = QString("%1 %2 %3 %4x%5 %6\" %6in")
                              .arg(scr->name(), scr->model(), scr->manufacturer())
                              .arg(geom.width()).arg(geom.height()).arg(diagInches);
-    if (meta.contains(hint, Qt::CaseInsensitive)) {
-      return scr;
-    }
+    if (meta.contains(hint, Qt::CaseInsensitive)) return scr;
   }
   return QGuiApplication::primaryScreen();
 }
@@ -532,17 +525,12 @@ QScreen* MainWindow::resolvePreferredScreen(const QString& monitorHint) const {
  */
 void MainWindow::applyPreferredScreenRouting(const QString& monitorHint, bool openUnfocused) {
   m_preferredMonitorHint = monitorHint.trimmed();
-  if (m_preferredMonitorHint.isEmpty()) {
-    setAttribute(Qt::WA_ShowWithoutActivating, false);
-    return;
-  }
+  if (m_preferredMonitorHint.isEmpty()) { setAttribute(Qt::WA_ShowWithoutActivating, false); return; }
   setAttribute(Qt::WA_ShowWithoutActivating, openUnfocused);
   if (QScreen* target = resolvePreferredScreen(m_preferredMonitorHint)) {
     if (target != QGuiApplication::primaryScreen()) {
       setScreen(target);
-      if (windowHandle()) {
-        windowHandle()->setScreen(target);
-      }
+      if (windowHandle()) windowHandle()->setScreen(target);
       move(target->availableGeometry().topLeft());
     }
   }
@@ -578,13 +566,8 @@ class AddressRibbonThemeFilter final : public QObject {
 
     // Standard x86_64 ELF section descriptors with dark and light semantic accent inks.
     struct SegSpec {
-      const char* label;
-      uint64_t base;
-      uint64_t end;
-      int weight;
-      const char* darkFill;
-      const char* darkFg;
-      const char* lightFg;
+      const char* label; uint64_t base; uint64_t end; int weight;
+      const char* darkFill; const char* darkFg; const char* lightFg;
     };
     // Configure .plt, .text, .rodata, .data, and stack section bounds and contrast-verified inks.
     static constexpr SegSpec kSegs[] = {
@@ -619,10 +602,8 @@ class AddressRibbonThemeFilter final : public QObject {
       p.fillRect(segRect, fill);
       // Paint a 2px semantic bottom accent bar in light mode for section boundary legibility.
       if (!pal.isDark) p.fillRect(QRect(segRect.left(), segRect.bottom() - 1, segRect.width(), 2), fg);
-      p.setPen(QColor(pal.borderHex));
-      p.drawRect(segRect.adjusted(0, 0, -1, -1));
-      p.setPen(fg);
-      p.drawText(segRect.adjusted(6, 0, -6, -1), Qt::AlignVCenter | Qt::AlignLeft, QLatin1String(seg.label));
+      p.setPen(QColor(pal.borderHex)); p.drawRect(segRect.adjusted(0, 0, -1, -1));
+      p.setPen(fg); p.drawText(segRect.adjusted(6, 0, -6, -1), Qt::AlignVCenter | Qt::AlignLeft, QLatin1String(seg.label));
       // Track active instruction pointer horizontal coordinate within matching ELF segment.
       if (inSeg && seg.end > seg.base) {
         const double ratio = std::clamp(static_cast<double>(curAddr - seg.base) /
@@ -638,10 +619,8 @@ class AddressRibbonThemeFilter final : public QObject {
     // Render active instruction / seek needle with dual triangular arrowheads.
     const QColor needle = pal.isDark ? QColor(QStringLiteral("#ffcc00")) : QColor(pal.accentHex);
     p.setPen(QPen(needle, 1));
-    p.drawLine(activeCursorX, 0, activeCursorX, 4);
-    p.drawLine(activeCursorX, h - 4, activeCursorX, h);
-    p.setBrush(needle);
-    p.setPen(Qt::NoPen);
+    p.drawLine(activeCursorX, 0, activeCursorX, 4); p.drawLine(activeCursorX, h - 4, activeCursorX, h);
+    p.setBrush(needle); p.setPen(Qt::NoPen);
     p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, 0), QPoint(activeCursorX + 4, 0), QPoint(activeCursorX, 4)}));
     p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, h), QPoint(activeCursorX + 4, h), QPoint(activeCursorX, h - 4)}));
     return true;
@@ -736,9 +715,7 @@ void MainWindow::propagateThemeToAllWidgets() {
       "QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex,
            isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
-  for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) {
-    if (btn) btn->setStyleSheet(navBtnStyle);
-  }
+  for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) if (btn) btn->setStyleSheet(navBtnStyle);
   if (m_seekBar) {
     m_seekBar->setStyleSheet(QStringLiteral(
         "QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; "
@@ -754,9 +731,7 @@ void MainWindow::propagateThemeToAllWidgets() {
       "QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } "
       "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
-  for (QPushButton* btn : {m_perspCodeBtn, m_perspReverseBtn, m_perspMpiBtn}) {
-    if (btn) btn->setStyleSheet(perspStyle);
-  }
+  for (QPushButton* btn : {m_perspCodeBtn, m_perspReverseBtn, m_perspMpiBtn}) if (btn) btn->setStyleSheet(perspStyle);
 
   // 3. Re-style Bottom Tool Window Rail (#bottomToolWindowRail)
   if (m_bottomToolRail) {
@@ -798,27 +773,31 @@ void MainWindow::propagateThemeToAllWidgets() {
       .arg(pal.headerHex, pal.borderHex, pal.textHex);
 
   for (auto* dock : findChildren<QDockWidget*>()) {
-    if (!dock) continue;
-    if (auto* titleWidget = dock->titleBarWidget()) {
-      if (titleWidget->objectName() == QStringLiteral("customDockHeader")) {
-        titleWidget->setStyleSheet(dockHeaderStyle);
-      }
+    if (dock && dock->titleBarWidget() && dock->titleBarWidget()->objectName() == QStringLiteral("customDockHeader")) {
+      dock->titleBarWidget()->setStyleSheet(dockHeaderStyle);
     }
   }
 
-  // 6. Ensure all QTabBar instances suppress scroll buttons and fit tabs compactly.
+  // 6. Suppress QTabBar scroll buttons and apply compact theme styling to top-right dock tab bars.
+  const QString dockTabStyle = QStringLiteral(
+      "QTabBar { background-color: %1; border-bottom: 1px solid %2; }"
+      "QTabBar::tab { background-color: %1; color: %3; padding: 3px 4px; margin: 0px; min-height: 20px; max-height: 24px; "
+      "border-right: 1px solid %2; font-size: 12px; font-weight: 600; }"
+      "QTabBar::tab:selected { background-color: %4; color: %3; border-bottom: 2px solid %5; }"
+      "QTabBar::tab:hover:!selected { background-color: %2; color: %3; }")
+      .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex);
   for (auto* tb : findChildren<QTabBar*>()) {
-    tb->setUsesScrollButtons(false);
-    tb->setElideMode(Qt::ElideNone);
-    tb->setExpanding(false);
+    tb->setUsesScrollButtons(false); tb->setElideMode(Qt::ElideNone); tb->setExpanding(false);
+    if (tb->parentWidget() == this) tb->setStyleSheet(dockTabStyle);
   }
 
-  // 7. Propagate theme to subviews and Variables scope strip
+  // 7. Propagate theme to subviews, Variables scope strip, and CallStackDockWidget
   if (m_variablesDockWidget) {
     if (auto* varHdr = m_variablesDockWidget->findChild<QWidget*>(QStringLiteral("variablesHeaderBar"))) {
       varHdr->setStyleSheet(QStringLiteral("#variablesHeaderBar { background-color: %1; border-bottom: 1px solid %2; } #variablesHeaderBar QLabel { color: %3; font-size: 12px; font-weight: 600; }").arg(pal.headerHex, pal.borderHex, pal.textHex));
     }
   }
+  if (m_callStackDockWidget) m_callStackDockWidget->reloadStyle();
   if (m_memView) m_memView->reloadStyle();
   if (m_differentialGrid) m_differentialGrid->reloadStyle();
   if (m_serverRackView) m_serverRackView->reloadStyle();

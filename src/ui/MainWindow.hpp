@@ -10,6 +10,7 @@
 #pragma once
 
 #include "../RankState.hpp"
+#include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 
 #include <QCloseEvent>
@@ -29,7 +30,6 @@
 #include <memory>
 #include <unordered_map>
 
-class IBackendCoordinator;
 class QVulkanInstance;
 class QDockWidget;
 class QSplitter;
@@ -52,6 +52,7 @@ class IDebugCommand;
 
 namespace gridlock::ui {
 
+class CallStackDockWidget;
 class ServerRackView;
 class SourceCodeView;
 class EditorTabManager;
@@ -119,6 +120,7 @@ public:
     ProjectExplorerWidget* projectExplorerWidget() const { return m_projectExplorerWidget; }
     gridlock::core::ElfBinaryInspector* elfInspector() const { return m_elfInspector.get(); }
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
+    CallStackDockWidget* callStackDockWidget() const { return m_callStackDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
@@ -572,8 +574,10 @@ private:
     void setupMenu();
     void setupToolbar();
     void setupDocks();
+    void setupCallStackDock();
     void setupStatusBar();
     void bindLiveMemViewHandlers();
+    void bindCallStackCoordinatorRoutes();
     void harmonizeBottomConsoleTabs();
     QString bottomToolGroupForTabIndex(int tabIndex) const;
     void updateStatusTelemetry(const QString& pcOrSeek = QString(),
@@ -599,6 +603,10 @@ private:
     ExpressionEvaluatorWidget* m_expressionEvaluatorWidget = nullptr;
 
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
+    CallStackDockWidget* m_callStackDockWidget = nullptr;
+    QMap<int, QVector<StackFrameEntry>> m_cachedStackFrames;
+    QMap<int, QVector<ThreadEntry>> m_cachedThreads;
+    QMap<int, int> m_selectedFrameLevel;
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QWidget* m_bottomToolRail = nullptr;
     QTabWidget* m_bottomTabs = nullptr;

@@ -142,6 +142,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setupUi();
   setupMenu();
   setupDocks();
+  setupCallStackDock();
   setupStatusBar();
 
   // Initialize global shortcuts and install top-level event filter.
@@ -190,13 +191,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Restore saved geometry and dock configuration.
   QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry_v8")) restoreGeometry(settings.value("MainWindow/Geometry_v8").toByteArray());
+  if (settings.contains("MainWindow/Geometry_v9")) restoreGeometry(settings.value("MainWindow/Geometry_v9").toByteArray());
   if (width() < 800 || height() < 600) resize(1440, 900);
-  if (settings.contains("MainWindow/State_v8")) restoreState(settings.value("MainWindow/State_v8").toByteArray());
+  if (settings.contains("MainWindow/State_v9")) restoreState(settings.value("MainWindow/State_v9").toByteArray());
   // Restore individual splitter sash positions.
   for (auto* splitter : findChildren<QSplitter*>()) {
     if (!splitter->objectName().isEmpty()) {
-      auto st = settings.value("MainWindow/Splitter_v8_" + splitter->objectName()).toByteArray();
+      auto st = settings.value("MainWindow/Splitter_v9_" + splitter->objectName()).toByteArray();
       if (!st.isEmpty()) splitter->restoreState(st);
     }
   }
@@ -228,9 +229,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Restore persisted theme choice and synchronize toolbar CTA, ribbons, and dock headers.
   gridlock::core::ThemeManager::instance().loadPersistedTheme();
   propagateThemeToAllWidgets();
-  // Balance right-sidebar zones: 340px wide, 55% top tabbed inspector, 45% bottom Server Rack.
+  // Balance right-sidebar zones: 380px wide, 55% top tabbed inspector, 45% bottom Server Rack.
   if (auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"))) {
-    resizeDocks({varsDock}, {340}, Qt::Horizontal);
+    resizeDocks({varsDock}, {380}, Qt::Horizontal);
     if (auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"))) resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical);
   }
   // Populate initial status bar Stack/Heap/RAM/CPU telemetry and start 1500ms refresh timer.
@@ -366,8 +367,13 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             });
   }
 
-  // Bind coordinator execution, hover, and memory events to UI views.
+  // Bind coordinator execution, call-stack, register, hover, and memory events to UI views.
   if (m_coordinator) {
+    bindCallStackCoordinatorRoutes();
+    connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,
+            [this](int rankId, const QJsonArray &regs) {
+              if (rankId == m_focusedRank && m_registerView) m_registerView->updateRegisters(regs);
+            });
     // Route execution location updates (file:line) to the focused rank's editor and gutter PC marker.
     connect(m_coordinator, &IBackendCoordinator::locationChanged, this,
             [this](int rankId, const QString &file, int line) {
@@ -783,11 +789,11 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   // Save active color theme and workstation dock/splitter geometry to QSettings.
   gridlock::core::ThemeManager::instance().savePersistedTheme();
   QSettings settings("gridlock", "debugger");
-  settings.setValue("MainWindow/Geometry_v8", saveGeometry());
-  settings.setValue("MainWindow/State_v8", saveState());
+  settings.setValue("MainWindow/Geometry_v9", saveGeometry());
+  settings.setValue("MainWindow/State_v9", saveState());
   // Record individual QSplitter ratios so side-by-side source/CFG splits restore cleanly.
   for (auto* splitter : findChildren<QSplitter*>()) {
-    if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v8_" + splitter->objectName(), splitter->saveState());
+    if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
   }
   event->accept();
 }

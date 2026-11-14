@@ -13,6 +13,7 @@
 #include <QComboBox>
 #include <QContextMenuEvent>
 #include <QDir>
+#include <QDockWidget>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
@@ -30,6 +31,7 @@
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTextEdit>
+#include <QTreeView>
 #include <QtTest/QtTest>
 #include <cmath>
 
@@ -158,13 +160,8 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
  * @brief Verifies Seek in Memory View tab switching, base address update, and mnemonic F1 doc lookup.
  */
 void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
-
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
@@ -172,8 +169,7 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     QVERIFY(disasmView != nullptr && memView != nullptr && bottomTabs != nullptr && refManual != nullptr);
 
     // Part 1: Seek in Memory View Switches Tab & Updates Base Address + Bytes.
-    bottomTabs->setCurrentIndex(0);
-    QApplication::processEvents();
+    bottomTabs->setCurrentIndex(0); QApplication::processEvents();
     QVERIFY(bottomTabs->currentWidget() != memView);
 
     // Trigger context menu action "Seek in Memory View" at loop header instruction 0x00401149ULL.
@@ -184,12 +180,10 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     // Verify MemView hex dump contains the instruction bytes: 83 7d fc 02
     auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
     QVERIFY(dumpEdit != nullptr);
-    const QString hexDumpText = dumpEdit->toPlainText();
-    QVERIFY2(hexDumpText.contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive), qPrintable(hexDumpText));
+    QVERIFY2(dumpEdit->toPlainText().contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive), qPrintable(dumpEdit->toPlainText()));
 
     // Verify seeking to .rodata string address 0x00402010ULL updates MemView base address.
-    mainWindow.seekToAddressOrExpression(QStringLiteral("0x00402010"));
-    QApplication::processEvents();
+    mainWindow.seekToAddressOrExpression(QStringLiteral("0x00402010")); QApplication::processEvents();
     QCOMPARE(memView->currentBaseAddress(), 0x00402010ULL);
 
     // Part 2: Looking Up "mov" (F1 on mov rbp, rsp) Never Shows MPI Reference.
@@ -210,22 +204,16 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
  * @brief Verifies smart Meson/CMake/Make/SingleFileMPI build system detection and Terminal build/clean/rebuild workflow.
  */
 void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflow() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // Part 1: Smart Build System Detection Across Project Types.
     const auto writeText = [](const QString& path, const QByteArray& bytes) {
-        QFile f(path);
-        if (f.open(QIODevice::WriteOnly)) { f.write(bytes); f.close(); }
+        QFile f(path); if (f.open(QIODevice::WriteOnly)) { f.write(bytes); f.close(); }
     };
     // Case A: Meson + Ninja project directory.
     {
-        QTemporaryDir mesonDir;
-        QVERIFY(mesonDir.isValid());
+        QTemporaryDir mesonDir; QVERIFY(mesonDir.isValid());
         writeText(mesonDir.filePath(QStringLiteral("meson.build")), "project('demo', 'cpp')\n");
         QDir(mesonDir.path()).mkpath(QStringLiteral("builddir"));
         writeText(mesonDir.filePath(QStringLiteral("builddir/build.ninja")), "# ninja build file\n");
@@ -235,8 +223,7 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     }
     // Case B: CMake project directory.
     {
-        QTemporaryDir cmakeDir;
-        QVERIFY(cmakeDir.isValid());
+        QTemporaryDir cmakeDir; QVERIFY(cmakeDir.isValid());
         writeText(cmakeDir.filePath(QStringLiteral("CMakeLists.txt")), "cmake_minimum_required(VERSION 3.20)\nproject(demo)\n");
         QCOMPARE(mainWindow.detectBuildSystem(cmakeDir.path()), QStringLiteral("CMake"));
         QVERIFY(mainWindow.buildCommandForPath(cmakeDir.path()).contains(QStringLiteral("cmake --build")) &&
@@ -244,16 +231,14 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     }
     // Case C: GNU Make project directory.
     {
-        QTemporaryDir makeDir;
-        QVERIFY(makeDir.isValid());
+        QTemporaryDir makeDir; QVERIFY(makeDir.isValid());
         writeText(makeDir.filePath(QStringLiteral("Makefile")), "all:\n\t@echo building\nclean:\n\t@echo cleaning\n");
         QCOMPARE(mainWindow.detectBuildSystem(makeDir.path()), QStringLiteral("Make"));
         QVERIFY(mainWindow.buildCommandForPath(makeDir.path()).contains(QStringLiteral("make")) &&
                 mainWindow.cleanCommandForPath(makeDir.path()).contains(QStringLiteral("make clean")));
     }
     // Case D: Standalone MPI / C++ source file.
-    QTemporaryDir singleFileDir;
-    QVERIFY(singleFileDir.isValid());
+    QTemporaryDir singleFileDir; QVERIFY(singleFileDir.isValid());
     const QString demoSourcePath = singleFileDir.filePath(QStringLiteral("demo.cpp"));
     writeText(demoSourcePath, "#include <mpi.h>\nint main(int argc, char** argv) { return 0; }\n");
     QCOMPARE(mainWindow.detectBuildSystem(demoSourcePath), QStringLiteral("SingleFileMPI"));
@@ -277,15 +262,11 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
     // Trigger Build, Clean, and Rebuild Target workflows and verify Terminal command dispatch + telemetry.
     QVERIFY(mainWindow.buildTargetWorkflow()); QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("-g")) &&
-            statusLabel->text().contains(QStringLiteral("BUILDING"), Qt::CaseInsensitive));
-
+    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("-g")) && statusLabel->text().contains(QStringLiteral("BUILDING"), Qt::CaseInsensitive));
     QVERIFY(mainWindow.cleanTargetWorkflow()); QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY((terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) ||
-             terminalDock->lastSentCommand().contains(QStringLiteral("clean"))) &&
+    QVERIFY((terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) || terminalDock->lastSentCommand().contains(QStringLiteral("clean"))) &&
             statusLabel->text().contains(QStringLiteral("CLEANING"), Qt::CaseInsensitive));
-
     QVERIFY(mainWindow.rebuildTargetWorkflow()); QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), terminalDock);
     QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("&&")));
@@ -296,38 +277,22 @@ void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflo
  *        Light Mode contrast on ProjectExplorerWidget, and ReferenceManualWidget docset auto-preview.
  */
 void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAutoDetect() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
-
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
     auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
     auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(bottomTabs != nullptr && terminalDock != nullptr && explorer != nullptr && refManual != nullptr);
 
-    // =========================================================================
-    // Part 1: Terminal EventFilter Protection When Opening PreferencesDialog
-    // =========================================================================
-    bottomTabs->setCurrentWidget(terminalDock);
-    QApplication::processEvents();
-
-    // Open PreferencesDialog and simulate proportional FontChange / StyleChange events on terminal children.
-    gridlock::ui::PreferencesDialog prefsDialog(&mainWindow);
-    prefsDialog.show();
-    QApplication::processEvents();
-
-    QFont proportionalFont(QStringLiteral("Cantarell"), 11);
-    proportionalFont.setFixedPitch(false);
+    // Part 1: Terminal EventFilter Protection When Opening PreferencesDialog.
+    bottomTabs->setCurrentWidget(terminalDock); QApplication::processEvents();
+    gridlock::ui::PreferencesDialog prefsDialog(&mainWindow); prefsDialog.show(); QApplication::processEvents();
+    QFont proportionalFont(QStringLiteral("Cantarell"), 11); proportionalFont.setFixedPitch(false);
     for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
         child->setFont(proportionalFont);
-        QEvent fontEv(QEvent::FontChange);
-        QApplication::sendEvent(child, &fontEv);
-        QEvent styleEv(QEvent::StyleChange);
-        QApplication::sendEvent(child, &styleEv);
+        QEvent fontEv(QEvent::FontChange); QApplication::sendEvent(child, &fontEv);
+        QEvent styleEv(QEvent::StyleChange); QApplication::sendEvent(child, &styleEv);
     }
     QApplication::processEvents();
 
@@ -341,52 +306,28 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
     }
     prefsDialog.close();
 
-    // =========================================================================
-    // Part 2: Light Mode Contrast Verification
-    // =========================================================================
+    // Part 2: Light Mode Contrast Verification.
     gridlock::core::ThemeManager::instance().setDarkMode(false);
-    explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}});
-    QApplication::processEvents();
-
+    explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}}); QApplication::processEvents();
     auto* symTable = explorer->findChild<QTableWidget*>();
-    QVERIFY(symTable != nullptr && symTable->rowCount() > 0);
-    QTableWidgetItem* symItem = symTable->item(0, 0);
-    QVERIFY(symItem != nullptr);
-
-    const QColor fgColor = symItem->foreground().color();
-    const QColor bgColor = symTable->palette().color(QPalette::Base);
+    QVERIFY(symTable != nullptr && symTable->rowCount() > 0 && symTable->item(0, 0) != nullptr);
     const auto luminance = [](const QColor& c) { return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000; };
-    const int contrastDiff = std::abs(luminance(fgColor) - luminance(bgColor));
+    const int contrastDiff = std::abs(luminance(symTable->item(0, 0)->foreground().color()) - luminance(symTable->palette().color(QPalette::Base)));
     QVERIFY2(contrastDiff >= 80, qPrintable(QStringLiteral("Light mode symbol contrast too low (%1)").arg(contrastDiff)));
+    gridlock::core::ThemeManager::instance().setDarkMode(true); QApplication::processEvents();
 
-    // Restore Dark Mode.
-    gridlock::core::ThemeManager::instance().setDarkMode(true);
-    QApplication::processEvents();
-
-    // =========================================================================
-    // Part 3: Selecting a Docset in ReferenceManualWidget Updates Right Pane
-    // =========================================================================
-    bottomTabs->setCurrentWidget(refManual);
-    refManual->lookupSymbol(QStringLiteral("MPI_Init"));
-    QApplication::processEvents();
-
+    // Part 3: Selecting a Docset in ReferenceManualWidget Updates Right Pane.
+    bottomTabs->setCurrentWidget(refManual); refManual->lookupSymbol(QStringLiteral("MPI_Init")); QApplication::processEvents();
     auto* docCombo = refManual->findChild<QComboBox*>();
     auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
-    QVERIFY(docCombo != nullptr && docBrowser != nullptr);
-    QVERIFY(docBrowser->toHtml().contains(QStringLiteral("MPI_Init")));
-
-    // Switch docset combo to a non-MPI category (e.g. "Intel x86_64 ISA" or another loaded docset).
+    QVERIFY(docCombo != nullptr && docBrowser != nullptr && docBrowser->toHtml().contains(QStringLiteral("MPI_Init")));
     int targetIdx = -1;
     for (int i = 0; i < docCombo->count(); ++i) {
         const QString label = docCombo->itemText(i);
-        if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) {
-            targetIdx = i;
-            break;
-        }
+        if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) { targetIdx = i; break; }
     }
     if (targetIdx >= 0) {
-        docCombo->setCurrentIndex(targetIdx);
-        QApplication::processEvents();
+        docCombo->setCurrentIndex(targetIdx); QApplication::processEvents();
         QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")), "Switching docset category must auto-preview first entry");
     }
 }
@@ -397,11 +338,7 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
  * to the selected target's source and binary paths.
  */
 void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildCommands() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
-    QApplication::processEvents();
-
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
@@ -444,20 +381,13 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
  *        and 6 curated color themes with human-readable display names (zero underscores).
  */
 void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
-    QApplication::processEvents();
-
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     // Ensure a source file is open in EditorTabManager.
-    mainWindow.selectTargetByName(QStringLiteral("inspection_demo"));
-    QApplication::processEvents();
-
+    mainWindow.selectTargetByName(QStringLiteral("inspection_demo")); QApplication::processEvents();
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(editorTabs != nullptr && disasmView != nullptr);
+    QVERIFY(editorTabs != nullptr && disasmView != nullptr && editorTabs->currentSourceCodeView() != nullptr);
     auto* srcView = editorTabs->currentSourceCodeView();
-    QVERIFY(srcView != nullptr);
 
     // 1. Verify Edit menu actions & focus-aware execution (Select All, Copy, Toggle Comment).
     srcView->setFocus();
@@ -465,9 +395,7 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Copy")), "Copy must succeed");
 
     // Toggle line comment on line 1 and verify '//' prefix is inserted and removed.
-    QTextCursor tc = srcView->textCursor();
-    tc.movePosition(QTextCursor::Start);
-    srcView->setTextCursor(tc);
+    QTextCursor tc = srcView->textCursor(); tc.movePosition(QTextCursor::Start); srcView->setTextCursor(tc);
     const QString origFirstLine = srcView->document()->firstBlock().text();
     QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")) && srcView->document()->firstBlock().text() != origFirstLine);
     QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")));
@@ -660,11 +588,76 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     diffBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
 
-    // Cleanly terminate session and verify rank PIDs and process counts reset to 0.
+    // Cleanly terminate inspection_demo session and verify rank PIDs and process counts reset to 0.
     mainWindow.stopTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
     QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0);
     QCOMPARE(static_cast<qint64>(mainWindow.coordinator()->getPidForRank(0)), 0LL);
+
+    // 6. Verify CallStackDockWidget ("CallStackDock"), live 3+ frame backtrace, thread selector, and caller frame switching.
+    auto* callStackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
+    QVERIFY2(callStackDock != nullptr, "MainWindow must expose docked CallStackDock");
+    auto* threadCombo = callStackDock->findChild<QComboBox*>(QStringLiteral("threadSelectorCombo"));
+    auto* callStackTable = callStackDock->findChild<QTableWidget*>(QStringLiteral("callStackTable"));
+    auto* varsDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+    QVERIFY2(threadCombo != nullptr && callStackTable != nullptr && varsDock != nullptr,
+             "CallStackDock must expose threadSelectorCombo + callStackTable alongside VariablesDock");
+
+    // Materialize a temporary nested-call C++/MPI program (main -> outerCaller(4242) -> innerCallee) and compile -g -O0.
+    QTemporaryDir nestedDir; QVERIFY(nestedDir.isValid());
+    const QString nestedCpp = nestedDir.filePath(QStringLiteral("nested_stack.cpp"));
+    {
+        QFile nf(nestedCpp); QVERIFY(nf.open(QIODevice::WriteOnly));
+        nf.write("#include <mpi.h>\n"
+                 "__attribute__((noinline)) int innerCallee(int innerVal) {\n    int innerLocal = innerVal + 7;\n    return innerLocal;\n}\n"
+                 "__attribute__((noinline)) int outerCaller(int outerSecret) {\n    int outerLocal = outerSecret + 1;\n    int res = innerCallee(outerLocal);\n    return res;\n}\n"
+                 "int main(int argc, char** argv) {\n    MPI_Init(&argc, &argv);\n    int total = outerCaller(4242);\n    MPI_Finalize();\n    return total == 0 ? 1 : 0;\n}\n");
+    }
+    rankSpin->setValue(1); targetCombo->insertItem(0, QStringLiteral("nested_stack"), nestedCpp);
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("nested_stack")), "selectTargetByName(nested_stack)");
+    QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "nested_stack must compile with -g -O0");
+    auto* nestedSrcView = editorTabs->currentSourceCodeView();
+    QVERIFY(nestedSrcView != nullptr);
+    const int innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal"));
+    const int outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
+    QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine);
+    nestedSrcView->toggleBreakpoint(innerBpLine);
+
+    // Launch nested_stack and verify #0 innerCallee, #1 outerCaller, #2 main populate with non-zero hex addresses.
+    mainWindow.startTargetWorkflow();
+    QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
+    QTRY_VERIFY_WITH_TIMEOUT(callStackTable->rowCount() >= 3 && threadCombo->count() >= 1, 5000);
+    auto verifyFrameRow = [&](int row, const QString& expectedFunc) {
+        const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString();
+        const QString loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString();
+        const QString addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString();
+        bool hexOk = false;
+        const quint64 parsedAddr = addr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? addr.mid(2).toULongLong(&hexOk, 16) : 0ULL;
+        QVERIFY2(fn.contains(expectedFunc) && loc.contains(QLatin1Char(':')) && hexOk && parsedAddr != 0ULL,
+                 qPrintable(QStringLiteral("Frame %1 mismatch: fn=%2 loc=%3 addr=%4").arg(row).arg(fn, loc, addr)));
+    };
+    verifyFrameRow(0, QStringLiteral("innerCallee"));
+    verifyFrameRow(1, QStringLiteral("outerCaller"));
+    verifyFrameRow(2, QStringLiteral("main"));
+
+    // Select caller frame #1 (outerCaller) via CallStackDockWidget and verify source line + VariablesDockWidget locals update.
+    callStackTable->selectRow(1);
+    QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1));
+    QTRY_COMPARE_WITH_TIMEOUT(editorTabs->currentSourceCodeView()->executionLine(), outerCallLine, 5000);
+    auto* varsTree = varsDock->findChild<QTreeView*>();
+    QVERIFY(varsTree != nullptr && varsTree->model() != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        auto* m = varsTree->model();
+        for (int r = 0; r < m->rowCount(); ++r) {
+            if (m->data(m->index(r, 0)).toString() == QStringLiteral("outerSecret") &&
+                m->data(m->index(r, 1)).toString().contains(QStringLiteral("4242"))) return true;
+        }
+        return false;
+    })(), 5000);
+
+    // Terminate session and verify CallStackDockWidget clears stale frames cleanly.
+    mainWindow.stopTargetWorkflow();
+    QCOMPARE(callStackTable->rowCount(), 0);
 }
 
 /**
@@ -715,11 +708,7 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
  *        tab filtering across Debug/MPI/Terminal/Docs, programmatic auto-sync, and flattened MPI header.
  */
 void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
-    QApplication::processEvents();
-
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     // 1. Verify #bottomToolWindowRail exists and exposes the 4 canonical tool groups.
     auto* rail = mainWindow.findChild<QWidget*>(QStringLiteral("bottomToolWindowRail"));
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
@@ -733,9 +722,7 @@ void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
     // Helper returning uppercased titles of currently visible tabs in BottomConsoleTabs.
     const auto visibleTitles = [&]() {
         QStringList vis;
-        for (int i = 0; i < bottomTabs->count(); ++i) {
-            if (bottomTabs->tabBar()->isTabVisible(i)) vis.append(bottomTabs->tabText(i).toUpper());
-        }
+        for (int i = 0; i < bottomTabs->count(); ++i) if (bottomTabs->tabBar()->isTabVisible(i)) vis.append(bottomTabs->tabText(i).toUpper());
         return vis;
     };
 

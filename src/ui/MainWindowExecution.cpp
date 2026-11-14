@@ -16,6 +16,7 @@
 #include "../core/hpc/NativeMemoryReader.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
+#include "docks/CallStackDockWidget.hpp"
 #include "views/MemView.hpp"
 
 #include <QCoreApplication>
@@ -220,6 +221,7 @@ bool MainWindow::pauseRankWorkflow() {
 void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
     // Cache the newest rank state and reflect it on the Server Rack overview widget.
     m_latestStates[rankId] = state;
+    if (state.currentState == QLatin1String("running")) m_selectedFrameLevel[rankId] = 0;
     if (m_serverRackView) m_serverRackView->updateRankState(rankId, state);
 
     // Parse the 64-bit instruction pointer from $rip (register slot 16) for CFG/disassembly sync.
@@ -286,6 +288,10 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
         }
         if (allExited) {
             m_debugSessionActive = false;
+            m_cachedStackFrames.clear();
+            m_cachedThreads.clear();
+            m_selectedFrameLevel.clear();
+            if (m_callStackDockWidget) m_callStackDockWidget->clearFrames();
             updateDebugToolbarState();
             if (SourceCodeView* sv = getSourceCodeView()) sv->highlightExecutionLine(-1);
             updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("EXITED (0)"));
@@ -294,13 +300,27 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
 }
 
 /**
- * @brief Focuses inspection views (Disassembly, Registers, Memory, Source) on a selected MPI rank.
+ * @brief Focuses inspection views (Disassembly, Registers, Call Stack, Variables, Source) on a selected MPI rank.
  * @param rankId The target 0-based rank index selected by the user.
  */
 void MainWindow::onRankSelected(int rankId) {
-    // Track newly focused rank and immediately rebind all inspection panes to its cached snapshot.
+    // Track newly focused rank and synchronize VariablesDockWidget + CallStackDockWidget scope immediately.
     m_focusedRank = rankId;
+    if (m_variablesDockWidget) {
+        if (auto* rankCombo = m_variablesDockWidget->findChild<QComboBox*>()) {
+            const int idx = rankCombo->findData(rankId);
+            if (idx >= 0 && rankCombo->currentIndex() != idx) rankCombo->setCurrentIndex(idx);
+        }
+    }
+    if (m_callStackDockWidget) {
+        // Hydrate thread selector and stack frame rows from the newly focused rank's cache.
+        m_callStackDockWidget->setThreads(m_cachedThreads.value(rankId));
+        m_callStackDockWidget->setStackFrames(m_cachedStackFrames.value(rankId),
+                                              m_selectedFrameLevel.value(rankId, 0));
+    }
+
     if (m_latestStates.count(rankId)) {
+        // Extract cached RankState and active $rip / $pc address for the selected rank.
         const auto& state = m_latestStates[rankId];
         const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
         const QString pcToken = pcAddr.section(QLatin1Char(' '), 0, 0);
@@ -309,14 +329,17 @@ void MainWindow::onRankSelected(int rankId) {
                                    .mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0)
                                    .toULongLong(&pcOk, 16);
 
+        // Synchronize status bar PC, rank state badge, and live /proc RSS/stack telemetry.
         updateStatusTelemetry(
             pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
         refreshStatusBarMemoryTelemetry();
+        // Update DisassemblyView text when running without a static ELF dump or outside mapped lines.
         if (m_disassemblyView && !state.disassemblyText.isEmpty() &&
             (!m_useRealBinaryTarget || !pcOk || pcVal == 0ULL ||
              m_disassemblyView->lineForAddress(pcVal) < 0)) {
             m_disassemblyView->updateDisassembly(state.disassemblyText);
         }
+        // Highlight the selected rank's current instruction address in Linear ASM and CFG views.
         if (m_disassemblyView && pcOk && pcVal != 0ULL) {
             m_disassemblyView->setCurrentAddress(pcVal);
             m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
@@ -327,16 +350,21 @@ void MainWindow::onRankSelected(int rankId) {
                 gdbCoord->requestDisassemblyFallback(rankId);
             }
         }
-        if (state.currentState == "stopped" && state.currentLine > 0) {
-            SourceCodeView* view =
-                (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
-                    ? m_editorTabManager->openFile(state.currentFile)
-                    : getSourceCodeView();
-            if (view) {
-                view->highlightCurrentLine(state.currentLine);
-                view->highlightExecutionLine(state.currentLine);
+        // When the focused rank is halted, refresh its 64-frame backtrace, threads, and editor PC line.
+        if (state.currentState == "stopped") {
+            if (m_coordinator) m_coordinator->requestStackAndThreads(rankId);
+            if (state.currentLine > 0) {
+                SourceCodeView* view =
+                    (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
+                        ? m_editorTabManager->openFile(state.currentFile)
+                        : getSourceCodeView();
+                if (view) {
+                    view->highlightCurrentLine(state.currentLine);
+                    view->highlightExecutionLine(state.currentLine);
+                }
             }
         }
+        // Push cached watch expressions and CPU register bank values into their respective docks.
         if (m_differentialGrid) m_differentialGrid->setVariableData(rankId, state.variableWatches);
         if (m_registerView && !state.registers.isEmpty()) m_registerView->updateRegisters(state);
     } else {
@@ -347,6 +375,75 @@ void MainWindow::onRankSelected(int rankId) {
             gdbCoord->requestDisassemblyFallback(rankId);
         }
     }
+}
+
+/**
+ * @brief Connects `CallStackDockWidget` and `m_coordinator` stack/thread signals for caller frame switching.
+ */
+void MainWindow::bindCallStackCoordinatorRoutes() {
+    // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
+    if (m_callStackDockWidget && !m_callStackDockWidget->property("gl_callstack_bound").toBool()) {
+        m_callStackDockWidget->setProperty("gl_callstack_bound", true);
+
+        // Switching OS/OpenMP threads resets frame level to #0 and queries that thread's stack and locals.
+        connect(m_callStackDockWidget, &CallStackDockWidget::threadSelected, this,
+                [this](int threadId) {
+                    m_selectedFrameLevel[m_focusedRank] = 0;
+                    if (m_coordinator) m_coordinator->selectStackFrame(m_focusedRank, threadId, 0);
+                });
+
+        // Activating a caller frame jumps SourceCodeView + DisassemblyView and re-queries frame locals/registers.
+        connect(m_callStackDockWidget, &CallStackDockWidget::frameActivated, this,
+                [this](int threadId, int frameLevel, const QString& file, int line, quint64 address) {
+                    m_selectedFrameLevel[m_focusedRank] = frameLevel;
+                    // Open or focus the frame's DWARF source file and move the active line highlight.
+                    if (!file.isEmpty() && QFileInfo::exists(file) && line > 0) {
+                        SourceCodeView* view = m_editorTabManager ? m_editorTabManager->openFile(file)
+                                                                  : getSourceCodeView();
+                        if (view) {
+                            view->highlightCurrentLine(line);
+                            view->highlightExecutionLine(line);
+                        }
+                    }
+                    // Synchronize DisassemblyView cursor to the caller frame's return/call site address.
+                    if (m_disassemblyView && address != 0ULL) {
+                        m_disassemblyView->setCurrentAddress(address);
+                        m_disassemblyView->setActiveSteppingRank(m_focusedRank, address);
+                    }
+                    // Instruct the active backend coordinator to select `threadId` + `frameLevel`.
+                    if (m_coordinator) m_coordinator->selectStackFrame(m_focusedRank, threadId, frameLevel);
+                });
+    }
+
+    if (!m_coordinator) return;
+
+    // Wire Coordinator -> UI signals for 64-frame backtraces and OS/OpenMP thread lists.
+    connect(m_coordinator, &IBackendCoordinator::stackTraceUpdated, this,
+            [this](int rank, const QVector<StackFrameEntry>& frames) {
+                // Empty frame broadcast with zero active processes signals full session teardown.
+                if (frames.isEmpty() && m_coordinator && m_coordinator->getProcessCount() == 0) {
+                    m_cachedStackFrames.clear();
+                    m_cachedThreads.clear();
+                    m_selectedFrameLevel.clear();
+                    if (m_callStackDockWidget) m_callStackDockWidget->clearFrames();
+                    return;
+                }
+                // Cache unwound frames per rank and update the dock immediately if `rank` is focused.
+                m_cachedStackFrames[rank] = frames;
+                if (rank == m_focusedRank && m_callStackDockWidget) {
+                    m_callStackDockWidget->setStackFrames(frames, m_selectedFrameLevel.value(rank, 0));
+                }
+            });
+
+    // Update per-rank OS/OpenMP thread cache and repopulate `#threadSelectorCombo` for the focused rank.
+    connect(m_coordinator, &IBackendCoordinator::threadsUpdated, this,
+            [this](int rank, const QVector<ThreadEntry>& threads) {
+                if (threads.isEmpty() && m_coordinator && m_coordinator->getProcessCount() == 0) return;
+                m_cachedThreads[rank] = threads;
+                if (rank == m_focusedRank && m_callStackDockWidget) {
+                    m_callStackDockWidget->setThreads(threads);
+                }
+            });
 }
 
 /**

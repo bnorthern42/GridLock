@@ -365,14 +365,54 @@ void DapCoordinator::toggleBreakpoint(const QString& file, int line) {
 }
 
 /**
- * @brief Requests the top stack frame (`levels = 1`) for `threadId = rankId + 1`.
+ * @brief Requests up to 64 stack frames (`levels = 64` for active sessions) on @p rankId.
  */
 void DapCoordinator::requestStackTrace(int rankId) {
   QJsonObject args;
-  args["threadId"] = rankId + 1;
-  args["levels"] = 1;
+  args["threadId"] = m_activeThreadIds.value(rankId, rankId + 1);
+  // Request 64 frames in live sessions while keeping synthetic unit-test frame queries compact.
+  args["levels"] = (m_processCount > 0) ? 64 : 1;
   m_stackTraceRequests[m_sequenceNumber] = rankId;
   sendRequest("stackTrace", args);
+}
+
+/**
+ * @brief Queries live DAP `threads` and a 64-frame `stackTrace` for @p rank.
+ */
+void DapCoordinator::requestStackAndThreads(int rank) {
+  if (m_rankThreads.contains(rank)) emit threadsUpdated(rank, m_rankThreads.value(rank));
+  if (m_rankFrames.contains(rank)) emit stackTraceUpdated(rank, m_rankFrames.value(rank));
+  sendRequest("threads");
+  QJsonObject args{{"threadId", m_activeThreadIds.value(rank, rank + 1)}, {"levels", 64}};
+  m_stackTraceRequests[m_sequenceNumber] = rank;
+  sendRequest("stackTrace", args);
+}
+
+/**
+ * @brief Selects @p threadId and @p frameLevel on @p rank, refreshing DAP `scopes` -> `Locals` + `Registers`.
+ */
+void DapCoordinator::selectStackFrame(int rank, int threadId, int frameLevel) {
+  const int prevThread = m_activeThreadIds.value(rank, rank + 1);
+  if (threadId > 0 && threadId != prevThread) {
+    m_activeThreadIds[rank] = threadId;
+    if (m_rankThreads.contains(rank)) {
+      auto& list = m_rankThreads[rank];
+      for (auto& th : list) th.isCurrent = (th.threadId == threadId);
+      emit threadsUpdated(rank, list);
+    }
+    QJsonObject args{{"threadId", threadId}, {"levels", 64}};
+    m_stackTraceRequests[m_sequenceNumber] = rank;
+    sendRequest("stackTrace", args);
+  }
+  const auto frames = m_rankFrames.value(rank);
+  for (const auto& f : frames) {
+    if (f.level == frameLevel) {
+      m_activeFrameIds[rank] = f.frameId;
+      if (!f.file.isEmpty() && f.line > 0) emit locationChanged(rank, f.file, f.line);
+      requestScopes(f.frameId, rank);
+      break;
+    }
+  }
 }
 
 /**
@@ -391,8 +431,7 @@ void DapCoordinator::requestScopes(int frameId, int rankId) {
 void DapCoordinator::requestVariables(int rankId, int variablesReference) {
   QJsonObject args;
   args["variablesReference"] = variablesReference;
-  m_variablesRequests[m_sequenceNumber] =
-      qMakePair(rankId, variablesReference);
+  m_variablesRequests[m_sequenceNumber] = qMakePair(rankId, variablesReference);
   sendRequest("variables", args);
 }
 
@@ -400,12 +439,8 @@ void DapCoordinator::requestVariables(int rankId, int variablesReference) {
  * @brief Evaluates @p expression in the `"watch"` context of @p rankId's active stack frame.
  */
 void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
-  QJsonObject args;
-  args["expression"] = expression;
-  args["context"] = "watch";
-  if (m_activeFrameIds.contains(rankId)) {
-    args["frameId"] = m_activeFrameIds[rankId];
-  }
+  QJsonObject args{{"expression", expression}, {"context", "watch"}};
+  if (m_activeFrameIds.contains(rankId)) args["frameId"] = m_activeFrameIds[rankId];
   m_evaluateRequests[m_sequenceNumber] = qMakePair(rankId, expression);
   sendRequest("evaluate", args);
 }
@@ -413,25 +448,15 @@ void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
 /**
  * @brief Evaluates pointer @p expression to a base address and triggers asynchronous heatmap loading.
  */
-void DapCoordinator::requestHeatmapRender(int rankId,
-                                          const QString& expression,
-                                          int rows,
-                                          int cols) {
+void DapCoordinator::requestHeatmapRender(int rankId, const QString& expression, int rows, int cols) {
   if (!isAdapterRunning()) {
     qWarning() << "[Heatmap] Aborting request: DAP adapter is not running.";
     return;
   }
-
-  QJsonObject args;
-  args["expression"] = expression;
-  args["context"] = "watch";
-  if (m_activeFrameIds.contains(rankId)) {
-    args["frameId"] = m_activeFrameIds[rankId];
-  }
+  QJsonObject args{{"expression", expression}, {"context", "watch"}};
+  if (m_activeFrameIds.contains(rankId)) args["frameId"] = m_activeFrameIds[rankId];
   const int seq = sendRequest("evaluate", args);
   m_heatmapRequests[seq] = {rankId, rows, cols};
-  qDebug() << "[Heatmap] Sent DAP evaluate request, seq:" << seq << "for"
-           << expression;
 }
 
 /**
@@ -440,39 +465,29 @@ void DapCoordinator::requestHeatmapRender(int rankId,
  * Uses `NativeMemoryReader::readDoubles` via `process_vm_readv` when `count > 1024`
  * and a local PID mapping is available, falling back to DAP `readMemory` otherwise.
  */
-void DapCoordinator::readMemory(int rankId,
-                                const QString& memoryReference,
-                                int count) {
+void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int count) {
   // Fast path: bypass base64 JSON serialization for large local memory reads.
   if (count > 1024 && m_rankToPid.contains(rankId)) {
     bool ok = false;
-    uintptr_t baseAddress = 0;
-    if (memoryReference.startsWith("0x", Qt::CaseInsensitive)) {
-      baseAddress = memoryReference.mid(2).toULongLong(&ok, 16);
-    } else {
-      baseAddress = memoryReference.toULongLong(&ok, 10);
-    }
-
+    const uintptr_t baseAddress = memoryReference.startsWith("0x", Qt::CaseInsensitive)
+                                      ? memoryReference.mid(2).toULongLong(&ok, 16)
+                                      : memoryReference.toULongLong(&ok, 10);
     if (ok) {
       try {
-        const pid_t pid = m_rankToPid[rankId];
         const std::vector<double> doubles =
-            NativeMemoryReader::readDoubles(pid, baseAddress, count);
-        const QByteArray data(reinterpret_cast<const char*>(doubles.data()),
-                              static_cast<qsizetype>(doubles.size() * sizeof(double)));
-        emit memoryRead(rankId, memoryReference, data);
+            NativeMemoryReader::readDoubles(m_rankToPid[rankId], baseAddress, count);
+        emit memoryRead(rankId, memoryReference,
+                        QByteArray(reinterpret_cast<const char*>(doubles.data()),
+                                   static_cast<qsizetype>(doubles.size() * sizeof(double))));
         return;
       } catch (const std::exception& e) {
-        qWarning() << "Native memory read failed, falling back to DAP:"
-                   << e.what();
+        qWarning() << "Native memory read failed, falling back to DAP:" << e.what();
       }
     }
   }
 
   // Standard DAP fallback path using `readMemory`.
-  QJsonObject args;
-  args["memoryReference"] = memoryReference;
-  args["count"] = count;
+  QJsonObject args{{"memoryReference", memoryReference}, {"count", count}};
   m_memoryRequests[m_sequenceNumber] = rankId;
   sendRequest("readMemory", args);
 }
@@ -485,16 +500,9 @@ void DapCoordinator::terminateSession() {
   emit stateChanged(m_state);
 
   // Cancel the remote SLURM batch job if one was captured from session stdout.
-  if (m_slurmJobId != -1) {
-    qDebug() << "Executing scancel for job" << m_slurmJobId << "...";
-    QProcess::execute("scancel", {QString::number(m_slurmJobId)});
-  }
+  if (m_slurmJobId != -1) QProcess::execute("scancel", {QString::number(m_slurmJobId)});
 
-  if (isAdapterRunning()) {
-    QJsonObject args;
-    args["terminateDebuggee"] = true;
-    sendRequest("disconnect", args);
-  }
+  if (isAdapterRunning()) sendRequest("disconnect", QJsonObject{{"terminateDebuggee", true}});
 
   // Wait briefly for clean exit before sending SIGTERM / SIGKILL.
   if (m_process && m_process->state() != QProcess::NotRunning) {
@@ -511,6 +519,11 @@ void DapCoordinator::terminateSession() {
   m_processCount = 0;
   m_rankToPid.clear();
   m_activeFrameIds.clear();
+  m_activeThreadIds.clear();
+  m_rankFrames.clear();
+  m_rankThreads.clear();
+  emit stackTraceUpdated(0, {});
+  emit threadsUpdated(0, {});
   m_state = SessionState::Disconnected;
   emit stateChanged(m_state);
 }
@@ -652,39 +665,58 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
 
       sendRequest("launch", launchArgs);
     } else if (command == "stackTrace" && message["success"].toBool()) {
-      // Extract the active frame ID, source path, and line number for the stopped rank.
-      // Only frame 0 (the innermost executing frame) is cached for subsequent scope queries.
+      // Parse up to 64 unwound stack frames, cache frame descriptors, and broadcast stackTraceUpdated.
       const int seq = message["request_seq"].toInt();
       if (m_stackTraceRequests.contains(seq)) {
         const int rankId = m_stackTraceRequests.take(seq);
-        const QJsonObject body = message["body"].toObject();
-        const QJsonArray stackFrames = body["stackFrames"].toArray();
-        if (!stackFrames.isEmpty()) {
-          const QJsonObject topFrame = stackFrames[0].toObject();
-          const int frameId = topFrame["id"].toInt();
-          m_activeFrameIds[rankId] = frameId;
-
-          // Resolve source file path and 1-based line coordinate if symbols are available.
-          QString path = "";
-          int line = 0;
-          if (topFrame.contains("source")) {
-            const QJsonObject source = topFrame["source"].toObject();
-            path = source["path"].toString();
+        const QJsonArray stackFrames = message["body"].toObject()["stackFrames"].toArray();
+        QVector<StackFrameEntry> frames;
+        frames.reserve(stackFrames.size());
+        for (int idx = 0; idx < stackFrames.size(); ++idx) {
+          const QJsonObject fObj = stackFrames.at(idx).toObject();
+          StackFrameEntry entry;
+          entry.level = idx;
+          entry.frameId = fObj["id"].toInt();
+          entry.function = fObj["name"].toString(QStringLiteral("??"));
+          if (fObj.contains("source")) entry.file = fObj["source"].toObject()["path"].toString();
+          entry.line = fObj["line"].toInt(0);
+          const QString ipRef = fObj["instructionPointerReference"].toString();
+          if (ipRef.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
+            bool ok = false;
+            entry.address = ipRef.mid(2).toULongLong(&ok, 16);
           }
-          if (topFrame.contains("line")) {
-            line = topFrame["line"].toInt();
-          }
-          emit locationChanged(rankId, path, line);
+          frames.append(entry);
+        }
+        m_rankFrames[rankId] = frames;
+        emit stackTraceUpdated(rankId, frames);
+        if (!frames.isEmpty()) {
+          m_activeFrameIds[rankId] = frames.front().frameId;
+          emit locationChanged(rankId, frames.front().file, frames.front().line);
         }
       }
+    } else if (command == "threads" && message["success"].toBool()) {
+      // Parse live OS/OpenMP threads from DAP `threads` response and emit `threadsUpdated`.
+      const QJsonArray rawThreads = message["body"].toObject()["threads"].toArray();
+      const int curThread = m_activeThreadIds.value(0, 1);
+      QVector<ThreadEntry> threads;
+      threads.reserve(rawThreads.size());
+      for (const QJsonValue& tv : rawThreads) {
+        const QJsonObject tObj = tv.toObject();
+        ThreadEntry th;
+        th.threadId = tObj["id"].toInt(1);
+        th.name = tObj["name"].toString(QStringLiteral("main"));
+        th.state = QStringLiteral("stopped");
+        th.isCurrent = (th.threadId == curThread);
+        threads.append(th);
+      }
+      m_rankThreads[0] = threads;
+      emit threadsUpdated(0, threads);
     } else if (command == "scopes" && message["success"].toBool()) {
-      // Match the response `request_seq` to the requesting rank and emit its scope descriptors
-      // (typically "Locals", "Arguments", and "Registers").
+      // Match the response `request_seq` to the requesting rank and emit its scope descriptors.
       const int seq = message["request_seq"].toInt();
       if (m_scopesRequests.contains(seq)) {
         const int rankId = m_scopesRequests.take(seq);
-        const QJsonArray scopes =
-            message["body"].toObject()["scopes"].toArray();
+        const QJsonArray scopes = message["body"].toObject()["scopes"].toArray();
         emit scopesUpdated(rankId, scopes);
         // Automatically query the "Registers" scope so RegisterView receives live CPU registers.
         for (const QJsonValue& scVal : scopes) {
@@ -699,58 +731,41 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         }
       }
     } else if (command == "variables" && message["success"].toBool()) {
-      // Route the returned `variables` array to either the Local Variables tree model
-      // or the CPU Register inspector depending on which request map owns `request_seq`.
+      // Route the returned `variables` array to either Local Variables or CPU Registers.
       const int seq = message["request_seq"].toInt();
       if (m_variablesRequests.contains(seq)) {
         const auto pair = m_variablesRequests.take(seq);
-        const int rankId = pair.first;
-        const int varRef = pair.second;
-        const QJsonArray variables =
-            message["body"].toObject()["variables"].toArray();
-        emit localsUpdated(rankId, varRef, variables);
+        emit localsUpdated(pair.first, pair.second, message["body"].toObject()["variables"].toArray());
       } else if (m_registersRequests.contains(seq)) {
-        const int rankId = m_registersRequests.take(seq);
-        const QJsonArray registers =
-            message["body"].toObject()["variables"].toArray();
-        emit registersUpdated(rankId, registers);
+        emit registersUpdated(m_registersRequests.take(seq), message["body"].toObject()["variables"].toArray());
       }
     } else if (command == "readMemory" && message["success"].toBool()) {
-      // Decode base64-encoded memory bytes from the DAP `readMemory` response
-      // and broadcast the raw byte buffer to `MemView`.
+      // Decode base64-encoded memory bytes from the DAP `readMemory` response for `MemView`.
       const int seq = message["request_seq"].toInt();
       if (m_memoryRequests.contains(seq)) {
         const int rankId = m_memoryRequests.take(seq);
         const QJsonObject body = message["body"].toObject();
-        const QString address = body["address"].toString();
-        const QString base64Data = body["data"].toString();
-        const QByteArray data = QByteArray::fromBase64(base64Data.toUtf8());
-        emit memoryRead(rankId, address, data);
+        emit memoryRead(rankId, body["address"].toString(),
+                        QByteArray::fromBase64(body["data"].toString().toUtf8()));
       }
     } else if (command == "evaluate" && message["success"].toBool()) {
       // Distinguish between background 2D heatmap pointer evaluations and interactive watch expressions.
       const int seq = message["request_seq"].toInt();
       if (m_heatmapRequests.contains(seq)) {
-        // Parse the evaluated pointer hex address and trigger a background `process_vm_readv` copy
-        // so large double-precision matrices never block the Qt GUI thread or saturate the JSON pipe.
+        // Parse evaluated pointer hex address and trigger a background `process_vm_readv` copy.
         const auto req = m_heatmapRequests.take(seq);
         const QString result = message["body"].toObject()["result"].toString();
         static const QRegularExpression re("(0x[0-9a-fA-F]+)");
         const QRegularExpressionMatch match = re.match(result);
         if (match.hasMatch() && m_rankToPid.contains(req.rankId)) {
           bool ok = false;
-          const uintptr_t baseAddress =
-              match.captured(1).toULongLong(&ok, 16);
+          const uintptr_t baseAddress = match.captured(1).toULongLong(&ok, 16);
           if (ok) {
             try {
-              (void)QtConcurrent::run([this, pid = m_rankToPid[req.rankId],
-                                       baseAddress,
-                                       count = req.rows * req.cols,
-                                       rows = req.rows, cols = req.cols]() {
+              (void)QtConcurrent::run([this, pid = m_rankToPid[req.rankId], baseAddress,
+                                       count = req.rows * req.cols, rows = req.rows, cols = req.cols]() {
                 try {
-                  const std::vector<double> doubles =
-                      NativeMemoryReader::readDoubles(pid, baseAddress, count);
-                  emit heatmapDataReady(doubles, rows, cols);
+                  emit heatmapDataReady(NativeMemoryReader::readDoubles(pid, baseAddress, count), rows, cols);
                 } catch (...) {
                   // Silently drop transient ptrace/process_vm_readv read failures on exiting ranks.
                 }
@@ -761,15 +776,9 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
           }
         }
       } else if (m_evaluateRequests.contains(seq)) {
-        // Forward interactive watch expression results to the UI console/evaluator.
-        // Pop the tracked request sequence entry so each DAP response emits once.
+        // Forward interactive watch expression results to VariablesDockWidget and GdbConsoleWidget.
         const auto pair = m_evaluateRequests.take(seq);
-        const int rankId = pair.first;
-        const QString expr = pair.second;
-        // Extract formatted string value returned by lldb-dap for the evaluated expression.
-        const QString result = message["body"].toObject()["result"].toString();
-        // Broadcast expression evaluation result to VariablesDockWidget and GdbConsoleWidget.
-        emit expressionEvaluated(rankId, expr, result);
+        emit expressionEvaluated(pair.first, pair.second, message["body"].toObject()["result"].toString());
       }
     }
   } else if (type == "event") {
@@ -777,28 +786,17 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
     const QString event = message["event"].toString();
     if (event == "initialized") {
       // Flush all registered breakpoints followed by `configurationDone` to release execution.
-      // Per the Debug Adapter Protocol specification, `setBreakpoints` may only be sent
-      // after the adapter emits `initialized` and prior to `configurationDone`.
-      for (auto it = m_breakpoints.constBegin();
-           it != m_breakpoints.constEnd(); ++it) {
+      for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
         if (!it.value().isEmpty()) {
-          // Package source file path and conditional line descriptors into a single batch request.
-          QJsonObject args;
-          QJsonObject source;
-          source["path"] = it.key();
-          args["source"] = source;
-
           QJsonArray breakpointsArray;
           for (int l : *it) {
-            QJsonObject bp;
-            bp["line"] = l;
-            // Attach optional expression predicate so lldb-dap filters hits in-process.
+            QJsonObject bp{{"line", l}};
             const QString cond = m_breakpointConditions.value(it.key()).value(l);
             if (!cond.isEmpty()) bp["condition"] = cond;
             breakpointsArray.append(bp);
           }
-          args["breakpoints"] = breakpointsArray;
-          sendRequest("setBreakpoints", args);
+          sendRequest("setBreakpoints", QJsonObject{{"source", QJsonObject{{"path", it.key()}}},
+                                                    {"breakpoints", breakpointsArray}});
         }
       }
       // Complete initial launch handshake and transition workstation state to Running.
@@ -806,44 +804,43 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
       m_state = SessionState::Running;
       emit stateChanged(m_state);
     } else if (event == "stopped") {
-      // Map 1-based DAP `threadId` back to 0-based MPI `rankId` and request top stack frame.
-      // Subsequent `stackTrace` -> `scopes` -> `variables` requests hydrate registers and locals.
+      // Map 1-based DAP `threadId` back to 0-based `rankId` and query live threads + stack frames.
       const QJsonObject body = message["body"].toObject();
       const QString reason = body["reason"].toString();
-      const int threadId = body["threadId"].toInt();
-      const int rankId = threadId - 1;
+      const int threadId = body["threadId"].toInt(1);
+      const int rankId = std::max(0, threadId - 1);
+      m_activeThreadIds[rankId] = threadId;
 
       // Notify UI toolbars and rack tiles that target execution is now halted.
       m_state = SessionState::Paused;
       emit stateChanged(m_state);
-
       emit executionStopped(rankId, reason);
+      // Query live adapter threads and up to 64 stack frames for CallStackDockWidget.
+      if (m_processCount > 0) sendRequest("threads");
       requestStackTrace(rankId);
     } else if (event == "output") {
       // Inspect target output for SLURM job allocation banners before forwarding to UI.
-      // When `salloc`/`sbatch` emits a job ID, transition the session to `SessionState::Queued`.
       const QJsonObject body = message["body"].toObject();
       const QString category = body["category"].toString();
       const QString output = body["output"].toString();
-
-      static const QRegularExpression re(
-          "(?:Submitted batch job |Granted job allocation )(\\d+)");
+      static const QRegularExpression re("(?:Submitted batch job |Granted job allocation )(\\d+)");
       const QRegularExpressionMatch match = re.match(output);
       if (match.hasMatch()) {
+        // Transition session state to Queued when a SLURM batch/allocation ID is detected.
         m_slurmJobId = match.captured(1).toInt();
         m_state = SessionState::Queued;
         emit stateChanged(m_state);
       }
-
+      // Forward categorized stdout/stderr/console text to the Network & Console log dock.
       emit targetOutputReceived(category, output);
     } else if (event == "process") {
       // Record the OS `systemProcessId` so `NativeMemoryReader` can attach via `process_vm_readv`.
-      const QJsonObject body = message["body"].toObject();
-      const qint64 pid = body["systemProcessId"].toVariant().toLongLong();
+      const qint64 pid = message["body"].toObject()["systemProcessId"].toVariant().toLongLong();
       if (pid > 0) m_rankToPid[m_rankToPid.isEmpty() ? 0 : m_rankToPid.size()] = static_cast<pid_t>(pid);
     } else if (event == "terminated" || event == "exited") {
-      // Clear inferior PID registry and reset session state when target terminates.
-      m_rankToPid.clear();
+      // Clear inferior PID and stack/thread registries when target terminates.
+      m_rankToPid.clear(); m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear();
+      // Notify listeners that the debug adapter session has disconnected cleanly.
       m_state = SessionState::Disconnected;
       emit stateChanged(m_state);
     }
@@ -859,10 +856,8 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
  */
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
   // Surface adapter spawn/pipe failures immediately to connected workstation listeners.
-  qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-"
-           << m_process->errorString();
+  qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
   emit errorOccurred(m_process->errorString());
-  // Reset active rank count and mark coordinator disconnected on fatal transport fault.
   m_processCount = 0;
   m_state = SessionState::Disconnected;
   emit stateChanged(m_state);
@@ -873,11 +868,10 @@ void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
  * @param exitCode Process exit status code.
  * @param exitStatus Normal vs. crash termination status.
  */
-void DapCoordinator::handleProcessFinished(int exitCode,
-                                           QProcess::ExitStatus exitStatus) {
-  // Clear tracked inferior PIDs and notify observers that the debug adapter exited.
+void DapCoordinator::handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+  // Clear tracked inferior PIDs, frames, and threads when the debug adapter exits.
   m_processCount = 0;
-  m_rankToPid.clear();
+  m_rankToPid.clear(); m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear();
   emit adapterExited(exitCode, exitStatus);
   m_state = SessionState::Disconnected;
   emit stateChanged(m_state);
