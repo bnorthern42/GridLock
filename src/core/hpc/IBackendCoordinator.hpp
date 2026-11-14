@@ -91,8 +91,14 @@ class IBackendCoordinator : public QObject {
   /** @brief Returns the canonical engine identifier (`"gdb"` or `"lldb-dap"`). */
   virtual QString activeEngineName() const = 0;
 
-  /** @brief Returns the OS process ID (`pid_t`) of the target rank @p rankId. */
-  virtual pid_t getPidForRank(int rankId) const = 0;
+  /** @brief Returns the OS process ID of the target MPI rank @p rank, or `0` if not running. */
+  virtual qint64 getPidForRank(int rank) const = 0;
+
+  /**
+   * @brief Attaches the debugger backend directly to a running local OS process @p pid.
+   * @return `true` if the attach session started successfully, `false` otherwise.
+   */
+  virtual bool attachToProcess(qint64 pid) = 0;
 
   /** @brief Returns the filesystem path to the currently loaded target executable. */
   virtual QString getCurrentBinaryPath() const = 0;

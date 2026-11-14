@@ -97,12 +97,57 @@ GdbRankCoordinator::~GdbRankCoordinator() { terminateAllSessions(); }
 /** @brief Implements `IBackendCoordinator::terminateSession()` by tearing down all rank processes. */
 void GdbRankCoordinator::terminateSession() { terminateAllSessions(); }
 
-/** @brief Returns the live inferior OS PID for @p rankId if known, or `0` otherwise. */
-pid_t GdbRankCoordinator::getPidForRank(int rankId) const {
-  if (rankId >= 0 && rankId < static_cast<int>(m_processes.size()) && m_processes[rankId]) {
-    return m_processes[rankId]->inferiorPid;
+/** @brief Returns the live inferior OS PID for @p rank if known, or `0` otherwise. */
+qint64 GdbRankCoordinator::getPidForRank(int rank) const {
+  if (m_rankPids.contains(rank) && m_rankPids.value(rank) > 0) return m_rankPids.value(rank);
+  if (rank >= 0 && rank < static_cast<int>(m_processes.size()) && m_processes[rank] && m_processes[rank]->inferiorPid > 0) {
+    return static_cast<qint64>(m_processes[rank]->inferiorPid);
   }
   return 0;
+}
+
+/**
+ * @brief Attaches a live `gdb --interpreter=mi3 -p <pid>` session to a running local OS process.
+ * @param pid Target OS process identifier from `/proc`.
+ * @return `true` if GDB started and initiated attachment to @p pid.
+ */
+bool GdbRankCoordinator::attachToProcess(qint64 pid) {
+  if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
+  terminateAllSessions();
+
+  // Resolve `gdb` executable from user settings or standard system PATH locations.
+  QString gdbPath = core::ConfigManager::instance().getGdbPath().trimmed();
+  if (gdbPath.isEmpty() || !QFileInfo::exists(gdbPath)) {
+    gdbPath = QStandardPaths::findExecutable(gdbPath.isEmpty() ? QStringLiteral("gdb") : gdbPath);
+  }
+  if (gdbPath.isEmpty()) return false;
+
+  // Inspect `/proc/<pid>/exe` symlink so static ELF symbols and breakpoints bind to the binary.
+  m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
+
+  auto rp = std::make_unique<RankProcess>();
+  rp->id = 0;
+  rp->process = std::make_unique<QProcess>();
+  rp->inferiorPid = static_cast<pid_t>(pid);
+  rp->state.rankId = 0;
+  rp->state.currentState = "launching";
+  rp->state.lastFiredTimestamp = "synced";
+  m_rankPids[0] = pid;
+  connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this]() { handleGdbOutput(0); });
+  // Start MI3 frontend directly attached to target PID with debuginfod disabled.
+  rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
+                               QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3"),
+                               QStringLiteral("-p"), QString::number(pid)});
+  const bool started = rp->process->waitForStarted(2000);
+  m_processes.push_back(std::move(rp));
+  if (!started) { terminateAllSessions(); return false; }
+
+  // Disable interactive pagination/prompts and query thread groups to confirm inferior state.
+  writeCmd(0, "-gdb-set pagination off\n");
+  writeCmd(0, "-gdb-set confirm off\n");
+  writeCmd(0, "-list-thread-groups\n");
+  emit rankStateChanged(0, m_processes[0]->state);
+  return true;
 }
 
 /**
@@ -227,13 +272,13 @@ void GdbRankCoordinator::terminateAllSessions() {
       rp->fifoInFd = -1;
     }
     if (rp->fifoOutFd >= 0) { ::close(rp->fifoOutFd); rp->fifoOutFd = -1; }
-    // Ensure any lingering attached inferior process is reaped immediately.
-    if (rp->inferiorPid > 0) { ::kill(rp->inferiorPid, SIGKILL); rp->inferiorPid = 0; }
+    // Reap spawned FIFO child rank processes; detach cleanly from externally attached PIDs.
+    if (rp->fifoInFd >= 0 && rp->inferiorPid > 0) { ::kill(rp->inferiorPid, SIGKILL); rp->inferiorPid = 0; }
     // Tear down standalone `QProcess` GDB frontend without writing to closed pipes.
     if (rp->process) {
       rp->process->disconnect();
       if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
-        rp->process->write("-gdb-exit\n");
+        rp->process->write("-target-detach\n-gdb-exit\n");
       }
       if (rp->process->state() != QProcess::NotRunning && !rp->process->waitForFinished(300)) {
         rp->process->kill();
@@ -241,8 +286,9 @@ void GdbRankCoordinator::terminateAllSessions() {
       }
     }
   }
-  // Clear rank process slots and reset per-rank GDB variable-object lookup tables.
+  // Clear rank process slots, OS PID map, and per-rank GDB variable-object lookup tables.
   m_processes.clear();
+  m_rankPids.clear();
   m_varNameMap.clear();
   m_varNameRevMap.clear();
 
@@ -643,19 +689,21 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
     // Broadcast raw MI3 record line to GdbConsoleWidget and protocol test listeners.
     emit gdbOutputReceived(rankId, line);
 
-    // Capture live inferior OS PID when GDB launches the target rank process.
-    if (line.startsWith("=thread-group-started")) {
+    // Capture or clear live inferior OS PID on GDB thread-group lifecycle and group-list records.
+    if (line.startsWith("=thread-group-started") || line.startsWith("^done,groups=[")) {
       static const QRegularExpression pidRe("pid=\"(\\d+)\"");
       const auto pm = pidRe.match(line);
-      if (pm.hasMatch()) rp->inferiorPid = static_cast<pid_t>(pm.captured(1).toInt());
+      if (pm.hasMatch()) { const qint64 pid = pm.captured(1).toLongLong(); rp->inferiorPid = static_cast<pid_t>(pid); m_rankPids[rankId] = pid; }
       continue;
     }
+    if (line.startsWith("=thread-group-exited")) { rp->inferiorPid = 0; m_rankPids.remove(rankId); continue; }
 
     if (line.startsWith("*stopped")) {
       // Handle normal or signal-induced inferior termination without querying dead frames.
       if (line.contains("reason=\"exited") || line.contains("reason=\"exited-normally\"")) {
         rp->state.currentState = "exited";
         rp->inferiorPid = 0;
+        m_rankPids.remove(rankId);
         emit rankStateChanged(rankId, rp->state);
         continue;
       }

@@ -15,6 +15,9 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFrame>
 #include <QGroupBox>
@@ -22,8 +25,13 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
+
+#include <algorithm>
+#include <pwd.h>
+#include <unistd.h>
 
 namespace gridlock::ui {
 
@@ -133,24 +141,28 @@ void ProjectSettingsDialog::accept() {
 AttachProcessDialog::AttachProcessDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(QStringLiteral("Attach to MPI / Local Process"));
     setMinimumSize(560, 320);
-    resize(620, 360);
+    resize(640, 360);
     setStyleSheet(workstationDialogStyleSheet());
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(10, 10, 10, 10);
     rootLayout->setSpacing(8);
 
-    // Top filter strip inside a compact dark-slate header bar.
+    // Top filter strip with live substring filter box and 24px Refresh button.
     auto* filterRow = new QHBoxLayout();
     filterRow->setContentsMargins(0, 0, 0, 0);
     filterRow->setSpacing(6);
     auto* filterLabel = new QLabel(QStringLiteral("Filter Processes:"), this);
     m_filterEdit = new QLineEdit(this);
     m_filterEdit->setObjectName(QStringLiteral("attachProcessFilterEdit"));
-    m_filterEdit->setPlaceholderText(QStringLiteral("Filter by PID, MPI rank, state, or binary command..."));
+    m_filterEdit->setPlaceholderText(QStringLiteral("Filter by PID, process name, user, or command line..."));
     m_filterEdit->setFixedHeight(24);
+    m_refreshBtn = new QPushButton(QStringLiteral("Refresh"), this);
+    m_refreshBtn->setObjectName(QStringLiteral("attachProcessRefreshBtn"));
+    m_refreshBtn->setFixedHeight(24);
     filterRow->addWidget(filterLabel);
     filterRow->addWidget(m_filterEdit, 1);
+    filterRow->addWidget(m_refreshBtn);
     rootLayout->addLayout(filterRow);
 
     // 4-column borderless process table with alternating row colors and >= 48px section sizes.
@@ -165,40 +177,16 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent) : QDialog(parent) {
     m_processTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_processTable->setHorizontalHeaderLabels({
         QStringLiteral("PID"),
-        QStringLiteral("RANK"),
-        QStringLiteral("STATE"),
+        QStringLiteral("PROCESS"),
+        QStringLiteral("USER"),
         QStringLiteral("COMMAND")
     });
     m_processTable->horizontalHeader()->setVisible(true);
     m_processTable->horizontalHeader()->setMinimumSectionSize(48);
     m_processTable->horizontalHeader()->setStretchLastSection(true);
-    m_processTable->setColumnWidth(0, 72);
-    m_processTable->setColumnWidth(1, 72);
-    m_processTable->setColumnWidth(2, 110);
-
-    // Seed structured MPI cluster process rows so the table never renders a blank void.
-    struct ProcessEntry {
-        const char* pid;
-        const char* rank;
-        const char* state;
-        const char* cmd;
-    };
-    const ProcessEntry seedRows[] = {
-        {"4102", "Rank 0", "RUNNING (MPI_Send)", "mpirun -np 4 ./mpi_navier_stokes --grid 512"},
-        {"4103", "Rank 1", "STOPPED (MPI_Recv)", "./mpi_navier_stokes --grid 512"},
-        {"4104", "Rank 2", "WAITING (MPI_Barrier)", "./mpi_navier_stokes --grid 512"},
-        {"4105", "Rank 3", "RUNNING (MPI_Allreduce)", "./mpi_navier_stokes --grid 512"},
-    };
-    m_processTable->setRowCount(4);
-    for (int i = 0; i < 4; ++i) {
-        m_processTable->setItem(i, 0, new QTableWidgetItem(QString::fromLatin1(seedRows[i].pid)));
-        m_processTable->setItem(i, 1, new QTableWidgetItem(QString::fromLatin1(seedRows[i].rank)));
-        auto* stateItem = new QTableWidgetItem(QString::fromLatin1(seedRows[i].state));
-        stateItem->setForeground(QColor(QStringLiteral("#61afef")));
-        m_processTable->setItem(i, 2, stateItem);
-        m_processTable->setItem(i, 3, new QTableWidgetItem(QString::fromLatin1(seedRows[i].cmd)));
-    }
-    m_processTable->selectRow(0);
+    m_processTable->setColumnWidth(0, 76);
+    m_processTable->setColumnWidth(1, 130);
+    m_processTable->setColumnWidth(2, 96);
     rootLayout->addWidget(m_processTable, 1);
 
     // Footer action buttons (Attach / Cancel) capped at 24px height.
@@ -211,28 +199,147 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent) : QDialog(parent) {
     }
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(m_refreshBtn, &QPushButton::clicked, this, &AttachProcessDialog::refreshProcesses);
+    connect(m_processTable, &QTableWidget::itemDoubleClicked, this, [this](QTableWidgetItem*) { accept(); });
     connect(m_filterEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         filterProcesses(text);
     });
+
+    // Populate initial table rows from live Linux `/proc` process descriptors.
+    refreshProcesses();
     rootLayout->addWidget(buttons);
 }
 
 /**
- * @brief Returns the currently selected process ID, or -1 if none is selected.
+ * @brief Scans `/proc/<pid>/status` and `/proc/<pid>/cmdline` for user-owned live OS processes.
+ *
+ * Uses `QFile::readAll()` because Linux procfs pseudo-files report `st_size == 0` in `stat()`,
+ * which causes `QIODevice::atEnd()` to evaluate true before reading content. Filters processes
+ * to those matching `geteuid()`, excludes GridLock's own GUI/test PID, and prioritizes MPI ranks.
  */
-int AttachProcessDialog::selectedPid() const {
+void AttachProcessDialog::refreshProcesses() {
+    if (!m_processTable) return;
+    // Query effective POSIX user ID, current application PID, and human-readable login name.
+    const uid_t currentUid = ::geteuid();
+    const qint64 selfPid = QCoreApplication::applicationPid();
+    const struct passwd* pw = ::getpwuid(currentUid);
+    const QString userName = (pw && pw->pw_name) ? QString::fromLocal8Bit(pw->pw_name)
+                                                 : qEnvironmentVariable("USER", QString::number(currentUid));
+    // Extract configured target binary basename so active project executables sort at the top.
+    const QString targetBase = QFileInfo(QString::fromStdString(
+        gridlock::core::ConfigManager::instance().loadProjectSettings().targetBinary)).fileName();
+
+    // Lightweight value record representing one user-owned OS process discovered in `/proc`.
+    struct ProcRow {
+        qint64 pid{0};
+        QString name;
+        QString cmdline;
+        bool priority{false};
+    };
+    QList<ProcRow> rows;
+
+    // Enumerate numeric `/proc/<pid>` directories and inspect status + command-line metadata.
+    const QDir procDir(QStringLiteral("/proc"));
+    for (const QString& entry : procDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool pidOk = false;
+        const qint64 pid = entry.toLongLong(&pidOk);
+        // Skip non-numeric procfs subdirectories (`net`, `sys`, `irq`) and our own process ID.
+        if (!pidOk || pid <= 0 || pid == selfPid) continue;
+
+        // Read `/proc/<pid>/status` in full via `readAll()` to extract `Name:` and `Uid:` fields.
+        QFile statusFile(QStringLiteral("/proc/%1/status").arg(pid));
+        if (!statusFile.open(QIODevice::ReadOnly)) continue;
+        const QByteArray statusBytes = statusFile.readAll();
+        if (statusBytes.isEmpty()) continue;
+
+        QString procName;
+        bool uidMatched = false;
+        // Parse newline-delimited procfs status headers until both `Name:` and `Uid:` are resolved.
+        for (const QByteArray& rawLine : statusBytes.split('\n')) {
+            const QString line = QString::fromUtf8(rawLine).trimmed();
+            if (line.startsWith(QStringLiteral("Name:"))) {
+                procName = line.mid(5).trimmed();
+            } else if (line.startsWith(QStringLiteral("Uid:"))) {
+                // `Uid:` lists Real, Effective, Saved-set, and Filesystem UIDs separated by tabs.
+                const QStringList parts = line.mid(4).split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+                if (!parts.isEmpty()) {
+                    const uid_t realUid = static_cast<uid_t>(parts[0].toUInt());
+                    const uid_t effUid = parts.size() > 1 ? static_cast<uid_t>(parts[1].toUInt()) : realUid;
+                    uidMatched = (realUid == currentUid || effUid == currentUid);
+                }
+                break;
+            }
+        }
+        // Exclude processes owned by other system accounts as well as any running `gridlock` binary.
+        if (!uidMatched || procName.isEmpty() || procName.compare(QStringLiteral("gridlock"), Qt::CaseInsensitive) == 0) {
+            continue;
+        }
+
+        // Convert NUL-delimited `/proc/<pid>/cmdline` argv tokens into a space-delimited command string.
+        QString cmdText;
+        QFile cmdFile(QStringLiteral("/proc/%1/cmdline").arg(pid));
+        if (cmdFile.open(QIODevice::ReadOnly)) {
+            QByteArray raw = cmdFile.readAll();
+            for (char& ch : raw) { if (ch == '\0') ch = ' '; }
+            cmdText = QString::fromUtf8(raw).trimmed();
+        }
+        // Kernel threads or zombies without user-space argv fall back to bracketed `[Name]`.
+        if (cmdText.isEmpty()) cmdText = QStringLiteral("[%1]").arg(procName);
+
+        // Flag MPI job launchers, OpenMPI/PRTE daemons, SLURM steps, and local target binaries.
+        const bool isPriority =
+            procName.contains(QStringLiteral("mpi"), Qt::CaseInsensitive) ||
+            procName.contains(QStringLiteral("orted"), Qt::CaseInsensitive) ||
+            procName.contains(QStringLiteral("prte"), Qt::CaseInsensitive) ||
+            procName.contains(QStringLiteral("srun"), Qt::CaseInsensitive) ||
+            cmdText.contains(QStringLiteral("mpirun"), Qt::CaseInsensitive) ||
+            cmdText.contains(QStringLiteral("mpiexec"), Qt::CaseInsensitive) ||
+            cmdText.contains(QStringLiteral("tutorial/"), Qt::CaseInsensitive) ||
+            (!targetBase.isEmpty() && procName == targetBase);
+        rows.push_back(ProcRow{pid, procName, cmdText, isPriority});
+    }
+
+    // Order MPI / target executables ahead of general desktop processes, then newest PIDs first.
+    std::sort(rows.begin(), rows.end(), [](const ProcRow& a, const ProcRow& b) {
+        return (a.priority != b.priority) ? (a.priority > b.priority) : (a.pid > b.pid);
+    });
+
+    // Populate the 4-column QTableWidget (`PID`, `PROCESS`, `USER`, `COMMAND`) and highlight priority rows.
+    m_processTable->setRowCount(rows.size());
+    for (int i = 0; i < rows.size(); ++i) {
+        m_processTable->setItem(i, 0, new QTableWidgetItem(QString::number(rows[i].pid)));
+        auto* nameItem = new QTableWidgetItem(rows[i].name);
+        if (rows[i].priority) nameItem->setForeground(QColor(QStringLiteral("#61afef")));
+        m_processTable->setItem(i, 1, nameItem);
+        m_processTable->setItem(i, 2, new QTableWidgetItem(userName));
+        m_processTable->setItem(i, 3, new QTableWidgetItem(rows[i].cmdline));
+    }
+    // Re-apply active substring filter when refreshing while a user search query is present.
+    if (m_filterEdit && !m_filterEdit->text().isEmpty()) filterProcesses(m_filterEdit->text());
+    // Default-select the first visible process row so clicking Attach immediately targets a valid PID.
+    for (int r = 0; r < m_processTable->rowCount(); ++r) {
+        if (!m_processTable->isRowHidden(r)) { m_processTable->selectRow(r); break; }
+    }
+}
+
+/**
+ * @brief Returns the currently selected OS process ID, or -1 if none is selected.
+ */
+qint64 AttachProcessDialog::selectedPid() const {
     if (!m_processTable || m_processTable->currentRow() < 0) {
         return -1;
     }
     if (const QTableWidgetItem* pidItem = m_processTable->item(m_processTable->currentRow(), 0)) {
-        return pidItem->text().toInt();
+        bool ok = false;
+        const qint64 pid = pidItem->text().toLongLong(&ok);
+        return ok ? pid : -1;
     }
     return -1;
 }
 
 /**
  * @brief Filters visible process rows matching the query string.
- * @param filterText Substring matched against PID, rank, state, or command.
+ * @param filterText Substring matched against PID, process name, user, or command line.
  */
 void AttachProcessDialog::filterProcesses(const QString& filterText) {
     if (!m_processTable) {

@@ -13,14 +13,22 @@
 #include "../core/hpc/DapCoordinator.hpp"
 #include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/hpc/NativeMemoryReader.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "dialogs/ProjectSettingsDialog.hpp"
+#include "views/MemView.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QString>
+#include <QTimer>
+
+#include <cstring>
 
 namespace gridlock::ui {
 
@@ -339,6 +347,171 @@ void MainWindow::onRankSelected(int rankId) {
             gdbCoord->requestDisassemblyFallback(rankId);
         }
     }
+}
+
+/**
+ * @brief Binds `MemView` live rank address evaluation and `process_vm_readv` + debugger fallback callbacks.
+ *
+ * Enables `MemView` to resolve per-rank register/symbol expressions (such as `$rsp`), read raw
+ * target rank memory via `NativeMemoryReader` (`process_vm_readv`), and fall back seamlessly to
+ * `IBackendCoordinator::readMemory` (`-data-read-memory-bytes` / DAP `readMemory`) when
+ * `kernel.yama.ptrace_scope` restricts sibling `process_vm_readv` calls.
+ */
+void MainWindow::bindLiveMemViewHandlers() {
+    if (!m_memView) return;
+
+    // Resolve hex addresses, cached x86_64 registers (`$rsp`, `$rbp`, `$rip`), or live expressions per rank.
+    auto resolver = [this](int rank, const QString& rawExpr, bool* okOut) -> uint64_t {
+        if (okOut) *okOut = false;
+        const QString expr = rawExpr.trimmed();
+        if (expr.isEmpty()) return 0ULL;
+
+        // 1. Parse direct hexadecimal literal (`0x...` or bare hex digits) without round-tripping to GDB.
+        if (!expr.startsWith(QLatin1Char('$')) && !expr.startsWith(QLatin1Char('&'))) {
+            const QString clean = expr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? expr.mid(2) : expr;
+            bool hexOk = false;
+            const uint64_t val = clean.toULongLong(&hexOk, 16);
+            if (hexOk && val != 0ULL) {
+                if (okOut) *okOut = true;
+                return val;
+            }
+        }
+
+        // 2. Resolve `$rsp` / `$rbp` / `$rip` / general-purpose registers from cached per-rank register map.
+        if (expr.startsWith(QLatin1Char('$')) && m_latestStates.count(rank)) {
+            const QString reg = expr.mid(1).toLower();
+            int slot = -1;
+            if (reg == QLatin1String("rsp") || reg == QLatin1String("sp")) slot = 7;
+            else if (reg == QLatin1String("rbp") || reg == QLatin1String("fp")) slot = 6;
+            else if (reg == QLatin1String("rip") || reg == QLatin1String("pc")) slot = 16;
+            else if (reg == QLatin1String("rax")) slot = 0;
+            else if (reg == QLatin1String("rbx")) slot = 1;
+            else if (reg == QLatin1String("rcx")) slot = 2;
+            else if (reg == QLatin1String("rdx")) slot = 3;
+            else if (reg == QLatin1String("rsi")) slot = 4;
+            else if (reg == QLatin1String("rdi")) slot = 5;
+            if (slot >= 0) {
+                const QString tok = m_latestStates[rank].registers.value(slot).section(QLatin1Char(' '), 0, 0);
+                const QString hexTok = tok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? tok.mid(2) : tok;
+                bool regOk = false;
+                const uint64_t regVal = hexTok.toULongLong(&regOk, 16);
+                if (regOk && regVal != 0ULL) {
+                    if (okOut) *okOut = true;
+                    return regVal;
+                }
+            }
+        }
+
+        // 3. Evaluate arbitrary register/pointer expression via active debugger coordinator with bounded wait.
+        if (m_debugSessionActive && m_coordinator) {
+            uint64_t evalAddr = 0ULL;
+            bool evalOk = false;
+            QEventLoop loop;
+            QTimer timer;
+            timer.setSingleShot(true);
+            QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+            const QMetaObject::Connection conn = QObject::connect(
+                m_coordinator, &IBackendCoordinator::expressionEvaluated, &loop,
+                [&](int rId, const QString&, const QString& result) {
+                    if (rId != rank) return;
+                    static const QRegularExpression hexRe(QStringLiteral("0x([0-9a-fA-F]+)"));
+                    const auto m = hexRe.match(result);
+                    if (m.hasMatch()) evalAddr = m.captured(1).toULongLong(&evalOk, 16);
+                    loop.quit();
+                });
+            timer.start(1200);
+            m_coordinator->evaluateExpression(rank, expr);
+            loop.exec();
+            QObject::disconnect(conn);
+            if (evalOk && evalAddr != 0ULL) {
+                if (okOut) *okOut = true;
+                return evalAddr;
+            }
+        }
+        return 0ULL;
+    };
+
+    // Read raw bytes from `rank` via `NativeMemoryReader` (`process_vm_readv`), falling back to GDB/DAP.
+    auto fetcher = [this](int rank, uint64_t addr, int length) -> QByteArray {
+        if (!m_debugSessionActive || !m_coordinator || addr == 0ULL || length <= 0) return {};
+        const qint64 pid = m_coordinator->getPidForRank(rank);
+        if (pid > 0) {
+            try {
+                const size_t doubleCount = static_cast<size_t>((length + 7) / 8);
+                const std::vector<double> words = NativeMemoryReader::readDoubles(
+                    static_cast<pid_t>(pid), static_cast<uintptr_t>(addr), doubleCount);
+                if (!words.empty()) {
+                    QByteArray out(length, Qt::Uninitialized);
+                    std::memcpy(out.data(), words.data(), static_cast<size_t>(length));
+                    return out;
+                }
+            } catch (...) {
+                // Fall through to debugger-tracer memory read when `yama/ptrace_scope` blocks sibling readv.
+            }
+        }
+
+        // Tracer fallback: request raw memory bytes directly from GDB (`-data-read-memory-bytes`) or DAP.
+        QByteArray fallbackBytes;
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        m_suppressMemViewBroadcast = true;
+        const QMetaObject::Connection conn = QObject::connect(
+            m_coordinator, &IBackendCoordinator::memoryRead, &loop,
+            [&](int rId, const QString&, const QByteArray& data) {
+                if (rId != rank) return;
+                fallbackBytes = data;
+                loop.quit();
+            });
+        timer.start(1500);
+        m_coordinator->readMemory(rank, QStringLiteral("0x%1").arg(addr, 0, 16), length);
+        loop.exec();
+        QObject::disconnect(conn);
+        m_suppressMemViewBroadcast = false;
+        if (fallbackBytes.size() > length) fallbackBytes.truncate(length);
+        return fallbackBytes;
+    };
+
+    auto pidGetter = [this](int rank) -> qint64 {
+        return (m_debugSessionActive && m_coordinator) ? m_coordinator->getPidForRank(rank) : 0LL;
+    };
+
+    m_memView->setLiveMemoryCallbacks(resolver, fetcher, pidGetter);
+}
+
+/**
+ * @brief Attaches the active debugger coordinator to a live local OS process (`AttachProcessDialog`).
+ * @param explicitPid Explicit target OS PID, or `<= 0` to prompt the user via `AttachProcessDialog`.
+ * @return True if `m_coordinator->attachToProcess(pid)` succeeded and the UI latched into session mode.
+ */
+bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
+    qint64 targetPid = explicitPid;
+    if (targetPid <= 0) {
+        AttachProcessDialog dlg(this);
+        if (dlg.exec() != QDialog::Accepted) return false;
+        targetPid = dlg.selectedPid();
+    }
+    if (targetPid <= 0) return false;
+
+    // Tear down any pre-existing debug session cleanly before attaching to the selected PID.
+    if (m_debugSessionActive) stopTargetWorkflow();
+    syncCoordinatorWithConfig();
+    if (!m_coordinator || !m_coordinator->attachToProcess(targetPid)) return false;
+
+    m_debugSessionActive = true;
+    m_focusedRank = 0;
+    m_latestStates.clear();
+    RankState attachedState;
+    attachedState.rankId = 0;
+    attachedState.currentState = QStringLiteral("stopped");
+    m_latestStates[0] = attachedState;
+    if (m_serverRackView) m_serverRackView->updateRanks({attachedState});
+    updateDebugToolbarState();
+    updateStatusTelemetry(QStringLiteral("0x00000000"),
+                          QStringLiteral("ATTACHED (PID %1)").arg(targetPid));
+    refreshStatusBarMemoryTelemetry();
+    return true;
 }
 
 }  // namespace gridlock::ui

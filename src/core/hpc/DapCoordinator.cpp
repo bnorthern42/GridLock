@@ -257,6 +257,34 @@ void DapCoordinator::launchParallelSession(const QString& binaryPath,
 }
 
 /**
+ * @brief Attaches `lldb-dap` to a running local OS process @p pid and records its rank-0 PID.
+ * @param pid Target OS process identifier from `/proc`.
+ * @return `true` if the adapter binary was found and launched for attachment.
+ */
+bool DapCoordinator::attachToProcess(qint64 pid) {
+  if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
+  if (m_state != SessionState::Disconnected) terminateSession();
+
+  // Resolve configured or system `lldb-dap` / `lldb-vscode` adapter binary.
+  QString adapterProgram = gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath().trimmed();
+  if (!adapterProgram.isEmpty() && !QFileInfo::exists(adapterProgram)) {
+    adapterProgram = QStandardPaths::findExecutable(adapterProgram);
+  }
+  if (adapterProgram.isEmpty()) adapterProgram = QStandardPaths::findExecutable(QStringLiteral("lldb-dap"));
+  if (adapterProgram.isEmpty()) adapterProgram = QStandardPaths::findExecutable(QStringLiteral("lldb-vscode"));
+  if (adapterProgram.isEmpty()) return false;
+
+  // Bind rank 0 immediately to the target PID and queue DAP `attach` on `initialize` completion.
+  m_processCount = 1;
+  m_pendingAttachPid = pid;
+  m_rankToPid.clear();
+  m_rankToPid[0] = static_cast<pid_t>(pid);
+  m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
+  startAdapter(adapterProgram);
+  return true;
+}
+
+/**
  * @brief Registers a breakpoint at `(file, line)` with optional @p condition and syncs via DAP `setBreakpoints`.
  */
 void DapCoordinator::setBreakpoint(const QString& file,
@@ -581,6 +609,14 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
   if (type == "response") {
     const QString command = message["command"].toString();
     if (command == "initialize" && message["success"].toBool(true)) {
+      // Dispatch live PID `attach` when `attachToProcess(pid)` initiated this session.
+      if (m_pendingAttachPid > 0) {
+        const qint64 attachPid = m_pendingAttachPid;
+        m_pendingAttachPid = 0;
+        sendRequest("attach", QJsonObject{{"pid", attachPid}, {"stopOnEntry", true}});
+        emit messageReceived(message);
+        return;
+      }
       // Upon `initialize` response, send `launch` configured from `ProjectSettings`.
       // Fall back to `settings.targetBinary` if no explicit binary override was passed.
       const auto settings =
@@ -803,10 +839,13 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
     } else if (event == "process") {
       // Record the OS `systemProcessId` so `NativeMemoryReader` can attach via `process_vm_readv`.
       const QJsonObject body = message["body"].toObject();
-      if (body.contains("systemProcessId")) {
-        const pid_t pid = body["systemProcessId"].toInt();
-        m_rankToPid[m_rankToPid.size()] = pid;
-      }
+      const qint64 pid = body["systemProcessId"].toVariant().toLongLong();
+      if (pid > 0) m_rankToPid[m_rankToPid.isEmpty() ? 0 : m_rankToPid.size()] = static_cast<pid_t>(pid);
+    } else if (event == "terminated" || event == "exited") {
+      // Clear inferior PID registry and reset session state when target terminates.
+      m_rankToPid.clear();
+      m_state = SessionState::Disconnected;
+      emit stateChanged(m_state);
     }
   }
 

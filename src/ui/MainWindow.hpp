@@ -541,6 +541,13 @@ public:
     QString preferredMonitorHint() const { return m_preferredMonitorHint; }
 
     /**
+     * @brief Opens `AttachProcessDialog` (or attaches directly to @p explicitPid) via `m_coordinator`.
+     * @param explicitPid Optional explicit OS PID (`<= 0` opens the interactive `/proc` picker).
+     * @return True if the coordinator attached to the target PID and activated the debug session.
+     */
+    bool attachToProcessWorkflow(qint64 explicitPid = 0);
+
+    /**
      * @brief Populates preview fixtures for automated headless snapshots.
      */
     void loadPreviewFixture();
@@ -566,6 +573,7 @@ private:
     void setupToolbar();
     void setupDocks();
     void setupStatusBar();
+    void bindLiveMemViewHandlers();
     void harmonizeBottomConsoleTabs();
     QString bottomToolGroupForTabIndex(int tabIndex) const;
     void updateStatusTelemetry(const QString& pcOrSeek = QString(),
@@ -619,6 +627,7 @@ private:
     bool m_showingDecompilerFallback = false;
     bool m_forceDecompilerFallback = false;
     bool m_debugSessionActive = false;
+    bool m_suppressMemViewBroadcast = false;
     bool m_bottomConsoleMaximized = false;
     QString m_workspacePerspective = QStringLiteral("Code");
     QPushButton* m_perspCodeBtn = nullptr;

@@ -47,32 +47,38 @@ private:
  * @class AttachProcessDialog
  * @brief Modal workstation dialog for inspecting and attaching to running MPI or local processes.
  *
- * Displays a 4-column borderless QTableWidget (PID, RANK, STATE, COMMAND) with alternating
- * row colors, 48px minimum section sizes, and live substring filtering.
+ * Displays a 4-column borderless QTableWidget (PID, PROCESS, USER, COMMAND) with alternating
+ * row colors, 48px minimum section sizes, live `/proc` enumeration, and substring filtering.
  */
 class AttachProcessDialog : public QDialog {
 public:
     /**
-     * @brief Constructs the attach process dialog with live filter bar and process table.
+     * @brief Constructs the attach process dialog with live `/proc` scanner, filter bar, and refresh control.
      * @param parent Optional parent widget.
      */
     explicit AttachProcessDialog(QWidget* parent = nullptr);
 
     /**
-     * @brief Returns the currently selected process ID, or -1 if none is selected.
-     * @return Selected process PID.
+     * @brief Returns the currently selected OS process ID, or -1 if none is selected.
+     * @return Selected 64-bit OS process PID.
      */
-    int selectedPid() const;
+    qint64 selectedPid() const;
+
+    /**
+     * @brief Re-scans `/proc` for active processes owned by the current effective UID.
+     */
+    void refreshProcesses();
 
 private:
     /**
      * @brief Filters visible process rows matching the query string.
-     * @param filterText Substring matched against PID, rank, state, or command.
+     * @param filterText Substring matched against PID, process name, user, or command line.
      */
     void filterProcesses(const QString& filterText);
 
     QLineEdit* m_filterEdit{nullptr};         ///< Substring filter input for process rows.
-    QTableWidget* m_processTable{nullptr};    ///< 4-column table displaying active processes.
+    QPushButton* m_refreshBtn{nullptr};       ///< Toolbar button triggering live `/proc` re-enumeration.
+    QTableWidget* m_processTable{nullptr};    ///< 4-column table displaying active user processes.
 };
 
 /**

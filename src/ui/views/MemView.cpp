@@ -198,11 +198,19 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_changedByteCount = 0;
 }
 
+void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
+                                     RankBytesFetcher fetcher,
+                                     RankPidGetter pidGetter) {
+    // Store coordinator-backed callbacks for live per-rank address evaluation and byte reads.
+    m_addressResolver = std::move(resolver);
+    m_bytesFetcher = std::move(fetcher);
+    m_pidGetter = std::move(pidGetter);
+}
+
 /**
  * @brief Seeks the memory view to a specific 64-bit memory address.
  *
- * Updates the address text box and emits a requestMemory signal to query the
- * underlying process memory subsystem.
+ * Updates the address text box and queries live target memory (or emits `requestMemory`).
  *
  * @param address The target 64-bit address.
  * @return True if the address was non-zero and seek was dispatched; false otherwise.
@@ -216,26 +224,52 @@ bool MemView::seekToAddress(uint64_t address) {
     if (m_addressEdit) {
         m_addressEdit->setText(formatted);
     }
-    // Dispatched memory read request for the specified byte length
-    emit requestMemory(formatted, m_lengthBox ? m_lengthBox->value() : 256);
+    const int rank = m_baselineRankBox ? m_baselineRankBox->value() : 0;
+    const int len = m_lengthBox ? m_lengthBox->value() : 256;
+    if (m_pidGetter && m_pidGetter(rank) > 0 && m_bytesFetcher) {
+        const QByteArray liveBytes = m_bytesFetcher(rank, address, len);
+        if (!liveBytes.isEmpty()) {
+            setMemoryData(static_cast<qint64>(address), QString::fromLatin1(liveBytes.toHex()));
+            return true;
+        }
+    }
+    // Dispatch memory read request for offline ELF or custom mock listeners.
+    emit requestMemory(formatted, len);
     return true;
 }
 
 /**
  * @brief Handles user clicks on the Read button or pressing Enter in the address input.
  *
- * Parses the user-entered address string and fires the requestMemory signal.
+ * Resolves hex literals or symbolic/register expressions (`$rsp`) for the selected rank and
+ * reads live bytes via `NativeMemoryReader` (`process_vm_readv`) with GDB/DAP fallback.
  */
 void MemView::onReadClicked() {
-    QString addr = m_addressEdit->text().trimmed();
-    if (!addr.isEmpty()) {
-        bool ok = false;
-        uint64_t parsed = parseHexAddress(addr, &ok);
-        if (ok && parsed != 0ULL) {
-            m_currentBaseAddress = parsed;
+    const QString addr = m_addressEdit ? m_addressEdit->text().trimmed() : QString();
+    if (addr.isEmpty()) return;
+    const int rank = m_baselineRankBox ? m_baselineRankBox->value() : 0;
+    const int len = m_lengthBox ? m_lengthBox->value() : 256;
+
+    // Resolve concrete 64-bit address via live rank callback first, falling back to hex parser.
+    bool ok = false;
+    uint64_t resolved = 0ULL;
+    if (m_addressResolver) resolved = m_addressResolver(rank, addr, &ok);
+    if (!ok || resolved == 0ULL) resolved = parseHexAddress(addr, &ok);
+    if (ok && resolved != 0ULL) m_currentBaseAddress = resolved;
+
+    // Read directly from the live inferior rank process when a debug session is active.
+    if (ok && resolved != 0ULL && m_pidGetter && m_pidGetter(rank) > 0 && m_bytesFetcher) {
+        const QByteArray liveBytes = m_bytesFetcher(rank, resolved, len);
+        if (!liveBytes.isEmpty()) {
+            bool isLiteralHex = false;
+            (void)parseHexAddress(addr, &isLiteralHex);
+            setMemoryData(static_cast<qint64>(resolved), QString::fromLatin1(liveBytes.toHex()));
+            // Preserve symbolic expressions (e.g., `$rsp`) in the input box for cross-rank diffing.
+            if (!isLiteralHex && m_addressEdit) m_addressEdit->setText(addr);
+            return;
         }
-        emit requestMemory(addr, m_lengthBox->value());
     }
+    emit requestMemory(addr, len);
 }
 
 /**
@@ -384,23 +418,59 @@ void MemView::onExportMatrixClicked() {
 }
 
 /**
- * @brief Triggers a cross-rank memory differential analysis.
+ * @brief Triggers a cross-rank memory differential analysis (`MemoryDiffer` + debugger fallback).
  *
- * Validates the entered address and emits the requestMemoryDiff signal.
+ * Resolves hex or symbolic addresses (`$rsp`) per rank, reads live bytes from `Base` and `Target`
+ * OS PIDs via `MemoryDiffer::compareMemory` (`process_vm_readv`) with automatic fallback to
+ * debugger memory reads when `yama/ptrace_scope` or per-rank ASLR stack bases apply.
  */
 void MemView::onDiffClicked() {
-    int baselineRank = m_baselineRankBox->value();
-    int targetRank = m_targetRankBox->value();
-    QString addrStr = m_addressEdit->text().trimmed();
-    size_t length = m_lengthBox->value();
-    
-    bool ok = false;
-    (void)parseHexAddress(addrStr, &ok);
-    if (!ok) {
-        QMessageBox::warning(this, "Invalid Address", "Please enter a valid hex address.");
+    const int baselineRank = m_baselineRankBox->value();
+    const int targetRank = m_targetRankBox->value();
+    const QString addrStr = m_addressEdit->text().trimmed();
+    const int length = m_lengthBox->value();
+
+    bool okA = false, okB = false;
+    uint64_t addrA = m_addressResolver ? m_addressResolver(baselineRank, addrStr, &okA) : 0ULL;
+    uint64_t addrB = m_addressResolver ? m_addressResolver(targetRank, addrStr, &okB) : 0ULL;
+    if (!okA || addrA == 0ULL) addrA = parseHexAddress(addrStr, &okA);
+    if (!okB || addrB == 0ULL) addrB = parseHexAddress(addrStr, &okB);
+    if (!okA || !okB) {
+        QMessageBox::warning(this, "Invalid Address", "Please enter a valid hex address or register expression.");
         return;
     }
-    
+
+    // Perform live cross-rank comparison when live inferior OS PIDs are attached.
+    const qint64 pidA = m_pidGetter ? m_pidGetter(baselineRank) : 0;
+    const qint64 pidB = m_pidGetter ? m_pidGetter(targetRank) : 0;
+    if ((pidA > 0 || pidB > 0) && m_bytesFetcher) {
+        gridlock::core::hpc::CompareResult res;
+        // Fast path: direct `process_vm_readv` cross-PID comparison when virtual addresses match.
+        if (pidA > 0 && pidB > 0 && addrA == addrB) {
+            res = gridlock::core::hpc::MemoryDiffer::compareMemory(
+                static_cast<pid_t>(pidA), static_cast<pid_t>(pidB),
+                reinterpret_cast<void*>(addrA), static_cast<size_t>(length));
+        }
+        // Fallback path: per-rank `NativeMemoryReader` / GDB `-data-read-memory-bytes` / DAP `readMemory`.
+        if (!res.success) {
+            const QByteArray bytesA = m_bytesFetcher(baselineRank, addrA, length);
+            const QByteArray bytesB = m_bytesFetcher(targetRank, addrB, length);
+            const int n = qMin(bytesA.size(), bytesB.size());
+            if (n > 0) {
+                res.baselineBuffer.assign(bytesA.constBegin(), bytesA.constBegin() + n);
+                res.targetBuffer.assign(bytesB.constBegin(), bytesB.constBegin() + n);
+                res.diffMask.resize(static_cast<size_t>(n), false);
+                for (int i = 0; i < n; ++i) res.diffMask[static_cast<size_t>(i)] = (bytesA[i] != bytesB[i]);
+                res.success = true;
+            }
+        }
+        if (res.success) {
+            m_currentBaseAddress = addrA;
+            displayMemoryDiff(res, reinterpret_cast<void*>(addrA));
+            return;
+        }
+    }
+
     emit requestMemoryDiff(baselineRank, targetRank, addrStr, length);
 }
 

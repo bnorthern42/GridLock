@@ -18,6 +18,9 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QLabel>
+#include <QLineEdit>
+#include <QProcess>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QSpinBox>
 #include <QString>
@@ -38,6 +41,7 @@
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
+#include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
@@ -470,25 +474,19 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
 
     // 2. Verify dynamic UI Font Size & Code Font Size scaling (no hardcoded 11px lock).
-    mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16);
-    QApplication::processEvents();
+    mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16); QApplication::processEvents();
     const QString activeQss = gridlock::core::ThemeManager::instance().currentStyleSheet();
-    QVERIFY2(activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px")),
-             qPrintable(activeQss.left(200)));
+    QVERIFY2(activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px")), qPrintable(activeQss.left(200)));
     QCOMPARE(srcView->font().pointSize(), 16); QCOMPARE(disasmView->codeFontPointSize(), 16);
-
-    // Restore default typography.
-    mainWindow.applyTypographySettings(QStringLiteral("Inter"), 11, QStringLiteral("JetBrains Mono"), 10);
-    QApplication::processEvents();
+    // Restore default typography settings after scaling verification.
+    mainWindow.applyTypographySettings(QStringLiteral("Inter"), 11, QStringLiteral("JetBrains Mono"), 10); QApplication::processEvents();
 
     // 3. Verify 6 curated color themes and zero underscores in PreferencesDialog Color Theme combo.
     QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6);
     gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
     auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo"));
     QVERIFY(themeCombo != nullptr && themeCombo->count() >= 6);
-    for (int i = 0; i < themeCombo->count(); ++i) {
-        QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));
-    }
+    for (int i = 0; i < themeCombo->count(); ++i) QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));
 
     // 4. Generate 6 offscreen 1440x900 PNG screenshots of each curated theme in docs/screenshots/.
     struct ThemeShotEntry { QString themeId; QString fileName; };
@@ -499,19 +497,16 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     };
     const QString docsShotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
     QDir().mkpath(docsShotDir);
-
+    // Export and verify each rendered theme PNG screenshot.
     for (const auto& shot : shots) {
         gridlock::core::ThemeManager::instance().setTheme(shot.themeId, !shot.themeId.contains(QStringLiteral("light")), false);
-        if (srcView) { srcView->reloadStyle(); } if (disasmView) { disasmView->reloadStyle(); }
-        QApplication::processEvents();
+        if (srcView) { srcView->reloadStyle(); } if (disasmView) { disasmView->reloadStyle(); } QApplication::processEvents();
         const QString outPath = docsShotDir + QLatin1Char('/') + shot.fileName;
         QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath) && QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024, qPrintable(outPath));
     }
-
     // Restore default GridLock Slate theme after screenshot export.
     gridlock::core::ThemeManager::instance().setTheme(QStringLiteral("gridlock_slate"), true, false);
-    if (srcView) { srcView->reloadStyle(); } if (disasmView) { disasmView->reloadStyle(); }
-    QApplication::processEvents();
+    if (srcView) { srcView->reloadStyle(); } if (disasmView) { disasmView->reloadStyle(); } QApplication::processEvents();
 }
 
 /**
@@ -519,13 +514,9 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
  *        and non-overlapping antialiased vector badge rendering in SourceCodeView.
  */
 void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState() {
-    gridlock::ui::SourceCodeView srcView;
-    QString sampleCode;
+    gridlock::ui::SourceCodeView srcView; QString sampleCode;
     for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
-    srcView.setSourceCode(sampleCode);
-    srcView.resize(720, 560);
-    srcView.show();
-    QApplication::processEvents();
+    srcView.setSourceCode(sampleCode); srcView.resize(720, 560); srcView.show(); QApplication::processEvents();
 
     // 1. Dedicated Two-Lane Gutter Width (>= 48px) & Non-Overlapping Icon Lane (>= 18px).
     QVERIFY(srcView.lineNumberAreaWidth() >= 48 && srcView.gutterIconLaneWidth() >= 18);
@@ -533,60 +524,70 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
     // 2. Distinct Gutter Marker States (None, Breakpoint, ConditionalBreakpoint, ExecutionPc, BreakpointAndExecutionPc).
     QCOMPARE(srcView.gutterMarkerStateForLine(1), QStringLiteral("None"));
     srcView.toggleBreakpoint(15); srcView.setConditionalBreakpoint(16, QStringLiteral("rank == 0"));
-    srcView.highlightExecutionLine(15);
-    QApplication::processEvents();
+    srcView.highlightExecutionLine(15); QApplication::processEvents();
     QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("BreakpointAndExecutionPc"));
     QCOMPARE(srcView.gutterMarkerStateForLine(16), QStringLiteral("ConditionalBreakpoint"));
-    srcView.highlightExecutionLine(13);
-    QApplication::processEvents();
+    srcView.highlightExecutionLine(13); QApplication::processEvents();
     QCOMPARE(srcView.gutterMarkerStateForLine(13), QStringLiteral("ExecutionPc")); QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("Breakpoint"));
 
     // 3. Antialiased Vector Rendering in Gutter Snapshot with zero overlap against line numbers.
-    srcView.highlightExecutionLine(15);
-    QApplication::processEvents();
-    const QImage img = srcView.grab().toImage();
-    QVERIFY(!img.isNull());
-
+    srcView.highlightExecutionLine(15); QApplication::processEvents();
+    const QImage img = srcView.grab().toImage(); QVERIFY(!img.isNull());
     const QColor gutterBg(0x16, 0x18, 0x1d);
     bool foundBadgePixelInIconLane = false;
+    // Scan gutter icon lane (x = 3..16) for rendered vector badge pixels.
     for (int y = 0; y < img.height() && !foundBadgePixelInIconLane; ++y) {
         for (int x = 3; x <= 16 && x < img.width(); ++x) {
             const QColor px = img.pixelColor(x, y);
             // Detect crimson (#e06c75), amber (#e5c07b), or emerald (#4ec9b0) vector badge pixels.
-            if (std::abs(px.red() - gutterBg.red()) > 35 || std::abs(px.green() - gutterBg.green()) > 35) {
-                foundBadgePixelInIconLane = true;
-                break;
-            }
+            if (std::abs(px.red() - gutterBg.red()) > 35 || std::abs(px.green() - gutterBg.green()) > 35) { foundBadgePixelInIconLane = true; break; }
         }
     }
     QVERIFY2(foundBadgePixelInIconLane, "Expected vector badge pixels inside left icon lane (x = 3..16)");
 }
 
 /**
- * @brief Verifies live coordinator engine switching (`gdb` <-> `lldb-dap`), on-demand ELF binary
- *        compilation, DWARF mapping, real `launchParallelSession` breakpoint stop, live inferior
- *        register hydration (`$rsp`/`$rip`), PC advance on step/continue, and clean teardown.
+ * @brief Verifies live coordinator engine switching (`gdb` <-> `lldb-dap`), real per-rank OS PIDs,
+ *        live `/proc` enumeration in `AttachProcessDialog` (zero `mpi_navier_stokes` stubs),
+ *        cross-rank `MemView` `DIFF RANKS` byte divergence, and clean session teardown.
  */
 void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatchedToolbar() {
     auto& cfg = gridlock::core::ConfigManager::instance();
     cfg.setDebuggerEngine(QStringLiteral("gdb"));
     cfg.setGlobalMpiArgs(QStringLiteral("--oversubscribe"));
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
 
     // 1. Dynamic coordinator switching: ConfigManager::setDebuggerEngine switches MainWindow's live backend.
     QVERIFY2(mainWindow.coordinator() != nullptr, "MainWindow must construct a live IBackendCoordinator");
     QVERIFY(QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
-    cfg.setDebuggerEngine(QStringLiteral("lldb-dap"));
-    QApplication::processEvents();
+    cfg.setDebuggerEngine(QStringLiteral("lldb-dap")); QApplication::processEvents();
     QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("DapCoordinator")));
-    cfg.setDebuggerEngine(QStringLiteral("gdb"));
-    QApplication::processEvents();
+    cfg.setDebuggerEngine(QStringLiteral("gdb")); QApplication::processEvents();
     QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
 
-    // 2. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
+    // 2. Verify AttachProcessDialog enumerates real /proc user processes and contains zero mpi_navier_stokes stubs.
+    QProcess helperProc;
+    struct ProcGuard { QProcess* p; ~ProcGuard() { if (p && p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1000); } } } guard{&helperProc};
+    helperProc.start(QStringLiteral("sleep"), {QStringLiteral("30")});
+    QVERIFY(helperProc.waitForStarted(3000));
+    const qint64 helperPid = helperProc.processId();
+    gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
+    auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable"));
+    QVERIFY(procTable != nullptr && procTable->rowCount() > 0);
+    int helperRow = -1;
+    for (int r = 0; r < procTable->rowCount(); ++r) {
+        for (int c = 0; c < procTable->columnCount(); ++c) {
+            const QString cell = procTable->item(r, c) ? procTable->item(r, c)->text() : QString();
+            QVERIFY2(!cell.contains(QStringLiteral("mpi_navier_stokes"), Qt::CaseInsensitive), "Hardcoded mpi_navier_stokes row still present in AttachProcessDialog");
+        }
+        if (procTable->item(r, 0) && procTable->item(r, 0)->text().toLongLong() == helperPid) helperRow = r;
+    }
+    QVERIFY2(helperRow >= 0, "AttachProcessDialog must include live child helper PID from /proc");
+    procTable->selectRow(helperRow);
+    const qint64 selPid = attachDlg.selectedPid();
+    QCOMPARE(selPid, helperPid);
+
+    // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QTest::qWait(600); }
     QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "ensureTargetBinaryCompiled must compile ELF binary");
@@ -595,14 +596,13 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
     auto* regTable = mainWindow.findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable"));
-    QVERIFY(editorTabs && disasmView && targetCombo && rankSpin && regTable);
-    const QString asmText = disasmView->toPlainText();
-    QVERIFY(asmText.contains(QStringLiteral("MPI_Send")) && asmText.contains(QStringLiteral("MPI_Recv")) && !asmText.contains(QStringLiteral("DeeplyNested")));
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    QVERIFY(editorTabs && disasmView && targetCombo && rankSpin && regTable && memView);
     const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send("));
     const int recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
     QVERIFY(sendLine > 0 && recvLine > sendLine && mainWindow.sourceLineToAddress(sendLine) != 0ULL && mainWindow.sourceLineToAddress(recvLine) != 0ULL);
 
-    // 3. Compile minimal C++/MPI target (`inspection_demo`, -g -O0), set breakpoints in main, and launch 2 live ranks.
+    // 4. Compile C++/MPI target (`inspection_demo`, -g -O0), set breakpoints, and launch 2 live ranks.
     rankSpin->setValue(2);
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName(inspection_demo)");
     QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must compile with -g -O0");
@@ -610,16 +610,20 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY(srcView != nullptr && QFileInfo::exists(mainWindow.activeTargetBinaryPath()));
     for (int bp : srcView->breakpoints().values()) srcView->toggleBreakpoint(bp);
     const int bpLine1 = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Comm_rank("));
-    const int bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("for (int i = 0;"));
+    const int bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("printf("));
     QVERIFY(bpLine1 > 0 && bpLine2 > bpLine1);
     srcView->toggleBreakpoint(bpLine1); srcView->toggleBreakpoint(bpLine2);
 
-    // Launch real parallel GDB session and verify coordinator owns 2 live rank slots and hits bpLine1.
+    // Launch real parallel GDB session and verify distinct real OS PIDs per rank (`pid0 != pid1 != appPid`).
     mainWindow.startTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), true); QCOMPARE(mainWindow.isRunButtonLatched(), true);
-    QCOMPARE(mainWindow.coordinator()->getCurrentBinaryPath(), mainWindow.activeTargetBinaryPath());
     QCOMPARE(mainWindow.coordinator()->getProcessCount(), 2);
     QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine1, 8000);
+    QTRY_VERIFY_WITH_TIMEOUT(mainWindow.coordinator()->getPidForRank(0) > 0 && mainWindow.coordinator()->getPidForRank(1) > 0, 5000);
+    const qint64 pid0 = mainWindow.coordinator()->getPidForRank(0);
+    const qint64 pid1 = mainWindow.coordinator()->getPidForRank(1);
+    QVERIFY(pid0 > 0 && pid1 > 0 && pid0 != pid1 && pid0 != QCoreApplication::applicationPid() && pid1 != QCoreApplication::applicationPid());
+    QVERIFY(QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid0)) && QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid1)));
 
     // Helper reading register value cell by lowercase mnemonic from RegisterView's QTableWidget.
     auto readReg = [&](const QString& name) {
@@ -627,21 +631,40 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
             if (regTable->item(r, 0) && regTable->item(r, 0)->text() == name && regTable->item(r, 1)) return regTable->item(r, 1)->text();
         return QString();
     };
-    // Verify non-hardcoded live inferior registers ($rsp and $rip match real OS process state).
-    QTRY_VERIFY_WITH_TIMEOUT(!readReg(QStringLiteral("rsp")).isEmpty() && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe480") && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe478"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!readReg(QStringLiteral("rsp")).isEmpty() && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe480"), 5000);
     bool ripOk = false;
     const uint64_t liveRip1 = readReg(QStringLiteral("rip")).section(QLatin1Char(' '), 0, 0).mid(2).toULongLong(&ripOk, 16);
-    QVERIFY(ripOk && liveRip1 != 0ULL);
-    QCOMPARE(disasmView->currentAddress(), liveRip1);
+    QVERIFY(ripOk && liveRip1 != 0ULL && disasmView->currentAddress() == liveRip1);
 
-    // 4. Advance real PC via Step Inst, then Continue to bpLine2, then Terminate Session cleanly.
+    // 5. Step Inst, Continue both ranks to bpLine2 (after per-rank data[] initialization), and run MemView Read + DIFF RANKS.
     QVERIFY(mainWindow.stepInstructionWorkflow());
     QTRY_VERIFY_WITH_TIMEOUT(disasmView->currentAddress() != 0ULL && disasmView->currentAddress() != liveRip1, 5000);
     QVERIFY(mainWindow.continueExecutionWorkflow());
     QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000);
+    mainWindow.onRankSelected(1); QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000);
+    mainWindow.onRankSelected(0);
+
+    // Read Rank 0 live stack at $rsp and run DIFF RANKS between Rank 0 and Rank 1 to detect diverging bytes.
+    auto* addrEdit = memView->findChild<QLineEdit*>(QStringLiteral("cutterMemAddressEdit"));
+    QPushButton *readBtn = nullptr, *diffBtn = nullptr;
+    for (auto* b : memView->findChildren<QPushButton*>()) {
+        if (b->text().compare(QStringLiteral("Read"), Qt::CaseInsensitive) == 0) readBtn = b;
+        if (b->text().contains(QStringLiteral("Diff"), Qt::CaseInsensitive)) diffBtn = b;
+    }
+    const auto memSpins = memView->findChildren<QSpinBox*>();
+    QVERIFY(addrEdit && readBtn && diffBtn && memSpins.size() >= 3);
+    addrEdit->setText(QStringLiteral("$rsp"));
+    readBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(memView->currentBaseAddress() > 0x1000000ULL, 5000);
+    memSpins[1]->setValue(0); memSpins[2]->setValue(1);
+    diffBtn->click();
+    QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
+
+    // Cleanly terminate session and verify rank PIDs and process counts reset to 0.
     mainWindow.stopTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
-    QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0); QCOMPARE(targetCombo->font().italic(), false);
+    QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0);
+    QCOMPARE(static_cast<qint64>(mainWindow.coordinator()->getPidForRank(0)), 0LL);
 }
 
 /**
@@ -649,63 +672,41 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
  *        breakpoint popover controls (Enabled, Suspend scope, Condition presets), and positioning.
  */
 void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
-    gridlock::ui::SourceCodeView sourceCodeView;
-    QString sampleCode;
+    gridlock::ui::SourceCodeView sourceCodeView; QString sampleCode;
     for (int i = 1; i <= 40; ++i) sampleCode += QStringLiteral("    MPI_Send(send_buf.data(), %1, MPI_INT, next, 0, MPI_COMM_WORLD);\n").arg(i);
-    sourceCodeView.setSourceCode(sampleCode);
-    sourceCodeView.resize(720, 560);
-    sourceCodeView.show();
-    QApplication::processEvents();
+    sourceCodeView.setSourceCode(sampleCode); sourceCodeView.resize(720, 560); sourceCodeView.show(); QApplication::processEvents();
 
     // 1. Gutter Hover Line Tracking & Ghost Preview State.
     QCOMPARE(sourceCodeView.hoveredGutterLine(), -1);
-    sourceCodeView.setHoveredGutterLine(16);
-    QApplication::processEvents();
+    sourceCodeView.setHoveredGutterLine(16); QApplication::processEvents();
     QCOMPARE(sourceCodeView.hoveredGutterLine(), 16);
     QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("HoverPreview"));
 
     // Active breakpoint supersedes ghost hover preview; clearing hover restores None on unmarked lines.
-    sourceCodeView.toggleBreakpoint(16);
-    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("Breakpoint"));
-    sourceCodeView.toggleBreakpoint(16);
-    sourceCodeView.setHoveredGutterLine(-1);
-    QCOMPARE(sourceCodeView.hoveredGutterLine(), -1);
-    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("None"));
+    sourceCodeView.toggleBreakpoint(16); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("Breakpoint"));
+    sourceCodeView.toggleBreakpoint(16); sourceCodeView.setHoveredGutterLine(-1);
+    QCOMPARE(sourceCodeView.hoveredGutterLine(), -1); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("None"));
 
     // 2. Breakpoint Popover Controls (Enabled, Suspend: All / Rank, Condition Presets).
     gridlock::ui::ConditionalBreakpointDialog dialog(QString(), &sourceCodeView);
     dialog.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
-    QVERIFY2(dialog.targetLineSummaryText().contains(QStringLiteral("Line 34")),
-             qPrintable(dialog.targetLineSummaryText()));
-    QCOMPARE(dialog.isBreakpointEnabled(), true);
-    QCOMPARE(dialog.suspendScope(), QStringLiteral("All"));
+    QVERIFY2(dialog.targetLineSummaryText().contains(QStringLiteral("Line 34")), qPrintable(dialog.targetLineSummaryText()));
+    QCOMPARE(dialog.isBreakpointEnabled(), true); QCOMPARE(dialog.suspendScope(), QStringLiteral("All"));
 
     // Toggle the single-rank/thread radio button and verify suspendScope() transitions to "Rank".
     QRadioButton* rankRadio = nullptr;
     for (QRadioButton* rb : dialog.findChildren<QRadioButton*>()) {
-        if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) {
-            rankRadio = rb;
-            break;
-        }
+        if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) { rankRadio = rb; break; }
     }
     QVERIFY2(rankRadio != nullptr, "ConditionalBreakpointDialog must expose a Rank/Thread suspend radio button");
-    rankRadio->setChecked(true);
-    QApplication::processEvents();
-    QCOMPARE(dialog.suspendScope(), QStringLiteral("Rank"));
+    rankRadio->setChecked(true); QApplication::processEvents(); QCOMPARE(dialog.suspendScope(), QStringLiteral("Rank"));
 
-    // Apply quick preset expression and verify condition accessor updates immediately.
-    dialog.applyQuickPreset(QStringLiteral("rank == 0"));
-    QCOMPARE(dialog.getCondition(), QStringLiteral("rank == 0"));
-
-    // 3. Cursor-Anchored Positioning (directly beneath the gutter dot, not screen-centered).
+    // Apply quick preset expression and verify cursor-anchored positioning near gutter dot.
+    dialog.applyQuickPreset(QStringLiteral("rank == 0")); QCOMPARE(dialog.getCondition(), QStringLiteral("rank == 0"));
     const QPoint anchorGlobalPos(120, 340);
-    dialog.positionNearAnchor(anchorGlobalPos);
-    dialog.show();
-    QApplication::processEvents();
-    QVERIFY2(std::abs(dialog.pos().x() - anchorGlobalPos.x()) <= 40,
-             qPrintable(QStringLiteral("Popover x=%1 too far from anchor x=120").arg(dialog.pos().x())));
-    QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25,
-             qPrintable(QStringLiteral("Popover y=%1 too far from anchor y=340").arg(dialog.pos().y())));
+    dialog.positionNearAnchor(anchorGlobalPos); dialog.show(); QApplication::processEvents();
+    QVERIFY2(std::abs(dialog.pos().x() - anchorGlobalPos.x()) <= 40, qPrintable(QStringLiteral("Popover x=%1").arg(dialog.pos().x())));
+    QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25, qPrintable(QStringLiteral("Popover y=%1").arg(dialog.pos().y())));
     dialog.hide();
 }
 

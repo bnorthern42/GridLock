@@ -200,6 +200,13 @@ public:
                                                            const QString& meminfoText = QString());
 
     /**
+     * @brief Resolves the upper `[stack]` boundary address from `/proc/<pid>/maps`.
+     * @param pid Target OS process identifier (`<= 0` returns `0`).
+     * @return Upper virtual address of the target `[stack]` mapping, or `0` if unavailable.
+     */
+    static quint64 queryStackTopAddress(qint64 pid);
+
+    /**
      * @brief Queries live per-rank process memory (/proc/<pid>/smaps or status) and host RAM/CPU telemetry.
      * @param pid Target rank OS process identifier (falls back to current process if <= 0).
      * @param currentRsp Current stack pointer register ($rsp).

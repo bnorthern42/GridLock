@@ -820,11 +820,29 @@ ProcessMemoryTelemetry ElfBinaryInspector::parseProcMemoryTelemetry(const QStrin
 }
 
 /**
+ * @brief Resolves the upper `[stack]` VMA address from `/proc/<pid>/maps` for active stack depth math.
+ */
+quint64 ElfBinaryInspector::queryStackTopAddress(qint64 pid) {
+    if (pid <= 0) return 0;
+    QFile mapsFile(QStringLiteral("/proc/%1/maps").arg(pid));
+    if (!mapsFile.open(QIODevice::ReadOnly | QIODevice::Text)) return 0;
+    // Read `/proc/<pid>/maps` via `readAll()` (`st_size == 0` on `/proc` makes `atEnd()` true at pos 0).
+    static const QRegularExpression stackMapRe(QStringLiteral("^([0-9a-fA-F]+)-([0-9a-fA-F]+)\\s+.*\\[stack\\]"));
+    for (const QByteArray& rawLine : mapsFile.readAll().split('\n')) {
+        const auto m = stackMapRe.match(QString::fromUtf8(rawLine).trimmed());
+        if (m.hasMatch()) return m.captured(2).toULongLong(nullptr, 16);
+    }
+    return 0;
+}
+
+/**
  * @brief Queries live per-rank process memory (/proc/<pid>/smaps or status) and host RAM/CPU telemetry.
  */
 ProcessMemoryTelemetry ElfBinaryInspector::queryProcessMemory(qint64 pid,
                                                               quint64 currentRsp,
                                                               quint64 stackTopAddr) {
+    // Auto-resolve `[stack]` top boundary for live target PIDs when caller omits `stackTopAddr`.
+    if (pid > 0 && currentRsp > 0 && stackTopAddr == 0) stackTopAddr = queryStackTopAddress(pid);
     QString procText;
     const QString pidToken = (pid > 0) ? QString::number(pid) : QStringLiteral("self");
     for (const QString& suffix : {QStringLiteral("/smaps"), QStringLiteral("/status")}) {

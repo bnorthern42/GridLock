@@ -148,10 +148,13 @@ class DapCoordinator : public IBackendCoordinator {
     return QStringLiteral("lldb-dap");
   }
 
-  /** @brief Returns the OS PID mapped to @p rankId, or `0` if unmapped. */
-  pid_t getPidForRank(int rankId) const override {
-    return m_rankToPid.value(rankId, 0);
+  /** @brief Returns the OS PID mapped to @p rank, or `0` if unmapped. */
+  qint64 getPidForRank(int rank) const override {
+    return static_cast<qint64>(m_rankToPid.value(rank, 0));
   }
+
+  /** @brief Attaches an `lldb-dap` session to a running local OS process @p pid. */
+  bool attachToProcess(qint64 pid) override;
 
   /** @brief Returns the path to the target binary for the active session. */
   QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
@@ -236,6 +239,7 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, HeatmapRequest> m_heatmapRequests; ///< Maps `request_seq` to `HeatmapRequest`.
 
   int m_slurmJobId = -1;       ///< Active SLURM job ID parsed from target output, or `-1`.
+  qint64 m_pendingAttachPid = 0; ///< Target local OS PID queued for DAP `attach` after `initialize`.
   QString m_currentBinaryPath; ///< Filesystem path of the target binary being debugged.
   QString m_mpiArgs;           ///< Optional MPI launcher arguments passed to `launchParallelSession`.
   QMap<QString, QMap<int, QString>> m_breakpointConditions; ///< Optional conditional expressions per `(file, line)`.

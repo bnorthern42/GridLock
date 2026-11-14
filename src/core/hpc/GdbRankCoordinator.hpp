@@ -54,8 +54,11 @@ class GdbRankCoordinator : public IBackendCoordinator {
                              int rankCount,
                              const QString& mpiArgs) override;
 
-  /** @brief Returns the live inferior OS PID for @p rankId, or `0` if not running. */
-  pid_t getPidForRank(int rankId) const override;
+  /** @brief Returns the live inferior OS PID for @p rank, or `0` if not running. */
+  qint64 getPidForRank(int rank) const override;
+
+  /** @brief Attaches a live `gdb --interpreter=mi3 -p <pid>` session to a running OS process. */
+  bool attachToProcess(qint64 pid) override;
 
   /** @brief Returns `"gdb"` as the canonical backend engine identifier. */
   QString activeEngineName() const override { return QStringLiteral("gdb"); }
@@ -234,6 +237,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QString m_fifoTempDir;                                 ///< Temporary directory owning per-rank MI FIFOs.
   QMap<int, QMap<QString, QString>> m_varNameMap;        ///< `rankId -> (varName -> gdbVarId)`.
   QMap<int, QMap<QString, QString>> m_varNameRevMap;     ///< `rankId -> (gdbVarId -> varName)`.
+  QMap<int, qint64> m_rankPids;                          ///< Live target OS PID per MPI rank index.
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
 };

@@ -12,6 +12,7 @@
 #include <QString>
 #include <QWidget>
 #include <cstdint>
+#include <functional>
 #include "../../core/hpc/MemoryDiffer.hpp"
 
 class QLineEdit;
@@ -28,8 +29,20 @@ namespace gridlock::ui {
 class MemView : public QWidget {
     Q_OBJECT
 public:
+    /// Resolves a hex literal or register/symbol expression (e.g. `$rsp`) for a given MPI rank.
+    using RankAddressResolver = std::function<uint64_t(int rank, const QString& expr, bool* okOut)>;
+    /// Reads `length` raw bytes at `address` from `rank` (`process_vm_readv` + GDB/DAP fallback).
+    using RankBytesFetcher = std::function<QByteArray(int rank, uint64_t address, int length)>;
+    /// Queries the live OS child PID for `rank` (`0` when no active target rank is running).
+    using RankPidGetter = std::function<qint64(int rank)>;
+
     explicit MemView(QWidget* parent = nullptr);
     ~MemView() override = default;
+
+    /// Binds live rank address resolution, `process_vm_readv` / debugger byte reads, and PID lookup.
+    void setLiveMemoryCallbacks(RankAddressResolver resolver,
+                                RankBytesFetcher fetcher,
+                                RankPidGetter pidGetter = {});
 
     /// Loads raw hex string data starting at beginAddress.
     void setMemoryData(qint64 beginAddress, const QString& hexContents);
@@ -98,6 +111,9 @@ private:
     int m_changedByteCount = 0;
     bool m_hasDiffBaseline = false;
     QString m_lastStyledThemeId;
+    RankAddressResolver m_addressResolver{};
+    RankBytesFetcher m_bytesFetcher{};
+    RankPidGetter m_pidGetter{};
 };
 
 }  // namespace gridlock::ui

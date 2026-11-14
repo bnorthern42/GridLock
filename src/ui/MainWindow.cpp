@@ -219,6 +219,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
   // Instantiate live debugger coordinator (`gdb` or `lldb-dap`) before seeding preview UI rows.
   syncCoordinatorWithConfig();
+  bindLiveMemViewHandlers();
   loadPreviewFixture();
   m_previewFixtureOnly = false;
   // Listen for global theme mode change events from ThemeManager singleton.
@@ -410,7 +411,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
               });
       connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this,
               [this](int rankId, qint64 beginAddress, const QString &hexContents) {
-                if (rankId == m_focusedRank && m_memView) m_memView->setMemoryData(beginAddress, hexContents);
+                if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) m_memView->setMemoryData(beginAddress, hexContents);
               });
     }
 
@@ -422,7 +423,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
     }
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
             [this](int rankId, const QString &address, const QByteArray &data) {
-              if (rankId == m_focusedRank && m_memView) m_memView->setMemoryData(address, data);
+              if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) m_memView->setMemoryData(address, data);
             });
     // Forward JSON register values to RegisterView and keep DisassemblyView PC cursor synchronized.
     connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,
@@ -594,6 +595,10 @@ void MainWindow::setupMenu() {
     dlg.exec();
   });
 
+  // Attach to Process Action: Enumerates live `/proc` processes and attaches active coordinator.
+  QAction *attachProcAction = fileMenu->addAction("Attach to Process...");
+  connect(attachProcAction, &QAction::triggered, this, [this]() { attachToProcessWorkflow(); });
+
   // SLURM Job Submission Action: Interpolates active target into template and queues via HPC backend.
   QAction *slurmAction = fileMenu->addAction("Submit SLURM Job");
   connect(slurmAction, &QAction::triggered, this, [this]() {
@@ -733,21 +738,22 @@ void MainWindow::setupMenu() {
  */
 void MainWindow::refreshStatusBarMemoryTelemetry() {
   if (!m_statusTelemetryLabel) return;
+  // Query live inferior OS PID for the focused rank when a debug session is active (`0` when idle).
+  const qint64 rankPid = (m_debugSessionActive && m_coordinator)
+                             ? m_coordinator->getPidForRank(m_focusedRank)
+                             : 0;
   quint64 currentRsp = 0, stackTop = 0;
-  // Extract live stack pointer ($rsp, x86_64 register slot 7) for the currently focused rank.
-  if (m_latestStates.count(m_focusedRank)) {
+  if (rankPid > 0 && m_latestStates.count(m_focusedRank)) {
     const QString rspStr = m_latestStates[m_focusedRank].registers.value(7).section(QLatin1Char(' '), 0, 0);
     bool ok = false;
     currentRsp = rspStr.trimmed().mid(rspStr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0).toULongLong(&ok, 16);
-    // Estimate active stack page ceiling when `/proc/<pid>/maps` stack bounds are unavailable.
-    if (ok && currentRsp > 0) stackTop = (currentRsp & ~0xfffULL) + 0x1000ULL;
+    if (ok && currentRsp > 0) {
+      stackTop = gridlock::core::ElfBinaryInspector::queryStackTopAddress(rankPid);
+      if (stackTop == 0) stackTop = (currentRsp & ~0xfffULL) + 0x1000ULL;
+    }
   }
-  // Query live inferior OS PID when attached, falling back to workstation PID while idle.
-  const pid_t targetPid = (m_coordinator && m_coordinator->getPidForRank(m_focusedRank) > 0)
-                              ? m_coordinator->getPidForRank(m_focusedRank)
-                              : static_cast<pid_t>(QCoreApplication::applicationPid());
-  // Sample `/proc/<pid>/statm` and host `/proc/meminfo` for status-bar Stack/Heap/RAM metrics.
-  const auto mem = gridlock::core::ElfBinaryInspector::queryProcessMemory(targetPid, currentRsp, stackTop);
+  // Sample `/proc/<rankPid>/smaps` (or host fallback when `rankPid == 0`) for Stack/Heap/RAM metrics.
+  const auto mem = gridlock::core::ElfBinaryInspector::queryProcessMemory(rankPid, currentRsp, stackTop);
   const QString summary = gridlock::core::ElfBinaryInspector::formatStatusBarSummary(
       mem, gridlock::core::ConfigManager::instance().telemetryDisplayFormat());
   // Replace any trailing telemetry suffix in-place without disturbing the active PC/status prefix.
