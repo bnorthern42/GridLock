@@ -144,7 +144,7 @@ void VariablesDockWidget::setupUi() {
         }
     });
 
-    // Right-clicking a variable row opens a context menu to promote the variable into Watch Expressions.
+    // Right-clicking a variable row opens a context menu to add a Watch Expression or Hardware Watchpoint.
     connect(m_variablesTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const QModelIndex index = m_variablesTree->indexAt(pos);
         if (!index.isValid() || !m_model) {
@@ -157,8 +157,26 @@ void VariablesDockWidget::setupUi() {
         }
         QMenu menu(this);
         QAction* watchAct = menu.addAction(QStringLiteral("Add to Watch Expressions"));
-        if (menu.exec(m_variablesTree->viewport()->mapToGlobal(pos)) == watchAct) {
+        menu.addSeparator();
+        QAction* wpWriteAct =
+            menu.addAction(QStringLiteral("Watch Memory Write (Hardware Watchpoint)"));
+        QAction* wpReadAct =
+            menu.addAction(QStringLiteral("Watch Memory Read (Hardware Watchpoint)"));
+        QAction* wpRwAct =
+            menu.addAction(QStringLiteral("Watch Memory Read/Write (Hardware Watchpoint)"));
+
+        QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
+        if (chosen == watchAct) {
             promoteVariableToWatch(varName);
+        } else if (chosen == wpWriteAct || chosen == wpReadAct || chosen == wpRwAct) {
+            const auto mode = (chosen == wpReadAct)
+                                  ? ::WatchpointAccessMode::Read
+                                  : ((chosen == wpRwAct) ? ::WatchpointAccessMode::ReadWrite
+                                                         : ::WatchpointAccessMode::Write);
+            if (m_coordinator) {
+                m_coordinator->setDataWatchpoint(varName, mode, -1);
+            }
+            emit dataWatchpointRequested(varName, static_cast<int>(mode));
         }
     });
 }

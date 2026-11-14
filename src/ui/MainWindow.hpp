@@ -87,9 +87,9 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
     /**
-     * @brief Virtual destructor for clean resource teardown.
+     * @brief Virtual destructor shutting down live coordinators before child dock teardown.
      */
-    ~MainWindow() override = default;
+    ~MainWindow() override;
 
     /**
      * @brief Associates an initialized Vulkan instance with the main window.
@@ -578,6 +578,7 @@ private:
     void setupStatusBar();
     void bindLiveMemViewHandlers();
     void bindCallStackCoordinatorRoutes();
+    void bindConsoleAndWatchpointRoutes();
     void harmonizeBottomConsoleTabs();
     QString bottomToolGroupForTabIndex(int tabIndex) const;
     void updateStatusTelemetry(const QString& pcOrSeek = QString(),

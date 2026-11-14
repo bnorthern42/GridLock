@@ -177,12 +177,26 @@ int GdbConsoleWidget::promptBarHeight() const {
 void GdbConsoleWidget::resetRanks(int count) {
     m_logs.clear();
     m_consoleEdit->clear();
+    ensureRankCount(count);
+}
+
+/**
+ * @brief Synchronizes the rank selector dropdown count without clearing retained console logs.
+ * @param count Active number of MPI ranks in the session.
+ */
+void GdbConsoleWidget::ensureRankCount(int count) {
+    if (!m_rankCombo || count < 0 || m_rankCombo->count() == count + 1) {
+        return;
+    }
+    const int previousSelection = m_rankCombo->currentData().toInt();
     m_rankCombo->blockSignals(true);
     m_rankCombo->clear();
-    m_rankCombo->addItem("All Ranks", -1);
+    m_rankCombo->addItem(QStringLiteral("All Ranks"), -1);
     for (int i = 0; i < count; ++i) {
-        m_rankCombo->addItem(QString("Rank %1").arg(i), i);
+        m_rankCombo->addItem(QStringLiteral("Rank %1").arg(i), i);
     }
+    const int restoredIdx = m_rankCombo->findData(previousSelection);
+    m_rankCombo->setCurrentIndex(restoredIdx >= 0 ? restoredIdx : 0);
     m_rankCombo->blockSignals(false);
 }
 
@@ -192,7 +206,7 @@ void GdbConsoleWidget::resetRanks(int count) {
  * @param output Output payload string.
  */
 void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {
-    m_logs.append({rank, output, false});
+    m_logs.append({rank, output, false, false, false});
 
     const int selectedRank = m_rankCombo->currentData().toInt();
     const QString filterText = m_filterEdit->text();
@@ -219,7 +233,7 @@ void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {
  * @param input Command string dispatched.
  */
 void GdbConsoleWidget::appendGdbInput(int rank, const QString& input) {
-    m_logs.append({rank, input, true});
+    m_logs.append({rank, input, true, false, false});
 
     const int selectedRank = m_rankCombo->currentData().toInt();
     const QString filterText = m_filterEdit->text();
@@ -234,6 +248,37 @@ void GdbConsoleWidget::appendGdbInput(int rank, const QString& input) {
         return;
     }
 
+    if (filterText.isEmpty() ||
+        displayStr.contains(filterText, Qt::CaseInsensitive)) {
+        m_consoleEdit->appendPlainText(displayStr);
+    }
+}
+
+/**
+ * @brief Appends interactive REPL evaluation output or sanitizer diagnostics for a rank.
+ * @param rank Target MPI rank index (or -1 for broadcast diagnostics).
+ * @param output Formatted debugger console response or error message.
+ * @param isError True when @p output represents an error or security rejection.
+ */
+void GdbConsoleWidget::appendDebuggerConsoleOutput(int rank, const QString& output,
+                                                   bool isError) {
+    const QString trimmed = output.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+
+    const int normRank = rank < 0 ? 0 : rank;
+    const QString displayStr = isError
+                                   ? QStringLiteral("[Rank %1 ERR] %2").arg(normRank).arg(trimmed)
+                                   : QStringLiteral("[Rank %1] %2").arg(normRank).arg(trimmed);
+    m_logs.append({normRank, displayStr, false, true, isError});
+
+    const int selectedRank = m_rankCombo->currentData().toInt();
+    if (selectedRank != -1 && rank >= 0 && selectedRank != rank) {
+        return;
+    }
+
+    const QString filterText = m_filterEdit->text();
     if (filterText.isEmpty() ||
         displayStr.contains(filterText, Qt::CaseInsensitive)) {
         m_consoleEdit->appendPlainText(displayStr);
@@ -257,20 +302,30 @@ void GdbConsoleWidget::onCommandReturnPressed() {
         return;
     }
 
+    // Emit -1 when "All Ranks" is active, or the specific 0-based MPI rank index.
     const int rank = m_rankCombo->currentData().toInt();
     emit commandEntered(rank, cmd);
 
     m_commandEdit->clear();
 }
 
+/**
+ * @brief Re-applies viewport filtering when the substring search box changes.
+ */
 void GdbConsoleWidget::onFilterTextChanged(const QString& /*text*/) {
     applyFilter();
 }
 
+/**
+ * @brief Re-applies viewport filtering when the target MPI rank selector changes.
+ */
 void GdbConsoleWidget::onRankFilterChanged(int /*index*/) {
     applyFilter();
 }
 
+/**
+ * @brief Re-renders retained log entries when Raw MI visibility is toggled.
+ */
 void GdbConsoleWidget::onRawMiToggled(bool /*checked*/) {
     applyFilter();
 }
@@ -289,8 +344,10 @@ void GdbConsoleWidget::applyFilter() {
             continue;
         }
 
+        // Preserve formatted REPL/sanitizer lines verbatim regardless of Raw MI checkbox state.
         const QString displayStr =
-            formatLogEntry(log.rank, log.text, log.isInput, showRaw);
+            log.isRepl ? log.text
+                       : formatLogEntry(log.rank, log.text, log.isInput, showRaw);
         if (displayStr.isEmpty()) {
             continue;
         }

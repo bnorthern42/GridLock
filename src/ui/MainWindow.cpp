@@ -346,17 +346,10 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             });
   }
 
-  // Connect variable inspection dock and deadlock analyzer.
+  // Connect variable inspection dock and polymorphic live DeadlockAnalyzer across GDB and DAP.
   if (m_variablesDockWidget) m_variablesDockWidget->setCoordinator(m_coordinator);
   if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-    m_deadlockAnalyzer = new gridlock::core::DeadlockAnalyzer(gdbCoord, this);
     connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged, this, &MainWindow::onRankStateChanged);
-    if (m_mpiDiagnosticsWidget) {
-      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected,
-              m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onDeadlockDetected);
-      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared,
-              m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onRankCleared);
-    }
     connect(gdbCoord, &gridlock::GdbRankCoordinator::localsUpdated, this,
             [this](int rankId, const QJsonArray &locals) {
               if (rankId == m_focusedRank && m_variablesDockWidget) {
@@ -367,9 +360,31 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             });
   }
 
-  // Bind coordinator execution, call-stack, register, hover, and memory events to UI views.
+  // Bind coordinator execution, call-stack, console REPL, watchpoints, and deadlock routes.
   if (m_coordinator) {
     bindCallStackCoordinatorRoutes();
+    bindConsoleAndWatchpointRoutes();
+    // Instantiate live DeadlockAnalyzer bound to m_coordinator's per-rank call stacks and state changes.
+    m_deadlockAnalyzer = new gridlock::core::DeadlockAnalyzer(m_coordinator, this);
+    if (m_mpiDiagnosticsWidget) {
+      // Forward detected wait-for cycles and collective divergences directly to MPI Diagnostics panel.
+      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected,
+              m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onDeadlockDetected);
+      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared,
+              m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onRankCleared);
+    }
+    // Reflect detected wait-for cycles and collective divergences on ServerRackView and DisassemblyView.
+    connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected, this,
+            [this](const gridlock::core::DeadlockInfo &info) {
+              // Mark rank card badge as DEADLOCK (`#f44747`) while preserving register/watch snapshots.
+              RankState rs = m_latestStates.contains(info.rankId) ? m_latestStates[info.rankId] : RankState{};
+              rs.rankId = info.rankId;
+              rs.currentState = QStringLiteral("deadlock");
+              rs.currentFunction = info.blockedFunction;
+              m_latestStates[info.rankId] = rs;
+              if (m_serverRackView) m_serverRackView->updateRankState(info.rankId, rs);
+            });
+    // Forward live register array updates for the currently focused MPI rank to RegisterView.
     connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,
             [this](int rankId, const QJsonArray &regs) {
               if (rankId == m_focusedRank && m_registerView) m_registerView->updateRegisters(regs);
@@ -390,24 +405,26 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
               }
             });
 
-    // Wire GDB-specific signals if coordinator is a GdbRankCoordinator.
+    // Wire GDB-specific hover, evaluator, raw MI stream, and SIGFPE handlers when using GDB.
     if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
+      // Display floating inline variable preview popup when editor hover evaluation finishes.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete,
               this, [this](const QString &varName, const QString &result, QPoint globalPos) {
                 if (getSourceCodeView() && m_plainJaneTooltip) {
                   m_plainJaneTooltip->showTooltip(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result));
                 }
               });
+      // Stream interactive expression evaluations to ExpressionEvaluatorWidget history.
       if (m_expressionEvaluatorWidget) {
         connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated,
                 m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
       }
+      // Stream raw GDB/MI stdout and dispatched MI commands to GdbConsoleWidget log cache.
       if (m_gdbConsoleWidget) {
-        m_gdbConsoleWidget->disconnect(SIGNAL(commandEntered(int,QString)));
         connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
         connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
-        connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered, gdbCoord, &gridlock::GdbRankCoordinator::sendCommand);
       }
+      // Focus offending rank and log floating-point trap details on SIGFPE signal stop.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this,
               [this](int rankId, const QString &output) {
                 if (output.contains("reason=\"signal-received\"") && output.contains("signal-name=\"SIGFPE\"")) {
@@ -415,18 +432,21 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                   if (networkLog()) networkLog()->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
                 }
               });
+      // Forward hexadecimal GDB memory dumps to MemView unless synchronous live fetch is active.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this,
               [this](int rankId, qint64 beginAddress, const QString &hexContents) {
                 if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) m_memView->setMemoryData(beginAddress, hexContents);
               });
     }
 
+    // Forward target inferior stdout/stderr streams into the bottom Network / Target Output log.
     if (networkLog()) {
       connect(m_coordinator, &IBackendCoordinator::targetOutputReceived, this,
               [this](const QString &category, const QString &output) {
                 if (networkLog()) networkLog()->appendText(category, output);
               });
     }
+    // Forward raw byte-array memory reads to MemView for the currently focused MPI rank.
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
             [this](int rankId, const QString &address, const QByteArray &data) {
               if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) m_memView->setMemoryData(address, data);

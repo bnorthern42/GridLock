@@ -232,15 +232,35 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
                                .mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0)
                                .toULongLong(&pcOk, 16);
 
-    // Push per-rank live status into the MPI Diagnostics table dock.
+    // Synchronize rank selector count in GdbConsoleWidget when live ranks exist.
+    if (m_gdbConsoleWidget && m_coordinator && m_coordinator->getProcessCount() > 0) {
+        m_gdbConsoleWidget->ensureRankCount(m_coordinator->getProcessCount());
+    }
+
+    // Push per-rank live OS PID, active MPI_* primitive, and source/PC location into MpiDiagnosticsWidget.
     if (m_mpiDiagnosticsWidget) {
         const QString diagStatus = (state.currentState == QLatin1String("stopped"))
                                        ? QStringLiteral("PAUSED")
                                        : state.currentState.toUpper();
-        m_mpiDiagnosticsWidget->updateRankStateRow(
-            rankId, diagStatus.isEmpty() ? QStringLiteral("IDLE") : diagStatus,
-            state.currentFunction.isEmpty() ? QStringLiteral("main") : state.currentFunction,
-            QStringLiteral("LIVE"), pcOk ? pcVal : 0ULL,
+        const qint64 livePid = m_coordinator ? m_coordinator->getPidForRank(rankId) : 0;
+        QString activePrim = state.currentFunction.isEmpty() ? QStringLiteral("main") : state.currentFunction;
+        for (const auto& fr : m_cachedStackFrames.value(rankId)) {
+            if (fr.function.startsWith(QStringLiteral("MPI_")) ||
+                fr.function.startsWith(QStringLiteral("PMPI_"))) {
+                activePrim = fr.function;
+                break;
+            }
+        }
+        const QString locStr =
+            (!state.currentFile.isEmpty() && state.currentLine > 0)
+                ? QStringLiteral("%1:%2 (0x%3)")
+                      .arg(QFileInfo(state.currentFile).fileName())
+                      .arg(state.currentLine)
+                      .arg(pcOk ? pcVal : 0ULL, 8, 16, QChar('0'))
+                : QStringLiteral("0x%1").arg(pcOk ? pcVal : 0ULL, 8, 16, QChar('0'));
+        m_mpiDiagnosticsWidget->updateLiveRankRow(
+            rankId, livePid, diagStatus.isEmpty() ? QStringLiteral("IDLE") : diagStatus,
+            activePrim, QStringLiteral("LIVE"), locStr,
             m_coordinator ? std::max(1, m_coordinator->getProcessCount()) : 1);
     }
 
@@ -379,6 +399,9 @@ void MainWindow::onRankSelected(int rankId) {
 
 /**
  * @brief Connects `CallStackDockWidget` and `m_coordinator` stack/thread signals for caller frame switching.
+ *
+ * Synchronizes 64-frame call stacks, OS/OpenMP thread selectors, caller-frame DWARF `file:line`
+ * jumps, `DisassemblyView` `$pc` updates, and live `MPI_*` primitive telemetry in `MpiDiagnosticsWidget`.
  */
 void MainWindow::bindCallStackCoordinatorRoutes() {
     // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
@@ -417,7 +440,7 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
 
     if (!m_coordinator) return;
 
-    // Wire Coordinator -> UI signals for 64-frame backtraces and OS/OpenMP thread lists.
+    // Wire Coordinator -> UI signals for 64-frame backtraces, MPI primitive telemetry, and thread lists.
     connect(m_coordinator, &IBackendCoordinator::stackTraceUpdated, this,
             [this](int rank, const QVector<StackFrameEntry>& frames) {
                 // Empty frame broadcast with zero active processes signals full session teardown.
@@ -433,6 +456,31 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
                 if (rank == m_focusedRank && m_callStackDockWidget) {
                     m_callStackDockWidget->setStackFrames(frames, m_selectedFrameLevel.value(rank, 0));
                 }
+
+                // Surface active MPI_* primitive and DWARF file:line in MpiDiagnosticsWidget.
+                if (!frames.isEmpty() && m_mpiDiagnosticsWidget) {
+                    const StackFrameEntry* mpiFrame = &frames.first();
+                    for (int i = 0; i < std::min<int>(frames.size(), 8); ++i) {
+                        if (frames[i].function.startsWith(QStringLiteral("MPI_")) ||
+                            frames[i].function.startsWith(QStringLiteral("PMPI_"))) {
+                            mpiFrame = &frames[i];
+                            break;
+                        }
+                    }
+                    const qint64 livePid = m_coordinator ? m_coordinator->getPidForRank(rank) : 0;
+                    const QString locStr =
+                        (!mpiFrame->file.isEmpty() && mpiFrame->line > 0)
+                            ? QStringLiteral("%1:%2 (0x%3)")
+                                  .arg(QFileInfo(mpiFrame->file).fileName())
+                                  .arg(mpiFrame->line)
+                                  .arg(mpiFrame->address, 8, 16, QChar('0'))
+                            : QStringLiteral("0x%1").arg(mpiFrame->address, 8, 16, QChar('0'));
+                    m_mpiDiagnosticsWidget->updateLiveRankRow(
+                        rank, livePid, QStringLiteral("PAUSED"),
+                        mpiFrame->function.isEmpty() ? QStringLiteral("main") : mpiFrame->function,
+                        QStringLiteral("LIVE"), locStr,
+                        m_coordinator ? std::max(1, m_coordinator->getProcessCount()) : 1);
+                }
             });
 
     // Update per-rank OS/OpenMP thread cache and repopulate `#threadSelectorCombo` for the focused rank.
@@ -443,6 +491,86 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
                 if (rank == m_focusedRank && m_callStackDockWidget) {
                     m_callStackDockWidget->setThreads(threads);
                 }
+            });
+}
+
+/**
+ * @brief Binds `GdbConsoleWidget` REPL dispatch, hardware data watchpoint triggers, and `WATCH` dock controls.
+ *
+ * Routes user-submitted debugger commands through `IBackendCoordinator::sendDebuggerCommand`
+ * (backed by `MiSanitizer`), installs the Write/Read/R/W hardware watchpoint controls in
+ * `WatchExpressionsDock`, and surfaces `watchpointHit` notifications across the workstation.
+ */
+void MainWindow::bindConsoleAndWatchpointRoutes() {
+    // Route interactive GdbConsoleWidget prompt commands through MiSanitizer-backed sendDebuggerCommand.
+    if (m_gdbConsoleWidget && !m_gdbConsoleWidget->property("gl_repl_bound").toBool()) {
+        m_gdbConsoleWidget->setProperty("gl_repl_bound", true);
+        connect(m_gdbConsoleWidget, &GdbConsoleWidget::commandEntered, this,
+                [this](int rank, const QString& command) {
+                    if (m_coordinator) m_coordinator->sendDebuggerCommand(rank, command);
+                });
+    }
+
+    // Augment WatchExpressionsDock toolbar once with Hardware Watchpoint mode selector + button.
+    if (auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"))) {
+        if (!watchDock->property("gl_wp_controls_bound").toBool()) {
+            watchDock->setProperty("gl_wp_controls_bound", true);
+            if (auto* watchInput = watchDock->findChild<QLineEdit*>()) {
+                if (auto* barLayout = qobject_cast<QHBoxLayout*>(watchInput->parentWidget() ? watchInput->parentWidget()->layout() : nullptr)) {
+                    // Populate Write / Read / ReadWrite CPU debug-register access modes.
+                    auto* modeCombo = new QComboBox(watchInput->parentWidget());
+                    modeCombo->setObjectName(QStringLiteral("watchpointAccessCombo"));
+                    modeCombo->setFixedHeight(22);
+                    modeCombo->addItem(QStringLiteral("Write"), static_cast<int>(WatchpointAccessMode::Write));
+                    modeCombo->addItem(QStringLiteral("Read"), static_cast<int>(WatchpointAccessMode::Read));
+                    modeCombo->addItem(QStringLiteral("R/W"), static_cast<int>(WatchpointAccessMode::ReadWrite));
+
+                    // Create `+ Watchpoint` button to arm hardware watchpoints and add a diff-grid column.
+                    auto* wpBtn = new QPushButton(QStringLiteral("+ Watchpoint"), watchInput->parentWidget());
+                    wpBtn->setObjectName(QStringLiteral("addHardwareWatchpointBtn"));
+                    wpBtn->setFixedHeight(22);
+                    wpBtn->setToolTip(QStringLiteral("Arm CPU Hardware Data Watchpoint (Write / Read / R/W)"));
+                    connect(wpBtn, &QPushButton::clicked, this, [this, watchInput, modeCombo]() {
+                        // Ignore empty watch expressions so blank inputs never emit spurious MI/DAP commands.
+                        const QString expr = watchInput->text().trimmed();
+                        if (expr.isEmpty()) return;
+                        const auto mode = static_cast<WatchpointAccessMode>(modeCombo->currentData().toInt());
+                        if (m_coordinator) m_coordinator->setDataWatchpoint(expr, mode, -1);
+                        if (m_differentialGrid) m_differentialGrid->addVariableColumn(expr);
+                        watchInput->clear();
+                    });
+                    barLayout->addWidget(modeCombo);
+                    barLayout->addWidget(wpBtn);
+                }
+            }
+        }
+    }
+
+    if (!m_coordinator) return;
+
+    // Stream REPL console evaluation replies and MiSanitizer diagnostics into GdbConsoleWidget.
+    if (m_gdbConsoleWidget) {
+        connect(m_coordinator, &IBackendCoordinator::debuggerConsoleOutput,
+                m_gdbConsoleWidget, &GdbConsoleWidget::appendDebuggerConsoleOutput);
+    }
+
+    // Surface hardware data watchpoint triggers across console, network log, and focused rank views.
+    // Automatically switches workstation focus to the rank whose memory trap fired.
+    connect(m_coordinator, &IBackendCoordinator::watchpointHit, this,
+            [this](int rank, const QString& expr, const QString& oldVal, const QString& newVal) {
+                // Format human-readable old -> new transition string for console and telemetry banners.
+                const QString summary =
+                    QStringLiteral("Hardware watchpoint '%1' hit: %2 -> %3").arg(expr, oldVal, newVal);
+                if (m_gdbConsoleWidget) {
+                    m_gdbConsoleWidget->appendDebuggerConsoleOutput(rank, summary, false);
+                }
+                if (networkLog()) {
+                    networkLog()->appendText(QStringLiteral("WATCHPOINT"), summary + QLatin1Char('\n'));
+                }
+                // Focus the halted rank and latch status bar state to highlight the watchpoint hit.
+                onRankSelected(rank);
+                updateStatusTelemetry(m_currentSeekOrPc,
+                                      QStringLiteral("WATCHPOINT (%1: %2 -> %3)").arg(expr, oldVal, newVal));
             });
 }
 
@@ -458,6 +586,7 @@ void MainWindow::bindLiveMemViewHandlers() {
     if (!m_memView) return;
 
     // Resolve hex addresses, cached x86_64 registers (`$rsp`, `$rbp`, `$rip`), or live expressions per rank.
+    // Returns 0 and sets `*okOut = false` whenever the expression cannot be resolved to a valid VA.
     auto resolver = [this](int rank, const QString& rawExpr, bool* okOut) -> uint64_t {
         if (okOut) *okOut = false;
         const QString expr = rawExpr.trimmed();
@@ -475,6 +604,7 @@ void MainWindow::bindLiveMemViewHandlers() {
         }
 
         // 2. Resolve `$rsp` / `$rbp` / `$rip` / general-purpose registers from cached per-rank register map.
+        // Slot indices correspond to canonical GDB x86_64 register numbers (0=rax .. 7=rsp, 16=rip).
         if (expr.startsWith(QLatin1Char('$')) && m_latestStates.count(rank)) {
             const QString reg = expr.mid(1).toLower();
             int slot = -1;
@@ -500,6 +630,7 @@ void MainWindow::bindLiveMemViewHandlers() {
         }
 
         // 3. Evaluate arbitrary register/pointer expression via active debugger coordinator with bounded wait.
+        // Uses a local single-shot 1200 ms timeout guard so an unresponsive target cannot hang the GUI.
         if (m_debugSessionActive && m_coordinator) {
             uint64_t evalAddr = 0ULL;
             bool evalOk = false;
@@ -529,11 +660,13 @@ void MainWindow::bindLiveMemViewHandlers() {
     };
 
     // Read raw bytes from `rank` via `NativeMemoryReader` (`process_vm_readv`), falling back to GDB/DAP.
+    // Fast-path avoids MI serialization overhead when ptrace_scope allows direct sibling VM reads.
     auto fetcher = [this](int rank, uint64_t addr, int length) -> QByteArray {
         if (!m_debugSessionActive || !m_coordinator || addr == 0ULL || length <= 0) return {};
         const qint64 pid = m_coordinator->getPidForRank(rank);
         if (pid > 0) {
             try {
+                // Round requested byte span up to 8-byte double words for aligned process_vm_readv transfer.
                 const size_t doubleCount = static_cast<size_t>((length + 7) / 8);
                 const std::vector<double> words = NativeMemoryReader::readDoubles(
                     static_cast<pid_t>(pid), static_cast<uintptr_t>(addr), doubleCount);
@@ -548,6 +681,7 @@ void MainWindow::bindLiveMemViewHandlers() {
         }
 
         // Tracer fallback: request raw memory bytes directly from GDB (`-data-read-memory-bytes`) or DAP.
+        // Suppresses re-entrant `m_memView->setMemoryData` broadcasts while synchronous read completes.
         QByteArray fallbackBytes;
         QEventLoop loop;
         QTimer timer;
@@ -570,6 +704,7 @@ void MainWindow::bindLiveMemViewHandlers() {
         return fallbackBytes;
     };
 
+    // Expose live inferior OS PID lookup per MPI rank so MemView can display and verify distinct PIDs.
     auto pidGetter = [this](int rank) -> qint64 {
         return (m_debugSessionActive && m_coordinator) ? m_coordinator->getPidForRank(rank) : 0LL;
     };
@@ -583,6 +718,7 @@ void MainWindow::bindLiveMemViewHandlers() {
  * @return True if `m_coordinator->attachToProcess(pid)` succeeded and the UI latched into session mode.
  */
 bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
+    // Prompt user via live `/proc` process picker when no explicit PID was passed programmatically.
     qint64 targetPid = explicitPid;
     if (targetPid <= 0) {
         AttachProcessDialog dlg(this);
@@ -596,6 +732,7 @@ bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
     syncCoordinatorWithConfig();
     if (!m_coordinator || !m_coordinator->attachToProcess(targetPid)) return false;
 
+    // Initialize Rank 0 workstation state, topology card, MPI diagnostics row, and console selector.
     m_debugSessionActive = true;
     m_focusedRank = 0;
     m_latestStates.clear();
@@ -604,11 +741,47 @@ bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
     attachedState.currentState = QStringLiteral("stopped");
     m_latestStates[0] = attachedState;
     if (m_serverRackView) m_serverRackView->updateRanks({attachedState});
+    if (m_mpiDiagnosticsWidget) {
+        m_mpiDiagnosticsWidget->beginLiveSession(1);
+        m_mpiDiagnosticsWidget->updateLiveRankRow(
+            0, targetPid, QStringLiteral("PAUSED"), QStringLiteral("attached"),
+            QStringLiteral("LOCAL PID"), QStringLiteral("0x00000000"), 1);
+    }
+    if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(1);
+    // Latch execution toolbar actions and refresh `/proc/<targetPid>` stack/heap telemetry.
     updateDebugToolbarState();
     updateStatusTelemetry(QStringLiteral("0x00000000"),
                           QStringLiteral("ATTACHED (PID %1)").arg(targetPid));
     refreshStatusBarMemoryTelemetry();
     return true;
+}
+
+/**
+ * @brief Safely shuts down live coordinators and disconnects signals before Qt destroys child docks.
+ *
+ * Blocks outgoing coordinator signals prior to `terminateSession()` and `delete m_ownedCoordinator`
+ * so teardown notifications never dereference partially destroyed UI widgets.
+ */
+MainWindow::~MainWindow() {
+    // Detach global shortcut/hover event filter before child widget destruction begins.
+    if (qApp) qApp->removeEventFilter(this);
+    delete m_deadlockAnalyzer;
+    m_deadlockAnalyzer = nullptr;
+    if (m_coordinator) QObject::disconnect(m_coordinator, nullptr, this, nullptr);
+    // Silence and destroy owned coordinator cleanly without post-delete signal-blocker UB.
+    if (m_ownedCoordinator) {
+        m_ownedCoordinator->blockSignals(true);
+        m_ownedCoordinator->terminateSession();
+        delete m_ownedCoordinator;
+        m_ownedCoordinator = nullptr;
+    }
+    // Nullify cached dock and view pointers prior to QMainWindow child tree cleanup.
+    m_coordinator = nullptr;
+    m_callStackDockWidget = nullptr;
+    m_mpiDiagnosticsWidget = nullptr;
+    m_gdbConsoleWidget = nullptr;
+    m_variablesDockWidget = nullptr;
+    m_serverRackView = nullptr;
 }
 
 }  // namespace gridlock::ui

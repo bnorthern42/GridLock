@@ -168,6 +168,17 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Switches active DAP thread/frame on @p rank and refreshes `scopes` -> `variables` + `Registers`. */
   void selectStackFrame(int rank, int threadId, int frameLevel) override;
 
+  /** @brief Scrubs @p command via `MiSanitizer` and evaluates it in DAP `"repl"` context. */
+  void sendDebuggerCommand(int rank, const QString& command) override;
+
+  /** @brief Queries `dataBreakpointInfo` and arms a DAP hardware data breakpoint on @p expression. */
+  void setDataWatchpoint(const QString& expression,
+                         WatchpointAccessMode mode,
+                         int rankFilter = -1) override;
+
+  /** @brief Removes an active DAP hardware data breakpoint matching @p expression. */
+  void removeDataWatchpoint(const QString& expression) override;
+
  signals:
   /** @brief Emitted when @p rankId stops due to @p reason (e.g., `"breakpoint"`, `"step"`). */
   void executionStopped(int rankId, const QString& reason);
@@ -221,6 +232,9 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, pid_t> m_rankToPid;                      ///< Maps zero-based rank ID to OS `pid_t`.
 
  private:
+  /** @brief Transmits the consolidated `setDataBreakpoints` array to the active DAP adapter. */
+  void syncDataBreakpoints();
+
   QProcess* m_process = nullptr;                     ///< Underlying `lldb-dap` child process.
   QByteArray m_buffer;                               ///< Receive buffer for partial DAP frames.
   std::atomic<int> m_sequenceNumber{1};              ///< Monotonic DAP `seq` counter.
@@ -235,6 +249,9 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, QVector<StackFrameEntry>> m_rankFrames;  ///< Cached 64-frame call stack per rank.
   QMap<int, QVector<ThreadEntry>> m_rankThreads;     ///< Cached thread descriptors per rank.
   QMap<int, QPair<int, QString>> m_evaluateRequests; ///< Maps `request_seq` to `(rankId, expr)`.
+  QMap<int, int> m_replRequests;                     ///< Maps `request_seq` to REPL target `rankId`.
+  QMap<int, QPair<QString, QString>> m_dataBpInfoRequests; ///< Maps `request_seq` to `(expr, accessType)`.
+  QMap<QString, QPair<QString, QString>> m_activeDataBreakpoints; ///< Maps `expr` to `(dataId, accessType)`.
 
   /**
    * @struct HeatmapRequest

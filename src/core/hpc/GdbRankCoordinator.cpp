@@ -26,6 +26,7 @@
 #include <QJsonObject>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTimer>
 
@@ -37,6 +38,8 @@ namespace {
 
 /**
  * @brief Escapes backslashes, quotes, and control characters for GDB/MI string literals.
+ * @param str Unescaped command or expression string.
+ * @return Double-quoted GDB/MI3 c-string literal.
  */
 QString escapeGdbMiString(const QString& str) {
   QString res;
@@ -51,9 +54,10 @@ QString escapeGdbMiString(const QString& str) {
   }
   return "\"" + res + "\"";
 }
-
 /**
  * @brief Maps standard x86_64 GDB register numbers (0..17) to canonical lowercase mnemonics.
+ * @param idx Zero-based GDB register index (`0` = `rax`, `7` = `rsp`, `16` = `rip`).
+ * @return Lowercase mnemonic string, or empty QString when @p idx is outside `0..17`.
  */
 QString x86RegName(int idx) {
   static const char* const kNames[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8",
@@ -91,8 +95,8 @@ QString buildBreakInsertCmd(const QString& file, int line, const QString& condit
 /** @brief Constructs `GdbRankCoordinator` and forwards @p parent to `IBackendCoordinator`. */
 GdbRankCoordinator::GdbRankCoordinator(QObject* parent) : IBackendCoordinator(parent) {}
 
-/** @brief Ensures all GDB, FIFO, and `mpiexec` resources are cleaned up on destruction. */
-GdbRankCoordinator::~GdbRankCoordinator() { terminateAllSessions(); }
+/** @brief Ensures all GDB, FIFO, and `mpiexec` resources are cleaned up on destruction without emitting teardown signals. */
+GdbRankCoordinator::~GdbRankCoordinator() { QSignalBlocker b(this); terminateAllSessions(); }
 
 /** @brief Implements `IBackendCoordinator::terminateSession()` by tearing down all rank processes. */
 void GdbRankCoordinator::terminateSession() { terminateAllSessions(); }
@@ -290,6 +294,7 @@ void GdbRankCoordinator::terminateAllSessions() {
   const bool hadActiveSession = !m_processes.empty() || !m_rankFrames.isEmpty() || !m_rankThreads.isEmpty();
   m_processes.clear(); m_rankPids.clear(); m_varNameMap.clear(); m_varNameRevMap.clear();
   m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear(); m_pendingFrameSelect.clear();
+  m_pendingConsoleCmdCount.clear(); m_consoleReplyBuffer.clear(); m_watchpointIds.clear();
   if (hadActiveSession) { emit stackTraceUpdated(0, {}); emit threadsUpdated(0, {}); }
 
   // Terminate and reap the master `mpirun` / `mpiexec` launcher process cleanly.
@@ -693,7 +698,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
     if (line.startsWith("=thread-group-started") || line.startsWith("^done,groups=[")) {
       static const QRegularExpression pidRe("pid=\"(\\d+)\"");
       const auto pm = pidRe.match(line);
-      if (pm.hasMatch()) { const qint64 pid = pm.captured(1).toLongLong(); rp->inferiorPid = static_cast<pid_t>(pid); m_rankPids[rankId] = pid; }
+      if (pm.hasMatch()) { const qint64 pid = pm.captured(1).toLongLong(); rp->inferiorPid = static_cast<pid_t>(pid); m_rankPids[rankId] = pid; emit rankStateChanged(rankId, rp->state); }
       continue;
     }
     if (line.startsWith("=thread-group-exited")) { rp->inferiorPid = 0; m_rankPids.remove(rankId); continue; }
@@ -746,15 +751,19 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       const auto matchThread = threadRe.match(line);
       writeCmd(rankId, matchThread.hasMatch() ? QString("-thread-select %1\n").arg(matchThread.captured(1)) : QStringLiteral("-thread-info\n"));
 
+      // Emit watchpointHit immediately when hardware debug registers fire a data watchpoint.
+      const bool isWatchTrigger = line.contains("watchpoint-trigger");
+      if (isWatchTrigger) handleWatchpointStopRecord(rankId, line);
+
       // Handle initial attach synchronization if `lastFiredTimestamp` was not pre-synced.
-      if (rp->state.lastFiredTimestamp.isEmpty()) {
+      if (!isWatchTrigger && rp->state.lastFiredTimestamp.isEmpty()) {
         rp->state.lastFiredTimestamp = "synced";
         flushCachedBreakpoints(rankId);
         continue;
       }
 
-      // Preserve auto-continue on unmapped breakpoints while allowing explicit steps/signals to stop.
-      const bool isStepOrSignal = line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"");
+      // Preserve auto-continue on unmapped breakpoints while allowing explicit steps/signals/watchpoints to stop.
+      const bool isStepOrSignal = isWatchTrigger || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"");
       if ((rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") && !isStepOrSignal) {
         writeCmd(rankId, "-exec-continue\n");
         rp->state.currentState = "running";
@@ -784,8 +793,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
             const QString& varName = m_watchVariables[varIdx];
             const QString varId = match.captured(2);
-            m_varNameMap[rankId][varName] = varId;
-            m_varNameRevMap[rankId][varId] = varName;
+            m_varNameMap[rankId][varName] = varId; m_varNameRevMap[rankId][varId] = varName;
             rp->state.variableWatches[varName] = match.captured(3);
             emit rankStateChanged(rankId, rp->state);
           }
@@ -798,8 +806,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
           const int varIdx = match.captured(1).toInt();
           if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
             const QString& varName = m_watchVariables[varIdx];
-            rp->state.variableWatches[varName] = "<Out of Scope>";
-            m_varNameMap[rankId].remove(varName);
+            rp->state.variableWatches[varName] = "<Out of Scope>"; m_varNameMap[rankId].remove(varName);
             emit rankStateChanged(rankId, rp->state);
           }
         }
@@ -810,8 +817,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       static const QRegularExpression nameRe("name=\"([^\"]+)\"");
       static const QRegularExpression valRe("value=\"([^\"]+)\"");
       static const QRegularExpression inScopeRe("in_scope=\"([^\"]+)\"");
-      auto it = objRe.globalMatch(line);
-      bool updated = false;
+      auto it = objRe.globalMatch(line); bool updated = false;
+      // Inspect each changed GDB varobj tuple for updated scalar text or scope exit.
       while (it.hasNext()) {
         const QString objStr = it.next().captured(1);
         const auto nameMatch = nameRe.match(objStr);
@@ -827,62 +834,61 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         } else {
           rp->state.variableWatches[varName] = "Out of scope";
           writeCmd(rankId, QString("-var-delete %1\n").arg(varId));
-          m_varNameMap[rankId].remove(varName);
-          m_varNameRevMap[rankId].remove(varId);
-          updated = true;
+          m_varNameMap[rankId].remove(varName); m_varNameRevMap[rankId].remove(varId); updated = true;
         }
       }
       if (updated) emit rankStateChanged(rankId, rp->state);
     } else if (line.startsWith("^done,memory=[")) {
       // Decode hexadecimal payload returned by `-data-read-memory-bytes` for MemView hex/diff panes.
+      // Emits both string-formatted `memoryDataReady` and raw byte-array `memoryRead` signals.
       static const QRegularExpression memRe("begin=\"([^\"]+)\".*?contents=\"([^\"]+)\"");
       const auto match = memRe.match(line);
       if (match.hasMatch()) {
-        bool ok = false;
-        const qint64 beginAddress = match.captured(1).toULongLong(&ok, 16);
+        bool ok = false; const qint64 beginAddress = match.captured(1).toULongLong(&ok, 16);
         const QString hex = match.captured(2);
         emit memoryDataReady(rankId, beginAddress, hex);
         emit memoryRead(rankId, match.captured(1), QByteArray::fromHex(hex.toLatin1()));
       }
     } else if (line.startsWith("^done,register-values=[")) {
       // Populate `rp->state.registers` and broadcast `registersUpdated` + `rankStateChanged`.
+      // Preserves per-rank GPR and `$rip`/`$rsp` cache for status bar and MemView `$rsp` lookups.
       static const QRegularExpression regRe("number=\"(\\d+)\".*?value=\"([^\"]+)\"");
-      auto it = regRe.globalMatch(line);
-      QJsonArray jsonRegs;
-      bool updated = false;
+      auto it = regRe.globalMatch(line); QJsonArray jsonRegs; bool updated = false;
+      // Map numeric GDB x86_64 register indices to canonical mnemonics (`rax`..`rip`, `eflags`).
       while (it.hasNext()) {
         const auto m = it.next();
-        const int regNum = m.captured(1).toInt();
-        const QString regVal = m.captured(2);
+        const int regNum = m.captured(1).toInt(); const QString regVal = m.captured(2);
         rp->state.registers[regNum] = regVal;
         const QString name = x86RegName(regNum);
         if (!name.isEmpty()) jsonRegs.append(QJsonObject{{"name", name}, {"value", regVal}});
         updated = true;
       }
+      // Emit structured JSON register bank when at least one hardware register value was parsed.
       if (updated) {
         if (!jsonRegs.isEmpty()) emit registersUpdated(rankId, jsonRegs);
         emit rankStateChanged(rankId, rp->state);
       }
     } else if (line.startsWith("^done,bkpt={")) {
       // Record GDB breakpoint number -> `file:line` mapping and release `sync_flushing` barrier.
+      // Automatically resumes execution once all queued pre-run breakpoints acknowledge insertion.
       static const QRegularExpression bkptRe("number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");
       const auto match = bkptRe.match(line);
       if (match.hasMatch()) {
         rp->state.breakpoints[match.captured(1).toInt()] = QString("%1:%2").arg(match.captured(2), match.captured(3));
         if (rp->state.currentState == "sync_flushing") {
           if (--rp->state.pendingBreakpoints <= 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; }
-        } else {
-          emit rankStateChanged(rankId, rp->state);
-        }
+        } else emit rankStateChanged(rankId, rp->state);
       }
     } else if (line.startsWith("100")) {
       // Token 100: Editor hover variable evaluation response (`-data-evaluate-expression`).
+      // Forwards evaluated scalar/struct preview text to `PlainJaneTooltip` at `lastHoverPos`.
       static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\"");
       static const QRegularExpression err100Re("msg=\"([^\"]+)\"");
       const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line);
       if (match.hasMatch()) emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
     } else if (line.startsWith("101")) {
       // Token 101: Interactive console / watch expression evaluation response.
+      // Emits either the resolved `value="..."` text or a prefixed `Error: ...` diagnostic.
       if (line.contains("^done")) {
         static const QRegularExpression valRe("101\\^done,value=\"([^\"]+)\"");
         const auto m = valRe.match(line);
@@ -894,6 +900,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.startsWith("200")) {
       // Token 200: Stop-point disassembly window (`-data-disassemble`) followed by `-var-update`.
+      // Refreshes linear assembly view around `$pc` and triggers watch-expression delta evaluation.
       if (line.contains("asm_insns=")) {
         const QString prettyAsm = formatMiDisassembly(line);
         if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); }
@@ -901,26 +908,24 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       writeCmd(rankId, "-var-update 1 *\n");
     } else if (line.startsWith("201^done,variables=[")) {
       // Token 201: Parse stack-frame locals (`name`, `type`, `value`) for `VariablesDockWidget`.
+      // Triggered automatically on `*stopped` and on caller frame switches (`selectStackFrame`).
       static const QRegularExpression varTupleRe("\\{([^{}]+)\\}");
       static const QRegularExpression vNameRe("name=\"([^\"]+)\"");
       static const QRegularExpression vTypeRe("type=\"([^\"]+)\"");
       static const QRegularExpression vValRe("value=\"((?:\\\\.|[^\"])*)\"");
-      QJsonArray locals;
-      auto it = varTupleRe.globalMatch(line);
+      QJsonArray locals; auto it = varTupleRe.globalMatch(line);
+      // Convert each MI local variable tuple into a DAP-compatible JSON variable descriptor.
       while (it.hasNext()) {
         const QString tuple = it.next().captured(1);
         const auto nm = vNameRe.match(tuple);
         if (!nm.hasMatch()) continue;
-        const auto tm = vTypeRe.match(tuple);
-        const auto vm = vValRe.match(tuple);
-        locals.append(QJsonObject{{"name", nm.captured(1)},
-                                  {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")},
-                                  {"value", vm.hasMatch() ? vm.captured(1) : QStringLiteral("{...}")},
-                                  {"variablesReference", 0}});
+        const auto tm = vTypeRe.match(tuple); const auto vm = vValRe.match(tuple);
+        locals.append(QJsonObject{{"name", nm.captured(1)}, {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")},
+                                  {"value", vm.hasMatch() ? vm.captured(1) : QStringLiteral("{...}")}, {"variablesReference", 0}});
       }
       emit localsUpdated(rankId, locals);
     } else if (handleMiStackOrThreadRecord(rankId, line)) {
-      // Token 202/203: Multi-frame backtrace and OS/OpenMP thread list parsed in GdbRankInspection.cpp.
+      // Token 202..206: Multi-frame backtrace, thread list, REPL output, and watchpoint records.
     } else if (line.contains("asm_insns=")) {
       // Untokenized fallback `-data-disassemble` response handler.
       const QString prettyAsm = formatMiDisassembly(line);

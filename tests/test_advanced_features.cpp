@@ -61,6 +61,43 @@ void TestAdvancedFeatures::testDeadlockAnalyzer() {
     args = spy.takeFirst();
     QCOMPARE(args.at(0).value<DeadlockInfo>().rankId, 0);
     QCOMPARE(args.at(0).value<DeadlockInfo>().blockedFunction, QString("PMPI_Wait"));
+
+    // Verify live multi-rank collective divergence detection (Rank 0 in MPI_Bcast vs Rank 1 in MPI_Barrier).
+    GdbRankCoordinator multiCoord; // Multi-rank coordinator test harness
+    multiCoord.initializeMockSession(2);
+    multiCoord.m_processes[0]->state.currentState = "stopped"; // Mark Rank 0 paused
+    multiCoord.m_processes[1]->state.currentState = "stopped"; // Mark Rank 1 paused
+    DeadlockAnalyzer multiAnalyzer(&multiCoord);
+    QSignalSpy divSpy(&multiAnalyzer, &DeadlockAnalyzer::deadlockDetected);
+
+    // Feed live 64-frame MI stack snapshots (token 202) for Rank 0 and Rank 1.
+    multiCoord.processGdbOutput(
+        0, "202^done,stack=[frame={level=\"0\",addr=\"0x401140\",func=\"MPI_Bcast\","
+           "fullname=\"/tmp/coll.cpp\",line=\"14\"},frame={level=\"1\",addr=\"0x401200\","
+           "func=\"main\",fullname=\"/tmp/coll.cpp\",line=\"30\"}]\n");
+    multiCoord.processGdbOutput(
+        1, "202^done,stack=[frame={level=\"0\",addr=\"0x401180\",func=\"MPI_Barrier\","
+           "fullname=\"/tmp/coll.cpp\",line=\"18\"},frame={level=\"1\",addr=\"0x401210\","
+           "func=\"main\",fullname=\"/tmp/coll.cpp\",line=\"32\"}]\n");
+
+    // Assert collective divergence alert is emitted and diagnostic summary names both primitives.
+    QVERIFY2(divSpy.count() >= 2, "DeadlockAnalyzer must emit alerts for diverging collective ranks");
+    const QString divAlert = multiAnalyzer.property("lastDiagnosticAlert").toString(); // Read diagnostic summary
+    QVERIFY2(divAlert.contains(QStringLiteral("MPI_Bcast")) &&
+                 divAlert.contains(QStringLiteral("MPI_Barrier")),
+             qPrintable(QStringLiteral("Expected collective divergence summary, got: %1").arg(divAlert)));
+
+    // Feed cyclic synchronous point-to-point MPI_Ssend frames across both stopped ranks.
+    divSpy.clear(); // Reset spy before testing point-to-point wait cycle
+    multiCoord.processGdbOutput(
+        0, "202^done,stack=[frame={level=\"0\",addr=\"0x401300\",func=\"MPI_Ssend\","
+           "fullname=\"/tmp/ring.cpp\",line=\"21\"}]\n");
+    multiCoord.processGdbOutput(
+        1, "202^done,stack=[frame={level=\"0\",addr=\"0x401300\",func=\"MPI_Ssend\","
+           "fullname=\"/tmp/ring.cpp\",line=\"21\"}]\n");
+    const QString cycleAlert = multiAnalyzer.property("lastDiagnosticAlert").toString(); // Read cycle summary
+    QVERIFY2(divSpy.count() >= 2 && cycleAlert.contains(QStringLiteral("MPI_Ssend")),
+             qPrintable(QStringLiteral("Expected point-to-point wait cycle alert, got: %1").arg(cycleAlert)));
 }
 
 /**
@@ -99,7 +136,7 @@ void TestAdvancedFeatures::testFpeTrapper() {
 }
 
 /**
- * @brief Tests conditional breakpoint formatting with predicate clauses.
+ * @brief Tests conditional breakpoints, sanitized REPL command dispatch, and hardware watchpoints.
  */
 void TestAdvancedFeatures::testConditionalBreakpoints() {
     GdbRankCoordinator coord;
@@ -109,6 +146,7 @@ void TestAdvancedFeatures::testConditionalBreakpoints() {
     coord.m_processes[0]->process = std::make_unique<QProcess>();
     coord.m_processes[0]->process->start("sleep", QStringList() << "10");
     coord.m_processes[0]->process->waitForStarted();
+    coord.m_processes[0]->state.currentState = "stopped";
     
     QSignalSpy spy(&coord, &GdbRankCoordinator::commandSentToGdb);
     
@@ -125,6 +163,62 @@ void TestAdvancedFeatures::testConditionalBreakpoints() {
     
     // Assert that the -break-insert command included the exact condition.
     QVERIFY(foundCondBreak);
+
+    // Verify sendDebuggerCommand wraps safe GDB commands in -interpreter-exec console and blocks injections.
+    QVERIFY2(coord.metaObject()->indexOfSignal(
+                 QMetaObject::normalizedSignature("debuggerConsoleOutput(int,QString,bool)")) >= 0,
+             "IBackendCoordinator must expose debuggerConsoleOutput(int,QString,bool)");
+    QSignalSpy consoleOutSpy(&coord, SIGNAL(debuggerConsoleOutput(int,QString,bool)));
+    // Clear previous breakpoint commands before dispatching interactive CLI command.
+    spy.clear();
+    QVERIFY(QMetaObject::invokeMethod(&coord, "sendDebuggerCommand",
+                                      Q_ARG(int, 0), Q_ARG(QString, QStringLiteral("info registers"))));
+    // Track whether `-interpreter-exec console` wrapper was emitted to GDB stdin.
+    bool wrappedConsoleCmd = false;
+    for (int i = 0; i < spy.count(); ++i) {
+        if (spy.at(i).at(1).toString().contains("-interpreter-exec console \"info registers\"")) {
+            wrappedConsoleCmd = true;
+        }
+    }
+    QVERIFY2(wrappedConsoleCmd, "sendDebuggerCommand must wrap CLI commands in -interpreter-exec console");
+
+    // Verify shell-injection payloads are scrubbed/rejected before reaching GDB stdin.
+    // Ensure zero MI traffic occurs when shell metacharacters (`;`, `|`, `` ` ``) are supplied.
+    spy.clear();
+    QVERIFY(QMetaObject::invokeMethod(&coord, "sendDebuggerCommand",
+                                      Q_ARG(int, 0), Q_ARG(QString, QStringLiteral("print rank; rm -rf /"))));
+    QCOMPARE(spy.count(), 0);
+    // Confirm rejected shell-injection command reports `isError=true` on `debuggerConsoleOutput`.
+    QVERIFY2(consoleOutSpy.count() >= 1 && consoleOutSpy.last().at(2).toBool() == true,
+             "Rejected shell-injection command must emit debuggerConsoleOutput with isError=true");
+
+    // Verify Hardware Data Watchpoint (-break-watch) creation and watchpoint-trigger stop parsing.
+    QSignalSpy wpSpy(&coord, SIGNAL(watchpointHit(int,QString,QString,QString)));
+    // Clear spy before arming hardware write watchpoint on `watchedCounter`.
+    spy.clear();
+    QVERIFY2(QMetaObject::invokeMethod(&coord, "setDataWatchpoint",
+                                       Q_ARG(QString, QStringLiteral("watchedCounter")),
+                                       Q_ARG(int, 0), Q_ARG(int, -1)),
+             "Coordinator must expose invokable setDataWatchpoint");
+    // Check that `-break-watch watchedCounter` MI command was dispatched to Rank 0.
+    bool foundBreakWatch = false;
+    for (int i = 0; i < spy.count(); ++i) {
+        if (spy.at(i).at(1).toString().contains("-break-watch watchedCounter")) foundBreakWatch = true;
+    }
+    QVERIFY2(foundBreakWatch, "setDataWatchpoint(Write) must emit -break-watch watchedCounter");
+
+    // Simulate GDB MI hardware watchpoint trigger stop packet and validate watchpointHit payload.
+    // Verifies extraction of `wpt={exp="..."}` and `value={old="10",new="77"}` fields.
+    coord.processGdbOutput(
+        0, "*stopped,reason=\"watchpoint-trigger\",wpt={number=\"2\",exp=\"watchedCounter\"},"
+           "value={old=\"10\",new=\"77\"},frame={addr=\"0x401234\",func=\"main\","
+           "file=\"main.cpp\",fullname=\"/tmp/main.cpp\",line=\"25\"},thread-id=\"1\"\n");
+    // Validate rank index, watched expression string, previous value, and updated value.
+    QCOMPARE(wpSpy.count(), 1);
+    QCOMPARE(wpSpy.first().at(0).toInt(), 0);
+    QCOMPARE(wpSpy.first().at(1).toString(), QStringLiteral("watchedCounter"));
+    QCOMPARE(wpSpy.first().at(2).toString(), QStringLiteral("10"));
+    QCOMPARE(wpSpy.first().at(3).toString(), QStringLiteral("77"));
 }
 
 /**

@@ -60,6 +60,13 @@ signals:
      */
     void watchExpressionRequested(const QString& expression);
 
+    /**
+     * @brief Emitted when a user arms a hardware data watchpoint from the variables context menu.
+     * @param expression Watched variable or lvalue memory expression.
+     * @param accessMode Access mode integer (`0 = Write`, `1 = Read`, `2 = ReadWrite`).
+     */
+    void dataWatchpointRequested(const QString& expression, int accessMode);
+
 private slots:
     /**
      * @brief Handles rank selection changes from the dropdown combo box.

@@ -14,14 +14,34 @@
 #include <QFuture>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QThreadPool>
 #include <QtConcurrent>
 #include <QtConcurrent/QtConcurrent>
 
+#include "MiSanitizer.hpp"
 #include "NativeMemoryReader.hpp"
 #include "core/managers/ConfigManager.hpp"
+
+namespace gridlock::core {
+/** @brief Weak `MiSanitizer::sanitize` fallback for standalone DAP test binaries omitting `MiSanitizer.cpp`. */
+__attribute__((weak)) MiSanitizer::SanitizationResult MiSanitizer::sanitize(std::string_view p) {
+  SanitizationResult r{"", p.size() > MAX_PAYLOAD_BYTES, false, false};
+  if (r.wasTruncated) p = p.substr(0, MAX_PAYLOAD_BYTES);
+  bool q = false, esc = false; size_t d = 0;
+  for (size_t i = 0; i < p.size(); ++i) {
+    const char c = p[i];
+    if (c == '\0' || (!q && (c == ';' || c == '|' || c == '&' || c == '`' || c == '$')) || c == '\n' || c == '\r') { r.dropped = true; return r; }
+    if (esc) esc = false; else if (c == '\\') esc = true; else if (c == '"') q = !q;
+    if ((c == '{' || c == '[') && ++d > MAX_MI_NESTING_DEPTH) { r.depthExceeded = r.dropped = true; return r; }
+    if ((c == '}' || c == ']') && d > 0) --d;
+  }
+  r.sanitizedPayload.assign(p.data(), p.size());
+  return r;
+}
+}  // namespace gridlock::core
 
 /**
  * @brief Constructs `DapCoordinator` and connects `QProcess` stdout, error, and lifecycle signals.
@@ -44,12 +64,11 @@ DapCoordinator::DapCoordinator(QObject* parent)
 }
 
 /**
- * @brief Disconnects `QProcess` signals and halts the adapter process on destruction.
+ * @brief Disconnects `QProcess` signals and halts the adapter process on destruction without teardown signals.
  */
 DapCoordinator::~DapCoordinator() {
-  if (m_process) {
-    m_process->disconnect();
-  }
+  QSignalBlocker blocker(this);
+  if (m_process) m_process->disconnect();
   stopAdapter();
 }
 
@@ -531,72 +550,53 @@ void DapCoordinator::terminateSession() {
 /**
  * @brief Drains available stdout bytes from the adapter into `processRawData()`.
  */
-void DapCoordinator::readyReadStandardOutput() {
-  processRawData(m_process->readAllStandardOutput());
-}
+void DapCoordinator::readyReadStandardOutput() { processRawData(m_process->readAllStandardOutput()); }
 
 /**
  * @brief Incrementally extracts `Content-Length` framed JSON payloads and parses them on `QThreadPool`.
+ * @param data Newly read raw byte chunk from the `lldb-dap` stdout pipe.
  */
 void DapCoordinator::processRawData(const QByteArray& data) {
+  // Append newly arrived adapter bytes into the rolling stream buffer.
   m_buffer.append(data);
-
   while (true) {
+    // Locate the HTTP-style `\r\n\r\n` separator bounding the DAP header block.
     const int headerEndIndex = m_buffer.indexOf("\r\n\r\n");
-    if (headerEndIndex == -1) {
-      // Header delimiter `\r\n\r\n` has not arrived yet.
-      break;
-    }
+    if (headerEndIndex == -1) break;
 
-    // Extract the ASCII header block preceding `\r\n\r\n`.
-    const QByteArray headerData = m_buffer.left(headerEndIndex);
-    const QString headerString = QString::fromUtf8(headerData);
-
+    // Parse the `Content-Length` header line (case-insensitive) to determine body byte length.
+    const QString headerString = QString::fromUtf8(m_buffer.left(headerEndIndex));
     int contentLength = 0;
-
-    // Parse the `Content-Length` header line (case-insensitive).
-    const QStringList headers = headerString.split("\r\n");
-    for (const QString& header : headers) {
+    for (const QString& header : headerString.split("\r\n")) {
       if (header.startsWith("Content-Length:", Qt::CaseInsensitive)) {
         contentLength = header.mid(15).trimmed().toInt();
         break;
       }
     }
-
     if (contentLength <= 0) {
+      // Recover stream synchronization by discarding malformed header blocks.
       qWarning() << "Invalid or missing Content-Length in DAP header.";
-      // Recover stream synchronization by discarding the malformed header block.
       m_buffer.remove(0, headerEndIndex + 4);
       continue;
     }
 
-    // Verify that the entire JSON body has arrived in `m_buffer`.
+    // Defer parsing until the complete UTF-8 JSON body is buffered in memory.
     const int totalMessageLength = headerEndIndex + 4 + contentLength;
-    if (m_buffer.size() < totalMessageLength) {
-      break;
-    }
-
-    const QByteArray payloadData =
-        m_buffer.mid(headerEndIndex + 4, contentLength);
+    if (m_buffer.size() < totalMessageLength) break;
+    const QByteArray payloadData = m_buffer.mid(headerEndIndex + 4, contentLength);
     m_buffer.remove(0, totalMessageLength);
 
     // Offload JSON deserialization to the global thread pool and marshal back to the UI thread.
     QThreadPool::globalInstance()->start([this, payloadData]() {
       QJsonParseError parseError;
-      const QJsonDocument doc =
-          QJsonDocument::fromJson(payloadData, &parseError);
-
+      const QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
       if (parseError.error != QJsonParseError::NoError) {
-        qWarning() << "Failed to parse DAP JSON payload:"
-                   << parseError.errorString();
+        qWarning() << "Failed to parse DAP JSON payload:" << parseError.errorString();
         return;
       }
-
       if (doc.isObject()) {
         const QJsonObject obj = doc.object();
-        QMetaObject::invokeMethod(
-            this, [this, obj]() { handleMessage(obj); },
-            Qt::QueuedConnection);
+        QMetaObject::invokeMethod(this, [this, obj]() { handleMessage(obj); }, Qt::QueuedConnection);
       }
     });
   }
@@ -607,19 +607,16 @@ void DapCoordinator::processRawData(const QByteArray& data) {
  * @param message Deserialized DAP JSON envelope (`type`: `"response"` or `"event"`).
  */
 void DapCoordinator::handleMessage(const QJsonObject& message) {
-  // Log incoming DAP traffic for protocol debugging and evaluate inspection.
-  if (message["type"].toString() == "response" &&
-      message["command"].toString() == "evaluate") {
-    qDebug() << "[DAP Sniffer] Evaluate Response:"
-             << QJsonDocument(message).toJson(QJsonDocument::Compact);
+  // Log incoming DAP traffic for protocol debugging and REPL/watch evaluation inspection.
+  if (message["type"].toString() == "response" && message["command"].toString() == "evaluate") {
+    qDebug() << "[DAP Sniffer] Evaluate Response:" << QJsonDocument(message).toJson(QJsonDocument::Compact);
   } else {
-    qDebug() << "[DAP Sniffer] RX:"
-             << QJsonDocument(message).toJson(QJsonDocument::Compact);
+    qDebug() << "[DAP Sniffer] RX:" << QJsonDocument(message).toJson(QJsonDocument::Compact);
   }
 
   const QString type = message["type"].toString();
-
   if (type == "response") {
+    // Dispatch adapter command responses (`initialize`, `stackTrace`, `threads`, `scopes`, `variables`, `evaluate`, `dataBreakpointInfo`).
     const QString command = message["command"].toString();
     if (command == "initialize" && message["success"].toBool(true)) {
       // Dispatch live PID `attach` when `attachToProcess(pid)` initiated this session.
@@ -630,83 +627,55 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         emit messageReceived(message);
         return;
       }
-      // Upon `initialize` response, send `launch` configured from `ProjectSettings`.
-      // Fall back to `settings.targetBinary` if no explicit binary override was passed.
-      const auto settings =
-          gridlock::core::ConfigManager::instance().loadProjectSettings();
+      // Upon `initialize` response, send `launch` configured from persisted `ProjectSettings`.
+      // Fall back to `settings.targetBinary` when no explicit binary override was supplied.
+      const auto settings = gridlock::core::ConfigManager::instance().loadProjectSettings();
       QJsonObject launchArgs;
-      QString programToLaunch = m_currentBinaryPath;
-      if (programToLaunch.isEmpty()) {
-        programToLaunch = QString::fromStdString(settings.targetBinary);
-      }
+      const QString programToLaunch = m_currentBinaryPath.isEmpty() ? QString::fromStdString(settings.targetBinary) : m_currentBinaryPath;
       launchArgs["program"] = programToLaunch;
       launchArgs["stopOnEntry"] = false;
 
-      // Tokenize space-delimited target arguments into a JSON array.
-      const QString argsStr = QString::fromStdString(settings.programArguments);
+      // Tokenize space-delimited target arguments and environment assignments into JSON arrays.
       QJsonArray argsArray;
-      for (const QString& arg : argsStr.split(" ", Qt::SkipEmptyParts)) {
-        argsArray.append(arg);
-      }
+      for (const QString& arg : QString::fromStdString(settings.programArguments).split(" ", Qt::SkipEmptyParts)) argsArray.append(arg);
       launchArgs["args"] = argsArray;
-
-      // Tokenize space-delimited environment variable assignments (`KEY=VALUE`).
-      const QString envStr =
-          QString::fromStdString(settings.environmentVariables);
       QJsonArray envArray;
-      for (const QString& envVar : envStr.split(" ", Qt::SkipEmptyParts)) {
-        envArray.append(envVar);
-      }
-      if (!envArray.isEmpty()) {
-        launchArgs["env"] = envArray;
-      }
-
+      for (const QString& envVar : QString::fromStdString(settings.environmentVariables).split(" ", Qt::SkipEmptyParts)) envArray.append(envVar);
+      if (!envArray.isEmpty()) launchArgs["env"] = envArray;
       launchArgs["cwd"] = QString::fromStdString(settings.workingDirectory);
-
       sendRequest("launch", launchArgs);
     } else if (command == "stackTrace" && message["success"].toBool()) {
-      // Parse up to 64 unwound stack frames, cache frame descriptors, and broadcast stackTraceUpdated.
+      // Parse up to 64 unwound stack frames, cache frame descriptors, and broadcast `stackTraceUpdated`.
       const int seq = message["request_seq"].toInt();
       if (m_stackTraceRequests.contains(seq)) {
         const int rankId = m_stackTraceRequests.take(seq);
         const QJsonArray stackFrames = message["body"].toObject()["stackFrames"].toArray();
-        QVector<StackFrameEntry> frames;
-        frames.reserve(stackFrames.size());
+        QVector<StackFrameEntry> frames; frames.reserve(stackFrames.size());
+        // Convert each DAP `StackFrame` object into a `StackFrameEntry` with DWARF path and RIP address.
         for (int idx = 0; idx < stackFrames.size(); ++idx) {
           const QJsonObject fObj = stackFrames.at(idx).toObject();
-          StackFrameEntry entry;
-          entry.level = idx;
-          entry.frameId = fObj["id"].toInt();
+          StackFrameEntry entry; entry.level = idx; entry.frameId = fObj["id"].toInt();
           entry.function = fObj["name"].toString(QStringLiteral("??"));
           if (fObj.contains("source")) entry.file = fObj["source"].toObject()["path"].toString();
           entry.line = fObj["line"].toInt(0);
           const QString ipRef = fObj["instructionPointerReference"].toString();
-          if (ipRef.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
-            bool ok = false;
-            entry.address = ipRef.mid(2).toULongLong(&ok, 16);
-          }
+          if (ipRef.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) { bool ok = false; entry.address = ipRef.mid(2).toULongLong(&ok, 16); }
           frames.append(entry);
         }
+        // Cache frames and publish `stackTraceUpdated` + top-frame `locationChanged`.
         m_rankFrames[rankId] = frames;
         emit stackTraceUpdated(rankId, frames);
-        if (!frames.isEmpty()) {
-          m_activeFrameIds[rankId] = frames.front().frameId;
-          emit locationChanged(rankId, frames.front().file, frames.front().line);
-        }
+        if (!frames.isEmpty()) { m_activeFrameIds[rankId] = frames.front().frameId; emit locationChanged(rankId, frames.front().file, frames.front().line); }
       }
     } else if (command == "threads" && message["success"].toBool()) {
       // Parse live OS/OpenMP threads from DAP `threads` response and emit `threadsUpdated`.
       const QJsonArray rawThreads = message["body"].toObject()["threads"].toArray();
       const int curThread = m_activeThreadIds.value(0, 1);
-      QVector<ThreadEntry> threads;
-      threads.reserve(rawThreads.size());
+      QVector<ThreadEntry> threads; threads.reserve(rawThreads.size());
       for (const QJsonValue& tv : rawThreads) {
         const QJsonObject tObj = tv.toObject();
-        ThreadEntry th;
-        th.threadId = tObj["id"].toInt(1);
-        th.name = tObj["name"].toString(QStringLiteral("main"));
-        th.state = QStringLiteral("stopped");
-        th.isCurrent = (th.threadId == curThread);
+        ThreadEntry th; th.threadId = tObj["id"].toInt(1); th.name = tObj["name"].toString(QStringLiteral("main"));
+        th.state = QStringLiteral("stopped"); th.isCurrent = (th.threadId == curThread);
         threads.append(th);
       }
       m_rankThreads[0] = threads;
@@ -723,10 +692,7 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
           const QJsonObject scObj = scVal.toObject();
           if (scObj["name"].toString().contains("Register", Qt::CaseInsensitive)) {
             const int regRef = scObj["variablesReference"].toInt();
-            if (regRef > 0) {
-              m_registersRequests[m_sequenceNumber] = rankId;
-              sendRequest("variables", QJsonObject{{"variablesReference", regRef}});
-            }
+            if (regRef > 0) { m_registersRequests[m_sequenceNumber] = rankId; sendRequest("variables", QJsonObject{{"variablesReference", regRef}}); }
           }
         }
       }
@@ -745,16 +711,20 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
       if (m_memoryRequests.contains(seq)) {
         const int rankId = m_memoryRequests.take(seq);
         const QJsonObject body = message["body"].toObject();
-        emit memoryRead(rankId, body["address"].toString(),
-                        QByteArray::fromBase64(body["data"].toString().toUtf8()));
+        emit memoryRead(rankId, body["address"].toString(), QByteArray::fromBase64(body["data"].toString().toUtf8()));
       }
-    } else if (command == "evaluate" && message["success"].toBool()) {
-      // Distinguish between background 2D heatmap pointer evaluations and interactive watch expressions.
+    } else if (command == "evaluate") {
+      // Route interactive REPL console queries, heatmap pointer reads, and watch expressions.
       const int seq = message["request_seq"].toInt();
-      if (m_heatmapRequests.contains(seq)) {
-        // Parse evaluated pointer hex address and trigger a background `process_vm_readv` copy.
+      const bool okResp = message["success"].toBool();
+      const QString result = message["body"].toObject()["result"].toString();
+      if (m_replRequests.contains(seq)) {
+        // Forward REPL output or adapter error message directly to `GdbConsoleWidget`.
+        const int rankId = m_replRequests.take(seq);
+        emit debuggerConsoleOutput(rankId, okResp ? result : message["message"].toString(QStringLiteral("Evaluation error")), !okResp);
+      } else if (okResp && m_heatmapRequests.contains(seq)) {
+        // Extract base hex pointer from expression result and stream doubles via `process_vm_readv`.
         const auto req = m_heatmapRequests.take(seq);
-        const QString result = message["body"].toObject()["result"].toString();
         static const QRegularExpression re("(0x[0-9a-fA-F]+)");
         const QRegularExpressionMatch match = re.match(result);
         if (match.hasMatch() && m_rankToPid.contains(req.rankId)) {
@@ -762,30 +732,30 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
           const uintptr_t baseAddress = match.captured(1).toULongLong(&ok, 16);
           if (ok) {
             try {
-              (void)QtConcurrent::run([this, pid = m_rankToPid[req.rankId], baseAddress,
-                                       count = req.rows * req.cols, rows = req.rows, cols = req.cols]() {
-                try {
-                  emit heatmapDataReady(NativeMemoryReader::readDoubles(pid, baseAddress, count), rows, cols);
-                } catch (...) {
-                  // Silently drop transient ptrace/process_vm_readv read failures on exiting ranks.
-                }
+              (void)QtConcurrent::run([this, pid = m_rankToPid[req.rankId], baseAddress, count = req.rows * req.cols, rows = req.rows, cols = req.cols]() {
+                try { emit heatmapDataReady(NativeMemoryReader::readDoubles(pid, baseAddress, count), rows, cols); } catch (...) {}
               });
-            } catch (const std::exception& e) {
-              qWarning() << "Heatmap memory read failed:" << e.what();
-            }
+            } catch (const std::exception& e) { qWarning() << "Heatmap memory read failed:" << e.what(); }
           }
         }
-      } else if (m_evaluateRequests.contains(seq)) {
-        // Forward interactive watch expression results to VariablesDockWidget and GdbConsoleWidget.
+      } else if (okResp && m_evaluateRequests.contains(seq)) {
         const auto pair = m_evaluateRequests.take(seq);
-        emit expressionEvaluated(pair.first, pair.second, message["body"].toObject()["result"].toString());
+        emit expressionEvaluated(pair.first, pair.second, result);
+      }
+    } else if (command == "dataBreakpointInfo" && message["success"].toBool()) {
+      // Promote resolved `dataId` from `dataBreakpointInfo` into an active `setDataBreakpoints` request.
+      const int seq = message["request_seq"].toInt();
+      if (m_dataBpInfoRequests.contains(seq)) {
+        const auto spec = m_dataBpInfoRequests.take(seq);
+        const QString dataId = message["body"].toObject()["dataId"].toString();
+        if (!dataId.isEmpty()) { m_activeDataBreakpoints[spec.first] = qMakePair(dataId, spec.second); syncDataBreakpoints(); }
       }
     }
   } else if (type == "event") {
-    // Handle asynchronous adapter notifications (`initialized`, `stopped`, `output`, `process`).
+    // Handle asynchronous adapter notifications (`initialized`, `stopped`, `output`, `process`, `terminated`).
     const QString event = message["event"].toString();
     if (event == "initialized") {
-      // Flush all registered breakpoints followed by `configurationDone` to release execution.
+      // Flush all registered source breakpoints followed by `configurationDone` to release execution.
       for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
         if (!it.value().isEmpty()) {
           QJsonArray breakpointsArray;
@@ -795,11 +765,9 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
             if (!cond.isEmpty()) bp["condition"] = cond;
             breakpointsArray.append(bp);
           }
-          sendRequest("setBreakpoints", QJsonObject{{"source", QJsonObject{{"path", it.key()}}},
-                                                    {"breakpoints", breakpointsArray}});
+          sendRequest("setBreakpoints", QJsonObject{{"source", QJsonObject{{"path", it.key()}}}, {"breakpoints", breakpointsArray}});
         }
       }
-      // Complete initial launch handshake and transition workstation state to Running.
       sendRequest("configurationDone");
       m_state = SessionState::Running;
       emit stateChanged(m_state);
@@ -811,51 +779,106 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
       const int rankId = std::max(0, threadId - 1);
       m_activeThreadIds[rankId] = threadId;
 
-      // Notify UI toolbars and rack tiles that target execution is now halted.
+      // Notify UI toolbars, hardware watchpoint listeners, and rack tiles that target execution is halted.
       m_state = SessionState::Paused;
       emit stateChanged(m_state);
+      if (reason.contains(QStringLiteral("data"), Qt::CaseInsensitive) || reason.contains(QStringLiteral("watchpoint"), Qt::CaseInsensitive)) {
+        const QString expr = m_activeDataBreakpoints.isEmpty() ? QStringLiteral("watchpoint") : m_activeDataBreakpoints.firstKey();
+        emit watchpointHit(rankId, expr, QString(), body["description"].toString(body["text"].toString()));
+      }
       emit executionStopped(rankId, reason);
-      // Query live adapter threads and up to 64 stack frames for CallStackDockWidget.
       if (m_processCount > 0) sendRequest("threads");
       requestStackTrace(rankId);
     } else if (event == "output") {
-      // Inspect target output for SLURM job allocation banners before forwarding to UI.
+      // Inspect target output for SLURM job allocation banners before forwarding to UI logs.
       const QJsonObject body = message["body"].toObject();
-      const QString category = body["category"].toString();
       const QString output = body["output"].toString();
       static const QRegularExpression re("(?:Submitted batch job |Granted job allocation )(\\d+)");
       const QRegularExpressionMatch match = re.match(output);
-      if (match.hasMatch()) {
-        // Transition session state to Queued when a SLURM batch/allocation ID is detected.
-        m_slurmJobId = match.captured(1).toInt();
-        m_state = SessionState::Queued;
-        emit stateChanged(m_state);
-      }
-      // Forward categorized stdout/stderr/console text to the Network & Console log dock.
-      emit targetOutputReceived(category, output);
+      if (match.hasMatch()) { m_slurmJobId = match.captured(1).toInt(); m_state = SessionState::Queued; emit stateChanged(m_state); }
+      emit targetOutputReceived(body["category"].toString(), output);
     } else if (event == "process") {
       // Record the OS `systemProcessId` so `NativeMemoryReader` can attach via `process_vm_readv`.
       const qint64 pid = message["body"].toObject()["systemProcessId"].toVariant().toLongLong();
       if (pid > 0) m_rankToPid[m_rankToPid.isEmpty() ? 0 : m_rankToPid.size()] = static_cast<pid_t>(pid);
     } else if (event == "terminated" || event == "exited") {
-      // Clear inferior PID and stack/thread registries when target terminates.
+      // Clear per-rank PIDs, frames, and threads when the debuggee process terminates.
       m_rankToPid.clear(); m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear();
-      // Notify listeners that the debug adapter session has disconnected cleanly.
       m_state = SessionState::Disconnected;
       emit stateChanged(m_state);
     }
   }
-
-  // Always emit the raw JSON envelope for diagnostic logging and protocol unit tests.
   emit messageReceived(message);
 }
 
 /**
+ * @brief Scrubs @p command via `MiSanitizer` and evaluates it in DAP `"repl"` context.
+ * @param rank Target rank index (`< 0` defaults to rank 0 for single-adapter DAP sessions).
+ * @param command Interactive debugger command string entered in `GdbConsoleWidget`.
+ */
+void DapCoordinator::sendDebuggerCommand(int rank, const QString& command) {
+  const QString trimmed = command.trimmed();
+  if (trimmed.isEmpty()) return;
+  // Mask benign `$reg` / `&var` prefixes before validating against shell metacharacters.
+  QString masked = trimmed;
+  masked.replace(QRegularExpression(QStringLiteral("[$&](?=[A-Za-z0-9_])")), QStringLiteral("_GL_"));
+  static const QRegularExpression shellRe(QStringLiteral("^(?:!|shell(?:\\s|$)|pipe(?:\\s|\\||$))"), QRegularExpression::CaseInsensitiveOption);
+  const auto san = gridlock::core::MiSanitizer::sanitize(masked.toStdString());
+  if (shellRe.match(trimmed).hasMatch() || trimmed.contains(QStringLiteral("$(")) || san.dropped || san.depthExceeded || san.wasTruncated) {
+    emit debuggerConsoleOutput(std::max(0, rank), QStringLiteral("Error: Command blocked by MiSanitizer security policy."), true);
+    return;
+  }
+  // Dispatch `evaluate` request in `"repl"` context scoped to the active stack frame if paused.
+  const int targetRank = std::max(0, rank);
+  QJsonObject args{{"expression", trimmed}, {"context", QStringLiteral("repl")}};
+  if (m_activeFrameIds.contains(targetRank)) args["frameId"] = m_activeFrameIds.value(targetRank);
+  m_replRequests[m_sequenceNumber] = targetRank;
+  sendRequest(QStringLiteral("evaluate"), args);
+}
+
+/**
+ * @brief Arms a DAP hardware data watchpoint via `dataBreakpointInfo` -> `setDataBreakpoints`.
+ * @param expression Variable or lvalue expression to monitor in hardware debug registers.
+ * @param mode Hardware access trigger mode (`Write`, `Read`, or `ReadWrite`).
+ * @param rankFilter Optional target rank index (`-1` targets active rank 0).
+ */
+void DapCoordinator::setDataWatchpoint(const QString& expression, WatchpointAccessMode mode, int rankFilter) {
+  const QString expr = expression.trimmed();
+  if (expr.isEmpty()) return;
+  // Map WatchpointAccessMode to DAP protocol `dataBreakpointAccessType` strings.
+  const QString access = (mode == WatchpointAccessMode::Read) ? QStringLiteral("read")
+                                                              : (mode == WatchpointAccessMode::ReadWrite ? QStringLiteral("readWrite") : QStringLiteral("write"));
+  const int targetRank = std::max(0, rankFilter);
+  QJsonObject args{{"name", expr}, {"variablesReference", 0}};
+  if (m_activeFrameIds.contains(targetRank)) args["frameId"] = m_activeFrameIds.value(targetRank);
+  m_dataBpInfoRequests[m_sequenceNumber] = qMakePair(expr, access);
+  sendRequest(QStringLiteral("dataBreakpointInfo"), args);
+}
+
+/**
+ * @brief Removes an active DAP hardware data breakpoint matching @p expression.
+ * @param expression Variable expression previously armed via `setDataWatchpoint`.
+ */
+void DapCoordinator::removeDataWatchpoint(const QString& expression) {
+  if (m_activeDataBreakpoints.remove(expression.trimmed()) > 0) syncDataBreakpoints();
+}
+
+/**
+ * @brief Sends the complete active `m_activeDataBreakpoints` list via DAP `setDataBreakpoints`.
+ */
+void DapCoordinator::syncDataBreakpoints() {
+  QJsonArray bps;
+  for (auto it = m_activeDataBreakpoints.constBegin(); it != m_activeDataBreakpoints.constEnd(); ++it) {
+    bps.append(QJsonObject{{"dataId", it.value().first}, {"accessType", it.value().second}});
+  }
+  sendRequest(QStringLiteral("setDataBreakpoints"), QJsonObject{{"breakpoints", bps}});
+}
+
+/**
  * @brief Logs `QProcess` transport errors and transitions the session to `Disconnected`.
- * @param error The `QProcess::ProcessError` code reported by the OS.
+ * @param error Underlying `QProcess::ProcessError` code reported by Qt.
  */
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
-  // Surface adapter spawn/pipe failures immediately to connected workstation listeners.
   qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
   emit errorOccurred(m_process->errorString());
   m_processCount = 0;
@@ -866,10 +889,9 @@ void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
 /**
  * @brief Emits `adapterExited` and resets session state when the adapter process terminates.
  * @param exitCode Process exit status code.
- * @param exitStatus Normal vs. crash termination status.
+ * @param exitStatus Normal or crash exit classification.
  */
 void DapCoordinator::handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
-  // Clear tracked inferior PIDs, frames, and threads when the debug adapter exits.
   m_processCount = 0;
   m_rankToPid.clear(); m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear();
   emit adapterExited(exitCode, exitStatus);

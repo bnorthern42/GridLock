@@ -50,6 +50,12 @@ public:
     void resetRanks(int count);
 
     /**
+     * @brief Synchronizes the rank selector dropdown count without clearing retained console logs.
+     * @param count Active number of MPI ranks in the session.
+     */
+    void ensureRankCount(int count);
+
+    /**
      * @brief Formats a raw MI log string into human-readable console text.
      * @param rank MPI rank identifier.
      * @param text Raw MI record string.
@@ -87,6 +93,14 @@ public slots:
      */
     void appendGdbInput(int rank, const QString& input);
 
+    /**
+     * @brief Appends interactive REPL evaluation output or sanitizer diagnostics for a rank.
+     * @param rank Target MPI rank index (or -1 for broadcast diagnostics).
+     * @param output Formatted debugger console response or error message.
+     * @param isError True when @p output represents an error or security rejection.
+     */
+    void appendDebuggerConsoleOutput(int rank, const QString& output, bool isError = false);
+
 signals:
     /**
      * @brief Emitted when the user enters a GDB command in the input edit box.
@@ -118,11 +132,13 @@ private:
     QPlainTextEdit* m_consoleEdit = nullptr;
     QLineEdit* m_commandEdit = nullptr;
 
-    /// Internal structure recording individual GDB log events.
+    /// Internal structure recording individual GDB MI and interactive REPL log events.
     struct LogEntry {
         int rank = 0;
         QString text;
         bool isInput = false;
+        bool isRepl = false;
+        bool isError = false;
     };
     QList<LogEntry> m_logs;
 };

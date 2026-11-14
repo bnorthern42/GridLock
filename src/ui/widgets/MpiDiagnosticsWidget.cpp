@@ -12,6 +12,7 @@
 #include "MpiNetworkLogWidget.hpp"
 #include <QAbstractItemView>
 #include <QColor>
+#include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -20,6 +21,7 @@
 #include <QSplitter>
 #include <QTabBar>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace gridlock::ui {
 
@@ -238,40 +240,123 @@ bool MpiDiagnosticsWidget::hasCompactSingleRowHeader() const {
 }
 
 /**
- * @brief Dynamically updates or inserts a rank state row in the wait-state table.
- * @param rankId Zero-based MPI rank identifier.
- * @param stateText Execution state string (e.g. "PAUSED (BP)", "STEPPED", "RUNNING").
- * @param primitive Active MPI primitive or instruction phase.
- * @param target Peer rank or collective target description.
- * @param pcAddr Active 64-bit program counter address.
- * @param totalRanks Optional total cluster rank count to resize table rows.
+ * @brief Clears static placeholder rows and initializes live per-rank telemetry rows.
+ * @param rankCount Active number of MPI ranks in the launched or attached session.
  */
-void MpiDiagnosticsWidget::updateRankStateRow(int rankId, const QString& stateText,
-                                              const QString& primitive, const QString& target,
-                                              uint64_t pcAddr, int totalRanks) {
+void MpiDiagnosticsWidget::beginLiveSession(int rankCount) {
+    if (m_deadlockList) {
+        m_deadlockList->clear();
+    }
+    // Reset header status pill to green NO CYCLE state when starting a fresh live session.
+    if (m_statusBadge) {
+        m_statusBadge->setText(QStringLiteral("STATUS: NO CYCLE"));
+        m_statusBadge->setStyleSheet(QStringLiteral(
+            "color: #4ec9b0; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; "
+            "padding: 1px 6px; background: #1b2a2f; border: 1px solid #2c4a52; border-radius: 2px;"));
+    }
+    if (!m_rankWaitTable) {
+        return;
+    }
+    // Clear static demo rows and seed `Rank 0..n-1` rows in live RUNNING state.
+    const int n = std::max(1, rankCount);
+    m_rankWaitTable->setRowCount(0);
+    m_rankWaitTable->setRowCount(n);
+    for (int r = 0; r < n; ++r) {
+        updateLiveRankRow(r, 0, QStringLiteral("RUNNING"), QStringLiteral("main"),
+                          QStringLiteral("ALL RANKS"), QStringLiteral("0x00000000"), n);
+    }
+}
+
+/**
+ * @brief Updates a rank telemetry row with live OS PID, state, MPI primitive, and source location.
+ * @param rankId Zero-based MPI rank index.
+ * @param pid Live inferior OS process ID (`0` if not yet reported or exited).
+ * @param stateText Execution state badge (`RUNNING`, `PAUSED`, `EXITED`, `IDLE`).
+ * @param primitive Active `MPI_*` primitive or function name on the rank's call stack.
+ * @param target Peer/collective target descriptor (`LIVE`, `ALL RANKS`, `CYCLE WAIT`, etc.).
+ * @param location DWARF `file:line (0xpc)` or raw hex program counter string.
+ * @param totalRanks Total MPI communicator size (`MPI_COMM_WORLD`).
+ */
+void MpiDiagnosticsWidget::updateLiveRankRow(int rankId, qint64 pid, const QString& stateText,
+                                             const QString& primitive, const QString& target,
+                                             const QString& location, int totalRanks) {
     if (!m_rankWaitTable || rankId < 0) {
         return;
     }
+    // Resize wait-state table dynamically when communicator size changes across sessions.
     if (totalRanks > 0 && m_rankWaitTable->rowCount() != totalRanks) {
         m_rankWaitTable->setRowCount(totalRanks);
     }
     if (rankId >= m_rankWaitTable->rowCount()) {
         m_rankWaitTable->setRowCount(rankId + 1);
     }
-    auto* rankItem = new QTableWidgetItem(QStringLiteral("Rank %1").arg(rankId));
+
+    // Clear stale deadlock alert entries whenever a rank resumes execution or exits.
+    if (stateText == QLatin1String("RUNNING") || stateText == QLatin1String("EXITED")) {
+        onRankCleared(rankId);
+    }
+
+    // Preserve any previously captured `(PID ...)` badge when pid is temporarily 0 during updates.
+    QString rankLabel = (pid > 0) ? QStringLiteral("Rank %1 (PID %2)").arg(rankId).arg(pid)
+                                  : QStringLiteral("Rank %1").arg(rankId);
+    if (pid <= 0 && stateText != QLatin1String("IDLE")) {
+        if (const QTableWidgetItem* prevRank = m_rankWaitTable->item(rankId, 0)) {
+            if (prevRank->text().contains(QStringLiteral("(PID "))) {
+                rankLabel = prevRank->text();
+            }
+        }
+    }
+
+    // Preserve active DEADLOCKED / COLL MISMATCH state badge if this rank is still flagged in m_deadlockList.
+    QString effectiveState = stateText;
+    if (stateText == QLatin1String("PAUSED") && m_deadlockList) {
+        for (int i = 0; i < m_deadlockList->count(); ++i) {
+            if (m_deadlockList->item(i)->data(Qt::UserRole).toInt() == rankId) {
+                if (const QTableWidgetItem* prevSt = m_rankWaitTable->item(rankId, 1)) {
+                    if (prevSt->text() == QLatin1String("DEADLOCKED") ||
+                        prevSt->text() == QLatin1String("COLL MISMATCH")) {
+                        effectiveState = prevSt->text();
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // Populate all 6 columns (`Rank`, `State`, `Primitive`, `Peer/Target`, `Comm`, `Location`).
+    auto* rankItem = new QTableWidgetItem(rankLabel);
     rankItem->setData(Qt::UserRole, rankId);
     m_rankWaitTable->setItem(rankId, 0, rankItem);
-    m_rankWaitTable->setItem(rankId, 1, new QTableWidgetItem(stateText));
+    m_rankWaitTable->setItem(rankId, 1, new QTableWidgetItem(effectiveState));
     m_rankWaitTable->setItem(rankId, 2, new QTableWidgetItem(primitive));
     m_rankWaitTable->setItem(rankId, 3, new QTableWidgetItem(target));
     m_rankWaitTable->setItem(rankId, 4, new QTableWidgetItem(QStringLiteral("MPI_COMM_WORLD")));
+    m_rankWaitTable->setItem(rankId, 5, new QTableWidgetItem(location));
+}
+
+/**
+ * @brief Dynamically updates or inserts a rank state row in the wait-state table.
+ * @param rankId Zero-based MPI rank index.
+ * @param stateText Execution state label.
+ * @param primitive Active MPI call or symbol name.
+ * @param target Peer rank or collective scope label.
+ * @param pcAddr Active 64-bit instruction pointer address.
+ * @param totalRanks Total MPI communicator size.
+ */
+void MpiDiagnosticsWidget::updateRankStateRow(int rankId, const QString& stateText,
+                                              const QString& primitive, const QString& target,
+                                              uint64_t pcAddr, int totalRanks) {
+    if (rankId == 0 && stateText == QLatin1String("RUNNING") && pcAddr == 0ULL) {
+        beginLiveSession(totalRanks > 0 ? totalRanks : 1);
+        return;
+    }
     const int offset = (pcAddr >= 0x00401120ULL && pcAddr <= 0x00401190ULL)
                            ? static_cast<int>(pcAddr - 0x00401120ULL)
                            : 0;
-    m_rankWaitTable->setItem(rankId, 5,
-                             new QTableWidgetItem(QStringLiteral("0x%1 <main+%2>")
-                                                      .arg(pcAddr, 8, 16, QChar('0'))
-                                                      .arg(offset)));
+    const QString loc = QStringLiteral("0x%1 <main+%2>")
+                            .arg(pcAddr, 8, 16, QChar('0'))
+                            .arg(offset);
+    updateLiveRankRow(rankId, 0, stateText, primitive, target, loc, totalRanks);
 }
 
 /**
@@ -282,6 +367,7 @@ void MpiDiagnosticsWidget::filterRankTable(const QString& filterText) {
     if (!m_rankWaitTable) {
         return;
     }
+    // Match case-insensitively across all columns (`Rank`, `PID`, `State`, `Primitive`, `Location`).
     const QString q = filterText.trimmed();
     for (int row = 0; row < m_rankWaitTable->rowCount(); ++row) {
         bool matches = q.isEmpty();
@@ -297,27 +383,35 @@ void MpiDiagnosticsWidget::filterRankTable(const QString& filterText) {
 }
 
 /**
- * @brief Records a detected deadlock event and updates both the table and alert list.
- * @param info Deadlock descriptor containing blocked rank and function.
+ * @brief Records a detected deadlock or collective mismatch event across table and alert list.
+ * @param info Deadlock descriptor containing blocked rank, primitive, and mismatch reason.
  */
 void MpiDiagnosticsWidget::onDeadlockDetected(const gridlock::core::DeadlockInfo& info) {
-    // Clear any previous stale alert entry for this rank
+    // Clear any previous stale alert entry for this rank before inserting the refreshed alert.
     onRankCleared(info.rankId);
-    
-    // Create new alert item storing rank ID in UserRole
+
+    // Create new alert item storing rank ID in UserRole for double-click frame seeking.
     QListWidgetItem* item = new QListWidgetItem();
-    item->setText(QString("Rank %1: Blocked in %2").arg(info.rankId).arg(info.blockedFunction));
+    const QString detail = !info.reason.isEmpty()
+                               ? QStringLiteral("Rank %1: %2").arg(info.rankId).arg(info.reason)
+                               : QStringLiteral("Rank %1: Blocked in %2")
+                                     .arg(info.rankId)
+                                     .arg(info.blockedFunction);
+    item->setText(detail);
     item->setData(Qt::UserRole, info.rankId);
     m_deadlockList->addItem(item);
 
+    // Switch header badge to crimson COLL DIVERGENCE or CYCLE DETECTED alert styling.
     if (m_statusBadge) {
-        m_statusBadge->setText(QStringLiteral("STATUS: CYCLE DETECTED"));
+        m_statusBadge->setText(info.isCollectiveMismatch
+                                   ? QStringLiteral("STATUS: COLL DIVERGENCE")
+                                   : QStringLiteral("STATUS: CYCLE DETECTED"));
         m_statusBadge->setStyleSheet(QStringLiteral(
             "color: #f44747; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; "
             "padding: 1px 6px; background: #331c1f; border: 1px solid #6b2a30; border-radius: 2px;"));
     }
 
-    // Update or append the corresponding row in m_rankWaitTable.
+    // Update or append the corresponding row in m_rankWaitTable while preserving live PID text.
     if (m_rankWaitTable) {
         int targetRow = -1;
         for (int r = 0; r < m_rankWaitTable->rowCount(); ++r) {
@@ -333,12 +427,26 @@ void MpiDiagnosticsWidget::onDeadlockDetected(const gridlock::core::DeadlockInfo
             auto* rItem = new QTableWidgetItem(QStringLiteral("Rank %1").arg(info.rankId));
             rItem->setData(Qt::UserRole, info.rankId);
             m_rankWaitTable->setItem(targetRow, 0, rItem);
-            m_rankWaitTable->setItem(targetRow, 3, new QTableWidgetItem(QStringLiteral("CYCLE WAIT")));
             m_rankWaitTable->setItem(targetRow, 4, new QTableWidgetItem(QStringLiteral("MPI_COMM_WORLD")));
             m_rankWaitTable->setItem(targetRow, 5, new QTableWidgetItem(QStringLiteral("0x0040113d")));
         }
-        m_rankWaitTable->setItem(targetRow, 1, new QTableWidgetItem(QStringLiteral("DEADLOCKED")));
+        // Highlight state, blocked MPI primitive, divergence category, and DWARF source location.
+        m_rankWaitTable->setItem(
+            targetRow, 1,
+            new QTableWidgetItem(info.isCollectiveMismatch ? QStringLiteral("COLL MISMATCH")
+                                                           : QStringLiteral("DEADLOCKED")));
         m_rankWaitTable->setItem(targetRow, 2, new QTableWidgetItem(info.blockedFunction));
+        m_rankWaitTable->setItem(
+            targetRow, 3,
+            new QTableWidgetItem(info.isCollectiveMismatch ? QStringLiteral("COLLECTIVE DIVERGENCE")
+                                                           : QStringLiteral("CYCLE WAIT")));
+        if (!info.file.isEmpty() && info.line > 0) {
+            m_rankWaitTable->setItem(
+                targetRow, 5,
+                new QTableWidgetItem(QStringLiteral("%1:%2")
+                                         .arg(QFileInfo(info.file).fileName())
+                                         .arg(info.line)));
+        }
     }
 }
 
@@ -347,6 +455,7 @@ void MpiDiagnosticsWidget::onDeadlockDetected(const gridlock::core::DeadlockInfo
  * @param rankId The resolved MPI rank index.
  */
 void MpiDiagnosticsWidget::onRankCleared(int rankId) {
+    // Remove matching rank alert item from m_deadlockList if present.
     for (int i = 0; i < m_deadlockList->count(); ++i) {
         QListWidgetItem* item = m_deadlockList->item(i);
         if (item->data(Qt::UserRole).toInt() == rankId) {
@@ -354,6 +463,7 @@ void MpiDiagnosticsWidget::onRankCleared(int rankId) {
             break;
         }
     }
+    // Restore green NO CYCLE badge once all rank deadlock/divergence alerts have cleared.
     if (m_deadlockList && m_deadlockList->count() == 0 && m_statusBadge) {
         m_statusBadge->setText(QStringLiteral("STATUS: NO CYCLE"));
         m_statusBadge->setStyleSheet(QStringLiteral(

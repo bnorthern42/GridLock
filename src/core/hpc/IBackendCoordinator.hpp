@@ -150,6 +150,53 @@ class IBackendCoordinator : public QObject {
     Q_UNUSED(frameLevel);
   }
 
+  /**
+   * @enum WatchpointAccessMode
+   * @brief Hardware debug register access trigger mode for data watchpoints.
+   */
+  enum class WatchpointAccessMode {
+    Write = 0,     ///< Break on memory write (`-break-watch <expr>` / DAP `"write"`).
+    Read = 1,      ///< Break on memory read (`-break-watch -r <expr>` / DAP `"read"`).
+    ReadWrite = 2  ///< Break on memory read or write (`-break-watch -a <expr>` / DAP `"readWrite"`).
+  };
+
+  /**
+   * @brief Dispatches a sanitized CLI or MI debugger command to @p rank (`< 0` broadcasts to all active ranks).
+   */
+  Q_INVOKABLE virtual void sendDebuggerCommand(int rank, const QString& command) {
+    Q_UNUSED(rank);
+    Q_UNUSED(command);
+  }
+
+  /**
+   * @brief Arms a hardware data watchpoint on @p expression across @p rankFilter (`-1` = all ranks).
+   */
+  virtual void setDataWatchpoint(const QString& expression,
+                                 WatchpointAccessMode mode,
+                                 int rankFilter = -1) {
+    Q_UNUSED(expression);
+    Q_UNUSED(mode);
+    Q_UNUSED(rankFilter);
+  }
+
+  /**
+   * @brief Qt meta-invokable overload forwarding integer @p mode (`0`=Write, `1`=Read, `2`=ReadWrite).
+   */
+  Q_INVOKABLE void setDataWatchpoint(const QString& expression,
+                                     int mode,
+                                     int rankFilter = -1) {
+    const WatchpointAccessMode parsedMode =
+        (mode == 1)   ? WatchpointAccessMode::Read
+        : (mode == 2) ? WatchpointAccessMode::ReadWrite
+                      : WatchpointAccessMode::Write;
+    setDataWatchpoint(expression, parsedMode, rankFilter);
+  }
+
+  /** @brief Deletes any active hardware data watchpoint matching @p expression across ranks. */
+  Q_INVOKABLE virtual void removeDataWatchpoint(const QString& expression) {
+    Q_UNUSED(expression);
+  }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -171,4 +218,16 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when OS/OpenMP thread descriptors are parsed for @p rank. */
   void threadsUpdated(int rank, const QVector<ThreadEntry>& threads);
+
+  /** @brief Emitted when an interactive console/REPL command on @p rank produces @p output. */
+  void debuggerConsoleOutput(int rank, const QString& output, bool isError);
+
+  /** @brief Emitted when a hardware data watchpoint triggers on @p rank (`oldValue` -> `newValue`). */
+  void watchpointHit(int rank,
+                     const QString& expression,
+                     const QString& oldValue,
+                     const QString& newValue);
 };
+
+/// Top-level convenience alias for hardware data watchpoint access modes.
+using WatchpointAccessMode = IBackendCoordinator::WatchpointAccessMode;

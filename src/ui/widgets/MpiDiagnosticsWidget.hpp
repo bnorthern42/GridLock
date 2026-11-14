@@ -81,6 +81,26 @@ public slots:
     MpiNetworkLogWidget* networkLogWidget() const { return m_networkLogWidget; }
 
     /**
+     * @brief Clears static placeholder rows and prepares per-rank live telemetry rows.
+     * @param rankCount Active number of MPI ranks in the newly launched or attached session.
+     */
+    void beginLiveSession(int rankCount);
+
+    /**
+     * @brief Updates a rank telemetry row with live OS PID, state, MPI primitive, and source location.
+     * @param rankId Zero-based MPI rank index.
+     * @param pid Live OS child PID (`<= 0` omits the `(PID ...)` suffix until spawned).
+     * @param stateText Execution state string (`"RUNNING"`, `"PAUSED"`, `"EXITED"`, etc.).
+     * @param primitive Active `MPI_*` primitive or function symbol in the rank's backtrace.
+     * @param target Peer rank, communicator, or collective wait target label.
+     * @param location Formatted `file:line (0xaddr)` or PC location string.
+     * @param totalRanks Optional total rank count used to resize the table on demand.
+     */
+    void updateLiveRankRow(int rankId, qint64 pid, const QString& stateText,
+                           const QString& primitive, const QString& target,
+                           const QString& location, int totalRanks = -1);
+
+    /**
      * @brief Dynamically updates or inserts a rank state row in the wait-state table.
      * @param rankId Zero-based MPI rank identifier.
      * @param stateText Execution state string (e.g. "PAUSED (BP)", "STEPPED", "RUNNING").

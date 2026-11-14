@@ -127,6 +127,21 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void selectStackFrame(int rank, int threadId, int frameLevel) override;
 
   /**
+   * @brief Scrubs @p command via `MiSanitizer` and dispatches CLI/MI input to @p rank (`< 0` = all ranks).
+   */
+  void sendDebuggerCommand(int rank, const QString& command) override;
+
+  /**
+   * @brief Arms a hardware data watchpoint (`-break-watch` / `-r` / `-a`) on @p expression across @p rankFilter.
+   */
+  void setDataWatchpoint(const QString& expression,
+                         WatchpointAccessMode mode,
+                         int rankFilter = -1) override;
+
+  /** @brief Deletes any active hardware data watchpoint matching @p expression via `-break-delete`. */
+  void removeDataWatchpoint(const QString& expression) override;
+
+  /**
    * @brief Returns a snapshot of `RankState` for @p rankId, or an `"offline"` state if out of range.
    */
   RankState getRankState(int rankId) const {
@@ -210,8 +225,11 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void evaluateHoverVariable(int rankId, const QString& varName, QPoint globalPos);
 
  private:
-  /** @brief Parses MI `202^done,stack=[...]` and `203^done,threads=[...]` result records for @p rankId. */
+  /** @brief Parses MI `202..206` stack, thread, console REPL, and watchpoint records for @p rankId. */
   bool handleMiStackOrThreadRecord(int rankId, const QString& line);
+
+  /** @brief Parses `*stopped,reason=".*watchpoint-trigger"` fields and emits `watchpointHit`. */
+  void handleWatchpointStopRecord(int rankId, const QString& line);
 
   /**
    * @struct PendingBreakpoint
@@ -242,9 +260,20 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QString lastEvalExpression;          ///< Expression string for pending token `101` evaluation.
   };
 
+  /**
+   * @struct PendingWatchpoint
+   * @brief Cached hardware data watchpoint specification synchronized across matching rank sessions.
+   */
+  struct PendingWatchpoint {
+    QString expression;                                      ///< Watched symbol or address expression.
+    WatchpointAccessMode mode = WatchpointAccessMode::Write; ///< Hardware watchpoint access trigger mode.
+    int rankFilter = -1;                                     ///< Target rank index (`-1` = all ranks).
+  };
+
   std::unique_ptr<QProcess> m_mpirunProcess;             ///< Master `mpirun`/`mpiexec` launcher process.
   std::vector<std::unique_ptr<RankProcess>> m_processes; ///< Per-rank GDB frontend slots.
   std::vector<PendingBreakpoint> m_pendingBreakpoints;   ///< Configured breakpoints synced across launches.
+  std::vector<PendingWatchpoint> m_pendingWatchpoints;   ///< Configured hardware watchpoints.
   QString m_fifoTempDir;                                 ///< Temporary directory owning per-rank MI FIFOs.
   QMap<int, QMap<QString, QString>> m_varNameMap;        ///< `rankId -> (varName -> gdbVarId)`.
   QMap<int, QMap<QString, QString>> m_varNameRevMap;     ///< `rankId -> (gdbVarId -> varName)`.
@@ -253,6 +282,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QVector<ThreadEntry>> m_rankThreads;         ///< Cached OS/OpenMP threads per MPI rank.
   QMap<int, int> m_activeThreadIds;                      ///< Active 1-based GDB thread ID per MPI rank.
   QMap<int, int> m_pendingFrameSelect;                   ///< Deferred frame level after cross-thread switch.
+  QMap<int, int> m_pendingConsoleCmdCount;               ///< Count of in-flight `204` CLI commands per rank.
+  QMap<int, QString> m_consoleReplyBuffer;               ///< Buffered `~`/`&` console lines per rank.
+  QMap<int, QMap<QString, int>> m_watchpointIds;         ///< `rankId -> (expression -> gdbBkptNum)`.
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
 };
