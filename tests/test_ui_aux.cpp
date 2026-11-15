@@ -19,9 +19,11 @@
 #include <QDirIterator>
 #include <QDockWidget>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileSystemModel>
 #include <QGraphicsView>
 #include <QGuiApplication>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -429,12 +431,9 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
  */
 void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
     // Instantiate primary MainWindow for rank telemetry sync tests.
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
+    gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture(); mainWindow.resize(1440, 900); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    auto* disassemblyView = mainWindow.disassemblyView();
-    auto* serverRackView = mainWindow.serverRackView();
+    auto* disassemblyView = mainWindow.disassemblyView(); auto* serverRackView = mainWindow.serverRackView();
     auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
     QVERIFY(disassemblyView && serverRackView && statusTelemetry);
 
@@ -852,6 +851,11 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     auto* fsModel = qobject_cast<QFileSystemModel*>(tree->model());
     QTRY_VERIFY_WITH_TIMEOUT(fsModel && QFileInfo(fsModel->filePath(tree->rootIndex())).canonicalFilePath() == QFileInfo(extDir.path()).canonicalFilePath() && visibleEntries().contains(QStringLiteral("MfemUtils")), 3000);
     QVERIFY2(targetCombo->currentText().contains(QStringLiteral("mfem_solver")), "SessionManager loadSession(.gridlock/workspace.toml) must restore workspace target");
+    // 10. Verify QFileDialog starts at active workspace, prunes nonexistent ghost sidebar URLs, and sizes columns >= 880px.
+    QFileDialog fd(&mw); fd.setOption(QFileDialog::DontUseNativeDialog, true); const QUrl ghostUrl = QUrl::fromLocalFile(QStringLiteral("/home/nonexistent_ghost_user_9999"));
+    fd.setSidebarUrls({ghostUrl}); fd.open(); QApplication::processEvents(); fd.hide();
+    auto* fdTree = fd.findChild<QTreeView*>(); const QString extCanon = QFileInfo(extDir.path()).canonicalFilePath();
+    QVERIFY2(QFileInfo(fd.directory().absolutePath()).canonicalFilePath() == extCanon && !fd.sidebarUrls().contains(ghostUrl) && fd.sidebarUrls().contains(QUrl::fromLocalFile(extCanon)) && fd.width() >= 880 && fdTree && fdTree->header() && fdTree->header()->sectionSize(0) >= 300, "QFileDialog must default to active workspace, prune ghost bookmarks, and prevent column clipping");
     gridlock::core::ConfigManager::instance().setWorkspace(savedRepoRoot);
 }
 

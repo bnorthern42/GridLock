@@ -465,13 +465,11 @@ void MainWindow::stopTargetWorkflow() {
     m_debugSessionActive = false; updateDebugToolbarState(); m_rankLoopCounter.clear();
     if (m_coordinator) m_coordinator->terminateSession();
 
-    // Mark any previously active rank rows as EXITED and clear execution PC highlights.
+    // Mark any previously active rank rows as IDLE/EXITED and clear execution PC highlights.
     for (auto& [rankId, st] : m_latestStates) {
-        st.currentState = QStringLiteral("exited");
+        st.currentState = QStringLiteral("idle"); st.registers[16] = QStringLiteral("—");
         if (m_serverRackView) m_serverRackView->updateRankState(rankId, st);
-        if (m_mpiDiagnosticsWidget) {
-            m_mpiDiagnosticsWidget->updateRankStateRow(rankId, QStringLiteral("EXITED"), QStringLiteral("main"), QStringLiteral("TERMINATED"), 0ULL);
-        }
+        if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateRankStateRow(rankId, QStringLiteral("EXITED"), QStringLiteral("main"), QStringLiteral("TERMINATED"), 0ULL);
     }
     if (m_disassemblyView) { m_disassemblyView->setDeadlockCycleRanks({}); m_disassemblyView->setActiveSteppingRank(-1, 0ULL); }
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
@@ -860,6 +858,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
             rebuildDynamicSourceLineMap();
         }
     }
+    if (!m_debugSessionActive && m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
     if (m_projectExplorerWidget) m_projectExplorerWidget->setSymbolsMode(false);
     syncDisassemblyDecompilerVisibility(true); return true;
 }

@@ -9,6 +9,7 @@
  */
 
 #include "PreferencesDialog.hpp"
+#include "../utils/FileDialogHelper.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/DocsetManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
@@ -681,18 +682,11 @@ DocsetSettingsPage::DocsetSettingsPage(QWidget* parent)
         if (startDir.isEmpty() || startDir == QStringLiteral("/") || !QDir(startDir).exists()) {
             startDir = QDir(zealDir).exists() ? zealDir : QDir::homePath();
         }
-        // Configure non-native directory chooser with quick-jump sidebar URLs.
+        // Configure non-native directory chooser with pruned quick-jump sidebar URLs and unclipped columns.
         QFileDialog dlg(this, tr("Select Docset Directory"), startDir);
         dlg.setFileMode(QFileDialog::Directory);
         dlg.setOption(QFileDialog::ShowDirsOnly, true);
-        dlg.setOption(QFileDialog::DontUseNativeDialog, true);
-        // Populate left sidebar with Home, Zeal Docsets, Documents, and workspace root.
-        dlg.setSidebarUrls({
-            QUrl::fromLocalFile(QDir::homePath()),
-            QUrl::fromLocalFile(zealDir),
-            QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)),
-            QUrl::fromLocalFile(QDir::currentPath())
-        });
+        FileDialogHelper::configureFileDialog(&dlg, startDir);
         // Persist selected directory path and immediately reload docset indices.
         if (dlg.exec() == QDialog::Accepted && !dlg.selectedFiles().isEmpty()) {
             const QString chosen = dlg.selectedFiles().first();

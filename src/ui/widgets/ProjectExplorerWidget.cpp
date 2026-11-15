@@ -26,6 +26,7 @@
 #include <QVBoxLayout>
 
 #include "../../core/managers/ThemeManager.hpp"
+#include "../utils/FileDialogHelper.hpp"
 #include "FileIconProvider.hpp"
 
 namespace gridlock::ui {
@@ -707,9 +708,7 @@ void ProjectExplorerWidget::reloadStyle() {
  * @brief Prompts user for a directory and opens it in the file tree view.
  */
 void ProjectExplorerWidget::onOpenFolder() {
-  const QString startDir = !m_rootPath.isEmpty() ? m_rootPath : QDir::currentPath();
-  const QString dir = QFileDialog::getExistingDirectory(
-      this, "Open Folder", startDir, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+  const QString dir = FileDialogHelper::getExistingDirectory(this, QStringLiteral("Open Folder"), m_rootPath);
   if (!dir.isEmpty()) setRootPath(dir);
 }
 

@@ -28,6 +28,7 @@
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
+#include "utils/FileDialogHelper.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
 
@@ -161,6 +162,9 @@ void MainWindow::setupToolbar() {
   if (auto *spinEdit = m_rankCountSpin->findChild<QLineEdit *>()) {
     spinEdit->setMinimumWidth(40);
   }
+  connect(m_rankCountSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
+    if (!m_debugSessionActive && !m_previewFixtureOnly && m_serverRackView) m_serverRackView->setSessionIdle(val);
+  });
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
 
@@ -314,6 +318,9 @@ void MainWindow::setupToolbar() {
   // Instantiate interactive address space navigation bar ribbon.
   m_addressNavBar = createAddressSpaceNavBar(this, navToolbar);
   m_addressNavBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  new DynamicAddressRibbonFilter(m_addressNavBar, [this](uint64_t addr) {
+    seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
+  });
   navToolbar->addWidget(m_addressNavBar);
 }
 

@@ -74,6 +74,7 @@
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
+#include "utils/FileDialogHelper.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
 
@@ -415,6 +416,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         const uint64_t entry = (mainAddr != 0ULL) ? mainAddr : m_elfInspector->entryPoint();
         if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
+    if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
     syncDisassemblyDecompilerVisibility(true); return true;
 }
 
@@ -537,6 +539,7 @@ void MainWindow::updateDebugToolbarState() {
     if (m_pauseAction) m_pauseAction->setEnabled(m_debugSessionActive);
     if (m_stopAction) m_stopAction->setEnabled(m_debugSessionActive);
     if (m_terminateAction) m_terminateAction->setEnabled(m_debugSessionActive);
+    if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
 }
 
 /**

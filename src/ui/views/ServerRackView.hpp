@@ -53,6 +53,12 @@ public:
     void resetRanks(int count);
 
     /**
+     * @brief Places all configured rank cards into pre-launch IDLE state with no instruction address.
+     * @param configuredRanks Number of configured MPI ranks (-np).
+     */
+    void setSessionIdle(int configuredRanks);
+
+    /**
      * @brief Batch updates the states of multiple ranks.
      * @param ranks List of RankState snapshots.
      */

@@ -32,6 +32,7 @@
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
+#include "utils/FileDialogHelper.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/MpiNetworkLogWidget.hpp"
@@ -237,6 +238,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   bindLiveMemViewHandlers();
   loadPreviewFixture();
   m_previewFixtureOnly = false;
+  if (m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
   // Listen for global theme mode change events from ThemeManager singleton.
   connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
           this, [this]() { propagateThemeToAllWidgets(); });
@@ -542,8 +544,7 @@ void MainWindow::setupMenu() {
   // Open Workspace Action: Atomically switches FILES tree, TARGET selector, LSP, and persisted watches/breakpoints.
   QAction *openProjAction = fileMenu->addAction("Open Workspace...");
   connect(openProjAction, &QAction::triggered, this, [this]() {
-    const QString startDir = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString dir = QFileDialog::getExistingDirectory(this, "Open Workspace", startDir);
+    const QString dir = FileDialogHelper::getExistingDirectory(this, QStringLiteral("Open Workspace"), m_activeWorkspaceDir);
     if (!dir.isEmpty()) switchWorkspaceDirectory(dir);
   });
 
@@ -834,13 +835,15 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
     else if (dp->propertyName() == QByteArrayLiteral("gridlock_editor_highlight_rev") && m_editorTabManager)
       m_editorTabManager->rehighlightAllTabs();
   }
-  // Connect PreferencesDialog::preferencesChanged on demand whenever Preferences opens.
-  if (event->type() == QEvent::Show) {
-    if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
-      connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
-      connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
-      if (m_editorTabManager) {
-        connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
+  // Connect PreferencesDialog::preferencesChanged and configure QFileDialogs on Show/Polish.
+  if (event->type() == QEvent::Show || event->type() == QEvent::Polish) {
+    if (auto *fd = qobject_cast<QFileDialog *>(watched))
+      FileDialogHelper::configureFileDialog(fd, !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : (m_projectExplorerWidget ? m_projectExplorerWidget->rootPath() : QString()));
+    if (event->type() == QEvent::Show) {
+      if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
+        connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
+        connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
+        if (m_editorTabManager) connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
       }
     }
   }

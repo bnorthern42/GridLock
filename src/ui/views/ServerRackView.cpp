@@ -49,8 +49,12 @@ public:
         bool isSelected = option.state & QStyle::State_Selected;
         bool isHovered = option.state & QStyle::State_MouseOver;
 
-        QString status = state.currentState.isEmpty() ? QStringLiteral("stopped") : state.currentState;
-        QString pcStr = state.registers.contains(16) ? state.registers.value(16) : QStringLiteral("0x00401120");
+        QString status = state.currentState.isEmpty() ? QStringLiteral("idle") : state.currentState.toLower();
+        const bool isIdleOrExited = (status == QStringLiteral("idle") || status == QStringLiteral("exited"));
+        QString pcStr = isIdleOrExited ? QStringLiteral("—")
+                                       : (state.registers.contains(16) && !state.registers.value(16).trimmed().isEmpty()
+                                              ? state.registers.value(16)
+                                              : QStringLiteral("0x00401120"));
 
         // Determine background and outline colors based on selection and hover state
         const auto& tm = gridlock::core::ThemeManager::instance();
@@ -115,7 +119,7 @@ public:
         QFont pcFont("JetBrains Mono", 8);
         pcFont.setStyleHint(QFont::Monospace);
         painter->setFont(pcFont);
-        painter->setPen(pal.isDark ? QColor("#4ec9b0") : QColor(pal.accentHex));
+        painter->setPen(isIdleOrExited ? QColor("#7f8c8d") : (pal.isDark ? QColor("#4ec9b0") : QColor(pal.accentHex)));
         painter->drawText(QRect(rect.left() + 6, rect.top() + 18, rect.width() - 12, 14),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           pcStr);
@@ -169,13 +173,17 @@ ServerRackView::ServerRackView(QWidget *parent) : QListWidget(parent) {
  * @brief Parses or extracts a program counter address from rank state telemetry.
  *
  * Inspects register index 16 (RIP on x86_64) or currentFunction string, converting
- * hex strings to uint64_t. Defaults to 0x00401120 for rank 0 or 0x00401155 for others.
+ * hex strings to uint64_t. Returns 0ULL when the rank is in IDLE or EXITED state.
  *
  * @param rankId Rank index.
  * @param state Rank state structure.
- * @return Extracted 64-bit instruction pointer address.
+ * @return Extracted 64-bit instruction pointer address, or 0ULL when idle.
  */
 uint64_t ServerRackView::extractPcFromState(int rankId, const RankState& state) {
+    if (state.currentState.compare(QStringLiteral("idle"), Qt::CaseInsensitive) == 0 ||
+        state.currentState.compare(QStringLiteral("exited"), Qt::CaseInsensitive) == 0) {
+        return 0ULL;
+    }
     // Helper to safely parse hexadecimal address strings
     auto tryParseHex = [](QString raw, uint64_t* outVal) -> bool {
         raw = raw.trimmed();
@@ -207,7 +215,7 @@ uint64_t ServerRackView::extractPcFromState(int rankId, const RankState& state) 
     if (!state.currentFunction.isEmpty() && tryParseHex(state.currentFunction, &parsed)) {
         return parsed;
     }
-    // Fall back to standard synthetic test offsets
+    // Fall back to standard synthetic test offsets only for active stopped/running states
     return (rankId == 0) ? 0x00401120ULL : 0x00401155ULL;
 }
 
@@ -230,6 +238,24 @@ void ServerRackView::resetRanks(int count) {
 }
 
 /**
+ * @brief Places all configured rank cards into pre-launch IDLE state with no instruction address.
+ * @param configuredRanks Number of configured MPI ranks (-np).
+ */
+void ServerRackView::setSessionIdle(int configuredRanks) {
+    const int n = std::max(1, configuredRanks);
+    QList<RankState> idleRanks;
+    idleRanks.reserve(n);
+    for (int i = 0; i < n; ++i) {
+        RankState st;
+        st.rankId = i;
+        st.currentState = QStringLiteral("idle");
+        st.registers[16] = QStringLiteral("—");
+        idleRanks.append(st);
+    }
+    updateRanks(idleRanks);
+}
+
+/**
  * @brief Batch updates all rank blade nodes in the rack view.
  * @param ranks List of incoming RankState snapshots.
  */
@@ -243,8 +269,12 @@ void ServerRackView::updateRanks(const QList<RankState>& ranks) {
         RankState st = ranks[i];
         const int rankId = (st.rankId >= 0 && st.rankId != 0) ? st.rankId : i;
         st.rankId = rankId;
-        // Ensure register 16 is populated with a valid formatted PC
-        if (!st.registers.contains(16) || st.registers.value(16).trimmed().isEmpty()) {
+        const bool isIdle = (st.currentState.compare(QStringLiteral("idle"), Qt::CaseInsensitive) == 0 ||
+                             st.currentState.compare(QStringLiteral("exited"), Qt::CaseInsensitive) == 0);
+        // Ensure register 16 holds "—" when idle/exited or a valid formatted PC when active
+        if (isIdle) {
+            st.registers[16] = QStringLiteral("—");
+        } else if (!st.registers.contains(16) || st.registers.value(16).trimmed().isEmpty()) {
             const uint64_t pc = extractPcFromState(rankId, st);
             st.registers[16] = QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0'));
         }
@@ -276,7 +306,11 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
     }
     RankState normalized = state;
     normalized.rankId = rank;
-    if (!normalized.registers.contains(16) || normalized.registers.value(16).trimmed().isEmpty()) {
+    const bool isIdle = (normalized.currentState.compare(QStringLiteral("idle"), Qt::CaseInsensitive) == 0 ||
+                         normalized.currentState.compare(QStringLiteral("exited"), Qt::CaseInsensitive) == 0);
+    if (isIdle) {
+        normalized.registers[16] = QStringLiteral("—");
+    } else if (!normalized.registers.contains(16) || normalized.registers.value(16).trimmed().isEmpty()) {
         const uint64_t pc = extractPcFromState(rank, normalized);
         normalized.registers[16] = QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0'));
     }
@@ -287,8 +321,8 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
         const int idx = count();
         RankState placeholder;
         placeholder.rankId = idx;
-        placeholder.currentState = QStringLiteral("stopped");
-        placeholder.registers[16] = (idx == 0) ? QStringLiteral("0x00401120") : QStringLiteral("0x00401155");
+        placeholder.currentState = QStringLiteral("idle");
+        placeholder.registers[16] = QStringLiteral("—");
         if (m_states.find(idx) == m_states.end()) {
             m_states[idx] = placeholder;
         }
@@ -308,7 +342,7 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
 /**
  * @brief Returns the 64-bit program counter address for a specified rank.
  * @param rankId Rank index.
- * @return 64-bit address or 0 if rank not tracked.
+ * @return 64-bit address or 0 if rank not tracked or idle.
  */
 uint64_t ServerRackView::rankPcAddress(int rankId) const {
     auto it = m_states.find(rankId);
@@ -320,12 +354,15 @@ uint64_t ServerRackView::rankPcAddress(int rankId) const {
 
 /**
  * @brief Constructs a mapping of all active ranks to their current program counters.
- * @return Map of rank ID to 64-bit PC address.
+ * @return Map of rank ID to 64-bit PC address (omitting idle ranks with 0ULL PC).
  */
 QMap<int, uint64_t> ServerRackView::rankPcAddresses() const {
     QMap<int, uint64_t> pcs;
     for (const auto& [rankId, st] : m_states) {
-        pcs.insert(rankId, extractPcFromState(rankId, st));
+        const uint64_t pc = extractPcFromState(rankId, st);
+        if (pc != 0ULL) {
+            pcs.insert(rankId, pc);
+        }
     }
     return pcs;
 }
