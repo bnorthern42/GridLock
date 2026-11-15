@@ -9,17 +9,21 @@
 #include "test_lsp.hpp"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
 #include "../src/core/hpc/LspCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/utils/ClangdLspClient.cpp"
+#include "../src/ui/views/SourceCodeView.hpp"
 
 using namespace gridlock::core;
 
@@ -500,6 +504,171 @@ void TestLspCoordinator::testLspHoverParsing() {
     qInstallMessageHandler(prevHandler);
     QVERIFY2(s_capturedWriteWarnings.isEmpty(),
              qPrintable(QStringLiteral("Unexpected QIODevice::write warnings: ") + s_capturedWriteWarnings.join(QStringLiteral(" | "))));
+
+    // 8. Verify ancestor `build_meson/compile_commands.json` discovery, workspace-isolated async
+    //    struct member completion (`double ds = params.` -> cx/cy/zCenterStart with `double` detail
+    //    and zero `toml::` leakage), and < 35ms non-blocking GUI-thread keystroke + Git diff latency.
+    //    Constructs an external C++ workspace layout mirroring `mfem_solver`:
+    //      - `<root>/build_meson/compile_commands.json`
+    //      - `<root>/include/Params.hpp` (`struct ElectrodeParams { double cx; double cy; double zCenterStart; };`)
+    //      - `<root>/ProblemSetup/ElectrodeGenerator.cpp` (`double ds = params.`)
+    QTemporaryDir extWsDir;
+    QVERIFY(extWsDir.isValid());
+    const QString projectRoot = extWsDir.path();
+    const QString buildMesonDir = projectRoot + QStringLiteral("/build_meson");
+    const QString includeDir = projectRoot + QStringLiteral("/include");
+    const QString problemSetupDir = projectRoot + QStringLiteral("/ProblemSetup");
+    QVERIFY(QDir().mkpath(buildMesonDir) && QDir().mkpath(includeDir) && QDir().mkpath(problemSetupDir));
+
+    // Write `<root>/include/Params.hpp` defining `ElectrodeParams` with `double` member fields.
+    const QString paramsHdrPath = includeDir + QStringLiteral("/Params.hpp");
+    const QString electrodeCppPath = problemSetupDir + QStringLiteral("/ElectrodeGenerator.cpp");
+    {
+        QFile hf(paramsHdrPath);
+        QVERIFY(hf.open(QIODevice::WriteOnly | QIODevice::Text));
+        hf.write("#pragma once\nstruct ElectrodeParams {\n    double cx;\n    double cy;\n    double zCenterStart;\n};\n");
+    }
+    // Write `<root>/ProblemSetup/ElectrodeGenerator.cpp` with an incomplete `params.` member access on line 3.
+    const QString electrodeCode = QStringLiteral(
+        "#include \"Params.hpp\"\n"
+        "void run(const ElectrodeParams& params) {\n"
+        "    double ds = params.\n"
+        "}\n");
+    {
+        QFile cf(electrodeCppPath);
+        QVERIFY(cf.open(QIODevice::WriteOnly | QIODevice::Text));
+        cf.write(electrodeCode.toUtf8());
+    }
+    // Write `<root>/build_meson/compile_commands.json` supplying `-I<root>/include` for `ElectrodeGenerator.cpp`.
+    {
+        QFile ccf(buildMesonDir + QStringLiteral("/compile_commands.json"));
+        QVERIFY(ccf.open(QIODevice::WriteOnly | QIODevice::Text));
+        const QJsonArray db{QJsonObject{
+            {QStringLiteral("directory"), projectRoot},
+            {QStringLiteral("command"),
+             QStringLiteral("clang++ -std=c++23 -I\"%1\" -c \"%2\"").arg(includeDir, electrodeCppPath)},
+            {QStringLiteral("file"), electrodeCppPath},
+        }};
+        ccf.write(QJsonDocument(db).toJson());
+    }
+
+    // Use C++20 requires-expression so Gate 1 Red Phase compiles before async completion APIs exist.
+    auto checkAsyncMemberCompletionAndLatency = [&]<typename ViewT = gridlock::ui::SourceCodeView>(auto& client) -> bool {
+        using ClientT = std::decay_t<decltype(client)>;
+        if constexpr (requires {
+                          client.setWorkspaceRoot(projectRoot);
+                          client.requestDocumentCompletionAsync(electrodeCppPath, electrodeCode, 2, 23, QStringLiteral("."));
+                          &ClientT::completionReady;
+                      }) {
+            // 1. Prime ClangdLspClient on GridLock's own repository root first (which indexes tomlplusplus),
+            //    then switch workspace root to `projectRoot` and verify `build_meson` ancestor discovery.
+            const QString repoRoot = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath() + QStringLiteral("/..")).canonicalPath();
+            client.setWorkspaceRoot(repoRoot);
+            // Confirm `discoverCompileCommandsDir` walks up from `ProblemSetup/ElectrodeGenerator.cpp` to `build_meson`.
+            const QString discoveredMeson = ClientT::discoverCompileCommandsDir(electrodeCppPath);
+            if (QFileInfo(discoveredMeson).canonicalFilePath() != QFileInfo(buildMesonDir).canonicalFilePath()) {
+                return false;
+            }
+            // Switch workspace root to `projectRoot` so clangd restarts cleanly without GridLock's `toml::` index.
+            client.setWorkspaceRoot(projectRoot);
+
+            // 2. Request async real-document completion right after `double ds = params.` (0-based line 2, col 23).
+            //    Verifies `requestDocumentCompletionAsync` operates on the real document URI without splicing
+            //    `auto __gl_cond = (...);` and emits `completionReady` with accurate `double` field types.
+            QVector<ClangdLspClient::LspCompletionItem> capturedItems;
+            quint64 capturedSeq = 0;
+            QObject::connect(&client, &ClientT::completionReady, &client,
+                             [&](quint64 seq, const QString&, const QVector<ClangdLspClient::LspCompletionItem>& items) {
+                                 capturedSeq = seq;
+                                 capturedItems = items;
+                             });
+            QSignalSpy compSpy(&client, &ClientT::completionReady);
+            const quint64 reqSeq = client.requestDocumentCompletionAsync(
+                electrodeCppPath, electrodeCode, 2, 23, QStringLiteral("."));
+            if (reqSeq == 0 || !compSpy.wait(4000) || capturedSeq != reqSeq) {
+                return false;
+            }
+            // Validate that `cx`, `cy`, and `zCenterStart` report `double` detailType (not fabricated `int`)
+            // and that zero `toml::` symbols from GridLock's own subprojects leak into the completion list.
+            bool hasCx = false, hasCy = false, hasZCenter = false, hasTomlLeak = false;
+            for (const auto& item : capturedItems) {
+                if (item.label.contains(QStringLiteral("toml"), Qt::CaseInsensitive) ||
+                    item.insertText.contains(QStringLiteral("toml"), Qt::CaseInsensitive)) {
+                    hasTomlLeak = true;
+                }
+                if (item.label == QStringLiteral("cx") && item.detailType.contains(QStringLiteral("double")) &&
+                    item.detailType != QStringLiteral("int")) {
+                    hasCx = true;
+                }
+                if (item.label == QStringLiteral("cy") && item.detailType.contains(QStringLiteral("double")) &&
+                    item.detailType != QStringLiteral("int")) {
+                    hasCy = true;
+                }
+                if (item.label == QStringLiteral("zCenterStart") && item.detailType.contains(QStringLiteral("double")) &&
+                    item.detailType != QStringLiteral("int")) {
+                    hasZCenter = true;
+                }
+            }
+            if (!hasCx || !hasCy || !hasZCenter || hasTomlLeak) {
+                return false;
+            }
+
+            // 3. Initialize a Git repo with a 2,000-line C++ file and verify GUI-thread keystroke + Git diff < 35ms.
+            //    Ensures neither `SourceCodeView::keyPressEvent` nor `refreshGitDiffGutter()` blocks the GUI thread.
+            //    Previously, typing `.` blocked on `readResponseForId(450)` and `refreshGitDiffGutter()` spawned
+            //    synchronous `git rev-parse`, `git show`, and `git diff` subprocesses on the Qt GUI thread.
+            auto runGitSetup = [&](const QStringList& args) {
+                QProcess p;
+                p.setWorkingDirectory(projectRoot);
+                p.start(QStringLiteral("git"), args);
+                p.waitForFinished(3000);
+            };
+            // Initialize the temporary repository and configure commit identity for deterministic `git diff HEAD`.
+            runGitSetup({QStringLiteral("init")});
+            runGitSetup({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("test@gridlock.dev")});
+            runGitSetup({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock Test")});
+            // Populate a 2,000-line translation unit and commit it to HEAD so `git diff` / `git show` are active.
+            // This 2,000-line buffer also ensures structural regex completion does not stall the GUI thread.
+            QString largeCode = QStringLiteral("#include \"Params.hpp\"\nvoid largeFn(const ElectrodeParams& params) {\n");
+            for (int i = 0; i < 2000; ++i) {
+                largeCode += QStringLiteral("    double v_%1 = params.cx + %1.0;\n").arg(i);
+            }
+            largeCode += QStringLiteral("    double ds = params\n}\n");
+            {
+                QFile lf(electrodeCppPath);
+                if (!lf.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+                lf.write(largeCode.toUtf8());
+            }
+            // Stage and commit the 2,000-line file so subsequent in-memory buffer edits diff against HEAD.
+            runGitSetup({QStringLiteral("add"), QStringLiteral(".")});
+            runGitSetup({QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("init")});
+
+            // Open the 2,000-line file in SourceCodeView and position the cursor at the end of `double ds = params`.
+            // Move the cursor to the penultimate block's end column right before typing the `.` member operator.
+            ViewT editor;
+            editor.setPlainText(largeCode);
+            editor.setCurrentFile(electrodeCppPath);
+            QTextCursor cur = editor.textCursor();
+            cur.movePosition(QTextCursor::End);
+            cur.movePosition(QTextCursor::PreviousBlock);
+            cur.movePosition(QTextCursor::EndOfBlock);
+            editor.setTextCursor(cur);
+
+            // Measure synchronous GUI-thread elapsed time for typing `.` and invoking `refreshGitDiffGutter()`.
+            // Both operations must dispatch asynchronously and return to the GUI event loop in under 35ms.
+            QElapsedTimer guiTimer;
+            guiTimer.start();
+            QKeyEvent dotKey(QEvent::KeyPress, Qt::Key_Period, Qt::NoModifier, QStringLiteral("."));
+            QCoreApplication::sendEvent(&editor, &dotKey);
+            editor.refreshGitDiffGutter();
+            const qint64 elapsedMs = guiTimer.elapsed();
+            return elapsedMs < 35;
+        } else {
+            return false;
+        }
+    };
+    QVERIFY2(checkAsyncMemberCompletionAndLatency(ClangdLspClient::instance()),
+             "ClangdLspClient + SourceCodeView must discover build_meson, isolate workspace completions without toml/int leaks, and run keystrokes + Git diff in < 35ms on the GUI thread");
 }
 
 QTEST_MAIN(TestLspCoordinator)

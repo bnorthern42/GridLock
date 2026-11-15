@@ -53,11 +53,15 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this); m_hoverTimer->setSingleShot(true);
     connect(m_hoverTimer, &QTimer::timeout, this, &SourceCodeView::handleHoverTimeout);
-    // Debounce live C/C++ text edits (250ms) into clangd `didOpen`/`didChange` and bind `publishDiagnostics`.
+    // Debounce live C/C++ text edits (250ms) into clangd `didOpen`/`didChange` and bind `publishDiagnostics` & `completionReady`.
     m_lspSyncTimer = new QTimer(this); m_lspSyncTimer->setSingleShot(true);
     connect(m_lspSyncTimer, &QTimer::timeout, this, &SourceCodeView::syncLspDocument);
     m_gitDiffTimer = new QTimer(this); m_gitDiffTimer->setSingleShot(true);
     connect(m_gitDiffTimer, &QTimer::timeout, this, &SourceCodeView::refreshGitDiffGutter);
+    m_completionTimer = new QTimer(this); m_completionTimer->setSingleShot(true);
+    connect(m_completionTimer, &QTimer::timeout, this, [this]() {
+        const QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
+    });
     connect(document(), &QTextDocument::contentsChanged, this, [this]() {
         if (!m_currentFilePath.isEmpty()) { m_lspSyncTimer->start(250); m_gitDiffTimer->start(350); }
     });
@@ -68,15 +72,22 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
                 const QString msgCanon = QFileInfo::exists(filePath) ? QFileInfo(filePath).canonicalFilePath() : QFileInfo(filePath).absoluteFilePath();
                 if (!curCanon.isEmpty() && curCanon == msgCanon) setDiagnostics(diags);
             });
+    connect(&core::ClangdLspClient::instance(), &core::ClangdLspClient::completionReady,
+            this, [this](quint64 seq, const QString& filePath, const QVector<core::ClangdLspClient::LspCompletionItem>& items) {
+                if (seq != m_latestCompletionSeq || m_currentFilePath.isEmpty() || items.isEmpty()) return;
+                const QString curCanon = QFileInfo::exists(m_currentFilePath) ? QFileInfo(m_currentFilePath).canonicalFilePath() : QFileInfo(m_currentFilePath).absoluteFilePath();
+                const QString msgCanon = QFileInfo::exists(filePath) ? QFileInfo(filePath).canonicalFilePath() : QFileInfo(filePath).absoluteFilePath();
+                if (curCanon != msgCanon) return;
+                ensureCompletionPopup(); m_completionPopup->setItems(items);
+                m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320); m_completionPopup->show();
+            });
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
     connect(document(), &QTextDocument::modificationChanged, this, &SourceCodeView::modificationStateChanged);
 }
-
 /** @brief Sets the active file path, restores cached diagnostics, syncs clangd, and refreshes Git gutter. */
 void SourceCodeView::setCurrentFile(const QString& filePath) {
     m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
-                            ? QFileInfo(filePath).canonicalFilePath()
-                            : filePath;
+                            ? QFileInfo(filePath).canonicalFilePath() : filePath;
     if (m_highlighter) m_highlighter->setFilePath(m_currentFilePath);
     if (!m_currentFilePath.isEmpty()) {
         setDiagnostics(core::ClangdLspClient::instance().cachedDiagnosticsForFile(m_currentFilePath));
@@ -84,7 +95,6 @@ void SourceCodeView::setCurrentFile(const QString& filePath) {
     }
     refreshGitDiffGutter();
 }
-
 /** @brief Pushes the current editor buffer to ClangdLspClient (`textDocument/didOpen` or `didChange`). */
 void SourceCodeView::syncLspDocument() {
     if (!m_currentFilePath.isEmpty()) core::ClangdLspClient::instance().syncDocument(m_currentFilePath, toPlainText());
@@ -167,34 +177,17 @@ void SourceCodeView::setLanguageMode(LanguageMode mode) {
 }
 
 /** @brief Returns the active highlighting language mode. */
-SourceCodeView::LanguageMode SourceCodeView::languageMode() const {
-    return m_highlighter ? m_highlighter->languageMode() : LanguageMode::PlainText;
-}
-
+SourceCodeView::LanguageMode SourceCodeView::languageMode() const { return m_highlighter ? m_highlighter->languageMode() : LanguageMode::PlainText; }
 /** @brief Enables or disables nested Rainbow Brackets depth coloring. */
-void SourceCodeView::setRainbowBracketsEnabled(bool enabled) {
-    if (m_highlighter) m_highlighter->setRainbowBracketsEnabled(enabled);
-}
-
+void SourceCodeView::setRainbowBracketsEnabled(bool enabled) { if (m_highlighter) m_highlighter->setRainbowBracketsEnabled(enabled); }
 /** @brief Returns whether Rainbow Brackets depth coloring is enabled. */
-bool SourceCodeView::rainbowBracketsEnabled() const {
-    return m_highlighter ? m_highlighter->rainbowBracketsEnabled() : false;
-}
-
+bool SourceCodeView::rainbowBracketsEnabled() const { return m_highlighter ? m_highlighter->rainbowBracketsEnabled() : false; }
 /** @brief Enables or disables TOML/YAML/Markdown/CSV syntax highlighting. */
-void SourceCodeView::setDataDocHighlightingEnabled(bool enabled) {
-    if (m_highlighter) m_highlighter->setDataDocHighlightingEnabled(enabled);
-}
-
+void SourceCodeView::setDataDocHighlightingEnabled(bool enabled) { if (m_highlighter) m_highlighter->setDataDocHighlightingEnabled(enabled); }
 /** @brief Returns whether TOML/YAML/Markdown/CSV syntax highlighting is enabled. */
-bool SourceCodeView::dataDocHighlightingEnabled() const {
-    return m_highlighter ? m_highlighter->dataDocHighlightingEnabled() : false;
-}
-
+bool SourceCodeView::dataDocHighlightingEnabled() const { return m_highlighter ? m_highlighter->dataDocHighlightingEnabled() : false; }
 /** @brief Rebuilds syntax palettes from active config/theme and rehighlights the document. */
-void SourceCodeView::rehighlightDocument() {
-    if (m_highlighter) m_highlighter->reloadPalette();
-}
+void SourceCodeView::rehighlightDocument() { if (m_highlighter) m_highlighter->reloadPalette(); }
 
 /**
  * @brief Toggles single-line '//' comments on the active line in the document.
@@ -728,33 +721,54 @@ void SourceCodeView::paintEvent(QPaintEvent *event) { QPlainTextEdit::paintEvent
 
 /**
  * @brief Returns member and variable completion strings for linePrefix at lineOneBased.
+ * @param lineOneBased 1-based line number of the completion request.
+ * @param linePrefix Text preceding the cursor on the target line.
  */
 QStringList SourceCodeView::editorCompletionsAtLine(int lineOneBased, const QString& linePrefix) const {
-    const auto items = core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
+    const auto items = core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix, 0);
     QStringList labels; labels.reserve(items.size());
     for (const auto& it : items) labels.append(it.label);
     return labels;
 }
 
 /**
- * @brief Triggers the floating LSP IntelliSense popup below cursorRect() at lineOneBased.
+ * @brief Lazily constructs the floating LspCompletionPopup and wires item selection replacement.
+ */
+void SourceCodeView::ensureCompletionPopup() {
+    if (m_completionPopup) return;
+    m_completionPopup = new LspCompletionPopup(this);
+    // Replace any partially typed identifier suffix after '.', '->', or '::' when a completion is chosen.
+    connect(m_completionPopup, &LspCompletionPopup::itemChosen, this, [this](const QString& insertText) {
+        QTextCursor cur = textCursor(); const QString line = cur.block().text().left(cur.positionInBlock());
+        const int sepPos = qMax(line.lastIndexOf(QLatin1Char('.')), qMax(line.lastIndexOf(QStringLiteral("->")) + 1, line.lastIndexOf(QStringLiteral("::")) + 1));
+        if (sepPos >= 0 && line.length() > sepPos + 1) cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, line.length() - (sepPos + 1));
+        cur.insertText(insertText); setTextCursor(cur);
+    });
+}
+
+/**
+ * @brief Triggers non-blocking floating LSP IntelliSense below cursorRect() at lineOneBased.
+ * @param linePrefix Text prefix up to the cursor column.
+ * @param lineOneBased 1-based line number in the document.
  */
 void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, int lineOneBased) {
-    const auto items = core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix);
-    if (items.isEmpty()) { if (m_completionPopup) m_completionPopup->hide(); return; }
-    if (!m_completionPopup) {
-        m_completionPopup = new LspCompletionPopup(this);
-        connect(m_completionPopup, &LspCompletionPopup::itemChosen, this, [this](const QString& insertText) {
-            QTextCursor cur = textCursor();
-            const QString line = cur.block().text().left(cur.positionInBlock());
-            const int sepPos = qMax(line.lastIndexOf(QLatin1Char('.')), qMax(line.lastIndexOf(QStringLiteral("->")) + 1, line.lastIndexOf(QStringLiteral("::")) + 1));
-            if (sepPos >= 0 && line.length() > sepPos + 1) cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, line.length() - (sepPos + 1));
-            cur.insertText(insertText); setTextCursor(cur);
-        });
+    // Use fast 0ms structural completion only on compact buffers (<= 500 blocks) to avoid GUI stalls.
+    const auto items = (document()->blockCount() <= 500)
+                           ? core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix, 0)
+                           : QVector<core::ClangdLspClient::LspCompletionItem>{};
+    if (!items.isEmpty()) {
+        ensureCompletionPopup(); m_completionPopup->setItems(items);
+        m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320); m_completionPopup->show();
+    } else if (m_currentFilePath.isEmpty() && m_completionPopup) {
+        m_completionPopup->hide();
     }
-    m_completionPopup->setItems(items);
-    m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320);
-    m_completionPopup->show();
+    // Dispatch non-blocking real-document clangd completion when backed by a workspace file path.
+    if (!m_currentFilePath.isEmpty()) {
+        const QTextCursor cur = textCursor();
+        const int zeroCol = (cur.blockNumber() + 1 == lineOneBased) ? cur.positionInBlock() : linePrefix.length();
+        m_latestCompletionSeq = core::ClangdLspClient::instance().requestDocumentCompletionAsync(
+            m_currentFilePath, toPlainText(), qMax(0, lineOneBased - 1), qMax(0, zeroCol), linePrefix.right(1));
+    }
 }
 
 /**
@@ -763,11 +777,9 @@ void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, i
 bool SourceCodeView::saveToFile(const QString& filePath) {
     const QString target = filePath.isEmpty() ? m_currentFilePath : filePath;
     if (target.isEmpty()) return false;
-    QFile file(target);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    QFile file(target); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream(&file) << toPlainText(); file.close(); document()->setModified(false);
-    refreshGitDiffGutter();
-    return true;
+    refreshGitDiffGutter(); return true;
 }
 
 /**
@@ -795,9 +807,6 @@ QString SourceCodeView::currentScopeBreadcrumb() const {
 
 /**
  * @brief Jumps the editor cursor to the declaration/definition of the symbol under the cursor (F12).
- *
- * Queries `ClangdLspClient::findDefinition` with workspace context when `m_currentFilePath` is set,
- * emitting `definitionJumpRequested` when the resolved declaration resides in another file.
  */
 bool SourceCodeView::triggerGoToDefinition() {
     const QTextCursor cur = textCursor();
@@ -811,15 +820,13 @@ bool SourceCodeView::triggerGoToDefinition() {
         const QString dstCanon = QFileInfo(loc.filePath).canonicalFilePath();
         if (!dstCanon.isEmpty() && dstCanon != curCanon) { emit definitionJumpRequested(dstCanon, loc.line, loc.column); return true; }
     }
-    QTextBlock b = document()->findBlockByNumber(loc.line - 1);
-    if (!b.isValid()) return false;
+    QTextBlock b = document()->findBlockByNumber(loc.line - 1); if (!b.isValid()) return false;
     QTextCursor dest(b); dest.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, qMax(0, loc.column));
     setTextCursor(dest); ensureCursorVisible(); return true;
 }
 
 /**
  * @brief Parses unified Git diff (`git diff -U0`) hunk headers into 1-based line change states.
- * @param unifiedDiff Unified diff output string containing `@@ -old +new @@` hunk headers.
  */
 QHash<int, SourceCodeView::GitLineState> SourceCodeView::parseUnifiedGitDiff(const QString& unifiedDiff) {
     QHash<int, GitLineState> states;
@@ -847,19 +854,30 @@ QHash<int, SourceCodeView::GitLineState> SourceCodeView::parseUnifiedGitDiff(con
 
 /**
  * @brief Sets the active per-line Git diff gutter states and schedules a gutter repaint.
- * @param states Map of 1-based line numbers to GitLineState values.
  */
 void SourceCodeView::setGitLineStates(const QHash<int, GitLineState>& states) {
     m_gitLineStates = states;
     if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
-/** @brief Refreshes live Git working-tree and unsaved-buffer diff gutter states against HEAD. */
+/**
+ * @brief Asynchronously refreshes live Git working-tree and unsaved-buffer diff gutter states on QThreadPool.
+ */
 void SourceCodeView::refreshGitDiffGutter() {
     if (m_gitDiffTimer) m_gitDiffTimer->stop();
-    const bool dirty = document() && document()->isModified();
-    const QString diff = computeUnifiedGitDiffForBuffer(m_currentFilePath, toPlainText(), dirty);
-    setGitLineStates(diff.isEmpty() ? QHash<int, GitLineState>{} : parseUnifiedGitDiff(diff));
+    const quint64 seq = ++m_gitDiffSeq; const QString filePath = m_currentFilePath;
+    if (filePath.isEmpty()) { setGitLineStates({}); return; }
+    const QString bufferText = toPlainText(); const bool dirty = document() && document()->isModified();
+    QPointer<SourceCodeView> self(this);
+    // Run external git subprocesses on QThreadPool and marshal parsed line states back via QueuedConnection.
+    QThreadPool::globalInstance()->start([self, seq, filePath, bufferText, dirty]() {
+        const QString diff = computeUnifiedGitDiffForBuffer(filePath, bufferText, dirty);
+        const auto states = diff.isEmpty() ? QHash<int, GitLineState>{} : parseUnifiedGitDiff(diff);
+        if (!self) return;
+        QMetaObject::invokeMethod(self, [self, seq, states]() {
+            if (self && self->m_gitDiffSeq.load() == seq) self->setGitLineStates(states);
+        }, Qt::QueuedConnection);
+    });
 }
 
 /**
@@ -874,12 +892,11 @@ bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
     }
     const QString updated = core::ClangdLspClient::instance().renameSymbolInSource(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock(), newName);
     if (updated == toPlainText()) return false;
-    setPlainText(updated); document()->setModified(true);
-    return true;
+    setPlainText(updated); document()->setModified(true); return true;
 }
 
 /**
- * @brief Handles key press events for live LSP autocomplete navigation, F12 Go-to-Definition, and invocation.
+ * @brief Handles key press events for non-blocking LSP autocomplete navigation, F12 Go-to-Definition, and invocation.
  */
 void SourceCodeView::keyPressEvent(QKeyEvent *event) {
     if (!event) return;
@@ -894,11 +911,12 @@ void SourceCodeView::keyPressEvent(QKeyEvent *event) {
         QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
         event->accept(); return;
     }
-    QPlainTextEdit::keyPressEvent(event);
-    const QString txt = event->text();
-    if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":") ||
-        (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() && (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_')))) {
+    QPlainTextEdit::keyPressEvent(event); const QString txt = event->text();
+    // Trigger immediate async completion on member access punctuation and debounce identifier filtering (75ms).
+    if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":")) {
         QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
+    } else if (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() && (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_'))) {
+        if (m_completionTimer) m_completionTimer->start(75);
     }
 }
 

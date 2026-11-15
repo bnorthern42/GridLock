@@ -149,12 +149,15 @@ test('coordinator_tests', gridlock_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 lsp_test_src = [
   'tests/test_lsp.cpp',
   'src/core/hpc/LspCoordinator.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/ui/views/SourceCodeView.cpp',
+  'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp'
 ]
 
 lsp_test_moc_headers = [
   'tests/test_lsp.hpp',
-  'src/core/hpc/LspCoordinator.hpp', 'src/core/utils/ClangdLspClient.hpp'
+  'src/core/hpc/LspCoordinator.hpp', 'src/core/utils/ClangdLspClient.hpp',
+  'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp'
 ]
 
 processed_lsp_test_files = qt6.compile_moc(

@@ -81,12 +81,35 @@ public:
         QString kindLabel;  ///< Kind category ("Field", "Method", "Variable", "Struct", "Keyword").
         QString detailType; ///< C++ type signature (e.g., "int", "double[5]", "float", "size_t").
     };
+    using CompletionEntry = LspCompletionItem;
+
+    /**
+     * @brief Sets the active workspace root directory and restarts `clangd` to isolate compilation DB state.
+     * @param rootDir Canonical or absolute path to the active workspace root directory.
+     */
+    void setWorkspaceRoot(const QString& rootDir);
+
+    /**
+     * @brief Dispatches a non-blocking `textDocument/completion` request on the real synced source document.
+     * @param filePath Local file path of the opened translation unit or header.
+     * @param sourceText Full current text of the editor buffer.
+     * @param zeroBasedLine 0-based cursor line number.
+     * @param zeroBasedCol 0-based cursor character offset.
+     * @param triggerChar Optional trigger character (".", ">", ":") or empty for manual invocation.
+     * @return Monotonic sequence number (> 0) matched against `completionReady`, or 0 on failure.
+     */
+    quint64 requestDocumentCompletionAsync(const QString& filePath,
+                                           const QString& sourceText,
+                                           int zeroBasedLine,
+                                           int zeroBasedCol,
+                                           const QString& triggerChar = QString());
 
     /**
      * @brief Auto-discovers the directory containing `compile_commands.json` for a workspace or source file.
      *
      * Walks upward from `startPath` inspecting `<dir>/compile_commands.json`,
-     * `<dir>/builddir/compile_commands.json`, and `<dir>/build/compile_commands.json`.
+     * `<dir>/builddir/compile_commands.json`, `<dir>/build/compile_commands.json`,
+     * `<dir>/build_meson/compile_commands.json`, and `<dir>/build_cmake/compile_commands.json`.
      *
      * @param startPath File path or workspace root directory to begin searching from.
      * @return Canonical directory path containing `compile_commands.json`, or empty string if none exists.
@@ -262,7 +285,22 @@ signals:
     void diagnosticsPublished(const QString& filePath,
                               const QVector<gridlock::core::LspDiagnostic>& diagnostics);
 
+    /**
+     * @brief Emitted asynchronously when a `requestDocumentCompletionAsync` response arrives from `clangd`.
+     * @param requestSeq Monotonic request sequence identifier returned by `requestDocumentCompletionAsync`.
+     * @param filePath Canonical local file path of the completed translation unit.
+     * @param items Structured completion candidates with accurate C++ member/return types.
+     */
+    void completionReady(quint64 requestSeq,
+                         const QString& filePath,
+                         const QVector<gridlock::core::ClangdLspClient::LspCompletionItem>& items);
+
 private:
+    struct PendingCompletion {
+        quint64 seq = 0;  ///< Monotonic completion sequence number.
+        QString filePath; ///< Canonical local file path for the request.
+    };
+
     /**
      * @brief Ensures the background clangd QProcess is started and LSP-initialized for `rootDir`.
      */
@@ -293,9 +331,13 @@ private:
     bool m_initialized = false;                           ///< True after initialize/initialized handshake completes.
     int m_nextRequestId = 1;                              ///< Monotonically increasing JSON-RPC request identifier.
     int m_documentVersion = 1;                            ///< Monotonically increasing virtual document version counter.
+    quint64 m_activeCompletionSeq = 0;                    ///< Monotonically increasing async completion sequence ID.
+    int m_pendingCompletionRequestId = -1;                ///< JSON-RPC `id` of in-flight completion request (or -1).
     QString m_activeDocumentUri;                          ///< URI of the temporary virtual completion document.
+    QString m_configuredWorkspaceRoot;                    ///< Explicitly configured workspace root directory.
     QString m_activeRootDir;                              ///< Active workspace root passed to `initialize`.
     QString m_activeCompileCommandsDir;                   ///< Active `--compile-commands-dir` directory (empty if none).
+    QMap<int, PendingCompletion> m_pendingCompletions;    ///< In-flight async completion requests keyed by JSON-RPC `id`.
     QMap<int, QJsonObject> m_completedResponses;          ///< Completed JSON-RPC responses indexed by integer `id`.
     QMap<QString, int> m_openDocumentVersions;            ///< Tracks open document URI -> latest LSP version number.
     QMap<QString, QString> m_openDocumentTexts;           ///< Tracks canonical local file path -> latest synced buffer text.

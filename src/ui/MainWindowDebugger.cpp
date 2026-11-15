@@ -804,7 +804,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
         m_currentFile.clear();
     }
     m_activeWorkspaceDir = resolvedDir;
-
+    gridlock::core::ClangdLspClient::instance().setWorkspaceRoot(resolvedDir);
     // 1. Re-root ProjectExplorerWidget to resolvedDir and ensure FILES mode is active.
     if (m_projectExplorerWidget) {
         if (m_projectExplorerWidget->rootPath() != resolvedDir ||

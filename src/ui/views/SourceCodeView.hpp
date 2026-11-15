@@ -20,7 +20,10 @@
 #include <QFileInfo>
 #include <QMouseEvent>
 #include <QProcess>
+#include <QPointer>
 #include <QTemporaryFile>
+#include <QThreadPool>
+#include <atomic>
 #include "../../core/utils/ClangdLspClient.hpp"
 #include "EditorSyntaxHighlighter.hpp"
 
@@ -490,6 +493,7 @@ private slots:
     void syncLspDocument();
 
 private:
+    void ensureCompletionPopup();
     LineNumberArea* m_lineNumberArea = nullptr;
     EditorSyntaxHighlighter* m_highlighter = nullptr;
     LspCompletionPopup* m_completionPopup = nullptr;
@@ -502,6 +506,9 @@ private:
     QTimer* m_hoverTimer = nullptr;
     QTimer* m_lspSyncTimer = nullptr;
     QTimer* m_gitDiffTimer = nullptr;
+    QTimer* m_completionTimer = nullptr;
+    quint64 m_latestCompletionSeq = 0;
+    std::atomic<quint64> m_gitDiffSeq{0};
     QPoint m_lastMousePos;
     QPoint m_lastGlobalMousePos;
     int m_executionLine = -1;

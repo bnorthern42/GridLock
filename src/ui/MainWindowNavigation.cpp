@@ -543,11 +543,9 @@ void MainWindow::loadSourceFile(const QString& filePath) {
             if (!cachedDiags.isEmpty() && view->diagnostics().isEmpty()) {
                 view->setDiagnostics(cachedDiags);
             }
-            // Restart secondary LspCoordinator session on the newly opened file when running interactively.
-            if (m_lspCoordinator && QGuiApplication::platformName() != QStringLiteral("offscreen")) {
+            // Ensure legacy secondary LspCoordinator remains stopped so ClangdLspClient owns the sole clangd daemon.
+            if (m_lspCoordinator) {
                 m_lspCoordinator->stop();
-                m_lspCoordinator->start(absolutePath);
-                m_lspCoordinator->didOpen(m_currentFile, view->getPlainText());
             }
             if (networkLog()) {
                 networkLog()->appendText("Successfully loaded: " + m_currentFile + "\n");

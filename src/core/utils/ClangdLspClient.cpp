@@ -206,14 +206,21 @@ QByteArray ClangdLspClient::encodeLspMessage(const QJsonObject& payload) {
  * @return True when the `clangd` daemon is running and its `initialize` handshake has completed.
  */
 bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
-    const QString cleanRoot = rootDir.isEmpty() ? QDir::currentPath() : QFileInfo(rootDir).absoluteFilePath();
+    const QString rawRoot = rootDir.isEmpty() ? QDir::currentPath() : QFileInfo(rootDir).absoluteFilePath();
+    const QString cleanRoot = (!m_configuredWorkspaceRoot.isEmpty() &&
+                               (rawRoot == m_configuredWorkspaceRoot ||
+                                rawRoot.startsWith(m_configuredWorkspaceRoot + QLatin1Char('/'))))
+                                  ? m_configuredWorkspaceRoot
+                                  : rawRoot;
     const QString ccDir = discoverCompileCommandsDir(cleanRoot);
 
-    // Reuse active clangd daemon unless the discovered compilation database changed or vanished.
+    // Reuse active clangd daemon unless the compilation database or workspace root changed or vanished.
     if (m_process && m_process->state() == QProcess::Running && m_initialized) {
-        const bool ccChanged = (!ccDir.isEmpty() && ccDir != m_activeCompileCommandsDir);
+        const bool ccChanged = (ccDir != m_activeCompileCommandsDir);
+        const bool rootOutside = (!m_activeRootDir.isEmpty() && cleanRoot != m_activeRootDir &&
+                                  !cleanRoot.startsWith(m_activeRootDir + QLatin1Char('/')));
         const bool ccStale = (!m_activeCompileCommandsDir.isEmpty() && !QDir(m_activeCompileCommandsDir).exists());
-        if (!ccChanged && !ccStale) {
+        if (!ccChanged && !rootOutside && !ccStale) {
             return true;
         }
         stopServerProcess();
@@ -232,7 +239,7 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
     if (!m_process) {
         m_process = new QProcess();
         m_process->setProcessChannelMode(QProcess::SeparateChannels);
-        // Pump asynchronous `textDocument/publishDiagnostics` frames whenever stdout arrives.
+        // Pump asynchronous `textDocument/publishDiagnostics` and completion frames whenever stdout arrives.
         QObject::connect(m_process, &QProcess::readyReadStandardOutput, this, [this]() {
             drainIncomingMessages();
         });
@@ -249,10 +256,15 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         m_initialized = false;
         m_readBuffer.clear();
         m_activeDocumentUri.clear();
+        m_pendingCompletions.clear();
+        m_pendingCompletionRequestId = -1;
         m_completedResponses.clear();
         m_openDocumentVersions.clear();
-        // Configure `--compile-commands-dir` and `--background-index` when a compilation DB exists.
-        QStringList args{QStringLiteral("--log=error"), QStringLiteral("--header-insertion=never")};
+        // Configure `--compile-commands-dir`, `--completion-parse=always`, and `--background-index` when a compilation DB exists.
+        QStringList args{QStringLiteral("--log=error"),
+                         QStringLiteral("--header-insertion=never"),
+                         QStringLiteral("--completion-parse=always"),
+                         QStringLiteral("--completion-style=detailed")};
         if (!ccDir.isEmpty()) {
             args << (QStringLiteral("--compile-commands-dir=") + ccDir)
                  << QStringLiteral("--background-index");
@@ -309,8 +321,64 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
     return true;
 }
 
+namespace {
+
 /**
- * @brief Writes a framed JSON-RPC message to the clangd child process stdin.
+ * @brief Extracts structured completion items from a clangd `textDocument/completion` response without fake `int` types.
+ */
+void parseClangdCompletionResponse(const QJsonObject& compResp,
+                                   QVector<ClangdLspClient::LspCompletionItem>* intoItems) {
+    if (!intoItems) return;
+    const QJsonValue resultVal = compResp.value(QStringLiteral("result"));
+    const QJsonArray items = resultVal.isObject()
+                                 ? resultVal.toObject().value(QStringLiteral("items")).toArray()
+                                 : resultVal.toArray();
+    for (const QJsonValue& val : items) {
+        const QJsonObject item = val.toObject();
+        const int kind = item.value(QStringLiteral("kind")).toInt(0);
+        // Retain Method (2), Function (3), Field (5), Variable (6), Class (7), Property (10), and Struct (22).
+        if (kind != 2 && kind != 3 && kind != 5 && kind != 6 && kind != 7 && kind != 10 && kind != 22) continue;
+        QString text = item.value(QStringLiteral("insertText")).toString().trimmed();
+        if (text.isEmpty()) {
+            text = item.value(QStringLiteral("textEdit")).toObject().value(QStringLiteral("newText")).toString().trimmed();
+        }
+        if (text.isEmpty()) text = item.value(QStringLiteral("filterText")).toString().trimmed();
+        if (text.isEmpty()) text = item.value(QStringLiteral("label")).toString().trimmed();
+        while (!text.isEmpty() && (text.startsWith(QLatin1Char('.')) || text.startsWith(QLatin1Char(' ')) ||
+                                   text.at(0).unicode() == 0x2022)) {
+            text.remove(0, 1);
+        }
+        const int parenPos = text.indexOf(QLatin1Char('('));
+        if (parenPos > 0) text = text.left(parenPos) + QStringLiteral("()");
+        if (text.isEmpty() || text.startsWith(QStringLiteral("__")) || text.startsWith(QStringLiteral("operator")) ||
+            text.startsWith(QLatin1Char('~'))) {
+            continue;
+        }
+        bool exists = false;
+        for (const auto& f : *intoItems) {
+            if (f.label == text) { exists = true; break; }
+        }
+        if (exists) continue;
+
+        const QString kLabel = (kind == 2 || kind == 3) ? QStringLiteral("Method")
+                             : (kind == 5 || kind == 10) ? QStringLiteral("Field")
+                             : (kind == 6) ? QStringLiteral("Variable")
+                             : QStringLiteral("Struct");
+        QString dType = item.value(QStringLiteral("detail")).toString().trimmed();
+        if (dType.isEmpty()) {
+            const QJsonObject ld = item.value(QStringLiteral("labelDetails")).toObject();
+            dType = ld.value(QStringLiteral("detail")).toString().trimmed();
+            if (dType.isEmpty()) dType = ld.value(QStringLiteral("description")).toString().trimmed();
+        }
+        if (dType.isEmpty()) dType = kLabel.toLower();
+        intoItems->append({text, text, kLabel, dType});
+    }
+}
+
+}  // namespace
+
+/**
+ * @brief Writes a framed JSON-RPC message to the clangd child process stdin without blocking the GUI thread.
  * @param payload JSON-RPC 2.0 request or notification object.
  */
 void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
@@ -319,11 +387,10 @@ void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
     if (m_process->state() != QProcess::Running || !m_process->isOpen() || !m_process->isWritable()) return;
     const QByteArray frame = encodeLspMessage(payload);
     m_process->write(frame);
-    m_process->waitForBytesWritten(150);
 }
 
 /**
- * @brief Drains complete Content-Length frames from stdout, caching responses and emitting diagnostics.
+ * @brief Drains complete Content-Length frames from stdout, caching responses and emitting diagnostics/completions.
  *
  * Called both asynchronously from `QProcess::readyReadStandardOutput` and synchronously inside
  * `readResponseForId` so neither notifications nor request responses can be lost during nested waits.
@@ -381,11 +448,21 @@ void ClangdLspClient::drainIncomingMessages() {
             }
         }
 
-        // Index every JSON-RPC response by integer `id` so nested `readyReadStandardOutput` slots never drop responses.
+        // Route asynchronous completion responses to `completionReady` or index synchronous responses by `id`.
         if (obj.contains(QStringLiteral("id")) && !obj.contains(QStringLiteral("method"))) {
             const int id = obj.value(QStringLiteral("id")).toInt(-1);
             if (id >= 0) {
-                m_completedResponses.insert(id, obj);
+                if (m_pendingCompletions.contains(id)) {
+                    const PendingCompletion pending = m_pendingCompletions.take(id);
+                    if (m_pendingCompletionRequestId == id) m_pendingCompletionRequestId = -1;
+                    if (pending.seq == m_activeCompletionSeq && !obj.contains(QStringLiteral("error"))) {
+                        QVector<LspCompletionItem> items;
+                        parseClangdCompletionResponse(obj, &items);
+                        emit completionReady(pending.seq, pending.filePath, items);
+                    }
+                } else {
+                    m_completedResponses.insert(id, obj);
+                }
             }
         }
     }
@@ -407,6 +484,7 @@ QJsonObject ClangdLspClient::readResponseForId(int requestId, int timeoutMs) {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < timeoutMs) {
+        if (m_process->bytesToWrite() > 0) m_process->waitForBytesWritten(30);
         drainIncomingMessages();
         if (m_completedResponses.contains(requestId)) {
             return m_completedResponses.take(requestId);
@@ -420,6 +498,64 @@ QJsonObject ClangdLspClient::readResponseForId(int requestId, int timeoutMs) {
         }
     }
     return m_completedResponses.take(requestId);
+}
+
+/**
+ * @brief Dispatches a non-blocking `textDocument/completion` request on the real synced source document.
+ */
+quint64 ClangdLspClient::requestDocumentCompletionAsync(const QString& filePath,
+                                                        const QString& sourceText,
+                                                        int zeroBasedLine,
+                                                        int zeroBasedCol,
+                                                        const QString& triggerChar) {
+    const QFileInfo fi(filePath.trimmed());
+    const QString normPath = (fi.exists() && !fi.canonicalFilePath().isEmpty())
+                                 ? fi.canonicalFilePath()
+                                 : fi.absoluteFilePath();
+    if (normPath.isEmpty()) return 0;
+
+    // Cancel any superseded in-flight completion request before issuing the new one.
+    if (m_pendingCompletionRequestId > 0) {
+        sendJsonRpc(QJsonObject{
+            {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+            {QStringLiteral("method"), QStringLiteral("$/cancelRequest")},
+            {QStringLiteral("params"), QJsonObject{{QStringLiteral("id"), m_pendingCompletionRequestId}}}
+        });
+        m_pendingCompletions.remove(m_pendingCompletionRequestId);
+        m_pendingCompletionRequestId = -1;
+    }
+
+    syncDocument(normPath, sourceText);
+    if (!m_process || m_process->state() != QProcess::Running || !m_initialized) return 0;
+
+    const quint64 seq = ++m_activeCompletionSeq;
+    const int compId = m_nextRequestId++;
+    m_pendingCompletionRequestId = compId;
+    m_pendingCompletions.insert(compId, PendingCompletion{seq, normPath});
+
+    QJsonObject contextObj;
+    if (!triggerChar.isEmpty()) {
+        contextObj[QStringLiteral("triggerKind")] = 2;
+        contextObj[QStringLiteral("triggerCharacter")] = triggerChar.left(1);
+    } else {
+        contextObj[QStringLiteral("triggerKind")] = 1;
+    }
+
+    const QString docUri = QUrl::fromLocalFile(normPath).toString();
+    sendJsonRpc(QJsonObject{
+        {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
+        {QStringLiteral("id"), compId},
+        {QStringLiteral("method"), QStringLiteral("textDocument/completion")},
+        {QStringLiteral("params"), QJsonObject{
+            {QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
+            {QStringLiteral("position"), QJsonObject{
+                {QStringLiteral("line"), std::max(0, zeroBasedLine)},
+                {QStringLiteral("character"), std::max(0, zeroBasedCol)}
+            }},
+            {QStringLiteral("context"), contextObj}
+        }}
+    });
+    return seq;
 }
 /**
  * @brief Resolves detailed completions with kind and type metadata for expression at target line.
@@ -552,7 +688,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
             continue;
         }
 
-        if (idx < targetLineOneBased) {
+        if (idx < targetLineOneBased && idx >= std::max(0, targetLineOneBased - 200)) {
             // Extract loop control variable declarations (e.g., for (int i = 0; ...)).
             static const QRegularExpression kForLoopRe(QStringLiteral("for\\s*\\(([^;]+);"));
             const QRegularExpressionMatch forMatch = kForLoopRe.match(line);
@@ -701,38 +837,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
                     }}
                 }}
             });
-            // Parse both `CompletionList.items` object responses and bare `CompletionItem[]` arrays.
-            const QJsonObject compResp = cli.readResponseForId(compId, timeoutMs);
-            const QJsonValue resultVal = compResp.value(QStringLiteral("result"));
-            const QJsonArray items = resultVal.isObject()
-                                         ? resultVal.toObject().value(QStringLiteral("items")).toArray()
-                                         : resultVal.toArray();
-            for (const QJsonValue val : items) {
-                const QJsonObject item = val.toObject();
-                const int kind = item.value(QStringLiteral("kind")).toInt(0);
-                // Retain Method (2), Field (5), Variable (6), and Property (10) completion entries.
-                if (kind != 2 && kind != 5 && kind != 6 && kind != 10) continue;
-                QString text = item.value(QStringLiteral("insertText")).toString().trimmed();
-                if (text.isEmpty()) text = item.value(QStringLiteral("label")).toString().trimmed();
-                while (text.startsWith(QLatin1Char('.')) || text.startsWith(QLatin1Char(' '))) text.remove(0, 1);
-                const int parenPos = text.indexOf(QLatin1Char('('));
-                if (parenPos > 0) text = text.left(parenPos) + QStringLiteral("()");
-                if (text.isEmpty() || text.startsWith(QStringLiteral("__"))) continue;
-                // Deduplicate clangd results against structural local/member items already collected.
-                bool exists = false;
-                for (const auto& f : filtered) {
-                    if (f.label == text) { exists = true; break; }
-                }
-                if (!exists) {
-                    QString kLabel = (kind == 2) ? QStringLiteral("Method")
-                                   : (kind == 5) ? QStringLiteral("Field")
-                                   : (kind == 6) ? QStringLiteral("Variable")
-                                   : QStringLiteral("Field");
-                    QString dType = item.value(QStringLiteral("detail")).toString().trimmed();
-                    if (dType.isEmpty()) dType = (kLabel == QStringLiteral("Method")) ? QStringLiteral("void") : QStringLiteral("int");
-                    filtered.append({text, text, kLabel, dType});
-                }
-            }
+            parseClangdCompletionResponse(cli.readResponseForId(compId, timeoutMs), &filtered);
         }
     }
     return filtered;

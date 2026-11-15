@@ -275,25 +275,42 @@ QString ClangdLspClient::discoverCompileCommandsDir(const QString& startPath) {
         return {};
     }
 
-    // Walk ancestor directories checking `<dir>`, `<dir>/builddir`, and `<dir>/build`.
+    // Walk ancestor directories checking `<dir>`, `builddir`, `build`, `build_meson`, and `build_cmake`.
     while (true) {
-        const QString directDb = dir.filePath(QStringLiteral("compile_commands.json"));
-        if (QFileInfo::exists(directDb)) {
+        if (QFileInfo::exists(dir.filePath(QStringLiteral("compile_commands.json")))) {
             return normalizeLocalPath(dir.absolutePath());
         }
-        const QString mesonDb = dir.filePath(QStringLiteral("builddir/compile_commands.json"));
-        if (QFileInfo::exists(mesonDb)) {
-            return normalizeLocalPath(dir.filePath(QStringLiteral("builddir")));
-        }
-        const QString cmakeDb = dir.filePath(QStringLiteral("build/compile_commands.json"));
-        if (QFileInfo::exists(cmakeDb)) {
-            return normalizeLocalPath(dir.filePath(QStringLiteral("build")));
+        for (const QString& sub : {QStringLiteral("builddir"), QStringLiteral("build"),
+                                   QStringLiteral("build_meson"), QStringLiteral("build_cmake")}) {
+            const QString candidate = dir.filePath(sub + QStringLiteral("/compile_commands.json"));
+            if (QFileInfo::exists(candidate)) {
+                return normalizeLocalPath(dir.filePath(sub));
+            }
         }
         if (!dir.cdUp()) {
             break;
         }
     }
     return {};
+}
+
+/**
+ * @brief Configures the active workspace root and restarts `clangd` whenever the workspace root changes.
+ */
+void ClangdLspClient::setWorkspaceRoot(const QString& rootDir) {
+    const QFileInfo info(rootDir.trimmed().isEmpty() ? QDir::currentPath() : rootDir.trimmed());
+    const QString cleanRoot = normalizeLocalPath(info.isDir() ? info.absoluteFilePath() : info.absolutePath());
+    if (cleanRoot.isEmpty()) {
+        return;
+    }
+    const QString ccDir = discoverCompileCommandsDir(cleanRoot);
+    if (m_configuredWorkspaceRoot != cleanRoot || m_activeRootDir != cleanRoot || m_activeCompileCommandsDir != ccDir) {
+        m_configuredWorkspaceRoot = cleanRoot;
+        stopServerProcess();
+        m_openDocumentTexts.clear();
+        m_latestDiagnostics.clear();
+    }
+    ensureServerInitialized(cleanRoot);
 }
 
 /**
@@ -304,7 +321,10 @@ void ClangdLspClient::syncDocument(const QString& filePath, const QString& sourc
     if (normPath.isEmpty()) {
         return;
     }
-    const QString rootDir = QFileInfo(normPath).absolutePath();
+    const QString fileDir = QFileInfo(normPath).absolutePath();
+    const QString rootDir = (!m_configuredWorkspaceRoot.isEmpty() && normPath.startsWith(m_configuredWorkspaceRoot + QLatin1Char('/')))
+                                ? m_configuredWorkspaceRoot
+                                : fileDir;
     if (!ensureServerInitialized(rootDir)) {
         return;
     }
