@@ -17,7 +17,11 @@
 #include <QTimer>
 #include <QPoint>
 #include <QContextMenuEvent>
+#include <QDir>
+#include <QFileInfo>
 #include <QMouseEvent>
+#include <QProcess>
+#include <QTemporaryFile>
 #include "../../core/utils/ClangdLspClient.hpp"
 
 namespace gridlock::ui {
@@ -362,6 +366,80 @@ public:
     }
 
     /**
+     * @brief Refreshes live Git working-tree and unsaved-buffer diff gutter states against HEAD.
+     */
+    Q_INVOKABLE void refreshGitDiffGutter();
+
+    /**
+     * @brief Computes unified `git diff -U0` text against `HEAD` for either saved disk state or live unsaved buffer text.
+     * @param filePath Canonical or absolute path to the open source file.
+     * @param bufferText Current plain text of the editor buffer.
+     * @param isModified True when the buffer has unsaved in-memory edits differing from disk.
+     * @return Unified diff text suitable for `parseUnifiedGitDiff`, or empty string when clean/untracked.
+     */
+    static inline QString computeUnifiedGitDiffForBuffer(
+        const QString& filePath, const QString& bufferText, bool isModified) {
+        if (filePath.isEmpty()) return {};
+        const QFileInfo fi(filePath);
+        if (!fi.exists() || !fi.isFile()) return {};
+        const QString canonPath = fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
+        const QString workDir = QFileInfo(canonPath).absolutePath();
+        auto runGit = [&](const QStringList& args, int* exitOut = nullptr) -> QByteArray {
+            QProcess proc;
+            proc.setWorkingDirectory(workDir);
+            proc.setProcessChannelMode(QProcess::SeparateChannels);
+            proc.start(QStringLiteral("git"), args);
+            if (!proc.waitForFinished(1500)) {
+                proc.kill();
+                proc.waitForFinished(200);
+                if (exitOut) *exitOut = -1;
+                return {};
+            }
+            if (exitOut) *exitOut = proc.exitCode();
+            return proc.readAllStandardOutput();
+        };
+        // Verify the file belongs to a Git working tree and is tracked before querying HEAD diffs.
+        int lsExit = -1;
+        const QString relPath = QString::fromUtf8(runGit(
+            {QStringLiteral("-C"), workDir, QStringLiteral("ls-files"),
+             QStringLiteral("--full-name"), QStringLiteral("--error-unmatch"), QStringLiteral("--"), canonPath},
+            &lsExit)).trimmed();
+        if (lsExit != 0 || relPath.isEmpty()) return {};
+
+        if (!isModified) {
+            int diffExit = -1;
+            const QByteArray out = runGit(
+                {QStringLiteral("-C"), workDir, QStringLiteral("diff"),
+                 QStringLiteral("--no-color"), QStringLiteral("--no-ext-diff"), QStringLiteral("-U0"),
+                 QStringLiteral("HEAD"), QStringLiteral("--"), canonPath},
+                &diffExit);
+            return (diffExit == 0) ? QString::fromUtf8(out) : QString();
+        }
+
+        // Compare live unsaved buffer bytes against the HEAD blob using temporary files so git diff -U0 stays exact.
+        int showExit = -1;
+        QByteArray headBytes = runGit({QStringLiteral("-C"), workDir, QStringLiteral("show"), QStringLiteral("HEAD:") + relPath}, &showExit);
+        if (showExit != 0) return {};
+        headBytes.replace("\r\n", "\n");
+        QTemporaryFile headTmp(QDir::tempPath() + QStringLiteral("/gridlock_git_head_XXXXXX"));
+        QTemporaryFile bufTmp(QDir::tempPath() + QStringLiteral("/gridlock_git_buf_XXXXXX"));
+        if (!headTmp.open() || !bufTmp.open()) return {};
+        headTmp.write(headBytes);
+        headTmp.flush();
+        bufTmp.write(bufferText.toUtf8());
+        bufTmp.flush();
+
+        int noIdxExit = -1;
+        const QByteArray diffOut = runGit(
+            {QStringLiteral("diff"), QStringLiteral("--no-index"), QStringLiteral("--no-color"),
+             QStringLiteral("--no-ext-diff"), QStringLiteral("-U0"), QStringLiteral("--"),
+             headTmp.fileName(), bufTmp.fileName()},
+            &noIdxExit);
+        // git diff --no-index returns 0 when identical and 1 when hunks differ.
+        return (noIdxExit == 0 || noIdxExit == 1) ? QString::fromUtf8(diffOut) : QString();
+    }
+
+    /**
      * @brief Renames all AST references to the symbol under the cursor (Shift+F6) without corrupting comments.
      * @param newName Replacement identifier name.
      * @return True if the symbol was renamed in the document.
@@ -432,6 +510,7 @@ private:
     QString m_lastHoveredWord;
     QTimer* m_hoverTimer = nullptr;
     QTimer* m_lspSyncTimer = nullptr;
+    QTimer* m_gitDiffTimer = nullptr;
     QPoint m_lastMousePos;
     QPoint m_lastGlobalMousePos;
     int m_executionLine = -1;

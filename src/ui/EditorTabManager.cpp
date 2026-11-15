@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QMenu>
 #include <QResizeEvent>
 #include <QTabBar>
@@ -35,6 +36,11 @@ EditorTabManager::EditorTabManager(QWidget* parent)
     setContentsMargins(0, 0, 0, 0);
     connect(this, &QTabWidget::tabCloseRequested, this,
             &EditorTabManager::onTabCloseRequested);
+    connect(this, &QTabWidget::currentChanged, this, [this](int idx) {
+        if (auto* view = qobject_cast<SourceCodeView*>(widget(idx))) {
+            view->refreshGitDiffGutter();
+        }
+    });
 
     // Configure right-click context menu on the tab bar for split editor actions.
     if (tabBar()) {
@@ -165,26 +171,59 @@ SourceCodeView* EditorTabManager::getSourceCodeViewForFile(
 }
 
 /**
- * @brief Handles tab closure by user request.
- * @param index Index of the tab being closed.
+ * @brief Removes the tab at `index` from tracking and schedules widget deletion without prompting.
+ * @param index Zero-based tab index.
  */
-void EditorTabManager::onTabCloseRequested(int index) {
+void EditorTabManager::closeTabUnchecked(int index) {
     QWidget* widget = this->widget(index);
+    if (!widget) return;
     if (auto* view = qobject_cast<SourceCodeView*>(widget)) {
-        const QString absolutePath = view->property("absolutePath").toString();
-        m_openFiles.remove(absolutePath);
+        m_openFiles.remove(view->property("absolutePath").toString());
     }
     removeTab(index);
     widget->deleteLater();
 }
 
 /**
- * @brief Iteratively removes and deallocates all tabs.
+ * @brief Prompts Save/Discard/Cancel via custom test handler or modal QMessageBox::warning.
+ * @param filePath File path associated with the modified buffer.
+ * @return User decision (`Save`, `Discard`, or `Cancel`).
+ */
+QMessageBox::StandardButton EditorTabManager::promptUnsavedDecision(const QString& filePath) const {
+    if (m_unsavedPromptHandler) return m_unsavedPromptHandler(filePath);
+    // Avoid blocking automated offscreen tests unless a test hook handler was installed.
+    if (QGuiApplication::platformName() == QStringLiteral("offscreen")) return QMessageBox::Discard;
+    const QString name = filePath.isEmpty() ? QStringLiteral("Untitled") : QFileInfo(filePath).fileName();
+    return QMessageBox::warning(
+        const_cast<EditorTabManager*>(this), QStringLiteral("Unsaved Changes"),
+        QStringLiteral("Save changes to \"%1\" before closing?").arg(name),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+}
+
+/**
+ * @brief Handles tab closure by user request with Save/Discard/Cancel protection for dirty tabs.
+ * @param index Index of the tab being closed.
+ */
+void EditorTabManager::onTabCloseRequested(int index) {
+    if (index < 0 || index >= count()) return;
+    if (isTabModified(index)) {
+        auto* view = qobject_cast<SourceCodeView*>(widget(index));
+        const QString filePath = view ? view->property("absolutePath").toString() : QString();
+        const auto choice = promptUnsavedDecision(filePath);
+        if (choice == QMessageBox::Save) {
+            if (!saveTab(index)) return;
+        } else if (choice != QMessageBox::Discard) {
+            return;
+        }
+    }
+    closeTabUnchecked(index);
+}
+
+/**
+ * @brief Iteratively removes and deallocates all tabs without interactive prompts.
  */
 void EditorTabManager::clearAllTabs() {
-    while (count() > 0) {
-        onTabCloseRequested(0);
-    }
+    while (count() > 0) closeTabUnchecked(0);
 }
 
 /**
@@ -198,19 +237,57 @@ bool EditorTabManager::isTabModified(int index) const {
 }
 
 /**
+ * @brief Saves the editor tab at `index` to disk and clears its dirty indicator.
+ * @param index Zero-based tab index.
+ * @return True if saved successfully.
+ */
+bool EditorTabManager::saveTab(int index) {
+    auto* view = qobject_cast<SourceCodeView*>(widget(index));
+    if (!view || !view->saveToFile()) return false;
+    const QString path = view->property("absolutePath").toString();
+    if (!path.isEmpty()) setTabText(index, QFileInfo(path).fileName());
+    return true;
+}
+
+/**
+ * @brief Returns whether any open editor tab currently has unsaved modifications.
+ * @return True if one or more tabs are modified.
+ */
+bool EditorTabManager::hasModifiedTabs() const {
+    for (int i = 0; i < count(); ++i) {
+        if (isTabModified(i)) return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Prompts Save/Discard/Cancel for every modified tab before closing the window.
+ * @return True if closing may proceed; false on Cancel or save failure.
+ */
+bool EditorTabManager::confirmCloseAllModifiedTabs() {
+    for (int i = 0; i < count(); ++i) {
+        if (!isTabModified(i)) continue;
+        setCurrentIndex(i);
+        auto* view = qobject_cast<SourceCodeView*>(widget(i));
+        const QString filePath = view ? view->property("absolutePath").toString() : QString();
+        const auto choice = promptUnsavedDecision(filePath);
+        if (choice == QMessageBox::Save) {
+            if (!saveTab(i)) return false;
+        } else if (choice != QMessageBox::Discard) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * @brief Saves all currently modified editor tabs to disk and clears their dirty indicators.
  * @return Number of modified tabs written to disk.
  */
 int EditorTabManager::saveAllModifiedTabs() {
     int savedCount = 0;
     for (int i = 0; i < count(); ++i) {
-        if (auto* view = qobject_cast<SourceCodeView*>(widget(i))) {
-            if (view->document() && view->document()->isModified() && view->saveToFile()) {
-                const QString baseName = QFileInfo(view->property("absolutePath").toString()).fileName();
-                setTabText(i, baseName);
-                ++savedCount;
-            }
-        }
+        if (isTabModified(i) && saveTab(i)) ++savedCount;
     }
     return savedCount;
 }

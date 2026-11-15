@@ -23,6 +23,7 @@
 #include <QGuiApplication>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
@@ -40,6 +41,7 @@
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/CliParser.cpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
+#include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/dialogs/XrefInspectorDialog.hpp"
@@ -730,26 +732,21 @@ void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
 
     // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid >= 800x500 QImage.
     for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png"), QStringLiteral("theme_solarized_light.png"), QStringLiteral("theme_catppuccin_latte.png")}) {
-        const QString fullPath = shotDir + QLatin1Char('/') + fn;
-        const QImage img(fullPath);
+        const QString fullPath = shotDir + QLatin1Char('/') + fn; const QImage img(fullPath);
         QVERIFY2(QFileInfo(fullPath).size() > 15000 && !img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath));
     }
-
     // 3. Verify DisassemblyView mode toggle buttons (SPLIT (CFG+DECOMP), DECOMPILER, CFG (SPACE)) never clip text.
     if (auto* disasm = mainWindow.disassemblyView()) {
         for (const QString& obj : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")}) {
-            auto* btn = disasm->findChild<QPushButton*>(obj);
-            QVERIFY2(btn && btn->isVisible() && btn->width() >= btn->sizeHint().width(), qPrintable(obj));
+            auto* btn = disasm->findChild<QPushButton*>(obj); QVERIFY2(btn && btn->isVisible() && btn->width() >= btn->sizeHint().width(), qPrintable(obj));
         }
     }
-
     // 4. Verify docs/USER_GUIDE.md and docs/THEMES.md embed the required screenshot assets.
     QFile guideFile(QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md")) ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md"));
     QFile themesFile(QFileInfo::exists(QStringLiteral("docs/THEMES.md")) ? QStringLiteral("docs/THEMES.md") : QStringLiteral("../docs/THEMES.md"));
     QVERIFY(guideFile.open(QIODevice::ReadOnly) && themesFile.open(QIODevice::ReadOnly));
     QVERIFY2(QString::fromUtf8(guideFile.readAll()).contains(QStringLiteral("breakpoint_popover.png")), "docs/USER_GUIDE.md must embed new assets");
-    const QString themesText = QString::fromUtf8(themesFile.readAll());
-    QVERIFY2(themesText.contains(QStringLiteral("theme_solarized_light.png")) && themesText.contains(QStringLiteral("theme_catppuccin_latte.png")), "docs/THEMES.md must embed theme_solarized_light.png and theme_catppuccin_latte.png");
+    const QString themesText = QString::fromUtf8(themesFile.readAll()); QVERIFY2(themesText.contains(QStringLiteral("theme_solarized_light.png")) && themesText.contains(QStringLiteral("theme_catppuccin_latte.png")), "docs/THEMES.md must embed theme_solarized_light.png and theme_catppuccin_latte.png");
 }
 
 /**
@@ -834,17 +831,14 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileCreated, [&](const QString&) { ++createdCount; });
     QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileRenamed, [&](const QString&, const QString&) { ++renamedCount; });
     QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileDeleted, [&](const QString&) { ++deletedCount; });
-    const QString cppPath = tempDir.filePath(QStringLiteral("solver_kernel.cpp"));
-    const QString hppPath = tempDir.filePath(QStringLiteral("solver_kernel.hpp"));
+    const QString cppPath = tempDir.filePath(QStringLiteral("solver_kernel.cpp")), hppPath = tempDir.filePath(QStringLiteral("solver_kernel.hpp"));
     QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.cpp")) && QFileInfo::exists(cppPath) && createdCount == 1, "createNewFile(.cpp)");
     QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.hpp")) && QFileInfo::exists(hppPath) && createdCount == 2, "createNewFile(.hpp)");
     QFile hppFile(hppPath); QVERIFY(hppFile.open(QIODevice::ReadOnly) && QString::fromUtf8(hppFile.readAll()).contains(QStringLiteral("#pragma once")));
-
     // 3 & 4. Create subfolder and rename solver_kernel.cpp -> mpi_solver_kernel.cpp.
     QVERIFY2(explorer.createNewFolder(tempDir.path(), QStringLiteral("kernels")) && QDir(tempDir.filePath(QStringLiteral("kernels"))).exists(), "createNewFolder");
     const QString renamedPath = tempDir.filePath(QStringLiteral("mpi_solver_kernel.cpp"));
     QVERIFY2(explorer.renameEntry(cppPath, QStringLiteral("mpi_solver_kernel.cpp")) && !QFileInfo::exists(cppPath) && QFileInfo::exists(renamedPath) && renamedCount == 1, "renameEntry");
-
     // 5 & 6. Register source in sample meson.build and CMakeLists.txt, then delete entry.
     const QString mesonBuildPath = tempDir.filePath(QStringLiteral("meson.build"));
     { QFile mf(mesonBuildPath); QVERIFY(mf.open(QIODevice::WriteOnly)); mf.write("executable('demo',\n  'src/main.cpp'\n)\n"); }
@@ -897,28 +891,43 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
  *        in `PreferencesDialog` and `ConfigManager`.
  */
 void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
-    // 1. Verify SourceCodeView::parseUnifiedGitDiff() and gitLineState(oneBasedLine).
+    // 1. Verify SourceCodeView::parseUnifiedGitDiff() and PreferencesDialog/ConfigManager debuggerEngine.
     gridlock::ui::SourceCodeView srcView;
-    const QString sampleDiff = QStringLiteral(
-        "@@ -3,0 +4,2 @@\n+int added1 = 1;\n+int added2 = 2;\n"
-        "@@ -10,1 +12,1 @@\n-int oldVal = 0;\n+int newVal = 1;\n"
-        "@@ -18,2 +20,0 @@\n-int removed1 = 0;\n-int removed2 = 0;\n");
-    auto checkGitDiffAndEngine = [&](auto& view, auto& cfg) -> bool {
-        using ViewT = std::decay_t<decltype(view)>;
-        if constexpr (requires { ViewT::parseUnifiedGitDiff(sampleDiff); view.setGitLineStates(ViewT::parseUnifiedGitDiff(sampleDiff)); view.gitLineState(4); cfg.debuggerEngine(); cfg.setDebuggerEngine(QStringLiteral("gdb")); }) {
-            // Parse unified diff hunks and apply line states to SourceCodeView.
-            const auto states = ViewT::parseUnifiedGitDiff(sampleDiff);
-            view.setGitLineStates(states);
-            if (view.gitLineState(4) != ViewT::GitLineState::Added || view.gitLineState(5) != ViewT::GitLineState::Added || view.gitLineState(12) != ViewT::GitLineState::Modified || view.gitLineState(20) != ViewT::GitLineState::Deleted || view.gitLineState(1) != ViewT::GitLineState::Unchanged) return false;
-            // 2 & 3. Verify PreferencesDialog debuggerEngineCombo and ConfigManager persistence.
-            gridlock::ui::PreferencesDialog dlg;
-            auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo"));
-            if (!combo || combo->findData(QStringLiteral("gdb")) < 0 || combo->findData(QStringLiteral("lldb-dap")) < 0 || combo->findData(QStringLiteral("cuda-gdb")) < 0 || combo->findData(QStringLiteral("rocgdb")) < 0) return false;
-            cfg.setDebuggerEngine(QStringLiteral("rocgdb"));
-            if (cfg.debuggerEngine() != QStringLiteral("rocgdb")) return false;
-            cfg.setDebuggerEngine(QStringLiteral("gdb"));
-            return cfg.debuggerEngine() == QStringLiteral("gdb");
+    const QString sampleDiff = QStringLiteral("@@ -3,0 +4,2 @@\n+int a1 = 1;\n+int a2 = 2;\n@@ -10,1 +12,1 @@\n-int o = 0;\n+int n = 1;\n@@ -18,2 +20,0 @@\n-int r1 = 0;\n-int r2 = 0;\n");
+    const auto states = gridlock::ui::SourceCodeView::parseUnifiedGitDiff(sampleDiff); srcView.setGitLineStates(states);
+    QVERIFY2(srcView.gitLineState(4) == gridlock::ui::SourceCodeView::GitLineState::Added && srcView.gitLineState(5) == gridlock::ui::SourceCodeView::GitLineState::Added && srcView.gitLineState(12) == gridlock::ui::SourceCodeView::GitLineState::Modified && srcView.gitLineState(20) == gridlock::ui::SourceCodeView::GitLineState::Deleted && srcView.gitLineState(1) == gridlock::ui::SourceCodeView::GitLineState::Unchanged, "parseUnifiedGitDiff states");
+    gridlock::ui::PreferencesDialog dlg; auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo")); auto& cfg = gridlock::core::ConfigManager::instance();
+    QVERIFY2(combo && combo->findData(QStringLiteral("gdb")) >= 0 && combo->findData(QStringLiteral("lldb-dap")) >= 0 && combo->findData(QStringLiteral("cuda-gdb")) >= 0 && combo->findData(QStringLiteral("rocgdb")) >= 0, "debuggerEngineCombo items");
+    cfg.setDebuggerEngine(QStringLiteral("rocgdb")); QCOMPARE(cfg.debuggerEngine(), QStringLiteral("rocgdb")); cfg.setDebuggerEngine(QStringLiteral("gdb")); QCOMPARE(cfg.debuggerEngine(), QStringLiteral("gdb"));
+
+    // 2. Verify live Git diff gutter updates on file open, unsaved debounced buffer edits, and saveToFile.
+    QTemporaryDir gitDir; QVERIFY(gitDir.isValid());
+    auto runGit = [&](const QStringList& args) -> bool { QProcess p; p.setWorkingDirectory(gitDir.path()); p.start(QStringLiteral("git"), args); return p.waitForFinished(4000) && p.exitCode() == 0; };
+    const QString solverPath = gitDir.filePath(QStringLiteral("solver.cpp"));
+    { QFile f(solverPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int a = 1;\nint b = 2;\nint c = 3;\nint d = 4;\n"); }
+    QVERIFY2(runGit({QStringLiteral("init"), QStringLiteral("-q")}) && runGit({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("t@gridlock.dev")}) && runGit({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("T")}) && runGit({QStringLiteral("add"), QStringLiteral("solver.cpp")}) && runGit({QStringLiteral("commit"), QStringLiteral("-q"), QStringLiteral("-m"), QStringLiteral("init")}), "git repo init");
+    gridlock::ui::MainWindow mw; auto* tabMgr = mw.editorTabManager(); QVERIFY(tabMgr != nullptr); tabMgr->clearAllTabs();
+    QVERIFY(tabMgr->openFile(solverPath) != nullptr); auto* ed = tabMgr->currentSourceCodeView(); QVERIFY(ed != nullptr);
+    QCOMPARE(ed->gitLineState(2), gridlock::ui::SourceCodeView::GitLineState::Unchanged);
+    // Edit line 2 and append line 5 in memory without saving, then wait for debounced gutter refresh.
+    { QTextCursor cur(ed->document()); cur.movePosition(QTextCursor::Start); cur.movePosition(QTextCursor::Down); cur.select(QTextCursor::LineUnderCursor); cur.insertText(QStringLiteral("int b = 99;")); cur.movePosition(QTextCursor::End); cur.insertText(QStringLiteral("int e = 5;\n")); }
+    QTRY_VERIFY_WITH_TIMEOUT(ed->gitLineState(2) == gridlock::ui::SourceCodeView::GitLineState::Modified && ed->gitLineState(5) == gridlock::ui::SourceCodeView::GitLineState::Added, 2000);
+    QVERIFY(ed->saveToFile() && ed->gitLineState(2) == gridlock::ui::SourceCodeView::GitLineState::Modified && ed->gitLineState(5) == gridlock::ui::SourceCodeView::GitLineState::Added);
+    // 3. Verify lossless dirty-tab Cancel/Save/Discard close prompts in EditorTabManager and MainWindow::closeEvent.
+    { QTextCursor cur(ed->document()); cur.movePosition(QTextCursor::Start); cur.select(QTextCursor::LineUnderCursor); cur.insertText(QStringLiteral("int a = 123;")); }
+    QVERIFY(tabMgr->isTabModified(0));
+    auto readDisk = [&]() { QFile rf(solverPath); return rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString(); };
+    auto checkDirtyClosePrompts = [&](auto* mgr) -> bool {
+        if constexpr (requires { mgr->setUnsavedPromptHandler(std::declval<std::function<QMessageBox::StandardButton(const QString&)>>()); mgr->confirmCloseAllModifiedTabs(); }) {
+            QMessageBox::StandardButton nextBtn = QMessageBox::Cancel; int prompts = 0;
+            mgr->setUnsavedPromptHandler([&](const QString&) { ++prompts; return nextBtn; });
+            if (mw.close() || mgr->count() != 1 || prompts != 1) return false;
+            emit mgr->tabCloseRequested(0); if (mgr->count() != 1 || !mgr->isTabModified(0) || prompts != 2) return false;
+            nextBtn = QMessageBox::Save; emit mgr->tabCloseRequested(0); if (mgr->count() != 0 || !readDisk().contains(QStringLiteral("123")) || prompts != 3) return false;
+            if (!mgr->openFile(solverPath) || !mgr->currentSourceCodeView()) return false;
+            { QTextCursor c2(mgr->currentSourceCodeView()->document()); c2.movePosition(QTextCursor::Start); c2.select(QTextCursor::LineUnderCursor); c2.insertText(QStringLiteral("int a = 777;")); }
+            nextBtn = QMessageBox::Discard; emit mgr->tabCloseRequested(0); return mgr->count() == 0 && !readDisk().contains(QStringLiteral("777")) && prompts == 4 && mw.close();
         } else return false;
     };
-    QVERIFY2(checkGitDiffAndEngine(srcView, gridlock::core::ConfigManager::instance()), "SourceCodeView Git diff gutter states and PreferencesDialog debuggerEngineCombo must succeed");
+    QVERIFY2(checkDirtyClosePrompts(tabMgr), "EditorTabManager & MainWindow dirty-tab Save/Discard/Cancel close prompts must succeed");
 }

@@ -10,10 +10,12 @@
 #pragma once
 
 #include <QMap>
+#include <QMessageBox>
 #include <QPoint>
 #include <QSplitter>
 #include <QString>
 #include <QTabWidget>
+#include <functional>
 
 namespace gridlock::ui {
 
@@ -67,12 +69,40 @@ public:
      */
     void clearAllTabs();
 
+    /// Callback returning Save, Discard, or Cancel for an unsaved file close prompt.
+    using UnsavedPromptHandler = std::function<QMessageBox::StandardButton(const QString& filePath)>;
+
     /**
      * @brief Returns whether the editor tab at index has unsaved document modifications.
      * @param index Zero-based tab index.
      * @return True if the underlying SourceCodeView document is modified.
      */
     bool isTabModified(int index) const;
+
+    /**
+     * @brief Installs a custom prompt handler (primarily for automated UI tests).
+     * @param handler Callback invoked when closing a dirty tab or window.
+     */
+    void setUnsavedPromptHandler(UnsavedPromptHandler handler) { m_unsavedPromptHandler = std::move(handler); }
+
+    /**
+     * @brief Saves the editor tab at `index` to disk and clears its dirty indicator.
+     * @param index Zero-based tab index.
+     * @return True if saved successfully.
+     */
+    bool saveTab(int index);
+
+    /**
+     * @brief Returns whether any open editor tab currently has unsaved modifications.
+     * @return True if one or more tabs are modified.
+     */
+    bool hasModifiedTabs() const;
+
+    /**
+     * @brief Prompts Save/Discard/Cancel for every modified tab before closing the window.
+     * @return True if closing may proceed (all dirty tabs saved or discarded); false on Cancel or save failure.
+     */
+    bool confirmCloseAllModifiedTabs();
 
     /**
      * @brief Saves all currently modified editor tabs to disk and clears their dirty indicators.
@@ -160,12 +190,27 @@ private slots:
 
 private:
     /**
+     * @brief Removes the tab at `index` from tracking and schedules widget deletion without prompting.
+     * @param index Zero-based tab index.
+     */
+    void closeTabUnchecked(int index);
+
+    /**
+     * @brief Prompts Save/Discard/Cancel via custom test handler or modal QMessageBox::warning.
+     * @param filePath File path associated with the modified buffer.
+     * @return User decision (`Save`, `Discard`, or `Cancel`).
+     */
+    QMessageBox::StandardButton promptUnsavedDecision(const QString& filePath) const;
+
+    /**
      * @brief Updates the bounding geometry of the internal split editor container.
      */
     void updateSplitGeometry();
 
     /// Map of canonical absolute file system paths to active SourceCodeView pointers.
     QMap<QString, SourceCodeView*> m_openFiles;
+    /// Optional custom unsaved-changes prompt callback used by headless tests.
+    UnsavedPromptHandler m_unsavedPromptHandler;
     /// Internal QSplitter hosting the on-demand secondary editor tab pane.
     QSplitter* m_splitContainer = nullptr;
     /// Secondary QTabWidget displayed inside the split pane.

@@ -760,6 +760,19 @@ void MainWindow::refreshStatusBarMemoryTelemetry() {
  * @param event Close event payload.
  */
 void MainWindow::closeEvent(QCloseEvent *event) {
+  const bool hadModified = m_editorTabManager && m_editorTabManager->hasModifiedTabs();
+  if (m_editorTabManager && !m_editorTabManager->confirmCloseAllModifiedTabs()) {
+    if (event) event->ignore();
+    return;
+  }
+  const bool interactive = QGuiApplication::platformName() != QStringLiteral("offscreen");
+  if (!hadModified && interactive && QSettings("gridlock", "debugger").value("behavior/confirm_quit", true).toBool()) {
+    if (QMessageBox::question(this, QStringLiteral("Quit GridLock"), QStringLiteral("Exit GridLock?"),
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) {
+      if (event) event->ignore();
+      return;
+    }
+  }
   // Gracefully terminate active debug sessions across all spawned ranks and DAP processes.
   if (m_coordinator) m_coordinator->terminateSession();
   // Shut down background clangd LSP worker before destroying editor buffer widgets.
@@ -774,7 +787,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
   // Save active color theme and desktop dock/splitter geometry when running interactively.
   gridlock::core::ThemeManager::instance().savePersistedTheme();
-  if (QGuiApplication::platformName() != QStringLiteral("offscreen")) {
+  if (interactive) {
     QSettings settings("gridlock", "debugger");
     settings.setValue("MainWindow/Geometry_v9", saveGeometry());
     settings.setValue("MainWindow/State_v9", saveState());
@@ -783,7 +796,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
       if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
     }
   }
-  event->accept();
+  if (event) event->accept();
 }
 
 /**

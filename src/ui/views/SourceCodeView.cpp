@@ -118,8 +118,10 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     // Debounce live C/C++ text edits (250ms) into clangd `didOpen`/`didChange` and bind `publishDiagnostics`.
     m_lspSyncTimer = new QTimer(this); m_lspSyncTimer->setSingleShot(true);
     connect(m_lspSyncTimer, &QTimer::timeout, this, &SourceCodeView::syncLspDocument);
+    m_gitDiffTimer = new QTimer(this); m_gitDiffTimer->setSingleShot(true);
+    connect(m_gitDiffTimer, &QTimer::timeout, this, &SourceCodeView::refreshGitDiffGutter);
     connect(document(), &QTextDocument::contentsChanged, this, [this]() {
-        if (!m_currentFilePath.isEmpty()) m_lspSyncTimer->start(250);
+        if (!m_currentFilePath.isEmpty()) { m_lspSyncTimer->start(250); m_gitDiffTimer->start(350); }
     });
     connect(&core::ClangdLspClient::instance(), &core::ClangdLspClient::diagnosticsPublished,
             this, [this](const QString& filePath, const QVector<core::LspDiagnostic>& diags) {
@@ -132,7 +134,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     connect(document(), &QTextDocument::modificationChanged, this, &SourceCodeView::modificationStateChanged);
 }
 
-/** @brief Sets the active file path, restores cached diagnostics, and syncs non-empty buffers with clangd. */
+/** @brief Sets the active file path, restores cached diagnostics, syncs clangd, and refreshes Git gutter. */
 void SourceCodeView::setCurrentFile(const QString& filePath) {
     m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
                             ? QFileInfo(filePath).canonicalFilePath()
@@ -141,6 +143,7 @@ void SourceCodeView::setCurrentFile(const QString& filePath) {
         setDiagnostics(core::ClangdLspClient::instance().cachedDiagnosticsForFile(m_currentFilePath));
         if (!toPlainText().trimmed().isEmpty()) syncLspDocument();
     }
+    refreshGitDiffGutter();
 }
 
 /** @brief Pushes the current editor buffer to ClangdLspClient (`textDocument/didOpen` or `didChange`). */
@@ -788,6 +791,7 @@ bool SourceCodeView::saveToFile(const QString& filePath) {
     QFile file(target);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream(&file) << toPlainText(); file.close(); document()->setModified(false);
+    refreshGitDiffGutter();
     return true;
 }
 
@@ -823,25 +827,19 @@ QString SourceCodeView::currentScopeBreadcrumb() const {
 bool SourceCodeView::triggerGoToDefinition() {
     const QTextCursor cur = textCursor();
     const auto loc = !m_currentFilePath.isEmpty()
-                         ? core::ClangdLspClient::instance().findDefinition(
-                               m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock())
-                         : core::ClangdLspClient::instance().findDefinition(
-                               toPlainText(), cur.blockNumber() + 1, cur.positionInBlock());
+                         ? core::ClangdLspClient::instance().findDefinition(m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock())
+                         : core::ClangdLspClient::instance().findDefinition(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock());
     if (loc.line <= 0) return false;
     // Dispatch cross-file jump request when clangd resolves a declaration in a sibling header or TU.
     if (!m_currentFilePath.isEmpty() && !loc.filePath.isEmpty() && QFileInfo::exists(loc.filePath)) {
         const QString curCanon = QFileInfo::exists(m_currentFilePath) ? QFileInfo(m_currentFilePath).canonicalFilePath() : QFileInfo(m_currentFilePath).absoluteFilePath();
         const QString dstCanon = QFileInfo(loc.filePath).canonicalFilePath();
-        if (!dstCanon.isEmpty() && dstCanon != curCanon) {
-            emit definitionJumpRequested(dstCanon, loc.line, loc.column);
-            return true;
-        }
+        if (!dstCanon.isEmpty() && dstCanon != curCanon) { emit definitionJumpRequested(dstCanon, loc.line, loc.column); return true; }
     }
     QTextBlock b = document()->findBlockByNumber(loc.line - 1);
     if (!b.isValid()) return false;
     QTextCursor dest(b); dest.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, qMax(0, loc.column));
-    setTextCursor(dest); ensureCursorVisible();
-    return true;
+    setTextCursor(dest); ensureCursorVisible(); return true;
 }
 
 /**
@@ -881,19 +879,23 @@ void SourceCodeView::setGitLineStates(const QHash<int, GitLineState>& states) {
     if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
+/** @brief Refreshes live Git working-tree and unsaved-buffer diff gutter states against HEAD. */
+void SourceCodeView::refreshGitDiffGutter() {
+    if (m_gitDiffTimer) m_gitDiffTimer->stop();
+    const bool dirty = document() && document()->isModified();
+    const QString diff = computeUnifiedGitDiffForBuffer(m_currentFilePath, toPlainText(), dirty);
+    setGitLineStates(diff.isEmpty() ? QHash<int, GitLineState>{} : parseUnifiedGitDiff(diff));
+}
+
 /**
  * @brief Renames all AST references to the symbol under the cursor (Shift+F6) via clangd `WorkspaceEdit`.
  */
 bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
     const QTextCursor cur = textCursor();
     if (!m_currentFilePath.isEmpty() && QFileInfo::exists(m_currentFilePath)) {
-        const auto edits = core::ClangdLspClient::instance().renameSymbol(
-            m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock(), newName);
+        const auto edits = core::ClangdLspClient::instance().renameSymbol(m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock(), newName);
         const QString curCanon = QFileInfo(m_currentFilePath).canonicalFilePath();
-        if (edits.contains(curCanon) && edits.value(curCanon) != toPlainText()) {
-            setPlainText(edits.value(curCanon)); document()->setModified(true);
-            return true;
-        }
+        if (edits.contains(curCanon) && edits.value(curCanon) != toPlainText()) { setPlainText(edits.value(curCanon)); document()->setModified(true); return true; }
     }
     const QString updated = core::ClangdLspClient::instance().renameSymbolInSource(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock(), newName);
     if (updated == toPlainText()) return false;
