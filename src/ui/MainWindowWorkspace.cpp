@@ -621,6 +621,7 @@ void MainWindow::setupDocks() {
       if (w == m_ed && m_dv && (ev->type() == QEvent::Show || ev->type() == QEvent::ShowToParent ||
                                 ev->type() == QEvent::Hide || ev->type() == QEvent::HideToParent)) {
         m_dv->setSourceEditorActive(!m_ed->isHidden());
+        if (auto *mw = qobject_cast<MainWindow *>(m_ed->window())) mw->syncDisassemblyDecompilerVisibility(false);
       }
       return QObject::eventFilter(w, ev);
     }

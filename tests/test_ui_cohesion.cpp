@@ -24,6 +24,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
+#include <QProcess>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSpinBox>
@@ -196,10 +197,33 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
         if (m == 0) disasm->setGraphMode(false); else if (m == 1) disasm->setGraphMode(true); else if (m == 2) disasm->setDecompilerMode(true); else disasm->setSplitGraphDecompilerMode(true);
         QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "At most 1 DisassemblyView mode button may be checked");
     }
+    auto* decompPage = disasm->findChild<QWidget*>(QStringLiteral("decompilerPageContainer"));
+    auto* splitBtn = disasm->findChild<QPushButton*>(QStringLiteral("cutterSplitViewBtn"));
+    QVERIFY(decompPage != nullptr && splitBtn != nullptr);
     mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
+    QVERIFY2(!decompPage->isVisible() && decompPage->width() == 0 && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !splitBtn->isChecked(), "Reverse->Code must collapse decompiler");
+    const QString prevRepoWs = QDir(QFileInfo(QStringLiteral(__FILE__)).absolutePath() + QStringLiteral("/..")).canonicalPath();
+    QTemporaryDir extWsDir; QVERIFY(extWsDir.isValid());
+    QVERIFY(QDir(extWsDir.path()).mkpath(QStringLiteral("src")) && QDir(extWsDir.path()).mkpath(QStringLiteral("build_meson")));
+    { QFile sf(extWsDir.filePath(QStringLiteral("src/main.cpp"))); QVERIFY(sf.open(QIODevice::WriteOnly | QIODevice::Text)); sf.write("int main() { return 0; }\n"); }
+    QProcess gxx; gxx.start(QStringLiteral("g++"), {QStringLiteral("-g"), extWsDir.filePath(QStringLiteral("src/main.cpp")), QStringLiteral("-o"), extWsDir.filePath(QStringLiteral("build_meson/ws_bin"))});
+    QVERIFY(gxx.waitForFinished(15000) && gxx.exitCode() == 0);
+    mainWindow.switchWorkspaceDirectory(extWsDir.path()); mainWindow.loadBinaryTarget(extWsDir.filePath(QStringLiteral("build_meson/ws_bin"))); QApplication::processEvents();
+    for (const QString& persp : {QStringLiteral("Code"), QStringLiteral("MPI")}) {
+        mainWindow.setWorkspacePerspective(persp); QApplication::processEvents();
+        QVERIFY2(!decompPage->isVisible() && decompPage->width() == 0 && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !disasm->isSplitGraphDecompilerMode() && !splitBtn->isChecked() && disasm->isGraphMode(), "External workspace + loadBinaryTarget must honor showDecompilerWithSource=false in Code/MPI");
+    }
     gridlock::ui::PreferencesDialog prefsDecompDlg(&mainWindow);
     auto* showDecompCheck = prefsDecompDlg.findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"));
-    QVERIFY2(showDecompCheck != nullptr && !showDecompCheck->isChecked(), "PreferencesDialog Debugger page must expose unchecked showDecompilerWithSourceCheck");
+    auto* prefsBtnBox = prefsDecompDlg.findChild<QDialogButtonBox*>();
+    QVERIFY2(showDecompCheck != nullptr && !showDecompCheck->isChecked() && prefsBtnBox != nullptr && prefsBtnBox->button(QDialogButtonBox::Apply) && prefsBtnBox->button(QDialogButtonBox::Ok), "PreferencesDialog Debugger page must expose unchecked showDecompilerWithSourceCheck");
+    prefsDecompDlg.show(); QApplication::processEvents();
+    showDecompCheck->setChecked(true); prefsBtnBox->button(QDialogButtonBox::Apply)->click(); QApplication::processEvents();
+    QVERIFY2(gridlock::tests::callShowDecompilerWithSource(&cfg, 0) && gridlock::tests::callIsDecompilerVisible(disasm, 0) && decompPage->isVisible() && decompPage->width() >= 180, "Apply showDecompilerWithSource=true must show decompiler split");
+    showDecompCheck->setChecked(false); prefsBtnBox->button(QDialogButtonBox::Ok)->click(); QApplication::processEvents();
+    QVERIFY2(!gridlock::tests::callShowDecompilerWithSource(&cfg, 0) && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !decompPage->isVisible() && decompPage->width() == 0 && !splitBtn->isChecked() && disasm->isGraphMode(), "OK showDecompilerWithSource=false must hide decompiler");
+    QVERIFY2(QMetaObject::invokeMethod(&mainWindow, "syncDisassemblyDecompilerVisibility"), "MainWindow must expose syncDisassemblyDecompilerVisibility() slot");
+    mainWindow.switchWorkspaceDirectory(prevRepoWs); mainWindow.loadPreviewFixture(); QApplication::processEvents();
 
     // 6. Verify MainToolbar spinbox/combobox widths, 26px button height parity, movable toolbars, and Run Target accent.
     auto* mainToolBar = mainWindow.findChild<QToolBar*>(QStringLiteral("MainToolbar")); QVERIFY(mainToolBar != nullptr);
@@ -850,80 +874,56 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
         const QImage img = w ? w->grab().toImage() : QImage();
         if (img.isNull() || img.width() <= 0 || img.height() <= 0) return 0.0;
         qint64 sum = 0, cnt = 0;
-        for (int y = 1; y < img.height() - 1; y += 2)
-            for (int x = 2; x < img.width() - 2; x += 3) { sum += img.pixelColor(x, y).lightness(); ++cnt; }
+        for (int y = 1; y < img.height() - 1; y += 2) for (int x = 2; x < img.width() - 2; x += 3) { sum += img.pixelColor(x, y).lightness(); ++cnt; }
         return cnt > 0 ? static_cast<double>(sum) / static_cast<double>(cnt) : 0.0;
     };
     // Verify section ribbon (#addressNavBar), unchecked FILES/REVERSE buttons (> 170), and checked accent CODE button (> 110).
-    auto* navBar = mainWindow.findChild<QWidget*>(QStringLiteral("addressNavBar"));
-    auto* filesBtn = explorer->findChild<QWidget*>(QStringLiteral("explorerFilesModeBtn"));
-    auto* revBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveReverseBtn"));
-    auto* codeBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveCodeBtn"));
+    auto *navBar = mainWindow.findChild<QWidget*>(QStringLiteral("addressNavBar")), *filesBtn = explorer->findChild<QWidget*>(QStringLiteral("explorerFilesModeBtn"));
+    auto *revBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveReverseBtn")), *codeBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveCodeBtn"));
     QVERIFY(navBar != nullptr && filesBtn != nullptr && revBtn != nullptr && codeBtn != nullptr);
-    QVERIFY2(avgLightness(navBar) > 170.0 && avgLightness(filesBtn) > 170.0 && avgLightness(revBtn) > 170.0 && avgLightness(codeBtn) > 110.0,
-             qPrintable(QStringLiteral("Dark bar remained in solarized_light: nav=%1 files=%2 rev=%3 code=%4").arg(avgLightness(navBar)).arg(avgLightness(filesBtn)).arg(avgLightness(revBtn)).arg(avgLightness(codeBtn))));
-
+    QVERIFY2(avgLightness(navBar) > 170.0 && avgLightness(filesBtn) > 170.0 && avgLightness(revBtn) > 170.0 && avgLightness(codeBtn) > 110.0, qPrintable(QStringLiteral("Dark bar remained in solarized_light: nav=%1 files=%2 rev=%3 code=%4").arg(avgLightness(navBar)).arg(avgLightness(filesBtn)).arg(avgLightness(revBtn)).arg(avgLightness(codeBtn))));
     // Verify MemView activeHexTextColor lightness < 65, dark non-zero hex ink (< 75) in viewport, and #6e7781 muted zero bytes.
     QVERIFY2(memView->activeHexTextColor().lightness() < 65, "MemView activeHexTextColor must have lightness < 65 in solarized_light");
-    auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
-    QVERIFY(dumpEdit != nullptr && dumpEdit->viewport() != nullptr);
+    auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit")); QVERIFY(dumpEdit != nullptr && dumpEdit->viewport() != nullptr);
     QVERIFY2(dumpEdit->toHtml().contains(QStringLiteral("#6e7781"), Qt::CaseInsensitive), "MemView zero (00) bytes must use muted medium steel #6e7781 in light mode");
-    const QImage hexImg = dumpEdit->viewport()->grab().toImage();
-    int darkHexInkPixels = 0;
-    for (int y = 20; y < qMin(hexImg.height() - 2, 56); ++y)
-        for (int x = 155; x < qMin(hexImg.width() - 10, 420); ++x)
-            if (hexImg.pixelColor(x, y).lightness() < 75) ++darkHexInkPixels;
+    const QImage hexImg = dumpEdit->viewport()->grab().toImage(); int darkHexInkPixels = 0;
+    for (int y = 20; y < qMin(hexImg.height() - 2, 56); ++y) for (int x = 155; x < qMin(hexImg.width() - 10, 420); ++x) if (hexImg.pixelColor(x, y).lightness() < 75) ++darkHexInkPixels;
     QVERIFY2(darkHexInkPixels >= 20, qPrintable(QStringLiteral("Expected >= 20 dark hex ink pixels (< 75 lightness), got %1").arg(darkHexInkPixels)));
-
     // Verify SourceCodeView and DisassemblyView canvas backgrounds and restore default gridlock_slate dark theme.
     gridlock::ui::SourceCodeView srcView; gridlock::ui::DisassemblyView disView;
     QVERIFY2(srcView.activeCanvasBackgroundColor().lightness() >= 220 && disView.activeCanvasBackgroundColor().lightness() >= 220, "Canvas backgrounds must be light in solarized_light");
     tm.applyTheme(QStringLiteral("gridlock_slate")); QVERIFY2(tm.isDarkMode(), "Selecting gridlock_slate must restore isDarkMode() == true");
 }
 
-/**
- * @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and MainWindow*.cpp line count headroom.
- */
+/** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and MainWindow*.cpp line count headroom. */
 void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadroom() {
     // 1. Full Workstation Theme Propagation in solarized_light across primary inspection views.
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("solarized_light"));
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
     gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
-
     // Retrieve pointers to all primary inspection subviews and verify light canvas lightness >= 200.
-    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
-    auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
-    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>(); auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(memView != nullptr && diffGrid != nullptr && serverRack != nullptr && disasmView != nullptr);
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() >= 200 && gridlock::tests::getActiveCanvasBg(diffGrid, 0).lightness() >= 200 && gridlock::tests::getActiveCanvasBg(serverRack, 0).lightness() >= 200, "Inspection views must have light canvas >= 200 in solarized_light");
-    // Verify toolbars and dock headers are aligned without hardcoded dark stylesheets.
     QVERIFY2(gridlock::tests::callAreAllChromeAligned(&mainWindow, 0), "All chrome toolbars and dock headers must be theme aligned without hardcoded #16181d/#1b1e24");
-
     // Inspect decompiler function signature label contrast (dark ink < 120 lightness on light cream background).
     auto* sigLabel = disasmView->findChild<QLabel*>(QStringLiteral("disasmSignatureLabel")); QVERIFY(sigLabel != nullptr);
     const auto match = QRegularExpression(QStringLiteral("color:\\s*(#[0-9a-fA-F]{3,8}|rgba?\\([^)]+\\))")).match(sigLabel->styleSheet());
     const QColor sigTextColor = match.hasMatch() ? QColor(match.captured(1)) : sigLabel->palette().color(QPalette::WindowText);
     QVERIFY2(sigTextColor.isValid() && sigTextColor.lightness() < 120, qPrintable(QString("Decompiler signature text color lightness %1 >= 120").arg(sigTextColor.lightness())));
-
     // Restore default dark theme and verify dark activeCanvasBackgroundColor (< 60 lightness).
     tm.applyTheme(QStringLiteral("gridlock_slate")); gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() < 60, "MemView canvas background must be dark (< 60 lightness) in gridlock_slate");
-
     // 2. Spaced, Non-Colliding Palette Swatch Chips with hex colors stored in toolTip().
     gridlock::ui::PreferencesDialog prefsDialog; prefsDialog.resize(860, 620); prefsDialog.show(); QApplication::processEvents();
     QList<QLabel*> swatchBoxes;
-    for (QLabel* lbl : prefsDialog.findChildren<QLabel*>())
-        for (const QString& r : {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")})
-            if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
+    for (QLabel* lbl : prefsDialog.findChildren<QLabel*>()) for (const QString& r : {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")}) if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
     QVERIFY2(swatchBoxes.size() == 5, qPrintable(QString("Expected 5 clean role swatch boxes, found %1").arg(swatchBoxes.size())));
     for (QLabel* box : swatchBoxes) QVERIFY2(!box->toolTip().isEmpty() && box->toolTip().contains('#'), "Swatch box must store hex color in toolTip()");
-
     // 3. MainWindow*.cpp Line Count Headroom (< 880 Lines Each).
     for (const QString& relPath : {QStringLiteral("src/ui/MainWindow.cpp"), QStringLiteral("src/ui/MainWindowWorkspace.cpp"), QStringLiteral("src/ui/MainWindowCohesion.cpp"), QStringLiteral("src/ui/MainWindowNavigation.cpp"), QStringLiteral("src/ui/MainWindowDocks.cpp")}) {
         QFile f(QFile::exists(QStringLiteral("../") + relPath) ? (QStringLiteral("../") + relPath) : relPath);
-        // Verify file exists and sits strictly below the 880 line target ceiling.
         QVERIFY2(f.exists() && f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QString("Could not open %1").arg(relPath)));
         QVERIFY2(QString::fromUtf8(f.readAll()).split('\n').size() < 880, qPrintable(QString("%1 >= 880 lines").arg(relPath)));
     }

@@ -171,6 +171,10 @@ public:
     bool isSplitGraphDecompilerMode() const { return m_splitGraphDecompiler; }
     /// Notifies DisassemblyView whether the C++ SourceCodeView editor is currently visible alongside it.
     void setSourceEditorActive(bool sourceVisible);
+    /// Shows or collapses the pseudo-C decompiler pane (optionally applying default CFG/Linear mode).
+    void setDecompilerPaneVisible(bool visible, bool applyDefaultMode = true);
+    /// Sets decompiler visibility policy when the source editor is shown alongside disassembly.
+    void setDecompilerVisibleWhenSourceShown(bool visible);
     /// Returns true if the pseudo-C decompiler pane is currently visible inside DisassemblyView.
     bool isDecompilerVisible() const;
 

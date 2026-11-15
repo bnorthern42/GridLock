@@ -580,6 +580,13 @@ public slots:
      */
     bool switchWorkspaceDirectory(const QString& dirPath);
 
+    /**
+     * @brief Enforces DisassemblyView pseudo-C decompiler and CFG/Linear mode visibility policy.
+     * @param applyDefaultMode True to also apply `ConfigManager::defaultDisassemblyMode()` when source is visible.
+     */
+    void syncDisassemblyDecompilerVisibility(bool applyDefaultMode);
+    void syncDisassemblyDecompilerVisibility() { syncDisassemblyDecompilerVisibility(true); }
+
     void onRankStateChanged(int rankId, const RankState& state);
     void onRankSelected(int rankId);
     void openFile();

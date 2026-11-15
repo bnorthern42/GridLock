@@ -591,18 +591,31 @@ void DisassemblyView::centerCursor() { if (m_linearEdit) m_linearEdit->centerCur
 void DisassemblyView::setSourceEditorActive(bool sourceVisible) {
   m_sourceEditorActive = sourceVisible;
   if (sourceVisible && !gridlock::core::ConfigManager::instance().showDecompilerWithSource()) {
-    m_splitGraphDecompiler = false;
-    m_decompilerMode = false;
+    m_splitGraphDecompiler = false; m_decompilerMode = false;
   }
   updateViewModeLayout();
 }
 
 /**
+ * @brief Shows or hides the pseudo-C decompiler pane and optionally applies default CFG/Linear mode.
+ * @param visible True to show decompiler alongside/instead of assembly; false to collapse to zero width.
+ * @param applyDefaultMode True to also enforce `ConfigManager::defaultDisassemblyMode()`.
+ */
+void DisassemblyView::setDecompilerPaneVisible(bool visible, bool applyDefaultMode) {
+  // Query user default disassembly mode ("cfg", "linear", or "split") before updating flags.
+  const bool wantLinear = (gridlock::core::ConfigManager::instance().defaultDisassemblyMode() == QStringLiteral("linear"));
+  if (!visible) { m_splitGraphDecompiler = false; m_decompilerMode = false; if (applyDefaultMode) m_graphMode = !wantLinear; }
+  else { m_graphMode = !wantLinear; m_splitGraphDecompiler = !wantLinear; m_decompilerMode = true; }
+  updateViewModeLayout();
+}
+/**
+ * @brief Synchronizes decompiler visibility policy when the source editor is active.
+ */
+void DisassemblyView::setDecompilerVisibleWhenSourceShown(bool visible) { setDecompilerPaneVisible(visible, true); }
+/**
  * @brief Returns true if the pseudo-C decompiler pane is currently visible inside DisassemblyView.
  */
-bool DisassemblyView::isDecompilerVisible() const {
-  return m_decompilerPage && !m_decompilerPage->isHidden() && (m_decompilerMode || m_splitGraphDecompiler);
-}
+bool DisassemblyView::isDecompilerVisible() const { return m_decompilerPage && !m_decompilerPage->isHidden() && (m_decompilerMode || m_splitGraphDecompiler); }
 
 /**
  * @brief Synchronizes UI toggles, splitter ratios, and visible pages for the active view mode.
@@ -612,30 +625,30 @@ void DisassemblyView::updateViewModeLayout() {
   if (m_splitToggleBtn) m_splitToggleBtn->setChecked(m_splitGraphDecompiler);
   if (m_modeToggleBtn) {
     m_modeToggleBtn->setText(m_graphMode ? QStringLiteral("Linear (Space)") : QStringLiteral("CFG (Space)"));
-    m_modeToggleBtn->setMinimumWidth(qMax(m_modeToggleBtn->sizeHint().width(),
-                                          m_modeToggleBtn->fontMetrics().horizontalAdvance(m_modeToggleBtn->text()) + 14));
+    m_modeToggleBtn->setMinimumWidth(qMax(m_modeToggleBtn->sizeHint().width(), m_modeToggleBtn->fontMetrics().horizontalAdvance(m_modeToggleBtn->text()) + 14));
   }
-
-  // Handle Split mode: Side-by-side CFG Graph (left) + Decompiler (right)
+  // Restore 180px minimum decompiler pane width whenever Split or standalone Decompiler mode is active.
+  auto showDecompPane = [this]() {
+    if (m_decompilerEdit) m_decompilerEdit->setMinimumWidth(180);
+    if (m_decompilerPage) { m_decompilerPage->setMinimumWidth(180); m_decompilerPage->show(); }
+  };
+  auto* sp = qobject_cast<QSplitter*>(m_splitViewContainer);
   if (m_splitGraphDecompiler) {
     if (m_stack) { m_stack->show(); m_stack->setCurrentIndex(1); }
-    if (m_decompilerPage) m_decompilerPage->show();
-    if (auto *sp = qobject_cast<QSplitter *>(m_splitViewContainer)) {
-      const int totalW = qMax(420, width());
-      sp->setSizes({totalW / 2, totalW / 2});
-    }
-    rebuildCfgScene();
-    refreshDecompilerView();
-    return;
+    showDecompPane();
+    if (sp) { const int totalW = qMax(420, width()); sp->setSizes({totalW / 2, totalW / 2}); }
+    rebuildCfgScene(); refreshDecompilerView(); return;
   }
-
-  // Handle standalone Decompiler vs stacked Linear/CFG modes cleanly.
   if (m_decompilerMode) {
     if (m_stack) m_stack->hide();
-    if (m_decompilerPage) m_decompilerPage->show();
+    showDecompPane();
+    if (sp) sp->setSizes({0, qMax(180, width())});
     refreshDecompilerView();
   } else {
-    if (m_decompilerPage) m_decompilerPage->hide();
+    // Collapse minimumWidth(0) before hiding so QSplitter and tests observe width() == 0.
+    if (m_decompilerEdit) { m_decompilerEdit->setMinimumWidth(0); m_decompilerEdit->resize(0, m_decompilerEdit->height()); }
+    if (m_decompilerPage) { m_decompilerPage->setMinimumWidth(0); m_decompilerPage->resize(0, m_decompilerPage->height()); m_decompilerPage->hide(); }
+    if (sp) sp->setSizes({qMax(420, width()), 0});
     if (m_stack) { m_stack->show(); m_stack->setCurrentIndex(m_graphMode ? 1 : 0); }
     if (m_graphMode) {
       // Entering CFG view resets manual scroll state and enforces idle ArrowCursor.
@@ -648,13 +661,9 @@ void DisassemblyView::updateViewModeLayout() {
 
 /**
  * @brief Toggles side-by-side CFG Graph + Decompiler split layout.
- * @param enabled True to enable split pane with CFG on left and pseudo-C on right.
  */
 void DisassemblyView::setSplitGraphDecompilerMode(bool enabled) {
-  m_splitGraphDecompiler = enabled;
-  m_graphMode = enabled ? true : m_graphMode;
-  m_decompilerMode = enabled;
-  updateViewModeLayout();
+  m_splitGraphDecompiler = enabled; m_graphMode = enabled ? true : m_graphMode; m_decompilerMode = enabled; updateViewModeLayout();
 }
 
 /**

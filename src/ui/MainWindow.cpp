@@ -248,6 +248,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     resizeDocks({varsDock}, {380}, Qt::Horizontal);
     if (auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"))) resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical);
   }
+  // Synchronize DisassemblyView pseudo-C decompiler visibility with showDecompilerWithSource preference.
+  syncDisassemblyDecompilerVisibility(false);
   // Populate initial status bar Stack/Heap/RAM/CPU telemetry and start 1500ms refresh timer.
   refreshStatusBarMemoryTelemetry();
   auto* telemetryTimer = new QTimer(this);
@@ -805,11 +807,30 @@ void MainWindow::closeEvent(QCloseEvent *event) {
  * @param event Event payload.
  * @return True if event was handled, false otherwise.
  */
+void MainWindow::syncDisassemblyDecompilerVisibility(bool applyDefaultMode) {
+  if (!m_disassemblyView) return;
+  const bool sourceVisible = m_editorTabManager && !m_editorTabManager->isHidden() &&
+                             m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) != 0;
+  m_disassemblyView->setSourceEditorActive(sourceVisible);
+  if (!sourceVisible) {
+    if (!m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setSplitGraphDecompilerMode(true);
+    return;
+  }
+  const auto& cfg = gridlock::core::ConfigManager::instance();
+  if (!cfg.showDecompilerWithSource()) {
+    m_showingDecompilerFallback = false; m_forceDecompilerFallback = false;
+    m_disassemblyView->setDecompilerPaneVisible(false, applyDefaultMode);
+  } else if (applyDefaultMode || !m_disassemblyView->isDecompilerVisible()) {
+    m_disassemblyView->setDecompilerPaneVisible(true, true);
+  }
+}
+
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   // Hot-swap between GdbRankCoordinator and DapCoordinator when ConfigManager::setDebuggerEngine fires.
   if (watched == qApp && event->type() == QEvent::DynamicPropertyChange) {
     const auto *dp = static_cast<QDynamicPropertyChangeEvent *>(event);
     if (dp->propertyName() == QByteArrayLiteral("gridlock_debugger_engine")) syncCoordinatorWithConfig();
+    else if (dp->propertyName() == QByteArrayLiteral("gridlock_disasm_prefs_rev")) syncDisassemblyDecompilerVisibility(true);
     else if (dp->propertyName() == QByteArrayLiteral("gridlock_editor_highlight_rev") && m_editorTabManager)
       m_editorTabManager->rehighlightAllTabs();
   }
@@ -817,6 +838,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   if (event->type() == QEvent::Show) {
     if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
       connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
+      connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
       if (m_editorTabManager) {
         connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
       }

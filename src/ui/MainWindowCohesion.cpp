@@ -415,7 +415,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         const uint64_t entry = (mainAddr != 0ULL) ? mainAddr : m_elfInspector->entryPoint();
         if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
-    return true;
+    syncDisassemblyDecompilerVisibility(true); return true;
 }
 
 /**
@@ -605,6 +605,7 @@ void MainWindow::setWorkspacePerspective(const QString& perspective) {
     if (m_perspCodeBtn) m_perspCodeBtn->setChecked(m_workspacePerspective == QStringLiteral("Code"));
     if (m_perspReverseBtn) m_perspReverseBtn->setChecked(m_workspacePerspective == QStringLiteral("Reverse"));
     if (m_perspMpiBtn) m_perspMpiBtn->setChecked(m_workspacePerspective == QStringLiteral("MPI"));
+    syncDisassemblyDecompilerVisibility(true);
 }
 
 /**

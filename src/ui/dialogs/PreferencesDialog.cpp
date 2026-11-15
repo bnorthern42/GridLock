@@ -538,6 +538,7 @@ void PreferencesDialog::apply() {
     cfg.saveTerminalSettings(ts);
 
     s.sync();
+    if (qApp) qApp->setProperty("gridlock_disasm_prefs_rev", qApp->property("gridlock_disasm_prefs_rev").toInt() + 1);
     emit preferencesChanged();
 }
 

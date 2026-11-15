@@ -861,7 +861,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
         }
     }
     if (m_projectExplorerWidget) m_projectExplorerWidget->setSymbolsMode(false);
-    return true;
+    syncDisassemblyDecompilerVisibility(true); return true;
 }
 
 /**
