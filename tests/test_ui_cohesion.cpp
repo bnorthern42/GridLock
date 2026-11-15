@@ -47,6 +47,8 @@
 #include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/dialogs/ProjectWizard.hpp"
 #include "../src/ui/dialogs/XrefInspectorDialog.hpp"
+#include "../src/core/models/VariableTreeModel.hpp"
+#include "../src/ui/docks/CallStackDockWidget.hpp"
 #include "../src/ui/docks/VariablesDockWidget.hpp"
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
@@ -118,6 +120,22 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     auto& cfg = gridlock::core::ConfigManager::instance();
     gridlock::tests::callSetShowDecompilerWithSource(&cfg, false, 0);
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900);
+    // 0. Gate 1 Zero-Mock Startup, Idle Telemetry, Preview Seeding, and Stop-Clear Verification.
+    auto* varsDockW = mainWindow.findChild<gridlock::VariablesDockWidget*>();
+    auto* varModel = varsDockW ? varsDockW->findChild<gridlock::VariableTreeModel*>() : nullptr;
+    auto* regTable = mainWindow.registerView() ? mainWindow.registerView()->findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable")) : nullptr;
+    auto* csWidget = mainWindow.findChild<gridlock::ui::CallStackDockWidget*>();
+    auto* csTable = csWidget ? csWidget->findChild<QTableWidget*>(QStringLiteral("callStackTable")) : nullptr;
+    auto* initStatusLbl = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
+    QVERIFY(varModel && regTable && csWidget && csTable && initStatusLbl);
+    QVERIFY2(varModel->rowCount() == 0, "VariableTreeModel must have 0 rows on startup");
+    QVERIFY2(regTable->rowCount() == 0, "RegisterView must have 0 rows on startup");
+    const QString idleTelemetry = initStatusLbl->text();
+    QVERIFY2(!idleTelemetry.contains(QStringLiteral("136 KB")) && !idleTelemetry.contains(QStringLiteral("2048 KB")) && !idleTelemetry.contains(QStringLiteral("2.0 MB")) && !idleTelemetry.contains(QStringLiteral("STACK:")) && !idleTelemetry.contains(QStringLiteral("HEAP:")) && idleTelemetry.contains(QStringLiteral("TARGET: IDLE")) && idleTelemetry.contains(QStringLiteral("HOST RAM:")) && idleTelemetry.contains(QStringLiteral("CPU:")), qPrintable(idleTelemetry));
+    mainWindow.loadPreviewFixture(); StackFrameEntry sf; sf.level = 0; sf.function = QStringLiteral("main"); sf.file = QStringLiteral("main.cpp"); sf.line = 10; sf.address = 0x401120ULL; csWidget->setStackFrames({sf}, 0);
+    QVERIFY2(varModel->rowCount() > 0 && regTable->rowCount() > 0 && csTable->rowCount() == 1, "loadPreviewFixture() + setStackFrames() must populate preview docks");
+    mainWindow.stopTargetWorkflow(); QApplication::processEvents();
+    QVERIFY2(varModel->rowCount() == 0 && regTable->rowCount() == 0 && csTable->rowCount() == 0, "stopTargetWorkflow() must clear VariableTreeModel, RegisterView, and CallStackDockWidget to 0 rows");
     mainWindow.loadPreviewFixture(); mainWindow.propagateThemeToAllWidgets();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
@@ -130,10 +148,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
         bottomTabs->setCurrentIndex(i); QCoreApplication::processEvents();
         QWidget* page = bottomTabs->widget(i); QVERIFY(page != nullptr);
         const QString tabTitle = bottomTabs->tabText(i);
-        if (QLayout* pageLayout = page->layout()) {
-            const QMargins m = pageLayout->contentsMargins();
-            QVERIFY2(m.left() <= gridlock::tests::kMaxAllowedTabMarginPx && m.right() <= gridlock::tests::kMaxAllowedTabMarginPx && m.bottom() <= gridlock::tests::kMaxAllowedTabMarginPx, qPrintable(QString("Tab '%1' margins > 4").arg(tabTitle)));
-        }
+        if (QLayout* pageLayout = page->layout()) { const QMargins m = pageLayout->contentsMargins(); QVERIFY2(m.left() <= gridlock::tests::kMaxAllowedTabMarginPx && m.right() <= gridlock::tests::kMaxAllowedTabMarginPx && m.bottom() <= gridlock::tests::kMaxAllowedTabMarginPx, qPrintable(QString("Tab '%1' margins > 4").arg(tabTitle))); }
         for (const QPushButton* btn : page->findChildren<QPushButton*>()) if (btn && btn->isVisible()) QVERIFY2(btn->height() <= gridlock::tests::kMaxAllowedControlHeightPx, qPrintable(QString("Tab '%1' button height > 28").arg(tabTitle)));
         for (const QLineEdit* edit : page->findChildren<QLineEdit*>()) if (edit && edit->isVisible()) QVERIFY2(edit->height() <= gridlock::tests::kMaxAllowedControlHeightPx, qPrintable(QString("Tab '%1' lineEdit height > 28").arg(tabTitle)));
         for (const QComboBox* combo : page->findChildren<QComboBox*>()) if (combo && combo->isVisible()) QVERIFY2(combo->height() <= gridlock::tests::kMaxAllowedControlHeightPx, qPrintable(QString("Tab '%1' combo height > 28").arg(tabTitle)));
@@ -156,23 +171,17 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     const QFileInfo snapInfo(snapshotPath); QVERIFY(snapInfo.exists() && snapInfo.size() > 0);
 
     // 4. Right-Sidebar 2-Zone Consolidation & Concise WATCH Tab without Scroll Arrows.
-    auto* variablesDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
-    auto* registersDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
-    auto* watchDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+    auto* variablesDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock")); auto* registersDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock")); auto* watchDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
     QVERIFY(variablesDock != nullptr && registersDock != nullptr && watchDock != nullptr);
     const QList<QDockWidget*> tabified = mainWindow.tabifiedDockWidgets(variablesDock);
     QVERIFY2(tabified.contains(registersDock) && tabified.contains(watchDock), "VariablesDock, RegisterViewDock, and WatchExpressionsDock must share top-right tabbed dock group");
     QVERIFY2(watchDock->windowTitle().compare(QStringLiteral("WATCH"), Qt::CaseInsensitive) == 0 && watchDock->windowTitle().size() <= 8, "watchDock title must be concise 'WATCH'");
-
-    // Verify all dock QTabBar instances disable scroll buttons and fit all tabs within tabBar width.
     QTabBar* rightDockTabBar = nullptr;
     for (QTabBar* tb : mainWindow.findChildren<QTabBar*>()) {
         QVERIFY2(!tb->usesScrollButtons(), "Every dock QTabBar in MainWindow must have usesScrollButtons() == false");
         for (int i = 0; i < tb->count(); ++i) if (tb->tabText(i).contains(QStringLiteral("VARIABLES"), Qt::CaseInsensitive)) { rightDockTabBar = tb; break; }
     }
     QVERIFY2(rightDockTabBar != nullptr && rightDockTabBar->count() >= 3 && rightDockTabBar->tabRect(0).left() >= 0 && rightDockTabBar->tabRect(rightDockTabBar->count() - 1).right() <= rightDockTabBar->width(), "All 3 tabs (VARIABLES, REGISTERS, WATCH) must fit completely inside QTabBar::width()");
-
-    // Verify active top-right dock group height >= 260px at 1600x950.
     mainWindow.resize(1600, 950); mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents(); QTest::qWait(20);
     const int varsActiveH = variablesDock->height(); watchDock->raise(); QApplication::processEvents(); const int watchActiveH = watchDock->height(); variablesDock->raise(); QApplication::processEvents();
     QVERIFY2(varsActiveH >= 260 && watchActiveH >= 260, qPrintable(QStringLiteral("Top-right dock crushed: varsH=%1 watchH=%2").arg(varsActiveH).arg(watchActiveH)));
@@ -187,18 +196,9 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QVERIFY2(!gridlock::tests::callIsDecompilerVisible(disasm, 0), "Pseudo-C decompiler must be hidden in MPI perspective when showDecompilerWithSource() == false");
     mainWindow.setWorkspacePerspective(QStringLiteral("Reverse")); disasm->setSplitGraphDecompilerMode(true); QApplication::processEvents();
     QVERIFY2(gridlock::tests::callIsDecompilerVisible(disasm, 0), "Pseudo-C decompiler must be visible in REVERSE perspective");
-    auto countCheckedModeBtns = [disasm]() -> int {
-        int cnt = 0;
-        for (const QString& id : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")})
-            if (auto* b = disasm->findChild<QPushButton*>(id); b && b->isChecked()) ++cnt;
-        return cnt;
-    };
-    for (int m = 0; m < 4; ++m) {
-        if (m == 0) disasm->setGraphMode(false); else if (m == 1) disasm->setGraphMode(true); else if (m == 2) disasm->setDecompilerMode(true); else disasm->setSplitGraphDecompilerMode(true);
-        QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "At most 1 DisassemblyView mode button may be checked");
-    }
-    auto* decompPage = disasm->findChild<QWidget*>(QStringLiteral("decompilerPageContainer"));
-    auto* splitBtn = disasm->findChild<QPushButton*>(QStringLiteral("cutterSplitViewBtn"));
+    auto countCheckedModeBtns = [disasm]() -> int { int cnt = 0; for (const QString& id : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")}) if (auto* b = disasm->findChild<QPushButton*>(id); b && b->isChecked()) ++cnt; return cnt; };
+    for (int m = 0; m < 4; ++m) { if (m == 0) disasm->setGraphMode(false); else if (m == 1) disasm->setGraphMode(true); else if (m == 2) disasm->setDecompilerMode(true); else disasm->setSplitGraphDecompilerMode(true); QApplication::processEvents(); QVERIFY2(countCheckedModeBtns() <= 1, "At most 1 DisassemblyView mode button may be checked"); }
+    auto* decompPage = disasm->findChild<QWidget*>(QStringLiteral("decompilerPageContainer")); auto* splitBtn = disasm->findChild<QPushButton*>(QStringLiteral("cutterSplitViewBtn"));
     QVERIFY(decompPage != nullptr && splitBtn != nullptr);
     mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
     QVERIFY2(!decompPage->isVisible() && decompPage->width() == 0 && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !splitBtn->isChecked(), "Reverse->Code must collapse decompiler");
@@ -209,14 +209,14 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QProcess gxx; gxx.start(QStringLiteral("g++"), {QStringLiteral("-g"), extWsDir.filePath(QStringLiteral("src/main.cpp")), QStringLiteral("-o"), extWsDir.filePath(QStringLiteral("build_meson/ws_bin"))});
     QVERIFY(gxx.waitForFinished(15000) && gxx.exitCode() == 0);
     mainWindow.switchWorkspaceDirectory(extWsDir.path()); mainWindow.loadBinaryTarget(extWsDir.filePath(QStringLiteral("build_meson/ws_bin"))); QApplication::processEvents();
+    // Verify switching workspace cleared stale variable/register/callstack entries too.
+    auto* varModelWs = varsDockW->findChild<gridlock::VariableTreeModel*>();
+    QVERIFY2(varModelWs && varModelWs->rowCount() == 0 && regTable->rowCount() == 0 && csTable->rowCount() == 0, "switchWorkspaceDirectory() must clear VariableTreeModel, RegisterView, and CallStackDockWidget");
     // Verify idle ServerRackView renders 8 IDLE cards without fake RUN badges or 0x00401120/0x00401157 addresses, and #addressNavBar hides stack & binds real ELF .text.
     auto *idleRack = mainWindow.serverRackView(); QWidget *navRibbon = mainWindow.findChild<QWidget*>(QStringLiteral("addressNavBar")); QLabel *stackSeg = navRibbon ? navRibbon->findChild<QLabel*>(QStringLiteral("ribbonSeg_stack")) : nullptr, *textSeg = navRibbon ? navRibbon->findChild<QLabel*>(QStringLiteral("ribbonSeg_text")) : nullptr;
     bool allRackIdle = idleRack && idleRack->rankNodeCount() == 8; for (int r = 0; allRackIdle && r < 8; ++r) { const auto rs = idleRack->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>(); allRackIdle = (rs.currentState == QStringLiteral("idle") && idleRack->rankPcAddress(r) == 0ULL && !rs.registers.value(16).contains(QStringLiteral("4011"))); }
     QVERIFY2(allRackIdle && stackSeg && !stackSeg->isVisible() && textSeg && textSeg->isVisible() && !textSeg->text().contains(QStringLiteral("0x401120")), "Idle ServerRack must show 8 IDLE cards without fake addresses and section ribbon must hide stack and bind real ELF .text");
-    for (const QString& persp : {QStringLiteral("Code"), QStringLiteral("MPI")}) {
-        mainWindow.setWorkspacePerspective(persp); QApplication::processEvents();
-        QVERIFY2(!decompPage->isVisible() && decompPage->width() == 0 && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !disasm->isSplitGraphDecompilerMode() && !splitBtn->isChecked() && disasm->isGraphMode(), "External workspace + loadBinaryTarget must honor showDecompilerWithSource=false in Code/MPI");
-    }
+    for (const QString& persp : {QStringLiteral("Code"), QStringLiteral("MPI")}) { mainWindow.setWorkspacePerspective(persp); QApplication::processEvents(); QVERIFY2(!decompPage->isVisible() && decompPage->width() == 0 && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !disasm->isSplitGraphDecompilerMode() && !splitBtn->isChecked() && disasm->isGraphMode(), "External workspace + loadBinaryTarget must honor showDecompilerWithSource=false in Code/MPI"); }
     gridlock::ui::PreferencesDialog prefsDecompDlg(&mainWindow);
     auto* showDecompCheck = prefsDecompDlg.findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck")); auto* prefsBtnBox = prefsDecompDlg.findChild<QDialogButtonBox*>();
     QVERIFY2(showDecompCheck && !showDecompCheck->isChecked() && prefsBtnBox && prefsBtnBox->button(QDialogButtonBox::Apply) && prefsBtnBox->button(QDialogButtonBox::Ok), "PreferencesDialog Debugger page must expose unchecked showDecompilerWithSourceCheck");
@@ -232,14 +232,11 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
 
     // 6. Verify MainToolbar spinbox/combobox widths, 26px button height parity, movable toolbars, and Run Target accent.
     auto* mainToolBar = mainWindow.findChild<QToolBar*>(QStringLiteral("MainToolbar")); QVERIFY(mainToolBar != nullptr);
-    auto* rankSpinBox = mainToolBar->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")); auto* targetCombo = mainToolBar->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    auto* spinEdit = rankSpinBox ? rankSpinBox->findChild<QLineEdit*>() : nullptr; QVERIFY(rankSpinBox && targetCombo && spinEdit);
+    auto* rankSpinBox = mainToolBar->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")); auto* targetCombo = mainToolBar->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* spinEdit = rankSpinBox ? rankSpinBox->findChild<QLineEdit*>() : nullptr;
+    QVERIFY(rankSpinBox && targetCombo && spinEdit);
     QVERIFY2(rankSpinBox->width() >= 68 && rankSpinBox->height() >= 24 && rankSpinBox->height() <= 28 && spinEdit->width() >= 36 && targetCombo->width() >= 185, "Toolbar rankSpinBox or targetCombo clipped");
     QToolButton *runBtn = nullptr, *buildBtn = nullptr;
-    for (QAction* act : mainToolBar->actions()) if (act) {
-        if (act->text().contains(QStringLiteral("Run Target"), Qt::CaseInsensitive)) runBtn = qobject_cast<QToolButton*>(mainToolBar->widgetForAction(act));
-        if (act->text().contains(QStringLiteral("Build"), Qt::CaseInsensitive)) buildBtn = qobject_cast<QToolButton*>(mainToolBar->widgetForAction(act));
-    }
+    for (QAction* act : mainToolBar->actions()) if (act) { if (act->text().contains(QStringLiteral("Run Target"), Qt::CaseInsensitive)) runBtn = qobject_cast<QToolButton*>(mainToolBar->widgetForAction(act)); if (act->text().contains(QStringLiteral("Build"), Qt::CaseInsensitive)) buildBtn = qobject_cast<QToolButton*>(mainToolBar->widgetForAction(act)); }
     const auto pal = tm.paletteForTheme(tm.activeThemeId());
     QVERIFY2(runBtn != nullptr && buildBtn != nullptr && qAbs(runBtn->height() - buildBtn->height()) <= 1 && runBtn->height() <= 28 && runBtn->styleSheet().contains(pal.accentHex, Qt::CaseInsensitive), "Run Target button height/accent mismatch");
     for (QToolBar* tb : mainWindow.findChildren<QToolBar*>()) QVERIFY2(tb->isMovable(), qPrintable(QStringLiteral("QToolBar must be movable: ") + tb->objectName()));
@@ -255,8 +252,7 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     auto* telemetryCombo = prefsDecompDlg.findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"));
     QVERIFY2(telemetryCombo != nullptr && telemetryCombo->findData(QStringLiteral("gb")) >= 0 && telemetryCombo->findData(QStringLiteral("percent")) >= 0 && telemetryCombo->findData(QStringLiteral("both")) >= 0, "PreferencesDialog must expose telemetryFormatCombo with gb, percent, and both");
     auto* statusLbl = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
-    QVERIFY2(statusLbl != nullptr && statusLbl->text().contains(QStringLiteral("STACK:")) && statusLbl->text().contains(QStringLiteral("HEAP:")) && statusLbl->text().contains(QStringLiteral("RAM:")) && statusLbl->text().contains(QStringLiteral("CPU:")),
-             qPrintable(QStringLiteral("Status bar missing STACK/HEAP/RAM/CPU telemetry: ") + (statusLbl ? statusLbl->text() : QStringLiteral("<null>"))));
+    QVERIFY2(statusLbl != nullptr && statusLbl->text().contains(QStringLiteral("TARGET: IDLE")) && statusLbl->text().contains(QStringLiteral("HOST RAM:")) && statusLbl->text().contains(QStringLiteral("CPU:")) && !statusLbl->text().contains(QStringLiteral("STACK:")) && !statusLbl->text().contains(QStringLiteral("136 KB")), qPrintable(statusLbl ? statusLbl->text() : QStringLiteral("<null>")));
     QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/statusbar_mem_verify.png")));
 }
 

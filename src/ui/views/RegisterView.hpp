@@ -89,6 +89,16 @@ public slots:
      */
     void updateRegisters(const QMap<QString, QString>& registers);
 
+    /**
+     * @brief Clears all register rows and cached mutation state so the panel is empty while idle.
+     */
+    void clearRegisters();
+
+    /**
+     * @brief Populates synthetic x86_64 preview registers strictly for explicit test fixtures.
+     */
+    void seedPreviewRegisters();
+
 private:
     /**
      * @brief Populates the QTableWidget with ordered name/value pairs.

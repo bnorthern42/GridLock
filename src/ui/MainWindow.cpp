@@ -233,10 +233,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Route window to preferred monitor if specified in configuration.
   auto& cfg = gridlock::core::ConfigManager::instance();
   applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
-  // Instantiate live debugger coordinator (`gdb` or `lldb-dap`) before seeding preview UI rows.
+  // Instantiate live debugger coordinator (`gdb` or `lldb-dap`) before finishing dock initialization.
   syncCoordinatorWithConfig();
   bindLiveMemViewHandlers();
-  loadPreviewFixture();
   m_previewFixtureOnly = false;
   if (m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
   // Listen for global theme mode change events from ThemeManager singleton.
@@ -268,6 +267,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 void MainWindow::loadPreviewFixture() {
   m_previewFixtureOnly = true;
   m_useRealBinaryTarget = false;
+  if (m_registerView) m_registerView->seedPreviewRegisters();
   // Pre-allocate storage capacity for eight initial process rank descriptors.
   QList<RankState> fixtureRanks; fixtureRanks.reserve(8);
   for (int i = 0; i < 8; ++i) {
@@ -753,8 +753,10 @@ void MainWindow::refreshStatusBarMemoryTelemetry() {
       mem, gridlock::core::ConfigManager::instance().telemetryDisplayFormat());
   // Replace any trailing telemetry suffix in-place without disturbing the active PC/status prefix.
   QString base = m_statusTelemetryLabel->text();
-  const int stackIdx = base.indexOf(QStringLiteral(" | STACK:"));
-  if (stackIdx >= 0) base = base.left(stackIdx);
+  int cutIdx = base.indexOf(QStringLiteral(" | STACK:"));
+  const int idleIdx = base.indexOf(QStringLiteral(" | TARGET: IDLE"));
+  if (idleIdx >= 0 && (cutIdx < 0 || idleIdx < cutIdx)) cutIdx = idleIdx;
+  if (cutIdx >= 0) base = base.left(cutIdx);
   m_statusTelemetryLabel->setText(base + QStringLiteral(" | ") + summary);
 }
 
@@ -847,9 +849,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
       }
     }
   }
-  // Ensure status-bar Stack/Heap telemetry populates immediately on initial status bar paint.
+  // Ensure status-bar Host/Target telemetry populates immediately on initial status bar paint.
   if (watched == m_statusTelemetryLabel && (event->type() == QEvent::Paint || event->type() == QEvent::Show)) {
-    if (m_statusTelemetryLabel && !m_statusTelemetryLabel->text().contains(QStringLiteral("STACK:"))) refreshStatusBarMemoryTelemetry();
+    if (m_statusTelemetryLabel && !m_statusTelemetryLabel->text().contains(QStringLiteral("CPU:"))) refreshStatusBarMemoryTelemetry();
   }
   // Delegate custom dock title-bar drag, pop-out, and double-click events first.
   if (handleDockHeaderEvent(watched, event)) return true;

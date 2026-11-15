@@ -846,24 +846,20 @@ quint64 ElfBinaryInspector::queryStackTopAddress(qint64 pid) {
 ProcessMemoryTelemetry ElfBinaryInspector::queryProcessMemory(qint64 pid,
                                                               quint64 currentRsp,
                                                               quint64 stackTopAddr) {
-    // Auto-resolve `[stack]` top boundary for live target PIDs when caller omits `stackTopAddr`.
+    // Auto-resolve `[stack]` top boundary only for live inferior PIDs (`pid > 0`).
     if (pid > 0 && currentRsp > 0 && stackTopAddr == 0) stackTopAddr = queryStackTopAddress(pid);
     QString procText;
-    const QString pidToken = (pid > 0) ? QString::number(pid) : QStringLiteral("self");
-    for (const QString& suffix : {QStringLiteral("/smaps"), QStringLiteral("/status")}) {
-        QFile f(QStringLiteral("/proc/%1%2").arg(pidToken, suffix));
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            procText = QString::fromUtf8(f.readAll());
-            if (!procText.isEmpty()) break;
+    // Never read `/proc/self` when idle (`pid <= 0`): only inspect a real target PID's procfs files.
+    if (pid > 0) {
+        for (const QString& suffix : {QStringLiteral("/smaps"), QStringLiteral("/status")}) {
+            QFile f(QStringLiteral("/proc/%1%2").arg(pid).arg(suffix));
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                procText = QString::fromUtf8(f.readAll());
+                if (!procText.isEmpty()) break;
+            }
         }
     }
-    if (procText.isEmpty()) {
-        QFile selfStatus(QStringLiteral("/proc/self/status"));
-        if (selfStatus.open(QIODevice::ReadOnly | QIODevice::Text)) procText = QString::fromUtf8(selfStatus.readAll());
-    }
-    ProcessMemoryTelemetry mem = parseProcMemoryTelemetry(procText, currentRsp, stackTopAddr);
-    if (mem.stackKb == 0) mem.stackKb = 136;
-    if (mem.heapKb == 0) mem.heapKb = 2048;
+    ProcessMemoryTelemetry mem = parseProcMemoryTelemetry(procText, (pid > 0) ? currentRsp : 0, (pid > 0) ? stackTopAddr : 0);
 
     // Sample aggregate host CPU utilization delta from /proc/stat across consecutive queries.
     QFile statFile(QStringLiteral("/proc/stat"));
@@ -899,15 +895,6 @@ QString ElfBinaryInspector::formatStatusBarSummary(const ProcessMemoryTelemetry&
         if (kb >= 1024) return QStringLiteral("%1 MB").arg(static_cast<double>(kb) / 1024.0, 0, 'f', 1);
         return QStringLiteral("%1 KB").arg(kb);
     };
-    const quint64 stkKb = (mem.stackKb > 0) ? mem.stackKb : 136;
-    const quint64 hpKb = (mem.heapKb > 0) ? mem.heapKb : 2048;
-    QString stackStr = fmtKb(stkKb);
-    if (mem.activeStackBytes > 0) {
-        const QString actStr = (mem.activeStackBytes >= 1024)
-            ? QStringLiteral("%1 KB").arg(mem.activeStackBytes / 1024)
-            : QStringLiteral("%1 B").arg(mem.activeStackBytes);
-        stackStr += QStringLiteral(" (%1 active)").arg(actStr);
-    }
     const double usedGb = static_cast<double>(mem.sysMemUsedKb) / (1024.0 * 1024.0);
     const double totalGb = static_cast<double>(mem.sysMemTotalKb) / (1024.0 * 1024.0);
     const double ramPct = (mem.sysMemTotalKb > 0)
@@ -924,7 +911,18 @@ QString ElfBinaryInspector::formatStatusBarSummary(const ProcessMemoryTelemetry&
         sysStr = QStringLiteral("RAM: %1 / %2 GB | CPU: %3%")
                      .arg(usedGb, 0, 'f', 1).arg(totalGb, 0, 'f', 1).arg(mem.sysCpuPercent, 0, 'f', 1);
     }
-    return QStringLiteral("STACK: %1 | HEAP: %2 | %3").arg(stackStr, fmtKb(hpKb), sysStr);
+    // Emit honest idle status when no live inferior process memory is reported.
+    if (mem.stackKb == 0 && mem.heapKb == 0 && mem.activeStackBytes == 0) {
+        return QStringLiteral("TARGET: IDLE | HOST %1").arg(sysStr);
+    }
+    QString stackStr = fmtKb(mem.stackKb);
+    if (mem.activeStackBytes > 0) {
+        const QString actStr = (mem.activeStackBytes >= 1024)
+            ? QStringLiteral("%1 KB").arg(mem.activeStackBytes / 1024)
+            : QStringLiteral("%1 B").arg(mem.activeStackBytes);
+        stackStr += QStringLiteral(" (%1 active)").arg(actStr);
+    }
+    return QStringLiteral("STACK: %1 | HEAP: %2 | %3").arg(stackStr, fmtKb(mem.heapKb), sysStr);
 }
 
 }  // namespace core

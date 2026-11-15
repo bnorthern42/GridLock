@@ -339,7 +339,7 @@ void MainWindow::setupStatusBar() {
   QStatusBar *bar = statusBar();
   bar->setObjectName(QStringLiteral("cutterStatusBar"));
   bar->setSizeGripEnabled(false); bar->setContentsMargins(6, 0, 6, 0);
-  if (m_currentSeekOrPc == QStringLiteral("0x00000000") || m_currentSeekOrPc.isEmpty()) m_currentSeekOrPc = QStringLiteral("0x00401120");
+  if (m_currentSeekOrPc == QStringLiteral("0x00000000") || m_currentSeekOrPc.isEmpty()) m_currentSeekOrPc = QStringLiteral("—");
   m_statusTelemetryLabel = new QLabel(bar);
   m_statusTelemetryLabel->setObjectName(QStringLiteral("cutterStatusTelemetry"));
   m_statusTelemetryLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);

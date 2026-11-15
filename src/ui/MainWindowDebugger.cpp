@@ -40,6 +40,8 @@
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
+#include "../core/models/VariableTreeModel.hpp"
+#include "docks/CallStackDockWidget.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
@@ -468,8 +470,10 @@ void MainWindow::stopTargetWorkflow() {
     }
     if (m_disassemblyView) { m_disassemblyView->setDeadlockCycleRanks({}); m_disassemblyView->setActiveSteppingRank(-1, 0ULL); }
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE"));
-
+    if (m_variablesDockWidget) { if (auto* vm = m_variablesDockWidget->findChild<gridlock::VariableTreeModel*>()) vm->clear(); }
+    { if (m_registerView) m_registerView->clearRegisters(); if (m_callStackDockWidget) m_callStackDockWidget->clearFrames(); }
+    m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE")); refreshStatusBarMemoryTelemetry();
     // Restore static pre-launch ELF64 disassembly, CFG, and symbol inspection cleanly after session stop.
     if (!m_previewFixtureOnly && !m_loadedBinaryPath.isEmpty() && QFileInfo::exists(m_loadedBinaryPath)) loadBinaryTarget(m_loadedBinaryPath);
 }
@@ -790,6 +794,9 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     struct ReentrancyGuard { bool& flag; ~ReentrancyGuard() { flag = false; } } guard{m_switchingWorkspace};
     m_switchingWorkspace = true;
     if (m_debugSessionActive) stopTargetWorkflow();
+    if (m_variablesDockWidget) { if (auto* vm = m_variablesDockWidget->findChild<gridlock::VariableTreeModel*>()) vm->clear(); }
+    { if (m_registerView) m_registerView->clearRegisters(); if (m_callStackDockWidget) m_callStackDockWidget->clearFrames(); }
+    m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
     if (m_differentialGrid) m_differentialGrid->clearWatches();
     // Close stale editor tabs belonging to the previous workspace while keeping tabs already inside resolvedDir.
     if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) {

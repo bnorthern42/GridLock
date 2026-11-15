@@ -124,30 +124,13 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
 
     layout->addWidget(m_table);
 
-    // Seed with a realistic x86_64 MPI startup register state
-    const QList<QPair<QString, QString>> seedRegs = {
-        {QStringLiteral("rip"), QStringLiteral("0x00401120 <main+0>")},
-        {QStringLiteral("rsp"), QStringLiteral("0x7fffffffe480")},
-        {QStringLiteral("rbp"), QStringLiteral("0x7fffffffe4b0")},
-        {QStringLiteral("rax"), QStringLiteral("0x0000000000000000")},
-        {QStringLiteral("rbx"), QStringLiteral("0x0000000000000000")},
-        {QStringLiteral("rcx"), QStringLiteral("0x00007ffff7dc45a0")},
-        {QStringLiteral("rdx"), QStringLiteral("0x00007fffffffe5b8")},
-        {QStringLiteral("rdi"), QStringLiteral("0x0000000000000001")},
-        {QStringLiteral("rsi"), QStringLiteral("0x00007fffffffe5a8")},
-        {QStringLiteral("r8"),  QStringLiteral("0x00007ffff7fb1400")},
-        {QStringLiteral("r9"),  QStringLiteral("0x00007ffff7fc9040")},
-        {QStringLiteral("eflags"), QStringLiteral("0x00000246 [ PF ZF IF ]")}
-    };
-    applyRegisterMap(seedRegs);
-    // Reset diff baseline after seeding so the first live/test update establishes the baseline
-    m_previousRegisters.clear();
-    m_modifiedRegisters.clear();
+    // Start with zero rows when idle; live updates or explicit preview fixtures populate registers.
+    clearRegisters();
 
     // Re-color register rows whenever Dark/Light mode toggles
     connect(&gridlock::core::managers::ThemeManager::instance(),
             &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
-                updateRegisters(m_currentRegisters);
+                if (!m_currentRegisters.isEmpty()) updateRegisters(m_currentRegisters);
             });
 }
 
@@ -356,6 +339,36 @@ void RegisterView::updateRegisters(const QMap<QString, QString>& registers) {
         }
     }
     applyRegisterMap(ordered);
+}
+
+void RegisterView::clearRegisters() {
+    // Reset all cached register snapshots and clear table rows for idle state.
+    m_previousRegisters.clear();
+    m_currentRegisters.clear();
+    m_modifiedRegisters.clear();
+    if (m_table) {
+        m_table->setRowCount(0);
+    }
+}
+
+void RegisterView::seedPreviewRegisters() {
+    // Populate realistic baseline x86_64 registers exclusively for preview fixtures.
+    const QMap<QString, QString> seedRegs = {
+        {QStringLiteral("rax"), QStringLiteral("0x0000000000000000")},
+        {QStringLiteral("rbx"), QStringLiteral("0x0000000000000001")},
+        {QStringLiteral("rcx"), QStringLiteral("0x00007ffff7dc45a0")},
+        {QStringLiteral("rdx"), QStringLiteral("0x00007fffffffe598")},
+        {QStringLiteral("rsi"), QStringLiteral("0x00007fffffffe588")},
+        {QStringLiteral("rdi"), QStringLiteral("0x0000000000000001")},
+        {QStringLiteral("rbp"), QStringLiteral("0x00007fffffffe4a0")},
+        {QStringLiteral("rsp"), QStringLiteral("0x00007fffffffe480")},
+        {QStringLiteral("rip"), QStringLiteral("0x00401120 <main+0>")},
+        {QStringLiteral("eflags"), QStringLiteral("0x00000246 [ PF ZF IF ]")},
+        {QStringLiteral("r8"), QStringLiteral("0x0000000000000000")},
+        {QStringLiteral("r9"), QStringLiteral("0x00007ffff7fe3b80")}};
+    m_previousRegisters.clear();
+    m_modifiedRegisters.clear();
+    updateRegisters(seedRegs);
 }
 
 }  // namespace gridlock::ui
