@@ -607,26 +607,27 @@ void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
     QVERIFY2(QString::fromUtf8(guideFile.readAll()).contains(QStringLiteral("breakpoint_popover.png")), "docs/USER_GUIDE.md must embed new assets");
     const QString themesText = QString::fromUtf8(themesFile.readAll()); QVERIFY2(themesText.contains(QStringLiteral("theme_solarized_light.png")) && themesText.contains(QStringLiteral("theme_catppuccin_latte.png")), "docs/THEMES.md must embed theme_solarized_light.png and theme_catppuccin_latte.png");
 }
-/** @brief Verifies v0.8.0 version alignment, AppImage build scripts, and tutorial resolution. */
+/** @brief Verifies v0.8.5 version alignment, AppImage build scripts, and tutorial resolution. */
 void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     // Helper to load repository root text files independent of test execution directory.
     const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
     auto readText = [&](const QString& relPath) -> QString { QFile f(rootPrefix + relPath); return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(); };
-    // 1. Verify meson.build declares version 0.8.0, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
-    const QString mesonText = readText(QStringLiteral("meson.build")), changelogText = readText(QStringLiteral("CHANGELOG.md")), readmeText = readText(QStringLiteral("README.md")), roadmapText = readText(QStringLiteral("ROADMAP.md"));
-    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.0");
-    QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.0") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.0")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.0\\]|v0\\.8\\.0)"))), "Version 0.8.0");
-    QVERIFY2(readmeText.contains(QStringLiteral("0.8.0")) && roadmapText.contains(QStringLiteral("0.8.0")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !readText(QStringLiteral("docs/ROADMAP.md")).contains(QStringLiteral("- [ ]")), "Roadmap 0.8.0");
+    // 1. Verify meson.build declares version 0.8.5, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
+    const QString mesonText = readText(QStringLiteral("meson.build")), changelogText = readText(QStringLiteral("CHANGELOG.md")), readmeText = readText(QStringLiteral("README.md")), roadmapText = readText(QStringLiteral("ROADMAP.md")), docsRoadmapText = readText(QStringLiteral("docs/ROADMAP.md")), sonarText = readText(QStringLiteral("sonar-project.properties"));
+    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.5'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.5");
+    QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.5") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.5")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.5\\]|v0\\.8\\.5)"))), "Version 0.8.5 & CHANGELOG");
+    QVERIFY2(readmeText.contains(QStringLiteral("0.8.5")) && roadmapText.contains(QStringLiteral("0.8.5")) && docsRoadmapText.contains(QStringLiteral("0.8.5")) && sonarText.contains(QStringLiteral("sonar.projectVersion=0.8.5")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !docsRoadmapText.contains(QStringLiteral("- [ ]")), "Roadmap & sonar 0.8.5");
     QVERIFY2(readmeText.contains(QStringLiteral("Tutorials-x86_64.AppImage")) && readmeText.contains(QStringLiteral("Lite")), "README.md must document Lite and Tutorials AppImage editions");
     // Verify every badge in README top badge block uses https://img.shields.io/badge/ with style=for-the-badge.
     auto badgeMatches = QRegularExpression(QStringLiteral("!\\[[^\\]]+\\]\\((https://img\\.shields\\.io/[^\\)]+)\\)")).globalMatch(readmeText.left(1000));
     int badgeCount = 0;
     while (badgeMatches.hasNext()) { const QString bUrl = badgeMatches.next().captured(1); ++badgeCount; QVERIFY2(bUrl.startsWith(QStringLiteral("https://img.shields.io/badge/")) && bUrl.contains(QStringLiteral("style=for-the-badge")), "README badge must use /badge/ with style=for-the-badge"); }
     QVERIFY2(badgeCount >= 7, "README must contain at least 7 for-the-badge shields");
-    // 2. Verify scripts/build_appimage.sh supports Lite and Tutorials editions without duplicate unversioned alias.
+    // 2. Verify scripts/build_appimage.sh stays version-agnostic and supports Lite + Tutorials editions without duplicate alias.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(QStringLiteral("0.7.0")) && !appImageScript.contains(QStringLiteral("0.8.0")) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh parse meson.build");
+    const QRegularExpression hardcodedVerRe(QStringLiteral("0\\.(?:7\\.0|8\\.0|8\\.5|9\\.0)"));
+    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(hardcodedVerRe) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh parse meson.build without hardcoded versions");
     QVERIFY2(appImageScript.contains(QStringLiteral("--lite")) && appImageScript.contains(QStringLiteral("--with-tutorials")) && appImageScript.contains(QStringLiteral("Tutorials")), "build_appimage.sh must support --lite and --with-tutorials");
     QVERIFY2(!appImageScript.contains(QStringLiteral("cp -af \"${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage\" \"${ROOT_DIR}/${APP_NAME}-x86_64.AppImage\"")), "build_appimage.sh must not create unversioned alias");
     for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("AppDir/usr/share/gridlock/tutorial"), QStringLiteral("AppDir/tutorial"), QStringLiteral("mpicxx"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
@@ -644,12 +645,12 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     for (const QString& k : {QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("DISPLAY"), QStringLiteral("WAYLAND_DISPLAY")}) env.remove(k);
     env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen")); proc.setProcessEnvironment(env);
     proc.start(QFileInfo::exists(rootPrefix + QStringLiteral("builddir/gridlock")) ? (rootPrefix + QStringLiteral("builddir/gridlock")) : (rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock")), {QStringLiteral("--version")});
-    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.0")), "gridlock --version must report 0.8.0");
+    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.5")), "gridlock --version must report 0.8.5");
     // 4. Verify GitHub Actions workflows are version-agnostic, filter ui_tests in CI, and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows")); QString combinedYml;
     for (const QString& fn : wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files)) {
         const QString content = readText(QStringLiteral(".github/workflows/") + fn); combinedYml += content + QLatin1Char('\n');
-        QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && !content.contains(QStringLiteral("0.8.0")) && !content.contains(QStringLiteral("v0.7.0")) && !content.contains(QStringLiteral("v0.8.0")), qPrintable(fn));
+        QVERIFY2(!content.contains(hardcodedVerRe), qPrintable(fn));
         QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")) && !content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("flatpak-builder")), qPrintable(fn));
     }
     // Check upload artifact globs and required CI APT packages across all workflow definitions.

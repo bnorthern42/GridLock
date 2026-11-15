@@ -1,6 +1,6 @@
 # GridLock Engineering Roadmap
 
-This roadmap tracks completed milestones (`Phases 1–10` / `v0.8.0`) for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
+This roadmap tracks completed milestones (`Phases 1–11` / `v0.8.5`) and upcoming releases for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
 
 ---
 
@@ -27,7 +27,7 @@ This roadmap tracks completed milestones (`Phases 1–10` / `v0.8.0`) for GridLo
 - [x] **External Static Analysis Passes (`cppcheck`, `clang-tidy`)**:
   - Ran `cppcheck` and `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`) across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
 - [x] **SonarQube / SonarCloud & Compiler Quality Gates**:
-  - Added `sonar-project.properties` (`sonar.projectVersion=0.8.0`) for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
+  - Updated `sonar-project.properties` (`sonar.projectVersion=0.8.5`) for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
 - [x] **Memory & Process Security Audit (`MemoryBoundsValidator`, `ElfBinaryInspector`, `MiSanitizer`)**:
   - Validated `uint64_t` overflow guards in `MemoryBoundsValidator`, corrupt/truncated ELF header rejection in `ElfBinaryInspector`, shell metacharacter filtering in `MiSanitizer`, and direct argument-list process spawning across all `QProcess` and `KPtyProcess` call sites under ASan, UBSan, and `MALLOC_PERTURB_`.
 
@@ -69,3 +69,21 @@ This roadmap tracks completed milestones (`Phases 1–10` / `v0.8.0`) for GridLo
   - Added inline compiler error and warning underlines (`textDocument/publishDiagnostics`), symbol/Doxygen hover tooltips (`textDocument/hover`), `F12` Go-to-Definition (`textDocument/definition`), `Shift+F12` Find References (`textDocument/references`), and `Shift+F6` AST symbol rename (`textDocument/rename`).
 - [x] **Git Diff Gutter & Debugger Engine Selector (`SourceCodeView`, `PreferencesDialog`, `ConfigManager`)**:
   - Added `git diff` gutter indicators (added, modified, and deleted line markers) in `SourceCodeView` and a debugger backend selector (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`) in `Preferences -> Debugger`.
+
+---
+
+## Phase 11 (`v0.8.5`): Live Multi-Rank Debugging, Observability & Release Stabilization
+
+- [x] **Live Multi-Rank GDB/MI3 & DAP Backends (`GdbRankCoordinator`, `DapCoordinator`)**:
+  - Replaced static simulation stepping with real MPMD GDB/MI3 process orchestration, per-rank OS PID tracking, `/proc` target attach (`AttachProcessDialog`), hardware data watchpoints, and 60 FPS coalesced `PROGRAM OUTPUT` / `GDB CONSOLE` streaming.
+- [x] **Stack Unwinding, Composite Inspection & Live Filtering (`CallStackDockWidget`, `VariablesDockWidget`, `RegisterView`, `ProjectExplorerWidget`)**:
+  - Added 64-frame call stack unwinding and OpenMP/OS thread selection, recursive `{...}` struct/class/vector expansion, and live search filtering plus interactive column sorting across `VARIABLES`, `REGISTERS`, `SYMBOLS`, and `STRINGS`.
+- [x] **MPI + OpenMP Execution Reliability & Workspace Sync (`MainWindowWorkspace`, `SessionManager`, `TerminalDockWidget`)**:
+  - Eliminated running-state MI stalls across multi-rank OpenMP solvers, synchronized `ProjectExplorerWidget` + `TARGET:` + `TerminalDockWidget` working directory on workspace switch, persisted recent sessions in `debugger.conf`, and packaged dual Lite and Tutorials AppImage editions.
+
+---
+
+## Upcoming Milestones (`v0.9.0` & `v1.0.0`)
+
+- **Planned (`v0.9.0`)**: Incorporate community and HPC user feedback on `v0.8.5` live multi-rank sessions, broaden `lldb-dap` / GPU (`cuda-gdb`, `rocgdb`) runtime coverage, and expand workspace diagnostics.
+- **Planned (`v1.0.0`)**: Final API/configuration stabilization, long-term AppImage packaging verification across major Linux distributions, and release-candidate regression hardening.

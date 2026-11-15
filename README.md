@@ -1,6 +1,6 @@
 # GridLock — MPI Debugger & ELF Binary Inspector
 
-![Version](https://img.shields.io/badge/Release-v0.8.0-brightgreen.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/Release-v0.8.5-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -161,7 +161,7 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 ## Documentation
 
 * [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](docs/TUTORIAL.md) — Step-by-step walkthroughs for all 7 bundled MPI showcase programs (`deadlock_ring.cpp`, `inspection_demo.cpp`, `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, `simd_struct_watch.cpp`), `MemView` rank diffing (`DIFF RANKS`) & memory export (`EXPORT`), offline `man` pages & Zeal docsets (`F1`), and the `PACKAGE MANAGER` dock.
-* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed milestones through `v0.8.0` and remaining tasks.
+* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed milestones through `v0.8.5` and upcoming releases.
 * [**Architecture Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — Window layout, module organization, and signal wiring.
 * [**User Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Walkthroughs for MPI debugging, source editing, conditional breakpoints, package search, SLURM import, and binary patching.
 * [**Themes & Fonts (`docs/THEMES.md`)**](docs/THEMES.md) — Screenshots and color reference table for the 12 built-in dark and light themes.

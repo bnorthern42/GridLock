@@ -5,6 +5,31 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-11-15
+
+### Added
+- **Live Multi-Rank Orchestration (`GdbRankCoordinator`, `DapCoordinator`):** Added live GDB/MI3 MPMD multi-rank process launching and stepping (`GdbRankCoordinator`) alongside Debug Adapter Protocol coordination (`DapCoordinator`), replacing the static `objdump` stepping simulation.
+- **Per-Rank PID Capture, `/proc` Attach & Cross-Rank Memory Diffing (`AttachProcessDialog`, `MemView`, `MemoryDiffer`):** Captured live inferior OS PIDs (`=thread-group-started` / `systemProcessId`), added a live `/proc` process scanner in `AttachProcessDialog`, and implemented cross-rank memory reads (`process_vm_readv` with GDB/DAP memory-read fallback) with byte diff highlighting in `MemView`.
+- **Call Stack Unwinding & Thread Switching (`CallStackDockWidget`):** Added the `CALL STACK` dock supporting 64-frame backtrace unwinding, OS/OpenMP thread selection, and caller-frame local variable, register, and source synchronization.
+- **Expandable Composite Variables & Live Table Filtering/Sorting (`VariablesDockWidget`, `VariableTreeModel`, `RegisterView`, `ProjectExplorerWidget`):** Added recursive GDB/MI3 and DAP `{...}` struct, class, and vector child expansion, plus live search inputs and click-to-sort interactive column headers across `VARIABLES`, `REGISTERS`, `SYMBOLS`, and `STRINGS`.
+- **Rank-Coded Breakpoint Gutter Badges (`SourceCodeView`):** Added crimson All-Ranks badges with a white ring alongside deterministic per-rank accordion colors, rank index labels, and gutter context-menu actions.
+- **Live Deadlock Analysis, REPL Console & Data Watchpoints (`DeadlockAnalyzer`, `MpiNetworkLogWidget`, `GdbConsoleWidget`, `MiSanitizer`):** Wired real rank call stacks into `DeadlockAnalyzer` for circular wait and collective divergence detection (`MPI_Bcast` vs `MPI_Barrier`), streamed live events to `MpiNetworkLogWidget`, enabled `MiSanitizer`-validated interactive commands in `GdbConsoleWidget`, and added hardware data watchpoints (`Write`, `Read`, `ReadWrite`).
+- **Dedicated Program Output Dock (`MainWindowExecution`, `MainWindowDocks`):** Added a `PROGRAM OUTPUT` bottom dock tab displaying a read-only launch command and working directory header bar above 60 FPS coalesced inferior stdout/stderr output with rank filtering.
+- **Cross-File `clangd` Navigation & Build Database Discovery (`ClangdLspClient`):** Enabled workspace-scoped JSON-RPC 2.0 `F12` Go-to-Definition, `findReferences`, AST-safe `WorkspaceEdit` symbol rename, live `publishDiagnostics` editor squiggles, and automatic `compile_commands.json` discovery across `builddir`, `build`, `build_meson`, and `build_cmake`.
+- **Session Persistence, Dirty Close Prompts & Syntax Modes (`SessionManager`, `EditorTabManager`, `SourceCodeView`):** Added live background Git diff gutter refreshes, `Save` / `Discard` / `Cancel` prompts on dirty tab and window close, `File -> Save Session` with workspace auto-save to `.gridlock/workspace.toml`, persistent `File -> Recent Sessions` in `~/.config/gridlock/debugger.conf`, syntax highlighters for `TOML`, `YAML`, `Markdown`, and `CSV`/`TSV`, and stateful Rainbow Brackets in `Preferences -> Editing`.
+- **Upgraded Project Settings, `MemView` Source Mode & Dual AppImages (`ProjectSettingsDialog`, `FileDialogHelper`, `scripts/build_appimage.sh`):** Added workspace ELF auto-discovery, file/folder browsers, `Program Arguments`, and `Working Directory` terminal synchronization in `ProjectSettingsDialog`; added explicit `MemView` source mode indicators (`IDLE (NO BINARY)`, `STATIC ELF (READ-ONLY)`, `LIVE RANK N (PID M)`); and packaged both Lite (`GridLock-<version>-x86_64.AppImage`) and Tutorials (`GridLock-<version>-Tutorials-x86_64.AppImage`) AppImage editions.
+
+### Changed
+- **Clean Idle & Unbuilt Workspace State:** Removed startup constructor mock fixtures across `VariablesDockWidget`, `RegisterView`, `MemView`, `MpiDiagnosticsWidget`, `MpiNetworkLogWidget`, `ProjectExplorerWidget`, `DisassemblyView`, `ServerRackView`, the section navigation ribbon, and status bar telemetry so idle and unbuilt workspaces start clean.
+- **Non-Blocking Asynchronous Pipelines:** Moved `clangd` document completion, Git diff gutter refreshes, and 8-rank `PROGRAM OUTPUT` / `GDB CONSOLE` batch insertion off synchronous GUI blocking paths.
+
+### Fixed
+- **Multi-Rank MPI + OpenMP Stalls (`GdbRankCoordinator`):** Guarded running-state MI inspection queries, resumed all stopped ranks on `Continue`, allowed dynamic breakpoint updates while ranks execute, and tuned `OMP_NUM_THREADS` / `OMP_WAIT_POLICY=PASSIVE` for responsive hybrid debugging.
+- **Secondary-Tab Breakpoint Focus Jump:** Prevented toggling a breakpoint in another source file tab from snapping focus back to the stopped execution file.
+- **Atomic Workspace Switching (`MainWindowWorkspace`):** Synchronized `ProjectExplorerWidget` (`FILES`), `TARGET:`, and `TerminalDockWidget` working directory together when opening external workspaces or `.gridlock/workspace.toml` sessions.
+- **Control Flow Graph & Decompiler Polish (`DisassemblyView`):** Clamped wide demangled C++ template signatures in CFG basic blocks, left-anchored wide blocks in the viewport, cleared the stuck hand-pan cursor, and honored the `"Show Pseudo-C Decompiler when Source Editor is visible"` preference consistently whenever any source tab is open.
+- **File Dialogs & Diagnostics Table Layout (`FileDialogHelper`, `MpiDiagnosticsWidget`, `MpiNetworkLogWidget`):** Defaulted `QFileDialog` to the active workspace, pruned non-existent ghost bookmarks from `sidebarUrls()`, and enabled interactive column resizing without PID truncation in `MPI DIAGNOSTICS` and `NETWORK LOG`.
+
 ## [0.8.0] - 2026-11-08
 
 ### Added
