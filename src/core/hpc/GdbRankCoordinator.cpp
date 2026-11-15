@@ -693,6 +693,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
   rp->buffer += output;
 
   // Consume newline-delimited GDB/MI3 async (`*`/`=`) and result (`^`) records incrementally.
+  QStringList batchedProgramOut;
   int newlineIdx = -1;
   while ((newlineIdx = rp->buffer.indexOf('\n')) != -1) {
     const QString line = rp->buffer.left(newlineIdx).trimmed();
@@ -899,17 +900,18 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       const QString prettyAsm = formatMiDisassembly(line);
       if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); }
     } else if (line.startsWith("@\"")) {
-      // MI target-stream inferior output record: unescape and forward to Program Output.
+      // MI target-stream inferior output record: unescape and queue for batched Program Output.
       QString txt = line.mid(2, line.endsWith('"') ? line.size() - 3 : line.size() - 2);
       txt.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\");
-      if (!txt.trimmed().isEmpty()) emit programOutputReceived(rankId, txt.trimmed(), false);
+      if (const QString cleaned = txt.trimmed(); !cleaned.isEmpty()) batchedProgramOut << cleaned;
     } else {
-      // Filter out GDB/MI protocol & console noise, forwarding genuine inferior stdout/stderr.
+      // Filter out GDB/MI protocol & console noise, queueing genuine inferior stdout/stderr.
       static const QRegularExpression miPrefRe("^\\d*[\\^*+=~&@]|^\\(gdb\\)");
       if (!miPrefRe.match(line).hasMatch() && !line.startsWith("[New ") && !line.startsWith("[Thread ") && !line.startsWith("[Inferior ") && !line.startsWith("[Detaching") && !line.startsWith("Reading symbols") && !line.startsWith("warning:"))
-        emit programOutputReceived(rankId, line, false);
+        batchedProgramOut << line;
     }
   }
+  if (!batchedProgramOut.isEmpty()) emit programOutputReceived(rankId, batchedProgramOut.join(QLatin1Char('\n')), false);
 }
 
 }  // namespace gridlock

@@ -649,12 +649,15 @@ private:
     QWidget* m_bottomToolRail = nullptr;
     QWidget* createProgramOutputTab();
     void appendProgramOutput(int rank, const QString& text, bool isError);
+    Q_INVOKABLE void flushProgramOutputBatch();
     void syncProgramOutputForLaunch(int rankCount);
     QTabWidget* m_bottomTabs = nullptr;
     QLineEdit* m_programLaunchCommandEdit = nullptr;
     QPlainTextEdit* m_programOutputView = nullptr;
     QComboBox* m_programOutputRankFilter = nullptr;
     QVector<QPair<int, QString>> m_programOutputLines;
+    class QTimer* m_programOutputFlushTimer = nullptr;
+    QStringList m_pendingProgramOutputBatch;
     QString m_activeSessionFilePath;
     QMap<QString, QToolButton*> m_bottomRailButtons;
     QString m_activeBottomToolGroup = QStringLiteral("Debug");

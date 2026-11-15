@@ -117,10 +117,10 @@ private slots:
     void onRawMiToggled(bool checked);
 
 private:
-    /**
-     * @brief Re-evaluates active filter constraints and updates the console edit.
-     */
+    /** @brief Re-evaluates active filter constraints and updates the console edit. */
     void applyFilter();
+    /** @brief Flushes coalesced pending console lines using sticky-scroll preservation. */
+    void flushConsoleBatch();
 
     QWidget* m_headerBar = nullptr;
     QWidget* m_promptBar = nullptr;
@@ -131,6 +131,8 @@ private:
     QComboBox* m_rankCombo = nullptr;
     QPlainTextEdit* m_consoleEdit = nullptr;
     QLineEdit* m_commandEdit = nullptr;
+    class QTimer* m_flushTimer = nullptr;
+    QStringList m_pendingBatch;
 
     /// Internal structure recording individual GDB MI and interactive REPL log events.
     struct LogEntry {

@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QDockWidget>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileSystemModel>
@@ -31,6 +32,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollBar>
 #include <QSignalSpy>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -803,6 +805,37 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QTRY_VERIFY_WITH_TIMEOUT(progOutView->toPlainText().contains(QStringLiteral("MFEM_OUT_READY")), 6000);
     QVERIFY2(!progOutView->toPlainText().contains(QStringLiteral("=thread-created")) && !progOutView->toPlainText().contains(QStringLiteral("*running,thread-id=")), qPrintable(progOutView->toPlainText()));
     mw.stopTargetWorkflow(); QApplication::processEvents();
+    // 11e. Verify 60 FPS frame-coalesced 8-rank burst throughput (<45ms for 800 lines) and sticky-scroll preservation.
+    // Use Q_INVOKABLE flush hook when exposed so tests measure deterministic batch insertion speed cleanly.
+    auto flushOut = [&]() {
+        if (mw.metaObject()->indexOfMethod("flushProgramOutputBatch()") >= 0) QMetaObject::invokeMethod(&mw, "flushProgramOutputBatch");
+        else QCoreApplication::processEvents();
+    };
+    // Confirm QPlainTextEdit undo/redo and word wrap are disabled prior to benchmarking burst insertion.
+    QVERIFY2(!progOutView->isUndoRedoEnabled(), "#programOutputView must disable undo/redo for lock-free batching");
+    QVERIFY2(progOutView->wordWrapMode() == QTextOption::NoWrap, "#programOutputView must use QTextOption::NoWrap");
+    if (auto* clearOutBtn = progOutView->parentWidget() ? progOutView->parentWidget()->findChildren<QPushButton*>().value(1, nullptr) : nullptr) clearOutBtn->click();
+    progOutView->resize(640, 180); progOutView->show(); QApplication::processEvents();
+    auto* coord = mw.coordinator(); QVERIFY(coord != nullptr);
+    QElapsedTimer burstTimer; burstTimer.start();
+    // Emit 800 rapid solver lines across Ranks 0..7 and flush coalesced batch on the GUI thread.
+    for (int i = 0; i < 800; ++i) emit coord->programOutputReceived(i % 8, QStringLiteral("SolveSystem: GMRES iter %1 res=1e-6").arg(i), false);
+    flushOut();
+    const qint64 burstMs = burstTimer.elapsed();
+    // Assert 800 batched lines complete under 45ms and preserve the latest flushed solver record.
+    QVERIFY2(burstMs < 45, qPrintable(QStringLiteral("800-line burst took %1ms (>= 45ms)").arg(burstMs)));
+    QVERIFY2(progOutView->toPlainText().contains(QStringLiteral("GMRES iter 799")), "All 800 batched lines must flush into #programOutputView");
+    // Scroll user viewport to top (value == 0) and confirm subsequent bursts NEVER yank the scrollbar down.
+    QScrollBar* outSb = progOutView->verticalScrollBar(); QVERIFY(outSb != nullptr && outSb->maximum() > 0);
+    outSb->setValue(0); QApplication::processEvents(); QCOMPARE(outSb->value(), 0);
+    for (int i = 0; i < 20; ++i) emit coord->programOutputReceived(i % 8, QStringLiteral("TailLine %1").arg(i), false);
+    flushOut(); QApplication::processEvents();
+    QCOMPARE(outSb->value(), 0);
+    // Pin scrollbar to bottom and confirm sticky auto-scroll tracks the newest appended lines.
+    outSb->setValue(outSb->maximum()); QApplication::processEvents();
+    for (int i = 0; i < 10; ++i) emit coord->programOutputReceived(i % 8, QStringLiteral("PinnedLine %1").arg(i), false);
+    flushOut(); QApplication::processEvents();
+    QCOMPARE(outSb->value(), outSb->maximum());
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(switchWs(mw, unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
     auto* disasm = mw.findChild<gridlock::ui::DisassemblyView*>(); auto* navBar = mw.findChild<QWidget*>(QStringLiteral("addressNavBar"));

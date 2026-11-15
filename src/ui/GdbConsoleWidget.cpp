@@ -10,9 +10,21 @@
 
 #include <QFrame>
 #include <QLabel>
+#include <QScrollBar>
+#include <QTextCursor>
+#include <QTimer>
 #include <QWidget>
 
 namespace gridlock::ui {
+
+namespace {
+bool isThreadLifecycleSpam(const QString& text) {
+    return text.startsWith(QLatin1String("=thread-created")) ||
+           text.startsWith(QLatin1String("=thread-exited")) ||
+           text.startsWith(QLatin1String("~\"[New Thread")) ||
+           text.startsWith(QLatin1String("~\"[Thread "));
+}
+}  // namespace
 
 /**
  * @brief Formats an MI protocol stream entry for terminal presentation.
@@ -30,7 +42,7 @@ QString GdbConsoleWidget::formatLogEntry(int rank, const QString& text,
         return prefix.arg(rank).arg(text);
     }
 
-    if (isInput) {
+    if (isInput || isThreadLifecycleSpam(text)) {
         return QString();
     }
 
@@ -96,16 +108,23 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent)
     topLayout->addWidget(m_rawMiCheckbox);
     topLayout->addWidget(m_clearButton);
 
-    // 2. Flush #16181d read-only monospace console viewport with QFrame::NoFrame.
+    // 2. Flush #16181d read-only monospace console viewport with QFrame::NoFrame and lock-free batch settings.
     m_consoleEdit = new QPlainTextEdit(this);
     m_consoleEdit->setObjectName(QStringLiteral("gdbConsoleViewport"));
     m_consoleEdit->setFrameShape(QFrame::NoFrame);
     m_consoleEdit->setReadOnly(true);
+    m_consoleEdit->setUndoRedoEnabled(false);
+    m_consoleEdit->setMaximumBlockCount(5000);
+    m_consoleEdit->setWordWrapMode(QTextOption::NoWrap);
     m_consoleEdit->setTextInteractionFlags(Qt::TextBrowserInteraction |
                                            Qt::TextSelectableByKeyboard);
     m_consoleEdit->setStyleSheet(QStringLiteral(
         "QPlainTextEdit#gdbConsoleViewport { background: #16181d; color: #d7dae0; border: none; "
         "font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
+    m_flushTimer = new QTimer(this);
+    m_flushTimer->setSingleShot(true);
+    m_flushTimer->setInterval(16);
+    connect(m_flushTimer, &QTimer::timeout, this, &GdbConsoleWidget::flushConsoleBatch);
 
     // 3. Docked 26px #21252b bottom command prompt bar with styled 'gdb>' prefix and Execute button.
     m_promptBar = new QWidget(this);
@@ -176,6 +195,8 @@ int GdbConsoleWidget::promptBarHeight() const {
  */
 void GdbConsoleWidget::resetRanks(int count) {
     m_logs.clear();
+    m_pendingBatch.clear();
+    if (m_flushTimer) m_flushTimer->stop();
     m_consoleEdit->clear();
     ensureRankCount(count);
 }
@@ -201,56 +222,46 @@ void GdbConsoleWidget::ensureRankCount(int count) {
 }
 
 /**
- * @brief Appends debugger stdout records and evaluates active filters.
+ * @brief Appends debugger stdout records and queues matching lines for 60 FPS batch insertion.
  * @param rank Rank index that produced output.
  * @param output Output payload string.
  */
 void GdbConsoleWidget::appendGdbOutput(int rank, const QString& output) {
-    m_logs.append({rank, output, false, false, false});
-
-    const int selectedRank = m_rankCombo->currentData().toInt();
-    const QString filterText = m_filterEdit->text();
     const bool showRaw = m_rawMiCheckbox->isChecked();
+    // Drop high-frequency OpenMP/pthread lifecycle spam when Raw MI mode is disabled.
+    if (!showRaw && isThreadLifecycleSpam(output)) return;
 
-    if (selectedRank != -1 && selectedRank != rank) {
-        return;
-    }
+    m_logs.append({rank, output, false, false, false});
+    const int selectedRank = m_rankCombo->currentData().toInt();
+    if (selectedRank != -1 && selectedRank != rank) return;
 
     const QString displayStr = formatLogEntry(rank, output, false, showRaw);
-    if (displayStr.isEmpty()) {
-        return;
-    }
+    if (displayStr.isEmpty()) return;
 
-    if (filterText.isEmpty() ||
-        displayStr.contains(filterText, Qt::CaseInsensitive)) {
-        m_consoleEdit->appendPlainText(displayStr);
+    const QString filterText = m_filterEdit->text();
+    if (filterText.isEmpty() || displayStr.contains(filterText, Qt::CaseInsensitive)) {
+        m_pendingBatch.append(displayStr);
+        if (m_flushTimer && !m_flushTimer->isActive()) m_flushTimer->start();
     }
 }
 
 /**
- * @brief Records stdin command input dispatched to a specific rank.
+ * @brief Records stdin command input dispatched to a specific rank and queues matching lines.
  * @param rank Target rank index.
  * @param input Command string dispatched.
  */
 void GdbConsoleWidget::appendGdbInput(int rank, const QString& input) {
     m_logs.append({rank, input, true, false, false});
-
     const int selectedRank = m_rankCombo->currentData().toInt();
+    if (selectedRank != -1 && selectedRank != rank) return;
+
+    const QString displayStr = formatLogEntry(rank, input, true, m_rawMiCheckbox->isChecked());
+    if (displayStr.isEmpty()) return;
+
     const QString filterText = m_filterEdit->text();
-    const bool showRaw = m_rawMiCheckbox->isChecked();
-
-    if (selectedRank != -1 && selectedRank != rank) {
-        return;
-    }
-
-    const QString displayStr = formatLogEntry(rank, input, true, showRaw);
-    if (displayStr.isEmpty()) {
-        return;
-    }
-
-    if (filterText.isEmpty() ||
-        displayStr.contains(filterText, Qt::CaseInsensitive)) {
-        m_consoleEdit->appendPlainText(displayStr);
+    if (filterText.isEmpty() || displayStr.contains(filterText, Qt::CaseInsensitive)) {
+        m_pendingBatch.append(displayStr);
+        if (m_flushTimer && !m_flushTimer->isActive()) m_flushTimer->start();
     }
 }
 
@@ -263,9 +274,7 @@ void GdbConsoleWidget::appendGdbInput(int rank, const QString& input) {
 void GdbConsoleWidget::appendDebuggerConsoleOutput(int rank, const QString& output,
                                                    bool isError) {
     const QString trimmed = output.trimmed();
-    if (trimmed.isEmpty()) {
-        return;
-    }
+    if (trimmed.isEmpty()) return;
 
     const int normRank = rank < 0 ? 0 : rank;
     const QString displayStr = isError
@@ -274,15 +283,34 @@ void GdbConsoleWidget::appendDebuggerConsoleOutput(int rank, const QString& outp
     m_logs.append({normRank, displayStr, false, true, isError});
 
     const int selectedRank = m_rankCombo->currentData().toInt();
-    if (selectedRank != -1 && rank >= 0 && selectedRank != rank) {
-        return;
-    }
+    if (selectedRank != -1 && rank >= 0 && selectedRank != rank) return;
 
     const QString filterText = m_filterEdit->text();
-    if (filterText.isEmpty() ||
-        displayStr.contains(filterText, Qt::CaseInsensitive)) {
-        m_consoleEdit->appendPlainText(displayStr);
+    if (filterText.isEmpty() || displayStr.contains(filterText, Qt::CaseInsensitive)) {
+        m_pendingBatch.append(displayStr);
+        if (m_flushTimer && !m_flushTimer->isActive()) m_flushTimer->start();
     }
+}
+
+/**
+ * @brief Flushes coalesced pending console lines in one QTextCursor operation while preserving scroll.
+ */
+void GdbConsoleWidget::flushConsoleBatch() {
+    if (m_flushTimer) m_flushTimer->stop();
+    if (!m_consoleEdit || m_pendingBatch.isEmpty()) return;
+
+    QScrollBar* sb = m_consoleEdit->verticalScrollBar();
+    const int prevVal = sb ? sb->value() : 0;
+    const bool stickToBottom = sb && (prevVal >= sb->maximum() - 8);
+    const QString batch = m_pendingBatch.join(QLatin1Char('\n'));
+    m_pendingBatch.clear();
+
+    m_consoleEdit->setUpdatesEnabled(false);
+    QTextCursor cur(m_consoleEdit->document());
+    cur.movePosition(QTextCursor::End);
+    cur.insertText(m_consoleEdit->document()->isEmpty() ? batch : (QLatin1Char('\n') + batch));
+    if (sb) sb->setValue(stickToBottom ? sb->maximum() : prevVal);
+    m_consoleEdit->setUpdatesEnabled(true);
 }
 
 /**
@@ -290,6 +318,8 @@ void GdbConsoleWidget::appendDebuggerConsoleOutput(int rank, const QString& outp
  */
 void GdbConsoleWidget::onClearClicked() {
     m_logs.clear();
+    m_pendingBatch.clear();
+    if (m_flushTimer) m_flushTimer->stop();
     m_consoleEdit->clear();
 }
 
@@ -298,65 +328,54 @@ void GdbConsoleWidget::onClearClicked() {
  */
 void GdbConsoleWidget::onCommandReturnPressed() {
     const QString cmd = m_commandEdit->text();
-    if (cmd.isEmpty()) {
-        return;
-    }
+    if (cmd.isEmpty()) return;
 
     // Emit -1 when "All Ranks" is active, or the specific 0-based MPI rank index.
     const int rank = m_rankCombo->currentData().toInt();
     emit commandEntered(rank, cmd);
-
     m_commandEdit->clear();
 }
 
 /**
  * @brief Re-applies viewport filtering when the substring search box changes.
  */
-void GdbConsoleWidget::onFilterTextChanged(const QString& /*text*/) {
-    applyFilter();
-}
+void GdbConsoleWidget::onFilterTextChanged(const QString& /*text*/) { applyFilter(); }
 
 /**
  * @brief Re-applies viewport filtering when the target MPI rank selector changes.
  */
-void GdbConsoleWidget::onRankFilterChanged(int /*index*/) {
-    applyFilter();
-}
+void GdbConsoleWidget::onRankFilterChanged(int /*index*/) { applyFilter(); }
 
 /**
  * @brief Re-renders retained log entries when Raw MI visibility is toggled.
  */
-void GdbConsoleWidget::onRawMiToggled(bool /*checked*/) {
-    applyFilter();
-}
+void GdbConsoleWidget::onRawMiToggled(bool /*checked*/) { applyFilter(); }
 
 /**
- * @brief Replays retained logs against updated filter predicates.
+ * @brief Replays retained logs against updated filter predicates in a single document update.
  */
 void GdbConsoleWidget::applyFilter() {
-    m_consoleEdit->clear();
+    if (m_flushTimer) m_flushTimer->stop();
+    m_pendingBatch.clear();
     const int selectedRank = m_rankCombo->currentData().toInt();
     const QString filterText = m_filterEdit->text();
     const bool showRaw = m_rawMiCheckbox->isChecked();
 
+    QStringList matching;
     for (const auto& log : m_logs) {
-        if (selectedRank != -1 && selectedRank != log.rank) {
-            continue;
-        }
-
+        if (selectedRank != -1 && selectedRank != log.rank) continue;
         // Preserve formatted REPL/sanitizer lines verbatim regardless of Raw MI checkbox state.
         const QString displayStr =
-            log.isRepl ? log.text
-                       : formatLogEntry(log.rank, log.text, log.isInput, showRaw);
-        if (displayStr.isEmpty()) {
-            continue;
-        }
-
-        if (filterText.isEmpty() ||
-            displayStr.contains(filterText, Qt::CaseInsensitive)) {
-            m_consoleEdit->appendPlainText(displayStr);
+            log.isRepl ? log.text : formatLogEntry(log.rank, log.text, log.isInput, showRaw);
+        if (displayStr.isEmpty()) continue;
+        if (filterText.isEmpty() || displayStr.contains(filterText, Qt::CaseInsensitive)) {
+            matching.append(displayStr);
         }
     }
+    m_consoleEdit->setUpdatesEnabled(false);
+    m_consoleEdit->setPlainText(matching.join(QLatin1Char('\n')));
+    if (QScrollBar* sb = m_consoleEdit->verticalScrollBar()) sb->setValue(sb->maximum());
+    m_consoleEdit->setUpdatesEnabled(true);
 }
 
 }  // namespace gridlock::ui

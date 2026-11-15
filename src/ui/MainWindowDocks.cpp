@@ -34,17 +34,20 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QPlainTextEdit>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTextCursor>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QWindow>
@@ -697,14 +700,8 @@ void MainWindow::propagateThemeToAllWidgets() {
       m_addressNavBar->installEventFilter(new AddressRibbonThemeFilter(m_addressNavBar));
       m_addressNavBar->setProperty("gl_ribbon_filter", true);
     }
-    QPalette navPal = m_addressNavBar->palette();
-    navPal.setColor(QPalette::Window, QColor(pal.headerHex));
-    navPal.setColor(QPalette::Base, QColor(pal.canvasHex));
-    navPal.setColor(QPalette::WindowText, QColor(pal.textHex));
-    m_addressNavBar->setPalette(navPal);
-    m_addressNavBar->setStyleSheet(QStringLiteral(
-        "#addressNavBar { background-color: %1; color: %2; border-bottom: 1px solid %3; }")
-        .arg(pal.headerHex, pal.textHex, pal.borderHex));
+    QPalette np = m_addressNavBar->palette(); np.setColor(QPalette::Window, QColor(pal.headerHex)); np.setColor(QPalette::Base, QColor(pal.canvasHex)); np.setColor(QPalette::WindowText, QColor(pal.textHex)); m_addressNavBar->setPalette(np);
+    m_addressNavBar->setStyleSheet(QStringLiteral("#addressNavBar { background-color: %1; color: %2; border-bottom: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex));
     m_addressNavBar->update();
   }
 
@@ -765,7 +762,7 @@ void MainWindow::propagateThemeToAllWidgets() {
         .arg(pal.canvasHex, pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
   }
 
-  // 5. Re-style all custom dock headers (#customDockHeader) in 12px UI sans-serif
+  // 5. Re-style custom dock headers (#customDockHeader) and dock tab bars cleanly.
   const QString dockHeaderStyle = QStringLiteral(
       "#customDockHeader { background-color: %1; border-bottom: 1px solid %2; } "
       "#customDockHeader QLabel { color: %3; font-size: 12px; font-weight: 700; padding-left: 6px; } "
@@ -773,14 +770,7 @@ void MainWindow::propagateThemeToAllWidgets() {
       "font-weight: 700; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; } "
       "#dockFloatBtn:hover, #dockCloseBtn:hover { background: %2; color: %3; border-radius: 2px; }")
       .arg(pal.headerHex, pal.borderHex, pal.textHex);
-
-  for (auto* dock : findChildren<QDockWidget*>()) {
-    if (dock && dock->titleBarWidget() && dock->titleBarWidget()->objectName() == QStringLiteral("customDockHeader")) {
-      dock->titleBarWidget()->setStyleSheet(dockHeaderStyle);
-    }
-  }
-
-  // 6. Suppress QTabBar scroll buttons and apply compact theme styling to top-right dock tab bars.
+  for (auto* dock : findChildren<QDockWidget*>()) { if (dock && dock->titleBarWidget() && dock->titleBarWidget()->objectName() == QStringLiteral("customDockHeader")) dock->titleBarWidget()->setStyleSheet(dockHeaderStyle); }
   const QString dockTabStyle = QStringLiteral(
       "QTabBar { background-color: %1; border-bottom: 1px solid %2; }"
       "QTabBar::tab { background-color: %1; color: %3; padding: 3px 4px; margin: 0px; min-height: 20px; max-height: 24px; "
@@ -788,16 +778,11 @@ void MainWindow::propagateThemeToAllWidgets() {
       "QTabBar::tab:selected { background-color: %4; color: %3; border-bottom: 2px solid %5; }"
       "QTabBar::tab:hover:!selected { background-color: %2; color: %3; }")
       .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex);
-  for (auto* tb : findChildren<QTabBar*>()) {
-    tb->setUsesScrollButtons(false); tb->setElideMode(Qt::ElideNone); tb->setExpanding(false);
-    if (tb->parentWidget() == this) tb->setStyleSheet(dockTabStyle);
-  }
+  for (auto* tb : findChildren<QTabBar*>()) { tb->setUsesScrollButtons(false); tb->setElideMode(Qt::ElideNone); tb->setExpanding(false); if (tb->parentWidget() == this) tb->setStyleSheet(dockTabStyle); }
 
   // 7. Propagate theme to subviews, Variables scope strip, and CallStackDockWidget
-  if (m_variablesDockWidget) {
-    if (auto* varHdr = m_variablesDockWidget->findChild<QWidget*>(QStringLiteral("variablesHeaderBar"))) {
-      varHdr->setStyleSheet(QStringLiteral("#variablesHeaderBar { background-color: %1; border-bottom: 1px solid %2; } #variablesHeaderBar QLabel { color: %3; font-size: 12px; font-weight: 600; }").arg(pal.headerHex, pal.borderHex, pal.textHex));
-    }
+  if (auto* vh = m_variablesDockWidget ? m_variablesDockWidget->findChild<QWidget*>(QStringLiteral("variablesHeaderBar")) : nullptr) {
+    vh->setStyleSheet(QStringLiteral("#variablesHeaderBar { background-color: %1; border-bottom: 1px solid %2; } #variablesHeaderBar QLabel { color: %3; font-size: 12px; font-weight: 600; }").arg(pal.headerHex, pal.borderHex, pal.textHex));
   }
   if (m_callStackDockWidget) m_callStackDockWidget->reloadStyle();
   if (m_memView) m_memView->reloadStyle();
@@ -808,26 +793,12 @@ void MainWindow::propagateThemeToAllWidgets() {
   if (m_projectExplorerWidget) m_projectExplorerWidget->reloadStyle();
 }
 
-/**
- * @brief Verifies that all chrome toolbars, ribbons, and dock headers align with the active theme and avoid hardcoded dark styles.
- * @return True if all inspected chrome elements are theme-aligned.
- */
+/** @brief Verifies that all chrome toolbars, ribbons, and dock headers align with the active theme and avoid hardcoded dark styles. */
 bool MainWindow::areAllChromeToolbarsAndDockHeadersThemeAligned() const {
   if (!gridlock::core::ThemeManager::instance().isDarkMode()) {
-    if (auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
-      const QString ss = mainToolBar->styleSheet();
-      if (ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#1e2228"), Qt::CaseInsensitive)) return false;
-    }
-    if (m_bottomToolRail) {
-      const QString ss = m_bottomToolRail->styleSheet();
-      if (ss.contains(QStringLiteral("#181a1f"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) return false;
-    }
-    for (auto* dock : findChildren<QDockWidget*>()) {
-      if (dock && dock->titleBarWidget()) {
-        const QString ss = dock->titleBarWidget()->styleSheet();
-        if (ss.contains(QStringLiteral("#1e222a"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) return false;
-      }
-    }
+    if (auto* mtb = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) { const QString ss = mtb->styleSheet(); if (ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#1b1e24"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#1e2228"), Qt::CaseInsensitive)) return false; }
+    if (m_bottomToolRail) { const QString ss = m_bottomToolRail->styleSheet(); if (ss.contains(QStringLiteral("#181a1f"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) return false; }
+    for (auto* dock : findChildren<QDockWidget*>()) { if (dock && dock->titleBarWidget()) { const QString ss = dock->titleBarWidget()->styleSheet(); if (ss.contains(QStringLiteral("#1e222a"), Qt::CaseInsensitive) || ss.contains(QStringLiteral("#16181d"), Qt::CaseInsensitive)) return false; } }
   }
   return true;
 }
@@ -843,31 +814,63 @@ void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
     for (const auto &w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
   }
 }
-/** @brief Builds the Program Output bottom tab with read-only launch command banner and filtered stdout view. */
+/** @brief Builds the Program Output bottom tab with read-only launch command banner and batched stdout view. */
 QWidget* MainWindow::createProgramOutputTab() {
   auto* page = new QWidget(m_bottomTabs); page->setObjectName(QStringLiteral("ProgramOutputDock")); auto* lay = new QVBoxLayout(page); lay->setContentsMargins(0, 0, 0, 0); lay->setSpacing(0);
   auto* bar = new QWidget(page); bar->setFixedHeight(28); auto* hb = new QHBoxLayout(bar); hb->setContentsMargins(6, 2, 6, 2); hb->setSpacing(6);
   m_programLaunchCommandEdit = new QLineEdit(bar); m_programLaunchCommandEdit->setObjectName(QStringLiteral("programLaunchCommandEdit")); m_programLaunchCommandEdit->setReadOnly(true);
   auto* copyBtn = new QPushButton(QStringLiteral("COPY"), bar); auto* clearBtn = new QPushButton(QStringLiteral("CLEAR"), bar); m_programOutputRankFilter = new QComboBox(bar); m_programOutputRankFilter->addItem(QStringLiteral("All Ranks"), -1);
   hb->addWidget(new QLabel(QStringLiteral("CMD:"), bar)); hb->addWidget(m_programLaunchCommandEdit, 1); hb->addWidget(copyBtn); hb->addWidget(m_programOutputRankFilter); hb->addWidget(clearBtn);
-  m_programOutputView = new QPlainTextEdit(page); m_programOutputView->setObjectName(QStringLiteral("programOutputView")); m_programOutputView->setReadOnly(true); m_programOutputView->setFont(QFont(QStringLiteral("JetBrains Mono"), 10));
+  m_programOutputView = new QPlainTextEdit(page); m_programOutputView->setObjectName(QStringLiteral("programOutputView")); m_programOutputView->setReadOnly(true);
+  // Disable undo/redo and wrapping and coalesce burst inserts at 60 FPS so 8-rank stdout never jitters.
+  m_programOutputView->setUndoRedoEnabled(false); m_programOutputView->setMaximumBlockCount(10000); m_programOutputView->setWordWrapMode(QTextOption::NoWrap); m_programOutputView->setFont(QFont(QStringLiteral("JetBrains Mono"), 10));
+  m_programOutputFlushTimer = new QTimer(this); m_programOutputFlushTimer->setSingleShot(true); m_programOutputFlushTimer->setInterval(16);
+  connect(m_programOutputFlushTimer, &QTimer::timeout, this, &MainWindow::flushProgramOutputBatch);
   connect(copyBtn, &QPushButton::clicked, this, [this]() { if (m_programLaunchCommandEdit) QApplication::clipboard()->setText(m_programLaunchCommandEdit->text()); });
-  connect(clearBtn, &QPushButton::clicked, this, [this]() { m_programOutputLines.clear(); if (m_programOutputView) m_programOutputView->clear(); });
-  connect(m_programOutputRankFilter, &QComboBox::currentIndexChanged, this, [this]() { if (m_programOutputView && m_programOutputRankFilter) { const int w = m_programOutputRankFilter->currentData().toInt(); m_programOutputView->clear(); for (const auto& e : m_programOutputLines) if (w < 0 || e.first == w) m_programOutputView->appendPlainText(e.second); } });
+  connect(clearBtn, &QPushButton::clicked, this, [this]() { m_programOutputLines.clear(); m_pendingProgramOutputBatch.clear(); if (m_programOutputFlushTimer) m_programOutputFlushTimer->stop(); if (m_programOutputView) m_programOutputView->clear(); });
+  // Rebuild filtered viewport in one pass while preserving user scroll position when scrolled up.
+  connect(m_programOutputRankFilter, &QComboBox::currentIndexChanged, this, [this]() {
+    if (!m_programOutputView || !m_programOutputRankFilter) return;
+    if (m_programOutputFlushTimer) m_programOutputFlushTimer->stop();
+    m_pendingProgramOutputBatch.clear(); QStringList match; const int w = m_programOutputRankFilter->currentData().toInt();
+    for (const auto& e : m_programOutputLines) if (w < 0 || e.first == w) match << e.second;
+    QScrollBar* sb = m_programOutputView->verticalScrollBar(); const int pv = sb ? sb->value() : 0; const bool stick = sb && (pv >= sb->maximum() - 8);
+    m_programOutputView->setUpdatesEnabled(false); m_programOutputView->setPlainText(match.join(QLatin1Char('\n')));
+    m_programOutputView->setUpdatesEnabled(true); if (sb) sb->setValue(stick ? sb->maximum() : pv);
+  });
   lay->addWidget(bar); lay->addWidget(m_programOutputView, 1); return page;
 }
+/** @brief Clears buffered Program Output and populates the rank filter for a new launch. */
 void MainWindow::syncProgramOutputForLaunch(int rankCount) {
-  m_programOutputLines.clear(); if (m_programOutputView) m_programOutputView->clear();
+  m_programOutputLines.clear(); m_pendingProgramOutputBatch.clear(); if (m_programOutputFlushTimer) m_programOutputFlushTimer->stop(); if (m_programOutputView) m_programOutputView->clear();
   if (m_programLaunchCommandEdit && m_coordinator) m_programLaunchCommandEdit->setText(m_coordinator->lastLaunchCommandSummary());
   if (!m_programOutputRankFilter) return;
   m_programOutputRankFilter->blockSignals(true); m_programOutputRankFilter->clear(); m_programOutputRankFilter->addItem(QStringLiteral("All Ranks"), -1);
   for (int r = 0; r < std::max(1, rankCount); ++r) { m_programOutputRankFilter->addItem(QStringLiteral("Rank %1").arg(r), r); } m_programOutputRankFilter->blockSignals(false);
 }
+/** @brief Queues one or more cleaned rank stdout/stderr lines and arms the 16ms coalescing timer. */
 void MainWindow::appendProgramOutput(int rank, const QString& text, bool isError) {
-  const QString clean = text.trimmed(); if (clean.isEmpty()) return;
-  const QString fmt = QStringLiteral("[Rank %1%2] %3").arg(rank).arg(isError ? QStringLiteral(" stderr") : QString()).arg(clean);
-  m_programOutputLines.append(qMakePair(rank, fmt));
-  if (m_programOutputView && (!m_programOutputRankFilter || m_programOutputRankFilter->currentData().toInt() < 0 || m_programOutputRankFilter->currentData().toInt() == rank)) m_programOutputView->appendPlainText(fmt);
+  const int filterRank = m_programOutputRankFilter ? m_programOutputRankFilter->currentData().toInt() : -1; bool queued = false;
+  for (const QString& ln : text.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+    const QString clean = ln.trimmed(); if (clean.isEmpty()) continue;
+    const QString fmt = QStringLiteral("[Rank %1%2] %3").arg(rank).arg(isError ? QStringLiteral(" stderr") : QString()).arg(clean);
+    m_programOutputLines.append(qMakePair(rank, fmt));
+    if (m_programOutputView && (filterRank < 0 || filterRank == rank)) { m_pendingProgramOutputBatch.append(fmt); queued = true; }
+  }
+  // Cap retained line history and start the single-shot 60 FPS flush timer once per burst.
+  if (m_programOutputLines.size() > 12000) m_programOutputLines.remove(0, m_programOutputLines.size() - 10000);
+  if (queued && m_programOutputFlushTimer && !m_programOutputFlushTimer->isActive()) m_programOutputFlushTimer->start();
+}
+/** @brief Flushes pending Program Output lines in a single cursor insert while preserving scroll position. */
+void MainWindow::flushProgramOutputBatch() {
+  if (m_programOutputFlushTimer) m_programOutputFlushTimer->stop();
+  if (!m_programOutputView || m_pendingProgramOutputBatch.isEmpty()) return;
+  QScrollBar* sb = m_programOutputView->verticalScrollBar(); const int pv = sb ? sb->value() : 0; const bool stick = sb && (pv >= sb->maximum() - 8);
+  const QString batch = m_pendingProgramOutputBatch.join(QLatin1Char('\n')); m_pendingProgramOutputBatch.clear();
+  // Lock repaint during cursor insertion and keep scrolled-up viewport offsets pinned.
+  m_programOutputView->setUpdatesEnabled(false); QTextCursor cur(m_programOutputView->document()); cur.movePosition(QTextCursor::End);
+  cur.insertText(m_programOutputView->document()->isEmpty() ? batch : (QLatin1Char('\n') + batch));
+  m_programOutputView->setUpdatesEnabled(true); if (sb) sb->setValue(stick ? sb->maximum() : pv);
 }
 void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {}
 }  // namespace gridlock::ui
