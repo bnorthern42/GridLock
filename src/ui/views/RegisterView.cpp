@@ -86,18 +86,29 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Create borderless monospace table widget with alternating rows and 48px minimum section size
+    // Compact live search bar filtering register names, hex values, and decimal equivalents.
+    m_searchEdit = new QLineEdit(this);
+    m_searchEdit->setObjectName(QStringLiteral("registerSearchEdit"));
+    m_searchEdit->setPlaceholderText(QStringLiteral("Filter registers by name or hex/dec value..."));
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setFixedHeight(24);
+    layout->addWidget(m_searchEdit);
+
+    // Create borderless monospace table widget with alternating rows, sorting, and Interactive columns.
     m_table = new QTableWidget(this);
     m_table->setObjectName("cutterRegisterTable");
     m_table->setFrameShape(QFrame::NoFrame);
     m_table->setAlternatingRowColors(true);
     m_table->setColumnCount(2);
     m_table->setHorizontalHeaderLabels({"REG", "VALUE / ROLE"});
+    m_table->setSortingEnabled(true);
     m_table->horizontalHeader()->setVisible(true);
     m_table->horizontalHeader()->setMinimumSectionSize(48);
+    m_table->horizontalHeader()->setSectionsMovable(false);
     m_table->horizontalHeader()->setStretchLastSection(true);
-    m_table->horizontalHeader()->setDefaultSectionSize(76);
-    m_table->setColumnWidth(0, 76);
+    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
+    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Interactive);
+    m_table->setColumnWidth(0, 84);
     m_table->verticalHeader()->setVisible(false);
     m_table->verticalHeader()->setDefaultSectionSize(20);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -109,11 +120,25 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     monoFont.setStyleHint(QFont::Monospace);
     m_table->setFont(monoFont);
 
-    // Synchronize background and foreground with theme configuration
-    QPalette p = m_table->palette();
-    p.setColor(QPalette::Base, QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
-    p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
-    m_table->setPalette(p);
+    // Synchronize search bar and table palette with active ThemeManager colors.
+    auto syncTheme = [this]() {
+        auto& tm = gridlock::core::managers::ThemeManager::instance();
+        const auto pal = tm.paletteForTheme(tm.activeThemeId());
+        if (m_searchEdit) {
+            m_searchEdit->setStyleSheet(QStringLiteral(
+                "QLineEdit { background-color: %1; color: %2; border: 1px solid %3; "
+                "padding: 1px 6px; font-size: 11px; } QLineEdit:focus { border: 1px solid %4; }")
+                .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex));
+        }
+        QPalette p = m_table->palette();
+        p.setColor(QPalette::Base, QColor(pal.canvasHex));
+        p.setColor(QPalette::Text, QColor(pal.textHex));
+        m_table->setPalette(p);
+    };
+    syncTheme();
+
+    // Filter rows live whenever the search query text changes.
+    connect(m_searchEdit, &QLineEdit::textChanged, this, &RegisterView::filterRegisters);
 
     // Double-clicking a register seeks the global disassembly or memory view
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row, int /*col*/) {
@@ -122,14 +147,15 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
         }
     });
 
-    layout->addWidget(m_table);
+    layout->addWidget(m_table, 1);
 
     // Start with zero rows when idle; live updates or explicit preview fixtures populate registers.
     clearRegisters();
 
-    // Re-color register rows whenever Dark/Light mode toggles
+    // Re-color search bar and register rows whenever Dark/Light mode toggles
     connect(&gridlock::core::managers::ThemeManager::instance(),
-            &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
+            &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this, syncTheme](bool) {
+                syncTheme();
                 if (!m_currentRegisters.isEmpty()) updateRegisters(m_currentRegisters);
             });
 }
@@ -196,6 +222,10 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
     const bool hasBaseline = !m_previousRegisters.isEmpty();
     m_modifiedRegisters.clear();
     m_currentRegisters.clear();
+
+    // Suppress automatic sorting while mutating rows so indices never shift mid-loop.
+    const bool wasSorting = m_table->isSortingEnabled();
+    m_table->setSortingEnabled(false);
 
     // Adjust table row allocation to match incoming register count
     if (m_table->rowCount() != orderedRegs.size()) {
@@ -270,6 +300,40 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
             nameItem->setFont(regularFont);
             valItem->setFont(regularFont);
         }
+    }
+
+    m_table->setSortingEnabled(wasSorting);
+    filterRegisters(m_searchEdit ? m_searchEdit->text() : QString());
+}
+
+/**
+ * @brief Filters visible register rows against @p filterText (name, hex, or decimal value).
+ */
+void RegisterView::filterRegisters(const QString& filterText) {
+    if (!m_table) {
+        return;
+    }
+    const QString q = filterText.trimmed();
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        if (q.isEmpty()) {
+            m_table->setRowHidden(r, false);
+            continue;
+        }
+        const QString regName = m_table->item(r, 0) ? m_table->item(r, 0)->text() : QString();
+        const QString regVal = m_table->item(r, 1) ? m_table->item(r, 1)->text() : QString();
+        bool match = regName.contains(q, Qt::CaseInsensitive) || regVal.contains(q, Qt::CaseInsensitive);
+        if (!match && !regVal.isEmpty()) {
+            // Also check unsigned decimal value when the register holds a hex address/integer.
+            const QString normHex = normalizeRegValue(regVal);
+            bool ok = false;
+            const qulonglong decVal = normHex.startsWith(QLatin1String("0x"))
+                                          ? normHex.mid(2).toULongLong(&ok, 16)
+                                          : normHex.toULongLong(&ok, 16);
+            if (ok && QString::number(decVal).contains(q)) {
+                match = true;
+            }
+        }
+        m_table->setRowHidden(r, !match);
     }
 }
 

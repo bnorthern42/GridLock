@@ -232,6 +232,9 @@ private slots:
     void filterStrings(const QString& filterText);
 
 private:
+    static void configureSortableTable(QTableWidget* table, const QString& objName,
+                                       const QStringList& headers, const QList<int>& widths);
+    void applyExplorerFilter(const QString& filterText);
     void populateSymbolsTable(const QString& filterText = QString());
     void populateStringsTable(const QString& filterText = QString());
     void refreshTreeViewPath(const QString& focusPath = QString());
@@ -245,10 +248,9 @@ private:
     QPushButton* m_filesModeBtn = nullptr;
     QPushButton* m_symbolsModeBtn = nullptr;
     QPushButton* m_stringsModeBtn = nullptr;
+    QLineEdit* m_explorerFilterEdit = nullptr;
     QStackedWidget* m_stack = nullptr;
-    QLineEdit* m_symbolFilterEdit = nullptr;
     QTableWidget* m_symbolsTable = nullptr;
-    QLineEdit* m_stringFilterEdit = nullptr;
     QTableWidget* m_stringsTable = nullptr;
     std::vector<SymbolEntry> m_symbols;
     std::vector<StringEntry> m_strings;

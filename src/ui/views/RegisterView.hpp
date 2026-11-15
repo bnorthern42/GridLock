@@ -10,6 +10,7 @@
  */
 
 #include <QJsonArray>
+#include <QLineEdit>
 #include <QMap>
 #include <QSet>
 #include <QString>
@@ -107,6 +108,12 @@ private:
     void applyRegisterMap(const QList<QPair<QString, QString>>& orderedRegs);
 
     /**
+     * @brief Hides non-matching register rows based on name, hex value, or decimal value.
+     * @param filterText Search query from #registerSearchEdit.
+     */
+    void filterRegisters(const QString& filterText);
+
+    /**
      * @brief Formats a raw register string into canonical hex format.
      * @param val Raw value string.
      * @return Canonical hexadecimal representation (e.g. "0x0000000000401120").
@@ -119,6 +126,9 @@ private:
      * @return Conventional register name.
      */
     static QString x86RegisterNameForIndex(int idx);
+
+    /// Live filter input for matching register names and hex/decimal values.
+    QLineEdit* m_searchEdit = nullptr;
 
     /// Monospace tabular register display widget.
     QTableWidget* m_table = nullptr;

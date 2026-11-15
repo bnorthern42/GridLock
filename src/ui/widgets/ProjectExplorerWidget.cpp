@@ -32,15 +32,25 @@
 namespace gridlock::ui {
 
 namespace {
-/**
- * @class FlexibleDockContent
- * @brief Container widget providing flexible layout size hints for docking.
- */
+/** @brief Container widget providing flexible layout size hints for docking. */
 class FlexibleDockContent : public QWidget {
 public:
     using QWidget::QWidget;
     QSize sizeHint() const override { return QSize(260, 500); }
     QSize minimumSizeHint() const override { return QSize(150, 120); }
+};
+
+/** @brief QTableWidgetItem sorting by numeric Qt::UserRole (hex addresses / sizes) when present. */
+class NumericSortTableItem : public QTableWidgetItem {
+public:
+    using QTableWidgetItem::QTableWidgetItem;
+    bool operator<(const QTableWidgetItem& other) const override {
+        const QVariant a = data(Qt::UserRole), b = other.data(Qt::UserRole);
+        if (a.isValid() && b.isValid() && a.canConvert<qulonglong>() && b.canConvert<qulonglong>()) {
+            return a.toULongLong() < b.toULongLong();
+        }
+        return QTableWidgetItem::operator<(other);
+    }
 };
 }  // namespace
 
@@ -88,6 +98,21 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   modeLayout->addWidget(m_symbolsModeBtn, 1);
   modeLayout->addWidget(m_stringsModeBtn, 1);
   mainLayout->addWidget(modeBar);
+
+  // Unified search bar filtering active mode (FILES tree, SYMBOLS table, or STRINGS table).
+  QWidget *explorerFilterBar = new QWidget(content);
+  explorerFilterBar->setObjectName(QStringLiteral("explorerFilterBar"));
+  explorerFilterBar->setFixedHeight(28);
+  QHBoxLayout *explorerFilterLayout = new QHBoxLayout(explorerFilterBar);
+  explorerFilterLayout->setContentsMargins(4, 2, 4, 2);
+  explorerFilterLayout->setSpacing(2);
+  m_explorerFilterEdit = new QLineEdit(explorerFilterBar);
+  m_explorerFilterEdit->setObjectName(QStringLiteral("explorerFilterEdit"));
+  m_explorerFilterEdit->setPlaceholderText(QStringLiteral("Filter files..."));
+  m_explorerFilterEdit->setClearButtonEnabled(true);
+  m_explorerFilterEdit->setFixedHeight(24);
+  explorerFilterLayout->addWidget(m_explorerFilterEdit);
+  mainLayout->addWidget(explorerFilterBar);
 
   m_stack = new QStackedWidget(content);
 
@@ -148,132 +173,52 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   filesLayout->addWidget(m_treeView, 1);
   m_stack->addWidget(filesPage);
 
-  // Page 1: Symbols & Functions View
+  // Page 1: Symbols & Functions View (sortable, interactive 3-column table).
   QWidget *symbolsPage = new QWidget(m_stack);
   QVBoxLayout *symbolsLayout = new QVBoxLayout(symbolsPage);
   symbolsLayout->setContentsMargins(0, 0, 0, 0);
   symbolsLayout->setSpacing(0);
-
-  // Filter bar housing live symbol substring search input
-  QWidget *filterBar = new QWidget(symbolsPage);
-  filterBar->setFixedHeight(28);
-  QHBoxLayout *filterLayout = new QHBoxLayout(filterBar);
-  filterLayout->setContentsMargins(3, 2, 3, 2);
-  filterLayout->setSpacing(2);
-
-  m_symbolFilterEdit = new QLineEdit(filterBar);
-  m_symbolFilterEdit->setObjectName("symbolFilterEdit");
-  m_symbolFilterEdit->setPlaceholderText("Filter functions / symbols...");
-  m_symbolFilterEdit->setFixedHeight(24);
-  filterLayout->addWidget(m_symbolFilterEdit);
-  symbolsLayout->addWidget(filterBar);
-
-  // Three-column symbols table: SYMBOL, ADDRESS, SIZE
   m_symbolsTable = new QTableWidget(0, 3, symbolsPage);
-  m_symbolsTable->setObjectName("symbolsTable");
-  m_symbolsTable->setFrameShape(QFrame::NoFrame);
-  m_symbolsTable->setAlternatingRowColors(true);
-  m_symbolsTable->setHorizontalHeaderLabels({"SYMBOL", "ADDRESS", "SIZE"});
-  m_symbolsTable->verticalHeader()->setVisible(false);
-  m_symbolsTable->verticalHeader()->setDefaultSectionSize(20);
-  m_symbolsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-  m_symbolsTable->setSelectionMode(QAbstractItemView::SingleSelection);
-  m_symbolsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  m_symbolsTable->setShowGrid(true);
-  m_symbolsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  m_symbolsTable->horizontalHeader()->setVisible(true);
-  m_symbolsTable->horizontalHeader()->setMinimumSectionSize(42);
-  m_symbolsTable->horizontalHeader()->setStretchLastSection(false);
-  // Column 0 stretches with window width, columns 1 and 2 fit contents tightly (82px / 48px)
-  m_symbolsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-  m_symbolsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-  m_symbolsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-  m_symbolsTable->setColumnWidth(1, 82);
-  m_symbolsTable->setColumnWidth(2, 48);
-
+  configureSortableTable(m_symbolsTable, QStringLiteral("symbolsTable"), {QStringLiteral("SYMBOL"), QStringLiteral("ADDRESS"), QStringLiteral("SIZE")}, {130, 88, 56});
   symbolsLayout->addWidget(m_symbolsTable, 1);
   m_stack->addWidget(symbolsPage);
 
-  // Page 2: Strings View (.rodata / .dynstr)
+  // Page 2: Strings View (.rodata / .dynstr, sortable, interactive 3-column table).
   QWidget *stringsPage = new QWidget(m_stack);
   QVBoxLayout *stringsLayout = new QVBoxLayout(stringsPage);
-  stringsLayout->setContentsMargins(0, 0, 0, 0);
-  stringsLayout->setSpacing(0);
-
-  // Filter bar housing live binary strings search input
-  QWidget *strFilterBar = new QWidget(stringsPage);
-  strFilterBar->setFixedHeight(28);
-  QHBoxLayout *strFilterLayout = new QHBoxLayout(strFilterBar);
-  strFilterLayout->setContentsMargins(3, 2, 3, 2);
-  strFilterLayout->setSpacing(2);
-
-  m_stringFilterEdit = new QLineEdit(strFilterBar);
-  m_stringFilterEdit->setObjectName("stringFilterEdit");
-  m_stringFilterEdit->setPlaceholderText("Filter strings...");
-  m_stringFilterEdit->setFixedHeight(24);
-  strFilterLayout->addWidget(m_stringFilterEdit);
-  stringsLayout->addWidget(strFilterBar);
-
-  // Three-column binary strings table: ADDRESS, SECTION, STRING
+  stringsLayout->setContentsMargins(0, 0, 0, 0); stringsLayout->setSpacing(0);
   m_stringsTable = new QTableWidget(0, 3, stringsPage);
-  m_stringsTable->setObjectName("stringsTable");
-  m_stringsTable->setFrameShape(QFrame::NoFrame);
-  m_stringsTable->setAlternatingRowColors(true);
-  m_stringsTable->setHorizontalHeaderLabels({"ADDRESS", "SECTION", "STRING"});
-  m_stringsTable->verticalHeader()->setVisible(false);
-  m_stringsTable->verticalHeader()->setDefaultSectionSize(20);
-  m_stringsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-  m_stringsTable->setSelectionMode(QAbstractItemView::SingleSelection);
-  m_stringsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  m_stringsTable->setShowGrid(true);
-  m_stringsTable->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  m_stringsTable->horizontalHeader()->setVisible(true);
-  m_stringsTable->horizontalHeader()->setMinimumSectionSize(48);
-  m_stringsTable->horizontalHeader()->setStretchLastSection(true);
-  // Address and section columns have fixed widths >= 48px, string value stretches
-  m_stringsTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
-  m_stringsTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Fixed);
-  m_stringsTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-  m_stringsTable->setColumnWidth(0, 82);
-  m_stringsTable->setColumnWidth(1, 64);
-
+  configureSortableTable(m_stringsTable, QStringLiteral("stringsTable"), {QStringLiteral("ADDRESS"), QStringLiteral("SECTION"), QStringLiteral("STRING")}, {88, 68, 120});
   stringsLayout->addWidget(m_stringsTable, 1);
   m_stack->addWidget(stringsPage);
 
   mainLayout->addWidget(m_stack, 1);
-  content->setMinimumWidth(150);
-  content->setMaximumWidth(QWIDGETSIZE_MAX);
-  content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+  content->setMinimumWidth(150); content->setMaximumWidth(QWIDGETSIZE_MAX); content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   setWidget(content);
-  setMinimumWidth(150);
-  setMaximumWidth(QWIDGETSIZE_MAX);
-  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+  setMinimumWidth(150); setMaximumWidth(QWIDGETSIZE_MAX); setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
   populateSymbolsTable();
   populateStringsTable();
 
-  // Mode switcher button slots
+  // Mode switcher button slots and live search filter dispatch across all three modes.
   connect(m_filesModeBtn, &QPushButton::clicked, this, [this]() { setSymbolsMode(false); });
   connect(m_symbolsModeBtn, &QPushButton::clicked, this, [this]() { setSymbolsMode(true); });
   connect(m_stringsModeBtn, &QPushButton::clicked, this, [this]() { setStringsMode(true); });
-  connect(m_symbolFilterEdit, &QLineEdit::textChanged, this, &ProjectExplorerWidget::filterSymbols);
-  connect(m_stringFilterEdit, &QLineEdit::textChanged, this, &ProjectExplorerWidget::filterStrings);
-  connect(m_symbolsTable, &QTableWidget::cellDoubleClicked, this,
-          [this](int row, int /*col*/) {
-            if (auto *symItem = m_symbolsTable->item(row, 0)) activateSymbol(symItem->text());
-          });
-  connect(m_symbolsTable, &QTableWidget::cellActivated, this,
-          [this](int row, int /*col*/) {
-            if (auto *symItem = m_symbolsTable->item(row, 0)) activateSymbol(symItem->text());
-          });
-  connect(m_stringsTable, &QTableWidget::cellDoubleClicked, this,
-          [this](int row, int /*col*/) {
-            if (auto *strItem = m_stringsTable->item(row, 2)) activateString(strItem->text());
-          });
-  connect(m_stringsTable, &QTableWidget::cellActivated, this,
-          [this](int row, int /*col*/) {
-            if (auto *strItem = m_stringsTable->item(row, 2)) activateString(strItem->text());
-          });
+  connect(m_explorerFilterEdit, &QLineEdit::textChanged, this, &ProjectExplorerWidget::applyExplorerFilter);
+
+  // Read target address directly from clicked/activated sorted row items so sort order is respected.
+  auto onSymbolActivated = [this](int row, int /*col*/) {
+    if (auto *symItem = m_symbolsTable->item(row, 0)) emit symbolAddressSelected(symItem->data(Qt::UserRole).toULongLong(), symItem->text());
+  };
+  connect(m_symbolsTable, &QTableWidget::cellDoubleClicked, this, onSymbolActivated);
+  connect(m_symbolsTable, &QTableWidget::cellActivated, this, onSymbolActivated);
+
+  auto onStringActivated = [this](int row, int /*col*/) {
+    auto *addrItem = m_stringsTable->item(row, 0); auto *strItem = m_stringsTable->item(row, 2);
+    if (addrItem && strItem) emit symbolAddressSelected(addrItem->data(Qt::UserRole).toULongLong(), strItem->text());
+  };
+  connect(m_stringsTable, &QTableWidget::cellDoubleClicked, this, onStringActivated);
+  connect(m_stringsTable, &QTableWidget::cellActivated, this, onStringActivated);
 
   connect(m_openFolderBtn, &QPushButton::clicked, this, &ProjectExplorerWidget::onOpenFolder);
   connect(m_collapseAllBtn, &QPushButton::clicked, m_treeView, &QTreeView::collapseAll);
@@ -301,10 +246,8 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   reloadStyle();
 
   // Re-render styles, symbol table, and string table foregrounds whenever Dark/Light mode toggles
-  connect(&gridlock::core::managers::ThemeManager::instance(),
-          &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
-            reloadStyle();
-          });
+  connect(&gridlock::core::managers::ThemeManager::instance(), &gridlock::core::managers::ThemeManager::themeModeChanged,
+          this, [this](bool) { reloadStyle(); });
 }
 
 
@@ -325,7 +268,7 @@ void ProjectExplorerWidget::seedDefaultSymbols() {
       {QStringLiteral("sym.init_deeply_nested"), 0x00401142ULL, 38},
       {QStringLiteral("sym.rank_coordinator"), 0x00401168ULL, 64},
   };
-  populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
+  populateSymbolsTable(isSymbolsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
 }
 
 /**
@@ -339,7 +282,7 @@ void ProjectExplorerWidget::seedDefaultStrings() {
       {0x00402050ULL, QStringLiteral(".dynstr"), QStringLiteral("libmpi.so.40")},
       {0x00402060ULL, QStringLiteral(".dynstr"), QStringLiteral("GLIBC_2.38")},
   };
-  populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+  populateStringsTable(isStringsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
 }
 
 /**
@@ -348,7 +291,7 @@ void ProjectExplorerWidget::seedDefaultStrings() {
  */
 void ProjectExplorerWidget::setSymbols(const std::vector<SymbolEntry>& symbols) {
   m_symbols = symbols;
-  populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
+  populateSymbolsTable(isSymbolsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
 }
 
 /**
@@ -357,7 +300,7 @@ void ProjectExplorerWidget::setSymbols(const std::vector<SymbolEntry>& symbols) 
  */
 void ProjectExplorerWidget::setStrings(const std::vector<StringEntry>& strings) {
   m_strings = strings;
-  populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+  populateStringsTable(isStringsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
 }
 
 /**
@@ -365,9 +308,7 @@ void ProjectExplorerWidget::setStrings(const std::vector<StringEntry>& strings) 
  * @param filterText Filter query matched against symbol name or hexadecimal address.
  */
 void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
-  if (!m_symbolsTable) {
-    return;
-  }
+  if (!m_symbolsTable) return;
   auto &tm = gridlock::core::managers::ThemeManager::instance();
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
   const bool isDark = pal.isDark;
@@ -376,13 +317,15 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
   symPal.setColor(QPalette::Text, QColor(pal.textHex));
   m_symbolsTable->setPalette(symPal);
 
+  // Suspend live column sorting while rebuilding rows so QTableWidget does not move items mid-insert.
+  const bool wasSorting = m_symbolsTable->isSortingEnabled();
+  m_symbolsTable->setSortingEnabled(false);
   const QString query = filterText.trimmed();
   m_symbolsTable->setRowCount(0);
 
-  // Iterate loaded symbols matching query
+  // Iterate loaded symbols matching query and bind numeric sort keys for address and size.
   for (const auto &entry : m_symbols) {
-    const QString addrStr =
-        QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
+    const QString addrStr = QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
     if (!query.isEmpty() && !entry.name.contains(query, Qt::CaseInsensitive) &&
         !addrStr.contains(query, Qt::CaseInsensitive)) {
       continue;
@@ -391,25 +334,28 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
     const int row = m_symbolsTable->rowCount();
     m_symbolsTable->insertRow(row);
 
-    // Symbol name in pastel yellow (dark mode) or dark amber (light mode)
+    // Symbol name in pastel yellow (dark mode) or dark amber (light mode); stores raw address for activation.
     auto *nameItem = new QTableWidgetItem(entry.name);
     nameItem->setForeground(isDark ? QColor("#dcdcaa") : QColor("#953800"));
     nameItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
-    // Hex address in cyan (dark mode) or deep navy (light mode)
-    auto *addrItem = new QTableWidgetItem(addrStr);
+    // Hex address sorted numerically by 64-bit address in cyan (dark mode) or deep navy (light mode).
+    auto *addrItem = new NumericSortTableItem(addrStr);
     addrItem->setForeground(isDark ? QColor("#4ec9b0") : QColor("#0550ae"));
+    addrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
-    // Size in bytes
-    auto *sizeItem = new QTableWidgetItem(QString::number(entry.size));
+    // Byte size sorted numerically by integer size.
+    auto *sizeItem = new NumericSortTableItem(QString::number(entry.size));
     sizeItem->setForeground(isDark ? QColor("#b5cea8") : QColor("#116329"));
     sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    sizeItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.size));
 
     m_symbolsTable->setItem(row, 0, nameItem);
     m_symbolsTable->setItem(row, 1, addrItem);
     m_symbolsTable->setItem(row, 2, sizeItem);
   }
 
+  m_symbolsTable->setSortingEnabled(wasSorting);
   if (m_symbolsTable->rowCount() > 0) {
     m_symbolsTable->selectRow(3 < m_symbolsTable->rowCount() ? 3 : 0);
   }
@@ -420,9 +366,7 @@ void ProjectExplorerWidget::populateSymbolsTable(const QString &filterText) {
  * @param filterText Filter query matched against string value, section, or address.
  */
 void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
-  if (!m_stringsTable) {
-    return;
-  }
+  if (!m_stringsTable) return;
   auto &tm = gridlock::core::managers::ThemeManager::instance();
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
   const bool isDark = pal.isDark;
@@ -431,13 +375,15 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
   strPal.setColor(QPalette::Text, QColor(pal.textHex));
   m_stringsTable->setPalette(strPal);
 
+  // Suspend live column sorting while rebuilding rows so QTableWidget does not move items mid-insert.
+  const bool wasSorting = m_stringsTable->isSortingEnabled();
+  m_stringsTable->setSortingEnabled(false);
   const QString query = filterText.trimmed();
   m_stringsTable->setRowCount(0);
 
-  // Iterate strings matching filter
+  // Iterate strings matching filter and attach 64-bit numeric sort key to column 0.
   for (const auto &entry : m_strings) {
-    const QString addrStr =
-        QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
+    const QString addrStr = QStringLiteral("0x%1").arg(entry.address, 8, 16, QChar('0'));
     if (!query.isEmpty() && !entry.value.contains(query, Qt::CaseInsensitive) &&
         !entry.section.contains(query, Qt::CaseInsensitive) &&
         !addrStr.contains(query, Qt::CaseInsensitive)) {
@@ -447,25 +393,25 @@ void ProjectExplorerWidget::populateStringsTable(const QString &filterText) {
     const int row = m_stringsTable->rowCount();
     m_stringsTable->insertRow(row);
 
-    auto *addrItem = new QTableWidgetItem(addrStr);
+    auto *addrItem = new NumericSortTableItem(addrStr);
     addrItem->setForeground(isDark ? QColor("#4ec9b0") : QColor("#0550ae"));
-    addrItem->setData(Qt::UserRole,
-                      QVariant::fromValue<qulonglong>(entry.address));
+    addrItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
     auto *secItem = new QTableWidgetItem(entry.section);
     secItem->setForeground(isDark ? QColor("#569cd6") : QColor("#0969da"));
+    secItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
     auto *valItem = new QTableWidgetItem(entry.value);
     valItem->setForeground(isDark ? QColor("#ce9178") : QColor("#953800"));
+    valItem->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.address));
 
     m_stringsTable->setItem(row, 0, addrItem);
     m_stringsTable->setItem(row, 1, secItem);
     m_stringsTable->setItem(row, 2, valItem);
   }
 
-  if (m_stringsTable->rowCount() > 0) {
-    m_stringsTable->selectRow(0);
-  }
+  m_stringsTable->setSortingEnabled(wasSorting);
+  if (m_stringsTable->rowCount() > 0) m_stringsTable->selectRow(0);
 }
 
 /**
@@ -477,6 +423,12 @@ void ProjectExplorerWidget::setSymbolsMode(bool enabled) {
   if (m_filesModeBtn) m_filesModeBtn->setChecked(!enabled);
   if (m_symbolsModeBtn) m_symbolsModeBtn->setChecked(enabled);
   if (m_stringsModeBtn) m_stringsModeBtn->setChecked(false);
+  if (m_explorerFilterEdit) {
+    m_explorerFilterEdit->setPlaceholderText(
+        enabled ? QStringLiteral("Filter symbols by name or address...")
+                : QStringLiteral("Filter files by name (e.g. main, *.cpp)..."));
+  }
+  applyExplorerFilter(m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
 }
 
 /**
@@ -505,6 +457,10 @@ void ProjectExplorerWidget::setStringsMode(bool enabled) {
   if (m_filesModeBtn) m_filesModeBtn->setChecked(false);
   if (m_symbolsModeBtn) m_symbolsModeBtn->setChecked(false);
   if (m_stringsModeBtn) m_stringsModeBtn->setChecked(true);
+  if (m_explorerFilterEdit) {
+    m_explorerFilterEdit->setPlaceholderText(QStringLiteral("Filter strings, sections, or addresses..."));
+  }
+  applyExplorerFilter(m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
 }
 
 /**
@@ -588,6 +544,52 @@ bool ProjectExplorerWidget::activateString(const QString &queryText) {
 }
 
 /**
+ * @brief Configures common sorting, selection, and interactive header geometry on explorer tables.
+ */
+void ProjectExplorerWidget::configureSortableTable(QTableWidget* table, const QString& objName,
+                                                   const QStringList& headers, const QList<int>& widths) {
+  if (!table) return;
+  table->setObjectName(objName);
+  table->setColumnCount(headers.size());
+  table->setHorizontalHeaderLabels(headers);
+  table->verticalHeader()->setVisible(false);
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::SingleSelection);
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->setSortingEnabled(true);
+  if (QHeaderView* hdr = table->horizontalHeader()) {
+    hdr->setVisible(true);
+    hdr->setMinimumSectionSize(42);
+    hdr->setSectionsMovable(false);
+    hdr->setStretchLastSection(true);
+    for (int i = 0; i < headers.size(); ++i) {
+      hdr->setSectionResizeMode(i, QHeaderView::Interactive);
+      if (i < widths.size()) table->setColumnWidth(i, widths.at(i));
+    }
+  }
+}
+
+/**
+ * @brief Applies the unified explorer filter bar query to whichever page (`FILES`, `SYMBOLS`, or `STRINGS`) is active.
+ * @param filterText Search substring or glob pattern entered in `#explorerFilterEdit`.
+ */
+void ProjectExplorerWidget::applyExplorerFilter(const QString &filterText) {
+  if (isSymbolsMode()) { populateSymbolsTable(filterText); return; }
+  if (isStringsMode()) { populateStringsTable(filterText); return; }
+  if (!m_fileSystemModel) return;
+  const QString query = filterText.trimmed();
+  m_fileSystemModel->setNameFilterDisables(false);
+  if (query.isEmpty()) {
+    m_fileSystemModel->setNameFilters(QStringList());
+    return;
+  }
+  const QString pattern = (query.contains(QLatin1Char('*')) || query.contains(QLatin1Char('?')))
+                              ? query
+                              : (QStringLiteral("*") + query + QStringLiteral("*"));
+  m_fileSystemModel->setNameFilters(QStringList{pattern});
+}
+
+/**
  * @brief Filters the symbols table on query changes.
  * @param filterText Search substring.
  */
@@ -600,12 +602,7 @@ void ProjectExplorerWidget::filterSymbols(const QString &filterText) { populateS
 void ProjectExplorerWidget::filterStrings(const QString &filterText) { populateStringsTable(filterText); }
 
 /**
- * @brief Reloads font size, item padding, mode buttons, filter bars, and icon provider from active theme and configuration.
- *
- * Queries QSettings for file tree density preferences ("Compact", "Comfortable", "Large"),
- * resolves the active ThemeManager palette, and updates the stylesheets of the segmented
- * mode switcher bar (`FILES | SYMBOLS | STRINGS`), filter inputs, symbol/string tables,
- * and directory tree view without hardcoded dark hex colors.
+ * @brief Reloads font size, item padding, mode buttons, unified filter bar, and icon provider from theme settings.
  */
 void ProjectExplorerWidget::reloadStyle() {
   // Read user-configured tree row density from persistent settings with a strict >= 12px typography floor.
@@ -621,16 +618,14 @@ void ProjectExplorerWidget::reloadStyle() {
   auto& tm = gridlock::core::managers::ThemeManager::instance();
   const auto pal = tm.paletteForTheme(tm.activeThemeId());
 
-  // Style the FILES | SYMBOLS | STRINGS segmented mode bar: 24px height, 0px 10px padding, 12px font, pal.headerHex / pal.accentHex.
+  // Style the FILES | SYMBOLS | STRINGS segmented mode bar from active theme tokens.
   const QString btnStyle = QStringLiteral(
       "QPushButton { background-color: %1; color: %2; border: 1px solid %3; "
-      "border-radius: 3px; padding: 0px 10px; font-size: 12px; font-weight: 600; "
-      "min-height: 24px; max-height: 24px; }"
+      "border-radius: 3px; padding: 0px 10px; font-size: 12px; font-weight: 600; min-height: 24px; max-height: 24px; }"
       "QPushButton:hover { background-color: %3; border: 1px solid %4; color: %2; }"
       "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
 
-  // Apply header background and border to #projectModeBar and #explorerFilesTopBar containers.
   if (auto* modeBar = findChild<QWidget*>(QStringLiteral("projectModeBar"))) {
     modeBar->setStyleSheet(QStringLiteral("QWidget#projectModeBar { background-color: %1; border-bottom: 1px solid %2; } ").arg(pal.headerHex, pal.borderHex) + btnStyle);
   }
@@ -653,17 +648,16 @@ void ProjectExplorerWidget::reloadStyle() {
         "QPushButton:hover { background-color: %2; border-radius: 3px; }").arg(pal.textHex, pal.borderHex));
   }
 
-  // Style the symbol and string filter inputs dynamically in 12px UI sans-serif from active theme palette.
+  // Style the unified explorer filter bar (#explorerFilterEdit) dynamically from active theme palette.
   const QString filterStyle = QStringLiteral(
       "QLineEdit { background-color: %1; color: %2; border: 1px solid %3; "
       "border-radius: 3px; padding: 1px 6px; font-size: 12px; }"
       "QLineEdit:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex);
-
-  // Update symbol and string filter bars and QLineEdit stylesheets.
-  for (QLineEdit* edit : {m_symbolFilterEdit, m_stringFilterEdit}) {
-    if (edit) {
-      edit->setStyleSheet(filterStyle);
-      if (edit->parentWidget()) edit->parentWidget()->setStyleSheet(QStringLiteral("background-color: %1; border-bottom: 1px solid %2;").arg(pal.headerHex, pal.borderHex));
+  if (m_explorerFilterEdit) {
+    m_explorerFilterEdit->setStyleSheet(filterStyle);
+    if (m_explorerFilterEdit->parentWidget()) {
+      m_explorerFilterEdit->parentWidget()->setStyleSheet(
+          QStringLiteral("background-color: %1; border-bottom: 1px solid %2;").arg(pal.headerHex, pal.borderHex));
     }
   }
 
@@ -675,14 +669,13 @@ void ProjectExplorerWidget::reloadStyle() {
       "border: 1px solid %3; padding: 2px 4px; font-size: 12px; font-weight: 600; }")
       .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex);
 
-  // Refresh symbols and strings table stylesheets and re-populate items with theme-aware foreground colors.
   if (m_symbolsTable) {
     m_symbolsTable->setStyleSheet(tableStyle);
-    populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
+    populateSymbolsTable(isSymbolsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
   }
   if (m_stringsTable) {
     m_stringsTable->setStyleSheet(tableStyle);
-    populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
+    populateStringsTable(isStringsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
   }
 
   // Apply canvas background, 12px UI sans-serif header style, text color, and item padding to the filesystem tree view.

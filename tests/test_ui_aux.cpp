@@ -101,9 +101,7 @@ static void auditFilesGoogleStyleAndDocumentation(const QStringList& targetFiles
     }
 }
 
-/**
- * @brief Tests side dock resizability limits and xref / decompiler integration.
- */
+/** @brief Tests side dock resizability limits and xref / decompiler integration. */
 void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture(); mainWindow.resize(1440, 900); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
@@ -132,10 +130,7 @@ void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
     disassemblyView->setDecompilerMode(true); QVERIFY(disassemblyView->isDecompilerMode());
     disassemblyView->setDecompilerMode(false); QVERIFY(!disassemblyView->isDecompilerMode());
 }
-
-/**
- * @brief Tests memory view toolbar geometry and source file line length limits.
- */
+/** @brief Tests memory view toolbar geometry and source file line length limits. */
 void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QTest::qWait(30); QApplication::processEvents();
@@ -148,19 +143,13 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
         const int minRequiredW = btn->fontMetrics().horizontalAdvance(btn->text()) + 12;
         QVERIFY2(btn->width() >= minRequiredW, qPrintable(QString("MemView button '%1' width (%2) < (%3)").arg(btn->text()).arg(btn->width()).arg(minRequiredW)));
     }
-    auto* addrInput = memView->findChild<QLineEdit*>();
-    QVERIFY(addrInput != nullptr && addrInput->width() >= 90);
+    auto* addrInput = memView->findChild<QLineEdit*>(); QVERIFY(addrInput != nullptr && addrInput->width() >= 90);
     // 2. Central horizontal splitter gives DisassemblyView >= 420px on 1440x900.
-    auto* disassemblyView = mainWindow.disassemblyView();
-    QVERIFY(disassemblyView != nullptr && disassemblyView->width() >= 420);
+    auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr && disassemblyView->width() >= 420);
     // 3. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines.
-    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
-    if (!rootDir.exists("src")) rootDir = QDir::current();
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/.."); if (!rootDir.exists("src")) rootDir = QDir::current();
     QStringList allFiles;
-    for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) {
-        QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) allFiles.append(it.next());
-    }
+    for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) { QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories); while (it.hasNext()) allFiles.append(it.next()); }
     allFiles.sort();
     for (const QString& filePath : allFiles) {
         QFile file(filePath); QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
@@ -168,71 +157,65 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
         QVERIFY2(lines < 950, qPrintable(QString("%1 exceeds 950-line headroom limit (%2 lines)").arg(filePath).arg(lines)));
     }
 }
-
-/**
- * @brief Tests preferred screen routing and offscreen startup configuration.
- */
+/** @brief Tests preferred screen routing and offscreen startup configuration. */
 void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
-    gridlock::ui::MainWindow mainWindow;
-    const auto docks = mainWindow.findChildren<QDockWidget*>(); QVERIFY(!docks.isEmpty());
-    for (QDockWidget* dock : docks) {
-        if (!dock) continue;
-        if (QWidget* tb = dock->titleBarWidget()) {
-            QVERIFY2(tb->parentWidget() == dock && !tb->isWindow(), qPrintable(QString("Dock '%1' titleBarWidget ownership").arg(dock->objectName())));
-        }
-    }
-    QScreen* primary = QGuiApplication::primaryScreen();
-    QVERIFY(primary != nullptr); QCOMPARE(mainWindow.resolvePreferredScreen(""), primary); QCOMPARE(mainWindow.resolvePreferredScreen("nonexistent_monitor_xyz"), primary);
+    // Instantiate MainWindow and verify every dock owns its custom titleBarWidget safely.
+    gridlock::ui::MainWindow mainWindow; const auto docks = mainWindow.findChildren<QDockWidget*>(); QVERIFY(!docks.isEmpty());
+    for (QDockWidget* dock : docks) if (dock && dock->titleBarWidget()) QVERIFY2(dock->titleBarWidget()->parentWidget() == dock && !dock->titleBarWidget()->isWindow(), qPrintable(QString("Dock '%1' titleBarWidget ownership").arg(dock->objectName())));
+    // Confirm resolvePreferredScreen falls back to primaryScreen on empty or unknown monitor hints.
+    QScreen* primary = QGuiApplication::primaryScreen(); QVERIFY(primary != nullptr);
+    QCOMPARE(mainWindow.resolvePreferredScreen(""), primary); QCOMPARE(mainWindow.resolvePreferredScreen("nonexistent_monitor_xyz"), primary);
     mainWindow.applyPreferredScreenRouting("27", true); QVERIFY(mainWindow.testAttribute(Qt::WA_ShowWithoutActivating) && mainWindow.preferredMonitorHint() == QStringLiteral("27"));
     mainWindow.applyPreferredScreenRouting("2560x1440", false); QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating) && mainWindow.preferredMonitorHint() == QStringLiteral("2560x1440"));
-    auto& cfg = gridlock::core::ConfigManager::instance();
-    const QString prevMonitor = cfg.preferredMonitor(); const bool prevUnfocused = cfg.openUnfocused();
+    // Persist monitor preference and unfocused launch flag inside an isolated temporary config dir.
+    auto& cfg = gridlock::core::ConfigManager::instance(); const QString prevMonitor = cfg.preferredMonitor(); const bool prevUnfocused = cfg.openUnfocused();
     QTemporaryDir tmpConfigDir; QVERIFY(tmpConfigDir.isValid());
-    const QByteArray prevTestDir = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
-    qputenv("GRIDLOCK_TEST_CONFIG_DIR", tmpConfigDir.path().toUtf8()); cfg.loadConfig();
+    const QByteArray prevTestDir = qgetenv("GRIDLOCK_TEST_CONFIG_DIR"); qputenv("GRIDLOCK_TEST_CONFIG_DIR", tmpConfigDir.path().toUtf8()); cfg.loadConfig();
     cfg.setPreferredMonitor("2560x1440"); cfg.setOpenUnfocused(true); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440")); QVERIFY(cfg.openUnfocused());
     cfg.loadConfig(); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440")); QVERIFY(cfg.openUnfocused());
     cfg.setPreferredMonitor("1920x1080"); cfg.setOpenUnfocused(false); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080")); QVERIFY(!cfg.openUnfocused());
     cfg.loadConfig(); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080")); QVERIFY(!cfg.openUnfocused());
+    // Restore original test config environment and ConfigManager state before returning.
     if (prevTestDir.isEmpty()) qunsetenv("GRIDLOCK_TEST_CONFIG_DIR"); else qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevTestDir);
     cfg.loadConfig(); cfg.setPreferredMonitor(prevMonitor); cfg.setOpenUnfocused(prevUnfocused);
 }
 
-/**
- * @brief Tests address history back/forward navigation, string lists, and bookmarks.
- */
+/** @brief Tests address history back/forward navigation, string lists, RegisterView filter/sort, and bookmarks. */
 void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
+    // Load synthetic preview fixture and grab disassembly, explorer, memory, and register widgets.
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
-    auto* disassemblyView = mainWindow.disassemblyView();
-    auto* projectExplorer = mainWindow.projectExplorerWidget();
-    auto* memView = mainWindow.memView();
-    QVERIFY(disassemblyView != nullptr && projectExplorer != nullptr && memView != nullptr);
-
-    // Seek across sequence of virtual addresses.
+    auto* disassemblyView = mainWindow.disassemblyView(); auto* projectExplorer = mainWindow.projectExplorerWidget();
+    auto* memView = mainWindow.memView(); auto* regView = mainWindow.findChild<gridlock::ui::RegisterView*>();
+    QVERIFY(disassemblyView != nullptr && projectExplorer != nullptr && memView != nullptr && regView != nullptr);
+    // Verify RegisterView #registerSearchEdit filtering, interactive headers, and column sorting.
+    regView->seedPreviewRegisters();
+    auto* regTable = regView->findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable")); auto* regSearch = regView->findChild<QLineEdit*>(QStringLiteral("registerSearchEdit"));
+    QVERIFY2(regTable && regSearch && regTable->isSortingEnabled() && regTable->horizontalHeader()->sectionResizeMode(0) == QHeaderView::Interactive, "RegisterView must expose #registerSearchEdit, sorting, and Interactive header");
+    // Confirm filtering for "rsp" isolates 1 matching register row and clear() restores all rows.
+    const int totalRegs = regTable->rowCount(); QVERIFY(totalRegs >= 10);
+    auto visRegRows = [&]() { QStringList r; for (int i = 0; i < regTable->rowCount(); ++i) if (!regTable->isRowHidden(i)) r << regTable->item(i, 0)->text(); return r; };
+    regSearch->setText(QStringLiteral("rsp")); QApplication::processEvents();
+    QVERIFY2(visRegRows().contains(QStringLiteral("rsp")) && visRegRows().size() == 1, qPrintable(visRegRows().join(',')));
+    regSearch->clear(); QApplication::processEvents(); QCOMPARE(visRegRows().size(), totalRegs);
+    // Sort column 0 ascending vs descending and confirm first visible register flips cleanly.
+    regTable->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents(); const QString asc0 = regTable->item(0, 0)->text();
+    regTable->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); const QString desc0 = regTable->item(0, 0)->text();
+    QVERIFY2(asc0 != desc0 && asc0 < desc0, "Sorting RegisterView NAME asc/desc must invert row order");
+    // Seek across sequence of virtual addresses and verify back/forward navigation.
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120")); QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401149")); QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178")); QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
     QVERIFY(mainWindow.canNavigateBack() && !mainWindow.canNavigateForward());
-
-    // Navigate back in history stack.
     QVERIFY(mainWindow.navigateBack()); QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
     QVERIFY(mainWindow.canNavigateBack() && mainWindow.canNavigateForward());
-
-    // Navigate forward in history stack.
     QVERIFY(mainWindow.navigateForward()); QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
     QVERIFY(!mainWindow.canNavigateForward());
-
-    // Activate string list view in project explorer.
-    projectExplorer->setStringsMode(true);
-    QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4);
-
-    // Activate string entry to seek memory view to target address.
+    // Activate a binary string entry in Strings mode and confirm MemoryView follows target address.
+    projectExplorer->setStringsMode(true); QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4);
     QSignalSpy spyStr(projectExplorer, &gridlock::ui::ProjectExplorerWidget::symbolAddressSelected);
     QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD") && spyStr.count() == 1);
-    QCOMPARE(spyStr.at(0).at(0).toULongLong(), 0x00402000ULL);
-    QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
+    QCOMPARE(spyStr.at(0).at(0).toULongLong(), 0x00402000ULL); QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
     QVERIFY(mainWindow.canNavigateBack());
-
     // Set address comments and toggle bookmarks.
     disassemblyView->setAddressComment(0x00401149ULL, " Outer loop rank check ");
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Outer loop rank check"));
@@ -241,34 +224,22 @@ void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
     QVERIFY(!disassemblyView->toggleBookmark(0x00401149ULL) && !disassemblyView->isBookmarked(0x00401149ULL));
 }
 
-/**
- * @brief Tests multi-language decompiler target generation and source fallback.
- */
+/** @brief Tests multi-language decompiler target generation and source fallback. */
 void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
-    auto* disassemblyView = mainWindow.disassemblyView();
-    QVERIFY(disassemblyView != nullptr);
-
-    // Generate C target pseudocode.
-    disassemblyView->setDecompilerTargetLanguage("C");
-    QCOMPARE(disassemblyView->decompilerTargetLanguage(), QStringLiteral("C"));
+    auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr);
+    // Generate C target pseudocode and check typed locals, control flow, and MPI calls.
+    disassemblyView->setDecompilerTargetLanguage("C"); QCOMPARE(disassemblyView->decompilerTargetLanguage(), QStringLiteral("C"));
     const QString cOut = disassemblyView->decompileToLanguage("C");
-    QVERIFY(cOut.contains("int32_t") || cOut.contains("var_"));
-    QVERIFY(cOut.contains("if (") || cOut.contains("while ("));
-    QVERIFY(cOut.contains("MPI_Init"));
-
-    // Generate C++ and high-level pseudocode variants.
-    const QString cppOut = disassemblyView->decompileToLanguage("C++");
-    const QString pseudoOut = disassemblyView->decompileToLanguage("Pseudocode");
+    QVERIFY((cOut.contains("int32_t") || cOut.contains("var_")) && (cOut.contains("if (") || cOut.contains("while (")) && cOut.contains("MPI_Init"));
+    // Generate distinct C++ and high-level Pseudocode outputs for comparison.
+    const QString cppOut = disassemblyView->decompileToLanguage("C++"); const QString pseudoOut = disassemblyView->decompileToLanguage("Pseudocode");
     QVERIFY(!cppOut.isEmpty() && !pseudoOut.isEmpty() && cppOut != cOut && pseudoOut != cOut && cppOut != pseudoOut);
-
-    // Function signature inspection.
+    // Inspect resolved function signature header and verify basic-block CFG graph toggle.
     const QString sigHeader = disassemblyView->functionSignatureHeader();
     QVERIFY(!sigHeader.isEmpty() && sigHeader.contains("sym.main(int argc, char **argv)"));
-    disassemblyView->setGraphMode(true);
-    QVERIFY(disassemblyView->isGraphMode() && disassemblyView->basicBlockCount() >= 3);
-
-    // Verify source code fallback on address miss.
+    disassemblyView->setGraphMode(true); QVERIFY(disassemblyView->isGraphMode() && disassemblyView->basicBlockCount() >= 3);
+    // Verify source code fallback engages on unmapped CRT/startup address misses.
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120") && !mainWindow.isShowingDecompilerFallback());
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401000") && mainWindow.isShowingDecompilerFallback());
 }
@@ -312,11 +283,11 @@ void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
  * @brief Tests synchronized selection choreography between decompiler lines and disassembly.
  */
 void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
+    // Load synthetic preview fixture and obtain core disassembly, explorer, and memory views.
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
-    auto* disassemblyView = mainWindow.disassemblyView();
-    auto* projectExplorer = mainWindow.projectExplorerWidget();
-    auto* memView = mainWindow.memView();
+    auto* disassemblyView = mainWindow.disassemblyView(); auto* projectExplorer = mainWindow.projectExplorerWidget(); auto* memView = mainWindow.memView();
     QVERIFY(disassemblyView && projectExplorer && memView);
+    // Enable split CFG+decompiler view and verify bidirectional line <-> address mapping at 0x0040113d.
     disassemblyView->setSplitGraphDecompilerMode(true); QVERIFY(disassemblyView->seekToAddress(0x0040113dULL));
     const int initLine = disassemblyView->currentDecompilerLine();
     QVERIFY(initLine > 0 && disassemblyView->decompilerLineToAddress(initLine) == 0x0040113dULL);
@@ -328,15 +299,19 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL); QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
     // Highlight token in pseudocode and verify navigation history traversal.
     disassemblyView->highlightToken("argc"); QCOMPARE(disassemblyView->highlightedToken(), QStringLiteral("argc"));
+    // Step across three disassembly addresses and exercise Back / Forward history stack.
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120") && mainWindow.seekToAddressOrExpression("0x0040113d") && mainWindow.seekToAddressOrExpression("0x00401178"));
     QVERIFY(mainWindow.canNavigateBack() && mainWindow.navigateBack());
+    // Confirm MemoryView follows DisassemblyView back to 0x0040113d before stepping forward again.
     QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL); QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
     QVERIFY(mainWindow.navigateForward() && disassemblyView->currentAddress() == 0x00401178ULL);
 
     // Activate string and verify memory view navigates to string address and address comment.
     projectExplorer->setStringsMode(true);
+    // Jump via MPI_COMM_WORLD string entry to 0x00402000 and verify MemoryView base update.
     QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4 && projectExplorer->activateString("MPI_COMM_WORLD"));
     QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
+    // Attach comment and bookmark at 0x00401149 and confirm persisted getters.
     disassemblyView->setAddressComment(0x00401149ULL, "Rank loop header");
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Rank loop header"));
     QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL) && disassemblyView->isBookmarked(0x00401149ULL));
@@ -349,12 +324,14 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
     // Instantiate primary MainWindow for rank telemetry sync tests.
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture(); mainWindow.resize(1440, 900); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
+    // Locate DisassemblyView, ServerRackView, and status bar telemetry pill.
     auto* disassemblyView = mainWindow.disassemblyView(); auto* serverRackView = mainWindow.serverRackView();
     auto* statusTelemetry = mainWindow.findChild<QLabel*>("cutterStatusTelemetry");
     QVERIFY(disassemblyView && serverRackView && statusTelemetry);
 
     // Set split graph decompiler and assign rank instruction pointers.
     disassemblyView->setSplitGraphDecompilerMode(true);
+    // Populate 4 divergent rank program counters across distinct basic blocks.
     disassemblyView->setRankAddresses({{0, 0x00401168ULL}, {1, 0x00401155ULL}, {2, 0x00401157ULL}, {3, 0x0040115fULL}});
     // Verify Rank 0 maps to block 0x00401168, Rank 1 to 0x0040114f, Ranks 2 and 3 to 0x00401157.
     QCOMPARE(disassemblyView->ranksAtBlock(0x00401168ULL), QVector<int>{0});
@@ -363,13 +340,16 @@ void TestMainWindowUI::testCfgRankDivergenceMinimapAndRackSync() {
 
     // Verify minimap visibility toggle and geometry constraints.
     QVERIFY(disassemblyView->isGraphMinimapVisible() && disassemblyView->minimapRect().width() >= 80 && disassemblyView->minimapRect().height() >= 60);
+    // Hide minimap overlay and confirm visibility flag flips false.
     disassemblyView->setGraphMinimapVisible(false);
     QVERIFY(!disassemblyView->isGraphMinimapVisible());
+    // Re-enable minimap overlay and confirm visibility flag flips back to true.
     disassemblyView->setGraphMinimapVisible(true);
     QVERIFY(disassemblyView->isGraphMinimapVisible());
 
     // Select rank 1 in ServerRackView and verify status telemetry and address update.
     QVERIFY(serverRackView->selectRank(1) && serverRackView->selectedRank() == 1);
+    // Confirm telemetry badge reports MPI RANK: 1 and DisassemblyView focuses 0x00401155.
     QVERIFY(statusTelemetry->text().contains("MPI RANK: 1") && disassemblyView->currentAddress() == 0x00401155ULL && disassemblyView->currentDecompilerLine() > 0);
 }
 
@@ -567,17 +547,14 @@ void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation
         if (match.address != 0 && (match.label.contains(QStringLiteral("main"), Qt::CaseInsensitive) || match.contextSnippet.contains(QStringLiteral("main"), Qt::CaseInsensitive))) { foundValidAddress = true; break; }
     }
     QVERIFY(!searchMatches.isEmpty() && foundValidAddress);
+    // Detect two-rank deadlock cycle and assert DisassemblyView + telemetry banner reflect it.
     const QVector<int> detectedCycle = mainWindow.detectAndHighlightDeadlock({{0, 1}, {1, 0}});
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     auto* telemetryLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
     QVERIFY(detectedCycle.contains(0) && detectedCycle.contains(1) && disasm && disasm->deadlockCycleRanks().contains(0) && telemetryLabel && telemetryLabel->text().contains(QStringLiteral("DEADLOCK")));
 }
 
-/**
- * @brief Verifies system package manager fallback detection, multi-distro CLI output parsing
- *        (`pacman`, `dnf4`/`dnf5`, `apt`, `zypper`), switchable `Table` / `List` / `Raw` display modes,
- *        and live host package querying with synchronized visible row count badges.
- */
+/** @brief Verifies system package manager detection, multi-distro parsing, view modes, and live host queries. */
 void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     // 1. System Package Manager Fallback Detection When Spack Is Missing.
     gridlock::ui::HpcConsoleWidget widget; QVERIFY(!widget.activePackageManagerBackend().isEmpty());
@@ -604,19 +581,14 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     const int fdMatches = widget.searchPackagesSynchronously(QStringLiteral("fd"), 5000);
     QVERIFY2(fdMatches > 0 && widget.visiblePackageCount() == fdMatches, "Live host package query for 'fd' must return > 0 real system/repo packages");
 }
-
-/**
- * @brief Generates and verifies all 1600x960 workstation, feature, and theme PNG screenshots in
- *        `docs/screenshots/` and confirms `docs/USER_GUIDE.md` embeds the new visual assets.
- */
+/** @brief Generates and verifies all 1600x960 workstation, feature, and theme PNG screenshots. */
 void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
-    // Instantiate MainWindow and resolve the repository docs/screenshots output directory.
+    // Resolve docs/screenshots path from either builddir/ or repo root.
     gridlock::ui::MainWindow mainWindow;
     const QString shotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
     // 1. Capture all workstation, feature, and theme screenshots via MainWindow::captureDocumentationScreenshots.
     QVERIFY2(mainWindow.captureDocumentationScreenshots(shotDir), "captureDocumentationScreenshots must succeed");
     QVERIFY2(QFileInfo::exists(shotDir + QStringLiteral("/theme_solarized_light.png")) && QFileInfo::exists(shotDir + QStringLiteral("/theme_catppuccin_latte.png")), "theme_solarized_light.png and theme_catppuccin_latte.png must exist in docs/screenshots");
-
     // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid >= 800x500 QImage.
     for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png"), QStringLiteral("theme_solarized_light.png"), QStringLiteral("theme_catppuccin_latte.png")}) {
         const QString fullPath = shotDir + QLatin1Char('/') + fn; const QImage img(fullPath);
@@ -635,16 +607,11 @@ void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
     QVERIFY2(QString::fromUtf8(guideFile.readAll()).contains(QStringLiteral("breakpoint_popover.png")), "docs/USER_GUIDE.md must embed new assets");
     const QString themesText = QString::fromUtf8(themesFile.readAll()); QVERIFY2(themesText.contains(QStringLiteral("theme_solarized_light.png")) && themesText.contains(QStringLiteral("theme_catppuccin_latte.png")), "docs/THEMES.md must embed theme_solarized_light.png and theme_catppuccin_latte.png");
 }
-
-/**
- * @brief Verifies v0.7.0 version alignment, `build_by_default : false` on test targets,
- *        `scripts/build_appimage.sh` `ninja -C "$BUILD_DIR" gridlock` + `libqtadvancedcss.so` RPATH bundling,
- *        zero `*test*` binaries in `AppDir/usr/bin/`, and direct `./AppDir/usr/bin/gridlock --version` execution.
- */
+/** @brief Verifies v0.8.0 version alignment, AppImage build scripts, and tutorial resolution. */
 void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
+    // Helper to load repository root text files independent of test execution directory.
     const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
     auto readText = [&](const QString& relPath) -> QString { QFile f(rootPrefix + relPath); return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(); };
-
     // 1. Verify meson.build declares version 0.8.0, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
     const QString mesonText = readText(QStringLiteral("meson.build")), changelogText = readText(QStringLiteral("CHANGELOG.md")), readmeText = readText(QStringLiteral("README.md")), roadmapText = readText(QStringLiteral("ROADMAP.md"));
     QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.0'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.0");
@@ -656,7 +623,6 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     int badgeCount = 0;
     while (badgeMatches.hasNext()) { const QString bUrl = badgeMatches.next().captured(1); ++badgeCount; QVERIFY2(bUrl.startsWith(QStringLiteral("https://img.shields.io/badge/")) && bUrl.contains(QStringLiteral("style=for-the-badge")), "README badge must use /badge/ with style=for-the-badge"); }
     QVERIFY2(badgeCount >= 7, "README must contain at least 7 for-the-badge shields");
-
     // 2. Verify scripts/build_appimage.sh supports Lite and Tutorials editions without duplicate unversioned alias.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
@@ -666,20 +632,19 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("AppDir/usr/share/gridlock/tutorial"), QStringLiteral("AppDir/tutorial"), QStringLiteral("mpicxx"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
         QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
     }
+    // Confirm AppImage script invokes ninja gridlock without deprecated cqtdeployer tool.
     QVERIFY2(!appImageScript.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive) && appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))), "scripts/build_appimage.sh ninja gridlock");
     if (!QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) || !QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1"))) {
         QProcess prepProc; prepProc.setWorkingDirectory(rootPrefix.isEmpty() ? QDir::currentPath() : QDir(rootPrefix).absolutePath()); prepProc.start(QStringLiteral("bash"), {QStringLiteral("scripts/build_appimage.sh"), QStringLiteral("--appdir-only")});
         QVERIFY2(prepProc.waitForFinished(30000) && prepProc.exitCode() == 0, "scripts/build_appimage.sh --appdir-only must succeed");
     }
     QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) && QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir must bundle libqtadvancedcss.so.1 and zero *test* binaries");
-
     // 3. Verify direct execution of ./builddir/gridlock --version in a headless environment with empty LD_LIBRARY_PATH.
     QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     for (const QString& k : {QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("DISPLAY"), QStringLiteral("WAYLAND_DISPLAY")}) env.remove(k);
     env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen")); proc.setProcessEnvironment(env);
     proc.start(QFileInfo::exists(rootPrefix + QStringLiteral("builddir/gridlock")) ? (rootPrefix + QStringLiteral("builddir/gridlock")) : (rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock")), {QStringLiteral("--version")});
     QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.0")), "gridlock --version must report 0.8.0");
-
     // 4. Verify GitHub Actions workflows are version-agnostic, filter ui_tests in CI, and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows")); QString combinedYml;
     for (const QString& fn : wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files)) {
@@ -687,6 +652,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
         QVERIFY2(!content.contains(QStringLiteral("0.7.0")) && !content.contains(QStringLiteral("0.8.0")) && !content.contains(QStringLiteral("v0.7.0")) && !content.contains(QStringLiteral("v0.8.0")), qPrintable(fn));
         QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")) && !content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("flatpak-builder")), qPrintable(fn));
     }
+    // Check upload artifact globs and required CI APT packages across all workflow definitions.
     QVERIFY2(combinedYml.contains(QStringLiteral("GridLock-*-Tutorials-x86_64.AppImage")) && !combinedYml.contains(QStringLiteral("GridLock-x86_64.AppImage")), "release.yml must upload Tutorials edition and no unversioned alias");
     for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("openmpi-bin"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
         QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing requirement: ") + pkg));
@@ -694,35 +660,63 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
 
     // 5. Verify MainWindow resolves tutorial targets from applicationDirPath()/../share/gridlock/tutorial/ or APPDIR when cwd has no ./tutorial/.
     {
+        // Create an isolated mock APPDIR with tutorial/deadlock_ring.cpp and switch cwd temporarily.
         QTemporaryDir tempCwd; const QString savedCwd = QDir::currentPath(); QDir::setCurrent(tempCwd.path());
         const QString mockAppDir = tempCwd.filePath(QStringLiteral("mock_appdir"));
         QDir().mkpath(mockAppDir + QStringLiteral("/usr/share/gridlock/tutorial"));
         { QFile f(mockAppDir + QStringLiteral("/usr/share/gridlock/tutorial/deadlock_ring.cpp")); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("// mpi test\n"); }
         qputenv("APPDIR", mockAppDir.toUtf8());
-        gridlock::ui::MainWindow mw;
-        QVERIFY2(mw.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName(deadlock_ring) must succeed in clean cwd");
+        gridlock::ui::MainWindow mw; QVERIFY2(mw.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName(deadlock_ring) must succeed in clean cwd");
         const QString resolvedSrc = mw.activeTargetSourcePath();
         qunsetenv("APPDIR"); QDir::setCurrent(savedCwd);
         QVERIFY2(resolvedSrc.contains(QStringLiteral("deadlock_ring.cpp")) && (resolvedSrc.contains(mockAppDir) || resolvedSrc.contains(QStringLiteral("share/gridlock/tutorial"))), "MainWindow must resolve tutorial from APPDIR or share fallback when cwd has no ./tutorial/");
     }
 }
 
-/**
- * @brief Verifies interactive file-system CRUD operations (`createNewFile`, `createNewFolder`,
- *        `renameEntry`, `deleteEntry`) and 1-click build file source registration in `ProjectExplorerWidget`.
- */
+/** @brief Verifies file CRUD, build registration, and #explorerFilterEdit filtering + sorting across FILES, SYMBOLS, and STRINGS. */
 void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
+    // Initialize ProjectExplorerWidget on a fresh temporary directory and verify empty disassembly startup.
     QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
     gridlock::ui::ProjectExplorerWidget explorer; explorer.setRootPath(tempDir.path());
     QVERIFY2(!explorer.isSymbolsMode() && !explorer.isStringsMode() && explorer.symbolCount() == 0 && explorer.stringCount() == 0, "ProjectExplorerWidget must start in FILES mode with 0 symbols and 0 strings");
     gridlock::ui::DisassemblyView idleDisasm;
     QVERIFY2(idleDisasm.basicBlockCount() == 0 && idleDisasm.decompiledPseudocode().isEmpty() && !idleDisasm.toPlainText().contains(QStringLiteral("0x00401120")) && !idleDisasm.decompiledPseudocode().contains(QStringLiteral("var_4h")), "DisassemblyView must start empty without constructor mock disassembly");
+    // Connect CRUD signal counters and verify C++/header creation plus subfolder creation.
     int createdCount = 0, renamedCount = 0, deletedCount = 0;
     QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileCreated, [&](const QString&) { ++createdCount; }); QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileRenamed, [&](const QString&, const QString&) { ++renamedCount; }); QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileDeleted, [&](const QString&) { ++deletedCount; });
     const QString cppPath = tempDir.filePath(QStringLiteral("solver_kernel.cpp")), hppPath = tempDir.filePath(QStringLiteral("solver_kernel.hpp"));
     QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.cpp")) && QFileInfo::exists(cppPath) && createdCount == 1 && explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.hpp")) && QFileInfo::exists(hppPath) && createdCount == 2, "createNewFile(.cpp/.hpp)");
     QFile hppFile(hppPath); QVERIFY(hppFile.open(QIODevice::ReadOnly) && QString::fromUtf8(hppFile.readAll()).contains(QStringLiteral("#pragma once")));
     QVERIFY2(explorer.createNewFolder(tempDir.path(), QStringLiteral("kernels")) && QDir(tempDir.filePath(QStringLiteral("kernels"))).exists(), "createNewFolder");
+    // Locate unified #explorerFilterEdit, sortable SYMBOLS/STRINGS tables, and FILES tree view.
+    auto* expFilter = explorer.findChild<QLineEdit*>(QStringLiteral("explorerFilterEdit")); auto* fsTree = explorer.findChild<QTreeView*>();
+    auto* symTable = explorer.findChild<QTableWidget*>(QStringLiteral("symbolsTable")); auto* strTable = explorer.findChild<QTableWidget*>(QStringLiteral("stringsTable"));
+    QVERIFY2(expFilter && expFilter->isClearButtonEnabled() && symTable && strTable && fsTree && symTable->isSortingEnabled() && strTable->isSortingEnabled() && symTable->horizontalHeader()->sectionResizeMode(0) == QHeaderView::Interactive && strTable->horizontalHeader()->sectionResizeMode(0) == QHeaderView::Interactive, "ProjectExplorerWidget must expose #explorerFilterEdit, sortable headers, and Interactive columns");
+    // Seed synthetic symbols and strings in unsorted order to verify numeric & alphabetic sorting.
+    explorer.setSymbols({{QStringLiteral("z_func"), 0x401200ULL, 32}, {QStringLiteral("MPI_Init"), 0x401050ULL, 16}, {QStringLiteral("MPI_Barrier"), 0x401100ULL, 24}, {QStringLiteral("a_func"), 0x401010ULL, 8}});
+    explorer.setStrings({{0x402050ULL, QStringLiteral(".rodata"), QStringLiteral("zebra_msg")}, {0x402000ULL, QStringLiteral(".rodata"), QStringLiteral("MPI_COMM_WORLD")}, {0x402010ULL, QStringLiteral(".dynstr"), QStringLiteral("alpha_str")}});
+    // Filter FILES tree via #explorerFilterEdit and confirm clear() restores both kernel files.
+    auto visibleTreeNames = [&]() { QStringList out; const QModelIndex r = fsTree->rootIndex(); for (int i = 0; i < fsTree->model()->rowCount(r); ++i) out << fsTree->model()->index(i, 0, r).data().toString(); return out; };
+    QTRY_VERIFY_WITH_TIMEOUT(visibleTreeNames().contains(QStringLiteral("solver_kernel.cpp")) && visibleTreeNames().contains(QStringLiteral("solver_kernel.hpp")), 3000);
+    expFilter->setText(QStringLiteral("solver_kernel.hpp")); QApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(visibleTreeNames().contains(QStringLiteral("solver_kernel.hpp")) && !visibleTreeNames().contains(QStringLiteral("solver_kernel.cpp")), 3000);
+    expFilter->clear(); QApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(visibleTreeNames().contains(QStringLiteral("solver_kernel.cpp")), 3000);
+    // Filter SYMBOLS for "MPI_", clear, sort descending/ascending, and verify sorted double-click address.
+    explorer.setSymbolsMode(true); QSignalSpy symClickSpy(&explorer, &gridlock::ui::ProjectExplorerWidget::symbolAddressSelected);
+    expFilter->setText(QStringLiteral("MPI_")); QApplication::processEvents();
+    QVERIFY2(symTable->rowCount() == 2 && symTable->item(0, 0)->text().startsWith(QStringLiteral("MPI_")) && symTable->item(1, 0)->text().startsWith(QStringLiteral("MPI_")), "SYMBOLS filter must keep only MPI_ rows");
+    expFilter->clear(); QApplication::processEvents(); QCOMPARE(symTable->rowCount(), 4);
+    symTable->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); QCOMPARE(symTable->item(0, 0)->text(), QStringLiteral("z_func"));
+    emit symTable->cellDoubleClicked(0, 0); QCOMPARE(symClickSpy.count(), 1); QCOMPARE(symClickSpy.last().at(0).toULongLong(), 0x401200ULL);
+    symTable->sortByColumn(1, Qt::AscendingOrder); QApplication::processEvents(); QCOMPARE(symTable->item(0, 0)->text(), QStringLiteral("a_func"));
+    // Switch to STRINGS mode, filter for "MPI_COMM", clear, and sort column 2 alphabetically.
+    explorer.setStringsMode(true); expFilter->setText(QStringLiteral("MPI_COMM")); QApplication::processEvents();
+    QVERIFY2(strTable->rowCount() == 1 && strTable->item(0, 2)->text() == QStringLiteral("MPI_COMM_WORLD"), "STRINGS filter must isolate MPI_COMM_WORLD");
+    expFilter->clear(); QApplication::processEvents(); QCOMPARE(strTable->rowCount(), 3);
+    strTable->sortByColumn(2, Qt::AscendingOrder); QApplication::processEvents(); QCOMPARE(strTable->item(0, 2)->text(), QStringLiteral("alpha_str"));
+    // Return to FILES mode and verify renameEntry, registerSourceInBuildFile, and deleteEntry.
+    explorer.setSymbolsMode(false);
     const QString renamedPath = tempDir.filePath(QStringLiteral("mpi_solver_kernel.cpp"));
     QVERIFY2(explorer.renameEntry(cppPath, QStringLiteral("mpi_solver_kernel.cpp")) && !QFileInfo::exists(cppPath) && QFileInfo::exists(renamedPath) && renamedCount == 1, "renameEntry");
     const QString mesonBuildPath = tempDir.filePath(QStringLiteral("meson.build"));
