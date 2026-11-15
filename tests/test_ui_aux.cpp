@@ -27,6 +27,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
@@ -836,6 +837,23 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     for (int i = 0; i < 10; ++i) emit coord->programOutputReceived(i % 8, QStringLiteral("PinnedLine %1").arg(i), false);
     flushOut(); QApplication::processEvents();
     QCOMPARE(outSb->value(), outSb->maximum());
+    // 11f. Verify Recent Sessions persistence in ~/.config/gridlock/debugger.conf, dynamic rebuild, and workspace switch.
+    QTemporaryDir wsA, wsB; QVERIFY(wsA.isValid() && wsB.isValid()); QDir(wsA.path()).mkpath("src"); QDir(wsB.path()).mkpath("src");
+    const QString cA = QFileInfo(wsA.path()).canonicalFilePath(), cB = QFileInfo(wsB.path()).canonicalFilePath();
+    QVERIFY2(switchWs(mw, wsA.path()), "wsA switch failed"); saveSessAct->trigger(); QApplication::processEvents(); QVERIFY2(switchWs(mw, wsB.path()), "wsB switch failed");
+    // Open #menuRecentSessions via aboutToShow and confirm wsB precedes wsA plus Clear Recent Sessions.
+    auto* rm = mw.findChild<QMenu*>(QStringLiteral("menuRecentSessions")); QVERIFY2(rm != nullptr, "#menuRecentSessions missing");
+    emit rm->aboutToShow(); QApplication::processEvents(); QAction* actA = nullptr; int iA = -1, iB = -1; bool hasClr = false;
+    for (int i = 0; i < rm->actions().size(); ++i) { QAction* a = rm->actions().at(i); const QString d = a->data().toString();
+        if (d.contains(cB) && iB < 0) iB = i; else if (d.contains(cA) && !actA) { iA = i; actA = a; }
+        if (a->text().contains(QStringLiteral("Clear Recent Sessions"))) hasClr = true; }
+    QVERIFY2(iB >= 0 && iA > iB && hasClr && actA != nullptr, "Recent Sessions must order wsB then wsA with Clear action");
+    // Construct a fresh SessionManager and assert wsB & wsA persisted to debugger.conf, then click wsA to restore workspace.
+    auto chkRe = [&](auto* tag) { using SM = std::remove_pointer_t<decltype(tag)>;
+        if constexpr (requires { SM(); std::declval<SM&>().recentSessions(); }) { SM re; QVERIFY2(re.recentSessions().join('|').contains(cB) && re.recentSessions().join('|').contains(cA), qPrintable(re.recentSessions().join(","))); }
+        else QFAIL("SessionManager must be constructible and expose recentSessions()"); };
+    chkRe(static_cast<gridlock::core::managers::SessionManager*>(nullptr));
+    actA->trigger(); QApplication::processEvents(); QCOMPARE(QFileInfo(pe->rootPath()).canonicalFilePath(), cA);
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(switchWs(mw, unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
     auto* disasm = mw.findChild<gridlock::ui::DisassemblyView*>(); auto* navBar = mw.findChild<QWidget*>(QStringLiteral("addressNavBar"));

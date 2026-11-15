@@ -588,24 +588,11 @@ void MainWindow::setupMenu() {
   QAction *saveSessionAction = fileMenu->addAction("Save Session As..."); connect(saveSessionAction, &QAction::triggered, this, &MainWindow::saveSessionAs);
   QAction *loadSessionAction = fileMenu->addAction("Load Session..."); connect(loadSessionAction, &QAction::triggered, this, &MainWindow::loadSession);
 
-  // Recent Sessions Submenu: Dynamically populated with most-recently-used session files.
-  QMenu *recentMenu = fileMenu->addMenu("Recent Sessions");
-  connect(recentMenu, &QMenu::aboutToShow, this, [this, recentMenu]() {
-    // Rebuild MRU menu entries lazily each time the submenu opens.
-    recentMenu->clear();
-    QStringList mru = gridlock::core::managers::SessionManager::instance().getMruSessions();
-    for (const QString &s : mru) {
-      // Trigger asynchronous session state restoration when an MRU item is selected.
-      connect(recentMenu->addAction(s), &QAction::triggered, this, [s]() {
-        gridlock::core::managers::SessionManager::instance().loadSession(s);
-      });
-    }
-    // Provide a disabled placeholder item when no prior session snapshots exist.
-    if (mru.isEmpty()) recentMenu->addAction("No Recent Sessions")->setEnabled(false);
-  });
-
+  // Recent Sessions Submenu: Dynamically populated with persisted workspaces and TOML sessions.
+  m_recentSessionsMenu = fileMenu->addMenu("Recent Sessions"); m_recentSessionsMenu->setObjectName(QStringLiteral("menuRecentSessions"));
+  connect(m_recentSessionsMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentSessionsMenu);
+  rebuildRecentSessionsMenu();
   fileMenu->addSeparator();
-
   // Project Settings Dialog Trigger: Edits compiler flags, include paths, and runtime environments.
   QAction *projSetAction = fileMenu->addAction("Project Settings");
   connect(projSetAction, &QAction::triggered, this, [this]() {
@@ -613,57 +600,33 @@ void MainWindow::setupMenu() {
     ProjectSettingsDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) { syncCoordinatorWithConfig(); if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); }
   });
-
   // Attach to Process Action: Enumerates live `/proc` processes and attaches active coordinator.
   QAction *attachProcAction = fileMenu->addAction("Attach to Process...");
   connect(attachProcAction, &QAction::triggered, this, [this]() { attachToProcessWorkflow(); });
-
   // SLURM Job Submission Action: Interpolates active target into template and queues via HPC backend.
   QAction *slurmAction = fileMenu->addAction("Submit SLURM Job");
   connect(slurmAction, &QAction::triggered, this, [this]() {
-    // Load SLURM batch script template and substitute the active source/target path.
-    const auto slurm =
-        gridlock::core::ConfigManager::instance().getSlurmSettings();
-    QString script = slurm.scriptTemplate;
-    script.replace("{FILE}", m_currentFile);
-    // Focus the Spack/HPC console tab so job allocation output is immediately visible.
-    if (m_spackManager) {
-      m_spackManager->appendMessage("Submitting SLURM batch job...");
-      m_bottomTabs->setCurrentWidget(m_spackManager);
-    }
-    // Dispatch rendered sbatch script to the configured HPC backend.
+    QString script = gridlock::core::ConfigManager::instance().getSlurmSettings().scriptTemplate; script.replace("{FILE}", m_currentFile);
+    if (m_spackManager) { m_spackManager->appendMessage("Submitting SLURM batch job..."); m_bottomTabs->setCurrentWidget(m_spackManager); }
     m_hpcBackend->submitSlurmJob(script);
   });
-
   fileMenu->addSeparator();
   // Exit Action: Closes MainWindow and triggers graceful session teardown in closeEvent().
   fileMenu->addAction("Exit", this, &MainWindow::close);
-
   // Construct Edit menu with focus-aware editor operations and Preferences dialog trigger.
-  // Supports Undo/Redo, Clipboard (Cut/Copy/Paste/Select All), Search/Navigation
-  // (Find in View, Go to Line, Toggle Line Comment), and global Preferences.
   QMenu *editMenu = menuBar->addMenu("&Edit");
   const QList<QPair<QString, QKeySequence>> editActions = {
-      {QStringLiteral("Undo"), QKeySequence::Undo},
-      {QStringLiteral("Redo"), QKeySequence::Redo},
-      {QStringLiteral("Cut"), QKeySequence::Cut},
-      {QStringLiteral("Copy"), QKeySequence::Copy},
-      {QStringLiteral("Paste"), QKeySequence::Paste},
-      {QStringLiteral("Select All"), QKeySequence::SelectAll},
-      {QStringLiteral("Find in View..."), QKeySequence::Find},
-      {QStringLiteral("Go to Line..."), QKeySequence(Qt::CTRL | Qt::Key_L)},
-      {QStringLiteral("Toggle Comment"), QKeySequence(Qt::CTRL | Qt::Key_Slash)}
-  };
+      {QStringLiteral("Undo"), QKeySequence::Undo}, {QStringLiteral("Redo"), QKeySequence::Redo}, {QStringLiteral("Cut"), QKeySequence::Cut},
+      {QStringLiteral("Copy"), QKeySequence::Copy}, {QStringLiteral("Paste"), QKeySequence::Paste}, {QStringLiteral("Select All"), QKeySequence::SelectAll},
+      {QStringLiteral("Find in View..."), QKeySequence::Find}, {QStringLiteral("Go to Line..."), QKeySequence(Qt::CTRL | Qt::Key_L)},
+      {QStringLiteral("Toggle Comment"), QKeySequence(Qt::CTRL | Qt::Key_Slash)}};
   // Register each action on the Edit menu and route its signal to triggerEditMenuAction().
   for (int i = 0; i < editActions.size(); ++i) {
     // Insert structural dividers between History, Clipboard, and Navigation groups.
     if (i == 2 || i == 6) editMenu->addSeparator();
-    QAction *act = editMenu->addAction(editActions[i].first);
-    act->setShortcut(editActions[i].second);
+    QAction *act = editMenu->addAction(editActions[i].first); act->setShortcut(editActions[i].second);
     const QString actLabel = editActions[i].first;
-    // Dispatch action by label to the currently focused editor or disassembly view.
-    connect(act, &QAction::triggered, this,
-            [this, actLabel]() { triggerEditMenuAction(actLabel); });
+    connect(act, &QAction::triggered, this, [this, actLabel]() { triggerEditMenuAction(actLabel); });
   }
   // Go to Definition Action: Resolves symbol declaration via clangd LSP (F12 inside SourceCodeView).
   QAction *gotoDefAction = editMenu->addAction(QStringLiteral("Go to Definition"));
@@ -874,6 +837,42 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
     if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, static_cast<QKeyEvent *>(event))) return true;
   }
   return QMainWindow::eventFilter(watched, event);
+}
+/** @brief Records @p path in SessionManager MRU history and refreshes File -> Recent Sessions. */
+void MainWindow::recordRecentWorkspace(const QString &path) {
+  // Persist normalized path into debugger.conf MRU before rebuilding submenu items.
+  if (!path.isEmpty()) gridlock::core::managers::SessionManager::instance().addRecentSession(path);
+  rebuildRecentSessionsMenu();
+}
+/** @brief Dynamically populates #menuRecentSessions from persisted MRU entries in debugger.conf. */
+void MainWindow::rebuildRecentSessionsMenu() {
+  if (!m_recentSessionsMenu) return;
+  m_recentSessionsMenu->clear();
+  // Query live normalized MRU workspaces/TOML paths (most recent first, capped at 10).
+  const QStringList entries = gridlock::core::managers::SessionManager::instance().recentSessions();
+  for (const QString &path : entries) {
+    // Format label as `<workspaceName> (<path>)` and store canonical path in action user data.
+    const QFileInfo fi(path); const QString name = fi.isDir() ? QDir(path).dirName() : fi.completeBaseName();
+    QAction *act = m_recentSessionsMenu->addAction(QStringLiteral("%1 (%2)").arg(name.isEmpty() ? path : name, path)); act->setData(path);
+    connect(act, &QAction::triggered, this, [this, path]() {
+      // Restore workspace TOML state if present; otherwise switch directly to the workspace directory.
+      const QString toml = QFileInfo(path).isDir() ? QDir(path).filePath(QStringLiteral(".gridlock/workspace.toml")) : path;
+      const auto opt = QFileInfo::exists(toml) ? gridlock::core::managers::SessionManager::instance().loadSession(toml) : std::nullopt;
+      if (!opt.has_value()) { switchWorkspaceDirectory(path); return; }
+      // Repopulate watched variables and persistent breakpoints from the loaded session snapshot.
+      if (m_differentialGrid) { m_differentialGrid->clearWatches(); for (const auto &w : opt->watchedVariables) m_differentialGrid->addVariableColumn(w); }
+      m_persistentBreakpoints.clear();
+      for (const auto &bp : opt->activeBreakpoints) {
+        const auto p = bp.split(':'); if (p.size() != 2) continue;
+        m_persistentBreakpoints[p[0]].insert(p[1].toInt());
+        if (m_editorTabManager) if (auto *v = m_editorTabManager->getSourceCodeViewForFile(p[0])) v->setBreakpoints(m_persistentBreakpoints[p[0]]);
+      }
+    });
+  }
+  // Show a disabled placeholder when empty; otherwise append a Clear Recent Sessions action.
+  if (entries.isEmpty()) { m_recentSessionsMenu->addAction(QStringLiteral("(No Recent Sessions)"))->setEnabled(false); return; }
+  m_recentSessionsMenu->addSeparator();
+  connect(m_recentSessionsMenu->addAction(QStringLiteral("Clear Recent Sessions")), &QAction::triggered, this, [this]() { gridlock::core::managers::SessionManager::instance().clearRecentSessions(); rebuildRecentSessionsMenu(); });
 }
 
 }  // namespace gridlock::ui

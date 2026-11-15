@@ -32,6 +32,7 @@
 
 class QVulkanInstance;
 class QDockWidget;
+class QMenu;
 class QPlainTextEdit;
 class QSplitter;
 
@@ -609,6 +610,10 @@ protected:
 private:
     void setupUi();
     void setupMenu();
+    /** @brief Rebuilds File -> Recent Sessions from persisted MRU history. */
+    void rebuildRecentSessionsMenu();
+    /** @brief Records a workspace/session path in MRU history and refreshes Recent Sessions menu. */
+    void recordRecentWorkspace(const QString& path);
     void setupToolbar();
     void setupDocks();
     void setupCallStackDock();
@@ -629,6 +634,7 @@ signals:
 
 private:
     ServerRackView* m_serverRackView = nullptr;
+    QMenu* m_recentSessionsMenu = nullptr;
     EditorTabManager* m_editorTabManager = nullptr;
     DisassemblyView* m_disassemblyView = nullptr;
     ReferenceManualWidget* m_referenceManualWidget = nullptr;

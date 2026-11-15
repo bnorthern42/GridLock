@@ -11,12 +11,21 @@
 #include <fstream>
 #include <iostream>
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
+#include <QSettings>
 #include <toml++/toml.hpp>
 
 namespace gridlock::core::managers {
+
+/**
+ * @brief Constructs SessionManager and loads persisted recent sessions from debugger.conf.
+ */
+SessionManager::SessionManager(QObject* parent) : QObject(parent) {
+    loadRecentSessionsFromDisk();
+}
 
 /**
  * @brief Writes the `[workspace]` TOML table containing watches, breakpoints, and ranks to disk.
@@ -58,6 +67,9 @@ bool SessionManager::saveSession(const QString& filePath, const SessionState& st
         }
 
         os << tbl << "\n";
+        os.flush();
+        // Record saved session/workspace in persisted MRU history immediately.
+        addRecentSession(filePath);
         return true;
     } catch (const std::exception& e) {
         qWarning() << "Exception while saving session:" << e.what();
@@ -118,7 +130,7 @@ std::optional<SessionState> SessionManager::loadSession(const QString& filePath)
             !wsInfo.canonicalFilePath().isEmpty() ? wsInfo.canonicalFilePath() : wsInfo.absoluteFilePath();
 
         // Record the loaded file at the front of the MRU list and notify listeners with workspaceRoot.
-        addMruSession(filePath);
+        addRecentSession(filePath);
         emit sessionLoaded(workspaceRoot);
         return state;
     } catch (const std::exception& e) {
@@ -128,15 +140,157 @@ std::optional<SessionState> SessionManager::loadSession(const QString& filePath)
 }
 
 /**
- * @brief Inserts filePath at the front of the MRU list, deduplicating and capping at MAX_MRU.
+ * @brief Canonicalizes @p rawPath, collapsing `.gridlock/workspace.toml` to its workspace root.
+ */
+QString SessionManager::normalizeRecentPath(const QString& rawPath) {
+    const QString trimmed = rawPath.trimmed();
+    if (trimmed.isEmpty() || !QFileInfo::exists(trimmed)) {
+        return {};
+    }
+    const QFileInfo fi(trimmed);
+    // Map `<ws>/.gridlock/workspace.toml` to `<ws>` so workspace switches and saves never duplicate.
+    if (fi.isFile() && fi.fileName() == QStringLiteral("workspace.toml") &&
+        fi.dir().dirName() == QStringLiteral(".gridlock")) {
+        QDir wsDir = fi.dir();
+        if (wsDir.cdUp()) {
+            const QFileInfo wsInfo(wsDir.absolutePath());
+            return !wsInfo.canonicalFilePath().isEmpty()
+                       ? wsInfo.canonicalFilePath()
+                       : QDir::cleanPath(wsInfo.absoluteFilePath());
+        }
+    }
+    return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : QDir::cleanPath(fi.absoluteFilePath());
+}
+
+/**
+ * @brief Loads recent sessions from `QSettings("gridlock", "debugger")`, merging legacy stores and TOMLs.
+ */
+void SessionManager::loadRecentSessionsFromDisk() {
+    m_recentSessions.clear();
+    auto ingestList = [this](const QStringList& rawEntries) {
+        for (const QString& raw : rawEntries) {
+            const QString norm = normalizeRecentPath(raw);
+            if (!norm.isEmpty() && !m_recentSessions.contains(norm) &&
+                m_recentSessions.size() < MAX_RECENT_SESSIONS) {
+                m_recentSessions.append(norm);
+            }
+        }
+    };
+
+    // 1. Primary store: ~/.config/gridlock/debugger.conf via QSettings("gridlock", "debugger").
+    QSettings primary(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    const QStringList primaryRaw = primary.value(QStringLiteral("recentSessions")).toStringList();
+    ingestList(primaryRaw);
+    ingestList(primary.value(QStringLiteral("Session/recentSessions")).toStringList());
+
+    // 2. Legacy default QSettings() store when application/organization metadata is configured.
+    const QString org = QCoreApplication::organizationName();
+    const QString app = QCoreApplication::applicationName();
+    if ((!org.isEmpty() || !app.isEmpty()) && !(org == QStringLiteral("gridlock") && app == QStringLiteral("debugger"))) {
+        QSettings legacy;
+        ingestList(legacy.value(QStringLiteral("recentSessions")).toStringList());
+    }
+
+    // 3. Legacy ~/.config/gridlock/*.toml session files or config.toml `recent_sessions` arrays.
+    const QDir cfgDir(QDir::homePath() + QStringLiteral("/.config/gridlock"));
+    if (cfgDir.exists()) {
+        for (const QFileInfo& tf : cfgDir.entryInfoList(QStringList{QStringLiteral("*.toml")}, QDir::Files)) {
+            try {
+                auto tbl = toml::parse_file(tf.absoluteFilePath().toStdString());
+                if (auto* arr = tbl["recent_sessions"].as_array()) {
+                    QStringList legacyTomlEntries;
+                    for (const auto& elem : *arr) {
+                        if (auto str = elem.value<std::string>()) legacyTomlEntries.append(QString::fromStdString(*str));
+                    }
+                    ingestList(legacyTomlEntries);
+                }
+                if (tf.fileName() != QStringLiteral("config.toml") &&
+                    tf.fileName() != QStringLiteral("settings.toml") && tbl["workspace"].as_table()) {
+                    ingestList(QStringList{tf.absoluteFilePath()});
+                }
+            } catch (...) {
+                // Skip unreadable or non-session TOML files safely.
+            }
+        }
+    }
+
+    // Persist normalized/pruned list back to debugger.conf when pruning or legacy migration occurred.
+    if (m_recentSessions != primaryRaw && !m_recentSessions.isEmpty()) {
+        saveRecentSessionsToDisk();
+    }
+}
+
+/**
+ * @brief Writes current MRU list to `QSettings("gridlock", "debugger")` and flushes immediately.
+ */
+void SessionManager::saveRecentSessionsToDisk() const {
+    QSettings settings(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    settings.setValue(QStringLiteral("recentSessions"), m_recentSessions);
+    settings.sync();
+}
+
+/**
+ * @brief Returns live persisted MRU workspace/session paths (pruning deleted entries).
+ */
+QStringList SessionManager::recentSessions() const {
+    QStringList live;
+    for (const QString& p : m_recentSessions) {
+        if (QFileInfo::exists(p)) {
+            live.append(p);
+        }
+    }
+    return live;
+}
+
+/**
+ * @brief Inserts @p path at index 0 of persisted MRU entries, caps at 10, and syncs debugger.conf.
+ */
+void SessionManager::addRecentSession(const QString& path) {
+    const QString norm = normalizeRecentPath(path);
+    if (norm.isEmpty()) {
+        return;
+    }
+    // Prune deleted paths and deduplicate before prepending the active workspace/session.
+    for (int i = m_recentSessions.size() - 1; i >= 0; --i) {
+        if (!QFileInfo::exists(m_recentSessions.at(i))) {
+            m_recentSessions.removeAt(i);
+        }
+    }
+    m_recentSessions.removeAll(norm);
+    m_recentSessions.prepend(norm);
+    while (m_recentSessions.size() > MAX_RECENT_SESSIONS) {
+        m_recentSessions.removeLast();
+    }
+    saveRecentSessionsToDisk();
+}
+
+/**
+ * @brief Empties all persisted MRU session history and syncs debugger.conf.
+ */
+void SessionManager::clearRecentSessions() {
+    m_recentSessions.clear();
+    saveRecentSessionsToDisk();
+}
+
+/**
+ * @brief Returns legacy or persisted MRU entries for backward-compatible callers.
+ */
+QStringList SessionManager::getMruSessions() const {
+    return m_mruSessions.isEmpty() ? recentSessions() : m_mruSessions;
+}
+
+/**
+ * @brief Inserts filePath at the front of the legacy MRU list (capped at MAX_MRU) and persists real paths.
  */
 void SessionManager::addMruSession(const QString& filePath) {
-    // Remove any existing occurrence so filePath moves to index 0 without duplicates.
+    // Preserve in-memory 5-slot queue semantics for unit tests using synthetic paths.
     m_mruSessions.removeAll(filePath);
     m_mruSessions.prepend(filePath);
-    // Evict the oldest entry when the list exceeds MAX_MRU (5).
     if (m_mruSessions.size() > MAX_MRU) {
         m_mruSessions.removeLast();
+    }
+    if (QFileInfo::exists(filePath)) {
+        addRecentSession(filePath);
     }
 }
 

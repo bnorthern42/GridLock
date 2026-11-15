@@ -40,6 +40,10 @@ struct SessionState {
 class SessionManager : public QObject {
     Q_OBJECT
 public:
+    /** @brief Constructs a SessionManager and loads persisted MRU entries from debugger.conf. */
+    explicit SessionManager(QObject* parent = nullptr);
+    ~SessionManager() override = default;
+
     /** @brief Returns the process-wide SessionManager singleton instance. */
     static SessionManager& instance() {
         static SessionManager instance;
@@ -61,8 +65,17 @@ public:
      */
     std::optional<SessionState> loadSession(const QString& filePath);
 
-    /** @brief Returns the Most-Recently-Used session file paths (up to MAX_MRU entries). */
-    QStringList getMruSessions() const { return m_mruSessions; }
+    /** @brief Returns persisted Most-Recently-Used workspace and session paths (up to 10). */
+    QStringList recentSessions() const;
+
+    /** @brief Records @p path at the front of persisted MRU entries and syncs debugger.conf. */
+    void addRecentSession(const QString& path);
+
+    /** @brief Clears all persisted recent session entries and syncs debugger.conf. */
+    void clearRecentSessions();
+
+    /** @brief Returns legacy or persisted MRU session paths for backward-compatible callers. */
+    QStringList getMruSessions() const;
 
     /**
      * @brief Promotes or inserts filePath at the front of the MRU session list.
@@ -75,12 +88,16 @@ signals:
     void sessionLoaded(QString workspaceRoot);
 
 private:
-    SessionManager() = default;
-    ~SessionManager() override = default;
     SessionManager(const SessionManager&) = delete;
     SessionManager& operator=(const SessionManager&) = delete;
 
+    void loadRecentSessionsFromDisk();
+    void saveRecentSessionsToDisk() const;
+    static QString normalizeRecentPath(const QString& rawPath);
+
+    QStringList m_recentSessions;
     QStringList m_mruSessions;
+    static constexpr int MAX_RECENT_SESSIONS = 10;
     static constexpr int MAX_MRU = 5;
 };
 

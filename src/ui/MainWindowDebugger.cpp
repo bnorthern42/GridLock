@@ -862,7 +862,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     }
     if (!m_debugSessionActive && m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
     if (m_projectExplorerWidget) m_projectExplorerWidget->setSymbolsMode(false);
-    syncDisassemblyDecompilerVisibility(true); return true;
+    recordRecentWorkspace(resolvedDir); syncDisassemblyDecompilerVisibility(true); return true;
 }
 
 /**

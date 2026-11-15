@@ -869,7 +869,7 @@ bool MainWindow::saveSession(bool showStatusMessage) {
   // Persist project settings and session TOML to disk.
   auto &cfg = gridlock::core::ConfigManager::instance(); cfg.saveProjectSettings(cfg.projectSettings());
   const bool ok = gridlock::core::managers::SessionManager::instance().saveSession(targetPath, state);
-  if (ok) { m_activeSessionFilePath = targetPath; if (showStatusMessage && statusBar()) statusBar()->showMessage(QStringLiteral("Session saved to %1").arg(targetPath), 3000); }
+  if (ok) { m_activeSessionFilePath = targetPath; rebuildRecentSessionsMenu(); if (showStatusMessage && statusBar()) statusBar()->showMessage(QStringLiteral("Session saved to %1").arg(targetPath), 3000); }
   return ok;
 }
 
