@@ -28,6 +28,7 @@
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 
 #include "../managers/ConfigManager.hpp"
@@ -178,6 +179,7 @@ void GdbRankCoordinator::queueOrWriteCmd(int rankId, const QString& cmd) {
  */
 void GdbRankCoordinator::setBreakpoint(const QString& file, int line, const QString& condition, int rankFilter) {
   if (file.isEmpty() || line <= 0) return;
+  m_breakpointsCleared = false;
   m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(),
       [&](const PendingBreakpoint& bp) { return bp.file == file && bp.line == line; }), m_pendingBreakpoints.end());
   m_pendingBreakpoints.push_back({file, line, condition.trimmed(), rankFilter});
@@ -201,11 +203,9 @@ void GdbRankCoordinator::setBreakpoint(const QString& file, int line, const QStr
 /** @brief Clears all pending breakpoints and deletes active GDB breakpoints across all ranks. */
 void GdbRankCoordinator::clearBreakpoints() {
   m_pendingBreakpoints.clear();
+  m_breakpointsCleared = true;
   for (size_t i = 0; i < m_processes.size(); ++i) {
-    if (m_processes[i]) {
-      m_processes[i]->state.breakpoints.clear();
-      writeCmd(static_cast<int>(i), "-break-delete\n");
-    }
+    if (m_processes[i]) { m_processes[i]->state.breakpoints.clear(); queueOrWriteCmd(static_cast<int>(i), "-break-delete\n"); }
   }
 }
 
@@ -216,13 +216,14 @@ void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
   auto& rp = m_processes[rankId];
   if (!rp) return;
+  // Never emit frame, thread, register, data, or varobj MI queries while target rank is not stopped.
+  static const QRegularExpression kInspectMiRe(QStringLiteral("^\\d*-(?:stack|thread|var|data)-"));
+  if (rp->state.currentState != QLatin1String("stopped") && kInspectMiRe.match(cmd.trimmed()).hasMatch()) return;
 
   // Prefer the non-blocking POSIX FIFO bridge when running under `mpirun` MPMD mode.
   if (rp->fifoInFd >= 0) {
     const QByteArray bytes = cmd.toUtf8();
-    if (::write(rp->fifoInFd, bytes.constData(), static_cast<size_t>(bytes.size())) > 0) {
-      emit commandSentToGdb(rankId, cmd.trimmed());
-    }
+    if (::write(rp->fifoInFd, bytes.constData(), static_cast<size_t>(bytes.size())) > 0) emit commandSentToGdb(rankId, cmd.trimmed());
     return;
   }
 
@@ -244,10 +245,7 @@ void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
   auto& rp = m_processes[rankId];
   int count = 0;
   for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
-    for (int line : *it) {
-      writeCmd(rankId, QString("-break-insert -f %1:%2\n").arg(it.key()).arg(line));
-      count++;
-    }
+    for (int line : *it) { writeCmd(rankId, QString("-break-insert -f %1:%2\n").arg(it.key()).arg(line)); count++; }
   }
   // Resume immediately when zero breakpoints exist; otherwise wait for bkpt acknowledgements.
   if (count == 0) {
@@ -260,20 +258,19 @@ void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
 }
 
 /**
- * @brief Registers @p name in `m_watchVariables` and creates a GDB/MI variable object on each rank.
+ * @brief Registers @p name in `m_watchVariables` and creates a GDB/MI variable object on stopped ranks.
  */
 void GdbRankCoordinator::registerWatchVariable(const QString& name) {
-  if (std::find(m_watchVariables.begin(), m_watchVariables.end(), name) == m_watchVariables.end()) {
-    m_watchVariables.push_back(name);
-  }
+  if (std::find(m_watchVariables.begin(), m_watchVariables.end(), name) == m_watchVariables.end()) m_watchVariables.push_back(name);
   const int varIdx = static_cast<int>(std::distance(
       m_watchVariables.begin(), std::find(m_watchVariables.begin(), m_watchVariables.end(), name)));
 
-  // Issue `30<varIdx>-var-create - * <name>` to every active GDB rank slot.
+  // Issue `30<varIdx>-var-create - * <name>` only to actively stopped GDB rank slots.
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
-    const bool active = rp && ((rp->fifoInFd >= 0) || (rp->process && rp->process->state() == QProcess::Running));
-    if (active && !m_varNameMap[static_cast<int>(i)].contains(name)) {
+    const bool stoppedActive = rp && rp->state.currentState == QLatin1String("stopped") &&
+                               ((rp->fifoInFd >= 0) || (rp->process && rp->process->state() == QProcess::Running));
+    if (stoppedActive && !m_varNameMap[static_cast<int>(i)].contains(name)) {
       writeCmd(static_cast<int>(i), QString("30%1-var-create - * %2\n").arg(varIdx).arg(name));
     }
   }
@@ -392,16 +389,43 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   if (workDir.isEmpty()) workDir = core::ConfigManager::instance().workspacePath().trimmed();
   if (workDir.isEmpty()) workDir = QFileInfo(executable).absolutePath();
   const QStringList splitExecArgs = execArgs.isEmpty() ? QStringList{} : QProcess::splitCommand(execArgs);
-  // Record human-readable CWD and launch command banner for the Program Output dock.
+
+  // Build process environment with MPI search paths, user envVars, and OpenMP anti-livelock defaults.
+  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+  env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+  env.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:") + env.value(QStringLiteral("LD_LIBRARY_PATH")));
+  for (const QString& pair : hs.envVars.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+    if (const int eq = pair.indexOf(QLatin1Char('=')); eq > 0) env.insert(pair.left(eq).trimmed(), pair.mid(eq + 1).trimmed());
+  }
+  // Parse custom MPI launcher flags while lifting `-x KEY=VAL` into `env` so MPMD ranks inherit symmetrically.
+  QStringList mpiArgs;
+  const QStringList rawMpiTokens = QProcess::splitCommand(customMpiArgs);
+  for (int ti = 0; ti < rawMpiTokens.size(); ++ti) {
+    const QString& tok = rawMpiTokens[ti];
+    if ((tok == QStringLiteral("-np") || tok == QStringLiteral("-n")) && ti + 1 < rawMpiTokens.size()) { ++ti; continue; }
+    if (tok == QStringLiteral("-x") && ti + 1 < rawMpiTokens.size() && rawMpiTokens[ti + 1].contains(QLatin1Char('='))) {
+      const QString kv = rawMpiTokens[++ti]; const int eq = kv.indexOf(QLatin1Char('='));
+      if (eq > 0) env.insert(kv.left(eq).trimmed(), kv.mid(eq + 1).trimmed());
+      continue;
+    }
+    mpiArgs << tok;
+  }
+  // Auto-tune OpenMP thread count (`max(1, idealThreadCount / rankCount)`) and passive barrier wait policy.
+  // Prevents `N * idealThreadCount` spinning OpenMP worker threads from starving ptrace and MPI_Barrier.
+  if (env.value(QStringLiteral("OMP_NUM_THREADS")).trimmed().isEmpty() && !customMpiArgs.contains(QStringLiteral("OMP_NUM_THREADS")))
+    env.insert(QStringLiteral("OMP_NUM_THREADS"), QString::number(qMax(1, QThread::idealThreadCount() / qMax(1, rankCount))));
+  if (env.value(QStringLiteral("OMP_WAIT_POLICY")).trimmed().isEmpty() && !customMpiArgs.contains(QStringLiteral("OMP_WAIT_POLICY")))
+    env.insert(QStringLiteral("OMP_WAIT_POLICY"), QStringLiteral("PASSIVE"));
+
+  // Record human-readable CWD, OpenMP tuning, and launch command banner for the Program Output dock.
+  const QString ompDisp = QStringLiteral("OMP_NUM_THREADS=%1 OMP_WAIT_POLICY=%2 ").arg(env.value(QStringLiteral("OMP_NUM_THREADS")), env.value(QStringLiteral("OMP_WAIT_POLICY")));
   const QString mpiDisp = mpiBin.isEmpty() ? QString() : (QFileInfo(mpiBin).fileName() + (customMpiArgs.trimmed().isEmpty() ? QString() : QStringLiteral(" ") + customMpiArgs.trimmed()) + QStringLiteral(" -np %1 ").arg(rankCount));
-  m_lastLaunchCommandSummary = QStringLiteral("[CWD: %1] %2%3%4").arg(workDir, mpiDisp, executable, execArgs.isEmpty() ? QString() : QStringLiteral(" ") + execArgs);
+  m_lastLaunchCommandSummary = QStringLiteral("[CWD: %1] %2%3%4%5").arg(workDir, ompDisp, mpiDisp, executable, execArgs.isEmpty() ? QString() : QStringLiteral(" ") + execArgs);
   // Helper configuring initial GDB settings, cwd, inferior args, breakpoints, and `-exec-run` on rank `id`.
   const auto bootstrapRankGdb = [this, execArgs, workDir](int id) {
-    writeCmd(id, "-gdb-set pagination off\n");
-    writeCmd(id, "-gdb-set confirm off\n");
-    writeCmd(id, "-gdb-set non-stop off\n");
-    writeCmd(id, "-gdb-set breakpoint pending on\n");
-    for (const char* sig : {"SIGPIPE", "SIGUSR1", "SIGUSR2", "SIG32", "SIG33"})
+    writeCmd(id, "-gdb-set pagination off\n"); writeCmd(id, "-gdb-set confirm off\n");
+    writeCmd(id, "-gdb-set non-stop off\n"); writeCmd(id, "-gdb-set breakpoint pending on\n");
+    for (const char* sig : {"SIGPIPE", "SIGUSR1", "SIGUSR2", "SIG32", "SIG33", "SIG34"})
       writeCmd(id, QString("-interpreter-exec console \"handle %1 nostop noprint pass\"\n").arg(sig).toUtf8().constData());
     writeCmd(id, "-gdb-set max-value-size unlimited\n");
     if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) {
@@ -412,49 +436,38 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     if (!m_pendingBreakpoints.empty()) {
       for (const auto& bp : m_pendingBreakpoints)
         if (bp.rankFilter < 0 || bp.rankFilter == id) writeCmd(id, buildBreakInsertCmd(bp.file, bp.line, bp.condition));
-    } else {
+    } else if (!m_breakpointsCleared) {
       const auto persisted = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
       for (auto it = persisted.constBegin(); it != persisted.constEnd(); ++it)
         for (int ln : *it) writeCmd(id, buildBreakInsertCmd(it.key(), ln, QString()));
     }
-    m_processes[id]->state.currentState = "running";
-    m_processes[id]->state.executionTimer.start();
     writeCmd(id, "-exec-run\n");
+    m_processes[id]->state.currentState = "running"; m_processes[id]->state.executionTimer.start();
   };
   // Fallback for single-process debugging when no MPI launcher is installed on the host.
   if (mpiBin.isEmpty()) {
     auto rp = std::make_unique<RankProcess>();
     rp->id = 0; rp->process = std::make_unique<QProcess>(); rp->state.rankId = 0;
-    rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
+    rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced"; rp->process->setProcessEnvironment(env);
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this]() { handleGdbOutput(0); });
     if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) rp->process->setWorkingDirectory(workDir);
     QStringList gdbArgs = {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
                            QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
     if (!splitExecArgs.isEmpty()) gdbArgs << QStringLiteral("--args") << executable << splitExecArgs;
     else gdbArgs << executable;
-    rp->process->start(gdbPath, gdbArgs);
-    m_processes.push_back(std::move(rp));
-    bootstrapRankGdb(0);
-    return;
+    rp->process->start(gdbPath, gdbArgs); m_processes.push_back(std::move(rp));
+    bootstrapRankGdb(0); emit rankStateChanged(0, m_processes[0]->state); return;
   }
   static std::atomic<int> s_sessionSeq{1};
   m_fifoTempDir = QStringLiteral("/tmp/gridlock_mi_%1_%2").arg(QCoreApplication::applicationPid()).arg(s_sessionSeq.fetch_add(1));
   QDir().mkpath(m_fifoTempDir);
-  QStringList mpiArgs;
-  for (const QString& tok : QProcess::splitCommand(customMpiArgs)) mpiArgs << tok;
   if (!mpiArgs.contains(QStringLiteral("--oversubscribe")) && mpiBin.contains(QStringLiteral("openmpi"))) mpiArgs << QStringLiteral("--oversubscribe");
   if (!hs.hostsFile.isEmpty()) mpiArgs << QStringLiteral("--hostfile") << hs.hostsFile;
   if (hs.strictAffinity) mpiArgs << QStringLiteral("--map-by") << QStringLiteral("node");
-  if (!hs.envVars.isEmpty())
-    for (const QString& pair : hs.envVars.split('\n', Qt::SkipEmptyParts))
-      if (!pair.trimmed().isEmpty()) mpiArgs << QStringLiteral("-x") << pair.trimmed();
   for (int i = 0; i < rankCount; ++i) {
-    const QString inFifo = QStringLiteral("%1/r%2.in").arg(m_fifoTempDir).arg(i);
-    const QString outFifo = QStringLiteral("%1/r%2.out").arg(m_fifoTempDir).arg(i);
-    ::mkfifo(inFifo.toUtf8().constData(), 0600);
-    ::mkfifo(outFifo.toUtf8().constData(), 0600);
-    const int inFd = ::open(inFifo.toUtf8().constData(), O_RDWR | O_NONBLOCK);
-    const int outFd = ::open(outFifo.toUtf8().constData(), O_RDWR | O_NONBLOCK);
+    const QString inFifo = QStringLiteral("%1/r%2.in").arg(m_fifoTempDir).arg(i), outFifo = QStringLiteral("%1/r%2.out").arg(m_fifoTempDir).arg(i);
+    ::mkfifo(inFifo.toUtf8().constData(), 0600); ::mkfifo(outFifo.toUtf8().constData(), 0600);
+    const int inFd = ::open(inFifo.toUtf8().constData(), O_RDWR | O_NONBLOCK), outFd = ::open(outFifo.toUtf8().constData(), O_RDWR | O_NONBLOCK);
     auto rp = std::make_unique<RankProcess>();
     rp->id = i; rp->fifoInFd = inFd; rp->fifoOutFd = outFd;
     rp->state.rankId = i; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
@@ -471,12 +484,9 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     if (!splitExecArgs.isEmpty()) mpiArgs << QStringLiteral("--args") << executable << splitExecArgs;
     else mpiArgs << executable;
   }
-  // Configure OpenMPI/MPICH runtime environment (`PATH`, `LD_LIBRARY_PATH`, cwd) and start `mpirun`.
+  // Configure OpenMPI/MPICH runtime environment and start the MPMD `mpirun` master process.
   m_mpirunProcess = std::make_unique<QProcess>();
   if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) m_mpirunProcess->setWorkingDirectory(workDir);
-  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-  env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
-  env.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:") + env.value(QStringLiteral("LD_LIBRARY_PATH")));
   m_mpirunProcess->setProcessEnvironment(env);
   connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() { emit targetOutputReceived("stdout", QString::fromUtf8(m_mpirunProcess->readAllStandardOutput())); });
   connect(m_mpirunProcess.get(), &QProcess::readyReadStandardError, this, [this]() { emit targetOutputReceived("stderr", QString::fromUtf8(m_mpirunProcess->readAllStandardError())); });
@@ -489,14 +499,10 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
  * @brief Populates `m_processes` with in-memory mock rank slots for unit testing without `QProcess`.
  */
 void GdbRankCoordinator::initializeMockSession(int rankCount, bool simulateInitialSync) {
-  terminateAllSessions();
-  m_watchVariables.clear();
+  terminateAllSessions(); m_watchVariables.clear();
   for (int i = 0; i < rankCount; ++i) {
     auto rp = std::make_unique<RankProcess>();
-    rp->id = i;
-    rp->state.rankId = i;
-    rp->state.currentState = "running";
-    rp->state.currentLine = 0;
+    rp->id = i; rp->state.rankId = i; rp->state.currentState = "running"; rp->state.currentLine = 0;
     if (!simulateInitialSync) rp->state.lastFiredTimestamp = "mocked";
     m_processes.push_back(std::move(rp));
   }
@@ -718,59 +724,40 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         for (const QString& c : pending) writeCmd(rankId, c);
         static const QRegularExpression rxBkptNo("bkptno=\"(\\d+)\""); const auto mBkpt = rxBkptNo.match(line);
         const bool activeBkptHit = line.contains("breakpoint-hit") && (!mBkpt.hasMatch() || rp->state.breakpoints.contains(mBkpt.captured(1).toInt()));
-        if (syntheticSigint || (!activeBkptHit && !line.contains("watchpoint-trigger") && !line.contains("end-stepping-range"))) { rp->state.currentState = "running"; writeCmd(rankId, "-exec-continue\n"); continue; }
+        if (syntheticSigint || (!activeBkptHit && !line.contains("watchpoint-trigger") && !line.contains("end-stepping-range"))) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; continue; }
       }
       rp->state.currentState = "stopped";
       if (rp->state.executionTimer.isValid()) { rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed(); rp->state.executionTimer.invalidate(); }
-
       // Extract source file, line number, function symbol, and frame PC from the MI stop record.
-      static const QRegularExpression rxFile("fullname=\"([^\"]+)\"");
-      static const QRegularExpression rxLine("frame=\\{.*?line=\"(\\d+)\"");
-      static const QRegularExpression rxFunc("frame=\\{[^}]*func=\"([^\"]+)\"");
-      static const QRegularExpression rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
-
-      const auto matchFile = rxFile.match(line);
-      const QString file = matchFile.hasMatch() ? matchFile.captured(1) : rp->state.currentFile;
-      const auto matchLine = rxLine.match(line);
-      int lineNum = matchLine.hasMatch() ? matchLine.captured(1).toInt() : (rp->state.currentLine > 0 ? rp->state.currentLine : -1);
-      rp->state.currentFile = file;
-      rp->state.currentLine = lineNum;
-      // Record active symbol name for MPI Diagnostics and Call-Stack displays.
-      const auto matchFunc = rxFunc.match(line);
-      if (matchFunc.hasMatch()) rp->state.currentFunction = matchFunc.captured(1);
-
-      // Seed x86_64 instruction pointer slot 16 ($rip) immediately from frame stop address.
+      static const QRegularExpression rxFile("fullname=\"([^\"]+)\""), rxLine("frame=\\{.*?line=\"(\\d+)\"");
+      static const QRegularExpression rxFunc("frame=\\{[^}]*func=\"([^\"]+)\""), rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
+      const auto matchFile = rxFile.match(line), matchLine = rxLine.match(line);
+      rp->state.currentFile = matchFile.hasMatch() ? matchFile.captured(1) : rp->state.currentFile;
+      rp->state.currentLine = matchLine.hasMatch() ? matchLine.captured(1).toInt() : (rp->state.currentLine > 0 ? rp->state.currentLine : -1);
+      // Record active symbol name and seed x86_64 instruction pointer slot 16 ($rip) from frame address.
+      if (const auto matchFunc = rxFunc.match(line); matchFunc.hasMatch()) rp->state.currentFunction = matchFunc.captured(1);
       const auto matchAddr = rxAddr.match(line);
       const QString stopAddress = matchAddr.hasMatch() ? matchAddr.captured(1) : QStringLiteral("$pc");
       if (matchAddr.hasMatch()) rp->state.registers[16] = stopAddress;
-
-      // Request live disassembly, CPU registers, and frame local variables on stop.
-      writeCmd(rankId, QString("200-data-disassemble -s %1 -e \"%1 + 64\" -- 0\n").arg(stopAddress));
-      writeCmd(rankId, "-data-list-register-values r\n");
-      writeCmd(rankId, "201-stack-list-variables --simple-values\n");
-
-      // Select stopped thread explicitly so subsequent variable queries inspect the active frame.
-      static const QRegularExpression threadRe("thread-id=\"(\\d+)\"");
-      const auto matchThread = threadRe.match(line);
-      writeCmd(rankId, matchThread.hasMatch() ? QString("-thread-select %1\n").arg(matchThread.captured(1)) : QStringLiteral("-thread-info\n"));
-
       // Emit watchpointHit immediately when hardware debug registers fire a data watchpoint.
       const bool isWatchTrigger = line.contains("watchpoint-trigger");
       if (isWatchTrigger) handleWatchpointStopRecord(rankId, line);
-
       // Handle initial attach synchronization if `lastFiredTimestamp` was not pre-synced.
       if (!isWatchTrigger && rp->state.lastFiredTimestamp.isEmpty()) {
-        rp->state.lastFiredTimestamp = "synced";
-        flushCachedBreakpoints(rankId);
-        continue;
+        rp->state.lastFiredTimestamp = "synced"; flushCachedBreakpoints(rankId); continue;
       }
-
       // Preserve auto-continue on unmapped breakpoints while allowing explicit steps/signals/watchpoints to stop.
       const bool isStepOrSignal = isWatchTrigger || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"");
       if ((rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") && !isStepOrSignal) {
-        writeCmd(rankId, "-exec-continue\n");
-        rp->state.currentState = "running";
+        writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running";
       } else {
+        // Request live disassembly, CPU registers, frame locals, and active thread only when remaining stopped.
+        writeCmd(rankId, QString("200-data-disassemble -s %1 -e \"%1 + 64\" -- 0\n").arg(stopAddress));
+        writeCmd(rankId, "-data-list-register-values r\n");
+        writeCmd(rankId, "201-stack-list-variables --simple-values\n");
+        static const QRegularExpression threadRe("thread-id=\"(\\d+)\"");
+        const auto matchThread = threadRe.match(line);
+        writeCmd(rankId, matchThread.hasMatch() ? QString("-thread-select %1\n").arg(matchThread.captured(1)) : QStringLiteral("-thread-info\n"));
         // Materialize any newly registered watch variable objects in the stopped frame scope.
         for (int varIdx = 0; varIdx < static_cast<int>(m_watchVariables.size()); ++varIdx) {
           const QString& varName = m_watchVariables[varIdx];
@@ -783,29 +770,24 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.startsWith("*running")) {
       // Transition rank slot to running state and restart its execution stopwatch.
-      rp->state.currentState = "running";
-      rp->state.executionTimer.start();
+      rp->state.currentState = "running"; rp->state.executionTimer.start();
       emit rankStateChanged(rankId, rp->state);
     } else if (line.startsWith("30")) {
       // Token `30<varIdx>`: Watch variable `-var-create` response binding user name <-> GDB varobj ID.
       if (line.contains("^done")) {
         static const QRegularExpression evalRe("30(\\d+)\\^done,name=\"([^\"]+)\".*?value=\"([^\"]+)\"");
-        const auto match = evalRe.match(line);
-        if (match.hasMatch()) {
+        if (const auto match = evalRe.match(line); match.hasMatch()) {
           const int varIdx = match.captured(1).toInt();
           if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
-            const QString& varName = m_watchVariables[varIdx];
-            const QString varId = match.captured(2);
+            const QString& varName = m_watchVariables[varIdx]; const QString varId = match.captured(2);
             m_varNameMap[rankId][varName] = varId; m_varNameRevMap[rankId][varId] = varName;
-            rp->state.variableWatches[varName] = match.captured(3);
-            emit rankStateChanged(rankId, rp->state);
+            rp->state.variableWatches[varName] = match.captured(3); emit rankStateChanged(rankId, rp->state);
           }
         }
       } else if (line.contains("^error")) {
         // Mark watch variable `<Out of Scope>` when expression cannot be resolved in active frame.
         static const QRegularExpression errRe("30(\\d+)\\^error");
-        const auto match = errRe.match(line);
-        if (match.hasMatch()) {
+        if (const auto match = errRe.match(line); match.hasMatch()) {
           const int varIdx = match.captured(1).toInt();
           if (varIdx >= 0 && varIdx < static_cast<int>(m_watchVariables.size())) {
             const QString& varName = m_watchVariables[varIdx];

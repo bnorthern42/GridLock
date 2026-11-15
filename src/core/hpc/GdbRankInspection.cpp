@@ -236,6 +236,15 @@ void GdbRankCoordinator::sendDebuggerCommand(int rank, const QString& command) {
   // Dispatch either direct MI (`-data-evaluate-expression ...`) or CLI (`-interpreter-exec console "..."`).
   auto sendToSingleRank = [&](int targetRank) {
     if (targetRank < 0 || targetRank >= static_cast<int>(m_processes.size()) || !m_processes[targetRank]) return;
+    // Never write inspection/CLI commands to a running all-stop GDB pipe unless explicitly interrupting.
+    const bool isInterrupt = (trimmed == QLatin1String("-exec-interrupt") || trimmed == QLatin1String("interrupt"));
+    if (!isInterrupt && m_processes[targetRank]->state.currentState != QLatin1String("stopped")) {
+      emit debuggerConsoleOutput(
+          targetRank,
+          QStringLiteral("Rank %1 is running; pause execution before inspecting state.").arg(targetRank),
+          true);
+      return;
+    }
     if (trimmed.startsWith(QLatin1Char('-'))) {
       // Token 205 tags direct MI evaluation commands so replies route to `debuggerConsoleOutput`.
       writeCmd(targetRank, QStringLiteral("205%1\n").arg(trimmed));
@@ -285,10 +294,10 @@ void GdbRankCoordinator::setDataWatchpoint(const QString& expression,
                                                                           : QString());
   const QString miCmd = QStringLiteral("206-break-watch %1%2\n").arg(modeFlag, expr);
 
-  // Issue token-206 `-break-watch` immediately on every matching active rank process.
+  // Dispatch immediately when stopped or queue safely behind a transient stop when running.
   for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) {
     if ((rankFilter == -1 || rankFilter == r) && m_processes[r]) {
-      writeCmd(r, miCmd);
+      queueOrWriteCmd(r, miCmd);
     }
   }
 }
@@ -310,7 +319,7 @@ void GdbRankCoordinator::removeDataWatchpoint(const QString& expression) {
   for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) {
     if (m_watchpointIds.contains(r) && m_watchpointIds[r].contains(expr)) {
       const int wpNum = m_watchpointIds[r].take(expr);
-      writeCmd(r, QStringLiteral("-break-delete %1\n").arg(wpNum));
+      queueOrWriteCmd(r, QStringLiteral("-break-delete %1\n").arg(wpNum));
     }
   }
 }

@@ -502,10 +502,8 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QProcess helperProc;
     struct ProcGuard { QProcess* p; ~ProcGuard() { if (p && p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1000); } } } guard{&helperProc};
     helperProc.start(QStringLiteral("sleep"), {QStringLiteral("30")}); QVERIFY(helperProc.waitForStarted(3000));
-    const qint64 helperPid = helperProc.processId();
-    gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
-    auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable"));
-    QVERIFY(procTable != nullptr && procTable->rowCount() > 0);
+    const qint64 helperPid = helperProc.processId(); gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
+    auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable")); QVERIFY(procTable != nullptr && procTable->rowCount() > 0);
     int helperRow = -1;
     for (int r = 0; r < procTable->rowCount(); ++r) {
         for (int c = 0; c < procTable->columnCount(); ++c) {
@@ -516,7 +514,6 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     }
     QVERIFY2(helperRow >= 0, "AttachProcessDialog must include live child helper PID from /proc");
     procTable->selectRow(helperRow); QCOMPARE(attachDlg.selectedPid(), helperPid);
-
     // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QFile::remove(mainWindow.activeTargetBinaryPath()); QTest::qWait(400); }
@@ -528,8 +525,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send(")), recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
     QVERIFY(sendLine > 0 && recvLine > sendLine && mainWindow.sourceLineToAddress(sendLine) != 0ULL && mainWindow.sourceLineToAddress(recvLine) != 0ULL);
     // 4. Compile C++/MPI target (`inspection_demo`, -g -O0), set breakpoints, and launch 2 live ranks.
-    rankSpin->setValue(2);
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")) && mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must select and compile");
+    rankSpin->setValue(2); QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")) && mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must select and compile");
     auto* srcView = editorTabs->currentSourceCodeView(); QVERIFY(srcView != nullptr && QFileInfo::exists(mainWindow.activeTargetBinaryPath()));
     for (int bp : srcView->breakpoints().values()) srcView->toggleBreakpoint(bp);
     const int bpLine1 = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Comm_rank(")), bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("printf("));
@@ -551,48 +547,35 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 0) && waitTable->item(0, 0)->text().contains(QString::number(pid0)), 4000);
     emit mainWindow.coordinator()->stackTraceUpdated(0, {StackFrameEntry{0, 0, 0x401140ULL, QStringLiteral("MPI_Bcast"), mainWindow.activeTargetSourcePath(), bpLine1}});
     emit mainWindow.coordinator()->stackTraceUpdated(1, {StackFrameEntry{0, 0, 0x401180ULL, QStringLiteral("MPI_Barrier"), mainWindow.activeTargetSourcePath(), bpLine1}});
-    QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 2) && waitTable->item(0, 2)->text().contains(QStringLiteral("MPI_Bcast")) &&
-                             waitTable->item(1, 2) && waitTable->item(1, 2)->text().contains(QStringLiteral("MPI_Barrier")) &&
-                             dlList->count() >= 1 && !dlBadge->text().contains(QStringLiteral("NO CYCLE")), 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 2) && waitTable->item(0, 2)->text().contains(QStringLiteral("MPI_Bcast")) && waitTable->item(1, 2) && waitTable->item(1, 2)->text().contains(QStringLiteral("MPI_Barrier")) && dlList->count() >= 1 && !dlBadge->text().contains(QStringLiteral("NO CYCLE")), 3000);
     // Helper reading register value cell by lowercase mnemonic from RegisterView's QTableWidget.
     auto readReg = [&](const QString& name) {
-        for (int r = 0; r < regTable->rowCount(); ++r)
-            if (regTable->item(r, 0) && regTable->item(r, 0)->text() == name && regTable->item(r, 1)) return regTable->item(r, 1)->text();
+        for (int r = 0; r < regTable->rowCount(); ++r) if (regTable->item(r, 0) && regTable->item(r, 0)->text() == name && regTable->item(r, 1)) return regTable->item(r, 1)->text();
         return QString();
     };
     QTRY_VERIFY_WITH_TIMEOUT(!readReg(QStringLiteral("rsp")).isEmpty() && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe480"), 5000);
-    bool ripOk = false;
-    const uint64_t liveRip1 = readReg(QStringLiteral("rip")).section(QLatin1Char(' '), 0, 0).mid(2).toULongLong(&ripOk, 16);
+    bool ripOk = false; const uint64_t liveRip1 = readReg(QStringLiteral("rip")).section(QLatin1Char(' '), 0, 0).mid(2).toULongLong(&ripOk, 16);
     QVERIFY(ripOk && liveRip1 != 0ULL && disasmView->currentAddress() == liveRip1);
     // 5. Step Inst, Continue both ranks to bpLine2, and run MemView Read + DIFF RANKS.
-    QVERIFY(mainWindow.stepInstructionWorkflow());
-    QTRY_VERIFY_WITH_TIMEOUT(disasmView->currentAddress() != 0ULL && disasmView->currentAddress() != liveRip1, 5000);
-    QVERIFY(mainWindow.continueExecutionWorkflow());
-    QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000);
+    QVERIFY(mainWindow.stepInstructionWorkflow()); QTRY_VERIFY_WITH_TIMEOUT(disasmView->currentAddress() != 0ULL && disasmView->currentAddress() != liveRip1, 5000);
+    QVERIFY(mainWindow.continueExecutionWorkflow()); QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000);
     mainWindow.onRankSelected(1); QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000); mainWindow.onRankSelected(0);
     // Read Rank 0 live stack at $rsp and run DIFF RANKS between Rank 0 and Rank 1 to detect diverging bytes.
-    auto* addrEdit = memView->findChild<QLineEdit*>(QStringLiteral("cutterMemAddressEdit"));
-    QPushButton *readBtn = nullptr, *diffBtn = nullptr;
+    auto* addrEdit = memView->findChild<QLineEdit*>(QStringLiteral("cutterMemAddressEdit")); QPushButton *readBtn = nullptr, *diffBtn = nullptr;
     for (auto* b : memView->findChildren<QPushButton*>()) {
         if (b->text().compare(QStringLiteral("Read"), Qt::CaseInsensitive) == 0) readBtn = b;
         if (b->text().contains(QStringLiteral("Diff"), Qt::CaseInsensitive)) diffBtn = b;
     }
     const auto memSpins = memView->findChildren<QSpinBox*>(); QVERIFY(addrEdit && readBtn && diffBtn && memSpins.size() >= 3);
-    addrEdit->setText(QStringLiteral("$rsp")); readBtn->click();
-    QTRY_VERIFY_WITH_TIMEOUT(memView->currentBaseAddress() > 0x1000000ULL, 5000);
-    memSpins[1]->setValue(0); memSpins[2]->setValue(1); diffBtn->click();
-    QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
+    addrEdit->setText(QStringLiteral("$rsp")); readBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(memView->currentBaseAddress() > 0x1000000ULL, 5000);
+    memSpins[1]->setValue(0); memSpins[2]->setValue(1); diffBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
     mainWindow.stopTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
     QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0); QCOMPARE(static_cast<qint64>(mainWindow.coordinator()->getPidForRank(0)), 0LL);
-
     // 6. Verify CallStackDockWidget, live GdbConsoleWidget REPL, and Hardware Data Watchpoint trigger.
-    auto* callStackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
-    QVERIFY2(callStackDock != nullptr, "MainWindow must expose docked CallStackDock");
-    auto* threadCombo = callStackDock->findChild<QComboBox*>(QStringLiteral("threadSelectorCombo"));
-    auto* callStackTable = callStackDock->findChild<QTableWidget*>(QStringLiteral("callStackTable"));
-    auto* varsDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
-    auto* gdbConsole = mainWindow.findChild<gridlock::ui::GdbConsoleWidget*>();
+    auto* callStackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("CallStackDock")); QVERIFY2(callStackDock != nullptr, "MainWindow must expose docked CallStackDock");
+    auto* threadCombo = callStackDock->findChild<QComboBox*>(QStringLiteral("threadSelectorCombo")); auto* callStackTable = callStackDock->findChild<QTableWidget*>(QStringLiteral("callStackTable"));
+    auto* varsDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock")); auto* gdbConsole = mainWindow.findChild<gridlock::ui::GdbConsoleWidget*>();
     auto* consoleCmdEdit = gdbConsole ? gdbConsole->findChild<QLineEdit*>(QStringLiteral("gdbConsoleCommandEdit")) : nullptr;
     auto* consoleExecBtn = gdbConsole ? gdbConsole->findChild<QPushButton*>(QStringLiteral("gdbConsoleExecuteBtn")) : nullptr;
     auto* consoleViewport = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
@@ -655,40 +638,58 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QCOMPARE(wpHitSpy.first().at(1).toString(), QStringLiteral("watchedCounter"));
     QCOMPARE(wpHitSpy.first().at(2).toString(), QStringLiteral("10"));
     QCOMPARE(wpHitSpy.first().at(3).toString(), QStringLiteral("77"));
+    // Clear step-6 dummy breakpoint so step 7 launches with zero breakpoints prior to MPI_Barrier.
+    solverView->toggleBreakpoint(82);
     mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0);
 
-    // 7. Verify 2-rank MPI_Barrier + "HEX" CLI argument + dynamic running-state breakpoint + zero fake rack PCs.
+    // 7. Verify 4-rank hybrid MPI + worker-thread "HEX" run with zero pre-barrier breakpoints, running-state inspection guards, and OMP auto-tuning.
     const QString barrierCpp = nestedDir.filePath(QStringLiteral("barrier_hex.cpp"));
     { QFile bf(barrierCpp); QVERIFY(bf.open(QIODevice::WriteOnly));
-      bf.write("#include <mpi.h>\n#include <chrono>\n#include <string>\n#include <unistd.h>\n"
+      bf.write("#include <mpi.h>\n#include <cstdio>\n#include <cstdlib>\n#include <string>\n#include <thread>\n#include <unistd.h>\n#include <vector>\n"
                "__attribute__((noinline)) int solveStage(int r, int it, int sum) {\n  int res = sum + r + it;\n  return res;\n}\n"
                "int main(int argc, char** argv) {\n  MPI_Init(&argc, &argv);\n"
                "  if (argc < 2 || std::string(argv[1]) != \"HEX\") { MPI_Finalize(); return 2; }\n"
-               "  int r = 0, s = 1; MPI_Comm_rank(MPI_COMM_WORLD, &r); MPI_Comm_size(MPI_COMM_WORLD, &s);\n"
-               "  int v = r + 1; MPI_Barrier(MPI_COMM_WORLD);\n"
-               "  auto t0 = std::chrono::steady_clock::now();\n  while (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1500)) usleep(20000);\n"
+               "  int r = -1, s = 0; MPI_Comm_rank(MPI_COMM_WORLD, &r); MPI_Comm_size(MPI_COMM_WORLD, &s);\n"
+               "  const char* omp = std::getenv(\"OMP_NUM_THREADS\"); const char* pol = std::getenv(\"OMP_WAIT_POLICY\");\n"
+               "  int nt = (omp && std::atoi(omp) > 0) ? std::atoi(omp) : 8; std::vector<std::thread> ws;\n"
+               "  for (int t = 0; t < nt; ++t) ws.emplace_back([r, t]() { volatile int acc = r + t; (void)acc; });\n"
+               "  for (auto& th : ws) th.join();\n"
+               "  std::printf(\"PRE_BARRIER_R%d OMP=%s POL=%s\\n\", r, omp ? omp : \"NONE\", pol ? pol : \"NONE\"); std::fflush(stdout);\n"
+               "  usleep(250000); int v = r + 1; MPI_Barrier(MPI_COMM_WORLD);\n"
                "  int g = 0; MPI_Allreduce(&v, &g, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);\n"
-               "  MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g);\n  MPI_Finalize();\n  return (out > 0 && s == 2) ? 0 : 1;\n}\n"); }
+               "  MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g);\n  MPI_Finalize();\n  return (out > 0 && s == 4) ? 0 : 1;\n}\n"); }
     auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings();
     projCfg.targetArguments = QStringLiteral("HEX"); projCfg.programArguments = "HEX";
     gridlock::core::ConfigManager::instance().saveProjectSettings(projCfg);
-    rankSpin->setValue(2); targetCombo->insertItem(0, QStringLiteral("barrier_hex"), barrierCpp);
+    qunsetenv("OMP_NUM_THREADS"); qunsetenv("OMP_WAIT_POLICY");
+    rankSpin->setValue(4); targetCombo->insertItem(0, QStringLiteral("barrier_hex"), barrierCpp);
     QVERIFY(mainWindow.selectTargetByName(QStringLiteral("barrier_hex")) && mainWindow.ensureTargetBinaryCompiled());
     auto* barrierView = editorTabs->currentSourceCodeView(); QVERIFY(barrierView != nullptr);
-    const int preBarrierBp = mainWindow.findSourceLineForStatement(QStringLiteral("int v = r + 1"));
-    const int solveBp = mainWindow.findSourceLineForStatement(QStringLiteral("return res"));
-    QVERIFY(preBarrierBp > 0 && solveBp > 0);
-    barrierView->toggleBreakpoint(preBarrierBp); mainWindow.startTargetWorkflow();
+    // Set ONLY 1 post-barrier breakpoint inside solveStage (zero breakpoints before both MPI_Barrier calls).
+    const int solveBp = mainWindow.findSourceLineForStatement(QStringLiteral("return res")); QVERIFY(solveBp > 0);
+    barrierView->toggleBreakpoint(solveBp); mainWindow.startTargetWorkflow();
     auto* rackView = mainWindow.findChild<gridlock::ui::ServerRackView*>(); QVERIFY(rackView != nullptr);
     for (int r = 0; r < rackView->count(); ++r) {
         const QString pc = rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>().registers.value(16);
         QVERIFY2(!pc.contains(QStringLiteral("401120")) && !pc.contains(QStringLiteral("401155")) && !pc.contains(QStringLiteral("00000000")), qPrintable(pc));
     }
-    QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), preBarrierBp, 8000);
-    barrierView->toggleBreakpoint(preBarrierBp); QVERIFY(mainWindow.continueExecutionWorkflow());
-    QTest::qWait(150);
-    barrierView->toggleBreakpoint(solveBp); // Insert breakpoint dynamically while both ranks are running toward MPI_Barrier
-    QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), solveBp, 8000);
+    // Verify running-state inspection/REPL calls and UI rank switches emit zero MI commands or SIGINTs to running Rank 0.
+    QSignalSpy cmdSpy(mainWindow.coordinator(), SIGNAL(commandSentToGdb(int,QString)));
+    mainWindow.coordinator()->requestStackAndThreads(0); mainWindow.coordinator()->selectStackFrame(0, 1, 0);
+    mainWindow.coordinator()->evaluateExpression(0, QStringLiteral("r")); mainWindow.coordinator()->sendDebuggerCommand(0, QStringLiteral("bt"));
+    mainWindow.onRankSelected(1); mainWindow.onRankSelected(0);
+    QCOMPARE(cmdSpy.count(), 0);
+    // Verify OMP_NUM_THREADS and OMP_WAIT_POLICY=PASSIVE appear in launch summary and all 4 ranks pass both barriers to solveBp.
+    const QString launchSummary = mainWindow.coordinator()->lastLaunchCommandSummary();
+    QVERIFY2(launchSummary.contains(QStringLiteral("OMP_NUM_THREADS=")) && launchSummary.contains(QStringLiteral("OMP_WAIT_POLICY=PASSIVE")), qPrintable(launchSummary));
+    auto* progOut = mainWindow.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView")); QVERIFY(progOut != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), solveBp, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
+        const QString out = progOut->toPlainText();
+        return out.contains(QStringLiteral("PRE_BARRIER_R0")) && out.contains(QStringLiteral("PRE_BARRIER_R1")) &&
+               out.contains(QStringLiteral("PRE_BARRIER_R2")) && out.contains(QStringLiteral("PRE_BARRIER_R3")) &&
+               out.contains(QStringLiteral("POL=PASSIVE")) && !out.contains(QStringLiteral("OMP=NONE"));
+    })(), 5000);
     mainWindow.stopTargetWorkflow();
 }
 

@@ -297,6 +297,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
   QString m_lastLaunchCommandSummary;                    ///< Human-readable CWD and launch command summary.
+  bool m_breakpointsCleared = false;                     ///< True when clearBreakpoints() explicitly emptied session breakpoints.
 };
 
 }  // namespace gridlock

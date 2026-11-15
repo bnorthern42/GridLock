@@ -399,14 +399,11 @@ void MainWindow::onRankSelected(int rankId) {
             m_disassemblyView->setCurrentAddress(pcVal);
             m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
         }
-        // Trigger on-demand GDB disassembly fallback when no cached text is present for this rank.
-        if (state.disassemblyText.isEmpty()) {
-            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
-                gdbCoord->requestDisassemblyFallback(rankId);
+        // When the focused rank is halted, refresh its disassembly fallback, 64-frame backtrace, threads, and editor PC line.
+        if (state.currentState == QLatin1String("stopped")) {
+            if (state.disassemblyText.isEmpty()) {
+                if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) gdbCoord->requestDisassemblyFallback(rankId);
             }
-        }
-        // When the focused rank is halted, refresh its 64-frame backtrace, threads, and editor PC line.
-        if (state.currentState == "stopped") {
             if (m_coordinator) m_coordinator->requestStackAndThreads(rankId);
             if (state.currentLine > 0) {
                 SourceCodeView* view =
@@ -424,12 +421,9 @@ void MainWindow::onRankSelected(int rankId) {
         if (m_differentialGrid) m_differentialGrid->setVariableData(rankId, state.variableWatches);
         if (m_registerView && !state.registers.isEmpty()) m_registerView->updateRegisters(state);
     } else {
-        // Refresh baseline telemetry and request initial disassembly if rank state has not arrived yet.
+        // Refresh baseline status bar telemetry without querying GDB while rank state is not stopped.
         updateStatusTelemetry();
         refreshStatusBarMemoryTelemetry();
-        if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
-            gdbCoord->requestDisassemblyFallback(rankId);
-        }
     }
 }
 
@@ -444,33 +438,35 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
     if (m_callStackDockWidget && !m_callStackDockWidget->property("gl_callstack_bound").toBool()) {
         m_callStackDockWidget->setProperty("gl_callstack_bound", true);
 
-        // Switching OS/OpenMP threads resets frame level to #0 and queries that thread's stack and locals.
+        // Switching OS/OpenMP threads resets frame level to #0 and queries that thread's stack and locals when stopped.
         connect(m_callStackDockWidget, &CallStackDockWidget::threadSelected, this,
                 [this](int threadId) {
                     m_selectedFrameLevel[m_focusedRank] = 0;
-                    if (m_coordinator) m_coordinator->selectStackFrame(m_focusedRank, threadId, 0);
+                    const auto stIt = m_latestStates.find(m_focusedRank);
+                    if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) {
+                        m_coordinator->selectStackFrame(m_focusedRank, threadId, 0);
+                    }
                 });
 
-        // Activating a caller frame jumps SourceCodeView + DisassemblyView and re-queries frame locals/registers.
+        // Activating a caller frame jumps SourceCodeView + DisassemblyView and re-queries frame locals/registers when stopped.
         connect(m_callStackDockWidget, &CallStackDockWidget::frameActivated, this,
                 [this](int threadId, int frameLevel, const QString& file, int line, quint64 address) {
                     m_selectedFrameLevel[m_focusedRank] = frameLevel;
                     // Open or focus the frame's DWARF source file and move the active line highlight.
                     if (!file.isEmpty() && QFileInfo::exists(file) && line > 0) {
-                        SourceCodeView* view = m_editorTabManager ? m_editorTabManager->openFile(file)
-                                                                  : getSourceCodeView();
-                        if (view) {
-                            view->highlightCurrentLine(line);
-                            view->highlightExecutionLine(line);
-                        }
+                        SourceCodeView* view = m_editorTabManager ? m_editorTabManager->openFile(file) : getSourceCodeView();
+                        if (view) { view->highlightCurrentLine(line); view->highlightExecutionLine(line); }
                     }
                     // Synchronize DisassemblyView cursor to the caller frame's return/call site address.
                     if (m_disassemblyView && address != 0ULL) {
                         m_disassemblyView->setCurrentAddress(address);
                         m_disassemblyView->setActiveSteppingRank(m_focusedRank, address);
                     }
-                    // Instruct the active backend coordinator to select `threadId` + `frameLevel`.
-                    if (m_coordinator) m_coordinator->selectStackFrame(m_focusedRank, threadId, frameLevel);
+                    // Instruct the active backend coordinator to select `threadId` + `frameLevel` only when stopped.
+                    const auto stIt = m_latestStates.find(m_focusedRank);
+                    if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) {
+                        m_coordinator->selectStackFrame(m_focusedRank, threadId, frameLevel);
+                    }
                 });
     }
 
@@ -666,9 +662,10 @@ void MainWindow::bindLiveMemViewHandlers() {
             }
         }
 
-        // 3. Evaluate arbitrary register/pointer expression via active debugger coordinator with bounded wait.
+        // 3. Evaluate arbitrary register/pointer expression via active debugger coordinator when stopped.
         // Uses a local single-shot 1200 ms timeout guard so an unresponsive target cannot hang the GUI.
-        if (m_debugSessionActive && m_coordinator) {
+        const auto stIt = m_latestStates.find(rank);
+        if (m_debugSessionActive && m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) {
             uint64_t evalAddr = 0ULL;
             bool evalOk = false;
             QEventLoop loop;
@@ -717,8 +714,9 @@ void MainWindow::bindLiveMemViewHandlers() {
             }
         }
 
-        // Tracer fallback: request raw memory bytes directly from GDB (`-data-read-memory-bytes`) or DAP.
-        // Suppresses re-entrant `m_memView->setMemoryData` broadcasts while synchronous read completes.
+        // Tracer fallback: request raw memory bytes directly from GDB/DAP only when the rank is stopped.
+        const auto stIt = m_latestStates.find(rank);
+        if (stIt == m_latestStates.end() || stIt->second.currentState != QLatin1String("stopped")) return {};
         QByteArray fallbackBytes;
         QEventLoop loop;
         QTimer timer;
