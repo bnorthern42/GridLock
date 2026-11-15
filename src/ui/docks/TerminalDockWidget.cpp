@@ -11,7 +11,9 @@
 
 #include <QApplication>
 #include <QChildEvent>
+#include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QProcessEnvironment>
@@ -298,6 +300,38 @@ void TerminalDockWidget::sendCommand(const QString& command) {
         m_termWidget->getShellPID() > 0) {
         // Dispatch command text followed by newline to trigger interactive shell execution.
         m_termWidget->sendText(m_lastSentCommand + QStringLiteral("\n"));
+    }
+}
+
+/**
+ * @brief Updates the terminal working directory and changes the live PTY shell directory.
+ * @param dirPath Target directory (or file path whose parent directory is resolved).
+ */
+void TerminalDockWidget::setWorkingDirectory(const QString& dirPath) {
+    const QString trimmed = dirPath.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+    const QFileInfo rawInfo(trimmed);
+    if (!rawInfo.exists()) {
+        return;
+    }
+    const QFileInfo dirInfo(rawInfo.isDir() ? rawInfo.absoluteFilePath() : rawInfo.absolutePath());
+    const QString canonical = !dirInfo.canonicalFilePath().isEmpty()
+                                  ? dirInfo.canonicalFilePath()
+                                  : QDir::cleanPath(dirInfo.absoluteFilePath());
+    if (canonical.isEmpty() || !QDir(canonical).exists() || canonical == m_currentWorkingDir) {
+        return;
+    }
+    m_currentWorkingDir = canonical;
+    if (m_termWidget != nullptr) {
+        m_termWidget->setWorkingDirectory(m_currentWorkingDir);
+        if (m_termWidget->getShellPID() > 0) {
+            // Escape single quotes for POSIX sh/bash/zsh and switch the live interactive shell directory.
+            QString escaped = m_currentWorkingDir;
+            escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+            m_termWidget->sendText(QStringLiteral("cd -- '%1'\n").arg(escaped));
+        }
     }
 }
 

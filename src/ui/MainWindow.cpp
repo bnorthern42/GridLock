@@ -24,6 +24,7 @@
 #include "dialogs/PreferencesDialog.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizard.hpp"
+#include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "views/DisassemblyView.hpp"
@@ -609,7 +610,7 @@ void MainWindow::setupMenu() {
   connect(projSetAction, &QAction::triggered, this, [this]() {
     // Present modal per-project target binary, CLI arguments, cwd, and MPI settings dialog.
     ProjectSettingsDialog dlg(this);
-    if (dlg.exec() == QDialog::Accepted) syncCoordinatorWithConfig();
+    if (dlg.exec() == QDialog::Accepted) { syncCoordinatorWithConfig(); if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); }
   });
 
   // Attach to Process Action: Enumerates live `/proc` processes and attaches active coordinator.
@@ -848,13 +849,11 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
         connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
         connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
         if (m_editorTabManager) connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
-      }
+      } else if (auto *ps = qobject_cast<ProjectSettingsDialog *>(watched); ps && !ps->property("_glWd").toBool()) { ps->setProperty("_glWd", true); connect(ps, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); }); }
     }
   }
   // Ensure status-bar Host/Target telemetry populates immediately on initial status bar paint.
-  if (watched == m_statusTelemetryLabel && (event->type() == QEvent::Paint || event->type() == QEvent::Show)) {
-    if (m_statusTelemetryLabel && !m_statusTelemetryLabel->text().contains(QStringLiteral("CPU:"))) refreshStatusBarMemoryTelemetry();
-  }
+  if (watched == m_statusTelemetryLabel && (event->type() == QEvent::Paint || event->type() == QEvent::Show) && m_statusTelemetryLabel && !m_statusTelemetryLabel->text().contains(QStringLiteral("CPU:"))) refreshStatusBarMemoryTelemetry();
   // Delegate custom dock title-bar drag, pop-out, and double-click events first.
   if (handleDockHeaderEvent(watched, event)) return true;
 

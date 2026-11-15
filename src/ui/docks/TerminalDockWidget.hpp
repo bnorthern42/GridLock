@@ -108,6 +108,18 @@ public:
     QString lastSentCommand() const { return m_lastSentCommand; }
 
     /**
+     * @brief Updates the terminal working directory and cd's the live shell PTY when running.
+     * @param dirPath Target directory (or file path whose parent directory will be used).
+     */
+    void setWorkingDirectory(const QString& dirPath);
+
+    /**
+     * @brief Returns the canonical working directory currently tracked by the terminal dock.
+     * @return Canonical working directory path.
+     */
+    QString workingDirectory() const { return m_currentWorkingDir; }
+
+    /**
      * @brief Verifies that QTermWidget and all internal display child widgets retain a fixed-pitch font.
      * @return True if every child widget inside TerminalDockWidget reports fixed-pitch typography.
      */
@@ -134,6 +146,7 @@ private:
     QString m_colorScheme;                 ///< Active color scheme name.
     QStringList m_environment;             ///< Shell process environment array.
     QString m_lastSentCommand;             ///< Most recent shell command sent via sendCommand().
+    QString m_currentWorkingDir;           ///< Canonical active working directory for the shell PTY.
     bool m_applyingFontGuard{false};       ///< Reentrancy guard preventing recursive FontChange loops.
 };
 

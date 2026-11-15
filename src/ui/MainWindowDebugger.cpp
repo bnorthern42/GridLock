@@ -822,7 +822,9 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     auto& cfg = gridlock::core::ConfigManager::instance();
     cfg.setWorkspace(resolvedDir); cfg.setLastOpenDir(resolvedDir);
     m_persistentBreakpoints = cfg.getBreakpoints();
-    for (const auto& w : cfg.loadProjectSettings().watchExpressions) if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
+    const auto loadedPs = cfg.loadProjectSettings();
+    for (const auto& w : loadedPs.watchExpressions) if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
+    if (m_terminalDock) m_terminalDock->setWorkingDirectory((!loadedPs.workingDirectory.empty() && QDir(QString::fromStdString(loadedPs.workingDirectory)).exists()) ? QString::fromStdString(loadedPs.workingDirectory) : resolvedDir);
     const QString folderName = QFileInfo(resolvedDir).fileName();
     setWindowTitle(QStringLiteral("GridLock - %1").arg(folderName.isEmpty() ? resolvedDir : folderName));
 

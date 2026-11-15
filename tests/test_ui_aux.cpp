@@ -743,9 +743,10 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QCoreApplication::processEvents();
     auto switchWs = [](auto& win, const QString& p) -> bool { if constexpr (requires { win.switchWorkspaceDirectory(p); }) return win.switchWorkspaceDirectory(p); else { win.projectExplorerWidget()->setRootPath(p); return false; } };
     const bool switchedViaMw = switchWs(mw, extDir.path());
-    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr; auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr && rankSpin != nullptr);
+    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr; auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")); auto* termDock = mw.findChild<gridlock::ui::TerminalDockWidget*>();
+    QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr && rankSpin != nullptr && termDock != nullptr);
     QVERIFY2(switchedViaMw && !pe->isSymbolsMode() && !pe->isStringsMode(), "Opening external workspace must switch ProjectExplorerWidget to FILES mode via switchWorkspaceDirectory");
+    QCOMPARE(termDock->workingDirectory(), QFileInfo(extDir.path()).canonicalFilePath());
     QTRY_VERIFY_WITH_TIMEOUT(tree->model()->rowCount(tree->rootIndex()) >= 4, 3000);
     auto visibleEntries = [&]() { QStringList out; const QModelIndex r = tree->rootIndex(); for (int i = 0; i < tree->model()->rowCount(r); ++i) out << tree->model()->index(i, 0, r).data().toString(); return out; };
     const QStringList extEntries = visibleEntries();
@@ -774,6 +775,17 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QFileDialog fd(&mw); fd.setOption(QFileDialog::DontUseNativeDialog, true); const QUrl ghostUrl = QUrl::fromLocalFile(QStringLiteral("/home/nonexistent_ghost_user_9999"));
     fd.setSidebarUrls({ghostUrl}); fd.open(); QApplication::processEvents(); fd.hide(); auto* fdTree = fd.findChild<QTreeView*>();
     QVERIFY2(QFileInfo(fd.directory().absolutePath()).canonicalFilePath() == extCanon && !fd.sidebarUrls().contains(ghostUrl) && fd.sidebarUrls().contains(QUrl::fromLocalFile(extCanon)) && fd.width() >= 880 && fdTree && fdTree->header() && fdTree->header()->sectionSize(0) >= 300, "QFileDialog must default to active workspace, prune ghost bookmarks, and prevent column clipping");
+    // 11b. Verify updating ProjectSettingsDialog workingDirectory switches TerminalDockWidget and live PTY shell pwd.
+    const QString customWd = QFileInfo(extDir.filePath(QStringLiteral("build_meson"))).canonicalFilePath();
+    gridlock::ui::ProjectSettingsDialog psDlg2(&mw);
+    auto* wdEd2 = psDlg2.findChild<QLineEdit*>(QStringLiteral("workingDirEdit")); QVERIFY(wdEd2 != nullptr);
+    psDlg2.show(); QApplication::processEvents();
+    wdEd2->setText(customWd); psDlg2.accept(); QApplication::processEvents();
+    QCOMPARE(termDock->workingDirectory(), customWd);
+    termDock->sendCommand(QStringLiteral("pwd > .pwd_check"));
+    const QString pwdFile = QDir(customWd).filePath(QStringLiteral(".pwd_check"));
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(pwdFile), 8000);
+    { QFile pf(pwdFile); QVERIFY(pf.open(QIODevice::ReadOnly)); QCOMPARE(QString::fromUtf8(pf.readAll()).trimmed(), customWd); }
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(switchWs(mw, unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
     auto* disasm = mw.findChild<gridlock::ui::DisassemblyView*>(); auto* navBar = mw.findChild<QWidget*>(QStringLiteral("addressNavBar"));
