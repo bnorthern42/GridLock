@@ -75,6 +75,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Returns the filesystem path of the target executable. */
   QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
 
+  /** @brief Returns the human-readable launch CWD + command summary for the active session. */
+  QString lastLaunchCommandSummary() const override { return m_lastLaunchCommandSummary; }
+
   /** @brief Broadcasts `-break-insert -f <location>` across all active rank GDB processes. */
   void insertBreakpoint(const QString& location);
 
@@ -293,6 +296,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QMap<QString, int>> m_watchpointIds;         ///< `rankId -> (expression -> gdbBkptNum)`.
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
+  QString m_lastLaunchCommandSummary;                    ///< Human-readable CWD and launch command summary.
 };
 
 }  // namespace gridlock

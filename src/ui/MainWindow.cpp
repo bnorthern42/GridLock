@@ -460,6 +460,8 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                 }
               });
     }
+    connect(m_coordinator, &IBackendCoordinator::programOutputReceived, this,
+            [this](int rank, const QString &text, bool isErr) { appendProgramOutput(rank, text, isErr); });
     if (networkLog()) {
       connect(m_coordinator, &IBackendCoordinator::targetOutputReceived, this,
               [this](const QString &category, const QString &output) { if (networkLog()) networkLog()->appendText(category, output); });
@@ -580,12 +582,11 @@ void MainWindow::setupMenu() {
   });
   fileMenu->addSeparator();
 
-  // Session Serialization Actions: Export and restore active workspace layout,
-  // breakpoint configurations, variable watches, and rank allocations.
-  QAction *saveSessionAction = fileMenu->addAction("Save Session As...");
-  connect(saveSessionAction, &QAction::triggered, this, &MainWindow::saveSessionAs);
-  QAction *loadSessionAction = fileMenu->addAction("Load Session...");
-  connect(loadSessionAction, &QAction::triggered, this, &MainWindow::loadSession);
+  // Session Serialization Actions: Save active workspace session or export/load TOML snapshots.
+  QAction *saveNowAct = fileMenu->addAction("Save Session"); saveNowAct->setObjectName(QStringLiteral("actionSaveSession"));
+  connect(saveNowAct, &QAction::triggered, this, [this]() { saveSession(true); });
+  QAction *saveSessionAction = fileMenu->addAction("Save Session As..."); connect(saveSessionAction, &QAction::triggered, this, &MainWindow::saveSessionAs);
+  QAction *loadSessionAction = fileMenu->addAction("Load Session..."); connect(loadSessionAction, &QAction::triggered, this, &MainWindow::loadSession);
 
   // Recent Sessions Submenu: Dynamically populated with most-recently-used session files.
   QMenu *recentMenu = fileMenu->addMenu("Recent Sessions");
@@ -782,6 +783,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     }
   }
   // Gracefully terminate active debug sessions across all spawned ranks and DAP processes.
+  if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
   if (m_coordinator) m_coordinator->terminateSession();
   // Shut down background clangd LSP worker before destroying editor buffer widgets.
   if (m_lspCoordinator) m_lspCoordinator->stop();
@@ -849,7 +851,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
         connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
         connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
         if (m_editorTabManager) connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
-      } else if (auto *ps = qobject_cast<ProjectSettingsDialog *>(watched); ps && !ps->property("_glWd").toBool()) { ps->setProperty("_glWd", true); connect(ps, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); }); }
+      } else if (auto *ps = qobject_cast<ProjectSettingsDialog *>(watched); ps && !ps->property("_glWd").toBool()) { ps->setProperty("_glWd", true); connect(ps, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); if (!m_activeWorkspaceDir.isEmpty()) saveSession(false); }); }
     }
   }
   // Ensure status-bar Host/Target telemetry populates immediately on initial status bar paint.

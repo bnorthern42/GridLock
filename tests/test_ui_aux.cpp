@@ -735,7 +735,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QVERIFY(QDir(otherDir.path()).mkpath(QStringLiteral("AMR_Electrode_Cut")) && QDir(unbuiltDir.path()).mkpath(QStringLiteral("src")));
     { QFile cm(extDir.filePath(QStringLiteral("CMakeLists.txt"))); QVERIFY(cm.open(QIODevice::WriteOnly)); cm.write("cmake_minimum_required(VERSION 3.20)\nproject(MfemSolver CXX)\n"); }
     const QString mainCpp = extDir.filePath(QStringLiteral("src/solver_main.cpp")), elfBin = extDir.filePath(QStringLiteral("build_meson/mfem_solver"));
-    { QFile sf(mainCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("int main(int argc, char** argv) { (void)argc; (void)argv; return 0; }\n"); }
+    { QFile sf(mainCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("#include <stdio.h>\nint main(int argc, char** argv) { (void)argc; (void)argv; puts(\"MFEM_OUT_READY\"); fflush(stdout); return 0; }\n"); }
     { QFile uf1(unbuiltDir.filePath(QStringLiteral("CMakeLists.txt"))); QVERIFY(uf1.open(QIODevice::WriteOnly)); uf1.write("cmake_minimum_required(VERSION 3.20)\nproject(UnbuiltApp CXX)\n"); QFile uf2(unbuiltDir.filePath(QStringLiteral("src/main.cpp"))); QVERIFY(uf2.open(QIODevice::WriteOnly)); uf2.write("int main() { return 0; }\n"); }
     { QProcess cc; cc.start(QStringLiteral("g++"), {QStringLiteral("-g"), QStringLiteral("-O0"), mainCpp, QStringLiteral("-o"), elfBin}); QVERIFY2(cc.waitForFinished(10000) && cc.exitCode() == 0 && QFileInfo::exists(elfBin), "g++ must compile build_meson/mfem_solver"); }
     QFile::copy(elfBin, extDir.filePath(QStringLiteral("build_meson/meson-private/sanitycheckcpp.exe")));
@@ -786,6 +786,23 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     const QString pwdFile = QDir(customWd).filePath(QStringLiteral(".pwd_check"));
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(pwdFile), 8000);
     { QFile pf(pwdFile); QVERIFY(pf.open(QIODevice::ReadOnly)); QCOMPARE(QString::fromUtf8(pf.readAll()).trimmed(), customWd); }
+    // 11c. Verify File -> Save Session writes .gridlock/workspace.toml & settings.toml without opening a file dialog.
+    auto* saveSessAct = mw.findChild<QAction*>(QStringLiteral("actionSaveSession"));
+    QVERIFY2(saveSessAct != nullptr, "File menu must expose actionSaveSession");
+    { auto ps = cfg.projectSettings(); ps.targetBinary = elfBin.toStdString(); ps.targetArguments = QStringLiteral("HEX"); ps.mpiRanks = 2; ps.workingDirectory = customWd.toStdString(); cfg.saveProjectSettings(ps); }
+    QFile::remove(wsToml); saveSessAct->trigger(); QApplication::processEvents();
+    QVERIFY2(QFileInfo::exists(wsToml) && QFileInfo::exists(extDir.filePath(QStringLiteral(".gridlock/settings.toml"))), "actionSaveSession must persist workspace.toml and settings.toml");
+    // 11d. Verify dedicated PROGRAM OUTPUT dock (#programLaunchCommandEdit & #programOutputView) and clean stdout streaming.
+    auto* launchCmdEd = mw.findChild<QLineEdit*>(QStringLiteral("programLaunchCommandEdit")); auto* progOutView = mw.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView"));
+    QVERIFY2(launchCmdEd && launchCmdEd->isReadOnly() && progOutView && progOutView->isReadOnly(), "PROGRAM OUTPUT dock must expose read-only #programLaunchCommandEdit and #programOutputView");
+    // Launch live MPI target and verify launch command banner + clean inferior stdout.
+    mw.syncCoordinatorWithConfig(); mw.startTargetWorkflow(); QApplication::processEvents();
+    const QString launchTxt = launchCmdEd->text();
+    QVERIFY2(launchTxt.contains(customWd) && (launchTxt.contains(QStringLiteral("mpirun")) || launchTxt.contains(QStringLiteral("mpiexec"))) && launchTxt.contains(QStringLiteral("-np")) && (launchTxt.contains(QStringLiteral("alt_solver")) || launchTxt.contains(QStringLiteral("mfem_solver"))) && launchTxt.contains(QStringLiteral("HEX")), qPrintable(launchTxt));
+    // Confirm real inferior stdout arrives without GDB/MI protocol noise, then stop target.
+    QTRY_VERIFY_WITH_TIMEOUT(progOutView->toPlainText().contains(QStringLiteral("MFEM_OUT_READY")), 6000);
+    QVERIFY2(!progOutView->toPlainText().contains(QStringLiteral("=thread-created")) && !progOutView->toPlainText().contains(QStringLiteral("*running,thread-id=")), qPrintable(progOutView->toPlainText()));
+    mw.stopTargetWorkflow(); QApplication::processEvents();
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(switchWs(mw, unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
     auto* disasm = mw.findChild<gridlock::ui::DisassemblyView*>(); auto* navBar = mw.findChild<QWidget*>(QStringLiteral("addressNavBar"));

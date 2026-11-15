@@ -744,16 +744,16 @@ void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
     };
     // 2. Verify selecting Debug, MPI, Terminal, and Docs filters visible tabs strictly to linked views.
     mainWindow.selectBottomToolGroup(QStringLiteral("Debug")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug"));
-    // Check Debug visible tabs (`GDB CONSOLE`, `MEMORY`, `EVALUATOR`).
-    const QStringList debugVis = visibleTitles(); QCOMPARE(debugVis.size(), 3);
-    QVERIFY(debugVis.join(QLatin1Char('|')).contains(QStringLiteral("GDB")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("MEMORY")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("EVALUATOR")));
+    // Check Debug visible tabs (`GDB CONSOLE`, `PROGRAM OUTPUT`, `MEMORY`, `EVALUATOR`).
+    const QStringList debugVis = visibleTitles(); QCOMPARE(debugVis.size(), 4);
+    QVERIFY(debugVis.join(QLatin1Char('|')).contains(QStringLiteral("GDB")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("PROGRAM")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("MEMORY")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("EVALUATOR")));
     // Switch to MPI, Terminal, and Docs tool groups and confirm filtered view visibility.
     mainWindow.selectBottomToolGroup(QStringLiteral("MPI")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("MPI")); QCOMPARE(visibleTitles().size(), 2);
     mainWindow.selectBottomToolGroup(QStringLiteral("Terminal")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Terminal")); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
     mainWindow.selectBottomToolGroup(QStringLiteral("Docs")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Docs")); QCOMPARE(bottomTabs->currentWidget(), refManual);
     // 3. Programmatically switching BottomConsoleTabs to MemView auto-syncs the Debug tool group.
     bottomTabs->setCurrentWidget(memView); QApplication::processEvents();
-    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug")); QCOMPARE(visibleTitles().size(), 3);
+    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug")); QCOMPARE(visibleTitles().size(), 4);
     // 4. Verify MpiDiagnosticsWidget uses a single compact 26px header bar with hidden inner QTabBar.
     QVERIFY(mpiDiag->hasCompactSingleRowHeader());
 }

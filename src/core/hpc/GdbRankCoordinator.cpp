@@ -392,6 +392,9 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   if (workDir.isEmpty()) workDir = core::ConfigManager::instance().workspacePath().trimmed();
   if (workDir.isEmpty()) workDir = QFileInfo(executable).absolutePath();
   const QStringList splitExecArgs = execArgs.isEmpty() ? QStringList{} : QProcess::splitCommand(execArgs);
+  // Record human-readable CWD and launch command banner for the Program Output dock.
+  const QString mpiDisp = mpiBin.isEmpty() ? QString() : (QFileInfo(mpiBin).fileName() + (customMpiArgs.trimmed().isEmpty() ? QString() : QStringLiteral(" ") + customMpiArgs.trimmed()) + QStringLiteral(" -np %1 ").arg(rankCount));
+  m_lastLaunchCommandSummary = QStringLiteral("[CWD: %1] %2%3%4").arg(workDir, mpiDisp, executable, execArgs.isEmpty() ? QString() : QStringLiteral(" ") + execArgs);
   // Helper configuring initial GDB settings, cwd, inferior args, breakpoints, and `-exec-run` on rank `id`.
   const auto bootstrapRankGdb = [this, execArgs, workDir](int id) {
     writeCmd(id, "-gdb-set pagination off\n");
@@ -878,47 +881,33 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.startsWith("100")) {
       // Token 100: Editor hover variable evaluation response (`-data-evaluate-expression`).
-      // Forwards evaluated scalar/struct preview text to `PlainJaneTooltip` at `lastHoverPos`.
-      static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\"");
-      static const QRegularExpression err100Re("msg=\"([^\"]+)\"");
+      static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\""), err100Re("msg=\"([^\"]+)\"");
       const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line);
       if (match.hasMatch()) emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
     } else if (line.startsWith("101")) {
       // Token 101: Interactive console / watch expression evaluation response.
-      // Emits either the resolved `value="..."` text or a prefixed `Error: ...` diagnostic.
       if (line.contains("^done")) {
         static const QRegularExpression valRe("101\\^done,value=\"([^\"]+)\"");
-        const auto m = valRe.match(line);
-        if (m.hasMatch()) emit expressionEvaluated(rankId, rp->lastEvalExpression, m.captured(1));
+        if (const auto m = valRe.match(line); m.hasMatch()) emit expressionEvaluated(rankId, rp->lastEvalExpression, m.captured(1));
       } else if (line.contains("^error")) {
         static const QRegularExpression errRe("msg=\"([^\"]+)\"");
-        const auto m = errRe.match(line);
-        if (m.hasMatch()) emit expressionEvaluated(rankId, rp->lastEvalExpression, "Error: " + m.captured(1));
+        if (const auto m = errRe.match(line); m.hasMatch()) emit expressionEvaluated(rankId, rp->lastEvalExpression, "Error: " + m.captured(1));
       }
     } else if (line.startsWith("200")) {
       // Token 200: Stop-point disassembly window (`-data-disassemble`) followed by `-var-update`.
-      // Refreshes linear assembly view around `$pc` and triggers watch-expression delta evaluation.
-      if (line.contains("asm_insns=")) {
-        const QString prettyAsm = formatMiDisassembly(line);
-        if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); }
-      }
+      if (line.contains("asm_insns=")) { const QString prettyAsm = formatMiDisassembly(line); if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); } }
       writeCmd(rankId, "-var-update 1 *\n");
     } else if (line.startsWith("201^done,variables=[")) {
       // Token 201: Parse stack-frame locals (`name`, `type`, `value`) for `VariablesDockWidget`.
       // Triggered automatically on `*stopped` and on caller frame switches (`selectStackFrame`).
-      static const QRegularExpression varTupleRe("\\{([^{}]+)\\}");
-      static const QRegularExpression vNameRe("name=\"([^\"]+)\"");
-      static const QRegularExpression vTypeRe("type=\"([^\"]+)\"");
-      static const QRegularExpression vValRe("value=\"((?:\\\\.|[^\"])*)\"");
+      static const QRegularExpression varTupleRe("\\{([^{}]+)\\}"), vNameRe("name=\"([^\"]+)\""), vTypeRe("type=\"([^\"]+)\""), vValRe("value=\"((?:\\\\.|[^\"])*)\"");
       QJsonArray locals; auto it = varTupleRe.globalMatch(line);
       // Convert each MI local variable tuple into a DAP-compatible JSON variable descriptor.
       while (it.hasNext()) {
-        const QString tuple = it.next().captured(1);
-        const auto nm = vNameRe.match(tuple);
+        const QString tuple = it.next().captured(1); const auto nm = vNameRe.match(tuple);
         if (!nm.hasMatch()) continue;
         const auto tm = vTypeRe.match(tuple); const auto vm = vValRe.match(tuple);
-        locals.append(QJsonObject{{"name", nm.captured(1)}, {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")},
-                                  {"value", vm.hasMatch() ? vm.captured(1) : QStringLiteral("{...}")}, {"variablesReference", 0}});
+        locals.append(QJsonObject{{"name", nm.captured(1)}, {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")}, {"value", vm.hasMatch() ? vm.captured(1) : QStringLiteral("{...}")}, {"variablesReference", 0}});
       }
       emit localsUpdated(rankId, locals);
     } else if (handleMiStackOrThreadRecord(rankId, line)) {
@@ -927,6 +916,16 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       // Untokenized fallback `-data-disassemble` response handler.
       const QString prettyAsm = formatMiDisassembly(line);
       if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); }
+    } else if (line.startsWith("@\"")) {
+      // MI target-stream inferior output record: unescape and forward to Program Output.
+      QString txt = line.mid(2, line.endsWith('"') ? line.size() - 3 : line.size() - 2);
+      txt.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\");
+      if (!txt.trimmed().isEmpty()) emit programOutputReceived(rankId, txt.trimmed(), false);
+    } else {
+      // Filter out GDB/MI protocol & console noise, forwarding genuine inferior stdout/stderr.
+      static const QRegularExpression miPrefRe("^\\d*[\\^*+=~&@]|^\\(gdb\\)");
+      if (!miPrefRe.match(line).hasMatch() && !line.startsWith("[New ") && !line.startsWith("[Thread ") && !line.startsWith("[Inferior ") && !line.startsWith("[Detaching") && !line.startsWith("Reading symbols") && !line.startsWith("warning:"))
+        emit programOutputReceived(rankId, line, false);
     }
   }
 }

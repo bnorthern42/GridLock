@@ -213,6 +213,9 @@ class IBackendCoordinator : public QObject {
     Q_UNUSED(expression);
   }
 
+  /** @brief Returns a human-readable summary of the active session's CWD and launch command. */
+  virtual QString lastLaunchCommandSummary() const { return {}; }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -222,6 +225,9 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when stdout/stderr or debugger console output arrives. */
   void targetOutputReceived(const QString& category, const QString& output);
+
+  /** @brief Emitted when target program stdout/stderr arrives for @p rank (free of MI noise). */
+  void programOutputReceived(int rank, const QString& text, bool isError);
 
   /** @brief Emitted when a raw memory read from @p rankId at @p address completes. */
   void memoryRead(int rankId, const QString& address, const QByteArray& data);

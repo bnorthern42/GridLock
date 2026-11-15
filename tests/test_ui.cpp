@@ -411,7 +411,7 @@ void TestMainWindowUI::testCutterZoneGroupingAndSeekBar() {
 
     for (QTabWidget* tabWidget : mainWindow.findChildren<QTabWidget*>()) {
         if (tabWidget->objectName() == "BottomConsoleTabs") {
-            QVERIFY(tabWidget->count() <= 7);
+            QVERIFY(tabWidget->count() <= 8);
         }
     }
 

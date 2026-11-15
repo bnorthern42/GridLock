@@ -303,6 +303,7 @@ void MainWindow::startTargetWorkflow() {
         if (tWd.isEmpty()) tWd = m_activeWorkspaceDir;
         m_coordinator->setTargetExecutionContext(tArgs, tWd);
         m_coordinator->launchParallelSession(binPath, rankCount, projCfg.mpiArgs.isEmpty() ? mpiArgs : projCfg.mpiArgs);
+        syncProgramOutputForLaunch(rankCount);
         if (m_differentialGrid) {
             if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
                 for (const auto& w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
@@ -799,17 +800,16 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
 
     struct ReentrancyGuard { bool& flag; ~ReentrancyGuard() { flag = false; } } guard{m_switchingWorkspace};
     m_switchingWorkspace = true;
+    if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
     if (m_debugSessionActive) stopTargetWorkflow();
     clearAllInspectionDocks(m_variablesDockWidget, m_registerView, m_callStackDockWidget, m_mpiDiagnosticsWidget, networkLog(), m_memView);
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
     m_previewFixtureOnly = false; m_useRealBinaryTarget = false; m_elfInspector.reset(); m_loadedBinaryPath.clear();
     if (m_differentialGrid) m_differentialGrid->clearWatches();
-    // Close stale editor tabs belonging to the previous workspace while keeping tabs already inside resolvedDir.
     if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) {
-        m_editorTabManager->clearAllTabs();
-        m_currentFile.clear();
+        m_editorTabManager->clearAllTabs(); m_currentFile.clear();
     }
-    m_activeWorkspaceDir = resolvedDir;
+    m_activeWorkspaceDir = resolvedDir; m_activeSessionFilePath = QDir(resolvedDir).filePath(QStringLiteral(".gridlock/workspace.toml"));
     gridlock::core::ClangdLspClient::instance().setWorkspaceRoot(resolvedDir);
     // 1. Re-root ProjectExplorerWidget to resolvedDir and ensure FILES mode is active.
     if (m_projectExplorerWidget) {

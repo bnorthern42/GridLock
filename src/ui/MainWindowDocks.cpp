@@ -27,12 +27,14 @@
 #include "GdbConsoleWidget.hpp"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDockWidget>
 #include <QEvent>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPlainTextEdit>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
@@ -830,27 +832,42 @@ bool MainWindow::areAllChromeToolbarsAndDockHeadersThemeAligned() const {
   return true;
 }
 
-/**
- * @brief Launches a multi-rank MPI debugging session.
- * @param binaryPath Executable path to target binary.
- * @param ranks Number of parallel MPI ranks to allocate.
- */
+/** @brief Launches a multi-rank MPI debugging session. */
 void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
   if (!m_coordinator) return;
   m_coordinator->launchParallelSession(binaryPath, ranks);
+  syncProgramOutputForLaunch(ranks);
   if (m_gdbConsoleWidget) m_gdbConsoleWidget->resetRanks(ranks);
   if (m_serverRackView) m_serverRackView->resetRanks(ranks);
-  if (m_differentialGrid) {
-    if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-      for (const auto &w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
-    }
+  if (auto *gdbCoord = m_differentialGrid ? dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator) : nullptr) {
+    for (const auto &w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
   }
 }
-
-/**
- * @brief No-op Vulkan instance configuration placeholder.
- * @param inst Active Vulkan instance pointer.
- */
+/** @brief Builds the Program Output bottom tab with read-only launch command banner and filtered stdout view. */
+QWidget* MainWindow::createProgramOutputTab() {
+  auto* page = new QWidget(m_bottomTabs); page->setObjectName(QStringLiteral("ProgramOutputDock")); auto* lay = new QVBoxLayout(page); lay->setContentsMargins(0, 0, 0, 0); lay->setSpacing(0);
+  auto* bar = new QWidget(page); bar->setFixedHeight(28); auto* hb = new QHBoxLayout(bar); hb->setContentsMargins(6, 2, 6, 2); hb->setSpacing(6);
+  m_programLaunchCommandEdit = new QLineEdit(bar); m_programLaunchCommandEdit->setObjectName(QStringLiteral("programLaunchCommandEdit")); m_programLaunchCommandEdit->setReadOnly(true);
+  auto* copyBtn = new QPushButton(QStringLiteral("COPY"), bar); auto* clearBtn = new QPushButton(QStringLiteral("CLEAR"), bar); m_programOutputRankFilter = new QComboBox(bar); m_programOutputRankFilter->addItem(QStringLiteral("All Ranks"), -1);
+  hb->addWidget(new QLabel(QStringLiteral("CMD:"), bar)); hb->addWidget(m_programLaunchCommandEdit, 1); hb->addWidget(copyBtn); hb->addWidget(m_programOutputRankFilter); hb->addWidget(clearBtn);
+  m_programOutputView = new QPlainTextEdit(page); m_programOutputView->setObjectName(QStringLiteral("programOutputView")); m_programOutputView->setReadOnly(true); m_programOutputView->setFont(QFont(QStringLiteral("JetBrains Mono"), 10));
+  connect(copyBtn, &QPushButton::clicked, this, [this]() { if (m_programLaunchCommandEdit) QApplication::clipboard()->setText(m_programLaunchCommandEdit->text()); });
+  connect(clearBtn, &QPushButton::clicked, this, [this]() { m_programOutputLines.clear(); if (m_programOutputView) m_programOutputView->clear(); });
+  connect(m_programOutputRankFilter, &QComboBox::currentIndexChanged, this, [this]() { if (m_programOutputView && m_programOutputRankFilter) { const int w = m_programOutputRankFilter->currentData().toInt(); m_programOutputView->clear(); for (const auto& e : m_programOutputLines) if (w < 0 || e.first == w) m_programOutputView->appendPlainText(e.second); } });
+  lay->addWidget(bar); lay->addWidget(m_programOutputView, 1); return page;
+}
+void MainWindow::syncProgramOutputForLaunch(int rankCount) {
+  m_programOutputLines.clear(); if (m_programOutputView) m_programOutputView->clear();
+  if (m_programLaunchCommandEdit && m_coordinator) m_programLaunchCommandEdit->setText(m_coordinator->lastLaunchCommandSummary());
+  if (!m_programOutputRankFilter) return;
+  m_programOutputRankFilter->blockSignals(true); m_programOutputRankFilter->clear(); m_programOutputRankFilter->addItem(QStringLiteral("All Ranks"), -1);
+  for (int r = 0; r < std::max(1, rankCount); ++r) { m_programOutputRankFilter->addItem(QStringLiteral("Rank %1").arg(r), r); } m_programOutputRankFilter->blockSignals(false);
+}
+void MainWindow::appendProgramOutput(int rank, const QString& text, bool isError) {
+  const QString clean = text.trimmed(); if (clean.isEmpty()) return;
+  const QString fmt = QStringLiteral("[Rank %1%2] %3").arg(rank).arg(isError ? QStringLiteral(" stderr") : QString()).arg(clean);
+  m_programOutputLines.append(qMakePair(rank, fmt));
+  if (m_programOutputView && (!m_programOutputRankFilter || m_programOutputRankFilter->currentData().toInt() < 0 || m_programOutputRankFilter->currentData().toInt() == rank)) m_programOutputView->appendPlainText(fmt);
+}
 void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {}
-
 }  // namespace gridlock::ui

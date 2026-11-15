@@ -805,7 +805,11 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
       static const QRegularExpression re("(?:Submitted batch job |Granted job allocation )(\\d+)");
       const QRegularExpressionMatch match = re.match(output);
       if (match.hasMatch()) { m_slurmJobId = match.captured(1).toInt(); m_state = SessionState::Queued; emit stateChanged(m_state); }
-      emit targetOutputReceived(body["category"].toString(), output);
+      const QString category = body["category"].toString();
+      emit targetOutputReceived(category, output);
+      if (category == QLatin1String("stdout") || category == QLatin1String("stderr")) {
+        emit programOutputReceived(0, output.trimmed(), category == QLatin1String("stderr"));
+      }
     } else if (event == "process") {
       // Record the OS `systemProcessId` so `NativeMemoryReader` can attach via `process_vm_readv`.
       const qint64 pid = message["body"].toObject()["systemProcessId"].toVariant().toLongLong();

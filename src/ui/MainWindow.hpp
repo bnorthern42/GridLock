@@ -32,6 +32,7 @@
 
 class QVulkanInstance;
 class QDockWidget;
+class QPlainTextEdit;
 class QSplitter;
 
 namespace gridlock {
@@ -595,6 +596,7 @@ public slots:
     void openFile();
     void openPreferences();
     void loadSourceFile(const QString& filePath);
+    bool saveSession(bool showStatusMessage = true);
     void saveSessionAs();
     void loadSession();
     void onTutorialLaunchRequested(const QString& absoluteFilePath);
@@ -645,7 +647,15 @@ private:
     QMap<int, int> m_selectedFrameLevel;
     MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
     QWidget* m_bottomToolRail = nullptr;
+    QWidget* createProgramOutputTab();
+    void appendProgramOutput(int rank, const QString& text, bool isError);
+    void syncProgramOutputForLaunch(int rankCount);
     QTabWidget* m_bottomTabs = nullptr;
+    QLineEdit* m_programLaunchCommandEdit = nullptr;
+    QPlainTextEdit* m_programOutputView = nullptr;
+    QComboBox* m_programOutputRankFilter = nullptr;
+    QVector<QPair<int, QString>> m_programOutputLines;
+    QString m_activeSessionFilePath;
     QMap<QString, QToolButton*> m_bottomRailButtons;
     QString m_activeBottomToolGroup = QStringLiteral("Debug");
     bool m_syncingBottomToolGroup = false;

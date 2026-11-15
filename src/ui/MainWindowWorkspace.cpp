@@ -43,6 +43,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
+#include <QStatusBar>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QShortcut>
@@ -753,7 +754,9 @@ void MainWindow::setupDocks() {
   m_bottomTabs->addTab(m_spackManager, QStringLiteral("Package Manager"));
   // 6. Dynamic C/C++ expression evaluator tab.
   m_bottomTabs->addTab(m_expressionEvaluatorWidget, "Evaluator");
-  // 7. Offline Dash/Zeal reference manual tab.
+  // 7. Clean target program stdout/stderr console with read-only launch command header.
+  m_bottomTabs->addTab(createProgramOutputTab(), QStringLiteral("Program Output"));
+  // 8. Offline Dash/Zeal reference manual tab.
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->setCurrentWidget(m_memView);
 
@@ -850,13 +853,25 @@ void MainWindow::setupDocks() {
 
   // Purge legacy geometry keys to guarantee fresh default workstation layout proportions.
   QSettings settings("gridlock", "debugger");
-  settings.remove("MainWindow/Geometry_v8");
-  settings.remove("MainWindow/State_v8");
-  settings.remove("MainWindow/Splitter_v8_MasterHorizontalSplitter");
-  settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
+  settings.remove("MainWindow/Geometry_v8"); settings.remove("MainWindow/State_v8");
+  settings.remove("MainWindow/Splitter_v8_MasterHorizontalSplitter"); settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
 }
-
-
+/** @brief Saves the active workspace session and project settings to workspace.toml. */
+bool MainWindow::saveSession(bool showStatusMessage) {
+  // Resolve workspace root and target session file path.
+  const QString wsRoot = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : (m_projectExplorerWidget ? m_projectExplorerWidget->rootPath() : QDir::currentPath());
+  const QString targetPath = !m_activeSessionFilePath.isEmpty() ? m_activeSessionFilePath : QDir(wsRoot).filePath(QStringLiteral(".gridlock/workspace.toml"));
+  QDir().mkpath(QFileInfo(targetPath).absolutePath()); gridlock::core::managers::SessionState state;
+  // Collect watched variables, persistent breakpoints, and focused rank.
+  if (m_differentialGrid) for (const auto &w : m_differentialGrid->getWatchExpressions()) state.watchedVariables.push_back(QString::fromStdString(w));
+  for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) { for (int line : *it) state.activeBreakpoints.push_back(QStringLiteral("%1:%2").arg(it.key()).arg(line)); }
+  state.selectedRanks.push_back(m_focusedRank);
+  // Persist project settings and session TOML to disk.
+  auto &cfg = gridlock::core::ConfigManager::instance(); cfg.saveProjectSettings(cfg.projectSettings());
+  const bool ok = gridlock::core::managers::SessionManager::instance().saveSession(targetPath, state);
+  if (ok) { m_activeSessionFilePath = targetPath; if (showStatusMessage && statusBar()) statusBar()->showMessage(QStringLiteral("Session saved to %1").arg(targetPath), 3000); }
+  return ok;
+}
 
 }  // namespace gridlock::ui
 
