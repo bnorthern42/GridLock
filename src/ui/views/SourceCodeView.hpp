@@ -131,10 +131,31 @@ public:
     bool hasRightMarginFill() const { return false; }
 
     /**
+     * @brief Visual and rank-filtering metadata stored for an active 1-based breakpoint line.
+     */
+    struct BreakpointVisualInfo {
+        int rankFilter = -1;  ///< -1 for All Ranks, or >= 0 for a specific 0-based MPI rank.
+        QString condition;    ///< Optional C/C++ boolean condition predicate.
+    };
+
+    /**
+     * @brief Computes deterministic high-contrast badge color for a rank filter (-1 = Crimson Red #ef4444).
+     * @param rankFilter Target 0-based MPI rank, or -1 for All Ranks.
+     * @return QColor badge fill color.
+     */
+    static QColor colorForRankBreakpoint(int rankFilter);
+
+    /**
      * @brief Sets the full set of active breakpoint lines.
      * @param bps Set of 1-based line numbers.
      */
     void setBreakpoints(const QSet<int>& bps);
+
+    /**
+     * @brief Restores per-line rank-filtered breakpoint metadata without emitting toggle signals.
+     * @param metaByLine Map of 1-based line number to BreakpointVisualInfo.
+     */
+    void syncBreakpointMetadata(const QMap<int, BreakpointVisualInfo>& metaByLine);
 
     /**
      * @brief Returns the set of active 1-based breakpoint line numbers.
@@ -156,11 +177,43 @@ public:
     void toggleBreakpoint(int lineNum);
 
     /**
+     * @brief Sets or updates a breakpoint with an explicit rank filter and optional condition.
+     * @param lineOneBased 1-based source line number.
+     * @param rankFilter Target 0-based MPI rank, or -1 for All Ranks.
+     * @param condition Optional C/C++ boolean condition expression.
+     */
+    void setRankBreakpoint(int lineOneBased, int rankFilter, const QString& condition = QString());
+
+    /**
      * @brief Sets or updates a conditional/rank-filtered breakpoint on a 1-based source line.
      * @param lineOneBased 1-based source line number.
      * @param condition Conditional expression (e.g., "rank == 0").
      */
     void setConditionalBreakpoint(int lineOneBased, const QString& condition);
+
+    /** @brief Returns stored visual metadata for a 1-based breakpoint line. */
+    BreakpointVisualInfo breakpointInfoForLine(int lineOneBased) const;
+
+    /** @brief Returns the rendered badge fill color for a 1-based line (`#ef4444` when All Ranks). */
+    QColor breakpointColorForLine(int lineOneBased) const;
+
+    /** @brief Returns true when the breakpoint on lineOneBased renders the crisp white All-Ranks outline. */
+    bool breakpointHasWhiteOutlineForLine(int lineOneBased) const;
+
+    /** @brief Returns the configured 0-based rank filter for lineOneBased (-1 for All Ranks or unset). */
+    int breakpointRankFilterForLine(int lineOneBased) const;
+
+    /** @brief Returns formatted gutter hover tooltip text for an active breakpoint line (empty if unset). */
+    QString breakpointTooltipForLine(int lineOneBased) const;
+
+    /** @brief Updates the active focused rank used by "Set Breakpoint for Active Rank (Rank N)". */
+    void setActiveFocusRank(int rankId);
+
+    /** @brief Returns the currently focused rank index used for rank-scoped quick actions. */
+    int activeFocusRank() const { return m_activeFocusRank; }
+
+    /** @brief Updates the gutter execution PC marker without moving cursor, scroll, or active tab. */
+    void setExecutionLineOnly(int lineOneBased);
 
     /**
      * @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line.
@@ -456,6 +509,10 @@ signals:
     /** @brief Emitted when a breakpoint is toggled at a file and line. */
     void breakpointToggled(const QString& file, int line, bool isSet, const QString& condition = QString());
 
+    /** @brief Emitted with explicit rank filter metadata whenever a line breakpoint is added, modified, or removed. */
+    void rankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
+                               const QString& condition = QString());
+
     /** @brief Emitted when hovering over a variable identifier. */
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
 
@@ -499,6 +556,7 @@ private:
     LspCompletionPopup* m_completionPopup = nullptr;
     QMap<int, QString> m_breakpoints;
     QMap<int, QString> m_breakpointSuspendScopes;
+    QMap<int, BreakpointVisualInfo> m_breakpointInfo;
     QHash<int, GitLineState> m_gitLineStates;
     QVector<core::utils::LspDiagnostic> m_diagnostics;
     QString m_currentFilePath;
@@ -513,6 +571,7 @@ private:
     QPoint m_lastGlobalMousePos;
     int m_executionLine = -1;
     int m_hoveredGutterLine = -1;
+    int m_activeFocusRank = 0;
 };
 
 /**

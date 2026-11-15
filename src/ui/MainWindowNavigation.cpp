@@ -547,6 +547,7 @@ void MainWindow::loadSourceFile(const QString& filePath) {
     if (m_editorTabManager) {
         if (auto* view = m_editorTabManager->openFile(filePath)) {
             m_currentFile = !view->currentFile().isEmpty() ? view->currentFile() : filePath;
+            syncTabBreakpointMetadata(view); view->setActiveFocusRank(m_focusedRank);
             const QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
             // Refresh any cached publishDiagnostics squiggles when switching back to an existing tab.
             const auto cachedDiags = gridlock::core::ClangdLspClient::instance().cachedDiagnosticsForFile(absolutePath);

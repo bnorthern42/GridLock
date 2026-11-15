@@ -95,6 +95,7 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
     view->setProperty("absolutePath", absolutePath);
     view->setSourceCode(code);
     view->setCurrentFile(absolutePath);
+    view->setActiveFocusRank(m_activeFocusRank);
 
     // Restore persistent breakpoints associated with this file path.
     const auto breakpoints = core::ConfigManager::instance().getBreakpoints();
@@ -109,6 +110,8 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
             &EditorTabManager::toggleBreakpointRequested);
     connect(view, &SourceCodeView::breakpointToggled, this,
             &EditorTabManager::breakpointToggled);
+    connect(view, &SourceCodeView::rankBreakpointChanged, this,
+            &EditorTabManager::rankBreakpointChanged);
     connect(view, &SourceCodeView::hoverVariableRequested, this,
             &EditorTabManager::hoverVariableRequested);
     connect(view, &SourceCodeView::hideHoverTooltip, this,
@@ -455,6 +458,18 @@ void EditorTabManager::rehighlightAllTabs() {
     if (m_secondaryEditorView) {
         m_secondaryEditorView->reloadStyle();
     }
+}
+
+/**
+ * @brief Propagates the active focused MPI rank to all open source editors and future tabs.
+ * @param rankId Zero-based focused MPI rank index.
+ */
+void EditorTabManager::setActiveFocusRank(int rankId) {
+    m_activeFocusRank = std::max(0, rankId);
+    for (auto* view : m_openFiles) {
+        if (view) view->setActiveFocusRank(m_activeFocusRank);
+    }
+    if (m_secondaryEditorView) m_secondaryEditorView->setActiveFocusRank(m_activeFocusRank);
 }
 
 }  // namespace gridlock::ui

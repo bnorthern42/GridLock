@@ -232,6 +232,15 @@ bool MainWindow::pauseRankWorkflow() {
  * @param state Snapshot containing current execution state, active PC, source line, and registers.
  */
 void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
+    // Capture previous stop snapshot before overwriting so only genuine stop transitions switch editor tabs.
+    const bool hadPrev = m_latestStates.contains(rankId);
+    const RankState prevState = hadPrev ? m_latestStates[rankId] : RankState{};
+    const bool isNewStopTransition =
+        (state.currentState == QLatin1String("stopped")) &&
+        (!hadPrev || prevState.currentState != QLatin1String("stopped") ||
+         prevState.currentFile != state.currentFile ||
+         prevState.currentLine != state.currentLine);
+
     // Cache the newest rank state and reflect it on the Server Rack overview widget.
     m_latestStates[rankId] = state;
     if (state.currentState == QLatin1String("running")) m_selectedFrameLevel[rankId] = 0;
@@ -292,15 +301,22 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
         updateStatusTelemetry(
             pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
         refreshStatusBarMemoryTelemetry();
-        // Open or focus the resolved DWARF source file and move the yellow PC arrow to currentLine.
-        if (state.currentState == "stopped" && state.currentLine > 0) {
-            SourceCodeView* view =
-                (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
-                    ? m_editorTabManager->openFile(state.currentFile)
-                    : getSourceCodeView();
-            if (view) {
-                view->highlightCurrentLine(state.currentLine);
-                view->highlightExecutionLine(state.currentLine);
+        // Switch active tab and center PC line ONLY on genuine execution stop transitions.
+        if (state.currentState == QLatin1String("stopped") && state.currentLine > 0) {
+            if (isNewStopTransition && !m_suppressExecutionTabSwitch) {
+                SourceCodeView* view =
+                    (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
+                        ? m_editorTabManager->openFile(state.currentFile)
+                        : getSourceCodeView();
+                if (view) {
+                    syncTabBreakpointMetadata(view);
+                    view->highlightCurrentLine(state.currentLine);
+                    view->highlightExecutionLine(state.currentLine);
+                }
+            } else if (m_editorTabManager && !state.currentFile.isEmpty()) {
+                if (SourceCodeView* stoppedView = m_editorTabManager->getSourceCodeViewForFile(state.currentFile)) {
+                    stoppedView->setExecutionLineOnly(state.currentLine);
+                }
             }
         }
         if (m_registerView && !state.registers.isEmpty()) m_registerView->updateRegisters(state);
@@ -337,8 +353,9 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
  * @param rankId The target 0-based rank index selected by the user.
  */
 void MainWindow::onRankSelected(int rankId) {
-    // Track newly focused rank and synchronize VariablesDockWidget + CallStackDockWidget scope immediately.
+    // Track newly focused rank and synchronize VariablesDockWidget, CallStackDockWidget, and EditorTabManager.
     m_focusedRank = rankId;
+    if (m_editorTabManager) m_editorTabManager->setActiveFocusRank(rankId);
     if (m_variablesDockWidget) {
         if (auto* rankCombo = m_variablesDockWidget->findChild<QComboBox*>()) {
             const int idx = rankCombo->findData(rankId);
@@ -392,6 +409,7 @@ void MainWindow::onRankSelected(int rankId) {
                         ? m_editorTabManager->openFile(state.currentFile)
                         : getSourceCodeView();
                 if (view) {
+                    syncTabBreakpointMetadata(view);
                     view->highlightCurrentLine(state.currentLine);
                     view->highlightExecutionLine(state.currentLine);
                 }
@@ -768,6 +786,51 @@ bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
                           QStringLiteral("ATTACHED (PID %1)").arg(targetPid));
     refreshStatusBarMemoryTelemetry();
     return true;
+}
+
+/**
+ * @brief Records per-rank breakpoint metadata and stages rank-filter hints for coordinator insertion.
+ */
+void MainWindow::onRankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
+                                         const QString& condition) {
+    if (file.isEmpty() || line <= 0) return;
+    const QFileInfo fi(file);
+    const QString absPath = fi.absoluteFilePath();
+    const QString canonPath = fi.canonicalFilePath().isEmpty() ? absPath : fi.canonicalFilePath();
+    if (isSet) {
+        BreakpointRankMeta meta{rankFilter < 0 ? -1 : rankFilter, condition.trimmed()};
+        m_breakpointRankMeta[absPath][line] = meta;
+        if (canonPath != absPath) m_breakpointRankMeta[canonPath][line] = meta;
+    } else {
+        m_breakpointRankMeta[absPath].remove(line);
+        if (canonPath != absPath) m_breakpointRankMeta[canonPath].remove(line);
+    }
+    if (m_coordinator) {
+        m_coordinator->setProperty("gl_pending_bp_rank_key", QString("%1:%2").arg(absPath).arg(line));
+        m_coordinator->setProperty("gl_pending_bp_rank_val", rankFilter < 0 ? -1 : rankFilter);
+    }
+}
+
+/**
+ * @brief Restores cached per-rank breakpoint colors/conditions onto an open SourceCodeView tab.
+ */
+void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
+    if (!view || view->currentFile().isEmpty()) return;
+    const QFileInfo fi(view->currentFile());
+    const QString absPath = fi.absoluteFilePath();
+    const QString canonPath = fi.canonicalFilePath().isEmpty() ? absPath : fi.canonicalFilePath();
+    QMap<int, SourceCodeView::BreakpointVisualInfo> meta;
+    const QMap<int, BreakpointRankMeta>& stored =
+        m_breakpointRankMeta.contains(canonPath) ? m_breakpointRankMeta[canonPath] : m_breakpointRankMeta.value(absPath);
+    if (stored.isEmpty()) return;
+    for (int line : view->breakpoints()) {
+        const auto s = stored.value(line, BreakpointRankMeta{-1, view->breakpointCondition(line)});
+        meta[line] = SourceCodeView::BreakpointVisualInfo{s.rankFilter, s.condition};
+    }
+    for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) {
+        meta[it.key()] = SourceCodeView::BreakpointVisualInfo{it.value().rankFilter, it.value().condition};
+    }
+    view->syncBreakpointMetadata(meta);
 }
 
 /**

@@ -159,19 +159,25 @@ bool GdbRankCoordinator::attachToProcess(qint64 pid) {
  */
 void GdbRankCoordinator::setBreakpoint(const QString& file, int line, const QString& condition, int rankFilter) {
   if (file.isEmpty() || line <= 0) return;
-  // Deduplicate existing entry at `(file, line, rankFilter)` before inserting updated metadata.
-  m_pendingBreakpoints.erase(
-      std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(),
-                     [&](const PendingBreakpoint& bp) {
-                       return bp.file == file && bp.line == line && bp.rankFilter == rankFilter;
-                     }),
-      m_pendingBreakpoints.end());
+  // Deduplicate existing entry at `(file, line)` across rank filters before inserting updated metadata.
+  m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(),
+      [&](const PendingBreakpoint& bp) { return bp.file == file && bp.line == line; }), m_pendingBreakpoints.end());
   m_pendingBreakpoints.push_back({file, line, condition.trimmed(), rankFilter});
-
-  // Synchronize immediately to any already-running or paused rank slots matching `rankFilter`.
+  // Delete any live GDB breakpoint for file:line on ranks excluded by a narrowed rankFilter.
+  const QString locFull = QString("%1:%2").arg(file).arg(line), locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line);
   const QString cmd = buildBreakInsertCmd(file, line, condition);
   for (size_t i = 0; i < m_processes.size(); ++i) {
-    if (rankFilter < 0 || rankFilter == static_cast<int>(i)) writeCmd(static_cast<int>(i), cmd);
+    auto& rp = m_processes[i];
+    if (rankFilter >= 0 && rankFilter != static_cast<int>(i)) {
+      if (rp) {
+        QList<int> toRemove;
+        for (auto it = rp->state.breakpoints.constBegin(); it != rp->state.breakpoints.constEnd(); ++it)
+          if (it.value() == locFull || it.value() == locBase) toRemove.append(it.key());
+        for (int id : toRemove) { writeCmd(static_cast<int>(i), QString("-break-delete %1\n").arg(id)); rp->state.breakpoints.remove(id); }
+      }
+      continue;
+    }
+    writeCmd(static_cast<int>(i), cmd);
   }
 }
 
@@ -508,22 +514,24 @@ void GdbRankCoordinator::sendCommand(int rankId, const QString& cmd) {
  * @brief Synchronizes a source-line breakpoint insertion or deletion across all ranks.
  */
 void GdbRankCoordinator::broadcastBreakpoint(const QString& file, int line, bool isSet, const QString& condition) {
-  if (isSet) {
-    setBreakpoint(file, line, condition, -1);
-    return;
+  int resolvedRank = -1;
+  const QString locStr = QString("%1:%2").arg(file).arg(line);
+  if (property("gl_pending_bp_rank_key").toString() == locStr) {
+    resolvedRank = property("gl_pending_bp_rank_val").toInt();
+    setProperty("gl_pending_bp_rank_key", QString());
   }
+  if (isSet) { setBreakpoint(file, line, condition, resolvedRank); return; }
   m_pendingBreakpoints.erase(
       std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(),
                      [&](const PendingBreakpoint& bp) { return bp.file == file && bp.line == line; }),
       m_pendingBreakpoints.end());
-
-  const QString locStr = QString("%1:%2").arg(file).arg(line);
+  const QString locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line);
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     if (!rp) continue;
     int bkptIdToDelete = -1;
     for (auto it = rp->state.breakpoints.constBegin(); it != rp->state.breakpoints.constEnd(); ++it) {
-      if (it.value() == locStr) { bkptIdToDelete = it.key(); break; }
+      if (it.value() == locStr || it.value() == locBase) { bkptIdToDelete = it.key(); break; }
     }
     if (bkptIdToDelete != -1) {
       writeCmd(static_cast<int>(i), QString("-break-delete %1\n").arg(bkptIdToDelete));
@@ -548,8 +556,7 @@ void GdbRankCoordinator::stepAll() {
 void GdbRankCoordinator::stepInto(int threadId) {
   if (m_processes.empty()) { stepAll(); return; }
   const int rankId = std::clamp(threadId - 1, 0, static_cast<int>(m_processes.size()) - 1);
-  const auto& st = m_processes[rankId]->state.currentState;
-  if (st != "running" && st != "exited") writeCmd(rankId, "-exec-step\n");
+  if (const auto& st = m_processes[rankId]->state.currentState; st != "running" && st != "exited") writeCmd(rankId, "-exec-step\n");
 }
 
 /**
@@ -558,18 +565,15 @@ void GdbRankCoordinator::stepInto(int threadId) {
 void GdbRankCoordinator::stepInstruction(int threadId) {
   if (m_processes.empty()) return;
   const int rankId = std::clamp(threadId - 1, 0, static_cast<int>(m_processes.size()) - 1);
-  const auto& st = m_processes[rankId]->state.currentState;
-  if (st != "running" && st != "exited") writeCmd(rankId, "-exec-step-instruction\n");
+  if (const auto& st = m_processes[rankId]->state.currentState; st != "running" && st != "exited") writeCmd(rankId, "-exec-step-instruction\n");
 }
 
 /**
  * @brief Resumes execution across all paused ranks (`-exec-continue`).
  */
 void GdbRankCoordinator::continueAll() {
-  for (size_t i = 0; i < m_processes.size(); ++i) {
-    const auto& st = m_processes[i]->state.currentState;
-    if (st != "running" && st != "exited") writeCmd(static_cast<int>(i), "-exec-continue\n");
-  }
+  for (size_t i = 0; i < m_processes.size(); ++i)
+    if (const auto& st = m_processes[i]->state.currentState; st != "running" && st != "exited") writeCmd(static_cast<int>(i), "-exec-continue\n");
 }
 
 /**
@@ -589,9 +593,8 @@ void GdbRankCoordinator::haltAll() {
  */
 void GdbRankCoordinator::pauseFocusedRank(int rankId) {
   if (rankId >= 0 && rankId < static_cast<int>(m_processes.size()) && m_processes[rankId] &&
-      m_processes[rankId]->inferiorPid > 0 && m_processes[rankId]->state.currentState == "running") {
+      m_processes[rankId]->inferiorPid > 0 && m_processes[rankId]->state.currentState == "running")
     ::kill(m_processes[rankId]->inferiorPid, SIGINT);
-  }
   writeCmd(rankId, "-exec-interrupt\n");
 }
 
@@ -603,12 +606,10 @@ void GdbRankCoordinator::requestDisassemblyFallback(int rankId) {
   auto& rp = m_processes[rankId];
   if (!rp || rp->state.currentState != "stopped") return;
   writeCmd(rankId, "-thread-info\n");
-  if (!rp->state.currentFile.isEmpty() && rp->state.currentLine > 0) {
-    writeCmd(rankId, QString("200-data-disassemble -f %1 -l %2 -n 30 -- 0\n")
-                         .arg(rp->state.currentFile).arg(rp->state.currentLine));
-  } else {
+  if (!rp->state.currentFile.isEmpty() && rp->state.currentLine > 0)
+    writeCmd(rankId, QString("200-data-disassemble -f %1 -l %2 -n 30 -- 0\n").arg(rp->state.currentFile).arg(rp->state.currentLine));
+  else
     writeCmd(rankId, "200-data-disassemble -s $pc -e \"$pc + 64\" -- 0\n");
-  }
 }
 
 /**
@@ -860,14 +861,15 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.startsWith("^done,bkpt={")) {
       // Record GDB breakpoint number -> `file:line` mapping and release `sync_flushing` barrier.
-      // Automatically resumes execution once all queued pre-run breakpoints acknowledge insertion.
       static const QRegularExpression bkptRe("number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");
       const auto match = bkptRe.match(line);
       if (match.hasMatch()) {
         rp->state.breakpoints[match.captured(1).toInt()] = QString("%1:%2").arg(match.captured(2), match.captured(3));
         if (rp->state.currentState == "sync_flushing") {
           if (--rp->state.pendingBreakpoints <= 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; }
-        } else emit rankStateChanged(rankId, rp->state);
+        } else if (rp->state.currentState != "stopped") {
+          emit rankStateChanged(rankId, rp->state);
+        }
       }
     } else if (line.startsWith("100")) {
       // Token 100: Editor hover variable evaluation response (`-data-evaluate-expression`).

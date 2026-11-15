@@ -589,6 +589,9 @@ public slots:
 
     void onRankStateChanged(int rankId, const RankState& state);
     void onRankSelected(int rankId);
+    void onRankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
+                                 const QString& condition);
+    void syncTabBreakpointMetadata(SourceCodeView* view) const;
     void openFile();
     void openPreferences();
     void loadSourceFile(const QString& filePath);
@@ -669,6 +672,7 @@ private:
     bool m_forceDecompilerFallback = false;
     bool m_debugSessionActive = false;
     bool m_suppressMemViewBroadcast = false;
+    bool m_suppressExecutionTabSwitch = false;
     bool m_bottomConsoleMaximized = false;
     QString m_workspacePerspective = QStringLiteral("Code");
     QPushButton* m_perspCodeBtn = nullptr;
@@ -688,6 +692,8 @@ private:
     QString m_currentFile;
     QString m_activeWorkspaceDir;
     bool m_switchingWorkspace = false;
+    struct BreakpointRankMeta { int rankFilter = -1; QString condition; };
+    QMap<QString, QMap<int, BreakpointRankMeta>> m_breakpointRankMeta;
     QMap<QString, QSet<int>> m_persistentBreakpoints;
     std::unique_ptr<gridlock::core::ElfBinaryInspector> m_elfInspector;
 

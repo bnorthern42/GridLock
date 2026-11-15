@@ -196,8 +196,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Eagerly load resolved demo source file into editor canvas if present on disk.
   if (QFileInfo::exists(initialSource)) loadSourceFile(initialSource);
 
-  // Load offline persistence TOML breakpoints from user preferences.
+  // Load offline persistence TOML breakpoints and connect per-rank breakpoint metadata sync.
   m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
+  if (m_editorTabManager) connect(m_editorTabManager, &EditorTabManager::rankBreakpointChanged, this, &MainWindow::onRankBreakpointChanged);
 
   // Restore saved desktop geometry and dock configuration when running with an interactive display server.
   if (QGuiApplication::platformName() != QStringLiteral("offscreen")) {
@@ -205,12 +206,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     if (settings.contains("MainWindow/Geometry_v9")) restoreGeometry(settings.value("MainWindow/Geometry_v9").toByteArray());
     if (settings.contains("MainWindow/State_v9")) restoreState(settings.value("MainWindow/State_v9").toByteArray());
     // Restore individual splitter sash positions.
-    for (auto* splitter : findChildren<QSplitter*>()) {
+    for (auto* splitter : findChildren<QSplitter*>())
       if (!splitter->objectName().isEmpty()) {
         auto st = settings.value("MainWindow/Splitter_v9_" + splitter->objectName()).toByteArray();
         if (!st.isEmpty()) splitter->restoreState(st);
       }
-    }
   }
   if (width() < 800 || height() < 600) resize(1440, 900);
   // Constrain side dock widths to prevent collapsing below 150px.
@@ -407,20 +407,20 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
             [this](int rankId, const QJsonArray &regs) {
               if (rankId == m_focusedRank && m_registerView) m_registerView->updateRegisters(regs);
             });
-    // Route execution location updates (file:line) to the focused rank's editor and gutter PC marker.
+    // Route execution location updates (file:line) without hijacking user-focused secondary tabs.
     connect(m_coordinator, &IBackendCoordinator::locationChanged, this,
             [this](int rankId, const QString &file, int line) {
-              m_latestStates[rankId].currentFile = file;
-              m_latestStates[rankId].currentLine = line;
-              if (rankId == m_focusedRank && line > 0) {
-                SourceCodeView *view = (!file.isEmpty() && QFileInfo::exists(file) && m_editorTabManager)
-                                           ? m_editorTabManager->openFile(file)
-                                           : getSourceCodeView();
-                if (view) {
-                  view->highlightCurrentLine(line);
-                  view->highlightExecutionLine(line);
-                }
+              const QString prevFile = m_latestStates.contains(rankId) ? m_latestStates[rankId].currentFile : QString();
+              const int prevLine = m_latestStates.contains(rankId) ? m_latestStates[rankId].currentLine : -1;
+              const bool sameLoc = (prevFile == file && prevLine == line && m_latestStates[rankId].currentState == QLatin1String("stopped"));
+              m_latestStates[rankId].currentFile = file; m_latestStates[rankId].currentLine = line;
+              if (rankId != m_focusedRank || line <= 0) return;
+              if (m_suppressExecutionTabSwitch || sameLoc) {
+                if (SourceCodeView *sv = (m_editorTabManager && !file.isEmpty()) ? m_editorTabManager->getSourceCodeViewForFile(file) : nullptr) sv->setExecutionLineOnly(line);
+                return;
               }
+              SourceCodeView *view = (!file.isEmpty() && QFileInfo::exists(file) && m_editorTabManager) ? m_editorTabManager->openFile(file) : getSourceCodeView();
+              if (view) { syncTabBreakpointMetadata(view); view->highlightExecutionLine(line); }
             });
 
     // Wire GDB-specific hover, evaluator, raw MI stream, and SIGFPE handlers when using GDB.

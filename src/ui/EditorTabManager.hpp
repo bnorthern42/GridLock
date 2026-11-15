@@ -153,11 +153,14 @@ public:
      */
     Qt::Orientation splitOrientation() const { return m_splitOrientation; }
 
-    /**
-     * @brief Returns the secondary SourceCodeView instance when a split is active.
-     * @return Pointer to the secondary SourceCodeView, or nullptr if unsplit.
-     */
+    /** @brief Returns the secondary SourceCodeView instance when a split is active. */
     SourceCodeView* secondaryEditorView() const { return m_splitActive ? m_secondaryEditorView : nullptr; }
+
+    /** @brief Propagates the currently focused MPI rank index to all open editor tabs. */
+    void setActiveFocusRank(int rankId);
+
+    /** @brief Returns all open SourceCodeView tabs tracked by this manager. */
+    QList<SourceCodeView*> openViews() const { return m_openFiles.values(); }
 
 protected:
     /**
@@ -173,6 +176,10 @@ signals:
     /// Emitted when a breakpoint is toggled directly on a source file line.
     void breakpointToggled(const QString& file, int line, bool isSet,
                            const QString& condition);
+
+    /// Emitted with explicit rank filter metadata whenever a tab breakpoint changes.
+    void rankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
+                               const QString& condition);
 
     /// Emitted when the user hovers over an identifier token in the editor.
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
@@ -226,6 +233,8 @@ private:
     bool m_splitActive = false;
     /// Active orientation of the split editor pane (Horizontal = Right, Vertical = Down).
     Qt::Orientation m_splitOrientation = Qt::Horizontal;
+    /// Focused MPI rank forwarded to open SourceCodeView rank-breakpoint actions.
+    int m_activeFocusRank = 0;
 };
 
 }  // namespace gridlock::ui

@@ -111,11 +111,40 @@ int SourceCodeView::lineNumberAreaWidth() const {
     return qMax(48, gutterIconLaneWidth() + digitsWidth + 18);
 }
 
-/** @brief Sets active breakpoints from a set of 1-based line numbers. */
+/** @brief Computes deterministic crimson (#ef4444) for All Ranks or non-red accordion color per rank. */
+QColor SourceCodeView::colorForRankBreakpoint(int rankFilter) {
+    if (rankFilter < 0) return QColor(QStringLiteral("#ef4444"));
+    static const QColor kPalette[8] = {
+        QColor(QStringLiteral("#06b6d4")), QColor(QStringLiteral("#f59e0b")),
+        QColor(QStringLiteral("#10b981")), QColor(QStringLiteral("#a855f7")),
+        QColor(QStringLiteral("#ec4899")), QColor(QStringLiteral("#84cc16")),
+        QColor(QStringLiteral("#3b82f6")), QColor(QStringLiteral("#f97316"))};
+    if (rankFilter < 8) return kPalette[rankFilter];
+    return QColor::fromHsl((45 + rankFilter * 137) % 330 + 20, 215, 135);
+}
+
+/** @brief Sets active breakpoints from a set of 1-based line numbers while preserving existing rank metadata. */
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
-    m_breakpoints.clear(); m_breakpointSuspendScopes.clear();
-    for (int bp : bps) { m_breakpoints[bp] = QString(); m_breakpointSuspendScopes[bp] = QStringLiteral("All"); }
-    highlightCurrentLine(); m_lineNumberArea->update();
+    const auto prevInfo = m_breakpointInfo;
+    m_breakpoints.clear(); m_breakpointSuspendScopes.clear(); m_breakpointInfo.clear();
+    for (int bp : bps) {
+        const BreakpointVisualInfo info = prevInfo.value(bp, BreakpointVisualInfo{-1, QString()});
+        m_breakpointInfo[bp] = info; m_breakpoints[bp] = info.condition;
+        m_breakpointSuspendScopes[bp] = (info.rankFilter >= 0) ? QStringLiteral("Rank") : QStringLiteral("All");
+    }
+    highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
+}
+
+/** @brief Restores per-line rank-filtered breakpoint metadata without emitting toggle signals. */
+void SourceCodeView::syncBreakpointMetadata(const QMap<int, BreakpointVisualInfo>& metaByLine) {
+    m_breakpoints.clear(); m_breakpointSuspendScopes.clear(); m_breakpointInfo.clear();
+    for (auto it = metaByLine.constBegin(); it != metaByLine.constEnd(); ++it) {
+        if (it.key() <= 0) continue;
+        BreakpointVisualInfo clean{it.value().rankFilter < 0 ? -1 : it.value().rankFilter, it.value().condition.trimmed()};
+        m_breakpointInfo[it.key()] = clean; m_breakpoints[it.key()] = clean.condition;
+        m_breakpointSuspendScopes[it.key()] = (clean.rankFilter >= 0) ? QStringLiteral("Rank") : QStringLiteral("All");
+    }
+    highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
 /** @brief Returns the set of active 1-based breakpoint line numbers. */
@@ -134,41 +163,33 @@ QColor SourceCodeView::activeCanvasBackgroundColor() const {
     return QColor(sw.value(0, isAppDarkThemeActive() ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8")));
 }
 
-/**
- * @brief Reloads font size, font family, word wrap, and active theme surface from user configuration.
- */
+/** @brief Reloads font size, font family, word wrap, and active theme surface from user configuration. */
 void SourceCodeView::reloadStyle() {
     // Query user appearance and editing settings from persistent QSettings store.
     QSettings s("gridlock", "debugger");
     const int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
     const QString codeFontFamily = s.value("appearance/code_font_family", QStringLiteral("JetBrains Mono")).toString();
     setLineWrapMode(s.value("editing/word_wrap", false).toBool() ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
-
     // Update widget QFont directly so font().pointSize() and fontMetrics() reflect live changes.
     QFont codeFont = font();
     if (!codeFontFamily.trimmed().isEmpty()) codeFont.setFamily(codeFontFamily.trimmed());
     codeFont.setStyleHint(QFont::Monospace); codeFont.setPointSize(codeFontSize); setFont(codeFont);
-
     // Resolve active canvas and text tokens from ThemeManager so Light and Dark themes render natively.
     const bool isDark = isAppDarkThemeActive();
     const QStringList sw = activeAppSwatchColors();
     const QString canvasHex = sw.value(0, isDark ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8"));
     const QString textHex = sw.value(4, isDark ? QStringLiteral("#d7dae0") : QStringLiteral("#1f2328"));
-
-    // Apply stylesheet and viewport palette for high-contrast Light and Dark workstation rendering.
     this->setStyleSheet(QStringLiteral(
         "QPlainTextEdit, QPlainTextEdit QWidget { background-color: %3; color: %4; border: none; "
         "font-family: '%2', 'JetBrains Mono', 'Fira Code', 'Monospace', monospace; font-size: %1pt; }"
     ).arg(codeFontSize).arg(codeFontFamily.isEmpty() ? QStringLiteral("JetBrains Mono") : codeFontFamily).arg(canvasHex, textHex));
-
     if (viewport()) {
         QPalette pal = viewport()->palette();
         pal.setColor(QPalette::Base, QColor(canvasHex)); pal.setColor(QPalette::Window, QColor(canvasHex));
         pal.setColor(QPalette::Text, QColor(textHex)); viewport()->setPalette(pal); viewport()->setAutoFillBackground(true);
     }
     if (m_highlighter) m_highlighter->reloadPalette();
-    highlightCurrentLine(); updateLineNumberAreaWidth(0);
-    if (m_lineNumberArea) m_lineNumberArea->update();
+    highlightCurrentLine(); updateLineNumberAreaWidth(0); if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
 /** @brief Overrides the active highlighting language mode on the editor highlighter. */
@@ -220,64 +241,96 @@ void SourceCodeView::toggleLineComment() {
  */
 int SourceCodeView::getCurrentLineNumber() const { return textCursor().blockNumber() + 1; }
 
-/**
- * @brief Toggles a breakpoint on the specified 1-based line.
- * @param lineNum 1-based line number.
- */
+/** @brief Toggles a breakpoint on the specified 1-based line. */
 void SourceCodeView::toggleBreakpoint(int lineNum) {
+    if (lineNum <= 0) return;
     const bool isSet = !m_breakpoints.contains(lineNum);
+    const int prevRank = breakpointRankFilterForLine(lineNum);
     if (isSet) {
         m_breakpoints.insert(lineNum, QString()); m_breakpointSuspendScopes.insert(lineNum, QStringLiteral("All"));
+        m_breakpointInfo.insert(lineNum, BreakpointVisualInfo{-1, QString()});
     } else {
-        m_breakpoints.remove(lineNum); m_breakpointSuspendScopes.remove(lineNum);
+        m_breakpoints.remove(lineNum); m_breakpointSuspendScopes.remove(lineNum); m_breakpointInfo.remove(lineNum);
     }
-    highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
+    highlightCurrentLine();
+    if (m_lineNumberArea) { if (m_hoveredGutterLine == lineNum) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineNum)); m_lineNumberArea->update(); }
+    emit rankBreakpointChanged(m_currentFilePath, lineNum, isSet, isSet ? -1 : prevRank, QString());
     emit breakpointToggled(m_currentFilePath, lineNum, isSet, QString());
 }
 
 /**
- * @brief Registers or updates a conditional/rank-filtered breakpoint on a 1-based source line.
- * @param lineOneBased 1-based source line number.
- * @param condition Conditional expression string.
+ * @brief Sets or updates a breakpoint with an explicit rank filter (-1 = All Ranks) and condition.
+ * @param lineOneBased 1-based target source line.
+ * @param rankFilter Target rank index, or -1 for All Ranks.
+ * @param condition Optional C/C++ condition expression.
+ */
+void SourceCodeView::setRankBreakpoint(int lineOneBased, int rankFilter, const QString& condition) {
+    if (lineOneBased <= 0) return;
+    // Normalize negative filters to -1 (All Ranks) and trim condition whitespace.
+    const int normalizedRank = (rankFilter < 0) ? -1 : rankFilter;
+    const QString cleanCond = condition.trimmed();
+    m_breakpointInfo.insert(lineOneBased, BreakpointVisualInfo{normalizedRank, cleanCond});
+    m_breakpoints.insert(lineOneBased, cleanCond);
+    m_breakpointSuspendScopes.insert(lineOneBased, (normalizedRank >= 0) ? QStringLiteral("Rank") : QStringLiteral("All"));
+    highlightCurrentLine();
+    // Refresh active gutter tooltip immediately when hovering the modified line.
+    if (m_lineNumberArea) { if (m_hoveredGutterLine == lineOneBased) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineOneBased)); m_lineNumberArea->update(); }
+    // Emit rank metadata before breakpointToggled so MainWindowWorkspace syncs the active rank filter.
+    emit rankBreakpointChanged(m_currentFilePath, lineOneBased, true, normalizedRank, cleanCond);
+    emit breakpointToggled(m_currentFilePath, lineOneBased, true, cleanCond);
+}
+/**
+ * @brief Registers or updates a conditional breakpoint while preserving its current rank filter.
  */
 void SourceCodeView::setConditionalBreakpoint(int lineOneBased, const QString& condition) {
-    if (lineOneBased <= 0) return;
-    m_breakpoints.insert(lineOneBased, condition);
-    if (!m_breakpointSuspendScopes.contains(lineOneBased)) m_breakpointSuspendScopes.insert(lineOneBased, QStringLiteral("All"));
-    highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
-    emit breakpointToggled(m_currentFilePath, lineOneBased, true, condition);
+    if (lineOneBased > 0) setRankBreakpoint(lineOneBased, breakpointRankFilterForLine(lineOneBased), condition);
 }
-
 /**
- * @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line.
+ * @brief Returns stored visual metadata for a 1-based breakpoint line.
  */
+SourceCodeView::BreakpointVisualInfo SourceCodeView::breakpointInfoForLine(int lineOneBased) const { return m_breakpointInfo.value(lineOneBased, BreakpointVisualInfo{-1, m_breakpoints.value(lineOneBased).trimmed()}); }
+/**
+ * @brief Returns deterministic badge fill color for lineOneBased (#ef4444 for All Ranks).
+ */
+QColor SourceCodeView::breakpointColorForLine(int lineOneBased) const { return colorForRankBreakpoint(breakpointRankFilterForLine(lineOneBased)); }
+/**
+ * @brief Returns true when lineOneBased holds an All-Ranks breakpoint rendered with a white outer ring.
+ */
+bool SourceCodeView::breakpointHasWhiteOutlineForLine(int lineOneBased) const { return hasBreakpoint(lineOneBased) && breakpointRankFilterForLine(lineOneBased) < 0; }
+/**
+ * @brief Returns the configured 0-based rank filter for lineOneBased (-1 for All Ranks or unset).
+ */
+int SourceCodeView::breakpointRankFilterForLine(int lineOneBased) const { return m_breakpointInfo.contains(lineOneBased) ? m_breakpointInfo.value(lineOneBased).rankFilter : -1; }
+/**
+ * @brief Returns formatted hover tooltip text for a breakpoint line, or empty string if unset.
+ */
+QString SourceCodeView::breakpointTooltipForLine(int lineOneBased) const {
+    if (!hasBreakpoint(lineOneBased)) return QString();
+    const BreakpointVisualInfo info = breakpointInfoForLine(lineOneBased);
+    QString tip = QStringLiteral("Breakpoint at line %1 (%2)").arg(lineOneBased).arg((info.rankFilter < 0) ? QStringLiteral("All Ranks") : QStringLiteral("Rank %1 only").arg(info.rankFilter));
+    if (!info.condition.trimmed().isEmpty()) tip += QStringLiteral("\nCondition: %1").arg(info.condition.trimmed());
+    return tip;
+}
+/**
+ * @brief Updates the active focused rank for rank-scoped quick context menu actions.
+ */
+void SourceCodeView::setActiveFocusRank(int rankId) { m_activeFocusRank = qMax(0, rankId); }
+/** @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line. */
 QString SourceCodeView::breakpointCondition(int lineOneBased) const { return m_breakpoints.value(lineOneBased).trimmed(); }
-
-/**
- * @brief Returns the configured rank suspension scope ("All" or "Rank") for a breakpoint line.
- */
-QString SourceCodeView::breakpointSuspendScope(int lineOneBased) const {
-    return m_breakpointSuspendScopes.value(lineOneBased, QStringLiteral("All"));
-}
-
-/**
- * @brief Updates the 1-based hovered gutter line and schedules a gutter repaint.
- * @param lineOneBased 1-based line number under cursor, or -1.
- */
+/** @brief Returns the configured rank suspension scope ("All" or "Rank") for a breakpoint line. */
+QString SourceCodeView::breakpointSuspendScope(int lineOneBased) const { return m_breakpointSuspendScopes.value(lineOneBased, QStringLiteral("All")); }
+/** @brief Updates the 1-based hovered gutter line, tooltip, and schedules a gutter repaint. */
 void SourceCodeView::setHoveredGutterLine(int lineOneBased) {
     const int normalized = (lineOneBased > 0) ? lineOneBased : -1;
     if (m_hoveredGutterLine == normalized) return;
     m_hoveredGutterLine = normalized;
     if (m_lineNumberArea) {
         m_lineNumberArea->setCursor(normalized > 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        m_lineNumberArea->setToolTip(normalized > 0 ? breakpointTooltipForLine(normalized) : QString());
         m_lineNumberArea->update();
     }
 }
-
-/**
- * @brief Resolves the composite gutter marker badge state for a 1-based source line.
- * @param lineOneBased 1-based source line number.
- */
+/** @brief Resolves the composite gutter marker badge state for a 1-based source line. */
 QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
     const bool hasBp = m_breakpoints.contains(lineOneBased);
     const bool isExec = (lineOneBased > 0 && lineOneBased == m_executionLine);
@@ -288,9 +341,7 @@ QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
     return QStringLiteral("None");
 }
 
-/**
- * @brief Highlights the current cursor line, breakpoint tint bands, and active debugger execution line.
- */
+/** @brief Highlights the current cursor line, per-rank breakpoint tint bands, and execution PC line. */
 void SourceCodeView::highlightCurrentLine() {
     QList<QTextEdit::ExtraSelection> selections;
     QTextEdit::ExtraSelection selection;
@@ -300,16 +351,15 @@ void SourceCodeView::highlightCurrentLine() {
     selection.format.setProperty(QTextFormat::FullWidthSelection, true);
     selection.cursor = textCursor(); selection.cursor.clearSelection();
     selections.append(selection);
-
-    // Layer subtle translucent crimson/amber background tint across breakpoint lines.
+    // Layer subtle translucent per-rank (alpha = 28) background tint across breakpoint lines.
     for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
         const int bpLine = it.key();
         if (bpLine <= 0 || bpLine == m_executionLine) continue;
         QTextBlock bpBlock = document()->findBlockByLineNumber(bpLine - 1);
         if (bpBlock.isValid()) {
             QTextEdit::ExtraSelection bpSel;
-            const bool isCond = !it.value().trimmed().isEmpty();
-            bpSel.format.setBackground(isCond ? QColor(229, 192, 123, 22) : QColor(224, 108, 117, 22));
+            QColor tint = breakpointColorForLine(bpLine); tint.setAlpha(28);
+            bpSel.format.setBackground(tint);
             bpSel.format.setProperty(QTextFormat::FullWidthSelection, true);
             bpSel.cursor = QTextCursor(bpBlock); bpSel.cursor.clearSelection();
             selections.append(bpSel);
@@ -396,94 +446,69 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             // Illuminate hovered gutter row background with subtle accent wash rgba(82, 139, 255, 0.14).
             if (isHovered) painter.fillRect(QRect(0, top, gutterW - 1, rowH), QColor(82, 139, 255, 36));
 
-            // 1. Left Icon Lane (x = 0..20): Antialiased QPainterPath vector badges & ghost hover preview.
+            // 1. Left Icon Lane (x = 0..20): Antialiased vector badges for HoverPreview, All-Ranks, Per-Rank, & ExecutionPc.
+            const int bpRank = breakpointRankFilterForLine(lineOneBased);
+            const QColor bpColor = colorForRankBreakpoint(bpRank);
             if (state == QStringLiteral("HoverPreview")) {
-                // Translucent ghost breakpoint preview circle rgba(224, 108, 117, 0.40) inside x = 4..16.
-                painter.setPen(QPen(QColor(255, 148, 157, 120), 1.0));
-                painter.setBrush(QColor(224, 108, 117, 102));
-                painter.drawEllipse(QPointF(cx, cy), 4.6, 4.6);
-            } else if (state == QStringLiteral("Breakpoint")) {
-                // Subtle outer halo + 10px crimson-coral disc (#e06c75) with #ff949d rim highlight.
-                painter.setPen(Qt::NoPen); painter.setBrush(QColor(224, 108, 117, 64));
-                painter.drawEllipse(QPointF(cx, cy), 6.1, 6.1);
-                painter.setPen(QPen(QColor("#ff949d"), 1.1)); painter.setBrush(QColor("#e06c75"));
-                painter.drawEllipse(QPointF(cx, cy), 4.7, 4.7);
-            } else if (state == QStringLiteral("ConditionalBreakpoint")) {
-                // Rotated 11px amber-gold diamond (#e5c07b) with 2.8px dark center cutout dot.
-                QPainterPath diamond;
-                diamond.moveTo(cx, cy - 5.4); diamond.lineTo(cx + 5.4, cy);
-                diamond.lineTo(cx, cy + 5.4); diamond.lineTo(cx - 5.4, cy); diamond.closeSubpath();
-                painter.setPen(QPen(QColor("#f0d090"), 1.0)); painter.setBrush(QColor("#e5c07b"));
-                painter.drawPath(diamond);
-                painter.setPen(Qt::NoPen); painter.setBrush(QColor("#16181d"));
-                painter.drawEllipse(QPointF(cx, cy), 1.5, 1.5);
+                painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0)); painter.setBrush(QColor(239, 68, 68, 102));
+                painter.drawEllipse(QPointF(cx, cy), 4.8, 4.8);
+            } else if (state == QStringLiteral("Breakpoint") || state == QStringLiteral("ConditionalBreakpoint")) {
+                const bool isCond = (state == QStringLiteral("ConditionalBreakpoint"));
+                if (bpRank < 0) {
+                    // All Ranks: crimson red (#ef4444) circle with crisp 1.5px white (#ffffff) outer ring.
+                    painter.setPen(QPen(QColor(QStringLiteral("#ffffff")), 1.5)); painter.setBrush(bpColor);
+                    painter.drawEllipse(QPointF(cx, cy), 5.2, 5.2);
+                    if (isCond) { painter.setPen(Qt::NoPen); painter.setBrush(QColor(QStringLiteral("#fbbf24"))); painter.drawEllipse(QPointF(cx, cy), 1.7, 1.7); }
+                } else {
+                    // Specific Rank: accordion rank color with high-contrast ring and bold rank number.
+                    painter.setPen(QPen(isDark ? QColor(QStringLiteral("#ffffff")) : QColor(QStringLiteral("#1f2328")), 1.2));
+                    painter.setBrush(bpColor); painter.drawEllipse(QPointF(cx, cy), 5.8, 5.8);
+                    const double luma = 0.2126 * bpColor.red() + 0.7152 * bpColor.green() + 0.0722 * bpColor.blue();
+                    QFont badgeFont = baseGutterFont; badgeFont.setBold(true); badgeFont.setPixelSize(bpRank >= 10 ? 7 : 8);
+                    painter.setFont(badgeFont);
+                    painter.setPen(luma > 150.0 ? QColor(QStringLiteral("#0f172a")) : QColor(QStringLiteral("#ffffff")));
+                    painter.drawText(QRectF(cx - 5.5, cy - 5.5, 11.0, 11.0), Qt::AlignCenter, QString::number(bpRank));
+                    if (isCond) { painter.setPen(Qt::NoPen); painter.setBrush(QColor(QStringLiteral("#fbbf24"))); painter.drawEllipse(QPointF(cx + 4.2, cy - 4.2), 1.6, 1.6); }
+                }
             } else if (state == QStringLiteral("ExecutionPc")) {
-                // Sleek emerald-teal execution chevron (#4ec9b0) + 3px right gutter accent bar.
-                QPainterPath chev;
-                chev.moveTo(cx - 3.6, cy - 4.5); chev.lineTo(cx + 4.6, cy);
+                QPainterPath chev; chev.moveTo(cx - 3.6, cy - 4.5); chev.lineTo(cx + 4.6, cy);
                 chev.lineTo(cx - 3.6, cy + 4.5); chev.lineTo(cx - 1.7, cy); chev.closeSubpath();
                 painter.setPen(QPen(QColor("#98c379"), 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
                 painter.setBrush(QColor("#4ec9b0")); painter.drawPath(chev);
                 painter.fillRect(QRect(gutterW - 3, top, 2, rowH), QColor("#4ec9b0"));
             } else if (state == QStringLiteral("BreakpointAndExecutionPc")) {
-                // Combined state: crimson outer breakpoint ring (#e06c75) with nested emerald PC chevron (#4ec9b0).
-                painter.setPen(QPen(QColor("#e06c75"), 1.8)); painter.setBrush(QColor("#24181c"));
-                painter.drawEllipse(QPointF(cx, cy), 5.3, 5.3);
-                QPainterPath innerChev;
-                innerChev.moveTo(cx - 2.2, cy - 3.0); innerChev.lineTo(cx + 3.2, cy);
+                if (bpRank < 0) { painter.setPen(QPen(QColor(QStringLiteral("#ffffff")), 1.4)); painter.setBrush(Qt::NoBrush); painter.drawEllipse(QPointF(cx, cy), 6.1, 6.1); }
+                painter.setPen(QPen(bpColor, 1.8)); painter.setBrush(QColor("#24181c")); painter.drawEllipse(QPointF(cx, cy), 5.1, 5.1);
+                QPainterPath innerChev; innerChev.moveTo(cx - 2.2, cy - 3.0); innerChev.lineTo(cx + 3.2, cy);
                 innerChev.lineTo(cx - 2.2, cy + 3.0); innerChev.lineTo(cx - 1.0, cy); innerChev.closeSubpath();
-                painter.setPen(QPen(QColor("#98c379"), 0.8)); painter.setBrush(QColor("#4ec9b0"));
-                painter.drawPath(innerChev);
+                painter.setPen(QPen(QColor("#98c379"), 0.8)); painter.setBrush(QColor("#4ec9b0")); painter.drawPath(innerChev);
                 painter.fillRect(QRect(gutterW - 3, top, 2, rowH), QColor("#4ec9b0"));
             }
 
             // 2. Right Line-Number Lane (x = 22..gutterW-8): Right-aligned digits with hover emphasis.
-            QFont rowFont = baseGutterFont;
-            rowFont.setBold(isHovered || lineOneBased == m_executionLine);
-            painter.setFont(rowFont);
-
-            const QString number = QString::number(lineOneBased);
-            const QColor numColor = (lineOneBased == m_executionLine) ? QColor("#4ec9b0")
-                                  : isHovered ? QColor("#61afef")
-                                  : m_breakpoints.contains(lineOneBased) ? QColor("#e06c75")
-                                  : QColor("#6b7280");
+            QFont rowFont = baseGutterFont; rowFont.setBold(isHovered || lineOneBased == m_executionLine); painter.setFont(rowFont);
+            const QColor numColor = (lineOneBased == m_executionLine) ? QColor("#4ec9b0") : isHovered ? QColor("#61afef") : m_breakpoints.contains(lineOneBased) ? bpColor : QColor("#6b7280");
             painter.setPen(numColor);
             const int numLeft = iconLaneW + 2, numWidth = qMax(12, gutterW - numLeft - 8);
-            painter.drawText(numLeft, top, numWidth, rowH, Qt::AlignRight | Qt::AlignVCenter, number);
+            painter.drawText(numLeft, top, numWidth, rowH, Qt::AlignRight | Qt::AlignVCenter, QString::number(lineOneBased));
 
             // 3. Right-edge Git diff gutter indicator bar (3px wide along gutter right border).
             const GitLineState gitState = gitLineState(lineOneBased);
-            if (gitState == GitLineState::Added) {
-                // Added lines: emerald green 3px bar (#9ece6a).
-                painter.fillRect(QRect(gutterW - 4, top, 3, rowH), QColor("#9ece6a"));
-            } else if (gitState == GitLineState::Modified) {
-                // Modified lines: cobalt blue 3px bar (#7aa2f7).
-                painter.fillRect(QRect(gutterW - 4, top, 3, rowH), QColor("#7aa2f7"));
-            } else if (gitState == GitLineState::Deleted) {
-                // Deleted hunk marker: crimson triangle indicator (#f7768e).
-                QPainterPath delTri;
-                delTri.moveTo(gutterW - 6, top); delTri.lineTo(gutterW - 1, top + 4); delTri.lineTo(gutterW - 6, top + 8); delTri.closeSubpath();
+            if (gitState == GitLineState::Added) painter.fillRect(QRect(gutterW - 4, top, 3, rowH), QColor("#9ece6a"));
+            else if (gitState == GitLineState::Modified) painter.fillRect(QRect(gutterW - 4, top, 3, rowH), QColor("#7aa2f7"));
+            else if (gitState == GitLineState::Deleted) {
+                QPainterPath delTri; delTri.moveTo(gutterW - 6, top); delTri.lineTo(gutterW - 1, top + 4); delTri.lineTo(gutterW - 6, top + 8); delTri.closeSubpath();
                 painter.fillPath(delTri, QColor("#f7768e"));
             }
         }
-        block = block.next(); top = bottom;
-        bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
+        block = block.next(); top = bottom; bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
     }
 }
-
-/**
- * @brief Determines whether the standard editor context menu may open at pos (suppressing gutter regions).
- * @param pos Coordinate in SourceCodeView widget space.
- */
+/** @brief Determines whether the standard editor context menu may open at pos (suppressing gutter regions). */
 bool SourceCodeView::shouldOpenEditorContextMenuAt(const QPoint& pos) const {
-    if (pos.x() < lineNumberAreaWidth()) return false;
-    return !(m_lineNumberArea && m_lineNumberArea->geometry().contains(pos));
+    return pos.x() >= lineNumberAreaWidth() && !(m_lineNumberArea && m_lineNumberArea->geometry().contains(pos));
 }
-
-/**
- * @brief Suppresses the standard Undo/Redo/Cut/Copy editor menu when right-clicking over the gutter.
- * @param event Context menu event descriptor.
- */
+/** @brief Suppresses editor menu over gutter; adds Go-to-Definition and per-rank breakpoint actions on lines. */
 void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
     if (!event) return;
     QPoint editorPos = event->pos();
@@ -492,88 +517,77 @@ void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
         if (rect().contains(mapped)) editorPos = mapped;
     }
     if (!shouldOpenEditorContextMenuAt(editorPos)) { event->accept(); return; }
-    // Append "Go to Definition (F12)" to the standard editor context menu.
+    const int clickedLine = qMax(1, cursorForPosition(editorPos).blockNumber() + 1);
     QMenu* menu = createStandardContextMenu();
     menu->addSeparator();
     menu->addAction(QStringLiteral("Go to Definition (F12)"), this, &SourceCodeView::triggerGoToDefinition);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Set Breakpoint (All Ranks)"), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, -1); });
+    menu->addAction(QStringLiteral("Set Breakpoint for Active Rank (Rank %1)").arg(m_activeFocusRank), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, m_activeFocusRank); });
+    menu->addAction(QStringLiteral("Set Breakpoint for Rank..."), this, [this, clickedLine]() {
+        bool ok = false; const int r = QInputDialog::getInt(this, QStringLiteral("Breakpoint Rank Filter"), QStringLiteral("Target MPI Rank (0+):"), m_activeFocusRank, 0, 4095, 1, &ok);
+        if (ok) setRankBreakpoint(clickedLine, r);
+    });
     menu->exec(event->globalPos()); delete menu;
 }
-
 /** @brief Commits or rolls back tentative breakpoint state after the anchored breakpoint popover closes. */
-void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet,
-                                                   bool accepted, bool enabledChecked,
-                                                   const QString& condition, const QString& suspendScope) {
+void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet, bool accepted,
+                                                   bool enabledChecked, const QString& condition, const QString& suspendScope) {
     if (lineOneBased <= 0) return;
-    // Remove breakpoint when newly canceled (!accepted && !wasPreviouslySet) or explicitly disabled/removed.
     if ((!accepted && !wasPreviouslySet) || (accepted && !enabledChecked)) {
         if (m_breakpoints.contains(lineOneBased)) {
-            m_breakpoints.remove(lineOneBased); m_breakpointSuspendScopes.remove(lineOneBased);
+            const int prevRank = breakpointRankFilterForLine(lineOneBased);
+            m_breakpoints.remove(lineOneBased); m_breakpointSuspendScopes.remove(lineOneBased); m_breakpointInfo.remove(lineOneBased);
             highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
+            emit rankBreakpointChanged(m_currentFilePath, lineOneBased, false, prevRank, QString());
             emit breakpointToggled(m_currentFilePath, lineOneBased, false, QString());
         }
         return;
     }
     if (!accepted) return;
-    // Persist updated predicate expression and rank suspension scope on the active breakpoint.
-    const QString cleanCondition = condition.trimmed();
     const QString cleanScope = suspendScope.trimmed().isEmpty() ? QStringLiteral("All") : suspendScope.trimmed();
-    m_breakpoints.insert(lineOneBased, cleanCondition);
-    m_breakpointSuspendScopes.insert(lineOneBased, cleanScope);
-    highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
-    emit breakpointToggled(m_currentFilePath, lineOneBased, true, cleanCondition);
+    int resolvedRank = -1;
+    if (cleanScope.compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) resolvedRank = qMax(0, m_activeFocusRank);
+    else if (cleanScope.startsWith(QStringLiteral("Rank "), Qt::CaseInsensitive)) {
+        bool ok = false; const int parsed = cleanScope.mid(5).trimmed().toInt(&ok);
+        resolvedRank = ok ? qMax(0, parsed) : qMax(0, m_activeFocusRank);
+    }
+    setRankBreakpoint(lineOneBased, resolvedRank, condition.trimmed());
 }
-
 /** @brief Handles gutter mouse clicks: left-click toggles breakpoint, right-click opens anchored popover. */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     if (!event || (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)) return;
-    event->accept();
-    const int y = event->pos().y();
-    QTextBlock block = firstVisibleBlock();
-    int blockNumber = block.blockNumber();
-    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
+    event->accept(); const int y = event->pos().y(); QTextBlock block = firstVisibleBlock();
+    int blockNumber = block.blockNumber(), top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
-    // Scan visible blocks to match the clicked vertical gutter coordinate.
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
             const int lineNum = blockNumber + 1;
             if (event->button() == Qt::RightButton) {
-                event->accept();
                 const bool wasPreviouslySet = hasBreakpoint(lineNum);
-                // Tentatively display the breakpoint marker above the callout caret while configuring.
                 if (!wasPreviouslySet) toggleBreakpoint(lineNum);
-                const QPoint iconGlobalPos = m_lineNumberArea->mapToGlobal(
-                    QPoint(gutterIconLaneWidth() / 2, top + (qMax(14, bottom - top) / 2) + 5));
-                // Configure and anchor the callout popover directly beneath the breakpoint circle.
+                const QPoint iconGlobalPos = m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, top + (qMax(14, bottom - top) / 2) + 5));
                 ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
                 dlg.setTargetLineContext(lineNum, block.text().trimmed());
                 dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
                 dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
                 dlg.positionNearAnchor(iconGlobalPos);
                 const bool accepted = (dlg.exec() == QDialog::Accepted);
-                handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted,
-                                              dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(),
-                                              dlg.getCondition(), dlg.suspendScope());
-            } else {
-                event->accept(); toggleBreakpoint(lineNum);
-            }
+                handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted, dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(), dlg.getCondition(), dlg.suspendScope());
+            } else { toggleBreakpoint(lineNum); }
             m_lineNumberArea->update(); break;
         }
-        block = block.next(); top = bottom;
-        bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
+        block = block.next(); top = bottom; bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
     }
 }
-
 /** @brief Resolves the 1-based line under the mouse cursor inside LineNumberArea for live hover preview. */
 void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
-    const int y = event->pos().y();
-    QTextBlock block = firstVisibleBlock();
+    const int y = event->pos().y(); QTextBlock block = firstVisibleBlock();
     int blockNumber = block.blockNumber(), hoveredLine = -1;
-    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
-    int bottom = top + qRound(blockBoundingRect(block).height());
+    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top()), bottom = top + qRound(blockBoundingRect(block).height());
     while (block.isValid() && top <= m_lineNumberArea->height()) {
         if (block.isVisible() && y >= top && y < bottom) { hoveredLine = blockNumber + 1; break; }
-        block = block.next(); top = bottom;
-        bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
+        block = block.next(); top = bottom; bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
     }
     setHoveredGutterLine(hoveredLine);
 }
@@ -581,13 +595,16 @@ void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
 /** @brief Resets hovered gutter line state when cursor leaves LineNumberArea. */
 void SourceCodeView::lineNumberAreaLeaveEvent(QEvent *event) { Q_UNUSED(event); setHoveredGutterLine(-1); }
 
+/** @brief Updates the gutter execution PC marker without moving cursor, scroll, or active tab. */
+void SourceCodeView::setExecutionLineOnly(int lineOneBased) {
+    m_executionLine = (lineOneBased > 0) ? lineOneBased : -1;
+    highlightCurrentLine();
+    if (m_lineNumberArea) m_lineNumberArea->update();
+}
+
 /** @brief Highlights a 1-based line as the active debugger execution line (or clears if <= 0). */
 void SourceCodeView::highlightExecutionLine(int lineOneBased) {
-    if (lineOneBased <= 0) {
-        m_executionLine = -1; highlightCurrentLine();
-        if (m_lineNumberArea) m_lineNumberArea->update();
-        return;
-    }
+    if (lineOneBased <= 0) { setExecutionLineOnly(-1); return; }
     m_executionLine = lineOneBased;
     QTextBlock block = document()->findBlockByLineNumber(lineOneBased - 1);
     if (block.isValid()) { setTextCursor(QTextCursor(block)); ensureCursorVisible(); centerCursor(); }
@@ -873,13 +890,9 @@ void SourceCodeView::refreshGitDiffGutter() {
     QThreadPool::globalInstance()->start([self, seq, filePath, bufferText, dirty]() {
         const QString diff = computeUnifiedGitDiffForBuffer(filePath, bufferText, dirty);
         const auto states = diff.isEmpty() ? QHash<int, GitLineState>{} : parseUnifiedGitDiff(diff);
-        if (!self) return;
-        QMetaObject::invokeMethod(self, [self, seq, states]() {
-            if (self && self->m_gitDiffSeq.load() == seq) self->setGitLineStates(states);
-        }, Qt::QueuedConnection);
+        if (self) QMetaObject::invokeMethod(self, [self, seq, states]() { if (self && self->m_gitDiffSeq.load() == seq) self->setGitLineStates(states); }, Qt::QueuedConnection);
     });
 }
-
 /**
  * @brief Renames all AST references to the symbol under the cursor (Shift+F6) via clangd `WorkspaceEdit`.
  */
@@ -894,7 +907,6 @@ bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
     if (updated == toPlainText()) return false;
     setPlainText(updated); document()->setModified(true); return true;
 }
-
 /**
  * @brief Handles key press events for non-blocking LSP autocomplete navigation, F12 Go-to-Definition, and invocation.
  */
@@ -908,16 +920,13 @@ void SourceCodeView::keyPressEvent(QKeyEvent *event) {
         if (event->key() == Qt::Key_Escape) { m_completionPopup->hide(); event->accept(); return; }
     }
     if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Space) {
-        QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
-        event->accept(); return;
+        QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1); event->accept(); return;
     }
     QPlainTextEdit::keyPressEvent(event); const QString txt = event->text();
     // Trigger immediate async completion on member access punctuation and debounce identifier filtering (75ms).
     if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":")) {
         QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1);
-    } else if (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() && (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_'))) {
-        if (m_completionTimer) m_completionTimer->start(75);
-    }
+    } else if (m_completionPopup && m_completionPopup->isVisible() && !txt.isEmpty() && (txt.at(0).isLetterOrNumber() || txt.at(0) == QLatin1Char('_')) && m_completionTimer) m_completionTimer->start(75);
 }
 
 }  // namespace gridlock::ui

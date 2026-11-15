@@ -148,15 +148,11 @@ void MainWindow::rebuildDynamicSourceLineMap() {
     }
 
     // Apply baseline fallback line numbers if specific patterns were not matched.
-    if (mainLine == -1) mainLine = 12;
-    if (initLine == -1) initLine = 13;
-    if (structLine == -1) structLine = 15;
-    if (forLoopLine == -1) forLoopLine = 16;
-    if (dataIdLine == -1) dataIdLine = 17;
-    if (coordsLine == -1) coordsLine = 19;
-    if (printfLine == -1) printfLine = 23;
-    if (finalizeLine == -1) finalizeLine = 24;
-    if (returnLine == -1) returnLine = 25;
+    for (auto [var, def] : std::initializer_list<std::pair<int*, int>>{
+             {&mainLine, 12}, {&initLine, 13}, {&structLine, 15}, {&forLoopLine, 16}, {&dataIdLine, 17},
+             {&coordsLine, 19}, {&printfLine, 23}, {&finalizeLine, 24}, {&returnLine, 25}}) {
+      if (*var == -1) *var = def;
+    }
 
     // Populate forward (line -> address) and reverse (address -> line) maps for preview sym.main.
     m_dynamicLineToAddress = {
@@ -252,28 +248,32 @@ void MainWindow::startTargetWorkflow() {
         const QString binPath = activeTargetBinaryPath();
         if (binPath.isEmpty() || !QFileInfo::exists(binPath)) return;
 
-        const int rankCount = m_rankCountSpin
-                                  ? std::clamp(m_rankCountSpin->value(), 1, 256)
-                                  : std::max(1, gridlock::core::ConfigManager::instance().getDefaultRanks());
+        const int rankCount = m_rankCountSpin ? std::clamp(m_rankCountSpin->value(), 1, 256) : std::max(1, gridlock::core::ConfigManager::instance().getDefaultRanks());
         const QString mpiArgs = gridlock::core::ConfigManager::instance().getMpiArgs();
-        const int preserveRank = (m_serverRackView && m_serverRackView->selectedRank() >= 0)
-                                     ? std::clamp(m_serverRackView->selectedRank(), 0, rankCount - 1)
-                                     : 0;
-
-        // Synchronize all active editor and workspace breakpoints (including conditions and rank filters).
+        const int preserveRank = (m_serverRackView && m_serverRackView->selectedRank() >= 0) ? std::clamp(m_serverRackView->selectedRank(), 0, rankCount - 1) : 0;
+        // Synchronize all active editor tabs and workspace breakpoints (including conditions and rank filters).
         m_coordinator->clearBreakpoints();
         const QString srcPath = activeTargetSourcePath();
-        if (SourceCodeView* srcView = sourceCodeView()) {
-            srcView->highlightExecutionLine(-1);
-            for (int bpLine : srcView->breakpoints()) {
-                const int rankFilter = (srcView->breakpointSuspendScope(bpLine).compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) ? preserveRank : -1;
-                m_coordinator->setBreakpoint(srcPath, bpLine, srcView->breakpointCondition(bpLine), rankFilter);
+        QSet<QString> syncedFiles;
+        const auto syncOpenView = [&](SourceCodeView* sv) {
+            if (!sv) return;
+            const QString viewPath = sv->currentFile().isEmpty() ? srcPath : QFileInfo(sv->currentFile()).absoluteFilePath();
+            sv->highlightExecutionLine(-1);
+            syncedFiles.insert(viewPath); syncedFiles.insert(QFileInfo(viewPath).canonicalFilePath());
+            for (int bpLine : sv->breakpoints()) {
+                int rf = sv->breakpointRankFilterForLine(bpLine);
+                if (rf < 0 && sv->breakpointSuspendScope(bpLine).compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) rf = preserveRank;
+                m_coordinator->setBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
                 const uint64_t a = sourceLineToAddress(bpLine);
                 if (m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) m_disassemblyView->toggleBookmark(a);
             }
-        }
+        };
+        if (m_editorTabManager) { for (SourceCodeView* sv : m_editorTabManager->openViews()) syncOpenView(sv); } else { syncOpenView(sourceCodeView()); }
         for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {
-            if (it.key() != srcPath && QFileInfo::exists(it.key())) for (int bpLine : *it) m_coordinator->setBreakpoint(it.key(), bpLine);
+            const QString absKey = QFileInfo(it.key()).absoluteFilePath();
+            if (syncedFiles.contains(absKey) || !QFileInfo::exists(it.key())) continue;
+            const auto metaMap = m_breakpointRankMeta.value(absKey);
+            for (int bpLine : *it) { const auto bm = metaMap.value(bpLine); m_coordinator->setBreakpoint(it.key(), bpLine, bm.condition, bm.rankFilter); }
         }
 
         // Reset rank telemetry rows to RUNNING prior to spawning child processes; live signals drive all stops.

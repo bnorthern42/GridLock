@@ -192,30 +192,24 @@ void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(disasmView != nullptr && memView != nullptr && bottomTabs != nullptr && refManual != nullptr);
-
     // Part 1: Seek in Memory View Switches Tab & Updates Base Address + Bytes.
     bottomTabs->setCurrentIndex(0); QApplication::processEvents();
     QVERIFY(bottomTabs->currentWidget() != memView);
-
     // Trigger context menu action "Seek in Memory View" at loop header instruction 0x00401149ULL.
     QVERIFY2(disasmView->triggerContextAction(0x00401149ULL, QStringLiteral("Seek in Memory View")), "Seek in Memory View must succeed");
     QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), memView); QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
-
     // Verify MemView hex dump contains the instruction bytes: 83 7d fc 02
     auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
     QVERIFY(dumpEdit != nullptr);
     QVERIFY2(dumpEdit->toPlainText().contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive), qPrintable(dumpEdit->toPlainText()));
-
     // Verify seeking to .rodata string address 0x00402010ULL updates MemView base address.
     mainWindow.seekToAddressOrExpression(QStringLiteral("0x00402010")); QApplication::processEvents();
     QCOMPARE(memView->currentBaseAddress(), 0x00402010ULL);
-
     // Part 2: Looking Up "mov" (F1 on mov rbp, rsp) Never Shows MPI Reference.
     QVERIFY2(disasmView->triggerContextAction(0x00401125ULL, QStringLiteral("Lookup in Reference Manual (F1)")), "Lookup (F1) must succeed");
     QApplication::processEvents();
     QCOMPARE(bottomTabs->currentWidget(), refManual);
-
     // Verify displayed documentation is for MOV and NEVER falls back to MPI_Init.
     auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
     QVERIFY(docBrowser != nullptr);
@@ -453,12 +447,10 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
  */
 void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState() {
     gridlock::ui::SourceCodeView srcView; QString sampleCode;
-    for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
+    for (int i = 1; i <= 90; ++i) sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
     srcView.setSourceCode(sampleCode); srcView.resize(720, 560); srcView.show(); QApplication::processEvents();
-
     // 1. Dedicated Two-Lane Gutter Width (>= 48px) & Non-Overlapping Icon Lane (>= 18px).
     QVERIFY(srcView.lineNumberAreaWidth() >= 48 && srcView.gutterIconLaneWidth() >= 18);
-
     // 2. Distinct Gutter Marker States (None, Breakpoint, ConditionalBreakpoint, ExecutionPc, BreakpointAndExecutionPc).
     QCOMPARE(srcView.gutterMarkerStateForLine(1), QStringLiteral("None"));
     srcView.toggleBreakpoint(15); srcView.setConditionalBreakpoint(16, QStringLiteral("rank == 0"));
@@ -467,8 +459,12 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
     QCOMPARE(srcView.gutterMarkerStateForLine(16), QStringLiteral("ConditionalBreakpoint"));
     srcView.highlightExecutionLine(13); QApplication::processEvents();
     QCOMPARE(srcView.gutterMarkerStateForLine(13), QStringLiteral("ExecutionPc")); QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("Breakpoint"));
-
-    // 3. Antialiased Vector Rendering in Gutter Snapshot with zero overlap against line numbers.
+    // 3. Antialiased Vector Rendering in Gutter Snapshot & Per-Rank Accordion Colors vs. White-Outlined Crimson All-Ranks.
+    srcView.setRankBreakpoint(82, -1); srcView.setRankBreakpoint(85, 1); srcView.setRankBreakpoint(88, 2);
+    QCOMPARE(srcView.breakpointColorForLine(82), QColor(QStringLiteral("#ef4444")));
+    QVERIFY(srcView.breakpointHasWhiteOutlineForLine(82) && srcView.breakpointRankFilterForLine(82) == -1);
+    QCOMPARE(srcView.breakpointRankFilterForLine(85), 1); QCOMPARE(srcView.breakpointRankFilterForLine(88), 2);
+    QVERIFY(srcView.breakpointColorForLine(85) != srcView.breakpointColorForLine(82) && srcView.breakpointColorForLine(88) != srcView.breakpointColorForLine(82) && srcView.breakpointColorForLine(85) != srcView.breakpointColorForLine(88));
     srcView.highlightExecutionLine(15); QApplication::processEvents();
     const QImage img = srcView.grab().toImage(); QVERIFY(!img.isNull());
     const QColor gutterBg(0x16, 0x18, 0x1d);
@@ -477,7 +473,6 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
     for (int y = 0; y < img.height() && !foundBadgePixelInIconLane; ++y) {
         for (int x = 3; x <= 16 && x < img.width(); ++x) {
             const QColor px = img.pixelColor(x, y);
-            // Detect crimson (#e06c75), amber (#e5c07b), or emerald (#4ec9b0) vector badge pixels.
             if (std::abs(px.red() - gutterBg.red()) > 35 || std::abs(px.green() - gutterBg.green()) > 35) { foundBadgePixelInIconLane = true; break; }
         }
     }
@@ -658,6 +653,16 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
     consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click(); // Injection rejection check
     QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));
+
+    // Open secondary file MfemSolver.cpp while paused in nested_stack.cpp, toggle breakpoint at line 82, and verify no tab-hijack occurs.
+    const QString mfemCpp = nestedDir.filePath(QStringLiteral("MfemSolver.cpp"));
+    { QFile mf(mfemCpp); QVERIFY(mf.open(QIODevice::WriteOnly)); for (int ln = 1; ln <= 90; ++ln) mf.write(QStringLiteral("// line %1\nint dummy_%1 = %1;\n").arg(ln).toUtf8()); }
+    mainWindow.loadSourceFile(mfemCpp); QApplication::processEvents();
+    auto* solverView = editorTabs->currentSourceCodeView();
+    QVERIFY2(solverView != nullptr && solverView->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")), "Secondary file tab MfemSolver.cpp must become active");
+    solverView->toggleBreakpoint(82); QTest::qWait(300); QApplication::processEvents();
+    QVERIFY2(editorTabs->currentSourceCodeView() == solverView && editorTabs->currentSourceCodeView()->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")),
+             "Toggling a breakpoint in MfemSolver.cpp while paused must NEVER switch active tab back to stopped file");
 
     // Arm Hardware Data Watchpoint on watchedCounter (Write) and verify continueExecution halts on mutation (10 -> 77).
     QSignalSpy wpHitSpy(mainWindow.coordinator(), SIGNAL(watchpointHit(int,QString,QString,QString)));
