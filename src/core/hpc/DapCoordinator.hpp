@@ -91,6 +91,9 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Requests child variables (`variables`) for @p variablesReference on @p rankId. */
   void requestVariables(int rankId, int variablesReference);
 
+  /** @brief Routes child inspection for @p parentExpression through DAP `variables` via its varRef. */
+  void requestVariableChildren(int rank, const QString& parentExpression) override;
+
   /** @brief Evaluates @p expression in the active stack frame of @p rankId. */
   void evaluateExpression(int rankId, const QString& expression) override;
 
@@ -242,6 +245,7 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, int> m_stackTraceRequests;               ///< Maps `request_seq` to `rankId`.
   QMap<int, int> m_scopesRequests;                   ///< Maps `request_seq` to `rankId`.
   QMap<int, QPair<int, int>> m_variablesRequests;    ///< Maps `request_seq` to `(rankId, varRef)`.
+  QMap<int, QPair<int, QString>> m_varChildRequests; ///< Maps `request_seq` to `(rankId, parentExpr)`.
   QMap<int, int> m_registersRequests;                ///< Maps `request_seq` to `rankId`.
   QMap<int, int> m_memoryRequests;                   ///< Maps `request_seq` to `rankId`.
   QMap<int, int> m_activeFrameIds;                   ///< Maps `rankId` to active stack `frameId`.

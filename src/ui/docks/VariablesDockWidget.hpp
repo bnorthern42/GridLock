@@ -9,7 +9,9 @@
 #pragma once
 
 #include <QComboBox>
+#include <QLineEdit>
 #include <QMap>
+#include <QSortFilterProxyModel>
 #include <QString>
 #include <QTreeView>
 #include <QWidget>
@@ -88,16 +90,18 @@ private slots:
 
 private:
     /**
-     * @brief Constructs layout, scope combo box, and tree view columns.
+     * @brief Constructs layout, scope/search header bar, and sortable tree view columns.
      */
     void setupUi();
 
     ::IBackendCoordinator* m_coordinator{nullptr};   ///< Attached backend coordinator.
-    VariableTreeModel* m_model{nullptr};              ///< Tree model populating variable rows.
-    
+    VariableTreeModel* m_model{nullptr};              ///< Source hierarchical variable model.
+    QSortFilterProxyModel* m_proxyModel{nullptr};     ///< Recursive case-insensitive filter & sort proxy.
+
     QComboBox* m_rankSelector{nullptr};               ///< Dropdown choosing target rank.
-    QTreeView* m_variablesTree{nullptr};              ///< Multi-column hierarchical tree view.
-    
+    QLineEdit* m_searchEdit{nullptr};                 ///< Live search box (`#variableSearchEdit`).
+    QTreeView* m_variablesTree{nullptr};              ///< Multi-column sortable hierarchical tree view.
+
     int m_currentRankId{0};                           ///< Active focused rank ID.
     QMap<int, QString> m_lastRankStates;              ///< Cached prior operational states.
 };

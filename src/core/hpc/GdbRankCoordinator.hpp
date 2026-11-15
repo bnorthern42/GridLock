@@ -130,6 +130,11 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void selectStackFrame(int rank, int threadId, int frameLevel) override;
 
   /**
+   * @brief Queries child fields/elements for composite expression @p parentExpression on @p rank via MI varobjs.
+   */
+  void requestVariableChildren(int rank, const QString& parentExpression) override;
+
+  /**
    * @brief Scrubs @p command via `MiSanitizer` and dispatches CLI/MI input to @p rank (`< 0` = all ranks).
    */
   void sendDebuggerCommand(int rank, const QString& command) override;
@@ -279,6 +284,18 @@ class GdbRankCoordinator : public IBackendCoordinator {
     int rankFilter = -1;                                     ///< Target rank index (`-1` = all ranks).
   };
 
+  /**
+   * @struct PendingVarChildQuery
+   * @brief Tracks an in-flight temporary GDB varobj child listing that unwraps access pseudo-nodes.
+   */
+  struct PendingVarChildQuery {
+    int rankId = 0;            ///< Target MPI rank index.
+    QString parentExpression;  ///< Original expression requested by VariableTreeModel.
+    QString rootVarObj;        ///< Temporary GDB varobj deleted once all children finish listing.
+    int inFlightLists = 0;     ///< Outstanding `-var-list-children` commands (including unwrapped scopes).
+    QVariantList resolved;     ///< Collected real member descriptors (`name`, `value`, `type`, `hasChildren`).
+  };
+
   std::unique_ptr<QProcess> m_mpirunProcess;             ///< Master `mpirun`/`mpiexec` launcher process.
   std::vector<std::unique_ptr<RankProcess>> m_processes; ///< Per-rank GDB frontend slots.
   std::vector<PendingBreakpoint> m_pendingBreakpoints;   ///< Configured breakpoints synced across launches.
@@ -294,6 +311,11 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, int> m_pendingConsoleCmdCount;               ///< Count of in-flight `204` CLI commands per rank.
   QMap<int, QString> m_consoleReplyBuffer;               ///< Buffered `~`/`&` console lines per rank.
   QMap<int, QMap<QString, int>> m_watchpointIds;         ///< `rankId -> (expression -> gdbBkptNum)`.
+  QMap<int, PendingVarChildQuery> m_varChildQueries;     ///< Active composite child queries by query ID.
+  QMap<int, int> m_tokenToVarCreateQuery;                ///< MI token -> query ID for `-var-create`.
+  QMap<int, int> m_tokenToVarListQuery;                  ///< MI token -> query ID for `-var-list-children`.
+  int m_nextVarQueryId = 1;                              ///< Monotonic ID generator for `m_varChildQueries`.
+  int m_nextVarQueryToken = 4000;                        ///< Monotonic MI command token (>= 4000) to avoid watch prefix collisions.
   std::vector<QString> m_watchVariables;                 ///< Ordered list of watched variable expressions.
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
   QString m_lastLaunchCommandSummary;                    ///< Human-readable CWD and launch command summary.

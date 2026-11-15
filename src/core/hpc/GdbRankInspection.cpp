@@ -561,7 +561,112 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
     return true;
   }
 
+  // Route tokenized varobj child expansion (`>= 4000`) for lazy `{...}` struct inspection.
+  static const QRegularExpression varTokRe(QStringLiteral("^(\\d+)\\^(done|error)(.*)$"));
+  if (const auto tm = varTokRe.match(line); tm.hasMatch()) {
+    const int tok = tm.captured(1).toInt();
+    const bool isErr = (tm.captured(2) == QLatin1String("error"));
+    // Step 1: Handle `-var-create` response and either finish immediately or list root children.
+    if (m_tokenToVarCreateQuery.contains(tok)) {
+      const int qId = m_tokenToVarCreateQuery.take(tok);
+      if (!m_varChildQueries.contains(qId)) return true;
+      static const QRegularExpression nameRe(QStringLiteral("\\bname=\"((?:\\\\.|[^\"])*)\""));
+      static const QRegularExpression numRe(QStringLiteral("\\bnumchild=\"(\\d+)\""));
+      const auto nm = nameRe.match(line);
+      // Emit empty child list on evaluation error or missing varobj handle.
+      if (isErr || !nm.hasMatch()) {
+        const auto q = m_varChildQueries.take(qId);
+        emit variableChildrenUpdated(rankId, q.parentExpression, {});
+        return true;
+      }
+      auto& q = m_varChildQueries[qId];
+      q.rootVarObj = unescapeMiValue(nm.captured(1));
+      const int nCh = numRe.match(line).hasMatch() ? numRe.match(line).captured(1).toInt() : 1;
+      // Clean up temporary zero-child varobj before returning empty results.
+      if (nCh <= 0) {
+        const auto doneQ = m_varChildQueries.take(qId);
+        writeCmd(rankId, QStringLiteral("-var-delete \"%1\"\n").arg(doneQ.rootVarObj));
+        emit variableChildrenUpdated(rankId, doneQ.parentExpression, {});
+        return true;
+      }
+      // Dispatch tokenized `-var-list-children` for the newly allocated root varobj.
+      const int listTok = m_nextVarQueryToken++;
+      m_tokenToVarListQuery[listTok] = qId;
+      q.inFlightLists = 1;
+      writeCmd(rankId, QStringLiteral("%1-var-list-children --all-values \"%2\"\n").arg(listTok).arg(q.rootVarObj));
+      return true;
+    }
+    // Step 2: Handle `-var-list-children` responses recursively until all scopes finish.
+    if (m_tokenToVarListQuery.contains(tok)) {
+      const int qId = m_tokenToVarListQuery.take(tok);
+      if (!m_varChildQueries.contains(qId)) return true;
+      auto& q = m_varChildQueries[qId];
+      q.inFlightLists = std::max(0, q.inFlightLists - 1);
+      if (!isErr && line.contains(QLatin1String("children=["))) {
+        const QString body = extractBracketBody(line, QStringLiteral("children=["));
+        const QVector<QString> tuples = extractTopLevelMiTuples(body);
+        static const QRegularExpression nameRe(QStringLiteral("\\bname=\"((?:\\\\.|[^\"])*)\""));
+        static const QRegularExpression expRe(QStringLiteral("\\bexp=\"((?:\\\\.|[^\"])*)\""));
+        static const QRegularExpression numRe(QStringLiteral("\\bnumchild=\"(\\d+)\""));
+        static const QRegularExpression valRe(QStringLiteral("\\bvalue=\"((?:\\\\.|[^\"])*)\""));
+        static const QRegularExpression typeRe(QStringLiteral("\\btype=\"((?:\\\\.|[^\"])*)\""));
+        // Collect member fields while unwrapping GDB's public/private/protected and base subobjects.
+        for (const QString& t : tuples) {
+          const QString childObj = nameRe.match(t).hasMatch() ? unescapeMiValue(nameRe.match(t).captured(1)) : QString();
+          const QString exp = expRe.match(t).hasMatch() ? unescapeMiValue(expRe.match(t).captured(1)) : QString();
+          const int numCh = numRe.match(t).hasMatch() ? numRe.match(t).captured(1).toInt() : 0;
+          QString val = valRe.match(t).hasMatch() ? unescapeMiValue(valRe.match(t).captured(1)) : QString();
+          const QString typeStr = typeRe.match(t).hasMatch() ? unescapeMiValue(typeRe.match(t).captured(1)) : QString();
+          // Expand C++ access visibility nodes and base-class pseudo-nodes transparently.
+          const bool isAccess = (exp == QLatin1String("public") || exp == QLatin1String("private") || exp == QLatin1String("protected"));
+          const bool isBase = (!typeStr.isEmpty() && exp == typeStr && numCh > 0);
+          if ((isAccess || isBase) && !childObj.isEmpty()) {
+            const int subTok = m_nextVarQueryToken++;
+            m_tokenToVarListQuery[subTok] = qId;
+            q.inFlightLists++;
+            writeCmd(rankId, QStringLiteral("%1-var-list-children --all-values \"%2\"\n").arg(subTok).arg(childObj));
+          } else if (!exp.isEmpty()) {
+            // Normalize empty composite summaries to `{...}` so views retain expand indicators.
+            if (val.isEmpty() && numCh > 0) val = QStringLiteral("{...}");
+            const bool hasCh = (numCh > 0) || val.trimmed() == QLatin1String("{...}") || val.trimmed().startsWith(QLatin1Char('{'));
+            q.resolved.append(QVariantMap{{QStringLiteral("name"), exp}, {QStringLiteral("value"), val},
+                                          {QStringLiteral("type"), typeStr}, {QStringLiteral("hasChildren"), hasCh},
+                                          {QStringLiteral("variablesReference"), 0}});
+          }
+        }
+      }
+      // Once every unwrapped sub-query completes, delete the temporary varobj and emit results.
+      if (q.inFlightLists <= 0) {
+        const auto doneQ = m_varChildQueries.take(qId);
+        if (!doneQ.rootVarObj.isEmpty()) writeCmd(rankId, QStringLiteral("-var-delete \"%1\"\n").arg(doneQ.rootVarObj));
+        emit variableChildrenUpdated(rankId, doneQ.parentExpression, doneQ.resolved);
+      }
+      return true;
+    }
+  }
+
   return false;
+}
+
+/**
+ * @brief Creates a temporary GDB varobj for @p parentExpression and lists unwrapped child fields on @p rank.
+ */
+void GdbRankCoordinator::requestVariableChildren(int rank, const QString& parentExpression) {
+  const QString expr = parentExpression.trimmed();
+  if (rank < 0 || rank >= static_cast<int>(m_processes.size()) || !m_processes[rank] ||
+      m_processes[rank]->state.currentState != QLatin1String("stopped") ||
+      expr.isEmpty() || !validateSafeDebuggerInput(expr)) {
+    emit variableChildrenUpdated(rank, parentExpression, {});
+    return;
+  }
+  QString escaped = expr;
+  escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+  escaped.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+  const int qId = m_nextVarQueryId++;
+  const int tok = m_nextVarQueryToken++;
+  m_varChildQueries[qId] = PendingVarChildQuery{rank, expr, QString(), 0, {}};
+  m_tokenToVarCreateQuery[tok] = qId;
+  writeCmd(rank, QStringLiteral("%1-var-create - * \"%2\"\n").arg(tok).arg(escaped));
 }
 
 /**

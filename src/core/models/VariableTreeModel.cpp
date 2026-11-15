@@ -33,6 +33,9 @@ VariableTreeModel::VariableTreeModel(IBackendCoordinator* coordinator, QObject* 
     // Initialize the invisible root container node.
     m_rootNode = std::make_unique<VariableNode>();
     if (m_coordinator) {
+        // Subscribe to backend-agnostic lazy struct/container child expansion updates.
+        connect(m_coordinator, &IBackendCoordinator::variableChildrenUpdated,
+                this, &VariableTreeModel::onVariableChildrenUpdated);
         // Connect GDB/MI raw output stream when backed by GdbRankCoordinator.
         if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
             connect(gdb, &gridlock::GdbRankCoordinator::gdbOutputReceived,
@@ -116,11 +119,18 @@ bool VariableTreeModel::hasChildren(const QModelIndex& parent) const {
     if (!node) {
         return false;
     }
-    // Report true if the backend indicated child fields exist even before lazy fetch completes.
-    if (node->numChildren > 0) {
+    if (node == m_rootNode.get()) {
+        return !node->children.empty();
+    }
+    if (!node->children.empty()) {
         return true;
     }
-    return !node->children.empty();
+    // Collapse empty leaf indicators once an expansion attempt confirmed zero children.
+    if (node->childrenLoaded) {
+        return false;
+    }
+    // Report true for {...} structs, classes, and containers before lazy child resolution.
+    return isCompositeVariable(node);
 }
 
 /**
@@ -187,31 +197,61 @@ QVariant VariableTreeModel::headerData(int section, Qt::Orientation orientation,
  * @brief Determines whether expanding parent requires an asynchronous backend child query.
  */
 bool VariableTreeModel::canFetchMore(const QModelIndex& parent) const {
-    // Allow lazy child expansion when the backend reported children that are not yet loaded.
+    if (!parent.isValid()) {
+        return false;
+    }
+    // Allow lazy child expansion for composite nodes not yet fetched or in flight.
     VariableNode* node = getNode(parent);
-    return node && (node->numChildren > 0 || node->variablesReference > 0) && !node->childrenLoaded;
+    return node && node != m_rootNode.get() && isCompositeVariable(node) && !node->childrenLoaded &&
+           !m_pendingChildFetches.contains(node);
 }
 
 /**
- * @brief Issues an asynchronous `-var-list-children` or DAP `variables` request for parent.
+ * @brief Issues an asynchronous varobj, DAP `variables`, or generic expression child query.
  */
 void VariableTreeModel::fetchMore(const QModelIndex& parent) {
     if (!parent.isValid()) {
         return;
     }
     VariableNode* node = getNode(parent);
-    if (node && (node->numChildren > 0 || node->variablesReference > 0) && !node->childrenLoaded) {
-        // Mark childrenLoaded immediately to prevent duplicate asynchronous fetch requests.
-        node->childrenLoaded = true;
+    if (!node || node == m_rootNode.get() || !isCompositeVariable(node) || node->childrenLoaded ||
+        m_pendingChildFetches.contains(node)) {
+        return;
+    }
+    // Record in-flight state to prevent duplicate fetches without prematurely setting childrenLoaded.
+    m_pendingChildFetches.insert(node);
+    if (!node->varobjName.isEmpty()) {
         if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
             gdb->writeCmd(m_currentRankId,
                           QString("-var-list-children --all-values %1\n").arg(node->varobjName));
-        } else if (auto* dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
-            if (node->variablesReference > 0) {
-                dap->requestVariables(m_currentRankId, node->variablesReference);
-            }
+            return;
         }
     }
+    if (auto* dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+        if (node->variablesReference > 0) {
+            dap->requestVariables(m_currentRankId, node->variablesReference);
+            return;
+        }
+    }
+    if (m_coordinator && m_currentRankId >= 0) {
+        const QString expr = buildExpressionPath(node);
+        if (!expr.isEmpty()) {
+            m_coordinator->requestVariableChildren(m_currentRankId, expr);
+            return;
+        }
+    }
+    m_pendingChildFetches.remove(node);
+    node->childrenLoaded = true;
+}
+
+/**
+ * @brief Returns the C/C++ expression path corresponding to @p index.
+ */
+QString VariableTreeModel::expressionPath(const QModelIndex& index) const {
+    if (!index.isValid()) {
+        return QString();
+    }
+    return buildExpressionPath(getNode(index));
 }
 
 /**
@@ -237,7 +277,7 @@ void VariableTreeModel::loadLocals(int rankId) {
 }
 
 /**
- * @brief Populates top-level or nested child VariableNodes from a DAP `variables` response.
+ * @brief Populates top-level or nested child VariableNodes from a structured locals/DAP response.
  */
 void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJsonArray& variables) {
     // Ignore updates belonging to non-focused MPI ranks.
@@ -259,40 +299,28 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
         targetParent = findNodeByRef(m_rootNode.get());
     }
 
-    // Reconstruct the QModelIndex for an internal VariableNode so beginInsertRows notifies views accurately.
-    std::function<QModelIndex(VariableNode*)> getIndex = [&](VariableNode* n) -> QModelIndex {
-        if (n == m_rootNode.get() || !n) return QModelIndex();
-        if (n->parent == m_rootNode.get()) {
-            for (size_t i = 0; i < m_rootNode->children.size(); ++i) {
-                if (m_rootNode->children[i].get() == n) return createIndex(static_cast<int>(i), 0, n);
-            }
-        } else {
-            const QModelIndex pIdx = getIndex(n->parent);
-            if (!pIdx.isValid()) return QModelIndex();
-            for (size_t i = 0; i < n->parent->children.size(); ++i) {
-                if (n->parent->children[i].get() == n) return createIndex(static_cast<int>(i), 0, n);
-            }
-        }
-        return QModelIndex();
-    };
-
     QModelIndex parentIdx;
     if (!targetParent) {
-        // Top-level "Locals" scope update: reset the entire root collection.
+        // Top-level "Locals" scope update: snapshot old scalars and reset the root tree.
+        storePreviousValues(m_rootNode.get());
         beginResetModel();
+        m_pendingChildFetches.clear();
+        m_varobjToNode.clear();
+        m_createdVarobjs.clear();
         m_rootNode->children.clear();
         m_rootNode->numChildren = 0;
         targetParent = m_rootNode.get();
     } else {
         // Nested struct/array expansion: insert rows under the existing targetParent index.
-        if (targetParent->childrenLoaded) return;
-        parentIdx = getIndex(targetParent);
+        m_pendingChildFetches.remove(targetParent);
+        if (targetParent->childrenLoaded && !targetParent->children.empty()) return;
+        parentIdx = getIndexForNode(targetParent);
         if (!variables.isEmpty()) {
             beginInsertRows(parentIdx, 0, variables.size() - 1);
         }
     }
 
-    // Materialize a VariableNode for each JSON entry returned in the DAP `variables` array.
+    // Materialize a VariableNode for each JSON entry returned in the locals/variables array.
     for (const QJsonValue val : variables) {
         const QJsonObject var = val.toObject();
         const QString name = var["name"].toString();
@@ -301,8 +329,8 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
         const int varRef = var["variablesReference"].toInt(0);
 
         auto node = std::make_unique<VariableNode>(name, type, value, "", 0, varRef, targetParent);
-        if (varRef > 0) {
-            // Mark non-zero variablesReference nodes as expandable in QTreeView.
+        // Mark non-zero references and {...} aggregates as expandable in QTreeView.
+        if (isCompositeVariable(node.get())) {
             node->numChildren = 1;
         }
         targetParent->children.push_back(std::move(node));
@@ -316,6 +344,49 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
         targetParent->childrenLoaded = true;
         if (!variables.isEmpty()) {
             endInsertRows();
+        }
+    }
+}
+
+/**
+ * @brief Inserts child fields resolved asynchronously by `IBackendCoordinator::requestVariableChildren`.
+ */
+void VariableTreeModel::onVariableChildrenUpdated(int rankId,
+                                                  const QString& parentExpression,
+                                                  const QVariantList& children) {
+    if (m_currentRankId != -1 && rankId != m_currentRankId) return;
+    VariableNode* parentNode = findNodeByExpr(m_rootNode.get(), parentExpression.trimmed());
+    if (!parentNode) return;
+
+    m_pendingChildFetches.remove(parentNode);
+    if (parentNode->childrenLoaded && !parentNode->children.empty()) return;
+
+    const QModelIndex parentIdx = getIndexForNode(parentNode);
+    if (!children.isEmpty()) {
+        beginInsertRows(parentIdx, 0, static_cast<int>(children.size()) - 1);
+        for (const QVariant& entry : children) {
+            const QVariantMap map = entry.toMap();
+            const QString name = map.value(QStringLiteral("name")).toString();
+            const QString value = map.value(QStringLiteral("value")).toString();
+            const QString type = map.value(QStringLiteral("type")).toString();
+            const bool hasCh = map.value(QStringLiteral("hasChildren"), false).toBool();
+            const int varRef = map.value(QStringLiteral("variablesReference"), 0).toInt();
+
+            auto node = std::make_unique<VariableNode>(name, type, value, QString(), 0, varRef, parentNode);
+            if (hasCh || isCompositeVariable(node.get())) {
+                node->numChildren = 1;
+            }
+            parentNode->children.push_back(std::move(node));
+        }
+        parentNode->numChildren = static_cast<int>(parentNode->children.size());
+        parentNode->childrenLoaded = true;
+        endInsertRows();
+    } else {
+        // Confirm zero fields so the view removes any stale expand triangle.
+        parentNode->numChildren = 0;
+        parentNode->childrenLoaded = true;
+        if (parentIdx.isValid()) {
+            emit dataChanged(parentIdx, parentIdx.siblingAtColumn(2));
         }
     }
 }
@@ -353,10 +424,88 @@ void VariableTreeModel::clear() {
         }
     }
     // Reset lookup maps and allocate a fresh empty root node.
+    m_pendingChildFetches.clear();
     m_createdVarobjs.clear();
     m_varobjToNode.clear();
     m_rootNode = std::make_unique<VariableNode>();
     endResetModel();
+}
+
+/**
+ * @brief Reconstructs the QModelIndex locating @p node under its parent chain.
+ */
+QModelIndex VariableTreeModel::getIndexForNode(VariableNode* node) const {
+    if (!node || node == m_rootNode.get() || !node->parent) {
+        return QModelIndex();
+    }
+    for (size_t i = 0; i < node->parent->children.size(); ++i) {
+        if (node->parent->children[i].get() == node) {
+            return createIndex(static_cast<int>(i), 0, node);
+        }
+    }
+    return QModelIndex();
+}
+
+/**
+ * @brief Builds a GDB/C++-evaluable expression path by walking @p node ancestors to root.
+ */
+QString VariableTreeModel::buildExpressionPath(const VariableNode* node) const {
+    if (!node || node == m_rootNode.get()) {
+        return QString();
+    }
+    QList<const VariableNode*> chain;
+    for (const VariableNode* cur = node; cur && cur != m_rootNode.get(); cur = cur->parent) {
+        chain.prepend(cur);
+    }
+    QString expr;
+    for (int i = 0; i < chain.size(); ++i) {
+        const QString seg = chain[i]->name.trimmed();
+        if (seg.isEmpty()) continue;
+        if (i == 0 || expr.isEmpty()) {
+            expr = seg;
+        } else if (seg.startsWith(QLatin1Char('['))) {
+            expr += seg;
+        } else if (seg == QStringLiteral("*") + chain[i - 1]->name.trimmed()) {
+            expr = QStringLiteral("*(") + expr + QLatin1Char(')');
+        } else if (chain[i - 1]->type.trimmed().endsWith(QLatin1Char('*'))) {
+            expr += QStringLiteral("->") + seg;
+        } else {
+            expr += QLatin1Char('.') + seg;
+        }
+    }
+    return expr;
+}
+
+/**
+ * @brief Depth-first search for a node whose C++ expression path equals @p expr.
+ */
+VariableNode* VariableTreeModel::findNodeByExpr(VariableNode* root, const QString& expr) const {
+    if (!root || expr.isEmpty()) {
+        return nullptr;
+    }
+    for (const auto& child : root->children) {
+        if (buildExpressionPath(child.get()) == expr) {
+            return child.get();
+        }
+        if (VariableNode* nested = findNodeByExpr(child.get(), expr)) {
+            return nested;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @brief Returns true when @p node holds a `{...}` aggregate value or backend child count.
+ */
+bool VariableTreeModel::isCompositeVariable(const VariableNode* node) {
+    if (!node) {
+        return false;
+    }
+    if (node->numChildren > 0 || node->variablesReference > 0) {
+        return true;
+    }
+    const QString trimmed = node->value.trimmed();
+    return trimmed == QStringLiteral("{...}") || trimmed.startsWith(QLatin1Char('{'));
 }
 
 /**

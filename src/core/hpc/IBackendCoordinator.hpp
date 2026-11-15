@@ -15,6 +15,7 @@
 #include <QMetaType>
 #include <QObject>
 #include <QString>
+#include <QVariantList>
 #include <QVector>
 
 /**
@@ -213,6 +214,14 @@ class IBackendCoordinator : public QObject {
     Q_UNUSED(expression);
   }
 
+  /**
+   * @brief Queries child fields/elements for composite expression @p parentExpression on @p rank.
+   */
+  virtual void requestVariableChildren(int rank, const QString& parentExpression) {
+    Q_UNUSED(rank);
+    Q_UNUSED(parentExpression);
+  }
+
   /** @brief Returns a human-readable summary of the active session's CWD and launch command. */
   virtual QString lastLaunchCommandSummary() const { return {}; }
 
@@ -237,6 +246,11 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when up to 64 call-stack frames are parsed for @p rank. */
   void stackTraceUpdated(int rank, const QVector<StackFrameEntry>& frames);
+
+  /** @brief Emitted when child entries for @p parentExpression on @p rank are resolved. */
+  void variableChildrenUpdated(int rank,
+                               const QString& parentExpression,
+                               const QVariantList& children);
 
   /** @brief Emitted when OS/OpenMP thread descriptors are parsed for @p rank. */
   void threadsUpdated(int rank, const QVector<ThreadEntry>& threads);

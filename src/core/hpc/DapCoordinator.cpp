@@ -459,6 +459,23 @@ void DapCoordinator::requestVariables(int rankId, int variablesReference) {
 }
 
 /**
+ * @brief Routes composite child queries through DAP `variables` using encoded `dapref:<id>:<expr>` keys.
+ */
+void DapCoordinator::requestVariableChildren(int rank, const QString& parentExpression) {
+  int varRef = 0;
+  if (parentExpression.startsWith(QLatin1String("dapref:"))) {
+    varRef = parentExpression.section(QLatin1Char(':'), 1, 1).toInt();
+  } else {
+    bool ok = false;
+    const int directRef = parentExpression.toInt(&ok);
+    if (ok) varRef = directRef;
+  }
+  if (varRef <= 0) { emit variableChildrenUpdated(rank, parentExpression, {}); return; }
+  m_varChildRequests[m_sequenceNumber] = qMakePair(rank, parentExpression);
+  requestVariables(rank, varRef);
+}
+
+/**
  * @brief Evaluates @p expression in the `"watch"` context of @p rankId's active stack frame.
  */
 void DapCoordinator::evaluateExpression(int rankId, const QString& expression) {
@@ -706,14 +723,16 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         }
       }
     } else if (command == "variables" && message["success"].toBool()) {
-      // Route the returned `variables` array to either Local Variables or CPU Registers.
-      const int seq = message["request_seq"].toInt();
-      if (m_variablesRequests.contains(seq)) {
-        const auto pair = m_variablesRequests.take(seq);
-        emit localsUpdated(pair.first, pair.second, message["body"].toObject()["variables"].toArray());
-      } else if (m_registersRequests.contains(seq)) {
-        emit registersUpdated(m_registersRequests.take(seq), message["body"].toObject()["variables"].toArray());
+      // Route the returned `variables` array to VariableTreeModel children, Locals, or CPU Registers.
+      const int seq = message["request_seq"].toInt(); const QJsonArray vars = message["body"].toObject()["variables"].toArray();
+      if (m_varChildRequests.contains(seq)) {
+        const auto cr = m_varChildRequests.take(seq); QVariantList children;
+        for (const QJsonValue& v : vars) { const QJsonObject o = v.toObject(); const int vr = o["variablesReference"].toInt(0); const QString val = o["value"].toString();
+          children.append(QVariantMap{{"name", o["name"].toString()}, {"value", val}, {"type", o["type"].toString()}, {"hasChildren", vr > 0 || val.trimmed().startsWith('{')}, {"variablesReference", vr}}); }
+        emit variableChildrenUpdated(cr.first, cr.second, children);
       }
+      if (m_variablesRequests.contains(seq)) { const auto pair = m_variablesRequests.take(seq); emit localsUpdated(pair.first, pair.second, vars); }
+      else if (m_registersRequests.contains(seq)) emit registersUpdated(m_registersRequests.take(seq), vars);
     } else if (command == "readMemory" && message["success"].toBool()) {
       // Decode base64-encoded memory bytes from the DAP `readMemory` response for `MemView`.
       const int seq = message["request_seq"].toInt();

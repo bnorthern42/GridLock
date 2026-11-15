@@ -549,10 +549,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     emit mainWindow.coordinator()->stackTraceUpdated(1, {StackFrameEntry{0, 0, 0x401180ULL, QStringLiteral("MPI_Barrier"), mainWindow.activeTargetSourcePath(), bpLine1}});
     QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 2) && waitTable->item(0, 2)->text().contains(QStringLiteral("MPI_Bcast")) && waitTable->item(1, 2) && waitTable->item(1, 2)->text().contains(QStringLiteral("MPI_Barrier")) && dlList->count() >= 1 && !dlBadge->text().contains(QStringLiteral("NO CYCLE")), 3000);
     // Helper reading register value cell by lowercase mnemonic from RegisterView's QTableWidget.
-    auto readReg = [&](const QString& name) {
-        for (int r = 0; r < regTable->rowCount(); ++r) if (regTable->item(r, 0) && regTable->item(r, 0)->text() == name && regTable->item(r, 1)) return regTable->item(r, 1)->text();
-        return QString();
-    };
+    auto readReg = [&](const QString& n) { for (int r = 0; r < regTable->rowCount(); ++r) if (regTable->item(r, 0) && regTable->item(r, 0)->text() == n && regTable->item(r, 1)) return regTable->item(r, 1)->text(); return QString(); };
     QTRY_VERIFY_WITH_TIMEOUT(!readReg(QStringLiteral("rsp")).isEmpty() && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe480"), 5000);
     bool ripOk = false; const uint64_t liveRip1 = readReg(QStringLiteral("rip")).section(QLatin1Char(' '), 0, 0).mid(2).toULongLong(&ripOk, 16);
     QVERIFY(ripOk && liveRip1 != 0ULL && disasmView->currentAddress() == liveRip1);
@@ -562,17 +559,14 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     mainWindow.onRankSelected(1); QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000); mainWindow.onRankSelected(0);
     // Read Rank 0 live stack at $rsp and run DIFF RANKS between Rank 0 and Rank 1 to detect diverging bytes.
     auto* addrEdit = memView->findChild<QLineEdit*>(QStringLiteral("cutterMemAddressEdit")); QPushButton *readBtn = nullptr, *diffBtn = nullptr;
-    for (auto* b : memView->findChildren<QPushButton*>()) {
-        if (b->text().compare(QStringLiteral("Read"), Qt::CaseInsensitive) == 0) readBtn = b;
-        if (b->text().contains(QStringLiteral("Diff"), Qt::CaseInsensitive)) diffBtn = b;
-    }
+    for (auto* b : memView->findChildren<QPushButton*>()) { if (b->text().compare(QStringLiteral("Read"), Qt::CaseInsensitive) == 0) readBtn = b; if (b->text().contains(QStringLiteral("Diff"), Qt::CaseInsensitive)) diffBtn = b; }
     const auto memSpins = memView->findChildren<QSpinBox*>(); QVERIFY(addrEdit && readBtn && diffBtn && memSpins.size() >= 3);
     addrEdit->setText(QStringLiteral("$rsp")); readBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(memView->currentBaseAddress() > 0x1000000ULL, 5000);
     memSpins[1]->setValue(0); memSpins[2]->setValue(1); diffBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
     mainWindow.stopTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
     QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0); QCOMPARE(static_cast<qint64>(mainWindow.coordinator()->getPidForRank(0)), 0LL);
-    // 6. Verify CallStackDockWidget, live GdbConsoleWidget REPL, and Hardware Data Watchpoint trigger.
+    // 6. Verify CallStackDockWidget, live GdbConsoleWidget REPL, VariablesDockWidget expansion/filter/sort, and watchpoint trigger.
     auto* callStackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("CallStackDock")); QVERIFY2(callStackDock != nullptr, "MainWindow must expose docked CallStackDock");
     auto* threadCombo = callStackDock->findChild<QComboBox*>(QStringLiteral("threadSelectorCombo")); auto* callStackTable = callStackDock->findChild<QTableWidget*>(QStringLiteral("callStackTable"));
     auto* varsDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock")); auto* gdbConsole = mainWindow.findChild<gridlock::ui::GdbConsoleWidget*>();
@@ -580,13 +574,12 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     auto* consoleExecBtn = gdbConsole ? gdbConsole->findChild<QPushButton*>(QStringLiteral("gdbConsoleExecuteBtn")) : nullptr;
     auto* consoleViewport = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
     QVERIFY(threadCombo && callStackTable && varsDock && gdbConsole && consoleCmdEdit && consoleExecBtn && consoleViewport);
-
     QTemporaryDir nestedDir; QVERIFY(nestedDir.isValid());
     const QString nestedCpp = nestedDir.filePath(QStringLiteral("nested_stack.cpp"));
     { QFile nf(nestedCpp); QVERIFY(nf.open(QIODevice::WriteOnly));
-      nf.write("#include <mpi.h>\nint watchedCounter = 10;\n"
+      nf.write("#include <mpi.h>\nint watchedCounter = 10;\nstruct MeshCfg { int dims = 3; };\nstruct InputConfig { MeshCfg mesh; double tol = 1e-6; };\n"
                "__attribute__((noinline)) int innerCallee(int innerVal) {\n    int innerLocal = innerVal + 7;\n    return innerLocal;\n}\n"
-               "__attribute__((noinline)) int outerCaller(int outerSecret) {\n    int outerLocal = outerSecret + 1;\n    int res = innerCallee(outerLocal);\n    return res;\n}\n"
+               "__attribute__((noinline)) int outerCaller(int outerSecret) {\n    InputConfig Iconfig{};\n    int outerLocal = outerSecret + (Iconfig.mesh.dims > 0 ? 1 : 0) + (Iconfig.tol > 0.0 ? 0 : 1);\n    int res = innerCallee(outerLocal);\n    return res;\n}\n"
                "int main(int argc, char** argv) {\n    MPI_Init(&argc, &argv);\n    int total = outerCaller(4242);\n    watchedCounter = 77;\n    MPI_Finalize();\n    return (total + watchedCounter) == 0 ? 1 : 0;\n}\n"); }
     rankSpin->setValue(1); targetCombo->insertItem(0, QStringLiteral("nested_stack"), nestedCpp);
     QVERIFY(mainWindow.selectTargetByName(QStringLiteral("nested_stack")) && mainWindow.ensureTargetBinaryCompiled());
@@ -594,27 +587,32 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     const int innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal"));
     const int outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
     QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine); nestedSrcView->toggleBreakpoint(innerBpLine);
-
     mainWindow.startTargetWorkflow();
     QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
     QTRY_VERIFY_WITH_TIMEOUT(callStackTable->rowCount() >= 3 && threadCombo->count() >= 1, 5000);
-    auto verifyFrameRow = [&](int row, const QString& expectedFunc) {
-        const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString();
-        const QString loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString();
-        const QString addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString();
-        bool hexOk = false; const quint64 parsedAddr = addr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? addr.mid(2).toULongLong(&hexOk, 16) : 0ULL;
-        QVERIFY2(fn.contains(expectedFunc) && loc.contains(QLatin1Char(':')) && hexOk && parsedAddr != 0ULL, qPrintable(fn));
-    };
+    auto verifyFrameRow = [&](int row, const QString& exp) { const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString(), loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString(), addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString(); bool hexOk = false; const quint64 pa = addr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? addr.mid(2).toULongLong(&hexOk, 16) : 0ULL; QVERIFY2(fn.contains(exp) && loc.contains(QLatin1Char(':')) && hexOk && pa != 0ULL, qPrintable(fn)); };
     verifyFrameRow(0, QStringLiteral("innerCallee")); verifyFrameRow(1, QStringLiteral("outerCaller")); verifyFrameRow(2, QStringLiteral("main"));
     callStackTable->selectRow(1); QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1));
     QTRY_COMPARE_WITH_TIMEOUT(editorTabs->currentSourceCodeView()->executionLine(), outerCallLine, 5000);
-    auto* varsTree = varsDock->findChild<QTreeView*>(); QVERIFY(varsTree != nullptr && varsTree->model() != nullptr);
-    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
-        auto* m = varsTree->model();
-        for (int r = 0; r < m->rowCount(); ++r)
-            if (m->data(m->index(r, 0)).toString() == QStringLiteral("outerSecret") && m->data(m->index(r, 1)).toString().contains(QStringLiteral("4242"))) return true;
-        return false;
-    })(), 5000);
+    auto* varsTree = varsDock->findChild<QTreeView*>(); auto* varSearch = varsDock->findChild<QLineEdit*>(QStringLiteral("variableSearchEdit"));
+    QVERIFY2(varsTree != nullptr && varsTree->model() != nullptr && varSearch != nullptr && varsTree->isSortingEnabled() && varsTree->header()->sectionResizeMode(0) == QHeaderView::Interactive, "VariablesDockWidget must expose #variableSearchEdit, sortable headers, and interactive column resizing");
+    auto findVarIdx = [&](const QModelIndex& parent, const QString& name) { for (int r = 0; r < varsTree->model()->rowCount(parent); ++r) { const QModelIndex i = varsTree->model()->index(r, 0, parent); if (varsTree->model()->data(i).toString() == name) return i; } return QModelIndex(); };
+    // Verify {...} struct Iconfig is expandable, expand Iconfig -> mesh -> dims, then filter and sort NAME column.
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")), os = findVarIdx({}, QStringLiteral("outerSecret")); return ic.isValid() && varsTree->model()->hasChildren(ic) && varsTree->model()->data(ic.siblingAtColumn(1)).toString().contains(QLatin1Char('{')) && os.isValid() && varsTree->model()->data(os.siblingAtColumn(1)).toString().contains(QStringLiteral("4242")); })(), 5000);
+    varsTree->expand(findVarIdx({}, QStringLiteral("Iconfig")));
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")); const QModelIndex m = findVarIdx(ic, QStringLiteral("mesh")), t = findVarIdx(ic, QStringLiteral("tol")); const QString tv = varsTree->model()->data(t.siblingAtColumn(1)).toString(); return m.isValid() && varsTree->model()->hasChildren(m) && t.isValid() && (tv.contains(QStringLiteral("1e")) || tv.contains(QStringLiteral("e-07"))); })(), 5000);
+    varsTree->expand(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")));
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex dm = findVarIdx(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")), QStringLiteral("dims")); return dm.isValid() && varsTree->model()->data(dm.siblingAtColumn(1)).toString().contains(QLatin1Char('3')); })(), 5000);
+    // Filter by "tol" to isolate Iconfig -> tol and hide outerSecret, clear filter to restore, then sort ascending vs descending.
+    varSearch->setText(QStringLiteral("tol")); QApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("Iconfig")).isValid() && findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("tol")).isValid() && !findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
+    varSearch->clear(); QApplication::processEvents();
+    QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
+    varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents();
+    const int icAsc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
+    varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents();
+    const int icDesc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
+    QVERIFY2(icAsc >= 0 && osAsc >= 0 && icAsc < osAsc && osDesc < icDesc, "Sorting NAME column asc/desc must deterministically invert top-level order");
     consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
     consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click();

@@ -15,7 +15,9 @@
 #include <QJsonArray>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include <QString>
+#include <QVariantList>
 
 #include "VariableNode.hpp"
 
@@ -66,6 +68,9 @@ public:
     /** @brief Requests child fields from GDB/MI or LLDB-DAP when the user expands a node. */
     void fetchMore(const QModelIndex& parent) override;
 
+    /** @brief Returns the full C/C++ expression path for @p index (e.g., `"Iconfig.mesh.dims"`). */
+    QString expressionPath(const QModelIndex& index) const;
+
     /**
      * @brief Snapshots current values and queries top-level local variables for rankId.
      * @param rankId Zero-based MPI rank index to inspect.
@@ -92,6 +97,13 @@ public slots:
     void onLocalsUpdated(int rankId, int parentVarRef, const QJsonArray& variables);
 
     /**
+     * @brief Populates lazy child entries resolved via `IBackendCoordinator::requestVariableChildren`.
+     */
+    void onVariableChildrenUpdated(int rankId,
+                                   const QString& parentExpression,
+                                   const QVariantList& children);
+
+    /**
      * @brief Filters a DAP scopes response and requests variables for the "Locals" scope.
      * @param rankId Originating MPI rank index.
      * @param scopes JSON array of DAP Scope descriptors.
@@ -101,6 +113,18 @@ public slots:
 private:
     /** @brief Extracts the VariableNode pointer from a QModelIndex, defaulting to m_rootNode. */
     VariableNode* getNode(const QModelIndex& index) const;
+
+    /** @brief Builds the QModelIndex for an internal VariableNode pointer. */
+    QModelIndex getIndexForNode(VariableNode* node) const;
+
+    /** @brief Builds the full C++ member/array expression path for @p node. */
+    QString buildExpressionPath(const VariableNode* node) const;
+
+    /** @brief Recursively locates a VariableNode matching @p expr under @p root. */
+    VariableNode* findNodeByExpr(VariableNode* root, const QString& expr) const;
+
+    /** @brief Returns true when @p node represents a `{...}` composite or container with children. */
+    static bool isCompositeVariable(const VariableNode* node);
 
     /** @brief Parses `-stack-list-variables` output and issues `-var-create` per local symbol. */
     void parseListVariables(const QString& output);
@@ -121,6 +145,7 @@ private:
 
     QList<QString> m_createdVarobjs;
     QMap<QString, VariableNode*> m_varobjToNode;
+    QSet<VariableNode*> m_pendingChildFetches;
 
     int m_evalCounter = 10000;
     QMap<int, QString> m_evalTokenToVarobj;

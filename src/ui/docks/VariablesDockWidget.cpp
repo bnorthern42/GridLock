@@ -12,13 +12,55 @@
 #include "../../core/hpc/IBackendCoordinator.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
+#include <functional>
+
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QRegularExpression>
 #include <QVBoxLayout>
 
 namespace gridlock {
+
+namespace {
+
+/**
+ * @class VariableFilterProxyModel
+ * @brief Recursive case-insensitive multi-column filter and sort proxy for variable trees.
+ */
+class VariableFilterProxyModel final : public QSortFilterProxyModel {
+public:
+    /** @brief Configures recursive case-insensitive filtering and dynamic column sorting. */
+    explicit VariableFilterProxyModel(QObject* parent = nullptr)
+        : QSortFilterProxyModel(parent) {
+        // Keep matching leaf fields visible together with their parent struct chain.
+        setRecursiveFilteringEnabled(true);
+        setFilterCaseSensitivity(Qt::CaseInsensitive);
+        setSortCaseSensitivity(Qt::CaseInsensitive);
+        setDynamicSortFilter(true);
+    }
+
+protected:
+    /** @brief Accepts a source row when Name, Value, or Type matches the active search pattern. */
+    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
+        const QRegularExpression rx = filterRegularExpression();
+        if (rx.pattern().isEmpty() || !sourceModel()) {
+            return true;
+        }
+        // Match filter text against Name (0), Value (1), or Type (2) columns.
+        for (int col = 0; col < 3; ++col) {
+            const QModelIndex idx = sourceModel()->index(sourceRow, col, sourceParent);
+            const QString text = sourceModel()->data(idx, Qt::DisplayRole).toString();
+            if (text.contains(rx)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+}  // namespace
 
 /**
  * @brief Constructs the variables widget and initializes default empty tree model.
@@ -26,7 +68,7 @@ namespace gridlock {
  */
 VariablesDockWidget::VariablesDockWidget(QWidget* parent)
     : QWidget(parent), m_coordinator(nullptr), m_currentRankId(0) {
-    // Instantiate initial unattached tree model.
+    // Instantiate initial unattached tree model (kept parented to widget for findChild lookups).
     m_model = new VariableTreeModel(nullptr, this);
     setupUi();
 }
@@ -53,12 +95,10 @@ bool VariablesDockWidget::promoteVariableToWatch(const QString& variableName) {
  */
 void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
     m_coordinator = coordinator;
-    // Replace old tree model with newly bound instance.
+    // Replace old tree model while preserving proxy filtering and tree sorting.
     m_model->deleteLater();
     m_model = new VariableTreeModel(coordinator, this);
-    m_variablesTree->setModel(m_model);
-    // Fetch child members dynamically when user expands a struct or object node.
-    connect(m_variablesTree, &QTreeView::expanded, m_model, &VariableTreeModel::fetchMore);
+    m_proxyModel->setSourceModel(m_model);
 
     if (m_coordinator) {
         // Wire GDB state change notifications to variable tree refreshes.
@@ -82,14 +122,14 @@ void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
 }
 
 /**
- * @brief Constructs the layout, 26px rank selection header bar, and hierarchical tree view.
+ * @brief Constructs layout, scope/search header bar, and sortable variable tree view.
  */
 void VariablesDockWidget::setupUi() {
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Unified 26px #21252b header strip hosting Scope label and rank selector combo box.
+    // Unified 26px header strip hosting Scope rank selector and live variable search bar.
     QWidget* headerBar = new QWidget(this);
     headerBar->setObjectName(QStringLiteral("variablesHeaderBar"));
     headerBar->setFixedHeight(26);
@@ -104,55 +144,119 @@ void VariablesDockWidget::setupUi() {
     m_rankSelector = new QComboBox(headerBar);
     m_rankSelector->setFixedHeight(22);
     m_rankSelector->addItem(QStringLiteral("Rank 0 (Master)"), 0);
+
+    m_searchEdit = new QLineEdit(headerBar);
+    m_searchEdit->setObjectName(QStringLiteral("variableSearchEdit"));
+    m_searchEdit->setPlaceholderText(QStringLiteral("Filter variables by name, value, or type..."));
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setFixedHeight(22);
+
     topBar->addWidget(scopeLabel);
-    topBar->addWidget(m_rankSelector, 1);
+    topBar->addWidget(m_rankSelector, 0);
+    topBar->addWidget(m_searchEdit, 1);
     layout->addWidget(headerBar);
 
-    // Main Area: Borderless tree view rendering variable names, values, and data types.
+    // Configure recursive filter/sort proxy wrapping the source VariableTreeModel.
+    m_proxyModel = new VariableFilterProxyModel(this);
+    m_proxyModel->setSourceModel(m_model);
+
+    // Main Area: Borderless sortable tree view rendering variable names, values, and data types.
     m_variablesTree = new QTreeView(this);
     m_variablesTree->setFrameShape(QFrame::NoFrame);
     m_variablesTree->setAlternatingRowColors(true);
-    m_variablesTree->setModel(m_model);
+    m_variablesTree->setModel(m_proxyModel);
     m_variablesTree->setRootIsDecorated(true);
     m_variablesTree->setIndentation(16);
     m_variablesTree->setItemsExpandable(true);
     m_variablesTree->setExpandsOnDoubleClick(true);
+    m_variablesTree->setSortingEnabled(true);
+    m_variablesTree->sortByColumn(0, Qt::AscendingOrder);
     m_variablesTree->setContextMenuPolicy(Qt::CustomContextMenu);
 
-    // Distribute tree column header widths across Name, Value, and Type with >= 48px minimum section size.
-    m_variablesTree->header()->setVisible(true);
-    m_variablesTree->header()->setMinimumSectionSize(48);
-    m_variablesTree->header()->setDefaultSectionSize(96);
-    m_variablesTree->header()->setStretchLastSection(true);
-    m_variablesTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_variablesTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_variablesTree->header()->setSectionResizeMode(2, QHeaderView::Interactive);
-    m_variablesTree->setColumnWidth(2, 72);
+    // Enable interactive user resizing across all three columns with clean defaults.
+    QHeaderView* hdr = m_variablesTree->header();
+    hdr->setVisible(true);
+    hdr->setMinimumSectionSize(48);
+    hdr->setSectionsMovable(false);
+    hdr->setStretchLastSection(true);
+    hdr->setSectionResizeMode(0, QHeaderView::Interactive);
+    hdr->setSectionResizeMode(1, QHeaderView::Interactive);
+    hdr->setSectionResizeMode(2, QHeaderView::Interactive);
+    m_variablesTree->setColumnWidth(0, 180);
+    m_variablesTree->setColumnWidth(1, 220);
+    m_variablesTree->setColumnWidth(2, 120);
 
     layout->addWidget(m_variablesTree, 1);
 
     // Re-query local variables when user changes active rank selection in combo box.
     connect(m_rankSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &VariablesDockWidget::onRankSelected);
-    
-    // Clicking a pointer variable with hex address triggers a memory read in the hex view.
-    connect(m_variablesTree, &QTreeView::clicked, this, [this](const QModelIndex& index) {
-        if (!index.isValid() || !m_coordinator) return;
-        QModelIndex valueIndex = m_model->index(index.row(), 1, index.parent());
-        QString valueStr = m_model->data(valueIndex, Qt::DisplayRole).toString();
-        if (valueStr.startsWith("0x")) {
-            m_coordinator->readMemory(m_currentRankId, valueStr, 256);
+
+    // Filter rows live across all columns and expand already-fetched subtrees containing matches.
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
+        if (!m_proxyModel || !m_variablesTree) return;
+        // Escape regex metacharacters so substrings like `Iconfig.tol` or `vec[0]` match literally.
+        const QString escaped = QRegularExpression::escape(text.trimmed());
+        m_proxyModel->setFilterRegularExpression(
+            QRegularExpression(escaped, QRegularExpression::CaseInsensitiveOption));
+        if (!text.trimmed().isEmpty()) {
+            // Only expand nodes whose children are already loaded to avoid triggering lazy MI queries.
+            std::function<void(const QModelIndex&)> expandLoadedMatches = [&](const QModelIndex& parentIdx) {
+                const int rows = m_proxyModel->rowCount(parentIdx);
+                for (int r = 0; r < rows; ++r) {
+                    const QModelIndex childProxy = m_proxyModel->index(r, 0, parentIdx);
+                    const QModelIndex childSrc = m_proxyModel->mapToSource(childProxy);
+                    // Skip canFetchMore nodes; expand only populated subtrees containing accepted matches.
+                    if (m_model && !m_model->canFetchMore(childSrc) && m_proxyModel->rowCount(childProxy) > 0) {
+                        m_variablesTree->expand(childProxy);
+                        expandLoadedMatches(childProxy);
+                    }
+                }
+            };
+            expandLoadedMatches(QModelIndex());
         }
     });
 
-    // Right-clicking a variable row opens a context menu to add a Watch Expression or Hardware Watchpoint.
+    // Fetch lazy child members when any parent row expands (mapping proxy -> source index).
+    connect(m_variablesTree, &QTreeView::expanded, this, [this](const QModelIndex& proxyIdx) {
+        if (m_model && m_proxyModel) {
+            m_model->fetchMore(m_proxyModel->mapToSource(proxyIdx));
+        }
+    });
+
+    // Clicking a pointer value opens Memory View; clicking a {...} composite expands its fields.
+    connect(m_variablesTree, &QTreeView::clicked, this, [this](const QModelIndex& proxyIdx) {
+        if (!proxyIdx.isValid() || !m_model || !m_proxyModel) return;
+        const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
+        const QModelIndex valueIndex = m_model->index(srcIdx.row(), 1, srcIdx.parent());
+        const QString valueStr = m_model->data(valueIndex, Qt::DisplayRole).toString().trimmed();
+        if (valueStr.startsWith(QStringLiteral("0x")) && m_coordinator) {
+            m_coordinator->readMemory(m_currentRankId, valueStr, 256);
+        } else if (proxyIdx.column() == 1 &&
+                   (valueStr == QStringLiteral("{...}") || valueStr.startsWith(QLatin1Char('{'))) &&
+                   !m_variablesTree->isExpanded(proxyIdx)) {
+            m_variablesTree->expand(proxyIdx);
+        }
+    });
+
+    // Double-clicking any column of an expandable row expands it cleanly.
+    connect(m_variablesTree, &QTreeView::doubleClicked, this, [this](const QModelIndex& proxyIdx) {
+        if (proxyIdx.isValid() && !m_variablesTree->isExpanded(proxyIdx)) {
+            m_variablesTree->expand(proxyIdx);
+        }
+    });
+
+    // Right-clicking a variable row opens a context menu to promote its full C++ path to Watches/Watchpoints.
     connect(m_variablesTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        const QModelIndex index = m_variablesTree->indexAt(pos);
-        if (!index.isValid() || !m_model) {
+        const QModelIndex proxyIdx = m_variablesTree->indexAt(pos);
+        if (!proxyIdx.isValid() || !m_model || !m_proxyModel) {
             return;
         }
-        const QModelIndex nameIndex = m_model->index(index.row(), 0, index.parent());
-        const QString varName = m_model->data(nameIndex, Qt::DisplayRole).toString().trimmed();
-        if (varName.isEmpty()) {
+        const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
+        QString exprPath = m_model->expressionPath(srcIdx.siblingAtColumn(0)).trimmed();
+        if (exprPath.isEmpty()) {
+            exprPath = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
+        }
+        if (exprPath.isEmpty()) {
             return;
         }
         QMenu menu(this);
@@ -167,16 +271,16 @@ void VariablesDockWidget::setupUi() {
 
         QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
         if (chosen == watchAct) {
-            promoteVariableToWatch(varName);
+            promoteVariableToWatch(exprPath);
         } else if (chosen == wpWriteAct || chosen == wpReadAct || chosen == wpRwAct) {
             const auto mode = (chosen == wpReadAct)
                                   ? ::WatchpointAccessMode::Read
                                   : ((chosen == wpRwAct) ? ::WatchpointAccessMode::ReadWrite
                                                          : ::WatchpointAccessMode::Write);
             if (m_coordinator) {
-                m_coordinator->setDataWatchpoint(varName, mode, -1);
+                m_coordinator->setDataWatchpoint(exprPath, mode, -1);
             }
-            emit dataWatchpointRequested(varName, static_cast<int>(mode));
+            emit dataWatchpointRequested(exprPath, static_cast<int>(mode));
         }
     });
 }
