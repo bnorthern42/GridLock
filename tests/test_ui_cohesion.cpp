@@ -121,21 +121,27 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     gridlock::tests::callSetShowDecompilerWithSource(&cfg, false, 0);
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900);
     // 0. Gate 1 Zero-Mock Startup, Idle Telemetry, Preview Seeding, and Stop-Clear Verification.
-    auto* varsDockW = mainWindow.findChild<gridlock::VariablesDockWidget*>();
-    auto* varModel = varsDockW ? varsDockW->findChild<gridlock::VariableTreeModel*>() : nullptr;
+    gridlock::ui::MpiDiagnosticsWidget standaloneDiag; gridlock::ui::MpiNetworkLogWidget standaloneNet(QStringLiteral("Net")); gridlock::ui::MemView standaloneMem;
+    auto* standaloneBadge = standaloneMem.findChild<QLabel*>(QStringLiteral("memSourceBadge")); auto* standaloneDump = standaloneMem.findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
+    QVERIFY2(standaloneDiag.rankWaitTableRowCount() == 0 && standaloneNet.logRowCount() == 0, "Standalone MpiDiagnosticsWidget and MpiNetworkLogWidget must start with 0 rows");
+    QVERIFY2(standaloneMem.currentBaseAddress() == 0ULL && standaloneDump && standaloneDump->toPlainText().trimmed().isEmpty() && standaloneBadge && standaloneBadge->text() == QStringLiteral("IDLE (NO BINARY)"), "Standalone MemView must start empty with IDLE (NO BINARY) badge");
+    standaloneMem.setLiveMemoryCallbacks([](int, const QString&, bool* ok) { if (ok) *ok = true; return 0x00401120ULL; }, [](int, uint64_t, int) { return QByteArray::fromHex("9090c3"); }, [](int) { return qint64(4242); });
+    QVERIFY(standaloneMem.seekToAddress(0x00401120ULL) && standaloneBadge->text().contains(QStringLiteral("LIVE RANK")));
+    auto* varsDockW = mainWindow.findChild<gridlock::VariablesDockWidget*>(); auto* varModel = varsDockW ? varsDockW->findChild<gridlock::VariableTreeModel*>() : nullptr;
     auto* regTable = mainWindow.registerView() ? mainWindow.registerView()->findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable")) : nullptr;
-    auto* csWidget = mainWindow.findChild<gridlock::ui::CallStackDockWidget*>();
-    auto* csTable = csWidget ? csWidget->findChild<QTableWidget*>(QStringLiteral("callStackTable")) : nullptr;
+    auto* csWidget = mainWindow.findChild<gridlock::ui::CallStackDockWidget*>(); auto* csTable = csWidget ? csWidget->findChild<QTableWidget*>(QStringLiteral("callStackTable")) : nullptr;
+    auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>(); auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>();
+    auto* memView = mainWindow.memView(); auto* memBadge = memView ? memView->findChild<QLabel*>(QStringLiteral("memSourceBadge")) : nullptr; auto* memDump = memView ? memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit")) : nullptr;
     auto* initStatusLbl = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
-    QVERIFY(varModel && regTable && csWidget && csTable && initStatusLbl);
-    QVERIFY2(varModel->rowCount() == 0, "VariableTreeModel must have 0 rows on startup");
-    QVERIFY2(regTable->rowCount() == 0, "RegisterView must have 0 rows on startup");
+    QVERIFY(varModel && regTable && csWidget && csTable && mpiDiag && netLog && memView && memBadge && memDump && initStatusLbl);
+    QVERIFY2(varModel->rowCount() == 0 && regTable->rowCount() == 0 && mpiDiag->rankWaitTableRowCount() == 0 && netLog->logRowCount() == 0, "Inspection and MPI docks must have 0 rows on startup");
+    QVERIFY2(memView->currentBaseAddress() == 0ULL && memDump->toPlainText().trimmed().isEmpty() && memBadge->text() == QStringLiteral("IDLE (NO BINARY)"), "MemView must start empty with IDLE (NO BINARY)");
     const QString idleTelemetry = initStatusLbl->text();
     QVERIFY2(!idleTelemetry.contains(QStringLiteral("136 KB")) && !idleTelemetry.contains(QStringLiteral("2048 KB")) && !idleTelemetry.contains(QStringLiteral("2.0 MB")) && !idleTelemetry.contains(QStringLiteral("STACK:")) && !idleTelemetry.contains(QStringLiteral("HEAP:")) && idleTelemetry.contains(QStringLiteral("TARGET: IDLE")) && idleTelemetry.contains(QStringLiteral("HOST RAM:")) && idleTelemetry.contains(QStringLiteral("CPU:")), qPrintable(idleTelemetry));
-    mainWindow.loadPreviewFixture(); StackFrameEntry sf; sf.level = 0; sf.function = QStringLiteral("main"); sf.file = QStringLiteral("main.cpp"); sf.line = 10; sf.address = 0x401120ULL; csWidget->setStackFrames({sf}, 0);
-    QVERIFY2(varModel->rowCount() > 0 && regTable->rowCount() > 0 && csTable->rowCount() == 1, "loadPreviewFixture() + setStackFrames() must populate preview docks");
+    mainWindow.loadPreviewFixture(); StackFrameEntry sf; sf.level = 0; sf.function = QStringLiteral("main"); sf.file = QStringLiteral("main.cpp"); sf.line = 10; sf.address = 0x401120ULL; csWidget->setStackFrames({sf}, 0); netLog->appendLog(QStringLiteral("[00:00.001] Rank 0 -> Rank 1 | MPI_Send | Tag=1 MPI_COMM_WORLD | 64 B"));
+    QVERIFY2(varModel->rowCount() > 0 && regTable->rowCount() > 0 && csTable->rowCount() == 1 && mpiDiag->rankWaitTableRowCount() > 0 && netLog->logRowCount() > 0, "loadPreviewFixture() + setStackFrames() must populate preview docks");
     mainWindow.stopTargetWorkflow(); QApplication::processEvents();
-    QVERIFY2(varModel->rowCount() == 0 && regTable->rowCount() == 0 && csTable->rowCount() == 0, "stopTargetWorkflow() must clear VariableTreeModel, RegisterView, and CallStackDockWidget to 0 rows");
+    QVERIFY2(varModel->rowCount() == 0 && regTable->rowCount() == 0 && csTable->rowCount() == 0 && mpiDiag->rankWaitTableRowCount() == 0 && netLog->logRowCount() == 0 && memBadge->text() == QStringLiteral("IDLE (NO BINARY)"), "stopTargetWorkflow() must clear inspection, MPI, and MemView docks");
     mainWindow.loadPreviewFixture(); mainWindow.propagateThemeToAllWidgets();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
@@ -208,7 +214,12 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     { QFile sf(extWsDir.filePath(QStringLiteral("src/main.cpp"))); QVERIFY(sf.open(QIODevice::WriteOnly | QIODevice::Text)); sf.write("int main() { return 0; }\n"); }
     QProcess gxx; gxx.start(QStringLiteral("g++"), {QStringLiteral("-g"), extWsDir.filePath(QStringLiteral("src/main.cpp")), QStringLiteral("-o"), extWsDir.filePath(QStringLiteral("build_meson/ws_bin"))});
     QVERIFY(gxx.waitForFinished(15000) && gxx.exitCode() == 0);
+    QTemporaryDir unbuiltWsDir; QVERIFY(unbuiltWsDir.isValid());
+    netLog->appendLog(QStringLiteral("[00:00.002] Rank 0 -> Rank 1 | MPI_Send | Tag=2 MPI_COMM_WORLD | 32 B"));
+    mainWindow.switchWorkspaceDirectory(unbuiltWsDir.path()); QApplication::processEvents();
+    QVERIFY2(mpiDiag->rankWaitTableRowCount() == 0 && netLog->logRowCount() == 0 && memView->currentBaseAddress() == 0ULL && memDump->toPlainText().trimmed().isEmpty() && memBadge->text() == QStringLiteral("IDLE (NO BINARY)"), "Unbuilt workspace switch must clear MPI docks and MemView to IDLE (NO BINARY)");
     mainWindow.switchWorkspaceDirectory(extWsDir.path()); mainWindow.loadBinaryTarget(extWsDir.filePath(QStringLiteral("build_meson/ws_bin"))); QApplication::processEvents();
+    QVERIFY2(memBadge->text() == QStringLiteral("STATIC ELF (READ-ONLY)") && !memDump->toPlainText().trimmed().isEmpty(), "loadBinaryTarget must display static ELF bytes with STATIC ELF (READ-ONLY) badge");
     // Verify switching workspace cleared stale variable/register/callstack entries too.
     auto* varModelWs = varsDockW->findChild<gridlock::VariableTreeModel*>();
     QVERIFY2(varModelWs && varModelWs->rowCount() == 0 && regTable->rowCount() == 0 && csTable->rowCount() == 0, "switchWorkspaceDirectory() must clear VariableTreeModel, RegisterView, and CallStackDockWidget");
@@ -432,13 +443,9 @@ void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable()
  * Confirms uniform editor background color, 6-column network log table, and monochrome glyphs.
  */
 void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.loadPreviewFixture();
-    mainWindow.loadSourceFile(QStringLiteral("tutorial/inspection_demo.cpp"));
-    mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
+    mainWindow.loadSourceFile(QStringLiteral("tutorial/inspection_demo.cpp")); mainWindow.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
     // 1. SourceCodeView Uniform Canvas & Gutter.
     auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
@@ -454,13 +461,11 @@ void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
     QVERIFY2(leftColor.rgb() == rightColor.rgb(), qPrintable(QString("SourceCodeView split background: left=%1 vs right=%2").arg(leftColor.name(), rightColor.name())));
 
     // 2. Structured MpiNetworkLogWidget Table.
-    auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>();
-    QVERIFY2(netLog != nullptr, "MpiNetworkLogWidget must exist in MainWindow");
+    auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>(); QVERIFY2(netLog != nullptr, "MpiNetworkLogWidget must exist in MainWindow");
     auto* netTable = netLog->findChild<QTableWidget*>();
     QVERIFY2(netTable != nullptr && netTable->columnCount() == 6 && netTable->frameShape() == QFrame::NoFrame, "MpiNetworkLogWidget must contain a 6-column QFrame::NoFrame QTableWidget");
     netLog->appendLog(QStringLiteral("[12:00:01.042] Rank 0 -> Rank 1 | MPI_Send | Tag=0 MPI_COMM_WORLD | 1024 B"));
     QVERIFY2(netLog->logRowCount() >= 1, "MpiNetworkLogWidget::logRowCount() must be >= 1 after appendLog");
-
     // 3. Single-Row ReferenceManualWidget Header & Clean Monochrome Toolbar Labels.
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY2(refManual != nullptr && refManual->headerBarHeight() > 0 && refManual->headerBarHeight() <= 30, "ReferenceManualWidget::headerBarHeight() must be in (0, 30]");
@@ -784,9 +789,7 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     QVERIFY2(darkHighlightPixels >= 100 && brightTextPixels >= 15, qPrintable(QStringLiteral("Selected sidebar row pixel check failed: darkBg=%1 brightText=%2").arg(darkHighlightPixels).arg(brightTextPixels)));
     QVERIFY(categoryList->minimumWidth() >= 185 && categoryList->palette().color(QPalette::Inactive, QPalette::HighlightedText).lightness() >= 200);
     auto hasLightPixel = [](const QImage& img, int x0, int x1, int y0, int y1, int minL) {
-        for (int y = qMax(0, y0); y < qMin(img.height(), y1); ++y)
-            for (int x = qMax(0, x0); x < qMin(img.width(), x1); ++x)
-                if (img.pixelColor(x, y).lightness() > minL) return true;
+        for (int y = qMax(0, y0); y < qMin(img.height(), y1); ++y) for (int x = qMax(0, x0); x < qMin(img.width(), x1); ++x) if (img.pixelColor(x, y).lightness() > minL) return true;
         return false;
     };
     QVERIFY2(hasLightPixel(catImg, 10, 30, catImg.height() - 30, catImg.height() - 10, 200) && hasLightPixel(dlgImg, dlgImg.width() - 60, dlgImg.width() - 20, dlgImg.height() / 2 - 20, dlgImg.height() / 2 + 20, 210), "PreferencesDialog canvas and sidebar must render solid light surfaces");

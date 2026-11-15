@@ -149,12 +149,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Keep active file tracking synchronized whenever F12 Go-to-Definition switches editor tabs.
   if (m_editorTabManager) {
     connect(m_editorTabManager, &EditorTabManager::definitionJumpRequested, this,
-            [this](const QString &filePath, int oneBasedLine, int /*zeroBasedColumn*/) {
+            [this](const QString &filePath, int oneBasedLine, int) {
               m_currentFile = filePath;
-              if (networkLog()) {
-                networkLog()->appendText(
-                    QStringLiteral("Navigated to definition: %1:%2\n").arg(filePath).arg(oneBasedLine));
-              }
+              if (networkLog()) networkLog()->appendText(QStringLiteral("Navigated to definition: %1:%2\n").arg(filePath).arg(oneBasedLine));
             });
   }
 
@@ -265,9 +262,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
  * program counter registers across the .text segment.
  */
 void MainWindow::loadPreviewFixture() {
-  m_previewFixtureOnly = true;
-  m_useRealBinaryTarget = false;
+  m_previewFixtureOnly = true; m_useRealBinaryTarget = false;
   if (m_registerView) m_registerView->seedPreviewRegisters();
+  if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->populateDefaultRankTelemetry();
+  if (m_memView) { if (const QByteArray pm = synthesizeMemoryWindow(0x00401120ULL, 256); !pm.isEmpty()) m_memView->setMemoryData(QStringLiteral("0x00401120"), pm); }
   // Pre-allocate storage capacity for eight initial process rank descriptors.
   QList<RankState> fixtureRanks; fixtureRanks.reserve(8);
   for (int i = 0; i < 8; ++i) {
@@ -450,24 +448,26 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
                   if (networkLog()) networkLog()->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
                 }
               });
-      // Forward hexadecimal GDB memory dumps to MemView unless synchronous live fetch is active.
+      // Forward hexadecimal GDB memory dumps and live rank reads to MemView with PID badge.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this,
               [this](int rankId, qint64 beginAddress, const QString &hexContents) {
-                if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) m_memView->setMemoryData(beginAddress, hexContents);
+                if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) {
+                  m_memView->setMemoryData(beginAddress, hexContents);
+                  m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(m_coordinator ? m_coordinator->getPidForRank(rankId) : 0LL));
+                }
               });
     }
-
-    // Forward target inferior stdout/stderr streams into the bottom Network / Target Output log.
     if (networkLog()) {
       connect(m_coordinator, &IBackendCoordinator::targetOutputReceived, this,
-              [this](const QString &category, const QString &output) {
-                if (networkLog()) networkLog()->appendText(category, output);
-              });
+              [this](const QString &category, const QString &output) { if (networkLog()) networkLog()->appendText(category, output); });
     }
     // Forward raw byte-array memory reads to MemView for the currently focused MPI rank.
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
             [this](int rankId, const QString &address, const QByteArray &data) {
-              if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) m_memView->setMemoryData(address, data);
+              if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) {
+                m_memView->setMemoryData(address, data);
+                m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(m_coordinator ? m_coordinator->getPidForRank(rankId) : 0LL));
+              }
             });
     // Forward JSON register values to RegisterView and keep DisassemblyView PC cursor synchronized.
     connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,

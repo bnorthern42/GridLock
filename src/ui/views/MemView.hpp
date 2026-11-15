@@ -20,6 +20,7 @@ class QSpinBox;
 class QPushButton;
 class QTextEdit;
 class QComboBox;
+class QLabel;
 
 namespace gridlock::ui {
 
@@ -43,6 +44,11 @@ public:
     void setLiveMemoryCallbacks(RankAddressResolver resolver,
                                 RankBytesFetcher fetcher,
                                 RankPidGetter pidGetter = {});
+
+    /// Updates the toolbar source badge label (`IDLE (NO BINARY)`, `STATIC ELF (READ-ONLY)`, `LIVE RANK ...`).
+    void setSourceModeLabel(const QString& label);
+    /// Clears hex dump viewport, buffers, patches, and resets source badge to `IDLE (NO BINARY)`.
+    void clear();
 
     /// Loads raw hex string data starting at beginAddress.
     void setMemoryData(qint64 beginAddress, const QString& hexContents);
@@ -100,13 +106,14 @@ private:
     QSpinBox* m_baselineRankBox = nullptr;
     QSpinBox* m_targetRankBox = nullptr;
     QPushButton* m_diffBtn = nullptr;
+    QLabel* m_sourceBadge = nullptr;
     QTextEdit* m_dumpEdit = nullptr;
 
     QByteArray m_lastRawData;
     QByteArray m_previousRawData;
     QByteArray m_unpatchedRawData;
     QMap<uint64_t, char> m_patchedBytes;
-    uint64_t m_currentBaseAddress = 0x00401120ULL;
+    uint64_t m_currentBaseAddress = 0ULL;
     uint64_t m_previousBaseAddress = 0ULL;
     int m_changedByteCount = 0;
     bool m_hasDiffBaseline = false;

@@ -45,11 +45,13 @@
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
+#include "views/MemView.hpp"
 #include "views/RegisterView.hpp"
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
+#include "widgets/MpiNetworkLogWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 
 namespace gridlock::ui {
@@ -263,21 +265,14 @@ void MainWindow::startTargetWorkflow() {
         if (SourceCodeView* srcView = sourceCodeView()) {
             srcView->highlightExecutionLine(-1);
             for (int bpLine : srcView->breakpoints()) {
-                const QString cond = srcView->breakpointCondition(bpLine);
-                const QString scope = srcView->breakpointSuspendScope(bpLine);
-                const int rankFilter =
-                    (scope.compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) ? preserveRank : -1;
-                m_coordinator->setBreakpoint(srcPath, bpLine, cond, rankFilter);
+                const int rankFilter = (srcView->breakpointSuspendScope(bpLine).compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) ? preserveRank : -1;
+                m_coordinator->setBreakpoint(srcPath, bpLine, srcView->breakpointCondition(bpLine), rankFilter);
                 const uint64_t a = sourceLineToAddress(bpLine);
-                if (m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) {
-                    m_disassemblyView->toggleBookmark(a);
-                }
+                if (m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) m_disassemblyView->toggleBookmark(a);
             }
         }
         for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {
-            if (it.key() != srcPath && QFileInfo::exists(it.key())) {
-                for (int bpLine : *it) m_coordinator->setBreakpoint(it.key(), bpLine);
-            }
+            if (it.key() != srcPath && QFileInfo::exists(it.key())) for (int bpLine : *it) m_coordinator->setBreakpoint(it.key(), bpLine);
         }
 
         // Reset rank telemetry rows to RUNNING prior to spawning child processes; live signals drive all stops.
@@ -309,9 +304,7 @@ void MainWindow::startTargetWorkflow() {
         m_coordinator->launchParallelSession(binPath, rankCount, projCfg.mpiArgs.isEmpty() ? mpiArgs : projCfg.mpiArgs);
         if (m_differentialGrid) {
             if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
-                for (const auto& w : m_differentialGrid->getWatchExpressions()) {
-                    gdbCoord->registerWatchVariable(QString::fromStdString(w));
-                }
+                for (const auto& w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
             }
         }
         return;
@@ -456,6 +449,19 @@ bool MainWindow::continueExecutionWorkflow() {
 }
 
 /**
+ * @brief Clears variable, register, call-stack, MPI diagnostics, network log, and memory docks to idle.
+ */
+static void clearAllInspectionDocks(QWidget* varsDock, RegisterView* regView, CallStackDockWidget* csDock,
+                                    MpiDiagnosticsWidget* mpiDiag, MpiNetworkLogWidget* netLog, MemView* memView) {
+    if (varsDock) { if (auto* vm = varsDock->findChild<gridlock::VariableTreeModel*>()) vm->clear(); }
+    if (regView) regView->clearRegisters();
+    if (csDock) csDock->clearFrames();
+    if (mpiDiag) mpiDiag->clear();
+    if (netLog) netLog->clear();
+    if (memView) memView->clear();
+}
+
+/**
  * @brief Terminates the active debugging session, reaps child ranks, and restores static ELF inspection.
  */
 void MainWindow::stopTargetWorkflow() {
@@ -466,12 +472,10 @@ void MainWindow::stopTargetWorkflow() {
     for (auto& [rankId, st] : m_latestStates) {
         st.currentState = QStringLiteral("idle"); st.registers[16] = QStringLiteral("—");
         if (m_serverRackView) m_serverRackView->updateRankState(rankId, st);
-        if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateRankStateRow(rankId, QStringLiteral("EXITED"), QStringLiteral("main"), QStringLiteral("TERMINATED"), 0ULL);
     }
     if (m_disassemblyView) { m_disassemblyView->setDeadlockCycleRanks({}); m_disassemblyView->setActiveSteppingRank(-1, 0ULL); }
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
-    if (m_variablesDockWidget) { if (auto* vm = m_variablesDockWidget->findChild<gridlock::VariableTreeModel*>()) vm->clear(); }
-    { if (m_registerView) m_registerView->clearRegisters(); if (m_callStackDockWidget) m_callStackDockWidget->clearFrames(); }
+    clearAllInspectionDocks(m_variablesDockWidget, m_registerView, m_callStackDockWidget, m_mpiDiagnosticsWidget, networkLog(), m_memView);
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
     updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE")); refreshStatusBarMemoryTelemetry();
     // Restore static pre-launch ELF64 disassembly, CFG, and symbol inspection cleanly after session stop.
@@ -794,9 +798,9 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     struct ReentrancyGuard { bool& flag; ~ReentrancyGuard() { flag = false; } } guard{m_switchingWorkspace};
     m_switchingWorkspace = true;
     if (m_debugSessionActive) stopTargetWorkflow();
-    if (m_variablesDockWidget) { if (auto* vm = m_variablesDockWidget->findChild<gridlock::VariableTreeModel*>()) vm->clear(); }
-    { if (m_registerView) m_registerView->clearRegisters(); if (m_callStackDockWidget) m_callStackDockWidget->clearFrames(); }
+    clearAllInspectionDocks(m_variablesDockWidget, m_registerView, m_callStackDockWidget, m_mpiDiagnosticsWidget, networkLog(), m_memView);
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
+    m_previewFixtureOnly = false; m_useRealBinaryTarget = false; m_elfInspector.reset(); m_loadedBinaryPath.clear();
     if (m_differentialGrid) m_differentialGrid->clearWatches();
     // Close stale editor tabs belonging to the previous workspace while keeping tabs already inside resolvedDir.
     if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) {
@@ -828,35 +832,26 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     QStringList elfTargets, mainSources;
     discoverWorkspaceTargets(resolvedDir, &elfTargets, &mainSources);
     if (m_targetSelector) {
-        m_targetSelector->blockSignals(true);
-        m_targetSelector->clear();
+        m_targetSelector->blockSignals(true); m_targetSelector->clear();
         for (const QString& elfPath : elfTargets) {
             const QString relDir = QDir(resolvedDir).relativeFilePath(QFileInfo(elfPath).absolutePath());
-            const QString label = (relDir.isEmpty() || relDir == QStringLiteral("."))
-                                      ? QStringLiteral("%1 (ELF)").arg(QFileInfo(elfPath).fileName())
-                                      : QStringLiteral("%1 (%2)").arg(QFileInfo(elfPath).fileName(), relDir);
+            const QString label = (relDir.isEmpty() || relDir == QStringLiteral(".")) ? QStringLiteral("%1 (ELF)").arg(QFileInfo(elfPath).fileName()) : QStringLiteral("%1 (%2)").arg(QFileInfo(elfPath).fileName(), relDir);
             m_targetSelector->addItem(label, elfPath);
         }
         for (const QString& srcPath : mainSources) {
             const QString relSrc = QDir(resolvedDir).relativeFilePath(srcPath);
             m_targetSelector->addItem(elfTargets.isEmpty() ? QFileInfo(srcPath).fileName() : QStringLiteral("%1 (Source)").arg(relSrc), srcPath);
         }
-        if (m_targetSelector->count() == 0) {
-            m_targetSelector->addItem(QStringLiteral("%1 (Workspace)").arg(folderName.isEmpty() ? QStringLiteral("Workspace") : folderName), resolvedDir);
-        }
+        if (m_targetSelector->count() == 0) m_targetSelector->addItem(QStringLiteral("%1 (Workspace)").arg(folderName.isEmpty() ? QStringLiteral("Workspace") : folderName), resolvedDir);
         m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."), QStringLiteral("__open_binary__"));
-        m_targetSelector->setCurrentIndex(0);
-        m_targetSelector->blockSignals(false);
+        m_targetSelector->setCurrentIndex(0); m_targetSelector->blockSignals(false);
     }
-
     // 4. Open primary workspace source file (activating ClangdLspClient) and load primary ELF binary.
     if (!mainSources.isEmpty() && m_currentFile.isEmpty()) loadSourceFile(mainSources.first());
     if (!elfTargets.isEmpty()) {
-        m_previewFixtureOnly = false; m_useRealBinaryTarget = true;
-        loadBinaryTarget(elfTargets.first());
+        m_previewFixtureOnly = false; m_useRealBinaryTarget = true; loadBinaryTarget(elfTargets.first());
         if (!mainSources.isEmpty() && m_elfInspector && m_elfInspector->isValid() && m_dwarfLineToAddress.isEmpty()) {
-            m_elfInspector->disassembleSymbol(QStringLiteral("main"), QFileInfo(mainSources.first()).fileName(),
-                                              &m_dwarfLineToAddress, &m_dwarfAddressToLine);
+            m_elfInspector->disassembleSymbol(QStringLiteral("main"), QFileInfo(mainSources.first()).fileName(), &m_dwarfLineToAddress, &m_dwarfAddressToLine);
             rebuildDynamicSourceLineMap();
         }
     }

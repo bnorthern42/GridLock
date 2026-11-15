@@ -110,7 +110,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_addressEdit->setObjectName("cutterMemAddressEdit");
     m_addressEdit->setMinimumWidth(105);
     m_addressEdit->setFixedHeight(22);
-    m_addressEdit->setText(QStringLiteral("0x00401120"));
+    m_addressEdit->setPlaceholderText(QStringLiteral("0x00000000"));
     topLayout->addWidget(m_addressEdit);
 
     topLayout->addWidget(new QLabel("Bytes:"));
@@ -158,6 +158,11 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
 
     topLayout->addStretch();
 
+    // Explicit source badge distinguishing idle empty state, static on-disk ELF reads, and live rank PID reads.
+    m_sourceBadge = new QLabel(QStringLiteral("IDLE (NO BINARY)"), headerBar);
+    m_sourceBadge->setObjectName(QStringLiteral("memSourceBadge"));
+    topLayout->addWidget(m_sourceBadge);
+
     mainLayout->addWidget(headerBar);
 
     m_dumpEdit = new QTextEdit();
@@ -181,21 +186,12 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     connect(m_exportBtn, &QPushButton::clicked, this, &MemView::onExportMatrixClicked);
     connect(m_diffBtn, &QPushButton::clicked, this, &MemView::onDiffClicked);
 
-    // Seed with a realistic 64-byte x86_64 prologue & MPI frame preview at 0x00401120
-    const QByteArray seedBytes = QByteArray::fromHex(
-        "f30f1efa554889e54881ec9000000048"
-        "8dbd78ffffff488db570ffffffe80efe"
-        "ffffc745fc00000000837dfc027f298b"
-        "45fc83f8007411f20f1005a90e000000");
-    setMemoryData(QStringLiteral("0x00401120"), seedBytes);
+    // Initialize clean empty state until a real ELF binary or live debug rank supplies bytes.
+    clear();
     reloadStyle();
     connect(&gridlock::core::ThemeManager::instance(),
             &gridlock::core::ThemeManager::themeModeChanged,
             this, [this](bool) { reloadStyle(); });
-    // Reset diff baseline after seeding so the first test or live update starts cleanly
-    m_hasDiffBaseline = false;
-    m_previousRawData.clear();
-    m_changedByteCount = 0;
 }
 
 void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
@@ -205,6 +201,41 @@ void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
     m_addressResolver = std::move(resolver);
     m_bytesFetcher = std::move(fetcher);
     m_pidGetter = std::move(pidGetter);
+}
+
+/**
+ * @brief Updates the toolbar source indicator badge (`IDLE (NO BINARY)`, `STATIC ELF`, `LIVE RANK`).
+ * @param label Human-readable data source badge string.
+ */
+void MemView::setSourceModeLabel(const QString& label) {
+    if (!m_sourceBadge) return;
+    m_sourceBadge->setText(label);
+    const auto pal = gridlock::core::ThemeManager::instance().paletteForTheme(
+        gridlock::core::ThemeManager::instance().activeThemeId());
+    const bool isLive = label.startsWith(QStringLiteral("LIVE RANK"), Qt::CaseInsensitive);
+    const bool isStatic = label.startsWith(QStringLiteral("STATIC ELF"), Qt::CaseInsensitive);
+    const QString fg = isLive ? QStringLiteral("#4ec9b0") : (isStatic ? QStringLiteral("#61afef") : pal.textHex);
+    m_sourceBadge->setStyleSheet(QStringLiteral(
+        "QLabel#memSourceBadge { color: %1; border: 1px solid %2; border-radius: 2px; "
+        "padding: 1px 6px; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; }")
+        .arg(fg, pal.borderHex));
+}
+
+/**
+ * @brief Clears hex dump buffers and resets base address and source badge to idle state.
+ */
+void MemView::clear() {
+    m_currentBaseAddress = 0ULL;
+    m_previousBaseAddress = 0ULL;
+    m_changedByteCount = 0;
+    m_hasDiffBaseline = false;
+    m_lastRawData.clear();
+    m_previousRawData.clear();
+    m_unpatchedRawData.clear();
+    m_patchedBytes.clear();
+    if (m_addressEdit) m_addressEdit->clear();
+    if (m_dumpEdit) m_dumpEdit->clear();
+    setSourceModeLabel(QStringLiteral("IDLE (NO BINARY)"));
 }
 
 /**
@@ -226,14 +257,16 @@ bool MemView::seekToAddress(uint64_t address) {
     }
     const int rank = m_baselineRankBox ? m_baselineRankBox->value() : 0;
     const int len = m_lengthBox ? m_lengthBox->value() : 256;
-    if (m_pidGetter && m_pidGetter(rank) > 0 && m_bytesFetcher) {
+    const qint64 pid = m_pidGetter ? m_pidGetter(rank) : 0LL;
+    if (pid > 0 && m_bytesFetcher) {
         const QByteArray liveBytes = m_bytesFetcher(rank, address, len);
         if (!liveBytes.isEmpty()) {
             setMemoryData(static_cast<qint64>(address), QString::fromLatin1(liveBytes.toHex()));
+            setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rank).arg(pid));
             return true;
         }
     }
-    // Dispatch memory read request for offline ELF or custom mock listeners.
+    // Dispatch memory read request for offline ELF or active debug listeners.
     emit requestMemory(formatted, len);
     return true;
 }
@@ -258,12 +291,14 @@ void MemView::onReadClicked() {
     if (ok && resolved != 0ULL) m_currentBaseAddress = resolved;
 
     // Read directly from the live inferior rank process when a debug session is active.
-    if (ok && resolved != 0ULL && m_pidGetter && m_pidGetter(rank) > 0 && m_bytesFetcher) {
+    const qint64 pid = m_pidGetter ? m_pidGetter(rank) : 0LL;
+    if (ok && resolved != 0ULL && pid > 0 && m_bytesFetcher) {
         const QByteArray liveBytes = m_bytesFetcher(rank, resolved, len);
         if (!liveBytes.isEmpty()) {
             bool isLiteralHex = false;
             (void)parseHexAddress(addr, &isLiteralHex);
             setMemoryData(static_cast<qint64>(resolved), QString::fromLatin1(liveBytes.toHex()));
+            setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rank).arg(pid));
             // Preserve symbolic expressions (e.g., `$rsp`) in the input box for cross-rank diffing.
             if (!isLiteralHex && m_addressEdit) m_addressEdit->setText(addr);
             return;
@@ -759,6 +794,9 @@ void MemView::reloadStyle() {
             "background-color: %1; color: %3; border: 1px solid %2; border-radius: 2px; font-size: 10px; font-weight: 600; } "
             "#cutterMemHeader QPushButton:hover { background-color: %2; color: %3; }")
             .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex));
+    }
+    if (m_sourceBadge) {
+        setSourceModeLabel(m_sourceBadge->text());
     }
     update();
 }

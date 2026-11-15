@@ -76,6 +76,11 @@ public:
      */
     void clearLogs();
 
+    /**
+     * @brief Convenience slot clearing all recorded MPI network traffic rows.
+     */
+    void clear();
+
 private:
     /**
      * @brief Inserts a structured 6-column row into the MPI traffic table.

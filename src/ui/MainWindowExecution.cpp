@@ -760,6 +760,7 @@ bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
             0, targetPid, QStringLiteral("PAUSED"), QStringLiteral("attached"),
             QStringLiteral("LOCAL PID"), QStringLiteral("0x00000000"), 1);
     }
+    if (m_memView) m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK 0 (PID %1)").arg(targetPid));
     if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(1);
     // Latch execution toolbar actions and refresh `/proc/<targetPid>` stack/heap telemetry.
     updateDebugToolbarState();

@@ -382,19 +382,19 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
     // Synchronize Hexdump memory viewport.
     if (m_memView) {
         if (hexOk && parsedAddr != 0ULL) {
+            QByteArray rawBytes;
+            // If static ELF inspector is loaded, populate memory bytes directly from disk image.
+            if (m_elfInspector && m_elfInspector->isValid()) rawBytes = m_elfInspector->readVirtualMemory(parsedAddr, 256);
+            if (rawBytes.isEmpty() && m_previewFixtureOnly) rawBytes = synthesizeMemoryWindow(parsedAddr, 256);
+            if (rawBytes.isEmpty() && !m_debugSessionActive && !m_previewFixtureOnly) m_memView->clear();
             const bool blocked = m_memView->blockSignals(true);
             m_memView->seekToAddress(parsedAddr);
             m_memView->blockSignals(blocked);
-            QByteArray rawBytes;
-            // If static ELF inspector is loaded, populate memory bytes directly from disk image.
-            if (m_elfInspector && m_elfInspector->isValid()) {
-                rawBytes = m_elfInspector->readVirtualMemory(parsedAddr, 256);
-            }
-            if (rawBytes.isEmpty()) {
-                rawBytes = synthesizeMemoryWindow(parsedAddr, 256);
-            }
             if (!rawBytes.isEmpty()) {
                 m_memView->setMemoryData(normalized, rawBytes);
+                if (!m_previewFixtureOnly && !m_debugSessionActive && m_elfInspector && m_elfInspector->isValid()) {
+                    m_memView->setSourceModeLabel(QStringLiteral("STATIC ELF (READ-ONLY)"));
+                }
             }
         }
         if (auto* addrEdit = m_memView->findChild<QLineEdit*>()) {
@@ -556,7 +556,6 @@ void MainWindow::loadSourceFile(const QString& filePath) {
             // Ensure legacy secondary LspCoordinator remains stopped so ClangdLspClient owns the sole clangd daemon.
             if (m_lspCoordinator) m_lspCoordinator->stop();
             syncDisassemblyDecompilerVisibility(false);
-            if (networkLog()) networkLog()->appendText("Successfully loaded: " + m_currentFile + "\n");
         } else if (networkLog()) {
             networkLog()->appendError("CRITICAL: Failed to load " + filePath + "\n");
         }

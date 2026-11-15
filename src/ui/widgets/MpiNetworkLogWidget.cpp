@@ -118,20 +118,6 @@ MpiNetworkLogWidget::MpiNetworkLogWidget(const QString& title, QWidget* parent)
     connect(m_directionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) { applyTrafficFilter(); });
     connect(m_clearBtn, &QPushButton::clicked, this, &MpiNetworkLogWidget::clearLogs);
-
-    // Seed initial baseline MPI session trace entries so the view is immediately informative.
-    insertStructuredRow(QStringLiteral("00:00.001"), QStringLiteral("Rank 0..3"),
-                        QStringLiteral("ALL"), QStringLiteral("MPI_Init"),
-                        QStringLiteral("MPI_COMM_WORLD"), QStringLiteral("0 B"));
-    insertStructuredRow(QStringLiteral("00:00.014"), QStringLiteral("Rank 0"),
-                        QStringLiteral("ALL"), QStringLiteral("MPI_Bcast"),
-                        QStringLiteral("Root=0 MPI_COMM_WORLD"), QStringLiteral("256 B"));
-    insertStructuredRow(QStringLiteral("00:00.029"), QStringLiteral("Rank 0"),
-                        QStringLiteral("Rank 1"), QStringLiteral("MPI_Isend"),
-                        QStringLiteral("Tag=100 MPI_COMM_WORLD"), QStringLiteral("4096 B"));
-    insertStructuredRow(QStringLiteral("00:00.031"), QStringLiteral("Rank 1"),
-                        QStringLiteral("Rank 0"), QStringLiteral("MPI_Recv"),
-                        QStringLiteral("Tag=100 MPI_COMM_WORLD"), QStringLiteral("4096 B"));
 }
 
 /**
@@ -244,6 +230,13 @@ void MpiNetworkLogWidget::clearLogs() {
     if (m_textEdit) {
         m_textEdit->clear();
     }
+}
+
+/**
+ * @brief Convenience slot clearing all recorded MPI network traffic rows.
+ */
+void MpiNetworkLogWidget::clear() {
+    clearLogs();
 }
 
 /**

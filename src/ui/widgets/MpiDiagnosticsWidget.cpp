@@ -166,9 +166,6 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
         if (m_networkLogModeBtn) m_networkLogModeBtn->setChecked(idx == 1);
     });
 
-    // Populate initial rank wait-state telemetry rows so the Deadlock Analyzer is never a blank void.
-    populateDefaultRankTelemetry();
-
     // Connect item activation and table double-click to frame seek dispatcher.
     connect(m_deadlockList, &QListWidget::itemDoubleClicked,
             this, &MpiDiagnosticsWidget::onItemDoubleClicked);
@@ -178,6 +175,24 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
         }
     });
     connect(m_filterEdit, &QLineEdit::textChanged, this, &MpiDiagnosticsWidget::filterRankTable);
+}
+
+/**
+ * @brief Clears wait-state telemetry rows and deadlock alert entries for idle state.
+ */
+void MpiDiagnosticsWidget::clear() {
+    if (m_deadlockList) {
+        m_deadlockList->clear();
+    }
+    if (m_rankWaitTable) {
+        m_rankWaitTable->setRowCount(0);
+    }
+    if (m_statusBadge) {
+        m_statusBadge->setText(QStringLiteral("STATUS: NO CYCLE"));
+        m_statusBadge->setStyleSheet(QStringLiteral(
+            "color: #4ec9b0; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; "
+            "padding: 1px 6px; background: #1b2a2f; border: 1px solid #2c4a52; border-radius: 2px;"));
+    }
 }
 
 /**

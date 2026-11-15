@@ -112,6 +112,16 @@ public slots:
     void updateRankStateRow(int rankId, const QString& stateText, const QString& primitive,
                             const QString& target, uint64_t pcAddr, int totalRanks = -1);
 
+    /**
+     * @brief Clears all wait-state rows and deadlock alert entries when returning to idle.
+     */
+    void clear();
+
+    /**
+     * @brief Populates preview cluster rank wait-state telemetry rows into m_rankWaitTable.
+     */
+    void populateDefaultRankTelemetry();
+
 private slots:
     /**
      * @brief Handles double-clicking deadlock alert items in the list.
@@ -126,10 +136,6 @@ private slots:
     void filterRankTable(const QString& filterText);
 
 private:
-    /**
-     * @brief Populates default cluster rank wait-state telemetry rows into m_rankWaitTable.
-     */
-    void populateDefaultRankTelemetry();
 
     /// Tab widget container (with hidden inner QTabBar for single-row header switching).
     QTabWidget* m_tabWidget = nullptr;

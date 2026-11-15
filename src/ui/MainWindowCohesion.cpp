@@ -380,24 +380,18 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     uint64_t mainAddr = 0ULL;
     QString mainSymName;
     if (m_projectExplorerWidget) {
-        std::vector<SymbolEntry> syms;
-        syms.reserve(m_elfInspector->symbols().size());
+        std::vector<SymbolEntry> syms; syms.reserve(m_elfInspector->symbols().size());
         for (const auto& s : m_elfInspector->symbols()) syms.push_back({s.name, s.address, static_cast<uint32_t>(s.size)});
         m_projectExplorerWidget->setSymbols(syms);
-
-        std::vector<StringEntry> strs;
-        strs.reserve(m_elfInspector->strings().size());
+        std::vector<StringEntry> strs; strs.reserve(m_elfInspector->strings().size());
         for (const auto& str : m_elfInspector->strings()) strs.push_back({str.address, str.section, str.value});
         m_projectExplorerWidget->setStrings(strs);
     }
-
     // Locate main symbol if present so user targets open directly at main with DWARF line info.
     for (const auto& s : m_elfInspector->symbols()) {
-        if (s.isFunction && (s.name == QStringLiteral("main") || s.name == QStringLiteral("sym.main"))) {
-            mainAddr = s.address; mainSymName = s.name; break;
-        }
+        if (s.isFunction && (s.name == QStringLiteral("main") || s.name == QStringLiteral("sym.main"))) { mainAddr = s.address; mainSymName = s.name; break; }
     }
-
+    if (m_memView && !m_debugSessionActive) m_memView->clear();
     if (mainAddr != 0ULL && !sourceFilter.isEmpty()) {
         const QString disasm = m_elfInspector->disassembleSymbol(mainSymName, sourceFilter, &m_dwarfLineToAddress, &m_dwarfAddressToLine);
         if (m_disassemblyView && !disasm.isEmpty()) m_disassemblyView->setPlainText(disasm);
@@ -405,17 +399,14 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
                                 !m_disassemblyView->isDecompilerMode() && !m_disassemblyView->isSplitGraphDecompilerMode() &&
                                 !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
         seekToAddressOrExpression(QStringLiteral("0x%1").arg(mainAddr, 8, 16, QChar('0')));
-        if (keepLinear && m_disassemblyView) {
-            m_showingDecompilerFallback = false;
-            m_disassemblyView->setSplitGraphDecompilerMode(false);
-            m_disassemblyView->setGraphMode(false);
-        }
+        if (keepLinear && m_disassemblyView) { m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false); }
         rebuildDynamicSourceLineMap();
     } else {
         m_dwarfLineToAddress.clear(); m_dwarfAddressToLine.clear();
         const uint64_t entry = (mainAddr != 0ULL) ? mainAddr : m_elfInspector->entryPoint();
         if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
+    if (m_memView && !m_debugSessionActive && m_elfInspector->isValid()) m_memView->setSourceModeLabel(QStringLiteral("STATIC ELF (READ-ONLY)"));
     if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
     syncDisassemblyDecompilerVisibility(true); return true;
 }
