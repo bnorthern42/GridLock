@@ -51,10 +51,10 @@ public:
 
         QString status = state.currentState.isEmpty() ? QStringLiteral("idle") : state.currentState.toLower();
         const bool isIdleOrExited = (status == QStringLiteral("idle") || status == QStringLiteral("exited"));
-        QString pcStr = isIdleOrExited ? QStringLiteral("—")
-                                       : (state.registers.contains(16) && !state.registers.value(16).trimmed().isEmpty()
-                                              ? state.registers.value(16)
-                                              : QStringLiteral("0x00401120"));
+        QString pcStr = (isIdleOrExited || !state.registers.contains(16) ||
+                         state.registers.value(16).trimmed().isEmpty())
+                            ? QStringLiteral("—")
+                            : state.registers.value(16);
 
         // Determine background and outline colors based on selection and hover state
         const auto& tm = gridlock::core::ThemeManager::instance();
@@ -215,26 +215,17 @@ uint64_t ServerRackView::extractPcFromState(int rankId, const RankState& state) 
     if (!state.currentFunction.isEmpty() && tryParseHex(state.currentFunction, &parsed)) {
         return parsed;
     }
-    // Fall back to standard synthetic test offsets only for active stopped/running states
-    return (rankId == 0) ? 0x00401120ULL : 0x00401155ULL;
+    // No active instruction pointer reported for this rank.
+    Q_UNUSED(rankId);
+    return 0ULL;
 }
 
 /**
- * @brief Resets the cluster rack view with default simulated rank states.
+ * @brief Resets the cluster rack view into pre-launch idle cards with zero mock addresses.
  * @param count Number of rank nodes to generate.
  */
 void ServerRackView::resetRanks(int count) {
-    QList<RankState> initialRanks;
-    initialRanks.reserve(count);
-    for (int i = 0; i < count; ++i) {
-        RankState defaultState;
-        defaultState.rankId = i;
-        defaultState.currentState = (i == 0) ? QStringLiteral("stopped") : QStringLiteral("running");
-        defaultState.registers[16] = (i == 0) ? QStringLiteral("0x00401120") : QStringLiteral("0x00401155");
-        defaultState.totalRuntimeMs = 12 + i * 3;
-        initialRanks.append(defaultState);
-    }
-    updateRanks(initialRanks);
+    setSessionIdle(count);
 }
 
 /**

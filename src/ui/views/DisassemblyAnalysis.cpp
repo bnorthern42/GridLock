@@ -312,20 +312,25 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     }
   }
 
-  // Abort basic-block partitioning if no valid assembly instructions were parsed.
+  // Abort basic-block partitioning and reset view badges if no valid instructions were parsed.
   if (instructions.isEmpty()) {
+    // Clear symbol, signature, and decompiler output when assembly input is empty.
+    m_activeSymbol.clear(); m_functionSignature.clear(); m_decompiledPseudocode.clear(); refreshDecompilerView();
+    // Reset header, signature, and basic-block counter badges to idle placeholders.
+    if (m_headerBadge) { m_headerBadge->setText(QStringLiteral("DISASM | No binary loaded")); m_headerBadge->setToolTip(QString()); }
+    if (m_signatureLabel) { m_signatureLabel->setText(QString()); m_signatureLabel->setToolTip(QString()); }
+    if (m_statsBadge) m_statsBadge->setText(QStringLiteral("BB:0 E:0"));
     return;
   }
 
   // Ensure current address points to a valid instruction in the listing.
-  if (!m_addrToLine.contains(m_currentAddress)) {
-    m_currentAddress = instructions.first().address;
-  }
+  if (!m_addrToLine.contains(m_currentAddress)) m_currentAddress = instructions.first().address;
+  // Synthesize an entry-address sub_<addr> label when disassembly lines omit a symbol name.
+  if (m_activeSymbol.isEmpty()) m_activeSymbol = QStringLiteral("sub_%1").arg(instructions.first().address, 0, 16);
 
   // Step 2: Identify basic block leaders (entry point, jump destinations, fallthroughs).
   // Every leader address marks the first instruction of a distinct basic block node.
-  QSet<uint64_t> blockLeaders;
-  blockLeaders.insert(instructions.first().address);
+  QSet<uint64_t> blockLeaders; blockLeaders.insert(instructions.first().address);
 
   // Scan instruction stream to flag control-transfer source and destination boundaries.
   for (int idx = 0; idx < instructions.size(); ++idx) {
@@ -333,21 +338,12 @@ void DisassemblyView::parseDisassembly(const QString &asmCode) {
     if (inst.isConditionalBranch || inst.isUnconditionalBranch) {
       if (inst.targetAddr != 0 && m_addrToLine.contains(inst.targetAddr)) {
         // Record gutter branch arc linking source line to destination line.
-        BranchArc arc;
-        arc.fromLine = inst.lineIndex;
-        arc.toLine = m_addrToLine.value(inst.targetAddr);
-        arc.fromAddr = inst.address;
-        arc.toAddr = inst.targetAddr;
-        arc.isConditional = inst.isConditionalBranch;
-        m_branchArcs.append(arc);
-
+        m_branchArcs.append(BranchArc{inst.lineIndex, m_addrToLine.value(inst.targetAddr), inst.address, inst.targetAddr, inst.isConditionalBranch});
         // Branch target starts a new basic block.
         blockLeaders.insert(inst.targetAddr);
       }
       // Instruction immediately following a branch starts a new basic block.
-      if (idx + 1 < instructions.size()) {
-        blockLeaders.insert(instructions[idx + 1].address);
-      }
+      if (idx + 1 < instructions.size()) blockLeaders.insert(instructions[idx + 1].address);
     } else if (inst.isRet && idx + 1 < instructions.size()) {
       // Instruction following a return starts a new block.
       blockLeaders.insert(instructions[idx + 1].address);

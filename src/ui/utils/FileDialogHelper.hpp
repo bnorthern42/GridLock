@@ -243,13 +243,13 @@ public:
                                         std::function<void(uint64_t)> onSeek)
         : QObject(navBar), m_navBar(navBar), m_onSeek(std::move(onSeek)) {
         setObjectName(QStringLiteral("dynamicAddressRibbonFilter"));
-        // Initialize default segments with stack hidden while no debug session is active.
+        // Initialize ribbon segments in idle 'No ELF loaded' state with zero fabricated addresses.
         m_segments = {
-            {QStringLiteral("plt"), QStringLiteral(".plt 0x401000"), 0x00401000ULL, 0x0040111fULL, 14, "#2c2238", "#c586c0", "#b42318", true},
-            {QStringLiteral("text"), QStringLiteral(".text 0x401120 (sym.main)"), 0x00401120ULL, 0x00401fffULL, 34, "#1e3038", "#4ec9b0", "#1d4ed8", true},
-            {QStringLiteral("rodata"), QStringLiteral(".rodata 0x402000"), 0x00402000ULL, 0x00403fffULL, 18, "#1e2836", "#569cd6", "#0f766e", true},
-            {QStringLiteral("data"), QStringLiteral(".data 0x404000"), 0x00404000ULL, 0x00405fffULL, 16, "#2f291e", "#dcdcaa", "#15803d", true},
-            {QStringLiteral("stack"), QStringLiteral("stack 0x7fffffffe000"), 0x7fffffffe000ULL, 0x7fffffffffffULL, 18, "#332222", "#ce9178", "#b45309", false},
+            {QStringLiteral("plt"), QStringLiteral(".plt"), 0ULL, 0ULL, 14, "#2c2238", "#c586c0", "#b42318", false},
+            {QStringLiteral("text"), QStringLiteral("No ELF loaded"), 0ULL, 0ULL, 34, "#1e3038", "#4ec9b0", "#1d4ed8", true},
+            {QStringLiteral("rodata"), QStringLiteral(".rodata"), 0ULL, 0ULL, 18, "#1e2836", "#569cd6", "#0f766e", false},
+            {QStringLiteral("data"), QStringLiteral(".data"), 0ULL, 0ULL, 16, "#2f291e", "#dcdcaa", "#15803d", false},
+            {QStringLiteral("stack"), QStringLiteral("stack"), 0ULL, 0ULL, 18, "#332222", "#ce9178", "#b45309", false},
         };
         if (m_navBar) {
             m_navBar->setProperty("gl_ribbon_filter", true);
@@ -287,29 +287,34 @@ public:
                                     bool sessionActive,
                                     uint64_t stackRsp = 0ULL) {
         if (elf && elf->isValid()) {
-            // Map real ELF64 section headers (.plt, .text, .rodata, .data/.bss) into ribbon segments.
+            // Reset section slots cleanly and bind real ELF64 sections (.plt, .text, .rodata, .data/.bss).
+            const QStringList baseNames = {QStringLiteral(".plt"), QStringLiteral(".text"), QStringLiteral(".rodata"), QStringLiteral(".data")};
+            for (size_t i = 0; i < 4; ++i) {
+                m_segments[i].base = 0ULL; m_segments[i].end = 0ULL;
+                m_segments[i].label = baseNames[static_cast<int>(i)]; m_segments[i].visible = false;
+            }
             for (const auto& sec : elf->sections()) {
                 if (sec.address == 0ULL) continue;
                 const uint64_t endAddr = sec.address + (std::max<uint64_t>)(sec.size, 1ULL) - 1ULL;
                 const QString hexAddr = QStringLiteral("0x%1").arg(sec.address, 0, 16);
-                // Bind .plt procedure linkage table segment base and label.
                 if (sec.name == QStringLiteral(".plt")) {
-                    m_segments[0].base = sec.address; m_segments[0].end = endAddr;
-                    m_segments[0].label = QStringLiteral(".plt ") + hexAddr;
-                // Bind .text executable code segment base and label.
+                    m_segments[0].base = sec.address; m_segments[0].end = endAddr; m_segments[0].label = QStringLiteral(".plt ") + hexAddr; m_segments[0].visible = true;
                 } else if (sec.name == QStringLiteral(".text")) {
-                    m_segments[1].base = sec.address; m_segments[1].end = endAddr;
-                    m_segments[1].label = QStringLiteral(".text %1 (sym.main)").arg(hexAddr);
-                // Bind .rodata read-only constants segment base and label.
+                    m_segments[1].base = sec.address; m_segments[1].end = endAddr; m_segments[1].label = QStringLiteral(".text %1 (sym.main)").arg(hexAddr); m_segments[1].visible = true;
                 } else if (sec.name == QStringLiteral(".rodata")) {
-                    m_segments[2].base = sec.address; m_segments[2].end = endAddr;
-                    m_segments[2].label = QStringLiteral(".rodata ") + hexAddr;
-                // Bind .data or fallback .bss writable globals segment base and label.
-                } else if (sec.name == QStringLiteral(".data") || (sec.name == QStringLiteral(".bss") && m_segments[3].base == 0x00404000ULL)) {
-                    m_segments[3].base = sec.address; m_segments[3].end = endAddr;
-                    m_segments[3].label = QStringLiteral("%1 %2").arg(sec.name, hexAddr);
+                    m_segments[2].base = sec.address; m_segments[2].end = endAddr; m_segments[2].label = QStringLiteral(".rodata ") + hexAddr; m_segments[2].visible = true;
+                } else if (sec.name == QStringLiteral(".data") || (sec.name == QStringLiteral(".bss") && m_segments[3].base == 0ULL)) {
+                    m_segments[3].base = sec.address; m_segments[3].end = endAddr; m_segments[3].label = QStringLiteral("%1 %2").arg(sec.name, hexAddr); m_segments[3].visible = true;
                 }
             }
+            if (!m_segments[1].visible) { m_segments[1].label = QStringLiteral(".text"); m_segments[1].visible = true; }
+        } else {
+            // Clear stale ELF section addresses and show 'No ELF loaded' when no binary is active.
+            m_segments[0].base = 0ULL; m_segments[0].end = 0ULL; m_segments[0].label = QStringLiteral(".plt"); m_segments[0].visible = false;
+            m_segments[1].base = 0ULL; m_segments[1].end = 0ULL; m_segments[1].label = QStringLiteral("No ELF loaded"); m_segments[1].visible = true;
+            m_segments[2].base = 0ULL; m_segments[2].end = 0ULL; m_segments[2].label = QStringLiteral(".rodata"); m_segments[2].visible = false;
+            m_segments[3].base = 0ULL; m_segments[3].end = 0ULL; m_segments[3].label = QStringLiteral(".data"); m_segments[3].visible = false;
+            if (m_navBar) m_navBar->setProperty("currentAddress", QVariant::fromValue<qulonglong>(0ULL));
         }
         // Hide stack pill when idle; display live $rsp when a debugging session is active.
         m_segments[4].visible = sessionActive;
@@ -318,6 +323,8 @@ public:
             m_segments[4].base = rspBase;
             m_segments[4].end = rspBase + 0x1fffULL;
             m_segments[4].label = QStringLiteral("stack 0x%1").arg(rspBase, 0, 16);
+        } else {
+            m_segments[4].base = 0ULL; m_segments[4].end = 0ULL; m_segments[4].label = QStringLiteral("stack");
         }
         syncChildWidgets();
     }
@@ -330,6 +337,10 @@ protected:
      * @return True when custom painting or mouse handling consumed the event.
      */
     bool eventFilter(QObject* watched, QEvent* event) override {
+        auto isLastVisibleSeg = [&](size_t idx) {
+            for (size_t j = idx + 1; j < m_segments.size(); ++j) if (m_segments[j].visible) return false;
+            return true;
+        };
         // Suppress child QLabel native text painting so custom ribbon painter renders crisp single-pass labels.
         if (watched != m_navBar) {
             return (event->type() == QEvent::Paint) ? true : QObject::eventFilter(watched, event);
@@ -349,9 +360,8 @@ protected:
             int x = 0;
             for (size_t i = 0; i < m_segments.size(); ++i) {
                 if (!m_segments[i].visible) continue;
-                const bool isLast = (i == 4 || (i == 3 && !m_segments[4].visible));
-                const int segW = isLast ? (w - x) : (w * m_segments[i].weight) / totalWeight;
-                if (me->position().x() >= x && me->position().x() <= x + segW) {
+                const int segW = isLastVisibleSeg(i) ? (w - x) : (w * m_segments[i].weight) / totalWeight;
+                if (me->position().x() >= x && me->position().x() <= x + segW && m_segments[i].base != 0ULL) {
                     m_navBar->setProperty("currentAddress", QVariant::fromValue<qulonglong>(m_segments[i].base));
                     if (m_onSeek) m_onSeek(m_segments[i].base);
                     m_navBar->update();
@@ -388,9 +398,8 @@ protected:
         for (size_t i = 0; i < m_segments.size(); ++i) {
             const auto& seg = m_segments[i];
             if (!seg.visible) continue;
-            const bool isLast = (i == 4 || (i == 3 && !m_segments[4].visible));
-            const int segW = isLast ? (w - x) : (w * seg.weight) / totalWeight;
-            const bool inSeg = (curAddr >= seg.base && curAddr <= seg.end);
+            const int segW = isLastVisibleSeg(i) ? (w - x) : (w * seg.weight) / totalWeight;
+            const bool inSeg = (curAddr != 0ULL && seg.base != 0ULL && curAddr >= seg.base && curAddr <= seg.end);
             const QRect segRect(x, 1, (std::max)(1, segW - 1), (std::max)(2, h - 2));
             const QColor fill = pal.isDark ? QColor(QLatin1String(seg.darkFill))
                                            : QColor(inSeg ? pal.canvasHex : pal.headerHex);
@@ -407,14 +416,15 @@ protected:
             }
             x += segW;
         }
-        // Render top and bottom triangular address indicator needles at the active seek coordinate.
-        if (activeCursorX < 0) activeCursorX = (w * m_segments[0].weight) / totalWeight + 18;
-        const QColor needle = pal.isDark ? QColor(QStringLiteral("#ffcc00")) : QColor(pal.accentHex);
-        p.setPen(QPen(needle, 1));
-        p.drawLine(activeCursorX, 0, activeCursorX, 4); p.drawLine(activeCursorX, h - 4, activeCursorX, h);
-        p.setBrush(needle); p.setPen(Qt::NoPen);
-        p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, 0), QPoint(activeCursorX + 4, 0), QPoint(activeCursorX, 4)}));
-        p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, h), QPoint(activeCursorX + 4, h), QPoint(activeCursorX, h - 4)}));
+        // Render top and bottom triangular address indicator needles when a valid binary address is active.
+        if (curAddr != 0ULL && activeCursorX >= 0) {
+            const QColor needle = pal.isDark ? QColor(QStringLiteral("#ffcc00")) : QColor(pal.accentHex);
+            p.setPen(QPen(needle, 1));
+            p.drawLine(activeCursorX, 0, activeCursorX, 4); p.drawLine(activeCursorX, h - 4, activeCursorX, h);
+            p.setBrush(needle); p.setPen(Qt::NoPen);
+            p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, 0), QPoint(activeCursorX + 4, 0), QPoint(activeCursorX, 4)}));
+            p.drawPolygon(QPolygon({QPoint(activeCursorX - 4, h), QPoint(activeCursorX + 4, h), QPoint(activeCursorX, h - 4)}));
+        }
         return true;
     }
 
@@ -428,14 +438,17 @@ private:
         for (const auto& s : m_segments) if (s.visible) totalWeight += s.weight;
         const int w = (std::max)(1, m_navBar->width()), h = (std::max)(1, m_navBar->height());
         int x = 0;
+        auto isLastVisible = [&](size_t idx) {
+            for (size_t j = idx + 1; j < m_segments.size(); ++j) if (m_segments[j].visible) return false;
+            return true;
+        };
         // Update each child QLabel's text, visibility flag, and proportional horizontal geometry.
         for (size_t i = 0; i < m_segments.size(); ++i) {
             QLabel* lbl = m_labels[i];
             lbl->setText(m_segments[i].label);
             lbl->setVisible(m_segments[i].visible);
             if (m_segments[i].visible && totalWeight > 0) {
-                const bool isLast = (i == 4 || (i == 3 && !m_segments[4].visible));
-                const int segW = isLast ? (w - x) : (w * m_segments[i].weight) / totalWeight;
+                const int segW = isLastVisible(i) ? (w - x) : (w * m_segments[i].weight) / totalWeight;
                 lbl->setGeometry(x, 0, (std::max)(1, segW), h);
                 x += segW;
             }

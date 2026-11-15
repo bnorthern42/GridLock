@@ -480,7 +480,7 @@ void TestMainWindowUI::testCutterDisassemblyCfgAndBranchFlow() {
 
     // Capture Linear and CFG Graph mode snapshots for visual verification
     gridlock::core::managers::ThemeManager::instance().initialize();
-    disassemblyView->updateDisassembly(QString());
+    disassemblyView->loadSampleDisassembly();
     disassemblyView->seekToAddress(0x401120ULL);
     disassemblyView->setGraphMode(false);
     mainWindow.show();
@@ -550,6 +550,7 @@ void TestMainWindowUI::testCutterHexdumpDiffAndRegisterSeekSync() {
 void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
     gridlock::ui::MainWindow mainWindow;
     mainWindow.resize(1440, 900);
+    mainWindow.loadPreviewFixture();
     QWidget* navBar = mainWindow.findChild<QWidget*>("addressNavBar");
     QVERIFY(navBar != nullptr);
 

@@ -117,7 +117,10 @@ public:
     /// Returns the currently active 64-bit instruction pointer address.
     uint64_t currentAddress() const { return m_currentAddress; }
 
-    // Compatibility helpers for QPlainTextEdit-like inspection
+    /// Clears all disassembly, CFG, and decompiler state to idle empty state.
+    void clear();
+    /// Loads the built-in startup disassembly fixture (for preview fixtures and unit tests).
+    void loadSampleDisassembly() { updateDisassembly(defaultStartupDisassembly()); }
     QString toPlainText() const;
     void setPlainText(const QString& text);
     void setInstructions(const QString& text) { updateDisassembly(text); }
@@ -329,9 +332,9 @@ private:
     QVector<int> m_deadlockCycleRanks;
     QSet<uint64_t> m_bookmarks;
     QString m_baseDisassembly;
-    uint64_t m_currentAddress = 0x401120ULL;
+    uint64_t m_currentAddress = 0ULL;
     int m_selectedRank = 0;
-    int m_currentDecompilerLine = 1;
+    int m_currentDecompilerLine = -1;
     bool m_updatingDecompilerCursor = false;
     bool m_graphMode = false;
     bool m_decompilerMode = false;
@@ -346,8 +349,8 @@ private:
     QRectF m_activeCfgBlockRect;
     /// Scene Y center of the active instruction line inside the active CFG block.
     qreal m_activeCfgInstY = 0.0;
-    QString m_activeSymbol = QStringLiteral("sym.main");
-    QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");
+    QString m_activeSymbol;
+    QString m_functionSignature;
     QString m_targetLang = QStringLiteral("C");
     QString m_decompiledPseudocode;
     QString m_highlightedToken;

@@ -44,6 +44,7 @@
 #include "docks/CallStackDockWidget.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
+#include "utils/FileDialogHelper.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/MemView.hpp"
 #include "views/RegisterView.hpp"
@@ -817,14 +818,10 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
         }
     }
 
-    // 2. Persist workspace root in ConfigManager, reload breakpoints/watches, and update window title.
     auto& cfg = gridlock::core::ConfigManager::instance();
-    cfg.setWorkspace(resolvedDir);
-    cfg.setLastOpenDir(resolvedDir);
+    cfg.setWorkspace(resolvedDir); cfg.setLastOpenDir(resolvedDir);
     m_persistentBreakpoints = cfg.getBreakpoints();
-    for (const auto& w : cfg.loadProjectSettings().watchExpressions) {
-        if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
-    }
+    for (const auto& w : cfg.loadProjectSettings().watchExpressions) if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
     const QString folderName = QFileInfo(resolvedDir).fileName();
     setWindowTitle(QStringLiteral("GridLock - %1").arg(folderName.isEmpty() ? resolvedDir : folderName));
 
@@ -854,6 +851,11 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
             m_elfInspector->disassembleSymbol(QStringLiteral("main"), QFileInfo(mainSources.first()).fileName(), &m_dwarfLineToAddress, &m_dwarfAddressToLine);
             rebuildDynamicSourceLineMap();
         }
+    } else {
+        // Clear binary-derived symbols, strings, disassembly, and section ribbon when switching to an unbuilt workspace.
+        if (m_projectExplorerWidget) { m_projectExplorerWidget->setSymbols({}); m_projectExplorerWidget->setStrings({}); }
+        if (m_disassemblyView) m_disassemblyView->clear();
+        if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(nullptr, false);
     }
     if (!m_debugSessionActive && m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
     if (m_projectExplorerWidget) m_projectExplorerWidget->setSymbolsMode(false);

@@ -263,6 +263,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
  */
 void MainWindow::loadPreviewFixture() {
   m_previewFixtureOnly = true; m_useRealBinaryTarget = false;
+  if (m_projectExplorerWidget) { m_projectExplorerWidget->seedDefaultSymbols(); m_projectExplorerWidget->seedDefaultStrings(); }
+  if (m_disassemblyView) m_disassemblyView->loadSampleDisassembly();
   if (m_registerView) m_registerView->seedPreviewRegisters();
   if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->populateDefaultRankTelemetry();
   if (m_memView) { if (const QByteArray pm = synthesizeMemoryWindow(0x00401120ULL, 256); !pm.isEmpty()) m_memView->setMemoryData(QStringLiteral("0x00401120"), pm); }

@@ -878,11 +878,11 @@ void TestMainWindowUI::testLightThemesCohesionAndNoRedundantDarkModeCheckbox() {
         for (int y = 1; y < img.height() - 1; y += 2) for (int x = 2; x < img.width() - 2; x += 3) { sum += img.pixelColor(x, y).lightness(); ++cnt; }
         return cnt > 0 ? static_cast<double>(sum) / static_cast<double>(cnt) : 0.0;
     };
-    // Verify section ribbon (#addressNavBar), unchecked FILES/REVERSE buttons (> 170), and checked accent CODE button (> 110).
-    auto *navBar = mainWindow.findChild<QWidget*>(QStringLiteral("addressNavBar")), *filesBtn = explorer->findChild<QWidget*>(QStringLiteral("explorerFilesModeBtn"));
+    // Verify section ribbon (#addressNavBar), unchecked SYMBOLS/REVERSE buttons (> 170), and checked accent FILES/CODE buttons (> 110).
+    auto *navBar = mainWindow.findChild<QWidget*>(QStringLiteral("addressNavBar")), *filesBtn = explorer->findChild<QWidget*>(QStringLiteral("explorerFilesModeBtn")), *symBtn = explorer->findChild<QWidget*>(QStringLiteral("explorerSymbolsModeBtn"));
     auto *revBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveReverseBtn")), *codeBtn = mainWindow.findChild<QWidget*>(QStringLiteral("perspectiveCodeBtn"));
-    QVERIFY(navBar != nullptr && filesBtn != nullptr && revBtn != nullptr && codeBtn != nullptr);
-    QVERIFY2(avgLightness(navBar) > 170.0 && avgLightness(filesBtn) > 170.0 && avgLightness(revBtn) > 170.0 && avgLightness(codeBtn) > 110.0, qPrintable(QStringLiteral("Dark bar remained in solarized_light: nav=%1 files=%2 rev=%3 code=%4").arg(avgLightness(navBar)).arg(avgLightness(filesBtn)).arg(avgLightness(revBtn)).arg(avgLightness(codeBtn))));
+    QVERIFY(navBar != nullptr && filesBtn != nullptr && symBtn != nullptr && revBtn != nullptr && codeBtn != nullptr);
+    QVERIFY2(avgLightness(navBar) > 170.0 && avgLightness(symBtn) > 170.0 && avgLightness(revBtn) > 170.0 && avgLightness(filesBtn) > 110.0 && avgLightness(codeBtn) > 110.0, qPrintable(QStringLiteral("Dark bar remained in solarized_light: nav=%1 sym=%2 rev=%3 files=%4 code=%5").arg(avgLightness(navBar)).arg(avgLightness(symBtn)).arg(avgLightness(revBtn)).arg(avgLightness(filesBtn)).arg(avgLightness(codeBtn))));
     // Verify MemView activeHexTextColor lightness < 65, dark non-zero hex ink (< 75) in viewport, and #6e7781 muted zero bytes.
     QVERIFY2(memView->activeHexTextColor().lightness() < 65, "MemView activeHexTextColor must have lightness < 65 in solarized_light");
     auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit")); QVERIFY(dumpEdit != nullptr && dumpEdit->viewport() != nullptr);

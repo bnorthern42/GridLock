@@ -271,7 +271,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   headerLayout->setSpacing(4);
 
   // Address and active symbol indicator badge (flexible width so it never crushes right-side mode buttons)
-  m_headerBadge = new QLabel(QStringLiteral("DISASM | sym.main @ 0x00401120"), headerWidget);
+  m_headerBadge = new QLabel(QStringLiteral("DISASM | No binary loaded"), headerWidget);
   m_headerBadge->setObjectName("cutterDisasmBadge");
   m_headerBadge->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
   m_headerBadge->setMinimumWidth(0);
@@ -561,7 +561,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   reloadStyle();
   connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
           this, [this](bool) { reloadStyle(); });
-  updateDisassembly(defaultStartupDisassembly());
+  clear();
 }
 
 /** @brief Returns the raw plain text listing from the linear disassembly editor. */
@@ -717,19 +717,30 @@ bool DisassemblyView::seekToAddress(uint64_t address) {
   return m_addrToLine.contains(address) || m_addrToLine.contains(resolvedAddress) || !m_basicBlocks.isEmpty();
 }
 
+/** @brief Clears disassembly text, CFG blocks, decompiler output, and badges to idle empty state. */
+void DisassemblyView::clear() {
+  m_currentAddress = 0ULL; m_currentDecompilerLine = -1;
+  m_activeSymbol.clear(); m_functionSignature.clear(); m_baseDisassembly.clear(); m_decompiledPseudocode.clear();
+  m_branchArcs.clear(); m_basicBlocks.clear(); m_addrToLine.clear(); m_lineToAddr.clear(); m_xrefs.clear();
+  m_decompilerLineToAddr.clear(); m_addrToDecompilerLine.clear(); m_rankAddresses.clear(); m_deadlockCycleRanks.clear();
+  if (m_linearEdit) { m_linearEdit->clear(); m_linearEdit->setExtraSelections({}); m_linearEdit->updateGutter(); }
+  if (m_decompilerEdit) { m_decompilerEdit->clear(); m_decompilerEdit->setExtraSelections({}); }
+  if (m_headerBadge) { m_headerBadge->setText(QStringLiteral("DISASM | No binary loaded")); m_headerBadge->setToolTip(QString()); }
+  if (m_signatureLabel) { m_signatureLabel->setText(QString()); m_signatureLabel->setToolTip(QString()); }
+  if (m_statsBadge) m_statsBadge->setText(QStringLiteral("BB:0 E:0"));
+  rebuildCfgScene();
+}
+
 /**
  * @brief Updates linear assembly code, normalizes live GDB branch syntax, and rebuilds CFG views.
- * @param asmCode Raw assembly listing text (falls back to startup fixture if empty).
+ * @param asmCode Raw assembly listing text (clears view when empty).
  */
 void DisassemblyView::updateDisassembly(const QString &asmCode) {
-  QString raw = asmCode.trimmed().isEmpty() ? defaultStartupDisassembly() : asmCode;
-  QStringList normalizedLines;
-  // Normalize each instruction line via balanced template scanning before block partitioning.
-  const QStringList rawLines = raw.split(QLatin1Char('\n'));
-  normalizedLines.reserve(rawLines.size());
+  if (asmCode.trimmed().isEmpty()) { clear(); return; }
+  const QStringList rawLines = asmCode.split(QLatin1Char('\n'));
+  QStringList normalizedLines; normalizedLines.reserve(rawLines.size());
   for (const QString &line : rawLines) normalizedLines.append(normalizeDisassemblyLine(line));
   m_baseDisassembly = normalizedLines.join(QLatin1Char('\n'));
-  // Treat newly loaded disassembly as fresh function view that re-anchors left edge.
   m_cfgUserScrolled = false;
   const QString effectiveCode = applyUserCommentsToListing(applyPatchesToListing(m_baseDisassembly));
   if (m_linearEdit && m_linearEdit->toPlainText() != effectiveCode) m_linearEdit->setPlainText(effectiveCode);
@@ -741,27 +752,18 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   if (m_linearEdit) m_linearEdit->updateGutter();
 }
 
-/**
- * @brief Highlights the active instruction pointer line in the linear assembly editor.
- */
+/** @brief Highlights the active instruction pointer line and search token matches in linear assembly. */
 void DisassemblyView::highlightActiveInstruction() {
   if (!m_linearEdit) return;
   const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
   QList<QTextEdit::ExtraSelection> selections;
-  // Locate line index mapped to current RIP/PC and scroll linear disassembly to keep it centered.
-  int line = m_addrToLine.value(m_currentAddress, -1);
+  // Locate line index mapped to current RIP/PC and center linear disassembly viewport.
+  const int line = m_addrToLine.value(m_currentAddress, -1);
   if (line >= 0) {
-    QTextBlock block = m_linearEdit->document()->findBlockByNumber(line);
-    if (block.isValid()) {
-      QTextCursor cursor(block);
-      m_linearEdit->setTextCursor(cursor);
-      m_linearEdit->centerCursor();
-      // Apply full-width highlight band across the active instruction row.
-      QTextEdit::ExtraSelection sel;
-      sel.format.setBackground(isDark ? QColor(0x1f, 0x34, 0x42) : QColor(46, 160, 67, 45));
-      sel.format.setProperty(QTextFormat::FullWidthSelection, true);
-      sel.cursor = cursor;
-      sel.cursor.clearSelection();
+    if (QTextBlock block = m_linearEdit->document()->findBlockByNumber(line); block.isValid()) {
+      QTextCursor cursor(block); m_linearEdit->setTextCursor(cursor); m_linearEdit->centerCursor();
+      QTextEdit::ExtraSelection sel; sel.format.setBackground(isDark ? QColor(0x1f, 0x34, 0x42) : QColor(46, 160, 67, 45));
+      sel.format.setProperty(QTextFormat::FullWidthSelection, true); sel.cursor = cursor; sel.cursor.clearSelection();
       selections.append(sel);
     }
   }
@@ -769,16 +771,11 @@ void DisassemblyView::highlightActiveInstruction() {
   if (!m_highlightedToken.isEmpty() && m_linearEdit->document()) {
     QTextCursor tc(m_linearEdit->document());
     while (!(tc = m_linearEdit->document()->find(m_highlightedToken, tc)).isNull()) {
-      QTextEdit::ExtraSelection tokSel;
-      tokSel.format.setBackground(QColor(0x3a, 0x44, 0x54));
-      tokSel.format.setForeground(QColor(0xff, 0xd7, 0x00));
-      tokSel.cursor = tc;
-      selections.append(tokSel);
+      QTextEdit::ExtraSelection tokSel; tokSel.format.setBackground(QColor(0x3a, 0x44, 0x54));
+      tokSel.format.setForeground(QColor(0xff, 0xd7, 0x00)); tokSel.cursor = tc; selections.append(tokSel);
     }
   }
-  // Commit extra selections and trigger branch-flow gutter repaint.
-  m_linearEdit->setExtraSelections(selections);
-  m_linearEdit->updateGutter();
+  m_linearEdit->setExtraSelections(selections); m_linearEdit->updateGutter();
 }
 
 /**

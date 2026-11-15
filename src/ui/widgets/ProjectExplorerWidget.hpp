@@ -116,6 +116,10 @@ public:
      * @param strings Vector of string entries.
      */
     void setStrings(const std::vector<StringEntry>& strings);
+    /// Seeds preview-fixture symbols explicitly when preview mode is requested.
+    void seedDefaultSymbols();
+    /// Seeds preview-fixture strings explicitly when preview mode is requested.
+    void seedDefaultStrings();
 
     /**
      * @brief Toggles the binary strings inspector mode.
@@ -228,9 +232,7 @@ private slots:
     void filterStrings(const QString& filterText);
 
 private:
-    void seedDefaultSymbols();
     void populateSymbolsTable(const QString& filterText = QString());
-    void seedDefaultStrings();
     void populateStringsTable(const QString& filterText = QString());
     void refreshTreeViewPath(const QString& focusPath = QString());
 

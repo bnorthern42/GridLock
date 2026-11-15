@@ -354,18 +354,6 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
   QSet<QString> stackOffsets;
   QMap<QString, uint64_t> stackOffsetFirstAddr;
   QStringList callsFound;
-  bool hasLoopBackEdge = false;
-  bool hasCondBranch = false;
-
-  // Scan control-flow arcs for loop back-edges and conditional branches
-  for (const auto &arc : m_branchArcs) {
-    if (arc.toAddr <= arc.fromAddr) {
-      hasLoopBackEdge = true;
-    }
-    if (arc.isConditional) {
-      hasCondBranch = true;
-    }
-  }
 
   // Scan basic-block lines for stack variable offsets and external library calls
   for (const DisasmBasicBlock &bb : m_basicBlocks) {
@@ -401,6 +389,9 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
 
   m_decompilerLineToAddr.clear();
   m_addrToDecompilerLine.clear();
+  if (m_basicBlocks.isEmpty() && m_baseDisassembly.trimmed().isEmpty()) {
+    return QString();
+  }
 
   QStringList out;
   auto emitLine = [&](const QString &text, uint64_t addr, bool isPrimaryStmt) {
@@ -415,7 +406,7 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
   };
 
   const uint64_t entryAddr =
-      m_basicBlocks.isEmpty() ? 0x00401120ULL : m_basicBlocks.first().startAddress;
+      m_basicBlocks.isEmpty() ? m_currentAddress : m_basicBlocks.first().startAddress;
 
   // Emit language-specific function header, includes, and local variable declarations
   int sigLineNum = 1;
@@ -569,14 +560,9 @@ QString DisassemblyView::decompileToLanguage(const QString &lang) const {
     }
   }
 
-  // Fallback template when basic-block analysis cannot isolate structured blocks
-  if (!hasLoopBackEdge && !hasCondBranch && m_basicBlocks.isEmpty()) {
-    emitLine(QStringLiteral("  int32_t var_4h = 0;"), entryAddr, false);
-    emitLine(QStringLiteral("  if (var_4h == 0) { MPI_Init(&argc, &argv); }"), entryAddr, true);
-  }
-  if (!isPseudo) {
+  if (!isPseudo && !out.isEmpty()) {
     const uint64_t endAddr =
-        m_basicBlocks.isEmpty() ? entryAddr : m_basicBlocks.last().endAddress;
+        m_basicBlocks.isEmpty() ? m_currentAddress : m_basicBlocks.last().endAddress;
     emitLine(QStringLiteral("}"), endAddr, false);
   }
   return out.join('\n');
@@ -671,9 +657,10 @@ bool DisassemblyView::toggleBookmark(uint64_t address) {
   } else {
     m_bookmarks.insert(address);
   }
-  // Refresh the disassembly listing to update bookmark gutter indicators
-  updateDisassembly(m_baseDisassembly.isEmpty() ? defaultStartupDisassembly()
-                                                : m_baseDisassembly);
+  // Refresh the disassembly listing when disassembly text is active to update bookmark gutter indicators
+  if (!m_baseDisassembly.isEmpty()) {
+    updateDisassembly(m_baseDisassembly);
+  }
   return m_bookmarks.contains(address);
 }
 

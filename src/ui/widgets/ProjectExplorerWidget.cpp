@@ -249,9 +249,7 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   setMaximumWidth(QWIDGETSIZE_MAX);
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-  seedDefaultSymbols();
   populateSymbolsTable();
-  seedDefaultStrings();
   populateStringsTable();
 
   // Mode switcher button slots
@@ -298,8 +296,8 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
       "#ProjectExplorerWidget::close-button, #ProjectExplorerWidget::float-button { icon-size: 14px; width: 20px; height: 20px; }"
       "#ProjectExplorerWidget::close-button:hover, #ProjectExplorerWidget::float-button:hover { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }");
 
-  // Default to Symbols view so the binary symbol table is immediately inspectable
-  setSymbolsMode(true);
+  // Default to FILES view with zero binary symbols or strings until an ELF binary is loaded
+  setSymbolsMode(false);
   reloadStyle();
 
   // Re-render styles, symbol table, and string table foregrounds whenever Dark/Light mode toggles
@@ -327,6 +325,7 @@ void ProjectExplorerWidget::seedDefaultSymbols() {
       {QStringLiteral("sym.init_deeply_nested"), 0x00401142ULL, 38},
       {QStringLiteral("sym.rank_coordinator"), 0x00401168ULL, 64},
   };
+  populateSymbolsTable(m_symbolFilterEdit ? m_symbolFilterEdit->text() : QString());
 }
 
 /**
@@ -340,6 +339,7 @@ void ProjectExplorerWidget::seedDefaultStrings() {
       {0x00402050ULL, QStringLiteral(".dynstr"), QStringLiteral("libmpi.so.40")},
       {0x00402060ULL, QStringLiteral(".dynstr"), QStringLiteral("GLIBC_2.38")},
   };
+  populateStringsTable(m_stringFilterEdit ? m_stringFilterEdit->text() : QString());
 }
 
 /**
