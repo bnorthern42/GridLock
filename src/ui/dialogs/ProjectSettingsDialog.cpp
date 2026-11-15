@@ -9,6 +9,7 @@
  */
 
 #include "ProjectSettingsDialog.hpp"
+#include "../utils/FileDialogHelper.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 
 #include <QAbstractItemView>
@@ -16,6 +17,7 @@
 #include <QCoreApplication>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -26,6 +28,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSet>
+#include <QSignalBlocker>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
@@ -63,38 +67,181 @@ QString workstationDialogStyleSheet() {
 // ProjectSettingsDialog Implementation
 // ============================================================================
 
+namespace {
+
+/**
+ * @brief Checks whether @p filePath is a runnable user ELF executable.
+ * @param filePath Candidate file path on disk.
+ * @return True if executable non-shared ELF with valid magic bytes.
+ */
+bool isRunnableElfCandidate(const QString& filePath) {
+    // Reject empty strings before inspecting filesystem metadata.
+    if (filePath.isEmpty()) return false;
+    const QString lower = filePath.toLower();
+    // Skip CMake/Meson internal probe binaries, shared libraries, objects, and split debuginfo files.
+    if (lower.contains(QStringLiteral("/meson-private/")) || lower.contains(QStringLiteral("/cmakefiles/")) ||
+        lower.contains(QStringLiteral("sanitycheck")) || lower.endsWith(QStringLiteral(".o")) ||
+        lower.endsWith(QStringLiteral(".a")) || lower.endsWith(QStringLiteral(".so")) ||
+        lower.contains(QStringLiteral(".so.")) || lower.endsWith(QStringLiteral(".debug"))) {
+        return false;
+    }
+    // Require a regular executable file of at least 4 bytes so the ELF magic header can be read.
+    const QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile() || !fi.isExecutable() || fi.size() < 4) return false;
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    // Verify the standard 4-byte `\x7fELF` header signature.
+    const QByteArray magic = f.read(4);
+    return magic.size() == 4 && magic[0] == '\x7f' && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
+}
+
+/**
+ * @brief Collects deduplicated ELF launch targets from toolbar state and workspace build folders.
+ * @param wsRoot Active workspace root directory path.
+ * @param toolbarTargetCombo Optional MainWindow `#toolbarTargetSelector` combo box.
+ * @return Ordered list of absolute paths to discovered runnable executables.
+ */
+QStringList discoverProjectBinaries(const QString& wsRoot, QComboBox* toolbarTargetCombo) {
+    QStringList ordered;
+    QSet<QString> seen;
+    // Deduplicate candidate paths using canonical path keys so symlinks map to one entry.
+    auto addCandidate = [&](const QString& path) {
+        if (!isRunnableElfCandidate(path)) return;
+        const QString absPath = QFileInfo(path).absoluteFilePath();
+        const QString canon = QFileInfo(absPath).canonicalFilePath();
+        const QString key = canon.isEmpty() ? absPath : canon;
+        if (seen.contains(key)) return;
+        seen.insert(key);
+        ordered << absPath;
+    };
+    // Preserve active toolbar selector target first so opening Project Settings keeps current selection.
+    if (toolbarTargetCombo) {
+        const int cur = toolbarTargetCombo->currentIndex();
+        if (cur >= 0) addCandidate(toolbarTargetCombo->itemData(cur).toString());
+        // Include remaining toolbar executables ahead of filesystem discovery results.
+        for (int i = 0; i < toolbarTargetCombo->count(); ++i) {
+            const QString data = toolbarTargetCombo->itemData(i).toString();
+            if (data != QStringLiteral("__open_binary__")) addCandidate(data);
+        }
+    }
+    // Stop early when no valid workspace root directory is active.
+    if (wsRoot.isEmpty() || !QFileInfo::exists(wsRoot)) return ordered;
+    const QDir rootDir(wsRoot);
+    // Scan top-level workspace executables directly before descending into build folders.
+    for (const QFileInfo& fi : rootDir.entryInfoList(QDir::Files | QDir::Executable | QDir::NoDotAndDotDot)) {
+        addCandidate(fi.absoluteFilePath());
+    }
+    // Search standard Meson, CMake, and custom output directories recursively.
+    const QStringList subDirs = {QStringLiteral("build_meson"), QStringLiteral("build_cmake"),
+                                 QStringLiteral("builddir"), QStringLiteral("build"),
+                                 QStringLiteral("bin"), QStringLiteral("src")};
+    QStringList discovered;
+    for (const QString& sub : subDirs) {
+        const QString subPath = rootDir.filePath(sub);
+        if (!QFileInfo(subPath).isDir()) continue;
+        // Walk each build directory subtree for compiled ELF binaries.
+        QDirIterator it(subPath, QDir::Files | QDir::Executable | QDir::NoDotAndDotDot,
+                        QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString candidate = it.next();
+            if (isRunnableElfCandidate(candidate)) discovered << QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    // Sort discovered workspace executables case-insensitively before appending.
+    discovered.sort(Qt::CaseInsensitive);
+    for (const QString& bin : discovered) addCandidate(bin);
+    return ordered;
+}
+
+} // namespace
+
 /**
  * @brief Constructs and presents the project settings configuration dialog.
  * @param parent Optional parent widget.
  */
 ProjectSettingsDialog::ProjectSettingsDialog(QWidget* parent) : QDialog(parent) {
-    // Configure window title, dark-slate chrome, and workstation modal geometry.
+    // Configure window title, dark-slate chrome, and spacious workstation modal geometry.
     setWindowTitle(QStringLiteral("Project Settings"));
-    setMinimumSize(460, 250);
-    resize(480, 260);
+    setMinimumSize(540, 290);
+    resize(600, 310);
     setStyleSheet(workstationDialogStyleSheet());
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(10, 10, 10, 10);
     rootLayout->setSpacing(8);
 
-    // GroupBox card wrapping target binary, arguments, and working directory fields.
+    // GroupBox card wrapping target binary, CLI args, working directory, and MPI execution settings.
     auto* card = new QGroupBox(QStringLiteral("Target Execution Configuration"), this);
     auto* form = new QFormLayout(card);
     form->setContentsMargins(10, 12, 10, 10);
     form->setSpacing(8);
 
-    m_targetBinary = new QLineEdit(card);
-    m_targetBinary->setFixedHeight(24);
-    m_binaryArguments = new QLineEdit(card);
-    m_binaryArguments->setFixedHeight(24);
-    m_workingDirectory = new QLineEdit(card);
-    m_workingDirectory->setFixedHeight(24);
+    // Target executable editable combo box paired with workspace-scoped Browse button.
+    m_targetBinaryCombo = new QComboBox(card);
+    m_targetBinaryCombo->setObjectName(QStringLiteral("targetBinaryCombo"));
+    m_targetBinaryCombo->setEditable(true);
+    m_targetBinaryCombo->setMinimumWidth(260);
+    m_targetBinaryCombo->setFixedHeight(24);
+    // Name the inner QLineEdit for direct UI testing and theme targeting.
+    if (m_targetBinaryCombo->lineEdit()) {
+        m_targetBinaryCombo->lineEdit()->setObjectName(QStringLiteral("targetBinaryEdit"));
+    }
+    // Browse button launching a workspace-rooted executable picker dialog.
+    m_targetBrowseBtn = new QPushButton(QStringLiteral("Browse..."), card);
+    m_targetBrowseBtn->setObjectName(QStringLiteral("targetBrowseBtn"));
+    m_targetBrowseBtn->setFixedSize(88, 24);
+    // Horizontal row grouping the editable target combo and its Browse trigger.
+    auto* targetRow = new QHBoxLayout();
+    targetRow->setContentsMargins(0, 0, 0, 0);
+    targetRow->setSpacing(6);
+    targetRow->addWidget(m_targetBinaryCombo, 1);
+    targetRow->addWidget(m_targetBrowseBtn);
 
-    // Mount labelled form rows for each configurable parameter.
-    form->addRow(QStringLiteral("Target Binary:"), m_targetBinary);
-    form->addRow(QStringLiteral("Binary Arguments:"), m_binaryArguments);
-    form->addRow(QStringLiteral("Working Directory:"), m_workingDirectory);
+    // Command-line arguments forwarded to the inferior process upon launch.
+    m_binaryArguments = new QLineEdit(card);
+    m_binaryArguments->setObjectName(QStringLiteral("targetArgsEdit"));
+    m_binaryArguments->setPlaceholderText(QStringLiteral("e.g., config.toml --threads 4"));
+    m_binaryArguments->setFixedHeight(24);
+
+    // Inferior working directory input paired with folder Browse button.
+    m_workingDirectory = new QLineEdit(card);
+    m_workingDirectory->setObjectName(QStringLiteral("workingDirEdit"));
+    m_workingDirectory->setFixedHeight(24);
+    // Folder chooser button for selecting the execution working directory.
+    m_workingDirBrowseBtn = new QPushButton(QStringLiteral("Browse..."), card);
+    m_workingDirBrowseBtn->setObjectName(QStringLiteral("workingDirBrowseBtn"));
+    m_workingDirBrowseBtn->setFixedSize(88, 24);
+    // Horizontal row pairing working directory input and folder chooser trigger.
+    auto* wdRow = new QHBoxLayout();
+    wdRow->setContentsMargins(0, 0, 0, 0);
+    wdRow->setSpacing(6);
+    wdRow->addWidget(m_workingDirectory, 1);
+    wdRow->addWidget(m_workingDirBrowseBtn);
+
+    // Per-project MPI rank count (-np) and launcher flags row.
+    m_mpiRanksSpin = new QSpinBox(card);
+    m_mpiRanksSpin->setObjectName(QStringLiteral("mpiRanksSpin"));
+    m_mpiRanksSpin->setRange(1, 256);
+    m_mpiRanksSpin->setFixedHeight(24);
+    // Additional flags forwarded directly to mpirun/mpiexec (e.g., oversubscribe/binding).
+    m_mpiArgsEdit = new QLineEdit(card);
+    m_mpiArgsEdit->setObjectName(QStringLiteral("mpiArgsEdit"));
+    m_mpiArgsEdit->setPlaceholderText(QStringLiteral("e.g., --oversubscribe --bind-to core"));
+    m_mpiArgsEdit->setFixedHeight(24);
+    // Inline row aligning MPI rank spinbox alongside optional mpirun flag input.
+    auto* mpiRow = new QHBoxLayout();
+    mpiRow->setContentsMargins(0, 0, 0, 0);
+    mpiRow->setSpacing(6);
+    mpiRow->addWidget(m_mpiRanksSpin);
+    auto* mpiArgsLbl = new QLabel(QStringLiteral("MPI Args:"), card);
+    mpiRow->addWidget(mpiArgsLbl);
+    mpiRow->addWidget(m_mpiArgsEdit, 1);
+
+    // Mount labelled form rows for each configurable execution parameter.
+    form->addRow(QStringLiteral("Target Binary:"), targetRow);
+    form->addRow(QStringLiteral("Program Arguments:"), m_binaryArguments);
+    form->addRow(QStringLiteral("Working Directory:"), wdRow);
+    form->addRow(QStringLiteral("MPI Ranks (-np):"), mpiRow);
     rootLayout->addWidget(card, 1);
 
     // Construct 24px-high Ok/Cancel dialog button strip.
@@ -106,27 +253,142 @@ ProjectSettingsDialog::ProjectSettingsDialog(QWidget* parent) : QDialog(parent) 
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     rootLayout->addWidget(buttons);
 
-    // Pre-populate fields from active ConfigManager project settings state.
-    const auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
-    m_targetBinary->setText(QString::fromStdString(ps.targetBinary));
-    m_binaryArguments->setText(QString::fromStdString(ps.programArguments));
-    m_workingDirectory->setText(QString::fromStdString(ps.workingDirectory));
+    // Resolve active workspace root, discovered ELFs, and persisted ConfigManager project settings.
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const auto ps = cfg.loadProjectSettings();
+    const QString wsRoot = FileDialogHelper::resolveDefaultDirectory(cfg.workspacePath());
+    const QString wsCanon = QFileInfo(wsRoot).canonicalFilePath();
+    auto* parentTargetCombo = parent ? parent->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")) : nullptr;
+    auto* parentRankSpin = parent ? parent->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")) : nullptr;
+    const QStringList discovered = discoverProjectBinaries(wsRoot, parentTargetCombo);
+    for (const QString& bin : discovered) m_targetBinaryCombo->addItem(bin, bin);
+
+    // Pre-select persisted workspace target or auto-fill with active toolbar / discovered ELF target.
+    const QString savedTarget = QString::fromStdString(ps.targetBinary).trimmed();
+    const QString savedCanon = QFileInfo(savedTarget).canonicalFilePath();
+    const bool savedInWs = !savedCanon.isEmpty() && !wsCanon.isEmpty() &&
+                           (savedCanon == wsCanon || savedCanon.startsWith(wsCanon + QLatin1Char('/')));
+    // Honor saved target only if it exists and belongs to the active workspace (or no workspace discovery exists).
+    if (!savedTarget.isEmpty() && QFileInfo::exists(savedTarget) &&
+        (wsCanon.isEmpty() || savedInWs || m_targetBinaryCombo->count() == 0)) {
+        int matchIdx = -1;
+        // Locate matching candidate inside the pre-populated combo box by canonical path.
+        for (int i = 0; i < m_targetBinaryCombo->count(); ++i) {
+            if (QFileInfo(m_targetBinaryCombo->itemData(i).toString()).canonicalFilePath() == savedCanon) {
+                matchIdx = i;
+                break;
+            }
+        }
+        // Prepend explicit saved path if it lies outside the auto-scanned build subdirectories.
+        if (matchIdx < 0) {
+            m_targetBinaryCombo->insertItem(0, savedTarget, savedTarget);
+            matchIdx = 0;
+        }
+        m_targetBinaryCombo->setCurrentIndex(matchIdx);
+    } else if (m_targetBinaryCombo->count() > 0) {
+        // Default to active toolbar target or first discovered workspace executable.
+        m_targetBinaryCombo->setCurrentIndex(0);
+    } else {
+        // Fall back to editable text when no runnable workspace binary is present yet.
+        m_targetBinaryCombo->setCurrentText(savedTarget);
+    }
+
+    // Populate program arguments, working directory (defaulting to workspace root), and MPI fields.
+    const QString savedArgs = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+    m_binaryArguments->setText(savedArgs);
+    const QString savedWd = QString::fromStdString(ps.workingDirectory).trimmed();
+    m_workingDirectory->setText((!savedWd.isEmpty() && QFileInfo(savedWd).isDir()) ? savedWd : wsRoot);
+    const int initRanks = ps.mpiRanks > 0 ? ps.mpiRanks : (parentRankSpin ? parentRankSpin->value() : cfg.getDefaultRanks());
+    m_mpiRanksSpin->setValue(qMax(1, initRanks));
+    m_mpiArgsEdit->setText(ps.mpiArgs);
+
+    // Wire workspace-aware executable picker to target combo box.
+    connect(m_targetBrowseBtn, &QPushButton::clicked, this, [this, wsRoot]() {
+        const QString wd = m_workingDirectory->text().trimmed();
+        const QString seed = (!wd.isEmpty() && QFileInfo(wd).isDir()) ? wd : wsRoot;
+        const QString picked = FileDialogHelper::getOpenFileName(
+            this, QStringLiteral("Select Target Executable"), seed, QStringLiteral("Executables (*);;All Files (*)"));
+        if (!picked.isEmpty()) m_targetBinaryCombo->setCurrentText(picked);
+    });
+    // Wire workspace-aware folder picker to working directory input.
+    connect(m_workingDirBrowseBtn, &QPushButton::clicked, this, [this, wsRoot]() {
+        const QString wd = m_workingDirectory->text().trimmed();
+        const QString seed = (!wd.isEmpty() && QFileInfo(wd).isDir()) ? wd : wsRoot;
+        const QString picked = FileDialogHelper::getExistingDirectory(
+            this, QStringLiteral("Select Working Directory"), seed);
+        if (!picked.isEmpty()) m_workingDirectory->setText(picked);
+    });
 }
 
 /**
- * @brief Serializes form inputs back to ConfigManager on user acceptance.
+ * @brief Serializes form inputs back to ConfigManager and synchronizes MainWindow toolbar controls.
  */
 void ProjectSettingsDialog::accept() {
-    // Read current project configuration snapshot.
-    auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    auto ps = cfg.loadProjectSettings();
+    // Resolve typed text vs combo user data, normalizing relative binary paths against working directory.
+    const QString typedTarget = m_targetBinaryCombo->currentText().trimmed();
+    QString chosenTarget = typedTarget;
+    const int curIdx = m_targetBinaryCombo->currentIndex();
+    if (curIdx >= 0 && m_targetBinaryCombo->itemText(curIdx) == typedTarget) {
+        const QString dataPath = m_targetBinaryCombo->itemData(curIdx).toString().trimmed();
+        if (!dataPath.isEmpty()) chosenTarget = dataPath;
+    }
+    // Fall back to workspace root when the user leaves Working Directory empty.
+    QString wd = m_workingDirectory->text().trimmed();
+    if (wd.isEmpty()) wd = FileDialogHelper::resolveDefaultDirectory(cfg.workspacePath());
+    if (!chosenTarget.isEmpty() && !QDir::isAbsolutePath(chosenTarget) && !wd.isEmpty()) {
+        const QString candidate = QDir(wd).filePath(chosenTarget);
+        if (QFileInfo::exists(candidate)) chosenTarget = QFileInfo(candidate).absoluteFilePath();
+    }
 
-    // Update settings model with edited values from GUI fields.
-    ps.targetBinary = m_targetBinary->text().toStdString();
-    ps.programArguments = m_binaryArguments->text().toStdString();
-    ps.workingDirectory = m_workingDirectory->text().toStdString();
+    // Persist updated project execution parameters into `.gridlock/settings.toml` and QSettings.
+    ps.targetBinary = chosenTarget.toStdString();
+    ps.targetArguments = m_binaryArguments->text().trimmed();
+    ps.programArguments = ps.targetArguments.toStdString();
+    ps.workingDirectory = wd.toStdString();
+    ps.mpiRanks = m_mpiRanksSpin->value();
+    ps.mpiArgs = m_mpiArgsEdit->text().trimmed();
+    cfg.saveProjectSettings(ps);
 
-    // Commit changes to persistent storage and close dialog.
-    gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+    // Mirror updated MPI rank count and flags into global DebuggerSettings defaults.
+    auto ds = cfg.getDebuggerSettings();
+    ds.defaultRanks = ps.mpiRanks;
+    ds.mpiArgs = ps.mpiArgs;
+    cfg.saveDebuggerSettings(ds);
+
+    // Synchronize parent MainWindow toolbar rank spinbox and TARGET selector immediately.
+    if (QWidget* parentWin = parentWidget()) {
+        // Update main toolbar RANKS (-np) spinbox if present on the parent window.
+        if (auto* rankSpin = parentWin->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"))) {
+            rankSpin->setValue(ps.mpiRanks);
+        }
+        // Update main toolbar TARGET selector combo box and trigger binary/DWARF loading on switch.
+        if (auto* targetCombo = parentWin->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"))) {
+            if (!chosenTarget.isEmpty()) {
+                const QString chosenCanon = QFileInfo(chosenTarget).canonicalFilePath();
+                int matchIdx = -1;
+                int openBinIdx = -1;
+                // Search existing toolbar entries while tracking the sentinel Open Binary action index.
+                for (int i = 0; i < targetCombo->count(); ++i) {
+                    const QString data = targetCombo->itemData(i).toString();
+                    if (data == QStringLiteral("__open_binary__")) { openBinIdx = i; continue; }
+                    if (data == chosenTarget || (!chosenCanon.isEmpty() && QFileInfo(data).canonicalFilePath() == chosenCanon)) {
+                        matchIdx = i;
+                        break;
+                    }
+                }
+                // Insert custom binary right before `Open ELF / Binary...` when not already listed.
+                if (matchIdx < 0) {
+                    const int insertAt = (openBinIdx >= 0) ? openBinIdx : targetCombo->count();
+                    targetCombo->insertItem(insertAt, QFileInfo(chosenTarget).fileName(), chosenTarget);
+                    matchIdx = insertAt;
+                }
+                // Activating the combo entry invokes MainWindow's connected selectTargetByName handler.
+                targetCombo->setCurrentIndex(matchIdx);
+            }
+        }
+    }
     QDialog::accept();
 }
 

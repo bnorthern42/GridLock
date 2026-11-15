@@ -110,6 +110,22 @@ class IBackendCoordinator : public QObject {
   }
 
   /**
+   * @brief Stores CLI arguments and inferior working directory for the next launched debug session.
+   * @param targetArgs Program command-line arguments string (e.g. `"config.toml --threads 4"`).
+   * @param workingDir Initial working directory path for the spawned target binary.
+   */
+  virtual void setTargetExecutionContext(const QString& targetArgs, const QString& workingDir) {
+    setProperty("gridlock_target_args", targetArgs);
+    setProperty("gridlock_working_dir", workingDir);
+  }
+
+  /** @brief Returns the configured inferior command-line arguments string. */
+  QString targetArguments() const { return property("gridlock_target_args").toString(); }
+
+  /** @brief Returns the configured inferior working directory path. */
+  QString workingDirectory() const { return property("gridlock_working_dir").toString(); }
+
+  /**
    * @brief Registers an active breakpoint at `file:line` with optional @p condition and @p rankFilter (`-1` = all ranks).
    */
   virtual void setBreakpoint(const QString& file,

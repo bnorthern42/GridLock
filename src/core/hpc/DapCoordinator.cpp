@@ -84,6 +84,10 @@ void DapCoordinator::startAdapter(const QString& program) {
   m_state = SessionState::Launching;
   emit stateChanged(m_state);
 
+  const QString cwd = !workingDirectory().trimmed().isEmpty()
+                          ? workingDirectory().trimmed()
+                          : QString::fromStdString(gridlock::core::ConfigManager::instance().loadProjectSettings().workingDirectory).trimmed();
+  if (!cwd.isEmpty() && QFileInfo(cwd).isDir()) m_process->setWorkingDirectory(cwd);
   qDebug() << "[DAP] Executing:" << program;
   m_process->start(program, QStringList());
 }
@@ -627,22 +631,27 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
         emit messageReceived(message);
         return;
       }
-      // Upon `initialize` response, send `launch` configured from persisted `ProjectSettings`.
-      // Fall back to `settings.targetBinary` when no explicit binary override was supplied.
+      // Upon `initialize` response, send `launch` configured from execution context / `ProjectSettings`.
       const auto settings = gridlock::core::ConfigManager::instance().loadProjectSettings();
       QJsonObject launchArgs;
       const QString programToLaunch = m_currentBinaryPath.isEmpty() ? QString::fromStdString(settings.targetBinary) : m_currentBinaryPath;
       launchArgs["program"] = programToLaunch;
       launchArgs["stopOnEntry"] = false;
 
-      // Tokenize space-delimited target arguments and environment assignments into JSON arrays.
+      // Tokenize target CLI arguments (preserving quoted strings) and environment assignments.
+      QString rawArgs = targetArguments().trimmed();
+      if (rawArgs.isEmpty()) rawArgs = !settings.targetArguments.isEmpty() ? settings.targetArguments.trimmed() : QString::fromStdString(settings.programArguments).trimmed();
       QJsonArray argsArray;
-      for (const QString& arg : QString::fromStdString(settings.programArguments).split(" ", Qt::SkipEmptyParts)) argsArray.append(arg);
+      for (const QString& arg : QProcess::splitCommand(rawArgs)) argsArray.append(arg);
       launchArgs["args"] = argsArray;
       QJsonArray envArray;
       for (const QString& envVar : QString::fromStdString(settings.environmentVariables).split(" ", Qt::SkipEmptyParts)) envArray.append(envVar);
       if (!envArray.isEmpty()) launchArgs["env"] = envArray;
-      launchArgs["cwd"] = QString::fromStdString(settings.workingDirectory);
+      QString cwd = workingDirectory().trimmed();
+      if (cwd.isEmpty()) cwd = QString::fromStdString(settings.workingDirectory).trimmed();
+      if (cwd.isEmpty()) cwd = gridlock::core::ConfigManager::instance().workspacePath().trimmed();
+      if (cwd.isEmpty()) cwd = QFileInfo(programToLaunch).absolutePath();
+      launchArgs["cwd"] = cwd;
       sendRequest("launch", launchArgs);
     } else if (command == "stackTrace" && message["success"].toBool()) {
       // Parse up to 64 unwound stack frames, cache frame descriptors, and broadcast `stackTraceUpdated`.

@@ -14,6 +14,8 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QLineEdit>
+#include <QPushButton>
+#include <QSpinBox>
 #include <QTableWidget>
 
 namespace gridlock::ui {
@@ -33,14 +35,18 @@ public:
     explicit ProjectSettingsDialog(QWidget* parent = nullptr);
 
     /**
-     * @brief Persists modified settings to ConfigManager upon user confirmation.
+     * @brief Persists modified settings to ConfigManager upon user confirmation and syncs toolbar state.
      */
     void accept() override;
 
 private:
-    QLineEdit* m_targetBinary{nullptr};       ///< Input field for target executable binary path.
-    QLineEdit* m_binaryArguments{nullptr};    ///< Input field for program command-line arguments.
-    QLineEdit* m_workingDirectory{nullptr};   ///< Input field for process working directory path.
+    QComboBox* m_targetBinaryCombo{nullptr};     ///< Editable combo pre-populated with discovered workspace ELFs.
+    QPushButton* m_targetBrowseBtn{nullptr};     ///< Browse button opening workspace-aware executable picker.
+    QLineEdit* m_binaryArguments{nullptr};       ///< Input field for program command-line arguments.
+    QLineEdit* m_workingDirectory{nullptr};      ///< Input field for process working directory path.
+    QPushButton* m_workingDirBrowseBtn{nullptr}; ///< Browse button opening workspace-aware directory picker.
+    QSpinBox* m_mpiRanksSpin{nullptr};           ///< Spinbox for workspace MPI rank count (-np).
+    QLineEdit* m_mpiArgsEdit{nullptr};           ///< Input field for extra mpirun / mpiexec flags.
 };
 
 /**

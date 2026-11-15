@@ -32,6 +32,7 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QSignalSpy>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -49,6 +50,7 @@
 #include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
+#include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/dialogs/XrefInspectorDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
@@ -798,9 +800,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
     gridlock::ui::ProjectExplorerWidget explorer; explorer.setRootPath(tempDir.path());
     int createdCount = 0, renamedCount = 0, deletedCount = 0;
-    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileCreated, [&](const QString&) { ++createdCount; });
-    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileRenamed, [&](const QString&, const QString&) { ++renamedCount; });
-    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileDeleted, [&](const QString&) { ++deletedCount; });
+    QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileCreated, [&](const QString&) { ++createdCount; }); QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileRenamed, [&](const QString&, const QString&) { ++renamedCount; }); QObject::connect(&explorer, &gridlock::ui::ProjectExplorerWidget::fileDeleted, [&](const QString&) { ++deletedCount; });
     const QString cppPath = tempDir.filePath(QStringLiteral("solver_kernel.cpp")), hppPath = tempDir.filePath(QStringLiteral("solver_kernel.hpp"));
     QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.cpp")) && QFileInfo::exists(cppPath) && createdCount == 1, "createNewFile(.cpp)");
     QVERIFY2(explorer.createNewFile(tempDir.path(), QStringLiteral("solver_kernel.hpp")) && QFileInfo::exists(hppPath) && createdCount == 2, "createNewFile(.hpp)");
@@ -826,23 +826,19 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     { QFile sf(mainCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("int main(int argc, char** argv) { (void)argc; (void)argv; return 0; }\n"); }
     { QProcess cc; cc.start(QStringLiteral("g++"), {QStringLiteral("-g"), QStringLiteral("-O0"), mainCpp, QStringLiteral("-o"), elfBin}); QVERIFY2(cc.waitForFinished(10000) && cc.exitCode() == 0 && QFileInfo::exists(elfBin), "g++ must compile build_meson/mfem_solver"); }
     QFile::copy(elfBin, extDir.filePath(QStringLiteral("build_meson/meson-private/sanitycheckcpp.exe")));
-
     // 8. Start MainWindow on default repo workspace, switch to extDir, and verify FILES tree + TARGET selector update atomically.
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QCoreApplication::processEvents();
     auto switchWs = [](auto& win, const QString& p) -> bool { if constexpr (requires { win.switchWorkspaceDirectory(p); }) return win.switchWorkspaceDirectory(p); else { win.projectExplorerWidget()->setRootPath(p); return false; } };
     const bool switchedViaMw = switchWs(mw, extDir.path());
-    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr; auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr);
-    // Verify ProjectExplorerWidget switches to FILES view and displays external project folders without leftover GridLock repo files.
+    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr; auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr && rankSpin != nullptr);
     QVERIFY2(switchedViaMw && !pe->isSymbolsMode() && !pe->isStringsMode(), "Opening external workspace must switch ProjectExplorerWidget to FILES mode via switchWorkspaceDirectory");
     QTRY_VERIFY_WITH_TIMEOUT(tree->model()->rowCount(tree->rootIndex()) >= 4, 3000);
     auto visibleEntries = [&]() { QStringList out; const QModelIndex r = tree->rootIndex(); for (int i = 0; i < tree->model()->rowCount(r); ++i) out << tree->model()->index(i, 0, r).data().toString(); return out; };
     const QStringList extEntries = visibleEntries();
     QVERIFY2(extEntries.contains(QStringLiteral("MfemUtils")) && extEntries.contains(QStringLiteral("ProblemSetup")) && extEntries.contains(QStringLiteral("build_meson")) && !extEntries.contains(QStringLiteral("agent.md")) && !extEntries.contains(QStringLiteral("sonar-project.properties")), qPrintable(extEntries.join(QLatin1Char(','))));
-    // Verify TARGET selector discovers build_meson/mfem_solver (excluding meson-private scratch binaries) and replaces inspection_demo.
     QVERIFY2(targetCombo->currentText().contains(QStringLiteral("mfem_solver")) && !targetCombo->currentText().contains(QStringLiteral("inspection_demo")) && targetCombo->findText(QStringLiteral("sanitycheckcpp"), Qt::MatchContains) < 0, qPrintable(targetCombo->currentText()));
-
-    // 9. Verify ProjectExplorerWidget root switch and SessionManager(.gridlock/workspace.toml) resolve workspace directory cleanly.
+    // 9. Verify ProjectExplorerWidget root switch and SessionManager(.gridlock/workspace.toml) restore workspace directory cleanly.
     pe->setRootPath(otherDir.path()); QTRY_VERIFY_WITH_TIMEOUT(visibleEntries().contains(QStringLiteral("AMR_Electrode_Cut")), 3000);
     QVERIFY2(!visibleEntries().contains(QStringLiteral("MfemUtils")) && mw.windowTitle().contains(QFileInfo(otherDir.path()).fileName()), "ProjectExplorer setRootPath must sync MainWindow");
     const QString wsToml = extDir.filePath(QStringLiteral(".gridlock/workspace.toml"));
@@ -851,12 +847,21 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     auto* fsModel = qobject_cast<QFileSystemModel*>(tree->model());
     QTRY_VERIFY_WITH_TIMEOUT(fsModel && QFileInfo(fsModel->filePath(tree->rootIndex())).canonicalFilePath() == QFileInfo(extDir.path()).canonicalFilePath() && visibleEntries().contains(QStringLiteral("MfemUtils")), 3000);
     QVERIFY2(targetCombo->currentText().contains(QStringLiteral("mfem_solver")), "SessionManager loadSession(.gridlock/workspace.toml) must restore workspace target");
-    // 10. Verify QFileDialog starts at active workspace, prunes nonexistent ghost sidebar URLs, and sizes columns >= 880px.
+    // 10. Verify ProjectSettingsDialog auto-fills discovered workspace target, working dir, Browse/Args/MPI fields, and syncs MainWindow toolbar.
+    const QString extCanon = QFileInfo(extDir.path()).canonicalFilePath(), altBin = extDir.filePath(QStringLiteral("build_meson/alt_solver"));
+    QFile::copy(elfBin, altBin); auto& cfg = gridlock::core::ConfigManager::instance(); const auto origDs = cfg.getDebuggerSettings();
+    gridlock::ui::ProjectSettingsDialog psDlg(&mw);
+    auto* tbCombo = psDlg.findChild<QComboBox*>(QStringLiteral("targetBinaryCombo")); auto* tbBrowse = psDlg.findChild<QPushButton*>(QStringLiteral("targetBrowseBtn")); auto* argsEd = psDlg.findChild<QLineEdit*>(QStringLiteral("targetArgsEdit")); auto* wdEd = psDlg.findChild<QLineEdit*>(QStringLiteral("workingDirEdit")); auto* wdBrowse = psDlg.findChild<QPushButton*>(QStringLiteral("workingDirBrowseBtn")); auto* ranksSp = psDlg.findChild<QSpinBox*>(QStringLiteral("mpiRanksSpin")); auto* mpiArgsEd = psDlg.findChild<QLineEdit*>(QStringLiteral("mpiArgsEdit"));
+    QVERIFY2(tbCombo && tbCombo->isEditable() && tbBrowse && argsEd && wdEd && wdBrowse && ranksSp && mpiArgsEd, "ProjectSettingsDialog missing targetBinaryCombo/targetBrowseBtn/targetArgsEdit/workingDirEdit/workingDirBrowseBtn/mpiRanksSpin/mpiArgsEdit");
+    QVERIFY2(tbCombo->currentText().contains(QStringLiteral("mfem_solver")) && QFileInfo(wdEd->text()).canonicalFilePath() == extCanon, qPrintable(tbCombo->currentText() + QLatin1Char('|') + wdEd->text()));
+    tbCombo->setCurrentText(altBin); argsEd->setText(QStringLiteral("config_28A.toml --verbose")); wdEd->setText(extCanon); ranksSp->setValue(6); mpiArgsEd->setText(QStringLiteral("--oversubscribe --bind-to core")); psDlg.accept(); QApplication::processEvents();
+    auto checkPersisted = [&](auto& c) -> bool { if constexpr (requires { c.projectSettings().targetArguments; c.projectSettings().mpiRanks; c.projectSettings().mpiArgs; }) { const auto ps = c.projectSettings(); return QFileInfo(QString::fromStdString(ps.targetBinary)).canonicalFilePath() == QFileInfo(altBin).canonicalFilePath() && ps.targetArguments == QStringLiteral("config_28A.toml --verbose") && QFileInfo(QString::fromStdString(ps.workingDirectory)).canonicalFilePath() == extCanon && ps.mpiRanks == 6 && ps.mpiArgs == QStringLiteral("--oversubscribe --bind-to core"); } else return false; };
+    QVERIFY2(checkPersisted(cfg) && targetCombo->currentText().contains(QStringLiteral("alt_solver")) && rankSpin->value() == 6, "Saving ProjectSettingsDialog must persist settings and sync MainWindow TARGET/RANKS");
+    // 11. Verify QFileDialog starts at active workspace, prunes nonexistent ghost sidebar URLs, and sizes columns >= 880px.
     QFileDialog fd(&mw); fd.setOption(QFileDialog::DontUseNativeDialog, true); const QUrl ghostUrl = QUrl::fromLocalFile(QStringLiteral("/home/nonexistent_ghost_user_9999"));
-    fd.setSidebarUrls({ghostUrl}); fd.open(); QApplication::processEvents(); fd.hide();
-    auto* fdTree = fd.findChild<QTreeView*>(); const QString extCanon = QFileInfo(extDir.path()).canonicalFilePath();
+    fd.setSidebarUrls({ghostUrl}); fd.open(); QApplication::processEvents(); fd.hide(); auto* fdTree = fd.findChild<QTreeView*>();
     QVERIFY2(QFileInfo(fd.directory().absolutePath()).canonicalFilePath() == extCanon && !fd.sidebarUrls().contains(ghostUrl) && fd.sidebarUrls().contains(QUrl::fromLocalFile(extCanon)) && fd.width() >= 880 && fdTree && fdTree->header() && fdTree->header()->sectionSize(0) >= 300, "QFileDialog must default to active workspace, prune ghost bookmarks, and prevent column clipping");
-    gridlock::core::ConfigManager::instance().setWorkspace(savedRepoRoot);
+    cfg.saveDebuggerSettings(origDs); cfg.setWorkspace(savedRepoRoot);
 }
 
 /** @brief Verifies Git diff parsing, Preferences toggles, multi-format syntax highlighting, and Rainbow Brackets. */
@@ -875,8 +880,7 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     const QString solverPath = gitDir.filePath(QStringLiteral("solver.cpp"));
     { QFile f(solverPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int a = 1;\nint b = 2;\nint c = 3;\nint d = 4;\n"); }
     QVERIFY2(runGit({QStringLiteral("init"), QStringLiteral("-q")}) && runGit({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("t@gridlock.dev")}) && runGit({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("T")}) && runGit({QStringLiteral("add"), QStringLiteral("solver.cpp")}) && runGit({QStringLiteral("commit"), QStringLiteral("-q"), QStringLiteral("-m"), QStringLiteral("init")}), "git repo init");
-    gridlock::ui::MainWindow mw; auto* tabMgr = mw.editorTabManager(); QVERIFY(tabMgr != nullptr); tabMgr->clearAllTabs();
-    QVERIFY(tabMgr->openFile(solverPath) != nullptr); auto* ed = tabMgr->currentSourceCodeView(); QVERIFY(ed != nullptr); QCOMPARE(ed->gitLineState(2), gridlock::ui::SourceCodeView::GitLineState::Unchanged);
+    gridlock::ui::MainWindow mw; auto* tabMgr = mw.editorTabManager(); QVERIFY(tabMgr != nullptr); tabMgr->clearAllTabs(); QVERIFY(tabMgr->openFile(solverPath) != nullptr); auto* ed = tabMgr->currentSourceCodeView(); QVERIFY(ed != nullptr); QCOMPARE(ed->gitLineState(2), gridlock::ui::SourceCodeView::GitLineState::Unchanged);
     // Edit line 2 and append line 5 in memory without saving, then wait for debounced gutter refresh.
     { QTextCursor cur(ed->document()); cur.movePosition(QTextCursor::Start); cur.movePosition(QTextCursor::Down); cur.select(QTextCursor::LineUnderCursor); cur.insertText(QStringLiteral("int b = 99;")); cur.movePosition(QTextCursor::End); cur.insertText(QStringLiteral("int e = 5;\n")); }
     QTRY_VERIFY_WITH_TIMEOUT(ed->gitLineState(2) == gridlock::ui::SourceCodeView::GitLineState::Modified && ed->gitLineState(5) == gridlock::ui::SourceCodeView::GitLineState::Added, 2000);
@@ -907,10 +911,8 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
             gridlock::ui::PreferencesDialog pd(&mw); pd.show();
             auto* rbChk = pd.findChild<QCheckBox*>(QStringLiteral("rainbowBracketsCheck")); auto* ddChk = pd.findChild<QCheckBox*>(QStringLiteral("dataDocHighlightingCheck"));
             if (!rbChk || !ddChk || !rbChk->isChecked() || !ddChk->isChecked()) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("c.toml"))); v.setSourceCode(QStringLiteral("[solver]\n# cmt\nk = true\n"));
-            if (v.languageMode() != Mode::Toml || !colorAt(v, 0, 1).isValid() || colorAt(v, 0, 1) == colorAt(v, 1, 2)) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("j.yaml"))); v.setSourceCode(QStringLiteral("mpi:\n  n: 4 # cmt\n  a: *r\n"));
-            if (v.languageMode() != Mode::Yaml || !colorAt(v, 0, 0).isValid() || colorAt(v, 0, 0) == colorAt(v, 1, 9)) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("c.toml"))); v.setSourceCode(QStringLiteral("[solver]\n# cmt\nk = true\n")); if (v.languageMode() != Mode::Toml || !colorAt(v, 0, 1).isValid() || colorAt(v, 0, 1) == colorAt(v, 1, 2)) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("j.yaml"))); v.setSourceCode(QStringLiteral("mpi:\n  n: 4 # cmt\n  a: *r\n")); if (v.languageMode() != Mode::Yaml || !colorAt(v, 0, 0).isValid() || colorAt(v, 0, 0) == colorAt(v, 1, 9)) return false;
             v.setCurrentFile(gitDir.filePath(QStringLiteral("r.md"))); v.setSourceCode(QStringLiteral("# H1\n```\nint x = 1;\n```\n[l](u)\n"));
             if (v.languageMode() != Mode::Markdown || !colorAt(v, 0, 2).isValid() || !colorAt(v, 2, 0).isValid()) return false;
             v.setCurrentFile(gitDir.filePath(QStringLiteral("d.csv"))); v.setSourceCode(QStringLiteral("\"a,b\",c\n"));

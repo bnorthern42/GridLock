@@ -288,28 +288,23 @@ void MainWindow::startTargetWorkflow() {
         QList<RankState> initialRanks;
         initialRanks.reserve(rankCount);
         for (int r = 0; r < rankCount; ++r) {
-            RankState st;
-            st.rankId = r;
-            st.currentState = QStringLiteral("running");
+            RankState st; st.rankId = r; st.currentState = QStringLiteral("running");
             m_latestStates[r] = st;
             initialRanks.append(st);
-            if (m_mpiDiagnosticsWidget) {
-                m_mpiDiagnosticsWidget->updateRankStateRow(
-                    r, QStringLiteral("RUNNING"), QStringLiteral("main"),
-                    QStringLiteral("ALL RANKS"), 0ULL, rankCount);
-            }
+            if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateRankStateRow(r, QStringLiteral("RUNNING"), QStringLiteral("main"), QStringLiteral("ALL RANKS"), 0ULL, rankCount);
         }
-        if (m_serverRackView) {
-            m_serverRackView->updateRanks(initialRanks);
-            m_serverRackView->selectRank(preserveRank);
-        }
-
+        if (m_serverRackView) { m_serverRackView->updateRanks(initialRanks); m_serverRackView->selectRank(preserveRank); }
         m_debugSessionActive = true;
         updateDebugToolbarState();
         updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("RUNNING"));
 
-        // Spawn live multi-rank MPI GDB or LLDB-DAP processes and register active watch expressions.
-        m_coordinator->launchParallelSession(binPath, rankCount, mpiArgs);
+        // Push active project CLI arguments and working directory, then spawn live MPI GDB / LLDB-DAP session.
+        const auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings();
+        const QString tArgs = !projCfg.targetArguments.isEmpty() ? projCfg.targetArguments : QString::fromStdString(projCfg.programArguments);
+        QString tWd = QString::fromStdString(projCfg.workingDirectory).trimmed();
+        if (tWd.isEmpty()) tWd = m_activeWorkspaceDir;
+        m_coordinator->setTargetExecutionContext(tArgs, tWd);
+        m_coordinator->launchParallelSession(binPath, rankCount, projCfg.mpiArgs.isEmpty() ? mpiArgs : projCfg.mpiArgs);
         if (m_differentialGrid) {
             if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
                 for (const auto& w : m_differentialGrid->getWatchExpressions()) {

@@ -144,14 +144,26 @@ void MainWindow::syncCoordinatorWithConfig() {
     // Never hot-swap the active coordinator backend mid-session while inferiors are attached.
     if (m_debugSessionActive) return;
 
-    const QString rawEngine =
-        gridlock::core::ConfigManager::instance().debuggerEngine().trimmed().toLower();
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const QString rawEngine = cfg.debuggerEngine().trimmed().toLower();
     const QString desired = (rawEngine == QStringLiteral("lldb-dap"))
                                 ? QStringLiteral("lldb-dap")
                                 : QStringLiteral("gdb");
 
+    auto pushExecutionContext = [&]() {
+        if (!m_coordinator) return;
+        const auto ps = cfg.loadProjectSettings();
+        const QString args = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+        QString wd = QString::fromStdString(ps.workingDirectory).trimmed();
+        if (wd.isEmpty()) wd = m_activeWorkspaceDir;
+        m_coordinator->setTargetExecutionContext(args, wd);
+    };
+
     // Preserve the existing coordinator instance when its engine identifier already matches.
-    if (m_coordinator && m_coordinator->activeEngineName() == desired) return;
+    if (m_coordinator && m_coordinator->activeEngineName() == desired) {
+        pushExecutionContext();
+        return;
+    }
 
     if (m_coordinator) m_coordinator->disconnect();
     if (m_deadlockAnalyzer) {
@@ -172,6 +184,7 @@ void MainWindow::syncCoordinatorWithConfig() {
         m_ownedCoordinator = new gridlock::GdbRankCoordinator(this);
     }
     setCoordinator(m_ownedCoordinator);
+    pushExecutionContext();
 }
 
 /**

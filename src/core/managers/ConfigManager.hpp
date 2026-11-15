@@ -84,9 +84,12 @@ struct TerminalSettings {
 struct ProjectSettings {
   std::string targetBinary;                  ///< Path to the compiled target binary.
   std::string programArguments;              ///< Command-line arguments passed to the target binary.
+  QString targetArguments;                   ///< QString mirror of programArguments for UI/launch integration.
   std::string environmentVariables;          ///< Environment overrides for the target process.
   std::string workingDirectory;              ///< Initial working directory for the target process.
   std::string customGdbPath = "gdb";         ///< Workspace-specific GDB executable override.
+  int mpiRanks = 0;                          ///< Workspace-scoped MPI rank count override (0 = debugger default).
+  QString mpiArgs;                           ///< Workspace-scoped mpirun extra flags override.
   std::vector<std::string> watchExpressions; ///< Persisted watch expressions evaluated on stops.
 };
 
@@ -180,6 +183,8 @@ class ConfigManager {
 
   /** @brief Loads per-workspace target and watch settings from `.gridlock/settings.toml`. */
   ProjectSettings loadProjectSettings() const;
+  /** @brief Convenience alias returning current project settings. */
+  ProjectSettings projectSettings() const { return loadProjectSettings(); }
   /** @brief Saves per-workspace target and watch settings to `.gridlock/settings.toml`. */
   void saveProjectSettings(const ProjectSettings& ps) const;
 

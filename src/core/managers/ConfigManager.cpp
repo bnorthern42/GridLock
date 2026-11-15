@@ -608,43 +608,45 @@ void ConfigManager::saveBreakpoints(
  * @brief Loads target binary settings from `.gridlock/settings.toml` and watches from `workspace.toml`.
  */
 ProjectSettings ConfigManager::loadProjectSettings() const {
+  const DebuggerSettings ds = getDebuggerSettings();
   ProjectSettings ps;
+  ps.mpiRanks = ds.defaultRanks;
+  ps.mpiArgs = ds.mpiArgs;
   if (m_workspacePath.isEmpty()) {
+    // Fall back to user-scoped QSettings when no active workspace directory is open.
+    QSettings s(kOrg, kApp);
+    ps.targetBinary = s.value("project/targetBinary", "").toString().toStdString();
+    ps.targetArguments = s.value("project/targetArguments", "").toString();
+    ps.programArguments = ps.targetArguments.toStdString();
+    ps.workingDirectory = s.value("project/workingDirectory", "").toString().toStdString();
+    ps.mpiRanks = qMax(1, s.value("project/mpiRanks", ds.defaultRanks).toInt());
+    ps.mpiArgs = s.value("project/mpiArgs", ds.mpiArgs).toString();
     return ps;
   }
-
-  // Read target executable, arguments, environment, and GDB override from `settings.toml`.
-  const QString settingsFile =
-      QDir(m_workspacePath).filePath(".gridlock/settings.toml");
+  // Read target executable, arguments, environment, and MPI overrides from `settings.toml`.
+  const QString settingsFile = QDir(m_workspacePath).filePath(".gridlock/settings.toml");
   toml::table tbl;
-  try {
-    tbl = toml::parse_file(settingsFile.toStdString());
-  } catch (...) {
-  }
-
+  try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
   if (auto* proj = tbl["project"].as_table()) {
     ps.targetBinary = (*proj)["targetBinary"].value_or("");
     ps.programArguments = (*proj)["programArguments"].value_or("");
+    const std::string tArgs = (*proj)["targetArguments"].value_or(ps.programArguments);
+    ps.targetArguments = QString::fromStdString(tArgs);
+    if (ps.programArguments.empty()) ps.programArguments = tArgs;
     ps.environmentVariables = (*proj)["environmentVariables"].value_or("");
     ps.workingDirectory = (*proj)["workingDirectory"].value_or("");
     ps.customGdbPath = (*proj)["customGdbPath"].value_or("gdb");
+    ps.mpiRanks = qMax(1, (*proj)["mpiRanks"].value_or(ds.defaultRanks));
+    if (proj->contains("mpiArgs")) ps.mpiArgs = QString::fromStdString((*proj)["mpiArgs"].value_or(""));
   }
-
   // Read persisted watch expressions from `.gridlock/workspace.toml`.
-  const QString workspaceFile =
-      QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
+  const QString workspaceFile = QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
   toml::table wTbl;
-  try {
-    wTbl = toml::parse_file(workspaceFile.toStdString());
-  } catch (...) {
-  }
-
+  try { wTbl = toml::parse_file(workspaceFile.toStdString()); } catch (...) {}
   if (auto* proj = wTbl["workspace"].as_table()) {
     if (auto* watches = (*proj)["watchExpressions"].as_array()) {
       for (auto& elem : *watches) {
-        if (auto* str = elem.as_string()) {
-          ps.watchExpressions.push_back(str->get());
-        }
+        if (auto* str = elem.as_string()) ps.watchExpressions.push_back(str->get());
       }
     }
   }
@@ -655,45 +657,31 @@ ProjectSettings ConfigManager::loadProjectSettings() const {
  * @brief Persists project target settings to `.gridlock/settings.toml` and watches to `workspace.toml`.
  */
 void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
-  if (m_workspacePath.isEmpty()) {
-    return;
-  }
-
+  const QString effArgs = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+  QSettings s(kOrg, kApp);
+  s.setValue("project/targetBinary", QString::fromStdString(ps.targetBinary));
+  s.setValue("project/targetArguments", effArgs);
+  s.setValue("project/workingDirectory", QString::fromStdString(ps.workingDirectory));
+  s.setValue("project/mpiRanks", ps.mpiRanks > 0 ? ps.mpiRanks : getDefaultRanks());
+  s.setValue("project/mpiArgs", ps.mpiArgs);
+  if (m_workspacePath.isEmpty()) { s.sync(); return; }
   QDir dir(m_workspacePath);
-  if (!dir.exists(".gridlock")) {
-    dir.mkdir(".gridlock");
-  }
+  if (!dir.exists(".gridlock")) dir.mkdir(".gridlock");
   const QString settingsFile = dir.filePath(".gridlock/settings.toml");
-
   toml::table tbl;
-  try {
-    tbl = toml::parse_file(settingsFile.toStdString());
-  } catch (...) {
-  }
-
-  // Populate the `[project]` table with target binary and execution parameters.
+  try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
+  // Populate the `[project]` table with target binary, CLI args, cwd, and MPI parameters.
   toml::table projTbl;
-  projTbl.insert_or_assign("targetBinary",
-                           ps.targetBinary.empty() ? "" : ps.targetBinary);
-  projTbl.insert_or_assign("programArguments", ps.programArguments.empty()
-                                                   ? ""
-                                                   : ps.programArguments);
-  projTbl.insert_or_assign(
-      "environmentVariables",
-      ps.environmentVariables.empty() ? "" : ps.environmentVariables);
-  projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty()
-                                                   ? ""
-                                                   : ps.workingDirectory);
-  projTbl.insert_or_assign("customGdbPath",
-                           ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);
-
+  projTbl.insert_or_assign("targetBinary", ps.targetBinary.empty() ? "" : ps.targetBinary);
+  projTbl.insert_or_assign("programArguments", effArgs.toStdString());
+  projTbl.insert_or_assign("targetArguments", effArgs.toStdString());
+  projTbl.insert_or_assign("environmentVariables", ps.environmentVariables.empty() ? "" : ps.environmentVariables);
+  projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty() ? "" : ps.workingDirectory);
+  projTbl.insert_or_assign("customGdbPath", ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);
+  projTbl.insert_or_assign("mpiRanks", ps.mpiRanks > 0 ? ps.mpiRanks : getDefaultRanks());
+  projTbl.insert_or_assign("mpiArgs", ps.mpiArgs.toStdString());
   tbl.insert_or_assign("project", projTbl);
-
-  std::ofstream out(settingsFile.toStdString());
-  if (out.is_open()) {
-    out << tbl;
-  }
-
+  if (std::ofstream out(settingsFile.toStdString()); out.is_open()) out << tbl;
   // Persist watch expressions into the `[workspace]` table of `workspace.toml`.
   const QString workspaceFile = dir.filePath(".gridlock/workspace.toml");
   toml::table wTbl;

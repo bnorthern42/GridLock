@@ -361,13 +361,25 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   if (mpiBin.isEmpty()) mpiBin = QStandardPaths::findExecutable(QStringLiteral("mpirun"), searchDirs);
   if (mpiBin.isEmpty()) mpiBin = QStandardPaths::findExecutable(QStringLiteral("mpiexec"), searchDirs);
 
-  // Helper configuring initial GDB settings, breakpoints, and `-exec-run` on rank `id`.
-  const auto bootstrapRankGdb = [this](int id) {
+  const auto projCfg = core::ConfigManager::instance().loadProjectSettings();
+  QString execArgs = targetArguments().trimmed();
+  if (execArgs.isEmpty()) execArgs = !projCfg.targetArguments.isEmpty() ? projCfg.targetArguments.trimmed() : QString::fromStdString(projCfg.programArguments).trimmed();
+  QString workDir = workingDirectory().trimmed();
+  if (workDir.isEmpty()) workDir = QString::fromStdString(projCfg.workingDirectory).trimmed();
+  if (workDir.isEmpty()) workDir = core::ConfigManager::instance().workspacePath().trimmed();
+  if (workDir.isEmpty()) workDir = QFileInfo(executable).absolutePath();
+  // Helper configuring initial GDB settings, cwd, inferior args, breakpoints, and `-exec-run` on rank `id`.
+  const auto bootstrapRankGdb = [this, execArgs, workDir](int id) {
     // Disable interactive paging/prompts and ignore benign MPI transport SIGPIPE signals.
     writeCmd(id, "-gdb-set pagination off\n");
     writeCmd(id, "-gdb-set confirm off\n");
     writeCmd(id, "-interpreter-exec console \"handle SIGPIPE nostop noprint pass\"\n");
     writeCmd(id, "-gdb-set max-value-size unlimited\n");
+    if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) {
+      QString escWd = workDir; escWd.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+      writeCmd(id, QStringLiteral("-environment-cd \"%1\"\n").arg(escWd).toUtf8().constData());
+    }
+    if (!execArgs.isEmpty()) writeCmd(id, QStringLiteral("-exec-arguments %1\n").arg(execArgs).toUtf8().constData());
     // Push explicit UI breakpoints matching `rankFilter`, falling back to persisted TOML breakpoints.
     if (!m_pendingBreakpoints.empty()) {
       for (const auto& bp : m_pendingBreakpoints) {
@@ -384,16 +396,13 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     m_processes[id]->state.executionTimer.start();
     writeCmd(id, "-exec-run\n");
   };
-
   // Fallback for single-process debugging when no MPI launcher is installed on the host.
   if (mpiBin.isEmpty()) {
     auto rp = std::make_unique<RankProcess>();
-    rp->id = 0;
-    rp->process = std::make_unique<QProcess>();
-    rp->state.rankId = 0;
-    rp->state.currentState = "launching";
-    rp->state.lastFiredTimestamp = "synced";
+    rp->id = 0; rp->process = std::make_unique<QProcess>(); rp->state.rankId = 0;
+    rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this]() { handleGdbOutput(0); });
+    if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) rp->process->setWorkingDirectory(workDir);
     // Disable debuginfod network fetches so headless attach never stalls on symbol servers.
     rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
                                  QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3"), executable});
@@ -401,18 +410,14 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     bootstrapRankGdb(0);
     return;
   }
-
   // Create a private `/tmp` directory housing per-rank input/output named pipes (`mkfifo`).
   static std::atomic<int> s_sessionSeq{1};
   m_fifoTempDir = QStringLiteral("/tmp/gridlock_mi_%1_%2").arg(QCoreApplication::applicationPid()).arg(s_sessionSeq.fetch_add(1));
   QDir().mkpath(m_fifoTempDir);
-
   // Assemble global `mpirun` flags (oversubscription, hostfile, node affinity, exported env vars).
   QStringList mpiArgs;
   for (const QString& tok : QProcess::splitCommand(customMpiArgs)) mpiArgs << tok;
-  if (!mpiArgs.contains(QStringLiteral("--oversubscribe")) && mpiBin.contains(QStringLiteral("openmpi"))) {
-    mpiArgs << QStringLiteral("--oversubscribe");
-  }
+  if (!mpiArgs.contains(QStringLiteral("--oversubscribe")) && mpiBin.contains(QStringLiteral("openmpi"))) mpiArgs << QStringLiteral("--oversubscribe");
   if (!hs.hostsFile.isEmpty()) mpiArgs << QStringLiteral("--hostfile") << hs.hostsFile;
   if (hs.strictAffinity) mpiArgs << QStringLiteral("--map-by") << QStringLiteral("node");
   if (!hs.envVars.isEmpty()) {
@@ -420,7 +425,6 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
       if (!pair.trimmed().isEmpty()) mpiArgs << QStringLiteral("-x") << pair.trimmed();
     }
   }
-
   // Allocate non-blocking FIFO pairs and construct MPMD rank launch clauses (`-np 1 ... : -np 1 ...`).
   for (int i = 0; i < rankCount; ++i) {
     const QString inFifo = QStringLiteral("%1/r%2.in").arg(m_fifoTempDir).arg(i);
@@ -430,47 +434,33 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     // Opening `O_RDWR | O_NONBLOCK` prevents blocking and suppresses premature EOF before child attach.
     const int inFd = ::open(inFifo.toUtf8().constData(), O_RDWR | O_NONBLOCK);
     const int outFd = ::open(outFifo.toUtf8().constData(), O_RDWR | O_NONBLOCK);
-
     auto rp = std::make_unique<RankProcess>();
-    rp->id = i;
-    rp->fifoInFd = inFd;
-    rp->fifoOutFd = outFd;
-    rp->state.rankId = i;
-    rp->state.currentState = "launching";
-    rp->state.lastFiredTimestamp = "synced";
+    rp->id = i; rp->fifoInFd = inFd; rp->fifoOutFd = outFd;
+    rp->state.rankId = i; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
     // Attach event-driven QSocketNotifier to stream GDB/MI3 stdout lines without polling threads.
     if (outFd >= 0) {
       rp->fifoNotifier = new QSocketNotifier(outFd, QSocketNotifier::Read, this);
       connect(rp->fifoNotifier, &QSocketNotifier::activated, this, [this, id = i]() { handleGdbOutput(id); });
     }
     m_processes.push_back(std::move(rp));
-
     // Append colon-delimited MPMD application context binding rank `i`'s stdio to its FIFO pair.
     if (i > 0) mpiArgs << QStringLiteral(":");
     mpiArgs << QStringLiteral("-np") << QStringLiteral("1") << QStringLiteral("/bin/sh") << QStringLiteral("-c")
             << QStringLiteral("exec \"$1\" --quiet --nx -iex \"set debuginfod enabled off\" --interpreter=mi3 \"$2\" <\"$3\" >\"$4\" 2>&1")
             << QStringLiteral("sh") << gdbPath << executable << inFifo << outFifo;
   }
-
-  // Configure OpenMPI/MPICH runtime environment (`PATH` and `LD_LIBRARY_PATH`) and start `mpirun`.
+  // Configure OpenMPI/MPICH runtime environment (`PATH`, `LD_LIBRARY_PATH`, cwd) and start `mpirun`.
   m_mpirunProcess = std::make_unique<QProcess>();
+  if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) m_mpirunProcess->setWorkingDirectory(workDir);
   QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
   env.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:") + env.value(QStringLiteral("LD_LIBRARY_PATH")));
   m_mpirunProcess->setProcessEnvironment(env);
-  connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() {
-    emit targetOutputReceived("stdout", QString::fromUtf8(m_mpirunProcess->readAllStandardOutput()));
-  });
-  connect(m_mpirunProcess.get(), &QProcess::readyReadStandardError, this, [this]() {
-    emit targetOutputReceived("stderr", QString::fromUtf8(m_mpirunProcess->readAllStandardError()));
-  });
+  connect(m_mpirunProcess.get(), &QProcess::readyReadStandardOutput, this, [this]() { emit targetOutputReceived("stdout", QString::fromUtf8(m_mpirunProcess->readAllStandardOutput())); });
+  connect(m_mpirunProcess.get(), &QProcess::readyReadStandardError, this, [this]() { emit targetOutputReceived("stderr", QString::fromUtf8(m_mpirunProcess->readAllStandardError())); });
   m_mpirunProcess->start(mpiBin, mpiArgs);
-
   // Queue initial MI setup, user breakpoints, and `-exec-run` into each rank's input FIFO.
-  for (int i = 0; i < rankCount; ++i) {
-    bootstrapRankGdb(i);
-    emit rankStateChanged(i, m_processes[i]->state);
-  }
+  for (int i = 0; i < rankCount; ++i) { bootstrapRankGdb(i); emit rankStateChanged(i, m_processes[i]->state); }
 }
 
 /**

@@ -605,9 +605,9 @@ void MainWindow::setupMenu() {
   // Project Settings Dialog Trigger: Edits compiler flags, include paths, and runtime environments.
   QAction *projSetAction = fileMenu->addAction("Project Settings");
   connect(projSetAction, &QAction::triggered, this, [this]() {
-    // Present modal per-project build/MPI configuration dialog.
+    // Present modal per-project target binary, CLI arguments, cwd, and MPI settings dialog.
     ProjectSettingsDialog dlg(this);
-    dlg.exec();
+    if (dlg.exec() == QDialog::Accepted) syncCoordinatorWithConfig();
   });
 
   // Attach to Process Action: Enumerates live `/proc` processes and attaches active coordinator.
