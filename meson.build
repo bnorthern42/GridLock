@@ -55,7 +55,7 @@ src_files = [
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
-  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
 ]
 
@@ -80,7 +80,7 @@ moc_headers = [
   'src/core/managers/ShortcutManager.hpp', 'src/core/managers/DocsetManager.hpp',
   'src/core/managers/ThemeManager.hpp', 'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp', 'src/ui/docks/VariablesDockWidget.hpp',
-  'src/ui/tutorial/TutorialDialog.hpp',
+  'src/ui/tutorial/TutorialDialog.hpp', 'src/core/utils/ClangdLspClient.hpp',
 ]
 
 # Process Qt6 files
@@ -146,13 +146,13 @@ test('coordinator_tests', gridlock_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 lsp_test_src = [
   'tests/test_lsp.cpp',
-  'src/core/hpc/LspCoordinator.cpp',
+  'src/core/hpc/LspCoordinator.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 lsp_test_moc_headers = [
   'tests/test_lsp.hpp',
-  'src/core/hpc/LspCoordinator.hpp'
+  'src/core/hpc/LspCoordinator.hpp', 'src/core/utils/ClangdLspClient.hpp'
 ]
 
 processed_lsp_test_files = qt6.compile_moc(
@@ -199,7 +199,7 @@ ui_test_src = [
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
-  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/core/Version.cpp',
 ]
 
@@ -222,7 +222,7 @@ ui_test_moc_headers = [
   'src/core/managers/SpackManager.hpp', 'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp', 'src/core/managers/ThemeManager.hpp',
   'src/core/managers/SessionManager.hpp', 'src/core/models/VariableTreeModel.hpp',
-  'src/ui/docks/VariablesDockWidget.hpp',
+  'src/ui/docks/VariablesDockWidget.hpp', 'src/core/utils/ClangdLspClient.hpp',
 ]
 
 processed_ui_test_files = qt6.compile_moc(
@@ -351,7 +351,7 @@ commands_test_src = [
   'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp'
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
 ]
 
 commands_test_moc_headers = [
@@ -360,7 +360,7 @@ commands_test_moc_headers = [
   'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.hpp'
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
 ]
 
 processed_commands_test_files = qt6.compile_moc(
@@ -414,7 +414,7 @@ dap_commands_test_src = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp'
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
 ]
 
 dap_commands_test_moc_headers = [
@@ -423,7 +423,7 @@ dap_commands_test_moc_headers = [
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.hpp'
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
 ]
 
 processed_dap_commands_test_files = qt6.compile_moc(

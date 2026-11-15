@@ -87,6 +87,15 @@ public:
     bool switchHeaderSource();
 
     /**
+     * @brief Opens or activates `filePath` and places the editor cursor at `(oneBasedLine, zeroBasedColumn)`.
+     * @param filePath Target workspace file path resolved by Go-to-Definition.
+     * @param oneBasedLine 1-based target line number.
+     * @param zeroBasedColumn 0-based target character column offset.
+     * @return Activated SourceCodeView pointer, or nullptr if `filePath` could not be opened.
+     */
+    SourceCodeView* navigateToLocation(const QString& filePath, int oneBasedLine, int zeroBasedColumn = 0);
+
+    /**
      * @brief Opens or reorients the secondary side-by-side split editor pane.
      * @param orientation Horizontal (Split Right) or Vertical (Split Down) orientation.
      */
@@ -138,6 +147,9 @@ signals:
 
     /// Emitted when the user requests to pin an identifier to watch expressions.
     void pinVariableRequested(const QString& varName);
+
+    /// Emitted when cross-file Go-to-Definition opens or switches to a target file and line.
+    void definitionJumpRequested(const QString& filePath, int oneBasedLine, int zeroBasedColumn);
 
 private slots:
     /**

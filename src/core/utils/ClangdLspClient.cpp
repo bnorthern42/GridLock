@@ -118,43 +118,52 @@ ClangdLspClient& ClangdLspClient::instance() {
 
 /**
  * @brief Constructs an uninitialized ClangdLspClient instance.
+ * @param parent Optional QObject parent.
  */
-ClangdLspClient::ClangdLspClient() = default;
+ClangdLspClient::ClangdLspClient(QObject* parent) : QObject(parent) {}
 
 /**
  * @brief Shuts down any running clangd background process when destroyed.
- *
- * Closes the standard input write channel, requests graceful termination, and
- * falls back to an immediate kill + waitForFinished so Qt never warns about a
- * still-running QProcess during static singleton destruction.
  */
 ClangdLspClient::~ClangdLspClient() {
+    stopServerProcess();
+}
+
+/**
+ * @brief Gracefully stops and deallocates any running clangd child process.
+ *
+ * Disconnects readyRead slots first, closes stdin, terminates the OS child process,
+ * and clears cached document version state so subsequent workspaces start cleanly.
+ */
+void ClangdLspClient::stopServerProcess() {
     if (m_process) {
+        m_process->disconnect(this);
         if (m_process->state() != QProcess::NotRunning) {
-            if (m_process->isOpen() && m_process->isWritable()) m_process->closeWriteChannel();
+            if (m_process->isOpen() && m_process->isWritable()) {
+                m_process->closeWriteChannel();
+            }
             m_process->kill();
             m_process->waitForFinished(1000);
         }
         delete m_process;
         m_process = nullptr;
     }
+    m_initialized = false;
+    m_readBuffer.clear();
+    m_activeDocumentUri.clear();
+    m_activeRootDir.clear();
+    m_activeCompileCommandsDir.clear();
+    m_completedResponses.clear();
+    m_openDocumentVersions.clear();
+    m_openDocumentTexts.clear();
 }
 
 /**
  * @brief Splices `auto __gl_cond = (<partialExpression>);` into sourceCode at targetLineOneBased.
  *
- * When a user types a conditional breakpoint expression inside the popover, the expression
- * does not yet exist in the on-disk `.cpp` source file. By injecting a synthetic `auto`
- * variable initialization immediately before `targetLineOneBased`, `clangd` evaluates the
- * expression with full visibility of enclosing function parameters, local variables, loop
- * induction variables (`i`, `j`), and struct definitions in scope at that exact line.
- *
- * @param sourceCode Full C/C++ source text.
- * @param targetLineOneBased 1-based line number of the breakpoint.
- * @param partialExpression Partial condition string typed by the user.
- * @param outZeroBasedLine Output 0-based line number of the spliced statement.
- * @param outZeroBasedCharacter Output 0-based column index immediately after partialExpression.
- * @return Virtual C++ document text with the spliced expression statement.
+ * Injects a synthetic `auto` variable initialization immediately before `targetLineOneBased`
+ * so `clangd` evaluates the expression with full visibility of enclosing function parameters,
+ * local variables, loop induction variables, and struct definitions in scope.
  */
 QString ClangdLspClient::buildVirtualCompletionDocument(const QString& sourceCode,
                                                         int targetLineOneBased,
@@ -177,12 +186,8 @@ QString ClangdLspClient::buildVirtualCompletionDocument(const QString& sourceCod
 
 /**
  * @brief Encodes a QJsonObject into an LSP `Content-Length: <bytes>\r\n\r\n<json>` wire frame.
- *
- * Language Server Protocol over stdio requires every JSON-RPC 2.0 request and notification
- * to be prefixed by an HTTP-like `Content-Length` header terminated by `\r\n\r\n`.
- *
- * @param payload JSON-RPC 2.0 message object.
- * @return Framed byte array ready for stdio transmission.
+ * @param payload JSON-RPC 2.0 request, notification, or response object.
+ * @return UTF-8 encoded LSP message frame ready for `QProcess::write`.
  */
 QByteArray ClangdLspClient::encodeLspMessage(const QJsonObject& payload) {
     const QByteArray jsonBytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
@@ -191,17 +196,28 @@ QByteArray ClangdLspClient::encodeLspMessage(const QJsonObject& payload) {
 }
 
 /**
- * @brief Ensures clangd is started and completes the LSP `initialize` / `initialized` handshake.
+ * @brief Ensures clangd is started for `rootDir` with auto-discovered `compile_commands.json`.
  *
- * Searches standard system paths for `clangd`, spawns it with background indexing disabled
- * and header auto-insertion turned off so completion labels never inject unexpected `#include`
- * directives, and configures C++20 + OpenMPI/MPICH fallback compile flags.
+ * Automatically detects `compile_commands.json` in `<root>`, `<root>/builddir`, or `<root>/build`,
+ * passing `--compile-commands-dir=<dir>` and `--background-index` when present, and restarts the
+ * daemon cleanly if the active compilation database directory changes between workspaces.
  *
- * @param rootDir Workspace directory path.
- * @return True if clangd is running and initialized.
+ * @param rootDir Workspace directory or translation unit parent directory.
+ * @return True when the `clangd` daemon is running and its `initialize` handshake has completed.
  */
 bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
-    if (m_process && m_process->state() == QProcess::Running && m_initialized) return true;
+    const QString cleanRoot = rootDir.isEmpty() ? QDir::currentPath() : QFileInfo(rootDir).absoluteFilePath();
+    const QString ccDir = discoverCompileCommandsDir(cleanRoot);
+
+    // Reuse active clangd daemon unless the discovered compilation database changed or vanished.
+    if (m_process && m_process->state() == QProcess::Running && m_initialized) {
+        const bool ccChanged = (!ccDir.isEmpty() && ccDir != m_activeCompileCommandsDir);
+        const bool ccStale = (!m_activeCompileCommandsDir.isEmpty() && !QDir(m_activeCompileCommandsDir).exists());
+        if (!ccChanged && !ccStale) {
+            return true;
+        }
+        stopServerProcess();
+    }
 
     // Locate clangd executable on PATH or standard system toolchain locations.
     QString clangdBin = QStandardPaths::findExecutable(QStringLiteral("clangd"));
@@ -212,35 +228,54 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
     }
     if (clangdBin.isEmpty()) return false;
 
+    // Lazily allocate the persistent QProcess and wire asynchronous stdout notification pumping.
     if (!m_process) {
         m_process = new QProcess();
         m_process->setProcessChannelMode(QProcess::SeparateChannels);
+        // Pump asynchronous `textDocument/publishDiagnostics` frames whenever stdout arrives.
+        QObject::connect(m_process, &QProcess::readyReadStandardOutput, this, [this]() {
+            drainIncomingMessages();
+        });
+        // Guarantee clean daemon shutdown before Qt destroys global application singletons.
         if (QCoreApplication::instance()) {
-            QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, [this]() {
-                if (m_process && m_process->state() != QProcess::NotRunning) {
-                    if (m_process->isOpen() && m_process->isWritable()) m_process->closeWriteChannel();
-                    m_process->kill();
-                    m_process->waitForFinished(500);
-                }
+            QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this]() {
+                stopServerProcess();
             });
         }
     }
+
+    // Spawn the clangd subprocess when starting fresh or recovering from a CompilationDatabase switch.
     if (m_process->state() == QProcess::NotRunning) {
         m_initialized = false;
         m_readBuffer.clear();
         m_activeDocumentUri.clear();
-        m_process->start(clangdBin, {QStringLiteral("--log=error"), QStringLiteral("--background-index=false"), QStringLiteral("--header-insertion=never")});
-        if (!m_process->waitForStarted(600)) return false;
+        m_completedResponses.clear();
+        m_openDocumentVersions.clear();
+        // Configure `--compile-commands-dir` and `--background-index` when a compilation DB exists.
+        QStringList args{QStringLiteral("--log=error"), QStringLiteral("--header-insertion=never")};
+        if (!ccDir.isEmpty()) {
+            args << (QStringLiteral("--compile-commands-dir=") + ccDir)
+                 << QStringLiteral("--background-index");
+        } else {
+            args << QStringLiteral("--background-index=false");
+        }
+        m_process->start(clangdBin, args);
+        if (!m_process->waitForStarted(1000)) return false;
     }
 
-    // Build initialize request with fallback flags for C++20 and OpenMPI/MPICH include paths.
+    m_activeRootDir = cleanRoot;
+    m_activeCompileCommandsDir = ccDir;
+
+    // Build initialize request with C++23 and OpenMPI/MPICH fallback compile flags.
     const int initId = m_nextRequestId++;
-    const QString cleanRoot = rootDir.isEmpty() ? QDir::currentPath() : QFileInfo(rootDir).absoluteFilePath();
     QJsonObject initOptions;
     initOptions[QStringLiteral("fallbackFlags")] = QJsonArray{
-        QStringLiteral("-std=c++20"), QStringLiteral("-I/usr/include/openmpi-x86_64"),
-        QStringLiteral("-I/usr/lib/x86_64-linux-gnu/openmpi/include"), QStringLiteral("-I/usr/include/mpich")};
+        QStringLiteral("-std=c++23"),
+        QStringLiteral("-I/usr/include/openmpi-x86_64"),
+        QStringLiteral("-I/usr/lib/x86_64-linux-gnu/openmpi/include"),
+        QStringLiteral("-I/usr/include/mpich")};
 
+    // Advertise client support for completion, publishDiagnostics, definition links, references, and WorkspaceEdit rename.
     QJsonObject params;
     params[QStringLiteral("processId")] = static_cast<qint64>(QCoreApplication::applicationPid());
     params[QStringLiteral("rootUri")] = QUrl::fromLocalFile(cleanRoot).toString();
@@ -249,14 +284,22 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         {QStringLiteral("textDocument"), QJsonObject{
             {QStringLiteral("completion"), QJsonObject{
                 {QStringLiteral("completionItem"), QJsonObject{{QStringLiteral("snippetSupport"), false}}}
-            }}
+            }},
+            {QStringLiteral("publishDiagnostics"), QJsonObject{{QStringLiteral("relatedInformation"), true}}},
+            {QStringLiteral("definition"), QJsonObject{{QStringLiteral("linkSupport"), true}}},
+            {QStringLiteral("references"), QJsonObject{}},
+            {QStringLiteral("rename"), QJsonObject{{QStringLiteral("prepareSupport"), true}}}
+        }},
+        {QStringLiteral("workspace"), QJsonObject{
+            {QStringLiteral("workspaceEdit"), QJsonObject{{QStringLiteral("documentChanges"), true}}}
         }}
     };
 
+    // Transmit `initialize` JSON-RPC request and block briefly for server capabilities acknowledgement.
     sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), initId},
                             {QStringLiteral("method"), QStringLiteral("initialize")}, {QStringLiteral("params"), params}});
 
-    const QJsonObject resp = readResponseForId(initId, 800);
+    const QJsonObject resp = readResponseForId(initId, 1500);
     if (resp.isEmpty()) return false;
 
     // Dispatch `initialized` notification completing the LSP handshake.
@@ -268,7 +311,7 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
 
 /**
  * @brief Writes a framed JSON-RPC message to the clangd child process stdin.
- * @param payload JSON-RPC object.
+ * @param payload JSON-RPC 2.0 request or notification object.
  */
 void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
     if (!m_process) return;
@@ -280,67 +323,104 @@ void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
 }
 
 /**
- * @brief Reads Content-Length framed JSON-RPC messages from clangd until requestId arrives.
- * @param requestId Target request ID to match.
- * @param timeoutMs Maximum wait time in milliseconds.
- * @return Matching JSON-RPC response object, or empty QJsonObject on timeout.
+ * @brief Drains complete Content-Length frames from stdout, caching responses and emitting diagnostics.
+ *
+ * Called both asynchronously from `QProcess::readyReadStandardOutput` and synchronously inside
+ * `readResponseForId` so neither notifications nor request responses can be lost during nested waits.
  */
-QJsonObject ClangdLspClient::readResponseForId(int requestId, int timeoutMs) {
-    if (!m_process || m_process->state() != QProcess::Running) return {};
+void ClangdLspClient::drainIncomingMessages() {
+    if (m_process && m_process->bytesAvailable() > 0) {
+        m_readBuffer.append(m_process->readAllStandardOutput());
+    }
 
-    QElapsedTimer timer;
-    timer.start();
-    while (timer.elapsed() < timeoutMs) {
-        // Parse any complete Content-Length frames already buffered in m_readBuffer.
-        while (true) {
-            const int headerEnd = m_readBuffer.indexOf("\r\n\r\n");
-            if (headerEnd < 0) break;
+    // Extract every complete Content-Length frame currently buffered in m_readBuffer.
+    while (true) {
+        const int headerEnd = m_readBuffer.indexOf("\r\n\r\n");
+        if (headerEnd < 0) break;
 
-            const QByteArray headerBlock = m_readBuffer.left(headerEnd);
-            int contentLen = -1;
-            for (const QByteArray& line : headerBlock.split('\n')) {
-                const QByteArray trimmed = line.trimmed();
-                if (trimmed.toLower().startsWith("content-length:")) {
-                    contentLen = trimmed.mid(15).trimmed().toInt();
-                    break;
-                }
-            }
-            if (contentLen < 0) {
-                m_readBuffer.remove(0, headerEnd + 4);
-                continue;
-            }
-            const int totalFrameBytes = headerEnd + 4 + contentLen;
-            if (m_readBuffer.size() < totalFrameBytes) {
+        // Parse the HTTP-style `Content-Length:` header preceding the `\r\n\r\n` separator.
+        const QByteArray headerBlock = m_readBuffer.left(headerEnd);
+        int contentLen = -1;
+        for (const QByteArray& line : headerBlock.split('\n')) {
+            const QByteArray trimmed = line.trimmed();
+            if (trimmed.toLower().startsWith("content-length:")) {
+                contentLen = trimmed.mid(15).trimmed().toInt();
                 break;
             }
+        }
+        if (contentLen < 0) {
+            m_readBuffer.remove(0, headerEnd + 4);
+            continue;
+        }
+        const int totalFrameBytes = headerEnd + 4 + contentLen;
+        if (m_readBuffer.size() < totalFrameBytes) {
+            break;
+        }
 
-            const QByteArray bodyBytes = m_readBuffer.mid(headerEnd + 4, contentLen);
-            m_readBuffer.remove(0, totalFrameBytes);
+        // Slice out the exact UTF-8 JSON payload bytes and advance m_readBuffer past the frame.
+        const QByteArray bodyBytes = m_readBuffer.mid(headerEnd + 4, contentLen);
+        m_readBuffer.remove(0, totalFrameBytes);
 
-            const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
-            if (doc.isObject()) {
-                const QJsonObject obj = doc.object();
-                if (obj.contains(QStringLiteral("id")) && obj.value(QStringLiteral("id")).toInt(-1) == requestId) {
-                    return obj;
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+        if (!doc.isObject()) continue;
+        const QJsonObject obj = doc.object();
+
+        // Dispatch asynchronous `textDocument/publishDiagnostics` notifications to UI listeners.
+        if (obj.value(QStringLiteral("method")).toString() == QStringLiteral("textDocument/publishDiagnostics")) {
+            const QString uri = obj.value(QStringLiteral("params")).toObject().value(QStringLiteral("uri")).toString();
+            QString localPath = QUrl(uri).toLocalFile();
+            // Ignore transient virtual completion buffers so real editor diagnostics remain pristine.
+            if (!localPath.isEmpty() && !localPath.endsWith(QStringLiteral(".__gridlock_virtual_comp.cpp"))) {
+                if (QFileInfo::exists(localPath)) {
+                    const QString canon = QFileInfo(localPath).canonicalFilePath();
+                    if (!canon.isEmpty()) localPath = canon;
                 }
+                const QVector<LspDiagnostic> diags = parsePublishDiagnostics(bodyBytes);
+                m_latestDiagnostics.insert(localPath, diags);
+                emit diagnosticsPublished(localPath, diags);
             }
         }
 
-        const int remaining = std::max(10, timeoutMs - static_cast<int>(timer.elapsed()));
-        if (m_process->waitForReadyRead(std::min(remaining, 80))) {
-            m_readBuffer.append(m_process->readAllStandardOutput());
+        // Index every JSON-RPC response by integer `id` so nested `readyReadStandardOutput` slots never drop responses.
+        if (obj.contains(QStringLiteral("id")) && !obj.contains(QStringLiteral("method"))) {
+            const int id = obj.value(QStringLiteral("id")).toInt(-1);
+            if (id >= 0) {
+                m_completedResponses.insert(id, obj);
+            }
         }
     }
-    return {};
 }
 
 /**
- * @brief Performs structural C++ struct/nested-struct/STL scope completion analysis on sourceCode.
- * @param sourceCode Full C/C++ translation unit text.
- * @param targetLineOneBased 1-based line number where completion is requested.
- * @param partialExpression Partial C/C++ expression being typed.
- * @return Ordered list of matching member or variable completions.
+ * @brief Reads Content-Length framed JSON-RPC messages from clangd until `requestId` arrives.
+ * @param requestId Monotonic JSON-RPC integer request identifier to await.
+ * @param timeoutMs Maximum wait budget in milliseconds.
+ * @return Decoded JSON-RPC response object, or empty QJsonObject on timeout.
  */
+QJsonObject ClangdLspClient::readResponseForId(int requestId, int timeoutMs) {
+    if (m_completedResponses.contains(requestId)) {
+        return m_completedResponses.take(requestId);
+    }
+    if (!m_process || m_process->state() != QProcess::Running) return {};
+
+    // Poll stdout in bounded slices until the matching response id arrives or timeoutMs elapses.
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        drainIncomingMessages();
+        if (m_completedResponses.contains(requestId)) {
+            return m_completedResponses.take(requestId);
+        }
+        const int remaining = std::max(10, timeoutMs - static_cast<int>(timer.elapsed()));
+        if (m_process->waitForReadyRead(std::min(remaining, 60))) {
+            drainIncomingMessages();
+            if (m_completedResponses.contains(requestId)) {
+                return m_completedResponses.take(requestId);
+            }
+        }
+    }
+    return m_completedResponses.take(requestId);
+}
 /**
  * @brief Resolves detailed completions with kind and type metadata for expression at target line.
  * @param filePath Path to the active source file.
@@ -514,6 +594,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
             receiverChain = chainMatch.captured(1);
         }
 
+        // Normalize pointer arrows into dot separators and walk nested field types left-to-right.
         QString normChain = receiverChain;
         normChain.replace(QStringLiteral("->"), QStringLiteral("."));
         const QStringList segments = normChain.split(QLatin1Char('.'), Qt::SkipEmptyParts);
@@ -525,6 +606,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
                 activeType = memberNestedTypes.value(activeType + QLatin1Char('.') + fieldName);
             }
 
+            // Populate user-defined struct members or standard C++ container methods (`std::vector`, `std::string`).
             if (structDetailedMembers.contains(activeType)) {
                 candidates = structDetailedMembers.value(activeType);
             } else if (activeType.contains(QStringLiteral("vector"))) {
@@ -550,6 +632,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
             }
         }
     } else {
+        // When no `.` or `->` separator is present, offer sorted in-scope local variables.
         memberPrefix = trimmedExpr;
         QStringList locals = varTypes.keys();
         locals.sort();
@@ -558,6 +641,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
         }
     }
 
+    // Filter candidate items case-insensitively against the trailing user-typed identifier prefix.
     QVector<LspCompletionItem> filtered;
     for (const auto& c : candidates) {
         if (memberPrefix.isEmpty() || c.label.startsWith(memberPrefix, Qt::CaseInsensitive)) {
@@ -565,6 +649,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
         }
     }
 
+    // Augment structural candidates with live `clangd` `textDocument/completion` results when budget permits.
     if (timeoutMs > 0) {
         int zeroLine = 0;
         int zeroCol = 0;
@@ -574,8 +659,11 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
         const QFileInfo fi(filePath.isEmpty() ? QStringLiteral("virtual_breakpoint.cpp") : filePath);
         const QString rootDir = fi.exists() ? fi.absolutePath() : QDir::currentPath();
         if (cli.ensureServerInitialized(rootDir)) {
+            // Use a dedicated hidden sibling URI so virtual spliced expressions resolve relative
+            // `#include` headers without colliding with open editor buffers or diagnostics.
             const QString docUri = QUrl::fromLocalFile(
-                fi.exists() ? fi.absoluteFilePath() : (rootDir + QStringLiteral("/virtual_breakpoint.cpp"))).toString();
+                rootDir + QStringLiteral("/.__gridlock_virtual_comp.cpp")).toString();
+            // Close any previous virtual completion buffer before opening the newly spliced expression.
             if (!cli.m_activeDocumentUri.isEmpty()) {
                 cli.sendJsonRpc(QJsonObject{
                     {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
@@ -586,6 +674,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
                 });
             }
             cli.m_activeDocumentUri = docUri;
+            // Open the transient virtual document at the spliced breakpoint expression line.
             cli.sendJsonRpc(QJsonObject{
                 {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
                 {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
@@ -598,6 +687,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
                     }}
                 }}
             });
+            // Issue `textDocument/completion` at the exact end column of `partialExpression`.
             const int compId = cli.m_nextRequestId++;
             cli.sendJsonRpc(QJsonObject{
                 {QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
@@ -611,6 +701,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
                     }}
                 }}
             });
+            // Parse both `CompletionList.items` object responses and bare `CompletionItem[]` arrays.
             const QJsonObject compResp = cli.readResponseForId(compId, timeoutMs);
             const QJsonValue resultVal = compResp.value(QStringLiteral("result"));
             const QJsonArray items = resultVal.isObject()
@@ -619,6 +710,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
             for (const QJsonValue val : items) {
                 const QJsonObject item = val.toObject();
                 const int kind = item.value(QStringLiteral("kind")).toInt(0);
+                // Retain Method (2), Field (5), Variable (6), and Property (10) completion entries.
                 if (kind != 2 && kind != 5 && kind != 6 && kind != 10) continue;
                 QString text = item.value(QStringLiteral("insertText")).toString().trimmed();
                 if (text.isEmpty()) text = item.value(QStringLiteral("label")).toString().trimmed();
@@ -626,6 +718,7 @@ QVector<ClangdLspClient::LspCompletionItem> ClangdLspClient::completeDetailedAtL
                 const int parenPos = text.indexOf(QLatin1Char('('));
                 if (parenPos > 0) text = text.left(parenPos) + QStringLiteral("()");
                 if (text.isEmpty() || text.startsWith(QStringLiteral("__"))) continue;
+                // Deduplicate clangd results against structural local/member items already collected.
                 bool exists = false;
                 for (const auto& f : filtered) {
                     if (f.label == text) { exists = true; break; }
@@ -685,236 +778,6 @@ QStringList ClangdLspClient::completeExpressionAtLine(const QString& filePath,
         labels.append(item.label);
     }
     return labels;
-}
-
-/**
- * @brief Parses a JSON-RPC `textDocument/publishDiagnostics` notification into LspDiagnostic records.
- * @param jsonMessage Raw JSON-RPC notification payload (with or without Content-Length header).
- * @return Vector of parsed LspDiagnostic entries with 1-based line numbers.
- */
-QVector<LspDiagnostic> ClangdLspClient::parsePublishDiagnostics(const QByteArray& jsonMessage) {
-    QVector<LspDiagnostic> result;
-    // Strip optional HTTP-like Content-Length header if present.
-    QByteArray body = jsonMessage;
-    const int sepIdx = body.indexOf("\r\n\r\n");
-    if (sepIdx >= 0) body = body.mid(sepIdx + 4);
-    // Parse JSON document and validate root object structure.
-    QJsonParseError err{};
-    const QJsonDocument doc = QJsonDocument::fromJson(body, &err);
-    if (err.error != QJsonParseError::NoError || !doc.isObject()) return result;
-    // Extract diagnostics array from either params.diagnostics or top-level diagnostics key.
-    const QJsonObject root = doc.object();
-    const QJsonObject params = root.value(QStringLiteral("params")).toObject();
-    const QJsonArray diags = params.contains(QStringLiteral("diagnostics"))
-                                 ? params.value(QStringLiteral("diagnostics")).toArray()
-                                 : root.value(QStringLiteral("diagnostics")).toArray();
-    // Convert each 0-based LSP range entry into a 1-based line LspDiagnostic record.
-    for (const QJsonValue val : diags) {
-        if (!val.isObject()) continue;
-        const QJsonObject dObj = val.toObject();
-        const QJsonObject rangeObj = dObj.value(QStringLiteral("range")).toObject();
-        const QJsonObject startObj = rangeObj.value(QStringLiteral("start")).toObject();
-        const QJsonObject endObj = rangeObj.value(QStringLiteral("end")).toObject();
-        // Populate 1-based line number, 0-based start/end columns, severity, and message.
-        LspDiagnostic diag;
-        diag.line = startObj.value(QStringLiteral("line")).toInt(0) + 1;
-        diag.column = startObj.value(QStringLiteral("character")).toInt(0);
-        diag.endColumn = endObj.value(QStringLiteral("character")).toInt(diag.column + 1);
-        diag.severity = dObj.value(QStringLiteral("severity")).toInt(1);
-        diag.message = dObj.value(QStringLiteral("message")).toString().trimmed();
-        result.append(diag);
-    }
-    return result;
-}
-
-/**
- * @brief Analyzes C/C++ source code for compiler errors and warnings via clangd and AST rules.
- * @param sourceCode Full C/C++ source buffer text.
- * @param timeoutMs Maximum wait time in milliseconds for live clangd diagnostics.
- * @return Vector of LspDiagnostic records.
- */
-QVector<LspDiagnostic> ClangdLspClient::analyzeSourceDiagnostics(const QString& sourceCode, int timeoutMs) {
-    QVector<LspDiagnostic> diagnostics;
-    if (sourceCode.trimmed().isEmpty()) {
-        return diagnostics;
-    }
-
-    // 1. Perform fast deterministic C++ type-mismatch and syntax validation across source lines.
-    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    static const QRegularExpression scalarStringInitRe(
-        QStringLiteral("^\\s*(?:const\\s+)?(int|long|short|unsigned|double|float|bool|size_t|uint64_t|int64_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\"([^\"]*)\""));
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString& line = lines.at(i);
-        const auto match = scalarStringInitRe.match(line);
-        if (match.hasMatch()) {
-            LspDiagnostic diag;
-            diag.line = i + 1;
-            diag.column = qMax(0, static_cast<int>(line.indexOf(match.captured(1))));
-            diag.endColumn = line.length();
-            diag.severity = 1;
-            diag.message = QStringLiteral("Cannot initialize a variable of type '%1' with a string literal")
-                               .arg(match.captured(1));
-            diagnostics.append(diag);
-        }
-    }
-
-    // 2. Query live clangd subprocess for publishDiagnostics notifications when available.
-    if (timeoutMs > 0 && ensureServerInitialized(QDir::currentPath()) && m_process) {
-        const QString docUri = QUrl::fromLocalFile(QDir::currentPath() + QStringLiteral("/virtual_diag.cpp")).toString();
-        if (!m_activeDocumentUri.isEmpty()) {
-            sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("method"), QStringLiteral("textDocument/didClose")},
-                                    {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), m_activeDocumentUri}}}}}});
-        }
-        m_activeDocumentUri = docUri;
-        sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
-                                {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{
-                                    {QStringLiteral("uri"), docUri}, {QStringLiteral("languageId"), QStringLiteral("cpp")},
-                                    {QStringLiteral("version"), m_documentVersion++}, {QStringLiteral("text"), sourceCode}}}}}});
-        QElapsedTimer timer; timer.start();
-        while (timer.elapsed() < qMin(timeoutMs, 350)) {
-            m_process->waitForReadyRead(35);
-            m_readBuffer.append(m_process->readAllStandardOutput());
-            const int idx = m_readBuffer.indexOf("publishDiagnostics");
-            if (idx >= 0) {
-                const int hdrIdx = m_readBuffer.lastIndexOf("Content-Length:", idx);
-                if (hdrIdx >= 0) {
-                    for (const auto& p : parsePublishDiagnostics(m_readBuffer.mid(hdrIdx))) {
-                        bool dup = false;
-                        for (const auto& ex : diagnostics) { if (ex.line == p.line && ex.severity == p.severity) { dup = true; break; } }
-                        if (!dup) diagnostics.append(p);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    return diagnostics;
-}
-
-namespace {
-// Extracts the C++ identifier token at or adjacent to zeroBasedCol on a single source line.
-QString extractSymbolAtColumn(const QString& targetLine, int zeroBasedCol) {
-    if (targetLine.isEmpty()) return QString();
-    int col = qBound(0, zeroBasedCol, static_cast<int>(targetLine.size()) - 1);
-    while (col > 0 && !targetLine.at(col).isLetterOrNumber() && targetLine.at(col) != QLatin1Char('_')) --col;
-    int start = col, end = col;
-    while (start > 0 && (targetLine.at(start - 1).isLetterOrNumber() || targetLine.at(start - 1) == QLatin1Char('_'))) --start;
-    while (end < targetLine.size() && (targetLine.at(end).isLetterOrNumber() || targetLine.at(end) == QLatin1Char('_'))) ++end;
-    return targetLine.mid(start, end - start).trimmed();
-}
-}  // namespace
-
-/**
- * @brief Queries rich symbol/type/Doxygen hover markdown at a source position via clangd and AST fallback.
- */
-QString ClangdLspClient::requestHoverInfo(const QString& sourceCode, int oneBasedLine, int zeroBasedColumn, int timeoutMs) {
-    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    if (oneBasedLine < 1 || oneBasedLine > lines.size()) return QString();
-    const QString& targetLine = lines.at(oneBasedLine - 1);
-    const QString symbol = extractSymbolAtColumn(targetLine, zeroBasedColumn);
-
-    // Query clangd textDocument/hover if server is running and timeoutMs > 0.
-    if (timeoutMs > 0 && ensureServerInitialized(QDir::currentPath())) {
-        const QString docUri = QUrl::fromLocalFile(QDir::currentPath() + QStringLiteral("/virtual_hover.cpp")).toString();
-        sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("method"), QStringLiteral("textDocument/didOpen")},
-                                {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{
-                                    {QStringLiteral("uri"), docUri}, {QStringLiteral("languageId"), QStringLiteral("cpp")},
-                                    {QStringLiteral("version"), m_documentVersion++}, {QStringLiteral("text"), sourceCode}}}}}});
-        const int hoverId = m_nextRequestId++;
-        sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), hoverId}, {QStringLiteral("method"), QStringLiteral("textDocument/hover")},
-                                {QStringLiteral("params"), QJsonObject{{QStringLiteral("textDocument"), QJsonObject{{QStringLiteral("uri"), docUri}}},
-                                                                       {QStringLiteral("position"), QJsonObject{{QStringLiteral("line"), oneBasedLine - 1}, {QStringLiteral("character"), zeroBasedColumn}}}}}});
-        const QJsonValue contentsVal = readResponseForId(hoverId, qMin(timeoutMs, 350)).value(QStringLiteral("result")).toObject().value(QStringLiteral("contents"));
-        if (contentsVal.isObject() && !contentsVal.toObject().value(QStringLiteral("value")).toString().trimmed().isEmpty()) {
-            return contentsVal.toObject().value(QStringLiteral("value")).toString().trimmed();
-        }
-        if (contentsVal.isString() && !contentsVal.toString().trimmed().isEmpty()) return contentsVal.toString().trimmed();
-    }
-
-    // Deterministic C++ AST fallback: resolve struct/class definitions and local declarations.
-    if (!symbol.isEmpty()) {
-        for (const QString& ln : lines) {
-            if (ln.contains(symbol) && (ln.contains(QStringLiteral("struct ")) || ln.contains(QStringLiteral("class ")) || ln.trimmed().startsWith(symbol))) {
-                return QStringLiteral("```cpp\n%1\n```\nSymbol: `%2`").arg(ln.trimmed(), symbol);
-            }
-        }
-        return QStringLiteral("```cpp\n%1\n```\nSymbol: `%2`").arg(targetLine.trimmed(), symbol);
-    }
-    return targetLine.trimmed();
-}
-
-/**
- * @brief Resolves the declaration/definition location of the symbol at (oneBasedLine, zeroBasedCol).
- */
-LspLocation ClangdLspClient::findDefinition(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs) {
-    Q_UNUSED(timeoutMs);
-    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    if (oneBasedLine < 1 || oneBasedLine > lines.size()) return {};
-    const QString symbol = extractSymbolAtColumn(lines.at(oneBasedLine - 1), zeroBasedCol);
-    if (symbol.isEmpty()) return {};
-    const QRegularExpression wordRe(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(symbol)));
-    // Search top-down for the first non-comment declaration/definition line containing symbol.
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString& ln = lines.at(i);
-        const int commentIdx = ln.indexOf(QStringLiteral("//"));
-        const QString codePart = (commentIdx >= 0) ? ln.left(commentIdx) : ln;
-        const auto m = wordRe.match(codePart);
-        if (m.hasMatch()) {
-            return LspLocation{m_activeDocumentUri, i + 1, static_cast<int>(m.capturedStart(0)), static_cast<int>(m.capturedEnd(0))};
-        }
-    }
-    return {};
-}
-
-/**
- * @brief Finds all reference locations of the symbol at (oneBasedLine, zeroBasedCol) across sourceCode.
- */
-QVector<LspLocation> ClangdLspClient::findReferences(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs) {
-    Q_UNUSED(timeoutMs);
-    QVector<LspLocation> refs;
-    const QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    if (oneBasedLine < 1 || oneBasedLine > lines.size()) return refs;
-    const QString symbol = extractSymbolAtColumn(lines.at(oneBasedLine - 1), zeroBasedCol);
-    if (symbol.isEmpty()) return refs;
-    const QRegularExpression wordRe(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(symbol)));
-    // Collect all whole-word occurrences in code segments (excluding single-line // comments).
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString& ln = lines.at(i);
-        const int commentIdx = ln.indexOf(QStringLiteral("//"));
-        const QString codePart = (commentIdx >= 0) ? ln.left(commentIdx) : ln;
-        auto it = wordRe.globalMatch(codePart);
-        while (it.hasNext()) {
-            const auto m = it.next();
-            refs.append(LspLocation{m_activeDocumentUri, i + 1, static_cast<int>(m.capturedStart(0)), static_cast<int>(m.capturedEnd(0))});
-        }
-    }
-    return refs;
-}
-
-/**
- * @brief Performs token- and comment-aware AST symbol renaming across sourceCode.
- */
-QString ClangdLspClient::renameSymbolInSource(const QString& sourceCode, int oneBasedLine, int zeroBasedCol,
-                                              const QString& newName, int timeoutMs) {
-    Q_UNUSED(timeoutMs);
-    QStringList lines = sourceCode.split(QLatin1Char('\n'));
-    if (oneBasedLine < 1 || oneBasedLine > lines.size() || newName.trimmed().isEmpty()) return sourceCode;
-    const QString symbol = extractSymbolAtColumn(lines.at(oneBasedLine - 1), zeroBasedCol);
-    if (symbol.isEmpty()) return sourceCode;
-    const QRegularExpression wordRe(QStringLiteral("\\b%1\\b").arg(QRegularExpression::escape(symbol)));
-    // Replace whole-word identifier matches in code segments while preserving trailing // comments verbatim.
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString& ln = lines.at(i);
-        const int commentIdx = ln.indexOf(QStringLiteral("//"));
-        if (commentIdx >= 0) {
-            QString codePart = ln.left(commentIdx);
-            codePart.replace(wordRe, newName);
-            lines[i] = codePart + ln.mid(commentIdx);
-        } else {
-            lines[i].replace(wordRe, newName);
-        }
-    }
-    return lines.join(QLatin1Char('\n'));
 }
 
 }  // namespace gridlock::core

@@ -535,6 +535,12 @@ public:
     bool navigateBack();
     bool navigateForward();
 
+    /**
+     * @brief Jumps the active source editor cursor to the clangd-resolved symbol definition (F12).
+     * @return True if a local or cross-file definition location was resolved and activated.
+     */
+    bool goToDefinitionAtCursor();
+
     bool isShowingDecompilerFallback() const { return m_showingDecompilerFallback; }
     void enableDecompilerFallback(bool enabled);
 

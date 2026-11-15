@@ -16,6 +16,8 @@
 #include <QMenu>
 #include <QResizeEvent>
 #include <QTabBar>
+#include <QTextBlock>
+#include <QTextCursor>
 #include <algorithm>
 
 namespace gridlock::ui {
@@ -82,7 +84,7 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
     code.replace("\r\n", "\n");
     file.close();
 
-    // Construct fresh SourceCodeView and initialize file properties.
+    // Construct fresh SourceCodeView, load buffer text, and synchronize canonical file path with clangd.
     auto* view = new SourceCodeView(this);
     view->setProperty("absolutePath", absolutePath);
     view->setSourceCode(code);
@@ -96,7 +98,7 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
         view->setBreakpoints(QSet<int>());
     }
 
-    // Forward view inspection and breakpoint signals through EditorTabManager.
+    // Forward view inspection, breakpoint, and cross-file Go-to-Definition signals through EditorTabManager.
     connect(view, &SourceCodeView::toggleBreakpointRequested, this,
             &EditorTabManager::toggleBreakpointRequested);
     connect(view, &SourceCodeView::breakpointToggled, this,
@@ -107,6 +109,8 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
             &EditorTabManager::hideHoverTooltip);
     connect(view, &SourceCodeView::pinVariableRequested, this,
             &EditorTabManager::pinVariableRequested);
+    connect(view, &SourceCodeView::definitionJumpRequested, this,
+            &EditorTabManager::navigateToLocation);
 
     // Append new tab with base file name and full path tooltip.
     const QFileInfo fi(absolutePath);
@@ -237,6 +241,37 @@ bool EditorTabManager::switchHeaderSource() {
 }
 
 /**
+ * @brief Opens or activates `filePath` and places the editor cursor at `(oneBasedLine, zeroBasedColumn)`.
+ * @param filePath Target workspace file path resolved by Go-to-Definition.
+ * @param oneBasedLine 1-based target line number.
+ * @param zeroBasedColumn 0-based target character column offset.
+ * @return Activated SourceCodeView pointer, or nullptr if `filePath` could not be opened.
+ */
+SourceCodeView* EditorTabManager::navigateToLocation(const QString& filePath, int oneBasedLine, int zeroBasedColumn) {
+    // Open or raise the target file tab in the central editor tab strip.
+    SourceCodeView* view = openFile(filePath);
+    if (!view || !view->document()) {
+        return nullptr;
+    }
+
+    // Clamp target block and character offset to valid document bounds before moving the cursor.
+    const QTextBlock block = view->document()->findBlockByNumber(std::max(0, oneBasedLine - 1));
+    if (block.isValid()) {
+        QTextCursor cursor(block);
+        const int clampedCol = std::clamp(zeroBasedColumn, 0, static_cast<int>(block.text().size()));
+        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, clampedCol);
+        view->setTextCursor(cursor);
+        view->ensureCursorVisible();
+        view->highlightCurrentLine(std::max(1, oneBasedLine));
+    }
+    view->setFocus();
+
+    // Notify MainWindow so active file tracking and status bar telemetry stay synchronized.
+    emit definitionJumpRequested(view->currentFile(), std::max(1, oneBasedLine), std::max(0, zeroBasedColumn));
+    return view;
+}
+
+/**
  * @brief Opens or reorients the secondary side-by-side split editor pane.
  * @param orientation Horizontal (Split Right) or Vertical (Split Down) orientation.
  */
@@ -251,6 +286,8 @@ void EditorTabManager::splitEditor(Qt::Orientation orientation) {
         m_secondaryTabWidget->setTabsClosable(true);
         connect(m_secondaryTabWidget, &QTabWidget::tabCloseRequested, this, [this](int) { closeSplit(); });
         m_secondaryEditorView = new SourceCodeView(m_secondaryTabWidget);
+        connect(m_secondaryEditorView, &SourceCodeView::definitionJumpRequested, this,
+                &EditorTabManager::navigateToLocation);
         m_secondaryTabWidget->addTab(m_secondaryEditorView, QStringLiteral("split"));
         m_splitContainer->addWidget(m_secondaryTabWidget);
     }

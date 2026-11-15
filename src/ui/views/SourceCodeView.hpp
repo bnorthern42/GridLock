@@ -85,10 +85,10 @@ public:
     void setSourceCode(const QString& code, int activeLine = -1);
 
     /**
-     * @brief Sets the path of the currently open source file.
+     * @brief Sets the path of the currently open source file and synchronizes live clangd diagnostics.
      * @param filePath Filesystem path.
      */
-    void setCurrentFile(const QString& filePath) { m_currentFilePath = filePath; }
+    void setCurrentFile(const QString& filePath);
 
     /**
      * @brief Returns the path of the currently open source file.
@@ -399,6 +399,9 @@ signals:
     /** @brief Emitted when the underlying QTextDocument modification state changes. */
     void modificationStateChanged(bool modified);
 
+    /** @brief Emitted when F12 Go-to-Definition resolves to a target location in another workspace file. */
+    void definitionJumpRequested(const QString& filePath, int oneBasedLine, int zeroBasedColumn);
+
 protected:
     void resizeEvent(QResizeEvent *e) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -415,6 +418,7 @@ private slots:
     void updateLineNumberArea(const QRect &rect, int dy);
     void handleHoverTimeout();
     void highlightCurrentLine();
+    void syncLspDocument();
 
 private:
     LineNumberArea* m_lineNumberArea = nullptr;
@@ -427,6 +431,7 @@ private:
     QString m_currentFilePath;
     QString m_lastHoveredWord;
     QTimer* m_hoverTimer = nullptr;
+    QTimer* m_lspSyncTimer = nullptr;
     QPoint m_lastMousePos;
     QPoint m_lastGlobalMousePos;
     int m_executionLine = -1;

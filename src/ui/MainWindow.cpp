@@ -145,6 +145,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   setupCallStackDock();
   setupStatusBar();
 
+  // Keep active file tracking synchronized whenever F12 Go-to-Definition switches editor tabs.
+  if (m_editorTabManager) {
+    connect(m_editorTabManager, &EditorTabManager::definitionJumpRequested, this,
+            [this](const QString &filePath, int oneBasedLine, int /*zeroBasedColumn*/) {
+              m_currentFile = filePath;
+              if (networkLog()) {
+                networkLog()->appendText(
+                    QStringLiteral("Navigated to definition: %1:%2\n").arg(filePath).arg(oneBasedLine));
+              }
+            });
+  }
+
   // Initialize global shortcuts and install top-level event filter.
   gridlock::core::ShortcutManager::instance().initialize(this);
   qApp->installEventFilter(this);
@@ -189,18 +201,20 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Load offline persistence TOML breakpoints from user preferences.
   m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
 
-  // Restore saved geometry and dock configuration.
-  QSettings settings("gridlock", "debugger");
-  if (settings.contains("MainWindow/Geometry_v9")) restoreGeometry(settings.value("MainWindow/Geometry_v9").toByteArray());
-  if (width() < 800 || height() < 600) resize(1440, 900);
-  if (settings.contains("MainWindow/State_v9")) restoreState(settings.value("MainWindow/State_v9").toByteArray());
-  // Restore individual splitter sash positions.
-  for (auto* splitter : findChildren<QSplitter*>()) {
-    if (!splitter->objectName().isEmpty()) {
-      auto st = settings.value("MainWindow/Splitter_v9_" + splitter->objectName()).toByteArray();
-      if (!st.isEmpty()) splitter->restoreState(st);
+  // Restore saved desktop geometry and dock configuration when running with an interactive display server.
+  if (QGuiApplication::platformName() != QStringLiteral("offscreen")) {
+    QSettings settings("gridlock", "debugger");
+    if (settings.contains("MainWindow/Geometry_v9")) restoreGeometry(settings.value("MainWindow/Geometry_v9").toByteArray());
+    if (settings.contains("MainWindow/State_v9")) restoreState(settings.value("MainWindow/State_v9").toByteArray());
+    // Restore individual splitter sash positions.
+    for (auto* splitter : findChildren<QSplitter*>()) {
+      if (!splitter->objectName().isEmpty()) {
+        auto st = settings.value("MainWindow/Splitter_v9_" + splitter->objectName()).toByteArray();
+        if (!st.isEmpty()) splitter->restoreState(st);
+      }
     }
   }
+  if (width() < 800 || height() < 600) resize(1440, 900);
   // Constrain side dock widths to prevent collapsing below 150px.
   for (auto* dock : findChildren<QDockWidget*>()) {
     const auto area = dockWidgetArea(dock);
@@ -672,6 +686,9 @@ void MainWindow::setupMenu() {
     connect(act, &QAction::triggered, this,
             [this, actLabel]() { triggerEditMenuAction(actLabel); });
   }
+  // Go to Definition Action: Resolves symbol declaration via clangd LSP (F12 inside SourceCodeView).
+  QAction *gotoDefAction = editMenu->addAction(QStringLiteral("Go to Definition"));
+  connect(gotoDefAction, &QAction::triggered, this, &MainWindow::goToDefinitionAtCursor);
   editMenu->addSeparator();
   // Preferences Action: Launches the multi-page PreferencesDialog (Ctrl+,).
   QAction *prefAction = editMenu->addAction("Preferences");
@@ -702,56 +719,33 @@ void MainWindow::setupMenu() {
   connect(aboutAction, &QAction::triggered, this, [this]() {
     // Asynchronously query remote Git tags to display latest release version.
     QProcess gitProc;
-    gitProc.start("git", QStringList()
-                             << "ls-remote" << "--tags" << "--sort=v:refname"
-                             << "https://github.com/bnorthern42/GridLock.git");
+    gitProc.start("git", {"ls-remote", "--tags", "--sort=v:refname", "https://github.com/bnorthern42/GridLock.git"});
     gitProc.waitForFinished(3000);
     // Fall back to built-in compile-time version string if network check fails.
     QString latestTag = "v" + gridlock::core::Version::getString();
-    if (gitProc.exitStatus() == QProcess::NormalExit &&
-        gitProc.exitCode() == 0) {
+    if (gitProc.exitStatus() == QProcess::NormalExit && gitProc.exitCode() == 0) {
       // Parse output stream to extract highest lexicographical tag name.
-      QString output =
-          QString::fromUtf8(gitProc.readAllStandardOutput()).trimmed();
+      const QString output = QString::fromUtf8(gitProc.readAllStandardOutput()).trimmed();
       if (!output.isEmpty()) {
-        QStringList lines = output.split('\n');
-        const QString &lastLine = lines.last();
-        QString tag = lastLine.split('\t').last().replace("refs/tags/", "");
-        if (!tag.isEmpty()) {
-          latestTag = tag;
-        }
+        const QString tag = output.split('\n').last().split('\t').last().replace("refs/tags/", "");
+        if (!tag.isEmpty()) latestTag = tag;
       }
     }
 
     // Construct modal message box with rich HTML formatting and project logo.
     QMessageBox msgBox(this);
     msgBox.setWindowTitle("About GridLock");
-    msgBox.setIconPixmap(
-        QPixmap(":/icon.png")
-            .scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    msgBox.setIconPixmap(QPixmap(":/icon.png").scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     msgBox.setTextFormat(Qt::RichText);
-    msgBox.setText(
-        QString("<b>GridLock IDE %1</b><br><br>"
-                "A high-performance graphical debugger for MPI "
-                "applications.<br><br>"
-                "<a href=\"https://github.com/bnorthern42/GridLock\">GridLock "
-                "on GitHub</a><br><br>"
-                "<b>Acknowledgments & Attributions:</b><ul>"
-                "<li><a href=\"https://www.gnu.org/software/ddd/\">GNU "
-                "DDD</a>: For pioneering visual data display in debugging.</li>"
-                "<li><a href=\"https://www.kdbg.org/\">KDbg</a>: For early "
-                "inspiration on KDE/Qt-based GDB frontend wrappers.</li>"
-                "<li><a href=\"https://www.gdbgui.com/\">gdbgui</a>: For "
-                "demonstrating the power of browser-based debug visualization, "
-                "which inspired our native DifferentialGrid.</li>"
-                "<li><a href=\"https://zealdocs.org/\">Zeal</a>: For the "
-                "open-source .docset standard and offline documentation "
-                "workflows that power our Reference Manual.</li>"
-                "</ul><br>"
-                "Special thanks to the <b>Spack</b>, <b>SLURM</b>, and "
-                "<b>OpenMPI</b> communities for the tools that power our HPC "
-                "environments.")
-            .arg(latestTag));
+    msgBox.setText(QString(
+        "<b>GridLock IDE %1</b><br><br>A high-performance graphical debugger for MPI applications.<br><br>"
+        "<a href=\"https://github.com/bnorthern42/GridLock\">GridLock on GitHub</a><br><br>"
+        "<b>Acknowledgments & Attributions:</b><ul>"
+        "<li><a href=\"https://www.gnu.org/software/ddd/\">GNU DDD</a>: For pioneering visual data display in debugging.</li>"
+        "<li><a href=\"https://www.kdbg.org/\">KDbg</a>: For early inspiration on KDE/Qt-based GDB frontend wrappers.</li>"
+        "<li><a href=\"https://www.gdbgui.com/\">gdbgui</a>: For demonstrating the power of browser-based debug visualization, which inspired our native DifferentialGrid.</li>"
+        "<li><a href=\"https://zealdocs.org/\">Zeal</a>: For the open-source .docset standard and offline documentation workflows that power our Reference Manual.</li>"
+        "</ul><br>Special thanks to the <b>Spack</b>, <b>SLURM</b>, and <b>OpenMPI</b> communities for the tools that power our HPC environments.").arg(latestTag));
     // Enable interactive hyperlinks in the about box so documentation and project links open in user browser.
     msgBox.setTextInteractionFlags(Qt::TextBrowserInteraction);
     // Display dialog modally to ensure user acknowledges application provenance and acknowledgments.
@@ -806,14 +800,16 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
   }
 
-  // Save active color theme and workstation dock/splitter geometry to QSettings.
+  // Save active color theme and desktop dock/splitter geometry when running interactively.
   gridlock::core::ThemeManager::instance().savePersistedTheme();
-  QSettings settings("gridlock", "debugger");
-  settings.setValue("MainWindow/Geometry_v9", saveGeometry());
-  settings.setValue("MainWindow/State_v9", saveState());
-  // Record individual QSplitter ratios so side-by-side source/CFG splits restore cleanly.
-  for (auto* splitter : findChildren<QSplitter*>()) {
-    if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
+  if (QGuiApplication::platformName() != QStringLiteral("offscreen")) {
+    QSettings settings("gridlock", "debugger");
+    settings.setValue("MainWindow/Geometry_v9", saveGeometry());
+    settings.setValue("MainWindow/State_v9", saveState());
+    // Record individual QSplitter ratios so side-by-side source/CFG splits restore cleanly.
+    for (auto* splitter : findChildren<QSplitter*>()) {
+      if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
+    }
   }
   event->accept();
 }

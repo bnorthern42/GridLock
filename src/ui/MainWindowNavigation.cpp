@@ -14,6 +14,7 @@
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/SessionManager.hpp"
 #include "../core/managers/ThemeManager.hpp"
+#include "../core/utils/ClangdLspClient.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "dialogs/PreferencesDialog.hpp"
@@ -469,6 +470,18 @@ void MainWindow::enableDecompilerFallback(bool enabled) {
 }
 
 /**
+ * @brief Jumps the active source editor cursor to the clangd-resolved symbol definition (F12).
+ * @return True if a local or cross-file definition location was resolved and activated.
+ */
+bool MainWindow::goToDefinitionAtCursor() {
+    // Delegate symbol resolution and cross-file tab navigation to the active SourceCodeView.
+    if (SourceCodeView* view = getSourceCodeView()) {
+        return view->triggerGoToDefinition();
+    }
+    return false;
+}
+
+/**
  * @brief Prompts user for source file via file dialog and opens it.
  */
 void MainWindow::openFile() {
@@ -520,12 +533,17 @@ void MainWindow::loadSourceFile(const QString& filePath) {
                     }
                 });
     }
-    // Open the requested source file in EditorTabManager and notify Clangd LSP coordinator.
+    // Open the requested source file in EditorTabManager and synchronize live Clangd LSP state.
     if (m_editorTabManager) {
         if (auto* view = m_editorTabManager->openFile(filePath)) {
-            m_currentFile = filePath;
+            m_currentFile = !view->currentFile().isEmpty() ? view->currentFile() : filePath;
             const QString absolutePath = QFileInfo(m_currentFile).absoluteFilePath();
-            // Restart Clangd LSP session on the newly opened file when running interactively.
+            // Refresh any cached publishDiagnostics squiggles when switching back to an existing tab.
+            const auto cachedDiags = gridlock::core::ClangdLspClient::instance().cachedDiagnosticsForFile(absolutePath);
+            if (!cachedDiags.isEmpty() && view->diagnostics().isEmpty()) {
+                view->setDiagnostics(cachedDiags);
+            }
+            // Restart secondary LspCoordinator session on the newly opened file when running interactively.
             if (m_lspCoordinator && QGuiApplication::platformName() != QStringLiteral("offscreen")) {
                 m_lspCoordinator->stop();
                 m_lspCoordinator->start(absolutePath);

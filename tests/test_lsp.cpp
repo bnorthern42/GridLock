@@ -8,10 +8,14 @@
 
 #include "test_lsp.hpp"
 
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 
 #include "../src/core/hpc/LspCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
@@ -170,6 +174,7 @@ void TestLspCoordinator::testLspHoverParsing() {
     coordinator.processRawOutput(LspCoordinator::formatMessage(initResult));
 
     // 1. Object Test (MarkedString / MarkupContent with kind="markdown")
+    //    Validates extraction of `contents.value` from structured MarkupContent payloads.
     coordinator.requestHover("dummy.cpp", 1, 1, QPoint(10, 10));
     QJsonObject hoverObj;
     hoverObj["jsonrpc"] = "2.0";
@@ -185,6 +190,7 @@ void TestLspCoordinator::testLspHoverParsing() {
     QCOMPARE(spy.takeFirst().at(0).toString(), QString("Object Markdown"));
 
     // 2. String Test (raw string contents)
+    //    Validates legacy LSP plain-string `contents` payloads.
     coordinator.requestHover("dummy.cpp", 2, 2, QPoint(20, 20));
     QJsonObject hoverStr;
     hoverStr["jsonrpc"] = "2.0";
@@ -197,6 +203,7 @@ void TestLspCoordinator::testLspHoverParsing() {
     QCOMPARE(spy.takeFirst().at(0).toString(), QString("String Markdown"));
 
     // 3. Array Test (array of strings and objects joined by newlines)
+    //    Validates MarkedString[] concatenation across heterogeneous array entries.
     coordinator.requestHover("dummy.cpp", 3, 3, QPoint(30, 30));
     QJsonObject hoverArr;
     hoverArr["jsonrpc"] = "2.0";
@@ -303,10 +310,155 @@ void TestLspCoordinator::testLspHoverParsing() {
     QVERIFY2(checkDefinitionRefsAndRename(ClangdLspClient::instance()),
              "ClangdLspClient must support findDefinition, findReferences, and renameSymbolInSource");
 
-    // 6. Verify zero "QIODevice::write (QProcess): device not open" warnings when invoking
+    // 6. Verify real cross-file clangd JSON-RPC definition, references, WorkspaceEdit AST rename,
+    //    compile_commands.json auto-discovery, and live textDocument/publishDiagnostics emission.
+    //    Construct a temporary multi-file C++23 workspace containing:
+    //      - `math_ops.hpp` declaring `Vec2::lengthSq()` on 1-based line 5
+    //      - `caller.cpp` invoking `v.lengthSq()` alongside string literals and comments
+    //      - `builddir/compile_commands.json` specifying the header include directory
+    //      - `broken_diag.cpp` triggering an asynchronous `textDocument/publishDiagnostics` error
+    QTemporaryDir crossDir;
+    QVERIFY(crossDir.isValid());
+    const QString headerPath = crossDir.filePath(QStringLiteral("math_ops.hpp"));
+    const QString callerPath = crossDir.filePath(QStringLiteral("caller.cpp"));
+    const QString brokenPath = crossDir.filePath(QStringLiteral("broken_diag.cpp"));
+    const QString buildSubdir = crossDir.filePath(QStringLiteral("builddir"));
+    QVERIFY(QDir().mkpath(buildSubdir));
+
+    // Write `math_ops.hpp` declaring `Vec2::lengthSq()` on 1-based line 5 (0-based line 4).
+    // This header exercises cross-translation-unit `textDocument/definition` and `WorkspaceEdit` rename.
+    const QString headerCode = QStringLiteral(
+        "#pragma once\n"
+        "struct Vec2 {\n"
+        "    double x;\n"
+        "    double y;\n"
+        "    double lengthSq() const { return x * x + y * y; }\n"
+        "};\n");
+    {
+        QFile hf(headerPath);
+        QVERIFY(hf.open(QIODevice::WriteOnly | QIODevice::Text));
+        hf.write(headerCode.toUtf8());
+    }
+
+    // Write `caller.cpp` calling `v.lengthSq()` with a comment and string literal containing `lengthSq`.
+    // Regex-based token replacement would corrupt `"lengthSq"`, whereas clangd AST rename preserves it.
+    const QString callerCode = QStringLiteral(
+        "#include \"math_ops.hpp\"\n"
+        "// lengthSq comment must stay intact\n"
+        "int main() {\n"
+        "    const char* label = \"lengthSq\";\n"
+        "    Vec2 v{3.0, 4.0};\n"
+        "    return static_cast<int>(v.lengthSq()) + (label[0] == 'l' ? 0 : 1);\n"
+        "}\n");
+    {
+        QFile cf(callerPath);
+        QVERIFY(cf.open(QIODevice::WriteOnly | QIODevice::Text));
+        cf.write(callerCode.toUtf8());
+    }
+
+    // Write `<root>/builddir/compile_commands.json` to verify `--compile-commands-dir` discovery.
+    // ClangdLspClient::discoverCompileCommandsDir() must locate `builddir/compile_commands.json`
+    // when given any translation unit inside `<root>`.
+    {
+        QFile ccf(buildSubdir + QStringLiteral("/compile_commands.json"));
+        QVERIFY(ccf.open(QIODevice::WriteOnly | QIODevice::Text));
+        const QJsonArray db{QJsonObject{
+            {QStringLiteral("directory"), crossDir.path()},
+            {QStringLiteral("command"), QStringLiteral("clang++ -std=c++23 -I\"%1\" -c \"%2\"").arg(crossDir.path(), callerPath)},
+            {QStringLiteral("file"), callerPath},
+        }};
+        ccf.write(QJsonDocument(db).toJson());
+    }
+
+    // Assert `renameSymbolInSource` never corrupts string literals (`"lengthSq"`) or block comments (`/* lengthSq */`).
+    // Single-file regex stubs replace every word-boundary match of `lengthSq` outside `//` comments,
+    // corrupting both C-style block comments and C string literals; clangd's AST `textDocument/rename`
+    // restricts edits strictly to semantic symbol references (`Box::lengthSq` and `b.lengthSq()`).
+    const QString stringLiteralProbe = QStringLiteral(
+        "struct Box { int lengthSq() const { return 1; } };\n"
+        "int main() {\n"
+        "    /* lengthSq block comment */\n"
+        "    const char* lit = \"lengthSq\";\n"
+        "    Box b;\n"
+        "    return b.lengthSq() + (lit[0] == 'l' ? 0 : 1);\n"
+        "}\n");
+    const QString astRenamedSingle = ClangdLspClient::instance().renameSymbolInSource(
+        stringLiteralProbe, 6, 15, QStringLiteral("normSquared"), 3000);
+    QVERIFY2(astRenamedSingle.contains(QStringLiteral("b.normSquared()")) &&
+                 astRenamedSingle.contains(QStringLiteral("\"lengthSq\"")) &&
+                 astRenamedSingle.contains(QStringLiteral("/* lengthSq block comment */")),
+             "renameSymbolInSource must use clangd AST WorkspaceEdit so string literals and block comments remain intact");
+
+    // Verify cross-file findDefinition, findReferences, WorkspaceEdit renameSymbol, and publishDiagnostics.
+    // Uses C++20 requires-clause so Gate 1 Red Phase compiles cleanly before Gate 2 signatures land,
+    // returning false immediately when any cross-file method or signal is missing.
+    auto checkCrossFileClangd = [&](auto& client) -> bool {
+        using ClientT = std::decay_t<decltype(client)>;
+        if constexpr (requires {
+                          ClientT::discoverCompileCommandsDir(callerPath);
+                          client.findDefinition(callerPath, callerCode, 5, 31, 4000);
+                          client.findReferences(callerPath, callerCode, 5, 31, 4000);
+                          client.renameSymbol(callerPath, callerCode, 5, 31, QStringLiteral("normSquared"), 4000);
+                          client.syncDocument(brokenPath, QString());
+                      }) {
+            // 1. Auto-discover `<root>/builddir` containing `compile_commands.json`.
+            //    Compare canonical paths so `/tmp` symlink differences do not cause false mismatches.
+            const QString ccDir = ClientT::discoverCompileCommandsDir(callerPath);
+            if (QFileInfo(ccDir).canonicalFilePath() != QFileInfo(buildSubdir).canonicalFilePath()) {
+                return false;
+            }
+            // 2. Resolve `lengthSq` on 0-based line 5, col 31 of `caller.cpp` across files into `math_ops.hpp` line 5.
+            //    Verifies `textDocument/definition` parses cross-file target URI and 1-based line number.
+            const auto crossDef = client.findDefinition(callerPath, callerCode, 5, 31, 4000);
+            if (QFileInfo(crossDef.filePath).fileName() != QStringLiteral("math_ops.hpp") || crossDef.line != 5) {
+                return false;
+            }
+            // 3. Find references across opened header + caller translation units.
+            //    Syncs `math_ops.hpp` first so both declaration and call-site references are indexed.
+            client.syncDocument(headerPath, headerCode);
+            const auto crossRefs = client.findReferences(callerPath, callerCode, 5, 31, 4000);
+            if (crossRefs.size() < 2) {
+                return false;
+            }
+            // 4. Cross-file AST rename (`lengthSq` -> `normSquared`) updates both files without touching comments/strings.
+            //    Validates bottom-up application of `WorkspaceEdit` across `math_ops.hpp` and `caller.cpp`.
+            const auto edits = client.renameSymbol(callerPath, callerCode, 5, 31, QStringLiteral("normSquared"), 4000);
+            bool headerUpdated = false;
+            bool callerUpdated = false;
+            for (auto it = edits.constBegin(); it != edits.constEnd(); ++it) {
+                // Check header declaration rename (`double normSquared() const`).
+                if (QFileInfo(it.key()).fileName() == QStringLiteral("math_ops.hpp") &&
+                    it.value().contains(QStringLiteral("double normSquared() const"))) {
+                    headerUpdated = true;
+                }
+                // Check caller invocation rename while preserving comment and string literal tokens.
+                if (QFileInfo(it.key()).fileName() == QStringLiteral("caller.cpp") &&
+                    it.value().contains(QStringLiteral("v.normSquared()")) &&
+                    it.value().contains(QStringLiteral("// lengthSq comment must stay intact")) &&
+                    it.value().contains(QStringLiteral("\"lengthSq\""))) {
+                    callerUpdated = true;
+                }
+            }
+            if (!headerUpdated || !callerUpdated) {
+                return false;
+            }
+            // 5. Verify live `textDocument/publishDiagnostics` signal emission on broken C++ buffer.
+            //    Confirms `diagnosticsPublished` fires asynchronously with parsed diagnostic entries.
+            QSignalSpy diagSpy(&client, &ClientT::diagnosticsPublished);
+            client.syncDocument(brokenPath, QStringLiteral("int main() { int bad = \"not_an_int\"; return bad; }\n"));
+            if (!diagSpy.wait(4000)) {
+                return false;
+            }
+            return diagSpy.count() >= 1;
+        } else {
+            return false;
+        }
+    };
+    QVERIFY2(checkCrossFileClangd(ClangdLspClient::instance()),
+             "ClangdLspClient must implement cross-file findDefinition, findReferences, renameSymbol, compile_commands discovery, and diagnosticsPublished");
+
+    // 7. Verify zero "QIODevice::write (QProcess): device not open" warnings when invoking
     // LspCoordinator or ClangdLspClient before start or after process exit / closed write channel.
-    // Install a custom QtMessageHandler to intercept any runtime QtWarningMsg diagnostics emitted
-    // by QProcess or QIODevice when writing to closed, unstarted, or terminating child processes.
     static QStringList s_capturedWriteWarnings;
     s_capturedWriteWarnings.clear();
     const QtMessageHandler prevHandler = qInstallMessageHandler(
@@ -321,8 +473,6 @@ void TestLspCoordinator::testLspHoverParsing() {
 
     {
         // Exercise LspCoordinator when pointing to a running process whose QIODevice is closed.
-        // Forcefully closing the underlying QIODevice while QProcess remains in Running state
-        // verifies that sendPayload() checks both isOpen() and isWritable() prior to write().
         gridlock::core::ConfigManager::instance().setGlobalClangdPath(QStringLiteral("/bin/cat"));
         LspCoordinator deadLsp;
         deadLsp.start(QStringLiteral("/tmp/nonexistent_test.cpp"));
@@ -334,8 +484,7 @@ void TestLspCoordinator::testLspHoverParsing() {
         }
         deadLsp.stop();
 
-        // Exercise LspCoordinator with a non-existent binary path so QProcess transitions from
-        // Starting to NotRunning, verifying waitForStarted() and ~QProcess teardown guards.
+        // Exercise LspCoordinator with a non-existent binary path so QProcess transitions cleanly.
         gridlock::core::ConfigManager::instance().setGlobalClangdPath(QStringLiteral("/nonexistent/clangd_missing_bin"));
         LspCoordinator missingLsp;
         missingLsp.start(QStringLiteral("/tmp/nonexistent_test.cpp"));

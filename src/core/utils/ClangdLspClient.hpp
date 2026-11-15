@@ -12,6 +12,7 @@
 #include <QByteArray>
 #include <QJsonObject>
 #include <QMap>
+#include <QObject>
 #include <QProcess>
 #include <QString>
 #include <QStringList>
@@ -49,9 +50,11 @@ using LspLocation = gridlock::core::LspLocation;
 
 /**
  * @class ClangdLspClient
- * @brief Provides C/C++ expression and member completion at a target source line via clangd LSP.
+ * @brief Persistent workspace-aware clangd JSON-RPC 2.0 client for diagnostics, navigation, refactoring, and completion.
  */
-class ClangdLspClient {
+class ClangdLspClient : public QObject {
+    Q_OBJECT
+
 public:
     using LspDiagnostic = gridlock::core::LspDiagnostic;
     using LspLocation = gridlock::core::LspLocation;
@@ -64,8 +67,9 @@ public:
 
     /**
      * @brief Constructs a ClangdLspClient instance.
+     * @param parent Optional QObject owner.
      */
-    ClangdLspClient();
+    explicit ClangdLspClient(QObject* parent = nullptr);
 
     /**
      * @struct LspCompletionItem
@@ -77,6 +81,31 @@ public:
         QString kindLabel;  ///< Kind category ("Field", "Method", "Variable", "Struct", "Keyword").
         QString detailType; ///< C++ type signature (e.g., "int", "double[5]", "float", "size_t").
     };
+
+    /**
+     * @brief Auto-discovers the directory containing `compile_commands.json` for a workspace or source file.
+     *
+     * Walks upward from `startPath` inspecting `<dir>/compile_commands.json`,
+     * `<dir>/builddir/compile_commands.json`, and `<dir>/build/compile_commands.json`.
+     *
+     * @param startPath File path or workspace root directory to begin searching from.
+     * @return Canonical directory path containing `compile_commands.json`, or empty string if none exists.
+     */
+    static QString discoverCompileCommandsDir(const QString& startPath);
+
+    /**
+     * @brief Synchronizes an open editor buffer with clangd via `textDocument/didOpen` or `textDocument/didChange`.
+     * @param filePath Local file path of the translation unit or header.
+     * @param sourceText Full current text of the editor buffer.
+     */
+    void syncDocument(const QString& filePath, const QString& sourceText);
+
+    /**
+     * @brief Returns the most recently published diagnostics cached for `filePath`.
+     * @param filePath Local file path to query.
+     * @return Cached vector of LspDiagnostic records.
+     */
+    QVector<LspDiagnostic> cachedDiagnosticsForFile(const QString& filePath) const;
 
     /**
      * @brief Resolves detailed completions with kind and type metadata for expression at target line.
@@ -120,7 +149,19 @@ public:
     QString requestHoverInfo(const QString& sourceCode, int oneBasedLine, int zeroBasedColumn, int timeoutMs = 2000);
 
     /**
-     * @brief Resolves the declaration/definition location of the symbol at (oneBasedLine, zeroBasedCol).
+     * @brief Resolves cross-file declaration/definition via `textDocument/definition` at 0-based coordinates.
+     * @param filePath Local file path of the active document.
+     * @param sourceText Current source text of `filePath`.
+     * @param zeroBasedLine 0-based line number of the symbol usage.
+     * @param zeroBasedCol 0-based character offset of the symbol usage.
+     * @param timeoutMs Maximum wait time in milliseconds for clangd JSON-RPC response.
+     * @return Resolved LspLocation (canonical target `filePath`, 1-based `line`, 0-based `column`).
+     */
+    LspLocation findDefinition(const QString& filePath, const QString& sourceText,
+                               int zeroBasedLine, int zeroBasedCol, int timeoutMs = 2000);
+
+    /**
+     * @brief Resolves the declaration/definition location of the symbol in an inline buffer (1-based line).
      * @param sourceCode Full C/C++ source buffer text.
      * @param oneBasedLine 1-based line number of the symbol usage.
      * @param zeroBasedCol 0-based column offset of the symbol usage.
@@ -130,7 +171,19 @@ public:
     LspLocation findDefinition(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs = 2000);
 
     /**
-     * @brief Finds all reference locations of the symbol at (oneBasedLine, zeroBasedCol) across sourceCode.
+     * @brief Finds cross-file symbol references via `textDocument/references` at 0-based coordinates.
+     * @param filePath Local file path of the active document.
+     * @param sourceText Current source text of `filePath`.
+     * @param zeroBasedLine 0-based line number of the symbol.
+     * @param zeroBasedCol 0-based character offset of the symbol.
+     * @param timeoutMs Maximum wait time in milliseconds for clangd JSON-RPC response.
+     * @return Vector of LspLocation reference sites across opened/indexed translation units.
+     */
+    QVector<LspLocation> findReferences(const QString& filePath, const QString& sourceText,
+                                        int zeroBasedLine, int zeroBasedCol, int timeoutMs = 2000);
+
+    /**
+     * @brief Finds all reference locations of the symbol in an inline buffer (1-based line).
      * @param sourceCode Full C/C++ source buffer text.
      * @param oneBasedLine 1-based line number of the symbol.
      * @param zeroBasedCol 0-based column offset of the symbol.
@@ -140,13 +193,27 @@ public:
     QVector<LspLocation> findReferences(const QString& sourceCode, int oneBasedLine, int zeroBasedCol, int timeoutMs = 2000);
 
     /**
-     * @brief Performs token- and comment-aware AST symbol renaming across sourceCode.
+     * @brief Executes cross-file AST rename via `textDocument/rename` returning updated contents per file.
+     * @param filePath Local file path of the active document.
+     * @param sourceText Current source text of `filePath`.
+     * @param zeroBasedLine 0-based line number of the symbol to rename.
+     * @param zeroBasedCol 0-based character offset of the symbol to rename.
+     * @param newName Replacement C++ identifier.
+     * @param timeoutMs Maximum wait time in milliseconds for clangd `WorkspaceEdit` response.
+     * @return Map of canonical local file path to updated source code after applying `WorkspaceEdit`.
+     */
+    QMap<QString, QString> renameSymbol(const QString& filePath, const QString& sourceText,
+                                        int zeroBasedLine, int zeroBasedCol,
+                                        const QString& newName, int timeoutMs = 2000);
+
+    /**
+     * @brief Performs clangd AST `WorkspaceEdit` symbol renaming on a single source buffer (1-based line).
      * @param sourceCode Full C/C++ source buffer text.
      * @param oneBasedLine 1-based line number of the symbol to rename.
      * @param zeroBasedCol 0-based column offset of the symbol to rename.
      * @param newName Replacement C++ identifier.
      * @param timeoutMs Maximum wait time in milliseconds for live clangd response.
-     * @return Updated source code with all symbol references renamed while comments/strings remain untouched.
+     * @return Updated source code with all AST symbol references renamed while comments/strings remain untouched.
      */
     QString renameSymbolInSource(const QString& sourceCode, int oneBasedLine, int zeroBasedCol,
                                  const QString& newName, int timeoutMs = 2000);
@@ -154,21 +221,10 @@ public:
     /**
      * @brief Terminates any active clangd background process cleanly on destruction.
      */
-    ~ClangdLspClient();
+    ~ClangdLspClient() override;
 
     /**
      * @brief Splices a partial C++ condition expression into sourceCode right before targetLineOneBased.
-     *
-     * Injects a synthetic statement `    auto __gl_cond = (<partialExpression>);` at the
-     * 1-based breakpoint line so `clangd` can type-check in-scope local variables, loop
-     * counters, and struct/class receivers at the exact point of execution pause.
-     *
-     * @param sourceCode Full C/C++ translation unit text currently open in the editor.
-     * @param targetLineOneBased 1-based line number where the conditional breakpoint is placed.
-     * @param partialExpression User-typed expression prefix (e.g., "data[i]." or "send_buf.").
-     * @param outZeroBasedLine Output 0-based LSP line index of the spliced completion cursor.
-     * @param outZeroBasedCharacter Output 0-based LSP column offset immediately after partialExpression.
-     * @return Complete virtual C++ document string ready for `textDocument/didOpen`.
      */
     static QString buildVirtualCompletionDocument(const QString& sourceCode,
                                                   int targetLineOneBased,
@@ -178,19 +234,11 @@ public:
 
     /**
      * @brief Serializes a JSON-RPC 2.0 payload into an HTTP-style `Content-Length` LSP frame.
-     * @param payload JSON-RPC request or notification object.
-     * @return Framed UTF-8 byte sequence (`Content-Length: <N>\r\n\r\n<json>`).
      */
     static QByteArray encodeLspMessage(const QJsonObject& payload);
 
     /**
      * @brief Resolves member and symbol completions for partialExpression at targetLineOneBased.
-     * @param filePath Path to the active source file (used to construct the `file://` document URI).
-     * @param sourceCode Full text of the source file.
-     * @param targetLineOneBased 1-based breakpoint line number.
-     * @param partialExpression Partial C/C++ condition string being edited.
-     * @param timeoutMs Maximum time (ms) to wait for a live clangd response before merging scope results.
-     * @return Ordered list of completion member/identifier strings.
      */
     QStringList completeExpressionAtLine(const QString& filePath,
                                          const QString& sourceCode,
@@ -200,43 +248,58 @@ public:
 
     /**
      * @brief Performs fast structural C++ AST/scope analysis for structs, nested structs, and STL containers.
-     * @param sourceCode Full C/C++ translation unit source text.
-     * @param targetLineOneBased 1-based line number defining lexical visibility scope.
-     * @param partialExpression Partial condition expression under the cursor.
-     * @return Ordered list of matching struct fields, STL container methods, or local variables.
      */
     static QStringList analyzeInScopeCompletions(const QString& sourceCode,
                                                  int targetLineOneBased,
                                                  const QString& partialExpression);
 
+signals:
+    /**
+     * @brief Emitted whenever clangd publishes compiler diagnostics (`textDocument/publishDiagnostics`).
+     * @param filePath Canonical local file path for the diagnosed translation unit or header.
+     * @param diagnostics Structured 1-based line / 0-based column diagnostic list.
+     */
+    void diagnosticsPublished(const QString& filePath,
+                              const QVector<gridlock::core::LspDiagnostic>& diagnostics);
+
 private:
     /**
-     * @brief Ensures the background clangd QProcess is started and LSP-initialized.
-     * @param rootDir Workspace directory URI root for clangd initialization.
-     * @return True if clangd is running and ready to accept document/completion requests.
+     * @brief Ensures the background clangd QProcess is started and LSP-initialized for `rootDir`.
      */
     bool ensureServerInitialized(const QString& rootDir);
 
     /**
+     * @brief Gracefully stops and deallocates any running clangd child process.
+     */
+    void stopServerProcess();
+
+    /**
      * @brief Sends a JSON-RPC payload over the clangd stdin pipe.
-     * @param payload JSON-RPC 2.0 object to transmit.
      */
     void sendJsonRpc(const QJsonObject& payload);
 
     /**
+     * @brief Drains complete Content-Length JSON-RPC frames from stdout, caching responses and emitting diagnostics.
+     */
+    void drainIncomingMessages();
+
+    /**
      * @brief Waits for and parses the JSON-RPC response matching requestId from clangd stdout.
-     * @param requestId Expected integer JSON-RPC request ID.
-     * @param timeoutMs Timeout in milliseconds.
-     * @return Parsed JSON-RPC response object, or empty QJsonObject on timeout.
      */
     QJsonObject readResponseForId(int requestId, int timeoutMs);
 
-    QProcess* m_process = nullptr;     ///< Persistent clangd stdio child process.
-    QByteArray m_readBuffer;           ///< Accumulator buffer for incoming Content-Length frames.
-    bool m_initialized = false;        ///< True after initialize/initialized handshake completes.
-    int m_nextRequestId = 1;           ///< Monotonically increasing JSON-RPC request identifier.
-    int m_documentVersion = 1;         ///< Monotonically increasing virtual document version counter.
-    QString m_activeDocumentUri;       ///< URI of the currently opened virtual document in clangd.
+    QProcess* m_process = nullptr;                        ///< Persistent clangd stdio child process.
+    QByteArray m_readBuffer;                              ///< Accumulator buffer for incoming Content-Length frames.
+    bool m_initialized = false;                           ///< True after initialize/initialized handshake completes.
+    int m_nextRequestId = 1;                              ///< Monotonically increasing JSON-RPC request identifier.
+    int m_documentVersion = 1;                            ///< Monotonically increasing virtual document version counter.
+    QString m_activeDocumentUri;                          ///< URI of the temporary virtual completion document.
+    QString m_activeRootDir;                              ///< Active workspace root passed to `initialize`.
+    QString m_activeCompileCommandsDir;                   ///< Active `--compile-commands-dir` directory (empty if none).
+    QMap<int, QJsonObject> m_completedResponses;          ///< Completed JSON-RPC responses indexed by integer `id`.
+    QMap<QString, int> m_openDocumentVersions;            ///< Tracks open document URI -> latest LSP version number.
+    QMap<QString, QString> m_openDocumentTexts;           ///< Tracks canonical local file path -> latest synced buffer text.
+    QMap<QString, QVector<LspDiagnostic>> m_latestDiagnostics; ///< Cached diagnostics per canonical local file path.
 };
 
 }  // namespace gridlock::core

@@ -7,21 +7,7 @@
  */
 
 #include "SourceCodeView.hpp"
-#include <QVBoxLayout>
-#include <QPainter>
-#include <QPainterPath>
-#include <QTextBlock>
-#include <QToolBar>
-#include <QAction>
-#include <QDebug>
-#include <QFile>
-#include <QFileInfo>
-#include <QKeyEvent>
-#include <QSet>
-#include <QTextStream>
-#include <QApplication>
-#include <QMouseEvent>
-#include <QWheelEvent>
+#include <QtWidgets>
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/utils/ClangdLspClient.hpp"
 #include "../dialogs/ConditionalBreakpointDialog.hpp"
@@ -129,8 +115,37 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this); m_hoverTimer->setSingleShot(true);
     connect(m_hoverTimer, &QTimer::timeout, this, &SourceCodeView::handleHoverTimeout);
+    // Debounce live C/C++ text edits (250ms) into clangd `didOpen`/`didChange` and bind `publishDiagnostics`.
+    m_lspSyncTimer = new QTimer(this); m_lspSyncTimer->setSingleShot(true);
+    connect(m_lspSyncTimer, &QTimer::timeout, this, &SourceCodeView::syncLspDocument);
+    connect(document(), &QTextDocument::contentsChanged, this, [this]() {
+        if (!m_currentFilePath.isEmpty()) m_lspSyncTimer->start(250);
+    });
+    connect(&core::ClangdLspClient::instance(), &core::ClangdLspClient::diagnosticsPublished,
+            this, [this](const QString& filePath, const QVector<core::LspDiagnostic>& diags) {
+                if (m_currentFilePath.isEmpty()) return;
+                const QString curCanon = QFileInfo::exists(m_currentFilePath) ? QFileInfo(m_currentFilePath).canonicalFilePath() : QFileInfo(m_currentFilePath).absoluteFilePath();
+                const QString msgCanon = QFileInfo::exists(filePath) ? QFileInfo(filePath).canonicalFilePath() : QFileInfo(filePath).absoluteFilePath();
+                if (!curCanon.isEmpty() && curCanon == msgCanon) setDiagnostics(diags);
+            });
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
     connect(document(), &QTextDocument::modificationChanged, this, &SourceCodeView::modificationStateChanged);
+}
+
+/** @brief Sets the active file path, restores cached diagnostics, and syncs non-empty buffers with clangd. */
+void SourceCodeView::setCurrentFile(const QString& filePath) {
+    m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
+                            ? QFileInfo(filePath).canonicalFilePath()
+                            : filePath;
+    if (!m_currentFilePath.isEmpty()) {
+        setDiagnostics(core::ClangdLspClient::instance().cachedDiagnosticsForFile(m_currentFilePath));
+        if (!toPlainText().trimmed().isEmpty()) syncLspDocument();
+    }
+}
+
+/** @brief Pushes the current editor buffer to ClangdLspClient (`textDocument/didOpen` or `didChange`). */
+void SourceCodeView::syncLspDocument() {
+    if (!m_currentFilePath.isEmpty()) core::ClangdLspClient::instance().syncDocument(m_currentFilePath, toPlainText());
 }
 
 /**
@@ -506,14 +521,14 @@ void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
         if (rect().contains(mapped)) editorPos = mapped;
     }
     if (!shouldOpenEditorContextMenuAt(editorPos)) { event->accept(); return; }
-    QPlainTextEdit::contextMenuEvent(event);
+    // Append "Go to Definition (F12)" to the standard editor context menu.
+    QMenu* menu = createStandardContextMenu();
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Go to Definition (F12)"), this, &SourceCodeView::triggerGoToDefinition);
+    menu->exec(event->globalPos()); delete menu;
 }
 
-/**
- * @brief Commits or rolls back tentative breakpoint state after the anchored breakpoint popover closes.
- * @param lineOneBased 1-based source line number.
- * @param wasPreviouslySet True if lineOneBased already held a breakpoint before right-clicking.
- */
+/** @brief Commits or rolls back tentative breakpoint state after the anchored breakpoint popover closes. */
 void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet,
                                                    bool accepted, bool enabledChecked,
                                                    const QString& condition, const QString& suspendScope) {
@@ -537,10 +552,7 @@ void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPre
     emit breakpointToggled(m_currentFilePath, lineOneBased, true, cleanCondition);
 }
 
-/**
- * @brief Handles gutter mouse clicks: left-click toggles breakpoint, right-click opens anchored popover.
- * @param event The mouse press event inside LineNumberArea.
- */
+/** @brief Handles gutter mouse clicks: left-click toggles breakpoint, right-click opens anchored popover. */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     if (!event || (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)) return;
     event->accept();
@@ -549,7 +561,6 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     int blockNumber = block.blockNumber();
     int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
     int bottom = top + qRound(blockBoundingRect(block).height());
-
     // Scan visible blocks to match the clicked vertical gutter coordinate.
     while (block.isValid()) {
         if (y >= top && y <= bottom) {
@@ -581,10 +592,7 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     }
 }
 
-/**
- * @brief Resolves the 1-based line under the mouse cursor inside LineNumberArea for live hover preview.
- * @param event Mouse move event inside LineNumberArea.
- */
+/** @brief Resolves the 1-based line under the mouse cursor inside LineNumberArea for live hover preview. */
 void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
     const int y = event->pos().y();
     QTextBlock block = firstVisibleBlock();
@@ -599,15 +607,10 @@ void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
     setHoveredGutterLine(hoveredLine);
 }
 
-/**
- * @brief Resets hovered gutter line state when cursor leaves LineNumberArea.
- */
+/** @brief Resets hovered gutter line state when cursor leaves LineNumberArea. */
 void SourceCodeView::lineNumberAreaLeaveEvent(QEvent *event) { Q_UNUSED(event); setHoveredGutterLine(-1); }
 
-/**
- * @brief Highlights a 1-based line as the active debugger execution line (or clears if <= 0).
- * @param lineOneBased 1-based source line number, or <= 0 to clear execution highlight.
- */
+/** @brief Highlights a 1-based line as the active debugger execution line (or clears if <= 0). */
 void SourceCodeView::highlightExecutionLine(int lineOneBased) {
     if (lineOneBased <= 0) {
         m_executionLine = -1; highlightCurrentLine();
@@ -621,46 +624,32 @@ void SourceCodeView::highlightExecutionLine(int lineOneBased) {
     if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
-/**
- * @brief Highlights a specific 1-based execution line and scrolls into view.
- */
+/** @brief Highlights a specific 1-based execution line and scrolls into view. */
 void SourceCodeView::highlightCurrentLine(int lineNumber) { highlightExecutionLine(lineNumber); }
 
-/**
- * @brief Selects a 1-based source line, highlights it as active, and emits sourceLineSelected.
- */
+/** @brief Selects a 1-based source line, highlights it as active, and emits sourceLineSelected. */
 void SourceCodeView::selectSourceLine(int lineOneBased) {
     if (lineOneBased <= 0) return;
     highlightExecutionLine(lineOneBased); emit sourceLineSelected(lineOneBased);
 }
 
-/**
- * @brief Adjusts viewport margins to accommodate the gutter width with zero right margin.
- */
+/** @brief Adjusts viewport margins to accommodate the gutter width with zero right margin. */
 void SourceCodeView::updateLineNumberAreaWidth(int) { setViewportMargins(lineNumberAreaWidth(), 0, 0, 0); }
 
-/**
- * @brief Handles scroll and geometry updates for the line number area.
- */
+/** @brief Handles scroll and geometry updates for the line number area. */
 void SourceCodeView::updateLineNumberArea(const QRect &rect, int dy) {
     if (dy) m_lineNumberArea->scroll(0, dy);
     else m_lineNumberArea->update(0, rect.y(), m_lineNumberArea->width(), rect.height());
     if (rect.contains(viewport()->rect())) m_lineNumberArea->resize(lineNumberAreaWidth(), rect.height());
 }
 
-/**
- * @brief Synchronizes gutter height upon editor resize.
- */
+/** @brief Synchronizes gutter height upon editor resize. */
 void SourceCodeView::resizeEvent(QResizeEvent *e) {
     QPlainTextEdit::resizeEvent(e);
     m_lineNumberArea->setGeometry(QRect(contentsRect().left(), contentsRect().top(), lineNumberAreaWidth(), contentsRect().height()));
 }
 
-/**
- * @brief Populates the editor with source code and optionally highlights an active line.
- * @param code Source code string.
- * @param activeLine Optional 1-based active line.
- */
+/** @brief Populates the editor with source code, highlights activeLine, and syncs live clangd diagnostics. */
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
     if (!code.isEmpty() && toPlainText() != code) { QPlainTextEdit::setPlainText(code); document()->setModified(false); }
     QList<QTextEdit::ExtraSelection> extraSelections;
@@ -674,30 +663,30 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
         }
     }
     setExtraSelections(extraSelections);
+    if (!m_currentFilePath.isEmpty() && !code.trimmed().isEmpty()) syncLspDocument();
 }
 
-/**
- * @brief Restarts the hover evaluation debounce timer on mouse movement.
- */
+/** @brief Restarts the hover evaluation debounce timer on mouse movement. */
 void SourceCodeView::mouseMoveEvent(QMouseEvent *event) {
     QPlainTextEdit::mouseMoveEvent(event);
     m_lastMousePos = event->pos(); m_lastGlobalMousePos = event->globalPosition().toPoint();
     m_hoverTimer->start(400);
 }
 
-/**
- * @brief Cancels active hover timers and hides tooltips when cursor exits the editor.
- */
+/** @brief Cancels active hover timers and hides tooltips when cursor exits the editor. */
 void SourceCodeView::leaveEvent(QEvent *event) {
     m_hoverTimer->stop(); m_lastHoveredWord.clear();
     emit hideHoverTooltip(); QPlainTextEdit::leaveEvent(event);
 }
 
-/**
- * @brief Slot triggered after mouse rests on a word, dispatching variable hover requests.
- */
+/** @brief Slot triggered after mouse rests on a token, showing diagnostic tooltips or variable hover cards. */
 void SourceCodeView::handleHoverTimeout() {
     QTextCursor cursor = cursorForPosition(m_lastMousePos);
+    const int hoveredLine = cursor.blockNumber() + 1;
+    // Surface clangd compiler diagnostic tooltip when hovering a wavy-underlined error or warning line.
+    for (const auto& diag : m_diagnostics) {
+        if (diag.line == hoveredLine && !diag.message.isEmpty()) { QToolTip::showText(m_lastGlobalMousePos, diag.message, this); break; }
+    }
     cursor.select(QTextCursor::WordUnderCursor);
     const QString word = cursor.selectedText();
     static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
@@ -827,11 +816,27 @@ QString SourceCodeView::currentScopeBreadcrumb() const {
 
 /**
  * @brief Jumps the editor cursor to the declaration/definition of the symbol under the cursor (F12).
+ *
+ * Queries `ClangdLspClient::findDefinition` with workspace context when `m_currentFilePath` is set,
+ * emitting `definitionJumpRequested` when the resolved declaration resides in another file.
  */
 bool SourceCodeView::triggerGoToDefinition() {
     const QTextCursor cur = textCursor();
-    const auto loc = core::ClangdLspClient::instance().findDefinition(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock());
+    const auto loc = !m_currentFilePath.isEmpty()
+                         ? core::ClangdLspClient::instance().findDefinition(
+                               m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock())
+                         : core::ClangdLspClient::instance().findDefinition(
+                               toPlainText(), cur.blockNumber() + 1, cur.positionInBlock());
     if (loc.line <= 0) return false;
+    // Dispatch cross-file jump request when clangd resolves a declaration in a sibling header or TU.
+    if (!m_currentFilePath.isEmpty() && !loc.filePath.isEmpty() && QFileInfo::exists(loc.filePath)) {
+        const QString curCanon = QFileInfo::exists(m_currentFilePath) ? QFileInfo(m_currentFilePath).canonicalFilePath() : QFileInfo(m_currentFilePath).absoluteFilePath();
+        const QString dstCanon = QFileInfo(loc.filePath).canonicalFilePath();
+        if (!dstCanon.isEmpty() && dstCanon != curCanon) {
+            emit definitionJumpRequested(dstCanon, loc.line, loc.column);
+            return true;
+        }
+    }
     QTextBlock b = document()->findBlockByNumber(loc.line - 1);
     if (!b.isValid()) return false;
     QTextCursor dest(b); dest.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, qMax(0, loc.column));
@@ -877,10 +882,19 @@ void SourceCodeView::setGitLineStates(const QHash<int, GitLineState>& states) {
 }
 
 /**
- * @brief Renames all AST references to the symbol under the cursor (Shift+F6) without corrupting comments.
+ * @brief Renames all AST references to the symbol under the cursor (Shift+F6) via clangd `WorkspaceEdit`.
  */
 bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
     const QTextCursor cur = textCursor();
+    if (!m_currentFilePath.isEmpty() && QFileInfo::exists(m_currentFilePath)) {
+        const auto edits = core::ClangdLspClient::instance().renameSymbol(
+            m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock(), newName);
+        const QString curCanon = QFileInfo(m_currentFilePath).canonicalFilePath();
+        if (edits.contains(curCanon) && edits.value(curCanon) != toPlainText()) {
+            setPlainText(edits.value(curCanon)); document()->setModified(true);
+            return true;
+        }
+    }
     const QString updated = core::ClangdLspClient::instance().renameSymbolInSource(toPlainText(), cur.blockNumber() + 1, cur.positionInBlock(), newName);
     if (updated == toPlainText()) return false;
     setPlainText(updated); document()->setModified(true);

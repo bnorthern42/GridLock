@@ -14,27 +14,7 @@
 #include <QContextMenuEvent>
 #include <QDir>
 #include <QDockWidget>
-#include <QEvent>
-#include <QFile>
-#include <QFileInfo>
-#include <QFont>
-#include <QLabel>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QPlainTextEdit>
-#include <QProcess>
-#include <QPushButton>
-#include <QRadioButton>
-#include <QSignalSpy>
-#include <QSpinBox>
-#include <QString>
-#include <QTabBar>
-#include <QTabWidget>
-#include <QTableWidget>
-#include <QTemporaryDir>
-#include <QTextBrowser>
-#include <QTextEdit>
-#include <QTreeView>
+#include <QtWidgets>
 #include <QtTest/QtTest>
 #include <cmath>
 
@@ -521,7 +501,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
 
     // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
-    if (!mainWindow.ensureTargetBinaryCompiled()) { QTest::qWait(600); }
+    if (!mainWindow.ensureTargetBinaryCompiled()) { QFile::remove(mainWindow.activeTargetBinaryPath()); QTest::qWait(400); }
     QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "ensureTargetBinaryCompiled must compile ELF binary");
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
@@ -853,6 +833,24 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34);
     const QString joined3 = dialog.completionsForExpression(QStringLiteral("send_buf.")).join(QLatin1Char('|'));
     QVERIFY2(joined3.contains(QStringLiteral("data")) && joined3.contains(QStringLiteral("size")), qPrintable(joined3));
+    // 4. Verify live clangd publishDiagnostics -> SourceCodeView::setDiagnostics & cross-file F12 in MainWindow.
+    // Create a 2-file workspace (`math_ops.hpp` + `caller.cpp` with an error line and cross-file call).
+    QTemporaryDir lspDir; QVERIFY(lspDir.isValid());
+    const QString hdrFile = lspDir.filePath(QStringLiteral("math_ops.hpp"));
+    const QString cppFile = lspDir.filePath(QStringLiteral("caller.cpp"));
+    { QFile hf(hdrFile); QVERIFY(hf.open(QIODevice::WriteOnly)); hf.write("#pragma once\nstruct Vec2 {\n  double x;\n  double y;\n  double lengthSq() const { return x * x + y * y; }\n};\n"); }
+    { QFile cf(cppFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("#include \"math_ops.hpp\"\nint main() {\n  Vec2 v{3.0, 4.0};\n  int bad = \"not_an_int\";\n  return static_cast<int>(v.lengthSq()) + bad;\n}\n"); }
+    // Open `caller.cpp` in MainWindow and verify `clangd` publishDiagnostics populates `view->diagnostics()`.
+    gridlock::ui::MainWindow mw; mw.loadSourceFile(cppFile);
+    auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(tabMgr && tabMgr->currentSourceCodeView());
+    auto* callerView = tabMgr->currentSourceCodeView();
+    QTRY_VERIFY_WITH_TIMEOUT(!callerView->diagnostics().isEmpty(), 4000);
+    // Position cursor on `lengthSq` (line 5, col 29) and press F12 to jump into `math_ops.hpp` line 5.
+    QTextCursor navCur(callerView->document()->findBlockByNumber(4)); navCur.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, 29);
+    callerView->setTextCursor(navCur);
+    QKeyEvent f12Press(QEvent::KeyPress, Qt::Key_F12, Qt::NoModifier); QApplication::sendEvent(callerView, &f12Press);
+    QCOMPARE(QFileInfo(tabMgr->currentSourceCodeView()->currentFile()).fileName(), QStringLiteral("math_ops.hpp"));
+    QCOMPARE(tabMgr->currentSourceCodeView()->getCurrentLineNumber(), 5);
 }
 /**
  * @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained
