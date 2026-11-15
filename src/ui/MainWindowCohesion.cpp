@@ -212,7 +212,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         }
     };
     bindActiveSourceView();
-    if (m_editorTabManager) connect(m_editorTabManager, &QTabWidget::currentChanged, this, [bindActiveSourceView](int) { bindActiveSourceView(); });
+    if (m_editorTabManager) connect(m_editorTabManager, &QTabWidget::currentChanged, this, [this, bindActiveSourceView](int) { bindActiveSourceView(); syncDisassemblyDecompilerVisibility(false); });
 
     // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {

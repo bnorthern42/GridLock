@@ -216,12 +216,14 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     gridlock::ui::PreferencesDialog prefsDecompDlg(&mainWindow);
     auto* showDecompCheck = prefsDecompDlg.findChild<QCheckBox*>(QStringLiteral("showDecompilerWithSourceCheck"));
     auto* prefsBtnBox = prefsDecompDlg.findChild<QDialogButtonBox*>();
-    QVERIFY2(showDecompCheck != nullptr && !showDecompCheck->isChecked() && prefsBtnBox != nullptr && prefsBtnBox->button(QDialogButtonBox::Apply) && prefsBtnBox->button(QDialogButtonBox::Ok), "PreferencesDialog Debugger page must expose unchecked showDecompilerWithSourceCheck");
-    prefsDecompDlg.show(); QApplication::processEvents();
-    showDecompCheck->setChecked(true); prefsBtnBox->button(QDialogButtonBox::Apply)->click(); QApplication::processEvents();
+    QVERIFY2(showDecompCheck && !showDecompCheck->isChecked() && prefsBtnBox && prefsBtnBox->button(QDialogButtonBox::Apply) && prefsBtnBox->button(QDialogButtonBox::Ok), "PreferencesDialog Debugger page must expose unchecked showDecompilerWithSourceCheck");
+    prefsDecompDlg.show(); QApplication::processEvents(); showDecompCheck->setChecked(true); prefsBtnBox->button(QDialogButtonBox::Apply)->click(); QApplication::processEvents();
     QVERIFY2(gridlock::tests::callShowDecompilerWithSource(&cfg, 0) && gridlock::tests::callIsDecompilerVisible(disasm, 0) && decompPage->isVisible() && decompPage->width() >= 180, "Apply showDecompilerWithSource=true must show decompiler split");
     showDecompCheck->setChecked(false); prefsBtnBox->button(QDialogButtonBox::Ok)->click(); QApplication::processEvents();
     QVERIFY2(!gridlock::tests::callShowDecompilerWithSource(&cfg, 0) && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !decompPage->isVisible() && decompPage->width() == 0 && !splitBtn->isChecked() && disasm->isGraphMode(), "OK showDecompilerWithSource=false must hide decompiler");
+    // Verify opening main.cpp + updateDisassembly + seeking to sym.main (0x003d1f09) collapses SPLIT (CFG+DECOMP) when showDecompilerWithSource=false.
+    disasm->setSplitGraphDecompilerMode(true); mainWindow.loadSourceFile(extWsDir.filePath(QStringLiteral("src/main.cpp"))); disasm->updateDisassembly(disasm->toPlainText()); disasm->seekToAddress(0x00401126ULL); mainWindow.seekToAddressOrExpression(QStringLiteral("0x003d1f09")); QApplication::processEvents();
+    QVERIFY2(!disasm->isSplitGraphDecompilerMode() && !gridlock::tests::callIsDecompilerVisible(disasm, 0) && !splitBtn->isChecked() && !decompPage->isVisible() && decompPage->width() == 0, "Opening main.cpp or updating/seeking DisassemblyView must collapse SPLIT (CFG+DECOMP) when showDecompilerWithSource=false");
     QVERIFY2(QMetaObject::invokeMethod(&mainWindow, "syncDisassemblyDecompilerVisibility"), "MainWindow must expose syncDisassemblyDecompilerVisibility() slot");
     mainWindow.switchWorkspaceDirectory(prevRepoWs); mainWindow.loadPreviewFixture(); QApplication::processEvents();
 

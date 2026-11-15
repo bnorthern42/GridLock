@@ -418,16 +418,26 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
             }
             // Determine if source code mapping exists or if fallback decompiler is required.
             const bool hasSourceMapping =
-                (parsedAddr >= 0x00401120ULL && parsedAddr <= 0x004011ffULL) &&
+                ((parsedAddr >= 0x00401120ULL && parsedAddr <= 0x004011ffULL) ||
+                 m_dwarfAddressToLine.contains(parsedAddr) || m_dynamicAddressToLine.contains(parsedAddr)) &&
                 !m_forceDecompilerFallback;
             m_disassemblyView->seekToAddress(parsedAddr);
+            const bool sourceEditorOpen =
+                m_editorTabManager && !m_editorTabManager->isHidden() && m_editorTabManager->count() > 0 &&
+                m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) != 0;
+            const bool allowDecompiler =
+                !sourceEditorOpen || gridlock::core::ConfigManager::instance().showDecompilerWithSource() ||
+                m_forceDecompilerFallback;
             if (!hasSourceMapping) {
                 m_showingDecompilerFallback = true;
-                m_disassemblyView->setSplitGraphDecompilerMode(true);
+                if (allowDecompiler) m_disassemblyView->setSplitGraphDecompilerMode(true);
+                else m_disassemblyView->setDecompilerPaneVisible(false, false);
             } else if (m_showingDecompilerFallback) {
                 m_showingDecompilerFallback = false;
                 m_disassemblyView->setSplitGraphDecompilerMode(false);
                 m_disassemblyView->setGraphMode(false);
+            } else if (!allowDecompiler && m_disassemblyView->isDecompilerVisible()) {
+                syncDisassemblyDecompilerVisibility(false);
             }
         } else if (!m_disassemblyView->toPlainText().isEmpty()) {
             // Find text token within disassembly buffer when not numeric address.
@@ -544,12 +554,9 @@ void MainWindow::loadSourceFile(const QString& filePath) {
                 view->setDiagnostics(cachedDiags);
             }
             // Ensure legacy secondary LspCoordinator remains stopped so ClangdLspClient owns the sole clangd daemon.
-            if (m_lspCoordinator) {
-                m_lspCoordinator->stop();
-            }
-            if (networkLog()) {
-                networkLog()->appendText("Successfully loaded: " + m_currentFile + "\n");
-            }
+            if (m_lspCoordinator) m_lspCoordinator->stop();
+            syncDisassemblyDecompilerVisibility(false);
+            if (networkLog()) networkLog()->appendText("Successfully loaded: " + m_currentFile + "\n");
         } else if (networkLog()) {
             networkLog()->appendError("CRITICAL: Failed to load " + filePath + "\n");
         }

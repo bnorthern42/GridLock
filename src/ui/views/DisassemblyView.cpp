@@ -591,6 +591,8 @@ void DisassemblyView::centerCursor() { if (m_linearEdit) m_linearEdit->centerCur
 void DisassemblyView::setSourceEditorActive(bool sourceVisible) {
   m_sourceEditorActive = sourceVisible;
   if (sourceVisible && !gridlock::core::ConfigManager::instance().showDecompilerWithSource()) {
+    const bool wantLinear = (gridlock::core::ConfigManager::instance().defaultDisassemblyMode() == QStringLiteral("linear"));
+    if (m_splitGraphDecompiler || m_decompilerMode) m_graphMode = !wantLinear;
     m_splitGraphDecompiler = false; m_decompilerMode = false;
   }
   updateViewModeLayout();
@@ -604,7 +606,8 @@ void DisassemblyView::setSourceEditorActive(bool sourceVisible) {
 void DisassemblyView::setDecompilerPaneVisible(bool visible, bool applyDefaultMode) {
   // Query user default disassembly mode ("cfg", "linear", or "split") before updating flags.
   const bool wantLinear = (gridlock::core::ConfigManager::instance().defaultDisassemblyMode() == QStringLiteral("linear"));
-  if (!visible) { m_splitGraphDecompiler = false; m_decompilerMode = false; if (applyDefaultMode) m_graphMode = !wantLinear; }
+  const bool wasDecomp = m_splitGraphDecompiler || m_decompilerMode;
+  if (!visible) { m_splitGraphDecompiler = false; m_decompilerMode = false; if (applyDefaultMode || wasDecomp) m_graphMode = !wantLinear; }
   else { m_graphMode = !wantLinear; m_splitGraphDecompiler = !wantLinear; m_decompilerMode = true; }
   updateViewModeLayout();
 }
@@ -730,8 +733,10 @@ void DisassemblyView::updateDisassembly(const QString &asmCode) {
   m_cfgUserScrolled = false;
   const QString effectiveCode = applyUserCommentsToListing(applyPatchesToListing(m_baseDisassembly));
   if (m_linearEdit && m_linearEdit->toPlainText() != effectiveCode) m_linearEdit->setPlainText(effectiveCode);
-  // Partition basic blocks, extract xrefs, and synchronize all panes.
+  // Partition basic blocks, extract xrefs, and enforce source-active decompiler suppression.
   parseDisassembly(effectiveCode);
+  if (m_sourceEditorActive && !gridlock::core::ConfigManager::instance().showDecompilerWithSource() && (m_splitGraphDecompiler || m_decompilerMode))
+    setDecompilerPaneVisible(false, false);
   highlightActiveInstruction(); highlightActiveDecompilerLine(); rebuildCfgScene();
   if (m_linearEdit) m_linearEdit->updateGutter();
 }
