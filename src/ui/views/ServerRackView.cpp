@@ -267,7 +267,7 @@ void ServerRackView::updateRanks(const QList<RankState>& ranks) {
             st.registers[16] = QStringLiteral("—");
         } else if (!st.registers.contains(16) || st.registers.value(16).trimmed().isEmpty()) {
             const uint64_t pc = extractPcFromState(rankId, st);
-            st.registers[16] = QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0'));
+            st.registers[16] = (pc != 0ULL) ? QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0')) : QStringLiteral("—");
         }
         m_states[rankId] = st;
 
@@ -303,7 +303,7 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
         normalized.registers[16] = QStringLiteral("—");
     } else if (!normalized.registers.contains(16) || normalized.registers.value(16).trimmed().isEmpty()) {
         const uint64_t pc = extractPcFromState(rank, normalized);
-        normalized.registers[16] = QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0'));
+        normalized.registers[16] = (pc != 0ULL) ? QStringLiteral("0x%1").arg(pc, 8, 16, QChar('0')) : QStringLiteral("—");
     }
     m_states[rank] = normalized;
 

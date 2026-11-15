@@ -527,7 +527,6 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY(editorTabs && disasmView && targetCombo && rankSpin && regTable && memView);
     const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send(")), recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
     QVERIFY(sendLine > 0 && recvLine > sendLine && mainWindow.sourceLineToAddress(sendLine) != 0ULL && mainWindow.sourceLineToAddress(recvLine) != 0ULL);
-
     // 4. Compile C++/MPI target (`inspection_demo`, -g -O0), set breakpoints, and launch 2 live ranks.
     rankSpin->setValue(2);
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")) && mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must select and compile");
@@ -535,7 +534,6 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     for (int bp : srcView->breakpoints().values()) srcView->toggleBreakpoint(bp);
     const int bpLine1 = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Comm_rank(")), bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("printf("));
     QVERIFY(bpLine1 > 0 && bpLine2 > bpLine1); srcView->toggleBreakpoint(bpLine1); srcView->toggleBreakpoint(bpLine2);
-
     // Launch real parallel GDB session and verify distinct real OS PIDs per rank (`pid0 != pid1 != appPid`).
     mainWindow.startTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), true); QCOMPARE(mainWindow.isRunButtonLatched(), true); QCOMPARE(mainWindow.coordinator()->getProcessCount(), 2);
@@ -544,53 +542,46 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     const qint64 pid0 = mainWindow.coordinator()->getPidForRank(0), pid1 = mainWindow.coordinator()->getPidForRank(1);
     QVERIFY(pid0 > 0 && pid1 > 0 && pid0 != pid1 && pid0 != QCoreApplication::applicationPid() && pid1 != QCoreApplication::applicationPid());
     QVERIFY(QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid0)) && QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid1)));
-
     // Verify MpiDiagnosticsWidget cleared static demo rows, shows live PIDs, and flags collective divergence.
     auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
     auto* waitTable = mpiDiag ? mpiDiag->findChild<QTableWidget*>(QStringLiteral("mpiRankWaitTable")) : nullptr;
     auto* dlList = mpiDiag ? mpiDiag->findChild<QListWidget*>(QStringLiteral("mpiDeadlockList")) : nullptr;
     auto* dlBadge = mpiDiag ? mpiDiag->findChild<QLabel*>(QStringLiteral("mpiDeadlockStatusBadge")) : nullptr;
-    QVERIFY(mpiDiag && waitTable && dlList && dlBadge); QCOMPARE(mpiDiag->rankWaitTableRowCount(), 2); // Live rank count
+    QVERIFY(mpiDiag && waitTable && dlList && dlBadge); QCOMPARE(mpiDiag->rankWaitTableRowCount(), 2);
     QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 0) && waitTable->item(0, 0)->text().contains(QString::number(pid0)), 4000);
-    // Emit diverging MPI_Bcast vs MPI_Barrier stack frames across Rank 0 and Rank 1.
     emit mainWindow.coordinator()->stackTraceUpdated(0, {StackFrameEntry{0, 0, 0x401140ULL, QStringLiteral("MPI_Bcast"), mainWindow.activeTargetSourcePath(), bpLine1}});
     emit mainWindow.coordinator()->stackTraceUpdated(1, {StackFrameEntry{0, 0, 0x401180ULL, QStringLiteral("MPI_Barrier"), mainWindow.activeTargetSourcePath(), bpLine1}});
     QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 2) && waitTable->item(0, 2)->text().contains(QStringLiteral("MPI_Bcast")) &&
                              waitTable->item(1, 2) && waitTable->item(1, 2)->text().contains(QStringLiteral("MPI_Barrier")) &&
-                             dlList->count() >= 1 && !dlBadge->text().contains(QStringLiteral("NO CYCLE")), 3000); // Alert raised
-
+                             dlList->count() >= 1 && !dlBadge->text().contains(QStringLiteral("NO CYCLE")), 3000);
     // Helper reading register value cell by lowercase mnemonic from RegisterView's QTableWidget.
     auto readReg = [&](const QString& name) {
         for (int r = 0; r < regTable->rowCount(); ++r)
             if (regTable->item(r, 0) && regTable->item(r, 0)->text() == name && regTable->item(r, 1)) return regTable->item(r, 1)->text();
-        return QString(); // Fallback when register row not yet populated
+        return QString();
     };
     QTRY_VERIFY_WITH_TIMEOUT(!readReg(QStringLiteral("rsp")).isEmpty() && readReg(QStringLiteral("rsp")) != QStringLiteral("0x7fffffffe480"), 5000);
-    bool ripOk = false; // Parse live RIP address and verify DisassemblyView synchronization
+    bool ripOk = false;
     const uint64_t liveRip1 = readReg(QStringLiteral("rip")).section(QLatin1Char(' '), 0, 0).mid(2).toULongLong(&ripOk, 16);
     QVERIFY(ripOk && liveRip1 != 0ULL && disasmView->currentAddress() == liveRip1);
-
     // 5. Step Inst, Continue both ranks to bpLine2, and run MemView Read + DIFF RANKS.
-    QVERIFY(mainWindow.stepInstructionWorkflow()); // Single-step assembly instruction
+    QVERIFY(mainWindow.stepInstructionWorkflow());
     QTRY_VERIFY_WITH_TIMEOUT(disasmView->currentAddress() != 0ULL && disasmView->currentAddress() != liveRip1, 5000);
-    QVERIFY(mainWindow.continueExecutionWorkflow()); // Resume ranks toward second breakpoint
+    QVERIFY(mainWindow.continueExecutionWorkflow());
     QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000);
     mainWindow.onRankSelected(1); QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine2, 5000); mainWindow.onRankSelected(0);
-
     // Read Rank 0 live stack at $rsp and run DIFF RANKS between Rank 0 and Rank 1 to detect diverging bytes.
     auto* addrEdit = memView->findChild<QLineEdit*>(QStringLiteral("cutterMemAddressEdit"));
-    QPushButton *readBtn = nullptr, *diffBtn = nullptr; // Locate Read and Diff buttons in MemView toolbar
+    QPushButton *readBtn = nullptr, *diffBtn = nullptr;
     for (auto* b : memView->findChildren<QPushButton*>()) {
         if (b->text().compare(QStringLiteral("Read"), Qt::CaseInsensitive) == 0) readBtn = b;
         if (b->text().contains(QStringLiteral("Diff"), Qt::CaseInsensitive)) diffBtn = b;
     }
     const auto memSpins = memView->findChildren<QSpinBox*>(); QVERIFY(addrEdit && readBtn && diffBtn && memSpins.size() >= 3);
-    addrEdit->setText(QStringLiteral("$rsp")); readBtn->click(); // Query inferior stack bytes via process_vm_readv
+    addrEdit->setText(QStringLiteral("$rsp")); readBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(memView->currentBaseAddress() > 0x1000000ULL, 5000);
-    memSpins[1]->setValue(0); memSpins[2]->setValue(1); diffBtn->click(); // Compare Rank 0 vs Rank 1 memory
+    memSpins[1]->setValue(0); memSpins[2]->setValue(1); diffBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
-
-    // Cleanly terminate inspection_demo session and verify rank PIDs and process counts reset to 0.
     mainWindow.stopTargetWorkflow();
     QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
     QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0); QCOMPARE(static_cast<qint64>(mainWindow.coordinator()->getPidForRank(0)), 0LL);
@@ -607,10 +598,9 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     auto* consoleViewport = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
     QVERIFY(threadCombo && callStackTable && varsDock && gdbConsole && consoleCmdEdit && consoleExecBtn && consoleViewport);
 
-    // Materialize a nested-call C++/MPI program with global watchedCounter (10 -> 77) and compile -g -O0.
     QTemporaryDir nestedDir; QVERIFY(nestedDir.isValid());
     const QString nestedCpp = nestedDir.filePath(QStringLiteral("nested_stack.cpp"));
-    { QFile nf(nestedCpp); QVERIFY(nf.open(QIODevice::WriteOnly)); // Write multi-frame + watchpoint test fixture
+    { QFile nf(nestedCpp); QVERIFY(nf.open(QIODevice::WriteOnly));
       nf.write("#include <mpi.h>\nint watchedCounter = 10;\n"
                "__attribute__((noinline)) int innerCallee(int innerVal) {\n    int innerLocal = innerVal + 7;\n    return innerLocal;\n}\n"
                "__attribute__((noinline)) int outerCaller(int outerSecret) {\n    int outerLocal = outerSecret + 1;\n    int res = innerCallee(outerLocal);\n    return res;\n}\n"
@@ -622,11 +612,10 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     const int outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
     QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine); nestedSrcView->toggleBreakpoint(innerBpLine);
 
-    // Launch nested_stack and verify #0 innerCallee, #1 outerCaller, #2 main populate with non-zero hex addresses.
     mainWindow.startTargetWorkflow();
     QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
     QTRY_VERIFY_WITH_TIMEOUT(callStackTable->rowCount() >= 3 && threadCombo->count() >= 1, 5000);
-    auto verifyFrameRow = [&](int row, const QString& expectedFunc) { // Validate function, file:line, and non-zero PC
+    auto verifyFrameRow = [&](int row, const QString& expectedFunc) {
         const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString();
         const QString loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString();
         const QString addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString();
@@ -634,27 +623,22 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
         QVERIFY2(fn.contains(expectedFunc) && loc.contains(QLatin1Char(':')) && hexOk && parsedAddr != 0ULL, qPrintable(fn));
     };
     verifyFrameRow(0, QStringLiteral("innerCallee")); verifyFrameRow(1, QStringLiteral("outerCaller")); verifyFrameRow(2, QStringLiteral("main"));
-
-    // Select caller frame #1 (outerCaller) and verify source line + VariablesDockWidget locals update.
     callStackTable->selectRow(1); QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1));
     QTRY_COMPARE_WITH_TIMEOUT(editorTabs->currentSourceCodeView()->executionLine(), outerCallLine, 5000);
     auto* varsTree = varsDock->findChild<QTreeView*>(); QVERIFY(varsTree != nullptr && varsTree->model() != nullptr);
-    QTRY_VERIFY_WITH_TIMEOUT(([&]() { // Confirm caller local variable outerSecret == 4242 is rendered
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
         auto* m = varsTree->model();
         for (int r = 0; r < m->rowCount(); ++r)
             if (m->data(m->index(r, 0)).toString() == QStringLiteral("outerSecret") && m->data(m->index(r, 1)).toString().contains(QStringLiteral("4242"))) return true;
         return false;
     })(), 5000);
-
-    // Execute live REPL commands via GdbConsoleWidget ("print outerSecret" -> 4242, "-data-evaluate-expression 21 + 21" -> 42).
-    consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click(); // CLI command evaluation
+    consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
-    consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click(); // Direct MI evaluation
+    consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click();
     QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
-    consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click(); // Injection rejection check
+    consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click();
     QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));
 
-    // Open secondary file MfemSolver.cpp while paused in nested_stack.cpp, toggle breakpoint at line 82, and verify no tab-hijack occurs.
     const QString mfemCpp = nestedDir.filePath(QStringLiteral("MfemSolver.cpp"));
     { QFile mf(mfemCpp); QVERIFY(mf.open(QIODevice::WriteOnly)); for (int ln = 1; ln <= 90; ++ln) mf.write(QStringLiteral("// line %1\nint dummy_%1 = %1;\n").arg(ln).toUtf8()); }
     mainWindow.loadSourceFile(mfemCpp); QApplication::processEvents();
@@ -664,55 +648,78 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY2(editorTabs->currentSourceCodeView() == solverView && editorTabs->currentSourceCodeView()->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")),
              "Toggling a breakpoint in MfemSolver.cpp while paused must NEVER switch active tab back to stopped file");
 
-    // Arm Hardware Data Watchpoint on watchedCounter (Write) and verify continueExecution halts on mutation (10 -> 77).
     QSignalSpy wpHitSpy(mainWindow.coordinator(), SIGNAL(watchpointHit(int,QString,QString,QString)));
     QVERIFY2(QMetaObject::invokeMethod(mainWindow.coordinator(), "setDataWatchpoint", Q_ARG(QString, QStringLiteral("watchedCounter")), Q_ARG(int, 0), Q_ARG(int, -1)), "Coordinator must expose setDataWatchpoint");
-    QVERIFY(mainWindow.continueExecutionWorkflow()); // Continue execution until hardware watchpoint fires
+    QVERIFY(mainWindow.continueExecutionWorkflow());
     QTRY_VERIFY_WITH_TIMEOUT(wpHitSpy.count() >= 1, 6000);
-    QCOMPARE(wpHitSpy.first().at(1).toString(), QStringLiteral("watchedCounter")); // Watched symbol name
-    QCOMPARE(wpHitSpy.first().at(2).toString(), QStringLiteral("10")); // Previous value before write
-    QCOMPARE(wpHitSpy.first().at(3).toString(), QStringLiteral("77")); // Mutated value after write
-
-    // Terminate session and verify CallStackDockWidget clears stale frames cleanly.
+    QCOMPARE(wpHitSpy.first().at(1).toString(), QStringLiteral("watchedCounter"));
+    QCOMPARE(wpHitSpy.first().at(2).toString(), QStringLiteral("10"));
+    QCOMPARE(wpHitSpy.first().at(3).toString(), QStringLiteral("77"));
     mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0);
+
+    // 7. Verify 2-rank MPI_Barrier + "HEX" CLI argument + dynamic running-state breakpoint + zero fake rack PCs.
+    const QString barrierCpp = nestedDir.filePath(QStringLiteral("barrier_hex.cpp"));
+    { QFile bf(barrierCpp); QVERIFY(bf.open(QIODevice::WriteOnly));
+      bf.write("#include <mpi.h>\n#include <chrono>\n#include <string>\n#include <unistd.h>\n"
+               "__attribute__((noinline)) int solveStage(int r, int it, int sum) {\n  int res = sum + r + it;\n  return res;\n}\n"
+               "int main(int argc, char** argv) {\n  MPI_Init(&argc, &argv);\n"
+               "  if (argc < 2 || std::string(argv[1]) != \"HEX\") { MPI_Finalize(); return 2; }\n"
+               "  int r = 0, s = 1; MPI_Comm_rank(MPI_COMM_WORLD, &r); MPI_Comm_size(MPI_COMM_WORLD, &s);\n"
+               "  int v = r + 1; MPI_Barrier(MPI_COMM_WORLD);\n"
+               "  auto t0 = std::chrono::steady_clock::now();\n  while (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1500)) usleep(20000);\n"
+               "  int g = 0; MPI_Allreduce(&v, &g, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);\n"
+               "  MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g);\n  MPI_Finalize();\n  return (out > 0 && s == 2) ? 0 : 1;\n}\n"); }
+    auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings();
+    projCfg.targetArguments = QStringLiteral("HEX"); projCfg.programArguments = "HEX";
+    gridlock::core::ConfigManager::instance().saveProjectSettings(projCfg);
+    rankSpin->setValue(2); targetCombo->insertItem(0, QStringLiteral("barrier_hex"), barrierCpp);
+    QVERIFY(mainWindow.selectTargetByName(QStringLiteral("barrier_hex")) && mainWindow.ensureTargetBinaryCompiled());
+    auto* barrierView = editorTabs->currentSourceCodeView(); QVERIFY(barrierView != nullptr);
+    const int preBarrierBp = mainWindow.findSourceLineForStatement(QStringLiteral("int v = r + 1"));
+    const int solveBp = mainWindow.findSourceLineForStatement(QStringLiteral("return res"));
+    QVERIFY(preBarrierBp > 0 && solveBp > 0);
+    barrierView->toggleBreakpoint(preBarrierBp); mainWindow.startTargetWorkflow();
+    auto* rackView = mainWindow.findChild<gridlock::ui::ServerRackView*>(); QVERIFY(rackView != nullptr);
+    for (int r = 0; r < rackView->count(); ++r) {
+        const QString pc = rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>().registers.value(16);
+        QVERIFY2(!pc.contains(QStringLiteral("401120")) && !pc.contains(QStringLiteral("401155")) && !pc.contains(QStringLiteral("00000000")), qPrintable(pc));
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), preBarrierBp, 8000);
+    barrierView->toggleBreakpoint(preBarrierBp); QVERIFY(mainWindow.continueExecutionWorkflow());
+    QTest::qWait(150);
+    barrierView->toggleBreakpoint(solveBp); // Insert breakpoint dynamically while both ranks are running toward MPI_Barrier
+    QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), solveBp, 8000);
+    mainWindow.stopTargetWorkflow();
 }
 
-/**
- * @brief Verifies gutter hover line tracking, ghost breakpoint preview state, cursor-anchored
- *        breakpoint popover controls (Enabled, Suspend scope, Condition presets), and positioning.
- */
+/** @brief Verifies gutter hover tracking, ghost preview, and anchored breakpoint popover controls. */
 void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
+    // 1. Initialize SourceCodeView with 40 MPI_Send lines for gutter hover and breakpoint tests.
     gridlock::ui::SourceCodeView sourceCodeView; QString sampleCode;
     for (int i = 1; i <= 40; ++i) sampleCode += QStringLiteral("    MPI_Send(send_buf.data(), %1, MPI_INT, next, 0, MPI_COMM_WORLD);\n").arg(i);
     sourceCodeView.setSourceCode(sampleCode); sourceCodeView.resize(720, 560); sourceCodeView.show(); QApplication::processEvents();
-
-    // 1. Gutter Hover Line Tracking & Ghost Preview State.
+    // Verify ghost hover preview transitions cleanly to active breakpoint and back to None.
     QCOMPARE(sourceCodeView.hoveredGutterLine(), -1);
     sourceCodeView.setHoveredGutterLine(16); QApplication::processEvents();
     QCOMPARE(sourceCodeView.hoveredGutterLine(), 16); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("HoverPreview"));
-
-    // Active breakpoint supersedes ghost hover preview; clearing hover restores None on unmarked lines.
     sourceCodeView.toggleBreakpoint(16); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("Breakpoint"));
     sourceCodeView.toggleBreakpoint(16); sourceCodeView.setHoveredGutterLine(-1);
     QCOMPARE(sourceCodeView.hoveredGutterLine(), -1); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("None"));
-
-    // 2. Breakpoint Popover Controls (Enabled, Suspend: All / Rank, Condition Presets).
+    // 2. Verify ConditionalBreakpointDialog target line summary and default suspend scope.
     gridlock::ui::ConditionalBreakpointDialog dialog(QString(), &sourceCodeView);
     dialog.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
     QVERIFY2(dialog.targetLineSummaryText().contains(QStringLiteral("Line 34")), qPrintable(dialog.targetLineSummaryText()));
     QCOMPARE(dialog.isBreakpointEnabled(), true); QCOMPARE(dialog.suspendScope(), QStringLiteral("All"));
-
-    // Toggle the single-rank/thread radio button and verify suspendScope() transitions to "Rank".
+    // Select single-rank suspend radio button and verify suspendScope() transitions to Rank.
     QRadioButton* rankRadio = nullptr;
     for (QRadioButton* rb : dialog.findChildren<QRadioButton*>())
         if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) { rankRadio = rb; break; }
     QVERIFY2(rankRadio != nullptr, "ConditionalBreakpointDialog must expose a Rank/Thread suspend radio button");
     rankRadio->setChecked(true); QApplication::processEvents(); QCOMPARE(dialog.suspendScope(), QStringLiteral("Rank"));
-
-    // Apply quick preset expression and verify cursor-anchored positioning near gutter dot.
+    // Apply quick preset condition and verify anchored popover screen positioning.
     dialog.applyQuickPreset(QStringLiteral("rank == 0")); QCOMPARE(dialog.getCondition(), QStringLiteral("rank == 0"));
     const QPoint anchorGlobalPos(120, 340); dialog.positionNearAnchor(anchorGlobalPos); dialog.show(); QApplication::processEvents();
-    // Verify horizontal and vertical screen offsets stay tightly anchored to the clicked gutter line.
+    // Assert horizontal and vertical offsets stay tightly anchored to the clicked gutter line.
     QVERIFY2(std::abs(dialog.pos().x() - anchorGlobalPos.x()) <= 40, qPrintable(QStringLiteral("Popover x=%1").arg(dialog.pos().x())));
     QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25, qPrintable(QStringLiteral("Popover y=%1").arg(dialog.pos().y())));
     dialog.hide();
@@ -750,10 +757,7 @@ void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
     // 4. Verify MpiDiagnosticsWidget uses a single compact 26px header bar with hidden inner QTabBar.
     QVERIFY(mpiDiag->hasCompactSingleRowHeader());
 }
-/**
- * @brief Verifies gutter `QContextMenuEvent` suppression (preventing editor Undo/Redo/Cut/Copy menu
- *        bleed-through) and clean rollback of newly right-clicked breakpoints when canceled.
- */
+/** @brief Verifies gutter QContextMenuEvent suppression and clean rollback of canceled breakpoints. */
 void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly() {
     // Configure sample 30-line source code buffer to test gutter context menu and breakpoint rollback.
     gridlock::ui::SourceCodeView sourceCodeView; QString sampleCode;
@@ -762,10 +766,10 @@ void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancels
     // 1. Locate LineNumberArea child widget and verify QContextMenuEvent is accepted without bubbling.
     // Prevents standard QPlainTextEdit Undo/Redo/Cut/Copy popup from bleeding over the gutter margin.
     QWidget* gutterWidget = nullptr;
-    for (QWidget* w : sourceCodeView.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+    for (QWidget* w : sourceCodeView.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly))
         if (w != sourceCodeView.viewport() && w->width() == sourceCodeView.lineNumberAreaWidth()) { gutterWidget = w; break; }
-    }
     QVERIFY(gutterWidget != nullptr);
+    // Dispatch synthetic right-click inside gutter area and verify event acceptance.
     QContextMenuEvent gutterMenuEv(QContextMenuEvent::Mouse, QPoint(10, 25), sourceCodeView.mapToGlobal(QPoint(10, 25)));
     gutterMenuEv.ignore(); QApplication::sendEvent(gutterWidget, &gutterMenuEv); QCOMPARE(gutterMenuEv.isAccepted(), true);
     // Verify context menu suppression within gutter boundaries (`x=10` suppressed, `x=120` allowed).
@@ -798,10 +802,7 @@ template <typename T> void verifyDetailed(const T& items) {
         for (const auto& it : items) {
             if (it.label == QStringLiteral("id")) { fId = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QCOMPARE(it.detailType, QStringLiteral("int")); }
             else if (it.label == QStringLiteral("coords")) { fCoords = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QVERIFY(!it.detailType.isEmpty()); }
-        }
-        QVERIFY(fId && fCoords);
-    }
-}
+        } QVERIFY(fId && fCoords); } }
 // Confirm `loadPersistedTheme()` restores `tokyo_night` after transient runtime theme switches.
 template <typename T, typename M> void verifyLoadedTheme(const T&, M& tm) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QCOMPARE(tm.activeThemeId(), QStringLiteral("tokyo_night")); } }
 }  // namespace (anonymous)

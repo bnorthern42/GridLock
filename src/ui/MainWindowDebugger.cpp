@@ -406,14 +406,15 @@ bool MainWindow::stepInstructionWorkflow() {
  * @return True if the continue request was dispatched; false otherwise.
  */
 bool MainWindow::continueExecutionWorkflow() {
-    // Dispatch live GDB/DAP continue command on the active stepping rank.
+    // Dispatch live GDB/DAP continue across all stopped ranks so no rank stalls behind an MPI_Barrier.
     if (!m_previewFixtureOnly) {
         if (!m_debugSessionActive || !m_coordinator) return false;
-        const int activeRank = activeSteppingRank();
-        m_focusedRank = activeRank;
+        m_focusedRank = activeSteppingRank();
         if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
+        for (auto& [rk, st] : m_latestStates)
+            if (st.currentState == QLatin1String("stopped")) { st.currentState = QStringLiteral("running"); if (m_serverRackView) m_serverRackView->updateRankState(rk, st); }
         updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("RUNNING"));
-        m_coordinator->continueExecution(activeRank + 1);
+        m_coordinator->continueExecution(-1);
         return true;
     }
 

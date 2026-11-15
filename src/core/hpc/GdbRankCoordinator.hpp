@@ -225,6 +225,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void evaluateHoverVariable(int rankId, const QString& varName, QPoint globalPos);
 
  private:
+  /** @brief Writes @p cmd immediately if stopped, or queues it behind a transient SIGINT if running. */
+  void queueOrWriteCmd(int rankId, const QString& cmd);
+
   /** @brief Parses MI `202..206` stack, thread, console REPL, and watchpoint records for @p rankId. */
   bool handleMiStackOrThreadRecord(int rankId, const QString& line);
 
@@ -258,6 +261,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QString lastHoverVarName;            ///< Variable name for pending token `100` hover evaluation.
     QPoint lastHoverPos;                 ///< Screen position for pending token `100` hover tooltip.
     QString lastEvalExpression;          ///< Expression string for pending token `101` evaluation.
+    QStringList pendingAfterStopCmds;    ///< MI commands queued while running to execute upon transient SIGINT stop.
+    bool autoContinueAfterPending = false; ///< True when rank was interrupted solely to apply pending breakpoints.
+    int pendingInterruptSignals = 0;       ///< Count of in-flight synthetic SIGINTs sent for transient interrupts.
   };
 
   /**
