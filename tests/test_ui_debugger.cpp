@@ -138,6 +138,47 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     gridlock::ui::PreferencesDialog prefsCfgDlg(&mainWindow);
     auto* defModeCombo = prefsCfgDlg.findChild<QComboBox*>(QStringLiteral("defaultDisassemblyModeCombo"));
     QVERIFY2(defModeCombo != nullptr && defModeCombo->count() >= 3, "PreferencesDialog Debugger page must expose defaultDisassemblyModeCombo");
+
+    // Part 5: Long Demangled C++ Template CFG Width Cap, Left-Edge Viewport Anchor & Cursor State.
+    {
+        gridlock::ui::DisassemblyView cfgPane; cfgPane.resize(600, 500); cfgPane.setGraphMode(true);
+        cfgPane.show(); QVERIFY(QTest::qWaitForWindowExposed(&cfgPane)); QApplication::processEvents();
+        // Build a 320+ char demangled STL/MFEM signature plus glued ")>call" boundary input.
+        const QString longTmpl = QStringLiteral("mfem::Solver::Solve(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&, std::map<int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > const&, double)");
+        QVERIFY(longTmpl.size() >= 320);
+        const QString longCppAsm = QStringLiteral("0x003ce970 <%1+0x0>: push rbp ; line 340\n0x003ce971 <%1+0x1>: mov rbp, rsp ; line 340\n0x003ce975 <std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)>call 0x003d2d3c ; line 345\n0x003ce97a <%1+0xa>: test al, al ; line 346\n0x003ce97c <%1+0xc>: je 0x003ce990 ; line 346\n0x003ce97e <%1+0xe>: call 0x003d2e00 <%1> ; line 348\n0x003ce983 <%1+0x13>: jmp 0x003ce998 ; line 349\n0x003ce990 <%1+0x20>: nop ; line 352\n0x003ce998 <%1+0x28>: pop rbp ; line 355\n0x003ce999 <%1+0x29>: ret ; line 356").arg(longTmpl);
+        cfgPane.updateDisassembly(longCppAsm); cfgPane.seekToAddress(0x003ce975ULL); QApplication::processEvents();
+        auto* cfgView = cfgPane.findChild<QGraphicsView*>(QStringLiteral("cutterCfgGraphView"));
+        QVERIFY(cfgView != nullptr && cfgView->scene() != nullptr && cfgPane.basicBlockCount() >= 3);
+        // 1. Bounded basic-block widths (<= 960px) and clean mnemonic separation (no ")>call").
+        QRectF targetRect, leftmostRect;
+        for (QGraphicsItem* item : cfgView->scene()->items()) {
+            if (qAbs(item->zValue() - 1.0) < 0.05) {
+                const QRectF br = item->sceneBoundingRect();
+                QVERIFY2(br.width() <= 960.0, qPrintable(QStringLiteral("CFG block width %1 > 960").arg(br.width())));
+                if (item->data(Qt::UserRole).toULongLong() == 0x003ce970ULL) targetRect = br;
+                if (leftmostRect.isNull() || br.left() < leftmostRect.left()) leftmostRect = br;
+            }
+            if (auto* txt = dynamic_cast<QGraphicsSimpleTextItem*>(item)) QVERIFY2(!txt->text().contains(QStringLiteral(")>call")), qPrintable(txt->text()));
+        }
+        QVERIFY(!targetRect.isNull() && !leftmostRect.isNull());
+        // 2. Left edge visible on load/focus (x >= 0) and full left scroll range past leftmost block.
+        QVERIFY2(cfgView->mapFromScene(targetRect.topLeft()).x() >= 0, qPrintable(QStringLiteral("Target left clipped at x=%1").arg(cfgView->mapFromScene(targetRect.topLeft()).x())));
+        auto* hbar = cfgView->horizontalScrollBar(); QVERIFY(hbar != nullptr && hbar->maximum() > hbar->minimum());
+        hbar->setValue(hbar->minimum()); QApplication::processEvents();
+        QVERIFY2(cfgView->mapFromScene(leftmostRect.topLeft()).x() >= 0, qPrintable(QStringLiteral("Leftmost block clipped at min scroll x=%1").arg(cfgView->mapFromScene(leftmostRect.topLeft()).x())));
+        // Test Right arrow scroll followed by Home key snap-back to active block left edge.
+        QTest::keyClick(cfgView, Qt::Key_Right); QTest::keyClick(cfgView, Qt::Key_Home); QApplication::processEvents();
+        QVERIFY(cfgView->mapFromScene(targetRect.topLeft()).x() >= 0);
+        // 3. Idle cursor is Qt::ArrowCursor and pan press/release restores Qt::ArrowCursor.
+        QCOMPARE(cfgView->cursor().shape(), Qt::ArrowCursor); QCOMPARE(cfgView->viewport()->cursor().shape(), Qt::ArrowCursor);
+        const QPoint midPt = cfgView->viewport()->rect().center();
+        QTest::mousePress(cfgView->viewport(), Qt::MiddleButton, Qt::NoModifier, midPt);
+        QTest::mouseMove(cfgView->viewport(), midPt + QPoint(25, 10));
+        QTest::mouseRelease(cfgView->viewport(), Qt::MiddleButton, Qt::NoModifier, midPt + QPoint(25, 10));
+        QApplication::processEvents();
+        QCOMPARE(cfgView->cursor().shape(), Qt::ArrowCursor); QCOMPARE(cfgView->viewport()->cursor().shape(), Qt::ArrowCursor);
+    }
 }
 
 /**
@@ -310,10 +351,7 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
         const QString label = docCombo->itemText(i);
         if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) { targetIdx = i; break; }
     }
-    if (targetIdx >= 0) {
-        docCombo->setCurrentIndex(targetIdx); QApplication::processEvents();
-        QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")), "Switching docset category must auto-preview first entry");
-    }
+    if (targetIdx >= 0) { docCombo->setCurrentIndex(targetIdx); QApplication::processEvents(); QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")), "Switching docset category must auto-preview first entry"); }
 }
 
 /**
@@ -331,12 +369,10 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
     // 1. Select "deadlock_ring" via MainWindow::selectTargetByName (and verify combo sync).
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName('deadlock_ring') must succeed");
     QApplication::processEvents();
-    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")) &&
-             mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")), qPrintable(mainWindow.activeTargetSourcePath()));
+    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")) && mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")), qPrintable(mainWindow.activeTargetSourcePath()));
 
     // Verify active SourceCodeView in EditorTabManager loaded deadlock_ring.cpp containing MPI_Send & MPI_Recv.
-    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
-    QVERIFY(editorTabs && editorTabs->currentSourceCodeView());
+    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(editorTabs && editorTabs->currentSourceCodeView());
     const QString editorText = editorTabs->currentSourceCodeView()->toPlainText();
     QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")), "Must display deadlock_ring.cpp");
 
@@ -349,15 +385,12 @@ void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildComman
     QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("deadlock_ring")) && !terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo")), qPrintable(terminalDock->lastSentCommand()));
     mainWindow.buildTargetWorkflow(); QApplication::processEvents();
     const QString buildCmd = terminalDock->lastSentCommand();
-    QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) &&
-                 buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")), qPrintable(buildCmd));
+    QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) && buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")), qPrintable(buildCmd));
 
     // 3. Switch back to "inspection_demo" and verify source path and build command restore inspection_demo.cpp.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName('inspection_demo') must succeed");
-    QApplication::processEvents();
-    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
-    mainWindow.buildTargetWorkflow(); QApplication::processEvents();
-    QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")), qPrintable(terminalDock->lastSentCommand()));
+    QApplication::processEvents(); QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
+    mainWindow.buildTargetWorkflow(); QApplication::processEvents(); QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")), qPrintable(terminalDock->lastSentCommand()));
 }
 
 /**
@@ -368,8 +401,7 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     // Ensure a source file is open in EditorTabManager.
     mainWindow.selectTargetByName(QStringLiteral("inspection_demo")); QApplication::processEvents();
-    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
-    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(editorTabs != nullptr && disasmView != nullptr && editorTabs->currentSourceCodeView() != nullptr);
     auto* srcView = editorTabs->currentSourceCodeView();
 
@@ -382,8 +414,7 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     QTextCursor tc = srcView->textCursor(); tc.movePosition(QTextCursor::Start); srcView->setTextCursor(tc);
     const QString origFirstLine = srcView->document()->firstBlock().text();
     QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")) && srcView->document()->firstBlock().text() != origFirstLine);
-    QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")));
-    QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
+    QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment"))); QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
 
     // 2. Verify dynamic UI Font Size & Code Font Size scaling (no hardcoded 11px lock).
     mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16); QApplication::processEvents();
@@ -396,17 +427,12 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     // 3. Verify 6 curated color themes and zero underscores in PreferencesDialog Color Theme combo.
     QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6);
     gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
-    auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo"));
-    QVERIFY(themeCombo != nullptr && themeCombo->count() >= 6);
+    auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo")); QVERIFY(themeCombo != nullptr && themeCombo->count() >= 6);
     for (int i = 0; i < themeCombo->count(); ++i) QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));
 
     // 4. Generate 6 offscreen 1440x900 PNG screenshots of each curated theme in docs/screenshots/.
     struct ThemeShotEntry { QString themeId; QString fileName; };
-    const std::vector<ThemeShotEntry> shots = {
-        {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}, {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
-        {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")}, {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
-        {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")}, {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
-    };
+    const std::vector<ThemeShotEntry> shots = {{QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}, {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")}, {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")}, {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")}, {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")}, {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")}};
     const QString docsShotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
     QDir().mkpath(docsShotDir);
     // Export and verify each rendered theme PNG screenshot.
@@ -480,8 +506,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     // 2. Verify AttachProcessDialog enumerates real /proc user processes and contains zero mpi_navier_stokes stubs.
     QProcess helperProc;
     struct ProcGuard { QProcess* p; ~ProcGuard() { if (p && p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1000); } } } guard{&helperProc};
-    helperProc.start(QStringLiteral("sleep"), {QStringLiteral("30")});
-    QVERIFY(helperProc.waitForStarted(3000));
+    helperProc.start(QStringLiteral("sleep"), {QStringLiteral("30")}); QVERIFY(helperProc.waitForStarted(3000));
     const qint64 helperPid = helperProc.processId();
     gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
     auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable"));
@@ -495,45 +520,33 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
         if (procTable->item(r, 0) && procTable->item(r, 0)->text().toLongLong() == helperPid) helperRow = r;
     }
     QVERIFY2(helperRow >= 0, "AttachProcessDialog must include live child helper PID from /proc");
-    procTable->selectRow(helperRow);
-    const qint64 selPid = attachDlg.selectedPid();
-    QCOMPARE(selPid, helperPid);
+    procTable->selectRow(helperRow); QCOMPARE(attachDlg.selectedPid(), helperPid);
 
     // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QFile::remove(mainWindow.activeTargetBinaryPath()); QTest::qWait(400); }
     QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "ensureTargetBinaryCompiled must compile ELF binary");
-    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>();
-    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    auto* regTable = mainWindow.findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable"));
-    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
+    auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rankSpin = mainWindow.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    auto* regTable = mainWindow.findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable")); auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     QVERIFY(editorTabs && disasmView && targetCombo && rankSpin && regTable && memView);
-    const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send("));
-    const int recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
+    const int sendLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Send(")), recvLine = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Recv("));
     QVERIFY(sendLine > 0 && recvLine > sendLine && mainWindow.sourceLineToAddress(sendLine) != 0ULL && mainWindow.sourceLineToAddress(recvLine) != 0ULL);
 
     // 4. Compile C++/MPI target (`inspection_demo`, -g -O0), set breakpoints, and launch 2 live ranks.
     rankSpin->setValue(2);
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName(inspection_demo)");
-    QVERIFY2(mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must compile with -g -O0");
-    auto* srcView = editorTabs->currentSourceCodeView();
-    QVERIFY(srcView != nullptr && QFileInfo::exists(mainWindow.activeTargetBinaryPath()));
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")) && mainWindow.ensureTargetBinaryCompiled(), "inspection_demo must select and compile");
+    auto* srcView = editorTabs->currentSourceCodeView(); QVERIFY(srcView != nullptr && QFileInfo::exists(mainWindow.activeTargetBinaryPath()));
     for (int bp : srcView->breakpoints().values()) srcView->toggleBreakpoint(bp);
-    const int bpLine1 = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Comm_rank("));
-    const int bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("printf("));
-    QVERIFY(bpLine1 > 0 && bpLine2 > bpLine1);
-    srcView->toggleBreakpoint(bpLine1); srcView->toggleBreakpoint(bpLine2);
+    const int bpLine1 = mainWindow.findSourceLineForStatement(QStringLiteral("MPI_Comm_rank(")), bpLine2 = mainWindow.findSourceLineForStatement(QStringLiteral("printf("));
+    QVERIFY(bpLine1 > 0 && bpLine2 > bpLine1); srcView->toggleBreakpoint(bpLine1); srcView->toggleBreakpoint(bpLine2);
 
     // Launch real parallel GDB session and verify distinct real OS PIDs per rank (`pid0 != pid1 != appPid`).
     mainWindow.startTargetWorkflow();
-    QCOMPARE(mainWindow.isDebugSessionActive(), true); QCOMPARE(mainWindow.isRunButtonLatched(), true);
-    QCOMPARE(mainWindow.coordinator()->getProcessCount(), 2);
+    QCOMPARE(mainWindow.isDebugSessionActive(), true); QCOMPARE(mainWindow.isRunButtonLatched(), true); QCOMPARE(mainWindow.coordinator()->getProcessCount(), 2);
     QTRY_COMPARE_WITH_TIMEOUT(srcView->executionLine(), bpLine1, 8000);
     QTRY_VERIFY_WITH_TIMEOUT(mainWindow.coordinator()->getPidForRank(0) > 0 && mainWindow.coordinator()->getPidForRank(1) > 0, 5000);
-    const qint64 pid0 = mainWindow.coordinator()->getPidForRank(0);
-    const qint64 pid1 = mainWindow.coordinator()->getPidForRank(1);
+    const qint64 pid0 = mainWindow.coordinator()->getPidForRank(0), pid1 = mainWindow.coordinator()->getPidForRank(1);
     QVERIFY(pid0 > 0 && pid1 > 0 && pid0 != pid1 && pid0 != QCoreApplication::applicationPid() && pid1 != QCoreApplication::applicationPid());
     QVERIFY(QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid0)) && QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid1)));
 
@@ -671,8 +684,7 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
     // 1. Gutter Hover Line Tracking & Ghost Preview State.
     QCOMPARE(sourceCodeView.hoveredGutterLine(), -1);
     sourceCodeView.setHoveredGutterLine(16); QApplication::processEvents();
-    QCOMPARE(sourceCodeView.hoveredGutterLine(), 16);
-    QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("HoverPreview"));
+    QCOMPARE(sourceCodeView.hoveredGutterLine(), 16); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("HoverPreview"));
 
     // Active breakpoint supersedes ghost hover preview; clearing hover restores None on unmarked lines.
     sourceCodeView.toggleBreakpoint(16); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("Breakpoint"));
@@ -687,16 +699,14 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
 
     // Toggle the single-rank/thread radio button and verify suspendScope() transitions to "Rank".
     QRadioButton* rankRadio = nullptr;
-    for (QRadioButton* rb : dialog.findChildren<QRadioButton*>()) {
+    for (QRadioButton* rb : dialog.findChildren<QRadioButton*>())
         if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) { rankRadio = rb; break; }
-    }
     QVERIFY2(rankRadio != nullptr, "ConditionalBreakpointDialog must expose a Rank/Thread suspend radio button");
     rankRadio->setChecked(true); QApplication::processEvents(); QCOMPARE(dialog.suspendScope(), QStringLiteral("Rank"));
 
     // Apply quick preset expression and verify cursor-anchored positioning near gutter dot.
     dialog.applyQuickPreset(QStringLiteral("rank == 0")); QCOMPARE(dialog.getCondition(), QStringLiteral("rank == 0"));
-    const QPoint anchorGlobalPos(120, 340);
-    dialog.positionNearAnchor(anchorGlobalPos); dialog.show(); QApplication::processEvents();
+    const QPoint anchorGlobalPos(120, 340); dialog.positionNearAnchor(anchorGlobalPos); dialog.show(); QApplication::processEvents();
     // Verify horizontal and vertical screen offsets stay tightly anchored to the clicked gutter line.
     QVERIFY2(std::abs(dialog.pos().x() - anchorGlobalPos.x()) <= 40, qPrintable(QStringLiteral("Popover x=%1").arg(dialog.pos().x())));
     QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25, qPrintable(QStringLiteral("Popover y=%1").arg(dialog.pos().y())));
@@ -710,39 +720,27 @@ void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     // 1. Verify #bottomToolWindowRail exists and exposes the 4 canonical tool groups.
     // Lookup bottom console tab widget and all linked child views (MemView, Terminal, Reference, MPI).
-    auto* rail = mainWindow.findChild<QWidget*>(QStringLiteral("bottomToolWindowRail"));
-    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
-    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
-    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
+    auto* rail = mainWindow.findChild<QWidget*>(QStringLiteral("bottomToolWindowRail")); auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>(); auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
     QVERIFY(rail && bottomTabs && memView && terminalDock && refManual && mpiDiag);
     QCOMPARE(mainWindow.bottomToolGroups(), (QStringList{QStringLiteral("Debug"), QStringLiteral("MPI"), QStringLiteral("Terminal"), QStringLiteral("Docs")}));
     // Helper returning uppercased titles of currently visible tabs in BottomConsoleTabs.
     const auto visibleTitles = [&]() {
-        QStringList vis;
-        for (int i = 0; i < bottomTabs->count(); ++i) if (bottomTabs->tabBar()->isTabVisible(i)) vis.append(bottomTabs->tabText(i).toUpper());
+        QStringList vis; for (int i = 0; i < bottomTabs->count(); ++i) if (bottomTabs->tabBar()->isTabVisible(i)) vis.append(bottomTabs->tabText(i).toUpper());
         return vis;
     };
     // 2. Verify selecting Debug, MPI, Terminal, and Docs filters visible tabs strictly to linked views.
-    mainWindow.selectBottomToolGroup(QStringLiteral("Debug"));
-    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug"));
+    mainWindow.selectBottomToolGroup(QStringLiteral("Debug")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug"));
     // Check Debug visible tabs (`GDB CONSOLE`, `MEMORY`, `EVALUATOR`).
-    const QStringList debugVis = visibleTitles();
-    QCOMPARE(debugVis.size(), 3);
+    const QStringList debugVis = visibleTitles(); QCOMPARE(debugVis.size(), 3);
     QVERIFY(debugVis.join(QLatin1Char('|')).contains(QStringLiteral("GDB")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("MEMORY")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("EVALUATOR")));
-    // Switch to MPI tool group and confirm 2 MPI diagnostic/network tabs remain visible.
-    mainWindow.selectBottomToolGroup(QStringLiteral("MPI"));
-    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("MPI")); QCOMPARE(visibleTitles().size(), 2);
-    // Switch to Terminal tool group and confirm TerminalDockWidget becomes the active tab.
-    mainWindow.selectBottomToolGroup(QStringLiteral("Terminal"));
-    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Terminal")); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    // Switch to Docs tool group and confirm ReferenceManualWidget becomes the active tab.
-    mainWindow.selectBottomToolGroup(QStringLiteral("Docs"));
-    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Docs")); QCOMPARE(bottomTabs->currentWidget(), refManual);
+    // Switch to MPI, Terminal, and Docs tool groups and confirm filtered view visibility.
+    mainWindow.selectBottomToolGroup(QStringLiteral("MPI")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("MPI")); QCOMPARE(visibleTitles().size(), 2);
+    mainWindow.selectBottomToolGroup(QStringLiteral("Terminal")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Terminal")); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
+    mainWindow.selectBottomToolGroup(QStringLiteral("Docs")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Docs")); QCOMPARE(bottomTabs->currentWidget(), refManual);
     // 3. Programmatically switching BottomConsoleTabs to MemView auto-syncs the Debug tool group.
-    bottomTabs->setCurrentWidget(memView);
-    QApplication::processEvents();
+    bottomTabs->setCurrentWidget(memView); QApplication::processEvents();
     QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug")); QCOMPARE(visibleTitles().size(), 3);
     // 4. Verify MpiDiagnosticsWidget uses a single compact 26px header bar with hidden inner QTabBar.
     QVERIFY(mpiDiag->hasCompactSingleRowHeader());

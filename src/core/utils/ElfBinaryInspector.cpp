@@ -612,11 +612,14 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
             const QStringList lines = out.split('\n');
             QString formatted;
             QString currentSym = effectiveSymName.isEmpty() ? QStringLiteral("entry") : effectiveSymName;
-            static const QRegularExpression symHeaderRegex(QStringLiteral("^[0-9a-fA-F]+\\s+<([^>]+)>:"));
+            // Match full <symbol> header including nested C++ template angle brackets (<...>).
+            static const QRegularExpression symHeaderRegex(QStringLiteral("^[0-9a-fA-F]+\\s+<(.+)>:$"));
             static const QRegularExpression insnRegex(QStringLiteral("^\\s*([0-9a-fA-F]+):\\s*(.*)$"));
             static const QRegularExpression dwarfRegex(QStringLiteral("^(/?[^:\n]+):(\\d+)"));
             static const QRegularExpression branchHexRegex(QStringLiteral(
                 "^((?:call|jmp|je|jz|jne|jnz|jg|jge|jl|jle|ja|jae|jb|jbe|js|jns|jo|jno)q?\\s+)([0-9a-fA-F]{4,16})(\\b.*)$"));
+            static const QRegularExpression gluedMnemRe(QStringLiteral(
+                "(\\))>(x?(?:callq?|jmpq?|je|jz|jne|jnz|jg|jge|jl|jle|ja|jae|jb|jbe|js|jns|jo|jno))\\b"));
 
             int currentDwarfLine = -1;
             QMap<int, uint64_t> parsedLineToAddr;
@@ -655,6 +658,8 @@ QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
 
                 QString body = insnMatch.captured(2).trimmed();
                 if (body.isEmpty()) continue;
+                // Separate any demangled template closure glued onto a mnemonic (e.g. "const&)>call").
+                body.replace(gluedMnemRe, QStringLiteral("\\1>: \\2"));
 
                 // Prefix immediate branch/call hex targets with 0x for CFG & Xref parser compatibility.
                 const auto brMatch = branchHexRegex.match(body);

@@ -267,12 +267,29 @@ private:
     friend class DisassemblyTextEdit;
     friend class BranchFlowGutter;
 
+    /// Parses assembly instructions, branch flow arcs, and basic blocks.
     void parseDisassembly(const QString& asmCode);
+    /// Reconstructs 2D basic-block cards and orthogonal Manhattan edges in the CFG scene.
     void rebuildCfgScene();
+    /// Synchronizes linear, CFG graph, and decompiler stacked pages and toggle state.
     void updateViewModeLayout();
+    /// Highlights the active instruction row in the linear assembly listing.
     void highlightActiveInstruction();
+    /// Highlights the mapped pseudocode line in the decompiler view.
     void highlightActiveDecompilerLine();
+    /// Constructs and connects the embedded decompiler pane inside the splitter.
     void setupDecompilerUi(QSplitter* splitSplitter, const QFont& font);
+    /// Re-anchors the CFG viewport horizontally and vertically to the active basic block.
+    void alignCfgViewportToActiveBlock(bool forceLeftAnchor = false);
+    /// Collects formatted instruction and function header lines for a CFG basic block.
+    QStringList collectCfgBlockLines(int blockIndex, QStringList* outRawLines = nullptr) const;
+    /// Normalizes a raw objdump/GDB disassembly line, separating template symbols from mnemonics.
+    static QString normalizeDisassemblyLine(const QString& rawLine);
+    /// Extracts address, optional symbol tag, mnemonic, and operands using balanced angle brackets.
+    static bool splitDisassemblyLine(const QString& line, uint64_t* outAddr, QString* outSymbol,
+                                     QString* outMnemonic, QString* outOperands);
+    /// Elides overly long demangled symbols/operands in CFG cards while preserving full tooltips.
+    static QString formatCfgDisplayLine(const QString& rawLine);
     QString applyUserCommentsToListing(const QString& rawCode) const;
     QString applyPatchesToListing(const QString& rawCode) const;
     static QString defaultStartupDisassembly();
@@ -317,6 +334,14 @@ private:
     bool m_splitGraphDecompiler = false;
     bool m_sourceEditorActive = true;
     bool m_graphMinimapVisible = true;
+    /// True after user wheel/drag/key scrolling until next seek or load.
+    bool m_cfgUserScrolled = false;
+    /// Reentrancy guard preventing programmatic scroll anchoring from flagging user scroll.
+    bool m_aligningCfgViewport = false;
+    /// Scene bounding box of the active or entry CFG basic block for camera tracking.
+    QRectF m_activeCfgBlockRect;
+    /// Scene Y center of the active instruction line inside the active CFG block.
+    qreal m_activeCfgInstY = 0.0;
     QString m_activeSymbol = QStringLiteral("sym.main");
     QString m_functionSignature = QStringLiteral("int sym.main(int argc, char **argv)");
     QString m_targetLang = QStringLiteral("C");
