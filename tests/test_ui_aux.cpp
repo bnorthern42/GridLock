@@ -12,6 +12,7 @@
 #include <cmath>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
@@ -31,7 +32,9 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTextBlock>
 #include <QTextBrowser>
+#include <QTextLayout>
 #include <QToolBar>
 #include <QTreeView>
 #include <QtTest/QtTest>
@@ -547,26 +550,20 @@ void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
 void TestMainWindowUI::testElfBinaryInspectorAndStaticTargetLoad() {
     // 1 & 2. Locate current test executable and parse ELF64 binary using ElfBinaryInspector.
     const QString appPath = QCoreApplication::applicationFilePath(); QVERIFY(!appPath.isEmpty() && QFile::exists(appPath));
-    gridlock::core::ElfBinaryInspector inspector;
-    QVERIFY(inspector.loadFile(appPath) && inspector.isValid() && inspector.entryPoint() != 0ULL);
-
+    gridlock::core::ElfBinaryInspector inspector; QVERIFY(inspector.loadFile(appPath) && inspector.isValid() && inspector.entryPoint() != 0ULL);
     // 3 & 4. Inspect ELF section headers (.text, .rodata, .data), symbol table, and printable ASCII strings.
     const auto sections = inspector.sections(); QVERIFY(!sections.isEmpty());
     bool hasTextSection = false; uint64_t textVaddr = 0;
     for (const auto& sec : sections) if (sec.name == QStringLiteral(".text")) { hasTextSection = true; textVaddr = sec.address; break; }
     QVERIFY(hasTextSection && textVaddr != 0ULL && inspector.symbols().size() > 20 && inspector.strings().size() > 10);
-
     // 6 & 7. Test virtual memory byte reading and disassembleRange for the .text section.
     const QByteArray textBytes = inspector.readVirtualMemory(textVaddr, 32);
     QVERIFY(textBytes.size() == 32 && textBytes != QByteArray(32, '\0') && !inspector.disassembleRange(textVaddr, 32, QStringLiteral("entry")).isEmpty());
-
     // 8, 9 & 10. Test MainWindow static target loading, ProjectExplorerWidget population, and address seek sync.
     gridlock::ui::MainWindow mainWindow; QVERIFY(mainWindow.loadBinaryTarget(appPath));
     auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>();
-    QVERIFY(explorer != nullptr && explorer->symbolCount() > 20 && explorer->stringCount() > 10);
-    QVERIFY(mainWindow.seekToAddressOrExpression(QString("0x%1").arg(textVaddr, 0, 16)));
-    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    QVERIFY(explorer != nullptr && explorer->symbolCount() > 20 && explorer->stringCount() > 10 && mainWindow.seekToAddressOrExpression(QString("0x%1").arg(textVaddr, 0, 16)));
+    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(memView != nullptr && memView->currentBaseAddress() == textVaddr && disasmView != nullptr && !disasmView->toPlainText().isEmpty());
 }
 
@@ -577,28 +574,16 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
     // 1. Load preview fixture providing canonical multi-rank MPI loop disassembly.
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
-
     // 2. Verify structured incoming cross-references targeting the barrier loop header 0x00401149.
     const auto incoming = disasm->incomingXrefs(0x00401149ULL); QVERIFY(incoming.size() >= 2);
     bool foundBackEdge = false;
-    for (const auto& xr : incoming) {
-        QCOMPARE(xr.toAddress, 0x00401149ULL);
-        if (xr.fromAddress == 0x00401163ULL || xr.fromAddress == 0x0040116eULL) foundBackEdge = true;
-        QVERIFY(xr.type == QStringLiteral("JMP") || xr.type == QStringLiteral("CJMP"));
-    }
+    for (const auto& xr : incoming) { QCOMPARE(xr.toAddress, 0x00401149ULL); if (xr.fromAddress == 0x00401163ULL || xr.fromAddress == 0x0040116eULL) foundBackEdge = true; QVERIFY(xr.type == QStringLiteral("JMP") || xr.type == QStringLiteral("CJMP")); }
     QVERIFY(foundBackEdge);
-
     // 3. Verify structured outgoing cross-references originating from function 0x00401120.
     const auto outgoing = disasm->outgoingXrefs(0x00401120ULL); QVERIFY(outgoing.size() >= 2);
     bool foundMpiInitCall = false, foundMpiFinalizeCall = false;
-    for (const auto& xr : outgoing) {
-        if (xr.type == QStringLiteral("CALL")) {
-            if (xr.toAddress == 0x00401050ULL || xr.instructionText.contains(QStringLiteral("MPI_Init"))) foundMpiInitCall = true;
-            if (xr.toAddress == 0x00401060ULL || xr.instructionText.contains(QStringLiteral("MPI_Finalize"))) foundMpiFinalizeCall = true;
-        }
-    }
+    for (const auto& xr : outgoing) { if (xr.type == QStringLiteral("CALL")) { if (xr.toAddress == 0x00401050ULL || xr.instructionText.contains(QStringLiteral("MPI_Init"))) foundMpiInitCall = true; if (xr.toAddress == 0x00401060ULL || xr.instructionText.contains(QStringLiteral("MPI_Finalize"))) foundMpiFinalizeCall = true; } }
     QVERIFY(foundMpiInitCall && foundMpiFinalizeCall);
-
     // 4. Open XrefInspectorDialog at address 0x00401149 and test filtering + incoming row activation.
     auto* dialog = disasm->openXrefInspector(0x00401149ULL);
     QVERIFY(dialog != nullptr && dialog->incomingRowCount() >= 2 && dialog->outgoingRowCount() >= 2 && !dialog->previewText().isEmpty());
@@ -606,8 +591,7 @@ void TestMainWindowUI::testInteractiveXrefInspectorAndCallGraphSync() {
     dialog->setFilterText(QString()); QVERIFY(dialog->outgoingRowCount() >= 2);
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
     QVERIFY(memView != nullptr && dialog->activateIncomingXref(0));
-    QCOMPARE(disasm->currentAddress(), incoming.first().fromAddress);
-    QCOMPARE(memView->currentBaseAddress(), incoming.first().fromAddress);
+    QCOMPARE(disasm->currentAddress(), incoming.first().fromAddress); QCOMPARE(memView->currentBaseAddress(), incoming.first().fromAddress);
 }
 
 /**
@@ -617,16 +601,12 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
     // 1 & 2. Initialize MainWindow, load preview fixture, and verify TerminalDockWidget monospace font enforcement.
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture();
     auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>(); QVERIFY(terminalDock != nullptr);
-    terminalDock->setCustomFont("Cantarell", 11);
-    QVERIFY(QFontInfo(terminalDock->activeTerminalFont()).fixedPitch() && terminalDock->width() >= 0);
-
+    terminalDock->setCustomFont("Cantarell", 11); QVERIFY(QFontInfo(terminalDock->activeTerminalFont()).fixedPitch() && terminalDock->width() >= 0);
     // 3. Verify MemView live byte patching, patch tracking count, signal emission, and revert.
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); QVERIFY(memView != nullptr);
     QSignalSpy patchSpy(memView, &gridlock::ui::MemView::bytesPatched);
-    QVERIFY(memView->patchBytes(0x00401120ULL, QByteArray::fromHex("9090")));
-    QCOMPARE(memView->patchedByteCount(), 2); QCOMPARE(patchSpy.count(), 1);
+    QVERIFY(memView->patchBytes(0x00401120ULL, QByteArray::fromHex("9090"))); QCOMPARE(memView->patchedByteCount(), 2); QCOMPARE(patchSpy.count(), 1);
     memView->revertAllPatches(); QCOMPARE(memView->patchedByteCount(), 0);
-
     // 4 & 5. Verify DisassemblyView live instruction patching, CFG arc updates, decompilation, and deadlock badges.
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
     const int initialArcs = disasm->branchArcCount();
@@ -634,7 +614,6 @@ void TestMainWindowUI::testTerminalFontIsolationLivePatchingAndDeadlockCycle() {
     QCOMPARE(disasm->patchedInstructionCount(), 1); QCOMPARE(disasm->branchArcCount(), initialArcs - 1);
     QVERIFY(!disasm->decompileToLanguage(QStringLiteral("C")).isEmpty());
     const QVector<int> cycleRanks = {0, 1}; disasm->setDeadlockCycleRanks(cycleRanks); QCOMPARE(disasm->deadlockCycleRanks(), cycleRanks);
-
     // 6. Verify ElfBinaryInspector virtual memory writing and round-trip verification.
     gridlock::core::ElfBinaryInspector inspector(QCoreApplication::applicationFilePath());
     if (inspector.isValid() && inspector.entryPoint() != 0) {
@@ -685,31 +664,23 @@ void TestMainWindowUI::testPatchedElfExportWorkspaceSearchAndDeadlockPropagation
  */
 void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     // 1. System Package Manager Fallback Detection When Spack Is Missing.
-    gridlock::ui::HpcConsoleWidget widget;
-    QVERIFY(!widget.activePackageManagerBackend().isEmpty());
-
+    gridlock::ui::HpcConsoleWidget widget; QVERIFY(!widget.activePackageManagerBackend().isEmpty());
     // 2. Multi-Distro CLI Output Parsing (pacman, dnf4, dnf5, apt, zypper).
     const QString pacmanOut = QStringLiteral("extra/openmpi 5.0.5-1 [installed]\n    High performance message passing library (MPI)\nextra/hypre 2.31.0-1\n    Parallel multigrid solvers\n");
     const auto pacmanRecs = widget.parsePackageManagerOutput(QStringLiteral("pacman"), pacmanOut);
     QVERIFY(pacmanRecs.size() == 2 && pacmanRecs[0].name == QStringLiteral("openmpi") && pacmanRecs[0].version == QStringLiteral("5.0.5-1") && pacmanRecs[0].repository == QStringLiteral("extra") && pacmanRecs[0].status == QStringLiteral("Installed") && pacmanRecs[1].name == QStringLiteral("hypre") && pacmanRecs[1].status == QStringLiteral("Available"));
-
     // Verify Fedora/RHEL dnf4 ("pkg.arch : summary") and Fedora 40+ dnf5 (" pkg.arch\tsummary") formats.
     const auto dnfRecs = widget.parsePackageManagerOutput(QStringLiteral("dnf"), QStringLiteral("Last metadata expiration check...\n=== Name & Summary Matched: openmpi ===\nopenmpi.x86_64 : Open Message Passing Interface\nopenmpi-devel.x86_64 : Development headers for OpenMPI\n"));
     const auto dnf5Recs = widget.parsePackageManagerOutput(QStringLiteral("dnf"), QStringLiteral("Updating and loading repositories:\nRepositories loaded.\nMatched fields: name, summary\n fd-find.x86_64\tFast and user-friendly alternative to find\n fdupes.x86_64  Finds duplicate files in a given set of directories\n"));
     QVERIFY(dnfRecs.size() == 2 && dnfRecs[0].name == QStringLiteral("openmpi") && dnf5Recs.size() == 2 && dnf5Recs[0].name == QStringLiteral("fd-find") && dnf5Recs[0].arch == QStringLiteral("x86_64") && dnf5Recs[1].name == QStringLiteral("fdupes"));
-
     // Verify Debian/Ubuntu apt-cache search and openSUSE zypper se -s pipe-delimited table parsing.
     const auto aptRecs = widget.parsePackageManagerOutput(QStringLiteral("apt"), QStringLiteral("openmpi-bin - high performance message passing library -- binaries\nlibopenmpi-dev - high performance message passing library -- header files\n"));
     const auto zypperRecs = widget.parsePackageManagerOutput(QStringLiteral("zypper"), QStringLiteral("S  | Name        | Type    | Version   | Arch   | Repository\n---+-------------+---------+-----------+--------+----------------\ni+ | openmpi4    | package | 4.1.6-1.1 | x86_64 | Main Repository\n   | openmpi4-devel | package | 4.1.6-1.1 | x86_64 | Main Repository\n"));
     QVERIFY(aptRecs.size() == 2 && aptRecs[0].name == QStringLiteral("openmpi-bin") && zypperRecs.size() == 2 && zypperRecs[0].name == QStringLiteral("openmpi4") && zypperRecs[0].status == QStringLiteral("Installed") && zypperRecs[1].status == QStringLiteral("Available"));
-
     // 3. Three Switchable Views (Table, List, Raw) & Non-Empty Table Population.
-    widget.displayPackageRecords(pacmanRecs, pacmanOut);
-    QCOMPARE(widget.packageTableRowCount(), 2);
+    widget.displayPackageRecords(pacmanRecs, pacmanOut); QCOMPARE(widget.packageTableRowCount(), 2);
     for (const QString& mode : {QStringLiteral("Table"), QStringLiteral("List"), QStringLiteral("Raw")}) { widget.setViewMode(mode); QCOMPARE(widget.currentViewMode(), mode); }
-    auto* listBrowser = widget.findChild<QTextBrowser*>();
-    QVERIFY(listBrowser != nullptr && listBrowser->toPlainText().contains(QStringLiteral("openmpi")));
-
+    auto* listBrowser = widget.findChild<QTextBrowser*>(); QVERIFY(listBrowser != nullptr && listBrowser->toPlainText().contains(QStringLiteral("openmpi")));
     // 4. Verify packageStatusFilterCombo generous width (>= 145px) and live host package query for "fd".
     auto* statusCombo = widget.findChild<QComboBox*>(QStringLiteral("packageStatusFilterCombo"));
     QVERIFY(statusCombo != nullptr && statusCombo->minimumWidth() >= 145 && statusCombo->count() == 3 && !statusCombo->itemIcon(0).isNull());
@@ -861,8 +832,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QCoreApplication::processEvents();
     auto switchWs = [](auto& win, const QString& p) -> bool { if constexpr (requires { win.switchWorkspaceDirectory(p); }) return win.switchWorkspaceDirectory(p); else { win.projectExplorerWidget()->setRootPath(p); return false; } };
     const bool switchedViaMw = switchWs(mw, extDir.path());
-    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr;
-    auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr; auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr);
     // Verify ProjectExplorerWidget switches to FILES view and displays external project folders without leftover GridLock repo files.
     QVERIFY2(switchedViaMw && !pe->isSymbolsMode() && !pe->isStringsMode(), "Opening external workspace must switch ProjectExplorerWidget to FILES mode via switchWorkspaceDirectory");
@@ -885,11 +855,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     gridlock::core::ConfigManager::instance().setWorkspace(savedRepoRoot);
 }
 
-/**
- * @brief Verifies unified Git diff hunk parsing (`Added`, `Modified`, `Deleted` gutter line states)
- *        in `SourceCodeView` and the `debuggerEngineCombo` selector (`gdb`, `lldb-dap`, `cuda-gdb`, `rocgdb`)
- *        in `PreferencesDialog` and `ConfigManager`.
- */
+/** @brief Verifies Git diff parsing, Preferences toggles, multi-format syntax highlighting, and Rainbow Brackets. */
 void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     // 1. Verify SourceCodeView::parseUnifiedGitDiff() and PreferencesDialog/ConfigManager debuggerEngine.
     gridlock::ui::SourceCodeView srcView;
@@ -899,7 +865,6 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     gridlock::ui::PreferencesDialog dlg; auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("debuggerEngineCombo")); auto& cfg = gridlock::core::ConfigManager::instance();
     QVERIFY2(combo && combo->findData(QStringLiteral("gdb")) >= 0 && combo->findData(QStringLiteral("lldb-dap")) >= 0 && combo->findData(QStringLiteral("cuda-gdb")) >= 0 && combo->findData(QStringLiteral("rocgdb")) >= 0, "debuggerEngineCombo items");
     cfg.setDebuggerEngine(QStringLiteral("rocgdb")); QCOMPARE(cfg.debuggerEngine(), QStringLiteral("rocgdb")); cfg.setDebuggerEngine(QStringLiteral("gdb")); QCOMPARE(cfg.debuggerEngine(), QStringLiteral("gdb"));
-
     // 2. Verify live Git diff gutter updates on file open, unsaved debounced buffer edits, and saveToFile.
     QTemporaryDir gitDir; QVERIFY(gitDir.isValid());
     auto runGit = [&](const QStringList& args) -> bool { QProcess p; p.setWorkingDirectory(gitDir.path()); p.start(QStringLiteral("git"), args); return p.waitForFinished(4000) && p.exitCode() == 0; };
@@ -907,8 +872,7 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     { QFile f(solverPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int a = 1;\nint b = 2;\nint c = 3;\nint d = 4;\n"); }
     QVERIFY2(runGit({QStringLiteral("init"), QStringLiteral("-q")}) && runGit({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("t@gridlock.dev")}) && runGit({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("T")}) && runGit({QStringLiteral("add"), QStringLiteral("solver.cpp")}) && runGit({QStringLiteral("commit"), QStringLiteral("-q"), QStringLiteral("-m"), QStringLiteral("init")}), "git repo init");
     gridlock::ui::MainWindow mw; auto* tabMgr = mw.editorTabManager(); QVERIFY(tabMgr != nullptr); tabMgr->clearAllTabs();
-    QVERIFY(tabMgr->openFile(solverPath) != nullptr); auto* ed = tabMgr->currentSourceCodeView(); QVERIFY(ed != nullptr);
-    QCOMPARE(ed->gitLineState(2), gridlock::ui::SourceCodeView::GitLineState::Unchanged);
+    QVERIFY(tabMgr->openFile(solverPath) != nullptr); auto* ed = tabMgr->currentSourceCodeView(); QVERIFY(ed != nullptr); QCOMPARE(ed->gitLineState(2), gridlock::ui::SourceCodeView::GitLineState::Unchanged);
     // Edit line 2 and append line 5 in memory without saving, then wait for debounced gutter refresh.
     { QTextCursor cur(ed->document()); cur.movePosition(QTextCursor::Start); cur.movePosition(QTextCursor::Down); cur.select(QTextCursor::LineUnderCursor); cur.insertText(QStringLiteral("int b = 99;")); cur.movePosition(QTextCursor::End); cur.insertText(QStringLiteral("int e = 5;\n")); }
     QTRY_VERIFY_WITH_TIMEOUT(ed->gitLineState(2) == gridlock::ui::SourceCodeView::GitLineState::Modified && ed->gitLineState(5) == gridlock::ui::SourceCodeView::GitLineState::Added, 2000);
@@ -926,8 +890,38 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
             nextBtn = QMessageBox::Save; emit mgr->tabCloseRequested(0); if (mgr->count() != 0 || !readDisk().contains(QStringLiteral("123")) || prompts != 3) return false;
             if (!mgr->openFile(solverPath) || !mgr->currentSourceCodeView()) return false;
             { QTextCursor c2(mgr->currentSourceCodeView()->document()); c2.movePosition(QTextCursor::Start); c2.select(QTextCursor::LineUnderCursor); c2.insertText(QStringLiteral("int a = 777;")); }
-            nextBtn = QMessageBox::Discard; emit mgr->tabCloseRequested(0); return mgr->count() == 0 && !readDisk().contains(QStringLiteral("777")) && prompts == 4 && mw.close();
+            nextBtn = QMessageBox::Discard; emit mgr->tabCloseRequested(0); return mgr->count() == 0 && !readDisk().contains(QStringLiteral("777")) && prompts == 4;
         } else return false;
     };
     QVERIFY2(checkDirtyClosePrompts(tabMgr), "EditorTabManager & MainWindow dirty-tab Save/Discard/Cancel close prompts must succeed");
+    // 4. Verify TOML/YAML/Markdown/CSV highlighting, Rainbow Brackets depth/ignore rules, and PreferencesDialog toggles.
+    auto colorAt = [](gridlock::ui::SourceCodeView& v, int blk, int col) -> QColor { const auto fmts = v.document()->findBlockByNumber(blk).layout()->formats(); for (int k = fmts.size() - 1; k >= 0; --k) if (col >= fmts[k].start && col < fmts[k].start + fmts[k].length) return fmts[k].format.foreground().color(); return QColor(); };
+    auto checkMultiSyntaxAndRainbow = [&](auto& v, auto& c) -> bool {
+        if constexpr (requires { c.rainbowBracketsEnabled(); c.setRainbowBracketsEnabled(true); c.dataDocHighlightingEnabled(); c.setDataDocHighlightingEnabled(true); v.languageMode(); v.setRainbowBracketsEnabled(true); }) {
+            using Mode = std::decay_t<decltype(v.languageMode())>;
+            // Verify ConfigManager & PreferencesDialog Editing checkboxes persist and apply live to open tabs.
+            gridlock::ui::PreferencesDialog pd(&mw); pd.show();
+            auto* rbChk = pd.findChild<QCheckBox*>(QStringLiteral("rainbowBracketsCheck")); auto* ddChk = pd.findChild<QCheckBox*>(QStringLiteral("dataDocHighlightingCheck"));
+            if (!rbChk || !ddChk || !rbChk->isChecked() || !ddChk->isChecked()) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("c.toml"))); v.setSourceCode(QStringLiteral("[solver]\n# cmt\nk = true\n"));
+            if (v.languageMode() != Mode::Toml || !colorAt(v, 0, 1).isValid() || colorAt(v, 0, 1) == colorAt(v, 1, 2)) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("j.yaml"))); v.setSourceCode(QStringLiteral("mpi:\n  n: 4 # cmt\n  a: *r\n"));
+            if (v.languageMode() != Mode::Yaml || !colorAt(v, 0, 0).isValid() || colorAt(v, 0, 0) == colorAt(v, 1, 9)) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("r.md"))); v.setSourceCode(QStringLiteral("# H1\n```\nint x = 1;\n```\n[l](u)\n"));
+            if (v.languageMode() != Mode::Markdown || !colorAt(v, 0, 2).isValid() || !colorAt(v, 2, 0).isValid()) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("d.csv"))); v.setSourceCode(QStringLiteral("\"a,b\",c\n"));
+            if (v.languageMode() != Mode::Csv || colorAt(v, 0, 1) != colorAt(v, 0, 3) || colorAt(v, 0, 1) == colorAt(v, 0, 6)) return false;
+            // Verify nested Rainbow Brackets in open MainWindow tab + string/comment ignores + live checkbox rehighlight.
+            if (!tabMgr->openFile(solverPath) || !tabMgr->currentSourceCodeView()) return false;
+            auto* tv = tabMgr->currentSourceCodeView(); const QString rbCode = QStringLiteral("if (a[0] + (b * {1})) { auto s = \"string (ignored)\"; } // comment (ignored)\n");
+            tv->setSourceCode(rbCode); tv->setCurrentFile(solverPath);
+            const QColor d0 = colorAt(*tv, 0, 3), d1 = colorAt(*tv, 0, 5), d2 = colorAt(*tv, 0, 16);
+            if (!d0.isValid() || d0 == d1 || d1 == d2 || colorAt(*tv, 0, rbCode.indexOf(QStringLiteral("(ignored)"))) == d0 || colorAt(*tv, 0, rbCode.lastIndexOf(QStringLiteral("(ignored)"))) == d0) return false;
+            rbChk->setChecked(false); ddChk->setChecked(false); QMetaObject::invokeMethod(&pd, "apply", Qt::DirectConnection);
+            const bool offOk = !c.rainbowBracketsEnabled() && !c.dataDocHighlightingEnabled() && colorAt(*tv, 0, 3) != d0;
+            rbChk->setChecked(true); ddChk->setChecked(true); QMetaObject::invokeMethod(&pd, "apply", Qt::DirectConnection);
+            return offOk && colorAt(*tv, 0, 3) == d0 && mw.close();
+        } else return false;
+    };
+    QVERIFY2(checkMultiSyntaxAndRainbow(srcView, cfg), "TOML/YAML/MD/CSV highlighting, Rainbow Brackets, and Preferences live toggles must succeed");
 }

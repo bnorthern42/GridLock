@@ -81,6 +81,8 @@ public:
     bool wordWrap() const;
     bool showEdgeColumn() const;
     int edgeColumn() const;
+    bool rainbowBrackets() const;
+    bool dataDocHighlighting() const;
 
     void loadFromSettings();
 
@@ -91,6 +93,8 @@ private:
     QCheckBox* m_wordWrapCheck = nullptr;
     QCheckBox* m_showEdgeColumnCheck = nullptr;
     QSpinBox* m_edgeColumnBox = nullptr;
+    QCheckBox* m_rainbowBracketsCheck = nullptr;
+    QCheckBox* m_dataDocHighlightingCheck = nullptr;
 };
 
 /**

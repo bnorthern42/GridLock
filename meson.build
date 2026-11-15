@@ -37,6 +37,7 @@ src_files = [
   'src/ui/MainWindowNavigation.cpp', 'src/ui/MainWindowCohesion.cpp',
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/views/ServerRackView.cpp', 'src/ui/views/SourceCodeView.cpp',
+  'src/ui/views/EditorSyntaxHighlighter.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/EditorTabManager.cpp',
   'src/ui/widgets/ProjectExplorerWidget.cpp', 'src/ui/dialogs/ProjectSettingsDialog.cpp',
   'src/ui/dialogs/ProjectWizard.cpp', 'src/ui/dialogs/XrefInspectorDialog.cpp',
@@ -65,7 +66,8 @@ moc_headers = [
   'src/core/hpc/DapCoordinator.hpp', 'src/core/hpc/TelemetryObfuscator.hpp',
   'src/core/hpc/DeadlockAnalyzer.hpp', 'src/core/hpc/LspCoordinator.hpp',
   'src/ui/MainWindow.hpp', 'src/ui/views/ServerRackView.hpp',
-  'src/ui/views/SourceCodeView.hpp', 'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
+  'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
   'src/ui/EditorTabManager.hpp', 'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp', 'src/ui/dialogs/ProjectWizard.hpp',
   'src/ui/dialogs/XrefInspectorDialog.hpp', 'src/ui/widgets/ExpressionEvaluatorWidget.hpp',
@@ -176,7 +178,8 @@ ui_test_src = [
   'src/ui/MainWindow.cpp', 'src/ui/MainWindowWorkspace.cpp',
   'src/ui/MainWindowNavigation.cpp', 'src/ui/MainWindowCohesion.cpp',
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
-  'src/ui/views/SourceCodeView.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
+  'src/ui/views/SourceCodeView.cpp', 'src/ui/views/EditorSyntaxHighlighter.cpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
   'src/ui/EditorTabManager.cpp', 'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp', 'src/ui/dialogs/ProjectWizard.cpp',
   'src/ui/dialogs/XrefInspectorDialog.cpp', 'src/ui/widgets/FileIconProvider.cpp',
@@ -205,7 +208,8 @@ ui_test_src = [
 
 ui_test_moc_headers = [
   'tests/test_ui.hpp', 'src/ui/MainWindow.hpp',
-  'src/ui/views/SourceCodeView.hpp', 'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
+  'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
+  'src/ui/dialogs/ConditionalBreakpointDialog.hpp',
   'src/ui/EditorTabManager.hpp', 'src/ui/widgets/ProjectExplorerWidget.hpp',
   'src/ui/dialogs/ProjectSettingsDialog.hpp', 'src/ui/dialogs/ProjectWizard.hpp',
   'src/ui/dialogs/XrefInspectorDialog.hpp', 'src/ui/tutorial/TutorialDialog.hpp',
@@ -351,6 +355,7 @@ commands_test_src = [
   'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp',
+  'src/ui/views/EditorSyntaxHighlighter.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
 ]
 
@@ -360,6 +365,7 @@ commands_test_moc_headers = [
   'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp',
+  'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
 ]
 
@@ -414,6 +420,7 @@ dap_commands_test_src = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/ui/views/SourceCodeView.cpp',
+  'src/ui/views/EditorSyntaxHighlighter.cpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
 ]
 
@@ -423,6 +430,7 @@ dap_commands_test_moc_headers = [
   'src/core/hpc/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
   'src/ui/views/SourceCodeView.hpp',
+  'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
 ]
 

@@ -810,11 +810,16 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   if (watched == qApp && event->type() == QEvent::DynamicPropertyChange) {
     const auto *dp = static_cast<QDynamicPropertyChangeEvent *>(event);
     if (dp->propertyName() == QByteArrayLiteral("gridlock_debugger_engine")) syncCoordinatorWithConfig();
+    else if (dp->propertyName() == QByteArrayLiteral("gridlock_editor_highlight_rev") && m_editorTabManager)
+      m_editorTabManager->rehighlightAllTabs();
   }
   // Connect PreferencesDialog::preferencesChanged on demand whenever Preferences opens.
   if (event->type() == QEvent::Show) {
     if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
       connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
+      if (m_editorTabManager) {
+        connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
+      }
     }
   }
   // Ensure status-bar Stack/Heap telemetry populates immediately on initial status bar paint.

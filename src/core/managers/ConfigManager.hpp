@@ -243,6 +243,16 @@ class ConfigManager {
   /** @brief Sets and persists the status bar resource telemetry display format ("gb", "percent", or "both"). */
   void setTelemetryDisplayFormat(const QString& fmt);
 
+  /** @brief Returns whether nested (), {}, [] Rainbow Brackets depth coloring is enabled (default: true). */
+  bool rainbowBracketsEnabled() const;
+  /** @brief Sets and persists whether Rainbow Brackets depth coloring is enabled and broadcasts live update. */
+  void setRainbowBracketsEnabled(bool enabled);
+
+  /** @brief Returns whether TOML, YAML, Markdown, and CSV syntax highlighting is enabled (default: true). */
+  bool dataDocHighlightingEnabled() const;
+  /** @brief Sets and persists whether TOML/YAML/Markdown/CSV syntax highlighting is enabled and broadcasts live update. */
+  void setDataDocHighlightingEnabled(bool enabled);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

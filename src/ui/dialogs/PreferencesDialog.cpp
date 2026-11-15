@@ -461,6 +461,8 @@ void PreferencesDialog::apply() {
     s.setValue("editing/word_wrap", m_editingPage->wordWrap());
     s.setValue("editing/show_edge_column", m_editingPage->showEdgeColumn());
     s.setValue("editing/edge_column", m_editingPage->edgeColumn());
+    s.setValue("editing/rainbow_brackets", m_editingPage->rainbowBrackets());
+    s.setValue("editing/data_doc_highlighting", m_editingPage->dataDocHighlighting());
 
     // 3. User interaction behavior
     s.setValue("behavior/restore_breakpoints",
@@ -470,6 +472,8 @@ void PreferencesDialog::apply() {
 
     // 4. Debugger engine & launcher configurations
     auto& cfg = gridlock::core::ConfigManager::instance();
+    cfg.setRainbowBracketsEnabled(m_editingPage->rainbowBrackets());
+    cfg.setDataDocHighlightingEnabled(m_editingPage->dataDocHighlighting());
     if (auto* telemetryCombo = m_behaviorPage->findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"))) {
         cfg.setTelemetryDisplayFormat(telemetryCombo->currentData().toString());
     }

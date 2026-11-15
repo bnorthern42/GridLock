@@ -443,4 +443,18 @@ void EditorTabManager::updateSplitGeometry() {
     }
 }
 
+/**
+ * @brief Refreshes styling and syntax highlighting on all open editor tabs and the split view.
+ */
+void EditorTabManager::rehighlightAllTabs() {
+    for (int i = 0; i < count(); ++i) {
+        if (auto* view = qobject_cast<SourceCodeView*>(widget(i))) {
+            view->reloadStyle();
+        }
+    }
+    if (m_secondaryEditorView) {
+        m_secondaryEditorView->reloadStyle();
+    }
+}
+
 }  // namespace gridlock::ui

@@ -386,6 +386,22 @@ EditingSettingsPage::EditingSettingsPage(QWidget* parent)
         tr("The column index at which the edge line is drawn."));
     form->addRow(tr("Edge Column:"), m_edgeColumnBox);
 
+    // Rainbow Brackets nesting depth highlighting toggle.
+    m_rainbowBracketsCheck = new QCheckBox(
+        tr("Enable Rainbow Brackets (colorize nested (), {}, [] depth)"), this);
+    m_rainbowBracketsCheck->setObjectName(QStringLiteral("rainbowBracketsCheck"));
+    m_rainbowBracketsCheck->setToolTip(
+        tr("Colorize nested parentheses, braces, and brackets by depth while ignoring strings and comments."));
+    form->addRow(QString(), m_rainbowBracketsCheck);
+
+    // TOML, YAML, Markdown, and CSV syntax highlighting toggle.
+    m_dataDocHighlightingCheck = new QCheckBox(
+        tr("Enable Syntax Highlighting for Config & Docs (TOML, YAML, Markdown, CSV)"), this);
+    m_dataDocHighlightingCheck->setObjectName(QStringLiteral("dataDocHighlightingCheck"));
+    m_dataDocHighlightingCheck->setToolTip(
+        tr("Apply theme-aware syntax highlighting to TOML, YAML, Markdown, and CSV/TSV files."));
+    form->addRow(QString(), m_dataDocHighlightingCheck);
+
     loadFromSettings();
 }
 
@@ -401,12 +417,15 @@ bool EditingSettingsPage::showEdgeColumn() const {
     return m_showEdgeColumnCheck->isChecked();
 }
 int EditingSettingsPage::edgeColumn() const { return m_edgeColumnBox->value(); }
+bool EditingSettingsPage::rainbowBrackets() const { return m_rainbowBracketsCheck->isChecked(); }
+bool EditingSettingsPage::dataDocHighlighting() const { return m_dataDocHighlightingCheck->isChecked(); }
 
 /**
  * @brief Restores editing preferences from user settings storage.
  */
 void EditingSettingsPage::loadFromSettings() {
     QSettings s("gridlock", "debugger");
+    auto& cfg = gridlock::core::ConfigManager::instance();
     m_tabWidthBox->setValue(s.value("editing/tab_width", 4).toInt());
     m_indentModeCombo->setCurrentIndex(
         s.value("editing/insert_spaces", true).toBool() ? 0 : 1);
@@ -416,6 +435,8 @@ void EditingSettingsPage::loadFromSettings() {
     m_showEdgeColumnCheck->setChecked(
         s.value("editing/show_edge_column", true).toBool());
     m_edgeColumnBox->setValue(s.value("editing/edge_column", 80).toInt());
+    m_rainbowBracketsCheck->setChecked(cfg.rainbowBracketsEnabled());
+    m_dataDocHighlightingCheck->setChecked(cfg.dataDocHighlightingEnabled());
 }
 
 // ============================================================================

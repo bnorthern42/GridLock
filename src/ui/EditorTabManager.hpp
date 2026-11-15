@@ -143,6 +143,11 @@ public:
     bool isSplitActive() const { return m_splitActive; }
 
     /**
+     * @brief Reloads styles and syntax highlighting across all open tabs and the secondary split pane.
+     */
+    void rehighlightAllTabs();
+
+    /**
      * @brief Returns the active split orientation (Qt::Horizontal or Qt::Vertical).
      * @return Current split orientation.
      */

@@ -11,7 +11,6 @@
 #include <QWidget>
 #include <QString>
 #include <QPlainTextEdit>
-#include <QSyntaxHighlighter>
 #include <QRegularExpression>
 #include <QTextCharFormat>
 #include <QTimer>
@@ -23,41 +22,9 @@
 #include <QProcess>
 #include <QTemporaryFile>
 #include "../../core/utils/ClangdLspClient.hpp"
+#include "EditorSyntaxHighlighter.hpp"
 
 namespace gridlock::ui {
-
-/**
- * @class CppSyntaxHighlighter
- * @brief Real-time syntax highlighter for C++ keywords, strings, types, and comments.
- */
-class CppSyntaxHighlighter : public QSyntaxHighlighter {
-    Q_OBJECT
-
-public:
-    /**
-     * @brief Constructs the highlighter attached to a QTextDocument.
-     * @param parent The parent text document.
-     */
-    explicit CppSyntaxHighlighter(QTextDocument *parent = nullptr);
-
-protected:
-    /**
-     * @brief Highlights an individual block of text using regular expressions.
-     * @param text The text chunk to highlight.
-     */
-    void highlightBlock(const QString &text) override;
-
-private:
-    struct HighlightingRule {
-        QRegularExpression pattern;
-        QTextCharFormat format;
-    };
-    QVector<HighlightingRule> highlightingRules;
-
-    QRegularExpression commentStartExpression;
-    QRegularExpression commentEndExpression;
-    QTextCharFormat multiLineCommentFormat;
-};
 
 class LineNumberArea;
 class LspCompletionPopup;
@@ -268,6 +235,30 @@ public:
      * @brief Reloads color palette and styling from ConfigManager and ThemeManager.
      */
     Q_INVOKABLE void reloadStyle();
+
+    /// Supported editor highlighting modes forwarded to EditorSyntaxHighlighter.
+    using LanguageMode = EditorSyntaxHighlighter::LanguageMode;
+
+    /** @brief Overrides the active syntax highlighting language mode and rehighlights. */
+    void setLanguageMode(LanguageMode mode);
+
+    /** @brief Returns the active syntax highlighting language mode. */
+    LanguageMode languageMode() const;
+
+    /** @brief Enables or disables Rainbow Brackets depth coloring on this view. */
+    void setRainbowBracketsEnabled(bool enabled);
+
+    /** @brief Returns whether Rainbow Brackets depth coloring is enabled on this view. */
+    bool rainbowBracketsEnabled() const;
+
+    /** @brief Enables or disables TOML/YAML/Markdown/CSV syntax highlighting on this view. */
+    void setDataDocHighlightingEnabled(bool enabled);
+
+    /** @brief Returns whether TOML/YAML/Markdown/CSV syntax highlighting is enabled on this view. */
+    bool dataDocHighlightingEnabled() const;
+
+    /** @brief Rebuilds token formats from current theme/config and rehighlights the document. */
+    void rehighlightDocument();
 
     /**
      * @brief Returns the active canvas background QColor resolved from ThemeManager.
@@ -500,7 +491,7 @@ private slots:
 
 private:
     LineNumberArea* m_lineNumberArea = nullptr;
-    CppSyntaxHighlighter* m_highlighter = nullptr;
+    EditorSyntaxHighlighter* m_highlighter = nullptr;
     LspCompletionPopup* m_completionPopup = nullptr;
     QMap<int, QString> m_breakpoints;
     QMap<int, QString> m_breakpointSuspendScopes;

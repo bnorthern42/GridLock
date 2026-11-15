@@ -2,8 +2,8 @@
  * @file SourceCodeView.cpp
  * @brief Source code editor implementation with syntax highlighting and gutter controls.
  *
- * Implements the SourceCodeView text editor, CppSyntaxHighlighter for regex-based
- * C++ lexical coloring, and LineNumberArea for gutter rendering and breakpoint interactions.
+ * Implements the SourceCodeView text editor (backed by EditorSyntaxHighlighter)
+ * and LineNumberArea for gutter rendering, Git diff markers, and breakpoint interactions.
  */
 
 #include "SourceCodeView.hpp"
@@ -30,68 +30,6 @@ QStringList activeAppSwatchColors() {
 }  // namespace
 
 /**
- * @brief Constructs a new CppSyntaxHighlighter and initializes syntax rules.
- *
- * Configures regex patterns and text formats for C++ types, control flow keywords,
- * preprocessor directives, MPI API symbols, string literals, and comments.
- *
- * @param parent Pointer to the underlying QTextDocument.
- */
-CppSyntaxHighlighter::CppSyntaxHighlighter(QTextDocument *parent) : QSyntaxHighlighter(parent) {
-    // Types: soft blue (#6496ff)
-    QTextCharFormat typeFormat; typeFormat.setForeground(QColor(55, 115, 225)); typeFormat.setFontWeight(QFont::Bold);
-    highlightingRules.append({QRegularExpression(QStringLiteral(
-        "\\b(char|class|const|double|enum|explicit|friend|inline|int|long|namespace|operator|private|protected|"
-        "public|short|signals|signed|slots|static|struct|template|typedef|typename|union|unsigned|virtual|void|volatile|bool)\\b")), typeFormat});
-    // Control flow keywords: crimson/magenta
-    QTextCharFormat keywordFormat; keywordFormat.setForeground(QColor(215, 58, 125)); keywordFormat.setFontWeight(QFont::Bold);
-    highlightingRules.append({QRegularExpression(QStringLiteral(
-        "\\b(for|return|if|else|while|do|switch|case|break|continue|new|delete)\\b")), keywordFormat});
-    // Preprocessor directives: orange (#d65d0e)
-    QTextCharFormat preprocessorFormat; preprocessorFormat.setForeground(QColor(214, 93, 14));
-    highlightingRules.append({QRegularExpression(QStringLiteral("#include[^\n]*")), preprocessorFormat});
-    // MPI primitives: purple (#8959a8)
-    QTextCharFormat mpiFormat; mpiFormat.setForeground(QColor(137, 89, 168));
-    highlightingRules.append({QRegularExpression(QStringLiteral("\\bMPI_[A-Za-z0-9_]+\\b")), mpiFormat});
-    // String literals: balanced emerald green (#2e8b57) legible on both light and dark canvases
-    QTextCharFormat stringFormat; stringFormat.setForeground(QColor(60, 165, 85));
-    highlightingRules.append({QRegularExpression(QStringLiteral("\".*?\"")), stringFormat});
-    // Single-line comments: slate gray (#787c85)
-    QTextCharFormat singleLineCommentFormat; singleLineCommentFormat.setForeground(QColor(120, 124, 133));
-    highlightingRules.append({QRegularExpression(QStringLiteral("//[^\n]*")), singleLineCommentFormat});
-    // Multi-line block comments
-    multiLineCommentFormat.setForeground(QColor(120, 124, 133));
-    commentStartExpression = QRegularExpression(QStringLiteral("/\\*"));
-    commentEndExpression = QRegularExpression(QStringLiteral("\\*/"));
-}
-
-/**
- * @brief Scans a text block applying syntax highlighting rules and stateful block comments.
- * @param text Content of the paragraph / block.
- */
-void CppSyntaxHighlighter::highlightBlock(const QString &text) {
-    // Apply single-token regex rules
-    for (const HighlightingRule &rule : std::as_const(highlightingRules)) {
-        QRegularExpressionMatchIterator matchIterator = rule.pattern.globalMatch(text);
-        while (matchIterator.hasNext()) {
-            QRegularExpressionMatch match = matchIterator.next();
-            setFormat(match.capturedStart(), match.capturedLength(), rule.format);
-        }
-    }
-    // Track multi-line comment state across blocks
-    setCurrentBlockState(0);
-    int startIndex = (previousBlockState() != 1) ? text.indexOf(commentStartExpression) : 0;
-    while (startIndex >= 0) {
-        QRegularExpressionMatch match = commentEndExpression.match(text, startIndex);
-        int endIndex = match.capturedStart(), commentLength = 0;
-        if (endIndex == -1) { setCurrentBlockState(1); commentLength = text.length() - startIndex; }
-        else { commentLength = endIndex - startIndex + match.capturedLength(); }
-        setFormat(startIndex, commentLength, multiLineCommentFormat);
-        startIndex = text.indexOf(commentStartExpression, startIndex + commentLength);
-    }
-}
-
-/**
  * @brief Constructs a new SourceCodeView editor widget.
  *
  * Configures monospace font, line number gutter, syntax highlighting, hover inspection timer,
@@ -108,9 +46,9 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     updateLineNumberAreaWidth(0);
     setReadOnly(false); setTextInteractionFlags(Qt::TextEditorInteraction);
     setLineWrapMode(QPlainTextEdit::NoWrap);
+    // Install multi-format syntax highlighter before initial reloadStyle so config & palette sync immediately
+    m_highlighter = new EditorSyntaxHighlighter(document());
     reloadStyle();
-    // Install C++ syntax highlighter
-    m_highlighter = new CppSyntaxHighlighter(document());
     // Enable mouse tracking for interactive variable hover inspector and dirty state propagation
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this); m_hoverTimer->setSingleShot(true);
@@ -139,6 +77,7 @@ void SourceCodeView::setCurrentFile(const QString& filePath) {
     m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
                             ? QFileInfo(filePath).canonicalFilePath()
                             : filePath;
+    if (m_highlighter) m_highlighter->setFilePath(m_currentFilePath);
     if (!m_currentFilePath.isEmpty()) {
         setDiagnostics(core::ClangdLspClient::instance().cachedDiagnosticsForFile(m_currentFilePath));
         if (!toPlainText().trimmed().isEmpty()) syncLspDocument();
@@ -217,8 +156,44 @@ void SourceCodeView::reloadStyle() {
         pal.setColor(QPalette::Base, QColor(canvasHex)); pal.setColor(QPalette::Window, QColor(canvasHex));
         pal.setColor(QPalette::Text, QColor(textHex)); viewport()->setPalette(pal); viewport()->setAutoFillBackground(true);
     }
+    if (m_highlighter) m_highlighter->reloadPalette();
     highlightCurrentLine(); updateLineNumberAreaWidth(0);
     if (m_lineNumberArea) m_lineNumberArea->update();
+}
+
+/** @brief Overrides the active highlighting language mode on the editor highlighter. */
+void SourceCodeView::setLanguageMode(LanguageMode mode) {
+    if (m_highlighter) m_highlighter->setLanguageMode(mode);
+}
+
+/** @brief Returns the active highlighting language mode. */
+SourceCodeView::LanguageMode SourceCodeView::languageMode() const {
+    return m_highlighter ? m_highlighter->languageMode() : LanguageMode::PlainText;
+}
+
+/** @brief Enables or disables nested Rainbow Brackets depth coloring. */
+void SourceCodeView::setRainbowBracketsEnabled(bool enabled) {
+    if (m_highlighter) m_highlighter->setRainbowBracketsEnabled(enabled);
+}
+
+/** @brief Returns whether Rainbow Brackets depth coloring is enabled. */
+bool SourceCodeView::rainbowBracketsEnabled() const {
+    return m_highlighter ? m_highlighter->rainbowBracketsEnabled() : false;
+}
+
+/** @brief Enables or disables TOML/YAML/Markdown/CSV syntax highlighting. */
+void SourceCodeView::setDataDocHighlightingEnabled(bool enabled) {
+    if (m_highlighter) m_highlighter->setDataDocHighlightingEnabled(enabled);
+}
+
+/** @brief Returns whether TOML/YAML/Markdown/CSV syntax highlighting is enabled. */
+bool SourceCodeView::dataDocHighlightingEnabled() const {
+    return m_highlighter ? m_highlighter->dataDocHighlightingEnabled() : false;
+}
+
+/** @brief Rebuilds syntax palettes from active config/theme and rehighlights the document. */
+void SourceCodeView::rehighlightDocument() {
+    if (m_highlighter) m_highlighter->reloadPalette();
 }
 
 /**

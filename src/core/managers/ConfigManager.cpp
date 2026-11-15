@@ -775,51 +775,32 @@ void ConfigManager::setThemeName(const QString& name) {
     tbl.insert_or_assign("appearance", appTbl);
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
-  for (const auto& pair : {std::make_pair(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation")),
-                           std::make_pair(QStringLiteral("GridLock"), QStringLiteral("Workstation")),
-                           std::make_pair(QStringLiteral("gridlock"), QStringLiteral("debugger"))}) {
-    QSettings s(pair.first, pair.second);
-    s.setValue(QStringLiteral("appearance/theme_id"), id);
-    s.setValue(QStringLiteral("appearance/theme"), id);
-    s.sync();
+  for (const auto& pair : {std::make_pair(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation")), std::make_pair(QStringLiteral("GridLock"), QStringLiteral("Workstation")), std::make_pair(QStringLiteral("gridlock"), QStringLiteral("debugger"))}) {
+    QSettings s(pair.first, pair.second); s.setValue(QStringLiteral("appearance/theme_id"), id); s.setValue(QStringLiteral("appearance/theme"), id); s.sync();
   }
 }
 
-/**
- * @brief Returns the configured local debugger backend engine ("gdb", "lldb-dap", "cuda-gdb", "rocgdb").
- */
+/** @brief Returns the configured local debugger backend engine ("gdb", "lldb-dap", "cuda-gdb", "rocgdb"). */
 QString ConfigManager::debuggerEngine() const {
   if (!m_debuggerEngine.trimmed().isEmpty()) return m_debuggerEngine.trimmed();
   if (!m_workspacePath.isEmpty()) {
-    const QString wf = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
     try {
-      auto tbl = toml::parse_file(wf.toStdString());
-      if (auto* dbg = tbl["debugger"].as_table())
-        if (auto val = dbg->get("engine"); val && val->is_string()) {
-          const QString eng = QString::fromStdString(val->as_string()->get()).trimmed();
-          if (!eng.isEmpty()) return eng;
-        }
+      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
+      if (auto* dbg = tbl["debugger"].as_table()) if (auto val = dbg->get("engine"); val && val->is_string()) { const QString eng = QString::fromStdString(val->as_string()->get()).trimmed(); if (!eng.isEmpty()) return eng; }
     } catch (...) {}
   }
-  QSettings s(kOrg, kApp);
-  const QString persisted = s.value(QStringLiteral("debugger/engine"), QStringLiteral("gdb")).toString().trimmed();
+  const QString persisted = QSettings(kOrg, kApp).value(QStringLiteral("debugger/engine"), QStringLiteral("gdb")).toString().trimmed();
   return persisted.isEmpty() ? QStringLiteral("gdb") : persisted;
 }
 
-/**
- * @brief Sets and persists the local debugger backend engine in workspace.toml and QSettings.
- * @param engine Backend identifier ("gdb", "lldb-dap", "cuda-gdb", or "rocgdb").
- */
+/** @brief Sets and persists the local debugger backend engine in workspace.toml and QSettings. */
 void ConfigManager::setDebuggerEngine(const QString& engine) {
-  const QString clean = engine.trimmed().isEmpty() ? QStringLiteral("gdb") : engine.trimmed();
-  m_debuggerEngine = clean;
+  const QString clean = engine.trimmed().isEmpty() ? QStringLiteral("gdb") : engine.trimmed(); m_debuggerEngine = clean;
   if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
-    const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
-    dbgTbl.insert_or_assign("engine", clean.toStdString());
-    tbl.insert_or_assign("debugger", dbgTbl);
+    dbgTbl.insert_or_assign("engine", clean.toStdString()); tbl.insert_or_assign("debugger", dbgTbl);
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/engine"), clean); s.sync();
@@ -827,60 +808,42 @@ void ConfigManager::setDebuggerEngine(const QString& engine) {
   if (auto* app = QCoreApplication::instance()) app->setProperty("gridlock_debugger_engine", clean);
 }
 
-/**
- * @brief Returns whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor (default: false).
- */
+/** @brief Returns whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor (default: false). */
 bool ConfigManager::showDecompilerWithSource() const {
   if (!m_workspacePath.isEmpty()) {
-    const QString wf = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
     try {
-      auto tbl = toml::parse_file(wf.toStdString());
-      if (auto* dbg = tbl["debugger"].as_table())
-        if (auto val = dbg->get("show_decompiler_with_source"); val && val->is_boolean())
-          return val->as_boolean()->get();
+      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
+      if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("show_decompiler_with_source"); v && v->is_boolean()) return v->as_boolean()->get();
     } catch (...) {}
   }
-  QSettings s(kOrg, kApp);
-  return s.value(QStringLiteral("debugger/show_decompiler_with_source"), false).toBool();
+  return QSettings(kOrg, kApp).value(QStringLiteral("debugger/show_decompiler_with_source"), false).toBool();
 }
 
-/**
- * @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor.
- * @param show True to allow Decompiler/Split views in CODE/MPI perspectives; false for pure assembly.
- */
+/** @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor. */
 void ConfigManager::setShowDecompilerWithSource(bool show) {
   if (!m_workspacePath.isEmpty()) {
     QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
     const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
-    dbgTbl.insert_or_assign("show_decompiler_with_source", show);
-    tbl.insert_or_assign("debugger", dbgTbl);
+    dbgTbl.insert_or_assign("show_decompiler_with_source", show); tbl.insert_or_assign("debugger", dbgTbl);
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/show_decompiler_with_source"), show); s.sync();
 }
 
-/**
- * @brief Returns the default DisassemblyView presentation mode ("cfg", "linear", or "split"; default: "cfg").
- */
+/** @brief Returns the default DisassemblyView presentation mode ("cfg", "linear", or "split"; default: "cfg"). */
 QString ConfigManager::defaultDisassemblyMode() const {
   if (!m_workspacePath.isEmpty()) {
-    const QString wf = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
     try {
-      auto tbl = toml::parse_file(wf.toStdString());
-      if (auto* dbg = tbl["debugger"].as_table())
-        if (auto val = dbg->get("default_disassembly_mode"); val && val->is_string())
-          return QString::fromStdString(val->as_string()->get());
+      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
+      if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("default_disassembly_mode"); v && v->is_string()) return QString::fromStdString(v->as_string()->get());
     } catch (...) {}
   }
-  QSettings s(kOrg, kApp);
-  return s.value(QStringLiteral("debugger/default_disassembly_mode"), QStringLiteral("cfg")).toString();
+  return QSettings(kOrg, kApp).value(QStringLiteral("debugger/default_disassembly_mode"), QStringLiteral("cfg")).toString();
 }
 
-/**
- * @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split").
- */
+/** @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split"). */
 void ConfigManager::setDefaultDisassemblyMode(const QString& mode) {
   const QString clean = mode.trimmed().isEmpty() ? QStringLiteral("cfg") : mode.trimmed().toLower();
   if (!m_workspacePath.isEmpty()) {
@@ -888,33 +851,24 @@ void ConfigManager::setDefaultDisassemblyMode(const QString& mode) {
     const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
-    dbgTbl.insert_or_assign("default_disassembly_mode", clean.toStdString());
-    tbl.insert_or_assign("debugger", dbgTbl);
+    dbgTbl.insert_or_assign("default_disassembly_mode", clean.toStdString()); tbl.insert_or_assign("debugger", dbgTbl);
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/default_disassembly_mode"), clean); s.sync();
 }
 
-/**
- * @brief Returns the status bar resource telemetry display format ("gb", "percent", or "both"; default: "gb").
- */
+/** @brief Returns the status bar resource telemetry display format ("gb", "percent", or "both"; default: "gb"). */
 QString ConfigManager::telemetryDisplayFormat() const {
   if (!m_workspacePath.isEmpty()) {
-    const QString wf = QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
     try {
-      auto tbl = toml::parse_file(wf.toStdString());
-      if (auto* uiTbl = tbl["ui"].as_table())
-        if (auto val = uiTbl->get("telemetry_display_format"); val && val->is_string())
-          return QString::fromStdString(val->as_string()->get());
+      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
+      if (auto* uiTbl = tbl["ui"].as_table()) if (auto v = uiTbl->get("telemetry_display_format"); v && v->is_string()) return QString::fromStdString(v->as_string()->get());
     } catch (...) {}
   }
-  QSettings s(kOrg, kApp);
-  return s.value(QStringLiteral("ui/telemetry_display_format"), QStringLiteral("gb")).toString();
+  return QSettings(kOrg, kApp).value(QStringLiteral("ui/telemetry_display_format"), QStringLiteral("gb")).toString();
 }
 
-/**
- * @brief Sets and persists the status bar resource telemetry display format ("gb", "percent", or "both").
- */
+/** @brief Sets and persists the status bar resource telemetry display format ("gb", "percent", or "both"). */
 void ConfigManager::setTelemetryDisplayFormat(const QString& fmt) {
   const QString clean = fmt.trimmed().isEmpty() ? QStringLiteral("gb") : fmt.trimmed().toLower();
   if (!m_workspacePath.isEmpty()) {
@@ -922,11 +876,42 @@ void ConfigManager::setTelemetryDisplayFormat(const QString& fmt) {
     const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table uiTbl; if (auto* ex = tbl["ui"].as_table()) uiTbl = *ex;
-    uiTbl.insert_or_assign("telemetry_display_format", clean.toStdString());
-    tbl.insert_or_assign("ui", uiTbl);
+    uiTbl.insert_or_assign("telemetry_display_format", clean.toStdString()); tbl.insert_or_assign("ui", uiTbl);
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("ui/telemetry_display_format"), clean); s.sync();
+}
+
+/** @brief Returns whether nested Rainbow Brackets depth coloring is enabled (default: true). */
+bool ConfigManager::rainbowBracketsEnabled() const {
+  QSettings s(kOrg, kApp);
+  if (s.contains(QStringLiteral("editing/rainbow_brackets"))) return s.value(QStringLiteral("editing/rainbow_brackets"), true).toBool();
+  if (auto* ed = m_config["editing"].as_table()) if (auto v = ed->get("rainbow_brackets"); v && v->is_boolean()) return v->as_boolean()->get();
+  return true;
+}
+
+/** @brief Returns whether TOML, YAML, Markdown, and CSV syntax highlighting is enabled (default: true). */
+bool ConfigManager::dataDocHighlightingEnabled() const {
+  QSettings s(kOrg, kApp);
+  if (s.contains(QStringLiteral("editing/data_doc_highlighting"))) return s.value(QStringLiteral("editing/data_doc_highlighting"), true).toBool();
+  if (auto* ed = m_config["editing"].as_table()) if (auto v = ed->get("data_doc_highlighting"); v && v->is_boolean()) return v->as_boolean()->get();
+  return true;
+}
+
+/** @brief Sets and persists Rainbow Brackets enabled state and broadcasts a live editor rehighlight property. */
+void ConfigManager::setRainbowBracketsEnabled(bool enabled) {
+  toml::table edTbl; if (auto* ex = m_config["editing"].as_table()) edTbl = *ex;
+  edTbl.insert_or_assign("rainbow_brackets", enabled); m_config.insert_or_assign("editing", edTbl); saveGlobalConfig();
+  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editing/rainbow_brackets"), enabled); s.sync();
+  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_rainbow_brackets", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
+}
+
+/** @brief Sets and persists TOML/YAML/Markdown/CSV syntax highlighting state and broadcasts a live rehighlight property. */
+void ConfigManager::setDataDocHighlightingEnabled(bool enabled) {
+  toml::table edTbl; if (auto* ex = m_config["editing"].as_table()) edTbl = *ex;
+  edTbl.insert_or_assign("data_doc_highlighting", enabled); m_config.insert_or_assign("editing", edTbl); saveGlobalConfig();
+  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editing/data_doc_highlighting"), enabled); s.sync();
+  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_data_doc_highlighting", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
 }
 
 }  // namespace gridlock::core
