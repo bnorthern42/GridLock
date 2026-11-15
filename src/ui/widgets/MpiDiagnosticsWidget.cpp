@@ -122,14 +122,20 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
         QStringLiteral("COMMUNICATOR"),
         QStringLiteral("PC / LOCATION")
     });
-    // Enforce >= 48px minimum section width and stretch columns across the viewport.
+    // Allow user-resizable columns without clipping live Rank/PID labels, stretching the trailing Location column.
     m_rankWaitTable->horizontalHeader()->setVisible(true);
     m_rankWaitTable->horizontalHeader()->setMinimumSectionSize(48);
     m_rankWaitTable->horizontalHeader()->setDefaultSectionSize(110);
+    m_rankWaitTable->horizontalHeader()->setSectionsMovable(false);
     m_rankWaitTable->horizontalHeader()->setStretchLastSection(true);
-    for (int col = 0; col < 5; ++col) {
-        m_rankWaitTable->horizontalHeader()->setSectionResizeMode(col, QHeaderView::Stretch);
+    for (int col = 0; col < 6; ++col) {
+        m_rankWaitTable->horizontalHeader()->setSectionResizeMode(col, QHeaderView::Interactive);
     }
+    m_rankWaitTable->setColumnWidth(0, 210);
+    m_rankWaitTable->setColumnWidth(1, 90);
+    m_rankWaitTable->setColumnWidth(2, 130);
+    m_rankWaitTable->setColumnWidth(3, 110);
+    m_rankWaitTable->setColumnWidth(4, 130);
 
     // Compact bottom list widget displaying detected wait-for cycle summaries.
     m_deadlockList = new QListWidget(analyzerPage);
@@ -181,6 +187,7 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
  * @brief Clears wait-state telemetry rows and deadlock alert entries for idle state.
  */
 void MpiDiagnosticsWidget::clear() {
+    m_lastLoggedRankEvent.clear();
     if (m_deadlockList) {
         m_deadlockList->clear();
     }
@@ -259,8 +266,17 @@ bool MpiDiagnosticsWidget::hasCompactSingleRowHeader() const {
  * @param rankCount Active number of MPI ranks in the launched or attached session.
  */
 void MpiDiagnosticsWidget::beginLiveSession(int rankCount) {
+    m_sessionTimer.restart();
+    m_lastLoggedRankEvent.clear();
     if (m_deadlockList) {
         m_deadlockList->clear();
+    }
+    if (m_networkLogWidget) {
+        m_networkLogWidget->clear();
+        m_networkLogWidget->insertStructuredRow(
+            QStringLiteral("00:00.000"), QStringLiteral("ALL"), QStringLiteral("ALL"),
+            QStringLiteral("MPI_Launch"), QStringLiteral("MPI_COMM_WORLD"),
+            QStringLiteral("%1 ranks").arg(std::max(1, rankCount)));
     }
     // Reset header status pill to green NO CYCLE state when starting a fresh live session.
     if (m_statusBadge) {
@@ -278,7 +294,7 @@ void MpiDiagnosticsWidget::beginLiveSession(int rankCount) {
     m_rankWaitTable->setRowCount(n);
     for (int r = 0; r < n; ++r) {
         updateLiveRankRow(r, 0, QStringLiteral("RUNNING"), QStringLiteral("main"),
-                          QStringLiteral("ALL RANKS"), QStringLiteral("0x00000000"), n);
+                          QStringLiteral("ALL RANKS"), QStringLiteral("running"), n);
     }
 }
 
@@ -338,15 +354,49 @@ void MpiDiagnosticsWidget::updateLiveRankRow(int rankId, qint64 pid, const QStri
         }
     }
 
-    // Populate all 6 columns (`Rank`, `State`, `Primitive`, `Peer/Target`, `Comm`, `Location`).
-    auto* rankItem = new QTableWidgetItem(rankLabel);
-    rankItem->setData(Qt::UserRole, rankId);
-    m_rankWaitTable->setItem(rankId, 0, rankItem);
-    m_rankWaitTable->setItem(rankId, 1, new QTableWidgetItem(effectiveState));
-    m_rankWaitTable->setItem(rankId, 2, new QTableWidgetItem(primitive));
-    m_rankWaitTable->setItem(rankId, 3, new QTableWidgetItem(target));
-    m_rankWaitTable->setItem(rankId, 4, new QTableWidgetItem(QStringLiteral("MPI_COMM_WORLD")));
-    m_rankWaitTable->setItem(rankId, 5, new QTableWidgetItem(location));
+    // Ensure column 0 never clips live Rank + PID text while remaining user-resizable.
+    const int neededWidth = m_rankWaitTable->fontMetrics().horizontalAdvance(rankLabel) + 24;
+    if (m_rankWaitTable->columnWidth(0) < neededWidth) {
+        m_rankWaitTable->setColumnWidth(0, neededWidth);
+    }
+
+    // Populate all 6 columns (`Rank`, `State`, `Primitive`, `Peer/Target`, `Comm`, `Location`) with tooltips.
+    const QStringList colTexts = {rankLabel, effectiveState, primitive, target,
+                                  QStringLiteral("MPI_COMM_WORLD"), location};
+    for (int col = 0; col < colTexts.size(); ++col) {
+        auto* cell = new QTableWidgetItem(colTexts[col]);
+        if (col == 0) {
+            cell->setData(Qt::UserRole, rankId);
+        }
+        cell->setToolTip(colTexts[col]);
+        m_rankWaitTable->setItem(rankId, col, cell);
+    }
+
+    // Emit deduplicated live execution events to MpiNetworkLogWidget for MPI calls, state changes, and PID attach.
+    if (m_networkLogWidget) {
+        const bool isMpiPrim = primitive.startsWith(QStringLiteral("MPI_")) ||
+                               primitive.startsWith(QStringLiteral("PMPI_")) ||
+                               primitive.contains(QStringLiteral("barrierWait"));
+        const bool isNotableState = effectiveState == QLatin1String("PAUSED") ||
+                                    effectiveState == QLatin1String("EXITED") ||
+                                    effectiveState == QLatin1String("DEADLOCKED") ||
+                                    effectiveState == QLatin1String("COLL MISMATCH");
+        const QString sig = QStringLiteral("%1|%2|%3|%4").arg(pid).arg(effectiveState, primitive, location);
+        if (m_lastLoggedRankEvent.value(rankId) != sig) {
+            const bool firstAttach = pid > 0 && !m_lastLoggedRankEvent.contains(rankId);
+            m_lastLoggedRankEvent.insert(rankId, sig);
+            if (firstAttach || isMpiPrim || isNotableState) {
+                const QString loggedPrim = isMpiPrim ? primitive
+                                                     : (firstAttach ? QStringLiteral("MPI_Attach") : effectiveState);
+                const bool isErr = effectiveState == QLatin1String("DEADLOCKED") ||
+                                   effectiveState == QLatin1String("COLL MISMATCH");
+                m_networkLogWidget->insertStructuredRow(
+                    formatSessionTimestamp(), QStringLiteral("Rank %1").arg(rankId),
+                    target.isEmpty() ? QStringLiteral("ALL") : target, loggedPrim,
+                    QStringLiteral("MPI_COMM_WORLD"), location, isErr);
+            }
+        }
+    }
 }
 
 /**
@@ -415,6 +465,15 @@ void MpiDiagnosticsWidget::onDeadlockDetected(const gridlock::core::DeadlockInfo
     item->setText(detail);
     item->setData(Qt::UserRole, info.rankId);
     m_deadlockList->addItem(item);
+
+    if (m_networkLogWidget) {
+        m_networkLogWidget->insertStructuredRow(
+            formatSessionTimestamp(), QStringLiteral("Rank %1").arg(info.rankId),
+            QStringLiteral("ALL"),
+            info.isCollectiveMismatch ? QStringLiteral("COLL_MISMATCH") : QStringLiteral("DEADLOCK"),
+            QStringLiteral("MPI_COMM_WORLD"),
+            info.blockedFunction.isEmpty() ? detail : info.blockedFunction, true);
+    }
 
     // Switch header badge to crimson COLL DIVERGENCE or CYCLE DETECTED alert styling.
     if (m_statusBadge) {
@@ -496,6 +555,22 @@ void MpiDiagnosticsWidget::onItemDoubleClicked(QListWidgetItem* item) {
         int rankId = item->data(Qt::UserRole).toInt();
         emit jumpToFrameRequested(rankId);
     }
+}
+
+/**
+ * @brief Formats elapsed session time as MM:SS.mmm for live network log rows.
+ * @return Zero-padded elapsed timestamp string.
+ */
+QString MpiDiagnosticsWidget::formatSessionTimestamp() const {
+    const qint64 elapsedMs = m_sessionTimer.isValid() ? m_sessionTimer.elapsed() : 0;
+    const qint64 totalSec = elapsedMs / 1000;
+    const qint64 mins = (totalSec / 60) % 100;
+    const qint64 secs = totalSec % 60;
+    const qint64 ms = elapsedMs % 1000;
+    return QStringLiteral("%1:%2.%3")
+        .arg(mins, 2, 10, QChar('0'))
+        .arg(secs, 2, 10, QChar('0'))
+        .arg(ms, 3, 10, QChar('0'));
 }
 
 }  // namespace gridlock::ui

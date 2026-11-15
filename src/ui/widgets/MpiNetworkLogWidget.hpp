@@ -81,7 +81,6 @@ public:
      */
     void clear();
 
-private:
     /**
      * @brief Inserts a structured 6-column row into the MPI traffic table.
      * @param timestamp Event timestamp string (e.g., "12:00:01.042").
@@ -96,6 +95,8 @@ private:
                              const QString& dstRank, const QString& primitive,
                              const QString& tagComm, const QString& payloadBytes,
                              bool isError = false);
+
+private:
 
     /**
      * @brief Filters visible table rows by the query text and traffic direction combo box.

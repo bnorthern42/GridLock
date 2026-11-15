@@ -125,6 +125,15 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     auto* standaloneBadge = standaloneMem.findChild<QLabel*>(QStringLiteral("memSourceBadge")); auto* standaloneDump = standaloneMem.findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
     QVERIFY2(standaloneDiag.rankWaitTableRowCount() == 0 && standaloneNet.logRowCount() == 0, "Standalone MpiDiagnosticsWidget and MpiNetworkLogWidget must start with 0 rows");
     QVERIFY2(standaloneMem.currentBaseAddress() == 0ULL && standaloneDump && standaloneDump->toPlainText().trimmed().isEmpty() && standaloneBadge && standaloneBadge->text() == QStringLiteral("IDLE (NO BINARY)"), "Standalone MemView must start empty with IDLE (NO BINARY) badge");
+    // Gate 1: MpiDiagnosticsWidget and MpiNetworkLogWidget columns must be user-resizable (Interactive) and never clip live PIDs or show 0x00000000.
+    auto* sWaitTbl = standaloneDiag.findChild<QTableWidget*>(QStringLiteral("mpiRankWaitTable")); auto* sNetTbl = standaloneNet.findChild<QTableWidget*>();
+    QVERIFY(sWaitTbl && sNetTbl); QCOMPARE(sWaitTbl->horizontalHeader()->sectionResizeMode(0), QHeaderView::Interactive); QCOMPARE(sNetTbl->horizontalHeader()->sectionResizeMode(0), QHeaderView::Interactive);
+    standaloneDiag.beginLiveSession(2); QVERIFY(!sWaitTbl->item(0, 5)->text().contains(QStringLiteral("0x00000000")));
+    // Verify live PID updates auto-widen the RANK column and attach full-text cell tooltips.
+    standaloneDiag.updateLiveRankRow(0, 3645905, QStringLiteral("RUNNING"), QStringLiteral("MPI_Allreduce"), QStringLiteral("ALL"), QStringLiteral("main.cpp:182"));
+    QVERIFY2(sWaitTbl->columnWidth(0) >= sWaitTbl->fontMetrics().horizontalAdvance(QStringLiteral("Rank 0 (PID 3645905)")) + 16, qPrintable(QString("RANK col width %1 too narrow").arg(sWaitTbl->columnWidth(0))));
+    for (int c = 0; c < sWaitTbl->columnCount(); ++c) QVERIFY(sWaitTbl->item(0, c) && !sWaitTbl->item(0, c)->toolTip().isEmpty());
+    // Verify live memory callback wiring switches MemView badge to LIVE RANK.
     standaloneMem.setLiveMemoryCallbacks([](int, const QString&, bool* ok) { if (ok) *ok = true; return 0x00401120ULL; }, [](int, uint64_t, int) { return QByteArray::fromHex("9090c3"); }, [](int) { return qint64(4242); });
     QVERIFY(standaloneMem.seekToAddress(0x00401120ULL) && standaloneBadge->text().contains(QStringLiteral("LIVE RANK")));
     auto* varsDockW = mainWindow.findChild<gridlock::VariablesDockWidget*>(); auto* varModel = varsDockW ? varsDockW->findChild<gridlock::VariableTreeModel*>() : nullptr;
@@ -142,6 +151,10 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QVERIFY2(varModel->rowCount() > 0 && regTable->rowCount() > 0 && csTable->rowCount() == 1 && mpiDiag->rankWaitTableRowCount() > 0 && netLog->logRowCount() > 0, "loadPreviewFixture() + setStackFrames() must populate preview docks");
     mainWindow.stopTargetWorkflow(); QApplication::processEvents();
     QVERIFY2(varModel->rowCount() == 0 && regTable->rowCount() == 0 && csTable->rowCount() == 0 && mpiDiag->rankWaitTableRowCount() == 0 && netLog->logRowCount() == 0 && memBadge->text() == QStringLiteral("IDLE (NO BINARY)"), "stopTargetWorkflow() must clear inspection, MPI, and MemView docks");
+    // Gate 1: Live MPI session & primitive updates must populate MpiNetworkLogWidget and clear on stopTargetWorkflow().
+    mpiDiag->beginLiveSession(2); mpiDiag->updateLiveRankRow(0, 3645905, QStringLiteral("PAUSED"), QStringLiteral("MPI_Allreduce"), QStringLiteral("ALL"), QStringLiteral("main.cpp:182"));
+    QVERIFY2(netLog->logRowCount() >= 1, "Live MPI session/primitive updates must populate MpiNetworkLogWidget");
+    mainWindow.stopTargetWorkflow(); QApplication::processEvents(); QCOMPARE(netLog->logRowCount(), 0);
     mainWindow.loadPreviewFixture(); mainWindow.propagateThemeToAllWidgets();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
 
@@ -431,35 +444,24 @@ void TestMainWindowUI::testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable()
     QVERIFY2(mpiDiag->rankWaitTableRowCount() >= 1, qPrintable(QString("MpiDiagnosticsWidget rankWaitTableRowCount() %1 < 1").arg(mpiDiag->rankWaitTableRowCount())));
     auto* waitTable = mpiDiag->findChild<QTableWidget*>();
     QVERIFY2(waitTable != nullptr && waitTable->columnCount() >= 5 && waitTable->frameShape() == QFrame::NoFrame, "MpiDiagnosticsWidget must contain a >= 5 column QFrame::NoFrame wait table");
-
     // 3. Verify ReferenceManualWidget exposes loaded Zeal docsets and renders real HTML from a Zeal bundle.
     auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY2(refManual != nullptr && !refManual->loadedDocsetNames().isEmpty(), "ReferenceManualWidget must exist and expose loaded docsets");
     QVERIFY2(refManual->lookupSymbol(QStringLiteral("MPI_Init")), "ReferenceManualWidget::lookupSymbol('MPI_Init') must succeed");
 }
-
-/**
- * @brief Verifies SourceCodeView uniform canvas, MpiNetworkLogWidget table, and header density.
- * Confirms uniform editor background color, 6-column network log table, and monochrome glyphs.
- */
+/** @brief Verifies SourceCodeView uniform canvas, MpiNetworkLogWidget table, and header density. */
 void TestMainWindowUI::testSourceEditorCanvasNetworkLogTableAndHeaderDensity() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     mainWindow.loadSourceFile(QStringLiteral("tutorial/inspection_demo.cpp")); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
-
     // 1. SourceCodeView Uniform Canvas & Gutter.
-    auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>();
-    QVERIFY2(sourceView != nullptr, "Active SourceCodeView must exist in MainWindow");
+    auto* sourceView = mainWindow.findChild<gridlock::ui::SourceCodeView*>(); QVERIFY2(sourceView != nullptr, "Active SourceCodeView must exist in MainWindow");
     QVERIFY2(sourceView->rightViewportMargin() == 0 && !sourceView->hasRightMarginFill(), "SourceCodeView right margin must be 0 with no right-margin fill");
-
     const QImage editorImg = sourceView->viewport()->grab().toImage();
     QVERIFY2(!editorImg.isNull() && editorImg.width() > 100 && editorImg.height() > 40, "SourceCodeView snapshot image must be valid and non-empty");
-    // Sample on empty line 3 (between #include <stdio.h> and struct DeeplyNested) above any scrollbar.
     const int sampleY = sourceView->fontMetrics().height() * 2 + sourceView->fontMetrics().height() / 2;
-    const QColor leftColor = editorImg.pixelColor(static_cast<int>(editorImg.width() * 0.25), sampleY);
-    const QColor rightColor = editorImg.pixelColor(static_cast<int>(editorImg.width() * 0.85), sampleY);
+    const QColor leftColor = editorImg.pixelColor(static_cast<int>(editorImg.width() * 0.25), sampleY), rightColor = editorImg.pixelColor(static_cast<int>(editorImg.width() * 0.85), sampleY);
     QVERIFY2(leftColor.rgb() == rightColor.rgb(), qPrintable(QString("SourceCodeView split background: left=%1 vs right=%2").arg(leftColor.name(), rightColor.name())));
-
     // 2. Structured MpiNetworkLogWidget Table.
     auto* netLog = mainWindow.findChild<gridlock::ui::MpiNetworkLogWidget*>(); QVERIFY2(netLog != nullptr, "MpiNetworkLogWidget must exist in MainWindow");
     auto* netTable = netLog->findChild<QTableWidget*>();

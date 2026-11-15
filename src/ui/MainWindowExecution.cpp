@@ -268,18 +268,23 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
         QString activePrim = state.currentFunction.isEmpty() ? QStringLiteral("main") : state.currentFunction;
         for (const auto& fr : m_cachedStackFrames.value(rankId)) {
             if (fr.function.startsWith(QStringLiteral("MPI_")) ||
-                fr.function.startsWith(QStringLiteral("PMPI_"))) {
+                fr.function.startsWith(QStringLiteral("PMPI_")) ||
+                fr.function.contains(QStringLiteral("barrierWait"))) {
                 activePrim = fr.function;
                 break;
             }
         }
-        const QString locStr =
-            (!state.currentFile.isEmpty() && state.currentLine > 0)
-                ? QStringLiteral("%1:%2 (0x%3)")
-                      .arg(QFileInfo(state.currentFile).fileName())
-                      .arg(state.currentLine)
-                      .arg(pcOk ? pcVal : 0ULL, 8, 16, QChar('0'))
-                : QStringLiteral("0x%1").arg(pcOk ? pcVal : 0ULL, 8, 16, QChar('0'));
+        QString locStr;
+        if (!state.currentFile.isEmpty() && state.currentLine > 0) {
+            locStr = QStringLiteral("%1:%2 (0x%3)")
+                         .arg(QFileInfo(state.currentFile).fileName())
+                         .arg(state.currentLine)
+                         .arg(pcOk ? pcVal : 0ULL, 8, 16, QChar('0'));
+        } else if (diagStatus == QLatin1String("RUNNING") && (!pcOk || pcVal == 0ULL)) {
+            locStr = QStringLiteral("running");
+        } else {
+            locStr = QStringLiteral("0x%1").arg(pcOk ? pcVal : 0ULL, 8, 16, QChar('0'));
+        }
         m_mpiDiagnosticsWidget->updateLiveRankRow(
             rankId, livePid, diagStatus.isEmpty() ? QStringLiteral("IDLE") : diagStatus,
             activePrim, QStringLiteral("LIVE"), locStr,
@@ -493,7 +498,8 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
                     const StackFrameEntry* mpiFrame = &frames.first();
                     for (int i = 0; i < std::min<int>(frames.size(), 8); ++i) {
                         if (frames[i].function.startsWith(QStringLiteral("MPI_")) ||
-                            frames[i].function.startsWith(QStringLiteral("PMPI_"))) {
+                            frames[i].function.startsWith(QStringLiteral("PMPI_")) ||
+                            frames[i].function.contains(QStringLiteral("barrierWait"))) {
                             mpiFrame = &frames[i];
                             break;
                         }

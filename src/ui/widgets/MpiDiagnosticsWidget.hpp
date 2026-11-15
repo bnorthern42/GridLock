@@ -8,6 +8,8 @@
  * collective communication verification, and point-to-point network log tracking.
  */
 
+#include <QElapsedTimer>
+#include <QHash>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -160,6 +162,15 @@ private:
 
     /// Integrated MPI network packet/call log widget.
     MpiNetworkLogWidget* m_networkLogWidget = nullptr;
+
+    /// Formats elapsed session time as MM:SS.mmm for live network log events.
+    QString formatSessionTimestamp() const;
+
+    /// Elapsed timer started on beginLiveSession() for live network log timestamps.
+    QElapsedTimer m_sessionTimer;
+
+    /// Per-rank last logged event signature to avoid flooding identical polling rows.
+    QHash<int, QString> m_lastLoggedRankEvent;
 };
 
 }  // namespace gridlock::ui

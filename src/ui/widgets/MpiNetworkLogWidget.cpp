@@ -96,12 +96,17 @@ MpiNetworkLogWidget::MpiNetworkLogWidget(const QString& title, QWidget* parent)
     QHeaderView* hdr = m_logTable->horizontalHeader();
     hdr->setVisible(true);
     hdr->setMinimumSectionSize(48);
-    hdr->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    hdr->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    hdr->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    hdr->setSectionResizeMode(4, QHeaderView::Stretch);
-    hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    hdr->setSectionsMovable(false);
+    hdr->setStretchLastSection(true);
+    for (int col = 0; col < 6; ++col) {
+        hdr->setSectionResizeMode(col, QHeaderView::Interactive);
+    }
+    m_logTable->setColumnWidth(0, 95);
+    m_logTable->setColumnWidth(1, 90);
+    m_logTable->setColumnWidth(2, 90);
+    m_logTable->setColumnWidth(3, 130);
+    m_logTable->setColumnWidth(4, 190);
+    m_logTable->setColumnWidth(5, 100);
 
     layout->addWidget(m_logTable, 1);
 
@@ -283,6 +288,7 @@ void MpiNetworkLogWidget::insertStructuredRow(const QString& timestamp, const QS
             // Standard light-slate foreground for timestamps, tags, and byte counts.
             item->setForeground(QColor("#d7dae0"));
         }
+        item->setToolTip(cols[col]);
         m_logTable->setItem(row, col, item);
     }
     // Re-evaluate active filter criteria and keep latest traffic visible at the bottom.
