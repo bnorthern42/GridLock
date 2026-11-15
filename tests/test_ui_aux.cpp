@@ -18,11 +18,13 @@
 #include <QDirIterator>
 #include <QDockWidget>
 #include <QFile>
+#include <QFileSystemModel>
 #include <QGraphicsView>
 #include <QGuiApplication>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QProcess>
 #include <QPushButton>
 #include <QScreen>
 #include <QSignalSpy>
@@ -30,9 +32,11 @@
 #include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QToolBar>
+#include <QTreeView>
 #include <QtTest/QtTest>
 
 #include "../src/core/managers/ConfigManager.hpp"
+#include "../src/core/managers/SessionManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/CliParser.cpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
@@ -197,30 +201,20 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
 
     // 3. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines
     QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
-    if (!rootDir.exists("src")) {
-        rootDir = QDir::current();
-    }
+    if (!rootDir.exists("src")) rootDir = QDir::current();
     const QStringList dirsToScan = {rootDir.filePath("src"), rootDir.filePath("tests")};
     QStringList allFiles;
     for (const QString& dirPath : dirsToScan) {
         QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) {
-            allFiles.append(it.next());
-        }
+        while (it.hasNext()) allFiles.append(it.next());
     }
     allFiles.sort();
     for (const QString& filePath : allFiles) {
         QFile file(filePath);
         QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
         int lines = 0;
-        while (!file.atEnd()) {
-            file.readLine();
-            ++lines;
-        }
-        QVERIFY2(lines < 950,
-                 qPrintable(QString("%1 exceeds 950-line headroom limit (%2 lines)")
-                                .arg(filePath)
-                                .arg(lines)));
+        while (!file.atEnd()) { file.readLine(); ++lines; }
+        QVERIFY2(lines < 950, qPrintable(QString("%1 exceeds 950-line headroom limit (%2 lines)").arg(filePath).arg(lines)));
     }
 }
 
@@ -237,10 +231,8 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
             // Verify title bar widget ownership.
             QVERIFY2(tb->parentWidget() == dock,
                      qPrintable(QString("Dock '%1' has titleBarWidget with parent '%2' instead of dock")
-                                    .arg(dock->objectName())
-                                    .arg(tb->parentWidget() ? tb->parentWidget()->objectName() : "nullptr")));
-            QVERIFY2(!tb->isWindow(),
-                     qPrintable(QString("Dock '%1' titleBarWidget is a top-level window").arg(dock->objectName())));
+                                    .arg(dock->objectName(), tb->parentWidget() ? tb->parentWidget()->objectName() : "nullptr")));
+            QVERIFY2(!tb->isWindow(), qPrintable(QString("Dock '%1' titleBarWidget is a top-level window").arg(dock->objectName())));
         }
     }
 
@@ -254,7 +246,6 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     mainWindow.applyPreferredScreenRouting("27", true);
     QVERIFY(mainWindow.testAttribute(Qt::WA_ShowWithoutActivating));
     QCOMPARE(mainWindow.preferredMonitorHint(), QStringLiteral("27"));
-
     mainWindow.applyPreferredScreenRouting("2560x1440", false);
     QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating));
     QCOMPARE(mainWindow.preferredMonitorHint(), QStringLiteral("2560x1440"));
@@ -263,35 +254,25 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     auto& cfg = gridlock::core::ConfigManager::instance();
     const QString prevMonitor = cfg.preferredMonitor();
     const bool prevUnfocused = cfg.openUnfocused();
-
-    QTemporaryDir tmpConfigDir;
-    QVERIFY(tmpConfigDir.isValid());
+    QTemporaryDir tmpConfigDir; QVERIFY(tmpConfigDir.isValid());
     const QByteArray prevTestDir = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
     qputenv("GRIDLOCK_TEST_CONFIG_DIR", tmpConfigDir.path().toUtf8());
     cfg.loadConfig();
 
-    cfg.setPreferredMonitor("2560x1440");
-    cfg.setOpenUnfocused(true);
-    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440"));
-    QVERIFY(cfg.openUnfocused());
+    cfg.setPreferredMonitor("2560x1440"); cfg.setOpenUnfocused(true);
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440")); QVERIFY(cfg.openUnfocused());
     cfg.loadConfig();
-    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440"));
-    QVERIFY(cfg.openUnfocused());
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440")); QVERIFY(cfg.openUnfocused());
 
-    cfg.setPreferredMonitor("1920x1080");
-    cfg.setOpenUnfocused(false);
-    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080"));
-    QVERIFY(!cfg.openUnfocused());
+    cfg.setPreferredMonitor("1920x1080"); cfg.setOpenUnfocused(false);
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080")); QVERIFY(!cfg.openUnfocused());
     cfg.loadConfig();
-    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080"));
-    QVERIFY(!cfg.openUnfocused());
+    QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080")); QVERIFY(!cfg.openUnfocused());
 
     // Restore previous configuration state.
     if (prevTestDir.isEmpty()) qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
     else qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevTestDir);
-    cfg.loadConfig();
-    cfg.setPreferredMonitor(prevMonitor);
-    cfg.setOpenUnfocused(prevUnfocused);
+    cfg.loadConfig(); cfg.setPreferredMonitor(prevMonitor); cfg.setOpenUnfocused(prevUnfocused);
 }
 
 /**
@@ -302,54 +283,39 @@ void TestMainWindowUI::testNavigationHistoryStringsAndBookmarks() {
     auto* disassemblyView = mainWindow.disassemblyView();
     auto* projectExplorer = mainWindow.projectExplorerWidget();
     auto* memView = mainWindow.memView();
-    QVERIFY(disassemblyView != nullptr);
-    QVERIFY(projectExplorer != nullptr);
-    QVERIFY(memView != nullptr);
+    QVERIFY(disassemblyView != nullptr && projectExplorer != nullptr && memView != nullptr);
 
     // Seek across sequence of virtual addresses.
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401149"));
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178"));
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
-    QVERIFY(mainWindow.canNavigateBack());
-    QVERIFY(!mainWindow.canNavigateForward());
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120")); QCOMPARE(disassemblyView->currentAddress(), 0x00401120ULL);
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401149")); QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401178")); QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
+    QVERIFY(mainWindow.canNavigateBack() && !mainWindow.canNavigateForward());
 
     // Navigate back in history stack.
-    QVERIFY(mainWindow.navigateBack());
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
-    QVERIFY(mainWindow.canNavigateBack());
-    QVERIFY(mainWindow.canNavigateForward());
+    QVERIFY(mainWindow.navigateBack()); QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
+    QVERIFY(mainWindow.canNavigateBack() && mainWindow.canNavigateForward());
 
     // Navigate forward in history stack.
-    QVERIFY(mainWindow.navigateForward());
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
+    QVERIFY(mainWindow.navigateForward()); QCOMPARE(disassemblyView->currentAddress(), 0x00401178ULL);
     QVERIFY(!mainWindow.canNavigateForward());
 
     // Activate string list view in project explorer.
     projectExplorer->setStringsMode(true);
-    QVERIFY(projectExplorer->isStringsMode());
-    QVERIFY(projectExplorer->stringCount() >= 4);
+    QVERIFY(projectExplorer->isStringsMode() && projectExplorer->stringCount() >= 4);
 
     // Activate string entry to seek memory view to target address.
     QSignalSpy spyStr(projectExplorer, &gridlock::ui::ProjectExplorerWidget::symbolAddressSelected);
-    QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD"));
-    QCOMPARE(spyStr.count(), 1);
-    const uint64_t strAddr = spyStr.at(0).at(0).toULongLong();
-    QCOMPARE(strAddr, 0x00402000ULL);
+    QVERIFY(projectExplorer->activateString("MPI_COMM_WORLD") && spyStr.count() == 1);
+    QCOMPARE(spyStr.at(0).at(0).toULongLong(), 0x00402000ULL);
     QCOMPARE(memView->currentBaseAddress(), 0x00402000ULL);
     QVERIFY(mainWindow.canNavigateBack());
 
     // Set address comments and toggle bookmarks.
     disassemblyView->setAddressComment(0x00401149ULL, " Outer loop rank check ");
     QCOMPARE(disassemblyView->addressComment(0x00401149ULL), QStringLiteral("Outer loop rank check"));
-    QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
-    QVERIFY(disassemblyView->toggleBookmark(0x00401149ULL));
-    QVERIFY(disassemblyView->isBookmarked(0x00401149ULL));
-    QVERIFY(disassemblyView->bookmarkedAddresses().contains(0x00401149ULL));
-    QVERIFY(!disassemblyView->toggleBookmark(0x00401149ULL));
-    QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL));
+    QVERIFY(!disassemblyView->isBookmarked(0x00401149ULL) && disassemblyView->toggleBookmark(0x00401149ULL));
+    QVERIFY(disassemblyView->isBookmarked(0x00401149ULL) && disassemblyView->bookmarkedAddresses().contains(0x00401149ULL));
+    QVERIFY(!disassemblyView->toggleBookmark(0x00401149ULL) && !disassemblyView->isBookmarked(0x00401149ULL));
 }
 
 /**
@@ -371,8 +337,7 @@ void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
     // Generate C++ and high-level pseudocode variants.
     const QString cppOut = disassemblyView->decompileToLanguage("C++");
     const QString pseudoOut = disassemblyView->decompileToLanguage("Pseudocode");
-    QVERIFY(!cppOut.isEmpty() && !pseudoOut.isEmpty());
-    QVERIFY(cppOut != cOut && pseudoOut != cOut && cppOut != pseudoOut);
+    QVERIFY(!cppOut.isEmpty() && !pseudoOut.isEmpty() && cppOut != cOut && pseudoOut != cOut && cppOut != pseudoOut);
 
     // Function signature inspection.
     const QString sigHeader = disassemblyView->functionSignatureHeader();
@@ -381,10 +346,8 @@ void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
     QVERIFY(disassemblyView->isGraphMode() && disassemblyView->basicBlockCount() >= 3);
 
     // Verify source code fallback on address miss.
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120"));
-    QVERIFY(!mainWindow.isShowingDecompilerFallback());
-    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401000"));
-    QVERIFY(mainWindow.isShowingDecompilerFallback());
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120") && !mainWindow.isShowingDecompilerFallback());
+    QVERIFY(mainWindow.seekToAddressOrExpression("0x00401000") && mainWindow.isShowingDecompilerFallback());
 }
 
 /**
@@ -393,31 +356,25 @@ void TestMainWindowUI::testCfgGraphDecompilerLanguagesAndSourceFallback() {
 void TestMainWindowUI::testUnifiedChromeMetricsAndSplitGraphDecompiler() {
     // Initialize ThemeManager to apply uniform dark slate theme.
     gridlock::core::managers::ThemeManager::instance().initialize();
-    gridlock::ui::MainWindow mainWindow;
-    mainWindow.resize(1440, 900);
-    mainWindow.show();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow));
-    auto* disassemblyView = mainWindow.disassemblyView();
-    QVERIFY(disassemblyView != nullptr);
+    auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr);
 
     // Enable dual split view displaying CFG graph alongside decompiled pseudocode.
     disassemblyView->setSplitGraphDecompilerMode(true);
-    QVERIFY(disassemblyView->isSplitGraphDecompilerMode());
-    QCoreApplication::processEvents();
+    QVERIFY(disassemblyView->isSplitGraphDecompilerMode()); QCoreApplication::processEvents();
 
     // Verify both graph and decompiler widgets are visible and have adequate width.
     auto* cfgGraphView = disassemblyView->findChild<QGraphicsView*>("cutterCfgGraphView");
     auto* decompView = disassemblyView->findChild<QPlainTextEdit*>("cutterDecompilerView");
-    QVERIFY(cfgGraphView && decompView);
     // Ensure both panels are active and visible in the split container.
-    QVERIFY(cfgGraphView->isVisibleTo(disassemblyView) && decompView->isVisibleTo(disassemblyView));
+    QVERIFY(cfgGraphView && decompView && cfgGraphView->isVisibleTo(disassemblyView) && decompView->isVisibleTo(disassemblyView));
     QVERIFY(cfgGraphView->width() >= 180 && decompView->width() >= 180);
     // Export UI split snapshot for visual comparison.
     mainWindow.captureWorkspaceSnapshot("/tmp/gridlock_ui_v11_split.png");
 
     // Verify compact heights across common input widgets (buttons, edits, combos <= 28px).
-    const QList<QWidget*> scopes = { &mainWindow, mainWindow.memView(), mainWindow.projectExplorerWidget(), disassemblyView };
-    for (QWidget* s : scopes) {
+    for (QWidget* s : QList<QWidget*>{ &mainWindow, mainWindow.memView(), mainWindow.projectExplorerWidget(), disassemblyView }) {
         if (!s) continue;
         // Verify buttons, line edits, and combo boxes conform to compact ergonomics.
         for (auto* btn : s->findChildren<QPushButton*>()) if (btn->isVisible()) QVERIFY2(btn->height() <= 28, qPrintable(btn->objectName()));
@@ -437,8 +394,7 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     auto* projectExplorer = mainWindow.projectExplorerWidget();
     auto* memView = mainWindow.memView();
     QVERIFY(disassemblyView && projectExplorer && memView);
-    disassemblyView->setSplitGraphDecompilerMode(true);
-    QVERIFY(disassemblyView->seekToAddress(0x0040113dULL));
+    disassemblyView->setSplitGraphDecompilerMode(true); QVERIFY(disassemblyView->seekToAddress(0x0040113dULL));
     const int initLine = disassemblyView->currentDecompilerLine();
     QVERIFY(initLine > 0 && disassemblyView->decompilerLineToAddress(initLine) == 0x0040113dULL);
     QCOMPARE(disassemblyView->addressToDecompilerLine(0x0040113dULL), initLine);
@@ -446,15 +402,12 @@ void TestMainWindowUI::testCrossPaneChoreographyHistoryAndStrings() {
     // Select line in decompiler and verify memory view seeks to corresponding address.
     const int loopLine = disassemblyView->addressToDecompilerLine(0x00401149ULL);
     QVERIFY(loopLine > 0 && disassemblyView->selectDecompilerLine(loopLine));
-    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL);
-    QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
+    QCOMPARE(disassemblyView->currentAddress(), 0x00401149ULL); QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
     // Highlight token in pseudocode and verify navigation history traversal.
-    disassemblyView->highlightToken("argc");
-    QCOMPARE(disassemblyView->highlightedToken(), QStringLiteral("argc"));
+    disassemblyView->highlightToken("argc"); QCOMPARE(disassemblyView->highlightedToken(), QStringLiteral("argc"));
     QVERIFY(mainWindow.seekToAddressOrExpression("0x00401120") && mainWindow.seekToAddressOrExpression("0x0040113d") && mainWindow.seekToAddressOrExpression("0x00401178"));
     QVERIFY(mainWindow.canNavigateBack() && mainWindow.navigateBack());
-    QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL);
-    QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
+    QCOMPARE(disassemblyView->currentAddress(), 0x0040113dULL); QCOMPARE(memView->currentBaseAddress(), 0x0040113dULL);
     QVERIFY(mainWindow.navigateForward() && disassemblyView->currentAddress() == 0x00401178ULL);
 
     // Activate string and verify memory view navigates to string address and address comment.
@@ -898,6 +851,44 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QVERIFY2(explorer.registerSourceInBuildFile(mesonBuildPath, QStringLiteral("src/mpi_solver_kernel.cpp")), "registerSourceInBuildFile");
     QFile mfCheck(mesonBuildPath); QVERIFY(mfCheck.open(QIODevice::ReadOnly) && QString::fromUtf8(mfCheck.readAll()).contains(QStringLiteral("src/mpi_solver_kernel.cpp")));
     QVERIFY2(explorer.deleteEntry(renamedPath) && !QFileInfo::exists(renamedPath) && deletedCount == 1, "deleteEntry");
+
+    // 7. Simulate an external C++/MPI project workspace with subdirs, CMakeLists.txt, src/solver_main.cpp, and build_meson/mfem_solver ELF.
+    const QString savedRepoRoot = QFileInfo::exists(QStringLiteral("meson.build")) ? QDir::currentPath() : QDir(QStringLiteral("..")).absolutePath();
+    QTemporaryDir extDir, otherDir; QVERIFY(extDir.isValid() && otherDir.isValid());
+    for (const QString& sub : {QStringLiteral("MfemUtils"), QStringLiteral("ProblemSetup"), QStringLiteral("build_meson/meson-private"), QStringLiteral("src"), QStringLiteral(".gridlock")}) QVERIFY(QDir(extDir.path()).mkpath(sub));
+    QVERIFY(QDir(otherDir.path()).mkpath(QStringLiteral("AMR_Electrode_Cut")));
+    { QFile cm(extDir.filePath(QStringLiteral("CMakeLists.txt"))); QVERIFY(cm.open(QIODevice::WriteOnly)); cm.write("cmake_minimum_required(VERSION 3.20)\nproject(MfemSolver CXX)\n"); }
+    const QString mainCpp = extDir.filePath(QStringLiteral("src/solver_main.cpp")), elfBin = extDir.filePath(QStringLiteral("build_meson/mfem_solver"));
+    { QFile sf(mainCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("int main(int argc, char** argv) { (void)argc; (void)argv; return 0; }\n"); }
+    { QProcess cc; cc.start(QStringLiteral("g++"), {QStringLiteral("-g"), QStringLiteral("-O0"), mainCpp, QStringLiteral("-o"), elfBin}); QVERIFY2(cc.waitForFinished(10000) && cc.exitCode() == 0 && QFileInfo::exists(elfBin), "g++ must compile build_meson/mfem_solver"); }
+    QFile::copy(elfBin, extDir.filePath(QStringLiteral("build_meson/meson-private/sanitycheckcpp.exe")));
+
+    // 8. Start MainWindow on default repo workspace, switch to extDir, and verify FILES tree + TARGET selector update atomically.
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QCoreApplication::processEvents();
+    auto switchWs = [](auto& win, const QString& p) -> bool { if constexpr (requires { win.switchWorkspaceDirectory(p); }) return win.switchWorkspaceDirectory(p); else { win.projectExplorerWidget()->setRootPath(p); return false; } };
+    const bool switchedViaMw = switchWs(mw, extDir.path());
+    auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr;
+    auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr);
+    // Verify ProjectExplorerWidget switches to FILES view and displays external project folders without leftover GridLock repo files.
+    QVERIFY2(switchedViaMw && !pe->isSymbolsMode() && !pe->isStringsMode(), "Opening external workspace must switch ProjectExplorerWidget to FILES mode via switchWorkspaceDirectory");
+    QTRY_VERIFY_WITH_TIMEOUT(tree->model()->rowCount(tree->rootIndex()) >= 4, 3000);
+    auto visibleEntries = [&]() { QStringList out; const QModelIndex r = tree->rootIndex(); for (int i = 0; i < tree->model()->rowCount(r); ++i) out << tree->model()->index(i, 0, r).data().toString(); return out; };
+    const QStringList extEntries = visibleEntries();
+    QVERIFY2(extEntries.contains(QStringLiteral("MfemUtils")) && extEntries.contains(QStringLiteral("ProblemSetup")) && extEntries.contains(QStringLiteral("build_meson")) && !extEntries.contains(QStringLiteral("agent.md")) && !extEntries.contains(QStringLiteral("sonar-project.properties")), qPrintable(extEntries.join(QLatin1Char(','))));
+    // Verify TARGET selector discovers build_meson/mfem_solver (excluding meson-private scratch binaries) and replaces inspection_demo.
+    QVERIFY2(targetCombo->currentText().contains(QStringLiteral("mfem_solver")) && !targetCombo->currentText().contains(QStringLiteral("inspection_demo")) && targetCombo->findText(QStringLiteral("sanitycheckcpp"), Qt::MatchContains) < 0, qPrintable(targetCombo->currentText()));
+
+    // 9. Verify ProjectExplorerWidget root switch and SessionManager(.gridlock/workspace.toml) resolve workspace directory cleanly.
+    pe->setRootPath(otherDir.path()); QTRY_VERIFY_WITH_TIMEOUT(visibleEntries().contains(QStringLiteral("AMR_Electrode_Cut")), 3000);
+    QVERIFY2(!visibleEntries().contains(QStringLiteral("MfemUtils")) && mw.windowTitle().contains(QFileInfo(otherDir.path()).fileName()), "ProjectExplorer setRootPath must sync MainWindow");
+    const QString wsToml = extDir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    { QFile tf(wsToml); QVERIFY(tf.open(QIODevice::WriteOnly)); tf.write("[workspace]\nwatched_variables = []\nactive_breakpoints = []\nselected_ranks = [0]\n"); }
+    QVERIFY(gridlock::core::managers::SessionManager::instance().loadSession(wsToml).has_value());
+    auto* fsModel = qobject_cast<QFileSystemModel*>(tree->model());
+    QTRY_VERIFY_WITH_TIMEOUT(fsModel && QFileInfo(fsModel->filePath(tree->rootIndex())).canonicalFilePath() == QFileInfo(extDir.path()).canonicalFilePath() && visibleEntries().contains(QStringLiteral("MfemUtils")), 3000);
+    QVERIFY2(targetCombo->currentText().contains(QStringLiteral("mfem_solver")), "SessionManager loadSession(.gridlock/workspace.toml) must restore workspace target");
+    gridlock::core::ConfigManager::instance().setWorkspace(savedRepoRoot);
 }
 
 /**

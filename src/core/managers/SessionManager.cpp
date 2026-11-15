@@ -12,6 +12,8 @@
 #include <iostream>
 
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
 #include <toml++/toml.hpp>
 
 namespace gridlock::core::managers {
@@ -105,9 +107,19 @@ std::optional<SessionState> SessionManager::loadSession(const QString& filePath)
             }
         }
 
-        // Record the loaded file at the front of the MRU list and notify listeners.
+        // Resolve the enclosing workspace root directory (stepping out of `.gridlock/` if nested).
+        const QFileInfo sessionInfo(filePath);
+        QDir wsDir = sessionInfo.isDir() ? QDir(sessionInfo.absoluteFilePath()) : sessionInfo.dir();
+        if (wsDir.dirName() == QStringLiteral(".gridlock")) {
+            wsDir.cdUp();
+        }
+        const QFileInfo wsInfo(wsDir.absolutePath());
+        const QString workspaceRoot =
+            !wsInfo.canonicalFilePath().isEmpty() ? wsInfo.canonicalFilePath() : wsInfo.absoluteFilePath();
+
+        // Record the loaded file at the front of the MRU list and notify listeners with workspaceRoot.
         addMruSession(filePath);
-        emit sessionLoaded(filePath);
+        emit sessionLoaded(workspaceRoot);
         return state;
     } catch (const std::exception& e) {
         qWarning() << "Exception while loading session:" << e.what();

@@ -64,10 +64,16 @@ public:
     ~ProjectExplorerWidget() override;
     
     /**
-     * @brief Sets root directory path displayed in the file tree.
-     * @param path Directory path string.
+     * @brief Sets root directory path displayed in the file tree and switches to FILES mode.
+     * @param path Workspace directory or `.toml` session file path.
      */
     void setRootPath(const QString& path);
+
+    /**
+     * @brief Returns the normalized root directory path currently bound to the FILES tree.
+     * @return Canonical or absolute workspace directory path.
+     */
+    QString rootPath() const { return m_rootPath; }
 
     /**
      * @brief Reloads fonts and palette settings from active ThemeManager theme.
@@ -208,6 +214,12 @@ signals:
      */
     void fileDeleted(const QString& path);
 
+    /**
+     * @brief Emitted whenever the workspace root directory changes via setRootPath() or Open Folder.
+     * @param rootDir Canonical or absolute path to the selected workspace root directory.
+     */
+    void workspaceRootChanged(const QString& rootDir);
+
 private slots:
     void onOpenFolder();
     void onDoubleClicked(const QModelIndex& index);
@@ -222,6 +234,7 @@ private:
     void populateStringsTable(const QString& filterText = QString());
     void refreshTreeViewPath(const QString& focusPath = QString());
 
+    QString m_rootPath;
     QTreeView* m_treeView = nullptr;
     QFileSystemModel* m_fileSystemModel = nullptr;
     FileIconProvider* m_iconProvider = nullptr;

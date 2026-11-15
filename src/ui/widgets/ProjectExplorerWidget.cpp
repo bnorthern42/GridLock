@@ -125,9 +125,10 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
 
   // Initialize Qt standard file system model for directory traversal
+  m_rootPath = QDir::currentPath();
   m_fileSystemModel = new QFileSystemModel(this);
   m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
-  m_fileSystemModel->setRootPath(QDir::currentPath());
+  m_fileSystemModel->setRootPath(m_rootPath);
 
   // Attach high-DPI theme-aware icon provider to model
   m_iconProvider = new FileIconProvider();
@@ -332,16 +333,11 @@ void ProjectExplorerWidget::seedDefaultSymbols() {
  */
 void ProjectExplorerWidget::seedDefaultStrings() {
   m_strings = {
-      {0x00402000ULL, QStringLiteral(".rodata"),
-       QStringLiteral("MPI_COMM_WORLD")},
-      {0x00402010ULL, QStringLiteral(".rodata"),
-       QStringLiteral("DeeplyNested rank=%d id=%d")},
-      {0x00402030ULL, QStringLiteral(".rodata"),
-       QStringLiteral("gridlock_rank_sync_barrier")},
-      {0x00402050ULL, QStringLiteral(".dynstr"),
-       QStringLiteral("libmpi.so.40")},
-      {0x00402060ULL, QStringLiteral(".dynstr"),
-       QStringLiteral("GLIBC_2.38")},
+      {0x00402000ULL, QStringLiteral(".rodata"), QStringLiteral("MPI_COMM_WORLD")},
+      {0x00402010ULL, QStringLiteral(".rodata"), QStringLiteral("DeeplyNested rank=%d id=%d")},
+      {0x00402030ULL, QStringLiteral(".rodata"), QStringLiteral("gridlock_rank_sync_barrier")},
+      {0x00402050ULL, QStringLiteral(".dynstr"), QStringLiteral("libmpi.so.40")},
+      {0x00402060ULL, QStringLiteral(".dynstr"), QStringLiteral("GLIBC_2.38")},
   };
 }
 
@@ -711,19 +707,45 @@ void ProjectExplorerWidget::reloadStyle() {
  * @brief Prompts user for a directory and opens it in the file tree view.
  */
 void ProjectExplorerWidget::onOpenFolder() {
-  QString dir = QFileDialog::getExistingDirectory(this, "Open Folder", QDir::currentPath(), QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+  const QString startDir = !m_rootPath.isEmpty() ? m_rootPath : QDir::currentPath();
+  const QString dir = QFileDialog::getExistingDirectory(
+      this, "Open Folder", startDir, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
   if (!dir.isEmpty()) setRootPath(dir);
 }
 
 /**
- * @brief Sets the root filesystem path displayed in the tree view.
- * @param path Directory path.
+ * @brief Resolves any directory or `.toml`/`.gridlock` session file path to its workspace directory,
+ *        rebuilds the `FILES` tree root index, switches the active tab to `FILES`, and notifies listeners.
+ * @param path Directory path or `.toml` session file path.
  */
 void ProjectExplorerWidget::setRootPath(const QString &path) {
-  if (!path.isEmpty()) {
-    m_fileSystemModel->setRootPath(path);
-    m_treeView->setRootIndex(m_fileSystemModel->index(path));
+  const QString trimmed = path.trimmed();
+  if (trimmed.isEmpty()) return;
+
+  // Normalize `.gridlock/workspace.toml` or `.toml` session file paths to their workspace directory.
+  const QFileInfo rawInfo(trimmed);
+  QDir dir = rawInfo.exists() ? (rawInfo.isDir() ? QDir(rawInfo.absoluteFilePath()) : rawInfo.dir())
+                              : (rawInfo.fileName().endsWith(QStringLiteral(".toml"), Qt::CaseInsensitive)
+                                     ? rawInfo.dir()
+                                     : QDir(rawInfo.absoluteFilePath()));
+  // Step up out of `.gridlock/` metadata directory when a `.gridlock/workspace.toml` path is passed.
+  if (dir.dirName() == QStringLiteral(".gridlock")) dir.cdUp();
+
+  const QFileInfo dirInfo(dir.absolutePath());
+  const QString resolvedDir =
+      !dirInfo.canonicalFilePath().isEmpty() ? dirInfo.canonicalFilePath() : QDir::cleanPath(dirInfo.absoluteFilePath());
+  m_rootPath = resolvedDir;
+
+  // Reset and re-root QFileSystemModel + QTreeView strictly at the resolved workspace directory.
+  if (m_fileSystemModel && m_treeView) {
+    m_fileSystemModel->setRootPath(QString());
+    const QModelIndex rootIdx = m_fileSystemModel->setRootPath(resolvedDir);
+    m_treeView->setRootIndex(rootIdx.isValid() ? rootIdx : m_fileSystemModel->index(resolvedDir));
+    m_treeView->clearSelection();
   }
+  // Switch active mode toggle to FILES (page 0) so the chosen folder hierarchy is immediately visible.
+  setSymbolsMode(false);
+  emit workspaceRootChanged(resolvedDir);
 }
 
 /**
@@ -742,16 +764,13 @@ void ProjectExplorerWidget::onDoubleClicked(const QModelIndex &index) {
  */
 void ProjectExplorerWidget::refreshTreeViewPath(const QString &focusPath) {
   if (!m_fileSystemModel || !m_treeView) return;
-  const QString root = m_fileSystemModel->rootPath();
+  const QString root = !m_rootPath.isEmpty() ? m_rootPath : m_fileSystemModel->rootPath();
   m_fileSystemModel->setRootPath(QString());
-  m_fileSystemModel->setRootPath(root);
-  m_treeView->setRootIndex(m_fileSystemModel->index(root));
+  const QModelIndex rootIdx = m_fileSystemModel->setRootPath(root);
+  m_treeView->setRootIndex(rootIdx.isValid() ? rootIdx : m_fileSystemModel->index(root));
   if (!focusPath.isEmpty()) {
     const QModelIndex idx = m_fileSystemModel->index(focusPath);
-    if (idx.isValid()) {
-      m_treeView->expand(idx.parent());
-      m_treeView->setCurrentIndex(idx);
-    }
+    if (idx.isValid()) { m_treeView->expand(idx.parent()); m_treeView->setCurrentIndex(idx); }
   }
 }
 
@@ -764,9 +783,7 @@ void ProjectExplorerWidget::refreshTreeViewPath(const QString &focusPath) {
 bool ProjectExplorerWidget::createNewFile(const QString &parentDir, const QString &fileName) {
   const QString cleanName = fileName.trimmed();
   if (cleanName.isEmpty() || cleanName.contains(QStringLiteral(".."))) return false;
-  const QString baseDir = parentDir.trimmed().isEmpty()
-                              ? (m_fileSystemModel ? m_fileSystemModel->rootPath() : QDir::currentPath())
-                              : parentDir.trimmed();
+  const QString baseDir = parentDir.trimmed().isEmpty() ? (!m_rootPath.isEmpty() ? m_rootPath : QDir::currentPath()) : parentDir.trimmed();
   QDir dir(baseDir);
   if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) return false;
   const QString fullPath = QFileInfo(dir.filePath(cleanName)).absoluteFilePath();
@@ -797,9 +814,7 @@ bool ProjectExplorerWidget::createNewFile(const QString &parentDir, const QStrin
 bool ProjectExplorerWidget::createNewFolder(const QString &parentDir, const QString &folderName) {
   const QString cleanName = folderName.trimmed();
   if (cleanName.isEmpty() || cleanName.contains(QStringLiteral(".."))) return false;
-  const QString baseDir = parentDir.trimmed().isEmpty()
-                              ? (m_fileSystemModel ? m_fileSystemModel->rootPath() : QDir::currentPath())
-                              : parentDir.trimmed();
+  const QString baseDir = parentDir.trimmed().isEmpty() ? (!m_rootPath.isEmpty() ? m_rootPath : QDir::currentPath()) : parentDir.trimmed();
   QDir dir(baseDir);
   if (!dir.mkpath(cleanName)) return false;
   refreshTreeViewPath(dir.filePath(cleanName));
@@ -815,11 +830,8 @@ bool ProjectExplorerWidget::createNewFolder(const QString &parentDir, const QStr
 bool ProjectExplorerWidget::renameEntry(const QString &oldPath, const QString &newName) {
   const QString cleanName = newName.trimmed();
   QFileInfo oldInfo(oldPath);
-  if (!oldInfo.exists() || cleanName.isEmpty() || cleanName.contains(QLatin1Char('/')) || cleanName.contains(QStringLiteral(".."))) {
-    return false;
-  }
-  const QString absOld = oldInfo.absoluteFilePath();
-  const QString absNew = oldInfo.dir().filePath(cleanName);
+  if (!oldInfo.exists() || cleanName.isEmpty() || cleanName.contains(QLatin1Char('/')) || cleanName.contains(QStringLiteral(".."))) return false;
+  const QString absOld = oldInfo.absoluteFilePath(), absNew = oldInfo.dir().filePath(cleanName);
   if (absOld == absNew) return true;
   if (!QDir().rename(absOld, absNew)) return false;
   refreshTreeViewPath(absNew);
@@ -836,8 +848,7 @@ bool ProjectExplorerWidget::deleteEntry(const QString &targetPath) {
   QFileInfo info(targetPath);
   if (!info.exists()) return false;
   const QString absTarget = info.absoluteFilePath();
-  const bool ok = info.isDir() ? QDir(absTarget).removeRecursively() : QFile::remove(absTarget);
-  if (!ok) return false;
+  if (!(info.isDir() ? QDir(absTarget).removeRecursively() : QFile::remove(absTarget))) return false;
   refreshTreeViewPath();
   emit fileDeleted(absTarget);
   return true;
@@ -862,11 +873,9 @@ bool ProjectExplorerWidget::registerSourceInBuildFile(const QString &buildFilePa
   const bool isMeson = buildFilePath.endsWith(QStringLiteral("meson.build"), Qt::CaseInsensitive);
   const int closeParen = content.lastIndexOf(QLatin1Char(')'));
   if (closeParen > 0) {
-    const QString entry = isMeson ? QStringLiteral("  '%1',\n").arg(cleanRel) : QStringLiteral("  %1\n").arg(cleanRel);
-    content.insert(closeParen, entry);
+    content.insert(closeParen, isMeson ? QStringLiteral("  '%1',\n").arg(cleanRel) : QStringLiteral("  %1\n").arg(cleanRel));
   } else {
-    content += isMeson ? QStringLiteral("\n# Added source: '%1'\n").arg(cleanRel)
-                       : QStringLiteral("\n# Added source: %1\n").arg(cleanRel);
+    content += isMeson ? QStringLiteral("\n# Added source: '%1'\n").arg(cleanRel) : QStringLiteral("\n# Added source: %1\n").arg(cleanRel);
   }
   if (!bf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return false;
   bf.write(content.toUtf8());
@@ -884,7 +893,7 @@ void ProjectExplorerWidget::onTreeCustomContextMenu(const QPoint &pos) {
   const QFileInfo selInfo = idx.isValid() ? m_fileSystemModel->fileInfo(idx) : QFileInfo(m_fileSystemModel->rootPath());
   const QString targetDir = selInfo.isDir() ? selInfo.absoluteFilePath() : selInfo.absolutePath();
 
-  // Construct context menu with source/header creation, folder creation, rename, delete, and build registration.
+  // Construct context menu with source/header creation, folder creation, rename, and delete actions.
   QMenu menu(this);
   QAction *newCppAct = menu.addAction(tr("New Source File (.cpp)..."));
   QAction *newHppAct = menu.addAction(tr("New Header File (.hpp)..."));
@@ -892,33 +901,26 @@ void ProjectExplorerWidget::onTreeCustomContextMenu(const QPoint &pos) {
   menu.addSeparator();
   QAction *renameAct = menu.addAction(tr("Rename...\tF2"));
   QAction *deleteAct = menu.addAction(tr("Delete..."));
-  renameAct->setEnabled(idx.isValid());
-  deleteAct->setEnabled(idx.isValid());
+  renameAct->setEnabled(idx.isValid()); deleteAct->setEnabled(idx.isValid());
 
   connect(newCppAct, &QAction::triggered, this, [this, targetDir]() {
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New Source File"), tr("File name:"), QLineEdit::Normal, QStringLiteral("new_kernel.cpp"), &ok);
-    if (ok && !name.trimmed().isEmpty()) createNewFile(targetDir, name.trimmed());
+    bool ok = false; const QString n = QInputDialog::getText(this, tr("New Source File"), tr("File name:"), QLineEdit::Normal, QStringLiteral("new_kernel.cpp"), &ok);
+    if (ok && !n.trimmed().isEmpty()) createNewFile(targetDir, n.trimmed());
   });
   connect(newHppAct, &QAction::triggered, this, [this, targetDir]() {
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New Header File"), tr("Header name:"), QLineEdit::Normal, QStringLiteral("new_kernel.hpp"), &ok);
-    if (ok && !name.trimmed().isEmpty()) createNewFile(targetDir, name.trimmed());
+    bool ok = false; const QString n = QInputDialog::getText(this, tr("New Header File"), tr("Header name:"), QLineEdit::Normal, QStringLiteral("new_kernel.hpp"), &ok);
+    if (ok && !n.trimmed().isEmpty()) createNewFile(targetDir, n.trimmed());
   });
   connect(newFolderAct, &QAction::triggered, this, [this, targetDir]() {
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New Folder"), tr("Folder name:"), QLineEdit::Normal, QStringLiteral("kernels"), &ok);
-    if (ok && !name.trimmed().isEmpty()) createNewFolder(targetDir, name.trimmed());
+    bool ok = false; const QString n = QInputDialog::getText(this, tr("New Folder"), tr("Folder name:"), QLineEdit::Normal, QStringLiteral("kernels"), &ok);
+    if (ok && !n.trimmed().isEmpty()) createNewFolder(targetDir, n.trimmed());
   });
   connect(renameAct, &QAction::triggered, this, [this, selInfo]() {
-    bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("Rename Entry"), tr("New name:"), QLineEdit::Normal, selInfo.fileName(), &ok);
-    if (ok && !name.trimmed().isEmpty()) renameEntry(selInfo.absoluteFilePath(), name.trimmed());
+    bool ok = false; const QString n = QInputDialog::getText(this, tr("Rename Entry"), tr("New name:"), QLineEdit::Normal, selInfo.fileName(), &ok);
+    if (ok && !n.trimmed().isEmpty()) renameEntry(selInfo.absoluteFilePath(), n.trimmed());
   });
   connect(deleteAct, &QAction::triggered, this, [this, selInfo]() {
-    if (QMessageBox::question(this, tr("Delete Entry"), tr("Delete '%1' from disk?").arg(selInfo.fileName())) == QMessageBox::Yes) {
-      deleteEntry(selInfo.absoluteFilePath());
-    }
+    if (QMessageBox::question(this, tr("Delete Entry"), tr("Delete '%1' from disk?").arg(selInfo.fileName())) == QMessageBox::Yes) deleteEntry(selInfo.absoluteFilePath());
   });
   menu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }

@@ -512,14 +512,8 @@ void MainWindow::setupMenu() {
       if (projectRoot.isEmpty())
         return;
 
-      // Reset existing differential watches and editor tabs when loading a new project.
-      if (m_differentialGrid)
-        m_differentialGrid->clearWatches();
-      if (m_editorTabManager)
-        m_editorTabManager->clearAllTabs();
-
-      // Persist chosen workspace root and project configurations.
-      gridlock::core::ConfigManager::instance().setWorkspace(projectRoot);
+      // Atomically switch workspace directory, FILES tree, and target discovery before saving wizard overrides.
+      switchWorkspaceDirectory(projectRoot);
 
       auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
       ps.targetBinary = dialog.getTargetBinary().toStdString();
@@ -527,50 +521,28 @@ void MainWindow::setupMenu() {
       gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
 
       // Configure default MPI launcher settings based on wizard selections.
-      auto dbgSettings =
-          gridlock::core::ConfigManager::instance().getDebuggerSettings();
+      auto dbgSettings = gridlock::core::ConfigManager::instance().getDebuggerSettings();
       dbgSettings.mpiExecutable = "mpirun";
       dbgSettings.defaultRanks = dialog.getRanks();
-      // Using the generated mpirun string for demonstration
-      dbgSettings.mpiArgs =
-          dialog.getMpiLaunchCommand()
-              .remove("mpirun ")
-              .remove("-np " + QString::number(dialog.getRanks()) + " ")
-              .remove(dialog.getTargetBinary())
-              .trimmed();
-      gridlock::core::ConfigManager::instance().saveDebuggerSettings(
-          dbgSettings);
-
-      // Point project explorer tree to new project root directory.
-      if (m_projectExplorerWidget) {
-        m_projectExplorerWidget->setRootPath(projectRoot);
-      }
+      // Strip launcher prefix and target binary path to persist pure MPI flags.
+      dbgSettings.mpiArgs = dialog.getMpiLaunchCommand()
+                               .remove("mpirun ")
+                               .remove("-np " + QString::number(dialog.getRanks()) + " ")
+                               .remove(dialog.getTargetBinary())
+                               .trimmed();
+      gridlock::core::ConfigManager::instance().saveDebuggerSettings(dbgSettings);
 
       // Immediately launch debugging session if coordinator is available.
-      if (m_coordinator) {
-        startDebuggingSession(dialog.getTargetBinary(), dialog.getRanks());
-      }
+      if (m_coordinator) startDebuggingSession(dialog.getTargetBinary(), dialog.getRanks());
     }
   });
 
-  // Open Workspace Action: Opens existing directory, restores persistent breakpoints
-  // and project-level watch expressions into the differential matrix.
+  // Open Workspace Action: Atomically switches FILES tree, TARGET selector, LSP, and persisted watches/breakpoints.
   QAction *openProjAction = fileMenu->addAction("Open Workspace...");
   connect(openProjAction, &QAction::triggered, this, [this]() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Open Workspace", QDir::currentPath());
-    if (!dir.isEmpty()) {
-      // Clear stale cross-rank watches and editor tabs before binding the new workspace directory.
-      if (m_differentialGrid) m_differentialGrid->clearWatches();
-      if (m_editorTabManager) m_editorTabManager->clearAllTabs();
-      // Update ConfigManager root path and reload persisted per-project breakpoints and watches.
-      gridlock::core::ConfigManager::instance().setWorkspace(dir);
-      m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
-      auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
-      // Re-populate DifferentialGrid watch columns from `.gridlock/workspace.toml`.
-      for (const auto &w : ps.watchExpressions) {
-        if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
-      }
-    }
+    const QString startDir = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
+    const QString dir = QFileDialog::getExistingDirectory(this, "Open Workspace", startDir);
+    if (!dir.isEmpty()) switchWorkspaceDirectory(dir);
   });
 
   // Open Source File Action: Direct file picker bypassing project hierarchy.

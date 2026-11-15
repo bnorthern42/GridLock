@@ -560,7 +560,26 @@ public:
      */
     void loadPreviewFixture();
 
+    /**
+     * @brief Returns the canonical or absolute path of the currently opened external/active workspace directory.
+     * @return Active workspace directory path, or empty string prior to explicit workspace selection.
+     */
+    QString activeWorkspaceDirectory() const { return m_activeWorkspaceDir; }
+
 public slots:
+    /**
+     * @brief Atomically switches the workstation to an opened folder or `.toml` workspace session root.
+     *
+     * Re-roots `ProjectExplorerWidget` (`FILES` mode), scans the workspace and build subdirectories
+     * (`build_meson`, `build_cmake`, `builddir`, `build`, `bin`) for runnable ELF executables and
+     * C/C++ entry targets to repopulate `m_targetSelector`, updates `ConfigManager` and window title,
+     * and opens the primary target binary/source.
+     *
+     * @param dirPath Target workspace directory path or `.gridlock/workspace.toml` / `.toml` session path.
+     * @return True if the workspace directory exists and was activated; false otherwise.
+     */
+    bool switchWorkspaceDirectory(const QString& dirPath);
+
     void onRankStateChanged(int rankId, const RankState& state);
     void onRankSelected(int rankId);
     void openFile();
@@ -660,6 +679,8 @@ private:
     int m_focusedRank = 0;
     std::unordered_map<int, RankState> m_latestStates;
     QString m_currentFile;
+    QString m_activeWorkspaceDir;
+    bool m_switchingWorkspace = false;
     QMap<QString, QSet<int>> m_persistentBreakpoints;
     std::unique_ptr<gridlock::core::ElfBinaryInspector> m_elfInspector;
 

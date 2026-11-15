@@ -331,10 +331,13 @@ void MainWindow::setupDocks() {
   setupDockTitleBar(m_projectExplorerWidget, QStringLiteral("PROJECT / SYMBOLS"));
   m_dockHomeSlots.insert(m_projectExplorerWidget, {nullptr, -1, Qt::LeftDockWidgetArea});
 
-  // Synchronize project explorer root directory when a saved session is restored.
+  // Synchronize workspace directory, FILES tree, and TARGET selector when a TOML session is restored.
   connect(&gridlock::core::managers::SessionManager::instance(),
           &gridlock::core::managers::SessionManager::sessionLoaded,
-          m_projectExplorerWidget, &ProjectExplorerWidget::setRootPath);
+          this, &MainWindow::switchWorkspaceDirectory);
+  // Route Open Folder selections in ProjectExplorerWidget through the unified workspace switcher.
+  connect(m_projectExplorerWidget, &ProjectExplorerWidget::workspaceRootChanged,
+          this, &MainWindow::switchWorkspaceDirectory);
 
   // Route file double-clicks from project explorer directly into editor tabs.
   connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked,
