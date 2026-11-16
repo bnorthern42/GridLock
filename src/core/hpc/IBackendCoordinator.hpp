@@ -88,6 +88,29 @@ class IBackendCoordinator : public QObject {
   /** @brief Interrupts/pauses execution of 0-based MPI rank @p rankId. */
   virtual void pauseRank(int rankId) { pauseExecution(rankId + 1); }
 
+  /** @brief Enables or disables GDB Process Record / time-travel recording on @p rank. */
+  virtual void setReverseRecordingEnabled(int rank, bool enabled) {
+    if (enabled) m_reverseRecordingRanks.insert(qMax(0, rank));
+    else m_reverseRecordingRanks.remove(qMax(0, rank));
+  }
+
+  /** @brief Returns true when time-travel process recording is enabled on @p rank. */
+  virtual bool isReverseRecordingEnabled(int rank) const {
+    return m_reverseRecordingRanks.contains(qMax(0, rank));
+  }
+
+  /** @brief Runs backward in recorded execution history until the previous breakpoint or boundary. */
+  virtual void reverseContinue(int rank) { Q_UNUSED(rank); }
+
+  /** @brief Steps backward over the previous source statement on @p rank. */
+  virtual void reverseStepOver(int rank) { Q_UNUSED(rank); }
+
+  /** @brief Steps backward into the previous function call on @p rank. */
+  virtual void reverseStepInto(int rank) { Q_UNUSED(rank); }
+
+  /** @brief Steps backward by a single machine instruction on @p rank. */
+  virtual void reverseStepInstruction(int rank) { Q_UNUSED(rank); }
+
   /** @brief Evaluates @p expression in the current stack frame of @p rankId. */
   virtual void evaluateExpression(int rankId, const QString& expression) = 0;
 
@@ -277,6 +300,7 @@ class IBackendCoordinator : public QObject {
 
  protected:
   QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".
+  QSet<int> m_reverseRecordingRanks;                         ///< Ranks with active time-travel process recording.
 };
 
 /// Top-level convenience alias for hardware data watchpoint access modes.

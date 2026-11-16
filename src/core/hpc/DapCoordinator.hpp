@@ -129,6 +129,21 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Pauses 0-based MPI rank @p rankId (`threadId = rankId + 1`). */
   void pauseRank(int rankId) override { pauseExecution(rankId + 1); }
 
+  /** @brief Sends a DAP `reverseContinue` request for 0-based MPI @p rank. */
+  void reverseContinue(int rank) override {
+    sendRequest(QStringLiteral("reverseContinue"), QJsonObject{{QStringLiteral("threadId"), qMax(0, rank) + 1}});
+  }
+  /** @brief Sends a statement-granularity DAP `stepBack` request for 0-based MPI @p rank. */
+  void reverseStepOver(int rank) override {
+    sendRequest(QStringLiteral("stepBack"), QJsonObject{{QStringLiteral("threadId"), qMax(0, rank) + 1}, {QStringLiteral("granularity"), QStringLiteral("statement")}});
+  }
+  /** @brief Sends a statement-granularity DAP `stepBack` request for 0-based MPI @p rank. */
+  void reverseStepInto(int rank) override { reverseStepOver(rank); }
+  /** @brief Sends an instruction-granularity DAP `stepBack` request for 0-based MPI @p rank. */
+  void reverseStepInstruction(int rank) override {
+    sendRequest(QStringLiteral("stepBack"), QJsonObject{{QStringLiteral("threadId"), qMax(0, rank) + 1}, {QStringLiteral("granularity"), QStringLiteral("instruction")}});
+  }
+
   /** @brief Locates `lldb-dap` / `lldb-vscode` in `PATH` and launches a session for @p binaryPath. */
   void launchParallelSession(const QString& binaryPath, int ranks) override;
 

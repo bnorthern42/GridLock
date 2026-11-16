@@ -74,6 +74,19 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Clears all pending and live breakpoints across all rank sessions. */
   void clearBreakpoints() override;
 
+  /** @brief Enables or disables GDB Process Record (`record full`) on @p rank. */
+  void setReverseRecordingEnabled(int rank, bool enabled) override;
+  /** @brief Returns true when GDB Process Record is active on @p rank. */
+  bool isReverseRecordingEnabled(int rank) const override;
+  /** @brief Executes `-exec-continue --reverse` on @p rank. */
+  void reverseContinue(int rank) override;
+  /** @brief Executes `-exec-next --reverse` on @p rank. */
+  void reverseStepOver(int rank) override;
+  /** @brief Executes `-exec-step --reverse` on @p rank. */
+  void reverseStepInto(int rank) override;
+  /** @brief Executes `-exec-step-instruction --reverse` on @p rank. */
+  void reverseStepInstruction(int rank) override;
+
   /** @brief Returns the filesystem path of the target executable. */
   QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }
 

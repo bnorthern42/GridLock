@@ -194,11 +194,8 @@ void MainWindow::syncCoordinatorWithConfig() {
  */
 bool MainWindow::stepOverWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
-    const int activeRank = activeSteppingRank();
-    m_focusedRank = activeRank;
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
-    m_coordinator->stepOver(activeRank + 1);
-    return true;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
+    m_coordinator->stepOver(m_focusedRank + 1); return true;
 }
 
 /**
@@ -207,11 +204,8 @@ bool MainWindow::stepOverWorkflow() {
  */
 bool MainWindow::stepIntoWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
-    const int activeRank = activeSteppingRank();
-    m_focusedRank = activeRank;
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
-    m_coordinator->stepInto(activeRank + 1);
-    return true;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
+    m_coordinator->stepInto(m_focusedRank + 1); return true;
 }
 
 /**
@@ -220,11 +214,28 @@ bool MainWindow::stepIntoWorkflow() {
  */
 bool MainWindow::pauseRankWorkflow() {
     if (!m_coordinator) return false;
-    const int activeRank = activeSteppingRank();
-    m_focusedRank = activeRank;
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("PAUSED"));
-    m_coordinator->pauseRank(activeRank);
-    return true;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("PAUSED"));
+    m_coordinator->pauseRank(m_focusedRank); return true;
+}
+
+/**
+ * @brief Steps backward over the previous source statement (`-exec-next --reverse` / DAP `stepBack`).
+ * @return True if an active session coordinator accepted the reverse step-over request.
+ */
+bool MainWindow::reverseStepOverWorkflow() {
+    if (!m_debugSessionActive || !m_coordinator) return false;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING BACK"));
+    m_coordinator->reverseStepOver(m_focusedRank); return true;
+}
+
+/**
+ * @brief Runs backward in recorded execution history (`-exec-continue --reverse` / DAP `reverseContinue`).
+ * @return True if an active session coordinator accepted the reverse continue request.
+ */
+bool MainWindow::reverseContinueWorkflow() {
+    if (!m_debugSessionActive || !m_coordinator) return false;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("REVERSE RUNNING"));
+    m_coordinator->reverseContinue(m_focusedRank); return true;
 }
 
 /**
@@ -442,20 +453,15 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
         if (auto* proxy = tree ? qobject_cast<QAbstractProxyModel*>(tree->model()) : nullptr) {
             QPointer<EditorTabManager> etmPtr(m_editorTabManager);
             auto syncVars = [proxy, etmPtr]() {
-                QAbstractItemModel* src = proxy ? proxy->sourceModel() : nullptr;
-                if (!src || !etmPtr) return;
+                QAbstractItemModel* src = proxy ? proxy->sourceModel() : nullptr; if (!src || !etmPtr) return;
                 QMap<QString, QString> varMap;
-                for (int r = 0; r < src->rowCount(); ++r) {
-                    const QString n = src->data(src->index(r, 0)).toString().trimmed(), v = src->data(src->index(r, 1)).toString().trimmed();
-                    if (!n.isEmpty() && !v.isEmpty()) varMap.insert(n, v);
-                }
+                for (int r = 0; r < src->rowCount(); ++r) { const QString n = src->data(src->index(r, 0)).toString().trimmed(), v = src->data(src->index(r, 1)).toString().trimmed(); if (!n.isEmpty() && !v.isEmpty()) varMap.insert(n, v); }
                 etmPtr->setInlineVariableValues(varMap);
             };
             connect(proxy, &QAbstractItemModel::modelReset, this, syncVars);
             connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex& p, int, int) { if (!p.isValid()) syncVars(); });
         }
-        connect(m_variablesDockWidget, &VariablesDockWidget::visualizeInPointerGraphRequested, this,
-                [this](const QString& expr, const QString&, const QString& val, const QString& typ) { openPointerGraphVisualizer(expr, val, typ); });
+        connect(m_variablesDockWidget, &VariablesDockWidget::visualizeInPointerGraphRequested, this, [this](const QString& expr, const QString&, const QString& val, const QString& typ) { openPointerGraphVisualizer(expr, val, typ); });
     }
     if (m_pointerGraphDialog) { m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank); }
     // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
@@ -829,22 +835,15 @@ void MainWindow::onRankBreakpointChanged(const QString& file, int line, bool isS
  */
 void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
     if (!view || view->currentFile().isEmpty()) return;
-    const QFileInfo fi(view->currentFile());
-    const QString absPath = fi.absoluteFilePath();
-    const QString canonPath = fi.canonicalFilePath().isEmpty() ? absPath : fi.canonicalFilePath();
+    const QFileInfo fi(view->currentFile()); const QString absPath = fi.absoluteFilePath(), canonPath = fi.canonicalFilePath().isEmpty() ? absPath : fi.canonicalFilePath();
     QMap<int, SourceCodeView::BreakpointVisualInfo> meta;
-    const QMap<int, BreakpointRankMeta>& stored =
-        m_breakpointRankMeta.contains(canonPath) ? m_breakpointRankMeta[canonPath] : m_breakpointRankMeta.value(absPath);
+    const QMap<int, BreakpointRankMeta>& stored = m_breakpointRankMeta.contains(canonPath) ? m_breakpointRankMeta[canonPath] : m_breakpointRankMeta.value(absPath);
     if (stored.isEmpty()) return;
     // Restore rank filters and condition expressions onto all open breakpoint lines.
-    for (int line : view->breakpoints()) {
-        const auto s = stored.value(line, BreakpointRankMeta{-1, view->breakpointCondition(line)});
-        meta[line] = SourceCodeView::BreakpointVisualInfo{s.rankFilter, s.condition, 0, QString()};
-    }
+    for (int line : view->breakpoints()) { const auto s = stored.value(line, BreakpointRankMeta{-1, view->breakpointCondition(line)}); meta[line] = SourceCodeView::BreakpointVisualInfo{s.rankFilter, s.condition, 0, QString()}; }
     for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) meta[it.key()] = SourceCodeView::BreakpointVisualInfo{it.value().rankFilter, it.value().condition, 0, QString()};
     view->syncBreakpointMetadata(meta);
 }
-
 /**
  * @brief Opens the modeless DDD Pointer & Struct Graph Visualizer and optionally graphs @p exprPath.
  * @param exprPath Optional C++ expression path to graph immediately.
@@ -857,23 +856,16 @@ void MainWindow::openPointerGraphVisualizer(const QString& exprPath, const QStri
     if (!exprPath.trimmed().isEmpty()) m_pointerGraphDialog->graphExpression(exprPath.trimmed(), varType, varValue);
     m_pointerGraphDialog->show(); m_pointerGraphDialog->raise(); m_pointerGraphDialog->activateWindow();
 }
-
 /**
  * @brief Safely shuts down live coordinators and disconnects signals before Qt destroys child docks.
  */
 MainWindow::~MainWindow() {
     // Detach global shortcut/hover event filter before child widget destruction begins.
     if (qApp) qApp->removeEventFilter(this);
-    delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr;
-    if (m_coordinator) QObject::disconnect(m_coordinator, nullptr, this, nullptr);
+    delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr; if (m_coordinator) QObject::disconnect(m_coordinator, nullptr, this, nullptr);
     // Silence and destroy owned coordinator cleanly without post-delete signal-blocker UB.
-    if (m_ownedCoordinator) {
-        m_ownedCoordinator->blockSignals(true); m_ownedCoordinator->terminateSession();
-        delete m_ownedCoordinator; m_ownedCoordinator = nullptr;
-    }
+    if (m_ownedCoordinator) { m_ownedCoordinator->blockSignals(true); m_ownedCoordinator->terminateSession(); delete m_ownedCoordinator; m_ownedCoordinator = nullptr; }
     // Nullify cached dock and view pointers prior to QMainWindow child tree cleanup.
-    m_coordinator = nullptr; m_callStackDockWidget = nullptr; m_mpiDiagnosticsWidget = nullptr;
-    m_gdbConsoleWidget = nullptr; m_variablesDockWidget = nullptr; m_serverRackView = nullptr;
+    m_coordinator = nullptr; m_callStackDockWidget = nullptr; m_mpiDiagnosticsWidget = nullptr; m_gdbConsoleWidget = nullptr; m_variablesDockWidget = nullptr; m_serverRackView = nullptr;
 }
-
 }  // namespace gridlock::ui

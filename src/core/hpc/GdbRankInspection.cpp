@@ -745,4 +745,82 @@ void GdbRankCoordinator::selectStackFrame(int rank, int threadId, int frameLevel
   }
 }
 
+/**
+ * @brief Enables or disables GDB Process Record (`record full`) on @p rank.
+ * @param rank Zero-based MPI rank index (or `-1` for all ranks).
+ * @param enabled True to start instruction/memory history recording; false to stop.
+ */
+void GdbRankCoordinator::setReverseRecordingEnabled(int rank, bool enabled) {
+  const int start = (rank < 0) ? 0 : rank;
+  const int end = (rank < 0) ? static_cast<int>(m_processes.size()) - 1 : rank;
+  for (int r = qMax(0, start); r <= end; ++r) {
+    IBackendCoordinator::setReverseRecordingEnabled(r, enabled);
+    if (r < static_cast<int>(m_processes.size()) && m_processes[r]) {
+      if (enabled) {
+        queueOrWriteCmd(r, QStringLiteral("-gdb-set confirm off\n"));
+        queueOrWriteCmd(r, QStringLiteral("-gdb-set scheduler-locking on\n"));
+        queueOrWriteCmd(r, QStringLiteral("-gdb-set record full stop-at-limit off\n"));
+        queueOrWriteCmd(r, QStringLiteral("-gdb-set record full insn-number-max 200000\n"));
+        queueOrWriteCmd(r, QStringLiteral("-interpreter-exec console \"record full\"\n"));
+      } else {
+        queueOrWriteCmd(r, QStringLiteral("-interpreter-exec console \"record stop\"\n"));
+        queueOrWriteCmd(r, QStringLiteral("-gdb-set scheduler-locking off\n"));
+      }
+    }
+  }
+}
+
+/**
+ * @brief Returns true when GDB Process Record is enabled for @p rank.
+ * @param rank Zero-based MPI rank index.
+ * @return True if process recording is active on @p rank.
+ */
+bool GdbRankCoordinator::isReverseRecordingEnabled(int rank) const {
+  return IBackendCoordinator::isReverseRecordingEnabled(rank);
+}
+
+/**
+ * @brief Runs backward in recorded history (`-exec-continue --reverse`) on @p rank.
+ * @param rank Zero-based MPI rank index.
+ */
+void GdbRankCoordinator::reverseContinue(int rank) {
+  const int r = qMax(0, rank);
+  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
+  writeCmd(r, QStringLiteral("-exec-continue --reverse\n"));
+}
+
+/**
+ * @brief Steps backward over the previous source statement (`-exec-next --reverse`) on @p rank.
+ * @param rank Zero-based MPI rank index.
+ */
+void GdbRankCoordinator::reverseStepOver(int rank) {
+  const int r = qMax(0, rank);
+  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
+  writeCmd(r, QStringLiteral("-exec-next --reverse\n"));
+}
+
+/**
+ * @brief Steps backward into the previous function call (`-exec-step --reverse`) on @p rank.
+ * @param rank Zero-based MPI rank index.
+ */
+void GdbRankCoordinator::reverseStepInto(int rank) {
+  const int r = qMax(0, rank);
+  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
+  writeCmd(r, QStringLiteral("-exec-step --reverse\n"));
+}
+
+/**
+ * @brief Steps backward by a single machine instruction (`-exec-step-instruction --reverse`) on @p rank.
+ * @param rank Zero-based MPI rank index.
+ */
+void GdbRankCoordinator::reverseStepInstruction(int rank) {
+  const int r = qMax(0, rank);
+  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
+  writeCmd(r, QStringLiteral("-exec-step-instruction --reverse\n"));
+}
+
 }  // namespace gridlock

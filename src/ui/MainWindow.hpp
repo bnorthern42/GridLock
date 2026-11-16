@@ -180,6 +180,12 @@ public:
      */
     bool pauseRankWorkflow();
 
+    /** @brief Steps backward over the previous source line (`-exec-next --reverse` / DAP `stepBack`). */
+    bool reverseStepOverWorkflow();
+
+    /** @brief Runs backward in recorded history (`-exec-continue --reverse` / DAP `reverseContinue`). */
+    bool reverseContinueWorkflow();
+
     /**
      * @brief Updates main toolbar action enablement and latched Run Target state.
      */

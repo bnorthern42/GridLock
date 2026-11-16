@@ -657,19 +657,25 @@ void MainWindow::propagateThemeToAllWidgets() {
         "QToolBar#MainToolbar QComboBox, #toolbarTargetSelector { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 6px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
         "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 6px; padding-right: 18px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
         "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 16px; margin-right: 1px; }"
-        "QToolBar#MainToolbar QToolButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 7px; margin: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; }"
-        "QToolBar#MainToolbar QToolButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
-        "QToolBar#MainToolbar QToolButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
-        "QToolBar#MainToolbar QToolButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
-        "QToolBar#MainToolbar QToolButton:disabled { background-color: %1; color: %7; border: 1px solid %2; }")
+        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 7px; margin: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; }"
+        "QToolBar#MainToolbar QToolButton:hover:enabled, QToolBar#MainToolbar QPushButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
+        "QToolBar#MainToolbar QToolButton:pressed:enabled, QToolBar#MainToolbar QPushButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
+        "QToolBar#MainToolbar QToolButton:checked, QToolBar#MainToolbar QPushButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
+        "QToolBar#MainToolbar QToolButton:disabled, QToolBar#MainToolbar QPushButton:disabled { background-color: %1; color: %7; border: 1px solid %2; }")
         .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex,
              isDark ? QStringLiteral("#19362b") : pal.accentHex,
              isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
-    for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) btn->setFixedHeight(26);
-    if (m_rankCountSpin) {
-      m_rankCountSpin->setMinimumWidth(72); m_rankCountSpin->setFixedHeight(26);
-      if (auto* spinEdit = m_rankCountSpin->findChild<QLineEdit*>()) spinEdit->setMinimumWidth(40);
+    if (!mainToolBar->findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"))) {
+      auto* recBtn = new QPushButton(QStringLiteral("⏺ Record"), mainToolBar); recBtn->setObjectName(QStringLiteral("toolbarRecordHistoryBtn")); recBtn->setCheckable(true); recBtn->setToolTip(QStringLiteral("Enable GDB Process Record (Time-Travel Recording) on Active Rank"));
+      auto* sbBtn = new QPushButton(QStringLiteral("↶ Step Back"), mainToolBar); sbBtn->setObjectName(QStringLiteral("toolbarStepBackBtn")); sbBtn->setToolTip(QStringLiteral("Reverse Step Over Source Line (-exec-next --reverse)"));
+      auto* rcBtn = new QPushButton(QStringLiteral("⏮ Rev Continue"), mainToolBar); rcBtn->setObjectName(QStringLiteral("toolbarReverseContinueBtn")); rcBtn->setToolTip(QStringLiteral("Reverse Continue to Previous Breakpoint (-exec-continue --reverse)"));
+      mainToolBar->addWidget(recBtn); mainToolBar->addWidget(sbBtn); mainToolBar->addWidget(rcBtn);
+      connect(recBtn, &QPushButton::toggled, this, [this](bool on) { if (m_coordinator) m_coordinator->setReverseRecordingEnabled(activeSteppingRank(), on); });
+      connect(sbBtn, &QPushButton::clicked, this, [this]() { reverseStepOverWorkflow(); }); connect(rcBtn, &QPushButton::clicked, this, [this]() { reverseContinueWorkflow(); });
     }
+    for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) btn->setFixedHeight(26);
+    for (QPushButton* btn : mainToolBar->findChildren<QPushButton*>()) btn->setFixedHeight(26);
+    if (m_rankCountSpin) { m_rankCountSpin->setMinimumWidth(72); m_rankCountSpin->setFixedHeight(26); if (auto* spinEdit = m_rankCountSpin->findChild<QLineEdit*>()) spinEdit->setMinimumWidth(40); }
     if (m_targetSelector) { m_targetSelector->setMinimumWidth(195); m_targetSelector->setFixedHeight(26); }
     // Highlight Run Target (m_runAction) via theme accent fill while preserving identical 26px height and padding.
     if (m_runAction) {
@@ -680,8 +686,7 @@ void MainWindow::propagateThemeToAllWidgets() {
             "QToolButton:hover:enabled { background-color: %1; color: #ffffff; border: 1px solid %2; }"
             "QToolButton:checked { background-color: %3; color: #ffffff; border: 1px solid %1; font-weight: 600; }"
             "QToolButton:disabled { background-color: %4; color: %5; border: 1px solid %4; }")
-            .arg(pal.accentHex, pal.textHex, isDark ? QStringLiteral("#1f6f4a") : pal.accentHex,
-                 pal.borderHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
+            .arg(pal.accentHex, pal.textHex, isDark ? QStringLiteral("#1f6f4a") : pal.accentHex, pal.borderHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
       }
     }
   }
@@ -689,39 +694,18 @@ void MainWindow::propagateThemeToAllWidgets() {
   // 2. Re-style Address Space Section Ribbon (#AddressNavToolbar / #addressNavBar), Nav Arrows, Seek Bar, & CODE | REVERSE | MPI
   if (auto* navToolBar = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) {
     navToolBar->setMovable(true);
-    navToolBar->setStyleSheet(QStringLiteral(
-        "QToolBar#AddressNavToolbar { background-color: %1; border-bottom: 1px solid %2; padding: 0px; margin: 0px; }"
-        "QToolBar#AddressNavToolbar::handle { background-color: %2; width: 4px; margin: 3px 2px; border-radius: 1px; }")
-        .arg(pal.headerHex, pal.borderHex));
+    navToolBar->setStyleSheet(QStringLiteral("QToolBar#AddressNavToolbar { background-color: %1; border-bottom: 1px solid %2; padding: 0px; margin: 0px; } QToolBar#AddressNavToolbar::handle { background-color: %2; width: 4px; margin: 3px 2px; border-radius: 1px; }").arg(pal.headerHex, pal.borderHex));
   }
   // Attach theme-aware paint filter once and refresh #addressNavBar palette and QSS.
   if (m_addressNavBar) {
-    if (!m_addressNavBar->property("gl_ribbon_filter").toBool()) {
-      m_addressNavBar->installEventFilter(new AddressRibbonThemeFilter(m_addressNavBar));
-      m_addressNavBar->setProperty("gl_ribbon_filter", true);
-    }
+    if (!m_addressNavBar->property("gl_ribbon_filter").toBool()) { m_addressNavBar->installEventFilter(new AddressRibbonThemeFilter(m_addressNavBar)); m_addressNavBar->setProperty("gl_ribbon_filter", true); }
     QPalette np = m_addressNavBar->palette(); np.setColor(QPalette::Window, QColor(pal.headerHex)); np.setColor(QPalette::Base, QColor(pal.canvasHex)); np.setColor(QPalette::WindowText, QColor(pal.textHex)); m_addressNavBar->setPalette(np);
-    m_addressNavBar->setStyleSheet(QStringLiteral("#addressNavBar { background-color: %1; color: %2; border-bottom: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex));
-    m_addressNavBar->update();
+    m_addressNavBar->setStyleSheet(QStringLiteral("#addressNavBar { background-color: %1; color: %2; border-bottom: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex)); m_addressNavBar->update();
   }
-
   // Style history navigation buttons (< / >) and global address seek bar dynamically in 12px UI sans-serif.
-  const QString navBtnStyle = QStringLiteral(
-      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
-      "padding: 0px; margin: 0px; font-size: 12px; font-weight: 700; "
-      "min-width: 22px; max-width: 24px; min-height: 22px; max-height: 24px; }"
-      "QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; }"
-      "QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }")
-      .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex,
-           isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
+  const QString navBtnStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px; margin: 0px; font-size: 12px; font-weight: 700; min-width: 22px; max-width: 24px; min-height: 22px; max-height: 24px; } QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; } QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
   for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) if (btn) btn->setStyleSheet(navBtnStyle);
-  if (m_seekBar) {
-    m_seekBar->setStyleSheet(QStringLiteral(
-        "QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; "
-        "border-radius: 3px; padding: 0px 6px; min-height: 22px; max-height: 24px; font-size: 12px; } "
-        "QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }")
-        .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
-  }
+  if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 6px; min-height: 22px; max-height: 24px; font-size: 12px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
 
   // Style CODE | REVERSE | MPI segmented mode buttons: 24px height, 0px 10px padding, 12px font, pal.headerHex / pal.accentHex.
   const QString perspStyle = QStringLiteral(

@@ -768,8 +768,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         }
         if (handledLogpoint) continue;
       }
-      // Preserve auto-continue on unmapped breakpoints while allowing explicit steps/signals/watchpoints to stop.
-      const bool isStepOrSignal = isWatchTrigger || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"");
+      // Preserve auto-continue on unmapped breakpoints while allowing explicit steps/signals/watchpoints/history-boundaries to stop.
+      const bool isStepOrSignal = isWatchTrigger || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"no-history-boundary\"") || line.contains("reason=\"signal-received\"");
       if ((rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") && !isStepOrSignal) {
         writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running";
       } else {
