@@ -902,4 +902,20 @@ void ConfigManager::setDataDocHighlightingEnabled(bool enabled) {
   if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_data_doc_highlighting", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
 }
 
+/** @brief Returns whether CLion-style inline variable ghost values are enabled when paused (default: true). */
+bool ConfigManager::inlineVariableValuesEnabled() const {
+  QSettings s(kOrg, kApp);
+  if (s.contains(QStringLiteral("editor/inline_variable_values"))) return s.value(QStringLiteral("editor/inline_variable_values"), true).toBool();
+  if (auto* ed = m_config["editor"].as_table()) if (auto v = ed->get("inline_variable_values"); v && v->is_boolean()) return v->as_boolean()->get();
+  return true;
+}
+
+/** @brief Sets and persists inline variable ghost values state and broadcasts a live viewport refresh property. */
+void ConfigManager::setInlineVariableValuesEnabled(bool enabled) {
+  toml::table edTbl; if (auto* ex = m_config["editor"].as_table()) edTbl = *ex;
+  edTbl.insert_or_assign("inline_variable_values", enabled); m_config.insert_or_assign("editor", edTbl); saveGlobalConfig();
+  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editor/inline_variable_values"), enabled); s.sync();
+  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_inline_var_values", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
+}
+
 }  // namespace gridlock::core

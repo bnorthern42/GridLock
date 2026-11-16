@@ -486,13 +486,10 @@ void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState()
  */
 void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatchedToolbar() {
     auto& cfg = gridlock::core::ConfigManager::instance();
-    cfg.setDebuggerEngine(QStringLiteral("gdb"));
-    cfg.setGlobalMpiArgs(QStringLiteral("--oversubscribe"));
+    cfg.setDebuggerEngine(QStringLiteral("gdb")); cfg.setGlobalMpiArgs(QStringLiteral("--oversubscribe"));
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
-
     // 1. Dynamic coordinator switching: ConfigManager::setDebuggerEngine switches MainWindow's live backend.
-    QVERIFY2(mainWindow.coordinator() != nullptr, "MainWindow must construct a live IBackendCoordinator");
-    QVERIFY(QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
+    QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
     cfg.setDebuggerEngine(QStringLiteral("lldb-dap")); QApplication::processEvents();
     QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("DapCoordinator")));
     cfg.setDebuggerEngine(QStringLiteral("gdb")); QApplication::processEvents();
@@ -585,6 +582,11 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine); nestedSrcView->toggleBreakpoint(innerBpLine);
     mainWindow.startTargetWorkflow(); QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
     QTRY_VERIFY_WITH_TIMEOUT(callStackTable->rowCount() >= 3 && threadCombo->count() >= 1, 5000);
+    // Verify CLion-style inline variable ghost text appears when paused, respects ConfigManager/Preferences toggle, and clears on stop.
+    QTRY_VERIFY_WITH_TIMEOUT(nestedSrcView->inlineGhostTextForLine(innerBpLine).contains(QStringLiteral("// innerLocal = ")), 5000);
+    cfg.setInlineVariableValuesEnabled(false); QVERIFY(nestedSrcView->inlineGhostTextForLine(innerBpLine).isEmpty());
+    cfg.setInlineVariableValuesEnabled(true); QVERIFY(!nestedSrcView->inlineGhostTextForLine(innerBpLine).isEmpty());
+    { gridlock::ui::PreferencesDialog pd(&mainWindow); auto* ivChk = pd.findChild<QCheckBox*>(QStringLiteral("inlineVarValuesCheck")); QVERIFY(ivChk && ivChk->isChecked()); }
     auto verifyFrameRow = [&](int row, const QString& exp) { const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString(), loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString(), addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString(); bool hexOk = false; const quint64 pa = addr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? addr.mid(2).toULongLong(&hexOk, 16) : 0ULL; QVERIFY2(fn.contains(exp) && loc.contains(QLatin1Char(':')) && hexOk && pa != 0ULL, qPrintable(fn)); };
     verifyFrameRow(0, QStringLiteral("innerCallee")); verifyFrameRow(1, QStringLiteral("outerCaller")); verifyFrameRow(2, QStringLiteral("main"));
     callStackTable->selectRow(1); QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1));
@@ -620,7 +622,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY(mainWindow.continueExecutionWorkflow()); QTRY_VERIFY_WITH_TIMEOUT(wpHitSpy.count() >= 1, 6000);
     QVERIFY(wpHitSpy.first().at(1).toString() == QStringLiteral("watchedCounter") && wpHitSpy.first().at(2).toString() == QStringLiteral("10") && wpHitSpy.first().at(3).toString() == QStringLiteral("77"));
     // Clear step-6 dummy breakpoint so step 7 launches with zero breakpoints prior to MPI_Barrier.
-    solverView->toggleBreakpoint(82); mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0);
+    solverView->toggleBreakpoint(82); mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0); QVERIFY(nestedSrcView->inlineGhostTextForLine(innerBpLine).isEmpty());
     // 7. Verify MemView #memMapModeBtn + MemoryProfilerWidget controls, then launch 4-rank hybrid MPI + 4 MB heap target.
     auto* memMapBtn = memView->findChild<QPushButton*>(QStringLiteral("memMapModeBtn")); auto* memProf = memView->findChild<QWidget*>(QStringLiteral("memoryProfilerWidget"));
     auto* treemapCanvas = memView->findChild<QWidget*>(QStringLiteral("memoryTreemapCanvas")); auto* breakdownTable = memView->findChild<QTableWidget*>(QStringLiteral("memoryBreakdownTable"));

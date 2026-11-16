@@ -142,6 +142,11 @@ public:
      */
     bool isSplitActive() const { return m_splitActive; }
 
+    /** @brief Updates inline variable ghost values on the active SourceCodeView. */
+    void setInlineVariableValues(const QMap<QString, QString>& varValues);
+    /** @brief Clears inline variable ghost values across all open SourceCodeView tabs. */
+    void clearInlineVariableValues();
+
     /**
      * @brief Reloads styles and syntax highlighting across all open tabs and the secondary split pane.
      */

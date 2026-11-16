@@ -83,6 +83,7 @@ public:
     int edgeColumn() const;
     bool rainbowBrackets() const;
     bool dataDocHighlighting() const;
+    bool inlineVariableValues() const;
 
     void loadFromSettings();
 
@@ -95,6 +96,7 @@ private:
     QSpinBox* m_edgeColumnBox = nullptr;
     QCheckBox* m_rainbowBracketsCheck = nullptr;
     QCheckBox* m_dataDocHighlightingCheck = nullptr;
+    QCheckBox* m_inlineVarValuesCheck = nullptr;
 };
 
 /**

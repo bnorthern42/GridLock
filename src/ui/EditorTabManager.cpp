@@ -472,4 +472,15 @@ void EditorTabManager::setActiveFocusRank(int rankId) {
     if (m_secondaryEditorView) m_secondaryEditorView->setActiveFocusRank(m_activeFocusRank);
 }
 
+/** @brief Forwards paused local variable values to the active SourceCodeView. */
+void EditorTabManager::setInlineVariableValues(const QMap<QString, QString>& varValues) {
+    if (auto* view = currentSourceCodeView()) view->setInlineVariableValues(varValues);
+}
+
+/** @brief Clears inline variable ghost values across all open source editor tabs. */
+void EditorTabManager::clearInlineVariableValues() {
+    for (int i = 0; i < count(); ++i) if (auto* v = qobject_cast<SourceCodeView*>(widget(i))) v->clearInlineVariableValues();
+    if (m_secondaryEditorView) m_secondaryEditorView->clearInlineVariableValues();
+}
+
 }  // namespace gridlock::ui

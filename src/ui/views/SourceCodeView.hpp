@@ -214,6 +214,12 @@ public:
 
     /** @brief Updates the gutter execution PC marker without moving cursor, scroll, or active tab. */
     void setExecutionLineOnly(int lineOneBased);
+    /** @brief Sets live paused local variable name -> value mappings for inline ghost rendering. */
+    void setInlineVariableValues(const QMap<QString, QString>& varValues);
+    /** @brief Clears all inline variable ghost values when resuming, stopping, or switching workspaces. */
+    void clearInlineVariableValues();
+    /** @brief Builds the deduplicated `// name = val, ...` ghost string for oneBasedLine (empty if disabled/none). */
+    QString inlineGhostTextForLine(int oneBasedLine) const;
 
     /**
      * @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line.
@@ -559,6 +565,7 @@ private:
     QMap<int, BreakpointVisualInfo> m_breakpointInfo;
     QHash<int, GitLineState> m_gitLineStates;
     QVector<core::utils::LspDiagnostic> m_diagnostics;
+    QMap<QString, QString> m_inlineVarValues;
     QString m_currentFilePath;
     QString m_lastHoveredWord;
     QTimer* m_hoverTimer = nullptr;

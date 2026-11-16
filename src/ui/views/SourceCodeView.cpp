@@ -208,7 +208,7 @@ void SourceCodeView::setDataDocHighlightingEnabled(bool enabled) { if (m_highlig
 /** @brief Returns whether TOML/YAML/Markdown/CSV syntax highlighting is enabled. */
 bool SourceCodeView::dataDocHighlightingEnabled() const { return m_highlighter ? m_highlighter->dataDocHighlightingEnabled() : false; }
 /** @brief Rebuilds syntax palettes from active config/theme and rehighlights the document. */
-void SourceCodeView::rehighlightDocument() { if (m_highlighter) m_highlighter->reloadPalette(); }
+void SourceCodeView::rehighlightDocument() { if (m_highlighter) m_highlighter->reloadPalette(); if (viewport()) viewport()->update(); }
 
 /**
  * @brief Toggles single-line '//' comments on the active line in the document.
@@ -691,66 +691,81 @@ void SourceCodeView::handleHoverTimeout() {
  */
 void SourceCodeView::mousePressEvent(QMouseEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
-        QTextCursor cursor = cursorForPosition(event->pos());
-        cursor.select(QTextCursor::WordUnderCursor);
-        const QString word = cursor.selectedText();
+        QTextCursor cursor = cursorForPosition(event->pos()); cursor.select(QTextCursor::WordUnderCursor);
         static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
-        if (cVarRegex.match(word).hasMatch()) emit pinVariableRequested(word);
+        if (cVarRegex.match(cursor.selectedText()).hasMatch()) emit pinVariableRequested(cursor.selectedText());
     }
-    m_lastHoveredWord.clear(); emit hideHoverTooltip();
-    QPlainTextEdit::mousePressEvent(event);
-    if (event->button() == Qt::LeftButton && !(event->modifiers() & Qt::ControlModifier)) {
-        const int clickedLine = textCursor().blockNumber() + 1;
-        if (clickedLine > 0) emit sourceLineSelected(clickedLine);
-    }
+    m_lastHoveredWord.clear(); emit hideHoverTooltip(); QPlainTextEdit::mousePressEvent(event);
+    if (event->button() == Qt::LeftButton && !(event->modifiers() & Qt::ControlModifier))
+        if (const int clickedLine = textCursor().blockNumber() + 1; clickedLine > 0) emit sourceLineSelected(clickedLine);
 }
 
-/**
- * @brief Handles double click events to pin variables to the watch list.
- */
+/** @brief Handles double click events to pin variables to the watch list. */
 void SourceCodeView::mouseDoubleClickEvent(QMouseEvent *event) {
-    QTextCursor cursor = cursorForPosition(event->pos());
-    cursor.select(QTextCursor::WordUnderCursor);
-    const QString word = cursor.selectedText();
+    QTextCursor cursor = cursorForPosition(event->pos()); cursor.select(QTextCursor::WordUnderCursor);
     static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
-    if (cVarRegex.match(word).hasMatch()) emit pinVariableRequested(word);
+    if (cVarRegex.match(cursor.selectedText()).hasMatch()) emit pinVariableRequested(cursor.selectedText());
     QPlainTextEdit::mouseDoubleClickEvent(event);
 }
 
-/**
- * @brief Handles Ctrl+MouseWheel zooming of editor font size.
- */
+/** @brief Handles Ctrl+MouseWheel zooming of editor font size. */
 void SourceCodeView::wheelEvent(QWheelEvent *event) {
     if (event->modifiers() & Qt::ControlModifier) {
-        QFont currentFont = font();
-        const int delta = event->angleDelta().y();
-        currentFont.setPointSize(qBound(6, currentFont.pointSize() + ((delta > 0) ? 1 : ((delta < 0) ? -1 : 0)), 72));
-        setFont(currentFont); updateLineNumberAreaWidth(0); event->accept();
-    } else {
-        QPlainTextEdit::wheelEvent(event);
+        QFont f = font(); const int d = event->angleDelta().y();
+        f.setPointSize(qBound(6, f.pointSize() + ((d > 0) ? 1 : ((d < 0) ? -1 : 0)), 72));
+        setFont(f); updateLineNumberAreaWidth(0); event->accept();
+    } else QPlainTextEdit::wheelEvent(event);
+}
+
+/** @brief Sets live paused local variable values for inline ghost rendering and repaints viewport. */
+void SourceCodeView::setInlineVariableValues(const QMap<QString, QString>& varValues) { m_inlineVarValues = varValues; if (viewport()) viewport()->update(); }
+/** @brief Clears inline variable ghost values when resuming, stopping, or switching workspaces. */
+void SourceCodeView::clearInlineVariableValues() { if (!m_inlineVarValues.isEmpty()) { m_inlineVarValues.clear(); if (viewport()) viewport()->update(); } }
+
+/** @brief Builds a deduplicated `// var = val, ...` ghost summary for oneBasedLine (<= 4 vars, <= 96 chars). */
+QString SourceCodeView::inlineGhostTextForLine(int oneBasedLine) const {
+    if (m_inlineVarValues.isEmpty() || !gridlock::core::ConfigManager::instance().inlineVariableValuesEnabled()) return QString();
+    const QTextBlock block = document()->findBlockByNumber(oneBasedLine - 1);
+    if (!block.isValid()) return QString();
+    // Strip string literals and trailing // comments before extracting identifier tokens.
+    QString line = block.text();
+    static const QRegularExpression kStrRe(QStringLiteral("\"([^\"\\\\]|\\\\.)*\""));
+    line.replace(kStrRe, QStringLiteral(" "));
+    if (const int cmt = line.indexOf(QStringLiteral("//")); cmt >= 0) line = line.left(cmt);
+    static const QRegularExpression kIdentRe(QStringLiteral("\\b([A-Za-z_][A-Za-z0-9_]*)\\b"));
+    QStringList parts; QSet<QString> seen; auto it = kIdentRe.globalMatch(line);
+    while (it.hasNext() && parts.size() < 4) { const QString id = it.next().captured(1); if (!seen.contains(id) && m_inlineVarValues.contains(id)) { seen.insert(id); parts.append(QStringLiteral("%1 = %2").arg(id, m_inlineVarValues.value(id))); } }
+    if (parts.isEmpty()) return QString();
+    QString summary = QStringLiteral("// ") + parts.join(QStringLiteral(", "));
+    return (summary.size() > 96) ? (summary.left(93) + QStringLiteral("...")) : summary;
+}
+
+/** @brief Renders the editor viewport plus O(visible lines) italic inline variable ghost values. */
+void SourceCodeView::paintEvent(QPaintEvent *event) {
+    QPlainTextEdit::paintEvent(event);
+    if (m_inlineVarValues.isEmpty() || !gridlock::core::ConfigManager::instance().inlineVariableValuesEnabled()) return;
+    QPainter painter(viewport()); QFont ghostFont = font(); ghostFont.setItalic(true); painter.setFont(ghostFont);
+    QColor ghostColor(gridlock::core::ConfigManager::instance().getSourceText()); ghostColor.setAlpha(140); painter.setPen(ghostColor);
+    const QFontMetrics fm(font()); QTextBlock block = firstVisibleBlock(); const int vpBottom = viewport()->rect().bottom();
+    // Draw ghost values only for blocks intersecting the visible viewport rect.
+    while (block.isValid()) {
+        const QRectF geom = blockBoundingGeometry(block).translated(contentOffset());
+        if (geom.top() > vpBottom) break;
+        if (block.isVisible() && geom.bottom() >= 0) if (const QString ghost = inlineGhostTextForLine(block.blockNumber() + 1); !ghost.isEmpty()) {
+            const int x = qRound(geom.left()) + fm.horizontalAdvance(block.text()) + 20;
+            painter.drawText(QRect(x, qRound(geom.top()), viewport()->width() - x - 4, qRound(geom.height())), Qt::AlignLeft | Qt::AlignVCenter, ghost);
+        }
+        block = block.next();
     }
 }
 
-/**
- * @brief Renders the source code editor viewport.
- */
-void SourceCodeView::paintEvent(QPaintEvent *event) { QPlainTextEdit::paintEvent(event); }
-
-/**
- * @brief Returns member and variable completion strings for linePrefix at lineOneBased.
- * @param lineOneBased 1-based line number of the completion request.
- * @param linePrefix Text preceding the cursor on the target line.
- */
+/** @brief Returns member and variable completion strings for linePrefix at lineOneBased. */
 QStringList SourceCodeView::editorCompletionsAtLine(int lineOneBased, const QString& linePrefix) const {
     const auto items = core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix, 0);
-    QStringList labels; labels.reserve(items.size());
-    for (const auto& it : items) labels.append(it.label);
-    return labels;
+    QStringList labels; labels.reserve(items.size()); for (const auto& it : items) labels.append(it.label); return labels;
 }
 
-/**
- * @brief Lazily constructs the floating LspCompletionPopup and wires item selection replacement.
- */
+/** @brief Lazily constructs the floating LspCompletionPopup and wires item selection replacement. */
 void SourceCodeView::ensureCompletionPopup() {
     if (m_completionPopup) return;
     m_completionPopup = new LspCompletionPopup(this);
@@ -763,40 +778,25 @@ void SourceCodeView::ensureCompletionPopup() {
     });
 }
 
-/**
- * @brief Triggers non-blocking floating LSP IntelliSense below cursorRect() at lineOneBased.
- * @param linePrefix Text prefix up to the cursor column.
- * @param lineOneBased 1-based line number in the document.
- */
+/** @brief Triggers non-blocking floating LSP IntelliSense below cursorRect() at lineOneBased. */
 void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, int lineOneBased) {
     // Use fast 0ms structural completion only on compact buffers (<= 500 blocks) to avoid GUI stalls.
-    const auto items = (document()->blockCount() <= 500)
-                           ? core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix, 0)
-                           : QVector<core::ClangdLspClient::LspCompletionItem>{};
-    if (!items.isEmpty()) {
-        ensureCompletionPopup(); m_completionPopup->setItems(items);
-        m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320); m_completionPopup->show();
-    } else if (m_currentFilePath.isEmpty() && m_completionPopup) {
-        m_completionPopup->hide();
-    }
+    const auto items = (document()->blockCount() <= 500) ? core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix, 0) : QVector<core::ClangdLspClient::LspCompletionItem>{};
+    if (!items.isEmpty()) { ensureCompletionPopup(); m_completionPopup->setItems(items); m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320); m_completionPopup->show(); }
+    else if (m_currentFilePath.isEmpty() && m_completionPopup) m_completionPopup->hide();
     // Dispatch non-blocking real-document clangd completion when backed by a workspace file path.
     if (!m_currentFilePath.isEmpty()) {
-        const QTextCursor cur = textCursor();
-        const int zeroCol = (cur.blockNumber() + 1 == lineOneBased) ? cur.positionInBlock() : linePrefix.length();
-        m_latestCompletionSeq = core::ClangdLspClient::instance().requestDocumentCompletionAsync(
-            m_currentFilePath, toPlainText(), qMax(0, lineOneBased - 1), qMax(0, zeroCol), linePrefix.right(1));
+        const QTextCursor cur = textCursor(); const int zeroCol = (cur.blockNumber() + 1 == lineOneBased) ? cur.positionInBlock() : linePrefix.length();
+        m_latestCompletionSeq = core::ClangdLspClient::instance().requestDocumentCompletionAsync(m_currentFilePath, toPlainText(), qMax(0, lineOneBased - 1), qMax(0, zeroCol), linePrefix.right(1));
     }
 }
 
-/**
- * @brief Saves the current editor document to disk and clears its modified state.
- */
+/** @brief Saves the current editor document to disk and clears its modified state. */
 bool SourceCodeView::saveToFile(const QString& filePath) {
     const QString target = filePath.isEmpty() ? m_currentFilePath : filePath;
     if (target.isEmpty()) return false;
     QFile file(target); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
-    QTextStream(&file) << toPlainText(); file.close(); document()->setModified(false);
-    refreshGitDiffGutter(); return true;
+    QTextStream(&file) << toPlainText(); file.close(); document()->setModified(false); refreshGitDiffGutter(); return true;
 }
 
 /**
@@ -898,6 +898,7 @@ void SourceCodeView::refreshGitDiffGutter() {
  */
 bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
     const QTextCursor cur = textCursor();
+    // Prefer clangd AST WorkspaceEdit when backed by a real workspace file on disk.
     if (!m_currentFilePath.isEmpty() && QFileInfo::exists(m_currentFilePath)) {
         const auto edits = core::ClangdLspClient::instance().renameSymbol(m_currentFilePath, toPlainText(), cur.blockNumber(), cur.positionInBlock(), newName);
         const QString curCanon = QFileInfo(m_currentFilePath).canonicalFilePath();
@@ -913,6 +914,7 @@ bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
 void SourceCodeView::keyPressEvent(QKeyEvent *event) {
     if (!event) return;
     if (event->key() == Qt::Key_F12 && !(event->modifiers() & Qt::ShiftModifier)) { triggerGoToDefinition(); event->accept(); return; }
+    // Forward Up/Down/Enter/Escape to the active clangd completion popup before normal text insertion.
     if (m_completionPopup && m_completionPopup->isVisible()) {
         if (event->key() == Qt::Key_Down) { m_completionPopup->selectNext(); event->accept(); return; }
         if (event->key() == Qt::Key_Up) { m_completionPopup->selectPrevious(); event->accept(); return; }

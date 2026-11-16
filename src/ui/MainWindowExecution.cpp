@@ -243,7 +243,7 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
 
     // Cache the newest rank state and reflect it on the Server Rack overview widget.
     m_latestStates[rankId] = state;
-    if (state.currentState == QLatin1String("running")) m_selectedFrameLevel[rankId] = 0;
+    if (state.currentState == QLatin1String("running")) { m_selectedFrameLevel[rankId] = 0; if (rankId == m_focusedRank && m_editorTabManager) m_editorTabManager->clearInlineVariableValues(); }
     if (m_serverRackView) m_serverRackView->updateRankState(rankId, state);
 
     // Parse the 64-bit instruction pointer from $rip (register slot 16) for CFG/disassembly sync.
@@ -434,40 +434,47 @@ void MainWindow::onRankSelected(int rankId) {
  * jumps, `DisassemblyView` `$pc` updates, and live `MPI_*` primitive telemetry in `MpiDiagnosticsWidget`.
  */
 void MainWindow::bindCallStackCoordinatorRoutes() {
+    // Sync paused locals via QSortFilterProxyModel (survives setCoordinator model swaps) with QPointer shutdown guard.
+    if (m_variablesDockWidget && !m_variablesDockWidget->property("gl_inline_var_bound").toBool()) {
+        m_variablesDockWidget->setProperty("gl_inline_var_bound", true);
+        auto* tree = m_variablesDockWidget->findChild<QTreeView*>();
+        if (auto* proxy = tree ? qobject_cast<QAbstractProxyModel*>(tree->model()) : nullptr) {
+            QPointer<EditorTabManager> etmPtr(m_editorTabManager);
+            auto syncVars = [proxy, etmPtr]() {
+                QAbstractItemModel* src = proxy ? proxy->sourceModel() : nullptr;
+                if (!src || !etmPtr) return;
+                QMap<QString, QString> varMap;
+                for (int r = 0; r < src->rowCount(); ++r) {
+                    const QString n = src->data(src->index(r, 0)).toString().trimmed(), v = src->data(src->index(r, 1)).toString().trimmed();
+                    if (!n.isEmpty() && !v.isEmpty()) varMap.insert(n, v);
+                }
+                etmPtr->setInlineVariableValues(varMap);
+            };
+            connect(proxy, &QAbstractItemModel::modelReset, this, syncVars);
+            connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex& p, int, int) { if (!p.isValid()) syncVars(); });
+        }
+    }
     // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
     if (m_callStackDockWidget && !m_callStackDockWidget->property("gl_callstack_bound").toBool()) {
         m_callStackDockWidget->setProperty("gl_callstack_bound", true);
 
         // Switching OS/OpenMP threads resets frame level to #0 and queries that thread's stack and locals when stopped.
-        connect(m_callStackDockWidget, &CallStackDockWidget::threadSelected, this,
-                [this](int threadId) {
-                    m_selectedFrameLevel[m_focusedRank] = 0;
-                    const auto stIt = m_latestStates.find(m_focusedRank);
-                    if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) {
-                        m_coordinator->selectStackFrame(m_focusedRank, threadId, 0);
-                    }
-                });
-
+        connect(m_callStackDockWidget, &CallStackDockWidget::threadSelected, this, [this](int threadId) {
+            m_selectedFrameLevel[m_focusedRank] = 0;
+            const auto stIt = m_latestStates.find(m_focusedRank);
+            if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) m_coordinator->selectStackFrame(m_focusedRank, threadId, 0);
+        });
         // Activating a caller frame jumps SourceCodeView + DisassemblyView and re-queries frame locals/registers when stopped.
-        connect(m_callStackDockWidget, &CallStackDockWidget::frameActivated, this,
-                [this](int threadId, int frameLevel, const QString& file, int line, quint64 address) {
-                    m_selectedFrameLevel[m_focusedRank] = frameLevel;
-                    // Open or focus the frame's DWARF source file and move the active line highlight.
-                    if (!file.isEmpty() && QFileInfo::exists(file) && line > 0) {
-                        SourceCodeView* view = m_editorTabManager ? m_editorTabManager->openFile(file) : getSourceCodeView();
-                        if (view) { view->highlightCurrentLine(line); view->highlightExecutionLine(line); }
-                    }
-                    // Synchronize DisassemblyView cursor to the caller frame's return/call site address.
-                    if (m_disassemblyView && address != 0ULL) {
-                        m_disassemblyView->setCurrentAddress(address);
-                        m_disassemblyView->setActiveSteppingRank(m_focusedRank, address);
-                    }
-                    // Instruct the active backend coordinator to select `threadId` + `frameLevel` only when stopped.
-                    const auto stIt = m_latestStates.find(m_focusedRank);
-                    if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) {
-                        m_coordinator->selectStackFrame(m_focusedRank, threadId, frameLevel);
-                    }
-                });
+        connect(m_callStackDockWidget, &CallStackDockWidget::frameActivated, this, [this](int threadId, int frameLevel, const QString& file, int line, quint64 address) {
+            m_selectedFrameLevel[m_focusedRank] = frameLevel;
+            if (!file.isEmpty() && QFileInfo::exists(file) && line > 0) {
+                SourceCodeView* view = m_editorTabManager ? m_editorTabManager->openFile(file) : getSourceCodeView();
+                if (view) { view->highlightCurrentLine(line); view->highlightExecutionLine(line); }
+            }
+            if (m_disassemblyView && address != 0ULL) { m_disassemblyView->setCurrentAddress(address); m_disassemblyView->setActiveSteppingRank(m_focusedRank, address); }
+            const auto stIt = m_latestStates.find(m_focusedRank);
+            if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) m_coordinator->selectStackFrame(m_focusedRank, threadId, frameLevel);
+        });
     }
 
     if (!m_coordinator) return;

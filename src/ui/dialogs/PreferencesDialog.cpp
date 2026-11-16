@@ -463,6 +463,7 @@ void PreferencesDialog::apply() {
     s.setValue("editing/edge_column", m_editingPage->edgeColumn());
     s.setValue("editing/rainbow_brackets", m_editingPage->rainbowBrackets());
     s.setValue("editing/data_doc_highlighting", m_editingPage->dataDocHighlighting());
+    s.setValue("editor/inline_variable_values", m_editingPage->inlineVariableValues());
 
     // 3. User interaction behavior
     s.setValue("behavior/restore_breakpoints",
@@ -474,6 +475,7 @@ void PreferencesDialog::apply() {
     auto& cfg = gridlock::core::ConfigManager::instance();
     cfg.setRainbowBracketsEnabled(m_editingPage->rainbowBrackets());
     cfg.setDataDocHighlightingEnabled(m_editingPage->dataDocHighlighting());
+    cfg.setInlineVariableValuesEnabled(m_editingPage->inlineVariableValues());
     if (auto* telemetryCombo = m_behaviorPage->findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"))) {
         cfg.setTelemetryDisplayFormat(telemetryCombo->currentData().toString());
     }

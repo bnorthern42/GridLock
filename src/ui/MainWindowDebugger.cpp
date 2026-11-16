@@ -478,9 +478,9 @@ void MainWindow::stopTargetWorkflow() {
     }
     if (m_disassemblyView) { m_disassemblyView->setDeadlockCycleRanks({}); m_disassemblyView->setActiveSteppingRank(-1, 0ULL); }
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
+    if (m_editorTabManager) m_editorTabManager->clearInlineVariableValues();
     clearAllInspectionDocks(m_variablesDockWidget, m_registerView, m_callStackDockWidget, m_mpiDiagnosticsWidget, networkLog(), m_memView);
-    m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE")); refreshStatusBarMemoryTelemetry();
+    m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE")); refreshStatusBarMemoryTelemetry();
     // Restore static pre-launch ELF64 disassembly, CFG, and symbol inspection cleanly after session stop.
     if (!m_previewFixtureOnly && !m_loadedBinaryPath.isEmpty() && QFileInfo::exists(m_loadedBinaryPath)) loadBinaryTarget(m_loadedBinaryPath);
 }
@@ -802,6 +802,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     m_switchingWorkspace = true;
     if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
     if (m_debugSessionActive) stopTargetWorkflow();
+    if (m_editorTabManager) m_editorTabManager->clearInlineVariableValues();
     clearAllInspectionDocks(m_variablesDockWidget, m_registerView, m_callStackDockWidget, m_mpiDiagnosticsWidget, networkLog(), m_memView);
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
     m_previewFixtureOnly = false; m_useRealBinaryTarget = false; m_elfInspector.reset(); m_loadedBinaryPath.clear();

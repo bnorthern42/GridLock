@@ -258,6 +258,11 @@ class ConfigManager {
   /** @brief Sets and persists whether TOML/YAML/Markdown/CSV syntax highlighting is enabled and broadcasts live update. */
   void setDataDocHighlightingEnabled(bool enabled);
 
+  /** @brief Returns whether CLion-style inline variable ghost values are shown when paused (default: true). */
+  bool inlineVariableValuesEnabled() const;
+  /** @brief Sets and persists whether inline variable ghost values are shown and broadcasts live update. */
+  void setInlineVariableValuesEnabled(bool enabled);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

@@ -403,6 +403,14 @@ EditingSettingsPage::EditingSettingsPage(QWidget* parent)
         tr("Apply theme-aware syntax highlighting to TOML, YAML, Markdown, and CSV/TSV files."));
     form->addRow(QString(), m_dataDocHighlightingCheck);
 
+    // CLion-style inline variable ghost values toggle when paused.
+    m_inlineVarValuesCheck = new QCheckBox(
+        tr("Show Inline Variable Values in Editor when Paused (CLion-style ghost text)"), this);
+    m_inlineVarValuesCheck->setObjectName(QStringLiteral("inlineVarValuesCheck"));
+    m_inlineVarValuesCheck->setToolTip(
+        tr("Render live local variable values as muted italic ghost text after lines while paused."));
+    form->addRow(QString(), m_inlineVarValuesCheck);
+
     loadFromSettings();
 }
 
@@ -420,6 +428,7 @@ bool EditingSettingsPage::showEdgeColumn() const {
 int EditingSettingsPage::edgeColumn() const { return m_edgeColumnBox->value(); }
 bool EditingSettingsPage::rainbowBrackets() const { return m_rainbowBracketsCheck->isChecked(); }
 bool EditingSettingsPage::dataDocHighlighting() const { return m_dataDocHighlightingCheck->isChecked(); }
+bool EditingSettingsPage::inlineVariableValues() const { return m_inlineVarValuesCheck->isChecked(); }
 
 /**
  * @brief Restores editing preferences from user settings storage.
@@ -438,6 +447,7 @@ void EditingSettingsPage::loadFromSettings() {
     m_edgeColumnBox->setValue(s.value("editing/edge_column", 80).toInt());
     m_rainbowBracketsCheck->setChecked(cfg.rainbowBracketsEnabled());
     m_dataDocHighlightingCheck->setChecked(cfg.dataDocHighlightingEnabled());
+    m_inlineVarValuesCheck->setChecked(cfg.inlineVariableValuesEnabled());
 }
 
 // ============================================================================
