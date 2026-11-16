@@ -227,6 +227,8 @@ public:
     void setExecutionLineOnly(int lineOneBased);
     /** @brief Sets live paused local variable name -> value mappings for inline ghost rendering. */
     void setInlineVariableValues(const QMap<QString, QString>& varValues);
+    /** @brief Merges a single resolved dotted/arrow member expression value into inline ghost values. */
+    void mergeInlineVariableValue(const QString& key, const QString& val);
     /** @brief Clears all inline variable ghost values when resuming, stopping, or switching workspaces. */
     void clearInlineVariableValues();
     /** @brief Builds the deduplicated `// name = val, ...` ghost string for oneBasedLine (empty if disabled/none). */

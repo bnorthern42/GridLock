@@ -572,7 +572,7 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QTemporaryDir nestedDir; QVERIFY(nestedDir.isValid());
     const QString nestedCpp = nestedDir.filePath(QStringLiteral("nested_stack.cpp"));
     { QFile nf(nestedCpp); QVERIFY(nf.open(QIODevice::WriteOnly));
-      nf.write("#include <mpi.h>\nint watchedCounter = 10;\nstruct MeshCfg { int dims = 3; };\nstruct InputConfig { MeshCfg mesh; double tol = 1e-6; };\n"
+      nf.write("#include <mpi.h>\nint watchedCounter = 10;\nclass MeshCfg { protected: int protDim = 9; public: int dims = 3; };\nstruct InputConfig { MeshCfg mesh; double tol = 1e-6; };\n"
                "__attribute__((noinline)) int innerCallee(int innerVal) {\n    int innerLocal = innerVal + 7;\n    int stateVal = 111;\n    stateVal = 999;\n    return innerLocal + stateVal;\n}\n"
                "__attribute__((noinline)) int outerCaller(int outerSecret) {\n    InputConfig Iconfig{};\n    int outerLocal = outerSecret + (Iconfig.mesh.dims > 0 ? 1 : 0) + (Iconfig.tol > 0.0 ? 0 : 1);\n    int res = innerCallee(outerLocal);\n    return res;\n}\n"
                "__attribute__((noinline)) int loopProbe(int step) {\n    int v = step * 10;\n    return v;\n}\n"
@@ -580,9 +580,9 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     rankSpin->setValue(1); targetCombo->insertItem(0, QStringLiteral("nested_stack"), nestedCpp);
     QVERIFY(mainWindow.selectTargetByName(QStringLiteral("nested_stack")) && mainWindow.ensureTargetBinaryCompiled());
     auto* nestedSrcView = editorTabs->currentSourceCodeView(); QVERIFY(nestedSrcView != nullptr);
-    const int revMutLine = mainWindow.findSourceLineForStatement(QStringLiteral("stateVal = 999")), innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal")), outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
+    const int revMutLine = mainWindow.findSourceLineForStatement(QStringLiteral("stateVal = 999")), innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal")), outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)")), cfgLine = mainWindow.findSourceLineForStatement(QStringLiteral("Iconfig.mesh.dims"));
     const int logLine = mainWindow.findSourceLineForStatement(QStringLiteral("int v = step * 10")), ignLine = mainWindow.findSourceLineForStatement(QStringLiteral("return v"));
-    QVERIFY(revMutLine > 0 && innerBpLine > revMutLine && outerCallLine > innerBpLine && logLine > 0 && ignLine > logLine); nestedSrcView->toggleBreakpoint(revMutLine);
+    QVERIFY(revMutLine > 0 && innerBpLine > revMutLine && outerCallLine > innerBpLine && cfgLine > 0 && logLine > 0 && ignLine > logLine); nestedSrcView->toggleBreakpoint(revMutLine);
     mainWindow.startTargetWorkflow(); QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), revMutLine, 8000);
     auto* varsTree = varsDock->findChild<QTreeView*>(); auto* varSearch = varsDock->findChild<QLineEdit*>(QStringLiteral("variableSearchEdit"));
     QVERIFY2(varsTree != nullptr && varsTree->model() != nullptr && varSearch != nullptr && varsTree->isSortingEnabled() && varsTree->header()->sectionResizeMode(0) == QHeaderView::Interactive, "VariablesDockWidget must expose #variableSearchEdit, sortable headers, and interactive column resizing");
@@ -607,24 +607,27 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     verifyFrameRow(0, QStringLiteral("innerCallee")); verifyFrameRow(1, QStringLiteral("outerCaller")); verifyFrameRow(2, QStringLiteral("main"));
     callStackTable->selectRow(1); QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1)); QTRY_COMPARE_WITH_TIMEOUT(editorTabs->currentSourceCodeView()->executionLine(), outerCallLine, 5000);
     QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")), os = findVarIdx({}, QStringLiteral("outerSecret")); return ic.isValid() && varsTree->model()->hasChildren(ic) && varsTree->model()->data(ic.siblingAtColumn(1)).toString().contains(QLatin1Char('{')) && os.isValid() && varsTree->model()->data(os.siblingAtColumn(1)).toString().contains(QStringLiteral("4242")); })(), 5000);
+    { QSet<QString> seenTop; for (int r = 0; r < varsTree->model()->rowCount(); ++r) { const QString vn = varsTree->model()->data(varsTree->model()->index(r, 0)).toString(); QVERIFY2(!vn.endsWith(QStringLiteral("@entry")) && !seenTop.contains(vn), qPrintable(vn)); seenTop.insert(vn); } }
     varsTree->expand(findVarIdx({}, QStringLiteral("Iconfig"))); QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")); const QModelIndex m = findVarIdx(ic, QStringLiteral("mesh")), t = findVarIdx(ic, QStringLiteral("tol")); const QString tv = varsTree->model()->data(t.siblingAtColumn(1)).toString(); return m.isValid() && varsTree->model()->hasChildren(m) && t.isValid() && (tv.contains(QStringLiteral("1e")) || tv.contains(QStringLiteral("e-07"))); })(), 5000);
-    varsTree->expand(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh"))); QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex dm = findVarIdx(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")), QStringLiteral("dims")); return dm.isValid() && varsTree->model()->data(dm.siblingAtColumn(1)).toString().contains(QLatin1Char('3')); })(), 5000);
+    varsTree->expand(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh"))); QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex m = findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")); const QModelIndex dm = findVarIdx(m, QStringLiteral("dims")), pm = findVarIdx(m, QStringLiteral("protDim")); return dm.isValid() && varsTree->model()->data(dm.siblingAtColumn(1)).toString().contains(QLatin1Char('3')) && pm.isValid() && !findVarIdx(m, QStringLiteral("protected")).isValid() && !findVarIdx(m, QStringLiteral("public")).isValid() && !findVarIdx(m, QStringLiteral("private")).isValid(); })(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QString g = nestedSrcView->inlineGhostTextForLine(cfgLine); return !g.contains(QStringLiteral("{...}")) && g.contains(QStringLiteral("Iconfig.mesh.dims = 3")) && g.contains(QStringLiteral("Iconfig.tol = ")); })(), 5000);
     varSearch->setText(QStringLiteral("tol")); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("Iconfig")).isValid() && findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("tol")).isValid() && !findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
     varSearch->clear(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
     varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents(); const int icAsc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); const int icDesc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     QVERIFY2(icAsc >= 0 && osAsc >= 0 && icAsc < osAsc && osDesc < icDesc, "Sorting NAME column asc/desc must deterministically invert top-level order");
-    // Verify DDD-style PointerGraphDialog 2D struct/pointer canvas, cycle/alias deduplication, and live GDB struct expansion.
-    gridlock::ui::PointerGraphDialog pgDlg(mainWindow.coordinator(), &mainWindow);
+    // Verify DDD-style PointerGraphDialog reset on re-open, 1-hop auto-expand, and cycle/alias deduplication.
+    mainWindow.openPointerGraphVisualizer(QStringLiteral("outerLocal"), QStringLiteral("4243"), QStringLiteral("int"));
+    auto* livePg = mainWindow.findChild<gridlock::ui::PointerGraphDialog*>(); QVERIFY(livePg != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(livePg->nodeCount() == 1, 3000);
+    mainWindow.openPointerGraphVisualizer(QStringLiteral("Iconfig"), QStringLiteral("{...}"), QStringLiteral("InputConfig"));
+    QTRY_VERIFY_WITH_TIMEOUT(livePg->nodeCount() >= 2 && livePg->edgeCount() >= 1 && livePg->nodeHasField(QStringLiteral("Iconfig"), QStringLiteral("mesh")) && livePg->nodeHasField(QStringLiteral("Iconfig.mesh"), QStringLiteral("dims")), 5000);
+    livePg->close(); gridlock::ui::PointerGraphDialog pgDlg(mainWindow.coordinator(), &mainWindow);
     QVERIFY(pgDlg.findChild<QLineEdit*>(QStringLiteral("pointerGraphRootEdit")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphAddBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphLayoutBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphExpandHopBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn")) && pgDlg.findChild<QGraphicsView*>(QStringLiteral("pointerGraphView")));
     pgDlg.upsertStructNode(QStringLiteral("n1"), QStringLiteral("Node"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("10"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("Node*")}});
     pgDlg.upsertStructNode(QStringLiteral("n2"), QStringLiteral("Node"), QStringLiteral("0x7fff2000"), {{QStringLiteral("val"), QStringLiteral("20"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff1000"), QStringLiteral("Node*")}}, QStringLiteral("n1"), QStringLiteral("next"));
     pgDlg.connectPointerField(QStringLiteral("n2"), QStringLiteral("next"), QStringLiteral("0x7fff1000"));
     QVERIFY(pgDlg.nodeCount() == 2 && pgDlg.edgeCount() == 2 && pgDlg.hasCycleOrSharedAlias());
-    pgDlg.clearGraph(); pgDlg.graphExpression(QStringLiteral("Iconfig"));
-    QTRY_VERIFY_WITH_TIMEOUT(pgDlg.nodeCount() >= 1 && pgDlg.nodeHasField(QStringLiteral("Iconfig"), QStringLiteral("mesh")) && pgDlg.nodeHasField(QStringLiteral("Iconfig"), QStringLiteral("tol")), 5000);
-    pgDlg.expandNodeField(QStringLiteral("Iconfig"), QStringLiteral("mesh"));
-    QTRY_VERIFY_WITH_TIMEOUT(pgDlg.nodeCount() >= 2 && pgDlg.edgeCount() >= 1 && pgDlg.nodeHasField(QStringLiteral("Iconfig.mesh"), QStringLiteral("dims")), 5000);
     consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
     consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
     consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click(); QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));

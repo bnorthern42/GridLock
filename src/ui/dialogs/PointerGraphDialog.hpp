@@ -190,6 +190,7 @@ class PointerGraphDialog : public QDialog {
   QVector<PointerGraphEdgeItem*> m_edges;                        ///< Active directed pointer/struct Bezier edges.
   QMap<QString, QPair<QString, QString>> m_pendingParentLinks;   ///< Maps childExpr -> (parentExpr, parentField).
   QMap<QString, QPair<QString, QString>> m_pendingTypeValueHints;///< Maps expr -> (typeHint, valueHint).
+  QSet<QString> m_autoExpandRoots;                               ///< Roots queued for automatic 1-hop child expansion.
   bool m_hasCycleOrSharedAlias = false;                          ///< True when a cycle or multi-parent alias exists.
 };
 

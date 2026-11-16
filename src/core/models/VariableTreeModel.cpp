@@ -320,19 +320,32 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
         }
     }
 
-    // Materialize a VariableNode for each JSON entry returned in the locals/variables array.
+    // Materialize deduplicated VariableNodes for each JSON entry, filtering GDB `@entry` shadows.
+    QHash<QString, int> seenByName;
     for (const QJsonValue val : variables) {
         const QJsonObject var = val.toObject();
         const QString name = var["name"].toString();
+        if (name.isEmpty() || name.endsWith(QStringLiteral("@entry"))) continue;
         const QString value = var["value"].toString();
         const QString type = var["type"].toString();
         const int varRef = var["variablesReference"].toInt(0);
 
         auto node = std::make_unique<VariableNode>(name, type, value, "", 0, varRef, targetParent);
-        // Mark non-zero references and {...} aggregates as expandable in QTreeView.
         if (isCompositeVariable(node.get())) {
             node->numChildren = 1;
         }
+        if (seenByName.contains(name)) {
+            VariableNode* prev = targetParent->children[seenByName.value(name)].get();
+            if (node->numChildren > prev->numChildren) prev->numChildren = node->numChildren;
+            if (node->variablesReference > 0 && prev->variablesReference == 0) prev->variablesReference = node->variablesReference;
+            if ((prev->value.isEmpty() || prev->value == QLatin1String("{...}")) &&
+                !value.isEmpty() && value != QLatin1String("{...}")) {
+                prev->value = value;
+                if (!type.isEmpty()) prev->type = type;
+            }
+            continue;
+        }
+        seenByName.insert(name, static_cast<int>(targetParent->children.size()));
         targetParent->children.push_back(std::move(node));
     }
 
@@ -505,7 +518,9 @@ bool VariableTreeModel::isCompositeVariable(const VariableNode* node) {
         return true;
     }
     const QString trimmed = node->value.trimmed();
-    return trimmed == QStringLiteral("{...}") || trimmed.startsWith(QLatin1Char('{'));
+    return trimmed == QStringLiteral("{...}") || trimmed.startsWith(QLatin1Char('{')) ||
+           trimmed.contains(QStringLiteral("{...}")) ||
+           (trimmed.startsWith(QLatin1Char('@')) && trimmed.contains(QLatin1Char('{')));
 }
 
 /**
@@ -671,39 +686,29 @@ void VariableTreeModel::parseVarListChildren(const QString& output) {
 
     const QModelIndex parentIdx = getIndex(parentNode);
 
-    // Count total child blocks before calling beginInsertRows.
-    int childCount = 0;
-    QRegularExpressionMatchIterator counterIt = childBlockRe.globalMatch(output);
-    while (counterIt.hasNext()) {
-        childCount++;
-        counterIt.next();
+    struct ParsedChild { QString varobjName; QString exp; int numCh; QString val; QString type; };
+    QVector<ParsedChild> parsed;
+    static const QRegularExpression expRe("exp=\"([^\"]+)\"");
+    static const QRegularExpression numRe("numchild=\"(\\d+)\"");
+    static const QRegularExpression valRe("value=\"([^\"]*)\"");
+    static const QRegularExpression typeRe("type=\"([^\"]+)\"");
+    while (it.hasNext()) {
+        const QString block = it.next().captured(1);
+        const QString exp = expRe.match(block).captured(1);
+        if (exp == QLatin1String("public") || exp == QLatin1String("private") || exp == QLatin1String("protected")) continue;
+        parsed.append({nameRe.match(block).captured(1), exp,
+                       numRe.match(block).hasMatch() ? numRe.match(block).captured(1).toInt() : 0,
+                       valRe.match(block).hasMatch() ? valRe.match(block).captured(1) : QString(),
+                       typeRe.match(block).hasMatch() ? typeRe.match(block).captured(1) : QString()});
     }
 
-    if (childCount > 0) {
-        beginInsertRows(parentIdx, 0, childCount - 1);
-
-        // Parse each `child={name="...",exp="...",numchild="...",value="...",type="..."}` tuple.
-        while (it.hasNext()) {
-            const QString block = it.next().captured(1);
-            const QString varobjName = nameRe.match(block).captured(1);
-
-            static const QRegularExpression expRe("exp=\"([^\"]+)\"");
-            const QString exp = expRe.match(block).captured(1);
-
-            static const QRegularExpression numRe("numchild=\"(\\d+)\"");
-            const int numChildren = numRe.match(block).hasMatch() ? numRe.match(block).captured(1).toInt() : 0;
-
-            static const QRegularExpression valRe("value=\"([^\"]*)\"");
-            const QString value = valRe.match(block).hasMatch() ? valRe.match(block).captured(1) : "";
-
-            static const QRegularExpression typeRe("type=\"([^\"]+)\"");
-            const QString type = typeRe.match(block).hasMatch() ? typeRe.match(block).captured(1) : "";
-
-            // Allocate and register the child VariableNode in the varobj lookup table.
-            auto* childNode = new VariableNode(exp, type, value, varobjName, numChildren, 0, parentNode);
+    if (!parsed.isEmpty()) {
+        beginInsertRows(parentIdx, 0, static_cast<int>(parsed.size()) - 1);
+        for (const ParsedChild& c : parsed) {
+            auto* childNode = new VariableNode(c.exp, c.type, c.val, c.varobjName, c.numCh, 0, parentNode);
             parentNode->children.push_back(std::unique_ptr<VariableNode>(childNode));
-            m_varobjToNode[varobjName] = childNode;
-            m_createdVarobjs.append(varobjName);
+            m_varobjToNode[c.varobjName] = childNode;
+            m_createdVarobjs.append(c.varobjName);
         }
 
         parentNode->childrenLoaded = true;

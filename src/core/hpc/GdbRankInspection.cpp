@@ -635,11 +635,13 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
           // Expand C++ access visibility nodes and base-class pseudo-nodes transparently.
           const bool isAccess = (exp == QLatin1String("public") || exp == QLatin1String("private") || exp == QLatin1String("protected"));
           const bool isBase = (!typeStr.isEmpty() && exp == typeStr && numCh > 0);
-          if ((isAccess || isBase) && !childObj.isEmpty()) {
-            const int subTok = m_nextVarQueryToken++;
-            m_tokenToVarListQuery[subTok] = qId;
-            q.inFlightLists++;
-            writeCmd(rankId, QStringLiteral("%1-var-list-children --all-values \"%2\"\n").arg(subTok).arg(childObj));
+          if (isAccess || isBase) {
+            if (!childObj.isEmpty() && numCh > 0) {
+              const int subTok = m_nextVarQueryToken++;
+              m_tokenToVarListQuery[subTok] = qId;
+              q.inFlightLists++;
+              writeCmd(rankId, QStringLiteral("%1-var-list-children --all-values \"%2\"\n").arg(subTok).arg(childObj));
+            }
           } else if (!exp.isEmpty()) {
             // Normalize empty composite summaries to `{...}` so views retain expand indicators.
             if (val.isEmpty() && numCh > 0) val = QStringLiteral("{...}");
@@ -650,11 +652,20 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
           }
         }
       }
-      // Once every unwrapped sub-query completes, delete the temporary varobj and emit results.
+      // Once every unwrapped sub-query completes, delete the temporary varobj and emit deduplicated results.
       if (q.inFlightLists <= 0) {
-        const auto doneQ = m_varChildQueries.take(qId);
+        auto doneQ = m_varChildQueries.take(qId);
         if (!doneQ.rootVarObj.isEmpty()) writeCmd(rankId, QStringLiteral("-var-delete \"%1\"\n").arg(doneQ.rootVarObj));
-        emit variableChildrenUpdated(rankId, doneQ.parentExpression, doneQ.resolved);
+        QVariantList deduped;
+        QSet<QString> seenNames;
+        for (const QVariant& entry : doneQ.resolved) {
+          const QString n = entry.toMap().value(QStringLiteral("name")).toString();
+          if (!n.isEmpty() && !seenNames.contains(n)) {
+            seenNames.insert(n);
+            deduped.append(entry);
+          }
+        }
+        emit variableChildrenUpdated(rankId, doneQ.parentExpression, deduped);
       }
       return true;
     }

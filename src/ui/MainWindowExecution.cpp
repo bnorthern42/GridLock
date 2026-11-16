@@ -452,16 +452,23 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
         auto* tree = m_variablesDockWidget->findChild<QTreeView*>();
         if (auto* proxy = tree ? qobject_cast<QAbstractProxyModel*>(tree->model()) : nullptr) {
             QPointer<EditorTabManager> etmPtr(m_editorTabManager);
-            auto syncVars = [proxy, etmPtr]() {
+            auto syncVars = [this, proxy, etmPtr]() {
                 QAbstractItemModel* src = proxy ? proxy->sourceModel() : nullptr; if (!src || !etmPtr) return;
                 QMap<QString, QString> varMap;
-                for (int r = 0; r < src->rowCount(); ++r) { const QString n = src->data(src->index(r, 0)).toString().trimmed(), v = src->data(src->index(r, 1)).toString().trimmed(); if (!n.isEmpty() && !v.isEmpty()) varMap.insert(n, v); }
-                etmPtr->setInlineVariableValues(varMap);
+                std::function<void(const QModelIndex&, const QString&)> collect = [&](const QModelIndex& p, const QString& pfx) { for (int r = 0; r < src->rowCount(p); ++r) { const QModelIndex idx = src->index(r, 0, p); const QString n = src->data(idx).toString().trimmed(), v = src->data(src->index(r, 1, p)).toString().trimmed(), full = pfx.isEmpty() ? n : (pfx + QLatin1Char('.') + n); if (!full.isEmpty() && !v.isEmpty()) varMap.insert(full, v); if (src->rowCount(idx) > 0) collect(idx, full); } };
+                collect(QModelIndex(), QString()); etmPtr->setInlineVariableValues(varMap);
+                if (auto* sv = etmPtr->currentSourceCodeView(); sv && m_coordinator && sv->executionLine() > 0 && !varMap.isEmpty()) {
+                    static const QRegularExpression kChainRe(QStringLiteral("\\b([A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)+)\\b")); int sent = 0; QSet<QString> q;
+                    for (int ln = std::max(1, sv->executionLine() - 15); ln <= sv->executionLine() + 15 && sent < 12; ++ln) for (auto it = kChainRe.globalMatch(sv->document()->findBlockByNumber(ln - 1).text()); it.hasNext() && sent < 12;) { const QString ex = it.next().captured(1), root = ex.section(QRegularExpression(QStringLiteral("\\.|->")), 0, 0); if (!q.contains(ex) && !varMap.contains(ex) && varMap.contains(root)) { q.insert(ex); ++sent; m_coordinator->evaluateExpression(m_focusedRank, ex); } }
+                }
             };
-            connect(proxy, &QAbstractItemModel::modelReset, this, syncVars);
-            connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex& p, int, int) { if (!p.isValid()) syncVars(); });
+            connect(proxy, &QAbstractItemModel::modelReset, this, syncVars); connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex&, int, int) { syncVars(); });
         }
         connect(m_variablesDockWidget, &VariablesDockWidget::visualizeInPointerGraphRequested, this, [this](const QString& expr, const QString&, const QString& val, const QString& typ) { openPointerGraphVisualizer(expr, val, typ); });
+    }
+    if (m_coordinator && !m_coordinator->property("gl_inline_eval_bound").toBool()) {
+        m_coordinator->setProperty("gl_inline_eval_bound", true); QPointer<EditorTabManager> etmPtr(m_editorTabManager);
+        connect(m_coordinator, &IBackendCoordinator::expressionEvaluated, this, [etmPtr](int, const QString& expr, const QString& val) { if (etmPtr && (expr.contains(QLatin1Char('.')) || expr.contains(QStringLiteral("->"))) && !val.startsWith(QStringLiteral("Error:"))) if (auto* sv = etmPtr->currentSourceCodeView()) sv->mergeInlineVariableValue(expr, val); });
     }
     if (m_pointerGraphDialog) { m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank); }
     // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
@@ -853,7 +860,7 @@ void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
 void MainWindow::openPointerGraphVisualizer(const QString& exprPath, const QString& varValue, const QString& varType) {
     if (!m_pointerGraphDialog) m_pointerGraphDialog = new PointerGraphDialog(m_coordinator, this);
     m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank);
-    if (!exprPath.trimmed().isEmpty()) m_pointerGraphDialog->graphExpression(exprPath.trimmed(), varType, varValue);
+    if (!exprPath.trimmed().isEmpty()) { m_pointerGraphDialog->clearGraph(); m_pointerGraphDialog->graphExpression(exprPath.trimmed(), varType, varValue); }
     m_pointerGraphDialog->show(); m_pointerGraphDialog->raise(); m_pointerGraphDialog->activateWindow();
 }
 /**

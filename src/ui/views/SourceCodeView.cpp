@@ -727,22 +727,23 @@ void SourceCodeView::wheelEvent(QWheelEvent *event) {
 
 /** @brief Sets live paused local variable values for inline ghost rendering and repaints viewport. */
 void SourceCodeView::setInlineVariableValues(const QMap<QString, QString>& varValues) { m_inlineVarValues = varValues; if (viewport()) viewport()->update(); }
+/** @brief Merges a single resolved dotted/arrow member expression value into the inline ghost map. */
+void SourceCodeView::mergeInlineVariableValue(const QString& key, const QString& val) { if (!key.isEmpty() && !val.isEmpty()) { m_inlineVarValues.insert(key, val); if (viewport()) viewport()->update(); } }
 /** @brief Clears inline variable ghost values when resuming, stopping, or switching workspaces. */
 void SourceCodeView::clearInlineVariableValues() { if (!m_inlineVarValues.isEmpty()) { m_inlineVarValues.clear(); if (viewport()) viewport()->update(); } }
 
 /** @brief Builds a deduplicated `// var = val, ...` ghost summary for oneBasedLine (<= 4 vars, <= 96 chars). */
 QString SourceCodeView::inlineGhostTextForLine(int oneBasedLine) const {
     if (m_inlineVarValues.isEmpty() || !gridlock::core::ConfigManager::instance().inlineVariableValuesEnabled()) return QString();
-    const QTextBlock block = document()->findBlockByNumber(oneBasedLine - 1);
-    if (!block.isValid()) return QString();
-    // Strip string literals and trailing // comments before extracting identifier tokens.
+    const QTextBlock block = document()->findBlockByNumber(oneBasedLine - 1); if (!block.isValid()) return QString();
+    // Strip string literals and trailing // comments before matching dotted/arrow expressions.
     QString line = block.text();
     static const QRegularExpression kStrRe(QStringLiteral("\"([^\"\\\\]|\\\\.)*\""));
-    line.replace(kStrRe, QStringLiteral(" "));
-    if (const int cmt = line.indexOf(QStringLiteral("//")); cmt >= 0) line = line.left(cmt);
-    static const QRegularExpression kIdentRe(QStringLiteral("\\b([A-Za-z_][A-Za-z0-9_]*)\\b"));
-    QStringList parts; QSet<QString> seen; auto it = kIdentRe.globalMatch(line);
-    while (it.hasNext() && parts.size() < 4) { const QString id = it.next().captured(1); if (!seen.contains(id) && m_inlineVarValues.contains(id)) { seen.insert(id); parts.append(QStringLiteral("%1 = %2").arg(id, m_inlineVarValues.value(id))); } }
+    line.replace(kStrRe, QStringLiteral(" ")); if (const int cmt = line.indexOf(QStringLiteral("//")); cmt >= 0) line = line.left(cmt);
+    // Match member chains (e.g. `cfg.mesh.dims`) and plain locals, skipping opaque `{...}` summaries.
+    static const QRegularExpression kExprRe(QStringLiteral("\\b([A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)*)\\b"));
+    QStringList parts; QSet<QString> seen; auto it = kExprRe.globalMatch(line);
+    while (it.hasNext() && parts.size() < 4) { const QString expr = it.next().captured(1), v = m_inlineVarValues.value(expr).trimmed(); if (seen.contains(expr) || v.isEmpty() || v == QLatin1String("{...}") || v.startsWith(QStringLiteral("{...")) || (v.startsWith(QLatin1Char('@')) && v.contains(QStringLiteral("{...}")))) continue; seen.insert(expr); parts.append(QStringLiteral("%1 = %2").arg(expr, v)); }
     if (parts.isEmpty()) return QString();
     QString summary = QStringLiteral("// ") + parts.join(QStringLiteral(", "));
     return (summary.size() > 96) ? (summary.left(93) + QStringLiteral("...")) : summary;

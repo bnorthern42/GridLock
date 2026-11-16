@@ -666,15 +666,22 @@ void GdbRankCoordinator::evaluateHoverVariable(int rankId, const QString& varNam
   writeCmd(rankId, QString("100-data-evaluate-expression %1\n").arg(escapeGdbMiString(varName)));
 }
 
+// Maps unique `101xxx` MI tokens to their original expression strings for concurrent evaluations.
+static QHash<int, QString>& evalTokenExprMap() { static QHash<int, QString> m; return m; }
+
 /**
- * @brief Sends `101-data-evaluate-expression` for an interactive watch/console expression on @p rankId.
+ * @brief Sends `101xxx-data-evaluate-expression` for an interactive watch/console expression on @p rankId.
  */
 void GdbRankCoordinator::evaluateExpression(int rankId, const QString& expression) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
   auto& rp = m_processes[rankId];
   if (!rp || rp->state.currentState != "stopped") return;
   rp->lastEvalExpression = expression;
-  writeCmd(rankId, QString("101-data-evaluate-expression %1\n").arg(escapeGdbMiString(expression)));
+  // Use rotating `101xxx` tokens so batched dotted-member ghost evaluations never clobber each other.
+  static int s_evalSeq = 0;
+  const int tok = 101000 + (++s_evalSeq % 900);
+  evalTokenExprMap().insert(tok, expression);
+  writeCmd(rankId, QString("%1-data-evaluate-expression %2\n").arg(tok).arg(escapeGdbMiString(expression)));
 }
 
 /**
@@ -886,29 +893,33 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\""), err100Re("msg=\"([^\"]+)\"");
       if (const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line); match.hasMatch()) emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
     } else if (line.startsWith("101")) {
-      // Token 101: Interactive console / watch expression evaluation response.
-      if (line.contains("^done")) {
-        static const QRegularExpression valRe("101\\^done,value=\"([^\"]+)\"");
-        if (const auto m = valRe.match(line); m.hasMatch()) emit expressionEvaluated(rankId, rp->lastEvalExpression, m.captured(1));
-      } else if (line.contains("^error")) {
-        static const QRegularExpression errRe("msg=\"([^\"]+)\"");
-        if (const auto m = errRe.match(line); m.hasMatch()) emit expressionEvaluated(rankId, rp->lastEvalExpression, "Error: " + m.captured(1));
-      }
+      // Token 101xxx: Resolve exact expression key from rotating token map for watch/inline evaluations.
+      const int caret = line.indexOf('^'); const QString resolvedExpr = (caret > 0 && evalTokenExprMap().contains(line.left(caret).toInt())) ? evalTokenExprMap().take(line.left(caret).toInt()) : rp->lastEvalExpression;
+      auto unesc = [](QString s) { return s.replace(QLatin1String("\\\""), QLatin1String("\"")).replace(QLatin1String("\\\\"), QLatin1String("\\")); };
+      if (line.contains("^done")) { static const QRegularExpression valRe("\\^done,value=\"((?:\\\\.|[^\"])*)\""); if (const auto m = valRe.match(line); m.hasMatch()) emit expressionEvaluated(rankId, resolvedExpr, unesc(m.captured(1))); }
+      else if (line.contains("^error")) { static const QRegularExpression errRe("msg=\"((?:\\\\.|[^\"])*)\""); if (const auto m = errRe.match(line); m.hasMatch()) emit expressionEvaluated(rankId, resolvedExpr, "Error: " + unesc(m.captured(1))); }
     } else if (line.startsWith("200")) {
       // Token 200: Stop-point disassembly window (`-data-disassemble`) followed by `-var-update`.
       if (line.contains("asm_insns=")) { const QString prettyAsm = formatMiDisassembly(line); if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); } }
       writeCmd(rankId, "-var-update 1 *\n");
     } else if (line.startsWith("201^done,variables=[")) {
-      // Token 201: Parse stack-frame locals (`name`, `type`, `value`) for `VariablesDockWidget`.
-      // Triggered automatically on `*stopped` and on caller frame switches (`selectStackFrame`).
+      // Token 201: Parse stack-frame locals (`name`, `type`, `value`), filtering `@entry` and duplicates.
       static const QRegularExpression varTupleRe("\\{([^{}]+)\\}"), vNameRe("name=\"([^\"]+)\""), vTypeRe("type=\"([^\"]+)\""), vValRe("value=\"((?:\\\\.|[^\"])*)\"");
-      QJsonArray locals; auto it = varTupleRe.globalMatch(line);
-      // Convert each MI local variable tuple into a DAP-compatible JSON variable descriptor.
+      QJsonArray locals; QHash<QString, int> idxByName; auto it = varTupleRe.globalMatch(line);
       while (it.hasNext()) {
-        const QString tuple = it.next().captured(1); const auto nm = vNameRe.match(tuple);
-        if (!nm.hasMatch()) continue;
+        const QString tuple = it.next().captured(1); const auto nm = vNameRe.match(tuple); if (!nm.hasMatch()) continue;
+        // Skip GDB `@entry` shadow entries so each variable appears only once.
+        const QString varName = nm.captured(1); if (varName.endsWith(QStringLiteral("@entry"))) continue;
         const auto tm = vTypeRe.match(tuple); const auto vm = vValRe.match(tuple);
-        locals.append(QJsonObject{{"name", nm.captured(1)}, {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")}, {"value", vm.hasMatch() ? vm.captured(1) : QStringLiteral("{...}")}, {"variablesReference", 0}});
+        const QString varVal = vm.hasMatch() ? vm.captured(1).replace(QLatin1String("\\\""), QLatin1String("\"")).replace(QLatin1String("\\\\"), QLatin1String("\\")) : QStringLiteral("{...}");
+        const QJsonObject entry{{"name", varName}, {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")}, {"value", varVal}, {"variablesReference", 0}};
+        // Deduplicate repeated MI tuples for the same symbol, preferring non-opaque values.
+        if (idxByName.contains(varName)) {
+          const int prevIdx = idxByName.value(varName); const QString prevVal = locals.at(prevIdx).toObject().value("value").toString();
+          if ((prevVal == QLatin1String("{...}") || prevVal.isEmpty()) && varVal != QLatin1String("{...}") && !varVal.isEmpty()) locals[prevIdx] = entry;
+          continue;
+        }
+        idxByName.insert(varName, locals.size()); locals.append(entry);
       }
       emit localsUpdated(rankId, locals);
     } else if (handleMiStackOrThreadRecord(rankId, line)) {

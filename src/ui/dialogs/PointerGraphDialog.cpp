@@ -597,8 +597,9 @@ void PointerGraphDialog::graphExpression(const QString& expression,
                                          const QString& valueHint) {
   const QString clean = expression.trimmed();
   if (clean.isEmpty()) return;
-  if (m_rootEdit && m_rootEdit->text().trimmed().isEmpty()) m_rootEdit->setText(clean);
+  if (m_rootEdit) m_rootEdit->setText(clean);
   m_pendingTypeValueHints.insert(clean, {typeHint.trimmed(), valueHint.trimmed()});
+  m_autoExpandRoots.insert(clean);
   upsertStructNode(clean, typeHint, normalizeHexAddress(valueHint), {});
   if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, clean);
 }
@@ -663,6 +664,12 @@ void PointerGraphDialog::onVariableChildrenUpdated(int,
   const auto parentLink = m_pendingParentLinks.take(cleanExpr);
   upsertStructNode(cleanExpr, hints.first, hints.second, parsedFields,
                    parentLink.first, parentLink.second);
+  if (m_autoExpandRoots.remove(cleanExpr)) {
+    for (const auto& f : parsedFields) {
+      if (isExpandableOrPointerField(f)) expandNodeField(cleanExpr, f.name);
+    }
+  }
+  autoLayoutNodes();
 }
 
 /** @brief Arranges all active struct node cards left-to-right in a layered topological DAG layout. */
@@ -678,12 +685,14 @@ void PointerGraphDialog::autoLayoutNodes() {
 /** @brief Removes all node cards, directed edges, and pending expansion state from the canvas. */
 void PointerGraphDialog::clearGraph() {
   if (m_scene) m_scene->clear();
+  if (m_rootEdit) m_rootEdit->clear();
   m_nodes.clear();
   m_nodesByExpr.clear();
   m_nodesByAddress.clear();
   m_edges.clear();
   m_pendingParentLinks.clear();
   m_pendingTypeValueHints.clear();
+  m_autoExpandRoots.clear();
   m_hasCycleOrSharedAlias = false;
 }
 
