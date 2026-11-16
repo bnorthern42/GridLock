@@ -8,6 +8,7 @@
  */
 
 #include "MemView.hpp"
+#include "MemoryProfilerWidget.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 #include "../../core/hpc/MemoryExporter.hpp"
@@ -22,6 +23,7 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrent>
@@ -73,7 +75,8 @@ uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
  * @brief Constructs a new MemView widget.
  *
  * Initializes the compact toolbar controls (address, byte count, data type,
- * read/export/diff buttons) and the read-only monospace hex dump text editor.
+ * read/export/diff buttons, and `HEX DUMP | LIBRARY MEMORY MAP` mode toggles)
+ * alongside the stacked hex dump editor and visual `MemoryProfilerWidget`.
  *
  * @param parent Optional parent widget.
  */
@@ -156,6 +159,20 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     configureToolbarButton(m_diffBtn);
     topLayout->addWidget(m_diffBtn);
 
+    // Segmented view-mode switcher toggling between raw HEX DUMP and visual LIBRARY MEMORY MAP.
+    m_hexModeBtn = new QPushButton(QStringLiteral("HEX DUMP"), headerBar);
+    m_hexModeBtn->setObjectName(QStringLiteral("memHexModeBtn"));
+    m_hexModeBtn->setCheckable(true);
+    m_hexModeBtn->setChecked(true);
+    configureToolbarButton(m_hexModeBtn);
+    topLayout->addWidget(m_hexModeBtn);
+
+    m_mapModeBtn = new QPushButton(QStringLiteral("LIBRARY MEMORY MAP"), headerBar);
+    m_mapModeBtn->setObjectName(QStringLiteral("memMapModeBtn"));
+    m_mapModeBtn->setCheckable(true);
+    configureToolbarButton(m_mapModeBtn);
+    topLayout->addWidget(m_mapModeBtn);
+
     topLayout->addStretch();
 
     // Explicit source badge distinguishing idle empty state, static on-disk ELF reads, and live rank PID reads.
@@ -165,7 +182,10 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
 
     mainLayout->addWidget(headerBar);
 
-    m_dumpEdit = new QTextEdit();
+    // Stacked container hosting page 0 (`m_dumpEdit`) and page 1 (`m_profilerWidget`).
+    m_viewStack = new QStackedWidget(this);
+
+    m_dumpEdit = new QTextEdit(m_viewStack);
     m_dumpEdit->setObjectName("cutterHexDumpEdit");
     m_dumpEdit->setReadOnly(true);
     m_dumpEdit->setFrameShape(QFrame::NoFrame);
@@ -179,12 +199,36 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     p.setColor(QPalette::Text, QColor(gridlock::core::ConfigManager::instance().getSourceText()));
     m_dumpEdit->setPalette(p);
 
-    mainLayout->addWidget(m_dumpEdit, 1);
+    m_profilerWidget = new MemoryProfilerWidget(m_viewStack);
+    m_viewStack->addWidget(m_dumpEdit);
+    m_viewStack->addWidget(m_profilerWidget);
+    mainLayout->addWidget(m_viewStack, 1);
 
     connect(m_readBtn, &QPushButton::clicked, this, &MemView::onReadClicked);
     connect(m_addressEdit, &QLineEdit::returnPressed, this, &MemView::onReadClicked);
     connect(m_exportBtn, &QPushButton::clicked, this, &MemView::onExportMatrixClicked);
     connect(m_diffBtn, &QPushButton::clicked, this, &MemView::onDiffClicked);
+
+    // Wire mode toggle buttons and double-click hex navigation from the profiler treemap/table.
+    connect(m_hexModeBtn, &QPushButton::clicked, this, [this]() {
+        m_hexModeBtn->setChecked(true);
+        if (m_mapModeBtn) m_mapModeBtn->setChecked(false);
+        if (m_viewStack) m_viewStack->setCurrentIndex(0);
+    });
+    connect(m_mapModeBtn, &QPushButton::clicked, this, [this]() {
+        m_mapModeBtn->setChecked(true);
+        if (m_hexModeBtn) m_hexModeBtn->setChecked(false);
+        if (m_viewStack) m_viewStack->setCurrentIndex(1);
+        const int rank = m_baselineRankBox ? m_baselineRankBox->value() : 0;
+        const qint64 pid = m_pidGetter ? m_pidGetter(rank) : 0LL;
+        if (pid > 0 && m_profilerWidget) m_profilerWidget->refreshForPid(pid);
+    });
+    connect(m_profilerWidget, &MemoryProfilerWidget::inspectAddressRequested, this, [this](uint64_t addr) {
+        if (m_hexModeBtn) m_hexModeBtn->setChecked(true);
+        if (m_mapModeBtn) m_mapModeBtn->setChecked(false);
+        if (m_viewStack) m_viewStack->setCurrentIndex(0);
+        seekToAddress(addr);
+    });
 
     // Initialize clean empty state until a real ELF binary or live debug rank supplies bytes.
     clear();
@@ -201,6 +245,18 @@ void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
     m_addressResolver = std::move(resolver);
     m_bytesFetcher = std::move(fetcher);
     m_pidGetter = std::move(pidGetter);
+    if (m_profilerWidget) m_profilerWidget->setAvailableRanks(1, 0, m_pidGetter);
+}
+
+/**
+ * @brief Updates the profiler's rank selector and refreshes automatically when `LIBRARY MEMORY MAP` is active.
+ */
+void MemView::notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount) {
+    if (!m_profilerWidget) return;
+    m_profilerWidget->setAvailableRanks(rankCount, rank, m_pidGetter);
+    if (m_viewStack && m_viewStack->currentIndex() == 1 && pid > 0) {
+        m_profilerWidget->refreshForPid(pid);
+    }
 }
 
 /**
@@ -222,7 +278,7 @@ void MemView::setSourceModeLabel(const QString& label) {
 }
 
 /**
- * @brief Clears hex dump buffers and resets base address and source badge to idle state.
+ * @brief Clears hex dump buffers, profiler state, and resets base address and source badge to idle state.
  */
 void MemView::clear() {
     m_currentBaseAddress = 0ULL;
@@ -235,6 +291,7 @@ void MemView::clear() {
     m_patchedBytes.clear();
     if (m_addressEdit) m_addressEdit->clear();
     if (m_dumpEdit) m_dumpEdit->clear();
+    if (m_profilerWidget) m_profilerWidget->clear();
     setSourceModeLabel(QStringLiteral("IDLE (NO BINARY)"));
 }
 
@@ -792,11 +849,15 @@ void MemView::reloadStyle() {
             "border: 1px solid %2; border-radius: 2px; } "
             "#cutterMemHeader QPushButton { padding: 1px 8px; min-height: 20px; max-height: 22px; "
             "background-color: %1; color: %3; border: 1px solid %2; border-radius: 2px; font-size: 10px; font-weight: 600; } "
-            "#cutterMemHeader QPushButton:hover { background-color: %2; color: %3; }")
-            .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex));
+            "#cutterMemHeader QPushButton:hover { background-color: %2; color: %3; } "
+            "#cutterMemHeader QPushButton:checked { background-color: %5; color: #ffffff; border: 1px solid %5; }")
+            .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));
     }
     if (m_sourceBadge) {
         setSourceModeLabel(m_sourceBadge->text());
+    }
+    if (m_profilerWidget) {
+        m_profilerWidget->reloadStyle();
     }
     update();
 }

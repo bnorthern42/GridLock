@@ -21,11 +21,14 @@ class QPushButton;
 class QTextEdit;
 class QComboBox;
 class QLabel;
+class QStackedWidget;
 
 namespace gridlock::ui {
 
+class MemoryProfilerWidget;
+
 /**
- * @brief Workstation memory inspector displaying hex dumps and cross-rank memory diffs.
+ * @brief Workstation memory inspector displaying hex dumps, cross-rank diffs, and library treemaps.
  */
 class MemView : public QWidget {
     Q_OBJECT
@@ -45,9 +48,14 @@ public:
                                 RankBytesFetcher fetcher,
                                 RankPidGetter pidGetter = {});
 
+    /// Synchronizes active rank/PID context with `MemoryProfilerWidget` and refreshes when visible.
+    void notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount);
+    /// Returns the embedded visual library and heap memory profiler widget.
+    MemoryProfilerWidget* memoryProfiler() const { return m_profilerWidget; }
+
     /// Updates the toolbar source badge label (`IDLE (NO BINARY)`, `STATIC ELF (READ-ONLY)`, `LIVE RANK ...`).
     void setSourceModeLabel(const QString& label);
-    /// Clears hex dump viewport, buffers, patches, and resets source badge to `IDLE (NO BINARY)`.
+    /// Clears hex dump viewport, buffers, patches, profiler state, and resets source badge to `IDLE (NO BINARY)`.
     void clear();
 
     /// Loads raw hex string data starting at beginAddress.
@@ -106,8 +114,12 @@ private:
     QSpinBox* m_baselineRankBox = nullptr;
     QSpinBox* m_targetRankBox = nullptr;
     QPushButton* m_diffBtn = nullptr;
+    QPushButton* m_hexModeBtn = nullptr;
+    QPushButton* m_mapModeBtn = nullptr;
     QLabel* m_sourceBadge = nullptr;
+    QStackedWidget* m_viewStack = nullptr;
     QTextEdit* m_dumpEdit = nullptr;
+    MemoryProfilerWidget* m_profilerWidget = nullptr;
 
     QByteArray m_lastRawData;
     QByteArray m_previousRawData;

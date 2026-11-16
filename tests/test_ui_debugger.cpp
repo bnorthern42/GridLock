@@ -541,9 +541,9 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     // Verify MpiDiagnosticsWidget cleared static demo rows, shows live PIDs, and flags collective divergence.
     auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
     auto* waitTable = mpiDiag ? mpiDiag->findChild<QTableWidget*>(QStringLiteral("mpiRankWaitTable")) : nullptr;
-    auto* dlList = mpiDiag ? mpiDiag->findChild<QListWidget*>(QStringLiteral("mpiDeadlockList")) : nullptr;
-    auto* dlBadge = mpiDiag ? mpiDiag->findChild<QLabel*>(QStringLiteral("mpiDeadlockStatusBadge")) : nullptr;
+    auto* dlList = mpiDiag ? mpiDiag->findChild<QListWidget*>(QStringLiteral("mpiDeadlockList")) : nullptr; auto* dlBadge = mpiDiag ? mpiDiag->findChild<QLabel*>(QStringLiteral("mpiDeadlockStatusBadge")) : nullptr;
     QVERIFY(mpiDiag && waitTable && dlList && dlBadge); QCOMPARE(mpiDiag->rankWaitTableRowCount(), 2);
+    // Simulate Rank 0 in MPI_Bcast and Rank 1 in MPI_Barrier to confirm live deadlock alert triggers.
     QTRY_VERIFY_WITH_TIMEOUT(waitTable->item(0, 0) && waitTable->item(0, 0)->text().contains(QString::number(pid0)), 4000);
     emit mainWindow.coordinator()->stackTraceUpdated(0, {StackFrameEntry{0, 0, 0x401140ULL, QStringLiteral("MPI_Bcast"), mainWindow.activeTargetSourcePath(), bpLine1}});
     emit mainWindow.coordinator()->stackTraceUpdated(1, {StackFrameEntry{0, 0, 0x401180ULL, QStringLiteral("MPI_Barrier"), mainWindow.activeTargetSourcePath(), bpLine1}});
@@ -564,15 +564,12 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     addrEdit->setText(QStringLiteral("$rsp")); readBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(memView->currentBaseAddress() > 0x1000000ULL, 5000);
     memSpins[1]->setValue(0); memSpins[2]->setValue(1); diffBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(memView->changedByteCount() > 0, 5000);
     mainWindow.stopTargetWorkflow();
-    QCOMPARE(mainWindow.isDebugSessionActive(), false); QCOMPARE(mainWindow.isRunButtonLatched(), false);
-    QCOMPARE(mainWindow.coordinator()->getProcessCount(), 0); QCOMPARE(static_cast<qint64>(mainWindow.coordinator()->getPidForRank(0)), 0LL);
+    QVERIFY(!mainWindow.isDebugSessionActive() && !mainWindow.isRunButtonLatched() && mainWindow.coordinator()->getProcessCount() == 0 && mainWindow.coordinator()->getPidForRank(0) == 0);
     // 6. Verify CallStackDockWidget, live GdbConsoleWidget REPL, VariablesDockWidget expansion/filter/sort, and watchpoint trigger.
     auto* callStackDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("CallStackDock")); QVERIFY2(callStackDock != nullptr, "MainWindow must expose docked CallStackDock");
     auto* threadCombo = callStackDock->findChild<QComboBox*>(QStringLiteral("threadSelectorCombo")); auto* callStackTable = callStackDock->findChild<QTableWidget*>(QStringLiteral("callStackTable"));
     auto* varsDock = mainWindow.findChild<QDockWidget*>(QStringLiteral("VariablesDock")); auto* gdbConsole = mainWindow.findChild<gridlock::ui::GdbConsoleWidget*>();
-    auto* consoleCmdEdit = gdbConsole ? gdbConsole->findChild<QLineEdit*>(QStringLiteral("gdbConsoleCommandEdit")) : nullptr;
-    auto* consoleExecBtn = gdbConsole ? gdbConsole->findChild<QPushButton*>(QStringLiteral("gdbConsoleExecuteBtn")) : nullptr;
-    auto* consoleViewport = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
+    auto* consoleCmdEdit = gdbConsole ? gdbConsole->findChild<QLineEdit*>(QStringLiteral("gdbConsoleCommandEdit")) : nullptr; auto* consoleExecBtn = gdbConsole ? gdbConsole->findChild<QPushButton*>(QStringLiteral("gdbConsoleExecuteBtn")) : nullptr; auto* consoleViewport = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
     QVERIFY(threadCombo && callStackTable && varsDock && gdbConsole && consoleCmdEdit && consoleExecBtn && consoleViewport);
     QTemporaryDir nestedDir; QVERIFY(nestedDir.isValid());
     const QString nestedCpp = nestedDir.filePath(QStringLiteral("nested_stack.cpp"));
@@ -584,11 +581,9 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     rankSpin->setValue(1); targetCombo->insertItem(0, QStringLiteral("nested_stack"), nestedCpp);
     QVERIFY(mainWindow.selectTargetByName(QStringLiteral("nested_stack")) && mainWindow.ensureTargetBinaryCompiled());
     auto* nestedSrcView = editorTabs->currentSourceCodeView(); QVERIFY(nestedSrcView != nullptr);
-    const int innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal"));
-    const int outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
+    const int innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal")), outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
     QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine); nestedSrcView->toggleBreakpoint(innerBpLine);
-    mainWindow.startTargetWorkflow();
-    QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
+    mainWindow.startTargetWorkflow(); QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
     QTRY_VERIFY_WITH_TIMEOUT(callStackTable->rowCount() >= 3 && threadCombo->count() >= 1, 5000);
     auto verifyFrameRow = [&](int row, const QString& exp) { const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString(), loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString(), addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString(); bool hexOk = false; const quint64 pa = addr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? addr.mid(2).toULongLong(&hexOk, 16) : 0ULL; QVERIFY2(fn.contains(exp) && loc.contains(QLatin1Char(':')) && hexOk && pa != 0ULL, qPrintable(fn)); };
     verifyFrameRow(0, QStringLiteral("innerCallee")); verifyFrameRow(1, QStringLiteral("outerCaller")); verifyFrameRow(2, QStringLiteral("main"));
@@ -606,48 +601,41 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     // Filter by "tol" to isolate Iconfig -> tol and hide outerSecret, clear filter to restore, then sort ascending vs descending.
     varSearch->setText(QStringLiteral("tol")); QApplication::processEvents();
     QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("Iconfig")).isValid() && findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("tol")).isValid() && !findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
-    varSearch->clear(); QApplication::processEvents();
-    QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
-    varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents();
-    const int icAsc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
-    varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents();
-    const int icDesc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
+    varSearch->clear(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
+    varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents(); const int icAsc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
+    varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); const int icDesc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     QVERIFY2(icAsc >= 0 && osAsc >= 0 && icAsc < osAsc && osDesc < icDesc, "Sorting NAME column asc/desc must deterministically invert top-level order");
-    consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click();
-    QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
-    consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click();
-    QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
-    consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click();
-    QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));
-
+    consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
+    consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
+    consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click(); QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));
+    // Verify toggling a breakpoint in a secondary file tab never steals editor focus back to the stopped file.
     const QString mfemCpp = nestedDir.filePath(QStringLiteral("MfemSolver.cpp"));
     { QFile mf(mfemCpp); QVERIFY(mf.open(QIODevice::WriteOnly)); for (int ln = 1; ln <= 90; ++ln) mf.write(QStringLiteral("// line %1\nint dummy_%1 = %1;\n").arg(ln).toUtf8()); }
-    mainWindow.loadSourceFile(mfemCpp); QApplication::processEvents();
-    auto* solverView = editorTabs->currentSourceCodeView();
+    mainWindow.loadSourceFile(mfemCpp); QApplication::processEvents(); auto* solverView = editorTabs->currentSourceCodeView();
     QVERIFY2(solverView != nullptr && solverView->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")), "Secondary file tab MfemSolver.cpp must become active");
     solverView->toggleBreakpoint(82); QTest::qWait(300); QApplication::processEvents();
-    QVERIFY2(editorTabs->currentSourceCodeView() == solverView && editorTabs->currentSourceCodeView()->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")),
-             "Toggling a breakpoint in MfemSolver.cpp while paused must NEVER switch active tab back to stopped file");
-
+    QVERIFY2(editorTabs->currentSourceCodeView() == solverView && editorTabs->currentSourceCodeView()->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")), "Toggling breakpoint in MfemSolver.cpp must NEVER switch active tab");
     QSignalSpy wpHitSpy(mainWindow.coordinator(), SIGNAL(watchpointHit(int,QString,QString,QString)));
     QVERIFY2(QMetaObject::invokeMethod(mainWindow.coordinator(), "setDataWatchpoint", Q_ARG(QString, QStringLiteral("watchedCounter")), Q_ARG(int, 0), Q_ARG(int, -1)), "Coordinator must expose setDataWatchpoint");
-    QVERIFY(mainWindow.continueExecutionWorkflow());
-    QTRY_VERIFY_WITH_TIMEOUT(wpHitSpy.count() >= 1, 6000);
-    QCOMPARE(wpHitSpy.first().at(1).toString(), QStringLiteral("watchedCounter"));
-    QCOMPARE(wpHitSpy.first().at(2).toString(), QStringLiteral("10"));
-    QCOMPARE(wpHitSpy.first().at(3).toString(), QStringLiteral("77"));
+    QVERIFY(mainWindow.continueExecutionWorkflow()); QTRY_VERIFY_WITH_TIMEOUT(wpHitSpy.count() >= 1, 6000);
+    QVERIFY(wpHitSpy.first().at(1).toString() == QStringLiteral("watchedCounter") && wpHitSpy.first().at(2).toString() == QStringLiteral("10") && wpHitSpy.first().at(3).toString() == QStringLiteral("77"));
     // Clear step-6 dummy breakpoint so step 7 launches with zero breakpoints prior to MPI_Barrier.
-    solverView->toggleBreakpoint(82);
-    mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0);
-
-    // 7. Verify 4-rank hybrid MPI + worker-thread "HEX" run with zero pre-barrier breakpoints, running-state inspection guards, and OMP auto-tuning.
+    solverView->toggleBreakpoint(82); mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0);
+    // 7. Verify MemView #memMapModeBtn + MemoryProfilerWidget controls, then launch 4-rank hybrid MPI + 4 MB heap target.
+    auto* memMapBtn = memView->findChild<QPushButton*>(QStringLiteral("memMapModeBtn")); auto* memProf = memView->findChild<QWidget*>(QStringLiteral("memoryProfilerWidget"));
+    auto* treemapCanvas = memView->findChild<QWidget*>(QStringLiteral("memoryTreemapCanvas")); auto* breakdownTable = memView->findChild<QTableWidget*>(QStringLiteral("memoryBreakdownTable"));
+    auto* profSearch = memView->findChild<QLineEdit*>(QStringLiteral("memProfileSearchEdit")); auto* preloadCheck = memView->findChild<QCheckBox*>(QStringLiteral("memTrackPreloadCheck"));
+    QVERIFY2(memMapBtn && memProf && treemapCanvas && breakdownTable && profSearch && preloadCheck && preloadCheck->isChecked(), "MemView must expose #memMapModeBtn and MemoryProfilerWidget child controls");
+    QVERIFY2(breakdownTable->isSortingEnabled() && breakdownTable->horizontalHeader()->sectionResizeMode(0) == QHeaderView::Interactive, "#memoryBreakdownTable must enable sorting and Interactive columns");
     const QString barrierCpp = nestedDir.filePath(QStringLiteral("barrier_hex.cpp"));
     { QFile bf(barrierCpp); QVERIFY(bf.open(QIODevice::WriteOnly));
       bf.write("#include <mpi.h>\n#include <cstdio>\n#include <cstdlib>\n#include <string>\n#include <thread>\n#include <unistd.h>\n#include <vector>\n"
+               "__attribute__((noinline)) std::vector<char> allocateSolverArena() { std::vector<char> b(4 * 1024 * 1024, 1); b[0] = 7; b.back() = 9; return b; }\n"
                "__attribute__((noinline)) int solveStage(int r, int it, int sum) {\n  int res = sum + r + it;\n  return res;\n}\n"
                "int main(int argc, char** argv) {\n  MPI_Init(&argc, &argv);\n"
                "  if (argc < 2 || std::string(argv[1]) != \"HEX\") { MPI_Finalize(); return 2; }\n"
                "  int r = -1, s = 0; MPI_Comm_rank(MPI_COMM_WORLD, &r); MPI_Comm_size(MPI_COMM_WORLD, &s);\n"
+               "  auto solverArena = allocateSolverArena();\n"
                "  const char* omp = std::getenv(\"OMP_NUM_THREADS\"); const char* pol = std::getenv(\"OMP_WAIT_POLICY\");\n"
                "  int nt = (omp && std::atoi(omp) > 0) ? std::atoi(omp) : 8; std::vector<std::thread> ws;\n"
                "  for (int t = 0; t < nt; ++t) ws.emplace_back([r, t]() { volatile int acc = r + t; (void)acc; });\n"
@@ -655,11 +643,9 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
                "  std::printf(\"PRE_BARRIER_R%d OMP=%s POL=%s\\n\", r, omp ? omp : \"NONE\", pol ? pol : \"NONE\"); std::fflush(stdout);\n"
                "  usleep(250000); int v = r + 1; MPI_Barrier(MPI_COMM_WORLD);\n"
                "  int g = 0; MPI_Allreduce(&v, &g, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);\n"
-               "  MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g);\n  MPI_Finalize();\n  return (out > 0 && s == 4) ? 0 : 1;\n}\n"); }
-    auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings();
-    projCfg.targetArguments = QStringLiteral("HEX"); projCfg.programArguments = "HEX";
-    gridlock::core::ConfigManager::instance().saveProjectSettings(projCfg);
-    qunsetenv("OMP_NUM_THREADS"); qunsetenv("OMP_WAIT_POLICY");
+               "  MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g + solverArena[0]);\n  MPI_Finalize();\n  return (out > 0 && s == 4) ? 0 : 1;\n}\n"); }
+    auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings(); projCfg.targetArguments = QStringLiteral("HEX"); projCfg.programArguments = "HEX";
+    gridlock::core::ConfigManager::instance().saveProjectSettings(projCfg); qunsetenv("OMP_NUM_THREADS"); qunsetenv("OMP_WAIT_POLICY");
     rankSpin->setValue(4); targetCombo->insertItem(0, QStringLiteral("barrier_hex"), barrierCpp);
     QVERIFY(mainWindow.selectTargetByName(QStringLiteral("barrier_hex")) && mainWindow.ensureTargetBinaryCompiled());
     auto* barrierView = editorTabs->currentSourceCodeView(); QVERIFY(barrierView != nullptr);
@@ -675,19 +661,34 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QSignalSpy cmdSpy(mainWindow.coordinator(), SIGNAL(commandSentToGdb(int,QString)));
     mainWindow.coordinator()->requestStackAndThreads(0); mainWindow.coordinator()->selectStackFrame(0, 1, 0);
     mainWindow.coordinator()->evaluateExpression(0, QStringLiteral("r")); mainWindow.coordinator()->sendDebuggerCommand(0, QStringLiteral("bt"));
-    mainWindow.onRankSelected(1); mainWindow.onRankSelected(0);
-    QCOMPARE(cmdSpy.count(), 0);
+    mainWindow.onRankSelected(1); mainWindow.onRankSelected(0); QCOMPARE(cmdSpy.count(), 0);
     // Verify OMP_NUM_THREADS and OMP_WAIT_POLICY=PASSIVE appear in launch summary and all 4 ranks pass both barriers to solveBp.
     const QString launchSummary = mainWindow.coordinator()->lastLaunchCommandSummary();
     QVERIFY2(launchSummary.contains(QStringLiteral("OMP_NUM_THREADS=")) && launchSummary.contains(QStringLiteral("OMP_WAIT_POLICY=PASSIVE")), qPrintable(launchSummary));
     auto* progOut = mainWindow.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView")); QVERIFY(progOut != nullptr);
     QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), solveBp, 10000);
-    QTRY_VERIFY_WITH_TIMEOUT(([&]() {
-        const QString out = progOut->toPlainText();
-        return out.contains(QStringLiteral("PRE_BARRIER_R0")) && out.contains(QStringLiteral("PRE_BARRIER_R1")) &&
-               out.contains(QStringLiteral("PRE_BARRIER_R2")) && out.contains(QStringLiteral("PRE_BARRIER_R3")) &&
-               out.contains(QStringLiteral("POL=PASSIVE")) && !out.contains(QStringLiteral("OMP=NONE"));
-    })(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QString o = progOut->toPlainText(); return o.contains(QStringLiteral("PRE_BARRIER_R0")) && o.contains(QStringLiteral("PRE_BARRIER_R1")) && o.contains(QStringLiteral("PRE_BARRIER_R2")) && o.contains(QStringLiteral("PRE_BARRIER_R3")) && o.contains(QStringLiteral("POL=PASSIVE")) && !o.contains(QStringLiteral("OMP=NONE")); })(), 5000);
+    // 8. Switch MemView to LIBRARY MEMORY MAP, refreshForPid on live Rank 0, and verify /proc/smaps + LD_PRELOAD heap + treemap + sort/filter.
+    memMapBtn->click(); treemapCanvas->resize(720, 260); treemapCanvas->show(); QApplication::processEvents();
+    const qint64 liveRankPid = mainWindow.coordinator()->getPidForRank(0); QVERIFY(liveRankPid > 0);
+    int rectCount = 0; QVERIFY(QMetaObject::invokeMethod(memProf, "refreshForPid", Q_ARG(qint64, liveRankPid)) && QMetaObject::invokeMethod(memProf, "treemapRectCount", Q_RETURN_ARG(int, rectCount)));
+    QVERIFY2(breakdownTable->rowCount() >= 3 && rectCount >= 2, qPrintable(QStringLiteral("rows=%1 rects=%2").arg(breakdownTable->rowCount()).arg(rectCount)));
+    // Confirm real shared libraries (libc/libstdc++/libmpi) and >=3.8 MB heap allocation appear in #memoryBreakdownTable.
+    bool sawSharedLib = false, sawArena = false;
+    for (int r = 0; r < breakdownTable->rowCount(); ++r) {
+        const QString lib = breakdownTable->item(r, 0) ? breakdownTable->item(r, 0)->text() : QString(), cat = breakdownTable->item(r, 1) ? breakdownTable->item(r, 1)->text() : QString(), sym = breakdownTable->item(r, 5) ? breakdownTable->item(r, 5)->text() : QString();
+        const double mb = breakdownTable->item(r, 2) ? breakdownTable->item(r, 2)->text().section(QLatin1Char(' '), 0, 0).toDouble() : 0.0;
+        if ((lib.contains(QStringLiteral("libc")) || lib.contains(QStringLiteral("libstdc++")) || lib.contains(QStringLiteral("libmpi"))) && mb > 0.0) sawSharedLib = true;
+        if ((lib.contains(QStringLiteral("barrier_hex")) || sym.contains(QStringLiteral("allocateSolverArena")) || cat.contains(QStringLiteral("Heap"))) && mb >= 3.8) sawArena = true;
+    }
+    QVERIFY2(sawSharedLib && sawArena, "Breakdown table must include live shared libraries and >=3.8 MB arena attribution");
+    // Sort by Live/RSS MB descending and filter via #memProfileSearchEdit for "libc".
+    breakdownTable->sortByColumn(2, Qt::DescendingOrder); QApplication::processEvents();
+    QVERIFY(breakdownTable->item(0, 2)->text().section(' ', 0, 0).toDouble() >= breakdownTable->item(breakdownTable->rowCount() - 1, 2)->text().section(' ', 0, 0).toDouble());
+    auto visProfCount = [&]() { int c = 0; for (int r = 0; r < breakdownTable->rowCount(); ++r) if (!breakdownTable->isRowHidden(r)) ++c; return c; };
+    const int fullProfCount = visProfCount(); profSearch->setText(QStringLiteral("libc")); QApplication::processEvents();
+    QVERIFY(visProfCount() > 0 && visProfCount() < fullProfCount);
+    profSearch->clear(); QApplication::processEvents(); QCOMPARE(visProfCount(), fullProfCount);
     mainWindow.stopTargetWorkflow();
 }
 

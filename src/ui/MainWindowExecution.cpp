@@ -483,10 +483,14 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
                     if (m_callStackDockWidget) m_callStackDockWidget->clearFrames();
                     return;
                 }
-                // Cache unwound frames per rank and update the dock immediately if `rank` is focused.
+                // Cache unwound frames per rank and update CallStackDock + MemView profiler if focused.
                 m_cachedStackFrames[rank] = frames;
                 if (rank == m_focusedRank && m_callStackDockWidget) {
                     m_callStackDockWidget->setStackFrames(frames, m_selectedFrameLevel.value(rank, 0));
+                }
+                if (rank == m_focusedRank && m_memView && m_coordinator) {
+                    m_memView->notifyRankStoppedOrSelected(rank, m_coordinator->getPidForRank(rank),
+                                                           std::max(1, m_coordinator->getProcessCount()));
                 }
 
                 // Surface active MPI_* primitive and DWARF file:line in MpiDiagnosticsWidget.
@@ -496,23 +500,17 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
                         if (frames[i].function.startsWith(QStringLiteral("MPI_")) ||
                             frames[i].function.startsWith(QStringLiteral("PMPI_")) ||
                             frames[i].function.contains(QStringLiteral("barrierWait"))) {
-                            mpiFrame = &frames[i];
-                            break;
+                            mpiFrame = &frames[i]; break;
                         }
                     }
                     const qint64 livePid = m_coordinator ? m_coordinator->getPidForRank(rank) : 0;
-                    const QString locStr =
-                        (!mpiFrame->file.isEmpty() && mpiFrame->line > 0)
-                            ? QStringLiteral("%1:%2 (0x%3)")
-                                  .arg(QFileInfo(mpiFrame->file).fileName())
-                                  .arg(mpiFrame->line)
-                                  .arg(mpiFrame->address, 8, 16, QChar('0'))
-                            : QStringLiteral("0x%1").arg(mpiFrame->address, 8, 16, QChar('0'));
+                    const QString locStr = (!mpiFrame->file.isEmpty() && mpiFrame->line > 0)
+                        ? QStringLiteral("%1:%2 (0x%3)").arg(QFileInfo(mpiFrame->file).fileName()).arg(mpiFrame->line).arg(mpiFrame->address, 8, 16, QChar('0'))
+                        : QStringLiteral("0x%1").arg(mpiFrame->address, 8, 16, QChar('0'));
                     m_mpiDiagnosticsWidget->updateLiveRankRow(
                         rank, livePid, QStringLiteral("PAUSED"),
                         mpiFrame->function.isEmpty() ? QStringLiteral("main") : mpiFrame->function,
-                        QStringLiteral("LIVE"), locStr,
-                        m_coordinator ? std::max(1, m_coordinator->getProcessCount()) : 1);
+                        QStringLiteral("LIVE"), locStr, m_coordinator ? std::max(1, m_coordinator->getProcessCount()) : 1);
                 }
             });
 

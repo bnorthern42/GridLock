@@ -428,6 +428,9 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     for (const char* sig : {"SIGPIPE", "SIGUSR1", "SIGUSR2", "SIG32", "SIG33", "SIG34"})
       writeCmd(id, QString("-interpreter-exec console \"handle %1 nostop noprint pass\"\n").arg(sig).toUtf8().constData());
     writeCmd(id, "-gdb-set max-value-size unlimited\n");
+    const QString memTrackSo = qEnvironmentVariable("GRIDLOCK_MEMTRACK_SO");
+    if (!memTrackSo.isEmpty() && QFileInfo::exists(memTrackSo))
+      writeCmd(id, QStringLiteral("-gdb-set environment LD_PRELOAD %1\n").arg(memTrackSo).toUtf8().constData());
     if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) {
       QString escWd = workDir; escWd.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
       writeCmd(id, QStringLiteral("-environment-cd \"%1\"\n").arg(escWd).toUtf8().constData());
