@@ -572,7 +572,7 @@ void DapCoordinator::terminateSession() {
 void DapCoordinator::readyReadStandardOutput() { processRawData(m_process->readAllStandardOutput()); }
 
 /**
- * @brief Incrementally extracts `Content-Length` framed JSON payloads and parses them on `QThreadPool`.
+ * @brief Incrementally extracts `Content-Length` framed JSON payloads and dispatches them in strict FIFO order.
  * @param data Newly read raw byte chunk from the `lldb-dap` stdout pipe.
  */
 void DapCoordinator::processRawData(const QByteArray& data) {
@@ -605,19 +605,16 @@ void DapCoordinator::processRawData(const QByteArray& data) {
     const QByteArray payloadData = m_buffer.mid(headerEndIndex + 4, contentLength);
     m_buffer.remove(0, totalMessageLength);
 
-    // Offload JSON deserialization to the global thread pool and marshal back to the UI thread.
-    QThreadPool::globalInstance()->start([this, payloadData]() {
-      QJsonParseError parseError;
-      const QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
-      if (parseError.error != QJsonParseError::NoError) {
-        qWarning() << "Failed to parse DAP JSON payload:" << parseError.errorString();
-        return;
-      }
-      if (doc.isObject()) {
-        const QJsonObject obj = doc.object();
-        QMetaObject::invokeMethod(this, [this, obj]() { handleMessage(obj); }, Qt::QueuedConnection);
-      }
-    });
+    // Parse and dispatch each frame sequentially so Frame k+1 can never overtake Frame k.
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(payloadData, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+      qWarning() << "Failed to parse DAP JSON payload:" << parseError.errorString();
+      continue;
+    }
+    if (doc.isObject()) {
+      handleMessage(doc.object());
+    }
   }
 }
 

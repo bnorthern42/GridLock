@@ -74,6 +74,21 @@ void TestDapParser::testMultipleMessages() {
 
     QJsonObject msg2 = spy.takeFirst().at(0).toJsonObject();
     QCOMPARE(msg2["command"].toString(), QString("next"));
+
+    // Feed a burst of 20 back-to-back numbered DAP frames in a single chunk and verify strict FIFO order.
+    spy.clear();
+    QByteArray burst;
+    for (int seq = 1; seq <= 20; ++seq) {
+        const QByteArray body = QStringLiteral("{\"type\":\"event\",\"event\":\"output\",\"seq\":%1}").arg(seq).toUtf8();
+        burst.append(QStringLiteral("Content-Length: %1\r\n\r\n").arg(body.size()).toUtf8());
+        burst.append(body);
+    }
+    coordinator.processRawData(burst);
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 20, 5000);
+    for (int i = 0; i < 20; ++i) {
+        const QJsonObject m = spy.takeFirst().at(0).toJsonObject();
+        QCOMPARE(m["seq"].toInt(), i + 1);
+    }
 }
 
 QTEST_GUILESS_MAIN(TestDapParser)
