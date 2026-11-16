@@ -68,6 +68,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
                      int line,
                      const QString& condition = QString(),
                      int rankFilter = -1) override;
+  /** @brief Configures hit ignore count (`ignoreCount > 0`) and Logpoint trace message for `file:line`. */
+  void configureBreakpointOptions(const QString& file, int line, int ignoreCount, const QString& logMessage) override;
 
   /** @brief Clears all pending and live breakpoints across all rank sessions. */
   void clearBreakpoints() override;
@@ -251,6 +253,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
     int line = 0;       ///< One-based source line number.
     QString condition;  ///< Optional conditional expression (`-c`).
     int rankFilter = -1; ///< Target zero-based rank index, or `-1` for all ranks.
+    int ignoreCount = 0; ///< Number of hits to ignore before stopping (0 = stop immediately).
+    QString logMessage; ///< Non-empty trace expression message for non-suspending Logpoints.
   };
 
   /**
@@ -272,6 +276,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QStringList pendingAfterStopCmds;    ///< MI commands queued while running to execute upon transient SIGINT stop.
     bool autoContinueAfterPending = false; ///< True when rank was interrupted solely to apply pending breakpoints.
     int pendingInterruptSignals = 0;       ///< Count of in-flight synthetic SIGINTs sent for transient interrupts.
+    QString pendingLogpointMessage;        ///< Active Logpoint template awaiting `209-stack-list-variables`.
+    QMap<QString, QString> pendingLogpointArgs; ///< Frame args captured from `*stopped` for Logpoint expansion.
   };
 
   /**

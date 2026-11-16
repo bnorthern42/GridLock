@@ -329,17 +329,15 @@ void DapCoordinator::setBreakpoint(const QString& file,
     return;
   }
 
-  QJsonObject args;
-  args["source"] = QJsonObject{{"path", file}};
-  QJsonArray breakpointsArray;
+  QJsonObject args; args["source"] = QJsonObject{{"path", file}}; QJsonArray breakpointsArray;
   for (int l : m_breakpoints[file]) {
-    QJsonObject bp{{"line", l}};
-    const QString cond = m_breakpointConditions.value(file).value(l);
-    if (!cond.isEmpty()) bp["condition"] = cond;
+    QJsonObject bp{{"line", l}}; const QString cond = m_breakpointConditions.value(file).value(l); if (!cond.isEmpty()) bp["condition"] = cond;
+    const auto extra = m_breakpointExtras.value(QStringLiteral("%1:%2").arg(file).arg(l));
+    if (extra.ignoreCount > 0) bp["hitCondition"] = QString::number(extra.ignoreCount);
+    if (!extra.logMessage.isEmpty()) bp["logMessage"] = extra.logMessage;
     breakpointsArray.append(bp);
   }
-  args["breakpoints"] = breakpointsArray;
-  sendRequest("setBreakpoints", args);
+  args["breakpoints"] = breakpointsArray; sendRequest("setBreakpoints", args);
 }
 
 /**

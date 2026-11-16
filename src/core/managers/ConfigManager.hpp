@@ -94,6 +94,19 @@ struct ProjectSettings {
 };
 
 /**
+ * @struct BreakpointConfig
+ * @brief Per-breakpoint predicate, hit ignore count, and non-suspending Logpoint message.
+ */
+struct BreakpointConfig {
+  QString file;       ///< Source file path.
+  int line = 0;       ///< One-based source line number.
+  int rankFilter = -1; ///< Target zero-based MPI rank, or -1 for all ranks.
+  QString condition;  ///< Optional boolean C/C++ condition expression.
+  int ignoreCount = 0; ///< Number of hits to ignore before stopping (0 = stop immediately).
+  QString logMessage; ///< Non-empty formatted trace message for non-suspending Logpoints.
+};
+
+/**
  * @class ConfigManager
  * @brief Singleton facade over `config.toml`, `.gridlock/` TOML files, and `QSettings`.
  */
@@ -180,6 +193,11 @@ class ConfigManager {
    */
   void saveBreakpoints(const QMap<QString, QSet<int>>& breakpoints,
                        QString targetExecutable = QString());
+
+  /** @brief Loads extended per-breakpoint metadata (condition, ignoreCount, logMessage). */
+  QList<BreakpointConfig> getBreakpointConfigs(const QString& targetExecutable = QString()) const;
+  /** @brief Persists extended per-breakpoint metadata (condition, ignoreCount, logMessage). */
+  void saveBreakpointConfigs(const QList<BreakpointConfig>& configs, const QString& targetExecutable = QString());
 
   /** @brief Loads per-workspace target and watch settings from `.gridlock/settings.toml`. */
   ProjectSettings loadProjectSettings() const;

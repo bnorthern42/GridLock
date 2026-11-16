@@ -574,35 +574,34 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
       nf.write("#include <mpi.h>\nint watchedCounter = 10;\nstruct MeshCfg { int dims = 3; };\nstruct InputConfig { MeshCfg mesh; double tol = 1e-6; };\n"
                "__attribute__((noinline)) int innerCallee(int innerVal) {\n    int innerLocal = innerVal + 7;\n    return innerLocal;\n}\n"
                "__attribute__((noinline)) int outerCaller(int outerSecret) {\n    InputConfig Iconfig{};\n    int outerLocal = outerSecret + (Iconfig.mesh.dims > 0 ? 1 : 0) + (Iconfig.tol > 0.0 ? 0 : 1);\n    int res = innerCallee(outerLocal);\n    return res;\n}\n"
-               "int main(int argc, char** argv) {\n    MPI_Init(&argc, &argv);\n    int total = outerCaller(4242);\n    watchedCounter = 77;\n    MPI_Finalize();\n    return (total + watchedCounter) == 0 ? 1 : 0;\n}\n"); }
+               "__attribute__((noinline)) int loopProbe(int step) {\n    int v = step * 10;\n    return v;\n}\n"
+               "int main(int argc, char** argv) {\n    MPI_Init(&argc, &argv);\n    int total = outerCaller(4242);\n    for (int step = 1; step <= 4; ++step) total += loopProbe(step);\n    watchedCounter = 77;\n    MPI_Finalize();\n    return (total + watchedCounter) == 0 ? 1 : 0;\n}\n"); }
     rankSpin->setValue(1); targetCombo->insertItem(0, QStringLiteral("nested_stack"), nestedCpp);
     QVERIFY(mainWindow.selectTargetByName(QStringLiteral("nested_stack")) && mainWindow.ensureTargetBinaryCompiled());
     auto* nestedSrcView = editorTabs->currentSourceCodeView(); QVERIFY(nestedSrcView != nullptr);
     const int innerBpLine = mainWindow.findSourceLineForStatement(QStringLiteral("return innerLocal")), outerCallLine = mainWindow.findSourceLineForStatement(QStringLiteral("innerCallee(outerLocal)"));
-    QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine); nestedSrcView->toggleBreakpoint(innerBpLine);
+    const int logLine = mainWindow.findSourceLineForStatement(QStringLiteral("int v = step * 10")), ignLine = mainWindow.findSourceLineForStatement(QStringLiteral("return v"));
+    QVERIFY(innerBpLine > 0 && outerCallLine > innerBpLine && logLine > 0 && ignLine > logLine); nestedSrcView->toggleBreakpoint(innerBpLine);
     mainWindow.startTargetWorkflow(); QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), innerBpLine, 8000);
     QTRY_VERIFY_WITH_TIMEOUT(callStackTable->rowCount() >= 3 && threadCombo->count() >= 1, 5000);
-    // Verify CLion-style inline variable ghost text appears when paused, respects ConfigManager/Preferences toggle, and clears on stop.
     QTRY_VERIFY_WITH_TIMEOUT(nestedSrcView->inlineGhostTextForLine(innerBpLine).contains(QStringLiteral("// innerLocal = ")), 5000);
     cfg.setInlineVariableValuesEnabled(false); QVERIFY(nestedSrcView->inlineGhostTextForLine(innerBpLine).isEmpty());
     cfg.setInlineVariableValuesEnabled(true); QVERIFY(!nestedSrcView->inlineGhostTextForLine(innerBpLine).isEmpty());
-    { gridlock::ui::PreferencesDialog pd(&mainWindow); auto* ivChk = pd.findChild<QCheckBox*>(QStringLiteral("inlineVarValuesCheck")); QVERIFY(ivChk && ivChk->isChecked()); }
+    { gridlock::ui::PreferencesDialog pd(&mainWindow); auto* ivChk = pd.findChild<QCheckBox*>(QStringLiteral("inlineVarValuesCheck")); QVERIFY(ivChk && ivChk->isChecked());
+      gridlock::ui::ConditionalBreakpointDialog cbd(QString(), &mainWindow); QVERIFY(cbd.findChild<QSpinBox*>(QStringLiteral("bpIgnoreCountSpin")) && cbd.findChild<QCheckBox*>(QStringLiteral("bpLogpointCheck")) && cbd.findChild<QLineEdit*>(QStringLiteral("bpLogMessageEdit"))); }
+    nestedSrcView->toggleBreakpoint(outerCallLine); nestedSrcView->setBreakpointOptions(outerCallLine, QString(), 3, QStringLiteral("iter={i}"));
+    QVERIFY(nestedSrcView->isLogpointForLine(outerCallLine) && nestedSrcView->breakpointIgnoreCountForLine(outerCallLine) == 3 && nestedSrcView->breakpointTooltipForLine(outerCallLine).contains(QStringLiteral("Logpoint")) && nestedSrcView->breakpointTooltipForLine(outerCallLine).contains(QLatin1Char('3')));
+    nestedSrcView->toggleBreakpoint(outerCallLine);
     auto verifyFrameRow = [&](int row, const QString& exp) { const QString fn = callStackTable->item(row, 1) ? callStackTable->item(row, 1)->text() : QString(), loc = callStackTable->item(row, 2) ? callStackTable->item(row, 2)->text() : QString(), addr = callStackTable->item(row, 3) ? callStackTable->item(row, 3)->text() : QString(); bool hexOk = false; const quint64 pa = addr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? addr.mid(2).toULongLong(&hexOk, 16) : 0ULL; QVERIFY2(fn.contains(exp) && loc.contains(QLatin1Char(':')) && hexOk && pa != 0ULL, qPrintable(fn)); };
     verifyFrameRow(0, QStringLiteral("innerCallee")); verifyFrameRow(1, QStringLiteral("outerCaller")); verifyFrameRow(2, QStringLiteral("main"));
-    callStackTable->selectRow(1); QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1));
-    QTRY_COMPARE_WITH_TIMEOUT(editorTabs->currentSourceCodeView()->executionLine(), outerCallLine, 5000);
+    callStackTable->selectRow(1); QMetaObject::invokeMethod(callStackTable, "cellClicked", Q_ARG(int, 1), Q_ARG(int, 1)); QTRY_COMPARE_WITH_TIMEOUT(editorTabs->currentSourceCodeView()->executionLine(), outerCallLine, 5000);
     auto* varsTree = varsDock->findChild<QTreeView*>(); auto* varSearch = varsDock->findChild<QLineEdit*>(QStringLiteral("variableSearchEdit"));
     QVERIFY2(varsTree != nullptr && varsTree->model() != nullptr && varSearch != nullptr && varsTree->isSortingEnabled() && varsTree->header()->sectionResizeMode(0) == QHeaderView::Interactive, "VariablesDockWidget must expose #variableSearchEdit, sortable headers, and interactive column resizing");
     auto findVarIdx = [&](const QModelIndex& parent, const QString& name) { for (int r = 0; r < varsTree->model()->rowCount(parent); ++r) { const QModelIndex i = varsTree->model()->index(r, 0, parent); if (varsTree->model()->data(i).toString() == name) return i; } return QModelIndex(); };
-    // Verify {...} struct Iconfig is expandable, expand Iconfig -> mesh -> dims, then filter and sort NAME column.
     QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")), os = findVarIdx({}, QStringLiteral("outerSecret")); return ic.isValid() && varsTree->model()->hasChildren(ic) && varsTree->model()->data(ic.siblingAtColumn(1)).toString().contains(QLatin1Char('{')) && os.isValid() && varsTree->model()->data(os.siblingAtColumn(1)).toString().contains(QStringLiteral("4242")); })(), 5000);
-    varsTree->expand(findVarIdx({}, QStringLiteral("Iconfig")));
-    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")); const QModelIndex m = findVarIdx(ic, QStringLiteral("mesh")), t = findVarIdx(ic, QStringLiteral("tol")); const QString tv = varsTree->model()->data(t.siblingAtColumn(1)).toString(); return m.isValid() && varsTree->model()->hasChildren(m) && t.isValid() && (tv.contains(QStringLiteral("1e")) || tv.contains(QStringLiteral("e-07"))); })(), 5000);
-    varsTree->expand(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")));
-    QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex dm = findVarIdx(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")), QStringLiteral("dims")); return dm.isValid() && varsTree->model()->data(dm.siblingAtColumn(1)).toString().contains(QLatin1Char('3')); })(), 5000);
-    // Filter by "tol" to isolate Iconfig -> tol and hide outerSecret, clear filter to restore, then sort ascending vs descending.
-    varSearch->setText(QStringLiteral("tol")); QApplication::processEvents();
-    QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("Iconfig")).isValid() && findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("tol")).isValid() && !findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
+    varsTree->expand(findVarIdx({}, QStringLiteral("Iconfig"))); QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex ic = findVarIdx({}, QStringLiteral("Iconfig")); const QModelIndex m = findVarIdx(ic, QStringLiteral("mesh")), t = findVarIdx(ic, QStringLiteral("tol")); const QString tv = varsTree->model()->data(t.siblingAtColumn(1)).toString(); return m.isValid() && varsTree->model()->hasChildren(m) && t.isValid() && (tv.contains(QStringLiteral("1e")) || tv.contains(QStringLiteral("e-07"))); })(), 5000);
+    varsTree->expand(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh"))); QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QModelIndex dm = findVarIdx(findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("mesh")), QStringLiteral("dims")); return dm.isValid() && varsTree->model()->data(dm.siblingAtColumn(1)).toString().contains(QLatin1Char('3')); })(), 5000);
+    varSearch->setText(QStringLiteral("tol")); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("Iconfig")).isValid() && findVarIdx(findVarIdx({}, QStringLiteral("Iconfig")), QStringLiteral("tol")).isValid() && !findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
     varSearch->clear(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("outerSecret")).isValid(), 3000);
     varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents(); const int icAsc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); const int icDesc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
@@ -610,18 +609,20 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
     consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
     consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click(); QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));
-    // Verify toggling a breakpoint in a secondary file tab never steals editor focus back to the stopped file.
     const QString mfemCpp = nestedDir.filePath(QStringLiteral("MfemSolver.cpp"));
     { QFile mf(mfemCpp); QVERIFY(mf.open(QIODevice::WriteOnly)); for (int ln = 1; ln <= 90; ++ln) mf.write(QStringLiteral("// line %1\nint dummy_%1 = %1;\n").arg(ln).toUtf8()); }
     mainWindow.loadSourceFile(mfemCpp); QApplication::processEvents(); auto* solverView = editorTabs->currentSourceCodeView();
     QVERIFY2(solverView != nullptr && solverView->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")), "Secondary file tab MfemSolver.cpp must become active");
     solverView->toggleBreakpoint(82); QTest::qWait(300); QApplication::processEvents();
     QVERIFY2(editorTabs->currentSourceCodeView() == solverView && editorTabs->currentSourceCodeView()->currentFile().endsWith(QStringLiteral("MfemSolver.cpp")), "Toggling breakpoint in MfemSolver.cpp must NEVER switch active tab");
-    QSignalSpy wpHitSpy(mainWindow.coordinator(), SIGNAL(watchpointHit(int,QString,QString,QString)));
-    QVERIFY2(QMetaObject::invokeMethod(mainWindow.coordinator(), "setDataWatchpoint", Q_ARG(QString, QStringLiteral("watchedCounter")), Q_ARG(int, 0), Q_ARG(int, -1)), "Coordinator must expose setDataWatchpoint");
-    QVERIFY(mainWindow.continueExecutionWorkflow()); QTRY_VERIFY_WITH_TIMEOUT(wpHitSpy.count() >= 1, 6000);
-    QVERIFY(wpHitSpy.first().at(1).toString() == QStringLiteral("watchedCounter") && wpHitSpy.first().at(2).toString() == QStringLiteral("10") && wpHitSpy.first().at(3).toString() == QStringLiteral("77"));
-    // Clear step-6 dummy breakpoint so step 7 launches with zero breakpoints prior to MPI_Barrier.
+    nestedSrcView->toggleBreakpoint(logLine); nestedSrcView->setBreakpointOptions(logLine, QString(), 0, QStringLiteral("TRACE_STEP_HIT"));
+    nestedSrcView->toggleBreakpoint(ignLine); nestedSrcView->setBreakpointOptions(ignLine, QString(), 2, QString());
+    auto* logProgOut = mainWindow.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView")); QVERIFY(logProgOut != nullptr);
+    QVERIFY(mainWindow.continueExecutionWorkflow()); QTRY_COMPARE_WITH_TIMEOUT(nestedSrcView->executionLine(), ignLine, 8000);
+    QTRY_VERIFY_WITH_TIMEOUT(logProgOut->toPlainText().contains(QStringLiteral("TRACE_STEP_HIT")), 5000); QTRY_VERIFY_WITH_TIMEOUT(findVarIdx({}, QStringLiteral("v")).isValid() && varsTree->model()->data(findVarIdx({}, QStringLiteral("v")).siblingAtColumn(1)).toString().contains(QStringLiteral("30")), 5000);
+    nestedSrcView->toggleBreakpoint(logLine); nestedSrcView->toggleBreakpoint(ignLine);
+    QSignalSpy wpHitSpy(mainWindow.coordinator(), SIGNAL(watchpointHit(int,QString,QString,QString))); QVERIFY2(QMetaObject::invokeMethod(mainWindow.coordinator(), "setDataWatchpoint", Q_ARG(QString, QStringLiteral("watchedCounter")), Q_ARG(int, 0), Q_ARG(int, -1)), "Coordinator must expose setDataWatchpoint"); QTest::qWait(150);
+    QVERIFY(mainWindow.continueExecutionWorkflow()); QTRY_VERIFY_WITH_TIMEOUT(wpHitSpy.count() >= 1, 6000); QVERIFY(wpHitSpy.first().at(1).toString() == QStringLiteral("watchedCounter") && wpHitSpy.first().at(2).toString() == QStringLiteral("10") && wpHitSpy.first().at(3).toString() == QStringLiteral("77"));
     solverView->toggleBreakpoint(82); mainWindow.stopTargetWorkflow(); QCOMPARE(callStackTable->rowCount(), 0); QVERIFY(nestedSrcView->inlineGhostTextForLine(innerBpLine).isEmpty());
     // 7. Verify MemView #memMapModeBtn + MemoryProfilerWidget controls, then launch 4-rank hybrid MPI + 4 MB heap target.
     auto* memMapBtn = memView->findChild<QPushButton*>(QStringLiteral("memMapModeBtn")); auto* memProf = memView->findChild<QWidget*>(QStringLiteral("memoryProfilerWidget"));

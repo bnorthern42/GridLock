@@ -28,6 +28,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QRadioButton>
 #include <QScreen>
 #include <QSettings>
@@ -383,6 +384,38 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     condRow->addWidget(m_presetCombo);
     rootLayout->addLayout(condRow);
 
+    // Ignore Count (Pass Count) row: skip first N hits before breaking.
+    auto* ignoreRow = new QHBoxLayout();
+    ignoreRow->setContentsMargins(0, 0, 0, 0);
+    ignoreRow->setSpacing(6);
+    ignoreRow->addWidget(new QLabel(QStringLiteral("Ignore:"), this));
+    m_ignoreCountSpin = new QSpinBox(this);
+    m_ignoreCountSpin->setObjectName(QStringLiteral("bpIgnoreCountSpin"));
+    m_ignoreCountSpin->setRange(0, 10000000);
+    m_ignoreCountSpin->setSuffix(QStringLiteral(" hits (0 = stop immediately)"));
+    m_ignoreCountSpin->setFixedHeight(24);
+    ignoreRow->addWidget(m_ignoreCountSpin, 1);
+    rootLayout->addLayout(ignoreRow);
+
+    // Non-Suspending Logpoint row: stream formatted {expr} message without pausing rank.
+    auto* logRow = new QHBoxLayout();
+    logRow->setContentsMargins(0, 0, 0, 0);
+    logRow->setSpacing(6);
+    m_logpointCheck = new QCheckBox(QStringLiteral("Logpoint:"), this);
+    m_logpointCheck->setObjectName(QStringLiteral("bpLogpointCheck"));
+    m_logMessageEdit = new QLineEdit(this);
+    m_logMessageEdit->setObjectName(QStringLiteral("bpLogMessageEdit"));
+    m_logMessageEdit->setFixedHeight(24);
+    m_logMessageEdit->setPlaceholderText(QStringLiteral("e.g., solver iter={iter}, norm={x_norm} (prints without pausing rank)"));
+    m_logMessageEdit->setEnabled(false);
+    connect(m_logpointCheck, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_logMessageEdit) m_logMessageEdit->setEnabled(on);
+        if (m_suspendCheck) m_suspendCheck->setChecked(!on);
+    });
+    logRow->addWidget(m_logpointCheck);
+    logRow->addWidget(m_logMessageEdit, 1);
+    rootLayout->addLayout(logRow);
+
     // Populate condition field immediately when an MPI preset item is selected.
     connect(m_presetCombo, &QComboBox::activated, this, [this](int index) {
         if (index > 0 && m_presetCombo) {
@@ -599,6 +632,23 @@ void ConditionalBreakpointDialog::applyQuickPreset(const QString& expr) {
  */
 QString ConditionalBreakpointDialog::condition() const {
     return m_conditionEdit ? m_conditionEdit->text().trimmed() : QString();
+}
+
+/** @brief Returns configured pass/ignore hit count (`0` = stop immediately). */
+int ConditionalBreakpointDialog::ignoreCount() const { return m_ignoreCountSpin ? m_ignoreCountSpin->value() : 0; }
+/** @brief Sets the pass/ignore hit count spinbox value. */
+void ConditionalBreakpointDialog::setIgnoreCount(int count) { if (m_ignoreCountSpin) m_ignoreCountSpin->setValue(qMax(0, count)); }
+/** @brief Returns true when Non-Suspending Logpoint mode is active with a non-empty message. */
+bool ConditionalBreakpointDialog::isLogpoint() const { return m_logpointCheck && m_logpointCheck->isChecked() && !logMessage().isEmpty(); }
+/** @brief Returns the trimmed Logpoint trace message (empty when disabled). */
+QString ConditionalBreakpointDialog::logMessage() const {
+    return (m_logpointCheck && m_logpointCheck->isChecked() && m_logMessageEdit) ? m_logMessageEdit->text().trimmed() : QString();
+}
+/** @brief Populates the Logpoint checkbox and trace message field. */
+void ConditionalBreakpointDialog::setLogMessage(const QString& message) {
+    const QString clean = message.trimmed();
+    if (m_logpointCheck) m_logpointCheck->setChecked(!clean.isEmpty());
+    if (m_logMessageEdit) { m_logMessageEdit->setText(clean); m_logMessageEdit->setEnabled(!clean.isEmpty()); }
 }
 
 /**

@@ -402,6 +402,21 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
     return true;
   }
 
+  // Token 209: Expand unresolved {expr} placeholders in a pending Logpoint message and auto-continue rank.
+  if (line.startsWith(QLatin1String("209^done")) || line.startsWith(QLatin1String("209^error"))) {
+    if (static_cast<size_t>(rankId) < m_processes.size() && m_processes[rankId] && !m_processes[rankId]->pendingLogpointMessage.isEmpty()) {
+      auto& rp = m_processes[rankId];
+      static const QRegularExpression rxLv(QStringLiteral("\\{name=\"([^\"]+)\",(?:type=\"[^\"]*\",)?value=\"((?:\\\\.|[^\"])*)\"\\}"));
+      auto it = rxLv.globalMatch(line); while (it.hasNext()) { const auto m = it.next(); rp->pendingLogpointArgs.insert(m.captured(1), unescapeMiValue(m.captured(2))); }
+      QString msg = rp->pendingLogpointMessage;
+      for (auto vIt = rp->pendingLogpointArgs.constBegin(); vIt != rp->pendingLogpointArgs.constEnd(); ++vIt) msg.replace(QStringLiteral("{%1}").arg(vIt.key()), vIt.value());
+      rp->pendingLogpointMessage.clear(); rp->pendingLogpointArgs.clear();
+      emit programOutputReceived(rankId, QStringLiteral("[LOGPOINT Rank %1] %2\n").arg(rankId).arg(msg), false);
+      writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running";
+    }
+    return true;
+  }
+
   // Token 206: Record GDB watchpoint number from `-break-watch` creation response.
   if (line.startsWith(QLatin1String("206^done")) || line.startsWith(QLatin1String("206^error"))) {
     if (line.startsWith(QLatin1String("206^done"))) {

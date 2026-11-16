@@ -83,12 +83,11 @@ QString formatMiDisassembly(const QString& miLine) {
 /**
  * @brief Builds a GDB/MI `-break-insert` command string for `file:line` and optional @p condition.
  */
-QString buildBreakInsertCmd(const QString& file, int line, const QString& condition) {
+QString buildBreakInsertCmd(const QString& file, int line, const QString& condition, int ignoreCount = 0) {
   const QString loc = QString("%1:%2").arg(file).arg(line);
-  if (!condition.trimmed().isEmpty()) {
-    return QString("-break-insert -c %1 %2\n").arg(escapeGdbMiString(condition.trimmed()), loc);
-  }
-  return QString("-break-insert -f %1\n").arg(loc);
+  const QString ign = ignoreCount > 0 ? QString("-i %1 ").arg(ignoreCount) : QString();
+  if (!condition.trimmed().isEmpty()) return QString("-break-insert %1-c %2 %3\n").arg(ign, escapeGdbMiString(condition.trimmed()), loc);
+  return QString("-break-insert -f %1%2\n").arg(ign, loc);
 }
 
 }  // namespace
@@ -180,24 +179,27 @@ void GdbRankCoordinator::queueOrWriteCmd(int rankId, const QString& cmd) {
 void GdbRankCoordinator::setBreakpoint(const QString& file, int line, const QString& condition, int rankFilter) {
   if (file.isEmpty() || line <= 0) return;
   m_breakpointsCleared = false;
-  m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(),
-      [&](const PendingBreakpoint& bp) { return bp.file == file && bp.line == line; }), m_pendingBreakpoints.end());
-  m_pendingBreakpoints.push_back({file, line, condition.trimmed(), rankFilter});
-  const QString locFull = QString("%1:%2").arg(file).arg(line), locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line);
-  const QString cmd = buildBreakInsertCmd(file, line, condition);
+  const auto extra = m_breakpointExtras.value(QStringLiteral("%1:%2").arg(file).arg(line));
+  m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(), [&](const PendingBreakpoint& bp) { return bp.file == file && bp.line == line; }), m_pendingBreakpoints.end());
+  m_pendingBreakpoints.push_back({file, line, condition.trimmed(), rankFilter, extra.ignoreCount, extra.logMessage});
+  const QString locFull = QString("%1:%2").arg(file).arg(line), locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line), cmd = buildBreakInsertCmd(file, line, condition, extra.ignoreCount);
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     if (rankFilter >= 0 && rankFilter != static_cast<int>(i)) {
-      if (rp) {
-        QList<int> toRemove;
-        for (auto it = rp->state.breakpoints.constBegin(); it != rp->state.breakpoints.constEnd(); ++it)
-          if (it.value() == locFull || it.value() == locBase) toRemove.append(it.key());
-        for (int id : toRemove) { queueOrWriteCmd(static_cast<int>(i), QString("-break-delete %1\n").arg(id)); rp->state.breakpoints.remove(id); }
-      }
+      if (rp) { QList<int> rem; for (auto it = rp->state.breakpoints.constBegin(); it != rp->state.breakpoints.constEnd(); ++it) if (it.value() == locFull || it.value() == locBase) rem.append(it.key());
+        for (int id : rem) { queueOrWriteCmd(static_cast<int>(i), QString("-break-delete %1\n").arg(id)); rp->state.breakpoints.remove(id); } }
       continue;
     }
     queueOrWriteCmd(static_cast<int>(i), cmd);
   }
+}
+void GdbRankCoordinator::configureBreakpointOptions(const QString& file, int line, int ignoreCount, const QString& logMessage) {
+  IBackendCoordinator::configureBreakpointOptions(file, line, ignoreCount, logMessage);
+  const int cleanIgn = qMax(0, ignoreCount); const QString cleanLog = logMessage.trimmed();
+  for (auto& bp : m_pendingBreakpoints) if (bp.file == file && bp.line == line) { bp.ignoreCount = cleanIgn; bp.logMessage = cleanLog; }
+  const QString locFull = QString("%1:%2").arg(file).arg(line), locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line);
+  for (size_t i = 0; i < m_processes.size(); ++i) if (m_processes[i]) for (auto it = m_processes[i]->state.breakpoints.constBegin(); it != m_processes[i]->state.breakpoints.constEnd(); ++it)
+    if (it.value() == locFull || it.value() == locBase) queueOrWriteCmd(static_cast<int>(i), QString("-break-after %1 %2\n").arg(it.key()).arg(cleanIgn));
 }
 
 /** @brief Clears all pending breakpoints and deletes active GDB breakpoints across all ranks. */
@@ -438,7 +440,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     if (!execArgs.isEmpty()) writeCmd(id, QStringLiteral("-exec-arguments %1\n").arg(execArgs).toUtf8().constData());
     if (!m_pendingBreakpoints.empty()) {
       for (const auto& bp : m_pendingBreakpoints)
-        if (bp.rankFilter < 0 || bp.rankFilter == id) writeCmd(id, buildBreakInsertCmd(bp.file, bp.line, bp.condition));
+        if (bp.rankFilter < 0 || bp.rankFilter == id) writeCmd(id, buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount));
     } else if (!m_breakpointsCleared) {
       const auto persisted = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
       for (auto it = persisted.constBegin(); it != persisted.constEnd(); ++it)
@@ -750,6 +752,22 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       if (!isWatchTrigger && rp->state.lastFiredTimestamp.isEmpty()) {
         rp->state.lastFiredTimestamp = "synced"; flushCachedBreakpoints(rankId); continue;
       }
+      // Non-suspending Logpoint: format {expr} from frame args (or token 209 locals) and immediately continue.
+      if (line.contains("breakpoint-hit")) {
+        bool handledLogpoint = false; const QString curBase = QFileInfo(rp->state.currentFile).fileName();
+        for (const auto& bp : m_pendingBreakpoints) {
+          if (!bp.logMessage.isEmpty() && bp.line == rp->state.currentLine && (bp.file == rp->state.currentFile || QFileInfo(bp.file).fileName() == curBase)) {
+            QMap<QString, QString> vals; static const QRegularExpression rxArg(QStringLiteral("\\{name=\"([^\"]+)\",value=\"((?:\\\\.|[^\"])*)\"\\}")), rxPh(QStringLiteral("\\{([A-Za-z_][A-Za-z0-9_]*)\\}"));
+            for (auto it = rxArg.globalMatch(line); it.hasNext();) { const auto m = it.next(); vals.insert(m.captured(1), m.captured(2)); }
+            bool needLocals = false; for (auto phIt = rxPh.globalMatch(bp.logMessage); phIt.hasNext();) if (!vals.contains(phIt.next().captured(1))) { needLocals = true; break; }
+            if (needLocals) { rp->pendingLogpointMessage = bp.logMessage; rp->pendingLogpointArgs = vals; writeCmd(rankId, "209-stack-list-variables --simple-values\n"); }
+            else { QString msg = bp.logMessage; for (auto vIt = vals.constBegin(); vIt != vals.constEnd(); ++vIt) msg.replace(QStringLiteral("{%1}").arg(vIt.key()), vIt.value());
+              emit programOutputReceived(rankId, QStringLiteral("[LOGPOINT Rank %1] %2\n").arg(rankId).arg(msg), false); writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; }
+            handledLogpoint = true; break;
+          }
+        }
+        if (handledLogpoint) continue;
+      }
       // Preserve auto-continue on unmapped breakpoints while allowing explicit steps/signals/watchpoints to stop.
       const bool isStepOrSignal = isWatchTrigger || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"signal-received\"");
       if ((rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") && !isStepOrSignal) {
@@ -854,22 +872,19 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       // Emit structured JSON register bank when at least one hardware register value was parsed.
       if (updated) { if (!jsonRegs.isEmpty()) emit registersUpdated(rankId, jsonRegs); emit rankStateChanged(rankId, rp->state); }
     } else if (line.startsWith("^done,bkpt={")) {
-      // Record GDB breakpoint number -> `file:line` mapping and release `sync_flushing` barrier.
       static const QRegularExpression bkptRe("number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");
-      const auto match = bkptRe.match(line);
-      if (match.hasMatch()) {
-        rp->state.breakpoints[match.captured(1).toInt()] = QString("%1:%2").arg(match.captured(2), match.captured(3));
-        if (rp->state.currentState == "sync_flushing") {
-          if (--rp->state.pendingBreakpoints <= 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; }
-        } else if (rp->state.currentState != "stopped") {
-          emit rankStateChanged(rankId, rp->state);
-        }
+      if (const auto match = bkptRe.match(line); match.hasMatch()) {
+        const int bkptId = match.captured(1).toInt(), bkptLn = match.captured(3).toInt();
+        const QString bkptBase = QFileInfo(match.captured(2)).fileName();
+        rp->state.breakpoints[bkptId] = QString("%1:%2").arg(match.captured(2), match.captured(3));
+        for (const auto& bp : m_pendingBreakpoints) if (bp.ignoreCount > 0 && bp.line == bkptLn && QFileInfo(bp.file).fileName() == bkptBase)
+          writeCmd(rankId, QString("-break-after %1 %2\n").arg(bkptId).arg(bp.ignoreCount));
+        if (rp->state.currentState == "sync_flushing") { if (--rp->state.pendingBreakpoints <= 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; } }
+        else if (rp->state.currentState != "stopped") emit rankStateChanged(rankId, rp->state);
       }
     } else if (line.startsWith("100")) {
-      // Token 100: Editor hover variable evaluation response (`-data-evaluate-expression`).
       static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\""), err100Re("msg=\"([^\"]+)\"");
-      const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line);
-      if (match.hasMatch()) emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
+      if (const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line); match.hasMatch()) emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
     } else if (line.startsWith("101")) {
       // Token 101: Interactive console / watch expression evaluation response.
       if (line.contains("^done")) {

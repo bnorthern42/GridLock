@@ -126,6 +126,12 @@ class IBackendCoordinator : public QObject {
   /** @brief Returns the configured inferior working directory path. */
   QString workingDirectory() const { return property("gridlock_working_dir").toString(); }
 
+  /** @brief Extra per-breakpoint execution options (pass/ignore count and non-suspending Logpoint message). */
+  struct BreakpointExtraOptions {
+    int ignoreCount = 0;  ///< Number of hits to ignore before suspending (0 = stop immediately).
+    QString logMessage;   ///< Non-empty trace message for non-suspending Logpoints.
+  };
+
   /**
    * @brief Registers an active breakpoint at `file:line` with optional @p condition and @p rankFilter (`-1` = all ranks).
    */
@@ -133,6 +139,11 @@ class IBackendCoordinator : public QObject {
                              int line,
                              const QString& condition = QString(),
                              int rankFilter = -1) = 0;
+
+  /** @brief Configures hit ignore count (`ignoreCount > 0`) and non-suspending Logpoint message for `file:line`. */
+  virtual void configureBreakpointOptions(const QString& file, int line, int ignoreCount, const QString& logMessage) {
+    m_breakpointExtras.insert(QStringLiteral("%1:%2").arg(file).arg(line), {qMax(0, ignoreCount), logMessage.trimmed()});
+  }
 
   /** @brief Clears all active breakpoints tracked by this coordinator. */
   virtual void clearBreakpoints() = 0;
@@ -263,6 +274,9 @@ class IBackendCoordinator : public QObject {
                      const QString& expression,
                      const QString& oldValue,
                      const QString& newValue);
+
+ protected:
+  QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".
 };
 
 /// Top-level convenience alias for hardware data watchpoint access modes.

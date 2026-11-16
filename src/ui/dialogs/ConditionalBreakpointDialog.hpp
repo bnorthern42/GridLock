@@ -27,6 +27,7 @@ class QPaintEvent;
 class QPushButton;
 class QRadioButton;
 class QShowEvent;
+class QSpinBox;
 class QTreeWidgetItem;
 
 namespace gridlock::ui {
@@ -152,6 +153,17 @@ public:
      */
     QString getCondition() const { return condition(); }
 
+    /** @brief Returns configured pass/ignore hit count (`0` = stop immediately). */
+    int ignoreCount() const;
+    /** @brief Sets the pass/ignore hit count spinbox value. */
+    void setIgnoreCount(int count);
+    /** @brief Returns true when Non-Suspending Logpoint mode is checked with a non-empty message. */
+    bool isLogpoint() const;
+    /** @brief Returns the trimmed Logpoint trace message (empty when Logpoint mode is disabled). */
+    QString logMessage() const;
+    /** @brief Populates the Logpoint checkbox and message field. */
+    void setLogMessage(const QString& message);
+
     /**
      * @brief Positions the popover directly beneath a global gutter icon coordinate, clamped to screen bounds.
      * @param globalAnchorPos Global screen point at the bottom-center of the gutter breakpoint marker.
@@ -196,6 +208,9 @@ private:
     QRadioButton* m_suspendRankRadio = nullptr;  ///< Radio option suspending only the active rank/thread.
     QPushButton* m_makeDefaultBtn = nullptr; ///< Button persisting chosen suspend scope as default.
     QLineEdit* m_conditionEdit = nullptr;    ///< Single-line C/C++ boolean predicate input box.
+    QSpinBox* m_ignoreCountSpin = nullptr;   ///< Hit pass/ignore count spinbox (0 = stop immediately).
+    QCheckBox* m_logpointCheck = nullptr;    ///< Toggle enabling Non-Suspending Logpoint mode.
+    QLineEdit* m_logMessageEdit = nullptr;   ///< Trace expression message for non-suspending Logpoints.
     LspCompletionPopup* m_completionPopup = nullptr; ///< Sleek floating IntelliSense completion card.
     QComboBox* m_presetCombo = nullptr;      ///< Dropdown selector offering common MPI rank/loop presets.
     QPushButton* m_removeBtn = nullptr;      ///< Left-aligned button removing the breakpoint (F9).

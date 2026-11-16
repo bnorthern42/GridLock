@@ -136,6 +136,8 @@ public:
     struct BreakpointVisualInfo {
         int rankFilter = -1;  ///< -1 for All Ranks, or >= 0 for a specific 0-based MPI rank.
         QString condition;    ///< Optional C/C++ boolean condition predicate.
+        int ignoreCount = 0;  ///< Number of hits to ignore before stopping (0 = stop immediately).
+        QString logMessage;   ///< Non-empty trace expression message for non-suspending Logpoints.
     };
 
     /**
@@ -190,6 +192,15 @@ public:
      * @param condition Conditional expression (e.g., "rank == 0").
      */
     void setConditionalBreakpoint(int lineOneBased, const QString& condition);
+
+    /** @brief Configures condition, pass/ignore count, and non-suspending Logpoint message on a breakpoint line. */
+    void setBreakpointOptions(int lineOneBased, const QString& condition, int ignoreCount, const QString& logMessage);
+    /** @brief Returns true when lineOneBased has a non-suspending Logpoint message configured. */
+    bool isLogpointForLine(int lineOneBased) const;
+    /** @brief Returns the configured pass/ignore hit count for lineOneBased (0 if unset). */
+    int breakpointIgnoreCountForLine(int lineOneBased) const;
+    /** @brief Returns the configured Logpoint trace message for lineOneBased (empty if unset). */
+    QString breakpointLogMessageForLine(int lineOneBased) const;
 
     /** @brief Returns stored visual metadata for a 1-based breakpoint line. */
     BreakpointVisualInfo breakpointInfoForLine(int lineOneBased) const;
@@ -518,6 +529,9 @@ signals:
     /** @brief Emitted with explicit rank filter metadata whenever a line breakpoint is added, modified, or removed. */
     void rankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
                                const QString& condition = QString());
+
+    /** @brief Emitted whenever breakpoint ignoreCount or Logpoint message is updated on a line. */
+    void breakpointOptionsChanged(const QString& file, int line, int ignoreCount, const QString& logMessage);
 
     /** @brief Emitted when hovering over a variable identifier. */
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);

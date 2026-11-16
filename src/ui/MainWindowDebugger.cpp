@@ -264,9 +264,11 @@ void MainWindow::startTargetWorkflow() {
                 int rf = sv->breakpointRankFilterForLine(bpLine);
                 if (rf < 0 && sv->breakpointSuspendScope(bpLine).compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) rf = preserveRank;
                 m_coordinator->setBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
-                const uint64_t a = sourceLineToAddress(bpLine);
-                if (m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) m_disassemblyView->toggleBookmark(a);
+                const auto bm = sv->breakpointInfoForLine(bpLine); m_coordinator->configureBreakpointOptions(viewPath, bpLine, bm.ignoreCount, bm.logMessage);
+                const uint64_t a = sourceLineToAddress(bpLine); if (m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) m_disassemblyView->toggleBookmark(a);
             }
+            if (!sv->property("gl_bp_opt_bound").toBool()) { sv->setProperty("gl_bp_opt_bound", true);
+                connect(sv, &SourceCodeView::breakpointOptionsChanged, this, [this](const QString& f, int ln, int ign, const QString& msg) { if (m_coordinator) m_coordinator->configureBreakpointOptions(f, ln, ign, msg); }); }
         };
         if (m_editorTabManager) { for (SourceCodeView* sv : m_editorTabManager->openViews()) syncOpenView(sv); } else { syncOpenView(sourceCodeView()); }
         for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {

@@ -918,4 +918,16 @@ void ConfigManager::setInlineVariableValuesEnabled(bool enabled) {
   if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_inline_var_values", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
 }
 
+/** @brief Loads extended breakpoint metadata (condition, ignoreCount, logMessage) from QSettings. */
+QList<BreakpointConfig> ConfigManager::getBreakpointConfigs(const QString& targetExecutable) const {
+  QSettings s("gridlock", "debugger"); const int n = s.beginReadArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable));
+  QList<BreakpointConfig> out;
+  for (int i = 0; i < n; ++i) { s.setArrayIndex(i); out.append({s.value("file").toString(), s.value("line").toInt(), s.value("rank", -1).toInt(), s.value("cond").toString(), s.value("ignore", 0).toInt(), s.value("log").toString()}); }
+  s.endArray(); return out;
+}
+void ConfigManager::saveBreakpointConfigs(const QList<BreakpointConfig>& configs, const QString& targetExecutable) {
+  QSettings s("gridlock", "debugger"); s.beginWriteArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable));
+  for (int i = 0; i < configs.size(); ++i) { s.setArrayIndex(i); s.setValue("file", configs[i].file); s.setValue("line", configs[i].line); s.setValue("rank", configs[i].rankFilter); s.setValue("cond", configs[i].condition); s.setValue("ignore", qMax(0, configs[i].ignoreCount)); s.setValue("log", configs[i].logMessage); }
+  s.endArray();
+}
 }  // namespace gridlock::core
