@@ -11,9 +11,12 @@
  */
 
 #include "MemoryProfilerWidget.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 #include <QAbstractItemView>
+#include <QCoreApplication>
 #include <QDir>
+#include <QDynamicPropertyChangeEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontMetrics>
@@ -58,15 +61,32 @@ class NumericMegabyteItem : public QTableWidgetItem {
  * @param isDark True when an active dark theme palette is selected.
  * @return Harmonized tile fill `QColor` with high white-label contrast.
  */
-QColor colorForCategory(const QString& category, int index, bool isDark) {
-  // Select distinct hue family per memory subsystem category.
-  QColor base = isDark ? QColor("#457b9d") : QColor("#316587");
-  if (category == QLatin1String("Heap / Call Site")) base = isDark ? QColor("#d9822b") : QColor("#c66a12");
-  else if (category == QLatin1String("Shared Lib")) base = isDark ? QColor("#2a9d8f") : QColor("#1f8276");
-  else if (category == QLatin1String("MPI /dev/shm")) base = isDark ? QColor("#8e6bbf") : QColor("#734ea8");
-  else if (category == QLatin1String("Stack")) base = isDark ? QColor("#d65d6e") : QColor("#bd4254");
-  // Vary lightness subtly across sibling entries so adjacent tiles remain visually distinct.
-  const int shift = ((index % 4) - 1) * 9;
+static QColor interpolatePalette(const QVector<QColor>& s, double t) {
+  if (s.isEmpty()) return QColor("#3b82f6");
+  const double c = std::clamp(t, 0.0, 1.0) * static_cast<double>(s.size() - 1);
+  const int lo = static_cast<int>(std::floor(c)), hi = std::min(static_cast<int>(s.size()) - 1, lo + 1);
+  const double f = c - static_cast<double>(lo);
+  return QColor::fromRgbF(s[lo].redF() + (s[hi].redF() - s[lo].redF()) * f, s[lo].greenF() + (s[hi].greenF() - s[lo].greenF()) * f, s[lo].blueF() + (s[hi].blueF() - s[lo].blueF()) * f);
+}
+
+/** @brief Computes a distinct, scheme-aware fill color for a treemap/table entry. */
+QColor colorForEntryImpl(int index, int totalCount, const MemoryProfileEntry& entry, const QString& scheme) {
+  const double rankT = (totalCount > 1) ? static_cast<double>(index) / static_cast<double>(totalCount - 1) : 0.0;
+  const uint h = qHash(entry.name + QLatin1Char('|') + entry.topSymbolOrRange);
+  // Interpolate perceptually uniform scientific/thermal/ocean gradients by sorted size rank.
+  if (scheme == QLatin1String("Viridis")) return interpolatePalette({QColor("#440154"), QColor("#3b528b"), QColor("#21918c"), QColor("#5ec962"), QColor("#fde725")}, rankT);
+  if (scheme == QLatin1String("Plasma")) return interpolatePalette({QColor("#0d0887"), QColor("#9c179e"), QColor("#ed7953"), QColor("#f0f921")}, rankT);
+  if (scheme == QLatin1String("Ocean")) return interpolatePalette({QColor("#0f2c59"), QColor("#0891b2"), QColor("#10b981"), QColor("#f59e0b")}, rankT);
+  // HighContrast: Okabe-Ito colorblind-safe categorical palette keyed by module/symbol hash.
+  if (scheme == QLatin1String("HighContrast")) {
+    static const QVector<QColor> kOkabe = {QColor("#0072b2"), QColor("#e69f00"), QColor("#009e73"), QColor("#cc79a7"), QColor("#56b4e9"), QColor("#d55e00"), QColor("#f0e442"), QColor("#332288")};
+    return kOkabe.at(static_cast<int>((h + static_cast<uint>(index)) % static_cast<uint>(kOkabe.size())));
+  }
+  // Distinct: multi-hue categorical palette differentiating individual libraries and Heap / Call Site blocks.
+  static const QVector<QColor> kDistinct = {QColor("#0d9488"), QColor("#4f46e5"), QColor("#e11d48"), QColor("#d97706"), QColor("#0284c7"), QColor("#7c3aed"), QColor("#059669"), QColor("#db2777"), QColor("#2563eb"), QColor("#ca8a04")};
+  const QColor base = kDistinct.at(static_cast<int>((h + static_cast<uint>(index)) % static_cast<uint>(kDistinct.size())));
+  // Apply subtle sibling lightness variation so adjacent blocks remain distinguishable.
+  const int shift = ((index % 3) - 1) * 7;
   return shift >= 0 ? base.lighter(100 + shift) : base.darker(100 - shift);
 }
 
@@ -415,17 +435,17 @@ void MemoryTreemapCanvas::paintEvent(QPaintEvent* /*event*/) {
     // Draw elided library/call-site title and size metrics whenever card dimensions permit.
     if (tile.rect.width() >= 48.0 && tile.rect.height() >= 22.0) {
       const QRectF textBox = tile.rect.adjusted(5.0, 3.0, -5.0, -3.0);
-      p.setPen(QColor("#ffffff")); p.setFont(titleFont);
+      const double lum = 0.2126 * e.color.redF() + 0.7152 * e.color.greenF() + 0.0722 * e.color.blueF();
+      const QColor fg = (lum > 0.56) ? QColor("#111827") : QColor("#ffffff");
+      const QColor subFg = (lum > 0.56) ? QColor(17, 24, 39, 220) : QColor(255, 255, 255, 225);
+      p.setPen(fg); p.setFont(titleFont);
       p.drawText(QRectF(textBox.left(), textBox.top(), textBox.width(), fmTitle.height() + 2),
                  Qt::AlignLeft | Qt::AlignVCenter, fmTitle.elidedText(e.name, Qt::ElideMiddle, static_cast<int>(textBox.width())));
-      // Render secondary MB + percentage subtitle when vertical card height >= 32px.
       if (textBox.height() >= 32.0) {
-        const double mb = static_cast<double>(e.liveBytes) / (1024.0 * 1024.0);
-        const double pct = (100.0 * static_cast<double>(e.liveBytes)) / static_cast<double>(m_totalBytes);
-        const QString metricStr = QStringLiteral("%1 MB (%2%)").arg(mb, 0, 'f', 2).arg(pct, 0, 'f', 1);
-        p.setFont(subFont); p.setPen(QColor(255, 255, 255, 225));
+        const double mb = static_cast<double>(e.liveBytes) / (1024.0 * 1024.0), pct = (100.0 * static_cast<double>(e.liveBytes)) / static_cast<double>(m_totalBytes);
+        p.setFont(subFont); p.setPen(subFg);
         p.drawText(QRectF(textBox.left(), textBox.top() + fmTitle.height() + 2, textBox.width(), fmSub.height() + 2),
-                   Qt::AlignLeft | Qt::AlignVCenter, fmSub.elidedText(metricStr, Qt::ElideRight, static_cast<int>(textBox.width())));
+                   Qt::AlignLeft | Qt::AlignVCenter, fmSub.elidedText(QStringLiteral("%1 MB (%2%)").arg(mb, 0, 'f', 2).arg(pct, 0, 'f', 1), Qt::ElideRight, static_cast<int>(textBox.width())));
       }
     }
   }
@@ -521,41 +541,32 @@ MemoryProfilerWidget::MemoryProfilerWidget(QWidget* parent) : QWidget(parent) {
   m_preloadCheck->setObjectName(QStringLiteral("memTrackPreloadCheck")); m_preloadCheck->setChecked(true);
   m_preloadCheck->setToolTip(QStringLiteral("Preload lightweight >=4 KB malloc/new caller tracker into newly launched MPI ranks"));
   ctrlLayout->addWidget(m_preloadCheck);
+  // Palette selector synchronized with ConfigManager & Preferences -> Appearance.
+  m_schemeCombo = new QComboBox(ctrlBar); m_schemeCombo->setObjectName(QStringLiteral("memProfileColorSchemeCombo")); m_schemeCombo->setFixedHeight(22);
+  for (const auto& opt : {QPair<QString, QString>{QStringLiteral("Distinct"), QStringLiteral("Distinct")}, {QStringLiteral("Viridis"), QStringLiteral("Viridis")}, {QStringLiteral("Plasma"), QStringLiteral("Plasma")}, {QStringLiteral("Ocean"), QStringLiteral("Ocean")}, {QStringLiteral("High-Contrast"), QStringLiteral("HighContrast")}}) m_schemeCombo->addItem(opt.first, opt.second);
+  if (const int si = m_schemeCombo->findData(gridlock::core::ConfigManager::instance().memoryMapColorScheme()); si >= 0) m_schemeCombo->setCurrentIndex(si);
+  connect(m_schemeCombo, &QComboBox::currentIndexChanged, this, [this](int) { gridlock::core::ConfigManager::instance().setMemoryMapColorScheme(m_schemeCombo->currentData().toString()); reapplyColors(); });
+  ctrlLayout->addWidget(m_schemeCombo);
+  if (auto* app = QCoreApplication::instance()) app->installEventFilter(this);
   // Live case-insensitive substring filter across library names, categories, and symbols.
-  m_searchEdit = new QLineEdit(ctrlBar);
-  m_searchEdit->setObjectName(QStringLiteral("memProfileSearchEdit"));
-  m_searchEdit->setPlaceholderText(QStringLiteral("Filter libraries, symbols, or categories..."));
-  m_searchEdit->setClearButtonEnabled(true); m_searchEdit->setFixedHeight(22); m_searchEdit->setMinimumWidth(180);
-  ctrlLayout->addWidget(m_searchEdit, 1);
+  m_searchEdit = new QLineEdit(ctrlBar); m_searchEdit->setObjectName(QStringLiteral("memProfileSearchEdit")); m_searchEdit->setPlaceholderText(QStringLiteral("Filter libraries, symbols, or categories...")); m_searchEdit->setClearButtonEnabled(true); m_searchEdit->setFixedHeight(22); m_searchEdit->setMinimumWidth(180); ctrlLayout->addWidget(m_searchEdit, 1);
   // Summary badge displaying sampled rank/PID context, total resident MB, and region count.
-  m_summaryLabel = new QLabel(QStringLiteral("TOTAL: 0.00 MB"), ctrlBar);
-  m_summaryLabel->setObjectName(QStringLiteral("memProfileSummaryLabel"));
-  ctrlLayout->addWidget(m_summaryLabel);
-  rootLayout->addWidget(ctrlBar);
+  m_summaryLabel = new QLabel(QStringLiteral("TOTAL: 0.00 MB"), ctrlBar); m_summaryLabel->setObjectName(QStringLiteral("memProfileSummaryLabel")); ctrlLayout->addWidget(m_summaryLabel); rootLayout->addWidget(ctrlBar);
   // Pair interactive 2D treemap canvas above sortable, interactive 6-column breakdown table.
-  auto* splitter = new QSplitter(Qt::Vertical, this);
-  splitter->setChildrenCollapsible(false); splitter->setOpaqueResize(true);
+  auto* splitter = new QSplitter(Qt::Vertical, this); splitter->setChildrenCollapsible(false); splitter->setOpaqueResize(true);
   m_canvas = new MemoryTreemapCanvas(splitter); splitter->addWidget(m_canvas);
   // Configure sortable breakdown table with interactive resizable column headers.
-  m_table = new QTableWidget(0, 6, splitter);
-  m_table->setObjectName(QStringLiteral("memoryBreakdownTable"));
-  m_table->setHorizontalHeaderLabels({
-      QStringLiteral("Library / Region"), QStringLiteral("Category"), QStringLiteral("Live / RSS (MB)"),
-      QStringLiteral("Private Dirty (MB)"), QStringLiteral("% of Total"), QStringLiteral("Top Symbol / Address Range")});
-  m_table->verticalHeader()->setVisible(false);
-  m_table->setSelectionBehavior(QAbstractItemView::SelectRows); m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-  m_table->setEditTriggers(QAbstractItemView::NoEditTriggers); m_table->setSortingEnabled(true);
+  m_table = new QTableWidget(0, 6, splitter); m_table->setObjectName(QStringLiteral("memoryBreakdownTable"));
+  m_table->setHorizontalHeaderLabels({QStringLiteral("Library / Region"), QStringLiteral("Category"), QStringLiteral("Live / RSS (MB)"), QStringLiteral("Private Dirty (MB)"), QStringLiteral("% of Total"), QStringLiteral("Top Symbol / Address Range")});
+  m_table->verticalHeader()->setVisible(false); m_table->setSelectionBehavior(QAbstractItemView::SelectRows); m_table->setSelectionMode(QAbstractItemView::SingleSelection); m_table->setEditTriggers(QAbstractItemView::NoEditTriggers); m_table->setSortingEnabled(true);
   if (QHeaderView* hdr = m_table->horizontalHeader()) {
-    // Allow users to drag any column separator while stretching the trailing symbol/range column.
     hdr->setSectionsMovable(false); hdr->setStretchLastSection(true); hdr->setMinimumSectionSize(56);
     const QList<int> widths = {210, 125, 115, 125, 88, 260};
     for (int c = 0; c < widths.size(); ++c) { hdr->setSectionResizeMode(c, QHeaderView::Interactive); m_table->setColumnWidth(c, widths[c]); }
     hdr->setSortIndicatorShown(true); hdr->setSortIndicator(m_sortColumn, m_sortOrder);
     connect(hdr, &QHeaderView::sectionClicked, this, [this, hdr](int) { m_sortColumn = hdr->sortIndicatorSection(); m_sortOrder = hdr->sortIndicatorOrder(); });
   }
-  splitter->addWidget(m_table);
-  splitter->setStretchFactor(0, 3); splitter->setStretchFactor(1, 2);
-  rootLayout->addWidget(splitter, 1);
+  splitter->addWidget(m_table); splitter->setStretchFactor(0, 3); splitter->setStretchFactor(1, 2); rootLayout->addWidget(splitter, 1);
   // Compile and register LD_PRELOAD tracker library immediately while enabled by default.
   syncPreloadTrackerEnvironment(m_preloadCheck->isChecked());
   // Wire toolbar controls to live refresh, preload toggle, and search filter handlers.
@@ -847,9 +858,10 @@ void MemoryProfilerWidget::populateFromEntries(const QVector<MemoryProfileEntry>
   m_entries = rawEntries;
   std::sort(m_entries.begin(), m_entries.end(), [](const MemoryProfileEntry& a, const MemoryProfileEntry& b) { return a.liveBytes > b.liveBytes; });
   const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+  const QString scheme = m_schemeCombo ? m_schemeCombo->currentData().toString() : gridlock::core::ConfigManager::instance().memoryMapColorScheme();
   uint64_t totalBytes = 0;
   for (int i = 0; i < m_entries.size(); ++i) {
-    m_entries[i].color = colorForCategory(m_entries[i].category, i, isDark);
+    m_entries[i].color = colorForEntry(i, m_entries.size(), m_entries[i], scheme);
     totalBytes += m_entries[i].liveBytes;
   }
   if (m_summaryLabel) {
@@ -902,29 +914,30 @@ void MemoryProfilerWidget::applySearchFilter(const QString& text) {
   }
 }
 
-/**
- * @brief Synchronizes control bar, breakdown table, and treemap canvas colors with ThemeManager.
- */
+/** @brief Computes a distinct, scheme-aware fill color for a treemap/table entry. */
+QColor MemoryProfilerWidget::colorForEntry(int index, int totalCount, const MemoryProfileEntry& entry, const QString& scheme) { return colorForEntryImpl(index, totalCount, entry, scheme); }
+/** @brief Recomputes entry colors under the active scheme and updates canvas + table. */
+void MemoryProfilerWidget::reapplyColors() {
+  const QString scheme = m_schemeCombo ? m_schemeCombo->currentData().toString() : gridlock::core::ConfigManager::instance().memoryMapColorScheme();
+  const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode(); uint64_t totalBytes = 0;
+  for (int i = 0; i < m_entries.size(); ++i) { m_entries[i].color = colorForEntry(i, m_entries.size(), m_entries[i], scheme); totalBytes += m_entries[i].liveBytes; }
+  if (m_canvas) m_canvas->setEntries(m_entries, totalBytes);
+  if (m_table) for (int r = 0; r < m_table->rowCount(); ++r) if (auto* it = m_table->item(r, 0)) for (const auto& e : m_entries) if (e.name == it->text()) { it->setForeground(e.color.lighter(isDark ? 130 : 85)); break; }
+}
+/** @brief Listens for Preferences -> Appearance Memory Map scheme updates via qApp property changes. */
+bool MemoryProfilerWidget::eventFilter(QObject* watched, QEvent* event) {
+  if (watched == QCoreApplication::instance() && event->type() == QEvent::DynamicPropertyChange && static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "gridlock_memmap_scheme_rev") {
+    const QString scheme = gridlock::core::ConfigManager::instance().memoryMapColorScheme();
+    if (m_schemeCombo) { QSignalBlocker sb(m_schemeCombo); if (const int idx = m_schemeCombo->findData(scheme); idx >= 0) m_schemeCombo->setCurrentIndex(idx); }
+    reapplyColors();
+  }
+  return QWidget::eventFilter(watched, event);
+}
+/** @brief Synchronizes control bar, breakdown table, and treemap canvas colors with ThemeManager. */
 void MemoryProfilerWidget::reloadStyle() {
-  // Query active dark or light workstation palette tokens from ThemeManager.
-  auto& tm = gridlock::core::ThemeManager::instance();
-  const auto pal = tm.paletteForTheme(tm.activeThemeId());
-  if (auto* bar = findChild<QWidget*>(QStringLiteral("memProfileControlBar"))) {
-    // Style control bar inputs, buttons, and checkboxes without hardcoded dark hex literals.
-    bar->setStyleSheet(QStringLiteral(
-        "#memProfileControlBar { background-color: %1; border-bottom: 1px solid %2; } "
-        "#memProfileControlBar QLabel, #memProfileControlBar QCheckBox { color: %3; font-size: 11px; font-weight: 600; } "
-        "#memProfileControlBar QLineEdit, #memProfileControlBar QComboBox { background-color: %4; color: %3; border: 1px solid %2; border-radius: 2px; padding: 0px 5px; font-size: 11px; } "
-        "#memProfileControlBar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 2px; padding: 1px 8px; font-size: 10px; font-weight: 600; } "
-        "#memProfileControlBar QPushButton:hover { background-color: %2; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex));
-  }
-  if (m_table) {
-    // Style breakdown cells in monospace and header sections in crisp UI sans-serif.
-    m_table->setStyleSheet(QStringLiteral(
-        "QTableWidget { background-color: %1; color: %2; gridline-color: %3; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; } "
-        "QHeaderView::section { background-color: %4; color: %2; border: 1px solid %3; padding: 2px 5px; font-size: 11px; font-weight: 600; }")
-        .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex));
-  }
+  auto& tm = gridlock::core::ThemeManager::instance(); const auto pal = tm.paletteForTheme(tm.activeThemeId());
+  if (auto* bar = findChild<QWidget*>(QStringLiteral("memProfileControlBar"))) bar->setStyleSheet(QStringLiteral("#memProfileControlBar { background-color: %1; border-bottom: 1px solid %2; } #memProfileControlBar QLabel, #memProfileControlBar QCheckBox { color: %3; font-size: 11px; font-weight: 600; } #memProfileControlBar QLineEdit, #memProfileControlBar QComboBox { background-color: %4; color: %3; border: 1px solid %2; border-radius: 2px; padding: 0px 5px; font-size: 11px; } #memProfileControlBar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 2px; padding: 1px 8px; font-size: 10px; font-weight: 600; } #memProfileControlBar QPushButton:hover { background-color: %2; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex));
+  if (m_table) m_table->setStyleSheet(QStringLiteral("QTableWidget { background-color: %1; color: %2; gridline-color: %3; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; } QHeaderView::section { background-color: %4; color: %2; border: 1px solid %3; padding: 2px 5px; font-size: 11px; font-weight: 600; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.headerHex));
   if (m_canvas) m_canvas->update();
 }
 

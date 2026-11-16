@@ -134,8 +134,14 @@ class MemoryProfilerWidget : public QWidget {
   /// Re-applies active `ThemeManager` colors to controls, treemap canvas, and breakdown table.
   void reloadStyle();
 
+  /// Computes a per-block fill color from the active palette scheme (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`).
+  static QColor colorForEntry(int index, int totalCount, const MemoryProfileEntry& entry, const QString& scheme);
+
   /// Compiles `/tmp/gridlock_memtrack_v1_<uid>.so` if available and syncs `GRIDLOCK_MEMTRACK_SO`.
   static QString syncPreloadTrackerEnvironment(bool enabled);
+
+ protected:
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
  signals:
   /// Emitted when the user double-clicks a treemap tile or breakdown row to inspect hex bytes.
@@ -150,10 +156,12 @@ class MemoryProfilerWidget : public QWidget {
   static QString demangleSymbol(const QString& rawSym);
   static QString formatMegabytes(uint64_t bytes);
   void populateFromEntries(const QVector<MemoryProfileEntry>& rawEntries, const QString& contextLabel);
+  void reapplyColors();
 
   QComboBox* m_rankCombo = nullptr;
   QPushButton* m_refreshBtn = nullptr;
   QCheckBox* m_preloadCheck = nullptr;
+  QComboBox* m_schemeCombo = nullptr;
   QLineEdit* m_searchEdit = nullptr;
   QLabel* m_summaryLabel = nullptr;
   MemoryTreemapCanvas* m_canvas = nullptr;

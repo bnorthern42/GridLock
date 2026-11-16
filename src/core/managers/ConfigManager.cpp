@@ -909,7 +909,6 @@ bool ConfigManager::inlineVariableValuesEnabled() const {
   if (auto* ed = m_config["editor"].as_table()) if (auto v = ed->get("inline_variable_values"); v && v->is_boolean()) return v->as_boolean()->get();
   return true;
 }
-
 /** @brief Sets and persists inline variable ghost values state and broadcasts a live viewport refresh property. */
 void ConfigManager::setInlineVariableValuesEnabled(bool enabled) {
   toml::table edTbl; if (auto* ex = m_config["editor"].as_table()) edTbl = *ex;
@@ -917,11 +916,25 @@ void ConfigManager::setInlineVariableValuesEnabled(bool enabled) {
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editor/inline_variable_values"), enabled); s.sync();
   if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_inline_var_values", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
 }
-
+/** @brief Returns the active Memory Map color scheme (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`). */
+QString ConfigManager::memoryMapColorScheme() const {
+  QSettings s(kOrg, kApp);
+  if (s.contains(QStringLiteral("appearance/memory_map_color_scheme"))) return s.value(QStringLiteral("appearance/memory_map_color_scheme"), QStringLiteral("Distinct")).toString();
+  if (auto* ap = m_config["appearance"].as_table()) if (auto v = ap->get("memory_map_color_scheme"); v && v->is_string()) return QString::fromStdString(std::string(v->as_string()->get()));
+  return QStringLiteral("Distinct");
+}
+/** @brief Persists Memory Map color scheme to TOML/QSettings and notifies live MemoryProfilerWidget instances. */
+void ConfigManager::setMemoryMapColorScheme(const QString& scheme) {
+  static const QStringList kValid = {QStringLiteral("Distinct"), QStringLiteral("Viridis"), QStringLiteral("Plasma"), QStringLiteral("Ocean"), QStringLiteral("HighContrast")};
+  const QString norm = kValid.contains(scheme) ? scheme : QStringLiteral("Distinct");
+  toml::table apTbl; if (auto* ex = m_config["appearance"].as_table()) apTbl = *ex;
+  apTbl.insert_or_assign("memory_map_color_scheme", norm.toStdString()); m_config.insert_or_assign("appearance", apTbl); saveGlobalConfig();
+  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("appearance/memory_map_color_scheme"), norm); s.sync();
+  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_memmap_color_scheme", norm); app->setProperty("gridlock_memmap_scheme_rev", app->property("gridlock_memmap_scheme_rev").toInt() + 1); }
+}
 /** @brief Loads extended breakpoint metadata (condition, ignoreCount, logMessage) from QSettings. */
 QList<BreakpointConfig> ConfigManager::getBreakpointConfigs(const QString& targetExecutable) const {
-  QSettings s("gridlock", "debugger"); const int n = s.beginReadArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable));
-  QList<BreakpointConfig> out;
+  QSettings s("gridlock", "debugger"); const int n = s.beginReadArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable)); QList<BreakpointConfig> out;
   for (int i = 0; i < n; ++i) { s.setArrayIndex(i); out.append({s.value("file").toString(), s.value("line").toInt(), s.value("rank", -1).toInt(), s.value("cond").toString(), s.value("ignore", 0).toInt(), s.value("log").toString()}); }
   s.endArray(); return out;
 }

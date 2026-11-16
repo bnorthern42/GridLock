@@ -281,6 +281,11 @@ class ConfigManager {
   /** @brief Sets and persists whether inline variable ghost values are shown and broadcasts live update. */
   void setInlineVariableValuesEnabled(bool enabled);
 
+  /** @brief Returns the active Memory Map treemap color scheme (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`). */
+  QString memoryMapColorScheme() const;
+  /** @brief Sets and persists the Memory Map treemap color scheme and broadcasts live update. */
+  void setMemoryMapColorScheme(const QString& scheme);
+
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();
 

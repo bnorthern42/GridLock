@@ -452,6 +452,7 @@ void PreferencesDialog::apply() {
     s.setValue("appearance/code_font_family", m_appearancePage->codeFontFamily());
     s.setValue("appearance/code_font_size", m_appearancePage->codeFontSize());
     s.sync();
+    gridlock::core::ConfigManager::instance().setMemoryMapColorScheme(m_appearancePage->memoryMapColorScheme());
     gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
 
     // 2. Editor options

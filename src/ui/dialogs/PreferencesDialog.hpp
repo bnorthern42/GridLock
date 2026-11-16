@@ -49,6 +49,7 @@ public:
     int uiFontSize() const;
     QString codeFontFamily() const;
     int codeFontSize() const;
+    QString memoryMapColorScheme() const;
 
     void loadFromSettings();
     void updateSwatchPreview(const QString& themeId);
@@ -63,6 +64,7 @@ private:
     QSpinBox* m_uiFontSizeBox = nullptr;
     QComboBox* m_codeFontFamilyCombo = nullptr;
     QSpinBox* m_codeFontSizeBox = nullptr;
+    QComboBox* m_memoryMapColorSchemeCombo = nullptr;
 };
 
 /**

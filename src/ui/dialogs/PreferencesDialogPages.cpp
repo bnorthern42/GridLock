@@ -197,6 +197,16 @@ AppearanceSettingsPage::AppearanceSettingsPage(QWidget* parent)
     swatchRow->addStretch(1);
     form->addRow(tr("Palette Swatches:"), swatchRow);
 
+    m_memoryMapColorSchemeCombo = new QComboBox(this);
+    m_memoryMapColorSchemeCombo->setObjectName(QStringLiteral("memoryMapColorSchemeCombo"));
+    m_memoryMapColorSchemeCombo->addItem(tr("Category & Library Distinct"), QStringLiteral("Distinct"));
+    m_memoryMapColorSchemeCombo->addItem(tr("Viridis Scientific"), QStringLiteral("Viridis"));
+    m_memoryMapColorSchemeCombo->addItem(tr("Plasma Thermal"), QStringLiteral("Plasma"));
+    m_memoryMapColorSchemeCombo->addItem(tr("Ocean Cool-Warm"), QStringLiteral("Ocean"));
+    m_memoryMapColorSchemeCombo->addItem(tr("High-Contrast Accessible"), QStringLiteral("HighContrast"));
+    m_memoryMapColorSchemeCombo->setToolTip(tr("Color palette used by Memory Profiler treemap and stacked bar."));
+    form->addRow(tr("Memory Map Color Scheme:"), m_memoryMapColorSchemeCombo);
+
     // Keep internal polarity state synchronized automatically with the selected theme.
     m_darkModeCheck = new QCheckBox(this);
     m_darkModeCheck->setVisible(false);
@@ -299,6 +309,7 @@ QString AppearanceSettingsPage::uiFontFamily() const { return m_uiFontFamilyComb
 int AppearanceSettingsPage::uiFontSize() const { return m_uiFontSizeBox->value(); }
 QString AppearanceSettingsPage::codeFontFamily() const { return m_codeFontFamilyCombo->currentText(); }
 int AppearanceSettingsPage::codeFontSize() const { return m_codeFontSizeBox->value(); }
+QString AppearanceSettingsPage::memoryMapColorScheme() const { return m_memoryMapColorSchemeCombo ? m_memoryMapColorSchemeCombo->currentData().toString() : QStringLiteral("Distinct"); }
 
 /** @brief Loads persisted appearance preferences from user settings with signals blocked. */
 void AppearanceSettingsPage::loadFromSettings() {
@@ -309,15 +320,21 @@ void AppearanceSettingsPage::loadFromSettings() {
                               ? activeId
                               : s.value("appearance/theme", QStringLiteral("gridlock_slate")).toString();
     const QVector<QWidget*> ctrls = {m_darkModeCheck, m_themeCombo, m_fileTreeStyleCombo, m_colorizeIconsCheck,
-                                     m_uiFontFamilyCombo, m_uiFontSizeBox, m_codeFontFamilyCombo, m_codeFontSizeBox};
+                                     m_uiFontFamilyCombo, m_uiFontSizeBox, m_codeFontFamilyCombo, m_codeFontSizeBox,
+                                     m_memoryMapColorSchemeCombo};
     // Temporarily suppress change signals while populating initial form state.
-    for (QWidget* w : ctrls) w->blockSignals(true);
+    for (QWidget* w : ctrls) if (w) w->blockSignals(true);
 
     int idx = m_themeCombo->findData(theme);
     if (idx < 0) idx = m_themeCombo->findText(theme, Qt::MatchContains);
     if (idx >= 0) m_themeCombo->setCurrentIndex(idx);
     m_darkModeCheck->setChecked(isDarkMode());
     updateSwatchPreview(selectedTheme());
+
+    if (m_memoryMapColorSchemeCombo) {
+        const int schemeIdx = m_memoryMapColorSchemeCombo->findData(gridlock::core::ConfigManager::instance().memoryMapColorScheme());
+        m_memoryMapColorSchemeCombo->setCurrentIndex(schemeIdx >= 0 ? schemeIdx : 0);
+    }
 
     // Restore file tree density, icon colorization, and UI/Code font families and sizes.
     const int ftsIdx = m_fileTreeStyleCombo->findText(s.value("appearance/file_tree_style", "Comfortable").toString());
@@ -332,7 +349,7 @@ void AppearanceSettingsPage::loadFromSettings() {
     if (codeFamIdx >= 0) m_codeFontFamilyCombo->setCurrentIndex(codeFamIdx);
     m_codeFontSizeBox->setValue(s.value("appearance/code_font_size", 11).toInt());
 
-    for (QWidget* w : ctrls) w->blockSignals(false);
+    for (QWidget* w : ctrls) if (w) w->blockSignals(false);
 }
 
 // ============================================================================

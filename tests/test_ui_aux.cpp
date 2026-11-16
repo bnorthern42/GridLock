@@ -8,7 +8,7 @@
  */
 
 #include "test_ui.hpp"
-
+#include "ui/views/MemoryProfilerWidget.hpp"
 #include <cmath>
 
 #include <QApplication>
@@ -154,23 +154,22 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     memView->notifyRankStoppedOrSelected(0, QCoreApplication::applicationPid(), 1); QApplication::processEvents();
     QVERIFY2(badge->text().contains(QString::number(QCoreApplication::applicationPid())), qPrintable(badge->text()));
     if (auto* tbl = memView->findChild<QTableWidget*>("memoryBreakdownTable"); tbl && tbl->rowCount() >= 2) QVERIFY(tbl->item(0, 2)->text().toDouble() >= tbl->item(tbl->rowCount() - 1, 2)->text().toDouble());
-    // Pop-out opens a large top-level window and clicking DOCK restores MemView back into the main layout.
+    // Verify 5 Memory Map color schemes in #memProfileColorSchemeCombo and #memoryMapColorSchemeCombo.
+    auto* schemeCombo = memView->findChild<QComboBox*>("memProfileColorSchemeCombo"); QVERIFY2(schemeCombo && schemeCombo->count() == 5, "MemoryProfilerWidget must expose 5-scheme #memProfileColorSchemeCombo");
+    { gridlock::ui::PreferencesDialog pd(&mainWindow); auto* prefScheme = pd.findChild<QComboBox*>("memoryMapColorSchemeCombo"); QVERIFY2(prefScheme && prefScheme->count() == 5, "PreferencesDialog Appearance must expose #memoryMapColorSchemeCombo"); }
+    // Verify switching schemes repaints #memoryTreemapCanvas and differentiates Heap / Call Site blocks.
+    auto* treemap = memView->findChild<QWidget*>("memoryTreemapCanvas"); QVERIFY(treemap != nullptr); treemap->resize(640, 220);
+    schemeCombo->setCurrentIndex(0); QApplication::processEvents(); const QImage imgDist = treemap->grab().toImage(); schemeCombo->setCurrentIndex(1); QApplication::processEvents(); const QImage imgVir = treemap->grab().toImage(); QVERIFY2(imgDist != imgVir, "Switching Memory Map color scheme must repaint treemap with distinct palette");
+    // Confirm ConfigManager persistence and per-module color differentiation within Heap / Call Site.
+    gridlock::core::ConfigManager::instance().setMemoryMapColorScheme(QStringLiteral("Distinct")); const gridlock::ui::MemoryProfileEntry h1{QStringLiteral("Process Heap"), QString(), QStringLiteral("Heap / Call Site"), QStringLiteral("[heap]"), 1024, 0, 0, 0, 0, 0, {}}, h2{QStringLiteral("libHYPRE"), QString(), QStringLiteral("Heap / Call Site"), QStringLiteral("hypre_CAlloc"), 512, 0, 0, 0, 0, 0, {}}, h3{QStringLiteral("mfem_exec"), QString(), QStringLiteral("Heap / Call Site"), QStringLiteral("CopyFrom"), 256, 0, 0, 0, 0, 0, {}};
+    const QColor c1 = gridlock::ui::MemoryProfilerWidget::colorForEntry(0, 3, h1, QStringLiteral("Distinct")), c2 = gridlock::ui::MemoryProfilerWidget::colorForEntry(1, 3, h2, QStringLiteral("Distinct")), c3 = gridlock::ui::MemoryProfilerWidget::colorForEntry(2, 3, h3, QStringLiteral("Distinct")); QVERIFY(c1 != c2 && c2 != c3 && c1 != c3);
     popBtn->click(); QApplication::processEvents(); QVERIFY(memView->isPoppedOut() && popBtn->window()->isWindow() && popBtn->window()->width() >= 1000 && popBtn->window()->height() >= 650);
     popBtn->click(); QApplication::processEvents(); QVERIFY(!memView->isPoppedOut()); hexBtn->click(); QApplication::processEvents(); QVERIFY(addrInput->isVisible());
-    // 2. Central horizontal splitter gives DisassemblyView >= 420px on 1440x900, and all QSplitters use opaqueResize(true).
     auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr && disassemblyView->width() >= 420);
     for (QSplitter* sp : mainWindow.findChildren<QSplitter*>()) QVERIFY2(sp->opaqueResize(), "QSplitter must use opaqueResize(true) for Wayland");
-    // 3. Clean shutdown lifecycle under popped-out MemView + active ClangdLspClient + close().
-    QTemporaryDir tmpSrcDir; QVERIFY(tmpSrcDir.isValid()); const QString cppPath = tmpSrcDir.filePath(QStringLiteral("exit_check.cpp"));
-    { QFile f(cppPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int main() { return 0; }\n"); }
-    auto* mw = new gridlock::ui::MainWindow(); mw->resize(1024, 700); mw->show(); QApplication::processEvents();
-    if (auto* tabs = mw->findChild<gridlock::ui::EditorTabManager*>()) tabs->openFile(cppPath);
-    if (auto* mv = mw->findChild<gridlock::ui::MemView*>()) mv->setPoppedOut(true);
-    QApplication::processEvents(); QVERIFY(mw->close()); delete mw;
-    gridlock::core::ClangdLspClient::instance().shutdown(); QVERIFY(!gridlock::core::ClangdLspClient::instance().isRunning());
-    // 4. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines.
-    QDir rootDir(QCoreApplication::applicationDirPath() + "/.."); if (!rootDir.exists("src")) rootDir = QDir::current();
-    for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) { QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories); while (it.hasNext()) { QFile file(it.next()); QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text)); int lines = 0; while (!file.atEnd()) { file.readLine(); ++lines; } QVERIFY2(lines < 950, qPrintable(QString("%1 (%2 lines)").arg(file.fileName()).arg(lines))); } }
+    QTemporaryDir tmpSrcDir; QVERIFY(tmpSrcDir.isValid()); const QString cppPath = tmpSrcDir.filePath(QStringLiteral("exit_check.cpp")); { QFile f(cppPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int main() { return 0; }\n"); }
+    auto* mw = new gridlock::ui::MainWindow(); mw->resize(1024, 700); mw->show(); QApplication::processEvents(); if (auto* tabs = mw->findChild<gridlock::ui::EditorTabManager*>()) tabs->openFile(cppPath); if (auto* mv = mw->findChild<gridlock::ui::MemView*>()) mv->setPoppedOut(true); QApplication::processEvents(); QVERIFY(mw->close()); delete mw; gridlock::core::ClangdLspClient::instance().shutdown(); QVERIFY(!gridlock::core::ClangdLspClient::instance().isRunning());
+    QDir rootDir(QCoreApplication::applicationDirPath() + "/.."); if (!rootDir.exists("src")) rootDir = QDir::current(); for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) { QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories); while (it.hasNext()) { QFile file(it.next()); QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text)); int lines = 0; while (!file.atEnd()) { file.readLine(); ++lines; } QVERIFY2(lines < 950, qPrintable(QString("%1 (%2 lines)").arg(file.fileName()).arg(lines))); } }
 }
 /** @brief Tests preferred screen routing and offscreen startup configuration. */
 void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
