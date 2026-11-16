@@ -602,6 +602,10 @@ public slots:
     void loadSession();
     void onTutorialLaunchRequested(const QString& absoluteFilePath);
     bool execTutorialDialog();
+    /** @brief Opens the modeless DDD Pointer & Struct Graph Visualizer and optionally graphs @p exprPath. */
+    void openPointerGraphVisualizer(const QString& exprPath = QString(),
+                                    const QString& varValue = QString(),
+                                    const QString& varType = QString());
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -730,6 +734,7 @@ private:
     QMap<QDockWidget*, DockHomeSlot> m_dockHomeSlots;
     QPointer<QDockWidget> m_draggingDock = nullptr;
     QPoint m_dragOffset;
+    class PointerGraphDialog* m_pointerGraphDialog = nullptr;
 };
 
 }  // namespace gridlock::ui

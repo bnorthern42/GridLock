@@ -654,8 +654,9 @@ void MainWindow::setupMenu() {
 
   toolsMenu->addSeparator();
   QAction *runTestsAction = toolsMenu->addAction("Run Tests");
-  connect(runTestsAction, &QAction::triggered, this,
-          &MainWindow::runTargetRequested);
+  connect(runTestsAction, &QAction::triggered, this, &MainWindow::runTargetRequested);
+  QAction *ptrGraphAction = toolsMenu->addAction("Pointer & Struct Graph Visualizer...");
+  connect(ptrGraphAction, &QAction::triggered, this, [this]() { openPointerGraphVisualizer(); });
 
   // Construct Help menu with comprehensive About dialog and attribution metadata.
   QMenu *helpMenu = menuBar->addMenu("&Help");

@@ -261,6 +261,7 @@ void VariablesDockWidget::setupUi() {
         }
         QMenu menu(this);
         QAction* watchAct = menu.addAction(QStringLiteral("Add to Watch Expressions"));
+        QAction* graphAct = menu.addAction(QStringLiteral("Visualize in Pointer / Struct Graph..."));
         menu.addSeparator();
         QAction* wpWriteAct =
             menu.addAction(QStringLiteral("Watch Memory Write (Hardware Watchpoint)"));
@@ -272,6 +273,11 @@ void VariablesDockWidget::setupUi() {
         QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
         if (chosen == watchAct) {
             promoteVariableToWatch(exprPath);
+        } else if (chosen == graphAct) {
+            const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
+            const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
+            const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
+            emit visualizeInPointerGraphRequested(exprPath, varName, varVal, varTyp);
         } else if (chosen == wpWriteAct || chosen == wpReadAct || chosen == wpRwAct) {
             const auto mode = (chosen == wpReadAct)
                                   ? ::WatchpointAccessMode::Read

@@ -15,6 +15,7 @@
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/hpc/NativeMemoryReader.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "dialogs/PointerGraphDialog.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
 #include "views/MemView.hpp"
@@ -453,7 +454,10 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
             connect(proxy, &QAbstractItemModel::modelReset, this, syncVars);
             connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex& p, int, int) { if (!p.isValid()) syncVars(); });
         }
+        connect(m_variablesDockWidget, &VariablesDockWidget::visualizeInPointerGraphRequested, this,
+                [this](const QString& expr, const QString&, const QString& val, const QString& typ) { openPointerGraphVisualizer(expr, val, typ); });
     }
+    if (m_pointerGraphDialog) { m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank); }
     // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
     if (m_callStackDockWidget && !m_callStackDockWidget->property("gl_callstack_bound").toBool()) {
         m_callStackDockWidget->setProperty("gl_callstack_bound", true);
@@ -832,42 +836,44 @@ void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
     const QMap<int, BreakpointRankMeta>& stored =
         m_breakpointRankMeta.contains(canonPath) ? m_breakpointRankMeta[canonPath] : m_breakpointRankMeta.value(absPath);
     if (stored.isEmpty()) return;
+    // Restore rank filters and condition expressions onto all open breakpoint lines.
     for (int line : view->breakpoints()) {
         const auto s = stored.value(line, BreakpointRankMeta{-1, view->breakpointCondition(line)});
-        meta[line] = SourceCodeView::BreakpointVisualInfo{s.rankFilter, s.condition};
+        meta[line] = SourceCodeView::BreakpointVisualInfo{s.rankFilter, s.condition, 0, QString()};
     }
-    for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) {
-        meta[it.key()] = SourceCodeView::BreakpointVisualInfo{it.value().rankFilter, it.value().condition};
-    }
+    for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) meta[it.key()] = SourceCodeView::BreakpointVisualInfo{it.value().rankFilter, it.value().condition, 0, QString()};
     view->syncBreakpointMetadata(meta);
 }
 
 /**
+ * @brief Opens the modeless DDD Pointer & Struct Graph Visualizer and optionally graphs @p exprPath.
+ * @param exprPath Optional C++ expression path to graph immediately.
+ * @param varValue Optional runtime value or pointer address hint.
+ * @param varType Optional static C/C++ type hint.
+ */
+void MainWindow::openPointerGraphVisualizer(const QString& exprPath, const QString& varValue, const QString& varType) {
+    if (!m_pointerGraphDialog) m_pointerGraphDialog = new PointerGraphDialog(m_coordinator, this);
+    m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank);
+    if (!exprPath.trimmed().isEmpty()) m_pointerGraphDialog->graphExpression(exprPath.trimmed(), varType, varValue);
+    m_pointerGraphDialog->show(); m_pointerGraphDialog->raise(); m_pointerGraphDialog->activateWindow();
+}
+
+/**
  * @brief Safely shuts down live coordinators and disconnects signals before Qt destroys child docks.
- *
- * Blocks outgoing coordinator signals prior to `terminateSession()` and `delete m_ownedCoordinator`
- * so teardown notifications never dereference partially destroyed UI widgets.
  */
 MainWindow::~MainWindow() {
     // Detach global shortcut/hover event filter before child widget destruction begins.
     if (qApp) qApp->removeEventFilter(this);
-    delete m_deadlockAnalyzer;
-    m_deadlockAnalyzer = nullptr;
+    delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr;
     if (m_coordinator) QObject::disconnect(m_coordinator, nullptr, this, nullptr);
     // Silence and destroy owned coordinator cleanly without post-delete signal-blocker UB.
     if (m_ownedCoordinator) {
-        m_ownedCoordinator->blockSignals(true);
-        m_ownedCoordinator->terminateSession();
-        delete m_ownedCoordinator;
-        m_ownedCoordinator = nullptr;
+        m_ownedCoordinator->blockSignals(true); m_ownedCoordinator->terminateSession();
+        delete m_ownedCoordinator; m_ownedCoordinator = nullptr;
     }
     // Nullify cached dock and view pointers prior to QMainWindow child tree cleanup.
-    m_coordinator = nullptr;
-    m_callStackDockWidget = nullptr;
-    m_mpiDiagnosticsWidget = nullptr;
-    m_gdbConsoleWidget = nullptr;
-    m_variablesDockWidget = nullptr;
-    m_serverRackView = nullptr;
+    m_coordinator = nullptr; m_callStackDockWidget = nullptr; m_mpiDiagnosticsWidget = nullptr;
+    m_gdbConsoleWidget = nullptr; m_variablesDockWidget = nullptr; m_serverRackView = nullptr;
 }
 
 }  // namespace gridlock::ui

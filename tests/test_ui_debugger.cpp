@@ -26,6 +26,7 @@
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
+#include "../src/ui/dialogs/PointerGraphDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
@@ -606,6 +607,17 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents(); const int icAsc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); const int icDesc = findVarIdx({}, QStringLiteral("Iconfig")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     QVERIFY2(icAsc >= 0 && osAsc >= 0 && icAsc < osAsc && osDesc < icDesc, "Sorting NAME column asc/desc must deterministically invert top-level order");
+    // Verify DDD-style PointerGraphDialog 2D struct/pointer canvas, cycle/alias deduplication, and live GDB struct expansion.
+    gridlock::ui::PointerGraphDialog pgDlg(mainWindow.coordinator(), &mainWindow);
+    QVERIFY(pgDlg.findChild<QLineEdit*>(QStringLiteral("pointerGraphRootEdit")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphAddBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphLayoutBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphExpandHopBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn")) && pgDlg.findChild<QGraphicsView*>(QStringLiteral("pointerGraphView")));
+    pgDlg.upsertStructNode(QStringLiteral("n1"), QStringLiteral("Node"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("10"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("Node*")}});
+    pgDlg.upsertStructNode(QStringLiteral("n2"), QStringLiteral("Node"), QStringLiteral("0x7fff2000"), {{QStringLiteral("val"), QStringLiteral("20"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff1000"), QStringLiteral("Node*")}}, QStringLiteral("n1"), QStringLiteral("next"));
+    pgDlg.connectPointerField(QStringLiteral("n2"), QStringLiteral("next"), QStringLiteral("0x7fff1000"));
+    QVERIFY(pgDlg.nodeCount() == 2 && pgDlg.edgeCount() == 2 && pgDlg.hasCycleOrSharedAlias());
+    pgDlg.clearGraph(); pgDlg.graphExpression(QStringLiteral("Iconfig"));
+    QTRY_VERIFY_WITH_TIMEOUT(pgDlg.nodeCount() >= 1 && pgDlg.nodeHasField(QStringLiteral("Iconfig"), QStringLiteral("mesh")) && pgDlg.nodeHasField(QStringLiteral("Iconfig"), QStringLiteral("tol")), 5000);
+    pgDlg.expandNodeField(QStringLiteral("Iconfig"), QStringLiteral("mesh"));
+    QTRY_VERIFY_WITH_TIMEOUT(pgDlg.nodeCount() >= 2 && pgDlg.edgeCount() >= 1 && pgDlg.nodeHasField(QStringLiteral("Iconfig.mesh"), QStringLiteral("dims")), 5000);
     consoleCmdEdit->setText(QStringLiteral("print outerSecret")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("4242")), 5000);
     consoleCmdEdit->setText(QStringLiteral("-data-evaluate-expression 21 + 21")); consoleExecBtn->click(); QTRY_VERIFY_WITH_TIMEOUT(consoleViewport->toPlainText().contains(QStringLiteral("42")), 5000);
     consoleCmdEdit->setText(QStringLiteral("print outerSecret; echo PWNED")); consoleExecBtn->click(); QApplication::processEvents(); QVERIFY(!consoleViewport->toPlainText().contains(QStringLiteral("PWNED")));
@@ -628,55 +640,33 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     auto* memMapBtn = memView->findChild<QPushButton*>(QStringLiteral("memMapModeBtn")); auto* memProf = memView->findChild<QWidget*>(QStringLiteral("memoryProfilerWidget"));
     auto* treemapCanvas = memView->findChild<QWidget*>(QStringLiteral("memoryTreemapCanvas")); auto* breakdownTable = memView->findChild<QTableWidget*>(QStringLiteral("memoryBreakdownTable"));
     auto* profSearch = memView->findChild<QLineEdit*>(QStringLiteral("memProfileSearchEdit")); auto* preloadCheck = memView->findChild<QCheckBox*>(QStringLiteral("memTrackPreloadCheck"));
-    QVERIFY2(memMapBtn && memProf && treemapCanvas && breakdownTable && profSearch && preloadCheck && preloadCheck->isChecked(), "MemView must expose #memMapModeBtn and MemoryProfilerWidget child controls");
-    QVERIFY2(breakdownTable->isSortingEnabled() && breakdownTable->horizontalHeader()->sectionResizeMode(0) == QHeaderView::Interactive, "#memoryBreakdownTable must enable sorting and Interactive columns");
+    QVERIFY2(memMapBtn && memProf && treemapCanvas && breakdownTable && profSearch && preloadCheck && preloadCheck->isChecked() && breakdownTable->isSortingEnabled() && breakdownTable->horizontalHeader()->sectionResizeMode(0) == QHeaderView::Interactive, "MemView must expose #memMapModeBtn, MemoryProfilerWidget controls, and sortable Interactive columns");
     const QString barrierCpp = nestedDir.filePath(QStringLiteral("barrier_hex.cpp"));
     { QFile bf(barrierCpp); QVERIFY(bf.open(QIODevice::WriteOnly));
       bf.write("#include <mpi.h>\n#include <cstdio>\n#include <cstdlib>\n#include <string>\n#include <thread>\n#include <unistd.h>\n#include <vector>\n"
                "__attribute__((noinline)) std::vector<char> allocateSolverArena() { std::vector<char> b(4 * 1024 * 1024, 1); b[0] = 7; b.back() = 9; return b; }\n"
                "__attribute__((noinline)) int solveStage(int r, int it, int sum) {\n  int res = sum + r + it;\n  return res;\n}\n"
-               "int main(int argc, char** argv) {\n  MPI_Init(&argc, &argv);\n"
-               "  if (argc < 2 || std::string(argv[1]) != \"HEX\") { MPI_Finalize(); return 2; }\n"
-               "  int r = -1, s = 0; MPI_Comm_rank(MPI_COMM_WORLD, &r); MPI_Comm_size(MPI_COMM_WORLD, &s);\n"
-               "  auto solverArena = allocateSolverArena();\n"
-               "  const char* omp = std::getenv(\"OMP_NUM_THREADS\"); const char* pol = std::getenv(\"OMP_WAIT_POLICY\");\n"
-               "  int nt = (omp && std::atoi(omp) > 0) ? std::atoi(omp) : 8; std::vector<std::thread> ws;\n"
-               "  for (int t = 0; t < nt; ++t) ws.emplace_back([r, t]() { volatile int acc = r + t; (void)acc; });\n"
-               "  for (auto& th : ws) th.join();\n"
-               "  std::printf(\"PRE_BARRIER_R%d OMP=%s POL=%s\\n\", r, omp ? omp : \"NONE\", pol ? pol : \"NONE\"); std::fflush(stdout);\n"
-               "  usleep(250000); int v = r + 1; MPI_Barrier(MPI_COMM_WORLD);\n"
-               "  int g = 0; MPI_Allreduce(&v, &g, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);\n"
-               "  MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g + solverArena[0]);\n  MPI_Finalize();\n  return (out > 0 && s == 4) ? 0 : 1;\n}\n"); }
+               "int main(int argc, char** argv) {\n  MPI_Init(&argc, &argv);\n  if (argc < 2 || std::string(argv[1]) != \"HEX\") { MPI_Finalize(); return 2; }\n"
+               "  int r = -1, s = 0; MPI_Comm_rank(MPI_COMM_WORLD, &r); MPI_Comm_size(MPI_COMM_WORLD, &s); auto solverArena = allocateSolverArena();\n"
+               "  const char* omp = std::getenv(\"OMP_NUM_THREADS\"); const char* pol = std::getenv(\"OMP_WAIT_POLICY\"); int nt = (omp && std::atoi(omp) > 0) ? std::atoi(omp) : 8; std::vector<std::thread> ws;\n"
+               "  for (int t = 0; t < nt; ++t) ws.emplace_back([r, t]() { volatile int acc = r + t; (void)acc; });\n  for (auto& th : ws) th.join();\n"
+               "  std::printf(\"PRE_BARRIER_R%d OMP=%s POL=%s\\n\", r, omp ? omp : \"NONE\", pol ? pol : \"NONE\"); std::fflush(stdout); usleep(250000); int v = r + 1; MPI_Barrier(MPI_COMM_WORLD);\n"
+               "  int g = 0; MPI_Allreduce(&v, &g, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD); MPI_Barrier(MPI_COMM_WORLD);\n  int out = solveStage(r, 3, g + solverArena[0]); MPI_Finalize(); return (out > 0 && s == 4) ? 0 : 1;\n}\n"); }
     auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings(); projCfg.targetArguments = QStringLiteral("HEX"); projCfg.programArguments = "HEX";
     gridlock::core::ConfigManager::instance().saveProjectSettings(projCfg); qunsetenv("OMP_NUM_THREADS"); qunsetenv("OMP_WAIT_POLICY");
-    rankSpin->setValue(4); targetCombo->insertItem(0, QStringLiteral("barrier_hex"), barrierCpp);
-    QVERIFY(mainWindow.selectTargetByName(QStringLiteral("barrier_hex")) && mainWindow.ensureTargetBinaryCompiled());
-    auto* barrierView = editorTabs->currentSourceCodeView(); QVERIFY(barrierView != nullptr);
-    // Set ONLY 1 post-barrier breakpoint inside solveStage (zero breakpoints before both MPI_Barrier calls).
-    const int solveBp = mainWindow.findSourceLineForStatement(QStringLiteral("return res")); QVERIFY(solveBp > 0);
+    rankSpin->setValue(4); targetCombo->insertItem(0, QStringLiteral("barrier_hex"), barrierCpp); QVERIFY(mainWindow.selectTargetByName(QStringLiteral("barrier_hex")) && mainWindow.ensureTargetBinaryCompiled());
+    auto* barrierView = editorTabs->currentSourceCodeView(); const int solveBp = mainWindow.findSourceLineForStatement(QStringLiteral("return res")); QVERIFY(barrierView != nullptr && solveBp > 0);
     barrierView->toggleBreakpoint(solveBp); mainWindow.startTargetWorkflow();
     auto* rackView = mainWindow.findChild<gridlock::ui::ServerRackView*>(); QVERIFY(rackView != nullptr);
-    for (int r = 0; r < rackView->count(); ++r) {
-        const QString pc = rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>().registers.value(16);
-        QVERIFY2(!pc.contains(QStringLiteral("401120")) && !pc.contains(QStringLiteral("401155")) && !pc.contains(QStringLiteral("00000000")), qPrintable(pc));
-    }
-    // Verify running-state inspection/REPL calls and UI rank switches emit zero MI commands or SIGINTs to running Rank 0.
+    for (int r = 0; r < rackView->count(); ++r) { const QString pc = rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>().registers.value(16); QVERIFY2(!pc.contains(QStringLiteral("401120")) && !pc.contains(QStringLiteral("401155")) && !pc.contains(QStringLiteral("00000000")), qPrintable(pc)); }
     QSignalSpy cmdSpy(mainWindow.coordinator(), SIGNAL(commandSentToGdb(int,QString)));
-    mainWindow.coordinator()->requestStackAndThreads(0); mainWindow.coordinator()->selectStackFrame(0, 1, 0);
-    mainWindow.coordinator()->evaluateExpression(0, QStringLiteral("r")); mainWindow.coordinator()->sendDebuggerCommand(0, QStringLiteral("bt"));
+    mainWindow.coordinator()->requestStackAndThreads(0); mainWindow.coordinator()->selectStackFrame(0, 1, 0); mainWindow.coordinator()->evaluateExpression(0, QStringLiteral("r")); mainWindow.coordinator()->sendDebuggerCommand(0, QStringLiteral("bt"));
     mainWindow.onRankSelected(1); mainWindow.onRankSelected(0); QCOMPARE(cmdSpy.count(), 0);
-    // Verify OMP_NUM_THREADS and OMP_WAIT_POLICY=PASSIVE appear in launch summary and all 4 ranks pass both barriers to solveBp.
-    const QString launchSummary = mainWindow.coordinator()->lastLaunchCommandSummary();
-    QVERIFY2(launchSummary.contains(QStringLiteral("OMP_NUM_THREADS=")) && launchSummary.contains(QStringLiteral("OMP_WAIT_POLICY=PASSIVE")), qPrintable(launchSummary));
-    auto* progOut = mainWindow.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView")); QVERIFY(progOut != nullptr);
-    QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), solveBp, 10000);
+    const QString launchSummary = mainWindow.coordinator()->lastLaunchCommandSummary(); QVERIFY2(launchSummary.contains(QStringLiteral("OMP_NUM_THREADS=")) && launchSummary.contains(QStringLiteral("OMP_WAIT_POLICY=PASSIVE")), qPrintable(launchSummary));
+    auto* progOut = mainWindow.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView")); QVERIFY(progOut != nullptr); QTRY_COMPARE_WITH_TIMEOUT(barrierView->executionLine(), solveBp, 10000);
     QTRY_VERIFY_WITH_TIMEOUT(([&]() { const QString o = progOut->toPlainText(); return o.contains(QStringLiteral("PRE_BARRIER_R0")) && o.contains(QStringLiteral("PRE_BARRIER_R1")) && o.contains(QStringLiteral("PRE_BARRIER_R2")) && o.contains(QStringLiteral("PRE_BARRIER_R3")) && o.contains(QStringLiteral("POL=PASSIVE")) && !o.contains(QStringLiteral("OMP=NONE")); })(), 5000);
-    // 8. Switch MemView to LIBRARY MEMORY MAP, refreshForPid on live Rank 0, and verify /proc/smaps + LD_PRELOAD heap + treemap + sort/filter.
     memMapBtn->click(); treemapCanvas->resize(720, 260); treemapCanvas->show(); QApplication::processEvents();
-    const qint64 liveRankPid = mainWindow.coordinator()->getPidForRank(0); QVERIFY(liveRankPid > 0);
-    int rectCount = 0; QVERIFY(QMetaObject::invokeMethod(memProf, "refreshForPid", Q_ARG(qint64, liveRankPid)) && QMetaObject::invokeMethod(memProf, "treemapRectCount", Q_RETURN_ARG(int, rectCount)));
-    QVERIFY2(breakdownTable->rowCount() >= 3 && rectCount >= 2, qPrintable(QStringLiteral("rows=%1 rects=%2").arg(breakdownTable->rowCount()).arg(rectCount)));
-    // Confirm real shared libraries (libc/libstdc++/libmpi) and >=3.8 MB heap allocation appear in #memoryBreakdownTable.
+    const qint64 liveRankPid = mainWindow.coordinator()->getPidForRank(0); int rectCount = 0; QVERIFY(liveRankPid > 0 && QMetaObject::invokeMethod(memProf, "refreshForPid", Q_ARG(qint64, liveRankPid)) && QMetaObject::invokeMethod(memProf, "treemapRectCount", Q_RETURN_ARG(int, rectCount)) && breakdownTable->rowCount() >= 3 && rectCount >= 2);
     bool sawSharedLib = false, sawArena = false;
     for (int r = 0; r < breakdownTable->rowCount(); ++r) {
         const QString lib = breakdownTable->item(r, 0) ? breakdownTable->item(r, 0)->text() : QString(), cat = breakdownTable->item(r, 1) ? breakdownTable->item(r, 1)->text() : QString(), sym = breakdownTable->item(r, 5) ? breakdownTable->item(r, 5)->text() : QString();

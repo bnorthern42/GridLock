@@ -69,6 +69,18 @@ signals:
      */
     void dataWatchpointRequested(const QString& expression, int accessMode);
 
+    /**
+     * @brief Emitted when the user selects "Visualize in Pointer / Struct Graph..." on a variable row.
+     * @param exprPath Full C++ expression path (e.g., "Iconfig.mesh").
+     * @param varName Leaf variable name.
+     * @param varValue Formatted runtime value or pointer address.
+     * @param varType Static C/C++ type string.
+     */
+    void visualizeInPointerGraphRequested(const QString& exprPath,
+                                          const QString& varName,
+                                          const QString& varValue,
+                                          const QString& varType);
+
 private slots:
     /**
      * @brief Handles rank selection changes from the dropdown combo box.
