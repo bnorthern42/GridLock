@@ -94,7 +94,33 @@ This roadmap tracks completed milestones (`Phases 1–12` / `v0.8.6`) and upcomi
 
 ---
 
-## Upcoming Milestones (`v0.9.0` & `v1.0.0`)
+## Upcoming Milestones (`v0.8.7` – `v1.0.0`)
 
-- **Planned (`v0.9.0`)**: Incorporate community and HPC user feedback on `v0.8.6` live multi-rank sessions, broaden `lldb-dap` / GPU (`cuda-gdb`, `rocgdb`) runtime coverage, and expand workspace diagnostics.
-- **Planned (`v1.0.0`)**: Final API/configuration stabilization, long-term AppImage packaging verification across major Linux distributions, and release-candidate regression hardening.
+### `v0.8.7` — Execution Power Tools, Catchpoints & Fast Ergonomics
+- **Non-Linear Execution Control (`Run to Cursor`, `Set Next Statement / Jump`, `Force Early Return`)**: `Ctrl+F10` Run to Cursor (`-exec-until`), draggable gutter PC arrow / `Set PC Here` (`$pc` / `-exec-jump` with lexical scope guard), and `Force Return Immediately...` (`-exec-return [expr]`).
+- **First-Class Catchpoints & Signal Disposition Manager**: C++ `throw`/`rethrow`/`catch` catchpoints (with type regex filtering), Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`), `dlopen`/`dlclose` regex catchpoints, and a per-signal (`SIGFPE`, `SIGPIPE`, `SIGUSR1`, `SIGBUS`) Stop/Print/Pass matrix.
+- **Instant Copy-on-Write Fork Checkpoints (`checkpoint` / `restart`)**: Native hardware-speed process state snapshots via GDB `checkpoint`/`restart` with `/proc/[pid]/fd` and `/proc/[pid]/maps` IPC/RDMA safety checks.
+- **Unified Fuzzy Command Palette (`Ctrl+Shift+P` / `Ctrl+P`)**: Modal-free fuzzy launcher across `ShortcutManager` actions (`>`), workspace files (`Ctrl+P`), `clangd`/ELF symbols (`@`), themes, and live MPI ranks/groups (`#`).
+
+### `v0.8.8` — Numerical, Vector & SIMD Inspection Suite
+- **Cross-Rank IEEE-754 Anomaly & Poison-Pattern Scanner (`NaN` / `Inf` / Subnormals)**: Concurrent `process_vm_readv` sweep across stopped ranks with per-rank distribution sparklines (`Min | Mean | Max | L2 Norm`), exact index flagging for Quiet/Signaling `NaN`, `±Inf`, IEEE-754 denormals/subnormals, and allocator poison patterns (`0xdeadbeef`, `0xcdcdcdcd`), plus a 1-click `$mxcsr` hardware FP exception trap toggle (`FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW`).
+- **Watch Expression Format Specifiers & AoS Columnar Table Views**: Inline comma suffixes (`ptr, [N]`, `,x`, `,b`) and Array-of-Structs tabular projections (`particles, [1000], cols(pos.x, pos.y, energy)`) strided locally via `process_vm_readv` and DWARF / `ptype /o` member offsets.
+- **Typed SIMD Vector Lane & Control/Flag Bitfield Inspector**: Expandable `XMM`/`YMM`/`ZMM` typed vector lanes (`f64x4`/`f64x8`, `f32x8`/`f32x16`, `i64x8`, `i32x16`) with per-lane step diff highlighting, `k0..k7` AVX-512 mask checkboxes, and decoded `RFLAGS` / `MXCSR` sticky exception badges (`IE`, `DE`, `ZE`, `OE`, `UE`, `PE`, `FTZ`, `DAZ`).
+- **Multidimensional Array, Slice & Heatmap Visualizer**: Dockable 1D/2D/3D array and tensor inspector (`[Nx, Ny, Nz]` shape/stride, row-major vs. Fortran column-major) with a virtualized 2D numerical table, multi-rank 1D curve overlays for halo/ghost-cell verification, and a 2D `QImage` heatmap (`Viridis`/`Plasma`/`Ocean`).
+
+### `v0.8.9` — Post-Mortem Crash Analysis & Low-Level Memory Layout
+- **Post-Mortem Core Dump & Multi-Rank Crash Loader (`coredumpctl` Integration)**: `File -> Open Core Dump(s)...` (multi-rank `core.*` globs) and `File -> Recent System Crashes (systemd-coredump)` (`coredumpctl list --json=short` + `coredumpctl dump`), ELF `PT_NOTE` (`NT_GNU_BUILD_ID` / `NT_FILE`) executable matching, and `POST-MORTEM` inspection across all docks.
+- **DWARF Struct Layout, Alignment Padding, Cache-Line & Hex-Dump Overlay Inspector**: `pahole`-style struct byte-map showing field offsets, bitfields, vptr slots, compiler padding holes, wasted byte %, optimal field packing preview, 64-byte hardware cache-line boundaries for OpenMP false-sharing analysis, and live `(StructType*)0x...` typed hex-grid overlays in `MemView`.
+- **Annotated Stack Frame Memory & Pointer-Telescoping Inspector**: Aligned 8-byte stack slot table (`[RSP .. RBP .. Caller CFA]`) bracketing stack frames, highlighting saved `RIP`, `RBP` chains, stack canaries, DWARF stack locals, and 4-hop pointer telescoping (`stack -> heap -> .rodata` symbol/string resolution).
+
+### `v0.9.0` — Flagship HPC Scale & Runtime Introspection (`TotalView` / `Forge` Parity)
+- **Merged Parallel Stack Tree ("STAT-Style" Prefix Aggregation) & Dynamic Rank Control Sub-Groups**: Prefix-trie call graph in `CallStackDockWidget` merging backtraces across all $N$ ranks with proportional `[M/N ranks]` membership bars to isolate stragglers, paired with `RankBitset` execution sub-groups (`All Ranks`, `Root (0)`, `Workers (1..N-1)`, `Stopped Ranks`, or custom branch subsets).
+- **OpenMP Logical Region, Task & Barrier Inspector (`OMPD` / `libompd.so` + Thread Alignment)**: Logical OpenMP team/thread hierarchy labeling, runtime frame collapsing, originating `omp task` backtraces, and a 1-click `"Align All Team Threads Here"` button.
+- **MPI Message Queue & Unmatched `MPI_Request` Inspector (`MPIR` / `mqs_` DLL Interface)**: Host adapter for `mpi_interface.h` (`libompi_dbg_msgq.so` / `libtvmpich.so`) backed by `process_vm_readv` callbacks, exposing **Posted Receives**, **Pending Sends**, and **Unexpected Messages** inside `MpiDiagnosticsWidget` alongside a 2D Rank × Rank communication matrix.
+
+### `v0.9.x` → `v1.0.0` — UI/UX Cohesion, Visual Ergonomics & Workstation Unification (Feature Freeze & Polish)
+- **Progressive Disclosure & Visual De-Cluttering**: Consolidating overlapping toolbars, context menus, and dock headers so advanced HPC and reverse-engineering tools appear contextually when needed without overwhelming the primary viewport.
+- **Task-Focused Workspace Perspective Presets**: 1-click and auto-switching layout perspectives (*Source & MPI Debugging*, *Binary CFG & Decompiler*, *Memory & Numerical Profiling*, *Post-Mortem Crash Triage*) with clean splitter proportions and zero clipped headers across 1080p, 1440p, and 4K/tiling Wayland setups.
+- **Unified Cross-View Selection, Navigation & Theme Harmony**: Consistent typography, spacing, badge semantics, keyboard navigation (`Ctrl+Shift+P`), and synchronized address/symbol/rank selection across all docks and pop-out windows.
+- **Real-World Dogfooding & `v1.0.0` Release Readiness**: Addressing community and production HPC user feedback, hardening OpenMPI/MPICH/SLURM edge cases, and stabilizing ABI/config compatibility for `v1.0.0`.
+
