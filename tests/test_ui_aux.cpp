@@ -134,16 +134,27 @@ void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
 void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show();
     QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QTest::qWait(30); QApplication::processEvents();
-    // 1. MemView toolbar button & input non-truncation check.
+    // 1. MemView toolbar button & input non-truncation + non-overlap check (HEX DUMP & LIBRARY MEMORY MAP).
     auto* memView = mainWindow.memView(); QVERIFY(memView != nullptr);
     if (auto* bottomTabs = mainWindow.findChild<QTabWidget*>("BottomConsoleTabs")) { bottomTabs->setCurrentWidget(memView); QApplication::processEvents(); }
+    auto* hexBtn = memView->findChild<QPushButton*>("memHexModeBtn"); auto* mapBtn = memView->findChild<QPushButton*>("memMapModeBtn");
+    auto* popBtn = memView->findChild<QPushButton*>("memPopOutBtn"); auto* badge = memView->findChild<QLabel*>("memSourceBadge");
+    QVERIFY(hexBtn && mapBtn && popBtn && badge);
+    auto checkNoOverlap = [&]() {
+        const QList<QWidget*> w = {hexBtn, mapBtn, badge, popBtn};
+        for (int i = 0; i < w.size(); ++i) for (int j = i + 1; j < w.size(); ++j) QVERIFY2(!w[i]->geometry().intersects(w[j]->geometry()), "MemView toolbar overlap");
+    };
     const auto buttons = memView->findChildren<QPushButton*>(); QVERIFY(!buttons.isEmpty());
-    for (QPushButton* btn : buttons) {
-        if (!btn->isVisible()) continue;
-        const int minRequiredW = btn->fontMetrics().horizontalAdvance(btn->text()) + 12;
-        QVERIFY2(btn->width() >= minRequiredW, qPrintable(QString("MemView button '%1' width (%2) < (%3)").arg(btn->text()).arg(btn->width()).arg(minRequiredW)));
-    }
-    auto* addrInput = memView->findChild<QLineEdit*>(); QVERIFY(addrInput != nullptr && addrInput->width() >= 90);
+    for (QPushButton* btn : buttons) if (btn->isVisible()) QVERIFY(btn->width() >= btn->fontMetrics().horizontalAdvance(btn->text()) + 12);
+    auto* addrInput = memView->findChild<QLineEdit*>(); QVERIFY(addrInput != nullptr && addrInput->width() >= 90); checkNoOverlap();
+    // Switch to LIBRARY MEMORY MAP: hex-only controls hide, badge/buttons do not overlap, table sorts descending by RSS.
+    mapBtn->click(); QApplication::processEvents(); checkNoOverlap(); QVERIFY(!addrInput->isVisible());
+    memView->notifyRankStoppedOrSelected(0, QCoreApplication::applicationPid(), 1); QApplication::processEvents();
+    QVERIFY2(badge->text().contains(QString::number(QCoreApplication::applicationPid())), qPrintable(badge->text()));
+    if (auto* tbl = memView->findChild<QTableWidget*>("memoryBreakdownTable"); tbl && tbl->rowCount() >= 2) QVERIFY(tbl->item(0, 2)->text().toDouble() >= tbl->item(tbl->rowCount() - 1, 2)->text().toDouble());
+    // Pop-out opens a large top-level window and clicking DOCK restores MemView back into the main layout.
+    popBtn->click(); QApplication::processEvents(); QVERIFY(memView->isPoppedOut() && popBtn->window()->isWindow() && popBtn->window()->width() >= 1000 && popBtn->window()->height() >= 650);
+    popBtn->click(); QApplication::processEvents(); QVERIFY(!memView->isPoppedOut()); hexBtn->click(); QApplication::processEvents(); QVERIFY(addrInput->isVisible());
     // 2. Central horizontal splitter gives DisassemblyView >= 420px on 1440x900.
     auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr && disassemblyView->width() >= 420);
     // 3. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines.

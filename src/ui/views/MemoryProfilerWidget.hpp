@@ -162,6 +162,8 @@ class MemoryProfilerWidget : public QWidget {
   RankPidGetter m_pidGetter{};
   int m_rankCount = 1;
   qint64 m_lastPid = 0;
+  int m_sortColumn = 2;
+  Qt::SortOrder m_sortOrder = Qt::DescendingOrder;
   QVector<MemoryProfileEntry> m_entries;
 };
 

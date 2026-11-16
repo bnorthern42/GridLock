@@ -81,89 +81,36 @@ uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
  * @param parent Optional parent widget.
  */
 MemView::MemView(QWidget* parent) : QWidget(parent) {
-    // Configure vertical root layout with zero margins for dock docking
+    // Configure vertical root layout with zero margins for dock docking.
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    // Build the compact toolbar header bar (styled dynamically by reloadStyle()).
-    QWidget* headerBar = new QWidget(this);
+    // Detachable container holding toolbar headerBar + m_viewStack for seamless Pop-Out / Dock Back.
+    m_contentContainer = new QWidget(this);
+    QVBoxLayout* containerLayout = new QVBoxLayout(m_contentContainer);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(0);
+
+    // Top mode/status bar: [HEX DUMP] [LIBRARY MEMORY MAP] <stretch> [Source Badge] [⤢ POP OUT].
+    QWidget* headerBar = new QWidget(m_contentContainer);
     headerBar->setObjectName("cutterMemHeader");
-    headerBar->setFixedHeight(26);
+    headerBar->setFixedHeight(28);
     QHBoxLayout* topLayout = new QHBoxLayout(headerBar);
     topLayout->setContentsMargins(6, 2, 6, 2);
-    topLayout->setSpacing(4);
+    topLayout->setSpacing(6);
 
-    // Helper lambda to measure button text and assign minimum width
+    // Helper lambda to measure button text and assign minimum width without truncation or overlap.
     auto configureToolbarButton = [](QPushButton* btn) {
-        QFont boldFont = btn->font();
-        boldFont.setBold(true);
-        QFontMetrics fm(boldFont);
-        const int textW = std::max(
-            fm.horizontalAdvance(btn->text()),
-            fm.horizontalAdvance(btn->text().toUpper()));
-        const int minW = textW + 20;
-        btn->setMinimumWidth(minW);
-        btn->setFixedHeight(22);
-        btn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+        QFont boldFont = btn->font(); boldFont.setBold(true); QFontMetrics fm(boldFont);
+        const int textW = std::max(fm.horizontalAdvance(btn->text()), fm.horizontalAdvance(btn->text().toUpper()));
+        btn->setMinimumWidth(textW + 20); btn->setFixedHeight(22); btn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     };
-
-    topLayout->addWidget(new QLabel("Addr:"));
-    m_addressEdit = new QLineEdit();
-    m_addressEdit->setObjectName("cutterMemAddressEdit");
-    m_addressEdit->setMinimumWidth(105);
-    m_addressEdit->setFixedHeight(22);
-    m_addressEdit->setPlaceholderText(QStringLiteral("0x00000000"));
-    topLayout->addWidget(m_addressEdit);
-
-    topLayout->addWidget(new QLabel("Bytes:"));
-    m_lengthBox = new QSpinBox();
-    m_lengthBox->setRange(1, 4096);
-    m_lengthBox->setValue(256);
-    m_lengthBox->setMinimumWidth(68);
-    m_lengthBox->setFixedHeight(22);
-    topLayout->addWidget(m_lengthBox);
-
-    topLayout->addWidget(new QLabel("Type:"));
-    m_typeBox = new QComboBox();
-    m_typeBox->addItem("Int32");
-    m_typeBox->addItem("Float");
-    m_typeBox->addItem("Double");
-    m_typeBox->setMinimumWidth(74);
-    m_typeBox->setFixedHeight(22);
-    topLayout->addWidget(m_typeBox);
-
-    m_readBtn = new QPushButton("Read");
-    configureToolbarButton(m_readBtn);
-    topLayout->addWidget(m_readBtn);
-
-    m_exportBtn = new QPushButton("Export");
-    configureToolbarButton(m_exportBtn);
-    topLayout->addWidget(m_exportBtn);
-
-    topLayout->addWidget(new QLabel("Base:"));
-    m_baselineRankBox = new QSpinBox();
-    m_baselineRankBox->setRange(0, 1000);
-    m_baselineRankBox->setMinimumWidth(56);
-    m_baselineRankBox->setFixedHeight(22);
-    topLayout->addWidget(m_baselineRankBox);
-
-    topLayout->addWidget(new QLabel("Target:"));
-    m_targetRankBox = new QSpinBox();
-    m_targetRankBox->setRange(0, 1000);
-    m_targetRankBox->setMinimumWidth(56);
-    m_targetRankBox->setFixedHeight(22);
-    topLayout->addWidget(m_targetRankBox);
-
-    m_diffBtn = new QPushButton("Diff Ranks");
-    configureToolbarButton(m_diffBtn);
-    topLayout->addWidget(m_diffBtn);
 
     // Segmented view-mode switcher toggling between raw HEX DUMP and visual LIBRARY MEMORY MAP.
     m_hexModeBtn = new QPushButton(QStringLiteral("HEX DUMP"), headerBar);
     m_hexModeBtn->setObjectName(QStringLiteral("memHexModeBtn"));
-    m_hexModeBtn->setCheckable(true);
-    m_hexModeBtn->setChecked(true);
+    m_hexModeBtn->setCheckable(true); m_hexModeBtn->setChecked(true);
     configureToolbarButton(m_hexModeBtn);
     topLayout->addWidget(m_hexModeBtn);
 
@@ -173,18 +120,70 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     configureToolbarButton(m_mapModeBtn);
     topLayout->addWidget(m_mapModeBtn);
 
-    topLayout->addStretch();
+    topLayout->addStretch(1);
 
-    // Explicit source badge distinguishing idle empty state, static on-disk ELF reads, and live rank PID reads.
+    // Explicit source badge with Minimum horizontal policy so it never overlaps adjacent mode buttons.
     m_sourceBadge = new QLabel(QStringLiteral("IDLE (NO BINARY)"), headerBar);
     m_sourceBadge->setObjectName(QStringLiteral("memSourceBadge"));
+    m_sourceBadge->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    m_sourceBadge->setFixedHeight(22);
     topLayout->addWidget(m_sourceBadge);
 
-    mainLayout->addWidget(headerBar);
+    // Pop-Out / Dock Back toggle button at the right edge of the toolbar.
+    m_popOutBtn = new QPushButton(QStringLiteral("⤢ POP OUT"), headerBar);
+    m_popOutBtn->setObjectName(QStringLiteral("memPopOutBtn"));
+    configureToolbarButton(m_popOutBtn);
+    topLayout->addWidget(m_popOutBtn);
+    containerLayout->addWidget(headerBar);
+
+    // Secondary Hex-Dump-only control bar (hidden automatically in LIBRARY MEMORY MAP mode).
+    QWidget* hexBar = new QWidget(m_contentContainer);
+    hexBar->setObjectName(QStringLiteral("cutterMemHexToolbar"));
+    hexBar->setFixedHeight(26);
+    QHBoxLayout* hexLayout = new QHBoxLayout(hexBar);
+    hexLayout->setContentsMargins(6, 2, 6, 2);
+    hexLayout->setSpacing(4);
+    m_hexOnlyWidgets.append(hexBar);
+
+    // Populate hex address, byte length, type interpretation, read/export, and cross-rank diff controls.
+    hexLayout->addWidget(new QLabel("Addr:", hexBar));
+    m_addressEdit = new QLineEdit(hexBar);
+    m_addressEdit->setObjectName("cutterMemAddressEdit");
+    m_addressEdit->setMinimumWidth(105); m_addressEdit->setFixedHeight(22);
+    m_addressEdit->setPlaceholderText(QStringLiteral("0x00000000"));
+    hexLayout->addWidget(m_addressEdit);
+
+    hexLayout->addWidget(new QLabel("Bytes:", hexBar));
+    m_lengthBox = new QSpinBox(hexBar);
+    m_lengthBox->setRange(1, 4096); m_lengthBox->setValue(256);
+    m_lengthBox->setMinimumWidth(68); m_lengthBox->setFixedHeight(22);
+    hexLayout->addWidget(m_lengthBox);
+
+    hexLayout->addWidget(new QLabel("Type:", hexBar));
+    m_typeBox = new QComboBox(hexBar);
+    m_typeBox->addItems({"Int32", "Float", "Double"});
+    m_typeBox->setMinimumWidth(74); m_typeBox->setFixedHeight(22);
+    hexLayout->addWidget(m_typeBox);
+
+    m_readBtn = new QPushButton("Read", hexBar); configureToolbarButton(m_readBtn); hexLayout->addWidget(m_readBtn);
+    m_exportBtn = new QPushButton("Export", hexBar); configureToolbarButton(m_exportBtn); hexLayout->addWidget(m_exportBtn);
+
+    hexLayout->addWidget(new QLabel("Base:", hexBar));
+    m_baselineRankBox = new QSpinBox(hexBar);
+    m_baselineRankBox->setRange(0, 1000); m_baselineRankBox->setMinimumWidth(56); m_baselineRankBox->setFixedHeight(22);
+    hexLayout->addWidget(m_baselineRankBox);
+
+    hexLayout->addWidget(new QLabel("Target:", hexBar));
+    m_targetRankBox = new QSpinBox(hexBar);
+    m_targetRankBox->setRange(0, 1000); m_targetRankBox->setMinimumWidth(56); m_targetRankBox->setFixedHeight(22);
+    hexLayout->addWidget(m_targetRankBox);
+
+    m_diffBtn = new QPushButton("Diff Ranks", hexBar); configureToolbarButton(m_diffBtn); hexLayout->addWidget(m_diffBtn);
+    hexLayout->addStretch(1);
+    containerLayout->addWidget(hexBar);
 
     // Stacked container hosting page 0 (`m_dumpEdit`) and page 1 (`m_profilerWidget`).
-    m_viewStack = new QStackedWidget(this);
-
+    m_viewStack = new QStackedWidget(m_contentContainer);
     m_dumpEdit = new QTextEdit(m_viewStack);
     m_dumpEdit->setObjectName("cutterHexDumpEdit");
     m_dumpEdit->setReadOnly(true);
@@ -202,22 +201,38 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_profilerWidget = new MemoryProfilerWidget(m_viewStack);
     m_viewStack->addWidget(m_dumpEdit);
     m_viewStack->addWidget(m_profilerWidget);
-    mainLayout->addWidget(m_viewStack, 1);
+    containerLayout->addWidget(m_viewStack, 1);
+    mainLayout->addWidget(m_contentContainer, 1);
+
+    // Docked placeholder shown while MemView is popped out into a standalone window.
+    m_placeholderWidget = new QWidget(this);
+    m_placeholderWidget->setVisible(false);
+    auto* phLayout = new QVBoxLayout(m_placeholderWidget);
+    phLayout->addStretch(1);
+    auto* dockBackBtn = new QPushButton(QStringLiteral("Memory View is popped out — Click to Dock Back"), m_placeholderWidget);
+    dockBackBtn->setObjectName(QStringLiteral("memDockBackPlaceholderBtn"));
+    phLayout->addWidget(dockBackBtn, 0, Qt::AlignCenter);
+    phLayout->addStretch(1);
+    mainLayout->addWidget(m_placeholderWidget, 1);
 
     connect(m_readBtn, &QPushButton::clicked, this, &MemView::onReadClicked);
     connect(m_addressEdit, &QLineEdit::returnPressed, this, &MemView::onReadClicked);
     connect(m_exportBtn, &QPushButton::clicked, this, &MemView::onExportMatrixClicked);
     connect(m_diffBtn, &QPushButton::clicked, this, &MemView::onDiffClicked);
+    connect(m_popOutBtn, &QPushButton::clicked, this, [this]() { setPoppedOut(!m_isPoppedOut); });
+    connect(dockBackBtn, &QPushButton::clicked, this, [this]() { setPoppedOut(false); });
 
     // Wire mode toggle buttons and double-click hex navigation from the profiler treemap/table.
     connect(m_hexModeBtn, &QPushButton::clicked, this, [this]() {
         m_hexModeBtn->setChecked(true);
         if (m_mapModeBtn) m_mapModeBtn->setChecked(false);
+        setHexControlsVisible(true);
         if (m_viewStack) m_viewStack->setCurrentIndex(0);
     });
     connect(m_mapModeBtn, &QPushButton::clicked, this, [this]() {
         m_mapModeBtn->setChecked(true);
         if (m_hexModeBtn) m_hexModeBtn->setChecked(false);
+        setHexControlsVisible(false);
         if (m_viewStack) m_viewStack->setCurrentIndex(1);
         const int rank = m_baselineRankBox ? m_baselineRankBox->value() : 0;
         const qint64 pid = m_pidGetter ? m_pidGetter(rank) : 0LL;
@@ -226,6 +241,7 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     connect(m_profilerWidget, &MemoryProfilerWidget::inspectAddressRequested, this, [this](uint64_t addr) {
         if (m_hexModeBtn) m_hexModeBtn->setChecked(true);
         if (m_mapModeBtn) m_mapModeBtn->setChecked(false);
+        setHexControlsVisible(true);
         if (m_viewStack) m_viewStack->setCurrentIndex(0);
         seekToAddress(addr);
     });
@@ -252,11 +268,56 @@ void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
  * @brief Updates the profiler's rank selector and refreshes automatically when `LIBRARY MEMORY MAP` is active.
  */
 void MemView::notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount) {
+    if (pid > 0) setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rank).arg(pid));
     if (!m_profilerWidget) return;
     m_profilerWidget->setAvailableRanks(rankCount, rank, m_pidGetter);
-    if (m_viewStack && m_viewStack->currentIndex() == 1 && pid > 0) {
-        m_profilerWidget->refreshForPid(pid);
+    if (m_viewStack && m_viewStack->currentIndex() == 1 && pid > 0) m_profilerWidget->refreshForPid(pid);
+}
+
+/** @brief Shows or hides Hex-Dump-only toolbar controls when switching between HEX DUMP and LIBRARY MEMORY MAP. */
+void MemView::setHexControlsVisible(bool visible) {
+    for (QWidget* w : m_hexOnlyWidgets) if (w) w->setVisible(visible);
+}
+
+/** @brief Detaches or re-docks MemView's content container between the main dock and a standalone window. */
+void MemView::setPoppedOut(bool poppedOut) {
+    if (poppedOut == m_isPoppedOut || !m_contentContainer) return;
+    m_isPoppedOut = poppedOut;
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (poppedOut) {
+        if (!m_popOutWindow) {
+            // Create a standalone resizable window with minimize/maximize/close buttons and clean re-dock on close.
+            m_popOutWindow = new QWidget(nullptr, Qt::Window | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
+            m_popOutWindow->setWindowTitle(QStringLiteral("GridLock — Memory View & Library Memory Map"));
+            m_popOutWindow->resize(1280, 820);
+            auto* winLayout = new QVBoxLayout(m_popOutWindow); winLayout->setContentsMargins(0, 0, 0, 0);
+            m_popOutWindow->installEventFilter(this);
+            connect(this, &QObject::destroyed, m_popOutWindow, &QObject::deleteLater);
+        }
+        // Move container from dock layout into floating window and show docked placeholder.
+        if (rootLayout) rootLayout->removeWidget(m_contentContainer);
+        if (m_placeholderWidget) m_placeholderWidget->setVisible(true);
+        m_popOutWindow->layout()->addWidget(m_contentContainer); m_contentContainer->show();
+        if (m_popOutBtn) { m_popOutBtn->setText(QStringLiteral("⤡ DOCK")); m_popOutBtn->setMinimumWidth(m_popOutBtn->fontMetrics().horizontalAdvance(QStringLiteral("⤡ DOCK")) + 24); }
+        m_popOutWindow->show(); m_popOutWindow->raise(); m_popOutWindow->activateWindow();
+    } else {
+        // Restore container back into MemView's dock layout and hide floating window.
+        if (m_popOutWindow) { m_popOutWindow->layout()->removeWidget(m_contentContainer); m_popOutWindow->hide(); }
+        if (m_placeholderWidget) m_placeholderWidget->setVisible(false);
+        if (rootLayout) rootLayout->insertWidget(0, m_contentContainer, 1);
+        m_contentContainer->show();
+        if (m_popOutBtn) { m_popOutBtn->setText(QStringLiteral("⤢ POP OUT")); m_popOutBtn->setMinimumWidth(m_popOutBtn->fontMetrics().horizontalAdvance(QStringLiteral("⤢ POP OUT")) + 24); }
     }
+}
+
+/** @brief Re-docks MemView when the user closes the standalone pop-out window. */
+bool MemView::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_popOutWindow && event && event->type() == QEvent::Close) {
+        event->ignore();
+        setPoppedOut(false);
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 /**

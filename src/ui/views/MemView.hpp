@@ -83,10 +83,16 @@ public:
     QColor activeHexTextColor() const;
     /// Reloads hex dump viewport and control header styles from ThemeManager.
     Q_INVOKABLE void reloadStyle();
+    /// Toggles standalone floating window mode for MemView (Pop-Out / Dock Back).
+    void setPoppedOut(bool poppedOut);
+    /// Returns true when MemView is currently detached into its standalone top-level window.
+    bool isPoppedOut() const { return m_isPoppedOut; }
 
 protected:
     /// Paints the memory inspector container and synchronizes theme-dependent hex colors.
     void paintEvent(QPaintEvent* event) override;
+    /// Intercepts floating window close events so closing the pop-out window docks MemView back cleanly.
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
     /// Emitted when bytes are patched at target memory address.
@@ -104,8 +110,12 @@ private slots:
 private:
     QString formatHexDump(qint64 startAddress, const QString& hexData);
     QString formatHexDumpHtml(uint64_t startAddress, const QByteArray& currentData, const QByteArray& prevData);
+    void setHexControlsVisible(bool visible);
     static uint64_t parseHexAddress(const QString& address, bool* okOut = nullptr);
 
+    QWidget* m_contentContainer = nullptr;
+    QWidget* m_placeholderWidget = nullptr;
+    QWidget* m_popOutWindow = nullptr;
     QLineEdit* m_addressEdit = nullptr;
     QSpinBox* m_lengthBox = nullptr;
     QPushButton* m_readBtn = nullptr;
@@ -116,7 +126,9 @@ private:
     QPushButton* m_diffBtn = nullptr;
     QPushButton* m_hexModeBtn = nullptr;
     QPushButton* m_mapModeBtn = nullptr;
+    QPushButton* m_popOutBtn = nullptr;
     QLabel* m_sourceBadge = nullptr;
+    QList<QWidget*> m_hexOnlyWidgets;
     QStackedWidget* m_viewStack = nullptr;
     QTextEdit* m_dumpEdit = nullptr;
     MemoryProfilerWidget* m_profilerWidget = nullptr;
@@ -129,6 +141,7 @@ private:
     uint64_t m_previousBaseAddress = 0ULL;
     int m_changedByteCount = 0;
     bool m_hasDiffBaseline = false;
+    bool m_isPoppedOut = false;
     QString m_lastStyledThemeId;
     RankAddressResolver m_addressResolver{};
     RankBytesFetcher m_bytesFetcher{};

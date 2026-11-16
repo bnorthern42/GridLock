@@ -550,6 +550,8 @@ MemoryProfilerWidget::MemoryProfilerWidget(QWidget* parent) : QWidget(parent) {
     hdr->setSectionsMovable(false); hdr->setStretchLastSection(true); hdr->setMinimumSectionSize(56);
     const QList<int> widths = {210, 125, 115, 125, 88, 260};
     for (int c = 0; c < widths.size(); ++c) { hdr->setSectionResizeMode(c, QHeaderView::Interactive); m_table->setColumnWidth(c, widths[c]); }
+    hdr->setSortIndicatorShown(true); hdr->setSortIndicator(m_sortColumn, m_sortOrder);
+    connect(hdr, &QHeaderView::sectionClicked, this, [this, hdr](int) { m_sortColumn = hdr->sortIndicatorSection(); m_sortOrder = hdr->sortIndicatorOrder(); });
   }
   splitter->addWidget(m_table);
   splitter->setStretchFactor(0, 3); splitter->setStretchFactor(1, 2);
@@ -879,6 +881,8 @@ void MemoryProfilerWidget::populateFromEntries(const QVector<MemoryProfileEntry>
     for (int c = 0; c < rowItems.size(); ++c) { rowItems[c]->setToolTip(rowItems[c]->text()); m_table->setItem(row, c, rowItems[c]); }
   }
   m_table->setSortingEnabled(wasSorting);
+  m_table->sortItems(m_sortColumn, m_sortOrder);
+  if (auto* hdr = m_table->horizontalHeader()) hdr->setSortIndicator(m_sortColumn, m_sortOrder);
   applySearchFilter(m_searchEdit ? m_searchEdit->text() : QString());
 }
 
