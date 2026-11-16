@@ -58,4 +58,9 @@ private slots:
      * @brief Tests terminal emulator shell binary, font family, and font size persistence.
      */
     void testTerminalSettingsPersistence();
+
+    /**
+     * @brief Tests MRU session queue capacity limiting, ordering, and re-insertion.
+     */
+    void testMruLogic();
 };

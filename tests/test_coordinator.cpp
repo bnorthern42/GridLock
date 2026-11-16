@@ -238,6 +238,45 @@ void TestGdbCoordinator::testRegisterValuesParsing() {
     QCOMPARE(state.registers[1], QString("0x12345678"));
 }
 
+#include "../src/core/commands/DebugCommands.hpp"
+#include "../src/ui/MainWindow.hpp"
+
+namespace {
+class MockCommandCoordinator : public gridlock::GdbRankCoordinator {
+public:
+    MockCommandCoordinator() : gridlock::GdbRankCoordinator(nullptr) {}
+    bool stepCalled = false;
+    bool pauseCalled = false;
+    int pauseRankId = -1;
+    void stepAll() override { stepCalled = true; }
+    void pauseFocusedRank(int rankId) override {
+        pauseCalled = true;
+        pauseRankId = rankId;
+    }
+};
+}  // namespace
+
+/**
+ * @brief Tests StepCommand execution routing to coordinator stepAll().
+ */
+void TestGdbCoordinator::testStepCommand() {
+    MockCommandCoordinator mock;
+    gridlock::core::commands::StepCommand cmd(&mock, 1);
+    cmd.execute();
+    QVERIFY(mock.stepCalled);
+}
+
+/**
+ * @brief Tests PauseCommand execution converting 1-based rank (43) to 0-based rank (42).
+ */
+void TestGdbCoordinator::testPauseCommand() {
+    MockCommandCoordinator mock;
+    gridlock::core::commands::PauseCommand cmd(&mock, 43);
+    cmd.execute();
+    QVERIFY(mock.pauseCalled);
+    QCOMPARE(mock.pauseRankId, 42);
+}
+
 /**
  * @brief Global test teardown hook.
  */
@@ -245,3 +284,10 @@ void TestGdbCoordinator::cleanupTestCase() {
 }
 
 QTEST_MAIN(TestGdbCoordinator)
+
+namespace gridlock::ui {
+void MainWindow::startDebuggingSession(const QString& binaryPath, int ranks) {
+    Q_UNUSED(binaryPath);
+    Q_UNUSED(ranks);
+}
+}  // namespace gridlock::ui

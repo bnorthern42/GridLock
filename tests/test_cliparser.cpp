@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QtTest>
 #include "../src/core/utils/CliParser.hpp"
+#include "../src/core/Version.hpp"
 
 /**
  * @class TestCliParser
@@ -127,6 +128,19 @@ private slots:
             char* argvSnapshot[] = {arg0, argSnapshot, argSnapPath, nullptr};
             QVERIFY(gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(3, argvSnapshot));
         }
+    }
+
+    /**
+     * @brief Verifies semantic version string format and numeric breakdown.
+     */
+    void testVersionStringAndParsing() {
+        const QString ver = gridlock::core::Version::getString();
+        QVERIFY(!ver.isEmpty());
+        QVERIFY(QRegularExpression(QStringLiteral("^\\d+\\.\\d+\\.\\d+$")).match(ver).hasMatch());
+        const QStringList parts = ver.split(QLatin1Char('.'));
+        QCOMPARE(gridlock::core::Version::getMajor(), parts[0].toInt());
+        QCOMPARE(gridlock::core::Version::getMinor(), parts[1].toInt());
+        QCOMPARE(gridlock::core::Version::getPatch(), parts[2].toInt());
     }
 };
 

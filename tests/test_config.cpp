@@ -367,4 +367,25 @@ void TestConfig::testTerminalSettingsPersistence() {
     QDir::setCurrent(oldCwd);
 }
 
+#include "../src/core/managers/SessionManager.hpp"
+
+/**
+ * @brief Tests MRU session queue capacity limiting, ordering, and re-insertion.
+ */
+void TestConfig::testMruLogic() {
+    auto& manager = gridlock::core::managers::SessionManager::instance();
+    for (int i = 1; i <= 6; ++i) {
+        manager.addMruSession(QString("path%1").arg(i));
+    }
+    QStringList mru = manager.getMruSessions();
+    QCOMPARE(mru.size(), 5);
+    QCOMPARE(mru.first(), QString("path6"));
+    QVERIFY(!mru.contains("path1"));
+    manager.addMruSession("path4");
+    mru = manager.getMruSessions();
+    QCOMPARE(mru.size(), 5);
+    QCOMPARE(mru.first(), QString("path4"));
+    QCOMPARE(mru.at(1), QString("path6"));
+}
+
 QTEST_MAIN(TestConfig)

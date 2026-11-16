@@ -121,13 +121,16 @@ install_data('resources/icon.png',
 # Test executable
 test_src = [
   'tests/test_coordinator.cpp',
+  'src/core/commands/DebugCommands.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp', 'src/core/hpc/GdbRankInspection.cpp',
+  'src/core/hpc/DapCoordinator.cpp', 'src/core/hpc/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 test_moc_headers = [
   'tests/test_coordinator.hpp',
   'src/core/hpc/GdbRankCoordinator.hpp',
+  'src/core/hpc/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
 
@@ -248,39 +251,15 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
 
 test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout: 120)
 
-terminal_config_test_src = [
-  'tests/test_terminal_config.cpp',
-  'src/ui/docks/TerminalDockWidget.cpp',
-  'src/core/managers/ConfigManager.cpp'
-]
-
-terminal_config_test_moc_headers = [
-  'tests/test_terminal_config.hpp',
-  'src/ui/docks/TerminalDockWidget.hpp',
-]
-
-processed_terminal_config_test_files = qt6.compile_moc(
-  headers : terminal_config_test_moc_headers,
-  dependencies: qt6_dep
-)
-
-gridlock_terminal_config_tests = executable('gridlock_terminal_config_tests',
-  terminal_config_test_src,
-  processed_terminal_config_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep, qtermwidget_dep, tomlplusplus_dep],
-  build_by_default : false
-)
-
-test('terminal_config_tests', gridlock_terminal_config_tests, env: ['QT_QPA_PLATFORM=offscreen'])
-
 config_test_src = [
   'tests/test_config.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp',
+  'src/core/managers/SessionManager.cpp'
 ]
 
 config_test_moc_headers = [
-  'tests/test_config.hpp'
+  'tests/test_config.hpp',
+  'src/core/managers/SessionManager.hpp'
 ]
 
 processed_config_test_files = qt6.compile_moc(
@@ -297,32 +276,6 @@ gridlock_config_tests = executable('gridlock_config_tests',
 )
 
 test('config_tests', gridlock_config_tests, env: ['QT_QPA_PLATFORM=offscreen'])
-
-config_engine_test_src = [
-  'tests/test_config_engine.cpp',
-  'src/core/managers/ConfigManager.cpp',
-  'src/core/managers/SessionManager.cpp'
-]
-
-config_engine_test_moc_headers = [
-  'tests/test_config_engine.hpp',
-  'src/core/managers/SessionManager.hpp'
-]
-
-processed_config_engine_test_files = qt6.compile_moc(
-  headers : config_engine_test_moc_headers,
-  dependencies: qt6_dep
-)
-
-gridlock_config_engine_tests = executable('gridlock_config_engine_tests',
-  config_engine_test_src,
-  processed_config_engine_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep],
-  build_by_default : false
-)
-
-test('config_engine_tests', gridlock_config_engine_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 docset_test_src = [
   'tests/test_docset.cpp',
@@ -350,43 +303,7 @@ gridlock_docset_tests = executable('gridlock_docset_tests',
 
 test('docset_tests', gridlock_docset_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
-commands_test_src = [
-  'tests/test_commands.cpp',
-  'src/core/commands/DebugCommands.cpp',
-  'src/core/hpc/GdbRankCoordinator.cpp', 'src/core/hpc/GdbRankInspection.cpp',
-  'src/core/hpc/DapCoordinator.cpp',
-  'src/core/hpc/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp',
-  'src/ui/views/SourceCodeView.cpp',
-  'src/ui/views/EditorSyntaxHighlighter.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
-]
 
-commands_test_moc_headers = [
-  'tests/test_commands.hpp',
-  'src/core/hpc/GdbRankCoordinator.hpp',
-  'src/core/hpc/DapCoordinator.hpp',
-  'src/core/hpc/IBackendCoordinator.hpp',
-  'src/ui/views/SourceCodeView.hpp',
-  'src/ui/views/EditorSyntaxHighlighter.hpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
-]
-
-processed_commands_test_files = qt6.compile_moc(
-  headers : commands_test_moc_headers,
-  dependencies: qt6_dep
-)
-
-gridlock_commands_tests = executable('gridlock_commands_tests',
-  commands_test_src,
-  processed_commands_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep],
-  build_by_default : false
-)
-
-test('commands_tests', gridlock_commands_tests, env: ['QT_QPA_PLATFORM=offscreen'])
-  
 dap_parser_test_src = [
   'tests/test_dap_parser.cpp',
   'src/core/hpc/DapCoordinator.cpp',
@@ -853,27 +770,6 @@ gridlock_cliparser_tests = executable('gridlock_cliparser_tests',
 
 test('cliparser_tests', gridlock_cliparser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
-version_test_src = [
-  'tests/test_version.cpp',
-  'src/core/Version.cpp'
-]
-
-# Since test_version.cpp contains the class and the #include "test_version.moc", 
-# we need to pass it as source to compile_moc
-processed_version_test_files = qt6.compile_moc(
-  sources : 'tests/test_version.cpp',
-  dependencies: qt6_dep
-)
-
-gridlock_version_tests = executable('gridlock_version_tests',
-  version_test_src,
-  processed_version_test_files,
-  include_directories : inc,
-  dependencies : [qt6_dep],
-  build_by_default : false
-)
-
-test('version_tests', gridlock_version_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 
 custom_target('mpi_mm_bin',

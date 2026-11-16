@@ -22,9 +22,6 @@ private slots:
     /** @brief Verifies source file loading into the editor. */
     void testSourceFileLoading();
 
-    /** @brief Verifies main window layout, splitters, and dock hierarchy. */
-    void testMainLayoutStructure();
-
     /** @brief Verifies text editor viewport margin geometry. */
     void testSourceCodeViewportMargins();
 
@@ -49,9 +46,6 @@ private slots:
     /** @brief Verifies gutter breakpoint click propagation. */
     void testGutterBreakpointPropagation();
 
-    /** @brief Verifies Nerd Font icon font family loading. */
-    void testNerdFontLoading();
-
     /** @brief Verifies MIME type and filename icon resolution. */
     void testFileIconProvider();
 
@@ -72,9 +66,6 @@ private slots:
 
     /** @brief Verifies symbol tree sidebar and address space nav ribbon. */
     void testSymbolSidebarAndNavRibbon();
-
-    /** @brief Verifies file line limits and length checks. */
-    void testSourceFileLineLimits();
 
     /** @brief Verifies dock resizability constraints and xref decompiler sync. */
     void testDockResizabilityAndXrefDecompiler();

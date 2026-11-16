@@ -40,7 +40,17 @@ private slots:
     void testFragmentedStream();
 
     /**
-     * @brief Verifies hover contents parsing across string, object, and array variants.
+     * @brief Verifies hover contents parsing and closed-pipe warning guards.
      */
     void testLspHoverParsing();
+
+    /**
+     * @brief Verifies clangd diagnostics, hover info, async workspace completion, and non-blocking latency.
+     */
+    void testClangdDiagnosticsAndCompletion();
+
+    /**
+     * @brief Verifies single-file and cross-file clangd definition, references, and WorkspaceEdit rename.
+     */
+    void testClangdNavigationAndWorkspaceRename();
 };

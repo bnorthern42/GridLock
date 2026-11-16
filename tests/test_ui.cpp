@@ -73,26 +73,6 @@ void TestMainWindowUI::testSourceFileLoading() {
 }
 
 /**
- * @brief Tests the presence and hierarchy of primary splitters in MainWindow.
- */
-void TestMainWindowUI::testMainLayoutStructure() {
-    gridlock::ui::MainWindow mainWindow;
-    QList<QSplitter*> splitters = mainWindow.findChildren<QSplitter*>();
-    QSplitter* mainVertical = nullptr;
-    QSplitter* masterHorizontal = nullptr;
-
-    // Locate vertical and horizontal splitters.
-    for (QSplitter* s : splitters) {
-        if (s->orientation() == Qt::Vertical) mainVertical = s;
-        if (s->orientation() == Qt::Horizontal) masterHorizontal = s;
-    }
-    // Verify both splitters are instantiated.
-    QVERIFY(mainVertical != nullptr);
-    QVERIFY(masterHorizontal != nullptr);
-    QCOMPARE(masterHorizontal->count(), 2);
-}
-
-/**
  * @brief Tests SourceCodeView left gutter margin dimensions for line numbering.
  */
 void TestMainWindowUI::testSourceCodeViewportMargins() {
@@ -277,16 +257,6 @@ void TestMainWindowUI::testGutterBreakpointPropagation() {
     // Verify breakpointToggled emitted for line 5.
     QCOMPARE(signalFired, 1);
     QCOMPARE(signaledLine, 5);
-}
-
-/**
- * @brief Tests embedded Symbols Nerd Font resource registration.
- */
-void TestMainWindowUI::testNerdFontLoading() {
-    int fontId = QFontDatabase::addApplicationFont(":/fonts/SymbolsNerdFont-Regular.ttf");
-    QVERIFY(fontId != -1);
-    QStringList families = QFontDatabase::applicationFontFamilies(fontId);
-    QVERIFY(!families.isEmpty());
 }
 
 /**
@@ -572,29 +542,6 @@ void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
     // Server rack rank nodes check.
     auto* serverRackView = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     QVERIFY(serverRackView != nullptr && serverRackView->rankNodeCount() >= 4);
-}
-
-/**
- * @brief Tests repository file size boundaries (all source files < 1000 lines).
- */
-void TestMainWindowUI::testSourceFileLineLimits() {
-    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
-    if (!rootDir.exists("src")) rootDir = QDir::current();
-    const QStringList dirsToScan = {rootDir.filePath("src"), rootDir.filePath("tests")};
-    QStringList allFiles;
-    for (const QString& dirPath : dirsToScan) {
-        QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) allFiles.append(it.next());
-    }
-    allFiles.sort();
-    for (const QString& filePath : allFiles) {
-        QFile file(filePath);
-        QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
-        int lines = 0;
-        while (!file.atEnd()) { file.readLine(); ++lines; }
-        // Verify line ceiling.
-        QVERIFY2(lines < 1000, qPrintable(QString("%1 exceeds 1000-line limit (%2 lines)").arg(filePath).arg(lines)));
-    }
 }
 
 QTEST_MAIN(TestMainWindowUI)

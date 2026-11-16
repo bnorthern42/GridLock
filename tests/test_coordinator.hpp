@@ -63,6 +63,16 @@ private slots:
     void testRegisterValuesParsing();
 
     /**
+     * @brief Tests StepCommand execution routing to coordinator stepAll().
+     */
+    void testStepCommand();
+
+    /**
+     * @brief Tests PauseCommand execution converting 1-based rank to 0-based rank.
+     */
+    void testPauseCommand();
+
+    /**
      * @brief Post-test environment cleanup.
      */
     void cleanupTestCase();
