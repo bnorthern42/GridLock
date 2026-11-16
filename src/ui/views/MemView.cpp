@@ -275,14 +275,14 @@ void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
     if (m_profilerWidget) m_profilerWidget->setAvailableRanks(1, 0, m_pidGetter);
 }
 
-/**
- * @brief Updates the profiler's rank selector and refreshes automatically when `LIBRARY MEMORY MAP` is active.
- */
+bool MemView::isMemoryMapMode() const { return m_viewStack && m_viewStack->currentIndex() == 1; }
+
+/** @brief Updates the profiler's rank selector and refreshes automatically when `LIBRARY MEMORY MAP` is active. */
 void MemView::notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount) {
     if (pid > 0) setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rank).arg(pid));
     if (!m_profilerWidget) return;
     m_profilerWidget->setAvailableRanks(rankCount, rank, m_pidGetter);
-    if (m_viewStack && m_viewStack->currentIndex() == 1 && pid > 0) m_profilerWidget->refreshForPid(pid);
+    if (isMemoryMapMode() && (isVisible() || m_isPoppedOut) && pid > 0) m_profilerWidget->refreshForPid(pid);
 }
 
 /** @brief Shows or hides Hex-Dump-only toolbar controls when switching between HEX DUMP and LIBRARY MEMORY MAP. */

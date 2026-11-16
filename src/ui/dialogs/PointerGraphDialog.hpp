@@ -181,6 +181,7 @@ class PointerGraphDialog : public QDialog {
   QPushButton* m_layoutBtn = nullptr;              ///< Toolbar DAG layout button (`#pointerGraphLayoutBtn`).
   QPushButton* m_expandHopBtn = nullptr;           ///< Toolbar 1-hop expand button (`#pointerGraphExpandHopBtn`).
   QPushButton* m_clearBtn = nullptr;               ///< Toolbar clear button (`#pointerGraphClearBtn`).
+  QPushButton* m_closeBtn = nullptr;               ///< Toolbar close button (`#pointerGraphCloseBtn`).
   QGraphicsScene* m_scene = nullptr;               ///< 2D graphics scene owning node cards and Bezier edges.
   QGraphicsView* m_view = nullptr;                 ///< Interactive pan/zoom canvas (`#pointerGraphView`).
 

@@ -32,12 +32,21 @@ constexpr qreal kHeaderHeight = 30.0;
 constexpr qreal kRowHeight = 24.0;
 constexpr qreal kFooterPadding = 8.0;
 
+/** @brief Returns true when @p v represents a null pointer (`0x0`, `0x00000000`, `nullptr`). */
+bool isNullPointerValue(const QString& v) {
+  const QString t = v.trimmed().section(QLatin1Char(' '), 0, 0).toLower();
+  if (t == QLatin1String("nullptr") || t == QLatin1String("null")) return true;
+  if (!t.startsWith(QLatin1String("0x"))) return false;
+  bool ok = false;
+  return t.mid(2).toULongLong(&ok, 16) == 0ULL && ok;
+}
+
 /** @brief Returns true when a struct field represents a non-null pointer or composite sub-object. */
 bool isExpandableOrPointerField(const PointerGraphDialog::StructFieldEntry& f) {
   const QString v = f.value.trimmed();
-  const bool nonNullHex = v.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) &&
-                          v != QStringLiteral("0x0") && v != QStringLiteral("0x0000000000000000");
-  return nonNullHex || f.type.contains(QLatin1Char('*')) || v.startsWith(QLatin1Char('{'));
+  if (isNullPointerValue(v)) return false;
+  return v.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ||
+         f.type.contains(QLatin1Char('*')) || v.startsWith(QLatin1Char('{'));
 }
 }  // namespace
 
@@ -192,7 +201,8 @@ class PointerGraphNodeItem : public QGraphicsObject {
       const qreal y = kHeaderHeight + i * kRowHeight;
       const auto& f = m_fields[i];
       const bool expandable = isExpandableOrPointerField(f);
-      const qreal rightPad = expandable ? 68.0 : 10.0;
+      const bool nullPtr = !expandable && (f.type.contains(QLatin1Char('*')) || isNullPointerValue(f.value));
+      const qreal rightPad = (expandable || nullPtr) ? 68.0 : 10.0;
 
       painter->setPen(isDark ? QColor(QStringLiteral("#e2e8f0")) : QColor(QStringLiteral("#1e293b")));
       const QString rowTxt = f.type.isEmpty()
@@ -202,14 +212,16 @@ class PointerGraphNodeItem : public QGraphicsObject {
                         Qt::AlignVCenter | Qt::AlignLeft,
                         painter->fontMetrics().elidedText(rowTxt, Qt::ElideRight, static_cast<int>(kCardWidth - 14.0 - rightPad)));
 
-      // Paint clickable `[➔ Deref]` action pill on pointer and composite struct rows.
-      if (expandable) {
+      // Paint clickable `[➔ Deref]` action pill on non-null pointer/struct rows or muted `nullptr` badge.
+      if (expandable || nullPtr) {
         const QRectF badgeRect(kCardWidth - 62.0, y + 3.0, 54.0, kRowHeight - 6.0);
-        painter->setPen(QPen(QColor(QStringLiteral("#0284c7")), 1.0));
-        painter->setBrush(isDark ? QColor(QStringLiteral("#0c4a6e")) : QColor(QStringLiteral("#e0f2fe")));
+        painter->setPen(QPen(expandable ? QColor(QStringLiteral("#0284c7")) : QColor(QStringLiteral("#64748b")), 1.0));
+        painter->setBrush(expandable ? (isDark ? QColor(QStringLiteral("#0c4a6e")) : QColor(QStringLiteral("#e0f2fe")))
+                                     : (isDark ? QColor(QStringLiteral("#1e293b")) : QColor(QStringLiteral("#f1f5f9"))));
         painter->drawRoundedRect(badgeRect, 4.0, 4.0);
-        painter->setPen(isDark ? QColor(QStringLiteral("#7dd3fc")) : QColor(QStringLiteral("#0369a1")));
-        painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("➔ Deref"));
+        painter->setPen(expandable ? (isDark ? QColor(QStringLiteral("#7dd3fc")) : QColor(QStringLiteral("#0369a1")))
+                                   : QColor(QStringLiteral("#94a3b8")));
+        painter->drawText(badgeRect, Qt::AlignCenter, expandable ? QStringLiteral("➔ Deref") : QStringLiteral("nullptr"));
       }
     }
   }
@@ -404,6 +416,8 @@ void PointerGraphDialog::setupUi() {
   auto* zoomInBtn = new QPushButton(QStringLiteral("Zoom +"), this);
   auto* zoomOutBtn = new QPushButton(QStringLiteral("Zoom -"), this);
   auto* zoomFitBtn = new QPushButton(QStringLiteral("Fit"), this);
+  m_closeBtn = new QPushButton(QStringLiteral("✕ CLOSE"), this);
+  m_closeBtn->setObjectName(QStringLiteral("pointerGraphCloseBtn"));
 
   toolbar->addWidget(m_rootEdit, 1);
   toolbar->addWidget(m_addBtn);
@@ -413,6 +427,7 @@ void PointerGraphDialog::setupUi() {
   toolbar->addWidget(zoomInBtn);
   toolbar->addWidget(zoomOutBtn);
   toolbar->addWidget(zoomFitBtn);
+  toolbar->addWidget(m_closeBtn);
   rootLayout->addLayout(toolbar);
 
   // 2D Interactive Canvas.
@@ -430,6 +445,7 @@ void PointerGraphDialog::setupUi() {
   connect(m_layoutBtn, &QPushButton::clicked, this, &PointerGraphDialog::autoLayoutNodes);
   connect(m_expandHopBtn, &QPushButton::clicked, this, &PointerGraphDialog::expandAllPointersOneHop);
   connect(m_clearBtn, &QPushButton::clicked, this, &PointerGraphDialog::clearGraph);
+  connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::close);
   connect(zoomInBtn, &QPushButton::clicked, this, [this]() { if (m_view) m_view->scale(1.15, 1.15); });
   connect(zoomOutBtn, &QPushButton::clicked, this, [this]() { if (m_view) m_view->scale(1.0 / 1.15, 1.0 / 1.15); });
   connect(zoomFitBtn, &QPushButton::clicked, this, [this]() {
@@ -614,6 +630,7 @@ void PointerGraphDialog::expandNodeField(const QString& nodeExpr, const QString&
   if (!src) return;
   const int idx = src->indexOfField(fieldName.trimmed());
   const StructFieldEntry field = (idx >= 0) ? src->fields().at(idx) : StructFieldEntry{fieldName.trimmed(), QString(), QString()};
+  if (isNullPointerValue(field.value)) return;
 
   // If the field holds a hex pointer to an address already on the canvas, connect the alias/cycle edge immediately.
   const QString normAddr = normalizeHexAddress(field.value);

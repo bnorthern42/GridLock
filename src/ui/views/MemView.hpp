@@ -50,6 +50,8 @@ public:
 
     /// Synchronizes active rank/PID context with `MemoryProfilerWidget` and refreshes when visible.
     void notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount);
+    /// Returns true when the `LIBRARY MEMORY MAP` view is currently selected.
+    bool isMemoryMapMode() const;
     /// Returns the embedded visual library and heap memory profiler widget.
     MemoryProfilerWidget* memoryProfiler() const { return m_profilerWidget; }
 

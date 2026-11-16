@@ -299,9 +299,13 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
         targetParent = findNodeByRef(m_rootNode.get());
     }
 
+    QHash<QString, QString> prevEnriched;
     QModelIndex parentIdx;
     if (!targetParent) {
-        // Top-level "Locals" scope update: snapshot old scalars and reset the root tree.
+        // Top-level "Locals" scope update: snapshot old scalars/enriched addresses and reset the root tree.
+        for (const auto& ch : m_rootNode->children) {
+            if (ch && ch->value.contains(QLatin1Char('@')) && ch->value.contains(QLatin1Char('{'))) prevEnriched.insert(ch->name, ch->value);
+        }
         storePreviousValues(m_rootNode.get());
         beginResetModel();
         m_pendingChildFetches.clear();
@@ -325,8 +329,9 @@ void VariableTreeModel::onLocalsUpdated(int rankId, int parentVarRef, const QJso
     for (const QJsonValue val : variables) {
         const QJsonObject var = val.toObject();
         const QString name = var["name"].toString();
-        if (name.isEmpty() || name.endsWith(QStringLiteral("@entry"))) continue;
-        const QString value = var["value"].toString();
+        if (name.isEmpty() || name.contains(QStringLiteral("@entry"))) continue;
+        QString value = var["value"].toString();
+        if ((value.isEmpty() || value == QLatin1String("{...}")) && prevEnriched.contains(name)) value = prevEnriched.value(name);
         const QString type = var["type"].toString();
         const int varRef = var["variablesReference"].toInt(0);
 
@@ -575,10 +580,12 @@ void VariableTreeModel::parseListVariables(const QString& output) {
     // Increment generation counter so varobj handles remain unique across step transitions.
     m_updateCounter++;
     static const QRegularExpression re("\\{name=\"([^\"]+)\"");
+    QSet<QString> seen;
     QRegularExpressionMatchIterator i = re.globalMatch(output);
     while (i.hasNext()) {
-        const QRegularExpressionMatch match = i.next();
-        const QString name = match.captured(1);
+        const QString name = i.next().captured(1);
+        if (name.isEmpty() || name.contains(QStringLiteral("@entry")) || seen.contains(name)) continue;
+        seen.insert(name);
         // Construct a deterministic varobj identifier `var_<gen>_<symbol>` for the floating frame (`*`).
         const QString varName = QString("var_%1_%2").arg(m_updateCounter).arg(name);
         if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
@@ -588,7 +595,7 @@ void VariableTreeModel::parseListVariables(const QString& output) {
 }
 
 /**
- * @brief Parses `-var-create` result records and inserts top-level VariableNode rows.
+ * @brief Parses `-var-create` result records and upserts top-level VariableNode rows without duplicates.
  * @param output Raw GDB/MI `^done,name="var_...",numchild="...",value="...",type="..."` record.
  */
 void VariableTreeModel::parseVarCreate(const QString& output) {
@@ -617,18 +624,36 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
             name = name.mid(secondUnderscore + 1);
         }
     }
+    if (name.isEmpty() || name.contains(QStringLiteral("@entry"))) return;
 
-    // Append the new variable row under the invisible root node.
-    const int newRow = static_cast<int>(m_rootNode->children.size());
-    beginInsertRows(QModelIndex(), newRow, newRow);
-
-    auto* node = new VariableNode(name, type, value, varobjName, numChildren, 0, m_rootNode.get());
-    m_rootNode->children.push_back(std::unique_ptr<VariableNode>(node));
-    m_varobjToNode[varobjName] = node;
-    m_createdVarobjs.append(varobjName);
+    // Upsert in-place when `onLocalsUpdated` or an earlier varobj already created a node for `name`.
+    VariableNode* targetNode = nullptr;
+    for (const auto& ch : m_rootNode->children) {
+        if (ch && ch->name == name) { targetNode = ch.get(); break; }
+    }
+    if (targetNode) {
+        targetNode->varobjName = varobjName;
+        targetNode->numChildren = std::max(targetNode->numChildren, numChildren);
+        if (!type.isEmpty() && (targetNode->type.isEmpty() || targetNode->type == QLatin1String("compound"))) targetNode->type = type;
+        if (!value.isEmpty() && (targetNode->value.isEmpty() || targetNode->value == QLatin1String("{...}"))) targetNode->value = value;
+        if (isCompositeVariable(targetNode) && targetNode->numChildren == 0) targetNode->numChildren = 1;
+        m_varobjToNode[varobjName] = targetNode;
+        m_createdVarobjs.append(varobjName);
+        const QModelIndex idx = getIndexForNode(targetNode);
+        if (idx.isValid()) emit dataChanged(idx, idx.siblingAtColumn(2));
+    } else {
+        const int newRow = static_cast<int>(m_rootNode->children.size());
+        beginInsertRows(QModelIndex(), newRow, newRow);
+        targetNode = new VariableNode(name, type, value, varobjName, numChildren, 0, m_rootNode.get());
+        if (isCompositeVariable(targetNode) && targetNode->numChildren == 0) targetNode->numChildren = 1;
+        m_rootNode->children.push_back(std::unique_ptr<VariableNode>(targetNode));
+        m_varobjToNode[varobjName] = targetNode;
+        m_createdVarobjs.append(varobjName);
+        endInsertRows();
+    }
 
     // For structs, classes, pointers, and MPI handles, asynchronously query `&symbol` for memory inspection.
-    if (value == "{...}" || type.contains("struct") || type.contains("class") ||
+    if (targetNode->value == "{...}" || type.contains("struct") || type.contains("class") ||
         type.contains("*") || type == "MPI_Status" || type.contains("MPI_")) {
         m_evalCounter++;
         m_evalTokenToVarobj[m_evalCounter] = varobjName;
@@ -637,8 +662,6 @@ void VariableTreeModel::parseVarCreate(const QString& output) {
                           QString("%1-data-evaluate-expression &%2\n").arg(m_evalCounter).arg(name));
         }
     }
-
-    endInsertRows();
 }
 
 /**
