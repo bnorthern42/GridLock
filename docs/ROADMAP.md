@@ -1,6 +1,6 @@
 # GridLock Engineering Roadmap
 
-This roadmap tracks completed milestones (`Phases 1–11` / `v0.8.5`) and upcoming releases for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
+This roadmap tracks completed milestones (`Phases 1–12` / `v0.8.6`) and upcoming releases for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
 
 ---
 
@@ -27,7 +27,7 @@ This roadmap tracks completed milestones (`Phases 1–11` / `v0.8.5`) and upcomi
 - [x] **External Static Analysis Passes (`cppcheck`, `clang-tidy`)**:
   - Ran `cppcheck` and `clang-tidy` (`bugprone-*`, `modernize-*`, `performance-*`, `cppcoreguidelines-*`) across `src/` and `tests/` to clean up dead code, uninitialized members, variable shadowing, and `QObject` lifetime issues.
 - [x] **SonarQube / SonarCloud & Compiler Quality Gates**:
-  - Updated `sonar-project.properties` (`sonar.projectVersion=0.8.5`) for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
+  - Updated `sonar-project.properties` (`sonar.projectVersion=0.8.6`) for complexity and coverage tracking alongside zero-warning compiler flags (`-Wall -Wextra -Wpedantic`).
 - [x] **Memory & Process Security Audit (`MemoryBoundsValidator`, `ElfBinaryInspector`, `MiSanitizer`)**:
   - Validated `uint64_t` overflow guards in `MemoryBoundsValidator`, corrupt/truncated ELF header rejection in `ElfBinaryInspector`, shell metacharacter filtering in `MiSanitizer`, and direct argument-list process spawning across all `QProcess` and `KPtyProcess` call sites under ASan, UBSan, and `MALLOC_PERTURB_`.
 
@@ -83,7 +83,18 @@ This roadmap tracks completed milestones (`Phases 1–11` / `v0.8.5`) and upcomi
 
 ---
 
+## Phase 12 (`v0.8.6`): Memory Attribution, Pointer Graph Visualization & Time-Travel Debugging
+
+- [x] **Visual Library & Heap Memory Profiler (`MemoryProfilerWidget`, `MemView`)**:
+  - Combined `/proc/<pid>/smaps` VMA region attribution with a lightweight `LD_PRELOAD` caller-attribution tracker and `addr2line` symbol resolution in an interactive 2D treemap, proportional stacked bar, and sortable table with 5 color schemes (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`) and standalone pop-out window support.
+- [x] **Interactive Pointer & Struct Graph Visualizer (`PointerGraphDialog`)**:
+  - Added a DDD-inspired 2D pointer and struct graph canvas with draggable struct cards, automatic 1-hop composite and pointer expansion, directed cubic Bezier edges, null-pointer (`0x0`) guards, and cycle/shared-alias detection.
+- [x] **Inline Variable Ghost Values, Logpoints & Reverse Debugging (`SourceCodeView`, `GdbRankCoordinator`, `DapCoordinator`)**:
+  - Added inline variable ghost values (resolving local scalars and dotted/arrow member chains), non-suspending Logpoints (`{expr}`) and breakpoint hit ignore counts, and GDB Process Record / DAP reverse execution (`⏺ Record`, `↶ Step Back`, `⏮ Rev Continue`).
+
+---
+
 ## Upcoming Milestones (`v0.9.0` & `v1.0.0`)
 
-- **Planned (`v0.9.0`)**: Incorporate community and HPC user feedback on `v0.8.5` live multi-rank sessions, broaden `lldb-dap` / GPU (`cuda-gdb`, `rocgdb`) runtime coverage, and expand workspace diagnostics.
+- **Planned (`v0.9.0`)**: Incorporate community and HPC user feedback on `v0.8.6` live multi-rank sessions, broaden `lldb-dap` / GPU (`cuda-gdb`, `rocgdb`) runtime coverage, and expand workspace diagnostics.
 - **Planned (`v1.0.0`)**: Final API/configuration stabilization, long-term AppImage packaging verification across major Linux distributions, and release-candidate regression hardening.

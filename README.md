@@ -1,6 +1,6 @@
 # GridLock — MPI Debugger & ELF Binary Inspector
 
-![Version](https://img.shields.io/badge/Release-v0.8.5-brightgreen.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/Release-v0.8.6-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -62,6 +62,10 @@ Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MP
 * **12 Dark & Light Themes (`ThemeManager`):** Includes 8 dark themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`, `Nord`, `One Dark Pro`, `Dracula`) and 4 light themes (`Daylight Paper`, `Solarized Warm`, `Catppuccin Latte`, `One Light`) with independent UI and code font settings in Preferences.
 * **Offline Zeal Docsets & Man Pages (`ReferenceManualWidget`):** Searches local Zeal `.docset` bundles (`~/.local/share/Zeal/Zeal/docsets`) and system `man` pages (`F1`).
 * **Embedded Terminal (`TerminalDockWidget`):** Built-in `QTermWidget` pseudo-terminal for running local shell or cluster commands.
+
+| Library & Heap Memory Map Profiler | Interactive Pointer & Struct Graph Visualizer |
+| :---: | :---: |
+| ![Library Memory Map Profiler](docs/screenshots/memory_profiler.png) | ![Pointer & Struct Graph Visualizer](docs/screenshots/pointer_graph.png) |
 
 | Conditional Breakpoint Popover | Package Manager (`"mpi"` Search) |
 | :---: | :---: |
@@ -161,7 +165,7 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 ## Documentation
 
 * [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](docs/TUTORIAL.md) — Step-by-step walkthroughs for all 7 bundled MPI showcase programs (`deadlock_ring.cpp`, `inspection_demo.cpp`, `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, `simd_struct_watch.cpp`), `MemView` rank diffing (`DIFF RANKS`) & memory export (`EXPORT`), offline `man` pages & Zeal docsets (`F1`), and the `PACKAGE MANAGER` dock.
-* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed milestones through `v0.8.5` and upcoming releases.
+* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed milestones through `v0.8.6` and upcoming releases.
 * [**Architecture Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — Window layout, module organization, and signal wiring.
 * [**User Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Walkthroughs for MPI debugging, source editing, conditional breakpoints, package search, SLURM import, and binary patching.
 * [**Themes & Fonts (`docs/THEMES.md`)**](docs/THEMES.md) — Screenshots and color reference table for the 12 built-in dark and light themes.

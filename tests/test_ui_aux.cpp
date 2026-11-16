@@ -9,8 +9,8 @@
 
 #include "test_ui.hpp"
 #include "ui/views/MemoryProfilerWidget.hpp"
+#include "ui/dialogs/PointerGraphDialog.hpp"
 #include <cmath>
-
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -592,42 +592,41 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     const int fdMatches = widget.searchPackagesSynchronously(QStringLiteral("fd"), 5000);
     QVERIFY2(fdMatches > 0 && widget.visiblePackageCount() == fdMatches, "Live host package query for 'fd' must return > 0 real system/repo packages");
 }
-/** @brief Generates and verifies all 1600x960 workstation, feature, and theme PNG screenshots. */
+/** @brief Generates and verifies all workstation, feature, memory profiler, pointer graph, and theme PNG screenshots. */
 void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
     // Resolve docs/screenshots path from either builddir/ or repo root.
     gridlock::ui::MainWindow mainWindow;
     const QString shotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
     // 1. Capture all workstation, feature, and theme screenshots via MainWindow::captureDocumentationScreenshots.
     QVERIFY2(mainWindow.captureDocumentationScreenshots(shotDir), "captureDocumentationScreenshots must succeed");
-    QVERIFY2(QFileInfo::exists(shotDir + QStringLiteral("/theme_solarized_light.png")) && QFileInfo::exists(shotDir + QStringLiteral("/theme_catppuccin_latte.png")), "theme_solarized_light.png and theme_catppuccin_latte.png must exist in docs/screenshots");
-    // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid >= 800x500 QImage.
-    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png"), QStringLiteral("theme_solarized_light.png"), QStringLiteral("theme_catppuccin_latte.png")}) {
-        const QString fullPath = shotDir + QLatin1Char('/') + fn; const QImage img(fullPath);
-        QVERIFY2(QFileInfo(fullPath).size() > 15000 && !img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath));
+    // Render high-res Library Memory Map Profiler screenshot (1280x780) with realistic multi-library HPC entries.
+    if (auto* mv = mainWindow.memView()) {
+        const qint64 pid = QCoreApplication::applicationPid(); const QString tsvPath = QStringLiteral("/tmp/gridlock_mem_%1.tsv").arg(pid); { QFile tf(tsvPath); if (tf.open(QIODevice::WriteOnly)) tf.write("/usr/lib64/libHYPRE.so.2.1\thypre_CAlloc\t134217728\t150994944\t184\n/tmp/mfem_exec\tmfem::Memory<double>::CopyFrom\t67108864\t83886080\t92\n/usr/lib64/libflexiblas.so.3\tflexiblas_init\t25165824\t33554432\t41\n"); }
+        { if (auto* mapBtn = mv->findChild<QPushButton*>(QStringLiteral("memMapModeBtn"))) mapBtn->click(); } mv->setPoppedOut(true); QWidget* mpWin = mv->memoryProfiler()->window(); mpWin->resize(1280, 780); mpWin->show(); QApplication::processEvents(); mv->notifyRankStoppedOrSelected(0, pid, 8); QApplication::processEvents(); mpWin->grab().save(shotDir + QStringLiteral("/memory_profiler.png")); mv->setPoppedOut(false); QFile::remove(tsvPath);
     }
-    // 3. Verify DisassemblyView mode toggle buttons (SPLIT (CFG+DECOMP), DECOMPILER, CFG (SPACE)) never clip text.
-    if (auto* disasm = mainWindow.disassemblyView()) {
-        for (const QString& obj : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")}) {
-            auto* btn = disasm->findChild<QPushButton*>(obj); QVERIFY2(btn && btn->isVisible() && btn->width() >= btn->sizeHint().width(), qPrintable(obj));
-        }
-    }
-    // 4. Verify docs/USER_GUIDE.md and docs/THEMES.md embed the required screenshot assets.
-    QFile guideFile(QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md")) ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md"));
-    QFile themesFile(QFileInfo::exists(QStringLiteral("docs/THEMES.md")) ? QStringLiteral("docs/THEMES.md") : QStringLiteral("../docs/THEMES.md"));
-    QVERIFY(guideFile.open(QIODevice::ReadOnly) && themesFile.open(QIODevice::ReadOnly));
-    QVERIFY2(QString::fromUtf8(guideFile.readAll()).contains(QStringLiteral("breakpoint_popover.png")), "docs/USER_GUIDE.md must embed new assets");
-    const QString themesText = QString::fromUtf8(themesFile.readAll()); QVERIFY2(themesText.contains(QStringLiteral("theme_solarized_light.png")) && themesText.contains(QStringLiteral("theme_catppuccin_latte.png")), "docs/THEMES.md must embed theme_solarized_light.png and theme_catppuccin_latte.png");
+    // Render high-res Interactive Pointer & Struct Graph Visualizer screenshot (1200x720) with Bezier edges and cycle badge.
+    { gridlock::ui::PointerGraphDialog pg(mainWindow.coordinator(), &mainWindow); pg.resize(1200, 720); pg.show();
+      pg.upsertStructNode(QStringLiteral("Iconfig"), QStringLiteral("InputConfig"), QStringLiteral("0x7fffffffab10"), {{QStringLiteral("mesh"), QStringLiteral("{...}"), QStringLiteral("MeshCfg")}, {QStringLiteral("Apar"), QStringLiteral("0x7fffa010"), QStringLiteral("mfem::HypreParMatrix *")}, {QStringLiteral("tol"), QStringLiteral("1e-06"), QStringLiteral("double")}}); pg.upsertStructNode(QStringLiteral("Apar"), QStringLiteral("mfem::HypreParMatrix"), QStringLiteral("0x7fffa010"), {{QStringLiteral("comm"), QStringLiteral("0x7fff8800"), QStringLiteral("MPI_Comm")}, {QStringLiteral("A_par"), QStringLiteral("0x7fffa440"), QStringLiteral("hypre_ParCSRMatrix *")}, {QStringLiteral("X_vec"), QStringLiteral("0x7fffa880"), QStringLiteral("mfem::HypreParVector *")}, {QStringLiteral("oper"), QStringLiteral("0x0"), QStringLiteral("mfem::Operator *")}}, QStringLiteral("Iconfig"), QStringLiteral("Apar"));
+      pg.upsertStructNode(QStringLiteral("A_par"), QStringLiteral("hypre_ParCSRMatrix"), QStringLiteral("0x7fffa440"), {{QStringLiteral("global_num_rows"), QStringLiteral("262144"), QStringLiteral("HYPRE_BigInt")}, {QStringLiteral("diag"), QStringLiteral("0x7fffb120"), QStringLiteral("hypre_CSRMatrix *")}, {QStringLiteral("offd"), QStringLiteral("0x7fffb340"), QStringLiteral("hypre_CSRMatrix *")}, {QStringLiteral("owner"), QStringLiteral("0x7fffa010"), QStringLiteral("mfem::HypreParMatrix *")}}, QStringLiteral("Apar"), QStringLiteral("A_par")); pg.upsertStructNode(QStringLiteral("X_vec"), QStringLiteral("mfem::HypreParVector"), QStringLiteral("0x7fffa880"), {{QStringLiteral("size"), QStringLiteral("32768"), QStringLiteral("int")}, {QStringLiteral("data"), QStringLiteral("0x7fffc000"), QStringLiteral("double *")}}, QStringLiteral("Apar"), QStringLiteral("X_vec"));
+      pg.connectPointerField(QStringLiteral("A_par"), QStringLiteral("owner"), QStringLiteral("0x7fffa010")); pg.autoLayoutNodes(); QApplication::processEvents(); pg.grab().save(shotDir + QStringLiteral("/pointer_graph.png")); pg.close(); }
+    // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid QImage.
+    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("memory_profiler.png"), QStringLiteral("pointer_graph.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png"), QStringLiteral("theme_solarized_light.png"), QStringLiteral("theme_catppuccin_latte.png")}) { const QString fullPath = shotDir + QLatin1Char('/') + fn; const QImage img(fullPath); QVERIFY2(QFileInfo(fullPath).size() > 15000 && !img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath)); }
+    const QImage mpImg(shotDir + QStringLiteral("/memory_profiler.png")), pgImg(shotDir + QStringLiteral("/pointer_graph.png")); QVERIFY(mpImg.width() >= 1100 && mpImg.height() >= 680 && pgImg.width() >= 1100 && pgImg.height() >= 680);
+    // 3. Verify DisassemblyView mode toggle buttons and documentation embeds.
+    if (auto* disasm = mainWindow.disassemblyView()) for (const QString& obj : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")}) { auto* btn = disasm->findChild<QPushButton*>(obj); QVERIFY2(btn && btn->isVisible() && btn->width() >= btn->sizeHint().width(), qPrintable(obj)); }
+    QFile guideFile(QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md")) ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md")), themesFile(QFileInfo::exists(QStringLiteral("docs/THEMES.md")) ? QStringLiteral("docs/THEMES.md") : QStringLiteral("../docs/THEMES.md")), readmeFile(QFileInfo::exists(QStringLiteral("README.md")) ? QStringLiteral("README.md") : QStringLiteral("../README.md")); QVERIFY(guideFile.open(QIODevice::ReadOnly) && themesFile.open(QIODevice::ReadOnly) && readmeFile.open(QIODevice::ReadOnly));
+    const QString rmTxt = QString::fromUtf8(readmeFile.readAll()), thTxt = QString::fromUtf8(themesFile.readAll()); QVERIFY2(QString::fromUtf8(guideFile.readAll()).contains(QStringLiteral("breakpoint_popover.png")) && thTxt.contains(QStringLiteral("theme_solarized_light.png")) && thTxt.contains(QStringLiteral("theme_catppuccin_latte.png")) && rmTxt.contains(QStringLiteral("memory_profiler.png")) && rmTxt.contains(QStringLiteral("pointer_graph.png")), "Docs and README must embed memory_profiler.png and pointer_graph.png");
 }
-/** @brief Verifies v0.8.5 version alignment, AppImage build scripts, and tutorial resolution. */
+/** @brief Verifies v0.8.6 version alignment, AppImage build scripts, and tutorial resolution. */
 void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     // Helper to load repository root text files independent of test execution directory.
     const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
     auto readText = [&](const QString& relPath) -> QString { QFile f(rootPrefix + relPath); return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(); };
-    // 1. Verify meson.build declares version 0.8.5, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
+    // 1. Verify meson.build declares version 0.8.6, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
     const QString mesonText = readText(QStringLiteral("meson.build")), changelogText = readText(QStringLiteral("CHANGELOG.md")), readmeText = readText(QStringLiteral("README.md")), roadmapText = readText(QStringLiteral("ROADMAP.md")), docsRoadmapText = readText(QStringLiteral("docs/ROADMAP.md")), sonarText = readText(QStringLiteral("sonar-project.properties"));
-    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.5'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.5");
-    QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.5") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.5")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.5\\]|v0\\.8\\.5)"))), "Version 0.8.5 & CHANGELOG");
-    QVERIFY2(readmeText.contains(QStringLiteral("0.8.5")) && roadmapText.contains(QStringLiteral("0.8.5")) && docsRoadmapText.contains(QStringLiteral("0.8.5")) && sonarText.contains(QStringLiteral("sonar.projectVersion=0.8.5")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !docsRoadmapText.contains(QStringLiteral("- [ ]")), "Roadmap & sonar 0.8.5");
+    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.6'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.6");
+    QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.6") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.6")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.6\\]|v0\\.8\\.6)"))), "Version 0.8.6 & CHANGELOG");
+    QVERIFY2(readmeText.contains(QStringLiteral("0.8.6")) && roadmapText.contains(QStringLiteral("0.8.6")) && docsRoadmapText.contains(QStringLiteral("0.8.6")) && sonarText.contains(QStringLiteral("sonar.projectVersion=0.8.6")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !docsRoadmapText.contains(QStringLiteral("- [ ]")), "Roadmap & sonar 0.8.6");
     QVERIFY2(readmeText.contains(QStringLiteral("Tutorials-x86_64.AppImage")) && readmeText.contains(QStringLiteral("Lite")), "README.md must document Lite and Tutorials AppImage editions");
     // Verify every badge in README top badge block uses https://img.shields.io/badge/ with style=for-the-badge.
     auto badgeMatches = QRegularExpression(QStringLiteral("!\\[[^\\]]+\\]\\((https://img\\.shields\\.io/[^\\)]+)\\)")).globalMatch(readmeText.left(1000));
@@ -637,7 +636,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     // 2. Verify scripts/build_appimage.sh stays version-agnostic and supports Lite + Tutorials editions without duplicate alias.
     const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
     const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    const QRegularExpression hardcodedVerRe(QStringLiteral("0\\.(?:7\\.0|8\\.0|8\\.5|9\\.0)"));
+    const QRegularExpression hardcodedVerRe(QStringLiteral("0\\.(?:7\\.0|8\\.0|8\\.5|8\\.6|9\\.0)"));
     QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(hardcodedVerRe) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh parse meson.build without hardcoded versions");
     QVERIFY2(appImageScript.contains(QStringLiteral("--lite")) && appImageScript.contains(QStringLiteral("--with-tutorials")) && appImageScript.contains(QStringLiteral("Tutorials")), "build_appimage.sh must support --lite and --with-tutorials");
     QVERIFY2(!appImageScript.contains(QStringLiteral("cp -af \"${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage\" \"${ROOT_DIR}/${APP_NAME}-x86_64.AppImage\"")), "build_appimage.sh must not create unversioned alias");
@@ -656,7 +655,7 @@ void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
     for (const QString& k : {QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("DISPLAY"), QStringLiteral("WAYLAND_DISPLAY")}) env.remove(k);
     env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen")); proc.setProcessEnvironment(env);
     proc.start(QFileInfo::exists(rootPrefix + QStringLiteral("builddir/gridlock")) ? (rootPrefix + QStringLiteral("builddir/gridlock")) : (rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock")), {QStringLiteral("--version")});
-    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.5")), "gridlock --version must report 0.8.5");
+    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.6")), "gridlock --version must report 0.8.6");
     // 4. Verify GitHub Actions workflows are version-agnostic, filter ui_tests in CI, and enforce AppImage-only packaging.
     QDir wfDir(rootPrefix + QStringLiteral(".github/workflows")); QString combinedYml;
     for (const QString& fn : wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files)) {

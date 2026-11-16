@@ -5,6 +5,24 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] - 2026-11-15
+
+### Added
+- **Visual Library & Heap Memory Profiler (`MemoryProfilerWidget`, `MemView`):** Added a `LIBRARY MEMORY MAP` view inside `MemView` combining `/proc/<pid>/smaps` virtual memory region attribution with a lightweight `LD_PRELOAD` caller-attribution tracker (`malloc`/`calloc`/`realloc`/`free` unwinding past `libstdc++` `operator new` with `addr2line` symbol resolution), an interactive 2D treemap and proportional stacked bar, a sortable and filterable breakdown table, a `⤢ POP OUT` / `⤡ DOCK` standalone window toggle, and five configurable color schemes (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`) in `Preferences -> Appearance` and the profiler toolbar.
+- **Inline Variable Ghost Values (`SourceCodeView`, `EditorTabManager`, `ConfigManager`):** Added muted italic inline variable values at the end of visible source lines when paused at a breakpoint or stack frame, resolving both local scalar variables and dotted/arrow member chains (such as `Iconfig.gmres.relTolerance`) while suppressing opaque `{...}` placeholders, with a toggle in `Preferences -> Editing`.
+- **Non-Suspending Logpoints & Breakpoint Hit Ignore Counts (`ConditionalBreakpointDialog`, `GdbRankCoordinator`, `DapCoordinator`):** Added breakpoint log messages (`{expr}` expression evaluation streamed directly to `PROGRAM OUTPUT` without pausing ranks or stalling MPI barriers, rendered with an amber/cyan diamond gutter marker) and hit ignore counts (`-break-insert -i N` / `-break-after` and DAP `hitCondition`).
+- **Interactive Pointer & Struct Graph Visualizer (`PointerGraphDialog`, `VariablesDockWidget`):** Added a DDD-inspired 2D pointer and struct graph canvas (`Variables` context menu and `Tools -> Pointer & Struct Graph Visualizer...`) with draggable struct cards, automatic 1-hop composite and pointer expansion, directed cubic Bezier edges, layered DAG auto-layout, null-pointer (`0x0`) guards, and cycle/shared-alias detection.
+- **Reverse Debugging / Time-Travel Execution (`GdbRankCoordinator`, `DapCoordinator`, `MainWindow`):** Added GDB Process Record (`record full` with scheduler-locking support) and DAP reverse execution (`stepBack` / `reverseContinue`), exposing `⏺ Record`, `↶ Step Back`, and `⏮ Rev Continue` controls in the main execution toolbar.
+
+### Changed
+- **Incremental Output Streaming & Lazy Memory Map Refreshes (`MainWindowDocks`, `GdbConsoleWidget`, `MainWindowExecution`, `MemView`):** Kept `PROGRAM OUTPUT` and `GDB CONSOLE` flushes strictly incremental by filtering incoming rank output on arrival, debounced dotted inline variable evaluations, and deferred `/proc/<pid>/smaps` refreshes until `LIBRARY MEMORY MAP` is active and visible on the focused rank.
+
+### Fixed
+- **Clean Shutdown Lifecycle (`ClangdLspClient`, `MainWindow`, `MemView`, `TerminalDockWidget`):** Fixed an exit segmentation fault on window close by shutting down `ClangdLspClient` on `QCoreApplication::aboutToQuit`, guarding signal teardown during destruction, and re-docking popped-out `MemView` windows before teardown.
+- **Wayland Splitter Resize Warnings:** Eliminated Wayland non-popup mouse-grab warnings when dragging dock and panel splitters by enabling `setOpaqueResize(true)` across all `QSplitter` instances.
+- **Variable Deduplication & Access-Specifier Unwrapping (`VariableTreeModel`, `GdbRankCoordinator`, `GdbRankInspection`):** Fixed duplicate variable rows (`{...}` vs `{...} @ 0x...` and `@entry` parameter shadows), unwrapped C++ `public`/`protected`/`private` access-specifier pseudo-nodes at all tree depths, and restricted `VariablesDockWidget` live updates to the focused rank.
+- **Toolbar Layout & Tiling Window Controls (`MemView`, `PointerGraphDialog`):** Fixed button and source badge overlap in `MemView`'s toolbar when switching modes, and added an explicit `✕ CLOSE` toolbar button to `PointerGraphDialog` for frameless and tiling Wayland compositors.
+
 ## [0.8.5] - 2026-11-15
 
 ### Added
