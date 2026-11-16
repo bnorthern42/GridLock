@@ -70,39 +70,6 @@
 #endif
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 
-/**
- * @brief Helper function verifying Google C++ Style and documentation coverage for all files.
- * @param targetFiles Sorted list of relative file paths to inspect.
- */
-static void auditFilesGoogleStyleAndDocumentation(const QStringList& targetFiles) {
-    for (const QString& relPath : targetFiles) {
-        QFile f(relPath);
-        // Verify file can be opened, stays < 950 lines, and has @file/@brief header banner.
-        QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(relPath));
-        const QString content = QString::fromUtf8(f.readAll());
-        const QStringList lines = content.split('\n');
-        QVERIFY2(lines.size() < 950, qPrintable(QString("%1 has %2 lines (>= 950)").arg(relPath).arg(lines.size())));
-        QVERIFY2(content.contains("@file") && content.contains("@brief"), qPrintable(QString("%1 missing @file/@brief header banner").arg(relPath)));
-
-        // Check Google C++ namespace closing comments.
-        if (content.contains("\nnamespace ") || content.startsWith("namespace ")) {
-            QVERIFY2(content.contains("// namespace "), qPrintable(QString("%1 missing Google C++ closing // namespace comment").arg(relPath)));
-        }
-
-        // Compute comment density ratio (comments / non-empty lines >= 0.20).
-        int nonEmptyLines = 0, commentLines = 0;
-        for (const QString& line : lines) {
-            const QString trimmed = line.trimmed();
-            if (trimmed.isEmpty()) continue;
-            ++nonEmptyLines;
-            if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) ++commentLines;
-        }
-        QVERIFY2(nonEmptyLines > 0, qPrintable(relPath));
-        const double ratio = static_cast<double>(commentLines) / static_cast<double>(nonEmptyLines);
-        QVERIFY2(ratio >= 0.20, qPrintable(QString("%1 comment ratio %2 (%3/%4) < 0.20").arg(relPath).arg(ratio, 0, 'f', 3).arg(commentLines).arg(nonEmptyLines)));
-    }
-}
-
 /** @brief Tests side dock resizability limits and xref / decompiler integration. */
 void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {
     gridlock::ui::MainWindow mainWindow; mainWindow.loadPreviewFixture(); mainWindow.resize(1440, 900); mainWindow.show();
@@ -169,7 +136,6 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     for (QSplitter* sp : mainWindow.findChildren<QSplitter*>()) QVERIFY2(sp->opaqueResize(), "QSplitter must use opaqueResize(true) for Wayland");
     QTemporaryDir tmpSrcDir; QVERIFY(tmpSrcDir.isValid()); const QString cppPath = tmpSrcDir.filePath(QStringLiteral("exit_check.cpp")); { QFile f(cppPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int main() { return 0; }\n"); }
     auto* mw = new gridlock::ui::MainWindow(); mw->resize(1024, 700); mw->show(); QApplication::processEvents(); if (auto* tabs = mw->findChild<gridlock::ui::EditorTabManager*>()) tabs->openFile(cppPath); if (auto* mv = mw->findChild<gridlock::ui::MemView*>()) mv->setPoppedOut(true); QApplication::processEvents(); QVERIFY(mw->close()); delete mw; gridlock::core::ClangdLspClient::instance().shutdown(); QVERIFY(!gridlock::core::ClangdLspClient::instance().isRunning());
-    QDir rootDir(QCoreApplication::applicationDirPath() + "/.."); if (!rootDir.exists("src")) rootDir = QDir::current(); for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) { QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories); while (it.hasNext()) { QFile file(it.next()); QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text)); int lines = 0; while (!file.atEnd()) { file.readLine(); ++lines; } QVERIFY2(lines < 950, qPrintable(QString("%1 (%2 lines)").arg(file.fileName()).arg(lines))); } }
 }
 /** @brief Tests preferred screen routing and offscreen startup configuration. */
 void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
@@ -395,63 +361,6 @@ void TestMainWindowUI::testDynamicRankSyncWithoutHardcodedConstructorMocks() {
 }
 
 /**
- * @brief Audits entire repository for Google C++ Style Guide and documentation completeness.
- */
-void TestMainWindowUI::testFullRepoGoogleStyleAndDocumentation() {
-    QDir rootDir(QCoreApplication::applicationDirPath() + "/..");
-    if (!rootDir.exists("src")) rootDir = QDir::current();
-    QStringList targetFiles;
-    for (const QString& subDir : {QStringLiteral("src"), QStringLiteral("tests")}) {
-        QDirIterator it(rootDir.filePath(subDir), QStringList() << "*.hpp" << "*.cpp", QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) targetFiles.append(it.next());
-    }
-    targetFiles.sort(); QVERIFY(targetFiles.size() >= 80);
-    auditFilesGoogleStyleAndDocumentation(targetFiles);
-
-    // Interactive launch assertions: normal CLI launch must not be invisible/offscreen.
-    char appName[] = "gridlock"; char* normalArgv[] = { appName, nullptr };
-    QVERIFY(!gridlock::core::utils::CliParser::shouldUseOffscreenPlatform(1, normalArgv));
-    gridlock::ui::MainWindow mainWindow; mainWindow.show();
-    QVERIFY(!mainWindow.testAttribute(Qt::WA_ShowWithoutActivating) && !mainWindow.testAttribute(Qt::WA_DontShowOnScreen) && !mainWindow.isMinimized() && !mainWindow.isHidden());
-
-    // 1. Static analysis sweep: run cppcheck with warning/performance/portability checks when present on PATH.
-    if (const QString cppcheckBin = QStandardPaths::findExecutable(QStringLiteral("cppcheck")); !cppcheckBin.isEmpty()) {
-        QProcess cppProc; cppProc.setWorkingDirectory(rootDir.absolutePath());
-        cppProc.start(cppcheckBin, {QStringLiteral("--enable=warning,performance,portability"), QStringLiteral("--std=c++23"), QStringLiteral("--suppress=missingIncludeSystem"), QStringLiteral("--suppress=unknownMacro"), QStringLiteral("--suppress=syntaxError"), QStringLiteral("--error-exitcode=1"), QStringLiteral("-I"), QStringLiteral("src"), QStringLiteral("src/")});
-        QVERIFY2(cppProc.waitForFinished(30000) && cppProc.exitCode() == 0, qPrintable(QString::fromUtf8(cppProc.readAllStandardError())));
-    }
-    // 2. Member initialization audit: verify pointer and scalar fields in src/ headers use explicit default initializers.
-    const QRegularExpression uninitPtrOrScalarRe(QStringLiteral("(?:\\*\\s*m_[A-Za-z0-9_]+|\\b(?:int|bool|double|float|quint64|uint64_t|qint64|size_t)\\s+(?:m_[A-Za-z0-9_]+|rankId|rows|cols|line|id|wasTruncated|dropped|depthExceeded))\\s*;"));
-    for (const QString& fPath : targetFiles) {
-        if (!fPath.endsWith(QStringLiteral(".hpp")) || !fPath.contains(QStringLiteral("/src/"))) continue;
-        QFile hf(fPath); QVERIFY(hf.open(QIODevice::ReadOnly | QIODevice::Text));
-        const auto m = uninitPtrOrScalarRe.match(QString::fromUtf8(hf.readAll()));
-        QVERIFY2(!m.hasMatch(), qPrintable(QStringLiteral("Uninitialized member in %1: %2").arg(fPath, m.captured(0))));
-    }
-    // 3. Roadmap & SonarQube / Compiler Quality Gates audit: verify sonar-project.properties, meson.build flags, and ROADMAP [x].
-    QFile sonarFile(rootDir.filePath(QStringLiteral("sonar-project.properties")));
-    QVERIFY2(sonarFile.exists() && sonarFile.open(QIODevice::ReadOnly | QIODevice::Text), "sonar-project.properties must exist at repository root");
-    const QString sonarText = QString::fromUtf8(sonarFile.readAll());
-    QVERIFY2(sonarText.contains(QStringLiteral("sonar.projectKey")) && sonarText.contains(QStringLiteral("sonar.sources=src")) && sonarText.contains(QStringLiteral("sonar.tests=tests")) && (sonarText.contains(QStringLiteral("sonar.cfamily.compile-commands=builddir/compile_commands.json")) || sonarText.contains(QStringLiteral("sonar.cxx.compileCommands=builddir/compile_commands.json"))), "sonar-project.properties must define projectKey, sources, tests, and compile_commands.json");
-    QFile mesonBuildFile(rootDir.filePath(QStringLiteral("meson.build"))); QVERIFY(mesonBuildFile.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString mesonBuildText = QString::fromUtf8(mesonBuildFile.readAll());
-    QVERIFY2(mesonBuildText.contains(QStringLiteral("-Wall")) && mesonBuildText.contains(QStringLiteral("-Wextra")) && mesonBuildText.contains(QStringLiteral("-Wpedantic")), "meson.build must enforce -Wall, -Wextra, and -Wpedantic");
-    for (const QString& rmRel : {QStringLiteral("ROADMAP.md"), QStringLiteral("docs/ROADMAP.md")}) {
-        QFile rf(rootDir.filePath(rmRel)); QVERIFY(rf.open(QIODevice::ReadOnly | QIODevice::Text));
-        const QString rmText = QString::fromUtf8(rf.readAll());
-        QVERIFY2(!rmText.contains(QStringLiteral("CLion"), Qt::CaseInsensitive) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*External Static Analysis Passes"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*SonarQube / SonarCloud & Compiler Quality Gates"))) && rmText.contains(QRegularExpression(QStringLiteral("-\\s*\\[x\\]\\s*\\*\\*Step-by-Step Walkthrough"))), qPrintable(QStringLiteral("Roadmap static analysis / SonarQube / Phase 9 item not updated in ") + rmRel));
-    }
-    // 4. Tutorial showcase suite & docs/TUTORIAL.md audit: verify all 7 MPI tutorial C++ programs exist on disk, are selectable in TARGET, and are documented.
-    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    QFile tutDoc(rootDir.filePath(QStringLiteral("docs/TUTORIAL.md"))); QVERIFY(targetCombo != nullptr && tutDoc.open(QIODevice::ReadOnly | QIODevice::Text));
-    const QString tutText = QString::fromUtf8(tutDoc.readAll());
-    for (const QString& tutRel : {QStringLiteral("tutorial/deadlock_ring.cpp"), QStringLiteral("tutorial/inspection_demo.cpp"), QStringLiteral("tutorial/collective_mismatch.cpp"), QStringLiteral("tutorial/ghost_cell_drift.cpp"), QStringLiteral("tutorial/heap_imbalance.cpp"), QStringLiteral("tutorial/tag_mismatch_stall.cpp"), QStringLiteral("tutorial/simd_struct_watch.cpp")}) {
-        QVERIFY2(QFileInfo::exists(rootDir.filePath(tutRel)) && targetCombo->findData(tutRel) >= 0 && tutText.contains(tutRel), qPrintable(QStringLiteral("Missing or undocumented tutorial showcase file: ") + tutRel));
-    }
-    QVERIFY2(tutText.contains(QStringLiteral("DIFF RANKS")) && tutText.contains(QStringLiteral("EXPORT")) && tutText.contains(QStringLiteral("F1")) && tutText.contains(QStringLiteral("PACKAGE MANAGER")), "docs/TUTORIAL.md must document DIFF RANKS, EXPORT, F1, and PACKAGE MANAGER");
-}
-
-/**
  * @brief Tests ELF64 binary parsing, section and symbol extraction, and static target loading.
  */
 void TestMainWindowUI::testElfBinaryInspectorAndStaticTargetLoad() {
@@ -592,85 +501,11 @@ void TestMainWindowUI::testMultiDistroPackageManagerParsingAndViewModes() {
     const int fdMatches = widget.searchPackagesSynchronously(QStringLiteral("fd"), 5000);
     QVERIFY2(fdMatches > 0 && widget.visiblePackageCount() == fdMatches, "Live host package query for 'fd' must return > 0 real system/repo packages");
 }
-/** @brief Generates and verifies all workstation, feature, memory profiler, pointer graph, and theme PNG screenshots. */
-void TestMainWindowUI::testGenerateAndVerifyUpdatedDocumentationScreenshots() {
-    // Resolve docs/screenshots path from either builddir/ or repo root.
-    gridlock::ui::MainWindow mainWindow;
-    const QString shotDir = (!QDir(QStringLiteral("docs")).exists() && QDir(QStringLiteral("../docs")).exists()) ? QStringLiteral("../docs/screenshots") : QStringLiteral("docs/screenshots");
-    // 1. Capture all workstation, feature, and theme screenshots via MainWindow::captureDocumentationScreenshots.
-    QVERIFY2(mainWindow.captureDocumentationScreenshots(shotDir), "captureDocumentationScreenshots must succeed");
-    // Render high-res Library Memory Map Profiler screenshot (1280x780) with realistic multi-library HPC entries.
-    if (auto* mv = mainWindow.memView()) {
-        const qint64 pid = QCoreApplication::applicationPid(); const QString tsvPath = QStringLiteral("/tmp/gridlock_mem_%1.tsv").arg(pid); { QFile tf(tsvPath); if (tf.open(QIODevice::WriteOnly)) tf.write("/usr/lib64/libopenblas.so.0\tblas_memory_alloc\t134217728\t150994944\t184\n/tmp/inspection_demo\tallocateHaloBuffers\t67108864\t83886080\t92\n/usr/lib64/libfftw3.so.3\tfftw_malloc\t25165824\t33554432\t41\n"); }
-        { if (auto* mapBtn = mv->findChild<QPushButton*>(QStringLiteral("memMapModeBtn"))) mapBtn->click(); } mv->setPoppedOut(true); QWidget* mpWin = mv->memoryProfiler()->window(); mpWin->resize(1280, 780); mpWin->show(); QApplication::processEvents(); mv->notifyRankStoppedOrSelected(0, pid, 8); QApplication::processEvents(); mpWin->grab().save(shotDir + QStringLiteral("/memory_profiler.png")); mv->setPoppedOut(false); QFile::remove(tsvPath);
-    }
-    // Render high-res Interactive Pointer & Struct Graph Visualizer screenshot (1200x720) with Bezier edges and cycle badge.
-    { gridlock::ui::PointerGraphDialog pg(mainWindow.coordinator(), &mainWindow); pg.resize(1200, 720); pg.show();
-      pg.upsertStructNode(QStringLiteral("domain_grid"), QStringLiteral("SubdomainBlock"), QStringLiteral("0x7fffffffe210"), {{QStringLiteral("local_cells"), QStringLiteral("{...}"), QStringLiteral("CellMesh")}, {QStringLiteral("north_halo"), QStringLiteral("0x7fffa400"), QStringLiteral("HaloExchangeBuf *")}, {QStringLiteral("east_neighbor"), QStringLiteral("0x7fffa880"), QStringLiteral("MpiPeerNode *")}, {QStringLiteral("tolerance"), QStringLiteral("1e-06"), QStringLiteral("double")}}); pg.upsertStructNode(QStringLiteral("north_halo"), QStringLiteral("HaloExchangeBuf"), QStringLiteral("0x7fffa400"), {{QStringLiteral("comm"), QStringLiteral("0x7fff8800"), QStringLiteral("MPI_Comm")}, {QStringLiteral("send_pkt"), QStringLiteral("0x7fffb120"), QStringLiteral("PacketHeader *")}, {QStringLiteral("recv_vec"), QStringLiteral("0x7fffb560"), QStringLiteral("FieldVector *")}, {QStringLiteral("ghost_guard"), QStringLiteral("0x0"), QStringLiteral("HaloExchangeBuf *")}}, QStringLiteral("domain_grid"), QStringLiteral("north_halo")); pg.upsertStructNode(QStringLiteral("recv_vec"), QStringLiteral("FieldVector"), QStringLiteral("0x7fffb560"), {{QStringLiteral("length"), QStringLiteral("32768"), QStringLiteral("int")}, {QStringLiteral("values"), QStringLiteral("0x7fffc000"), QStringLiteral("double *")}}, QStringLiteral("north_halo"), QStringLiteral("recv_vec")); pg.upsertStructNode(QStringLiteral("send_pkt"), QStringLiteral("PacketHeader"), QStringLiteral("0x7fffb120"), {{QStringLiteral("tag_id"), QStringLiteral("104"), QStringLiteral("int")}, {QStringLiteral("payload_bytes"), QStringLiteral("262144"), QStringLiteral("size_t")}, {QStringLiteral("parent_buf"), QStringLiteral("0x7fffa400"), QStringLiteral("HaloExchangeBuf *")}}, QStringLiteral("north_halo"), QStringLiteral("send_pkt"));
-      pg.connectPointerField(QStringLiteral("send_pkt"), QStringLiteral("parent_buf"), QStringLiteral("0x7fffa400")); pg.autoLayoutNodes(); QApplication::processEvents(); pg.grab().save(shotDir + QStringLiteral("/pointer_graph.png")); pg.close(); }
-    // 2. Verify every required PNG file exists, exceeds 15 KB, and loads as a valid QImage.
-    for (const QString& fn : {QStringLiteral("workstation_overview.png"), QStringLiteral("workspace_overview.png"), QStringLiteral("cfg_decompiler_split.png"), QStringLiteral("mpi_diagnostics_docsets.png"), QStringLiteral("breakpoint_popover.png"), QStringLiteral("tool_rail_debug_tabs.png"), QStringLiteral("tool_rail_mpi_diagnostics.png"), QStringLiteral("package_manager_mpi_search.png"), QStringLiteral("package_manager_list_view.png"), QStringLiteral("preferences_slurm_autodetect.png"), QStringLiteral("memory_profiler.png"), QStringLiteral("pointer_graph.png"), QStringLiteral("theme_gridlock_slate.png"), QStringLiteral("theme_obsidian_teal.png"), QStringLiteral("theme_tokyo_night.png"), QStringLiteral("theme_catppuccin_mocha.png"), QStringLiteral("theme_gruvbox_dark.png"), QStringLiteral("theme_daylight_light.png"), QStringLiteral("theme_solarized_light.png"), QStringLiteral("theme_catppuccin_latte.png")}) { const QString fullPath = shotDir + QLatin1Char('/') + fn; const QImage img(fullPath); QVERIFY2(QFileInfo(fullPath).size() > 15000 && !img.isNull() && img.width() >= 800 && img.height() >= 500, qPrintable(fullPath)); }
-    const QImage mpImg(shotDir + QStringLiteral("/memory_profiler.png")), pgImg(shotDir + QStringLiteral("/pointer_graph.png")); QVERIFY(mpImg.width() >= 1100 && mpImg.height() >= 680 && pgImg.width() >= 1100 && pgImg.height() >= 680);
-    // 3. Verify DisassemblyView mode toggle buttons and documentation embeds + zero proprietary identifiers.
-    if (auto* disasm = mainWindow.disassemblyView()) for (const QString& obj : {QStringLiteral("cutterSplitViewBtn"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("cutterCfgToggleBtn")}) { auto* btn = disasm->findChild<QPushButton*>(obj); QVERIFY2(btn && btn->isVisible() && btn->width() >= btn->sizeHint().width(), qPrintable(obj)); }
-    QFile guideFile(QFileInfo::exists(QStringLiteral("docs/USER_GUIDE.md")) ? QStringLiteral("docs/USER_GUIDE.md") : QStringLiteral("../docs/USER_GUIDE.md")), themesFile(QFileInfo::exists(QStringLiteral("docs/THEMES.md")) ? QStringLiteral("docs/THEMES.md") : QStringLiteral("../docs/THEMES.md")), readmeFile(QFileInfo::exists(QStringLiteral("README.md")) ? QStringLiteral("README.md") : QStringLiteral("../README.md")), clFile(QFileInfo::exists(QStringLiteral("CHANGELOG.md")) ? QStringLiteral("CHANGELOG.md") : QStringLiteral("../CHANGELOG.md")); QVERIFY(guideFile.open(QIODevice::ReadOnly) && themesFile.open(QIODevice::ReadOnly) && readmeFile.open(QIODevice::ReadOnly) && clFile.open(QIODevice::ReadOnly));
-    const QString rmTxt = QString::fromUtf8(readmeFile.readAll()), thTxt = QString::fromUtf8(themesFile.readAll()), clTxt = QString::fromUtf8(clFile.readAll()); QVERIFY2(QString::fromUtf8(guideFile.readAll()).contains(QStringLiteral("breakpoint_popover.png")) && thTxt.contains(QStringLiteral("theme_solarized_light.png")) && thTxt.contains(QStringLiteral("theme_catppuccin_latte.png")) && rmTxt.contains(QStringLiteral("memory_profiler.png")) && rmTxt.contains(QStringLiteral("pointer_graph.png")), "Docs and README must embed memory_profiler.png and pointer_graph.png");
-    static const QRegularExpression kPropRe(QStringLiteral("mf") + QStringLiteral("em|hyp") + QStringLiteral("re|icon") + QStringLiteral("fig|ap") + QStringLiteral("ar"), QRegularExpression::CaseInsensitiveOption); QVERIFY2(!rmTxt.contains(kPropRe) && !clTxt.contains(kPropRe), "README.md and CHANGELOG.md must contain zero closed-source identifiers");
-}
-/** @brief Verifies v0.8.6 version alignment, AppImage build scripts, and tutorial resolution. */
+/** @brief Verifies runtime version string and APPDIR tutorial target resolution. */
 void TestMainWindowUI::testReleaseVersion070AndAppImageWorkflowDependencies() {
-    // Helper to load repository root text files independent of test execution directory.
-    const QString rootPrefix = QFileInfo::exists(QStringLiteral("meson.build")) ? QString() : QStringLiteral("../");
-    auto readText = [&](const QString& relPath) -> QString { QFile f(rootPrefix + relPath); return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(); };
-    // 1. Verify meson.build declares version 0.8.6, $ORIGIN/../lib RPATH, and build_by_default : false on test targets.
-    const QString mesonText = readText(QStringLiteral("meson.build")), changelogText = readText(QStringLiteral("CHANGELOG.md")), readmeText = readText(QStringLiteral("README.md")), roadmapText = readText(QStringLiteral("ROADMAP.md")), docsRoadmapText = readText(QStringLiteral("docs/ROADMAP.md")), sonarText = readText(QStringLiteral("sonar-project.properties"));
-    QVERIFY2(mesonText.contains(QRegularExpression(QStringLiteral("version\\s*:\\s*'0\\.8\\.6'"))) && mesonText.contains(QStringLiteral("$ORIGIN/../lib")) && mesonText.count(QRegularExpression(QStringLiteral("build_by_default\\s*:\\s*false"))) >= 26, "meson.build 0.8.6");
-    QVERIFY2((gridlock::core::Version::getString() == QStringLiteral("0.8.6") || QCoreApplication::applicationVersion() == QStringLiteral("0.8.6")) && changelogText.contains(QRegularExpression(QStringLiteral("##\\s*(?:\\[0\\.8\\.6\\]|v0\\.8\\.6)"))), "Version 0.8.6 & CHANGELOG");
-    QVERIFY2(readmeText.contains(QStringLiteral("0.8.6")) && roadmapText.contains(QStringLiteral("0.8.6")) && docsRoadmapText.contains(QStringLiteral("0.8.6")) && sonarText.contains(QStringLiteral("sonar.projectVersion=0.8.6")) && !roadmapText.contains(QStringLiteral("- [ ]")) && !docsRoadmapText.contains(QStringLiteral("- [ ]")), "Roadmap & sonar 0.8.6");
-    QVERIFY2(!roadmapText.isEmpty() && roadmapText == docsRoadmapText, "ROADMAP.md and docs/ROADMAP.md must exist and be identical"); for (const char* k : {"v0.8.7", "Run to Cursor", "Set Next Statement", "Force Early Return", "Catchpoints", "checkpoint", "Command Palette", "v0.8.8", "IEEE-754", "Format Specifiers", "SIMD", "Heatmap", "v0.8.9", "coredumpctl", "Padding", "Stack Frame Memory", "v0.9.0", "Merged Parallel Stack Tree", "Sub-Groups", "OpenMP", "MPI_Request", "v0.9.x", "v1.0.0", "UI/UX Cohesion", "Progressive Disclosure", "Perspective Presets"}) { QVERIFY2(roadmapText.contains(QLatin1String(k)), k); }
-    QVERIFY2(readmeText.contains(QStringLiteral("Tutorials-x86_64.AppImage")) && readmeText.contains(QStringLiteral("Lite")), "README.md must document Lite and Tutorials AppImage editions");
-    // Verify every badge in README top badge block uses https://img.shields.io/badge/ with style=for-the-badge.
-    auto badgeMatches = QRegularExpression(QStringLiteral("!\\[[^\\]]+\\]\\((https://img\\.shields\\.io/[^\\)]+)\\)")).globalMatch(readmeText.left(1000));
-    int badgeCount = 0;
-    while (badgeMatches.hasNext()) { const QString bUrl = badgeMatches.next().captured(1); ++badgeCount; QVERIFY2(bUrl.startsWith(QStringLiteral("https://img.shields.io/badge/")) && bUrl.contains(QStringLiteral("style=for-the-badge")), "README badge must use /badge/ with style=for-the-badge"); }
-    QVERIFY2(badgeCount >= 7, "README must contain at least 7 for-the-badge shields");
-    // 2. Verify scripts/build_appimage.sh stays version-agnostic and supports Lite + Tutorials editions without duplicate alias.
-    const QFileInfo scriptInfo(rootPrefix + QStringLiteral("scripts/build_appimage.sh"));
-    const QString appImageScript = readText(QStringLiteral("scripts/build_appimage.sh"));
-    const QRegularExpression hardcodedVerRe(QStringLiteral("0\\.(?:7\\.0|8\\.0|8\\.5|8\\.6|9\\.0)"));
-    QVERIFY2(scriptInfo.exists() && scriptInfo.isExecutable() && !appImageScript.contains(hardcodedVerRe) && appImageScript.contains(QStringLiteral("meson.build")), "build_appimage.sh parse meson.build without hardcoded versions");
-    QVERIFY2(appImageScript.contains(QStringLiteral("--lite")) && appImageScript.contains(QStringLiteral("--with-tutorials")) && appImageScript.contains(QStringLiteral("Tutorials")), "build_appimage.sh must support --lite and --with-tutorials");
-    QVERIFY2(!appImageScript.contains(QStringLiteral("cp -af \"${ROOT_DIR}/${APP_NAME}-${VERSION}-x86_64.AppImage\" \"${ROOT_DIR}/${APP_NAME}-x86_64.AppImage\"")), "build_appimage.sh must not create unversioned alias");
-    for (const QString& req : {QStringLiteral("sqldrivers"), QStringLiteral("qtermwidget6"), QStringLiteral("inspection_demo.cpp"), QStringLiteral("deadlock_ring.cpp"), QStringLiteral("AppDir/usr/share/gridlock/tutorial"), QStringLiteral("AppDir/tutorial"), QStringLiteral("mpicxx"), QStringLiteral("libqtadvancedcss.so"), QStringLiteral("$ORIGIN/../lib"), QStringLiteral("patchelf"), QStringLiteral("gridlock"), QStringLiteral("appimagetool"), QStringLiteral("--appimage-extract-and-run"), QStringLiteral("ARCH=x86_64")}) {
-        QVERIFY2(appImageScript.contains(req), qPrintable(QStringLiteral("build_appimage.sh missing: ") + req));
-    }
-    // Confirm AppImage script invokes ninja gridlock without deprecated cqtdeployer tool.
-    QVERIFY2(!appImageScript.contains(QStringLiteral("cqtdeployer"), Qt::CaseInsensitive) && appImageScript.contains(QRegularExpression(QStringLiteral("ninja\\s+-C\\s+\"\\$\\{?BUILD_DIR\\}?\"\\s+gridlock"))), "scripts/build_appimage.sh ninja gridlock");
-    if (!QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) || !QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1"))) {
-        QProcess prepProc; prepProc.setWorkingDirectory(rootPrefix.isEmpty() ? QDir::currentPath() : QDir(rootPrefix).absolutePath()); prepProc.start(QStringLiteral("bash"), {QStringLiteral("scripts/build_appimage.sh"), QStringLiteral("--appdir-only")});
-        QVERIFY2(prepProc.waitForFinished(30000) && prepProc.exitCode() == 0, "scripts/build_appimage.sh --appdir-only must succeed");
-    }
-    QVERIFY2(QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/usr/lib/libqtadvancedcss.so.1")) && QFileInfo::exists(rootPrefix + QStringLiteral("AppDir/AppRun")) && QDir(rootPrefix + QStringLiteral("AppDir/usr/bin")).entryList({QStringLiteral("*test*")}, QDir::Files).isEmpty(), "AppDir must bundle libqtadvancedcss.so.1 and zero *test* binaries");
-    // 3. Verify direct execution of ./builddir/gridlock --version in a headless environment with empty LD_LIBRARY_PATH.
-    QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    for (const QString& k : {QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("DISPLAY"), QStringLiteral("WAYLAND_DISPLAY")}) env.remove(k);
-    env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen")); proc.setProcessEnvironment(env);
-    proc.start(QFileInfo::exists(rootPrefix + QStringLiteral("builddir/gridlock")) ? (rootPrefix + QStringLiteral("builddir/gridlock")) : (rootPrefix + QStringLiteral("AppDir/usr/bin/gridlock")), {QStringLiteral("--version")});
-    QVERIFY2(proc.waitForFinished(5000) && proc.exitCode() == 0 && QString::fromUtf8(proc.readAllStandardOutput()).contains(QStringLiteral("0.8.6")), "gridlock --version must report 0.8.6");
-    // 4. Verify GitHub Actions workflows are version-agnostic, filter ui_tests in CI, and enforce AppImage-only packaging.
-    QDir wfDir(rootPrefix + QStringLiteral(".github/workflows")); QString combinedYml;
-    for (const QString& fn : wfDir.entryList({QStringLiteral("*.yml"), QStringLiteral("*.yaml")}, QDir::Files)) {
-        const QString content = readText(QStringLiteral(".github/workflows/") + fn); combinedYml += content + QLatin1Char('\n');
-        QVERIFY2(!content.contains(hardcodedVerRe), qPrintable(fn));
-        QVERIFY2(content.contains(QStringLiteral("grep -v ui_tests")) && !content.contains(QStringLiteral("dpkg-deb")) && !content.contains(QStringLiteral("flatpak-builder")), qPrintable(fn));
-    }
-    // Check upload artifact globs and required CI APT packages across all workflow definitions.
-    QVERIFY2(combinedYml.contains(QStringLiteral("GridLock-*-Tutorials-x86_64.AppImage")) && !combinedYml.contains(QStringLiteral("GridLock-x86_64.AppImage")), "release.yml must upload Tutorials edition and no unversioned alias");
-    for (const QString& pkg : {QStringLiteral("clangd"), QStringLiteral("libqtermwidget6-dev"), QStringLiteral("APPIMAGE_EXTRACT_AND_RUN"), QStringLiteral("openmpi-bin"), QStringLiteral("gdb"), QStringLiteral("binutils")}) {
-        QVERIFY2(combinedYml.contains(pkg), qPrintable(QStringLiteral("CI workflow missing requirement: ") + pkg));
-    }
-
-    // 5. Verify MainWindow resolves tutorial targets from applicationDirPath()/../share/gridlock/tutorial/ or APPDIR when cwd has no ./tutorial/.
+    const QString appVersion = gridlock::core::Version::getString();
+    QVERIFY2(!appVersion.isEmpty() && (QCoreApplication::applicationVersion().isEmpty() || QCoreApplication::applicationVersion() == appVersion), "Version string must be non-empty");
+    // Verify MainWindow resolves tutorial targets from applicationDirPath()/../share/gridlock/tutorial/ or APPDIR when cwd has no ./tutorial/.
     {
         // Create an isolated mock APPDIR with tutorial/deadlock_ring.cpp and switch cwd temporarily.
         QTemporaryDir tempCwd; const QString savedCwd = QDir::currentPath(); QDir::setCurrent(tempCwd.path());

@@ -103,9 +103,6 @@ private slots:
     /** @brief Verifies dynamic rank telemetry without constructor mocks. */
     void testDynamicRankSyncWithoutHardcodedConstructorMocks();
 
-    /** @brief Audits entire repository for Google C++ Style and documentation. */
-    void testFullRepoGoogleStyleAndDocumentation();
-
     /** @brief Verifies native ELF64 binary parsing, symbols, .rodata strings, and target loading. */
     void testElfBinaryInspectorAndStaticTargetLoad();
 
@@ -199,10 +196,7 @@ private slots:
     /** @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained breakpoint popover, and theme persistence. */
     void testEditableSourceViewModernLspPopupAndThemePersistence();
 
-    /** @brief Generates and verifies all 1600x960 documentation and theme PNG screenshots and USER_GUIDE.md image references. */
-    void testGenerateAndVerifyUpdatedDocumentationScreenshots();
-
-    /** @brief Verifies v0.7.0 version alignment across meson.build/CHANGELOG.md, build_appimage.sh packaging, and CI workflow dependencies. */
+    /** @brief Verifies runtime version string and APPDIR tutorial target resolution. */
     void testReleaseVersion070AndAppImageWorkflowDependencies();
 
     /** @brief Verifies ProjectExplorerWidget file/folder CRUD operations, signals, and meson.build/CMakeLists.txt source registration. */

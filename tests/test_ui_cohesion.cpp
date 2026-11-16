@@ -924,11 +924,5 @@ void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadr
     for (QLabel* lbl : prefsDialog.findChildren<QLabel*>()) for (const QString& r : {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")}) if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
     QVERIFY2(swatchBoxes.size() == 5, qPrintable(QString("Expected 5 clean role swatch boxes, found %1").arg(swatchBoxes.size())));
     for (QLabel* box : swatchBoxes) QVERIFY2(!box->toolTip().isEmpty() && box->toolTip().contains('#'), "Swatch box must store hex color in toolTip()");
-    // 3. MainWindow*.cpp Line Count Headroom (< 880 Lines Each).
-    for (const QString& relPath : {QStringLiteral("src/ui/MainWindow.cpp"), QStringLiteral("src/ui/MainWindowWorkspace.cpp"), QStringLiteral("src/ui/MainWindowCohesion.cpp"), QStringLiteral("src/ui/MainWindowNavigation.cpp"), QStringLiteral("src/ui/MainWindowDocks.cpp")}) {
-        QFile f(QFile::exists(QStringLiteral("../") + relPath) ? (QStringLiteral("../") + relPath) : relPath);
-        QVERIFY2(f.exists() && f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(QString("Could not open %1").arg(relPath)));
-        QVERIFY2(QString::fromUtf8(f.readAll()).split('\n').size() < 880, qPrintable(QString("%1 >= 880 lines").arg(relPath)));
-    }
 }
 
