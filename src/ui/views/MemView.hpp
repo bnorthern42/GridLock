@@ -41,7 +41,7 @@ public:
     using RankPidGetter = std::function<qint64(int rank)>;
 
     explicit MemView(QWidget* parent = nullptr);
-    ~MemView() override = default;
+    ~MemView() override;
 
     /// Binds live rank address resolution, `process_vm_readv` / debugger byte reads, and PID lookup.
     void setLiveMemoryCallbacks(RankAddressResolver resolver,

@@ -254,6 +254,17 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
             this, [this](bool) { reloadStyle(); });
 }
 
+/** @brief Cleans up any detached pop-out window and reparents m_contentContainer safely. */
+MemView::~MemView() {
+    if (!m_popOutWindow) return;
+    m_popOutWindow->removeEventFilter(this);
+    if (m_isPoppedOut && m_contentContainer) {
+        if (auto* l = m_popOutWindow->layout()) l->removeWidget(m_contentContainer);
+        m_contentContainer->setParent(this);
+    }
+    delete m_popOutWindow; m_popOutWindow = nullptr;
+}
+
 void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
                                      RankBytesFetcher fetcher,
                                      RankPidGetter pidGetter) {

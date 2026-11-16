@@ -126,7 +126,12 @@ ClangdLspClient::ClangdLspClient(QObject* parent) : QObject(parent) {}
  * @brief Shuts down any running clangd background process when destroyed.
  */
 ClangdLspClient::~ClangdLspClient() {
-    stopServerProcess();
+    if (QCoreApplication::instance()) {
+        stopServerProcess();
+    } else {
+        // QCoreApplication has already been destroyed during static teardown; avoid touching QProcess.
+        m_process = nullptr;
+    }
 }
 
 /**

@@ -668,6 +668,7 @@ private:
     QMap<QString, QToolButton*> m_bottomRailButtons;
     QString m_activeBottomToolGroup = QStringLiteral("Debug");
     bool m_syncingBottomToolGroup = false;
+    bool m_isClosing = false;
     QComboBox* m_targetSelector = nullptr;
     QSpinBox* m_rankCountSpin = nullptr;
     QAction* m_runAction = nullptr;

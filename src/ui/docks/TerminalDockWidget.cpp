@@ -109,6 +109,15 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     layout->addWidget(m_termWidget, 1);
 }
 
+/** @brief Disconnects QTermWidget signals before child destruction during shutdown. */
+TerminalDockWidget::~TerminalDockWidget() {
+    removeEventFilter(this);
+    if (m_termWidget) {
+        m_termWidget->blockSignals(true);
+        m_termWidget->disconnect(this);
+    }
+}
+
 /**
  * @brief Re-applies validated monospace typography and full-width geometry across QTermWidget and its children.
  */

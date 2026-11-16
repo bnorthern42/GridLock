@@ -246,6 +246,11 @@ public:
      */
     ~ClangdLspClient() override;
 
+    /// Shuts down any running clangd background process immediately while QCoreApplication is alive.
+    void shutdown() { stopServerProcess(); }
+    /// Returns true when the underlying clangd child process is currently running.
+    bool isRunning() const { return m_process && m_process->state() != QProcess::NotRunning; }
+
     /**
      * @brief Splices a partial C++ condition expression into sourceCode right before targetLineOneBased.
      */

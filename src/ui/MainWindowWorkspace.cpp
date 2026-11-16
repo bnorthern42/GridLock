@@ -368,8 +368,8 @@ void MainWindow::setupDocks() {
   mainVerticalSplitter->setMinimumWidth(240);
   mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
   mainVerticalSplitter->setHandleWidth(4);
-  // Prevent child widgets from being collapsed completely via splitter drag.
-  mainVerticalSplitter->setChildrenCollapsible(false);
+  // Prevent child widgets from being collapsed completely via splitter drag and use opaque resize on Wayland.
+  mainVerticalSplitter->setChildrenCollapsible(false); mainVerticalSplitter->setOpaqueResize(true);
 
   // Center Zone: Source Code (Left) & Disassembly View (Right) side-by-side
   QSplitter *masterHorizontalSplitter =
@@ -377,8 +377,8 @@ void MainWindow::setupDocks() {
   masterHorizontalSplitter->setObjectName("MasterHorizontalSplitter");
   masterHorizontalSplitter->setContentsMargins(0, 0, 0, 0);
   masterHorizontalSplitter->setHandleWidth(4);
-  // Prevent source editor or disassembly panes from being zeroed out.
-  masterHorizontalSplitter->setChildrenCollapsible(false);
+  // Prevent source editor or disassembly panes from being zeroed out and use opaque resize on Wayland.
+  masterHorizontalSplitter->setChildrenCollapsible(false); masterHorizontalSplitter->setOpaqueResize(true);
 
   // Instantiate multi-tab source code editor manager.
   m_editorTabManager = new EditorTabManager(masterHorizontalSplitter);

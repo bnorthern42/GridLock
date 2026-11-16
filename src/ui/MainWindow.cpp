@@ -68,9 +68,11 @@
 #include <QJsonObject>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
 #include <algorithm>
+#include "core/utils/ClangdLspClient.hpp"
 
 namespace gridlock {
 class PlainJaneTooltip : public QLabel {
@@ -745,58 +747,56 @@ void MainWindow::closeEvent(QCloseEvent *event) {
       return;
     }
   }
-  // Gracefully terminate active debug sessions across all spawned ranks and DAP processes.
+  // Begin guarded teardown: remove global event filter, stop timers, and dock any popped-out MemView.
+  m_isClosing = true;
+  if (qApp) qApp->removeEventFilter(this);
+  // Stop all active UI and telemetry timers before child destruction.
+  for (auto* t : findChildren<QTimer*>()) if (t) t->stop();
+  // Re-dock any floating MemView window so no top-level window outlives MainWindow.
+  if (m_memView && m_memView->isPoppedOut()) m_memView->setPoppedOut(false);
+  // Save active session and watch expressions before disconnecting coordinator/LSP signals.
   if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
-  if (m_coordinator) m_coordinator->terminateSession();
-  // Shut down background clangd LSP worker before destroying editor buffer widgets.
-  if (m_lspCoordinator) m_lspCoordinator->stop();
-
-  // Persist user-configured cross-rank watch expressions into `.gridlock/workspace.toml`.
   if (m_differentialGrid) {
     auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
     ps.watchExpressions = m_differentialGrid->getWatchExpressions();
     gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
   }
-
-  // Save active color theme and desktop dock/splitter geometry when running interactively.
+  // Persist active theme and interactive dock/splitter geometry.
   gridlock::core::ThemeManager::instance().savePersistedTheme();
   if (interactive) {
     QSettings settings("gridlock", "debugger");
-    settings.setValue("MainWindow/Geometry_v9", saveGeometry());
-    settings.setValue("MainWindow/State_v9", saveState());
-    // Record individual QSplitter ratios so side-by-side source/CFG splits restore cleanly.
-    for (auto* splitter : findChildren<QSplitter*>()) {
-      if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
-    }
+    settings.setValue("MainWindow/Geometry_v9", saveGeometry()); settings.setValue("MainWindow/State_v9", saveState());
+    for (auto* splitter : findChildren<QSplitter*>()) if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
   }
+  // Disconnect signals and cleanly stop coordinators, clangd LSP, and background thread-pool tasks.
+  if (m_coordinator) { QObject::disconnect(m_coordinator, nullptr, this, nullptr); m_coordinator->terminateSession(); }
+  if (m_deadlockAnalyzer) QObject::disconnect(m_deadlockAnalyzer, nullptr, this, nullptr);
+  if (m_lspCoordinator) { QObject::disconnect(m_lspCoordinator, nullptr, this, nullptr); m_lspCoordinator->stop(); }
+  if (m_editorTabManager) QObject::disconnect(m_editorTabManager, nullptr, this, nullptr);
+  // Detach ClangdLspClient signals, terminate clangd, and wait for thread-pool workers.
+  QObject::disconnect(&gridlock::core::ClangdLspClient::instance(), nullptr, this, nullptr);
+  gridlock::core::ClangdLspClient::instance().shutdown();
+  QThreadPool::globalInstance()->waitForDone(500);
   if (event) event->accept();
 }
 
-/**
- * @brief Global event filter routing keyboard shortcuts and dynamic debugger-engine updates.
- * @param watched Target QObject.
- * @param event Event payload.
- * @return True if event was handled, false otherwise.
- */
+/** @brief Global event filter routing keyboard shortcuts and dynamic debugger-engine updates. */
 void MainWindow::syncDisassemblyDecompilerVisibility(bool applyDefaultMode) {
   if (!m_disassemblyView) return;
+  // Determine whether the center source pane is visible in the current perspective.
   const bool sourceVisible = m_editorTabManager && !m_editorTabManager->isHidden() &&
                              m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) != 0;
   m_disassemblyView->setSourceEditorActive(sourceVisible);
-  if (!sourceVisible) {
-    if (!m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setSplitGraphDecompilerMode(true);
-    return;
-  }
+  if (!sourceVisible) { if (!m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setSplitGraphDecompilerMode(true); return; }
+  // Sync decompiler split visibility with persisted user preferences.
   const auto& cfg = gridlock::core::ConfigManager::instance();
-  if (!cfg.showDecompilerWithSource()) {
-    m_showingDecompilerFallback = false; m_forceDecompilerFallback = false;
-    m_disassemblyView->setDecompilerPaneVisible(false, applyDefaultMode);
-  } else if (applyDefaultMode || !m_disassemblyView->isDecompilerVisible()) {
-    m_disassemblyView->setDecompilerPaneVisible(true, true);
-  }
+  if (!cfg.showDecompilerWithSource()) { m_showingDecompilerFallback = false; m_forceDecompilerFallback = false; m_disassemblyView->setDecompilerPaneVisible(false, applyDefaultMode); }
+  else if (applyDefaultMode || !m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setDecompilerPaneVisible(true, true);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  // Ignore global events once window teardown has started.
+  if (m_isClosing) return QMainWindow::eventFilter(watched, event);
   // Hot-swap between GdbRankCoordinator and DapCoordinator when ConfigManager::setDebuggerEngine fires.
   if (watched == qApp && event->type() == QEvent::DynamicPropertyChange) {
     const auto *dp = static_cast<QDynamicPropertyChangeEvent *>(event);

@@ -337,6 +337,7 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   splitSplitter->setContentsMargins(0, 0, 0, 0);
   splitSplitter->setHandleWidth(4);
   splitSplitter->setChildrenCollapsible(false);
+  splitSplitter->setOpaqueResize(true);
   m_splitViewContainer = splitSplitter;
 
   // Left pane of splitter: Stack of Page 0 = Linear Disassembly, Page 1 = CFG Graph

@@ -534,7 +534,7 @@ MemoryProfilerWidget::MemoryProfilerWidget(QWidget* parent) : QWidget(parent) {
   rootLayout->addWidget(ctrlBar);
   // Pair interactive 2D treemap canvas above sortable, interactive 6-column breakdown table.
   auto* splitter = new QSplitter(Qt::Vertical, this);
-  splitter->setChildrenCollapsible(false);
+  splitter->setChildrenCollapsible(false); splitter->setOpaqueResize(true);
   m_canvas = new MemoryTreemapCanvas(splitter); splitter->addWidget(m_canvas);
   // Configure sortable breakdown table with interactive resizable column headers.
   m_table = new QTableWidget(0, 6, splitter);

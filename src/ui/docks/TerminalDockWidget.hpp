@@ -32,6 +32,8 @@ public:
      * @param parent Optional parent widget.
      */
     explicit TerminalDockWidget(const QString& title, QWidget* parent = nullptr);
+    /// Disconnects QTermWidget signals before destruction so shell exit cannot hit a dying dock.
+    ~TerminalDockWidget() override;
 
     /**
      * @brief Sets the terminal emulator font family and point size.

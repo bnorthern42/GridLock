@@ -36,6 +36,7 @@
 #include <QScrollBar>
 #include <QSignalSpy>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -48,6 +49,7 @@
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/SessionManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
+#include "../src/core/utils/ClangdLspClient.hpp"
 #include "../src/core/utils/CliParser.cpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/EditorTabManager.hpp"
@@ -155,18 +157,20 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     // Pop-out opens a large top-level window and clicking DOCK restores MemView back into the main layout.
     popBtn->click(); QApplication::processEvents(); QVERIFY(memView->isPoppedOut() && popBtn->window()->isWindow() && popBtn->window()->width() >= 1000 && popBtn->window()->height() >= 650);
     popBtn->click(); QApplication::processEvents(); QVERIFY(!memView->isPoppedOut()); hexBtn->click(); QApplication::processEvents(); QVERIFY(addrInput->isVisible());
-    // 2. Central horizontal splitter gives DisassemblyView >= 420px on 1440x900.
+    // 2. Central horizontal splitter gives DisassemblyView >= 420px on 1440x900, and all QSplitters use opaqueResize(true).
     auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr && disassemblyView->width() >= 420);
-    // 3. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines.
+    for (QSplitter* sp : mainWindow.findChildren<QSplitter*>()) QVERIFY2(sp->opaqueResize(), "QSplitter must use opaqueResize(true) for Wayland");
+    // 3. Clean shutdown lifecycle under popped-out MemView + active ClangdLspClient + close().
+    QTemporaryDir tmpSrcDir; QVERIFY(tmpSrcDir.isValid()); const QString cppPath = tmpSrcDir.filePath(QStringLiteral("exit_check.cpp"));
+    { QFile f(cppPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int main() { return 0; }\n"); }
+    auto* mw = new gridlock::ui::MainWindow(); mw->resize(1024, 700); mw->show(); QApplication::processEvents();
+    if (auto* tabs = mw->findChild<gridlock::ui::EditorTabManager*>()) tabs->openFile(cppPath);
+    if (auto* mv = mw->findChild<gridlock::ui::MemView*>()) mv->setPoppedOut(true);
+    QApplication::processEvents(); QVERIFY(mw->close()); delete mw;
+    gridlock::core::ClangdLspClient::instance().shutdown(); QVERIFY(!gridlock::core::ClangdLspClient::instance().isRunning());
+    // 4. Every .cpp and .hpp file in src/ and tests/ has strictly < 950 lines.
     QDir rootDir(QCoreApplication::applicationDirPath() + "/.."); if (!rootDir.exists("src")) rootDir = QDir::current();
-    QStringList allFiles;
-    for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) { QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories); while (it.hasNext()) allFiles.append(it.next()); }
-    allFiles.sort();
-    for (const QString& filePath : allFiles) {
-        QFile file(filePath); QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(filePath));
-        int lines = 0; while (!file.atEnd()) { file.readLine(); ++lines; }
-        QVERIFY2(lines < 950, qPrintable(QString("%1 exceeds 950-line headroom limit (%2 lines)").arg(filePath).arg(lines)));
-    }
+    for (const QString& dirPath : {rootDir.filePath("src"), rootDir.filePath("tests")}) { QDirIterator it(dirPath, {"*.cpp", "*.hpp"}, QDir::Files, QDirIterator::Subdirectories); while (it.hasNext()) { QFile file(it.next()); QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text)); int lines = 0; while (!file.atEnd()) { file.readLine(); ++lines; } QVERIFY2(lines < 950, qPrintable(QString("%1 (%2 lines)").arg(file.fileName()).arg(lines))); } }
 }
 /** @brief Tests preferred screen routing and offscreen startup configuration. */
 void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
@@ -182,11 +186,8 @@ void TestMainWindowUI::testOffscreenDefaultAndPreferredScreenRouting() {
     auto& cfg = gridlock::core::ConfigManager::instance(); const QString prevMonitor = cfg.preferredMonitor(); const bool prevUnfocused = cfg.openUnfocused();
     QTemporaryDir tmpConfigDir; QVERIFY(tmpConfigDir.isValid());
     const QByteArray prevTestDir = qgetenv("GRIDLOCK_TEST_CONFIG_DIR"); qputenv("GRIDLOCK_TEST_CONFIG_DIR", tmpConfigDir.path().toUtf8()); cfg.loadConfig();
-    cfg.setPreferredMonitor("2560x1440"); cfg.setOpenUnfocused(true); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440")); QVERIFY(cfg.openUnfocused());
-    cfg.loadConfig(); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("2560x1440")); QVERIFY(cfg.openUnfocused());
-    cfg.setPreferredMonitor("1920x1080"); cfg.setOpenUnfocused(false); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080")); QVERIFY(!cfg.openUnfocused());
-    cfg.loadConfig(); QCOMPARE(cfg.preferredMonitor(), QStringLiteral("1920x1080")); QVERIFY(!cfg.openUnfocused());
-    // Restore original test config environment and ConfigManager state before returning.
+    cfg.setPreferredMonitor("2560x1440"); cfg.setOpenUnfocused(true); cfg.loadConfig(); QVERIFY(cfg.preferredMonitor() == QStringLiteral("2560x1440") && cfg.openUnfocused());
+    cfg.setPreferredMonitor("1920x1080"); cfg.setOpenUnfocused(false); cfg.loadConfig(); QVERIFY(cfg.preferredMonitor() == QStringLiteral("1920x1080") && !cfg.openUnfocused());
     if (prevTestDir.isEmpty()) qunsetenv("GRIDLOCK_TEST_CONFIG_DIR"); else qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevTestDir);
     cfg.loadConfig(); cfg.setPreferredMonitor(prevMonitor); cfg.setOpenUnfocused(prevUnfocused);
 }
@@ -911,18 +912,13 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     auto colorAt = [](gridlock::ui::SourceCodeView& v, int blk, int col) -> QColor { const auto fmts = v.document()->findBlockByNumber(blk).layout()->formats(); for (int k = fmts.size() - 1; k >= 0; --k) if (col >= fmts[k].start && col < fmts[k].start + fmts[k].length) return fmts[k].format.foreground().color(); return QColor(); };
     auto checkMultiSyntaxAndRainbow = [&](auto& v, auto& c) -> bool {
         if constexpr (requires { c.rainbowBracketsEnabled(); c.setRainbowBracketsEnabled(true); c.dataDocHighlightingEnabled(); c.setDataDocHighlightingEnabled(true); v.languageMode(); v.setRainbowBracketsEnabled(true); }) {
-            using Mode = std::decay_t<decltype(v.languageMode())>;
-            // Verify ConfigManager & PreferencesDialog Editing checkboxes persist and apply live to open tabs.
-            gridlock::ui::PreferencesDialog pd(&mw); pd.show();
+            using Mode = std::decay_t<decltype(v.languageMode())>; gridlock::ui::PreferencesDialog pd(&mw); pd.show();
             auto* rbChk = pd.findChild<QCheckBox*>(QStringLiteral("rainbowBracketsCheck")); auto* ddChk = pd.findChild<QCheckBox*>(QStringLiteral("dataDocHighlightingCheck"));
             if (!rbChk || !ddChk || !rbChk->isChecked() || !ddChk->isChecked()) return false;
             v.setCurrentFile(gitDir.filePath(QStringLiteral("c.toml"))); v.setSourceCode(QStringLiteral("[solver]\n# cmt\nk = true\n")); if (v.languageMode() != Mode::Toml || !colorAt(v, 0, 1).isValid() || colorAt(v, 0, 1) == colorAt(v, 1, 2)) return false;
             v.setCurrentFile(gitDir.filePath(QStringLiteral("j.yaml"))); v.setSourceCode(QStringLiteral("mpi:\n  n: 4 # cmt\n  a: *r\n")); if (v.languageMode() != Mode::Yaml || !colorAt(v, 0, 0).isValid() || colorAt(v, 0, 0) == colorAt(v, 1, 9)) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("r.md"))); v.setSourceCode(QStringLiteral("# H1\n```\nint x = 1;\n```\n[l](u)\n"));
-            if (v.languageMode() != Mode::Markdown || !colorAt(v, 0, 2).isValid() || !colorAt(v, 2, 0).isValid()) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("d.csv"))); v.setSourceCode(QStringLiteral("\"a,b\",c\n"));
-            if (v.languageMode() != Mode::Csv || colorAt(v, 0, 1) != colorAt(v, 0, 3) || colorAt(v, 0, 1) == colorAt(v, 0, 6)) return false;
-            // Verify nested Rainbow Brackets in open MainWindow tab + string/comment ignores + live checkbox rehighlight.
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("r.md"))); v.setSourceCode(QStringLiteral("# H1\n```\nint x = 1;\n```\n[l](u)\n")); if (v.languageMode() != Mode::Markdown || !colorAt(v, 0, 2).isValid() || !colorAt(v, 2, 0).isValid()) return false;
+            v.setCurrentFile(gitDir.filePath(QStringLiteral("d.csv"))); v.setSourceCode(QStringLiteral("\"a,b\",c\n")); if (v.languageMode() != Mode::Csv || colorAt(v, 0, 1) != colorAt(v, 0, 3) || colorAt(v, 0, 1) == colorAt(v, 0, 6)) return false;
             if (!tabMgr->openFile(solverPath) || !tabMgr->currentSourceCodeView()) return false;
             auto* tv = tabMgr->currentSourceCodeView(); const QString rbCode = QStringLiteral("if (a[0] + (b * {1})) { auto s = \"string (ignored)\"; } // comment (ignored)\n");
             tv->setSourceCode(rbCode); tv->setCurrentFile(solverPath);

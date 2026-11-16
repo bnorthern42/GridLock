@@ -28,11 +28,13 @@
 #include <QStandardPaths>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
+#include <QThreadPool>
 
 #include "QtAdvancedStylesheet.h"
 #include "backend/GridLockAutomationRunner.hpp"
 #include "core/Version.hpp"
 #include "core/managers/ThemeManager.hpp"
+#include "core/utils/ClangdLspClient.hpp"
 #include "core/utils/CliParser.hpp"
 #include "ui/MainWindow.hpp"
 #include "ui/tutorial/TutorialDialog.hpp"
@@ -49,6 +51,10 @@ bool g_isVerbose = false;
 void gridlockMessageHandler(QtMsgType type, const QMessageLogContext& /*context*/, const QString& msg) {
   // Suppress noisy debug and info messages during standard non-verbose execution.
   if (!g_isVerbose && (type == QtDebugMsg || type == QtInfoMsg)) {
+    return;
+  }
+  // Suppress benign Wayland QPA subwindow grab warnings emitted during dock/splitter drags.
+  if (type == QtWarningMsg && msg.contains(QLatin1String("This plugin supports grabbing the mouse only for popup windows"))) {
     return;
   }
 
@@ -244,6 +250,12 @@ int main(int argc, char* argv[]) {
     }
     new gridlock::backend::GridLockAutomationRunner(&window, &app);
   }
+
+  // Guarantee clean background worker and clangd teardown while QApplication is still alive.
+  QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
+    gridlock::core::ClangdLspClient::instance().shutdown();
+    QThreadPool::globalInstance()->waitForDone(500);
+  });
 
   return app.exec();
 }
