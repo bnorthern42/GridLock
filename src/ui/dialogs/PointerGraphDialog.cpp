@@ -330,9 +330,9 @@ class PointerGraphEdgeItem : public QGraphicsPathItem {
       const qreal dx = (p2.x() - p1.x()) * 0.5;
       path.cubicTo(QPointF(p1.x() + dx, p1.y()), QPointF(p2.x() - dx, p2.y()), p2);
     } else {
-      // Back-edge / cycle arc: curve gracefully below the cards so it never cuts across text.
-      const qreal lift = 75.0;
-      path.cubicTo(QPointF(p1.x() + 70.0, p1.y() + lift), QPointF(p2.x() - 70.0, p2.y() + lift), p2);
+      // Back-edge / cycle arc: curve below both cards (`maxY + 75px`) so it never clips behind card bodies.
+      const qreal archY = std::max(m_source->sceneBoundingRect().bottom(), m_target->sceneBoundingRect().bottom()) + 75.0;
+      path.cubicTo(QPointF(p1.x() + 65.0, archY), QPointF(p2.x() - 65.0, archY), p2);
     }
     m_midPoint = path.pointAtPercent(0.5);
     setPath(path);
@@ -588,15 +588,16 @@ bool PointerGraphDialog::canReachNode(const PointerGraphNodeItem* startNode,
  */
 void PointerGraphDialog::recomputeCyclesAndRefreshEdges() {
   m_hasCycleOrSharedAlias = false;
-  QMap<PointerGraphNodeItem*, int> inDegree;
-  for (auto* e : m_edges) ++inDegree[e->targetNode()];
-
-  // Flag edges that close a directed cycle or point to a shared multi-parent target node.
+  QSet<PointerGraphNodeItem*> primaryTargetSeen;
+  // Flag only true back-edges / self-loops and secondary shared-alias edges; forward tree edges stay clean cyan.
   for (auto* e : m_edges) {
-    const bool isSelfLoop = (e->sourceNode() == e->targetNode());
-    const bool formsCycle = isSelfLoop || canReachNode(e->targetNode(), e->sourceNode());
-    const bool sharedAlias = (inDegree.value(e->targetNode()) > 1);
-    const bool flag = formsCycle || sharedAlias;
+    PointerGraphNodeItem* src = e->sourceNode();
+    PointerGraphNodeItem* dst = e->targetNode();
+    const bool isSelfLoop = (src == dst);
+    const bool isBackEdge = src && dst && (dst->pos().x() <= src->pos().x()) && canReachNode(dst, src);
+    const bool isSecondaryAlias = dst && primaryTargetSeen.contains(dst);
+    if (dst && !isSelfLoop && !isBackEdge) primaryTargetSeen.insert(dst);
+    const bool flag = isSelfLoop || isBackEdge || isSecondaryAlias;
     if (flag) m_hasCycleOrSharedAlias = true;
     e->setCycleOrAlias(flag);
   }
@@ -694,9 +695,9 @@ void PointerGraphDialog::autoLayoutNodes() {
   for (int i = 0; i < m_nodes.size(); ++i) {
     const int col = i % 3;
     const int row = i / 3;
-    m_nodes[i]->setPos(col * (kCardWidth + 90.0), row * 190.0);
+    m_nodes[i]->setPos(col * (kCardWidth + 130.0), row * 220.0);
   }
-  for (auto* e : m_edges) e->updateGeometry();
+  recomputeCyclesAndRefreshEdges();
 }
 
 /** @brief Removes all node cards, directed edges, and pending expansion state from the canvas. */
