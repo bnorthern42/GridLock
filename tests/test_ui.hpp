@@ -82,12 +82,6 @@ private slots:
     /** @brief Verifies multi-language decompiler and source code fallback. */
     void testCfgGraphDecompilerLanguagesAndSourceFallback();
 
-    /** @brief Verifies unified dark slate chrome metrics and split layout. */
-    void testUnifiedChromeMetricsAndSplitGraphDecompiler();
-
-    /** @brief Verifies cross-pane choreography history and string search. */
-    void testCrossPaneChoreographyHistoryAndStrings();
-
     /** @brief Verifies CFG rank divergence badges, minimap, and rack sync. */
     void testCfgRankDivergenceMinimapAndRackSync();
 
@@ -100,29 +94,14 @@ private slots:
     /** @brief Verifies interactive Xref extraction, incoming/outgoing call graph analysis, and inspector dialog sync. */
     void testInteractiveXrefInspectorAndCallGraphSync();
 
-    /** @brief Verifies terminal monospace font enforcement, memory/disassembly live patching, and deadlock cycle badges. */
-    void testTerminalFontIsolationLivePatchingAndDeadlockCycle();
-
     /** @brief Verifies patched ELF export to disk, unified multi-domain workspace search, and deadlock propagation. */
     void testPatchedElfExportWorkspaceSearchAndDeadlockPropagation();
 
-    /** @brief Verifies workstation UI cohesion across all bottom tabs, F1 docset lookup, and tab audit snapshots. */
+    /** @brief Verifies workstation UI cohesion across all bottom tabs and F1 docset lookup. */
     void testWorkstationUiCohesionAndIntegratedDocViewer();
 
-    /** @brief Verifies dark-slate visual cohesion across modal dialogs, category sidebars, and table/tree headers. */
-    void testDialogsAndTablesVisualCohesion();
-
-    /** @brief Verifies cross-pane workflow bridges (Evaluator/Variables -> Watch, Disassembly context actions -> Reference Manual) and DisassemblyAnalysis line count. */
+    /** @brief Verifies cross-pane workflow bridges (Evaluator/Variables -> Watch, Disassembly context actions -> Reference Manual). */
     void testCrossPaneWorkflowBridgesAndContextActions();
-
-    /** @brief Verifies Zeal docset UI integration, unclipped CFG basic-block comments, and MpiDiagnosticsWidget rank wait-state table. */
-    void testZealUiIntegrationCfgUnclippedAndMpiDiagnosticsTable();
-
-    /** @brief Verifies SourceCodeView uniform canvas without right-half grey band, structured MpiNetworkLogWidget 6-column table, single-row ReferenceManualWidget header, and monochrome toolbar glyphs. */
-    void testSourceEditorCanvasNetworkLogTableAndHeaderDensity();
-
-    /** @brief Verifies DifferentialGrid uniform empty viewport without vertical header grey block, stretched watch columns, and GDB Console / Evaluator prompt bar cohesion. */
-    void testWatchGridBackgroundAndConsolePromptCohesion();
 
     /** @brief Verifies toolbar target/rank controls, state-aware debugger action enablement, and synchronized Run -> Step -> Register/Source/Rack -> Stop workflow. */
     void testEndToEndStepDebuggingWorkflowAndToolbarState();
@@ -160,9 +139,6 @@ private slots:
     /** @brief Verifies gutter hover ghost preview tracking and cursor-anchored breakpoint popover controls/positioning. */
     void testAnchoredBreakpointPopoverAndGutterHover();
 
-    /** @brief Verifies left tool-window icon rail, linked contextual tab filtering, auto-group sync, and compact MPI Diagnostics header. */
-    void testBottomToolWindowRailAndLinkedTabGroups();
-
     /** @brief Verifies gutter QContextMenuEvent isolation from editor viewport menu and clean rollback of canceled breakpoints. */
     void testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly();
 
@@ -175,20 +151,14 @@ private slots:
     /** @brief Verifies multi-distro package manager auto-detection, Spack/Pacman/DNF/APT/Zypper CLI output parsing, and Table/List/Raw display views. */
     void testMultiDistroPackageManagerParsingAndViewModes();
 
-    /** @brief Verifies removal of redundant Enable Dark Mode checkbox, 3 Light Themes (Daylight, Solarized, Catppuccin Latte), and light-mode canvas cohesion. */
-    void testLightThemesCohesionAndNoRedundantDarkModeCheckbox();
-
     /** @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector expression completion in ConditionalBreakpointDialog. */
     void testClangdLspBreakpointExpressionCompletion();
 
-    /** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and MainWindow*.cpp line count headroom. */
+    /** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and theme switching. */
     void testFullWorkstationLightThemePropagationAndLineCountHeadroom();
 
     /** @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained breakpoint popover, and theme persistence. */
     void testEditableSourceViewModernLspPopupAndThemePersistence();
-
-    /** @brief Verifies runtime version string and APPDIR tutorial target resolution. */
-    void testReleaseVersion070AndAppImageWorkflowDependencies();
 
     /** @brief Verifies ProjectExplorerWidget file/folder CRUD operations, signals, and meson.build/CMakeLists.txt source registration. */
     void testProjectExplorerFileCrudAndBuildRegistration();

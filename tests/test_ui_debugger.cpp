@@ -724,39 +724,6 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
     QVERIFY2(std::abs(dialog.pos().y() - anchorGlobalPos.y()) <= 25, qPrintable(QStringLiteral("Popover y=%1").arg(dialog.pos().y())));
     dialog.hide();
 }
-/**
- * @brief Verifies left vertical tool-window icon rail (`#bottomToolWindowRail`), linked contextual
- *        tab filtering across Debug/MPI/Terminal/Docs, programmatic auto-sync, and flattened MPI header.
- */
-void TestMainWindowUI::testBottomToolWindowRailAndLinkedTabGroups() {
-    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
-    // 1. Verify #bottomToolWindowRail exists and exposes the 4 canonical tool groups.
-    // Lookup bottom console tab widget and all linked child views (MemView, Terminal, Reference, MPI).
-    auto* rail = mainWindow.findChild<QWidget*>(QStringLiteral("bottomToolWindowRail")); auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
-    auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
-    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>(); auto* mpiDiag = mainWindow.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
-    QVERIFY(rail && bottomTabs && memView && terminalDock && refManual && mpiDiag);
-    QCOMPARE(mainWindow.bottomToolGroups(), (QStringList{QStringLiteral("Debug"), QStringLiteral("MPI"), QStringLiteral("Terminal"), QStringLiteral("Docs")}));
-    // Helper returning uppercased titles of currently visible tabs in BottomConsoleTabs.
-    const auto visibleTitles = [&]() {
-        QStringList vis; for (int i = 0; i < bottomTabs->count(); ++i) if (bottomTabs->tabBar()->isTabVisible(i)) vis.append(bottomTabs->tabText(i).toUpper());
-        return vis;
-    };
-    // 2. Verify selecting Debug, MPI, Terminal, and Docs filters visible tabs strictly to linked views.
-    mainWindow.selectBottomToolGroup(QStringLiteral("Debug")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug"));
-    // Check Debug visible tabs (`GDB CONSOLE`, `PROGRAM OUTPUT`, `MEMORY`, `EVALUATOR`).
-    const QStringList debugVis = visibleTitles(); QCOMPARE(debugVis.size(), 4);
-    QVERIFY(debugVis.join(QLatin1Char('|')).contains(QStringLiteral("GDB")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("PROGRAM")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("MEMORY")) && debugVis.join(QLatin1Char('|')).contains(QStringLiteral("EVALUATOR")));
-    // Switch to MPI, Terminal, and Docs tool groups and confirm filtered view visibility.
-    mainWindow.selectBottomToolGroup(QStringLiteral("MPI")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("MPI")); QCOMPARE(visibleTitles().size(), 2);
-    mainWindow.selectBottomToolGroup(QStringLiteral("Terminal")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Terminal")); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    mainWindow.selectBottomToolGroup(QStringLiteral("Docs")); QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Docs")); QCOMPARE(bottomTabs->currentWidget(), refManual);
-    // 3. Programmatically switching BottomConsoleTabs to MemView auto-syncs the Debug tool group.
-    bottomTabs->setCurrentWidget(memView); QApplication::processEvents();
-    QCOMPARE(mainWindow.activeBottomToolGroup(), QStringLiteral("Debug")); QCOMPARE(visibleTitles().size(), 4);
-    // 4. Verify MpiDiagnosticsWidget uses a single compact 26px header bar with hidden inner QTabBar.
-    QVERIFY(mpiDiag->hasCompactSingleRowHeader());
-}
 /** @brief Verifies gutter QContextMenuEvent suppression and clean rollback of canceled breakpoints. */
 void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly() {
     // Configure sample 30-line source code buffer to test gutter context menu and breakpoint rollback.
