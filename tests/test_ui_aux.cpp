@@ -484,8 +484,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QFile::copy(elfBin, extDir.filePath(QStringLiteral("build_meson/meson-private/sanitycheckcpp.exe")));
     // 8. Start MainWindow on default repo workspace, switch to extDir, and verify FILES tree + TARGET selector update atomically.
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QCoreApplication::processEvents();
-    auto switchWs = [](auto& win, const QString& p) -> bool { if constexpr (requires { win.switchWorkspaceDirectory(p); }) return win.switchWorkspaceDirectory(p); else { win.projectExplorerWidget()->setRootPath(p); return false; } };
-    const bool switchedViaMw = switchWs(mw, extDir.path());
+    const bool switchedViaMw = mw.switchWorkspaceDirectory(extDir.path());
     auto* pe = mw.projectExplorerWidget(); auto* tree = pe ? pe->findChild<QTreeView*>() : nullptr; auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")); auto* termDock = mw.findChild<gridlock::ui::TerminalDockWidget*>();
     QVERIFY(pe != nullptr && tree != nullptr && tree->model() != nullptr && targetCombo != nullptr && rankSpin != nullptr && termDock != nullptr);
     QVERIFY2(switchedViaMw && !pe->isSymbolsMode() && !pe->isStringsMode(), "Opening external workspace must switch ProjectExplorerWidget to FILES mode via switchWorkspaceDirectory");
@@ -512,8 +511,9 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     QVERIFY2(tbCombo && tbCombo->isEditable() && tbBrowse && argsEd && wdEd && wdBrowse && ranksSp && mpiArgsEd, "ProjectSettingsDialog missing targetBinaryCombo/targetBrowseBtn/targetArgsEdit/workingDirEdit/workingDirBrowseBtn/mpiRanksSpin/mpiArgsEdit");
     QVERIFY2(tbCombo->currentText().contains(QStringLiteral("solver_demo")) && QFileInfo(wdEd->text()).canonicalFilePath() == extCanon, qPrintable(tbCombo->currentText() + QLatin1Char('|') + wdEd->text()));
     tbCombo->setCurrentText(altBin); argsEd->setText(QStringLiteral("config_28A.toml --verbose")); wdEd->setText(extCanon); ranksSp->setValue(6); mpiArgsEd->setText(QStringLiteral("--oversubscribe --bind-to core")); psDlg.accept(); QApplication::processEvents();
-    auto checkPersisted = [&](auto& c) -> bool { if constexpr (requires { c.projectSettings().targetArguments; c.projectSettings().mpiRanks; c.projectSettings().mpiArgs; }) { const auto ps = c.projectSettings(); return QFileInfo(QString::fromStdString(ps.targetBinary)).canonicalFilePath() == QFileInfo(altBin).canonicalFilePath() && ps.targetArguments == QStringLiteral("config_28A.toml --verbose") && QFileInfo(QString::fromStdString(ps.workingDirectory)).canonicalFilePath() == extCanon && ps.mpiRanks == 6 && ps.mpiArgs == QStringLiteral("--oversubscribe --bind-to core"); } else return false; };
-    QVERIFY2(checkPersisted(cfg) && targetCombo->currentText().contains(QStringLiteral("alt_solver")) && rankSpin->value() == 6, "Saving ProjectSettingsDialog must persist settings and sync MainWindow TARGET/RANKS");
+    const auto ps = cfg.projectSettings();
+    const bool persistedOk = QFileInfo(QString::fromStdString(ps.targetBinary)).canonicalFilePath() == QFileInfo(altBin).canonicalFilePath() && ps.targetArguments == QStringLiteral("config_28A.toml --verbose") && QFileInfo(QString::fromStdString(ps.workingDirectory)).canonicalFilePath() == extCanon && ps.mpiRanks == 6 && ps.mpiArgs == QStringLiteral("--oversubscribe --bind-to core");
+    QVERIFY2(persistedOk && targetCombo->currentText().contains(QStringLiteral("alt_solver")) && rankSpin->value() == 6, "Saving ProjectSettingsDialog must persist settings and sync MainWindow TARGET/RANKS");
     // 11. Verify QFileDialog starts at active workspace, prunes nonexistent ghost sidebar URLs, and sizes columns >= 880px.
     QFileDialog fd(&mw); fd.setOption(QFileDialog::DontUseNativeDialog, true); const QUrl ghostUrl = QUrl::fromLocalFile(QStringLiteral("/home/nonexistent_ghost_user_9999"));
     fd.setSidebarUrls({ghostUrl}); fd.open(); QApplication::processEvents(); fd.hide(); auto* fdTree = fd.findChild<QTreeView*>();
@@ -581,7 +581,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     // 11f. Verify Recent Sessions persistence in ~/.config/gridlock/debugger.conf, dynamic rebuild, and workspace switch.
     QTemporaryDir wsA, wsB; QVERIFY(wsA.isValid() && wsB.isValid()); QDir(wsA.path()).mkpath("src"); QDir(wsB.path()).mkpath("src");
     const QString cA = QFileInfo(wsA.path()).canonicalFilePath(), cB = QFileInfo(wsB.path()).canonicalFilePath();
-    QVERIFY2(switchWs(mw, wsA.path()), "wsA switch failed"); saveSessAct->trigger(); QApplication::processEvents(); QVERIFY2(switchWs(mw, wsB.path()), "wsB switch failed");
+    QVERIFY2(mw.switchWorkspaceDirectory(wsA.path()), "wsA switch failed"); saveSessAct->trigger(); QApplication::processEvents(); QVERIFY2(mw.switchWorkspaceDirectory(wsB.path()), "wsB switch failed");
     // Open #menuRecentSessions via aboutToShow and confirm wsB precedes wsA plus Clear Recent Sessions.
     auto* rm = mw.findChild<QMenu*>(QStringLiteral("menuRecentSessions")); QVERIFY2(rm != nullptr, "#menuRecentSessions missing");
     emit rm->aboutToShow(); QApplication::processEvents(); QAction* actA = nullptr; int iA = -1, iB = -1; bool hasClr = false;
@@ -590,13 +590,13 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
         if (a->text().contains(QStringLiteral("Clear Recent Sessions"))) hasClr = true; }
     QVERIFY2(iB >= 0 && iA > iB && hasClr && actA != nullptr, "Recent Sessions must order wsB then wsA with Clear action");
     // Construct a fresh SessionManager and assert wsB & wsA persisted to debugger.conf, then click wsA to restore workspace.
-    auto chkRe = [&](auto* tag) { using SM = std::remove_pointer_t<decltype(tag)>;
-        if constexpr (requires { SM(); std::declval<SM&>().recentSessions(); }) { SM re; QVERIFY2(re.recentSessions().join('|').contains(cB) && re.recentSessions().join('|').contains(cA), qPrintable(re.recentSessions().join(","))); }
-        else QFAIL("SessionManager must be constructible and expose recentSessions()"); };
-    chkRe(static_cast<gridlock::core::managers::SessionManager*>(nullptr));
+    {
+        gridlock::core::managers::SessionManager re;
+        QVERIFY2(re.recentSessions().join('|').contains(cB) && re.recentSessions().join('|').contains(cA), qPrintable(re.recentSessions().join(",")));
+    }
     actA->trigger(); QApplication::processEvents(); QCOMPARE(QFileInfo(pe->rootPath()).canonicalFilePath(), cA);
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
-    QVERIFY2(switchWs(mw, unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
+    QVERIFY2(mw.switchWorkspaceDirectory(unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
     auto* disasm = mw.findChild<gridlock::ui::DisassemblyView*>(); auto* navBar = mw.findChild<QWidget*>(QStringLiteral("addressNavBar"));
     QVERIFY2(pe->symbolCount() == 0 && pe->stringCount() == 0 && !pe->isSymbolsMode() && !pe->isStringsMode(), "Unbuilt workspace must have 0 symbols and 0 strings");
     QVERIFY2(disasm && disasm->basicBlockCount() == 0 && !disasm->decompiledPseudocode().contains(QStringLiteral("var_4h")) && !disasm->toPlainText().contains(QStringLiteral("0x00401120")), "Unbuilt workspace must clear DisassemblyView");
@@ -629,40 +629,36 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     { QTextCursor cur(ed->document()); cur.movePosition(QTextCursor::Start); cur.select(QTextCursor::LineUnderCursor); cur.insertText(QStringLiteral("int a = 123;")); }
     QVERIFY(tabMgr->isTabModified(0));
     auto readDisk = [&]() { QFile rf(solverPath); return rf.open(QIODevice::ReadOnly) ? QString::fromUtf8(rf.readAll()) : QString(); };
-    auto checkDirtyClosePrompts = [&](auto* mgr) -> bool {
-        if constexpr (requires { mgr->setUnsavedPromptHandler(std::declval<std::function<QMessageBox::StandardButton(const QString&)>>()); mgr->confirmCloseAllModifiedTabs(); }) {
-            QMessageBox::StandardButton nextBtn = QMessageBox::Cancel; int prompts = 0;
-            mgr->setUnsavedPromptHandler([&](const QString&) { ++prompts; return nextBtn; });
-            if (mw.close() || mgr->count() != 1 || prompts != 1) return false;
-            emit mgr->tabCloseRequested(0); if (mgr->count() != 1 || !mgr->isTabModified(0) || prompts != 2) return false;
-            nextBtn = QMessageBox::Save; emit mgr->tabCloseRequested(0); if (mgr->count() != 0 || !readDisk().contains(QStringLiteral("123")) || prompts != 3) return false;
-            if (!mgr->openFile(solverPath) || !mgr->currentSourceCodeView()) return false;
-            { QTextCursor c2(mgr->currentSourceCodeView()->document()); c2.movePosition(QTextCursor::Start); c2.select(QTextCursor::LineUnderCursor); c2.insertText(QStringLiteral("int a = 777;")); }
-            nextBtn = QMessageBox::Discard; emit mgr->tabCloseRequested(0); return mgr->count() == 0 && !readDisk().contains(QStringLiteral("777")) && prompts == 4;
-        } else return false;
+    auto checkDirtyClosePrompts = [&](gridlock::ui::EditorTabManager* mgr) -> bool {
+        QMessageBox::StandardButton nextBtn = QMessageBox::Cancel; int prompts = 0;
+        mgr->setUnsavedPromptHandler([&](const QString&) { ++prompts; return nextBtn; });
+        if (mw.close() || mgr->count() != 1 || prompts != 1) return false;
+        emit mgr->tabCloseRequested(0); if (mgr->count() != 1 || !mgr->isTabModified(0) || prompts != 2) return false;
+        nextBtn = QMessageBox::Save; emit mgr->tabCloseRequested(0); if (mgr->count() != 0 || !readDisk().contains(QStringLiteral("123")) || prompts != 3) return false;
+        if (!mgr->openFile(solverPath) || !mgr->currentSourceCodeView()) return false;
+        { QTextCursor c2(mgr->currentSourceCodeView()->document()); c2.movePosition(QTextCursor::Start); c2.select(QTextCursor::LineUnderCursor); c2.insertText(QStringLiteral("int a = 777;")); }
+        nextBtn = QMessageBox::Discard; emit mgr->tabCloseRequested(0); return mgr->count() == 0 && !readDisk().contains(QStringLiteral("777")) && prompts == 4;
     };
     QVERIFY2(checkDirtyClosePrompts(tabMgr), "EditorTabManager & MainWindow dirty-tab Save/Discard/Cancel close prompts must succeed");
     // 4. Verify TOML/YAML/Markdown/CSV highlighting, Rainbow Brackets depth/ignore rules, and PreferencesDialog toggles.
     auto colorAt = [](gridlock::ui::SourceCodeView& v, int blk, int col) -> QColor { const auto fmts = v.document()->findBlockByNumber(blk).layout()->formats(); for (int k = fmts.size() - 1; k >= 0; --k) if (col >= fmts[k].start && col < fmts[k].start + fmts[k].length) return fmts[k].format.foreground().color(); return QColor(); };
-    auto checkMultiSyntaxAndRainbow = [&](auto& v, auto& c) -> bool {
-        if constexpr (requires { c.rainbowBracketsEnabled(); c.setRainbowBracketsEnabled(true); c.dataDocHighlightingEnabled(); c.setDataDocHighlightingEnabled(true); v.languageMode(); v.setRainbowBracketsEnabled(true); }) {
-            using Mode = std::decay_t<decltype(v.languageMode())>; gridlock::ui::PreferencesDialog pd(&mw); pd.show();
-            auto* rbChk = pd.findChild<QCheckBox*>(QStringLiteral("rainbowBracketsCheck")); auto* ddChk = pd.findChild<QCheckBox*>(QStringLiteral("dataDocHighlightingCheck"));
-            if (!rbChk || !ddChk || !rbChk->isChecked() || !ddChk->isChecked()) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("c.toml"))); v.setSourceCode(QStringLiteral("[solver]\n# cmt\nk = true\n")); if (v.languageMode() != Mode::Toml || !colorAt(v, 0, 1).isValid() || colorAt(v, 0, 1) == colorAt(v, 1, 2)) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("j.yaml"))); v.setSourceCode(QStringLiteral("mpi:\n  n: 4 # cmt\n  a: *r\n")); if (v.languageMode() != Mode::Yaml || !colorAt(v, 0, 0).isValid() || colorAt(v, 0, 0) == colorAt(v, 1, 9)) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("r.md"))); v.setSourceCode(QStringLiteral("# H1\n```\nint x = 1;\n```\n[l](u)\n")); if (v.languageMode() != Mode::Markdown || !colorAt(v, 0, 2).isValid() || !colorAt(v, 2, 0).isValid()) return false;
-            v.setCurrentFile(gitDir.filePath(QStringLiteral("d.csv"))); v.setSourceCode(QStringLiteral("\"a,b\",c\n")); if (v.languageMode() != Mode::Csv || colorAt(v, 0, 1) != colorAt(v, 0, 3) || colorAt(v, 0, 1) == colorAt(v, 0, 6)) return false;
-            if (!tabMgr->openFile(solverPath) || !tabMgr->currentSourceCodeView()) return false;
-            auto* tv = tabMgr->currentSourceCodeView(); const QString rbCode = QStringLiteral("if (a[0] + (b * {1})) { auto s = \"string (ignored)\"; } // comment (ignored)\n");
-            tv->setSourceCode(rbCode); tv->setCurrentFile(solverPath);
-            const QColor d0 = colorAt(*tv, 0, 3), d1 = colorAt(*tv, 0, 5), d2 = colorAt(*tv, 0, 16);
-            if (!d0.isValid() || d0 == d1 || d1 == d2 || colorAt(*tv, 0, rbCode.indexOf(QStringLiteral("(ignored)"))) == d0 || colorAt(*tv, 0, rbCode.lastIndexOf(QStringLiteral("(ignored)"))) == d0) return false;
-            rbChk->setChecked(false); ddChk->setChecked(false); QMetaObject::invokeMethod(&pd, "apply", Qt::DirectConnection);
-            const bool offOk = !c.rainbowBracketsEnabled() && !c.dataDocHighlightingEnabled() && colorAt(*tv, 0, 3) != d0;
-            rbChk->setChecked(true); ddChk->setChecked(true); QMetaObject::invokeMethod(&pd, "apply", Qt::DirectConnection);
-            return offOk && colorAt(*tv, 0, 3) == d0 && mw.close();
-        } else return false;
+    auto checkMultiSyntaxAndRainbow = [&](gridlock::ui::SourceCodeView& v, gridlock::core::ConfigManager& c) -> bool {
+        using Mode = gridlock::ui::SourceCodeView::LanguageMode; gridlock::ui::PreferencesDialog pd(&mw); pd.show();
+        auto* rbChk = pd.findChild<QCheckBox*>(QStringLiteral("rainbowBracketsCheck")); auto* ddChk = pd.findChild<QCheckBox*>(QStringLiteral("dataDocHighlightingCheck"));
+        if (!rbChk || !ddChk || !rbChk->isChecked() || !ddChk->isChecked()) return false;
+        v.setCurrentFile(gitDir.filePath(QStringLiteral("c.toml"))); v.setSourceCode(QStringLiteral("[solver]\n# cmt\nk = true\n")); if (v.languageMode() != Mode::Toml || !colorAt(v, 0, 1).isValid() || colorAt(v, 0, 1) == colorAt(v, 1, 2)) return false;
+        v.setCurrentFile(gitDir.filePath(QStringLiteral("j.yaml"))); v.setSourceCode(QStringLiteral("mpi:\n  n: 4 # cmt\n  a: *r\n")); if (v.languageMode() != Mode::Yaml || !colorAt(v, 0, 0).isValid() || colorAt(v, 0, 0) == colorAt(v, 1, 9)) return false;
+        v.setCurrentFile(gitDir.filePath(QStringLiteral("r.md"))); v.setSourceCode(QStringLiteral("# H1\n```\nint x = 1;\n```\n[l](u)\n")); if (v.languageMode() != Mode::Markdown || !colorAt(v, 0, 2).isValid() || !colorAt(v, 2, 0).isValid()) return false;
+        v.setCurrentFile(gitDir.filePath(QStringLiteral("d.csv"))); v.setSourceCode(QStringLiteral("\"a,b\",c\n")); if (v.languageMode() != Mode::Csv || colorAt(v, 0, 1) != colorAt(v, 0, 3) || colorAt(v, 0, 1) == colorAt(v, 0, 6)) return false;
+        if (!tabMgr->openFile(solverPath) || !tabMgr->currentSourceCodeView()) return false;
+        auto* tv = tabMgr->currentSourceCodeView(); const QString rbCode = QStringLiteral("if (a[0] + (b * {1})) { auto s = \"string (ignored)\"; } // comment (ignored)\n");
+        tv->setSourceCode(rbCode); tv->setCurrentFile(solverPath);
+        const QColor d0 = colorAt(*tv, 0, 3), d1 = colorAt(*tv, 0, 5), d2 = colorAt(*tv, 0, 16);
+        if (!d0.isValid() || d0 == d1 || d1 == d2 || colorAt(*tv, 0, rbCode.indexOf(QStringLiteral("(ignored)"))) == d0 || colorAt(*tv, 0, rbCode.lastIndexOf(QStringLiteral("(ignored)"))) == d0) return false;
+        rbChk->setChecked(false); ddChk->setChecked(false); QMetaObject::invokeMethod(&pd, "apply", Qt::DirectConnection);
+        const bool offOk = !c.rainbowBracketsEnabled() && !c.dataDocHighlightingEnabled() && colorAt(*tv, 0, 3) != d0;
+        rbChk->setChecked(true); ddChk->setChecked(true); QMetaObject::invokeMethod(&pd, "apply", Qt::DirectConnection);
+        return offOk && colorAt(*tv, 0, 3) == d0 && mw.close();
     };
     QVERIFY2(checkMultiSyntaxAndRainbow(srcView, cfg), "TOML/YAML/MD/CSV highlighting, Rainbow Brackets, and Preferences live toggles must succeed");
 }

@@ -111,9 +111,7 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
 
     // Part 4: Live GDB Disassembly CFG Basic-Block Splitting & Default CFG Map View Mode.
     auto& cfg = gridlock::core::ConfigManager::instance();
-    auto getDefMode = [](const auto& c) { if constexpr (requires { c.defaultDisassemblyMode(); }) return c.defaultDisassemblyMode(); else return QString(); };
-    auto getEdgeCnt = [](const auto* d) { if constexpr (requires { d->cfgEdgeCount(); }) return d->cfgEdgeCount(); else return -1; };
-    QCOMPARE(getDefMode(cfg), QStringLiteral("cfg"));
+    QCOMPARE(cfg.defaultDisassemblyMode(), QStringLiteral("cfg"));
     const QString liveGdbAsm = QStringLiteral(
         "0x00400550 <main+0x0>: push rbp ; line 12\n"
         "0x00400554 <main+0x4>: mov rbp, rsp ; line 12\n"
@@ -131,8 +129,8 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
         "0x00400658 <main+0x108>: leave ; line 22\n"
         "0x00400659 <main+0x109>: ret ; line 22");
     disasmView->setGraphMode(true); disasmView->updateDisassembly(liveGdbAsm); QApplication::processEvents();
-    QVERIFY2(disasmView->basicBlockCount() >= 4 && getEdgeCnt(disasmView) >= 3,
-             qPrintable(QStringLiteral("CFG collapsed: BB=%1 E=%2").arg(disasmView->basicBlockCount()).arg(getEdgeCnt(disasmView))));
+    QVERIFY2(disasmView->basicBlockCount() >= 4 && disasmView->cfgEdgeCount() >= 3,
+             qPrintable(QStringLiteral("CFG collapsed: BB=%1 E=%2").arg(disasmView->basicBlockCount()).arg(disasmView->cfgEdgeCount())));
     QVERIFY(mainWindow.grab().save(QStringLiteral("/tmp/cfg_live_stepping_verify.png")));
     disasmView->seekToAddress(0x0040056bULL); mainWindow.stopTargetWorkflow(); QApplication::processEvents();
     QVERIFY2(disasmView->isGraphMode() && disasmView->basicBlockCount() >= 4, "DisassemblyView must remain in multi-block CFG Map mode across seek and stop");
@@ -863,37 +861,31 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     const QString tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
     { QFile fc(tempCpp); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(inspectionSource.toUtf8()); }
     { QFile fh(tempHpp); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nstruct DeeplyNested {};\n"); }
-    // Open the temporary C++ source file in EditorTabManager and define SFINAE-safe helper lambdas.
+    // Open the temporary C++ source file in EditorTabManager.
     gridlock::ui::EditorTabManager tabManager;
     auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr);
     const int idx = tabManager.currentIndex();
-    auto isDirty = [](auto& m, int i) { if constexpr (requires { m.isTabModified(i); }) return m.isTabModified(i); else return false; };
-    auto saveAll = [](auto& m) { if constexpr (requires { m.saveAllModifiedTabs(); }) return m.saveAllModifiedTabs(); else return -1; };
-    auto switchHdr = [](auto& m) { if constexpr (requires { m.switchHeaderSource(); }) return m.switchHeaderSource(); else return false; };
-    auto breadcrumb = [](auto* v) { if constexpr (requires { v->currentScopeBreadcrumb(); }) return v->currentScopeBreadcrumb(); else return QString(); };
     // Modify text in tabView and verify dirty indicator ("●") and isTabModified(idx) == true.
     // Then invoke saveAllModifiedTabs() and verify dirty state is cleared on disk and tab bar.
     tabView->textCursor().insertText(QStringLiteral("// dirty edit\n")); QApplication::processEvents();
-    QVERIFY2(isDirty(tabManager, idx) && tabManager.tabText(idx).contains(QStringLiteral("●")), "Modified tab must report isTabModified(idx) == true and include '●' in tabText");
-    QVERIFY2(saveAll(tabManager) >= 1 && !isDirty(tabManager, idx) && !tabManager.tabText(idx).contains(QStringLiteral("●")), "saveAllModifiedTabs() must save dirty buffer and remove '●'");
+    QVERIFY2(tabManager.isTabModified(idx) && tabManager.tabText(idx).contains(QStringLiteral("●")), "Modified tab must report isTabModified(idx) == true and include '●' in tabText");
+    QVERIFY2(tabManager.saveAllModifiedTabs() >= 1 && !tabManager.isTabModified(idx) && !tabManager.tabText(idx).contains(QStringLiteral("●")), "saveAllModifiedTabs() must save dirty buffer and remove '●'");
     // Move cursor into main() or DeeplyNested and verify currentScopeBreadcrumb(), then toggle header/source.
     // Confirms F10 companion lookup opens `inspection_demo.hpp` in EditorTabManager.
     tabView->setTextCursor(QTextCursor(tabView->document()->findBlockByNumber(16)));
-    const QString bc = breadcrumb(tabView);
+    const QString bc = tabView->currentScopeBreadcrumb();
     QVERIFY2(bc.contains(QStringLiteral("inspection_demo.cpp")) && (bc.contains(QStringLiteral("main")) || bc.contains(QStringLiteral("DeeplyNested"))), qPrintable(bc));
-    QVERIFY2(switchHdr(tabManager) && tabManager.tabText(tabManager.currentIndex()).contains(QStringLiteral("inspection_demo.hpp")), "switchHeaderSource() must switch to inspection_demo.hpp");
+    QVERIFY2(tabManager.switchHeaderSource() && tabManager.tabText(tabManager.currentIndex()).contains(QStringLiteral("inspection_demo.hpp")), "switchHeaderSource() must switch to inspection_demo.hpp");
     // 5. Horizontal and Vertical Side-by-Side Split Editors (`splitEditor`, `closeSplit`, `secondaryEditorView`).
     // Verify initial unsplit state, horizontal/vertical split orientation toggling, and split collapse.
-    auto checkSplits = [](auto& m) -> bool {
-        if constexpr (requires { m.isSplitActive(); m.splitEditor(Qt::Horizontal); m.splitOrientation(); m.secondaryEditorView(); m.closeSplit(); }) {
-            if (m.isSplitActive()) return false;
-            m.splitEditor(Qt::Horizontal);
-            if (!m.isSplitActive() || m.splitOrientation() != Qt::Horizontal || m.secondaryEditorView() == nullptr) return false;
-            m.splitEditor(Qt::Vertical);
-            if (!m.isSplitActive() || m.splitOrientation() != Qt::Vertical) return false;
-            m.closeSplit();
-            return !m.isSplitActive();
-        } else { return false; }
+    auto checkSplits = [](gridlock::ui::EditorTabManager& m) -> bool {
+        if (m.isSplitActive()) return false;
+        m.splitEditor(Qt::Horizontal);
+        if (!m.isSplitActive() || m.splitOrientation() != Qt::Horizontal || m.secondaryEditorView() == nullptr) return false;
+        m.splitEditor(Qt::Vertical);
+        if (!m.isSplitActive() || m.splitOrientation() != Qt::Vertical) return false;
+        m.closeSplit();
+        return !m.isSplitActive();
     };
     QVERIFY2(checkSplits(tabManager), "EditorTabManager must support horizontal/vertical splitEditor() and closeSplit()");
 }
