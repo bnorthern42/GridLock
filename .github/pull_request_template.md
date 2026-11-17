@@ -38,3 +38,11 @@
 - [ ] Adheres to the Google C++ Style Guide and repository `agent.md` invariants (`< 950` lines per file, no bulk script mutations).
 - [ ] No unit tests scrape `.md` documentation or source files on disk.
 - [ ] `.gridlock/` or temporary build artifacts are not staged.
+
+## Accessibility Checklist
+
+- [ ] Keyboard navigation (`Tab` order, shortcuts, `Esc` / close buttons) works end-to-end for modified dialogs and widgets.
+- [ ] Visible focus indicators are preserved on interactive controls.
+- [ ] Form controls and icon buttons have clear labels or accessible names.
+- [ ] Color is not the sole indicator of status or meaning (paired with text, icons, or badges).
+- [ ] Documentation images include descriptive alt text.

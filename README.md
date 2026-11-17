@@ -171,6 +171,7 @@ paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
 * [**Themes & Fonts (`docs/THEMES.md`)**](docs/THEMES.md) — Screenshots and color reference table for the 12 built-in dark and light themes.
 * [**User Manual (`docs/user/README.md`)**](docs/user/README.md) — Reference pages for panels, shortcuts, and cluster setup.
 * [**Developer Notes (`docs/developer/README.md`)**](docs/developer/README.md) — Internals on backend coordinators, sanitizers, and UI widgets.
+* [**Accessibility Statement (`ACCESSIBILITY.md`)**](ACCESSIBILITY.md) — Keyboard navigation, contrast themes, AT-SPI2 support, known canvas limitations, and barrier reporting.
 
 ---
 

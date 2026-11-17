@@ -1,0 +1,56 @@
+name: Accessibility Barrier Report
+description: Report a keyboard, screen reader, contrast, scaling, or usability barrier
+title: "[Accessibility]: "
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping make GridLock more accessible across Linux desktop environments and assistive technologies.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severely does this barrier impact your workflow?
+      options:
+        - "Critical - Blocks completing a core task"
+        - "High - Significant difficulty, workaround exists"
+        - "Medium - Inconsistent behavior or moderate friction"
+        - "Low - Minor visual or usability annoyance"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment & Assistive Technology
+      description: Please share your OS, compositor, scaling, Qt version, and assistive tools.
+      placeholder: |
+        - Linux Distro: (e.g., Fedora 41, Arch Linux, Ubuntu 24.04)
+        - Display Server / Compositor: (e.g., Wayland/Niri, Sway, Hyprland, X11/KDE)
+        - Qt Version: (e.g., Qt 6.8.1)
+        - Display Scaling: (e.g., 100%, 150%, QT_SCALE_FACTOR=1.25)
+        - Assistive Tech / Setup: (e.g., Orca screen reader, keyboard-only, high-contrast theme, magnification)
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current Behavior & Steps to Reproduce
+      description: Describe what happens today and the exact steps to trigger the barrier.
+      placeholder: |
+        1. Open ...
+        2. Press Tab / activate ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior & Suggested Workaround
+      description: Describe what should happen instead and any workaround you found (if any).
+    validations:
+      required: false
