@@ -216,9 +216,6 @@ cat << 'EOF' > "${APPDIR}/gridlock.svg"
 EOF
 
 ICON_SRC="${ROOT_DIR}/resources/icon.png"
-if [ ! -f "${ICON_SRC}" ] && [ -f "${ROOT_DIR}/packaging/gridlock.png" ]; then
-    ICON_SRC="${ROOT_DIR}/packaging/gridlock.png"
-fi
 
 for size in 512 256 128 64 48 32 16; do
     out_dir="${APPDIR}/usr/share/icons/hicolor/${size}x${size}/apps"
