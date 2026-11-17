@@ -6,9 +6,17 @@ cd "$(dirname "$0")/.."
 
 mkdir -p builddir
 
-echo "Building and starting Docker test environment..."
-docker compose up --build -d
+echo "Configuring and running native coverage pipeline..."
+if [ ! -f builddir/build.ninja ]; then
+    meson setup builddir -Db_coverage=true
+else
+    meson configure builddir -Db_coverage=true
+fi
 
-docker compose exec -T test bash -c "rm -rf builddir/* && meson setup builddir -Db_coverage=true && export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json && (meson test -C builddir || true) && mkdir -p builddir/meson-logs/coveragereport && gcovr -r . --html --html-details -o builddir/meson-logs/coveragereport/index.html"
+ninja -C builddir
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+(meson test -C builddir || true)
+mkdir -p builddir/meson-logs/coveragereport
+gcovr -r . --html --html-details -o builddir/meson-logs/coveragereport/index.html
 
 echo "[CI] Coverage report generated at: builddir/meson-logs/coveragereport/index.html"

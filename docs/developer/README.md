@@ -9,7 +9,7 @@ Welcome to the internal architecture and developer documentation for **GridLock*
 | 🏗️ [**Environment Setup & Build**](./environment_setup.md) | OS matrices, Meson/Ninja targets, and CQtDeployer packaging. |
 | ⚙️ [**Backend Architecture Core**](./architecture_core.md) | GDB/DAP/LSP Coordinators, Zero-Copy Memory Engine, and Security. |
 | 🖼️ [**UI Internals & Views**](./ui_internals.md) | Qt6 widgets, models, Wayland rendering, and theming. |
-| 🧪 [**Testing & CI Pipelines**](./testing_and_ci.md) | Dockerized TDD sandbox, `SYS_PTRACE`, and unit test suite. |
+| 🧪 [**Testing & CI Pipelines**](./testing_and_ci.md) | Headless TDD pipeline, `SYS_PTRACE`, and unit test suite. |
 
 ---
 
