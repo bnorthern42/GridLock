@@ -3,20 +3,28 @@ set -euo pipefail
 
 ANNOTATE=0
 LIVE_MODE=0
+DOCS_MODE=1
 OUTPUT_PATH="/tmp/gridlock_capture.png"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --annotate|-a)
             ANNOTATE=1
+            DOCS_MODE=0
             shift
             ;;
         --live)
             LIVE_MODE=1
+            DOCS_MODE=0
+            shift
+            ;;
+        --docs)
+            DOCS_MODE=1
             shift
             ;;
         *)
             OUTPUT_PATH="$1"
+            DOCS_MODE=0
             shift
             ;;
     esac
@@ -24,6 +32,22 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+if [[ "${DOCS_MODE}" == "1" ]]; then
+    if [[ -d "${PROJECT_ROOT}/builddir" ]]; then
+        ninja -C "${PROJECT_ROOT}/builddir" gridlock_ui_tests
+        UI_TESTS_BIN="${PROJECT_ROOT}/builddir/gridlock_ui_tests"
+    elif [[ -d "${PROJECT_ROOT}/build" ]]; then
+        ninja -C "${PROJECT_ROOT}/build" gridlock_ui_tests
+        UI_TESTS_BIN="${PROJECT_ROOT}/build/gridlock_ui_tests"
+    else
+        echo "Error: builddir/ or build/ not found." >&2
+        exit 1
+    fi
+    GRIDLOCK_CAPTURE_SCREENSHOTS=1 QT_QPA_PLATFORM=offscreen "${UI_TESTS_BIN}" testWorkstationUiCohesionAndIntegratedDocViewer
+    echo "Regenerated all documentation screenshots in ${PROJECT_ROOT}/docs/screenshots/"
+    exit 0
+fi
 
 if [[ -x "${PROJECT_ROOT}/builddir/gridlock" ]]; then
     GRIDLOCK_BIN="${PROJECT_ROOT}/builddir/gridlock"

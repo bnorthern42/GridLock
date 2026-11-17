@@ -228,6 +228,14 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QCOMPARE(gridlock::tests::callTelemetryDisplayFormat(&cfg, 0), QStringLiteral("gb"));
     auto* telemetryCombo = prefsDecompDlg.findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"));
     QVERIFY2(telemetryCombo != nullptr && telemetryCombo->findData(QStringLiteral("gb")) >= 0 && telemetryCombo->findData(QStringLiteral("percent")) >= 0 && telemetryCombo->findData(QStringLiteral("both")) >= 0, "PreferencesDialog must expose telemetryFormatCombo");
+
+    if (qEnvironmentVariableIsSet("GRIDLOCK_CAPTURE_SCREENSHOTS")) {
+        const QString outDir = QFileInfo::exists(QStringLiteral("docs/screenshots"))
+            ? QStringLiteral("docs/screenshots")
+            : QStringLiteral("../docs/screenshots");
+        QVERIFY2(mainWindow.captureDocumentationScreenshots(outDir),
+                 "MainWindow::captureDocumentationScreenshots failed");
+    }
 }
 
 /**

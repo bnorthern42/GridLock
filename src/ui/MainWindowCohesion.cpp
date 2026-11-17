@@ -62,11 +62,13 @@
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
 #include "dialogs/ConditionalBreakpointDialog.hpp"
+#include "dialogs/PointerGraphDialog.hpp"
 #include "dialogs/PreferencesDialog.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/MemView.hpp"
+#include "views/MemoryProfilerWidget.hpp"
 #include "views/RegisterView.hpp"
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
@@ -786,14 +788,12 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
         sv->setConditionalBreakpoint(34, QStringLiteral("rank == 0"));
         sv->highlightExecutionLine(34);
     }
-    auto isFresh = [&](const QString& fn) { const QFileInfo fi(dir.filePath(fn)); return fi.exists() && fi.size() > 15000; };
     auto saveGrab = [&](const QString& fn) -> bool {
-        if (isFresh(fn)) return true;
         QApplication::processEvents();
         return grab().save(dir.filePath(fn), "PNG", 88);
     };
 
-    // 1. Capture all 8 curated theme screenshots plus default workstation_overview & workspace_overview.
+    // 1. Capture all 8 curated theme screenshots plus default workspace_overview.
     setWorkspacePerspective(QStringLiteral("Code"));
     for (const auto& [presetId, fileName] : std::vector<std::pair<QString, QString>>{
              {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
@@ -804,21 +804,22 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
              {QStringLiteral("solarized_light"), QStringLiteral("theme_solarized_light.png")},
              {QStringLiteral("catppuccin_latte"), QStringLiteral("theme_catppuccin_latte.png")},
              {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}}) {
-        if (!isFresh(fileName)) { core::managers::ThemeManager::instance().applyTheme(presetId, false); propagateThemeToAllWidgets(); }
+        core::managers::ThemeManager::instance().applyTheme(presetId, false);
+        propagateThemeToAllWidgets();
         if (!saveGrab(fileName)) return false;
     }
     if (core::managers::ThemeManager::instance().activeThemeId() != QStringLiteral("gridlock_slate")) {
         core::managers::ThemeManager::instance().applyTheme(QStringLiteral("gridlock_slate"), false);
         propagateThemeToAllWidgets();
     }
-    // Save primary workstation & workspace overview assets from the active Gridlock Slate theme.
-    if (!saveGrab(QStringLiteral("workstation_overview.png")) || !saveGrab(QStringLiteral("workspace_overview.png"))) return false;
+    // Save primary workspace overview and Reverse Engineering perspective assets.
+    if (!saveGrab(QStringLiteral("workspace_overview.png"))) return false;
     setWorkspacePerspective(QStringLiteral("Reverse"));
     if (!saveGrab(QStringLiteral("cfg_decompiler_split.png"))) return false;
     setWorkspacePerspective(QStringLiteral("Code"));
 
     // 2. Composite cursor-anchored ConditionalBreakpointDialog popover beneath line 34's gutter dot.
-    if (!isFresh(QStringLiteral("breakpoint_popover.png"))) {
+    {
         ConditionalBreakpointDialog popDlg(QStringLiteral("rank == 0"), this);
         popDlg.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
         popDlg.adjustSize();
@@ -848,21 +849,71 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
     }
 
     // 5. Capture PreferencesDialog on HPC / Cluster page with 16-directive #SBATCH auto-detection.
-    if (isFresh(QStringLiteral("preferences_slurm_autodetect.png"))) return true;
-    PreferencesDialog prefsDlg(this); prefsDlg.resize(940, 660);
-    if (auto* catList = prefsDlg.findChild<QListWidget*>()) {
-        for (int i = 0; i < catList->count(); ++i) if (catList->item(i)->text().contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) catList->setCurrentRow(i);
+    {
+        PreferencesDialog prefsDlg(this); prefsDlg.resize(940, 660);
+        if (auto* catList = prefsDlg.findChild<QListWidget*>()) {
+            for (int i = 0; i < catList->count(); ++i) if (catList->item(i)->text().contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) catList->setCurrentRow(i);
+        }
+        prefsDlg.parseSlurmBatchScript(QStringLiteral(
+            "#!/bin/bash\n#SBATCH --job-name=gridlock_ring_debug\n#SBATCH --partition=gpu-a100\n#SBATCH --account=hpc_devtools\n"
+            "#SBATCH --qos=interactive\n#SBATCH --nodes=4\n#SBATCH --ntasks=16\n#SBATCH --ntasks-per-node=4\n#SBATCH --cpus-per-task=8\n"
+            "#SBATCH --gres=gpu:a100:4\n#SBATCH --mem=128G\n#SBATCH --time=02:30:00\n#SBATCH --constraint=nvlink\n"
+            "#SBATCH --reservation=maint_window\n#SBATCH --chdir=/scratch/hpc/gridlock\n#SBATCH --output=logs/slurm-%j.out\n"
+            "#SBATCH --error=logs/slurm-%j.err\nmodule load openmpi/5.0.5 cuda/12.4\n"));
+        QApplication::processEvents();
+        QPixmap basePix = grab(); QPainter painter(&basePix); const QPixmap dlgPix = prefsDlg.grab();
+        painter.drawPixmap((width() - dlgPix.width()) / 2, (height() - dlgPix.height()) / 2, dlgPix); painter.end();
+        if (!basePix.save(dir.filePath(QStringLiteral("preferences_slurm_autodetect.png")), "PNG", 88)) return false;
     }
-    prefsDlg.parseSlurmBatchScript(QStringLiteral(
-        "#!/bin/bash\n#SBATCH --job-name=gridlock_ring_debug\n#SBATCH --partition=gpu-a100\n#SBATCH --account=hpc_devtools\n"
-        "#SBATCH --qos=interactive\n#SBATCH --nodes=4\n#SBATCH --ntasks=16\n#SBATCH --ntasks-per-node=4\n#SBATCH --cpus-per-task=8\n"
-        "#SBATCH --gres=gpu:a100:4\n#SBATCH --mem=128G\n#SBATCH --time=02:30:00\n#SBATCH --constraint=nvlink\n"
-        "#SBATCH --reservation=maint_window\n#SBATCH --chdir=/scratch/hpc/gridlock\n#SBATCH --output=logs/slurm-%j.out\n"
-        "#SBATCH --error=logs/slurm-%j.err\nmodule load openmpi/5.0.5 cuda/12.4\n"));
-    QApplication::processEvents();
-    QPixmap basePix = grab(); QPainter painter(&basePix); const QPixmap dlgPix = prefsDlg.grab();
-    painter.drawPixmap((width() - dlgPix.width()) / 2, (height() - dlgPix.height()) / 2, dlgPix); painter.end();
-    return basePix.save(dir.filePath(QStringLiteral("preferences_slurm_autodetect.png")), "PNG", 88);
+
+    // 6. Capture MemoryProfilerWidget populated from live /proc/<pid>/smaps at 1280x800.
+    {
+        MemoryProfilerWidget profWidget(nullptr);
+        profWidget.resize(1280, 800);
+        profWidget.reloadStyle();
+        profWidget.refreshForPid(QCoreApplication::applicationPid());
+        profWidget.show();
+        QApplication::processEvents();
+        if (!profWidget.grab().save(dir.filePath(QStringLiteral("memory_profiler.png")), "PNG", 88)) return false;
+    }
+
+    // 7. Capture PointerGraphDialog populated with open-source MPI/C++ tutorial structs at 1280x800.
+    {
+        PointerGraphDialog pgDlg(nullptr, this);
+        pgDlg.resize(1280, 800);
+        pgDlg.upsertStructNode(QStringLiteral("sim"), QStringLiteral("SimConfig"), QStringLiteral("0x7fff1000"),
+                               {{QStringLiteral("rank"), QStringLiteral("0"), QStringLiteral("int")},
+                                {QStringLiteral("domain"), QStringLiteral("0x7fff2000"), QStringLiteral("MeshDomain*")},
+                                {QStringLiteral("ring_head"), QStringLiteral("0x7fff3000"), QStringLiteral("RankRingNode*")}});
+        pgDlg.upsertStructNode(QStringLiteral("domain"), QStringLiteral("MeshDomain"), QStringLiteral("0x7fff2000"),
+                               {{QStringLiteral("nx"), QStringLiteral("256"), QStringLiteral("int")},
+                                {QStringLiteral("ny"), QStringLiteral("256"), QStringLiteral("int")},
+                                {QStringLiteral("root_field"), QStringLiteral("0x7fff4000"), QStringLiteral("FieldNode*")}},
+                               QStringLiteral("sim"), QStringLiteral("domain"));
+        pgDlg.upsertStructNode(QStringLiteral("ring_head"), QStringLiteral("RankRingNode"), QStringLiteral("0x7fff3000"),
+                               {{QStringLiteral("rank_id"), QStringLiteral("0"), QStringLiteral("int")},
+                                {QStringLiteral("next"), QStringLiteral("0x7fff3100"), QStringLiteral("RankRingNode*")}},
+                               QStringLiteral("sim"), QStringLiteral("ring_head"));
+        pgDlg.upsertStructNode(QStringLiteral("ring_peer"), QStringLiteral("RankRingNode"), QStringLiteral("0x7fff3100"),
+                               {{QStringLiteral("rank_id"), QStringLiteral("1"), QStringLiteral("int")},
+                                {QStringLiteral("next"), QStringLiteral("0x7fff3000"), QStringLiteral("RankRingNode*")}},
+                               QStringLiteral("ring_head"), QStringLiteral("next"));
+        pgDlg.upsertStructNode(QStringLiteral("root_field"), QStringLiteral("FieldNode"), QStringLiteral("0x7fff4000"),
+                               {{QStringLiteral("norm_l2"), QStringLiteral("1.41421"), QStringLiteral("double")},
+                                {QStringLiteral("size"), QStringLiteral("65536"), QStringLiteral("size_t")}},
+                               QStringLiteral("domain"), QStringLiteral("root_field"));
+        pgDlg.connectPointerField(QStringLiteral("sim"), QStringLiteral("domain"), QStringLiteral("0x7fff2000"));
+        pgDlg.connectPointerField(QStringLiteral("sim"), QStringLiteral("ring_head"), QStringLiteral("0x7fff3000"));
+        pgDlg.connectPointerField(QStringLiteral("domain"), QStringLiteral("root_field"), QStringLiteral("0x7fff4000"));
+        pgDlg.connectPointerField(QStringLiteral("ring_head"), QStringLiteral("next"), QStringLiteral("0x7fff3100"));
+        pgDlg.connectPointerField(QStringLiteral("ring_peer"), QStringLiteral("next"), QStringLiteral("0x7fff3000"));
+        pgDlg.autoLayoutNodes();
+        pgDlg.show();
+        QApplication::processEvents();
+        if (!pgDlg.grab().save(dir.filePath(QStringLiteral("pointer_graph.png")), "PNG", 88)) return false;
+    }
+
+    return true;
 }
 
 }  // namespace gridlock::ui
