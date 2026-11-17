@@ -779,14 +779,39 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
     resize(1600, 960);
     loadPreviewFixture();
     selectTargetByName(QStringLiteral("deadlock_ring"));
+    const QString deadlockSrc = resolveWorkspacePath(QStringLiteral("tutorial/deadlock_ring.cpp"));
+    if (m_editorTabManager && !deadlockSrc.isEmpty()) {
+        m_editorTabManager->clearAllTabs();
+        m_editorTabManager->openFile(deadlockSrc);
+    }
     show();
     QApplication::processEvents();
 
-    // Configure SourceCodeView breakpoints (line 18 standard, line 34 conditional) and execution line.
+    // Locate the actual MPI_Send line in tutorial/deadlock_ring.cpp and configure coherent state.
+    int bpLine = 34;
+    QString bpLineText = QStringLiteral("MPI_Send(send_buf.data(), static_cast<int>(send_buf.size()), MPI_INT,");
     if (auto* sv = sourceCodeView()) {
+        const QStringList srcLines = sv->toPlainText().split(QLatin1Char('\n'));
+        for (int i = 0; i < srcLines.size(); ++i) {
+            if (srcLines[i].contains(QStringLiteral("MPI_Send("))) {
+                bpLine = i + 1;
+                bpLineText = srcLines[i].trimmed();
+                break;
+            }
+        }
         if (!sv->hasBreakpoint(18)) sv->toggleBreakpoint(18);
-        sv->setConditionalBreakpoint(34, QStringLiteral("rank == 0"));
-        sv->highlightExecutionLine(34);
+        sv->setConditionalBreakpoint(bpLine, QStringLiteral("rank == 0"));
+        sv->highlightExecutionLine(bpLine);
+        sv->setInlineVariableValues({
+            {QStringLiteral("rank"), QStringLiteral("0")},
+            {QStringLiteral("size"), QStringLiteral("8")},
+            {QStringLiteral("next_rank"), QStringLiteral("1")},
+            {QStringLiteral("prev_rank"), QStringLiteral("7")},
+            {QStringLiteral("tag"), QStringLiteral("100")}
+        });
+        QTextCursor cur(sv->document()->findBlockByNumber(bpLine - 1));
+        sv->setTextCursor(cur);
+        sv->centerCursor();
     }
     auto saveGrab = [&](const QString& fn) -> bool {
         QApplication::processEvents();
@@ -818,14 +843,23 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
     if (!saveGrab(QStringLiteral("cfg_decompiler_split.png"))) return false;
     setWorkspacePerspective(QStringLiteral("Code"));
 
-    // 2. Composite cursor-anchored ConditionalBreakpointDialog popover beneath line 34's gutter dot.
+    // 2. Composite cursor-anchored ConditionalBreakpointDialog popover directly beneath bpLine's gutter dot.
     {
         ConditionalBreakpointDialog popDlg(QStringLiteral("rank == 0"), this);
-        popDlg.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
+        popDlg.setTargetLineContext(bpLine, bpLineText);
         popDlg.adjustSize();
+        QPoint anchorPos(290, 260);
+        if (auto* sv = sourceCodeView()) {
+            QTextCursor bpCur(sv->document()->findBlockByNumber(bpLine - 1));
+            sv->setTextCursor(bpCur);
+            sv->centerCursor();
+            QApplication::processEvents();
+            const QRect lineRect = sv->cursorRect(bpCur);
+            anchorPos = sv->mapTo(this, QPoint(36, lineRect.bottom() + 4));
+        }
         QPixmap basePix = grab();
         QPainter painter(&basePix);
-        painter.drawPixmap(sourceCodeView() ? sourceCodeView()->mapTo(this, QPoint(44, 180)) : QPoint(290, 260), popDlg.grab());
+        painter.drawPixmap(anchorPos, popDlg.grab());
         painter.end();
         if (!basePix.save(dir.filePath(QStringLiteral("breakpoint_popover.png")), "PNG", 88)) return false;
     }
@@ -879,37 +913,17 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
 
     // 7. Capture PointerGraphDialog populated with open-source MPI/C++ tutorial structs at 1280x800.
     {
-        PointerGraphDialog pgDlg(nullptr, this);
-        pgDlg.resize(1280, 800);
-        pgDlg.upsertStructNode(QStringLiteral("sim"), QStringLiteral("SimConfig"), QStringLiteral("0x7fff1000"),
-                               {{QStringLiteral("rank"), QStringLiteral("0"), QStringLiteral("int")},
-                                {QStringLiteral("domain"), QStringLiteral("0x7fff2000"), QStringLiteral("MeshDomain*")},
-                                {QStringLiteral("ring_head"), QStringLiteral("0x7fff3000"), QStringLiteral("RankRingNode*")}});
-        pgDlg.upsertStructNode(QStringLiteral("domain"), QStringLiteral("MeshDomain"), QStringLiteral("0x7fff2000"),
-                               {{QStringLiteral("nx"), QStringLiteral("256"), QStringLiteral("int")},
-                                {QStringLiteral("ny"), QStringLiteral("256"), QStringLiteral("int")},
-                                {QStringLiteral("root_field"), QStringLiteral("0x7fff4000"), QStringLiteral("FieldNode*")}},
-                               QStringLiteral("sim"), QStringLiteral("domain"));
-        pgDlg.upsertStructNode(QStringLiteral("ring_head"), QStringLiteral("RankRingNode"), QStringLiteral("0x7fff3000"),
-                               {{QStringLiteral("rank_id"), QStringLiteral("0"), QStringLiteral("int")},
-                                {QStringLiteral("next"), QStringLiteral("0x7fff3100"), QStringLiteral("RankRingNode*")}},
-                               QStringLiteral("sim"), QStringLiteral("ring_head"));
-        pgDlg.upsertStructNode(QStringLiteral("ring_peer"), QStringLiteral("RankRingNode"), QStringLiteral("0x7fff3100"),
-                               {{QStringLiteral("rank_id"), QStringLiteral("1"), QStringLiteral("int")},
-                                {QStringLiteral("next"), QStringLiteral("0x7fff3000"), QStringLiteral("RankRingNode*")}},
-                               QStringLiteral("ring_head"), QStringLiteral("next"));
-        pgDlg.upsertStructNode(QStringLiteral("root_field"), QStringLiteral("FieldNode"), QStringLiteral("0x7fff4000"),
-                               {{QStringLiteral("norm_l2"), QStringLiteral("1.41421"), QStringLiteral("double")},
-                                {QStringLiteral("size"), QStringLiteral("65536"), QStringLiteral("size_t")}},
-                               QStringLiteral("domain"), QStringLiteral("root_field"));
-        pgDlg.connectPointerField(QStringLiteral("sim"), QStringLiteral("domain"), QStringLiteral("0x7fff2000"));
-        pgDlg.connectPointerField(QStringLiteral("sim"), QStringLiteral("ring_head"), QStringLiteral("0x7fff3000"));
-        pgDlg.connectPointerField(QStringLiteral("domain"), QStringLiteral("root_field"), QStringLiteral("0x7fff4000"));
-        pgDlg.connectPointerField(QStringLiteral("ring_head"), QStringLiteral("next"), QStringLiteral("0x7fff3100"));
-        pgDlg.connectPointerField(QStringLiteral("ring_peer"), QStringLiteral("next"), QStringLiteral("0x7fff3000"));
-        pgDlg.autoLayoutNodes();
-        pgDlg.show();
-        QApplication::processEvents();
+        using F = PointerGraphDialog::StructFieldEntry;
+        PointerGraphDialog pgDlg(nullptr, this); pgDlg.resize(1280, 800);
+        pgDlg.upsertStructNode("sim", "SimConfig", "0x7fff1000", {F{"rank", "0", "int"}, F{"domain", "0x7fff2000", "MeshDomain*"}, F{"ring_head", "0x7fff3000", "RankRingNode*"}});
+        pgDlg.upsertStructNode("domain", "MeshDomain", "0x7fff2000", {F{"nx", "256", "int"}, F{"ny", "256", "int"}, F{"root_field", "0x7fff4000", "FieldNode*"}}, "sim", "domain");
+        pgDlg.upsertStructNode("ring_head", "RankRingNode", "0x7fff3000", {F{"rank_id", "0", "int"}, F{"next", "0x7fff3100", "RankRingNode*"}}, "sim", "ring_head");
+        pgDlg.upsertStructNode("ring_peer", "RankRingNode", "0x7fff3100", {F{"rank_id", "1", "int"}, F{"next", "0x7fff3000", "RankRingNode*"}}, "ring_head", "next");
+        pgDlg.upsertStructNode("root_field", "FieldNode", "0x7fff4000", {F{"norm_l2", "1.41421", "double"}, F{"size", "65536", "size_t"}}, "domain", "root_field");
+        pgDlg.connectPointerField("sim", "domain", "0x7fff2000"); pgDlg.connectPointerField("sim", "ring_head", "0x7fff3000");
+        pgDlg.connectPointerField("domain", "root_field", "0x7fff4000"); pgDlg.connectPointerField("ring_head", "next", "0x7fff3100");
+        pgDlg.connectPointerField("ring_peer", "next", "0x7fff3000"); pgDlg.autoLayoutNodes();
+        pgDlg.show(); QApplication::processEvents();
         if (!pgDlg.grab().save(dir.filePath(QStringLiteral("pointer_graph.png")), "PNG", 88)) return false;
     }
 
