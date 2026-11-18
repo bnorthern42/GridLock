@@ -5,6 +5,17 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.65] - 2026-11-18
+
+### Added
+- **Attach to Running Process (`Ctrl+Alt+P`, `ProcessScanner`, `AttachProcessDialog`):** Added a Linux `/proc` process scanner with automatic OpenMPI, MPICH/PMI, PMIx, and SLURM MPI world-rank grouping (`MPI Job (N ranks)`), `kernel.yama.ptrace_scope` permission diagnostics with a 1-click `sysctl` clipboard fix, and single-PID or full-MPI-job attach via GDB/MI3 (`-target-attach`) and DAP (`attach`).
+- **Remote Target (`target remote` / `extended-remote`) Support (`ProcessScanner`, `GdbRankCoordinator`, `AttachProcessDialog`):** Added a `Remote Target (gdbserver / QEMU)` tab supporting direct connections to `qemu-user -g <port>` stubs, `gdbserver` instances inside VMs, and multi-rank `host:port..port` ranges or comma-separated `host:port` endpoints with local ELF DWARF symbol loading (`-file-exec-and-symbols`) and `gdb-multiarch` selection.
+- **GitHub Community Standards & Automated Wiki Sync (`ACCESSIBILITY.md`, `.github/`, `scripts/sync_wiki.sh`):** Added `ACCESSIBILITY.md`, structured YAML issue forms (`bug_report.yml`, `feature_request.yml`, `accessibility.yml`, `config.yml`), a standardized pull request template, and an automated GitHub Wiki sync workflow with generated `_Sidebar.md` and `_Footer.md`.
+
+### Changed & Fixed
+- **Documentation Screenshots (`MainWindowCohesion`, `scripts/capture_ui.sh`, `docs/screenshots/`):** Refreshed all 19 workstation, dialog, and theme screenshots to reflect current UI state with real MPI tutorial source files (`tutorial/deadlock_ring.cpp`) and line-anchored breakpoint popovers, while keeping normal `meson test` runs side-effect-free.
+- **Repository & Test Suite Cleanup (`tests/`, `.gitignore`):** Removed obsolete top-level directories (`docker/`, `assets/`, `scratch/`, `.jules/`, `packaging/`), untracked runtime `.gridlock/` state in `.gitignore`, consolidated redundant and meta-linting test targets (`26 -> 22` Meson suites), and stripped leftover `if constexpr (requires ...)` test scaffolding.
+
 ## [0.8.6] - 2026-11-15
 
 ### Added
