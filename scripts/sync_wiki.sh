@@ -146,4 +146,19 @@ cat > "${WIKI_DIR}/_Sidebar.md" << 'EOF'
   - [Test Harness](Developer-Testing-Harness)
 EOF
 
-echo "Synced ${#PAGE_MAP[@]} documentation pages + Home.md + _Sidebar.md into ${WIKI_DIR}"
+REPO_SLUG="${GITHUB_REPOSITORY:-}"
+if [[ -z "${REPO_SLUG}" ]]; then
+    ORIGIN_URL="$(git -C "${ROOT_DIR}" remote get-url origin 2>/dev/null || true)"
+    REPO_SLUG="$(echo "${ORIGIN_URL}" | sed -E 's#^(git@github\.com:|https?://github\.com/)##; s#\.git$##')"
+fi
+REPO_SLUG="${REPO_SLUG:-bnorthern42/GridLock}"
+
+cat > "${WIKI_DIR}/_Footer.md" << EOF
+---
+
+[GridLock Repository](https://github.com/${REPO_SLUG}) | [Releases](https://github.com/${REPO_SLUG}/releases) | [Report an Issue](https://github.com/${REPO_SLUG}/issues/new/choose) | [Roadmap](https://github.com/${REPO_SLUG}/blob/master/ROADMAP.md) | [Accessibility](https://github.com/${REPO_SLUG}/blob/master/ACCESSIBILITY.md) | [License (MIT)](https://github.com/${REPO_SLUG}/blob/master/LICENSE)
+
+*Documentation mirrored from \`docs/\` on \`master\`.*
+EOF
+
+echo "Synced ${#PAGE_MAP[@]} documentation pages + Home.md + _Sidebar.md + _Footer.md into ${WIKI_DIR}"
