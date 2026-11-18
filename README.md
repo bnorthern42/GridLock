@@ -35,6 +35,8 @@ Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MP
 
 ### Multi-Rank MPI Debugging
 * **Target & Rank Controls:** Pick an MPI target or load any ELF64 binary from the toolbar, set the process count (`-np 1..64`), and run, step, pause, or stop individual ranks.
+* **Attach to Running Process (`Ctrl+Alt+P`):** Discover running local processes via `/proc`, automatically group active OpenMPI, MPICH, PMIx, and SLURM jobs under expandable `MPI Job (N ranks)` headers, verify `kernel.yama.ptrace_scope` permissions with a 1-click `sysctl` fix, and attach `GdbRankCoordinator` (`-target-attach <pid>`) or `DapCoordinator` to a single process or all ranks of an MPI job.
+* **Remote GDB Target (`target remote` / `extended-remote`):** Connect `gdb` or `gdb-multiarch` directly to `qemu-user -g <port>` cross-architecture stubs (`qemu-aarch64`, `qemu-riscv64`), single `gdbserver` instances inside QEMU VMs, or multi-rank port ranges (`localhost:1234..1237` or comma-separated `host:port` endpoints) with local ELF64 DWARF symbol loading.
 * **Selectable Debugger Backends:** Choose between `GNU GDB (gdb)`, `LLVM LLDB-DAP (lldb-dap)`, `NVIDIA CUDA-GDB (cuda-gdb)`, and `AMD ROCm GDB (rocgdb)` in `Edit -> Preferences -> Debugger`.
 * **Synchronized Source & Assembly Stepping:** Stepping an instruction updates the active address across the disassembly view, CFG, decompiler, source editor, register table, rank status panel, and hex memory view.
 * **Cross-Rank Watch Table (`DifferentialGrid`):** Evaluate C/C++ expressions (such as `data[0].id`, `data[0].coords.x`, or `mpi_rank`) across all active ranks at once, or promote variables directly from the `Variables` and `Evaluator` panels.
@@ -63,6 +65,10 @@ Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MP
 * **Offline Zeal Docsets & Man Pages (`ReferenceManualWidget`):** Searches local Zeal `.docset` bundles (`~/.local/share/Zeal/Zeal/docsets`) and system `man` pages (`F1`).
 * **Embedded Terminal (`TerminalDockWidget`):** Built-in `QTermWidget` pseudo-terminal for running local shell or cluster commands.
 
+| Attach to Running Process (`/proc` MPI Grouping) | Remote Target (`qemu-user -g` / `gdbserver`) |
+| :---: | :---: |
+| ![Attach to Running Process](docs/screenshots/attach_process.png) | ![Remote GDB Target](docs/screenshots/attach_remote.png) |
+
 | Library & Heap Memory Map Profiler | Interactive Pointer & Struct Graph Visualizer |
 | :---: | :---: |
 | ![Library Memory Map Profiler](docs/screenshots/memory_profiler.png) | ![Pointer & Struct Graph Visualizer](docs/screenshots/pointer_graph.png) |
@@ -84,6 +90,7 @@ Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MP
 | **`Alt+1`** | Switch to **Code** perspective (`SourceCodeView` + `DisassemblyView`) | Global |
 | **`Alt+2`** | Switch to **Reverse** perspective (Split `CFG` + `Decompiler`) | Global |
 | **`Alt+3`** | Switch to **MPI** perspective (`MPI Diagnostics` & cluster views) | Global |
+| **`Ctrl+Alt+P`** | Open **Attach to Running Process / Remote GDB Target** dialog | Global |
 | **`Ctrl+S` / `Ctrl+Shift+S`** | Save current file / Save all modified editor tabs | Source Editor |
 | **`F10`** | Switch between matching `.hpp` header and `.cpp` source file | Source Editor |
 | **`F12`** | Go to symbol definition (`clangd` AST lookup) | Source Editor |

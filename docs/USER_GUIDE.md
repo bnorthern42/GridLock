@@ -118,3 +118,43 @@ The **Package Manager** tab (`HpcConsoleWidget`) checks which MPI libraries and 
 * **Cross-References (`X`):** Press `X` on an instruction in `DisassemblyView` to open `XrefInspectorDialog` and see incoming callers/branches (`XREFS TO`) and outgoing calls/jumps (`XREFS FROM`).
 * **Patching Instructions & Bytes (`Ctrl+Shift+P` / `Ctrl+E`):** Replace instructions in `DisassemblyView` or edit raw bytes in `MemView`, then write out a patched ELF binary via `MainWindow::exportPatchedBinary`.
 * **Offline Documentation (`F1`):** Press `F1` on an MPI call (`MPI_Init`, `MPI_Send`, `MPI_Recv`, `MPI_Barrier`, `MPI_Allreduce`) or standard C/POSIX function to look up its page in the **Reference Manual** tab.
+
+---
+
+## 9. Attach to Running Process & Remote GDB Targets (`Ctrl+Alt+P`)
+
+Open **`File -> Attach to Process...`** (`Ctrl+Alt+P`) to attach GridLock to a running local Linux process, an active multi-rank MPI job, or a remote `gdbserver` / QEMU GDB stub.
+
+### Tab 1: Local Processes (`/proc`) & Multi-Rank MPI Grouping
+
+![Attach to Running Process — /proc MPI Job Grouping](screenshots/attach_process.png)
+
+1. **Automatic MPI Job Discovery (`ProcessScanner`):**
+   * Scans `/proc/<pid>/{comm,cmdline,status,environ,exe}` and inspects OpenMPI (`OMPI_COMM_WORLD_RANK`, `OMPI_COMM_WORLD_SIZE`), MPICH/Hydra (`PMI_RANK`, `PMI_SIZE`), PMIx (`PMIX_RANK`), and SLURM (`SLURM_PROCID`, `SLURM_JOB_ID`, `SLURM_NTASKS`) environment variables.
+   * Groups sibling MPI ranks under an expandable **`MPI Job (N ranks) — <binary>`** tree header sorted by world rank (`Rank 0/4 .. Rank 3/4`).
+2. **Whole-Job or Single-Rank Attach:**
+   * Selecting the top-level **`MPI Job (N ranks)`** header and clicking **Attach to Selected** attaches one `GdbRankCoordinator` (`-target-attach <pid>`) or `DapCoordinator` instance per rank across the job and populates the **Server Rack** cards.
+   * Selecting an individual rank row or a standalone process attaches only to that PID.
+3. **`kernel.yama.ptrace_scope` Check:**
+   * When `/proc/sys/kernel/yama/ptrace_scope` is `>= 1`, Linux blocks non-parent `ptrace` attaches with `EPERM`. GridLock displays a warning banner at the top of the dialog with a **Copy sysctl Fix** button that copies:
+     ```bash
+     echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+     ```
+
+### Tab 2: Remote Target (`gdbserver` / QEMU)
+
+![Attach to Remote GDB Target — QEMU & gdbserver](screenshots/attach_remote.png)
+
+Switch to the **`Remote Target (gdbserver / QEMU)`** tab to debug cross-architecture binaries under `qemu-user`, full-system QEMU VMs, or remote compute nodes running `gdbserver`:
+
+1. **Endpoint Formats (`ProcessScanner::expandRemoteEndpoints`):**
+   * **Single Target:** `localhost:1234` or `127.0.0.1:2222` (Rank 0).
+   * **Multi-Rank Port Range:** `localhost:1234..1237` expands automatically into 4 rank endpoints (`localhost:1234` for Rank 0 through `localhost:1237` for Rank 3).
+   * **Comma-Separated Endpoints:** `node0:1234, node1:1234, node2:1234, node3:1234` assigns each `host:port` to a sequential MPI rank.
+2. **Local Symbol Binary (ELF) & GDB Binary:**
+   * Point **Local Symbol Binary (ELF)** to the unstripped ELF binary on your workstation so GridLock loads DWARF source-line mappings, symbols, and CFG blocks before issuing `-target-select`.
+   * Pick **`gdb`**, **`gdb-multiarch`**, **`aarch64-linux-gnu-gdb`**, or **`riscv64-linux-gnu-gdb`** in the **GDB Binary** selector.
+3. **Protocol Mode (`remote` vs. `extended-remote`):**
+   * **`remote (qemu-user -g / gdbserver)`:** Issues `-target-select remote <host:port>`. Use this for `qemu-aarch64 -g 1234 ./guest_binary`, `qemu-riscv64 -g 1234 ./guest_binary`, or standard `gdbserver :1234 ./target_binary`.
+   * **`extended-remote (gdbserver --multi)`:** Issues `-target-select extended-remote <host:port>` for persistent `gdbserver --multi` sessions.
+

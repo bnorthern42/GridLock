@@ -61,6 +61,7 @@
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
+#include "dialogs/AttachProcessDialog.hpp"
 #include "dialogs/ConditionalBreakpointDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
 #include "dialogs/PreferencesDialog.hpp"
@@ -927,7 +928,7 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
         if (!pgDlg.grab().save(dir.filePath(QStringLiteral("pointer_graph.png")), "PNG", 88)) return false;
     }
 
-    return true;
+    return AttachProcessDialog::captureDocumentationPreviews(this, outputDir);
 }
 
 }  // namespace gridlock::ui

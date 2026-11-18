@@ -6,11 +6,16 @@
 #include "AttachProcessDialog.hpp"
 #undef AttachProcessDialog
 
+#include <unistd.h>
+
 #include <algorithm>
 
+#include <QApplication>
 #include <QClipboard>
 #include <QColor>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
@@ -20,8 +25,11 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QMap>
+#include <QPainter>
 #include <QSet>
 #include <QStandardPaths>
+#include <QTabBar>
+#include <QTemporaryDir>
 #include <QVBoxLayout>
 
 #include "../../core/managers/ConfigManager.hpp"
@@ -52,6 +60,8 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
 
   m_tabWidget = new QTabWidget(this);
   m_tabWidget->setObjectName(QStringLiteral("attachModeTabWidget"));
+  m_tabWidget->tabBar()->setExpanding(false);
+  m_tabWidget->tabBar()->setUsesScrollButtons(false);
   rootLayout->addWidget(m_tabWidget, 1);
 
   // ==========================================================================
@@ -307,6 +317,140 @@ void AttachProcessDialog::setProcPaths(const QString& procRoot,
   m_procRoot = procRoot;
   m_sysctlPath = sysctlPath;
   refreshProcesses();
+}
+
+void AttachProcessDialog::setProcRoot(const QString& procRoot) {
+  setProcPaths(procRoot, m_sysctlPath);
+}
+
+bool AttachProcessDialog::captureDocumentationPreviews(
+    QWidget* parentWindow, const QString& outputDir) {
+  if (!parentWindow) return false;
+  QDir outDir(outputDir);
+  if (!outDir.exists() && !outDir.mkpath(QStringLiteral("."))) return false;
+
+  QTemporaryDir fakeProcDir;
+  if (!fakeProcDir.isValid()) return false;
+  const uid_t myUid = ::geteuid();
+
+  auto writeFakeProc = [&](int pid, int ppid, const QString& comm,
+                           const QStringList& argv, const QStringList& env) {
+    const QString pidDir = fakeProcDir.filePath(QString::number(pid));
+    QDir().mkpath(pidDir);
+    QFile commF(pidDir + QStringLiteral("/comm"));
+    if (commF.open(QIODevice::WriteOnly)) {
+      commF.write((comm + QStringLiteral("\n")).toUtf8());
+    }
+    QFile statusF(pidDir + QStringLiteral("/status"));
+    if (statusF.open(QIODevice::WriteOnly)) {
+      statusF.write(QStringLiteral("Name:\t%1\nPPid:\t%2\nUid:\t%3\t%3\t%3\t%3\n")
+                        .arg(comm)
+                        .arg(ppid)
+                        .arg(myUid)
+                        .toUtf8());
+    }
+    QFile cmdF(pidDir + QStringLiteral("/cmdline"));
+    if (cmdF.open(QIODevice::WriteOnly)) {
+      QByteArrayList parts;
+      for (const QString& a : argv) parts.append(a.toUtf8());
+      cmdF.write(parts.join('\0') + '\0');
+    }
+    QFile envF(pidDir + QStringLiteral("/environ"));
+    if (envF.open(QIODevice::WriteOnly)) {
+      QByteArrayList parts;
+      for (const QString& e : env) parts.append(e.toUtf8());
+      envF.write(parts.join('\0') + '\0');
+    }
+  };
+
+  for (int r = 0; r < 4; ++r) {
+    writeFakeProc(
+        41010 + r, 41000, QStringLiteral("wave_solver"),
+        {QStringLiteral("/workspace/hpc/build/wave_solver"),
+         QStringLiteral("--grid"), QStringLiteral("512x512"),
+         QStringLiteral("--cfl"), QStringLiteral("0.45")},
+        {QStringLiteral("OMPI_COMM_WORLD_RANK=%1").arg(r),
+         QStringLiteral("OMPI_COMM_WORLD_SIZE=4"),
+         QStringLiteral("OMPI_MCA_ess_base_jobid=41000"),
+         QStringLiteral("USER=researcher")});
+  }
+  writeFakeProc(
+      41088, 39200, QStringLiteral("mesh_partitioner"),
+      {QStringLiteral("/workspace/hpc/build/mesh_partitioner"),
+       QStringLiteral("--domains"), QStringLiteral("4"),
+       QStringLiteral("--input"), QStringLiteral("wing_3d.msh")},
+      {QStringLiteral("USER=researcher")});
+
+  const QString sysctlPath = fakeProcDir.filePath(QStringLiteral("ptrace_scope"));
+  {
+    QFile sysctlF(sysctlPath);
+    if (sysctlF.open(QIODevice::WriteOnly)) sysctlF.write("1\n");
+  }
+
+  AttachProcessDialog dlg(parentWindow, fakeProcDir.path(), sysctlPath);
+  dlg.resize(860, 520);
+  dlg.show();
+  if (dlg.m_processTable) {
+    for (int r = 0; r < dlg.m_processTable->rowCount(); ++r) {
+      if (QTableWidgetItem* uItem = dlg.m_processTable->item(r, 2)) {
+        uItem->setText(QStringLiteral("researcher"));
+      }
+    }
+  }
+  if (dlg.m_processTree && dlg.m_processTree->topLevelItemCount() > 0) {
+    QTreeWidgetItem* topGroup = dlg.m_processTree->topLevelItem(0);
+    topGroup->setText(3, QStringLiteral("/workspace/hpc/build/wave_solver"));
+    for (int i = 0; i < topGroup->childCount(); ++i) {
+      topGroup->child(i)->setText(3, QStringLiteral("/workspace/hpc/build/wave_solver"));
+    }
+    if (dlg.m_processTree->topLevelItemCount() > 1) {
+      dlg.m_processTree->topLevelItem(1)->setText(
+          3, QStringLiteral("/workspace/hpc/build/mesh_partitioner"));
+    }
+    dlg.m_processTree->setCurrentItem(topGroup);
+    topGroup->setSelected(true);
+  }
+  QApplication::processEvents();
+
+  auto compositeAndSave = [&](const QString& fileName) -> bool {
+    QPixmap basePix = parentWindow->grab();
+    const QPixmap dlgPix = dlg.grab();
+    QPainter painter(&basePix);
+    painter.setPen(QColor(QStringLiteral("#3e4451")));
+    const int dx = (parentWindow->width() - dlgPix.width()) / 2;
+    const int dy = (parentWindow->height() - dlgPix.height()) / 2;
+    painter.drawPixmap(dx, dy, dlgPix);
+    painter.drawRect(dx, dy, dlgPix.width() - 1, dlgPix.height() - 1);
+    painter.end();
+    return basePix.save(outDir.filePath(fileName), "PNG", 88);
+  };
+
+  if (!compositeAndSave(QStringLiteral("attach_process.png"))) {
+    dlg.hide();
+    return false;
+  }
+
+  dlg.setRemoteTargetTabActive(true);
+  if (dlg.m_remoteEndpointEdit) {
+    dlg.m_remoteEndpointEdit->setText(QStringLiteral("localhost:1234..1237"));
+  }
+  if (dlg.m_remoteSymbolBinaryEdit) {
+    dlg.m_remoteSymbolBinaryEdit->setText(
+        QStringLiteral("/workspace/hpc/build/wave_solver"));
+  }
+  if (dlg.m_remoteGdbCombo) {
+    const int idx = dlg.m_remoteGdbCombo->findText(QStringLiteral("gdb-multiarch"));
+    if (idx >= 0) dlg.m_remoteGdbCombo->setCurrentIndex(idx);
+  }
+  if (dlg.m_remoteProtocolCombo) {
+    dlg.m_remoteProtocolCombo->setCurrentIndex(0);
+  }
+  dlg.updateRemoteEndpointValidation();
+  QApplication::processEvents();
+
+  const bool ok = compositeAndSave(QStringLiteral("attach_remote.png"));
+  dlg.hide();
+  return ok;
 }
 
 void AttachProcessDialog::refreshProcesses() {

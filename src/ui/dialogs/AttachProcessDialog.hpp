@@ -55,6 +55,15 @@ class AttachProcessDialog : public QDialog {
       const QString& sysctlPath =
           QStringLiteral("/proc/sys/kernel/yama/ptrace_scope"));
 
+  /** @brief Convenience override for setting the synthetic `/proc` root directory and refreshing. */
+  void setProcRoot(const QString& procRoot);
+
+  /**
+   * @brief Captures sanitized `attach_process.png` and `attach_remote.png` screenshots into @p outputDir.
+   */
+  static bool captureDocumentationPreviews(QWidget* parentWindow,
+                                           const QString& outputDir);
+
   /** @brief Re-scans `m_procRoot` and rebuilds the MPI job tree, flat table, and ptrace banner. */
   void refreshProcesses();
 
