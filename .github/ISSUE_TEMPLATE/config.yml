@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a Security Vulnerability
+    url: https://github.com/bnorthern42/GridLock/blob/master/SECURITY.md
+    about: Please do not report security vulnerabilities via public issues
+  - name: Project Roadmap
+    url: https://github.com/bnorthern42/GridLock/blob/master/ROADMAP.md
+    about: Check planned milestones for v0.8.7 through v1.0.0

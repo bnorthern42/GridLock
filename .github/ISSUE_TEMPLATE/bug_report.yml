@@ -1,0 +1,95 @@
+name: Bug Report
+description: Report a crash, debugger backend fault, or UI regression
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide enough detail for maintainers to reproduce the issue.
+
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected Area
+      description: Which subsystem is primarily affected?
+      options:
+        - "Multi-Rank GDB/MI3 Coordinator"
+        - "DAP Backend"
+        - "Source Editor & clangd LSP"
+        - "Disassembly / CFG / Decompiler"
+        - "Variables, Watch & Pointer Graph"
+        - "Memory View & Library Memory Map"
+        - "MPI Diagnostics & Deadlock Analyzer"
+        - "Build / AppImage / Packaging"
+        - "Other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: What is the impact of this bug?
+      options:
+        - "Critical - Crash, data loss, or completely blocked workflow"
+        - "High - Major feature broken without a clean workaround"
+        - "Medium - Incorrect behavior or UI glitch with workaround"
+        - "Low - Minor cosmetic or edge-case issue"
+    validations:
+      required: true
+
+  - type: input
+    id: gridlock_version
+    attributes:
+      label: GridLock Version
+      description: Output of `./gridlock --version` or release tag
+      placeholder: "v0.8.6"
+    validations:
+      required: true
+
+  - type: input
+    id: os_display
+    attributes:
+      label: OS & Display Server
+      description: Linux distribution and Wayland compositor or X11 window manager
+      placeholder: "Arch Linux / Wayland (niri)"
+    validations:
+      required: true
+
+  - type: input
+    id: toolchain_versions
+    attributes:
+      label: Compiler, MPI & Debugger Versions
+      description: Versions of GCC/Clang, OpenMPI/MPICH, and GDB/LLDB
+      placeholder: "GCC 14, OpenMPI 5.0, GDB 15.2"
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Exact numbered steps to trigger the issue (include MPI rank count if relevant).
+      placeholder: |
+        1. Launch GridLock with ...
+        2. Set breakpoint on ...
+        3. Run with -np 4 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_vs_actual
+    attributes:
+      label: Expected vs. Actual Behavior
+      description: Describe what you expected to happen and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs_and_screenshots
+    attributes:
+      label: Logs, Backtrace, or Screenshots
+      description: Paste terminal output, `process_vm_readv` / GDB errors, or attach `.png` screenshots (`.png` screenshots are welcome for UI issues).
+    validations:
+      required: false

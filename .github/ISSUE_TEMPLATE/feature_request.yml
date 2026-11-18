@@ -1,0 +1,49 @@
+name: Feature Request
+description: Suggest a debugging capability, visualizer, or workflow improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the debugging workflow gap and how the proposed capability should behave.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Which capability area does this request belong to?
+      options:
+        - "Scientific / Numerical & Array Inspection"
+        - "MPI / OpenMP Concurrency Diagnostics"
+        - "Execution Control & Post-Mortem Analysis"
+        - "Low-Level Memory & Reverse Engineering"
+        - "UI/UX Cohesion & Ergonomics"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Debugging Workflow Gap
+      description: What debugging or inspection task is difficult or impossible today?
+      placeholder: "When debugging 64 MPI ranks, inspecting..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution & Reference Tools
+      description: How should this work in GridLock (UI/docks/backend), and does another debugger (such as TotalView, Linaro Forge, RAD Debugger, CLion, or Cutter) implement a similar pattern?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds (such as GDB scripts, external tools, or CLI commands) you currently use or considered.
+    validations:
+      required: false
