@@ -1,0 +1,45 @@
+name: Sync Docs to GitHub Wiki
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/**'
+      - 'ROADMAP.md'
+      - 'scripts/sync_wiki.sh'
+      - '.github/workflows/sync-wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    name: Mirror docs/ to GitHub Wiki
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone GitHub Wiki repository
+        run: |
+          git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" /tmp/gridlock-wiki
+
+      - name: Sync documentation and screenshots
+        run: |
+          bash scripts/sync_wiki.sh /tmp/gridlock-wiki
+
+      - name: Commit and push Wiki updates
+        working-directory: /tmp/gridlock-wiki
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No Wiki changes to commit."
+            exit 0
+          fi
+          git commit -m "docs(wiki): sync from master (${GITHUB_SHA::7})"
+          git push origin master
