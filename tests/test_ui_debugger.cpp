@@ -538,6 +538,25 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QCOMPARE(attachDlg.selectedPids(), (QList<qint64>{4101, 4102}));
     filterEd->setText(QStringLiteral("4999"));
     QVERIFY(procTree->topLevelItem(0)->isHidden() && !procTree->topLevelItem(1)->isHidden());
+    // Verify Tab 2: Remote Target (gdbserver / QEMU) controls, port-range expansion, and MainWindow remote attach.
+    auto* tabW = attachDlg.findChild<QTabWidget*>(QStringLiteral("attachModeTabWidget"));
+    auto* remEpEd = attachDlg.findChild<QLineEdit*>(QStringLiteral("remoteEndpointEdit"));
+    auto* remSymEd = attachDlg.findChild<QLineEdit*>(QStringLiteral("remoteSymbolBinaryEdit"));
+    auto* remSymBtn = attachDlg.findChild<QPushButton*>(QStringLiteral("remoteSymbolBrowseBtn"));
+    auto* remGdbCombo = attachDlg.findChild<QComboBox*>(QStringLiteral("remoteGdbBinaryCombo"));
+    auto* remProtoCombo = attachDlg.findChild<QComboBox*>(QStringLiteral("remoteProtocolModeCombo"));
+    auto* remHintLbl = attachDlg.findChild<QLabel*>(QStringLiteral("remoteCommandHintLabel"));
+    QVERIFY(tabW && tabW->count() == 2 && remEpEd && remSymEd && remSymBtn && remGdbCombo && remProtoCombo && remHintLbl);
+    attachDlg.setRemoteTargetTabActive(true); QVERIFY(attachDlg.isRemoteTargetTabActive());
+    remEpEd->setText(QStringLiteral("localhost:1234..1237")); remSymEd->setText(QStringLiteral("/tmp/qemu_guest.elf"));
+    remProtoCombo->setCurrentIndex(1);
+    const auto remTargets = attachDlg.selectedRemoteTargets();
+    QCOMPARE(remTargets.size(), 4); QCOMPARE(remTargets[0].endpoint, QStringLiteral("localhost:1234"));
+    QCOMPARE(remTargets[3].endpoint, QStringLiteral("localhost:1237")); QVERIFY(remTargets[0].extendedRemote && attachBtn->isEnabled());
+    remEpEd->setText(QStringLiteral("localhost:99999"));
+    QVERIFY(attachDlg.selectedRemoteTargets().isEmpty() && !attachBtn->isEnabled());
+    QVERIFY(mainWindow.attachToRemoteTargets({remTargets[0]}));
+    mainWindow.stopTargetWorkflow();
     // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QFile::remove(mainWindow.activeTargetBinaryPath()); QTest::qWait(400); }

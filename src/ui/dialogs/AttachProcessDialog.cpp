@@ -1,6 +1,6 @@
 /**
  * @file AttachProcessDialog.cpp
- * @brief Implementation of the `/proc` process & MPI job attach dialog.
+ * @brief Implementation of the two-tab local `/proc` and remote `gdbserver`/QEMU attach dialog.
  */
 
 #include "AttachProcessDialog.hpp"
@@ -11,15 +11,20 @@
 #include <QClipboard>
 #include <QColor>
 #include <QDialogButtonBox>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QFormLayout>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QMap>
 #include <QSet>
+#include <QStandardPaths>
 #include <QVBoxLayout>
+
+#include "../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
 
@@ -37,16 +42,27 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
                                          const QString& procRoot,
                                          const QString& sysctlPath)
     : QDialog(parent), m_procRoot(procRoot), m_sysctlPath(sysctlPath) {
-  setWindowTitle(QStringLiteral("Attach to Running Process / MPI Job"));
-  setMinimumSize(720, 440);
-  resize(820, 500);
+  setWindowTitle(QStringLiteral("Attach to Running Process / Remote GDB Target"));
+  setMinimumSize(740, 460);
+  resize(840, 520);
 
   auto* rootLayout = new QVBoxLayout(this);
   rootLayout->setContentsMargins(12, 12, 12, 12);
   rootLayout->setSpacing(8);
 
-  // 1. Yama ptrace_scope warning banner (shown when checkPtraceScope() > 0).
-  m_ptraceBanner = new QWidget(this);
+  m_tabWidget = new QTabWidget(this);
+  m_tabWidget->setObjectName(QStringLiteral("attachModeTabWidget"));
+  rootLayout->addWidget(m_tabWidget, 1);
+
+  // ==========================================================================
+  // Tab 1: Local Processes (/proc)
+  // ==========================================================================
+  auto* localPage = new QWidget(m_tabWidget);
+  auto* localLayout = new QVBoxLayout(localPage);
+  localLayout->setContentsMargins(8, 8, 8, 8);
+  localLayout->setSpacing(8);
+
+  m_ptraceBanner = new QWidget(localPage);
   m_ptraceBanner->setObjectName(QStringLiteral("attachPtraceWarningBanner"));
   m_ptraceBanner->setStyleSheet(QStringLiteral(
       "QWidget#attachPtraceWarningBanner { background-color: #2d2216; border: 1px solid #d19a66; border-radius: 4px; }"
@@ -62,7 +78,7 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
   m_copySysctlBtn->setFixedHeight(24);
   bannerLayout->addWidget(m_ptraceLabel, 1);
   bannerLayout->addWidget(m_copySysctlBtn);
-  rootLayout->addWidget(m_ptraceBanner);
+  localLayout->addWidget(m_ptraceBanner);
 
   connect(m_copySysctlBtn, &QPushButton::clicked, this, [this]() {
     if (QClipboard* cb = QGuiApplication::clipboard()) {
@@ -71,30 +87,28 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
     m_copySysctlBtn->setText(QStringLiteral("Copied!"));
   });
 
-  // 2. Filter strip: instant search input, "My Processes Only" checkbox, and "Refresh" button.
   auto* filterRow = new QHBoxLayout();
   filterRow->setContentsMargins(0, 0, 0, 0);
   filterRow->setSpacing(8);
-  auto* filterLabel = new QLabel(QStringLiteral("Filter:"), this);
-  m_filterEdit = new QLineEdit(this);
+  auto* filterLabel = new QLabel(QStringLiteral("Filter:"), localPage);
+  m_filterEdit = new QLineEdit(localPage);
   m_filterEdit->setObjectName(QStringLiteral("attachProcessFilterEdit"));
   m_filterEdit->setPlaceholderText(
       QStringLiteral("Filter by PID, process name, command line, or MPI job..."));
   m_filterEdit->setFixedHeight(24);
-  m_myProcessesCheck = new QCheckBox(QStringLiteral("My Processes Only"), this);
+  m_myProcessesCheck = new QCheckBox(QStringLiteral("My Processes Only"), localPage);
   m_myProcessesCheck->setObjectName(QStringLiteral("attachMyProcessesOnlyCheck"));
   m_myProcessesCheck->setChecked(true);
-  m_refreshBtn = new QPushButton(QStringLiteral("Refresh"), this);
+  m_refreshBtn = new QPushButton(QStringLiteral("Refresh"), localPage);
   m_refreshBtn->setObjectName(QStringLiteral("attachProcessRefreshBtn"));
   m_refreshBtn->setFixedHeight(24);
   filterRow->addWidget(filterLabel);
   filterRow->addWidget(m_filterEdit, 1);
   filterRow->addWidget(m_myProcessesCheck);
   filterRow->addWidget(m_refreshBtn);
-  rootLayout->addLayout(filterRow);
+  localLayout->addLayout(filterRow);
 
-  // 3. Primary MPI Job grouped QTreeWidget (`PID`, `Rank`, `Process / Command`, `Executable`).
-  m_processTree = new QTreeWidget(this);
+  m_processTree = new QTreeWidget(localPage);
   m_processTree->setObjectName(QStringLiteral("attachProcessTree"));
   m_processTree->setColumnCount(4);
   m_processTree->setHeaderLabels({QStringLiteral("PID"),
@@ -110,10 +124,9 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
   m_processTree->setColumnWidth(0, 120);
   m_processTree->setColumnWidth(1, 90);
   m_processTree->setColumnWidth(2, 340);
-  rootLayout->addWidget(m_processTree, 1);
+  localLayout->addWidget(m_processTree, 1);
 
-  // 4. Companion 4-column flat QTableWidget (`attachProcessTable`) for flat table inspection/selection.
-  m_processTable = new QTableWidget(0, 4, this);
+  m_processTable = new QTableWidget(0, 4, localPage);
   m_processTable->setObjectName(QStringLiteral("attachProcessTable"));
   m_processTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   m_processTable->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -124,7 +137,95 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
                                              QStringLiteral("COMMAND")});
   m_processTable->setVisible(false);
 
-  // 5. Footer action bar with "Attach to Selected" and "Cancel".
+  m_tabWidget->addTab(localPage, QStringLiteral("Local Processes (/proc)"));
+
+  // ==========================================================================
+  // Tab 2: Remote Target (gdbserver / QEMU)
+  // ==========================================================================
+  auto* remotePage = new QWidget(m_tabWidget);
+  auto* remoteLayout = new QVBoxLayout(remotePage);
+  remoteLayout->setContentsMargins(12, 12, 12, 12);
+  remoteLayout->setSpacing(10);
+
+  auto* formLayout = new QFormLayout();
+  formLayout->setSpacing(10);
+
+  m_remoteEndpointEdit = new QLineEdit(QStringLiteral("localhost:1234"), remotePage);
+  m_remoteEndpointEdit->setObjectName(QStringLiteral("remoteEndpointEdit"));
+  m_remoteEndpointEdit->setPlaceholderText(
+      QStringLiteral("localhost:1234 or localhost:1234..1237 or node0:1234, node1:1234"));
+  formLayout->addRow(QStringLiteral("Endpoint(s):"), m_remoteEndpointEdit);
+
+  auto* symRow = new QHBoxLayout();
+  symRow->setContentsMargins(0, 0, 0, 0);
+  symRow->setSpacing(6);
+  const QString defaultBin = QString::fromStdString(
+      gridlock::core::ConfigManager::instance().loadProjectSettings().targetBinary);
+  m_remoteSymbolBinaryEdit = new QLineEdit(defaultBin, remotePage);
+  m_remoteSymbolBinaryEdit->setObjectName(QStringLiteral("remoteSymbolBinaryEdit"));
+  m_remoteSymbolBinaryEdit->setPlaceholderText(
+      QStringLiteral("/path/to/local/unstripped/binary (for DWARF symbols)"));
+  m_remoteSymbolBrowseBtn = new QPushButton(QStringLiteral("Browse..."), remotePage);
+  m_remoteSymbolBrowseBtn->setObjectName(QStringLiteral("remoteSymbolBrowseBtn"));
+  m_remoteSymbolBrowseBtn->setFixedHeight(24);
+  symRow->addWidget(m_remoteSymbolBinaryEdit, 1);
+  symRow->addWidget(m_remoteSymbolBrowseBtn);
+  formLayout->addRow(QStringLiteral("Local Symbol Binary (ELF):"), symRow);
+
+  connect(m_remoteSymbolBrowseBtn, &QPushButton::clicked, this, [this]() {
+    const QString picked = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Select Local ELF Symbol Binary"),
+        m_remoteSymbolBinaryEdit->text());
+    if (!picked.isEmpty()) m_remoteSymbolBinaryEdit->setText(picked);
+  });
+
+  m_remoteGdbCombo = new QComboBox(remotePage);
+  m_remoteGdbCombo->setObjectName(QStringLiteral("remoteGdbBinaryCombo"));
+  m_remoteGdbCombo->setEditable(true);
+  const QStringList gdbCandidates{QStringLiteral("gdb"),
+                                  QStringLiteral("gdb-multiarch"),
+                                  QStringLiteral("aarch64-linux-gnu-gdb"),
+                                  QStringLiteral("riscv64-linux-gnu-gdb")};
+  for (const QString& cand : gdbCandidates) {
+    m_remoteGdbCombo->addItem(cand, cand);
+  }
+  const QString cfgGdb = gridlock::core::ConfigManager::instance().getGdbPath().trimmed();
+  if (!cfgGdb.isEmpty() && m_remoteGdbCombo->findText(cfgGdb) < 0) {
+    m_remoteGdbCombo->insertItem(0, cfgGdb, cfgGdb);
+    m_remoteGdbCombo->setCurrentIndex(0);
+  }
+  formLayout->addRow(QStringLiteral("GDB Binary:"), m_remoteGdbCombo);
+
+  m_remoteProtocolCombo = new QComboBox(remotePage);
+  m_remoteProtocolCombo->setObjectName(QStringLiteral("remoteProtocolModeCombo"));
+  m_remoteProtocolCombo->addItem(
+      QStringLiteral("remote (qemu-user -g / gdbserver)"), false);
+  m_remoteProtocolCombo->addItem(
+      QStringLiteral("extended-remote (gdbserver --multi)"), true);
+  formLayout->addRow(QStringLiteral("Protocol Mode:"), m_remoteProtocolCombo);
+
+  remoteLayout->addLayout(formLayout);
+
+  m_remoteValidationLabel = new QLabel(remotePage);
+  m_remoteValidationLabel->setObjectName(QStringLiteral("remoteEndpointValidationLabel"));
+  remoteLayout->addWidget(m_remoteValidationLabel);
+
+  m_remoteHintLabel = new QLabel(
+      QStringLiteral("Examples:\n"
+                     "  • QEMU user-mode stub:  qemu-aarch64 -g 1234 ./guest_binary\n"
+                     "  • Single gdbserver:     gdbserver :1234 ./target_binary\n"
+                     "  • Multi-rank port range: localhost:1234..1237 (attaches Rank 0..3)"),
+      remotePage);
+  m_remoteHintLabel->setObjectName(QStringLiteral("remoteCommandHintLabel"));
+  m_remoteHintLabel->setWordWrap(true);
+  remoteLayout->addWidget(m_remoteHintLabel);
+  remoteLayout->addStretch(1);
+
+  m_tabWidget->addTab(remotePage, QStringLiteral("Remote Target (gdbserver / QEMU)"));
+
+  // ==========================================================================
+  // Footer Action Bar
+  // ==========================================================================
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
   m_attachBtn = buttons->button(QDialogButtonBox::Ok);
   if (m_attachBtn) {
@@ -146,8 +247,59 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
   connect(m_processTable, &QTableWidget::itemSelectionChanged, this, [this]() {
     m_tableExplicitlySelected = true;
   });
+  connect(m_remoteEndpointEdit, &QLineEdit::textChanged, this, [this](const QString&) {
+    updateRemoteEndpointValidation();
+  });
+  connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
+    updateRemoteEndpointValidation();
+  });
 
   refreshProcesses();
+  updateRemoteEndpointValidation();
+}
+
+bool AttachProcessDialog::isRemoteTargetTabActive() const {
+  return m_tabWidget && m_tabWidget->currentIndex() == 1;
+}
+
+void AttachProcessDialog::setRemoteTargetTabActive(bool active) {
+  if (m_tabWidget) m_tabWidget->setCurrentIndex(active ? 1 : 0);
+}
+
+QList<RemoteTargetSpec> AttachProcessDialog::selectedRemoteTargets() const {
+  if (!m_remoteEndpointEdit) return {};
+  const QString symBin = m_remoteSymbolBinaryEdit ? m_remoteSymbolBinaryEdit->text().trimmed() : QString();
+  const QString gdbBin = m_remoteGdbCombo ? m_remoteGdbCombo->currentText().trimmed() : QStringLiteral("gdb");
+  const bool extRemote = m_remoteProtocolCombo && m_remoteProtocolCombo->currentData().toBool();
+  return ProcessScanner::expandRemoteEndpoints(
+      m_remoteEndpointEdit->text(), symBin, gdbBin, extRemote);
+}
+
+void AttachProcessDialog::updateRemoteEndpointValidation() {
+  const QList<RemoteTargetSpec> specs = selectedRemoteTargets();
+  if (m_remoteValidationLabel) {
+    if (specs.isEmpty()) {
+      m_remoteValidationLabel->setText(
+          QStringLiteral("Invalid endpoint format (expected host:port or host:start..end)"));
+      m_remoteValidationLabel->setStyleSheet(QStringLiteral("color: #e06c75; font-weight: bold;"));
+    } else {
+      m_remoteValidationLabel->setText(
+          QStringLiteral("Resolved %1 remote rank endpoint(s): %2%3")
+              .arg(specs.size())
+              .arg(specs.first().endpoint)
+              .arg(specs.size() > 1 ? QStringLiteral(" .. %1").arg(specs.last().endpoint) : QString()));
+      m_remoteValidationLabel->setStyleSheet(QStringLiteral("color: #98c379;"));
+    }
+  }
+  if (m_attachBtn) {
+    if (isRemoteTargetTabActive()) {
+      m_attachBtn->setText(QStringLiteral("Connect Remote Target"));
+      m_attachBtn->setEnabled(!specs.isEmpty());
+    } else {
+      m_attachBtn->setText(QStringLiteral("Attach to Selected"));
+      m_attachBtn->setEnabled(true);
+    }
+  }
 }
 
 void AttachProcessDialog::setProcPaths(const QString& procRoot,
@@ -175,7 +327,6 @@ void AttachProcessDialog::refreshProcesses() {
   m_tableExplicitlySelected = false;
   m_mpiJobGroupCount = 0;
 
-  // Populate flat companion table (`attachProcessTable`).
   if (m_processTable) {
     m_processTable->blockSignals(true);
     m_processTable->setRowCount(m_entries.size());
@@ -189,7 +340,6 @@ void AttachProcessDialog::refreshProcesses() {
     m_processTable->blockSignals(false);
   }
 
-  // Populate hierarchical MPI job + standalone process tree (`attachProcessTree`).
   if (!m_processTree) return;
   m_processTree->blockSignals(true);
   m_processTree->clear();

@@ -11,6 +11,7 @@
 
 #include "../RankState.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
+#include "../core/hpc/ProcessScanner.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 
 #include <QCloseEvent>
@@ -569,6 +570,11 @@ public:
      * @return True if attachment succeeded and the workstation entered active session state.
      */
     bool attachToRunningProcesses(const QList<qint64>& explicitPids = {});
+
+    /**
+     * @brief Connects `GdbRankCoordinator` to one or more remote `gdbserver` / `qemu-user -g` endpoints.
+     */
+    bool attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTargets);
 
     /**
      * @brief Populates preview fixtures for automated headless snapshots.

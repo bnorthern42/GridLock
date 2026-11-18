@@ -193,50 +193,35 @@ void MainWindow::syncCoordinatorWithConfig() {
     pushExecutionContext();
 }
 
-/**
- * @brief Dispatches a live source-level step-over (`-exec-next` / DAP `next`) on the active rank.
- * @return True if an active session coordinator accepted the step-over request.
- */
+/** @brief Dispatches a live source-level step-over (`-exec-next` / DAP `next`) on the active rank. */
 bool MainWindow::stepOverWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
     m_coordinator->stepOver(m_focusedRank + 1); return true;
 }
 
-/**
- * @brief Dispatches a live source-level step-into (`-exec-step` / DAP `stepIn`) on the active rank.
- * @return True if an active session coordinator accepted the step-into request.
- */
+/** @brief Dispatches a live source-level step-into (`-exec-step` / DAP `stepIn`) on the active rank. */
 bool MainWindow::stepIntoWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
     m_coordinator->stepInto(m_focusedRank + 1); return true;
 }
 
-/**
- * @brief Interrupts execution on the currently focused MPI rank (`SIGINT` + `-exec-interrupt` / DAP `pause`).
- * @return True if a coordinator instance received the pause request.
- */
+/** @brief Interrupts execution on the currently focused MPI rank (`SIGINT` + `-exec-interrupt` / DAP `pause`). */
 bool MainWindow::pauseRankWorkflow() {
     if (!m_coordinator) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("PAUSED"));
     m_coordinator->pauseRank(m_focusedRank); return true;
 }
 
-/**
- * @brief Steps backward over the previous source statement (`-exec-next --reverse` / DAP `stepBack`).
- * @return True if an active session coordinator accepted the reverse step-over request.
- */
+/** @brief Steps backward over the previous source statement (`-exec-next --reverse` / DAP `stepBack`). */
 bool MainWindow::reverseStepOverWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING BACK"));
     m_coordinator->reverseStepOver(m_focusedRank); return true;
 }
 
-/**
- * @brief Runs backward in recorded execution history (`-exec-continue --reverse` / DAP `reverseContinue`).
- * @return True if an active session coordinator accepted the reverse continue request.
- */
+/** @brief Runs backward in recorded execution history (`-exec-continue --reverse` / DAP `reverseContinue`). */
 bool MainWindow::reverseContinueWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("REVERSE RUNNING"));
@@ -796,6 +781,9 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
     if (explicitPids.isEmpty()) {
         AttachProcessDialog dlg(this);
         if (dlg.exec() != QDialog::Accepted) return false;
+        if (dlg.isRemoteTargetTabActive()) {
+            return attachToRemoteTargets(dlg.selectedRemoteTargets());
+        }
         targets = dlg.selectedProcesses();
     } else {
         for (int i = 0; i < explicitPids.size(); ++i) {
@@ -831,11 +819,8 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
     QList<RankState> rankStates;
     if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->beginLiveSession(rankCount);
     for (int r = 0; r < rankCount; ++r) {
-        RankState st;
-        st.rankId = r;
-        st.currentState = QStringLiteral("stopped");
-        m_latestStates[r] = st;
-        rankStates.append(st);
+        RankState st; st.rankId = r; st.currentState = QStringLiteral("stopped");
+        m_latestStates[r] = st; rankStates.append(st);
         if (m_mpiDiagnosticsWidget) {
             m_mpiDiagnosticsWidget->updateLiveRankRow(
                 r, static_cast<qint64>(targets[r].pid), QStringLiteral("PAUSED"),
@@ -844,17 +829,46 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
         }
     }
     if (m_serverRackView) m_serverRackView->updateRanks(rankStates);
-    if (m_memView) {
-        m_memView->setSourceModeLabel(
-            QStringLiteral("LIVE RANK 0 (PID %1)").arg(targets.first().pid));
-    }
+    if (m_memView) m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK 0 (PID %1)").arg(targets.first().pid));
     if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(rankCount);
     m_coordinator->requestStackAndThreads(0);
     updateDebugToolbarState();
     updateStatusTelemetry(QStringLiteral("0x00000000"),
-                          QStringLiteral("ATTACHED (%1 RANK%2)")
-                              .arg(rankCount)
-                              .arg(rankCount > 1 ? QStringLiteral("S") : QString()));
+                          QStringLiteral("ATTACHED (%1 RANK%2)").arg(rankCount).arg(rankCount > 1 ? QStringLiteral("S") : QString()));
+    refreshStatusBarMemoryTelemetry();
+    return true;
+}
+
+bool MainWindow::attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTargets) {
+    if (explicitTargets.isEmpty()) return false;
+    if (m_debugSessionActive) stopTargetWorkflow();
+    gridlock::core::ConfigManager::instance().setDebuggerEngine(QStringLiteral("gdb"));
+    syncCoordinatorWithConfig();
+    auto* gdbCoord = qobject_cast<GdbRankCoordinator*>(m_coordinator);
+    if (!gdbCoord || !gdbCoord->attachToRemoteTargets(explicitTargets)) return false;
+
+    const int rankCount = explicitTargets.size();
+    m_debugSessionActive = true;
+    m_focusedRank = 0;
+    m_latestStates.clear();
+    QList<RankState> rankStates;
+    if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->beginLiveSession(rankCount);
+    for (int r = 0; r < rankCount; ++r) {
+        RankState st; st.rankId = r; st.currentState = QStringLiteral("stopped");
+        m_latestStates[r] = st; rankStates.append(st);
+        if (m_mpiDiagnosticsWidget) {
+            m_mpiDiagnosticsWidget->updateLiveRankRow(
+                r, 0, QStringLiteral("PAUSED"), QStringLiteral("remote"),
+                explicitTargets[r].endpoint, QStringLiteral("0x00000000"), rankCount);
+        }
+    }
+    if (m_serverRackView) m_serverRackView->updateRanks(rankStates);
+    if (m_memView) m_memView->setSourceModeLabel(QStringLiteral("REMOTE RANK 0 (%1)").arg(explicitTargets.first().endpoint));
+    if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(rankCount);
+    m_coordinator->requestStackAndThreads(0);
+    updateDebugToolbarState();
+    updateStatusTelemetry(QStringLiteral("0x00000000"),
+                          QStringLiteral("REMOTE (%1)").arg(explicitTargets.first().endpoint));
     refreshStatusBarMemoryTelemetry();
     return true;
 }

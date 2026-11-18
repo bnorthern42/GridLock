@@ -1,21 +1,25 @@
 /**
  * @file AttachProcessDialog.hpp
- * @brief Modal dialog for discovering running Linux `/proc` processes and grouped MPI jobs.
+ * @brief Two-tab modal dialog for attaching to local `/proc` processes/MPI jobs or remote `gdbserver`/QEMU stubs.
  *
- * Groups detected OpenMPI/MPICH/PMIx/SLURM processes under expandable `MPI Job (N ranks)`
- * headers, displays standalone processes, checks `kernel.yama.ptrace_scope` permissions
- * with a one-click `sysctl` clipboard fix, and supports single-PID or full-MPI-job attach.
+ * Tab 1 ("Local Processes (/proc)") groups detected OpenMPI/MPICH/PMIx/SLURM processes under
+ * expandable `MPI Job (N ranks)` headers and checks `kernel.yama.ptrace_scope`.
+ * Tab 2 ("Remote Target (gdbserver / QEMU)") connects `gdb` or `gdb-multiarch` via
+ * `-target-select remote` / `extended-remote` to single endpoints, port ranges (`localhost:1234..1237`),
+ * or comma-separated `host:port` lists with local ELF DWARF symbol loading.
  */
 
 #pragma once
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QList>
 #include <QPushButton>
 #include <QString>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTreeWidget>
 #include <QWidget>
@@ -28,15 +32,12 @@ inline namespace proc_attach {
 
 /**
  * @class AttachProcessDialog
- * @brief Interactive `/proc` process & MPI job picker dialog (`File -> Attach to Process...`).
+ * @brief Interactive local `/proc` process & remote `gdbserver`/QEMU picker dialog (`File -> Attach to Process...`).
  */
 class AttachProcessDialog : public QDialog {
  public:
   /**
-   * @brief Constructs the attach dialog and scans @p procRoot and @p sysctlPath.
-   * @param parent Optional parent widget.
-   * @param procRoot Root procfs directory (defaults to `"/proc"`).
-   * @param sysctlPath Path to Yama `ptrace_scope` file.
+   * @brief Constructs the two-tab attach dialog and scans @p procRoot and @p sysctlPath.
    */
   explicit AttachProcessDialog(
       QWidget* parent = nullptr,
@@ -66,8 +67,17 @@ class AttachProcessDialog : public QDialog {
   /** @brief Returns all selected OS process IDs (expanding any selected MPI Job group into all its rank PIDs). */
   QList<qint64> selectedPids() const;
 
-  /** @brief Returns all selected `ProcessEntry` descriptors ordered by MPI rank. */
+  /** @brief Returns all selected local `ProcessEntry` descriptors ordered by MPI rank. */
   QList<ProcessEntry> selectedProcesses() const;
+
+  /** @brief Returns true when Tab 2 ("Remote Target (gdbserver / QEMU)") is the active tab. */
+  bool isRemoteTargetTabActive() const;
+
+  /** @brief Switches between Tab 0 (Local Processes) and Tab 1 (Remote Target). */
+  void setRemoteTargetTabActive(bool active);
+
+  /** @brief Expands and returns the configured `RemoteTargetSpec` list from Tab 2 controls (empty if invalid). */
+  QList<RemoteTargetSpec> selectedRemoteTargets() const;
 
   /** @brief Returns the number of top-level MPI Job group rows currently in the tree. */
   int mpiJobGroupCount() const { return m_mpiJobGroupCount; }
@@ -76,6 +86,8 @@ class AttachProcessDialog : public QDialog {
   int ptraceScope() const { return m_ptraceScope; }
 
  private:
+  void updateRemoteEndpointValidation();
+
   QString m_procRoot;
   QString m_sysctlPath;
   int m_ptraceScope = 0;
@@ -83,6 +95,7 @@ class AttachProcessDialog : public QDialog {
   bool m_tableExplicitlySelected = false;
   QList<ProcessEntry> m_entries;
 
+  QTabWidget* m_tabWidget = nullptr;
   QWidget* m_ptraceBanner = nullptr;
   QLabel* m_ptraceLabel = nullptr;
   QPushButton* m_copySysctlBtn = nullptr;
@@ -91,6 +104,15 @@ class AttachProcessDialog : public QDialog {
   QPushButton* m_refreshBtn = nullptr;
   QTreeWidget* m_processTree = nullptr;
   QTableWidget* m_processTable = nullptr;
+
+  QLineEdit* m_remoteEndpointEdit = nullptr;
+  QLineEdit* m_remoteSymbolBinaryEdit = nullptr;
+  QPushButton* m_remoteSymbolBrowseBtn = nullptr;
+  QComboBox* m_remoteGdbCombo = nullptr;
+  QComboBox* m_remoteProtocolCombo = nullptr;
+  QLabel* m_remoteHintLabel = nullptr;
+  QLabel* m_remoteValidationLabel = nullptr;
+
   QPushButton* m_attachBtn = nullptr;
 };
 

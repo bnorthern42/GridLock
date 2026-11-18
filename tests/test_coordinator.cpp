@@ -369,6 +369,63 @@ void TestGdbCoordinator::testProcessScannerAndCoordinatorAttach() {
 
     childProc.kill();
     childProc.waitForFinished(1000);
+
+    // 6. Verify ProcessScanner::expandRemoteEndpoints() for single, :port, range, comma list, and invalid ports.
+    const auto singleSpec = gridlock::ProcessScanner::expandRemoteEndpoints(
+        QStringLiteral("127.0.0.1:2345"), QStringLiteral("/tmp/guest.elf"),
+        QStringLiteral("gdb-multiarch"), true);
+    QCOMPARE(singleSpec.size(), 1);
+    QCOMPARE(singleSpec[0].endpoint, QStringLiteral("127.0.0.1:2345"));
+    QCOMPARE(singleSpec[0].localSymbolBinary, QStringLiteral("/tmp/guest.elf"));
+    QCOMPARE(singleSpec[0].gdbBinary, QStringLiteral("gdb-multiarch"));
+    QVERIFY(singleSpec[0].extendedRemote);
+    QCOMPARE(singleSpec[0].mpiRank, 0);
+
+    const auto shortSpec = gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral(":1234"));
+    QCOMPARE(shortSpec.size(), 1);
+    QCOMPARE(shortSpec[0].endpoint, QStringLiteral("localhost:1234"));
+
+    const auto rangeSpec = gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("localhost:1234..1237"));
+    QCOMPARE(rangeSpec.size(), 4);
+    for (int i = 0; i < 4; ++i) {
+        QCOMPARE(rangeSpec[i].endpoint, QStringLiteral("localhost:%1").arg(1234 + i));
+        QCOMPARE(rangeSpec[i].mpiRank, i);
+    }
+
+    const auto dashRangeSpec = gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("10.0.0.5:4000-4001"));
+    QCOMPARE(dashRangeSpec.size(), 2);
+    QCOMPARE(dashRangeSpec[0].endpoint, QStringLiteral("10.0.0.5:4000"));
+    QCOMPARE(dashRangeSpec[1].endpoint, QStringLiteral("10.0.0.5:4001"));
+
+    const auto commaSpec = gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("node0:1234, node1:1235"));
+    QCOMPARE(commaSpec.size(), 2);
+    QCOMPARE(commaSpec[0].endpoint, QStringLiteral("node0:1234"));
+    QCOMPARE(commaSpec[0].mpiRank, 0);
+    QCOMPARE(commaSpec[1].endpoint, QStringLiteral("node1:1235"));
+    QCOMPARE(commaSpec[1].mpiRank, 1);
+
+    QVERIFY(gridlock::ProcessScanner::expandRemoteEndpoints(QString()).isEmpty());
+    QVERIFY(gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("localhost")).isEmpty());
+    QVERIFY(gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("localhost:0")).isEmpty());
+    QVERIFY(gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("localhost:70000")).isEmpty());
+    QVERIFY(gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("localhost:1237..1234")).isEmpty());
+    QVERIFY(gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("node0:1234,")).isEmpty());
+
+    // 7. Verify GdbRankCoordinator::attachToRemoteTargets() issues -file-exec-and-symbols and -target-select remote/extended-remote.
+    QStringList sentCmds;
+    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb,
+            &coord, [&](int, const QString& cmd) { sentCmds.append(cmd); });
+    QVERIFY(coord.attachToRemoteTargets(singleSpec));
+    QCOMPARE(coord.getCurrentBinaryPath(), QStringLiteral("/tmp/guest.elf"));
+    QVERIFY(sentCmds.contains(QStringLiteral("-file-exec-and-symbols \"/tmp/guest.elf\"")));
+    QVERIFY(sentCmds.contains(QStringLiteral("-target-select extended-remote 127.0.0.1:2345")));
+    coord.processGdbOutput(
+        0, QStringLiteral("^connected,frame={level=\"0\",addr=\"0x00401120\",func=\"main\",fullname=\"/tmp/guest.c\",line=\"15\"}\n"));
+    const gridlock::RankState remState = coord.getRankState(0);
+    QCOMPARE(remState.currentState, QStringLiteral("stopped"));
+    QCOMPARE(remState.currentFunction, QStringLiteral("main"));
+    QCOMPARE(remState.currentLine, 15);
+    coord.terminateSession();
 }
 
 /**

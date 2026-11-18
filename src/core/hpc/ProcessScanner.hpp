@@ -37,16 +37,25 @@ struct ProcessEntry {
 };
 
 /**
+ * @struct RemoteTargetSpec
+ * @brief Connection descriptor for a remote `gdbserver` or `qemu-user -g` stub.
+ */
+struct RemoteTargetSpec {
+  QString endpoint;           ///< Normalized `host:port` endpoint (e.g. `"localhost:1234"`).
+  QString localSymbolBinary;  ///< Optional host ELF binary with DWARF debug symbols.
+  QString gdbBinary = QStringLiteral("gdb");  ///< Debugger binary (`"gdb"`, `"gdb-multiarch"`, etc.).
+  bool extendedRemote = false;  ///< True for `-target-select extended-remote`, false for `remote`.
+  int mpiRank = 0;            ///< Zero-based MPI rank index assigned to this endpoint.
+};
+
+/**
  * @class ProcessScanner
- * @brief Stateless `/proc` process discovery and `kernel.yama.ptrace_scope` inspection utility.
+ * @brief Stateless `/proc` process discovery, remote endpoint expander, and `ptrace_scope` utility.
  */
 class ProcessScanner {
  public:
   /**
    * @brief Scans @p procRoot for running processes and groups sibling MPI ranks by job tag.
-   * @param procRoot Root procfs directory path (defaults to `"/proc"`, overridable for tests).
-   * @param currentUserOnly When true, returns only processes matching `geteuid()`.
-   * @return Sorted list of discovered process entries (MPI jobs first, ordered by rank).
    */
   static QList<ProcessEntry> scanRunningProcesses(
       const QString& procRoot = QStringLiteral("/proc"),
@@ -54,19 +63,33 @@ class ProcessScanner {
 
   /**
    * @brief Reads the Linux Yama LSM ptrace scope (`0` = permissive, `1` = restricted, `2` = admin, `3` = disabled).
-   * @param sysctlPath Path to `ptrace_scope` sysctl file.
-   * @return Parsed integer scope (`0..3`), or `0` if Yama is not active on the host kernel.
    */
   static int checkPtraceScope(
       const QString& sysctlPath = QStringLiteral("/proc/sys/kernel/yama/ptrace_scope"));
+
+  /**
+   * @brief Parses and expands single, port-range (`host:1234..1237`), or comma-separated remote endpoints.
+   * @param specText Raw endpoint specification string (e.g. `":1234"`, `"localhost:1234..1237"`, `"n0:1234, n1:1234"`).
+   * @param localSymbolBinary Optional local ELF binary path with DWARF symbols.
+   * @param gdbBinary Optional GDB executable name/path (`"gdb"`, `"gdb-multiarch"`).
+   * @param extendedRemote True to use `extended-remote`, false for `remote`.
+   * @return Ordered list of `RemoteTargetSpec` (Rank `0..N-1`), or empty list if any token is invalid.
+   */
+  static QList<RemoteTargetSpec> expandRemoteEndpoints(
+      const QString& specText,
+      const QString& localSymbolBinary = QString(),
+      const QString& gdbBinary = QStringLiteral("gdb"),
+      bool extendedRemote = false);
 };
 
 namespace core {
 using ::gridlock::ProcessEntry;
 using ::gridlock::ProcessScanner;
+using ::gridlock::RemoteTargetSpec;
 namespace hpc {
 using ::gridlock::ProcessEntry;
 using ::gridlock::ProcessScanner;
+using ::gridlock::RemoteTargetSpec;
 }  // namespace hpc
 }  // namespace core
 

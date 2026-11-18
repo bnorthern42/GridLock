@@ -231,4 +231,75 @@ int ProcessScanner::checkPtraceScope(const QString& sysctlPath) {
   return (ok && scope >= 0) ? scope : 0;
 }
 
+QList<RemoteTargetSpec> ProcessScanner::expandRemoteEndpoints(
+    const QString& specText,
+    const QString& localSymbolBinary,
+    const QString& gdbBinary,
+    bool extendedRemote) {
+  QList<RemoteTargetSpec> specs;
+  const QString trimmedSpec = specText.trimmed();
+  if (trimmedSpec.isEmpty()) return {};
+
+  const QString cleanSym = localSymbolBinary.trimmed();
+  const QString cleanGdb = gdbBinary.trimmed().isEmpty()
+                               ? QStringLiteral("gdb")
+                               : gdbBinary.trimmed();
+
+  const QStringList segments = trimmedSpec.split(QLatin1Char(','));
+  for (const QString& rawSeg : segments) {
+    const QString seg = rawSeg.trimmed();
+    if (seg.isEmpty()) return {};
+    const int colonIdx = seg.lastIndexOf(QLatin1Char(':'));
+    if (colonIdx < 0) return {};
+
+    QString host = seg.left(colonIdx).trimmed();
+    if (host.isEmpty()) host = QStringLiteral("localhost");
+    if (host.contains(QRegularExpression(QStringLiteral("\\s")))) return {};
+
+    const QString portPart = seg.mid(colonIdx + 1).trimmed();
+    if (portPart.isEmpty()) return {};
+
+    int startPort = -1;
+    int endPort = -1;
+    if (portPart.contains(QStringLiteral(".."))) {
+      const QStringList bounds = portPart.split(QStringLiteral(".."));
+      if (bounds.size() != 2) return {};
+      bool ok1 = false;
+      bool ok2 = false;
+      startPort = bounds[0].trimmed().toInt(&ok1);
+      endPort = bounds[1].trimmed().toInt(&ok2);
+      if (!ok1 || !ok2) return {};
+    } else if (portPart.contains(QLatin1Char('-'))) {
+      const QStringList bounds = portPart.split(QLatin1Char('-'));
+      if (bounds.size() != 2) return {};
+      bool ok1 = false;
+      bool ok2 = false;
+      startPort = bounds[0].trimmed().toInt(&ok1);
+      endPort = bounds[1].trimmed().toInt(&ok2);
+      if (!ok1 || !ok2) return {};
+    } else {
+      bool ok = false;
+      startPort = portPart.toInt(&ok);
+      if (!ok) return {};
+      endPort = startPort;
+    }
+
+    if (startPort < 1 || startPort > 65535 || endPort < 1 || endPort > 65535 ||
+        startPort > endPort || (endPort - startPort) > 1024) {
+      return {};
+    }
+
+    for (int p = startPort; p <= endPort; ++p) {
+      RemoteTargetSpec item;
+      item.endpoint = QStringLiteral("%1:%2").arg(host).arg(p);
+      item.localSymbolBinary = cleanSym;
+      item.gdbBinary = cleanGdb;
+      item.extendedRemote = extendedRemote;
+      item.mpiRank = specs.size();
+      specs.append(item);
+    }
+  }
+  return specs;
+}
+
 }  // namespace gridlock

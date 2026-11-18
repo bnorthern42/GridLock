@@ -67,6 +67,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Attaches one GDB/MI3 rank session per target `ProcessEntry` (ordered by `mpiRank`). */
   bool attachToProcesses(const QList<ProcessEntry>& targets);
 
+  /** @brief Connects one GDB/MI3 rank session per remote `gdbserver` / `qemu-user -g` endpoint. */
+  bool attachToRemoteTargets(const QList<RemoteTargetSpec>& targets);
+
   /** @brief Returns `"gdb"` as the canonical backend engine identifier. */
   QString activeEngineName() const override { return QStringLiteral("gdb"); }
 
