@@ -564,6 +564,13 @@ public:
     bool attachToProcessWorkflow(qint64 explicitPid = 0);
 
     /**
+     * @brief Attaches `m_coordinator` to one or more running processes or an entire MPI job.
+     * @param explicitPids Optional explicit list of PIDs (empty opens `AttachProcessDialog`).
+     * @return True if attachment succeeded and the workstation entered active session state.
+     */
+    bool attachToRunningProcesses(const QList<qint64>& explicitPids = {});
+
+    /**
      * @brief Populates preview fixtures for automated headless snapshots.
      */
     void loadPreviewFixture();

@@ -28,7 +28,7 @@
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PointerGraphDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
-#include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
+#include "../src/ui/dialogs/AttachProcessDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
@@ -494,12 +494,21 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     cfg.setDebuggerEngine(QStringLiteral("gdb")); QApplication::processEvents();
     QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
 
-    // 2. Verify AttachProcessDialog enumerates real /proc user processes and contains zero mpi_navier_stokes stubs.
+    // 2. Verify File -> Attach to Process... (Ctrl+Alt+P) and AttachProcessDialog /proc + MPI job grouping.
+    auto* attachAct = mainWindow.findChild<QAction*>(QStringLiteral("actionAttachProcess"));
+    QVERIFY2(attachAct != nullptr && attachAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P),
+             "MainWindow must expose #actionAttachProcess with Ctrl+Alt+P shortcut");
     QProcess helperProc;
     struct ProcGuard { QProcess* p; ~ProcGuard() { if (p && p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1000); } } } guard{&helperProc};
     helperProc.start(QStringLiteral("sleep"), {QStringLiteral("30")}); QVERIFY(helperProc.waitForStarted(3000));
     const qint64 helperPid = helperProc.processId(); gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
-    auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable")); QVERIFY(procTable != nullptr && procTable->rowCount() > 0);
+    auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable"));
+    auto* procTree = attachDlg.findChild<QTreeWidget*>(QStringLiteral("attachProcessTree"));
+    auto* filterEd = attachDlg.findChild<QLineEdit*>(QStringLiteral("attachProcessFilterEdit"));
+    auto* myProcChk = attachDlg.findChild<QCheckBox*>(QStringLiteral("attachMyProcessesOnlyCheck"));
+    auto* ptraceBanner = attachDlg.findChild<QWidget*>(QStringLiteral("attachPtraceWarningBanner"));
+    auto* attachBtn = attachDlg.findChild<QPushButton*>(QStringLiteral("attachSelectedBtn"));
+    QVERIFY(procTable && procTable->rowCount() > 0 && procTree && filterEd && myProcChk && myProcChk->isChecked() && ptraceBanner && attachBtn);
     int helperRow = -1;
     for (int r = 0; r < procTable->rowCount(); ++r) {
         for (int c = 0; c < procTable->columnCount(); ++c) {
@@ -510,6 +519,25 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     }
     QVERIFY2(helperRow >= 0, "AttachProcessDialog must include live child helper PID from /proc");
     procTable->selectRow(helperRow); QCOMPARE(attachDlg.selectedPid(), helperPid);
+    // Point AttachProcessDialog at a synthetic /proc with a 2-rank OpenMPI job and ptrace_scope=1.
+    QTemporaryDir fakeProcDir; QVERIFY(fakeProcDir.isValid());
+    const uint curUid = static_cast<uint>(::geteuid());
+    auto mkFakePid = [&](int pid, int rank) {
+        const QString d = fakeProcDir.filePath(QString::number(pid)); QVERIFY(QDir().mkpath(d));
+        { QFile f(d + "/comm"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("deadlock_ring\n"); }
+        { QFile f(d + "/status"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(QStringLiteral("Name:\tdeadlock_ring\nPPid:\t4000\nUid:\t%1\t%1\t%1\t%1\n").arg(curUid).toUtf8()); }
+        { QFile f(d + "/cmdline"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("./deadlock_ring"); }
+        if (rank >= 0) { QFile f(d + "/environ"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(QStringLiteral("OMPI_COMM_WORLD_RANK=%1\nOMPI_COMM_WORLD_SIZE=2\nOMPI_MCA_ess_base_jobid=job42\n").arg(rank).toUtf8()); }
+    };
+    mkFakePid(4102, 1); mkFakePid(4101, 0); mkFakePid(4999, -1);
+    const QString fakeSysctl = fakeProcDir.filePath(QStringLiteral("ptrace_scope"));
+    { QFile f(fakeSysctl); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("1\n"); }
+    attachDlg.setProcPaths(fakeProcDir.path(), fakeSysctl);
+    QCOMPARE(attachDlg.mpiJobGroupCount(), 1); QCOMPARE(attachDlg.ptraceScope(), 1); QVERIFY(!ptraceBanner->isHidden());
+    procTree->setCurrentItem(procTree->topLevelItem(0));
+    QCOMPARE(attachDlg.selectedPids(), (QList<qint64>{4101, 4102}));
+    filterEd->setText(QStringLiteral("4999"));
+    QVERIFY(procTree->topLevelItem(0)->isHidden() && !procTree->topLevelItem(1)->isHidden());
     // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QFile::remove(mainWindow.activeTargetBinaryPath()); QTest::qWait(400); }

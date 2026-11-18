@@ -14,16 +14,21 @@
 #include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/hpc/NativeMemoryReader.hpp"
+#include "../core/hpc/ProcessScanner.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "dialogs/AttachProcessDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
-#include "dialogs/ProjectSettingsDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
 #include "views/MemView.hpp"
 
+#include <QAction>
 #include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
+#include <QKeySequence>
+#include <QMenu>
+#include <QMenuBar>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -764,49 +769,92 @@ void MainWindow::bindLiveMemViewHandlers() {
     };
 
     m_memView->setLiveMemoryCallbacks(resolver, fetcher, pidGetter);
+
+    // Ensure File -> Attach to Process... exposes #actionAttachProcess and Ctrl+Alt+P shortcut.
+    if (menuBar()) {
+        for (QAction* topAct : menuBar()->actions()) {
+            if (QMenu* menu = topAct->menu()) {
+                for (QAction* act : menu->actions()) {
+                    if (act->text().contains(QStringLiteral("Attach to Process"), Qt::CaseInsensitive)) {
+                        act->setObjectName(QStringLiteral("actionAttachProcess"));
+                        act->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+                        act->disconnect(this);
+                        connect(act, &QAction::triggered, this, [this]() { attachToRunningProcesses(); });
+                    }
+                }
+            }
+        }
+    }
 }
 
-/**
- * @brief Attaches the active debugger coordinator to a live local OS process (`AttachProcessDialog`).
- * @param explicitPid Explicit target OS PID, or `<= 0` to prompt the user via `AttachProcessDialog`.
- * @return True if `m_coordinator->attachToProcess(pid)` succeeded and the UI latched into session mode.
- */
 bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) {
-    // Prompt user via live `/proc` process picker when no explicit PID was passed programmatically.
-    qint64 targetPid = explicitPid;
-    if (targetPid <= 0) {
+    return attachToRunningProcesses(explicitPid > 0 ? QList<qint64>{explicitPid} : QList<qint64>{});
+}
+
+bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
+    QList<ProcessEntry> targets;
+    if (explicitPids.isEmpty()) {
         AttachProcessDialog dlg(this);
         if (dlg.exec() != QDialog::Accepted) return false;
-        targetPid = dlg.selectedPid();
+        targets = dlg.selectedProcesses();
+    } else {
+        for (int i = 0; i < explicitPids.size(); ++i) {
+            if (explicitPids[i] <= 0) continue;
+            ProcessEntry e;
+            e.pid = static_cast<pid_t>(explicitPids[i]);
+            e.mpiRank = i;
+            e.mpiWorldSize = explicitPids.size();
+            e.executablePath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(e.pid)).symLinkTarget();
+            targets.append(e);
+        }
     }
-    if (targetPid <= 0) return false;
+    if (targets.isEmpty()) return false;
 
-    // Tear down any pre-existing debug session cleanly before attaching to the selected PID.
     if (m_debugSessionActive) stopTargetWorkflow();
     syncCoordinatorWithConfig();
-    if (!m_coordinator || !m_coordinator->attachToProcess(targetPid)) return false;
+    if (!m_coordinator) return false;
 
-    // Initialize Rank 0 workstation state, topology card, MPI diagnostics row, and console selector.
+    bool attached = false;
+    if (auto* gdbCoord = qobject_cast<GdbRankCoordinator*>(m_coordinator)) {
+        attached = gdbCoord->attachToProcesses(targets);
+    } else if (auto* dapCoord = qobject_cast<DapCoordinator*>(m_coordinator)) {
+        attached = dapCoord->attachToProcesses(targets);
+    } else {
+        attached = m_coordinator->attachToProcess(static_cast<qint64>(targets.first().pid));
+    }
+    if (!attached) return false;
+
+    const int rankCount = targets.size();
     m_debugSessionActive = true;
     m_focusedRank = 0;
     m_latestStates.clear();
-    RankState attachedState;
-    attachedState.rankId = 0;
-    attachedState.currentState = QStringLiteral("stopped");
-    m_latestStates[0] = attachedState;
-    if (m_serverRackView) m_serverRackView->updateRanks({attachedState});
-    if (m_mpiDiagnosticsWidget) {
-        m_mpiDiagnosticsWidget->beginLiveSession(1);
-        m_mpiDiagnosticsWidget->updateLiveRankRow(
-            0, targetPid, QStringLiteral("PAUSED"), QStringLiteral("attached"),
-            QStringLiteral("LOCAL PID"), QStringLiteral("0x00000000"), 1);
+    QList<RankState> rankStates;
+    if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->beginLiveSession(rankCount);
+    for (int r = 0; r < rankCount; ++r) {
+        RankState st;
+        st.rankId = r;
+        st.currentState = QStringLiteral("stopped");
+        m_latestStates[r] = st;
+        rankStates.append(st);
+        if (m_mpiDiagnosticsWidget) {
+            m_mpiDiagnosticsWidget->updateLiveRankRow(
+                r, static_cast<qint64>(targets[r].pid), QStringLiteral("PAUSED"),
+                QStringLiteral("attached"), QStringLiteral("LOCAL PID"),
+                QStringLiteral("0x00000000"), rankCount);
+        }
     }
-    if (m_memView) m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK 0 (PID %1)").arg(targetPid));
-    if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(1);
-    // Latch execution toolbar actions and refresh `/proc/<targetPid>` stack/heap telemetry.
+    if (m_serverRackView) m_serverRackView->updateRanks(rankStates);
+    if (m_memView) {
+        m_memView->setSourceModeLabel(
+            QStringLiteral("LIVE RANK 0 (PID %1)").arg(targets.first().pid));
+    }
+    if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(rankCount);
+    m_coordinator->requestStackAndThreads(0);
     updateDebugToolbarState();
     updateStatusTelemetry(QStringLiteral("0x00000000"),
-                          QStringLiteral("ATTACHED (PID %1)").arg(targetPid));
+                          QStringLiteral("ATTACHED (%1 RANK%2)")
+                              .arg(rankCount)
+                              .arg(rankCount > 1 ? QStringLiteral("S") : QString()));
     refreshStatusBarMemoryTelemetry();
     return true;
 }

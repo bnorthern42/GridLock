@@ -26,6 +26,7 @@
 #include <QString>
 
 #include "IBackendCoordinator.hpp"
+#include "ProcessScanner.hpp"
 
 /**
  * @enum SessionState
@@ -173,6 +174,9 @@ class DapCoordinator : public IBackendCoordinator {
 
   /** @brief Attaches an `lldb-dap` session to a running local OS process @p pid. */
   bool attachToProcess(qint64 pid) override;
+
+  /** @brief Attaches an `lldb-dap` session to one or more running `ProcessEntry` targets. */
+  bool attachToProcesses(const QList<gridlock::ProcessEntry>& targets);
 
   /** @brief Returns the path to the target binary for the active session. */
   QString getCurrentBinaryPath() const override { return m_currentBinaryPath; }

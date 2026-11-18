@@ -37,11 +37,7 @@ namespace gridlock {
 
 namespace {
 
-/**
- * @brief Escapes backslashes, quotes, and control characters for GDB/MI string literals.
- * @param str Unescaped command or expression string.
- * @return Double-quoted GDB/MI3 c-string literal.
- */
+/** @brief Escapes backslashes, quotes, and control characters for GDB/MI string literals. */
 QString escapeGdbMiString(const QString& str) {
   QString res;
   for (int i = 0; i < str.length(); ++i) {
@@ -55,34 +51,24 @@ QString escapeGdbMiString(const QString& str) {
   }
   return "\"" + res + "\"";
 }
-/**
- * @brief Maps standard x86_64 GDB register numbers (0..17) to canonical lowercase mnemonics.
- * @param idx Zero-based GDB register index (`0` = `rax`, `7` = `rsp`, `16` = `rip`).
- * @return Lowercase mnemonic string, or empty QString when @p idx is outside `0..17`.
- */
+
+/** @brief Maps standard x86_64 GDB register numbers (0..17) to canonical lowercase mnemonics. */
 QString x86RegName(int idx) {
   static const char* const kNames[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8",
                                        "r9",  "r10", "r11", "r12", "r13", "r14", "r15", "rip", "eflags"};
   return (idx >= 0 && idx < 18) ? QLatin1String(kNames[idx]) : QString();
 }
 
-/**
- * @brief Formats `address="..."` and `inst="..."` tuples from `-data-disassemble` MI output.
- */
+/** @brief Formats `address="..."` and `inst="..."` tuples from `-data-disassemble` MI output. */
 QString formatMiDisassembly(const QString& miLine) {
   QString prettyAsm;
   static const QRegularExpression instRe("address=\"([^\"]+)\".*?inst=\"([^\"]+)\"");
   auto it = instRe.globalMatch(miLine);
-  while (it.hasNext()) {
-    const auto m = it.next();
-    prettyAsm += QString("%1: %2\n").arg(m.captured(1), m.captured(2));
-  }
+  while (it.hasNext()) { const auto m = it.next(); prettyAsm += QString("%1: %2\n").arg(m.captured(1), m.captured(2)); }
   return prettyAsm;
 }
 
-/**
- * @brief Builds a GDB/MI `-break-insert` command string for `file:line` and optional @p condition.
- */
+/** @brief Builds a GDB/MI `-break-insert` command string for `file:line` and optional @p condition. */
 QString buildBreakInsertCmd(const QString& file, int line, const QString& condition, int ignoreCount = 0) {
   const QString loc = QString("%1:%2").arg(file).arg(line);
   const QString ign = ignoreCount > 0 ? QString("-i %1 ").arg(ignoreCount) : QString();
@@ -110,47 +96,60 @@ qint64 GdbRankCoordinator::getPidForRank(int rank) const {
   return 0;
 }
 
-/**
- * @brief Attaches a live `gdb --interpreter=mi3 -p <pid>` session to a running local OS process.
- * @param pid Target OS process identifier from `/proc`.
- * @return `true` if GDB started and initiated attachment to @p pid.
- */
-bool GdbRankCoordinator::attachToProcess(qint64 pid) {
-  if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
-  terminateAllSessions();
+/** @brief Attaches a single GDB/MI3 rank session to running OS process @p pid. */
+bool GdbRankCoordinator::attachToProcess(qint64 pid) { return attachToPids({pid}); }
 
-  // Resolve `gdb` executable from user settings or standard system PATH locations.
+/** @brief Attaches one GDB/MI3 rank session per target `ProcessEntry` (ordered by `mpiRank`). */
+bool GdbRankCoordinator::attachToProcesses(const QList<ProcessEntry>& targets) {
+  if (targets.isEmpty()) return false;
+  QList<ProcessEntry> ordered = targets;
+  std::sort(ordered.begin(), ordered.end(), [](const ProcessEntry& a, const ProcessEntry& b) {
+    if (a.mpiRank >= 0 && b.mpiRank >= 0 && a.mpiRank != b.mpiRank) return a.mpiRank < b.mpiRank;
+    return a.pid < b.pid;
+  });
+  QList<qint64> pids;
+  for (const ProcessEntry& e : ordered) pids.append(static_cast<qint64>(e.pid));
+  return attachToPids(pids);
+}
+
+/** @brief Spawns one GDB/MI3 session per PID in @p pids and issues `-target-attach <pid>`. */
+bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
+  if (pids.isEmpty()) return false;
+  for (qint64 pid : pids) {
+    if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
+  }
+  terminateAllSessions();
   QString gdbPath = core::ConfigManager::instance().getGdbPath().trimmed();
   if (gdbPath.isEmpty() || !QFileInfo::exists(gdbPath)) {
     gdbPath = QStandardPaths::findExecutable(gdbPath.isEmpty() ? QStringLiteral("gdb") : gdbPath);
   }
   if (gdbPath.isEmpty()) return false;
 
-  // Inspect `/proc/<pid>/exe` symlink so static ELF symbols and breakpoints bind to the binary.
-  m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
-
-  auto rp = std::make_unique<RankProcess>();
-  rp->id = 0;
-  rp->process = std::make_unique<QProcess>();
-  rp->inferiorPid = static_cast<pid_t>(pid);
-  rp->state.rankId = 0;
-  rp->state.currentState = "launching";
-  rp->state.lastFiredTimestamp = "synced";
-  m_rankPids[0] = pid;
-  connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this]() { handleGdbOutput(0); });
-  // Start MI3 frontend directly attached to target PID with debuginfod disabled.
-  rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
-                               QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3"),
-                               QStringLiteral("-p"), QString::number(pid)});
-  const bool started = rp->process->waitForStarted(2000);
-  m_processes.push_back(std::move(rp));
-  if (!started) { terminateAllSessions(); return false; }
-
-  // Disable interactive pagination/prompts and query thread groups to confirm inferior state.
-  writeCmd(0, "-gdb-set pagination off\n");
-  writeCmd(0, "-gdb-set confirm off\n");
-  writeCmd(0, "-list-thread-groups\n");
-  emit rankStateChanged(0, m_processes[0]->state);
+  m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pids.first())).symLinkTarget();
+  for (int r = 0; r < pids.size(); ++r) {
+    const qint64 pid = pids[r];
+    auto rp = std::make_unique<RankProcess>();
+    rp->id = r;
+    rp->process = std::make_unique<QProcess>();
+    rp->inferiorPid = static_cast<pid_t>(pid);
+    rp->state.rankId = r;
+    rp->state.currentState = "launching";
+    rp->state.lastFiredTimestamp = "synced";
+    m_rankPids[r] = pid;
+    connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
+    QStringList args{QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
+                     QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
+    if (!m_currentBinaryPath.isEmpty() && QFileInfo::exists(m_currentBinaryPath)) args.append(m_currentBinaryPath);
+    rp->process->start(gdbPath, args);
+    const bool started = rp->process->waitForStarted(2000);
+    m_processes.push_back(std::move(rp));
+    if (!started) { terminateAllSessions(); return false; }
+    writeCmd(r, "-gdb-set pagination off\n");
+    writeCmd(r, "-gdb-set confirm off\n");
+    writeCmd(r, QStringLiteral("-target-attach %1\n").arg(pid));
+    writeCmd(r, "-list-thread-groups\n");
+    emit rankStateChanged(r, m_processes[r]->state);
+  }
   return true;
 }
 

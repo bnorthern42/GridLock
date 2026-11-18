@@ -22,6 +22,7 @@
 
 #include "../../RankState.hpp"
 #include "IBackendCoordinator.hpp"
+#include "ProcessScanner.hpp"
 
 namespace gridlock {
 
@@ -57,8 +58,14 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Returns the live inferior OS PID for @p rank, or `0` if not running. */
   qint64 getPidForRank(int rank) const override;
 
-  /** @brief Attaches a live `gdb --interpreter=mi3 -p <pid>` session to a running OS process. */
+  /** @brief Attaches a live `gdb --interpreter=mi3` session to a running OS process. */
   bool attachToProcess(qint64 pid) override;
+
+  /** @brief Attaches one GDB/MI3 rank session per target OS PID via `-target-attach <pid>`. */
+  bool attachToPids(const QList<qint64>& pids);
+
+  /** @brief Attaches one GDB/MI3 rank session per target `ProcessEntry` (ordered by `mpiRank`). */
+  bool attachToProcesses(const QList<ProcessEntry>& targets);
 
   /** @brief Returns `"gdb"` as the canonical backend engine identifier. */
   QString activeEngineName() const override { return QStringLiteral("gdb"); }

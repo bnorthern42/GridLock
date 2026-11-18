@@ -32,13 +32,13 @@ src_files = [
   'src/core/hpc/TelemetryObfuscator.cpp', 'src/core/hpc/MemoryExporter.cpp',
   'src/core/hpc/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp',
   'src/core/managers/SessionManager.cpp', 'src/core/hpc/LspCoordinator.cpp',
-  'src/core/hpc/DeadlockAnalyzer.cpp',
+  'src/core/hpc/DeadlockAnalyzer.cpp', 'src/core/hpc/ProcessScanner.cpp',
   'src/ui/MainWindow.cpp', 'src/ui/MainWindowWorkspace.cpp',
   'src/ui/MainWindowNavigation.cpp', 'src/ui/MainWindowCohesion.cpp',
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/views/ServerRackView.cpp', 'src/ui/views/SourceCodeView.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/PointerGraphDialog.cpp', 'src/ui/EditorTabManager.cpp',
+  'src/ui/dialogs/AttachProcessDialog.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/PointerGraphDialog.cpp', 'src/ui/EditorTabManager.cpp',
   'src/ui/widgets/ProjectExplorerWidget.cpp', 'src/ui/dialogs/ProjectSettingsDialog.cpp',
   'src/ui/dialogs/ProjectWizard.cpp', 'src/ui/dialogs/XrefInspectorDialog.cpp',
   'src/ui/widgets/FileIconProvider.cpp', 'src/ui/widgets/ExpressionEvaluatorWidget.cpp',
@@ -124,7 +124,7 @@ test_src = [
   'src/core/commands/DebugCommands.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp', 'src/core/hpc/GdbRankInspection.cpp',
   'src/core/hpc/DapCoordinator.cpp', 'src/core/hpc/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/hpc/ProcessScanner.cpp', 'src/core/managers/ConfigManager.cpp'
 ]
 
 test_moc_headers = [
@@ -185,7 +185,7 @@ ui_test_src = [
   'src/ui/MainWindowNavigation.cpp', 'src/ui/MainWindowCohesion.cpp',
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/views/SourceCodeView.cpp', 'src/ui/views/EditorSyntaxHighlighter.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/PointerGraphDialog.cpp',
+  'src/ui/dialogs/AttachProcessDialog.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/PointerGraphDialog.cpp',
   'src/ui/EditorTabManager.cpp', 'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/dialogs/ProjectSettingsDialog.cpp', 'src/ui/dialogs/ProjectWizard.cpp',
   'src/ui/dialogs/XrefInspectorDialog.cpp', 'src/ui/widgets/FileIconProvider.cpp',
@@ -197,7 +197,7 @@ ui_test_src = [
   'src/ui/docks/TerminalDockWidget.cpp', 'src/ui/docks/CallStackDockWidget.cpp',
   'src/ui/widgets/MpiDiagnosticsWidget.cpp', 'src/ui/GdbConsoleWidget.cpp',
   'src/core/hpc/GdbRankCoordinator.cpp', 'src/core/hpc/GdbRankInspection.cpp',
-  'src/core/hpc/DeadlockAnalyzer.cpp', 'src/core/hpc/DapCoordinator.cpp',
+  'src/core/hpc/DeadlockAnalyzer.cpp', 'src/core/hpc/ProcessScanner.cpp', 'src/core/hpc/DapCoordinator.cpp',
   'src/core/hpc/NativeMemoryReader.cpp', 'src/core/hpc/MemoryExporter.cpp',
   'src/core/hpc/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp',
   'src/core/managers/SessionManager.cpp', 'src/core/hpc/LspCoordinator.cpp',

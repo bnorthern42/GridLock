@@ -307,6 +307,24 @@ bool DapCoordinator::attachToProcess(qint64 pid) {
   return true;
 }
 
+bool DapCoordinator::attachToProcesses(const QList<gridlock::ProcessEntry>& targets) {
+  if (targets.isEmpty()) return false;
+  QList<gridlock::ProcessEntry> ordered = targets;
+  std::sort(ordered.begin(), ordered.end(),
+            [](const gridlock::ProcessEntry& a, const gridlock::ProcessEntry& b) {
+              if (a.mpiRank >= 0 && b.mpiRank >= 0 && a.mpiRank != b.mpiRank) return a.mpiRank < b.mpiRank;
+              return a.pid < b.pid;
+            });
+  if (!attachToProcess(static_cast<qint64>(ordered.first().pid))) return false;
+  m_processCount = ordered.size();
+  m_rankToPid.clear();
+  for (int r = 0; r < ordered.size(); ++r) m_rankToPid[r] = ordered[r].pid;
+  if (m_currentBinaryPath.isEmpty() && !ordered.first().executablePath.isEmpty()) {
+    m_currentBinaryPath = ordered.first().executablePath;
+  }
+  return true;
+}
+
 /**
  * @brief Registers a breakpoint at `(file, line)` with optional @p condition and syncs via DAP `setBreakpoints`.
  */

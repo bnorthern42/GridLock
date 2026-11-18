@@ -278,6 +278,100 @@ void TestGdbCoordinator::testPauseCommand() {
 }
 
 /**
+ * @brief Verifies ProcessScanner synthetic /proc parsing, MPI job grouping, ptrace_scope, and live child attach.
+ */
+void TestGdbCoordinator::testProcessScannerAndCoordinatorAttach() {
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString procRoot = tempDir.filePath(QStringLiteral("proc"));
+    const uint uid = static_cast<uint>(::geteuid());
+
+    auto writeProcEntry = [&](int pid, int ppid, const QString& comm, const QByteArray& cmdline,
+                              const QString& exePath, const QByteArray& environBytes) {
+        const QString dirPath = QStringLiteral("%1/%2").arg(procRoot).arg(pid);
+        QVERIFY(QDir().mkpath(dirPath));
+        { QFile f(dirPath + "/comm"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(comm.toUtf8() + "\n"); }
+        { QFile f(dirPath + "/status"); QVERIFY(f.open(QIODevice::WriteOnly));
+          f.write(QStringLiteral("Name:\t%1\nPPid:\t%2\nUid:\t%3\t%3\t%3\t%3\n").arg(comm).arg(ppid).arg(uid).toUtf8()); }
+        { QFile f(dirPath + "/cmdline"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(cmdline); }
+        { QFile f(dirPath + "/exe"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(exePath.toUtf8()); }
+        { QFile f(dirPath + "/environ"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(environBytes); }
+    };
+
+    // 1. Two OpenMPI ranks (inserted out-of-order: rank 1 on PID 4102, rank 0 on PID 4101).
+    const QByteArray ringCmd = QByteArrayList{"/opt/gridlock/deadlock_ring", "--steps", "100"}.join('\0');
+    writeProcEntry(4102, 4000, QStringLiteral("deadlock_ring"), ringCmd,
+                   QStringLiteral("/opt/gridlock/deadlock_ring"),
+                   QByteArrayList{"OMPI_COMM_WORLD_RANK=1", "OMPI_COMM_WORLD_SIZE=2", "OMPI_MCA_ess_base_jobid=job99"}.join('\0'));
+    writeProcEntry(4101, 4000, QStringLiteral("deadlock_ring"), ringCmd,
+                   QStringLiteral("/opt/gridlock/deadlock_ring"),
+                   QByteArrayList{"OMPI_COMM_WORLD_RANK=0", "OMPI_COMM_WORLD_SIZE=2", "OMPI_MCA_ess_base_jobid=job99"}.join('\0'));
+
+    // 2. One MPICH rank using PMI_RANK / PMI_SIZE.
+    writeProcEntry(5200, 5100, QStringLiteral("inspection_demo"),
+                   QByteArray("/opt/gridlock/inspection_demo"),
+                   QStringLiteral("/opt/gridlock/inspection_demo"),
+                   QByteArrayList{"PMI_RANK=2", "PMI_SIZE=4", "PMI_JOBID=mpich7"}.join('\0'));
+
+    // 3. One standalone non-MPI process.
+    writeProcEntry(6300, 1, QStringLiteral("solver_serial"),
+                   QByteArrayList{"/usr/local/bin/solver_serial", "--mesh", "grid.msh"}.join('\0'),
+                   QStringLiteral("/usr/local/bin/solver_serial"),
+                   QByteArray("PATH=/usr/bin"));
+
+    const QList<gridlock::ProcessEntry> entries =
+        gridlock::ProcessScanner::scanRunningProcesses(procRoot, true);
+    QCOMPARE(entries.size(), 4);
+
+    // OpenMPI ranks 0 and 1 must be grouped under the same non-empty mpiJobTag and ordered by rank.
+    QCOMPARE(entries[0].pid, static_cast<pid_t>(4101));
+    QCOMPARE(entries[0].mpiRank, 0);
+    QCOMPARE(entries[0].mpiWorldSize, 2);
+    QCOMPARE(entries[1].pid, static_cast<pid_t>(4102));
+    QCOMPARE(entries[1].mpiRank, 1);
+    QCOMPARE(entries[1].mpiWorldSize, 2);
+    QVERIFY(!entries[0].mpiJobTag.isEmpty());
+    QCOMPARE(entries[0].mpiJobTag, entries[1].mpiJobTag);
+    QCOMPARE(entries[0].cmdline, QStringLiteral("/opt/gridlock/deadlock_ring --steps 100"));
+
+    // MPICH rank and standalone process verification.
+    QCOMPARE(entries[2].pid, static_cast<pid_t>(5200));
+    QCOMPARE(entries[2].mpiRank, 2);
+    QCOMPARE(entries[2].mpiWorldSize, 4);
+    QVERIFY(entries[2].isMpiProcess());
+    QCOMPARE(entries[3].pid, static_cast<pid_t>(6300));
+    QVERIFY(!entries[3].isMpiProcess());
+
+    // 4. Verify checkPtraceScope against synthetic sysctl files.
+    const QString sysctlFile = tempDir.filePath(QStringLiteral("ptrace_scope"));
+    QCOMPARE(gridlock::ProcessScanner::checkPtraceScope(sysctlFile), 0);
+    { QFile f(sysctlFile); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("1\n"); }
+    QCOMPARE(gridlock::ProcessScanner::checkPtraceScope(sysctlFile), 1);
+    { QFile f(sysctlFile); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("2\n"); }
+    QCOMPARE(gridlock::ProcessScanner::checkPtraceScope(sysctlFile), 2);
+
+    // 5. Attach GdbRankCoordinator to a real direct-child `sleep` process.
+    QProcess childProc;
+    childProc.start(QStringLiteral("sleep"), {QStringLiteral("30")});
+    QVERIFY(childProc.waitForStarted(3000));
+    const qint64 childPid = childProc.processId();
+    QVERIFY(childPid > 0);
+
+    gridlock::ProcessEntry liveTarget;
+    liveTarget.pid = static_cast<pid_t>(childPid);
+    liveTarget.mpiRank = 0;
+    liveTarget.mpiWorldSize = 1;
+
+    gridlock::GdbRankCoordinator coord;
+    QVERIFY(coord.attachToProcesses({liveTarget}));
+    QCOMPARE(coord.getPidForRank(0), childPid);
+    coord.terminateSession();
+
+    childProc.kill();
+    childProc.waitForFinished(1000);
+}
+
+/**
  * @brief Global test teardown hook.
  */
 void TestGdbCoordinator::cleanupTestCase() {

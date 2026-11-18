@@ -73,6 +73,11 @@ private slots:
     void testPauseCommand();
 
     /**
+     * @brief Verifies ProcessScanner /proc MPI rank parsing, ptrace_scope check, and live child attach.
+     */
+    void testProcessScannerAndCoordinatorAttach();
+
+    /**
      * @brief Post-test environment cleanup.
      */
     void cleanupTestCase();
