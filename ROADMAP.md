@@ -1,6 +1,6 @@
 # GridLock Engineering Roadmap
 
-This roadmap tracks completed milestones (`Phases 1–12` / `v0.8.65`) and upcoming releases for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
+This roadmap tracks completed milestones (`Phases 1–12` / `v0.8.66`) and upcoming releases for GridLock, a C++23 and Qt6 MPI debugger and ELF binary inspector on Linux.
 
 ---
 

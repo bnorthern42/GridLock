@@ -5,6 +5,14 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.66] - 2026-11-19
+
+### Fixed
+- **AppImage Qt6 Platform Plugins (`wayland` & `xcb`):** Bundled `libqwayland*.so` (`wayland-decoration-client`, `wayland-graphics-integration-client`, `wayland-shell-integration`), `xcbglintegrations`, `qt.conf`, and `libxcb-cursor.so.0` (with fixed-point recursive `ldd` plugin dependency collection and a build-time verification gate) so `GridLock-0.8.66-x86_64.AppImage` launches cleanly on both native Wayland compositors and X11/XWayland systems without requiring `libxcb-cursor0` on the host.
+
+### Added
+- **Documentation:** Added sanitized screenshots and usage documentation in `README.md` and `docs/USER_GUIDE.md` for **Attach to Running Process (`/proc` MPI job grouping)** and **Remote GDB Target (`target remote` / `extended-remote` for `qemu-user -g` and `gdbserver`)**.
+
 ## [0.8.65] - 2026-11-18
 
 ### Added
