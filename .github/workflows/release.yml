@@ -61,6 +61,7 @@ jobs:
             elfutils \
             file \
             xvfb \
+            xauth \
             libgl1-mesa-dev \
             libgl1-mesa-dri \
             libwayland-client0 \
@@ -108,6 +109,7 @@ jobs:
 
       - name: Compile Qt-Advanced-Stylesheets
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule update --init --recursive || true
           cmake -S external/Qt-Advanced-Stylesheets -B external/Qt-Advanced-Stylesheets/build -GNinja \
             -DQT_VERSION_MAJOR=6 \
