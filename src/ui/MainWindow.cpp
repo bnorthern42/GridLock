@@ -23,6 +23,7 @@
 #include "GdbConsoleWidget.hpp"
 #include "dialogs/CommandPaletteDialog.hpp"
 #include "dialogs/PreferencesDialog.hpp"
+#include "dialogs/ProgrammerCalculatorDialog.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizard.hpp"
 #include "docks/TerminalDockWidget.hpp"
@@ -670,6 +671,10 @@ void MainWindow::setupMenu() {
   connect(runTestsAction, &QAction::triggered, this, &MainWindow::runTargetRequested);
   QAction *ptrGraphAction = toolsMenu->addAction("Pointer & Struct Graph Visualizer...");
   connect(ptrGraphAction, &QAction::triggered, this, [this]() { openPointerGraphVisualizer(); });
+  QAction *progCalcAction = toolsMenu->addAction(QStringLiteral("Programmer's Calculator..."));
+  progCalcAction->setObjectName(QStringLiteral("actionProgrammerCalculator"));
+  progCalcAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
+  connect(progCalcAction, &QAction::triggered, this, &MainWindow::openProgrammerCalculator);
 
   // Construct Help menu with comprehensive About dialog and attribution metadata.
   QMenu *helpMenu = menuBar->addMenu("&Help");
@@ -858,6 +863,10 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
       attachToProcessWorkflow();
       return true;
     }
+    if (ke->key() == Qt::Key_C && mods == (Qt::ControlModifier | Qt::AltModifier)) {
+      openProgrammerCalculator();
+      return true;
+    }
     if (ke->key() == Qt::Key_P && mods == Qt::ControlModifier) {
       if (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible()) {
         openCommandPalette(QString());
@@ -875,6 +884,16 @@ void MainWindow::openCommandPalette(const QString &initialPrefix) {
   }
   m_commandPaletteDialog->populateFromMainWindow(this);
   m_commandPaletteDialog->openWithPrefix(initialPrefix);
+}
+/** @brief Opens or raises the floating Programmer's Calculator tool window. */
+void MainWindow::openProgrammerCalculator() {
+  if (!m_programmerCalculatorDialog) {
+    m_programmerCalculatorDialog = new ProgrammerCalculatorDialog(this);
+  }
+  m_programmerCalculatorDialog->reloadStyle();
+  m_programmerCalculatorDialog->show();
+  m_programmerCalculatorDialog->raise();
+  m_programmerCalculatorDialog->activateWindow();
 }
 /** @brief Records @p path in SessionManager MRU history and refreshes File -> Recent Sessions. */
 void MainWindow::recordRecentWorkspace(const QString &path) {

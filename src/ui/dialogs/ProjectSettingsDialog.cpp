@@ -9,6 +9,7 @@
  */
 
 #include "ProjectSettingsDialog.hpp"
+#include "ProgrammerCalculatorDialog.hpp"
 #include "../utils/FileDialogHelper.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 
@@ -29,6 +30,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
@@ -244,6 +246,45 @@ ProjectSettingsDialog::ProjectSettingsDialog(QWidget* parent) : QDialog(parent) 
     form->addRow(QStringLiteral("MPI Ranks (-np):"), mpiRow);
     rootLayout->addWidget(card, 1);
 
+    // Programmer's Calculator default configuration card (width, signed mode, and inline launcher).
+    auto* calcCard = new QGroupBox(QStringLiteral("Programmer's Calculator"), this);
+    auto* calcForm = new QFormLayout(calcCard);
+    calcForm->setContentsMargins(10, 12, 10, 10);
+    calcForm->setSpacing(6);
+    m_calcWidthCombo = new QComboBox(calcCard);
+    m_calcWidthCombo->setObjectName(QStringLiteral("calcDefaultWidthCombo"));
+    m_calcWidthCombo->setFixedHeight(24);
+    m_calcWidthCombo->addItem(QStringLiteral("64-bit (QWORD)"), 64);
+    m_calcWidthCombo->addItem(QStringLiteral("32-bit (DWORD)"), 32);
+    m_calcWidthCombo->addItem(QStringLiteral("16-bit (WORD)"), 16);
+    m_calcWidthCombo->addItem(QStringLiteral("8-bit (BYTE)"), 8);
+    m_calcSignedCheck = new QCheckBox(QStringLiteral("Default Signed Decimal Display"), calcCard);
+    m_calcSignedCheck->setObjectName(QStringLiteral("calcDefaultSignedCheck"));
+    m_openCalcBtn = new QPushButton(QStringLiteral("Open Programmer's Calculator..."), calcCard);
+    m_openCalcBtn->setObjectName(QStringLiteral("openProgrammerCalculatorBtn"));
+    m_openCalcBtn->setFixedHeight(24);
+    QSettings calcSettings(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    const int savedCalcWidth = calcSettings.value(QStringLiteral("tools/calcDefaultWidth"), 64).toInt();
+    const int widthIdx = m_calcWidthCombo->findData(savedCalcWidth);
+    if (widthIdx >= 0) m_calcWidthCombo->setCurrentIndex(widthIdx);
+    m_calcSignedCheck->setChecked(calcSettings.value(QStringLiteral("tools/calcDefaultSigned"), false).toBool());
+    connect(m_openCalcBtn, &QPushButton::clicked, this, [this]() {
+        if (QWidget* pw = parentWidget()) {
+            if (QMetaObject::invokeMethod(pw, "openProgrammerCalculator")) return;
+        }
+        auto* dlg = new ProgrammerCalculatorDialog(parentWidget());
+        dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+        dlg->show();
+    });
+    auto* calcRow = new QHBoxLayout();
+    calcRow->setContentsMargins(0, 0, 0, 0);
+    calcRow->setSpacing(8);
+    calcRow->addWidget(m_calcWidthCombo);
+    calcRow->addWidget(m_calcSignedCheck, 1);
+    calcRow->addWidget(m_openCalcBtn);
+    calcForm->addRow(QStringLiteral("Default Width:"), calcRow);
+    rootLayout->addWidget(calcCard);
+
     // Construct 24px-high Ok/Cancel dialog button strip.
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     for (QAbstractButton* btn : buttons->buttons()) {
@@ -350,6 +391,11 @@ void ProjectSettingsDialog::accept() {
     ps.mpiRanks = m_mpiRanksSpin->value();
     ps.mpiArgs = m_mpiArgsEdit->text().trimmed();
     cfg.saveProjectSettings(ps);
+
+    // Persist Programmer's Calculator default bit-width and signed display settings.
+    QSettings calcSettings(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    if (m_calcWidthCombo) calcSettings.setValue(QStringLiteral("tools/calcDefaultWidth"), m_calcWidthCombo->currentData().toInt());
+    if (m_calcSignedCheck) calcSettings.setValue(QStringLiteral("tools/calcDefaultSigned"), m_calcSignedCheck->isChecked());
 
     // Mirror updated MPI rank count and flags into global DebuggerSettings defaults.
     auto ds = cfg.getDebuggerSettings();

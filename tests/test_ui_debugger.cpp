@@ -25,11 +25,13 @@
 #include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/dialogs/AttachProcessDialog.hpp"
 #include "../src/ui/dialogs/CommandPaletteDialog.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PointerGraphDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
+#include "../src/ui/dialogs/ProgrammerCalculatorDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
@@ -243,42 +245,27 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
     gridlock::ui::PreferencesDialog prefsDialog(&mainWindow); prefsDialog.show(); QApplication::processEvents();
     QFont proportionalFont(QStringLiteral("Cantarell"), 11); proportionalFont.setFixedPitch(false);
     for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
-        child->setFont(proportionalFont);
-        QEvent fontEv(QEvent::FontChange); QApplication::sendEvent(child, &fontEv);
-        QEvent styleEv(QEvent::StyleChange); QApplication::sendEvent(child, &styleEv);
+        child->setFont(proportionalFont); QEvent fontEv(QEvent::FontChange); QApplication::sendEvent(child, &fontEv); QEvent styleEv(QEvent::StyleChange); QApplication::sendEvent(child, &styleEv);
     }
     QApplication::processEvents();
-
     // Verify all child widgets in TerminalDockWidget remain fixed-pitch and span >= 95% of dock width.
     QVERIFY2(terminalDock->areAllChildWidgetsFixedPitch(), "TerminalDockWidget eventFilter must restore fixed-pitch font");
-    for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
-        if (child->isVisible() && child->width() > 80) {
-            QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100,
-                     qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
-        }
-    }
+    for (QWidget* child : terminalDock->findChildren<QWidget*>())
+        if (child->isVisible() && child->width() > 80) QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100, qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
     prefsDialog.close();
-
     // Part 2: Light Mode Contrast Verification.
-    gridlock::core::ThemeManager::instance().setDarkMode(false);
-    explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}}); QApplication::processEvents();
-    auto* symTable = explorer->findChild<QTableWidget*>();
-    QVERIFY(symTable != nullptr && symTable->rowCount() > 0 && symTable->item(0, 0) != nullptr);
+    gridlock::core::ThemeManager::instance().setDarkMode(false); explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}}); QApplication::processEvents();
+    auto* symTable = explorer->findChild<QTableWidget*>(); QVERIFY(symTable != nullptr && symTable->rowCount() > 0 && symTable->item(0, 0) != nullptr);
     const auto luminance = [](const QColor& c) { return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000; };
     const int contrastDiff = std::abs(luminance(symTable->item(0, 0)->foreground().color()) - luminance(symTable->palette().color(QPalette::Base)));
     QVERIFY2(contrastDiff >= 80, qPrintable(QStringLiteral("Light mode symbol contrast too low (%1)").arg(contrastDiff)));
     gridlock::core::ThemeManager::instance().setDarkMode(true); QApplication::processEvents();
-
     // Part 3: Selecting a Docset in ReferenceManualWidget Updates Right Pane.
     bottomTabs->setCurrentWidget(refManual); refManual->lookupSymbol(QStringLiteral("MPI_Init")); QApplication::processEvents();
-    auto* docCombo = refManual->findChild<QComboBox*>();
-    auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
+    auto* docCombo = refManual->findChild<QComboBox*>(); auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
     QVERIFY(docCombo != nullptr && docBrowser != nullptr && docBrowser->toHtml().contains(QStringLiteral("MPI_Init")));
     int targetIdx = -1;
-    for (int i = 0; i < docCombo->count(); ++i) {
-        const QString label = docCombo->itemText(i);
-        if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) { targetIdx = i; break; }
-    }
+    for (int i = 0; i < docCombo->count(); ++i) { const QString label = docCombo->itemText(i); if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) { targetIdx = i; break; } }
     if (targetIdx >= 0) { docCombo->setCurrentIndex(targetIdx); QApplication::processEvents(); QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")), "Switching docset category must auto-preview first entry"); }
 }
 
@@ -289,35 +276,25 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
  */
 void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildCommands() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
-    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
-    auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
-    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
+    auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
     QVERIFY(targetCombo != nullptr && terminalDock != nullptr && disasmView != nullptr);
-
     // 1. Select "deadlock_ring" via MainWindow::selectTargetByName (and verify combo sync).
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName('deadlock_ring') must succeed");
-    QApplication::processEvents();
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName('deadlock_ring') must succeed"); QApplication::processEvents();
     QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")) && mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")), qPrintable(mainWindow.activeTargetSourcePath()));
-
     // Verify active SourceCodeView in EditorTabManager loaded deadlock_ring.cpp containing MPI_Send & MPI_Recv.
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(editorTabs && editorTabs->currentSourceCodeView());
-    const QString editorText = editorTabs->currentSourceCodeView()->toPlainText();
-    QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")), "Must display deadlock_ring.cpp");
-
+    const QString editorText = editorTabs->currentSourceCodeView()->toPlainText(); QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")), "Must display deadlock_ring.cpp");
     // Verify DisassemblyView updated its decompiler/disassembly preview to reflect deadlock_ring's MPI_Send/MPI_Recv.
     const QString decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
     QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv")), qPrintable(decompText.left(400)));
-
     // 2. Verify Clean & Build commands operate on deadlock_ring.cpp / deadlock_ring (NOT inspection_demo.cpp).
     mainWindow.cleanTargetWorkflow(); QApplication::processEvents();
     QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("deadlock_ring")) && !terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo")), qPrintable(terminalDock->lastSentCommand()));
-    mainWindow.buildTargetWorkflow(); QApplication::processEvents();
-    const QString buildCmd = terminalDock->lastSentCommand();
+    mainWindow.buildTargetWorkflow(); QApplication::processEvents(); const QString buildCmd = terminalDock->lastSentCommand();
     QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) && buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")), qPrintable(buildCmd));
-
     // 3. Switch back to "inspection_demo" and verify source path and build command restore inspection_demo.cpp.
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName('inspection_demo') must succeed");
-    QApplication::processEvents(); QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
+    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName('inspection_demo') must succeed"); QApplication::processEvents();
+    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
     mainWindow.buildTargetWorkflow(); QApplication::processEvents(); QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")), qPrintable(terminalDock->lastSentCommand()));
 }
 
@@ -330,20 +307,14 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     // Ensure a source file is open in EditorTabManager.
     mainWindow.selectTargetByName(QStringLiteral("inspection_demo")); QApplication::processEvents();
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(editorTabs != nullptr && disasmView != nullptr && editorTabs->currentSourceCodeView() != nullptr);
-    auto* srcView = editorTabs->currentSourceCodeView();
-
+    QVERIFY(editorTabs != nullptr && disasmView != nullptr && editorTabs->currentSourceCodeView() != nullptr); auto* srcView = editorTabs->currentSourceCodeView();
     // 1. Verify Edit menu actions & focus-aware execution (Select All, Copy, Toggle Comment).
-    srcView->setFocus();
-    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")), "Select All must succeed");
-    QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Copy")), "Copy must succeed");
-
+    srcView->setFocus(); QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")) && mainWindow.triggerEditMenuAction(QStringLiteral("Copy")), "Select All and Copy must succeed");
     // Toggle line comment on line 1 and verify '//' prefix is inserted and removed.
     QTextCursor tc = srcView->textCursor(); tc.movePosition(QTextCursor::Start); srcView->setTextCursor(tc);
     const QString origFirstLine = srcView->document()->firstBlock().text();
     QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")) && srcView->document()->firstBlock().text() != origFirstLine);
     QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment"))); QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
-
     // 2. Verify dynamic UI Font Size & Code Font Size scaling (no hardcoded 11px lock).
     mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16); QApplication::processEvents();
     const QString activeQss = gridlock::core::ThemeManager::instance().currentStyleSheet();
@@ -351,18 +322,14 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     QCOMPARE(srcView->font().pointSize(), 16); QCOMPARE(disasmView->codeFontPointSize(), 16);
     // Restore default typography settings after scaling verification.
     mainWindow.applyTypographySettings(QStringLiteral("Inter"), 11, QStringLiteral("JetBrains Mono"), 10); QApplication::processEvents();
-
     // 3. Verify 6 curated color themes and zero underscores in PreferencesDialog Color Theme combo.
-    QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6);
-    gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
+    QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6); gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
     auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo")); QVERIFY(themeCombo != nullptr && themeCombo->count() >= 6);
     for (int i = 0; i < themeCombo->count(); ++i) QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));
-
     // 4. Generate 6 offscreen 1440x900 PNG screenshots of each curated theme in an isolated QTemporaryDir.
     struct ThemeShotEntry { QString themeId; QString fileName; };
     const std::vector<ThemeShotEntry> shots = {{QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}, {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")}, {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")}, {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")}, {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")}, {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")}};
-    QTemporaryDir tempThemeShotDir; QVERIFY(tempThemeShotDir.isValid());
-    const QString docsShotDir = tempThemeShotDir.path();
+    QTemporaryDir tempThemeShotDir; QVERIFY(tempThemeShotDir.isValid()); const QString docsShotDir = tempThemeShotDir.path();
     // Export and verify each rendered theme PNG screenshot.
     for (const auto& shot : shots) {
         gridlock::core::ThemeManager::instance().setTheme(shot.themeId, !shot.themeId.contains(QStringLiteral("light")), false);
@@ -943,4 +910,40 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
     QVERIFY(attachOpened);
     for (const QString& w : s_capturedWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
+}
+
+/** @brief Verifies ProgrammerCalculatorDialog base conversion, width masking, bit grid, BSWAP, expressions, Preferences, and Command Palette launch. */
+void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
+    using gridlock::ui::CommandPaletteDialog; using gridlock::ui::ProgrammerCalculatorDialog;
+    // 1. Hex/Dec/Oct/Bin synchronization at 32-bit unsigned and signed modes (0xDEADBEEF).
+    ProgrammerCalculatorDialog calc; calc.setWordWidth(32); calc.setSigned(false);
+    calc.hexEdit()->setText(QStringLiteral("0xDEADBEEF")); QApplication::processEvents();
+    QCOMPARE(calc.value(), 0xDEADBEEFULL); QCOMPARE(calc.decText(), QStringLiteral("3735928559")); QCOMPARE(calc.octText(), QStringLiteral("33653337357"));
+    QVERIFY(calc.binText().startsWith(QStringLiteral("1101 1110 1010 1101")) && calc.binText().endsWith(QStringLiteral("1110 1111")));
+    calc.setSigned(true); QCOMPARE(calc.decText(), QStringLiteral("-559038737"));
+    // 2. Word-width masking (64 -> 16 -> 8-bit) and interactive bit-toggle grid.
+    calc.setSigned(false); calc.setWordWidth(64); calc.setValue(0x11223344DEADBEEFULL);
+    calc.setWordWidth(16); QCOMPARE(calc.value(), 0xBEEFULL); QVERIFY(!calc.bitButton(16)->isEnabled() && calc.bitButton(15)->isEnabled());
+    calc.setWordWidth(8); QCOMPARE(calc.value(), 0xEFULL); QVERIFY(!calc.bitButton(8)->isEnabled() && calc.bitButton(0)->isEnabled());
+    calc.bitButton(0)->click(); QCOMPARE(calc.value(), 0xEEULL); QCOMPARE(calc.hexText(), QStringLiteral("0xEE"));
+    // 3. Bitwise/shift expression evaluation and BSWAP endianness toggle.
+    calc.setWordWidth(32); QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("(0x10 << 4) | 0x05")));
+    QCOMPARE(calc.value(), 0x105ULL); QCOMPARE(calc.hexText(), QStringLiteral("0x105"));
+    calc.setValue(0x12345678ULL); calc.byteSwap(); QCOMPARE(calc.value(), 0x78563412ULL);
+    // 4. Preferences (ProjectSettingsDialog) controls + Command Palette (> Programmer) & Ctrl+Alt+C with zero shortcut warnings.
+    static QStringList s_calcWarnings; s_calcWarnings.clear();
+    const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_calcWarnings.append(m); });
+    struct Guard { QtMessageHandler p; ~Guard() { qInstallMessageHandler(p); } } g{prevH};
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
+    gridlock::ui::ProjectSettingsDialog psDlg(&mw);
+    QVERIFY(psDlg.findChild<QComboBox*>(QStringLiteral("calcDefaultWidthCombo")) && psDlg.findChild<QCheckBox*>(QStringLiteral("calcDefaultSignedCheck")) && psDlg.findChild<QPushButton*>(QStringLiteral("openProgrammerCalculatorBtn")));
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
+    auto* pal = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(pal && pal->isVisible());
+    pal->setFilterText(QStringLiteral("> Programmer")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Programmer's Calculator")));
+    QTest::keyClick(pal->inputEdit(), Qt::Key_Return); QApplication::processEvents();
+    auto* floatingCalc = mw.programmerCalculatorDialog();
+    QVERIFY(floatingCalc && floatingCalc->isVisible() && !floatingCalc->isModal() && (floatingCalc->windowFlags() & Qt::Window));
+    floatingCalc->close(); QTest::keyClick(&mw, Qt::Key_C, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
+    QVERIFY(floatingCalc->isVisible()); floatingCalc->close();
+    for (const QString& w : s_calcWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }

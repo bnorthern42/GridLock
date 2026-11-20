@@ -72,6 +72,7 @@ class SpackManager;
 class ExpressionEvaluatorWidget;
 class MpiDiagnosticsWidget;
 class CommandPaletteDialog;
+class ProgrammerCalculatorDialog;
 
 /**
  * @class MainWindow
@@ -127,6 +128,7 @@ public:
     CallStackDockWidget* callStackDockWidget() const { return m_callStackDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     CommandPaletteDialog* commandPaletteDialog() const { return m_commandPaletteDialog; }
+    ProgrammerCalculatorDialog* programmerCalculatorDialog() const { return m_programmerCalculatorDialog; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
     int configuredRankCount() const { return m_rankCountSpin ? m_rankCountSpin->value() : 4; }
@@ -633,6 +635,8 @@ public slots:
     void openCommandPalette(const QString& initialPrefix = QStringLiteral(">"));
     /** @brief Opens the unified Command Palette in Quick Open File mode (Ctrl+P). */
     void openQuickOpenPalette() { openCommandPalette(QString()); }
+    /** @brief Opens or raises the floating Programmer's Calculator tool window (Ctrl+Alt+C). */
+    void openProgrammerCalculator();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -763,6 +767,7 @@ private:
     QPoint m_dragOffset;
     class PointerGraphDialog* m_pointerGraphDialog = nullptr;
     CommandPaletteDialog* m_commandPaletteDialog = nullptr;
+    ProgrammerCalculatorDialog* m_programmerCalculatorDialog = nullptr;
 };
 
 }  // namespace gridlock::ui

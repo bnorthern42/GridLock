@@ -168,5 +168,8 @@ private slots:
 
     /** @brief Verifies CommandPaletteDialog subsequence fuzzy scoring, prefix filtering (>, @, #), keyboard navigation, and Ctrl+Shift+P / Ctrl+P shortcuts. */
     void testCommandPaletteFuzzyAndNavigation();
+
+    /** @brief Verifies ProgrammerCalculatorDialog Hex/Dec/Oct/Bin conversion, word width masking, 64-bit toggle grid, BSWAP, expression evaluator, Command Palette, and Preferences integration. */
+    void testProgrammerCalculatorBasesAndBits();
 };
 

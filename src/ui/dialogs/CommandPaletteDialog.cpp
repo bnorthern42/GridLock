@@ -657,6 +657,9 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("View: Switch to MPI Cluster Perspective"),
                        QStringLiteral("Focus MPI deadlock diagnostics, differential watch grid, and server rack"),
                        QStringLiteral("Perspective"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("MPI")); });
+    registerActionItem(QStringLiteral("Programmer's Calculator"),
+                       QStringLiteral("Floating Hex / Dec / Oct / Bin binary calculator, 64-bit toggle grid, and BSWAP"),
+                       QStringLiteral("Ctrl+Alt+C"), [mainWindow]() { mainWindow->openProgrammerCalculator(); });
 
     // 2. Collect Workspace & Tutorial Files (Category::File) with cached directory indexing.
     QString wsRoot = mainWindow->activeWorkspaceDirectory();

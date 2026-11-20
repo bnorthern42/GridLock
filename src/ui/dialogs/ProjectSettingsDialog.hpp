@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QLineEdit>
@@ -22,7 +23,7 @@ namespace gridlock::ui {
 
 /**
  * @class ProjectSettingsDialog
- * @brief Form dialog for managing active project execution parameters.
+ * @brief Form dialog for managing active project execution parameters and developer tool defaults.
  */
 class ProjectSettingsDialog : public QDialog {
     Q_OBJECT
@@ -35,7 +36,7 @@ public:
     explicit ProjectSettingsDialog(QWidget* parent = nullptr);
 
     /**
-     * @brief Persists modified settings to ConfigManager upon user confirmation and syncs toolbar state.
+     * @brief Persists modified settings to ConfigManager and QSettings upon user confirmation and syncs toolbar state.
      */
     void accept() override;
 
@@ -47,6 +48,9 @@ private:
     QPushButton* m_workingDirBrowseBtn{nullptr}; ///< Browse button opening workspace-aware directory picker.
     QSpinBox* m_mpiRanksSpin{nullptr};           ///< Spinbox for workspace MPI rank count (-np).
     QLineEdit* m_mpiArgsEdit{nullptr};           ///< Input field for extra mpirun / mpiexec flags.
+    QComboBox* m_calcWidthCombo{nullptr};        ///< Default Programmer's Calculator word width selector (64/32/16/8-bit).
+    QCheckBox* m_calcSignedCheck{nullptr};       ///< Default Programmer's Calculator signed decimal display toggle.
+    QPushButton* m_openCalcBtn{nullptr};         ///< Inline launcher button opening the floating Programmer's Calculator.
 };
 
 /**
