@@ -12,7 +12,7 @@ If you have never used a multi-process debugger before, start here. Unlike a sin
 
 ### Step 1: Select or Build a Target Binary
 Look at the top-left of the main toolbar (outlined in cyan above):
-1. Click the **`TARGET:`** dropdown. All 7 primary MPI tutorials (`inspection_demo (MPI)` through `simd_struct_watch (MPI)`) are pre-listed. Selecting one opens its `.cpp` source file in the center editor.
+1. Click the **`TARGET:`** dropdown. The bundled MPI showcase tutorials (`inspection_demo (MPI)` through `simd_struct_watch (MPI)`) are pre-listed, and `tutorial/catchpoint_exceptions.cpp` (Tutorial 8) can be opened via **`File -> Open Source File`** or **`Ctrl+P`**. Selecting a target opens its `.cpp` source file in the center editor.
    * To open your own file or binary instead, choose **`Open ELF / Binary...`** at the bottom of **`TARGET:`**, or use **`File -> Open Source File`**.
 2. Click **`⚙ Build`** on the toolbar (or press **`Ctrl+B`**, or choose **`Tools -> Build Target`**) to compile the target with debug symbols (`mpicxx -g -O0`). Clicking **`▶ Run Target`** also compiles any unbuilt tutorial file automatically.
 
@@ -413,6 +413,72 @@ struct alignas(16) SimdMatrixPacket {
      * Offset `+0x50..0x6F`: 32 bytes of IEEE-754 `double lane_Norms[4]`.
    * Set **`Base:`** to `0` and **`Target:`** to `1`, then click **`Diff Ranks`**: rank-invariant bytes (`CA FE`, `04`, upper flag bytes) stay normal, while every rank-dependent byte (`magic[2]`, `packet_id`, `flags` low byte, `matrix`, `lane_Norms`) lights up in red.
    * Set **`Type:`** to `Float` and click **`Export`** to write the slice to `.csv` or `.bin`, then press **`F5`** to hit line 64 and verify `global_trace` matches across all 4 ranks.
+
+---
+
+## Tutorial 8: C++ Exceptions, Syscalls, and Signal Catchpoints (`tutorial/catchpoint_exceptions.cpp`)
+
+### What This Program Demonstrates
+`tutorial/catchpoint_exceptions.cpp` is a 4-rank MPI target designed to practice **`Debug -> Signals & Catchpoints...`** (`Ctrl+Alt+S`):
+* **Rank 0** calls `open("/dev/null", O_RDONLY)` (`openat` syscall), allocates a 4096-byte anonymous `mmap` scratch page, and sends itself `SIGUSR1` (`std::raise(SIGUSR1)`).
+* **Rank 1** throws and recovers locally from a benign `MeshBoundaryException` inside `validateHaloExchange()`.
+* **Rank 2** throws a critical `SolverConvergenceException`, logs its residual norm inside `solveSubdomain()`, and rethrows it (`throw;`) to the outer driver.
+
+### Source Code (`tutorial/catchpoint_exceptions.cpp`, lines 71-109)
+```cpp
+void validateHaloExchange(int rank) {
+  if (rank == 1) {
+    throw MeshBoundaryException("Rank 1 east ghost-layer index out of bounds (clamped to boundary)");
+  }
+}
+
+void solveSubdomain(int rank) {
+  try {
+    if (rank == 2) {
+      throw SolverConvergenceException("Rank 2 BiCGSTAB residual exceeded tolerance (1.42e+03)", 1420.0);
+    }
+  } catch (const SolverConvergenceException& ex) {
+    std::printf("[Rank %d] Inner solver catch logged residual=%.2f; rethrowing to driver...\n",
+                rank, ex.residualNorm());
+    throw;  // Rethrow site targeted by GDB `-catch-rethrow`
+  }
+}
+
+void performCoordinatorSyscallAndSignalProbe(int rank) {
+  if (rank != 0) return;
+
+  // Trigger `openat` syscall catchpoint on Rank 0.
+  const int fd = ::open("/dev/null", O_RDONLY);
+  if (fd >= 0) {
+    ::close(fd);
+  }
+
+  // Trigger `mmap` syscall catchpoint on Rank 0.
+  void* scratchPage = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (scratchPage != MAP_FAILED) {
+    *static_cast<int*>(scratchPage) = 42;
+    ::munmap(scratchPage, 4096);
+  }
+
+  // Trigger `SIGUSR1` disposition matrix handling on Rank 0.
+  std::signal(SIGUSR1, handleSigUsr1Heartbeat);
+  std::raise(SIGUSR1);
+}
+```
+
+### Click-by-Click Walkthrough
+1. Open **`tutorial/catchpoint_exceptions.cpp`** (`File -> Open Source File` or `Ctrl+P` -> `catchpoint_exceptions.cpp`), set **`RANKS (-np):`** to **`4`**, and press **`Ctrl+B`** (`Tools -> Build Target`) if not yet compiled.
+2. Press **`Ctrl+Alt+S`** (or choose **`Debug -> Signals & Catchpoints...`**) to open `SignalCatchpointDialog`.
+3. Configure **`SIGUSR1`** in the **`Signal Disposition Matrix`** tab:
+   * Type `SIGUSR1` in the filter box and uncheck **`Stop`** while leaving **`Print`** and **`Pass`** checked (or click **`HPC Quiet Defaults`** to quiet `SIGUSR1`, `SIGUSR2`, and `SIGPIPE` in one click).
+   * Rank 0's `raise(SIGUSR1)` telemetry heartbeat will now pass through to `handleSigUsr1Heartbeat` without stalling the parallel run.
+4. Add exception and syscall rules in the **`Catchpoints`** tab:
+   * Select **C++ `throw`**, type `SolverConvergenceException` into the regex filter box, and click **`Add C++ Catchpoint`** (`-catch-throw -r SolverConvergenceException`). Rank 1's benign `MeshBoundaryException` is skipped while Rank 2 pauses at line `80`.
+   * Select **C++ `rethrow`** and click **`Add C++ Catchpoint`** (`-catch-rethrow`) so Rank 2 also pauses at line `85` (`throw;`) before unwinding out of `solveSubdomain()`.
+   * Toggle the **`openat`** or **`mmap`** preset chip under **Linux Syscalls** and click **`Add Syscall Catchpoint`** (`catch syscall openat`) to intercept Rank 0 inside `performCoordinatorSyscallAndSignalProbe()`.
+5. Click **`▶ Run Target`** (`Alt+R`) and step through the triggered catchpoints:
+   * Inspect **`CALL STACK`** on Rank 2 at line `80` and line `85`, then click **`Remove`** next to each catchpoint rule in `SignalCatchpointDialog` and press **`F5`** (`⏭ Continue`) so all 4 ranks pass `MPI_Barrier` and print `SIGUSR1 heartbeats=1` in **`Program Output`**.
 
 ---
 

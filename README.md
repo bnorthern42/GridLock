@@ -70,23 +70,24 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 
 ---
 
-## Feature Summary (`v0.8.66`)
+## Feature Summary (`v0.8.7`)
 
-* **Execution & Target Modes**:
+* **Execution, Checkpoints & Target Modes**:
   * **Local MPI & ELF64 Launch**: MPMD `mpirun` / `mpiexec` orchestration (`1..256` ranks) over POSIX FIFOs via `GdbRankCoordinator` (`gdb`, `cuda-gdb`, `rocgdb`) or JSON-RPC via `DapCoordinator` (`lldb-dap`), with OpenMP `OMP_NUM_THREADS` / `OMP_WAIT_POLICY=PASSIVE` auto-tuning and time-travel reverse execution (`⏺ Record`, `↶ Step Back`, `⏮ Rev Continue`).
-  * **Attach to Running Process (`Ctrl+Alt+P`)**: `/proc` process scanner (`ProcessScanner`) grouping live OpenMPI, MPICH/PMI, PMIx, MVAPICH2, and SLURM jobs under expandable `MPI Job (N ranks)` headers, with `kernel.yama.ptrace_scope` diagnostics and detach-on-stop (`-target-detach`).
-  * **Remote Targets (`target remote` / `extended-remote`)**: Single `host:port`, port ranges (`localhost:1234..1237`), and comma-separated endpoints for `qemu-user -g` stubs (`qemu-aarch64`, `qemu-riscv64`) and `gdbserver` VMs, paired with local unstripped ELF64 DWARF symbol loading (`-file-exec-and-symbols`) and `gdb-multiarch`.
+  * **Complete Instruction & Non-Linear Execution**: `stepi`, `nexti` (`Ctrl+Shift+F10`), `Run to Cursor` (`Ctrl+F10`), draggable gutter PC arrow and `Set Next Statement / Jump...` with lexical scope safety checks, and `Force Early Return...` (`-exec-return`).
+  * **Copy-on-Write Fork Checkpoints (`Ctrl+Alt+K`)**: Save, list, restore (`restart <id>`), and delete GDB process snapshots via `CheckpointDialog` with pre-fork `/proc/[pid]/fd` and `/proc/[pid]/maps` IPC/RDMA/GPU safety scanning.
+  * **Attach to Running Process (`Ctrl+Alt+P`) & Remote Targets**: `/proc` process scanner (`ProcessScanner`) grouping live OpenMPI, MPICH/PMI, PMIx, MVAPICH2, and SLURM jobs under `MPI Job (N ranks)` headers, plus `target remote` / `extended-remote` port ranges (`localhost:1234..1237`) for `qemu-user -g` and `gdbserver`.
+* **Breakpoints, Signals, Catchpoints & Console Readline**:
+  * **Non-Destructive Breakpoint Lifecycle**: Toggle enabled/disabled state (`-break-enable` / `-break-disable`) with hollow gutter markers, one-shot temporary breakpoints (`tbreak`), function regex breakpoints (`rbreak`), multi-line `commands ... end` hit scripts, rank-scoped conditions, ignore counts, non-suspending `{ident}` logpoints, and hardware data watchpoints (`Write`, `Read`, `ReadWrite`).
+  * **Signal Disposition Matrix & Catchpoints (`Ctrl+Alt+S`)**: Per-signal `Stop`/`Print`/`Pass` matrix (`handle <SIG>`), C++ `throw`/`rethrow`/`catch` regex catchpoints, Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`), and `dlopen`/`dlclose` regex catchpoints.
+  * **GDB Console Readline Ergonomics**: Persistent `~/.config/gridlock/gdb_history` (`Up`/`Down` with draft preservation), `Ctrl+R` incremental reverse search, and live GDB `complete` Tab completion popup.
 * **MPI & Cross-Rank Inspection**:
-  * **`ServerRackView` & `CallStackDockWidget`**: Per-rank state cards (`RUN`, `BRK`, `IDLE`), 64-frame stack unwinding, and OS/OpenMP thread switching.
-  * **`DeadlockAnalyzer` & `MpiNetworkLogWidget`**: Detects collective mismatches (`MPI_Bcast` vs. `MPI_Barrier`) and point-to-point wait stalls across 16 canonical blocking `MPI_*`/`PMPI_*` routines.
-  * **`DifferentialGrid` (`WATCH` Dock)**: Evaluates C/C++ expressions across all ranks simultaneously and highlights minority-consensus outliers in light red.
-* **Memory, Profiling & Reverse Engineering**:
-  * **`MemView` & `MemoryProfilerWidget`**: `process_vm_readv` hex/ASCII reader (`MemoryBoundsValidator`), cross-rank byte diffing (`Diff Ranks`), typed `Int32`/`Float`/`Double` CSV and raw `.bin` export (`Export`), `/proc/<pid>/smaps` + `LD_PRELOAD` heap-caller treemap profiler with 5 palettes (including Okabe-Ito `High-Contrast`), and `⤢ POP OUT` window mode.
-  * **`PointerGraphDialog`**: Interactive 2D struct/pointer DAG canvas with live `➔ Deref` expansion, address deduplication, `nullptr` guards, and `CYCLE / SHARED ALIAS` back-edge detection.
-  * **`DisassemblyView` & `ElfBinaryInspector`**: ELF64 section/symbol/string parser, linear Intel assembly with branch arcs, 2D Control Flow Graph (`Space`) with `[R0]` and `[DEADLOCK]` badges, synchronized decompiler (`Approx C`, `C++ / MPI`, `Pseudocode`), cross-references (`X`), and instruction patching (`Ctrl+Shift+P`).
-* **Source Editor, LSP & Workstation Tools**:
-  * **`SourceCodeView` & `ClangdLspClient`**: Horizontal/vertical split tabs (`EditorTabManager`), `git diff` gutter, scope breadcrumbs, rainbow brackets, inline variable ghost values, `clangd` diagnostics/hover/completion/`F12` definition, rank-scoped conditional breakpoints, hit ignore counts, non-suspending `{ident}` logpoints, and hardware data watchpoints (`Write`, `Read`, `ReadWrite`).
-  * **Offline Docs, Package Search & Themes**: SQLite3 Zeal `.docset` and `man` viewer (`F1`), multi-distro/Spack `Package Manager` (`spack`, `pacman`, `dnf`, `apt`, `zypper`, `rpm`), embedded `QTermWidget` PTY terminal, 16-directive `#SBATCH` script importer, and 12 dark/light themes.
+  * **`ServerRackView`, `CallStackDockWidget`, `DeadlockAnalyzer`, `MpiNetworkLogWidget`, and `DifferentialGrid`**: Per-rank state cards (`RUN`, `BRK`, `IDLE`), 64-frame stack unwinding, OS/OpenMP thread switching, collective/P2P deadlock detection across 16 `MPI_*` routines, and cross-rank watch outlier highlighting.
+* **Memory, Plotting, Reverse Engineering & Workstation Tools**:
+  * **`MemView` & `MemoryProfilerWidget`**: `process_vm_readv` hex/ASCII reader (`MemoryBoundsValidator`), cross-rank byte diffing (`Diff Ranks`), typed CSV/`.bin` export, and `/proc/<pid>/smaps` + `LD_PRELOAD` heap-caller treemap profiler with 5 palettes.
+  * **`ArrayPlotDialog` (`Ctrl+Alt+G`) & `PointerGraphDialog`**: Live auto-refreshing 1D line/stem and 2D colormapped heatmap plotting (`NaN`/`Inf` flags, ghost previous-stop overlay, CSV/PNG/`gnuplot`), plus persistent pinned struct/pointer graph roots with `"old -> new"` mutation highlighting and cycle/alias detection.
+  * **`ProgrammerCalculatorDialog` (`Ctrl+Alt+C`)**: Floating base converter (`HEX`/`DEC`/`OCT`/`BIN`, IEEE-754 `float`/`double`, `8/16/32/64-bit`, `BSWAP`, 64-bit interactive bit grid, radix keypad) with right-click selection handoff from editor, variables, registers, memory, and disassembly.
+  * **`DisassemblyView`, `CommandPaletteDialog`, `SourceCodeView` & `ClangdLspClient`**: Unified fuzzy Command Palette (`Ctrl+Shift+P` / `Ctrl+P`, `>`, `@`, `#`), ELF64 section/symbol/string parser, 2D Control Flow Graph (`Space`), synchronized decompiler, cross-references (`X`), `Alt+P` instruction patching, `clangd` diagnostics/hover/completion/`F12` definition, offline Zeal `.docset`/`man` viewer (`F1`), `Package Manager`, embedded `QTermWidget` PTY, and 12 dark/light themes.
 
 ---
 
@@ -94,21 +95,22 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 
 All documentation in `docs/` is automatically mirrored to the [GridLock GitHub Wiki](https://github.com/bnorthern42/GridLock/wiki):
 
+* [**Keyboard Shortcuts and Quick Reference**](docs/Keyboard-Shortcuts-and-Reference.md): Scannable lookup tables for execution controls, Command Palette prefixes (`>`, `@`, `#`), floating analysis tools (`Ctrl+Alt+C/G/S/K/P`), breakpoint lifecycle, GDB console readline keys, and 2D CFG shortcuts.
 * [**Installation and Building**](docs/Installation-and-Building.md): Distro packages (Arch, Ubuntu/Debian, Fedora), AppImage usage, Meson/Ninja build targets, CLI flags, and environment variables.
 * [**Quickstart and Workflows**](docs/Quickstart-and-Workflows.md): Launching local MPI targets, attaching to `/proc` MPI jobs (`Ctrl+Alt+P`), connecting to `qemu-user -g` and `gdbserver` targets, and importing `#SBATCH` scripts.
-* [**User Manual: UI and Debugging**](docs/User-Manual-UI-and-Debugging.md): Menus, toolbars, perspectives (`Alt+1..3`), bottom tool rail (`Alt+4..7`), editor LSP, breakpoints/logpoints/watchpoints, and the full keyboard shortcut table.
+* [**User Manual: UI and Debugging**](docs/User-Manual-UI-and-Debugging.md): Menus, toolbars, perspectives (`Alt+1..3`), bottom tool rail (`Alt+4..7`), Command Palette, non-linear execution, breakpoint lifecycle, Signals & Catchpoints (`Ctrl+Alt+S`), Process Checkpoints (`Ctrl+Alt+K`), and GDB console readline ergonomics.
 * [**MPI Diagnostics and HPC Analysis**](docs/MPI-Diagnostics-and-HPC-Analysis.md): MPMD FIFO coordinator mechanics, `ServerRackView`, `DeadlockAnalyzer`, `MpiNetworkLogWidget`, `DifferentialGrid` outlier detection, and `HpcConsoleWidget` package search.
-* [**Memory, Reverse Engineering, and Profiling**](docs/Memory-Reverse-Engineering-and-Profiling.md): `MemView` (`Diff Ranks` & `Export`), `MemoryProfilerWidget`, `PointerGraphDialog`, `DisassemblyView` (CFG + Decompiler + `X` Xrefs + `Ctrl+Shift+P` patching), and `RegisterView`.
-* [**Tutorials Walkthrough**](docs/Tutorials-Walkthrough.md): Step-by-step labs for all 7 primary C++ MPI showcase programs (`deadlock_ring`, `inspection_demo`, `collective_mismatch`, `ghost_cell_drift`, `heap_imbalance`, `tag_mismatch_stall`, `simd_struct_watch`) and 5 auxiliary demos.
+* [**Memory, Reverse Engineering, and Profiling**](docs/Memory-Reverse-Engineering-and-Profiling.md): `MemView` (`Diff Ranks` & `Export`), `MemoryProfilerWidget`, `ProgrammerCalculatorDialog` (`Ctrl+Alt+C`), `ArrayPlotDialog` (`Ctrl+Alt+G`), persistent `PointerGraphDialog`, `DisassemblyView` (CFG + Decompiler + `X` Xrefs + `Alt+P` patching), and `RegisterView`.
+* [**Tutorials Walkthrough**](docs/Tutorials-Walkthrough.md): Step-by-step labs for all 8 primary C++ MPI showcase programs (`deadlock_ring`, `inspection_demo`, `collective_mismatch`, `ghost_cell_drift`, `heap_imbalance`, `tag_mismatch_stall`, `simd_struct_watch`, `catchpoint_exceptions`) and 5 auxiliary demos.
 * [**Configuration and Customization**](docs/Configuration-and-Customization.md): `PreferencesDialog`, 12 dark/light theme hex palettes and previews, `config.toml` / `.gridlock/` session files, and build system auto-detection.
-* [**Developer Architecture and Testing**](docs/Developer-Architecture-and-Testing.md): Codebase structure, coordinator/memory/security internals, all 22 Meson test suites, coverage, screenshot generation, and Wiki sync.
-* [**Engineering Roadmap (`v0.8.7` to `v1.0.0`)**](ROADMAP.md): Upcoming milestones clearly separated from current `v0.8.66` features.
+* [**Developer Architecture and Testing**](docs/Developer-Architecture-and-Testing.md): Codebase structure, coordinator/memory/startup-caching internals, all 22 Meson test suites (including 57 offscreen UI tests), coverage, screenshot generation, and Wiki sync.
+* [**Engineering Roadmap (`v0.8.7` to `v1.0.0`)**](ROADMAP.md): Completed `v0.8.7` deliverables and planned milestones from `v0.8.8` through `v1.0.0`.
 
 ---
 
 ## Project Governance & Policies
 
-* [**Changelog (`CHANGELOG.md`)**](CHANGELOG.md): Version history through `v0.8.66`.
+* [**Changelog (`CHANGELOG.md`)**](CHANGELOG.md): Version history and release notes.
 * [**Accessibility Statement (`ACCESSIBILITY.md`)**](ACCESSIBILITY.md): Keyboard navigation, contrast themes, colorblind-safe palettes, AT-SPI2 support, and barrier reporting.
 * [**Contributing Guide (`CONTRIBUTING.md`)**](CONTRIBUTING.md): Coding standards (`< 950` lines per file, C++23, Meson tests) and pull request workflow.
 * [**Security Policy (`SECURITY.md`)**](SECURITY.md): Vulnerability reporting and `MiSanitizer` / `MemoryBoundsValidator` hardening boundaries.

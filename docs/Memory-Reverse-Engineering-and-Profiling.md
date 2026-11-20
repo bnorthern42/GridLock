@@ -1,6 +1,6 @@
 # Memory, Reverse Engineering, and Profiling
 
-This guide covers process memory inspection and cross-rank byte diffing (`MemView`), virtual memory and heap-caller profiling (`MemoryProfilerWidget`), interactive pointer and struct graph visualization (`PointerGraphDialog`), ELF64 disassembly, 2D Control Flow Graphs, decompilation (`DisassemblyView`), and CPU register telemetry (`RegisterView`).
+This guide covers process memory inspection and cross-rank byte diffing (`MemView`), virtual memory and heap-caller profiling (`MemoryProfilerWidget`), persistent pointer and struct graph visualization (`PointerGraphDialog`), live 1D/2D array plotting (`ArrayPlotDialog`), floating base/bit conversion (`ProgrammerCalculatorDialog`), ELF64 disassembly, 2D Control Flow Graphs, decompilation (`DisassemblyView`), and CPU register telemetry (`RegisterView`).
 
 ---
 
@@ -75,19 +75,50 @@ Open **`Tools -> Pointer & Struct Graph Visualizer...`** from the menu bar, or r
 
 ### Operating the Graph Canvas
 
-1. **Graph a Root Expression**: Type a C/C++ struct or pointer variable (such as `sim`, `pkt`, `cfg`, or `head`) into the top input box and click **`Graph Expression`** (or press `Enter`).
-2. **Interactive Dereferencing (`➔ Deref`)**:
+1. **Graph and Pin Root Expressions**: Type a C/C++ struct or pointer variable (such as `sim`, `pkt`, `cfg`, or `head`) into the top input box and click **`Graph Expression`** (or press `Enter`).
+2. **Persistent Auto-Updating Roots & Mutation Diffs (`v0.8.7`)**:
+   * Enable **`Auto-Refresh on Stop`** (checked by default) to keep pinned root expressions live across every step or breakpoint stop without re-typing them.
+   * On each stop, `PointerGraphDialog` re-evaluates every pinned root, diffs every scalar and pointer field against its previous-stop value, and highlights changed fields with an inline **`"old -> new"`** mutation badge.
+   * Click **`Refresh Now`** at any time to re-query all pinned roots on demand.
+3. **Interactive Dereferencing (`➔ Deref`)**:
    * Each card displays `expression : Type @ 0xAddress` and lists its member fields (`name : value (type)`).
    * Non-null pointer and composite fields show a clickable **`➔ Deref`** pill badge (null pointers display a muted **`nullptr`** badge and are guarded against dereferencing).
    * Click **`➔ Deref`** (or double-click a field row) to expand that child node live via `IBackendCoordinator::requestVariableChildren`, or click **`Expand All Pointers (1 Hop)`** on the toolbar to expand every visible frontier pointer by one level.
-3. **Cycle and Shared-Alias Detection**:
+4. **Cycle and Shared-Alias Detection**:
    * Cards are deduplicated by normalized virtual address (`0x...`), so multiple pointers referencing the same heap object converge onto the same card.
    * Forward tree edges render as solid cyan (`#38bdf8`) cubic Bezier curves. Back-edges (linked-list rings, parent pointers) and multi-parent shared aliases render as dashed amber (`#f59e0b`) curves labeled **`CYCLE / SHARED ALIAS`**.
-4. **Layout and Navigation**: Drag cards freely on the canvas, pan with mouse drag, click **`Auto-Layout (Layered DAG)`** to arrange nodes left-to-right by depth, use **`Zoom +`**, **`Zoom -`**, **`Fit`**, **`Clear Graph`**, and **`✕ CLOSE`**.
+5. **Layout and Navigation**: Drag cards freely on the canvas, pan with mouse drag, click **`Auto-Layout (Layered DAG)`** to arrange nodes left-to-right by depth, use **`Zoom +`**, **`Zoom -`**, **`Fit`**, **`Clear Graph`**, and **`✕ CLOSE`**.
 
 ---
 
-## 4. Disassembly, 2D Control Flow Graph, Decompiler, and Patching
+## 4. Live 1D/2D Array and Field Plotter (`ArrayPlotDialog`, `Ctrl+Alt+G`)
+
+Open **`Tools -> Array & Field Plotter...`** (`Ctrl+Alt+G`) or right-click an array/pointer expression in **`Variables`** to plot live numerical arrays and 2D matrices directly from inferior memory.
+
+* **Data Types & Plot Modes**:
+  * Supports `double`, `float`, `int32_t`, `int64_t`, and `uint8_t` slices read via `IBackendCoordinator::readMemory` (`process_vm_readv` / GDB / DAP).
+  * Switch between **`1D Line Plot`**, **`1D Bar / Stem`**, and **`2D Heatmap`** (`Rows x Cols` dimensions) with 4 selectable colormaps: **`Viridis`**, **`Plasma`**, **`Diverging Cool-Warm`**, and **`Grayscale`**.
+* **Numerical Telemetry & Anomaly Flagging**:
+  * Computes live **`Min`**, **`Max`**, **`Mean`**, **`L2 Norm`**, and IEEE-754 **`NaN` / `Inf`** counts on every refresh, flagging non-finite samples visually on the plot canvas.
+  * When **`Auto-Refresh on Stop`** is enabled, each step retains the previous stop's 1D curve as a translucent **ghost overlay** and reports how many elements mutated since the previous stop.
+* **Export & External Plotting**: Click **`Export CSV`**, **`Save PNG`**, or **`Open in gnuplot`** to save slices or hand off to an external `gnuplot` window.
+
+---
+
+## 5. Floating Programmer's Calculator (`ProgrammerCalculatorDialog`, `Ctrl+Alt+C`)
+
+Open **`Tools -> Programmer's Calculator...`** (`Ctrl+Alt+C`), launch `> Programmer's Calculator` from the Command Palette, or right-click any value/address/selection in **`SourceCodeView`**, **`Variables`**, **`Registers`**, **`Memory View`**, or **`DisassemblyView`** and select **`Open in Programmer's Calculator`**.
+
+* **Synchronized Multi-Base Readouts**: Edit **`HEX`**, **`DEC`** (signed or unsigned), **`OCT`**, or **`BIN`** and watch all four bases update immediately, alongside live **IEEE-754 `float`/`double`** hex bit-pattern decoding and **ASCII** byte readout.
+* **Word Width, Endianness & Bit Grid**:
+  * Switch word width between **`8-bit`**, **`16-bit`**, **`32-bit`**, and **`64-bit`** (with automatic masking and default width/signedness configurable in `Project Settings` and `Preferences`).
+  * Click **`BSWAP`** to reverse byte order for inspecting little-endian vs. big-endian network/MPI payloads.
+  * Click any bit (`63..0`) in the **64-bit interactive toggle grid** to flip individual flag/mask bits in place.
+* **Radix-Aware Keypad & Expression Evaluator**: Includes a full clickable `0-9` / `A-F` / bitwise (`AND`, `OR`, `XOR`, `NOT`, `<<`, `>>`) / arithmetic / floating-point keypad plus a free-form C expression bar (such as `(0x10 << 4) | 0x05` or `3.3 * 2`).
+
+---
+
+## 6. Disassembly, 2D Control Flow Graph, Decompiler, and Patching
 
 Press **`Alt+2`** for the full-width **`REVERSE`** perspective, or inspect assembly alongside C/C++ code in the **`CODE`** perspective (`Alt+1`).
 
@@ -98,24 +129,25 @@ Press **`Alt+2`** for the full-width **`REVERSE`** perspective, or inspect assem
 * **`CFG (Space)` / `Linear (Space)`**: Press **`Space`** (or click the top-right toggle button) to switch between:
   * **Linear Assembly**: Intel-syntax disassembly (`objdump -d -l -C -M intel`) with a `46px` left `BranchFlowGutter` drawing multi-lane forward/backward conditional and unconditional jump arcs, emerald `▶` PC chevrons, and amber `◆` bookmark diamonds.
   * **2D Control Flow Graph (`CfgGraphView`)**: Basic-block cards connected by orthogonal true (green), false (red), and unconditional (blue) edges, annotated with live MPI rank badges (`[R0]`, `[R0-R3 (4)]`), `[DEADLOCK]` alerts, and a `120x90` bottom-right minimap. Pan with middle-drag, `Space`+left-drag, or `Left`/`Right` arrow keys; press `Home` to snap back to the active block.
+* **Toolbar Stepping (`stepi` / `nexti`)**: Step into (`-exec-step-instruction`) or step over (`-exec-next-instruction`, `Ctrl+Shift+F10`) individual machine instructions directly from the disassembly header bar.
 * **`DECOMPILER` and `SPLIT (CFG+DECOMP)`**:
   * Generates structured **`Approx C`**, **`C++ / MPI`**, or **`Pseudocode`** (selectable in the footer **`Target:`** dropdown, with **`Auto`** refresh and manual **`Refresh`**).
   * Clicking any line in the decompiler or `SourceCodeView` jumps the linear disassembly, CFG, and `MemView` to the corresponding DWARF instruction address; selecting any identifier token (`2..32` chars) highlights every occurrence across assembly, CFG blocks, and decompiled output.
   * By default, the decompiler pane hides automatically when `SourceCodeView` already shows matching DWARF source; enable `Show Pseudo-C Decompiler when Source Editor is visible` in `Preferences -> Debugger` to keep all three panes open together.
 
-### Cross-References (`X`) and Instruction Patching (`Ctrl+Shift+P`)
+### Cross-References (`X`) and Instruction Patching (`Alt+P`)
 
 * **Cross-Reference Inspector (`XrefInspectorDialog`)**: Press **`X`** (or right-click -> **`Inspect Cross-References (X)`**) to inspect incoming callers/branches (**`XREFS TO`**) and outgoing `CALL`, `CJMP`, `JMP`, and RIP-relative `DATA` references (**`XREFS FROM`**) with a live filter bar and assembly preview pane. Double-click any row to jump to that address.
-* **Right-Click Context Menu (Linear Mode)**: Provides **`Seek in Memory View`**, **`Inspect Cross-References (X)`**, **`Lookup in Reference Manual (F1)`**, **`Toggle Bookmark`** (auto-synced with source breakpoints), and **`Patch Instruction`** (`nop`).
-* **Instruction & ELF64 Patching**: Press **`Ctrl+Shift+P`** in `DisassemblyView` to assemble/patch an instruction at the current address (splicing `; [PATCHED]` into the listing and updating `ElfBinaryInspector`'s in-memory section image via `writeVirtualMemory`, which can be written out as an executable ELF64 binary via `ElfBinaryInspector::savePatchedBinary`).
+* **Right-Click Context Menu**: Provides **`Run to Instruction Address`**, **`Jump / Set PC to Address`**, **`Open Address in Programmer's Calculator`**, **`Seek in Memory View`**, **`Inspect Cross-References (X)`**, **`Lookup in Reference Manual (F1)`**, **`Toggle Bookmark`** (auto-synced with source breakpoints), and **`Patch Instruction`** (`nop`).
+* **Instruction & ELF64 Patching**: Press **`Alt+P`** in `DisassemblyView` to assemble/patch an instruction at the current address (splicing `; [PATCHED]` into the listing and updating `ElfBinaryInspector`'s in-memory section image via `writeVirtualMemory`, which can be written out as an executable ELF64 binary via `ElfBinaryInspector::savePatchedBinary`).
 
 ---
 
-## 5. CPU Registers (`RegisterView`) and Status Bar Telemetry
+## 7. CPU Registers (`RegisterView`) and Status Bar Telemetry
 
 * **`Registers` Dock (`RegisterView`)**:
   * Pins `rip`, `rsp`, and `rbp` at the top, color-coding instruction pointers, stack pointers, and `eflags`.
   * Changed register values highlight in bold red on each step.
-  * The search bar (`Filter registers by name or hex/dec value...`) matches register names, hex strings (`401125`), and converted unsigned decimal values. Double-clicking any register seeks `DisassemblyView` and `MemView` to its pointer value.
+  * The search bar (`Filter registers by name or hex/dec value...`) matches register names, hex strings (`401125`), and converted unsigned decimal values. Double-clicking any register seeks `DisassemblyView` and `MemView` to its pointer value; right-clicking sends its value to **`Programmer's Calculator`**.
 * **Bottom Status Bar Telemetry (`ElfBinaryInspector`)**:
   * Displays `ARCH`, focused `MPI RANK`, active `PC/SEEK`, session `STATUS`, per-rank `STACK` (active frame delta `stackTop - $rsp` plus mapped `[stack]` RSS) and `HEAP` (`[heap]` RSS from `/proc/<pid>/smaps`), plus host `RAM` (`/proc/meminfo`) and delta `CPU %` (`/proc/stat`), configurable as `GB`, `%`, or `Both` in `Preferences -> Behavior`.

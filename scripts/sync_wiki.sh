@@ -21,6 +21,7 @@ declare -A PAGE_MAP=(
     ["Installation-and-Building.md"]="Installation-and-Building"
     ["Quickstart-and-Workflows.md"]="Quickstart-and-Workflows"
     ["User-Manual-UI-and-Debugging.md"]="User-Manual-UI-and-Debugging"
+    ["Keyboard-Shortcuts-and-Reference.md"]="Keyboard-Shortcuts-and-Reference"
     ["MPI-Diagnostics-and-HPC-Analysis.md"]="MPI-Diagnostics-and-HPC-Analysis"
     ["Memory-Reverse-Engineering-and-Profiling.md"]="Memory-Reverse-Engineering-and-Profiling"
     ["Tutorials-Walkthrough.md"]="Tutorials-Walkthrough"
@@ -65,7 +66,7 @@ for src_rel in "${!PAGE_MAP[@]}"; do
 done
 
 cat > "${WIKI_DIR}/Home.md" << 'EOF'
-# GridLock Documentation Wiki (`v0.8.66`)
+# GridLock Documentation Wiki (`v0.8.7`)
 
 Welcome to the **GridLock** documentation wiki, synchronized automatically from `docs/` on `master`.
 
@@ -75,19 +76,20 @@ Welcome to the **GridLock** documentation wiki, synchronized automatically from 
 
 - [Installation and Building](Installation-and-Building): Linux dependencies (Arch, Ubuntu/Debian, Fedora), AppImage usage on Wayland and X11, Meson/Ninja build, tutorial compilation, and CLI options.
 - [Quickstart and Workflows](Quickstart-and-Workflows): Launching local MPI jobs, attaching to live `/proc` OpenMPI/MPICH/SLURM jobs (`Ctrl+Alt+P`), debugging `qemu-user -g` and `gdbserver` targets (`target remote`), and importing `#SBATCH` scripts.
-- [Tutorials Walkthrough](Tutorials-Walkthrough): Step-by-step exercises for all 7 primary C++ MPI showcase programs and 5 auxiliary demos in `tutorial/`.
+- [Tutorials Walkthrough](Tutorials-Walkthrough): Step-by-step exercises for all 8 primary C++ MPI showcase programs (including `catchpoint_exceptions.cpp`) and 5 auxiliary demos in `tutorial/`.
 
 ## User Reference
 
-- [User Manual: UI and Debugging](User-Manual-UI-and-Debugging): Perspectives (`Alt+1..3`), menus, toolbars, docks, `clangd` LSP, conditional breakpoints, logpoints, hardware watchpoints, and keyboard shortcuts.
+- [Keyboard Shortcuts and Quick Reference](Keyboard-Shortcuts-and-Reference): Scannable lookup tables for execution controls (`nexti`, `Ctrl+F10`, PC jump, early return), Command Palette prefixes (`>`, `@`, `#`), floating tools (`Ctrl+Alt+C/G/S/K/P`), breakpoint lifecycle, GDB readline bindings, and CFG shortcuts.
+- [User Manual: UI and Debugging](User-Manual-UI-and-Debugging): Perspectives (`Alt+1..3`), Command Palette, non-linear execution, non-destructive/temporary/regex breakpoints, `SignalCatchpointDialog` (`Ctrl+Alt+S`), `CheckpointDialog` (`Ctrl+Alt+K`), and `GdbConsoleWidget` readline ergonomics.
 - [MPI Diagnostics and HPC Analysis](MPI-Diagnostics-and-HPC-Analysis): MPMD FIFO coordinator mechanics, `ServerRackView`, `DeadlockAnalyzer`, `MpiNetworkLogWidget`, `DifferentialGrid` outlier highlighting, and `Package Manager` (`spack`, `dnf`, `pacman`, `apt`).
-- [Memory, Reverse Engineering, and Profiling](Memory-Reverse-Engineering-and-Profiling): `MemView` (`process_vm_readv`, `Diff Ranks`, `Export`), `MemoryProfilerWidget` (`smaps` + `LD_PRELOAD` heap callers), `PointerGraphDialog`, `DisassemblyView` (2D CFG + Decompiler + Xrefs + Patching), and `RegisterView`.
+- [Memory, Reverse Engineering, and Profiling](Memory-Reverse-Engineering-and-Profiling): `MemView` (`process_vm_readv`, `Diff Ranks`, `Export`), `MemoryProfilerWidget` (`smaps` + `LD_PRELOAD` heap callers), `ProgrammerCalculatorDialog` (`Ctrl+Alt+C`), `ArrayPlotDialog` (`Ctrl+Alt+G`), persistent `PointerGraphDialog`, `DisassemblyView` (2D CFG + Decompiler + Xrefs + `Alt+P` patching), and `RegisterView`.
 - [Configuration and Customization](Configuration-and-Customization): `PreferencesDialog`, 12 built-in dark and light theme palettes, `config.toml` and `.gridlock/` session files, and build auto-detection.
 
 ## Architecture, Testing & Roadmap
 
-- [Developer Architecture and Testing](Developer-Architecture-and-Testing): Repository structure, `GdbRankCoordinator` / `DapCoordinator` / `ProcessScanner` internals, all 22 Meson test suites, coverage, and screenshot generation.
-- [Engineering Roadmap](Roadmap): Planned milestones from `v0.8.7` through `v1.0.0`.
+- [Developer Architecture and Testing](Developer-Architecture-and-Testing): Repository structure, coordinator and lazy-loading startup architecture, QSS disk cache, all 22 Meson test suites, coverage, and screenshot generation.
+- [Engineering Roadmap](Roadmap): Completed `v0.8.7` deliverables and planned milestones from `v0.8.8` through `v1.0.0`.
 EOF
 
 cat > "${WIKI_DIR}/_Sidebar.md" << 'EOF'
@@ -101,6 +103,7 @@ cat > "${WIKI_DIR}/_Sidebar.md" << 'EOF'
 - [Tutorials Walkthrough](Tutorials-Walkthrough)
 
 **User Reference**
+- [Keyboard Shortcuts](Keyboard-Shortcuts-and-Reference)
 - [UI & Debugging Manual](User-Manual-UI-and-Debugging)
 - [MPI Diagnostics & HPC](MPI-Diagnostics-and-HPC-Analysis)
 - [Memory, RE & Profiling](Memory-Reverse-Engineering-and-Profiling)
