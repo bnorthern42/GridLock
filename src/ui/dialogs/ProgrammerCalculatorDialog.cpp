@@ -475,7 +475,7 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     root->addWidget(bitGroup);
 
     // 4. Bitwise & Arithmetic Expression Evaluator + Full Programmer's Calculator Keypad.
-    auto* exprGroup = new QGroupBox(QStringLiteral("Bitwise & Arithmetic Expression Evaluator"), this);
+    auto* exprGroup = new QGroupBox(QStringLiteral("Bitwise && Arithmetic Expression Evaluator"), this);
     auto* exprVBox = new QVBoxLayout(exprGroup);
     exprVBox->setContentsMargins(10, 12, 10, 10); exprVBox->setSpacing(8);
 

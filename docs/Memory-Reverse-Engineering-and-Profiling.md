@@ -95,12 +95,14 @@ Open **`Tools -> Pointer & Struct Graph Visualizer...`** from the menu bar, or r
 
 Open **`Tools -> Array & Field Plotter...`** (`Ctrl+Alt+G`) or right-click an array/pointer expression in **`Variables`** to plot live numerical arrays and 2D matrices directly from inferior memory.
 
+![Live 1D/2D Array and Field Plotter with previous-stop ghost curve and NaN anomaly marker](screenshots/v087_array_plotter_1d_2d.png)
+
 * **Data Types & Plot Modes**:
   * Supports `double`, `float`, `int32_t`, `int64_t`, and `uint8_t` slices read via `IBackendCoordinator::readMemory` (`process_vm_readv` / GDB / DAP).
   * Switch between **`1D Line Plot`**, **`1D Bar / Stem`**, and **`2D Heatmap`** (`Rows x Cols` dimensions) with 4 selectable colormaps: **`Viridis`**, **`Plasma`**, **`Diverging Cool-Warm`**, and **`Grayscale`**.
 * **Numerical Telemetry & Anomaly Flagging**:
   * Computes live **`Min`**, **`Max`**, **`Mean`**, **`L2 Norm`**, and IEEE-754 **`NaN` / `Inf`** counts on every refresh, flagging non-finite samples visually on the plot canvas.
-  * When **`Auto-Refresh on Stop`** is enabled, each step retains the previous stop's 1D curve as a translucent **ghost overlay** and reports how many elements mutated since the previous stop.
+  * When **`Auto-Refresh`** is enabled, each step retains the previous stop's 1D curve as a translucent **ghost overlay** and reports how many elements mutated since the previous stop.
 * **Export & External Plotting**: Click **`Export CSV`**, **`Save PNG`**, or **`Open in gnuplot`** to save slices or hand off to an external `gnuplot` window.
 
 ---
@@ -108,6 +110,8 @@ Open **`Tools -> Array & Field Plotter...`** (`Ctrl+Alt+G`) or right-click an ar
 ## 5. Floating Programmer's Calculator (`ProgrammerCalculatorDialog`, `Ctrl+Alt+C`)
 
 Open **`Tools -> Programmer's Calculator...`** (`Ctrl+Alt+C`), launch `> Programmer's Calculator` from the Command Palette, or right-click any value/address/selection in **`SourceCodeView`**, **`Variables`**, **`Registers`**, **`Memory View`**, or **`DisassemblyView`** and select **`Open in Programmer's Calculator`**.
+
+![Floating Programmer's Calculator showing synchronized bases, IEEE-754 float, 64-bit grid, and keypad](screenshots/v087_programmer_calculator.png)
 
 * **Synchronized Multi-Base Readouts**: Edit **`HEX`**, **`DEC`** (signed or unsigned), **`OCT`**, or **`BIN`** and watch all four bases update immediately, alongside live **IEEE-754 `float`/`double`** hex bit-pattern decoding and **ASCII** byte readout.
 * **Word Width, Endianness & Bit Grid**:

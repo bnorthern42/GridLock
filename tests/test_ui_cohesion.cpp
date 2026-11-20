@@ -43,19 +43,28 @@
 #include <QTreeView>
 #include <QtTest/QtTest>
 
+#include <cmath>
 #include <cstring>
+#include <limits>
+#include <unistd.h>
 
 #include "../src/core/hpc/DeadlockAnalyzer.hpp"
+#include "../src/core/hpc/GdbRankCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/ArrayPlotDialog.hpp"
+#include "../src/ui/dialogs/CheckpointDialog.hpp"
+#include "../src/ui/dialogs/CommandPaletteDialog.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
+#include "../src/ui/dialogs/ProgrammerCalculatorDialog.hpp"
 #include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/dialogs/ProjectWizard.hpp"
+#include "../src/ui/dialogs/SignalCatchpointDialog.hpp"
 #include "../src/ui/dialogs/XrefInspectorDialog.hpp"
 #include "../src/core/models/VariableTreeModel.hpp"
 #include "../src/ui/docks/CallStackDockWidget.hpp"
@@ -349,6 +358,86 @@ bool captureTutorialDocumentationScreenshots(gridlock::ui::MainWindow& mw, const
     return ok;
 }
 
+/** @brief Captures 5 sanitized v0.8.7 tool screenshots into @p outputDir when GRIDLOCK_CAPTURE_SCREENSHOTS=1. */
+static bool captureV087ToolScreenshots(gridlock::ui::MainWindow& mw, const QString& outputDir) {
+    QDir dir(outputDir); if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) return false;
+    gridlock::core::ThemeManager::instance().applyTheme(QStringLiteral("gridlock_slate"), false);
+    mw.resize(1600, 960); mw.setWorkspacePerspective(QStringLiteral("Code")); mw.show(); QApplication::processEvents();
+    // 1. v087_command_palette.png: CommandPaletteDialog composited over MainWindow with curated sanitized entries.
+    {
+        using gridlock::ui::CommandPaletteDialog; using gridlock::ui::PaletteItem;
+        CommandPaletteDialog pal(&mw);
+        pal.setItems({
+            {PaletteItem::Category::Action, QStringLiteral("Debug: Run to Cursor"), QStringLiteral("Menu -> Debug"), QStringLiteral("Ctrl+F10"), {}},
+            {PaletteItem::Category::Action, QStringLiteral("Debug: Step Over Instruction (nexti)"), QStringLiteral("Menu -> Debug"), QStringLiteral("Ctrl+Shift+F10"), {}},
+            {PaletteItem::Category::Action, QStringLiteral("Debug: Process Checkpoints..."), QStringLiteral("Menu -> Debug"), QStringLiteral("Ctrl+Alt+K"), {}},
+            {PaletteItem::Category::Action, QStringLiteral("Debug: Signals & Catchpoints..."), QStringLiteral("Menu -> Debug"), QStringLiteral("Ctrl+Alt+S"), {}},
+            {PaletteItem::Category::Action, QStringLiteral("Debug: Break on Function Regex (rbreak)..."), QStringLiteral("Menu -> Debug"), QStringLiteral("rbreak"), {}},
+            {PaletteItem::Category::Action, QStringLiteral("Tools: Programmer's Calculator"), QStringLiteral("Menu -> Tools"), QStringLiteral("Ctrl+Alt+C"), {}},
+            {PaletteItem::Category::Action, QStringLiteral("Tools: Array & Field Plotter..."), QStringLiteral("Menu -> Tools"), QStringLiteral("Ctrl+Alt+G"), {}},
+            {PaletteItem::Category::File, QStringLiteral("tutorial/catchpoint_exceptions.cpp"), QStringLiteral("tutorial"), QStringLiteral("C/C++"), {}},
+            {PaletteItem::Category::Symbol, QStringLiteral("SolverConvergenceException"), QStringLiteral("catchpoint_exceptions.cpp:58"), QStringLiteral("Class"), {}},
+            {PaletteItem::Category::Rank, QStringLiteral("Rank 2"), QStringLiteral("Focus MPI Rank 2 (PAUSED)"), QStringLiteral("BRK"), {}}});
+        pal.openWithPrefix(QStringLiteral(">")); pal.resize(680, 440); QApplication::processEvents();
+        QPixmap base = mw.grab(); QPainter p(&base); p.fillRect(base.rect(), QColor(0, 0, 0, 95));
+        const QPixmap palPix = pal.grab(); p.drawPixmap((base.width() - palPix.width()) / 2, 86, palPix); p.end();
+        pal.hide(); if (!base.save(dir.filePath(QStringLiteral("v087_command_palette.png")), "PNG", 88)) return false;
+    }
+    // 2. v087_programmer_calculator.png: ProgrammerCalculatorDialog with 0x3F8CCCCD (1.1f), lit bit grid & full keypad.
+    {
+        gridlock::ui::ProgrammerCalculatorDialog calc(&mw);
+        calc.setWordWidth(32); calc.setSigned(false); calc.setValue(0x3F8CCCCDULL);
+        calc.resize(740, 620); calc.show(); QApplication::processEvents();
+        if (!calc.grab().save(dir.filePath(QStringLiteral("v087_programmer_calculator.png")), "PNG", 88)) return false;
+        calc.close();
+    }
+    // 3. v087_array_plotter_1d_2d.png: ArrayPlotDialog with previous-stop ghost curve, mutated peak & NaN anomaly flag.
+    {
+        gridlock::ui::ArrayPlotDialog plotDlg(nullptr, &mw); plotDlg.setExpression(QStringLiteral("pressure_field[0..63]"));
+        QVector<double> prev(64), curr(64);
+        for (int i = 0; i < 64; ++i) { const double x = static_cast<double>(i) * 0.22; prev[i] = std::exp(-x * 0.08) * std::sin(x) * 12.0; curr[i] = std::exp(-x * 0.07) * std::sin(x + 0.35) * 14.5 + ((i >= 24 && i <= 30) ? 4.8 : 0.0); }
+        curr[44] = std::numeric_limits<double>::quiet_NaN();
+        plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(prev.constData()), prev.size() * sizeof(double)), gridlock::ui::ArrayPlotDialog::ElementType::Float64, 1, 64);
+        plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(curr.constData()), curr.size() * sizeof(double)), gridlock::ui::ArrayPlotDialog::ElementType::Float64, 1, 64);
+        plotDlg.resize(1040, 600); plotDlg.show(); QApplication::processEvents();
+        if (!plotDlg.grab().save(dir.filePath(QStringLiteral("v087_array_plotter_1d_2d.png")), "PNG", 88)) return false;
+        plotDlg.close();
+    }
+    // 4. v087_signals_and_catchpoints.png & 5. v087_cow_checkpoints.png using sanitized mock coordinator + fake /proc.
+    {
+        gridlock::GdbRankCoordinator coord; coord.initializeMockSession(4);
+        coord.processGdbOutput(0, QStringLiteral("=thread-group-started,id=\"i1\",pid=\"4200\"\n*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401280\",func=\"solveSubdomain\",fullname=\"tutorial/catchpoint_exceptions.cpp\",line=\"80\",args=[]}\n"));
+        coord.insertCatchpoint({CatchpointSpec::Kind::CppThrow, QStringLiteral("SolverConvergenceException"), -1, true});
+        coord.insertCatchpoint({CatchpointSpec::Kind::Syscall, QStringLiteral("openat, mmap"), -1, true});
+        coord.insertCatchpoint({CatchpointSpec::Kind::LoadLib, QStringLiteral("libmpi"), -1, true});
+        gridlock::ui::SignalCatchpointDialog sigDlg(&coord, &mw);
+        sigDlg.setSignalDispositionRow(QStringLiteral("SIGUSR1"), false, true, true); sigDlg.setSignalDispositionRow(QStringLiteral("SIGFPE"), true, true, false);
+        sigDlg.resize(860, 620); sigDlg.show(); QApplication::processEvents();
+        const QPixmap tab0 = sigDlg.grab();
+        if (auto* tabs = sigDlg.findChild<QTabWidget*>(QStringLiteral("signalCatchpointTabs"))) tabs->setCurrentIndex(1);
+        QApplication::processEvents();
+        const QPixmap tab1 = sigDlg.grab();
+        QPixmap both(tab0.width() + 16 + tab1.width(), std::max(tab0.height(), tab1.height())); both.fill(QColor(QStringLiteral("#0d1117")));
+        { QPainter bp(&both); bp.drawPixmap(0, 0, tab0); bp.drawPixmap(tab0.width() + 16, 0, tab1); }
+        if (!both.save(dir.filePath(QStringLiteral("v087_signals_and_catchpoints.png")), "PNG", 88)) return false;
+        sigDlg.close();
+        QTemporaryDir fakeProc; if (!fakeProc.isValid()) return false;
+        const QString pDir = fakeProc.filePath(QStringLiteral("4200")), fdDir = pDir + QStringLiteral("/fd");
+        if (!QDir().mkpath(fdDir)) return false;
+        (void)::symlink("socket:[41022]", (fdDir + QStringLiteral("/3")).toUtf8().constData()); (void)::symlink("pipe:[41098]", (fdDir + QStringLiteral("/4")).toUtf8().constData());
+        { QFile mf(pDir + QStringLiteral("/maps")); if (mf.open(QIODevice::WriteOnly)) mf.write("7ffff6000000-7ffff6400000 rw-s 00000000 00:18 2 /dev/shm/openmpi_vader_rank0\n"); }
+        coord.createCheckpoint(0, QStringLiteral("before halo exchange"));
+        coord.processGdbOutput(0, QStringLiteral("~\"checkpoint 1: fork returned pid 4242.\\n\"\n212^done\n"));
+        coord.processGdbOutput(0, QStringLiteral("~\"  2 process 4249 at 0x4012b4, file catchpoint_exceptions.cpp, line 85\\n\"\n~\"* 1 process 4242 at 0x401280, file catchpoint_exceptions.cpp, line 80\\n\"\n~\"  0 process 4200 (main process) at 0x401190, file catchpoint_exceptions.cpp, line 121\\n\"\n213^done\n"));
+        gridlock::ui::CheckpointDialog cpDlg(&coord, &mw); cpDlg.setProcRootForTesting(fakeProc.path());
+        if (auto* diagBtn = cpDlg.findChild<QPushButton*>(QStringLiteral("checkpointDiagnosticsToggleBtn"))) diagBtn->setChecked(true);
+        cpDlg.resize(1160, 560); cpDlg.show(); QApplication::processEvents();
+        if (!cpDlg.grab().save(dir.filePath(QStringLiteral("v087_cow_checkpoints.png")), "PNG", 88)) return false;
+        cpDlg.close();
+    }
+    return true;
+}
+
 }  // namespace gridlock::tests
 
 /**
@@ -471,67 +560,42 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
     QVERIFY2(telemetryCombo != nullptr && telemetryCombo->findData(QStringLiteral("gb")) >= 0 && telemetryCombo->findData(QStringLiteral("percent")) >= 0 && telemetryCombo->findData(QStringLiteral("both")) >= 0, "PreferencesDialog must expose telemetryFormatCombo");
 
     if (qEnvironmentVariableIsSet("GRIDLOCK_CAPTURE_SCREENSHOTS")) {
-        const QString outDir = QFileInfo::exists(QStringLiteral("docs/screenshots"))
-            ? QStringLiteral("docs/screenshots")
-            : QStringLiteral("../docs/screenshots");
-        QVERIFY2(mainWindow.captureDocumentationScreenshots(outDir),
-                 "MainWindow::captureDocumentationScreenshots failed");
-        QVERIFY2(gridlock::tests::captureTutorialDocumentationScreenshots(mainWindow, outDir),
-                 "captureTutorialDocumentationScreenshots failed");
+        const QString outDir = QFileInfo::exists(QStringLiteral("docs/screenshots")) ? QStringLiteral("docs/screenshots") : QStringLiteral("../docs/screenshots");
+        QVERIFY2(mainWindow.captureDocumentationScreenshots(outDir), "MainWindow::captureDocumentationScreenshots failed");
+        QVERIFY2(gridlock::tests::captureTutorialDocumentationScreenshots(mainWindow, outDir), "captureTutorialDocumentationScreenshots failed");
+        QVERIFY2(gridlock::tests::captureV087ToolScreenshots(mainWindow, outDir), "captureV087ToolScreenshots failed");
     }
 }
-
-/**
- * @brief Verifies cross-pane workflow bridges, DisassemblyView context actions, and line rebalance.
- * Tests evaluator-to-watch promotion, disassembly context menu F1 manual lookup, and file headroom.
- */
+/** @brief Verifies cross-pane workflow bridges, DisassemblyView context actions, and line rebalance. */
 void TestMainWindowUI::testCrossPaneWorkflowBridgesAndContextActions() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
-
     // 1. Evaluator & Variables -> Watch Expressions Bridge.
-    auto* evaluatorWidget = mainWindow.findChild<gridlock::ui::ExpressionEvaluatorWidget*>();
-    auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
-    QVERIFY2(evaluatorWidget != nullptr && diffGrid != nullptr, "ExpressionEvaluatorWidget and DifferentialGrid must exist");
-    evaluatorWidget->setExpression(QStringLiteral("data[0].coords.z"));
-    QVERIFY2(evaluatorWidget->promoteCurrentToWatch(), "promoteCurrentToWatch() must succeed for non-empty expression");
-    QCoreApplication::processEvents();
-
-    // Verify "data[0].coords.z" was added (case-insensitively) to DifferentialGrid watch expressions.
+    auto* evaluatorWidget = mainWindow.findChild<gridlock::ui::ExpressionEvaluatorWidget*>(); auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>();
+    QVERIFY(evaluatorWidget && diffGrid); evaluatorWidget->setExpression(QStringLiteral("data[0].coords.z"));
+    QVERIFY(evaluatorWidget->promoteCurrentToWatch()); QCoreApplication::processEvents();
     auto hasWatchExpression = [diffGrid](const QString& target) -> bool {
         for (const std::string& w : diffGrid->getWatchExpressions()) if (QString::fromStdString(w).compare(target, Qt::CaseInsensitive) == 0) return true;
-        for (int col = 0; col < diffGrid->columnCount(); ++col)
-            if (const QTableWidgetItem* hdr = diffGrid->horizontalHeaderItem(col); hdr && hdr->text().compare(target, Qt::CaseInsensitive) == 0) return true;
+        for (int col = 0; col < diffGrid->columnCount(); ++col) if (const QTableWidgetItem* hdr = diffGrid->horizontalHeaderItem(col); hdr && hdr->text().compare(target, Qt::CaseInsensitive) == 0) return true;
         return false;
     };
-    QVERIFY2(hasWatchExpression(QStringLiteral("data[0].coords.z")), "DifferentialGrid must contain promoted Evaluator expression 'data[0].coords.z'");
-
-    // Promote a variable from VariablesDockWidget to Watch Expressions.
-    auto* variablesDock = mainWindow.findChild<gridlock::VariablesDockWidget*>(); QVERIFY(variablesDock != nullptr);
-    QVERIFY2(variablesDock->promoteVariableToWatch(QStringLiteral("rank_local_id")), "VariablesDockWidget::promoteVariableToWatch('rank_local_id') must return true");
-    QCoreApplication::processEvents();
-    QVERIFY2(hasWatchExpression(QStringLiteral("rank_local_id")), "DifferentialGrid must contain promoted variable 'rank_local_id'");
-
+    QVERIFY(hasWatchExpression(QStringLiteral("data[0].coords.z")));
+    auto* variablesDock = mainWindow.findChild<gridlock::VariablesDockWidget*>(); QVERIFY(variablesDock && variablesDock->promoteVariableToWatch(QStringLiteral("rank_local_id")));
+    QCoreApplication::processEvents(); QVERIFY(hasWatchExpression(QStringLiteral("rank_local_id")));
     // 2. Cross-View Context Menu Actions in DisassemblyView.
     auto* disasm = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); QVERIFY(disasm != nullptr);
     const QStringList actionNames = disasm->contextActionNamesForAddress(0x0040113dULL);
-    QVERIFY(actionNames.contains(QStringLiteral("Seek in Memory View")) && actionNames.contains(QStringLiteral("Inspect Cross-References (X)")));
-    QVERIFY(actionNames.contains(QStringLiteral("Lookup in Reference Manual (F1)")) && actionNames.contains(QStringLiteral("Patch Instruction")));
-
-    // Start on Terminal tab (index 0), then trigger "Lookup in Reference Manual (F1)" at 0x0040113d.
+    QVERIFY(actionNames.contains(QStringLiteral("Seek in Memory View")) && actionNames.contains(QStringLiteral("Inspect Cross-References (X)")) && actionNames.contains(QStringLiteral("Lookup in Reference Manual (F1)")) && actionNames.contains(QStringLiteral("Patch Instruction")));
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); QVERIFY(bottomTabs != nullptr);
     bottomTabs->setCurrentIndex(0); QCoreApplication::processEvents();
-    QVERIFY2(disasm->triggerContextAction(0x0040113dULL, QStringLiteral("Lookup in Reference Manual (F1)")), "triggerContextAction(0x0040113d, 'Lookup in Reference Manual (F1)') must succeed");
-    QCoreApplication::processEvents();
-    QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"), Qt::CaseInsensitive), "Must switch BottomConsoleTabs to Reference Manual");
-    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>(); QVERIFY(refManual != nullptr);
-    auto* browser = refManual->findChild<QTextBrowser*>(); QVERIFY(browser != nullptr);
-    QVERIFY2(browser->toPlainText().contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive), "Reference Manual must display MPI_Init documentation");
-
+    QVERIFY(disasm->triggerContextAction(0x0040113dULL, QStringLiteral("Lookup in Reference Manual (F1)"))); QCoreApplication::processEvents();
+    QVERIFY(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("Reference Manual"), Qt::CaseInsensitive));
+    auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>(); auto* browser = refManual ? refManual->findChild<QTextBrowser*>() : nullptr;
+    QVERIFY(refManual && browser && browser->toPlainText().contains(QStringLiteral("MPI_Init"), Qt::CaseInsensitive));
     // 3. File Line Headroom Verification for src/ui/views/DisassemblyAnalysis.cpp (< 850 lines).
     QFile disasmAnalysisFile(QStringLiteral("../src/ui/views/DisassemblyAnalysis.cpp"));
     if (!disasmAnalysisFile.exists()) disasmAnalysisFile.setFileName(QStringLiteral("src/ui/views/DisassemblyAnalysis.cpp"));
-    QVERIFY2(disasmAnalysisFile.open(QIODevice::ReadOnly | QIODevice::Text), "Must open src/ui/views/DisassemblyAnalysis.cpp for line count verification");
+    QVERIFY(disasmAnalysisFile.open(QIODevice::ReadOnly | QIODevice::Text));
     const int lineCount = QString::fromUtf8(disasmAnalysisFile.readAll()).split('\n').size();
     QVERIFY2(lineCount < 850, qPrintable(QString("DisassemblyAnalysis.cpp has %1 lines (expected < 850)").arg(lineCount)));
 }

@@ -191,7 +191,7 @@ void CheckpointDialog::setupUi() {
   m_rankSpin->setValue(0);
   connect(m_rankSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int r) { setFocusedRank(r); });
 
-  m_refreshBtn = new QPushButton(QStringLiteral("Rescan & Refresh"), this);
+  m_refreshBtn = new QPushButton(QStringLiteral("Rescan && Refresh"), this);
   m_refreshBtn->setObjectName(QStringLiteral("checkpointRefreshBtn"));
   connect(m_refreshBtn, &QPushButton::clicked, this, [this]() {
     refreshSafetyScan();
@@ -274,17 +274,18 @@ void CheckpointDialog::setupUi() {
       QStringLiteral("Location"), QStringLiteral("Created"), QStringLiteral("Note"),
       QStringLiteral("Restore"), QStringLiteral("Delete")});
   m_checkpointTable->verticalHeader()->setVisible(false);
+  m_checkpointTable->setWordWrap(false);
   m_checkpointTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   m_checkpointTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
   m_checkpointTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
   m_checkpointTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-  m_checkpointTable->setColumnWidth(0, 48);
-  m_checkpointTable->setColumnWidth(1, 56);
-  m_checkpointTable->setColumnWidth(2, 82);
-  m_checkpointTable->setColumnWidth(4, 78);
-  m_checkpointTable->setColumnWidth(5, 160);
-  m_checkpointTable->setColumnWidth(6, 118);
-  m_checkpointTable->setColumnWidth(7, 74);
+  m_checkpointTable->setColumnWidth(0, 42);
+  m_checkpointTable->setColumnWidth(1, 52);
+  m_checkpointTable->setColumnWidth(2, 76);
+  m_checkpointTable->setColumnWidth(4, 92);
+  m_checkpointTable->setColumnWidth(5, 210);
+  m_checkpointTable->setColumnWidth(6, 98);
+  m_checkpointTable->setColumnWidth(7, 82);
   root->addWidget(m_checkpointTable, 1);
 }
 
@@ -403,8 +404,9 @@ void CheckpointDialog::rebuildCheckpointTable() {
     m_checkpointTable->setItem(row, 4, new QTableWidgetItem(cp.timestamp));
     m_checkpointTable->setItem(row, 5, new QTableWidgetItem(cp.note));
 
-    auto* restoreBtn = new QPushButton(QStringLiteral("Restore (restart)"), m_checkpointTable);
+    auto* restoreBtn = new QPushButton(QStringLiteral("Restore"), m_checkpointTable);
     restoreBtn->setObjectName(QStringLiteral("checkpointRestoreBtn_%1").arg(cp.id));
+    restoreBtn->setToolTip(QStringLiteral("Restore checkpoint %1 (restart %1)").arg(cp.id));
     restoreBtn->setCursor(Qt::PointingHandCursor);
     connect(restoreBtn, &QPushButton::clicked, this, [this, r = cp.rank, cid = cp.id]() {
       if (m_coordinator) m_coordinator->restoreCheckpoint(r, cid);

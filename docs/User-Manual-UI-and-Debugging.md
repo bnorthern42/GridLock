@@ -18,6 +18,8 @@ Press **`Ctrl+M`** at any time to toggle maximizing and restoring the height of 
 
 ### Unified Fuzzy Command Palette (`CommandPaletteDialog`)
 
+![Command Palette fuzzy launcher](screenshots/v087_command_palette.png)
+
 * **`Ctrl+Shift+P`** (`View -> Command Palette...`): Opens the keyboard launcher pre-filtered with `>` for commands and actions (`Debug: Run to Cursor`, `Debug: Break on Function Regex (rbreak)...`, `Process Checkpoints...`, `Signals & Catchpoints...`, `Programmer's Calculator`, `Array & Field Plotter...`, perspective switches, and themes).
 * **`Ctrl+P`** (`File -> Quick Open`): Opens the unified fuzzy palette across workspace files, commands, symbols, themes, and ranks.
 * **Domain Prefixes**: Type `>` for menu/shortcut actions, `@` for `clangd` and ELF64 symbols, or `#` to jump directly to a live MPI rank. Navigate results with `Up`/`Down`, execute with `Return`, and close with `Esc`.
@@ -146,6 +148,9 @@ Switch between three modes at the top of the left dock, all sharing a live wildc
 ### Signal Disposition Matrix and Catchpoints (`SignalCatchpointDialog`, `Ctrl+Alt+S`)
 
 Open **`Debug -> Signals & Catchpoints...`** (`Ctrl+Alt+S`) to manage runtime signal handling and event catchpoints across all active ranks:
+
+![Signals and Catchpoints dialog showing Signal Disposition Matrix and Catchpoints tabs](screenshots/v087_signals_and_catchpoints.png)
+
 * **Tab 1 (`Signal Disposition Matrix`)**: Filterable table of standard POSIX and HPC fabric signals (`SIGFPE`, `SIGPIPE`, `SIGUSR1`, `SIGUSR2`, `SIGBUS`, `SIGSEGV`, `SIGABRT`, `SIGALRM`, `SIGINT`, `SIGTERM`, `SIGCHLD`, `SIGURG`, `SIGILL`, `SIGTRAP`) with live `Stop`, `Print`, and `Pass` checkboxes issuing `handle <SIG> <stop|nostop> <print|noprint> <pass|nopass>`, plus 1-click **`HPC Quiet Defaults`** and **`Trap Faults`** presets.
 * **Tab 2 (`Catchpoints`)**:
   * **C++ Exceptions**: Install `throw` (`-catch-throw`), `rethrow` (`-catch-rethrow`), or `catch` (`-catch-catch`) catchpoints with optional exception-type regex filtering (`-r <regex>`).
@@ -155,11 +160,14 @@ Open **`Debug -> Signals & Catchpoints...`** (`Ctrl+Alt+S`) to manage runtime si
 ### Copy-on-Write Process Checkpoints (`CheckpointDialog`, `Ctrl+Alt+K`)
 
 Open **`Debug -> Process Checkpoints...`** (`Ctrl+Alt+K`) to save and restore lightweight Linux copy-on-write process snapshots on a paused rank:
+
+![Copy-on-Write Process Checkpoints dialog with /proc safety banner](screenshots/v087_cow_checkpoints.png)
+
 * **Pre-Checkpoint `/proc/[pid]/fd` & `/proc/[pid]/maps` Safety Scanner**: Before creating a fork snapshot, `inspectProcessCheckpointSafety()` inspects open file descriptors and memory mappings for the focused rank's PID and displays a color-coded status banner plus expandable `/proc` diagnostics:
   * **`SAFE`** (green): No external sockets, pipes, shared-memory IPC, RDMA verbs, or GPU device mappings detected.
   * **`WARNING: Active Sockets / Pipes / SHM`** (amber): Active `socket:[...]`, `pipe:[...]`, `eventfd`, `/dev/shm/`, `SYSV`, or writable file handles (typical for OpenMPI/MPICH ranks; safe for local single-rank forks if collective barriers are not crossed).
   * **`UNSAFE: RDMA / GPU Device Mapping Detected`** (red): Active `/dev/infiniband/*`, `uverbs`, `mlx5`, `/dev/nvidia*`, `/dev/kfd`, or `/dev/dri/` device handles/VMAs where `fork()` can trigger `EFAULT` or driver faults.
-* **Create, Restore, and Delete**: Enter an optional note and click **`Create CoW Checkpoint (Ctrl+Shift+K)`** (prompts confirmation on `WARNING`/`UNSAFE`), then click **`Restore (restart)`** (`restart <id>`) to jump backward in execution and refresh frames/variables/registers, or **`Delete`** (`delete checkpoint <id>`) to reclaim a snapshot.
+* **Create, Restore, and Delete**: Enter an optional note and click **`Create CoW Checkpoint (Ctrl+Shift+K)`** (prompts confirmation on `WARNING`/`UNSAFE`), then click **`Restore`** (`restart <id>`) to jump backward in execution and refresh frames/variables/registers, or **`Delete`** (`delete checkpoint <id>`) to reclaim a snapshot.
 
 ### Hardware Data Watchpoints (`Variables` Dock)
 

@@ -470,6 +470,9 @@ void performCoordinatorSyscallAndSignalProbe(int rank) {
 ### Click-by-Click Walkthrough
 1. Open **`tutorial/catchpoint_exceptions.cpp`** (`File -> Open Source File` or `Ctrl+P` -> `catchpoint_exceptions.cpp`), set **`RANKS (-np):`** to **`4`**, and press **`Ctrl+B`** (`Tools -> Build Target`) if not yet compiled.
 2. Press **`Ctrl+Alt+S`** (or choose **`Debug -> Signals & Catchpoints...`**) to open `SignalCatchpointDialog`.
+
+![Signals and Catchpoints dialog configured for Tutorial 8](screenshots/v087_signals_and_catchpoints.png)
+
 3. Configure **`SIGUSR1`** in the **`Signal Disposition Matrix`** tab:
    * Type `SIGUSR1` in the filter box and uncheck **`Stop`** while leaving **`Print`** and **`Pass`** checked (or click **`HPC Quiet Defaults`** to quiet `SIGUSR1`, `SIGUSR2`, and `SIGPIPE` in one click).
    * Rank 0's `raise(SIGUSR1)` telemetry heartbeat will now pass through to `handleSigUsr1Heartbeat` without stalling the parallel run.

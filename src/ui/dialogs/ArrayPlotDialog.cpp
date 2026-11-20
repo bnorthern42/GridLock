@@ -207,6 +207,7 @@ void ArrayPlotCanvas::paintEvent(QPaintEvent* /*event*/) {
             if (!started) { ghostPath.moveTo(pt); started = true; }
             else ghostPath.lineTo(pt);
         }
+        p.setBrush(Qt::NoBrush);
         p.setPen(QPen(prevCol, 1.3, Qt::DashLine));
         p.drawPath(ghostPath);
     }
@@ -228,6 +229,7 @@ void ArrayPlotCanvas::paintEvent(QPaintEvent* /*event*/) {
             if (!started) { rankPath.moveTo(pt); started = true; }
             else rankPath.lineTo(pt);
         }
+        p.setBrush(Qt::NoBrush);
         p.setPen(QPen(kRankPalette[overlayColorIdx++ % 6], 1.4));
         p.drawPath(rankPath);
     }
@@ -260,6 +262,7 @@ void ArrayPlotCanvas::paintEvent(QPaintEvent* /*event*/) {
         }
     }
     if (!isStem) {
+        p.setBrush(Qt::NoBrush);
         p.setPen(QPen(lineCol, 2.0));
         p.drawPath(activePath);
     }
@@ -346,10 +349,10 @@ int ArrayPlotDialog::byteSizeOf(ElementType type) {
 ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* parent)
     : QDialog(parent, Qt::Window) {
     setObjectName(QStringLiteral("ArrayPlotDialog"));
-    setWindowTitle(QStringLiteral("DDD Scientific 1D/2D Array & Field Plotter"));
+    setWindowTitle(QStringLiteral("Scientific 1D/2D Array & Field Plotter"));
     setModal(false);
-    setMinimumSize(780, 500);
-    resize(900, 560);
+    setMinimumSize(940, 520);
+    resize(1040, 600);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(10, 10, 10, 10);
@@ -408,19 +411,21 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
 
     // Second toolbar row: Rows (NY), Cols (NX), Rank selector, Compare Ranks, Auto-Refresh on Stop, and Exports.
     auto* secondRow = new QHBoxLayout();
-    secondRow->setSpacing(6);
+    secondRow->setSpacing(8);
 
     m_rowsSpin = new QSpinBox(this);
     m_rowsSpin->setObjectName(QStringLiteral("arrayPlotRowsSpin"));
     m_rowsSpin->setRange(1, 4096);
     m_rowsSpin->setValue(1);
     m_rowsSpin->setFixedHeight(24);
+    m_rowsSpin->setMaximumWidth(74);
 
     m_colsSpin = new QSpinBox(this);
     m_colsSpin->setObjectName(QStringLiteral("arrayPlotColsSpin"));
     m_colsSpin->setRange(1, 65536);
     m_colsSpin->setValue(64);
     m_colsSpin->setFixedHeight(24);
+    m_colsSpin->setMaximumWidth(78);
 
     m_rankCombo = new QComboBox(this);
     m_rankCombo->setObjectName(QStringLiteral("arrayPlotRankCombo"));
@@ -429,9 +434,12 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
 
     m_overlayRanksCheck = new QCheckBox(QStringLiteral("Overlay Ranks"), this);
     m_overlayRanksCheck->setObjectName(QStringLiteral("arrayPlotOverlayAllRanksCheck"));
+    m_overlayRanksCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 
-    m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh on Stop"), this);
+    m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh"), this);
     m_autoRefreshCheck->setObjectName(QStringLiteral("arrayPlotAutoRefreshCheck"));
+    m_autoRefreshCheck->setToolTip(QStringLiteral("Automatically refresh plot whenever the focused rank stops"));
+    m_autoRefreshCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_autoRefreshCheck->setChecked(true);
 
     m_exportCsvBtn = new QPushButton(QStringLiteral("Export CSV"), this);
