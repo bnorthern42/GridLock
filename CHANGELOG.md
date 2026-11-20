@@ -8,15 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.7] - 2026-11-20
 
 ### Added
-- **Execution Power Tools & Non-Linear Control (`MainWindowDebugger`, `SourceCodeView`, `DisassemblyView`, `GdbRankCoordinator`, `DapCoordinator`):** Added instruction step-over (`nexti` / `Ctrl+Shift+F10` / `-exec-next-instruction`), Run to Cursor (`Ctrl+F10` / `-exec-until`) from both source lines and disassembly addresses, a draggable gutter PC arrow and `Set Next Statement / Jump...` (`-exec-jump`) guarded by lexical scope hazard checks, and `Force Early Return...` (`-exec-return`) from the `Debug` menu and `CALL STACK` context menu.
-- **Non-Destructive Breakpoint Lifecycle, Temporary/Regex Breakpoints & Command Lists (`ConditionalBreakpointDialog`, `SourceCodeView`, `GdbRankCoordinator`):** Added non-destructive enable/disable toggling (`-break-enable` / `-break-disable`) rendered as hollow gutter rings while preserving condition, ignore count, rank filter, and hit commands; temporary one-shot breakpoints (`tbreak` / `-break-insert -t`) with dashed cyan `T` markers that auto-clear on hit; function-symbol regex breakpoints (`Debug -> Break on Function Regex (rbreak)...`); and multi-line GDB hit command scripts (`-break-commands`).
-- **Signal Disposition Matrix & Catchpoints (`SignalCatchpointDialog`, `GdbRankCoordinator`, `tutorial/catchpoint_exceptions.cpp`):** Added `Debug -> Signals & Catchpoints...` (`Ctrl+Alt+S`) with a filterable POSIX/HPC signal `Stop`/`Print`/`Pass` disposition matrix (`handle <SIG>`, plus `HPC Quiet Defaults` and `Trap Faults` presets) and C++ `throw`/`rethrow`/`catch` regex, Linux syscall (`mmap`, `openat`, `clone3`, `ioctl`), and `dlopen`/`dlclose` catchpoints, paired with a new 4-rank C++ MPI tutorial showcase (`tutorial/catchpoint_exceptions.cpp`).
-- **Copy-on-Write Fork Checkpoints (`CheckpointDialog`, `GdbRankCoordinator`):** Added `Debug -> Process Checkpoints...` (`Ctrl+Alt+K`) supporting GDB `checkpoint`, `info checkpoints`, `restart <id>`, and `delete checkpoint <id>` alongside a pre-fork `/proc/[pid]/fd` and `/proc/[pid]/maps` safety scanner (`Safe`, `Warning`, and `BlockedOrUnsafe`) with expandable diagnostics and explicit confirmation prompts for active IPC sockets, pipes, shared memory, RDMA verbs, and GPU device mappings.
-- **Productivity, Visualization & Console Ergonomics (`CommandPaletteDialog`, `ProgrammerCalculatorDialog`, `ArrayPlotDialog`, `PointerGraphDialog`, `GdbConsoleWidget`):** Added the unified fuzzy Command Palette (`Ctrl+Shift+P` / `Ctrl+P` with `>`, `@`, and `#` prefixes), floating Programmer's Calculator (`Ctrl+Alt+C`, synchronized `HEX`/`DEC`/`OCT`/`BIN`, IEEE-754 `float`/`double`, `8/16/32/64-bit` width, `BSWAP`, interactive 64-bit bit-toggle grid, radix-aware keypad, and right-click handoff across views), live auto-refreshing 1D/2D Array & Field Plotter (`Ctrl+Alt+G`, `Viridis`/`Plasma`/`Cool-Warm`/`Grayscale`, `NaN`/`Inf` flags, previous-stop ghost curve overlay, CSV/PNG/`gnuplot`), persistent auto-updating Pointer Graph roots with `"old -> new"` field-level mutation diffs, and GDB console readline ergonomics (persistent `~/.config/gridlock/gdb_history`, `Up`/`Down` draft preservation, `Ctrl+R` incremental reverse search, and `Tab` `complete` popup).
-- **Documentation & Quick Reference (`docs/Keyboard-Shortcuts-and-Reference.md`, `docs/`, `scripts/sync_wiki.sh`):** Added a dedicated Keyboard Shortcuts and Quick Reference guide, Tutorial 8 (`catchpoint_exceptions.cpp`), and updated Wiki sync metadata for `v0.8.7`.
+- **Execution Power Tools & Non-Linear Control** (`MainWindowDebugger`, `SourceCodeView`, `DisassemblyView`, `GdbRankCoordinator`, `DapCoordinator`):
+  - Instruction step-over (`nexti` / `Ctrl+Shift+F10` / `-exec-next-instruction`).
+  - Run to Cursor (`Ctrl+F10` / `-exec-until`) from both source lines and disassembly addresses.
+  - Draggable gutter PC arrow and `Set Next Statement / Jump...` (`-exec-jump`) guarded by lexical scope hazard checks.
+  - `Force Early Return...` (`-exec-return`) from the `Debug` menu and `CALL STACK` context menu.
+- **Non-Destructive Breakpoint Lifecycle, Temporary/Regex Breakpoints & Command Lists** (`ConditionalBreakpointDialog`, `SourceCodeView`, `GdbRankCoordinator`):
+  - Non-destructive enable/disable toggling (`-break-enable` / `-break-disable`) rendered as hollow gutter rings while preserving condition, ignore count, rank filter, and hit commands.
+  - Temporary one-shot breakpoints (`tbreak` / `-break-insert -t`) with dashed cyan `T` markers that auto-clear on hit.
+  - Function-symbol regex breakpoints (`Debug -> Break on Function Regex (rbreak)...`).
+  - Multi-line GDB hit command scripts (`-break-commands`).
+- **Signal Disposition Matrix & Catchpoints** (`SignalCatchpointDialog`, `GdbRankCoordinator`, `tutorial/catchpoint_exceptions.cpp`):
+  - `Debug -> Signals & Catchpoints...` (`Ctrl+Alt+S`) with a filterable POSIX/HPC signal `Stop` / `Print` / `Pass` disposition matrix (`handle <SIG>`) and `HPC Quiet Defaults` / `Trap Faults` presets.
+  - C++ `throw`, `rethrow`, and `catch` regex catchpoints, Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`), and `dlopen` / `dlclose` catchpoints.
+  - New 4-rank C++ MPI tutorial showcase (`tutorial/catchpoint_exceptions.cpp`).
+- **Copy-on-Write Fork Checkpoints** (`CheckpointDialog`, `GdbRankCoordinator`):
+  - `Debug -> Process Checkpoints...` (`Ctrl+Alt+K`) supporting GDB `checkpoint`, `info checkpoints`, `restart <id>`, and `delete checkpoint <id>`.
+  - Pre-fork `/proc/[pid]/fd` and `/proc/[pid]/maps` safety scanner (`Safe`, `Warning`, and `BlockedOrUnsafe`) with expandable diagnostics and explicit confirmation prompts for active IPC sockets, pipes, shared memory, RDMA verbs, and GPU device mappings.
+- **Productivity, Visualization & Console Ergonomics** (`CommandPaletteDialog`, `ProgrammerCalculatorDialog`, `ArrayPlotDialog`, `PointerGraphDialog`, `GdbConsoleWidget`):
+  - Unified fuzzy Command Palette (`Ctrl+Shift+P` / `Ctrl+P` with `>`, `@`, and `#` prefixes).
+  - Floating Programmer's Calculator (`Ctrl+Alt+C`) with synchronized `HEX` / `DEC` / `OCT` / `BIN`, IEEE-754 `float` / `double`, `8/16/32/64-bit` width, `BSWAP`, interactive 64-bit bit-toggle grid, radix-aware keypad, and right-click handoff across views.
+  - Live auto-refreshing 1D/2D Array & Field Plotter (`Ctrl+Alt+G`) with `Viridis` / `Plasma` / `Cool-Warm` / `Grayscale` colormaps, `NaN` / `Inf` flags, previous-stop ghost curve overlay, and CSV / PNG / `gnuplot` export.
+  - Persistent auto-updating Pointer Graph roots with `"old -> new"` field-level mutation diffs.
+  - GDB console readline ergonomics (`~/.config/gridlock/gdb_history`, `Up` / `Down` draft preservation, `Ctrl+R` incremental reverse search, and `Tab` `complete` popup).
+- **Documentation, Screenshots & Quick Reference** (`docs/Keyboard-Shortcuts-and-Reference.md`, `docs/screenshots/v087_*.png`, `scripts/sync_wiki.sh`):
+  - Dedicated Keyboard Shortcuts and Quick Reference guide, Tutorial 8 (`catchpoint_exceptions.cpp`), five `v0.8.7` tool screenshots, and updated Wiki sync metadata.
 
-### Changed
-- **Startup Latency Optimization (`ThemeManager`, `ClangdLspClient`, `MainWindowWorkspace`, `MainWindowDocks`, `HpcConsoleWidget`, `TerminalDockWidget`, `ReferenceManualWidget`):** Added on-disk QSS stylesheet caching under `AppConfigLocation/acss`, consolidated theme initialization to a single pass, moved package manager probing and `clangd` launch off the synchronous startup path, and deferred initialization of inactive `Terminal`, `Package Manager`, and `Reference Manual` bottom tabs until first activation.
+### Performance
+- **Startup Latency Optimization** (`ThemeManager`, `ClangdLspClient`, `MainWindowWorkspace`, `MainWindowDocks`, `HpcConsoleWidget`, `TerminalDockWidget`, `ReferenceManualWidget`):
+  - On-disk QSS stylesheet caching under `AppConfigLocation/acss` and single-pass theme initialization.
+  - Asynchronous package manager probing and `clangd` launch moved off the synchronous startup path.
+  - Deferred initialization of inactive `Terminal`, `Package Manager`, and `Reference Manual` bottom tabs until first activation.
+
+### Fixed
+- **Dialog Visual Polish & Layout** (`ArrayPlotDialog`, `ProgrammerCalculatorDialog`, `CheckpointDialog`):
+  - Reset `QPainter` brush to `Qt::NoBrush` before drawing 1D plot curves so `NaN` anomaly markers no longer flood-fill the plot interior, and widened `ArrayPlotDialog` toolbar controls to prevent checkbox clipping.
+  - Escaped literal `&` mnemonics in `ProgrammerCalculatorDialog` (`Bitwise && Arithmetic Expression Evaluator`) and `CheckpointDialog` (`Rescan && Refresh`).
+  - Disabled table word-wrapping and adjusted column widths in `CheckpointDialog` so file locations, timestamps, notes, and `Restore` / `Delete` buttons render without truncation.
 
 ## [0.8.66] - 2026-11-19
 
@@ -43,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Visual Library & Heap Memory Profiler (`MemoryProfilerWidget`, `MemView`):** Added a `LIBRARY MEMORY MAP` view inside `MemView` combining `/proc/<pid>/smaps` virtual memory region attribution with a lightweight `LD_PRELOAD` caller-attribution tracker (`malloc`/`calloc`/`realloc`/`free` unwinding past `libstdc++` `operator new` with `addr2line` symbol resolution), an interactive 2D treemap and proportional stacked bar, a sortable and filterable breakdown table, a `⤢ POP OUT` / `⤡ DOCK` standalone window toggle, and five configurable color schemes (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`) in `Preferences -> Appearance` and the profiler toolbar.
 - **Inline Variable Ghost Values (`SourceCodeView`, `EditorTabManager`, `ConfigManager`):** Added muted italic inline variable values at the end of visible source lines when paused at a breakpoint or stack frame, resolving both local scalar variables and dotted/arrow member chains (such as `domain_cfg.solver.rel_tolerance`) while suppressing opaque `{...}` placeholders, with a toggle in `Preferences -> Editing`.
 - **Non-Suspending Logpoints & Breakpoint Hit Ignore Counts (`ConditionalBreakpointDialog`, `GdbRankCoordinator`, `DapCoordinator`):** Added breakpoint log messages (`{expr}` expression evaluation streamed directly to `PROGRAM OUTPUT` without pausing ranks or stalling MPI barriers, rendered with an amber/cyan diamond gutter marker) and hit ignore counts (`-break-insert -i N` / `-break-after` and DAP `hitCondition`).
-- **Interactive Pointer & Struct Graph Visualizer (`PointerGraphDialog`, `VariablesDockWidget`):** Added a DDD-inspired 2D pointer and struct graph canvas (`Variables` context menu and `Tools -> Pointer & Struct Graph Visualizer...`) with draggable struct cards, automatic 1-hop composite and pointer expansion, directed cubic Bezier edges, layered DAG auto-layout, null-pointer (`0x0`) guards, and cycle/shared-alias detection.
+- **Interactive Pointer & Struct Graph Visualizer (`PointerGraphDialog`, `VariablesDockWidget`):** Added an interactive 2D pointer and struct graph canvas (`Variables` context menu and `Tools -> Pointer & Struct Graph Visualizer...`) with draggable struct cards, automatic 1-hop composite and pointer expansion, directed cubic Bezier edges, layered DAG auto-layout, null-pointer (`0x0`) guards, and cycle/shared-alias detection.
 - **Reverse Debugging / Time-Travel Execution (`GdbRankCoordinator`, `DapCoordinator`, `MainWindow`):** Added GDB Process Record (`record full` with scheduler-locking support) and DAP reverse execution (`stepBack` / `reverseContinue`), exposing `⏺ Record`, `↶ Step Back`, and `⏮ Rev Continue` controls in the main execution toolbar.
 
 ### Changed
