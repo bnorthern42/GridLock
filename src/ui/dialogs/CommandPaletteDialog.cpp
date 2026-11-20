@@ -660,6 +660,9 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Programmer's Calculator"),
                        QStringLiteral("Floating Hex / Dec / Oct / Bin binary calculator, 64-bit toggle grid, and BSWAP"),
                        QStringLiteral("Ctrl+Alt+C"), [mainWindow]() { mainWindow->openProgrammerCalculator(); });
+    registerActionItem(QStringLiteral("Signals & Catchpoints..."),
+                       QStringLiteral("Configure POSIX/HPC signal Stop/Print/Pass matrix and C++/syscall/dlopen catchpoints"),
+                       QStringLiteral("Ctrl+Alt+S"), [mainWindow]() { mainWindow->openSignalsAndCatchpoints(); });
 
     // 2. Collect Workspace & Tutorial Files (Category::File) with cached directory indexing.
     QString wsRoot = mainWindow->activeWorkspaceDirectory();

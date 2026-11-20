@@ -174,6 +174,17 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Deletes any active hardware data watchpoint matching @p expression via `-break-delete`. */
   void removeDataWatchpoint(const QString& expression) override;
 
+  /** @brief Configures `handle <SIG> <stop|nostop> <print|noprint> <pass|nopass>` across active ranks. */
+  void setSignalDisposition(const QString& signalName, bool stop, bool print, bool pass) override;
+  /** @brief Queries `-interpreter-exec console "info handle"` and emits `signalDispositionsReady`. */
+  void requestSignalDispositions() override;
+  /** @brief Installs a C++ exception, Linux syscall, or shared-library catchpoint across active ranks. */
+  void insertCatchpoint(const CatchpointSpec& spec) override;
+  /** @brief Removes an installed catchpoint by its assigned ID @p gdbId across active ranks. */
+  void removeCatchpoint(int gdbId) override;
+  /** @brief Returns the list of currently installed catchpoints tracked by this coordinator. */
+  QVector<CatchpointSpec> activeCatchpoints() const { return m_activeCatchpoints; }
+
   /**
    * @brief Returns a snapshot of `RankState` for @p rankId, or an `"offline"` state if out of range.
    */
@@ -349,6 +360,11 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QString m_currentBinaryPath;                           ///< Target binary path for the active session.
   QString m_lastLaunchCommandSummary;                    ///< Human-readable CWD and launch command summary.
   bool m_breakpointsCleared = false;                     ///< True when clearBreakpoints() explicitly emptied session breakpoints.
+  QMap<QString, SignalDisposition> m_signalDispositions; ///< Configured `handle <SIG>` dispositions re-applied on launch.
+  QVector<CatchpointSpec> m_activeCatchpoints;           ///< Active C++ exception, syscall, and dlopen/dlclose catchpoints.
+  QMap<int, bool> m_pendingInfoHandle;                   ///< True while `210-interpreter-exec console "info handle"` is in flight.
+  QMap<int, QString> m_infoHandleBuffer;                 ///< Accumulated `~` output lines for `210` `info handle` query.
+  int m_nextCatchpointId = 1;                            ///< Monotonic logical ID generator for installed catchpoints.
 };
 
 }  // namespace gridlock

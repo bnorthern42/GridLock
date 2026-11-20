@@ -43,10 +43,45 @@ struct ThreadEntry {
   bool isCurrent = false;   ///< True when this thread is currently selected in the debugger.
 };
 
+/**
+ * @struct SignalDisposition
+ * @brief Represents the debugger's stop/print/pass disposition for a POSIX signal (`handle <SIG>`).
+ */
+struct SignalDisposition {
+  QString signal;       ///< Canonical signal identifier (e.g., `"SIGFPE"`, `"SIGUSR1"`).
+  bool stop = true;     ///< True if the debugger suspends execution when the signal arrives.
+  bool print = true;    ///< True if the debugger logs a message when the signal arrives.
+  bool pass = false;    ///< True if the signal is forwarded to the target application.
+  QString description;  ///< Human-readable description of the signal.
+};
+
+/**
+ * @struct CatchpointSpec
+ * @brief Describes an active C++ exception, Linux syscall, or shared-library (`dlopen`/`dlclose`) catchpoint.
+ */
+struct CatchpointSpec {
+  enum class Kind {
+    CppThrow,    ///< Break on C++ `throw` (`-catch-throw [-r <regex>]`).
+    CppRethrow,  ///< Break on C++ `rethrow` (`-catch-rethrow [-r <regex>]`).
+    CppCatch,    ///< Break on C++ `catch` (`-catch-catch [-r <regex>]`).
+    Syscall,     ///< Break on Linux syscall entry/exit (`catch syscall <filter>`).
+    LoadLib,     ///< Break on shared-library load / `dlopen` (`-catch-load [-r <regex>]`).
+    UnloadLib    ///< Break on shared-library unload / `dlclose` (`-catch-unload [-r <regex>]`).
+  };
+  Kind kind = Kind::CppThrow;  ///< Catchpoint event category.
+  QString filter;              ///< Optional exception/library regex or space/comma-separated syscall names.
+  int gdbId = -1;              ///< Assigned debugger breakpoint/catchpoint ID (`> 0` once installed).
+  bool enabled = true;         ///< True when the catchpoint is active.
+};
+
 Q_DECLARE_METATYPE(StackFrameEntry)
 Q_DECLARE_METATYPE(QVector<StackFrameEntry>)
 Q_DECLARE_METATYPE(ThreadEntry)
 Q_DECLARE_METATYPE(QVector<ThreadEntry>)
+Q_DECLARE_METATYPE(SignalDisposition)
+Q_DECLARE_METATYPE(QVector<SignalDisposition>)
+Q_DECLARE_METATYPE(CatchpointSpec)
+Q_DECLARE_METATYPE(QVector<CatchpointSpec>)
 
 /**
  * @class IBackendCoordinator
@@ -259,6 +294,28 @@ class IBackendCoordinator : public QObject {
   /** @brief Returns a human-readable summary of the active session's CWD and launch command. */
   virtual QString lastLaunchCommandSummary() const { return {}; }
 
+  /**
+   * @brief Configures the debugger's `Stop` / `Print` / `Pass` disposition for @p signalName across all ranks.
+   */
+  virtual void setSignalDisposition(const QString& signalName,
+                                    bool stop,
+                                    bool print,
+                                    bool pass) {
+    Q_UNUSED(signalName);
+    Q_UNUSED(stop);
+    Q_UNUSED(print);
+    Q_UNUSED(pass);
+  }
+
+  /** @brief Requests the current signal disposition table (`info handle`) from the active debugger backend. */
+  virtual void requestSignalDispositions() {}
+
+  /** @brief Installs a C++ exception, Linux syscall, or shared-library catchpoint across all active ranks. */
+  virtual void insertCatchpoint(const CatchpointSpec& spec) { Q_UNUSED(spec); }
+
+  /** @brief Removes an installed catchpoint by its debugger breakpoint/catchpoint ID @p gdbId. */
+  virtual void removeCatchpoint(int gdbId) { Q_UNUSED(gdbId); }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -297,6 +354,12 @@ class IBackendCoordinator : public QObject {
                      const QString& expression,
                      const QString& oldValue,
                      const QString& newValue);
+
+  /** @brief Emitted when the signal disposition table (`info handle`) is parsed for @p rank. */
+  void signalDispositionsReady(int rank, const QVector<SignalDisposition>& dispositions);
+
+  /** @brief Emitted when the active catchpoints list changes. */
+  void catchpointsUpdated(const QVector<CatchpointSpec>& catchpoints);
 
  protected:
   QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".

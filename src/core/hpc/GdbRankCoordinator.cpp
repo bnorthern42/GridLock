@@ -260,13 +260,15 @@ void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
     return;
   }
 
-  // Fallback path for standalone `QProcess` GDB instances.
+  // Fallback path for standalone `QProcess` GDB instances or in-memory mock test sessions.
   if (rp->process) {
     if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(1000);
     if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
       rp->process->write(cmd.toUtf8());
       emit commandSentToGdb(rankId, cmd.trimmed());
     }
+  } else {
+    emit commandSentToGdb(rankId, cmd.trimmed());
   }
 }
 
@@ -459,16 +461,21 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     writeCmd(id, "-gdb-set pagination off\n"); writeCmd(id, "-gdb-set confirm off\n");
     writeCmd(id, "-gdb-set non-stop off\n"); writeCmd(id, "-gdb-set breakpoint pending on\n");
     for (const char* sig : {"SIGPIPE", "SIGUSR1", "SIGUSR2", "SIG32", "SIG33", "SIG34"})
-      writeCmd(id, QString("-interpreter-exec console \"handle %1 nostop noprint pass\"\n").arg(sig).toUtf8().constData());
+      writeCmd(id, QString("-interpreter-exec console \"handle %1 nostop noprint pass\"\n").arg(sig));
+    for (auto it = m_signalDispositions.constBegin(); it != m_signalDispositions.constEnd(); ++it)
+      writeCmd(id, QStringLiteral("-interpreter-exec console \"handle %1 %2 %3 %4\"\n")
+                       .arg(it.value().signal, it.value().stop ? QStringLiteral("stop") : QStringLiteral("nostop"),
+                            it.value().print ? QStringLiteral("print") : QStringLiteral("noprint"),
+                            it.value().pass ? QStringLiteral("pass") : QStringLiteral("nopass")));
     writeCmd(id, "-gdb-set max-value-size unlimited\n");
     const QString memTrackSo = qEnvironmentVariable("GRIDLOCK_MEMTRACK_SO");
     if (!memTrackSo.isEmpty() && QFileInfo::exists(memTrackSo))
-      writeCmd(id, QStringLiteral("-gdb-set environment LD_PRELOAD %1\n").arg(memTrackSo).toUtf8().constData());
+      writeCmd(id, QStringLiteral("-gdb-set environment LD_PRELOAD %1\n").arg(memTrackSo));
     if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) {
       QString escWd = workDir; escWd.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
-      writeCmd(id, QStringLiteral("-environment-cd \"%1\"\n").arg(escWd).toUtf8().constData());
+      writeCmd(id, QStringLiteral("-environment-cd \"%1\"\n").arg(escWd));
     }
-    if (!execArgs.isEmpty()) writeCmd(id, QStringLiteral("-exec-arguments %1\n").arg(execArgs).toUtf8().constData());
+    if (!execArgs.isEmpty()) writeCmd(id, QStringLiteral("-exec-arguments %1\n").arg(execArgs));
     if (!m_pendingBreakpoints.empty()) {
       for (const auto& bp : m_pendingBreakpoints)
         if (bp.rankFilter < 0 || bp.rankFilter == id) writeCmd(id, buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount));
@@ -476,6 +483,17 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
       const auto persisted = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
       for (auto it = persisted.constBegin(); it != persisted.constEnd(); ++it)
         for (int ln : *it) writeCmd(id, buildBreakInsertCmd(it.key(), ln, QString()));
+    }
+    for (const auto& cp : m_activeCatchpoints) {
+      if (!cp.enabled) continue;
+      QString f = cp.filter.trimmed();
+      if (cp.kind == CatchpointSpec::Kind::Syscall) {
+        f.replace(QLatin1Char(','), QLatin1Char(' ')); f = f.simplified();
+        writeCmd(id, f.isEmpty() ? QStringLiteral("-interpreter-exec console \"catch syscall\"\n") : QStringLiteral("-interpreter-exec console \"catch syscall %1\"\n").arg(f));
+      } else {
+        const QString base = (cp.kind == CatchpointSpec::Kind::CppThrow) ? QStringLiteral("-catch-throw") : (cp.kind == CatchpointSpec::Kind::CppRethrow) ? QStringLiteral("-catch-rethrow") : (cp.kind == CatchpointSpec::Kind::CppCatch) ? QStringLiteral("-catch-catch") : (cp.kind == CatchpointSpec::Kind::LoadLib) ? QStringLiteral("-catch-load") : QStringLiteral("-catch-unload");
+        writeCmd(id, f.isEmpty() ? (base + QLatin1Char('\n')) : QStringLiteral("%1 -r %2\n").arg(base, f));
+      }
     }
     writeCmd(id, "-exec-run\n");
     m_processes[id]->state.currentState = "running"; m_processes[id]->state.executionTimer.start();

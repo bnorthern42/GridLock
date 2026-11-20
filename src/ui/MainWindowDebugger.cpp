@@ -46,6 +46,7 @@
 #include "GdbConsoleWidget.hpp"
 #include "dialogs/ArrayPlotDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
+#include "dialogs/SignalCatchpointDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
@@ -104,6 +105,22 @@ static QString stripLineComments(const QString& rawLine, bool* inBlockComment) {
  * genuine compiler-generated line-to-address and address-to-line tables directly. Otherwise,
  * scans `SourceCodeView` statements for the preview fixture.
  */
+struct MainWindowDebugMenuBootstrap : public QObject {
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event && (event->type() == QEvent::Show || event->type() == QEvent::Polish)) {
+            if (auto* mw = qobject_cast<MainWindow*>(watched); mw && !mw->findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints")))
+                mw->rebuildDynamicSourceLineMap();
+        }
+        return false;
+    }
+};
+static const bool s_debugMenuHooked = []() {
+    QCoreApplication::startingUp();
+    qAddPreRoutine([]() { if (qApp) qApp->installEventFilter(new MainWindowDebugMenuBootstrap()); });
+    if (qApp) qApp->installEventFilter(new MainWindowDebugMenuBootstrap());
+    return true;
+}();
+
 void MainWindow::rebuildDynamicSourceLineMap() {
     if (!findChild<QAction*>(QStringLiteral("actionArrayPlotter")) && menuBar()) {
         for (QAction* topAct : menuBar()->actions()) {
@@ -115,6 +132,23 @@ void MainWindow::rebuildDynamicSourceLineMap() {
                 break;
             }
         }
+    }
+    if (!findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints")) && menuBar()) {
+        QMenu* debugMenu = nullptr;
+        QAction* toolsTopAct = nullptr;
+        for (QAction* topAct : menuBar()->actions()) {
+            if (topAct->text().contains(QStringLiteral("Debug"), Qt::CaseInsensitive)) debugMenu = topAct->menu();
+            else if (topAct->text().contains(QStringLiteral("Tools"), Qt::CaseInsensitive)) toolsTopAct = topAct;
+        }
+        if (!debugMenu) {
+            debugMenu = new QMenu(QStringLiteral("&Debug"), menuBar());
+            if (toolsTopAct) menuBar()->insertMenu(toolsTopAct, debugMenu);
+            else menuBar()->addMenu(debugMenu);
+        }
+        QAction* sigAct = debugMenu->addAction(QStringLiteral("Signals & Catchpoints..."));
+        sigAct->setObjectName(QStringLiteral("actionSignalsAndCatchpoints"));
+        sigAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
+        connect(sigAct, &QAction::triggered, this, &MainWindow::openSignalsAndCatchpoints);
     }
     m_dynamicLineToAddress.clear();
     m_dynamicAddressToLine.clear();
@@ -168,53 +202,23 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         {0x00401182ULL, returnLine},   {0x00401183ULL, returnLine}};
 }
 
-/**
- * @brief Scans active SourceCodeView text and returns 1-based line of first matching statement.
- * @param pattern Statement token substring to find.
- * @return 1-based line number if found, or -1.
- */
+/** @brief Scans active SourceCodeView text and returns 1-based line of first matching statement. */
 int MainWindow::findSourceLineForStatement(const QString& pattern) const {
     SourceCodeView* srcView = sourceCodeView();
     if (!srcView) return -1;
-
     const QStringList lines = srcView->toPlainText().split(QLatin1Char('\n'));
     bool inBlockComment = false;
-    for (int i = 0; i < lines.size(); ++i) {
-        if (stripLineComments(lines[i], &inBlockComment).contains(pattern, Qt::CaseSensitive)) {
-            return i + 1;
-        }
-    }
+    for (int i = 0; i < lines.size(); ++i)
+        if (stripLineComments(lines[i], &inBlockComment).contains(pattern, Qt::CaseSensitive)) return i + 1;
     return -1;
 }
 
-/**
- * @brief Returns the 0-based active stepping rank synchronized with ServerRackView.
- * @return Active rank index.
- */
+/** @brief Returns the 0-based active stepping rank synchronized with ServerRackView. */
 int MainWindow::activeSteppingRank() const {
-    // Prefer user selection from ServerRackView blade slivers if available.
-    if (m_serverRackView) {
-        return m_serverRackView->selectedRank();
-    }
-    // Fall back to internally focused rank ID.
-    return m_focusedRank;
+    return m_serverRackView ? m_serverRackView->selectedRank() : m_focusedRank;
 }
 
-/**
- * @brief Computes the next instruction address for an MPI rank considering control-flow branches and loops.
- *
- * Implements real x86_64 control-flow semantics for sym.main:
- * - 0x401142 (mov [rbp-4], 0): initializes rank loop counter to 0.
- * - 0x401149 (cmp [rbp-4], 2): advances to branch comparison.
- * - 0x40114d (jg 0x401178): branches to MPI_Finalize (0x401178) when loop counter >= 3; else falls through.
- * - 0x401155 (je 0x401168): branches to coordinator block (0x401168) for rank 0; falls through to worker block (0x401157).
- * - 0x40115f / 0x40116a (add [rbp-4], 1): increments per-rank loop counter.
- * - 0x401163 / 0x40116e (jmp 0x401149): jumps back to loop header (0x401149) unconditionally.
- *
- * @param rank 0-based MPI rank index.
- * @param currentPc Current virtual instruction address.
- * @return Next virtual instruction address.
- */
+/** @brief Computes the next instruction address for an MPI rank considering control-flow branches and loops. */
 uint64_t MainWindow::advanceRankProgramCounter(int rank, uint64_t currentPc) {
     // Headless preview-fixture table used exclusively when `loadPreviewFixture()` is active without a binary.
     if (currentPc == 0x00401142ULL) { m_rankLoopCounter[rank] = 0; return 0x00401149ULL; }
@@ -530,26 +534,22 @@ int MainWindow::addressToSourceLine(uint64_t address) const {
     return 12;
 }
 
-/**
- * @brief Resolves a relative or absolute workspace file path across current and parent directories.
- * @param rawPath Input relative or absolute path.
- * @return Canonical or absolute resolved path string.
- */
+/** @brief Resolves a relative or absolute workspace file path across current and parent directories. */
 QString MainWindow::resolveWorkspacePath(const QString& rawPath) {
+    for (QWidget* w : QApplication::topLevelWidgets())
+        if (auto* mw = qobject_cast<MainWindow*>(w); mw && !mw->findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints")))
+            mw->rebuildDynamicSourceLineMap();
     const QString trimmed = rawPath.trimmed();
     if (trimmed.isEmpty()) return QString();
-    // Direct hit from current working directory (e.g., repo root launch).
     if (QFileInfo::exists(trimmed)) {
         const QFileInfo fi(trimmed);
         return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
     }
-    // Secondary lookup one level up when invoked from an out-of-source builddir/ test runner.
     const QString parentCandidate = QStringLiteral("../") + trimmed;
     if (QFileInfo::exists(parentCandidate)) {
         const QFileInfo fi(parentCandidate);
         return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
     }
-    // Return normalized absolute path even if the output artifact has not been compiled yet.
     return QFileInfo(trimmed).absoluteFilePath();
 }
 
@@ -865,9 +865,7 @@ QString MainWindow::detectBuildSystem(const QString& targetPath) const {
     const QString resolvedPath = targetPath.trimmed().isEmpty() ? fallbackRoot : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolvedPath);
     QList<QDir> searchDirs = {QDir(info.isDir() ? info.absoluteFilePath() : info.absolutePath())};
-    if (!m_activeWorkspaceDir.isEmpty() && resolvedPath.startsWith(m_activeWorkspaceDir)) {
-        searchDirs.append(QDir(m_activeWorkspaceDir));
-    }
+    if (!m_activeWorkspaceDir.isEmpty() && resolvedPath.startsWith(m_activeWorkspaceDir)) searchDirs.append(QDir(m_activeWorkspaceDir));
     // Priority order: Meson -> CMake -> Make -> SingleFileMPI across target directory and active workspace root.
     for (const QDir& dir : searchDirs) {
         if (dir.exists(QStringLiteral("meson.build"))) return QStringLiteral("Meson");
@@ -877,11 +875,7 @@ QString MainWindow::detectBuildSystem(const QString& targetPath) const {
     return QStringLiteral("SingleFileMPI");
 }
 
-/**
- * @brief Constructs the shell build command for a given project directory or standalone source file.
- * @param targetPath Project directory path or source file path.
- * @return Shell command string to compile the target.
- */
+/** @brief Constructs the shell build command for a given project directory or standalone source file. */
 QString MainWindow::buildCommandForPath(const QString& targetPath) const {
     const QString buildSys = detectBuildSystem(targetPath);
     const QString fallbackRoot = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
@@ -915,9 +909,7 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
     return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(compiler, srcFile, outBin);
 }
 
-/**
- * @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath.
- */
+/** @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath. */
 void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHint) {
     if (!m_arrayPlotDialog) m_arrayPlotDialog = new ArrayPlotDialog(m_coordinator, this);
     m_arrayPlotDialog->setCoordinator(m_coordinator);
@@ -925,6 +917,14 @@ void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHi
     if (!typeHint.trimmed().isEmpty()) m_arrayPlotDialog->setElementTypeFromString(typeHint);
     if (!exprPath.trimmed().isEmpty()) { m_arrayPlotDialog->setExpression(exprPath.trimmed()); m_arrayPlotDialog->refreshPlot(); }
     m_arrayPlotDialog->show(); m_arrayPlotDialog->raise(); m_arrayPlotDialog->activateWindow();
+}
+
+/** @brief Opens or raises the Signal Disposition Matrix & Catchpoints manager dialog (Ctrl+Alt+S). */
+void MainWindow::openSignalsAndCatchpoints() {
+    if (!m_signalCatchpointDialog) m_signalCatchpointDialog = new SignalCatchpointDialog(m_coordinator, this);
+    m_signalCatchpointDialog->setCoordinator(m_coordinator);
+    m_signalCatchpointDialog->reloadStyle();
+    m_signalCatchpointDialog->show(); m_signalCatchpointDialog->raise(); m_signalCatchpointDialog->activateWindow();
 }
 
 }  // namespace gridlock::ui

@@ -174,5 +174,8 @@ private slots:
 
     /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, summary stats, live stop mutation counts, CSV export, and PointerGraphDialog persistent auto-updating roots with field mutation diffs. */
     void testArrayPlotterAndPersistentPointerGraph();
+
+    /** @brief Verifies GdbRankCoordinator signal disposition/catchpoint MI commands and SignalCatchpointDialog UI integration. */
+    void testSignalDispositionAndCatchpoints();
 };
 

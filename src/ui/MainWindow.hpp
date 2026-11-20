@@ -75,6 +75,7 @@ class ArrayPlotDialog;
 class CommandPaletteDialog;
 class PointerGraphDialog;
 class ProgrammerCalculatorDialog;
+class SignalCatchpointDialog;
 
 /**
  * @class MainWindow
@@ -646,6 +647,8 @@ public slots:
     void openProgrammerCalculator();
     /** @brief Opens or raises the floating Programmer's Calculator pre-populated with @p text. */
     void openProgrammerCalculatorWithText(const QString& text);
+    /** @brief Opens or raises the Signal Disposition Matrix & Catchpoints manager dialog (Ctrl+Alt+S). */
+    void openSignalsAndCatchpoints();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -778,6 +781,7 @@ private:
     PointerGraphDialog* m_pointerGraphDialog = nullptr;
     CommandPaletteDialog* m_commandPaletteDialog = nullptr;
     ProgrammerCalculatorDialog* m_programmerCalculatorDialog = nullptr;
+    SignalCatchpointDialog* m_signalCatchpointDialog = nullptr;
 };
 
 }  // namespace gridlock::ui

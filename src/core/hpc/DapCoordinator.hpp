@@ -201,6 +201,15 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Removes an active DAP hardware data breakpoint matching @p expression. */
   void removeDataWatchpoint(const QString& expression) override;
 
+  /** @brief Safe no-op signal disposition handler for `lldb-dap` sessions. */
+  void setSignalDisposition(const QString& signalName, bool stop, bool print, bool pass) override;
+  /** @brief Safe no-op signal disposition table query for `lldb-dap` sessions. */
+  void requestSignalDispositions() override;
+  /** @brief Safe no-op catchpoint insertion handler for `lldb-dap` sessions. */
+  void insertCatchpoint(const CatchpointSpec& spec) override;
+  /** @brief Safe no-op catchpoint removal handler for `lldb-dap` sessions. */
+  void removeCatchpoint(int gdbId) override;
+
  signals:
   /** @brief Emitted when @p rankId stops due to @p reason (e.g., `"breakpoint"`, `"step"`). */
   void executionStopped(int rankId, const QString& reason);

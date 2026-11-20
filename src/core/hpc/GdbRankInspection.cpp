@@ -354,6 +354,41 @@ void GdbRankCoordinator::handleWatchpointStopRecord(int rankId, const QString& l
  * @return True if @p line was consumed by an inspection/REPL/watchpoint handler; false otherwise.
  */
 bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& line) {
+  // Buffer `~"..."` / `&"..."` console output produced while a `210-interpreter-exec console "info handle"` command is active.
+  if (m_pendingInfoHandle.value(rankId, false) &&
+      (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {
+    QString payload = line.mid(1).trimmed();
+    if (payload.startsWith(QLatin1Char('"')) && payload.endsWith(QLatin1Char('"')) && payload.size() >= 2)
+      payload = unescapeMiValue(payload.mid(1, payload.size() - 2));
+    if (!payload.isEmpty()) m_infoHandleBuffer[rankId] += payload;
+    return true;
+  }
+
+  // Token 210: Parse `info handle` table lines into `SignalDisposition` rows and emit `signalDispositionsReady`.
+  if (line.startsWith(QLatin1String("210^done")) || line.startsWith(QLatin1String("210^error"))) {
+    m_pendingInfoHandle[rankId] = false;
+    const QString buffered = m_infoHandleBuffer.take(rankId);
+    if (line.startsWith(QLatin1String("210^done"))) {
+      static const QRegularExpression sigRowRe(
+          QStringLiteral("^\\s*(SIG[A-Z0-9+-]+)\\s+(Yes|No)\\s+(Yes|No)\\s+(Yes|No)\\s*(.*)$"),
+          QRegularExpression::CaseInsensitiveOption);
+      QVector<SignalDisposition> rows;
+      for (const QString& rawLn : buffered.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        if (const auto m = sigRowRe.match(rawLn); m.hasMatch()) {
+          SignalDisposition disp{m.captured(1).toUpper(),
+                                 m.captured(2).compare(QStringLiteral("Yes"), Qt::CaseInsensitive) == 0,
+                                 m.captured(3).compare(QStringLiteral("Yes"), Qt::CaseInsensitive) == 0,
+                                 m.captured(4).compare(QStringLiteral("Yes"), Qt::CaseInsensitive) == 0,
+                                 m.captured(5).trimmed()};
+          m_signalDispositions[disp.signal] = disp;
+          rows.append(disp);
+        }
+      }
+      if (!rows.isEmpty()) emit signalDispositionsReady(rankId, rows);
+    }
+    return true;
+  }
+
   // Buffer `~"..."` / `&"..."` console output produced while a `204-interpreter-exec console` command is active.
   if (m_pendingConsoleCmdCount.value(rankId, 0) > 0 &&
       (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {
@@ -832,6 +867,74 @@ void GdbRankCoordinator::reverseStepInstruction(int rank) {
   if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-step-instruction --reverse\n"));
+}
+
+void GdbRankCoordinator::setSignalDisposition(const QString& signalName, bool stop, bool print, bool pass) {
+  const QString sig = signalName.trimmed().toUpper();
+  if (sig.isEmpty()) return;
+  SignalDisposition disp = m_signalDispositions.value(sig, {sig, stop, print, pass, QString()});
+  disp.signal = sig; disp.stop = stop; disp.print = print; disp.pass = pass;
+  m_signalDispositions.insert(sig, disp);
+  const QString cmd = QStringLiteral("-interpreter-exec console \"handle %1 %2 %3 %4\"\n")
+                          .arg(sig, stop ? QStringLiteral("stop") : QStringLiteral("nostop"),
+                               print ? QStringLiteral("print") : QStringLiteral("noprint"),
+                               pass ? QStringLiteral("pass") : QStringLiteral("nopass"));
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r)
+    if (m_processes[r]) queueOrWriteCmd(r, cmd);
+}
+
+void GdbRankCoordinator::requestSignalDispositions() {
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) {
+    if (m_processes[r]) {
+      m_pendingInfoHandle[r] = true; m_infoHandleBuffer[r].clear();
+      queueOrWriteCmd(r, QStringLiteral("210-interpreter-exec console \"info handle\"\n"));
+      return;
+    }
+  }
+  if (!m_signalDispositions.isEmpty()) {
+    QVector<SignalDisposition> rows;
+    for (auto it = m_signalDispositions.constBegin(); it != m_signalDispositions.constEnd(); ++it) rows.append(it.value());
+    emit signalDispositionsReady(0, rows);
+  }
+}
+
+void GdbRankCoordinator::insertCatchpoint(const CatchpointSpec& spec) {
+  CatchpointSpec entry = spec;
+  entry.filter = entry.filter.trimmed();
+  if (entry.gdbId <= 0) entry.gdbId = m_nextCatchpointId++;
+  else if (entry.gdbId >= m_nextCatchpointId) m_nextCatchpointId = entry.gdbId + 1;
+  entry.enabled = true;
+  m_activeCatchpoints.append(entry);
+
+  QString cmd;
+  if (entry.kind == CatchpointSpec::Kind::Syscall) {
+    QString f = entry.filter;
+    f.replace(QLatin1Char(','), QLatin1Char(' '));
+    f = f.simplified();
+    cmd = f.isEmpty() ? QStringLiteral("-interpreter-exec console \"catch syscall\"\n")
+                      : QStringLiteral("-interpreter-exec console \"catch syscall %1\"\n").arg(f);
+  } else {
+    const QString base = (entry.kind == CatchpointSpec::Kind::CppThrow)    ? QStringLiteral("-catch-throw")
+                         : (entry.kind == CatchpointSpec::Kind::CppRethrow) ? QStringLiteral("-catch-rethrow")
+                         : (entry.kind == CatchpointSpec::Kind::CppCatch)   ? QStringLiteral("-catch-catch")
+                         : (entry.kind == CatchpointSpec::Kind::LoadLib)    ? QStringLiteral("-catch-load")
+                                                                            : QStringLiteral("-catch-unload");
+    cmd = entry.filter.isEmpty() ? (base + QLatin1Char('\n'))
+                                 : QStringLiteral("%1 -r %2\n").arg(base, entry.filter);
+  }
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r)
+    if (m_processes[r]) queueOrWriteCmd(r, cmd);
+  emit catchpointsUpdated(m_activeCatchpoints);
+}
+
+void GdbRankCoordinator::removeCatchpoint(int gdbId) {
+  if (gdbId <= 0) return;
+  for (int i = m_activeCatchpoints.size() - 1; i >= 0; --i)
+    if (m_activeCatchpoints[i].gdbId == gdbId) m_activeCatchpoints.removeAt(i);
+  const QString cmd = QStringLiteral("-break-delete %1\n").arg(gdbId);
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r)
+    if (m_processes[r]) queueOrWriteCmd(r, cmd);
+  emit catchpointsUpdated(m_activeCatchpoints);
 }
 
 }  // namespace gridlock

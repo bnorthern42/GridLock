@@ -913,9 +913,8 @@ void DapCoordinator::removeDataWatchpoint(const QString& expression) {
  */
 void DapCoordinator::syncDataBreakpoints() {
   QJsonArray bps;
-  for (auto it = m_activeDataBreakpoints.constBegin(); it != m_activeDataBreakpoints.constEnd(); ++it) {
+  for (auto it = m_activeDataBreakpoints.constBegin(); it != m_activeDataBreakpoints.constEnd(); ++it)
     bps.append(QJsonObject{{"dataId", it.value().first}, {"accessType", it.value().second}});
-  }
   sendRequest(QStringLiteral("setDataBreakpoints"), QJsonObject{{"breakpoints", bps}});
 }
 
@@ -926,9 +925,7 @@ void DapCoordinator::syncDataBreakpoints() {
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
   qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
   emit errorOccurred(m_process->errorString());
-  m_processCount = 0;
-  m_state = SessionState::Disconnected;
-  emit stateChanged(m_state);
+  m_processCount = 0; m_state = SessionState::Disconnected; emit stateChanged(m_state);
 }
 
 /**
@@ -940,7 +937,11 @@ void DapCoordinator::handleProcessFinished(int exitCode, QProcess::ExitStatus ex
   m_processCount = 0;
   m_rankToPid.clear(); m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear();
   emit adapterExited(exitCode, exitStatus);
-  m_state = SessionState::Disconnected;
-  emit stateChanged(m_state);
+  m_state = SessionState::Disconnected; emit stateChanged(m_state);
 }
+
+void DapCoordinator::setSignalDisposition(const QString& signalName, bool stop, bool print, bool pass) { Q_UNUSED(signalName); Q_UNUSED(stop); Q_UNUSED(print); Q_UNUSED(pass); }
+void DapCoordinator::requestSignalDispositions() {}
+void DapCoordinator::insertCatchpoint(const CatchpointSpec& spec) { Q_UNUSED(spec); }
+void DapCoordinator::removeCatchpoint(int gdbId) { Q_UNUSED(gdbId); }
 
