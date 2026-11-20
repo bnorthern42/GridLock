@@ -261,6 +261,8 @@ void VariablesDockWidget::setupUi() {
         }
         QMenu menu(this);
         QAction* watchAct = menu.addAction(QStringLiteral("Add to Watch Expressions"));
+        QAction* plotAct = menu.addAction(QStringLiteral("Plot 1D/2D Array..."));
+        QAction* graphShortAct = menu.addAction(QStringLiteral("Graph Pointer / Struct..."));
         QAction* graphAct = menu.addAction(QStringLiteral("Visualize in Pointer / Struct Graph..."));
         menu.addSeparator();
         QAction* wpWriteAct =
@@ -273,7 +275,14 @@ void VariablesDockWidget::setupUi() {
         QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
         if (chosen == watchAct) {
             promoteVariableToWatch(exprPath);
-        } else if (chosen == graphAct) {
+        } else if (chosen == plotAct) {
+            const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
+            if (QWidget* win = window()) {
+                QMetaObject::invokeMethod(win, "openArrayPlotter",
+                                          Q_ARG(QString, exprPath),
+                                          Q_ARG(QString, varTyp));
+            }
+        } else if (chosen == graphAct || chosen == graphShortAct) {
             const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
             const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
             const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();

@@ -171,5 +171,8 @@ private slots:
 
     /** @brief Verifies ProgrammerCalculatorDialog Hex/Dec/Oct/Bin conversion, word width masking, 64-bit toggle grid, BSWAP, expression evaluator, Command Palette, and Preferences integration. */
     void testProgrammerCalculatorBasesAndBits();
+
+    /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, summary stats, live stop mutation counts, CSV export, and PointerGraphDialog persistent auto-updating roots with field mutation diffs. */
+    void testArrayPlotterAndPersistentPointerGraph();
 };
 

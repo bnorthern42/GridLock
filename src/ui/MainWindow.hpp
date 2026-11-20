@@ -71,7 +71,9 @@ class RegisterView;
 class SpackManager;
 class ExpressionEvaluatorWidget;
 class MpiDiagnosticsWidget;
+class ArrayPlotDialog;
 class CommandPaletteDialog;
+class PointerGraphDialog;
 class ProgrammerCalculatorDialog;
 
 /**
@@ -127,6 +129,8 @@ public:
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     CallStackDockWidget* callStackDockWidget() const { return m_callStackDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
+    ArrayPlotDialog* arrayPlotDialog() const { return m_arrayPlotDialog; }
+    PointerGraphDialog* pointerGraphDialog() const { return m_pointerGraphDialog; }
     CommandPaletteDialog* commandPaletteDialog() const { return m_commandPaletteDialog; }
     ProgrammerCalculatorDialog* programmerCalculatorDialog() const { return m_programmerCalculatorDialog; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
@@ -631,6 +635,9 @@ public slots:
     void openPointerGraphVisualizer(const QString& exprPath = QString(),
                                     const QString& varValue = QString(),
                                     const QString& varType = QString());
+    /** @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath. */
+    void openArrayPlotter(const QString& exprPath = QString(),
+                          const QString& typeHint = QString());
     /** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix (e.g., ">" or ""). */
     void openCommandPalette(const QString& initialPrefix = QStringLiteral(">"));
     /** @brief Opens the unified Command Palette in Quick Open File mode (Ctrl+P). */
@@ -765,7 +772,8 @@ private:
     QMap<QDockWidget*, DockHomeSlot> m_dockHomeSlots;
     QPointer<QDockWidget> m_draggingDock = nullptr;
     QPoint m_dragOffset;
-    class PointerGraphDialog* m_pointerGraphDialog = nullptr;
+    ArrayPlotDialog* m_arrayPlotDialog = nullptr;
+    PointerGraphDialog* m_pointerGraphDialog = nullptr;
     CommandPaletteDialog* m_commandPaletteDialog = nullptr;
     ProgrammerCalculatorDialog* m_programmerCalculatorDialog = nullptr;
 };

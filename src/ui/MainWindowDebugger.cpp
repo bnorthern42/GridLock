@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <memory>
 
+#include <QAction>
 #include <QApplication>
 #include <QComboBox>
 #include <QDateTime>
@@ -21,6 +22,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
+#include <QMenu>
+#include <QMenuBar>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -37,10 +40,12 @@
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "../core/models/VariableTreeModel.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
-#include "../core/models/VariableTreeModel.hpp"
+#include "dialogs/ArrayPlotDialog.hpp"
+#include "dialogs/PointerGraphDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
@@ -100,9 +105,19 @@ static QString stripLineComments(const QString& rawLine, bool* inBlockComment) {
  * scans `SourceCodeView` statements for the preview fixture.
  */
 void MainWindow::rebuildDynamicSourceLineMap() {
+    if (!findChild<QAction*>(QStringLiteral("actionArrayPlotter")) && menuBar()) {
+        for (QAction* topAct : menuBar()->actions()) {
+            if (QMenu* m = topAct->menu(); m && topAct->text().contains(QStringLiteral("Tools"), Qt::CaseInsensitive)) {
+                QAction* plotAct = m->addAction(QStringLiteral("Array & Field Plotter..."));
+                plotAct->setObjectName(QStringLiteral("actionArrayPlotter"));
+                plotAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
+                connect(plotAct, &QAction::triggered, this, [this]() { openArrayPlotter(); });
+                break;
+            }
+        }
+    }
     m_dynamicLineToAddress.clear();
     m_dynamicAddressToLine.clear();
-
     // Prefer genuine DWARF .debug_line tables parsed from the compiled ELF64 target binary.
     if (m_useRealBinaryTarget && !m_dwarfLineToAddress.isEmpty()) {
         m_dynamicLineToAddress = m_dwarfLineToAddress;
@@ -112,48 +127,31 @@ void MainWindow::rebuildDynamicSourceLineMap() {
 
     SourceCodeView* srcView = sourceCodeView();
     if (!srcView || srcView->toPlainText().isEmpty()) return;
-
     const QStringList lines = srcView->toPlainText().split(QLatin1Char('\n'));
     bool inBlockComment = false;
     int mainLine = -1, initLine = -1, structLine = -1, forLoopLine = -1;
     int dataIdLine = -1, coordsLine = -1, printfLine = -1, finalizeLine = -1, returnLine = -1;
-
     // Scan source lines sequentially (1-based) to anchor statement tokens for preview fixtures.
     for (int i = 0; i < lines.size(); ++i) {
         const int lineNum = i + 1;
         const QString line = stripLineComments(lines[i], &inBlockComment);
         if (line.isEmpty()) continue;
-
-        if (mainLine == -1 && (line.contains(QStringLiteral("int main")) || line.contains(QStringLiteral("main(")))) {
-            mainLine = lineNum;
-        } else if (mainLine != -1 && initLine == -1 && line.contains(QStringLiteral("MPI_Init"))) {
-            initLine = lineNum;
-        } else if (mainLine != -1 && structLine == -1 &&
-                   (line.contains(QStringLiteral("data[")) ||
-                    (line.contains(QStringLiteral("DeeplyNested")) && line.contains(QStringLiteral("data"))))) {
-            structLine = lineNum;
-        } else if (forLoopLine == -1 && line.contains(QStringLiteral("for")) && line.contains(QStringLiteral("int i"))) {
-            forLoopLine = lineNum;
-        } else if (dataIdLine == -1 && line.contains(QStringLiteral("data[i].id"))) {
-            dataIdLine = lineNum;
-        } else if (coordsLine == -1 && (line.contains(QStringLiteral("coords")) || line.contains(QStringLiteral("values[")))) {
-            coordsLine = lineNum;
-        } else if (printfLine == -1 && line.contains(QStringLiteral("printf"))) {
-            printfLine = lineNum;
-        } else if (finalizeLine == -1 && line.contains(QStringLiteral("MPI_Finalize"))) {
-            finalizeLine = lineNum;
-        } else if (returnLine == -1 && line.contains(QStringLiteral("return 0"))) {
-            returnLine = lineNum;
-        }
+        if (mainLine == -1 && (line.contains(QStringLiteral("int main")) || line.contains(QStringLiteral("main(")))) mainLine = lineNum;
+        else if (mainLine != -1 && initLine == -1 && line.contains(QStringLiteral("MPI_Init"))) initLine = lineNum;
+        else if (mainLine != -1 && structLine == -1 && (line.contains(QStringLiteral("data[")) || (line.contains(QStringLiteral("DeeplyNested")) && line.contains(QStringLiteral("data"))))) structLine = lineNum;
+        else if (forLoopLine == -1 && line.contains(QStringLiteral("for")) && line.contains(QStringLiteral("int i"))) forLoopLine = lineNum;
+        else if (dataIdLine == -1 && line.contains(QStringLiteral("data[i].id"))) dataIdLine = lineNum;
+        else if (coordsLine == -1 && (line.contains(QStringLiteral("coords")) || line.contains(QStringLiteral("values[")))) coordsLine = lineNum;
+        else if (printfLine == -1 && line.contains(QStringLiteral("printf"))) printfLine = lineNum;
+        else if (finalizeLine == -1 && line.contains(QStringLiteral("MPI_Finalize"))) finalizeLine = lineNum;
+        else if (returnLine == -1 && line.contains(QStringLiteral("return 0"))) returnLine = lineNum;
     }
-
     // Apply baseline fallback line numbers if specific patterns were not matched.
     for (auto [var, def] : std::initializer_list<std::pair<int*, int>>{
              {&mainLine, 12}, {&initLine, 13}, {&structLine, 15}, {&forLoopLine, 16}, {&dataIdLine, 17},
              {&coordsLine, 19}, {&printfLine, 23}, {&finalizeLine, 24}, {&returnLine, 25}}) {
       if (*var == -1) *var = def;
     }
-
     // Populate forward (line -> address) and reverse (address -> line) maps for preview sym.main.
     m_dynamicLineToAddress = {
         {mainLine, 0x00401120ULL},     {structLine, 0x00401128ULL}, {initLine, 0x0040113dULL},
@@ -357,6 +355,8 @@ void MainWindow::startTargetWorkflow() {
     }
     if (m_disassemblyView) m_disassemblyView->setActiveSteppingRank(preserveRank, stopAddr);
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(stopLine);
+    if (m_arrayPlotDialog && m_arrayPlotDialog->isVisible()) m_arrayPlotDialog->onTargetStopped(preserveRank);
+    if (m_pointerGraphDialog && m_pointerGraphDialog->isVisible()) m_pointerGraphDialog->onTargetStopped(preserveRank);
     updateStatusTelemetry(stopHex, QStringLiteral("PAUSED (BREAKPOINT)"));
 }
 
@@ -400,6 +400,8 @@ bool MainWindow::stepInstructionWorkflow() {
                                          {QStringLiteral("rax"), QStringLiteral("0x%1").arg(m_rankLoopCounter.value(activeRank, 0), 16, 16, QChar('0'))}});
     }
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(nextLine);
+    if (m_arrayPlotDialog && m_arrayPlotDialog->isVisible()) m_arrayPlotDialog->onTargetStopped(activeRank);
+    if (m_pointerGraphDialog && m_pointerGraphDialog->isVisible()) m_pointerGraphDialog->onTargetStopped(activeRank);
     updateStatusTelemetry(nextPcHex, QStringLiteral("PAUSED (STEP)"));
     return true;
 }
@@ -449,6 +451,8 @@ bool MainWindow::continueExecutionWorkflow() {
     if (keepLinear) { m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false); }
     m_disassemblyView->setActiveSteppingRank(activeRank, cur);
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(targetLine);
+    if (m_arrayPlotDialog && m_arrayPlotDialog->isVisible()) m_arrayPlotDialog->onTargetStopped(activeRank);
+    if (m_pointerGraphDialog && m_pointerGraphDialog->isVisible()) m_pointerGraphDialog->onTargetStopped(activeRank);
     updateStatusTelemetry(targetHex, QStringLiteral("PAUSED (BREAKPOINT)"));
     return true;
 }
@@ -708,8 +712,7 @@ bool MainWindow::ensureTargetBinaryCompiled() {
         if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(mpiName, searchDirs);
         if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(gnuName);
         if (!compiler.isEmpty()) {
-            QProcess proc;
-            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
             env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
             proc.setProcessEnvironment(env);
             proc.start(compiler, {QStringLiteral("-g"), QStringLiteral("-O0"), srcPath, QStringLiteral("-o"), binPath});
@@ -717,15 +720,13 @@ bool MainWindow::ensureTargetBinaryCompiled() {
         }
     }
     if (!QFileInfo::exists(binPath)) return false;
-
     // Reload ELF symbol tables, objdump -d -l disassembly, and DWARF line maps when binary changed.
     const QString absBinPath = QFileInfo(binPath).absoluteFilePath();
     if (needCompile || !m_elfInspector || !m_elfInspector->isValid() ||
         m_loadedBinaryPath != absBinPath || m_dwarfLineToAddress.isEmpty()) {
         if (!loadBinaryTarget(binPath)) return false;
     }
-    rebuildDynamicSourceLineMap();
-    return true;
+    rebuildDynamicSourceLineMap(); return true;
 }
 
 /**
@@ -737,38 +738,24 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     m_previewFixtureOnly = false;
     const QString query = targetName.trimmed();
     if (query.isEmpty() || !m_targetSelector) return false;
-
     // 1. Find matching item in toolbarTargetSelector by label or user data path.
     int matchedIdx = -1;
     for (int i = 0; i < m_targetSelector->count(); ++i) {
         const QString data = m_targetSelector->itemData(i).toString();
         if (data == QStringLiteral("__open_binary__")) continue;
-        if (m_targetSelector->itemText(i).contains(query, Qt::CaseInsensitive) || data.contains(query, Qt::CaseInsensitive)) {
-            matchedIdx = i; break;
-        }
+        if (m_targetSelector->itemText(i).contains(query, Qt::CaseInsensitive) || data.contains(query, Qt::CaseInsensitive)) { matchedIdx = i; break; }
     }
     if (matchedIdx < 0) return false;
-
     // 2. Synchronize combo box selection without recursive signal emission.
     if (m_targetSelector->currentIndex() != matchedIdx) {
         m_targetSelector->blockSignals(true); m_targetSelector->setCurrentIndex(matchedIdx); m_targetSelector->blockSignals(false);
     }
-
     // 3. Resolve target path (distinguishing pre-built ELF executables from C/C++ source files and directories).
     const QString resolvedPath = resolveWorkspacePath(m_targetSelector->itemData(matchedIdx).toString());
     if (QFileInfo(resolvedPath).isDir()) return true;
-    if (m_disassemblyView) {
-        for (uint64_t oldBp : m_disassemblyView->bookmarkedAddresses()) m_disassemblyView->toggleBookmark(oldBp);
-    }
-    if (isRunnableElfExecutable(resolvedPath)) {
-        m_useRealBinaryTarget = true;
-        loadBinaryTarget(resolvedPath);
-    } else {
-        m_currentFile = resolvedPath;
-        loadSourceFile(resolvedPath);
-        ensureTargetBinaryCompiled();
-    }
-
+    if (m_disassemblyView) for (uint64_t oldBp : m_disassemblyView->bookmarkedAddresses()) m_disassemblyView->toggleBookmark(oldBp);
+    if (isRunnableElfExecutable(resolvedPath)) { m_useRealBinaryTarget = true; loadBinaryTarget(resolvedPath); }
+    else { m_currentFile = resolvedPath; loadSourceFile(resolvedPath); ensureTargetBinaryCompiled(); }
     // 4. Synchronize active SourceCodeView breakpoints into DisassemblyView bookmarks and reset session if active.
     if (SourceCodeView* sv = sourceCodeView()) {
         for (int bpLine : sv->breakpoints()) {
@@ -903,16 +890,12 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
     QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
     if (!m_activeWorkspaceDir.isEmpty() && resolvedPath.startsWith(m_activeWorkspaceDir) &&
         !QDir(dirPath).exists(QStringLiteral("meson.build")) && !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) &&
-        !QDir(dirPath).exists(QStringLiteral("Makefile"))) {
-        dirPath = m_activeWorkspaceDir;
-    }
+        !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
     const QDir dir(dirPath);
-
     // 1. Meson + Ninja build command supporting build_meson, builddir, and build directories.
     if (buildSys == QStringLiteral("Meson")) {
-        for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")}) {
+        for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")})
             if (dir.exists(b + QStringLiteral("/build.ninja"))) return QStringLiteral("ninja -C \"%1/%2\"").arg(dirPath, b);
-        }
         return QStringLiteral("meson setup \"%1/builddir\" \"%1\" && ninja -C \"%1/builddir\"").arg(dirPath);
     }
     // 2. CMake debug configure and parallel build command supporting build_cmake and build directories.
@@ -922,16 +905,26 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
     }
     // 3. GNU Make parallel build command.
     if (buildSys == QStringLiteral("Make")) return QStringLiteral("make -C \"%1\" -j").arg(dirPath);
-
     // 4. Standalone SingleFileMPI compilation using mpicxx/mpicc or g++/gcc fallback.
     const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
     const QFileInfo srcInfo(srcFile);
     const QString outBin = srcInfo.dir().filePath(srcInfo.completeBaseName());
     const bool isCFile = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
-    const QString compiler = isCFile
-                                 ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc"))
-                                 : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
+    const QString compiler = isCFile ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc"))
+                                     : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
     return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(compiler, srcFile, outBin);
+}
+
+/**
+ * @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath.
+ */
+void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHint) {
+    if (!m_arrayPlotDialog) m_arrayPlotDialog = new ArrayPlotDialog(m_coordinator, this);
+    m_arrayPlotDialog->setCoordinator(m_coordinator);
+    m_arrayPlotDialog->setFocusedRank(activeSteppingRank());
+    if (!typeHint.trimmed().isEmpty()) m_arrayPlotDialog->setElementTypeFromString(typeHint);
+    if (!exprPath.trimmed().isEmpty()) { m_arrayPlotDialog->setExpression(exprPath.trimmed()); m_arrayPlotDialog->refreshPlot(); }
+    m_arrayPlotDialog->show(); m_arrayPlotDialog->raise(); m_arrayPlotDialog->activateWindow();
 }
 
 }  // namespace gridlock::ui

@@ -9,6 +9,8 @@
 
 #include "PointerGraphDialog.hpp"
 
+#include "../../core/hpc/DapCoordinator.hpp"
+#include "../../core/hpc/GdbRankCoordinator.hpp"
 #include "../../core/hpc/IBackendCoordinator.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
@@ -103,6 +105,23 @@ class PointerGraphNodeItem : public QGraphicsObject {
     update();
   }
 
+  /**
+   * @brief Updates the map of field-level value transitions (`fieldName -> "old -> new"`) since the last stop.
+   */
+  void setMutatedFields(const QMap<QString, QString>& transitions) {
+    m_mutatedTransitions = transitions;
+    if (m_mutatedTransitions.isEmpty()) {
+      setToolTip(m_expression);
+    } else {
+      QStringList lines;
+      for (auto it = m_mutatedTransitions.cbegin(); it != m_mutatedTransitions.cend(); ++it) {
+        lines.append(QStringLiteral("%1.%2: %3").arg(m_expression, it.key(), it.value()));
+      }
+      setToolTip(lines.join(QLatin1Char('\n')));
+    }
+    update();
+  }
+
   /** @brief Returns the primary C++ expression label for this node card. */
   const QString& expression() const { return m_expression; }
   /** @brief Returns the C/C++ type label for this node card. */
@@ -152,7 +171,7 @@ class PointerGraphNodeItem : public QGraphicsObject {
   }
 
   /**
-   * @brief Renders the dark/light theme-cohesive struct card, member rows, and `[➔ Deref]` badges.
+   * @brief Renders the dark/light theme-cohesive struct card, member rows, mutation highlights, and `[➔ Deref]` badges.
    * @param painter Active QPainter context.
    */
   void paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) override {
@@ -163,8 +182,10 @@ class PointerGraphNodeItem : public QGraphicsObject {
     // Draw outer rounded card body and selection highlight border.
     const QColor bgColor = isDark ? QColor(QStringLiteral("#181c24")) : QColor(QStringLiteral("#ffffff"));
     const QColor borderColor = isSelected() ? QColor(QStringLiteral("#38bdf8"))
-                                            : (isDark ? QColor(QStringLiteral("#334155")) : QColor(QStringLiteral("#cbd5e1")));
-    painter->setPen(QPen(borderColor, isSelected() ? 2.0 : 1.2));
+                                            : (!m_mutatedTransitions.isEmpty()
+                                                   ? QColor(QStringLiteral("#f59e0b"))
+                                                   : (isDark ? QColor(QStringLiteral("#334155")) : QColor(QStringLiteral("#cbd5e1"))));
+    painter->setPen(QPen(borderColor, (isSelected() || !m_mutatedTransitions.isEmpty()) ? 2.0 : 1.2));
     painter->setBrush(bgColor);
     painter->drawRoundedRect(rect, 7.0, 7.0);
 
@@ -196,18 +217,29 @@ class PointerGraphNodeItem : public QGraphicsObject {
       return;
     }
 
-    // Iterate over all member fields and paint name : value (type) plus optional dereference pill.
+    // Iterate over all member fields and paint name : value (type) plus mutation highlight and optional dereference pill.
     for (int i = 0; i < m_fields.size(); ++i) {
       const qreal y = kHeaderHeight + i * kRowHeight;
       const auto& f = m_fields[i];
+      const bool isMutated = m_mutatedTransitions.contains(f.name);
       const bool expandable = isExpandableOrPointerField(f);
       const bool nullPtr = !expandable && (f.type.contains(QLatin1Char('*')) || isNullPointerValue(f.value));
       const qreal rightPad = (expandable || nullPtr) ? 68.0 : 10.0;
 
-      painter->setPen(isDark ? QColor(QStringLiteral("#e2e8f0")) : QColor(QStringLiteral("#1e293b")));
-      const QString rowTxt = f.type.isEmpty()
-                                 ? QStringLiteral("%1 : %2").arg(f.name, f.value)
-                                 : QStringLiteral("%1 : %2 (%3)").arg(f.name, f.value, f.type);
+      if (isMutated) {
+        painter->fillRect(QRectF(2.0, y + 1.0, kCardWidth - 4.0, kRowHeight - 2.0),
+                          isDark ? QColor(QStringLiteral("#451a03")) : QColor(QStringLiteral("#fef3c7")));
+      }
+
+      painter->setPen(isMutated
+                          ? (isDark ? QColor(QStringLiteral("#fbbf24")) : QColor(QStringLiteral("#b45309")))
+                          : (isDark ? QColor(QStringLiteral("#e2e8f0")) : QColor(QStringLiteral("#1e293b"))));
+      QString rowTxt = f.type.isEmpty()
+                           ? QStringLiteral("%1 : %2").arg(f.name, f.value)
+                           : QStringLiteral("%1 : %2 (%3)").arg(f.name, f.value, f.type);
+      if (isMutated) {
+        rowTxt += QStringLiteral(" [%1]").arg(m_mutatedTransitions.value(f.name));
+      }
       painter->drawText(QRectF(10.0, y, kCardWidth - 10.0 - rightPad, kRowHeight),
                         Qt::AlignVCenter | Qt::AlignLeft,
                         painter->fontMetrics().elidedText(rowTxt, Qt::ElideRight, static_cast<int>(kCardWidth - 14.0 - rightPad)));
@@ -276,6 +308,7 @@ class PointerGraphNodeItem : public QGraphicsObject {
   QString m_typeName;                                            ///< Static C/C++ type name.
   QString m_address;                                             ///< Normalized hex address (`0x...`).
   QVector<PointerGraphDialog::StructFieldEntry> m_fields;        ///< Displayed struct fields.
+  QMap<QString, QString> m_mutatedTransitions;                   ///< Field-level `old -> new` diff transitions.
   std::function<void()> m_onMoved;                               ///< Callback refreshing Bezier edges on move.
   std::function<void(const QString&, const QString&)> m_onExpandField; ///< Callback expanding a clicked field.
 };
@@ -386,6 +419,7 @@ class PointerGraphEdgeItem : public QGraphicsPathItem {
 /** @brief Constructs the interactive pointer/struct graph dialog and binds @p coordinator. */
 PointerGraphDialog::PointerGraphDialog(::IBackendCoordinator* coordinator, QWidget* parent)
     : QDialog(parent, Qt::Window | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint) {
+  setObjectName(QStringLiteral("PointerGraphDialog"));
   setWindowTitle(QStringLiteral("DDD Pointer & Struct Graph Visualizer"));
   resize(1100, 720);
   setupUi();
@@ -398,7 +432,7 @@ void PointerGraphDialog::setupUi() {
   rootLayout->setContentsMargins(8, 8, 8, 8);
   rootLayout->setSpacing(6);
 
-  // Top toolbar: Root Expression input + Graph, Auto-Layout, Expand 1-Hop, Clear, and Zoom buttons.
+  // Top toolbar: Root Expression input + Graph, Refresh Now, Auto-Refresh on Stop, Auto-Layout, Expand 1-Hop, Clear, and Zoom buttons.
   auto* toolbar = new QHBoxLayout();
   toolbar->setSpacing(6);
   m_rootEdit = new QLineEdit(this);
@@ -406,6 +440,11 @@ void PointerGraphDialog::setupUi() {
   m_rootEdit->setPlaceholderText(QStringLiteral("Enter pointer or struct expression (e.g., mesh, Iconfig, head)..."));
   m_addBtn = new QPushButton(QStringLiteral("Graph Expression"), this);
   m_addBtn->setObjectName(QStringLiteral("pointerGraphAddBtn"));
+  m_refreshBtn = new QPushButton(QStringLiteral("Refresh Now"), this);
+  m_refreshBtn->setObjectName(QStringLiteral("pointerGraphRefreshBtn"));
+  m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh on Stop"), this);
+  m_autoRefreshCheck->setObjectName(QStringLiteral("pointerGraphAutoRefreshCheck"));
+  m_autoRefreshCheck->setChecked(true);
   m_layoutBtn = new QPushButton(QStringLiteral("Auto-Layout (Layered DAG)"), this);
   m_layoutBtn->setObjectName(QStringLiteral("pointerGraphLayoutBtn"));
   m_expandHopBtn = new QPushButton(QStringLiteral("Expand All Pointers (1 Hop)"), this);
@@ -421,6 +460,8 @@ void PointerGraphDialog::setupUi() {
 
   toolbar->addWidget(m_rootEdit, 1);
   toolbar->addWidget(m_addBtn);
+  toolbar->addWidget(m_refreshBtn);
+  toolbar->addWidget(m_autoRefreshCheck);
   toolbar->addWidget(m_layoutBtn);
   toolbar->addWidget(m_expandHopBtn);
   toolbar->addWidget(m_clearBtn);
@@ -442,6 +483,7 @@ void PointerGraphDialog::setupUi() {
     if (m_rootEdit && !m_rootEdit->text().trimmed().isEmpty()) graphExpression(m_rootEdit->text().trimmed());
   });
   connect(m_rootEdit, &QLineEdit::returnPressed, m_addBtn, &QPushButton::click);
+  connect(m_refreshBtn, &QPushButton::clicked, this, &PointerGraphDialog::refreshPinnedRoots);
   connect(m_layoutBtn, &QPushButton::clicked, this, &PointerGraphDialog::autoLayoutNodes);
   connect(m_expandHopBtn, &QPushButton::clicked, this, &PointerGraphDialog::expandAllPointersOneHop);
   connect(m_clearBtn, &QPushButton::clicked, this, &PointerGraphDialog::clearGraph);
@@ -455,7 +497,7 @@ void PointerGraphDialog::setupUi() {
 }
 
 /**
- * @brief Binds @p coordinator and connects `variableChildrenUpdated` for live struct expansion.
+ * @brief Binds @p coordinator and connects `variableChildrenUpdated` and target stop notifications.
  * @param coordinator Active debugger backend coordinator instance.
  */
 void PointerGraphDialog::setCoordinator(::IBackendCoordinator* coordinator) {
@@ -465,7 +507,53 @@ void PointerGraphDialog::setCoordinator(::IBackendCoordinator* coordinator) {
   if (m_coordinator) {
     connect(m_coordinator, &IBackendCoordinator::variableChildrenUpdated,
             this, &PointerGraphDialog::onVariableChildrenUpdated, Qt::UniqueConnection);
+    if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
+      connect(gdb, &gridlock::GdbRankCoordinator::rankStateChanged, this,
+              [this](int rankId, const gridlock::RankState& state) {
+                if (rankId == m_focusedRank && state.currentState == QLatin1String("stopped")) {
+                  onTargetStopped(rankId);
+                }
+              });
+    } else if (auto* dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
+      connect(dap, &DapCoordinator::executionStopped, this,
+              [this](int rankId, const QString&) {
+                if (rankId == m_focusedRank) onTargetStopped(rankId);
+              });
+    }
   }
+}
+
+bool PointerGraphDialog::isAutoRefreshEnabled() const {
+  return m_autoRefreshCheck ? m_autoRefreshCheck->isChecked() : true;
+}
+
+void PointerGraphDialog::setAutoRefreshEnabled(bool enabled) {
+  if (m_autoRefreshCheck) m_autoRefreshCheck->setChecked(enabled);
+}
+
+void PointerGraphDialog::pinRootExpression(const QString& expression) {
+  const QString clean = expression.trimmed();
+  if (!clean.isEmpty() && !m_rootExpressions.contains(clean)) {
+    m_rootExpressions.append(clean);
+  }
+}
+
+void PointerGraphDialog::refreshPinnedRoots() {
+  QStringList targets = m_rootExpressions;
+  for (auto it = m_nodesByExpr.cbegin(); it != m_nodesByExpr.cend(); ++it) {
+    if (!targets.contains(it.key())) targets.append(it.key());
+  }
+  for (const QString& expr : targets) {
+    m_autoExpandRoots.insert(expr);
+    if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, expr);
+  }
+}
+
+void PointerGraphDialog::onTargetStopped(int rankId) {
+  m_focusedRank = qMax(0, rankId);
+  if (!isAutoRefreshEnabled()) return;
+  ++m_stopRefreshCount;
+  refreshPinnedRoots();
 }
 
 /**
@@ -499,11 +587,13 @@ void PointerGraphDialog::upsertStructNode(const QString& expression,
                                           const QString& parentField) {
   const QString cleanExpr = expression.trimmed();
   if (cleanExpr.isEmpty()) return;
+  if (parentExpr.trimmed().isEmpty()) pinRootExpression(cleanExpr);
   const QString normAddr = normalizeHexAddress(address);
 
   // Deduplicate by normalized hex address first, then by expression path.
   PointerGraphNodeItem* node = !normAddr.isEmpty() ? m_nodesByAddress.value(normAddr, nullptr) : nullptr;
   if (!node) node = m_nodesByExpr.value(cleanExpr, nullptr);
+  const bool isNewNode = (node == nullptr);
 
   // Allocate a new movable graphics card only when neither address nor expression is on the canvas.
   if (!node) {
@@ -514,7 +604,31 @@ void PointerGraphDialog::upsertStructNode(const QString& expression,
     m_scene->addItem(node);
     m_nodes.append(node);
   }
+
+  // Compare each incoming field value against the previous stop snapshot to highlight mutations.
+  const QString nodeKey = node->expression();
+  if (!fields.isEmpty()) {
+    auto& prevMap = m_previousFieldValues[nodeKey];
+    auto& mutMap = m_mutatedFieldTransitions[nodeKey];
+    for (const auto& f : fields) {
+      if (prevMap.contains(f.name)) {
+        const QString oldVal = prevMap.value(f.name);
+        if (oldVal != f.value) {
+          mutMap.insert(f.name, QStringLiteral("%1 -> %2").arg(oldVal, f.value));
+        } else {
+          mutMap.remove(f.name);
+        }
+      }
+      prevMap.insert(f.name, f.value);
+    }
+    if (nodeKey != cleanExpr) {
+      m_previousFieldValues[cleanExpr] = prevMap;
+      m_mutatedFieldTransitions[cleanExpr] = mutMap;
+    }
+  }
+
   node->updateData(cleanExpr, typeName.trimmed(), normAddr, fields);
+  node->setMutatedFields(m_mutatedFieldTransitions.value(nodeKey));
   m_nodesByExpr.insert(cleanExpr, node);
   if (!normAddr.isEmpty()) m_nodesByAddress.insert(normAddr, node);
 
@@ -523,7 +637,11 @@ void PointerGraphDialog::upsertStructNode(const QString& expression,
     connectPointerField(parentExpr.trimmed(), parentField.trimmed(),
                         !normAddr.isEmpty() ? normAddr : cleanExpr);
   }
-  autoLayoutNodes();
+  if (isNewNode) {
+    autoLayoutNodes();
+  } else {
+    recomputeCyclesAndRefreshEdges();
+  }
 }
 
 /**
@@ -614,6 +732,7 @@ void PointerGraphDialog::graphExpression(const QString& expression,
                                          const QString& valueHint) {
   const QString clean = expression.trimmed();
   if (clean.isEmpty()) return;
+  pinRootExpression(clean);
   if (m_rootEdit) m_rootEdit->setText(clean);
   m_pendingTypeValueHints.insert(clean, {typeHint.trimmed(), valueHint.trimmed()});
   m_autoExpandRoots.insert(clean);
@@ -687,7 +806,6 @@ void PointerGraphDialog::onVariableChildrenUpdated(int,
       if (isExpandableOrPointerField(f)) expandNodeField(cleanExpr, f.name);
     }
   }
-  autoLayoutNodes();
 }
 
 /** @brief Arranges all active struct node cards left-to-right in a layered topological DAG layout. */
@@ -704,6 +822,9 @@ void PointerGraphDialog::autoLayoutNodes() {
 void PointerGraphDialog::clearGraph() {
   if (m_scene) m_scene->clear();
   if (m_rootEdit) m_rootEdit->clear();
+  m_rootExpressions.clear();
+  m_previousFieldValues.clear();
+  m_mutatedFieldTransitions.clear();
   m_nodes.clear();
   m_nodesByExpr.clear();
   m_nodesByAddress.clear();
@@ -719,6 +840,38 @@ bool PointerGraphDialog::nodeHasField(const QString& nodeExpr, const QString& fi
   const PointerGraphNodeItem* node = m_nodesByExpr.value(nodeExpr.trimmed(), nullptr);
   if (!node) node = m_nodesByAddress.value(normalizeHexAddress(nodeExpr), nullptr);
   return node && node->indexOfField(fieldName.trimmed()) >= 0;
+}
+
+QString PointerGraphDialog::fieldValue(const QString& nodeExpr, const QString& fieldName) const {
+  const PointerGraphNodeItem* node = m_nodesByExpr.value(nodeExpr.trimmed(), nullptr);
+  if (!node) node = m_nodesByAddress.value(normalizeHexAddress(nodeExpr), nullptr);
+  if (!node) return QString();
+  const int idx = node->indexOfField(fieldName.trimmed());
+  return (idx >= 0) ? node->fields().at(idx).value : QString();
+}
+
+bool PointerGraphDialog::isFieldMutated(const QString& nodeExpr, const QString& fieldName) const {
+  return !fieldMutationSummary(nodeExpr, fieldName).isEmpty();
+}
+
+QString PointerGraphDialog::fieldMutationSummary(const QString& nodeExpr,
+                                                 const QString& fieldName) const {
+  const QString clean = nodeExpr.trimmed();
+  if (m_mutatedFieldTransitions.contains(clean)) {
+    return m_mutatedFieldTransitions.value(clean).value(fieldName.trimmed());
+  }
+  if (const PointerGraphNodeItem* node = m_nodesByAddress.value(normalizeHexAddress(clean), nullptr)) {
+    return m_mutatedFieldTransitions.value(node->expression()).value(fieldName.trimmed());
+  }
+  return QString();
+}
+
+int PointerGraphDialog::mutatedFieldCount() const {
+  int count = 0;
+  for (auto* node : m_nodes) {
+    count += m_mutatedFieldTransitions.value(node->expression()).size();
+  }
+  return count;
 }
 
 }  // namespace gridlock::ui

@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <QCheckBox>
 #include <QDialog>
 #include <QGraphicsObject>
 #include <QGraphicsPathItem>
@@ -21,6 +22,7 @@
 #include <QPushButton>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QVector>
 
@@ -71,6 +73,18 @@ class PointerGraphDialog : public QDialog {
    * @param rankId Zero-based MPI rank index.
    */
   void setFocusedRank(int rankId) { m_focusedRank = qMax(0, rankId); }
+
+  /** @brief Returns whether automatic re-evaluation on debugger `*stopped` events is enabled. */
+  bool isAutoRefreshEnabled() const;
+
+  /** @brief Enables or disables automatic re-evaluation of pinned roots on debugger `*stopped` events. */
+  void setAutoRefreshEnabled(bool enabled);
+
+  /** @brief Returns the ordered list of pinned root expressions retained across debugger stop events. */
+  QStringList pinnedRootExpressions() const { return m_rootExpressions; }
+
+  /** @brief Pins @p expression as a persistent root node to re-evaluate on every target stop. */
+  void pinRootExpression(const QString& expression);
 
   /**
    * @brief Inserts or updates a struct node card on the canvas, deduplicating by non-null hex address.
@@ -148,7 +162,39 @@ class PointerGraphDialog : public QDialog {
    */
   bool nodeHasField(const QString& nodeExpr, const QString& fieldName) const;
 
+  /**
+   * @brief Returns the current formatted runtime value of @p fieldName on @p nodeExpr, or empty string.
+   */
+  QString fieldValue(const QString& nodeExpr, const QString& fieldName) const;
+
+  /**
+   * @brief Returns true if @p fieldName on @p nodeExpr mutated compared to its previous stop snapshot.
+   */
+  bool isFieldMutated(const QString& nodeExpr, const QString& fieldName) const;
+
+  /**
+   * @brief Returns the `"oldValue -> newValue"` mutation transition string for @p fieldName on @p nodeExpr.
+   */
+  QString fieldMutationSummary(const QString& nodeExpr, const QString& fieldName) const;
+
+  /** @brief Returns total number of currently highlighted mutated struct fields across all nodes. */
+  int mutatedFieldCount() const;
+
+  /** @brief Returns total count of stop-triggered auto-refreshes executed. */
+  int stopRefreshCount() const { return m_stopRefreshCount; }
+
  public slots:
+  /**
+   * @brief Re-evaluates all pinned root expressions and active nodes without wiping canvas layout.
+   */
+  void refreshPinnedRoots();
+
+  /**
+   * @brief Invoked when MPI rank @p rankId stops at a breakpoint/step or becomes the focused rank.
+   * @param rankId Zero-based MPI rank index.
+   */
+  void onTargetStopped(int rankId);
+
   /**
    * @brief Receives resolved child fields from `IBackendCoordinator::variableChildrenUpdated`.
    * @param rank MPI rank index.
@@ -175,9 +221,12 @@ class PointerGraphDialog : public QDialog {
 
   ::IBackendCoordinator* m_coordinator = nullptr;  ///< Attached debugger backend coordinator.
   int m_focusedRank = 0;                           ///< Active MPI rank index for live queries.
+  int m_stopRefreshCount = 0;                      ///< Count of stop-triggered auto-refresh cycles.
 
   QLineEdit* m_rootEdit = nullptr;                 ///< Toolbar root expression input (`#pointerGraphRootEdit`).
   QPushButton* m_addBtn = nullptr;                 ///< Toolbar graph button (`#pointerGraphAddBtn`).
+  QPushButton* m_refreshBtn = nullptr;             ///< Toolbar manual refresh button (`#pointerGraphRefreshBtn`).
+  QCheckBox* m_autoRefreshCheck = nullptr;         ///< Toolbar auto-refresh on stop toggle (`#pointerGraphAutoRefreshCheck`).
   QPushButton* m_layoutBtn = nullptr;              ///< Toolbar DAG layout button (`#pointerGraphLayoutBtn`).
   QPushButton* m_expandHopBtn = nullptr;           ///< Toolbar 1-hop expand button (`#pointerGraphExpandHopBtn`).
   QPushButton* m_clearBtn = nullptr;               ///< Toolbar clear button (`#pointerGraphClearBtn`).
@@ -185,6 +234,9 @@ class PointerGraphDialog : public QDialog {
   QGraphicsScene* m_scene = nullptr;               ///< 2D graphics scene owning node cards and Bezier edges.
   QGraphicsView* m_view = nullptr;                 ///< Interactive pan/zoom canvas (`#pointerGraphView`).
 
+  QStringList m_rootExpressions;                                 ///< Pinned root expressions retained across stops.
+  QMap<QString, QMap<QString, QString>> m_previousFieldValues;   ///< Maps nodeExpr -> (fieldName -> previousValue).
+  QMap<QString, QMap<QString, QString>> m_mutatedFieldTransitions; ///< Maps nodeExpr -> (fieldName -> "old -> new").
   QVector<PointerGraphNodeItem*> m_nodes;                        ///< Ordered list of unique node cards.
   QMap<QString, PointerGraphNodeItem*> m_nodesByExpr;            ///< Lookup from expression path to node card.
   QMap<QString, PointerGraphNodeItem*> m_nodesByAddress;         ///< Lookup from normalized `0x...` address to node card.
