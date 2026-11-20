@@ -1,6 +1,6 @@
 # GridLock: Multi-Rank MPI Debugger & ELF64 Binary Inspector
 
-![Version](https://img.shields.io/badge/Release-v0.8.66-brightgreen.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/Release-v0.8.7-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -19,12 +19,12 @@
 ### Option 1: Standalone Linux AppImage (`x86_64`, Wayland & X11)
 
 Download either AppImage from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) (bundles Qt6 Wayland and XCB platform plugins plus `libxcb-cursor.so.0`):
-* **`GridLock-0.8.66-x86_64.AppImage`** (Lite Edition)
-* **`GridLock-0.8.66-Tutorials-x86_64.AppImage`** (Includes all 7 MPI tutorial `.cpp` sources and pre-built debug binaries)
+* **`GridLock-0.8.7-x86_64.AppImage`** (Lite Edition)
+* **`GridLock-0.8.7-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
 
 ```bash
-chmod +x GridLock-0.8.66-Tutorials-x86_64.AppImage
-./GridLock-0.8.66-Tutorials-x86_64.AppImage
+chmod +x GridLock-0.8.7-Tutorials-x86_64.AppImage
+./GridLock-0.8.7-Tutorials-x86_64.AppImage
 ```
 
 ### Option 2: Build From Source (`Meson` + `Ninja`)

@@ -5,6 +5,19 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-11-20
+
+### Added
+- **Execution Power Tools & Non-Linear Control (`MainWindowDebugger`, `SourceCodeView`, `DisassemblyView`, `GdbRankCoordinator`, `DapCoordinator`):** Added instruction step-over (`nexti` / `Ctrl+Shift+F10` / `-exec-next-instruction`), Run to Cursor (`Ctrl+F10` / `-exec-until`) from both source lines and disassembly addresses, a draggable gutter PC arrow and `Set Next Statement / Jump...` (`-exec-jump`) guarded by lexical scope hazard checks, and `Force Early Return...` (`-exec-return`) from the `Debug` menu and `CALL STACK` context menu.
+- **Non-Destructive Breakpoint Lifecycle, Temporary/Regex Breakpoints & Command Lists (`ConditionalBreakpointDialog`, `SourceCodeView`, `GdbRankCoordinator`):** Added non-destructive enable/disable toggling (`-break-enable` / `-break-disable`) rendered as hollow gutter rings while preserving condition, ignore count, rank filter, and hit commands; temporary one-shot breakpoints (`tbreak` / `-break-insert -t`) with dashed cyan `T` markers that auto-clear on hit; function-symbol regex breakpoints (`Debug -> Break on Function Regex (rbreak)...`); and multi-line GDB hit command scripts (`-break-commands`).
+- **Signal Disposition Matrix & Catchpoints (`SignalCatchpointDialog`, `GdbRankCoordinator`, `tutorial/catchpoint_exceptions.cpp`):** Added `Debug -> Signals & Catchpoints...` (`Ctrl+Alt+S`) with a filterable POSIX/HPC signal `Stop`/`Print`/`Pass` disposition matrix (`handle <SIG>`, plus `HPC Quiet Defaults` and `Trap Faults` presets) and C++ `throw`/`rethrow`/`catch` regex, Linux syscall (`mmap`, `openat`, `clone3`, `ioctl`), and `dlopen`/`dlclose` catchpoints, paired with a new 4-rank C++ MPI tutorial showcase (`tutorial/catchpoint_exceptions.cpp`).
+- **Copy-on-Write Fork Checkpoints (`CheckpointDialog`, `GdbRankCoordinator`):** Added `Debug -> Process Checkpoints...` (`Ctrl+Alt+K`) supporting GDB `checkpoint`, `info checkpoints`, `restart <id>`, and `delete checkpoint <id>` alongside a pre-fork `/proc/[pid]/fd` and `/proc/[pid]/maps` safety scanner (`Safe`, `Warning`, and `BlockedOrUnsafe`) with expandable diagnostics and explicit confirmation prompts for active IPC sockets, pipes, shared memory, RDMA verbs, and GPU device mappings.
+- **Productivity, Visualization & Console Ergonomics (`CommandPaletteDialog`, `ProgrammerCalculatorDialog`, `ArrayPlotDialog`, `PointerGraphDialog`, `GdbConsoleWidget`):** Added the unified fuzzy Command Palette (`Ctrl+Shift+P` / `Ctrl+P` with `>`, `@`, and `#` prefixes), floating Programmer's Calculator (`Ctrl+Alt+C`, synchronized `HEX`/`DEC`/`OCT`/`BIN`, IEEE-754 `float`/`double`, `8/16/32/64-bit` width, `BSWAP`, interactive 64-bit bit-toggle grid, radix-aware keypad, and right-click handoff across views), live auto-refreshing 1D/2D Array & Field Plotter (`Ctrl+Alt+G`, `Viridis`/`Plasma`/`Cool-Warm`/`Grayscale`, `NaN`/`Inf` flags, previous-stop ghost curve overlay, CSV/PNG/`gnuplot`), persistent auto-updating Pointer Graph roots with `"old -> new"` field-level mutation diffs, and GDB console readline ergonomics (persistent `~/.config/gridlock/gdb_history`, `Up`/`Down` draft preservation, `Ctrl+R` incremental reverse search, and `Tab` `complete` popup).
+- **Documentation & Quick Reference (`docs/Keyboard-Shortcuts-and-Reference.md`, `docs/`, `scripts/sync_wiki.sh`):** Added a dedicated Keyboard Shortcuts and Quick Reference guide, Tutorial 8 (`catchpoint_exceptions.cpp`), and updated Wiki sync metadata for `v0.8.7`.
+
+### Changed
+- **Startup Latency Optimization (`ThemeManager`, `ClangdLspClient`, `MainWindowWorkspace`, `MainWindowDocks`, `HpcConsoleWidget`, `TerminalDockWidget`, `ReferenceManualWidget`):** Added on-disk QSS stylesheet caching under `AppConfigLocation/acss`, consolidated theme initialization to a single pass, moved package manager probing and `clangd` launch off the synchronous startup path, and deferred initialization of inactive `Terminal`, `Package Manager`, and `Reference Manual` bottom tabs until first activation.
+
 ## [0.8.66] - 2026-11-19
 
 ### Fixed
@@ -147,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] - 2026-06-24
 - **Global Configuration Engine:** Implemented a new TOML-based `ConfigManager` that persistently stores toolchain paths (`lldb-dap`, `gdb`, `clangd`) and default MPI launch arguments in `~/.config/gridlock/config.toml`.
-- **Unified Preferences UI:** Added a comprehensive, Kate/KDevelop-style sidebar `PreferencesDialog` (Edit -> Preferences) to manage Appearance, Editing, Behavior, Debugger tools, HPC/Cluster settings, SLURM integration, and Docsets.
+- **Unified Preferences UI:** Added a multi-page Kate/KDevelop-style sidebar `PreferencesDialog` (Edit -> Preferences) to manage Appearance, Editing, Behavior, Debugger tools, HPC/Cluster settings, SLURM integration, and Docsets.
 - **Project Creation Wizard:** Replaced the disjointed "New Project" menu with a linear, multi-page `QWizard`. Includes dynamic MPI launch string generation with quick-toggles for common OpenMPI flags (e.g., `--bind-to core`, `--map-by node`, `--oversubscribe`).
 - **Recent Sessions (MRU):** Added a "Recent Sessions" submenu under the File menu, tracking the last 5 loaded workspaces dynamically.
 - **Headless CI Support:** Added `xvfb` (X Virtual FrameBuffer) to the GitHub Actions pipeline to allow Qt GUI and DAP parser tests to run successfully on headless Ubuntu runners.

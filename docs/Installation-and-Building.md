@@ -1,6 +1,6 @@
 # Installation and Building
 
-GridLock (`v0.8.66`) runs on x86_64 Linux systems under both native Wayland compositors (Niri, Sway, Hyprland, KDE Plasma, GNOME) and X11/XWayland servers. You can run a standalone AppImage from GitHub Releases or compile from source with Meson and Ninja.
+GridLock (`v0.8.7`) runs on x86_64 Linux systems under both native Wayland compositors (Niri, Sway, Hyprland, KDE Plasma, GNOME) and X11/XWayland servers. You can run a standalone AppImage from GitHub Releases or compile from source with Meson and Ninja.
 
 ---
 
@@ -8,20 +8,20 @@ GridLock (`v0.8.66`) runs on x86_64 Linux systems under both native Wayland comp
 
 Each release on [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) ships two self-contained AppImage editions:
 
-* **`GridLock-0.8.66-x86_64.AppImage` (Lite Edition)**: Bundles the `gridlock` binary, Qt6 Wayland (`libqwayland*.so`, `wayland-decoration-client`, `wayland-graphics-integration-client`, `wayland-shell-integration`) and XCB (`libqxcb.so`, `xcbglintegrations`, `libxcb-cursor.so.0`) platform plugins, `libqtadvancedcss`, `qtermwidget6` color schemes and keyboard layouts, and SQLite3 docset drivers without tutorial binaries.
-* **`GridLock-0.8.66-Tutorials-x86_64.AppImage` (Tutorials Edition)**: Includes everything in the Lite Edition plus all 7 MPI tutorial source files and pre-compiled debug binaries under `usr/share/gridlock/tutorial/`.
+* **`GridLock-0.8.7-x86_64.AppImage` (Lite Edition)**: Bundles the `gridlock` binary, Qt6 Wayland (`libqwayland*.so`, `wayland-decoration-client`, `wayland-graphics-integration-client`, `wayland-shell-integration`) and XCB (`libqxcb.so`, `xcbglintegrations`, `libxcb-cursor.so.0`) platform plugins, `libqtadvancedcss`, `qtermwidget6` color schemes and keyboard layouts, and SQLite3 docset drivers without tutorial binaries.
+* **`GridLock-0.8.7-Tutorials-x86_64.AppImage` (Tutorials Edition)**: Includes everything in the Lite Edition plus all 8 MPI tutorial source files and pre-compiled debug binaries under `usr/share/gridlock/tutorial/`.
 
 ### Running the AppImage
 
 ```bash
-chmod +x GridLock-0.8.66-Tutorials-x86_64.AppImage
-./GridLock-0.8.66-Tutorials-x86_64.AppImage
+chmod +x GridLock-0.8.7-Tutorials-x86_64.AppImage
+./GridLock-0.8.7-Tutorials-x86_64.AppImage
 ```
 
 * **Wayland and X11 Selection**: `AppRun` configures `QT_PLUGIN_PATH="$APPDIR/usr/plugins"` and `usr/bin/qt.conf`. When both `WAYLAND_DISPLAY` and `DISPLAY` are active and `QT_QPA_PLATFORM` is unset, `AppRun` exports `QT_QPA_PLATFORM="wayland;xcb"` so Qt6 connects over Wayland first and falls back to X11/XCB if needed. On native (non-WSLg) Wayland compositors, `src/main.cpp` sets `QT_WAYLAND_DISABLE_WINDOWDECORATION=1`.
 * **Running Without `libfuse2`**: On containers or minimal hosts without FUSE, extract and run on the fly:
   ```bash
-  ./GridLock-0.8.66-x86_64.AppImage --appimage-extract-and-run
+  ./GridLock-0.8.7-x86_64.AppImage --appimage-extract-and-run
   # or export APPIMAGE_EXTRACT_AND_RUN=1
   ```
 * **External Host Tools Used at Runtime**: The AppImage bundles the GUI and Qt6 runtime. Host debugging, compilation, and LSP features invoke tools from your system `PATH` when present: `gdb` (or `gdb-multiarch`, `lldb-dap`, `cuda-gdb`, `rocgdb`), `mpirun` / `mpiexec`, `mpicxx` / `mpicc` / `g++`, `objdump` (`binutils`), `clangd`, and `man`.
@@ -160,7 +160,7 @@ See [Tutorials Walkthrough](Tutorials-Walkthrough.md) for line-by-line instructi
 
 | Option | Description |
 | :--- | :--- |
-| `-v`, `--version` | Prints `gridlock 0.8.66` to `stdout` and exits `0` before initializing Qt/GUI plugins. |
+| `-v`, `--version` | Prints `gridlock 0.8.7` to `stdout` and exits `0` before initializing Qt/GUI plugins. |
 | `-h`, `--help` | Prints command-line usage options and exits `0`. |
 | `--help-all` | Prints GridLock options plus standard Qt6 command-line flags. |
 | `--tutorial-mode` | Opens the modal `Interactive Tutorials` launcher (`TutorialDialog`) before mapping `MainWindow`. |

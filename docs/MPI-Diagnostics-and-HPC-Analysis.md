@@ -85,7 +85,7 @@ When debugging numerical drift, ghost-cell corruption, or rank-dependent branchi
    * Rows correspond to `Rank 0 .. Rank N-1`; columns correspond to watched expressions.
    * On every stop, `DifferentialGrid::updateHighlights()` computes the modal (majority-vote) value string in each column across active ranks. Any rank cell whose value differs from the majority consensus is shaded light red (`rgb(255, 200, 200)`), immediately isolating a single diverged or `nan`-corrupted rank.
 
-> **Note on Multidimensional Array Heatmaps**: In `v0.8.66`, cross-rank scalar and struct-member outlier comparison is handled by `DifferentialGrid`, while raw typed array slices (`Int32`, `Float`, `Double`) can be exported to `.csv` or `.bin` from `Memory View` (`Export`). A dedicated 1D/2D/3D array and tensor heatmap dock is scheduled for `v0.8.8` (see [Engineering Roadmap](ROADMAP.md)).
+> **Note on Multidimensional Array Heatmaps**: In `v0.8.7`, live auto-refreshing 1D line/stem and 2D colormapped heatmap plotting is built into `Tools -> Array & Field Plotter...` (`Ctrl+Alt+G`), cross-rank scalar and struct-member outlier comparison is handled by `DifferentialGrid`, and raw typed array slices (`Int32`, `Float`, `Double`) can be exported to `.csv` or `.bin` from `Memory View` (`Export`). Multi-rank 1D overlays and 3D tensor views are scheduled for `v0.8.8` (see [Engineering Roadmap](ROADMAP.md)).
 
 ---
 

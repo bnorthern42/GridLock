@@ -1,6 +1,6 @@
 # Quickstart and Workflows
 
-This guide covers the four main debugging workflows in GridLock (`v0.8.66`):
+This guide covers the four main debugging workflows in GridLock (`v0.8.7`):
 1. Launching a local multi-rank MPI program or standalone ELF64 binary.
 2. Attaching to a running Linux process or live `mpirun` / SLURM MPI job (`Ctrl+Alt+P`).
 3. Connecting to `qemu-user -g` cross-architecture stubs and `gdbserver` instances (`target remote` / `extended-remote`).
