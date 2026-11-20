@@ -1,0 +1,121 @@
+# Memory, Reverse Engineering, and Profiling
+
+This guide covers process memory inspection and cross-rank byte diffing (`MemView`), virtual memory and heap-caller profiling (`MemoryProfilerWidget`), interactive pointer and struct graph visualization (`PointerGraphDialog`), ELF64 disassembly, 2D Control Flow Graphs, decompilation (`DisassemblyView`), and CPU register telemetry (`RegisterView`).
+
+---
+
+## 1. Hex Memory View, Cross-Rank Diffing, and Matrix Export (`MemView`)
+
+Open the **`Memory View`** tab in the bottom dock (`Alt+4` -> `Memory View`). Ensure **`HEX DUMP`** is selected in the top bar.
+
+### Reading Process and Static ELF Memory
+
+* **Source Status Badge**: Shows **`IDLE (NO BINARY)`**, **`STATIC ELF (READ-ONLY)`** (reading virtual sections directly from disk via `ElfBinaryInspector`), **`LIVE RANK N (PID P)`**, or **`REMOTE RANK N (...)`**.
+* **Fast `process_vm_readv` Path (`NativeMemoryReader` + `MemoryBoundsValidator`)**:
+  * For local live processes, GridLock reads target memory directly via Linux `process_vm_readv`, enforcing `MIN_VALID_BASE_ADDRESS >= 0x1000`, natural element/stride alignment, 64-bit overflow guards, and a `64 MiB` per-transfer cap before falling back to GDB/MI or DAP memory reads when `ptrace_scope` restricts cross-process reads or when connected to a remote `gdbserver`/`qemu-user` target.
+* **Seeking to an Address or Expression**:
+  * Enter a hex address (`0x404040`), decimal literal (`0d16384`), symbol/pointer variable (`send_buf.data()`), or register (`$rsp`) in **`Addr:`**, set **`Bytes:`** (`1..4096`, default `256`), and click **`Read`** (or press `Enter`).
+  * Left-clicking any `0x...` pointer value in the **`Variables`** dock automatically reads 256 bytes from that address into `MemView`.
+* **Step Mutation Highlighting**: Bytes that changed since the previous debugger stop are highlighted in bold red (`#f44747`) across the 16-byte-per-row hex and ASCII columns.
+* **Standalone Pop-Out Window**: Click **`⤢ POP OUT`** in the top-right corner of `MemView` to detach the entire memory inspector (`1280x820`) onto a second monitor; click **`⤡ DOCK`** (or close the window) to snap it back into the bottom dock.
+
+### Cross-Rank Byte Diffing (`Diff Ranks` / `MemoryDiffer`)
+
+1. Pause at least two MPI ranks at a synchronization point (for example before `MPI_Allreduce` or `MPI_Barrier`).
+2. Enter the buffer address or expression (such as `&packet` or `domain.data()`) in **`Addr:`** and set **`Bytes:`**.
+3. Set **`Base:`** (for example `0`) and **`Target:`** (for example `1` or `2`), then click **`Diff Ranks`**.
+4. `MemView` compares `Base` against `Target` byte-by-byte (using `MemoryDiffer::compareMemory` over `process_vm_readv` when addresses match, or per-rank debugger evaluation when ASLR/stack addresses differ). Every differing byte is highlighted in bold red (`#f44747`); hover over any red byte to see a tooltip showing `Baseline: 0x.. | Target: 0x..`.
+
+### Exporting Typed CSV Matrices and Raw Binary Slices (`Export` / `MemoryExporter`)
+
+1. Read the desired buffer into `MemView` (`Addr:` and `Bytes:`).
+2. Select the element type in **`Type:`**: **`Int32`** (`int32_t`), **`Float`** (`float`), or **`Double`** (`double`).
+3. Click **`Export`** and choose an output path:
+   * **`CSV Files (*.csv)`**: Unpacks the buffer as a typed row-major CSV slice (`std::setprecision(9)`) via `MemoryExporter::exportToCsv`.
+   * **`Binary Files (*.bin)`**: Writes the exact raw byte slice verbatim via `MemoryExporter::exportToBinary`.
+
+---
+
+## 2. Library and Heap Memory Map Profiler (`MemoryProfilerWidget`)
+
+Inside **`Memory View`**, click **`LIBRARY MEMORY MAP`** in the top bar to switch from the hex dump to the virtual memory profiler.
+
+![Library and Heap Memory Map Profiler showing VMA treemap and breakdown table](screenshots/memory_profiler.png)
+
+### How Memory Attribution Works
+
+1. **`/proc/<pid>/smaps` VMA Categorization**: Parses `Size`, `Rss`, and `Private_Dirty` across all mapped regions of the selected rank (`Rank 0 .. Rank N-1` or `All Ranks Overview`) and classifies each region into five categories:
+   * **`Shared Lib`**: Loaded `.so` libraries (`libmpi.so`, `libc.so`, `libstdc++.so`, CUDA/ROCm runtimes).
+   * **`Heap / Call Site`**: Process `[heap]` and attributed dynamic allocations.
+   * **`Anon mmap`**: Anonymous `rw-p` mappings outside `[heap]`.
+   * **`MPI /dev/shm`**: Shared-memory transport segments (`/dev/shm/*`, POSIX shm, XPMEM/Vader buffers).
+   * **`Stack`**: Thread `[stack]` mappings.
+2. **`LD_PRELOAD` Heap Caller Attribution (`Track Heap Callers (LD_PRELOAD)`)**:
+   * Checked by default. When `gcc` or `cc` is available, GridLock compiles a small interposition library (`/tmp/gridlock_memtrack_v2_<uid>.so`) and injects it via `LD_PRELOAD` into GDB-spawned ranks.
+   * Allocations `>= 4 KB` via `malloc`, `calloc`, `realloc`, and `free` unwind past `libstdc++` `operator new` frames using `_Unwind_Backtrace`, `dladdr`, and `addr2line`, writing live call-site totals to `/tmp/gridlock_mem_<pid>.tsv` and deducting attributed heap bytes from the raw `[heap]` bucket so totals are never double-counted.
+
+### Visual Controls and Colorblind-Safe Palettes
+
+* **Proportional Bar & 2D Treemap (`MemoryTreemapCanvas`)**: Hover over any tile to inspect `Category`, `Live / RSS`, `Private Dirty`, and symbol/range details. Single-click a tile to select its row in the breakdown table; **double-click** any tile or table row to jump straight back to **`HEX DUMP`** at that mapping's start address.
+* **Sortable Breakdown Table**: 6 columns (`Library / Region`, `Category`, `Live / RSS (MB)`, `Private Dirty (MB)`, `% of Total`, `Top Symbol / Address Range`) with numeric MB/% sorting and instant substring filtering (`Filter libraries, symbols, or categories...`).
+* **5 Color Schemes** (synced with `Edit -> Preferences -> Appearance -> Memory Map Color Scheme`):
+  * **`Distinct`** (category and library distinct hues, default)
+  * **`Viridis`** (perceptually uniform sequential green-blue-yellow)
+  * **`Plasma`** (perceptually uniform purple-orange-yellow)
+  * **`Ocean`** (cool-to-warm blue-cyan)
+  * **`High-Contrast`** (Okabe-Ito colorblind-safe palette)
+
+---
+
+## 3. Pointer and Struct Graph Visualizer (`PointerGraphDialog`)
+
+Open **`Tools -> Pointer & Struct Graph Visualizer...`** from the menu bar, or right-click any struct/pointer variable in the **`Variables`** dock and select **`Visualize in Pointer / Struct Graph...`**.
+
+![Pointer and Struct Graph Visualizer showing linked MeshDomain and cyclic RankRingNode cards](screenshots/pointer_graph.png)
+
+### Operating the Graph Canvas
+
+1. **Graph a Root Expression**: Type a C/C++ struct or pointer variable (such as `sim`, `pkt`, `cfg`, or `head`) into the top input box and click **`Graph Expression`** (or press `Enter`).
+2. **Interactive Dereferencing (`➔ Deref`)**:
+   * Each card displays `expression : Type @ 0xAddress` and lists its member fields (`name : value (type)`).
+   * Non-null pointer and composite fields show a clickable **`➔ Deref`** pill badge (null pointers display a muted **`nullptr`** badge and are guarded against dereferencing).
+   * Click **`➔ Deref`** (or double-click a field row) to expand that child node live via `IBackendCoordinator::requestVariableChildren`, or click **`Expand All Pointers (1 Hop)`** on the toolbar to expand every visible frontier pointer by one level.
+3. **Cycle and Shared-Alias Detection**:
+   * Cards are deduplicated by normalized virtual address (`0x...`), so multiple pointers referencing the same heap object converge onto the same card.
+   * Forward tree edges render as solid cyan (`#38bdf8`) cubic Bezier curves. Back-edges (linked-list rings, parent pointers) and multi-parent shared aliases render as dashed amber (`#f59e0b`) curves labeled **`CYCLE / SHARED ALIAS`**.
+4. **Layout and Navigation**: Drag cards freely on the canvas, pan with mouse drag, click **`Auto-Layout (Layered DAG)`** to arrange nodes left-to-right by depth, use **`Zoom +`**, **`Zoom -`**, **`Fit`**, **`Clear Graph`**, and **`✕ CLOSE`**.
+
+---
+
+## 4. Disassembly, 2D Control Flow Graph, Decompiler, and Patching
+
+Press **`Alt+2`** for the full-width **`REVERSE`** perspective, or inspect assembly alongside C/C++ code in the **`CODE`** perspective (`Alt+1`).
+
+![Reverse Perspective showing 2D Control Flow Graph with rank badges paired with the Decompiler](screenshots/cfg_decompiler_split.png)
+
+### Modes and Navigation (`DisassemblyView`)
+
+* **`CFG (Space)` / `Linear (Space)`**: Press **`Space`** (or click the top-right toggle button) to switch between:
+  * **Linear Assembly**: Intel-syntax disassembly (`objdump -d -l -C -M intel`) with a `46px` left `BranchFlowGutter` drawing multi-lane forward/backward conditional and unconditional jump arcs, emerald `▶` PC chevrons, and amber `◆` bookmark diamonds.
+  * **2D Control Flow Graph (`CfgGraphView`)**: Basic-block cards connected by orthogonal true (green), false (red), and unconditional (blue) edges, annotated with live MPI rank badges (`[R0]`, `[R0-R3 (4)]`), `[DEADLOCK]` alerts, and a `120x90` bottom-right minimap. Pan with middle-drag, `Space`+left-drag, or `Left`/`Right` arrow keys; press `Home` to snap back to the active block.
+* **`DECOMPILER` and `SPLIT (CFG+DECOMP)`**:
+  * Generates structured **`Approx C`**, **`C++ / MPI`**, or **`Pseudocode`** (selectable in the footer **`Target:`** dropdown, with **`Auto`** refresh and manual **`Refresh`**).
+  * Clicking any line in the decompiler or `SourceCodeView` jumps the linear disassembly, CFG, and `MemView` to the corresponding DWARF instruction address; selecting any identifier token (`2..32` chars) highlights every occurrence across assembly, CFG blocks, and decompiled output.
+  * By default, the decompiler pane hides automatically when `SourceCodeView` already shows matching DWARF source; enable `Show Pseudo-C Decompiler when Source Editor is visible` in `Preferences -> Debugger` to keep all three panes open together.
+
+### Cross-References (`X`) and Instruction Patching (`Ctrl+Shift+P`)
+
+* **Cross-Reference Inspector (`XrefInspectorDialog`)**: Press **`X`** (or right-click -> **`Inspect Cross-References (X)`**) to inspect incoming callers/branches (**`XREFS TO`**) and outgoing `CALL`, `CJMP`, `JMP`, and RIP-relative `DATA` references (**`XREFS FROM`**) with a live filter bar and assembly preview pane. Double-click any row to jump to that address.
+* **Right-Click Context Menu (Linear Mode)**: Provides **`Seek in Memory View`**, **`Inspect Cross-References (X)`**, **`Lookup in Reference Manual (F1)`**, **`Toggle Bookmark`** (auto-synced with source breakpoints), and **`Patch Instruction`** (`nop`).
+* **Instruction & ELF64 Patching**: Press **`Ctrl+Shift+P`** in `DisassemblyView` to assemble/patch an instruction at the current address (splicing `; [PATCHED]` into the listing and updating `ElfBinaryInspector`'s in-memory section image via `writeVirtualMemory`, which can be written out as an executable ELF64 binary via `ElfBinaryInspector::savePatchedBinary`).
+
+---
+
+## 5. CPU Registers (`RegisterView`) and Status Bar Telemetry
+
+* **`Registers` Dock (`RegisterView`)**:
+  * Pins `rip`, `rsp`, and `rbp` at the top, color-coding instruction pointers, stack pointers, and `eflags`.
+  * Changed register values highlight in bold red on each step.
+  * The search bar (`Filter registers by name or hex/dec value...`) matches register names, hex strings (`401125`), and converted unsigned decimal values. Double-clicking any register seeks `DisassemblyView` and `MemView` to its pointer value.
+* **Bottom Status Bar Telemetry (`ElfBinaryInspector`)**:
+  * Displays `ARCH`, focused `MPI RANK`, active `PC/SEEK`, session `STATUS`, per-rank `STACK` (active frame delta `stackTop - $rsp` plus mapped `[stack]` RSS) and `HEAP` (`[heap]` RSS from `/proc/<pid>/smaps`), plus host `RAM` (`/proc/meminfo`) and delta `CPU %` (`/proc/stat`), configurable as `GB`, `%`, or `Both` in `Preferences -> Behavior`.

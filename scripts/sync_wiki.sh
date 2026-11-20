@@ -8,6 +8,9 @@ DOCS_DIR="${ROOT_DIR}/docs"
 
 mkdir -p "${WIKI_DIR}/screenshots"
 
+# Remove stale top-level Wiki Markdown pages before regenerating so deleted/renamed docs do not linger.
+rm -f "${WIKI_DIR}"/*.md
+
 # Copy screenshots into Wiki screenshots/ directory.
 if [[ -d "${DOCS_DIR}/screenshots" ]]; then
     cp -f "${DOCS_DIR}/screenshots/"*.png "${WIKI_DIR}/screenshots/" 2>/dev/null || true
@@ -15,60 +18,39 @@ fi
 
 # Map source Markdown paths (relative to docs/) to flat GitHub Wiki page names.
 declare -A PAGE_MAP=(
-    ["ARCHITECTURE.md"]="Architecture"
+    ["Installation-and-Building.md"]="Installation-and-Building"
+    ["Quickstart-and-Workflows.md"]="Quickstart-and-Workflows"
+    ["User-Manual-UI-and-Debugging.md"]="User-Manual-UI-and-Debugging"
+    ["MPI-Diagnostics-and-HPC-Analysis.md"]="MPI-Diagnostics-and-HPC-Analysis"
+    ["Memory-Reverse-Engineering-and-Profiling.md"]="Memory-Reverse-Engineering-and-Profiling"
+    ["Tutorials-Walkthrough.md"]="Tutorials-Walkthrough"
+    ["Configuration-and-Customization.md"]="Configuration-and-Customization"
+    ["Developer-Architecture-and-Testing.md"]="Developer-Architecture-and-Testing"
     ["ROADMAP.md"]="Roadmap"
-    ["THEMES.md"]="Themes"
-    ["TUTORIAL.md"]="Tutorial"
-    ["USER_GUIDE.md"]="User-Guide"
-    ["user/README.md"]="User-Manual"
-    ["user/interface_guide.md"]="User-Interface-Guide"
-    ["user/hpc_workflows.md"]="User-HPC-Workflows"
-    ["user/advanced_debugging.md"]="User-Advanced-Debugging"
-    ["developer/README.md"]="Developer-Guide"
-    ["developer/environment_setup.md"]="Developer-Environment-Setup"
-    ["developer/architecture_core.md"]="Developer-Architecture-Core"
-    ["developer/ui_internals.md"]="Developer-UI-Internals"
-    ["developer/testing_and_ci.md"]="Developer-Testing-and-CI"
-    ["developer/core/hpc_and_memory.md"]="Developer-Core-HPC-and-Memory"
-    ["developer/core/managers_and_models.md"]="Developer-Core-Managers-and-Models"
-    ["developer/ui/views_and_docks.md"]="Developer-UI-Views-and-Docks"
-    ["developer/ui/widgets_and_dialogs.md"]="Developer-UI-Widgets-and-Dialogs"
-    ["developer/testing/test_harness.md"]="Developer-Testing-Harness"
 )
 
 rewrite_markdown_links() {
     local src_rel="$1"
     local src_file="${DOCS_DIR}/${src_rel}"
     local dst_file="$2"
-    local src_dir
-    src_dir="$(dirname "${src_rel}")"
 
     cp -f "${src_file}" "${dst_file}"
 
     # Normalize screenshot paths to flat `screenshots/<file>.png` inside Wiki.
     sed -i -E 's|\((\.\./)+screenshots/|(|g; s|\(\./screenshots/|(screenshots/|g; s|\(docs/screenshots/|(screenshots/|g' "${dst_file}"
-    # Ensure screenshot paths that lost `screenshots/` prefix via (../)+ regain it.
     sed -i -E 's|\(([A-Za-z0-9_.-]+\.png)\)|(screenshots/\1)|g' "${dst_file}"
 
-    # Rewrite known cross-links to flat GitHub Wiki page names (without .md).
+    # Rewrite cross-links to flat GitHub Wiki page names (without .md).
     for key in "${!PAGE_MAP[@]}"; do
         local wiki_page="${PAGE_MAP[${key}]}"
         local base_name
         base_name="$(basename "${key}")"
-        local rel_dir
-        rel_dir="$(dirname "${key}")"
 
-        # Match exact path relative to docs/ (e.g. docs/TUTORIAL.md or user/hpc_workflows.md).
         sed -i -E "s|\((docs/)?${key}(#[^)]*)?\)|(${wiki_page}\2)|g" "${dst_file}"
-        # Match ./<file> or ../<file> or bare <file> for unique filenames.
-        if [[ "${base_name}" != "README.md" ]]; then
-            sed -i -E "s|\((\.\./)*(\./)?([A-Za-z0-9_/-]+/)?${base_name}(#[^)]*)?\)|(${wiki_page}\4)|g" "${dst_file}"
-        elif [[ "${src_dir}" == "${rel_dir}" ]]; then
-            sed -i -E "s|\(\./README\.md(#[^)]*)?\)|(${wiki_page}\1)|g" "${dst_file}"
-        fi
+        sed -i -E "s|\((\.\./)*(\./)?([A-Za-z0-9_/-]+/)?${base_name}(#[^)]*)?\)|(${wiki_page}\4)|g" "${dst_file}"
     done
 
-    # Rewrite links to top-level repo files (ROADMAP.md, ACCESSIBILITY.md) to Wiki or GitHub.
+    # Rewrite links to root ROADMAP.md to the Wiki Roadmap page.
     sed -i -E 's|\((\.\./)*ROADMAP\.md(#[^)]*)?\)|(Roadmap\2)|g' "${dst_file}"
 }
 
@@ -76,43 +58,36 @@ for src_rel in "${!PAGE_MAP[@]}"; do
     if [[ -f "${DOCS_DIR}/${src_rel}" ]]; then
         wiki_name="${PAGE_MAP[${src_rel}]}"
         rewrite_markdown_links "${src_rel}" "${WIKI_DIR}/${wiki_name}.md"
+    else
+        echo "ERROR: Expected documentation file missing: ${DOCS_DIR}/${src_rel}" >&2
+        exit 1
     fi
 done
 
 cat > "${WIKI_DIR}/Home.md" << 'EOF'
-# GridLock Documentation Wiki
+# GridLock Documentation Wiki (`v0.8.66`)
 
-Welcome to the **GridLock** documentation wiki, automatically synchronized from the `docs/` tree on `master`.
+Welcome to the **GridLock** documentation wiki, synchronized automatically from `docs/` on `master`.
 
 ![GridLock Workspace Overview](screenshots/workspace_overview.png)
 
-## User Documentation
+## Getting Started & Workflows
 
-- [User Guide](User-Guide) - End-to-end walkthrough for MPI debugging, source editing, conditional breakpoints, and SLURM import
-- [Hands-On Tutorial](Tutorial) - Step-by-step exercises using the bundled MPI showcase targets
-- [Themes and Fonts](Themes) - Previews and color palettes for all built-in dark and light themes
-- [User Manual](User-Manual) - Interface, HPC workflows, and advanced debugging reference
-  - [Interface Guide](User-Interface-Guide)
-  - [HPC Workflows](User-HPC-Workflows)
-  - [Advanced Debugging](User-Advanced-Debugging)
+- [Installation and Building](Installation-and-Building): Linux dependencies (Arch, Ubuntu/Debian, Fedora), AppImage usage on Wayland and X11, Meson/Ninja build, tutorial compilation, and CLI options.
+- [Quickstart and Workflows](Quickstart-and-Workflows): Launching local MPI jobs, attaching to live `/proc` OpenMPI/MPICH/SLURM jobs (`Ctrl+Alt+P`), debugging `qemu-user -g` and `gdbserver` targets (`target remote`), and importing `#SBATCH` scripts.
+- [Tutorials Walkthrough](Tutorials-Walkthrough): Step-by-step exercises for all 7 primary C++ MPI showcase programs and 5 auxiliary demos in `tutorial/`.
 
-## Architecture & Roadmap
+## User Reference
 
-- [Architecture Overview](Architecture) - Window layout, dock structure, and coordinator signal wiring
-- [Engineering Roadmap](Roadmap) - Planned milestones from v0.8.7 through v1.0.0
+- [User Manual: UI and Debugging](User-Manual-UI-and-Debugging): Perspectives (`Alt+1..3`), menus, toolbars, docks, `clangd` LSP, conditional breakpoints, logpoints, hardware watchpoints, and keyboard shortcuts.
+- [MPI Diagnostics and HPC Analysis](MPI-Diagnostics-and-HPC-Analysis): MPMD FIFO coordinator mechanics, `ServerRackView`, `DeadlockAnalyzer`, `MpiNetworkLogWidget`, `DifferentialGrid` outlier highlighting, and `Package Manager` (`spack`, `dnf`, `pacman`, `apt`).
+- [Memory, Reverse Engineering, and Profiling](Memory-Reverse-Engineering-and-Profiling): `MemView` (`process_vm_readv`, `Diff Ranks`, `Export`), `MemoryProfilerWidget` (`smaps` + `LD_PRELOAD` heap callers), `PointerGraphDialog`, `DisassemblyView` (2D CFG + Decompiler + Xrefs + Patching), and `RegisterView`.
+- [Configuration and Customization](Configuration-and-Customization): `PreferencesDialog`, 12 built-in dark and light theme palettes, `config.toml` and `.gridlock/` session files, and build auto-detection.
 
-## Developer Documentation
+## Architecture, Testing & Roadmap
 
-- [Developer Guide](Developer-Guide) - Internal subsystem index
-- [Environment Setup and Build](Developer-Environment-Setup)
-- [Backend Architecture Core](Developer-Architecture-Core)
-  - [HPC and Native Memory Engine](Developer-Core-HPC-and-Memory)
-  - [Managers and Models](Developer-Core-Managers-and-Models)
-- [UI Internals and Views](Developer-UI-Internals)
-  - [Views and Docks](Developer-UI-Views-and-Docks)
-  - [Widgets and Dialogs](Developer-UI-Widgets-and-Dialogs)
-- [Testing and CI Pipeline](Developer-Testing-and-CI)
-  - [Test Harness](Developer-Testing-Harness)
+- [Developer Architecture and Testing](Developer-Architecture-and-Testing): Repository structure, `GdbRankCoordinator` / `DapCoordinator` / `ProcessScanner` internals, all 22 Meson test suites, coverage, and screenshot generation.
+- [Engineering Roadmap](Roadmap): Planned milestones from `v0.8.7` through `v1.0.0`.
 EOF
 
 cat > "${WIKI_DIR}/_Sidebar.md" << 'EOF'
@@ -120,30 +95,20 @@ cat > "${WIKI_DIR}/_Sidebar.md" << 'EOF'
 
 - [Home](Home)
 
-**User Guides**
-- [User Guide](User-Guide)
-- [Tutorial](Tutorial)
-- [Themes & Fonts](Themes)
-- [User Manual](User-Manual)
-  - [Interface Guide](User-Interface-Guide)
-  - [HPC Workflows](User-HPC-Workflows)
-  - [Advanced Debugging](User-Advanced-Debugging)
+**Getting Started**
+- [Installation & Building](Installation-and-Building)
+- [Quickstart & Workflows](Quickstart-and-Workflows)
+- [Tutorials Walkthrough](Tutorials-Walkthrough)
 
-**Architecture & Plan**
-- [Architecture](Architecture)
-- [Roadmap](Roadmap)
+**User Reference**
+- [UI & Debugging Manual](User-Manual-UI-and-Debugging)
+- [MPI Diagnostics & HPC](MPI-Diagnostics-and-HPC-Analysis)
+- [Memory, RE & Profiling](Memory-Reverse-Engineering-and-Profiling)
+- [Configuration & Themes](Configuration-and-Customization)
 
-**Developer Docs**
-- [Developer Guide](Developer-Guide)
-- [Environment Setup](Developer-Environment-Setup)
-- [Architecture Core](Developer-Architecture-Core)
-  - [HPC & Memory](Developer-Core-HPC-and-Memory)
-  - [Managers & Models](Developer-Core-Managers-and-Models)
-- [UI Internals](Developer-UI-Internals)
-  - [Views & Docks](Developer-UI-Views-and-Docks)
-  - [Widgets & Dialogs](Developer-UI-Widgets-and-Dialogs)
-- [Testing & CI](Developer-Testing-and-CI)
-  - [Test Harness](Developer-Testing-Harness)
+**Internals & Plan**
+- [Developer Architecture](Developer-Architecture-and-Testing)
+- [Engineering Roadmap](Roadmap)
 EOF
 
 REPO_SLUG="${GITHUB_REPOSITORY:-}"

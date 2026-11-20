@@ -1,187 +1,115 @@
-# GridLock — MPI Debugger & ELF Binary Inspector
+# GridLock: Multi-Rank MPI Debugger & ELF64 Binary Inspector
 
 ![Version](https://img.shields.io/badge/Release-v0.8.66-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
-![Wayland/Niri](https://img.shields.io/badge/Wayland-Niri_Native-orange.svg?style=for-the-badge)
+![Wayland/X11](https://img.shields.io/badge/Linux-Wayland%20|%20X11-orange.svg?style=for-the-badge)
 ![Meson/Ninja](https://img.shields.io/badge/Build-Meson%20|%20Ninja-blue.svg?style=for-the-badge)
-![LLDB/DAP & GDB/MI3](https://img.shields.io/badge/Backend-LLDB--DAP%20|%20GDB--MI3-purple.svg?style=for-the-badge)
+![GDB/MI3 & LLDB-DAP](https://img.shields.io/badge/Backend-GDB--MI3%20|%20LLDB--DAP-purple.svg?style=for-the-badge)
 
-**GridLock** is a C++23 and Qt6 debugger for multi-rank MPI programs and ELF64 binaries on Linux. It lets you step individual MPI processes, compare variables and memory across ranks, inspect disassembly and control-flow graphs, edit source files with `clangd` language server support, and detect communication deadlocks.
+**GridLock** is a C++23 and Qt6 workstation debugger for multi-rank MPI programs, cross-architecture `qemu-user` / `gdbserver` stubs, and ELF64 binaries on Linux. It coordinates up to 256 MPI processes over GDB/MI3 or LLDB-DAP, attaches to live `/proc` OpenMPI/MPICH/SLURM jobs, flags collective mismatches and circular wait-for deadlocks, diffs process memory across ranks via `process_vm_readv`, profiles virtual memory and `LD_PRELOAD` heap call sites, visualizes C/C++ pointer graphs, and pairs `clangd` source editing with a 2D Control Flow Graph and pseudo-C decompiler.
 
----
-
-## Workspace Perspectives
-
-### 1. Code + Disassembly (`Alt+1` / `CODE`)
-Side-by-side C/C++ source editor (`SourceCodeView` / `EditorTabManager`), linear assembly with branch arcs (`DisassemblyView`), CPU registers (`RegisterView`), cross-rank watch comparisons (`DifferentialGrid`), rank status cards (`ServerRackView`), and a hex memory viewer (`MemView`).
-
-![GridLock Workspace Overview](docs/screenshots/workspace_overview.png)
-
-### 2. Reverse Engineering (`Alt+2` / `REVERSE`)
-Full-width split view pairing the basic-block Control Flow Graph (with per-block MPI rank badges `[R0]`, `[R1]`, `[R2-R7]` and a corner minimap) with a synchronized decompiler (`Approx C`, `C++`, `Pseudocode`) and cross-reference (`XREF`) comments.
-
-![GridLock CFG & Decompiler Split Perspective](docs/screenshots/cfg_decompiler_split.png)
-
-### 3. MPI Diagnostics (`Alt+3` / `MPI`)
-Dedicated view for circular wait-for deadlock detection (`DeadlockAnalyzer`), MPI point-to-point and collective message logs (`MpiDiagnosticsWidget` / `MpiNetworkLogWidget`), and offline documentation via Zeal docsets and system `man` pages (`ReferenceManualWidget`).
-
-![GridLock MPI Diagnostics & Deadlock Analyzer](docs/screenshots/mpi_diagnostics_docsets.png)
+![GridLock Code Perspective showing deadlock_ring.cpp, inline variable values, CFG, Variables, and 8-rank Server Rack](docs/screenshots/workspace_overview.png)
 
 ---
 
-## Features
+## Quick Install & Launch
 
-### Multi-Rank MPI Debugging
-* **Target & Rank Controls:** Pick an MPI target or load any ELF64 binary from the toolbar, set the process count (`-np 1..64`), and run, step, pause, or stop individual ranks.
-* **Attach to Running Process (`Ctrl+Alt+P`):** Discover running local processes via `/proc`, automatically group active OpenMPI, MPICH, PMIx, and SLURM jobs under expandable `MPI Job (N ranks)` headers, verify `kernel.yama.ptrace_scope` permissions with a 1-click `sysctl` fix, and attach `GdbRankCoordinator` (`-target-attach <pid>`) or `DapCoordinator` to a single process or all ranks of an MPI job.
-* **Remote GDB Target (`target remote` / `extended-remote`):** Connect `gdb` or `gdb-multiarch` directly to `qemu-user -g <port>` cross-architecture stubs (`qemu-aarch64`, `qemu-riscv64`), single `gdbserver` instances inside QEMU VMs, or multi-rank port ranges (`localhost:1234..1237` or comma-separated `host:port` endpoints) with local ELF64 DWARF symbol loading.
-* **Selectable Debugger Backends:** Choose between `GNU GDB (gdb)`, `LLVM LLDB-DAP (lldb-dap)`, `NVIDIA CUDA-GDB (cuda-gdb)`, and `AMD ROCm GDB (rocgdb)` in `Edit -> Preferences -> Debugger`.
-* **Synchronized Source & Assembly Stepping:** Stepping an instruction updates the active address across the disassembly view, CFG, decompiler, source editor, register table, rank status panel, and hex memory view.
-* **Cross-Rank Watch Table (`DifferentialGrid`):** Evaluate C/C++ expressions (such as `data[0].id`, `data[0].coords.x`, or `mpi_rank`) across all active ranks at once, or promote variables directly from the `Variables` and `Evaluator` panels.
-* **Deadlock Cycle Detection (`DeadlockAnalyzer`):** Builds a wait-for graph across blocked `MPI_Send`, `MPI_Recv`, and `MPI_Barrier` calls and flags circular dependencies in both the rank rack and the control-flow graph.
-* **Cross-Rank Memory Diffing (`MemoryDiffer`):** Reads process memory directly via `process_vm_readv` with bounds validation (`MemoryBoundsValidator`) and highlights byte differences between any two MPI ranks in `MemView`.
+### Option 1: Standalone Linux AppImage (`x86_64`, Wayland & X11)
 
-### Source Editor, Project Tree & `clangd` LSP
-* **Project File Tree Operations (`ProjectExplorerWidget`):** Create `.cpp` and `.hpp` files, create folders, rename (`F2`), and delete entries from the right-click context menu on the `FILES` tree, with optional 1-click source registration in `meson.build` or `CMakeLists.txt`.
-* **Split Editors & Dirty Buffer Tracking (`EditorTabManager`):** Open files side-by-side (`Split Right`) or stacked (`Split Down`), track unsaved buffers with `●` tab markers and close prompts, save all open buffers (`Ctrl+Shift+S`), and toggle between `.hpp` and `.cpp` files (`F10`).
-* **Scope Breadcrumbs & Git Diff Gutter (`SourceCodeView`):** Displays a scope bar (`File > Class/Struct > Function`) at the top of the editor and marks added, modified, and deleted lines from `git diff` in the editor gutter.
-* **`clangd` Diagnostics, Hover & Navigation (`ClangdLspClient`):** Underlines compiler errors and warnings inline, shows symbol/Doxygen hover tooltips, and supports Go-to-Definition (`F12`), Find References (`Shift+F12`), and AST symbol renaming (`Shift+F6`).
-* **Gutter Breakpoint Popover:** Right-clicking a line in the source gutter opens a popover next to the cursor to filter breakpoints by rank (`All MPI Ranks` or `Focused Rank Only`) and write conditional expressions with `clangd` autocomplete.
-
-### Binary Inspection & Reverse Engineering
-* **ELF64 Parser (`ElfBinaryInspector`):** Reads ELF headers, sections (`.plt`, `.text`, `.rodata`, `.data`), symbol tables (`.symtab`, `.dynsym`), and printable strings from disk, displaying section layout in an address-space navigation bar.
-* **Control Flow Graph & Rank Badges:** Breaks assembly routines into basic blocks with true, false, and unconditional branch edges, showing which MPI ranks are stopped inside each block.
-* **Decompiler & Bidirectional Navigation:** Generates `Approx C`, `C++`, or `Pseudocode` alongside assembly. Clicking a line in the source editor or decompiler jumps the disassembly, CFG, and memory views to the matching instruction address, and vice versa.
-* **Cross-Reference Inspector (`XrefInspectorDialog`):** Press `X` on any instruction to list callers and incoming branches (`XREFS TO`) as well as outgoing calls and jumps (`XREFS FROM`).
-* **Instruction & Byte Patching:** Patch assembly instructions (`Ctrl+Shift+P`) or raw hex bytes (`Ctrl+E` in `MemView`) and write the modified ELF64 binary back to disk (`ElfBinaryInspector::savePatchedBinary`).
-
-### Cluster Tools & Environment
-* **Bottom Tool Rail:** Groups the bottom dock panels into four categories (`Debug`, `MPI`, `Terminal`, `Docs`) on a vertical icon rail so only relevant tabs are shown at a time.
-* **System & HPC Package Search (`HpcConsoleWidget`):** Queries `spack`, `pacman`, `dnf`, `apt`, `zypper`, `rpm`, `dpkg-query`, and `eb` from a single search tab with `Table`, `List`, and `Raw` output modes.
-* **SLURM Script Parser & Build Runner:** Imports `#SBATCH` directives and `module load` lines from batch scripts in `PreferencesDialog` (`HPC / Cluster`), and builds projects with `Meson`, `CMake`, `Make`, or `mpicxx` (`F7`).
-* **12 Dark & Light Themes (`ThemeManager`):** Includes 8 dark themes (`GridLock Slate`, `Obsidian Teal`, `Tokyo Night`, `Catppuccin Mocha`, `Gruvbox Industrial`, `Nord`, `One Dark Pro`, `Dracula`) and 4 light themes (`Daylight Paper`, `Solarized Warm`, `Catppuccin Latte`, `One Light`) with independent UI and code font settings in Preferences.
-* **Offline Zeal Docsets & Man Pages (`ReferenceManualWidget`):** Searches local Zeal `.docset` bundles (`~/.local/share/Zeal/Zeal/docsets`) and system `man` pages (`F1`).
-* **Embedded Terminal (`TerminalDockWidget`):** Built-in `QTermWidget` pseudo-terminal for running local shell or cluster commands.
-
-| Attach to Running Process (`/proc` MPI Grouping) | Remote Target (`qemu-user -g` / `gdbserver`) |
-| :---: | :---: |
-| ![Attach to Running Process](docs/screenshots/attach_process.png) | ![Remote GDB Target](docs/screenshots/attach_remote.png) |
-
-| Library & Heap Memory Map Profiler | Interactive Pointer & Struct Graph Visualizer |
-| :---: | :---: |
-| ![Library Memory Map Profiler](docs/screenshots/memory_profiler.png) | ![Pointer & Struct Graph Visualizer](docs/screenshots/pointer_graph.png) |
-
-| Conditional Breakpoint Popover | Package Manager (`"mpi"` Search) |
-| :---: | :---: |
-| ![Breakpoint Popover](docs/screenshots/breakpoint_popover.png) | ![Package Manager MPI Search](docs/screenshots/package_manager_mpi_search.png) |
-
-| Bottom Tool Rail (`Debug` Mode) | `#SBATCH` Script Import |
-| :---: | :---: |
-| ![Tool Rail Debug Tabs](docs/screenshots/tool_rail_debug_tabs.png) | ![SLURM Auto-Detection](docs/screenshots/preferences_slurm_autodetect.png) |
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut | Action | Scope |
-| :--- | :--- | :--- |
-| **`Alt+1`** | Switch to **Code** perspective (`SourceCodeView` + `DisassemblyView`) | Global |
-| **`Alt+2`** | Switch to **Reverse** perspective (Split `CFG` + `Decompiler`) | Global |
-| **`Alt+3`** | Switch to **MPI** perspective (`MPI Diagnostics` & cluster views) | Global |
-| **`Ctrl+Alt+P`** | Open **Attach to Running Process / Remote GDB Target** dialog | Global |
-| **`Ctrl+S` / `Ctrl+Shift+S`** | Save current file / Save all modified editor tabs | Source Editor |
-| **`F10`** | Switch between matching `.hpp` header and `.cpp` source file | Source Editor |
-| **`F12`** | Go to symbol definition (`clangd` AST lookup) | Source Editor |
-| **`Shift+F12`** | Find symbol references in document | Source Editor |
-| **`Shift+F6`** | Rename symbol across AST occurrences | Source Editor |
-| **`F2`** | Rename selected file or folder in Project Explorer | Project Explorer |
-| **`Ctrl+M`** | Toggle maximize / restore bottom dock | Global |
-| **`Ctrl+G`** | Focus address / symbol seek bar | Global |
-| **`Alt+Left` / `Alt+Right`** | Navigate backward / forward in address history | Global |
-| **`Space`** | Toggle `DisassemblyView` between linear assembly and CFG | Disassembly / CFG |
-| **`X`** | Open cross-reference dialog (`XrefInspectorDialog`) for current address | Disassembly / CFG |
-| **`F1`** | Look up symbol in Reference Manual (Zeal / `man`) | Disassembly / Global |
-| **`Ctrl+Shift+P`** | Patch instruction in `DisassemblyView` | Disassembly |
-| **`Ctrl+E`** | Edit hex bytes at active address in `MemView` | Memory View |
-| **`Ctrl+Shift+F`** | Search across symbols, strings, assembly, and decompiler output | Global |
-| **`;`** | Add or edit inline comment at active instruction address | Disassembly |
-| **`Ctrl+B`** | Toggle bookmark on active instruction | Disassembly |
-
----
-
-## Installation & AppImage Downloads
-
-Standalone AppImages for Linux x86_64 are available from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases):
-* **`GridLock-<version>-x86_64.AppImage` (Lite / Core Edition)**: Lean standalone distribution packaging the full GridLock workstation IDE, syntax highlighters, and debugger backends without bundled demo sources.
-* **`GridLock-<version>-Tutorials-x86_64.AppImage` (Full / Tutorials Edition)**: Includes all 7 interactive MPI showcase programs (`deadlock_ring`, `inspection_demo`, `collective_mismatch`, `ghost_cell_drift`, `heap_imbalance`, `tag_mismatch_stall`, `simd_struct_watch`) with both `.cpp` sources and pre-compiled debug binaries for out-of-the-box exploration.
+Download either AppImage from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) (bundles Qt6 Wayland and XCB platform plugins plus `libxcb-cursor.so.0`):
+* **`GridLock-0.8.66-x86_64.AppImage`** (Lite Edition)
+* **`GridLock-0.8.66-Tutorials-x86_64.AppImage`** (Includes all 7 MPI tutorial `.cpp` sources and pre-built debug binaries)
 
 ```bash
-chmod +x GridLock-*-x86_64.AppImage
-./GridLock-*-x86_64.AppImage
+chmod +x GridLock-0.8.66-Tutorials-x86_64.AppImage
+./GridLock-0.8.66-Tutorials-x86_64.AppImage
 ```
 
----
+### Option 2: Build From Source (`Meson` + `Ninja`)
 
-## Building & Running
-
-### Dependencies
-* **Compiler:** GCC 13+ or Clang 16+ (C++23)
-* **Build tools:** Meson (`>= 1.1`) and Ninja
-* **Qt 6:** `Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, `Qt6Sql`, `Qt6Concurrent`, `Qt6Svg`, `Qt6OpenGLWidgets`, `Qt6Test`
-* **Libraries:** `qtermwidget6`, `tomlplusplus`, and bundled `Qt-Advanced-Stylesheets`
-
-### Compile & Launch
 ```bash
-meson setup builddir
-ninja -C builddir gridlock
+git clone --recurse-submodules https://github.com/bnorthern42/GridLock.git
+cd GridLock
 
-# Launch GridLock
+cmake -S external/Qt-Advanced-Stylesheets -B external/Qt-Advanced-Stylesheets/build \
+      -GNinja -DQT_VERSION_MAJOR=6 -DCMAKE_BUILD_TYPE=Release
+ninja -C external/Qt-Advanced-Stylesheets/build
+
+meson setup builddir
+ninja -C builddir
 ./builddir/gridlock
 ```
 
-### Running the Test Suite
-GridLock includes 26 test suites covering the debugger backend, ELF/DWARF parsers, `clangd` LSP integration, security boundaries, MPI deadlock detection, and UI workflows:
-```bash
-find builddir -name "*.gcda" -delete && meson test -C builddir --print-errorlogs
-```
-
-### Headless Screenshot Capture
-Render a window snapshot offscreen without a display server:
-```bash
-QT_QPA_PLATFORM=offscreen ./builddir/gridlock --headless --snapshot docs/screenshots/workspace_overview.png
-```
-
-### Configuration (`config.toml` & `.gridlock/workspace.toml`)
-Global settings live in `~/.config/gridlock/config.toml` and per-project overrides in `.gridlock/workspace.toml`:
-```toml
-[ui]
-preferred_monitor = "2560x1440"
-open_unfocused = false
-
-[debugger]
-engine = "gdb"
-
-[docsets]
-paths = ["/home/user/.local/share/Zeal/Zeal/docsets"]
-```
+For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--snapshot`, `--tutorial-mode`, `--test-mode`), and AppImage packaging flags, see [Installation and Building](docs/Installation-and-Building.md).
 
 ---
 
-## Documentation
+## Screenshot Gallery
 
-* [**Hands-On Tutorial (`docs/TUTORIAL.md`)**](docs/TUTORIAL.md) — Step-by-step walkthroughs for all 7 bundled MPI showcase programs (`deadlock_ring.cpp`, `inspection_demo.cpp`, `collective_mismatch.cpp`, `ghost_cell_drift.cpp`, `heap_imbalance.cpp`, `tag_mismatch_stall.cpp`, `simd_struct_watch.cpp`), `MemView` rank diffing (`DIFF RANKS`) & memory export (`EXPORT`), offline `man` pages & Zeal docsets (`F1`), and the `PACKAGE MANAGER` dock.
-* [**Engineering Roadmap (`ROADMAP.md`)**](ROADMAP.md) — Completed milestones through `v0.8.66` and upcoming releases.
-* [**Architecture Guide (`docs/ARCHITECTURE.md`)**](docs/ARCHITECTURE.md) — Window layout, module organization, and signal wiring.
-* [**User Guide (`docs/USER_GUIDE.md`)**](docs/USER_GUIDE.md) — Walkthroughs for MPI debugging, source editing, conditional breakpoints, package search, SLURM import, and binary patching.
-* [**Themes & Fonts (`docs/THEMES.md`)**](docs/THEMES.md) — Screenshots and color reference table for the 12 built-in dark and light themes.
-* [**User Manual (`docs/user/README.md`)**](docs/user/README.md) — Reference pages for panels, shortcuts, and cluster setup.
-* [**Developer Notes (`docs/developer/README.md`)**](docs/developer/README.md) — Internals on backend coordinators, sanitizers, and UI widgets.
-* [**Accessibility Statement (`ACCESSIBILITY.md`)**](ACCESSIBILITY.md) — Keyboard navigation, contrast themes, AT-SPI2 support, known canvas limitations, and barrier reporting.
+| 2D Control Flow Graph & Decompiler (`Alt+2`) | MPI Deadlock & Collective Analyzer (`Alt+3`) |
+| :---: | :---: |
+| ![Reverse Perspective showing 2D CFG with rank badges and Decompiler](docs/screenshots/cfg_decompiler_split.png) | ![MPI Diagnostics panel highlighting a 4-rank circular wait cycle](docs/screenshots/mpi_diagnostics_docsets.png) |
+
+| Attach to Running `/proc` MPI Job (`Ctrl+Alt+P`) | Remote GDB Target (`qemu-user -g` / `gdbserver`) |
+| :---: | :---: |
+| ![Attach Process dialog grouping a 4-rank OpenMPI job with ptrace_scope banner](docs/screenshots/attach_process.png) | ![Remote Target dialog expanding localhost:1234..1237 with gdb-multiarch](docs/screenshots/attach_remote.png) |
+
+| Library & Heap Memory Map Profiler (`smaps` + `LD_PRELOAD`) | Pointer & Struct Graph Visualizer (`PointerGraphDialog`) |
+| :---: | :---: |
+| ![Memory Profiler showing VMA treemap and RSS breakdown table](docs/screenshots/memory_profiler.png) | ![Pointer Graph Visualizer showing MeshDomain and cyclic RankRingNode cards](docs/screenshots/pointer_graph.png) |
+
+| Line-Anchored Conditional Breakpoint & Logpoint Popover | System & HPC Package Search (`spack`, `dnf`, `pacman`, `apt`) |
+| :---: | :---: |
+| ![Conditional Breakpoint Popover anchored to line 34 of deadlock_ring.cpp](docs/screenshots/breakpoint_popover.png) | ![Package Manager showing MPI package search results in Table mode](docs/screenshots/package_manager_mpi_search.png) |
+
+| Bottom Tool-Window Rail (`Debug` Mode, `Alt+4`) | 16-Directive `#SBATCH` Batch Script Importer |
+| :---: | :---: |
+| ![Bottom Tool Rail in Debug mode showing GDB Console, Memory View, and Evaluator](docs/screenshots/tool_rail_debug_tabs.png) | ![Preferences dialog showing 16 auto-detected SLURM batch directives](docs/screenshots/preferences_slurm_autodetect.png) |
 
 ---
 
-## License
+## Feature Summary (`v0.8.66`)
 
-Licensed under the MIT License. See [LICENSE](LICENSE).
+* **Execution & Target Modes**:
+  * **Local MPI & ELF64 Launch**: MPMD `mpirun` / `mpiexec` orchestration (`1..256` ranks) over POSIX FIFOs via `GdbRankCoordinator` (`gdb`, `cuda-gdb`, `rocgdb`) or JSON-RPC via `DapCoordinator` (`lldb-dap`), with OpenMP `OMP_NUM_THREADS` / `OMP_WAIT_POLICY=PASSIVE` auto-tuning and time-travel reverse execution (`⏺ Record`, `↶ Step Back`, `⏮ Rev Continue`).
+  * **Attach to Running Process (`Ctrl+Alt+P`)**: `/proc` process scanner (`ProcessScanner`) grouping live OpenMPI, MPICH/PMI, PMIx, MVAPICH2, and SLURM jobs under expandable `MPI Job (N ranks)` headers, with `kernel.yama.ptrace_scope` diagnostics and detach-on-stop (`-target-detach`).
+  * **Remote Targets (`target remote` / `extended-remote`)**: Single `host:port`, port ranges (`localhost:1234..1237`), and comma-separated endpoints for `qemu-user -g` stubs (`qemu-aarch64`, `qemu-riscv64`) and `gdbserver` VMs, paired with local unstripped ELF64 DWARF symbol loading (`-file-exec-and-symbols`) and `gdb-multiarch`.
+* **MPI & Cross-Rank Inspection**:
+  * **`ServerRackView` & `CallStackDockWidget`**: Per-rank state cards (`RUN`, `BRK`, `IDLE`), 64-frame stack unwinding, and OS/OpenMP thread switching.
+  * **`DeadlockAnalyzer` & `MpiNetworkLogWidget`**: Detects collective mismatches (`MPI_Bcast` vs. `MPI_Barrier`) and point-to-point wait stalls across 16 canonical blocking `MPI_*`/`PMPI_*` routines.
+  * **`DifferentialGrid` (`WATCH` Dock)**: Evaluates C/C++ expressions across all ranks simultaneously and highlights minority-consensus outliers in light red.
+* **Memory, Profiling & Reverse Engineering**:
+  * **`MemView` & `MemoryProfilerWidget`**: `process_vm_readv` hex/ASCII reader (`MemoryBoundsValidator`), cross-rank byte diffing (`Diff Ranks`), typed `Int32`/`Float`/`Double` CSV and raw `.bin` export (`Export`), `/proc/<pid>/smaps` + `LD_PRELOAD` heap-caller treemap profiler with 5 palettes (including Okabe-Ito `High-Contrast`), and `⤢ POP OUT` window mode.
+  * **`PointerGraphDialog`**: Interactive 2D struct/pointer DAG canvas with live `➔ Deref` expansion, address deduplication, `nullptr` guards, and `CYCLE / SHARED ALIAS` back-edge detection.
+  * **`DisassemblyView` & `ElfBinaryInspector`**: ELF64 section/symbol/string parser, linear Intel assembly with branch arcs, 2D Control Flow Graph (`Space`) with `[R0]` and `[DEADLOCK]` badges, synchronized decompiler (`Approx C`, `C++ / MPI`, `Pseudocode`), cross-references (`X`), and instruction patching (`Ctrl+Shift+P`).
+* **Source Editor, LSP & Workstation Tools**:
+  * **`SourceCodeView` & `ClangdLspClient`**: Horizontal/vertical split tabs (`EditorTabManager`), `git diff` gutter, scope breadcrumbs, rainbow brackets, inline variable ghost values, `clangd` diagnostics/hover/completion/`F12` definition, rank-scoped conditional breakpoints, hit ignore counts, non-suspending `{ident}` logpoints, and hardware data watchpoints (`Write`, `Read`, `ReadWrite`).
+  * **Offline Docs, Package Search & Themes**: SQLite3 Zeal `.docset` and `man` viewer (`F1`), multi-distro/Spack `Package Manager` (`spack`, `pacman`, `dnf`, `apt`, `zypper`, `rpm`), embedded `QTermWidget` PTY terminal, 16-directive `#SBATCH` script importer, and 12 dark/light themes.
+
+---
+
+## Documentation & GitHub Wiki
+
+All documentation in `docs/` is automatically mirrored to the [GridLock GitHub Wiki](https://github.com/bnorthern42/GridLock/wiki):
+
+* [**Installation and Building**](docs/Installation-and-Building.md): Distro packages (Arch, Ubuntu/Debian, Fedora), AppImage usage, Meson/Ninja build targets, CLI flags, and environment variables.
+* [**Quickstart and Workflows**](docs/Quickstart-and-Workflows.md): Launching local MPI targets, attaching to `/proc` MPI jobs (`Ctrl+Alt+P`), connecting to `qemu-user -g` and `gdbserver` targets, and importing `#SBATCH` scripts.
+* [**User Manual: UI and Debugging**](docs/User-Manual-UI-and-Debugging.md): Menus, toolbars, perspectives (`Alt+1..3`), bottom tool rail (`Alt+4..7`), editor LSP, breakpoints/logpoints/watchpoints, and the full keyboard shortcut table.
+* [**MPI Diagnostics and HPC Analysis**](docs/MPI-Diagnostics-and-HPC-Analysis.md): MPMD FIFO coordinator mechanics, `ServerRackView`, `DeadlockAnalyzer`, `MpiNetworkLogWidget`, `DifferentialGrid` outlier detection, and `HpcConsoleWidget` package search.
+* [**Memory, Reverse Engineering, and Profiling**](docs/Memory-Reverse-Engineering-and-Profiling.md): `MemView` (`Diff Ranks` & `Export`), `MemoryProfilerWidget`, `PointerGraphDialog`, `DisassemblyView` (CFG + Decompiler + `X` Xrefs + `Ctrl+Shift+P` patching), and `RegisterView`.
+* [**Tutorials Walkthrough**](docs/Tutorials-Walkthrough.md): Step-by-step labs for all 7 primary C++ MPI showcase programs (`deadlock_ring`, `inspection_demo`, `collective_mismatch`, `ghost_cell_drift`, `heap_imbalance`, `tag_mismatch_stall`, `simd_struct_watch`) and 5 auxiliary demos.
+* [**Configuration and Customization**](docs/Configuration-and-Customization.md): `PreferencesDialog`, 12 dark/light theme hex palettes and previews, `config.toml` / `.gridlock/` session files, and build system auto-detection.
+* [**Developer Architecture and Testing**](docs/Developer-Architecture-and-Testing.md): Codebase structure, coordinator/memory/security internals, all 22 Meson test suites, coverage, screenshot generation, and Wiki sync.
+* [**Engineering Roadmap (`v0.8.7` to `v1.0.0`)**](ROADMAP.md): Upcoming milestones clearly separated from current `v0.8.66` features.
+
+---
+
+## Project Governance & Policies
+
+* [**Changelog (`CHANGELOG.md`)**](CHANGELOG.md): Version history through `v0.8.66`.
+* [**Accessibility Statement (`ACCESSIBILITY.md`)**](ACCESSIBILITY.md): Keyboard navigation, contrast themes, colorblind-safe palettes, AT-SPI2 support, and barrier reporting.
+* [**Contributing Guide (`CONTRIBUTING.md`)**](CONTRIBUTING.md): Coding standards (`< 950` lines per file, C++23, Meson tests) and pull request workflow.
+* [**Security Policy (`SECURITY.md`)**](SECURITY.md): Vulnerability reporting and `MiSanitizer` / `MemoryBoundsValidator` hardening boundaries.
+* [**License (`LICENSE`)**](LICENSE): MIT License.
