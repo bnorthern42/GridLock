@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+#include <QDateTime>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QMap>
@@ -271,6 +272,51 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Returns the list of currently installed catchpoints tracked by this coordinator. */
   QVector<CatchpointSpec> activeCatchpoints() const { return m_activeCatchpoints; }
 
+  /** @brief Creates a copy-on-write process checkpoint (`checkpoint`) on @p rank with optional @p note. */
+  void createCheckpoint(int rank, const QString& note = QString()) override {
+    const int r = qMax(0, rank);
+    if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+    m_pendingCheckpointNote[r] = note.trimmed();
+    m_pendingCheckpointCreate[r] = true;
+    m_checkpointCreateBuffer[r].clear();
+    queueOrWriteCmd(r, QStringLiteral("212-interpreter-exec console \"checkpoint\"\n"));
+  }
+
+  /** @brief Restores checkpoint @p checkpointId (`restart <id>`) on @p rank and refreshes stack/locals/registers. */
+  void restoreCheckpoint(int rank, int checkpointId) override {
+    const int r = qMax(0, rank);
+    if (checkpointId < 0 || r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+    queueOrWriteCmd(r, QStringLiteral("-interpreter-exec console \"restart %1\"\n").arg(checkpointId));
+    requestStackAndThreads(r);
+    queueOrWriteCmd(r, QStringLiteral("201-stack-list-variables --all-values\n"));
+    queueOrWriteCmd(r, QStringLiteral("-data-list-register-values x\n"));
+  }
+
+  /** @brief Deletes checkpoint @p checkpointId (`delete checkpoint <id>`) on @p rank. */
+  void deleteCheckpoint(int rank, int checkpointId) override {
+    const int r = qMax(0, rank);
+    if (checkpointId <= 0 || r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+    auto& list = m_rankCheckpoints[r];
+    for (int i = list.size() - 1; i >= 0; --i) if (list[i].id == checkpointId) list.removeAt(i);
+    queueOrWriteCmd(r, QStringLiteral("-interpreter-exec console \"delete checkpoint %1\"\n").arg(checkpointId));
+    emit checkpointsReady(r, list);
+  }
+
+  /** @brief Queries active copy-on-write checkpoints (`info checkpoints`) for @p rank. */
+  void requestCheckpoints(int rank) override {
+    const int r = qMax(0, rank);
+    if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) {
+      emit checkpointsReady(r, m_rankCheckpoints.value(r));
+      return;
+    }
+    m_pendingInfoCheckpoints[r] = true;
+    m_infoCheckpointsBuffer[r].clear();
+    queueOrWriteCmd(r, QStringLiteral("213-interpreter-exec console \"info checkpoints\"\n"));
+  }
+
+  /** @brief Returns cached copy-on-write checkpoints tracked for @p rank. */
+  QVector<ProcessCheckpoint> checkpointsForRank(int rank) const { return m_rankCheckpoints.value(qMax(0, rank)); }
+
   /**
    * @brief Returns a snapshot of `RankState` for @p rankId, or an `"offline"` state if out of range.
    */
@@ -497,6 +543,91 @@ class GdbRankCoordinator : public IBackendCoordinator {
     return false;
   }
 
+  /** @brief Parses MI tokens `212` (`checkpoint`) and `213` (`info checkpoints`) plus `checkpoint <id>: fork returned pid <pid>.` console records. */
+  bool handleCheckpointMiRecord(int rankId, const QString& line) {
+    auto unquoteConsole = [](const QString& raw) {
+      QString p = raw.mid(1).trimmed();
+      if (p.startsWith(QLatin1Char('"')) && p.endsWith(QLatin1Char('"')) && p.size() >= 2) p = p.mid(1, p.size() - 2);
+      p.replace(QStringLiteral("\\n"), QStringLiteral("\n")).replace(QStringLiteral("\\t"), QStringLiteral("\t")).replace(QStringLiteral("\\\""), QStringLiteral("\"")).replace(QStringLiteral("\\\\"), QStringLiteral("\\"));
+      return p;
+    };
+    auto upsertCheckpoint = [&](int r, const ProcessCheckpoint& entry) {
+      auto& list = m_rankCheckpoints[r];
+      for (auto& existing : list) {
+        if (existing.id == entry.id) {
+          existing.forkPid = entry.forkPid;
+          if (!entry.location.isEmpty()) existing.location = entry.location;
+          if (!entry.note.isEmpty()) existing.note = entry.note;
+          if (existing.timestamp.isEmpty()) existing.timestamp = entry.timestamp;
+          return;
+        }
+      }
+      list.append(entry);
+    };
+    if (m_pendingCheckpointCreate.value(rankId, false) && (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {
+      m_checkpointCreateBuffer[rankId] += unquoteConsole(line);
+      return true;
+    }
+    if (m_pendingCheckpointCreate.value(rankId, false) && (line.startsWith(QLatin1String("212^done")) || line.startsWith(QLatin1String("212^error")) || line == QLatin1String("^done"))) {
+      m_pendingCheckpointCreate[rankId] = false;
+      const QString buf = m_checkpointCreateBuffer.take(rankId);
+      const QString note = m_pendingCheckpointNote.take(rankId);
+      if (!line.contains(QLatin1String("^error"))) {
+        static const QRegularExpression cpRe(QStringLiteral("checkpoint\\s+(\\d+)\\s*:\\s*fork returned pid\\s+(\\d+)"), QRegularExpression::CaseInsensitiveOption);
+        if (const auto m = cpRe.match(buf); m.hasMatch()) {
+          ProcessCheckpoint cp;
+          cp.id = m.captured(1).toInt();
+          cp.rank = rankId;
+          cp.forkPid = m.captured(2).toLongLong();
+          cp.timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
+          cp.note = note;
+          if (rankId >= 0 && rankId < static_cast<int>(m_processes.size()) && m_processes[rankId]) {
+            const auto& st = m_processes[rankId]->state;
+            const QString fn = st.currentFunction.isEmpty() ? QStringLiteral("main") : st.currentFunction;
+            cp.location = (!st.currentFile.isEmpty() && st.currentLine > 0) ? QStringLiteral("%1 (%2:%3)").arg(fn, QFileInfo(st.currentFile).fileName()).arg(st.currentLine) : fn;
+          }
+          upsertCheckpoint(rankId, cp);
+          emit checkpointsReady(rankId, m_rankCheckpoints.value(rankId));
+          requestCheckpoints(rankId);
+        }
+      }
+      return true;
+    }
+    if (m_pendingInfoCheckpoints.value(rankId, false) && (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {
+      m_infoCheckpointsBuffer[rankId] += unquoteConsole(line);
+      return true;
+    }
+    if (line.startsWith(QLatin1String("213^done")) || line.startsWith(QLatin1String("213^error"))) {
+      m_pendingInfoCheckpoints[rankId] = false;
+      const QString buf = m_infoCheckpointsBuffer.take(rankId);
+      if (line.startsWith(QLatin1String("213^done"))) {
+        QMap<int, ProcessCheckpoint> prevById;
+        for (const auto& existing : m_rankCheckpoints.value(rankId)) prevById.insert(existing.id, existing);
+        static const QRegularExpression rowRe(QStringLiteral("^\\s*\\*?\\s*(\\d+)\\s+process\\s+(\\d+)\\s*(.*)$"), QRegularExpression::CaseInsensitiveOption);
+        QVector<ProcessCheckpoint> parsed;
+        for (const QString& rawLn : buf.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+          if (const auto m = rowRe.match(rawLn); m.hasMatch()) {
+            const int cid = m.captured(1).toInt();
+            const ProcessCheckpoint prev = prevById.value(cid);
+            ProcessCheckpoint cp;
+            cp.id = cid;
+            cp.rank = rankId;
+            cp.forkPid = m.captured(2).toLongLong();
+            cp.location = m.captured(3).trimmed();
+            if (cp.location.startsWith(QStringLiteral("at "), Qt::CaseInsensitive)) cp.location = cp.location.mid(3).trimmed();
+            cp.timestamp = prev.timestamp.isEmpty() ? QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss")) : prev.timestamp;
+            cp.note = prev.note;
+            parsed.append(cp);
+          }
+        }
+        if (!parsed.isEmpty()) m_rankCheckpoints[rankId] = parsed;
+        emit checkpointsReady(rankId, m_rankCheckpoints.value(rankId));
+      }
+      return true;
+    }
+    return false;
+  }
+
   std::unique_ptr<QProcess> m_mpirunProcess;             ///< Master `mpirun`/`mpiexec` launcher process.
   std::vector<std::unique_ptr<RankProcess>> m_processes; ///< Per-rank GDB frontend slots.
   std::vector<PendingBreakpoint> m_pendingBreakpoints;   ///< Configured breakpoints synced across launches.
@@ -530,6 +661,12 @@ class GdbRankCoordinator : public IBackendCoordinator {
   int m_nextCatchpointId = 1;                            ///< Monotonic logical ID generator for installed catchpoints.
   QStringList m_pendingRegexBreakpoints;                 ///< Registered `rbreak` patterns replayed on launch.
   QVector<BreakpointSpec> m_regexCreatedBreakpoints;     ///< Breakpoint records created via `rbreak` / `=breakpoint-created`.
+  QMap<int, QVector<ProcessCheckpoint>> m_rankCheckpoints; ///< Active copy-on-write checkpoints per MPI rank.
+  QMap<int, bool> m_pendingCheckpointCreate;             ///< True while `212` `checkpoint` is in flight per rank.
+  QMap<int, QString> m_checkpointCreateBuffer;           ///< Buffered `~` output for `212` `checkpoint`.
+  QMap<int, QString> m_pendingCheckpointNote;            ///< Pending user note for in-flight `checkpoint` creation.
+  QMap<int, bool> m_pendingInfoCheckpoints;              ///< True while `213` `info checkpoints` is in flight per rank.
+  QMap<int, QString> m_infoCheckpointsBuffer;            ///< Buffered `~` output for `213` `info checkpoints`.
 };
 
 }  // namespace gridlock

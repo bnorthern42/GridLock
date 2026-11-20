@@ -17,6 +17,7 @@
 #include <QtWidgets>
 #include <QtTest/QtTest>
 #include <cmath>
+#include <unistd.h>
 
 #include "../src/core/hpc/GdbRankCoordinator.hpp"
 #include "../src/core/hpc/IBackendCoordinator.hpp"
@@ -29,6 +30,7 @@
 #include "../src/ui/dialogs/ArrayPlotDialog.hpp"
 #include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
 #include "../src/ui/dialogs/AttachProcessDialog.hpp"
+#include "../src/ui/dialogs/CheckpointDialog.hpp"
 #include "../src/ui/dialogs/CommandPaletteDialog.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
 #include "../src/ui/dialogs/PointerGraphDialog.hpp"
@@ -152,85 +154,53 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
 
 /** @brief Verifies Seek in Memory View tab switching, base address update, and mnemonic F1 doc lookup. */
 void TestMainWindowUI::testSeekInMemoryViewAndMnemonicDocLookup() {
-    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
-    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); auto* memView = mainWindow.findChild<gridlock::ui::MemView*>();
-    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    QVERIFY(disasmView != nullptr && memView != nullptr && bottomTabs != nullptr && refManual != nullptr);
-    bottomTabs->setCurrentIndex(0); QApplication::processEvents(); QVERIFY(bottomTabs->currentWidget() != memView);
-    QVERIFY2(disasmView->triggerContextAction(0x00401149ULL, QStringLiteral("Seek in Memory View")), "Seek in Memory View must succeed"); QApplication::processEvents();
-    QCOMPARE(bottomTabs->currentWidget(), memView); QCOMPARE(memView->currentBaseAddress(), 0x00401149ULL);
-    auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit")); QVERIFY(dumpEdit != nullptr);
-    QVERIFY2(dumpEdit->toPlainText().contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive), qPrintable(dumpEdit->toPlainText()));
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
+    auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>(); auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY(disasmView && memView && bottomTabs && refManual); bottomTabs->setCurrentIndex(0); QApplication::processEvents(); QVERIFY(bottomTabs->currentWidget() != memView);
+    QVERIFY(disasmView->triggerContextAction(0x00401149ULL, QStringLiteral("Seek in Memory View"))); QApplication::processEvents(); QVERIFY(bottomTabs->currentWidget() == memView && memView->currentBaseAddress() == 0x00401149ULL);
+    auto* dumpEdit = memView->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit")); QVERIFY(dumpEdit && dumpEdit->toPlainText().contains(QStringLiteral("83 7d fc 02"), Qt::CaseInsensitive));
     mainWindow.seekToAddressOrExpression(QStringLiteral("0x00402010")); QApplication::processEvents(); QCOMPARE(memView->currentBaseAddress(), 0x00402010ULL);
-    QVERIFY2(disasmView->triggerContextAction(0x00401125ULL, QStringLiteral("Lookup in Reference Manual (F1)")), "Lookup (F1) must succeed"); QApplication::processEvents();
-    QCOMPARE(bottomTabs->currentWidget(), refManual);
-    auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser")); QVERIFY(docBrowser != nullptr);
-    const QString docContent = docBrowser->toHtml();
+    QVERIFY(disasmView->triggerContextAction(0x00401125ULL, QStringLiteral("Lookup in Reference Manual (F1)"))); QApplication::processEvents(); QCOMPARE(bottomTabs->currentWidget(), refManual);
+    auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser")); QVERIFY(docBrowser != nullptr); const QString docContent = docBrowser->toHtml();
     QVERIFY2(docContent.contains(QStringLiteral("MOV"), Qt::CaseInsensitive) && !docContent.contains(QStringLiteral("MPI_Init")) && !docContent.contains(QStringLiteral("MPI-3.1 Standard")), "Must display MOV instruction documentation");
 }
-
 /** @brief Verifies smart Meson/CMake/Make/SingleFileMPI build system detection and Terminal build/clean/rebuild workflow. */
 void TestMainWindowUI::testSmartBuildSystemDetectionAndTerminalBuildCleanWorkflow() {
-    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
     const auto writeText = [](const QString& path, const QByteArray& bytes) { QFile f(path); if (f.open(QIODevice::WriteOnly)) { f.write(bytes); f.close(); } };
-    { QTemporaryDir mesonDir; QVERIFY(mesonDir.isValid());
-      writeText(mesonDir.filePath(QStringLiteral("meson.build")), "project('demo', 'cpp')\n"); QDir(mesonDir.path()).mkpath(QStringLiteral("builddir"));
-      writeText(mesonDir.filePath(QStringLiteral("builddir/build.ninja")), "# ninja build file\n"); QCOMPARE(mainWindow.detectBuildSystem(mesonDir.path()), QStringLiteral("Meson"));
-      QVERIFY(mainWindow.buildCommandForPath(mesonDir.path()).contains(QStringLiteral("ninja -C")) && mainWindow.cleanCommandForPath(mesonDir.path()).contains(QStringLiteral("clean"))); }
-    { QTemporaryDir cmakeDir; QVERIFY(cmakeDir.isValid());
-      writeText(cmakeDir.filePath(QStringLiteral("CMakeLists.txt")), "cmake_minimum_required(VERSION 3.20)\nproject(demo)\n"); QCOMPARE(mainWindow.detectBuildSystem(cmakeDir.path()), QStringLiteral("CMake"));
-      QVERIFY(mainWindow.buildCommandForPath(cmakeDir.path()).contains(QStringLiteral("cmake --build")) && mainWindow.cleanCommandForPath(cmakeDir.path()).contains(QStringLiteral("clean"))); }
-    { QTemporaryDir makeDir; QVERIFY(makeDir.isValid());
-      writeText(makeDir.filePath(QStringLiteral("Makefile")), "all:\n\t@echo building\nclean:\n\t@echo cleaning\n"); QCOMPARE(mainWindow.detectBuildSystem(makeDir.path()), QStringLiteral("Make"));
-      QVERIFY(mainWindow.buildCommandForPath(makeDir.path()).contains(QStringLiteral("make")) && mainWindow.cleanCommandForPath(makeDir.path()).contains(QStringLiteral("make clean"))); }
+    { QTemporaryDir d; QVERIFY(d.isValid()); writeText(d.filePath(QStringLiteral("meson.build")), "project('demo', 'cpp')\n"); QDir(d.path()).mkpath(QStringLiteral("builddir")); writeText(d.filePath(QStringLiteral("builddir/build.ninja")), "# ninja\n"); QVERIFY(mainWindow.detectBuildSystem(d.path()) == QStringLiteral("Meson") && mainWindow.buildCommandForPath(d.path()).contains(QStringLiteral("ninja -C")) && mainWindow.cleanCommandForPath(d.path()).contains(QStringLiteral("clean"))); }
+    { QTemporaryDir d; QVERIFY(d.isValid()); writeText(d.filePath(QStringLiteral("CMakeLists.txt")), "cmake_minimum_required(VERSION 3.20)\nproject(demo)\n"); QVERIFY(mainWindow.detectBuildSystem(d.path()) == QStringLiteral("CMake") && mainWindow.buildCommandForPath(d.path()).contains(QStringLiteral("cmake --build")) && mainWindow.cleanCommandForPath(d.path()).contains(QStringLiteral("clean"))); }
+    { QTemporaryDir d; QVERIFY(d.isValid()); writeText(d.filePath(QStringLiteral("Makefile")), "all:\n\t@echo building\nclean:\n\t@echo cleaning\n"); QVERIFY(mainWindow.detectBuildSystem(d.path()) == QStringLiteral("Make") && mainWindow.buildCommandForPath(d.path()).contains(QStringLiteral("make")) && mainWindow.cleanCommandForPath(d.path()).contains(QStringLiteral("make clean"))); }
     QTemporaryDir singleFileDir; QVERIFY(singleFileDir.isValid()); const QString demoSourcePath = singleFileDir.filePath(QStringLiteral("demo.cpp"));
-    writeText(demoSourcePath, "#include <mpi.h>\nint main(int argc, char** argv) { return 0; }\n"); QCOMPARE(mainWindow.detectBuildSystem(demoSourcePath), QStringLiteral("SingleFileMPI"));
-    const QString singleBuildCmd = mainWindow.buildCommandForPath(demoSourcePath);
-    QVERIFY(singleBuildCmd.contains(QStringLiteral("-g")) && singleBuildCmd.contains(QStringLiteral("-o")) && mainWindow.cleanCommandForPath(demoSourcePath).contains(QStringLiteral("rm -f")));
+    writeText(demoSourcePath, "#include <mpi.h>\nint main(int argc, char** argv) { return 0; }\n");
+    QVERIFY(mainWindow.detectBuildSystem(demoSourcePath) == QStringLiteral("SingleFileMPI") && mainWindow.buildCommandForPath(demoSourcePath).contains(QStringLiteral("-g")) && mainWindow.buildCommandForPath(demoSourcePath).contains(QStringLiteral("-o")) && mainWindow.cleanCommandForPath(demoSourcePath).contains(QStringLiteral("rm -f")));
     auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>(); auto* statusLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
-    QVERIFY(bottomTabs != nullptr && terminalDock != nullptr && statusLabel != nullptr);
-    mainWindow.loadSourceFile(demoSourcePath);
+    QVERIFY(bottomTabs && terminalDock && statusLabel); mainWindow.loadSourceFile(demoSourcePath);
     for (int i = 0; i < bottomTabs->count(); ++i) if (bottomTabs->widget(i) != terminalDock) { bottomTabs->setCurrentIndex(i); break; }
-    QVERIFY(bottomTabs->currentWidget() != terminalDock);
-    QVERIFY(mainWindow.buildTargetWorkflow()); QApplication::processEvents(); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("-g")) && statusLabel->text().contains(QStringLiteral("BUILDING"), Qt::CaseInsensitive));
-    QVERIFY(mainWindow.cleanTargetWorkflow()); QApplication::processEvents(); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY((terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) || terminalDock->lastSentCommand().contains(QStringLiteral("clean"))) && statusLabel->text().contains(QStringLiteral("CLEANING"), Qt::CaseInsensitive));
-    QVERIFY(mainWindow.rebuildTargetWorkflow()); QApplication::processEvents(); QCOMPARE(bottomTabs->currentWidget(), terminalDock);
-    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("&&")));
+    QVERIFY(bottomTabs->currentWidget() != terminalDock && mainWindow.buildTargetWorkflow()); QApplication::processEvents();
+    QVERIFY(bottomTabs->currentWidget() == terminalDock && terminalDock->lastSentCommand().contains(QStringLiteral("-g")) && statusLabel->text().contains(QStringLiteral("BUILDING"), Qt::CaseInsensitive));
+    QVERIFY(mainWindow.cleanTargetWorkflow()); QApplication::processEvents(); QVERIFY(bottomTabs->currentWidget() == terminalDock && (terminalDock->lastSentCommand().contains(QStringLiteral("rm -f")) || terminalDock->lastSentCommand().contains(QStringLiteral("clean"))) && statusLabel->text().contains(QStringLiteral("CLEANING"), Qt::CaseInsensitive));
+    QVERIFY(mainWindow.rebuildTargetWorkflow()); QApplication::processEvents(); QVERIFY(bottomTabs->currentWidget() == terminalDock && terminalDock->lastSentCommand().contains(QStringLiteral("&&")));
 }
-
 /** @brief Verifies TerminalDockWidget eventFilter font/geometry lock during PreferencesDialog, Light Mode contrast, and ReferenceManualWidget docset auto-preview. */
 void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAutoDetect() {
-    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show();
-    QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
-    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>();
-    auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>(); auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
-    QVERIFY(bottomTabs != nullptr && terminalDock != nullptr && explorer != nullptr && refManual != nullptr);
-    bottomTabs->setCurrentWidget(terminalDock); QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture(); mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
+    auto* bottomTabs = mainWindow.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>(); auto* explorer = mainWindow.findChild<gridlock::ui::ProjectExplorerWidget*>(); auto* refManual = mainWindow.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY(bottomTabs && terminalDock && explorer && refManual); bottomTabs->setCurrentWidget(terminalDock); QApplication::processEvents();
     gridlock::ui::PreferencesDialog prefsDialog(&mainWindow); prefsDialog.show(); QApplication::processEvents();
     QFont proportionalFont(QStringLiteral("Cantarell"), 11); proportionalFont.setFixedPitch(false);
-    for (QWidget* child : terminalDock->findChildren<QWidget*>()) {
-        child->setFont(proportionalFont); QEvent fontEv(QEvent::FontChange); QApplication::sendEvent(child, &fontEv); QEvent styleEv(QEvent::StyleChange); QApplication::sendEvent(child, &styleEv);
-    }
+    for (QWidget* child : terminalDock->findChildren<QWidget*>()) { child->setFont(proportionalFont); QEvent fe(QEvent::FontChange); QApplication::sendEvent(child, &fe); QEvent se(QEvent::StyleChange); QApplication::sendEvent(child, &se); }
     QApplication::processEvents(); QVERIFY2(terminalDock->areAllChildWidgetsFixedPitch(), "TerminalDockWidget eventFilter must restore fixed-pitch font");
-    for (QWidget* child : terminalDock->findChildren<QWidget*>())
-        if (child->isVisible() && child->width() > 80) QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100, qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
-    prefsDialog.close();
-    gridlock::core::ThemeManager::instance().setDarkMode(false); explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}}); QApplication::processEvents();
-    auto* symTable = explorer->findChild<QTableWidget*>(); QVERIFY(symTable != nullptr && symTable->rowCount() > 0 && symTable->item(0, 0) != nullptr);
+    for (QWidget* child : terminalDock->findChildren<QWidget*>()) if (child->isVisible() && child->width() > 80) QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100, qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
+    prefsDialog.close(); gridlock::core::ThemeManager::instance().setDarkMode(false); explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}}); QApplication::processEvents();
+    auto* symTable = explorer->findChild<QTableWidget*>(); QVERIFY(symTable && symTable->rowCount() > 0 && symTable->item(0, 0));
     const auto luminance = [](const QColor& c) { return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000; };
-    const int contrastDiff = std::abs(luminance(symTable->item(0, 0)->foreground().color()) - luminance(symTable->palette().color(QPalette::Base)));
-    QVERIFY2(contrastDiff >= 80, qPrintable(QStringLiteral("Light mode symbol contrast too low (%1)").arg(contrastDiff)));
+    QVERIFY(std::abs(luminance(symTable->item(0, 0)->foreground().color()) - luminance(symTable->palette().color(QPalette::Base))) >= 80);
     gridlock::core::ThemeManager::instance().setDarkMode(true); QApplication::processEvents();
-    // Part 3: Selecting a Docset in ReferenceManualWidget Updates Right Pane.
     bottomTabs->setCurrentWidget(refManual); refManual->lookupSymbol(QStringLiteral("MPI_Init")); QApplication::processEvents();
     auto* docCombo = refManual->findChild<QComboBox*>(); auto* docBrowser = refManual->findChild<QTextBrowser*>(QStringLiteral("docsetTextBrowser"));
-    QVERIFY(docCombo != nullptr && docBrowser != nullptr && docBrowser->toHtml().contains(QStringLiteral("MPI_Init")));
-    int targetIdx = -1;
-    for (int i = 0; i < docCombo->count(); ++i) { const QString label = docCombo->itemText(i); if (!label.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !label.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) { targetIdx = i; break; } }
+    QVERIFY(docCombo && docBrowser && docBrowser->toHtml().contains(QStringLiteral("MPI_Init")));
+    int targetIdx = -1; for (int i = 0; i < docCombo->count(); ++i) { const QString l = docCombo->itemText(i); if (!l.contains(QStringLiteral("All"), Qt::CaseInsensitive) && !l.contains(QStringLiteral("MPI"), Qt::CaseInsensitive)) { targetIdx = i; break; } }
     if (targetIdx >= 0) { docCombo->setCurrentIndex(targetIdx); QApplication::processEvents(); QVERIFY2(!docBrowser->toHtml().contains(QStringLiteral("MPI_Init(&argc")), "Switching docset category must auto-preview first entry"); }
 }
 
@@ -238,79 +208,62 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
 void TestMainWindowUI::testTargetSelectorSwitchesSourceDisassemblyAndBuildCommands() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     auto* targetCombo = mainWindow.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* terminalDock = mainWindow.findChild<gridlock::ui::TerminalDockWidget*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(targetCombo != nullptr && terminalDock != nullptr && disasmView != nullptr);
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName('deadlock_ring') must succeed"); QApplication::processEvents();
-    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")) && mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")), qPrintable(mainWindow.activeTargetSourcePath()));
+    QVERIFY(targetCombo && terminalDock && disasmView && mainWindow.selectTargetByName(QStringLiteral("deadlock_ring"))); QApplication::processEvents();
+    QVERIFY(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("deadlock_ring.cpp")) && mainWindow.activeTargetBinaryPath().endsWith(QStringLiteral("deadlock_ring")));
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(editorTabs && editorTabs->currentSourceCodeView());
-    const QString editorText = editorTabs->currentSourceCodeView()->toPlainText(); QVERIFY2(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")), "Must display deadlock_ring.cpp");
-    const QString decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
-    QVERIFY2(decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv")), qPrintable(decompText.left(400)));
+    const QString editorText = editorTabs->currentSourceCodeView()->toPlainText(), decompText = disasmView->toPlainText() + QLatin1Char('\n') + disasmView->decompiledPseudocode();
+    QVERIFY(editorText.contains(QStringLiteral("MPI_Send")) && editorText.contains(QStringLiteral("MPI_Recv")) && (decompText.contains(QStringLiteral("MPI_Send")) || decompText.contains(QStringLiteral("MPI_Recv"))));
     mainWindow.cleanTargetWorkflow(); QApplication::processEvents();
-    QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("deadlock_ring")) && !terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo")), qPrintable(terminalDock->lastSentCommand()));
+    QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("deadlock_ring")) && !terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo")));
     mainWindow.buildTargetWorkflow(); QApplication::processEvents(); const QString buildCmd = terminalDock->lastSentCommand();
-    QVERIFY2(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) && buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")), qPrintable(buildCmd));
-    QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("inspection_demo")), "selectTargetByName('inspection_demo') must succeed"); QApplication::processEvents();
-    QVERIFY2(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")), qPrintable(mainWindow.activeTargetSourcePath()));
-    mainWindow.buildTargetWorkflow(); QApplication::processEvents(); QVERIFY2(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")), qPrintable(terminalDock->lastSentCommand()));
+    QVERIFY(buildCmd.contains(QStringLiteral("deadlock_ring.cpp")) && buildCmd.contains(QStringLiteral("-o")) && buildCmd.contains(QStringLiteral("deadlock_ring")) && !buildCmd.contains(QStringLiteral("inspection_demo.cpp")));
+    QVERIFY(mainWindow.selectTargetByName(QStringLiteral("inspection_demo"))); QApplication::processEvents();
+    QVERIFY(mainWindow.activeTargetSourcePath().endsWith(QStringLiteral("inspection_demo.cpp")));
+    mainWindow.buildTargetWorkflow(); QApplication::processEvents(); QVERIFY(terminalDock->lastSentCommand().contains(QStringLiteral("inspection_demo.cpp")));
 }
-
 /** @brief Verifies Edit menu actions, dynamic UI/Code font scaling across QSS and editors, and 6 curated themes with human-readable titles. */
 void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
-    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
-    mainWindow.selectTargetByName(QStringLiteral("inspection_demo")); QApplication::processEvents();
+    gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents(); mainWindow.selectTargetByName(QStringLiteral("inspection_demo")); QApplication::processEvents();
     auto* editorTabs = mainWindow.findChild<gridlock::ui::EditorTabManager*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(editorTabs != nullptr && disasmView != nullptr && editorTabs->currentSourceCodeView() != nullptr); auto* srcView = editorTabs->currentSourceCodeView();
-    srcView->setFocus(); QVERIFY2(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")) && mainWindow.triggerEditMenuAction(QStringLiteral("Copy")), "Select All and Copy must succeed");
-    QTextCursor tc = srcView->textCursor(); tc.movePosition(QTextCursor::Start); srcView->setTextCursor(tc);
-    const QString origFirstLine = srcView->document()->firstBlock().text();
-    QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")) && srcView->document()->firstBlock().text() != origFirstLine);
-    QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment"))); QCOMPARE(srcView->document()->firstBlock().text().trimmed(), origFirstLine.trimmed());
+    QVERIFY(editorTabs && disasmView && editorTabs->currentSourceCodeView()); auto* srcView = editorTabs->currentSourceCodeView();
+    srcView->setFocus(); QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Select All")) && mainWindow.triggerEditMenuAction(QStringLiteral("Copy")));
+    QTextCursor tc = srcView->textCursor(); tc.movePosition(QTextCursor::Start); srcView->setTextCursor(tc); const QString origFirstLine = srcView->document()->firstBlock().text();
+    QVERIFY(mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")) && srcView->document()->firstBlock().text() != origFirstLine && mainWindow.triggerEditMenuAction(QStringLiteral("Toggle Comment")) && srcView->document()->firstBlock().text().trimmed() == origFirstLine.trimmed());
     mainWindow.applyTypographySettings(QStringLiteral("Monospace"), 15, QStringLiteral("Monospace"), 16); QApplication::processEvents();
     const QString activeQss = gridlock::core::ThemeManager::instance().currentStyleSheet();
-    QVERIFY2(activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px")), qPrintable(activeQss.left(200)));
-    QCOMPARE(srcView->font().pointSize(), 16); QCOMPARE(disasmView->codeFontPointSize(), 16);
+    QVERIFY((activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px"))) && srcView->font().pointSize() == 16 && disasmView->codeFontPointSize() == 16);
     mainWindow.applyTypographySettings(QStringLiteral("Inter"), 11, QStringLiteral("JetBrains Mono"), 10); QApplication::processEvents();
     QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6); gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
-    auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo")); QVERIFY(themeCombo != nullptr && themeCombo->count() >= 6);
+    auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo")); QVERIFY(themeCombo && themeCombo->count() >= 6);
     for (int i = 0; i < themeCombo->count(); ++i) QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));
     struct ThemeShotEntry { QString themeId; QString fileName; };
     const std::vector<ThemeShotEntry> shots = {{QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}, {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")}, {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")}, {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")}, {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")}, {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")}};
-    QTemporaryDir tempThemeShotDir; QVERIFY(tempThemeShotDir.isValid()); const QString docsShotDir = tempThemeShotDir.path();
+    QTemporaryDir tempThemeShotDir; QVERIFY(tempThemeShotDir.isValid());
     for (const auto& shot : shots) {
         gridlock::core::ThemeManager::instance().setTheme(shot.themeId, !shot.themeId.contains(QStringLiteral("light")), false);
-        if (srcView) { srcView->reloadStyle(); } if (disasmView) { disasmView->reloadStyle(); } QApplication::processEvents();
-        const QString outPath = docsShotDir + QLatin1Char('/') + shot.fileName;
+        srcView->reloadStyle(); disasmView->reloadStyle(); QApplication::processEvents();
+        const QString outPath = tempThemeShotDir.path() + QLatin1Char('/') + shot.fileName;
         QVERIFY2(mainWindow.captureWorkspaceSnapshot(outPath) && QFileInfo::exists(outPath) && QFileInfo(outPath).size() > 1024, qPrintable(outPath));
     }
-    gridlock::core::ThemeManager::instance().setTheme(QStringLiteral("gridlock_slate"), true, false);
-    if (srcView) { srcView->reloadStyle(); } if (disasmView) { disasmView->reloadStyle(); } QApplication::processEvents();
+    gridlock::core::ThemeManager::instance().setTheme(QStringLiteral("gridlock_slate"), true, false); srcView->reloadStyle(); disasmView->reloadStyle(); QApplication::processEvents();
 }
-
 /** @brief Verifies two-lane vector gutter geometry, distinct breakpoint/conditional/PC marker states, and non-overlapping antialiased vector badge rendering in SourceCodeView. */
 void TestMainWindowUI::testModernVectorGutterIconsAndCombinedBreakpointPcState() {
     gridlock::ui::SourceCodeView srcView; QString sampleCode;
     for (int i = 1; i <= 90; ++i) sampleCode += QStringLiteral("    int mpi_rank_step_%1 = %1; // source line %1\n").arg(i);
     srcView.setSourceCode(sampleCode); srcView.resize(720, 560); srcView.show(); QApplication::processEvents();
-    QVERIFY(srcView.lineNumberAreaWidth() >= 48 && srcView.gutterIconLaneWidth() >= 18);
-    QCOMPARE(srcView.gutterMarkerStateForLine(1), QStringLiteral("None"));
-    srcView.toggleBreakpoint(15); srcView.setConditionalBreakpoint(16, QStringLiteral("rank == 0"));
-    srcView.highlightExecutionLine(15); QApplication::processEvents();
-    QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("BreakpointAndExecutionPc")); QCOMPARE(srcView.gutterMarkerStateForLine(16), QStringLiteral("ConditionalBreakpoint"));
+    QVERIFY(srcView.lineNumberAreaWidth() >= 48 && srcView.gutterIconLaneWidth() >= 18 && srcView.gutterMarkerStateForLine(1) == QStringLiteral("None"));
+    srcView.toggleBreakpoint(15); srcView.setConditionalBreakpoint(16, QStringLiteral("rank == 0")); srcView.highlightExecutionLine(15); QApplication::processEvents();
+    QVERIFY(srcView.gutterMarkerStateForLine(15) == QStringLiteral("BreakpointAndExecutionPc") && srcView.gutterMarkerStateForLine(16) == QStringLiteral("ConditionalBreakpoint"));
     srcView.highlightExecutionLine(13); QApplication::processEvents();
-    QCOMPARE(srcView.gutterMarkerStateForLine(13), QStringLiteral("ExecutionPc")); QCOMPARE(srcView.gutterMarkerStateForLine(15), QStringLiteral("Breakpoint"));
+    QVERIFY(srcView.gutterMarkerStateForLine(13) == QStringLiteral("ExecutionPc") && srcView.gutterMarkerStateForLine(15) == QStringLiteral("Breakpoint"));
     srcView.setRankBreakpoint(82, -1); srcView.setRankBreakpoint(85, 1); srcView.setRankBreakpoint(88, 2);
-    QCOMPARE(srcView.breakpointColorForLine(82), QColor(QStringLiteral("#ef4444")));
-    QVERIFY(srcView.breakpointHasWhiteOutlineForLine(82) && srcView.breakpointRankFilterForLine(82) == -1);
-    QCOMPARE(srcView.breakpointRankFilterForLine(85), 1); QCOMPARE(srcView.breakpointRankFilterForLine(88), 2);
+    QVERIFY(srcView.breakpointColorForLine(82) == QColor(QStringLiteral("#ef4444")) && srcView.breakpointHasWhiteOutlineForLine(82) && srcView.breakpointRankFilterForLine(82) == -1 && srcView.breakpointRankFilterForLine(85) == 1 && srcView.breakpointRankFilterForLine(88) == 2);
     QVERIFY(srcView.breakpointColorForLine(85) != srcView.breakpointColorForLine(82) && srcView.breakpointColorForLine(88) != srcView.breakpointColorForLine(82) && srcView.breakpointColorForLine(85) != srcView.breakpointColorForLine(88));
-    srcView.highlightExecutionLine(15); QApplication::processEvents();
-    const QImage img = srcView.grab().toImage(); QVERIFY(!img.isNull());
+    srcView.highlightExecutionLine(15); QApplication::processEvents(); const QImage img = srcView.grab().toImage(); QVERIFY(!img.isNull());
     const QColor gutterBg(0x16, 0x18, 0x1d); bool foundBadgePixelInIconLane = false;
     for (int y = 0; y < img.height() && !foundBadgePixelInIconLane; ++y)
-        for (int x = 3; x <= 16 && x < img.width(); ++x) {
-            const QColor px = img.pixelColor(x, y);
-            if (std::abs(px.red() - gutterBg.red()) > 35 || std::abs(px.green() - gutterBg.green()) > 35) { foundBadgePixelInIconLane = true; break; }
-        }
+        for (int x = 3; x <= 16 && x < img.width(); ++x) { const QColor px = img.pixelColor(x, y); if (std::abs(px.red() - gutterBg.red()) > 35 || std::abs(px.green() - gutterBg.green()) > 35) { foundBadgePixelInIconLane = true; break; } }
     QVERIFY2(foundBadgePixelInIconLane, "Expected vector badge pixels inside left icon lane (x = 3..16)");
 }
 
@@ -941,5 +894,52 @@ void TestMainWindowUI::testBreakpointLifecycleAndCommands() {
     auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(pal && pal->isVisible());
     pal->setFilterText(QStringLiteral("> rbreak")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("rbreak"), Qt::CaseInsensitive));
     QTest::keyClick(pal->inputEdit(), Qt::Key_Escape); mw.setCoordinator(nullptr);
+}
+/** @brief Verifies Copy-on-Write GDB checkpoints (checkpoint/restart/info/delete), /proc fd/maps safety checks, and CheckpointDialog integration. */
+void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
+    using gridlock::ui::CheckpointDialog; using gridlock::ui::SafetyLevel;
+    // 1. Verify /proc/[pid]/fd and /proc/[pid]/maps safety scanner across Safe, Warning (OpenMPI SHM/socket), and BlockedOrUnsafe (RDMA/GPU).
+    QTemporaryDir fakeProc; QVERIFY(fakeProc.isValid());
+    auto mkProc = [&](int pid, const QMap<QString, QString>& fds, const QByteArray& maps) {
+        const QString pDir = fakeProc.filePath(QString::number(pid)), fdDir = pDir + QStringLiteral("/fd");
+        QVERIFY(QDir().mkpath(fdDir));
+        for (auto it = fds.constBegin(); it != fds.constEnd(); ++it) QCOMPARE(::symlink(it.value().toUtf8().constData(), (fdDir + QLatin1Char('/') + it.key()).toUtf8().constData()), 0);
+        QFile mf(pDir + QStringLiteral("/maps")); QVERIFY(mf.open(QIODevice::WriteOnly)); mf.write(maps);
+    };
+    mkProc(1001, {{QStringLiteral("0"), QStringLiteral("/dev/pts/0")}, {QStringLiteral("1"), QStringLiteral("/dev/pts/0")}}, "555555554000-555555558000 r-xp 00000000 08:01 1 /usr/bin/solver\n7ffff7a00000-7ffff7b00000 rw-p 00000000 00:00 0 [heap]\n");
+    mkProc(1002, {{QStringLiteral("3"), QStringLiteral("socket:[12345]")}, {QStringLiteral("4"), QStringLiteral("pipe:[67890]")}}, "7ffff6000000-7ffff6400000 rw-s 00000000 00:18 2 /dev/shm/openmpi_vader_segment\n");
+    mkProc(1003, {{QStringLiteral("5"), QStringLiteral("/dev/infiniband/uverbs0")}}, "7ffff5000000-7ffff5100000 rw-s 00000000 00:06 3 /dev/infiniband/uverbs0\n");
+    const auto repSafe = gridlock::ui::inspectProcessCheckpointSafety(1001, fakeProc.path());
+    const auto repWarn = gridlock::ui::inspectProcessCheckpointSafety(1002, fakeProc.path());
+    const auto repUnsafe = gridlock::ui::inspectProcessCheckpointSafety(1003, fakeProc.path());
+    QVERIFY(repSafe.level == SafetyLevel::Safe && repSafe.warnings.isEmpty() && repSafe.blockers.isEmpty() && repSafe.badgeText == QStringLiteral("SAFE"));
+    QVERIFY(repWarn.level == SafetyLevel::Warning && repWarn.blockers.isEmpty() && repWarn.warnings.size() >= 3 && repWarn.badgeText.contains(QStringLiteral("WARNING")));
+    QVERIFY(repUnsafe.level == SafetyLevel::BlockedOrUnsafe && !repUnsafe.blockers.isEmpty() && repUnsafe.badgeText.contains(QStringLiteral("UNSAFE")));
+    // 2. Verify GdbRankCoordinator checkpoint, info checkpoints, restart, and delete checkpoint MI commands & parsing.
+    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"28\",args=[]}\n"));
+    QStringList sent; connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& c) { if (r == 0) sent.append(c.trimmed()); });
+    QSignalSpy cpSpy(&coord, &IBackendCoordinator::checkpointsReady);
+    coord.createCheckpoint(0, QStringLiteral("before halo"));
+    QVERIFY(sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\"")));
+    coord.processGdbOutput(0, QStringLiteral("~\"checkpoint 1: fork returned pid 4242.\\n\"\n212^done\n"));
+    QVERIFY(cpSpy.count() >= 1 && coord.checkpointsForRank(0).size() == 1 && coord.checkpointsForRank(0).first().id == 1 && coord.checkpointsForRank(0).first().forkPid == 4242 && coord.checkpointsForRank(0).first().note == QStringLiteral("before halo"));
+    QVERIFY(sent.contains(QStringLiteral("213-interpreter-exec console \"info checkpoints\"")));
+    coord.processGdbOutput(0, QStringLiteral("~\"  1 process 4242 at 0x401120, file solver.cpp, line 28\\n\"\n~\"  0 process 4200 (main process) at 0x401100\\n\"\n213^done\n"));
+    QVERIFY(coord.checkpointsForRank(0).size() == 2 && coord.checkpointsForRank(0).first().note == QStringLiteral("before halo") && coord.checkpointsForRank(0).first().location.contains(QStringLiteral("solver.cpp")));
+    coord.restoreCheckpoint(0, 1); coord.deleteCheckpoint(0, 1);
+    QVERIFY(sent.contains(QStringLiteral("-interpreter-exec console \"restart 1\"")) && sent.contains(QStringLiteral("-interpreter-exec console \"delete checkpoint 1\"")) && coord.checkpointsForRank(0).size() == 1);
+    // 3. Verify CheckpointDialog UI, Debug menu Ctrl+Alt+K shortcut, and Command Palette entry.
+    CheckpointDialog cpDlg(&coord); cpDlg.setProcRootForTesting(fakeProc.path()); cpDlg.show(); QApplication::processEvents();
+    QVERIFY(cpDlg.findChild<QPushButton*>(QStringLiteral("checkpointCloseBtn")) && cpDlg.findChild<QPushButton*>(QStringLiteral("createCheckpointBtn")) && cpDlg.checkpointTable() && cpDlg.checkpointTable()->rowCount() == 1);
+    sent.clear(); QVERIFY(cpDlg.createCheckpointNow(true) && sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\""))); cpDlg.close();
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
+    auto* cpAct = mw.findChild<QAction*>(QStringLiteral("actionProcessCheckpoints")); QVERIFY(cpAct && cpAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K));
+    QTest::keyClick(&mw, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
+    QVERIFY(mw.checkpointDialog() && mw.checkpointDialog()->isVisible()); mw.checkpointDialog()->close();
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
+    auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(pal && pal->isVisible());
+    pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints")));
+    QTest::keyClick(pal->inputEdit(), Qt::Key_Escape);
 }
 

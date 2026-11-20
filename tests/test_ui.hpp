@@ -186,5 +186,8 @@ private slots:
 
     /** @brief Verifies non-destructive breakpoint enable/disable hollow markers, tbreak, rbreak, and GDB breakpoint command lists. */
     void testBreakpointLifecycleAndCommands();
+
+    /** @brief Verifies Copy-on-Write GDB checkpoints (checkpoint/restart/info/delete), /proc fd/maps safety checks, and CheckpointDialog integration. */
+    void testCowCheckpointsAndProcSafety();
 };
 

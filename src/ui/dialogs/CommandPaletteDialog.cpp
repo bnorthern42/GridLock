@@ -680,6 +680,9 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Signals & Catchpoints..."),
                        QStringLiteral("Configure POSIX/HPC signal Stop/Print/Pass matrix and C++/syscall/dlopen catchpoints"),
                        QStringLiteral("Ctrl+Alt+S"), [mainWindow]() { mainWindow->openSignalsAndCatchpoints(); });
+    registerActionItem(QStringLiteral("Process Checkpoints..."),
+                       QStringLiteral("Create, inspect, and restore copy-on-write fork checkpoints with /proc IPC/RDMA safety checks"),
+                       QStringLiteral("Ctrl+Alt+K"), [mainWindow]() { mainWindow->openProcessCheckpoints(); });
 
     // 2. Collect Workspace & Tutorial Files (Category::File) with cached directory indexing.
     QString wsRoot = mainWindow->activeWorkspaceDirectory();

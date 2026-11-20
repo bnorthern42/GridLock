@@ -48,6 +48,7 @@
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
 #include "dialogs/ArrayPlotDialog.hpp"
+#include "dialogs/CheckpointDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
 #include "dialogs/SignalCatchpointDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
@@ -133,6 +134,7 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         addDbgAct(QStringLiteral("Force Early Return..."), QStringLiteral("actionForceEarlyReturn"), QKeySequence(), [this]() { forceEarlyReturnWorkflow(QString(), true); });
         addDbgAct(QStringLiteral("Break on Function Regex (rbreak)..."), QStringLiteral("actionRegexBreakpoint"), QKeySequence(), [this]() { insertRegexBreakpointWorkflow(QString(), true); });
         debugMenu->addSeparator();
+        addDbgAct(QStringLiteral("Process Checkpoints..."), QStringLiteral("actionProcessCheckpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K), [this]() { openProcessCheckpoints(); });
         addDbgAct(QStringLiteral("Signals & Catchpoints..."), QStringLiteral("actionSignalsAndCatchpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this]() { openSignalsAndCatchpoints(); });
     }
     // Bind DisassemblyView, SourceCodeView tabs, and CallStackDockWidget execution control signals once.
@@ -858,6 +860,12 @@ void MainWindow::openSignalsAndCatchpoints() {
     if (!m_signalCatchpointDialog) m_signalCatchpointDialog = new SignalCatchpointDialog(m_coordinator, this);
     m_signalCatchpointDialog->setCoordinator(m_coordinator); m_signalCatchpointDialog->reloadStyle();
     m_signalCatchpointDialog->show(); m_signalCatchpointDialog->raise(); m_signalCatchpointDialog->activateWindow();
+}
+/** @brief Opens or raises the Copy-on-Write Process Checkpoints manager dialog (Ctrl+Alt+K). */
+void MainWindow::openProcessCheckpoints() {
+    if (!m_checkpointDialog) m_checkpointDialog = new CheckpointDialog(m_coordinator, this);
+    m_checkpointDialog->setCoordinator(m_coordinator); m_checkpointDialog->setFocusedRank(activeSteppingRank()); m_checkpointDialog->reloadStyle();
+    m_checkpointDialog->show(); m_checkpointDialog->raise(); m_checkpointDialog->activateWindow();
 }
 /** @brief Steps over a single machine instruction (`nexti` / `-exec-next-instruction`) on the focused MPI rank. */
 bool MainWindow::nextInstructionWorkflow() {

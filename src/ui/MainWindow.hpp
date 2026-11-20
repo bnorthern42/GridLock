@@ -73,6 +73,7 @@ class SpackManager;
 class ExpressionEvaluatorWidget;
 class MpiDiagnosticsWidget;
 class ArrayPlotDialog;
+class CheckpointDialog;
 class CommandPaletteDialog;
 class PointerGraphDialog;
 class ProgrammerCalculatorDialog;
@@ -132,6 +133,7 @@ public:
     CallStackDockWidget* callStackDockWidget() const { return m_callStackDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
     ArrayPlotDialog* arrayPlotDialog() const { return m_arrayPlotDialog; }
+    CheckpointDialog* checkpointDialog() const { return m_checkpointDialog; }
     PointerGraphDialog* pointerGraphDialog() const { return m_pointerGraphDialog; }
     CommandPaletteDialog* commandPaletteDialog() const { return m_commandPaletteDialog; }
     ProgrammerCalculatorDialog* programmerCalculatorDialog() const { return m_programmerCalculatorDialog; }
@@ -794,6 +796,8 @@ public slots:
     void openProgrammerCalculatorWithText(const QString& text);
     /** @brief Opens or raises the Signal Disposition Matrix & Catchpoints manager dialog (Ctrl+Alt+S). */
     void openSignalsAndCatchpoints();
+    /** @brief Opens or raises the Copy-on-Write Process Checkpoints manager dialog (Ctrl+Alt+K). */
+    void openProcessCheckpoints();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -927,6 +931,7 @@ private:
     CommandPaletteDialog* m_commandPaletteDialog = nullptr;
     ProgrammerCalculatorDialog* m_programmerCalculatorDialog = nullptr;
     SignalCatchpointDialog* m_signalCatchpointDialog = nullptr;
+    CheckpointDialog* m_checkpointDialog = nullptr;
 };
 
 }  // namespace gridlock::ui

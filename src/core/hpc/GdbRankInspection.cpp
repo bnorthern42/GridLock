@@ -354,6 +354,7 @@ void GdbRankCoordinator::handleWatchpointStopRecord(int rankId, const QString& l
  * @return True if @p line was consumed by an inspection/REPL/watchpoint handler; false otherwise.
  */
 bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& line) {
+  if (handleCheckpointMiRecord(rankId, line)) return true;
   // Buffer `~"..."` / `&"..."` console output produced while a `211-interpreter-exec console "complete ..."` command is active.
   if (m_pendingCompletePrefix.contains(rankId) &&
       (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {

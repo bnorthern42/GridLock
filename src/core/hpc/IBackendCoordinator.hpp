@@ -76,6 +76,19 @@ struct CatchpointSpec {
   bool enabled = true;         ///< True when the catchpoint is active.
 };
 
+/**
+ * @struct ProcessCheckpoint
+ * @brief Snapshot descriptor for a GDB copy-on-write process checkpoint (`checkpoint` / `info checkpoints`).
+ */
+struct ProcessCheckpoint {
+  int id = 0;         ///< GDB checkpoint identifier (0 = main process, >= 1 = forked snapshot).
+  int rank = 0;       ///< Zero-based MPI rank index owning this checkpoint.
+  qint64 forkPid = 0; ///< OS PID of the copy-on-write forked snapshot process.
+  QString location;   ///< Function + `file:line` or address where the snapshot was taken.
+  QString timestamp;  ///< Creation timestamp string (`HH:mm:ss`).
+  QString note;       ///< Optional user-supplied checkpoint description.
+};
+
 Q_DECLARE_METATYPE(StackFrameEntry)
 Q_DECLARE_METATYPE(QVector<StackFrameEntry>)
 Q_DECLARE_METATYPE(ThreadEntry)
@@ -84,6 +97,8 @@ Q_DECLARE_METATYPE(SignalDisposition)
 Q_DECLARE_METATYPE(QVector<SignalDisposition>)
 Q_DECLARE_METATYPE(CatchpointSpec)
 Q_DECLARE_METATYPE(QVector<CatchpointSpec>)
+Q_DECLARE_METATYPE(ProcessCheckpoint)
+Q_DECLARE_METATYPE(QVector<ProcessCheckpoint>)
 
 /**
  * @class IBackendCoordinator
@@ -391,6 +406,18 @@ class IBackendCoordinator : public QObject {
   /** @brief Queries GDB/debugger tab completions for @p prefix via `complete <prefix>`. */
   virtual void requestConsoleCompletions(const QString& prefix) { Q_UNUSED(prefix); }
 
+  /** @brief Creates a copy-on-write process snapshot (`checkpoint`) on @p rank with optional @p note. */
+  virtual void createCheckpoint(int rank, const QString& note = QString()) { Q_UNUSED(rank); Q_UNUSED(note); }
+
+  /** @brief Restores a previously saved checkpoint (`restart <checkpointId>`) on @p rank. */
+  virtual void restoreCheckpoint(int rank, int checkpointId) { Q_UNUSED(rank); Q_UNUSED(checkpointId); }
+
+  /** @brief Deletes a saved checkpoint (`delete checkpoint <checkpointId>`) on @p rank. */
+  virtual void deleteCheckpoint(int rank, int checkpointId) { Q_UNUSED(rank); Q_UNUSED(checkpointId); }
+
+  /** @brief Requests the active checkpoint table (`info checkpoints`) for @p rank. */
+  virtual void requestCheckpoints(int rank) { Q_UNUSED(rank); }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -444,6 +471,9 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when a one-shot temporary (`tbreak`) breakpoint triggers and auto-deletes. */
   void temporaryBreakpointHit(int rank, const QString& file, int line);
+
+  /** @brief Emitted when the active copy-on-write process checkpoints list for @p rank updates. */
+  void checkpointsReady(int rank, const QVector<ProcessCheckpoint>& checkpoints);
 
  protected:
   QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".
