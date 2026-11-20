@@ -642,6 +642,20 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Debug: Step Instruction"),
                        QStringLiteral("Single-step one machine instruction on the focused MPI rank"),
                        QStringLiteral("Alt+S"), [mainWindow]() { mainWindow->stepInstructionWorkflow(); });
+    registerActionItem(QStringLiteral("Debug: Step Over Instruction (nexti)"),
+                       QStringLiteral("Step over one machine instruction (-exec-next-instruction) on the focused MPI rank"),
+                       QStringLiteral("Ctrl+Shift+F10"), [mainWindow]() { mainWindow->nextInstructionWorkflow(); });
+    registerActionItem(QStringLiteral("Debug: Run to Cursor"),
+                       QStringLiteral("Execute until the active source line or disassembly instruction (-exec-until)"),
+                       QStringLiteral("Ctrl+F10"), [mainWindow]() { mainWindow->runToCursorWorkflow(); });
+    registerActionItem(QStringLiteral("Debug: Set Next Statement / Jump..."),
+                       QStringLiteral("Relocate execution PC to a target source line with lexical scope safety check (-exec-jump)"),
+                       QString(), [mainWindow]() {
+                           if (auto* act = mainWindow->findChild<QAction*>(QStringLiteral("actionJumpToLine"))) act->trigger();
+                       });
+    registerActionItem(QStringLiteral("Debug: Force Early Return..."),
+                       QStringLiteral("Return immediately from the current stack frame with an optional expression (-exec-return)"),
+                       QString(), [mainWindow]() { mainWindow->forceEarlyReturnWorkflow(QString(), true); });
     registerActionItem(QStringLiteral("Debug: Pause Active Rank"),
                        QStringLiteral("Interrupt execution on the currently focused MPI rank"),
                        QStringLiteral("F6"), [mainWindow]() { mainWindow->pauseRankWorkflow(); });

@@ -12,6 +12,7 @@
 #include <QString>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
+#include <QTextBlock>
 #include <QTextCharFormat>
 #include <QTimer>
 #include <QPoint>
@@ -360,10 +361,22 @@ public:
     void lineNumberAreaMouseMoveEvent(QMouseEvent *event);
 
     /**
+     * @brief Completes a gutter PC arrow drag (emitting jumpToLineRequested) or plain click breakpoint toggle.
+     * @param event Mouse release event inside LineNumberArea.
+     */
+    inline void lineNumberAreaMouseReleaseEvent(QMouseEvent *event);
+
+    /** @brief Returns true while the user is actively dragging the gutter execution PC marker. */
+    bool isDraggingExecutionPc() const { return m_draggingExecutionPc; }
+
+    /** @brief Returns the 1-based line currently targeted by an in-progress gutter PC drag (`-1` if none). */
+    int dragTargetLine() const { return m_dragTargetLine; }
+
+    /**
      * @brief Clears gutter hover state when the mouse cursor exits LineNumberArea.
      * @param event Leave event from LineNumberArea.
      */
-    void lineNumberAreaLeaveEvent(QEvent *event);
+    inline void lineNumberAreaLeaveEvent(QEvent *event);
 
     /**
      * @brief Determines whether the standard editor context menu may open at the given widget coordinate.
@@ -556,6 +569,12 @@ signals:
     /** @brief Emitted when the user chooses "Open Selection in Programmer's Calculator" from the editor context menu. */
     void sendToCalculatorRequested(const QString& text);
 
+    /** @brief Emitted when the user selects "Run to Cursor (Ctrl+F10)" for a 1-based source line. */
+    void runToCursorRequested(const QString& filePath, int lineOneBased);
+
+    /** @brief Emitted when the user drags the gutter PC arrow or selects "Set Next Statement / Jump Here". */
+    void jumpToLineRequested(const QString& filePath, int lineOneBased);
+
 protected:
     void resizeEvent(QResizeEvent *e) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -576,6 +595,27 @@ private slots:
 
 private:
     void ensureCompletionPopup();
+
+    /** @brief Resolves the 1-based source line at gutter pixel coordinate @p y (`-1` if none). */
+    int gutterLineAtY(int y, int* outTop = nullptr, int* outBottom = nullptr) const {
+        QTextBlock block = firstVisibleBlock();
+        int blockNumber = block.blockNumber();
+        int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top());
+        int bottom = top + qRound(blockBoundingRect(block).height());
+        while (block.isValid()) {
+            if (block.isVisible() && y >= top && y <= bottom) {
+                if (outTop) *outTop = top;
+                if (outBottom) *outBottom = bottom;
+                return blockNumber + 1;
+            }
+            block = block.next();
+            top = bottom;
+            bottom = top + qRound(blockBoundingRect(block).height());
+            ++blockNumber;
+        }
+        return -1;
+    }
+
     LineNumberArea* m_lineNumberArea = nullptr;
     EditorSyntaxHighlighter* m_highlighter = nullptr;
     LspCompletionPopup* m_completionPopup = nullptr;
@@ -598,6 +638,10 @@ private:
     int m_executionLine = -1;
     int m_hoveredGutterLine = -1;
     int m_activeFocusRank = 0;
+    bool m_pcDragCandidate = false;
+    bool m_draggingExecutionPc = false;
+    int m_dragTargetLine = -1;
+    QPoint m_pcDragPressPos;
 };
 
 /**
@@ -627,12 +671,8 @@ protected:
     /** @brief Delegates left/right gutter clicks to SourceCodeView. */
     void mousePressEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMousePressEvent(event); }
 
-    /** @brief Consumes mouse button release inside the gutter so right-click release never triggers fallback menus. */
-    void mouseReleaseEvent(QMouseEvent *event) override {
-        if (event) {
-            event->accept();
-        }
-    }
+    /** @brief Delegates gutter mouse releases to SourceCodeView for PC arrow drag completion and clean click handling. */
+    void mouseReleaseEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMouseReleaseEvent(event); }
 
     /** @brief Delegates cursor hover tracking over the gutter to SourceCodeView. */
     void mouseMoveEvent(QMouseEvent *event) override { sourceCodeView->lineNumberAreaMouseMoveEvent(event); }
@@ -650,6 +690,27 @@ protected:
 private:
     SourceCodeView *sourceCodeView = nullptr;
 };
+
+inline void SourceCodeView::lineNumberAreaMouseReleaseEvent(QMouseEvent *event) {
+    if (event) event->accept();
+    if (!event || event->button() != Qt::LeftButton || (!m_pcDragCandidate && !m_draggingExecutionPc)) return;
+    const int releaseLine = gutterLineAtY(event->pos().y());
+    const int targetLine = (releaseLine > 0) ? releaseLine : m_dragTargetLine;
+    const bool wasDragging = m_draggingExecutionPc;
+    m_pcDragCandidate = false; m_draggingExecutionPc = false; m_dragTargetLine = -1;
+    if (m_lineNumberArea) { m_lineNumberArea->setCursor(Qt::ArrowCursor); m_lineNumberArea->update(); }
+    if (viewport()) viewport()->update();
+    if (wasDragging && targetLine > 0 && targetLine != m_executionLine) emit jumpToLineRequested(m_currentFilePath, targetLine);
+    else if (!wasDragging && m_executionLine > 0) toggleBreakpoint(m_executionLine);
+}
+
+inline void SourceCodeView::lineNumberAreaLeaveEvent(QEvent *event) {
+    Q_UNUSED(event);
+    if (!m_draggingExecutionPc) {
+        setHoveredGutterLine(-1);
+        if (m_lineNumberArea) m_lineNumberArea->setCursor(Qt::ArrowCursor);
+    }
+}
 
 }  // namespace gridlock::ui
 

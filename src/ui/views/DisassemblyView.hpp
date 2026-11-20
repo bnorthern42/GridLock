@@ -245,6 +245,8 @@ public:
     bool activeCfgBlockContainsInstructionMarker(uint64_t addr) const;
     /// Returns the active point size of the linear assembly and decompiler font.
     int codeFontPointSize() const;
+    /// Returns the 64-bit instruction address at the current linear cursor (falling back to currentAddress()).
+    uint64_t selectedInstructionAddress() const { return m_lineToAddr.value(textCursor().blockNumber(), m_currentAddress); }
 
 
 signals:
@@ -258,6 +260,14 @@ signals:
     void documentationRequested(const QString& symbol);
     /// Emitted when the user selects "Open Address in Programmer's Calculator" on an instruction row.
     void sendToCalculatorRequested(const QString& text);
+    /// Emitted when the user clicks "Step Instruction (stepi)" in the Disassembly toolbar.
+    void stepInstructionRequested();
+    /// Emitted when the user clicks "Next Instruction (nexti)" in the Disassembly toolbar.
+    void nextInstructionRequested();
+    /// Emitted when the user selects "Run to Instruction Address" from the disassembly context menu.
+    void runToAddressRequested(uint64_t address);
+    /// Emitted when the user selects "Jump / Set PC to Address" from the disassembly context menu.
+    void jumpToAddressRequested(uint64_t address);
 
 public slots:
     /// Loads and analyzes new assembly code listing.
@@ -307,6 +317,8 @@ private:
     QLabel* m_signatureLabel = nullptr;
     QLabel* m_functionBannerLabel = nullptr;
     QLabel* m_statsBadge = nullptr;
+    QPushButton* m_stepiBtn = nullptr;
+    QPushButton* m_nextiBtn = nullptr;
     QPushButton* m_modeToggleBtn = nullptr;
     QPushButton* m_decompilerToggleBtn = nullptr;
     QPushButton* m_splitToggleBtn = nullptr;

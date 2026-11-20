@@ -180,5 +180,8 @@ private slots:
 
     /** @brief Verifies GdbConsoleWidget persistent gdb_history, Up/Down draft preservation, Ctrl+R reverse search, and Tab completion popup. */
     void testGdbConsoleReadlineErgonomics();
+
+    /** @brief Verifies nexti, Ctrl+F10 Run to Cursor, draggable gutter PC jump, lexical scope hazard guard, Force Early Return, and shortcut uniqueness. */
+    void testNonLinearExecutionControl();
 };
 

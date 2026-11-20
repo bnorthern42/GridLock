@@ -21,9 +21,11 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
@@ -33,6 +35,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTabWidget>
+#include <QTableWidget>
 #include <QTextBlock>
 
 #include "../RankState.hpp"
@@ -63,48 +66,23 @@
 
 namespace gridlock::ui {
 
-/**
- * @brief Strips inline C-style block and single-line (`//`) comments from one source line.
- * @param rawLine Raw source line text.
- * @param inBlockComment Mutable state tracking multi-line block comments across lines.
- * @return Trimmed executable code remainder on the line.
- */
+/** @brief Strips inline C-style block and single-line (`//`) comments from one source line. */
 static QString stripLineComments(const QString& rawLine, bool* inBlockComment) {
     QString line = rawLine.trimmed();
-    // Resume consuming lines inside an unclosed multi-line /* ... */ block comment.
     if (inBlockComment && *inBlockComment) {
         const int endIdx = line.indexOf(QStringLiteral("*/"));
-        // Entire line remains inside block comment when closing delimiter is absent.
         if (endIdx == -1) return QString();
-        *inBlockComment = false;
-        line = line.mid(endIdx + 2).trimmed();
+        *inBlockComment = false; line = line.mid(endIdx + 2).trimmed();
     }
-    // Strip any inline /* ... */ segments occurring on the current line.
     while (line.contains(QStringLiteral("/*"))) {
-        const int startIdx = line.indexOf(QStringLiteral("/*"));
-        const int endIdx = line.indexOf(QStringLiteral("*/"), startIdx + 2);
-        if (endIdx != -1) {
-            // Excise closed inline block comment while preserving surrounding code tokens.
-            line = (line.left(startIdx) + line.mid(endIdx + 2)).trimmed();
-        } else {
-            // Opening delimiter extends onto subsequent lines; latch inBlockComment flag.
-            if (inBlockComment) *inBlockComment = true;
-            line = line.left(startIdx).trimmed();
-            break;
-        }
+        const int s = line.indexOf(QStringLiteral("/*")), e = line.indexOf(QStringLiteral("*/"), s + 2);
+        if (e != -1) line = (line.left(s) + line.mid(e + 2)).trimmed();
+        else { if (inBlockComment) *inBlockComment = true; line = line.left(s).trimmed(); break; }
     }
-    // Truncate trailing C++ single-line comment suffix if present.
-    const int singleCommentIdx = line.indexOf(QStringLiteral("//"));
-    return (singleCommentIdx != -1) ? line.left(singleCommentIdx).trimmed() : line;
+    const int sc = line.indexOf(QStringLiteral("//"));
+    return (sc != -1) ? line.left(sc).trimmed() : line;
 }
 
-/**
- * @brief Rebuilds the bidirectional source-line-to-instruction address map from DWARF or SourceCodeView.
- *
- * When a real compiled ELF64 binary with DWARF `.debug_line` annotations is active, copies the
- * genuine compiler-generated line-to-address and address-to-line tables directly. Otherwise,
- * scans `SourceCodeView` statements for the preview fixture.
- */
 struct MainWindowDebugMenuBootstrap : public QObject {
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (event && (event->type() == QEvent::Show || event->type() == QEvent::Polish)) {
@@ -126,49 +104,66 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         for (QAction* topAct : menuBar()->actions()) {
             if (QMenu* m = topAct->menu(); m && topAct->text().contains(QStringLiteral("Tools"), Qt::CaseInsensitive)) {
                 QAction* plotAct = m->addAction(QStringLiteral("Array & Field Plotter..."));
-                plotAct->setObjectName(QStringLiteral("actionArrayPlotter"));
-                plotAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
-                connect(plotAct, &QAction::triggered, this, [this]() { openArrayPlotter(); });
-                break;
+                plotAct->setObjectName(QStringLiteral("actionArrayPlotter")); plotAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
+                connect(plotAct, &QAction::triggered, this, [this]() { openArrayPlotter(); }); break;
             }
         }
     }
     if (!findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints")) && menuBar()) {
-        QMenu* debugMenu = nullptr;
-        QAction* toolsTopAct = nullptr;
+        QMenu* debugMenu = nullptr; QAction* toolsTopAct = nullptr;
         for (QAction* topAct : menuBar()->actions()) {
             if (topAct->text().contains(QStringLiteral("Debug"), Qt::CaseInsensitive)) debugMenu = topAct->menu();
             else if (topAct->text().contains(QStringLiteral("Tools"), Qt::CaseInsensitive)) toolsTopAct = topAct;
         }
-        if (!debugMenu) {
-            debugMenu = new QMenu(QStringLiteral("&Debug"), menuBar());
-            if (toolsTopAct) menuBar()->insertMenu(toolsTopAct, debugMenu);
-            else menuBar()->addMenu(debugMenu);
-        }
-        QAction* sigAct = debugMenu->addAction(QStringLiteral("Signals & Catchpoints..."));
-        sigAct->setObjectName(QStringLiteral("actionSignalsAndCatchpoints"));
-        sigAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
-        connect(sigAct, &QAction::triggered, this, &MainWindow::openSignalsAndCatchpoints);
+        if (!debugMenu) { debugMenu = new QMenu(QStringLiteral("&Debug"), menuBar()); if (toolsTopAct) menuBar()->insertMenu(toolsTopAct, debugMenu); else menuBar()->addMenu(debugMenu); }
+        auto addDbgAct = [&](const QString& text, const QString& obj, const QKeySequence& ks, auto slotFn) {
+            QAction* a = debugMenu->addAction(text); a->setObjectName(obj); if (!ks.isEmpty()) a->setShortcut(ks); connect(a, &QAction::triggered, this, slotFn);
+        };
+        addDbgAct(QStringLiteral("Step Over Instruction (nexti)"), QStringLiteral("actionNextInstruction"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F10), [this]() { nextInstructionWorkflow(); });
+        addDbgAct(QStringLiteral("Run to Cursor"), QStringLiteral("actionRunToCursor"), QKeySequence(Qt::CTRL | Qt::Key_F10), [this]() { runToCursorWorkflow(); });
+        addDbgAct(QStringLiteral("Set Next Statement / Jump..."), QStringLiteral("actionJumpToLine"), QKeySequence(), [this]() {
+            SourceCodeView* sv = sourceCodeView(); if (!sv) return;
+            int targetLine = sv->getCurrentLineNumber();
+            if (targetLine <= 0 || targetLine == sv->executionLine()) {
+                bool ok = false; targetLine = QInputDialog::getInt(this, tr("Set Next Statement / Jump"), tr("Target source line (1-based):"), qMax(1, targetLine), 1, qMax(1, sv->document()->blockCount()), 1, &ok);
+                if (!ok) return;
+            }
+            jumpToLocationWorkflow(sv->currentFile(), targetLine);
+        });
+        addDbgAct(QStringLiteral("Force Early Return..."), QStringLiteral("actionForceEarlyReturn"), QKeySequence(), [this]() { forceEarlyReturnWorkflow(QString(), true); });
+        debugMenu->addSeparator();
+        addDbgAct(QStringLiteral("Signals & Catchpoints..."), QStringLiteral("actionSignalsAndCatchpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this]() { openSignalsAndCatchpoints(); });
     }
-    m_dynamicLineToAddress.clear();
-    m_dynamicAddressToLine.clear();
-    // Prefer genuine DWARF .debug_line tables parsed from the compiled ELF64 target binary.
-    if (m_useRealBinaryTarget && !m_dwarfLineToAddress.isEmpty()) {
-        m_dynamicLineToAddress = m_dwarfLineToAddress;
-        m_dynamicAddressToLine = m_dwarfAddressToLine;
-        return;
+    // Bind DisassemblyView, SourceCodeView tabs, and CallStackDockWidget execution control signals once.
+    if (m_disassemblyView && !m_disassemblyView->property("gl_exec_wired").toBool()) {
+        m_disassemblyView->setProperty("gl_exec_wired", true);
+        connect(m_disassemblyView, &DisassemblyView::stepInstructionRequested, this, &MainWindow::stepInstructionWorkflow);
+        connect(m_disassemblyView, &DisassemblyView::nextInstructionRequested, this, &MainWindow::nextInstructionWorkflow);
+        connect(m_disassemblyView, &DisassemblyView::runToAddressRequested, this, &MainWindow::runToAddressWorkflow);
+        connect(m_disassemblyView, &DisassemblyView::jumpToAddressRequested, this, [this](uint64_t a) { jumpToAddressWorkflow(a); });
     }
-
-    SourceCodeView* srcView = sourceCodeView();
-    if (!srcView || srcView->toPlainText().isEmpty()) return;
+    auto bindSrcExec = [this](SourceCodeView* sv) {
+        if (!sv || sv->property("gl_exec_wired").toBool()) return;
+        sv->setProperty("gl_exec_wired", true);
+        connect(sv, &SourceCodeView::runToCursorRequested, this, [this](const QString& f, int ln) { runToCursorWorkflow(f, ln); });
+        connect(sv, &SourceCodeView::jumpToLineRequested, this, [this](const QString& f, int ln) { jumpToLocationWorkflow(f, ln); });
+    };
+    if (m_editorTabManager) {
+        for (SourceCodeView* sv : m_editorTabManager->openViews()) bindSrcExec(sv);
+        if (!m_editorTabManager->property("gl_exec_wired").toBool()) { m_editorTabManager->setProperty("gl_exec_wired", true); connect(m_editorTabManager, &QTabWidget::currentChanged, this, [this, bindSrcExec](int) { bindSrcExec(getSourceCodeView()); }); }
+    } else bindSrcExec(sourceCodeView());
+    if (m_callStackDockWidget) if (auto* tbl = m_callStackDockWidget->findChild<QTableWidget*>(QStringLiteral("callStackTable")); tbl && !tbl->property("gl_exec_wired").toBool()) {
+        tbl->setProperty("gl_exec_wired", true); tbl->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(tbl, &QWidget::customContextMenuRequested, this, [this, tbl](const QPoint& pos) { QMenu m(tbl); m.addAction(QStringLiteral("Force Early Return..."), this, [this]() { forceEarlyReturnWorkflow(QString(), true); }); m.exec(tbl->viewport()->mapToGlobal(pos)); });
+    }
+    m_dynamicLineToAddress.clear(); m_dynamicAddressToLine.clear();
+    if (m_useRealBinaryTarget && !m_dwarfLineToAddress.isEmpty()) { m_dynamicLineToAddress = m_dwarfLineToAddress; m_dynamicAddressToLine = m_dwarfAddressToLine; return; }
+    SourceCodeView* srcView = sourceCodeView(); if (!srcView || srcView->toPlainText().isEmpty()) return;
     const QStringList lines = srcView->toPlainText().split(QLatin1Char('\n'));
     bool inBlockComment = false;
-    int mainLine = -1, initLine = -1, structLine = -1, forLoopLine = -1;
-    int dataIdLine = -1, coordsLine = -1, printfLine = -1, finalizeLine = -1, returnLine = -1;
-    // Scan source lines sequentially (1-based) to anchor statement tokens for preview fixtures.
+    int mainLine = -1, initLine = -1, structLine = -1, forLoopLine = -1, dataIdLine = -1, coordsLine = -1, printfLine = -1, finalizeLine = -1, returnLine = -1;
     for (int i = 0; i < lines.size(); ++i) {
-        const int lineNum = i + 1;
-        const QString line = stripLineComments(lines[i], &inBlockComment);
+        const int lineNum = i + 1; const QString line = stripLineComments(lines[i], &inBlockComment);
         if (line.isEmpty()) continue;
         if (mainLine == -1 && (line.contains(QStringLiteral("int main")) || line.contains(QStringLiteral("main(")))) mainLine = lineNum;
         else if (mainLine != -1 && initLine == -1 && line.contains(QStringLiteral("MPI_Init"))) initLine = lineNum;
@@ -180,26 +175,9 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         else if (finalizeLine == -1 && line.contains(QStringLiteral("MPI_Finalize"))) finalizeLine = lineNum;
         else if (returnLine == -1 && line.contains(QStringLiteral("return 0"))) returnLine = lineNum;
     }
-    // Apply baseline fallback line numbers if specific patterns were not matched.
-    for (auto [var, def] : std::initializer_list<std::pair<int*, int>>{
-             {&mainLine, 12}, {&initLine, 13}, {&structLine, 15}, {&forLoopLine, 16}, {&dataIdLine, 17},
-             {&coordsLine, 19}, {&printfLine, 23}, {&finalizeLine, 24}, {&returnLine, 25}}) {
-      if (*var == -1) *var = def;
-    }
-    // Populate forward (line -> address) and reverse (address -> line) maps for preview sym.main.
-    m_dynamicLineToAddress = {
-        {mainLine, 0x00401120ULL},     {structLine, 0x00401128ULL}, {initLine, 0x0040113dULL},
-        {forLoopLine, 0x00401149ULL},  {dataIdLine, 0x0040114fULL}, {coordsLine, 0x00401157ULL},
-        {printfLine, 0x0040116eULL},   {finalizeLine, 0x00401178ULL}, {returnLine, 0x00401183ULL}};
-    m_dynamicAddressToLine = {
-        {0x00401120ULL, mainLine},     {0x00401124ULL, mainLine},     {0x00401125ULL, mainLine},
-        {0x00401128ULL, structLine},   {0x0040112fULL, structLine},   {0x00401136ULL, structLine},
-        {0x0040113dULL, initLine},     {0x00401142ULL, forLoopLine},  {0x00401149ULL, forLoopLine},
-        {0x0040114dULL, forLoopLine},  {0x0040114fULL, dataIdLine},   {0x00401152ULL, dataIdLine},
-        {0x00401155ULL, dataIdLine},   {0x00401157ULL, coordsLine},   {0x0040115fULL, coordsLine},
-        {0x00401163ULL, coordsLine},   {0x00401168ULL, coordsLine},   {0x0040116aULL, coordsLine},
-        {0x0040116eULL, printfLine},   {0x00401178ULL, finalizeLine}, {0x0040117dULL, finalizeLine},
-        {0x00401182ULL, returnLine},   {0x00401183ULL, returnLine}};
+    for (auto [var, def] : std::initializer_list<std::pair<int*, int>>{{&mainLine, 12}, {&initLine, 13}, {&structLine, 15}, {&forLoopLine, 16}, {&dataIdLine, 17}, {&coordsLine, 19}, {&printfLine, 23}, {&finalizeLine, 24}, {&returnLine, 25}}) if (*var == -1) *var = def;
+    m_dynamicLineToAddress = {{mainLine, 0x00401120ULL}, {structLine, 0x00401128ULL}, {initLine, 0x0040113dULL}, {forLoopLine, 0x00401149ULL}, {dataIdLine, 0x0040114fULL}, {coordsLine, 0x00401157ULL}, {printfLine, 0x0040116eULL}, {finalizeLine, 0x00401178ULL}, {returnLine, 0x00401183ULL}};
+    m_dynamicAddressToLine = {{0x00401120ULL, mainLine}, {0x00401124ULL, mainLine}, {0x00401125ULL, mainLine}, {0x00401128ULL, structLine}, {0x0040112fULL, structLine}, {0x00401136ULL, structLine}, {0x0040113dULL, initLine}, {0x00401142ULL, forLoopLine}, {0x00401149ULL, forLoopLine}, {0x0040114dULL, forLoopLine}, {0x0040114fULL, dataIdLine}, {0x00401152ULL, dataIdLine}, {0x00401155ULL, dataIdLine}, {0x00401157ULL, coordsLine}, {0x0040115fULL, coordsLine}, {0x00401163ULL, coordsLine}, {0x00401168ULL, coordsLine}, {0x0040116aULL, coordsLine}, {0x0040116eULL, printfLine}, {0x00401178ULL, finalizeLine}, {0x0040117dULL, finalizeLine}, {0x00401182ULL, returnLine}, {0x00401183ULL, returnLine}};
 }
 
 /** @brief Scans active SourceCodeView text and returns 1-based line of first matching statement. */
@@ -855,76 +833,115 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     recordRecentWorkspace(resolvedDir); syncDisassemblyDecompilerVisibility(true); return true;
 }
 
-/**
- * @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for a directory or source file.
- * @param targetPath Project directory path or source file path.
- * @return Detected build system identifier string.
- */
+/** @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for @p targetPath. */
 QString MainWindow::detectBuildSystem(const QString& targetPath) const {
-    const QString fallbackRoot = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString resolvedPath = targetPath.trimmed().isEmpty() ? fallbackRoot : resolveWorkspacePath(targetPath);
-    const QFileInfo info(resolvedPath);
-    QList<QDir> searchDirs = {QDir(info.isDir() ? info.absoluteFilePath() : info.absolutePath())};
-    if (!m_activeWorkspaceDir.isEmpty() && resolvedPath.startsWith(m_activeWorkspaceDir)) searchDirs.append(QDir(m_activeWorkspaceDir));
-    // Priority order: Meson -> CMake -> Make -> SingleFileMPI across target directory and active workspace root.
-    for (const QDir& dir : searchDirs) {
-        if (dir.exists(QStringLiteral("meson.build"))) return QStringLiteral("Meson");
-        if (dir.exists(QStringLiteral("CMakeLists.txt"))) return QStringLiteral("CMake");
-        if (dir.exists(QStringLiteral("Makefile")) || dir.exists(QStringLiteral("GNUmakefile"))) return QStringLiteral("Make");
+    const QString root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
+    const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
+    const QFileInfo info(resolved);
+    QList<QDir> dirs = {QDir(info.isDir() ? info.absoluteFilePath() : info.absolutePath())};
+    if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir)) dirs.append(QDir(m_activeWorkspaceDir));
+    for (const QDir& d : dirs) {
+        if (d.exists(QStringLiteral("meson.build"))) return QStringLiteral("Meson");
+        if (d.exists(QStringLiteral("CMakeLists.txt"))) return QStringLiteral("CMake");
+        if (d.exists(QStringLiteral("Makefile")) || d.exists(QStringLiteral("GNUmakefile"))) return QStringLiteral("Make");
     }
     return QStringLiteral("SingleFileMPI");
 }
-
 /** @brief Constructs the shell build command for a given project directory or standalone source file. */
 QString MainWindow::buildCommandForPath(const QString& targetPath) const {
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString fallbackRoot = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString resolvedPath = targetPath.trimmed().isEmpty() ? fallbackRoot : resolveWorkspacePath(targetPath);
-    const QFileInfo info(resolvedPath);
-    QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    if (!m_activeWorkspaceDir.isEmpty() && resolvedPath.startsWith(m_activeWorkspaceDir) &&
-        !QDir(dirPath).exists(QStringLiteral("meson.build")) && !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) &&
-        !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
+    const QString buildSys = detectBuildSystem(targetPath), root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
+    const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
+    const QFileInfo info(resolved); QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir) && !QDir(dirPath).exists(QStringLiteral("meson.build")) && !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) && !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
     const QDir dir(dirPath);
-    // 1. Meson + Ninja build command supporting build_meson, builddir, and build directories.
     if (buildSys == QStringLiteral("Meson")) {
-        for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")})
-            if (dir.exists(b + QStringLiteral("/build.ninja"))) return QStringLiteral("ninja -C \"%1/%2\"").arg(dirPath, b);
+        for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")}) if (dir.exists(b + QStringLiteral("/build.ninja"))) return QStringLiteral("ninja -C \"%1/%2\"").arg(dirPath, b);
         return QStringLiteral("meson setup \"%1/builddir\" \"%1\" && ninja -C \"%1/builddir\"").arg(dirPath);
     }
-    // 2. CMake debug configure and parallel build command supporting build_cmake and build directories.
-    if (buildSys == QStringLiteral("CMake")) {
-        const QString bDir = dir.exists(QStringLiteral("build_cmake")) ? QStringLiteral("build_cmake") : QStringLiteral("build");
-        return QStringLiteral("cmake -S \"%1\" -B \"%1/%2\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/%2\" -j").arg(dirPath, bDir);
-    }
-    // 3. GNU Make parallel build command.
+    if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake -S \"%1\" -B \"%1/%2\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/%2\" -j").arg(dirPath, dir.exists(QStringLiteral("build_cmake")) ? QStringLiteral("build_cmake") : QStringLiteral("build"));
     if (buildSys == QStringLiteral("Make")) return QStringLiteral("make -C \"%1\" -j").arg(dirPath);
-    // 4. Standalone SingleFileMPI compilation using mpicxx/mpicc or g++/gcc fallback.
-    const QString srcFile = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
-    const QFileInfo srcInfo(srcFile);
-    const QString outBin = srcInfo.dir().filePath(srcInfo.completeBaseName());
-    const bool isCFile = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
-    const QString compiler = isCFile ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc"))
-                                     : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
-    return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(compiler, srcFile, outBin);
+    const QFileInfo srcInfo(!info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath());
+    const bool isC = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
+    const QString cc = isC ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc")) : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
+    return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(cc, srcInfo.absoluteFilePath(), srcInfo.dir().filePath(srcInfo.completeBaseName()));
 }
-
 /** @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath. */
 void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHint) {
     if (!m_arrayPlotDialog) m_arrayPlotDialog = new ArrayPlotDialog(m_coordinator, this);
-    m_arrayPlotDialog->setCoordinator(m_coordinator);
-    m_arrayPlotDialog->setFocusedRank(activeSteppingRank());
+    m_arrayPlotDialog->setCoordinator(m_coordinator); m_arrayPlotDialog->setFocusedRank(activeSteppingRank());
     if (!typeHint.trimmed().isEmpty()) m_arrayPlotDialog->setElementTypeFromString(typeHint);
     if (!exprPath.trimmed().isEmpty()) { m_arrayPlotDialog->setExpression(exprPath.trimmed()); m_arrayPlotDialog->refreshPlot(); }
     m_arrayPlotDialog->show(); m_arrayPlotDialog->raise(); m_arrayPlotDialog->activateWindow();
 }
-
 /** @brief Opens or raises the Signal Disposition Matrix & Catchpoints manager dialog (Ctrl+Alt+S). */
 void MainWindow::openSignalsAndCatchpoints() {
     if (!m_signalCatchpointDialog) m_signalCatchpointDialog = new SignalCatchpointDialog(m_coordinator, this);
-    m_signalCatchpointDialog->setCoordinator(m_coordinator);
-    m_signalCatchpointDialog->reloadStyle();
+    m_signalCatchpointDialog->setCoordinator(m_coordinator); m_signalCatchpointDialog->reloadStyle();
     m_signalCatchpointDialog->show(); m_signalCatchpointDialog->raise(); m_signalCatchpointDialog->activateWindow();
+}
+/** @brief Steps over a single machine instruction (`nexti` / `-exec-next-instruction`) on the focused MPI rank. */
+bool MainWindow::nextInstructionWorkflow() {
+    if (m_previewFixtureOnly) return stepInstructionWorkflow();
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING (NEXTI)"));
+    m_coordinator->nextInstruction(m_focusedRank); return true;
+}
+/** @brief Runs execution until `filePath:lineOneBased` (or active editor/disassembly cursor) is reached (`Ctrl+F10`). */
+bool MainWindow::runToCursorWorkflow(const QString& filePath, int lineOneBased) {
+    if (filePath.trimmed().isEmpty() && lineOneBased <= 0 && m_disassemblyView)
+        if (QWidget* fw = QApplication::focusWidget(); fw && (fw == m_disassemblyView || m_disassemblyView->isAncestorOf(fw)))
+            if (const uint64_t addr = m_disassemblyView->selectedInstructionAddress(); addr != 0ULL) return runToAddressWorkflow(addr);
+    SourceCodeView* sv = sourceCodeView();
+    const QString targetFile = !filePath.trimmed().isEmpty() ? filePath.trimmed() : (sv && !sv->currentFile().isEmpty() ? sv->currentFile() : activeTargetSourcePath());
+    const int targetLine = (lineOneBased > 0) ? lineOneBased : (sv ? sv->getCurrentLineNumber() : -1);
+    if (targetFile.isEmpty() || targetLine <= 0) return false;
+    if (m_previewFixtureOnly) { if (sv) sv->highlightExecutionLine(targetLine); return true; }
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("RUNNING TO CURSOR"));
+    m_coordinator->runToCursor(targetFile, targetLine, m_focusedRank); return true;
+}
+/** @brief Runs execution until instruction address `*0x<hex>` is reached (`-exec-until *0x...`). */
+bool MainWindow::runToAddressWorkflow(uint64_t address) {
+    if (address == 0ULL) return false;
+    if (m_previewFixtureOnly) { if (m_disassemblyView) m_disassemblyView->seekToAddress(address); return true; }
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(QStringLiteral("0x%1").arg(address, 0, 16), QStringLiteral("RUNNING TO ADDR"));
+    m_coordinator->runToAddress(address, m_focusedRank); return true;
+}
+/** @brief Relocates execution PC to `filePath:lineOneBased` (`-exec-jump`) with lexical scope safety confirmation. */
+bool MainWindow::jumpToLocationWorkflow(const QString& filePath, int lineOneBased, bool skipPrompt) {
+    SourceCodeView* sv = sourceCodeView();
+    const QString targetFile = !filePath.trimmed().isEmpty() ? filePath.trimmed() : (sv && !sv->currentFile().isEmpty() ? sv->currentFile() : activeTargetSourcePath());
+    if (targetFile.isEmpty() || lineOneBased <= 0) return false;
+    const int activeRank = activeSteppingRank(); const auto stIt = m_latestStates.find(activeRank);
+    const QString curFunc = (stIt != m_latestStates.end()) ? stIt->second.currentFunction : QString();
+    int curLine = sv ? sv->executionLine() : -1; if (curLine <= 0 && stIt != m_latestStates.end()) curLine = stIt->second.currentLine;
+    QString srcText = sv ? sv->toPlainText() : QString();
+    if (srcText.isEmpty() && QFileInfo::exists(targetFile)) { QFile f(targetFile); if (f.open(QIODevice::ReadOnly | QIODevice::Text)) srcText = QString::fromUtf8(f.readAll()); }
+    if (!skipPrompt) {
+        if (const QString hazard = checkJumpLexicalScopeHazard(srcText, curLine, lineOneBased, curFunc); !hazard.isEmpty() &&
+            QMessageBox::warning(this, tr("Set Next Statement / Jump Hazard"), hazard + tr("\n\nProceed with jump anyway?"), QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return false;
+    }
+    if (m_previewFixtureOnly) { if (sv) sv->highlightExecutionLine(lineOneBased); return true; }
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeRank; m_coordinator->jumpToLocation(targetFile, lineOneBased, activeRank); return true;
+}
+/** @brief Relocates execution PC to machine instruction @p address (`-exec-jump *0x...`) with safety confirmation. */
+bool MainWindow::jumpToAddressWorkflow(uint64_t address, bool skipPrompt) {
+    if (address == 0ULL) return false;
+    if (!skipPrompt) if (const int ml = addressToSourceLine(address); ml > 0) if (SourceCodeView* sv = sourceCodeView())
+        if (const QString h = checkJumpLexicalScopeHazard(sv->toPlainText(), sv->executionLine(), ml); !h.isEmpty() &&
+            QMessageBox::warning(this, tr("Jump to Instruction Hazard"), h + tr("\n\nJump to 0x%1 anyway?").arg(address, 0, 16), QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return false;
+    if (m_previewFixtureOnly) { if (m_disassemblyView) m_disassemblyView->seekToAddress(address); return true; }
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeSteppingRank(); m_coordinator->jumpToAddress(address, m_focusedRank); return true;
+}
+/** @brief Forces an immediate return from the current frame (`-exec-return [expr]`) on the focused MPI rank. */
+bool MainWindow::forceEarlyReturnWorkflow(const QString& explicitExpr, bool promptIfEmpty) {
+    QString expr = explicitExpr.trimmed();
+    if (promptIfEmpty) { bool ok = false; expr = QInputDialog::getText(this, tr("Force Early Return"), tr("Return expression (leave empty for void functions):"), QLineEdit::Normal, expr, &ok).trimmed(); if (!ok) return false; }
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeSteppingRank(); m_coordinator->forceEarlyReturn(expr, m_focusedRank); return true;
 }
 
 }  // namespace gridlock::ui

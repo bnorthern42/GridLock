@@ -10,6 +10,8 @@
 
 #include <sys/types.h>
 
+#include <cstdint>
+
 #include <QByteArray>
 #include <QJsonArray>
 #include <QMetaType>
@@ -113,6 +115,34 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Steps a single machine instruction on @p threadId (`rankId + 1`). */
   virtual void stepInstruction(int threadId) = 0;
+
+  /** @brief Steps over a single machine instruction (`-exec-next-instruction`) on @p rank (`< 0` = all stopped ranks). */
+  virtual void nextInstruction(int rank = -1) { Q_UNUSED(rank); }
+
+  /** @brief Executes until source location `filePath:line` is reached (`-exec-until`) on @p rank. */
+  virtual void runToCursor(const QString& filePath, int line, int rank = -1) {
+    Q_UNUSED(filePath); Q_UNUSED(line); Q_UNUSED(rank);
+  }
+
+  /** @brief Executes until machine instruction @p address is reached (`-exec-until *0x...`) on @p rank. */
+  virtual void runToAddress(uint64_t address, int rank = -1) {
+    Q_UNUSED(address); Q_UNUSED(rank);
+  }
+
+  /** @brief Relocates the program counter to `filePath:line` (`-exec-jump`) on @p rank. */
+  virtual void jumpToLocation(const QString& filePath, int line, int rank = -1) {
+    Q_UNUSED(filePath); Q_UNUSED(line); Q_UNUSED(rank);
+  }
+
+  /** @brief Relocates the program counter to machine @p address (`-exec-jump *0x...`) on @p rank. */
+  virtual void jumpToAddress(uint64_t address, int rank = -1) {
+    Q_UNUSED(address); Q_UNUSED(rank);
+  }
+
+  /** @brief Forces an immediate return from the active stack frame (`-exec-return [expr]`) on @p rank. */
+  virtual void forceEarlyReturn(const QString& returnExpr = QString(), int rank = -1) {
+    Q_UNUSED(returnExpr); Q_UNUSED(rank);
+  }
 
   /** @brief Resumes execution of @p threadId until the next breakpoint or signal. */
   virtual void continueExecution(int threadId) = 0;

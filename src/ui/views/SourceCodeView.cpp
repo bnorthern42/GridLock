@@ -442,13 +442,15 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             // Reset painter brush/pen explicitly at the top of each row iteration.
             painter.setBrush(Qt::NoBrush); painter.setPen(Qt::NoPen);
 
-            // Illuminate hovered gutter row background with subtle accent wash rgba(82, 139, 255, 0.14).
-            if (isHovered) painter.fillRect(QRect(0, top, gutterW - 1, rowH), QColor(82, 139, 255, 36));
+            // Illuminate hovered gutter row or active PC drag drop-target row.
+            const bool isDragTarget = m_draggingExecutionPc && (lineOneBased == m_dragTargetLine);
+            if (isDragTarget) { painter.fillRect(QRect(0, top, gutterW - 1, rowH), QColor(245, 158, 11, 56)); painter.setPen(QPen(QColor(245, 158, 11, 220), 1.5, Qt::DashLine)); painter.drawLine(0, top, gutterW - 1, top); painter.setPen(Qt::NoPen); }
+            else if (isHovered) painter.fillRect(QRect(0, top, gutterW - 1, rowH), QColor(82, 139, 255, 36));
 
             // 1. Left Icon Lane (x = 0..20): Antialiased vector badges for HoverPreview, All-Ranks, Per-Rank, & ExecutionPc.
-            const int bpRank = breakpointRankFilterForLine(lineOneBased);
-            const QColor bpColor = colorForRankBreakpoint(bpRank);
-            if (state == QStringLiteral("HoverPreview")) {
+            const int bpRank = breakpointRankFilterForLine(lineOneBased); const QColor bpColor = colorForRankBreakpoint(bpRank);
+            if (isDragTarget) { QPainterPath chev; chev.moveTo(cx - 3.6, cy - 4.5); chev.lineTo(cx + 4.6, cy); chev.lineTo(cx - 3.6, cy + 4.5); chev.lineTo(cx - 1.7, cy); chev.closeSubpath(); painter.setPen(QPen(QColor("#fbbf24"), 1.1)); painter.setBrush(QColor(245, 158, 11, 185)); painter.drawPath(chev); }
+            else if (state == QStringLiteral("HoverPreview")) {
                 painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0)); painter.setBrush(QColor(239, 68, 68, 102));
                 painter.drawEllipse(QPointF(cx, cy), 4.8, 4.8);
             } else if (state == QStringLiteral("Breakpoint") || state == QStringLiteral("ConditionalBreakpoint")) {
@@ -536,6 +538,9 @@ void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
         });
     }
     menu->addSeparator();
+    menu->addAction(QStringLiteral("Run to Cursor (Ctrl+F10)"), this, [this, clickedLine]() { emit runToCursorRequested(m_currentFilePath, clickedLine); });
+    menu->addAction(QStringLiteral("Set Next Statement / Jump Here"), this, [this, clickedLine]() { emit jumpToLineRequested(m_currentFilePath, clickedLine); });
+    menu->addSeparator();
     menu->addAction(QStringLiteral("Set Breakpoint (All Ranks)"), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint for Active Rank (Rank %1)").arg(m_activeFocusRank), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, m_activeFocusRank); });
     menu->addAction(QStringLiteral("Set Breakpoint for Rank..."), this, [this, clickedLine]() {
@@ -565,53 +570,49 @@ void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPre
     else if (cleanScope.startsWith(QStringLiteral("Rank "), Qt::CaseInsensitive)) { bool ok = false; const int parsed = cleanScope.mid(5).trimmed().toInt(&ok); resolvedRank = ok ? qMax(0, parsed) : qMax(0, m_activeFocusRank); }
     setRankBreakpoint(lineOneBased, resolvedRank, condition.trimmed());
 }
-/** @brief Handles gutter mouse clicks: left-click toggles breakpoint, right-click opens anchored popover. */
+/** @brief Handles gutter mouse clicks: arms PC arrow drag on execution line, toggles breakpoint, or opens popover. */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     if (!event || (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)) return;
-    event->accept(); const int y = event->pos().y(); QTextBlock block = firstVisibleBlock();
-    // Walk visible document blocks to locate the 1-based line under the gutter click Y coordinate.
-    int blockNumber = block.blockNumber(), top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top()), bottom = top + qRound(blockBoundingRect(block).height());
-    while (block.isValid()) {
-        if (y >= top && y <= bottom) {
-            const int lineNum = blockNumber + 1;
-            if (event->button() == Qt::RightButton) {
-                // Right-click ensures a tentative breakpoint exists and opens the anchored popover.
-                const bool wasPreviouslySet = hasBreakpoint(lineNum); if (!wasPreviouslySet) toggleBreakpoint(lineNum);
-                const QPoint iconGlobalPos = m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, top + (qMax(14, bottom - top) / 2) + 5));
-                const BreakpointVisualInfo curMeta = breakpointInfoForLine(lineNum);
-                // Populate condition, suspend scope, ignoreCount, and Logpoint message into the popover.
-                ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
-                dlg.setTargetLineContext(lineNum, block.text().trimmed()); dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
-                dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
-                dlg.setIgnoreCount(curMeta.ignoreCount); dlg.setLogMessage(curMeta.logMessage); dlg.positionNearAnchor(iconGlobalPos);
-                // Apply accepted popover settings or roll back tentative breakpoint if dismissed.
-                const bool accepted = (dlg.exec() == QDialog::Accepted);
-                handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted, dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(), dlg.getCondition(), dlg.suspendScope());
-                // Commit extended Logpoint and pass-count options when the breakpoint remains active.
-                if (accepted && dlg.isBreakpointEnabled() && !dlg.isRemoveRequested()) setBreakpointOptions(lineNum, dlg.getCondition(), dlg.ignoreCount(), dlg.logMessage());
-            } else {
-                // Left-click toggles the line breakpoint directly.
-                toggleBreakpoint(lineNum);
-            }
-            m_lineNumberArea->update(); break;
-        }
-        block = block.next(); top = bottom; bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
+    event->accept();
+    int top = 0, bottom = 0;
+    const int lineNum = gutterLineAtY(event->pos().y(), &top, &bottom);
+    if (lineNum <= 0) return;
+    if (event->button() == Qt::RightButton) {
+        const bool wasPreviouslySet = hasBreakpoint(lineNum); if (!wasPreviouslySet) toggleBreakpoint(lineNum);
+        const QPoint iconGlobalPos = m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, top + (qMax(14, bottom - top) / 2) + 5));
+        const BreakpointVisualInfo curMeta = breakpointInfoForLine(lineNum);
+        const QTextBlock block = document()->findBlockByNumber(lineNum - 1);
+        ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
+        dlg.setTargetLineContext(lineNum, block.text().trimmed()); dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
+        dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
+        dlg.setIgnoreCount(curMeta.ignoreCount); dlg.setLogMessage(curMeta.logMessage); dlg.positionNearAnchor(iconGlobalPos);
+        const bool accepted = (dlg.exec() == QDialog::Accepted);
+        handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted, dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(), dlg.getCondition(), dlg.suspendScope());
+        if (accepted && dlg.isBreakpointEnabled() && !dlg.isRemoveRequested()) setBreakpointOptions(lineNum, dlg.getCondition(), dlg.ignoreCount(), dlg.logMessage());
+    } else if (m_executionLine > 0 && lineNum == m_executionLine) {
+        // Arm execution PC arrow drag; plain click without drag falls back to breakpoint toggle on release.
+        m_pcDragCandidate = true; m_draggingExecutionPc = false; m_pcDragPressPos = event->pos(); m_dragTargetLine = m_executionLine;
+    } else {
+        toggleBreakpoint(lineNum);
     }
+    m_lineNumberArea->update();
 }
-/** @brief Resolves the 1-based line under the mouse cursor inside LineNumberArea for live hover preview. */
+/** @brief Tracks gutter hover preview and active execution PC arrow dragging across visible source lines. */
 void SourceCodeView::lineNumberAreaMouseMoveEvent(QMouseEvent *event) {
-    const int y = event->pos().y(); QTextBlock block = firstVisibleBlock();
-    int blockNumber = block.blockNumber(), hoveredLine = -1;
-    int top = qRound(blockBoundingGeometry(block).translated(contentOffset()).top()), bottom = top + qRound(blockBoundingRect(block).height());
-    while (block.isValid() && top <= m_lineNumberArea->height()) {
-        if (block.isVisible() && y >= top && y < bottom) { hoveredLine = blockNumber + 1; break; }
-        block = block.next(); top = bottom; bottom = top + qRound(blockBoundingRect(block).height()); ++blockNumber;
+    if (!event) return;
+    const int hoveredLine = gutterLineAtY(event->pos().y());
+    if (m_pcDragCandidate && (event->buttons() & Qt::LeftButton)) {
+        if (!m_draggingExecutionPc && ((event->pos() - m_pcDragPressPos).manhattanLength() >= 4 || (hoveredLine > 0 && hoveredLine != m_executionLine))) {
+            m_draggingExecutionPc = true; if (m_lineNumberArea) m_lineNumberArea->setCursor(Qt::ClosedHandCursor);
+        }
+        if (m_draggingExecutionPc && hoveredLine > 0 && hoveredLine != m_dragTargetLine) {
+            m_dragTargetLine = hoveredLine; if (m_lineNumberArea) m_lineNumberArea->update(); if (viewport()) viewport()->update();
+        }
+        return;
     }
+    if (m_lineNumberArea) m_lineNumberArea->setCursor((m_executionLine > 0 && hoveredLine == m_executionLine) ? Qt::OpenHandCursor : Qt::ArrowCursor);
     setHoveredGutterLine(hoveredLine);
 }
-
-/** @brief Resets hovered gutter line state when cursor leaves LineNumberArea. */
-void SourceCodeView::lineNumberAreaLeaveEvent(QEvent *event) { Q_UNUSED(event); setHoveredGutterLine(-1); }
 
 /** @brief Updates the gutter execution PC marker without moving cursor, scroll, or active tab. */
 void SourceCodeView::setExecutionLineOnly(int lineOneBased) {
@@ -759,9 +760,16 @@ QString SourceCodeView::inlineGhostTextForLine(int oneBasedLine) const {
     return (summary.size() > 96) ? (summary.left(93) + QStringLiteral("...")) : summary;
 }
 
-/** @brief Renders the editor viewport plus O(visible lines) italic inline variable ghost values. */
+/** @brief Renders the editor viewport, PC drag drop-line indicator, and italic inline variable ghost values. */
 void SourceCodeView::paintEvent(QPaintEvent *event) {
     QPlainTextEdit::paintEvent(event);
+    if (m_draggingExecutionPc && m_dragTargetLine > 0) {
+        if (const QTextBlock tb = document()->findBlockByLineNumber(m_dragTargetLine - 1); tb.isValid() && tb.isVisible()) {
+            const QRectF g = blockBoundingGeometry(tb).translated(contentOffset()); QPainter p(viewport());
+            p.fillRect(QRect(0, qRound(g.top()), viewport()->width(), qRound(g.height())), QColor(245, 158, 11, 32));
+            p.setPen(QPen(QColor(245, 158, 11, 220), 1.5, Qt::DashLine)); p.drawLine(0, qRound(g.top()), viewport()->width(), qRound(g.top()));
+        }
+    }
     if (m_inlineVarValues.isEmpty() || !gridlock::core::ConfigManager::instance().inlineVariableValuesEnabled()) return;
     QPainter painter(viewport()); QFont ghostFont = font(); ghostFont.setItalic(true); painter.setFont(ghostFont);
     QColor ghostColor(gridlock::core::ConfigManager::instance().getSourceText()); ghostColor.setAlpha(140); painter.setPen(ghostColor);

@@ -121,6 +121,38 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Sends a machine-instruction granularity `stepIn` request for @p threadId. */
   void stepInstruction(int threadId) override;
 
+  /** @brief Steps over one machine instruction via DAP `next` with `"instruction"` granularity. */
+  void nextInstruction(int rank = -1) override {
+    sendRequest(QStringLiteral("next"), QJsonObject{{QStringLiteral("threadId"), qMax(0, rank) + 1}, {QStringLiteral("granularity"), QStringLiteral("instruction")}});
+  }
+
+  /** @brief Executes until `filePath:line` via LLDB-DAP REPL `thread until` fallback. */
+  void runToCursor(const QString& filePath, int line, int rank = -1) override {
+    if (isAdapterRunning() && !filePath.trimmed().isEmpty() && line > 0) sendDebuggerCommand(qMax(0, rank), QStringLiteral("thread until %1").arg(line));
+  }
+
+  /** @brief Executes until instruction @p address via LLDB-DAP REPL `thread until -a` fallback. */
+  void runToAddress(uint64_t address, int rank = -1) override {
+    if (isAdapterRunning() && address != 0ULL) sendDebuggerCommand(qMax(0, rank), QStringLiteral("thread until -a 0x%1").arg(address, 0, 16));
+  }
+
+  /** @brief Relocates PC to `filePath:line` via LLDB-DAP REPL `thread jump` fallback. */
+  void jumpToLocation(const QString& filePath, int line, int rank = -1) override {
+    if (isAdapterRunning() && !filePath.trimmed().isEmpty() && line > 0) sendDebuggerCommand(qMax(0, rank), QStringLiteral("thread jump --file \"%1\" --line %2").arg(filePath.trimmed()).arg(line));
+  }
+
+  /** @brief Relocates PC to @p address via LLDB-DAP REPL `register write pc` fallback. */
+  void jumpToAddress(uint64_t address, int rank = -1) override {
+    if (isAdapterRunning() && address != 0ULL) sendDebuggerCommand(qMax(0, rank), QStringLiteral("register write pc 0x%1").arg(address, 0, 16));
+  }
+
+  /** @brief Forces an immediate return via LLDB-DAP REPL `thread return` fallback. */
+  void forceEarlyReturn(const QString& returnExpr = QString(), int rank = -1) override {
+    if (!isAdapterRunning()) return;
+    const QString expr = returnExpr.trimmed();
+    sendDebuggerCommand(qMax(0, rank), expr.isEmpty() ? QStringLiteral("thread return") : QStringLiteral("thread return %1").arg(expr));
+  }
+
   /** @brief Sends a DAP `continue` request for @p threadId. */
   void continueExecution(int threadId) override;
 

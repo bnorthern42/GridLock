@@ -246,6 +246,24 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Steps one machine instruction (`-exec-step-instruction`) on @p threadId (`rankId + 1`). */
   void stepInstruction(int threadId) override;
 
+  /** @brief Steps over one machine instruction (`-exec-next-instruction`) on @p rank (`< 0` = all stopped ranks). */
+  void nextInstruction(int rank = -1) override;
+
+  /** @brief Executes until `filePath:line` is reached (`-exec-until "<path>:<line>"`) on @p rank. */
+  void runToCursor(const QString& filePath, int line, int rank = -1) override;
+
+  /** @brief Executes until instruction address `*0x<hex>` is reached (`-exec-until *0x<hex>`) on @p rank. */
+  void runToAddress(uint64_t address, int rank = -1) override;
+
+  /** @brief Relocates execution PC to `filePath:line` (`-exec-jump "<path>:<line>"`) on @p rank. */
+  void jumpToLocation(const QString& filePath, int line, int rank = -1) override;
+
+  /** @brief Relocates execution PC to machine address `*0x<hex>` (`-exec-jump *0x<hex>`) on @p rank. */
+  void jumpToAddress(uint64_t address, int rank = -1) override;
+
+  /** @brief Forces an immediate return from the current stack frame (`-exec-return [expr]`) on @p rank. */
+  void forceEarlyReturn(const QString& returnExpr = QString(), int rank = -1) override;
+
   /** @brief `IBackendCoordinator` continue shim routing to `continueAll()`. */
   void continueExecution(int threadId) override {
     Q_UNUSED(threadId);
@@ -273,6 +291,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
  private:
   /** @brief Writes @p cmd immediately if stopped, or queues it behind a transient SIGINT if running. */
   void queueOrWriteCmd(int rankId, const QString& cmd);
+
+  /** @brief Writes an execution control MI command to @p rank (or all stopped ranks when `rank < 0`). */
+  void dispatchStoppedExecCmd(int rank, const QString& cmd);
 
   /** @brief Parses MI `202..206` stack, thread, console REPL, and watchpoint records for @p rankId. */
   bool handleMiStackOrThreadRecord(int rankId, const QString& line);

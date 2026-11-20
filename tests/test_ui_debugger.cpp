@@ -792,8 +792,7 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     using gridlock::ui::CommandPaletteDialog; using gridlock::ui::ProgrammerCalculatorDialog;
     ProgrammerCalculatorDialog calc; calc.setWordWidth(32); calc.setSigned(false);
     calc.hexEdit()->setText(QStringLiteral("0xDEADBEEF")); QApplication::processEvents();
-    QVERIFY(calc.value() == 0xDEADBEEFULL && calc.decText() == QStringLiteral("3735928559") && calc.octText() == QStringLiteral("33653337357"));
-    QVERIFY(calc.binText().startsWith(QStringLiteral("1101 1110 1010 1101")) && calc.binText().endsWith(QStringLiteral("1110 1111")));
+    QVERIFY(calc.value() == 0xDEADBEEFULL && calc.decText() == QStringLiteral("3735928559") && calc.octText() == QStringLiteral("33653337357") && calc.binText().startsWith(QStringLiteral("1101 1110 1010 1101")) && calc.binText().endsWith(QStringLiteral("1110 1111")));
     calc.setSigned(true); QCOMPARE(calc.decText(), QStringLiteral("-559038737"));
     calc.setSigned(false); calc.setWordWidth(64); calc.setValue(0x11223344DEADBEEFULL);
     calc.setWordWidth(16); QVERIFY(calc.value() == 0xBEEFULL && !calc.bitButton(16)->isEnabled() && calc.bitButton(15)->isEnabled());
@@ -801,20 +800,18 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     calc.bitButton(0)->click(); QVERIFY(calc.value() == 0xEEULL && calc.hexText() == QStringLiteral("0xEE"));
     calc.setWordWidth(32); QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("(0x10 << 4) | 0x05")) && calc.value() == 0x105ULL && calc.hexText() == QStringLiteral("0x105"));
     calc.setValue(0x12345678ULL); calc.byteSwap(); QCOMPARE(calc.value(), 0x78563412ULL);
-    auto* acBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpClearBtn")); auto* addBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpAddBtn"));
-    auto* shlBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpShlBtn")); auto* eqBtn = calc.findChild<QPushButton*>(QStringLiteral("calcExprEvalBtn"));
-    auto* hexRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixHexBtn")); auto* binRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixBinBtn"));
+    auto* acBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpClearBtn")), *addBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpAddBtn"));
+    auto* shlBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpShlBtn")), *eqBtn = calc.findChild<QPushButton*>(QStringLiteral("calcExprEvalBtn"));
+    auto* hexRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixHexBtn")), *binRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixBinBtn"));
     QVERIFY(acBtn && addBtn && shlBtn && eqBtn && hexRadixBtn && binRadixBtn && !calc.keypadDigitButton(10)->isEnabled());
     acBtn->click(); calc.keypadDigitButton(1)->click(); calc.keypadDigitButton(0)->click(); addBtn->click(); calc.keypadDigitButton(5)->click(); eqBtn->click();
     QVERIFY(calc.value() == 15ULL && calc.hexText() == QStringLiteral("0xF") && calc.decText() == QStringLiteral("15") && calc.octText() == QStringLiteral("17") && calc.bitButton(3)->text() == QStringLiteral("1"));
     hexRadixBtn->click(); QVERIFY(calc.keypadDigitButton(13)->isEnabled() && calc.inputRadix() == 16);
-    calc.keypadDigitButton(13)->click(); calc.keypadDigitButton(14)->click(); calc.keypadDigitButton(10)->click(); calc.keypadDigitButton(13)->click(); eqBtn->click();
-    QVERIFY(calc.value() == 0xDEADULL && calc.decText() == QStringLiteral("57005"));
+    calc.keypadDigitButton(13)->click(); calc.keypadDigitButton(14)->click(); calc.keypadDigitButton(10)->click(); calc.keypadDigitButton(13)->click(); eqBtn->click(); QVERIFY(calc.value() == 0xDEADULL && calc.decText() == QStringLiteral("57005"));
     calc.expressionEdit()->clear(); shlBtn->click(); calc.keypadDigitButton(4)->click(); eqBtn->click(); QCOMPARE(calc.value(), 0xDEAD0ULL);
     binRadixBtn->click(); QVERIFY(calc.keypadDigitButton(1)->isEnabled() && !calc.keypadDigitButton(2)->isEnabled());
     auto* statusLbl = calc.findChild<QLabel*>(QStringLiteral("calcExprStatusLabel")); QVERIFY(statusLbl && calc.findChild<QPushButton*>(QStringLiteral("calcKeyDot")));
-    calc.setInitialTextOrValue(QStringLiteral("3.3f")); QVERIFY(calc.expressionEdit()->text() == QStringLiteral("3.3") && calc.decText() == QStringLiteral("3") && calc.hexText() == QStringLiteral("0x3"));
-    QVERIFY(calc.hasFloatValue() && std::abs(calc.floatValue() - 3.3) < 1e-9 && calc.floatReadoutText().contains(QStringLiteral("0x40533333")) && !statusLbl->text().contains(QStringLiteral("Error")));
+    calc.setInitialTextOrValue(QStringLiteral("3.3f")); QVERIFY(calc.expressionEdit()->text() == QStringLiteral("3.3") && calc.decText() == QStringLiteral("3") && calc.hexText() == QStringLiteral("0x3") && calc.hasFloatValue() && std::abs(calc.floatValue() - 3.3) < 1e-9 && calc.floatReadoutText().contains(QStringLiteral("0x40533333")) && !statusLbl->text().contains(QStringLiteral("Error")));
     QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("3.3 * 2")) && std::abs(calc.floatValue() - 6.6) < 1e-9 && calc.decText() == QStringLiteral("6") && calc.hexText() == QStringLiteral("0x6"));
     calc.setInitialTextOrValue(QStringLiteral("0x4011a6")); QVERIFY(calc.hexText() == QStringLiteral("0x4011A6") && calc.expressionEdit()->text() == QStringLiteral("0x4011A6"));
     calc.setWordWidth(64); calc.setSigned(false); calc.setInitialTextOrValue(QStringLiteral("0xdeadbeefULL")); QVERIFY(calc.value() == 0xDEADBEEFULL && calc.hexText() == QStringLiteral("0xDEADBEEF"));
@@ -824,14 +821,12 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_calcWarnings.append(m); });
     struct Guard { QtMessageHandler p; ~Guard() { qInstallMessageHandler(p); } } g{prevH};
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
-    gridlock::ui::ProjectSettingsDialog psDlg(&mw);
-    QVERIFY(psDlg.findChild<QComboBox*>(QStringLiteral("calcDefaultWidthCombo")) && psDlg.findChild<QCheckBox*>(QStringLiteral("calcDefaultSignedCheck")) && psDlg.findChild<QPushButton*>(QStringLiteral("openProgrammerCalculatorBtn")));
+    gridlock::ui::ProjectSettingsDialog psDlg(&mw); QVERIFY(psDlg.findChild<QComboBox*>(QStringLiteral("calcDefaultWidthCombo")) && psDlg.findChild<QCheckBox*>(QStringLiteral("calcDefaultSignedCheck")) && psDlg.findChild<QPushButton*>(QStringLiteral("openProgrammerCalculatorBtn")));
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     auto* pal = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(pal && pal->isVisible());
     pal->setFilterText(QStringLiteral("> Programmer")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Programmer's Calculator")));
     QTest::keyClick(pal->inputEdit(), Qt::Key_Return); QApplication::processEvents();
-    auto* floatingCalc = mw.programmerCalculatorDialog();
-    QVERIFY(floatingCalc && floatingCalc->isVisible() && !floatingCalc->isModal() && (floatingCalc->windowFlags() & Qt::Window) && floatingCalc->keypadDigitButton(0)->height() >= 26);
+    auto* floatingCalc = mw.programmerCalculatorDialog(); QVERIFY(floatingCalc && floatingCalc->isVisible() && !floatingCalc->isModal() && (floatingCalc->windowFlags() & Qt::Window) && floatingCalc->keypadDigitButton(0)->height() >= 26);
     floatingCalc->close(); QTest::keyClick(&mw, Qt::Key_C, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(floatingCalc->isVisible()); floatingCalc->close();
     QVERIFY(mw.sourceCodeView() && mw.variablesDockWidget() && mw.registerView() && mw.memView() && mw.disassemblyView());
     emit mw.sourceCodeView()->sendToCalculatorRequested(QStringLiteral("0x4011a6")); QApplication::processEvents();
@@ -839,32 +834,23 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     emit mw.variablesDockWidget()->sendToCalculatorRequested(QStringLiteral("0x7fffffffe5a8")); QCOMPARE(floatingCalc->value(), 0x7FFFFFFFE5A8ULL); floatingCalc->close();
     for (const QString& w : s_calcWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }
-
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     using gridlock::ui::ArrayPlotDialog; using gridlock::ui::PointerGraphDialog;
-    ArrayPlotDialog plotDlg;
-    QVERIFY(plotDlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotExprEdit")) && plotDlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotAutoRefreshCheck")) && plotDlg.isAutoRefreshEnabled());
+    ArrayPlotDialog plotDlg; QVERIFY(plotDlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotExprEdit")) && plotDlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotAutoRefreshCheck")) && plotDlg.isAutoRefreshEnabled());
     const double d0[4] = {1.0, 2.0, 3.0, 4.0}, d1[4] = {1.0, 9.0, 3.0, std::numeric_limits<double>::quiet_NaN()};
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d0), sizeof(d0)), ArrayPlotDialog::ElementType::Float64, 1, 4));
-    QVERIFY(plotDlg.currentSamples().size() == 4 && plotDlg.minValue() == 1.0 && plotDlg.maxValue() == 4.0 && plotDlg.meanValue() == 2.5 && std::abs(plotDlg.l2Norm() - std::sqrt(30.0)) < 1e-9 && plotDlg.nanInfCount() == 0);
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d1), sizeof(d1)), ArrayPlotDialog::ElementType::Float64, 2, 2));
-    QVERIFY(plotDlg.plotMode() == ArrayPlotDialog::PlotMode::Heatmap2D && plotDlg.nanCount() == 1 && plotDlg.changedElementCount() == 2);
+    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d0), sizeof(d0)), ArrayPlotDialog::ElementType::Float64, 1, 4) && plotDlg.currentSamples().size() == 4 && plotDlg.minValue() == 1.0 && plotDlg.maxValue() == 4.0 && plotDlg.meanValue() == 2.5 && std::abs(plotDlg.l2Norm() - std::sqrt(30.0)) < 1e-9 && plotDlg.nanInfCount() == 0);
+    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d1), sizeof(d1)), ArrayPlotDialog::ElementType::Float64, 2, 2) && plotDlg.plotMode() == ArrayPlotDialog::PlotMode::Heatmap2D && plotDlg.nanCount() == 1 && plotDlg.changedElementCount() == 2);
     const float f0[3] = {-2.5f, 0.0f, 5.5f}; const int32_t i0[4] = {10, 20, 30, 40};
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(f0), sizeof(f0)), QStringLiteral("float"), 1, 3) && plotDlg.minValue() == -2.5 && plotDlg.maxValue() == 5.5);
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2) && plotDlg.meanValue() == 25.0);
+    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(f0), sizeof(f0)), QStringLiteral("float"), 1, 3) && plotDlg.minValue() == -2.5 && plotDlg.maxValue() == 5.5 && plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2) && plotDlg.meanValue() == 25.0);
     QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); const QString csvPath = tmpDir.filePath(QStringLiteral("field.csv")), pngPath = tmpDir.filePath(QStringLiteral("field.png"));
     QVERIFY(plotDlg.exportCsv(csvPath) && plotDlg.savePng(pngPath) && QFileInfo::exists(pngPath));
     QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll()); QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));
-    PointerGraphDialog pgDlg;
-    QVERIFY(pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphRefreshBtn")) && pgDlg.findChild<QCheckBox*>(QStringLiteral("pointerGraphAutoRefreshCheck")) && pgDlg.isAutoRefreshEnabled());
-    pgDlg.pinRootExpression(QStringLiteral("head"));
-    pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("42"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
+    PointerGraphDialog pgDlg; QVERIFY(pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphRefreshBtn")) && pgDlg.findChild<QCheckBox*>(QStringLiteral("pointerGraphAutoRefreshCheck")) && pgDlg.isAutoRefreshEnabled());
+    pgDlg.pinRootExpression(QStringLiteral("head")); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("42"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
-    pgDlg.onTargetStopped(0);
-    pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
-    QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")));
-    QCOMPARE(pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")), QStringLiteral("42 -> 99")); QCOMPARE(pgDlg.mutatedFieldCount(), 1);
+    pgDlg.onTargetStopped(0); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
+    QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
     const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
     QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();
@@ -876,69 +862,80 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     bottomTabs->setCurrentWidget(term); QApplication::processEvents(); bottomTabs->setCurrentWidget(ref); QApplication::processEvents(); bottomTabs->setCurrentWidget(pm); QApplication::processEvents();
     QVERIFY(term->isShellStarted() && ref->isDocsetsInitialized() && pm->isPackagesLoaded());
 }
-
 /** @brief Verifies GdbRankCoordinator signal disposition/catchpoint MI commands and SignalCatchpointDialog UI integration. */
 void TestMainWindowUI::testSignalDispositionAndCatchpoints() {
     gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
     coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",func=\"main\",fullname=\"/tmp/main.cpp\",line=\"10\",args=[]}\n"));
     coord.processGdbOutput(1, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",func=\"main\",fullname=\"/tmp/main.cpp\",line=\"10\",args=[]}\n"));
-    QStringList sentCmds;
-    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& cmd) { if (r == 0) sentCmds.append(cmd.trimmed()); });
-    coord.setSignalDisposition(QStringLiteral("SIGUSR1"), false, false, true);
-    QVERIFY(sentCmds.contains(QStringLiteral("-interpreter-exec console \"handle SIGUSR1 nostop noprint pass\"")));
-    coord.insertCatchpoint({CatchpointSpec::Kind::CppThrow, QStringLiteral("std::runtime_error"), -1, true});
-    coord.insertCatchpoint({CatchpointSpec::Kind::Syscall, QStringLiteral("mmap, openat, clone3, ioctl"), -1, true});
-    coord.insertCatchpoint({CatchpointSpec::Kind::LoadLib, QStringLiteral("libmpi"), -1, true});
+    QStringList sentCmds; connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& cmd) { if (r == 0) sentCmds.append(cmd.trimmed()); });
+    coord.setSignalDisposition(QStringLiteral("SIGUSR1"), false, false, true); QVERIFY(sentCmds.contains(QStringLiteral("-interpreter-exec console \"handle SIGUSR1 nostop noprint pass\"")));
+    coord.insertCatchpoint({CatchpointSpec::Kind::CppThrow, QStringLiteral("std::runtime_error"), -1, true}); coord.insertCatchpoint({CatchpointSpec::Kind::Syscall, QStringLiteral("mmap, openat, clone3, ioctl"), -1, true}); coord.insertCatchpoint({CatchpointSpec::Kind::LoadLib, QStringLiteral("libmpi"), -1, true});
     QVERIFY(sentCmds.contains(QStringLiteral("-catch-throw -r std::runtime_error")) && sentCmds.contains(QStringLiteral("-interpreter-exec console \"catch syscall mmap openat clone3 ioctl\"")) && sentCmds.contains(QStringLiteral("-catch-load -r libmpi")));
     gridlock::ui::SignalCatchpointDialog dlg(&coord); QCOMPARE(dlg.catchpoints().size(), 3);
-    dlg.setSignalDispositionRow(QStringLiteral("SIGFPE"), true, true, false);
-    QVERIFY(dlg.dispositionForSignal(QStringLiteral("SIGFPE")).stop && !dlg.dispositionForSignal(QStringLiteral("SIGFPE")).pass);
-    dlg.removeCatchpointById(dlg.catchpoints().first().gdbId);
-    QVERIFY(dlg.catchpoints().size() == 2 && sentCmds.contains(QStringLiteral("-break-delete 1")));
+    dlg.setSignalDispositionRow(QStringLiteral("SIGFPE"), true, true, false); QVERIFY(dlg.dispositionForSignal(QStringLiteral("SIGFPE")).stop && !dlg.dispositionForSignal(QStringLiteral("SIGFPE")).pass);
+    dlg.removeCatchpointById(dlg.catchpoints().first().gdbId); QVERIFY(dlg.catchpoints().size() == 2 && sentCmds.contains(QStringLiteral("-break-delete 1")));
     gridlock::ui::MainWindow mw; mw.show(); QApplication::processEvents();
-    auto* sigAct = mw.findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints"));
-    QVERIFY(sigAct && sigAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
-    sigAct->trigger(); QApplication::processEvents();
-    auto* mwSigDlg = mw.findChild<gridlock::ui::SignalCatchpointDialog*>(QStringLiteral("SignalCatchpointDialog"));
-    QVERIFY(mwSigDlg && mwSigDlg->isVisible()); mwSigDlg->close();
+    auto* sigAct = mw.findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints")); QVERIFY(sigAct && sigAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
+    sigAct->trigger(); QApplication::processEvents(); auto* mwSigDlg = mw.findChild<gridlock::ui::SignalCatchpointDialog*>(QStringLiteral("SignalCatchpointDialog")); QVERIFY(mwSigDlg && mwSigDlg->isVisible()); mwSigDlg->close();
 }
-
 /** @brief Verifies GdbConsoleWidget persistent gdb_history, Up/Down draft preservation, Ctrl+R reverse search, and Tab completion popup. */
 void TestMainWindowUI::testGdbConsoleReadlineErgonomics() {
-    QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid());
-    const QString histPath = tmpDir.filePath(QStringLiteral("gdb_history"));
-    gridlock::core::ConfigManager::instance().setGdbHistoryFilePathOverride(histPath);
+    QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); gridlock::core::ConfigManager::instance().setGdbHistoryFilePathOverride(tmpDir.filePath(QStringLiteral("gdb_history")));
     struct HistGuard { ~HistGuard() { gridlock::core::ConfigManager::instance().setGdbHistoryFilePathOverride(QString()); } } guard;
     gridlock::ui::GdbConsoleWidget console; console.resize(640, 320); console.show(); QApplication::processEvents();
     auto* edit = console.commandEdit(); QVERIFY(edit != nullptr);
-    for (const QString& cmd : {QStringLiteral("info registers"), QStringLiteral("break main"), QStringLiteral("x/16gx $rsp"), QStringLiteral("break main")}) {
-        edit->setText(cmd); QTest::keyClick(edit, Qt::Key_Return);
-    }
+    for (const QString& cmd : {QStringLiteral("info registers"), QStringLiteral("break main"), QStringLiteral("x/16gx $rsp"), QStringLiteral("break main")}) { edit->setText(cmd); QTest::keyClick(edit, Qt::Key_Return); }
     QCOMPARE(console.commandHistory(), (QStringList{QStringLiteral("info registers"), QStringLiteral("x/16gx $rsp"), QStringLiteral("break main")}));
-    edit->setText(QStringLiteral("print draft_val"));
-    QTest::keyClick(edit, Qt::Key_Up); QCOMPARE(edit->text(), QStringLiteral("break main"));
-    QTest::keyClick(edit, Qt::Key_Up); QCOMPARE(edit->text(), QStringLiteral("x/16gx $rsp"));
-    QTest::keyClick(edit, Qt::Key_Down); QCOMPARE(edit->text(), QStringLiteral("break main"));
-    QTest::keyClick(edit, Qt::Key_Down); QCOMPARE(edit->text(), QStringLiteral("print draft_val"));
+    edit->setText(QStringLiteral("print draft_val")); QTest::keyClick(edit, Qt::Key_Up); QCOMPARE(edit->text(), QStringLiteral("break main")); QTest::keyClick(edit, Qt::Key_Up); QCOMPARE(edit->text(), QStringLiteral("x/16gx $rsp"));
+    QTest::keyClick(edit, Qt::Key_Down); QCOMPARE(edit->text(), QStringLiteral("break main")); QTest::keyClick(edit, Qt::Key_Down); QCOMPARE(edit->text(), QStringLiteral("print draft_val"));
     gridlock::ui::GdbConsoleWidget reloadedConsole; QCOMPARE(reloadedConsole.commandHistory(), console.commandHistory());
-    edit->setText(QStringLiteral("initial_input")); QTest::keyClick(edit, Qt::Key_R, Qt::ControlModifier);
-    QVERIFY(console.isReverseSearchActive() && console.reverseSearchLabel() && console.reverseSearchLabel()->isVisible());
-    QTest::keyClicks(edit, QStringLiteral("in"));
-    QVERIFY(console.reverseSearchQuery() == QStringLiteral("in") && edit->text() == QStringLiteral("break main"));
-    QTest::keyClick(edit, Qt::Key_R, Qt::ControlModifier); QCOMPARE(edit->text(), QStringLiteral("info registers"));
-    QTest::keyClick(edit, Qt::Key_Escape);
-    QVERIFY(!console.isReverseSearchActive() && !console.reverseSearchLabel()->isVisible() && edit->text() == QStringLiteral("initial_input"));
+    edit->setText(QStringLiteral("initial_input")); QTest::keyClick(edit, Qt::Key_R, Qt::ControlModifier); QVERIFY(console.isReverseSearchActive() && console.reverseSearchLabel() && console.reverseSearchLabel()->isVisible());
+    QTest::keyClicks(edit, QStringLiteral("in")); QVERIFY(console.reverseSearchQuery() == QStringLiteral("in") && edit->text() == QStringLiteral("break main"));
+    QTest::keyClick(edit, Qt::Key_R, Qt::ControlModifier); QCOMPARE(edit->text(), QStringLiteral("info registers")); QTest::keyClick(edit, Qt::Key_Escape); QVERIFY(!console.isReverseSearchActive() && !console.reverseSearchLabel()->isVisible() && edit->text() == QStringLiteral("initial_input"));
     edit->setText(QStringLiteral("disas")); edit->setCursorPosition(5); QTest::keyClick(edit, Qt::Key_Tab); QCOMPARE(edit->text(), QStringLiteral("disassemble"));
-    edit->setText(QStringLiteral("info ")); edit->setCursorPosition(5); QTest::keyClick(edit, Qt::Key_Tab);
-    QVERIFY(console.completionPopup() && console.completionPopup()->isVisible() && console.completionPopup()->count() >= 4);
-    QTest::keyClick(edit, Qt::Key_Escape); QVERIFY(!console.completionPopup()->isVisible());
-    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(1);
-    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",func=\"main\",fullname=\"/tmp/main.cpp\",line=\"10\",args=[]}\n"));
-    connect(&console, &gridlock::ui::GdbConsoleWidget::completionRequested, &coord, &gridlock::GdbRankCoordinator::requestConsoleCompletions);
-    connect(&coord, &IBackendCoordinator::consoleCompletionsReady, &console, &gridlock::ui::GdbConsoleWidget::onConsoleCompletionsReady);
-    edit->setText(QStringLiteral("b ma")); edit->setCursorPosition(4); QTest::keyClick(edit, Qt::Key_Tab);
-    coord.processGdbOutput(0, QStringLiteral("~\"b main\\n\"\n~\"b malloc\\n\"\n211^done\n"));
-    QVERIFY(console.completionPopup()->isVisible() && console.completionPopup()->count() == 2);
-    QTest::keyClick(edit, Qt::Key_Down); QTest::keyClick(edit, Qt::Key_Return);
-    QVERIFY(!console.completionPopup()->isVisible() && edit->text() == QStringLiteral("b malloc"));
+    edit->setText(QStringLiteral("info ")); edit->setCursorPosition(5); QTest::keyClick(edit, Qt::Key_Tab); QVERIFY(console.completionPopup() && console.completionPopup()->isVisible() && console.completionPopup()->count() >= 4); QTest::keyClick(edit, Qt::Key_Escape); QVERIFY(!console.completionPopup()->isVisible());
+    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(1); coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",func=\"main\",fullname=\"/tmp/main.cpp\",line=\"10\",args=[]}\n"));
+    connect(&console, &gridlock::ui::GdbConsoleWidget::completionRequested, &coord, &gridlock::GdbRankCoordinator::requestConsoleCompletions); connect(&coord, &IBackendCoordinator::consoleCompletionsReady, &console, &gridlock::ui::GdbConsoleWidget::onConsoleCompletionsReady);
+    edit->setText(QStringLiteral("b ma")); edit->setCursorPosition(4); QTest::keyClick(edit, Qt::Key_Tab); coord.processGdbOutput(0, QStringLiteral("~\"b main\\n\"\n~\"b malloc\\n\"\n211^done\n"));
+    QVERIFY(console.completionPopup()->isVisible() && console.completionPopup()->count() == 2); QTest::keyClick(edit, Qt::Key_Down); QTest::keyClick(edit, Qt::Key_Return); QVERIFY(!console.completionPopup()->isVisible() && edit->text() == QStringLiteral("b malloc"));
+}
+/** @brief Verifies nexti, Ctrl+F10 Run to Cursor, draggable gutter PC jump, lexical scope guard, Force Early Return, and shortcut uniqueness. */
+void TestMainWindowUI::testNonLinearExecutionControl() {
+    // 1. Verify GdbRankCoordinator emits exact MI3 commands for nexti, until, jump, and return.
+    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"4\",args=[]}\n"));
+    coord.processGdbOutput(1, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"4\",args=[]}\n"));
+    QStringList sent; connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& c) { if (r == 0) sent.append(c.trimmed()); });
+    coord.nextInstruction(0); coord.runToCursor(QStringLiteral("/tmp/solver.cpp"), 12, 0); coord.runToAddress(0x401180ULL, 0);
+    coord.jumpToLocation(QStringLiteral("/tmp/solver.cpp"), 15, 0); coord.jumpToAddress(0x401190ULL, 0); coord.forceEarlyReturn(QString(), 0); coord.forceEarlyReturn(QStringLiteral("42"), 0);
+    QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")) && sent.contains(QStringLiteral("-exec-until \"/tmp/solver.cpp:12\"")) && sent.contains(QStringLiteral("-exec-until *0x401180")));
+    QVERIFY(sent.contains(QStringLiteral("-exec-jump \"/tmp/solver.cpp:15\"")) && sent.contains(QStringLiteral("-exec-jump *0x401190")) && sent.contains(QStringLiteral("-exec-return")) && sent.contains(QStringLiteral("-exec-return 42")));
+    // 2. Verify lexical scope safety guard distinguishes safe intra-block jumps from declaration, block, and cross-function hazards.
+    const QString sampleCpp = QStringLiteral("int solve(int x) {\n  int a = 1;\n  a += x;\n  a *= 2;\n  int b = 7;\n  if (a > 0) {\n    a += b;\n  }\n  return a;\n}\nint helper() {\n  return 0;\n}\n");
+    QVERIFY(gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 4, QStringLiteral("solve")).isEmpty());
+    QVERIFY(!gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 4, 6, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 7, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 12, QStringLiteral("solve")).isEmpty());
+    // 3. Verify draggable gutter PC arrow emits jumpToLineRequested and MainWindow routes Ctrl+F10, nexti, DisassemblyView, & Force Early Return with zero shortcut collisions.
+    static QStringList s_execWarnings; s_execWarnings.clear();
+    const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_execWarnings.append(m); });
+    struct WarnGuard { QtMessageHandler p; ~WarnGuard() { qInstallMessageHandler(p); } } wg{prevH};
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents(); mw.setCoordinator(&coord); sent.clear();
+    auto* sv = mw.sourceCodeView(); auto* dv = mw.disassemblyView(); QVERIFY(sv && dv);
+    sv->setCurrentFile(QStringLiteral("/tmp/solver.cpp")); sv->setSourceCode(sampleCpp); sv->highlightExecutionLine(3); QApplication::processEvents();
+    QWidget* gutter = nullptr; for (QWidget* w : sv->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) if (w != sv->viewport() && w->width() == sv->lineNumberAreaWidth()) { gutter = w; break; }
+    QVERIFY(gutter != nullptr); QSignalSpy jumpSpy(sv, &gridlock::ui::SourceCodeView::jumpToLineRequested);
+    const int rowH = qMax(14, sv->fontMetrics().lineSpacing()); const QPoint pStart(10, 2 * rowH + rowH / 2), pEnd(10, 3 * rowH + rowH / 2);
+    QTest::mousePress(gutter, Qt::LeftButton, Qt::NoModifier, pStart); QTest::mouseMove(gutter, pEnd); QApplication::processEvents();
+    QVERIFY(sv->isDraggingExecutionPc() && sv->dragTargetLine() == 4);
+    QTest::mouseRelease(gutter, Qt::LeftButton, Qt::NoModifier, pEnd); QApplication::processEvents();
+    QCOMPARE(jumpSpy.count(), 1); QCOMPARE(jumpSpy.first().at(1).toInt(), 4); QVERIFY(sent.contains(QStringLiteral("-exec-jump \"/tmp/solver.cpp:4\"")));
+    sv->setTextCursor(QTextCursor(sv->document()->findBlockByNumber(8))); sv->setFocus();
+    QTest::keyClick(&mw, Qt::Key_F10, Qt::ControlModifier); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-until \"/tmp/solver.cpp:9\"")));
+    QTest::keyClick(&mw, Qt::Key_F10, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")));
+    auto* nextiBtn = dv->findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")); QVERIFY(nextiBtn && dv->findChild<QPushButton*>(QStringLiteral("disasmStepiBtn")));
+    sent.clear(); nextiBtn->click(); QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")));
+    emit dv->runToAddressRequested(0x401180ULL); emit dv->jumpToAddressRequested(0x401190ULL); QVERIFY(sent.contains(QStringLiteral("-exec-until *0x401180")) && sent.contains(QStringLiteral("-exec-jump *0x401190")));
+    QVERIFY(mw.forceEarlyReturnWorkflow(QStringLiteral("7"), false) && sent.contains(QStringLiteral("-exec-return 7")));
+    QVERIFY(mw.findChild<QAction*>(QStringLiteral("actionNextInstruction")) && mw.findChild<QAction*>(QStringLiteral("actionRunToCursor")) && mw.findChild<QAction*>(QStringLiteral("actionJumpToLine")) && mw.findChild<QAction*>(QStringLiteral("actionForceEarlyReturn")));
+    for (const QString& w : s_execWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
+    mw.setCoordinator(nullptr);
 }

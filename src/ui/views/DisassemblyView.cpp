@@ -282,35 +282,28 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_statsBadge->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
   m_statsBadge->setMinimumWidth(0);
 
-  // Side-by-side CFG + Decompiler toggle button (styled as unified 24px segmented button in reloadStyle())
-  m_splitToggleBtn = new QPushButton(QStringLiteral("SPLIT (CFG+DECOMP)"), headerWidget);
-  m_splitToggleBtn->setObjectName("cutterSplitViewBtn");
-  m_splitToggleBtn->setCheckable(true);
-  m_splitToggleBtn->setCursor(Qt::PointingHandCursor);
-  m_splitToggleBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+  // Compact helper for unified 24px header toolbar buttons (instruction stepping + view mode toggles).
+  auto makeHdrBtn = [&](const QString& label, const QString& objName, const QString& tip, bool checkable) {
+    auto* btn = new QPushButton(label, headerWidget);
+    btn->setObjectName(objName); btn->setCheckable(checkable); btn->setToolTip(tip);
+    btn->setCursor(Qt::PointingHandCursor); btn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    return btn;
+  };
+  m_stepiBtn = makeHdrBtn(QStringLiteral("stepi"), QStringLiteral("disasmStepiBtn"), QStringLiteral("Step Instruction (stepi)"), false);
+  m_nextiBtn = makeHdrBtn(QStringLiteral("nexti"), QStringLiteral("disasmNextiBtn"), QStringLiteral("Next Instruction (nexti) [Ctrl+Shift+F10]"), false);
+  m_splitToggleBtn = makeHdrBtn(QStringLiteral("SPLIT (CFG+DECOMP)"), QStringLiteral("cutterSplitViewBtn"), QStringLiteral("Side-by-side CFG + Decompiler"), true);
+  m_modeToggleBtn = makeHdrBtn(QStringLiteral("CFG (Space)"), QStringLiteral("cutterCfgToggleBtn"), QStringLiteral("Toggle Linear / CFG Graph (Space)"), false);
+  m_decompilerToggleBtn = makeHdrBtn(QStringLiteral("DECOMPILER"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("Standalone Decompiler View"), true);
+  connect(m_stepiBtn, &QPushButton::clicked, this, &DisassemblyView::stepInstructionRequested);
+  connect(m_nextiBtn, &QPushButton::clicked, this, &DisassemblyView::nextInstructionRequested);
   connect(m_splitToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setSplitGraphDecompilerMode);
-
-  // Linear vs CFG Graph view mode toggle button
-  m_modeToggleBtn = new QPushButton(QStringLiteral("CFG (Space)"), headerWidget);
-  m_modeToggleBtn->setObjectName("cutterCfgToggleBtn");
-  m_modeToggleBtn->setCursor(Qt::PointingHandCursor);
-  m_modeToggleBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
   connect(m_modeToggleBtn, &QPushButton::clicked, this, &DisassemblyView::toggleViewMode);
-
-  // Fullscreen decompiler view mode toggle button
-  m_decompilerToggleBtn = new QPushButton(QStringLiteral("DECOMPILER"), headerWidget);
-  m_decompilerToggleBtn->setObjectName("cutterDecompilerBtn");
-  m_decompilerToggleBtn->setCheckable(true);
-  m_decompilerToggleBtn->setCursor(Qt::PointingHandCursor);
-  m_decompilerToggleBtn->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
   connect(m_decompilerToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setDecompilerMode);
 
-  // Assemble header toolbar items with stretchable left badges and unclipped right mode buttons
-  headerLayout->addWidget(m_headerBadge, 2);
-  headerLayout->addWidget(m_statsBadge, 1);
-  headerLayout->addWidget(m_splitToggleBtn, 0);
-  headerLayout->addWidget(m_decompilerToggleBtn, 0);
-  headerLayout->addWidget(m_modeToggleBtn, 0);
+  // Assemble header toolbar items with stretchable left badges and unclipped right control buttons
+  headerLayout->addWidget(m_headerBadge, 2); headerLayout->addWidget(m_statsBadge, 1);
+  headerLayout->addWidget(m_stepiBtn, 0); headerLayout->addWidget(m_nextiBtn, 0);
+  headerLayout->addWidget(m_splitToggleBtn, 0); headerLayout->addWidget(m_decompilerToggleBtn, 0); headerLayout->addWidget(m_modeToggleBtn, 0);
   rootLayout->addWidget(headerWidget);
 
   // Sub-header bar displaying reconstructed function signature in 12px monospace
@@ -358,6 +351,9 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
     const uint64_t addr = m_lineToAddr.value(lineIdx, m_currentAddress);
     const QString addrHex = QStringLiteral("0x%1").arg(addr, 0, 16).toUpper();
     QMenu* menu = m_linearEdit->createStandardContextMenu();
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Run to Instruction Address (%1)").arg(addrHex), this, [this, addr]() { emit runToAddressRequested(addr); });
+    menu->addAction(QStringLiteral("Jump / Set PC to Address (%1)").arg(addrHex), this, [this, addr]() { emit jumpToAddressRequested(addr); });
     menu->addSeparator();
     QAction* calcAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
     for (const QString& actLabel : contextActionNamesForAddress(addr)) {
@@ -876,10 +872,10 @@ void DisassemblyView::reloadStyle() {
   // Style top header strip, 12px UI sans-serif badges, and unified 24px segmented mode toggle buttons
   if (auto *hdr = findChild<QWidget *>(QStringLiteral("cutterDisasmHeader"))) {
     const auto pal = gridlock::core::ThemeManager::paletteForTheme(tm.activeThemeId());
-    hdr->setStyleSheet(QStringLiteral("#cutterDisasmHeader { background-color: %1; border-bottom: 1px solid %2; } #cutterDisasmBadge { color: %3; font-size: 12px; font-weight: 600; } #cutterDisasmStats { color: %3; font-size: 12px; } #cutterCfgToggleBtn, #cutterDecompilerBtn, #cutterSplitViewBtn { background-color: %1; color: %3; border: 1px solid %2; border-radius: 3px; padding: 0px 10px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; } #cutterCfgToggleBtn:hover, #cutterDecompilerBtn:hover, #cutterSplitViewBtn:hover { background-color: %2; border: 1px solid %4; color: %3; } #cutterCfgToggleBtn:checked, #cutterDecompilerBtn:checked, #cutterSplitViewBtn:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
+    hdr->setStyleSheet(QStringLiteral("#cutterDisasmHeader { background-color: %1; border-bottom: 1px solid %2; } #cutterDisasmBadge { color: %3; font-size: 12px; font-weight: 600; } #cutterDisasmStats { color: %3; font-size: 12px; } #disasmStepiBtn, #disasmNextiBtn, #cutterCfgToggleBtn, #cutterDecompilerBtn, #cutterSplitViewBtn { background-color: %1; color: %3; border: 1px solid %2; border-radius: 3px; padding: 0px 8px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; } #disasmStepiBtn:hover, #disasmNextiBtn:hover, #cutterCfgToggleBtn:hover, #cutterDecompilerBtn:hover, #cutterSplitViewBtn:hover { background-color: %2; border: 1px solid %4; color: %3; } #cutterCfgToggleBtn:checked, #cutterDecompilerBtn:checked, #cutterSplitViewBtn:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
   }
-  // Ensure each segmented mode button meets its polished sizeHint width without horizontal clipping
-  for (QPushButton *btn : {m_splitToggleBtn, m_decompilerToggleBtn, m_modeToggleBtn}) {
+  // Ensure each segmented mode/step button meets its polished sizeHint width without horizontal clipping
+  for (QPushButton *btn : {m_stepiBtn, m_nextiBtn, m_splitToggleBtn, m_decompilerToggleBtn, m_modeToggleBtn}) {
     if (btn) { btn->ensurePolished(); btn->setMinimumWidth(btn->sizeHint().width()); }
   }
   // Style reconstructed function signature banner strip and label in 12px monospace

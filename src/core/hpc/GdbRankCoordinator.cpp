@@ -623,6 +623,24 @@ void GdbRankCoordinator::stepInstruction(int threadId) {
   if (const auto& st = m_processes[rankId]->state.currentState; st != "running" && st != "exited") writeCmd(rankId, "-exec-step-instruction\n");
 }
 
+/** @brief Dispatches an execution control MI command to @p rank (or all stopped ranks when `rank < 0`). */
+void GdbRankCoordinator::dispatchStoppedExecCmd(int rank, const QString& cmd) {
+  if (m_processes.empty()) return;
+  const int lo = (rank < 0) ? 0 : qMax(0, rank), hi = (rank < 0) ? static_cast<int>(m_processes.size()) - 1 : qMin(rank, static_cast<int>(m_processes.size()) - 1);
+  for (int r = lo; r <= hi; ++r)
+    if (m_processes[r] && m_processes[r]->state.currentState != "running" && m_processes[r]->state.currentState != "exited") writeCmd(r, cmd);
+}
+void GdbRankCoordinator::nextInstruction(int rank) { dispatchStoppedExecCmd(rank, QStringLiteral("-exec-next-instruction\n")); }
+void GdbRankCoordinator::runToCursor(const QString& filePath, int line, int rank) { if (!filePath.trimmed().isEmpty() && line > 0) dispatchStoppedExecCmd(rank, QStringLiteral("-exec-until %1\n").arg(escapeGdbMiString(QStringLiteral("%1:%2").arg(filePath.trimmed()).arg(line)))); }
+void GdbRankCoordinator::runToAddress(uint64_t address, int rank) { if (address != 0ULL) dispatchStoppedExecCmd(rank, QStringLiteral("-exec-until *0x%1\n").arg(address, 0, 16)); }
+void GdbRankCoordinator::jumpToLocation(const QString& filePath, int line, int rank) { if (!filePath.trimmed().isEmpty() && line > 0) dispatchStoppedExecCmd(rank, QStringLiteral("-exec-jump %1\n").arg(escapeGdbMiString(QStringLiteral("%1:%2").arg(filePath.trimmed()).arg(line)))); }
+void GdbRankCoordinator::jumpToAddress(uint64_t address, int rank) { if (address != 0ULL) dispatchStoppedExecCmd(rank, QStringLiteral("-exec-jump *0x%1\n").arg(address, 0, 16)); }
+void GdbRankCoordinator::forceEarlyReturn(const QString& returnExpr, int rank) {
+  const QString expr = returnExpr.trimmed();
+  if (!expr.contains(QLatin1Char('\n')) && !expr.contains(QLatin1Char('\r')) && !expr.contains(QChar('\0')))
+    dispatchStoppedExecCmd(rank, expr.isEmpty() ? QStringLiteral("-exec-return\n") : QStringLiteral("-exec-return %1\n").arg(expr));
+}
+
 /** @brief Resumes execution across all paused ranks (`-exec-continue`). */
 void GdbRankCoordinator::continueAll() {
   for (size_t i = 0; i < m_processes.size(); ++i) {
@@ -761,7 +779,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         }
         if (handledLogpoint) continue;
       }
-      const bool isStepOrSignal = isWatchTrigger || line.startsWith("^connected") || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"no-history-boundary\"") || line.contains("reason=\"signal-received\"");
+      const bool isStepOrSignal = isWatchTrigger || line.startsWith("^connected") || line.contains("reason=\"end-stepping-range\"") || line.contains("reason=\"location-reached\"") || line.contains("reason=\"no-history-boundary\"") || line.contains("reason=\"signal-received\"");
       if ((rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") && !isStepOrSignal) {
         writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running";
       } else {
