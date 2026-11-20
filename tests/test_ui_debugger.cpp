@@ -40,6 +40,7 @@
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/HpcConsoleWidget.hpp"
 #include "../src/ui/widgets/MpiDiagnosticsWidget.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 #include "../src/ui/widgets/ReferenceManualWidget.hpp"
@@ -761,20 +762,16 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     dialog.applyCompletionItem(QStringLiteral("x")); QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords.x"));
     // 3. Theme Persistence Across App Restart (savePersistedTheme / loadPersistedTheme).
     // Verify that saving tokyo_night persists across transient switches to gridlock_slate.
-    auto& tm = gridlock::core::ThemeManager::instance();
-    tm.applyTheme(QStringLiteral("tokyo_night")); callSavePersistedTheme(tm, 0);
+    auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("tokyo_night")); callSavePersistedTheme(tm, 0);
     tm.applyTheme(QStringLiteral("gridlock_slate"), false); QCOMPARE(tm.activeThemeId(), QStringLiteral("gridlock_slate"));
-    verifyLoadedTheme(callLoadPersistedTheme(tm, 0), tm);
-    tm.applyTheme(QStringLiteral("gridlock_slate")); callSavePersistedTheme(tm, 0);
+    verifyLoadedTheme(callLoadPersistedTheme(tm, 0), tm); tm.applyTheme(QStringLiteral("gridlock_slate")); callSavePersistedTheme(tm, 0);
     // 4. Dirty Buffer Tab Indicators ("●"), saveAllModifiedTabs(), switchHeaderSource(), & Scope Breadcrumbs.
     // Create temporary .cpp and .hpp companion files to exercise dirty buffer and F10 toggle workflows.
     QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
     const QString tempCpp = tempDir.filePath(QStringLiteral("inspection_demo.cpp")), tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
-    { QFile fc(tempCpp); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(inspectionSource.toUtf8()); }
-    { QFile fh(tempHpp); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nstruct DeeplyNested {};\n"); }
+    { QFile fc(tempCpp); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(inspectionSource.toUtf8()); QFile fh(tempHpp); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nstruct DeeplyNested {};\n"); }
     // Open the temporary C++ source file in EditorTabManager.
-    gridlock::ui::EditorTabManager tabManager; auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr);
-    const int idx = tabManager.currentIndex();
+    gridlock::ui::EditorTabManager tabManager; auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr); const int idx = tabManager.currentIndex();
     // Modify text in tabView and verify dirty indicator ("●") and isTabModified(idx) == true.
     // Then invoke saveAllModifiedTabs() and verify dirty state is cleared on disk and tab bar.
     tabView->textCursor().insertText(QStringLiteral("// dirty edit\n")); QApplication::processEvents();
@@ -868,18 +865,17 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     calc.setWordWidth(8); QCOMPARE(calc.value(), 0xEFULL); QVERIFY(!calc.bitButton(8)->isEnabled() && calc.bitButton(0)->isEnabled());
     calc.bitButton(0)->click(); QCOMPARE(calc.value(), 0xEEULL); QCOMPARE(calc.hexText(), QStringLiteral("0xEE"));
     // 3. Bitwise/shift expression evaluation, BSWAP, clickable keypad (0-9, A-F), Input Radix (DEC/HEX/OCT/BIN), and operator chaining.
-    calc.setWordWidth(32); QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("(0x10 << 4) | 0x05")));
-    QCOMPARE(calc.value(), 0x105ULL); QCOMPARE(calc.hexText(), QStringLiteral("0x105"));
+    calc.setWordWidth(32); QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("(0x10 << 4) | 0x05")) && calc.value() == 0x105ULL && calc.hexText() == QStringLiteral("0x105"));
     calc.setValue(0x12345678ULL); calc.byteSwap(); QCOMPARE(calc.value(), 0x78563412ULL);
     auto* acBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpClearBtn")); auto* addBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpAddBtn"));
     auto* shlBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpShlBtn")); auto* eqBtn = calc.findChild<QPushButton*>(QStringLiteral("calcExprEvalBtn"));
     auto* hexRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixHexBtn")); auto* binRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixBinBtn"));
     QVERIFY(acBtn && addBtn && shlBtn && eqBtn && hexRadixBtn && binRadixBtn && !calc.keypadDigitButton(10)->isEnabled());
     acBtn->click(); calc.keypadDigitButton(1)->click(); calc.keypadDigitButton(0)->click(); addBtn->click(); calc.keypadDigitButton(5)->click(); eqBtn->click();
-    QCOMPARE(calc.value(), 15ULL); QCOMPARE(calc.hexText(), QStringLiteral("0xF")); QCOMPARE(calc.decText(), QStringLiteral("15")); QCOMPARE(calc.octText(), QStringLiteral("17")); QCOMPARE(calc.bitButton(3)->text(), QStringLiteral("1"));
+    QVERIFY(calc.value() == 15ULL && calc.hexText() == QStringLiteral("0xF") && calc.decText() == QStringLiteral("15") && calc.octText() == QStringLiteral("17") && calc.bitButton(3)->text() == QStringLiteral("1"));
     hexRadixBtn->click(); QVERIFY(calc.keypadDigitButton(13)->isEnabled() && calc.inputRadix() == 16);
     calc.keypadDigitButton(13)->click(); calc.keypadDigitButton(14)->click(); calc.keypadDigitButton(10)->click(); calc.keypadDigitButton(13)->click(); eqBtn->click();
-    QCOMPARE(calc.value(), 0xDEADULL); QCOMPARE(calc.decText(), QStringLiteral("57005"));
+    QVERIFY(calc.value() == 0xDEADULL && calc.decText() == QStringLiteral("57005"));
     calc.expressionEdit()->clear(); shlBtn->click(); calc.keypadDigitButton(4)->click(); eqBtn->click(); QCOMPARE(calc.value(), 0xDEAD0ULL);
     binRadixBtn->click(); QVERIFY(calc.keypadDigitButton(1)->isEnabled() && !calc.keypadDigitButton(2)->isEnabled());
     // Verify setInitialTextOrValue with float ("3.3f"), float math ("3.3 * 2"), "." key, hex ("0x4011a6", "0xdeadbeefULL"), negative decimals ("-42"), and expressions ("(1 << 8) + 7").
@@ -888,8 +884,7 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     QVERIFY(calc.hasFloatValue() && std::abs(calc.floatValue() - 3.3) < 1e-9 && calc.floatReadoutText().contains(QStringLiteral("0x40533333")) && !statusLbl->text().contains(QStringLiteral("Error")));
     QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("3.3 * 2")) && std::abs(calc.floatValue() - 6.6) < 1e-9 && calc.decText() == QStringLiteral("6") && calc.hexText() == QStringLiteral("0x6"));
     calc.setInitialTextOrValue(QStringLiteral("0x4011a6")); QCOMPARE(calc.hexText(), QStringLiteral("0x4011A6")); QCOMPARE(calc.expressionEdit()->text(), QStringLiteral("0x4011A6"));
-    calc.setWordWidth(64); calc.setSigned(false);
-    calc.setInitialTextOrValue(QStringLiteral("0xdeadbeefULL")); QCOMPARE(calc.value(), 0xDEADBEEFULL); QCOMPARE(calc.hexText(), QStringLiteral("0xDEADBEEF"));
+    calc.setWordWidth(64); calc.setSigned(false); calc.setInitialTextOrValue(QStringLiteral("0xdeadbeefULL")); QCOMPARE(calc.value(), 0xDEADBEEFULL); QCOMPARE(calc.hexText(), QStringLiteral("0xDEADBEEF"));
     calc.setInitialTextOrValue(QStringLiteral("-42")); QCOMPARE(calc.decText(), QStringLiteral("-42"));
     calc.setSigned(false); calc.setInitialTextOrValue(QStringLiteral("(1 << 8) + 7")); QCOMPARE(calc.value(), 263ULL); QCOMPARE(calc.hexText(), QStringLiteral("0x107"));
     // 4. Preferences, Command Palette, Ctrl+Alt+C, keypad button height (>= 26px), and "Open in Programmer's Calculator" signal routing across views.
@@ -908,12 +903,12 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     floatingCalc->close(); QTest::keyClick(&mw, Qt::Key_C, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(floatingCalc->isVisible()); floatingCalc->close();
     QVERIFY(mw.sourceCodeView() && mw.variablesDockWidget() && mw.registerView() && mw.memView() && mw.disassemblyView());
     emit mw.sourceCodeView()->sendToCalculatorRequested(QStringLiteral("0x4011a6")); QApplication::processEvents();
-    QVERIFY(floatingCalc->isVisible()); QCOMPARE(floatingCalc->value(), 0x4011A6ULL); QCOMPARE(floatingCalc->hexText(), QStringLiteral("0x4011A6")); QCOMPARE(floatingCalc->expressionEdit()->text(), QStringLiteral("0x4011A6"));
+    QVERIFY(floatingCalc->isVisible() && floatingCalc->value() == 0x4011A6ULL && floatingCalc->hexText() == QStringLiteral("0x4011A6") && floatingCalc->expressionEdit()->text() == QStringLiteral("0x4011A6"));
     emit mw.variablesDockWidget()->sendToCalculatorRequested(QStringLiteral("0x7fffffffe5a8")); QCOMPARE(floatingCalc->value(), 0x7FFFFFFFE5A8ULL); floatingCalc->close();
     for (const QString& w : s_calcWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }
 
-/** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, and PointerGraphDialog persistent auto-updating roots. */
+/** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     using gridlock::ui::ArrayPlotDialog; using gridlock::ui::PointerGraphDialog;
     // 1. ArrayPlotDialog: decode double, float, and int32_t raw byte buffers into 1D line and 2D heatmap series.
@@ -921,16 +916,12 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(plotDlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotExprEdit")) && plotDlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotAutoRefreshCheck")) && plotDlg.isAutoRefreshEnabled());
     const double d0[4] = {1.0, 2.0, 3.0, 4.0}, d1[4] = {1.0, 9.0, 3.0, std::numeric_limits<double>::quiet_NaN()};
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d0), sizeof(d0)), ArrayPlotDialog::ElementType::Float64, 1, 4));
-    QCOMPARE(plotDlg.currentSamples().size(), 4); QCOMPARE(plotDlg.minValue(), 1.0); QCOMPARE(plotDlg.maxValue(), 4.0);
-    QCOMPARE(plotDlg.meanValue(), 2.5); QVERIFY(std::abs(plotDlg.l2Norm() - std::sqrt(30.0)) < 1e-9 && plotDlg.nanInfCount() == 0);
-    // Second stop snapshot mutating 2 elements + injecting NaN: verify changedElementCount() and nanCount().
+    QVERIFY(plotDlg.currentSamples().size() == 4 && plotDlg.minValue() == 1.0 && plotDlg.maxValue() == 4.0 && plotDlg.meanValue() == 2.5 && std::abs(plotDlg.l2Norm() - std::sqrt(30.0)) < 1e-9 && plotDlg.nanInfCount() == 0);
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d1), sizeof(d1)), ArrayPlotDialog::ElementType::Float64, 2, 2));
-    QCOMPARE(plotDlg.plotMode(), ArrayPlotDialog::PlotMode::Heatmap2D); QCOMPARE(plotDlg.nanCount(), 1); QCOMPARE(plotDlg.changedElementCount(), 2);
-    // Verify float and int32_t decoding plus CSV and PNG export.
+    QVERIFY(plotDlg.plotMode() == ArrayPlotDialog::PlotMode::Heatmap2D && plotDlg.nanCount() == 1 && plotDlg.changedElementCount() == 2);
     const float f0[3] = {-2.5f, 0.0f, 5.5f}; const int32_t i0[4] = {10, 20, 30, 40};
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(f0), sizeof(f0)), QStringLiteral("float"), 1, 3));
-    QCOMPARE(plotDlg.minValue(), -2.5); QCOMPARE(plotDlg.maxValue(), 5.5);
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2)); QCOMPARE(plotDlg.meanValue(), 25.0);
+    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(f0), sizeof(f0)), QStringLiteral("float"), 1, 3) && plotDlg.minValue() == -2.5 && plotDlg.maxValue() == 5.5);
+    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2) && plotDlg.meanValue() == 25.0);
     QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); const QString csvPath = tmpDir.filePath(QStringLiteral("field.csv")), pngPath = tmpDir.filePath(QStringLiteral("field.png"));
     QVERIFY(plotDlg.exportCsv(csvPath) && plotDlg.savePng(pngPath) && QFileInfo::exists(pngPath));
     QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll()); QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));
@@ -939,11 +930,20 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphRefreshBtn")) && pgDlg.findChild<QCheckBox*>(QStringLiteral("pointerGraphAutoRefreshCheck")) && pgDlg.isAutoRefreshEnabled());
     pgDlg.pinRootExpression(QStringLiteral("head"));
     pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("42"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
-    QCOMPARE(pgDlg.pinnedRootExpressions(), QStringList{QStringLiteral("head")}); QCOMPARE(pgDlg.mutatedFieldCount(), 0);
-    // Simulate stop event with updated field value (val: 42 -> 99) and verify root retention + mutation badge.
+    QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
     pgDlg.onTargetStopped(0);
     pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
-    QCOMPARE(pgDlg.pinnedRootExpressions(), QStringList{QStringLiteral("head")});
-    QVERIFY(pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")));
+    QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")));
     QCOMPARE(pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")), QStringLiteral("42 -> 99")); QCOMPARE(pgDlg.mutatedFieldCount(), 1);
+    // 3. Startup QSS disk cache (< 450 ms to MainWindow::show()) and lazy bottom-tab initialization.
+    auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
+    const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
+    QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();
+    const qint64 startupMs = startupTimer.elapsed(); QVERIFY2(startupMs < 450, qPrintable(QStringLiteral("Startup took %1 ms").arg(startupMs)));
+    QApplication::processEvents(); auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* pm = static_cast<gridlock::ui::HpcConsoleWidget*>(mw.findChild<QWidget*>(QStringLiteral("HpcConsoleDock")));
+    auto* term = mw.findChild<gridlock::ui::TerminalDockWidget*>(); auto* ref = mw.findChild<gridlock::ui::ReferenceManualWidget*>();
+    QVERIFY(bottomTabs && pm && term && ref && !pm->isPackagesLoaded() && !term->isShellStarted() && !ref->isDocsetsInitialized());
+    bottomTabs->setCurrentWidget(term); QApplication::processEvents(); bottomTabs->setCurrentWidget(ref); QApplication::processEvents(); bottomTabs->setCurrentWidget(pm); QApplication::processEvents();
+    QVERIFY(term->isShellStarted() && ref->isDocsetsInitialized() && pm->isPackagesLoaded());
 }

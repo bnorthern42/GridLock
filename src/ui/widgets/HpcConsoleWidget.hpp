@@ -148,6 +148,22 @@ public:
      */
     Q_INVOKABLE void reloadStyle();
 
+    /**
+     * @brief Lazily triggers an asynchronous background query of installed host packages on first view.
+     */
+    void ensurePackagesLoaded();
+
+    /**
+     * @brief Returns true once the initial package query has been triggered or completed.
+     */
+    bool isPackagesLoaded() const { return m_packagesLoaded; }
+
+protected:
+    /**
+     * @brief Triggers lazy asynchronous package loading when the Package Manager tab is first shown.
+     */
+    void showEvent(QShowEvent* event) override;
+
 private:
     /**
      * @brief Re-renders m_packageTable and m_listBrowser applying the active status filter.
@@ -185,6 +201,7 @@ private:
     QVector<PackageRecord> m_allRecords;
     QString m_lastRawOutput;
     int m_visibleCount = 0;
+    bool m_packagesLoaded = false;
 };
 
 }  // namespace gridlock::ui

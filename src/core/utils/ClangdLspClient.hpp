@@ -322,6 +322,11 @@ private:
     void sendJsonRpc(const QJsonObject& payload);
 
     /**
+     * @brief Flushes any queued JSON-RPC frames once the clangd QProcess transitions to Running.
+     */
+    void flushPendingOutbound();
+
+    /**
      * @brief Drains complete Content-Length JSON-RPC frames from stdout, caching responses and emitting diagnostics.
      */
     void drainIncomingMessages();
@@ -333,7 +338,8 @@ private:
 
     QProcess* m_process = nullptr;                        ///< Persistent clangd stdio child process.
     QByteArray m_readBuffer;                              ///< Accumulator buffer for incoming Content-Length frames.
-    bool m_initialized = false;                           ///< True after initialize/initialized handshake completes.
+    QVector<QByteArray> m_pendingOutboundFrames;          ///< Outbound LSP frames queued while clangd is starting.
+    bool m_initialized = false;                           ///< True after initialize/initialized handshake is queued or completed.
     int m_nextRequestId = 1;                              ///< Monotonically increasing JSON-RPC request identifier.
     int m_documentVersion = 1;                            ///< Monotonically increasing virtual document version counter.
     quint64 m_activeCompletionSeq = 0;                    ///< Monotonically increasing async completion sequence ID.

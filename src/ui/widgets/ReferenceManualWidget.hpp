@@ -71,6 +71,16 @@ public:
      */
     QLineEdit* searchEdit() const { return m_searchEdit; }
 
+    /** @brief Lazily discovers installed Zeal docsets and renders the initial MPI_Init card. */
+    void ensureDocsetsInitialized();
+
+    /** @brief Returns true once Zeal docset discovery has run for this viewer. */
+    bool isDocsetsInitialized() const { return m_docsetsInitialized; }
+
+protected:
+    /** @brief Triggers lazy docset discovery when the Reference Manual tab is first displayed. */
+    void showEvent(QShowEvent* event) override;
+
 private slots:
     /**
      * @brief Executes keyword search across available docset indices.
@@ -88,6 +98,7 @@ private:
     QLineEdit* m_searchEdit = nullptr;
     QListWidget* m_resultsList = nullptr;
     QTextBrowser* m_textBrowser = nullptr;
+    bool m_docsetsInitialized = false;
     
     /// Pairs of <Keyword, AbsoluteHTMLPath> for easy access
     QList<QPair<QString, QString>> m_searchResults;
@@ -174,6 +185,16 @@ public:
      * @return Header bar height in pixels.
      */
     int headerBarHeight() const;
+
+    /** @brief Lazily discovers installed Zeal docsets and initializes the DocsetViewerWidget. */
+    void ensureDocsetsInitialized();
+
+    /** @brief Returns true once Zeal docset discovery has run for the embedded DocsetViewerWidget. */
+    bool isDocsetsInitialized() const { return m_docsetViewer && m_docsetViewer->isDocsetsInitialized(); }
+
+protected:
+    /** @brief Triggers lazy docset discovery when the Reference Manual tab is first displayed. */
+    void showEvent(QShowEvent* event) override;
 
 private:
     QWidget* m_headerBar = nullptr;

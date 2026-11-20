@@ -69,6 +69,9 @@ public:
     /** @brief Returns the currently active compiled QSS stylesheet string. */
     QString currentStyleSheet() const { return m_currentStyleSheet; }
 
+    /** @brief Returns the on-disk QSS cache file path for a given theme identifier. */
+    QString cachedQssFilePath(const QString& themeId) const;
+
     /**
      * @brief Applies a theme by identifier, automatically deriving dark/light polarity from the theme.
      * @param themeName Curated theme identifier (e.g., "gridlock_slate", "daylight_light", "solarized_light", "catppuccin_latte").

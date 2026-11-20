@@ -182,9 +182,8 @@ int main(int argc, char* argv[]) {
   g_isVerbose = parser.isVerbose();
   qInstallMessageHandler(gridlockMessageHandler);
 
-  // Instantiate the primary workstation window and synchronize its live debugger coordinator (`gdb` or `lldb-dap`).
+  // Instantiate the primary workstation window (which synchronizes its live debugger coordinator internally).
   gridlock::ui::MainWindow window;
-  window.syncCoordinatorWithConfig();
 
   // Ensure initial geometry has suitable workstation dimensions before showing.
   if (window.width() < 1440 || window.height() < 900) {

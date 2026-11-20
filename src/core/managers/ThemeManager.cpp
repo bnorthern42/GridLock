@@ -17,10 +17,13 @@
 
 #include "ThemeManager.hpp"
 #include "ConfigManager.hpp"
+#include "../Version.hpp"
 
 #include <QApplication>
 #include <QColor>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QFont>
 #include <QPalette>
 #include <QSettings>
@@ -602,11 +605,13 @@ static QString buildDynamicWorkstationQss(const QString& baseQss, bool isDark, i
  * @brief Initializes QtAdvancedStylesheet paths, loads user preferences, and applies persisted theme.
  */
 void ThemeManager::initialize() {
-    const QString stylesDir = QStringLiteral(":/styles");
-    m_advancedStylesheet->setStylesDirPath(stylesDir);
-    m_advancedStylesheet->setOutputDirPath(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/acss"));
-    m_advancedStylesheet->setCurrentStyle(QStringLiteral("qt_material"));
     loadPersistedTheme();
+}
+
+/** @brief Returns the on-disk QSS cache file path for a given theme identifier. */
+QString ThemeManager::cachedQssFilePath(const QString& themeId) const {
+    const QString acssDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/acss");
+    return acssDir + QStringLiteral("/%1-%2.qss").arg(themeId.trimmed(), gridlock::core::Version::getString());
 }
 
 /** @brief Returns the list of curated workstation themes. */
@@ -636,25 +641,55 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
     QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
     const int uiFontSize = s.value(QStringLiteral("appearance/ui_font_size"), 11).toInt();
     const QString uiFontFamily = s.value(QStringLiteral("appearance/ui_font_family"), QString()).toString();
+    const QString acssDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/acss");
 
-    static QMap<QString, QString> s_acssCache;
-    QString baseAcss;
-    if (m_advancedStylesheet) {
-        const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
-        const QString cacheKey = acssTheme + QLatin1Char(':') + QString::number(uiFontSize);
-        if (s_acssCache.contains(cacheKey)) {
-            baseAcss = s_acssCache.value(cacheKey);
-        } else if (m_advancedStylesheet->themes().contains(acssTheme) || m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
-            m_advancedStylesheet->setCurrentTheme(m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
-            m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
-            m_advancedStylesheet->updateStylesheet();
-            baseAcss = m_advancedStylesheet->styleSheet();
-            s_acssCache.insert(cacheKey, baseAcss);
+    const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
+    const QString svgThemeDir = acssDir + QStringLiteral("/qt_material/") + acssTheme;
+    const QString qssCacheFile = cachedQssFilePath(m_activeThemeId);
+    const QString fontTag = QStringLiteral("/* gridlock-font:%1:%2 */\n").arg(uiFontFamily.trimmed()).arg(uiFontSize);
+
+    bool loadedFromDiskCache = false;
+    if (QFileInfo::exists(qssCacheFile) && QFileInfo(qssCacheFile).size() > 0 && QDir(svgThemeDir).exists()) {
+        QFile cf(qssCacheFile);
+        if (cf.open(QIODevice::ReadOnly)) {
+            const QString cached = QString::fromUtf8(cf.readAll());
+            if (cached.startsWith(fontTag)) {
+                m_currentStyleSheet = cached;
+                loadedFromDiskCache = true;
+            }
         }
     }
+
+    if (!loadedFromDiskCache) {
+        if (m_advancedStylesheet && m_advancedStylesheet->outputDirPath().isEmpty()) {
+            m_advancedStylesheet->setStylesDirPath(QStringLiteral(":/styles"));
+            m_advancedStylesheet->setOutputDirPath(acssDir);
+            m_advancedStylesheet->setCurrentStyle(QStringLiteral("qt_material"));
+        }
+        static QMap<QString, QString> s_acssCache;
+        QString baseAcss;
+        if (m_advancedStylesheet) {
+            const QString cacheKey = acssTheme + QLatin1Char(':') + QString::number(uiFontSize);
+            if (s_acssCache.contains(cacheKey)) {
+                baseAcss = s_acssCache.value(cacheKey);
+            } else if (m_advancedStylesheet->themes().contains(acssTheme) || m_advancedStylesheet->themes().contains(acssTheme + ".xml")) {
+                m_advancedStylesheet->setCurrentTheme(m_advancedStylesheet->themes().contains(acssTheme + ".xml") ? acssTheme + ".xml" : acssTheme);
+                m_advancedStylesheet->setThemeVariableValue("font_size", QString("%1pt").arg(uiFontSize));
+                m_advancedStylesheet->updateStylesheet();
+                baseAcss = m_advancedStylesheet->styleSheet();
+                s_acssCache.insert(cacheKey, baseAcss);
+            }
+        }
+        m_currentStyleSheet = fontTag + buildDynamicWorkstationQss(baseAcss, m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
+        if (!m_currentStyleSheet.isEmpty()) {
+            QDir().mkpath(acssDir);
+            QFile cf(qssCacheFile);
+            if (cf.open(QIODevice::WriteOnly | QIODevice::Truncate)) cf.write(m_currentStyleSheet.toUtf8());
+        }
+    }
+
     const ThemePalette activePal = paletteForTheme(m_activeThemeId);
     applyApplicationPalette(activePal);
-    m_currentStyleSheet = buildDynamicWorkstationQss(baseAcss, m_darkMode, uiFontSize, uiFontFamily, m_activeThemeId);
     if (qApp) {
         const bool themeOrQssChanged = (qApp->property("gridlock_active_theme").toString() != m_activeThemeId) ||
                                        (qApp->styleSheet() != m_currentStyleSheet);

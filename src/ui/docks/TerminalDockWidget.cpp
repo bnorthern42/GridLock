@@ -18,6 +18,7 @@
 #include <QFontInfo>
 #include <QProcessEnvironment>
 #include <QSizePolicy>
+#include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <qtermwidget.h>
@@ -75,10 +76,9 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Instantiate QTermWidget backend.
+    // Instantiate QTermWidget backend without starting shell process yet.
     m_termWidget = new QTermWidget(0, this);
     m_termWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    // Isolate terminal canvas from external stylesheet cascading padding/margins.
     m_termWidget->setStyleSheet(QStringLiteral(
         "QTermWidget, QTermWidget QWidget { padding: 0px; margin: 0px; border: none; font-family: monospace; }"));
 
@@ -87,24 +87,14 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
 
     // Set default standard terminal environment parameters.
     QStringList env;
-    env << "TERM=xterm-256color" << "COLORTERM=truecolor";
+    env << QStringLiteral("TERM=xterm-256color") << QStringLiteral("COLORTERM=truecolor");
     setEnvironment(env);
+    setColorScheme(QStringLiteral("DarkPastels"));
 
-    // Apply default dark theme color scheme.
-    setColorScheme("DarkPastels");
-
-    // Launch underlying shell process.
     m_termWidget->startShellProgram();
 
-    // Enforce fixed-pitch monospace typography at startup and install recursive event filters.
     m_activeFont = resolveMonospaceFont(ts.fontFamily, ts.fontSize);
     installEventFilter(this);
-    enforceMonospaceOnChildren();
-
-    // Delay second pass to next event loop iteration after VT100 TerminalDisplay is constructed.
-    QTimer::singleShot(0, this, [this]() {
-        enforceMonospaceOnChildren();
-    });
 
     layout->addWidget(m_termWidget, 1);
 }
@@ -116,6 +106,17 @@ TerminalDockWidget::~TerminalDockWidget() {
         m_termWidget->blockSignals(true);
         m_termWidget->disconnect(this);
     }
+}
+
+void TerminalDockWidget::ensureShellStarted() {
+    if (m_shellStarted || !m_termWidget) return;
+    m_shellStarted = true;
+    enforceMonospaceOnChildren();
+}
+
+void TerminalDockWidget::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    ensureShellStarted();
 }
 
 /**
@@ -191,8 +192,9 @@ bool TerminalDockWidget::eventFilter(QObject* watched, QEvent* event) {
  */
 bool TerminalDockWidget::areAllChildWidgetsFixedPitch() const {
     if (!m_termWidget) {
-        return false;
+        return m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch();
     }
+    const_cast<TerminalDockWidget*>(this)->enforceMonospaceOnChildren();
     for (const QWidget* child : findChildren<const QWidget*>()) {
         if (!child->font().fixedPitch() && !QFontInfo(child->font()).fixedPitch()) {
             return false;
@@ -235,7 +237,7 @@ QFont TerminalDockWidget::activeTerminalFont() const {
     if (m_activeFont.fixedPitch() || QFontInfo(m_activeFont).fixedPitch()) {
         return m_activeFont;
     }
-    return m_termWidget->getTerminalFont();
+    return m_termWidget ? m_termWidget->getTerminalFont() : m_activeFont;
 }
 
 /**
@@ -255,7 +257,7 @@ QFont TerminalDockWidget::terminalFont() const {
  */
 void TerminalDockWidget::setColorScheme(const QString& scheme) {
     m_colorScheme = scheme;
-    m_termWidget->setColorScheme(scheme);
+    if (m_termWidget) m_termWidget->setColorScheme(scheme);
 }
 
 /**
@@ -271,7 +273,8 @@ QString TerminalDockWidget::colorScheme() const {
  * @param lines Number of history lines.
  */
 void TerminalDockWidget::setScrollbackLines(int lines) {
-    m_termWidget->setHistorySize(lines);
+    m_scrollbackLines = lines;
+    if (m_termWidget) m_termWidget->setHistorySize(lines);
 }
 
 /**
@@ -279,7 +282,7 @@ void TerminalDockWidget::setScrollbackLines(int lines) {
  * @return Line count.
  */
 int TerminalDockWidget::scrollbackLines() const {
-    return m_termWidget->historySize();
+    return m_termWidget ? m_termWidget->historySize() : m_scrollbackLines;
 }
 
 /**
@@ -288,7 +291,7 @@ int TerminalDockWidget::scrollbackLines() const {
  */
 void TerminalDockWidget::setEnvironment(const QStringList& env) {
     m_environment = env;
-    m_termWidget->setEnvironment(env);
+    if (m_termWidget) m_termWidget->setEnvironment(env);
 }
 
 /**
@@ -305,6 +308,7 @@ QStringList TerminalDockWidget::environment() const {
  */
 void TerminalDockWidget::sendCommand(const QString& command) {
     m_lastSentCommand = command.trimmed();
+    ensureShellStarted();
     if (m_termWidget != nullptr && !m_lastSentCommand.isEmpty() &&
         m_termWidget->getShellPID() > 0) {
         // Dispatch command text followed by newline to trigger interactive shell execution.

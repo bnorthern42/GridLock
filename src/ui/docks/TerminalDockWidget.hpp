@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <QElapsedTimer>
 #include <QFont>
 #include <QString>
 #include <QStringList>
@@ -127,7 +128,22 @@ public:
      */
     bool areAllChildWidgetsFixedPitch() const;
 
+    /**
+     * @brief Lazily starts the underlying interactive shell PTY if it has not been launched yet.
+     */
+    void ensureShellStarted();
+
+    /**
+     * @brief Returns true once the underlying shell PTY has been started.
+     */
+    bool isShellStarted() const { return m_shellStarted; }
+
 protected:
+    /**
+     * @brief Lazily launches the interactive shell PTY when the Terminal tab is first shown.
+     */
+    void showEvent(QShowEvent* event) override;
+
     /**
      * @brief Intercepts FontChange, StyleChange, and ChildAdded events to lock fixed-pitch font and full-width geometry.
      * @param watched Target QObject receiving the event.
@@ -150,6 +166,9 @@ private:
     QString m_lastSentCommand;             ///< Most recent shell command sent via sendCommand().
     QString m_currentWorkingDir;           ///< Canonical active working directory for the shell PTY.
     bool m_applyingFontGuard{false};       ///< Reentrancy guard preventing recursive FontChange loops.
+    bool m_shellStarted{false};            ///< True once m_termWidget->startShellProgram() has been invoked.
+    int m_scrollbackLines{1000};           ///< Configured scrollback buffer capacity in lines.
+    QElapsedTimer m_shellStartTimer;       ///< Tracks elapsed time since startShellProgram() for initial PTY readiness.
 };
 
 }  // namespace gridlock::ui

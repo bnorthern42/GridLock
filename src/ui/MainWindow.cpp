@@ -165,7 +165,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   qApp->installEventFilter(this);
 
   // Eagerly load default source file so UI is populated before running.
-  m_lspCoordinator = new gridlock::core::LspCoordinator(this);
   m_plainJaneTooltip = new gridlock::PlainJaneTooltip(this);
   if (m_targetSelector) {
     // Register the full 7-program MPI showcase suite ahead of the Open ELF / Binary... item.
@@ -253,8 +252,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Listen for global theme mode change events from ThemeManager singleton.
   connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
           this, [this]() { propagateThemeToAllWidgets(); });
-  // Restore persisted theme choice and synchronize toolbar CTA, ribbons, and dock headers.
-  gridlock::core::ThemeManager::instance().loadPersistedTheme();
+  // Only load persisted theme if ThemeManager::initialize() has not already populated the global QSS.
+  if (gridlock::core::ThemeManager::instance().currentStyleSheet().isEmpty()) {
+    gridlock::core::ThemeManager::instance().loadPersistedTheme();
+  }
   propagateThemeToAllWidgets();
   // Balance right-sidebar zones: 380px wide, 55% top tabbed inspector, 45% bottom Server Rack.
   if (auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"))) {
@@ -838,12 +839,16 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   if (event->type() == QEvent::Show || event->type() == QEvent::Polish) {
     if (auto *fd = qobject_cast<QFileDialog *>(watched))
       FileDialogHelper::configureFileDialog(fd, !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : (m_projectExplorerWidget ? m_projectExplorerWidget->rootPath() : QString()));
+    if (auto *psPre = qobject_cast<ProjectSettingsDialog *>(watched)) {
+      if (m_terminalDock) m_terminalDock->ensureShellStarted();
+      if (!psPre->property("_glWd").toBool()) { psPre->setProperty("_glWd", true); connect(psPre, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); if (!m_activeWorkspaceDir.isEmpty()) saveSession(false); }); }
+    }
     if (event->type() == QEvent::Show) {
       if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
         connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
         connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
         if (m_editorTabManager) connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
-      } else if (auto *ps = qobject_cast<ProjectSettingsDialog *>(watched); ps && !ps->property("_glWd").toBool()) { ps->setProperty("_glWd", true); connect(ps, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); if (!m_activeWorkspaceDir.isEmpty()) saveSession(false); }); }
+      }
     }
   }
   // Ensure status-bar Host/Target telemetry populates immediately on initial status bar paint.

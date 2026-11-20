@@ -314,11 +314,8 @@ HpcConsoleWidget::HpcConsoleWidget(gridlock::core::HpcBackend* backend,
         });
     }
 
-    // Query real installed host packages on startup so the view reflects authentic OS packages.
-    const QString activePm = activePackageManagerBackend();
-    QString rawStartup;
-    const QVector<PackageRecord> initialInstalled = queryLocalInstalledPackages(activePm, QString(), &rawStartup);
-    displayPackageRecords(initialInstalled, rawStartup);
+    // Defer installed host package query until the Package Manager tab is first shown or searched.
+    if (m_countLabel) m_countLabel->setText(tr("0 packages"));
     setViewMode(QStringLiteral("Table"));
 }
 
@@ -332,7 +329,8 @@ HpcConsoleWidget::HpcConsoleWidget(gridlock::core::HpcBackend* backend,
  * @return Ordered list of available package manager identifiers on the host system.
  */
 QStringList HpcConsoleWidget::detectAvailablePackageManagers() {
-    QStringList detected;
+    static QStringList s_detected;
+    if (!s_detected.isEmpty()) return s_detected;
     // Check Spack, Pacman, DNF, APT, Zypper, RPM, DPKG, and EasyBuild in priority order.
     struct Candidate {
         const char* binary;
@@ -345,20 +343,14 @@ QStringList HpcConsoleWidget::detectAvailablePackageManagers() {
         {"rpm", "rpm"},           {"dpkg-query", "dpkg"},
         {"eb", "eb"},
     };
-    // Probe each candidate executable on the system PATH and record unique backend IDs.
     for (const auto& cand : kCandidates) {
         if (!QStandardPaths::findExecutable(QString::fromLatin1(cand.binary)).isEmpty()) {
             const QString id = QString::fromLatin1(cand.id);
-            if (!detected.contains(id)) {
-                detected.append(id);
-            }
+            if (!s_detected.contains(id)) s_detected.append(id);
         }
     }
-    // Guarantee a non-empty fallback identifier even inside minimal container environments.
-    if (detected.isEmpty()) {
-        detected.append(QStringLiteral("rpm"));
-    }
-    return detected;
+    if (s_detected.isEmpty()) s_detected.append(QStringLiteral("rpm"));
+    return s_detected;
 }
 
 /**
@@ -691,26 +683,19 @@ int HpcConsoleWidget::visiblePackageCount() const {
  */
 QVector<PackageRecord> HpcConsoleWidget::queryLocalInstalledPackages(
     const QString& backend, const QString& filterQuery, QString* outRawLog) const {
-    const QString pm = backend.trimmed().toLower();
-    const QString q = filterQuery.trimmed();
-    QString prog, parseTag = pm;
-    QStringList args;
-    // Select native fast local database dump command for RPM, DPKG, or Pacman systems.
+    const QString pm = backend.trimmed().toLower(), q = filterQuery.trimmed();
+    QString prog, parseTag = pm; QStringList args;
     if ((pm == QLatin1String("dnf") || pm == QLatin1String("rpm") || pm == QLatin1String("zypper")) &&
         !QStandardPaths::findExecutable(QStringLiteral("rpm")).isEmpty()) {
-        prog = QStringLiteral("rpm");
-        args = {QStringLiteral("-qa"), QStringLiteral("--qf"),
-                QStringLiteral("%{NAME}|%{VERSION}-%{RELEASE}|%{ARCH}|installed|Installed|%{SUMMARY}\n")};
-        parseTag = QStringLiteral("rpm");
+        prog = QStringLiteral("rpm"); parseTag = QStringLiteral("rpm");
+        args = {QStringLiteral("-qa"), QStringLiteral("--qf"), QStringLiteral("%{NAME}|%{VERSION}-%{RELEASE}|%{ARCH}|installed|Installed|%{SUMMARY}\n")};
     } else if ((pm == QLatin1String("apt") || pm == QLatin1String("dpkg")) &&
                !QStandardPaths::findExecutable(QStringLiteral("dpkg-query")).isEmpty()) {
-        prog = QStringLiteral("dpkg-query");
+        prog = QStringLiteral("dpkg-query"); parseTag = QStringLiteral("dpkg");
         args = {QStringLiteral("-W"), QStringLiteral("-f=${Package}|${Version}|${Architecture}|installed|Installed|${binary:Summary}\n")};
-        parseTag = QStringLiteral("dpkg");
     } else if (pm == QLatin1String("pacman") && !QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty()) {
-        prog = QStringLiteral("pacman");
+        prog = QStringLiteral("pacman"); parseTag = QStringLiteral("pacman");
         args = q.isEmpty() ? QStringList{QStringLiteral("-Qs")} : QStringList{QStringLiteral("-Qs"), q};
-        parseTag = QStringLiteral("pacman");
     }
     QVector<PackageRecord> matched;
     if (prog.isEmpty()) return matched;
@@ -722,34 +707,77 @@ QVector<PackageRecord> HpcConsoleWidget::queryLocalInstalledPackages(
     if (prog != QLatin1String("pacman") && s_cachedLocalProg == prog && !s_cachedLocalRecords.isEmpty()) {
         allLocal = s_cachedLocalRecords;
     } else {
-        QProcess proc;
-        proc.start(prog, args);
+        QProcess proc; proc.start(prog, args);
         if (proc.waitForFinished(2500) && proc.exitStatus() == QProcess::NormalExit) {
             allLocal = parsePackageManagerOutput(parseTag, QString::fromUtf8(proc.readAllStandardOutput()));
             std::sort(allLocal.begin(), allLocal.end(), [](const PackageRecord& a, const PackageRecord& b) {
                 return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
             });
-            if (prog != QLatin1String("pacman") && !allLocal.isEmpty()) {
-                s_cachedLocalProg = prog;
-                s_cachedLocalRecords = allLocal;
-            }
+            if (prog != QLatin1String("pacman") && !allLocal.isEmpty()) { s_cachedLocalProg = prog; s_cachedLocalRecords = allLocal; }
         }
     }
 
     // Filter local records by query (or cap initial unfiltered startup view to first 12 sorted packages).
     QString rawBuilder = QStringLiteral("$ %1 %2\n").arg(prog, args.join(QLatin1Char(' ')));
     for (const auto& rec : allLocal) {
-        if (!q.isEmpty() && !rec.name.contains(q, Qt::CaseInsensitive) &&
-            !rec.description.contains(q, Qt::CaseInsensitive)) {
-            continue;
-        }
+        if (!q.isEmpty() && !rec.name.contains(q, Qt::CaseInsensitive) && !rec.description.contains(q, Qt::CaseInsensitive)) continue;
         matched.append(rec);
-        rawBuilder += QStringLiteral("%1|%2|%3|%4|%5|%6\n")
-                          .arg(rec.name, rec.version, rec.arch, rec.repository, rec.status, rec.description);
+        rawBuilder += QStringLiteral("%1|%2|%3|%4|%5|%6\n").arg(rec.name, rec.version, rec.arch, rec.repository, rec.status, rec.description);
         if (q.isEmpty() && matched.size() >= 12) break;
     }
     if (outRawLog) *outRawLog = rawBuilder;
     return matched;
+}
+
+void HpcConsoleWidget::ensurePackagesLoaded() {
+    if (m_packagesLoaded) return;
+    m_packagesLoaded = true;
+    const QString pm = activePackageManagerBackend().trimmed().toLower();
+    QString prog, parseTag = pm; QStringList args;
+    if ((pm == QLatin1String("dnf") || pm == QLatin1String("rpm") || pm == QLatin1String("zypper")) &&
+        !QStandardPaths::findExecutable(QStringLiteral("rpm")).isEmpty()) {
+        prog = QStringLiteral("rpm"); parseTag = QStringLiteral("rpm");
+        args = {QStringLiteral("-qa"), QStringLiteral("--qf"), QStringLiteral("%{NAME}|%{VERSION}-%{RELEASE}|%{ARCH}|installed|Installed|%{SUMMARY}\n")};
+    } else if ((pm == QLatin1String("apt") || pm == QLatin1String("dpkg")) &&
+               !QStandardPaths::findExecutable(QStringLiteral("dpkg-query")).isEmpty()) {
+        prog = QStringLiteral("dpkg-query"); parseTag = QStringLiteral("dpkg");
+        args = {QStringLiteral("-W"), QStringLiteral("-f=${Package}|${Version}|${Architecture}|installed|Installed|${binary:Summary}\n")};
+    } else if (pm == QLatin1String("pacman") && !QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty()) {
+        prog = QStringLiteral("pacman"); parseTag = QStringLiteral("pacman"); args = {QStringLiteral("-Qs")};
+    }
+    if (prog.isEmpty()) return;
+    if (m_allRecords.isEmpty()) {
+        displayPackageRecords({{QStringLiteral("Loading installed packages..."), QStringLiteral("..."),
+                                QStringLiteral("host"), pm, QStringLiteral("Installed"),
+                                QStringLiteral("Querying local package database in background...")}},
+                              QStringLiteral("$ %1 %2\nLoading installed packages...\n").arg(prog, args.join(QLatin1Char(' '))));
+    }
+    auto* proc = new QProcess(this);
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, proc, prog, args, parseTag](int, QProcess::ExitStatus status) {
+                if (status == QProcess::NormalExit && (m_searchEdit == nullptr || m_searchEdit->text().trimmed().isEmpty())) {
+                    QVector<PackageRecord> allLocal = parsePackageManagerOutput(parseTag, QString::fromUtf8(proc->readAllStandardOutput()));
+                    std::sort(allLocal.begin(), allLocal.end(), [](const PackageRecord& a, const PackageRecord& b) {
+                        return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+                    });
+                    QVector<PackageRecord> matched;
+                    QString rawBuilder = QStringLiteral("$ %1 %2\n").arg(prog, args.join(QLatin1Char(' ')));
+                    for (const auto& rec : allLocal) {
+                        matched.append(rec);
+                        rawBuilder += QStringLiteral("%1|%2|%3|%4|%5|%6\n")
+                                          .arg(rec.name, rec.version, rec.arch, rec.repository, rec.status, rec.description);
+                        if (matched.size() >= 12) break;
+                    }
+                    displayPackageRecords(matched, rawBuilder);
+                }
+                proc->deleteLater();
+            });
+    proc->start(prog, args);
+}
+
+void HpcConsoleWidget::showEvent(QShowEvent* event) {
+    SpackManager::showEvent(event);
+    ensurePackagesLoaded();
 }
 
 /**
@@ -758,16 +786,13 @@ QVector<PackageRecord> HpcConsoleWidget::queryLocalInstalledPackages(
 QVector<PackageRecord> HpcConsoleWidget::mergePackageRecords(
     const QVector<PackageRecord>& installed, const QVector<PackageRecord>& repoRecords) {
     QVector<PackageRecord> merged = installed;
-    // Append repository records not already present in installed, or enrich missing descriptions.
     for (const auto& repoRec : repoRecords) {
         bool exists = false;
         for (auto& instRec : merged) {
             if (instRec.name.compare(repoRec.name, Qt::CaseInsensitive) == 0 &&
                 (instRec.arch.compare(repoRec.arch, Qt::CaseInsensitive) == 0 ||
                  instRec.arch.isEmpty() || repoRec.arch.isEmpty())) {
-                if (instRec.description.isEmpty() && !repoRec.description.isEmpty()) {
-                    instRec.description = repoRec.description;
-                }
+                if (instRec.description.isEmpty() && !repoRec.description.isEmpty()) instRec.description = repoRec.description;
                 exists = true;
                 break;
             }
@@ -781,20 +806,15 @@ namespace {
 // Resolves the repository search executable and arguments for a given backend and query.
 void resolveRepoSearchCommand(const QString& pm, const QString& q, QString* outProg, QStringList* outArgs) {
     if (pm == QLatin1String("dnf") && !QStandardPaths::findExecutable(QStringLiteral("dnf")).isEmpty()) {
-        *outProg = QStringLiteral("dnf");
-        *outArgs = {QStringLiteral("--quiet"), QStringLiteral("search"), q};
+        *outProg = QStringLiteral("dnf"); *outArgs = {QStringLiteral("--quiet"), QStringLiteral("search"), q};
     } else if (pm == QLatin1String("pacman") && !QStandardPaths::findExecutable(QStringLiteral("pacman")).isEmpty()) {
-        *outProg = QStringLiteral("pacman");
-        *outArgs = {QStringLiteral("-Ss"), q};
+        *outProg = QStringLiteral("pacman"); *outArgs = {QStringLiteral("-Ss"), q};
     } else if (pm == QLatin1String("apt") && !QStandardPaths::findExecutable(QStringLiteral("apt-cache")).isEmpty()) {
-        *outProg = QStringLiteral("apt-cache");
-        *outArgs = {QStringLiteral("search"), q};
+        *outProg = QStringLiteral("apt-cache"); *outArgs = {QStringLiteral("search"), q};
     } else if (pm == QLatin1String("zypper") && !QStandardPaths::findExecutable(QStringLiteral("zypper")).isEmpty()) {
-        *outProg = QStringLiteral("zypper");
-        *outArgs = {QStringLiteral("--non-interactive"), QStringLiteral("se"), QStringLiteral("-s"), q};
+        *outProg = QStringLiteral("zypper"); *outArgs = {QStringLiteral("--non-interactive"), QStringLiteral("se"), QStringLiteral("-s"), q};
     } else if (pm == QLatin1String("spack") && !QStandardPaths::findExecutable(QStringLiteral("spack")).isEmpty()) {
-        *outProg = QStringLiteral("spack");
-        *outArgs = {QStringLiteral("list"), QStringLiteral("-d"), q};
+        *outProg = QStringLiteral("spack"); *outArgs = {QStringLiteral("list"), QStringLiteral("-d"), q};
     }
 }
 }  // namespace
@@ -803,12 +823,10 @@ void resolveRepoSearchCommand(const QString& pm, const QString& q, QString* outP
  * @brief Synchronously queries local installed and remote repository packages for query.
  */
 int HpcConsoleWidget::searchPackagesSynchronously(const QString& query, int timeoutMs) {
-    const QString pm = activePackageManagerBackend();
-    const QString q = query.trimmed();
+    m_packagesLoaded = true;
+    const QString pm = activePackageManagerBackend(), q = query.trimmed();
     if (m_searchEdit && m_searchEdit->text() != q) {
-        m_searchEdit->blockSignals(true);
-        m_searchEdit->setText(q);
-        m_searchEdit->blockSignals(false);
+        m_searchEdit->blockSignals(true); m_searchEdit->setText(q); m_searchEdit->blockSignals(false);
     }
     // Stage 1: Instant local installed package query.
     QString rawLocal;
@@ -819,17 +837,13 @@ int HpcConsoleWidget::searchPackagesSynchronously(const QString& query, int time
         return visiblePackageCount();
     }
     // Stage 2: Remote/repository query without -C so unprivileged user searches succeed.
-    QString prog;
-    QStringList args;
+    QString prog; QStringList args;
     resolveRepoSearchCommand(pm, q, &prog, &args);
-    QVector<PackageRecord> repoMatches;
-    QString rawRepo;
+    QVector<PackageRecord> repoMatches; QString rawRepo;
     if (!prog.isEmpty()) {
-        QProcess proc;
-        proc.start(prog, args);
+        QProcess proc; proc.start(prog, args);
         if (!proc.waitForFinished(timeoutMs) && proc.state() != QProcess::NotRunning) {
-            proc.kill();
-            proc.waitForFinished(500);
+            proc.kill(); proc.waitForFinished(500);
         }
         rawRepo = QString::fromUtf8(proc.readAllStandardOutput());
         repoMatches = parsePackageManagerOutput(pm, rawRepo);
@@ -844,24 +858,19 @@ int HpcConsoleWidget::searchPackagesSynchronously(const QString& query, int time
  * @brief Executes an asynchronous two-stage package query against the active host backend.
  */
 void HpcConsoleWidget::executePackageSearch(const QString& query) {
-    const QString pm = activePackageManagerBackend();
-    const QString q = query.trimmed();
-    // Stage 1: Immediately populate local installed matches so the UI responds in < 50ms.
+    m_packagesLoaded = true;
+    const QString pm = activePackageManagerBackend(), q = query.trimmed();
     QString rawLocal;
     const QVector<PackageRecord> localMatches = queryLocalInstalledPackages(pm, q, &rawLocal);
     displayPackageRecords(localMatches, rawLocal);
     const int statusMode = m_statusFilterCombo ? m_statusFilterCombo->currentIndex() : 0;
     if (q.isEmpty() || statusMode == 1 || !m_searchProcess) return;
 
-    // Stage 2: Launch asynchronous repository search via m_searchProcess.
     if (m_searchProcess->state() != QProcess::NotRunning) {
-        m_searchProcess->disconnect(this);
-        m_searchProcess->kill();
-        m_searchProcess->waitForFinished(500);
+        m_searchProcess->disconnect(this); m_searchProcess->kill(); m_searchProcess->waitForFinished(500);
     }
     m_searchProcess->disconnect();
-    QString prog;
-    QStringList args;
+    QString prog; QStringList args;
     resolveRepoSearchCommand(pm, q, &prog, &args);
     if (prog.isEmpty()) return;
 
@@ -877,14 +886,14 @@ void HpcConsoleWidget::executePackageSearch(const QString& query) {
 }
 
 /**
- * @brief Cleanly terminates any in-flight repository search subprocess before destruction.
+ * @brief Cleanly terminates any in-flight repository or initial package search subprocesses before destruction.
  */
 HpcConsoleWidget::~HpcConsoleWidget() {
     if (m_searchDebounceTimer) m_searchDebounceTimer->stop();
-    if (m_searchProcess && m_searchProcess->state() != QProcess::NotRunning) {
-        m_searchProcess->disconnect(this);
-        m_searchProcess->kill();
-        m_searchProcess->waitForFinished(500);
+    for (QProcess* proc : findChildren<QProcess*>()) {
+        if (proc && proc->state() != QProcess::NotRunning) {
+            proc->disconnect(this); proc->kill(); proc->waitForFinished(500);
+        }
     }
 }
 
@@ -892,9 +901,7 @@ HpcConsoleWidget::~HpcConsoleWidget() {
  * @brief Applies modern dark/light themed QSS to package filter combo boxes.
  */
 void HpcConsoleWidget::reloadStyle() {
-    // Query active dark/light mode state from ThemeManager singleton.
     const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
-    // Dark workstation QSS for package filter and backend combo boxes.
     const QString darkQss = QStringLiteral(
         "QComboBox#packageStatusFilterCombo, QComboBox#packageBackendCombo { background: #1e222a; color: #d7dae0; border: 1px solid #3e4451; border-radius: 4px; padding: 1px 22px 1px 8px; font-size: 11px; font-weight: 600; min-height: 20px; max-height: 22px; }"
         "QComboBox#packageStatusFilterCombo:hover, QComboBox#packageBackendCombo:hover, QComboBox#packageStatusFilterCombo:focus, QComboBox#packageBackendCombo:focus { background: #242933; border: 1px solid #528bff; color: #ffffff; }"
@@ -904,7 +911,6 @@ void HpcConsoleWidget::reloadStyle() {
         "QComboBox#packageStatusFilterCombo QAbstractItemView::item, QComboBox#packageBackendCombo QAbstractItemView::item { min-height: 24px; padding: 2px 8px; border-radius: 2px; }"
         "QComboBox#packageStatusFilterCombo QAbstractItemView::item:hover, QComboBox#packageBackendCombo QAbstractItemView::item:hover { background-color: #282c34; color: #528bff; }"
         "QComboBox#packageStatusFilterCombo QAbstractItemView::item:selected, QComboBox#packageBackendCombo QAbstractItemView::item:selected { background-color: #264f78; color: #ffffff; }");
-    // Light workstation QSS with crisp GitHub-style borders and high-contrast text.
     const QString lightQss = QStringLiteral(
         "QComboBox#packageStatusFilterCombo, QComboBox#packageBackendCombo { background: #ffffff; color: #1f2328; border: 1px solid #d0d7de; border-radius: 4px; padding: 1px 22px 1px 8px; font-size: 11px; font-weight: 600; min-height: 20px; max-height: 22px; }"
         "QComboBox#packageStatusFilterCombo:hover, QComboBox#packageBackendCombo:hover { background: #f6f8fa; border: 1px solid #0969da; color: #0969da; }"
@@ -915,7 +921,6 @@ void HpcConsoleWidget::reloadStyle() {
         "QComboBox#packageStatusFilterCombo QAbstractItemView::item, QComboBox#packageBackendCombo QAbstractItemView::item { min-height: 24px; padding: 2px 8px; border-radius: 2px; }"
         "QComboBox#packageStatusFilterCombo QAbstractItemView::item:hover, QComboBox#packageBackendCombo QAbstractItemView::item:hover { background-color: #eaeef2; color: #0969da; }"
         "QComboBox#packageStatusFilterCombo QAbstractItemView::item:selected, QComboBox#packageBackendCombo QAbstractItemView::item:selected { background-color: #ddf4ff; color: #0969da; }");
-    // Assign tailored stylesheet based on active color theme mode.
     const QString& activeQss = isDark ? darkQss : lightQss;
     if (m_statusFilterCombo) m_statusFilterCombo->setStyleSheet(activeQss);
     if (m_backendCombo) m_backendCombo->setStyleSheet(activeQss);

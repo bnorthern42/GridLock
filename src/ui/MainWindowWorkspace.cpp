@@ -759,6 +759,12 @@ void MainWindow::setupDocks() {
   // 8. Offline Dash/Zeal reference manual tab.
   m_bottomTabs->addTab(m_referenceManualWidget, "Reference Manual");
   m_bottomTabs->setCurrentWidget(m_memView);
+  connect(m_bottomTabs, &QTabWidget::currentChanged, this, [this](int) {
+    QWidget* activeTab = m_bottomTabs ? m_bottomTabs->currentWidget() : nullptr;
+    if (activeTab == m_terminalDock && m_terminalDock) m_terminalDock->ensureShellStarted();
+    else if (activeTab == m_spackManager && m_spackManager) static_cast<HpcConsoleWidget*>(m_spackManager)->ensurePackagesLoaded();
+    else if (activeTab == m_referenceManualWidget && m_referenceManualWidget) m_referenceManualWidget->ensureDocsetsInitialized();
+  });
 
   // Harmonize margins, control heights, borderless frames, tool-window rail, and F1 lookup across bottom tabs.
   harmonizeBottomConsoleTabs();

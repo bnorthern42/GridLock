@@ -119,9 +119,12 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
     connect(m_resultsList, &QListWidget::currentRowChanged, this,
             &DocsetViewerWidget::onResultClicked);
 
-    // Discover installed Zeal docsets, populate selector and results list, and render MPI_Init initially.
-    refreshDocsets();
-    showSymbolDocumentation(QStringLiteral("MPI_Init"));
+    // Seed lightweight Built-in selector entry; full Zeal SQLite docset discovery runs lazily on showEvent or lookup.
+    if (m_docsetSelector) {
+        m_docsetSelector->blockSignals(true);
+        m_docsetSelector->addItem(QStringLiteral("Built-in MPI/ABI"), QStringLiteral("Built-in MPI/ABI"));
+        m_docsetSelector->blockSignals(false);
+    }
 }
 
 /**
@@ -129,10 +132,25 @@ DocsetViewerWidget::DocsetViewerWidget(QWidget* parent)
  */
 DocsetViewerWidget::~DocsetViewerWidget() = default;
 
+void DocsetViewerWidget::ensureDocsetsInitialized() {
+    if (m_docsetsInitialized) return;
+    m_docsetsInitialized = true;
+    refreshDocsets();
+    if (m_textBrowser && m_textBrowser->toPlainText().trimmed().isEmpty()) {
+        showSymbolDocumentation(QStringLiteral("MPI_Init"));
+    }
+}
+
+void DocsetViewerWidget::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    ensureDocsetsInitialized();
+}
+
 /**
  * @brief Re-discovers installed Zeal docset bundles on disk and repopulates the selector combo box.
  */
 void DocsetViewerWidget::refreshDocsets() {
+    m_docsetsInitialized = true;
     auto& mgr = gridlock::core::DocsetManager::instance();
     if (mgr.loadedDocsetNames().isEmpty()) {
         mgr.discoverAndLoadSystemDocsets();
@@ -160,6 +178,7 @@ void DocsetViewerWidget::refreshDocsets() {
  * @return Non-empty list of active docset names.
  */
 QStringList DocsetViewerWidget::loadedDocsetNames() const {
+    const_cast<DocsetViewerWidget*>(this)->ensureDocsetsInitialized();
     QStringList names = gridlock::core::DocsetManager::instance().loadedDocsetNames();
     names.append(QStringLiteral("Built-in MPI/ABI"));
     return names;
@@ -171,6 +190,10 @@ QStringList DocsetViewerWidget::loadedDocsetNames() const {
  * @return True if documentation was resolved and rendered; false if symbol is empty.
  */
 bool DocsetViewerWidget::showSymbolDocumentation(const QString& rawSymbol) {
+    if (!m_docsetsInitialized) {
+        m_docsetsInitialized = true;
+        refreshDocsets();
+    }
     const QString normalized = gridlock::core::DocsetManager::normalizeSymbolName(rawSymbol);
     if (normalized.isEmpty()) {
         return false;
@@ -633,6 +656,15 @@ QStringList ReferenceManualWidget::loadedDocsetNames() const {
  */
 int ReferenceManualWidget::headerBarHeight() const {
     return m_headerBar ? m_headerBar->height() : 0;
+}
+
+void ReferenceManualWidget::ensureDocsetsInitialized() {
+    if (m_docsetViewer) m_docsetViewer->ensureDocsetsInitialized();
+}
+
+void ReferenceManualWidget::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    ensureDocsetsInitialized();
 }
 
 }  // namespace gridlock::ui

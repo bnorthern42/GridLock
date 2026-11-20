@@ -219,8 +219,8 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
                                   : rawRoot;
     const QString ccDir = discoverCompileCommandsDir(cleanRoot);
 
-    // Reuse active clangd daemon unless the compilation database or workspace root changed or vanished.
-    if (m_process && m_process->state() == QProcess::Running && m_initialized) {
+    // Reuse active or starting clangd daemon unless the compilation database or workspace root changed or vanished.
+    if (m_process && m_process->state() != QProcess::NotRunning && m_initialized) {
         const bool ccChanged = (ccDir != m_activeCompileCommandsDir);
         const bool rootOutside = (!m_activeRootDir.isEmpty() && cleanRoot != m_activeRootDir &&
                                   !cleanRoot.startsWith(m_activeRootDir + QLatin1Char('/')));
@@ -244,6 +244,9 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
     if (!m_process) {
         m_process = new QProcess();
         m_process->setProcessChannelMode(QProcess::SeparateChannels);
+        QObject::connect(m_process, &QProcess::started, this, [this]() {
+            flushPendingOutbound();
+        });
         // Pump asynchronous `textDocument/publishDiagnostics` and completion frames whenever stdout arrives.
         QObject::connect(m_process, &QProcess::readyReadStandardOutput, this, [this]() {
             drainIncomingMessages();
@@ -256,10 +259,11 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         }
     }
 
-    // Spawn the clangd subprocess when starting fresh or recovering from a CompilationDatabase switch.
+    // Spawn the clangd subprocess asynchronously when starting fresh or recovering from a CompilationDatabase switch.
     if (m_process->state() == QProcess::NotRunning) {
         m_initialized = false;
         m_readBuffer.clear();
+        m_pendingOutboundFrames.clear();
         m_activeDocumentUri.clear();
         m_pendingCompletions.clear();
         m_pendingCompletionRequestId = -1;
@@ -277,7 +281,6 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
             args << QStringLiteral("--background-index=false");
         }
         m_process->start(clangdBin, args);
-        if (!m_process->waitForStarted(1000)) return false;
     }
 
     m_activeRootDir = cleanRoot;
@@ -312,14 +315,9 @@ bool ClangdLspClient::ensureServerInitialized(const QString& rootDir) {
         }}
     };
 
-    // Transmit `initialize` JSON-RPC request and block briefly for server capabilities acknowledgement.
+    // Queue or transmit `initialize` and `initialized` without blocking the GUI thread on startup.
     sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")}, {QStringLiteral("id"), initId},
                             {QStringLiteral("method"), QStringLiteral("initialize")}, {QStringLiteral("params"), params}});
-
-    const QJsonObject resp = readResponseForId(initId, 1500);
-    if (resp.isEmpty()) return false;
-
-    // Dispatch `initialized` notification completing the LSP handshake.
     sendJsonRpc(QJsonObject{{QStringLiteral("jsonrpc"), QStringLiteral("2.0")},
                             {QStringLiteral("method"), QStringLiteral("initialized")}, {QStringLiteral("params"), QJsonObject{}}});
     m_initialized = true;
@@ -382,15 +380,26 @@ void parseClangdCompletionResponse(const QJsonObject& compResp,
 
 }  // namespace
 
+void ClangdLspClient::flushPendingOutbound() {
+    if (!m_process || m_process->state() != QProcess::Running || !m_process->isOpen() || !m_process->isWritable()) return;
+    while (!m_pendingOutboundFrames.isEmpty()) {
+        m_process->write(m_pendingOutboundFrames.takeFirst());
+    }
+}
+
 /**
- * @brief Writes a framed JSON-RPC message to the clangd child process stdin without blocking the GUI thread.
+ * @brief Writes or queues a framed JSON-RPC message to the clangd child process stdin without blocking the GUI thread.
  * @param payload JSON-RPC 2.0 request or notification object.
  */
 void ClangdLspClient::sendJsonRpc(const QJsonObject& payload) {
     if (!m_process) return;
-    if (m_process->state() == QProcess::Starting) m_process->waitForStarted(1000);
-    if (m_process->state() != QProcess::Running || !m_process->isOpen() || !m_process->isWritable()) return;
     const QByteArray frame = encodeLspMessage(payload);
+    if (m_process->state() == QProcess::Starting) {
+        m_pendingOutboundFrames.append(frame);
+        return;
+    }
+    if (m_process->state() != QProcess::Running || !m_process->isOpen() || !m_process->isWritable()) return;
+    flushPendingOutbound();
     m_process->write(frame);
 }
 
@@ -483,7 +492,12 @@ QJsonObject ClangdLspClient::readResponseForId(int requestId, int timeoutMs) {
     if (m_completedResponses.contains(requestId)) {
         return m_completedResponses.take(requestId);
     }
-    if (!m_process || m_process->state() != QProcess::Running) return {};
+    if (!m_process) return {};
+    if (m_process->state() == QProcess::Starting) {
+        m_process->waitForStarted(std::min(timeoutMs, 1000));
+    }
+    if (m_process->state() != QProcess::Running) return {};
+    flushPendingOutbound();
 
     // Poll stdout in bounded slices until the matching response id arrives or timeoutMs elapses.
     QElapsedTimer timer;
@@ -531,7 +545,7 @@ quint64 ClangdLspClient::requestDocumentCompletionAsync(const QString& filePath,
     }
 
     syncDocument(normPath, sourceText);
-    if (!m_process || m_process->state() != QProcess::Running || !m_initialized) return 0;
+    if (!m_process || m_process->state() == QProcess::NotRunning || !m_initialized) return 0;
 
     const quint64 seq = ++m_activeCompletionSeq;
     const int compId = m_nextRequestId++;
