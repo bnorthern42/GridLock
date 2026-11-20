@@ -822,12 +822,9 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     palette.setFilterText(QStringLiteral("@")); QCOMPARE(palette.resultCount(), 1); QCOMPARE(palette.resultItemAt(0).category, PaletteItem::Category::Symbol);
     palette.setFilterText(QStringLiteral("#")); QCOMPARE(palette.resultCount(), 1); QCOMPARE(palette.resultItemAt(0).category, PaletteItem::Category::Rank);
     palette.setFilterText(QStringLiteral(">")); QCOMPARE(palette.selectedIndex(), 0);
-    QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 1);
-    QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 0);
-    QTest::keyClick(palette.inputEdit(), Qt::Key_Up); QCOMPARE(palette.selectedIndex(), 1);
-    QTest::keyClick(palette.inputEdit(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
-    palette.openWithPrefix(QStringLiteral(">")); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QTest::keyClick(palette.inputEdit(), Qt::Key_Return);
-    QVERIFY(!palette.isVisible() && firedId == 2);
+    QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 1); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 0);
+    QTest::keyClick(palette.inputEdit(), Qt::Key_Up); QCOMPARE(palette.selectedIndex(), 1); QTest::keyClick(palette.inputEdit(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
+    palette.openWithPrefix(QStringLiteral(">")); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QTest::keyClick(palette.inputEdit(), Qt::Key_Return); QVERIFY(!palette.isVisible() && firedId == 2);
     // 3. MainWindow Ctrl+Shift+P (#actionCommandPalette), Ctrl+P (#actionQuickOpen), and Ctrl+Alt+P (#actionAttachProcess) integration.
     static QStringList s_capturedWarnings; s_capturedWarnings.clear();
     const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) { if (type == QtWarningMsg) s_capturedWarnings.append(msg); });
@@ -885,12 +882,16 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     QCOMPARE(calc.value(), 0xDEADULL); QCOMPARE(calc.decText(), QStringLiteral("57005"));
     calc.expressionEdit()->clear(); shlBtn->click(); calc.keypadDigitButton(4)->click(); eqBtn->click(); QCOMPARE(calc.value(), 0xDEAD0ULL);
     binRadixBtn->click(); QVERIFY(calc.keypadDigitButton(1)->isEnabled() && !calc.keypadDigitButton(2)->isEnabled());
-    // Verify setInitialTextOrValue with C/C++ suffixes ("0xdeadbeefULL"), negative decimals ("-42"), and expressions ("(1 << 8) + 7").
+    // Verify setInitialTextOrValue with float ("1.1f"), hex ("0x4011a6", "0xdeadbeefULL"), negative decimals ("-42"), and expressions ("(1 << 8) + 7").
+    auto* statusLbl = calc.findChild<QLabel*>(QStringLiteral("calcExprStatusLabel")); QVERIFY(statusLbl != nullptr);
+    calc.setInitialTextOrValue(QStringLiteral("1.1f")); QCOMPARE(calc.wordWidth(), 32); QCOMPARE(calc.hexText(), QStringLiteral("0x3F8CCCCD"));
+    QCOMPARE(calc.expressionEdit()->text(), QStringLiteral("0x3F8CCCCD")); QVERIFY(!statusLbl->text().contains(QStringLiteral("Error")));
+    calc.setInitialTextOrValue(QStringLiteral("0x4011a6")); QCOMPARE(calc.hexText(), QStringLiteral("0x4011A6")); QCOMPARE(calc.expressionEdit()->text(), QStringLiteral("0x4011A6"));
     calc.setWordWidth(64); calc.setSigned(false);
     calc.setInitialTextOrValue(QStringLiteral("0xdeadbeefULL")); QCOMPARE(calc.value(), 0xDEADBEEFULL); QCOMPARE(calc.hexText(), QStringLiteral("0xDEADBEEF"));
     calc.setInitialTextOrValue(QStringLiteral("-42")); QCOMPARE(calc.decText(), QStringLiteral("-42"));
     calc.setSigned(false); calc.setInitialTextOrValue(QStringLiteral("(1 << 8) + 7")); QCOMPARE(calc.value(), 263ULL); QCOMPARE(calc.hexText(), QStringLiteral("0x107"));
-    // 4. Preferences, Command Palette, Ctrl+Alt+C, and "Open in Programmer's Calculator" signal routing across views.
+    // 4. Preferences, Command Palette, Ctrl+Alt+C, keypad button height (>= 26px), and "Open in Programmer's Calculator" signal routing across views.
     static QStringList s_calcWarnings; s_calcWarnings.clear();
     const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_calcWarnings.append(m); });
     struct Guard { QtMessageHandler p; ~Guard() { qInstallMessageHandler(p); } } g{prevH};
@@ -902,11 +903,11 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     pal->setFilterText(QStringLiteral("> Programmer")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Programmer's Calculator")));
     QTest::keyClick(pal->inputEdit(), Qt::Key_Return); QApplication::processEvents();
     auto* floatingCalc = mw.programmerCalculatorDialog();
-    QVERIFY(floatingCalc && floatingCalc->isVisible() && !floatingCalc->isModal() && (floatingCalc->windowFlags() & Qt::Window));
+    QVERIFY(floatingCalc && floatingCalc->isVisible() && !floatingCalc->isModal() && (floatingCalc->windowFlags() & Qt::Window) && floatingCalc->keypadDigitButton(0)->height() >= 26);
     floatingCalc->close(); QTest::keyClick(&mw, Qt::Key_C, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(floatingCalc->isVisible()); floatingCalc->close();
     QVERIFY(mw.sourceCodeView() && mw.variablesDockWidget() && mw.registerView() && mw.memView() && mw.disassemblyView());
     emit mw.sourceCodeView()->sendToCalculatorRequested(QStringLiteral("0x4011a6")); QApplication::processEvents();
-    QVERIFY(floatingCalc->isVisible()); QCOMPARE(floatingCalc->value(), 0x4011A6ULL); QCOMPARE(floatingCalc->hexText(), QStringLiteral("0x4011A6"));
+    QVERIFY(floatingCalc->isVisible()); QCOMPARE(floatingCalc->value(), 0x4011A6ULL); QCOMPARE(floatingCalc->hexText(), QStringLiteral("0x4011A6")); QCOMPARE(floatingCalc->expressionEdit()->text(), QStringLiteral("0x4011A6"));
     emit mw.variablesDockWidget()->sendToCalculatorRequested(QStringLiteral("0x7fffffffe5a8")); QCOMPARE(floatingCalc->value(), 0x7FFFFFFFE5A8ULL); floatingCalc->close();
     for (const QString& w : s_calcWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }

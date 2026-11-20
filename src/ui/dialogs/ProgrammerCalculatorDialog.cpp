@@ -500,9 +500,10 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     exprRow->addWidget(ansBtn);
     exprVBox->addLayout(exprRow);
 
-    // Full tactile 4x8 Programmer's Calculator Button Grid.
+    // Full tactile 5x8 Programmer's Calculator Button Grid.
     auto* padGrid = new QGridLayout();
-    padGrid->setSpacing(4);
+    padGrid->setHorizontalSpacing(6);
+    padGrid->setVerticalSpacing(5);
     for (int c = 0; c < 8; ++c) padGrid->setColumnStretch(c, 1);
 
     auto makePadBtn = [&](const QString& text, const QString& objName, const QString& role,
@@ -510,7 +511,7 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
         auto* btn = new QPushButton(text, exprGroup);
         btn->setObjectName(objName);
         btn->setProperty("calcRole", role);
-        btn->setFixedHeight(28);
+        btn->setMinimumHeight(30);
         connect(btn, &QPushButton::clicked, this, std::move(cb));
         padGrid->addWidget(btn, r, c, 1, cs);
         return btn;
@@ -606,8 +607,8 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     exprVBox->addLayout(padGrid);
     root->addWidget(exprGroup);
 
-    setMinimumSize(740, 560);
-    resize(780, 580);
+    setMinimumSize(760, 650);
+    resize(780, 660);
     syncKeypadRadixState();
     reloadStyle();
     syncAllViews();
@@ -671,6 +672,8 @@ bool ProgrammerCalculatorDialog::evaluateAndApplyExpression(const QString& expr)
 
 void ProgrammerCalculatorDialog::setInitialTextOrValue(const QString& text) {
     QString s = text.trimmed();
+    while (!s.isEmpty() && (s.endsWith(QLatin1Char(';')) || s.endsWith(QLatin1Char(',')))) s.chop(1);
+    s = s.trimmed();
     if (s.isEmpty()) return;
     const int atIdx = s.indexOf(QStringLiteral("@ 0x"), 0, Qt::CaseInsensitive);
     if (atIdx >= 0) s = s.mid(atIdx + 2).trimmed().section(QLatin1Char(' '), 0, 0);
@@ -679,10 +682,51 @@ void ProgrammerCalculatorDialog::setInitialTextOrValue(const QString& text) {
         const QString rest = s.mid(firstTok.size()).trimmed();
         if (rest.startsWith(QLatin1Char('<')) || rest.startsWith(QLatin1Char('[')) || rest.startsWith(QLatin1Char('('))) s = firstTok;
     }
-    if (m_exprEdit) m_exprEdit->setText(s);
-    if (s.startsWith(QLatin1Char('-')) && !s.mid(1).trimmed().contains(QLatin1Char(' '))) {
-        setSigned(true);
+    // Case A: Floating-Point Literal (e.g., 1.1f, -3.14159, 2.5e-3, 1.0F) -> IEEE-754 bit pattern.
+    if (!s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) &&
+        (s.contains(QLatin1Char('.')) || s.contains(QLatin1Char('e'), Qt::CaseInsensitive))) {
+        const bool isFloat32 = s.endsWith(QLatin1Char('f'), Qt::CaseInsensitive);
+        QString numStr = s;
+        if (isFloat32 || numStr.endsWith(QLatin1Char('l'), Qt::CaseInsensitive)) numStr.chop(1);
+        bool ok = false;
+        if (isFloat32) {
+            const float fVal = numStr.toFloat(&ok);
+            if (ok) {
+                uint32_t bits32 = 0; std::memcpy(&bits32, &fVal, sizeof(bits32));
+                m_wordWidth = 32; m_value = static_cast<uint64_t>(bits32); m_justEvaluated = true;
+                const QString hexStr = QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper());
+                if (m_exprEdit) m_exprEdit->setText(hexStr);
+                if (m_exprStatusLabel) m_exprStatusLabel->clear();
+                syncAllViews(); return;
+            }
+        } else {
+            const double dVal = numStr.toDouble(&ok);
+            if (ok) {
+                uint64_t bits64 = 0; std::memcpy(&bits64, &dVal, sizeof(bits64));
+                m_wordWidth = 64; m_value = bits64; m_justEvaluated = true;
+                const QString hexStr = QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper());
+                if (m_exprEdit) m_exprEdit->setText(hexStr);
+                if (m_exprStatusLabel) m_exprStatusLabel->clear();
+                syncAllViews(); return;
+            }
+        }
     }
+    // Case B & C: Integer literal or bitwise/arithmetic expression.
+    if (s.startsWith(QLatin1Char('-')) && !s.mid(1).trimmed().contains(QLatin1Char(' '))) setSigned(true);
+    uint64_t result = 0ULL; QString err;
+    if (evaluateExpression(s, m_value, m_wordWidth, m_signedMode, &result, &err)) {
+        m_value = result & widthMask(m_wordWidth); m_justEvaluated = true;
+        if (m_exprStatusLabel) m_exprStatusLabel->clear();
+        if (m_exprEdit) {
+            if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) && !s.contains(QLatin1Char(' '))) {
+                m_exprEdit->setText(QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper()));
+            } else {
+                m_exprEdit->setText(s);
+            }
+        }
+        syncAllViews(); return;
+    }
+    if (m_exprEdit) m_exprEdit->setText(s);
     evaluateAndApplyExpression(s);
 }
 
@@ -866,7 +910,6 @@ void ProgrammerCalculatorDialog::syncAllViews(QLineEdit* skipEditor) {
         }
         m_asciiReadoutLabel->setText(QStringLiteral("ASCII: \"%1\"").arg(ascii));
     }
-
     m_updatingViews = false;
 }
 
@@ -879,7 +922,6 @@ void ProgrammerCalculatorDialog::reloadStyle() {
     const QString btnBg = pal.isDark ? QStringLiteral("#252b38") : QStringLiteral("#e2e8f0");
     const QString digitBg = pal.isDark ? QStringLiteral("#2d3548") : QStringLiteral("#cbd5e1");
     const QString muted = pal.isDark ? QStringLiteral("#94a3b8") : QStringLiteral("#475569");
-
     setStyleSheet(QStringLiteral(
         "QDialog#ProgrammerCalculatorDialog { background: %1; color: %2; }"
         "QGroupBox { background: %3; border: 1px solid %4; border-radius: 5px; margin-top: 8px; padding-top: 8px; font-weight: 600; color: %2; }"
@@ -887,6 +929,7 @@ void ProgrammerCalculatorDialog::reloadStyle() {
         "QLineEdit { background: %6; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
         "QLineEdit:focus { border: 1px solid %5; }"
         "QPushButton { background: %7; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-size: 11px; font-family: 'JetBrains Mono', monospace; }"
+        "QPushButton[calcRole] { padding: 4px 8px; min-height: 22px; }"
         "QPushButton[calcRole=\"digit\"], QPushButton[calcRole=\"hex\"] { background: %9; font-weight: bold; font-size: 12px; }"
         "QPushButton[calcRole=\"eval\"] { background: %5; color: #0b1120; font-weight: bold; font-size: 13px; border: 1px solid %5; }"
         "QPushButton:hover { border: 1px solid %5; }"
