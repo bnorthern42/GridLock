@@ -913,12 +913,20 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     palette.openWithPrefix(QStringLiteral(">"));
     QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QTest::keyClick(palette.inputEdit(), Qt::Key_Return);
     QVERIFY(!palette.isVisible() && firedId == 2);
-    // 3. MainWindow Ctrl+Shift+P (#actionCommandPalette) and Ctrl+P (#actionQuickOpen) integration.
+    // 3. MainWindow Ctrl+Shift+P (#actionCommandPalette), Ctrl+P (#actionQuickOpen), and Ctrl+Alt+P (#actionAttachProcess) integration.
+    static QStringList s_capturedWarnings; s_capturedWarnings.clear();
+    const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) {
+        if (type == QtWarningMsg) s_capturedWarnings.append(msg);
+    });
+    struct MsgGuard { QtMessageHandler prev; ~MsgGuard() { qInstallMessageHandler(prev); } } msgGuard{prevHandler};
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.loadPreviewFixture(); mw.show(); QApplication::processEvents();
-    auto* actCmd = mw.findChild<QAction*>(QStringLiteral("actionCommandPalette"));
-    auto* actQuick = mw.findChild<QAction*>(QStringLiteral("actionQuickOpen"));
-    QVERIFY(actCmd && actCmd->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
-    QVERIFY(actQuick && actQuick->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_P));
+    auto* actCmd = mw.findChild<QAction*>(QStringLiteral("actionCommandPalette")); auto* actQuick = mw.findChild<QAction*>(QStringLiteral("actionQuickOpen")); auto* actAttach = mw.findChild<QAction*>(QStringLiteral("actionAttachProcess"));
+    QVERIFY(actCmd && actCmd->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P) && actQuick && actQuick->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_P) && actAttach && actAttach->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+    int countCtrlShiftP = 0, countCtrlP = 0, countCtrlAltP = 0;
+    for (QAction* a : mw.findChildren<QAction*>()) { if (a->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P)) ++countCtrlShiftP; if (a->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_P)) ++countCtrlP; if (a->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P)) ++countCtrlAltP; }
+    for (QShortcut* s : mw.findChildren<QShortcut*>()) { if (s->key() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P)) ++countCtrlShiftP; if (s->key() == QKeySequence(Qt::CTRL | Qt::Key_P)) ++countCtrlP; if (s->key() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P)) ++countCtrlAltP; }
+    QVERIFY(countCtrlShiftP == 1 && countCtrlP == 1 && countCtrlAltP == 1);
+    if (auto* dv = mw.disassemblyView()) dv->setFocus();
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     auto* mwPalette = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
     QVERIFY(mwPalette && mwPalette->isVisible() && mwPalette->filterText() == QStringLiteral(">") && mwPalette->resultCount() > 0);
@@ -930,4 +938,9 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QVERIFY(mwPalette->resultCount() > 0 && mwPalette->resultItemAt(0).title.contains(QStringLiteral("deadlock_ring.cpp")));
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return); QApplication::processEvents();
     QVERIFY(!mwPalette->isVisible() && mw.sourceCodeView() && mw.sourceCodeView()->currentFile().endsWith(QStringLiteral("deadlock_ring.cpp")));
+    bool attachOpened = false;
+    QTimer::singleShot(80, [&]() { if (auto* dlg = dynamic_cast<gridlock::ui::AttachProcessDialog*>(QApplication::activeModalWidget())) { attachOpened = dlg->isVisible(); dlg->reject(); } });
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
+    QVERIFY(attachOpened);
+    for (const QString& w : s_capturedWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }

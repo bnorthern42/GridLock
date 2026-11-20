@@ -542,9 +542,9 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
     openXrefInspector(m_currentAddress);
   });
 
-  // Live assembly instruction patch shortcut 'Ctrl+Shift+P'
+  // Live assembly instruction patch shortcut 'Alt+P' (avoids colliding with Ctrl+Shift+P Command Palette)
   auto *patchShortcut =
-      new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), this);
+      new QShortcut(QKeySequence(Qt::ALT | Qt::Key_P), this);
   patchShortcut->setContext(Qt::WidgetWithChildrenShortcut);
   connect(patchShortcut, &QShortcut::activated, this, [this]() {
     bool ok = false;

@@ -854,6 +854,10 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
       openCommandPalette(QStringLiteral(">"));
       return true;
     }
+    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::AltModifier)) {
+      attachToProcessWorkflow();
+      return true;
+    }
     if (ke->key() == Qt::Key_P && mods == Qt::ControlModifier) {
       if (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible()) {
         openCommandPalette(QString());

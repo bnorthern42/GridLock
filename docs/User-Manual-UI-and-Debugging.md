@@ -200,6 +200,8 @@ When triggered, GridLock pauses the offending rank and reports the expression, o
 | `F1` | Look up symbol or mnemonic under cursor in `Reference Manual` | Global / Disassembly |
 | `Space` | Toggle `DisassemblyView` between Linear Assembly and 2D CFG (`Space`+drag pans CFG) | `DisassemblyView` |
 | `X` | Open `XrefInspectorDialog` (`XREFS TO` and `XREFS FROM`) for active address | `DisassemblyView` |
-| `Ctrl+Shift+P` | Patch instruction at active address (`QInputDialog`, default `nop`) | `DisassemblyView` |
+| `Ctrl+Shift+P` | Open Command Palette in command mode (`>`) | Global (`View` menu) |
+| `Ctrl+P` | Open Quick Open / unified fuzzy palette | Global (`File` menu) |
+| `Alt+P` | Patch instruction at active address (`QInputDialog`, default `nop`) | `DisassemblyView` |
 | `Left` / `Right` / `Home` | Pan CFG horizontally (`±48px`) / Snap CFG viewport back to active basic block | `DisassemblyView` (CFG) |
 | `Ctrl+,` | Open `Preferences` dialog | Global (`Edit` menu) |
