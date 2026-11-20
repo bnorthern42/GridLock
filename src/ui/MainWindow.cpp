@@ -238,6 +238,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   // Instantiate live debugger coordinator (`gdb` or `lldb-dap`) before finishing dock initialization.
   syncCoordinatorWithConfig();
   bindLiveMemViewHandlers();
+  if (m_variablesDockWidget) connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
+  if (m_registerView) connect(m_registerView, &RegisterView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
+  if (m_memView) connect(m_memView, &MemView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
+  if (m_disassemblyView) connect(m_disassemblyView, &DisassemblyView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
+  if (m_editorTabManager) {
+    for (SourceCodeView* sv : m_editorTabManager->openViews()) connect(sv, &SourceCodeView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
+    connect(m_editorTabManager, &QTabWidget::currentChanged, this, [this](int) {
+      if (auto* sv = getSourceCodeView()) connect(sv, &SourceCodeView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
+    });
+  }
   m_previewFixtureOnly = false;
   if (m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
   // Listen for global theme mode change events from ThemeManager singleton.
@@ -879,21 +889,20 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
 }
 /** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix. */
 void MainWindow::openCommandPalette(const QString &initialPrefix) {
-  if (!m_commandPaletteDialog) {
-    m_commandPaletteDialog = new CommandPaletteDialog(this);
-  }
+  if (!m_commandPaletteDialog) m_commandPaletteDialog = new CommandPaletteDialog(this);
   m_commandPaletteDialog->populateFromMainWindow(this);
   m_commandPaletteDialog->openWithPrefix(initialPrefix);
 }
 /** @brief Opens or raises the floating Programmer's Calculator tool window. */
 void MainWindow::openProgrammerCalculator() {
-  if (!m_programmerCalculatorDialog) {
-    m_programmerCalculatorDialog = new ProgrammerCalculatorDialog(this);
-  }
+  if (!m_programmerCalculatorDialog) m_programmerCalculatorDialog = new ProgrammerCalculatorDialog(this);
   m_programmerCalculatorDialog->reloadStyle();
-  m_programmerCalculatorDialog->show();
-  m_programmerCalculatorDialog->raise();
-  m_programmerCalculatorDialog->activateWindow();
+  m_programmerCalculatorDialog->show(); m_programmerCalculatorDialog->raise(); m_programmerCalculatorDialog->activateWindow();
+}
+/** @brief Opens or raises the floating Programmer's Calculator pre-populated with @p text. */
+void MainWindow::openProgrammerCalculatorWithText(const QString &text) {
+  openProgrammerCalculator();
+  if (m_programmerCalculatorDialog) m_programmerCalculatorDialog->setInitialTextOrValue(text);
 }
 /** @brief Records @p path in SessionManager MRU history and refreshes File -> Recent Sessions. */
 void MainWindow::recordRecentWorkspace(const QString &path) {

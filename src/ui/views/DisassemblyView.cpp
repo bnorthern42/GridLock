@@ -20,6 +20,7 @@
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -349,11 +350,25 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_linearEdit->setReadOnly(true);
   m_linearEdit->setFrameShape(QFrame::NoFrame);
   m_linearEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
-  QFont f("JetBrains Mono");
-  f.setStyleHint(QFont::Monospace);
-  f.setPointSize(10);
-  m_linearEdit->setFont(f);
+  QFont f("JetBrains Mono"); f.setStyleHint(QFont::Monospace); f.setPointSize(10); m_linearEdit->setFont(f);
   m_highlighter = new AsmSyntaxHighlighter(m_linearEdit->document());
+  m_linearEdit->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(m_linearEdit, &QPlainTextEdit::customContextMenuRequested, this, [this](const QPoint& pos) {
+    const int lineIdx = m_linearEdit->cursorForPosition(pos).blockNumber();
+    const uint64_t addr = m_lineToAddr.value(lineIdx, m_currentAddress);
+    const QString addrHex = QStringLiteral("0x%1").arg(addr, 0, 16).toUpper();
+    QMenu* menu = m_linearEdit->createStandardContextMenu();
+    menu->addSeparator();
+    QAction* calcAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
+    for (const QString& actLabel : contextActionNamesForAddress(addr)) {
+      connect(menu->addAction(actLabel), &QAction::triggered, this, [this, addr, actLabel]() { triggerContextAction(addr, actLabel); });
+    }
+    if (menu->exec(m_linearEdit->viewport()->mapToGlobal(pos)) == calcAct) {
+      emit sendToCalculatorRequested(addrHex);
+      if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, addrHex));
+    }
+    delete menu;
+  });
 
   /** @brief Interactive CFG QGraphicsView with hold-to-pan, horizontal wheel/key navigation, and ArrowCursor idle state. */
   class CfgGraphView : public QGraphicsView {

@@ -34,18 +34,16 @@
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/dialogs/ProgrammerCalculatorDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
+#include "../src/ui/docks/VariablesDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
+#include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
 #include "../src/ui/widgets/MpiDiagnosticsWidget.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
 #include "../src/ui/widgets/ReferenceManualWidget.hpp"
-
-/**
- * @brief Verifies dynamic statement mapping, loop back-edge/branch control-flow stepping,
- *        active rank context sync, live GDB disassembly CFG parsing, and default CFG Map mode.
- */
+/** @brief Verifies dynamic statement mapping, loop back-edge/branch control-flow stepping, active rank context sync, live GDB disassembly CFG parsing, and default CFG Map mode. */
 void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext() {
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     // Ensure tutorial/inspection_demo.cpp is loaded in SourceCodeView.
@@ -887,7 +885,12 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     QCOMPARE(calc.value(), 0xDEADULL); QCOMPARE(calc.decText(), QStringLiteral("57005"));
     calc.expressionEdit()->clear(); shlBtn->click(); calc.keypadDigitButton(4)->click(); eqBtn->click(); QCOMPARE(calc.value(), 0xDEAD0ULL);
     binRadixBtn->click(); QVERIFY(calc.keypadDigitButton(1)->isEnabled() && !calc.keypadDigitButton(2)->isEnabled());
-    // 4. Preferences (ProjectSettingsDialog) controls + Command Palette (> Programmer) & Ctrl+Alt+C with zero shortcut warnings.
+    // Verify setInitialTextOrValue with C/C++ suffixes ("0xdeadbeefULL"), negative decimals ("-42"), and expressions ("(1 << 8) + 7").
+    calc.setWordWidth(64); calc.setSigned(false);
+    calc.setInitialTextOrValue(QStringLiteral("0xdeadbeefULL")); QCOMPARE(calc.value(), 0xDEADBEEFULL); QCOMPARE(calc.hexText(), QStringLiteral("0xDEADBEEF"));
+    calc.setInitialTextOrValue(QStringLiteral("-42")); QCOMPARE(calc.decText(), QStringLiteral("-42"));
+    calc.setSigned(false); calc.setInitialTextOrValue(QStringLiteral("(1 << 8) + 7")); QCOMPARE(calc.value(), 263ULL); QCOMPARE(calc.hexText(), QStringLiteral("0x107"));
+    // 4. Preferences, Command Palette, Ctrl+Alt+C, and "Open in Programmer's Calculator" signal routing across views.
     static QStringList s_calcWarnings; s_calcWarnings.clear();
     const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_calcWarnings.append(m); });
     struct Guard { QtMessageHandler p; ~Guard() { qInstallMessageHandler(p); } } g{prevH};
@@ -900,8 +903,11 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     QTest::keyClick(pal->inputEdit(), Qt::Key_Return); QApplication::processEvents();
     auto* floatingCalc = mw.programmerCalculatorDialog();
     QVERIFY(floatingCalc && floatingCalc->isVisible() && !floatingCalc->isModal() && (floatingCalc->windowFlags() & Qt::Window));
-    floatingCalc->close(); QTest::keyClick(&mw, Qt::Key_C, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
-    QVERIFY(floatingCalc->isVisible()); floatingCalc->close();
+    floatingCalc->close(); QTest::keyClick(&mw, Qt::Key_C, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(floatingCalc->isVisible()); floatingCalc->close();
+    QVERIFY(mw.sourceCodeView() && mw.variablesDockWidget() && mw.registerView() && mw.memView() && mw.disassemblyView());
+    emit mw.sourceCodeView()->sendToCalculatorRequested(QStringLiteral("0x4011a6")); QApplication::processEvents();
+    QVERIFY(floatingCalc->isVisible()); QCOMPARE(floatingCalc->value(), 0x4011A6ULL); QCOMPARE(floatingCalc->hexText(), QStringLiteral("0x4011A6"));
+    emit mw.variablesDockWidget()->sendToCalculatorRequested(QStringLiteral("0x7fffffffe5a8")); QCOMPARE(floatingCalc->value(), 0x7FFFFFFFE5A8ULL); floatingCalc->close();
     for (const QString& w : s_calcWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }
 
@@ -922,8 +928,7 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     const float f0[3] = {-2.5f, 0.0f, 5.5f}; const int32_t i0[4] = {10, 20, 30, 40};
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(f0), sizeof(f0)), QStringLiteral("float"), 1, 3));
     QCOMPARE(plotDlg.minValue(), -2.5); QCOMPARE(plotDlg.maxValue(), 5.5);
-    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2));
-    QCOMPARE(plotDlg.meanValue(), 25.0);
+    QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2)); QCOMPARE(plotDlg.meanValue(), 25.0);
     QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); const QString csvPath = tmpDir.filePath(QStringLiteral("field.csv")), pngPath = tmpDir.filePath(QStringLiteral("field.png"));
     QVERIFY(plotDlg.exportCsv(csvPath) && plotDlg.savePng(pngPath) && QFileInfo::exists(pngPath));
     QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll()); QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));

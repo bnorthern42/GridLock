@@ -103,6 +103,8 @@ signals:
     void requestMemory(const QString& address, int length);
     /// Emitted when user requests cross-rank memory difference comparison.
     void requestMemoryDiff(int baseRank, int targetRank, const QString& address, int length);
+    /// Emitted when user selects "Open Address / Word in Programmer's Calculator" from the hex dump context menu.
+    void sendToCalculatorRequested(const QString& text);
 
 private slots:
     void onReadClicked();

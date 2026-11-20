@@ -111,6 +111,14 @@ public:
      */
     bool evaluateAndApplyExpression(const QString& expr);
 
+    /**
+     * @brief Parses a raw literal (with optional C/C++ U/L/ULL suffixes), negative decimal, or bitwise/arithmetic
+     *        expression, loads the resulting value into all synchronized base editors and the 64-bit toggle grid,
+     *        and populates #calcExprEdit when an expression was provided.
+     * @param text Raw literal, address, register value, or arithmetic expression string.
+     */
+    void setInitialTextOrValue(const QString& text);
+
     /** @brief Returns the formatted Hexadecimal text currently shown in #calcHexEdit. */
     QString hexText() const { return m_hexEdit ? m_hexEdit->text() : QString(); }
     /** @brief Returns the formatted Decimal text currently shown in #calcDecEdit. */

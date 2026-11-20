@@ -256,6 +256,8 @@ signals:
     void instructionPatched(uint64_t address, const QByteArray& newBytes);
     /// Emitted when the user requests Reference Manual documentation for a symbol or mnemonic.
     void documentationRequested(const QString& symbol);
+    /// Emitted when the user selects "Open Address in Programmer's Calculator" on an instruction row.
+    void sendToCalculatorRequested(const QString& text);
 
 public slots:
     /// Loads and analyzes new assembly code listing.

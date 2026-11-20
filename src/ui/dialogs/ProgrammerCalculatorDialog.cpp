@@ -208,7 +208,7 @@ private:
             return 0ULL;
         }
 
-        QString tok = m_input.mid(start, m_pos - start).remove(QLatin1Char('_'));
+        QString tok = m_input.mid(start, m_pos - start).remove(QLatin1Char('_')).remove(QLatin1Char('\''));
         int base = 10;
         if (tok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
             base = 16;
@@ -219,9 +219,12 @@ private:
         } else if (tok.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive)) {
             base = 8;
             tok = tok.mid(2);
-        } else if (tok.size() > 1 && tok.startsWith(QLatin1Char('0'))) {
+        } else if (tok.size() > 1 && tok.startsWith(QLatin1Char('0')) && tok.at(1).isDigit()) {
             base = 8;
             tok = tok.mid(1);
+        }
+        while (tok.size() > 1 && (tok.back().toLower() == QLatin1Char('u') || tok.back().toLower() == QLatin1Char('l'))) {
+            tok.chop(1);
         }
         bool ok = false;
         const uint64_t val = tok.toULongLong(&ok, base);
@@ -610,96 +613,90 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     syncAllViews();
 }
 
-void ProgrammerCalculatorDialog::setValue(uint64_t val) {
-    m_value = val & widthMask(m_wordWidth);
-    syncAllViews();
-}
+void ProgrammerCalculatorDialog::setValue(uint64_t val) { m_value = val & widthMask(m_wordWidth); syncAllViews(); }
 
 void ProgrammerCalculatorDialog::setWordWidth(int bits) {
     if (bits != 8 && bits != 16 && bits != 32 && bits != 64) return;
-    m_wordWidth = bits;
-    m_value &= widthMask(m_wordWidth);
-    syncAllViews();
+    m_wordWidth = bits; m_value &= widthMask(m_wordWidth); syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::setSigned(bool enabled) {
     m_signedMode = enabled;
     if (m_signedCheck && m_signedCheck->isChecked() != enabled) {
-        m_signedCheck->blockSignals(true);
-        m_signedCheck->setChecked(enabled);
-        m_signedCheck->blockSignals(false);
+        m_signedCheck->blockSignals(true); m_signedCheck->setChecked(enabled); m_signedCheck->blockSignals(false);
     }
     syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::byteSwap() {
-    if (m_wordWidth == 64) {
-        m_value = __builtin_bswap64(m_value);
-    } else if (m_wordWidth == 32) {
-        m_value = static_cast<uint64_t>(__builtin_bswap32(static_cast<uint32_t>(m_value)));
-    } else if (m_wordWidth == 16) {
-        m_value = static_cast<uint64_t>(__builtin_bswap16(static_cast<uint16_t>(m_value)));
-    }
-    m_value &= widthMask(m_wordWidth);
-    syncAllViews();
+    if (m_wordWidth == 64) m_value = __builtin_bswap64(m_value);
+    else if (m_wordWidth == 32) m_value = static_cast<uint64_t>(__builtin_bswap32(static_cast<uint32_t>(m_value)));
+    else if (m_wordWidth == 16) m_value = static_cast<uint64_t>(__builtin_bswap16(static_cast<uint16_t>(m_value)));
+    m_value &= widthMask(m_wordWidth); syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::rotateLeft(int count) {
     const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
     if (sh == 0) return;
     const uint64_t masked = m_value & widthMask(m_wordWidth);
-    m_value = ((masked << sh) | (masked >> (m_wordWidth - sh))) & widthMask(m_wordWidth);
-    syncAllViews();
+    m_value = ((masked << sh) | (masked >> (m_wordWidth - sh))) & widthMask(m_wordWidth); syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::rotateRight(int count) {
     const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
     if (sh == 0) return;
     const uint64_t masked = m_value & widthMask(m_wordWidth);
-    m_value = ((masked >> sh) | (masked << (m_wordWidth - sh))) & widthMask(m_wordWidth);
-    syncAllViews();
+    m_value = ((masked >> sh) | (masked << (m_wordWidth - sh))) & widthMask(m_wordWidth); syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::toggleBit(int bitIndex) {
     if (bitIndex < 0 || bitIndex >= m_wordWidth) return;
-    m_value = (m_value ^ (1ULL << bitIndex)) & widthMask(m_wordWidth);
-    syncAllViews();
+    m_value = (m_value ^ (1ULL << bitIndex)) & widthMask(m_wordWidth); syncAllViews();
 }
 
 bool ProgrammerCalculatorDialog::evaluateAndApplyExpression(const QString& expr) {
-    uint64_t result = 0ULL;
-    QString err;
+    uint64_t result = 0ULL; QString err;
     if (!evaluateExpression(expr, m_value, m_wordWidth, m_signedMode, &result, &err)) {
         if (m_exprStatusLabel) m_exprStatusLabel->setText(QStringLiteral("Error: %1").arg(err));
         return false;
     }
-    m_value = result & widthMask(m_wordWidth);
-    m_justEvaluated = true;
+    m_value = result & widthMask(m_wordWidth); m_justEvaluated = true;
     if (m_exprStatusLabel) {
-        m_exprStatusLabel->setText(
-            QStringLiteral("Result = 0x%1 (%2)")
-                .arg(QString::number(m_value, 16).toUpper(),
-                     m_signedMode ? QString::number(signExtend(m_value, m_wordWidth))
-                                  : QString::number(m_value)));
+        m_exprStatusLabel->setText(QStringLiteral("Result = 0x%1 (%2)")
+            .arg(QString::number(m_value, 16).toUpper(),
+                 m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value)));
     }
-    syncAllViews();
-    return true;
+    syncAllViews(); return true;
+}
+
+void ProgrammerCalculatorDialog::setInitialTextOrValue(const QString& text) {
+    QString s = text.trimmed();
+    if (s.isEmpty()) return;
+    const int atIdx = s.indexOf(QStringLiteral("@ 0x"), 0, Qt::CaseInsensitive);
+    if (atIdx >= 0) s = s.mid(atIdx + 2).trimmed().section(QLatin1Char(' '), 0, 0);
+    else if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) && s.contains(QLatin1Char(' '))) {
+        const QString firstTok = s.section(QLatin1Char(' '), 0, 0);
+        const QString rest = s.mid(firstTok.size()).trimmed();
+        if (rest.startsWith(QLatin1Char('<')) || rest.startsWith(QLatin1Char('[')) || rest.startsWith(QLatin1Char('('))) s = firstTok;
+    }
+    if (m_exprEdit) m_exprEdit->setText(s);
+    if (s.startsWith(QLatin1Char('-')) && !s.mid(1).trimmed().contains(QLatin1Char(' '))) {
+        setSigned(true);
+    }
+    evaluateAndApplyExpression(s);
 }
 
 QPushButton* ProgrammerCalculatorDialog::bitButton(int bitIndex) const {
-    if (bitIndex < 0 || bitIndex >= 64) return nullptr;
-    return m_bitButtons[static_cast<size_t>(bitIndex)];
+    return (bitIndex >= 0 && bitIndex < 64) ? m_bitButtons[static_cast<size_t>(bitIndex)] : nullptr;
 }
 
 QPushButton* ProgrammerCalculatorDialog::keypadDigitButton(int digitVal) const {
-    if (digitVal < 0 || digitVal >= 16) return nullptr;
-    return m_digitButtons[static_cast<size_t>(digitVal)];
+    return (digitVal >= 0 && digitVal < 16) ? m_digitButtons[static_cast<size_t>(digitVal)] : nullptr;
 }
 
 void ProgrammerCalculatorDialog::setInputRadix(int radix) {
     if (radix != 2 && radix != 8 && radix != 10 && radix != 16) return;
-    m_inputRadix = radix;
-    syncKeypadRadixState();
+    m_inputRadix = radix; syncKeypadRadixState();
 }
 
 void ProgrammerCalculatorDialog::syncKeypadRadixState() {

@@ -71,6 +71,12 @@ signals:
      */
     void addressActivated(uint64_t address);
 
+    /**
+     * @brief Emitted when the user chooses "Open Register in Programmer's Calculator".
+     * @param text Formatted hex/integer register value string.
+     */
+    void sendToCalculatorRequested(const QString& text);
+
 public slots:
     /**
      * @brief Updates register table from rank state telemetry.

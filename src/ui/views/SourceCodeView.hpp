@@ -553,6 +553,9 @@ signals:
     /** @brief Emitted when F12 Go-to-Definition resolves to a target location in another workspace file. */
     void definitionJumpRequested(const QString& filePath, int oneBasedLine, int zeroBasedColumn);
 
+    /** @brief Emitted when the user chooses "Open Selection in Programmer's Calculator" from the editor context menu. */
+    void sendToCalculatorRequested(const QString& text);
+
 protected:
     void resizeEvent(QResizeEvent *e) override;
     void contextMenuEvent(QContextMenuEvent *event) override;

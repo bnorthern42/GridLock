@@ -81,6 +81,12 @@ signals:
                                           const QString& varValue,
                                           const QString& varType);
 
+    /**
+     * @brief Emitted when the user chooses "Open Value in Programmer's Calculator" on a variable row.
+     * @param text Formatted numeric value or pointer address ("0x...").
+     */
+    void sendToCalculatorRequested(const QString& text);
+
 private slots:
     /**
      * @brief Handles rank selection changes from the dropdown combo box.

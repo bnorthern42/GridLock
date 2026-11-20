@@ -644,6 +644,8 @@ public slots:
     void openQuickOpenPalette() { openCommandPalette(QString()); }
     /** @brief Opens or raises the floating Programmer's Calculator tool window (Ctrl+Alt+C). */
     void openProgrammerCalculator();
+    /** @brief Opens or raises the floating Programmer's Calculator pre-populated with @p text. */
+    void openProgrammerCalculatorWithText(const QString& text);
 
 protected:
     void closeEvent(QCloseEvent* event) override;

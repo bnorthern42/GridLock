@@ -19,6 +19,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPalette>
 #include <QPushButton>
@@ -27,6 +28,7 @@
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrent>
+#include <cstring>
 
 namespace gridlock::ui {
 
@@ -43,31 +45,17 @@ namespace gridlock::ui {
 uint64_t MemView::parseHexAddress(const QString& address, bool* okOut) {
     // Trim leading/trailing whitespace
     QString trimmed = address.trimmed();
-
     bool isDecimal = false;
-    if (trimmed.startsWith("0d", Qt::CaseInsensitive)) {
-        trimmed = trimmed.mid(2);
-        isDecimal = true;
-    } else if (trimmed.startsWith("0x", Qt::CaseInsensitive)) {
-        trimmed = trimmed.mid(2);
-    }
-
+    if (trimmed.startsWith("0d", Qt::CaseInsensitive)) { trimmed = trimmed.mid(2); isDecimal = true; }
+    else if (trimmed.startsWith("0x", Qt::CaseInsensitive)) { trimmed = trimmed.mid(2); }
     // Stop at any trailing comment or label offset separated by spaces
-    int spaceIdx = trimmed.indexOf(' ');
-    if (spaceIdx > 0) {
-        trimmed = trimmed.left(spaceIdx);
-    }
-
+    const int spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx > 0) trimmed = trimmed.left(spaceIdx);
     // Convert hex string (or decimal) to 64-bit unsigned integer
     bool ok = false;
-    uint64_t val = isDecimal ? trimmed.toULongLong(&ok, 10)
-                             : trimmed.toULongLong(&ok, 16);
-    if (!ok && !isDecimal) {
-        val = trimmed.toULongLong(&ok, 10);
-    }
-    if (okOut) {
-        *okOut = ok;
-    }
+    uint64_t val = isDecimal ? trimmed.toULongLong(&ok, 10) : trimmed.toULongLong(&ok, 16);
+    if (!ok && !isDecimal) val = trimmed.toULongLong(&ok, 10);
+    if (okOut) *okOut = ok;
     return ok ? val : 0ULL;
 }
 
@@ -188,10 +176,34 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_dumpEdit->setObjectName("cutterHexDumpEdit");
     m_dumpEdit->setReadOnly(true);
     m_dumpEdit->setFrameShape(QFrame::NoFrame);
-    QFont font("JetBrains Mono");
-    font.setStyleHint(QFont::Monospace);
-    font.setPointSize(10);
-    m_dumpEdit->setFont(font);
+    QFont font("JetBrains Mono"); font.setStyleHint(QFont::Monospace); font.setPointSize(10); m_dumpEdit->setFont(font);
+    m_dumpEdit->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_dumpEdit, &QTextEdit::customContextMenuRequested, this, [this](const QPoint& pos) {
+        QMenu* menu = m_dumpEdit->createStandardContextMenu();
+        menu->addSeparator();
+        const QString addrHex = QStringLiteral("0x%1").arg(m_currentBaseAddress, 0, 16).toUpper();
+        QAction* addrAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
+        QAction* wordAct = nullptr;
+        QString wordHex;
+        if (m_lastRawData.size() >= 8) {
+            uint64_t w64 = 0ULL; std::memcpy(&w64, m_lastRawData.constData(), sizeof(w64));
+            wordHex = QStringLiteral("0x%1").arg(w64, 0, 16).toUpper();
+            wordAct = menu->addAction(QStringLiteral("Open 64-bit Word at Cursor in Programmer's Calculator (%1)").arg(wordHex));
+        } else if (m_lastRawData.size() >= 4) {
+            uint32_t w32 = 0U; std::memcpy(&w32, m_lastRawData.constData(), sizeof(w32));
+            wordHex = QStringLiteral("0x%1").arg(w32, 0, 16).toUpper();
+            wordAct = menu->addAction(QStringLiteral("Open 32-bit Word at Cursor in Programmer's Calculator (%1)").arg(wordHex));
+        }
+        QAction* chosen = menu->exec(m_dumpEdit->viewport()->mapToGlobal(pos));
+        if (chosen == addrAct) {
+            emit sendToCalculatorRequested(addrHex);
+            if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, addrHex));
+        } else if (wordAct && chosen == wordAct) {
+            emit sendToCalculatorRequested(wordHex);
+            if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, wordHex));
+        }
+        delete menu;
+    });
 
     QPalette p = m_dumpEdit->palette();
     p.setColor(QPalette::Base, QColor(gridlock::core::ConfigManager::instance().getSourceBackground()));
@@ -819,68 +831,42 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
  */
 QString MemView::formatHexDump(qint64 startAddress, const QString& hexData) {
     QString result;
-    int dataLen = hexData.length();
-    int byteCount = dataLen / 2;
-    
+    const int dataLen = hexData.length(), byteCount = dataLen / 2;
     // Group hex digits into 16-byte lines
     for (int i = 0; i < byteCount; i += 16) {
-        result += QString("0x%1: ").arg(QString::number((quint64)(startAddress + i), 16).rightJustified(16, '0').toUpper());
-        
+        result += QString("0x%1: ").arg(QString::number(static_cast<quint64>(startAddress + i), 16).rightJustified(16, '0').toUpper());
         QString asciiPart = "| ";
         for (int j = 0; j < 16; ++j) {
             if (i + j < byteCount) {
-                QString byteStr = hexData.mid((i + j) * 2, 2);
+                const QString byteStr = hexData.mid((i + j) * 2, 2);
                 result += byteStr.toUpper() + " ";
-                
-                bool ok;
-                char c = byteStr.toInt(&ok, 16);
-                if (c >= 32 && c <= 126) {
-                    asciiPart += c;
-                } else {
-                    asciiPart += '.';
-                }
+                bool ok = false; const char c = static_cast<char>(byteStr.toInt(&ok, 16));
+                asciiPart += (c >= 32 && c <= 126) ? c : '.';
             } else {
                 result += "   ";
             }
         }
-        
-        asciiPart += " |";
-        result += asciiPart + "\n";
+        result += asciiPart + " |\n";
     }
-    
     return result;
 }
 
-/**
- * @brief Returns active canvas background QColor resolved from ThemeManager.
- */
+/** @brief Returns active canvas background QColor resolved from ThemeManager. */
 QColor MemView::activeCanvasBackgroundColor() const {
-    if (m_dumpEdit) {
-        return m_dumpEdit->palette().color(QPalette::Base);
-    }
-    const auto pal = gridlock::core::ThemeManager::instance().paletteForTheme(
-        gridlock::core::ThemeManager::instance().activeThemeId());
+    if (m_dumpEdit) return m_dumpEdit->palette().color(QPalette::Base);
+    const auto pal = gridlock::core::ThemeManager::instance().paletteForTheme(gridlock::core::ThemeManager::instance().activeThemeId());
     return QColor(pal.canvasHex);
 }
 
-/**
- * @brief Returns the active non-zero hex byte text QColor resolved from ThemeManager.
- * @return Dark slate (#1f2328) in light themes, or crisp light gray (#d4d7dc) in dark themes.
- */
+/** @brief Returns the active non-zero hex byte text QColor resolved from ThemeManager. */
 QColor MemView::activeHexTextColor() const {
-    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
-    return isDark ? QColor(QStringLiteral("#d4d7dc")) : QColor(QStringLiteral("#1f2328"));
+    return gridlock::core::ThemeManager::instance().isDarkMode() ? QColor(QStringLiteral("#d4d7dc")) : QColor(QStringLiteral("#1f2328"));
 }
 
-/**
- * @brief Paints the MemView container and ensures light/dark hexdump colors stay synchronized.
- * @param event Paint event payload.
- */
+/** @brief Paints the MemView container and ensures light/dark hexdump colors stay synchronized. */
 void MemView::paintEvent(QPaintEvent* event) {
     const QString activeTheme = gridlock::core::ThemeManager::instance().activeThemeId();
-    if (m_lastStyledThemeId != activeTheme) {
-        reloadStyle();
-    }
+    if (m_lastStyledThemeId != activeTheme) reloadStyle();
     QWidget::paintEvent(event);
 }
 

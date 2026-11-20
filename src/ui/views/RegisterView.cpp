@@ -12,6 +12,7 @@
 #include <QHeaderView>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMenu>
 #include <QVBoxLayout>
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
@@ -144,6 +145,28 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row, int /*col*/) {
         if (QTableWidgetItem* nameItem = m_table->item(row, 0)) {
             activateRegister(nameItem->text());
+        }
+    });
+
+    m_table->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_table, &QTableWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QModelIndex idx = m_table->indexAt(pos);
+        if (!idx.isValid()) return;
+        const int row = idx.row();
+        const QString regName = m_table->item(row, 0) ? m_table->item(row, 0)->text().trimmed() : QString();
+        const QString regVal = m_table->item(row, 1) ? m_table->item(row, 1)->text().section(QLatin1Char(' '), 0, 0).trimmed() : QString();
+        if (regVal.isEmpty()) return;
+        QMenu menu(this);
+        QAction* calcAct = menu.addAction(QStringLiteral("Open Register in Programmer's Calculator"));
+        QAction* seekAct = menu.addAction(QStringLiteral("Seek to Register Address"));
+        QAction* chosen = menu.exec(m_table->viewport()->mapToGlobal(pos));
+        if (chosen == calcAct) {
+            emit sendToCalculatorRequested(regVal);
+            if (QWidget* win = window()) {
+                QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, regVal));
+            }
+        } else if (chosen == seekAct) {
+            activateRegister(regName);
         }
     });
 

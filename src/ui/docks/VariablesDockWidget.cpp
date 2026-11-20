@@ -264,6 +264,7 @@ void VariablesDockWidget::setupUi() {
         QAction* plotAct = menu.addAction(QStringLiteral("Plot 1D/2D Array..."));
         QAction* graphShortAct = menu.addAction(QStringLiteral("Graph Pointer / Struct..."));
         QAction* graphAct = menu.addAction(QStringLiteral("Visualize in Pointer / Struct Graph..."));
+        QAction* calcAct = menu.addAction(QStringLiteral("Open Value in Programmer's Calculator"));
         menu.addSeparator();
         QAction* wpWriteAct =
             menu.addAction(QStringLiteral("Watch Memory Write (Hardware Watchpoint)"));
@@ -287,6 +288,13 @@ void VariablesDockWidget::setupUi() {
             const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
             const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
             emit visualizeInPointerGraphRequested(exprPath, varName, varVal, varTyp);
+        } else if (chosen == calcAct) {
+            QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
+            if (varVal.isEmpty()) varVal = exprPath;
+            emit sendToCalculatorRequested(varVal);
+            if (QWidget* win = window()) {
+                QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, varVal));
+            }
         } else if (chosen == wpWriteAct || chosen == wpReadAct || chosen == wpRwAct) {
             const auto mode = (chosen == wpReadAct)
                                   ? ::WatchpointAccessMode::Read

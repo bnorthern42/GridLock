@@ -512,7 +512,7 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
 bool SourceCodeView::shouldOpenEditorContextMenuAt(const QPoint& pos) const {
     return pos.x() >= lineNumberAreaWidth() && !(m_lineNumberArea && m_lineNumberArea->geometry().contains(pos));
 }
-/** @brief Suppresses editor menu over gutter; adds Go-to-Definition and per-rank breakpoint actions on lines. */
+/** @brief Suppresses editor menu over gutter; adds Go-to-Definition, Calculator, and per-rank breakpoint actions. */
 void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
     if (!event) return;
     QPoint editorPos = event->pos();
@@ -521,10 +521,20 @@ void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
         if (rect().contains(mapped)) editorPos = mapped;
     }
     if (!shouldOpenEditorContextMenuAt(editorPos)) { event->accept(); return; }
-    const int clickedLine = qMax(1, cursorForPosition(editorPos).blockNumber() + 1);
+    const QTextCursor posCur = cursorForPosition(editorPos);
+    const int clickedLine = qMax(1, posCur.blockNumber() + 1);
+    QString calcTok = textCursor().hasSelection() ? textCursor().selectedText().replace(QChar::ParagraphSeparator, QLatin1Char(' ')).trimmed() : QString();
+    if (calcTok.isEmpty()) { QTextCursor wc = posCur; wc.select(QTextCursor::WordUnderCursor); calcTok = wc.selectedText().trimmed(); }
+    if (!calcTok.isEmpty() && m_inlineVarValues.contains(calcTok)) calcTok = m_inlineVarValues.value(calcTok);
     QMenu* menu = createStandardContextMenu();
     menu->addSeparator();
     menu->addAction(QStringLiteral("Go to Definition (F12)"), this, &SourceCodeView::triggerGoToDefinition);
+    if (!calcTok.isEmpty()) {
+        menu->addAction(QStringLiteral("Open Selection in Programmer's Calculator"), this, [this, calcTok]() {
+            emit sendToCalculatorRequested(calcTok);
+            if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, calcTok));
+        });
+    }
     menu->addSeparator();
     menu->addAction(QStringLiteral("Set Breakpoint (All Ranks)"), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint for Active Rank (Rank %1)").arg(m_activeFocusRank), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, m_activeFocusRank); });
@@ -808,9 +818,7 @@ bool SourceCodeView::saveToFile(const QString& filePath) {
     QTextStream(&file) << toPlainText(); file.close(); document()->setModified(false); refreshGitDiffGutter(); return true;
 }
 
-/**
- * @brief Computes the enclosing C/C++ lexical scope breadcrumb ("filename > Class/Struct > function").
- */
+/** @brief Computes the enclosing C/C++ lexical scope breadcrumb ("filename > Class/Struct > function"). */
 QString SourceCodeView::currentScopeBreadcrumb() const {
     const QString fileLabel = m_currentFilePath.isEmpty() ? QStringLiteral("buffer.cpp") : QFileInfo(m_currentFilePath).fileName();
     const int targetBlock = textCursor().blockNumber();
@@ -831,9 +839,7 @@ QString SourceCodeView::currentScopeBreadcrumb() const {
     return parts.join(QStringLiteral(" > "));
 }
 
-/**
- * @brief Jumps the editor cursor to the declaration/definition of the symbol under the cursor (F12).
- */
+/** @brief Jumps the editor cursor to the declaration/definition of the symbol under the cursor (F12). */
 bool SourceCodeView::triggerGoToDefinition() {
     const QTextCursor cur = textCursor();
     const auto loc = !m_currentFilePath.isEmpty()
@@ -851,44 +857,30 @@ bool SourceCodeView::triggerGoToDefinition() {
     setTextCursor(dest); ensureCursorVisible(); return true;
 }
 
-/**
- * @brief Parses unified Git diff (`git diff -U0`) hunk headers into 1-based line change states.
- */
+/** @brief Parses unified Git diff (`git diff -U0`) hunk headers into 1-based line change states. */
 QHash<int, SourceCodeView::GitLineState> SourceCodeView::parseUnifiedGitDiff(const QString& unifiedDiff) {
     QHash<int, GitLineState> states;
     // Match unified diff hunk headers of the form @@ -oldStart[,oldCount] +newStart[,newCount] @@.
-    static const QRegularExpression hunkRe(
-        QStringLiteral("^@@\\s+-(\\d+)(?:,(\\d+))?\\s+\\+(\\d+)(?:,(\\d+))?\\s+@@"),
-        QRegularExpression::MultilineOption);
+    static const QRegularExpression hunkRe(QStringLiteral("^@@\\s+-(\\d+)(?:,(\\d+))?\\s+\\+(\\d+)(?:,(\\d+))?\\s+@@"), QRegularExpression::MultilineOption);
     auto it = hunkRe.globalMatch(unifiedDiff);
     while (it.hasNext()) {
         const auto m = it.next();
-        const int oldCount = m.captured(2).isEmpty() ? 1 : m.captured(2).toInt();
-        const int newStart = m.captured(3).toInt();
-        const int newCount = m.captured(4).isEmpty() ? 1 : m.captured(4).toInt();
+        const int oldCount = m.captured(2).isEmpty() ? 1 : m.captured(2).toInt(), newStart = m.captured(3).toInt(), newCount = m.captured(4).isEmpty() ? 1 : m.captured(4).toInt();
         // Classify hunk range as Added, Modified, or Deleted based on oldCount and newCount.
-        if (newCount > 0 && oldCount == 0) {
-            for (int i = 0; i < newCount; ++i) states.insert(newStart + i, GitLineState::Added);
-        } else if (newCount > 0 && oldCount > 0) {
-            for (int i = 0; i < newCount; ++i) states.insert(newStart + i, GitLineState::Modified);
-        } else if (newCount == 0 && oldCount > 0) {
-            states.insert(qMax(1, newStart), GitLineState::Deleted);
-        }
+        if (newCount > 0 && oldCount == 0) { for (int i = 0; i < newCount; ++i) states.insert(newStart + i, GitLineState::Added); }
+        else if (newCount > 0 && oldCount > 0) { for (int i = 0; i < newCount; ++i) states.insert(newStart + i, GitLineState::Modified); }
+        else if (newCount == 0 && oldCount > 0) { states.insert(qMax(1, newStart), GitLineState::Deleted); }
     }
     return states;
 }
 
-/**
- * @brief Sets the active per-line Git diff gutter states and schedules a gutter repaint.
- */
+/** @brief Sets the active per-line Git diff gutter states and schedules a gutter repaint. */
 void SourceCodeView::setGitLineStates(const QHash<int, GitLineState>& states) {
     m_gitLineStates = states;
     if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
-/**
- * @brief Asynchronously refreshes live Git working-tree and unsaved-buffer diff gutter states on QThreadPool.
- */
+/** @brief Asynchronously refreshes live Git working-tree and unsaved-buffer diff gutter states on QThreadPool. */
 void SourceCodeView::refreshGitDiffGutter() {
     if (m_gitDiffTimer) m_gitDiffTimer->stop();
     const quint64 seq = ++m_gitDiffSeq; const QString filePath = m_currentFilePath;
@@ -902,9 +894,7 @@ void SourceCodeView::refreshGitDiffGutter() {
         if (self) QMetaObject::invokeMethod(self, [self, seq, states]() { if (self && self->m_gitDiffSeq.load() == seq) self->setGitLineStates(states); }, Qt::QueuedConnection);
     });
 }
-/**
- * @brief Renames all AST references to the symbol under the cursor (Shift+F6) via clangd `WorkspaceEdit`.
- */
+/** @brief Renames all AST references to the symbol under the cursor (Shift+F6) via clangd `WorkspaceEdit`. */
 bool SourceCodeView::renameSymbolAtCursor(const QString& newName) {
     const QTextCursor cur = textCursor();
     // Prefer clangd AST WorkspaceEdit when backed by a real workspace file on disk.
