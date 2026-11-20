@@ -182,6 +182,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void insertCatchpoint(const CatchpointSpec& spec) override;
   /** @brief Removes an installed catchpoint by its assigned ID @p gdbId across active ranks. */
   void removeCatchpoint(int gdbId) override;
+  /** @brief Queries `-interpreter-exec console "complete <prefix>"` and emits `consoleCompletionsReady`. */
+  void requestConsoleCompletions(const QString& prefix) override;
   /** @brief Returns the list of currently installed catchpoints tracked by this coordinator. */
   QVector<CatchpointSpec> activeCatchpoints() const { return m_activeCatchpoints; }
 
@@ -364,6 +366,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QVector<CatchpointSpec> m_activeCatchpoints;           ///< Active C++ exception, syscall, and dlopen/dlclose catchpoints.
   QMap<int, bool> m_pendingInfoHandle;                   ///< True while `210-interpreter-exec console "info handle"` is in flight.
   QMap<int, QString> m_infoHandleBuffer;                 ///< Accumulated `~` output lines for `210` `info handle` query.
+  QMap<int, QString> m_pendingCompletePrefix;            ///< Active `211` `complete <prefix>` prefix per rank.
+  QMap<int, QString> m_completeBuffer;                   ///< Accumulated `~` output lines for `211` `complete` query.
   int m_nextCatchpointId = 1;                            ///< Monotonic logical ID generator for installed catchpoints.
 };
 

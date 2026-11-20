@@ -13,9 +13,11 @@
 #include <string>
 #include <vector>
 
+#include <QDir>
 #include <QMap>
 #include <QSet>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QString>
 #include <toml++/toml.h>
 
@@ -285,6 +287,18 @@ class ConfigManager {
   QString memoryMapColorScheme() const;
   /** @brief Sets and persists the Memory Map treemap color scheme and broadcasts live update. */
   void setMemoryMapColorScheme(const QString& scheme);
+
+  /** @brief Returns the persistent GDB console command history file path (`~/.config/gridlock/gdb_history` or test override). */
+  QString gdbHistoryFilePath() const { return resolveGdbHistoryFilePath(); }
+  /** @brief Overrides the GDB console command history file path for isolated unit tests (empty restores default). */
+  void setGdbHistoryFilePathOverride(const QString& path) { s_gdbHistoryPathOverride() = path; }
+  /** @brief Static helper resolving the active GDB history file path without requiring `ConfigManager::instance()`. */
+  static QString resolveGdbHistoryFilePath() {
+    if (!s_gdbHistoryPathOverride().trimmed().isEmpty()) return s_gdbHistoryPathOverride().trimmed();
+    const QString cfgDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    return (cfgDir.isEmpty() ? (QDir::homePath() + QStringLiteral("/.config/gridlock")) : cfgDir) + QStringLiteral("/gdb_history");
+  }
+  static QString& s_gdbHistoryPathOverride() { static QString p; return p; }
 
   /** @brief Flushes the in-memory `m_config` TOML table to `m_globalConfigPath`. */
   void saveGlobalConfig();

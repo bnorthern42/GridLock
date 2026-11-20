@@ -177,5 +177,8 @@ private slots:
 
     /** @brief Verifies GdbRankCoordinator signal disposition/catchpoint MI commands and SignalCatchpointDialog UI integration. */
     void testSignalDispositionAndCatchpoints();
+
+    /** @brief Verifies GdbConsoleWidget persistent gdb_history, Up/Down draft preservation, Ctrl+R reverse search, and Tab completion popup. */
+    void testGdbConsoleReadlineErgonomics();
 };
 

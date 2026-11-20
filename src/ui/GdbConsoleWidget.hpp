@@ -12,9 +12,12 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QStringList>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -25,8 +28,10 @@ namespace gridlock::ui {
  * @brief Terminal widget displaying input and output streams for GDB debugger instances.
  *
  * Supports switching between raw MI2 protocol streams and cleaned console
- * text, filtering logs by rank ID and text search patterns, and executing
- * arbitrary GDB commands against all or individual MPI ranks.
+ * text, filtering logs by rank ID and text search patterns, executing
+ * arbitrary GDB commands against all or individual MPI ranks, persistent
+ * command history (`Up`/`Down`), incremental reverse search (`Ctrl+R`), and
+ * live `complete` tab completion (`Tab`).
  */
 class GdbConsoleWidget : public QWidget {
     Q_OBJECT
@@ -78,6 +83,30 @@ public:
      */
     int promptBarHeight() const;
 
+    /** @brief Returns the interactive command input QLineEdit (`#gdbConsoleCommandEdit`). */
+    QLineEdit* commandEdit() const { return m_commandEdit; }
+
+    /** @brief Returns the loaded persistent command history list (oldest to newest, max 500 entries). */
+    QStringList commandHistory() const { return m_history; }
+
+    /** @brief Reloads command history from `ConfigManager::instance().gdbHistoryFilePath()`. */
+    void loadCommandHistory();
+
+    /** @brief Returns true when `(reverse-i-search)` mode (`Ctrl+R`) is currently active. */
+    bool isReverseSearchActive() const { return m_reverseSearchActive; }
+
+    /** @brief Returns the current `(reverse-i-search)` query string. */
+    QString reverseSearchQuery() const { return m_reverseSearchQuery; }
+
+    /** @brief Returns the currently matched history command in `(reverse-i-search)` mode. */
+    QString reverseSearchMatch() const { return m_reverseSearchMatch; }
+
+    /** @brief Returns the inline `(reverse-i-search)` banner label (`#gdbReverseSearchStrip`). */
+    QLabel* reverseSearchLabel() const { return m_reverseSearchLabel; }
+
+    /** @brief Returns the `Tab` completion popup list widget (`#GdbCompletionPopup`). */
+    QListWidget* completionPopup() const { return m_completionPopup; }
+
 public slots:
     /**
      * @brief Appends asynchronous output received from GDB for a rank.
@@ -101,6 +130,11 @@ public slots:
      */
     void appendDebuggerConsoleOutput(int rank, const QString& output, bool isError = false);
 
+    /**
+     * @brief Receives live GDB `complete <prefix>` suggestions and applies common prefix or shows `#GdbCompletionPopup`.
+     */
+    void onConsoleCompletionsReady(const QString& prefix, const QStringList& completions);
+
 signals:
     /**
      * @brief Emitted when the user enters a GDB command in the input edit box.
@@ -108,6 +142,14 @@ signals:
      * @param command Command string to execute.
      */
     void commandEntered(int rank, const QString& command);
+
+    /**
+     * @brief Emitted when `Tab` is pressed and live GDB `complete <prefix>` suggestions are requested.
+     */
+    void completionRequested(const QString& prefix);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onClearClicked();
@@ -121,6 +163,17 @@ private:
     void applyFilter();
     /** @brief Flushes coalesced pending console lines using sticky-scroll preservation. */
     void flushConsoleBatch();
+    void recordCommandInHistory(const QString& command);
+    void saveCommandHistory() const;
+    void navigateHistory(int delta);
+    void startOrCycleReverseSearch();
+    void updateReverseSearchMatch(bool cycleOlder);
+    void exitReverseSearch(bool restorePrior);
+    void triggerTabCompletion();
+    void applyCompletionCandidates(const QString& prefix, const QStringList& candidates);
+    void acceptSelectedCompletion();
+    void hideCompletionPopup();
+    static QStringList offlineCompletionsForPrefix(const QString& prefix);
 
     QWidget* m_headerBar = nullptr;
     QWidget* m_promptBar = nullptr;
@@ -131,8 +184,20 @@ private:
     QComboBox* m_rankCombo = nullptr;
     QPlainTextEdit* m_consoleEdit = nullptr;
     QLineEdit* m_commandEdit = nullptr;
+    QLabel* m_reverseSearchLabel = nullptr;
+    QListWidget* m_completionPopup = nullptr;
     class QTimer* m_flushTimer = nullptr;
     QStringList m_pendingBatch;
+
+    QStringList m_history;
+    int m_historyIndex = 0;
+    QString m_pendingDraft;
+    bool m_reverseSearchActive = false;
+    QString m_reverseSearchQuery;
+    QString m_reverseSearchMatch;
+    QString m_reverseSearchPriorInput;
+    int m_reverseSearchHistoryIdx = -1;
+    bool m_awaitingLiveCompletion = false;
 
     /// Internal structure recording individual GDB MI and interactive REPL log events.
     struct LogEntry {

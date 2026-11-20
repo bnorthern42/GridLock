@@ -316,6 +316,9 @@ class IBackendCoordinator : public QObject {
   /** @brief Removes an installed catchpoint by its debugger breakpoint/catchpoint ID @p gdbId. */
   virtual void removeCatchpoint(int gdbId) { Q_UNUSED(gdbId); }
 
+  /** @brief Queries GDB/debugger tab completions for @p prefix via `complete <prefix>`. */
+  virtual void requestConsoleCompletions(const QString& prefix) { Q_UNUSED(prefix); }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -360,6 +363,9 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when the active catchpoints list changes. */
   void catchpointsUpdated(const QVector<CatchpointSpec>& catchpoints);
+
+  /** @brief Emitted when GDB `complete <prefix>` tab completions are resolved. */
+  void consoleCompletionsReady(const QString& prefix, const QStringList& completions);
 
  protected:
   QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".

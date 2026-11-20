@@ -453,10 +453,12 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
         connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated,
                 m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
       }
-      // Stream raw GDB/MI stdout and dispatched MI commands to GdbConsoleWidget log cache.
+      // Stream raw GDB/MI stdout, dispatched MI commands, and Tab completion queries to GdbConsoleWidget.
       if (m_gdbConsoleWidget) {
-        connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput);
-        connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput);
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput, Qt::UniqueConnection);
+        connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput, Qt::UniqueConnection);
+        connect(m_gdbConsoleWidget, &GdbConsoleWidget::completionRequested, gdbCoord, &gridlock::GdbRankCoordinator::requestConsoleCompletions, Qt::UniqueConnection);
+        connect(gdbCoord, &IBackendCoordinator::consoleCompletionsReady, m_gdbConsoleWidget, &GdbConsoleWidget::onConsoleCompletionsReady, Qt::UniqueConnection);
       }
       // Focus offending rank and log floating-point trap details on SIGFPE signal stop.
       connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this,
@@ -870,23 +872,12 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   if (event->type() == QEvent::KeyPress) {
     auto *ke = static_cast<QKeyEvent *>(event);
     const auto mods = ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
-    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::ShiftModifier)) {
-      openCommandPalette(QStringLiteral(">"));
-      return true;
-    }
-    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::AltModifier)) {
-      attachToProcessWorkflow();
-      return true;
-    }
-    if (ke->key() == Qt::Key_C && mods == (Qt::ControlModifier | Qt::AltModifier)) {
-      openProgrammerCalculator();
-      return true;
-    }
+    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::ShiftModifier)) { openCommandPalette(QStringLiteral(">")); return true; }
+    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::AltModifier)) { attachToProcessWorkflow(); return true; }
+    if (ke->key() == Qt::Key_C && mods == (Qt::ControlModifier | Qt::AltModifier)) { openProgrammerCalculator(); return true; }
+    if (ke->key() == Qt::Key_S && mods == (Qt::ControlModifier | Qt::AltModifier)) { openSignalsAndCatchpoints(); return true; }
     if (ke->key() == Qt::Key_P && mods == Qt::ControlModifier) {
-      if (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible()) {
-        openCommandPalette(QString());
-        return true;
-      }
+      if (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible()) { openCommandPalette(QString()); return true; }
     }
     if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, ke)) return true;
   }

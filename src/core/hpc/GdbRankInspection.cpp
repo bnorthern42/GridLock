@@ -354,6 +354,34 @@ void GdbRankCoordinator::handleWatchpointStopRecord(int rankId, const QString& l
  * @return True if @p line was consumed by an inspection/REPL/watchpoint handler; false otherwise.
  */
 bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& line) {
+  // Buffer `~"..."` / `&"..."` console output produced while a `211-interpreter-exec console "complete ..."` command is active.
+  if (m_pendingCompletePrefix.contains(rankId) &&
+      (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {
+    QString payload = line.mid(1).trimmed();
+    if (payload.startsWith(QLatin1Char('"')) && payload.endsWith(QLatin1Char('"')) && payload.size() >= 2)
+      payload = unescapeMiValue(payload.mid(1, payload.size() - 2));
+    if (!payload.isEmpty()) m_completeBuffer[rankId] += payload;
+    return true;
+  }
+
+  // Token 211: Parse `complete <prefix>` console stream lines (capped at 100 items) and emit `consoleCompletionsReady`.
+  if (line.startsWith(QLatin1String("211^done")) || line.startsWith(QLatin1String("211^error"))) {
+    const QString prefix = m_pendingCompletePrefix.take(rankId);
+    const QString buffered = m_completeBuffer.take(rankId);
+    QStringList completions;
+    if (line.startsWith(QLatin1String("211^done"))) {
+      for (const QString& rawLn : buffered.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        const QString item = rawLn.trimmed();
+        if (!item.isEmpty() && !completions.contains(item)) {
+          completions.append(item);
+          if (completions.size() >= 100) break;
+        }
+      }
+    }
+    emit consoleCompletionsReady(prefix, completions);
+    return true;
+  }
+
   // Buffer `~"..."` / `&"..."` console output produced while a `210-interpreter-exec console "info handle"` command is active.
   if (m_pendingInfoHandle.value(rankId, false) &&
       (line.startsWith(QLatin1Char('~')) || line.startsWith(QLatin1Char('&')))) {
@@ -791,11 +819,7 @@ void GdbRankCoordinator::selectStackFrame(int rank, int threadId, int frameLevel
   }
 }
 
-/**
- * @brief Enables or disables GDB Process Record (`record full`) on @p rank.
- * @param rank Zero-based MPI rank index (or `-1` for all ranks).
- * @param enabled True to start instruction/memory history recording; false to stop.
- */
+/** @brief Enables or disables GDB Process Record (`record full`) on @p rank. */
 void GdbRankCoordinator::setReverseRecordingEnabled(int rank, bool enabled) {
   const int start = (rank < 0) ? 0 : rank;
   const int end = (rank < 0) ? static_cast<int>(m_processes.size()) - 1 : rank;
@@ -816,52 +840,33 @@ void GdbRankCoordinator::setReverseRecordingEnabled(int rank, bool enabled) {
   }
 }
 
-/**
- * @brief Returns true when GDB Process Record is enabled for @p rank.
- * @param rank Zero-based MPI rank index.
- * @return True if process recording is active on @p rank.
- */
+/** @brief Returns true when GDB Process Record is enabled for @p rank. */
 bool GdbRankCoordinator::isReverseRecordingEnabled(int rank) const {
   return IBackendCoordinator::isReverseRecordingEnabled(rank);
 }
 
-/**
- * @brief Runs backward in recorded history (`-exec-continue --reverse`) on @p rank.
- * @param rank Zero-based MPI rank index.
- */
+/** @brief Runs backward in recorded history (`-exec-continue --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseContinue(int rank) {
   const int r = qMax(0, rank);
   if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-continue --reverse\n"));
 }
-
-/**
- * @brief Steps backward over the previous source statement (`-exec-next --reverse`) on @p rank.
- * @param rank Zero-based MPI rank index.
- */
+/** @brief Steps backward over the previous source statement (`-exec-next --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseStepOver(int rank) {
   const int r = qMax(0, rank);
   if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-next --reverse\n"));
 }
-
-/**
- * @brief Steps backward into the previous function call (`-exec-step --reverse`) on @p rank.
- * @param rank Zero-based MPI rank index.
- */
+/** @brief Steps backward into the previous function call (`-exec-step --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseStepInto(int rank) {
   const int r = qMax(0, rank);
   if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-step --reverse\n"));
 }
-
-/**
- * @brief Steps backward by a single machine instruction (`-exec-step-instruction --reverse`) on @p rank.
- * @param rank Zero-based MPI rank index.
- */
+/** @brief Steps backward by a single machine instruction (`-exec-step-instruction --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseStepInstruction(int rank) {
   const int r = qMax(0, rank);
   if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
@@ -879,8 +884,7 @@ void GdbRankCoordinator::setSignalDisposition(const QString& signalName, bool st
                           .arg(sig, stop ? QStringLiteral("stop") : QStringLiteral("nostop"),
                                print ? QStringLiteral("print") : QStringLiteral("noprint"),
                                pass ? QStringLiteral("pass") : QStringLiteral("nopass"));
-  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r)
-    if (m_processes[r]) queueOrWriteCmd(r, cmd);
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) if (m_processes[r]) queueOrWriteCmd(r, cmd);
 }
 
 void GdbRankCoordinator::requestSignalDispositions() {
@@ -899,42 +903,41 @@ void GdbRankCoordinator::requestSignalDispositions() {
 }
 
 void GdbRankCoordinator::insertCatchpoint(const CatchpointSpec& spec) {
-  CatchpointSpec entry = spec;
-  entry.filter = entry.filter.trimmed();
+  CatchpointSpec entry = spec; entry.filter = entry.filter.trimmed();
   if (entry.gdbId <= 0) entry.gdbId = m_nextCatchpointId++;
   else if (entry.gdbId >= m_nextCatchpointId) m_nextCatchpointId = entry.gdbId + 1;
-  entry.enabled = true;
-  m_activeCatchpoints.append(entry);
-
+  entry.enabled = true; m_activeCatchpoints.append(entry);
   QString cmd;
   if (entry.kind == CatchpointSpec::Kind::Syscall) {
-    QString f = entry.filter;
-    f.replace(QLatin1Char(','), QLatin1Char(' '));
-    f = f.simplified();
-    cmd = f.isEmpty() ? QStringLiteral("-interpreter-exec console \"catch syscall\"\n")
-                      : QStringLiteral("-interpreter-exec console \"catch syscall %1\"\n").arg(f);
+    QString f = entry.filter; f.replace(QLatin1Char(','), QLatin1Char(' ')); f = f.simplified();
+    cmd = f.isEmpty() ? QStringLiteral("-interpreter-exec console \"catch syscall\"\n") : QStringLiteral("-interpreter-exec console \"catch syscall %1\"\n").arg(f);
   } else {
-    const QString base = (entry.kind == CatchpointSpec::Kind::CppThrow)    ? QStringLiteral("-catch-throw")
-                         : (entry.kind == CatchpointSpec::Kind::CppRethrow) ? QStringLiteral("-catch-rethrow")
-                         : (entry.kind == CatchpointSpec::Kind::CppCatch)   ? QStringLiteral("-catch-catch")
-                         : (entry.kind == CatchpointSpec::Kind::LoadLib)    ? QStringLiteral("-catch-load")
-                                                                            : QStringLiteral("-catch-unload");
-    cmd = entry.filter.isEmpty() ? (base + QLatin1Char('\n'))
-                                 : QStringLiteral("%1 -r %2\n").arg(base, entry.filter);
+    const QString base = (entry.kind == CatchpointSpec::Kind::CppThrow) ? QStringLiteral("-catch-throw") : (entry.kind == CatchpointSpec::Kind::CppRethrow) ? QStringLiteral("-catch-rethrow") : (entry.kind == CatchpointSpec::Kind::CppCatch) ? QStringLiteral("-catch-catch") : (entry.kind == CatchpointSpec::Kind::LoadLib) ? QStringLiteral("-catch-load") : QStringLiteral("-catch-unload");
+    cmd = entry.filter.isEmpty() ? (base + QLatin1Char('\n')) : QStringLiteral("%1 -r %2\n").arg(base, entry.filter);
   }
-  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r)
-    if (m_processes[r]) queueOrWriteCmd(r, cmd);
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) if (m_processes[r]) queueOrWriteCmd(r, cmd);
   emit catchpointsUpdated(m_activeCatchpoints);
 }
 
 void GdbRankCoordinator::removeCatchpoint(int gdbId) {
   if (gdbId <= 0) return;
-  for (int i = m_activeCatchpoints.size() - 1; i >= 0; --i)
-    if (m_activeCatchpoints[i].gdbId == gdbId) m_activeCatchpoints.removeAt(i);
+  for (int i = m_activeCatchpoints.size() - 1; i >= 0; --i) if (m_activeCatchpoints[i].gdbId == gdbId) m_activeCatchpoints.removeAt(i);
   const QString cmd = QStringLiteral("-break-delete %1\n").arg(gdbId);
-  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r)
-    if (m_processes[r]) queueOrWriteCmd(r, cmd);
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) if (m_processes[r]) queueOrWriteCmd(r, cmd);
   emit catchpointsUpdated(m_activeCatchpoints);
+}
+
+void GdbRankCoordinator::requestConsoleCompletions(const QString& prefix) {
+  if (prefix.contains(QChar('\0')) || prefix.contains(QLatin1Char('\n')) || prefix.contains(QLatin1Char('\r'))) return;
+  QString escaped = prefix;
+  escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\")).replace(QStringLiteral("\""), QStringLiteral("\\\""));
+  for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) {
+    if (m_processes[r]) {
+      m_pendingCompletePrefix[r] = prefix; m_completeBuffer[r].clear();
+      queueOrWriteCmd(r, QStringLiteral("211-interpreter-exec console \"complete %1\"\n").arg(escaped));
+      return;
+    }
+  }
 }
 
 }  // namespace gridlock
