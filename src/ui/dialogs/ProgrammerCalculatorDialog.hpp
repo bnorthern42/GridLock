@@ -127,6 +127,12 @@ public:
     QString octText() const { return m_octEdit ? m_octEdit->text() : QString(); }
     /** @brief Returns the formatted Binary text currently shown in #calcBinEdit. */
     QString binText() const { return m_binEdit ? m_binEdit->text() : QString(); }
+    /** @brief Returns the IEEE-754 readout label text currently shown in #calcFloatLabel. */
+    QString floatReadoutText() const { return m_floatReadoutLabel ? m_floatReadoutLabel->text() : QString(); }
+    /** @brief Returns true when the last evaluated or loaded value was a floating-point number. */
+    bool hasFloatValue() const { return m_hasFloatValue; }
+    /** @brief Returns the last evaluated floating-point value (or integer value as double). */
+    double floatValue() const { return m_hasFloatValue ? m_floatValue : static_cast<double>(m_value); }
 
     /** @brief Accessor for the Hexadecimal base editor (#calcHexEdit). */
     QLineEdit* hexEdit() const { return m_hexEdit; }
@@ -165,6 +171,9 @@ public:
      * @param digitChar Uppercase hex/decimal digit character.
      */
     void pressDigitKey(QChar digitChar);
+
+    /** @brief Appends a decimal point ('.') to #calcExprEdit when in DEC radix mode. */
+    void pressDotKey();
 
     /** @brief Appends the current register value (formatted in the active inputRadix) into #calcExprEdit. */
     void insertCurrentValueToken();
@@ -216,6 +225,8 @@ private:
     void toggleNegateExpression();
 
     uint64_t m_value = 0ULL;
+    double m_floatValue = 0.0;
+    bool m_hasFloatValue = false;
     int m_wordWidth = 64;
     int m_inputRadix = 10;
     bool m_signedMode = false;
@@ -243,6 +254,7 @@ private:
     QPushButton* m_radixHexBtn = nullptr;
     QPushButton* m_radixOctBtn = nullptr;
     QPushButton* m_radixBinBtn = nullptr;
+    QPushButton* m_dotBtn = nullptr;
     std::array<QPushButton*, 16> m_digitButtons{};
     std::array<QPushButton*, 64> m_bitButtons{};
 };

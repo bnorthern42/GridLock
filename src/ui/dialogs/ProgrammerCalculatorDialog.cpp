@@ -30,24 +30,32 @@ namespace {
 
 /**
  * @class IntExprParser
- * @brief Self-contained recursive-descent parser for C-style 64-bit integer expressions.
+ * @brief Self-contained recursive-descent parser for C-style 64-bit integer and floating-point expressions.
  *
- * Supports decimal, hexadecimal (0x), binary (0b), octal (0o), '$'/'ans' current value,
- * parentheses, unary (+, -, ~, !), multiplicative (*, /, %), additive (+, -),
- * shift (<<, >>), and bitwise (&, ^, |) operators.
+ * Supports decimal, float/double (3.3, 3.3f, 2.5e-3), hexadecimal (0x), binary (0b), octal (0o),
+ * '$'/'ans' current value, parentheses, unary (+, -, ~, !), multiplicative (*, /, %),
+ * additive (+, -), shift (<<, >>), and bitwise (&, ^, |) operators.
  */
 class IntExprParser {
 public:
-    IntExprParser(const QString& input, uint64_t currentValue, int widthBits, bool isSigned)
-        : m_input(input), m_curValue(currentValue), m_width(widthBits), m_signed(isSigned) {}
+    struct Val {
+        uint64_t i = 0ULL;
+        double f = 0.0;
+        bool isFloat = false;
+    };
 
-    bool parse(uint64_t* outValue, QString* outError) {
+    IntExprParser(const QString& input, uint64_t currentValue, int widthBits, bool isSigned,
+                  double curFloat = 0.0, bool curIsFloat = false)
+        : m_input(input), m_curValue(currentValue), m_curFloat(curFloat), m_curIsFloat(curIsFloat),
+          m_width(widthBits), m_signed(isSigned) {}
+
+    bool parse(uint64_t* outValue, QString* outError, double* outFloat = nullptr, bool* outIsFloat = nullptr) {
         skipWs();
         if (m_pos >= m_input.size()) {
             if (outError) *outError = QStringLiteral("Empty expression");
             return false;
         }
-        const uint64_t val = parseBitOr();
+        const Val val = parseBitOr();
         skipWs();
         if (!m_error.isEmpty()) {
             if (outError) *outError = m_error;
@@ -57,7 +65,9 @@ public:
             if (outError) *outError = QStringLiteral("Unexpected token at position %1").arg(m_pos + 1);
             return false;
         }
-        if (outValue) *outValue = mask(val);
+        if (outValue) *outValue = mask(val.i);
+        if (outFloat) *outFloat = val.f;
+        if (outIsFloat) *outIsFloat = val.isFloat;
         return true;
     }
 
@@ -76,57 +86,58 @@ private:
         return static_cast<int64_t>(v);
     }
 
-    void skipWs() {
-        while (m_pos < m_input.size() && m_input.at(m_pos).isSpace()) ++m_pos;
+    Val makeInt(uint64_t v) const {
+        const uint64_t m = mask(v);
+        const double d = m_signed ? static_cast<double>(signExtend(m)) : static_cast<double>(m);
+        return Val{m, d, false};
     }
+
+    Val makeFloat(double d) const {
+        const int64_t iv = (std::isfinite(d) && d >= static_cast<double>(INT64_MIN) && d <= static_cast<double>(INT64_MAX))
+                               ? static_cast<int64_t>(d)
+                               : 0;
+        return Val{mask(static_cast<uint64_t>(iv)), d, true};
+    }
+
+    void skipWs() { while (m_pos < m_input.size() && m_input.at(m_pos).isSpace()) ++m_pos; }
 
     bool match(const QString& tok) {
         skipWs();
-        if (m_input.mid(m_pos, tok.size()) == tok) {
-            m_pos += tok.size();
-            return true;
-        }
+        if (m_input.mid(m_pos, tok.size()) == tok) { m_pos += tok.size(); return true; }
         return false;
     }
 
-    uint64_t parseBitOr() {
-        uint64_t lhs = parseBitXor();
-        while (m_error.isEmpty() && match(QStringLiteral("|"))) {
-            lhs = mask(lhs | parseBitXor());
-        }
+    Val parseBitOr() {
+        Val lhs = parseBitXor();
+        while (m_error.isEmpty() && match(QStringLiteral("|"))) lhs = makeInt(lhs.i | parseBitXor().i);
         return lhs;
     }
 
-    uint64_t parseBitXor() {
-        uint64_t lhs = parseBitAnd();
-        while (m_error.isEmpty() && match(QStringLiteral("^"))) {
-            lhs = mask(lhs ^ parseBitAnd());
-        }
+    Val parseBitXor() {
+        Val lhs = parseBitAnd();
+        while (m_error.isEmpty() && match(QStringLiteral("^"))) lhs = makeInt(lhs.i ^ parseBitAnd().i);
         return lhs;
     }
 
-    uint64_t parseBitAnd() {
-        uint64_t lhs = parseShift();
-        while (m_error.isEmpty() && match(QStringLiteral("&"))) {
-            lhs = mask(lhs & parseShift());
-        }
+    Val parseBitAnd() {
+        Val lhs = parseShift();
+        while (m_error.isEmpty() && match(QStringLiteral("&"))) lhs = makeInt(lhs.i & parseShift().i);
         return lhs;
     }
 
-    uint64_t parseShift() {
-        uint64_t lhs = parseAddSub();
+    Val parseShift() {
+        Val lhs = parseAddSub();
         while (m_error.isEmpty()) {
             if (match(QStringLiteral("<<"))) {
-                const uint64_t sh = parseAddSub();
-                lhs = (sh >= static_cast<uint64_t>(m_width)) ? 0ULL : mask(lhs << sh);
+                const uint64_t sh = parseAddSub().i;
+                lhs = makeInt((sh >= static_cast<uint64_t>(m_width)) ? 0ULL : (lhs.i << sh));
             } else if (match(QStringLiteral(">>"))) {
-                const uint64_t sh = parseAddSub();
+                const uint64_t sh = parseAddSub().i;
                 if (m_signed) {
-                    const int64_t s = signExtend(lhs);
-                    lhs = (sh >= static_cast<uint64_t>(m_width)) ? (s < 0 ? mask(~0ULL) : 0ULL)
-                                                                 : mask(static_cast<uint64_t>(s >> sh));
+                    const int64_t s = signExtend(lhs.i);
+                    lhs = makeInt((sh >= static_cast<uint64_t>(m_width)) ? (s < 0 ? ~0ULL : 0ULL) : static_cast<uint64_t>(s >> sh));
                 } else {
-                    lhs = (sh >= static_cast<uint64_t>(m_width)) ? 0ULL : mask(mask(lhs) >> sh);
+                    lhs = makeInt((sh >= static_cast<uint64_t>(m_width)) ? 0ULL : (mask(lhs.i) >> sh));
                 }
             } else {
                 break;
@@ -135,38 +146,55 @@ private:
         return lhs;
     }
 
-    uint64_t parseAddSub() {
-        uint64_t lhs = parseMulDiv();
+    Val parseAddSub() {
+        Val lhs = parseMulDiv();
         while (m_error.isEmpty()) {
-            if (match(QStringLiteral("+"))) lhs = mask(lhs + parseMulDiv());
-            else if (match(QStringLiteral("-"))) lhs = mask(lhs - parseMulDiv());
-            else break;
+            if (match(QStringLiteral("+"))) {
+                const Val rhs = parseMulDiv();
+                lhs = (lhs.isFloat || rhs.isFloat) ? makeFloat(lhs.f + rhs.f) : makeInt(lhs.i + rhs.i);
+            } else if (match(QStringLiteral("-"))) {
+                const Val rhs = parseMulDiv();
+                lhs = (lhs.isFloat || rhs.isFloat) ? makeFloat(lhs.f - rhs.f) : makeInt(lhs.i - rhs.i);
+            } else {
+                break;
+            }
         }
         return lhs;
     }
 
-    uint64_t parseMulDiv() {
-        uint64_t lhs = parseUnary();
+    Val parseMulDiv() {
+        Val lhs = parseUnary();
         while (m_error.isEmpty()) {
             if (match(QStringLiteral("*"))) {
-                lhs = mask(lhs * parseUnary());
+                const Val rhs = parseUnary();
+                lhs = (lhs.isFloat || rhs.isFloat) ? makeFloat(lhs.f * rhs.f) : makeInt(lhs.i * rhs.i);
             } else if (match(QStringLiteral("/"))) {
-                const uint64_t rhs = parseUnary();
-                if (rhs == 0ULL) { m_error = QStringLiteral("Division by zero"); return 0ULL; }
-                if (m_signed) {
-                    const int64_t a = signExtend(lhs), b = signExtend(rhs);
-                    lhs = (b == -1 && a == INT64_MIN) ? mask(static_cast<uint64_t>(a)) : mask(static_cast<uint64_t>(a / b));
+                const Val rhs = parseUnary();
+                if (lhs.isFloat || rhs.isFloat) {
+                    if (rhs.f == 0.0) { m_error = QStringLiteral("Division by zero"); return makeFloat(0.0); }
+                    lhs = makeFloat(lhs.f / rhs.f);
                 } else {
-                    lhs = mask(mask(lhs) / mask(rhs));
+                    if (rhs.i == 0ULL) { m_error = QStringLiteral("Division by zero"); return makeInt(0ULL); }
+                    if (m_signed) {
+                        const int64_t a = signExtend(lhs.i), b = signExtend(rhs.i);
+                        lhs = makeInt((b == -1 && a == INT64_MIN) ? static_cast<uint64_t>(a) : static_cast<uint64_t>(a / b));
+                    } else {
+                        lhs = makeInt(mask(lhs.i) / mask(rhs.i));
+                    }
                 }
             } else if (match(QStringLiteral("%"))) {
-                const uint64_t rhs = parseUnary();
-                if (rhs == 0ULL) { m_error = QStringLiteral("Modulo by zero"); return 0ULL; }
-                if (m_signed) {
-                    const int64_t a = signExtend(lhs), b = signExtend(rhs);
-                    lhs = (b == -1 && a == INT64_MIN) ? 0ULL : mask(static_cast<uint64_t>(a % b));
+                const Val rhs = parseUnary();
+                if (lhs.isFloat || rhs.isFloat) {
+                    if (rhs.f == 0.0) { m_error = QStringLiteral("Modulo by zero"); return makeFloat(0.0); }
+                    lhs = makeFloat(std::fmod(lhs.f, rhs.f));
                 } else {
-                    lhs = mask(mask(lhs) % mask(rhs));
+                    if (rhs.i == 0ULL) { m_error = QStringLiteral("Modulo by zero"); return makeInt(0ULL); }
+                    if (m_signed) {
+                        const int64_t a = signExtend(lhs.i), b = signExtend(rhs.i);
+                        lhs = makeInt((b == -1 && a == INT64_MIN) ? 0ULL : static_cast<uint64_t>(a % b));
+                    } else {
+                        lhs = makeInt(mask(lhs.i) % mask(rhs.i));
+                    }
                 }
             } else {
                 break;
@@ -175,54 +203,70 @@ private:
         return lhs;
     }
 
-    uint64_t parseUnary() {
+    Val parseUnary() {
         skipWs();
-        if (match(QStringLiteral("+"))) return mask(parseUnary());
-        if (match(QStringLiteral("-"))) return mask(0ULL - parseUnary());
-        if (match(QStringLiteral("~"))) return mask(~parseUnary());
-        if (match(QStringLiteral("!"))) return (mask(parseUnary()) == 0ULL) ? 1ULL : 0ULL;
+        if (match(QStringLiteral("+"))) return parseUnary();
+        if (match(QStringLiteral("-"))) {
+            const Val v = parseUnary();
+            return v.isFloat ? makeFloat(-v.f) : makeInt(0ULL - v.i);
+        }
+        if (match(QStringLiteral("~"))) return makeInt(~parseUnary().i);
+        if (match(QStringLiteral("!"))) return makeInt((mask(parseUnary().i) == 0ULL) ? 1ULL : 0ULL);
         return parsePrimary();
     }
 
-    uint64_t parsePrimary() {
+    Val parsePrimary() {
         skipWs();
         if (match(QStringLiteral("("))) {
-            const uint64_t v = parseBitOr();
+            const Val v = parseBitOr();
             if (!match(QStringLiteral(")"))) m_error = QStringLiteral("Missing closing ')'");
-            return mask(v);
+            return v;
         }
-        if (match(QStringLiteral("$"))) return mask(m_curValue);
+        if (match(QStringLiteral("$"))) return m_curIsFloat ? makeFloat(m_curFloat) : makeInt(m_curValue);
         if (m_input.mid(m_pos, 3).compare(QStringLiteral("ans"), Qt::CaseInsensitive) == 0 &&
             (m_pos + 3 >= m_input.size() || !m_input.at(m_pos + 3).isLetterOrNumber())) {
             m_pos += 3;
-            return mask(m_curValue);
+            return m_curIsFloat ? makeFloat(m_curFloat) : makeInt(m_curValue);
         }
 
         const int start = m_pos;
-        while (m_pos < m_input.size() &&
-               (m_input.at(m_pos).isLetterOrNumber() || m_input.at(m_pos) == QLatin1Char('_'))) {
-            ++m_pos;
+        const bool isHex = m_input.mid(m_pos, 2).compare(QStringLiteral("0x"), Qt::CaseInsensitive) == 0;
+        while (m_pos < m_input.size()) {
+            const QChar c = m_input.at(m_pos);
+            if (c.isLetterOrNumber() || c == QLatin1Char('_') || c == QLatin1Char('\'') || (!isHex && c == QLatin1Char('.'))) {
+                ++m_pos;
+                if (!isHex && (c == QLatin1Char('e') || c == QLatin1Char('E')) && m_pos < m_input.size() &&
+                    (m_input.at(m_pos) == QLatin1Char('+') || m_input.at(m_pos) == QLatin1Char('-'))) {
+                    ++m_pos;
+                }
+            } else {
+                break;
+            }
         }
         if (m_pos == start) {
             m_error = QStringLiteral("Expected number at position %1").arg(m_pos + 1);
-            return 0ULL;
+            return makeInt(0ULL);
         }
 
         QString tok = m_input.mid(start, m_pos - start).remove(QLatin1Char('_')).remove(QLatin1Char('\''));
-        int base = 10;
-        if (tok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
-            base = 16;
-            tok = tok.mid(2);
-        } else if (tok.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) {
-            base = 2;
-            tok = tok.mid(2);
-        } else if (tok.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive)) {
-            base = 8;
-            tok = tok.mid(2);
-        } else if (tok.size() > 1 && tok.startsWith(QLatin1Char('0')) && tok.at(1).isDigit()) {
-            base = 8;
-            tok = tok.mid(1);
+        if (!isHex && !tok.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive) &&
+            !tok.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive) &&
+            (tok.contains(QLatin1Char('.')) || tok.contains(QLatin1Char('e'), Qt::CaseInsensitive) ||
+             tok.endsWith(QLatin1Char('f'), Qt::CaseInsensitive))) {
+            if (tok.endsWith(QLatin1Char('f'), Qt::CaseInsensitive) || tok.endsWith(QLatin1Char('l'), Qt::CaseInsensitive)) {
+                tok.chop(1);
+            }
+            bool ok = false;
+            const double d = tok.toDouble(&ok);
+            if (!ok) { m_error = QStringLiteral("Invalid floating-point literal '%1'").arg(tok); return makeFloat(0.0); }
+            return makeFloat(d);
         }
+
+        int base = 10;
+        if (tok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) { base = 16; tok = tok.mid(2); }
+        else if (tok.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) { base = 2; tok = tok.mid(2); }
+        else if (tok.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive)) { base = 8; tok = tok.mid(2); }
+        else if (tok.size() > 1 && tok.startsWith(QLatin1Char('0')) && tok.at(1).isDigit()) { base = 8; tok = tok.mid(1); }
         while (tok.size() > 1 && (tok.back().toLower() == QLatin1Char('u') || tok.back().toLower() == QLatin1Char('l'))) {
             tok.chop(1);
         }
@@ -230,14 +274,16 @@ private:
         const uint64_t val = tok.toULongLong(&ok, base);
         if (!ok) {
             m_error = QStringLiteral("Invalid integer literal '%1'").arg(tok);
-            return 0ULL;
+            return makeInt(0ULL);
         }
-        return mask(val);
+        return makeInt(val);
     }
 
     QString m_input;
     int m_pos = 0;
     uint64_t m_curValue = 0ULL;
+    double m_curFloat = 0.0;
+    bool m_curIsFloat = false;
     int m_width = 64;
     bool m_signed = false;
     QString m_error;
@@ -281,8 +327,6 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     setObjectName(QStringLiteral("ProgrammerCalculatorDialog"));
     setWindowTitle(QStringLiteral("Programmer's Calculator"));
     setModal(false);
-    setMinimumSize(720, 490);
-    resize(780, 520);
 
     // Load user defaults from QSettings ("tools/calcDefaultWidth" and "tools/calcDefaultSigned").
     QSettings settings(QStringLiteral("gridlock"), QStringLiteral("debugger"));
@@ -297,7 +341,6 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     // 1. Header bar with Word Width selector (64/32/16/8-bit), Signed toggle, BSWAP, and explicit Close button.
     auto* topBar = new QHBoxLayout();
     topBar->setSpacing(6);
-
     auto makeWidthBtn = [&](const QString& label, const QString& objName, int bits) {
         auto* btn = new QPushButton(label, this);
         btn->setObjectName(objName);
@@ -327,15 +370,10 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     m_closeBtn->setFixedHeight(26);
     connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::close);
 
-    topBar->addWidget(m_width64Btn);
-    topBar->addWidget(m_width32Btn);
-    topBar->addWidget(m_width16Btn);
-    topBar->addWidget(m_width8Btn);
-    topBar->addSpacing(8);
-    topBar->addWidget(m_signedCheck);
-    topBar->addWidget(m_bswapBtn);
-    topBar->addStretch(1);
-    topBar->addWidget(m_closeBtn);
+    topBar->addWidget(m_width64Btn); topBar->addWidget(m_width32Btn);
+    topBar->addWidget(m_width16Btn); topBar->addWidget(m_width8Btn);
+    topBar->addSpacing(8); topBar->addWidget(m_signedCheck); topBar->addWidget(m_bswapBtn);
+    topBar->addStretch(1); topBar->addWidget(m_closeBtn);
     root->addLayout(topBar);
 
     // 2. Synchronized Base Editors card (HEX, DEC, OCT, BIN + 1-click Copy + IEEE-754/ASCII readouts).
@@ -344,38 +382,27 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     basesGrid->setContentsMargins(10, 12, 10, 10);
     basesGrid->setSpacing(6);
 
-    auto addBaseRow = [&](int row, const QString& label, const QString& editObj, const QString& copyObj,
-                          QLineEdit** outEdit) {
-        auto* lbl = new QLabel(label, basesGroup);
-        lbl->setFixedWidth(48);
-        auto* ed = new QLineEdit(basesGroup);
-        ed->setObjectName(editObj);
-        ed->setFixedHeight(26);
+    auto addBaseRow = [&](int row, const QString& label, const QString& editObj, const QString& copyObj, QLineEdit** outEdit) {
+        auto* lbl = new QLabel(label, basesGroup); lbl->setFixedWidth(48);
+        auto* ed = new QLineEdit(basesGroup); ed->setObjectName(editObj); ed->setFixedHeight(26);
         auto* copyBtn = new QPushButton(QStringLiteral("Copy"), basesGroup);
-        copyBtn->setObjectName(copyObj);
-        copyBtn->setFixedSize(56, 26);
+        copyBtn->setObjectName(copyObj); copyBtn->setFixedSize(56, 26);
         connect(copyBtn, &QPushButton::clicked, this, [ed]() {
             if (QClipboard* cb = QApplication::clipboard()) cb->setText(ed->text());
         });
-        basesGrid->addWidget(lbl, row, 0);
-        basesGrid->addWidget(ed, row, 1);
-        basesGrid->addWidget(copyBtn, row, 2);
+        basesGrid->addWidget(lbl, row, 0); basesGrid->addWidget(ed, row, 1); basesGrid->addWidget(copyBtn, row, 2);
         *outEdit = ed;
     };
-
     addBaseRow(0, QStringLiteral("HEX"), QStringLiteral("calcHexEdit"), QStringLiteral("calcHexCopyBtn"), &m_hexEdit);
     addBaseRow(1, QStringLiteral("DEC"), QStringLiteral("calcDecEdit"), QStringLiteral("calcDecCopyBtn"), &m_decEdit);
     addBaseRow(2, QStringLiteral("OCT"), QStringLiteral("calcOctEdit"), QStringLiteral("calcOctCopyBtn"), &m_octEdit);
     addBaseRow(3, QStringLiteral("BIN"), QStringLiteral("calcBinEdit"), QStringLiteral("calcBinCopyBtn"), &m_binEdit);
 
     // IEEE-754 Float/Double and ASCII byte interpretation row.
-    m_floatReadoutLabel = new QLabel(basesGroup);
-    m_floatReadoutLabel->setObjectName(QStringLiteral("calcFloatLabel"));
-    m_asciiReadoutLabel = new QLabel(basesGroup);
-    m_asciiReadoutLabel->setObjectName(QStringLiteral("calcAsciiLabel"));
+    m_floatReadoutLabel = new QLabel(basesGroup); m_floatReadoutLabel->setObjectName(QStringLiteral("calcFloatLabel"));
+    m_asciiReadoutLabel = new QLabel(basesGroup); m_asciiReadoutLabel->setObjectName(QStringLiteral("calcAsciiLabel"));
     auto* metaRow = new QHBoxLayout();
-    metaRow->addWidget(m_floatReadoutLabel, 1);
-    metaRow->addWidget(m_asciiReadoutLabel);
+    metaRow->addWidget(m_floatReadoutLabel, 1); metaRow->addWidget(m_asciiReadoutLabel);
     basesGrid->addLayout(metaRow, 4, 0, 1, 3);
     root->addWidget(basesGroup);
 
@@ -384,63 +411,52 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
         if (m_updatingViews) return;
         QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_'));
         if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) s = s.mid(2);
-        if (s.isEmpty()) { m_value = 0ULL; syncAllViews(m_hexEdit); return; }
-        bool ok = false;
-        const uint64_t parsed = s.toULongLong(&ok, 16);
-        if (ok) { m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_hexEdit); }
+        if (s.isEmpty()) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_hexEdit); return; }
+        bool ok = false; const uint64_t parsed = s.toULongLong(&ok, 16);
+        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_hexEdit); }
     });
     connect(m_decEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
         if (m_updatingViews) return;
         QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_')).remove(QLatin1Char(','));
-        if (s.isEmpty() || s == QStringLiteral("-")) { m_value = 0ULL; syncAllViews(m_decEdit); return; }
+        if (s.isEmpty() || s == QStringLiteral("-")) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_decEdit); return; }
         bool ok = false;
-        uint64_t parsed = 0ULL;
-        if (m_signedMode || s.startsWith(QLatin1Char('-'))) {
-            const qint64 sv = s.toLongLong(&ok, 10);
-            parsed = static_cast<uint64_t>(sv);
-        } else {
-            parsed = s.toULongLong(&ok, 10);
-        }
-        if (ok) { m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_decEdit); }
+        const uint64_t parsed = (m_signedMode || s.startsWith(QLatin1Char('-')))
+                                    ? static_cast<uint64_t>(s.toLongLong(&ok, 10))
+                                    : s.toULongLong(&ok, 10);
+        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_decEdit); }
     });
     connect(m_octEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
         if (m_updatingViews) return;
         QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_'));
         if (s.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive)) s = s.mid(2);
-        if (s.isEmpty()) { m_value = 0ULL; syncAllViews(m_octEdit); return; }
-        bool ok = false;
-        const uint64_t parsed = s.toULongLong(&ok, 8);
-        if (ok) { m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_octEdit); }
+        if (s.isEmpty()) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_octEdit); return; }
+        bool ok = false; const uint64_t parsed = s.toULongLong(&ok, 8);
+        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_octEdit); }
     });
     connect(m_binEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
         if (m_updatingViews) return;
         QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_'));
         if (s.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) s = s.mid(2);
-        if (s.isEmpty()) { m_value = 0ULL; syncAllViews(m_binEdit); return; }
-        bool ok = false;
-        const uint64_t parsed = s.toULongLong(&ok, 2);
-        if (ok) { m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_binEdit); }
+        if (s.isEmpty()) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_binEdit); return; }
+        bool ok = false; const uint64_t parsed = s.toULongLong(&ok, 2);
+        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_binEdit); }
     });
 
     // 3. Interactive 64-Bit Clickable Bit-Toggle Grid (63..32 on top, 31..0 on bottom, nibble-grouped).
     auto* bitGroup = new QGroupBox(QStringLiteral("Interactive 64-Bit Toggle Grid"), this);
     auto* bitLayout = new QVBoxLayout(bitGroup);
-    bitLayout->setContentsMargins(8, 10, 8, 8);
-    bitLayout->setSpacing(6);
+    bitLayout->setContentsMargins(8, 10, 8, 8); bitLayout->setSpacing(6);
 
     auto addBitRow = [&](int highBit, int lowBit) {
-        auto* rowLayout = new QHBoxLayout();
-        rowLayout->setSpacing(6);
+        auto* rowLayout = new QHBoxLayout(); rowLayout->setSpacing(6);
         for (int nibbleHigh = highBit; nibbleHigh >= lowBit; nibbleHigh -= 4) {
-            auto* nibbleCol = new QVBoxLayout();
-            nibbleCol->setSpacing(2);
+            auto* nibbleCol = new QVBoxLayout(); nibbleCol->setSpacing(2);
             auto* idxLbl = new QLabel(QString::number(nibbleHigh), bitGroup);
             idxLbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
             idxLbl->setObjectName(QStringLiteral("calcBitIndexLabel"));
             nibbleCol->addWidget(idxLbl);
 
-            auto* nibbleBtns = new QHBoxLayout();
-            nibbleBtns->setSpacing(2);
+            auto* nibbleBtns = new QHBoxLayout(); nibbleBtns->setSpacing(2);
             for (int b = nibbleHigh; b >= nibbleHigh - 3; --b) {
                 auto* btn = new QPushButton(QStringLiteral("0"), bitGroup);
                 btn->setObjectName(QStringLiteral("calcBitBtn_%1").arg(b));
@@ -455,22 +471,19 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
         }
         bitLayout->addLayout(rowLayout);
     };
-    addBitRow(63, 32);
-    addBitRow(31, 0);
+    addBitRow(63, 32); addBitRow(31, 0);
     root->addWidget(bitGroup);
 
     // 4. Bitwise & Arithmetic Expression Evaluator + Full Programmer's Calculator Keypad.
     auto* exprGroup = new QGroupBox(QStringLiteral("Bitwise & Arithmetic Expression Evaluator"), this);
     auto* exprVBox = new QVBoxLayout(exprGroup);
-    exprVBox->setContentsMargins(10, 12, 10, 8);
-    exprVBox->setSpacing(6);
+    exprVBox->setContentsMargins(10, 12, 10, 10); exprVBox->setSpacing(8);
 
-    auto* exprRow = new QHBoxLayout();
-    exprRow->setSpacing(6);
+    auto* exprRow = new QHBoxLayout(); exprRow->setSpacing(6);
     m_exprEdit = new QLineEdit(exprGroup);
     m_exprEdit->setObjectName(QStringLiteral("calcExprEdit"));
-    m_exprEdit->setPlaceholderText(QStringLiteral("e.g., (0x10 << 4) | 0x05, 0b1010 ^ 0xff, $ + 64"));
-    m_exprEdit->setFixedHeight(26);
+    m_exprEdit->setPlaceholderText(QStringLiteral("e.g., 3.3 * 2, (0x10 << 4) | 0x05, 0b1010 ^ 0xff, $ + 64"));
+    m_exprEdit->setFixedHeight(28);
     connect(m_exprEdit, &QLineEdit::returnPressed, this, [this]() { evaluateAndApplyExpression(m_exprEdit->text()); });
     exprRow->addWidget(m_exprEdit, 1);
 
@@ -480,12 +493,9 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
 
     auto makeRadixBtn = [&](const QString& label, const QString& objName, int radix) {
         auto* btn = new QPushButton(label, exprGroup);
-        btn->setObjectName(objName);
-        btn->setCheckable(true);
-        btn->setFixedSize(44, 26);
+        btn->setObjectName(objName); btn->setCheckable(true); btn->setFixedSize(44, 28);
         connect(btn, &QPushButton::clicked, this, [this, radix]() { setInputRadix(radix); });
-        exprRow->addWidget(btn);
-        return btn;
+        exprRow->addWidget(btn); return btn;
     };
     m_radixDecBtn = makeRadixBtn(QStringLiteral("DEC"), QStringLiteral("calcRadixDecBtn"), 10);
     m_radixHexBtn = makeRadixBtn(QStringLiteral("HEX"), QStringLiteral("calcRadixHexBtn"), 16);
@@ -495,126 +505,94 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     auto* ansBtn = new QPushButton(QStringLiteral("ANS"), exprGroup);
     ansBtn->setObjectName(QStringLiteral("calcAnsBtn"));
     ansBtn->setToolTip(QStringLiteral("Insert current register value into expression"));
-    ansBtn->setFixedSize(50, 26);
+    ansBtn->setFixedSize(50, 28);
     connect(ansBtn, &QPushButton::clicked, this, &ProgrammerCalculatorDialog::insertCurrentValueToken);
     exprRow->addWidget(ansBtn);
     exprVBox->addLayout(exprRow);
 
     // Full tactile 5x8 Programmer's Calculator Button Grid.
     auto* padGrid = new QGridLayout();
-    padGrid->setHorizontalSpacing(6);
-    padGrid->setVerticalSpacing(5);
+    padGrid->setHorizontalSpacing(6); padGrid->setVerticalSpacing(6);
     for (int c = 0; c < 8; ++c) padGrid->setColumnStretch(c, 1);
 
     auto makePadBtn = [&](const QString& text, const QString& objName, const QString& role,
                           int r, int c, int cs, std::function<void()> cb) {
         auto* btn = new QPushButton(text, exprGroup);
-        btn->setObjectName(objName);
-        btn->setProperty("calcRole", role);
-        btn->setMinimumHeight(30);
+        btn->setObjectName(objName); btn->setProperty("calcRole", role); btn->setMinimumHeight(32);
         connect(btn, &QPushButton::clicked, this, std::move(cb));
-        padGrid->addWidget(btn, r, c, 1, cs);
-        return btn;
+        padGrid->addWidget(btn, r, c, 1, cs); return btn;
     };
-
     auto makeDigitBtn = [&](int digitVal, const QString& label, int r, int c) {
         const QChar ch = label.at(0);
-        auto* btn = makePadBtn(label, QStringLiteral("calcKey_%1").arg(label),
-                               digitVal >= 10 ? QStringLiteral("hex") : QStringLiteral("digit"),
-                               r, c, 1, [this, ch]() { pressDigitKey(ch); });
-        m_digitButtons[static_cast<size_t>(digitVal)] = btn;
+        m_digitButtons[static_cast<size_t>(digitVal)] = makePadBtn(
+            label, QStringLiteral("calcKey_%1").arg(label),
+            digitVal >= 10 ? QStringLiteral("hex") : QStringLiteral("digit"),
+            r, c, 1, [this, ch]() { pressDigitKey(ch); });
     };
 
     // Row 0: A, B, 7, 8, 9, AND, OR, AC
-    makeDigitBtn(10, QStringLiteral("A"), 0, 0);
-    makeDigitBtn(11, QStringLiteral("B"), 0, 1);
-    makeDigitBtn(7, QStringLiteral("7"), 0, 2);
-    makeDigitBtn(8, QStringLiteral("8"), 0, 3);
-    makeDigitBtn(9, QStringLiteral("9"), 0, 4);
-    makePadBtn(QStringLiteral("AND"), QStringLiteral("calcOpAndBtn"), QStringLiteral("op"), 0, 5, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" & ")); });
-    makePadBtn(QStringLiteral("OR"), QStringLiteral("calcOpOrBtn"), QStringLiteral("op"), 0, 6, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" | ")); });
-    makePadBtn(QStringLiteral("AC"), QStringLiteral("calcOpClearBtn"), QStringLiteral("clear"), 0, 7, 1,
-               [this]() { clearAll(); });
+    makeDigitBtn(10, QStringLiteral("A"), 0, 0); makeDigitBtn(11, QStringLiteral("B"), 0, 1);
+    makeDigitBtn(7, QStringLiteral("7"), 0, 2); makeDigitBtn(8, QStringLiteral("8"), 0, 3); makeDigitBtn(9, QStringLiteral("9"), 0, 4);
+    makePadBtn(QStringLiteral("AND"), QStringLiteral("calcOpAndBtn"), QStringLiteral("op"), 0, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" & ")); });
+    makePadBtn(QStringLiteral("OR"), QStringLiteral("calcOpOrBtn"), QStringLiteral("op"), 0, 6, 1, [this]() { insertOperatorToken(QStringLiteral(" | ")); });
+    makePadBtn(QStringLiteral("AC"), QStringLiteral("calcOpClearBtn"), QStringLiteral("clear"), 0, 7, 1, [this]() { clearAll(); });
 
     // Row 1: C, D, 4, 5, 6, XOR, NOT, ⌫
-    makeDigitBtn(12, QStringLiteral("C"), 1, 0);
-    makeDigitBtn(13, QStringLiteral("D"), 1, 1);
-    makeDigitBtn(4, QStringLiteral("4"), 1, 2);
-    makeDigitBtn(5, QStringLiteral("5"), 1, 3);
-    makeDigitBtn(6, QStringLiteral("6"), 1, 4);
-    makePadBtn(QStringLiteral("XOR"), QStringLiteral("calcOpXorBtn"), QStringLiteral("op"), 1, 5, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" ^ ")); });
+    makeDigitBtn(12, QStringLiteral("C"), 1, 0); makeDigitBtn(13, QStringLiteral("D"), 1, 1);
+    makeDigitBtn(4, QStringLiteral("4"), 1, 2); makeDigitBtn(5, QStringLiteral("5"), 1, 3); makeDigitBtn(6, QStringLiteral("6"), 1, 4);
+    makePadBtn(QStringLiteral("XOR"), QStringLiteral("calcOpXorBtn"), QStringLiteral("op"), 1, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" ^ ")); });
     makePadBtn(QStringLiteral("NOT"), QStringLiteral("calcOpNotBtn"), QStringLiteral("op"), 1, 6, 1, [this]() {
-        if (m_exprEdit && m_exprEdit->text().trimmed().isEmpty()) {
-            setValue(~m_value);
-        } else if (m_exprEdit) {
-            m_exprEdit->insert(QStringLiteral("~"));
-            m_exprEdit->setFocus();
-        }
+        if (m_exprEdit && m_exprEdit->text().trimmed().isEmpty()) { setValue(~m_value); }
+        else if (m_exprEdit) { m_exprEdit->insert(QStringLiteral("~")); m_exprEdit->setFocus(); }
     });
-    makePadBtn(QStringLiteral("⌫"), QStringLiteral("calcKeyBackspace"), QStringLiteral("clear"), 1, 7, 1,
-               [this]() { backspaceExpression(); });
+    makePadBtn(QStringLiteral("⌫"), QStringLiteral("calcKeyBackspace"), QStringLiteral("clear"), 1, 7, 1, [this]() { backspaceExpression(); });
 
     // Row 2: E, F, 1, 2, 3, <<, >>, (
-    makeDigitBtn(14, QStringLiteral("E"), 2, 0);
-    makeDigitBtn(15, QStringLiteral("F"), 2, 1);
-    makeDigitBtn(1, QStringLiteral("1"), 2, 2);
-    makeDigitBtn(2, QStringLiteral("2"), 2, 3);
-    makeDigitBtn(3, QStringLiteral("3"), 2, 4);
-    makePadBtn(QStringLiteral("<<"), QStringLiteral("calcOpShlBtn"), QStringLiteral("op"), 2, 5, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" << ")); });
-    makePadBtn(QStringLiteral(">>"), QStringLiteral("calcOpShrBtn"), QStringLiteral("op"), 2, 6, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" >> ")); });
+    makeDigitBtn(14, QStringLiteral("E"), 2, 0); makeDigitBtn(15, QStringLiteral("F"), 2, 1);
+    makeDigitBtn(1, QStringLiteral("1"), 2, 2); makeDigitBtn(2, QStringLiteral("2"), 2, 3); makeDigitBtn(3, QStringLiteral("3"), 2, 4);
+    makePadBtn(QStringLiteral("<<"), QStringLiteral("calcOpShlBtn"), QStringLiteral("op"), 2, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" << ")); });
+    makePadBtn(QStringLiteral(">>"), QStringLiteral("calcOpShrBtn"), QStringLiteral("op"), 2, 6, 1, [this]() { insertOperatorToken(QStringLiteral(" >> ")); });
     makePadBtn(QStringLiteral("("), QStringLiteral("calcKeyLParen"), QStringLiteral("op"), 2, 7, 1, [this]() {
         if (m_exprEdit) {
             if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
-            m_exprEdit->insert(QStringLiteral("("));
-            m_exprEdit->setFocus();
+            m_exprEdit->insert(QStringLiteral("(")); m_exprEdit->setFocus();
         }
     });
 
-    // Row 3: ROL, ROR, ±, 0, %, /, *, )
-    makePadBtn(QStringLiteral("ROL"), QStringLiteral("calcOpRolBtn"), QStringLiteral("op"), 3, 0, 1,
-               [this]() { rotateLeft(1); });
-    makePadBtn(QStringLiteral("ROR"), QStringLiteral("calcOpRorBtn"), QStringLiteral("op"), 3, 1, 1,
-               [this]() { rotateRight(1); });
-    makePadBtn(QStringLiteral("±"), QStringLiteral("calcKeyNegate"), QStringLiteral("op"), 3, 2, 1,
-               [this]() { toggleNegateExpression(); });
+    // Row 3: ROL, ROR, ±, 0, ., ÷, ×, )
+    makePadBtn(QStringLiteral("ROL"), QStringLiteral("calcOpRolBtn"), QStringLiteral("op"), 3, 0, 1, [this]() { rotateLeft(1); });
+    makePadBtn(QStringLiteral("ROR"), QStringLiteral("calcOpRorBtn"), QStringLiteral("op"), 3, 1, 1, [this]() { rotateRight(1); });
+    makePadBtn(QStringLiteral("±"), QStringLiteral("calcKeyNegate"), QStringLiteral("op"), 3, 2, 1, [this]() { toggleNegateExpression(); });
     makeDigitBtn(0, QStringLiteral("0"), 3, 3);
-    makePadBtn(QStringLiteral("%"), QStringLiteral("calcOpModBtn"), QStringLiteral("op"), 3, 4, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" % ")); });
-    makePadBtn(QStringLiteral("÷"), QStringLiteral("calcOpDivBtn"), QStringLiteral("op"), 3, 5, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" / ")); });
-    makePadBtn(QStringLiteral("×"), QStringLiteral("calcOpMulBtn"), QStringLiteral("op"), 3, 6, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" * ")); });
+    m_dotBtn = makePadBtn(QStringLiteral("."), QStringLiteral("calcKeyDot"), QStringLiteral("digit"), 3, 4, 1, [this]() { pressDotKey(); });
+    makePadBtn(QStringLiteral("÷"), QStringLiteral("calcOpDivBtn"), QStringLiteral("op"), 3, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" / ")); });
+    makePadBtn(QStringLiteral("×"), QStringLiteral("calcOpMulBtn"), QStringLiteral("op"), 3, 6, 1, [this]() { insertOperatorToken(QStringLiteral(" * ")); });
     makePadBtn(QStringLiteral(")"), QStringLiteral("calcKeyRParen"), QStringLiteral("op"), 3, 7, 1, [this]() {
         if (m_exprEdit) { m_exprEdit->insert(QStringLiteral(")")); m_exprEdit->setFocus(); }
     });
 
-    // Row 4: status label on left (cols 0..4), -, +, and wide highlighted = (cols 6..7)
+    // Row 4: status label on left (cols 0..2), %, -, +, and wide highlighted = (cols 6..7)
     m_exprStatusLabel = new QLabel(exprGroup);
     m_exprStatusLabel->setObjectName(QStringLiteral("calcExprStatusLabel"));
-    padGrid->addWidget(m_exprStatusLabel, 4, 0, 1, 4);
-    makePadBtn(QStringLiteral("-"), QStringLiteral("calcOpSubBtn"), QStringLiteral("op"), 4, 4, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" - ")); });
-    makePadBtn(QStringLiteral("+"), QStringLiteral("calcOpAddBtn"), QStringLiteral("op"), 4, 5, 1,
-               [this]() { insertOperatorToken(QStringLiteral(" + ")); });
-    makePadBtn(QStringLiteral("="), QStringLiteral("calcExprEvalBtn"), QStringLiteral("eval"), 4, 6, 2,
-               [this]() { evaluateAndApplyExpression(m_exprEdit->text()); });
+    padGrid->addWidget(m_exprStatusLabel, 4, 0, 1, 3);
+    makePadBtn(QStringLiteral("%"), QStringLiteral("calcOpModBtn"), QStringLiteral("op"), 4, 3, 1, [this]() { insertOperatorToken(QStringLiteral(" % ")); });
+    makePadBtn(QStringLiteral("-"), QStringLiteral("calcOpSubBtn"), QStringLiteral("op"), 4, 4, 1, [this]() { insertOperatorToken(QStringLiteral(" - ")); });
+    makePadBtn(QStringLiteral("+"), QStringLiteral("calcOpAddBtn"), QStringLiteral("op"), 4, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" + ")); });
+    makePadBtn(QStringLiteral("="), QStringLiteral("calcExprEvalBtn"), QStringLiteral("eval"), 4, 6, 2, [this]() { evaluateAndApplyExpression(m_exprEdit->text()); });
 
     exprVBox->addLayout(padGrid);
     root->addWidget(exprGroup);
 
-    setMinimumSize(760, 650);
-    resize(780, 660);
+    setMinimumSize(760, 680);
+    resize(780, 700);
     syncKeypadRadixState();
     reloadStyle();
     syncAllViews();
 }
 
-void ProgrammerCalculatorDialog::setValue(uint64_t val) { m_value = val & widthMask(m_wordWidth); syncAllViews(); }
+void ProgrammerCalculatorDialog::setValue(uint64_t val) {
+    m_hasFloatValue = false; m_value = val & widthMask(m_wordWidth); syncAllViews();
+}
 
 void ProgrammerCalculatorDialog::setWordWidth(int bits) {
     if (bits != 8 && bits != 16 && bits != 32 && bits != 64) return;
@@ -630,6 +608,7 @@ void ProgrammerCalculatorDialog::setSigned(bool enabled) {
 }
 
 void ProgrammerCalculatorDialog::byteSwap() {
+    m_hasFloatValue = false;
     if (m_wordWidth == 64) m_value = __builtin_bswap64(m_value);
     else if (m_wordWidth == 32) m_value = static_cast<uint64_t>(__builtin_bswap32(static_cast<uint32_t>(m_value)));
     else if (m_wordWidth == 16) m_value = static_cast<uint64_t>(__builtin_bswap16(static_cast<uint16_t>(m_value)));
@@ -639,6 +618,7 @@ void ProgrammerCalculatorDialog::byteSwap() {
 void ProgrammerCalculatorDialog::rotateLeft(int count) {
     const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
     if (sh == 0) return;
+    m_hasFloatValue = false;
     const uint64_t masked = m_value & widthMask(m_wordWidth);
     m_value = ((masked << sh) | (masked >> (m_wordWidth - sh))) & widthMask(m_wordWidth); syncAllViews();
 }
@@ -646,26 +626,40 @@ void ProgrammerCalculatorDialog::rotateLeft(int count) {
 void ProgrammerCalculatorDialog::rotateRight(int count) {
     const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
     if (sh == 0) return;
+    m_hasFloatValue = false;
     const uint64_t masked = m_value & widthMask(m_wordWidth);
     m_value = ((masked >> sh) | (masked << (m_wordWidth - sh))) & widthMask(m_wordWidth); syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::toggleBit(int bitIndex) {
     if (bitIndex < 0 || bitIndex >= m_wordWidth) return;
+    m_hasFloatValue = false;
     m_value = (m_value ^ (1ULL << bitIndex)) & widthMask(m_wordWidth); syncAllViews();
 }
 
 bool ProgrammerCalculatorDialog::evaluateAndApplyExpression(const QString& expr) {
-    uint64_t result = 0ULL; QString err;
-    if (!evaluateExpression(expr, m_value, m_wordWidth, m_signedMode, &result, &err)) {
+    uint64_t result = 0ULL; double fResult = 0.0; bool isFloat = false; QString err;
+    IntExprParser parser(expr, m_value, m_wordWidth, m_signedMode, m_floatValue, m_hasFloatValue);
+    if (!parser.parse(&result, &err, &fResult, &isFloat)) {
         if (m_exprStatusLabel) m_exprStatusLabel->setText(QStringLiteral("Error: %1").arg(err));
         return false;
     }
-    m_value = result & widthMask(m_wordWidth); m_justEvaluated = true;
+    m_value = result & widthMask(m_wordWidth);
+    m_floatValue = fResult;
+    m_hasFloatValue = isFloat;
+    m_justEvaluated = true;
+    if (isFloat && fResult < 0.0 && !m_signedMode) setSigned(true);
     if (m_exprStatusLabel) {
-        m_exprStatusLabel->setText(QStringLiteral("Result = 0x%1 (%2)")
-            .arg(QString::number(m_value, 16).toUpper(),
-                 m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value)));
+        if (isFloat) {
+            m_exprStatusLabel->setText(QStringLiteral("Result = %1 (int: %2, 0x%3)")
+                .arg(QString::number(fResult, 'g', 12),
+                     m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value),
+                     QString::number(m_value, 16).toUpper()));
+        } else {
+            m_exprStatusLabel->setText(QStringLiteral("Result = 0x%1 (%2)")
+                .arg(QString::number(m_value, 16).toUpper(),
+                     m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value)));
+        }
     }
     syncAllViews(); return true;
 }
@@ -682,43 +676,25 @@ void ProgrammerCalculatorDialog::setInitialTextOrValue(const QString& text) {
         const QString rest = s.mid(firstTok.size()).trimmed();
         if (rest.startsWith(QLatin1Char('<')) || rest.startsWith(QLatin1Char('[')) || rest.startsWith(QLatin1Char('('))) s = firstTok;
     }
-    // Case A: Floating-Point Literal (e.g., 1.1f, -3.14159, 2.5e-3, 1.0F) -> IEEE-754 bit pattern.
-    if (!s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) &&
-        (s.contains(QLatin1Char('.')) || s.contains(QLatin1Char('e'), Qt::CaseInsensitive))) {
-        const bool isFloat32 = s.endsWith(QLatin1Char('f'), Qt::CaseInsensitive);
-        QString numStr = s;
-        if (isFloat32 || numStr.endsWith(QLatin1Char('l'), Qt::CaseInsensitive)) numStr.chop(1);
-        bool ok = false;
-        if (isFloat32) {
-            const float fVal = numStr.toFloat(&ok);
-            if (ok) {
-                uint32_t bits32 = 0; std::memcpy(&bits32, &fVal, sizeof(bits32));
-                m_wordWidth = 32; m_value = static_cast<uint64_t>(bits32); m_justEvaluated = true;
-                const QString hexStr = QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper());
-                if (m_exprEdit) m_exprEdit->setText(hexStr);
-                if (m_exprStatusLabel) m_exprStatusLabel->clear();
-                syncAllViews(); return;
-            }
-        } else {
-            const double dVal = numStr.toDouble(&ok);
-            if (ok) {
-                uint64_t bits64 = 0; std::memcpy(&bits64, &dVal, sizeof(bits64));
-                m_wordWidth = 64; m_value = bits64; m_justEvaluated = true;
-                const QString hexStr = QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper());
-                if (m_exprEdit) m_exprEdit->setText(hexStr);
-                if (m_exprStatusLabel) m_exprStatusLabel->clear();
-                syncAllViews(); return;
-            }
-        }
-    }
-    // Case B & C: Integer literal or bitwise/arithmetic expression.
     if (s.startsWith(QLatin1Char('-')) && !s.mid(1).trimmed().contains(QLatin1Char(' '))) setSigned(true);
-    uint64_t result = 0ULL; QString err;
-    if (evaluateExpression(s, m_value, m_wordWidth, m_signedMode, &result, &err)) {
-        m_value = result & widthMask(m_wordWidth); m_justEvaluated = true;
+    uint64_t result = 0ULL; double fResult = 0.0; bool isFloat = false; QString err;
+    IntExprParser parser(s, m_value, m_wordWidth, m_signedMode, m_floatValue, m_hasFloatValue);
+    if (parser.parse(&result, &err, &fResult, &isFloat)) {
+        m_value = result & widthMask(m_wordWidth);
+        m_floatValue = fResult;
+        m_hasFloatValue = isFloat;
+        m_justEvaluated = true;
+        if (isFloat && fResult < 0.0 && !m_signedMode) setSigned(true);
         if (m_exprStatusLabel) m_exprStatusLabel->clear();
         if (m_exprEdit) {
-            if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) && !s.contains(QLatin1Char(' '))) {
+            if (isFloat && !s.contains(QLatin1Char(' '))) {
+                QString cleanFloat = s;
+                if (cleanFloat.endsWith(QLatin1Char('f'), Qt::CaseInsensitive) ||
+                    cleanFloat.endsWith(QLatin1Char('l'), Qt::CaseInsensitive)) {
+                    cleanFloat.chop(1);
+                }
+                m_exprEdit->setText(cleanFloat);
+            } else if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) && !s.contains(QLatin1Char(' '))) {
                 m_exprEdit->setText(QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper()));
             } else {
                 m_exprEdit->setText(s);
@@ -748,14 +724,14 @@ void ProgrammerCalculatorDialog::syncKeypadRadixState() {
     if (m_radixHexBtn) m_radixHexBtn->setChecked(m_inputRadix == 16);
     if (m_radixOctBtn) m_radixOctBtn->setChecked(m_inputRadix == 8);
     if (m_radixBinBtn) m_radixBinBtn->setChecked(m_inputRadix == 2);
+    if (m_dotBtn) m_dotBtn->setEnabled(m_inputRadix == 10);
     for (int d = 0; d < 16; ++d) {
-        if (QPushButton* btn = m_digitButtons[static_cast<size_t>(d)]) {
-            btn->setEnabled(d < m_inputRadix);
-        }
+        if (QPushButton* btn = m_digitButtons[static_cast<size_t>(d)]) btn->setEnabled(d < m_inputRadix);
     }
 }
 
 QString ProgrammerCalculatorDialog::formatValueForRadix(uint64_t val, int radix) const {
+    if (radix == 10 && m_hasFloatValue) return QString::number(m_floatValue, 'g', 12);
     const uint64_t masked = val & widthMask(m_wordWidth);
     if (radix == 16) return QStringLiteral("0x%1").arg(QString::number(masked, 16).toUpper());
     if (radix == 8) return QStringLiteral("0o%1").arg(QString::number(masked, 8));
@@ -771,12 +747,9 @@ void ProgrammerCalculatorDialog::pressDigitKey(QChar digitChar) {
     else if (upper >= QLatin1Char('A') && upper <= QLatin1Char('F')) digitVal = 10 + (upper.unicode() - QLatin1Char('A').unicode());
     if (digitVal < 0 || digitVal >= m_inputRadix) return;
 
-    if (m_justEvaluated) {
-        m_exprEdit->clear();
-        m_justEvaluated = false;
-    }
+    if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
     const QString cur = m_exprEdit->text();
-    const bool continuingToken = !cur.isEmpty() && (cur.back().isLetterOrNumber() || cur.back() == QLatin1Char('_'));
+    const bool continuingToken = !cur.isEmpty() && (cur.back().isLetterOrNumber() || cur.back() == QLatin1Char('_') || cur.back() == QLatin1Char('.'));
     QString prefix;
     if (!continuingToken) {
         if (m_inputRadix == 16) prefix = QStringLiteral("0x");
@@ -787,12 +760,23 @@ void ProgrammerCalculatorDialog::pressDigitKey(QChar digitChar) {
     m_exprEdit->setFocus();
 }
 
+void ProgrammerCalculatorDialog::pressDotKey() {
+    if (!m_exprEdit || m_inputRadix != 10) return;
+    if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
+    const QString cur = m_exprEdit->text();
+    int i = cur.size() - 1;
+    while (i >= 0 && (cur.at(i).isDigit() || cur.at(i) == QLatin1Char('.'))) {
+        if (cur.at(i) == QLatin1Char('.')) return;
+        --i;
+    }
+    const bool afterDigit = !cur.isEmpty() && cur.back().isDigit();
+    m_exprEdit->setText(cur + (afterDigit ? QStringLiteral(".") : QStringLiteral("0.")));
+    m_exprEdit->setFocus();
+}
+
 void ProgrammerCalculatorDialog::insertCurrentValueToken() {
     if (!m_exprEdit) return;
-    if (m_justEvaluated) {
-        m_exprEdit->clear();
-        m_justEvaluated = false;
-    }
+    if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
     m_exprEdit->insert(formatValueForRadix(m_value, m_inputRadix));
     m_exprEdit->setFocus();
 }
@@ -819,7 +803,7 @@ void ProgrammerCalculatorDialog::backspaceExpression() {
 }
 
 void ProgrammerCalculatorDialog::clearAll() {
-    m_justEvaluated = false;
+    m_justEvaluated = false; m_hasFloatValue = false; m_floatValue = 0.0;
     if (m_exprEdit) m_exprEdit->clear();
     if (m_exprStatusLabel) m_exprStatusLabel->clear();
     setValue(0ULL);
@@ -830,7 +814,13 @@ void ProgrammerCalculatorDialog::toggleNegateExpression() {
     const QString cur = m_exprEdit->text().trimmed();
     if (cur.isEmpty() || m_justEvaluated) {
         m_justEvaluated = false;
-        setValue(0ULL - m_value);
+        if (m_hasFloatValue) {
+            m_floatValue = -m_floatValue;
+            m_value = static_cast<uint64_t>(static_cast<int64_t>(m_floatValue)) & widthMask(m_wordWidth);
+            if (m_floatValue < 0.0 && !m_signedMode) setSigned(true); else syncAllViews();
+        } else {
+            setValue(0ULL - m_value);
+        }
         m_exprEdit->setText(formatValueForRadix(m_value, m_inputRadix));
     } else if (cur.startsWith(QStringLiteral("-(")) && cur.endsWith(QLatin1Char(')'))) {
         m_exprEdit->setText(cur.mid(2, cur.size() - 3));
@@ -854,51 +844,53 @@ void ProgrammerCalculatorDialog::insertOperatorToken(const QString& opToken) {
 
 void ProgrammerCalculatorDialog::syncAllViews(QLineEdit* skipEditor) {
     m_updatingViews = true;
-
     if (m_width64Btn) m_width64Btn->setChecked(m_wordWidth == 64);
     if (m_width32Btn) m_width32Btn->setChecked(m_wordWidth == 32);
     if (m_width16Btn) m_width16Btn->setChecked(m_wordWidth == 16);
     if (m_width8Btn) m_width8Btn->setChecked(m_wordWidth == 8);
 
     const uint64_t masked = m_value & widthMask(m_wordWidth);
-    if (m_hexEdit && skipEditor != m_hexEdit) {
-        m_hexEdit->setText(QStringLiteral("0x%1").arg(QString::number(masked, 16).toUpper()));
-    }
+    if (m_hexEdit && skipEditor != m_hexEdit) m_hexEdit->setText(QStringLiteral("0x%1").arg(QString::number(masked, 16).toUpper()));
     if (m_decEdit && skipEditor != m_decEdit) {
-        if (m_signedMode) m_decEdit->setText(QString::number(signExtend(masked, m_wordWidth)));
-        else m_decEdit->setText(QString::number(masked));
+        m_decEdit->setText(m_signedMode ? QString::number(signExtend(masked, m_wordWidth)) : QString::number(masked));
     }
-    if (m_octEdit && skipEditor != m_octEdit) {
-        m_octEdit->setText(QString::number(masked, 8));
-    }
-    if (m_binEdit && skipEditor != m_binEdit) {
-        m_binEdit->setText(formatGroupedBinary(masked, m_wordWidth));
-    }
+    if (m_octEdit && skipEditor != m_octEdit) m_octEdit->setText(QString::number(masked, 8));
+    if (m_binEdit && skipEditor != m_binEdit) m_binEdit->setText(formatGroupedBinary(masked, m_wordWidth));
 
     // Update interactive 64-bit button states and active width enablement.
     for (int b = 0; b < 64; ++b) {
         QPushButton* btn = m_bitButtons[static_cast<size_t>(b)];
         if (!btn) continue;
-        const bool inRange = (b < m_wordWidth);
-        const bool bitSet = inRange && (((masked >> b) & 1ULL) != 0ULL);
-        btn->setEnabled(inRange);
-        btn->setText(bitSet ? QStringLiteral("1") : QStringLiteral("0"));
-        btn->setProperty("bitSet", bitSet);
-        btn->style()->unpolish(btn);
-        btn->style()->polish(btn);
+        const bool inRange = (b < m_wordWidth), bitSet = inRange && (((masked >> b) & 1ULL) != 0ULL);
+        btn->setEnabled(inRange); btn->setText(bitSet ? QStringLiteral("1") : QStringLiteral("0"));
+        btn->setProperty("bitSet", bitSet); btn->style()->unpolish(btn); btn->style()->polish(btn);
     }
 
-    // Update IEEE-754 float (low 32-bit) / double (64-bit) and printable ASCII bytes.
-    const uint32_t low32 = static_cast<uint32_t>(masked & 0xFFFFFFFFULL);
-    float f32 = 0.0f;
-    double f64 = 0.0;
-    std::memcpy(&f32, &low32, sizeof(f32));
-    std::memcpy(&f64, &masked, sizeof(f64));
+    // Update IEEE-754 float/double readout (shows exact IEEE-754 hex bit patterns when a float is active).
     if (m_floatReadoutLabel) {
-        m_floatReadoutLabel->setText(
-            QStringLiteral("IEEE-754: float = %1  |  double = %2")
-                .arg(QString::number(static_cast<double>(f32), 'g', 7),
-                     QString::number(f64, 'g', 12)));
+        if (m_hasFloatValue) {
+            const float f32 = static_cast<float>(m_floatValue);
+            const double f64 = m_floatValue;
+            uint32_t bits32 = 0;
+            uint64_t bits64 = 0;
+            std::memcpy(&bits32, &f32, sizeof(bits32));
+            std::memcpy(&bits64, &f64, sizeof(bits64));
+            m_floatReadoutLabel->setText(
+                QStringLiteral("IEEE-754 (%1): float32 = 0x%2  |  float64 = 0x%3")
+                    .arg(QString::number(m_floatValue, 'g', 12),
+                         QStringLiteral("%1").arg(bits32, 8, 16, QLatin1Char('0')).toUpper(),
+                         QStringLiteral("%1").arg(bits64, 16, 16, QLatin1Char('0')).toUpper()));
+        } else {
+            const uint32_t low32 = static_cast<uint32_t>(masked & 0xFFFFFFFFULL);
+            float f32 = 0.0f;
+            double f64 = 0.0;
+            std::memcpy(&f32, &low32, sizeof(f32));
+            std::memcpy(&f64, &masked, sizeof(f64));
+            m_floatReadoutLabel->setText(
+                QStringLiteral("IEEE-754: float = %1  |  double = %2")
+                    .arg(QString::number(static_cast<double>(f32), 'g', 7),
+                         QString::number(f64, 'g', 12)));
+        }
     }
     if (m_asciiReadoutLabel) {
         const int byteCount = m_wordWidth / 8;
@@ -929,7 +921,7 @@ void ProgrammerCalculatorDialog::reloadStyle() {
         "QLineEdit { background: %6; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
         "QLineEdit:focus { border: 1px solid %5; }"
         "QPushButton { background: %7; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-size: 11px; font-family: 'JetBrains Mono', monospace; }"
-        "QPushButton[calcRole] { padding: 4px 8px; min-height: 22px; }"
+        "QPushButton[calcRole] { padding: 4px 8px; margin: 1px; min-height: 22px; }"
         "QPushButton[calcRole=\"digit\"], QPushButton[calcRole=\"hex\"] { background: %9; font-weight: bold; font-size: 12px; }"
         "QPushButton[calcRole=\"eval\"] { background: %5; color: #0b1120; font-weight: bold; font-size: 13px; border: 1px solid %5; }"
         "QPushButton:hover { border: 1px solid %5; }"

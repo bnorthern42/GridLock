@@ -882,10 +882,11 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     QCOMPARE(calc.value(), 0xDEADULL); QCOMPARE(calc.decText(), QStringLiteral("57005"));
     calc.expressionEdit()->clear(); shlBtn->click(); calc.keypadDigitButton(4)->click(); eqBtn->click(); QCOMPARE(calc.value(), 0xDEAD0ULL);
     binRadixBtn->click(); QVERIFY(calc.keypadDigitButton(1)->isEnabled() && !calc.keypadDigitButton(2)->isEnabled());
-    // Verify setInitialTextOrValue with float ("1.1f"), hex ("0x4011a6", "0xdeadbeefULL"), negative decimals ("-42"), and expressions ("(1 << 8) + 7").
-    auto* statusLbl = calc.findChild<QLabel*>(QStringLiteral("calcExprStatusLabel")); QVERIFY(statusLbl != nullptr);
-    calc.setInitialTextOrValue(QStringLiteral("1.1f")); QCOMPARE(calc.wordWidth(), 32); QCOMPARE(calc.hexText(), QStringLiteral("0x3F8CCCCD"));
-    QCOMPARE(calc.expressionEdit()->text(), QStringLiteral("0x3F8CCCCD")); QVERIFY(!statusLbl->text().contains(QStringLiteral("Error")));
+    // Verify setInitialTextOrValue with float ("3.3f"), float math ("3.3 * 2"), "." key, hex ("0x4011a6", "0xdeadbeefULL"), negative decimals ("-42"), and expressions ("(1 << 8) + 7").
+    auto* statusLbl = calc.findChild<QLabel*>(QStringLiteral("calcExprStatusLabel")); QVERIFY(statusLbl && calc.findChild<QPushButton*>(QStringLiteral("calcKeyDot")));
+    calc.setInitialTextOrValue(QStringLiteral("3.3f")); QCOMPARE(calc.expressionEdit()->text(), QStringLiteral("3.3")); QCOMPARE(calc.decText(), QStringLiteral("3")); QCOMPARE(calc.hexText(), QStringLiteral("0x3"));
+    QVERIFY(calc.hasFloatValue() && std::abs(calc.floatValue() - 3.3) < 1e-9 && calc.floatReadoutText().contains(QStringLiteral("0x40533333")) && !statusLbl->text().contains(QStringLiteral("Error")));
+    QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("3.3 * 2")) && std::abs(calc.floatValue() - 6.6) < 1e-9 && calc.decText() == QStringLiteral("6") && calc.hexText() == QStringLiteral("0x6"));
     calc.setInitialTextOrValue(QStringLiteral("0x4011a6")); QCOMPARE(calc.hexText(), QStringLiteral("0x4011A6")); QCOMPARE(calc.expressionEdit()->text(), QStringLiteral("0x4011A6"));
     calc.setWordWidth(64); calc.setSigned(false);
     calc.setInitialTextOrValue(QStringLiteral("0xdeadbeefULL")); QCOMPARE(calc.value(), 0xDEADBEEFULL); QCOMPARE(calc.hexText(), QStringLiteral("0xDEADBEEF"));
