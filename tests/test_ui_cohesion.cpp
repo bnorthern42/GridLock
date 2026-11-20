@@ -15,10 +15,15 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileSystemModel>
 #include <QFrame>
 #include <QHeaderView>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
@@ -32,14 +37,19 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTextBrowser>
+#include <QTextCursor>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeView>
 #include <QtTest/QtTest>
 
+#include <cstring>
+
+#include "../src/core/hpc/DeadlockAnalyzer.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
+#include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ConditionalBreakpointDialog.hpp"
@@ -107,6 +117,237 @@ auto callParseAndFormatTelemetry(const QString& smaps, quint64 rsp, quint64 top,
     return T::formatStatusBarSummary(T::parseProcMemoryTelemetry(smaps, rsp, top, meminfo), fmt);
 }
 template <typename T> QString callParseAndFormatTelemetry(const QString&, quint64, quint64, const QString&, const QString&, ...) { return QString(); }
+
+bool captureTutorialDocumentationScreenshots(gridlock::ui::MainWindow& mw, const QString& outDirPath) {
+    QDir dir(outDirPath);
+    if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) return false;
+    const QString repoRoot = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
+                                 ? QDir::currentPath()
+                                 : QFileInfo(QStringLiteral("..")).absoluteFilePath();
+    const QString tutDir = repoRoot + QStringLiteral("/tutorial");
+    mw.switchWorkspaceDirectory(repoRoot);
+    mw.resize(1600, 960);
+    mw.setWorkspacePerspective(QStringLiteral("Code"));
+    if (auto* projExp = mw.findChild<gridlock::ui::ProjectExplorerWidget*>()) {
+        if (auto* tree = projExp->findChild<QTreeView*>()) {
+            if (auto* fsModel = qobject_cast<QFileSystemModel*>(tree->model())) {
+                tree->setRootIndex(fsModel->setRootPath(tutDir));
+            }
+        }
+    }
+    auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>();
+    auto* rack = mw.serverRackView();
+    auto* varsDock = mw.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+    auto* regsDock = mw.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+    auto* watchDock = mw.findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
+    auto* varModel = mw.findChild<gridlock::VariableTreeModel*>();
+    auto* varsTree = varsDock ? varsDock->findChild<QTreeView*>() : nullptr;
+    auto* regView = mw.findChild<gridlock::ui::RegisterView*>();
+    auto* diffGrid = mw.findChild<gridlock::ui::DifferentialGrid*>();
+    auto* mpiDiag = mw.findChild<gridlock::ui::MpiDiagnosticsWidget*>();
+    auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
+    auto* memView = mw.findChild<gridlock::ui::MemView*>();
+    auto* statusLbl = mw.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
+    if (!targetCombo || !rankSpin || !tabMgr || !rack || !varModel || !regView || !diffGrid || !mpiDiag) return false;
+
+    targetCombo->blockSignals(true);
+    targetCombo->clear();
+    for (const QString& t : {QStringLiteral("inspection_demo"), QStringLiteral("deadlock_ring"),
+                             QStringLiteral("collective_mismatch"), QStringLiteral("ghost_cell_drift"),
+                             QStringLiteral("heap_imbalance"), QStringLiteral("tag_mismatch_stall"),
+                             QStringLiteral("simd_struct_watch")}) {
+        targetCombo->addItem(t + QStringLiteral(" (MPI)"), tutDir + QLatin1Char('/') + t + QStringLiteral(".cpp"));
+    }
+    targetCombo->blockSignals(false);
+
+    auto setupScene = [&](const QString& baseName, int bpLine, const QString& bpCond,
+                          int execLine, int topLine, int focusedRank, const QMap<QString, QString>& ghosts) -> uint64_t {
+        mw.selectTargetByName(baseName);
+        rankSpin->blockSignals(true); rankSpin->setValue(4); rankSpin->blockSignals(false);
+        for (QToolBar* tb : mw.findChildren<QToolBar*>()) {
+            for (QAction* act : tb->actions()) act->setEnabled(true);
+        }
+        const QString srcPath = tutDir + QLatin1Char('/') + baseName + QStringLiteral(".cpp");
+        tabMgr->clearAllTabs();
+        auto* sv = tabMgr->openFile(srcPath);
+        QApplication::processEvents();
+        uint64_t pc = mw.sourceLineToAddress(execLine);
+        if (pc == 0ULL) pc = 0x0040113dULL;
+        QList<gridlock::RankState> states;
+        for (int r = 0; r < 4; ++r) {
+            gridlock::RankState rs; rs.rankId = r; rs.currentState = QStringLiteral("stopped");
+            rs.registers.insert(16, QStringLiteral("0x%1").arg(pc, 8, 16, QLatin1Char('0')));
+            states.append(rs);
+        }
+        rack->blockSignals(true); rack->resetRanks(4); rack->updateRanks(states); rack->selectRank(focusedRank); rack->blockSignals(false);
+        mw.seekToAddressOrExpression(QStringLiteral("0x%1").arg(pc, 8, 16, QLatin1Char('0')));
+        if (sv) {
+            sv->setBreakpoints(QSet<int>());
+            if (bpLine > 0) {
+                if (!bpCond.isEmpty()) sv->setConditionalBreakpoint(bpLine, bpCond);
+                else sv->toggleBreakpoint(bpLine);
+            }
+            if (execLine > 0) sv->highlightExecutionLine(execLine);
+            sv->setInlineVariableValues(ghosts);
+            QTextCursor cur(sv->document()->findBlockByNumber(qMax(0, execLine - 1)));
+            sv->setTextCursor(cur);
+            QApplication::processEvents();
+            if (sv->verticalScrollBar()) sv->verticalScrollBar()->setValue(qMax(0, topLine - 1));
+        }
+        return pc;
+    };
+    auto mkVar = [](const QString& n, const QString& v, const QString& t, int ref = 0) {
+        return QJsonObject{{QStringLiteral("name"), n}, {QStringLiteral("value"), v},
+                           {QStringLiteral("type"), t}, {QStringLiteral("variablesReference"), ref}};
+    };
+
+    // 1. tutorial_launch_toolbar.png
+    if (varsDock) varsDock->raise();
+    const uint64_t pc1 = setupScene(QStringLiteral("inspection_demo"), 19, QStringLiteral("rank == 2"), 23, 1, 0,
+                                    {{QStringLiteral("rank"), QStringLiteral("0")}, {QStringLiteral("size"), QStringLiteral("4")}, {QStringLiteral("i"), QStringLiteral("3")}});
+    varModel->clear();
+    varModel->onLocalsUpdated(0, 0, QJsonArray{
+        mkVar(QStringLiteral("rank"), QStringLiteral("0"), QStringLiteral("int")),
+        mkVar(QStringLiteral("size"), QStringLiteral("4"), QStringLiteral("int")),
+        mkVar(QStringLiteral("data"), QStringLiteral("{...} @ 0x7fffffffe120"), QStringLiteral("DeeplyNested[3]"), 101)});
+    varModel->onLocalsUpdated(0, 101, QJsonArray{
+        mkVar(QStringLiteral("[0]"), QStringLiteral("{id = 0, coords = {0.0, 0.0, 0.0}}"), QStringLiteral("DeeplyNested")),
+        mkVar(QStringLiteral("[1]"), QStringLiteral("{id = 1, coords = {1.1, 2.2, 3.3}}"), QStringLiteral("DeeplyNested"), 102),
+        mkVar(QStringLiteral("[2]"), QStringLiteral("{id = 2, coords = {2.2, 4.4, 6.6}}"), QStringLiteral("DeeplyNested"))});
+    varModel->onLocalsUpdated(0, 102, QJsonArray{
+        mkVar(QStringLiteral("id"), QStringLiteral("1"), QStringLiteral("int")),
+        mkVar(QStringLiteral("values"), QStringLiteral("{0.0, 1.0, 2.0, 3.0, 4.0}"), QStringLiteral("double[5]")),
+        mkVar(QStringLiteral("coords.x"), QStringLiteral("1.1f"), QStringLiteral("float")),
+        mkVar(QStringLiteral("coords.y"), QStringLiteral("2.2f"), QStringLiteral("float")),
+        mkVar(QStringLiteral("coords.z"), QStringLiteral("3.3f"), QStringLiteral("float"))});
+    if (varsTree) varsTree->expandAll();
+    mw.selectBottomToolGroup(QStringLiteral("Debug"));
+    if (bottomTabs && memView) bottomTabs->setCurrentWidget(memView);
+    if (statusLbl) statusLbl->setText(QStringLiteral("ARCH: x86_64 | MPI RANK: 0 | PC/SEEK: 0x%1 | STATUS: PAUSED (BRK) | STACK: 64 KB | HEAP: 128 KB | HOST RAM: 8.0 / 32.0 GB | CPU: 4.2%").arg(pc1, 8, 16, QLatin1Char('0')));
+    QApplication::processEvents();
+    {
+        QPixmap launchPix = mw.grab();
+        if (auto* mainTb = mw.findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
+            QPainter p(&launchPix); p.setRenderHint(QPainter::Antialiasing, true);
+            p.setPen(QPen(QColor(QStringLiteral("#38bdf8")), 2));
+            p.drawRoundedRect(QRect(mainTb->mapTo(&mw, QPoint(4, 1)), QSize(qMin(mainTb->width() - 8, 1140), mainTb->height() - 2)), 5, 5);
+            p.end();
+        }
+        if (!launchPix.save(dir.filePath(QStringLiteral("tutorial_launch_toolbar.png")), "PNG", 88)) return false;
+    }
+
+    // 2. tutorial_deadlock_analyzer.png
+    if (varsDock) varsDock->raise();
+    const uint64_t pc2 = setupScene(QStringLiteral("deadlock_ring"), 34, QString(), 34, 15, 0,
+                                    {{QStringLiteral("rank"), QStringLiteral("0")}, {QStringLiteral("size"), QStringLiteral("4")},
+                                     {QStringLiteral("next_rank"), QStringLiteral("1")}, {QStringLiteral("prev_rank"), QStringLiteral("3")}, {QStringLiteral("tag"), QStringLiteral("100")}});
+    varModel->clear();
+    varModel->onLocalsUpdated(0, 0, QJsonArray{
+        mkVar(QStringLiteral("rank"), QStringLiteral("0"), QStringLiteral("int")),
+        mkVar(QStringLiteral("size"), QStringLiteral("4"), QStringLiteral("int")),
+        mkVar(QStringLiteral("next_rank"), QStringLiteral("1"), QStringLiteral("const int")),
+        mkVar(QStringLiteral("prev_rank"), QStringLiteral("3"), QStringLiteral("const int")),
+        mkVar(QStringLiteral("tag"), QStringLiteral("100"), QStringLiteral("const int")),
+        mkVar(QStringLiteral("send_buf"), QStringLiteral("size=16384 (64 KB) @ 0x618040"), QStringLiteral("std::vector<int>")),
+        mkVar(QStringLiteral("recv_buf"), QStringLiteral("size=16384 (64 KB) @ 0x628080"), QStringLiteral("std::vector<int>"))});
+    mw.selectBottomToolGroup(QStringLiteral("MPI"));
+    if (bottomTabs) bottomTabs->setCurrentWidget(mpiDiag);
+    mpiDiag->beginLiveSession(4);
+    for (int r = 0; r < 4; ++r) {
+        mpiDiag->updateLiveRankRow(r, 42010 + r, QStringLiteral("WAITING (BLOCKED)"), QStringLiteral("MPI_Send"),
+                                   QStringLiteral("-> Rank %1 (tag=100, 64 KB)").arg((r + 1) % 4),
+                                   QStringLiteral("tutorial/deadlock_ring.cpp:34"), 4);
+    }
+    mpiDiag->onDeadlockDetected(gridlock::core::DeadlockInfo{
+        0, QStringLiteral("MPI_Send"), QStringLiteral("tutorial/deadlock_ring.cpp"), 34,
+        QStringLiteral("Wait-For Cycle: Rank 0 -> Rank 1 -> Rank 2 -> Rank 3 -> Rank 0 (MPI_Send, tag=100)"), false});
+    mw.detectAndHighlightDeadlock({{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+    if (statusLbl) statusLbl->setText(QStringLiteral("ARCH: x86_64 | MPI RANK: 0 | PC/SEEK: 0x%1 | STATUS: CYCLE DETECTED | STACK: 64 KB | HEAP: 256 KB | HOST RAM: 8.0 / 32.0 GB | CPU: 1.1%").arg(pc2, 8, 16, QLatin1Char('0')));
+    QApplication::processEvents();
+    if (!mw.grab().save(dir.filePath(QStringLiteral("tutorial_deadlock_analyzer.png")), "PNG", 88)) return false;
+
+    // 3. tutorial_differential_grid.png
+    const uint64_t pc3 = setupScene(QStringLiteral("ghost_cell_drift"), 69, QStringLiteral("step == 3"), 69, 43, 2,
+                                    {{QStringLiteral("step"), QStringLiteral("3")}, {QStringLiteral("rank"), QStringLiteral("2")},
+                                     {QStringLiteral("faulty_rank"), QStringLiteral("2")}, {QStringLiteral("send_right"), QStringLiteral("nan")},
+                                     {QStringLiteral("left_ghost"), QStringLiteral("110.0")}});
+    if (watchDock) { watchDock->show(); watchDock->raise(); }
+    diffGrid->clearWatches();
+    diffGrid->setRowHidden(0, true);
+    diffGrid->setColumnHidden(0, true);
+    const QStringList sendRightVals{QStringLiteral("100.0"), QStringLiteral("110.0"), QStringLiteral("nan"), QStringLiteral("130.0")};
+    const QStringList leftGhostVals{QStringLiteral("130.0"), QStringLiteral("100.0"), QStringLiteral("110.0"), QStringLiteral("nan")};
+    const QStringList centerVals{QStringLiteral("100.0"), QStringLiteral("110.0"), QStringLiteral("120.0"), QStringLiteral("nan")};
+    for (int r = 0; r < 4; ++r) {
+        diffGrid->updateVariableDisplay(r, QStringLiteral("step"), QStringLiteral("3"));
+        diffGrid->updateVariableDisplay(r, QStringLiteral("send_right"), sendRightVals[r]);
+        diffGrid->updateVariableDisplay(r, QStringLiteral("left_ghost"), leftGhostVals[r]);
+        diffGrid->updateVariableDisplay(r, QStringLiteral("stencil_center"), centerVals[r]);
+    }
+    for (int row = 1; row < diffGrid->rowCount(); ++row) {
+        for (int col = 1; col < diffGrid->columnCount(); ++col) {
+            if (QTableWidgetItem* it = diffGrid->item(row, col); it && it->text() == QStringLiteral("nan")) {
+                auto* pill = new QLabel(QStringLiteral(" nan"), diffGrid);
+                pill->setStyleSheet(QStringLiteral("background-color: #4c1d24; color: #ff8a8a; font-weight: bold; border-left: 3px solid #ef4444; padding-left: 4px;"));
+                diffGrid->setCellWidget(row, col, pill);
+            }
+        }
+    }
+    mw.selectBottomToolGroup(QStringLiteral("Debug"));
+    if (bottomTabs && memView) bottomTabs->setCurrentWidget(memView);
+    if (statusLbl) statusLbl->setText(QStringLiteral("ARCH: x86_64 | MPI RANK: 2 | PC/SEEK: 0x%1 | STATUS: PAUSED (step == 3) | STACK: 64 KB | HEAP: 192 KB | HOST RAM: 8.0 / 32.0 GB | CPU: 3.6%").arg(pc3, 8, 16, QLatin1Char('0')));
+    QApplication::processEvents();
+    if (!mw.grab().save(dir.filePath(QStringLiteral("tutorial_differential_grid.png")), "PNG", 88)) return false;
+
+    // 4. tutorial_register_simd.png
+    const uint64_t pc4 = setupScene(QStringLiteral("simd_struct_watch"), 62, QString(), 62, 36, 0,
+                                    {{QStringLiteral("rank"), QStringLiteral("0")}, {QStringLiteral("world_size"), QStringLiteral("4")},
+                                     {QStringLiteral("local_trace"), QStringLiteral("46.0")}, {QStringLiteral("global_trace"), QStringLiteral("0.0")}});
+    if (regsDock) { regsDock->show(); regsDock->raise(); }
+    auto mkReg = [](const QString& n, const QString& v) { return QJsonObject{{QStringLiteral("name"), n}, {QStringLiteral("value"), v}}; };
+    regView->clearRegisters();
+    regView->updateRegisters(QJsonArray{
+        mkReg(QStringLiteral("rip"), QStringLiteral("0x%1").arg(pc4 - 4, 16, 16, QLatin1Char('0'))),
+        mkReg(QStringLiteral("rsp"), QStringLiteral("0x00007fffffffe060")),
+        mkReg(QStringLiteral("rbp"), QStringLiteral("0x00007fffffffe110")),
+        mkReg(QStringLiteral("rdi"), QStringLiteral("0x00007fffffffe080 (&packet)")),
+        mkReg(QStringLiteral("eflags"), QStringLiteral("0x00000202 [ IF ]")),
+        mkReg(QStringLiteral("xmm0"), QStringLiteral("{f32 = {0.0, 0.0, 0.0, 0.0}}")),
+        mkReg(QStringLiteral("xmm1"), QStringLiteral("{f32 = {4.0, 11.0, 6.0, 7.0}}")),
+        mkReg(QStringLiteral("xmm2"), QStringLiteral("{f32 = {8.0, 9.0, 12.0, 11.0}}")),
+        mkReg(QStringLiteral("xmm3"), QStringLiteral("{f32 = {12.0, 13.0, 14.0, 13.0}}")),
+        mkReg(QStringLiteral("ymm0"), QStringLiteral("0x0000000000000000_0000000000000000")),
+        mkReg(QStringLiteral("ymm1"), QStringLiteral("0x40e0000040c00000_4130000040800000"))});
+    regView->updateRegisters(QJsonArray{
+        mkReg(QStringLiteral("rip"), QStringLiteral("0x%1").arg(pc4, 16, 16, QLatin1Char('0'))),
+        mkReg(QStringLiteral("rsp"), QStringLiteral("0x00007fffffffe060")),
+        mkReg(QStringLiteral("rbp"), QStringLiteral("0x00007fffffffe110")),
+        mkReg(QStringLiteral("rdi"), QStringLiteral("0x00007fffffffe080 (&packet)")),
+        mkReg(QStringLiteral("eflags"), QStringLiteral("0x00000206 [ PF IF ]")),
+        mkReg(QStringLiteral("xmm0"), QStringLiteral("{f32 = {10.0, 1.0, 2.0, 3.0}}")),
+        mkReg(QStringLiteral("xmm1"), QStringLiteral("{f32 = {4.0, 11.0, 6.0, 7.0}}")),
+        mkReg(QStringLiteral("xmm2"), QStringLiteral("{f32 = {8.0, 9.0, 12.0, 11.0}}")),
+        mkReg(QStringLiteral("xmm3"), QStringLiteral("{f32 = {12.0, 13.0, 14.0, 13.0}}")),
+        mkReg(QStringLiteral("ymm0"), QStringLiteral("0x4040000040000000_3f80000041200000")),
+        mkReg(QStringLiteral("ymm1"), QStringLiteral("0x40e0000040c00000_4130000040800000"))});
+    if (memView) {
+        QByteArray pktBytes(112, '\0');
+        const uint8_t hdr[16] = {0xCA, 0xFE, 0x00, 0x04, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCD, 0xAB};
+        std::memcpy(pktBytes.data(), hdr, 16);
+        const float mat[16] = {10.f, 1.f, 2.f, 3.f, 4.f, 11.f, 6.f, 7.f, 8.f, 9.f, 12.f, 11.f, 12.f, 13.f, 14.f, 13.f};
+        std::memcpy(pktBytes.data() + 16, mat, sizeof(mat));
+        const double norms[4] = {114.0, 222.0, 410.0, 674.0};
+        std::memcpy(pktBytes.data() + 80, norms, sizeof(norms));
+        memView->setMemoryData(QStringLiteral("0x7fffffffe080"), pktBytes);
+    }
+    if (statusLbl) statusLbl->setText(QStringLiteral("ARCH: x86_64 | MPI RANK: 0 | PC/SEEK: 0x%1 | STATUS: PAUSED | STACK: 64 KB | HEAP: 128 KB | HOST RAM: 8.0 / 32.0 GB | CPU: 2.9%").arg(pc4, 8, 16, QLatin1Char('0')));
+    QApplication::processEvents();
+    const bool ok = mw.grab().save(dir.filePath(QStringLiteral("tutorial_register_simd.png")), "PNG", 88);
+    if (varsDock) varsDock->raise();
+    return ok;
+}
 
 }  // namespace gridlock::tests
 
@@ -235,6 +476,8 @@ void TestMainWindowUI::testWorkstationUiCohesionAndIntegratedDocViewer() {
             : QStringLiteral("../docs/screenshots");
         QVERIFY2(mainWindow.captureDocumentationScreenshots(outDir),
                  "MainWindow::captureDocumentationScreenshots failed");
+        QVERIFY2(gridlock::tests::captureTutorialDocumentationScreenshots(mainWindow, outDir),
+                 "captureTutorialDocumentationScreenshots failed");
     }
 }
 
