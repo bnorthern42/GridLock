@@ -778,3 +778,10 @@ custom_target('mpi_mm_bin',
   command: ['mpicc', '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
   build_by_default: true
 )
+
+custom_target('catchpoint_exceptions_bin',
+  input: 'tutorial/catchpoint_exceptions.cpp',
+  output: 'catchpoint_exceptions',
+  command: ['mpicxx', '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
+  build_by_default: true
+)
