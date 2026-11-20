@@ -12,6 +12,8 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 
 - [x] **Fuzzy Command Palette (`Ctrl+P` / `Ctrl+Shift+P`)**: Keyboard launcher across `ShortcutManager` actions (`>`), workspace files (`Ctrl+P`), `clangd`/ELF symbols (`@`), themes, and live MPI ranks/groups (`#`).
 - [x] **Undocked Programmer's Calculator (`Ctrl+Alt+C`)**: Floating base converter and keypad (`HEX`, `DEC` signed/unsigned, `OCT`, `BIN`, IEEE-754 float/double, `8/16/32/64-bit` width & `BSWAP`, interactive 64-bit toggle grid, full `0-9`/`A-F`/bitwise/arithmetic/float keypad, Preferences defaults, and right-click "Open in Programmer's Calculator" handoff across code, variables, registers, memory, and disassembly views).
+- [x] **Live Auto-Refreshing 1D/2D Array and Field Plotter (`Ctrl+Alt+G`)**: Floating 1D line/bar and 2D colormapped heatmap plotter (`Viridis`, `Plasma`, `Diverging Cool-Warm`, `Grayscale`) with IEEE-754 `NaN`/`Inf` anomaly flagging, `Min`/`Max`/`Mean`/`L2` telemetry, previous-stop ghost curve delta overlay, CSV/PNG export, and `gnuplot` pipe.
+- [x] **Persistent Auto-Updating Pointer and Struct Graph Nodes**: Pin root expressions across stops in `PointerGraphDialog` with automatic re-evaluation and `"old -> new"` field-level mutation highlighting.
 - [ ] **Complete Instruction and Non-Linear Execution Control (`nexti`, `Run to Cursor`, `Set Next Statement / Jump`, `Force Early Return`)**:
   - [ ] Instruction step-over `nexti` (`-exec-next-instruction`) alongside `stepi`.
   - [ ] `Ctrl+F10` Run to Cursor (`-exec-until`).
@@ -33,8 +35,6 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 
 ## `v0.8.8`: Deep Memory, Register, and Scientific Graph Inspection
 
-- [x] **Live Auto-Refreshing 1D/2D Array and Field Plotter (`Ctrl+Alt+G`)**: Floating 1D line/bar and 2D colormapped heatmap plotter (`Viridis`, `Plasma`, `Diverging Cool-Warm`, `Grayscale`) with IEEE-754 `NaN`/`Inf` anomaly flagging, `Min`/`Max`/`Mean`/`L2` telemetry, previous-stop ghost curve delta overlay, CSV/PNG export, and `gnuplot` pipe.
-- [x] **Persistent Auto-Updating Pointer and Struct Graph Nodes**: Pin root expressions across stops in `PointerGraphDialog` with automatic re-evaluation and `"old -> new"` field-level mutation highlighting.
 - [ ] **Dynamic All-Register Discovery, SIMD Vector Lanes, and Live Register/Memory Editing**:
   - [ ] Replace fixed x86 GPR-only register filtering with dynamic `-data-list-register-names` discovery across architectures (x86-64, AArch64, RISC-V).
   - [ ] Expandable FPU/SSE/AVX/NEON vector lanes (`XMM`/`YMM`/`ZMM`/NEON in `f32`, `f64`, `i32`, `i64`, `hex`) with per-lane step diff highlighting, `k0..k7` AVX-512 mask checkboxes, and decoded `RFLAGS` / `MXCSR` status bitfield badges (`IE`, `DE`, `ZE`, `OE`, `UE`, `PE`, `FTZ`, `DAZ`).
