@@ -131,6 +131,7 @@ void MainWindow::rebuildDynamicSourceLineMap() {
             jumpToLocationWorkflow(sv->currentFile(), targetLine);
         });
         addDbgAct(QStringLiteral("Force Early Return..."), QStringLiteral("actionForceEarlyReturn"), QKeySequence(), [this]() { forceEarlyReturnWorkflow(QString(), true); });
+        addDbgAct(QStringLiteral("Break on Function Regex (rbreak)..."), QStringLiteral("actionRegexBreakpoint"), QKeySequence(), [this]() { insertRegexBreakpointWorkflow(QString(), true); });
         debugMenu->addSeparator();
         addDbgAct(QStringLiteral("Signals & Catchpoints..."), QStringLiteral("actionSignalsAndCatchpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this]() { openSignalsAndCatchpoints(); });
     }
@@ -142,11 +143,25 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         connect(m_disassemblyView, &DisassemblyView::runToAddressRequested, this, &MainWindow::runToAddressWorkflow);
         connect(m_disassemblyView, &DisassemblyView::jumpToAddressRequested, this, [this](uint64_t a) { jumpToAddressWorkflow(a); });
     }
-    auto bindSrcExec = [this](SourceCodeView* sv) {
+    auto wireTbreakHit = [this]() {
+        if (!m_coordinator || m_coordinator->property("gl_tbreak_hit_wired").toBool()) return;
+        m_coordinator->setProperty("gl_tbreak_hit_wired", true);
+        connect(m_coordinator, &IBackendCoordinator::temporaryBreakpointHit, this, [this](int, const QString& f, int ln) {
+            const QString base = QFileInfo(f).fileName();
+            auto clearIfMatch = [&](SourceCodeView* v) { if (v && (v->currentFile() == f || QFileInfo(v->currentFile()).fileName() == base)) v->removeBreakpointQuietly(ln); };
+            if (m_editorTabManager) { for (SourceCodeView* v : m_editorTabManager->openViews()) clearIfMatch(v); }
+            else clearIfMatch(sourceCodeView());
+        });
+    };
+    wireTbreakHit();
+    auto bindSrcExec = [this, wireTbreakHit](SourceCodeView* sv) {
         if (!sv || sv->property("gl_exec_wired").toBool()) return;
         sv->setProperty("gl_exec_wired", true);
         connect(sv, &SourceCodeView::runToCursorRequested, this, [this](const QString& f, int ln) { runToCursorWorkflow(f, ln); });
         connect(sv, &SourceCodeView::jumpToLineRequested, this, [this](const QString& f, int ln) { jumpToLocationWorkflow(f, ln); });
+        connect(sv, &SourceCodeView::breakpointEnabledToggled, this, [this](const QString& f, int ln, bool en) { if (m_coordinator) m_coordinator->setBreakpointEnabled(f, ln, en); });
+        connect(sv, &SourceCodeView::temporaryBreakpointInserted, this, [this, wireTbreakHit](const QString& f, int ln, const QString& c, int rf) { wireTbreakHit(); if (m_coordinator) m_coordinator->insertTemporaryBreakpoint(f, ln, c, rf); });
+        connect(sv, &SourceCodeView::breakpointCommandsChanged, this, [this](const QString& f, int ln, const QStringList& cmds) { if (m_coordinator) m_coordinator->setBreakpointCommands(f, ln, cmds); });
     };
     if (m_editorTabManager) {
         for (SourceCodeView* sv : m_editorTabManager->openViews()) bindSrcExec(sv);
@@ -243,13 +258,17 @@ void MainWindow::startTargetWorkflow() {
             for (int bpLine : sv->breakpoints()) {
                 int rf = sv->breakpointRankFilterForLine(bpLine);
                 if (rf < 0 && sv->breakpointSuspendScope(bpLine).compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) rf = preserveRank;
-                m_coordinator->setBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
-                const auto bm = sv->breakpointInfoForLine(bpLine); m_coordinator->configureBreakpointOptions(viewPath, bpLine, bm.ignoreCount, bm.logMessage);
-                const uint64_t a = sourceLineToAddress(bpLine); if (m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) m_disassemblyView->toggleBookmark(a);
+                const auto bm = sv->breakpointInfoForLine(bpLine);
+                if (bm.temporary) m_coordinator->insertTemporaryBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
+                else m_coordinator->setBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
+                m_coordinator->configureBreakpointOptions(viewPath, bpLine, bm.ignoreCount, bm.logMessage);
+                if (!bm.enabled) m_coordinator->setBreakpointEnabled(viewPath, bpLine, false);
+                if (!bm.commands.isEmpty()) m_coordinator->setBreakpointCommands(viewPath, bpLine, bm.commands);
+                if (const uint64_t a = sourceLineToAddress(bpLine); m_disassemblyView && a != 0ULL && !m_disassemblyView->isBookmarked(a)) m_disassemblyView->toggleBookmark(a);
             }
-            if (!sv->property("gl_bp_opt_bound").toBool()) { sv->setProperty("gl_bp_opt_bound", true);
-                connect(sv, &SourceCodeView::breakpointOptionsChanged, this, [this](const QString& f, int ln, int ign, const QString& msg) { if (m_coordinator) m_coordinator->configureBreakpointOptions(f, ln, ign, msg); }); }
+            if (!sv->property("gl_bp_opt_bound").toBool()) { sv->setProperty("gl_bp_opt_bound", true); connect(sv, &SourceCodeView::breakpointOptionsChanged, this, [this](const QString& f, int ln, int ign, const QString& msg) { if (m_coordinator) m_coordinator->configureBreakpointOptions(f, ln, ign, msg); }); }
         };
+        if (m_coordinator && !m_coordinator->property("gl_tbreak_hit_wired").toBool()) { m_coordinator->setProperty("gl_tbreak_hit_wired", true); connect(m_coordinator, &IBackendCoordinator::temporaryBreakpointHit, this, [this](int, const QString& f, int ln) { const QString b = QFileInfo(f).fileName(); auto clr = [&](SourceCodeView* v) { if (v && (v->currentFile() == f || QFileInfo(v->currentFile()).fileName() == b)) v->removeBreakpointQuietly(ln); }; if (m_editorTabManager) { for (SourceCodeView* v : m_editorTabManager->openViews()) clr(v); } else clr(sourceCodeView()); }); }
         if (m_editorTabManager) { for (SourceCodeView* sv : m_editorTabManager->openViews()) syncOpenView(sv); } else { syncOpenView(sourceCodeView()); }
         for (auto it = m_persistentBreakpoints.constBegin(); it != m_persistentBreakpoints.constEnd(); ++it) {
             const QString absKey = QFileInfo(it.key()).absoluteFilePath();
@@ -533,48 +552,30 @@ QString MainWindow::resolveWorkspacePath(const QString& rawPath) {
 
 namespace {
 
-/**
- * @brief Checks whether @p filePath is a runnable 64/32-bit ELF `ET_EXEC`/`ET_DYN` binary (excluding `.so`/`.o` and scratch checks).
- * @param filePath Candidate file path on disk.
- * @return True if @p filePath is an executable ELF target suitable for `#toolbarTargetSelector`.
- */
+/** @brief Checks whether @p filePath is a runnable 64/32-bit ELF `ET_EXEC`/`ET_DYN` binary (excluding `.so`/`.o` and scratch checks). */
 bool isRunnableElfExecutable(const QString& filePath) {
     const QFileInfo fi(filePath);
     if (!fi.exists() || !fi.isFile() || !fi.isExecutable() || fi.size() < 64) return false;
     const QString abs = fi.absoluteFilePath(), name = fi.fileName();
     // Exclude CMake/Meson compiler-check scratch directories, object folders, and shared libraries.
-    if (abs.contains(QStringLiteral("/CMakeFiles/")) || abs.contains(QStringLiteral("/meson-private/")) ||
-        abs.contains(QStringLiteral(".p/")) || abs.contains(QStringLiteral(".dir/"))) return false;
-    if (name.endsWith(QStringLiteral(".so")) || name.contains(QStringLiteral(".so.")) ||
-        name.endsWith(QStringLiteral(".o")) || name.endsWith(QStringLiteral(".a")) ||
-        name.endsWith(QStringLiteral(".lo")) || name.contains(QStringLiteral("sanitycheck"), Qt::CaseInsensitive) ||
-        name.contains(QStringLiteral("CompilerId"), Qt::CaseInsensitive)) return false;
-
+    if (abs.contains(QStringLiteral("/CMakeFiles/")) || abs.contains(QStringLiteral("/meson-private/")) || abs.contains(QStringLiteral(".p/")) || abs.contains(QStringLiteral(".dir/"))) return false;
+    if (name.endsWith(QStringLiteral(".so")) || name.contains(QStringLiteral(".so.")) || name.endsWith(QStringLiteral(".o")) || name.endsWith(QStringLiteral(".a")) || name.endsWith(QStringLiteral(".lo")) || name.contains(QStringLiteral("sanitycheck"), Qt::CaseInsensitive) || name.contains(QStringLiteral("CompilerId"), Qt::CaseInsensitive)) return false;
     // Verify 0x7f 'E' 'L' 'F' magic bytes and ELF header e_type == ET_EXEC (2) or ET_DYN (3).
     QFile f(abs);
     if (!f.open(QIODevice::ReadOnly)) return false;
     const QByteArray hdr = f.read(20);
     if (hdr.size() < 20 || hdr[0] != '\x7f' || hdr[1] != 'E' || hdr[2] != 'L' || hdr[3] != 'F') return false;
-    const auto eType = static_cast<uint16_t>(static_cast<uint8_t>(hdr[16]) |
-                                             (static_cast<uint16_t>(static_cast<uint8_t>(hdr[17])) << 8U));
+    const auto eType = static_cast<uint16_t>(static_cast<uint8_t>(hdr[16]) | (static_cast<uint16_t>(static_cast<uint8_t>(hdr[17])) << 8U));
     return eType == 2U || eType == 3U;
 }
 
-/**
- * @brief Scans @p rootDir and common build/source subdirectories for runnable ELF binaries and C/C++ `main` sources.
- * @param rootDir Canonical workspace root directory.
- * @param outElfs Output list of canonical ELF executable paths.
- * @param outMainSources Output list of canonical C/C++ entry source paths containing `main(`.
- */
+/** @brief Scans @p rootDir and common build/source subdirectories for runnable ELF binaries and C/C++ `main` sources. */
 void discoverWorkspaceTargets(const QString& rootDir, QStringList* outElfs, QStringList* outMainSources) {
     static const QRegularExpression mainRe(QStringLiteral("\\bmain\\s*\\("));
     // Seed priority scan queue with workspace root, common build dirs, and source subtrees (depth <= 4).
     QList<QPair<QString, int>> queue = {{rootDir, 0}};
-    for (const QString& sub : {QStringLiteral("build_meson"), QStringLiteral("build_cmake"),
-                               QStringLiteral("builddir"), QStringLiteral("build"), QStringLiteral("bin"), QStringLiteral("src")}) {
-        const QString cand = QDir(rootDir).filePath(sub);
-        if (QDir(cand).exists()) queue.append({cand, 1});
-    }
+    for (const QString& sub : {QStringLiteral("build_meson"), QStringLiteral("build_cmake"), QStringLiteral("builddir"), QStringLiteral("build"), QStringLiteral("bin"), QStringLiteral("src")})
+        if (const QString cand = QDir(rootDir).filePath(sub); QDir(cand).exists()) queue.append({cand, 1});
     QSet<QString> visitedDirs, seenElfs, seenSrcs;
     while (!queue.isEmpty()) {
         const auto [curPath, depth] = queue.takeFirst();
@@ -582,24 +583,17 @@ void discoverWorkspaceTargets(const QString& rootDir, QStringList* outElfs, QStr
         const QString canonDir = !curInfo.canonicalFilePath().isEmpty() ? curInfo.canonicalFilePath() : curInfo.absoluteFilePath();
         if (visitedDirs.contains(canonDir)) continue;
         visitedDirs.insert(canonDir);
-
         const QDir dir(canonDir);
-        const bool inBuildSubtree = canonDir != rootDir &&
-                                    QFileInfo(canonDir).fileName().startsWith(QStringLiteral("build"), Qt::CaseInsensitive);
+        const bool inBuildSubtree = canonDir != rootDir && QFileInfo(canonDir).fileName().startsWith(QStringLiteral("build"), Qt::CaseInsensitive);
         // Inspect regular files in current directory for runnable ELF binaries and C/C++ main() entry files.
         for (const QFileInfo& entry : dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name)) {
             const QString canonFile = !entry.canonicalFilePath().isEmpty() ? entry.canonicalFilePath() : entry.absoluteFilePath();
-            if (outElfs && !seenElfs.contains(canonFile) && isRunnableElfExecutable(canonFile)) {
-                seenElfs.insert(canonFile); outElfs->append(canonFile);
-            } else if (outMainSources && !inBuildSubtree && !seenSrcs.contains(canonFile)) {
+            if (outElfs && !seenElfs.contains(canonFile) && isRunnableElfExecutable(canonFile)) { seenElfs.insert(canonFile); outElfs->append(canonFile); }
+            else if (outMainSources && !inBuildSubtree && !seenSrcs.contains(canonFile)) {
                 const QString ext = entry.suffix().toLower();
-                if ((ext == QStringLiteral("cpp") || ext == QStringLiteral("cc") ||
-                     ext == QStringLiteral("cxx") || ext == QStringLiteral("c")) && entry.size() <= 524288) {
+                if ((ext == QStringLiteral("cpp") || ext == QStringLiteral("cc") || ext == QStringLiteral("cxx") || ext == QStringLiteral("c")) && entry.size() <= 524288) {
                     QFile sf(canonFile);
-                    if (sf.open(QIODevice::ReadOnly | QIODevice::Text) &&
-                        QString::fromUtf8(sf.read(65536)).contains(mainRe)) {
-                        seenSrcs.insert(canonFile); outMainSources->append(canonFile);
-                    }
+                    if (sf.open(QIODevice::ReadOnly | QIODevice::Text) && QString::fromUtf8(sf.read(65536)).contains(mainRe)) { seenSrcs.insert(canonFile); outMainSources->append(canonFile); }
                 }
             }
         }
@@ -607,9 +601,7 @@ void discoverWorkspaceTargets(const QString& rootDir, QStringList* outElfs, QStr
         // Enqueue non-hidden subdirectories excluding CMakeFiles, meson-private, and *.p/*.dir scratch dirs.
         for (const QFileInfo& subDir : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
             const QString dn = subDir.fileName();
-            if (dn.startsWith(QLatin1Char('.')) || dn == QStringLiteral("CMakeFiles") ||
-                dn == QStringLiteral("meson-private") || dn == QStringLiteral("Testing") ||
-                dn.endsWith(QStringLiteral(".p")) || dn.endsWith(QStringLiteral(".dir"))) continue;
+            if (dn.startsWith(QLatin1Char('.')) || dn == QStringLiteral("CMakeFiles") || dn == QStringLiteral("meson-private") || dn == QStringLiteral("Testing") || dn.endsWith(QStringLiteral(".p")) || dn.endsWith(QStringLiteral(".dir"))) continue;
             queue.append({subDir.absoluteFilePath(), depth + 1});
         }
     }
@@ -617,14 +609,9 @@ void discoverWorkspaceTargets(const QString& rootDir, QStringList* outElfs, QStr
 
 }  // namespace
 
-/**
- * @brief Returns the resolved source file path for the currently active target.
- * @return Absolute or resolved path to the active target's C/C++ source file.
- */
+/** @brief Returns the resolved source file path for the currently active target. */
 QString MainWindow::activeTargetSourcePath() const {
-    // Prioritize explicitly opened source file path tracked by the active editor session.
     if (!m_currentFile.trimmed().isEmpty()) return resolveWorkspacePath(m_currentFile);
-    // Otherwise inspect user data bound to the selected item in #toolbarTargetSelector (skipping raw ELF binaries).
     if (m_targetSelector) {
         const QString selData = m_targetSelector->currentData().toString();
         if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
@@ -632,18 +619,12 @@ QString MainWindow::activeTargetSourcePath() const {
             if (!isRunnableElfExecutable(resolvedSel)) return resolvedSel;
         }
     }
-    // Fall back to active workspace directory if an external folder is open without a source tab.
     if (!m_activeWorkspaceDir.isEmpty()) return m_activeWorkspaceDir;
-    // Default workstation startup fixture when no target has been explicitly chosen.
     return resolveWorkspacePath(QStringLiteral("tutorial/inspection_demo.cpp"));
 }
 
-/**
- * @brief Returns the resolved output executable binary path for the currently active target.
- * @return Absolute or resolved path to the active target's compiled binary executable.
- */
+/** @brief Returns the resolved output executable binary path for the currently active target. */
 QString MainWindow::activeTargetBinaryPath() const {
-    // Return selected ELF binary directly when #toolbarTargetSelector points to a pre-built executable.
     if (m_targetSelector) {
         const QString selData = m_targetSelector->currentData().toString();
         if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
@@ -651,7 +632,6 @@ QString MainWindow::activeTargetBinaryPath() const {
             if (isRunnableElfExecutable(resolvedSel)) return resolvedSel;
         }
     }
-    // Derive companion ELF executable path alongside the C/C++ source file (stripping extension).
     const QString srcPath = activeTargetSourcePath();
     if (srcPath.isEmpty() || QFileInfo(srcPath).isDir()) return m_loadedBinaryPath;
     const QFileInfo srcInfo(srcPath);
@@ -942,6 +922,13 @@ bool MainWindow::forceEarlyReturnWorkflow(const QString& explicitExpr, bool prom
     if (promptIfEmpty) { bool ok = false; expr = QInputDialog::getText(this, tr("Force Early Return"), tr("Return expression (leave empty for void functions):"), QLineEdit::Normal, expr, &ok).trimmed(); if (!ok) return false; }
     if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
     m_focusedRank = activeSteppingRank(); m_coordinator->forceEarlyReturn(expr, m_focusedRank); return true;
+}
+/** @brief Installs function-symbol regex breakpoints via GDB `rbreak <pattern>`. */
+bool MainWindow::insertRegexBreakpointWorkflow(const QString& explicitPattern, bool promptIfEmpty) {
+    QString pat = explicitPattern.trimmed();
+    if (promptIfEmpty && pat.isEmpty()) { bool ok = false; pat = QInputDialog::getText(this, tr("Break on Function Regex (rbreak)"), tr("Function regex pattern (e.g. MPI_.*|Solver::step.*):"), QLineEdit::Normal, QString(), &ok).trimmed(); if (!ok) return false; }
+    if (pat.isEmpty() || !m_coordinator) return false;
+    m_coordinator->insertRegexBreakpoint(pat); return true;
 }
 
 }  // namespace gridlock::ui

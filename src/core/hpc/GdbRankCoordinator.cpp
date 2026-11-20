@@ -68,12 +68,12 @@ QString formatMiDisassembly(const QString& miLine) {
   return prettyAsm;
 }
 
-/** @brief Builds a GDB/MI `-break-insert` command string for `file:line` and optional @p condition. */
-QString buildBreakInsertCmd(const QString& file, int line, const QString& condition, int ignoreCount = 0) {
+/** @brief Builds a GDB/MI `-break-insert` command string for `file:line`, optional condition, ignoreCount, `-t`, and `-d`. */
+QString buildBreakInsertCmd(const QString& file, int line, const QString& condition, int ignoreCount = 0, bool temporary = false, bool disabled = false) {
   const QString loc = QString("%1:%2").arg(file).arg(line);
-  const QString ign = ignoreCount > 0 ? QString("-i %1 ").arg(ignoreCount) : QString();
-  if (!condition.trimmed().isEmpty()) return QString("-break-insert %1-c %2 %3\n").arg(ign, escapeGdbMiString(condition.trimmed()), loc);
-  return QString("-break-insert -f %1%2\n").arg(ign, loc);
+  const QString flags = QString("%1%2%3").arg(temporary ? QStringLiteral("-t ") : QString(), disabled ? QStringLiteral("-d ") : QString(), ignoreCount > 0 ? QString("-i %1 ").arg(ignoreCount) : QString());
+  if (!condition.trimmed().isEmpty()) return QString("-break-insert %1-c %2 %3\n").arg(flags, escapeGdbMiString(condition.trimmed()), loc);
+  return QString("-break-insert %1-f %2\n").arg(flags, loc);
 }
 
 }  // namespace
@@ -216,8 +216,8 @@ void GdbRankCoordinator::setBreakpoint(const QString& file, int line, const QStr
   m_breakpointsCleared = false;
   const auto extra = m_breakpointExtras.value(QStringLiteral("%1:%2").arg(file).arg(line));
   m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(), [&](const PendingBreakpoint& bp) { return bp.file == file && bp.line == line; }), m_pendingBreakpoints.end());
-  m_pendingBreakpoints.push_back({file, line, condition.trimmed(), rankFilter, extra.ignoreCount, extra.logMessage});
-  const QString locFull = QString("%1:%2").arg(file).arg(line), locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line), cmd = buildBreakInsertCmd(file, line, condition, extra.ignoreCount);
+  m_pendingBreakpoints.push_back({file, line, condition.trimmed(), rankFilter, extra.ignoreCount, extra.logMessage, extra.enabled, extra.temporary, extra.commands});
+  const QString locFull = QString("%1:%2").arg(file).arg(line), locBase = QString("%1:%2").arg(QFileInfo(file).fileName()).arg(line), cmd = buildBreakInsertCmd(file, line, condition, extra.ignoreCount, extra.temporary, !extra.enabled);
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     if (rankFilter >= 0 && rankFilter != static_cast<int>(i)) {
@@ -239,7 +239,7 @@ void GdbRankCoordinator::configureBreakpointOptions(const QString& file, int lin
 
 /** @brief Clears all pending breakpoints and deletes active GDB breakpoints across all ranks. */
 void GdbRankCoordinator::clearBreakpoints() {
-  m_pendingBreakpoints.clear(); m_breakpointsCleared = true;
+  m_pendingBreakpoints.clear(); m_pendingRegexBreakpoints.clear(); m_regexCreatedBreakpoints.clear(); m_breakpointsCleared = true;
   for (size_t i = 0; i < m_processes.size(); ++i)
     if (m_processes[i]) { m_processes[i]->state.breakpoints.clear(); queueOrWriteCmd(static_cast<int>(i), "-break-delete\n"); }
 }
@@ -478,12 +478,12 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     if (!execArgs.isEmpty()) writeCmd(id, QStringLiteral("-exec-arguments %1\n").arg(execArgs));
     if (!m_pendingBreakpoints.empty()) {
       for (const auto& bp : m_pendingBreakpoints)
-        if (bp.rankFilter < 0 || bp.rankFilter == id) writeCmd(id, buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount));
+        if (bp.rankFilter < 0 || bp.rankFilter == id) writeCmd(id, buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount, bp.temporary, !bp.enabled));
     } else if (!m_breakpointsCleared) {
       const auto persisted = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
-      for (auto it = persisted.constBegin(); it != persisted.constEnd(); ++it)
-        for (int ln : *it) writeCmd(id, buildBreakInsertCmd(it.key(), ln, QString()));
+      for (auto it = persisted.constBegin(); it != persisted.constEnd(); ++it) for (int ln : *it) writeCmd(id, buildBreakInsertCmd(it.key(), ln, QString()));
     }
+    for (const QString& rx : m_pendingRegexBreakpoints) writeCmd(id, QStringLiteral("-interpreter-exec console \"rbreak %1\"\n").arg(rx));
     for (const auto& cp : m_activeCatchpoints) {
       if (!cp.enabled) continue;
       QString f = cp.filter.trimmed();
@@ -881,17 +881,8 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
       // Emit structured JSON register bank when at least one hardware register value was parsed.
       if (updated) { if (!jsonRegs.isEmpty()) emit registersUpdated(rankId, jsonRegs); emit rankStateChanged(rankId, rp->state); }
-    } else if (line.startsWith("^done,bkpt={")) {
-      static const QRegularExpression bkptRe("number=\"(\\d+)\".*?file=\"([^\"]+)\".*?line=\"(\\d+)\"");
-      if (const auto match = bkptRe.match(line); match.hasMatch()) {
-        const int bkptId = match.captured(1).toInt(), bkptLn = match.captured(3).toInt();
-        const QString bkptBase = QFileInfo(match.captured(2)).fileName();
-        rp->state.breakpoints[bkptId] = QString("%1:%2").arg(match.captured(2), match.captured(3));
-        for (const auto& bp : m_pendingBreakpoints) if (bp.ignoreCount > 0 && bp.line == bkptLn && QFileInfo(bp.file).fileName() == bkptBase)
-          writeCmd(rankId, QString("-break-after %1 %2\n").arg(bkptId).arg(bp.ignoreCount));
-        if (rp->state.currentState == "sync_flushing") { if (--rp->state.pendingBreakpoints <= 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; } }
-        else if (rp->state.currentState != "stopped") emit rankStateChanged(rankId, rp->state);
-      }
+    } else if (handleBreakpointMiRecord(rankId, line)) {
+      // Handled `^done,bkpt={...}`, `=breakpoint-created`, and `=breakpoint-deleted` records.
     } else if (line.startsWith("100")) {
       static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\""), err100Re("msg=\"([^\"]+)\"");
       if (const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line); match.hasMatch()) emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);

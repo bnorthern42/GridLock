@@ -214,10 +214,28 @@ class IBackendCoordinator : public QObject {
   /** @brief Returns the configured inferior working directory path. */
   QString workingDirectory() const { return property("gridlock_working_dir").toString(); }
 
-  /** @brief Extra per-breakpoint execution options (pass/ignore count and non-suspending Logpoint message). */
+  /** @brief Extra per-breakpoint execution options (ignore count, logpoint, enablement, temporary one-shot, GDB commands). */
   struct BreakpointExtraOptions {
     int ignoreCount = 0;  ///< Number of hits to ignore before suspending (0 = stop immediately).
     QString logMessage;   ///< Non-empty trace message for non-suspending Logpoints.
+    bool enabled = true;  ///< False when breakpoint is non-destructively disabled (`-break-disable`).
+    bool temporary = false; ///< True for one-shot temporary breakpoints (`tbreak` / `-break-insert -t`).
+    QStringList commands; ///< Automated GDB commands executed on hit (`-break-commands <id> ...`).
+  };
+
+  /** @brief Complete breakpoint lifecycle specification tracked across ranks and UI models. */
+  struct BreakpointSpec {
+    QString file;          ///< Source file path (empty for pure regex symbol breakpoints).
+    int line = 0;          ///< 1-based source line number.
+    QString condition;     ///< Optional C/C++ predicate expression.
+    int rankFilter = -1;   ///< Target 0-based MPI rank (`-1` = all ranks).
+    int ignoreCount = 0;   ///< Number of hits to ignore before suspending.
+    QString logMessage;    ///< Optional non-suspending Logpoint trace message.
+    bool enabled = true;   ///< True when active; false when disabled non-destructively.
+    bool temporary = false;///< True for one-shot temporary (`tbreak`) breakpoints.
+    QStringList commands;  ///< Multi-line GDB command list executed on hit (`commands ... end`).
+    QString regexPattern;  ///< Regex pattern when created via `rbreak`.
+    int gdbId = -1;        ///< Debugger-assigned breakpoint number (`> 0` once installed).
   };
 
   /**
@@ -230,7 +248,31 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Configures hit ignore count (`ignoreCount > 0`) and non-suspending Logpoint message for `file:line`. */
   virtual void configureBreakpointOptions(const QString& file, int line, int ignoreCount, const QString& logMessage) {
-    m_breakpointExtras.insert(QStringLiteral("%1:%2").arg(file).arg(line), {qMax(0, ignoreCount), logMessage.trimmed()});
+    auto& opts = m_breakpointExtras[QStringLiteral("%1:%2").arg(file).arg(line)];
+    opts.ignoreCount = qMax(0, ignoreCount);
+    opts.logMessage = logMessage.trimmed();
+  }
+
+  /** @brief Non-destructively enables or disables an existing breakpoint (`-break-enable` / `-break-disable`). */
+  virtual void setBreakpointEnabled(const QString& filePath, int line, bool enabled) {
+    m_breakpointExtras[QStringLiteral("%1:%2").arg(filePath).arg(line)].enabled = enabled;
+  }
+
+  /** @brief Inserts a one-shot temporary breakpoint (`tbreak` / `-break-insert -t`) at `filePath:line`. */
+  virtual void insertTemporaryBreakpoint(const QString& filePath,
+                                         int line,
+                                         const QString& condition = QString(),
+                                         int targetRank = -1) {
+    Q_UNUSED(condition); Q_UNUSED(targetRank);
+    m_breakpointExtras[QStringLiteral("%1:%2").arg(filePath).arg(line)].temporary = true;
+  }
+
+  /** @brief Installs function-symbol regex breakpoints via GDB `rbreak <regexPattern>`. */
+  virtual void insertRegexBreakpoint(const QString& regexPattern) { Q_UNUSED(regexPattern); }
+
+  /** @brief Attaches or clears automated GDB hit commands (`-break-commands <id> ...`) for `filePath:line`. */
+  virtual void setBreakpointCommands(const QString& filePath, int line, const QStringList& commands) {
+    m_breakpointExtras[QStringLiteral("%1:%2").arg(filePath).arg(line)].commands = commands;
   }
 
   /** @brief Clears all active breakpoints tracked by this coordinator. */
@@ -396,6 +438,12 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when GDB `complete <prefix>` tab completions are resolved. */
   void consoleCompletionsReady(const QString& prefix, const QStringList& completions);
+
+  /** @brief Emitted when a new breakpoint record (including `rbreak` matches) is parsed from the backend. */
+  void breakpointRecordCreated(int rank, const QString& file, int line, int gdbId, bool temporary);
+
+  /** @brief Emitted when a one-shot temporary (`tbreak`) breakpoint triggers and auto-deletes. */
+  void temporaryBreakpointHit(int rank, const QString& file, int line);
 
  protected:
   QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".

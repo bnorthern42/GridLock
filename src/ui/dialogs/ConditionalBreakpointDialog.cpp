@@ -27,6 +27,7 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QRadioButton>
@@ -41,8 +42,8 @@
 namespace gridlock::ui {
 
 namespace {
-constexpr int kPopoverWidthPx = 380;
-constexpr int kPopoverMinHeightPx = 224;
+constexpr int kPopoverWidthPx = 396;
+constexpr int kPopoverMinHeightPx = 310;
 constexpr int kCalloutCaretHeightPx = 10;
 constexpr int kDefaultAnchorCaretOffsetPx = 18;
 constexpr int kAnchorVerticalGapPx = 6;
@@ -252,7 +253,7 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     setAttribute(Qt::WA_TranslucentBackground, true);
     setFixedWidth(kPopoverWidthPx);
     setMinimumHeight(kPopoverMinHeightPx);
-    resize(kPopoverWidthPx, 228);
+    resize(kPopoverWidthPx, 326);
 
     // Apply compact dark-slate popover stylesheet keeping all interactive controls <= 24px tall.
     setStyleSheet(QStringLiteral(
@@ -263,7 +264,9 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
         "QLineEdit { background: #1e2128; color: #e5e9f0; border: 1px solid #43454a; "
         "border-radius: 4px; padding: 1px 6px; min-height: 22px; max-height: 24px; "
         "font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
-        "QLineEdit:focus { border: 1px solid #528bff; }"
+        "QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #528bff; }"
+        "QPlainTextEdit { background: #1e2128; color: #e5e9f0; border: 1px solid #43454a; "
+        "border-radius: 4px; padding: 3px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
         "QComboBox { background: #1e2128; color: #abb2bf; border: 1px solid #43454a; "
         "border-radius: 4px; padding: 1px 6px; min-height: 22px; max-height: 24px; font-size: 11px; }"
         "QComboBox:hover { border-color: #528bff; color: #ffffff; }"
@@ -282,7 +285,7 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     // Reserve top 10px above the card interior for the upward-pointing callout caret (▲).
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(14, kCalloutCaretHeightPx + 10, 14, 12);
-    rootLayout->setSpacing(7);
+    rootLayout->setSpacing(6);
 
     // Header Row: Bold "Line <N> breakpoint" banner with subtle horizontal divider.
     m_titleLabel = new QLabel(QStringLiteral("Line breakpoint"), this);
@@ -295,10 +298,23 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     divider->setStyleSheet(QStringLiteral("background: #393b40; border: none;"));
     rootLayout->addWidget(divider);
 
-    // Row 1: Enabled checkbox (checked by default; unchecking disables/removes breakpoint on accept).
+    // Row 1: Non-destructive Enabled toggle + Temporary (one-shot tbreak) checkbox.
+    auto* stateRow = new QHBoxLayout();
+    stateRow->setContentsMargins(0, 0, 0, 0);
+    stateRow->setSpacing(14);
     m_enabledCheck = new QCheckBox(QStringLiteral("Enabled"), this);
+    m_enabledCheck->setObjectName(QStringLiteral("bpEnabledCheck"));
     m_enabledCheck->setChecked(true);
-    rootLayout->addWidget(m_enabledCheck);
+    connect(m_enabledCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (!m_removeRequested && m_targetLine > 0) emit breakpointEnabledToggled(m_sourceFilePath, m_targetLine, checked);
+    });
+    m_temporaryCheck = new QCheckBox(QStringLiteral("Temporary (one-shot tbreak)"), this);
+    m_temporaryCheck->setObjectName(QStringLiteral("bpTemporaryCheck"));
+    m_temporaryCheck->setChecked(false);
+    stateRow->addWidget(m_enabledCheck);
+    stateRow->addWidget(m_temporaryCheck);
+    stateRow->addStretch(1);
+    rootLayout->addLayout(stateRow);
 
     // Row 2: Suspend scope row ("Suspend:" checkbox + "All" / "Rank / Thread" radios + "Make Default").
     auto* suspendRow = new QHBoxLayout();
@@ -415,6 +431,14 @@ ConditionalBreakpointDialog::ConditionalBreakpointDialog(const QString& currentC
     logRow->addWidget(m_logpointCheck);
     logRow->addWidget(m_logMessageEdit, 1);
     rootLayout->addLayout(logRow);
+
+    // Multi-line GDB Commands on Hit (commands ... end) editor.
+    rootLayout->addWidget(new QLabel(QStringLiteral("GDB Commands on Hit (commands ... end):"), this));
+    m_commandsEdit = new QPlainTextEdit(this);
+    m_commandsEdit->setObjectName(QStringLiteral("bpCommandsEdit"));
+    m_commandsEdit->setFixedHeight(58);
+    m_commandsEdit->setPlaceholderText(QStringLiteral("silent\nprintf \"rank=%d iter=%d\\n\", rank, i\nbt 3\ncontinue"));
+    rootLayout->addWidget(m_commandsEdit);
 
     // Populate condition field immediately when an MPI preset item is selected.
     connect(m_presetCombo, &QComboBox::activated, this, [this](int index) {
@@ -649,6 +673,22 @@ void ConditionalBreakpointDialog::setLogMessage(const QString& message) {
     const QString clean = message.trimmed();
     if (m_logpointCheck) m_logpointCheck->setChecked(!clean.isEmpty());
     if (m_logMessageEdit) { m_logMessageEdit->setText(clean); m_logMessageEdit->setEnabled(!clean.isEmpty()); }
+}
+/** @brief Returns true when Temporary (one-shot tbreak) mode is checked. */
+bool ConditionalBreakpointDialog::isTemporary() const { return m_temporaryCheck && m_temporaryCheck->isChecked(); }
+/** @brief Updates the Temporary (one-shot tbreak) checkbox state. */
+void ConditionalBreakpointDialog::setTemporary(bool temporary) { if (m_temporaryCheck) m_temporaryCheck->setChecked(temporary); }
+/** @brief Returns non-empty trimmed GDB hit command lines (`commands ... end`). */
+QStringList ConditionalBreakpointDialog::commands() const {
+    if (!m_commandsEdit) return {};
+    QStringList out;
+    for (const QString& line : m_commandsEdit->toPlainText().split(QLatin1Char('\n')))
+        if (const QString t = line.trimmed(); !t.isEmpty()) out.append(t);
+    return out;
+}
+/** @brief Populates the multi-line GDB hit commands editor. */
+void ConditionalBreakpointDialog::setCommands(const QStringList& commands) {
+    if (m_commandsEdit) m_commandsEdit->setPlainText(commands.join(QLatin1Char('\n')));
 }
 
 /**

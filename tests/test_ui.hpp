@@ -183,5 +183,8 @@ private slots:
 
     /** @brief Verifies nexti, Ctrl+F10 Run to Cursor, draggable gutter PC jump, lexical scope hazard guard, Force Early Return, and shortcut uniqueness. */
     void testNonLinearExecutionControl();
+
+    /** @brief Verifies non-destructive breakpoint enable/disable hollow markers, tbreak, rbreak, and GDB breakpoint command lists. */
+    void testBreakpointLifecycleAndCommands();
 };
 

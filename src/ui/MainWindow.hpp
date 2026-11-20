@@ -217,6 +217,9 @@ public:
     /** @brief Forces an immediate return from the current frame (`-exec-return [expr]`), optionally prompting for @p explicitExpr. */
     bool forceEarlyReturnWorkflow(const QString& explicitExpr = QString(), bool promptIfEmpty = true);
 
+    /** @brief Installs function-symbol regex breakpoints via GDB `rbreak <pattern>`, optionally prompting for @p explicitPattern. */
+    bool insertRegexBreakpointWorkflow(const QString& explicitPattern = QString(), bool promptIfEmpty = true);
+
     /**
      * @brief Analyzes whether jumping from @p currentLine to @p targetLine in @p sourceText crosses function,
      *        lexical block, or local variable initialization boundaries.

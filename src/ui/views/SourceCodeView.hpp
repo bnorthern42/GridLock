@@ -139,6 +139,9 @@ public:
         QString condition;    ///< Optional C/C++ boolean condition predicate.
         int ignoreCount = 0;  ///< Number of hits to ignore before stopping (0 = stop immediately).
         QString logMessage;   ///< Non-empty trace expression message for non-suspending Logpoints.
+        bool enabled = true;  ///< False when breakpoint is non-destructively disabled (hollow gutter ring).
+        bool temporary = false; ///< True for one-shot temporary (`tbreak`) breakpoints.
+        QStringList commands = {}; ///< Automated GDB commands executed on hit (`commands ... end`).
     };
 
     /**
@@ -196,6 +199,20 @@ public:
 
     /** @brief Configures condition, pass/ignore count, and non-suspending Logpoint message on a breakpoint line. */
     void setBreakpointOptions(int lineOneBased, const QString& condition, int ignoreCount, const QString& logMessage);
+    /** @brief Non-destructively enables or disables an existing breakpoint on @p lineOneBased. */
+    inline void setBreakpointEnabled(int lineOneBased, bool enabled);
+    /** @brief Returns true when @p lineOneBased has an enabled breakpoint. */
+    bool isBreakpointEnabledForLine(int lineOneBased) const { return hasBreakpoint(lineOneBased) && m_breakpointInfo.value(lineOneBased).enabled; }
+    /** @brief Inserts a one-shot temporary (`tbreak`) breakpoint on @p lineOneBased. */
+    inline void setTemporaryBreakpoint(int lineOneBased, int rankFilter = -1, const QString& condition = QString());
+    /** @brief Returns true when @p lineOneBased holds a one-shot temporary (`tbreak`) breakpoint. */
+    bool isTemporaryBreakpointForLine(int lineOneBased) const { return hasBreakpoint(lineOneBased) && m_breakpointInfo.value(lineOneBased).temporary; }
+    /** @brief Attaches or clears GDB hit command lines (`commands ... end`) on @p lineOneBased. */
+    inline void setBreakpointCommands(int lineOneBased, const QStringList& commands);
+    /** @brief Returns GDB hit command lines attached to @p lineOneBased. */
+    QStringList breakpointCommandsForLine(int lineOneBased) const { return hasBreakpoint(lineOneBased) ? m_breakpointInfo.value(lineOneBased).commands : QStringList{}; }
+    /** @brief Removes a breakpoint from UI state without emitting toggle signals (used after one-shot `tbreak` hit). */
+    inline void removeBreakpointQuietly(int lineOneBased);
     /** @brief Returns true when lineOneBased has a non-suspending Logpoint message configured. */
     bool isLogpointForLine(int lineOneBased) const;
     /** @brief Returns the configured pass/ignore hit count for lineOneBased (0 if unset). */
@@ -398,6 +415,11 @@ public:
                                        bool enabledChecked, const QString& condition,
                                        const QString& suspendScope);
 
+    /** @brief Non-destructive overload separating explicit F9 removal (@p removeRequested) from disablement (@p enabledChecked). */
+    void handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet, bool accepted,
+                                       bool enabledChecked, const QString& condition,
+                                       const QString& suspendScope, bool removeRequested);
+
     /**
      * @brief Applies compiler diagnostics as wavy underlines (#f7768e errors, #e0af68 warnings) and tooltips.
      * @param diagnostics Vector of LspDiagnostic records.
@@ -547,6 +569,15 @@ signals:
 
     /** @brief Emitted whenever breakpoint ignoreCount or Logpoint message is updated on a line. */
     void breakpointOptionsChanged(const QString& file, int line, int ignoreCount, const QString& logMessage);
+
+    /** @brief Emitted when a breakpoint is non-destructively enabled or disabled (`-break-enable` / `-break-disable`). */
+    void breakpointEnabledToggled(const QString& file, int line, bool enabled);
+
+    /** @brief Emitted when a one-shot temporary (`tbreak`) breakpoint is inserted on a line. */
+    void temporaryBreakpointInserted(const QString& file, int line, const QString& condition, int rankFilter);
+
+    /** @brief Emitted when GDB hit commands (`-break-commands`) are updated for a breakpoint line. */
+    void breakpointCommandsChanged(const QString& file, int line, const QStringList& commands);
 
     /** @brief Emitted when hovering over a variable identifier. */
     void hoverVariableRequested(const QString& varName, const QPoint& globalPos);
@@ -710,6 +741,62 @@ inline void SourceCodeView::lineNumberAreaLeaveEvent(QEvent *event) {
         setHoveredGutterLine(-1);
         if (m_lineNumberArea) m_lineNumberArea->setCursor(Qt::ArrowCursor);
     }
+}
+
+inline void SourceCodeView::setBreakpointEnabled(int lineOneBased, bool enabled) {
+    if (lineOneBased <= 0 || !hasBreakpoint(lineOneBased)) return;
+    BreakpointVisualInfo info = breakpointInfoForLine(lineOneBased);
+    info.enabled = enabled;
+    m_breakpointInfo.insert(lineOneBased, info);
+    highlightCurrentLine();
+    if (m_lineNumberArea) {
+        if (m_hoveredGutterLine == lineOneBased) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineOneBased));
+        m_lineNumberArea->update();
+    }
+    emit breakpointEnabledToggled(m_currentFilePath, lineOneBased, enabled);
+}
+
+inline void SourceCodeView::setTemporaryBreakpoint(int lineOneBased, int rankFilter, const QString& condition) {
+    if (lineOneBased <= 0) return;
+    const int normRank = (rankFilter < 0) ? -1 : rankFilter;
+    const QString cleanCond = condition.trimmed();
+    BreakpointVisualInfo info = m_breakpointInfo.value(lineOneBased);
+    info.rankFilter = normRank;
+    info.condition = cleanCond;
+    info.enabled = true;
+    info.temporary = true;
+    m_breakpointInfo.insert(lineOneBased, info);
+    m_breakpoints.insert(lineOneBased, cleanCond);
+    m_breakpointSuspendScopes.insert(lineOneBased, (normRank >= 0) ? QStringLiteral("Rank") : QStringLiteral("All"));
+    highlightCurrentLine();
+    if (m_lineNumberArea) {
+        if (m_hoveredGutterLine == lineOneBased) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineOneBased));
+        m_lineNumberArea->update();
+    }
+    emit temporaryBreakpointInserted(m_currentFilePath, lineOneBased, cleanCond, normRank);
+}
+
+inline void SourceCodeView::setBreakpointCommands(int lineOneBased, const QStringList& commands) {
+    if (lineOneBased <= 0 || !hasBreakpoint(lineOneBased)) return;
+    QStringList cleaned;
+    for (const QString& ln : commands) if (const QString t = ln.trimmed(); !t.isEmpty()) cleaned.append(t);
+    BreakpointVisualInfo info = breakpointInfoForLine(lineOneBased);
+    info.commands = cleaned;
+    m_breakpointInfo.insert(lineOneBased, info);
+    if (m_lineNumberArea) {
+        if (m_hoveredGutterLine == lineOneBased) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineOneBased));
+        m_lineNumberArea->update();
+    }
+    emit breakpointCommandsChanged(m_currentFilePath, lineOneBased, cleaned);
+}
+
+inline void SourceCodeView::removeBreakpointQuietly(int lineOneBased) {
+    if (lineOneBased <= 0 || !m_breakpoints.contains(lineOneBased)) return;
+    m_breakpoints.remove(lineOneBased);
+    m_breakpointSuspendScopes.remove(lineOneBased);
+    m_breakpointInfo.remove(lineOneBased);
+    highlightCurrentLine();
+    if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
 }  // namespace gridlock::ui

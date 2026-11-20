@@ -191,6 +191,39 @@ class DapCoordinator : public IBackendCoordinator {
                      const QString& condition = QString(),
                      int rankFilter = -1) override;
 
+  /** @brief Non-destructively toggles breakpoint enablement in DAP metadata and re-syncs active breakpoints. */
+  void setBreakpointEnabled(const QString& filePath, int line, bool enabled) override {
+    IBackendCoordinator::setBreakpointEnabled(filePath, line, enabled);
+    if (!isAdapterRunning() || filePath.trimmed().isEmpty() || line <= 0) return;
+    QJsonArray bps;
+    for (int l : m_breakpoints.value(filePath)) {
+      if (!m_breakpointExtras.value(QStringLiteral("%1:%2").arg(filePath).arg(l)).enabled) continue;
+      QJsonObject bp{{QStringLiteral("line"), l}};
+      if (const QString c = m_breakpointConditions.value(filePath).value(l); !c.isEmpty()) bp[QStringLiteral("condition")] = c;
+      bps.append(bp);
+    }
+    sendRequest(QStringLiteral("setBreakpoints"), QJsonObject{{QStringLiteral("source"), QJsonObject{{QStringLiteral("path"), filePath}}}, {QStringLiteral("breakpoints"), bps}});
+  }
+
+  /** @brief Inserts a temporary breakpoint fallback in DAP mode. */
+  void insertTemporaryBreakpoint(const QString& filePath, int line, const QString& condition = QString(), int targetRank = -1) override {
+    IBackendCoordinator::insertTemporaryBreakpoint(filePath, line, condition, targetRank);
+    setBreakpoint(filePath, line, condition, targetRank);
+  }
+
+  /** @brief Inserts a regex symbol breakpoint via LLDB-DAP REPL `breakpoint set -r` fallback. */
+  void insertRegexBreakpoint(const QString& regexPattern) override {
+    const QString pat = regexPattern.trimmed();
+    if (!isAdapterRunning() || pat.isEmpty() || pat.contains(QLatin1Char('\n')) || pat.contains(QLatin1Char('\r'))) return;
+    QString esc = pat; esc.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    sendDebuggerCommand(0, QStringLiteral("breakpoint set -r \"%1\"").arg(esc));
+  }
+
+  /** @brief Stores hit command list metadata for DAP sessions. */
+  void setBreakpointCommands(const QString& filePath, int line, const QStringList& commands) override {
+    IBackendCoordinator::setBreakpointCommands(filePath, line, commands);
+  }
+
   /** @brief Clears all active breakpoints across tracked source files. */
   void clearBreakpoints() override;
 

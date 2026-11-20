@@ -9,14 +9,17 @@
 
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QMap>
 #include <QObject>
 #include <QPoint>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSocketNotifier>
 #include <QString>
 
@@ -80,6 +83,87 @@ class GdbRankCoordinator : public IBackendCoordinator {
                      int rankFilter = -1) override;
   /** @brief Configures hit ignore count (`ignoreCount > 0`) and Logpoint trace message for `file:line`. */
   void configureBreakpointOptions(const QString& file, int line, int ignoreCount, const QString& logMessage) override;
+
+  /** @brief Formats a GDB/MI `-break-commands <id> "cmd1" ...` command line (empty @p commands clears commands). */
+  static QString formatBreakCommandsMi(int bkptId, const QStringList& commands) {
+    QString cmd = QStringLiteral("-break-commands %1").arg(bkptId);
+    for (const QString& raw : commands) {
+      const QString t = raw.trimmed();
+      if (t.isEmpty() || t.contains(QLatin1Char('\n')) || t.contains(QLatin1Char('\r')) || t.contains(QChar('\0'))) continue;
+      QString esc = t;
+      esc.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+      cmd += QStringLiteral(" \"%1\"").arg(esc);
+    }
+    return cmd + QLatin1Char('\n');
+  }
+
+  /** @brief Non-destructively enables or disables an existing breakpoint (`-break-enable` / `-break-disable`). */
+  void setBreakpointEnabled(const QString& filePath, int line, bool enabled) override {
+    if (filePath.trimmed().isEmpty() || line <= 0) return;
+    IBackendCoordinator::setBreakpointEnabled(filePath, line, enabled);
+    const QString locFull = QStringLiteral("%1:%2").arg(filePath).arg(line);
+    const QString locBase = QStringLiteral("%1:%2").arg(QFileInfo(filePath).fileName()).arg(line);
+    for (auto& bp : m_pendingBreakpoints)
+      if (bp.line == line && (bp.file == filePath || QFileInfo(bp.file).fileName() == QFileInfo(filePath).fileName())) bp.enabled = enabled;
+    const QString verb = enabled ? QStringLiteral("-break-enable") : QStringLiteral("-break-disable");
+    for (size_t i = 0; i < m_processes.size(); ++i) {
+      if (!m_processes[i]) continue;
+      for (auto it = m_processes[i]->state.breakpoints.constBegin(); it != m_processes[i]->state.breakpoints.constEnd(); ++it) {
+        if (it.value() == locFull || it.value() == locBase || QFileInfo(it.value().section(QLatin1Char(':'), 0, -2)).fileName() + QLatin1Char(':') + it.value().section(QLatin1Char(':'), -1) == locBase)
+          queueOrWriteCmd(static_cast<int>(i), QStringLiteral("%1 %2\n").arg(verb).arg(it.key()));
+      }
+    }
+  }
+
+  /** @brief Inserts a one-shot temporary breakpoint (`-break-insert -t`) at `filePath:line`. */
+  void insertTemporaryBreakpoint(const QString& filePath, int line, const QString& condition = QString(), int targetRank = -1) override {
+    if (filePath.trimmed().isEmpty() || line <= 0) return;
+    m_breakpointsCleared = false;
+    IBackendCoordinator::insertTemporaryBreakpoint(filePath, line, condition, targetRank);
+    const QString cleanCond = condition.trimmed();
+    m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(), [&](const PendingBreakpoint& bp) { return bp.file == filePath && bp.line == line; }), m_pendingBreakpoints.end());
+    m_pendingBreakpoints.push_back({filePath, line, cleanCond, targetRank, 0, QString(), true, true, {}});
+    QString escCond = cleanCond;
+    escCond.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    const QString loc = QStringLiteral("%1:%2").arg(filePath).arg(line);
+    const QString cmd = cleanCond.isEmpty() ? QStringLiteral("-break-insert -t -f %1\n").arg(loc) : QStringLiteral("-break-insert -t -c \"%1\" %2\n").arg(escCond, loc);
+    for (size_t i = 0; i < m_processes.size(); ++i) {
+      if (m_processes[i] && (targetRank < 0 || targetRank == static_cast<int>(i))) queueOrWriteCmd(static_cast<int>(i), cmd);
+    }
+  }
+
+  /** @brief Installs function-symbol regex breakpoints via `-interpreter-exec console "rbreak <pattern>"`. */
+  void insertRegexBreakpoint(const QString& regexPattern) override {
+    const QString pat = regexPattern.trimmed();
+    if (pat.isEmpty() || pat.contains(QLatin1Char('\n')) || pat.contains(QLatin1Char('\r')) || pat.contains(QChar('\0'))) return;
+    if (!m_pendingRegexBreakpoints.contains(pat)) m_pendingRegexBreakpoints.append(pat);
+    QString esc = pat;
+    esc.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    const QString cmd = QStringLiteral("-interpreter-exec console \"rbreak %1\"\n").arg(esc);
+    for (size_t i = 0; i < m_processes.size(); ++i) if (m_processes[i]) queueOrWriteCmd(static_cast<int>(i), cmd);
+  }
+
+  /** @brief Attaches or clears GDB hit commands (`-break-commands <id> ...`) on `filePath:line`. */
+  void setBreakpointCommands(const QString& filePath, int line, const QStringList& commands) override {
+    if (filePath.trimmed().isEmpty() || line <= 0) return;
+    QStringList cleaned;
+    for (const QString& ln : commands) if (const QString t = ln.trimmed(); !t.isEmpty() && !t.contains(QLatin1Char('\n')) && !t.contains(QLatin1Char('\r'))) cleaned.append(t);
+    IBackendCoordinator::setBreakpointCommands(filePath, line, cleaned);
+    const QString locFull = QStringLiteral("%1:%2").arg(filePath).arg(line);
+    const QString locBase = QStringLiteral("%1:%2").arg(QFileInfo(filePath).fileName()).arg(line);
+    for (auto& bp : m_pendingBreakpoints)
+      if (bp.line == line && (bp.file == filePath || QFileInfo(bp.file).fileName() == QFileInfo(filePath).fileName())) bp.commands = cleaned;
+    for (size_t i = 0; i < m_processes.size(); ++i) {
+      if (!m_processes[i]) continue;
+      for (auto it = m_processes[i]->state.breakpoints.constBegin(); it != m_processes[i]->state.breakpoints.constEnd(); ++it) {
+        if (it.value() == locFull || it.value() == locBase || QFileInfo(it.value().section(QLatin1Char(':'), 0, -2)).fileName() + QLatin1Char(':') + it.value().section(QLatin1Char(':'), -1) == locBase)
+          queueOrWriteCmd(static_cast<int>(i), formatBreakCommandsMi(it.key(), cleaned));
+      }
+    }
+  }
+
+  /** @brief Returns breakpoint records created dynamically via `rbreak` or `=breakpoint-created`. */
+  QVector<BreakpointSpec> regexCreatedBreakpoints() const { return m_regexCreatedBreakpoints; }
 
   /** @brief Clears all pending and live breakpoints across all rank sessions. */
   void clearBreakpoints() override;
@@ -312,6 +396,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
     int rankFilter = -1; ///< Target zero-based rank index, or `-1` for all ranks.
     int ignoreCount = 0; ///< Number of hits to ignore before stopping (0 = stop immediately).
     QString logMessage; ///< Non-empty trace expression message for non-suspending Logpoints.
+    bool enabled = true; ///< False when breakpoint is non-destructively disabled.
+    bool temporary = false; ///< True for one-shot temporary (`tbreak`) breakpoints.
+    QStringList commands; ///< Automated GDB commands executed on hit (`-break-commands`).
   };
 
   /**
@@ -359,6 +446,57 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QVariantList resolved;     ///< Collected real member descriptors (`name`, `value`, `type`, `hasChildren`).
   };
 
+  /** @brief Parses `^done,bkpt={...}`, `=breakpoint-created`, and `=breakpoint-deleted` records for @p rankId. */
+  bool handleBreakpointMiRecord(int rankId, const QString& line) {
+    auto& rp = m_processes[rankId];
+    if (line.startsWith("^done,bkpt={") || line.startsWith("=breakpoint-created,bkpt={")) {
+      static const QRegularExpression idRe("number=\"(\\d+)\""), fileRe("(?:fullname|file)=\"([^\"]+)\""), lnRe("line=\"(\\d+)\""), fnRe("func=\"([^\"]+)\"");
+      if (const auto idM = idRe.match(line); idM.hasMatch()) {
+        const int bkptId = idM.captured(1).toInt();
+        const auto fM = fileRe.match(line); const auto lM = lnRe.match(line);
+        const QString fPath = fM.hasMatch() ? fM.captured(1) : QString();
+        const int bkptLn = lM.hasMatch() ? lM.captured(1).toInt() : 0;
+        const bool isTemp = line.contains(QStringLiteral("disp=\"del\"")), isCreated = line.startsWith("=breakpoint-created");
+        if (!fPath.isEmpty() && bkptLn > 0) rp->state.breakpoints[bkptId] = QString("%1:%2").arg(fPath).arg(bkptLn);
+        else if (const auto fnM = fnRe.match(line); fnM.hasMatch()) rp->state.breakpoints[bkptId] = fnM.captured(1);
+        if (isCreated) {
+          BreakpointSpec sp; sp.file = fPath; sp.line = bkptLn; sp.temporary = isTemp; sp.gdbId = bkptId;
+          sp.enabled = !line.contains(QStringLiteral("enabled=\"n\""));
+          if (const auto fnM = fnRe.match(line); fnM.hasMatch()) sp.regexPattern = fnM.captured(1);
+          m_regexCreatedBreakpoints.append(sp);
+        }
+        emit breakpointRecordCreated(rankId, fPath, bkptLn, bkptId, isTemp);
+        const QString bkptBase = QFileInfo(fPath).fileName();
+        for (const auto& bp : m_pendingBreakpoints) if (bkptLn > 0 && bp.line == bkptLn && QFileInfo(bp.file).fileName() == bkptBase) {
+          if (bp.ignoreCount > 0) writeCmd(rankId, QString("-break-after %1 %2\n").arg(bkptId).arg(bp.ignoreCount));
+          if (!bp.enabled) writeCmd(rankId, QString("-break-disable %1\n").arg(bkptId));
+          if (!bp.commands.isEmpty()) writeCmd(rankId, formatBreakCommandsMi(bkptId, bp.commands));
+        }
+        if (rp->state.currentState == "sync_flushing") { if (--rp->state.pendingBreakpoints <= 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; } }
+        else if (rp->state.currentState != "stopped") emit rankStateChanged(rankId, rp->state);
+      }
+      return true;
+    }
+    if (line.startsWith("=breakpoint-deleted,id=")) {
+      static const QRegularExpression delRe("id=\"(\\d+)\"");
+      if (const auto dm = delRe.match(line); dm.hasMatch()) {
+        const QString loc = rp->state.breakpoints.take(dm.captured(1).toInt());
+        if (!loc.isEmpty()) {
+          const QString f = loc.section(QLatin1Char(':'), 0, -2);
+          const int ln = loc.section(QLatin1Char(':'), -1).toInt();
+          for (auto it = m_pendingBreakpoints.begin(); it != m_pendingBreakpoints.end(); ++it)
+            if (it->temporary && it->line == ln && QFileInfo(it->file).fileName() == QFileInfo(f).fileName()) {
+              emit temporaryBreakpointHit(rankId, it->file, it->line);
+              m_pendingBreakpoints.erase(it);
+              break;
+            }
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
   std::unique_ptr<QProcess> m_mpirunProcess;             ///< Master `mpirun`/`mpiexec` launcher process.
   std::vector<std::unique_ptr<RankProcess>> m_processes; ///< Per-rank GDB frontend slots.
   std::vector<PendingBreakpoint> m_pendingBreakpoints;   ///< Configured breakpoints synced across launches.
@@ -390,6 +528,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QString> m_pendingCompletePrefix;            ///< Active `211` `complete <prefix>` prefix per rank.
   QMap<int, QString> m_completeBuffer;                   ///< Accumulated `~` output lines for `211` `complete` query.
   int m_nextCatchpointId = 1;                            ///< Monotonic logical ID generator for installed catchpoints.
+  QStringList m_pendingRegexBreakpoints;                 ///< Registered `rbreak` patterns replayed on launch.
+  QVector<BreakpointSpec> m_regexCreatedBreakpoints;     ///< Breakpoint records created via `rbreak` / `=breakpoint-created`.
 };
 
 }  // namespace gridlock

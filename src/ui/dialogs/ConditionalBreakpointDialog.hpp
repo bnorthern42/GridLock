@@ -24,6 +24,7 @@ class QContextMenuEvent;
 class QLabel;
 class QLineEdit;
 class QPaintEvent;
+class QPlainTextEdit;
 class QPushButton;
 class QRadioButton;
 class QShowEvent;
@@ -163,6 +164,14 @@ public:
     QString logMessage() const;
     /** @brief Populates the Logpoint checkbox and message field. */
     void setLogMessage(const QString& message);
+    /** @brief Returns true when Temporary (one-shot tbreak) mode is checked. */
+    bool isTemporary() const;
+    /** @brief Updates the Temporary (one-shot tbreak) checkbox state. */
+    void setTemporary(bool temporary);
+    /** @brief Returns non-empty GDB command lines entered for `commands ... end`. */
+    QStringList commands() const;
+    /** @brief Populates the multi-line GDB hit commands editor. */
+    void setCommands(const QStringList& commands);
 
     /**
      * @brief Positions the popover directly beneath a global gutter icon coordinate, clamped to screen bounds.
@@ -175,6 +184,10 @@ public:
      * @param globalAnchorPos Global screen coordinate of the clicked breakpoint marker.
      */
     void showAtGlobalPos(const QPoint& globalAnchorPos);
+
+signals:
+    /** @brief Emitted when the Enabled checkbox is toggled non-destructively (not when Remove F9 is clicked). */
+    void breakpointEnabledToggled(const QString& filePath, int lineOneBased, bool enabled);
 
 protected:
     /**
@@ -202,7 +215,8 @@ protected:
 
 private:
     QLabel* m_titleLabel = nullptr;          ///< Header label displaying "Line <N> breakpoint".
-    QCheckBox* m_enabledCheck = nullptr;     ///< Toggle checkbox enabling or removing the breakpoint.
+    QCheckBox* m_enabledCheck = nullptr;     ///< Toggle checkbox enabling or non-destructively disabling the breakpoint.
+    QCheckBox* m_temporaryCheck = nullptr;   ///< Toggle checkbox marking a one-shot temporary (`tbreak`) breakpoint.
     QCheckBox* m_suspendCheck = nullptr;     ///< Toggle checkbox controlling execution suspension.
     QRadioButton* m_suspendAllRadio = nullptr;   ///< Radio option suspending all MPI ranks.
     QRadioButton* m_suspendRankRadio = nullptr;  ///< Radio option suspending only the active rank/thread.
@@ -211,6 +225,7 @@ private:
     QSpinBox* m_ignoreCountSpin = nullptr;   ///< Hit pass/ignore count spinbox (0 = stop immediately).
     QCheckBox* m_logpointCheck = nullptr;    ///< Toggle enabling Non-Suspending Logpoint mode.
     QLineEdit* m_logMessageEdit = nullptr;   ///< Trace expression message for non-suspending Logpoints.
+    QPlainTextEdit* m_commandsEdit = nullptr;///< Multi-line GDB `commands ... end` editor executed on breakpoint hit.
     LspCompletionPopup* m_completionPopup = nullptr; ///< Sleek floating IntelliSense completion card.
     QComboBox* m_presetCombo = nullptr;      ///< Dropdown selector offering common MPI rank/loop presets.
     QPushButton* m_removeBtn = nullptr;      ///< Left-aligned button removing the breakpoint (F9).

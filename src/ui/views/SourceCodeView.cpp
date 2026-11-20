@@ -137,7 +137,7 @@ void SourceCodeView::syncBreakpointMetadata(const QMap<int, BreakpointVisualInfo
     m_breakpoints.clear(); m_breakpointSuspendScopes.clear(); m_breakpointInfo.clear();
     for (auto it = metaByLine.constBegin(); it != metaByLine.constEnd(); ++it) {
         if (it.key() <= 0) continue;
-        BreakpointVisualInfo clean{it.value().rankFilter < 0 ? -1 : it.value().rankFilter, it.value().condition.trimmed(), qMax(0, it.value().ignoreCount), it.value().logMessage.trimmed()};
+        BreakpointVisualInfo clean{it.value().rankFilter < 0 ? -1 : it.value().rankFilter, it.value().condition.trimmed(), qMax(0, it.value().ignoreCount), it.value().logMessage.trimmed(), it.value().enabled, it.value().temporary, it.value().commands};
         m_breakpointInfo[it.key()] = clean; m_breakpoints[it.key()] = clean.condition; m_breakpointSuspendScopes[it.key()] = (clean.rankFilter >= 0) ? QStringLiteral("Rank") : QStringLiteral("All");
     }
     highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
@@ -262,10 +262,10 @@ void SourceCodeView::toggleBreakpoint(int lineNum) {
  */
 void SourceCodeView::setRankBreakpoint(int lineOneBased, int rankFilter, const QString& condition) {
     if (lineOneBased <= 0) return;
-    // Normalize negative rank filters to -1 (All Ranks) and preserve existing ignoreCount/logMessage.
+    // Normalize negative rank filters to -1 (All Ranks) and preserve existing ignoreCount/logMessage/enabled/temporary/commands.
     const int normalizedRank = (rankFilter < 0) ? -1 : rankFilter; const QString cleanCond = condition.trimmed();
     const BreakpointVisualInfo prev = m_breakpointInfo.value(lineOneBased);
-    m_breakpointInfo.insert(lineOneBased, BreakpointVisualInfo{normalizedRank, cleanCond, prev.ignoreCount, prev.logMessage});
+    m_breakpointInfo.insert(lineOneBased, BreakpointVisualInfo{normalizedRank, cleanCond, prev.ignoreCount, prev.logMessage, prev.enabled, prev.temporary, prev.commands});
     m_breakpoints.insert(lineOneBased, cleanCond); m_breakpointSuspendScopes.insert(lineOneBased, (normalizedRank >= 0) ? QStringLiteral("Rank") : QStringLiteral("All"));
     highlightCurrentLine(); if (m_lineNumberArea) { if (m_hoveredGutterLine == lineOneBased) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineOneBased)); m_lineNumberArea->update(); }
     // Emit rank metadata before breakpointToggled so MainWindowWorkspace syncs the active rank filter.
@@ -281,7 +281,8 @@ void SourceCodeView::setBreakpointOptions(int lineOneBased, const QString& condi
     // Update stored metadata and emit breakpointOptionsChanged without duplicating -break-insert when already set.
     const int rf = breakpointRankFilterForLine(lineOneBased); const QString cleanCond = condition.trimmed(), cleanLog = logMessage.trimmed();
     const bool needInsert = !hasBreakpoint(lineOneBased) || (m_breakpoints.value(lineOneBased) != cleanCond);
-    m_breakpointInfo.insert(lineOneBased, BreakpointVisualInfo{rf, cleanCond, qMax(0, ignoreCount), cleanLog}); m_breakpoints.insert(lineOneBased, cleanCond);
+    const BreakpointVisualInfo prev = m_breakpointInfo.value(lineOneBased);
+    m_breakpointInfo.insert(lineOneBased, BreakpointVisualInfo{rf, cleanCond, qMax(0, ignoreCount), cleanLog, prev.enabled, prev.temporary, prev.commands}); m_breakpoints.insert(lineOneBased, cleanCond);
     if (needInsert) setRankBreakpoint(lineOneBased, rf, cleanCond);
     else { highlightCurrentLine(); if (m_lineNumberArea) { if (m_hoveredGutterLine == lineOneBased) m_lineNumberArea->setToolTip(breakpointTooltipForLine(lineOneBased)); m_lineNumberArea->update(); } }
     emit breakpointOptionsChanged(m_currentFilePath, lineOneBased, qMax(0, ignoreCount), cleanLog);
@@ -304,15 +305,14 @@ int SourceCodeView::breakpointRankFilterForLine(int lineOneBased) const { return
 QString SourceCodeView::breakpointTooltipForLine(int lineOneBased) const {
     if (!hasBreakpoint(lineOneBased)) return QString();
     const BreakpointVisualInfo info = breakpointInfoForLine(lineOneBased);
-    QString tip = QStringLiteral("Breakpoint at line %1 (%2)").arg(lineOneBased).arg((info.rankFilter < 0) ? QStringLiteral("All Ranks") : QStringLiteral("Rank %1 only").arg(info.rankFilter));
+    QString tip = QStringLiteral("%1Breakpoint at line %2 (%3)").arg(!info.enabled ? QStringLiteral("[DISABLED] ") : info.temporary ? QStringLiteral("[Temporary tbreak] ") : QString()).arg(lineOneBased).arg((info.rankFilter < 0) ? QStringLiteral("All Ranks") : QStringLiteral("Rank %1 only").arg(info.rankFilter));
     if (!info.condition.trimmed().isEmpty()) tip += QStringLiteral("\nCondition: %1").arg(info.condition.trimmed());
     if (info.ignoreCount > 0) tip += QStringLiteral("\nIgnore first %1 hits").arg(info.ignoreCount);
     if (!info.logMessage.trimmed().isEmpty()) tip += QStringLiteral("\nLogpoint: %1").arg(info.logMessage.trimmed());
+    if (!info.commands.isEmpty()) tip += QStringLiteral("\nGDB Commands: %1 line(s)").arg(info.commands.size());
     return tip;
 }
-/**
- * @brief Updates the active focused rank for rank-scoped quick context menu actions.
- */
+/** @brief Updates the active focused rank for rank-scoped quick context menu actions. */
 void SourceCodeView::setActiveFocusRank(int rankId) { m_activeFocusRank = qMax(0, rankId); }
 /** @brief Returns the active C/C++ boolean condition attached to a 1-based breakpoint line. */
 QString SourceCodeView::breakpointCondition(int lineOneBased) const { return m_breakpoints.value(lineOneBased).trimmed(); }
@@ -334,7 +334,11 @@ QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
     const bool hasBp = m_breakpoints.contains(lineOneBased);
     const bool isExec = (lineOneBased > 0 && lineOneBased == m_executionLine);
     if (hasBp && isExec) return QStringLiteral("BreakpointAndExecutionPc");
-    if (hasBp) return m_breakpoints.value(lineOneBased).trimmed().isEmpty() ? QStringLiteral("Breakpoint") : QStringLiteral("ConditionalBreakpoint");
+    if (hasBp) {
+        if (!isBreakpointEnabledForLine(lineOneBased)) return QStringLiteral("DisabledBreakpoint");
+        if (isTemporaryBreakpointForLine(lineOneBased)) return QStringLiteral("TemporaryBreakpoint");
+        return m_breakpoints.value(lineOneBased).trimmed().isEmpty() ? QStringLiteral("Breakpoint") : QStringLiteral("ConditionalBreakpoint");
+    }
     if (isExec) return QStringLiteral("ExecutionPc");
     if (lineOneBased > 0 && lineOneBased == m_hoveredGutterLine) return QStringLiteral("HoverPreview");
     return QStringLiteral("None");
@@ -342,59 +346,37 @@ QString SourceCodeView::gutterMarkerStateForLine(int lineOneBased) const {
 
 /** @brief Highlights the current cursor line, per-rank breakpoint tint bands, and execution PC line. */
 void SourceCodeView::highlightCurrentLine() {
-    QList<QTextEdit::ExtraSelection> selections;
-    QTextEdit::ExtraSelection selection;
-    const bool isDark = isAppDarkThemeActive();
-    const QColor highlightColor = isDark ? QColor("#1e222a") : activeCanvasBackgroundColor().darker(104);
-    selection.format.setBackground(highlightColor);
-    selection.format.setProperty(QTextFormat::FullWidthSelection, true);
-    selection.cursor = textCursor(); selection.cursor.clearSelection();
-    selections.append(selection);
-    // Layer subtle translucent per-rank (alpha = 28) background tint across breakpoint lines.
+    QList<QTextEdit::ExtraSelection> selections; const bool isDark = isAppDarkThemeActive();
+    auto addFullSel = [&](const QTextCursor& c, const QColor& bg) {
+        QTextEdit::ExtraSelection s; s.format.setBackground(bg); s.format.setProperty(QTextFormat::FullWidthSelection, true);
+        s.cursor = c; s.cursor.clearSelection(); selections.append(s);
+    };
+    addFullSel(textCursor(), isDark ? QColor("#1e222a") : activeCanvasBackgroundColor().darker(104));
+    // Layer subtle translucent per-rank (alpha = 28 enabled, 10 disabled) background tint across breakpoint lines.
     for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) {
-        const int bpLine = it.key();
-        if (bpLine <= 0 || bpLine == m_executionLine) continue;
-        QTextBlock bpBlock = document()->findBlockByLineNumber(bpLine - 1);
-        if (bpBlock.isValid()) {
-            QTextEdit::ExtraSelection bpSel;
-            QColor tint = breakpointColorForLine(bpLine); tint.setAlpha(28);
-            bpSel.format.setBackground(tint);
-            bpSel.format.setProperty(QTextFormat::FullWidthSelection, true);
-            bpSel.cursor = QTextCursor(bpBlock); bpSel.cursor.clearSelection();
-            selections.append(bpSel);
+        const int bpLine = it.key(); if (bpLine <= 0 || bpLine == m_executionLine) continue;
+        if (QTextBlock b = document()->findBlockByLineNumber(bpLine - 1); b.isValid()) {
+            QColor tint = breakpointColorForLine(bpLine); tint.setAlpha(isBreakpointEnabledForLine(bpLine) ? 28 : 10);
+            addFullSel(QTextCursor(b), tint);
         }
     }
-
     // If a 1-based debugger execution line is active, layer a distinct emerald-slate highlight band.
-    if (m_executionLine > 0) {
-        QTextBlock execBlock = document()->findBlockByLineNumber(m_executionLine - 1);
-        if (execBlock.isValid()) {
-            QTextEdit::ExtraSelection execSel;
-            execSel.format.setBackground(isDark ? QColor("#20342c") : QColor(46, 160, 67, 45));
-            execSel.format.setProperty(QTextFormat::FullWidthSelection, true);
-            execSel.cursor = QTextCursor(execBlock); execSel.cursor.clearSelection();
-            selections.append(execSel);
-        }
-    }
+    if (m_executionLine > 0) if (QTextBlock eb = document()->findBlockByLineNumber(m_executionLine - 1); eb.isValid())
+        addFullSel(QTextCursor(eb), isDark ? QColor("#20342c") : QColor(46, 160, 67, 45));
     // Render inline wavy underlines (#f7768e crimson for errors, #e0af68 amber for warnings).
     for (const auto& diag : m_diagnostics) {
-        QTextBlock dBlock = document()->findBlockByLineNumber(qMax(0, diag.line - 1));
-        if (!dBlock.isValid()) continue;
+        QTextBlock dBlock = document()->findBlockByLineNumber(qMax(0, diag.line - 1)); if (!dBlock.isValid()) continue;
         QTextEdit::ExtraSelection dSel; dSel.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
         dSel.format.setUnderlineColor(diag.severity == 1 ? QColor(QStringLiteral("#f7768e")) : QColor(QStringLiteral("#e0af68")));
         dSel.format.setToolTip(diag.message); dSel.cursor = QTextCursor(dBlock);
         const int sCol = qBound(0, diag.column, qMax(0, dBlock.length() - 1));
         const int eCol = (diag.endColumn > sCol) ? qMin(diag.endColumn, qMax(0, dBlock.length() - 1)) : qMax(0, dBlock.length() - 1);
-        dSel.cursor.setPosition(dBlock.position() + sCol);
-        dSel.cursor.setPosition(dBlock.position() + eCol, QTextCursor::KeepAnchor);
+        dSel.cursor.setPosition(dBlock.position() + sCol); dSel.cursor.setPosition(dBlock.position() + eCol, QTextCursor::KeepAnchor);
         selections.append(dSel);
     }
     setExtraSelections(selections);
 }
-
-/**
- * @brief Applies compiler diagnostics as wavy underlines and updates gutter markers.
- */
+/** @brief Applies compiler diagnostics as wavy underlines and updates gutter markers. */
 void SourceCodeView::setDiagnostics(const QVector<core::utils::LspDiagnostic>& diagnostics) { m_diagnostics = diagnostics; highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update(); }
 
 /**
@@ -450,7 +432,15 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
             // 1. Left Icon Lane (x = 0..20): Antialiased vector badges for HoverPreview, All-Ranks, Per-Rank, & ExecutionPc.
             const int bpRank = breakpointRankFilterForLine(lineOneBased); const QColor bpColor = colorForRankBreakpoint(bpRank);
             if (isDragTarget) { QPainterPath chev; chev.moveTo(cx - 3.6, cy - 4.5); chev.lineTo(cx + 4.6, cy); chev.lineTo(cx - 3.6, cy + 4.5); chev.lineTo(cx - 1.7, cy); chev.closeSubpath(); painter.setPen(QPen(QColor("#fbbf24"), 1.1)); painter.setBrush(QColor(245, 158, 11, 185)); painter.drawPath(chev); }
-            else if (state == QStringLiteral("HoverPreview")) {
+            else if (state == QStringLiteral("DisabledBreakpoint")) {
+                // Hollow 2px red/amber ring indicating a non-destructively disabled breakpoint.
+                const QColor ringCol = m_breakpoints.value(lineOneBased).trimmed().isEmpty() ? bpColor : QColor(QStringLiteral("#f59e0b"));
+                painter.setPen(QPen(ringCol, 2.0)); painter.setBrush(Qt::NoBrush); painter.drawEllipse(QPointF(cx, cy), 5.0, 5.0);
+            } else if (state == QStringLiteral("TemporaryBreakpoint")) {
+                // Dashed ring with centered 'T' glyph indicating a one-shot temporary (tbreak) breakpoint.
+                painter.setPen(QPen(QColor(QStringLiteral("#38bdf8")), 1.6, Qt::DashLine)); painter.setBrush(QColor(56, 189, 248, 42)); painter.drawEllipse(QPointF(cx, cy), 5.6, 5.6);
+                QFont tFont = baseGutterFont; tFont.setBold(true); tFont.setPixelSize(8); painter.setFont(tFont); painter.setPen(QColor(QStringLiteral("#38bdf8"))); painter.drawText(QRectF(cx - 5.5, cy - 5.5, 11.0, 11.0), Qt::AlignCenter, QStringLiteral("T"));
+            } else if (state == QStringLiteral("HoverPreview")) {
                 painter.setPen(QPen(QColor(255, 255, 255, 160), 1.0)); painter.setBrush(QColor(239, 68, 68, 102));
                 painter.drawEllipse(QPointF(cx, cy), 4.8, 4.8);
             } else if (state == QStringLiteral("Breakpoint") || state == QStringLiteral("ConditionalBreakpoint")) {
@@ -541,6 +531,11 @@ void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
     menu->addAction(QStringLiteral("Run to Cursor (Ctrl+F10)"), this, [this, clickedLine]() { emit runToCursorRequested(m_currentFilePath, clickedLine); });
     menu->addAction(QStringLiteral("Set Next Statement / Jump Here"), this, [this, clickedLine]() { emit jumpToLineRequested(m_currentFilePath, clickedLine); });
     menu->addSeparator();
+    if (hasBreakpoint(clickedLine)) {
+        const bool en = isBreakpointEnabledForLine(clickedLine);
+        menu->addAction(en ? QStringLiteral("Disable Breakpoint") : QStringLiteral("Enable Breakpoint"), this, [this, clickedLine, en]() { setBreakpointEnabled(clickedLine, !en); });
+    }
+    menu->addAction(QStringLiteral("Insert Temporary Breakpoint (tbreak)"), this, [this, clickedLine]() { setTemporaryBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint (All Ranks)"), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint for Active Rank (Rank %1)").arg(m_activeFocusRank), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, m_activeFocusRank); });
     menu->addAction(QStringLiteral("Set Breakpoint for Rank..."), this, [this, clickedLine]() {
@@ -549,11 +544,14 @@ void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
     });
     menu->exec(event->globalPos()); delete menu;
 }
-/** @brief Commits or rolls back tentative breakpoint state after the anchored breakpoint popover closes. */
+/** @brief Legacy 6-arg overload preserving deletion semantics when unchecking without explicit removeRequested. */
 void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet, bool accepted, bool enabledChecked, const QString& condition, const QString& suspendScope) {
+    handleBreakpointPopoverResult(lineOneBased, wasPreviouslySet, accepted, enabledChecked, condition, suspendScope, !enabledChecked);
+}
+/** @brief Commits non-destructive enable/disable, updates condition/scope, or removes breakpoint on explicit removal. */
+void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet, bool accepted, bool enabledChecked, const QString& condition, const QString& suspendScope, bool removeRequested) {
     if (lineOneBased <= 0) return;
-    // Remove newly created or unchecked breakpoints when the popover is cancelled or disabled.
-    if ((!accepted && !wasPreviouslySet) || (accepted && !enabledChecked)) {
+    if ((!accepted && !wasPreviouslySet) || (accepted && removeRequested)) {
         if (m_breakpoints.contains(lineOneBased)) {
             const int prevRank = breakpointRankFilterForLine(lineOneBased);
             m_breakpoints.remove(lineOneBased); m_breakpointSuspendScopes.remove(lineOneBased); m_breakpointInfo.remove(lineOneBased);
@@ -563,38 +561,43 @@ void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPre
         return;
     }
     if (!accepted) return;
-    // Resolve "All" vs "Rank N" suspension scope and commit the updated breakpoint.
     const QString cleanScope = suspendScope.trimmed().isEmpty() ? QStringLiteral("All") : suspendScope.trimmed();
     int resolvedRank = -1;
     if (cleanScope.compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) resolvedRank = qMax(0, m_activeFocusRank);
     else if (cleanScope.startsWith(QStringLiteral("Rank "), Qt::CaseInsensitive)) { bool ok = false; const int parsed = cleanScope.mid(5).trimmed().toInt(&ok); resolvedRank = ok ? qMax(0, parsed) : qMax(0, m_activeFocusRank); }
     setRankBreakpoint(lineOneBased, resolvedRank, condition.trimmed());
+    setBreakpointEnabled(lineOneBased, enabledChecked);
 }
-/** @brief Handles gutter mouse clicks: arms PC arrow drag on execution line, toggles breakpoint, or opens popover. */
+/** @brief Handles gutter mouse clicks: arms PC arrow drag on execution line, toggles breakpoint, or opens popover/menu. */
 void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent *event) {
     if (!event || (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)) return;
-    event->accept();
-    int top = 0, bottom = 0;
-    const int lineNum = gutterLineAtY(event->pos().y(), &top, &bottom);
+    event->accept(); int top = 0, bottom = 0; const int lineNum = gutterLineAtY(event->pos().y(), &top, &bottom);
     if (lineNum <= 0) return;
+    if (event->button() == Qt::RightButton && (event->modifiers() & Qt::ShiftModifier)) {
+        QMenu gMenu(this);
+        if (hasBreakpoint(lineNum)) { const bool en = isBreakpointEnabledForLine(lineNum); gMenu.addAction(en ? QStringLiteral("Disable Breakpoint") : QStringLiteral("Enable Breakpoint"), this, [this, lineNum, en]() { setBreakpointEnabled(lineNum, !en); }); }
+        gMenu.addAction(QStringLiteral("Insert Temporary Breakpoint (tbreak)"), this, [this, lineNum]() { setTemporaryBreakpoint(lineNum, -1); });
+        if (hasBreakpoint(lineNum)) gMenu.addAction(QStringLiteral("Remove Breakpoint"), this, [this, lineNum]() { toggleBreakpoint(lineNum); });
+        gMenu.exec(m_lineNumberArea->mapToGlobal(event->pos())); return;
+    }
     if (event->button() == Qt::RightButton) {
         const bool wasPreviouslySet = hasBreakpoint(lineNum); if (!wasPreviouslySet) toggleBreakpoint(lineNum);
         const QPoint iconGlobalPos = m_lineNumberArea->mapToGlobal(QPoint(gutterIconLaneWidth() / 2, top + (qMax(14, bottom - top) / 2) + 5));
         const BreakpointVisualInfo curMeta = breakpointInfoForLine(lineNum);
-        const QTextBlock block = document()->findBlockByNumber(lineNum - 1);
         ConditionalBreakpointDialog dlg(m_breakpoints.value(lineNum), this);
-        dlg.setTargetLineContext(lineNum, block.text().trimmed()); dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
-        dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All")));
-        dlg.setIgnoreCount(curMeta.ignoreCount); dlg.setLogMessage(curMeta.logMessage); dlg.positionNearAnchor(iconGlobalPos);
+        dlg.setTargetLineContext(lineNum, document()->findBlockByNumber(lineNum - 1).text().trimmed()); dlg.setSourceDocumentContext(m_currentFilePath, toPlainText(), lineNum);
+        dlg.setBreakpointEnabled(curMeta.enabled); dlg.setTemporary(curMeta.temporary); dlg.setCommands(curMeta.commands);
+        dlg.setSuspendScope(m_breakpointSuspendScopes.value(lineNum, QStringLiteral("All"))); dlg.setIgnoreCount(curMeta.ignoreCount); dlg.setLogMessage(curMeta.logMessage); dlg.positionNearAnchor(iconGlobalPos);
         const bool accepted = (dlg.exec() == QDialog::Accepted);
-        handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted, dlg.isBreakpointEnabled() && !dlg.isRemoveRequested(), dlg.getCondition(), dlg.suspendScope());
-        if (accepted && dlg.isBreakpointEnabled() && !dlg.isRemoveRequested()) setBreakpointOptions(lineNum, dlg.getCondition(), dlg.ignoreCount(), dlg.logMessage());
+        handleBreakpointPopoverResult(lineNum, wasPreviouslySet, accepted, dlg.isBreakpointEnabled(), dlg.getCondition(), dlg.suspendScope(), dlg.isRemoveRequested());
+        if (accepted && !dlg.isRemoveRequested()) {
+            setBreakpointOptions(lineNum, dlg.getCondition(), dlg.ignoreCount(), dlg.logMessage());
+            if (dlg.isTemporary() && !curMeta.temporary) setTemporaryBreakpoint(lineNum, breakpointRankFilterForLine(lineNum), dlg.getCondition());
+            setBreakpointCommands(lineNum, dlg.commands());
+        }
     } else if (m_executionLine > 0 && lineNum == m_executionLine) {
-        // Arm execution PC arrow drag; plain click without drag falls back to breakpoint toggle on release.
         m_pcDragCandidate = true; m_draggingExecutionPc = false; m_pcDragPressPos = event->pos(); m_dragTargetLine = m_executionLine;
-    } else {
-        toggleBreakpoint(lineNum);
-    }
+    } else toggleBreakpoint(lineNum);
     m_lineNumberArea->update();
 }
 /** @brief Tracks gutter hover preview and active execution PC arrow dragging across visible source lines. */

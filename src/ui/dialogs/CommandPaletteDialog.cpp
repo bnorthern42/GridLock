@@ -656,6 +656,9 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Debug: Force Early Return..."),
                        QStringLiteral("Return immediately from the current stack frame with an optional expression (-exec-return)"),
                        QString(), [mainWindow]() { mainWindow->forceEarlyReturnWorkflow(QString(), true); });
+    registerActionItem(QStringLiteral("Debug: Break on Function Regex (rbreak)..."),
+                       QStringLiteral("Install breakpoints on all functions matching a regular expression (rbreak <pattern>)"),
+                       QString(), [mainWindow]() { mainWindow->insertRegexBreakpointWorkflow(QString(), true); });
     registerActionItem(QStringLiteral("Debug: Pause Active Rank"),
                        QStringLiteral("Interrupt execution on the currently focused MPI rank"),
                        QStringLiteral("F6"), [mainWindow]() { mainWindow->pauseRankWorkflow(); });
