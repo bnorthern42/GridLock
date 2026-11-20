@@ -71,6 +71,7 @@ class RegisterView;
 class SpackManager;
 class ExpressionEvaluatorWidget;
 class MpiDiagnosticsWidget;
+class CommandPaletteDialog;
 
 /**
  * @class MainWindow
@@ -125,8 +126,11 @@ public:
     gridlock::VariablesDockWidget* variablesDockWidget() const { return m_variablesDockWidget; }
     CallStackDockWidget* callStackDockWidget() const { return m_callStackDockWidget; }
     MpiDiagnosticsWidget* mpiDiagnosticsWidget() const { return m_mpiDiagnosticsWidget; }
+    CommandPaletteDialog* commandPaletteDialog() const { return m_commandPaletteDialog; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
+    int configuredRankCount() const { return m_rankCountSpin ? m_rankCountSpin->value() : 4; }
+    const std::unordered_map<int, RankState>& latestRankStates() const { return m_latestStates; }
 
     /**
      * @brief Launches an MPI debug session on the specified target binary.
@@ -625,6 +629,10 @@ public slots:
     void openPointerGraphVisualizer(const QString& exprPath = QString(),
                                     const QString& varValue = QString(),
                                     const QString& varType = QString());
+    /** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix (e.g., ">" or ""). */
+    void openCommandPalette(const QString& initialPrefix = QStringLiteral(">"));
+    /** @brief Opens the unified Command Palette in Quick Open File mode (Ctrl+P). */
+    void openQuickOpenPalette() { openCommandPalette(QString()); }
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -754,6 +762,7 @@ private:
     QPointer<QDockWidget> m_draggingDock = nullptr;
     QPoint m_dragOffset;
     class PointerGraphDialog* m_pointerGraphDialog = nullptr;
+    CommandPaletteDialog* m_commandPaletteDialog = nullptr;
 };
 
 }  // namespace gridlock::ui

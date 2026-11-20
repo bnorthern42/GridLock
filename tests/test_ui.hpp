@@ -165,5 +165,8 @@ private slots:
 
     /** @brief Verifies SourceCodeView unified Git diff gutter parsing/markers and PreferencesDialog debugger engine selector. */
     void testGitDiffGutterAndDebuggerEngineSelector();
+
+    /** @brief Verifies CommandPaletteDialog subsequence fuzzy scoring, prefix filtering (>, @, #), keyboard navigation, and Ctrl+Shift+P / Ctrl+P shortcuts. */
+    void testCommandPaletteFuzzyAndNavigation();
 };
 

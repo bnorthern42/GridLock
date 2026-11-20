@@ -21,6 +21,7 @@
 #include "../core/managers/ThemeManager.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
+#include "dialogs/CommandPaletteDialog.hpp"
 #include "dialogs/PreferencesDialog.hpp"
 #include "dialogs/ProjectSettingsDialog.hpp"
 #include "dialogs/ProjectWizard.hpp"
@@ -559,6 +560,12 @@ void MainWindow::setupMenu() {
   QAction *openAction = fileMenu->addAction("Open Source File");
   connect(openAction, &QAction::triggered, this, &MainWindow::openFile);
 
+  // Quick Open File Action (Ctrl+P): Launches the unified fuzzy Command Palette in file/all mode.
+  QAction *quickOpenAction = fileMenu->addAction(QStringLiteral("Quick Open File..."));
+  quickOpenAction->setObjectName(QStringLiteral("actionQuickOpen"));
+  quickOpenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+  connect(quickOpenAction, &QAction::triggered, this, [this]() { openCommandPalette(QString()); });
+
   // Save Source File Action: Saves active editor buffer directly to disk.
   QAction *saveAction = fileMenu->addAction("Save Source File");
   saveAction->setShortcut(QKeySequence::Save);
@@ -604,6 +611,8 @@ void MainWindow::setupMenu() {
   });
   // Attach to Process Action: Enumerates live `/proc` processes and attaches active coordinator.
   QAction *attachProcAction = fileMenu->addAction("Attach to Process...");
+  attachProcAction->setObjectName(QStringLiteral("actionAttachProcess"));
+  attachProcAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
   connect(attachProcAction, &QAction::triggered, this, [this]() { attachToProcessWorkflow(); });
   // SLURM Job Submission Action: Interpolates active target into template and queues via HPC backend.
   QAction *slurmAction = fileMenu->addAction("Submit SLURM Job");
@@ -638,7 +647,11 @@ void MainWindow::setupMenu() {
   QAction *prefAction = editMenu->addAction("Preferences");
   prefAction->setShortcut(QKeySequence::Preferences);
   connect(prefAction, &QAction::triggered, this, &MainWindow::openPreferences);
-  menuBar->addMenu("&View");
+  QMenu *viewMenu = menuBar->addMenu("&View");
+  QAction *cmdPaletteAction = viewMenu->addAction(QStringLiteral("Command Palette..."));
+  cmdPaletteAction->setObjectName(QStringLiteral("actionCommandPalette"));
+  cmdPaletteAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
+  connect(cmdPaletteAction, &QAction::triggered, this, [this]() { openCommandPalette(QStringLiteral(">")); });
 
   // Construct Tools menu for smart build system compilation, cleaning, rebuilding, and unit tests.
   QMenu *toolsMenu = menuBar->addMenu("&Tools");
@@ -835,9 +848,29 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   }
   // Route global customizable IDE keybindings through ShortcutManager before default widget handling.
   if (event->type() == QEvent::KeyPress) {
-    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, static_cast<QKeyEvent *>(event))) return true;
+    auto *ke = static_cast<QKeyEvent *>(event);
+    const auto mods = ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::ShiftModifier)) {
+      openCommandPalette(QStringLiteral(">"));
+      return true;
+    }
+    if (ke->key() == Qt::Key_P && mods == Qt::ControlModifier) {
+      if (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible()) {
+        openCommandPalette(QString());
+        return true;
+      }
+    }
+    if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, ke)) return true;
   }
   return QMainWindow::eventFilter(watched, event);
+}
+/** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix. */
+void MainWindow::openCommandPalette(const QString &initialPrefix) {
+  if (!m_commandPaletteDialog) {
+    m_commandPaletteDialog = new CommandPaletteDialog(this);
+  }
+  m_commandPaletteDialog->populateFromMainWindow(this);
+  m_commandPaletteDialog->openWithPrefix(initialPrefix);
 }
 /** @brief Records @p path in SessionManager MRU history and refreshes File -> Recent Sessions. */
 void MainWindow::recordRecentWorkspace(const QString &path) {
