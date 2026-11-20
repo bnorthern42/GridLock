@@ -14,22 +14,22 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 - [x] **Undocked Programmer's Calculator (`Ctrl+Alt+C`)**: Floating base converter and keypad (`HEX`, `DEC` signed/unsigned, `OCT`, `BIN`, IEEE-754 float/double, `8/16/32/64-bit` width & `BSWAP`, interactive 64-bit toggle grid, full `0-9`/`A-F`/bitwise/arithmetic/float keypad, Preferences defaults, and right-click "Open in Programmer's Calculator" handoff across code, variables, registers, memory, and disassembly views).
 - [x] **Live Auto-Refreshing 1D/2D Array and Field Plotter (`Ctrl+Alt+G`)**: Floating 1D line/bar and 2D colormapped heatmap plotter (`Viridis`, `Plasma`, `Diverging Cool-Warm`, `Grayscale`) with IEEE-754 `NaN`/`Inf` anomaly flagging, `Min`/`Max`/`Mean`/`L2` telemetry, previous-stop ghost curve delta overlay, CSV/PNG export, and `gnuplot` pipe.
 - [x] **Persistent Auto-Updating Pointer and Struct Graph Nodes**: Pin root expressions across stops in `PointerGraphDialog` with automatic re-evaluation and `"old -> new"` field-level mutation highlighting.
-- [ ] **Complete Instruction and Non-Linear Execution Control (`nexti`, `Run to Cursor`, `Set Next Statement / Jump`, `Force Early Return`)**:
-  - [ ] Instruction step-over `nexti` (`-exec-next-instruction`) alongside `stepi`.
-  - [ ] `Ctrl+F10` Run to Cursor (`-exec-until`).
-  - [ ] Draggable gutter PC arrow and `Set Next Statement / Jump` (`-exec-jump` / PC relocation with lexical scope safety checks).
-  - [ ] `Force Early Return...` (`-exec-return [expr]`).
-- [ ] **Non-Destructive Breakpoint Lifecycle and Temporary/Regex Breakpoints**:
-  - [ ] Toggle breakpoint enabled/disabled state (`-break-enable` / `-break-disable`) with hollow gutter markers instead of deleting breakpoints.
-  - [ ] Temporary one-shot breakpoints (`tbreak`), regex symbol breakpoints (`rbreak`), and custom GDB command lists (`commands ... end`).
+- [x] **Complete Instruction and Non-Linear Execution Control (`nexti`, `Run to Cursor`, `Set Next Statement / Jump`, `Force Early Return`)**:
+  - [x] Instruction step-over `nexti` (`-exec-next-instruction`) alongside `stepi`.
+  - [x] `Ctrl+F10` Run to Cursor (`-exec-until`).
+  - [x] Draggable gutter PC arrow and `Set Next Statement / Jump` (`-exec-jump` / PC relocation with lexical scope safety checks).
+  - [x] `Force Early Return...` (`-exec-return [expr]`).
+- [x] **Non-Destructive Breakpoint Lifecycle and Temporary/Regex Breakpoints**:
+  - [x] Toggle breakpoint enabled/disabled state (`-break-enable` / `-break-disable`) with hollow gutter markers instead of deleting breakpoints.
+  - [x] Temporary one-shot breakpoints (`tbreak`), regex symbol breakpoints (`rbreak`), and custom GDB command lists (`commands ... end`).
 - [x] **Signal Disposition Matrix and Catchpoints**:
   - [x] Per-signal (`SIGFPE`, `SIGPIPE`, `SIGUSR1`, `SIGBUS`) Stop / Print / Pass disposition matrix (`handle <SIG>`).
   - [x] C++ `throw`, `rethrow`, and `catch` catchpoints with exception-type regex filtering.
   - [x] Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`) and `dlopen`/`dlclose` regex catchpoints.
 - [x] **GDB Console Readline Ergonomics**:
   - [x] Persistent command history (`Up`/`Down` saved across sessions), `Ctrl+R` incremental reverse search, and live `complete` Tab completion popup in `GdbConsoleWidget`.
-- [ ] **Copy-on-Write Fork Checkpoints (`checkpoint` / `restart`)**:
-  - [ ] Process state snapshots via GDB `checkpoint` and `restart` with `/proc/[pid]/fd` and `/proc/[pid]/maps` IPC/RDMA safety checks.
+- [x] **Copy-on-Write Fork Checkpoints (`checkpoint` / `restart`)**:
+  - [x] Process state snapshots via GDB `checkpoint` and `restart` with `/proc/[pid]/fd` and `/proc/[pid]/maps` IPC/RDMA safety checks.
 
 ---
 
