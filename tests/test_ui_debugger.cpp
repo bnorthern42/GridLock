@@ -698,10 +698,7 @@ template <typename T> void verifyDetailed(const T& items) {
 // Confirm `loadPersistedTheme()` restores `tokyo_night` after transient runtime theme switches.
 template <typename T, typename M> void verifyLoadedTheme(const T&, M& tm) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QCOMPARE(tm.activeThemeId(), QStringLiteral("tokyo_night")); } }
 }  // namespace (anonymous)
-/**
- * @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector
- *        expression completion (`data[i].`, `data[i].coords.`, `send_buf.`) in ConditionalBreakpointDialog.
- */
+/** @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector expression completion in ConditionalBreakpointDialog. */
 void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     // Resolve tutorial sample file paths and read source code contents for LSP splicing tests.
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp")), deadlockPath = resolveTutorialPath(QStringLiteral("tutorial/deadlock_ring.cpp"));
@@ -742,11 +739,7 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     QCOMPARE(QFileInfo(tabMgr->currentSourceCodeView()->currentFile()).fileName(), QStringLiteral("math_ops.hpp"));
     QCOMPARE(tabMgr->currentSourceCodeView()->getCurrentLineNumber(), 5);
 }
-/**
- * @brief Verifies editable SourceCodeView, live editor LSP completion, modern chained
- *        breakpoint popover suffix insertion, theme persistence, dirty tab indicators (`●`),
- *        `saveAllModifiedTabs()`, `switchHeaderSource()`, scope breadcrumbs, and split editors.
- */
+/** @brief Verifies editable SourceCodeView, live editor LSP completion, chained breakpoint popover suffix insertion, theme persistence, dirty tab indicators (`●`), `saveAllModifiedTabs()`, `switchHeaderSource()`, scope breadcrumbs, and split editors. */
 void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence() {
     // Load the tutorial inspection demo source code for editor and completion verification.
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp"));
@@ -778,13 +771,11 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     // 4. Dirty Buffer Tab Indicators ("●"), saveAllModifiedTabs(), switchHeaderSource(), & Scope Breadcrumbs.
     // Create temporary .cpp and .hpp companion files to exercise dirty buffer and F10 toggle workflows.
     QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
-    const QString tempCpp = tempDir.filePath(QStringLiteral("inspection_demo.cpp"));
-    const QString tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
+    const QString tempCpp = tempDir.filePath(QStringLiteral("inspection_demo.cpp")), tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
     { QFile fc(tempCpp); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(inspectionSource.toUtf8()); }
     { QFile fh(tempHpp); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nstruct DeeplyNested {};\n"); }
     // Open the temporary C++ source file in EditorTabManager.
-    gridlock::ui::EditorTabManager tabManager;
-    auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr);
+    gridlock::ui::EditorTabManager tabManager; auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr);
     const int idx = tabManager.currentIndex();
     // Modify text in tabView and verify dirty indicator ("●") and isTabModified(idx) == true.
     // Then invoke saveAllModifiedTabs() and verify dirty state is cleared on disk and tab bar.
@@ -793,8 +784,7 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     QVERIFY2(tabManager.saveAllModifiedTabs() >= 1 && !tabManager.isTabModified(idx) && !tabManager.tabText(idx).contains(QStringLiteral("●")), "saveAllModifiedTabs() must save dirty buffer and remove '●'");
     // Move cursor into main() or DeeplyNested and verify currentScopeBreadcrumb(), then toggle header/source.
     // Confirms F10 companion lookup opens `inspection_demo.hpp` in EditorTabManager.
-    tabView->setTextCursor(QTextCursor(tabView->document()->findBlockByNumber(16)));
-    const QString bc = tabView->currentScopeBreadcrumb();
+    tabView->setTextCursor(QTextCursor(tabView->document()->findBlockByNumber(16))); const QString bc = tabView->currentScopeBreadcrumb();
     QVERIFY2(bc.contains(QStringLiteral("inspection_demo.cpp")) && (bc.contains(QStringLiteral("main")) || bc.contains(QStringLiteral("DeeplyNested"))), qPrintable(bc));
     QVERIFY2(tabManager.switchHeaderSource() && tabManager.tabText(tabManager.currentIndex()).contains(QStringLiteral("inspection_demo.hpp")), "switchHeaderSource() must switch to inspection_demo.hpp");
     // 5. Horizontal and Vertical Side-by-Side Split Editors (`splitEditor`, `closeSplit`, `secondaryEditorView`).
@@ -808,10 +798,7 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     QVERIFY2(checkSplits(tabManager), "EditorTabManager must support horizontal/vertical splitEditor() and closeSplit()");
 }
 
-/**
- * @brief Verifies CommandPaletteDialog subsequence fuzzy scoring, prefix filtering (>, @, #),
- *        wrap-around keyboard navigation (Down, Up, Return, Escape), and MainWindow shortcuts.
- */
+/** @brief Verifies CommandPaletteDialog subsequence fuzzy scoring, prefix filtering (>, @, #), wrap-around keyboard navigation (Down, Up, Return, Escape), and MainWindow shortcuts. */
 void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     using gridlock::ui::CommandPaletteDialog; using gridlock::ui::PaletteItem;
     // 1. Subsequence fuzzy scoring: boundary matches outrank loose matches and non-matches return -1.
@@ -862,14 +849,12 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Escape); QVERIFY(!mwPalette->isVisible());
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier); QApplication::processEvents();
     QVERIFY(mwPalette->isVisible() && mwPalette->filterText().isEmpty() && mwPalette->resultCount() > 0);
-    mwPalette->setFilterText(QStringLiteral("dr.cpp"));
-    QVERIFY(mwPalette->resultCount() > 0 && mwPalette->resultItemAt(0).title.contains(QStringLiteral("deadlock_ring.cpp")));
+    mwPalette->setFilterText(QStringLiteral("dr.cpp")); QVERIFY(mwPalette->resultCount() > 0 && mwPalette->resultItemAt(0).title.contains(QStringLiteral("deadlock_ring.cpp")));
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return); QApplication::processEvents();
     QVERIFY(!mwPalette->isVisible() && mw.sourceCodeView() && mw.sourceCodeView()->currentFile().endsWith(QStringLiteral("deadlock_ring.cpp")));
     bool attachOpened = false;
     QTimer::singleShot(80, [&]() { if (auto* dlg = dynamic_cast<gridlock::ui::AttachProcessDialog*>(QApplication::activeModalWidget())) { attachOpened = dlg->isVisible(); dlg->reject(); } });
-    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
-    QVERIFY(attachOpened);
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(attachOpened);
     for (const QString& w : s_capturedWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }
 
@@ -887,10 +872,21 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     calc.setWordWidth(16); QCOMPARE(calc.value(), 0xBEEFULL); QVERIFY(!calc.bitButton(16)->isEnabled() && calc.bitButton(15)->isEnabled());
     calc.setWordWidth(8); QCOMPARE(calc.value(), 0xEFULL); QVERIFY(!calc.bitButton(8)->isEnabled() && calc.bitButton(0)->isEnabled());
     calc.bitButton(0)->click(); QCOMPARE(calc.value(), 0xEEULL); QCOMPARE(calc.hexText(), QStringLiteral("0xEE"));
-    // 3. Bitwise/shift expression evaluation and BSWAP endianness toggle.
+    // 3. Bitwise/shift expression evaluation, BSWAP, clickable keypad (0-9, A-F), Input Radix (DEC/HEX/OCT/BIN), and operator chaining.
     calc.setWordWidth(32); QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("(0x10 << 4) | 0x05")));
     QCOMPARE(calc.value(), 0x105ULL); QCOMPARE(calc.hexText(), QStringLiteral("0x105"));
     calc.setValue(0x12345678ULL); calc.byteSwap(); QCOMPARE(calc.value(), 0x78563412ULL);
+    auto* acBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpClearBtn")); auto* addBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpAddBtn"));
+    auto* shlBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpShlBtn")); auto* eqBtn = calc.findChild<QPushButton*>(QStringLiteral("calcExprEvalBtn"));
+    auto* hexRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixHexBtn")); auto* binRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixBinBtn"));
+    QVERIFY(acBtn && addBtn && shlBtn && eqBtn && hexRadixBtn && binRadixBtn && !calc.keypadDigitButton(10)->isEnabled());
+    acBtn->click(); calc.keypadDigitButton(1)->click(); calc.keypadDigitButton(0)->click(); addBtn->click(); calc.keypadDigitButton(5)->click(); eqBtn->click();
+    QCOMPARE(calc.value(), 15ULL); QCOMPARE(calc.hexText(), QStringLiteral("0xF")); QCOMPARE(calc.decText(), QStringLiteral("15")); QCOMPARE(calc.octText(), QStringLiteral("17")); QCOMPARE(calc.bitButton(3)->text(), QStringLiteral("1"));
+    hexRadixBtn->click(); QVERIFY(calc.keypadDigitButton(13)->isEnabled() && calc.inputRadix() == 16);
+    calc.keypadDigitButton(13)->click(); calc.keypadDigitButton(14)->click(); calc.keypadDigitButton(10)->click(); calc.keypadDigitButton(13)->click(); eqBtn->click();
+    QCOMPARE(calc.value(), 0xDEADULL); QCOMPARE(calc.decText(), QStringLiteral("57005"));
+    calc.expressionEdit()->clear(); shlBtn->click(); calc.keypadDigitButton(4)->click(); eqBtn->click(); QCOMPARE(calc.value(), 0xDEAD0ULL);
+    binRadixBtn->click(); QVERIFY(calc.keypadDigitButton(1)->isEnabled() && !calc.keypadDigitButton(2)->isEnabled());
     // 4. Preferences (ProjectSettingsDialog) controls + Command Palette (> Programmer) & Ctrl+Alt+C with zero shortcut warnings.
     static QStringList s_calcWarnings; s_calcWarnings.clear();
     const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_calcWarnings.append(m); });
@@ -915,12 +911,11 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     // 1. ArrayPlotDialog: decode double, float, and int32_t raw byte buffers into 1D line and 2D heatmap series.
     ArrayPlotDialog plotDlg;
     QVERIFY(plotDlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotExprEdit")) && plotDlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotAutoRefreshCheck")) && plotDlg.isAutoRefreshEnabled());
-    const double d0[4] = {1.0, 2.0, 3.0, 4.0};
+    const double d0[4] = {1.0, 2.0, 3.0, 4.0}, d1[4] = {1.0, 9.0, 3.0, std::numeric_limits<double>::quiet_NaN()};
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d0), sizeof(d0)), ArrayPlotDialog::ElementType::Float64, 1, 4));
     QCOMPARE(plotDlg.currentSamples().size(), 4); QCOMPARE(plotDlg.minValue(), 1.0); QCOMPARE(plotDlg.maxValue(), 4.0);
     QCOMPARE(plotDlg.meanValue(), 2.5); QVERIFY(std::abs(plotDlg.l2Norm() - std::sqrt(30.0)) < 1e-9 && plotDlg.nanInfCount() == 0);
     // Second stop snapshot mutating 2 elements + injecting NaN: verify changedElementCount() and nanCount().
-    const double d1[4] = {1.0, 9.0, 3.0, std::numeric_limits<double>::quiet_NaN()};
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d1), sizeof(d1)), ArrayPlotDialog::ElementType::Float64, 2, 2));
     QCOMPARE(plotDlg.plotMode(), ArrayPlotDialog::PlotMode::Heatmap2D); QCOMPARE(plotDlg.nanCount(), 1); QCOMPARE(plotDlg.changedElementCount(), 2);
     // Verify float and int32_t decoding plus CSV and PNG export.
@@ -929,11 +924,9 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QCOMPARE(plotDlg.minValue(), -2.5); QCOMPARE(plotDlg.maxValue(), 5.5);
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2));
     QCOMPARE(plotDlg.meanValue(), 25.0);
-    QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid());
-    const QString csvPath = tmpDir.filePath(QStringLiteral("field.csv")), pngPath = tmpDir.filePath(QStringLiteral("field.png"));
+    QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); const QString csvPath = tmpDir.filePath(QStringLiteral("field.csv")), pngPath = tmpDir.filePath(QStringLiteral("field.png"));
     QVERIFY(plotDlg.exportCsv(csvPath) && plotDlg.savePng(pngPath) && QFileInfo::exists(pngPath));
-    QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll());
-    QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));
+    QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll()); QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));
     // 2. PointerGraphDialog: persistent pinned root expressions, auto-refresh on stop, and field mutation tracking.
     PointerGraphDialog pgDlg;
     QVERIFY(pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphRefreshBtn")) && pgDlg.findChild<QCheckBox*>(QStringLiteral("pointerGraphAutoRefreshCheck")) && pgDlg.isAutoRefreshEnabled());

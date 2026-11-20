@@ -456,7 +456,7 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     addBitRow(31, 0);
     root->addWidget(bitGroup);
 
-    // 4. Bitwise & Arithmetic Expression Evaluator + Quick Operation Keypad.
+    // 4. Bitwise & Arithmetic Expression Evaluator + Full Programmer's Calculator Keypad.
     auto* exprGroup = new QGroupBox(QStringLiteral("Bitwise & Arithmetic Expression Evaluator"), this);
     auto* exprVBox = new QVBoxLayout(exprGroup);
     exprVBox->setContentsMargins(10, 12, 10, 8);
@@ -468,50 +468,144 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     m_exprEdit->setObjectName(QStringLiteral("calcExprEdit"));
     m_exprEdit->setPlaceholderText(QStringLiteral("e.g., (0x10 << 4) | 0x05, 0b1010 ^ 0xff, $ + 64"));
     m_exprEdit->setFixedHeight(26);
-    auto* evalBtn = new QPushButton(QStringLiteral("Eval (=)"), exprGroup);
-    evalBtn->setObjectName(QStringLiteral("calcExprEvalBtn"));
-    evalBtn->setFixedSize(74, 26);
-    connect(evalBtn, &QPushButton::clicked, this, [this]() { evaluateAndApplyExpression(m_exprEdit->text()); });
     connect(m_exprEdit, &QLineEdit::returnPressed, this, [this]() { evaluateAndApplyExpression(m_exprEdit->text()); });
     exprRow->addWidget(m_exprEdit, 1);
-    exprRow->addWidget(evalBtn);
+
+    auto* radixLbl = new QLabel(QStringLiteral("RADIX:"), exprGroup);
+    radixLbl->setObjectName(QStringLiteral("calcBitIndexLabel"));
+    exprRow->addWidget(radixLbl);
+
+    auto makeRadixBtn = [&](const QString& label, const QString& objName, int radix) {
+        auto* btn = new QPushButton(label, exprGroup);
+        btn->setObjectName(objName);
+        btn->setCheckable(true);
+        btn->setFixedSize(44, 26);
+        connect(btn, &QPushButton::clicked, this, [this, radix]() { setInputRadix(radix); });
+        exprRow->addWidget(btn);
+        return btn;
+    };
+    m_radixDecBtn = makeRadixBtn(QStringLiteral("DEC"), QStringLiteral("calcRadixDecBtn"), 10);
+    m_radixHexBtn = makeRadixBtn(QStringLiteral("HEX"), QStringLiteral("calcRadixHexBtn"), 16);
+    m_radixOctBtn = makeRadixBtn(QStringLiteral("OCT"), QStringLiteral("calcRadixOctBtn"), 8);
+    m_radixBinBtn = makeRadixBtn(QStringLiteral("BIN"), QStringLiteral("calcRadixBinBtn"), 2);
+
+    auto* ansBtn = new QPushButton(QStringLiteral("ANS"), exprGroup);
+    ansBtn->setObjectName(QStringLiteral("calcAnsBtn"));
+    ansBtn->setToolTip(QStringLiteral("Insert current register value into expression"));
+    ansBtn->setFixedSize(50, 26);
+    connect(ansBtn, &QPushButton::clicked, this, &ProgrammerCalculatorDialog::insertCurrentValueToken);
+    exprRow->addWidget(ansBtn);
     exprVBox->addLayout(exprRow);
 
-    auto* keypadRow = new QHBoxLayout();
-    keypadRow->setSpacing(4);
-    auto addOpBtn = [&](const QString& text, const QString& objName, std::function<void()> cb) {
+    // Full tactile 4x8 Programmer's Calculator Button Grid.
+    auto* padGrid = new QGridLayout();
+    padGrid->setSpacing(4);
+    for (int c = 0; c < 8; ++c) padGrid->setColumnStretch(c, 1);
+
+    auto makePadBtn = [&](const QString& text, const QString& objName, const QString& role,
+                          int r, int c, int cs, std::function<void()> cb) {
         auto* btn = new QPushButton(text, exprGroup);
         btn->setObjectName(objName);
-        btn->setFixedHeight(24);
+        btn->setProperty("calcRole", role);
+        btn->setFixedHeight(28);
         connect(btn, &QPushButton::clicked, this, std::move(cb));
-        keypadRow->addWidget(btn);
+        padGrid->addWidget(btn, r, c, 1, cs);
+        return btn;
     };
-    addOpBtn(QStringLiteral("AND &"), QStringLiteral("calcOpAndBtn"), [this]() { insertOperatorToken(QStringLiteral(" & ")); });
-    addOpBtn(QStringLiteral("OR |"), QStringLiteral("calcOpOrBtn"), [this]() { insertOperatorToken(QStringLiteral(" | ")); });
-    addOpBtn(QStringLiteral("XOR ^"), QStringLiteral("calcOpXorBtn"), [this]() { insertOperatorToken(QStringLiteral(" ^ ")); });
-    addOpBtn(QStringLiteral("NOT ~"), QStringLiteral("calcOpNotBtn"), [this]() { setValue(~m_value); });
-    addOpBtn(QStringLiteral("SHL <<"), QStringLiteral("calcOpShlBtn"), [this]() { setValue(m_value << 1); });
-    addOpBtn(QStringLiteral("SHR >>"), QStringLiteral("calcOpShrBtn"), [this]() {
-        if (m_signedMode) setValue(static_cast<uint64_t>(signExtend(m_value, m_wordWidth) >> 1));
-        else setValue(m_value >> 1);
-    });
-    addOpBtn(QStringLiteral("+"), QStringLiteral("calcOpAddBtn"), [this]() { insertOperatorToken(QStringLiteral(" + ")); });
-    addOpBtn(QStringLiteral("-"), QStringLiteral("calcOpSubBtn"), [this]() { insertOperatorToken(QStringLiteral(" - ")); });
-    addOpBtn(QStringLiteral("*"), QStringLiteral("calcOpMulBtn"), [this]() { insertOperatorToken(QStringLiteral(" * ")); });
-    addOpBtn(QStringLiteral("/"), QStringLiteral("calcOpDivBtn"), [this]() { insertOperatorToken(QStringLiteral(" / ")); });
-    addOpBtn(QStringLiteral("%"), QStringLiteral("calcOpModBtn"), [this]() { insertOperatorToken(QStringLiteral(" % ")); });
-    addOpBtn(QStringLiteral("Clear"), QStringLiteral("calcOpClearBtn"), [this]() {
-        if (m_exprEdit) m_exprEdit->clear();
-        if (m_exprStatusLabel) m_exprStatusLabel->clear();
-        setValue(0ULL);
-    });
-    exprVBox->addLayout(keypadRow);
 
+    auto makeDigitBtn = [&](int digitVal, const QString& label, int r, int c) {
+        const QChar ch = label.at(0);
+        auto* btn = makePadBtn(label, QStringLiteral("calcKey_%1").arg(label),
+                               digitVal >= 10 ? QStringLiteral("hex") : QStringLiteral("digit"),
+                               r, c, 1, [this, ch]() { pressDigitKey(ch); });
+        m_digitButtons[static_cast<size_t>(digitVal)] = btn;
+    };
+
+    // Row 0: A, B, 7, 8, 9, AND, OR, AC
+    makeDigitBtn(10, QStringLiteral("A"), 0, 0);
+    makeDigitBtn(11, QStringLiteral("B"), 0, 1);
+    makeDigitBtn(7, QStringLiteral("7"), 0, 2);
+    makeDigitBtn(8, QStringLiteral("8"), 0, 3);
+    makeDigitBtn(9, QStringLiteral("9"), 0, 4);
+    makePadBtn(QStringLiteral("AND"), QStringLiteral("calcOpAndBtn"), QStringLiteral("op"), 0, 5, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" & ")); });
+    makePadBtn(QStringLiteral("OR"), QStringLiteral("calcOpOrBtn"), QStringLiteral("op"), 0, 6, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" | ")); });
+    makePadBtn(QStringLiteral("AC"), QStringLiteral("calcOpClearBtn"), QStringLiteral("clear"), 0, 7, 1,
+               [this]() { clearAll(); });
+
+    // Row 1: C, D, 4, 5, 6, XOR, NOT, ⌫
+    makeDigitBtn(12, QStringLiteral("C"), 1, 0);
+    makeDigitBtn(13, QStringLiteral("D"), 1, 1);
+    makeDigitBtn(4, QStringLiteral("4"), 1, 2);
+    makeDigitBtn(5, QStringLiteral("5"), 1, 3);
+    makeDigitBtn(6, QStringLiteral("6"), 1, 4);
+    makePadBtn(QStringLiteral("XOR"), QStringLiteral("calcOpXorBtn"), QStringLiteral("op"), 1, 5, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" ^ ")); });
+    makePadBtn(QStringLiteral("NOT"), QStringLiteral("calcOpNotBtn"), QStringLiteral("op"), 1, 6, 1, [this]() {
+        if (m_exprEdit && m_exprEdit->text().trimmed().isEmpty()) {
+            setValue(~m_value);
+        } else if (m_exprEdit) {
+            m_exprEdit->insert(QStringLiteral("~"));
+            m_exprEdit->setFocus();
+        }
+    });
+    makePadBtn(QStringLiteral("⌫"), QStringLiteral("calcKeyBackspace"), QStringLiteral("clear"), 1, 7, 1,
+               [this]() { backspaceExpression(); });
+
+    // Row 2: E, F, 1, 2, 3, <<, >>, (
+    makeDigitBtn(14, QStringLiteral("E"), 2, 0);
+    makeDigitBtn(15, QStringLiteral("F"), 2, 1);
+    makeDigitBtn(1, QStringLiteral("1"), 2, 2);
+    makeDigitBtn(2, QStringLiteral("2"), 2, 3);
+    makeDigitBtn(3, QStringLiteral("3"), 2, 4);
+    makePadBtn(QStringLiteral("<<"), QStringLiteral("calcOpShlBtn"), QStringLiteral("op"), 2, 5, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" << ")); });
+    makePadBtn(QStringLiteral(">>"), QStringLiteral("calcOpShrBtn"), QStringLiteral("op"), 2, 6, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" >> ")); });
+    makePadBtn(QStringLiteral("("), QStringLiteral("calcKeyLParen"), QStringLiteral("op"), 2, 7, 1, [this]() {
+        if (m_exprEdit) {
+            if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
+            m_exprEdit->insert(QStringLiteral("("));
+            m_exprEdit->setFocus();
+        }
+    });
+
+    // Row 3: ROL, ROR, ±, 0, %, /, *, )
+    makePadBtn(QStringLiteral("ROL"), QStringLiteral("calcOpRolBtn"), QStringLiteral("op"), 3, 0, 1,
+               [this]() { rotateLeft(1); });
+    makePadBtn(QStringLiteral("ROR"), QStringLiteral("calcOpRorBtn"), QStringLiteral("op"), 3, 1, 1,
+               [this]() { rotateRight(1); });
+    makePadBtn(QStringLiteral("±"), QStringLiteral("calcKeyNegate"), QStringLiteral("op"), 3, 2, 1,
+               [this]() { toggleNegateExpression(); });
+    makeDigitBtn(0, QStringLiteral("0"), 3, 3);
+    makePadBtn(QStringLiteral("%"), QStringLiteral("calcOpModBtn"), QStringLiteral("op"), 3, 4, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" % ")); });
+    makePadBtn(QStringLiteral("÷"), QStringLiteral("calcOpDivBtn"), QStringLiteral("op"), 3, 5, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" / ")); });
+    makePadBtn(QStringLiteral("×"), QStringLiteral("calcOpMulBtn"), QStringLiteral("op"), 3, 6, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" * ")); });
+    makePadBtn(QStringLiteral(")"), QStringLiteral("calcKeyRParen"), QStringLiteral("op"), 3, 7, 1, [this]() {
+        if (m_exprEdit) { m_exprEdit->insert(QStringLiteral(")")); m_exprEdit->setFocus(); }
+    });
+
+    // Row 4: status label on left (cols 0..4), -, +, and wide highlighted = (cols 6..7)
     m_exprStatusLabel = new QLabel(exprGroup);
     m_exprStatusLabel->setObjectName(QStringLiteral("calcExprStatusLabel"));
-    exprVBox->addWidget(m_exprStatusLabel);
+    padGrid->addWidget(m_exprStatusLabel, 4, 0, 1, 4);
+    makePadBtn(QStringLiteral("-"), QStringLiteral("calcOpSubBtn"), QStringLiteral("op"), 4, 4, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" - ")); });
+    makePadBtn(QStringLiteral("+"), QStringLiteral("calcOpAddBtn"), QStringLiteral("op"), 4, 5, 1,
+               [this]() { insertOperatorToken(QStringLiteral(" + ")); });
+    makePadBtn(QStringLiteral("="), QStringLiteral("calcExprEvalBtn"), QStringLiteral("eval"), 4, 6, 2,
+               [this]() { evaluateAndApplyExpression(m_exprEdit->text()); });
+
+    exprVBox->addLayout(padGrid);
     root->addWidget(exprGroup);
 
+    setMinimumSize(740, 560);
+    resize(780, 580);
+    syncKeypadRadixState();
     reloadStyle();
     syncAllViews();
 }
@@ -550,6 +644,22 @@ void ProgrammerCalculatorDialog::byteSwap() {
     syncAllViews();
 }
 
+void ProgrammerCalculatorDialog::rotateLeft(int count) {
+    const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
+    if (sh == 0) return;
+    const uint64_t masked = m_value & widthMask(m_wordWidth);
+    m_value = ((masked << sh) | (masked >> (m_wordWidth - sh))) & widthMask(m_wordWidth);
+    syncAllViews();
+}
+
+void ProgrammerCalculatorDialog::rotateRight(int count) {
+    const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
+    if (sh == 0) return;
+    const uint64_t masked = m_value & widthMask(m_wordWidth);
+    m_value = ((masked >> sh) | (masked << (m_wordWidth - sh))) & widthMask(m_wordWidth);
+    syncAllViews();
+}
+
 void ProgrammerCalculatorDialog::toggleBit(int bitIndex) {
     if (bitIndex < 0 || bitIndex >= m_wordWidth) return;
     m_value = (m_value ^ (1ULL << bitIndex)) & widthMask(m_wordWidth);
@@ -564,9 +674,13 @@ bool ProgrammerCalculatorDialog::evaluateAndApplyExpression(const QString& expr)
         return false;
     }
     m_value = result & widthMask(m_wordWidth);
+    m_justEvaluated = true;
     if (m_exprStatusLabel) {
         m_exprStatusLabel->setText(
-            QStringLiteral("Result = 0x%1").arg(QString::number(m_value, 16).toUpper()));
+            QStringLiteral("Result = 0x%1 (%2)")
+                .arg(QString::number(m_value, 16).toUpper(),
+                     m_signedMode ? QString::number(signExtend(m_value, m_wordWidth))
+                                  : QString::number(m_value)));
     }
     syncAllViews();
     return true;
@@ -577,12 +691,122 @@ QPushButton* ProgrammerCalculatorDialog::bitButton(int bitIndex) const {
     return m_bitButtons[static_cast<size_t>(bitIndex)];
 }
 
+QPushButton* ProgrammerCalculatorDialog::keypadDigitButton(int digitVal) const {
+    if (digitVal < 0 || digitVal >= 16) return nullptr;
+    return m_digitButtons[static_cast<size_t>(digitVal)];
+}
+
+void ProgrammerCalculatorDialog::setInputRadix(int radix) {
+    if (radix != 2 && radix != 8 && radix != 10 && radix != 16) return;
+    m_inputRadix = radix;
+    syncKeypadRadixState();
+}
+
+void ProgrammerCalculatorDialog::syncKeypadRadixState() {
+    if (m_radixDecBtn) m_radixDecBtn->setChecked(m_inputRadix == 10);
+    if (m_radixHexBtn) m_radixHexBtn->setChecked(m_inputRadix == 16);
+    if (m_radixOctBtn) m_radixOctBtn->setChecked(m_inputRadix == 8);
+    if (m_radixBinBtn) m_radixBinBtn->setChecked(m_inputRadix == 2);
+    for (int d = 0; d < 16; ++d) {
+        if (QPushButton* btn = m_digitButtons[static_cast<size_t>(d)]) {
+            btn->setEnabled(d < m_inputRadix);
+        }
+    }
+}
+
+QString ProgrammerCalculatorDialog::formatValueForRadix(uint64_t val, int radix) const {
+    const uint64_t masked = val & widthMask(m_wordWidth);
+    if (radix == 16) return QStringLiteral("0x%1").arg(QString::number(masked, 16).toUpper());
+    if (radix == 8) return QStringLiteral("0o%1").arg(QString::number(masked, 8));
+    if (radix == 2) return QStringLiteral("0b%1").arg(QString::number(masked, 2));
+    return m_signedMode ? QString::number(signExtend(masked, m_wordWidth)) : QString::number(masked);
+}
+
+void ProgrammerCalculatorDialog::pressDigitKey(QChar digitChar) {
+    if (!m_exprEdit) return;
+    const QChar upper = digitChar.toUpper();
+    int digitVal = -1;
+    if (upper >= QLatin1Char('0') && upper <= QLatin1Char('9')) digitVal = upper.unicode() - QLatin1Char('0').unicode();
+    else if (upper >= QLatin1Char('A') && upper <= QLatin1Char('F')) digitVal = 10 + (upper.unicode() - QLatin1Char('A').unicode());
+    if (digitVal < 0 || digitVal >= m_inputRadix) return;
+
+    if (m_justEvaluated) {
+        m_exprEdit->clear();
+        m_justEvaluated = false;
+    }
+    const QString cur = m_exprEdit->text();
+    const bool continuingToken = !cur.isEmpty() && (cur.back().isLetterOrNumber() || cur.back() == QLatin1Char('_'));
+    QString prefix;
+    if (!continuingToken) {
+        if (m_inputRadix == 16) prefix = QStringLiteral("0x");
+        else if (m_inputRadix == 8) prefix = QStringLiteral("0o");
+        else if (m_inputRadix == 2) prefix = QStringLiteral("0b");
+    }
+    m_exprEdit->setText(cur + prefix + upper);
+    m_exprEdit->setFocus();
+}
+
+void ProgrammerCalculatorDialog::insertCurrentValueToken() {
+    if (!m_exprEdit) return;
+    if (m_justEvaluated) {
+        m_exprEdit->clear();
+        m_justEvaluated = false;
+    }
+    m_exprEdit->insert(formatValueForRadix(m_value, m_inputRadix));
+    m_exprEdit->setFocus();
+}
+
+void ProgrammerCalculatorDialog::backspaceExpression() {
+    if (!m_exprEdit) return;
+    m_justEvaluated = false;
+    QString cur = m_exprEdit->text();
+    if (cur.isEmpty()) return;
+    if (cur.endsWith(QStringLiteral(" << ")) || cur.endsWith(QStringLiteral(" >> "))) {
+        cur.chop(4);
+    } else if (cur.size() >= 3 && cur.endsWith(QLatin1Char(' ')) && cur.at(cur.size() - 3) == QLatin1Char(' ')) {
+        cur.chop(3);
+    } else {
+        cur.chop(1);
+        if (cur.endsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ||
+            cur.endsWith(QStringLiteral("0o"), Qt::CaseInsensitive) ||
+            cur.endsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) {
+            if (cur.size() == 2 || !cur.at(cur.size() - 3).isLetterOrNumber()) cur.chop(2);
+        }
+    }
+    m_exprEdit->setText(cur);
+    m_exprEdit->setFocus();
+}
+
+void ProgrammerCalculatorDialog::clearAll() {
+    m_justEvaluated = false;
+    if (m_exprEdit) m_exprEdit->clear();
+    if (m_exprStatusLabel) m_exprStatusLabel->clear();
+    setValue(0ULL);
+}
+
+void ProgrammerCalculatorDialog::toggleNegateExpression() {
+    if (!m_exprEdit) return;
+    const QString cur = m_exprEdit->text().trimmed();
+    if (cur.isEmpty() || m_justEvaluated) {
+        m_justEvaluated = false;
+        setValue(0ULL - m_value);
+        m_exprEdit->setText(formatValueForRadix(m_value, m_inputRadix));
+    } else if (cur.startsWith(QStringLiteral("-(")) && cur.endsWith(QLatin1Char(')'))) {
+        m_exprEdit->setText(cur.mid(2, cur.size() - 3));
+    } else {
+        m_exprEdit->setText(QStringLiteral("-(%1)").arg(cur));
+    }
+    m_exprEdit->setFocus();
+}
+
 void ProgrammerCalculatorDialog::insertOperatorToken(const QString& opToken) {
     if (!m_exprEdit) return;
-    if (m_exprEdit->text().trimmed().isEmpty()) {
-        m_exprEdit->setText(QStringLiteral("0x%1%2").arg(QString::number(m_value, 16).toUpper(), opToken));
+    const QString trimmed = m_exprEdit->text().trimmed();
+    if (trimmed.isEmpty() || m_justEvaluated) {
+        m_justEvaluated = false;
+        m_exprEdit->setText(formatValueForRadix(m_value, m_inputRadix) + opToken);
     } else {
-        m_exprEdit->insert(opToken);
+        m_exprEdit->setText(m_exprEdit->text() + opToken);
     }
     m_exprEdit->setFocus();
 }
@@ -656,6 +880,7 @@ void ProgrammerCalculatorDialog::reloadStyle() {
     const QString cardBg = pal.isDark ? QStringLiteral("#1b202c") : QStringLiteral("#ffffff");
     const QString inputBg = pal.isDark ? QStringLiteral("#0f131a") : QStringLiteral("#ffffff");
     const QString btnBg = pal.isDark ? QStringLiteral("#252b38") : QStringLiteral("#e2e8f0");
+    const QString digitBg = pal.isDark ? QStringLiteral("#2d3548") : QStringLiteral("#cbd5e1");
     const QString muted = pal.isDark ? QStringLiteral("#94a3b8") : QStringLiteral("#475569");
 
     setStyleSheet(QStringLiteral(
@@ -665,12 +890,14 @@ void ProgrammerCalculatorDialog::reloadStyle() {
         "QLineEdit { background: %6; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
         "QLineEdit:focus { border: 1px solid %5; }"
         "QPushButton { background: %7; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-size: 11px; font-family: 'JetBrains Mono', monospace; }"
+        "QPushButton[calcRole=\"digit\"], QPushButton[calcRole=\"hex\"] { background: %9; font-weight: bold; font-size: 12px; }"
+        "QPushButton[calcRole=\"eval\"] { background: %5; color: #0b1120; font-weight: bold; font-size: 13px; border: 1px solid %5; }"
         "QPushButton:hover { border: 1px solid %5; }"
         "QPushButton:checked, QPushButton[bitSet=\"true\"] { background: %5; color: #0b1120; font-weight: bold; border: 1px solid %5; }"
         "QPushButton:disabled { opacity: 0.35; color: %8; }"
         "QLabel#calcBitIndexLabel { color: %8; font-size: 9px; font-family: 'JetBrains Mono', monospace; }"
         "QLabel#calcFloatLabel, QLabel#calcAsciiLabel, QLabel#calcExprStatusLabel { color: %8; font-size: 10px; font-family: 'JetBrains Mono', monospace; }")
-                      .arg(bg, pal.textHex, cardBg, pal.borderHex, pal.accentHex, inputBg, btnBg, muted));
+                      .arg(bg, pal.textHex, cardBg, pal.borderHex, pal.accentHex, inputBg, btnBg, muted, digitBg));
 }
 
 }  // namespace gridlock::ui

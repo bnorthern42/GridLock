@@ -138,6 +138,45 @@ public:
      */
     QPushButton* bitButton(int bitIndex) const;
 
+    /** @brief Returns the active keypad input radix (10 = DEC, 16 = HEX, 8 = OCT, 2 = BIN). */
+    int inputRadix() const { return m_inputRadix; }
+
+    /**
+     * @brief Sets the active keypad input radix (10 = DEC, 16 = HEX, 8 = OCT, 2 = BIN) and updates valid digit keycaps.
+     * @param radix Target numeric base (10, 16, 8, or 2).
+     */
+    void setInputRadix(int radix);
+
+    /**
+     * @brief Returns the clickable keypad button for hex/decimal digit value @p digitVal (0..15 for '0'..'9','A'..'F').
+     */
+    QPushButton* keypadDigitButton(int digitVal) const;
+
+    /**
+     * @brief Appends a digit ('0'..'9', 'A'..'F') to #calcExprEdit using the active inputRadix() prefix (0x, 0o, 0b, or decimal).
+     * @param digitChar Uppercase hex/decimal digit character.
+     */
+    void pressDigitKey(QChar digitChar);
+
+    /** @brief Appends the current register value (formatted in the active inputRadix) into #calcExprEdit. */
+    void insertCurrentValueToken();
+
+    /** @brief Removes the trailing character from #calcExprEdit. */
+    void backspaceExpression();
+
+    /** @brief Clears #calcExprEdit, resets #calcExprStatusLabel, and zeroes the calculator value (AC). */
+    void clearAll();
+
+    /**
+     * @brief Rotates the active register value left by @p count bits within the active wordWidth().
+     */
+    void rotateLeft(int count = 1);
+
+    /**
+     * @brief Rotates the active register value right by @p count bits within the active wordWidth().
+     */
+    void rotateRight(int count = 1);
+
     /**
      * @brief Reloads dialog colors and control styling from the active ThemeManager theme.
      */
@@ -153,16 +192,27 @@ private:
     /** @brief Formats @p val as nibble-grouped binary string for @p widthBits. */
     static QString formatGroupedBinary(uint64_t val, int widthBits);
 
+    /** @brief Formats @p val as a literal token matching @p radix (0x..., 0o..., 0b..., or decimal). */
+    QString formatValueForRadix(uint64_t val, int radix) const;
+
     /** @brief Synchronizes all base QLineEdits, 64 bit-toggle buttons, and IEEE-754/ASCII readouts. */
     void syncAllViews(QLineEdit* skipEditor = nullptr);
 
-    /** @brief Inserts an operator token into #calcExprEdit (seeding with current hex value if empty). */
+    /** @brief Synchronizes radix pill check states and enables/disables 0-9 / A-F digit buttons. */
+    void syncKeypadRadixState();
+
+    /** @brief Inserts an operator token into #calcExprEdit (seeding with current register value if empty). */
     void insertOperatorToken(const QString& opToken);
+
+    /** @brief Toggles unary negation (`-`) on the active expression or register value. */
+    void toggleNegateExpression();
 
     uint64_t m_value = 0ULL;
     int m_wordWidth = 64;
+    int m_inputRadix = 10;
     bool m_signedMode = false;
     bool m_updatingViews = false;
+    bool m_justEvaluated = false;
 
     QPushButton* m_width64Btn = nullptr;
     QPushButton* m_width32Btn = nullptr;
@@ -181,6 +231,11 @@ private:
 
     QLineEdit* m_exprEdit = nullptr;
     QLabel* m_exprStatusLabel = nullptr;
+    QPushButton* m_radixDecBtn = nullptr;
+    QPushButton* m_radixHexBtn = nullptr;
+    QPushButton* m_radixOctBtn = nullptr;
+    QPushButton* m_radixBinBtn = nullptr;
+    std::array<QPushButton*, 16> m_digitButtons{};
     std::array<QPushButton*, 64> m_bitButtons{};
 };
 
