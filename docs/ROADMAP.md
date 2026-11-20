@@ -22,12 +22,12 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 - [ ] **Non-Destructive Breakpoint Lifecycle and Temporary/Regex Breakpoints**:
   - [ ] Toggle breakpoint enabled/disabled state (`-break-enable` / `-break-disable`) with hollow gutter markers instead of deleting breakpoints.
   - [ ] Temporary one-shot breakpoints (`tbreak`), regex symbol breakpoints (`rbreak`), and custom GDB command lists (`commands ... end`).
-- [ ] **Signal Disposition Matrix and Catchpoints**:
-  - [ ] Per-signal (`SIGFPE`, `SIGPIPE`, `SIGUSR1`, `SIGBUS`) Stop / Print / Pass disposition matrix (`handle <SIG>`).
-  - [ ] C++ `throw`, `rethrow`, and `catch` catchpoints with exception-type regex filtering.
-  - [ ] Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`) and `dlopen`/`dlclose` regex catchpoints.
-- [ ] **GDB Console Readline Ergonomics**:
-  - [ ] Persistent command history (`Up`/`Down` saved across sessions), `Ctrl+R` incremental reverse search, and live `complete` Tab completion popup in `GdbConsoleWidget`.
+- [x] **Signal Disposition Matrix and Catchpoints**:
+  - [x] Per-signal (`SIGFPE`, `SIGPIPE`, `SIGUSR1`, `SIGBUS`) Stop / Print / Pass disposition matrix (`handle <SIG>`).
+  - [x] C++ `throw`, `rethrow`, and `catch` catchpoints with exception-type regex filtering.
+  - [x] Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`) and `dlopen`/`dlclose` regex catchpoints.
+- [x] **GDB Console Readline Ergonomics**:
+  - [x] Persistent command history (`Up`/`Down` saved across sessions), `Ctrl+R` incremental reverse search, and live `complete` Tab completion popup in `GdbConsoleWidget`.
 - [ ] **Copy-on-Write Fork Checkpoints (`checkpoint` / `restart`)**:
   - [ ] Process state snapshots via GDB `checkpoint` and `restart` with `/proc/[pid]/fd` and `/proc/[pid]/maps` IPC/RDMA safety checks.
 
