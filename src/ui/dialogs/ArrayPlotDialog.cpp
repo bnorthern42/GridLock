@@ -1,11 +1,7 @@
 /**
  * @file ArrayPlotDialog.cpp
- * @brief Implementation of the live auto-refreshing 1D/2D scientific array and field plotter.
- *
- * Implements contiguous raw-memory decoding (double, float, int32_t, int64_t, uint8_t),
- * automatic refresh on debugger stop events (*stopped), previous-stop delta tracking,
- * IEEE-754 NaN/Inf anomaly highlighting, 1D Line/Stem and 2D Heatmap QPainter rendering
- * with Viridis/Plasma/CoolWarm/Grayscale colormaps, and CSV/PNG/gnuplot export.
+ * @brief Implementation of the live auto-refreshing 1D/2D scientific array, multi-rank overlay,
+ *        strided slice, and scalar time-series history plotter.
  */
 
 #include "ArrayPlotDialog.hpp"
@@ -13,17 +9,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QHBoxLayout>
-#include <QPainter>
-#include <QPainterPath>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTextStream>
-#include <QToolTip>
 #include <QVBoxLayout>
 
 #include "../../core/hpc/DapCoordinator.hpp"
@@ -32,308 +27,6 @@
 #include "../../core/managers/ThemeManager.hpp"
 
 namespace gridlock::ui {
-
-namespace {
-
-/** @brief Linearly interpolates between two RGB colors for @p t in [0.0, 1.0]. */
-QColor lerpColor(const QColor& a, const QColor& b, double t) {
-    const double u = std::clamp(t, 0.0, 1.0);
-    return QColor(static_cast<int>(std::round(a.red() + (b.red() - a.red()) * u)),
-                  static_cast<int>(std::round(a.green() + (b.green() - a.green()) * u)),
-                  static_cast<int>(std::round(a.blue() + (b.blue() - a.blue()) * u)));
-}
-
-/** @brief Samples a 5-stop color ramp for @p t in [0.0, 1.0]. */
-QColor sampleRamp(double t, const QColor stops[5]) {
-    const double u = std::clamp(t, 0.0, 1.0) * 4.0;
-    const int idx = std::clamp(static_cast<int>(std::floor(u)), 0, 3);
-    return lerpColor(stops[idx], stops[idx + 1], u - idx);
-}
-
-}  // namespace
-
-ArrayPlotCanvas::ArrayPlotCanvas(ArrayPlotDialog* owner)
-    : QWidget(owner), m_owner(owner) {
-    setObjectName(QStringLiteral("arrayPlotCanvas"));
-    setMouseTracking(true);
-    setMinimumSize(540, 300);
-}
-
-QColor ArrayPlotCanvas::sampleColormap(double t, int colormapId) {
-    static const QColor kViridis[5] = {
-        QColor(68, 1, 84), QColor(59, 82, 139), QColor(33, 145, 140),
-        QColor(94, 201, 98), QColor(253, 231, 37)};
-    static const QColor kPlasma[5] = {
-        QColor(13, 8, 135), QColor(126, 3, 168), QColor(204, 71, 120),
-        QColor(248, 149, 64), QColor(240, 249, 33)};
-    static const QColor kCoolWarm[5] = {
-        QColor(59, 76, 192), QColor(141, 176, 254), QColor(221, 221, 221),
-        QColor(244, 154, 123), QColor(180, 4, 38)};
-    static const QColor kGray[5] = {
-        QColor(18, 22, 28), QColor(78, 84, 94), QColor(138, 144, 154),
-        QColor(196, 202, 210), QColor(248, 250, 252)};
-
-    switch (colormapId) {
-        case 1: return sampleRamp(t, kPlasma);
-        case 2: return sampleRamp(t, kCoolWarm);
-        case 3: return sampleRamp(t, kGray);
-        default: return sampleRamp(t, kViridis);
-    }
-}
-
-void ArrayPlotCanvas::paintEvent(QPaintEvent* /*event*/) {
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, true);
-
-    const auto& tm = gridlock::core::ThemeManager::instance();
-    const auto pal = gridlock::core::ThemeManager::paletteForTheme(tm.activeThemeId());
-    const bool isDark = pal.isDark;
-
-    const QColor canvasBg = isDark ? QColor(QStringLiteral("#0f141c")) : QColor(QStringLiteral("#ffffff"));
-    const QColor gridCol = isDark ? QColor(QStringLiteral("#1e293b")) : QColor(QStringLiteral("#e2e8f0"));
-    const QColor axisCol = isDark ? QColor(QStringLiteral("#64748b")) : QColor(QStringLiteral("#475569"));
-    const QColor textCol = isDark ? QColor(QStringLiteral("#cbd5e1")) : QColor(QStringLiteral("#1e293b"));
-    const QColor lineCol = QColor(QStringLiteral("#38bdf8"));
-    const QColor prevCol = isDark ? QColor(QStringLiteral("#64748b")) : QColor(QStringLiteral("#94a3b8"));
-    const QColor mutCol = QColor(QStringLiteral("#f59e0b"));
-    const QColor anomCol = QColor(QStringLiteral("#ec4899"));
-
-    p.fillRect(rect(), canvasBg);
-    if (!m_owner) return;
-
-    const QVector<double>& samples = m_owner->currentSamples();
-    const QVector<double>& prevSamples = m_owner->previousSamples();
-    const QRect plotRect = rect().adjusted(64, 18, -72, -32);
-    if (plotRect.width() < 40 || plotRect.height() < 40) return;
-
-    p.setPen(QPen(axisCol, 1.0));
-    p.drawRect(plotRect);
-
-    if (samples.isEmpty()) {
-        p.setPen(axisCol);
-        p.drawText(plotRect, Qt::AlignCenter,
-                   QStringLiteral("No array samples loaded. Enter an expression and click Plot / Refresh."));
-        return;
-    }
-
-    const double minV = m_owner->minValue();
-    const double maxV = m_owner->maxValue();
-    const double span = (std::abs(maxV - minV) > 1e-15) ? (maxV - minV) : 1.0;
-
-    // 2D Heatmap rendering path.
-    if (m_owner->plotMode() == ArrayPlotDialog::PlotMode::Heatmap2D || m_owner->rows() > 1) {
-        const int ny = qMax(1, m_owner->rows());
-        const int nx = qMax(1, m_owner->cols());
-        const int cmId = static_cast<int>(m_owner->colormap());
-        const double cellW = static_cast<double>(plotRect.width()) / nx;
-        const double cellH = static_cast<double>(plotRect.height()) / ny;
-
-        for (int r = 0; r < ny; ++r) {
-            for (int c = 0; c < nx; ++c) {
-                const int idx = r * nx + c;
-                const QRectF cellRect(plotRect.left() + c * cellW, plotRect.top() + r * cellH,
-                                      std::ceil(cellW), std::ceil(cellH));
-                if (idx >= samples.size()) {
-                    p.fillRect(cellRect, canvasBg);
-                    continue;
-                }
-                const double val = samples.at(idx);
-                if (std::isnan(val) || std::isinf(val)) {
-                    p.fillRect(cellRect, anomCol);
-                    p.setPen(QPen(Qt::white, 1.4));
-                    p.drawLine(cellRect.topLeft(), cellRect.bottomRight());
-                    p.drawLine(cellRect.topRight(), cellRect.bottomLeft());
-                } else {
-                    const double norm = (val - minV) / span;
-                    p.fillRect(cellRect, sampleColormap(norm, cmId));
-                }
-            }
-        }
-
-        // Draw right-side vertical colorbar legend.
-        const QRect barRect(plotRect.right() + 14, plotRect.top(), 14, plotRect.height());
-        for (int y = 0; y < barRect.height(); ++y) {
-            const double t = 1.0 - static_cast<double>(y) / qMax(1, barRect.height() - 1);
-            p.setPen(sampleColormap(t, cmId));
-            p.drawLine(barRect.left(), barRect.top() + y, barRect.right(), barRect.top() + y);
-        }
-        p.setPen(axisCol);
-        p.drawRect(barRect);
-        p.setPen(textCol);
-        p.drawText(QRect(barRect.right() + 4, barRect.top() - 4, 48, 16),
-                   Qt::AlignLeft | Qt::AlignTop, QString::number(maxV, 'g', 4));
-        p.drawText(QRect(barRect.right() + 4, barRect.bottom() - 12, 48, 16),
-                   Qt::AlignLeft | Qt::AlignBottom, QString::number(minV, 'g', 4));
-        return;
-    }
-
-    // 1D Line / Stem rendering path.
-    for (int g = 1; g < 4; ++g) {
-        const int gy = plotRect.top() + (plotRect.height() * g) / 4;
-        const int gx = plotRect.left() + (plotRect.width() * g) / 4;
-        p.setPen(QPen(gridCol, 1.0, Qt::DotLine));
-        p.drawLine(plotRect.left(), gy, plotRect.right(), gy);
-        p.drawLine(gx, plotRect.top(), gx, plotRect.bottom());
-    }
-
-    p.setPen(textCol);
-    p.drawText(QRect(4, plotRect.top() - 6, 56, 18), Qt::AlignRight | Qt::AlignVCenter,
-               QString::number(maxV, 'g', 5));
-    p.drawText(QRect(4, plotRect.center().y() - 9, 56, 18), Qt::AlignRight | Qt::AlignVCenter,
-               QString::number((minV + maxV) * 0.5, 'g', 5));
-    p.drawText(QRect(4, plotRect.bottom() - 9, 56, 18), Qt::AlignRight | Qt::AlignVCenter,
-               QString::number(minV, 'g', 5));
-    p.drawText(QRect(plotRect.left(), plotRect.bottom() + 6, 60, 18), Qt::AlignLeft, QStringLiteral("[0]"));
-    p.drawText(QRect(plotRect.right() - 70, plotRect.bottom() + 6, 70, 18), Qt::AlignRight,
-               QStringLiteral("[%1]").arg(samples.size() - 1));
-
-    const int n = samples.size();
-    auto mapPoint = [&](int idx, double v) -> QPointF {
-        const double xRatio = (n > 1) ? (static_cast<double>(idx) / (n - 1)) : 0.5;
-        const double yRatio = std::clamp((v - minV) / span, 0.0, 1.0);
-        return QPointF(plotRect.left() + xRatio * plotRect.width(),
-                       plotRect.bottom() - yRatio * plotRect.height());
-    };
-
-    // Draw dashed ghost curve of previous stop's sample values when available.
-    if (!prevSamples.isEmpty()) {
-        QPainterPath ghostPath;
-        bool started = false;
-        const int prevN = qMin(n, static_cast<int>(prevSamples.size()));
-        for (int i = 0; i < prevN; ++i) {
-            const double pv = prevSamples.at(i);
-            if (std::isnan(pv) || std::isinf(pv)) { started = false; continue; }
-            const QPointF pt = mapPoint(i, pv);
-            if (!started) { ghostPath.moveTo(pt); started = true; }
-            else ghostPath.lineTo(pt);
-        }
-        p.setBrush(Qt::NoBrush);
-        p.setPen(QPen(prevCol, 1.3, Qt::DashLine));
-        p.drawPath(ghostPath);
-    }
-
-    // Draw any multi-rank comparison overlay curves.
-    static const QColor kRankPalette[6] = {
-        QColor(QStringLiteral("#34d399")), QColor(QStringLiteral("#a78bfa")),
-        QColor(QStringLiteral("#fbbf24")), QColor(QStringLiteral("#f472b6")),
-        QColor(QStringLiteral("#60a5fa")), QColor(QStringLiteral("#fb923c"))};
-    int overlayColorIdx = 0;
-    for (auto it = m_owner->rankOverlays().cbegin(); it != m_owner->rankOverlays().cend(); ++it) {
-        if (it.key() == m_owner->focusedRank()) continue;
-        const QVector<double>& rv = it.value();
-        QPainterPath rankPath;
-        bool started = false;
-        for (int i = 0; i < qMin(n, static_cast<int>(rv.size())); ++i) {
-            if (std::isnan(rv.at(i)) || std::isinf(rv.at(i))) { started = false; continue; }
-            const QPointF pt = mapPoint(i, rv.at(i));
-            if (!started) { rankPath.moveTo(pt); started = true; }
-            else rankPath.lineTo(pt);
-        }
-        p.setBrush(Qt::NoBrush);
-        p.setPen(QPen(kRankPalette[overlayColorIdx++ % 6], 1.4));
-        p.drawPath(rankPath);
-    }
-
-    // Draw primary active series (Line1D or Stem1D) plus mutation and NaN/Inf markers.
-    const bool isStem = (m_owner->plotMode() == ArrayPlotDialog::PlotMode::Stem1D);
-    const double zeroY = mapPoint(0, std::clamp(0.0, minV, maxV)).y();
-    QPainterPath activePath;
-    bool activeStarted = false;
-
-    for (int i = 0; i < n; ++i) {
-        const double v = samples.at(i);
-        if (std::isnan(v) || std::isinf(v)) {
-            activeStarted = false;
-            const double x = mapPoint(i, minV).x();
-            p.setPen(QPen(anomCol, 1.5, Qt::DashLine));
-            p.drawLine(QPointF(x, plotRect.top()), QPointF(x, plotRect.bottom()));
-            p.setBrush(anomCol);
-            p.setPen(Qt::white);
-            p.drawEllipse(QPointF(x, plotRect.top() + 8.0), 4.5, 4.5);
-            continue;
-        }
-        const QPointF pt = mapPoint(i, v);
-        if (isStem) {
-            p.setPen(QPen(lineCol, 1.8));
-            p.drawLine(QPointF(pt.x(), zeroY), pt);
-        } else {
-            if (!activeStarted) { activePath.moveTo(pt); activeStarted = true; }
-            else activePath.lineTo(pt);
-        }
-    }
-    if (!isStem) {
-        p.setBrush(Qt::NoBrush);
-        p.setPen(QPen(lineCol, 2.0));
-        p.drawPath(activePath);
-    }
-
-    // Draw sample dots and highlight elements mutated since the previous stop in amber.
-    for (int i = 0; i < n; ++i) {
-        const double v = samples.at(i);
-        if (std::isnan(v) || std::isinf(v)) continue;
-        const bool changed = (i < prevSamples.size()) &&
-                             (std::isnan(prevSamples.at(i)) || std::abs(v - prevSamples.at(i)) > 1e-12);
-        if (changed || n <= 64 || isStem) {
-            const QPointF pt = mapPoint(i, v);
-            p.setPen(Qt::NoPen);
-            p.setBrush(changed ? mutCol : lineCol);
-            const double r = changed ? 4.0 : 2.5;
-            p.drawEllipse(pt, r, r);
-        }
-    }
-
-    // Draw hover crosshair if cursor lies inside the plot region.
-    if (plotRect.contains(m_hoverPos)) {
-        p.setPen(QPen(axisCol, 1.0, Qt::DashLine));
-        p.drawLine(m_hoverPos.x(), plotRect.top(), m_hoverPos.x(), plotRect.bottom());
-        p.drawLine(plotRect.left(), m_hoverPos.y(), plotRect.right(), m_hoverPos.y());
-    }
-}
-
-void ArrayPlotCanvas::mouseMoveEvent(QMouseEvent* event) {
-    if (!event || !m_owner) return;
-    m_hoverPos = event->pos();
-    const QRect plotRect = rect().adjusted(64, 18, -72, -32);
-    const QVector<double>& samples = m_owner->currentSamples();
-    if (!plotRect.contains(m_hoverPos) || samples.isEmpty()) {
-        update();
-        return;
-    }
-
-    if (m_owner->plotMode() == ArrayPlotDialog::PlotMode::Heatmap2D || m_owner->rows() > 1) {
-        const int ny = qMax(1, m_owner->rows());
-        const int nx = qMax(1, m_owner->cols());
-        const int c = std::clamp(static_cast<int>(((m_hoverPos.x() - plotRect.left()) * nx) / plotRect.width()), 0, nx - 1);
-        const int r = std::clamp(static_cast<int>(((m_hoverPos.y() - plotRect.top()) * ny) / plotRect.height()), 0, ny - 1);
-        const int idx = r * nx + c;
-        if (idx < samples.size()) {
-            m_owner->setHoverSummaryText(
-                QStringLiteral("Hover: [%1, %2] (idx %3) = %4")
-                    .arg(r).arg(c).arg(idx).arg(QString::number(samples.at(idx), 'g', 8)));
-        }
-    } else {
-        const int n = samples.size();
-        const double ratio = static_cast<double>(m_hoverPos.x() - plotRect.left()) / qMax(1, plotRect.width());
-        const int idx = std::clamp(static_cast<int>(std::round(ratio * (n - 1))), 0, n - 1);
-        const double val = samples.at(idx);
-        QString deltaText;
-        if (idx < m_owner->previousSamples().size()) {
-            const double delta = val - m_owner->previousSamples().at(idx);
-            deltaText = QStringLiteral("  (prev = %1, delta = %2)")
-                            .arg(QString::number(m_owner->previousSamples().at(idx), 'g', 6),
-                                 QString::number(delta, 'g', 6));
-        }
-        m_owner->setHoverSummaryText(
-            QStringLiteral("Hover: [%1] = %2%3")
-                .arg(idx).arg(QString::number(val, 'g', 8), deltaText));
-    }
-    update();
-}
-
-void ArrayPlotCanvas::leaveEvent(QEvent* /*event*/) {
-    m_hoverPos = QPoint(-1, -1);
-    update();
-}
 
 int ArrayPlotDialog::byteSizeOf(ElementType type) {
     switch (type) {
@@ -346,25 +39,95 @@ int ArrayPlotDialog::byteSizeOf(ElementType type) {
     return 8;
 }
 
+QVector<double> ArrayPlotDialog::decodeStridedBytes(const QByteArray& rawBytes, ElementType type,
+                                                    int maxCount, int offset, int stride) {
+    const int elemSize = byteSizeOf(type);
+    const int totalAvailable = static_cast<int>(rawBytes.size()) / elemSize;
+    const int safeOffset = qMax(0, offset);
+    const int safeStride = qMax(1, stride);
+    if (totalAvailable <= safeOffset) return {};
+
+    const int stridedAvailable = (totalAvailable - safeOffset - 1) / safeStride + 1;
+    const int count = (maxCount > 0) ? qMin(stridedAvailable, maxCount) : stridedAvailable;
+    if (count <= 0) return {};
+
+    auto readAt = [](const char* src, auto tag) -> double {
+        using T = decltype(tag);
+        T v{};
+        std::memcpy(&v, src, sizeof(v));
+        return static_cast<double>(v);
+    };
+
+    QVector<double> decoded(count);
+    const char* ptr = rawBytes.constData();
+    for (int i = 0; i < count; ++i) {
+        const char* src = ptr + static_cast<qsizetype>(safeOffset + i * safeStride) * elemSize;
+        switch (type) {
+            case ElementType::Float64: decoded[i] = readAt(src, double{}); break;
+            case ElementType::Float32: decoded[i] = readAt(src, float{}); break;
+            case ElementType::Int32:   decoded[i] = readAt(src, int32_t{}); break;
+            case ElementType::Int64:   decoded[i] = readAt(src, int64_t{}); break;
+            case ElementType::UInt8:   decoded[i] = readAt(src, uint8_t{}); break;
+        }
+    }
+    return decoded;
+}
+
+bool ArrayPlotDialog::parseScalarResult(const QString& resultText, double* outVal) {
+    if (!outVal) return false;
+    QString s = resultText.trimmed();
+    if (s.isEmpty()) return false;
+    if (const int eq = s.lastIndexOf(QLatin1Char('=')); eq >= 0) s = s.mid(eq + 1).trimmed();
+    static const QRegularExpression kCastRe(QStringLiteral(R"(^\([^)]*\)\s*)"));
+    s.remove(kCastRe);
+    s = s.trimmed();
+
+    const QString lower = s.toLower();
+    if (lower == QStringLiteral("nan") || lower == QStringLiteral("-nan")) {
+        *outVal = std::numeric_limits<double>::quiet_NaN();
+        return true;
+    }
+    if (lower == QStringLiteral("inf") || lower == QStringLiteral("+inf") || lower == QStringLiteral("infinity")) {
+        *outVal = std::numeric_limits<double>::infinity();
+        return true;
+    }
+    if (lower == QStringLiteral("-inf") || lower == QStringLiteral("-infinity")) {
+        *outVal = -std::numeric_limits<double>::infinity();
+        return true;
+    }
+    if (lower.startsWith(QStringLiteral("0x"))) {
+        bool ok = false;
+        const quint64 hv = lower.mid(2).section(QLatin1Char(' '), 0, 0).toULongLong(&ok, 16);
+        if (ok) { *outVal = static_cast<double>(hv); return true; }
+    }
+    bool ok = false;
+    if (const double direct = s.toDouble(&ok); ok) { *outVal = direct; return true; }
+    static const QRegularExpression kFloatRe(QStringLiteral(R"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)"));
+    if (const QRegularExpressionMatch m = kFloatRe.match(s); m.hasMatch()) {
+        if (const double v = m.captured(0).toDouble(&ok); ok) { *outVal = v; return true; }
+    }
+    return false;
+}
+
 ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* parent)
     : QDialog(parent, Qt::Window) {
     setObjectName(QStringLiteral("ArrayPlotDialog"));
     setWindowTitle(QStringLiteral("Scientific 1D/2D Array & Field Plotter"));
     setModal(false);
-    setMinimumSize(940, 520);
-    resize(1040, 600);
+    setMinimumSize(940, 540);
+    resize(1040, 620);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(10, 10, 10, 10);
     root->setSpacing(6);
 
-    // Top control bar: Expression, ElementType, PlotMode, Colormap, NY x NX, Rank, Auto-Refresh, Close.
+    // Row 1: Expression, ElementType, PlotMode, Colormap, Refresh, Close.
     auto* topRow = new QHBoxLayout();
     topRow->setSpacing(6);
 
     m_exprEdit = new QLineEdit(this);
     m_exprEdit->setObjectName(QStringLiteral("arrayPlotExprEdit"));
-    m_exprEdit->setPlaceholderText(QStringLiteral("Array or pointer expression (e.g., u, grid.data(), &vec[0])..."));
+    m_exprEdit->setPlaceholderText(QStringLiteral("Expr or slice (e.g., u[16:128:2], grid.data(), residual)..."));
     m_exprEdit->setFixedHeight(26);
 
     m_typeCombo = new QComboBox(this);
@@ -382,13 +145,14 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     m_modeCombo->addItem(QStringLiteral("1D Line Plot"), static_cast<int>(PlotMode::Line1D));
     m_modeCombo->addItem(QStringLiteral("1D Bar / Stem"), static_cast<int>(PlotMode::Stem1D));
     m_modeCombo->addItem(QStringLiteral("2D Heatmap"), static_cast<int>(PlotMode::Heatmap2D));
+    m_modeCombo->addItem(QStringLiteral("Scalar History (Over Stops)"), static_cast<int>(PlotMode::ScalarHistory));
 
     m_colormapCombo = new QComboBox(this);
     m_colormapCombo->setObjectName(QStringLiteral("arrayPlotColormapCombo"));
     m_colormapCombo->setFixedHeight(26);
     m_colormapCombo->addItem(QStringLiteral("Viridis"), static_cast<int>(Colormap::Viridis));
     m_colormapCombo->addItem(QStringLiteral("Plasma"), static_cast<int>(Colormap::Plasma));
-    m_colormapCombo->addItem(QStringLiteral("Diverging Cool-Warm"), static_cast<int>(Colormap::CoolWarm));
+    m_colormapCombo->addItem(QStringLiteral("Cool-Warm"), static_cast<int>(Colormap::CoolWarm));
     m_colormapCombo->addItem(QStringLiteral("Grayscale"), static_cast<int>(Colormap::Grayscale));
 
     m_refreshBtn = new QPushButton(QStringLiteral("Plot / Refresh"), this);
@@ -409,23 +173,72 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     topRow->addWidget(m_closeBtn);
     root->addLayout(topRow);
 
-    // Second toolbar row: Rows (NY), Cols (NX), Rank selector, Compare Ranks, Auto-Refresh on Stop, and Exports.
-    auto* secondRow = new QHBoxLayout();
-    secondRow->setSpacing(8);
+    // Row 2: Shape (Rows, Cols), Slicing (Offset, Stride), Log10 Scale, Reset Zoom, Clear History.
+    auto* sliceRow = new QHBoxLayout();
+    sliceRow->setSpacing(6);
 
     m_rowsSpin = new QSpinBox(this);
     m_rowsSpin->setObjectName(QStringLiteral("arrayPlotRowsSpin"));
     m_rowsSpin->setRange(1, 4096);
     m_rowsSpin->setValue(1);
     m_rowsSpin->setFixedHeight(24);
-    m_rowsSpin->setMaximumWidth(74);
+    m_rowsSpin->setMaximumWidth(68);
 
     m_colsSpin = new QSpinBox(this);
     m_colsSpin->setObjectName(QStringLiteral("arrayPlotColsSpin"));
     m_colsSpin->setRange(1, 65536);
     m_colsSpin->setValue(64);
     m_colsSpin->setFixedHeight(24);
-    m_colsSpin->setMaximumWidth(78);
+    m_colsSpin->setMaximumWidth(74);
+
+    m_offsetSpin = new QSpinBox(this);
+    m_offsetSpin->setObjectName(QStringLiteral("arrayPlotOffsetSpin"));
+    m_offsetSpin->setRange(0, 10000000);
+    m_offsetSpin->setValue(0);
+    m_offsetSpin->setFixedHeight(24);
+    m_offsetSpin->setMaximumWidth(76);
+    m_offsetSpin->setToolTip(QStringLiteral("Starting element offset for strided slicing (offset + i * stride)"));
+
+    m_strideSpin = new QSpinBox(this);
+    m_strideSpin->setObjectName(QStringLiteral("arrayPlotStrideSpin"));
+    m_strideSpin->setRange(1, 65536);
+    m_strideSpin->setValue(1);
+    m_strideSpin->setFixedHeight(24);
+    m_strideSpin->setMaximumWidth(64);
+    m_strideSpin->setToolTip(QStringLiteral("Step between consecutive plotted elements"));
+
+    m_logScaleCheck = new QCheckBox(QStringLiteral("Log10"), this);
+    m_logScaleCheck->setObjectName(QStringLiteral("arrayPlotLogScaleCheck"));
+    m_logScaleCheck->setToolTip(QStringLiteral("Use base-10 logarithmic Y axis / 2D heatmap color scale"));
+    m_logScaleCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+
+    m_resetZoomBtn = new QPushButton(QStringLiteral("Reset Zoom"), this);
+    m_resetZoomBtn->setObjectName(QStringLiteral("arrayPlotResetZoomBtn"));
+    m_resetZoomBtn->setFixedHeight(24);
+    m_resetZoomBtn->setEnabled(false);
+
+    m_clearHistoryBtn = new QPushButton(QStringLiteral("Clear History"), this);
+    m_clearHistoryBtn->setObjectName(QStringLiteral("arrayPlotClearHistoryBtn"));
+    m_clearHistoryBtn->setFixedHeight(24);
+    m_clearHistoryBtn->setToolTip(QStringLiteral("Clear accumulated Scalar History samples"));
+
+    sliceRow->addWidget(new QLabel(QStringLiteral("Rows:"), this));
+    sliceRow->addWidget(m_rowsSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Cols:"), this));
+    sliceRow->addWidget(m_colsSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Offset:"), this));
+    sliceRow->addWidget(m_offsetSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Stride:"), this));
+    sliceRow->addWidget(m_strideSpin);
+    sliceRow->addWidget(m_logScaleCheck);
+    sliceRow->addWidget(m_resetZoomBtn);
+    sliceRow->addWidget(m_clearHistoryBtn);
+    sliceRow->addStretch(1);
+    root->addLayout(sliceRow);
+
+    // Row 3: Rank selector, Multi-Rank Overlay + Subset filter, Auto-Refresh, and Exports.
+    auto* rankRow = new QHBoxLayout();
+    rankRow->setSpacing(6);
 
     m_rankCombo = new QComboBox(this);
     m_rankCombo->setObjectName(QStringLiteral("arrayPlotRankCombo"));
@@ -435,6 +248,13 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     m_overlayRanksCheck = new QCheckBox(QStringLiteral("Overlay Ranks"), this);
     m_overlayRanksCheck->setObjectName(QStringLiteral("arrayPlotOverlayAllRanksCheck"));
     m_overlayRanksCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+
+    m_rankSubsetEdit = new QLineEdit(QStringLiteral("All"), this);
+    m_rankSubsetEdit->setObjectName(QStringLiteral("arrayPlotRankSubsetEdit"));
+    m_rankSubsetEdit->setPlaceholderText(QStringLiteral("All or 0..3"));
+    m_rankSubsetEdit->setFixedHeight(24);
+    m_rankSubsetEdit->setFixedWidth(96);
+    m_rankSubsetEdit->setToolTip(QStringLiteral("Ranks to overlay (e.g., All, 0..3, 0,2,3)"));
 
     m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh"), this);
     m_autoRefreshCheck->setObjectName(QStringLiteral("arrayPlotAutoRefreshCheck"));
@@ -454,18 +274,16 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     m_gnuplotBtn->setObjectName(QStringLiteral("arrayPlotGnuplotBtn"));
     m_gnuplotBtn->setFixedHeight(24);
 
-    secondRow->addWidget(new QLabel(QStringLiteral("Rows (NY):"), this));
-    secondRow->addWidget(m_rowsSpin);
-    secondRow->addWidget(new QLabel(QStringLiteral("Cols (NX):"), this));
-    secondRow->addWidget(m_colsSpin);
-    secondRow->addWidget(m_rankCombo);
-    secondRow->addWidget(m_overlayRanksCheck);
-    secondRow->addWidget(m_autoRefreshCheck);
-    secondRow->addStretch(1);
-    secondRow->addWidget(m_exportCsvBtn);
-    secondRow->addWidget(m_savePngBtn);
-    secondRow->addWidget(m_gnuplotBtn);
-    root->addLayout(secondRow);
+    rankRow->addWidget(m_rankCombo);
+    rankRow->addWidget(m_overlayRanksCheck);
+    rankRow->addWidget(new QLabel(QStringLiteral("Ranks:"), this));
+    rankRow->addWidget(m_rankSubsetEdit);
+    rankRow->addWidget(m_autoRefreshCheck);
+    rankRow->addStretch(1);
+    rankRow->addWidget(m_exportCsvBtn);
+    rankRow->addWidget(m_savePngBtn);
+    rankRow->addWidget(m_gnuplotBtn);
+    root->addLayout(rankRow);
 
     // Custom scientific plot canvas.
     m_canvas = new ArrayPlotCanvas(this);
@@ -475,7 +293,7 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     auto* footerRow = new QHBoxLayout();
     m_statsLabel = new QLabel(QStringLiteral("Min: 0 | Max: 0 | Mean: 0 | L2: 0 | NaN/Inf: 0 | Changed: 0"), this);
     m_statsLabel->setObjectName(QStringLiteral("arrayPlotStatsLabel"));
-    m_hoverLabel = new QLabel(QStringLiteral("Hover over plot canvas to inspect values and deltas"), this);
+    m_hoverLabel = new QLabel(QStringLiteral("Drag to zoom, double-click to reset, hover to inspect values"), this);
     m_hoverLabel->setObjectName(QStringLiteral("arrayPlotHoverLabel"));
     footerRow->addWidget(m_statsLabel, 1);
     footerRow->addWidget(m_hoverLabel);
@@ -485,7 +303,18 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     connect(m_exprEdit, &QLineEdit::returnPressed, this, &ArrayPlotDialog::refreshPlot);
     connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::close);
     connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        if (m_canvas) m_canvas->update();
+        if (plotMode() == PlotMode::ScalarHistory) {
+            m_currentSamples = m_scalarHistory;
+            m_previousSamples.clear();
+            m_rows = 1;
+            m_cols = qMax(1, static_cast<int>(m_scalarHistory.size()));
+            m_rankOverlays = m_rankScalarHistories;
+            recomputeStats();
+        }
+        if (m_canvas) {
+            m_canvas->resetZoom();
+            m_canvas->update();
+        }
     });
     connect(m_colormapCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         if (m_canvas) m_canvas->update();
@@ -499,11 +328,36 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
         m_cols = qMax(1, c);
         if (m_canvas) m_canvas->update();
     });
+    connect(m_offsetSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int off) {
+        m_sliceOffset = qMax(0, off);
+        if (m_canvas) m_canvas->update();
+    });
+    connect(m_strideSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int str) {
+        m_sliceStride = qMax(1, str);
+        if (m_canvas) m_canvas->update();
+    });
+    connect(m_logScaleCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        if (m_canvas) m_canvas->setLogScale(enabled);
+    });
+    connect(m_resetZoomBtn, &QPushButton::clicked, this, &ArrayPlotDialog::resetZoom);
+    connect(m_canvas, &ArrayPlotCanvas::zoomChanged, m_resetZoomBtn, &QPushButton::setEnabled);
+    connect(m_clearHistoryBtn, &QPushButton::clicked, this, &ArrayPlotDialog::clearScalarHistory);
     connect(m_rankCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
         if (idx >= 0) {
             m_focusedRank = m_rankCombo->itemData(idx).toInt();
             if (isAutoRefreshEnabled()) refreshPlot();
         }
+    });
+    connect(m_overlayRanksCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (!checked) {
+            m_pendingOverlayRanks.clear();
+            clearRankOverlays();
+        } else {
+            refreshPlot();
+        }
+    });
+    connect(m_rankSubsetEdit, &QLineEdit::returnPressed, this, [this]() {
+        if (isOverlayRanksEnabled()) refreshPlot();
     });
     connect(m_exportCsvBtn, &QPushButton::clicked, this, [this]() {
         const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export Array CSV"),
@@ -531,9 +385,36 @@ void ArrayPlotDialog::setCoordinator(::IBackendCoordinator* coordinator) {
 
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
             [this](int rankId, const QString& /*address*/, const QByteArray& data) {
-                if (!m_awaitingCoordinatorRead || rankId != m_focusedRank || data.isEmpty()) return;
+                if (data.isEmpty()) return;
+                if (m_pendingOverlayRanks.remove(rankId)) {
+                    const int count = qMax(1, m_cols);
+                    const QVector<double> decoded = decodeStridedBytes(
+                        data, elementType(), count, m_sliceOffset, m_sliceStride);
+                    if (!decoded.isEmpty()) {
+                        setRankOverlaySamples(rankId, decoded);
+                        if (rankId == m_focusedRank) {
+                            setSamples(decoded, 1, decoded.size());
+                        }
+                    }
+                    return;
+                }
+                if (!m_awaitingCoordinatorRead || rankId != m_focusedRank) return;
                 m_awaitingCoordinatorRead = false;
-                loadFromRawBytes(data, elementType(), m_rows, m_cols);
+                loadFromRawBytes(data, elementType(), m_rows, m_cols, m_sliceOffset, m_sliceStride);
+            });
+    connect(m_coordinator, &IBackendCoordinator::expressionEvaluated, this,
+            [this](int rankId, const QString& expr, const QString& result) {
+                if (plotMode() != PlotMode::ScalarHistory) return;
+                const bool expecting = m_pendingScalarRanks.contains(rankId) ||
+                                       (m_awaitingScalarEval && rankId == m_focusedRank);
+                if (!expecting) return;
+                if (!m_pendingScalarExpr.isEmpty() && expr.trimmed() != m_pendingScalarExpr) return;
+                m_pendingScalarRanks.remove(rankId);
+                if (rankId == m_focusedRank) m_awaitingScalarEval = false;
+                double val = 0.0;
+                if (parseScalarResult(result, &val)) {
+                    appendScalarSample(val, rankId);
+                }
             });
     if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
         connect(gdb, &gridlock::GdbRankCoordinator::rankStateChanged, this,
@@ -550,157 +431,136 @@ void ArrayPlotDialog::setCoordinator(::IBackendCoordinator* coordinator) {
     }
 }
 
-void ArrayPlotDialog::setExpression(const QString& expr) {
-    if (m_exprEdit) m_exprEdit->setText(expr.trimmed());
+ArraySliceSpec ArrayPlotDialog::syncSliceControlsFromExpression() {
+    const ArraySliceSpec spec = parseArraySliceExpression(expression());
+    if (spec.hasSlice) {
+        setSliceOffset(spec.offset);
+        setSliceStride(spec.stride);
+        m_hasExplicitSliceCount = (spec.count > 0);
+        if (spec.count > 0) {
+            m_cols = spec.count;
+            if (m_colsSpin && m_colsSpin->value() != m_cols) { QSignalBlocker b(m_colsSpin); m_colsSpin->setValue(m_cols); }
+        }
+    } else {
+        m_hasExplicitSliceCount = false;
+    }
+    return spec;
 }
 
-QString ArrayPlotDialog::expression() const {
-    return m_exprEdit ? m_exprEdit->text().trimmed() : QString();
-}
+void ArrayPlotDialog::setExpression(const QString& expr) { if (m_exprEdit) m_exprEdit->setText(expr.trimmed()); syncSliceControlsFromExpression(); }
+QString ArrayPlotDialog::expression() const { return m_exprEdit ? m_exprEdit->text().trimmed() : QString(); }
+QString ArrayPlotDialog::baseExpression() const { return parseArraySliceExpression(expression()).baseExpression; }
 
 void ArrayPlotDialog::setElementType(ElementType type) {
     if (!m_typeCombo) return;
-    const int idx = m_typeCombo->findData(static_cast<int>(type));
-    if (idx >= 0) m_typeCombo->setCurrentIndex(idx);
+    if (const int idx = m_typeCombo->findData(static_cast<int>(type)); idx >= 0) m_typeCombo->setCurrentIndex(idx);
 }
 
 void ArrayPlotDialog::setElementTypeFromString(const QString& cType) {
     const QString lower = cType.toLower();
     if (lower.contains(QStringLiteral("float"))) setElementType(ElementType::Float32);
-    else if (lower.contains(QStringLiteral("uint8")) || lower.contains(QStringLiteral("uchar")) || lower.contains(QStringLiteral("char")))
-        setElementType(ElementType::UInt8);
-    else if (lower.contains(QStringLiteral("int64")) || lower.contains(QStringLiteral("long")))
-        setElementType(ElementType::Int64);
-    else if (lower.contains(QStringLiteral("int")))
-        setElementType(ElementType::Int32);
-    else
-        setElementType(ElementType::Float64);
+    else if (lower.contains(QStringLiteral("uint8")) || lower.contains(QStringLiteral("uchar")) || lower.contains(QStringLiteral("char"))) setElementType(ElementType::UInt8);
+    else if (lower.contains(QStringLiteral("int64")) || lower.contains(QStringLiteral("long"))) setElementType(ElementType::Int64);
+    else if (lower.contains(QStringLiteral("int"))) setElementType(ElementType::Int32);
+    else setElementType(ElementType::Float64);
 }
 
 ArrayPlotDialog::ElementType ArrayPlotDialog::elementType() const {
-    if (!m_typeCombo) return ElementType::Float64;
-    return static_cast<ElementType>(m_typeCombo->currentData().toInt());
+    return m_typeCombo ? static_cast<ElementType>(m_typeCombo->currentData().toInt()) : ElementType::Float64;
 }
 
 void ArrayPlotDialog::setPlotMode(PlotMode mode) {
-    if (!m_modeCombo) return;
-    const int idx = m_modeCombo->findData(static_cast<int>(mode));
-    if (idx >= 0) m_modeCombo->setCurrentIndex(idx);
+    if (m_modeCombo) { if (const int idx = m_modeCombo->findData(static_cast<int>(mode)); idx >= 0) m_modeCombo->setCurrentIndex(idx); }
     if (m_canvas) m_canvas->update();
 }
-
 ArrayPlotDialog::PlotMode ArrayPlotDialog::plotMode() const {
-    if (!m_modeCombo) return PlotMode::Line1D;
-    return static_cast<PlotMode>(m_modeCombo->currentData().toInt());
+    return m_modeCombo ? static_cast<PlotMode>(m_modeCombo->currentData().toInt()) : PlotMode::Line1D;
 }
 
 void ArrayPlotDialog::setColormap(Colormap cm) {
-    if (!m_colormapCombo) return;
-    const int idx = m_colormapCombo->findData(static_cast<int>(cm));
-    if (idx >= 0) m_colormapCombo->setCurrentIndex(idx);
+    if (m_colormapCombo) { if (const int idx = m_colormapCombo->findData(static_cast<int>(cm)); idx >= 0) m_colormapCombo->setCurrentIndex(idx); }
     if (m_canvas) m_canvas->update();
 }
-
 ArrayPlotDialog::Colormap ArrayPlotDialog::colormap() const {
-    if (!m_colormapCombo) return Colormap::Viridis;
-    return static_cast<Colormap>(m_colormapCombo->currentData().toInt());
+    return m_colormapCombo ? static_cast<Colormap>(m_colormapCombo->currentData().toInt()) : Colormap::Viridis;
 }
 
 void ArrayPlotDialog::setDimensions(int rows, int cols) {
-    m_rows = qMax(1, rows);
-    m_cols = qMax(1, cols);
-    if (m_rowsSpin && m_rowsSpin->value() != m_rows) {
-        m_rowsSpin->blockSignals(true);
-        m_rowsSpin->setValue(m_rows);
-        m_rowsSpin->blockSignals(false);
-    }
-    if (m_colsSpin && m_colsSpin->value() != m_cols) {
-        m_colsSpin->blockSignals(true);
-        m_colsSpin->setValue(m_cols);
-        m_colsSpin->blockSignals(false);
-    }
+    m_rows = qMax(1, rows); m_cols = qMax(1, cols);
+    if (m_rowsSpin && m_rowsSpin->value() != m_rows) { QSignalBlocker b(m_rowsSpin); m_rowsSpin->setValue(m_rows); }
+    if (m_colsSpin && m_colsSpin->value() != m_cols) { QSignalBlocker b(m_colsSpin); m_colsSpin->setValue(m_cols); }
     if (m_rows > 1) setPlotMode(PlotMode::Heatmap2D);
     if (m_canvas) m_canvas->update();
 }
+
+void ArrayPlotDialog::setSliceOffset(int offset) {
+    m_sliceOffset = qMax(0, offset);
+    if (m_offsetSpin && m_offsetSpin->value() != m_sliceOffset) { QSignalBlocker b(m_offsetSpin); m_offsetSpin->setValue(m_sliceOffset); }
+    if (m_canvas) m_canvas->update();
+}
+
+void ArrayPlotDialog::setSliceStride(int stride) {
+    m_sliceStride = qMax(1, stride);
+    if (m_strideSpin && m_strideSpin->value() != m_sliceStride) { QSignalBlocker b(m_strideSpin); m_strideSpin->setValue(m_sliceStride); }
+    if (m_canvas) m_canvas->update();
+}
+
+void ArrayPlotDialog::setLogScale(bool enabled) {
+    if (m_logScaleCheck && m_logScaleCheck->isChecked() != enabled) m_logScaleCheck->setChecked(enabled);
+    else if (m_canvas) m_canvas->setLogScale(enabled);
+}
+bool ArrayPlotDialog::isLogScale() const { return m_canvas ? m_canvas->isLogScale() : (m_logScaleCheck && m_logScaleCheck->isChecked()); }
+void ArrayPlotDialog::resetZoom() { if (m_canvas) m_canvas->resetZoom(); }
+bool ArrayPlotDialog::isZoomed() const { return m_canvas && m_canvas->isZoomed(); }
+QPair<int, int> ArrayPlotDialog::visibleXRange() const { return m_canvas ? m_canvas->visibleXRange() : QPair<int, int>{0, 0}; }
+QPair<int, int> ArrayPlotDialog::visibleYRange() const { return m_canvas ? m_canvas->visibleYRange() : QPair<int, int>{0, 0}; }
 
 void ArrayPlotDialog::setFocusedRank(int rankId) {
     m_focusedRank = qMax(0, rankId);
     if (m_rankCombo) {
         const int idx = m_rankCombo->findData(m_focusedRank);
-        if (idx >= 0 && m_rankCombo->currentIndex() != idx) {
-            m_rankCombo->blockSignals(true);
-            m_rankCombo->setCurrentIndex(idx);
-            m_rankCombo->blockSignals(false);
-        }
+        if (idx >= 0 && m_rankCombo->currentIndex() != idx) { QSignalBlocker b(m_rankCombo); m_rankCombo->setCurrentIndex(idx); }
     }
 }
 
-bool ArrayPlotDialog::isAutoRefreshEnabled() const {
-    return m_autoRefreshCheck ? m_autoRefreshCheck->isChecked() : true;
+void ArrayPlotDialog::setOverlayRanksEnabled(bool enabled) { if (m_overlayRanksCheck) m_overlayRanksCheck->setChecked(enabled); }
+bool ArrayPlotDialog::isOverlayRanksEnabled() const { return m_overlayRanksCheck && m_overlayRanksCheck->isChecked(); }
+void ArrayPlotDialog::setRankSubsetSpec(const QString& spec) { if (m_rankSubsetEdit) m_rankSubsetEdit->setText(spec.trimmed()); }
+QString ArrayPlotDialog::rankSubsetSpec() const { return m_rankSubsetEdit ? m_rankSubsetEdit->text().trimmed() : QStringLiteral("All"); }
+QVector<int> ArrayPlotDialog::selectedOverlayRanks(int totalRanks) const {
+    return parseRankSubset(rankSubsetSpec(), (totalRanks >= 0) ? totalRanks : (m_coordinator ? m_coordinator->getProcessCount() : 0));
 }
-
-void ArrayPlotDialog::setAutoRefreshEnabled(bool enabled) {
-    if (m_autoRefreshCheck) m_autoRefreshCheck->setChecked(enabled);
-}
+void ArrayPlotDialog::expectOverlayReadForRank(int rankId) { m_pendingOverlayRanks.insert(qMax(0, rankId)); }
+bool ArrayPlotDialog::isAutoRefreshEnabled() const { return m_autoRefreshCheck ? m_autoRefreshCheck->isChecked() : true; }
+void ArrayPlotDialog::setAutoRefreshEnabled(bool enabled) { if (m_autoRefreshCheck) m_autoRefreshCheck->setChecked(enabled); }
 
 bool ArrayPlotDialog::loadFromRawBytes(const QByteArray& rawBytes, const QString& typeName,
-                                       int rows, int cols) {
+                                       int rows, int cols, int offset, int stride) {
     setElementTypeFromString(typeName);
-    return loadFromRawBytes(rawBytes, elementType(), rows, cols);
+    return loadFromRawBytes(rawBytes, elementType(), rows, cols, offset, stride);
 }
 
 bool ArrayPlotDialog::loadFromRawBytes(const QByteArray& rawBytes, ElementType type,
-                                       int rows, int cols) {
+                                       int rows, int cols, int offset, int stride) {
     setElementType(type);
-    const int elemSize = byteSizeOf(type);
-    const int totalAvailable = rawBytes.size() / elemSize;
-    if (totalAvailable <= 0) return false;
+    const int effOffset = (offset >= 0) ? offset : m_sliceOffset;
+    const int effStride = (stride > 0) ? stride : m_sliceStride;
+    if (offset >= 0) setSliceOffset(effOffset);
+    if (stride > 0) setSliceStride(effStride);
 
     const int effRows = qMax(1, rows);
-    const int effCols = (cols > 0) ? cols : (totalAvailable / effRows);
-    const int count = qMin(totalAvailable, effRows * qMax(1, effCols));
-    if (count <= 0) return false;
-
-    QVector<double> decoded;
-    decoded.resize(count);
-    const char* ptr = rawBytes.constData();
-
-    for (int i = 0; i < count; ++i) {
-        const char* src = ptr + i * elemSize;
-        switch (type) {
-            case ElementType::Float64: {
-                double v = 0.0;
-                std::memcpy(&v, src, sizeof(v));
-                decoded[i] = v;
-                break;
-            }
-            case ElementType::Float32: {
-                float v = 0.0f;
-                std::memcpy(&v, src, sizeof(v));
-                decoded[i] = static_cast<double>(v);
-                break;
-            }
-            case ElementType::Int32: {
-                int32_t v = 0;
-                std::memcpy(&v, src, sizeof(v));
-                decoded[i] = static_cast<double>(v);
-                break;
-            }
-            case ElementType::Int64: {
-                int64_t v = 0;
-                std::memcpy(&v, src, sizeof(v));
-                decoded[i] = static_cast<double>(v);
-                break;
-            }
-            case ElementType::UInt8: {
-                uint8_t v = 0;
-                std::memcpy(&v, src, sizeof(v));
-                decoded[i] = static_cast<double>(v);
-                break;
-            }
-        }
+    int requestedCount = 0;
+    if (cols > 0) {
+        requestedCount = effRows * cols;
+    } else if (m_hasExplicitSliceCount && effRows == 1) {
+        requestedCount = qMax(1, m_cols);
     }
 
+    const QVector<double> decoded =
+        decodeStridedBytes(rawBytes, type, requestedCount, effOffset, effStride);
+    if (decoded.isEmpty()) return false;
+
+    const int effCols = (cols > 0) ? cols : qMax(1, static_cast<int>(decoded.size()) / effRows);
     setSamples(decoded, effRows, effCols);
     return true;
 }
@@ -725,6 +585,42 @@ void ArrayPlotDialog::setRankOverlaySamples(int rankId, const QVector<double>& s
 void ArrayPlotDialog::clearRankOverlays() {
     m_rankOverlays.clear();
     if (m_canvas) m_canvas->update();
+}
+
+void ArrayPlotDialog::appendScalarSample(double value, int rankId) {
+    const int targetRank = (rankId >= 0) ? rankId : m_focusedRank;
+    if (targetRank == m_focusedRank) {
+        m_scalarHistory.append(value);
+    }
+    if (isOverlayRanksEnabled() || targetRank != m_focusedRank || !m_rankScalarHistories.isEmpty()) {
+        m_rankScalarHistories[targetRank].append(value);
+        if (plotMode() == PlotMode::ScalarHistory) {
+            m_rankOverlays[targetRank] = m_rankScalarHistories[targetRank];
+        }
+    }
+    if (plotMode() == PlotMode::ScalarHistory) {
+        m_previousSamples.clear();
+        m_currentSamples = m_scalarHistory;
+        m_rows = 1;
+        m_cols = qMax(1, static_cast<int>(m_scalarHistory.size()));
+        recomputeStats();
+        if (m_canvas) m_canvas->update();
+    }
+}
+
+void ArrayPlotDialog::clearScalarHistory() {
+    m_scalarHistory.clear();
+    m_rankScalarHistories.clear();
+    if (plotMode() == PlotMode::ScalarHistory) {
+        m_currentSamples.clear();
+        m_previousSamples.clear();
+        m_rankOverlays.clear();
+        recomputeStats();
+    }
+    if (m_canvas) {
+        m_canvas->resetZoom();
+        m_canvas->update();
+    }
 }
 
 void ArrayPlotDialog::recomputeStats() {
@@ -769,28 +665,75 @@ void ArrayPlotDialog::recomputeStats() {
     }
 
     if (m_statsLabel) {
-        m_statsLabel->setText(
-            QStringLiteral("Min: %1 | Max: %2 | Mean: %3 | L2: %4 | NaN/Inf: %5 (%6 NaN, %7 Inf) | Changed: %8")
-                .arg(QString::number(m_minVal, 'g', 6),
-                     QString::number(m_maxVal, 'g', 6),
-                     QString::number(m_meanVal, 'g', 6),
-                     QString::number(m_l2Norm, 'g', 6))
-                .arg(m_nanCount + m_infCount)
-                .arg(m_nanCount)
-                .arg(m_infCount)
-                .arg(m_changedElementCount));
+        if (plotMode() == PlotMode::ScalarHistory) {
+            m_statsLabel->setText(
+                QStringLiteral("Stops: %1 | Min: %2 | Max: %3 | Mean: %4 | Latest: %5 | NaN/Inf: %6")
+                    .arg(m_scalarHistory.size())
+                    .arg(QString::number(m_minVal, 'g', 6),
+                         QString::number(m_maxVal, 'g', 6),
+                         QString::number(m_meanVal, 'g', 6),
+                         m_scalarHistory.isEmpty() ? QStringLiteral("-")
+                                                   : QString::number(m_scalarHistory.constLast(), 'g', 6))
+                    .arg(m_nanCount + m_infCount));
+        } else {
+            m_statsLabel->setText(
+                QStringLiteral("Min: %1 | Max: %2 | Mean: %3 | L2: %4 | NaN/Inf: %5 (%6 NaN, %7 Inf) | Changed: %8")
+                    .arg(QString::number(m_minVal, 'g', 6),
+                         QString::number(m_maxVal, 'g', 6),
+                         QString::number(m_meanVal, 'g', 6),
+                         QString::number(m_l2Norm, 'g', 6))
+                    .arg(m_nanCount + m_infCount)
+                    .arg(m_nanCount)
+                    .arg(m_infCount)
+                    .arg(m_changedElementCount));
+        }
     }
 }
 
 void ArrayPlotDialog::refreshPlot() {
-    const QString expr = expression();
-    if (m_coordinator && !expr.isEmpty()) {
-        const size_t totalBytes = static_cast<size_t>(qMax(1, m_rows) * qMax(1, m_cols) * byteSizeOf(elementType()));
-        const QString addrExpr = expr.startsWith(QLatin1Char('&')) || expr.startsWith(QStringLiteral("0x"))
-                                     ? expr
-                                     : QStringLiteral("&(%1)[0]").arg(expr);
-        m_awaitingCoordinatorRead = true;
-        m_coordinator->readMemory(m_focusedRank, addrExpr, totalBytes);
+    const QString rawExpr = expression();
+    if (plotMode() == PlotMode::ScalarHistory) {
+        if (m_coordinator && !rawExpr.isEmpty()) {
+            m_pendingScalarExpr = rawExpr;
+            if (isOverlayRanksEnabled()) {
+                for (int r : selectedOverlayRanks(m_coordinator->getProcessCount())) {
+                    m_pendingScalarRanks.insert(r);
+                    m_coordinator->evaluateExpression(r, rawExpr);
+                }
+            } else {
+                m_awaitingScalarEval = true;
+                m_pendingScalarRanks.insert(m_focusedRank);
+                m_coordinator->evaluateExpression(m_focusedRank, rawExpr);
+            }
+        }
+        if (m_canvas) m_canvas->update();
+        return;
+    }
+
+    const ArraySliceSpec spec = syncSliceControlsFromExpression();
+    const QString baseExpr = spec.baseExpression;
+    if (!baseExpr.isEmpty()) {
+        const int elemCount = qMax(1, m_rows) * qMax(1, m_cols);
+        const int spanElems = m_sliceOffset + (elemCount - 1) * qMax(1, m_sliceStride) + 1;
+        const int totalBytes = spanElems * byteSizeOf(elementType());
+        const QString addrExpr = (baseExpr.startsWith(QLatin1Char('&')) || baseExpr.startsWith(QStringLiteral("0x")))
+                                     ? baseExpr
+                                     : QStringLiteral("&(%1)[0]").arg(baseExpr);
+
+        if (isOverlayRanksEnabled() && plotMode() != PlotMode::Heatmap2D && m_rows == 1) {
+            m_pendingOverlayRanks.clear();
+            emit multiRankPlotRequested(baseExpr, totalBytes, elementType(), m_sliceOffset, m_sliceStride);
+            // Fallback dispatch when no external coordinator bridge (e.g., MainWindow) handled the signal.
+            if (m_pendingOverlayRanks.isEmpty() && m_coordinator) {
+                for (int r : selectedOverlayRanks(m_coordinator->getProcessCount())) {
+                    expectOverlayReadForRank(r);
+                    m_coordinator->readMemory(r, addrExpr, totalBytes);
+                }
+            }
+        } else if (m_coordinator) {
+            m_awaitingCoordinatorRead = true;
+            m_coordinator->readMemory(m_focusedRank, addrExpr, totalBytes);
+        }
     }
     if (m_canvas) m_canvas->update();
 }
@@ -808,7 +751,12 @@ bool ArrayPlotDialog::exportCsv(const QString& filePath) const {
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
 
     QTextStream out(&file);
-    if (m_rows > 1) {
+    if (plotMode() == PlotMode::ScalarHistory) {
+        out << "stop,value\n";
+        for (int i = 0; i < m_currentSamples.size(); ++i) {
+            out << i << "," << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
+        }
+    } else if (m_rows > 1) {
         out << "row,col,value\n";
         for (int r = 0; r < m_rows; ++r) {
             for (int c = 0; c < m_cols; ++c) {
@@ -823,7 +771,7 @@ bool ArrayPlotDialog::exportCsv(const QString& filePath) const {
             const double cur = m_currentSamples.at(i);
             const double prev = (i < m_previousSamples.size()) ? m_previousSamples.at(i) : cur;
             const double delta = cur - prev;
-            out << i << ","
+            out << (m_sliceOffset + i * m_sliceStride) << ","
                 << QString::number(cur, 'g', 12) << ","
                 << QString::number(prev, 'g', 12) << ","
                 << QString::number(delta, 'g', 12) << "\n";
@@ -847,14 +795,17 @@ bool ArrayPlotDialog::openInGnuplot() const {
     if (!df.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream dout(&df);
     for (int i = 0; i < m_currentSamples.size(); ++i) {
-        dout << i << " " << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
+        const int x = (plotMode() == PlotMode::ScalarHistory) ? i : (m_sliceOffset + i * m_sliceStride);
+        dout << x << " " << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
     }
     df.close();
 
     QFile sf(scriptPath);
     if (!sf.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream sout(&sf);
-    sout << "set grid\nset title 'GridLock Array Plot: " << expression() << "'\n";
+    sout << "set grid\n";
+    if (isLogScale()) sout << "set logscale y\n";
+    sout << "set title 'GridLock Array Plot: " << expression() << "'\n";
     sout << "plot '" << dataPath << "' using 1:2 with linespoints title 'Rank " << m_focusedRank << "'\n";
     sf.close();
 
@@ -882,6 +833,7 @@ void ArrayPlotDialog::reloadStyle() {
         "QLineEdit, QComboBox, QSpinBox { background: %3; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
         "QPushButton { background: %5; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 8px; font-size: 11px; }"
         "QPushButton:hover { border: 1px solid %6; }"
+        "QPushButton:disabled { color: %7; }"
         "QLabel#arrayPlotStatsLabel { color: %6; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; }"
         "QLabel#arrayPlotHoverLabel { color: %7; font-family: 'JetBrains Mono', monospace; font-size: 10px; }")
                       .arg(bg, pal.textHex, inputBg, pal.borderHex, btnBg, pal.accentHex, muted));

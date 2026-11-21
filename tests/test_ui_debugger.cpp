@@ -466,7 +466,6 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
 
 /** @brief Verifies gutter hover tracking, ghost preview, and anchored breakpoint popover controls. */
 void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
-    // 1. Initialize SourceCodeView with 40 MPI_Send lines for gutter hover and breakpoint tests.
     gridlock::ui::SourceCodeView sourceCodeView; QString sampleCode;
     for (int i = 1; i <= 40; ++i) sampleCode += QStringLiteral("    MPI_Send(send_buf.data(), %1, MPI_INT, next, 0, MPI_COMM_WORLD);\n").arg(i);
     sourceCodeView.setSourceCode(sampleCode); sourceCodeView.resize(720, 560); sourceCodeView.show(); QApplication::processEvents();
@@ -475,12 +474,9 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
     sourceCodeView.toggleBreakpoint(16); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(16), QStringLiteral("Breakpoint"));
     sourceCodeView.toggleBreakpoint(16); sourceCodeView.setHoveredGutterLine(-1);
     QVERIFY(sourceCodeView.hoveredGutterLine() == -1 && sourceCodeView.gutterMarkerStateForLine(16) == QStringLiteral("None"));
-    // 2. Verify ConditionalBreakpointDialog target line summary, suspend scope, and anchored screen positioning.
-    gridlock::ui::ConditionalBreakpointDialog dialog(QString(), &sourceCodeView);
-    dialog.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
+    gridlock::ui::ConditionalBreakpointDialog dialog(QString(), &sourceCodeView); dialog.setTargetLineContext(34, QStringLiteral("MPI_Send(send_buf.data(), ...);"));
     QVERIFY2(dialog.targetLineSummaryText().contains(QStringLiteral("Line 34")) && dialog.isBreakpointEnabled() && dialog.suspendScope() == QStringLiteral("All"), qPrintable(dialog.targetLineSummaryText()));
-    QRadioButton* rankRadio = nullptr;
-    for (QRadioButton* rb : dialog.findChildren<QRadioButton*>()) if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) { rankRadio = rb; break; }
+    QRadioButton* rankRadio = nullptr; for (QRadioButton* rb : dialog.findChildren<QRadioButton*>()) if (rb->text().contains(QStringLiteral("Rank"), Qt::CaseInsensitive) || !rb->isChecked()) { rankRadio = rb; break; }
     QVERIFY(rankRadio != nullptr); rankRadio->setChecked(true); QApplication::processEvents(); QCOMPARE(dialog.suspendScope(), QStringLiteral("Rank"));
     dialog.applyQuickPreset(QStringLiteral("rank == 0")); QCOMPARE(dialog.getCondition(), QStringLiteral("rank == 0"));
     const QPoint anchorGlobalPos(120, 340); dialog.positionNearAnchor(anchorGlobalPos); dialog.show(); QApplication::processEvents();
@@ -491,16 +487,11 @@ void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancels
     gridlock::ui::SourceCodeView sourceCodeView; QString sampleCode;
     for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int rank_val_%1 = %1;\n").arg(i);
     sourceCodeView.setSourceCode(sampleCode); sourceCodeView.resize(720, 560); sourceCodeView.show(); QApplication::processEvents();
-    // 1. Locate LineNumberArea child widget and verify QContextMenuEvent is accepted without bubbling.
-    QWidget* gutterWidget = nullptr;
-    for (QWidget* w : sourceCodeView.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) if (w != sourceCodeView.viewport() && w->width() == sourceCodeView.lineNumberAreaWidth()) { gutterWidget = w; break; }
-    QVERIFY(gutterWidget != nullptr);
-    QContextMenuEvent gutterMenuEv(QContextMenuEvent::Mouse, QPoint(10, 25), sourceCodeView.mapToGlobal(QPoint(10, 25)));
+    QWidget* gutterWidget = nullptr; for (QWidget* w : sourceCodeView.findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) if (w != sourceCodeView.viewport() && w->width() == sourceCodeView.lineNumberAreaWidth()) { gutterWidget = w; break; }
+    QVERIFY(gutterWidget != nullptr); QContextMenuEvent gutterMenuEv(QContextMenuEvent::Mouse, QPoint(10, 25), sourceCodeView.mapToGlobal(QPoint(10, 25)));
     gutterMenuEv.ignore(); QApplication::sendEvent(gutterWidget, &gutterMenuEv);
     QVERIFY(gutterMenuEv.isAccepted() && !sourceCodeView.shouldOpenEditorContextMenuAt(QPoint(10, 25)) && sourceCodeView.shouldOpenEditorContextMenuAt(QPoint(120, 25)));
-    // 2. Canceling a newly right-clicked gutter breakpoint restores unmarked state on line 18.
-    sourceCodeView.toggleBreakpoint(18);
-    sourceCodeView.handleBreakpointPopoverResult(18, false, false, false, QString(), QStringLiteral("All")); QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
+    sourceCodeView.toggleBreakpoint(18); sourceCodeView.handleBreakpointPopoverResult(18, false, false, false, QString(), QStringLiteral("All")); QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
     sourceCodeView.handleBreakpointPopoverResult(18, false, true, true, QStringLiteral("rank == 0"), QStringLiteral("Rank")); QCOMPARE(sourceCodeView.gutterMarkerStateForLine(18), QStringLiteral("ConditionalBreakpoint"));
     sourceCodeView.handleBreakpointPopoverResult(18, true, true, false, QString(), QStringLiteral("All")); QCOMPARE(sourceCodeView.hasBreakpoint(18), false);
 }
@@ -513,13 +504,7 @@ template <typename T> auto callEditorCompletionsAtLine(T* v, int l, const QStrin
 template <typename T> auto callTriggerCompletionPopup(T* v, const QString& p, int l, int) -> decltype(v->triggerCompletionPopupAtCursor(p, l), void()) { v->triggerCompletionPopupAtCursor(p, l); } template <typename T> void callTriggerCompletionPopup(T*, const QString&, int, ...) {}
 template <typename C, typename... A> auto callCompleteDetailed(int, A&&... a) -> decltype(C::completeDetailedAtLine(std::forward<A>(a)...)) { return C::completeDetailedAtLine(std::forward<A>(a)...); } template <typename C, typename... A> int callCompleteDetailed(long, A&&...) { return 0; }
 template <typename T> void verifyCompletions(const T& c) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QVERIFY(!c.isEmpty() && c.contains(QStringLiteral("id")) && c.contains(QStringLiteral("coords"))); } }
-template <typename T> void verifyDetailed(const T& items) {
-    if constexpr (!std::is_same_v<std::decay_t<T>, int>) {
-        QVERIFY(!items.isEmpty()); bool fId = false, fCoords = false;
-        for (const auto& it : items) {
-            if (it.label == QStringLiteral("id")) { fId = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QCOMPARE(it.detailType, QStringLiteral("int")); }
-            else if (it.label == QStringLiteral("coords")) { fCoords = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QVERIFY(!it.detailType.isEmpty()); }
-        } QVERIFY(fId && fCoords); } }
+template <typename T> void verifyDetailed(const T& items) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QVERIFY(!items.isEmpty()); bool fId = false, fCoords = false; for (const auto& it : items) { if (it.label == QStringLiteral("id")) { fId = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QCOMPARE(it.detailType, QStringLiteral("int")); } else if (it.label == QStringLiteral("coords")) { fCoords = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QVERIFY(!it.detailType.isEmpty()); } } QVERIFY(fId && fCoords); } }
 template <typename T, typename M> void verifyLoadedTheme(const T&, M& tm) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QCOMPARE(tm.activeThemeId(), QStringLiteral("tokyo_night")); } }
 }  // namespace (anonymous)
 /** @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector expression completion in ConditionalBreakpointDialog. */
@@ -527,27 +512,18 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp")), deadlockPath = resolveTutorialPath(QStringLiteral("tutorial/deadlock_ring.cpp"));
     const QString inspectionSource = readTutorialFile(QStringLiteral("tutorial/inspection_demo.cpp")), deadlockSource = readTutorialFile(QStringLiteral("tutorial/deadlock_ring.cpp"));
     QVERIFY(!inspectionSource.isEmpty() && !deadlockSource.isEmpty());
-    // 1. Verify LSP JSON-RPC Content-Length framing and virtual document splicing at line 18.
-    int zeroLine = -1, zeroCol = -1;
-    const QString spliced = gridlock::core::ClangdLspClient::buildVirtualCompletionDocument(inspectionSource, 18, QStringLiteral("data[i]."), &zeroLine, &zeroCol);
-    const QStringList splicedLines = spliced.split(QLatin1Char('\n'));
-    QVERIFY(zeroLine == 17 && zeroCol >= 8 && zeroLine < splicedLines.size() && splicedLines.at(zeroLine).left(zeroCol).endsWith(QStringLiteral("data[i].")));
-    // 2. Verify member completion on `data[i].` and nested `data[i].coords.` in ConditionalBreakpointDialog.
+    int zeroLine = -1, zeroCol = -1; const QString spliced = gridlock::core::ClangdLspClient::buildVirtualCompletionDocument(inspectionSource, 18, QStringLiteral("data[i]."), &zeroLine, &zeroCol);
+    const QStringList splicedLines = spliced.split(QLatin1Char('\n')); QVERIFY(zeroLine == 17 && zeroCol >= 8 && zeroLine < splicedLines.size() && splicedLines.at(zeroLine).left(zeroCol).endsWith(QStringLiteral("data[i].")));
     gridlock::ui::ConditionalBreakpointDialog dialog; dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
     const QStringList items1 = dialog.completionsForExpression(QStringLiteral("data[i].")), items2 = dialog.completionsForExpression(QStringLiteral("data[i].coords."));
     QVERIFY(items1.contains(QStringLiteral("id")) && items1.contains(QStringLiteral("values")) && items1.contains(QStringLiteral("coords")) && items2.contains(QStringLiteral("x")) && items2.contains(QStringLiteral("y")) && items2.contains(QStringLiteral("z")));
-    // 3. Verify applying completion item "coords" and std::vector completion on `send_buf.`.
     dialog.applyQuickPreset(QStringLiteral("data[i].")); dialog.applyCompletionItem(QStringLiteral("coords")); QCOMPARE(dialog.getCondition(), QStringLiteral("data[i].coords"));
-    dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34);
-    const QString joined3 = dialog.completionsForExpression(QStringLiteral("send_buf.")).join(QLatin1Char('|'));
+    dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34); const QString joined3 = dialog.completionsForExpression(QStringLiteral("send_buf.")).join(QLatin1Char('|'));
     QVERIFY2(joined3.contains(QStringLiteral("data")) && joined3.contains(QStringLiteral("size")), qPrintable(joined3));
-    // 4. Verify live clangd publishDiagnostics -> SourceCodeView::setDiagnostics & cross-file F12 in MainWindow.
-    QTemporaryDir lspDir; QVERIFY(lspDir.isValid());
-    const QString hdrFile = lspDir.filePath(QStringLiteral("math_ops.hpp")), cppFile = lspDir.filePath(QStringLiteral("caller.cpp"));
+    QTemporaryDir lspDir; QVERIFY(lspDir.isValid()); const QString hdrFile = lspDir.filePath(QStringLiteral("math_ops.hpp")), cppFile = lspDir.filePath(QStringLiteral("caller.cpp"));
     { QFile hf(hdrFile); QVERIFY(hf.open(QIODevice::WriteOnly)); hf.write("#pragma once\nstruct Vec2 {\n  double x;\n  double y;\n  double lengthSq() const { return x * x + y * y; }\n};\n"); }
     { QFile cf(cppFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("#include \"math_ops.hpp\"\nint main() {\n  Vec2 v{3.0, 4.0};\n  int bad = \"not_an_int\";\n  return static_cast<int>(v.lengthSq()) + bad;\n}\n"); }
-    gridlock::ui::MainWindow mw; mw.loadSourceFile(cppFile);
-    auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(tabMgr && tabMgr->currentSourceCodeView());
+    gridlock::ui::MainWindow mw; mw.loadSourceFile(cppFile); auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(tabMgr && tabMgr->currentSourceCodeView());
     auto* callerView = tabMgr->currentSourceCodeView(); QTRY_VERIFY_WITH_TIMEOUT(!callerView->diagnostics().isEmpty(), 4000);
     QTextCursor navCur(callerView->document()->findBlockByNumber(4)); navCur.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, 29);
     callerView->setTextCursor(navCur); QKeyEvent f12Press(QEvent::KeyPress, Qt::Key_F12, Qt::NoModifier); QApplication::sendEvent(callerView, &f12Press);
@@ -557,26 +533,18 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
 void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence() {
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp")), inspectionSource = readTutorialFile(QStringLiteral("tutorial/inspection_demo.cpp"));
     QVERIFY(!inspectionSource.isEmpty());
-    // 1. SourceCodeView must be editable by default & support live completions.
-    gridlock::ui::SourceCodeView srcView; QVERIFY2(!srcView.isReadOnly(), "SourceCodeView must be editable (isReadOnly() == false)");
-    srcView.setSourceCode(inspectionSource);
-    verifyCompletions(callEditorCompletionsAtLine(&srcView, 18, QStringLiteral("data[i]."), 0));
-    callTriggerCompletionPopup(&srcView, QStringLiteral("data[i]."), 18, 0);
+    gridlock::ui::SourceCodeView srcView; QVERIFY2(!srcView.isReadOnly(), "SourceCodeView must be editable (isReadOnly() == false)"); srcView.setSourceCode(inspectionSource);
+    verifyCompletions(callEditorCompletionsAtLine(&srcView, 18, QStringLiteral("data[i]."), 0)); callTriggerCompletionPopup(&srcView, QStringLiteral("data[i]."), 18, 0);
     verifyDetailed(callCompleteDetailed<gridlock::core::ClangdLspClient>(0, inspectionPath, inspectionSource, 18, QStringLiteral("data[i].")));
-    // 2. Modern Breakpoint Popover Chained Member Insertion (data[i]. -> data[i].coords -> data[i].coords.x).
     gridlock::ui::ConditionalBreakpointDialog dialog; dialog.setSourceDocumentContext(inspectionPath, inspectionSource, 18);
     dialog.applyQuickPreset(QStringLiteral("i == 0 && data[i].")); dialog.applyCompletionItem(QStringLiteral("coords")); QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords"));
-    dialog.applyQuickPreset(dialog.getCondition() + QStringLiteral("."));
-    const QStringList subItems = dialog.completionsForExpression(dialog.getCondition());
+    dialog.applyQuickPreset(dialog.getCondition() + QStringLiteral(".")); const QStringList subItems = dialog.completionsForExpression(dialog.getCondition());
     QVERIFY(subItems.contains(QStringLiteral("x")) && subItems.contains(QStringLiteral("y")) && subItems.contains(QStringLiteral("z")));
     dialog.applyCompletionItem(QStringLiteral("x")); QCOMPARE(dialog.getCondition(), QStringLiteral("i == 0 && data[i].coords.x"));
-    // 3. Theme Persistence Across App Restart (savePersistedTheme / loadPersistedTheme).
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("tokyo_night")); callSavePersistedTheme(tm, 0);
     tm.applyTheme(QStringLiteral("gridlock_slate"), false); QCOMPARE(tm.activeThemeId(), QStringLiteral("gridlock_slate"));
     verifyLoadedTheme(callLoadPersistedTheme(tm, 0), tm); tm.applyTheme(QStringLiteral("gridlock_slate")); callSavePersistedTheme(tm, 0);
-    // 4. Dirty Buffer Tab Indicators ("●"), saveAllModifiedTabs(), switchHeaderSource(), & Scope Breadcrumbs.
-    QTemporaryDir tempDir; QVERIFY(tempDir.isValid());
-    const QString tempCpp = tempDir.filePath(QStringLiteral("inspection_demo.cpp")), tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
+    QTemporaryDir tempDir; QVERIFY(tempDir.isValid()); const QString tempCpp = tempDir.filePath(QStringLiteral("inspection_demo.cpp")), tempHpp = tempDir.filePath(QStringLiteral("inspection_demo.hpp"));
     { QFile fc(tempCpp); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(inspectionSource.toUtf8()); QFile fh(tempHpp); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nstruct DeeplyNested {};\n"); }
     gridlock::ui::EditorTabManager tabManager; auto* tabView = tabManager.openFile(tempCpp); QVERIFY(tabView != nullptr); const int idx = tabManager.currentIndex();
     tabView->textCursor().insertText(QStringLiteral("// dirty edit\n")); QApplication::processEvents();
@@ -585,13 +553,7 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     tabView->setTextCursor(QTextCursor(tabView->document()->findBlockByNumber(16))); const QString bc = tabView->currentScopeBreadcrumb();
     QVERIFY2(bc.contains(QStringLiteral("inspection_demo.cpp")) && (bc.contains(QStringLiteral("main")) || bc.contains(QStringLiteral("DeeplyNested"))), qPrintable(bc));
     QVERIFY2(tabManager.switchHeaderSource() && tabManager.tabText(tabManager.currentIndex()).contains(QStringLiteral("inspection_demo.hpp")), "switchHeaderSource() must switch to inspection_demo.hpp");
-    // 5. Horizontal and Vertical Side-by-Side Split Editors (`splitEditor`, `closeSplit`, `secondaryEditorView`).
-    auto checkSplits = [](gridlock::ui::EditorTabManager& m) -> bool {
-        if (m.isSplitActive()) return false;
-        m.splitEditor(Qt::Horizontal); if (!m.isSplitActive() || m.splitOrientation() != Qt::Horizontal || m.secondaryEditorView() == nullptr) return false;
-        m.splitEditor(Qt::Vertical); if (!m.isSplitActive() || m.splitOrientation() != Qt::Vertical) return false;
-        m.closeSplit(); return !m.isSplitActive();
-    };
+    auto checkSplits = [](gridlock::ui::EditorTabManager& m) -> bool { if (m.isSplitActive()) return false; m.splitEditor(Qt::Horizontal); if (!m.isSplitActive() || m.splitOrientation() != Qt::Horizontal || m.secondaryEditorView() == nullptr) return false; m.splitEditor(Qt::Vertical); if (!m.isSplitActive() || m.splitOrientation() != Qt::Vertical) return false; m.closeSplit(); return !m.isSplitActive(); };
     QVERIFY2(checkSplits(tabManager), "EditorTabManager must support horizontal/vertical splitEditor() and closeSplit()");
 }
 
@@ -691,30 +653,25 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
 /** @brief Verifies PointerGraphDialog layered DAG layout, manual drag preservation, incremental multi-root pinning, and dynamic alias splitting/merging. */
 static void testPointerGraphDagLayoutAndAliasSplitting() {
     using gridlock::ui::PointerGraphDialog; using F = PointerGraphDialog::StructFieldEntry;
-    PointerGraphDialog pg;
-    auto* layoutBtn = pg.findChild<QPushButton*>(QStringLiteral("pointerGraphLayoutBtn")); auto* clearBtn = pg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn")); auto* pruneChk = pg.findChild<QCheckBox*>(QStringLiteral("pointerGraphPruneCheck"));
+    PointerGraphDialog pg; auto* layoutBtn = pg.findChild<QPushButton*>(QStringLiteral("pointerGraphLayoutBtn")); auto* clearBtn = pg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn")); auto* pruneChk = pg.findChild<QCheckBox*>(QStringLiteral("pointerGraphPruneCheck"));
     QVERIFY(layoutBtn && clearBtn && pruneChk && pruneChk->isChecked());
-    // 1. Layered DAG placement (layer 0 -> layer 1 -> layer 2), barycenter ordering, and manual position preservation across onTargetStopped().
     pg.upsertStructNode(QStringLiteral("root"), QStringLiteral("Tree"), QStringLiteral("0x100"), {F{QStringLiteral("left"), QStringLiteral("0x200"), QStringLiteral("Node*")}, F{QStringLiteral("right"), QStringLiteral("0x210"), QStringLiteral("Node*")}});
     pg.upsertStructNode(QStringLiteral("child"), QStringLiteral("Node"), QStringLiteral("0x200"), {F{QStringLiteral("next"), QStringLiteral("0x300"), QStringLiteral("Node*")}}, QStringLiteral("root"), QStringLiteral("left"));
     pg.upsertStructNode(QStringLiteral("altChild"), QStringLiteral("Node"), QStringLiteral("0x210"), {F{QStringLiteral("val"), QStringLiteral("7"), QStringLiteral("int")}}, QStringLiteral("root"), QStringLiteral("right"));
     pg.upsertStructNode(QStringLiteral("grandchild"), QStringLiteral("Node"), QStringLiteral("0x300"), {F{QStringLiteral("val"), QStringLiteral("9"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("next"));
     pg.autoLayoutNodes();
-    QVERIFY(pg.nodeLayer(QStringLiteral("root")) == 0 && pg.nodeLayer(QStringLiteral("child")) == 1 && pg.nodeLayer(QStringLiteral("grandchild")) == 2);
-    QVERIFY(pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x() && pg.nodePosition(QStringLiteral("child")).y() < pg.nodePosition(QStringLiteral("altChild")).y());
+    QVERIFY(pg.nodeLayer(QStringLiteral("root")) == 0 && pg.nodeLayer(QStringLiteral("child")) == 1 && pg.nodeLayer(QStringLiteral("grandchild")) == 2 && pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x() && pg.nodePosition(QStringLiteral("child")).y() < pg.nodePosition(QStringLiteral("altChild")).y());
     const QPointF manualPos(555.0, 444.0); QVERIFY(pg.setNodePosition(QStringLiteral("child"), manualPos) && pg.isNodeManuallyPositioned(QStringLiteral("child")));
     pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("child"), QStringLiteral("Node"), QStringLiteral("0x200"), {F{QStringLiteral("next"), QStringLiteral("0x300"), QStringLiteral("Node*")}, F{QStringLiteral("tag"), QStringLiteral("1"), QStringLiteral("int")}});
     pg.upsertStructNode(QStringLiteral("extra"), QStringLiteral("Node"), QStringLiteral("0x310"), {F{QStringLiteral("val"), QStringLiteral("3"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("tag"));
     pg.autoLayoutNodes(false); QCOMPARE(pg.nodePosition(QStringLiteral("child")), manualPos);
     layoutBtn->click(); QVERIFY(!pg.isNodeManuallyPositioned(QStringLiteral("child")) && pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x());
-    // 2. Incremental multi-root pinning (first root stays intact until Clear Graph) & per-root unpinning.
     clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0 && pg.pinnedRootExpressions().isEmpty());
     pg.addAndEvaluateRootExpression(QStringLiteral("headA"), QStringLiteral("Holder*"), QStringLiteral("0x100")); pg.upsertStructNode(QStringLiteral("headA"), QStringLiteral("Holder"), QStringLiteral("0x100"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
     pg.addAndEvaluateRootExpression(QStringLiteral("headB"), QStringLiteral("Holder*"), QStringLiteral("0x200")); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
     QVERIFY(pg.nodeCount() == 2 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA"), QStringLiteral("headB")}) && pg.nodePosition(QStringLiteral("headA")).y() != pg.nodePosition(QStringLiteral("headB")).y());
     QVERIFY(pg.unpinRootExpression(QStringLiteral("headB")) && pg.nodeCount() == 1 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA")}));
     pg.addAndEvaluateRootExpression(QStringLiteral("headB"), QStringLiteral("Holder*"), QStringLiteral("0x200")); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
-    // 3. Dynamic alias splitting (0x1000 -> 0x2000 clears alias badge) and re-merging (prunes orphan 0x1000 & re-flags alias).
     pg.upsertStructNode(QStringLiteral("n1"), QStringLiteral("Node"), QStringLiteral("0x1000"), {F{QStringLiteral("val"), QStringLiteral("10"), QStringLiteral("int")}}, QStringLiteral("headA"), QStringLiteral("ptr"));
     QVERIFY(pg.connectPointerField(QStringLiteral("headB"), QStringLiteral("ptr"), QStringLiteral("0x1000")) && pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.hasCycleOrSharedAlias());
     pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x2000"), QStringLiteral("Node*")}});
@@ -732,26 +689,60 @@ static void testPointerGraphControlsAndExport() {
     pg.upsertStructNode(QStringLiteral("pkt"), QStringLiteral("Packet"), QStringLiteral("0x5000"), {F{QStringLiteral("magic"), QStringLiteral("42"), QStringLiteral("int")}, F{QStringLiteral("seq"), QStringLiteral("7"), QStringLiteral("int")}, F{QStringLiteral("crc"), QStringLiteral("255"), QStringLiteral("uint32_t")}, F{QStringLiteral("next"), QStringLiteral("0x5100"), QStringLiteral("Packet*")}});
     pg.upsertStructNode(QStringLiteral("peer"), QStringLiteral("Packet"), QStringLiteral("0x5100"), {F{QStringLiteral("magic"), QStringLiteral("99"), QStringLiteral("int")}}, QStringLiteral("pkt"), QStringLiteral("next"));
     QApplication::processEvents();
-    // 1. Field suppression (+1 hidden badge), persistence across onTargetStopped(), and restore.
-    QVERIFY(pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0);
-    QVERIFY(pg.setNodeFieldHidden(QStringLiteral("pkt"), QStringLiteral("crc"), true) && pg.visibleFieldCount(QStringLiteral("pkt")) == 3 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.hiddenFieldsBadgeText(QStringLiteral("pkt")).contains(QStringLiteral("(+1 hidden)")));
+    QVERIFY(pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0 && pg.setNodeFieldHidden(QStringLiteral("pkt"), QStringLiteral("crc"), true) && pg.visibleFieldCount(QStringLiteral("pkt")) == 3 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.hiddenFieldsBadgeText(QStringLiteral("pkt")).contains(QStringLiteral("(+1 hidden)")));
     pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("pkt"), QStringLiteral("Packet"), QStringLiteral("0x5000"), {F{QStringLiteral("magic"), QStringLiteral("42"), QStringLiteral("int")}, F{QStringLiteral("seq"), QStringLiteral("8"), QStringLiteral("int")}, F{QStringLiteral("crc"), QStringLiteral("255"), QStringLiteral("uint32_t")}, F{QStringLiteral("next"), QStringLiteral("0x5100"), QStringLiteral("Packet*")}});
     QVERIFY(pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.restoreAllHiddenFields(QStringLiteral("pkt")) && pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0);
-    // 2. Horizontal / Vertical orientation toggle (`width > height`) and `/x`, `/d`, `/b` format overrides (`42` -> `0x2a` / `0b101010`).
     QVERIFY(!pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.toggleNodeOrientation(QStringLiteral("pkt")) && pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.nodeCardSize(QStringLiteral("pkt")).width() > pg.nodeCardSize(QStringLiteral("pkt")).height());
-    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/x")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0x2a"));
-    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/b")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0b101010"));
-    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/d")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("42"));
-    // 3. Clamped wheel zoom (`0.25..2.5`), corner minimap (`160x110`), and high-resolution PNG/SVG export.
+    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/x")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0x2a") && pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/b")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0b101010") && pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/d")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("42"));
     auto* gv = pg.findChild<QGraphicsView*>(QStringLiteral("pointerGraphView")); QVERIFY(gv != nullptr && !pg.minimapViewportRect().isEmpty());
     QWheelEvent wheelIn(QPointF(100, 100), gv->mapToGlobal(QPointF(100, 100)), QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
     QApplication::sendEvent(gv->viewport(), &wheelIn); QVERIFY(pg.zoomFactor() > 1.05);
-    pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3);
-    pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
-    const QPoint mmCenter = pg.minimapViewportRect().center().toPoint(); QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, mmCenter);
+    pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3); pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
+    QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, pg.minimapViewportRect().center().toPoint());
     QTemporaryDir expDir; QVERIFY(expDir.isValid()); const QString pngOut = expDir.filePath(QStringLiteral("graph.png")), svgOut = expDir.filePath(QStringLiteral("graph.svg"));
     QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400);
     QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg"))); pg.close();
+}
+/** @brief Verifies ArrayPlotDialog v0.8.8 multi-rank 1D overlay, start:end:stride slicing, Log10 scale, drag-box zoom, and Scalar History mode. */
+static void testArrayPlotterScientificExtensions() {
+    using gridlock::ui::ArrayPlotDialog; using gridlock::ui::parseArraySliceExpression; using gridlock::ui::parseRankSubset;
+    // 1. Slice parser (`arr[2:10:2]`, `u[16:128:2]`, `field[0..63]`, plain `&vec[0]`) & strided decoding.
+    const auto s1 = parseArraySliceExpression(QStringLiteral("arr[2:10:2]")), s2 = parseArraySliceExpression(QStringLiteral("u[16:128:2]")), s3 = parseArraySliceExpression(QStringLiteral("pressure_field[0..63]")), s4 = parseArraySliceExpression(QStringLiteral("&vec[0]"));
+    QVERIFY(s1.hasSlice && s1.baseExpression == QStringLiteral("arr") && s1.offset == 2 && s1.count == 4 && s1.stride == 2 && s2.hasSlice && s2.offset == 16 && s2.count == 56 && s2.stride == 2 && s3.hasSlice && s3.offset == 0 && s3.count == 64 && s3.stride == 1 && !s4.hasSlice && s4.baseExpression == QStringLiteral("&vec[0]"));
+    QCOMPARE(parseRankSubset(QStringLiteral("0..3"), 8), (QVector<int>{0, 1, 2, 3})); QCOMPARE(parseRankSubset(QStringLiteral("0, 2, 3"), 4), (QVector<int>{0, 2, 3}));
+    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(4);
+    ArrayPlotDialog dlg(&coord); dlg.resize(980, 600); dlg.show(); QApplication::processEvents();
+    auto* logChk = dlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotLogScaleCheck")); auto* overlayChk = dlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotOverlayAllRanksCheck")); auto* resetZoomBtn = dlg.findChild<QPushButton*>(QStringLiteral("arrayPlotResetZoomBtn")); auto* clearHistBtn = dlg.findChild<QPushButton*>(QStringLiteral("arrayPlotClearHistoryBtn"));
+    QVERIFY(logChk && overlayChk && resetZoomBtn && clearHistBtn && dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotOffsetSpin")) && dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotStrideSpin")) && dlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotRankSubsetEdit")));
+    QVector<double> buf12(12); for (int i = 0; i < 12; ++i) buf12[i] = static_cast<double>(i);
+    dlg.setExpression(QStringLiteral("arr[2:10:2]"));
+    QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(buf12.constData()), buf12.size() * sizeof(double)), ArrayPlotDialog::ElementType::Float64) && dlg.currentSamples() == (QVector<double>{2.0, 4.0, 6.0, 8.0}) && dlg.sliceOffset() == 2 && dlg.sliceStride() == 2);
+    // 2. Multi-rank 1D overlay toggle emits multiRankPlotRequested, populates ranks 0..3, and clears on uncheck.
+    QSignalSpy multiSpy(&dlg, &ArrayPlotDialog::multiRankPlotRequested); dlg.setExpression(QStringLiteral("halo[0:4]")); dlg.setRankSubsetSpec(QStringLiteral("0..3"));
+    overlayChk->setChecked(true); QApplication::processEvents(); QVERIFY(multiSpy.count() >= 1 && multiSpy.first().at(0).toString() == QStringLiteral("halo") && multiSpy.first().at(1).toInt() == 32);
+    for (int r = 0; r < 4; ++r) { const double vals[4] = {r * 10.0 + 1.0, r * 10.0 + 2.0, r * 10.0 + 3.0, r * 10.0 + 4.0}; emit coord.memoryRead(r, QStringLiteral("&(halo)[0]"), QByteArray(reinterpret_cast<const char*>(vals), sizeof(vals))); }
+    QVERIFY(dlg.rankOverlays().size() == 4 && dlg.rankOverlays().value(3).first() == 31.0 && !dlg.grab().isNull());
+    overlayChk->setChecked(false); QVERIFY(dlg.rankOverlays().isEmpty());
+    // 3. Log10 scale with positive + zero/negative values (1D + 2D) renders cleanly without NaN crashes.
+    dlg.setSliceOffset(0); dlg.setSliceStride(1); dlg.setSamples({1e-4, 1e-2, 1.0, 0.0, -5.0}, 1, 5);
+    logChk->setChecked(true); QApplication::processEvents(); QVERIFY(dlg.isLogScale() && !dlg.grab().isNull());
+    dlg.setSamples({1e-3, 1.0, 0.0, -2.0}, 2, 2); QApplication::processEvents(); QVERIFY(!dlg.grab().isNull()); logChk->setChecked(false);
+    // 4. Interactive drag-box zoom narrows visibleXRange() and Reset Zoom + double-click restore full bounds.
+    QVector<double> wave(64); for (int i = 0; i < 64; ++i) wave[i] = std::sin(i * 0.15) + 2.0;
+    dlg.setPlotMode(ArrayPlotDialog::PlotMode::Line1D); dlg.setSamples(wave, 1, 64); QApplication::processEvents();
+    auto* canvas = dlg.canvas(); QVERIFY(canvas != nullptr && !dlg.isZoomed() && !resetZoomBtn->isEnabled());
+    const QRect pr = canvas->plotAreaRect(); const QPoint p0(pr.left() + pr.width() / 4, pr.top() + pr.height() / 4), p1(pr.left() + (pr.width() * 3) / 4, pr.top() + (pr.height() * 3) / 4);
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, p0); QTest::mouseMove(canvas, p1); QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, p1); QApplication::processEvents();
+    QVERIFY(dlg.isZoomed() && resetZoomBtn->isEnabled() && dlg.visibleXRange().first > 5 && dlg.visibleXRange().second < 58);
+    resetZoomBtn->click(); QVERIFY(!dlg.isZoomed() && !resetZoomBtn->isEnabled() && dlg.visibleXRange() == (QPair<int, int>{0, 63}));
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, p0); QTest::mouseMove(canvas, p1); QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, p1); QVERIFY(dlg.isZoomed());
+    QTest::mouseDClick(canvas, Qt::LeftButton, Qt::NoModifier, pr.center()); QVERIFY(!dlg.isZoomed());
+    // 5. Scalar History mode accumulates 4 stop evaluations and Clear History resets it.
+    dlg.setPlotMode(ArrayPlotDialog::PlotMode::ScalarHistory); dlg.setExpression(QStringLiteral("residual"));
+    const QStringList resVals = {QStringLiteral("$1 = 1.0"), QStringLiteral("$2 = 0.1"), QStringLiteral("$3 = 0.01"), QStringLiteral("$4 = 0.001")};
+    for (const QString& rv : resVals) { dlg.onTargetStopped(0); emit coord.expressionEvaluated(0, QStringLiteral("residual"), rv); }
+    QVERIFY(dlg.scalarHistory().size() == 4 && dlg.currentSamples().size() == 4 && std::abs(dlg.scalarHistory().constLast() - 0.001) < 1e-12 && !dlg.grab().isNull());
+    clearHistBtn->click(); QVERIFY(dlg.scalarHistory().isEmpty() && dlg.currentSamples().isEmpty()); dlg.close();
 }
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
@@ -770,8 +761,7 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
     pgDlg.onTargetStopped(0); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
-    testPointerGraphDagLayoutAndAliasSplitting();
-    testPointerGraphControlsAndExport();
+    testPointerGraphDagLayoutAndAliasSplitting(); testPointerGraphControlsAndExport(); testArrayPlotterScientificExtensions();
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
     const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
     QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();

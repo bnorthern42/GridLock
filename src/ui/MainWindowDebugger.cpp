@@ -849,7 +849,11 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
 }
 /** @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath. */
 void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHint) {
-    if (!m_arrayPlotDialog) m_arrayPlotDialog = new ArrayPlotDialog(m_coordinator, this);
+    if (!m_arrayPlotDialog) { m_arrayPlotDialog = new ArrayPlotDialog(m_coordinator, this);
+        connect(m_arrayPlotDialog, &ArrayPlotDialog::multiRankPlotRequested, this, [this](const QString& baseExpr, int byteCount, ArrayPlotDialog::ElementType, int, int) {
+            if (!m_coordinator || !m_arrayPlotDialog || baseExpr.isEmpty() || byteCount <= 0) return;
+            const QString addr = (baseExpr.startsWith(QLatin1Char('&')) || baseExpr.startsWith(QStringLiteral("0x"))) ? baseExpr : QStringLiteral("&(%1)[0]").arg(baseExpr);
+            for (int r : m_arrayPlotDialog->selectedOverlayRanks(m_coordinator->getProcessCount())) { m_arrayPlotDialog->expectOverlayReadForRank(r); m_coordinator->readMemory(r, addr, byteCount); } }); }
     m_arrayPlotDialog->setCoordinator(m_coordinator); m_arrayPlotDialog->setFocusedRank(activeSteppingRank());
     if (!typeHint.trimmed().isEmpty()) m_arrayPlotDialog->setElementTypeFromString(typeHint);
     if (!exprPath.trimmed().isEmpty()) { m_arrayPlotDialog->setExpression(exprPath.trimmed()); m_arrayPlotDialog->refreshPlot(); }
