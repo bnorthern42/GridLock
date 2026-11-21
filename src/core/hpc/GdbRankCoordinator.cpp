@@ -96,6 +96,33 @@ qint64 GdbRankCoordinator::getPidForRank(int rank) const {
   return 0;
 }
 
+/** @brief Pre-validates `gdb` and `mpirun`/`mpiexec` executables before UI marks ranks `RUNNING`. */
+bool GdbRankCoordinator::validateLaunchEnvironment(int ranks, QString* outError) const {
+  const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"),
+                                  QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
+                                  QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
+  const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
+  QString gdbBin = (!cfgGdb.isEmpty() && QFileInfo::exists(cfgGdb)) ? cfgGdb : QStandardPaths::findExecutable(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb);
+  if (gdbBin.isEmpty() && (cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb"))) gdbBin = QStandardPaths::findExecutable(QStringLiteral("gdb"), searchDirs);
+  if (gdbBin.isEmpty()) { if (outError) *outError = QStringLiteral("GDB debugger executable ('%1') was not found in PATH.").arg(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb); return false; }
+  const QString prefMpi = core::ConfigManager::instance().getDebuggerSettings().mpiExecutable.trimmed();
+  const auto findMpi = [&](const QString& name) -> QString {
+    if (name.isEmpty()) return {};
+    if (QFileInfo::exists(name) && QFileInfo(name).isExecutable()) return name;
+    QString f = QStandardPaths::findExecutable(name);
+    return f.isEmpty() ? QStandardPaths::findExecutable(name, searchDirs) : f;
+  };
+  if (!prefMpi.isEmpty() && prefMpi != QStringLiteral("mpirun") && prefMpi != QStringLiteral("mpiexec") && findMpi(prefMpi).isEmpty()) {
+    if (outError) *outError = QStringLiteral("Configured MPI launcher ('%1') was not found.").arg(prefMpi);
+    return false;
+  }
+  if (ranks > 1 && findMpi(prefMpi).isEmpty() && findMpi(QStringLiteral("mpirun")).isEmpty() && findMpi(QStringLiteral("mpiexec")).isEmpty()) {
+    if (outError) *outError = QStringLiteral("Multi-rank MPI launch (-np %1) requires mpirun or mpiexec in PATH.").arg(ranks);
+    return false;
+  }
+  return true;
+}
+
 /** @brief Attaches a single GDB/MI3 rank session to running OS process @p pid. */
 bool GdbRankCoordinator::attachToProcess(qint64 pid) { return attachToPids({pid}); }
 
@@ -104,8 +131,7 @@ bool GdbRankCoordinator::attachToProcesses(const QList<ProcessEntry>& targets) {
   if (targets.isEmpty()) return false;
   QList<ProcessEntry> ordered = targets;
   std::sort(ordered.begin(), ordered.end(), [](const ProcessEntry& a, const ProcessEntry& b) {
-    if (a.mpiRank >= 0 && b.mpiRank >= 0 && a.mpiRank != b.mpiRank) return a.mpiRank < b.mpiRank;
-    return a.pid < b.pid;
+    return (a.mpiRank >= 0 && b.mpiRank >= 0 && a.mpiRank != b.mpiRank) ? (a.mpiRank < b.mpiRank) : (a.pid < b.pid);
   });
   QList<qint64> pids;
   for (const ProcessEntry& e : ordered) pids.append(static_cast<qint64>(e.pid));
@@ -115,39 +141,28 @@ bool GdbRankCoordinator::attachToProcesses(const QList<ProcessEntry>& targets) {
 /** @brief Spawns one GDB/MI3 session per PID in @p pids and issues `-target-attach <pid>`. */
 bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   if (pids.isEmpty()) return false;
-  for (qint64 pid : pids) {
-    if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
-  }
+  for (qint64 pid : pids) if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
   terminateAllSessions();
   QString gdbPath = core::ConfigManager::instance().getGdbPath().trimmed();
-  if (gdbPath.isEmpty() || !QFileInfo::exists(gdbPath)) {
-    gdbPath = QStandardPaths::findExecutable(gdbPath.isEmpty() ? QStringLiteral("gdb") : gdbPath);
-  }
+  if (gdbPath.isEmpty() || !QFileInfo::exists(gdbPath)) gdbPath = QStandardPaths::findExecutable(gdbPath.isEmpty() ? QStringLiteral("gdb") : gdbPath);
   if (gdbPath.isEmpty()) return false;
 
   m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pids.first())).symLinkTarget();
   for (int r = 0; r < pids.size(); ++r) {
     const qint64 pid = pids[r];
     auto rp = std::make_unique<RankProcess>();
-    rp->id = r;
-    rp->process = std::make_unique<QProcess>();
-    rp->inferiorPid = static_cast<pid_t>(pid);
-    rp->state.rankId = r;
-    rp->state.currentState = "launching";
-    rp->state.lastFiredTimestamp = "synced";
+    rp->id = r; rp->process = std::make_unique<QProcess>(); rp->inferiorPid = static_cast<pid_t>(pid);
+    rp->pendingAttach = true; rp->state.rankId = r; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
     m_rankPids[r] = pid;
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
-    QStringList args{QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
-                     QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
+    QStringList args{QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
     if (!m_currentBinaryPath.isEmpty() && QFileInfo::exists(m_currentBinaryPath)) args.append(m_currentBinaryPath);
     rp->process->start(gdbPath, args);
     const bool started = rp->process->waitForStarted(2000);
     m_processes.push_back(std::move(rp));
     if (!started) { terminateAllSessions(); return false; }
-    writeCmd(r, "-gdb-set pagination off\n");
-    writeCmd(r, "-gdb-set confirm off\n");
-    writeCmd(r, QStringLiteral("-target-attach %1\n").arg(pid));
-    writeCmd(r, "-list-thread-groups\n");
+    writeCmd(r, "-gdb-set pagination off\n"); writeCmd(r, "-gdb-set confirm off\n");
+    writeCmd(r, QStringLiteral("-target-attach %1\n").arg(pid)); writeCmd(r, "-list-thread-groups\n");
     emit rankStateChanged(r, m_processes[r]->state);
   }
   return true;
@@ -156,9 +171,7 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
 /** @brief Connects one GDB/MI3 session per remote `gdbserver` / `qemu-user -g` endpoint. */
 bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& targets) {
   if (targets.isEmpty()) return false;
-  for (const RemoteTargetSpec& t : targets) {
-    if (t.endpoint.trimmed().isEmpty()) return false;
-  }
+  for (const RemoteTargetSpec& t : targets) if (t.endpoint.trimmed().isEmpty()) return false;
   terminateAllSessions();
   m_currentBinaryPath = targets.first().localSymbolBinary.trimmed();
   for (int r = 0; r < targets.size(); ++r) {
@@ -171,24 +184,17 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     if (gdbPath.isEmpty()) { terminateAllSessions(); return false; }
 
     auto rp = std::make_unique<RankProcess>();
-    rp->id = r;
-    rp->process = std::make_unique<QProcess>();
-    rp->state.rankId = r;
-    rp->state.currentState = "stopped";
-    rp->state.lastFiredTimestamp = "synced";
+    rp->id = r; rp->process = std::make_unique<QProcess>(); rp->pendingAttach = true;
+    rp->state.rankId = r; rp->state.currentState = "stopped"; rp->state.lastFiredTimestamp = "synced";
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
-    rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
-                                 QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")});
+    rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")});
     const bool started = rp->process->waitForStarted(2000);
     m_processes.push_back(std::move(rp));
     if (!started) { terminateAllSessions(); return false; }
-    writeCmd(r, "-gdb-set pagination off\n");
-    writeCmd(r, "-gdb-set confirm off\n");
+    writeCmd(r, "-gdb-set pagination off\n"); writeCmd(r, "-gdb-set confirm off\n");
     const QString symBin = t.localSymbolBinary.trimmed();
     if (!symBin.isEmpty()) writeCmd(r, QStringLiteral("-file-exec-and-symbols %1\n").arg(escapeGdbMiString(symBin)));
-    writeCmd(r, QStringLiteral("-target-select %1 %2\n")
-                    .arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"),
-                         t.endpoint.trimmed()));
+    writeCmd(r, QStringLiteral("-target-select %1 %2\n").arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"), t.endpoint.trimmed()));
     flushCachedBreakpoints(r);
     emit rankStateChanged(r, m_processes[r]->state);
   }
@@ -735,6 +741,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
     if (line.startsWith("=thread-group-exited")) { rp->inferiorPid = 0; m_rankPids.remove(rankId); continue; }
 
     if (line.startsWith("*stopped") || line.startsWith("^connected")) {
+      rp->pendingAttach = false;
       if (line.contains("reason=\"exited") || line.contains("reason=\"exited-normally\"")) {
         rp->state.currentState = "exited"; rp->inferiorPid = 0; m_rankPids.remove(rankId);
         emit rankStateChanged(rankId, rp->state); continue;
@@ -831,10 +838,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (line.contains("^done,changelist=")) {
       // Update watch variable values from `-var-update 1 *` changelist tuples.
-      static const QRegularExpression objRe("\\{([^}]+)\\}");
-      static const QRegularExpression nameRe("name=\"([^\"]+)\"");
-      static const QRegularExpression valRe("value=\"([^\"]+)\"");
-      static const QRegularExpression inScopeRe("in_scope=\"([^\"]+)\"");
+      static const QRegularExpression objRe("\\{([^}]+)\\}"), nameRe("name=\"([^\"]+)\""), valRe("value=\"([^\"]+)\""), inScopeRe("in_scope=\"([^\"]+)\"");
       auto it = objRe.globalMatch(line); bool updated = false;
       // Inspect each changed GDB varobj tuple for updated scalar text or scope exit.
       while (it.hasNext()) {
@@ -847,40 +851,30 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         const auto scopeMatch = inScopeRe.match(objStr);
         // Refresh value when variable remains in scope; delete stale varobj when leaving scope.
         if (!scopeMatch.hasMatch() || scopeMatch.captured(1) == "true") {
-          const auto valMatch = valRe.match(objStr);
-          if (valMatch.hasMatch()) { rp->state.variableWatches[varName] = valMatch.captured(1); updated = true; }
+          if (const auto valMatch = valRe.match(objStr); valMatch.hasMatch()) { rp->state.variableWatches[varName] = valMatch.captured(1); updated = true; }
         } else {
-          rp->state.variableWatches[varName] = "Out of scope";
-          writeCmd(rankId, QString("-var-delete %1\n").arg(varId));
+          rp->state.variableWatches[varName] = "Out of scope"; writeCmd(rankId, QString("-var-delete %1\n").arg(varId));
           m_varNameMap[rankId].remove(varName); m_varNameRevMap[rankId].remove(varId); updated = true;
         }
       }
       if (updated) emit rankStateChanged(rankId, rp->state);
     } else if (line.startsWith("^done,memory=[")) {
       // Decode hexadecimal payload returned by `-data-read-memory-bytes` for MemView hex/diff panes.
-      // Emits both string-formatted `memoryDataReady` and raw byte-array `memoryRead` signals.
       static const QRegularExpression memRe("begin=\"([^\"]+)\".*?contents=\"([^\"]+)\"");
-      const auto match = memRe.match(line);
-      if (match.hasMatch()) {
-        bool ok = false; const qint64 beginAddress = match.captured(1).toULongLong(&ok, 16);
-        const QString hex = match.captured(2);
-        emit memoryDataReady(rankId, beginAddress, hex);
-        emit memoryRead(rankId, match.captured(1), QByteArray::fromHex(hex.toLatin1()));
+      if (const auto match = memRe.match(line); match.hasMatch()) {
+        bool ok = false; const qint64 beginAddress = match.captured(1).toULongLong(&ok, 16); const QString hex = match.captured(2);
+        emit memoryDataReady(rankId, beginAddress, hex); emit memoryRead(rankId, match.captured(1), QByteArray::fromHex(hex.toLatin1()));
       }
     } else if (line.startsWith("^done,register-values=[")) {
       // Populate `rp->state.registers` and broadcast `registersUpdated` + `rankStateChanged`.
-      // Preserves per-rank GPR and `$rip`/`$rsp` cache for status bar and MemView `$rsp` lookups.
       static const QRegularExpression regRe("number=\"(\\d+)\".*?value=\"([^\"]+)\"");
       auto it = regRe.globalMatch(line); QJsonArray jsonRegs; bool updated = false;
-      // Map numeric GDB x86_64 register indices to canonical mnemonics (`rax`..`rip`, `eflags`).
       while (it.hasNext()) {
-        const auto m = it.next();
-        const int regNum = m.captured(1).toInt(); const QString regVal = m.captured(2);
+        const auto m = it.next(); const int regNum = m.captured(1).toInt(); const QString regVal = m.captured(2);
         rp->state.registers[regNum] = regVal;
         if (const QString name = x86RegName(regNum); !name.isEmpty()) jsonRegs.append(QJsonObject{{"name", name}, {"value", regVal}});
         updated = true;
       }
-      // Emit structured JSON register bank when at least one hardware register value was parsed.
       if (updated) { if (!jsonRegs.isEmpty()) emit registersUpdated(rankId, jsonRegs); emit rankStateChanged(rankId, rp->state); }
     } else if (handleBreakpointMiRecord(rankId, line)) {
       // Handled `^done,bkpt={...}`, `=breakpoint-created`, and `=breakpoint-deleted` records.
@@ -919,6 +913,20 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       emit localsUpdated(rankId, locals);
     } else if (handleMiStackOrThreadRecord(rankId, line)) {
       // Token 202..206: Multi-frame backtrace, thread list, REPL output, and watchpoint records.
+    } else if (line.startsWith("^error")) {
+      // Handle untokenized MI errors (including `-target-attach` `ptrace_scope` `EPERM` rejections).
+      static const QRegularExpression errMsgRe("msg=\"((?:\\\\.|[^\"])*)\"");
+      const auto m = errMsgRe.match(line);
+      QString msg = m.hasMatch() ? m.captured(1) : line;
+      msg.replace(QLatin1String("\\\""), QLatin1String("\"")).replace(QLatin1String("\\n"), QLatin1String(" ")).replace(QLatin1String("\\\\"), QLatin1String("\\"));
+      emit debuggerConsoleOutput(rankId, QStringLiteral("Error: ") + msg, true);
+      if (rp->pendingAttach || msg.contains(QStringLiteral("ptrace"), Qt::CaseInsensitive) ||
+          msg.contains(QStringLiteral("Operation not permitted"), Qt::CaseInsensitive) ||
+          msg.contains(QStringLiteral("Cannot attach"), Qt::CaseInsensitive)) {
+        terminateAllSessions();
+        emit sessionErrorOccurred(msg);
+        return;
+      }
     } else if (line.contains("asm_insns=")) {
       // Untokenized fallback `-data-disassemble` response handler.
       const QString prettyAsm = formatMiDisassembly(line);

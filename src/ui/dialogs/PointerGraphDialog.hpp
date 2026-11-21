@@ -102,6 +102,9 @@ class PointerGraphDialog : public QDialog {
   void autoLayoutNodes(bool resetManualPositions = false);
   void resetLayoutAndRelayoutDag();
   void clearGraph();
+  bool canUndoClear() const { return m_hasUndoSnapshot; }
+  bool undoClearGraph();
+  bool undoClear() { return undoClearGraph(); }
 
   int nodeCount() const { return m_nodes.size(); }
   int edgeCount() const { return m_edges.size(); }
@@ -180,6 +183,22 @@ class PointerGraphDialog : public QDialog {
   static QString normalizeHexAddress(const QString& rawAddr);
   static QString normalizeFormatCode(const QString& rawFormat);
 
+  struct NodeSnapshot {
+    QString expr, typeName, address;
+    QVector<StructFieldEntry> fields;
+    QPointF pos;
+  };
+  struct EdgeSnapshot { QString srcExpr, fieldName, dstKey; };
+  struct GraphUndoSnapshot {
+    QVector<NodeSnapshot> nodes;
+    QVector<EdgeSnapshot> edges;
+    QStringList roots;
+    QString rootInput;
+    QMap<QString, QPointF> pinnedPositions;
+    QMap<QString, NodeDisplayOptions> displayOptions;
+    QMap<QString, QMap<QString, QString>> previousFieldValues, mutatedTransitions;
+  };
+
   ::IBackendCoordinator* m_coordinator = nullptr;
   int m_focusedRank = 0;
   int m_stopRefreshCount = 0;
@@ -196,6 +215,7 @@ class PointerGraphDialog : public QDialog {
   QPushButton* m_layoutBtn = nullptr;
   QPushButton* m_expandHopBtn = nullptr;
   QPushButton* m_clearBtn = nullptr;
+  QPushButton* m_undoClearBtn = nullptr;
   QPushButton* m_exportSvgBtn = nullptr;
   QPushButton* m_exportPngBtn = nullptr;
   QPushButton* m_resetZoomBtn = nullptr;
@@ -218,6 +238,8 @@ class PointerGraphDialog : public QDialog {
   QMap<QString, QPair<QString, QString>> m_pendingTypeValueHints;
   QSet<QString> m_autoExpandRoots;
   bool m_hasCycleOrSharedAlias = false;
+  bool m_hasUndoSnapshot = false;
+  GraphUndoSnapshot m_undoSnapshot;
 };
 
 }  // namespace gridlock::ui

@@ -209,6 +209,15 @@ public:
     /// Returns the list of MPI ranks participating in a deadlock wait-for cycle.
     QVector<int> deadlockCycleRanks() const { return m_deadlockCycleRanks; }
 
+    /// Validates space-separated hex bytes (e.g. "31 c0 90") or "nop [N]" without raw ASCII fallback.
+    static bool validatePatchBytes(const QString& spec,
+                                   QByteArray* outBytes = nullptr,
+                                   int targetInstLen = 0,
+                                   QString* outDiagnostic = nullptr);
+    /// Returns the inferred machine-code byte length of the instruction at address (or 0 if unknown).
+    int instructionByteLength(uint64_t address) const;
+    /// Opens a validated hex/NOP patch input dialog for address instead of 1-click NOP clobbering.
+    bool promptPatchInstructionDialog(uint64_t address);
     /// Applies live assembly instruction patch at instruction pointer address.
     bool patchInstruction(uint64_t address, const QString& newInstruction);
     /// Returns total number of actively patched assembly instructions.
@@ -253,7 +262,6 @@ public:
     /// Returns the 64-bit target instruction address of the most recently invoked context menu.
     uint64_t lastContextMenuAddress() const { return m_lastContextMenuAddress; }
 
-
 signals:
     /// Emitted when an instruction address is selected by click or seek.
     void addressSelected(uint64_t address);
@@ -261,6 +269,8 @@ signals:
     void seekInMemoryViewRequested(uint64_t address);
     /// Emitted when an assembly instruction is patched.
     void instructionPatched(uint64_t address, const QByteArray& newBytes);
+    /// Emitted when all DisassemblyView instruction patches are reverted.
+    void patchesReverted();
     /// Emitted when the user requests Reference Manual documentation for a symbol or mnemonic.
     void documentationRequested(const QString& symbol);
     /// Emitted when the user selects "Open Address in Programmer's Calculator" on an instruction row.
@@ -336,6 +346,7 @@ private:
     QPlainTextEdit* m_decompilerEdit = nullptr;
     QCheckBox* m_autoRefreshCheck = nullptr;
     QPushButton* m_refreshDecompilerBtn = nullptr;
+    QPushButton* m_revertPatchesBtn = nullptr;
     QComboBox* m_targetLangCombo = nullptr;
     AsmSyntaxHighlighter* m_highlighter = nullptr;
 

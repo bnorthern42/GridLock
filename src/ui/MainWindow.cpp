@@ -396,6 +396,11 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
 
   // Bind coordinator execution, call-stack, console REPL, watchpoints, and deadlock routes.
   if (m_coordinator) {
+    connect(m_coordinator, &IBackendCoordinator::sessionErrorOccurred, this, [this](const QString &errMsg) {
+      if (m_debugSessionActive) stopTargetWorkflow();
+      appendProgramOutput(-1, QStringLiteral("[Session Error] %1").arg(errMsg), true); flushProgramOutputBatch();
+      updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("ATTACH / LAUNCH FAILED"));
+    });
     bindCallStackCoordinatorRoutes();
     bindConsoleAndWatchpointRoutes();
     // Instantiate live DeadlockAnalyzer bound to m_coordinator's per-rank call stacks and state changes.

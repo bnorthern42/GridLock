@@ -83,6 +83,8 @@ void PointerGraphDialog::setupUi() {
   m_layoutBtn->setToolTip(QStringLiteral("Reset manual card positions and compute a layered Sugiyama DAG layout"));
   m_expandHopBtn = new QPushButton(QStringLiteral("Expand All Pointers (1 Hop)"), this); m_expandHopBtn->setObjectName(QStringLiteral("pointerGraphExpandHopBtn"));
   m_clearBtn = new QPushButton(QStringLiteral("Clear Graph"), this); m_clearBtn->setObjectName(QStringLiteral("pointerGraphClearBtn"));
+  m_undoClearBtn = new QPushButton(QStringLiteral("Undo Clear"), this); m_undoClearBtn->setObjectName(QStringLiteral("pointerGraphUndoClearBtn"));
+  m_undoClearBtn->setEnabled(false);
   m_exportSvgBtn = new QPushButton(QStringLiteral("Export SVG..."), this); m_exportSvgBtn->setObjectName(QStringLiteral("pointerGraphExportSvgBtn"));
   m_exportPngBtn = new QPushButton(QStringLiteral("Export PNG..."), this); m_exportPngBtn->setObjectName(QStringLiteral("pointerGraphExportPngBtn"));
   auto* zoomOutBtn = new QPushButton(QStringLiteral("Zoom -"), this);
@@ -90,7 +92,7 @@ void PointerGraphDialog::setupUi() {
   auto* zoomInBtn = new QPushButton(QStringLiteral("Zoom +"), this);
   m_fitBtn = new QPushButton(QStringLiteral("Fit Graph"), this); m_fitBtn->setObjectName(QStringLiteral("pointerGraphFitBtn"));
 
-  row2->addWidget(m_layoutBtn); row2->addWidget(m_expandHopBtn); row2->addWidget(m_clearBtn); row2->addStretch(1);
+  row2->addWidget(m_layoutBtn); row2->addWidget(m_expandHopBtn); row2->addWidget(m_clearBtn); row2->addWidget(m_undoClearBtn); row2->addStretch(1);
   row2->addWidget(m_exportSvgBtn); row2->addWidget(m_exportPngBtn);
   row2->addWidget(zoomOutBtn); row2->addWidget(m_resetZoomBtn); row2->addWidget(zoomInBtn); row2->addWidget(m_fitBtn);
   rootLayout->addLayout(row2);
@@ -110,6 +112,7 @@ void PointerGraphDialog::setupUi() {
   connect(m_layoutBtn, &QPushButton::clicked, this, &PointerGraphDialog::resetLayoutAndRelayoutDag);
   connect(m_expandHopBtn, &QPushButton::clicked, this, &PointerGraphDialog::expandAllPointersOneHop);
   connect(m_clearBtn, &QPushButton::clicked, this, &PointerGraphDialog::clearGraph);
+  connect(m_undoClearBtn, &QPushButton::clicked, this, &PointerGraphDialog::undoClearGraph);
   connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::close);
 
   connect(m_exportSvgBtn, &QPushButton::clicked, this, [this]() {
@@ -684,23 +687,43 @@ void PointerGraphDialog::autoLayoutNodes(bool resetManualPositions) {
 void PointerGraphDialog::resetLayoutAndRelayoutDag() { autoLayoutNodes(true); }
 
 void PointerGraphDialog::clearGraph() {
+  if (!m_nodes.isEmpty() || !m_rootExpressions.isEmpty()) {
+    GraphUndoSnapshot snap;
+    snap.roots = m_rootExpressions; snap.rootInput = m_rootEdit ? m_rootEdit->text() : QString();
+    snap.pinnedPositions = m_pinnedPositions; snap.displayOptions = m_displayOptions;
+    snap.previousFieldValues = m_previousFieldValues; snap.mutatedTransitions = m_mutatedFieldTransitions;
+    for (const auto* n : m_nodes) if (n) snap.nodes.append({n->expression(), n->typeName(), n->address(), n->fields(), n->pos()});
+    for (const auto* e : m_edges) if (e && e->sourceNode() && e->targetNode()) snap.edges.append({e->sourceNode()->expression(), e->sourceField(), canonicalNodeKey(e->targetNode())});
+    m_undoSnapshot = std::move(snap); m_hasUndoSnapshot = true;
+    if (m_undoClearBtn) m_undoClearBtn->setEnabled(true);
+  }
   if (m_scene) m_scene->clear();
   if (m_rootEdit) m_rootEdit->clear();
-  m_rootExpressions.clear();
-  m_pinnedPositions.clear();
-  m_nodeLayers.clear();
-  m_displayOptions.clear();
-  m_previousFieldValues.clear();
-  m_mutatedFieldTransitions.clear();
-  m_nodes.clear();
-  m_nodesByExpr.clear();
-  m_nodesByAddress.clear();
-  m_edges.clear();
-  m_pendingParentLinks.clear();
-  m_pendingTypeValueHints.clear();
-  m_autoExpandRoots.clear();
+  m_rootExpressions.clear(); m_pinnedPositions.clear(); m_nodeLayers.clear(); m_displayOptions.clear();
+  m_previousFieldValues.clear(); m_mutatedFieldTransitions.clear(); m_nodes.clear();
+  m_nodesByExpr.clear(); m_nodesByAddress.clear(); m_edges.clear();
+  m_pendingParentLinks.clear(); m_pendingTypeValueHints.clear(); m_autoExpandRoots.clear();
   m_hasCycleOrSharedAlias = false;
   if (m_view && m_view->viewport()) m_view->viewport()->update();
+}
+
+bool PointerGraphDialog::undoClearGraph() {
+  if (!m_hasUndoSnapshot) return false;
+  const GraphUndoSnapshot snap = std::move(m_undoSnapshot);
+  m_hasUndoSnapshot = false;
+  if (m_undoClearBtn) m_undoClearBtn->setEnabled(false);
+  m_rootExpressions = snap.roots; m_displayOptions = snap.displayOptions;
+  for (const auto& ns : snap.nodes) {
+    upsertStructNode(ns.expr, ns.typeName, ns.address, ns.fields);
+    if (auto* node = findNode(ns.expr)) { ScopedPinSuppress g(m_suppressPositionPinning); node->setPos(ns.pos); }
+  }
+  m_pinnedPositions = snap.pinnedPositions;
+  m_previousFieldValues = snap.previousFieldValues; m_mutatedFieldTransitions = snap.mutatedTransitions;
+  for (auto* n : m_nodes) n->setMutatedFields(m_mutatedFieldTransitions.value(n->expression()));
+  for (const auto& es : snap.edges) connectPointerField(es.srcExpr, es.fieldName, es.dstKey);
+  if (m_rootEdit) m_rootEdit->setText(snap.rootInput);
+  syncNodeRootFlags(); recomputeCyclesAndRefreshEdges();
+  return true;
 }
 
 bool PointerGraphDialog::nodeHasField(const QString& nodeExpr, const QString& fieldName) const {

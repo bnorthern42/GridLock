@@ -427,6 +427,20 @@ class IBackendCoordinator : public QObject {
   /** @brief Requests the active checkpoint table (`info checkpoints`) for @p rank. */
   virtual void requestCheckpoints(int rank) { Q_UNUSED(rank); }
 
+  /** @brief Pre-validates debugger and MPI launcher executables prior to marking UI ranks RUNNING. */
+  virtual bool validateLaunchEnvironment(int ranks, QString* outError = nullptr) const {
+    Q_UNUSED(ranks);
+    Q_UNUSED(outError);
+    return true;
+  }
+
+  /** @brief Writes raw @p data bytes at virtual @p address in @p rankId's live inferior address space. */
+  virtual void writeMemory(int rankId, uint64_t address, const QByteArray& data) {
+    Q_UNUSED(rankId);
+    Q_UNUSED(address);
+    Q_UNUSED(data);
+  }
+
  signals:
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
@@ -483,6 +497,9 @@ class IBackendCoordinator : public QObject {
 
   /** @brief Emitted when the active copy-on-write process checkpoints list for @p rank updates. */
   void checkpointsReady(int rank, const QVector<ProcessCheckpoint>& checkpoints);
+
+  /** @brief Emitted when launch or attach fails asynchronously (e.g. `ptrace_scope` `EPERM`). */
+  void sessionErrorOccurred(const QString& errorMessage);
 
  protected:
   QMap<QString, BreakpointExtraOptions> m_breakpointExtras;  ///< Extra ignoreCount/logMessage keyed by "file:line".

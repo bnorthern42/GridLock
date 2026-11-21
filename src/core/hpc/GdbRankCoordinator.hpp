@@ -77,6 +77,17 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Returns `"gdb"` as the canonical backend engine identifier. */
   QString activeEngineName() const override { return QStringLiteral("gdb"); }
 
+  /** @brief Pre-validates configured `gdb` and `mpirun`/`mpiexec` binaries before starting UI sessions. */
+  bool validateLaunchEnvironment(int ranks, QString* outError = nullptr) const override;
+
+  /** @brief Writes raw bytes into @p rankId's live inferior address space via `-data-write-memory-bytes`. */
+  void writeMemory(int rankId, uint64_t address, const QByteArray& data) override {
+    if (!data.isEmpty())
+      queueOrWriteCmd(rankId, QStringLiteral("-data-write-memory-bytes 0x%1 \"%2\"\n")
+                                  .arg(address, 0, 16)
+                                  .arg(QString::fromLatin1(data.toHex())));
+  }
+
   /** @brief Registers an active source-line breakpoint (with optional @p condition and @p rankFilter). */
   void setBreakpoint(const QString& file,
                      int line,
@@ -482,6 +493,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QString lastEvalExpression;          ///< Expression string for pending token `101` evaluation.
     QStringList pendingAfterStopCmds;    ///< MI commands queued while running to execute upon transient SIGINT stop.
     bool autoContinueAfterPending = false; ///< True when rank was interrupted solely to apply pending breakpoints.
+    bool pendingAttach = false;            ///< True while `-target-attach` or `-target-select` awaits confirmation.
     int pendingInterruptSignals = 0;       ///< Count of in-flight synthetic SIGINTs sent for transient interrupts.
     QString pendingLogpointMessage;        ///< Active Logpoint template awaiting `209-stack-list-variables`.
     QMap<QString, QString> pendingLogpointArgs; ///< Frame args captured from `*stopped` for Logpoint expansion.

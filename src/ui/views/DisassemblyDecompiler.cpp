@@ -21,9 +21,11 @@
 #include <QGraphicsSimpleTextItem>
 #include <QGraphicsView>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMap>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -612,45 +614,98 @@ QString DisassemblyView::applyPatchesToListing(const QString &rawCode) const {
   return lines.join('\n');
 }
 
-/**
- * @brief Applies live assembly instruction patch at instruction pointer address.
- *
- * Records the replacement instruction for the target address and triggers a
- * full disassembly parse, CFG basic block rebuild, and decompiler regeneration pass.
- *
- * @param address 64-bit target instruction address.
- * @param newInstruction New assembly instruction string (e.g. "nop").
- * @return True on valid non-empty patch; false otherwise.
- */
-bool DisassemblyView::patchInstruction(uint64_t address,
-                                       const QString &newInstruction) {
-  if (newInstruction.trimmed().isEmpty()) {
+bool DisassemblyView::validatePatchBytes(const QString& spec, QByteArray* outBytes,
+                                         int targetInstLen, QString* outDiagnostic) {
+  const QString trimmed = spec.trimmed();
+  if (trimmed.isEmpty()) {
+    if (outDiagnostic) *outDiagnostic = QStringLiteral("Patch specification cannot be empty.");
     return false;
   }
-  m_patchedInstructions.insert(address, newInstruction.trimmed());
+  static const QRegularExpression nopRe(QStringLiteral("^nop(?:\\s+(\\d+))?$"), QRegularExpression::CaseInsensitiveOption);
+  if (const auto m = nopRe.match(trimmed); m.hasMatch()) {
+    int count = (targetInstLen > 0) ? targetInstLen : 1;
+    if (!m.captured(1).isEmpty()) {
+      bool ok = false; count = m.captured(1).toInt(&ok);
+      if (!ok || count < 1 || count > 64) {
+        if (outDiagnostic) *outDiagnostic = QStringLiteral("NOP repeat count must be between 1 and 64 bytes.");
+        return false;
+      }
+    }
+    QByteArray bytes(count, '\x90');
+    if (targetInstLen > 0 && bytes.size() != targetInstLen && outDiagnostic) {
+      *outDiagnostic = QStringLiteral("NOP count (%1) differs from %2-byte target instruction.").arg(bytes.size()).arg(targetInstLen);
+    }
+    if (outBytes) *outBytes = bytes;
+    return true;
+  }
+  static const QRegularExpression hexTokRe(QStringLiteral("^(?:0x)?([0-9a-fA-F]+)$"), QRegularExpression::CaseInsensitiveOption);
+  QByteArray bytes;
+  for (const QString& tok : trimmed.split(QRegularExpression(QStringLiteral("[\\s,]+")), Qt::SkipEmptyParts)) {
+    const auto hm = hexTokRe.match(tok);
+    if (!hm.hasMatch() || (hm.captured(1).size() % 2) != 0) {
+      if (outDiagnostic) *outDiagnostic = QStringLiteral("Invalid token '%1': enter hex bytes (e.g. '31 c0 90') or 'nop [N]'.").arg(tok);
+      return false;
+    }
+    bytes.append(QByteArray::fromHex(hm.captured(1).toLatin1()));
+  }
+  if (bytes.isEmpty()) return false;
+  if (targetInstLen > 0 && bytes.size() < targetInstLen) {
+    const int pad = targetInstLen - bytes.size();
+    bytes.append(QByteArray(pad, '\x90'));
+    if (outDiagnostic) *outDiagnostic = QStringLiteral("Auto-padded %1 trailing NOP byte(s) to match %2-byte instruction.").arg(pad).arg(targetInstLen);
+  } else if (targetInstLen > 0 && bytes.size() > targetInstLen && outDiagnostic) {
+    *outDiagnostic = QStringLiteral("Patch length (%1 bytes) exceeds %2-byte instruction at target address.").arg(bytes.size()).arg(targetInstLen);
+  }
+  if (outBytes) *outBytes = bytes;
+  return true;
+}
+
+bool DisassemblyView::promptPatchInstructionDialog(uint64_t address) {
+  const int instLen = instructionByteLength(address);
+  const QString defSpec = (instLen > 1) ? QStringLiteral("nop %1").arg(instLen) : QStringLiteral("nop");
+  bool ok = false;
+  const QString raw = QInputDialog::getText(
+      this, tr("Patch Instruction"),
+      tr("Hex machine bytes (e.g. '31 c0 90') or 'nop [N]' for 0x%1%2:")
+          .arg(address, 8, 16, QChar('0'))
+          .arg(instLen > 0 ? tr(" (%1-byte instruction)").arg(instLen) : QString()),
+      QLineEdit::Normal, defSpec, &ok);
+  if (!ok || raw.trimmed().isEmpty()) return false;
+  QByteArray preview; QString diag;
+  if (!validatePatchBytes(raw, &preview, instLen, &diag)) {
+    QMessageBox::warning(this, tr("Invalid Instruction Patch"), diag);
+    return false;
+  }
+  if (instLen > 0 && preview.size() > instLen &&
+      QMessageBox::warning(this, tr("Instruction Length Mismatch"),
+                           diag + tr("\n\nApply multi-instruction overwrite anyway?"),
+                           QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+    return false;
+  }
+  return patchInstruction(address, raw);
+}
+
+bool DisassemblyView::patchInstruction(uint64_t address, const QString &newInstruction) {
+  QByteArray bytes; QString diag;
+  if (!validatePatchBytes(newInstruction, &bytes, instructionByteLength(address), &diag)) return false;
+  const bool isAllNop = std::all_of(bytes.cbegin(), bytes.cend(), [](char b) { return static_cast<unsigned char>(b) == 0x90U; });
+  QString label = isAllNop ? (bytes.size() > 1 ? QStringLiteral("nop ; x%1").arg(bytes.size()) : QStringLiteral("nop"))
+                           : (QStringLiteral(".byte 0x") + QString::fromLatin1(bytes.toHex(' ').toUpper()).replace(QLatin1Char(' '), QStringLiteral(", 0x")));
+  m_patchedInstructions.insert(address, label);
+  if (m_revertPatchesBtn) m_revertPatchesBtn->setEnabled(true);
   updateDisassembly(m_baseDisassembly);
   refreshDecompilerView();
-
-  QByteArray bytes;
-  if (newInstruction.trimmed().compare(QStringLiteral("nop"), Qt::CaseInsensitive) == 0) {
-    bytes = QByteArray("\x90", 1);
-  } else {
-    bytes = QByteArray::fromHex(newInstruction.toLatin1());
-    if (bytes.isEmpty()) {
-      bytes = newInstruction.toUtf8();
-    }
-  }
   emit instructionPatched(address, bytes);
   return true;
 }
 
-/**
- * @brief Reverts all actively applied instruction patches and restores original code.
- */
 void DisassemblyView::revertAllPatches() {
+  if (m_patchedInstructions.isEmpty()) return;
   m_patchedInstructions.clear();
+  if (m_revertPatchesBtn) m_revertPatchesBtn->setEnabled(false);
   updateDisassembly(m_baseDisassembly);
   refreshDecompilerView();
+  emit patchesReverted();
 }
 
 /**
@@ -805,32 +860,16 @@ XrefInspectorDialog* DisassemblyView::openXrefInspector(uint64_t targetAddr) {
  */
 QStringList DisassemblyView::contextActionNamesForAddress(uint64_t address) const {
   Q_UNUSED(address);
-  return {
-      QStringLiteral("Seek in Memory View"),
-      QStringLiteral("Inspect Cross-References (X)"),
-      QStringLiteral("Lookup in Reference Manual (F1)"),
-      QStringLiteral("Toggle Bookmark"),
-      QStringLiteral("Patch Instruction")
-  };
+  return {QStringLiteral("Seek in Memory View"), QStringLiteral("Inspect Cross-References (X)"),
+          QStringLiteral("Lookup in Reference Manual (F1)"), QStringLiteral("Toggle Bookmark"),
+          QStringLiteral("Patch Instruction"), QStringLiteral("Revert All Patches")};
 }
 
-/**
- * @brief Executes a named cross-view context menu action for the specified instruction address.
- * @param address Target 64-bit instruction address.
- * @param actionName Action label from contextActionNamesForAddress().
- * @return True if the action was recognized and dispatched, false otherwise.
- */
 bool DisassemblyView::triggerContextAction(uint64_t address, const QString& actionName) {
   if (actionName == QStringLiteral("Seek in Memory View")) {
-    seekToAddress(address);
-    emit addressSelected(address);
-    emit seekInMemoryViewRequested(address);
-    return true;
+    seekToAddress(address); emit addressSelected(address); emit seekInMemoryViewRequested(address); return true;
   }
-  if (actionName == QStringLiteral("Inspect Cross-References (X)")) {
-    openXrefInspector(address);
-    return true;
-  }
+  if (actionName == QStringLiteral("Inspect Cross-References (X)")) { openXrefInspector(address); return true; }
   if (actionName == QStringLiteral("Lookup in Reference Manual (F1)")) {
     // Extract called function symbol or instruction mnemonic from disassembly line at address.
     QString symbol;
@@ -838,62 +877,33 @@ bool DisassemblyView::triggerContextAction(uint64_t address, const QString& acti
     const QStringList lines = toPlainText().split('\n');
     if (lineIdx >= 0 && lineIdx < lines.size()) {
       const QString& line = lines[lineIdx];
-      // If line is a CALL instruction to a named symbol, extract target routine (e.g., MPI_Init).
-      static const QRegularExpression callRe(
-          QStringLiteral("\\bcall\\b[^<]*<([^>@]+)(?:@plt)?>"),
-          QRegularExpression::CaseInsensitiveOption);
-      const QRegularExpressionMatch callMatch = callRe.match(line);
-      if (callMatch.hasMatch()) {
+      static const QRegularExpression callRe(QStringLiteral("\\bcall\\b[^<]*<([^>@]+)(?:@plt)?>"), QRegularExpression::CaseInsensitiveOption);
+      if (const auto callMatch = callRe.match(line); callMatch.hasMatch()) {
         symbol = callMatch.captured(1).trimmed();
       } else {
-        // Strip address and label prefixes (e.g., "0x00401125 <main+5>: " -> "mov rbp, rsp").
-        QString stripped = line;
-        const int colonIdx = stripped.indexOf(QLatin1Char(':'));
-        if (colonIdx != -1) {
-          stripped = stripped.mid(colonIdx + 1).trimmed();
-        }
-        // Extract instruction mnemonic token (e.g., "mov", "cmp", "jg", "ret").
-        const QString mnemonic =
-            stripped.section(QRegularExpression(QStringLiteral("\\s+")), 0, 0).trimmed();
-        if (!mnemonic.isEmpty()) {
-          symbol = mnemonic;
-        }
+        const int colonIdx = line.indexOf(QLatin1Char(':'));
+        const QString stripped = (colonIdx != -1) ? line.mid(colonIdx + 1).trimmed() : line.trimmed();
+        const QString mnemonic = stripped.section(QRegularExpression(QStringLiteral("\\s+")), 0, 0).trimmed();
+        if (!mnemonic.isEmpty()) symbol = mnemonic;
       }
     }
-    if (symbol.isEmpty()) {
-      symbol = QStringLiteral("mov");
-    }
-    emit documentationRequested(symbol);
+    emit documentationRequested(symbol.isEmpty() ? QStringLiteral("mov") : symbol);
     return true;
   }
-  if (actionName == QStringLiteral("Toggle Bookmark")) {
-    toggleBookmark(address);
-    return true;
-  }
-  if (actionName == QStringLiteral("Patch Instruction")) {
-    return patchInstruction(address, QStringLiteral("nop"));
-  }
+  if (actionName == QStringLiteral("Toggle Bookmark")) { toggleBookmark(address); return true; }
+  if (actionName == QStringLiteral("Patch Instruction")) return promptPatchInstructionDialog(address);
+  if (actionName == QStringLiteral("Revert All Patches")) { revertAllPatches(); return true; }
   return false;
 }
 
-/**
- * @brief Checks whether the rendered CFG basic block containing addr displays an active ▶ instruction marker.
- * @param addr 64-bit target instruction address.
- * @return True if a CFG scene text item for addr is prefixed with the active ▶ execution marker.
- */
 bool DisassemblyView::activeCfgBlockContainsInstructionMarker(uint64_t addr) const {
-  if (!m_cfgScene) {
-    return false;
-  }
+  if (!m_cfgScene) return false;
   const QString hex8 = QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0'));
   const QString hex6 = QStringLiteral("0x%1").arg(addr, 6, 16, QChar('0'));
   for (QGraphicsItem *item : m_cfgScene->items()) {
     if (auto *txt = dynamic_cast<QGraphicsSimpleTextItem *>(item)) {
       const QString t = txt->text();
-      if (t.contains(QStringLiteral("▶")) &&
-          (t.contains(hex8, Qt::CaseInsensitive) || t.contains(hex6, Qt::CaseInsensitive))) {
-        return true;
-      }
+      if (t.contains(QStringLiteral("▶")) && (t.contains(hex8, Qt::CaseInsensitive) || t.contains(hex6, Qt::CaseInsensitive))) return true;
     }
   }
   return false;
@@ -911,7 +921,9 @@ void DisassemblyView::execAddressContextMenu(uint64_t addr, const QPoint& global
   menu->addSeparator();
   QAction* calcAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
   for (const QString& actLabel : contextActionNamesForAddress(addr)) {
-    connect(menu->addAction(actLabel), &QAction::triggered, this, [this, addr, actLabel]() { triggerContextAction(addr, actLabel); });
+    QAction* a = menu->addAction(actLabel);
+    if (actLabel == QStringLiteral("Revert All Patches")) a->setEnabled(!m_patchedInstructions.isEmpty());
+    connect(a, &QAction::triggered, this, [this, addr, actLabel]() { triggerContextAction(addr, actLabel); });
   }
   if (!property("gl_suppress_modal_exec").toBool()) {
     if (menu->exec(globalPos) == calcAct) emit sendToCalculatorRequested(addrHex);

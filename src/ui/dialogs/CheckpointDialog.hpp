@@ -112,6 +112,12 @@ class CheckpointDialog : public QDialog {
    */
   bool createCheckpointNow(bool bypassConfirm = false);
 
+  /** @brief Confirms naming `Rank <rank>` before restoring Checkpoint `<checkpointId>` (`restart <id>`). */
+  bool restoreCheckpointWithConfirm(int rank, int checkpointId, bool bypassConfirm = false);
+
+  /** @brief Confirms naming `Rank <rank>` before permanently deleting Checkpoint `<checkpointId>`. */
+  bool deleteCheckpointWithConfirm(int rank, int checkpointId, bool bypassConfirm = false);
+
  private:
   void setupUi();
   void applySafetyReportToBanner(const CheckpointSafetyReport& report);

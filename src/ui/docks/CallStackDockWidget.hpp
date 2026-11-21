@@ -71,6 +71,12 @@ class CallStackDockWidget : public QWidget {
    */
   int activeFrameLevel() const { return m_activeFrameLevel; }
 
+  /** @brief Programmatically selects and activates stack frame @p row (e.g. on right-click context menu). */
+  bool selectFrameRow(int row);
+
+  /** @brief Returns the function name of the currently active stack frame, if known. */
+  QString activeFrameFunction() const;
+
   /**
    * @brief Reapplies active `ThemeManager` palette tokens across header chrome and frame rows.
    */

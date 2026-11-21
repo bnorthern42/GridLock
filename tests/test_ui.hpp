@@ -201,5 +201,8 @@ private slots:
 
     /** @brief Verifies single DisassemblyView context menu + CFG/Decompiler menus, Watch registration/removal/contrast/tooltips, MemView cursor byte offset, and VariableTreeModel tooltips/copy/floating signals. */
     void testCrossViewHandoffsWatchLifecycleAndMemCursor();
+
+    /** @brief Verifies fail-loud build error handling, backend/ptrace preflight recovery, validatePatchBytes + Revert All Patches, confirmation guards, and PointerGraph/ArrayPlot Undo Clear. */
+    void testBuildPreflightValidatedPatchingAndSafetyGuards();
 };
 

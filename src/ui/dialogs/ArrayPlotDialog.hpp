@@ -236,6 +236,12 @@ public:
     const QVector<double>& scalarHistory() const { return m_scalarHistory; }
     /** @brief Clears all accumulated scalar time-series history samples (primary and per-rank). */
     void clearScalarHistory();
+    /** @brief Returns true when a cleared history/plot snapshot is available to restore. */
+    bool canUndoClear() const { return m_hasUndoSnapshot; }
+    /** @brief Restores the most recently cleared scalar history and plot sample buffers. */
+    bool undoClearHistory();
+    /** @brief Convenience alias forwarding to undoClearHistory(). */
+    bool undoClear() { return undoClearHistory(); }
 
     /** @brief Returns the currently plotted sample values. */
     const QVector<double>& currentSamples() const { return m_currentSamples; }
@@ -341,6 +347,15 @@ private:
     int m_infCount = 0;
     int m_changedElementCount = 0;
 
+    struct PlotUndoSnapshot {
+        QVector<double> scalarHistory, currentSamples, previousSamples;
+        QVector<QPair<double, double>> complexPairs;
+        QMap<int, QVector<double>> rankScalarHistories, rankOverlays;
+        int rows = 1, cols = 1, depth = 1;
+    };
+    bool m_hasUndoSnapshot = false;
+    PlotUndoSnapshot m_undoSnapshot;
+
     QLineEdit* m_exprEdit = nullptr;
     QCompleter* m_completer = nullptr;
     QStringListModel* m_completerModel = nullptr;
@@ -359,6 +374,7 @@ private:
     QCheckBox* m_logScaleCheck = nullptr;
     QPushButton* m_resetZoomBtn = nullptr;
     QPushButton* m_clearHistoryBtn = nullptr;
+    QPushButton* m_undoClearBtn = nullptr;
     QPushButton* m_chartViewBtn = nullptr;
     QPushButton* m_tableViewBtn = nullptr;
     QComboBox* m_rankCombo = nullptr;

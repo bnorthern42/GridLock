@@ -43,6 +43,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
+#include <memory>
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QMouseEvent>
@@ -141,16 +143,33 @@ void MainWindow::setupToolbar() {
     m_targetSelector->setToolTip(QStringLiteral("Active Target: %1\nPath: %2").arg(m_targetSelector->itemText(idx), full.isEmpty() ? raw : full));
   };
   syncTargetTooltip();
+  m_targetSelector->setProperty("gl_confirmed_idx", 0);
   connect(m_targetSelector, &QComboBox::currentIndexChanged, this, [this, syncTargetTooltip](int index) {
     if (!m_targetSelector || index < 0) return;
+    const int prevIdx = m_targetSelector->property("gl_confirmed_idx").toInt();
     const QString data = m_targetSelector->itemData(index).toString();
     if (data == QStringLiteral("__open_binary__")) {
       m_targetSelector->blockSignals(true);
-      m_targetSelector->setCurrentIndex(0);
+      m_targetSelector->setCurrentIndex(prevIdx >= 0 && prevIdx < m_targetSelector->count() ? prevIdx : 0);
       m_targetSelector->blockSignals(false);
       syncTargetTooltip();
       openFile();
     } else if (!data.isEmpty()) {
+      if (m_debugSessionActive && !m_switchingWorkspace && index != prevIdx && !property("gl_bypass_confirm").toBool()) {
+        const int r = activeSteppingRank();
+        if (QMessageBox::warning(this, tr("Switch Active Target"),
+                                 tr("A debug session is active on Rank %1.\n\nTerminate the active session and switch target to '%2'?")
+                                     .arg(r)
+                                     .arg(m_targetSelector->itemText(index)),
+                                 QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+          m_targetSelector->blockSignals(true);
+          m_targetSelector->setCurrentIndex(prevIdx >= 0 && prevIdx < m_targetSelector->count() ? prevIdx : 0);
+          m_targetSelector->blockSignals(false);
+          syncTargetTooltip();
+          return;
+        }
+      }
+      m_targetSelector->setProperty("gl_confirmed_idx", index);
       selectTargetByName(data);
       syncTargetTooltip();
     }
@@ -192,14 +211,15 @@ void MainWindow::setupToolbar() {
   buildSplitBtn->setMenu(buildMenu);
   toolbar->addWidget(buildSplitBtn);
 
-  // Run Action: Compiles active target on-demand, latches Running state, and advances to first BP.
+  // Run Action: Compiles active target on-demand, latches Running state only on valid launch, and advances to first BP.
   m_runAction = new QAction(QStringLiteral("▶ Run Target"), this);
   m_runAction->setObjectName(QStringLiteral("actionRunTarget"));
   m_runAction->setIconText(QStringLiteral("▶ Run"));
   m_runAction->setCheckable(true);
   connect(m_runAction, &QAction::triggered, this, [this]() {
-    ensureTargetBinaryCompiled();
+    if (!m_previewFixtureOnly && !ensureTargetBinaryCompiled()) { updateDebugToolbarState(); return; }
     startTargetWorkflow();
+    updateDebugToolbarState();
   });
   toolbar->addAction(m_runAction);
   if (QWidget *runBtn = toolbar->widgetForAction(m_runAction)) {
@@ -641,13 +661,23 @@ void MainWindow::setupDocks() {
               srcView->highlightExecutionLine(addressToSourceLine(addr));
             }
           });
-  // Write patched instruction bytes back to the in-memory ELF binary image when edited in DisassemblyView.
-  connect(m_disassemblyView, &DisassemblyView::instructionPatched, this,
-          [this](uint64_t addr, const QByteArray &bytes) {
-            if (m_elfInspector && m_elfInspector->isValid()) {
-              m_elfInspector->writeVirtualMemory(addr, bytes);
-            }
-          });
+  // Write patched instruction bytes to ELF image + live coordinator memory, and restore originals on revert.
+  auto savedInstBytes = std::make_shared<QMap<uint64_t, QByteArray>>();
+  connect(m_disassemblyView, &DisassemblyView::instructionPatched, this, [this, savedInstBytes](uint64_t addr, const QByteArray &bytes) {
+    if (m_elfInspector && m_elfInspector->isValid()) {
+      if (!savedInstBytes->contains(addr)) savedInstBytes->insert(addr, m_elfInspector->readVirtualMemory(addr, bytes.size()));
+      m_elfInspector->writeVirtualMemory(addr, bytes);
+    }
+    if (m_coordinator && (m_debugSessionActive || m_coordinator->getProcessCount() > 0)) m_coordinator->writeMemory(activeSteppingRank(), addr, bytes);
+  });
+  connect(m_disassemblyView, &DisassemblyView::patchesReverted, this, [this, savedInstBytes]() {
+    for (auto it = savedInstBytes->cbegin(); it != savedInstBytes->cend(); ++it) {
+      if (it.value().isEmpty()) continue;
+      if (m_elfInspector && m_elfInspector->isValid()) m_elfInspector->writeVirtualMemory(it.key(), it.value());
+      if (m_coordinator && (m_debugSessionActive || m_coordinator->getProcessCount() > 0)) m_coordinator->writeMemory(activeSteppingRank(), it.key(), it.value());
+    }
+    savedInstBytes->clear();
+  });
 
   // Mount Source Editor and Disassembly/CFG side-by-side in the master horizontal splitter.
   masterHorizontalSplitter->addWidget(m_editorTabManager);
@@ -747,6 +777,7 @@ void MainWindow::setupDocks() {
   });
   connect(m_memView, &MemView::bytesPatched, this, [this](uint64_t addr, const QByteArray &bytes) {
     if (m_elfInspector && m_elfInspector->isValid()) m_elfInspector->writeVirtualMemory(addr, bytes);
+    if (m_coordinator && (m_debugSessionActive || m_coordinator->getProcessCount() > 0)) m_coordinator->writeMemory(activeSteppingRank(), addr, bytes);
   });
 
   // Asynchronous Cross-Rank Memory Differ: Compares byte blocks between two MPI rank processes.

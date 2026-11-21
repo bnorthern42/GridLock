@@ -238,44 +238,46 @@ void DapCoordinator::pauseExecution(int threadId) {
   sendRequest("pause", args);
 }
 
-/**
- * @brief Resolves `lldb-dap` (or fallback `lldb-vscode`) and starts a parallel debugging session.
- */
-void DapCoordinator::launchParallelSession(const QString& binaryPath,
-                                           int ranks) {
-  launchParallelSession(binaryPath, ranks,
-                        gridlock::core::ConfigManager::instance().getMpiArgs());
+/** @brief Pre-validates `lldb-dap`/`lldb-vscode` and MPI launcher availability before UI launch. */
+bool DapCoordinator::validateLaunchEnvironment(int ranks, QString* outError) const {
+  const QString cfg = gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath().trimmed();
+  QString adapter = (!cfg.isEmpty() && QFileInfo::exists(cfg)) ? cfg : QStandardPaths::findExecutable(cfg);
+  if (adapter.isEmpty() && cfg.isEmpty()) {
+    adapter = QStandardPaths::findExecutable(QStringLiteral("lldb-dap"));
+    if (adapter.isEmpty()) adapter = QStandardPaths::findExecutable(QStringLiteral("lldb-vscode"));
+  }
+  if (adapter.isEmpty()) {
+    if (outError) *outError = QStringLiteral("LLDB-DAP adapter executable ('%1') was not found in PATH.").arg(cfg.isEmpty() ? QStringLiteral("lldb-dap") : cfg);
+    return false;
+  }
+  if (ranks > 1) {
+    const QStringList dirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"), QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
+    if (QStandardPaths::findExecutable(QStringLiteral("mpirun"), dirs).isEmpty() && QStandardPaths::findExecutable(QStringLiteral("mpiexec"), dirs).isEmpty() &&
+        QStandardPaths::findExecutable(QStringLiteral("mpirun")).isEmpty() && QStandardPaths::findExecutable(QStringLiteral("mpiexec")).isEmpty()) {
+      if (outError) *outError = QStringLiteral("Multi-rank launch (-np %1) requires mpirun or mpiexec in PATH.").arg(ranks);
+      return false;
+    }
+  }
+  return true;
 }
 
-/**
- * @brief Resolves the configured DAP adapter and starts a debugging session with @p mpiArgs.
- */
-void DapCoordinator::launchParallelSession(const QString& binaryPath,
-                                           int ranks,
-                                           const QString& mpiArgs) {
-  if (m_state != SessionState::Disconnected) {
-    terminateSession();
-  }
+/** @brief Resolves `lldb-dap` (or fallback `lldb-vscode`) and starts a parallel debugging session. */
+void DapCoordinator::launchParallelSession(const QString& binaryPath, int ranks) {
+  launchParallelSession(binaryPath, ranks, gridlock::core::ConfigManager::instance().getMpiArgs());
+}
+
+/** @brief Resolves the configured DAP adapter and starts a debugging session with @p mpiArgs. */
+void DapCoordinator::launchParallelSession(const QString& binaryPath, int ranks, const QString& mpiArgs) {
+  if (m_state != SessionState::Disconnected) terminateSession();
   m_processCount = std::max(1, ranks);
   m_currentBinaryPath = binaryPath;
   m_mpiArgs = mpiArgs;
 
-  QString adapterProgram =
-      gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath().trimmed();
-  if (!adapterProgram.isEmpty() && !QFileInfo::exists(adapterProgram)) {
-    adapterProgram = QStandardPaths::findExecutable(adapterProgram);
-  }
-  if (adapterProgram.isEmpty()) {
-    adapterProgram = QStandardPaths::findExecutable("lldb-dap");
-  }
-  if (adapterProgram.isEmpty()) {
-    adapterProgram = QStandardPaths::findExecutable("lldb-vscode");
-  }
-  if (adapterProgram.isEmpty()) {
-    qWarning() << "[DAP] Could not find lldb-dap or lldb-vscode in PATH.";
-    return;
-  }
-
+  QString adapterProgram = gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath().trimmed();
+  if (!adapterProgram.isEmpty() && !QFileInfo::exists(adapterProgram)) adapterProgram = QStandardPaths::findExecutable(adapterProgram);
+  if (adapterProgram.isEmpty()) adapterProgram = QStandardPaths::findExecutable("lldb-dap");
+  if (adapterProgram.isEmpty()) adapterProgram = QStandardPaths::findExecutable("lldb-vscode");
+  if (adapterProgram.isEmpty()) { m_processCount = 0; qWarning() << "[DAP] Could not find lldb-dap or lldb-vscode in PATH."; return; }
   startAdapter(adapterProgram);
 }
 
@@ -290,18 +292,14 @@ bool DapCoordinator::attachToProcess(qint64 pid) {
 
   // Resolve configured or system `lldb-dap` / `lldb-vscode` adapter binary.
   QString adapterProgram = gridlock::core::ConfigManager::instance().getGlobalDapAdapterPath().trimmed();
-  if (!adapterProgram.isEmpty() && !QFileInfo::exists(adapterProgram)) {
-    adapterProgram = QStandardPaths::findExecutable(adapterProgram);
-  }
+  if (!adapterProgram.isEmpty() && !QFileInfo::exists(adapterProgram)) adapterProgram = QStandardPaths::findExecutable(adapterProgram);
   if (adapterProgram.isEmpty()) adapterProgram = QStandardPaths::findExecutable(QStringLiteral("lldb-dap"));
   if (adapterProgram.isEmpty()) adapterProgram = QStandardPaths::findExecutable(QStringLiteral("lldb-vscode"));
   if (adapterProgram.isEmpty()) return false;
 
   // Bind rank 0 immediately to the target PID and queue DAP `attach` on `initialize` completion.
-  m_processCount = 1;
-  m_pendingAttachPid = pid;
-  m_rankToPid.clear();
-  m_rankToPid[0] = static_cast<pid_t>(pid);
+  m_processCount = 1; m_pendingAttachPid = pid;
+  m_rankToPid.clear(); m_rankToPid[0] = static_cast<pid_t>(pid);
   m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
   startAdapter(adapterProgram);
   return true;
@@ -310,18 +308,13 @@ bool DapCoordinator::attachToProcess(qint64 pid) {
 bool DapCoordinator::attachToProcesses(const QList<gridlock::ProcessEntry>& targets) {
   if (targets.isEmpty()) return false;
   QList<gridlock::ProcessEntry> ordered = targets;
-  std::sort(ordered.begin(), ordered.end(),
-            [](const gridlock::ProcessEntry& a, const gridlock::ProcessEntry& b) {
-              if (a.mpiRank >= 0 && b.mpiRank >= 0 && a.mpiRank != b.mpiRank) return a.mpiRank < b.mpiRank;
-              return a.pid < b.pid;
-            });
+  std::sort(ordered.begin(), ordered.end(), [](const gridlock::ProcessEntry& a, const gridlock::ProcessEntry& b) {
+    return (a.mpiRank >= 0 && b.mpiRank >= 0 && a.mpiRank != b.mpiRank) ? (a.mpiRank < b.mpiRank) : (a.pid < b.pid);
+  });
   if (!attachToProcess(static_cast<qint64>(ordered.first().pid))) return false;
-  m_processCount = ordered.size();
-  m_rankToPid.clear();
+  m_processCount = ordered.size(); m_rankToPid.clear();
   for (int r = 0; r < ordered.size(); ++r) m_rankToPid[r] = ordered[r].pid;
-  if (m_currentBinaryPath.isEmpty() && !ordered.first().executablePath.isEmpty()) {
-    m_currentBinaryPath = ordered.first().executablePath;
-  }
+  if (m_currentBinaryPath.isEmpty() && !ordered.first().executablePath.isEmpty()) m_currentBinaryPath = ordered.first().executablePath;
   return true;
 }
 
@@ -652,6 +645,10 @@ void DapCoordinator::handleMessage(const QJsonObject& message) {
   if (type == "response") {
     // Dispatch adapter command responses (`initialize`, `stackTrace`, `threads`, `scopes`, `variables`, `evaluate`, `dataBreakpointInfo`).
     const QString command = message["command"].toString();
+    if ((command == "attach" || command == "launch") && !message["success"].toBool(true)) {
+      const QString errMsg = message["message"].toString(QStringLiteral("DAP %1 failed").arg(command));
+      terminateSession(); emit sessionErrorOccurred(errMsg); emit messageReceived(message); return;
+    }
     if (command == "initialize" && message["success"].toBool(true)) {
       // Dispatch live PID `attach` when `attachToProcess(pid)` initiated this session.
       if (m_pendingAttachPid > 0) {

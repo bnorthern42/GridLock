@@ -239,6 +239,8 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     m_resetZoomBtn = makeBtn(QStringLiteral("Reset Zoom"), QStringLiteral("arrayPlotResetZoomBtn"));
     m_resetZoomBtn->setEnabled(false);
     m_clearHistoryBtn = makeBtn(QStringLiteral("Clear History"), QStringLiteral("arrayPlotClearHistoryBtn"));
+    m_undoClearBtn = makeBtn(QStringLiteral("Undo Clear"), QStringLiteral("arrayPlotUndoClearBtn"));
+    m_undoClearBtn->setEnabled(false);
 
     sliceRow->addWidget(new QLabel(QStringLiteral("Ny:"), this)); sliceRow->addWidget(m_rowsSpin);
     sliceRow->addWidget(new QLabel(QStringLiteral("Nx:"), this)); sliceRow->addWidget(m_colsSpin);
@@ -247,7 +249,7 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     sliceRow->addWidget(m_memoryOrderCombo);
     sliceRow->addWidget(new QLabel(QStringLiteral("Off:"), this)); sliceRow->addWidget(m_offsetSpin);
     sliceRow->addWidget(new QLabel(QStringLiteral("Str:"), this)); sliceRow->addWidget(m_strideSpin);
-    sliceRow->addWidget(m_logScaleCheck); sliceRow->addWidget(m_resetZoomBtn); sliceRow->addWidget(m_clearHistoryBtn);
+    sliceRow->addWidget(m_logScaleCheck); sliceRow->addWidget(m_resetZoomBtn); sliceRow->addWidget(m_clearHistoryBtn); sliceRow->addWidget(m_undoClearBtn);
     sliceRow->addStretch(1); root->addLayout(sliceRow);
 
     // Row 3: Chart / Tensor Table view switcher, Rank controls, Auto-Refresh, and Exports.
@@ -347,6 +349,7 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     connect(m_resetZoomBtn, &QPushButton::clicked, this, &ArrayPlotDialog::resetZoom);
     connect(m_canvas, &ArrayPlotCanvas::zoomChanged, m_resetZoomBtn, &QPushButton::setEnabled);
     connect(m_clearHistoryBtn, &QPushButton::clicked, this, &ArrayPlotDialog::clearScalarHistory);
+    connect(m_undoClearBtn, &QPushButton::clicked, this, &ArrayPlotDialog::undoClearHistory);
     connect(m_chartViewBtn, &QPushButton::clicked, this, [this]() { setTensorTableActive(false); });
     connect(m_tableViewBtn, &QPushButton::clicked, this, [this]() { setTensorTableActive(true); });
     connect(m_rankCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
@@ -692,16 +695,42 @@ void ArrayPlotDialog::appendScalarSample(double value, int rankId) {
 }
 
 void ArrayPlotDialog::clearScalarHistory() {
+    const bool hadScalar = !m_scalarHistory.isEmpty() || !m_rankScalarHistories.isEmpty();
+    if (hadScalar || !m_currentSamples.isEmpty()) {
+        m_undoSnapshot = {m_scalarHistory, m_currentSamples, m_previousSamples, m_complexPairs,
+                          m_rankScalarHistories, m_rankOverlays, m_rows, m_cols, m_depth};
+        m_hasUndoSnapshot = true;
+        if (m_undoClearBtn) m_undoClearBtn->setEnabled(true);
+    }
     m_scalarHistory.clear();
     m_rankScalarHistories.clear();
-    if (plotMode() == PlotMode::ScalarHistory) {
+    if (plotMode() == PlotMode::ScalarHistory || !hadScalar) {
         m_currentSamples.clear();
         m_previousSamples.clear();
+        m_complexPairs.clear();
         m_rankOverlays.clear();
         if (m_tensorModel) m_tensorModel->notifyDataRefreshed();
         recomputeStats();
     }
     if (m_canvas) { m_canvas->resetZoom(); m_canvas->update(); }
+}
+
+bool ArrayPlotDialog::undoClearHistory() {
+    if (!m_hasUndoSnapshot) return false;
+    const PlotUndoSnapshot snap = std::move(m_undoSnapshot);
+    m_hasUndoSnapshot = false;
+    if (m_undoClearBtn) m_undoClearBtn->setEnabled(false);
+    m_scalarHistory = snap.scalarHistory; m_rankScalarHistories = snap.rankScalarHistories;
+    m_currentSamples = snap.currentSamples; m_previousSamples = snap.previousSamples;
+    m_complexPairs = snap.complexPairs; m_rankOverlays = snap.rankOverlays;
+    m_rows = snap.rows; m_cols = snap.cols; m_depth = snap.depth;
+    if (m_tensorModel) {
+        m_tensorModel->setSourceData(&m_currentSamples, m_complexPairs.isEmpty() ? nullptr : &m_complexPairs);
+        m_tensorModel->setShape(m_cols, m_rows, m_depth);
+    }
+    recomputeStats();
+    if (m_canvas) m_canvas->update();
+    return true;
 }
 
 void ArrayPlotDialog::recomputeStats() {

@@ -29,8 +29,11 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QDir>
 #include <QDockWidget>
 #include <QEvent>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -834,9 +837,11 @@ void MainWindow::appendProgramOutput(int rank, const QString& text, bool isError
   const int filterRank = m_programOutputRankFilter ? m_programOutputRankFilter->currentData().toInt() : -1; bool queued = false;
   for (const QString& ln : text.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
     const QString clean = ln.trimmed(); if (clean.isEmpty()) continue;
-    const QString fmt = QStringLiteral("[Rank %1%2] %3").arg(rank).arg(isError ? QStringLiteral(" stderr") : QString()).arg(clean);
+    const QString fmt = (rank < 0)
+                            ? (clean.startsWith(QLatin1Char('[')) ? clean : QStringLiteral("[Diagnostics] %1").arg(clean))
+                            : QStringLiteral("[Rank %1%2] %3").arg(rank).arg(isError ? QStringLiteral(" stderr") : QString()).arg(clean);
     m_programOutputLines.append(qMakePair(rank, fmt));
-    if (m_programOutputView && (filterRank < 0 || filterRank == rank)) { m_pendingProgramOutputBatch.append(fmt); queued = true; }
+    if (m_programOutputView && (filterRank < 0 || rank < 0 || filterRank == rank)) { m_pendingProgramOutputBatch.append(fmt); queued = true; }
   }
   // Cap retained line history and start the single-shot 60 FPS flush timer once per burst.
   if (m_programOutputLines.size() > 12000) m_programOutputLines.remove(0, m_programOutputLines.size() - 10000);
@@ -876,4 +881,38 @@ void MainWindow::syncRankCountChrome(int rankCount) {
   if (m_programOutputRankFilter) m_programOutputRankFilter->setVisible(multi);
 }
 void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {}
+
+/** @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for @p targetPath. */
+QString MainWindow::detectBuildSystem(const QString& targetPath) const {
+  const QString root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
+  const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
+  const QFileInfo info(resolved);
+  QList<QDir> dirs = {QDir(info.isDir() ? info.absoluteFilePath() : info.absolutePath())};
+  if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir)) dirs.append(QDir(m_activeWorkspaceDir));
+  for (const QDir& d : dirs) {
+    if (d.exists(QStringLiteral("meson.build"))) return QStringLiteral("Meson");
+    if (d.exists(QStringLiteral("CMakeLists.txt"))) return QStringLiteral("CMake");
+    if (d.exists(QStringLiteral("Makefile")) || d.exists(QStringLiteral("GNUmakefile"))) return QStringLiteral("Make");
+  }
+  return QStringLiteral("SingleFileMPI");
+}
+
+/** @brief Constructs the shell build command for a given project directory or standalone source file. */
+QString MainWindow::buildCommandForPath(const QString& targetPath) const {
+  const QString buildSys = detectBuildSystem(targetPath), root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
+  const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
+  const QFileInfo info(resolved); QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+  if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir) && !QDir(dirPath).exists(QStringLiteral("meson.build")) && !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) && !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
+  const QDir dir(dirPath);
+  if (buildSys == QStringLiteral("Meson")) {
+    for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")}) if (dir.exists(b + QStringLiteral("/build.ninja"))) return QStringLiteral("ninja -C \"%1/%2\"").arg(dirPath, b);
+    return QStringLiteral("meson setup \"%1/builddir\" \"%1\" && ninja -C \"%1/builddir\"").arg(dirPath);
+  }
+  if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake -S \"%1\" -B \"%1/%2\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/%2\" -j").arg(dirPath, dir.exists(QStringLiteral("build_cmake")) ? QStringLiteral("build_cmake") : QStringLiteral("build"));
+  if (buildSys == QStringLiteral("Make")) return QStringLiteral("make -C \"%1\" -j").arg(dirPath);
+  const QFileInfo srcInfo(!info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath());
+  const bool isC = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
+  const QString cc = isC ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc")) : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
+  return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(cc, srcInfo.absoluteFilePath(), srcInfo.dir().filePath(srcInfo.completeBaseName()));
+}
 }  // namespace gridlock::ui

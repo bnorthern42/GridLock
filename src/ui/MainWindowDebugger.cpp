@@ -171,7 +171,10 @@ void MainWindow::rebuildDynamicSourceLineMap() {
     } else bindSrcExec(sourceCodeView());
     if (m_callStackDockWidget) if (auto* tbl = m_callStackDockWidget->findChild<QTableWidget*>(QStringLiteral("callStackTable")); tbl && !tbl->property("gl_exec_wired").toBool()) {
         tbl->setProperty("gl_exec_wired", true); tbl->setContextMenuPolicy(Qt::CustomContextMenu);
-        connect(tbl, &QWidget::customContextMenuRequested, this, [this, tbl](const QPoint& pos) { QMenu m(tbl); m.addAction(QStringLiteral("Force Early Return..."), this, [this]() { forceEarlyReturnWorkflow(QString(), true); }); m.exec(tbl->viewport()->mapToGlobal(pos)); });
+        connect(tbl, &QWidget::customContextMenuRequested, this, [this, tbl](const QPoint& pos) {
+            if (const int row = tbl->rowAt(pos.y()); row >= 0 && m_callStackDockWidget) m_callStackDockWidget->selectFrameRow(row);
+            QMenu m(tbl); m.addAction(QStringLiteral("Force Early Return..."), this, [this]() { forceEarlyReturnWorkflow(QString(), true); }); m.exec(tbl->viewport()->mapToGlobal(pos));
+        });
     }
     m_dynamicLineToAddress.clear(); m_dynamicAddressToLine.clear();
     if (m_useRealBinaryTarget && !m_dwarfLineToAddress.isEmpty()) { m_dynamicLineToAddress = m_dwarfLineToAddress; m_dynamicAddressToLine = m_dwarfAddressToLine; return; }
@@ -241,11 +244,20 @@ void MainWindow::startTargetWorkflow() {
     // Live parallel execution path via `IBackendCoordinator` (`GdbRankCoordinator` or `DapCoordinator`).
     if (!m_previewFixtureOnly) {
         syncCoordinatorWithConfig();
-        if (!ensureTargetBinaryCompiled() || !m_coordinator) return;
+        if (!ensureTargetBinaryCompiled() || !m_coordinator) { updateDebugToolbarState(); return; }
         const QString binPath = activeTargetBinaryPath();
-        if (binPath.isEmpty() || !QFileInfo::exists(binPath)) return;
+        if (binPath.isEmpty() || !QFileInfo::exists(binPath)) { updateDebugToolbarState(); return; }
 
         const int rankCount = m_rankCountSpin ? std::clamp(m_rankCountSpin->value(), 1, 256) : std::max(1, gridlock::core::ConfigManager::instance().getDefaultRanks());
+        QString preflightErr;
+        if (!m_coordinator->validateLaunchEnvironment(rankCount, &preflightErr)) {
+            appendProgramOutput(-1, QStringLiteral("[Launch Aborted] %1").arg(preflightErr), true); flushProgramOutputBatch();
+            selectBottomToolGroup(QStringLiteral("Debug"));
+            if (auto* po = findChild<QWidget*>(QStringLiteral("ProgramOutputDock")); po && m_bottomTabs) m_bottomTabs->setCurrentWidget(po);
+            updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("LAUNCH FAILED"));
+            updateDebugToolbarState();
+            return;
+        }
         const QString mpiArgs = gridlock::core::ConfigManager::instance().getMpiArgs();
         const int preserveRank = (m_serverRackView && m_serverRackView->selectedRank() >= 0) ? std::clamp(m_serverRackView->selectedRank(), 0, rankCount - 1) : 0;
         // Synchronize all active editor tabs and workspace breakpoints (including conditions and rank filters).
@@ -280,18 +292,14 @@ void MainWindow::startTargetWorkflow() {
         }
 
         // Reset rank telemetry rows to RUNNING prior to spawning child processes; live signals drive all stops.
-        m_latestStates.clear();
-        m_rankLoopCounter.clear();
-        m_focusedRank = preserveRank;
+        m_latestStates.clear(); m_rankLoopCounter.clear(); m_focusedRank = preserveRank;
         if (m_disassemblyView) m_disassemblyView->setDeadlockCycleRanks({});
         if (m_gdbConsoleWidget) m_gdbConsoleWidget->resetRanks(rankCount);
 
-        QList<RankState> initialRanks;
-        initialRanks.reserve(rankCount);
+        QList<RankState> initialRanks; initialRanks.reserve(rankCount);
         for (int r = 0; r < rankCount; ++r) {
             RankState st; st.rankId = r; st.currentState = QStringLiteral("running");
-            m_latestStates[r] = st;
-            initialRanks.append(st);
+            m_latestStates[r] = st; initialRanks.append(st);
             if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateRankStateRow(r, QStringLiteral("RUNNING"), QStringLiteral("main"), QStringLiteral("ALL RANKS"), 0ULL, rankCount);
         }
         if (m_serverRackView) { m_serverRackView->updateRanks(initialRanks); m_serverRackView->selectRank(preserveRank); }
@@ -308,11 +316,8 @@ void MainWindow::startTargetWorkflow() {
         m_coordinator->setTargetExecutionContext(tArgs, tWd);
         m_coordinator->launchParallelSession(binPath, rankCount, projCfg.mpiArgs.isEmpty() ? mpiArgs : projCfg.mpiArgs);
         syncProgramOutputForLaunch(rankCount);
-        if (m_differentialGrid) {
-            if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
-                for (const auto& w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
-            }
-        }
+        if (m_differentialGrid) if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator))
+            for (const auto& w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
         return;
     }
 
@@ -648,44 +653,47 @@ QString MainWindow::activeTargetBinaryPath() const {
  */
 bool MainWindow::ensureTargetBinaryCompiled() {
     // Enable genuine ELF64 + DWARF disassembly and live coordinator execution mode.
-    m_previewFixtureOnly = false;
-    m_useRealBinaryTarget = true;
-    const QString srcPath = activeTargetSourcePath();
-    const QString binPath = activeTargetBinaryPath();
+    m_previewFixtureOnly = false; m_useRealBinaryTarget = true;
+    const QString srcPath = activeTargetSourcePath(), binPath = activeTargetBinaryPath();
     if (binPath.isEmpty()) return false;
 
     // Skip single-file compiler overwrite when #toolbarTargetSelector directly targets an external build-dir ELF binary.
     const QFileInfo srcInfo(srcPath), binInfo(binPath);
-    const bool directElfSelected = m_targetSelector &&
-                                   resolveWorkspacePath(m_targetSelector->currentData().toString()) == binInfo.absoluteFilePath() &&
-                                   isRunnableElfExecutable(binPath);
+    const bool directElfSelected = m_targetSelector && resolveWorkspacePath(m_targetSelector->currentData().toString()) == binInfo.absoluteFilePath() && isRunnableElfExecutable(binPath);
     const bool srcExists = !directElfSelected && !srcPath.isEmpty() && srcInfo.exists() && srcInfo.isFile();
     const bool needCompile = srcExists && (!binInfo.exists() || binInfo.lastModified() < srcInfo.lastModified());
 
     // Compile with -g -O0 when the ELF executable is missing or older than its standalone C/C++ source file.
     if (needCompile) {
         const bool isCFile = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
-        const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"),
-                                        QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
-                                        QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
-        const QString mpiName = isCFile ? QStringLiteral("mpicc") : QStringLiteral("mpicxx");
-        const QString gnuName = isCFile ? QStringLiteral("gcc") : QStringLiteral("g++");
+        const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"), QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"), QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
+        const QString mpiName = isCFile ? QStringLiteral("mpicc") : QStringLiteral("mpicxx"), gnuName = isCFile ? QStringLiteral("gcc") : QStringLiteral("g++");
         QString compiler = QStandardPaths::findExecutable(mpiName);
         if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(mpiName, searchDirs);
         if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(gnuName);
-        if (!compiler.isEmpty()) {
-            QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-            env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
-            proc.setProcessEnvironment(env);
-            proc.start(compiler, {QStringLiteral("-g"), QStringLiteral("-O0"), srcPath, QStringLiteral("-o"), binPath});
-            proc.waitForFinished(10000);
+        auto failCompile = [&](const QString& msg) {
+            appendProgramOutput(-1, msg, true); flushProgramOutputBatch(); selectBottomToolGroup(QStringLiteral("Debug"));
+            if (auto* po = findChild<QWidget*>(QStringLiteral("ProgramOutputDock")); po && m_bottomTabs) m_bottomTabs->setCurrentWidget(po);
+            updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILD FAILED")); updateDebugToolbarState();
+            return false;
+        };
+        if (compiler.isEmpty()) return failCompile(QStringLiteral("[Build Failed] No C/C++ or MPI compiler (%1/%2) found in PATH.").arg(mpiName, gnuName));
+        QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+        proc.setProcessEnvironment(env); proc.setProcessChannelMode(QProcess::MergedChannels);
+        proc.start(compiler, {QStringLiteral("-g"), QStringLiteral("-O0"), srcPath, QStringLiteral("-o"), binPath});
+        const bool finished = proc.waitForFinished(15000);
+        const QString diag = QString::fromUtf8(proc.readAll()).trimmed();
+        if (!finished || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            return failCompile(QStringLiteral("[Build Failed (exit %1)] %2 -g -O0 \"%3\" -o \"%4\"\n%5")
+                                   .arg(finished ? proc.exitCode() : -1)
+                                   .arg(compiler, srcPath, binPath, diag.isEmpty() ? proc.errorString() : diag));
         }
     }
     if (!QFileInfo::exists(binPath)) return false;
     // Reload ELF symbol tables, objdump -d -l disassembly, and DWARF line maps when binary changed.
     const QString absBinPath = QFileInfo(binPath).absoluteFilePath();
-    if (needCompile || !m_elfInspector || !m_elfInspector->isValid() ||
-        m_loadedBinaryPath != absBinPath || m_dwarfLineToAddress.isEmpty()) {
+    if (needCompile || !m_elfInspector || !m_elfInspector->isValid() || m_loadedBinaryPath != absBinPath || m_dwarfLineToAddress.isEmpty()) {
         if (!loadBinaryTarget(binPath)) return false;
     }
     rebuildDynamicSourceLineMap(); return true;
@@ -709,9 +717,8 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     }
     if (matchedIdx < 0) return false;
     // 2. Synchronize combo box selection without recursive signal emission.
-    if (m_targetSelector->currentIndex() != matchedIdx) {
-        m_targetSelector->blockSignals(true); m_targetSelector->setCurrentIndex(matchedIdx); m_targetSelector->blockSignals(false);
-    }
+    if (m_targetSelector->currentIndex() != matchedIdx) { m_targetSelector->blockSignals(true); m_targetSelector->setCurrentIndex(matchedIdx); m_targetSelector->blockSignals(false); }
+    m_targetSelector->setProperty("gl_confirmed_idx", matchedIdx);
     // 3. Resolve target path (distinguishing pre-built ELF executables from C/C++ source files and directories).
     const QString resolvedPath = resolveWorkspacePath(m_targetSelector->itemData(matchedIdx).toString());
     m_targetSelector->setToolTip(QStringLiteral("Active Target: %1\nPath: %2").arg(m_targetSelector->itemText(matchedIdx), resolvedPath));
@@ -720,12 +727,8 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     if (isRunnableElfExecutable(resolvedPath)) { m_useRealBinaryTarget = true; loadBinaryTarget(resolvedPath); }
     else { m_currentFile = resolvedPath; loadSourceFile(resolvedPath); ensureTargetBinaryCompiled(); }
     // 4. Synchronize active SourceCodeView breakpoints into DisassemblyView bookmarks and reset session if active.
-    if (SourceCodeView* sv = sourceCodeView()) {
-        for (int bpLine : sv->breakpoints()) {
-            const uint64_t addr = sourceLineToAddress(bpLine);
-            if (m_disassemblyView && addr != 0ULL && !m_disassemblyView->isBookmarked(addr)) m_disassemblyView->toggleBookmark(addr);
-        }
-    }
+    if (SourceCodeView* sv = sourceCodeView())
+        for (int bpLine : sv->breakpoints()) if (const uint64_t addr = sourceLineToAddress(bpLine); m_disassemblyView && addr != 0ULL && !m_disassemblyView->isBookmarked(addr)) m_disassemblyView->toggleBookmark(addr);
     if (m_debugSessionActive) stopTargetWorkflow();
     return true;
 }
@@ -741,14 +744,11 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     // Normalize `.gridlock/workspace.toml` or `.toml` session file paths to their parent workspace directory.
     const QFileInfo rawInfo(dirPath.trimmed());
     QDir dir = rawInfo.exists() ? (rawInfo.isDir() ? QDir(rawInfo.absoluteFilePath()) : rawInfo.dir())
-                                : (rawInfo.fileName().endsWith(QStringLiteral(".toml"), Qt::CaseInsensitive)
-                                       ? rawInfo.dir()
-                                       : QDir(rawInfo.absoluteFilePath()));
+                                : (rawInfo.fileName().endsWith(QStringLiteral(".toml"), Qt::CaseInsensitive) ? rawInfo.dir() : QDir(rawInfo.absoluteFilePath()));
     if (dir.dirName() == QStringLiteral(".gridlock")) dir.cdUp();
     if (!dir.exists()) return false;
     const QFileInfo dirInfo(dir.absolutePath());
-    const QString resolvedDir =
-        !dirInfo.canonicalFilePath().isEmpty() ? dirInfo.canonicalFilePath() : QDir::cleanPath(dirInfo.absoluteFilePath());
+    const QString resolvedDir = !dirInfo.canonicalFilePath().isEmpty() ? dirInfo.canonicalFilePath() : QDir::cleanPath(dirInfo.absoluteFilePath());
 
     struct ReentrancyGuard { bool& flag; ~ReentrancyGuard() { flag = false; } } guard{m_switchingWorkspace};
     m_switchingWorkspace = true;
@@ -759,22 +759,15 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
     m_previewFixtureOnly = false; m_useRealBinaryTarget = false; m_elfInspector.reset(); m_loadedBinaryPath.clear();
     if (m_differentialGrid) m_differentialGrid->clearWatches();
-    if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) {
-        m_editorTabManager->clearAllTabs(); m_currentFile.clear();
-    }
+    if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) { m_editorTabManager->clearAllTabs(); m_currentFile.clear(); }
     m_activeWorkspaceDir = resolvedDir; m_activeSessionFilePath = QDir(resolvedDir).filePath(QStringLiteral(".gridlock/workspace.toml"));
     gridlock::core::ClangdLspClient::instance().setWorkspaceRoot(resolvedDir);
     // 1. Re-root ProjectExplorerWidget to resolvedDir and ensure FILES mode is active.
-    if (m_projectExplorerWidget) {
-        if (m_projectExplorerWidget->rootPath() != resolvedDir ||
-            m_projectExplorerWidget->isSymbolsMode() || m_projectExplorerWidget->isStringsMode()) {
-            m_projectExplorerWidget->setRootPath(resolvedDir);
-        }
-    }
+    if (m_projectExplorerWidget && (m_projectExplorerWidget->rootPath() != resolvedDir || m_projectExplorerWidget->isSymbolsMode() || m_projectExplorerWidget->isStringsMode()))
+        m_projectExplorerWidget->setRootPath(resolvedDir);
 
     auto& cfg = gridlock::core::ConfigManager::instance();
-    cfg.setWorkspace(resolvedDir); cfg.setLastOpenDir(resolvedDir);
-    m_persistentBreakpoints = cfg.getBreakpoints();
+    cfg.setWorkspace(resolvedDir); cfg.setLastOpenDir(resolvedDir); m_persistentBreakpoints = cfg.getBreakpoints();
     const auto loadedPs = cfg.loadProjectSettings();
     for (const auto& w : loadedPs.watchExpressions) if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
     if (m_terminalDock) m_terminalDock->setWorkingDirectory((!loadedPs.workingDirectory.empty() && QDir(QString::fromStdString(loadedPs.workingDirectory)).exists()) ? QString::fromStdString(loadedPs.workingDirectory) : resolvedDir);
@@ -788,8 +781,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
         m_targetSelector->blockSignals(true); m_targetSelector->clear();
         for (const QString& elfPath : elfTargets) {
             const QString relDir = QDir(resolvedDir).relativeFilePath(QFileInfo(elfPath).absolutePath());
-            const QString label = (relDir.isEmpty() || relDir == QStringLiteral(".")) ? QStringLiteral("%1 (ELF)").arg(QFileInfo(elfPath).fileName()) : QStringLiteral("%1 (%2)").arg(QFileInfo(elfPath).fileName(), relDir);
-            m_targetSelector->addItem(label, elfPath);
+            m_targetSelector->addItem((relDir.isEmpty() || relDir == QStringLiteral(".")) ? QStringLiteral("%1 (ELF)").arg(QFileInfo(elfPath).fileName()) : QStringLiteral("%1 (%2)").arg(QFileInfo(elfPath).fileName(), relDir), elfPath);
         }
         for (const QString& srcPath : mainSources) {
             const QString relSrc = QDir(resolvedDir).relativeFilePath(srcPath);
@@ -797,7 +789,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
         }
         if (m_targetSelector->count() == 0) m_targetSelector->addItem(QStringLiteral("%1 (Workspace)").arg(folderName.isEmpty() ? QStringLiteral("Workspace") : folderName), resolvedDir);
         m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."), QStringLiteral("__open_binary__"));
-        m_targetSelector->setCurrentIndex(0); m_targetSelector->blockSignals(false);
+        m_targetSelector->setCurrentIndex(0); m_targetSelector->setProperty("gl_confirmed_idx", 0); m_targetSelector->blockSignals(false);
     }
     // 4. Open primary workspace source file (activating ClangdLspClient) and load primary ELF binary.
     if (!mainSources.isEmpty() && m_currentFile.isEmpty()) loadSourceFile(mainSources.first());
@@ -818,38 +810,6 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     recordRecentWorkspace(resolvedDir); syncDisassemblyDecompilerVisibility(true); return true;
 }
 
-/** @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for @p targetPath. */
-QString MainWindow::detectBuildSystem(const QString& targetPath) const {
-    const QString root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
-    const QFileInfo info(resolved);
-    QList<QDir> dirs = {QDir(info.isDir() ? info.absoluteFilePath() : info.absolutePath())};
-    if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir)) dirs.append(QDir(m_activeWorkspaceDir));
-    for (const QDir& d : dirs) {
-        if (d.exists(QStringLiteral("meson.build"))) return QStringLiteral("Meson");
-        if (d.exists(QStringLiteral("CMakeLists.txt"))) return QStringLiteral("CMake");
-        if (d.exists(QStringLiteral("Makefile")) || d.exists(QStringLiteral("GNUmakefile"))) return QStringLiteral("Make");
-    }
-    return QStringLiteral("SingleFileMPI");
-}
-/** @brief Constructs the shell build command for a given project directory or standalone source file. */
-QString MainWindow::buildCommandForPath(const QString& targetPath) const {
-    const QString buildSys = detectBuildSystem(targetPath), root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
-    const QFileInfo info(resolved); QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir) && !QDir(dirPath).exists(QStringLiteral("meson.build")) && !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) && !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
-    const QDir dir(dirPath);
-    if (buildSys == QStringLiteral("Meson")) {
-        for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")}) if (dir.exists(b + QStringLiteral("/build.ninja"))) return QStringLiteral("ninja -C \"%1/%2\"").arg(dirPath, b);
-        return QStringLiteral("meson setup \"%1/builddir\" \"%1\" && ninja -C \"%1/builddir\"").arg(dirPath);
-    }
-    if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake -S \"%1\" -B \"%1/%2\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/%2\" -j").arg(dirPath, dir.exists(QStringLiteral("build_cmake")) ? QStringLiteral("build_cmake") : QStringLiteral("build"));
-    if (buildSys == QStringLiteral("Make")) return QStringLiteral("make -C \"%1\" -j").arg(dirPath);
-    const QFileInfo srcInfo(!info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath());
-    const bool isC = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
-    const QString cc = isC ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc")) : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
-    return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(cc, srcInfo.absoluteFilePath(), srcInfo.dir().filePath(srcInfo.completeBaseName()));
-}
 /** @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath. */
 void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHint) {
     if (!m_arrayPlotDialog) { m_arrayPlotDialog = new ArrayPlotDialog(m_coordinator, this);
@@ -931,12 +891,29 @@ bool MainWindow::jumpToAddressWorkflow(uint64_t address, bool skipPrompt) {
     if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
     m_focusedRank = activeSteppingRank(); m_coordinator->jumpToAddress(address, m_focusedRank); return true;
 }
-/** @brief Forces an immediate return from the current frame (`-exec-return [expr]`) on the focused MPI rank. */
+/** @brief Forces an immediate return from the active/selected frame (`-exec-return [expr]`) on the focused MPI rank. */
 bool MainWindow::forceEarlyReturnWorkflow(const QString& explicitExpr, bool promptIfEmpty) {
+    const int rank = activeSteppingRank();
+    const int frameLvl = m_callStackDockWidget ? m_callStackDockWidget->activeFrameLevel() : m_selectedFrameLevel.value(rank, 0);
+    const QString funcName = (m_callStackDockWidget && !m_callStackDockWidget->activeFrameFunction().isEmpty()) ? m_callStackDockWidget->activeFrameFunction() : QStringLiteral("current frame");
     QString expr = explicitExpr.trimmed();
-    if (promptIfEmpty) { bool ok = false; expr = QInputDialog::getText(this, tr("Force Early Return"), tr("Return expression (leave empty for void functions):"), QLineEdit::Normal, expr, &ok).trimmed(); if (!ok) return false; }
+    if (promptIfEmpty) {
+        bool ok = false;
+        expr = QInputDialog::getText(this, tr("Force Early Return (Rank %1)").arg(rank),
+                                     tr("Return expression for Frame #%1 (%2) on Rank %3 (leave empty for void):").arg(frameLvl).arg(funcName).arg(rank),
+                                     QLineEdit::Normal, expr, &ok).trimmed();
+        if (!ok) return false;
+        if (!property("gl_bypass_confirm").toBool() &&
+            QMessageBox::warning(this, tr("Confirm Force Early Return"),
+                                 tr("Force immediate return from Frame #%1 (%2) on Rank %3?\n\nRemaining instructions and local destructors in the unwound frame(s) will be skipped.")
+                                     .arg(frameLvl).arg(funcName).arg(rank),
+                                 QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return false;
+    }
     if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
-    m_focusedRank = activeSteppingRank(); m_coordinator->forceEarlyReturn(expr, m_focusedRank); return true;
+    m_focusedRank = rank;
+    if (m_callStackDockWidget) m_coordinator->selectStackFrame(rank, m_callStackDockWidget->activeThreadId(), frameLvl);
+    m_coordinator->forceEarlyReturn(expr, rank);
+    return true;
 }
 /** @brief Installs function-symbol regex breakpoints via GDB `rbreak <pattern>`. */
 bool MainWindow::insertRegexBreakpointWorkflow(const QString& explicitPattern, bool promptIfEmpty) {

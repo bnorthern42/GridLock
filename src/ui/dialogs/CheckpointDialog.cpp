@@ -385,6 +385,38 @@ bool CheckpointDialog::createCheckpointNow(bool bypassConfirm) {
   return true;
 }
 
+bool CheckpointDialog::restoreCheckpointWithConfirm(int rank, int checkpointId, bool bypassConfirm) {
+  if (!m_coordinator) return false;
+  if (!bypassConfirm && !property("gl_bypass_confirm").toBool()) {
+    const auto ans = QMessageBox::warning(
+        this, tr("Restore Process Checkpoint"),
+        tr("Restore Checkpoint #%1 (restart %1) on Rank %2?\n\n"
+           "Current execution state on Rank %2 will be discarded, and rewinding across an MPI collective may desynchronize peer ranks.")
+            .arg(checkpointId)
+            .arg(rank),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (ans != QMessageBox::Yes) return false;
+  }
+  m_coordinator->restoreCheckpoint(rank, checkpointId);
+  return true;
+}
+
+bool CheckpointDialog::deleteCheckpointWithConfirm(int rank, int checkpointId, bool bypassConfirm) {
+  if (!m_coordinator || checkpointId <= 0) return false;
+  if (!bypassConfirm && !property("gl_bypass_confirm").toBool()) {
+    const auto ans = QMessageBox::warning(
+        this, tr("Delete Process Checkpoint"),
+        tr("Permanently delete Checkpoint #%1 on Rank %2?\n\n"
+           "This copy-on-write fork snapshot cannot be recovered once deleted.")
+            .arg(checkpointId)
+            .arg(rank),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (ans != QMessageBox::Yes) return false;
+  }
+  m_coordinator->deleteCheckpoint(rank, checkpointId);
+  return true;
+}
+
 void CheckpointDialog::onCheckpointsReady(int rank, const QVector<ProcessCheckpoint>& checkpoints) {
   if (rank != m_focusedRank) return;
   m_checkpoints = checkpoints;
@@ -406,10 +438,10 @@ void CheckpointDialog::rebuildCheckpointTable() {
 
     auto* restoreBtn = new QPushButton(QStringLiteral("Restore"), m_checkpointTable);
     restoreBtn->setObjectName(QStringLiteral("checkpointRestoreBtn_%1").arg(cp.id));
-    restoreBtn->setToolTip(QStringLiteral("Restore checkpoint %1 (restart %1)").arg(cp.id));
+    restoreBtn->setToolTip(QStringLiteral("Restore checkpoint %1 (restart %1) on Rank %2").arg(cp.id).arg(cp.rank));
     restoreBtn->setCursor(Qt::PointingHandCursor);
     connect(restoreBtn, &QPushButton::clicked, this, [this, r = cp.rank, cid = cp.id]() {
-      if (m_coordinator) m_coordinator->restoreCheckpoint(r, cid);
+      restoreCheckpointWithConfirm(r, cid, false);
     });
     m_checkpointTable->setCellWidget(row, 6, restoreBtn);
 
@@ -418,7 +450,7 @@ void CheckpointDialog::rebuildCheckpointTable() {
     delBtn->setCursor(Qt::PointingHandCursor);
     delBtn->setEnabled(cp.id > 0);
     connect(delBtn, &QPushButton::clicked, this, [this, r = cp.rank, cid = cp.id]() {
-      if (m_coordinator) m_coordinator->deleteCheckpoint(r, cid);
+      deleteCheckpointWithConfirm(r, cid, false);
     });
     m_checkpointTable->setCellWidget(row, 7, delBtn);
   }

@@ -237,6 +237,19 @@ class DapCoordinator : public IBackendCoordinator {
     return QStringLiteral("lldb-dap");
   }
 
+  /** @brief Pre-validates `lldb-dap`/`lldb-vscode` (and MPI launcher when `ranks > 1`) before UI launch. */
+  bool validateLaunchEnvironment(int ranks, QString* outError = nullptr) const override;
+
+  /** @brief Writes raw bytes to live inferior memory at @p address via DAP `writeMemory`. */
+  void writeMemory(int rankId, uint64_t address, const QByteArray& data) override {
+    Q_UNUSED(rankId);
+    if (isAdapterRunning() && !data.isEmpty()) {
+      sendRequest(QStringLiteral("writeMemory"),
+                  QJsonObject{{QStringLiteral("memoryReference"), QStringLiteral("0x%1").arg(address, 0, 16)},
+                              {QStringLiteral("data"), QString::fromLatin1(data.toBase64())}});
+    }
+  }
+
   /** @brief Returns the OS PID mapped to @p rank, or `0` if unmapped. */
   qint64 getPidForRank(int rank) const override {
     return static_cast<qint64>(m_rankToPid.value(rank, 0));

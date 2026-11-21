@@ -53,7 +53,13 @@
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/ArrayPlotDialog.hpp"
+#include "../src/ui/dialogs/CheckpointDialog.hpp"
+#include "../src/ui/dialogs/PointerGraphDialog.hpp"
+#include "../src/ui/docks/CallStackDockWidget.hpp"
 #include "../src/ui/docks/VariablesDockWidget.hpp"
+#include <QMessageBox>
+#include <QPushButton>
+#include <utime.h>
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
@@ -675,6 +681,175 @@ void TestMainWindowUI::testCrossViewHandoffsWatchLifecycleAndMemCursor() {
     QVERIFY(plotDlg && plotDlg->isVisible());
     plotDlg->close();
     mw.redockAllFloatingPanels();
+    mw.setCoordinator(nullptr);
+    mw.close();
+}
+
+void TestMainWindowUI::testBuildPreflightValidatedPatchingAndSafetyGuards() {
+    // 1. Fail-Loud Build: stale binary on disk MUST NOT launch when newer source fails compilation.
+    QTemporaryDir wsDir;
+    QVERIFY(wsDir.isValid());
+    const QString srcFile = wsDir.filePath(QStringLiteral("broken_solver.cpp"));
+    const QString binFile = wsDir.filePath(QStringLiteral("broken_solver"));
+    {
+        QFile f(srcFile);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("int main() { return 0; }\n");
+    }
+    gridlock::ui::MainWindow mw;
+    mw.resize(1366, 840);
+    mw.show();
+    QApplication::processEvents();
+    auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* progOut = mw.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView"));
+    auto* runAct = mw.findChild<QAction*>(QStringLiteral("actionRunTarget"));
+    QVERIFY(targetCombo && progOut && runAct);
+    targetCombo->insertItem(0, QStringLiteral("broken_solver"), srcFile);
+    QVERIFY(mw.selectTargetByName(QStringLiteral("broken_solver")) && mw.ensureTargetBinaryCompiled() && QFileInfo::exists(binFile));
+
+    // Introduce syntax error with mtime newer than stale binary on disk, then trigger Run.
+    {
+        QFile f(srcFile);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("int main() { SYNTAX_ERROR_TOKEN_XYZ; return 0; }\n");
+    }
+    struct utimbuf futureTimes{QFileInfo(binFile).lastModified().toSecsSinceEpoch() + 10,
+                               QFileInfo(binFile).lastModified().toSecsSinceEpoch() + 10};
+    ::utime(srcFile.toUtf8().constData(), &futureTimes);
+    runAct->trigger();
+    QApplication::processEvents();
+    QVERIFY2(!mw.isDebugSessionActive() && !mw.isRunButtonLatched(), "Failed compilation must abort launch and avoid latching Run");
+    QVERIFY2(progOut->toPlainText().contains(QStringLiteral("Build Failed")) && progOut->toPlainText().contains(QStringLiteral("SYNTAX_ERROR_TOKEN_XYZ")),
+             qPrintable(progOut->toPlainText()));
+
+    // 2. Backend Pre-Flight & Untokenized ptrace_scope EPERM Attach Recovery.
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const QString prevWs = cfg.workspacePath();
+    cfg.setWorkspace(wsDir.path());
+    auto ps = cfg.loadProjectSettings();
+    ps.customGdbPath = "/nonexistent/missing_gdb_binary_999";
+    cfg.saveProjectSettings(ps);
+    gridlock::GdbRankCoordinator coord;
+    QString preErr;
+    QVERIFY(!coord.validateLaunchEnvironment(1, &preErr) && preErr.contains(QStringLiteral("missing_gdb_binary_999")));
+    ps.customGdbPath = "gdb";
+    cfg.saveProjectSettings(ps);
+    cfg.setWorkspace(prevWs);
+
+    coord.initializeMockSession(1, false);
+    mw.setCoordinator(&coord);
+    QVERIFY(mw.isDebugSessionActive());
+    coord.processGdbOutput(0, QStringLiteral("^error,msg=\"ptrace: Operation not permitted.\"\n"));
+    QApplication::processEvents();
+    QVERIFY2(!mw.isDebugSessionActive() && !mw.isRunButtonLatched() && progOut->toPlainText().contains(QStringLiteral("ptrace: Operation not permitted")),
+             "Untokenized ptrace EPERM attach error must revert phantom ATTACHED session cleanly");
+
+    // 3. Validated Hex/NOP Patching & Revert All Patches.
+    QByteArray patchBytes;
+    QString patchDiag;
+    QVERIFY(!gridlock::ui::DisassemblyView::validatePatchBytes(QStringLiteral("xor eax, eax"), &patchBytes, 0, &patchDiag));
+    QVERIFY(gridlock::ui::DisassemblyView::validatePatchBytes(QStringLiteral("31 c0"), &patchBytes) && patchBytes == QByteArray::fromHex("31c0"));
+    QVERIFY(gridlock::ui::DisassemblyView::validatePatchBytes(QStringLiteral("nop 2"), &patchBytes) && patchBytes == QByteArray("\x90\x90", 2));
+
+    mw.loadPreviewFixture();
+    coord.initializeMockSession(1, false);
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x00401155\",func=\"main\",fullname=\"/tmp/demo.cpp\",line=\"17\",args=[]}\n"));
+    mw.setCoordinator(&coord);
+    QStringList sentCmds;
+    QObject::connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int, const QString& c) { sentCmds.append(c.trimmed()); });
+    auto* disasm = mw.disassemblyView();
+    auto* revertBtn = disasm ? disasm->findChild<QPushButton*>(QStringLiteral("disasmRevertPatchesBtn")) : nullptr;
+    QVERIFY(disasm && revertBtn && !revertBtn->isEnabled());
+    QVERIFY(!disasm->patchInstruction(0x00401155ULL, QStringLiteral("xor eax, eax")) && disasm->patchedInstructionCount() == 0);
+    QVERIFY(disasm->patchInstruction(0x00401155ULL, QStringLiteral("31 c0")) && disasm->patchedInstructionCount() == 1 && revertBtn->isEnabled());
+    QVERIFY(std::any_of(sentCmds.cbegin(), sentCmds.cend(), [](const QString& c) { return c.startsWith(QStringLiteral("-data-write-memory-bytes 0x401155")); }));
+    revertBtn->click();
+    QApplication::processEvents();
+    QVERIFY(disasm->patchedInstructionCount() == 0 && !revertBtn->isEnabled());
+
+    // 4. Confirmation Guardrails: Checkpoint Restore/Delete (naming Rank k), Active Target Switch, and CallStack Frame Early Return.
+    coord.createCheckpoint(0, QStringLiteral("iter_snap"));
+    coord.processGdbOutput(0, QStringLiteral("~\"checkpoint 1: fork returned pid 5151.\\n\"\n212^done\n"));
+    gridlock::ui::CheckpointDialog cpDlg(&coord);
+    cpDlg.show();
+    QApplication::processEvents();
+    sentCmds.clear();
+    QString capturedPrompt;
+    QTimer::singleShot(20, [&]() {
+        if (auto* mb = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            capturedPrompt = mb->text();
+            if (auto* btn = mb->button(QMessageBox::Cancel)) btn->click();
+            else mb->reject();
+        }
+    });
+    QVERIFY(!cpDlg.restoreCheckpointWithConfirm(0, 1, false));
+    QVERIFY(capturedPrompt.contains(QStringLiteral("Rank 0")) && !sentCmds.contains(QStringLiteral("-interpreter-exec console \"restart 1\"")));
+
+    QTimer::singleShot(20, [&]() {
+        if (auto* mb = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            if (auto* btn = mb->button(QMessageBox::Yes)) btn->click();
+        }
+    });
+    QVERIFY(cpDlg.restoreCheckpointWithConfirm(0, 1, false) && sentCmds.contains(QStringLiteral("-interpreter-exec console \"restart 1\"")));
+    cpDlg.close();
+
+    // Active-session target switch cancellation keeps active session intact.
+    const int origIdx = targetCombo->currentIndex();
+    const int altIdx = (origIdx + 1) % qMax(1, targetCombo->count() - 1);
+    if (altIdx != origIdx) {
+        QTimer::singleShot(20, [&]() {
+            if (auto* mb = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+                if (auto* btn = mb->button(QMessageBox::Cancel)) btn->click();
+                else mb->reject();
+            }
+        });
+        targetCombo->setCurrentIndex(altIdx);
+        QApplication::processEvents();
+        QVERIFY(mw.isDebugSessionActive() && targetCombo->currentIndex() == origIdx);
+    }
+
+    // CallStackDock frame selection before Force Early Return.
+    if (auto* csDock = mw.callStackDockWidget()) {
+        QVector<StackFrameEntry> frames{
+            {0, 10, 0x401100ULL, QStringLiteral("innerKernel"), QStringLiteral("/tmp/demo.cpp"), 10},
+            {1, 11, 0x401200ULL, QStringLiteral("outerSolver"), QStringLiteral("/tmp/demo.cpp"), 25}};
+        csDock->setStackFrames(frames, 0);
+        QVERIFY(csDock->selectFrameRow(1) && csDock->activeFrameLevel() == 1 && csDock->activeFrameFunction() == QStringLiteral("outerSolver"));
+        sentCmds.clear();
+        QVERIFY(mw.forceEarlyReturnWorkflow(QStringLiteral("42"), false));
+        QVERIFY(sentCmds.contains(QStringLiteral("-stack-select-frame 1")) && sentCmds.contains(QStringLiteral("-exec-return 42")));
+    }
+
+    // 5. Single-Step Undo Clear in PointerGraphDialog and ArrayPlotDialog.
+    gridlock::ui::PointerGraphDialog pgDlg;
+    pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("Node"), QStringLiteral("0x7000"),
+                           {{QStringLiteral("next"), QStringLiteral("0x7040"), QStringLiteral("Node*")}});
+    pgDlg.upsertStructNode(QStringLiteral("head.next"), QStringLiteral("Node"), QStringLiteral("0x7040"),
+                           {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}});
+    QVERIFY(pgDlg.connectPointerField(QStringLiteral("head"), QStringLiteral("next"), QStringLiteral("0x7040")));
+    QCOMPARE(pgDlg.nodeCount(), 2);
+    QCOMPARE(pgDlg.edgeCount(), 1);
+    auto* pgClearBtn = pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn"));
+    auto* pgUndoBtn = pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphUndoClearBtn"));
+    QVERIFY(pgClearBtn && pgUndoBtn && !pgUndoBtn->isEnabled());
+    pgClearBtn->click();
+    QVERIFY(pgDlg.nodeCount() == 0 && pgDlg.edgeCount() == 0 && pgDlg.canUndoClear() && pgUndoBtn->isEnabled());
+    pgUndoBtn->click();
+    QVERIFY(pgDlg.nodeCount() == 2 && pgDlg.edgeCount() == 1 && !pgDlg.canUndoClear() && !pgUndoBtn->isEnabled());
+
+    gridlock::ui::ArrayPlotDialog plotDlg;
+    plotDlg.setPlotMode(gridlock::ui::ArrayPlotDialog::PlotMode::ScalarHistory);
+    plotDlg.appendScalarSample(1.25, 0);
+    plotDlg.appendScalarSample(0.50, 0);
+    QCOMPARE(plotDlg.scalarHistory().size(), 2);
+    auto* apClearBtn = plotDlg.findChild<QPushButton*>(QStringLiteral("arrayPlotClearHistoryBtn"));
+    auto* apUndoBtn = plotDlg.findChild<QPushButton*>(QStringLiteral("arrayPlotUndoClearBtn"));
+    QVERIFY(apClearBtn && apUndoBtn && !apUndoBtn->isEnabled());
+    apClearBtn->click();
+    QVERIFY(plotDlg.scalarHistory().isEmpty() && plotDlg.canUndoClear() && apUndoBtn->isEnabled());
+    apUndoBtn->click();
+    QVERIFY(plotDlg.scalarHistory().size() == 2 && qAbs(plotDlg.scalarHistory().at(0) - 1.25) < 1e-9 && !plotDlg.canUndoClear());
+
     mw.setCoordinator(nullptr);
     mw.close();
 }

@@ -291,18 +291,21 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   };
   m_stepiBtn = makeHdrBtn(QStringLiteral("stepi"), QStringLiteral("disasmStepiBtn"), QStringLiteral("Step Instruction (stepi)"), false);
   m_nextiBtn = makeHdrBtn(QStringLiteral("nexti"), QStringLiteral("disasmNextiBtn"), QStringLiteral("Next Instruction (nexti) [Ctrl+Shift+F10]"), false);
+  m_revertPatchesBtn = makeHdrBtn(QStringLiteral("Revert All Patches"), QStringLiteral("disasmRevertPatchesBtn"), QStringLiteral("Restore all patched instructions to original machine code"), false);
+  m_revertPatchesBtn->setEnabled(false);
   m_splitToggleBtn = makeHdrBtn(QStringLiteral("SPLIT (CFG+DECOMP)"), QStringLiteral("cutterSplitViewBtn"), QStringLiteral("Side-by-side CFG + Decompiler"), true);
   m_modeToggleBtn = makeHdrBtn(QStringLiteral("CFG (Space)"), QStringLiteral("cutterCfgToggleBtn"), QStringLiteral("Toggle Linear / CFG Graph (Space)"), false);
   m_decompilerToggleBtn = makeHdrBtn(QStringLiteral("DECOMPILER"), QStringLiteral("cutterDecompilerBtn"), QStringLiteral("Standalone Decompiler View"), true);
   connect(m_stepiBtn, &QPushButton::clicked, this, &DisassemblyView::stepInstructionRequested);
   connect(m_nextiBtn, &QPushButton::clicked, this, &DisassemblyView::nextInstructionRequested);
+  connect(m_revertPatchesBtn, &QPushButton::clicked, this, &DisassemblyView::revertAllPatches);
   connect(m_splitToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setSplitGraphDecompilerMode);
   connect(m_modeToggleBtn, &QPushButton::clicked, this, &DisassemblyView::toggleViewMode);
   connect(m_decompilerToggleBtn, &QPushButton::clicked, this, &DisassemblyView::setDecompilerMode);
 
   // Assemble header toolbar items with stretchable left badges and unclipped right control buttons
   headerLayout->addWidget(m_headerBadge, 2); headerLayout->addWidget(m_statsBadge, 1);
-  headerLayout->addWidget(m_stepiBtn, 0); headerLayout->addWidget(m_nextiBtn, 0);
+  headerLayout->addWidget(m_stepiBtn, 0); headerLayout->addWidget(m_nextiBtn, 0); headerLayout->addWidget(m_revertPatchesBtn, 0);
   headerLayout->addWidget(m_splitToggleBtn, 0); headerLayout->addWidget(m_decompilerToggleBtn, 0); headerLayout->addWidget(m_modeToggleBtn, 0);
   rootLayout->addWidget(headerWidget);
 
@@ -541,19 +544,10 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   });
 
   // Live assembly instruction patch shortcut 'Alt+P' (avoids colliding with Ctrl+Shift+P Command Palette)
-  auto *patchShortcut =
-      new QShortcut(QKeySequence(Qt::ALT | Qt::Key_P), this);
+  auto *patchShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_P), this);
   patchShortcut->setContext(Qt::WidgetWithChildrenShortcut);
   connect(patchShortcut, &QShortcut::activated, this, [this]() {
-    bool ok = false;
-    const QString newInst = QInputDialog::getText(
-        this, tr("Patch Instruction"),
-        tr("Enter replacement assembly instruction for 0x%1:")
-            .arg(m_currentAddress, 8, 16, QChar('0')),
-        QLineEdit::Normal, QStringLiteral("nop"), &ok);
-    if (ok && !newInst.trimmed().isEmpty()) {
-      patchInstruction(m_currentAddress, newInst.trimmed());
-    }
+    promptPatchInstructionDialog(selectedInstructionAddress());
   });
 
   installEventFilter(this);
@@ -906,6 +900,14 @@ uint64_t DisassemblyView::nextInstructionAddress(uint64_t currentAddr) const {
   const auto it = m_addrToLine.upperBound(currentAddr);
   if (it != m_addrToLine.cend()) return it.key();
   return m_addrToLine.isEmpty() ? currentAddr : m_addrToLine.firstKey();
+}
+
+int DisassemblyView::instructionByteLength(uint64_t address) const {
+  const auto it = m_addrToLine.upperBound(address);
+  if (it != m_addrToLine.cend() && it.key() > address && (it.key() - address) <= 15ULL) {
+    return static_cast<int>(it.key() - address);
+  }
+  return 0;
 }
 
 /**

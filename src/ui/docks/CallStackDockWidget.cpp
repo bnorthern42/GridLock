@@ -257,11 +257,20 @@ void CallStackDockWidget::onThreadComboChanged(int index) {
   emit threadSelected(threadId);
 }
 
-/**
- * @brief Marks @p row as the active caller frame and emits `frameActivated(...)`.
- * @param row Zero-based row index inside `#callStackTable`.
- * @param column Zero-based column index (unused).
- */
+bool CallStackDockWidget::selectFrameRow(int row) {
+  if (row < 0 || row >= m_frames.size()) return false;
+  if (m_table) m_table->selectRow(row);
+  onFrameRowActivated(row, 0);
+  return true;
+}
+
+QString CallStackDockWidget::activeFrameFunction() const {
+  for (const auto& f : m_frames) {
+    if (f.level == m_activeFrameLevel) return f.function;
+  }
+  return m_frames.isEmpty() ? QString() : m_frames.first().function;
+}
+
 void CallStackDockWidget::onFrameRowActivated(int row, int column) {
   Q_UNUSED(column);
   if (row < 0 || row >= m_frames.size()) return;
