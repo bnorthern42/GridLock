@@ -21,6 +21,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QStyledItemDelegate>
 #include <QTableWidget>
 #include <QTextEdit>
 #include <QVector>
@@ -285,6 +286,27 @@ private:
 };
 
 /**
+ * @class ShortcutItemDelegate
+ * @brief Paints rounded keycap shortcut badges and opens QKeySequenceEdit strictly on demand inside column 2.
+ */
+class ShortcutItemDelegate : public QStyledItemDelegate {
+    Q_OBJECT
+
+public:
+    explicit ShortcutItemDelegate(QObject* parent = nullptr);
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override;
+    QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option,
+                          const QModelIndex& index) const override;
+    void setEditorData(QWidget* editor, const QModelIndex& index) const override;
+    void setModelData(QWidget* editor, QAbstractItemModel* model,
+                      const QModelIndex& index) const override;
+    void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
+                              const QModelIndex& index) const override;
+};
+
+/**
  * @class KeybindingsSettingsPage
  * @brief Searchable shortcut customization page backed by ShortcutManager and ConfigManager.
  */
@@ -299,14 +321,17 @@ public:
 
     QLineEdit* filterEdit() const { return m_filterEdit; }
     QTableWidget* table() const { return m_table; }
+    QPushButton* clearShortcutButton() const { return m_clearBtn; }
     QPushButton* resetDefaultsButton() const { return m_resetBtn; }
 
 private slots:
     void filterRows(const QString& query);
+    void clearSelectedShortcut();
 
 private:
     QLineEdit* m_filterEdit = nullptr;
     QTableWidget* m_table = nullptr;
+    QPushButton* m_clearBtn = nullptr;
     QPushButton* m_resetBtn = nullptr;
 };
 

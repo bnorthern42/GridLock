@@ -14,6 +14,7 @@
 #include "../../core/managers/ShortcutManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
+#include <QApplication>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QHBoxLayout>
@@ -24,6 +25,7 @@
 #include <QListWidgetItem>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -31,8 +33,113 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 #include <QWindow>
+#include <algorithm>
 
 namespace gridlock::ui {
+
+ShortcutItemDelegate::ShortcutItemDelegate(QObject* parent)
+    : QStyledItemDelegate(parent) {}
+
+void ShortcutItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
+                                 const QModelIndex& index) const {
+    if (!painter) return;
+    QStyleOptionViewItem opt(option);
+    initStyleOption(&opt, index);
+    opt.text.clear();
+    const QStyle* st = opt.widget ? opt.widget->style() : QApplication::style();
+    st->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+
+    const QKeySequence seq = index.data(Qt::UserRole + 1).value<QKeySequence>();
+    const bool assigned = !seq.isEmpty();
+    const QString text = assigned ? seq.toString(QKeySequence::NativeText) : QObject::tr("Unassigned");
+
+    auto& tm = gridlock::core::managers::ThemeManager::instance();
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
+    const bool selected = (opt.state & QStyle::State_Selected) != 0;
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+
+    QFont badgeFont = opt.font;
+    badgeFont.setPixelSize(12);
+    badgeFont.setWeight(assigned ? QFont::DemiBold : QFont::Normal);
+    painter->setFont(badgeFont);
+
+    const QRect avail = opt.rect.adjusted(8, 4, -8, -4);
+    if (!assigned) {
+        QColor muted(pal.textHex);
+        if (selected) {
+            const QColor acc(pal.accentHex);
+            muted = (acc.lightness() < 165) ? QColor(255, 255, 255, 195) : QColor(22, 24, 29, 195);
+        } else {
+            muted.setAlpha(135);
+        }
+        painter->setPen(muted);
+        painter->drawText(avail.adjusted(2, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, text);
+        painter->restore();
+        return;
+    }
+
+    const QFontMetrics fm(badgeFont);
+    const int pillW = std::clamp(fm.horizontalAdvance(text) + 18, 34, std::max(34, avail.width()));
+    const int pillH = std::min(24, std::max(18, avail.height()));
+    const QRectF pillRect(avail.left(), avail.center().y() - pillH / 2.0 + 0.5, pillW, pillH);
+
+    const QColor fillCol = pal.isDark ? QColor(pal.headerHex).lighter(128) : QColor(pal.headerHex).darker(105);
+    const QColor borderCol = selected ? QColor(pal.accentHex) : QColor(pal.borderHex);
+    const QColor textCol(pal.textHex);
+
+    painter->setBrush(fillCol);
+    painter->setPen(QPen(borderCol, 1.0));
+    painter->drawRoundedRect(pillRect, 4.0, 4.0);
+    painter->setPen(textCol);
+    painter->drawText(pillRect.adjusted(6, 0, -6, 0), Qt::AlignCenter,
+                      fm.elidedText(text, Qt::ElideRight, static_cast<int>(pillRect.width()) - 12));
+    painter->restore();
+}
+
+QWidget* ShortcutItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem&,
+                                            const QModelIndex& index) const {
+    auto* editor = new QKeySequenceEdit(parent);
+    const QString actionId = index.data(Qt::UserRole).toString();
+    editor->setObjectName(actionId.isEmpty() ? QStringLiteral("keySeqInlineEditor")
+                                             : QStringLiteral("keySeqEdit_%1").arg(actionId));
+    editor->setClearButtonEnabled(true);
+    const QPointer<QKeySequenceEdit> edGuard(editor);
+    connect(editor, &QKeySequenceEdit::keySequenceChanged, this, [this, edGuard](const QKeySequence&) {
+        if (!edGuard || !edGuard->isVisible() || edGuard->property("gl_populating").toBool()) return;
+        auto* self = const_cast<ShortcutItemDelegate*>(this);
+        emit self->commitData(edGuard.data());
+    });
+    return editor;
+}
+
+void ShortcutItemDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
+    if (auto* keyEdit = qobject_cast<QKeySequenceEdit*>(editor)) {
+        keyEdit->setProperty("gl_populating", true);
+        keyEdit->setKeySequence(index.data(Qt::UserRole + 1).value<QKeySequence>());
+        keyEdit->setProperty("gl_populating", false);
+    }
+}
+
+void ShortcutItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model,
+                                        const QModelIndex& index) const {
+    auto* keyEdit = qobject_cast<QKeySequenceEdit*>(editor);
+    if (!keyEdit || !model) return;
+    const QKeySequence seq = keyEdit->keySequence();
+    model->setData(index, QVariant::fromValue(seq), Qt::UserRole + 1);
+    model->setData(index, seq.isEmpty() ? QObject::tr("Unassigned") : seq.toString(QKeySequence::NativeText),
+                   Qt::DisplayRole);
+    const QString actionId = index.data(Qt::UserRole).toString();
+    if (!actionId.isEmpty()) {
+        gridlock::core::ShortcutManager::instance().setShortcutForAction(actionId, seq, true);
+    }
+}
+
+void ShortcutItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
+                                                const QModelIndex&) const {
+    if (editor) editor->setGeometry(option.rect.adjusted(2, 2, -2, -2));
+}
 
 KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -57,6 +164,12 @@ KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(pare
     m_filterEdit->setToolTip(tr("Filter keyboard shortcuts by category, action title, or key sequence"));
     topRow->addWidget(m_filterEdit, 1);
 
+    m_clearBtn = new QPushButton(tr("Clear Shortcut"), this);
+    m_clearBtn->setObjectName(QStringLiteral("keybindingsClearShortcutBtn"));
+    m_clearBtn->setToolTip(tr("Unassign the keyboard shortcut for the selected action"));
+    m_clearBtn->setEnabled(false);
+    topRow->addWidget(m_clearBtn);
+
     m_resetBtn = new QPushButton(tr("Reset Defaults"), this);
     m_resetBtn->setObjectName(QStringLiteral("keybindingsResetDefaultsBtn"));
     m_resetBtn->setToolTip(tr("Restore all keyboard shortcuts to their built-in defaults"));
@@ -68,20 +181,34 @@ KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(pare
     m_table->setHorizontalHeaderLabels({tr("Category"), tr("Action"), tr("Shortcut")});
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setEditTriggers(QAbstractItemView::SelectedClicked | QAbstractItemView::DoubleClicked |
+                             QAbstractItemView::EditKeyPressed);
     m_table->setAlternatingRowColors(true);
+    m_table->setWordWrap(false);
+    m_table->setTextElideMode(Qt::ElideRight);
     m_table->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_table->verticalHeader()->setVisible(false);
-    m_table->verticalHeader()->setDefaultSectionSize(38);
-    m_table->verticalHeader()->setMinimumSectionSize(36);
-    m_table->horizontalHeader()->setMinimumSectionSize(80);
+    m_table->verticalHeader()->setDefaultSectionSize(34);
+    m_table->verticalHeader()->setMinimumSectionSize(34);
+    m_table->horizontalHeader()->setMinimumSectionSize(115);
     m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
-    m_table->setColumnWidth(2, 210);
+    m_table->setColumnWidth(2, 200);
+    m_table->setItemDelegateForColumn(2, new ShortcutItemDelegate(m_table));
     layout->addWidget(m_table, 1);
 
     connect(m_filterEdit, &QLineEdit::textChanged, this, &KeybindingsSettingsPage::filterRows);
+    connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int col) {
+        if (col == 2 && !m_table->viewport()->findChild<QKeySequenceEdit*>()) {
+            if (QTableWidgetItem* it = m_table->item(row, 2)) m_table->editItem(it);
+        }
+    });
+    connect(m_table->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
+            [this](const QModelIndex& cur, const QModelIndex&) {
+                if (m_clearBtn) m_clearBtn->setEnabled(cur.isValid());
+            });
+    connect(m_clearBtn, &QPushButton::clicked, this, &KeybindingsSettingsPage::clearSelectedShortcut);
     connect(m_resetBtn, &QPushButton::clicked, this, [this]() {
         gridlock::core::ShortcutManager::instance().resetAllToDefaults(true);
         refreshBindings();
@@ -94,37 +221,55 @@ void KeybindingsSettingsPage::refreshBindings() {
     auto& sm = gridlock::core::ShortcutManager::instance();
     sm.syncMenuActionsFromMainWindow();
     const auto& bindings = sm.registeredBindings();
+    m_table->setCurrentCell(-1, -1);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     m_table->setRowCount(bindings.size());
     for (int row = 0; row < bindings.size(); ++row) {
         const auto& b = bindings[row];
         auto* catItem = new QTableWidgetItem(b.category);
+        catItem->setFlags(catItem->flags() & ~Qt::ItemIsEditable);
         catItem->setToolTip(tr("Category: %1").arg(b.category));
+
         auto* actItem = new QTableWidgetItem(b.label);
+        actItem->setFlags(actItem->flags() & ~Qt::ItemIsEditable);
         actItem->setData(Qt::UserRole, b.id);
-        const QString defStr = b.defaultShortcut.isEmpty() ? tr("Unassigned") : b.defaultShortcut.toString(QKeySequence::NativeText);
+        const QString defStr = b.defaultShortcut.isEmpty()
+                                   ? tr("Unassigned")
+                                   : b.defaultShortcut.toString(QKeySequence::NativeText);
         actItem->setToolTip(tr("%1 -> %2 (Default: %3)").arg(b.category, b.label, defStr));
+
+        const QString curStr = b.currentShortcut.isEmpty()
+                                   ? tr("Unassigned")
+                                   : b.currentShortcut.toString(QKeySequence::NativeText);
+        auto* seqItem = new QTableWidgetItem(curStr);
+        seqItem->setFlags(seqItem->flags() | Qt::ItemIsEditable);
+        seqItem->setData(Qt::UserRole, b.id);
+        seqItem->setData(Qt::UserRole + 1, QVariant::fromValue(b.currentShortcut));
+        seqItem->setToolTip(tr("Click to edit shortcut for '%1' (Default: %2)").arg(b.label, defStr));
+
         m_table->setItem(row, 0, catItem);
         m_table->setItem(row, 1, actItem);
-
-        // Wrap QKeySequenceEdit in a padded cell widget so it never bleeds into the Action column.
-        auto* cell = new QWidget(m_table);
-        auto* cellLayout = new QHBoxLayout(cell);
-        cellLayout->setContentsMargins(4, 3, 4, 3);
-        cellLayout->setSpacing(0);
-        auto* seqEdit = new QKeySequenceEdit(b.currentShortcut, cell);
-        seqEdit->setObjectName(QStringLiteral("keySeqEdit_%1").arg(b.id));
-        seqEdit->setClearButtonEnabled(true);
-        seqEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        seqEdit->setMinimumHeight(28);
-        seqEdit->setToolTip(tr("Click and press a new shortcut for '%1' (Default: %2)").arg(b.label, defStr));
-        const QString actionId = b.id;
-        connect(seqEdit, &QKeySequenceEdit::keySequenceChanged, this, [actionId](const QKeySequence& seq) {
-            gridlock::core::ShortcutManager::instance().setShortcutForAction(actionId, seq, true);
-        });
-        cellLayout->addWidget(seqEdit);
-        m_table->setCellWidget(row, 2, cell);
+        m_table->setItem(row, 2, seqItem);
+        m_table->setRowHeight(row, 34);
     }
+    m_table->resizeColumnToContents(0);
+    if (m_clearBtn) m_clearBtn->setEnabled(false);
     if (m_filterEdit && !m_filterEdit->text().isEmpty()) filterRows(m_filterEdit->text());
+}
+
+void KeybindingsSettingsPage::clearSelectedShortcut() {
+    if (!m_table) return;
+    const int row = m_table->currentRow();
+    if (row < 0) return;
+    QTableWidgetItem* seqItem = m_table->item(row, 2);
+    if (!seqItem) return;
+    const QKeySequence emptySeq;
+    seqItem->setData(Qt::UserRole + 1, QVariant::fromValue(emptySeq));
+    seqItem->setText(tr("Unassigned"));
+    const QString actionId = seqItem->data(Qt::UserRole).toString();
+    if (!actionId.isEmpty()) {
+        gridlock::core::ShortcutManager::instance().setShortcutForAction(actionId, emptySeq, true);
+    }
 }
 
 void KeybindingsSettingsPage::applyPendingChanges() {
@@ -132,12 +277,12 @@ void KeybindingsSettingsPage::applyPendingChanges() {
     auto& sm = gridlock::core::ShortcutManager::instance();
     for (int row = 0; row < m_table->rowCount(); ++row) {
         QTableWidgetItem* actItem = m_table->item(row, 1);
-        QWidget* cell = m_table->cellWidget(row, 2);
-        auto* seqEdit = cell ? cell->findChild<QKeySequenceEdit*>() : nullptr;
-        if (!actItem || !seqEdit) continue;
+        QTableWidgetItem* seqItem = m_table->item(row, 2);
+        if (!actItem || !seqItem) continue;
         const QString id = actItem->data(Qt::UserRole).toString();
-        if (sm.shortcutForAction(id) != seqEdit->keySequence()) {
-            sm.setShortcutForAction(id, seqEdit->keySequence(), true);
+        const QKeySequence seq = seqItem->data(Qt::UserRole + 1).value<QKeySequence>();
+        if (sm.shortcutForAction(id) != seq) {
+            sm.setShortcutForAction(id, seq, true);
         }
     }
 }
@@ -152,9 +297,7 @@ void KeybindingsSettingsPage::filterRows(const QString& query) {
         }
         const QString cat = m_table->item(row, 0) ? m_table->item(row, 0)->text() : QString();
         const QString act = m_table->item(row, 1) ? m_table->item(row, 1)->text() : QString();
-        QWidget* cell = m_table->cellWidget(row, 2);
-        auto* seqEdit = cell ? cell->findChild<QKeySequenceEdit*>() : nullptr;
-        const QString seq = seqEdit ? seqEdit->keySequence().toString(QKeySequence::NativeText) : QString();
+        const QString seq = m_table->item(row, 2) ? m_table->item(row, 2)->text() : QString();
         const bool match = cat.contains(q, Qt::CaseInsensitive) || act.contains(q, Qt::CaseInsensitive) ||
                            seq.contains(q, Qt::CaseInsensitive);
         m_table->setRowHidden(row, !match);
@@ -259,8 +402,9 @@ void PreferencesDialog::applyDialogThemeChrome() {
         "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %5; "
         "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 22px; max-height: 26px; font-size: 13px; }"
         "QKeySequenceEdit { background-color: %1; color: %5; "
-        "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 28px; max-height: 30px; font-size: 13px; }"
+        "border: 1px solid %4; border-radius: 3px; padding: 0px 4px; min-height: 24px; max-height: 30px; font-size: 12px; }"
         "QTableWidget { background-color: %1; alternate-background-color: %2; color: %5; gridline-color: %3; border: 1px solid %3; border-radius: 4px; }"
+        "QTableWidget::item { padding: 2px 8px; }"
         "QHeaderView::section { background-color: %2; color: %5; border: none; border-bottom: 1px solid %3; border-right: 1px solid %3; padding: 4px 8px; font-weight: 600; }"
         "QStackedWidget QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
         "border-radius: 3px; padding: 2px 10px; min-height: 22px; max-height: 26px; font-size: 13px; }"
