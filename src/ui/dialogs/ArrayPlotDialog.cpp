@@ -1,7 +1,7 @@
 /**
  * @file ArrayPlotDialog.cpp
- * @brief Implementation of the live auto-refreshing 1D/2D scientific array, multi-rank overlay,
- *        strided slice, and scalar time-series history plotter.
+ * @brief Implementation of ArrayPlotDialog with Complex64/128 decoding, 2D splot/pm3d export,
+ *        multi-rank 1D overlay, strided slicing, Log10 scale, scalar history, and 2D/3D tensor tables.
  */
 
 #include "ArrayPlotDialog.hpp"
@@ -10,13 +10,16 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QVBoxLayout>
@@ -28,19 +31,39 @@
 
 namespace gridlock::ui {
 
+bool ArrayPlotDialog::isComplexType(ElementType type) {
+    return type == ElementType::Complex64 || type == ElementType::Complex128;
+}
+
 int ArrayPlotDialog::byteSizeOf(ElementType type) {
     switch (type) {
-        case ElementType::Float64: return 8;
-        case ElementType::Float32: return 4;
-        case ElementType::Int32:   return 4;
-        case ElementType::Int64:   return 8;
-        case ElementType::UInt8:   return 1;
+        case ElementType::Float64:    return 8;
+        case ElementType::Float32:    return 4;
+        case ElementType::Int32:      return 4;
+        case ElementType::Int64:      return 8;
+        case ElementType::UInt8:      return 1;
+        case ElementType::Complex64:  return 8;
+        case ElementType::Complex128: return 16;
     }
     return 8;
 }
 
-QVector<double> ArrayPlotDialog::decodeStridedBytes(const QByteArray& rawBytes, ElementType type,
-                                                    int maxCount, int offset, int stride) {
+double ArrayPlotDialog::extractComplexComponent(double re, double im, ComplexComponent comp) {
+    if (std::isnan(re) || std::isnan(im)) return std::numeric_limits<double>::quiet_NaN();
+    if (std::isinf(re) || std::isinf(im)) return std::isinf(re) ? re : im;
+    switch (comp) {
+        case ComplexComponent::Magnitude: return std::hypot(re, im);
+        case ComplexComponent::Phase:     return std::atan2(im == 0.0 ? 0.0 : im, re);
+        case ComplexComponent::Real:      return re;
+        case ComplexComponent::Imaginary: return im;
+    }
+    return std::hypot(re, im);
+}
+
+QVector<double> ArrayPlotDialog::decodeStridedBytes(
+    const QByteArray& rawBytes, ElementType type, ComplexComponent comp,
+    int maxCount, int offset, int stride, QVector<QPair<double, double>>* outComplexPairs) {
+    if (outComplexPairs) outComplexPairs->clear();
     const int elemSize = byteSizeOf(type);
     const int totalAvailable = static_cast<int>(rawBytes.size()) / elemSize;
     const int safeOffset = qMax(0, offset);
@@ -59,7 +82,9 @@ QVector<double> ArrayPlotDialog::decodeStridedBytes(const QByteArray& rawBytes, 
     };
 
     QVector<double> decoded(count);
+    if (outComplexPairs && isComplexType(type)) outComplexPairs->resize(count);
     const char* ptr = rawBytes.constData();
+
     for (int i = 0; i < count; ++i) {
         const char* src = ptr + static_cast<qsizetype>(safeOffset + i * safeStride) * elemSize;
         switch (type) {
@@ -68,6 +93,20 @@ QVector<double> ArrayPlotDialog::decodeStridedBytes(const QByteArray& rawBytes, 
             case ElementType::Int32:   decoded[i] = readAt(src, int32_t{}); break;
             case ElementType::Int64:   decoded[i] = readAt(src, int64_t{}); break;
             case ElementType::UInt8:   decoded[i] = readAt(src, uint8_t{}); break;
+            case ElementType::Complex64: {
+                const double re = readAt(src, float{});
+                const double im = readAt(src + sizeof(float), float{});
+                if (outComplexPairs) (*outComplexPairs)[i] = {re, im};
+                decoded[i] = extractComplexComponent(re, im, comp);
+                break;
+            }
+            case ElementType::Complex128: {
+                const double re = readAt(src, double{});
+                const double im = readAt(src + sizeof(double), double{});
+                if (outComplexPairs) (*outComplexPairs)[i] = {re, im};
+                decoded[i] = extractComplexComponent(re, im, comp);
+                break;
+            }
         }
     }
     return decoded;
@@ -112,184 +151,177 @@ bool ArrayPlotDialog::parseScalarResult(const QString& resultText, double* outVa
 ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* parent)
     : QDialog(parent, Qt::Window) {
     setObjectName(QStringLiteral("ArrayPlotDialog"));
-    setWindowTitle(QStringLiteral("Scientific 1D/2D Array & Field Plotter"));
+    setWindowTitle(QStringLiteral("Scientific 1D/2D/3D Array, Complex & Tensor Plotter"));
     setModal(false);
-    setMinimumSize(940, 540);
-    resize(1040, 620);
+    setMinimumSize(960, 560);
+    resize(1080, 640);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(10, 10, 10, 10);
     root->setSpacing(6);
 
-    // Row 1: Expression, ElementType, PlotMode, Colormap, Refresh, Close.
+    auto makeCombo = [this](const QString& name, int h) {
+        auto* cb = new QComboBox(this);
+        cb->setObjectName(name);
+        cb->setFixedHeight(h);
+        return cb;
+    };
+    auto makeSpin = [this](const QString& name, int minV, int maxV, int initV, int maxW) {
+        auto* sp = new QSpinBox(this);
+        sp->setObjectName(name);
+        sp->setRange(minV, maxV);
+        sp->setValue(initV);
+        sp->setFixedHeight(24);
+        sp->setMaximumWidth(maxW);
+        return sp;
+    };
+    auto makeBtn = [this](const QString& text, const QString& name, int h = 24) {
+        auto* b = new QPushButton(text, this);
+        b->setObjectName(name);
+        b->setFixedHeight(h);
+        return b;
+    };
+    auto makeCheck = [this](const QString& text, const QString& name) {
+        auto* c = new QCheckBox(text, this);
+        c->setObjectName(name);
+        c->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+        return c;
+    };
+
+    // Row 1: Expression, ElementType, ComplexComponent, PlotMode, Colormap, Refresh, Close.
     auto* topRow = new QHBoxLayout();
     topRow->setSpacing(6);
-
     m_exprEdit = new QLineEdit(this);
     m_exprEdit->setObjectName(QStringLiteral("arrayPlotExprEdit"));
-    m_exprEdit->setPlaceholderText(QStringLiteral("Expr or slice (e.g., u[16:128:2], grid.data(), residual)..."));
+    m_exprEdit->setPlaceholderText(QStringLiteral("Expr or slice (e.g., u[16:128:2], fft_buf, residual)..."));
     m_exprEdit->setFixedHeight(26);
 
-    m_typeCombo = new QComboBox(this);
-    m_typeCombo->setObjectName(QStringLiteral("arrayPlotTypeCombo"));
-    m_typeCombo->setFixedHeight(26);
+    m_typeCombo = makeCombo(QStringLiteral("arrayPlotTypeCombo"), 26);
     m_typeCombo->addItem(QStringLiteral("double"), static_cast<int>(ElementType::Float64));
     m_typeCombo->addItem(QStringLiteral("float"), static_cast<int>(ElementType::Float32));
     m_typeCombo->addItem(QStringLiteral("int32_t"), static_cast<int>(ElementType::Int32));
     m_typeCombo->addItem(QStringLiteral("int64_t"), static_cast<int>(ElementType::Int64));
     m_typeCombo->addItem(QStringLiteral("uint8_t"), static_cast<int>(ElementType::UInt8));
+    m_typeCombo->addItem(QStringLiteral("Complex64 (std::complex<float>)"), static_cast<int>(ElementType::Complex64));
+    m_typeCombo->addItem(QStringLiteral("Complex128 (std::complex<double>)"), static_cast<int>(ElementType::Complex128));
 
-    m_modeCombo = new QComboBox(this);
-    m_modeCombo->setObjectName(QStringLiteral("arrayPlotModeCombo"));
-    m_modeCombo->setFixedHeight(26);
+    m_componentCombo = makeCombo(QStringLiteral("arrayPlotComponentCombo"), 26);
+    m_componentCombo->addItem(QStringLiteral("Magnitude |z|"), static_cast<int>(ComplexComponent::Magnitude));
+    m_componentCombo->addItem(QStringLiteral("Phase arg(z) (rad)"), static_cast<int>(ComplexComponent::Phase));
+    m_componentCombo->addItem(QStringLiteral("Real Re(z)"), static_cast<int>(ComplexComponent::Real));
+    m_componentCombo->addItem(QStringLiteral("Imaginary Im(z)"), static_cast<int>(ComplexComponent::Imaginary));
+    m_componentCombo->setEnabled(false);
+
+    m_modeCombo = makeCombo(QStringLiteral("arrayPlotModeCombo"), 26);
     m_modeCombo->addItem(QStringLiteral("1D Line Plot"), static_cast<int>(PlotMode::Line1D));
     m_modeCombo->addItem(QStringLiteral("1D Bar / Stem"), static_cast<int>(PlotMode::Stem1D));
     m_modeCombo->addItem(QStringLiteral("2D Heatmap"), static_cast<int>(PlotMode::Heatmap2D));
     m_modeCombo->addItem(QStringLiteral("Scalar History (Over Stops)"), static_cast<int>(PlotMode::ScalarHistory));
 
-    m_colormapCombo = new QComboBox(this);
-    m_colormapCombo->setObjectName(QStringLiteral("arrayPlotColormapCombo"));
-    m_colormapCombo->setFixedHeight(26);
+    m_colormapCombo = makeCombo(QStringLiteral("arrayPlotColormapCombo"), 26);
     m_colormapCombo->addItem(QStringLiteral("Viridis"), static_cast<int>(Colormap::Viridis));
     m_colormapCombo->addItem(QStringLiteral("Plasma"), static_cast<int>(Colormap::Plasma));
     m_colormapCombo->addItem(QStringLiteral("Cool-Warm"), static_cast<int>(Colormap::CoolWarm));
     m_colormapCombo->addItem(QStringLiteral("Grayscale"), static_cast<int>(Colormap::Grayscale));
 
-    m_refreshBtn = new QPushButton(QStringLiteral("Plot / Refresh"), this);
-    m_refreshBtn->setObjectName(QStringLiteral("arrayPlotRefreshBtn"));
-    m_refreshBtn->setFixedHeight(26);
-
-    m_closeBtn = new QPushButton(QStringLiteral("✕ CLOSE"), this);
-    m_closeBtn->setObjectName(QStringLiteral("arrayPlotCloseBtn"));
-    m_closeBtn->setFixedHeight(26);
+    m_refreshBtn = makeBtn(QStringLiteral("Plot / Refresh"), QStringLiteral("arrayPlotRefreshBtn"), 26);
+    m_closeBtn = makeBtn(QStringLiteral("✕ CLOSE"), QStringLiteral("arrayPlotCloseBtn"), 26);
 
     topRow->addWidget(new QLabel(QStringLiteral("Expr:"), this));
     topRow->addWidget(m_exprEdit, 1);
     topRow->addWidget(new QLabel(QStringLiteral("Type:"), this));
     topRow->addWidget(m_typeCombo);
+    topRow->addWidget(m_componentCombo);
     topRow->addWidget(m_modeCombo);
     topRow->addWidget(m_colormapCombo);
     topRow->addWidget(m_refreshBtn);
     topRow->addWidget(m_closeBtn);
     root->addLayout(topRow);
 
-    // Row 2: Shape (Rows, Cols), Slicing (Offset, Stride), Log10 Scale, Reset Zoom, Clear History.
+    // Row 2: Tensor shape (Ny, Nx, Nz, Z, Memory Order), Slicing (Off, Str), Log10, Zoom, History.
     auto* sliceRow = new QHBoxLayout();
-    sliceRow->setSpacing(6);
+    sliceRow->setSpacing(5);
+    m_rowsSpin = makeSpin(QStringLiteral("arrayPlotRowsSpin"), 1, 8192, 1, 64);
+    m_colsSpin = makeSpin(QStringLiteral("arrayPlotColsSpin"), 1, 65536, 64, 70);
+    m_depthSpin = makeSpin(QStringLiteral("arrayPlotDepthSpin"), 1, 4096, 1, 60);
+    m_zSliceSpin = makeSpin(QStringLiteral("arrayPlotZSliceSpin"), 0, 0, 0, 56);
+    m_zSliceSpin->setEnabled(false);
 
-    m_rowsSpin = new QSpinBox(this);
-    m_rowsSpin->setObjectName(QStringLiteral("arrayPlotRowsSpin"));
-    m_rowsSpin->setRange(1, 4096);
-    m_rowsSpin->setValue(1);
-    m_rowsSpin->setFixedHeight(24);
-    m_rowsSpin->setMaximumWidth(68);
+    m_memoryOrderCombo = makeCombo(QStringLiteral("arrayPlotMemoryOrderCombo"), 24);
+    m_memoryOrderCombo->addItem(QStringLiteral("C Row-Major"), static_cast<int>(TensorSliceTableModel::MemoryOrder::CRowMajor));
+    m_memoryOrderCombo->addItem(QStringLiteral("Fortran Col-Major"), static_cast<int>(TensorSliceTableModel::MemoryOrder::FortranColMajor));
 
-    m_colsSpin = new QSpinBox(this);
-    m_colsSpin->setObjectName(QStringLiteral("arrayPlotColsSpin"));
-    m_colsSpin->setRange(1, 65536);
-    m_colsSpin->setValue(64);
-    m_colsSpin->setFixedHeight(24);
-    m_colsSpin->setMaximumWidth(74);
-
-    m_offsetSpin = new QSpinBox(this);
-    m_offsetSpin->setObjectName(QStringLiteral("arrayPlotOffsetSpin"));
-    m_offsetSpin->setRange(0, 10000000);
-    m_offsetSpin->setValue(0);
-    m_offsetSpin->setFixedHeight(24);
-    m_offsetSpin->setMaximumWidth(76);
-    m_offsetSpin->setToolTip(QStringLiteral("Starting element offset for strided slicing (offset + i * stride)"));
-
-    m_strideSpin = new QSpinBox(this);
-    m_strideSpin->setObjectName(QStringLiteral("arrayPlotStrideSpin"));
-    m_strideSpin->setRange(1, 65536);
-    m_strideSpin->setValue(1);
-    m_strideSpin->setFixedHeight(24);
-    m_strideSpin->setMaximumWidth(64);
-    m_strideSpin->setToolTip(QStringLiteral("Step between consecutive plotted elements"));
-
-    m_logScaleCheck = new QCheckBox(QStringLiteral("Log10"), this);
-    m_logScaleCheck->setObjectName(QStringLiteral("arrayPlotLogScaleCheck"));
-    m_logScaleCheck->setToolTip(QStringLiteral("Use base-10 logarithmic Y axis / 2D heatmap color scale"));
-    m_logScaleCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-
-    m_resetZoomBtn = new QPushButton(QStringLiteral("Reset Zoom"), this);
-    m_resetZoomBtn->setObjectName(QStringLiteral("arrayPlotResetZoomBtn"));
-    m_resetZoomBtn->setFixedHeight(24);
+    m_offsetSpin = makeSpin(QStringLiteral("arrayPlotOffsetSpin"), 0, 10000000, 0, 72);
+    m_strideSpin = makeSpin(QStringLiteral("arrayPlotStrideSpin"), 1, 65536, 1, 58);
+    m_logScaleCheck = makeCheck(QStringLiteral("Log10"), QStringLiteral("arrayPlotLogScaleCheck"));
+    m_resetZoomBtn = makeBtn(QStringLiteral("Reset Zoom"), QStringLiteral("arrayPlotResetZoomBtn"));
     m_resetZoomBtn->setEnabled(false);
+    m_clearHistoryBtn = makeBtn(QStringLiteral("Clear History"), QStringLiteral("arrayPlotClearHistoryBtn"));
 
-    m_clearHistoryBtn = new QPushButton(QStringLiteral("Clear History"), this);
-    m_clearHistoryBtn->setObjectName(QStringLiteral("arrayPlotClearHistoryBtn"));
-    m_clearHistoryBtn->setFixedHeight(24);
-    m_clearHistoryBtn->setToolTip(QStringLiteral("Clear accumulated Scalar History samples"));
-
-    sliceRow->addWidget(new QLabel(QStringLiteral("Rows:"), this));
-    sliceRow->addWidget(m_rowsSpin);
-    sliceRow->addWidget(new QLabel(QStringLiteral("Cols:"), this));
-    sliceRow->addWidget(m_colsSpin);
-    sliceRow->addWidget(new QLabel(QStringLiteral("Offset:"), this));
-    sliceRow->addWidget(m_offsetSpin);
-    sliceRow->addWidget(new QLabel(QStringLiteral("Stride:"), this));
-    sliceRow->addWidget(m_strideSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Ny:"), this)); sliceRow->addWidget(m_rowsSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Nx:"), this)); sliceRow->addWidget(m_colsSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Nz:"), this)); sliceRow->addWidget(m_depthSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Z:"), this));  sliceRow->addWidget(m_zSliceSpin);
+    sliceRow->addWidget(m_memoryOrderCombo);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Off:"), this)); sliceRow->addWidget(m_offsetSpin);
+    sliceRow->addWidget(new QLabel(QStringLiteral("Str:"), this)); sliceRow->addWidget(m_strideSpin);
     sliceRow->addWidget(m_logScaleCheck);
     sliceRow->addWidget(m_resetZoomBtn);
     sliceRow->addWidget(m_clearHistoryBtn);
     sliceRow->addStretch(1);
     root->addLayout(sliceRow);
 
-    // Row 3: Rank selector, Multi-Rank Overlay + Subset filter, Auto-Refresh, and Exports.
+    // Row 3: Chart / Tensor Table view switcher, Rank controls, Auto-Refresh, and Exports.
     auto* rankRow = new QHBoxLayout();
     rankRow->setSpacing(6);
+    m_chartViewBtn = makeBtn(QStringLiteral("Chart"), QStringLiteral("arrayPlotChartViewBtn"));
+    m_chartViewBtn->setCheckable(true);
+    m_chartViewBtn->setChecked(true);
+    m_tableViewBtn = makeBtn(QStringLiteral("Tensor Table"), QStringLiteral("arrayPlotTableViewBtn"));
+    m_tableViewBtn->setCheckable(true);
 
-    m_rankCombo = new QComboBox(this);
-    m_rankCombo->setObjectName(QStringLiteral("arrayPlotRankCombo"));
-    m_rankCombo->setFixedHeight(24);
+    m_rankCombo = makeCombo(QStringLiteral("arrayPlotRankCombo"), 24);
     for (int r = 0; r < 8; ++r) m_rankCombo->addItem(QStringLiteral("Rank %1").arg(r), r);
-
-    m_overlayRanksCheck = new QCheckBox(QStringLiteral("Overlay Ranks"), this);
-    m_overlayRanksCheck->setObjectName(QStringLiteral("arrayPlotOverlayAllRanksCheck"));
-    m_overlayRanksCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-
+    m_overlayRanksCheck = makeCheck(QStringLiteral("Overlay Ranks"), QStringLiteral("arrayPlotOverlayAllRanksCheck"));
     m_rankSubsetEdit = new QLineEdit(QStringLiteral("All"), this);
     m_rankSubsetEdit->setObjectName(QStringLiteral("arrayPlotRankSubsetEdit"));
     m_rankSubsetEdit->setPlaceholderText(QStringLiteral("All or 0..3"));
-    m_rankSubsetEdit->setFixedHeight(24);
-    m_rankSubsetEdit->setFixedWidth(96);
-    m_rankSubsetEdit->setToolTip(QStringLiteral("Ranks to overlay (e.g., All, 0..3, 0,2,3)"));
-
-    m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh"), this);
-    m_autoRefreshCheck->setObjectName(QStringLiteral("arrayPlotAutoRefreshCheck"));
-    m_autoRefreshCheck->setToolTip(QStringLiteral("Automatically refresh plot whenever the focused rank stops"));
-    m_autoRefreshCheck->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    m_rankSubsetEdit->setFixedSize(92, 24);
+    m_autoRefreshCheck = makeCheck(QStringLiteral("Auto-Refresh"), QStringLiteral("arrayPlotAutoRefreshCheck"));
     m_autoRefreshCheck->setChecked(true);
 
-    m_exportCsvBtn = new QPushButton(QStringLiteral("Export CSV"), this);
-    m_exportCsvBtn->setObjectName(QStringLiteral("arrayPlotExportCsvBtn"));
-    m_exportCsvBtn->setFixedHeight(24);
+    m_exportCsvBtn = makeBtn(QStringLiteral("Export CSV"), QStringLiteral("arrayPlotExportCsvBtn"));
+    m_savePngBtn = makeBtn(QStringLiteral("Save PNG"), QStringLiteral("arrayPlotSavePngBtn"));
+    m_gnuplotBtn = makeBtn(QStringLiteral("Open in gnuplot"), QStringLiteral("arrayPlotGnuplotBtn"));
 
-    m_savePngBtn = new QPushButton(QStringLiteral("Save PNG"), this);
-    m_savePngBtn->setObjectName(QStringLiteral("arrayPlotSavePngBtn"));
-    m_savePngBtn->setFixedHeight(24);
-
-    m_gnuplotBtn = new QPushButton(QStringLiteral("Open in gnuplot"), this);
-    m_gnuplotBtn->setObjectName(QStringLiteral("arrayPlotGnuplotBtn"));
-    m_gnuplotBtn->setFixedHeight(24);
-
-    rankRow->addWidget(m_rankCombo);
-    rankRow->addWidget(m_overlayRanksCheck);
-    rankRow->addWidget(new QLabel(QStringLiteral("Ranks:"), this));
-    rankRow->addWidget(m_rankSubsetEdit);
-    rankRow->addWidget(m_autoRefreshCheck);
-    rankRow->addStretch(1);
-    rankRow->addWidget(m_exportCsvBtn);
-    rankRow->addWidget(m_savePngBtn);
-    rankRow->addWidget(m_gnuplotBtn);
+    rankRow->addWidget(m_chartViewBtn); rankRow->addWidget(m_tableViewBtn);
+    rankRow->addWidget(m_rankCombo); rankRow->addWidget(m_overlayRanksCheck);
+    rankRow->addWidget(new QLabel(QStringLiteral("Ranks:"), this)); rankRow->addWidget(m_rankSubsetEdit);
+    rankRow->addWidget(m_autoRefreshCheck); rankRow->addStretch(1);
+    rankRow->addWidget(m_exportCsvBtn); rankRow->addWidget(m_savePngBtn); rankRow->addWidget(m_gnuplotBtn);
     root->addLayout(rankRow);
 
-    // Custom scientific plot canvas.
+    // Central stacked view: [0] = ArrayPlotCanvas, [1] = virtualized TensorSliceTableModel QTableView.
+    m_viewStack = new QStackedWidget(this);
+    m_viewStack->setObjectName(QStringLiteral("arrayPlotViewStack"));
     m_canvas = new ArrayPlotCanvas(this);
-    root->addWidget(m_canvas, 1);
+    m_viewStack->addWidget(m_canvas);
 
-    // Live telemetry stats bar + cursor hover readout.
+    m_tensorModel = new TensorSliceTableModel(this);
+    m_tensorModel->setSourceData(&m_currentSamples, nullptr);
+    m_tensorModel->setShape(m_cols, m_rows, m_depth);
+
+    m_tensorTableView = new QTableView(this);
+    m_tensorTableView->setObjectName(QStringLiteral("arrayPlotTensorTableView"));
+    m_tensorTableView->setModel(m_tensorModel);
+    m_tensorTableView->setAlternatingRowColors(true);
+    m_tensorTableView->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    m_tensorTableView->horizontalHeader()->setDefaultSectionSize(90);
+    m_tensorTableView->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    m_tensorTableView->verticalHeader()->setDefaultSectionSize(22);
+    m_viewStack->addWidget(m_tensorTableView);
+    root->addWidget(m_viewStack, 1);
+
     auto* footerRow = new QHBoxLayout();
     m_statsLabel = new QLabel(QStringLiteral("Min: 0 | Max: 0 | Mean: 0 | L2: 0 | NaN/Inf: 0 | Changed: 0"), this);
     m_statsLabel->setObjectName(QStringLiteral("arrayPlotStatsLabel"));
@@ -302,74 +334,60 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     connect(m_refreshBtn, &QPushButton::clicked, this, &ArrayPlotDialog::refreshPlot);
     connect(m_exprEdit, &QLineEdit::returnPressed, this, &ArrayPlotDialog::refreshPlot);
     connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::close);
+    connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
+        if (m_componentCombo) m_componentCombo->setEnabled(isComplexType(elementType()));
+    });
+    connect(m_componentCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { recomputeComplexProjection(); });
     connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
         if (plotMode() == PlotMode::ScalarHistory) {
-            m_currentSamples = m_scalarHistory;
-            m_previousSamples.clear();
-            m_rows = 1;
-            m_cols = qMax(1, static_cast<int>(m_scalarHistory.size()));
+            m_currentSamples = m_scalarHistory; m_previousSamples.clear(); m_complexPairs.clear();
+            m_rows = 1; m_cols = qMax(1, static_cast<int>(m_scalarHistory.size()));
             m_rankOverlays = m_rankScalarHistories;
+            m_tensorModel->setSourceData(&m_currentSamples, nullptr);
+            m_tensorModel->setShape(m_cols, m_rows, m_depth);
             recomputeStats();
         }
-        if (m_canvas) {
-            m_canvas->resetZoom();
-            m_canvas->update();
-        }
+        if (m_canvas) { m_canvas->resetZoom(); m_canvas->update(); }
     });
-    connect(m_colormapCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
-        if (m_canvas) m_canvas->update();
-    });
+    connect(m_colormapCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { if (m_canvas) m_canvas->update(); });
     connect(m_rowsSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int r) {
         m_rows = qMax(1, r);
         if (m_rows > 1 && m_modeCombo) m_modeCombo->setCurrentIndex(static_cast<int>(PlotMode::Heatmap2D));
+        m_tensorModel->setShape(m_cols, m_rows, m_depth);
         if (m_canvas) m_canvas->update();
     });
     connect(m_colsSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int c) {
-        m_cols = qMax(1, c);
-        if (m_canvas) m_canvas->update();
+        m_cols = qMax(1, c); m_tensorModel->setShape(m_cols, m_rows, m_depth); if (m_canvas) m_canvas->update();
     });
-    connect(m_offsetSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int off) {
-        m_sliceOffset = qMax(0, off);
-        if (m_canvas) m_canvas->update();
+    connect(m_depthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int d) {
+        m_depth = qMax(1, d);
+        if (m_zSliceSpin) { m_zSliceSpin->setRange(0, qMax(0, m_depth - 1)); m_zSliceSpin->setEnabled(m_depth > 1); }
+        m_tensorModel->setShape(m_cols, m_rows, m_depth);
     });
-    connect(m_strideSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int str) {
-        m_sliceStride = qMax(1, str);
-        if (m_canvas) m_canvas->update();
-    });
-    connect(m_logScaleCheck, &QCheckBox::toggled, this, [this](bool enabled) {
-        if (m_canvas) m_canvas->setLogScale(enabled);
-    });
+    connect(m_zSliceSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int z) { m_tensorModel->setZSlice(z); });
+    connect(m_memoryOrderCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { m_tensorModel->setMemoryOrder(memoryOrder()); });
+    connect(m_offsetSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int off) { m_sliceOffset = qMax(0, off); if (m_canvas) m_canvas->update(); });
+    connect(m_strideSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int str) { m_sliceStride = qMax(1, str); if (m_canvas) m_canvas->update(); });
+    connect(m_logScaleCheck, &QCheckBox::toggled, this, [this](bool enabled) { if (m_canvas) m_canvas->setLogScale(enabled); });
     connect(m_resetZoomBtn, &QPushButton::clicked, this, &ArrayPlotDialog::resetZoom);
     connect(m_canvas, &ArrayPlotCanvas::zoomChanged, m_resetZoomBtn, &QPushButton::setEnabled);
     connect(m_clearHistoryBtn, &QPushButton::clicked, this, &ArrayPlotDialog::clearScalarHistory);
+    connect(m_chartViewBtn, &QPushButton::clicked, this, [this]() { setTensorTableActive(false); });
+    connect(m_tableViewBtn, &QPushButton::clicked, this, [this]() { setTensorTableActive(true); });
     connect(m_rankCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
-        if (idx >= 0) {
-            m_focusedRank = m_rankCombo->itemData(idx).toInt();
-            if (isAutoRefreshEnabled()) refreshPlot();
-        }
+        if (idx >= 0) { m_focusedRank = m_rankCombo->itemData(idx).toInt(); if (isAutoRefreshEnabled()) refreshPlot(); }
     });
     connect(m_overlayRanksCheck, &QCheckBox::toggled, this, [this](bool checked) {
-        if (!checked) {
-            m_pendingOverlayRanks.clear();
-            clearRankOverlays();
-        } else {
-            refreshPlot();
-        }
+        if (!checked) { m_pendingOverlayRanks.clear(); clearRankOverlays(); } else refreshPlot();
     });
-    connect(m_rankSubsetEdit, &QLineEdit::returnPressed, this, [this]() {
-        if (isOverlayRanksEnabled()) refreshPlot();
-    });
+    connect(m_rankSubsetEdit, &QLineEdit::returnPressed, this, [this]() { if (isOverlayRanksEnabled()) refreshPlot(); });
     connect(m_exportCsvBtn, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export Array CSV"),
-                                                          QStringLiteral("array_plot.csv"),
-                                                          QStringLiteral("CSV Files (*.csv)"));
-        if (!path.isEmpty()) exportCsv(path);
+        const QString p = QFileDialog::getSaveFileName(this, QStringLiteral("Export Array CSV"), QStringLiteral("array_plot.csv"), QStringLiteral("CSV Files (*.csv)"));
+        if (!p.isEmpty()) exportCsv(p);
     });
     connect(m_savePngBtn, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save Plot PNG"),
-                                                          QStringLiteral("array_plot.png"),
-                                                          QStringLiteral("PNG Images (*.png)"));
-        if (!path.isEmpty()) savePng(path);
+        const QString p = QFileDialog::getSaveFileName(this, QStringLiteral("Save Plot PNG"), QStringLiteral("array_plot.png"), QStringLiteral("PNG Images (*.png)"));
+        if (!p.isEmpty()) savePng(p);
     });
     connect(m_gnuplotBtn, &QPushButton::clicked, this, [this]() { openInGnuplot(); });
 
@@ -388,12 +406,17 @@ void ArrayPlotDialog::setCoordinator(::IBackendCoordinator* coordinator) {
                 if (data.isEmpty()) return;
                 if (m_pendingOverlayRanks.remove(rankId)) {
                     const int count = qMax(1, m_cols);
+                    QVector<QPair<double, double>> pairs;
                     const QVector<double> decoded = decodeStridedBytes(
-                        data, elementType(), count, m_sliceOffset, m_sliceStride);
+                        data, elementType(), complexComponent(), count, m_sliceOffset, m_sliceStride,
+                        (rankId == m_focusedRank && isComplexType(elementType())) ? &pairs : nullptr);
                     if (!decoded.isEmpty()) {
                         setRankOverlaySamples(rankId, decoded);
                         if (rankId == m_focusedRank) {
                             setSamples(decoded, 1, decoded.size());
+                            m_complexPairs = std::move(pairs);
+                            m_tensorModel->setSourceData(&m_currentSamples,
+                                                         m_complexPairs.isEmpty() ? nullptr : &m_complexPairs);
                         }
                     }
                     return;
@@ -412,16 +435,12 @@ void ArrayPlotDialog::setCoordinator(::IBackendCoordinator* coordinator) {
                 m_pendingScalarRanks.remove(rankId);
                 if (rankId == m_focusedRank) m_awaitingScalarEval = false;
                 double val = 0.0;
-                if (parseScalarResult(result, &val)) {
-                    appendScalarSample(val, rankId);
-                }
+                if (parseScalarResult(result, &val)) appendScalarSample(val, rankId);
             });
     if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {
         connect(gdb, &gridlock::GdbRankCoordinator::rankStateChanged, this,
                 [this](int rankId, const gridlock::RankState& state) {
-                    if (rankId == m_focusedRank && state.currentState == QLatin1String("stopped")) {
-                        onTargetStopped(rankId);
-                    }
+                    if (rankId == m_focusedRank && state.currentState == QLatin1String("stopped")) onTargetStopped(rankId);
                 });
     } else if (auto* dap = dynamic_cast<DapCoordinator*>(m_coordinator)) {
         connect(dap, &DapCoordinator::executionStopped, this,
@@ -440,6 +459,7 @@ ArraySliceSpec ArrayPlotDialog::syncSliceControlsFromExpression() {
         if (spec.count > 0) {
             m_cols = spec.count;
             if (m_colsSpin && m_colsSpin->value() != m_cols) { QSignalBlocker b(m_colsSpin); m_colsSpin->setValue(m_cols); }
+            if (m_tensorModel) m_tensorModel->setShape(m_cols, m_rows, m_depth);
         }
     } else {
         m_hasExplicitSliceCount = false;
@@ -454,19 +474,55 @@ QString ArrayPlotDialog::baseExpression() const { return parseArraySliceExpressi
 void ArrayPlotDialog::setElementType(ElementType type) {
     if (!m_typeCombo) return;
     if (const int idx = m_typeCombo->findData(static_cast<int>(type)); idx >= 0) m_typeCombo->setCurrentIndex(idx);
+    if (m_componentCombo) m_componentCombo->setEnabled(isComplexType(type));
 }
 
 void ArrayPlotDialog::setElementTypeFromString(const QString& cType) {
     const QString lower = cType.toLower();
-    if (lower.contains(QStringLiteral("float"))) setElementType(ElementType::Float32);
-    else if (lower.contains(QStringLiteral("uint8")) || lower.contains(QStringLiteral("uchar")) || lower.contains(QStringLiteral("char"))) setElementType(ElementType::UInt8);
-    else if (lower.contains(QStringLiteral("int64")) || lower.contains(QStringLiteral("long"))) setElementType(ElementType::Int64);
-    else if (lower.contains(QStringLiteral("int"))) setElementType(ElementType::Int32);
-    else setElementType(ElementType::Float64);
+    if (lower.contains(QStringLiteral("complex64")) ||
+        (lower.contains(QStringLiteral("complex")) && lower.contains(QStringLiteral("float"))))
+        setElementType(ElementType::Complex64);
+    else if (lower.contains(QStringLiteral("complex")))
+        setElementType(ElementType::Complex128);
+    else if (lower.contains(QStringLiteral("float")))
+        setElementType(ElementType::Float32);
+    else if (lower.contains(QStringLiteral("uint8")) || lower.contains(QStringLiteral("uchar")) || lower.contains(QStringLiteral("char")))
+        setElementType(ElementType::UInt8);
+    else if (lower.contains(QStringLiteral("int64")) || lower.contains(QStringLiteral("long")))
+        setElementType(ElementType::Int64);
+    else if (lower.contains(QStringLiteral("int")))
+        setElementType(ElementType::Int32);
+    else
+        setElementType(ElementType::Float64);
 }
 
 ArrayPlotDialog::ElementType ArrayPlotDialog::elementType() const {
     return m_typeCombo ? static_cast<ElementType>(m_typeCombo->currentData().toInt()) : ElementType::Float64;
+}
+
+void ArrayPlotDialog::setComplexComponent(ComplexComponent component) {
+    if (!m_componentCombo) return;
+    if (const int idx = m_componentCombo->findData(static_cast<int>(component)); idx >= 0) {
+        if (m_componentCombo->currentIndex() != idx) m_componentCombo->setCurrentIndex(idx);
+        else recomputeComplexProjection();
+    }
+}
+
+ArrayPlotDialog::ComplexComponent ArrayPlotDialog::complexComponent() const {
+    return m_componentCombo ? static_cast<ComplexComponent>(m_componentCombo->currentData().toInt())
+                            : ComplexComponent::Magnitude;
+}
+
+void ArrayPlotDialog::recomputeComplexProjection() {
+    if (m_complexPairs.isEmpty()) return;
+    const ComplexComponent comp = complexComponent();
+    m_currentSamples.resize(m_complexPairs.size());
+    for (int i = 0; i < m_complexPairs.size(); ++i) {
+        m_currentSamples[i] = extractComplexComponent(m_complexPairs.at(i).first, m_complexPairs.at(i).second, comp);
+    }
+    recomputeStats();
+    if (m_tensorModel) m_tensorModel->notifyDataRefreshed();
+    if (m_canvas) m_canvas->update();
 }
 
 void ArrayPlotDialog::setPlotMode(PlotMode mode) {
@@ -486,11 +542,54 @@ ArrayPlotDialog::Colormap ArrayPlotDialog::colormap() const {
 }
 
 void ArrayPlotDialog::setDimensions(int rows, int cols) {
-    m_rows = qMax(1, rows); m_cols = qMax(1, cols);
+    setTensorDimensions(cols, rows, m_depth);
+}
+
+void ArrayPlotDialog::setTensorDimensions(int nx, int ny, int nz) {
+    m_cols = qMax(1, nx);
+    m_rows = qMax(1, ny);
+    m_depth = qMax(1, nz);
     if (m_rowsSpin && m_rowsSpin->value() != m_rows) { QSignalBlocker b(m_rowsSpin); m_rowsSpin->setValue(m_rows); }
     if (m_colsSpin && m_colsSpin->value() != m_cols) { QSignalBlocker b(m_colsSpin); m_colsSpin->setValue(m_cols); }
+    if (m_depthSpin && m_depthSpin->value() != m_depth) { QSignalBlocker b(m_depthSpin); m_depthSpin->setValue(m_depth); }
+    if (m_zSliceSpin) {
+        QSignalBlocker b(m_zSliceSpin);
+        m_zSliceSpin->setRange(0, qMax(0, m_depth - 1));
+        m_zSliceSpin->setValue(std::clamp(m_zSliceSpin->value(), 0, qMax(0, m_depth - 1)));
+        m_zSliceSpin->setEnabled(m_depth > 1);
+    }
+    if (m_tensorModel) m_tensorModel->setShape(m_cols, m_rows, m_depth);
     if (m_rows > 1) setPlotMode(PlotMode::Heatmap2D);
     if (m_canvas) m_canvas->update();
+}
+
+void ArrayPlotDialog::setZSlice(int zSlice) {
+    if (m_zSliceSpin) m_zSliceSpin->setValue(std::clamp(zSlice, 0, qMax(0, m_depth - 1)));
+    else if (m_tensorModel) m_tensorModel->setZSlice(zSlice);
+}
+int ArrayPlotDialog::zSlice() const { return m_tensorModel ? m_tensorModel->zSlice() : 0; }
+
+void ArrayPlotDialog::setMemoryOrder(TensorSliceTableModel::MemoryOrder order) {
+    if (m_memoryOrderCombo) {
+        if (const int idx = m_memoryOrderCombo->findData(static_cast<int>(order)); idx >= 0) {
+            m_memoryOrderCombo->setCurrentIndex(idx);
+        }
+    }
+    if (m_tensorModel) m_tensorModel->setMemoryOrder(order);
+}
+TensorSliceTableModel::MemoryOrder ArrayPlotDialog::memoryOrder() const {
+    return m_memoryOrderCombo
+               ? static_cast<TensorSliceTableModel::MemoryOrder>(m_memoryOrderCombo->currentData().toInt())
+               : TensorSliceTableModel::MemoryOrder::CRowMajor;
+}
+
+void ArrayPlotDialog::setTensorTableActive(bool active) {
+    if (m_viewStack) m_viewStack->setCurrentIndex(active ? 1 : 0);
+    if (m_chartViewBtn) m_chartViewBtn->setChecked(!active);
+    if (m_tableViewBtn) m_tableViewBtn->setChecked(active);
+}
+bool ArrayPlotDialog::isTensorTableActive() const {
+    return m_viewStack && m_viewStack->currentIndex() == 1;
 }
 
 void ArrayPlotDialog::setSliceOffset(int offset) {
@@ -498,7 +597,6 @@ void ArrayPlotDialog::setSliceOffset(int offset) {
     if (m_offsetSpin && m_offsetSpin->value() != m_sliceOffset) { QSignalBlocker b(m_offsetSpin); m_offsetSpin->setValue(m_sliceOffset); }
     if (m_canvas) m_canvas->update();
 }
-
 void ArrayPlotDialog::setSliceStride(int stride) {
     m_sliceStride = qMax(1, stride);
     if (m_strideSpin && m_strideSpin->value() != m_sliceStride) { QSignalBlocker b(m_strideSpin); m_strideSpin->setValue(m_sliceStride); }
@@ -551,28 +649,37 @@ bool ArrayPlotDialog::loadFromRawBytes(const QByteArray& rawBytes, ElementType t
     const int effRows = qMax(1, rows);
     int requestedCount = 0;
     if (cols > 0) {
-        requestedCount = effRows * cols;
-    } else if (m_hasExplicitSliceCount && effRows == 1) {
+        requestedCount = qMax(1, m_depth) * effRows * cols;
+    } else if (m_hasExplicitSliceCount && effRows == 1 && m_depth == 1) {
         requestedCount = qMax(1, m_cols);
     }
 
-    const QVector<double> decoded =
-        decodeStridedBytes(rawBytes, type, requestedCount, effOffset, effStride);
+    QVector<QPair<double, double>> pairs;
+    const QVector<double> decoded = decodeStridedBytes(
+        rawBytes, type, complexComponent(), requestedCount, effOffset, effStride,
+        isComplexType(type) ? &pairs : nullptr);
     if (decoded.isEmpty()) return false;
 
-    const int effCols = (cols > 0) ? cols : qMax(1, static_cast<int>(decoded.size()) / effRows);
+    const int effCols = (cols > 0) ? cols : qMax(1, static_cast<int>(decoded.size()) / (effRows * qMax(1, m_depth)));
     setSamples(decoded, effRows, effCols);
+    m_complexPairs = std::move(pairs);
+    if (m_tensorModel) {
+        m_tensorModel->setSourceData(&m_currentSamples, m_complexPairs.isEmpty() ? nullptr : &m_complexPairs);
+    }
     return true;
 }
 
 void ArrayPlotDialog::setSamples(const QVector<double>& samples, int rows, int cols) {
-    if (!m_currentSamples.isEmpty()) {
-        m_previousSamples = m_currentSamples;
-    }
+    if (!m_currentSamples.isEmpty()) m_previousSamples = m_currentSamples;
     m_currentSamples = samples;
+    m_complexPairs.clear();
     const int effRows = qMax(1, rows);
-    const int effCols = (cols > 0) ? cols : qMax(1, static_cast<int>(samples.size()) / effRows);
+    const int effCols = (cols > 0) ? cols : qMax(1, static_cast<int>(samples.size()) / (effRows * qMax(1, m_depth)));
     setDimensions(effRows, effCols);
+    if (m_tensorModel) {
+        m_tensorModel->setSourceData(&m_currentSamples, nullptr);
+        m_tensorModel->setShape(m_cols, m_rows, m_depth);
+    }
     recomputeStats();
     if (m_canvas) m_canvas->update();
 }
@@ -589,20 +696,21 @@ void ArrayPlotDialog::clearRankOverlays() {
 
 void ArrayPlotDialog::appendScalarSample(double value, int rankId) {
     const int targetRank = (rankId >= 0) ? rankId : m_focusedRank;
-    if (targetRank == m_focusedRank) {
-        m_scalarHistory.append(value);
-    }
+    if (targetRank == m_focusedRank) m_scalarHistory.append(value);
     if (isOverlayRanksEnabled() || targetRank != m_focusedRank || !m_rankScalarHistories.isEmpty()) {
         m_rankScalarHistories[targetRank].append(value);
-        if (plotMode() == PlotMode::ScalarHistory) {
-            m_rankOverlays[targetRank] = m_rankScalarHistories[targetRank];
-        }
+        if (plotMode() == PlotMode::ScalarHistory) m_rankOverlays[targetRank] = m_rankScalarHistories[targetRank];
     }
     if (plotMode() == PlotMode::ScalarHistory) {
         m_previousSamples.clear();
+        m_complexPairs.clear();
         m_currentSamples = m_scalarHistory;
         m_rows = 1;
         m_cols = qMax(1, static_cast<int>(m_scalarHistory.size()));
+        if (m_tensorModel) {
+            m_tensorModel->setSourceData(&m_currentSamples, nullptr);
+            m_tensorModel->setShape(m_cols, m_rows, 1);
+        }
         recomputeStats();
         if (m_canvas) m_canvas->update();
     }
@@ -615,78 +723,50 @@ void ArrayPlotDialog::clearScalarHistory() {
         m_currentSamples.clear();
         m_previousSamples.clear();
         m_rankOverlays.clear();
+        if (m_tensorModel) m_tensorModel->notifyDataRefreshed();
         recomputeStats();
     }
-    if (m_canvas) {
-        m_canvas->resetZoom();
-        m_canvas->update();
-    }
+    if (m_canvas) { m_canvas->resetZoom(); m_canvas->update(); }
 }
 
 void ArrayPlotDialog::recomputeStats() {
-    m_minVal = 0.0;
-    m_maxVal = 0.0;
-    m_meanVal = 0.0;
-    m_l2Norm = 0.0;
-    m_nanCount = 0;
-    m_infCount = 0;
-    m_changedElementCount = 0;
-
-    double sum = 0.0;
-    double sumSq = 0.0;
+    m_minVal = m_maxVal = m_meanVal = m_l2Norm = 0.0;
+    m_nanCount = m_infCount = m_changedElementCount = 0;
+    double sum = 0.0, sumSq = 0.0;
     int finiteCount = 0;
 
     for (int i = 0; i < m_currentSamples.size(); ++i) {
         const double v = m_currentSamples.at(i);
-        if (std::isnan(v)) {
-            ++m_nanCount;
-        } else if (std::isinf(v)) {
-            ++m_infCount;
-        } else {
+        if (std::isnan(v)) ++m_nanCount;
+        else if (std::isinf(v)) ++m_infCount;
+        else {
             if (finiteCount == 0 || v < m_minVal) m_minVal = v;
             if (finiteCount == 0 || v > m_maxVal) m_maxVal = v;
-            sum += v;
-            sumSq += v * v;
-            ++finiteCount;
+            sum += v; sumSq += v * v; ++finiteCount;
         }
-
         if (!m_previousSamples.isEmpty() && i < m_previousSamples.size()) {
             const double pv = m_previousSamples.at(i);
-            const bool nanChanged = (std::isnan(v) != std::isnan(pv));
-            const bool infChanged = (std::isinf(v) != std::isinf(pv));
-            const bool valChanged = (!std::isnan(v) && !std::isnan(pv) && std::abs(v - pv) > 1e-12);
-            if (nanChanged || infChanged || valChanged) ++m_changedElementCount;
+            if ((std::isnan(v) != std::isnan(pv)) || (std::isinf(v) != std::isinf(pv)) ||
+                (!std::isnan(v) && !std::isnan(pv) && std::abs(v - pv) > 1e-12)) ++m_changedElementCount;
         }
     }
+    if (finiteCount > 0) { m_meanVal = sum / finiteCount; m_l2Norm = std::sqrt(sumSq); }
+    if (!m_statsLabel) return;
 
-    if (finiteCount > 0) {
-        m_meanVal = sum / finiteCount;
-        m_l2Norm = std::sqrt(sumSq);
-    }
-
-    if (m_statsLabel) {
-        if (plotMode() == PlotMode::ScalarHistory) {
-            m_statsLabel->setText(
-                QStringLiteral("Stops: %1 | Min: %2 | Max: %3 | Mean: %4 | Latest: %5 | NaN/Inf: %6")
-                    .arg(m_scalarHistory.size())
-                    .arg(QString::number(m_minVal, 'g', 6),
-                         QString::number(m_maxVal, 'g', 6),
-                         QString::number(m_meanVal, 'g', 6),
-                         m_scalarHistory.isEmpty() ? QStringLiteral("-")
-                                                   : QString::number(m_scalarHistory.constLast(), 'g', 6))
-                    .arg(m_nanCount + m_infCount));
-        } else {
-            m_statsLabel->setText(
-                QStringLiteral("Min: %1 | Max: %2 | Mean: %3 | L2: %4 | NaN/Inf: %5 (%6 NaN, %7 Inf) | Changed: %8")
-                    .arg(QString::number(m_minVal, 'g', 6),
-                         QString::number(m_maxVal, 'g', 6),
-                         QString::number(m_meanVal, 'g', 6),
-                         QString::number(m_l2Norm, 'g', 6))
-                    .arg(m_nanCount + m_infCount)
-                    .arg(m_nanCount)
-                    .arg(m_infCount)
-                    .arg(m_changedElementCount));
-        }
+    if (plotMode() == PlotMode::ScalarHistory) {
+        m_statsLabel->setText(
+            QStringLiteral("Stops: %1 | Min: %2 | Max: %3 | Mean: %4 | Latest: %5 | NaN/Inf: %6")
+                .arg(m_scalarHistory.size())
+                .arg(QString::number(m_minVal, 'g', 6), QString::number(m_maxVal, 'g', 6),
+                     QString::number(m_meanVal, 'g', 6),
+                     m_scalarHistory.isEmpty() ? QStringLiteral("-") : QString::number(m_scalarHistory.constLast(), 'g', 6))
+                .arg(m_nanCount + m_infCount));
+    } else {
+        m_statsLabel->setText(
+            QStringLiteral("Min: %1 | Max: %2 | Mean: %3 | L2: %4 | NaN/Inf: %5 (%6 NaN, %7 Inf) | Changed: %8")
+                .arg(QString::number(m_minVal, 'g', 6), QString::number(m_maxVal, 'g', 6),
+                     QString::number(m_meanVal, 'g', 6), QString::number(m_l2Norm, 'g', 6))
+                .arg(m_nanCount + m_infCount).arg(m_nanCount).arg(m_infCount).arg(m_changedElementCount));
     }
 }
 
@@ -697,12 +777,10 @@ void ArrayPlotDialog::refreshPlot() {
             m_pendingScalarExpr = rawExpr;
             if (isOverlayRanksEnabled()) {
                 for (int r : selectedOverlayRanks(m_coordinator->getProcessCount())) {
-                    m_pendingScalarRanks.insert(r);
-                    m_coordinator->evaluateExpression(r, rawExpr);
+                    m_pendingScalarRanks.insert(r); m_coordinator->evaluateExpression(r, rawExpr);
                 }
             } else {
-                m_awaitingScalarEval = true;
-                m_pendingScalarRanks.insert(m_focusedRank);
+                m_awaitingScalarEval = true; m_pendingScalarRanks.insert(m_focusedRank);
                 m_coordinator->evaluateExpression(m_focusedRank, rawExpr);
             }
         }
@@ -713,21 +791,18 @@ void ArrayPlotDialog::refreshPlot() {
     const ArraySliceSpec spec = syncSliceControlsFromExpression();
     const QString baseExpr = spec.baseExpression;
     if (!baseExpr.isEmpty()) {
-        const int elemCount = qMax(1, m_rows) * qMax(1, m_cols);
+        const int elemCount = qMax(1, m_depth) * qMax(1, m_rows) * qMax(1, m_cols);
         const int spanElems = m_sliceOffset + (elemCount - 1) * qMax(1, m_sliceStride) + 1;
         const int totalBytes = spanElems * byteSizeOf(elementType());
         const QString addrExpr = (baseExpr.startsWith(QLatin1Char('&')) || baseExpr.startsWith(QStringLiteral("0x")))
-                                     ? baseExpr
-                                     : QStringLiteral("&(%1)[0]").arg(baseExpr);
+                                     ? baseExpr : QStringLiteral("&(%1)[0]").arg(baseExpr);
 
-        if (isOverlayRanksEnabled() && plotMode() != PlotMode::Heatmap2D && m_rows == 1) {
+        if (isOverlayRanksEnabled() && plotMode() != PlotMode::Heatmap2D && m_rows == 1 && m_depth == 1) {
             m_pendingOverlayRanks.clear();
             emit multiRankPlotRequested(baseExpr, totalBytes, elementType(), m_sliceOffset, m_sliceStride);
-            // Fallback dispatch when no external coordinator bridge (e.g., MainWindow) handled the signal.
             if (m_pendingOverlayRanks.isEmpty() && m_coordinator) {
                 for (int r : selectedOverlayRanks(m_coordinator->getProcessCount())) {
-                    expectOverlayReadForRank(r);
-                    m_coordinator->readMemory(r, addrExpr, totalBytes);
+                    expectOverlayReadForRank(r); m_coordinator->readMemory(r, addrExpr, totalBytes);
                 }
             }
         } else if (m_coordinator) {
@@ -740,85 +815,91 @@ void ArrayPlotDialog::refreshPlot() {
 
 void ArrayPlotDialog::onTargetStopped(int rankId) {
     setFocusedRank(rankId);
-    if (!isAutoRefreshEnabled()) return;
-    ++m_stopRefreshCount;
-    refreshPlot();
+    if (isAutoRefreshEnabled()) { ++m_stopRefreshCount; refreshPlot(); }
+}
+
+QString ArrayPlotDialog::buildGnuplotScript(const QString& dataPath) const {
+    QString safeTitle = expression();
+    safeTitle.replace(QLatin1Char('\''), QLatin1Char(' '));
+    QString script;
+    QTextStream sout(&script);
+    if (m_rows > 1) {
+        sout << "set title 'GridLock 2D Field: " << safeTitle << " (Rank " << m_focusedRank << ")'\n"
+             << "set xlabel 'Column (x)'\nset ylabel 'Row (y)'\n";
+        if (isLogScale()) sout << "set logscale zcb\n";
+        sout << "set pm3d at bs\nset contour base\nset mouse\n"
+             << "splot '" << dataPath << "' matrix with pm3d title 'Rank " << m_focusedRank << "'\n";
+    } else {
+        sout << "set grid\n";
+        if (isLogScale()) sout << "set logscale y\n";
+        sout << "set title 'GridLock Array Plot: " << safeTitle << "'\n"
+             << "plot '" << dataPath << "' using 1:2 with linespoints title 'Rank " << m_focusedRank << "'\n";
+    }
+    return script;
 }
 
 bool ArrayPlotDialog::exportCsv(const QString& filePath) const {
     if (filePath.trimmed().isEmpty() || m_currentSamples.isEmpty()) return false;
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
-
     QTextStream out(&file);
     if (plotMode() == PlotMode::ScalarHistory) {
         out << "stop,value\n";
-        for (int i = 0; i < m_currentSamples.size(); ++i) {
-            out << i << "," << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
-        }
+        for (int i = 0; i < m_currentSamples.size(); ++i) out << i << "," << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
     } else if (m_rows > 1) {
         out << "row,col,value\n";
-        for (int r = 0; r < m_rows; ++r) {
+        for (int r = 0; r < m_rows; ++r)
             for (int c = 0; c < m_cols; ++c) {
-                const int idx = r * m_cols + c;
-                if (idx >= m_currentSamples.size()) break;
-                out << r << "," << c << "," << QString::number(m_currentSamples.at(idx), 'g', 12) << "\n";
+                const double v = m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c);
+                out << r << "," << c << "," << QString::number(v, 'g', 12) << "\n";
             }
-        }
     } else {
         out << "index,value,prev_value,delta\n";
         for (int i = 0; i < m_currentSamples.size(); ++i) {
-            const double cur = m_currentSamples.at(i);
-            const double prev = (i < m_previousSamples.size()) ? m_previousSamples.at(i) : cur;
-            const double delta = cur - prev;
-            out << (m_sliceOffset + i * m_sliceStride) << ","
-                << QString::number(cur, 'g', 12) << ","
-                << QString::number(prev, 'g', 12) << ","
-                << QString::number(delta, 'g', 12) << "\n";
+            const double cur = m_currentSamples.at(i), prev = (i < m_previousSamples.size()) ? m_previousSamples.at(i) : cur;
+            out << (m_sliceOffset + i * m_sliceStride) << "," << QString::number(cur, 'g', 12) << ","
+                << QString::number(prev, 'g', 12) << "," << QString::number(cur - prev, 'g', 12) << "\n";
         }
     }
-    file.close();
     return true;
 }
 
 bool ArrayPlotDialog::savePng(const QString& filePath) {
-    if (!m_canvas || filePath.trimmed().isEmpty()) return false;
-    return m_canvas->grab().save(filePath, "PNG");
+    return m_canvas && !filePath.trimmed().isEmpty() && m_canvas->grab().save(filePath, "PNG");
 }
 
 bool ArrayPlotDialog::openInGnuplot() const {
     if (m_currentSamples.isEmpty()) return false;
     const QString dataPath = QDir::temp().filePath(QStringLiteral("gridlock_array_plot.dat"));
     const QString scriptPath = QDir::temp().filePath(QStringLiteral("gridlock_array_plot.gp"));
-
     QFile df(dataPath);
     if (!df.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream dout(&df);
-    for (int i = 0; i < m_currentSamples.size(); ++i) {
-        const int x = (plotMode() == PlotMode::ScalarHistory) ? i : (m_sliceOffset + i * m_sliceStride);
-        dout << x << " " << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
+    if (m_rows > 1) {
+        for (int r = 0; r < m_rows; ++r) {
+            for (int c = 0; c < m_cols; ++c) {
+                if (c > 0) dout << " ";
+                dout << QString::number(m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c), 'g', 12);
+            }
+            dout << "\n";
+        }
+    } else {
+        for (int i = 0; i < m_currentSamples.size(); ++i) {
+            const int x = (plotMode() == PlotMode::ScalarHistory) ? i : (m_sliceOffset + i * m_sliceStride);
+            dout << x << " " << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
+        }
     }
     df.close();
-
     QFile sf(scriptPath);
     if (!sf.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
-    QTextStream sout(&sf);
-    sout << "set grid\n";
-    if (isLogScale()) sout << "set logscale y\n";
-    sout << "set title 'GridLock Array Plot: " << expression() << "'\n";
-    sout << "plot '" << dataPath << "' using 1:2 with linespoints title 'Rank " << m_focusedRank << "'\n";
+    QTextStream(&sf) << buildGnuplotScript(dataPath);
     sf.close();
-
-    const QString gnuplotBin = QStandardPaths::findExecutable(QStringLiteral("gnuplot"));
-    if (!gnuplotBin.isEmpty()) {
-        QProcess::startDetached(gnuplotBin, {QStringLiteral("-persist"), scriptPath});
-    }
+    if (const QString bin = QStandardPaths::findExecutable(QStringLiteral("gnuplot")); !bin.isEmpty())
+        QProcess::startDetached(bin, {QStringLiteral("-persist"), scriptPath});
     return true;
 }
 
-void ArrayPlotDialog::setHoverSummaryText(const QString& text) {
-    if (m_hoverLabel) m_hoverLabel->setText(text);
-}
+void ArrayPlotDialog::setHoverSummaryText(const QString& text) { if (m_hoverLabel) m_hoverLabel->setText(text); }
 
 void ArrayPlotDialog::reloadStyle() {
     const auto& tm = gridlock::core::ThemeManager::instance();
@@ -830,8 +911,10 @@ void ArrayPlotDialog::reloadStyle() {
 
     setStyleSheet(QStringLiteral(
         "QDialog#ArrayPlotDialog { background: %1; color: %2; }"
-        "QLineEdit, QComboBox, QSpinBox { background: %3; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
+        "QLineEdit, QComboBox, QSpinBox, QTableView { background: %3; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
+        "QHeaderView::section { background: %5; color: %2; border: 1px solid %4; padding: 2px 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }"
         "QPushButton { background: %5; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 8px; font-size: 11px; }"
+        "QPushButton:checked { border: 1px solid %6; color: %6; font-weight: bold; }"
         "QPushButton:hover { border: 1px solid %6; }"
         "QPushButton:disabled { color: %7; }"
         "QLabel#arrayPlotStatsLabel { color: %6; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; }"

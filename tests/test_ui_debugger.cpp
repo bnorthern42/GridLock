@@ -562,20 +562,11 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     using gridlock::ui::CommandPaletteDialog; using gridlock::ui::PaletteItem;
     // 1. Subsequence fuzzy scoring: boundary matches outrank loose matches and non-matches return -1.
     QVector<int> dtpIdx, drIdx, badIdx;
-    const int dtpExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Debug: Attach to Process..."), &dtpIdx);
-    const int dtpLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Edit: Copy desktop path"));
-    const int drExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("tutorial/deadlock_ring.cpp"), &drIdx);
-    const int drLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("src/core/hpc/DeadlockAnalyzer.cpp"));
-    QVERIFY(dtpExact > 0 && dtpExact > dtpLoose && dtpIdx.size() == 3 && drExact > 0 && drExact > drLoose && drIdx.size() == 6);
-    QVERIFY(CommandPaletteDialog::fuzzyScore(QStringLiteral("zqx_nomatch"), QStringLiteral("tutorial/deadlock_ring.cpp"), &badIdx) == -1 && badIdx.isEmpty());
-    // 2. Prefix filtering (>, @, #, theme:) and keyboard navigation (Key_Down, Key_Up, Key_Escape, Key_Return).
+    const int dtpExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Debug: Attach to Process..."), &dtpIdx), dtpLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Edit: Copy desktop path"));
+    const int drExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("tutorial/deadlock_ring.cpp"), &drIdx), drLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("src/core/hpc/DeadlockAnalyzer.cpp"));
+    QVERIFY(dtpExact > 0 && dtpExact > dtpLoose && dtpIdx.size() == 3 && drExact > 0 && drExact > drLoose && drIdx.size() == 6 && CommandPaletteDialog::fuzzyScore(QStringLiteral("zqx_nomatch"), QStringLiteral("tutorial/deadlock_ring.cpp"), &badIdx) == -1 && badIdx.isEmpty());
     int firedId = -1; CommandPaletteDialog palette;
-    palette.setItems({{PaletteItem::Category::Action, QStringLiteral("Debug: Attach to Process..."), QStringLiteral("Menu -> File"), QStringLiteral("Ctrl+Alt+P"), [&]() { firedId = 1; }},
-                      {PaletteItem::Category::Action, QStringLiteral("Tools: Build Target"), QStringLiteral("Menu -> Tools"), QStringLiteral("Ctrl+B"), [&]() { firedId = 2; }},
-                      {PaletteItem::Category::File, QStringLiteral("tutorial/deadlock_ring.cpp"), QStringLiteral("tutorial"), QStringLiteral("C/C++"), [&]() { firedId = 3; }},
-                      {PaletteItem::Category::Symbol, QStringLiteral("DeeplyNested"), QStringLiteral("inspection_demo.cpp:6"), QStringLiteral("Struct"), [&]() { firedId = 4; }},
-                      {PaletteItem::Category::Rank, QStringLiteral("Rank 2"), QStringLiteral("Focus MPI Rank 2 (PAUSED)"), QStringLiteral("PAUSED"), [&]() { firedId = 5; }},
-                      {PaletteItem::Category::Theme, QStringLiteral("Theme: Solarized Dark"), QStringLiteral("Switch palette"), QStringLiteral("Dark"), [&]() { firedId = 6; }}});
+    palette.setItems({{PaletteItem::Category::Action, QStringLiteral("Debug: Attach to Process..."), QStringLiteral("Menu -> File"), QStringLiteral("Ctrl+Alt+P"), [&]() { firedId = 1; }}, {PaletteItem::Category::Action, QStringLiteral("Tools: Build Target"), QStringLiteral("Menu -> Tools"), QStringLiteral("Ctrl+B"), [&]() { firedId = 2; }}, {PaletteItem::Category::File, QStringLiteral("tutorial/deadlock_ring.cpp"), QStringLiteral("tutorial"), QStringLiteral("C/C++"), [&]() { firedId = 3; }}, {PaletteItem::Category::Symbol, QStringLiteral("DeeplyNested"), QStringLiteral("inspection_demo.cpp:6"), QStringLiteral("Struct"), [&]() { firedId = 4; }}, {PaletteItem::Category::Rank, QStringLiteral("Rank 2"), QStringLiteral("Focus MPI Rank 2 (PAUSED)"), QStringLiteral("PAUSED"), [&]() { firedId = 5; }}, {PaletteItem::Category::Theme, QStringLiteral("Theme: Solarized Dark"), QStringLiteral("Switch palette"), QStringLiteral("Dark"), [&]() { firedId = 6; }}});
     palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.resultCount() == 2 && palette.resultItemAt(0).category == PaletteItem::Category::Action);
     palette.setFilterText(QStringLiteral("@")); QVERIFY(palette.resultCount() == 1 && palette.resultItemAt(0).category == PaletteItem::Category::Symbol);
     palette.setFilterText(QStringLiteral("#")); QVERIFY(palette.resultCount() == 1 && palette.resultItemAt(0).category == PaletteItem::Category::Rank);
@@ -583,7 +574,6 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 1); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 0);
     QTest::keyClick(palette.inputEdit(), Qt::Key_Up); QCOMPARE(palette.selectedIndex(), 1); QTest::keyClick(palette.inputEdit(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
     palette.openWithPrefix(QStringLiteral(">")); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QTest::keyClick(palette.inputEdit(), Qt::Key_Return); QVERIFY(!palette.isVisible() && firedId == 2);
-    // 3. MainWindow Ctrl+Shift+P (#actionCommandPalette), Ctrl+P (#actionQuickOpen), and Ctrl+Alt+P (#actionAttachProcess) integration.
     static QStringList s_capturedWarnings; s_capturedWarnings.clear();
     const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) { if (type == QtWarningMsg) s_capturedWarnings.append(msg); });
     struct MsgGuard { QtMessageHandler prev; ~MsgGuard() { qInstallMessageHandler(prev); } } msgGuard{prevHandler};
@@ -706,43 +696,54 @@ static void testPointerGraphControlsAndExport() {
 /** @brief Verifies ArrayPlotDialog v0.8.8 multi-rank 1D overlay, start:end:stride slicing, Log10 scale, drag-box zoom, and Scalar History mode. */
 static void testArrayPlotterScientificExtensions() {
     using gridlock::ui::ArrayPlotDialog; using gridlock::ui::parseArraySliceExpression; using gridlock::ui::parseRankSubset;
-    // 1. Slice parser (`arr[2:10:2]`, `u[16:128:2]`, `field[0..63]`, plain `&vec[0]`) & strided decoding.
     const auto s1 = parseArraySliceExpression(QStringLiteral("arr[2:10:2]")), s2 = parseArraySliceExpression(QStringLiteral("u[16:128:2]")), s3 = parseArraySliceExpression(QStringLiteral("pressure_field[0..63]")), s4 = parseArraySliceExpression(QStringLiteral("&vec[0]"));
     QVERIFY(s1.hasSlice && s1.baseExpression == QStringLiteral("arr") && s1.offset == 2 && s1.count == 4 && s1.stride == 2 && s2.hasSlice && s2.offset == 16 && s2.count == 56 && s2.stride == 2 && s3.hasSlice && s3.offset == 0 && s3.count == 64 && s3.stride == 1 && !s4.hasSlice && s4.baseExpression == QStringLiteral("&vec[0]"));
     QCOMPARE(parseRankSubset(QStringLiteral("0..3"), 8), (QVector<int>{0, 1, 2, 3})); QCOMPARE(parseRankSubset(QStringLiteral("0, 2, 3"), 4), (QVector<int>{0, 2, 3}));
-    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(4);
-    ArrayPlotDialog dlg(&coord); dlg.resize(980, 600); dlg.show(); QApplication::processEvents();
+    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(4); ArrayPlotDialog dlg(&coord); dlg.resize(980, 600); dlg.show(); QApplication::processEvents();
     auto* logChk = dlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotLogScaleCheck")); auto* overlayChk = dlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotOverlayAllRanksCheck")); auto* resetZoomBtn = dlg.findChild<QPushButton*>(QStringLiteral("arrayPlotResetZoomBtn")); auto* clearHistBtn = dlg.findChild<QPushButton*>(QStringLiteral("arrayPlotClearHistoryBtn"));
     QVERIFY(logChk && overlayChk && resetZoomBtn && clearHistBtn && dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotOffsetSpin")) && dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotStrideSpin")) && dlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotRankSubsetEdit")));
-    QVector<double> buf12(12); for (int i = 0; i < 12; ++i) buf12[i] = static_cast<double>(i);
-    dlg.setExpression(QStringLiteral("arr[2:10:2]"));
+    QVector<double> buf12(12); for (int i = 0; i < 12; ++i) buf12[i] = static_cast<double>(i); dlg.setExpression(QStringLiteral("arr[2:10:2]"));
     QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(buf12.constData()), buf12.size() * sizeof(double)), ArrayPlotDialog::ElementType::Float64) && dlg.currentSamples() == (QVector<double>{2.0, 4.0, 6.0, 8.0}) && dlg.sliceOffset() == 2 && dlg.sliceStride() == 2);
-    // 2. Multi-rank 1D overlay toggle emits multiRankPlotRequested, populates ranks 0..3, and clears on uncheck.
     QSignalSpy multiSpy(&dlg, &ArrayPlotDialog::multiRankPlotRequested); dlg.setExpression(QStringLiteral("halo[0:4]")); dlg.setRankSubsetSpec(QStringLiteral("0..3"));
     overlayChk->setChecked(true); QApplication::processEvents(); QVERIFY(multiSpy.count() >= 1 && multiSpy.first().at(0).toString() == QStringLiteral("halo") && multiSpy.first().at(1).toInt() == 32);
     for (int r = 0; r < 4; ++r) { const double vals[4] = {r * 10.0 + 1.0, r * 10.0 + 2.0, r * 10.0 + 3.0, r * 10.0 + 4.0}; emit coord.memoryRead(r, QStringLiteral("&(halo)[0]"), QByteArray(reinterpret_cast<const char*>(vals), sizeof(vals))); }
-    QVERIFY(dlg.rankOverlays().size() == 4 && dlg.rankOverlays().value(3).first() == 31.0 && !dlg.grab().isNull());
-    overlayChk->setChecked(false); QVERIFY(dlg.rankOverlays().isEmpty());
-    // 3. Log10 scale with positive + zero/negative values (1D + 2D) renders cleanly without NaN crashes.
-    dlg.setSliceOffset(0); dlg.setSliceStride(1); dlg.setSamples({1e-4, 1e-2, 1.0, 0.0, -5.0}, 1, 5);
-    logChk->setChecked(true); QApplication::processEvents(); QVERIFY(dlg.isLogScale() && !dlg.grab().isNull());
+    QVERIFY(dlg.rankOverlays().size() == 4 && dlg.rankOverlays().value(3).first() == 31.0 && !dlg.grab().isNull()); overlayChk->setChecked(false); QVERIFY(dlg.rankOverlays().isEmpty());
+    dlg.setSliceOffset(0); dlg.setSliceStride(1); dlg.setSamples({1e-4, 1e-2, 1.0, 0.0, -5.0}, 1, 5); logChk->setChecked(true); QApplication::processEvents(); QVERIFY(dlg.isLogScale() && !dlg.grab().isNull());
     dlg.setSamples({1e-3, 1.0, 0.0, -2.0}, 2, 2); QApplication::processEvents(); QVERIFY(!dlg.grab().isNull()); logChk->setChecked(false);
-    // 4. Interactive drag-box zoom narrows visibleXRange() and Reset Zoom + double-click restore full bounds.
-    QVector<double> wave(64); for (int i = 0; i < 64; ++i) wave[i] = std::sin(i * 0.15) + 2.0;
-    dlg.setPlotMode(ArrayPlotDialog::PlotMode::Line1D); dlg.setSamples(wave, 1, 64); QApplication::processEvents();
+    QVector<double> wave(64); for (int i = 0; i < 64; ++i) wave[i] = std::sin(i * 0.15) + 2.0; dlg.setPlotMode(ArrayPlotDialog::PlotMode::Line1D); dlg.setSamples(wave, 1, 64); QApplication::processEvents();
     auto* canvas = dlg.canvas(); QVERIFY(canvas != nullptr && !dlg.isZoomed() && !resetZoomBtn->isEnabled());
     const QRect pr = canvas->plotAreaRect(); const QPoint p0(pr.left() + pr.width() / 4, pr.top() + pr.height() / 4), p1(pr.left() + (pr.width() * 3) / 4, pr.top() + (pr.height() * 3) / 4);
     QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, p0); QTest::mouseMove(canvas, p1); QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, p1); QApplication::processEvents();
-    QVERIFY(dlg.isZoomed() && resetZoomBtn->isEnabled() && dlg.visibleXRange().first > 5 && dlg.visibleXRange().second < 58);
-    resetZoomBtn->click(); QVERIFY(!dlg.isZoomed() && !resetZoomBtn->isEnabled() && dlg.visibleXRange() == (QPair<int, int>{0, 63}));
-    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, p0); QTest::mouseMove(canvas, p1); QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, p1); QVERIFY(dlg.isZoomed());
-    QTest::mouseDClick(canvas, Qt::LeftButton, Qt::NoModifier, pr.center()); QVERIFY(!dlg.isZoomed());
-    // 5. Scalar History mode accumulates 4 stop evaluations and Clear History resets it.
+    QVERIFY(dlg.isZoomed() && resetZoomBtn->isEnabled() && dlg.visibleXRange().first > 5 && dlg.visibleXRange().second < 58); resetZoomBtn->click(); QVERIFY(!dlg.isZoomed() && !resetZoomBtn->isEnabled() && dlg.visibleXRange() == (QPair<int, int>{0, 63}));
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, p0); QTest::mouseMove(canvas, p1); QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, p1); QVERIFY(dlg.isZoomed()); QTest::mouseDClick(canvas, Qt::LeftButton, Qt::NoModifier, pr.center()); QVERIFY(!dlg.isZoomed());
     dlg.setPlotMode(ArrayPlotDialog::PlotMode::ScalarHistory); dlg.setExpression(QStringLiteral("residual"));
-    const QStringList resVals = {QStringLiteral("$1 = 1.0"), QStringLiteral("$2 = 0.1"), QStringLiteral("$3 = 0.01"), QStringLiteral("$4 = 0.001")};
-    for (const QString& rv : resVals) { dlg.onTargetStopped(0); emit coord.expressionEvaluated(0, QStringLiteral("residual"), rv); }
+    for (const QString& rv : {QStringLiteral("$1 = 1.0"), QStringLiteral("$2 = 0.1"), QStringLiteral("$3 = 0.01"), QStringLiteral("$4 = 0.001")}) { dlg.onTargetStopped(0); emit coord.expressionEvaluated(0, QStringLiteral("residual"), rv); }
     QVERIFY(dlg.scalarHistory().size() == 4 && dlg.currentSamples().size() == 4 && std::abs(dlg.scalarHistory().constLast() - 0.001) < 1e-12 && !dlg.grab().isNull());
     clearHistBtn->click(); QVERIFY(dlg.scalarHistory().isEmpty() && dlg.currentSamples().isEmpty()); dlg.close();
+}
+/** @brief Verifies Complex64/Complex128 decoding, 2D splot/pm3d gnuplot script generation, and virtualized C/Fortran 2D/3D TensorSliceTableModel. */
+static void testComplexAndTensorTableExtensions() {
+    using gridlock::ui::ArrayPlotDialog; using gridlock::ui::TensorSliceTableModel;
+    ArrayPlotDialog dlg; const float c64[2] = {3.0f, 4.0f}; const double c128[4] = {-1.0, 0.0, 1.0, std::numeric_limits<double>::quiet_NaN()};
+    QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(c64), sizeof(c64)), ArrayPlotDialog::ElementType::Complex64, 1, 1) && std::abs(dlg.currentSamples().first() - 5.0) < 1e-6);
+    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Phase); QVERIFY(std::abs(dlg.currentSamples().first() - std::atan2(4.0, 3.0)) < 1e-6);
+    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Real); QCOMPARE(dlg.currentSamples().first(), 3.0); dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Imaginary); QCOMPARE(dlg.currentSamples().first(), 4.0);
+    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Magnitude);
+    QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(c128), sizeof(c128)), ArrayPlotDialog::ElementType::Complex128, 1, 2) && std::abs(dlg.currentSamples().first() - 1.0) < 1e-12 && dlg.nanCount() == 1);
+    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Phase); QVERIFY(std::abs(dlg.currentSamples().first() - std::acos(-1.0)) < 1e-12 && dlg.nanCount() == 1);
+    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Real); QCOMPARE(dlg.currentSamples().first(), -1.0); dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Imaginary); QCOMPARE(dlg.currentSamples().first(), 0.0);
+    QVector<double> m32(32, 1.5); dlg.setSamples(m32, 4, 8); const QString gp2d = dlg.buildGnuplotScript(QStringLiteral("/tmp/m.dat"));
+    QVERIFY(gp2d.contains(QStringLiteral("splot")) && gp2d.contains(QStringLiteral("with pm3d")) && gp2d.contains(QStringLiteral("matrix")));
+    dlg.setSamples({1.0, 2.0, 3.0, 4.0}, 1, 4); const QString gp1d = dlg.buildGnuplotScript(QStringLiteral("/tmp/l.dat")); QVERIFY(gp1d.contains(QStringLiteral("plot '")) && !gp1d.contains(QStringLiteral("splot")));
+    QVector<double> t12(12); for (int i = 0; i < 12; ++i) t12[i] = static_cast<double>(i);
+    dlg.setTensorDimensions(3, 2, 2); dlg.setSamples(t12, 2, 3); dlg.setTensorTableActive(true); auto* tm = dlg.tensorTableModel(); QVERIFY(dlg.isTensorTableActive() && tm && tm->rowCount() == 2 && tm->columnCount() == 3);
+    dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor); dlg.setZSlice(0); QVERIFY(tm->cellValue(0, 2) == 2.0 && tm->cellValue(1, 0) == 3.0 && tm->data(tm->index(1, 0), Qt::ToolTipRole).toString().contains(QStringLiteral("[3]")));
+    dlg.setZSlice(1); QVERIFY(tm->cellValue(0, 0) == 6.0 && tm->cellValue(1, 2) == 11.0);
+    dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::FortranColMajor); dlg.setZSlice(0); QVERIFY(tm->cellValue(1, 0) == 1.0 && tm->cellValue(0, 1) == 2.0 && tm->cellValue(1, 2) == 5.0);
+    dlg.setZSlice(1); QVERIFY(tm->cellValue(0, 1) == 8.0 && tm->cellValue(1, 2) == 11.0);
+    QVector<double> big(120000); for (int i = 0; i < big.size(); ++i) big[i] = static_cast<double>(i);
+    dlg.setTensorDimensions(400, 300, 1); dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor); dlg.setSamples(big, 300, 400);
+    QVERIFY(tm->rowCount() == 300 && tm->columnCount() == 400 && tm->cellValue(299, 399) == 119999.0);
 }
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
@@ -761,7 +762,7 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
     pgDlg.onTargetStopped(0); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
-    testPointerGraphDagLayoutAndAliasSplitting(); testPointerGraphControlsAndExport(); testArrayPlotterScientificExtensions();
+    testPointerGraphDagLayoutAndAliasSplitting(); testPointerGraphControlsAndExport(); testArrayPlotterScientificExtensions(); testComplexAndTensorTableExtensions();
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
     const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
     QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();

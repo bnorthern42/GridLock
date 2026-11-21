@@ -1,13 +1,7 @@
 /**
  * @file ArrayPlotDialog.hpp
- * @brief Live auto-refreshing 1D/2D scientific array, multi-rank overlay, and scalar history plotter.
- *
- * Implements `ArrayPlotDialog` as an independent floating `Qt::Window` tool supporting
- * 1D Line, 1D Bar/Stem, 2D Heatmap, and Scalar Time-Series History visualization of raw
- * C/C++ arrays, pointers, strided slices (`start:end:stride`), and scalar convergence
- * expressions across MPI ranks. Automatically re-evaluates on debugger stop events,
- * tracks previous-stop deltas, flags IEEE-754 NaN/+/-Inf anomalies, supports Log10 scale
- * and drag-box zoom, and exports CSV, PNG, or gnuplot scripts.
+ * @brief Live auto-refreshing 1D/2D scientific array, complex field, multi-rank overlay,
+ *        scalar history, and virtualized 2D/3D C/Fortran tensor plotter.
  */
 
 #pragma once
@@ -25,10 +19,13 @@
 #include <QPushButton>
 #include <QSet>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QString>
+#include <QTableView>
 #include <QVector>
 
 #include "ArrayPlotCanvas.hpp"
+#include "TensorSliceTableModel.hpp"
 
 class IBackendCoordinator;
 
@@ -36,7 +33,7 @@ namespace gridlock::ui {
 
 /**
  * @class ArrayPlotDialog
- * @brief Floating non-modal 1D/2D array, multi-rank overlay, and scalar history visualizer.
+ * @brief Floating non-modal 1D/2D/3D array, complex spectrum, multi-rank overlay, and tensor visualizer.
  */
 class ArrayPlotDialog : public QDialog {
     Q_OBJECT
@@ -44,14 +41,27 @@ class ArrayPlotDialog : public QDialog {
 public:
     /**
      * @enum ElementType
-     * @brief Numeric data type used when decoding contiguous raw memory byte buffers.
+     * @brief Numeric or complex data type used when decoding contiguous raw memory byte buffers.
      */
     enum class ElementType {
-        Float64 = 0,  ///< 64-bit IEEE-754 double (`double`).
-        Float32 = 1,  ///< 32-bit IEEE-754 float (`float`).
-        Int32   = 2,  ///< 32-bit signed integer (`int32_t`).
-        Int64   = 3,  ///< 64-bit signed integer (`int64_t`).
-        UInt8   = 4   ///< 8-bit unsigned byte (`uint8_t`).
+        Float64    = 0,  ///< 64-bit IEEE-754 double (`double`).
+        Float32    = 1,  ///< 32-bit IEEE-754 float (`float`).
+        Int32      = 2,  ///< 32-bit signed integer (`int32_t`).
+        Int64      = 3,  ///< 64-bit signed integer (`int64_t`).
+        UInt8      = 4,  ///< 8-bit unsigned byte (`uint8_t`).
+        Complex64  = 5,  ///< 64-bit interleaved complex float (`std::complex<float>`: `float re, im`).
+        Complex128 = 6   ///< 128-bit interleaved complex double (`std::complex<double>`: `double re, im`).
+    };
+
+    /**
+     * @enum ComplexComponent
+     * @brief Scalar projection extracted from `Complex64` / `Complex128` elements.
+     */
+    enum class ComplexComponent {
+        Magnitude = 0,  ///< Euclidean modulus `|z| = hypot(re, im)`.
+        Phase     = 1,  ///< Principal phase angle `arg(z) = atan2(im, re)` in radians.
+        Real      = 2,  ///< Real part `Re(z)`.
+        Imaginary = 3   ///< Imaginary part `Im(z)`.
     };
 
     /**
@@ -87,10 +97,7 @@ public:
     /** @brief Virtual destructor. */
     ~ArrayPlotDialog() override = default;
 
-    /**
-     * @brief Attaches a debugger backend coordinator and wires memory, scalar eval, and stop notifications.
-     * @param coordinator Active IBackendCoordinator instance.
-     */
+    /** @brief Attaches a debugger backend coordinator and wires memory, scalar eval, and stop notifications. */
     void setCoordinator(::IBackendCoordinator* coordinator);
 
     /** @brief Sets the C/C++ array, slice (`arr[start:end:stride]`), or scalar expression and syncs slice controls. */
@@ -106,8 +113,15 @@ public:
     void setElementTypeFromString(const QString& cType);
     /** @brief Returns the currently selected element data type. */
     ElementType elementType() const;
-    /** @brief Returns the byte size (1, 4, or 8) of one element of @p type. */
+    /** @brief Returns true when @p type is `Complex64` or `Complex128`. */
+    static bool isComplexType(ElementType type);
+    /** @brief Returns the byte size (1, 4, 8, or 16) of one element of @p type. */
     static int byteSizeOf(ElementType type);
+
+    /** @brief Sets the active complex component projection (`Magnitude`, `Phase`, `Real`, `Imaginary`). */
+    void setComplexComponent(ComplexComponent component);
+    /** @brief Returns the active complex component projection. */
+    ComplexComponent complexComponent() const;
 
     /** @brief Sets the visual rendering mode (1D Line, 1D Stem, 2D Heatmap, or Scalar History). */
     void setPlotMode(PlotMode mode);
@@ -119,12 +133,35 @@ public:
     /** @brief Returns the active 2D heatmap colormap. */
     Colormap colormap() const;
 
-    /** @brief Sets the 2D array shape (`rows` = NY, `cols` = NX) and triggers a canvas update. */
+    /** @brief Sets the 2D array shape (`rows` = NY, `cols` = NX) and triggers a canvas/table update. */
     void setDimensions(int rows, int cols);
+    /** @brief Sets full 3D tensor dimensions (`nx` = Cols, `ny` = Rows, `nz` = Depth). */
+    void setTensorDimensions(int nx, int ny, int nz = 1);
     /** @brief Returns the configured row count (`NY`, 1 for 1D plots). */
     int rows() const { return m_rows; }
     /** @brief Returns the configured column count (`NX`). */
     int cols() const { return m_cols; }
+    /** @brief Returns the configured 3D depth count (`NZ`, >= 1). */
+    int depth() const { return m_depth; }
+
+    /** @brief Sets the active 3D Z-slice index (`[0, depth() - 1]`). */
+    void setZSlice(int zSlice);
+    /** @brief Returns the active 3D Z-slice index. */
+    int zSlice() const;
+
+    /** @brief Sets C row-major or Fortran column-major tensor indexing order. */
+    void setMemoryOrder(TensorSliceTableModel::MemoryOrder order);
+    /** @brief Returns the active C row-major or Fortran column-major tensor indexing order. */
+    TensorSliceTableModel::MemoryOrder memoryOrder() const;
+
+    /** @brief Switches between the graphical Chart view (`false`) and virtualized Tensor Table (`true`). */
+    void setTensorTableActive(bool active);
+    /** @brief Returns true when the virtualized 2D/3D Tensor Table view is active. */
+    bool isTensorTableActive() const;
+    /** @brief Returns the underlying zero-copy `TensorSliceTableModel`. */
+    TensorSliceTableModel* tensorTableModel() const { return m_tensorModel; }
+    /** @brief Returns the virtualized `QTableView` displaying the active tensor Z-slice. */
+    QTableView* tensorTableView() const { return m_tensorTableView; }
 
     /** @brief Sets the starting element offset for strided slicing (`offset >= 0`). */
     void setSliceOffset(int offset);
@@ -166,10 +203,8 @@ public:
     void setRankSubsetSpec(const QString& spec);
     /** @brief Returns the current rank subset specification text. */
     QString rankSubsetSpec() const;
-
     /** @brief Resolves the selected overlay rank list given optional @p totalRanks (`< 0` queries coordinator). */
     QVector<int> selectedOverlayRanks(int totalRanks = -1) const;
-
     /** @brief Registers @p rankId as expecting an incoming `memoryRead` reply for multi-rank overlay rendering. */
     void expectOverlayReadForRank(int rankId);
 
@@ -178,53 +213,31 @@ public:
     /** @brief Enables or disables automatic re-evaluation on debugger `*stopped` events. */
     void setAutoRefreshEnabled(bool enabled);
 
-    /**
-     * @brief Decodes raw bytes with optional strided slicing (`offset + i * stride`) into double samples.
-     * @param rawBytes Contiguous raw bytes in host little-endian order.
-     * @param type Element data type used to decode @p rawBytes.
-     * @param rows Number of rows (`NY`, >= 1).
-     * @param cols Number of columns (`NX`; `<= 0` uses slice count or infers from buffer size).
-     * @param offset Starting element index (`< 0` uses dialog's configured `sliceOffset()`).
-     * @param stride Step between elements (`<= 0` uses dialog's configured `sliceStride()`).
-     * @return True if at least one sample was decoded.
-     */
+    /** @brief Decodes raw bytes (including `Complex64`/`Complex128` and strided slices) into double samples. */
     bool loadFromRawBytes(const QByteArray& rawBytes, ElementType type, int rows = 1, int cols = -1,
                           int offset = -1, int stride = -1);
-
-    /**
-     * @brief Convenience overload decoding @p rawBytes using a C++ type string ("double", "float", "int32_t", etc.).
-     */
+    /** @brief Convenience overload decoding @p rawBytes using a C++ type string. */
     bool loadFromRawBytes(const QByteArray& rawBytes, const QString& typeName, int rows = 1, int cols = -1,
                           int offset = -1, int stride = -1);
 
-    /**
-     * @brief Loads pre-decoded scalar values directly, preserving the previous stop's samples for mutation comparison.
-     */
+    /** @brief Loads pre-decoded scalar values directly, preserving the previous stop's samples for mutation comparison. */
     void setSamples(const QVector<double>& samples, int rows = 1, int cols = -1);
-
-    /**
-     * @brief Stores an additional rank's 1D sample curve for multi-rank halo/ghost-cell overlay comparison.
-     */
+    /** @brief Stores an additional rank's 1D sample curve for multi-rank halo/ghost-cell overlay comparison. */
     void setRankOverlaySamples(int rankId, const QVector<double>& samples);
-
     /** @brief Clears any secondary multi-rank overlay curves. */
     void clearRankOverlays();
 
-    /**
-     * @brief Appends a single scalar measurement for Scalar History mode across debugger stops.
-     * @param value Evaluated scalar value at the current stop.
-     * @param rankId Optional MPI rank ID (`< 0` targets focused rank).
-     */
+    /** @brief Appends a single scalar measurement for Scalar History mode across debugger stops. */
     void appendScalarSample(double value, int rankId = -1);
-
     /** @brief Returns the accumulated primary scalar convergence history samples. */
     const QVector<double>& scalarHistory() const { return m_scalarHistory; }
-
     /** @brief Clears all accumulated scalar time-series history samples (primary and per-rank). */
     void clearScalarHistory();
 
     /** @brief Returns the currently plotted sample values. */
     const QVector<double>& currentSamples() const { return m_currentSamples; }
+    /** @brief Returns the decoded `(Re, Im)` complex pairs when `Complex64`/`Complex128` is active. */
+    const QVector<QPair<double, double>>& complexPairs() const { return m_complexPairs; }
     /** @brief Returns the previous stop's sample values (used for ghost-curve and delta calculation). */
     const QVector<double>& previousSamples() const { return m_previousSamples; }
     /** @brief Returns per-rank 1D comparison curves. */
@@ -249,11 +262,14 @@ public:
     /** @brief Total number of stop-triggered auto-refreshes performed. */
     int stopRefreshCount() const { return m_stopRefreshCount; }
 
+    /** @brief Builds the gnuplot script (`splot ... matrix with pm3d` for 2D, `plot ... with linespoints` for 1D). */
+    QString buildGnuplotScript(const QString& dataPath) const;
+
     /** @brief Exports the active 1D, 2D, or Scalar History dataset to CSV. */
     bool exportCsv(const QString& filePath) const;
     /** @brief Renders the plot canvas to a PNG image file on disk. */
     bool savePng(const QString& filePath);
-    /** @brief Pipes the active dataset to an external `gnuplot -persist` process if installed. */
+    /** @brief Pipes the active 1D or 2D dataset to an external `gnuplot -persist` process if installed. */
     bool openInGnuplot() const;
 
     /** @brief Updates the hover readout bar at the bottom of the dialog. */
@@ -262,14 +278,7 @@ public:
     void reloadStyle();
 
 signals:
-    /**
-     * @brief Emitted when multi-rank 1D overlay refresh requests memory slices across selected MPI ranks.
-     * @param baseExpression Stripped C/C++ array or pointer expression.
-     * @param byteCount Contiguous byte span covering `offset + (count - 1) * stride + 1` elements.
-     * @param elementType Element data type for decoding.
-     * @param offset Starting element offset.
-     * @param stride Step between consecutive elements.
-     */
+    /** @brief Emitted when multi-rank 1D overlay refresh requests memory slices across selected MPI ranks. */
     void multiRankPlotRequested(const QString& baseExpression,
                                 int byteCount,
                                 gridlock::ui::ArrayPlotDialog::ElementType elementType,
@@ -279,25 +288,24 @@ signals:
 public slots:
     /** @brief Requests a fresh memory read (or scalar evaluation in ScalarHistory mode) from the backend. */
     void refreshPlot();
-
     /** @brief Invoked automatically when MPI rank @p rankId hits a breakpoint/step stop. */
     void onTargetStopped(int rankId);
 
 private:
-    /** @brief Decodes raw bytes with explicit @p offset, @p stride, and max @p maxCount into double samples. */
+    static double extractComplexComponent(double re, double im, ComplexComponent comp);
     static QVector<double> decodeStridedBytes(const QByteArray& rawBytes, ElementType type,
-                                              int maxCount, int offset, int stride);
-    /** @brief Parses a numeric scalar value from a debugger expression evaluation string (e.g., `"$1 = 1.2e-4"`). */
+                                              ComplexComponent comp, int maxCount, int offset, int stride,
+                                              QVector<QPair<double, double>>* outComplexPairs = nullptr);
     static bool parseScalarResult(const QString& resultText, double* outVal);
-    /** @brief Applies parsed slice parameters from `m_exprEdit` to offset/stride/cols spinboxes. */
     ArraySliceSpec syncSliceControlsFromExpression();
-    /** @brief Recomputes Min, Max, Mean, L2 Norm, NaN/Inf counts, and Changed Elements. */
+    void recomputeComplexProjection();
     void recomputeStats();
 
     ::IBackendCoordinator* m_coordinator = nullptr;
     int m_focusedRank = 0;
     int m_rows = 1;
     int m_cols = 64;
+    int m_depth = 1;
     int m_sliceOffset = 0;
     int m_sliceStride = 1;
     bool m_hasExplicitSliceCount = false;
@@ -309,6 +317,7 @@ private:
     QString m_pendingScalarExpr;
 
     QVector<double> m_currentSamples;
+    QVector<QPair<double, double>> m_complexPairs;
     QVector<double> m_previousSamples;
     QMap<int, QVector<double>> m_rankOverlays;
     QVector<double> m_scalarHistory;
@@ -324,15 +333,21 @@ private:
 
     QLineEdit* m_exprEdit = nullptr;
     QComboBox* m_typeCombo = nullptr;
+    QComboBox* m_componentCombo = nullptr;
     QComboBox* m_modeCombo = nullptr;
     QComboBox* m_colormapCombo = nullptr;
     QSpinBox* m_rowsSpin = nullptr;
     QSpinBox* m_colsSpin = nullptr;
+    QSpinBox* m_depthSpin = nullptr;
+    QSpinBox* m_zSliceSpin = nullptr;
+    QComboBox* m_memoryOrderCombo = nullptr;
     QSpinBox* m_offsetSpin = nullptr;
     QSpinBox* m_strideSpin = nullptr;
     QCheckBox* m_logScaleCheck = nullptr;
     QPushButton* m_resetZoomBtn = nullptr;
     QPushButton* m_clearHistoryBtn = nullptr;
+    QPushButton* m_chartViewBtn = nullptr;
+    QPushButton* m_tableViewBtn = nullptr;
     QComboBox* m_rankCombo = nullptr;
     QCheckBox* m_overlayRanksCheck = nullptr;
     QLineEdit* m_rankSubsetEdit = nullptr;
@@ -343,7 +358,10 @@ private:
     QPushButton* m_gnuplotBtn = nullptr;
     QPushButton* m_closeBtn = nullptr;
 
+    QStackedWidget* m_viewStack = nullptr;
     ArrayPlotCanvas* m_canvas = nullptr;
+    TensorSliceTableModel* m_tensorModel = nullptr;
+    QTableView* m_tensorTableView = nullptr;
     QLabel* m_statsLabel = nullptr;
     QLabel* m_hoverLabel = nullptr;
 };
