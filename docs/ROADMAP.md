@@ -33,27 +33,39 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 
 ---
 
-## `v0.8.8`: Deep Memory, Register, and Scientific Graph Inspection
+## `v0.8.8`: UX Polish, Progressive Disclosure & Workflow Ergonomics
+
+- [x] **Topological Pointer and Struct Graph Enhancements**:
+  - [x] Upgrade `PointerGraphDialog` from a fixed grid to a layered DAG layout that preserves manual node positions across steps and supports incremental multi-root pinning without clearing existing graphs.
+  - [x] Add mouse-wheel zoom, a corner minimap, per-node field suppression, horizontal/vertical orientation, format overrides (`/x`, `/d`, `/b`), dynamic alias splitting/merging on pointer reassignment, SVG/PNG export, and expression autocomplete.
+- [x] **Multi-Rank and Scientific Array Plotter Extensions**:
+  - [x] Connect multi-rank 1D overlay mode in `ArrayPlotDialog` for halo/ghost-cell comparison, and add `start:end:stride` slicing, Log10 scale, drag-box zoom/reset, and scalar time-series history mode.
+  - [x] Add complex-number (`Complex64` / `Complex128` real/imaginary/magnitude) decoding, 2D matrix `splot`/`pm3d` export, and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
+- [x] **Clean Menu Labels, Editable Keybindings Preferences, and `SourceCodeView` Struct/Pointer Graph Actions**:
+  - [x] Replace raw underscore identifiers in menu labels with human-readable titles, expose editable shortcut preferences in `PreferencesDialog`, and add right-click `SourceCodeView` actions to graph struct types and pointer expressions directly.
+- [ ] **Toolbar Consolidation and Progressive Disclosure**:
+  - [ ] Compact `< 1040px` toolbar with source-level `Step Over (F10)` / `Step Into (F11)` / `Step Out (Shift+F11)` controls, context-sensitive hiding when idle or single-rank, `Source`/`Debug`/`Binary`/`MPI` perspectives that preserve floating docks without force-redocking, and state-aware tooltips.
+- [ ] **Real `QSplitter` Split Editor and Inline `Ctrl+F` Editor Search**:
+  - [ ] Replace the overlay split-editor container in `EditorTabManager` with a horizontal `QSplitter` so both panes resize cleanly with visible scrollbars, and bind `Ctrl+F` to a compact inline search bar inside the active editor while reserving `Ctrl+G` for `#cutterSeekBar`.
+- [ ] **Unified Multi-Rank Scope (`All Ranks` vs. `Rank k`), `Pause All Ranks (F6)`, and Synchronized Master Rank Focus**:
+  - [ ] Provide a single execution-scope toggle (`All Ranks` vs. `Rank k`), an always-reachable `Pause All Ranks (F6)` interrupt control, and synchronized master rank focus across source, disassembly, call stack, variables, registers, and memory views.
+- [ ] **Fail-Loud Build/Launch Guardrails, Safe Byte/NOP Instruction Patching, and Confirmation/Undo Prompts**:
+  - [ ] Surface clear diagnostics when a build or launch pre-check fails, guard live byte/NOP patching with explicit confirmation and undo prompts, and prevent silent no-op execution failures.
+- [ ] **Symmetrical Cross-View Context Handoffs, Full-Value Tooltips, and Live Variable/Register Editing**:
+  - [ ] Standardize right-click handoffs across source, variables, registers, memory, and disassembly views, add full-value hover tooltips for truncated entries, and support inline variable and register value editing.
+
+---
+
+## `v0.8.9`: Deep Register/Memory Inspection, Session Snapshots, CLI Launch Flags, and Core Dump Analysis
 
 - [ ] **Dynamic All-Register Discovery, SIMD Vector Lanes, and Live Register/Memory Editing**:
   - [ ] Replace fixed x86 GPR-only register filtering with dynamic `-data-list-register-names` discovery across architectures (x86-64, AArch64, RISC-V).
   - [ ] Expandable FPU/SSE/AVX/NEON vector lanes (`XMM`/`YMM`/`ZMM`/NEON in `f32`, `f64`, `i32`, `i64`, `hex`) with per-lane step diff highlighting, `k0..k7` AVX-512 mask checkboxes, and decoded `RFLAGS` / `MXCSR` status bitfield badges (`IE`, `DE`, `ZE`, `OE`, `UE`, `PE`, `FTZ`, `DAZ`).
   - [ ] Inline register editing (`-gdb-set`), live inferior memory writes (`-data-write-memory-bytes`), typed `x/FMT` memory examination (`b`/`h`/`w`/`g` unit sizes and `x`/`d`/`u`/`f`/`s` formats), and `"Set Watchpoint at Address"` in `MemView`.
-- [x] **Topological Pointer and Struct Graph Enhancements**:
-  - [x] Upgrade `PointerGraphDialog` from a fixed grid to a layered DAG layout that preserves manual node positions across steps and supports incremental multi-root pinning without clearing existing graphs.
-  - [x] Add mouse-wheel zoom, a corner minimap, per-node field suppression, horizontal/vertical orientation, format overrides (`/x`, `/d`, `/b`), dynamic alias splitting/merging on pointer reassignment, and SVG/PNG export.
-- [x] **Multi-Rank and Scientific Array Plotter Extensions**:
-  - [x] Connect multi-rank 1D overlay mode in `ArrayPlotDialog` for halo/ghost-cell comparison, and add `start:end:stride` slicing, logarithmic Y/color scale, drag-box zoom/reset, and scalar time-series history mode.
-  - [x] Add complex-number (`Complex64` / `Complex128` real/imaginary/magnitude) decoding, 2D matrix `splot`/`pm3d` export, and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
 - [ ] **Cross-Rank IEEE-754 Anomaly and Poison-Pattern Scanner (`NaN` / `Inf` / Subnormals)**:
   - [ ] Concurrent `process_vm_readv` sweep across stopped ranks with per-rank distribution stats (`Min | Mean | Max | L2 Norm`), exact index reporting for quiet/signaling `NaN`, `+-Inf`, IEEE-754 subnormals, and allocator poison patterns (`0xdeadbeef`, `0xcdcdcdcd`), plus a 1-click `$mxcsr` hardware FP trap toggle (`FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW`).
 - [ ] **Watch Expression Format Specifiers and Array-of-Structs (AoS) Columnar Views**:
   - [ ] Inline comma suffixes (`ptr, [N]`, `,x`, `,b`) and AoS tabular projections (`particles, [1000], cols(pos.x, pos.y, energy)`) strided via `process_vm_readv` and DWARF / `ptype /o` member offsets.
-
----
-
-## `v0.8.9`: Session Snapshots, CLI Launch Flags, and Core Dump Analysis
-
 - [ ] **Rich Named Session Snapshots and CLI Automation Flags**:
   - [ ] Persist full breakpoint metadata (conditions, ignore counts, rank filters, logpoints), pinned graph roots, and target environment variables across `.gridlock/` sessions.
   - [ ] Add `--ranks`/`-np`, `--attach <pid>`, `--remote <host:port>`, `--core <file>`, `--session <name>`, and `--args` flags to `CliParser`.
