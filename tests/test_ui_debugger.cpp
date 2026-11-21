@@ -9,11 +9,7 @@
 
 #include "test_ui.hpp"
 
-#include <QApplication>
-#include <QComboBox>
-#include <QContextMenuEvent>
 #include <QDir>
-#include <QDockWidget>
 #include <QtWidgets>
 #include <QtTest/QtTest>
 #include <cmath>
@@ -115,39 +111,23 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     {
         gridlock::ui::DisassemblyView cfgPane; cfgPane.resize(600, 500); cfgPane.setGraphMode(true);
         cfgPane.show(); QVERIFY(QTest::qWaitForWindowExposed(&cfgPane)); QApplication::processEvents();
-        // Build a 320+ char demangled STL/HPC signature plus glued ")>call" boundary input.
         const QString longTmpl = QStringLiteral("gridlock::Solver::Solve(std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > const&, std::map<int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > const&, double)");
         QVERIFY(longTmpl.size() >= 320);
         const QString longCppAsm = QStringLiteral("0x003ce970 <%1+0x0>: push rbp ; line 340\n0x003ce971 <%1+0x1>: mov rbp, rsp ; line 340\n0x003ce975 <std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)>call 0x003d2d3c ; line 345\n0x003ce97a <%1+0xa>: test al, al ; line 346\n0x003ce97c <%1+0xc>: je 0x003ce990 ; line 346\n0x003ce97e <%1+0xe>: call 0x003d2e00 <%1> ; line 348\n0x003ce983 <%1+0x13>: jmp 0x003ce998 ; line 349\n0x003ce990 <%1+0x20>: nop ; line 352\n0x003ce998 <%1+0x28>: pop rbp ; line 355\n0x003ce999 <%1+0x29>: ret ; line 356").arg(longTmpl);
         cfgPane.updateDisassembly(longCppAsm); cfgPane.seekToAddress(0x003ce975ULL); QApplication::processEvents();
-        auto* cfgView = cfgPane.findChild<QGraphicsView*>(QStringLiteral("cutterCfgGraphView"));
-        QVERIFY(cfgView != nullptr && cfgView->scene() != nullptr && cfgPane.basicBlockCount() >= 3);
-        // 1. Bounded basic-block widths (<= 960px) and clean mnemonic separation (no ")>call").
+        auto* cfgView = cfgPane.findChild<QGraphicsView*>(QStringLiteral("cutterCfgGraphView")); QVERIFY(cfgView && cfgView->scene() && cfgPane.basicBlockCount() >= 3);
         QRectF targetRect, leftmostRect;
         for (QGraphicsItem* item : cfgView->scene()->items()) {
-            if (qAbs(item->zValue() - 1.0) < 0.05) {
-                const QRectF br = item->sceneBoundingRect();
-                QVERIFY2(br.width() <= 960.0, qPrintable(QStringLiteral("CFG block width %1 > 960").arg(br.width())));
-                if (item->data(Qt::UserRole).toULongLong() == 0x003ce970ULL) targetRect = br;
-                if (leftmostRect.isNull() || br.left() < leftmostRect.left()) leftmostRect = br;
-            }
+            if (qAbs(item->zValue() - 1.0) < 0.05) { const QRectF br = item->sceneBoundingRect(); QVERIFY2(br.width() <= 960.0, qPrintable(QStringLiteral("CFG block width %1 > 960").arg(br.width()))); if (item->data(Qt::UserRole).toULongLong() == 0x003ce970ULL) targetRect = br; if (leftmostRect.isNull() || br.left() < leftmostRect.left()) leftmostRect = br; }
             if (auto* txt = dynamic_cast<QGraphicsSimpleTextItem*>(item)) QVERIFY2(!txt->text().contains(QStringLiteral(")>call")), qPrintable(txt->text()));
         }
-        QVERIFY(!targetRect.isNull() && !leftmostRect.isNull());
-        // 2. Left edge visible on load/focus (x >= 0) and full left scroll range past leftmost block.
-        QVERIFY2(cfgView->mapFromScene(targetRect.topLeft()).x() >= 0, qPrintable(QStringLiteral("Target left clipped at x=%1").arg(cfgView->mapFromScene(targetRect.topLeft()).x())));
-        auto* hbar = cfgView->horizontalScrollBar(); QVERIFY(hbar != nullptr && hbar->maximum() > hbar->minimum());
-        hbar->setValue(hbar->minimum()); QApplication::processEvents();
-        QVERIFY2(cfgView->mapFromScene(leftmostRect.topLeft()).x() >= 0, qPrintable(QStringLiteral("Leftmost block clipped at min scroll x=%1").arg(cfgView->mapFromScene(leftmostRect.topLeft()).x())));
-        // Test Right arrow scroll followed by Home key snap-back to active block left edge.
-        QTest::keyClick(cfgView, Qt::Key_Right); QTest::keyClick(cfgView, Qt::Key_Home); QApplication::processEvents();
-        QVERIFY(cfgView->mapFromScene(targetRect.topLeft()).x() >= 0);
-        // 3. Idle cursor is Qt::ArrowCursor and pan press/release restores Qt::ArrowCursor.
+        QVERIFY(!targetRect.isNull() && !leftmostRect.isNull() && cfgView->mapFromScene(targetRect.topLeft()).x() >= 0);
+        auto* hbar = cfgView->horizontalScrollBar(); QVERIFY(hbar && hbar->maximum() > hbar->minimum()); hbar->setValue(hbar->minimum()); QApplication::processEvents();
+        QVERIFY(cfgView->mapFromScene(leftmostRect.topLeft()).x() >= 0);
+        QTest::keyClick(cfgView, Qt::Key_Right); QTest::keyClick(cfgView, Qt::Key_Home); QApplication::processEvents(); QVERIFY(cfgView->mapFromScene(targetRect.topLeft()).x() >= 0);
         QCOMPARE(cfgView->cursor().shape(), Qt::ArrowCursor); QCOMPARE(cfgView->viewport()->cursor().shape(), Qt::ArrowCursor);
         const QPoint midPt = cfgView->viewport()->rect().center();
-        QTest::mousePress(cfgView->viewport(), Qt::MiddleButton, Qt::NoModifier, midPt);
-        QTest::mouseMove(cfgView->viewport(), midPt + QPoint(25, 10));
-        QTest::mouseRelease(cfgView->viewport(), Qt::MiddleButton, Qt::NoModifier, midPt + QPoint(25, 10));
+        QTest::mousePress(cfgView->viewport(), Qt::MiddleButton, Qt::NoModifier, midPt); QTest::mouseMove(cfgView->viewport(), midPt + QPoint(25, 10)); QTest::mouseRelease(cfgView->viewport(), Qt::MiddleButton, Qt::NoModifier, midPt + QPoint(25, 10));
         QApplication::processEvents(); QCOMPARE(cfgView->cursor().shape(), Qt::ArrowCursor); QCOMPARE(cfgView->viewport()->cursor().shape(), Qt::ArrowCursor);
     }
 }
@@ -273,17 +253,14 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     cfg.setDebuggerEngine(QStringLiteral("gdb")); cfg.setGlobalMpiArgs(QStringLiteral("--oversubscribe"));
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.show(); QApplication::processEvents();
     // 1. Dynamic coordinator switching: ConfigManager::setDebuggerEngine switches MainWindow's live backend.
-    QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
+    QVERIFY(mainWindow.coordinator() && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
     cfg.setDebuggerEngine(QStringLiteral("lldb-dap")); QApplication::processEvents();
-    QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("DapCoordinator")));
+    QVERIFY(mainWindow.coordinator() && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("DapCoordinator")));
     cfg.setDebuggerEngine(QStringLiteral("gdb")); QApplication::processEvents();
-    QVERIFY(mainWindow.coordinator() != nullptr && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
-
+    QVERIFY(mainWindow.coordinator() && QString::fromLatin1(mainWindow.coordinator()->metaObject()->className()).contains(QStringLiteral("GdbRankCoordinator")));
     // 2. Verify File -> Attach to Process... (Ctrl+Alt+P) and AttachProcessDialog /proc + MPI job grouping.
-    auto* attachAct = mainWindow.findChild<QAction*>(QStringLiteral("actionAttachProcess"));
-    QVERIFY2(attachAct != nullptr && attachAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P), "MainWindow must expose #actionAttachProcess with Ctrl+Alt+P shortcut");
-    QProcess helperProc;
-    struct ProcGuard { QProcess* p; ~ProcGuard() { if (p && p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1000); } } } guard{&helperProc};
+    auto* attachAct = mainWindow.findChild<QAction*>(QStringLiteral("actionAttachProcess")); QVERIFY2(attachAct && attachAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P), "MainWindow must expose #actionAttachProcess with Ctrl+Alt+P shortcut");
+    QProcess helperProc; struct ProcGuard { QProcess* p; ~ProcGuard() { if (p && p->state() != QProcess::NotRunning) { p->kill(); p->waitForFinished(1000); } } } guard{&helperProc};
     helperProc.start(QStringLiteral("sleep"), {QStringLiteral("30")}); QVERIFY(helperProc.waitForStarted(3000));
     const qint64 helperPid = helperProc.processId(); gridlock::ui::AttachProcessDialog attachDlg(&mainWindow);
     auto* procTable = attachDlg.findChild<QTableWidget*>(QStringLiteral("attachProcessTable")); auto* procTree = attachDlg.findChild<QTreeWidget*>(QStringLiteral("attachProcessTree"));
@@ -292,15 +269,11 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY(procTable && procTable->rowCount() > 0 && procTree && filterEd && myProcChk && myProcChk->isChecked() && ptraceBanner && attachBtn);
     int helperRow = -1;
     for (int r = 0; r < procTable->rowCount(); ++r) {
-        for (int c = 0; c < procTable->columnCount(); ++c) {
-            const QString cell = procTable->item(r, c) ? procTable->item(r, c)->text() : QString();
-            QVERIFY2(!cell.contains(QStringLiteral("mpi_navier_stokes"), Qt::CaseInsensitive), "Hardcoded mpi_navier_stokes row still present in AttachProcessDialog");
-        }
+        for (int c = 0; c < procTable->columnCount(); ++c) QVERIFY2(!(procTable->item(r, c) && procTable->item(r, c)->text().contains(QStringLiteral("mpi_navier_stokes"), Qt::CaseInsensitive)), "Hardcoded mpi_navier_stokes row still present in AttachProcessDialog");
         if (procTable->item(r, 0) && procTable->item(r, 0)->text().toLongLong() == helperPid) helperRow = r;
     }
     QVERIFY2(helperRow >= 0, "AttachProcessDialog must include live child helper PID from /proc");
     procTable->selectRow(helperRow); QCOMPARE(attachDlg.selectedPid(), helperPid);
-    // Point AttachProcessDialog at a synthetic /proc with a 2-rank OpenMPI job and ptrace_scope=1.
     QTemporaryDir fakeProcDir; QVERIFY(fakeProcDir.isValid()); const uint curUid = static_cast<uint>(::geteuid());
     auto mkFakePid = [&](int pid, int rank) {
         const QString d = fakeProcDir.filePath(QString::number(pid)); QVERIFY(QDir().mkpath(d));
@@ -310,13 +283,10 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
         if (rank >= 0) { QFile f(d + "/environ"); QVERIFY(f.open(QIODevice::WriteOnly)); f.write(QStringLiteral("OMPI_COMM_WORLD_RANK=%1\nOMPI_COMM_WORLD_SIZE=2\nOMPI_MCA_ess_base_jobid=job42\n").arg(rank).toUtf8()); }
     };
     mkFakePid(4102, 1); mkFakePid(4101, 0); mkFakePid(4999, -1);
-    const QString fakeSysctl = fakeProcDir.filePath(QStringLiteral("ptrace_scope"));
-    { QFile f(fakeSysctl); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("1\n"); }
-    attachDlg.setProcPaths(fakeProcDir.path(), fakeSysctl);
-    QCOMPARE(attachDlg.mpiJobGroupCount(), 1); QCOMPARE(attachDlg.ptraceScope(), 1); QVERIFY(!ptraceBanner->isHidden());
+    const QString fakeSysctl = fakeProcDir.filePath(QStringLiteral("ptrace_scope")); { QFile f(fakeSysctl); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("1\n"); }
+    attachDlg.setProcPaths(fakeProcDir.path(), fakeSysctl); QCOMPARE(attachDlg.mpiJobGroupCount(), 1); QCOMPARE(attachDlg.ptraceScope(), 1); QVERIFY(!ptraceBanner->isHidden());
     procTree->setCurrentItem(procTree->topLevelItem(0)); QCOMPARE(attachDlg.selectedPids(), (QList<qint64>{4101, 4102}));
     filterEd->setText(QStringLiteral("4999")); QVERIFY(procTree->topLevelItem(0)->isHidden() && !procTree->topLevelItem(1)->isHidden());
-    // Verify Tab 2: Remote Target (gdbserver / QEMU) controls, port-range expansion, and MainWindow remote attach.
     auto* tabW = attachDlg.findChild<QTabWidget*>(QStringLiteral("attachModeTabWidget")); auto* remEpEd = attachDlg.findChild<QLineEdit*>(QStringLiteral("remoteEndpointEdit"));
     auto* remSymEd = attachDlg.findChild<QLineEdit*>(QStringLiteral("remoteSymbolBinaryEdit")); auto* remSymBtn = attachDlg.findChild<QPushButton*>(QStringLiteral("remoteSymbolBrowseBtn"));
     auto* remGdbCombo = attachDlg.findChild<QComboBox*>(QStringLiteral("remoteGdbBinaryCombo")); auto* remProtoCombo = attachDlg.findChild<QComboBox*>(QStringLiteral("remoteProtocolModeCombo"));
@@ -324,11 +294,8 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     QVERIFY(tabW && tabW->count() == 2 && remEpEd && remSymEd && remSymBtn && remGdbCombo && remProtoCombo && remHintLbl);
     attachDlg.setRemoteTargetTabActive(true); QVERIFY(attachDlg.isRemoteTargetTabActive());
     remEpEd->setText(QStringLiteral("localhost:1234..1237")); remSymEd->setText(QStringLiteral("/tmp/qemu_guest.elf")); remProtoCombo->setCurrentIndex(1);
-    const auto remTargets = attachDlg.selectedRemoteTargets();
-    QCOMPARE(remTargets.size(), 4); QCOMPARE(remTargets[0].endpoint, QStringLiteral("localhost:1234"));
-    QCOMPARE(remTargets[3].endpoint, QStringLiteral("localhost:1237")); QVERIFY(remTargets[0].extendedRemote && attachBtn->isEnabled());
-    remEpEd->setText(QStringLiteral("localhost:99999")); QVERIFY(attachDlg.selectedRemoteTargets().isEmpty() && !attachBtn->isEnabled());
-    QVERIFY(mainWindow.attachToRemoteTargets({remTargets[0]})); mainWindow.stopTargetWorkflow();
+    const auto remTargets = attachDlg.selectedRemoteTargets(); QVERIFY(remTargets.size() == 4 && remTargets[0].endpoint == QStringLiteral("localhost:1234") && remTargets[3].endpoint == QStringLiteral("localhost:1237") && remTargets[0].extendedRemote && attachBtn->isEnabled());
+    remEpEd->setText(QStringLiteral("localhost:99999")); QVERIFY(attachDlg.selectedRemoteTargets().isEmpty() && !attachBtn->isEnabled()); QVERIFY(mainWindow.attachToRemoteTargets({remTargets[0]})); mainWindow.stopTargetWorkflow();
     // 3. Verify static ELF64 DWARF line-to-address inspection on deadlock_ring before launching a live session.
     QVERIFY2(mainWindow.selectTargetByName(QStringLiteral("deadlock_ring")), "selectTargetByName must succeed");
     if (!mainWindow.ensureTargetBinaryCompiled()) { QFile::remove(mainWindow.activeTargetBinaryPath()); QTest::qWait(400); }
@@ -433,11 +400,11 @@ void TestMainWindowUI::testRealCompiledTargetDwarfMappingBreakpointRunAndLatched
     varsTree->sortByColumn(0, Qt::AscendingOrder); QApplication::processEvents(); const int icAsc = findVarIdx({}, QStringLiteral("domain_cfg")).row(), osAsc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     varsTree->sortByColumn(0, Qt::DescendingOrder); QApplication::processEvents(); const int icDesc = findVarIdx({}, QStringLiteral("domain_cfg")).row(), osDesc = findVarIdx({}, QStringLiteral("outerSecret")).row();
     QVERIFY2(icAsc >= 0 && osAsc >= 0 && icAsc < osAsc && osDesc < icDesc, "Sorting NAME column asc/desc must deterministically invert top-level order");
-    // Verify DDD-style PointerGraphDialog reset on re-open, 1-hop auto-expand, and cycle/alias deduplication.
+    // Verify PointerGraphDialog incremental multi-root pinning, 1-hop auto-expand, and cycle/alias deduplication.
     mainWindow.openPointerGraphVisualizer(QStringLiteral("outerLocal"), QStringLiteral("4243"), QStringLiteral("int"));
     auto* livePg = mainWindow.findChild<gridlock::ui::PointerGraphDialog*>(); auto* pgCloseBtn = livePg ? livePg->findChild<QPushButton*>(QStringLiteral("pointerGraphCloseBtn")) : nullptr; QVERIFY2(livePg && pgCloseBtn, "PointerGraphDialog must expose #pointerGraphCloseBtn"); QTRY_VERIFY_WITH_TIMEOUT(livePg->nodeCount() == 1, 3000);
     mainWindow.openPointerGraphVisualizer(QStringLiteral("domain_cfg"), QStringLiteral("{...}"), QStringLiteral("SubdomainBlock"));
-    QTRY_VERIFY_WITH_TIMEOUT(livePg->nodeCount() >= 2 && livePg->edgeCount() >= 1 && livePg->nodeHasField(QStringLiteral("domain_cfg"), QStringLiteral("mesh")) && livePg->nodeHasField(QStringLiteral("domain_cfg.mesh"), QStringLiteral("dims")), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(livePg->nodeCount() >= 3 && livePg->pinnedRootExpressions().contains(QStringLiteral("outerLocal")) && livePg->pinnedRootExpressions().contains(QStringLiteral("domain_cfg")) && livePg->edgeCount() >= 1 && livePg->nodeHasField(QStringLiteral("domain_cfg"), QStringLiteral("mesh")) && livePg->nodeHasField(QStringLiteral("domain_cfg.mesh"), QStringLiteral("dims")), 5000);
     pgCloseBtn->click(); QApplication::processEvents(); QVERIFY(!livePg->isVisible());
     gridlock::ui::PointerGraphDialog pgDlg(mainWindow.coordinator(), &mainWindow); QVERIFY(pgDlg.findChild<QLineEdit*>(QStringLiteral("pointerGraphRootEdit")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphAddBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphLayoutBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphExpandHopBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn")) && pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphCloseBtn")) && pgDlg.findChild<QGraphicsView*>(QStringLiteral("pointerGraphView")));
     pgDlg.upsertStructNode(QStringLiteral("n1"), QStringLiteral("Node"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("10"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("Node*")}, {QStringLiteral("ghost_guard"), QStringLiteral("0x0"), QStringLiteral("HaloExchangeBuf *")}});
@@ -741,6 +708,42 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     emit mw.variablesDockWidget()->sendToCalculatorRequested(QStringLiteral("0x7fffffffe5a8")); QCOMPARE(floatingCalc->value(), 0x7FFFFFFFE5A8ULL); floatingCalc->close();
     for (const QString& w : s_calcWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }
+/** @brief Verifies PointerGraphDialog layered DAG layout, manual drag preservation, incremental multi-root pinning, and dynamic alias splitting/merging. */
+static void testPointerGraphDagLayoutAndAliasSplitting() {
+    using gridlock::ui::PointerGraphDialog; using F = PointerGraphDialog::StructFieldEntry;
+    PointerGraphDialog pg;
+    auto* layoutBtn = pg.findChild<QPushButton*>(QStringLiteral("pointerGraphLayoutBtn")); auto* clearBtn = pg.findChild<QPushButton*>(QStringLiteral("pointerGraphClearBtn")); auto* pruneChk = pg.findChild<QCheckBox*>(QStringLiteral("pointerGraphPruneCheck"));
+    QVERIFY(layoutBtn && clearBtn && pruneChk && pruneChk->isChecked());
+    // 1. Layered DAG placement (layer 0 -> layer 1 -> layer 2), barycenter ordering, and manual position preservation across onTargetStopped().
+    pg.upsertStructNode(QStringLiteral("root"), QStringLiteral("Tree"), QStringLiteral("0x100"), {F{QStringLiteral("left"), QStringLiteral("0x200"), QStringLiteral("Node*")}, F{QStringLiteral("right"), QStringLiteral("0x210"), QStringLiteral("Node*")}});
+    pg.upsertStructNode(QStringLiteral("child"), QStringLiteral("Node"), QStringLiteral("0x200"), {F{QStringLiteral("next"), QStringLiteral("0x300"), QStringLiteral("Node*")}}, QStringLiteral("root"), QStringLiteral("left"));
+    pg.upsertStructNode(QStringLiteral("altChild"), QStringLiteral("Node"), QStringLiteral("0x210"), {F{QStringLiteral("val"), QStringLiteral("7"), QStringLiteral("int")}}, QStringLiteral("root"), QStringLiteral("right"));
+    pg.upsertStructNode(QStringLiteral("grandchild"), QStringLiteral("Node"), QStringLiteral("0x300"), {F{QStringLiteral("val"), QStringLiteral("9"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("next"));
+    pg.autoLayoutNodes();
+    QVERIFY(pg.nodeLayer(QStringLiteral("root")) == 0 && pg.nodeLayer(QStringLiteral("child")) == 1 && pg.nodeLayer(QStringLiteral("grandchild")) == 2);
+    QVERIFY(pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x() && pg.nodePosition(QStringLiteral("child")).y() < pg.nodePosition(QStringLiteral("altChild")).y());
+    const QPointF manualPos(555.0, 444.0); QVERIFY(pg.setNodePosition(QStringLiteral("child"), manualPos) && pg.isNodeManuallyPositioned(QStringLiteral("child")));
+    pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("child"), QStringLiteral("Node"), QStringLiteral("0x200"), {F{QStringLiteral("next"), QStringLiteral("0x300"), QStringLiteral("Node*")}, F{QStringLiteral("tag"), QStringLiteral("1"), QStringLiteral("int")}});
+    pg.upsertStructNode(QStringLiteral("extra"), QStringLiteral("Node"), QStringLiteral("0x310"), {F{QStringLiteral("val"), QStringLiteral("3"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("tag"));
+    pg.autoLayoutNodes(false); QCOMPARE(pg.nodePosition(QStringLiteral("child")), manualPos);
+    layoutBtn->click(); QVERIFY(!pg.isNodeManuallyPositioned(QStringLiteral("child")) && pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x());
+    // 2. Incremental multi-root pinning (first root stays intact until Clear Graph) & per-root unpinning.
+    clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0 && pg.pinnedRootExpressions().isEmpty());
+    pg.addAndEvaluateRootExpression(QStringLiteral("headA"), QStringLiteral("Holder*"), QStringLiteral("0x100")); pg.upsertStructNode(QStringLiteral("headA"), QStringLiteral("Holder"), QStringLiteral("0x100"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
+    pg.addAndEvaluateRootExpression(QStringLiteral("headB"), QStringLiteral("Holder*"), QStringLiteral("0x200")); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
+    QVERIFY(pg.nodeCount() == 2 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA"), QStringLiteral("headB")}) && pg.nodePosition(QStringLiteral("headA")).y() != pg.nodePosition(QStringLiteral("headB")).y());
+    QVERIFY(pg.unpinRootExpression(QStringLiteral("headB")) && pg.nodeCount() == 1 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA")}));
+    pg.addAndEvaluateRootExpression(QStringLiteral("headB"), QStringLiteral("Holder*"), QStringLiteral("0x200")); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
+    // 3. Dynamic alias splitting (0x1000 -> 0x2000 clears alias badge) and re-merging (prunes orphan 0x1000 & re-flags alias).
+    pg.upsertStructNode(QStringLiteral("n1"), QStringLiteral("Node"), QStringLiteral("0x1000"), {F{QStringLiteral("val"), QStringLiteral("10"), QStringLiteral("int")}}, QStringLiteral("headA"), QStringLiteral("ptr"));
+    QVERIFY(pg.connectPointerField(QStringLiteral("headB"), QStringLiteral("ptr"), QStringLiteral("0x1000")) && pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.hasCycleOrSharedAlias());
+    pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x2000"), QStringLiteral("Node*")}});
+    pg.upsertStructNode(QStringLiteral("n2"), QStringLiteral("Node"), QStringLiteral("0x2000"), {F{QStringLiteral("val"), QStringLiteral("20"), QStringLiteral("int")}}, QStringLiteral("headB"), QStringLiteral("ptr"));
+    QVERIFY(pg.nodeCount() == 4 && pg.edgeCount() == 2 && pg.edgeTargetAddressOrExpr(QStringLiteral("headA"), QStringLiteral("ptr")) == QStringLiteral("0x1000") && pg.edgeTargetAddressOrExpr(QStringLiteral("headB"), QStringLiteral("ptr")) == QStringLiteral("0x2000") && !pg.hasCycleOrSharedAlias() && pg.fieldMutationSummary(QStringLiteral("headB"), QStringLiteral("ptr")) == QStringLiteral("0x1000 -> 0x2000"));
+    pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("headA"), QStringLiteral("Holder"), QStringLiteral("0x100"), {F{QStringLiteral("ptr"), QStringLiteral("0x2000"), QStringLiteral("Node*")}});
+    QVERIFY(pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.edgeTargetAddressOrExpr(QStringLiteral("headA"), QStringLiteral("ptr")) == QStringLiteral("0x2000") && pg.hasCycleOrSharedAlias());
+    clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0);
+}
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     using gridlock::ui::ArrayPlotDialog; using gridlock::ui::PointerGraphDialog;
@@ -758,6 +761,7 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
     pgDlg.onTargetStopped(0); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
+    testPointerGraphDagLayoutAndAliasSplitting();
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
     const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
     QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();

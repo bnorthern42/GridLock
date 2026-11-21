@@ -919,7 +919,7 @@ void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
 void MainWindow::openPointerGraphVisualizer(const QString& exprPath, const QString& varValue, const QString& varType) {
     if (!m_pointerGraphDialog) m_pointerGraphDialog = new PointerGraphDialog(m_coordinator, this);
     m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank);
-    if (!exprPath.trimmed().isEmpty()) { m_pointerGraphDialog->clearGraph(); m_pointerGraphDialog->graphExpression(exprPath.trimmed(), varType, varValue); }
+    if (!exprPath.trimmed().isEmpty()) { m_pointerGraphDialog->addAndEvaluateRootExpression(exprPath.trimmed(), varType, varValue); }
     m_pointerGraphDialog->show(); m_pointerGraphDialog->raise(); m_pointerGraphDialog->activateWindow();
 }
 /**
