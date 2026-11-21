@@ -177,6 +177,16 @@ QVariant VariableTreeModel::data(const QModelIndex& index, int role) const {
         if (m_previousValues.contains(node->name) && m_previousValues[node->name] != node->value) {
             return QColor("#1e1e2e");
         }
+    } else if (role == Qt::ToolTipRole) {
+        const QString expr = buildExpressionPath(node);
+        QString tip = QStringLiteral("%1 : %2\nValue: %3")
+                          .arg(expr.isEmpty() ? node->name : expr,
+                               node->type.isEmpty() ? QStringLiteral("<unknown>") : node->type,
+                               node->value);
+        if (m_previousValues.contains(node->name) && m_previousValues[node->name] != node->value) {
+            tip += QStringLiteral("\nPrevious: %1").arg(m_previousValues[node->name]);
+        }
+        return tip;
     }
     return QVariant();
 }

@@ -181,7 +181,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         const QString trimmed = expr.trimmed();
         if (trimmed.isEmpty() || !m_differentialGrid) return;
         m_differentialGrid->addVariableColumn(trimmed);
-        m_differentialGrid->updateVariableDisplay(0, trimmed, QStringLiteral("0.0"));
+        if (m_coordinator) m_coordinator->registerWatchVariable(trimmed);
     };
     if (m_expressionEvaluatorWidget) connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::watchExpressionRequested, this, addPromotedWatch);
     if (m_variablesDockWidget) connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::watchExpressionRequested, this, addPromotedWatch);

@@ -304,7 +304,7 @@ void GdbRankCoordinator::registerWatchVariable(const QString& name) {
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     const bool stoppedActive = rp && rp->state.currentState == QLatin1String("stopped") &&
-                               ((rp->fifoInFd >= 0) || (rp->process && rp->process->state() == QProcess::Running));
+                               ((rp->fifoInFd >= 0) || !rp->process || rp->process->state() == QProcess::Running);
     if (stoppedActive && !m_varNameMap[static_cast<int>(i)].contains(name)) {
       writeCmd(static_cast<int>(i), QString("30%1-var-create - * %2\n").arg(varIdx).arg(name));
     }

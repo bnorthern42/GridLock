@@ -311,8 +311,16 @@ void TerminalDockWidget::sendCommand(const QString& command) {
     ensureShellStarted();
     if (m_termWidget != nullptr && !m_lastSentCommand.isEmpty() &&
         m_termWidget->getShellPID() > 0) {
-        // Dispatch command text followed by newline to trigger interactive shell execution.
-        m_termWidget->sendText(m_lastSentCommand + QStringLiteral("\n"));
+        if (m_pendingCdSync && !m_currentWorkingDir.isEmpty()) {
+            m_pendingCdSync = false;
+            QString escaped = m_currentWorkingDir;
+            escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+            m_termWidget->sendText(
+                QStringLiteral("cd -- '%1' && %2\n").arg(escaped, m_lastSentCommand));
+        } else {
+            // Dispatch command text followed by newline to trigger interactive shell execution.
+            m_termWidget->sendText(m_lastSentCommand + QStringLiteral("\n"));
+        }
     }
 }
 
@@ -337,6 +345,7 @@ void TerminalDockWidget::setWorkingDirectory(const QString& dirPath) {
         return;
     }
     m_currentWorkingDir = canonical;
+    m_pendingCdSync = true;
     if (m_termWidget != nullptr) {
         m_termWidget->setWorkingDirectory(m_currentWorkingDir);
         if (m_termWidget->getShellPID() > 0) {

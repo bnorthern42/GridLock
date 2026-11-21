@@ -12,22 +12,31 @@
 
 #include <algorithm>
 
+#include <QApplication>
+#include <QClipboard>
 #include <QHeaderView>
+#include <QKeyEvent>
+#include <QMenu>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPalette>
+#include <QRegularExpression>
 
 namespace gridlock::ui {
 
-/**
- * @brief Constructs a new DifferentialGrid widget.
- *
- * Configures the initial 1x1 table layout with an inline "New Variable"
- * input cell at (0, 0), enforces QHeaderView::Stretch across watched columns,
- * and synchronizes verticalHeader() and viewport() background palettes with the active theme.
- *
- * @param parent Optional parent widget.
- */
+namespace {
+bool parseLeadingNumber(const QString& raw, double* outVal) {
+    static const QRegularExpression kNumRe(QStringLiteral(R"(^\s*([-+]?(?:0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)))"));
+    const QRegularExpressionMatch m = kNumRe.match(raw);
+    if (!m.hasMatch()) return false;
+    const QString tok = m.captured(1);
+    bool ok = false;
+    const double v = tok.contains(QLatin1String("0x"), Qt::CaseInsensitive) ? static_cast<double>(tok.toLongLong(&ok, 16)) : tok.toDouble(&ok);
+    if (ok && outVal) *outVal = v;
+    return ok;
+}
+}  // namespace
+
 DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     setFrameShape(QFrame::NoFrame);
     setAlternatingRowColors(true);
@@ -40,10 +49,23 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     horizontalHeader()->setTextElideMode(Qt::ElideRight);
     verticalHeader()->setDefaultSectionSize(22);
 
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QModelIndex idx = indexAt(pos);
+        showWatchContextMenu(idx.isValid() ? idx.row() : currentRow(),
+                             idx.isValid() ? idx.column() : currentColumn(),
+                             viewport()->mapToGlobal(pos));
+    });
+    connect(horizontalHeader(), &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const int col = horizontalHeader()->logicalIndexAt(pos);
+        showWatchContextMenu(-1, col >= 0 ? col : currentColumn(), horizontalHeader()->mapToGlobal(pos));
+    });
+
     reloadStyle();
     connect(&gridlock::core::ThemeManager::instance(),
             &gridlock::core::ThemeManager::themeModeChanged,
-            this, [this](bool) { reloadStyle(); });
+            this, [this](bool) { reloadStyle(); updateHighlights(); });
 
     // Seed initial row/col for inline watch input
     setRowCount(1);
@@ -61,8 +83,6 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
             QString newVarName = cell->text().trimmed();
             if (!newVarName.isEmpty() && newVarName != "...") {
                 emit watchVariableAdded(newVarName);
-                
-                // Temporarily show placeholder while watch request dispatches
                 this->blockSignals(true);
                 cell->setText("...");
                 this->blockSignals(false);
@@ -86,74 +106,106 @@ void DifferentialGrid::paintEvent(QPaintEvent* event) {
     p.drawText(r, Qt::AlignCenter | Qt::TextWordWrap, emptyPlaceholderText());
 }
 
-/**
- * @brief Returns whether horizontal header columns are configured to stretch evenly across the dock width.
- * @return True if QHeaderView::Stretch is active on the horizontal header; false otherwise.
- */
+void DifferentialGrid::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Delete && currentColumn() >= 1) {
+        removeWatchColumn(currentColumn());
+        event->accept();
+        return;
+    }
+    if (event->matches(QKeySequence::Copy)) {
+        if (const QTableWidgetItem* it = currentItem(); it && currentRow() >= 1 && currentColumn() >= 1) {
+            QApplication::clipboard()->setText(it->text());
+            event->accept();
+            return;
+        }
+    }
+    QTableWidget::keyPressEvent(event);
+}
+
+void DifferentialGrid::showWatchContextMenu(int row, int col, const QPoint& globalPos) {
+    const QString colExpr = (col >= 1 && horizontalHeaderItem(col)) ? horizontalHeaderItem(col)->text() : QString();
+    const QString cellVal = (row >= 1 && col >= 1 && item(row, col)) ? item(row, col)->text() : QString();
+    QMenu menu(this);
+    QAction* copyAct = menu.addAction(QStringLiteral("Copy Value (Ctrl+C)"));
+    copyAct->setEnabled(!cellVal.isEmpty());
+    QAction* rmColAct = menu.addAction(colExpr.isEmpty() ? QStringLiteral("Remove Watch Column (Del)")
+                                                         : QStringLiteral("Remove Watch Column '%1' (Del)").arg(colExpr));
+    rmColAct->setEnabled(col >= 1);
+    QAction* clearAct = menu.addAction(QStringLiteral("Clear All Watches"));
+    clearAct->setEnabled(columnCount() > 1);
+    menu.addSeparator();
+    QAction* plotAct = menu.addAction(QStringLiteral("Plot 1D/2D Array..."));
+    plotAct->setEnabled(!colExpr.isEmpty());
+    QAction* graphAct = menu.addAction(QStringLiteral("Graph Pointer / Struct..."));
+    graphAct->setEnabled(!colExpr.isEmpty());
+
+    QAction* chosen = menu.exec(globalPos);
+    if (chosen == copyAct && !cellVal.isEmpty()) QApplication::clipboard()->setText(cellVal);
+    else if (chosen == rmColAct && col >= 1) removeWatchColumn(col);
+    else if (chosen == clearAct) clearWatches();
+    else if (chosen == plotAct && !colExpr.isEmpty()) emit plotArrayRequested(colExpr);
+    else if (chosen == graphAct && !colExpr.isEmpty()) emit graphPointerRequested(colExpr, cellVal);
+}
+
 bool DifferentialGrid::horizontalHeaderStretchEnabled() const {
     return horizontalHeader() != nullptr &&
            horizontalHeader()->sectionResizeMode(0) == QHeaderView::Stretch;
 }
 
-/**
- * @brief Updates all variable entries for a specific rank from a hash map.
- * @param rankId Zero-based rank index.
- * @param variables Mapping of variable identifiers to evaluated string values.
- */
 void DifferentialGrid::setVariableData(int rankId, const QHash<QString, QString>& variables) {
     for (auto it = variables.constBegin(); it != variables.constEnd(); ++it) {
         updateVariableDisplay(rankId, it.key(), it.value());
     }
 }
 
-/**
- * @brief Adds a new column header for the given variable if it doesn't already exist.
- * @param name Variable identifier or expression string.
- */
 void DifferentialGrid::addVariableColumn(const QString& name) {
     horizontalHeader()->setVisible(true);
     verticalHeader()->setVisible(true);
     int col = -1;
     for (int c = 0; c < columnCount(); ++c) {
-        if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == name) {
-            col = c;
-            break;
-        }
+        if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == name) { col = c; break; }
     }
-    
-    // Allocate new column if not present
     if (col == -1) {
         col = columnCount();
         setColumnCount(col + 1);
         auto* hdrItem = new QTableWidgetItem(name);
         hdrItem->setToolTip(name);
         setHorizontalHeaderItem(col, hdrItem);
-        for (int r = 0; r < rowCount(); ++r) {
-            setItem(r, col, new QTableWidgetItem("-"));
-        }
+        for (int r = 0; r < rowCount(); ++r) setItem(r, col, new QTableWidgetItem("-"));
     }
     if (viewport()) viewport()->update();
 }
 
-/**
- * @brief Retrieves the list of watched expressions currently tracked as columns.
- * @return Vector of expression strings.
- */
+bool DifferentialGrid::removeWatchColumn(int col) {
+    if (col < 1 || col >= columnCount()) return false;
+    const QString removedName = horizontalHeaderItem(col) ? horizontalHeaderItem(col)->text() : QString();
+    removeColumn(col);
+    if (columnCount() <= 1 && isColumnHidden(0)) {
+        horizontalHeader()->setVisible(false);
+        verticalHeader()->setVisible(false);
+    }
+    if (!removedName.isEmpty()) emit watchVariableRemoved(removedName);
+    if (viewport()) viewport()->update();
+    return true;
+}
+
+bool DifferentialGrid::removeWatchExpression(const QString& name) {
+    for (int c = 1; c < columnCount(); ++c) {
+        if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == name) return removeWatchColumn(c);
+    }
+    return false;
+}
+
 std::vector<std::string> DifferentialGrid::getWatchExpressions() const {
     std::vector<std::string> watches;
     for (int c = 1; c < columnCount(); ++c) {
-        if (auto* item = horizontalHeaderItem(c)) {
-            QString name = item->text();
-            watches.push_back(name.toStdString());
-        }
+        if (auto* item = horizontalHeaderItem(c)) watches.push_back(item->text().toStdString());
     }
     return watches;
 }
 
-/**
- * @brief Resets the grid back to its initial empty state with only the watch prompt.
- */
 void DifferentialGrid::clearWatches() {
+    const auto prior = getWatchExpressions();
     setColumnCount(1);
     setHorizontalHeaderItem(0, new QTableWidgetItem("New Variable"));
     setRowCount(1);
@@ -162,44 +214,25 @@ void DifferentialGrid::clearWatches() {
         horizontalHeader()->setVisible(false);
         verticalHeader()->setVisible(false);
     }
+    for (const auto& w : prior) emit watchVariableRemoved(QString::fromStdString(w));
     if (viewport()) viewport()->update();
 }
 
-/**
- * @brief Populates or updates an evaluation cell for a specific rank and variable.
- *
- * Dynamically expands table rows and columns as new ranks or variables are encountered.
- * Recomputes differential divergence highlights after insertion.
- *
- * @param rankId Rank index (0-based).
- * @param varName Variable name.
- * @param value String value or error description.
- */
 void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName, const QString& value) {
     horizontalHeader()->setVisible(true);
     verticalHeader()->setVisible(true);
     int targetRow = rankId + 1;
-    
-    // Find or create column for varName
     int col = -1;
     for (int c = 0; c < columnCount(); ++c) {
-        if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == varName) {
-            col = c;
-            break;
-        }
+        if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == varName) { col = c; break; }
     }
-    
     if (col == -1) {
         col = columnCount();
         setColumnCount(col + 1);
         auto* hdrItem = new QTableWidgetItem(varName);
         hdrItem->setToolTip(varName);
         setHorizontalHeaderItem(col, hdrItem);
-        for (int r = 0; r < rowCount(); ++r) {
-            setItem(r, col, new QTableWidgetItem("-"));
-        }
-        
-        // Clear the "..." in the new variable cell if it matches
+        for (int r = 0; r < rowCount(); ++r) setItem(r, col, new QTableWidgetItem("-"));
         QTableWidgetItem* inputCell = item(0, 0);
         if (inputCell && inputCell->text() == "...") {
             blockSignals(true);
@@ -207,81 +240,66 @@ void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName,
             blockSignals(false);
         }
     }
-    
-    // Dynamically expand rows to accommodate rank index
     if (targetRow >= rowCount()) {
         int oldRow = rowCount();
         setRowCount(targetRow + 1);
         for (int r = oldRow; r <= targetRow; ++r) {
             setVerticalHeaderItem(r, new QTableWidgetItem(QString("Rank %1").arg(r - 1)));
-            for (int c = 0; c < columnCount(); ++c) {
-                setItem(r, c, new QTableWidgetItem("-"));
-            }
+            for (int c = 0; c < columnCount(); ++c) setItem(r, c, new QTableWidgetItem("-"));
         }
     }
-    
-    // Set cell contents
     QTableWidgetItem* cellItem = item(targetRow, col);
-    if (!cellItem) {
-        cellItem = new QTableWidgetItem(value);
-        setItem(targetRow, col, cellItem);
-    } else {
-        cellItem->setText(value);
-    }
-    
-    // Dim out of scope variables in italic gray
-    if (value == "<Out of Scope>") {
-        cellItem->setForeground(Qt::gray);
-        QFont font = cellItem->font();
-        font.setItalic(true);
-        cellItem->setFont(font);
-    } else {
-        cellItem->setForeground(QBrush());
-        QFont font = cellItem->font();
-        font.setItalic(false);
-        cellItem->setFont(font);
-    }
-    
-    // Recalculate divergence across all ranks for this variable
+    if (!cellItem) { cellItem = new QTableWidgetItem(value); setItem(targetRow, col, cellItem); }
+    else cellItem->setText(value);
+
+    QFont font = cellItem->font();
+    font.setItalic(value == "<Out of Scope>");
+    cellItem->setFont(font);
     updateHighlights();
 }
 
-/**
- * @brief Inspects all watched columns to detect and highlight divergent values.
- *
- * Uses frequency voting to determine the majority/consensus value in each column.
- * Any rank displaying a value different from the majority is highlighted with
- * a distinct light-red alert background.
- */
 void DifferentialGrid::updateHighlights() {
+    const bool isDark = gridlock::core::ThemeManager::instance().isDarkMode();
+    const QColor divFg = isDark ? QColor(0x24, 0x0b, 0x0e) : QColor(0x6e, 0x11, 0x16);
     for (int col = 1; col < columnCount(); ++col) {
-        // Count value frequency across active rank rows
+        const QString varName = horizontalHeaderItem(col) ? horizontalHeaderItem(col)->text() : QString();
         std::unordered_map<QString, int> counts;
         for (int row = 1; row < rowCount(); ++row) {
             QTableWidgetItem* it = item(row, col);
             if (it && it->text() != "-") counts[it->text()]++;
         }
-        
-        // Identify majority value consensus
         QString majorityStr;
         int maxCount = 0;
         for (const auto& kv : counts) {
-            if (kv.second > maxCount) {
-                maxCount = kv.second;
-                majorityStr = kv.first;
-            }
+            if (kv.second > maxCount) { maxCount = kv.second; majorityStr = kv.first; }
         }
-        
-        // Highlight minority/divergent cells
+        double rank0Num = 0.0;
+        const QString rank0Str = (rowCount() > 1 && item(1, col)) ? item(1, col)->text() : QString();
+        const bool hasRank0Num = (rank0Str != QLatin1String("-")) && parseLeadingNumber(rank0Str, &rank0Num);
+
         for (int row = 1; row < rowCount(); ++row) {
             QTableWidgetItem* it = item(row, col);
-            if (it) {
-                if (it->text() != "-" && it->text() != majorityStr && counts.size() > 1) {
-                    it->setBackground(QColor(255, 200, 200));
-                } else {
-                    it->setBackground(QBrush());
-                }
+            if (!it) continue;
+            const QString val = it->text();
+            const bool divergent = (val != QLatin1String("-") && val != majorityStr && counts.size() > 1);
+            if (divergent) {
+                it->setBackground(QColor(255, 200, 200));
+                it->setForeground(divFg);
+            } else {
+                it->setBackground(QBrush());
+                it->setForeground(val == QLatin1String("<Out of Scope>") ? QBrush(Qt::gray) : QBrush());
             }
+            QString tip = QStringLiteral("Rank %1 — %2 = %3").arg(row - 1).arg(varName, val);
+            double curNum = 0.0;
+            if (row > 1 && hasRank0Num && val != QLatin1String("-") && parseLeadingNumber(val, &curNum)) {
+                const double delta = curNum - rank0Num;
+                tip += QStringLiteral("\nΔ vs Rank 0 (%1): %2%3").arg(rank0Str, delta >= 0.0 ? QStringLiteral("+") : QString()).arg(delta);
+            }
+            if (!majorityStr.isEmpty() && counts.size() > 1) {
+                tip += divergent ? QStringLiteral("\nConsensus: %1 (DIVERGENT)").arg(majorityStr)
+                                 : QStringLiteral("\nMatches consensus (%1)").arg(majorityStr);
+            }
+            it->setToolTip(tip);
         }
     }
 }

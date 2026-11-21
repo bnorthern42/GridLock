@@ -181,27 +181,16 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     connect(m_dumpEdit, &QTextEdit::customContextMenuRequested, this, [this](const QPoint& pos) {
         QMenu* menu = m_dumpEdit->createStandardContextMenu();
         menu->addSeparator();
-        const QString addrHex = QStringLiteral("0x%1").arg(m_currentBaseAddress, 0, 16).toUpper();
+        const int byteOff = byteOffsetAtPosition(pos);
+        const uint64_t cursorAddr = m_currentBaseAddress + static_cast<uint64_t>(std::max(0, byteOff));
+        const QString addrHex = QStringLiteral("0x%1").arg(cursorAddr, 0, 16).toUpper();
         QAction* addrAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
-        QAction* wordAct = nullptr;
-        QString wordHex;
-        if (m_lastRawData.size() >= 8) {
-            uint64_t w64 = 0ULL; std::memcpy(&w64, m_lastRawData.constData(), sizeof(w64));
-            wordHex = QStringLiteral("0x%1").arg(w64, 0, 16).toUpper();
-            wordAct = menu->addAction(QStringLiteral("Open 64-bit Word at Cursor in Programmer's Calculator (%1)").arg(wordHex));
-        } else if (m_lastRawData.size() >= 4) {
-            uint32_t w32 = 0U; std::memcpy(&w32, m_lastRawData.constData(), sizeof(w32));
-            wordHex = QStringLiteral("0x%1").arg(w32, 0, 16).toUpper();
-            wordAct = menu->addAction(QStringLiteral("Open 32-bit Word at Cursor in Programmer's Calculator (%1)").arg(wordHex));
-        }
+        int bits = 0;
+        const QString wordHex = wordHexAtByteOffset(byteOff, &bits);
+        QAction* wordAct = (bits > 0) ? menu->addAction(QStringLiteral("Open %1-bit Word at Cursor in Programmer's Calculator (%2)").arg(bits).arg(wordHex)) : nullptr;
         QAction* chosen = menu->exec(m_dumpEdit->viewport()->mapToGlobal(pos));
-        if (chosen == addrAct) {
-            emit sendToCalculatorRequested(addrHex);
-            if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, addrHex));
-        } else if (wordAct && chosen == wordAct) {
-            emit sendToCalculatorRequested(wordHex);
-            if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, wordHex));
-        }
+        if (chosen == addrAct) emit sendToCalculatorRequested(addrHex);
+        else if (wordAct && chosen == wordAct) emit sendToCalculatorRequested(wordHex);
         delete menu;
     });
 
@@ -779,39 +768,24 @@ QString MemView::formatHexDumpHtml(uint64_t startAddress, const QByteArray& curr
                                      static_cast<uint8_t>(prevData[idx]) != b;
                 const QString byteStr = QStringLiteral("%1").arg(b, 2, 16, QChar('0')).toUpper();
 
-                if (isPatched) {
-                    html += QStringLiteral("<span style=\"color: %1; font-weight: bold;\">%2</span> ").arg(patchColor, byteStr);
-                } else if (mutated) {
-                    html += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span> ").arg(byteStr);
-                } else if (b == 0x00) {
-                    html += QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(zeroColor, byteStr);
-                } else {
-                    html += isDark
-                                ? QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(hexColor, byteStr)
-                                : QStringLiteral("<span style=\"color: %1; font-weight: 500;\">%2</span> ").arg(hexColor, byteStr);
-                }
+                if (isPatched) html += QStringLiteral("<span style=\"color: %1; font-weight: bold;\">%2</span> ").arg(patchColor, byteStr);
+                else if (mutated) html += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span> ").arg(byteStr);
+                else if (b == 0x00) html += QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(zeroColor, byteStr);
+                else html += isDark ? QStringLiteral("<span style=\"color: %1;\">%2</span> ").arg(hexColor, byteStr)
+                                    : QStringLiteral("<span style=\"color: %1; font-weight: 500;\">%2</span> ").arg(hexColor, byteStr);
 
                 // Append printable character or dot for non-printables
                 const char c = static_cast<char>(b);
                 if (c >= 32 && c <= 126) {
                     const QString escaped = QString(QChar(c)).toHtmlEscaped();
-                    if (isPatched) {
-                        asciiPart += QStringLiteral("<span style=\"color: %1; font-weight: bold;\">%2</span>").arg(patchColor, escaped);
-                    } else if (mutated) {
-                        asciiPart += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(escaped);
-                    } else {
-                        asciiPart += QStringLiteral("<span style=\"color: %1;\">%2</span>").arg(asciiColor, escaped);
-                    }
+                    if (isPatched) asciiPart += QStringLiteral("<span style=\"color: %1; font-weight: bold;\">%2</span>").arg(patchColor, escaped);
+                    else if (mutated) asciiPart += QStringLiteral("<span style=\"color: #f44747; font-weight: bold;\">%1</span>").arg(escaped);
+                    else asciiPart += QStringLiteral("<span style=\"color: %1;\">%2</span>").arg(asciiColor, escaped);
                 } else {
-                    if (isPatched) {
-                        asciiPart += QStringLiteral("<span style=\"color: %1;\">.</span>").arg(patchColor);
-                    } else {
-                        asciiPart += QStringLiteral("<span style=\"color: %1;\">.</span>").arg(zeroColor);
-                    }
+                    asciiPart += QStringLiteral("<span style=\"color: %1;\">.</span>").arg(isPatched ? patchColor : zeroColor);
                 }
             } else {
-                html += QStringLiteral("   ");
-                asciiPart += QStringLiteral(" ");
+                html += QStringLiteral("   "); asciiPart += QStringLiteral(" ");
             }
         }
         asciiPart += QStringLiteral("|");
@@ -911,13 +885,42 @@ void MemView::reloadStyle() {
             "#cutterMemHeader QPushButton:checked { background-color: %5; color: #ffffff; border: 1px solid %5; }")
             .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));
     }
-    if (m_sourceBadge) {
-        setSourceModeLabel(m_sourceBadge->text());
-    }
-    if (m_profilerWidget) {
-        m_profilerWidget->reloadStyle();
-    }
+    if (m_sourceBadge) setSourceModeLabel(m_sourceBadge->text());
+    if (m_profilerWidget) m_profilerWidget->reloadStyle();
     update();
+}
+
+int MemView::byteOffsetAtCursor(const QTextCursor& cursor) const {
+    if (!m_dumpEdit || m_lastRawData.isEmpty()) return 0;
+    const QString fullText = m_dumpEdit->toPlainText();
+    const int docPos = std::clamp(cursor.position(), 0, static_cast<int>(fullText.size()));
+    const int nlPrev = fullText.lastIndexOf(QLatin1Char('\n'), std::max(0, docPos - 1));
+    const int lineStart = (nlPrev < 0) ? 0 : (nlPrev + 1);
+    const int nlNext = fullText.indexOf(QLatin1Char('\n'), docPos);
+    const QString line = fullText.mid(lineStart, ((nlNext < 0) ? fullText.size() : nlNext) - lineStart);
+    const int col = docPos - lineStart, pipeIdx = line.indexOf(QLatin1Char('|'));
+    const bool isDataRow = line.startsWith(QLatin1String("0x"), Qt::CaseInsensitive);
+    const int hexStart = isDataRow ? (line.indexOf(QLatin1Char(' ')) + 1) : 19;
+    int rowOffset = 0, byteInRow = 0;
+    if (isDataRow && hexStart > 3) { bool ok = false; const uint64_t a = parseHexAddress(line.left(hexStart - 1), &ok); if (ok && a >= m_currentBaseAddress) rowOffset = static_cast<int>(a - m_currentBaseAddress); }
+    if (pipeIdx >= 0 && col > pipeIdx && col <= pipeIdx + 16) byteInRow = col - (pipeIdx + 1);
+    else if (hexStart > 0 && col >= hexStart) {
+        const int rel = col - hexStart;
+        const bool midGap = (line.mid(hexStart + 24, 1) == QLatin1String(" "));
+        byteInRow = midGap ? ((rel < 24) ? (rel / 3) : ((rel == 24) ? 8 : (8 + (rel - 25) / 3))) : (rel / 3);
+    }
+    return std::clamp(rowOffset + std::clamp(byteInRow, 0, 15), 0, static_cast<int>(m_lastRawData.size()) - 1);
+}
+
+int MemView::byteOffsetAtPosition(const QPoint& pos) const { return m_dumpEdit ? byteOffsetAtCursor(m_dumpEdit->cursorForPosition(pos)) : 0; }
+
+QString MemView::wordHexAtByteOffset(int byteOffset, int* outBitWidth) const {
+    if (outBitWidth) *outBitWidth = 0;
+    if (byteOffset < 0 || byteOffset >= m_lastRawData.size()) return QString();
+    const int rem = static_cast<int>(m_lastRawData.size()) - byteOffset;
+    if (rem >= 8) { uint64_t w = 0; std::memcpy(&w, m_lastRawData.constData() + byteOffset, 8); if (outBitWidth) *outBitWidth = 64; return QStringLiteral("0x") + QString::number(w, 16).toUpper(); }
+    if (rem >= 4) { uint32_t w = 0; std::memcpy(&w, m_lastRawData.constData() + byteOffset, 4); if (outBitWidth) *outBitWidth = 32; return QStringLiteral("0x") + QString::number(w, 16).toUpper(); }
+    return QString();
 }
 
 }  // namespace gridlock::ui

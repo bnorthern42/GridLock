@@ -55,6 +55,11 @@ public:
      */
     bool promoteVariableToWatch(const QString& variableName);
 
+    /**
+     * @brief Copies the currently selected variable value (Ctrl+C) to the system clipboard.
+     */
+    bool copySelectedVariableValue() const;
+
 signals:
     /**
      * @brief Emitted when a user promotes a variable from the tree into Watch Expressions.
@@ -70,16 +75,17 @@ signals:
     void dataWatchpointRequested(const QString& expression, int accessMode);
 
     /**
-     * @brief Emitted when the user selects "Visualize in Pointer / Struct Graph..." on a variable row.
-     * @param exprPath Full C++ expression path (e.g., "Iconfig.mesh").
-     * @param varName Leaf variable name.
-     * @param varValue Formatted runtime value or pointer address.
-     * @param varType Static C/C++ type string.
+     * @brief Emitted when the user selects "Graph Pointer / Struct..." on a variable row.
      */
     void visualizeInPointerGraphRequested(const QString& exprPath,
                                           const QString& varName,
                                           const QString& varValue,
                                           const QString& varType);
+
+    /**
+     * @brief Emitted when the user selects "Plot 1D/2D Array..." on a variable row.
+     */
+    void plotArrayRequested(const QString& expression, const QString& typeString);
 
     /**
      * @brief Emitted when the user chooses "Open Value in Programmer's Calculator" on a variable row.

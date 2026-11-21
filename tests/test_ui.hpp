@@ -198,5 +198,8 @@ private slots:
 
     /** @brief Verifies Source/Debug/Binary/MPI progressive disclosure, >=60% startup editor width, non-destructive floating docks, ranks==1 vs ranks==4 ServerRack auto-collapse, 0 fake watch columns, and idle control disablement. */
     void testProgressiveDisclosurePerspectivesAndSingleRank();
+
+    /** @brief Verifies single DisassemblyView context menu + CFG/Decompiler menus, Watch registration/removal/contrast/tooltips, MemView cursor byte offset, and VariableTreeModel tooltips/copy/floating signals. */
+    void testCrossViewHandoffsWatchLifecycleAndMemCursor();
 };
 

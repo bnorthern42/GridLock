@@ -69,6 +69,7 @@ public:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 
 public slots:
@@ -85,6 +86,16 @@ public slots:
      * @param name Variable identifier or expression.
      */
     void addVariableColumn(const QString& name);
+
+    /**
+     * @brief Removes a watched expression column by 1-based column index.
+     */
+    bool removeWatchColumn(int col);
+
+    /**
+     * @brief Removes a watched expression column by expression name.
+     */
+    bool removeWatchExpression(const QString& name);
 
     /**
      * @brief Retrieves all active watch column expression strings.
@@ -104,11 +115,24 @@ signals:
      */
     void watchVariableAdded(const QString& name);
 
-private:
     /**
-     * @brief Scans column cells to detect divergence across ranks and updates cell colors.
+     * @brief Emitted when a variable column is removed from the watch table.
      */
+    void watchVariableRemoved(const QString& name);
+
+    /**
+     * @brief Emitted when the user chooses "Plot 1D/2D Array..." on a watch column.
+     */
+    void plotArrayRequested(const QString& expression);
+
+    /**
+     * @brief Emitted when the user chooses "Graph Pointer / Struct..." on a watch column.
+     */
+    void graphPointerRequested(const QString& expression, const QString& value);
+
+private:
     void updateHighlights();
+    void showWatchContextMenu(int row, int col, const QPoint& globalPos);
 };
 
 }  // namespace gridlock::ui

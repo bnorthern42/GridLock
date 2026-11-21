@@ -317,6 +317,12 @@ class IBackendCoordinator : public QObject {
   /** @brief Queries up to 64 call-stack frames and OS/OpenMP threads for @p rank. */
   virtual void requestStackAndThreads(int rank) { Q_UNUSED(rank); }
 
+  /** @brief Registers @p varName for automatic cross-rank watch evaluation on debugger stops. */
+  virtual void registerWatchVariable(const QString& varName) { Q_UNUSED(varName); }
+
+  /** @brief Unregisters @p varName from automatic cross-rank watch evaluation. */
+  virtual void unregisterWatchVariable(const QString& varName) { Q_UNUSED(varName); }
+
   /**
    * @brief Selects @p threadId and @p frameLevel on @p rank, refreshing locals, registers, and source location.
    */

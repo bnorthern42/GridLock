@@ -32,17 +32,28 @@
 #include <QTableWidgetItem>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QClipboard>
+#include <QGraphicsView>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTextBlock>
 #include <QTextDocument>
+#include <QTextEdit>
 #include <QTextLayout>
 #include <QToolBar>
+#include <QTreeView>
+#include <cstring>
 #include <QtTest/QtTest>
 
 #include "../src/RankState.hpp"
+#include "../src/core/hpc/GdbRankCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
+#include "../src/core/models/VariableTreeModel.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
+#include "../src/ui/dialogs/ArrayPlotDialog.hpp"
+#include "../src/ui/docks/VariablesDockWidget.hpp"
 #include "../src/ui/tutorial/TutorialDialog.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"
@@ -542,6 +553,130 @@ void TestMainWindowUI::testSymbolSidebarAndNavRibbon() {
     // Server rack rank nodes check.
     auto* serverRackView = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     QVERIFY(serverRackView != nullptr && serverRackView->rankNodeCount() >= 4);
+}
+
+void TestMainWindowUI::testCrossViewHandoffsWatchLifecycleAndMemCursor() {
+    gridlock::ui::MainWindow mw;
+    mw.resize(1280, 800);
+    mw.setWorkspacePerspective(QStringLiteral("Binary"));
+    mw.show();
+    QApplication::processEvents();
+
+    // 1. DisassemblyView: single context-menu popup on Linear, plus CFG and Decompiler context menus.
+    auto* dv = mw.disassemblyView();
+    QVERIFY(dv != nullptr);
+    dv->loadSampleDisassembly();
+    dv->setProperty("gl_suppress_modal_exec", true);
+    auto* linEdit = dv->findChild<QPlainTextEdit*>(QStringLiteral("cutterLinearDisasm"));
+    auto* cfgView = dv->findChild<QGraphicsView*>(QStringLiteral("cutterCfgGraphView"));
+    auto* decompPage = dv->findChild<QWidget*>(QStringLiteral("decompilerPageContainer"));
+    auto* decompEdit = decompPage ? decompPage->findChild<QPlainTextEdit*>() : nullptr;
+    QVERIFY(linEdit && cfgView && decompEdit);
+
+    dv->setGraphMode(false);
+    QApplication::processEvents();
+    const int beforeCnt = dv->contextMenuPopupCount();
+    emit linEdit->customContextMenuRequested(QPoint(20, 8));
+    QCOMPARE(dv->contextMenuPopupCount(), beforeCnt + 1);
+    QVERIFY(dv->lastContextMenuAddress() != 0ULL);
+
+    dv->setSplitGraphDecompilerMode(true);
+    QApplication::processEvents();
+    QString calcPayload;
+    connect(dv, &gridlock::ui::DisassemblyView::sendToCalculatorRequested, [&](const QString& s) { calcPayload = s; });
+    dv->setProperty("gl_auto_trigger_context_action", QStringLiteral("Calculator"));
+    emit cfgView->customContextMenuRequested(QPoint(20, 20));
+    QCOMPARE(dv->contextMenuPopupCount(), beforeCnt + 2);
+    QVERIFY(calcPayload.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive));
+    calcPayload.clear();
+    emit decompEdit->customContextMenuRequested(QPoint(20, 20));
+    QCOMPARE(dv->contextMenuPopupCount(), beforeCnt + 3);
+    QVERIFY(calcPayload.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive));
+
+    // 2. DifferentialGrid (Watch): coordinator registration via addPromotedWatch, contrast/tooltips, and Del removal.
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(2);
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"main\",fullname=\"/tmp/a.cpp\",line=\"3\",args=[]}\n"));
+    QStringList gdbCmds;
+    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int, const QString& c) { gdbCmds.append(c.trimmed()); });
+    mw.setCoordinator(&coord);
+    auto* varsWidget = mw.variablesDockWidget();
+    auto* diffGrid = mw.differentialGrid();
+    QVERIFY(varsWidget && diffGrid);
+    QVERIFY(varsWidget->promoteVariableToWatch(QStringLiteral("residual_norm")));
+    QApplication::processEvents();
+    QCOMPARE(static_cast<int>(diffGrid->getWatchExpressions().size()), 1);
+    QCOMPARE(static_cast<int>(coord.registeredWatchVariables().size()), 1);
+    QVERIFY(gdbCmds.join(QLatin1Char('\n')).contains(QStringLiteral("-var-create - * residual_norm")));
+
+    diffGrid->updateVariableDisplay(0, QStringLiteral("residual_norm"), QStringLiteral("1.0"));
+    diffGrid->updateVariableDisplay(1, QStringLiteral("residual_norm"), QStringLiteral("1.0"));
+    diffGrid->updateVariableDisplay(2, QStringLiteral("residual_norm"), QStringLiteral("4.5"));
+    QTableWidgetItem* divCell = diffGrid->item(3, 1);
+    QVERIFY(divCell != nullptr);
+    QVERIFY(divCell->foreground().color().lightness() < 90);
+    QVERIFY(divCell->toolTip().contains(QStringLiteral("residual_norm")) && divCell->toolTip().contains(QStringLiteral("+3.5")) && divCell->toolTip().contains(QStringLiteral("DIVERGENT")));
+
+    diffGrid->setCurrentCell(1, 1);
+    QTest::keyClick(diffGrid, Qt::Key_Delete);
+    QApplication::processEvents();
+    QVERIFY(diffGrid->getWatchExpressions().empty() && coord.registeredWatchVariables().empty());
+
+    // 3. MemView: non-zero cursor byte offset extraction for 64-bit word handoff.
+    auto* mem = mw.memView();
+    QVERIFY(mem != nullptr);
+    QByteArray raw(32, '\0');
+    const uint64_t w0 = 0x1111111111111111ULL, w8 = 0x0102030405060708ULL, w16 = 0xCAFEBABEDEADBEEFULL;
+    std::memcpy(raw.data() + 0, &w0, 8);
+    std::memcpy(raw.data() + 8, &w8, 8);
+    std::memcpy(raw.data() + 16, &w16, 8);
+    mem->setMemoryData(QStringLiteral("0x00402000"), raw);
+    auto* dumpEdit = mem->findChild<QTextEdit*>(QStringLiteral("cutterHexDumpEdit"));
+    QVERIFY(dumpEdit != nullptr);
+    const QString plain = dumpEdit->toPlainText();
+    const int row1Idx = plain.indexOf(QStringLiteral("0x0000000000402010"));
+    QVERIFY(row1Idx > 0);
+    QTextCursor cur16(dumpEdit->document());
+    cur16.setPosition(row1Idx + 20);
+    QCOMPARE(mem->byteOffsetAtCursor(cur16), 16);
+    int bits = 0;
+    QCOMPARE(mem->wordHexAtByteOffset(16, &bits), QStringLiteral("0xCAFEBABEDEADBEEF"));
+    QCOMPARE(bits, 64);
+
+    const int row0Idx = plain.indexOf(QStringLiteral("0x0000000000402000"));
+    QVERIFY(row0Idx >= 0);
+    QTextCursor cur8(dumpEdit->document());
+    cur8.setPosition(row0Idx + 19 + 25);
+    QCOMPARE(mem->byteOffsetAtCursor(cur8), 8);
+    QCOMPARE(mem->wordHexAtByteOffset(8, &bits), QStringLiteral("0x102030405060708"));
+
+    // 4. VariableTreeModel Qt::ToolTipRole, VariablesDockWidget Ctrl+C copy, and floating signal routing.
+    auto* varModel = mw.findChild<gridlock::VariableTreeModel*>();
+    auto* varTree = varsWidget->findChild<QTreeView*>();
+    QVERIFY(varModel && varTree);
+    varModel->onLocalsUpdated(0, 0, QJsonArray{QJsonObject{{QStringLiteral("name"), QStringLiteral("mesh_ptr")}, {QStringLiteral("value"), QStringLiteral("0x7fff00001000")}, {QStringLiteral("type"), QStringLiteral("MeshDomain *")}}});
+    varModel->loadLocals(0);
+    varModel->onLocalsUpdated(0, 0, QJsonArray{QJsonObject{{QStringLiteral("name"), QStringLiteral("mesh_ptr")}, {QStringLiteral("value"), QStringLiteral("0x7fff00002000")}, {QStringLiteral("type"), QStringLiteral("MeshDomain *")}}});
+    const QModelIndex mIdx = varModel->index(0, 1);
+    const QString varTip = varModel->data(mIdx, Qt::ToolTipRole).toString();
+    QVERIFY(varTip.contains(QStringLiteral("mesh_ptr")) && varTip.contains(QStringLiteral("MeshDomain *")) && varTip.contains(QStringLiteral("0x7fff00002000")) && varTip.contains(QStringLiteral("Previous: 0x7fff00001000")));
+
+    varTree->setCurrentIndex(varTree->model()->index(0, 0));
+    QVERIFY(varsWidget->copySelectedVariableValue());
+    QCOMPARE(QApplication::clipboard()->text(), QStringLiteral("0x7fff00002000"));
+
+    auto* varsDock = mw.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+    QVERIFY(varsDock != nullptr);
+    mw.toggleDockFloating(varsDock);
+    QVERIFY(mw.isDockFloating(varsDock));
+    emit varsWidget->plotArrayRequested(QStringLiteral("u_field"), QStringLiteral("double[64]"));
+    QApplication::processEvents();
+    auto* plotDlg = mw.findChild<gridlock::ui::ArrayPlotDialog*>();
+    QVERIFY(plotDlg && plotDlg->isVisible());
+    plotDlg->close();
+    mw.redockAllFloatingPanels();
+    mw.setCoordinator(nullptr);
+    mw.close();
 }
 
 QTEST_MAIN(TestMainWindowUI)

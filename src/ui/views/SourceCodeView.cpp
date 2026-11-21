@@ -506,7 +506,7 @@ QMenu* SourceCodeView::createEditorContextMenuAt(const QPoint& editorPos) {
     menu->addAction(QStringLiteral("Go to Definition"), this, &SourceCodeView::triggerGoToDefinition)->setShortcut(QKeySequence(Qt::Key_F12));
     if (!exprTok.isEmpty() && exprTok != structType) menu->addAction(QStringLiteral("Graph '%1' in Pointer Graph").arg(exprTok), this, [this, exprTok]() { emit graphExpressionRequested(exprTok); });
     if (!structType.isEmpty()) menu->addAction(QStringLiteral("Graph '%1' Struct Instances").arg(structType), this, [this, structType]() { emit graphStructTypeRequested(structType); });
-    if (!calcTok.isEmpty()) menu->addAction(QStringLiteral("Open Selection in Programmer's Calculator"), this, [this, calcTok]() { emit sendToCalculatorRequested(calcTok); if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, calcTok)); });
+    if (!calcTok.isEmpty()) menu->addAction(QStringLiteral("Open Selection in Programmer's Calculator"), this, [this, calcTok]() { emit sendToCalculatorRequested(calcTok); });
     menu->addSeparator();
     QAction* rtcAct = menu->addAction(QStringLiteral("Run to Cursor"), this, [this, clickedLine]() { emit runToCursorRequested(m_currentFilePath, clickedLine); });
     const QAction* winRtc = window() ? window()->findChild<QAction*>(QStringLiteral("actionRunToCursor")) : nullptr;

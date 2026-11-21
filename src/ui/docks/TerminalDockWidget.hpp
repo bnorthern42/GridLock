@@ -167,6 +167,7 @@ private:
     QString m_currentWorkingDir;           ///< Canonical active working directory for the shell PTY.
     bool m_applyingFontGuard{false};       ///< Reentrancy guard preventing recursive FontChange loops.
     bool m_shellStarted{false};            ///< True once m_termWidget->startShellProgram() has been invoked.
+    bool m_pendingCdSync{false};           ///< Ensures active working directory is synced before the next shell command.
     int m_scrollbackLines{1000};           ///< Configured scrollback buffer capacity in lines.
     QElapsedTimer m_shellStartTimer;       ///< Tracks elapsed time since startShellProgram() for initial PTY readiness.
 };

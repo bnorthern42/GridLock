@@ -348,22 +348,9 @@ DisassemblyView::DisassemblyView(QWidget *parent) : QWidget(parent) {
   m_linearEdit->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(m_linearEdit, &QPlainTextEdit::customContextMenuRequested, this, [this](const QPoint& pos) {
     const int lineIdx = m_linearEdit->cursorForPosition(pos).blockNumber();
-    const uint64_t addr = m_lineToAddr.value(lineIdx, m_currentAddress);
-    const QString addrHex = QStringLiteral("0x%1").arg(addr, 0, 16).toUpper();
-    QMenu* menu = m_linearEdit->createStandardContextMenu();
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("Run to Instruction Address (%1)").arg(addrHex), this, [this, addr]() { emit runToAddressRequested(addr); });
-    menu->addAction(QStringLiteral("Jump / Set PC to Address (%1)").arg(addrHex), this, [this, addr]() { emit jumpToAddressRequested(addr); });
-    menu->addSeparator();
-    QAction* calcAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
-    for (const QString& actLabel : contextActionNamesForAddress(addr)) {
-      connect(menu->addAction(actLabel), &QAction::triggered, this, [this, addr, actLabel]() { triggerContextAction(addr, actLabel); });
-    }
-    if (menu->exec(m_linearEdit->viewport()->mapToGlobal(pos)) == calcAct) {
-      emit sendToCalculatorRequested(addrHex);
-      if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, addrHex));
-    }
-    delete menu;
+    execAddressContextMenu(m_lineToAddr.value(lineIdx, m_currentAddress),
+                           m_linearEdit->viewport()->mapToGlobal(pos),
+                           m_linearEdit->createStandardContextMenu());
   });
 
   /** @brief Interactive CFG QGraphicsView with hold-to-pan, horizontal wheel/key navigation, and ArrowCursor idle state. */

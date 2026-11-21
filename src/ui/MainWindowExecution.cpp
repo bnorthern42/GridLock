@@ -421,7 +421,6 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
             });
             connect(proxy, &QAbstractItemModel::modelReset, this, syncVars); connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex&, int, int) { syncVars(); });
         }
-        connect(m_variablesDockWidget, &VariablesDockWidget::visualizeInPointerGraphRequested, this, [this](const QString& expr, const QString&, const QString& val, const QString& typ) { openPointerGraphVisualizer(expr, val, typ); });
     }
     if (m_coordinator && !m_coordinator->property("gl_inline_eval_bound").toBool()) {
         m_coordinator->setProperty("gl_inline_eval_bound", true); QPointer<EditorTabManager> etmPtr(m_editorTabManager);
@@ -912,6 +911,7 @@ void bindSourceViewGraphSignals(MainWindow* mw, SourceCodeView* sv) {
     sv->setProperty("gl_graph_ctx_wired", true);
     QObject::connect(sv, &SourceCodeView::graphExpressionRequested, mw, [mw](const QString& expr) { mw->openPointerGraphVisualizer(expr); });
     QObject::connect(sv, &SourceCodeView::graphStructTypeRequested, mw, [mw](const QString& tp) { graphStructTypeFromSource(mw, tp); });
+    QObject::connect(sv, &SourceCodeView::sendToCalculatorRequested, mw, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
 }
 }  // namespace
 

@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QList>
 #include <QMap>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -247,6 +248,10 @@ public:
     int codeFontPointSize() const;
     /// Returns the 64-bit instruction address at the current linear cursor (falling back to currentAddress()).
     uint64_t selectedInstructionAddress() const { return m_lineToAddr.value(textCursor().blockNumber(), m_currentAddress); }
+    /// Returns total number of instruction context menus invoked on Linear, CFG, or Decompiler views.
+    int contextMenuPopupCount() const { return m_contextMenuPopupCount; }
+    /// Returns the 64-bit target instruction address of the most recently invoked context menu.
+    uint64_t lastContextMenuAddress() const { return m_lastContextMenuAddress; }
 
 
 signals:
@@ -368,6 +373,9 @@ private:
     QString m_targetLang = QStringLiteral("C");
     QString m_decompiledPseudocode;
     QString m_highlightedToken;
+    void execAddressContextMenu(uint64_t addr, const QPoint& globalPos, QMenu* baseMenu = nullptr);
+    int m_contextMenuPopupCount = 0;
+    uint64_t m_lastContextMenuAddress = 0;
     XrefInspectorDialog* m_xrefDialog = nullptr;
     QVector<XrefRecord> m_xrefs;
 };

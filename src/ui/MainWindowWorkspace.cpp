@@ -486,6 +486,10 @@ void MainWindow::setupDocks() {
   // Right Inspection Zone: Variables, Registers, Watch Expressions, and Server Rack
   m_variablesDockWidget = new VariablesDockWidget(this);
   m_variablesDockWidget->setObjectName("VariablesWidget");
+  connect(m_variablesDockWidget, &VariablesDockWidget::plotArrayRequested, this,
+          [this](const QString &expr, const QString &typ) { openArrayPlotter(expr, typ); });
+  connect(m_variablesDockWidget, &VariablesDockWidget::visualizeInPointerGraphRequested, this,
+          [this](const QString &expr, const QString &, const QString &val, const QString &typ) { openPointerGraphVisualizer(expr, val, typ); });
   QDockWidget *variablesDock = new QDockWidget("Variables", this);
   variablesDock->setObjectName("VariablesDock");
   variablesDock->setWidget(m_variablesDockWidget);
@@ -509,8 +513,14 @@ void MainWindow::setupDocks() {
   m_differentialGrid->verticalHeader()->setDefaultSectionSize(20);
   m_differentialGrid->horizontalHeader()->setDefaultSectionSize(96);
   connect(m_differentialGrid, &DifferentialGrid::watchVariableAdded, this, [this](const QString &name) {
-    if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) gdbCoord->registerWatchVariable(name);
+    if (m_coordinator) m_coordinator->registerWatchVariable(name);
   });
+  connect(m_differentialGrid, &DifferentialGrid::watchVariableRemoved, this, [this](const QString &name) {
+    if (m_coordinator) m_coordinator->unregisterWatchVariable(name);
+  });
+  connect(m_differentialGrid, &DifferentialGrid::plotArrayRequested, this, [this](const QString &expr) { openArrayPlotter(expr); });
+  connect(m_differentialGrid, &DifferentialGrid::graphPointerRequested, this,
+          [this](const QString &expr, const QString &val) { openPointerGraphVisualizer(expr, val); });
 
   m_differentialGrid->setColumnHidden(0, true);
   m_differentialGrid->setRowHidden(0, true);

@@ -22,6 +22,7 @@ class QTextEdit;
 class QComboBox;
 class QLabel;
 class QStackedWidget;
+class QTextCursor;
 
 namespace gridlock::ui {
 
@@ -89,6 +90,12 @@ public:
     void setPoppedOut(bool poppedOut);
     /// Returns true when MemView is currently detached into its standalone top-level window.
     bool isPoppedOut() const { return m_isPoppedOut; }
+    /// Resolves the 0-based byte offset in m_lastRawData corresponding to a QTextCursor inside the hex dump.
+    int byteOffsetAtCursor(const QTextCursor& cursor) const;
+    /// Resolves the 0-based byte offset in m_lastRawData under viewport coordinate @p pos.
+    int byteOffsetAtPosition(const QPoint& pos) const;
+    /// Formats the 64-bit (or 32-bit fallback) little-endian word starting at @p byteOffset as "0x...".
+    QString wordHexAtByteOffset(int byteOffset, int* outBitWidth = nullptr) const;
 
 protected:
     /// Paints the memory inspector container and synchronizes theme-dependent hex colors.

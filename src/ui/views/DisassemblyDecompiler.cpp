@@ -19,6 +19,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QGraphicsSimpleTextItem>
+#include <QGraphicsView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMap>
@@ -134,18 +135,25 @@ void DisassemblyView::setupDecompilerUi(QSplitter* splitSplitter, const QFont& f
   splitSplitter->setStretchFactor(1, 1);
   m_decompilerPage->hide();
 
-  // Wire right-click context menu on the linear disassembly editor page (page 0 of m_stack).
-  if (QWidget *linearWidget = (m_stack && m_stack->count() > 0) ? m_stack->widget(0) : nullptr) {
-    linearWidget->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(linearWidget, &QWidget::customContextMenuRequested, this, [this, linearWidget](const QPoint &pos) {
-      QMenu menu(this);
-      const QStringList actions = contextActionNamesForAddress(m_currentAddress);
-      for (const QString &actName : actions) {
-        menu.addAction(actName);
+  // Wire right-click address context menus on CFG graph view and Decompiler view (Linear is wired once in DisassemblyView.cpp).
+  if (m_cfgView) {
+    m_cfgView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_cfgView, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+      uint64_t addr = m_currentAddress;
+      for (QGraphicsItem *it = m_cfgView->itemAt(pos); it; it = it->parentItem()) {
+        if (const uint64_t a = it->data(Qt::UserRole).toULongLong(); a != 0ULL) { addr = a; break; }
       }
-      if (QAction *chosen = menu.exec(linearWidget->mapToGlobal(pos))) {
-        triggerContextAction(m_currentAddress, chosen->text());
-      }
+      execAddressContextMenu(addr, m_cfgView->viewport()->mapToGlobal(pos));
+    });
+  }
+  if (m_decompilerEdit) {
+    m_decompilerEdit->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_decompilerEdit, &QPlainTextEdit::customContextMenuRequested, this, [this](const QPoint &pos) {
+      const int ln = m_decompilerEdit->cursorForPosition(pos).blockNumber() + 1;
+      const uint64_t mapped = decompilerLineToAddress(ln);
+      execAddressContextMenu(mapped != 0ULL ? mapped : m_currentAddress,
+                             m_decompilerEdit->viewport()->mapToGlobal(pos),
+                             m_decompilerEdit->createStandardContextMenu());
     });
   }
 }
@@ -889,6 +897,29 @@ bool DisassemblyView::activeCfgBlockContainsInstructionMarker(uint64_t addr) con
     }
   }
   return false;
+}
+
+void DisassemblyView::execAddressContextMenu(uint64_t addr, const QPoint& globalPos, QMenu* baseMenu) {
+  ++m_contextMenuPopupCount;
+  m_lastContextMenuAddress = addr;
+  const QString addrHex = QStringLiteral("0x%1").arg(addr, 0, 16).toUpper();
+  const bool ownsMenu = (baseMenu == nullptr);
+  QMenu* menu = baseMenu ? baseMenu : new QMenu(this);
+  if (!ownsMenu) menu->addSeparator();
+  menu->addAction(QStringLiteral("Run to Instruction Address (%1)").arg(addrHex), this, [this, addr]() { emit runToAddressRequested(addr); });
+  menu->addAction(QStringLiteral("Jump / Set PC to Address (%1)").arg(addrHex), this, [this, addr]() { emit jumpToAddressRequested(addr); });
+  menu->addSeparator();
+  QAction* calcAct = menu->addAction(QStringLiteral("Open Address in Programmer's Calculator (%1)").arg(addrHex));
+  for (const QString& actLabel : contextActionNamesForAddress(addr)) {
+    connect(menu->addAction(actLabel), &QAction::triggered, this, [this, addr, actLabel]() { triggerContextAction(addr, actLabel); });
+  }
+  if (!property("gl_suppress_modal_exec").toBool()) {
+    if (menu->exec(globalPos) == calcAct) emit sendToCalculatorRequested(addrHex);
+  } else if (const QString autoAct = property("gl_auto_trigger_context_action").toString(); !autoAct.isEmpty()) {
+    if (autoAct.contains(QStringLiteral("Calculator"), Qt::CaseInsensitive)) emit sendToCalculatorRequested(addrHex);
+    else triggerContextAction(addr, autoAct);
+  }
+  delete menu;
 }
 
 }  // namespace gridlock::ui

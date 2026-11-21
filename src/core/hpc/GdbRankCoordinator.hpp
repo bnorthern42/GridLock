@@ -410,7 +410,21 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void pauseRank(int rankId) override { pauseFocusedRank(rankId); }
 
   /** @brief Registers @p varName as a tracked GDB/MI variable object (`-var-create`) across all ranks. */
-  void registerWatchVariable(const QString& varName);
+  void registerWatchVariable(const QString& varName) override;
+
+  /** @brief Unregisters @p varName and deletes any active GDB/MI `-var-delete` objects across ranks. */
+  void unregisterWatchVariable(const QString& varName) override {
+    m_watchVariables.erase(std::remove(m_watchVariables.begin(), m_watchVariables.end(), varName), m_watchVariables.end());
+    for (auto it = m_varNameMap.begin(); it != m_varNameMap.end(); ++it) {
+      if (it.value().contains(varName)) {
+        const QString vo = it.value().take(varName);
+        if (!vo.isEmpty()) writeCmd(it.key(), QStringLiteral("-var-delete %1\n").arg(vo));
+      }
+    }
+  }
+
+  /** @brief Returns currently registered cross-rank watch variable expressions. */
+  const std::vector<QString>& registeredWatchVariables() const { return m_watchVariables; }
 
   /** @brief Sends a user or console command to @p rankId (or all ranks when `rankId == -1`). */
   void sendCommand(int rankId, const QString& cmd);

@@ -14,11 +14,14 @@
 
 #include <functional>
 
+#include <QApplication>
+#include <QClipboard>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
 #include <QRegularExpression>
+#include <QShortcut>
 #include <QVBoxLayout>
 
 namespace gridlock {
@@ -95,8 +98,7 @@ bool VariablesDockWidget::promoteVariableToWatch(const QString& variableName) {
  */
 void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
     m_coordinator = coordinator;
-    // Replace old tree model while preserving proxy filtering and tree sorting.
-    m_model->deleteLater();
+    if (m_model) { m_model->setParent(nullptr); m_model->deleteLater(); }
     m_model = new VariableTreeModel(coordinator, this);
     m_proxyModel->setSourceModel(m_model);
 
@@ -247,67 +249,69 @@ void VariablesDockWidget::setupUi() {
         }
     });
 
-    // Right-clicking a variable row opens a context menu to promote its full C++ path to Watches/Watchpoints.
+    auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_variablesTree);
+    copyShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(copyShortcut, &QShortcut::activated, this, [this]() { copySelectedVariableValue(); });
+
+    // Right-clicking a variable row opens a context menu to copy, plot, graph, or promote to Watches/Watchpoints.
     connect(m_variablesTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const QModelIndex proxyIdx = m_variablesTree->indexAt(pos);
-        if (!proxyIdx.isValid() || !m_model || !m_proxyModel) {
-            return;
-        }
+        if (!proxyIdx.isValid() || !m_model || !m_proxyModel) return;
         const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
         QString exprPath = m_model->expressionPath(srcIdx.siblingAtColumn(0)).trimmed();
-        if (exprPath.isEmpty()) {
-            exprPath = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
-        }
-        if (exprPath.isEmpty()) {
-            return;
-        }
+        if (exprPath.isEmpty()) exprPath = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
+        if (exprPath.isEmpty()) return;
+        const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
+        const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
+        const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
+
         QMenu menu(this);
+        QAction* copyValAct = menu.addAction(QStringLiteral("Copy Value (Ctrl+C)"));
+        QAction* copyExprAct = menu.addAction(QStringLiteral("Copy Expression"));
+        menu.addSeparator();
         QAction* watchAct = menu.addAction(QStringLiteral("Add to Watch Expressions"));
         QAction* plotAct = menu.addAction(QStringLiteral("Plot 1D/2D Array..."));
-        QAction* graphShortAct = menu.addAction(QStringLiteral("Graph Pointer / Struct..."));
-        QAction* graphAct = menu.addAction(QStringLiteral("Visualize in Pointer / Struct Graph..."));
+        QAction* graphAct = menu.addAction(QStringLiteral("Graph Pointer / Struct..."));
         QAction* calcAct = menu.addAction(QStringLiteral("Open Value in Programmer's Calculator"));
         menu.addSeparator();
-        QAction* wpWriteAct =
-            menu.addAction(QStringLiteral("Watch Memory Write (Hardware Watchpoint)"));
-        QAction* wpReadAct =
-            menu.addAction(QStringLiteral("Watch Memory Read (Hardware Watchpoint)"));
-        QAction* wpRwAct =
-            menu.addAction(QStringLiteral("Watch Memory Read/Write (Hardware Watchpoint)"));
+        QAction* wpWriteAct = menu.addAction(QStringLiteral("Watch Memory Write (Hardware Watchpoint)"));
+        QAction* wpReadAct = menu.addAction(QStringLiteral("Watch Memory Read (Hardware Watchpoint)"));
+        QAction* wpRwAct = menu.addAction(QStringLiteral("Watch Memory Read/Write (Hardware Watchpoint)"));
 
         QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
-        if (chosen == watchAct) {
+        if (chosen == copyValAct) {
+            QApplication::clipboard()->setText(varVal.isEmpty() ? exprPath : varVal);
+        } else if (chosen == copyExprAct) {
+            QApplication::clipboard()->setText(exprPath);
+        } else if (chosen == watchAct) {
             promoteVariableToWatch(exprPath);
         } else if (chosen == plotAct) {
-            const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
-            if (QWidget* win = window()) {
-                QMetaObject::invokeMethod(win, "openArrayPlotter",
-                                          Q_ARG(QString, exprPath),
-                                          Q_ARG(QString, varTyp));
-            }
-        } else if (chosen == graphAct || chosen == graphShortAct) {
-            const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
-            const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
-            const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
+            emit plotArrayRequested(exprPath, varTyp);
+        } else if (chosen == graphAct) {
             emit visualizeInPointerGraphRequested(exprPath, varName, varVal, varTyp);
         } else if (chosen == calcAct) {
-            QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
-            if (varVal.isEmpty()) varVal = exprPath;
-            emit sendToCalculatorRequested(varVal);
-            if (QWidget* win = window()) {
-                QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, varVal));
-            }
+            emit sendToCalculatorRequested(varVal.isEmpty() ? exprPath : varVal);
         } else if (chosen == wpWriteAct || chosen == wpReadAct || chosen == wpRwAct) {
             const auto mode = (chosen == wpReadAct)
                                   ? ::WatchpointAccessMode::Read
                                   : ((chosen == wpRwAct) ? ::WatchpointAccessMode::ReadWrite
                                                          : ::WatchpointAccessMode::Write);
-            if (m_coordinator) {
-                m_coordinator->setDataWatchpoint(exprPath, mode, -1);
-            }
+            if (m_coordinator) m_coordinator->setDataWatchpoint(exprPath, mode, -1);
             emit dataWatchpointRequested(exprPath, static_cast<int>(mode));
         }
     });
+}
+
+bool VariablesDockWidget::copySelectedVariableValue() const {
+    if (!m_variablesTree || !m_model || !m_proxyModel) return false;
+    const QModelIndex proxyIdx = m_variablesTree->currentIndex();
+    if (!proxyIdx.isValid()) return false;
+    const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
+    QString val = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
+    if (val.isEmpty()) val = m_model->expressionPath(srcIdx.siblingAtColumn(0)).trimmed();
+    if (val.isEmpty()) return false;
+    QApplication::clipboard()->setText(val);
+    return true;
 }
 
 /**
