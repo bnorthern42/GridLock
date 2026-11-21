@@ -86,9 +86,10 @@ QStringList discoverMonospaceFontFamilies() {
 QFormLayout* createStandardPageForm(QWidget* parent, const QString& titleHtml,
                                     int spacing = 14) {
     auto* form = new QFormLayout(parent);
-    form->setContentsMargins(24, 24, 24, 24);
+    form->setContentsMargins(20, 16, 20, 24);
     form->setSpacing(spacing);
     form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     // Section title heading label with custom object name for styling.
     auto* heading = new QLabel(titleHtml, parent);
@@ -151,7 +152,8 @@ QLineEdit* addBrowsePathRow(QWidget* parent, QFormLayout* form,
 void addFormNote(QWidget* parent, QFormLayout* form, const QString& html) {
     auto* note = new QLabel(html, parent);
     note->setWordWrap(true);
-    form->addRow(QString(), note);
+    note->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    form->addRow(note);
 }
 
 }  // namespace
@@ -683,7 +685,7 @@ void DebuggerSettingsPage::loadFromSettings() {
 DocsetSettingsPage::DocsetSettingsPage(QWidget* parent)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setContentsMargins(20, 16, 20, 24);
     layout->setSpacing(14);
 
     auto* heading = new QLabel(tr("<b>Offline Docsets</b>"), this);

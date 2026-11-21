@@ -78,9 +78,10 @@ HpcSettingsPage::HpcSettingsPage(QWidget* parent)
     : QWidget(parent) {
     // Configure top-level form layout with section heading and separator.
     auto* form = new QFormLayout(this);
-    form->setContentsMargins(24, 24, 24, 24);
+    form->setContentsMargins(20, 16, 20, 24);
     form->setSpacing(14);
     form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     // Create bold category title label at the top of the page.
     auto* heading = new QLabel(tr("<b>HPC / Cluster</b>"), this);
@@ -144,7 +145,8 @@ HpcSettingsPage::HpcSettingsPage(QWidget* parent)
            "<b>next</b> debug session launch.</small>"),
         this);
     note->setWordWrap(true);
-    form->addRow(QString(), note);
+    note->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    form->addRow(note);
 
     // Populate initial form controls from persistent ConfigManager state.
     loadFromSettings();
@@ -187,25 +189,16 @@ void HpcSettingsPage::loadFromSettings() {
  */
 HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
     : QWidget(parent) {
-    // Wrap the page in a borderless scroll area so all 16 SLURM controls fit comfortably.
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-    outer->addWidget(scroll);
-
-    // Create inner scrollable form container.
-    auto* container = new QWidget();
-    scroll->setWidget(container);
-    auto* form = new QFormLayout(container);
-    form->setContentsMargins(24, 20, 24, 20);
+    // Use a full-width single-column QFormLayout; PreferencesDialog wraps every page in a vertical-only QScrollArea.
+    auto* form = new QFormLayout(this);
+    form->setContentsMargins(20, 16, 20, 24);
     form->setSpacing(10);
     form->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     // Helper lambda to insert styled bold section headings into the form layout.
     auto addSectionHeading = [&](const QString& title) {
-        auto* lbl = new QLabel(title, container);
+        auto* lbl = new QLabel(title, this);
         lbl->setObjectName("heading");
         form->addRow(lbl);
     };
@@ -213,27 +206,23 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
     // 1. SSH Remote node credentials section.
     addSectionHeading(tr("<b>Remote SSH Connection</b>"));
 
-    // Remote login node hostname or IP address field.
-    m_sshHostEdit = new QLineEdit(container);
+    m_sshHostEdit = new QLineEdit(this);
     m_sshHostEdit->setPlaceholderText(tr("e.g. login.hpc.university.edu"));
     m_sshHostEdit->setToolTip(tr("Hostname or IP of the HPC login node."));
     form->addRow(tr("SSH Host:"), m_sshHostEdit);
 
-    // Remote cluster account username field.
-    m_sshUserEdit = new QLineEdit(container);
+    m_sshUserEdit = new QLineEdit(this);
     m_sshUserEdit->setPlaceholderText(tr("your_hpc_username"));
     form->addRow(tr("SSH User:"), m_sshUserEdit);
 
-    // Private SSH key path row with non-clipped 92px Browse button.
     auto* keyRow = new QHBoxLayout();
-    m_sshKeyEdit = new QLineEdit(container);
+    m_sshKeyEdit = new QLineEdit(this);
     m_sshKeyEdit->setPlaceholderText(tr("~/.ssh/id_rsa"));
     m_sshKeyEdit->setToolTip(
         tr("Path to the private SSH key file used for authentication."));
-    auto* keyBrowse = new QPushButton(tr("Browse…"), container);
+    auto* keyBrowse = new QPushButton(tr("Browse…"), this);
     keyBrowse->setMinimumWidth(92);
     connect(keyBrowse, &QPushButton::clicked, this, [this]() {
-        // Prompt user to choose an SSH private key file from ~/.ssh or Home.
         const QString path = QFileDialog::getOpenFileName(
             this, tr("Select SSH Private Key"), QDir::homePath(),
             tr("SSH Keys (id_rsa id_ed25519 *.pem);; All Files (*)"), nullptr,
@@ -242,24 +231,25 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
             m_sshKeyEdit->setText(path);
         }
     });
-    keyRow->addWidget(m_sshKeyEdit);
+    keyRow->addWidget(m_sshKeyEdit, 1);
     keyRow->addWidget(keyBrowse);
     form->addRow(tr("SSH Key Path:"), keyRow);
 
-    // 2. SLURM Batch Configuration section with file auto-detector and 16 directives.
+    // 2. SLURM Batch Configuration section with responsive script loader and 16 full-width directives.
     addSectionHeading(tr("<b>SLURM Batch Configuration</b>"));
 
-    // Top row: Load & Auto-Detect .sbatch Script button, file path display, and Sync button.
-    auto* sbatchFileRow = new QHBoxLayout();
-    auto* loadSbatchBtn = new QPushButton(tr("Load && Auto-Detect .sbatch Script..."), container);
-    loadSbatchBtn->setObjectName(QStringLiteral("loadSlurmScriptButton"));
-    loadSbatchBtn->setMinimumWidth(210);
-    m_sbatchFilePathEdit = new QLineEdit(container);
+    auto* sbatchContainer = new QVBoxLayout();
+    sbatchContainer->setSpacing(6);
+    m_sbatchFilePathEdit = new QLineEdit(this);
     m_sbatchFilePathEdit->setPlaceholderText(tr("Select an existing .sbatch / .slurm / .sh script to auto-populate fields..."));
-    auto* syncPreviewBtn = new QPushButton(tr("Sync Fields -> Script Preview"), container);
-    syncPreviewBtn->setMinimumWidth(175);
+    sbatchContainer->addWidget(m_sbatchFilePathEdit);
+
+    auto* sbatchBtnRow = new QHBoxLayout();
+    sbatchBtnRow->setSpacing(8);
+    auto* loadSbatchBtn = new QPushButton(tr("Load && Auto-Detect .sbatch Script..."), this);
+    loadSbatchBtn->setObjectName(QStringLiteral("loadSlurmScriptButton"));
+    auto* syncPreviewBtn = new QPushButton(tr("Sync Fields -> Script Preview"), this);
     connect(loadSbatchBtn, &QPushButton::clicked, this, [this]() {
-        // Open file chooser for .sbatch / .slurm / .job / .sh scripts and auto-parse directives.
         const QString path = QFileDialog::getOpenFileName(
             this, tr("Select SLURM Batch Script"), QDir::currentPath(),
             tr("SLURM Batch Scripts (*.sbatch *.slurm *.job *.sh);;All Files (*)"),
@@ -269,50 +259,47 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
         }
     });
     connect(syncPreviewBtn, &QPushButton::clicked, this, [this]() {
-        // Regenerate the #SBATCH script preview from the 16 form controls.
         m_templateEdit->setPlainText(generateSlurmBatchScript());
     });
-    sbatchFileRow->addWidget(loadSbatchBtn);
-    sbatchFileRow->addWidget(m_sbatchFilePathEdit, 1);
-    sbatchFileRow->addWidget(syncPreviewBtn);
-    form->addRow(tr("Batch Script:"), sbatchFileRow);
+    sbatchBtnRow->addWidget(loadSbatchBtn);
+    sbatchBtnRow->addWidget(syncPreviewBtn);
+    sbatchBtnRow->addStretch(1);
+    sbatchContainer->addLayout(sbatchBtnRow);
+    form->addRow(tr("Batch Script:"), sbatchContainer);
 
-    // Build a compact 2-column QGridLayout holding all 16 standard SLURM directives.
-    auto* gridWidget = new QWidget(container);
-    auto* grid = new QGridLayout(gridWidget);
-    grid->setContentsMargins(0, 4, 0, 4);
-    grid->setHorizontalSpacing(12);
-    grid->setVerticalSpacing(8);
-
-    // Row 0: Directive 1 (Job Name --job-name) and Directive 2 (Account --account).
-    m_jobNameEdit = new QLineEdit(gridWidget);
+    // Directive 1: Job Name (--job-name)
+    m_jobNameEdit = new QLineEdit(this);
     m_jobNameEdit->setPlaceholderText(tr("gridlock_debug"));
-    m_accountEdit = new QLineEdit(gridWidget);
-    m_accountEdit->setPlaceholderText(tr("(optional allocation / project)"));
-    grid->addWidget(new QLabel(tr("Job Name (--job-name):"), gridWidget), 0, 0, Qt::AlignRight);
-    grid->addWidget(m_jobNameEdit, 0, 1);
-    grid->addWidget(new QLabel(tr("Account (--account):"), gridWidget), 0, 2, Qt::AlignRight);
-    grid->addWidget(m_accountEdit, 0, 3);
+    m_jobNameEdit->setToolTip(tr("SLURM job name (--job-name / -J)."));
+    form->addRow(tr("Job Name:"), m_jobNameEdit);
 
-    // Row 1: Directive 3 (Partition --partition) and Directive 4 (Quality of Service --qos).
-    m_partitionCombo = new QComboBox(gridWidget);
+    // Directive 2: Account (--account)
+    m_accountEdit = new QLineEdit(this);
+    m_accountEdit->setPlaceholderText(tr("(optional allocation / project)"));
+    m_accountEdit->setToolTip(tr("SLURM allocation or project account (--account / -A)."));
+    form->addRow(tr("Account:"), m_accountEdit);
+
+    // Directive 3: Partition (--partition)
+    m_partitionCombo = new QComboBox(this);
     m_partitionCombo->setEditable(true);
     m_partitionCombo->addItems({QStringLiteral("batch"), QStringLiteral("debug"),
                                 QStringLiteral("gpu"), QStringLiteral("compute"),
                                 QStringLiteral("interactive"), QStringLiteral("highmem"),
                                 QStringLiteral("long")});
-    m_qosCombo = new QComboBox(gridWidget);
+    m_partitionCombo->setToolTip(tr("Target SLURM queue or partition (--partition / -p)."));
+    form->addRow(tr("Partition:"), m_partitionCombo);
+
+    // Directive 4: Quality of Service (--qos)
+    m_qosCombo = new QComboBox(this);
     m_qosCombo->setEditable(true);
     m_qosCombo->addItems({QStringLiteral("(default)"), QStringLiteral("normal"),
                           QStringLiteral("debug"), QStringLiteral("high"),
                           QStringLiteral("long"), QStringLiteral("standby")});
-    grid->addWidget(new QLabel(tr("Partition (--partition):"), gridWidget), 1, 0, Qt::AlignRight);
-    grid->addWidget(m_partitionCombo, 1, 1);
-    grid->addWidget(new QLabel(tr("QoS (--qos):"), gridWidget), 1, 2, Qt::AlignRight);
-    grid->addWidget(m_qosCombo, 1, 3);
+    m_qosCombo->setToolTip(tr("Quality of Service tier (--qos / -q)."));
+    form->addRow(tr("QoS:"), m_qosCombo);
 
-    // Row 2: Directive 5 (Wall-Clock Time --time) and Directive 9 (Memory per Node --mem).
-    m_timeCombo = new QComboBox(gridWidget);
+    // Directive 5: Wall-Clock Time (--time)
+    m_timeCombo = new QComboBox(this);
     m_timeCombo->setEditable(true);
     m_timeCombo->addItems({QStringLiteral("00:15:00"), QStringLiteral("00:30:00"),
                            QStringLiteral("01:00:00"), QStringLiteral("02:00:00"),
@@ -320,102 +307,112 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
                            QStringLiteral("12:00:00"), QStringLiteral("24:00:00"),
                            QStringLiteral("48:00:00"), QStringLiteral("72:00:00")});
     m_timeCombo->setCurrentText(QStringLiteral("01:00:00"));
-    m_memCombo = new QComboBox(gridWidget);
+    m_timeCombo->setToolTip(tr("Maximum job wall-clock time (--time / -t)."));
+    form->addRow(tr("Wall Time:"), m_timeCombo);
+
+    // Directive 6: Nodes (--nodes)
+    m_nodesBox = new QSpinBox(this);
+    m_nodesBox->setRange(1, 9999);
+    m_nodesBox->setValue(1);
+    m_nodesBox->setToolTip(tr("Number of compute nodes (--nodes / -N)."));
+    form->addRow(tr("Nodes:"), m_nodesBox);
+
+    // Directive 7: Tasks per Node (--ntasks-per-node)
+    m_tasksBox = new QSpinBox(this);
+    m_tasksBox->setRange(1, 1024);
+    m_tasksBox->setValue(4);
+    m_tasksBox->setToolTip(tr("MPI tasks per compute node (--ntasks-per-node / -n)."));
+    form->addRow(tr("Tasks / Node:"), m_tasksBox);
+
+    // Directive 8: CPUs per Task (--cpus-per-task)
+    m_cpusPerTaskBox = new QSpinBox(this);
+    m_cpusPerTaskBox->setRange(1, 256);
+    m_cpusPerTaskBox->setValue(1);
+    m_cpusPerTaskBox->setToolTip(tr("CPU cores allocated per MPI task (--cpus-per-task)."));
+    form->addRow(tr("CPUs / Task:"), m_cpusPerTaskBox);
+
+    // Directive 9: Memory per Node (--mem)
+    m_memCombo = new QComboBox(this);
     m_memCombo->setEditable(true);
     m_memCombo->addItems({QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"),
                           QStringLiteral("32G"), QStringLiteral("64G"), QStringLiteral("128G"),
                           QStringLiteral("256G"), QStringLiteral("512G"),
                           QStringLiteral("0 (All Node Memory)")});
     m_memCombo->setCurrentText(QStringLiteral("16G"));
-    grid->addWidget(new QLabel(tr("Wall Time (--time):"), gridWidget), 2, 0, Qt::AlignRight);
-    grid->addWidget(m_timeCombo, 2, 1);
-    grid->addWidget(new QLabel(tr("Memory (--mem):"), gridWidget), 2, 2, Qt::AlignRight);
-    grid->addWidget(m_memCombo, 2, 3);
+    m_memCombo->setToolTip(tr("Memory allocated per node (--mem)."));
+    form->addRow(tr("Memory:"), m_memCombo);
 
-    // Row 3: Directive 6 (Nodes --nodes) and Directive 7 (Tasks per Node --ntasks-per-node).
-    m_nodesBox = new QSpinBox(gridWidget);
-    m_nodesBox->setRange(1, 9999);
-    m_nodesBox->setValue(1);
-    m_tasksBox = new QSpinBox(gridWidget);
-    m_tasksBox->setRange(1, 1024);
-    m_tasksBox->setValue(4);
-    grid->addWidget(new QLabel(tr("Nodes (--nodes):"), gridWidget), 3, 0, Qt::AlignRight);
-    grid->addWidget(m_nodesBox, 3, 1);
-    grid->addWidget(new QLabel(tr("Tasks/Node (--ntasks-per-node):"), gridWidget), 3, 2, Qt::AlignRight);
-    grid->addWidget(m_tasksBox, 3, 3);
-
-    // Row 4: Directive 8 (CPUs per Task --cpus-per-task) and Directive 11 (Constraint --constraint).
-    m_cpusPerTaskBox = new QSpinBox(gridWidget);
-    m_cpusPerTaskBox->setRange(1, 256);
-    m_cpusPerTaskBox->setValue(1);
-    m_constraintEdit = new QLineEdit(gridWidget);
-    m_constraintEdit->setPlaceholderText(tr("e.g. rome, hdr, nvlink"));
-    grid->addWidget(new QLabel(tr("CPUs/Task (--cpus-per-task):"), gridWidget), 4, 0, Qt::AlignRight);
-    grid->addWidget(m_cpusPerTaskBox, 4, 1);
-    grid->addWidget(new QLabel(tr("Constraint (--constraint):"), gridWidget), 4, 2, Qt::AlignRight);
-    grid->addWidget(m_constraintEdit, 4, 3);
-
-    // Row 5: Directive 10 (GPUs / GRES --gres=gpu:<type>:<count>) and Directive 12 (MPI Launcher).
-    auto* gpuCell = new QWidget(gridWidget);
-    auto* gpuRow = new QHBoxLayout(gpuCell);
-    gpuRow->setContentsMargins(0, 0, 0, 0);
-    gpuRow->setSpacing(4);
-    m_gpuCheck = new QCheckBox(tr("GPUs"), gpuCell);
-    m_gpuTypeEdit = new QLineEdit(gpuCell);
-    m_gpuTypeEdit->setPlaceholderText(tr("a100 / v100"));
+    // Directive 10: GPUs / GRES (--gres=gpu:<type>:<count>)
+    auto* gpuRow = new QHBoxLayout();
+    gpuRow->setSpacing(8);
+    m_gpuCheck = new QCheckBox(tr("Request GPUs"), this);
+    m_gpuTypeEdit = new QLineEdit(this);
+    m_gpuTypeEdit->setPlaceholderText(tr("GPU model (e.g. a100, v100)"));
+    m_gpuTypeEdit->setToolTip(tr("Optional GPU accelerator type for --gres=gpu:<type>:<count>."));
     m_gpuTypeEdit->setEnabled(false);
-    m_gpusBox = new QSpinBox(gpuCell);
+    m_gpusBox = new QSpinBox(this);
     m_gpusBox->setRange(1, 16);
+    m_gpusBox->setMinimumWidth(110);
+    m_gpusBox->setToolTip(tr("Number of GPUs per node."));
     m_gpusBox->setEnabled(false);
-    // Enable GPU model and count controls only when Request GPUs is checked.
     connect(m_gpuCheck, &QCheckBox::toggled, m_gpuTypeEdit, &QLineEdit::setEnabled);
     connect(m_gpuCheck, &QCheckBox::toggled, m_gpusBox, &QSpinBox::setEnabled);
     gpuRow->addWidget(m_gpuCheck);
     gpuRow->addWidget(m_gpuTypeEdit, 1);
     gpuRow->addWidget(m_gpusBox);
+    form->addRow(tr("GRES GPUs:"), gpuRow);
 
-    m_mpiLauncherCombo = new QComboBox(gridWidget);
+    // Directive 11: Constraint (--constraint)
+    m_constraintEdit = new QLineEdit(this);
+    m_constraintEdit->setPlaceholderText(tr("e.g. rome, hdr, nvlink"));
+    m_constraintEdit->setToolTip(tr("Node hardware feature constraint (--constraint / -C)."));
+    form->addRow(tr("Constraint:"), m_constraintEdit);
+
+    // Directive 12: MPI Launcher
+    m_mpiLauncherCombo = new QComboBox(this);
     m_mpiLauncherCombo->setEditable(true);
     m_mpiLauncherCombo->addItems({QStringLiteral("srun"), QStringLiteral("mpirun"),
                                   QStringLiteral("mpiexec"), QStringLiteral("srun --mpi=pmix")});
-    grid->addWidget(new QLabel(tr("GRES GPUs (--gres):"), gridWidget), 5, 0, Qt::AlignRight);
-    grid->addWidget(gpuCell, 5, 1);
-    grid->addWidget(new QLabel(tr("MPI Launcher:"), gridWidget), 5, 2, Qt::AlignRight);
-    grid->addWidget(m_mpiLauncherCombo, 5, 3);
+    m_mpiLauncherCombo->setToolTip(tr("MPI job launcher command invoked inside the batch script."));
+    form->addRow(tr("MPI Launcher:"), m_mpiLauncherCombo);
 
-    // Row 6: Directive 13 (Environment Modules module load) and Directive 14 (Output Log --output).
-    m_modulesEdit = new QLineEdit(gridWidget);
+    // Directive 13: Environment Modules (module load)
+    m_modulesEdit = new QLineEdit(this);
     m_modulesEdit->setPlaceholderText(tr("e.g. gcc/13.2 openmpi/5.0 cuda/12.2"));
-    m_outputLogEdit = new QLineEdit(gridWidget);
-    m_outputLogEdit->setText(QStringLiteral("gridlock_%j.log"));
-    grid->addWidget(new QLabel(tr("Modules (module load):"), gridWidget), 6, 0, Qt::AlignRight);
-    grid->addWidget(m_modulesEdit, 6, 1);
-    grid->addWidget(new QLabel(tr("Output Log (--output):"), gridWidget), 6, 2, Qt::AlignRight);
-    grid->addWidget(m_outputLogEdit, 6, 3);
+    m_modulesEdit->setToolTip(tr("Space-separated environment modules loaded via 'module load'."));
+    form->addRow(tr("Modules:"), m_modulesEdit);
 
-    // Row 7: Directive 15 (Email Notification --mail-type) and Directive 16 (Notification Email --mail-user).
-    m_mailTypeCombo = new QComboBox(gridWidget);
+    // Directive 14: Output Log (--output)
+    m_outputLogEdit = new QLineEdit(this);
+    m_outputLogEdit->setText(QStringLiteral("gridlock_%j.log"));
+    m_outputLogEdit->setToolTip(tr("SLURM stdout/stderr log file pattern (--output / -o)."));
+    form->addRow(tr("Output Log:"), m_outputLogEdit);
+
+    // Directive 15: Mail Type (--mail-type)
+    m_mailTypeCombo = new QComboBox(this);
     m_mailTypeCombo->setEditable(true);
     m_mailTypeCombo->addItems({QStringLiteral("NONE"), QStringLiteral("END,FAIL"),
                                QStringLiteral("ALL"), QStringLiteral("BEGIN,END,FAIL"),
                                QStringLiteral("FAIL")});
-    m_mailUserEdit = new QLineEdit(gridWidget);
-    m_mailUserEdit->setPlaceholderText(tr("user@university.edu"));
-    grid->addWidget(new QLabel(tr("Mail Type (--mail-type):"), gridWidget), 7, 0, Qt::AlignRight);
-    grid->addWidget(m_mailTypeCombo, 7, 1);
-    grid->addWidget(new QLabel(tr("Mail User (--mail-user):"), gridWidget), 7, 2, Qt::AlignRight);
-    grid->addWidget(m_mailUserEdit, 7, 3);
+    m_mailTypeCombo->setToolTip(tr("Email notification triggers (--mail-type)."));
+    form->addRow(tr("Mail Type:"), m_mailTypeCombo);
 
-    form->addRow(gridWidget);
+    // Directive 16: Mail User (--mail-user)
+    m_mailUserEdit = new QLineEdit(this);
+    m_mailUserEdit->setPlaceholderText(tr("user@university.edu"));
+    m_mailUserEdit->setToolTip(tr("Email address for SLURM job notifications (--mail-user)."));
+    form->addRow(tr("Mail User:"), m_mailUserEdit);
 
     // Editable script template preview box showing the full batch job script.
     auto* tplLabel = new QLabel(
         tr("Script Template (Use <tt>{FILE}</tt> as a placeholder for the target binary):"),
-        container);
+        this);
     tplLabel->setTextFormat(Qt::RichText);
+    tplLabel->setWordWrap(true);
+    tplLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
     form->addRow(tplLabel);
 
-    m_templateEdit = new QPlainTextEdit(container);
+    m_templateEdit = new QPlainTextEdit(this);
     m_templateEdit->setMinimumHeight(120);
     QFont mono(QStringLiteral("Monospace"), 9);
     mono.setStyleHint(QFont::TypeWriter);
@@ -425,7 +422,7 @@ HpcIntegrationSettingsPage::HpcIntegrationSettingsPage(QWidget* parent)
     // 3. Spack package manager environment configuration.
     addSectionHeading(tr("<b>Spack Package Manager</b>"));
 
-    m_spackRootEdit = new QLineEdit(container);
+    m_spackRootEdit = new QLineEdit(this);
     m_spackRootEdit->setPlaceholderText(tr("/opt/spack"));
     m_spackRootEdit->setToolTip(
         tr("Absolute path to the Spack installation on the remote node.\n"

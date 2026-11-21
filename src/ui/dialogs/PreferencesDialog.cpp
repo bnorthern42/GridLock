@@ -25,6 +25,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -35,7 +36,7 @@ namespace gridlock::ui {
 
 KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setContentsMargins(20, 16, 20, 24);
     layout->setSpacing(12);
 
     auto* heading = new QLabel(tr("<b>Keyboard Shortcuts</b>"), this);
@@ -69,12 +70,14 @@ KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(pare
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setAlternatingRowColors(true);
+    m_table->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_table->verticalHeader()->setVisible(false);
-    m_table->verticalHeader()->setDefaultSectionSize(32);
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
+    m_table->verticalHeader()->setDefaultSectionSize(38);
+    m_table->verticalHeader()->setMinimumSectionSize(36);
+    m_table->horizontalHeader()->setMinimumSectionSize(80);
+    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Interactive);
-    m_table->setColumnWidth(0, 125);
+    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
     m_table->setColumnWidth(2, 210);
     layout->addWidget(m_table, 1);
 
@@ -103,16 +106,23 @@ void KeybindingsSettingsPage::refreshBindings() {
         m_table->setItem(row, 0, catItem);
         m_table->setItem(row, 1, actItem);
 
-        auto* seqEdit = new QKeySequenceEdit(b.currentShortcut, m_table);
+        // Wrap QKeySequenceEdit in a padded cell widget so it never bleeds into the Action column.
+        auto* cell = new QWidget(m_table);
+        auto* cellLayout = new QHBoxLayout(cell);
+        cellLayout->setContentsMargins(4, 3, 4, 3);
+        cellLayout->setSpacing(0);
+        auto* seqEdit = new QKeySequenceEdit(b.currentShortcut, cell);
         seqEdit->setObjectName(QStringLiteral("keySeqEdit_%1").arg(b.id));
         seqEdit->setClearButtonEnabled(true);
-        seqEdit->setFixedHeight(26);
+        seqEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        seqEdit->setMinimumHeight(28);
         seqEdit->setToolTip(tr("Click and press a new shortcut for '%1' (Default: %2)").arg(b.label, defStr));
         const QString actionId = b.id;
         connect(seqEdit, &QKeySequenceEdit::keySequenceChanged, this, [actionId](const QKeySequence& seq) {
             gridlock::core::ShortcutManager::instance().setShortcutForAction(actionId, seq, true);
         });
-        m_table->setCellWidget(row, 2, seqEdit);
+        cellLayout->addWidget(seqEdit);
+        m_table->setCellWidget(row, 2, cell);
     }
     if (m_filterEdit && !m_filterEdit->text().isEmpty()) filterRows(m_filterEdit->text());
 }
@@ -122,7 +132,8 @@ void KeybindingsSettingsPage::applyPendingChanges() {
     auto& sm = gridlock::core::ShortcutManager::instance();
     for (int row = 0; row < m_table->rowCount(); ++row) {
         QTableWidgetItem* actItem = m_table->item(row, 1);
-        auto* seqEdit = qobject_cast<QKeySequenceEdit*>(m_table->cellWidget(row, 2));
+        QWidget* cell = m_table->cellWidget(row, 2);
+        auto* seqEdit = cell ? cell->findChild<QKeySequenceEdit*>() : nullptr;
         if (!actItem || !seqEdit) continue;
         const QString id = actItem->data(Qt::UserRole).toString();
         if (sm.shortcutForAction(id) != seqEdit->keySequence()) {
@@ -141,7 +152,8 @@ void KeybindingsSettingsPage::filterRows(const QString& query) {
         }
         const QString cat = m_table->item(row, 0) ? m_table->item(row, 0)->text() : QString();
         const QString act = m_table->item(row, 1) ? m_table->item(row, 1)->text() : QString();
-        auto* seqEdit = qobject_cast<QKeySequenceEdit*>(m_table->cellWidget(row, 2));
+        QWidget* cell = m_table->cellWidget(row, 2);
+        auto* seqEdit = cell ? cell->findChild<QKeySequenceEdit*>() : nullptr;
         const QString seq = seqEdit ? seqEdit->keySequence().toString(QKeySequence::NativeText) : QString();
         const bool match = cat.contains(q, Qt::CaseInsensitive) || act.contains(q, Qt::CaseInsensitive) ||
                            seq.contains(q, Qt::CaseInsensitive);
@@ -157,8 +169,8 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     : QDialog(parent) {
     setObjectName(QStringLiteral("PreferencesDialog"));
     setWindowTitle(tr("Preferences — GridLock"));
-    setMinimumSize(780, 540);
-    resize(860, 580);
+    setMinimumSize(880, 620);
+    resize(960, 680);
 
     setAttribute(Qt::WA_StyledBackground, true);
     setAutoFillBackground(true);
@@ -178,7 +190,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({195, 665});
+    splitter->setSizes({195, 765});
 
     rootLayout->addWidget(splitter, 1);
 
@@ -196,7 +208,10 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
         btn->setFixedHeight(26);
         if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) btn->setMinimumWidth(96);
     }
-    for (QLineEdit* edit : findChildren<QLineEdit*>()) edit->setFixedHeight(26);
+    for (QLineEdit* edit : findChildren<QLineEdit*>()) {
+        if (qobject_cast<QKeySequenceEdit*>(edit->parentWidget())) continue;
+        edit->setFixedHeight(26);
+    }
     for (QComboBox* combo : findChildren<QComboBox*>()) {
         combo->setFixedHeight(26);
         for (int i = 0; i < combo->count(); ++i) {
@@ -241,8 +256,10 @@ void PreferencesDialog::applyDialogThemeChrome() {
         "QLabel, QCheckBox { color: %5; font-size: 13px; }"
         "QGroupBox { background-color: %2; border: 1px solid %3; border-radius: 4px; "
         "margin-top: 8px; padding-top: 10px; color: %5; font-size: 13px; font-weight: 600; }"
-        "QLineEdit, QComboBox, QSpinBox, QKeySequenceEdit { background-color: %1; color: %5; "
+        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %5; "
         "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 22px; max-height: 26px; font-size: 13px; }"
+        "QKeySequenceEdit { background-color: %1; color: %5; "
+        "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 28px; max-height: 30px; font-size: 13px; }"
         "QTableWidget { background-color: %1; alternate-background-color: %2; color: %5; gridline-color: %3; border: 1px solid %3; border-radius: 4px; }"
         "QHeaderView::section { background-color: %2; color: %5; border: none; border-bottom: 1px solid %3; border-right: 1px solid %3; padding: 4px 8px; font-weight: 600; }"
         "QStackedWidget QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
@@ -284,6 +301,17 @@ void PreferencesDialog::applyDialogThemeChrome() {
                 page->setAttribute(Qt::WA_StyledBackground, true);
                 page->setPalette(dlgPal);
                 page->setAutoFillBackground(true);
+                if (auto* sa = qobject_cast<QScrollArea*>(page)) {
+                    if (sa->viewport()) {
+                        sa->viewport()->setPalette(dlgPal);
+                        sa->viewport()->setAutoFillBackground(true);
+                    }
+                    if (sa->widget()) {
+                        sa->widget()->setAttribute(Qt::WA_StyledBackground, true);
+                        sa->widget()->setPalette(dlgPal);
+                        sa->widget()->setAutoFillBackground(true);
+                    }
+                }
             }
         }
     }
@@ -484,7 +512,7 @@ void PreferencesDialog::setupPages() {
     m_terminalPage = new TerminalSettingsPage(m_stack);
     m_docsetPage = new DocsetSettingsPage(m_stack);
 
-    // Register pages in the exact sequential order matching the sidebar entries.
+    // Register pages in the exact sequential order matching the sidebar entries, each inside a vertical-only QScrollArea.
     for (QWidget* page : {static_cast<QWidget*>(m_appearancePage),
                           static_cast<QWidget*>(m_editingPage),
                           static_cast<QWidget*>(m_behaviorPage),
@@ -496,7 +524,15 @@ void PreferencesDialog::setupPages() {
                           static_cast<QWidget*>(m_docsetPage)}) {
         page->setAttribute(Qt::WA_StyledBackground, true);
         page->setAutoFillBackground(true);
-        m_stack->addWidget(page);
+        auto* scroll = new QScrollArea(m_stack);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        scroll->setAttribute(Qt::WA_StyledBackground, true);
+        scroll->setAutoFillBackground(true);
+        scroll->setWidget(page);
+        m_stack->addWidget(scroll);
     }
     m_stack->setCurrentIndex(0);
 }
