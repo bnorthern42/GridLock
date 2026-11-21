@@ -344,11 +344,11 @@ void MainWindow::executeCommand(
  * @param coord Pointer to active coordinator instance.
  */
 void MainWindow::setCoordinator(IBackendCoordinator *coord) {
-  if (m_deadlockAnalyzer) {
-    delete m_deadlockAnalyzer;
-    m_deadlockAnalyzer = nullptr;
-  }
+  if (m_deadlockAnalyzer) { delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr; }
   m_coordinator = coord;
+  if (!m_coordinator) m_debugSessionActive = false;
+  else if (m_coordinator->getProcessCount() > 0) m_debugSessionActive = true;
+  updateDebugToolbarState();
 
   if (auto *dapCoord = dynamic_cast<DapCoordinator *>(m_coordinator)) {
     connect(dapCoord, &DapCoordinator::stateChanged, this,
@@ -594,9 +594,10 @@ void MainWindow::setupMenu() {
     if (m_editorTabManager) m_editorTabManager->saveAllModifiedTabs();
   });
 
-  // Switch Header/Source Action (F10): Toggles between corresponding .cpp/.c and .hpp/.h files.
+  // Switch Header/Source Action (F4): Toggles between corresponding .cpp/.c and .hpp/.h files.
   QAction *switchHdrAct = fileMenu->addAction("Switch Header/Source");
-  switchHdrAct->setShortcut(QKeySequence(Qt::Key_F10));
+  switchHdrAct->setObjectName(QStringLiteral("file.switch_header_source"));
+  switchHdrAct->setShortcut(QKeySequence(Qt::Key_F4));
   connect(switchHdrAct, &QAction::triggered, this, [this]() {
     // Resolve companion declaration/implementation file in the active tab group.
     if (m_editorTabManager) m_editorTabManager->switchHeaderSource();

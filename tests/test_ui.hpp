@@ -192,5 +192,8 @@ private slots:
 
     /** @brief Verifies real QSplitter non-overlapping split editors and Ctrl+F inline search vs Ctrl+G seek bar focus. */
     void testSplitEditorQSplitterAndInlineFindBar();
+
+    /** @brief Verifies <1040px MainToolbar consolidation, F10/F11/Shift+F11 source stepping, F4 Header/Source, single Stop, and state-aware tooltips. */
+    void testConsolidatedToolbarSourceSteppingAndTooltips();
 };
 

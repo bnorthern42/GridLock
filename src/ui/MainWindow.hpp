@@ -189,6 +189,9 @@ public:
      */
     bool stepIntoWorkflow();
 
+    /** @brief Finishes the current stack frame on the active MPI rank (`IBackendCoordinator::stepOut`). */
+    bool stepOutWorkflow();
+
     /**
      * @brief Interrupts/pauses execution on the active MPI rank (`IBackendCoordinator::pauseRank`).
      * @return True if a live coordinator pause request was dispatched; false otherwise.
@@ -869,10 +872,12 @@ private:
     QSpinBox* m_rankCountSpin = nullptr;
     QAction* m_runAction = nullptr;
     QAction* m_continueAction = nullptr;
+    QAction* m_stepOverAction = nullptr;
+    QAction* m_stepIntoAction = nullptr;
+    QAction* m_stepOutAction = nullptr;
     QAction* m_stepAction = nullptr;
     QAction* m_pauseAction = nullptr;
     QAction* m_stopAction = nullptr;
-    QAction* m_terminateAction = nullptr;
     QPushButton* m_navBackBtn = nullptr;
     QPushButton* m_navForwardBtn = nullptr;
     QLineEdit* m_seekBar = nullptr;

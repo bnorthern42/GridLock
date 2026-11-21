@@ -118,6 +118,11 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Sends a DAP `stepIn` request for @p threadId. */
   void stepInto(int threadId) override;
 
+  /** @brief Sends a DAP `stepOut` request for @p threadId. */
+  void stepOut(int threadId) override {
+    sendRequest(QStringLiteral("stepOut"), QJsonObject{{QStringLiteral("threadId"), (threadId > 0) ? threadId : 1}});
+  }
+
   /** @brief Sends a machine-instruction granularity `stepIn` request for @p threadId. */
   void stepInstruction(int threadId) override;
 

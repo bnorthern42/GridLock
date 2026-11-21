@@ -34,7 +34,6 @@
 #include <QStandardPaths>
 #include <QString>
 #include <QStringList>
-#include <QTabWidget>
 #include <QTableWidget>
 #include <QTextBlock>
 
@@ -43,6 +42,7 @@
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "../core/managers/ShortcutManager.hpp"
 #include "../core/models/VariableTreeModel.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
@@ -117,6 +117,8 @@ void MainWindow::rebuildDynamicSourceLineMap() {
             else if (topAct->text().contains(QStringLiteral("Tools"), Qt::CaseInsensitive)) toolsTopAct = topAct;
         }
         if (!debugMenu) { debugMenu = new QMenu(QStringLiteral("&Debug"), menuBar()); if (toolsTopAct) menuBar()->insertMenu(toolsTopAct, debugMenu); else menuBar()->addMenu(debugMenu); }
+        for (QAction* sa : {m_runAction, m_continueAction, m_stepOverAction, m_stepIntoAction, m_stepOutAction, m_stepAction, m_pauseAction, m_stopAction}) if (sa) debugMenu->addAction(sa);
+        debugMenu->addSeparator();
         auto addDbgAct = [&](const QString& text, const QString& obj, const QKeySequence& ks, auto slotFn) {
             QAction* a = debugMenu->addAction(text); a->setObjectName(obj); if (!ks.isEmpty()) a->setShortcut(ks); connect(a, &QAction::triggered, this, slotFn);
         };
@@ -125,10 +127,7 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         addDbgAct(QStringLiteral("Set Next Statement / Jump..."), QStringLiteral("actionJumpToLine"), QKeySequence(), [this]() {
             SourceCodeView* sv = sourceCodeView(); if (!sv) return;
             int targetLine = sv->getCurrentLineNumber();
-            if (targetLine <= 0 || targetLine == sv->executionLine()) {
-                bool ok = false; targetLine = QInputDialog::getInt(this, tr("Set Next Statement / Jump"), tr("Target source line (1-based):"), qMax(1, targetLine), 1, qMax(1, sv->document()->blockCount()), 1, &ok);
-                if (!ok) return;
-            }
+            if (targetLine <= 0 || targetLine == sv->executionLine()) { bool ok = false; targetLine = QInputDialog::getInt(this, tr("Set Next Statement / Jump"), tr("Target source line (1-based):"), qMax(1, targetLine), 1, qMax(1, sv->document()->blockCount()), 1, &ok); if (!ok) return; }
             jumpToLocationWorkflow(sv->currentFile(), targetLine);
         });
         addDbgAct(QStringLiteral("Force Early Return..."), QStringLiteral("actionForceEarlyReturn"), QKeySequence(), [this]() { forceEarlyReturnWorkflow(QString(), true); });
@@ -136,6 +135,7 @@ void MainWindow::rebuildDynamicSourceLineMap() {
         debugMenu->addSeparator();
         addDbgAct(QStringLiteral("Process Checkpoints..."), QStringLiteral("actionProcessCheckpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K), [this]() { openProcessCheckpoints(); });
         addDbgAct(QStringLiteral("Signals & Catchpoints..."), QStringLiteral("actionSignalsAndCatchpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S), [this]() { openSignalsAndCatchpoints(); });
+        gridlock::core::ShortcutManager::instance().syncMenuActionsFromMainWindow();
     }
     // Bind DisassemblyView, SourceCodeView tabs, and CallStackDockWidget execution control signals once.
     if (m_disassemblyView && !m_disassemblyView->property("gl_exec_wired").toBool()) {
@@ -712,6 +712,7 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     }
     // 3. Resolve target path (distinguishing pre-built ELF executables from C/C++ source files and directories).
     const QString resolvedPath = resolveWorkspacePath(m_targetSelector->itemData(matchedIdx).toString());
+    m_targetSelector->setToolTip(QStringLiteral("Active Target: %1\nPath: %2").arg(m_targetSelector->itemText(matchedIdx), resolvedPath));
     if (QFileInfo(resolvedPath).isDir()) return true;
     if (m_disassemblyView) for (uint64_t oldBp : m_disassemblyView->bookmarkedAddresses()) m_disassemblyView->toggleBookmark(oldBp);
     if (isRunnableElfExecutable(resolvedPath)) { m_useRealBinaryTarget = true; loadBinaryTarget(resolvedPath); }

@@ -630,6 +630,7 @@ void GdbRankCoordinator::dispatchStoppedExecCmd(int rank, const QString& cmd) {
   for (int r = lo; r <= hi; ++r)
     if (m_processes[r] && m_processes[r]->state.currentState != "running" && m_processes[r]->state.currentState != "exited") writeCmd(r, cmd);
 }
+void GdbRankCoordinator::stepOut(int threadId) { dispatchStoppedExecCmd((threadId > 0) ? (threadId - 1) : -1, QStringLiteral("-exec-finish\n")); }
 void GdbRankCoordinator::nextInstruction(int rank) { dispatchStoppedExecCmd(rank, QStringLiteral("-exec-next-instruction\n")); }
 void GdbRankCoordinator::runToCursor(const QString& filePath, int line, int rank) { if (!filePath.trimmed().isEmpty() && line > 0) dispatchStoppedExecCmd(rank, QStringLiteral("-exec-until %1\n").arg(escapeGdbMiString(QStringLiteral("%1:%2").arg(filePath.trimmed()).arg(line)))); }
 void GdbRankCoordinator::runToAddress(uint64_t address, int rank) { if (address != 0ULL) dispatchStoppedExecCmd(rank, QStringLiteral("-exec-until *0x%1\n").arg(address, 0, 16)); }

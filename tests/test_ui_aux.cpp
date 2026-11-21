@@ -46,6 +46,7 @@
 #include <QTreeView>
 #include <QtTest/QtTest>
 
+#include "../src/core/hpc/GdbRankCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/SessionManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
@@ -766,4 +767,125 @@ void TestMainWindowUI::testSplitEditorQSplitterAndInlineFindBar() {
     }
     mw.close();
 }
+
+void TestMainWindowUI::testConsolidatedToolbarSourceSteppingAndTooltips() {
+    static QStringList s_warnings;
+    s_warnings.clear();
+    const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) {
+        if (type == QtWarningMsg) s_warnings.append(msg);
+    });
+    struct WarnGuard { QtMessageHandler prev; ~WarnGuard() { qInstallMessageHandler(prev); } } guard{prevHandler};
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString cppPath = dir.filePath(QStringLiteral("stepper.cpp"));
+    const QString hppPath = dir.filePath(QStringLiteral("stepper.hpp"));
+    {
+        QFile fc(cppPath); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write("#include \"stepper.hpp\"\nint helper(int v) { return v + 1; }\nint main() { return helper(4); }\n");
+        QFile fh(hppPath); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nint helper(int v);\n");
+    }
+
+    gridlock::ui::MainWindow mw;
+    mw.resize(1280, 800);
+    mw.show();
+    mw.activateWindow();
+    QApplication::processEvents();
+
+    auto* mainTb = mw.findChild<QToolBar*>(QStringLiteral("MainToolbar"));
+    auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* buildBtn = mw.findChild<QToolButton*>(QStringLiteral("toolbarBuildSplitBtn"));
+    auto* intoBtn = mw.findChild<QToolButton*>(QStringLiteral("toolbarStepIntoBtn"));
+    auto* recBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"));
+    auto* sbBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarStepBackBtn"));
+    auto* rcBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarReverseContinueBtn"));
+    QVERIFY(mainTb && targetCombo && buildBtn && buildBtn->menu() && intoBtn && intoBtn->menu() && recBtn && sbBtn && rcBtn);
+
+    // 1. Verify compact toolbar width <= 1040, 190px target selector cap + tooltip, single Stop action, and hidden reverse step buttons while idle.
+    QVERIFY2(mainTb->sizeHint().width() <= 1040, qPrintable(QStringLiteral("MainToolbar sizeHint width: %1").arg(mainTb->sizeHint().width())));
+    QVERIFY(targetCombo->maximumWidth() <= 190 && !targetCombo->toolTip().isEmpty());
+    QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
+
+    int stopCount = 0, terminateCount = 0;
+    for (QAction* a : mainTb->actions()) {
+        if (a->text().contains(QStringLiteral("Stop"), Qt::CaseInsensitive)) ++stopCount;
+        if (a->text().contains(QStringLiteral("Terminate"), Qt::CaseInsensitive)) ++terminateCount;
+        if (!a->isSeparator() && !a->text().isEmpty()) {
+            QVERIFY2(!a->toolTip().isEmpty(), qPrintable(QStringLiteral("Empty tooltip on toolbar action: %1").arg(a->text())));
+        }
+    }
+    QCOMPARE(stopCount, 1);
+    QCOMPARE(terminateCount, 0);
+
+    auto* stepOverAct = mw.findChild<QAction*>(QStringLiteral("debug.step_over"));
+    auto* stepIntoAct = mw.findChild<QAction*>(QStringLiteral("debug.step_into"));
+    auto* stepOutAct = mw.findChild<QAction*>(QStringLiteral("debug.step_out"));
+    auto* stopAct = mw.findChild<QAction*>(QStringLiteral("debug.stop"));
+    auto* switchHdrAct = mw.findChild<QAction*>(QStringLiteral("file.switch_header_source"));
+    QVERIFY(stepOverAct && stepIntoAct && stepOutAct && stopAct && switchHdrAct);
+    QCOMPARE(stepOverAct->shortcut(), QKeySequence(Qt::Key_F10));
+    QCOMPARE(stepIntoAct->shortcut(), QKeySequence(Qt::Key_F11));
+    QCOMPARE(stepOutAct->shortcut(), QKeySequence(Qt::SHIFT | Qt::Key_F11));
+    QCOMPARE(stopAct->shortcut(), QKeySequence(Qt::SHIFT | Qt::Key_F5));
+    QCOMPARE(switchHdrAct->shortcut(), QKeySequence(Qt::Key_F4));
+
+    // Verify idle tooltips explain both shortcuts and why disabled actions are unavailable.
+    QVERIFY(stepOverAct->toolTip().contains(QStringLiteral("F10")) && stepOverAct->toolTip().contains(QStringLiteral("idle"), Qt::CaseInsensitive));
+    QVERIFY(stepIntoAct->toolTip().contains(QStringLiteral("F11")) && stepOutAct->toolTip().contains(QStringLiteral("Shift+F11")));
+
+    // 2. Verify F4 switches Header/Source while F10/F11/Shift+F11 dispatch Step Over / Step Into / Step Out with zero ambiguous shortcut warnings.
+    auto* tabMgr = mw.editorTabManager();
+    QVERIFY(tabMgr && tabMgr->openFile(cppPath));
+    QTest::keyClick(&mw, Qt::Key_F4);
+    QApplication::processEvents();
+    QVERIFY(tabMgr->tabText(tabMgr->currentIndex()).contains(QStringLiteral("stepper.hpp")));
+
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(2);
+    auto markStopped = [&]() {
+        coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"main\",fullname=\"/tmp/stepper.cpp\",line=\"3\",args=[]}\n"));
+        coord.processGdbOutput(1, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"main\",fullname=\"/tmp/stepper.cpp\",line=\"3\",args=[]}\n"));
+    };
+    QStringList sent;
+    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& cmd) {
+        if (r == 0) sent.append(cmd.trimmed());
+    });
+    mw.setCoordinator(&coord);
+    markStopped();
+    QApplication::processEvents();
+    QVERIFY(recBtn->isEnabled() && !sbBtn->isVisible() && !rcBtn->isVisible());
+    recBtn->click();
+    QApplication::processEvents();
+    QVERIFY(sbBtn->isVisible() && rcBtn->isVisible());
+    mw.onRankSelected(1);
+    QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
+    mw.onRankSelected(0);
+    QVERIFY(sbBtn->isVisible() && rcBtn->isVisible());
+    recBtn->click();
+    QApplication::processEvents();
+    QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
+
+    QTest::keyClick(&mw, Qt::Key_F10);
+    QApplication::processEvents();
+    QVERIFY(sent.contains(QStringLiteral("-exec-next")) && tabMgr->tabText(tabMgr->currentIndex()).contains(QStringLiteral("stepper.hpp")));
+
+    markStopped();
+    sent.clear();
+    QTest::keyClick(&mw, Qt::Key_F11);
+    QApplication::processEvents();
+    QVERIFY(sent.contains(QStringLiteral("-exec-step")));
+
+    markStopped();
+    sent.clear();
+    QTest::keyClick(&mw, Qt::Key_F11, Qt::ShiftModifier);
+    QApplication::processEvents();
+    QVERIFY(sent.contains(QStringLiteral("-exec-finish")));
+
+    for (const QString& w : s_warnings) {
+        QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
+    }
+
+    mw.setCoordinator(nullptr);
+    mw.close();
+}
+
 

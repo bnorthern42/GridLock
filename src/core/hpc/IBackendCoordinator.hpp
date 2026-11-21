@@ -128,6 +128,9 @@ class IBackendCoordinator : public QObject {
   /** @brief Steps into the function call on the current line for @p threadId. */
   virtual void stepInto(int threadId) = 0;
 
+  /** @brief Steps out of the current stack frame (`-exec-finish` / DAP `stepOut`) for @p threadId. */
+  virtual void stepOut(int threadId) { Q_UNUSED(threadId); }
+
   /** @brief Steps a single machine instruction on @p threadId (`rankId + 1`). */
   virtual void stepInstruction(int threadId) = 0;
 

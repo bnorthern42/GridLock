@@ -639,6 +639,9 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Debug: Step Into"),
                        QStringLiteral("Step into the called function on the focused MPI rank"),
                        QStringLiteral("F11"), [mainWindow]() { mainWindow->stepIntoWorkflow(); });
+    registerActionItem(QStringLiteral("Debug: Step Out"),
+                       QStringLiteral("Finish the current stack frame and pause in the caller (-exec-finish)"),
+                       QStringLiteral("Shift+F11"), [mainWindow]() { mainWindow->stepOutWorkflow(); });
     registerActionItem(QStringLiteral("Debug: Step Instruction"),
                        QStringLiteral("Single-step one machine instruction on the focused MPI rank"),
                        QStringLiteral("Alt+S"), [mainWindow]() { mainWindow->stepInstructionWorkflow(); });

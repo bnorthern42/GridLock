@@ -373,6 +373,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Steps into callees (`-exec-step`) on @p threadId (`rankId + 1`). */
   void stepInto(int threadId) override;
 
+  /** @brief Finishes the current stack frame (`-exec-finish`) on @p threadId (`rankId + 1`). */
+  void stepOut(int threadId) override;
+
   /** @brief Steps one machine instruction (`-exec-step-instruction`) on @p threadId (`rankId + 1`). */
   void stepInstruction(int threadId) override;
 

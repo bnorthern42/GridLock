@@ -148,16 +148,26 @@ void MainWindow::syncCoordinatorWithConfig() {
 
 /** @brief Dispatches a live source-level step-over (`-exec-next` / DAP `next`) on the active rank. */
 bool MainWindow::stepOverWorkflow() {
-    if (!m_debugSessionActive || !m_coordinator) return false;
+    if (m_previewFixtureOnly) return stepInstructionWorkflow();
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
     m_coordinator->stepOver(m_focusedRank + 1); return true;
 }
 
 /** @brief Dispatches a live source-level step-into (`-exec-step` / DAP `stepIn`) on the active rank. */
 bool MainWindow::stepIntoWorkflow() {
-    if (!m_debugSessionActive || !m_coordinator) return false;
+    if (m_previewFixtureOnly) return stepInstructionWorkflow();
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
     m_coordinator->stepInto(m_focusedRank + 1); return true;
+}
+
+/** @brief Dispatches a live source-level step-out (`-exec-finish` / DAP `stepOut`) on the active rank. */
+bool MainWindow::stepOutWorkflow() {
+    if (m_previewFixtureOnly) return stepInstructionWorkflow();
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING OUT"));
+    m_coordinator->stepOut(m_focusedRank + 1); return true;
 }
 
 /** @brief Interrupts execution on the currently focused MPI rank (`SIGINT` + `-exec-interrupt` / DAP `pause`). */
@@ -315,6 +325,8 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
 void MainWindow::onRankSelected(int rankId) {
     // Track newly focused rank and synchronize VariablesDockWidget, CallStackDockWidget, and EditorTabManager.
     m_focusedRank = rankId;
+    if (m_serverRackView && m_serverRackView->selectedRank() != rankId) { m_serverRackView->blockSignals(true); m_serverRackView->selectRank(rankId); m_serverRackView->blockSignals(false); }
+    updateDebugToolbarState();
     if (m_editorTabManager) m_editorTabManager->setActiveFocusRank(rankId);
     if (m_variablesDockWidget) {
         if (auto* rankCombo = m_variablesDockWidget->findChild<QComboBox*>()) {

@@ -220,17 +220,17 @@ void MainWindow::harmonizeBottomConsoleTabs() {
 
     // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
-        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 6px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
-        auto makePerspBtn = [&](const QString& label, const QString& obj, const QString& persp, bool chk) {
+        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 6px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
+        auto makePerspBtn = [&](const QString& label, const QString& obj, const QString& persp, const QString& tip, bool chk) {
             auto* b = new QPushButton(label, mainToolbar);
-            b->setObjectName(obj); b->setCheckable(true); b->setChecked(chk); b->setStyleSheet(pStyle);
+            b->setObjectName(obj); b->setCheckable(true); b->setChecked(chk); b->setToolTip(tip); b->setStyleSheet(pStyle);
             connect(b, &QPushButton::clicked, this, [this, persp]() { setWorkspacePerspective(persp); });
             mainToolbar->addWidget(b); return b;
         };
         mainToolbar->addSeparator();
-        m_perspCodeBtn = makePerspBtn(QStringLiteral("CODE"), QStringLiteral("perspectiveCodeBtn"), QStringLiteral("Code"), true);
-        m_perspReverseBtn = makePerspBtn(QStringLiteral("REVERSE"), QStringLiteral("perspectiveReverseBtn"), QStringLiteral("Reverse"), false);
-        m_perspMpiBtn = makePerspBtn(QStringLiteral("MPI"), QStringLiteral("perspectiveMpiBtn"), QStringLiteral("MPI"), false);
+        m_perspCodeBtn = makePerspBtn(QStringLiteral("CODE"), QStringLiteral("perspectiveCodeBtn"), QStringLiteral("Code"), QStringLiteral("Source & Debug Perspective (Alt+1)"), true);
+        m_perspReverseBtn = makePerspBtn(QStringLiteral("REVERSE"), QStringLiteral("perspectiveReverseBtn"), QStringLiteral("Reverse"), QStringLiteral("Binary CFG & Decompiler Perspective (Alt+2)"), false);
+        m_perspMpiBtn = makePerspBtn(QStringLiteral("MPI"), QStringLiteral("perspectiveMpiBtn"), QStringLiteral("MPI"), QStringLiteral("MPI Topology & Collective Diagnostics Perspective (Alt+3)"), false);
     }
 
     // 8. Bind Alt+1..3 perspective shortcuts, Ctrl+M maximize toggle, and populate #bottomToolWindowRail.
@@ -514,35 +514,35 @@ QVector<int> MainWindow::detectAndHighlightDeadlock(const QMap<int, int>& waitFo
     return cycleNodes;
 }
 
-/**
- * @brief Updates main toolbar action enablement based on m_debugSessionActive.
- *
- * When m_debugSessionActive is false (Idle state), Run Target is enabled while
- * Continue, Step Inst, Pause Rank, Stop, and Terminate Session are disabled
- * and styled in muted dark-slate so the user immediately sees the entry action.
- */
+/** @brief Synchronizes #MainToolbar action enablement, state-aware tooltips, and reverse-debug controls. */
 void MainWindow::updateDebugToolbarState() {
+    const bool active = m_debugSessionActive; const QString idleWhy = QStringLiteral(" — unavailable while idle (click ▶ Run first)");
     if (m_runAction) {
-        m_runAction->setEnabled(true);
-        m_runAction->setCheckable(true);
-        m_runAction->setChecked(m_debugSessionActive);
-        m_runAction->setText(m_debugSessionActive ? QStringLiteral("● Running") : QStringLiteral("▶ Run Target"));
+        m_runAction->setEnabled(true); m_runAction->setCheckable(true); m_runAction->setChecked(active);
+        m_runAction->setText(active ? QStringLiteral("● Running") : QStringLiteral("▶ Run Target")); m_runAction->setIconText(active ? QStringLiteral("● Running") : QStringLiteral("▶ Run"));
+        m_runAction->setToolTip(active ? QStringLiteral("Target Session Active — click ■ Stop (Shift+F5) to end session") : QStringLiteral("Run Target (Alt+R) — compile if needed and launch MPI debug session"));
     }
-    if (m_continueAction) m_continueAction->setEnabled(m_debugSessionActive);
-    if (m_stepAction) m_stepAction->setEnabled(m_debugSessionActive);
-    if (m_pauseAction) m_pauseAction->setEnabled(m_debugSessionActive);
-    if (m_stopAction) m_stopAction->setEnabled(m_debugSessionActive);
-    if (m_terminateAction) m_terminateAction->setEnabled(m_debugSessionActive);
-    if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
+    auto syncAct = [&](QAction* a, const QString& onTip, const QString& name) { if (a) { a->setEnabled(active); a->setToolTip(active ? onTip : (name + idleWhy)); } };
+    syncAct(m_continueAction, QStringLiteral("Continue Execution (F5) — resume suspended ranks until the next breakpoint"), QStringLiteral("Continue Execution (F5)"));
+    syncAct(m_stepOverAction, QStringLiteral("Step Over (F10) — execute current source line without entering callees"), QStringLiteral("Step Over (F10)"));
+    syncAct(m_stepIntoAction, QStringLiteral("Step Into (F11) — step into called function (click arrow for stepi / nexti)"), QStringLiteral("Step Into (F11)"));
+    syncAct(m_stepOutAction, QStringLiteral("Step Out (Shift+F11) — finish current stack frame and pause in caller"), QStringLiteral("Step Out (Shift+F11)"));
+    syncAct(m_stepAction, QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
+    syncAct(m_pauseAction, QStringLiteral("Pause Focused Rank — interrupt execution on the active MPI rank"), QStringLiteral("Pause Focused Rank"));
+    syncAct(m_stopAction, QStringLiteral("Stop Session (Shift+F5) — terminate active debugging session"), QStringLiteral("Stop Session (Shift+F5)"));
+    if (auto* recBtn = findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"))) {
+        const bool recOn = active && (m_coordinator ? m_coordinator->isReverseRecordingEnabled(activeSteppingRank()) : recBtn->isChecked());
+        if (recBtn->isChecked() != recOn) { recBtn->blockSignals(true); recBtn->setChecked(recOn); recBtn->blockSignals(false); }
+        recBtn->setEnabled(active); recBtn->setToolTip(active ? (recOn ? QStringLiteral("Time-Travel Recording Active — click to stop recording") : QStringLiteral("Record Execution History — enable reverse stepping on focused rank")) : (QStringLiteral("Record Execution History") + idleWhy));
+        if (auto* sbAct = findChild<QAction*>(QStringLiteral("actionToolbarStepBack"))) sbAct->setVisible(recOn);
+        if (auto* rcAct = findChild<QAction*>(QStringLiteral("actionToolbarReverseContinue"))) rcAct->setVisible(recOn);
+        if (auto* sbBtn = findChild<QPushButton*>(QStringLiteral("toolbarStepBackBtn"))) { sbBtn->setVisible(recOn); sbBtn->setEnabled(recOn); sbBtn->setToolTip(QStringLiteral("Step Back — reverse step over previous source line (-exec-next --reverse)")); }
+        if (auto* rcBtn = findChild<QPushButton*>(QStringLiteral("toolbarReverseContinueBtn"))) { rcBtn->setVisible(recOn); rcBtn->setEnabled(recOn); rcBtn->setToolTip(QStringLiteral("Reverse Continue — run backward to previous breakpoint (-exec-continue --reverse)")); }
+    }
+    if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), active);
 }
-
-/**
- * @brief Checks whether the toolbar Run Target button is currently latched in Running state.
- * @return True when an active debugging session has latched Run Target checked.
- */
-bool MainWindow::isRunButtonLatched() const {
-    return m_debugSessionActive && m_runAction && m_runAction->isChecked();
-}
+/** @brief Checks whether the toolbar Run Target button is currently latched in Running state. */
+bool MainWindow::isRunButtonLatched() const { return m_debugSessionActive && m_runAction && m_runAction->isChecked(); }
 
 /**
  * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.

@@ -655,9 +655,9 @@ void MainWindow::propagateThemeToAllWidgets() {
         "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 2px; }"
         "QToolBar#MainToolbar QLabel { background: transparent; color: %3; font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
         "QToolBar#MainToolbar QComboBox, #toolbarTargetSelector { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 6px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
-        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 6px; padding-right: 18px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
-        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 16px; margin-right: 1px; }"
-        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 7px; margin: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 600; }"
+        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 4px; padding-right: 16px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 500; }"
+        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 14px; margin-right: 1px; }"
+        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 4px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 600; }"
         "QToolBar#MainToolbar QToolButton:hover:enabled, QToolBar#MainToolbar QPushButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
         "QToolBar#MainToolbar QToolButton:pressed:enabled, QToolBar#MainToolbar QPushButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
         "QToolBar#MainToolbar QToolButton:checked, QToolBar#MainToolbar QPushButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
@@ -665,24 +665,16 @@ void MainWindow::propagateThemeToAllWidgets() {
         .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex,
              isDark ? QStringLiteral("#19362b") : pal.accentHex,
              isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
-    if (!mainToolBar->findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"))) {
-      auto* recBtn = new QPushButton(QStringLiteral("⏺ Record"), mainToolBar); recBtn->setObjectName(QStringLiteral("toolbarRecordHistoryBtn")); recBtn->setCheckable(true); recBtn->setToolTip(QStringLiteral("Enable GDB Process Record (Time-Travel Recording) on Active Rank"));
-      auto* sbBtn = new QPushButton(QStringLiteral("↶ Step Back"), mainToolBar); sbBtn->setObjectName(QStringLiteral("toolbarStepBackBtn")); sbBtn->setToolTip(QStringLiteral("Reverse Step Over Source Line (-exec-next --reverse)"));
-      auto* rcBtn = new QPushButton(QStringLiteral("⏮ Rev Continue"), mainToolBar); rcBtn->setObjectName(QStringLiteral("toolbarReverseContinueBtn")); rcBtn->setToolTip(QStringLiteral("Reverse Continue to Previous Breakpoint (-exec-continue --reverse)"));
-      mainToolBar->addWidget(recBtn); mainToolBar->addWidget(sbBtn); mainToolBar->addWidget(rcBtn);
-      connect(recBtn, &QPushButton::toggled, this, [this](bool on) { if (m_coordinator) m_coordinator->setReverseRecordingEnabled(activeSteppingRank(), on); });
-      connect(sbBtn, &QPushButton::clicked, this, [this]() { reverseStepOverWorkflow(); }); connect(rcBtn, &QPushButton::clicked, this, [this]() { reverseContinueWorkflow(); });
-    }
-    for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) btn->setFixedHeight(26);
-    for (QPushButton* btn : mainToolBar->findChildren<QPushButton*>()) btn->setFixedHeight(26);
-    if (m_rankCountSpin) { m_rankCountSpin->setMinimumWidth(72); m_rankCountSpin->setFixedHeight(26); if (auto* spinEdit = m_rankCountSpin->findChild<QLineEdit*>()) spinEdit->setMinimumWidth(40); }
-    if (m_targetSelector) { m_targetSelector->setMinimumWidth(195); m_targetSelector->setFixedHeight(26); }
+    for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
+    for (QPushButton* btn : mainToolBar->findChildren<QPushButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
+    if (m_rankCountSpin) { m_rankCountSpin->setMinimumWidth(56); m_rankCountSpin->setMaximumWidth(68); m_rankCountSpin->setFixedHeight(26); }
+    if (m_targetSelector) { m_targetSelector->setMinimumWidth(100); m_targetSelector->setMaximumWidth(190); m_targetSelector->setFixedHeight(26); }
     // Highlight Run Target (m_runAction) via theme accent fill while preserving identical 26px height and padding.
     if (m_runAction) {
       if (QWidget* runBtn = mainToolBar->widgetForAction(m_runAction)) {
         runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn")); runBtn->setFixedHeight(26);
         runBtn->setStyleSheet(QStringLiteral(
-            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; font-size: 12px; font-weight: 600; border: 1px solid %1; border-radius: 4px; padding: 0px 8px; margin: 0px; height: 24px; min-height: 24px; max-height: 24px; }"
+            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; font-size: 11px; font-weight: 600; border: 1px solid %1; border-radius: 4px; padding: 0px 5px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; }"
             "QToolButton:hover:enabled { background-color: %1; color: #ffffff; border: 1px solid %2; }"
             "QToolButton:checked { background-color: %3; color: #ffffff; border: 1px solid %1; font-weight: 600; }"
             "QToolButton:disabled { background-color: %4; color: %5; border: 1px solid %4; }")
@@ -703,14 +695,14 @@ void MainWindow::propagateThemeToAllWidgets() {
     m_addressNavBar->setStyleSheet(QStringLiteral("#addressNavBar { background-color: %1; color: %2; border-bottom: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex)); m_addressNavBar->update();
   }
   // Style history navigation buttons (< / >) and global address seek bar dynamically in 12px UI sans-serif.
-  const QString navBtnStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px; margin: 0px; font-size: 12px; font-weight: 700; min-width: 22px; max-width: 24px; min-height: 22px; max-height: 24px; } QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; } QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
+  const QString navBtnStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px; margin: 0px; font-size: 11px; font-weight: 700; min-width: 20px; max-width: 24px; min-height: 22px; max-height: 24px; } QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; } QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
   for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) if (btn) btn->setStyleSheet(navBtnStyle);
-  if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 6px; min-height: 22px; max-height: 24px; font-size: 12px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
+  if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 5px; min-height: 22px; max-height: 24px; font-size: 11px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
 
-  // Style CODE | REVERSE | MPI segmented mode buttons: 24px height, 0px 10px padding, 12px font, pal.headerHex / pal.accentHex.
+  // Style CODE | REVERSE | MPI segmented mode buttons: 24px height, compact 0px 5px padding.
   const QString perspStyle = QStringLiteral(
       "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
-      "padding: 0px 10px; font-size: 12px; font-weight: 600; min-height: 24px; max-height: 24px; } "
+      "padding: 0px 5px; min-width: 0px; font-size: 11px; font-weight: 600; min-height: 24px; max-height: 24px; } "
       "QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } "
       "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);

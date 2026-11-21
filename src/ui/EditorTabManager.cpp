@@ -81,7 +81,7 @@ EditorTabManager::EditorTabManager(QWidget* parent)
             menu.addAction(QStringLiteral("Split Editor Down"), this, [this]() { splitEditor(Qt::Vertical); });
             menu.addAction(QStringLiteral("Close Split"), this, &EditorTabManager::closeSplit);
             menu.addSeparator();
-            menu.addAction(QStringLiteral("Switch Header/Source (F10)"), this, &EditorTabManager::switchHeaderSource);
+            menu.addAction(QStringLiteral("Switch Header/Source (F4)"), this, &EditorTabManager::switchHeaderSource);
             menu.exec(bar->mapToGlobal(pos));
         });
     };

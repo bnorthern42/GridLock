@@ -629,20 +629,20 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     };
 
     QAction* runAction = findToolbarAction(QStringLiteral("Run Target"));
-    QAction* stepAction = findToolbarAction(QStringLiteral("Step Inst"));
-    QAction* terminateAction = findToolbarAction(QStringLiteral("Terminate Session"));
-    QVERIFY2(runAction != nullptr && stepAction != nullptr && terminateAction != nullptr, "Run Target, Step Inst, and Terminate Session actions must exist on MainToolbar");
+    QAction* stepAction = findToolbarAction(QStringLiteral("Step Over"));
+    QAction* stopAction = findToolbarAction(QStringLiteral("Stop"));
+    QVERIFY2(runAction != nullptr && stepAction != nullptr && stopAction != nullptr && findToolbarAction(QStringLiteral("Terminate Session")) == nullptr, "Run Target, Step Over, and single Stop action must exist on MainToolbar");
 
     mainWindow.stopTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(!mainWindow.isDebugSessionActive() && runAction->isEnabled() && !terminateAction->isEnabled(), "Idle state must enable Run Target and disable Terminate Session");
+    QVERIFY2(!mainWindow.isDebugSessionActive() && runAction->isEnabled() && !stopAction->isEnabled(), "Idle state must enable Run Target and disable Stop");
 
     // 2. End-to-End Interactive Run -> Step -> Register/Source/Rack Sync -> Stop Loop.
     if (auto* sv = mainWindow.findChild<gridlock::ui::SourceCodeView*>()) sv->setBreakpoints(QSet<int>());
     rankSpin->setValue(4);
     mainWindow.startTargetWorkflow();
     QApplication::processEvents();
-    QVERIFY2(mainWindow.isDebugSessionActive() && stepAction->isEnabled() && terminateAction->isEnabled(), "Active session must enable Step Inst and Terminate Session");
+    QVERIFY2(mainWindow.isDebugSessionActive() && stepAction->isEnabled() && stopAction->isEnabled(), "Active session must enable Step Over and Stop");
 
     auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>();
     auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
@@ -681,7 +681,7 @@ void TestMainWindowUI::testEndToEndStepDebuggingWorkflowAndToolbarState() {
     QApplication::processEvents();
     auto* statusLabel = mainWindow.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"));
     QVERIFY(statusLabel != nullptr);
-    QVERIFY2(!mainWindow.isDebugSessionActive() && !terminateAction->isEnabled() &&
+    QVERIFY2(!mainWindow.isDebugSessionActive() && !stopAction->isEnabled() &&
                  statusLabel->text().contains(QStringLiteral("STATUS: IDLE"), Qt::CaseInsensitive),
              "stopTargetWorkflow() must return session to STATUS: IDLE");
 }

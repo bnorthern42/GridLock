@@ -32,6 +32,7 @@
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QDockWidget>
@@ -105,83 +106,95 @@ void MainWindow::applyCutterWorkspaceLayout() {
  * with history back/forward buttons, global seek bar, and address space visualizer.
  */
 void MainWindow::setupToolbar() {
-  // Construct main debugger control toolbar (styled dynamically by propagateThemeToAllWidgets()).
+  // Construct consolidated main debugger toolbar targeting < 1,040 px width without overflow.
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
   toolbar->setMovable(true);
+  toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   toolbar->setFixedHeight(32);
   toolbar->setContentsMargins(2, 0, 2, 0);
 
-  // Inline Target binary selector and MPI Rank (-np) spinbox ahead of Run Target.
-  QLabel *targetLabel = new QLabel(QStringLiteral("TARGET:"), toolbar);
-  toolbar->addWidget(targetLabel);
-
-  // Inline Target Selector combo box allowing one-click switching between MPI targets or ELF binaries.
+  // Target selector capped at 190 px with middle text elision and full-path tooltip.
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
-  m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-  m_targetSelector->setMinimumWidth(195);
+  m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  m_targetSelector->setMinimumContentsLength(8);
+  m_targetSelector->setMinimumWidth(100);
+  m_targetSelector->setMaximumWidth(190);
   m_targetSelector->setFixedHeight(26);
+  if (m_targetSelector->view()) {
+    m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle);
+    m_targetSelector->view()->setMinimumWidth(260);
+  }
   QFont selectorFont = m_targetSelector->font();
   selectorFont.setItalic(false);
   selectorFont.setWeight(QFont::Medium);
   m_targetSelector->setFont(selectorFont);
-  // Populate default MPI demonstration targets and the Open ELF / Binary file dialog entry.
-  m_targetSelector->addItem(QStringLiteral("inspection_demo (MPI)"),
-                            QStringLiteral("tutorial/inspection_demo.cpp"));
-  m_targetSelector->addItem(QStringLiteral("deadlock_ring (MPI)"),
-                            QStringLiteral("tutorial/deadlock_ring.cpp"));
-  m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."),
-                            QStringLiteral("__open_binary__"));
-  // Synchronize source editor, disassembly/CFG, and build paths when the user switches targets.
-  connect(m_targetSelector, &QComboBox::currentIndexChanged, this, [this](int index) {
+  m_targetSelector->addItem(QStringLiteral("inspection_demo (MPI)"), QStringLiteral("tutorial/inspection_demo.cpp"));
+  m_targetSelector->addItem(QStringLiteral("deadlock_ring (MPI)"), QStringLiteral("tutorial/deadlock_ring.cpp"));
+  m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."), QStringLiteral("__open_binary__"));
+  auto syncTargetTooltip = [this]() {
+    if (!m_targetSelector || m_targetSelector->currentIndex() < 0) return;
+    const int idx = m_targetSelector->currentIndex();
+    const QString raw = m_targetSelector->itemData(idx).toString();
+    const QString full = (raw.isEmpty() || raw == QStringLiteral("__open_binary__")) ? m_targetSelector->itemText(idx) : resolveWorkspacePath(raw);
+    m_targetSelector->setToolTip(QStringLiteral("Active Target: %1\nPath: %2").arg(m_targetSelector->itemText(idx), full.isEmpty() ? raw : full));
+  };
+  syncTargetTooltip();
+  connect(m_targetSelector, &QComboBox::currentIndexChanged, this, [this, syncTargetTooltip](int index) {
     if (!m_targetSelector || index < 0) return;
     const QString data = m_targetSelector->itemData(index).toString();
     if (data == QStringLiteral("__open_binary__")) {
       m_targetSelector->blockSignals(true);
       m_targetSelector->setCurrentIndex(0);
       m_targetSelector->blockSignals(false);
+      syncTargetTooltip();
       openFile();
     } else if (!data.isEmpty()) {
       selectTargetByName(data);
+      syncTargetTooltip();
     }
   });
   toolbar->addWidget(m_targetSelector);
 
-  // Inline MPI Rank Count (-np) label and spin box configuring spawned cluster ranks (1..256).
-  QLabel *ranksLabel = new QLabel(QStringLiteral("RANKS (-np):"), toolbar);
-  toolbar->addWidget(ranksLabel);
-
-  // Spin box controlling the number of MPI ranks launched by startTargetWorkflow().
+  // Compact self-labeled MPI rank count spin box ("np:8").
   m_rankCountSpin = new QSpinBox(toolbar);
   m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
+  m_rankCountSpin->setPrefix(QStringLiteral("np:"));
   m_rankCountSpin->setRange(1, 256);
   m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setMinimumWidth(72);
+  m_rankCountSpin->setMinimumWidth(56);
+  m_rankCountSpin->setMaximumWidth(68);
   m_rankCountSpin->setFixedHeight(26);
   m_rankCountSpin->setFont(selectorFont);
-  if (auto *spinEdit = m_rankCountSpin->findChild<QLineEdit *>()) {
-    spinEdit->setMinimumWidth(40);
-  }
+  m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
   connect(m_rankCountSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
     if (!m_debugSessionActive && !m_previewFixtureOnly && m_serverRackView) m_serverRackView->setSessionIdle(val);
   });
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
 
-  // Build Action: Auto-detects Meson/CMake/Make/SingleFileMPI and compiles in the embedded Terminal tab.
-  QAction *toolbarBuildAct = new QAction("⚙ Build", this);
+  // Compact Build / Clean / Rebuild split button (#toolbarBuildSplitBtn).
+  auto *toolbarBuildAct = new QAction(QStringLiteral("Build Target"), this);
+  toolbarBuildAct->setIconText(QStringLiteral("⚙ Build"));
+  toolbarBuildAct->setToolTip(QStringLiteral("Build Active Target (Ctrl+B) — click arrow for Clean / Rebuild"));
   connect(toolbarBuildAct, &QAction::triggered, this, &MainWindow::buildTargetWorkflow);
-  toolbar->addAction(toolbarBuildAct);
+  auto *buildSplitBtn = new QToolButton(toolbar);
+  buildSplitBtn->setObjectName(QStringLiteral("toolbarBuildSplitBtn"));
+  buildSplitBtn->setPopupMode(QToolButton::MenuButtonPopup);
+  buildSplitBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  buildSplitBtn->setDefaultAction(toolbarBuildAct);
+  auto *buildMenu = new QMenu(buildSplitBtn);
+  buildMenu->addAction(QStringLiteral("Build Target (Ctrl+B)"), this, &MainWindow::buildTargetWorkflow);
+  buildMenu->addAction(QStringLiteral("Clean Target"), this, &MainWindow::cleanTargetWorkflow);
+  buildMenu->addAction(QStringLiteral("Rebuild Target"), this, &MainWindow::rebuildTargetWorkflow);
+  buildSplitBtn->setMenu(buildMenu);
+  toolbar->addWidget(buildSplitBtn);
 
-  // Clean Action: Auto-detects active build system and dispatches clean command to Terminal tab.
-  QAction *toolbarCleanAct = new QAction("✕ Clean", this);
-  connect(toolbarCleanAct, &QAction::triggered, this, &MainWindow::cleanTargetWorkflow);
-  toolbar->addAction(toolbarCleanAct);
-  toolbar->addSeparator();
-
-  // Run Action: Compiles active target on-demand, latches Running state, and advances to first BP or deadlock.
-  m_runAction = new QAction("▶ Run Target", this);
+  // Run Action: Compiles active target on-demand, latches Running state, and advances to first BP.
+  m_runAction = new QAction(QStringLiteral("▶ Run Target"), this);
+  m_runAction->setObjectName(QStringLiteral("actionRunTarget"));
+  m_runAction->setIconText(QStringLiteral("▶ Run"));
   m_runAction->setCheckable(true);
   connect(m_runAction, &QAction::triggered, this, [this]() {
     ensureTargetBinaryCompiled();
@@ -193,106 +206,134 @@ void MainWindow::setupToolbar() {
   }
   toolbar->addSeparator();
 
-  // Continue Action: Resumes suspended execution until the next active breakpoint or procedure exit.
-  m_continueAction = new QAction("⏭ Continue", this);
-  // Route Continue clicks directly to breakpoint-aware continueExecutionWorkflow().
-  connect(m_continueAction, &QAction::triggered, this,
-          &MainWindow::continueExecutionWorkflow);
+  // Continue Action (F5).
+  m_continueAction = new QAction(QStringLiteral("Continue"), this);
+  m_continueAction->setObjectName(QStringLiteral("debug.continue"));
+  m_continueAction->setIconText(QStringLiteral("⏭"));
+  m_continueAction->setShortcut(QKeySequence(Qt::Key_F5));
+  connect(m_continueAction, &QAction::triggered, this, &MainWindow::continueExecutionWorkflow);
   toolbar->addAction(m_continueAction);
 
-  // Step Instruction Action: Executes a single machine instruction on the active rank
-  // and synchronizes DisassemblyView, RegisterView, ServerRackView, MemView, and SourceCodeView.
-  m_stepAction = new QAction("↷ Step Inst", this);
-  // Route single-instruction step clicks to rank-aware stepInstructionWorkflow().
-  connect(m_stepAction, &QAction::triggered, this,
-          &MainWindow::stepInstructionWorkflow);
-  toolbar->addAction(m_stepAction);
+  // Source-Level Stepping: Step Over (F10), Step Into (F11, with stepi/nexti dropdown), Step Out (Shift+F11).
+  m_stepOverAction = new QAction(QStringLiteral("Step Over"), this);
+  m_stepOverAction->setObjectName(QStringLiteral("debug.step_over"));
+  m_stepOverAction->setIconText(QStringLiteral("↷ Over"));
+  m_stepOverAction->setShortcut(QKeySequence(Qt::Key_F10));
+  connect(m_stepOverAction, &QAction::triggered, this, &MainWindow::stepOverWorkflow);
+  toolbar->addAction(m_stepOverAction);
 
-  // Pause Action: Interrupts running execution on the focused rank and updates status telemetry.
-  m_pauseAction = new QAction("⏸ Pause Rank", this);
-  // Dispatch asynchronous PauseCommand to backend coordinator when active.
-  connect(m_pauseAction, &QAction::triggered, this, [this]() {
-    updateStatusTelemetry(QString(), QStringLiteral("PAUSED"));
-    if (m_coordinator) {
-      // Ranks are 1-indexed inside backend PauseCommand wire messages.
-      auto cmd = std::make_unique<gridlock::core::commands::PauseCommand>(
-          m_coordinator, m_focusedRank + 1);
-      executeCommand(std::move(cmd));
-    }
-  });
-  toolbar->addAction(m_pauseAction);
+  m_stepIntoAction = new QAction(QStringLiteral("Step Into"), this);
+  m_stepIntoAction->setObjectName(QStringLiteral("debug.step_into"));
+  m_stepIntoAction->setIconText(QStringLiteral("↳ Into"));
+  m_stepIntoAction->setShortcut(QKeySequence(Qt::Key_F11));
+  connect(m_stepIntoAction, &QAction::triggered, this, &MainWindow::stepIntoWorkflow);
+  toolbar->addAction(m_stepIntoAction);
 
-  // Stop Action: Sends termination request to active coordinator and resets session state to IDLE.
-  m_stopAction = new QAction("■ Stop", this);
-  // Unlatch Run Target button and clear active PC cursor when Stop is pressed.
-  connect(m_stopAction, &QAction::triggered, this,
-          &MainWindow::stopTargetWorkflow);
-  toolbar->addAction(m_stopAction);
-
-  // Terminate Action: Closes debugging session, clears execution line highlight, and resets toolbar state.
-  m_terminateAction = new QAction("✕ Terminate Session", this);
-  // Reuse stopTargetWorkflow() so Stop and Terminate share identical session teardown semantics.
-  connect(m_terminateAction, &QAction::triggered, this,
-          &MainWindow::stopTargetWorkflow);
-  toolbar->addAction(m_terminateAction);
-
-  // Initialize state-aware toolbar button enablement (Idle by default: only Run Target enabled).
-  updateDebugToolbarState();
-
-  // Enforce uniform 26px height across all toolbar QToolButtons and strip tooltips.
-  for (QAction *action : toolbar->actions()) {
-    action->setToolTip(QString());
-    if (QWidget *btn = toolbar->widgetForAction(action)) {
-      if (qobject_cast<QToolButton *>(btn)) btn->setFixedHeight(26);
-    }
+  m_stepAction = new QAction(QStringLiteral("Step Instruction (stepi)"), this);
+  m_stepAction->setObjectName(QStringLiteral("actionStepInstruction"));
+  connect(m_stepAction, &QAction::triggered, this, &MainWindow::stepInstructionWorkflow);
+  if (auto *intoBtn = qobject_cast<QToolButton *>(toolbar->widgetForAction(m_stepIntoAction))) {
+    intoBtn->setObjectName(QStringLiteral("toolbarStepIntoBtn"));
+    intoBtn->setPopupMode(QToolButton::MenuButtonPopup);
+    auto *stepMenu = new QMenu(intoBtn);
+    stepMenu->addAction(m_stepAction);
+    stepMenu->addAction(QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"), this, &MainWindow::nextInstructionWorkflow);
+    intoBtn->setMenu(stepMenu);
   }
 
-  // Expanding spacer separating debugger actions from navigation controls.
-  // Right-aligns history arrows, universal seek bar, and perspective pills on wide monitors.
+  m_stepOutAction = new QAction(QStringLiteral("Step Out"), this);
+  m_stepOutAction->setObjectName(QStringLiteral("debug.step_out"));
+  m_stepOutAction->setIconText(QStringLiteral("↱ Out"));
+  m_stepOutAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
+  connect(m_stepOutAction, &QAction::triggered, this, &MainWindow::stepOutWorkflow);
+  toolbar->addAction(m_stepOutAction);
+
+  // Pause Focused Rank & Single Merged Stop Action (Shift+F5).
+  m_pauseAction = new QAction(QStringLiteral("Pause Rank"), this);
+  m_pauseAction->setObjectName(QStringLiteral("actionPauseRank"));
+  m_pauseAction->setIconText(QStringLiteral("⏸"));
+  connect(m_pauseAction, &QAction::triggered, this, &MainWindow::pauseRankWorkflow);
+  toolbar->addAction(m_pauseAction);
+
+  m_stopAction = new QAction(QStringLiteral("Stop Session"), this);
+  m_stopAction->setObjectName(QStringLiteral("debug.stop"));
+  m_stopAction->setIconText(QStringLiteral("■ Stop"));
+  m_stopAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F5));
+  connect(m_stopAction, &QAction::triggered, this, &MainWindow::stopTargetWorkflow);
+  toolbar->addAction(m_stopAction);
+
+  // Time-travel Record button next to stepping group (Step Back & Rev Continue stay hidden until recording is active).
+  auto *recBtn = new QPushButton(QStringLiteral("⏺ Rec"), toolbar);
+  recBtn->setObjectName(QStringLiteral("toolbarRecordHistoryBtn"));
+  recBtn->setCheckable(true);
+  auto *sbBtn = new QPushButton(QStringLiteral("↶ Back"), toolbar);
+  sbBtn->setObjectName(QStringLiteral("toolbarStepBackBtn"));
+  auto *rcBtn = new QPushButton(QStringLiteral("⏮ Rev"), toolbar);
+  rcBtn->setObjectName(QStringLiteral("toolbarReverseContinueBtn"));
+  toolbar->addWidget(recBtn);
+  QAction *sbAct = toolbar->addWidget(sbBtn);
+  sbAct->setObjectName(QStringLiteral("actionToolbarStepBack"));
+  sbAct->setVisible(false);
+  QAction *rcAct = toolbar->addWidget(rcBtn);
+  rcAct->setObjectName(QStringLiteral("actionToolbarReverseContinue"));
+  rcAct->setVisible(false);
+  connect(recBtn, &QPushButton::toggled, this, [this](bool on) {
+    if (m_coordinator) m_coordinator->setReverseRecordingEnabled(activeSteppingRank(), on);
+    updateDebugToolbarState();
+  });
+  connect(sbBtn, &QPushButton::clicked, this, [this]() { reverseStepOverWorkflow(); });
+  connect(rcBtn, &QPushButton::clicked, this, [this]() { reverseContinueWorkflow(); });
+
+  // Initialize state-aware toolbar button enablement and descriptive tooltips.
+  updateDebugToolbarState();
+  for (QToolButton *btn : toolbar->findChildren<QToolButton *>()) {
+    btn->setFixedHeight(26);
+    btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  }
+  for (QPushButton *btn : toolbar->findChildren<QPushButton *>()) {
+    btn->setFixedHeight(26);
+    btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  }
+
+  // Expanding spacer separating execution controls from right-aligned navigation & perspective pills.
   QWidget *spacer = new QWidget(toolbar);
   spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
   toolbar->addWidget(spacer);
 
-  // History back navigation button (<) styled dynamically by propagateThemeToAllWidgets().
+  // History back/forward navigation buttons (< / >) with shortcut tooltips.
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
   m_navBackBtn->setObjectName("navBackButton");
-  m_navBackBtn->setFixedSize(26, 26);
+  m_navBackBtn->setFixedSize(22, 26);
   m_navBackBtn->setEnabled(false);
-  // Connect back button click to address stack pop operation.
+  m_navBackBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  m_navBackBtn->setToolTip(QStringLiteral("Navigate Back in Address History (Alt+Left)"));
   connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
   toolbar->addWidget(m_navBackBtn);
 
-  // History forward navigation button (>) styled dynamically by propagateThemeToAllWidgets().
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
   m_navForwardBtn->setObjectName("navForwardButton");
-  m_navForwardBtn->setFixedSize(26, 26);
+  m_navForwardBtn->setFixedSize(22, 26);
   m_navForwardBtn->setEnabled(false);
-  // Connect forward button click to address stack forward traversal.
-  connect(m_navForwardBtn, &QPushButton::clicked, this,
-          &MainWindow::navigateForward);
+  m_navForwardBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  m_navForwardBtn->setToolTip(QStringLiteral("Navigate Forward in Address History (Alt+Right)"));
+  connect(m_navForwardBtn, &QPushButton::clicked, this, &MainWindow::navigateForward);
   toolbar->addWidget(m_navForwardBtn);
 
-  // Global Alt+Left and Alt+Right keyboard shortcuts for navigation history.
-  QShortcut *navBackShortcut =
-      new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this);
-  connect(navBackShortcut, &QShortcut::activated, this,
-          &MainWindow::navigateBack);
-  QShortcut *navFwdShortcut =
-      new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this);
-  connect(navFwdShortcut, &QShortcut::activated, this,
-          &MainWindow::navigateForward);
+  // Global seek bar for hexadecimal address or symbol jumps (Ctrl+G).
+  QShortcut *navBackShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this);
+  connect(navBackShortcut, &QShortcut::activated, this, &MainWindow::navigateBack);
+  QShortcut *navFwdShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this);
+  connect(navFwdShortcut, &QShortcut::activated, this, &MainWindow::navigateForward);
 
-  // Universal seek bar allowing direct hexadecimal address or symbol navigation in 12px UI sans-serif.
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
-  m_seekBar->setPlaceholderText("Go to address / symbol (Ctrl+G)...");
+  m_seekBar->setPlaceholderText("Go to addr/sym (Ctrl+G)");
+  m_seekBar->setToolTip(QStringLiteral("Go to Address or Symbol (Ctrl+G) — enter hex address (0x401000) or function symbol"));
   m_seekBar->setFixedHeight(26);
-  m_seekBar->setMinimumWidth(96);
-  m_seekBar->setMaximumWidth(135);
+  m_seekBar->setFixedWidth(88);
   toolbar->addWidget(m_seekBar);
 
-  // Synchronize inspection views whenever user presses Return in seek bar (Ctrl+G focus is managed by ShortcutManager).
   connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() {
     seekToAddressOrExpression(m_seekBar->text());
   });

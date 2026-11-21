@@ -80,25 +80,36 @@ void ShortcutManager::initialize(gridlock::ui::MainWindow* mainWindow) {
   registerChordBinding(QStringLiteral("debug.continue"), QStringLiteral("Debug"),
                        QStringLiteral("Continue Execution"), QKeySequence(Qt::Key_F5), [this]() {
                          if (!m_mainWindow) return;
-                         const int threadId = m_mainWindow->focusedRank() + 1;
-                         auto cmd = std::make_unique<commands::ContinueCommand>(m_mainWindow->coordinator(), threadId);
-                         m_mainWindow->executeCommand(std::move(cmd));
+                         if (!m_mainWindow->continueExecutionWorkflow() && m_mainWindow->coordinator()) {
+                           const int threadId = m_mainWindow->focusedRank() + 1;
+                           auto cmd = std::make_unique<commands::ContinueCommand>(m_mainWindow->coordinator(), threadId);
+                           m_mainWindow->executeCommand(std::move(cmd));
+                         }
                        });
 
   registerChordBinding(QStringLiteral("debug.step_over"), QStringLiteral("Debug"),
-                       QStringLiteral("Step Over Line"), QKeySequence(Qt::Key_F10), [this]() {
-                         if (!m_mainWindow) return;
-                         const int threadId = m_mainWindow->focusedRank() + 1;
-                         auto cmd = std::make_unique<commands::StepCommand>(m_mainWindow->coordinator(), threadId, false);
-                         m_mainWindow->executeCommand(std::move(cmd));
+                       QStringLiteral("Step Over"), QKeySequence(Qt::Key_F10), [this]() {
+                         if (m_mainWindow) m_mainWindow->stepOverWorkflow();
                        });
 
   registerChordBinding(QStringLiteral("debug.step_into"), QStringLiteral("Debug"),
-                       QStringLiteral("Step Into Call"), QKeySequence(Qt::Key_F11), [this]() {
-                         if (!m_mainWindow) return;
-                         const int threadId = m_mainWindow->focusedRank() + 1;
-                         auto cmd = std::make_unique<commands::StepCommand>(m_mainWindow->coordinator(), threadId, true);
-                         m_mainWindow->executeCommand(std::move(cmd));
+                       QStringLiteral("Step Into"), QKeySequence(Qt::Key_F11), [this]() {
+                         if (m_mainWindow) m_mainWindow->stepIntoWorkflow();
+                       });
+
+  registerChordBinding(QStringLiteral("debug.step_out"), QStringLiteral("Debug"),
+                       QStringLiteral("Step Out"), QKeySequence(Qt::SHIFT | Qt::Key_F11), [this]() {
+                         if (m_mainWindow) m_mainWindow->stepOutWorkflow();
+                       });
+
+  registerChordBinding(QStringLiteral("debug.stop"), QStringLiteral("Debug"),
+                       QStringLiteral("Stop Session"), QKeySequence(Qt::SHIFT | Qt::Key_F5), [this]() {
+                         if (m_mainWindow) m_mainWindow->stopTargetWorkflow();
+                       });
+
+  registerChordBinding(QStringLiteral("file.switch_header_source"), QStringLiteral("File"),
+                       QStringLiteral("Switch Header/Source"), QKeySequence(Qt::Key_F4), [this]() {
+                         if (m_mainWindow && m_mainWindow->editorTabManager()) m_mainWindow->editorTabManager()->switchHeaderSource();
                        });
 
   registerChordBinding(QStringLiteral("debug.launch_session"), QStringLiteral("Debug"),
