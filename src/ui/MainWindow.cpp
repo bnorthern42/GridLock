@@ -262,14 +262,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     gridlock::core::ThemeManager::instance().loadPersistedTheme();
   }
   propagateThemeToAllWidgets();
-  // Balance right-sidebar zones: 380px wide, 55% top tabbed inspector, 45% bottom Server Rack.
-  if (auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"))) {
-    resizeDocks({varsDock}, {380}, Qt::Horizontal);
-    if (auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"))) resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical);
-  }
-  // Synchronize DisassemblyView pseudo-C decompiler visibility with showDecompilerWithSource preference.
-  syncDisassemblyDecompilerVisibility(false);
-  // Populate initial status bar Stack/Heap/RAM/CPU telemetry and start 1500ms refresh timer.
+  setWorkspacePerspective(QStringLiteral("Source"));
   refreshStatusBarMemoryTelemetry();
   auto* telemetryTimer = new QTimer(this);
   connect(telemetryTimer, &QTimer::timeout, this, &MainWindow::refreshStatusBarMemoryTelemetry);
@@ -284,6 +277,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
  */
 void MainWindow::loadPreviewFixture() {
   m_previewFixtureOnly = true; m_useRealBinaryTarget = false;
+  if (m_workspacePerspective == QStringLiteral("Source")) setWorkspacePerspective(QStringLiteral("Code"));
+  syncRankCountChrome(8);
   if (m_projectExplorerWidget) { m_projectExplorerWidget->seedDefaultSymbols(); m_projectExplorerWidget->seedDefaultStrings(); }
   if (m_disassemblyView) m_disassemblyView->loadSampleDisassembly();
   if (m_registerView) m_registerView->seedPreviewRegisters();
@@ -787,11 +782,13 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   // Re-dock any floating MemView window so no top-level window outlives MainWindow.
   if (m_memView && m_memView->isPoppedOut()) m_memView->setPoppedOut(false);
   // Save active session and watch expressions before disconnecting coordinator/LSP signals.
-  if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
-  if (m_differentialGrid) {
-    auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
-    ps.watchExpressions = m_differentialGrid->getWatchExpressions();
-    gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+  if (!m_activeWorkspaceDir.isEmpty()) {
+    saveSession(false);
+    if (m_differentialGrid) {
+      auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+      ps.watchExpressions = m_differentialGrid->getWatchExpressions();
+      gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
+    }
   }
   // Persist active theme and interactive dock/splitter geometry.
   gridlock::core::ThemeManager::instance().savePersistedTheme();
@@ -812,16 +809,16 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   if (event) event->accept();
 }
 
-/** @brief Global event filter routing keyboard shortcuts and dynamic debugger-engine updates. */
+/** @brief Synchronizes DisassemblyView & decompiler visibility across Source, Debug, Binary, and MPI perspectives. */
 void MainWindow::syncDisassemblyDecompilerVisibility(bool applyDefaultMode) {
   if (!m_disassemblyView) return;
-  // Determine whether the center source pane is visible in the current perspective.
-  const bool sourceVisible = m_editorTabManager && !m_editorTabManager->isHidden() &&
-                             m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) != 0;
+  const bool isBin = (m_workspacePerspective.compare(QStringLiteral("Binary"), Qt::CaseInsensitive) == 0 ||
+                      m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0);
+  const bool sourceVisible = m_editorTabManager && !m_editorTabManager->isHidden() && !isBin;
   m_disassemblyView->setSourceEditorActive(sourceVisible);
-  if (!sourceVisible) { if (!m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setSplitGraphDecompilerMode(true); return; }
-  // Sync decompiler split visibility with persisted user preferences.
+  if (!sourceVisible) { m_disassemblyView->setVisible(true); if (!m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setSplitGraphDecompilerMode(true); return; }
   const auto& cfg = gridlock::core::ConfigManager::instance();
+  if (m_workspacePerspective == QStringLiteral("Debug") && cfg.showDecompilerWithSource()) m_disassemblyView->setVisible(true);
   if (!cfg.showDecompilerWithSource()) { m_showingDecompilerFallback = false; m_forceDecompilerFallback = false; m_disassemblyView->setDecompilerPaneVisible(false, applyDefaultMode); }
   else if (applyDefaultMode || !m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setDecompilerPaneVisible(true, true);
 }

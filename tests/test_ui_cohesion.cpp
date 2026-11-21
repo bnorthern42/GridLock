@@ -724,20 +724,20 @@ void TestMainWindowUI::testSourceToAssemblySyncAndWorkspacePerspectives() {
     emit disasmView->addressSelected(0x0040113dULL); QApplication::processEvents();
     QCOMPARE(sourceView->executionLine(), 13);
 
-    // 2. Workspace Perspective Switching ("Reverse", "MPI", "Code") and width checks.
-    mainWindow.setWorkspacePerspective(QStringLiteral("Reverse")); QApplication::processEvents();
-    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Reverse"));
-    QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700, "Reverse perspective must enable Split CFG + Decompiler mode with width >= 700");
+    // 2. Workspace Perspective Switching ("Binary", "MPI", "Debug", "Source") and width checks.
+    mainWindow.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents();
+    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Binary"));
+    QVERIFY2(disasmView->isSplitGraphDecompilerMode() && disasmView->width() >= 700, "Binary perspective must enable Split CFG + Decompiler mode with width >= 700");
 
     // Verify MPI perspective activates the MPI Diagnostics tab in BottomConsoleTabs.
     mainWindow.setWorkspacePerspective(QStringLiteral("MPI")); QApplication::processEvents();
     QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("MPI"));
     QVERIFY2(bottomTabs->tabText(bottomTabs->currentIndex()).contains(QStringLiteral("MPI Diagnostics"), Qt::CaseInsensitive), "MPI perspective must activate the MPI Diagnostics bottom tab");
 
-    // Verify Code perspective restores side-by-side SourceCodeView and DisassemblyView panes.
-    mainWindow.setWorkspacePerspective(QStringLiteral("Code")); QApplication::processEvents();
-    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Code"));
-    QVERIFY2(sourceView->width() > 200 && disasmView->width() > 200, "Code perspective must restore side-by-side SourceCodeView and DisassemblyView");
+    // Verify Debug perspective focuses SourceCodeView alongside right-side inspection docks.
+    mainWindow.setWorkspacePerspective(QStringLiteral("Debug")); QApplication::processEvents();
+    QCOMPARE(mainWindow.workspacePerspective(), QStringLiteral("Debug"));
+    QVERIFY2(sourceView->width() > 400, "Debug perspective must keep SourceCodeView wide alongside Variables/CallStack");
 
     // 3. Bottom Console Maximize Toggle expands and restores bottom dock height.
     const int baseHeight = bottomTabs->height();

@@ -534,11 +534,8 @@ void MainWindow::bindConsoleAndWatchpointRoutes() {
 
                     // Create `+ Watchpoint` button to arm hardware watchpoints and add a diff-grid column.
                     auto* wpBtn = new QPushButton(QStringLiteral("+ Watchpoint"), watchInput->parentWidget());
-                    wpBtn->setObjectName(QStringLiteral("addHardwareWatchpointBtn"));
-                    wpBtn->setFixedHeight(22);
-                    wpBtn->setToolTip(QStringLiteral("Arm CPU Hardware Data Watchpoint (Write / Read / R/W)"));
+                    wpBtn->setObjectName(QStringLiteral("addHardwareWatchpointBtn")); wpBtn->setFixedHeight(22);
                     connect(wpBtn, &QPushButton::clicked, this, [this, watchInput, modeCombo]() {
-                        // Ignore empty watch expressions so blank inputs never emit spurious MI/DAP commands.
                         const QString expr = watchInput->text().trimmed();
                         if (expr.isEmpty()) return;
                         const auto mode = static_cast<WatchpointAccessMode>(modeCombo->currentData().toInt());
@@ -546,13 +543,12 @@ void MainWindow::bindConsoleAndWatchpointRoutes() {
                         if (m_differentialGrid) m_differentialGrid->addVariableColumn(expr);
                         watchInput->clear();
                     });
-                    barLayout->addWidget(modeCombo);
-                    barLayout->addWidget(wpBtn);
+                    barLayout->addWidget(modeCombo); barLayout->addWidget(wpBtn);
+                    updateDebugToolbarState();
                 }
             }
         }
     }
-
     if (!m_coordinator) return;
 
     // Stream REPL console evaluation replies and MiSanitizer diagnostics into GdbConsoleWidget.

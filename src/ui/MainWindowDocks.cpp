@@ -70,14 +70,14 @@ void MainWindow::setupCallStackDock() {
   addDockWidget(Qt::RightDockWidgetArea, callStackDock);
   m_dockHomeSlots[callStackDock] = {nullptr, -1, Qt::RightDockWidgetArea};
 
-  // Tabify alongside VARIABLES | REGISTERS | WATCH and keep VARIABLES raised as default startup tab.
+  // Split CallStackDock vertically below VariablesDock (above ServerRackDock) so Variables and Call Stack are both visible.
   auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
-  auto* regsDock = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
-  auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
-  if (QDockWidget* anchor = watchDock ? watchDock : (regsDock ? regsDock : varsDock)) {
-    tabifyDockWidget(anchor, callStackDock);
+  auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+  if (varsDock) {
+    splitDockWidget(varsDock, callStackDock, Qt::Vertical);
+    if (rackDock) splitDockWidget(callStackDock, rackDock, Qt::Vertical);
+    varsDock->raise();
   }
-  if (varsDock) varsDock->raise();
 }
 
 /**
@@ -200,9 +200,13 @@ void MainWindow::redockWidget(QDockWidget* dock) {
         auto* watch = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
         auto* cstack = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
         auto* rack = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
-        if (dock == rack && vars && !isDockFloating(vars)) {
-          splitDockWidget(vars, rack, Qt::Vertical); resizeDocks({vars, rack}, {520, 380}, Qt::Vertical);
-        } else if ((dock == regs || dock == watch || dock == cstack) && vars && !isDockFloating(vars)) {
+        if (dock == rack && cstack && !isDockFloating(cstack)) {
+          splitDockWidget(cstack, rack, Qt::Vertical); resizeDocks({cstack, rack}, {210, 260}, Qt::Vertical);
+        } else if (dock == rack && vars && !isDockFloating(vars)) {
+          splitDockWidget(vars, rack, Qt::Vertical); resizeDocks({vars, rack}, {460, 280}, Qt::Vertical);
+        } else if (dock == cstack && vars && !isDockFloating(vars)) {
+          splitDockWidget(vars, cstack, Qt::Vertical);
+        } else if ((dock == regs || dock == watch) && vars && !isDockFloating(vars)) {
           tabifyDockWidget(vars, dock);
         } else if (dock == vars && regs && !isDockFloating(regs)) {
           tabifyDockWidget(regs, vars);
@@ -699,14 +703,14 @@ void MainWindow::propagateThemeToAllWidgets() {
   for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) if (btn) btn->setStyleSheet(navBtnStyle);
   if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 5px; min-height: 22px; max-height: 24px; font-size: 11px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
 
-  // Style CODE | REVERSE | MPI segmented mode buttons: 24px height, compact 0px 5px padding.
+  // Style SOURCE | DEBUG | BINARY | MPI segmented mode buttons: 24px height, compact 0px 4px padding.
   const QString perspStyle = QStringLiteral(
       "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
-      "padding: 0px 5px; min-width: 0px; font-size: 11px; font-weight: 600; min-height: 24px; max-height: 24px; } "
+      "padding: 0px 4px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 24px; max-height: 24px; } "
       "QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } "
       "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
       .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
-  for (QPushButton* btn : {m_perspCodeBtn, m_perspReverseBtn, m_perspMpiBtn}) if (btn) btn->setStyleSheet(perspStyle);
+  for (QPushButton* btn : {m_perspSourceBtn, m_perspDebugBtn, m_perspBinaryBtn, m_perspMpiBtn}) if (btn) btn->setStyleSheet(perspStyle);
 
   // 3. Re-style Bottom Tool Window Rail (#bottomToolWindowRail)
   if (m_bottomToolRail) {
@@ -823,6 +827,7 @@ void MainWindow::syncProgramOutputForLaunch(int rankCount) {
   if (!m_programOutputRankFilter) return;
   m_programOutputRankFilter->blockSignals(true); m_programOutputRankFilter->clear(); m_programOutputRankFilter->addItem(QStringLiteral("All Ranks"), -1);
   for (int r = 0; r < std::max(1, rankCount); ++r) { m_programOutputRankFilter->addItem(QStringLiteral("Rank %1").arg(r), r); } m_programOutputRankFilter->blockSignals(false);
+  m_programOutputRankFilter->setVisible(rankCount > 1);
 }
 /** @brief Queues one or more cleaned rank stdout/stderr lines and arms the 16ms coalescing timer. */
 void MainWindow::appendProgramOutput(int rank, const QString& text, bool isError) {
@@ -847,6 +852,28 @@ void MainWindow::flushProgramOutputBatch() {
   m_programOutputView->setUpdatesEnabled(false); QTextCursor cur(m_programOutputView->document()); cur.movePosition(QTextCursor::End);
   cur.insertText(m_programOutputView->document()->isEmpty() ? batch : (QLatin1Char('\n') + batch));
   m_programOutputView->setUpdatesEnabled(true); if (sb) sb->setValue(stick ? sb->maximum() : pv);
+}
+void MainWindow::syncRankCountChrome(int rankCount) {
+  const int ranks = (rankCount > 0) ? rankCount
+                    : ((m_debugSessionActive && m_coordinator && m_coordinator->getProcessCount() > 0)
+                           ? m_coordinator->getProcessCount()
+                           : (m_rankCountSpin ? m_rankCountSpin->value() : 1));
+  const bool multi = (ranks > 1);
+  const bool hideRight = (m_workspacePerspective == QStringLiteral("Source") && !m_debugSessionActive);
+  auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+  auto* cstackDock = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
+  auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+  if (rackDock && !isDockFloating(rackDock)) rackDock->setVisible(!hideRight && multi);
+  if (!hideRight && varsDock && cstackDock && !isDockFloating(varsDock) && !isDockFloating(cstackDock)) {
+    if (multi && rackDock && !isDockFloating(rackDock)) resizeDocks({varsDock, cstackDock, rackDock}, {320, 200, 260}, Qt::Vertical);
+    else resizeDocks({varsDock, cstackDock}, {460, 320}, Qt::Vertical);
+  }
+  for (const QString& id : {QStringLiteral("variablesScopeLabel"), QStringLiteral("variablesRankSelector"),
+                            QStringLiteral("gdbConsoleTargetLabel"), QStringLiteral("gdbConsoleRankCombo"),
+                            QStringLiteral("evaluatorRankCombo"), QStringLiteral("memProfileRankCombo")}) {
+    if (QWidget* w = findChild<QWidget*>(id)) w->setVisible(multi);
+  }
+  if (m_programOutputRankFilter) m_programOutputRankFilter->setVisible(multi);
 }
 void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {}
 }  // namespace gridlock::ui

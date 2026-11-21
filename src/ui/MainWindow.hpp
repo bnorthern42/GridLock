@@ -484,14 +484,18 @@ public:
                                  const QString& codeFamily, int codeSize);
 
     /**
-     * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
-     * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
+     * @brief Switches the workstation layout between "Source", "Debug", "Binary", and "MPI" perspectives.
+     * @param perspective Target perspective name ("Source", "Debug", "Binary", or "MPI").
      */
     void setWorkspacePerspective(const QString& perspective);
 
     /**
-     * @brief Returns the currently active workspace perspective identifier ("Code", "Reverse", or "MPI").
-     * @return Active perspective name.
+     * @brief Synchronizes ServerRackDock and multi-rank selector visibility for single-rank vs multi-rank workflows.
+     */
+    void syncRankCountChrome(int rankCount = -1);
+
+    /**
+     * @brief Returns the currently active workspace perspective identifier.
      */
     QString workspacePerspective() const { return m_workspacePerspective; }
 
@@ -895,9 +899,10 @@ private:
     bool m_suppressMemViewBroadcast = false;
     bool m_suppressExecutionTabSwitch = false;
     bool m_bottomConsoleMaximized = false;
-    QString m_workspacePerspective = QStringLiteral("Code");
-    QPushButton* m_perspCodeBtn = nullptr;
-    QPushButton* m_perspReverseBtn = nullptr;
+    QString m_workspacePerspective = QStringLiteral("Source");
+    QPushButton* m_perspSourceBtn = nullptr;
+    QPushButton* m_perspDebugBtn = nullptr;
+    QPushButton* m_perspBinaryBtn = nullptr;
     QPushButton* m_perspMpiBtn = nullptr;
 
     IBackendCoordinator* m_coordinator = nullptr;

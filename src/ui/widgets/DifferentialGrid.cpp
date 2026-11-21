@@ -13,6 +13,8 @@
 #include <algorithm>
 
 #include <QHeaderView>
+#include <QPaintEvent>
+#include <QPainter>
 #include <QPalette>
 
 namespace gridlock::ui {
@@ -69,6 +71,21 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     });
 }
 
+QString DifferentialGrid::emptyPlaceholderText() const {
+    return QStringLiteral("No watch expressions — enter a C/C++ expression above and click + Watch");
+}
+
+void DifferentialGrid::paintEvent(QPaintEvent* event) {
+    QTableWidget::paintEvent(event);
+    if (!getWatchExpressions().empty() || !viewport()) return;
+    QPainter p(viewport());
+    QColor muted = palette().color(QPalette::Text);
+    muted.setAlpha(140);
+    p.setPen(muted);
+    QRect r = viewport()->rect().adjusted(14, isRowHidden(0) ? 12 : 30, -14, -12);
+    p.drawText(r, Qt::AlignCenter | Qt::TextWordWrap, emptyPlaceholderText());
+}
+
 /**
  * @brief Returns whether horizontal header columns are configured to stretch evenly across the dock width.
  * @return True if QHeaderView::Stretch is active on the horizontal header; false otherwise.
@@ -94,6 +111,8 @@ void DifferentialGrid::setVariableData(int rankId, const QHash<QString, QString>
  * @param name Variable identifier or expression string.
  */
 void DifferentialGrid::addVariableColumn(const QString& name) {
+    horizontalHeader()->setVisible(true);
+    verticalHeader()->setVisible(true);
     int col = -1;
     for (int c = 0; c < columnCount(); ++c) {
         if (horizontalHeaderItem(c) && horizontalHeaderItem(c)->text() == name) {
@@ -113,6 +132,7 @@ void DifferentialGrid::addVariableColumn(const QString& name) {
             setItem(r, col, new QTableWidgetItem("-"));
         }
     }
+    if (viewport()) viewport()->update();
 }
 
 /**
@@ -138,6 +158,11 @@ void DifferentialGrid::clearWatches() {
     setHorizontalHeaderItem(0, new QTableWidgetItem("New Variable"));
     setRowCount(1);
     setItem(0, 0, new QTableWidgetItem(""));
+    if (isColumnHidden(0)) {
+        horizontalHeader()->setVisible(false);
+        verticalHeader()->setVisible(false);
+    }
+    if (viewport()) viewport()->update();
 }
 
 /**
@@ -151,6 +176,8 @@ void DifferentialGrid::clearWatches() {
  * @param value String value or error description.
  */
 void DifferentialGrid::updateVariableDisplay(int rankId, const QString& varName, const QString& value) {
+    horizontalHeader()->setVisible(true);
+    verticalHeader()->setVisible(true);
     int targetRow = rankId + 1;
     
     // Find or create column for varName

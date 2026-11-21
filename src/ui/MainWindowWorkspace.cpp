@@ -170,6 +170,7 @@ void MainWindow::setupToolbar() {
   m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
   connect(m_rankCountSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
     if (!m_debugSessionActive && !m_previewFixtureOnly && m_serverRackView) m_serverRackView->setSessionIdle(val);
+    syncRankCountChrome(val);
   });
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
@@ -237,7 +238,8 @@ void MainWindow::setupToolbar() {
     intoBtn->setPopupMode(QToolButton::MenuButtonPopup);
     auto *stepMenu = new QMenu(intoBtn);
     stepMenu->addAction(m_stepAction);
-    stepMenu->addAction(QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"), this, &MainWindow::nextInstructionWorkflow);
+    QAction *nextiAct = stepMenu->addAction(QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"), this, &MainWindow::nextInstructionWorkflow);
+    nextiAct->setObjectName(QStringLiteral("actionToolbarNexti"));
     intoBtn->setMenu(stepMenu);
   }
 
@@ -510,20 +512,10 @@ void MainWindow::setupDocks() {
     if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) gdbCoord->registerWatchVariable(name);
   });
 
-  // Restore project settings watch expressions into differential grid columns.
-  auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
-  for (const auto &w : ps.watchExpressions) {
-    if (!w.empty()) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
-  }
-  // Populate initial synthetic fixture watch entries for baseline inspection.
-  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].id"), QStringLiteral("0 (int)"));
-  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("data[0].coords.x"), QStringLiteral("0.0f (float)"));
-  m_differentialGrid->updateVariableDisplay(0, QStringLiteral("mpi_rank"), QStringLiteral("0 (int)"));
-  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].id"), QStringLiteral("1 (int)"));
-  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("data[0].coords.x"), QStringLiteral("1.5f (float)"));
-  m_differentialGrid->updateVariableDisplay(1, QStringLiteral("mpi_rank"), QStringLiteral("1 (int)"));
   m_differentialGrid->setColumnHidden(0, true);
   m_differentialGrid->setRowHidden(0, true);
+  m_differentialGrid->horizontalHeader()->setVisible(false);
+  m_differentialGrid->verticalHeader()->setVisible(false);
   m_differentialGrid->horizontalHeader()->setMinimumSectionSize(64);
   m_differentialGrid->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
   m_differentialGrid->horizontalHeader()->setStretchLastSection(true);

@@ -62,6 +62,14 @@ public:
      */
     Q_INVOKABLE void reloadStyle();
 
+    /**
+     * @brief Returns the empty-state placeholder guidance message shown when zero watches exist.
+     */
+    QString emptyPlaceholderText() const;
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+
 
 public slots:
     /**

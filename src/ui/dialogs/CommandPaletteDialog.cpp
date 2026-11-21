@@ -668,15 +668,18 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Debug: Stop Debugging Session"),
                        QStringLiteral("Terminate all active MPI ranks and return to IDLE state"),
                        QStringLiteral("Shift+F5"), [mainWindow]() { mainWindow->stopTargetWorkflow(); });
-    registerActionItem(QStringLiteral("View: Switch to Code Perspective"),
-                       QStringLiteral("Focus source editor, variables, and call stack layout"),
-                       QStringLiteral("Perspective"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("Code")); });
-    registerActionItem(QStringLiteral("View: Switch to Reverse Engineering Perspective"),
+    registerActionItem(QStringLiteral("View: Switch to Source Perspective"),
+                       QStringLiteral("Full-width source editor and bottom console without disassembly or debug dock clutter"),
+                       QStringLiteral("Alt+1"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("Source")); });
+    registerActionItem(QStringLiteral("View: Switch to Debug Perspective"),
+                       QStringLiteral("Focus source editor alongside Variables and Call Stack inspection"),
+                       QStringLiteral("Alt+2"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("Debug")); });
+    registerActionItem(QStringLiteral("View: Switch to Binary Perspective"),
                        QStringLiteral("Focus CFG disassembly, pseudo-C decompiler, registers, and hex memory"),
-                       QStringLiteral("Perspective"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("Reverse")); });
+                       QStringLiteral("Alt+3"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("Binary")); });
     registerActionItem(QStringLiteral("View: Switch to MPI Cluster Perspective"),
                        QStringLiteral("Focus MPI deadlock diagnostics, differential watch grid, and server rack"),
-                       QStringLiteral("Perspective"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("MPI")); });
+                       QStringLiteral("Alt+8"), [mainWindow]() { mainWindow->setWorkspacePerspective(QStringLiteral("MPI")); });
     registerActionItem(QStringLiteral("Programmer's Calculator"),
                        QStringLiteral("Floating Hex / Dec / Oct / Bin binary calculator, 64-bit toggle grid, and BSWAP"),
                        QStringLiteral("Ctrl+Alt+C"), [mainWindow]() { mainWindow->openProgrammerCalculator(); });

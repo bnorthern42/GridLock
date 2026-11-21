@@ -94,6 +94,7 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent)
     topLayout->setSpacing(6);
 
     auto* targetLabel = new QLabel(QStringLiteral("TARGET:"), m_headerBar);
+    targetLabel->setObjectName(QStringLiteral("gdbConsoleTargetLabel"));
     m_rankCombo = new QComboBox(m_headerBar);
     m_rankCombo->setObjectName(QStringLiteral("gdbConsoleRankCombo"));
     m_rankCombo->setFixedHeight(22);
@@ -245,9 +246,14 @@ void GdbConsoleWidget::resetRanks(int count) {
  * @param count Active number of MPI ranks in the session.
  */
 void GdbConsoleWidget::ensureRankCount(int count) {
-    if (!m_rankCombo || count < 0 || m_rankCombo->count() == count + 1) {
-        return;
+    if (!m_rankCombo || count < 0) return;
+    if (count > 0) {
+        const bool multi = (count > 1);
+        m_rankCombo->setVisible(multi);
+        if (auto* tl = findChild<QLabel*>(QStringLiteral("gdbConsoleTargetLabel"))) tl->setVisible(multi);
+        if (!multi && m_rankCombo->currentIndex() != 0) m_rankCombo->setCurrentIndex(0);
     }
+    if (m_rankCombo->count() == count + 1) return;
     const int previousSelection = m_rankCombo->currentData().toInt();
     m_rankCombo->blockSignals(true);
     m_rankCombo->clear();

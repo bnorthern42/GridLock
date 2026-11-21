@@ -141,7 +141,9 @@ void VariablesDockWidget::setupUi() {
     topBar->setContentsMargins(6, 2, 6, 2);
     topBar->setSpacing(6);
     QLabel* scopeLabel = new QLabel(QStringLiteral("Scope:"), headerBar);
+    scopeLabel->setObjectName(QStringLiteral("variablesScopeLabel"));
     m_rankSelector = new QComboBox(headerBar);
+    m_rankSelector->setObjectName(QStringLiteral("variablesRankSelector"));
     m_rankSelector->setFixedHeight(22);
     m_rankSelector->addItem(QStringLiteral("Rank 0 (Master)"), 0);
 
@@ -326,9 +328,9 @@ void VariablesDockWidget::onProcessCountChanged() {
         }
     }
     m_rankSelector->blockSignals(false);
-    
-    // Select master rank by default if processes exist.
     if (count > 0) {
+        m_rankSelector->setVisible(count > 1);
+        if (auto* sl = findChild<QLabel*>(QStringLiteral("variablesScopeLabel"))) sl->setVisible(count > 1);
         m_rankSelector->setCurrentIndex(0);
         onRankSelected(0);
     }

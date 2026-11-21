@@ -204,7 +204,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
                     const bool keepLinear = m_disassemblyView && !m_disassemblyView->isGraphMode() &&
                                             !m_disassemblyView->isDecompilerMode() &&
                                             !m_disassemblyView->isSplitGraphDecompilerMode() &&
-                                            !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
+                                            !m_forceDecompilerFallback && m_workspacePerspective != QStringLiteral("Binary");
                     seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
                     if (keepLinear && m_disassemblyView) {
                         m_showingDecompilerFallback = false;
@@ -218,9 +218,9 @@ void MainWindow::harmonizeBottomConsoleTabs() {
     bindActiveSourceView();
     if (m_editorTabManager) connect(m_editorTabManager, &EditorTabManager::currentChanged, this, [this, bindActiveSourceView](int) { bindActiveSourceView(); syncDisassemblyDecompilerVisibility(false); });
 
-    // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE | MPI) on MainToolbar.
+    // 7. Mount one-click Workspace Perspective Switcher (SOURCE | DEBUG | BINARY | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
-        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 6px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
+        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 4px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
         auto makePerspBtn = [&](const QString& label, const QString& obj, const QString& persp, const QString& tip, bool chk) {
             auto* b = new QPushButton(label, mainToolbar);
             b->setObjectName(obj); b->setCheckable(true); b->setChecked(chk); b->setToolTip(tip); b->setStyleSheet(pStyle);
@@ -228,15 +228,17 @@ void MainWindow::harmonizeBottomConsoleTabs() {
             mainToolbar->addWidget(b); return b;
         };
         mainToolbar->addSeparator();
-        m_perspCodeBtn = makePerspBtn(QStringLiteral("CODE"), QStringLiteral("perspectiveCodeBtn"), QStringLiteral("Code"), QStringLiteral("Source & Debug Perspective (Alt+1)"), true);
-        m_perspReverseBtn = makePerspBtn(QStringLiteral("REVERSE"), QStringLiteral("perspectiveReverseBtn"), QStringLiteral("Reverse"), QStringLiteral("Binary CFG & Decompiler Perspective (Alt+2)"), false);
-        m_perspMpiBtn = makePerspBtn(QStringLiteral("MPI"), QStringLiteral("perspectiveMpiBtn"), QStringLiteral("MPI"), QStringLiteral("MPI Topology & Collective Diagnostics Perspective (Alt+3)"), false);
+        m_perspSourceBtn = makePerspBtn(QStringLiteral("SOURCE"), QStringLiteral("perspectiveSourceBtn"), QStringLiteral("Source"), QStringLiteral("Source Perspective (Alt+1) — full-width editor without debug clutter"), true);
+        m_perspDebugBtn = makePerspBtn(QStringLiteral("DEBUG"), QStringLiteral("perspectiveDebugBtn"), QStringLiteral("Debug"), QStringLiteral("Debug Perspective (Alt+2) — source editor + Variables & Call Stack"), false);
+        m_perspBinaryBtn = makePerspBtn(QStringLiteral("BINARY"), QStringLiteral("perspectiveBinaryBtn"), QStringLiteral("Binary"), QStringLiteral("Binary Perspective (Alt+3) — CFG disassembly & Decompiler"), false);
+        m_perspMpiBtn = makePerspBtn(QStringLiteral("MPI"), QStringLiteral("perspectiveMpiBtn"), QStringLiteral("MPI"), QStringLiteral("MPI Perspective (Alt+8) — topology & collective diagnostics"), false);
     }
 
-    // 8. Bind Alt+1..3 perspective shortcuts, Ctrl+M maximize toggle, and populate #bottomToolWindowRail.
-    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_1), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Code")); });
-    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_2), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Reverse")); });
-    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_3), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("MPI")); });
+    // 8. Bind Alt+1/2/3/8 perspective shortcuts, Ctrl+M maximize toggle, and populate #bottomToolWindowRail.
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_1), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Source")); });
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_2), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Debug")); });
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_3), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Binary")); });
+    connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_8), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("MPI")); });
     connect(new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_M), this), &QShortcut::activated, this, &MainWindow::toggleMaximizeBottomConsole);
 
     // 9. Populate the 36px left vertical tool-window icon rail (#bottomToolWindowRail) with 4 linked tool groups.
@@ -400,7 +402,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         if (m_disassemblyView && !disasm.isEmpty()) m_disassemblyView->setPlainText(disasm);
         const bool keepLinear = m_disassemblyView && !m_disassemblyView->isGraphMode() &&
                                 !m_disassemblyView->isDecompilerMode() && !m_disassemblyView->isSplitGraphDecompilerMode() &&
-                                !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
+                                !m_forceDecompilerFallback && m_workspacePerspective != QStringLiteral("Binary");
         seekToAddressOrExpression(QStringLiteral("0x%1").arg(mainAddr, 8, 16, QChar('0')));
         if (keepLinear && m_disassemblyView) { m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false); }
         rebuildDynamicSourceLineMap();
@@ -410,6 +412,7 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
     if (m_memView && !m_debugSessionActive && m_elfInspector->isValid()) m_memView->setSourceModeLabel(QStringLiteral("STATIC ELF (READ-ONLY)"));
+    if (m_workspacePerspective != QStringLiteral("Source")) if (auto* nt = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) nt->setVisible(true);
     if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
     syncDisassemblyDecompilerVisibility(true); return true;
 }
@@ -528,8 +531,15 @@ void MainWindow::updateDebugToolbarState() {
     syncAct(m_stepIntoAction, QStringLiteral("Step Into (F11) — step into called function (click arrow for stepi / nexti)"), QStringLiteral("Step Into (F11)"));
     syncAct(m_stepOutAction, QStringLiteral("Step Out (Shift+F11) — finish current stack frame and pause in caller"), QStringLiteral("Step Out (Shift+F11)"));
     syncAct(m_stepAction, QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
+    syncAct(findChild<QAction*>(QStringLiteral("actionNextInstruction")), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10) — step machine instruction over CALL"), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"));
+    syncAct(findChild<QAction*>(QStringLiteral("actionToolbarNexti")), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10) — step machine instruction over CALL"), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"));
     syncAct(m_pauseAction, QStringLiteral("Pause Focused Rank — interrupt execution on the active MPI rank"), QStringLiteral("Pause Focused Rank"));
     syncAct(m_stopAction, QStringLiteral("Stop Session (Shift+F5) — terminate active debugging session"), QStringLiteral("Stop Session (Shift+F5)"));
+    auto syncBtn = [&](QWidget* w, const QString& onTip, const QString& name) { if (w) { w->setEnabled(active); w->setToolTip(active ? onTip : (name + idleWhy)); } };
+    syncBtn(findChild<QPushButton*>(QStringLiteral("disasmStepiBtn")), QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
+    syncBtn(findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"));
+    syncBtn(findChild<QPushButton*>(QStringLiteral("addHardwareWatchpointBtn")), QStringLiteral("Arm CPU Hardware Data Watchpoint (Write / Read / R/W)"), QStringLiteral("Add Hardware Watchpoint"));
+    if (auto* wpCombo = findChild<QComboBox*>(QStringLiteral("watchpointAccessCombo"))) wpCombo->setEnabled(active);
     if (auto* recBtn = findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"))) {
         const bool recOn = active && (m_coordinator ? m_coordinator->isReverseRecordingEnabled(activeSteppingRank()) : recBtn->isChecked());
         if (recBtn->isChecked() != recOn) { recBtn->blockSignals(true); recBtn->setChecked(recOn); recBtn->blockSignals(false); }
@@ -544,65 +554,67 @@ void MainWindow::updateDebugToolbarState() {
 /** @brief Checks whether the toolbar Run Target button is currently latched in Running state. */
 bool MainWindow::isRunButtonLatched() const { return m_debugSessionActive && m_runAction && m_runAction->isChecked(); }
 
-/**
- * @brief Switches the workstation layout between "Code", "Reverse", and "MPI" perspectives.
- *
- * - "Code": Side-by-side SourceCodeView and DisassemblyView with standard bottom console height.
- * - "Reverse": Collapses SourceCodeView and expands DisassemblyView in Split CFG + Decompiler mode.
- * - "MPI": Activates the MPI Diagnostics bottom tab and expands bottom console height.
- *
- * @param perspective Target perspective name ("Code", "Reverse", or "MPI").
- */
+/** @brief Switches workstation between "Source", "Debug", "Binary", and "MPI" without force-redocking floating panels. */
 void MainWindow::setWorkspacePerspective(const QString& perspective) {
-    redockAllFloatingPanels();
     auto* masterSplitter = findChild<QSplitter*>(QStringLiteral("MasterHorizontalSplitter"));
     auto* mainVertSplitter = findChild<QSplitter*>(QStringLiteral("MainVerticalSplitter"));
+    auto* navTb = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"));
     auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
     auto* regsDock = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
     auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
-    auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
-
-    // Ensure right sidebar maintains the 2-zone layout (tabbed Variables/Registers/Watch above ServerRack).
-    if (varsDock && regsDock && watchDock && rackDock) {
-        if (!tabifiedDockWidgets(varsDock).contains(regsDock) || !tabifiedDockWidgets(varsDock).contains(watchDock)) {
-            splitDockWidget(varsDock, rackDock, Qt::Vertical);
-            tabifyDockWidget(varsDock, regsDock);
-            tabifyDockWidget(regsDock, watchDock);
-        }
+    auto* cstackDock = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
+    if (varsDock && regsDock && watchDock && !isDockFloating(varsDock) && !isDockFloating(regsDock) && !isDockFloating(watchDock)) {
+        if (!tabifiedDockWidgets(varsDock).contains(regsDock)) tabifyDockWidget(varsDock, regsDock);
+        if (!tabifiedDockWidgets(varsDock).contains(watchDock)) tabifyDockWidget(regsDock, watchDock);
     }
+    if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
 
-    if (perspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0) {
-        // Reverse perspective: full-width Split CFG + Decompiler view.
-        m_workspacePerspective = QStringLiteral("Reverse");
+    const bool wasBin = (m_workspacePerspective == QStringLiteral("Binary"));
+    const bool isBin = (perspective.compare(QStringLiteral("Binary"), Qt::CaseInsensitive) == 0 || perspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0);
+    const bool isMpi = (perspective.compare(QStringLiteral("MPI"), Qt::CaseInsensitive) == 0);
+    const bool isDbg = (perspective.compare(QStringLiteral("Debug"), Qt::CaseInsensitive) == 0 || perspective.compare(QStringLiteral("Code"), Qt::CaseInsensitive) == 0);
+    m_workspacePerspective = isBin ? QStringLiteral("Binary") : (isMpi ? QStringLiteral("MPI") : (isDbg ? QStringLiteral("Debug") : QStringLiteral("Source")));
+
+    const bool hideIdleRight = (m_workspacePerspective == QStringLiteral("Source") && !m_debugSessionActive);
+    for (QDockWidget* d : {varsDock, regsDock, watchDock, cstackDock}) {
+        if (d && !isDockFloating(d)) d->setVisible(!hideIdleRight);
+    }
+    if (!hideIdleRight && varsDock && !isDockFloating(varsDock)) { varsDock->raise(); resizeDocks({varsDock}, {320}, Qt::Horizontal); }
+    if (navTb) navTb->setVisible(isBin || (!hideIdleRight && m_workspacePerspective != QStringLiteral("Source") && (m_debugSessionActive || (m_elfInspector && m_elfInspector->isValid()))));
+
+    if (isBin) {
         if (m_editorTabManager) m_editorTabManager->setVisible(false);
-        if (m_disassemblyView) { m_disassemblyView->setSplitGraphDecompilerMode(true); m_disassemblyView->setMinimumWidth(720); }
-        if (masterSplitter) masterSplitter->setSizes({0, (std::max)(width() - 360, 860)});
-    } else if (perspective.compare(QStringLiteral("MPI"), Qt::CaseInsensitive) == 0) {
-        // MPI perspective: focus MPI Diagnostics wait-state table and 55%/45% right dock balance.
-        m_workspacePerspective = QStringLiteral("MPI");
+        if (m_disassemblyView) { m_disassemblyView->setVisible(true); m_disassemblyView->setSplitGraphDecompilerMode(true); }
+        if (masterSplitter) masterSplitter->setSizes({0, (std::max)(width() - 360, 640)});
+    } else if (isMpi) {
+        const bool showDis = core::ConfigManager::instance().showDecompilerWithSource();
         if (m_editorTabManager) m_editorTabManager->setVisible(true);
-        if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
-        if (masterSplitter) masterSplitter->setSizes({420, 500});
+        if (m_disassemblyView) m_disassemblyView->setVisible(showDis);
+        if (masterSplitter) masterSplitter->setSizes(showDis ? QList<int>{420, 500} : QList<int>{920, 0});
         selectBottomToolGroup(QStringLiteral("MPI"));
         if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
         if (mainVertSplitter) mainVertSplitter->setSizes({430, 410});
-        if (varsDock && rackDock) { varsDock->raise(); resizeDocks({varsDock}, {340}, Qt::Horizontal); resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical); }
-    } else {
-        // Code perspective: balanced side-by-side SourceCodeView/DisassemblyView and 55%/45% right dock balance.
-        m_workspacePerspective = QStringLiteral("Code");
+    } else if (isDbg) {
+        const bool showDis = (perspective.compare(QStringLiteral("Code"), Qt::CaseInsensitive) == 0) || core::ConfigManager::instance().showDecompilerWithSource();
         if (m_editorTabManager) m_editorTabManager->setVisible(true);
-        if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
-        if (masterSplitter) masterSplitter->setSizes({440, 520});
+        if (m_disassemblyView) m_disassemblyView->setVisible(showDis);
+        if (masterSplitter) masterSplitter->setSizes(showDis ? QList<int>{440, 520} : QList<int>{940, 0});
         if (mainVertSplitter) mainVertSplitter->setSizes({600, 260});
-        if (varsDock && rackDock) { varsDock->raise(); resizeDocks({varsDock}, {340}, Qt::Horizontal); resizeDocks({varsDock, rackDock}, {520, 380}, Qt::Vertical); }
+        m_bottomConsoleMaximized = false;
+    } else {
+        if (m_editorTabManager) m_editorTabManager->setVisible(true);
+        if (m_disassemblyView) m_disassemblyView->setVisible(false);
+        if (masterSplitter) masterSplitter->setSizes({1020, 0});
+        if (mainVertSplitter) mainVertSplitter->setSizes({600, 260});
         m_bottomConsoleMaximized = false;
     }
 
-    // Synchronize checked state on the toolbar perspective switcher buttons.
-    if (m_perspCodeBtn) m_perspCodeBtn->setChecked(m_workspacePerspective == QStringLiteral("Code"));
-    if (m_perspReverseBtn) m_perspReverseBtn->setChecked(m_workspacePerspective == QStringLiteral("Reverse"));
+    if (m_perspSourceBtn) m_perspSourceBtn->setChecked(m_workspacePerspective == QStringLiteral("Source"));
+    if (m_perspDebugBtn) m_perspDebugBtn->setChecked(m_workspacePerspective == QStringLiteral("Debug"));
+    if (m_perspBinaryBtn) m_perspBinaryBtn->setChecked(m_workspacePerspective == QStringLiteral("Binary"));
     if (m_perspMpiBtn) m_perspMpiBtn->setChecked(m_workspacePerspective == QStringLiteral("MPI"));
-    syncDisassemblyDecompilerVisibility(true);
+    syncRankCountChrome();
+    syncDisassemblyDecompilerVisibility(isBin || wasBin);
 }
 
 /**
@@ -826,29 +838,22 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
     };
 
     // 1. Capture all 8 curated theme screenshots plus default workspace_overview.
-    setWorkspacePerspective(QStringLiteral("Code"));
+    setWorkspacePerspective(QStringLiteral("Debug"));
     for (const auto& [presetId, fileName] : std::vector<std::pair<QString, QString>>{
-             {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")},
-             {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
-             {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")},
-             {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
-             {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")},
-             {QStringLiteral("solarized_light"), QStringLiteral("theme_solarized_light.png")},
-             {QStringLiteral("catppuccin_latte"), QStringLiteral("theme_catppuccin_latte.png")},
-             {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}}) {
-        core::managers::ThemeManager::instance().applyTheme(presetId, false);
-        propagateThemeToAllWidgets();
+             {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")}, {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
+             {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")}, {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
+             {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")}, {QStringLiteral("solarized_light"), QStringLiteral("theme_solarized_light.png")},
+             {QStringLiteral("catppuccin_latte"), QStringLiteral("theme_catppuccin_latte.png")}, {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}}) {
+        core::managers::ThemeManager::instance().applyTheme(presetId, false); propagateThemeToAllWidgets();
         if (!saveGrab(fileName)) return false;
     }
     if (core::managers::ThemeManager::instance().activeThemeId() != QStringLiteral("gridlock_slate")) {
-        core::managers::ThemeManager::instance().applyTheme(QStringLiteral("gridlock_slate"), false);
-        propagateThemeToAllWidgets();
+        core::managers::ThemeManager::instance().applyTheme(QStringLiteral("gridlock_slate"), false); propagateThemeToAllWidgets();
     }
-    // Save primary workspace overview and Reverse Engineering perspective assets.
     if (!saveGrab(QStringLiteral("workspace_overview.png"))) return false;
-    setWorkspacePerspective(QStringLiteral("Reverse"));
+    setWorkspacePerspective(QStringLiteral("Binary"));
     if (!saveGrab(QStringLiteral("cfg_decompiler_split.png"))) return false;
-    setWorkspacePerspective(QStringLiteral("Code"));
+    setWorkspacePerspective(QStringLiteral("Debug"));
 
     // 2. Composite cursor-anchored ConditionalBreakpointDialog popover directly beneath bpLine's gutter dot.
     {

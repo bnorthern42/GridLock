@@ -296,7 +296,8 @@ void MainWindow::startTargetWorkflow() {
         }
         if (m_serverRackView) { m_serverRackView->updateRanks(initialRanks); m_serverRackView->selectRank(preserveRank); }
         m_debugSessionActive = true;
-        updateDebugToolbarState();
+        if (m_workspacePerspective == QStringLiteral("Source")) setWorkspacePerspective(QStringLiteral("Debug"));
+        updateDebugToolbarState(); syncRankCountChrome(rankCount);
         updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("RUNNING"));
 
         // Push active project CLI arguments and working directory, then spawn live MPI GDB / LLDB-DAP session.
@@ -316,7 +317,8 @@ void MainWindow::startTargetWorkflow() {
     }
 
     // Synthetic preview-fixture fallback used strictly by headless layout tests calling `loadPreviewFixture()`.
-    m_debugSessionActive = true; updateDebugToolbarState(); rebuildDynamicSourceLineMap();
+    m_debugSessionActive = true; if (m_workspacePerspective == QStringLiteral("Source")) setWorkspacePerspective(QStringLiteral("Debug"));
+    updateDebugToolbarState(); rebuildDynamicSourceLineMap();
     if (m_disassemblyView) m_disassemblyView->setDeadlockCycleRanks({});
 
     const int rankCount = m_rankCountSpin ? std::clamp(m_rankCountSpin->value(), 1, 64) : 8;

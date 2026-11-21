@@ -195,5 +195,8 @@ private slots:
 
     /** @brief Verifies <1040px MainToolbar consolidation, F10/F11/Shift+F11 source stepping, F4 Header/Source, single Stop, and state-aware tooltips. */
     void testConsolidatedToolbarSourceSteppingAndTooltips();
+
+    /** @brief Verifies Source/Debug/Binary/MPI progressive disclosure, >=60% startup editor width, non-destructive floating docks, ranks==1 vs ranks==4 ServerRack auto-collapse, 0 fake watch columns, and idle control disablement. */
+    void testProgressiveDisclosurePerspectivesAndSingleRank();
 };
 

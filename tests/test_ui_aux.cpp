@@ -65,6 +65,7 @@
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/DifferentialGrid.hpp"
 #include "../src/ui/widgets/InlineFindBar.hpp"
 #if __has_include("../src/ui/widgets/HpcConsoleWidget.hpp")
 #include "../src/ui/widgets/HpcConsoleWidget.hpp"
@@ -135,6 +136,7 @@ void TestMainWindowUI::testMemViewToolbarNoTruncationAndDisassemblyLayout() {
     const QColor c1 = gridlock::ui::MemoryProfilerWidget::colorForEntry(0, 3, h1, QStringLiteral("Distinct")), c2 = gridlock::ui::MemoryProfilerWidget::colorForEntry(1, 3, h2, QStringLiteral("Distinct")), c3 = gridlock::ui::MemoryProfilerWidget::colorForEntry(2, 3, h3, QStringLiteral("Distinct")); QVERIFY(c1 != c2 && c2 != c3 && c1 != c3);
     popBtn->click(); QApplication::processEvents(); QVERIFY(memView->isPoppedOut() && popBtn->window()->isWindow() && popBtn->window()->width() >= 1000 && popBtn->window()->height() >= 650);
     popBtn->click(); QApplication::processEvents(); QVERIFY(!memView->isPoppedOut()); hexBtn->click(); QApplication::processEvents(); QVERIFY(addrInput->isVisible());
+    mainWindow.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents();
     auto* disassemblyView = mainWindow.disassemblyView(); QVERIFY(disassemblyView != nullptr && disassemblyView->width() >= 420);
     for (QSplitter* sp : mainWindow.findChildren<QSplitter*>()) QVERIFY2(sp->opaqueResize(), "QSplitter must use opaqueResize(true) for Wayland");
     QTemporaryDir tmpSrcDir; QVERIFY(tmpSrcDir.isValid()); const QString cppPath = tmpSrcDir.filePath(QStringLiteral("exit_check.cpp")); { QFile f(cppPath); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("int main() { return 0; }\n"); }
@@ -886,6 +888,52 @@ void TestMainWindowUI::testConsolidatedToolbarSourceSteppingAndTooltips() {
 
     mw.setCoordinator(nullptr);
     mw.close();
+}
+
+void TestMainWindowUI::testProgressiveDisclosurePerspectivesAndSingleRank() {
+    gridlock::ui::MainWindow mw; mw.resize(1280, 800);
+    const QString demoPath = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp")) ? QStringLiteral("tutorial/inspection_demo.cpp") : QStringLiteral("../tutorial/inspection_demo.cpp");
+    mw.loadSourceFile(demoPath); mw.show(); mw.activateWindow(); QApplication::processEvents();
+
+    auto* srcView = mw.sourceCodeView(); auto* disasm = mw.disassemblyView();
+    auto* navTb = mw.findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"));
+    auto* varsDock = mw.findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
+    auto* cstackDock = mw.findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
+    auto* regDock = mw.findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
+    auto* rackDock = mw.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+    auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    auto* diffGrid = mw.differentialGrid();
+    QVERIFY(srcView && disasm && navTb && varsDock && cstackDock && regDock && rackDock && rankSpin && diffGrid);
+    QVERIFY(mw.findChild<QPushButton*>(QStringLiteral("perspectiveSourceBtn")) && mw.findChild<QPushButton*>(QStringLiteral("perspectiveDebugBtn")) && mw.findChild<QPushButton*>(QStringLiteral("perspectiveBinaryBtn")) && mw.findChild<QPushButton*>(QStringLiteral("perspectiveMpiBtn")));
+
+    // 1. Verify idle Source perspective gives SourceCodeView >= 60% of 1280px width and hides disassembly/nav/debug docks.
+    QCOMPARE(mw.workspacePerspective(), QStringLiteral("Source"));
+    QVERIFY2(srcView->width() >= static_cast<int>(mw.width() * 0.60), qPrintable(QStringLiteral("SourceCodeView width %1 < 60%% of %2").arg(srcView->width()).arg(mw.width())));
+    QVERIFY(!disasm->isVisible() && !navTb->isVisible() && !varsDock->isVisible() && !rackDock->isVisible());
+
+    // 2. Verify DifferentialGrid starts with 0 synthetic watch columns + placeholder, and idle-only controls are disabled.
+    QVERIFY(diffGrid->getWatchExpressions().empty() && !diffGrid->emptyPlaceholderText().isEmpty());
+    auto* recBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"));
+    auto* stepiBtn = mw.findChild<QPushButton*>(QStringLiteral("disasmStepiBtn"));
+    auto* nextiBtn = mw.findChild<QPushButton*>(QStringLiteral("disasmNextiBtn"));
+    auto* wpBtn = mw.findChild<QPushButton*>(QStringLiteral("addHardwareWatchpointBtn"));
+    QVERIFY(recBtn && !recBtn->isEnabled() && stepiBtn && !stepiBtn->isEnabled() && nextiBtn && !nextiBtn->isEnabled() && wpBtn && !wpBtn->isEnabled());
+
+    // 3. Verify ranks==1 hides ServerRackDock + single-rank selectors while ranks==4 reveals them.
+    mw.setWorkspacePerspective(QStringLiteral("Debug"));
+    rankSpin->setValue(1); QApplication::processEvents();
+    auto* varRankCombo = mw.findChild<QComboBox*>(QStringLiteral("variablesRankSelector"));
+    auto* evalRankCombo = mw.findChild<QComboBox*>(QStringLiteral("evaluatorRankCombo"));
+    QVERIFY(varsDock->isVisible() && cstackDock->isVisible() && !rackDock->isVisible());
+    QVERIFY(varRankCombo && varRankCombo->isHidden() && evalRankCombo && evalRankCombo->isHidden());
+    rankSpin->setValue(4); QApplication::processEvents();
+    QVERIFY(rackDock->isVisible() && !varRankCombo->isHidden() && !evalRankCombo->isHidden());
+
+    // 4. Verify switching perspectives does NOT force-redock floating docks and Binary mode avoids 720px overflow.
+    mw.toggleDockFloating(regDock); QVERIFY(mw.isDockFloating(regDock));
+    mw.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents();
+    QVERIFY(mw.isDockFloating(regDock) && disasm->isVisible() && disasm->minimumWidth() < 720 && mw.width() <= 1280);
+    mw.redockAllFloatingPanels(); mw.close();
 }
 
 
