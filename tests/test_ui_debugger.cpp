@@ -65,36 +65,24 @@ void TestMainWindowUI::testDynamicSourceMappingLoopBranchSteppingAndRankContext(
     // Dynamic bidirectional mapping must match instructions to shifted source lines.
     auto checkLine = [&](int l, uint64_t a) { QCOMPARE(mainWindow.sourceLineToAddress(l), a); QCOMPARE(mainWindow.addressToSourceLine(a), l); };
     checkLine(initLine, 0x0040113dULL); checkLine(finalizeLine, 0x00401178ULL); checkLine(returnLine, 0x00401183ULL);
-    // Part 2: Active Rank Stepping Context (default 0, select 2, reset 0).
+    // Part 2 & 3: Active Rank Stepping Context and True Control-Flow Loop & Branch Stepping.
     QCOMPARE(mainWindow.activeSteppingRank(), 0);
     serverRack->selectRank(2); QApplication::processEvents(); QCOMPARE(mainWindow.activeSteppingRank(), 2);
     serverRack->selectRank(0); QApplication::processEvents(); QCOMPARE(mainWindow.activeSteppingRank(), 0);
-    // Part 3: True Control-Flow Loop & Rank-Conditional Branch Stepping.
     sourceView->setBreakpoints(QSet<int>()); mainWindow.stopTargetWorkflow(); mainWindow.startTargetWorkflow();
     QApplication::processEvents(); QCOMPARE(disasmView->currentAddress(), 0x00401120ULL);
-    // Step through function prologue up to loop header.
     while (disasmView->currentAddress() < 0x00401149ULL) { mainWindow.stepInstructionWorkflow(); QApplication::processEvents(); }
     QCOMPARE(disasmView->currentAddress(), 0x00401149ULL);
-    // Loop Iteration 0: step through header and body.
     auto stepTo = [&](uint64_t addr) { mainWindow.stepInstructionWorkflow(); QCOMPARE(disasmView->currentAddress(), addr); };
     stepTo(0x0040114dULL); stepTo(0x0040114fULL); stepTo(0x00401152ULL); stepTo(0x00401155ULL);
-    // Stepping at 0x00401155 with rank 0 MUST branch to 0x00401168 -> 0x40116a -> 0x40116e -> 0x401149.
     stepTo(0x00401168ULL); stepTo(0x0040116aULL); stepTo(0x0040116eULL); stepTo(0x00401149ULL);
-    // Loop Iteration 1 & 2: execute 7 single-steps through coordinator body to jmp back-edge.
-    for (int iter = 1; iter <= 2; ++iter) {
-        for (int s = 0; s < 7; ++s) mainWindow.stepInstructionWorkflow();
-        QCOMPARE(disasmView->currentAddress(), 0x0040116eULL); stepTo(0x00401149ULL);
-    }
-    // Loop Exit (i == 3 > 2): step through cmp to jg and take exit branch to MPI_Finalize.
+    for (int iter = 1; iter <= 2; ++iter) { for (int s = 0; s < 7; ++s) mainWindow.stepInstructionWorkflow(); QCOMPARE(disasmView->currentAddress(), 0x0040116eULL); stepTo(0x00401149ULL); }
     stepTo(0x0040114dULL); stepTo(0x00401178ULL);
-    // Step through MPI_Finalize call, leave, and ret, verifying return 0 highlight.
     for (int s = 0; s < 3; ++s) mainWindow.stepInstructionWorkflow();
     QCOMPARE(disasmView->currentAddress(), 0x00401183ULL); QCOMPARE(sourceView->executionLine(), returnLine);
-    // Test Worker Rank (Rank 2) conditional branch behavior:
     mainWindow.stopTargetWorkflow(); serverRack->selectRank(2); mainWindow.startTargetWorkflow(); QApplication::processEvents();
     while (disasmView->currentAddress() < 0x00401155ULL) { mainWindow.stepInstructionWorkflow(); QApplication::processEvents(); }
     QCOMPARE(disasmView->currentAddress(), 0x00401155ULL);
-    // For active rank 2, je 0x00401168 condition is false -> must fall through to worker block (0x00401157ULL).
     stepTo(0x00401157ULL); mainWindow.stepInstructionWorkflow(); stepTo(0x00401163ULL); stepTo(0x00401149ULL);
     // Part 4: Live GDB Disassembly CFG Basic-Block Splitting & Default CFG Map View Mode.
     auto& cfg = gridlock::core::ConfigManager::instance(); QCOMPARE(cfg.defaultDisassemblyMode(), QStringLiteral("cfg"));
@@ -646,26 +634,20 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QVERIFY(countCtrlShiftP == 1 && countCtrlP == 1 && countCtrlAltP == 1);
     if (auto* dv = mw.disassemblyView()) dv->setFocus();
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
-    auto* mwPalette = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
-    QVERIFY(mwPalette && mwPalette->isVisible() && mwPalette->filterText() == QStringLiteral(">") && mwPalette->resultCount() > 0);
+    auto* mwPalette = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(mwPalette && mwPalette->isVisible() && mwPalette->filterText() == QStringLiteral(">") && mwPalette->resultCount() > 0);
     for (int i = 0; i < mwPalette->resultCount(); ++i) QCOMPARE(mwPalette->resultItemAt(i).category, PaletteItem::Category::Action);
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Escape); QVERIFY(!mwPalette->isVisible());
-    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier); QApplication::processEvents();
-    QVERIFY(mwPalette->isVisible() && mwPalette->filterText().isEmpty() && mwPalette->resultCount() > 0);
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier); QApplication::processEvents(); QVERIFY(mwPalette->isVisible() && mwPalette->filterText().isEmpty() && mwPalette->resultCount() > 0);
     mwPalette->setFilterText(QStringLiteral("dr.cpp")); QVERIFY(mwPalette->resultCount() > 0 && mwPalette->resultItemAt(0).title.contains(QStringLiteral("deadlock_ring.cpp")));
-    QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return); QApplication::processEvents();
-    QVERIFY(!mwPalette->isVisible() && mw.sourceCodeView() && mw.sourceCodeView()->currentFile().endsWith(QStringLiteral("deadlock_ring.cpp")));
-    bool attachOpened = false;
-    QTimer::singleShot(80, [&]() { if (auto* dlg = dynamic_cast<gridlock::ui::AttachProcessDialog*>(QApplication::activeModalWidget())) { attachOpened = dlg->isVisible(); dlg->reject(); } });
+    QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return); QApplication::processEvents(); QVERIFY(!mwPalette->isVisible() && mw.sourceCodeView() && mw.sourceCodeView()->currentFile().endsWith(QStringLiteral("deadlock_ring.cpp")));
+    bool attachOpened = false; QTimer::singleShot(80, [&]() { if (auto* dlg = dynamic_cast<gridlock::ui::AttachProcessDialog*>(QApplication::activeModalWidget())) { attachOpened = dlg->isVisible(); dlg->reject(); } });
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(attachOpened);
     for (const QString& w : s_capturedWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
 }
-
 /** @brief Verifies ProgrammerCalculatorDialog base conversion, width masking, bit grid, BSWAP, expressions, Preferences, and Command Palette launch. */
 void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     using gridlock::ui::CommandPaletteDialog; using gridlock::ui::ProgrammerCalculatorDialog;
-    ProgrammerCalculatorDialog calc; calc.setWordWidth(32); calc.setSigned(false);
-    calc.hexEdit()->setText(QStringLiteral("0xDEADBEEF")); QApplication::processEvents();
+    ProgrammerCalculatorDialog calc; calc.setWordWidth(32); calc.setSigned(false); calc.hexEdit()->setText(QStringLiteral("0xDEADBEEF")); QApplication::processEvents();
     QVERIFY(calc.value() == 0xDEADBEEFULL && calc.decText() == QStringLiteral("3735928559") && calc.octText() == QStringLiteral("33653337357") && calc.binText().startsWith(QStringLiteral("1101 1110 1010 1101")) && calc.binText().endsWith(QStringLiteral("1110 1111")));
     calc.setSigned(true); QCOMPARE(calc.decText(), QStringLiteral("-559038737"));
     calc.setSigned(false); calc.setWordWidth(64); calc.setValue(0x11223344DEADBEEFULL);
@@ -674,9 +656,7 @@ void TestMainWindowUI::testProgrammerCalculatorBasesAndBits() {
     calc.bitButton(0)->click(); QVERIFY(calc.value() == 0xEEULL && calc.hexText() == QStringLiteral("0xEE"));
     calc.setWordWidth(32); QVERIFY(calc.evaluateAndApplyExpression(QStringLiteral("(0x10 << 4) | 0x05")) && calc.value() == 0x105ULL && calc.hexText() == QStringLiteral("0x105"));
     calc.setValue(0x12345678ULL); calc.byteSwap(); QCOMPARE(calc.value(), 0x78563412ULL);
-    auto* acBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpClearBtn")), *addBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpAddBtn"));
-    auto* shlBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpShlBtn")), *eqBtn = calc.findChild<QPushButton*>(QStringLiteral("calcExprEvalBtn"));
-    auto* hexRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixHexBtn")), *binRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixBinBtn"));
+    auto* acBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpClearBtn")), *addBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpAddBtn")), *shlBtn = calc.findChild<QPushButton*>(QStringLiteral("calcOpShlBtn")), *eqBtn = calc.findChild<QPushButton*>(QStringLiteral("calcExprEvalBtn")), *hexRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixHexBtn")), *binRadixBtn = calc.findChild<QPushButton*>(QStringLiteral("calcRadixBinBtn"));
     QVERIFY(acBtn && addBtn && shlBtn && eqBtn && hexRadixBtn && binRadixBtn && !calc.keypadDigitButton(10)->isEnabled());
     acBtn->click(); calc.keypadDigitButton(1)->click(); calc.keypadDigitButton(0)->click(); addBtn->click(); calc.keypadDigitButton(5)->click(); eqBtn->click();
     QVERIFY(calc.value() == 15ULL && calc.hexText() == QStringLiteral("0xF") && calc.decText() == QStringLiteral("15") && calc.octText() == QStringLiteral("17") && calc.bitButton(3)->text() == QStringLiteral("1"));
@@ -744,6 +724,35 @@ static void testPointerGraphDagLayoutAndAliasSplitting() {
     QVERIFY(pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.edgeTargetAddressOrExpr(QStringLiteral("headA"), QStringLiteral("ptr")) == QStringLiteral("0x2000") && pg.hasCycleOrSharedAlias());
     clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0);
 }
+/** @brief Verifies PointerGraphDialog wheel zoom, corner minimap, field suppression, horizontal orientation, /x /d /b overrides, and SVG/PNG export. */
+static void testPointerGraphControlsAndExport() {
+    using gridlock::ui::PointerGraphDialog; using F = PointerGraphDialog::StructFieldEntry;
+    PointerGraphDialog pg; pg.resize(960, 620); pg.show(); QApplication::processEvents();
+    QVERIFY(pg.findChild<QPushButton*>(QStringLiteral("pointerGraphExportSvgBtn")) && pg.findChild<QPushButton*>(QStringLiteral("pointerGraphExportPngBtn")) && pg.findChild<QPushButton*>(QStringLiteral("pointerGraphResetZoomBtn")) && pg.findChild<QPushButton*>(QStringLiteral("pointerGraphFitBtn")));
+    pg.upsertStructNode(QStringLiteral("pkt"), QStringLiteral("Packet"), QStringLiteral("0x5000"), {F{QStringLiteral("magic"), QStringLiteral("42"), QStringLiteral("int")}, F{QStringLiteral("seq"), QStringLiteral("7"), QStringLiteral("int")}, F{QStringLiteral("crc"), QStringLiteral("255"), QStringLiteral("uint32_t")}, F{QStringLiteral("next"), QStringLiteral("0x5100"), QStringLiteral("Packet*")}});
+    pg.upsertStructNode(QStringLiteral("peer"), QStringLiteral("Packet"), QStringLiteral("0x5100"), {F{QStringLiteral("magic"), QStringLiteral("99"), QStringLiteral("int")}}, QStringLiteral("pkt"), QStringLiteral("next"));
+    QApplication::processEvents();
+    // 1. Field suppression (+1 hidden badge), persistence across onTargetStopped(), and restore.
+    QVERIFY(pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0);
+    QVERIFY(pg.setNodeFieldHidden(QStringLiteral("pkt"), QStringLiteral("crc"), true) && pg.visibleFieldCount(QStringLiteral("pkt")) == 3 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.hiddenFieldsBadgeText(QStringLiteral("pkt")).contains(QStringLiteral("(+1 hidden)")));
+    pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("pkt"), QStringLiteral("Packet"), QStringLiteral("0x5000"), {F{QStringLiteral("magic"), QStringLiteral("42"), QStringLiteral("int")}, F{QStringLiteral("seq"), QStringLiteral("8"), QStringLiteral("int")}, F{QStringLiteral("crc"), QStringLiteral("255"), QStringLiteral("uint32_t")}, F{QStringLiteral("next"), QStringLiteral("0x5100"), QStringLiteral("Packet*")}});
+    QVERIFY(pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.restoreAllHiddenFields(QStringLiteral("pkt")) && pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0);
+    // 2. Horizontal / Vertical orientation toggle (`width > height`) and `/x`, `/d`, `/b` format overrides (`42` -> `0x2a` / `0b101010`).
+    QVERIFY(!pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.toggleNodeOrientation(QStringLiteral("pkt")) && pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.nodeCardSize(QStringLiteral("pkt")).width() > pg.nodeCardSize(QStringLiteral("pkt")).height());
+    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/x")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0x2a"));
+    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/b")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0b101010"));
+    QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/d")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("42"));
+    // 3. Clamped wheel zoom (`0.25..2.5`), corner minimap (`160x110`), and high-resolution PNG/SVG export.
+    auto* gv = pg.findChild<QGraphicsView*>(QStringLiteral("pointerGraphView")); QVERIFY(gv != nullptr && !pg.minimapViewportRect().isEmpty());
+    QWheelEvent wheelIn(QPointF(100, 100), gv->mapToGlobal(QPointF(100, 100)), QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(gv->viewport(), &wheelIn); QVERIFY(pg.zoomFactor() > 1.05);
+    pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3);
+    pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
+    const QPoint mmCenter = pg.minimapViewportRect().center().toPoint(); QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, mmCenter);
+    QTemporaryDir expDir; QVERIFY(expDir.isValid()); const QString pngOut = expDir.filePath(QStringLiteral("graph.png")), svgOut = expDir.filePath(QStringLiteral("graph.svg"));
+    QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400);
+    QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg"))); pg.close();
+}
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     using gridlock::ui::ArrayPlotDialog; using gridlock::ui::PointerGraphDialog;
@@ -762,6 +771,7 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     pgDlg.onTargetStopped(0); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
     testPointerGraphDagLayoutAndAliasSplitting();
+    testPointerGraphControlsAndExport();
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
     const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
     QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();
@@ -902,45 +912,35 @@ void TestMainWindowUI::testBreakpointLifecycleAndCommands() {
 /** @brief Verifies Copy-on-Write GDB checkpoints (checkpoint/restart/info/delete), /proc fd/maps safety checks, and CheckpointDialog integration. */
 void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
     using gridlock::ui::CheckpointDialog; using gridlock::ui::SafetyLevel;
-    // 1. Verify /proc/[pid]/fd and /proc/[pid]/maps safety scanner across Safe, Warning (OpenMPI SHM/socket), and BlockedOrUnsafe (RDMA/GPU).
     QTemporaryDir fakeProc; QVERIFY(fakeProc.isValid());
     auto mkProc = [&](int pid, const QMap<QString, QString>& fds, const QByteArray& maps) {
-        const QString pDir = fakeProc.filePath(QString::number(pid)), fdDir = pDir + QStringLiteral("/fd");
-        QVERIFY(QDir().mkpath(fdDir));
+        const QString pDir = fakeProc.filePath(QString::number(pid)), fdDir = pDir + QStringLiteral("/fd"); QVERIFY(QDir().mkpath(fdDir));
         for (auto it = fds.constBegin(); it != fds.constEnd(); ++it) QCOMPARE(::symlink(it.value().toUtf8().constData(), (fdDir + QLatin1Char('/') + it.key()).toUtf8().constData()), 0);
         QFile mf(pDir + QStringLiteral("/maps")); QVERIFY(mf.open(QIODevice::WriteOnly)); mf.write(maps);
     };
     mkProc(1001, {{QStringLiteral("0"), QStringLiteral("/dev/pts/0")}, {QStringLiteral("1"), QStringLiteral("/dev/pts/0")}}, "555555554000-555555558000 r-xp 00000000 08:01 1 /usr/bin/solver\n7ffff7a00000-7ffff7b00000 rw-p 00000000 00:00 0 [heap]\n");
     mkProc(1002, {{QStringLiteral("3"), QStringLiteral("socket:[12345]")}, {QStringLiteral("4"), QStringLiteral("pipe:[67890]")}}, "7ffff6000000-7ffff6400000 rw-s 00000000 00:18 2 /dev/shm/openmpi_vader_segment\n");
     mkProc(1003, {{QStringLiteral("5"), QStringLiteral("/dev/infiniband/uverbs0")}}, "7ffff5000000-7ffff5100000 rw-s 00000000 00:06 3 /dev/infiniband/uverbs0\n");
-    const auto repSafe = gridlock::ui::inspectProcessCheckpointSafety(1001, fakeProc.path());
-    const auto repWarn = gridlock::ui::inspectProcessCheckpointSafety(1002, fakeProc.path());
-    const auto repUnsafe = gridlock::ui::inspectProcessCheckpointSafety(1003, fakeProc.path());
+    const auto repSafe = gridlock::ui::inspectProcessCheckpointSafety(1001, fakeProc.path()), repWarn = gridlock::ui::inspectProcessCheckpointSafety(1002, fakeProc.path()), repUnsafe = gridlock::ui::inspectProcessCheckpointSafety(1003, fakeProc.path());
     QVERIFY(repSafe.level == SafetyLevel::Safe && repSafe.warnings.isEmpty() && repSafe.blockers.isEmpty() && repSafe.badgeText == QStringLiteral("SAFE"));
     QVERIFY(repWarn.level == SafetyLevel::Warning && repWarn.blockers.isEmpty() && repWarn.warnings.size() >= 3 && repWarn.badgeText.contains(QStringLiteral("WARNING")));
     QVERIFY(repUnsafe.level == SafetyLevel::BlockedOrUnsafe && !repUnsafe.blockers.isEmpty() && repUnsafe.badgeText.contains(QStringLiteral("UNSAFE")));
-    // 2. Verify GdbRankCoordinator checkpoint, info checkpoints, restart, and delete checkpoint MI commands & parsing.
     gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
     coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"28\",args=[]}\n"));
     QStringList sent; connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& c) { if (r == 0) sent.append(c.trimmed()); });
-    QSignalSpy cpSpy(&coord, &IBackendCoordinator::checkpointsReady);
-    coord.createCheckpoint(0, QStringLiteral("before halo"));
-    QVERIFY(sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\"")));
+    QSignalSpy cpSpy(&coord, &IBackendCoordinator::checkpointsReady); coord.createCheckpoint(0, QStringLiteral("before halo")); QVERIFY(sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\"")));
     coord.processGdbOutput(0, QStringLiteral("~\"checkpoint 1: fork returned pid 4242.\\n\"\n212^done\n"));
-    QVERIFY(cpSpy.count() >= 1 && coord.checkpointsForRank(0).size() == 1 && coord.checkpointsForRank(0).first().id == 1 && coord.checkpointsForRank(0).first().forkPid == 4242 && coord.checkpointsForRank(0).first().note == QStringLiteral("before halo"));
-    QVERIFY(sent.contains(QStringLiteral("213-interpreter-exec console \"info checkpoints\"")));
+    QVERIFY(cpSpy.count() >= 1 && coord.checkpointsForRank(0).size() == 1 && coord.checkpointsForRank(0).first().id == 1 && coord.checkpointsForRank(0).first().forkPid == 4242 && coord.checkpointsForRank(0).first().note == QStringLiteral("before halo") && sent.contains(QStringLiteral("213-interpreter-exec console \"info checkpoints\"")));
     coord.processGdbOutput(0, QStringLiteral("~\"  1 process 4242 at 0x401120, file solver.cpp, line 28\\n\"\n~\"  0 process 4200 (main process) at 0x401100\\n\"\n213^done\n"));
     QVERIFY(coord.checkpointsForRank(0).size() == 2 && coord.checkpointsForRank(0).first().note == QStringLiteral("before halo") && coord.checkpointsForRank(0).first().location.contains(QStringLiteral("solver.cpp")));
     coord.restoreCheckpoint(0, 1); coord.deleteCheckpoint(0, 1);
     QVERIFY(sent.contains(QStringLiteral("-interpreter-exec console \"restart 1\"")) && sent.contains(QStringLiteral("-interpreter-exec console \"delete checkpoint 1\"")) && coord.checkpointsForRank(0).size() == 1);
-    // 3. Verify CheckpointDialog UI, Debug menu Ctrl+Alt+K shortcut, and Command Palette entry.
     CheckpointDialog cpDlg(&coord); cpDlg.setProcRootForTesting(fakeProc.path()); cpDlg.show(); QApplication::processEvents();
     QVERIFY(cpDlg.findChild<QPushButton*>(QStringLiteral("checkpointCloseBtn")) && cpDlg.findChild<QPushButton*>(QStringLiteral("createCheckpointBtn")) && cpDlg.checkpointTable() && cpDlg.checkpointTable()->rowCount() == 1);
     sent.clear(); QVERIFY(cpDlg.createCheckpointNow(true) && sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\""))); cpDlg.close();
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
     auto* cpAct = mw.findChild<QAction*>(QStringLiteral("actionProcessCheckpoints")); QVERIFY(cpAct && cpAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K));
-    QTest::keyClick(&mw, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
-    QVERIFY(mw.checkpointDialog() && mw.checkpointDialog()->isVisible()); mw.checkpointDialog()->close();
+    QTest::keyClick(&mw, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(mw.checkpointDialog() && mw.checkpointDialog()->isVisible()); mw.checkpointDialog()->close();
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(pal && pal->isVisible());
     pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints")));
