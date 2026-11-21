@@ -248,7 +248,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   if (m_disassemblyView) connect(m_disassemblyView, &DisassemblyView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
   if (m_editorTabManager) {
     for (SourceCodeView* sv : m_editorTabManager->openViews()) connect(sv, &SourceCodeView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
-    connect(m_editorTabManager, &QTabWidget::currentChanged, this, [this](int) {
+    connect(m_editorTabManager, &EditorTabManager::currentChanged, this, [this](int) {
       if (auto* sv = getSourceCodeView()) connect(sv, &SourceCodeView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
     });
   }
@@ -641,13 +641,14 @@ void MainWindow::setupMenu() {
   const QList<QPair<QString, QKeySequence>> editActions = {
       {QStringLiteral("Undo"), QKeySequence::Undo}, {QStringLiteral("Redo"), QKeySequence::Redo}, {QStringLiteral("Cut"), QKeySequence::Cut},
       {QStringLiteral("Copy"), QKeySequence::Copy}, {QStringLiteral("Paste"), QKeySequence::Paste}, {QStringLiteral("Select All"), QKeySequence::SelectAll},
-      {QStringLiteral("Find in View..."), QKeySequence::Find}, {QStringLiteral("Go to Line..."), QKeySequence(Qt::CTRL | Qt::Key_L)},
+      {QStringLiteral("Find in View..."), QKeySequence(Qt::CTRL | Qt::Key_F)}, {QStringLiteral("Go to Line..."), QKeySequence(Qt::CTRL | Qt::Key_L)},
       {QStringLiteral("Toggle Comment"), QKeySequence(Qt::CTRL | Qt::Key_Slash)}};
   // Register each action on the Edit menu and route its signal to triggerEditMenuAction().
   for (int i = 0; i < editActions.size(); ++i) {
     // Insert structural dividers between History, Clipboard, and Navigation groups.
     if (i == 2 || i == 6) editMenu->addSeparator();
     QAction *act = editMenu->addAction(editActions[i].first); act->setShortcut(editActions[i].second);
+    if (editActions[i].first.startsWith(QStringLiteral("Find"))) act->setObjectName(QStringLiteral("actionFindInView"));
     const QString actLabel = editActions[i].first;
     connect(act, &QAction::triggered, this, [this, actLabel]() { triggerEditMenuAction(actLabel); });
   }
@@ -881,6 +882,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
     if (matchesAct(QStringLiteral("actionProgrammerCalculator"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C))) { openProgrammerCalculator(); return true; }
     if (matchesAct(QStringLiteral("actionSignalsAndCatchpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S))) { openSignalsAndCatchpoints(); return true; }
     if (matchesAct(QStringLiteral("actionQuickOpen"), QKeySequence(Qt::CTRL | Qt::Key_P)) && (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible())) { openCommandPalette(QString()); return true; }
+    if (watched && !watched->inherits("QKeySequenceEdit") && (!watched->parent() || !watched->parent()->inherits("QKeySequenceEdit")) && matchesAct(QStringLiteral("actionFindInView"), QKeySequence(Qt::CTRL | Qt::Key_F)) && triggerEditMenuAction(QStringLiteral("Find in View"))) return true;
     if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, ke)) return true;
   }
   return QMainWindow::eventFilter(watched, event);

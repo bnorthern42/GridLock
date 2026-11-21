@@ -167,7 +167,7 @@ void MainWindow::rebuildDynamicSourceLineMap() {
     };
     if (m_editorTabManager) {
         for (SourceCodeView* sv : m_editorTabManager->openViews()) bindSrcExec(sv);
-        if (!m_editorTabManager->property("gl_exec_wired").toBool()) { m_editorTabManager->setProperty("gl_exec_wired", true); connect(m_editorTabManager, &QTabWidget::currentChanged, this, [this, bindSrcExec](int) { bindSrcExec(getSourceCodeView()); }); }
+        if (!m_editorTabManager->property("gl_exec_wired").toBool()) { m_editorTabManager->setProperty("gl_exec_wired", true); connect(m_editorTabManager, &EditorTabManager::currentChanged, this, [this, bindSrcExec](int) { bindSrcExec(getSourceCodeView()); }); }
     } else bindSrcExec(sourceCodeView());
     if (m_callStackDockWidget) if (auto* tbl = m_callStackDockWidget->findChild<QTableWidget*>(QStringLiteral("callStackTable")); tbl && !tbl->property("gl_exec_wired").toBool()) {
         tbl->setProperty("gl_exec_wired", true); tbl->setContextMenuPolicy(Qt::CustomContextMenu);

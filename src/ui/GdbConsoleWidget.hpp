@@ -23,6 +23,8 @@
 
 namespace gridlock::ui {
 
+class InlineFindBar;
+
 /**
  * @class GdbConsoleWidget
  * @brief Terminal widget displaying input and output streams for GDB debugger instances.
@@ -47,6 +49,11 @@ public:
      * @brief Virtual destructor for clean resource release.
      */
     ~GdbConsoleWidget() override = default;
+
+    /** @brief Opens and focuses the compact inline search bar (`Ctrl+F`) inside the console viewport. */
+    void openFindBar();
+    /** @brief Returns the inline search bar widget attached to the console viewport. */
+    InlineFindBar* findBar() const { return m_findBar; }
 
     /**
      * @brief Resets the rank filter dropdown for a new debugging session.
@@ -184,6 +191,7 @@ private:
     QComboBox* m_rankCombo = nullptr;
     QPlainTextEdit* m_consoleEdit = nullptr;
     QLineEdit* m_commandEdit = nullptr;
+    InlineFindBar* m_findBar = nullptr;
     QLabel* m_reverseSearchLabel = nullptr;
     QListWidget* m_completionPopup = nullptr;
     class QTimer* m_flushTimer = nullptr;

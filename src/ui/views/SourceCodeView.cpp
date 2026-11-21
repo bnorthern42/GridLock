@@ -11,6 +11,7 @@
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/utils/ClangdLspClient.hpp"
 #include "../dialogs/ConditionalBreakpointDialog.hpp"
+#include "../widgets/InlineFindBar.hpp"
 
 namespace gridlock::ui {
 
@@ -41,6 +42,8 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     updateLineNumberAreaWidth(0);
     setReadOnly(false); setTextInteractionFlags(Qt::TextEditorInteraction); setLineWrapMode(QPlainTextEdit::NoWrap);
     m_highlighter = new EditorSyntaxHighlighter(document());
+    m_findBar = new InlineFindBar(this, true);
+    connect(m_findBar, &InlineFindBar::matchesUpdated, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
     reloadStyle();
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this); m_hoverTimer->setSingleShot(true);
@@ -75,6 +78,8 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
     connect(document(), &QTextDocument::modificationChanged, this, &SourceCodeView::modificationStateChanged);
 }
+void SourceCodeView::openFindBar() { if (m_findBar) m_findBar->openAndFocus(); }
+void SourceCodeView::closeFindBar() { if (m_findBar) m_findBar->closeBar(); }
 
 void SourceCodeView::setCurrentFile(const QString& filePath) {
     m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
@@ -339,6 +344,7 @@ void SourceCodeView::highlightCurrentLine() {
         dSel.cursor.setPosition(dBlock.position() + sCol); dSel.cursor.setPosition(dBlock.position() + eCol, QTextCursor::KeepAnchor);
         selections.append(dSel);
     }
+    if (m_findBar && m_findBar->isVisible()) selections.append(m_findBar->matchSelections());
     setExtraSelections(selections);
 }
 /** @brief Applies compiler diagnostics as wavy underlines and updates gutter markers. */

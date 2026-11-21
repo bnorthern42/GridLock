@@ -53,6 +53,7 @@
 #include "../src/core/utils/CliParser.cpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/EditorTabManager.hpp"
+#include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
 #include "../src/ui/dialogs/PreferencesDialog.hpp"
 #include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
@@ -63,6 +64,7 @@
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/InlineFindBar.hpp"
 #if __has_include("../src/ui/widgets/HpcConsoleWidget.hpp")
 #include "../src/ui/widgets/HpcConsoleWidget.hpp"
 #else
@@ -662,3 +664,106 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
     };
     QVERIFY2(checkMultiSyntaxAndRainbow(srcView, cfg), "TOML/YAML/MD/CSV highlighting, Rainbow Brackets, and Preferences live toggles must succeed");
 }
+
+void TestMainWindowUI::testSplitEditorQSplitterAndInlineFindBar() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString cppPath = dir.filePath(QStringLiteral("split_demo.cpp"));
+    const QString hppPath = dir.filePath(QStringLiteral("split_demo.hpp"));
+    QString body = QStringLiteral("int alpha = 1;\nint ALPHA = 2;\nint alpha_tail = 3;\n");
+    for (int i = 0; i < 80; ++i) body += QStringLiteral("int line_%1 = %1;\n").arg(i);
+    {
+        QFile fc(cppPath); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(body.toUtf8());
+        QFile fh(hppPath); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write((QStringLiteral("#pragma once\n") + body).toUtf8());
+    }
+
+    gridlock::ui::MainWindow mw;
+    mw.resize(1600, 900);
+    mw.show();
+    mw.activateWindow();
+    QApplication::processEvents();
+
+    auto* tabMgr = mw.editorTabManager();
+    auto* seekBar = mw.findChild<QLineEdit*>(QStringLiteral("cutterSeekBar"));
+    QVERIFY(tabMgr != nullptr && seekBar != nullptr);
+    tabMgr->clearAllTabs();
+    auto* primaryView = tabMgr->openFile(cppPath);
+    QVERIFY(primaryView != nullptr);
+    QApplication::processEvents();
+
+    // 1. Verify QSplitter splitEditor creates two non-overlapping sibling panes with visible scrollbars.
+    tabMgr->splitEditor(Qt::Horizontal);
+    QApplication::processEvents();
+    auto* splitter = tabMgr->editorSplitter();
+    auto* leftTabs = tabMgr->primaryTabWidget();
+    auto* rightTabs = tabMgr->secondaryTabWidget();
+    auto* secView = tabMgr->secondaryEditorView();
+    QVERIFY(splitter && leftTabs && rightTabs && secView && tabMgr->isSplitActive());
+    QVERIFY(leftTabs->isVisible() && rightTabs->isVisible());
+    const QRect leftGeom = leftTabs->geometry();
+    const QRect rightGeom = rightTabs->geometry();
+    QVERIFY2(leftGeom.width() >= 140 && rightGeom.width() >= 140 && leftGeom.right() <= rightGeom.left(),
+             qPrintable(QStringLiteral("left=%1..%2 right=%3..%4").arg(leftGeom.left()).arg(leftGeom.right()).arg(rightGeom.left()).arg(rightGeom.right())));
+    QVERIFY(primaryView->verticalScrollBar()->isVisible() && secView->verticalScrollBar()->isVisible());
+
+    // Verify active-editor tracking, gutter breakpoint signals, and dirty-tab checks work in the secondary pane.
+    secView->setFocus();
+    QApplication::processEvents();
+    QCOMPARE(tabMgr->currentSourceCodeView(), secView);
+    QSignalSpy bpSpy(tabMgr, &gridlock::ui::EditorTabManager::breakpointToggled);
+    secView->toggleBreakpoint(2);
+    QCOMPARE(bpSpy.count(), 1);
+    {
+        QTextCursor cur(secView->document());
+        cur.movePosition(QTextCursor::End);
+        cur.insertText(QStringLiteral("// split edit\n"));
+    }
+    QVERIFY(tabMgr->hasModifiedTabs());
+    QVERIFY(tabMgr->saveAllModifiedTabs() >= 1 && !tabMgr->hasModifiedTabs());
+
+    // Closing the split hides the secondary pane and restores full width to the primary pane.
+    tabMgr->closeSplit();
+    QApplication::processEvents();
+    QVERIFY(!tabMgr->isSplitActive() && !rightTabs->isVisible() && leftTabs->width() >= tabMgr->width() - 4);
+
+    // 2. Verify Ctrl+F opens the inline editor find bar without stealing focus to #cutterSeekBar, while Ctrl+G focuses #cutterSeekBar.
+    primaryView->setFocus();
+    QApplication::processEvents();
+    QTest::keyClick(primaryView, Qt::Key_F, Qt::ControlModifier);
+    QApplication::processEvents();
+    auto* findBar = primaryView->findBar();
+    QVERIFY(findBar != nullptr && findBar->isVisible() && findBar->findEdit()->hasFocus() && !seekBar->hasFocus());
+
+    findBar->setSearchText(QStringLiteral("alpha"));
+    QApplication::processEvents();
+    QCOMPARE(findBar->matchCount(), 3);
+    QCOMPARE(findBar->currentMatchIndex(), 0);
+    QTest::keyClick(findBar->findEdit(), Qt::Key_Return);
+    QCOMPARE(findBar->currentMatchIndex(), 1);
+    QTest::keyClick(findBar->findEdit(), Qt::Key_Return, Qt::ShiftModifier);
+    QCOMPARE(findBar->currentMatchIndex(), 0);
+    findBar->setCaseSensitive(true);
+    QCOMPARE(findBar->matchCount(), 2);
+
+    QTest::keyClick(findBar->findEdit(), Qt::Key_Escape);
+    QApplication::processEvents();
+    QVERIFY(!findBar->isVisible() && primaryView->hasFocus() && !seekBar->hasFocus());
+
+    // Verify Ctrl+G focuses #cutterSeekBar.
+    QTest::keyClick(primaryView, Qt::Key_G, Qt::ControlModifier);
+    QApplication::processEvents();
+    QVERIFY(seekBar->hasFocus());
+
+    // Verify Ctrl+F inside GdbConsoleWidget opens its inline find bar without focusing #cutterSeekBar.
+    if (auto* gdbConsole = mw.findChild<gridlock::ui::GdbConsoleWidget*>()) {
+        if (auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"))) bottomTabs->setCurrentWidget(gdbConsole);
+        gdbConsole->commandEdit()->setFocus();
+        QApplication::processEvents();
+        QTest::keyClick(gdbConsole->commandEdit(), Qt::Key_F, Qt::ControlModifier);
+        QApplication::processEvents();
+        QVERIFY(gdbConsole->findBar() && gdbConsole->findBar()->isVisible() && !seekBar->hasFocus());
+        gdbConsole->findBar()->closeBar();
+    }
+    mw.close();
+}
+

@@ -22,6 +22,7 @@
 #include <QWidget>
 
 #include "../core/managers/ConfigManager.hpp"
+#include "widgets/InlineFindBar.hpp"
 
 namespace gridlock::ui {
 
@@ -129,6 +130,7 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent)
     m_consoleEdit->setStyleSheet(QStringLiteral(
         "QPlainTextEdit#gdbConsoleViewport { background: #16181d; color: #d7dae0; border: none; "
         "font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 4px 6px; }"));
+    m_findBar = new InlineFindBar(m_consoleEdit, false);
     m_flushTimer = new QTimer(this);
     m_flushTimer->setSingleShot(true);
     m_flushTimer->setInterval(16);
@@ -210,6 +212,10 @@ GdbConsoleWidget::GdbConsoleWidget(QWidget* parent)
  * @brief Returns the pixel height of the top filter/target header strip.
  * @return Header bar height in pixels.
  */
+void GdbConsoleWidget::openFindBar() {
+    if (m_findBar) m_findBar->openAndFocus();
+}
+
 int GdbConsoleWidget::headerBarHeight() const {
     return m_headerBar ? m_headerBar->height() : 0;
 }

@@ -292,19 +292,9 @@ void MainWindow::setupToolbar() {
   m_seekBar->setMaximumWidth(135);
   toolbar->addWidget(m_seekBar);
 
-  // Synchronize inspection views whenever user presses Return in seek bar.
+  // Synchronize inspection views whenever user presses Return in seek bar (Ctrl+G focus is managed by ShortcutManager).
   connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() {
     seekToAddressOrExpression(m_seekBar->text());
-  });
-
-  // Ctrl+G shortcut to focus and select all text in the seek bar for rapid jumping.
-  QShortcut *seekShortcut =
-      new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
-  connect(seekShortcut, &QShortcut::activated, this, [this]() {
-    if (m_seekBar) {
-      m_seekBar->setFocus(Qt::ShortcutFocusReason);
-      m_seekBar->selectAll();
-    }
   });
 
   // Secondary toolbar break for address space navigation ribbon.

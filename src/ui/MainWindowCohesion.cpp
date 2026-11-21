@@ -216,7 +216,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         }
     };
     bindActiveSourceView();
-    if (m_editorTabManager) connect(m_editorTabManager, &QTabWidget::currentChanged, this, [this, bindActiveSourceView](int) { bindActiveSourceView(); syncDisassemblyDecompilerVisibility(false); });
+    if (m_editorTabManager) connect(m_editorTabManager, &EditorTabManager::currentChanged, this, [this, bindActiveSourceView](int) { bindActiveSourceView(); syncDisassemblyDecompilerVisibility(false); });
 
     // 7. Mount one-click Workspace Perspective Switcher (CODE | REVERSE | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
@@ -641,7 +641,13 @@ bool MainWindow::triggerEditMenuAction(const QString& actionName) {
     if (act.contains(QStringLiteral("Select All"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->selectAll(); return true; }
     if (act.contains(QStringLiteral("Comment"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->toggleLineComment(); return true; }
     if (act.contains(QStringLiteral("Go to Line"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->selectSourceLine(1); return true; }
-    if (act.contains(QStringLiteral("Find"), Qt::CaseInsensitive) && m_seekBar) { m_seekBar->setFocus(); m_seekBar->selectAll(); return true; }
+    if (act.contains(QStringLiteral("Go to Address"), Qt::CaseInsensitive) && m_seekBar) { if (!m_seekBar->isVisible()) m_seekBar->show(); m_seekBar->setFocus(Qt::ShortcutFocusReason); m_seekBar->selectAll(); return true; }
+    if (act.contains(QStringLiteral("Find"), Qt::CaseInsensitive)) {
+        QWidget* fw = QApplication::focusWidget();
+        if (m_gdbConsoleWidget && fw && (fw == m_gdbConsoleWidget || m_gdbConsoleWidget->isAncestorOf(fw))) { m_gdbConsoleWidget->openFindBar(); return true; }
+        for (QWidget* p = fw; p; p = p->parentWidget()) if (auto* fsv = qobject_cast<SourceCodeView*>(p)) { fsv->openFindBar(); return true; }
+        if (srcView) { srcView->openFindBar(); return true; }
+    }
     return false;
 }
 

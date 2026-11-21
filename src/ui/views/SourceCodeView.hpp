@@ -30,6 +30,7 @@
 
 namespace gridlock::ui {
 
+class InlineFindBar;
 class LineNumberArea;
 class LspCompletionPopup;
 
@@ -51,6 +52,13 @@ public:
      * @brief Destructor.
      */
     ~SourceCodeView() override = default;
+
+    /** @brief Opens and focuses the compact inline search bar (`Ctrl+F`) inside this editor. */
+    void openFindBar();
+    /** @brief Closes the inline search bar (`Esc`) and restores focus to this editor. */
+    void closeFindBar();
+    /** @brief Returns the inline search bar widget owned by this editor. */
+    InlineFindBar* findBar() const { return m_findBar; }
 
     /**
      * @brief Sets source code content and highlights an initial active line.
@@ -665,6 +673,7 @@ private:
     LineNumberArea* m_lineNumberArea = nullptr;
     EditorSyntaxHighlighter* m_highlighter = nullptr;
     LspCompletionPopup* m_completionPopup = nullptr;
+    InlineFindBar* m_findBar = nullptr;
     QMap<int, QString> m_breakpoints;
     QMap<int, QString> m_breakpointSuspendScopes;
     QMap<int, BreakpointVisualInfo> m_breakpointInfo;

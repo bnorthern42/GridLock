@@ -125,12 +125,20 @@ void ShortcutManager::initialize(gridlock::ui::MainWindow* mainWindow) {
 
   registerChordBinding(QStringLiteral("nav.focus_editor"), QStringLiteral("Navigation"),
                        QStringLiteral("Focus Source Editor"), QKeySequence(QStringLiteral("Ctrl+W, H")), [this]() {
-                         if (m_mainWindow && m_mainWindow->editorTabManager()) m_mainWindow->editorTabManager()->setFocus();
+                         if (m_mainWindow && m_mainWindow->editorTabManager()) {
+                           if (auto* sv = m_mainWindow->editorTabManager()->currentSourceCodeView()) sv->setFocus();
+                           else m_mainWindow->editorTabManager()->setFocus();
+                         }
                        });
 
   registerChordBinding(QStringLiteral("nav.focus_explorer"), QStringLiteral("Navigation"),
                        QStringLiteral("Focus Project Explorer"), QKeySequence(QStringLiteral("Ctrl+W, L")), [this]() {
                          if (m_mainWindow && m_mainWindow->projectExplorerWidget()) m_mainWindow->projectExplorerWidget()->setFocus();
+                       });
+
+  registerChordBinding(QStringLiteral("nav.goto_address"), QStringLiteral("Navigation"),
+                       QStringLiteral("Go to Address / Symbol"), QKeySequence(Qt::CTRL | Qt::Key_G), [this]() {
+                         if (m_mainWindow) m_mainWindow->triggerEditMenuAction(QStringLiteral("Go to Address"));
                        });
 
   rebuildChordTable();
@@ -243,7 +251,10 @@ void ShortcutManager::resetAllToDefaults(bool persist) {
 }
 
 bool ShortcutManager::handleKeyPress(QObject* watched, QKeyEvent* event) {
-  if (!m_mainWindow) return false;
+  if (!m_mainWindow || !watched) return false;
+  if (watched->inherits("QKeySequenceEdit") || (watched->parent() && watched->parent()->inherits("QKeySequenceEdit"))) {
+    return false;
+  }
 
   const int keyInt = event->key();
   if (keyInt == Qt::Key_unknown || keyInt == Qt::Key_Control || keyInt == Qt::Key_Shift ||

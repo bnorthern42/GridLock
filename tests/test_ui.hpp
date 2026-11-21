@@ -189,5 +189,8 @@ private slots:
 
     /** @brief Verifies Copy-on-Write GDB checkpoints (checkpoint/restart/info/delete), /proc fd/maps safety checks, and CheckpointDialog integration. */
     void testCowCheckpointsAndProcSafety();
+
+    /** @brief Verifies real QSplitter non-overlapping split editors and Ctrl+F inline search vs Ctrl+G seek bar focus. */
+    void testSplitEditorQSplitterAndInlineFindBar();
 };
 
