@@ -82,17 +82,16 @@ QString buildBreakInsertCmd(const QString& file, int line, const QString& condit
 GdbRankCoordinator::GdbRankCoordinator(QObject* parent) : IBackendCoordinator(parent) {}
 
 /** @brief Ensures all GDB, FIFO, and `mpiexec` resources are cleaned up on destruction without emitting teardown signals. */
-GdbRankCoordinator::~GdbRankCoordinator() { QSignalBlocker b(this); terminateAllSessions(); }
+GdbRankCoordinator::~GdbRankCoordinator() { m_shuttingDown = true; QSignalBlocker b(this); stopAll(true); }
 
 /** @brief Implements `IBackendCoordinator::terminateSession()` by tearing down all rank processes. */
-void GdbRankCoordinator::terminateSession() { terminateAllSessions(); }
+void GdbRankCoordinator::terminateSession() { stopAll(m_shuttingDown); }
 
 /** @brief Returns the live inferior OS PID for @p rank if known, or `0` otherwise. */
 qint64 GdbRankCoordinator::getPidForRank(int rank) const {
   if (m_rankPids.contains(rank) && m_rankPids.value(rank) > 0) return m_rankPids.value(rank);
-  if (rank >= 0 && rank < static_cast<int>(m_processes.size()) && m_processes[rank] && m_processes[rank]->inferiorPid > 0) {
+  if (rank >= 0 && rank < static_cast<int>(m_processes.size()) && m_processes[rank] && m_processes[rank]->inferiorPid > 0)
     return static_cast<qint64>(m_processes[rank]->inferiorPid);
-  }
   return 0;
 }
 
@@ -152,7 +151,7 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
     const qint64 pid = pids[r];
     auto rp = std::make_unique<RankProcess>();
     rp->id = r; rp->process = std::make_unique<QProcess>(); rp->inferiorPid = static_cast<pid_t>(pid);
-    rp->pendingAttach = true; rp->state.rankId = r; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
+    rp->pendingAttach = true; rp->isAttached = true; rp->state.rankId = r; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
     m_rankPids[r] = pid;
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
     QStringList args{QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
@@ -184,7 +183,7 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     if (gdbPath.isEmpty()) { terminateAllSessions(); return false; }
 
     auto rp = std::make_unique<RankProcess>();
-    rp->id = r; rp->process = std::make_unique<QProcess>(); rp->pendingAttach = true;
+    rp->id = r; rp->process = std::make_unique<QProcess>(); rp->pendingAttach = true; rp->isAttached = true;
     rp->state.rankId = r; rp->state.currentState = "stopped"; rp->state.lastFiredTimestamp = "synced";
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
     rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")});
@@ -255,18 +254,13 @@ void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
   auto& rp = m_processes[rankId];
   if (!rp) return;
-  // Never emit frame, thread, register, data, or varobj MI queries while target rank is not stopped.
   static const QRegularExpression kInspectMiRe(QStringLiteral("^\\d*-(?:stack|thread|var|data)-"));
   if (rp->state.currentState != QLatin1String("stopped") && kInspectMiRe.match(cmd.trimmed()).hasMatch()) return;
-
-  // Prefer the non-blocking POSIX FIFO bridge when running under `mpirun` MPMD mode.
   if (rp->fifoInFd >= 0) {
     const QByteArray bytes = cmd.toUtf8();
     if (::write(rp->fifoInFd, bytes.constData(), static_cast<size_t>(bytes.size())) > 0) emit commandSentToGdb(rankId, cmd.trimmed());
     return;
   }
-
-  // Fallback path for standalone `QProcess` GDB instances or in-memory mock test sessions.
   if (rp->process) {
     if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(1000);
     if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
@@ -278,101 +272,91 @@ void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
   }
 }
 
-/**
- * @brief Pushes persisted workspace breakpoints to @p rankId upon initial attach stop.
- */
+/** @brief Pushes persisted workspace breakpoints to @p rankId upon initial attach stop. */
 void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
   const auto bps = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
   auto& rp = m_processes[rankId];
   int count = 0;
-  for (auto it = bps.constBegin(); it != bps.constEnd(); ++it) {
+  for (auto it = bps.constBegin(); it != bps.constEnd(); ++it)
     for (int line : *it) { writeCmd(rankId, QString("-break-insert -f %1:%2\n").arg(it.key()).arg(line)); count++; }
-  }
-  // Resume immediately when zero breakpoints exist; otherwise wait for bkpt acknowledgements.
-  if (count == 0) {
-    writeCmd(rankId, "-exec-continue\n");
-    rp->state.currentState = "running";
-  } else {
-    rp->state.pendingBreakpoints = count;
-    rp->state.currentState = "sync_flushing";
-  }
+  if (count == 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; }
+  else { rp->state.pendingBreakpoints = count; rp->state.currentState = "sync_flushing"; }
 }
 
-/**
- * @brief Registers @p name in `m_watchVariables` and creates a GDB/MI variable object on stopped ranks.
- */
+/** @brief Registers @p name in `m_watchVariables` and creates a GDB/MI variable object on stopped ranks. */
 void GdbRankCoordinator::registerWatchVariable(const QString& name) {
   if (std::find(m_watchVariables.begin(), m_watchVariables.end(), name) == m_watchVariables.end()) m_watchVariables.push_back(name);
-  const int varIdx = static_cast<int>(std::distance(
-      m_watchVariables.begin(), std::find(m_watchVariables.begin(), m_watchVariables.end(), name)));
-
-  // Issue `30<varIdx>-var-create - * <name>` only to actively stopped GDB rank slots.
+  const int varIdx = static_cast<int>(std::distance(m_watchVariables.begin(), std::find(m_watchVariables.begin(), m_watchVariables.end(), name)));
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     const bool stoppedActive = rp && rp->state.currentState == QLatin1String("stopped") &&
                                ((rp->fifoInFd >= 0) || !rp->process || rp->process->state() == QProcess::Running);
-    if (stoppedActive && !m_varNameMap[static_cast<int>(i)].contains(name)) {
+    if (stoppedActive && !m_varNameMap[static_cast<int>(i)].contains(name))
       writeCmd(static_cast<int>(i), QString("30%1-var-create - * %2\n").arg(varIdx).arg(name));
-    }
   }
 }
 
-/**
- * @brief Cleanly stops all per-rank GDB sessions, closes FIFOs, kills `mpirun`, and removes temp files.
- */
-void GdbRankCoordinator::terminateAllSessions() {
+/** @brief Cleanly stops all per-rank GDB sessions, closes FIFOs, kills `mpirun`, and removes temp files. */
+void GdbRankCoordinator::terminateAllSessions() { stopAll(m_shuttingDown); }
+
+void GdbRankCoordinator::stopAll(bool silentShutdown) {
+  const bool prevShuttingDown = m_shuttingDown;
+  m_shuttingDown = true;
+  QVector<pid_t> spawnedPids;
+  if (m_mpirunProcess) m_mpirunProcess->disconnect();
   for (size_t i = 0; i < m_processes.size(); ++i) {
     auto& rp = m_processes[i];
     if (!rp) continue;
-    // Disable and destroy FIFO socket notifier before closing POSIX file descriptors.
-    if (rp->fifoNotifier) {
-      rp->fifoNotifier->setEnabled(false);
-      delete rp->fifoNotifier;
-      rp->fifoNotifier = nullptr;
+    const bool wasFifo = (rp->fifoInFd >= 0 || rp->fifoOutFd >= 0);
+    const bool wasAttached = rp->isAttached || rp->pendingAttach;
+    if (rp->fifoNotifier) { rp->fifoNotifier->setEnabled(false); rp->fifoNotifier->disconnect(); delete rp->fifoNotifier; rp->fifoNotifier = nullptr; }
+    if (rp->process) rp->process->disconnect();
+    if (!wasAttached && rp->inferiorPid > 0) {
+      spawnedPids.append(rp->inferiorPid);
+      ::kill(rp->inferiorPid, SIGINT);
     }
-    // Issue graceful `-gdb-exit` over the input FIFO and close both pipe endpoints.
     if (rp->fifoInFd >= 0) {
       [[maybe_unused]] const ssize_t n = ::write(rp->fifoInFd, "-gdb-exit\n", 10);
-      ::close(rp->fifoInFd);
-      rp->fifoInFd = -1;
+      ::close(rp->fifoInFd); rp->fifoInFd = -1;
     }
     if (rp->fifoOutFd >= 0) { ::close(rp->fifoOutFd); rp->fifoOutFd = -1; }
-    // Reap spawned FIFO child rank processes; detach cleanly from externally attached PIDs.
-    if (rp->fifoInFd >= 0 && rp->inferiorPid > 0) { ::kill(rp->inferiorPid, SIGKILL); rp->inferiorPid = 0; }
-    // Tear down standalone `QProcess` GDB frontend without writing to closed pipes.
+    if (wasFifo && !wasAttached && rp->inferiorPid > 0) ::kill(rp->inferiorPid, SIGTERM);
     if (rp->process) {
-      rp->process->disconnect();
+      if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(250);
       if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
-        rp->process->write("-target-detach\n-gdb-exit\n");
+        rp->process->write(wasAttached ? "-target-detach\n-gdb-exit\n" : "-gdb-exit\n");
       }
-      if (rp->process->state() != QProcess::NotRunning && !rp->process->waitForFinished(300)) {
-        rp->process->kill();
-        rp->process->waitForFinished(300);
+      if (rp->process->state() != QProcess::NotRunning && !rp->process->waitForFinished(250)) {
+        rp->process->terminate();
+        if (!rp->process->waitForFinished(250)) { rp->process->kill(); rp->process->waitForFinished(250); }
       }
     }
+    rp->inferiorPid = 0;
   }
-  // Clear rank process slots, OS PID map, stack/thread caches, and GDB variable-object lookup tables.
   const bool hadActiveSession = !m_processes.empty() || !m_rankFrames.isEmpty() || !m_rankThreads.isEmpty();
+  for (auto it = m_rankPids.constBegin(); it != m_rankPids.constEnd(); ++it) {
+    if (it.value() > 0 && spawnedPids.contains(static_cast<pid_t>(it.value()))) continue;
+  }
   m_processes.clear(); m_rankPids.clear(); m_varNameMap.clear(); m_varNameRevMap.clear();
   m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear(); m_pendingFrameSelect.clear();
   m_pendingConsoleCmdCount.clear(); m_consoleReplyBuffer.clear(); m_watchpointIds.clear();
-  if (hadActiveSession) { emit stackTraceUpdated(0, {}); emit threadsUpdated(0, {}); }
-
-  // Terminate and reap the master `mpirun` / `mpiexec` launcher process cleanly.
   if (m_mpirunProcess) {
-    m_mpirunProcess->disconnect();
-    if (m_mpirunProcess->state() != QProcess::NotRunning) {
+    if (m_mpirunProcess->state() == QProcess::Starting) m_mpirunProcess->waitForStarted(250);
+    if (m_mpirunProcess->state() != QProcess::NotRunning && !m_mpirunProcess->waitForFinished(250)) {
       m_mpirunProcess->terminate();
-      if (!m_mpirunProcess->waitForFinished(300)) {
-        m_mpirunProcess->kill();
-        m_mpirunProcess->waitForFinished(500);
-      }
+      if (!m_mpirunProcess->waitForFinished(250)) { m_mpirunProcess->kill(); m_mpirunProcess->waitForFinished(250); }
     }
     m_mpirunProcess.reset();
   }
-  // Remove the per-session FIFO directory from `/tmp`.
+  for (pid_t pid : spawnedPids) {
+    if (pid > 0 && ::kill(pid, 0) == 0) ::kill(pid, SIGKILL);
+  }
   if (!m_fifoTempDir.isEmpty()) { QDir(m_fifoTempDir).removeRecursively(); m_fifoTempDir.clear(); }
   m_currentBinaryPath.clear();
+  if (!silentShutdown) {
+    m_shuttingDown = prevShuttingDown;
+    if (hadActiveSession) { emit stackTraceUpdated(0, {}); emit threadsUpdated(0, {}); }
+  }
 }
 
 /** @brief Convenience entry point forwarding to `launchParallelSession()`. */
@@ -685,15 +669,15 @@ void GdbRankCoordinator::requestDisassemblyFallback(int rankId) {
 
 /** @brief Drains available bytes from @p rankId's FIFO or `QProcess` into `processGdbOutput()`. */
 void GdbRankCoordinator::handleGdbOutput(int rankId) {
-  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
+  if (m_shuttingDown || rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
   auto& rp = m_processes[rankId]; if (!rp) return;
   if (rp->fifoOutFd >= 0) {
     QByteArray acc; char buf[8192];
-    while (true) { const ssize_t n = ::read(rp->fifoOutFd, buf, sizeof(buf)); if (n <= 0) break; acc.append(buf, static_cast<qsizetype>(n)); }
-    if (!acc.isEmpty()) processGdbOutput(rankId, QString::fromUtf8(acc));
+    while (!m_shuttingDown) { const ssize_t n = ::read(rp->fifoOutFd, buf, sizeof(buf)); if (n <= 0) break; acc.append(buf, static_cast<qsizetype>(n)); }
+    if (!m_shuttingDown && !acc.isEmpty()) processGdbOutput(rankId, QString::fromUtf8(acc));
     return;
   }
-  if (rp->process) processGdbOutput(rankId, QString::fromUtf8(rp->process->readAllStandardOutput()));
+  if (!m_shuttingDown && rp->process) processGdbOutput(rankId, QString::fromUtf8(rp->process->readAllStandardOutput()));
 }
 
 /** @brief Sends `100-data-evaluate-expression` for a source-editor mouse hover on @p rankId. */
@@ -724,10 +708,10 @@ void GdbRankCoordinator::readMemory(int rankId, const QString& address, int leng
 
 /** @brief Incremental GDB/MI3 state machine parser for a single MPI rank. */
 void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
-  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
+  if (m_shuttingDown || rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
   auto& rp = m_processes[rankId]; rp->buffer += output;
   QStringList batchedProgramOut; int newlineIdx = -1;
-  while ((newlineIdx = rp->buffer.indexOf('\n')) != -1) {
+  while (!m_shuttingDown && (newlineIdx = rp->buffer.indexOf('\n')) != -1) {
     const QString line = rp->buffer.left(newlineIdx).trimmed();
     rp->buffer.remove(0, newlineIdx + 1);
     if (line.isEmpty()) continue;

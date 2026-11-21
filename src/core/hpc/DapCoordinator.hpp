@@ -80,6 +80,9 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Cancels any active SLURM job, sends `disconnect`, and stops the adapter. */
   void terminateSession() override;
 
+  /** @brief Disconnects adapter signals and terminates the DAP session (`silentShutdown` suppresses UI reset signals). */
+  void stopSession(bool silentShutdown = false);
+
   /** @brief Toggles a source-line breakpoint in @p file at @p line and syncs via `setBreakpoints`. */
   void toggleBreakpoint(const QString& file, int line);
 
@@ -346,6 +349,8 @@ class DapCoordinator : public IBackendCoordinator {
   QMap<int, pid_t> m_rankToPid;                      ///< Maps zero-based rank ID to OS `pid_t`.
 
  private:
+  /** @brief Connects `m_process` stdout, error, finished, and started signals to this coordinator. */
+  void bindProcessSignals();
   /** @brief Transmits the consolidated `setDataBreakpoints` array to the active DAP adapter. */
   void syncDataBreakpoints();
 
@@ -384,4 +389,5 @@ class DapCoordinator : public IBackendCoordinator {
   QString m_currentBinaryPath; ///< Filesystem path of the target binary being debugged.
   QString m_mpiArgs;           ///< Optional MPI launcher arguments passed to `launchParallelSession`.
   QMap<QString, QMap<int, QString>> m_breakpointConditions; ///< Optional conditional expressions per `(file, line)`.
+  bool m_shuttingDown = false; ///< Suppresses async adapter callbacks while stopping or destroying.
 };

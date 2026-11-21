@@ -172,10 +172,12 @@ public:
      */
     bool continueExecutionWorkflow();
 
-    /**
-     * @brief Terminates the active debugging session and resets the workstation to IDLE state.
-     */
+    /** @brief Terminates the active debugging session and resets the workstation to IDLE state. */
     void stopTargetWorkflow();
+    /** @brief Synchronously disconnects signals and stops/reaps active debug sessions during shutdown. */
+    void shutdownActiveSessionSync();
+    /** @brief Returns true once window close or destructor teardown has started. */
+    bool isShuttingDown() const { return m_isShuttingDown; }
 
     /**
      * @brief Steps over the current source line on the active MPI rank (`IBackendCoordinator::stepOver`).
@@ -787,12 +789,9 @@ public slots:
     void onTutorialLaunchRequested(const QString& absoluteFilePath);
     bool execTutorialDialog();
     /** @brief Opens the modeless DDD Pointer & Struct Graph Visualizer and optionally graphs @p exprPath. */
-    void openPointerGraphVisualizer(const QString& exprPath = QString(),
-                                    const QString& varValue = QString(),
-                                    const QString& varType = QString());
+    void openPointerGraphVisualizer(const QString& exprPath = QString(), const QString& varValue = QString(), const QString& varType = QString());
     /** @brief Opens or raises the live 1D/2D Array & Field Plotter dialog and optionally plots @p exprPath. */
-    void openArrayPlotter(const QString& exprPath = QString(),
-                          const QString& typeHint = QString());
+    void openArrayPlotter(const QString& exprPath = QString(), const QString& typeHint = QString());
     /** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix (e.g., ">" or ""). */
     void openCommandPalette(const QString& initialPrefix = QStringLiteral(">"));
     /** @brief Opens the unified Command Palette in Quick Open File mode (Ctrl+P). */
@@ -805,11 +804,9 @@ public slots:
     void openSignalsAndCatchpoints();
     /** @brief Opens or raises the Copy-on-Write Process Checkpoints manager dialog (Ctrl+Alt+K). */
     void openProcessCheckpoints();
-
 protected:
     void closeEvent(QCloseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
-
 private:
     void setupUi();
     void setupMenu();
@@ -826,8 +823,7 @@ private:
     void bindConsoleAndWatchpointRoutes();
     void harmonizeBottomConsoleTabs();
     QString bottomToolGroupForTabIndex(int tabIndex) const;
-    void updateStatusTelemetry(const QString& pcOrSeek = QString(),
-                               const QString& targetState = QString());
+    void updateStatusTelemetry(const QString& pcOrSeek = QString(), const QString& targetState = QString());
     void refreshStatusBarMemoryTelemetry();
     void updateNavigationButtons();
     void hideHoverTooltipPopup();
@@ -866,12 +862,14 @@ private:
     QComboBox* m_programOutputRankFilter = nullptr;
     QVector<QPair<int, QString>> m_programOutputLines;
     class QTimer* m_programOutputFlushTimer = nullptr;
+    class QTimer* m_telemetryTimer = nullptr;
     QStringList m_pendingProgramOutputBatch;
     QString m_activeSessionFilePath;
     QMap<QString, QToolButton*> m_bottomRailButtons;
     QString m_activeBottomToolGroup = QStringLiteral("Debug");
     bool m_syncingBottomToolGroup = false;
     bool m_isClosing = false;
+    bool m_isShuttingDown = false;
     QComboBox* m_targetSelector = nullptr;
     QSpinBox* m_rankCountSpin = nullptr;
     QAction* m_runAction = nullptr;
@@ -942,6 +940,10 @@ private:
     ProgrammerCalculatorDialog* m_programmerCalculatorDialog = nullptr;
     SignalCatchpointDialog* m_signalCatchpointDialog = nullptr;
     CheckpointDialog* m_checkpointDialog = nullptr;
+    struct SessionShutdownGuard {
+        MainWindow* self = nullptr;
+        ~SessionShutdownGuard() { if (self && !self->m_isShuttingDown && self->m_coordinator) self->shutdownActiveSessionSync(); }
+    } m_shutdownGuard{this};
 };
 
 }  // namespace gridlock::ui

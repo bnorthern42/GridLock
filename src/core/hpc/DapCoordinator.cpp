@@ -20,6 +20,7 @@
 #include <QThreadPool>
 #include <QtConcurrent>
 #include <QtConcurrent/QtConcurrent>
+#include <csignal>
 
 #include "MiSanitizer.hpp"
 #include "NativeMemoryReader.hpp"
@@ -48,64 +49,53 @@ __attribute__((weak)) MiSanitizer::SanitizationResult MiSanitizer::sanitize(std:
  */
 DapCoordinator::DapCoordinator(QObject* parent)
     : IBackendCoordinator(parent), m_process(new QProcess(this)) {
-  connect(m_process, &QProcess::readyReadStandardOutput, this,
-          &DapCoordinator::readyReadStandardOutput);
-  connect(m_process, &QProcess::errorOccurred, this,
-          &DapCoordinator::handleProcessError);
-  connect(m_process, &QProcess::finished, this,
-          &DapCoordinator::handleProcessFinished);
+  bindProcessSignals();
+}
+
+void DapCoordinator::bindProcessSignals() {
+  if (!m_process) return;
+  m_process->disconnect();
+  connect(m_process, &QProcess::readyReadStandardOutput, this, &DapCoordinator::readyReadStandardOutput);
+  connect(m_process, &QProcess::errorOccurred, this, &DapCoordinator::handleProcessError);
+  connect(m_process, &QProcess::finished, this, &DapCoordinator::handleProcessFinished);
   connect(m_process, &QProcess::started, this, [this]() {
+    if (m_shuttingDown) return;
     emit adapterStarted();
-    qDebug() << "[DAP] Adapter process successfully started.";
     m_state = SessionState::Running;
     emit stateChanged(m_state);
     initializeAdapter();
   });
 }
 
-/**
- * @brief Disconnects `QProcess` signals and halts the adapter process on destruction without teardown signals.
- */
+/** @brief Disconnects `QProcess` signals and halts the adapter process on destruction without teardown signals. */
 DapCoordinator::~DapCoordinator() {
+  m_shuttingDown = true;
   QSignalBlocker blocker(this);
-  if (m_process) m_process->disconnect();
-  stopAdapter();
+  stopSession(true);
 }
 
-/**
- * @brief Spawns the DAP adapter executable if no session is currently active.
- */
+/** @brief Spawns the DAP adapter executable if no session is currently active. */
 void DapCoordinator::startAdapter(const QString& program) {
-  if (m_state != SessionState::Disconnected) {
-    qWarning() << "DAP Adapter is already active or launching.";
-    return;
-  }
-
+  if (m_state != SessionState::Disconnected) return;
+  m_shuttingDown = false;
+  bindProcessSignals();
   m_state = SessionState::Launching;
   emit stateChanged(m_state);
-
   const QString cwd = !workingDirectory().trimmed().isEmpty()
                           ? workingDirectory().trimmed()
                           : QString::fromStdString(gridlock::core::ConfigManager::instance().loadProjectSettings().workingDirectory).trimmed();
   if (!cwd.isEmpty() && QFileInfo(cwd).isDir()) m_process->setWorkingDirectory(cwd);
-  qDebug() << "[DAP] Executing:" << program;
   m_process->start(program, QStringList());
 }
 
-/**
- * @brief Gracefully terminates the adapter process, escalating to `SIGKILL` after 3 seconds.
- */
+/** @brief Gracefully terminates the adapter process with bounded 250ms steps, escalating to `SIGKILL`. */
 void DapCoordinator::stopAdapter() {
   if (!m_process) return;
-  if (m_process->state() == QProcess::Starting) {
-    m_process->waitForStarted(500);
-  }
-  if (m_process->state() != QProcess::NotRunning) {
+  m_process->disconnect();
+  if (m_process->state() == QProcess::Starting) m_process->waitForStarted(250);
+  if (m_process->state() != QProcess::NotRunning && !m_process->waitForFinished(250)) {
     m_process->terminate();
-    if (!m_process->waitForFinished(3000)) {
-      m_process->kill();
-      m_process->waitForFinished(500);
-    }
+    if (!m_process->waitForFinished(250)) { m_process->kill(); m_process->waitForFinished(250); }
   }
 }
 
@@ -541,55 +531,52 @@ void DapCoordinator::readMemory(int rankId, const QString& memoryReference, int 
   sendRequest("readMemory", args);
 }
 
-/**
- * @brief Cancels any active SLURM allocation, sends DAP `disconnect`, and stops the adapter.
- */
-void DapCoordinator::terminateSession() {
+/** @brief Cancels any active SLURM allocation, sends DAP `disconnect`, and stops the adapter. */
+void DapCoordinator::terminateSession() { stopSession(m_shuttingDown); }
+
+void DapCoordinator::stopSession(bool silentShutdown) {
+  m_shuttingDown = true;
   m_state = SessionState::Terminating;
-  emit stateChanged(m_state);
-
-  // Cancel the remote SLURM batch job if one was captured from session stdout.
+  if (!silentShutdown) emit stateChanged(m_state);
   if (m_slurmJobId != -1) QProcess::execute("scancel", {QString::number(m_slurmJobId)});
-
+  const bool hadRunningAdapter = m_process && m_process->state() != QProcess::NotRunning;
+  if (m_process) m_process->disconnect();
   if (isAdapterRunning()) sendRequest("disconnect", QJsonObject{{"terminateDebuggee", true}});
-
-  // Wait briefly for clean exit before sending SIGTERM / SIGKILL.
-  if (m_process && m_process->state() != QProcess::NotRunning) {
-    if (!m_process->waitForFinished(1000)) {
+  if (m_process) {
+    if (m_process->state() == QProcess::Starting) m_process->waitForStarted(250);
+    if (m_process->state() != QProcess::NotRunning && !m_process->waitForFinished(250)) {
       m_process->terminate();
-      if (!m_process->waitForFinished(1000)) {
-        m_process->kill();
-        m_process->waitForFinished(500);
-      }
+      if (!m_process->waitForFinished(250)) { m_process->kill(); m_process->waitForFinished(250); }
     }
   }
-
-  m_slurmJobId = -1;
-  m_processCount = 0;
-  m_rankToPid.clear();
-  m_activeFrameIds.clear();
-  m_activeThreadIds.clear();
-  m_rankFrames.clear();
-  m_rankThreads.clear();
-  emit stackTraceUpdated(0, {});
-  emit threadsUpdated(0, {});
-  m_state = SessionState::Disconnected;
-  emit stateChanged(m_state);
+  if (hadRunningAdapter && m_pendingAttachPid == 0) {
+    const pid_t selfPid = static_cast<pid_t>(QCoreApplication::applicationPid());
+    for (auto it = m_rankToPid.constBegin(); it != m_rankToPid.constEnd(); ++it)
+      if (it.value() > 0 && it.value() != selfPid && ::kill(it.value(), 0) == 0) ::kill(it.value(), SIGTERM);
+  }
+  m_slurmJobId = -1; m_processCount = 0; m_pendingAttachPid = 0; m_buffer.clear();
+  m_rankToPid.clear(); m_activeFrameIds.clear(); m_activeThreadIds.clear();
+  m_rankFrames.clear(); m_rankThreads.clear(); m_state = SessionState::Disconnected;
+  if (!silentShutdown) {
+    m_shuttingDown = false;
+    bindProcessSignals();
+    emit stackTraceUpdated(0, {});
+    emit threadsUpdated(0, {});
+    emit stateChanged(m_state);
+  }
 }
 
-/**
- * @brief Drains available stdout bytes from the adapter into `processRawData()`.
- */
-void DapCoordinator::readyReadStandardOutput() { processRawData(m_process->readAllStandardOutput()); }
+/** @brief Drains available stdout bytes from the adapter into `processRawData()`. */
+void DapCoordinator::readyReadStandardOutput() {
+  if (!m_shuttingDown && m_process) processRawData(m_process->readAllStandardOutput());
+}
 
-/**
- * @brief Incrementally extracts `Content-Length` framed JSON payloads and dispatches them in strict FIFO order.
- * @param data Newly read raw byte chunk from the `lldb-dap` stdout pipe.
- */
+/** @brief Incrementally extracts `Content-Length` framed JSON payloads and dispatches them in strict FIFO order. */
 void DapCoordinator::processRawData(const QByteArray& data) {
+  if (m_shuttingDown) return;
   // Append newly arrived adapter bytes into the rolling stream buffer.
   m_buffer.append(data);
-  while (true) {
+  while (!m_shuttingDown) {
     // Locate the HTTP-style `\r\n\r\n` separator bounding the DAP header block.
     const int headerEndIndex = m_buffer.indexOf("\r\n\r\n");
     if (headerEndIndex == -1) break;
@@ -920,17 +907,15 @@ void DapCoordinator::syncDataBreakpoints() {
  * @param error Underlying `QProcess::ProcessError` code reported by Qt.
  */
 void DapCoordinator::handleProcessError(QProcess::ProcessError error) {
+  if (m_shuttingDown) return;
   qDebug() << "[DAP] FATAL: Adapter process error:" << error << "-" << m_process->errorString();
   emit errorOccurred(m_process->errorString());
   m_processCount = 0; m_state = SessionState::Disconnected; emit stateChanged(m_state);
 }
 
-/**
- * @brief Emits `adapterExited` and resets session state when the adapter process terminates.
- * @param exitCode Process exit status code.
- * @param exitStatus Normal or crash exit classification.
- */
+/** @brief Emits `adapterExited` and resets session state when the adapter process terminates. */
 void DapCoordinator::handleProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
+  if (m_shuttingDown) return;
   m_processCount = 0;
   m_rankToPid.clear(); m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear();
   emit adapterExited(exitCode, exitStatus);

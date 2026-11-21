@@ -21,6 +21,8 @@
 #include <QThread>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <csignal>
+#include <sys/wait.h>
 #include <qtermwidget.h>
 
 namespace gridlock::ui {
@@ -99,12 +101,25 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     layout->addWidget(m_termWidget, 1);
 }
 
-/** @brief Disconnects QTermWidget signals before child destruction during shutdown. */
+/** @brief Disconnects QTermWidget signals and terminates the PTY shell process before child destruction. */
 TerminalDockWidget::~TerminalDockWidget() {
     removeEventFilter(this);
     if (m_termWidget) {
         m_termWidget->blockSignals(true);
         m_termWidget->disconnect(this);
+        for (QObject* child : m_termWidget->findChildren<QObject*>()) {
+            child->blockSignals(true);
+            child->disconnect(this);
+        }
+        const int shellPid = m_termWidget->getShellPID();
+        if (shellPid > 0 && ::kill(shellPid, 0) == 0) {
+            ::kill(-shellPid, SIGHUP);
+            ::kill(shellPid, SIGTERM);
+            for (int i = 0; i < 8 && ::kill(shellPid, 0) == 0; ++i) QThread::msleep(10);
+            if (::kill(shellPid, 0) == 0) { ::kill(-shellPid, SIGKILL); ::kill(shellPid, SIGKILL); }
+        }
+        delete m_termWidget;
+        m_termWidget = nullptr;
     }
 }
 

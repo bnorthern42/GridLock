@@ -375,6 +375,9 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Implements `IBackendCoordinator::terminateSession()` via `terminateAllSessions()`. */
   void terminateSession() override;
 
+  /** @brief Disconnects signals and stops all rank GDB/FIFO/MPI processes (`silentShutdown` suppresses UI reset signals). */
+  void stopAll(bool silentShutdown = false);
+
   /** @brief `IBackendCoordinator` step-over shim routing to `stepAll()`. */
   void stepOver(int threadId) override {
     Q_UNUSED(threadId);
@@ -494,6 +497,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QStringList pendingAfterStopCmds;    ///< MI commands queued while running to execute upon transient SIGINT stop.
     bool autoContinueAfterPending = false; ///< True when rank was interrupted solely to apply pending breakpoints.
     bool pendingAttach = false;            ///< True while `-target-attach` or `-target-select` awaits confirmation.
+    bool isAttached = false;               ///< True when attached to an external OS/remote target (detach, do not kill).
     int pendingInterruptSignals = 0;       ///< Count of in-flight synthetic SIGINTs sent for transient interrupts.
     QString pendingLogpointMessage;        ///< Active Logpoint template awaiting `209-stack-list-variables`.
     QMap<QString, QString> pendingLogpointArgs; ///< Frame args captured from `*stopped` for Logpoint expansion.
@@ -696,6 +700,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QString> m_pendingCheckpointNote;            ///< Pending user note for in-flight `checkpoint` creation.
   QMap<int, bool> m_pendingInfoCheckpoints;              ///< True while `213` `info checkpoints` is in flight per rank.
   QMap<int, QString> m_infoCheckpointsBuffer;            ///< Buffered `~` output for `213` `info checkpoints`.
+  bool m_shuttingDown = false;                           ///< Suppresses async MI/FIFO processing while stopping or destroying.
 };
 
 }  // namespace gridlock

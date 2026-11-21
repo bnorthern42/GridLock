@@ -256,7 +256,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   if (m_serverRackView) m_serverRackView->setSessionIdle(m_rankCountSpin ? m_rankCountSpin->value() : 8);
   // Listen for global theme mode change events from ThemeManager singleton.
   connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
-          this, [this]() { propagateThemeToAllWidgets(); });
+          this, [this]() { if (!m_isShuttingDown && !m_isClosing) propagateThemeToAllWidgets(); });
   // Only load persisted theme if ThemeManager::initialize() has not already populated the global QSS.
   if (gridlock::core::ThemeManager::instance().currentStyleSheet().isEmpty()) {
     gridlock::core::ThemeManager::instance().loadPersistedTheme();
@@ -264,9 +264,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   propagateThemeToAllWidgets();
   setWorkspacePerspective(QStringLiteral("Source"));
   refreshStatusBarMemoryTelemetry();
-  auto* telemetryTimer = new QTimer(this);
-  connect(telemetryTimer, &QTimer::timeout, this, &MainWindow::refreshStatusBarMemoryTelemetry);
-  telemetryTimer->start(1500);
+  m_telemetryTimer = new QTimer(this);
+  connect(m_telemetryTimer, &QTimer::timeout, this, &MainWindow::refreshStatusBarMemoryTelemetry);
+  m_telemetryTimer->start(1500);
 }
 
 /**
@@ -323,200 +323,160 @@ void MainWindow::loadPreviewFixture() {
   }
 }
 
-/**
- * @brief Dispatches a polymorphic debugger command object.
- * @param cmd The command instance to execute.
- */
-void MainWindow::executeCommand(
-    std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd) {
-  if (cmd) {
-    cmd->execute();
-  }
+/** @brief Dispatches a polymorphic debugger command object. */
+void MainWindow::executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd) {
+  if (cmd) cmd->execute();
 }
 
-/**
- * @brief Attaches a backend coordinator (GDB or DAP) and establishes signal routes.
- * @param coord Pointer to active coordinator instance.
- */
+/** @brief Attaches a backend coordinator (GDB or DAP) and establishes signal routes. */
 void MainWindow::setCoordinator(IBackendCoordinator *coord) {
   if (m_deadlockAnalyzer) { delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr; }
   m_coordinator = coord;
   if (!m_coordinator) m_debugSessionActive = false;
   else if (m_coordinator->getProcessCount() > 0) m_debugSessionActive = true;
-  updateDebugToolbarState();
+  if (!m_isShuttingDown && !m_isClosing) updateDebugToolbarState();
+  const QPointer<MainWindow> self(this);
 
   if (auto *dapCoord = dynamic_cast<DapCoordinator *>(m_coordinator)) {
-    connect(dapCoord, &DapCoordinator::stateChanged, this,
-            [this, dapCoord](SessionState state) {
-              if (state == SessionState::Disconnected) {
-                m_debugSessionActive = false;
-                updateDebugToolbarState();
-                updateStatusTelemetry(QString(), QStringLiteral("IDLE"));
-              } else if (state == SessionState::Launching) {
-                updateStatusTelemetry(QString(), QStringLiteral("LAUNCHING"));
-              } else if (state == SessionState::Queued) {
-                updateStatusTelemetry(QString(), QStringLiteral("QUEUED"));
-              } else if (state == SessionState::Running) {
-                updateStatusTelemetry(QString(), QStringLiteral("RUNNING"));
-                for (int i = 0; i < dapCoord->getProcessCount(); ++i) {
-                  RankState rs = m_latestStates.contains(i) ? m_latestStates[i] : RankState{};
-                  rs.rankId = i;
-                  rs.currentState = "running";
-                  rs.executionTimer.start();
-                  onRankStateChanged(i, rs);
-                }
-              } else if (state == SessionState::Paused) {
-                updateStatusTelemetry(QString(), QStringLiteral("PAUSED"));
-              }
-            });
-
-    connect(dapCoord, &DapCoordinator::executionStopped, this,
-            [this](int rankId, const QString& /*reason*/) {
-              RankState rs = m_latestStates.contains(rankId) ? m_latestStates[rankId] : RankState{};
-              rs.rankId = rankId;
-              rs.currentState = "stopped";
-              rs.totalRuntimeMs += rs.executionTimer.isValid() ? rs.executionTimer.elapsed() : 0;
-              onRankStateChanged(rankId, rs);
-            });
+    const QPointer<DapCoordinator> dapGuard(dapCoord);
+    connect(dapCoord, &DapCoordinator::stateChanged, this, [self, dapGuard](SessionState state) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing || !dapGuard) return;
+      if (state == SessionState::Disconnected) {
+        self->m_debugSessionActive = false; self->updateDebugToolbarState(); self->updateStatusTelemetry(QString(), QStringLiteral("IDLE"));
+      } else if (state == SessionState::Launching) { self->updateStatusTelemetry(QString(), QStringLiteral("LAUNCHING"));
+      } else if (state == SessionState::Queued) { self->updateStatusTelemetry(QString(), QStringLiteral("QUEUED"));
+      } else if (state == SessionState::Running) {
+        self->updateStatusTelemetry(QString(), QStringLiteral("RUNNING"));
+        for (int i = 0; i < dapGuard->getProcessCount(); ++i) {
+          RankState rs = self->m_latestStates.contains(i) ? self->m_latestStates[i] : RankState{};
+          rs.rankId = i; rs.currentState = "running"; rs.executionTimer.start(); self->onRankStateChanged(i, rs);
+        }
+      } else if (state == SessionState::Paused) { self->updateStatusTelemetry(QString(), QStringLiteral("PAUSED")); }
+    });
+    connect(dapCoord, &DapCoordinator::executionStopped, this, [self](int rankId, const QString&) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      RankState rs = self->m_latestStates.contains(rankId) ? self->m_latestStates[rankId] : RankState{};
+      rs.rankId = rankId; rs.currentState = "stopped";
+      rs.totalRuntimeMs += rs.executionTimer.isValid() ? rs.executionTimer.elapsed() : 0;
+      self->onRankStateChanged(rankId, rs);
+    });
   }
 
   // Connect variable inspection dock and polymorphic live DeadlockAnalyzer across GDB and DAP.
   if (m_variablesDockWidget) m_variablesDockWidget->setCoordinator(m_coordinator);
   if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-    connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged, this, &MainWindow::onRankStateChanged);
-    connect(gdbCoord, &gridlock::GdbRankCoordinator::localsUpdated, this,
-            [this](int rankId, const QJsonArray &locals) {
-              if (rankId == m_focusedRank && m_variablesDockWidget) {
-                if (auto *vm = m_variablesDockWidget->findChild<gridlock::VariableTreeModel *>()) {
-                  vm->onLocalsUpdated(rankId, 0, locals);
-                }
-              }
-            });
+    connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged, this, [self](int rankId, const RankState &st) {
+      if (self && !self->m_isShuttingDown && !self->m_isClosing) self->onRankStateChanged(rankId, st);
+    });
+    connect(gdbCoord, &gridlock::GdbRankCoordinator::localsUpdated, this, [self](int rankId, const QJsonArray &locals) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      if (rankId == self->m_focusedRank && self->m_variablesDockWidget) {
+        if (auto *vm = self->m_variablesDockWidget->findChild<gridlock::VariableTreeModel *>()) vm->onLocalsUpdated(rankId, 0, locals);
+      }
+    });
   }
 
   // Bind coordinator execution, call-stack, console REPL, watchpoints, and deadlock routes.
   if (m_coordinator) {
-    connect(m_coordinator, &IBackendCoordinator::sessionErrorOccurred, this, [this](const QString &errMsg) {
-      if (m_debugSessionActive) stopTargetWorkflow();
-      appendProgramOutput(-1, QStringLiteral("[Session Error] %1").arg(errMsg), true); flushProgramOutputBatch();
-      updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("ATTACH / LAUNCH FAILED"));
+    connect(m_coordinator, &IBackendCoordinator::sessionErrorOccurred, this, [self](const QString &errMsg) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      if (self->m_debugSessionActive) self->stopTargetWorkflow();
+      self->appendProgramOutput(-1, QStringLiteral("[Session Error] %1").arg(errMsg), true); self->flushProgramOutputBatch();
+      self->updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("ATTACH / LAUNCH FAILED"));
     });
     bindCallStackCoordinatorRoutes();
     bindConsoleAndWatchpointRoutes();
     // Instantiate live DeadlockAnalyzer bound to m_coordinator's per-rank call stacks and state changes.
     m_deadlockAnalyzer = new gridlock::core::DeadlockAnalyzer(m_coordinator, this);
     if (m_mpiDiagnosticsWidget) {
-      // Forward detected wait-for cycles and collective divergences directly to MPI Diagnostics panel.
-      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected,
-              m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onDeadlockDetected);
-      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared,
-              m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onRankCleared);
+      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected, m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onDeadlockDetected);
+      connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::rankCleared, m_mpiDiagnosticsWidget, &MpiDiagnosticsWidget::onRankCleared);
     }
     // Reflect detected wait-for cycles and collective divergences on ServerRackView and DisassemblyView.
-    connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected, this,
-            [this](const gridlock::core::DeadlockInfo &info) {
-              // Mark rank card badge as DEADLOCK (`#f44747`) while preserving register/watch snapshots.
-              RankState rs = m_latestStates.contains(info.rankId) ? m_latestStates[info.rankId] : RankState{};
-              rs.rankId = info.rankId;
-              rs.currentState = QStringLiteral("deadlock");
-              rs.currentFunction = info.blockedFunction;
-              m_latestStates[info.rankId] = rs;
-              if (m_serverRackView) m_serverRackView->updateRankState(info.rankId, rs);
-            });
-    // Forward live register array updates for the currently focused MPI rank to RegisterView.
-    connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,
-            [this](int rankId, const QJsonArray &regs) {
-              if (rankId == m_focusedRank && m_registerView) m_registerView->updateRegisters(regs);
-            });
+    connect(m_deadlockAnalyzer, &gridlock::core::DeadlockAnalyzer::deadlockDetected, this, [self](const gridlock::core::DeadlockInfo &info) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      RankState rs = self->m_latestStates.contains(info.rankId) ? self->m_latestStates[info.rankId] : RankState{};
+      rs.rankId = info.rankId; rs.currentState = QStringLiteral("deadlock"); rs.currentFunction = info.blockedFunction;
+      self->m_latestStates[info.rankId] = rs;
+      if (self->m_serverRackView) self->m_serverRackView->updateRankState(info.rankId, rs);
+    });
     // Route execution location updates (file:line) without hijacking user-focused secondary tabs.
-    connect(m_coordinator, &IBackendCoordinator::locationChanged, this,
-            [this](int rankId, const QString &file, int line) {
-              const QString prevFile = m_latestStates.contains(rankId) ? m_latestStates[rankId].currentFile : QString();
-              const int prevLine = m_latestStates.contains(rankId) ? m_latestStates[rankId].currentLine : -1;
-              const bool sameLoc = (prevFile == file && prevLine == line && m_latestStates[rankId].currentState == QLatin1String("stopped"));
-              m_latestStates[rankId].currentFile = file; m_latestStates[rankId].currentLine = line;
-              if (rankId != m_focusedRank || line <= 0) return;
-              if (m_suppressExecutionTabSwitch || sameLoc) {
-                if (SourceCodeView *sv = (m_editorTabManager && !file.isEmpty()) ? m_editorTabManager->getSourceCodeViewForFile(file) : nullptr) sv->setExecutionLineOnly(line);
-                return;
-              }
-              SourceCodeView *view = (!file.isEmpty() && QFileInfo::exists(file) && m_editorTabManager) ? m_editorTabManager->openFile(file) : getSourceCodeView();
-              if (view) { syncTabBreakpointMetadata(view); view->highlightExecutionLine(line); }
-            });
+    connect(m_coordinator, &IBackendCoordinator::locationChanged, this, [self](int rankId, const QString &file, int line) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      const QString prevFile = self->m_latestStates.contains(rankId) ? self->m_latestStates[rankId].currentFile : QString();
+      const int prevLine = self->m_latestStates.contains(rankId) ? self->m_latestStates[rankId].currentLine : -1;
+      const bool sameLoc = (prevFile == file && prevLine == line && self->m_latestStates[rankId].currentState == QLatin1String("stopped"));
+      self->m_latestStates[rankId].currentFile = file; self->m_latestStates[rankId].currentLine = line;
+      if (rankId != self->m_focusedRank || line <= 0) return;
+      if (self->m_suppressExecutionTabSwitch || sameLoc) {
+        if (SourceCodeView *sv = (self->m_editorTabManager && !file.isEmpty()) ? self->m_editorTabManager->getSourceCodeViewForFile(file) : nullptr) sv->setExecutionLineOnly(line);
+        return;
+      }
+      SourceCodeView *view = (!file.isEmpty() && QFileInfo::exists(file) && self->m_editorTabManager) ? self->m_editorTabManager->openFile(file) : self->getSourceCodeView();
+      if (view) { self->syncTabBreakpointMetadata(view); view->highlightExecutionLine(line); }
+    });
 
     // Wire GDB-specific hover, evaluator, raw MI stream, and SIGFPE handlers when using GDB.
     if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
-      // Display floating inline variable preview popup when editor hover evaluation finishes.
-      connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete,
-              this, [this](const QString &varName, const QString &result, QPoint globalPos) {
-                if (getSourceCodeView() && m_plainJaneTooltip) {
-                  m_plainJaneTooltip->showTooltip(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result));
-                }
-              });
-      // Stream interactive expression evaluations to ExpressionEvaluatorWidget history.
-      if (m_expressionEvaluatorWidget) {
-        connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated,
-                m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
-      }
-      // Stream raw GDB/MI stdout, dispatched MI commands, and Tab completion queries to GdbConsoleWidget.
+      connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete, this, [self](const QString &varName, const QString &result, QPoint globalPos) {
+        if (self && !self->m_isShuttingDown && !self->m_isClosing && self->getSourceCodeView() && self->m_plainJaneTooltip)
+          self->m_plainJaneTooltip->showTooltip(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result));
+      });
+      if (m_expressionEvaluatorWidget) connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated, m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
       if (m_gdbConsoleWidget) {
         connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput, Qt::UniqueConnection);
         connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput, Qt::UniqueConnection);
         connect(m_gdbConsoleWidget, &GdbConsoleWidget::completionRequested, gdbCoord, &gridlock::GdbRankCoordinator::requestConsoleCompletions, Qt::UniqueConnection);
         connect(gdbCoord, &IBackendCoordinator::consoleCompletionsReady, m_gdbConsoleWidget, &GdbConsoleWidget::onConsoleCompletionsReady, Qt::UniqueConnection);
       }
-      // Focus offending rank and log floating-point trap details on SIGFPE signal stop.
-      connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this,
-              [this](int rankId, const QString &output) {
-                if (output.contains("reason=\"signal-received\"") && output.contains("signal-name=\"SIGFPE\"")) {
-                  onRankSelected(rankId);
-                  if (networkLog()) networkLog()->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
-                }
-              });
-      // Forward hexadecimal GDB memory dumps and live rank reads to MemView with PID badge.
-      connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this,
-              [this](int rankId, qint64 beginAddress, const QString &hexContents) {
-                if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) {
-                  m_memView->setMemoryData(beginAddress, hexContents);
-                  m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(m_coordinator ? m_coordinator->getPidForRank(rankId) : 0LL));
-                }
-              });
+      connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this, [self](int rankId, const QString &output) {
+        if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+        if (output.contains("reason=\"signal-received\"") && output.contains("signal-name=\"SIGFPE\"")) {
+          self->onRankSelected(rankId);
+          if (self->networkLog()) self->networkLog()->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
+        }
+      });
+      connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this, [self](int rankId, qint64 beginAddress, const QString &hexContents) {
+        if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+        if (!self->m_suppressMemViewBroadcast && rankId == self->m_focusedRank && self->m_memView) {
+          self->m_memView->setMemoryData(beginAddress, hexContents);
+          self->m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(self->m_coordinator ? self->m_coordinator->getPidForRank(rankId) : 0LL));
+        }
+      });
     }
-    connect(m_coordinator, &IBackendCoordinator::programOutputReceived, this,
-            [this](int rank, const QString &text, bool isErr) { appendProgramOutput(rank, text, isErr); });
+    connect(m_coordinator, &IBackendCoordinator::programOutputReceived, this, [self](int rank, const QString &text, bool isErr) {
+      if (self && !self->m_isShuttingDown && !self->m_isClosing) self->appendProgramOutput(rank, text, isErr);
+    });
     if (networkLog()) {
-      connect(m_coordinator, &IBackendCoordinator::targetOutputReceived, this,
-              [this](const QString &category, const QString &output) { if (networkLog()) networkLog()->appendText(category, output); });
+      connect(m_coordinator, &IBackendCoordinator::targetOutputReceived, this, [self](const QString &category, const QString &output) {
+        if (self && !self->m_isShuttingDown && !self->m_isClosing && self->networkLog()) self->networkLog()->appendText(category, output);
+      });
     }
-    // Forward raw byte-array memory reads to MemView for the currently focused MPI rank.
-    connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
-            [this](int rankId, const QString &address, const QByteArray &data) {
-              if (!m_suppressMemViewBroadcast && rankId == m_focusedRank && m_memView) {
-                m_memView->setMemoryData(address, data);
-                m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(m_coordinator ? m_coordinator->getPidForRank(rankId) : 0LL));
-              }
-            });
-    // Forward JSON register values to RegisterView and keep DisassemblyView PC cursor synchronized.
-    connect(m_coordinator, &IBackendCoordinator::registersUpdated, this,
-            [this](int rankId, const QJsonArray &registers) {
-              for (const QJsonValue &rv : registers) {
-                const QJsonObject ro = rv.toObject();
-                const QString rn = ro.value(QStringLiteral("name")).toString().toLower();
-                const QString rval = ro.value(QStringLiteral("value")).toString();
-                if (rn == QStringLiteral("rip") || rn == QStringLiteral("pc")) m_latestStates[rankId].registers[16] = rval;
-                else if (rn == QStringLiteral("rsp") || rn == QStringLiteral("sp")) m_latestStates[rankId].registers[7] = rval;
-              }
-              if (rankId == m_focusedRank) {
-                if (m_registerView) m_registerView->updateRegisters(registers);
-                const QString pcToken = m_latestStates[rankId].registers.value(16).section(QLatin1Char(' '), 0, 0);
-                bool ok = false;
-                const uint64_t pcVal = pcToken.mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0).toULongLong(&ok, 16);
-                if (ok && pcVal != 0ULL && m_disassemblyView) {
-                  m_disassemblyView->setCurrentAddress(pcVal);
-                  m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
-                }
-              }
-            });
+    connect(m_coordinator, &IBackendCoordinator::memoryRead, this, [self](int rankId, const QString &address, const QByteArray &data) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      if (!self->m_suppressMemViewBroadcast && rankId == self->m_focusedRank && self->m_memView) {
+        self->m_memView->setMemoryData(address, data);
+        self->m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(self->m_coordinator ? self->m_coordinator->getPidForRank(rankId) : 0LL));
+      }
+    });
+    connect(m_coordinator, &IBackendCoordinator::registersUpdated, this, [self](int rankId, const QJsonArray &registers) {
+      if (!self || self->m_isShuttingDown || self->m_isClosing) return;
+      for (const QJsonValue &rv : registers) {
+        const QJsonObject ro = rv.toObject();
+        const QString rn = ro.value(QStringLiteral("name")).toString().toLower(), rval = ro.value(QStringLiteral("value")).toString();
+        if (rn == QStringLiteral("rip") || rn == QStringLiteral("pc")) self->m_latestStates[rankId].registers[16] = rval;
+        else if (rn == QStringLiteral("rsp") || rn == QStringLiteral("sp")) self->m_latestStates[rankId].registers[7] = rval;
+      }
+      if (rankId == self->m_focusedRank) {
+        if (self->m_registerView) self->m_registerView->updateRegisters(registers);
+        const QString pcToken = self->m_latestStates[rankId].registers.value(16).section(QLatin1Char(' '), 0, 0);
+        bool ok = false;
+        const uint64_t pcVal = pcToken.mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0).toULongLong(&ok, 16);
+        if (ok && pcVal != 0ULL && self->m_disassemblyView) {
+          self->m_disassemblyView->setCurrentAddress(pcVal); self->m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
+        }
+      }
+    });
   }
 }
 
@@ -733,7 +693,7 @@ void MainWindow::setupMenu() {
  * @brief Appends live per-rank Stack/Heap and host RAM/CPU telemetry to the bottom status bar label.
  */
 void MainWindow::refreshStatusBarMemoryTelemetry() {
-  if (!m_statusTelemetryLabel) return;
+  if (m_isShuttingDown || m_isClosing || !m_statusTelemetryLabel) return;
   // Query live inferior OS PID for the focused rank when a debug session is active (`0` when idle).
   const qint64 rankPid = (m_debugSessionActive && m_coordinator)
                              ? m_coordinator->getPidForRank(m_focusedRank)
@@ -779,10 +739,11 @@ void MainWindow::closeEvent(QCloseEvent *event) {
       return;
     }
   }
-  // Begin guarded teardown: remove global event filter, stop timers, and dock any popped-out MemView.
+  // Begin guarded teardown: set shutdown flags immediately, remove event filter, and stop all timers.
+  m_isShuttingDown = true;
   m_isClosing = true;
   if (qApp) qApp->removeEventFilter(this);
-  // Stop all active UI and telemetry timers before child destruction.
+  if (m_telemetryTimer) m_telemetryTimer->stop();
   for (auto* t : findChildren<QTimer*>()) if (t) t->stop();
   // Re-dock any floating MemView window so no top-level window outlives MainWindow.
   if (m_memView && m_memView->isPoppedOut()) m_memView->setPoppedOut(false);
@@ -802,16 +763,14 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     settings.setValue("MainWindow/Geometry_v9", saveGeometry()); settings.setValue("MainWindow/State_v9", saveState());
     for (auto* splitter : findChildren<QSplitter*>()) if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
   }
-  // Disconnect signals and cleanly stop coordinators, clangd LSP, and background thread-pool tasks.
-  if (m_coordinator) { QObject::disconnect(m_coordinator, nullptr, this, nullptr); m_coordinator->terminateSession(); }
-  if (m_deadlockAnalyzer) QObject::disconnect(m_deadlockAnalyzer, nullptr, this, nullptr);
+  // Synchronously disconnect and reap active debug/MPI sessions before QMainWindow tears down docks/widgets.
+  shutdownActiveSessionSync();
   if (m_lspCoordinator) { QObject::disconnect(m_lspCoordinator, nullptr, this, nullptr); m_lspCoordinator->stop(); }
   if (m_editorTabManager) QObject::disconnect(m_editorTabManager, nullptr, this, nullptr);
-  // Detach ClangdLspClient signals, terminate clangd, and wait for thread-pool workers.
   QObject::disconnect(&gridlock::core::ClangdLspClient::instance(), nullptr, this, nullptr);
   gridlock::core::ClangdLspClient::instance().shutdown();
   QThreadPool::globalInstance()->waitForDone(500);
-  if (event) event->accept();
+  if (event) QMainWindow::closeEvent(event);
 }
 
 /** @brief Synchronizes DisassemblyView & decompiler visibility across Source, Debug, Binary, and MPI perspectives. */
@@ -830,7 +789,7 @@ void MainWindow::syncDisassemblyDecompilerVisibility(bool applyDefaultMode) {
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   // Ignore global events once window teardown has started.
-  if (m_isClosing) return QMainWindow::eventFilter(watched, event);
+  if (m_isShuttingDown || m_isClosing) return QMainWindow::eventFilter(watched, event);
   // Hot-swap between GdbRankCoordinator and DapCoordinator when ConfigManager::setDebuggerEngine fires.
   if (watched == qApp && event->type() == QEvent::DynamicPropertyChange) {
     const auto *dp = static_cast<QDynamicPropertyChangeEvent *>(event);

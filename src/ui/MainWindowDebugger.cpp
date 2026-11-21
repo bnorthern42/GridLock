@@ -39,6 +39,7 @@
 
 #include "../RankState.hpp"
 #include "../core/commands/DebugCommands.hpp"
+#include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "../core/hpc/GdbRankCoordinator.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
@@ -61,6 +62,7 @@
 #include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
+#include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/MpiNetworkLogWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
@@ -344,25 +346,17 @@ void MainWindow::startTargetWorkflow() {
 
     // Populate simulated rank descriptors stopped at stopAddr for headless layout tests.
     const QString stopHex = QStringLiteral("0x%1").arg(stopAddr, 8, 16, QChar('0'));
-    const int stopLine = addressToSourceLine(stopAddr);
-    const int preserveRank = (m_serverRackView && m_serverRackView->selectedRank() >= 0) ? m_serverRackView->selectedRank() : 0;
-    m_latestStates.clear(); m_rankLoopCounter.clear();
-    QList<RankState> rankList;
+    const int stopLine = addressToSourceLine(stopAddr), preserveRank = (m_serverRackView && m_serverRackView->selectedRank() >= 0) ? m_serverRackView->selectedRank() : 0;
+    m_latestStates.clear(); m_rankLoopCounter.clear(); QList<RankState> rankList;
     for (int r = 0; r < rankCount; ++r) {
-        RankState st; st.rankId = r;
-        st.currentState = (r == preserveRank) ? QStringLiteral("stopped") : QStringLiteral("running");
-        st.registers[16] = stopHex; st.currentFunction = QStringLiteral("main"); st.currentLine = stopLine;
-        m_latestStates[r] = st; rankList.append(st);
+        RankState st; st.rankId = r; st.currentState = (r == preserveRank) ? QStringLiteral("stopped") : QStringLiteral("running");
+        st.registers[16] = stopHex; st.currentFunction = QStringLiteral("main"); st.currentLine = stopLine; m_latestStates[r] = st; rankList.append(st);
     }
     m_focusedRank = preserveRank;
     if (m_serverRackView) { m_serverRackView->updateRanks(rankList); m_serverRackView->selectRank(preserveRank); }
-    const bool keepLinear = m_disassemblyView && !m_disassemblyView->isGraphMode() && !m_disassemblyView->isDecompilerMode() &&
-                            !m_disassemblyView->isSplitGraphDecompilerMode() && !m_forceDecompilerFallback &&
-                            m_workspacePerspective == QStringLiteral("Code");
+    const bool keepLinear = m_disassemblyView && !m_disassemblyView->isGraphMode() && !m_disassemblyView->isDecompilerMode() && !m_disassemblyView->isSplitGraphDecompilerMode() && !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
     seekToAddressOrExpression(stopHex);
-    if (keepLinear && m_disassemblyView) {
-        m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false);
-    }
+    if (keepLinear && m_disassemblyView) { m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false); }
     if (m_disassemblyView) m_disassemblyView->setActiveSteppingRank(preserveRank, stopAddr);
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(stopLine);
     if (m_arrayPlotDialog && m_arrayPlotDialog->isVisible()) m_arrayPlotDialog->onTargetStopped(preserveRank);
@@ -378,18 +372,14 @@ bool MainWindow::stepInstructionWorkflow() {
     // Dispatch live GDB/DAP single-instruction step when not running synthetic preview fixtures.
     if (!m_previewFixtureOnly) {
         if (!m_debugSessionActive || !m_coordinator) return false;
-        const int activeRank = activeSteppingRank();
-        m_focusedRank = activeRank;
-        updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
-        m_coordinator->stepInstruction(activeRank + 1);
-        return true;
+        const int activeRank = activeSteppingRank(); m_focusedRank = activeRank;
+        updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING")); m_coordinator->stepInstruction(activeRank + 1); return true;
     }
 
     // Advance synthetic preview program counter by one simulated x86_64 instruction.
     if (!m_disassemblyView) return false;
     m_debugSessionActive = true; updateDebugToolbarState();
-    const int activeRank = activeSteppingRank();
-    m_focusedRank = activeRank;
+    const int activeRank = activeSteppingRank(); m_focusedRank = activeRank;
     const uint64_t currentPc = (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : 0x00401120ULL;
     const uint64_t nextPc = advanceRankProgramCounter(activeRank, currentPc);
     const QString nextPcHex = QStringLiteral("0x%1").arg(nextPc, 8, 16, QChar('0'));
@@ -399,16 +389,11 @@ bool MainWindow::stepInstructionWorkflow() {
     st.rankId = activeRank; st.currentState = QStringLiteral("stopped"); st.registers[16] = nextPcHex; st.currentLine = nextLine;
     if (m_serverRackView) m_serverRackView->updateRankState(activeRank, st);
 
-    const bool keepLinear = !m_disassemblyView->isGraphMode() && !m_disassemblyView->isDecompilerMode() &&
-                            !m_disassemblyView->isSplitGraphDecompilerMode() && !m_forceDecompilerFallback &&
-                            m_workspacePerspective == QStringLiteral("Code");
+    const bool keepLinear = !m_disassemblyView->isGraphMode() && !m_disassemblyView->isDecompilerMode() && !m_disassemblyView->isSplitGraphDecompilerMode() && !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
     seekToAddressOrExpression(nextPcHex);
     if (keepLinear) { m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false); }
     m_disassemblyView->setActiveSteppingRank(activeRank, nextPc);
-    if (m_registerView) {
-        m_registerView->updateRegisters({{QStringLiteral("rip"), nextPcHex},
-                                         {QStringLiteral("rax"), QStringLiteral("0x%1").arg(m_rankLoopCounter.value(activeRank, 0), 16, 16, QChar('0'))}});
-    }
+    if (m_registerView) m_registerView->updateRegisters({{QStringLiteral("rip"), nextPcHex}, {QStringLiteral("rax"), QStringLiteral("0x%1").arg(m_rankLoopCounter.value(activeRank, 0), 16, 16, QChar('0'))}});
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(nextLine);
     if (m_arrayPlotDialog && m_arrayPlotDialog->isVisible()) m_arrayPlotDialog->onTargetStopped(activeRank);
     if (m_pointerGraphDialog && m_pointerGraphDialog->isVisible()) m_pointerGraphDialog->onTargetStopped(activeRank);
@@ -428,35 +413,27 @@ bool MainWindow::continueExecutionWorkflow() {
         if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
         for (auto& [rk, st] : m_latestStates)
             if (st.currentState == QLatin1String("stopped")) { st.currentState = QStringLiteral("running"); if (m_serverRackView) m_serverRackView->updateRankState(rk, st); }
-        updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("RUNNING"));
-        m_coordinator->continueExecution(-1);
-        return true;
+        updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("RUNNING")); m_coordinator->continueExecution(-1); return true;
     }
 
     // Advance synthetic preview PC forward until hitting a user breakpoint or procedure return.
     if (!m_disassemblyView) return false;
     m_debugSessionActive = true; updateDebugToolbarState();
     QSet<uint64_t> bpAddrs;
-    if (SourceCodeView* srcView = sourceCodeView()) {
-        for (int bpLine : srcView->breakpoints()) if (const uint64_t a = sourceLineToAddress(bpLine); a != 0ULL) bpAddrs.insert(a);
-    }
-    const int activeRank = activeSteppingRank();
-    m_focusedRank = activeRank;
+    if (SourceCodeView* srcView = sourceCodeView()) for (int bpLine : srcView->breakpoints()) if (const uint64_t a = sourceLineToAddress(bpLine); a != 0ULL) bpAddrs.insert(a);
+    const int activeRank = activeSteppingRank(); m_focusedRank = activeRank;
     uint64_t cur = (m_disassemblyView->currentAddress() != 0ULL) ? m_disassemblyView->currentAddress() : 0x00401120ULL;
     for (int step = 0; step < 64; ++step) {
         const uint64_t next = advanceRankProgramCounter(activeRank, cur);
         if (next == cur || next == 0ULL || (next < cur && next != 0x00401149ULL)) break;
-        cur = next;
-        if (bpAddrs.contains(cur) || cur == 0x00401183ULL) break;
+        cur = next; if (bpAddrs.contains(cur) || cur == 0x00401183ULL) break;
     }
     const QString targetHex = QStringLiteral("0x%1").arg(cur, 8, 16, QChar('0'));
     const int targetLine = addressToSourceLine(cur);
     RankState& st = m_latestStates[activeRank];
     st.rankId = activeRank; st.currentState = QStringLiteral("stopped"); st.registers[16] = targetHex; st.currentLine = targetLine;
     if (m_serverRackView) m_serverRackView->updateRankState(activeRank, st);
-    const bool keepLinear = !m_disassemblyView->isGraphMode() && !m_disassemblyView->isDecompilerMode() &&
-                            !m_disassemblyView->isSplitGraphDecompilerMode() && !m_forceDecompilerFallback &&
-                            m_workspacePerspective == QStringLiteral("Code");
+    const bool keepLinear = !m_disassemblyView->isGraphMode() && !m_disassemblyView->isDecompilerMode() && !m_disassemblyView->isSplitGraphDecompilerMode() && !m_forceDecompilerFallback && m_workspacePerspective == QStringLiteral("Code");
     seekToAddressOrExpression(targetHex);
     if (keepLinear) { m_showingDecompilerFallback = false; m_disassemblyView->setSplitGraphDecompilerMode(false); m_disassemblyView->setGraphMode(false); }
     m_disassemblyView->setActiveSteppingRank(activeRank, cur);
@@ -467,12 +444,10 @@ bool MainWindow::continueExecutionWorkflow() {
     return true;
 }
 
-/**
- * @brief Clears variable, register, call-stack, MPI diagnostics, network log, and memory docks to idle.
- */
+/** @brief Clears variable, register, call-stack, MPI diagnostics, network log, and memory docks to idle. */
 static void clearAllInspectionDocks(QWidget* varsDock, RegisterView* regView, CallStackDockWidget* csDock,
                                     MpiDiagnosticsWidget* mpiDiag, MpiNetworkLogWidget* netLog, MemView* memView) {
-    if (varsDock) { if (auto* vm = varsDock->findChild<gridlock::VariableTreeModel*>()) vm->clear(); }
+    if (varsDock) if (auto* vm = varsDock->findChild<gridlock::VariableTreeModel*>()) vm->clear();
     if (regView) regView->clearRegisters();
     if (csDock) csDock->clearFrames();
     if (mpiDiag) mpiDiag->clear();
@@ -484,7 +459,13 @@ static void clearAllInspectionDocks(QWidget* varsDock, RegisterView* regView, Ca
  * @brief Terminates the active debugging session, reaps child ranks, and restores static ELF inspection.
  */
 void MainWindow::stopTargetWorkflow() {
-    m_debugSessionActive = false; updateDebugToolbarState(); m_rankLoopCounter.clear();
+    m_debugSessionActive = false; m_rankLoopCounter.clear();
+    if (m_isShuttingDown || m_isClosing) {
+        if (m_runAction) m_runAction->setChecked(false);
+        if (m_coordinator) m_coordinator->terminateSession();
+        return;
+    }
+    updateDebugToolbarState();
     if (m_coordinator) m_coordinator->terminateSession();
 
     // Mark any previously active rank rows as IDLE/EXITED and clear execution PC highlights.
@@ -499,6 +480,37 @@ void MainWindow::stopTargetWorkflow() {
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("IDLE")); refreshStatusBarMemoryTelemetry();
     // Restore static pre-launch ELF64 disassembly, CFG, and symbol inspection cleanly after session stop.
     if (!m_previewFixtureOnly && !m_loadedBinaryPath.isEmpty() && QFileInfo::exists(m_loadedBinaryPath)) loadBinaryTarget(m_loadedBinaryPath);
+}
+
+void MainWindow::shutdownActiveSessionSync() {
+    m_isShuttingDown = true; m_isClosing = true;
+    if (m_telemetryTimer) m_telemetryTimer->stop();
+    if (m_programOutputFlushTimer) m_programOutputFlushTimer->stop();
+    if (m_deadlockAnalyzer) {
+        QObject::disconnect(m_deadlockAnalyzer, nullptr, this, nullptr);
+        if (m_mpiDiagnosticsWidget) QObject::disconnect(m_deadlockAnalyzer, nullptr, m_mpiDiagnosticsWidget, nullptr);
+    }
+    if (m_coordinator) {
+        for (QObject* child : {static_cast<QObject*>(this), static_cast<QObject*>(m_variablesDockWidget),
+                               static_cast<QObject*>(m_callStackDockWidget), static_cast<QObject*>(m_disassemblyView),
+                               static_cast<QObject*>(m_memView), static_cast<QObject*>(m_registerView),
+                               static_cast<QObject*>(m_differentialGrid), static_cast<QObject*>(m_arrayPlotDialog),
+                               static_cast<QObject*>(m_pointerGraphDialog), static_cast<QObject*>(m_gdbConsoleWidget),
+                               static_cast<QObject*>(m_expressionEvaluatorWidget), static_cast<QObject*>(m_signalCatchpointDialog),
+                               static_cast<QObject*>(m_checkpointDialog), static_cast<QObject*>(m_deadlockAnalyzer)}) {
+            if (child) { QObject::disconnect(m_coordinator, nullptr, child, nullptr); QObject::disconnect(child, nullptr, m_coordinator, nullptr); }
+        }
+        if (m_variablesDockWidget) m_variablesDockWidget->setCoordinator(nullptr);
+        if (m_arrayPlotDialog) m_arrayPlotDialog->setCoordinator(nullptr);
+        if (m_pointerGraphDialog) m_pointerGraphDialog->setCoordinator(nullptr);
+        if (m_signalCatchpointDialog) m_signalCatchpointDialog->setCoordinator(nullptr);
+        if (m_checkpointDialog) m_checkpointDialog->setCoordinator(nullptr);
+    }
+    if (m_debugSessionActive || (m_coordinator && m_coordinator->getProcessCount() > 0)) {
+        stopTargetWorkflow();
+    } else if (m_coordinator) {
+        m_coordinator->terminateSession();
+    }
 }
 
 /**
