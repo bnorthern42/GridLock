@@ -35,6 +35,7 @@
 #include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QFont>
@@ -64,12 +65,7 @@ namespace gridlock::ui {
 
 QWidget* createAddressSpaceNavBar(MainWindow* window, QWidget* parent);
 
-/**
- * @brief Initializes main window geometry, Cutter-style dock layout, and toolbars.
- *
- * Configures the default 1440x900 desktop viewport, establishes dock nesting
- * rules across the four peripheral zones, and binds top-level action controls.
- */
+/** @brief Initializes main window geometry, Cutter-style dock layout, and toolbars. */
 void MainWindow::setupUi() {
   setWindowTitle("GridLock - MPI Graphical Debugger");
   setWindowIcon(QIcon());
@@ -78,37 +74,20 @@ void MainWindow::setupUi() {
   setupToolbar();
 }
 
-/**
- * @brief Configures modern reverse-engineering workstation docking rules.
- *
- * Enables nested docks, corner sharing favoring side panels over top/bottom,
- * document tabs for tabified docks, and north-oriented tab placement.
- */
+/** @brief Configures nested/tabbed reverse-engineering workstation docking rules. */
 void MainWindow::applyCutterWorkspaceLayout() {
-  // Allow docking panes to nest horizontally/vertically and tabify when dragged together.
   setDockOptions(QMainWindow::AllowNestedDocks | QMainWindow::AllowTabbedDocks);
   setDockNestingEnabled(true);
-  // Configure seamless document mode styling without redundant frame borders.
   setDocumentMode(true);
-  // Position dock tab bars along the north edge for consistent Cutter ergonomics.
   setTabPosition(Qt::AllDockWidgetAreas, QTabWidget::North);
-  // Favor vertical side docks over horizontal top/bottom docks at corners.
   setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
   setCorner(Qt::TopRightCorner, Qt::RightDockWidgetArea);
   setCorner(Qt::BottomRightCorner, Qt::RightDockWidgetArea);
 }
 
-
-
-/**
- * @brief Constructs primary debugger control toolbar and secondary address space ribbon.
- *
- * Configures actions for Run, Continue, Step, Pause, Stop, and Terminate, along
- * with history back/forward buttons, global seek bar, and address space visualizer.
- */
+/** @brief Constructs primary debugger control toolbar and secondary address space ribbon. */
 void MainWindow::setupToolbar() {
-  // Construct consolidated main debugger toolbar targeting < 1,040 px width without overflow.
   QToolBar *toolbar = addToolBar("Main Toolbar");
   toolbar->setObjectName("MainToolbar");
   toolbar->setMovable(true);
@@ -190,6 +169,7 @@ void MainWindow::setupToolbar() {
   connect(m_rankCountSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
     if (!m_debugSessionActive && !m_previewFixtureOnly && m_serverRackView) m_serverRackView->setSessionIdle(val);
     syncRankCountChrome(val);
+    syncExecutionScopeUi();
   });
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
@@ -222,10 +202,21 @@ void MainWindow::setupToolbar() {
     updateDebugToolbarState();
   });
   toolbar->addAction(m_runAction);
-  if (QWidget *runBtn = toolbar->widgetForAction(m_runAction)) {
-    runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
-  }
+  if (QWidget *runBtn = toolbar->widgetForAction(m_runAction)) runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
   toolbar->addSeparator();
+
+  // Multi-rank execution scope pill: All Ranks vs. Focused Rank k (shown automatically when ranks > 1).
+  m_executionScopeCombo = new QComboBox(toolbar);
+  m_executionScopeCombo->setObjectName(QStringLiteral("toolbarExecutionScopeCombo"));
+  m_executionScopeCombo->setFont(selectorFont);
+  m_executionScopeCombo->setMinimumWidth(98);
+  m_executionScopeCombo->setMaximumWidth(122);
+  m_executionScopeCombo->setFixedHeight(26);
+  m_executionScopeCombo->addItem(QStringLiteral("All Ranks"), -1);
+  m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0);
+  m_executionScopeCombo->setCurrentIndex(0);
+  connect(m_executionScopeCombo, &QComboBox::currentIndexChanged, this, [this](int) { syncExecutionScopeUi(); });
+  m_executionScopeAction = toolbar->addWidget(m_executionScopeCombo);
 
   // Continue Action (F5).
   m_continueAction = new QAction(QStringLiteral("Continue"), this);
@@ -233,6 +224,7 @@ void MainWindow::setupToolbar() {
   m_continueAction->setIconText(QStringLiteral("⏭"));
   m_continueAction->setShortcut(QKeySequence(Qt::Key_F5));
   connect(m_continueAction, &QAction::triggered, this, &MainWindow::continueExecutionWorkflow);
+  connect(m_continueAction, &QAction::changed, this, &MainWindow::syncExecutionScopeUi);
   toolbar->addAction(m_continueAction);
 
   // Source-Level Stepping: Step Over (F10), Step Into (F11, with stepi/nexti dropdown), Step Out (Shift+F11).
@@ -270,12 +262,25 @@ void MainWindow::setupToolbar() {
   connect(m_stepOutAction, &QAction::triggered, this, &MainWindow::stepOutWorkflow);
   toolbar->addAction(m_stepOutAction);
 
-  // Pause Focused Rank & Single Merged Stop Action (Shift+F5).
-  m_pauseAction = new QAction(QStringLiteral("Pause Rank"), this);
+  // Scoped Pause, Pause All Ranks (F6), & Single Merged Stop Action (Shift+F5).
+  m_pauseAction = new QAction(QStringLiteral("Pause"), this);
   m_pauseAction->setObjectName(QStringLiteral("actionPauseRank"));
   m_pauseAction->setIconText(QStringLiteral("⏸"));
   connect(m_pauseAction, &QAction::triggered, this, &MainWindow::pauseRankWorkflow);
   toolbar->addAction(m_pauseAction);
+
+  m_pauseAllAction = new QAction(QStringLiteral("Pause All Ranks"), this);
+  m_pauseAllAction->setObjectName(QStringLiteral("actionPauseAllRanks"));
+  m_pauseAllAction->setIconText(QStringLiteral("⏸ All"));
+  m_pauseAllAction->setShortcut(QKeySequence(Qt::Key_F6));
+  connect(m_pauseAllAction, &QAction::triggered, this, &MainWindow::pauseAllRanksWorkflow);
+  auto *pauseAllBtn = new QToolButton(toolbar);
+  pauseAllBtn->setObjectName(QStringLiteral("toolbarPauseAllRanksBtn"));
+  pauseAllBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  pauseAllBtn->setDefaultAction(m_pauseAllAction);
+  QAction *pauseAllTbAct = toolbar->addWidget(pauseAllBtn);
+  pauseAllTbAct->setObjectName(QStringLiteral("actionToolbarPauseAllRanks"));
+  pauseAllTbAct->setVisible(false);
 
   m_stopAction = new QAction(QStringLiteral("Stop Session"), this);
   m_stopAction->setObjectName(QStringLiteral("debug.stop"));
@@ -308,6 +313,7 @@ void MainWindow::setupToolbar() {
 
   // Initialize state-aware toolbar button enablement and descriptive tooltips.
   updateDebugToolbarState();
+  syncExecutionScopeUi();
   for (QToolButton *btn : toolbar->findChildren<QToolButton *>()) {
     btn->setFixedHeight(26);
     btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
@@ -542,61 +548,48 @@ void MainWindow::setupDocks() {
   connect(m_differentialGrid, &DifferentialGrid::graphPointerRequested, this,
           [this](const QString &expr, const QString &val) { openPointerGraphVisualizer(expr, val); });
 
-  m_differentialGrid->setColumnHidden(0, true);
-  m_differentialGrid->setRowHidden(0, true);
-  m_differentialGrid->horizontalHeader()->setVisible(false);
-  m_differentialGrid->verticalHeader()->setVisible(false);
-  m_differentialGrid->horizontalHeader()->setMinimumSectionSize(64);
-  m_differentialGrid->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-  m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
-
+  m_differentialGrid->setColumnHidden(0, true); m_differentialGrid->setRowHidden(0, true);
+  m_differentialGrid->horizontalHeader()->setVisible(false); m_differentialGrid->verticalHeader()->setVisible(false);
+  m_differentialGrid->horizontalHeader()->setMinimumSectionSize(64); m_differentialGrid->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch); m_differentialGrid->horizontalHeader()->setStretchLastSection(true);
   // Watch Expressions container with custom inline expression add bar.
-  QWidget *watchContainer = new QWidget(this);
-  QVBoxLayout *watchLayout = new QVBoxLayout(watchContainer);
-  watchLayout->setContentsMargins(0, 0, 0, 0);
-  watchLayout->setSpacing(0);
-
-  QWidget *watchToolbar = new QWidget(watchContainer);
-  watchToolbar->setObjectName("watchToolbar");
-  QHBoxLayout *watchBarLayout = new QHBoxLayout(watchToolbar);
-  watchBarLayout->setContentsMargins(3, 2, 3, 2);
-  watchBarLayout->setSpacing(3);
-
-  QLineEdit *watchInput = new QLineEdit(watchToolbar);
-  watchInput->setObjectName("watchExpressionInput");
-  watchInput->setPlaceholderText("New watch expression...");
-  watchInput->setFixedHeight(22);
-
-  QPushButton *addWatchBtn = new QPushButton("+ Watch", watchToolbar);
-  addWatchBtn->setObjectName("addWatchBtn");
-  addWatchBtn->setFixedHeight(22);
-
+  auto *watchContainer = new QWidget(this); auto *watchLayout = new QVBoxLayout(watchContainer);
+  watchLayout->setContentsMargins(0, 0, 0, 0); watchLayout->setSpacing(0);
+  auto *watchToolbar = new QWidget(watchContainer); watchToolbar->setObjectName("watchToolbar");
+  auto *watchBarLayout = new QHBoxLayout(watchToolbar); watchBarLayout->setContentsMargins(3, 2, 3, 2); watchBarLayout->setSpacing(3);
+  auto *watchInput = new QLineEdit(watchToolbar); watchInput->setObjectName("watchExpressionInput"); watchInput->setPlaceholderText("New watch expression..."); watchInput->setFixedHeight(22);
+  auto *addWatchBtn = new QPushButton("+ Watch", watchToolbar); addWatchBtn->setObjectName("addWatchBtn"); addWatchBtn->setFixedHeight(22);
   auto submitWatch = [this, watchInput]() {
-    const QString expr = watchInput->text().trimmed();
-    if (!expr.isEmpty() && m_differentialGrid) {
-      m_differentialGrid->addVariableColumn(expr);
-      emit m_differentialGrid->watchVariableAdded(expr);
-      watchInput->clear();
+    if (const QString expr = watchInput->text().trimmed(); !expr.isEmpty() && m_differentialGrid) {
+      m_differentialGrid->addVariableColumn(expr); emit m_differentialGrid->watchVariableAdded(expr); watchInput->clear();
     }
   };
-  connect(addWatchBtn, &QPushButton::clicked, this, submitWatch);
-  connect(watchInput, &QLineEdit::returnPressed, this, submitWatch);
-
-  watchBarLayout->addWidget(watchInput, 1);
-  watchBarLayout->addWidget(addWatchBtn);
-  watchLayout->addWidget(watchToolbar);
-  watchLayout->addWidget(m_differentialGrid, 1);
-
-  // Encapsulate watch container in a standard dockable QDockWidget with concise WATCH title.
-  QDockWidget *watchDock = new QDockWidget("WATCH", this);
-  watchDock->setObjectName("WatchExpressionsDock");
-  watchDock->setWidget(watchContainer);
-  setupDockTitleBar(watchDock, QStringLiteral("WATCH"));
+  connect(addWatchBtn, &QPushButton::clicked, this, submitWatch); connect(watchInput, &QLineEdit::returnPressed, this, submitWatch);
+  watchBarLayout->addWidget(watchInput, 1); watchBarLayout->addWidget(addWatchBtn);
+  watchLayout->addWidget(watchToolbar); watchLayout->addWidget(m_differentialGrid, 1);
+  auto *watchDock = new QDockWidget("WATCH", this); watchDock->setObjectName("WatchExpressionsDock");
+  watchDock->setWidget(watchContainer); setupDockTitleBar(watchDock, QStringLiteral("WATCH"));
   m_dockHomeSlots.insert(watchDock, {nullptr, -1, Qt::RightDockWidgetArea});
 
-  // Server Rack Overview: Visualizes cluster node/rank topology and operational status.
-  m_serverRackView = new ServerRackView(this);
+  // Server Rack Overview with compact state filter strip (All, Deadlocked/Diverged, Stopped, Running).
+  auto *rackContainer = new QWidget(this); auto *rackLayout = new QVBoxLayout(rackContainer);
+  rackLayout->setContentsMargins(0, 0, 0, 0); rackLayout->setSpacing(0);
+  auto *rackFilterBar = new QWidget(rackContainer); rackFilterBar->setObjectName(QStringLiteral("serverRackFilterBar"));
+  auto *rackFilterLay = new QHBoxLayout(rackFilterBar); rackFilterLay->setContentsMargins(3, 2, 3, 2); rackFilterLay->setSpacing(3);
+  auto *rackFilterGrp = new QButtonGroup(rackFilterBar); rackFilterGrp->setExclusive(true);
+  m_serverRackView = new ServerRackView(rackContainer);
   m_serverRackView->setObjectName("ServerRackViewWidget");
+  auto addRackFilterBtn = [&](const QString &label, const QString &objName, const QString &filterKey, const QString &tip, bool checked) {
+    auto *b = new QToolButton(rackFilterBar); b->setObjectName(objName); b->setText(label); b->setToolTip(tip);
+    b->setCheckable(true); b->setChecked(checked); b->setFixedHeight(20); b->setAutoRaise(false);
+    rackFilterGrp->addButton(b); rackFilterLay->addWidget(b);
+    connect(b, &QToolButton::toggled, this, [this, filterKey](bool on) { if (on && m_serverRackView) m_serverRackView->setStateFilter(filterKey); });
+  };
+  addRackFilterBtn(QStringLiteral("All"), QStringLiteral("serverRackFilterAllBtn"), QStringLiteral("all"), QStringLiteral("Show all MPI ranks"), true);
+  addRackFilterBtn(QStringLiteral("Deadlock"), QStringLiteral("serverRackFilterDeadlockBtn"), QStringLiteral("deadlock"), QStringLiteral("Show deadlocked or diverged ranks"), false);
+  addRackFilterBtn(QStringLiteral("Stopped"), QStringLiteral("serverRackFilterStoppedBtn"), QStringLiteral("stopped"), QStringLiteral("Show paused / breakpoint-stopped ranks"), false);
+  addRackFilterBtn(QStringLiteral("Running"), QStringLiteral("serverRackFilterRunningBtn"), QStringLiteral("running"), QStringLiteral("Show actively running ranks"), false);
+  rackFilterLay->addStretch(1);
+  rackLayout->addWidget(rackFilterBar); rackLayout->addWidget(m_serverRackView, 1);
   connect(m_serverRackView, &ServerRackView::ranksUpdated, this, [this](const QMap<int, uint64_t> &rankPcMap) {
     if (m_disassemblyView) m_disassemblyView->setRankAddresses(rankPcMap);
   });
@@ -608,7 +601,7 @@ void MainWindow::setupDocks() {
   });
   QDockWidget *serverRackDock = new QDockWidget("Server Rack", this);
   serverRackDock->setObjectName("ServerRackDock");
-  serverRackDock->setWidget(m_serverRackView);
+  serverRackDock->setWidget(rackContainer);
   setupDockTitleBar(serverRackDock, QStringLiteral("SERVER RACK"));
   m_dockHomeSlots.insert(serverRackDock, {nullptr, -1, Qt::RightDockWidgetArea});
 

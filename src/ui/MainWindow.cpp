@@ -263,6 +263,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   }
   propagateThemeToAllWidgets();
   setWorkspacePerspective(QStringLiteral("Source"));
+  syncExecutionScopeUi();
+  if (m_pauseAllAction && menuBar()) {
+    for (QAction *ma : menuBar()->actions()) {
+      if (QMenu *dm = ma ? ma->menu() : nullptr; dm && dm->title().remove(QLatin1Char('&')) == QLatin1String("Debug") && !dm->actions().contains(m_pauseAllAction)) {
+        const QList<QAction *> acts = dm->actions();
+        const int pIdx = m_pauseAction ? acts.indexOf(m_pauseAction) : -1;
+        dm->insertAction((pIdx >= 0 && pIdx + 1 < acts.size()) ? acts.at(pIdx + 1) : nullptr, m_pauseAllAction);
+      }
+    }
+  }
   refreshStatusBarMemoryTelemetry();
   m_telemetryTimer = new QTimer(this);
   connect(m_telemetryTimer, &QTimer::timeout, this, &MainWindow::refreshStatusBarMemoryTelemetry);
@@ -334,7 +344,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
   m_coordinator = coord;
   if (!m_coordinator) m_debugSessionActive = false;
   else if (m_coordinator->getProcessCount() > 0) m_debugSessionActive = true;
-  if (!m_isShuttingDown && !m_isClosing) updateDebugToolbarState();
+  if (!m_isShuttingDown && !m_isClosing) { updateDebugToolbarState(); syncExecutionScopeUi(); }
   const QPointer<MainWindow> self(this);
 
   if (auto *dapCoord = dynamic_cast<DapCoordinator *>(m_coordinator)) {
@@ -808,6 +818,15 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
       if (!psPre->property("_glWd").toBool()) { psPre->setProperty("_glWd", true); connect(psPre, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); if (!m_activeWorkspaceDir.isEmpty()) saveSession(false); }); }
     }
     if (event->type() == QEvent::Show) {
+      if (m_pauseAllAction && menuBar()) {
+        for (QAction *ma : menuBar()->actions()) {
+          if (QMenu *dm = ma ? ma->menu() : nullptr; dm && dm->title().remove(QLatin1Char('&')) == QLatin1String("Debug") && !dm->actions().contains(m_pauseAllAction)) {
+            const QList<QAction *> acts = dm->actions();
+            const int pIdx = m_pauseAction ? acts.indexOf(m_pauseAction) : -1;
+            dm->insertAction((pIdx >= 0 && pIdx + 1 < acts.size()) ? acts.at(pIdx + 1) : nullptr, m_pauseAllAction);
+          }
+        }
+      }
       if (qobject_cast<PointerGraphDialog *>(watched) || qobject_cast<ArrayPlotDialog *>(watched)) refreshDialogCompleters(this);
       if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
         gridlock::core::ShortcutManager::instance().syncMenuActionsFromMainWindow();
@@ -839,6 +858,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
       if (auto *a = findChild<QAction *>(objName)) return !a->shortcut().isEmpty() && a->shortcut() == pressed;
       return !fallback.isEmpty() && fallback == pressed;
     };
+    if (matchesAct(QStringLiteral("actionPauseAllRanks"), QKeySequence(Qt::Key_F6))) { pauseAllRanksWorkflow(); return true; }
     if (matchesAct(QStringLiteral("actionCommandPalette"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P))) { openCommandPalette(QStringLiteral(">")); return true; }
     if (matchesAct(QStringLiteral("actionAttachProcess"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P))) { attachToProcessWorkflow(); return true; }
     if (matchesAct(QStringLiteral("actionProgrammerCalculator"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C))) { openProgrammerCalculator(); return true; }

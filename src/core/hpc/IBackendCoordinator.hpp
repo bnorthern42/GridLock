@@ -165,11 +165,14 @@ class IBackendCoordinator : public QObject {
   /** @brief Resumes execution of @p threadId until the next breakpoint or signal. */
   virtual void continueExecution(int threadId) = 0;
 
-  /** @brief Interrupts/pauses execution of 1-based @p threadId (`rankId + 1`). */
+  /** @brief Interrupts/pauses execution of 1-based @p threadId (`<= 0` pauses all ranks). */
   virtual void pauseExecution(int threadId) = 0;
 
-  /** @brief Interrupts/pauses execution of 0-based MPI rank @p rankId. */
-  virtual void pauseRank(int rankId) { pauseExecution(rankId + 1); }
+  /** @brief Interrupts/pauses execution of 0-based MPI rank @p rankId (`< 0` pauses all ranks). */
+  virtual void pauseRank(int rankId) { if (rankId < 0) haltAll(); else pauseExecution(rankId + 1); }
+
+  /** @brief Interrupts/pauses execution across all active ranks/threads. */
+  virtual void haltAll() { pauseExecution(-1); }
 
   /** @brief Enables or disables GDB Process Record / time-travel recording on @p rank. */
   virtual void setReverseRecordingEnabled(int rank, bool enabled) {

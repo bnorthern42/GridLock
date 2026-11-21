@@ -599,11 +599,10 @@ void GdbRankCoordinator::stepAll() {
     if (const auto& st = m_processes[i]->state.currentState; st != "running" && st != "exited") writeCmd(static_cast<int>(i), "-exec-next\n");
 }
 
-/** @brief Steps into callees (`-exec-step`) on @p threadId (`rankId + 1`). */
+/** @brief Steps into callees (`-exec-step`) on @p threadId (`<= 0` = all stopped ranks, `> 0` = `rankId + 1`). */
 void GdbRankCoordinator::stepInto(int threadId) {
   if (m_processes.empty()) { stepAll(); return; }
-  const int rankId = std::clamp(threadId - 1, 0, static_cast<int>(m_processes.size()) - 1);
-  if (const auto& st = m_processes[rankId]->state.currentState; st != "running" && st != "exited") writeCmd(rankId, "-exec-step\n");
+  dispatchStoppedExecCmd((threadId > 0) ? (threadId - 1) : -1, QStringLiteral("-exec-step\n"));
 }
 
 /** @brief Steps a single machine instruction (`-exec-step-instruction`) on @p threadId (`rankId + 1`). */
@@ -637,6 +636,17 @@ void GdbRankCoordinator::continueAll() {
   for (size_t i = 0; i < m_processes.size(); ++i) {
     if (auto& st = m_processes[i]->state; st.currentState != "running" && st.currentState != "exited") {
       st.currentState = "running"; st.executionTimer.start(); writeCmd(static_cast<int>(i), "-exec-continue\n");
+    }
+  }
+}
+
+void GdbRankCoordinator::continueExecution(int threadId) {
+  const QVariant scoped = property("gl_scoped_continue_rank");
+  const int targetRank = (threadId > 0) ? (threadId - 1) : (scoped.isValid() ? scoped.toInt() : -1);
+  if (targetRank < 0 || m_processes.empty()) { continueAll(); return; }
+  if (targetRank < static_cast<int>(m_processes.size()) && m_processes[targetRank]) {
+    if (auto& st = m_processes[targetRank]->state; st.currentState != "running" && st.currentState != "exited") {
+      st.currentState = "running"; st.executionTimer.start(); writeCmd(targetRank, "-exec-continue\n");
     }
   }
 }

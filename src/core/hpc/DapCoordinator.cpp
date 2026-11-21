@@ -182,50 +182,36 @@ void DapCoordinator::writeToAdapter(const QByteArray& data) {
   m_process->write(data);
 }
 
-/**
- * @brief Steps over the current source line on @p threadId via DAP `next`.
- */
+/** @brief Steps over the current source line (`threadId <= 0` broadcasts across active threads). */
 void DapCoordinator::stepOver(int threadId) {
-  QJsonObject args;
-  args["threadId"] = threadId;
-  sendRequest("next", args);
+  if (threadId > 0) { sendRequest("next", QJsonObject{{"threadId", threadId}}); return; }
+  for (int tid = 1; tid <= qMax(1, m_processCount); ++tid) sendRequest("next", QJsonObject{{"threadId", tid}});
 }
 
-/**
- * @brief Steps into the target function call on @p threadId via DAP `stepIn`.
- */
+/** @brief Steps into the target function call (`threadId <= 0` broadcasts across active threads). */
 void DapCoordinator::stepInto(int threadId) {
-  QJsonObject args;
-  args["threadId"] = (threadId > 0) ? threadId : 1;
-  sendRequest("stepIn", args);
+  if (threadId > 0) { sendRequest("stepIn", QJsonObject{{"threadId", threadId}}); return; }
+  for (int tid = 1; tid <= qMax(1, m_processCount); ++tid) sendRequest("stepIn", QJsonObject{{"threadId", tid}});
 }
 
-/**
- * @brief Steps a single machine instruction on @p threadId via DAP `stepIn` with `"instruction"` granularity.
- */
+/** @brief Steps a single machine instruction on @p threadId via DAP `stepIn` with `"instruction"` granularity. */
 void DapCoordinator::stepInstruction(int threadId) {
-  QJsonObject args;
-  args["threadId"] = (threadId > 0) ? threadId : 1;
-  args["granularity"] = "instruction";
-  sendRequest("stepIn", args);
+  sendRequest("stepIn", QJsonObject{{"threadId", (threadId > 0) ? threadId : 1}, {"granularity", "instruction"}});
 }
 
-/**
- * @brief Resumes execution on @p threadId via DAP `continue`.
- */
+/** @brief Resumes execution (`threadId > 0` = single rank, `<= 0` honors `gl_scoped_continue_rank` or resumes all). */
 void DapCoordinator::continueExecution(int threadId) {
-  QJsonObject args;
-  args["threadId"] = (threadId > 0) ? threadId : 1;
+  const QVariant scoped = property("gl_scoped_continue_rank");
+  const int targetRank = (threadId > 0) ? (threadId - 1) : (scoped.isValid() ? scoped.toInt() : -1);
+  QJsonObject args{{"threadId", (targetRank >= 0) ? (targetRank + 1) : 1}};
+  if (m_processCount > 1) args["singleThread"] = (targetRank >= 0);
   sendRequest("continue", args);
 }
 
-/**
- * @brief Pauses execution on @p threadId via DAP `pause`.
- */
+/** @brief Pauses execution on @p threadId (`<= 0` pauses all active ranks/threads). */
 void DapCoordinator::pauseExecution(int threadId) {
-  QJsonObject args;
-  args["threadId"] = (threadId > 0) ? threadId : 1;
-  sendRequest("pause", args);
+  if (threadId <= 0) { haltAll(); return; }
+  sendRequest("pause", QJsonObject{{"threadId", threadId}});
 }
 
 /** @brief Pre-validates `lldb-dap`/`lldb-vscode` and MPI launcher availability before UI launch. */

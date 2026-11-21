@@ -41,64 +41,30 @@
 
 namespace gridlock::ui {
 
-/**
- * @brief Resolves a tutorial target name or relative path across local and AppImage share directories.
- * @param target Target name or relative path (e.g. "deadlock_ring", "tutorial/deadlock_ring.cpp").
- * @return Canonical or absolute path to the resolved tutorial source or binary file.
- *
- * Checks in order:
- * 1. Current working directory (./tutorial/<name>.cpp)
- * 2. Parent directory for builddir test execution (../tutorial/<name>.cpp)
- * 3. AppDir share directory ($APPDIR/usr/share/gridlock/tutorial/<name>.cpp)
- * 4. Application directory share path (QCoreApplication::applicationDirPath() + "/../share/gridlock/tutorial/")
- * 5. Direct AppDir directory ($APPDIR/tutorial/<name>.cpp)
- * 6. Local application binary directory (QCoreApplication::applicationDirPath() + "/tutorial/")
- */
+/** @brief Resolves a tutorial target name or relative path across local and AppImage share directories. */
 QString resolveTutorialTarget(const QString& target) {
     QString rel = target.trimmed();
     if (rel.isEmpty()) return QString();
-
-    // Normalize bare target names into relative tutorial source file paths.
     if (!rel.endsWith(QStringLiteral(".cpp")) && !rel.contains(QLatin1Char('/'))) rel = QStringLiteral("tutorial/") + rel + QStringLiteral(".cpp");
     else if (!rel.startsWith(QStringLiteral("tutorial/")) && !rel.startsWith(QLatin1Char('/'))) rel = QStringLiteral("tutorial/") + rel;
     auto canonOrAbs = [](const QString& p) { const QFileInfo fi(p); return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath(); };
-
-    // 1. Direct hit from current working directory (standard repository root execution).
     if (QFileInfo::exists(rel)) return canonOrAbs(rel);
-
-    // 2. Secondary lookup one level up (out-of-source builddir/ test harness runner).
-    const QString parentCand = QStringLiteral("../") + rel;
-    if (QFileInfo::exists(parentCand)) return canonOrAbs(parentCand);
-
-    // 3. AppImage deployment environment variable ($APPDIR/usr/share/gridlock/tutorial/...).
+    if (const QString parentCand = QStringLiteral("../") + rel; QFileInfo::exists(parentCand)) return canonOrAbs(parentCand);
     const QString envAppDir = qEnvironmentVariable("APPDIR");
     if (!envAppDir.isEmpty()) {
         if (const QString appDirShare = envAppDir + QStringLiteral("/usr/share/gridlock/") + rel; QFileInfo::exists(appDirShare)) return canonOrAbs(appDirShare);
         if (const QString appDirDirect = envAppDir + QStringLiteral("/") + rel; QFileInfo::exists(appDirDirect)) return canonOrAbs(appDirDirect);
     }
-
-    // 4. Relative to application binary dir (e.g. AppDir/usr/bin/../share/gridlock/tutorial/...).
-    const QString appDirPath = QCoreApplication::applicationDirPath();
-    const QString shareCand = appDirPath + QStringLiteral("/../share/gridlock/") + rel;
+    const QString appDirPath = QCoreApplication::applicationDirPath(), shareCand = appDirPath + QStringLiteral("/../share/gridlock/") + rel;
     if (QFileInfo::exists(shareCand)) return canonOrAbs(shareCand);
-
-    // 5. Direct companion directory in binary folder (e.g. AppDir/usr/bin/tutorial/...).
     if (const QString localCand = appDirPath + QStringLiteral("/") + rel; QFileInfo::exists(localCand)) return canonOrAbs(localCand);
-
-    // 6. Default to expected share or appdir path when simulating outside repository.
     return !envAppDir.isEmpty() ? (envAppDir + QStringLiteral("/usr/share/gridlock/") + rel) : shareCand;
 }
 
-/**
- * @brief Ensures a writable execution path for tutorial targets in read-only AppImage environments.
- * @param sourcePath Canonical path to tutorial source file.
- * @return Writable binary path in /tmp/gridlock_tutorials/ or direct binary path.
- */
+/** @brief Ensures a writable execution path for tutorial targets in read-only AppImage environments. */
 QString ensureWritableTutorialBinaryPath(const QString& sourcePath) {
     if (sourcePath.isEmpty()) return QString();
     const QFileInfo srcInfo(sourcePath); const QString baseName = srcInfo.completeBaseName(), companionBin = srcInfo.dir().filePath(baseName);
-
-    // If existing companion binary exists and directory is read-only, use it or copy to /tmp.
     if (!srcInfo.dir().exists() || !QFileInfo(srcInfo.dir().absolutePath()).isWritable()) {
         const QString cacheDir = QStringLiteral("/tmp/gridlock_tutorials"); QDir().mkpath(cacheDir);
         const QString targetBin = cacheDir + QStringLiteral("/") + baseName;
@@ -111,17 +77,9 @@ QString ensureWritableTutorialBinaryPath(const QString& sourcePath) {
     return companionBin;
 }
 
-/**
- * @brief Synchronizes `m_coordinator` with `ConfigManager::instance().debuggerEngine()` when idle.
- *
- * Instantiates `GdbRankCoordinator` by default (for `"gdb"`, `"cuda-gdb"`, and `"rocgdb"`) so
- * multi-rank MPI debugging works out of the box, or switches to `DapCoordinator` when `"lldb-dap"`
- * is selected in Preferences while no active debugging session is running.
- */
+/** @brief Synchronizes `m_coordinator` with `ConfigManager::instance().debuggerEngine()` when idle. */
 void MainWindow::syncCoordinatorWithConfig() {
-    // Never hot-swap the active coordinator backend mid-session while inferiors are attached.
     if (m_debugSessionActive) return;
-
     auto& cfg = gridlock::core::ConfigManager::instance();
     const QString desired = (cfg.debuggerEngine().trimmed().toLower() == QStringLiteral("lldb-dap")) ? QStringLiteral("lldb-dap") : QStringLiteral("gdb");
     auto pushExecutionContext = [&]() {
@@ -131,59 +89,99 @@ void MainWindow::syncCoordinatorWithConfig() {
         QString wd = QString::fromStdString(ps.workingDirectory).trimmed();
         m_coordinator->setTargetExecutionContext(args, wd.isEmpty() ? m_activeWorkspaceDir : wd);
     };
-
-    // Preserve the existing coordinator instance when its engine identifier already matches.
     if (m_coordinator && m_coordinator->activeEngineName() == desired) { pushExecutionContext(); return; }
-
     if (m_coordinator) m_coordinator->disconnect();
     delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr;
     if (m_ownedCoordinator) { m_ownedCoordinator->terminateSession(); delete m_ownedCoordinator; m_ownedCoordinator = nullptr; }
     m_coordinator = nullptr;
-
-    // Instantiate the requested live backend coordinator and wire all workstation signal routes.
     m_ownedCoordinator = (desired == QStringLiteral("lldb-dap")) ? static_cast<IBackendCoordinator*>(new DapCoordinator(this)) : static_cast<IBackendCoordinator*>(new gridlock::GdbRankCoordinator(this));
     setCoordinator(m_ownedCoordinator);
     pushExecutionContext();
 }
 
-/** @brief Dispatches a live source-level step-over (`-exec-next` / DAP `next`) on the active rank. */
+bool MainWindow::isAllRanksExecutionScope() const {
+    const int ranks = (m_coordinator && m_coordinator->getProcessCount() > 0)
+                          ? m_coordinator->getProcessCount()
+                          : (m_rankCountSpin ? m_rankCountSpin->value() : 1);
+    return ranks > 1 && (!m_executionScopeCombo || m_executionScopeCombo->currentData().toInt() < 0);
+}
+int MainWindow::executionTargetRank() const { return isAllRanksExecutionScope() ? -1 : activeSteppingRank(); }
+void MainWindow::setExecutionScopeAllRanks(bool allRanks) {
+    if (m_executionScopeCombo) m_executionScopeCombo->setCurrentIndex(allRanks ? 0 : 1);
+    syncExecutionScopeUi();
+}
+void MainWindow::syncExecutionScopeUi() {
+    if (m_syncingScopeUi) return;
+    m_syncingScopeUi = true;
+    const int ranks = (m_coordinator && m_coordinator->getProcessCount() > 0)
+                          ? m_coordinator->getProcessCount()
+                          : (m_rankCountSpin ? m_rankCountSpin->value() : 1);
+    const int focused = activeSteppingRank();
+    if (m_executionScopeCombo && m_executionScopeCombo->count() >= 2) {
+        QSignalBlocker sb(m_executionScopeCombo);
+        m_executionScopeCombo->setItemText(1, QStringLiteral("Rank %1").arg(focused));
+        m_executionScopeCombo->setItemData(1, focused);
+    }
+    const bool active = m_debugSessionActive || (m_coordinator && m_coordinator->getProcessCount() > 0);
+    const bool showMultiRankControls = active && ranks > 1;
+    if (m_executionScopeAction) m_executionScopeAction->setVisible(showMultiRankControls);
+    if (auto* paTbAct = findChild<QAction*>(QStringLiteral("actionToolbarPauseAllRanks"))) paTbAct->setVisible(showMultiRankControls);
+    const bool allRanks = isAllRanksExecutionScope();
+    const QString scope = allRanks ? QStringLiteral("All Ranks") : QStringLiteral("Rank %1").arg(focused);
+    const QString idleSuffix = active ? QString() : QStringLiteral(" (disabled while idle — click Run Target first)");
+    if (m_executionScopeCombo) m_executionScopeCombo->setToolTip(QStringLiteral("Execution Scope (%1) — governs Continue, Pause, Step Over, Step Into, and Step Out").arg(scope));
+    if (m_coordinator) m_coordinator->setProperty("gl_scoped_continue_rank", allRanks ? -1 : focused);
+    if (m_continueAction) m_continueAction->setToolTip(QStringLiteral("Continue Execution on %1 (F5)%2").arg(scope, idleSuffix));
+    if (m_stepOverAction) m_stepOverAction->setToolTip(QStringLiteral("Step Over on %1 (F10)%2").arg(scope, idleSuffix));
+    if (m_stepIntoAction) m_stepIntoAction->setToolTip(QStringLiteral("Step Into on %1 (F11)%2").arg(scope, idleSuffix));
+    if (m_stepOutAction) m_stepOutAction->setToolTip(QStringLiteral("Step Out on %1 (Shift+F11)%2").arg(scope, idleSuffix));
+    if (m_pauseAction) m_pauseAction->setToolTip(QStringLiteral("Pause %1%2").arg(scope, idleSuffix));
+    if (m_pauseAllAction) { m_pauseAllAction->setEnabled(active); m_pauseAllAction->setToolTip(QStringLiteral("Pause All Ranks (F6)%1").arg(idleSuffix)); }
+    m_syncingScopeUi = false;
+}
+/** @brief Dispatches a scoped source-level step-over (`-exec-next` / DAP `next`). */
 bool MainWindow::stepOverWorkflow() {
     if (m_previewFixtureOnly) return stepInstructionWorkflow();
     if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
-    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
-    m_coordinator->stepOver(m_focusedRank + 1); return true;
+    m_focusedRank = activeSteppingRank(); const int target = executionTargetRank();
+    updateStatusTelemetry(m_currentSeekOrPc, target < 0 ? QStringLiteral("STEPPING ALL") : QStringLiteral("STEPPING"));
+    m_coordinator->stepOver(target < 0 ? -1 : (target + 1)); return true;
 }
-
-/** @brief Dispatches a live source-level step-into (`-exec-step` / DAP `stepIn`) on the active rank. */
+/** @brief Dispatches a scoped source-level step-into (`-exec-step` / DAP `stepIn`). */
 bool MainWindow::stepIntoWorkflow() {
     if (m_previewFixtureOnly) return stepInstructionWorkflow();
     if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
-    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING"));
-    m_coordinator->stepInto(m_focusedRank + 1); return true;
+    m_focusedRank = activeSteppingRank(); const int target = executionTargetRank();
+    updateStatusTelemetry(m_currentSeekOrPc, target < 0 ? QStringLiteral("STEPPING ALL") : QStringLiteral("STEPPING"));
+    m_coordinator->stepInto(target < 0 ? -1 : (target + 1)); return true;
 }
-
-/** @brief Dispatches a live source-level step-out (`-exec-finish` / DAP `stepOut`) on the active rank. */
+/** @brief Dispatches a scoped source-level step-out (`-exec-finish` / DAP `stepOut`). */
 bool MainWindow::stepOutWorkflow() {
     if (m_previewFixtureOnly) return stepInstructionWorkflow();
     if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
-    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING OUT"));
-    m_coordinator->stepOut(m_focusedRank + 1); return true;
+    m_focusedRank = activeSteppingRank(); const int target = executionTargetRank();
+    updateStatusTelemetry(m_currentSeekOrPc, target < 0 ? QStringLiteral("STEPPING OUT ALL") : QStringLiteral("STEPPING OUT"));
+    m_coordinator->stepOut(target < 0 ? -1 : (target + 1)); return true;
 }
-
-/** @brief Interrupts execution on the currently focused MPI rank (`SIGINT` + `-exec-interrupt` / DAP `pause`). */
+/** @brief Interrupts execution on the active scope (`All Ranks` or focused `Rank k`). */
 bool MainWindow::pauseRankWorkflow() {
     if (!m_coordinator) return false;
-    m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("PAUSED"));
-    m_coordinator->pauseRank(m_focusedRank); return true;
+    m_focusedRank = activeSteppingRank(); const int target = executionTargetRank();
+    updateStatusTelemetry(m_currentSeekOrPc, target < 0 ? QStringLiteral("PAUSED ALL") : QStringLiteral("PAUSED"));
+    m_coordinator->pauseRank(target); return true;
 }
-
+/** @brief Interrupts execution across all active ranks (`F6` -> `m_coordinator->haltAll()`). */
+bool MainWindow::pauseAllRanksWorkflow() {
+    if (!m_coordinator || (!m_debugSessionActive && m_coordinator->getProcessCount() <= 0)) return false;
+    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("PAUSED ALL"));
+    m_coordinator->haltAll(); return true;
+}
 /** @brief Steps backward over the previous source statement (`-exec-next --reverse` / DAP `stepBack`). */
 bool MainWindow::reverseStepOverWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
     m_focusedRank = activeSteppingRank(); updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("STEPPING BACK"));
     m_coordinator->reverseStepOver(m_focusedRank); return true;
 }
-
 /** @brief Runs backward in recorded execution history (`-exec-continue --reverse` / DAP `reverseContinue`). */
 bool MainWindow::reverseContinueWorkflow() {
     if (!m_debugSessionActive || !m_coordinator) return false;
@@ -326,7 +324,7 @@ void MainWindow::onRankSelected(int rankId) {
     // Track newly focused rank and synchronize VariablesDockWidget, CallStackDockWidget, and EditorTabManager.
     m_focusedRank = rankId;
     if (m_serverRackView && m_serverRackView->selectedRank() != rankId) { m_serverRackView->blockSignals(true); m_serverRackView->selectRank(rankId); m_serverRackView->blockSignals(false); }
-    updateDebugToolbarState();
+    updateDebugToolbarState(); syncExecutionScopeUi();
     if (m_editorTabManager) m_editorTabManager->setActiveFocusRank(rankId);
     if (m_variablesDockWidget) {
         if (auto* rankCombo = m_variablesDockWidget->findChild<QComboBox*>()) {

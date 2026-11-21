@@ -114,6 +114,24 @@ public:
      */
     QMap<int, uint64_t> rankPcAddresses() const;
 
+    /** @brief Applies a state filter (`"all"`, `"deadlock"`, `"stopped"`, `"running"`, `"exited"`). */
+    void setStateFilter(const QString& filter);
+
+    /** @brief Returns the active rank state filter key. */
+    QString stateFilter() const { return m_stateFilter; }
+
+    /** @brief Returns the number of rank cards currently visible under the active state filter. */
+    int visibleRankCount() const;
+
+    /** @brief Returns true if @p state matches filter key @p filter. */
+    static bool stateMatchesFilter(const QString& state, const QString& filter);
+
+    /** @brief Returns the short pill label rendered for rank execution @p state. */
+    static QString badgeTextForState(const QString& state);
+
+    /** @brief Returns the accent color rendered for rank execution @p state. */
+    static QColor badgeColorForState(const QString& state);
+
 signals:
     /**
      * @brief Emitted when a rank node is selected by user click or programmatic seek.
@@ -136,6 +154,9 @@ private slots:
     void onItemClicked(QListWidgetItem* item);
 
 private:
+    /** @brief Re-evaluates item visibility for all rank cards against `m_stateFilter`. */
+    void applyStateFilter();
+
     /**
      * @brief Extracts or synthesizes a program counter address from rank state telemetry.
      * @param rankId Target rank ID.
@@ -149,6 +170,9 @@ private:
 
     /// Currently highlighted/selected rank index.
     int m_selectedRank = 0;
+
+    /// Active state filter key (`"all"`, `"deadlock"`, `"stopped"`, `"running"`, `"exited"`).
+    QString m_stateFilter = QStringLiteral("all");
 
     /// Internal cache of rank states indexed by rank ID.
     std::unordered_map<int, RankState> m_states;

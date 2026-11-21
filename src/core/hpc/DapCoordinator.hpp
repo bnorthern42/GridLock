@@ -121,9 +121,11 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Sends a DAP `stepIn` request for @p threadId. */
   void stepInto(int threadId) override;
 
-  /** @brief Sends a DAP `stepOut` request for @p threadId. */
+  /** @brief Sends a DAP `stepOut` request for @p threadId (`<= 0` broadcasts across active threads). */
   void stepOut(int threadId) override {
-    sendRequest(QStringLiteral("stepOut"), QJsonObject{{QStringLiteral("threadId"), (threadId > 0) ? threadId : 1}});
+    if (threadId > 0) { sendRequest(QStringLiteral("stepOut"), QJsonObject{{QStringLiteral("threadId"), threadId}}); return; }
+    for (int tid = 1; tid <= qMax(1, m_processCount); ++tid)
+      sendRequest(QStringLiteral("stepOut"), QJsonObject{{QStringLiteral("threadId"), tid}});
   }
 
   /** @brief Sends a machine-instruction granularity `stepIn` request for @p threadId. */
@@ -161,14 +163,20 @@ class DapCoordinator : public IBackendCoordinator {
     sendDebuggerCommand(qMax(0, rank), expr.isEmpty() ? QStringLiteral("thread return") : QStringLiteral("thread return %1").arg(expr));
   }
 
-  /** @brief Sends a DAP `continue` request for @p threadId. */
+  /** @brief Sends a DAP `continue` request for @p threadId (`<= 0` honors `gl_scoped_continue_rank` or resumes all). */
   void continueExecution(int threadId) override;
 
-  /** @brief Sends a DAP `pause` request for @p threadId. */
+  /** @brief Sends a DAP `pause` request for @p threadId (`<= 0` pauses all active ranks/threads). */
   void pauseExecution(int threadId) override;
 
-  /** @brief Pauses 0-based MPI rank @p rankId (`threadId = rankId + 1`). */
-  void pauseRank(int rankId) override { pauseExecution(rankId + 1); }
+  /** @brief Sends DAP `pause` across all active ranks/threads. */
+  void haltAll() override {
+    for (int tid = 1; tid <= qMax(1, m_processCount); ++tid)
+      sendRequest(QStringLiteral("pause"), QJsonObject{{QStringLiteral("threadId"), tid}});
+  }
+
+  /** @brief Pauses 0-based MPI rank @p rankId (`< 0` pauses all ranks). */
+  void pauseRank(int rankId) override { if (rankId < 0) haltAll(); else pauseExecution(rankId + 1); }
 
   /** @brief Sends a DAP `reverseContinue` request for 0-based MPI @p rank. */
   void reverseContinue(int rank) override {

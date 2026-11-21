@@ -50,23 +50,33 @@ public:
         bool isHovered = option.state & QStyle::State_MouseOver;
 
         QString status = state.currentState.isEmpty() ? QStringLiteral("idle") : state.currentState.toLower();
-        const bool isIdleOrExited = (status == QStringLiteral("idle") || status == QStringLiteral("exited"));
+        const bool isDeadlock = (status == QStringLiteral("deadlock") || status == QStringLiteral("deadlocked") || status == QStringLiteral("diverged"));
+        const bool isExited = (status == QStringLiteral("exited"));
+        const bool isIdleOrExited = (status == QStringLiteral("idle") || isExited);
         QString pcStr = (isIdleOrExited || !state.registers.contains(16) ||
                          state.registers.value(16).trimmed().isEmpty())
                             ? QStringLiteral("—")
                             : state.registers.value(16);
 
-        // Determine background and outline colors based on selection and hover state
+        // Determine background and outline colors based on selection, hover, and deadlock state
         const auto& tm = gridlock::core::ThemeManager::instance();
         const auto pal = tm.paletteForTheme(tm.activeThemeId());
         QColor bgColor;
         QColor borderColor;
         if (pal.isDark) {
-            bgColor = isSelected ? QColor("#22303c") : (isHovered ? QColor("#1f242c") : QColor("#181b20"));
-            borderColor = isSelected ? QColor("#528bff") : (isHovered ? QColor("#569cd6") : QColor("#2d323b"));
+            bgColor = isSelected ? QColor("#22303c")
+                                 : (isDeadlock ? QColor("#2b181b")
+                                               : (isHovered ? QColor("#1f242c") : QColor("#181b20")));
+            borderColor = isSelected ? QColor("#528bff")
+                                     : (isDeadlock ? QColor("#f44747")
+                                                   : (isHovered ? QColor("#569cd6") : QColor("#2d323b")));
         } else {
-            bgColor = isSelected ? QColor("#ddf4ff") : (isHovered ? QColor(pal.headerHex).darker(108) : QColor(pal.headerHex));
-            borderColor = isSelected ? QColor(pal.accentHex) : (isHovered ? QColor(pal.accentHex).lighter(120) : QColor(pal.borderHex));
+            bgColor = isSelected ? QColor("#ddf4ff")
+                                 : (isDeadlock ? QColor("#fee2e2")
+                                               : (isHovered ? QColor(pal.headerHex).darker(108) : QColor(pal.headerHex)));
+            borderColor = isSelected ? QColor(pal.accentHex)
+                                     : (isDeadlock ? QColor("#f44747")
+                                                   : (isHovered ? QColor(pal.accentHex).lighter(120) : QColor(pal.borderHex)));
         }
 
         QPainterPath path;
@@ -74,40 +84,33 @@ public:
         painter->fillPath(path, bgColor);
 
         QPen borderPen(borderColor);
-        borderPen.setWidth(isSelected ? 2 : 1);
+        borderPen.setWidth((isSelected || isDeadlock) ? 2 : 1);
         painter->setPen(borderPen);
         painter->setBrush(Qt::NoBrush);
         painter->drawPath(path);
 
         // Map execution state to LED status and pill badge color
-        QColor ledColor;
-        QString badgeText;
-        if (status == "running") {
-            ledColor = QColor("#2ecc71");
-            badgeText = QStringLiteral("RUN");
-        } else if (status == "stopped" || status == "paused") {
-            ledColor = QColor("#f1c40f");
-            badgeText = QStringLiteral("BRK");
-        } else {
-            ledColor = QColor("#7f8c8d");
-            badgeText = QStringLiteral("IDLE");
-        }
+        const QColor ledColor = ServerRackView::badgeColorForState(status);
+        const QString badgeText = ServerRackView::badgeTextForState(status);
 
         // Top row: Rank [N] header text
         QFont rankFont("JetBrains Mono", 8, QFont::Bold);
         rankFont.setStyleHint(QFont::Monospace);
         painter->setFont(rankFont);
-        painter->setPen(pal.isDark ? QColor("#e5e9f0") : QColor(pal.textHex));
-        painter->drawText(QRect(rect.left() + 6, rect.top() + 3, 54, 14),
+        const QColor rankTextColor = isExited
+                                         ? (pal.isDark ? QColor("#94a3b8") : QColor("#64748b"))
+                                         : (pal.isDark ? QColor("#e5e9f0") : QColor(pal.textHex));
+        painter->setPen(rankTextColor);
+        painter->drawText(QRect(rect.left() + 6, rect.top() + 3, 56, 14),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("RANK %1").arg(rankId));
 
         // State badge pill rendered on top-right
-        QRect badgeRect(rect.right() - 38, rect.top() + 3, 32, 13);
+        QRect badgeRect(rect.right() - 44, rect.top() + 3, 40, 13);
         QPainterPath badgePath;
         badgePath.addRoundedRect(badgeRect, 2, 2);
         QColor badgeBg = ledColor;
-        badgeBg.setAlpha(45);
+        badgeBg.setAlpha(isDeadlock ? 64 : 45);
         painter->fillPath(badgePath, badgeBg);
         painter->setPen(ledColor);
         QFont badgeFont("JetBrains Mono", 7, QFont::Bold);
@@ -119,7 +122,9 @@ public:
         QFont pcFont("JetBrains Mono", 8);
         pcFont.setStyleHint(QFont::Monospace);
         painter->setFont(pcFont);
-        painter->setPen(isIdleOrExited ? QColor("#7f8c8d") : (pal.isDark ? QColor("#4ec9b0") : QColor(pal.accentHex)));
+        painter->setPen(isIdleOrExited ? QColor("#64748b")
+                                       : (isDeadlock ? QColor("#f87171")
+                                                     : (pal.isDark ? QColor("#4ec9b0") : QColor(pal.accentHex))));
         painter->drawText(QRect(rect.left() + 6, rect.top() + 18, rect.width() - 12, 14),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           pcStr);
@@ -281,6 +286,7 @@ void ServerRackView::updateRanks(const QList<RankState>& ranks) {
     if (count() > 0) {
         setCurrentRow(0);
     }
+    applyStateFilter();
     viewport()->update();
     // Notify connected views (DisassemblyView) of all rank positions
     emit ranksUpdated(rankPcAddresses());
@@ -325,9 +331,73 @@ void ServerRackView::updateRankState(int rank, const RankState& state) {
     m_rankCount = count();
     if (QListWidgetItem* item = this->item(rank)) {
         item->setData(Qt::UserRole + 1, QVariant::fromValue(normalized));
+        item->setHidden(!stateMatchesFilter(normalized.currentState, m_stateFilter));
+        doItemsLayout();
         viewport()->update();
     }
     emit ranksUpdated(rankPcAddresses());
+}
+
+QString ServerRackView::badgeTextForState(const QString& state) {
+    const QString s = state.trimmed().toLower();
+    if (s == QStringLiteral("running")) return QStringLiteral("RUN");
+    if (s == QStringLiteral("stopped") || s == QStringLiteral("paused")) return QStringLiteral("BRK");
+    if (s == QStringLiteral("deadlock") || s == QStringLiteral("deadlocked")) return QStringLiteral("DLOCK");
+    if (s == QStringLiteral("diverged")) return QStringLiteral("DIV");
+    if (s == QStringLiteral("exited")) return QStringLiteral("EXIT");
+    return QStringLiteral("IDLE");
+}
+
+QColor ServerRackView::badgeColorForState(const QString& state) {
+    const QString s = state.trimmed().toLower();
+    if (s == QStringLiteral("running")) return QColor(QStringLiteral("#2ecc71"));
+    if (s == QStringLiteral("stopped") || s == QStringLiteral("paused")) return QColor(QStringLiteral("#f1c40f"));
+    if (s == QStringLiteral("deadlock") || s == QStringLiteral("deadlocked") || s == QStringLiteral("diverged"))
+        return QColor(QStringLiteral("#f44747"));
+    if (s == QStringLiteral("exited")) return QColor(QStringLiteral("#64748b"));
+    return QColor(QStringLiteral("#7f8c8d"));
+}
+
+bool ServerRackView::stateMatchesFilter(const QString& state, const QString& filter) {
+    const QString f = filter.trimmed().toLower();
+    if (f.isEmpty() || f == QStringLiteral("all")) return true;
+    const QString s = state.trimmed().toLower();
+    if (f == QStringLiteral("deadlock") || f == QStringLiteral("diverged"))
+        return s == QStringLiteral("deadlock") || s == QStringLiteral("deadlocked") || s == QStringLiteral("diverged");
+    if (f == QStringLiteral("stopped") || f == QStringLiteral("paused"))
+        return s == QStringLiteral("stopped") || s == QStringLiteral("paused");
+    if (f == QStringLiteral("deadlock_stopped"))
+        return s == QStringLiteral("deadlock") || s == QStringLiteral("deadlocked") ||
+               s == QStringLiteral("diverged") || s == QStringLiteral("stopped") || s == QStringLiteral("paused");
+    if (f == QStringLiteral("running")) return s == QStringLiteral("running");
+    if (f == QStringLiteral("exited")) return s == QStringLiteral("exited");
+    return s == f;
+}
+
+void ServerRackView::setStateFilter(const QString& filter) {
+    const QString normalized = filter.trimmed().isEmpty() ? QStringLiteral("all") : filter.trimmed().toLower();
+    if (m_stateFilter == normalized) return;
+    m_stateFilter = normalized;
+    applyStateFilter();
+}
+
+int ServerRackView::visibleRankCount() const {
+    int visible = 0;
+    for (int i = 0; i < count(); ++i) {
+        if (const QListWidgetItem* it = item(i); it && !it->isHidden()) ++visible;
+    }
+    return visible;
+}
+
+void ServerRackView::applyStateFilter() {
+    for (int i = 0; i < count(); ++i) {
+        if (QListWidgetItem* it = item(i)) {
+            const RankState st = it->data(Qt::UserRole + 1).value<RankState>();
+            it->setHidden(!stateMatchesFilter(st.currentState, m_stateFilter));
+        }
+    }
+    doItemsLayout();
+    viewport()->update();
 }
 
 /**

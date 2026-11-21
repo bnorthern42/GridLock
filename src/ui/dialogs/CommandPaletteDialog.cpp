@@ -613,7 +613,9 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
                 }
                 const QString topCat = prefixPath.section(QStringLiteral(" -> "), -1);
                 const QString fullTitle = QStringLiteral("%1: %2").arg(topCat, actText);
-                registerActionItem(fullTitle, QStringLiteral("Menu -> ") + prefixPath,
+                const QString tip = act->toolTip().trimmed();
+                const QString sub = (!tip.isEmpty() && tip != actText) ? tip : (QStringLiteral("Menu -> ") + prefixPath);
+                registerActionItem(fullTitle, sub,
                                    act->shortcut().toString(QKeySequence::NativeText),
                                    [act]() { if (act) act->trigger(); });
             }
@@ -630,17 +632,19 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Debug: Run / Launch Target"),
                        QStringLiteral("Compile and start the configured MPI debugging session"),
                        QStringLiteral("F5"), [mainWindow]() { mainWindow->startTargetWorkflow(); });
+    const bool allRanksScope = mainWindow->isAllRanksExecutionScope();
+    const QString scopeDesc = allRanksScope ? QStringLiteral("All Ranks") : QStringLiteral("Rank %1").arg(mainWindow->activeSteppingRank());
     registerActionItem(QStringLiteral("Debug: Continue Execution"),
-                       QStringLiteral("Resume execution of the active rank until the next breakpoint"),
+                       QStringLiteral("Resume execution on %1 until the next breakpoint").arg(scopeDesc),
                        QStringLiteral("F5"), [mainWindow]() { mainWindow->continueExecutionWorkflow(); });
     registerActionItem(QStringLiteral("Debug: Step Over"),
-                       QStringLiteral("Step over the current source line on the focused MPI rank"),
+                       QStringLiteral("Step over the current source line on %1").arg(scopeDesc),
                        QStringLiteral("F10"), [mainWindow]() { mainWindow->stepOverWorkflow(); });
     registerActionItem(QStringLiteral("Debug: Step Into"),
-                       QStringLiteral("Step into the called function on the focused MPI rank"),
+                       QStringLiteral("Step into the called function on %1").arg(scopeDesc),
                        QStringLiteral("F11"), [mainWindow]() { mainWindow->stepIntoWorkflow(); });
     registerActionItem(QStringLiteral("Debug: Step Out"),
-                       QStringLiteral("Finish the current stack frame and pause in the caller (-exec-finish)"),
+                       QStringLiteral("Finish the current stack frame on %1 (-exec-finish)").arg(scopeDesc),
                        QStringLiteral("Shift+F11"), [mainWindow]() { mainWindow->stepOutWorkflow(); });
     registerActionItem(QStringLiteral("Debug: Step Instruction"),
                        QStringLiteral("Single-step one machine instruction on the focused MPI rank"),
@@ -662,9 +666,12 @@ void CommandPaletteDialog::populateFromMainWindow(MainWindow* mainWindow) {
     registerActionItem(QStringLiteral("Debug: Break on Function Regex (rbreak)..."),
                        QStringLiteral("Install breakpoints on all functions matching a regular expression (rbreak <pattern>)"),
                        QString(), [mainWindow]() { mainWindow->insertRegexBreakpointWorkflow(QString(), true); });
-    registerActionItem(QStringLiteral("Debug: Pause Active Rank"),
-                       QStringLiteral("Interrupt execution on the currently focused MPI rank"),
-                       QStringLiteral("F6"), [mainWindow]() { mainWindow->pauseRankWorkflow(); });
+    registerActionItem(QStringLiteral("Debug: Pause All Ranks"),
+                       QStringLiteral("Interrupt execution across all active MPI ranks immediately (haltAll)"),
+                       QStringLiteral("F6"), [mainWindow]() { mainWindow->pauseAllRanksWorkflow(); });
+    registerActionItem(QStringLiteral("Debug: Pause (%1)").arg(scopeDesc),
+                       QStringLiteral("Interrupt execution according to the active execution scope (%1)").arg(scopeDesc),
+                       QString(), [mainWindow]() { mainWindow->pauseRankWorkflow(); });
     registerActionItem(QStringLiteral("Debug: Stop Debugging Session"),
                        QStringLiteral("Terminate all active MPI ranks and return to IDLE state"),
                        QStringLiteral("Shift+F5"), [mainWindow]() { mainWindow->stopTargetWorkflow(); });

@@ -485,136 +485,63 @@ public:
     void applyTypographySettings(const QString& uiFamily, int uiSize,
                                  const QString& codeFamily, int codeSize);
 
-    /**
-     * @brief Switches the workstation layout between "Source", "Debug", "Binary", and "MPI" perspectives.
-     * @param perspective Target perspective name ("Source", "Debug", "Binary", or "MPI").
-     */
+    /** @brief Switches the workstation layout between "Source", "Debug", "Binary", and "MPI" perspectives. */
     void setWorkspacePerspective(const QString& perspective);
-
-    /**
-     * @brief Synchronizes ServerRackDock and multi-rank selector visibility for single-rank vs multi-rank workflows.
-     */
+    /** @brief Synchronizes ServerRackDock and multi-rank selector visibility for single-rank vs multi-rank workflows. */
     void syncRankCountChrome(int rankCount = -1);
-
-    /**
-     * @brief Returns the currently active workspace perspective identifier.
-     */
+    /** @brief Returns true when multi-rank execution commands target All Ranks rather than Focused Rank. */
+    bool isAllRanksExecutionScope() const;
+    /** @brief Returns `-1` when scoped to All Ranks, or `activeSteppingRank()` when scoped to Focused Rank. */
+    int executionTargetRank() const;
+    /** @brief Switches the toolbar execution scope selector between All Ranks (`true`) and Focused Rank (`false`). */
+    void setExecutionScopeAllRanks(bool allRanks);
+    /** @brief Interrupts execution across all active ranks via `m_coordinator->haltAll()` (`F6`). */
+    bool pauseAllRanksWorkflow();
+    /** @brief Synchronizes `#toolbarExecutionScopeCombo` visibility, tooltips, and coordinator continue scope. */
+    void syncExecutionScopeUi();
+    /** @brief Returns the currently active workspace perspective identifier. */
     QString workspacePerspective() const { return m_workspacePerspective; }
-
-    /**
-     * @brief Toggles the bottom console dock between standard height (260px) and maximized height (65%).
-     */
+    /** @brief Toggles the bottom console dock between standard height (260px) and maximized height (65%). */
     void toggleMaximizeBottomConsole();
-
-    /**
-     * @brief Returns the ordered list of bottom tool-window icon rail group identifiers.
-     * @return List containing {"Debug", "MPI", "Terminal", "Docs"}.
-     */
+    /** @brief Returns the ordered list of bottom tool-window icon rail group identifiers. */
     QStringList bottomToolGroups() const;
-
-    /**
-     * @brief Returns the currently active bottom tool-window group identifier.
-     * @return Active group name ("Debug", "MPI", "Terminal", or "Docs").
-     */
+    /** @brief Returns the currently active bottom tool-window group identifier. */
     QString activeBottomToolGroup() const { return m_activeBottomToolGroup; }
-
-    /**
-     * @brief Activates a bottom tool-window group, filtering visible tabs strictly to its linked views.
-     * @param groupName Target group name ("Debug", "MPI", "Terminal", or "Docs").
-     */
+    /** @brief Activates a bottom tool-window group, filtering visible tabs strictly to its linked views. */
     void selectBottomToolGroup(const QString& groupName);
-
-    /**
-     * @brief Synchronizes the bottom tool rail button state with the specified tab index.
-     * @param tabIndex Selected tab index in m_bottomTabs.
-     */
+    /** @brief Synchronizes the bottom tool rail button state with the specified tab index. */
     void syncBottomToolRailToTab(int tabIndex);
-
-    /**
-     * @brief Propagates the active ThemeManager palette across all chrome toolbars, dock headers, and workstation views.
-     */
+    /** @brief Propagates the active ThemeManager palette across all chrome toolbars, dock headers, and workstation views. */
     Q_INVOKABLE void propagateThemeToAllWidgets();
-
-    /**
-     * @brief Reloads workstation theme styling according to ThemeManager palette.
-     */
+    /** @brief Reloads workstation theme styling according to ThemeManager palette. */
     Q_INVOKABLE void reloadStyle() { propagateThemeToAllWidgets(); }
-
-    /**
-     * @brief Verifies that all chrome toolbars, ribbons, and dock headers align with the active theme and avoid hardcoded dark styles.
-     * @return True if all inspected chrome elements are theme-aligned.
-     */
+    /** @brief Verifies that all chrome toolbars, ribbons, and dock headers align with the active theme. */
     bool areAllChromeToolbarsAndDockHeadersThemeAligned() const;
 
-    /**
-     * @struct DockHomeSlot
-     * @brief Records the original splitter or QMainWindow dock area home container for a panel.
-     */
+    /** @brief Records the original splitter or QMainWindow dock area home container for a panel. */
     struct DockHomeSlot {
         QSplitter* splitter = nullptr;
         int splitterIndex = -1;
         Qt::DockWidgetArea area = Qt::RightDockWidgetArea;
     };
 
-    /**
-     * @brief Checks if a dock widget is currently detached in a top-level floating window.
-     * @param dock Pointer to the dock widget to inspect.
-     * @return True if dock is floating or detached as top-level window.
-     */
+    /** @brief Checks if a dock widget is currently detached in a top-level floating window. */
     bool isDockFloating(const QDockWidget* dock) const;
-
-    /**
-     * @brief Toggles a dock widget between floating top-level state and docked workspace slot.
-     * @param dock Pointer to the dock widget to float or redock.
-     */
+    /** @brief Toggles a dock widget between floating top-level state and docked workspace slot. */
     void toggleDockFloating(QDockWidget* dock);
-
-    /**
-     * @brief Re-docks a floating dock widget into its recorded home splitter or dock area.
-     * @param dock Pointer to the dock widget to re-dock.
-     */
+    /** @brief Re-docks a floating dock widget into its recorded home splitter or dock area. */
     void redockWidget(QDockWidget* dock);
-
-    /**
-     * @brief Calculates the global screen rectangle of a dock widget's home drop zone.
-     * @param dock Pointer to the dock widget.
-     * @return Global screen rectangle of the home dock or splitter region.
-     */
+    /** @brief Calculates the global screen rectangle of a dock widget's home drop zone. */
     QRect dockHomeGlobalRect(const QDockWidget* dock) const;
-
-    /**
-     * @brief Evaluates mouse release position during dock drag and redocks if dropped in home zone.
-     * @param dock Pointer to the dock widget being dragged.
-     * @param globalReleasePos Global cursor release position.
-     * @return True if redocked, false otherwise.
-     */
+    /** @brief Evaluates mouse release position during dock drag and redocks if dropped in home zone. */
     bool handleDockDragRelease(QDockWidget* dock, const QPoint& globalReleasePos);
-
-    /**
-     * @brief Restores all floating or detached panels back into their home workstation slots.
-     */
+    /** @brief Restores all floating or detached panels back into their home workstation slots. */
     void redockAllFloatingPanels();
-
-    /**
-     * @brief Intercepts and handles mouse/context-menu events on custom dock headers.
-     * @param watched Target QObject emitting the event.
-     * @param event QEvent payload to inspect.
-     * @return True if event was handled and should be consumed.
-     */
+    /** @brief Intercepts and handles mouse/context-menu events on custom dock headers. */
     bool handleDockHeaderEvent(QObject* watched, QEvent* event);
-
-    /**
-     * @brief Creates and mounts a custom dark-slate title bar widget on the specified dock widget.
-     * @param dock Pointer to the target dock widget.
-     * @param titleText Header display title string.
-     * @return Pointer to created custom title bar header widget.
-     */
+    /** @brief Creates and mounts a custom title bar widget on the specified dock widget. */
     QWidget* setupDockTitleBar(QDockWidget* dock, const QString& titleText);
-
-    /**
-     * @brief Dispatches a debug command through the coordinator.
-     * @param cmd Unique pointer to command object.
-     */
+    /** @brief Dispatches a debug command through the coordinator. */
     void executeCommand(std::unique_ptr<gridlock::core::commands::IDebugCommand> cmd);
 
     /**
@@ -872,6 +799,8 @@ private:
     bool m_isShuttingDown = false;
     QComboBox* m_targetSelector = nullptr;
     QSpinBox* m_rankCountSpin = nullptr;
+    QComboBox* m_executionScopeCombo = nullptr;
+    QAction* m_executionScopeAction = nullptr;
     QAction* m_runAction = nullptr;
     QAction* m_continueAction = nullptr;
     QAction* m_stepOverAction = nullptr;
@@ -879,7 +808,9 @@ private:
     QAction* m_stepOutAction = nullptr;
     QAction* m_stepAction = nullptr;
     QAction* m_pauseAction = nullptr;
+    QAction* m_pauseAllAction = nullptr;
     QAction* m_stopAction = nullptr;
+    bool m_syncingScopeUi = false;
     QPushButton* m_navBackBtn = nullptr;
     QPushButton* m_navForwardBtn = nullptr;
     QLineEdit* m_seekBar = nullptr;

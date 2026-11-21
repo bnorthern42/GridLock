@@ -368,7 +368,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Broadcasts `-exec-run` across all MPI ranks. */
   virtual void runAll();
   /** @brief Broadcasts `-exec-interrupt` across all MPI ranks. */
-  virtual void haltAll();
+  void haltAll() override;
   /** @brief Sends `SIGINT` / `-exec-interrupt` to a single focused rank @p rankId. */
   virtual void pauseFocusedRank(int rankId);
 
@@ -378,16 +378,16 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Disconnects signals and stops all rank GDB/FIFO/MPI processes (`silentShutdown` suppresses UI reset signals). */
   void stopAll(bool silentShutdown = false);
 
-  /** @brief `IBackendCoordinator` step-over shim routing to `stepAll()`. */
+  /** @brief Steps over one source line (`threadId <= 0` = all stopped ranks, `> 0` = rank `threadId - 1`). */
   void stepOver(int threadId) override {
-    Q_UNUSED(threadId);
-    stepAll();
+    if (threadId <= 0 || m_processes.empty()) stepAll();
+    else dispatchStoppedExecCmd(threadId - 1, QStringLiteral("-exec-next\n"));
   }
 
-  /** @brief Steps into callees (`-exec-step`) on @p threadId (`rankId + 1`). */
+  /** @brief Steps into callees (`-exec-step`) on @p threadId (`<= 0` = all stopped ranks, `> 0` = `rankId + 1`). */
   void stepInto(int threadId) override;
 
-  /** @brief Finishes the current stack frame (`-exec-finish`) on @p threadId (`rankId + 1`). */
+  /** @brief Finishes the current stack frame (`-exec-finish`) on @p threadId (`<= 0` = all stopped ranks, `> 0` = `rankId + 1`). */
   void stepOut(int threadId) override;
 
   /** @brief Steps one machine instruction (`-exec-step-instruction`) on @p threadId (`rankId + 1`). */
@@ -411,17 +411,18 @@ class GdbRankCoordinator : public IBackendCoordinator {
   /** @brief Forces an immediate return from the current stack frame (`-exec-return [expr]`) on @p rank. */
   void forceEarlyReturn(const QString& returnExpr = QString(), int rank = -1) override;
 
-  /** @brief `IBackendCoordinator` continue shim routing to `continueAll()`. */
-  void continueExecution(int threadId) override {
-    Q_UNUSED(threadId);
-    continueAll();
+  /** @brief Resumes execution (`threadId > 0` = rank `threadId - 1`, `<= 0` honors `gl_scoped_continue_rank` or resumes all). */
+  void continueExecution(int threadId) override;
+
+  /** @brief Interrupts execution (`threadId <= 0` = all ranks, `> 0` = rank `threadId - 1`). */
+  void pauseExecution(int threadId) override {
+    if (threadId <= 0) haltAll(); else pauseFocusedRank(threadId - 1);
   }
 
-  /** @brief `IBackendCoordinator` pause shim routing to `pauseFocusedRank(threadId - 1)`. */
-  void pauseExecution(int threadId) override { pauseFocusedRank(threadId - 1); }
-
-  /** @brief Interrupts 0-based MPI rank @p rankId directly. */
-  void pauseRank(int rankId) override { pauseFocusedRank(rankId); }
+  /** @brief Interrupts 0-based MPI rank @p rankId (`< 0` = all ranks). */
+  void pauseRank(int rankId) override {
+    if (rankId < 0) haltAll(); else pauseFocusedRank(rankId);
+  }
 
   /** @brief Registers @p varName as a tracked GDB/MI variable object (`-var-create`) across all ranks. */
   void registerWatchVariable(const QString& varName) override;
