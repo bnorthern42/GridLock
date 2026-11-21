@@ -16,6 +16,7 @@
 #include "../core/hpc/NativeMemoryReader.hpp"
 #include "../core/hpc/ProcessScanner.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "dialogs/ArrayPlotDialog.hpp"
 #include "dialogs/AttachProcessDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
@@ -33,6 +34,7 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QString>
+#include <QTableWidget>
 #include <QTimer>
 
 #include <cstring>
@@ -57,60 +59,34 @@ QString resolveTutorialTarget(const QString& target) {
     if (rel.isEmpty()) return QString();
 
     // Normalize bare target names into relative tutorial source file paths.
-    if (!rel.endsWith(QStringLiteral(".cpp")) && !rel.contains(QLatin1Char('/'))) {
-        rel = QStringLiteral("tutorial/") + rel + QStringLiteral(".cpp");
-    } else if (!rel.startsWith(QStringLiteral("tutorial/")) && !rel.startsWith(QLatin1Char('/'))) {
-        rel = QStringLiteral("tutorial/") + rel;
-    }
+    if (!rel.endsWith(QStringLiteral(".cpp")) && !rel.contains(QLatin1Char('/'))) rel = QStringLiteral("tutorial/") + rel + QStringLiteral(".cpp");
+    else if (!rel.startsWith(QStringLiteral("tutorial/")) && !rel.startsWith(QLatin1Char('/'))) rel = QStringLiteral("tutorial/") + rel;
+    auto canonOrAbs = [](const QString& p) { const QFileInfo fi(p); return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath(); };
 
     // 1. Direct hit from current working directory (standard repository root execution).
-    if (QFileInfo::exists(rel)) {
-        const QFileInfo fi(rel);
-        return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
-    }
+    if (QFileInfo::exists(rel)) return canonOrAbs(rel);
 
     // 2. Secondary lookup one level up (out-of-source builddir/ test harness runner).
     const QString parentCand = QStringLiteral("../") + rel;
-    if (QFileInfo::exists(parentCand)) {
-        const QFileInfo fi(parentCand);
-        return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
-    }
+    if (QFileInfo::exists(parentCand)) return canonOrAbs(parentCand);
 
     // 3. AppImage deployment environment variable ($APPDIR/usr/share/gridlock/tutorial/...).
     const QString envAppDir = qEnvironmentVariable("APPDIR");
     if (!envAppDir.isEmpty()) {
-        const QString appDirShare = envAppDir + QStringLiteral("/usr/share/gridlock/") + rel;
-        if (QFileInfo::exists(appDirShare)) {
-            const QFileInfo fi(appDirShare);
-            return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
-        }
-        const QString appDirDirect = envAppDir + QStringLiteral("/") + rel;
-        if (QFileInfo::exists(appDirDirect)) {
-            const QFileInfo fi(appDirDirect);
-            return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
-        }
+        if (const QString appDirShare = envAppDir + QStringLiteral("/usr/share/gridlock/") + rel; QFileInfo::exists(appDirShare)) return canonOrAbs(appDirShare);
+        if (const QString appDirDirect = envAppDir + QStringLiteral("/") + rel; QFileInfo::exists(appDirDirect)) return canonOrAbs(appDirDirect);
     }
 
     // 4. Relative to application binary dir (e.g. AppDir/usr/bin/../share/gridlock/tutorial/...).
     const QString appDirPath = QCoreApplication::applicationDirPath();
     const QString shareCand = appDirPath + QStringLiteral("/../share/gridlock/") + rel;
-    if (QFileInfo::exists(shareCand)) {
-        const QFileInfo fi(shareCand);
-        return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
-    }
+    if (QFileInfo::exists(shareCand)) return canonOrAbs(shareCand);
 
     // 5. Direct companion directory in binary folder (e.g. AppDir/usr/bin/tutorial/...).
-    const QString localCand = appDirPath + QStringLiteral("/") + rel;
-    if (QFileInfo::exists(localCand)) {
-        const QFileInfo fi(localCand);
-        return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
-    }
+    if (const QString localCand = appDirPath + QStringLiteral("/") + rel; QFileInfo::exists(localCand)) return canonOrAbs(localCand);
 
     // 6. Default to expected share or appdir path when simulating outside repository.
-    if (!envAppDir.isEmpty()) {
-        return envAppDir + QStringLiteral("/usr/share/gridlock/") + rel;
-    }
-    return shareCand;
+    return !envAppDir.isEmpty() ? (envAppDir + QStringLiteral("/usr/share/gridlock/") + rel) : shareCand;
 }
 
 /**
@@ -120,18 +96,14 @@ QString resolveTutorialTarget(const QString& target) {
  */
 QString ensureWritableTutorialBinaryPath(const QString& sourcePath) {
     if (sourcePath.isEmpty()) return QString();
-    const QFileInfo srcInfo(sourcePath);
-    const QString baseName = srcInfo.completeBaseName();
-    const QString companionBin = srcInfo.dir().filePath(baseName);
+    const QFileInfo srcInfo(sourcePath); const QString baseName = srcInfo.completeBaseName(), companionBin = srcInfo.dir().filePath(baseName);
 
     // If existing companion binary exists and directory is read-only, use it or copy to /tmp.
     if (!srcInfo.dir().exists() || !QFileInfo(srcInfo.dir().absolutePath()).isWritable()) {
-        const QString cacheDir = QStringLiteral("/tmp/gridlock_tutorials");
-        QDir().mkpath(cacheDir);
+        const QString cacheDir = QStringLiteral("/tmp/gridlock_tutorials"); QDir().mkpath(cacheDir);
         const QString targetBin = cacheDir + QStringLiteral("/") + baseName;
         if (QFileInfo::exists(companionBin) && (!QFileInfo::exists(targetBin) || QFileInfo(targetBin).lastModified() < QFileInfo(companionBin).lastModified())) {
-            QFile::remove(targetBin);
-            QFile::copy(companionBin, targetBin);
+            QFile::remove(targetBin); QFile::copy(companionBin, targetBin);
             QFile::setPermissions(targetBin, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup | QFile::ExeGroup);
         }
         return targetBin;
@@ -151,44 +123,25 @@ void MainWindow::syncCoordinatorWithConfig() {
     if (m_debugSessionActive) return;
 
     auto& cfg = gridlock::core::ConfigManager::instance();
-    const QString rawEngine = cfg.debuggerEngine().trimmed().toLower();
-    const QString desired = (rawEngine == QStringLiteral("lldb-dap"))
-                                ? QStringLiteral("lldb-dap")
-                                : QStringLiteral("gdb");
-
+    const QString desired = (cfg.debuggerEngine().trimmed().toLower() == QStringLiteral("lldb-dap")) ? QStringLiteral("lldb-dap") : QStringLiteral("gdb");
     auto pushExecutionContext = [&]() {
         if (!m_coordinator) return;
         const auto ps = cfg.loadProjectSettings();
         const QString args = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
         QString wd = QString::fromStdString(ps.workingDirectory).trimmed();
-        if (wd.isEmpty()) wd = m_activeWorkspaceDir;
-        m_coordinator->setTargetExecutionContext(args, wd);
+        m_coordinator->setTargetExecutionContext(args, wd.isEmpty() ? m_activeWorkspaceDir : wd);
     };
 
     // Preserve the existing coordinator instance when its engine identifier already matches.
-    if (m_coordinator && m_coordinator->activeEngineName() == desired) {
-        pushExecutionContext();
-        return;
-    }
+    if (m_coordinator && m_coordinator->activeEngineName() == desired) { pushExecutionContext(); return; }
 
     if (m_coordinator) m_coordinator->disconnect();
-    if (m_deadlockAnalyzer) {
-        delete m_deadlockAnalyzer;
-        m_deadlockAnalyzer = nullptr;
-    }
-    if (m_ownedCoordinator) {
-        m_ownedCoordinator->terminateSession();
-        delete m_ownedCoordinator;
-        m_ownedCoordinator = nullptr;
-    }
+    delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr;
+    if (m_ownedCoordinator) { m_ownedCoordinator->terminateSession(); delete m_ownedCoordinator; m_ownedCoordinator = nullptr; }
     m_coordinator = nullptr;
 
     // Instantiate the requested live backend coordinator and wire all workstation signal routes.
-    if (desired == QStringLiteral("lldb-dap")) {
-        m_ownedCoordinator = new DapCoordinator(this);
-    } else {
-        m_ownedCoordinator = new gridlock::GdbRankCoordinator(this);
-    }
+    m_ownedCoordinator = (desired == QStringLiteral("lldb-dap")) ? static_cast<IBackendCoordinator*>(new DapCoordinator(this)) : static_cast<IBackendCoordinator*>(new gridlock::GdbRankCoordinator(this));
     setCoordinator(m_ownedCoordinator);
     pushExecutionContext();
 }
@@ -677,27 +630,16 @@ void MainWindow::bindLiveMemViewHandlers() {
         if (m_debugSessionActive && m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) {
             uint64_t evalAddr = 0ULL;
             bool evalOk = false;
-            QEventLoop loop;
-            QTimer timer;
-            timer.setSingleShot(true);
+            QEventLoop loop; QTimer timer; timer.setSingleShot(true);
             QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-            const QMetaObject::Connection conn = QObject::connect(
-                m_coordinator, &IBackendCoordinator::expressionEvaluated, &loop,
-                [&](int rId, const QString&, const QString& result) {
-                    if (rId != rank) return;
-                    static const QRegularExpression hexRe(QStringLiteral("0x([0-9a-fA-F]+)"));
-                    const auto m = hexRe.match(result);
-                    if (m.hasMatch()) evalAddr = m.captured(1).toULongLong(&evalOk, 16);
-                    loop.quit();
-                });
-            timer.start(1200);
-            m_coordinator->evaluateExpression(rank, expr);
-            loop.exec();
-            QObject::disconnect(conn);
-            if (evalOk && evalAddr != 0ULL) {
-                if (okOut) *okOut = true;
-                return evalAddr;
-            }
+            const QMetaObject::Connection conn = QObject::connect(m_coordinator, &IBackendCoordinator::expressionEvaluated, &loop, [&](int rId, const QString&, const QString& result) {
+                if (rId != rank) return;
+                static const QRegularExpression hexRe(QStringLiteral("0x([0-9a-fA-F]+)"));
+                if (const auto m = hexRe.match(result); m.hasMatch()) evalAddr = m.captured(1).toULongLong(&evalOk, 16);
+                loop.quit();
+            });
+            timer.start(1200); m_coordinator->evaluateExpression(rank, expr); loop.exec(); QObject::disconnect(conn);
+            if (evalOk && evalAddr != 0ULL) { if (okOut) *okOut = true; return evalAddr; }
         }
         return 0ULL;
     };
@@ -710,14 +652,8 @@ void MainWindow::bindLiveMemViewHandlers() {
         if (pid > 0) {
             try {
                 // Round requested byte span up to 8-byte double words for aligned process_vm_readv transfer.
-                const size_t doubleCount = static_cast<size_t>((length + 7) / 8);
-                const std::vector<double> words = NativeMemoryReader::readDoubles(
-                    static_cast<pid_t>(pid), static_cast<uintptr_t>(addr), doubleCount);
-                if (!words.empty()) {
-                    QByteArray out(length, Qt::Uninitialized);
-                    std::memcpy(out.data(), words.data(), static_cast<size_t>(length));
-                    return out;
-                }
+                const std::vector<double> words = NativeMemoryReader::readDoubles(static_cast<pid_t>(pid), static_cast<uintptr_t>(addr), static_cast<size_t>((length + 7) / 8));
+                if (!words.empty()) { QByteArray out(length, Qt::Uninitialized); std::memcpy(out.data(), words.data(), static_cast<size_t>(length)); return out; }
             } catch (...) {
                 // Fall through to debugger-tracer memory read when `yama/ptrace_scope` blocks sibling readv.
             }
@@ -726,43 +662,31 @@ void MainWindow::bindLiveMemViewHandlers() {
         // Tracer fallback: request raw memory bytes directly from GDB/DAP only when the rank is stopped.
         const auto stIt = m_latestStates.find(rank);
         if (stIt == m_latestStates.end() || stIt->second.currentState != QLatin1String("stopped")) return {};
-        QByteArray fallbackBytes;
-        QEventLoop loop;
-        QTimer timer;
-        timer.setSingleShot(true);
+        QByteArray fallbackBytes; QEventLoop loop; QTimer timer; timer.setSingleShot(true);
         QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
         m_suppressMemViewBroadcast = true;
-        const QMetaObject::Connection conn = QObject::connect(
-            m_coordinator, &IBackendCoordinator::memoryRead, &loop,
-            [&](int rId, const QString&, const QByteArray& data) {
-                if (rId != rank) return;
-                fallbackBytes = data;
-                loop.quit();
-            });
-        timer.start(1500);
-        m_coordinator->readMemory(rank, QStringLiteral("0x%1").arg(addr, 0, 16), length);
-        loop.exec();
-        QObject::disconnect(conn);
-        m_suppressMemViewBroadcast = false;
+        const QMetaObject::Connection conn = QObject::connect(m_coordinator, &IBackendCoordinator::memoryRead, &loop, [&](int rId, const QString&, const QByteArray& data) {
+            if (rId != rank) return;
+            fallbackBytes = data; loop.quit();
+        });
+        timer.start(1500); m_coordinator->readMemory(rank, QStringLiteral("0x%1").arg(addr, 0, 16), length); loop.exec();
+        QObject::disconnect(conn); m_suppressMemViewBroadcast = false;
         if (fallbackBytes.size() > length) fallbackBytes.truncate(length);
         return fallbackBytes;
     };
 
     // Expose live inferior OS PID lookup per MPI rank so MemView can display and verify distinct PIDs.
-    auto pidGetter = [this](int rank) -> qint64 {
-        return (m_debugSessionActive && m_coordinator) ? m_coordinator->getPidForRank(rank) : 0LL;
-    };
-
+    auto pidGetter = [this](int rank) -> qint64 { return (m_debugSessionActive && m_coordinator) ? m_coordinator->getPidForRank(rank) : 0LL; };
     m_memView->setLiveMemoryCallbacks(resolver, fetcher, pidGetter);
 
-    // Ensure File -> Attach to Process... exposes #actionAttachProcess and Ctrl+Alt+P shortcut.
+    // Ensure File -> Attach to Process... exposes #actionAttachProcess and default Ctrl+Alt+P shortcut.
     if (menuBar()) {
         for (QAction* topAct : menuBar()->actions()) {
             if (QMenu* menu = topAct->menu()) {
                 for (QAction* act : menu->actions()) {
                     if (act->text().contains(QStringLiteral("Attach to Process"), Qt::CaseInsensitive)) {
                         act->setObjectName(QStringLiteral("actionAttachProcess"));
-                        act->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+                        if (act->shortcut().isEmpty()) act->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
                         act->disconnect(this);
                         connect(act, &QAction::triggered, this, [this]() { attachToRunningProcesses(); });
                     }
@@ -848,27 +772,20 @@ bool MainWindow::attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTa
     if (!gdbCoord || !gdbCoord->attachToRemoteTargets(explicitTargets)) return false;
 
     const int rankCount = explicitTargets.size();
-    m_debugSessionActive = true;
-    m_focusedRank = 0;
-    m_latestStates.clear();
+    m_debugSessionActive = true; m_focusedRank = 0; m_latestStates.clear();
     QList<RankState> rankStates;
     if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->beginLiveSession(rankCount);
     for (int r = 0; r < rankCount; ++r) {
         RankState st; st.rankId = r; st.currentState = QStringLiteral("stopped");
         m_latestStates[r] = st; rankStates.append(st);
-        if (m_mpiDiagnosticsWidget) {
-            m_mpiDiagnosticsWidget->updateLiveRankRow(
-                r, 0, QStringLiteral("PAUSED"), QStringLiteral("remote"),
-                explicitTargets[r].endpoint, QStringLiteral("0x00000000"), rankCount);
-        }
+        if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateLiveRankRow(r, 0, QStringLiteral("PAUSED"), QStringLiteral("remote"), explicitTargets[r].endpoint, QStringLiteral("0x00000000"), rankCount);
     }
     if (m_serverRackView) m_serverRackView->updateRanks(rankStates);
     if (m_memView) m_memView->setSourceModeLabel(QStringLiteral("REMOTE RANK 0 (%1)").arg(explicitTargets.first().endpoint));
     if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(rankCount);
     m_coordinator->requestStackAndThreads(0);
     updateDebugToolbarState();
-    updateStatusTelemetry(QStringLiteral("0x00000000"),
-                          QStringLiteral("REMOTE (%1)").arg(explicitTargets.first().endpoint));
+    updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("REMOTE (%1)").arg(explicitTargets.first().endpoint));
     refreshStatusBarMemoryTelemetry();
     return true;
 }
@@ -876,12 +793,9 @@ bool MainWindow::attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTa
 /**
  * @brief Records per-rank breakpoint metadata and stages rank-filter hints for coordinator insertion.
  */
-void MainWindow::onRankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
-                                         const QString& condition) {
+void MainWindow::onRankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter, const QString& condition) {
     if (file.isEmpty() || line <= 0) return;
-    const QFileInfo fi(file);
-    const QString absPath = fi.absoluteFilePath();
-    const QString canonPath = fi.canonicalFilePath().isEmpty() ? absPath : fi.canonicalFilePath();
+    const QFileInfo fi(file); const QString absPath = fi.absoluteFilePath(), canonPath = fi.canonicalFilePath().isEmpty() ? absPath : fi.canonicalFilePath();
     if (isSet) {
         BreakpointRankMeta meta{rankFilter < 0 ? -1 : rankFilter, condition.trimmed()};
         m_breakpointRankMeta[absPath][line] = meta;
@@ -910,8 +824,91 @@ void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
     for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) meta[it.key()] = SourceCodeView::BreakpointVisualInfo{it.value().rankFilter, it.value().condition, 0, QString()};
     view->syncBreakpointMetadata(meta);
 }
+
+namespace {
+QStringList collectExpressionCandidates(MainWindow* mw) {
+    QStringList out; QSet<QString> seen;
+    auto push = [&](const QString& raw) { const QString s = raw.trimmed(); if (!s.isEmpty() && !seen.contains(s)) { seen.insert(s); out.append(s); } };
+    if (!mw) return out;
+    if (auto* model = mw->variablesDockWidget() ? mw->variablesDockWidget()->findChild<VariableTreeModel*>() : nullptr) {
+        auto walk = [&](auto& self, const QModelIndex& parent, int depth) -> void {
+            if (depth > 3) return;
+            for (int r = 0, rows = model->rowCount(parent); r < rows; ++r) {
+                const QModelIndex idx = model->index(r, 0, parent);
+                const QString expr = model->expressionPath(idx), name = model->data(idx).toString(), type = model->data(model->index(r, 2, parent)).toString();
+                push(expr); push(name);
+                if (!expr.isEmpty() && !expr.endsWith(QLatin1Char(']')) && (type.contains(QStringLiteral("vector")) || type.contains(QStringLiteral("array")) || type.contains(QLatin1Char('[')) || type.contains(QLatin1Char('*')))) push(expr + QStringLiteral("[0]"));
+                self(self, idx, depth + 1);
+            }
+        };
+        walk(walk, QModelIndex(), 0);
+    }
+    const QList<SourceCodeView*> views = mw->editorTabManager() ? mw->editorTabManager()->openViews() : (mw->sourceCodeView() ? QList<SourceCodeView*>{mw->sourceCodeView()} : QList<SourceCodeView*>{});
+    static const QRegularExpression kTypeRe(QStringLiteral(R"(\b(?:struct|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b)"));
+    static const QRegularExpression kVecDeclRe(QStringLiteral(R"(\b(?:(?:vector|array)\s*<[^>;]+>\s+([A-Za-z_][A-Za-z0-9_]*)|[A-Za-z_][A-Za-z0-9_]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[[0-9]+\]))"));
+    static const QRegularExpression kIdxRe(QStringLiteral(R"(\b([A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])+(?:\.[A-Za-z_][A-Za-z0-9_]*)*))"));
+    static const QRegularExpression kDeclRe(QStringLiteral(R"(^\s*(?:const\s+)?(?:std::)?[A-Za-z_][A-Za-z0-9_:<>*&\s]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\]|\(|=|\{|;))"), QRegularExpression::MultilineOption);
+    for (SourceCodeView* sv : views) {
+        if (!sv) continue;
+        const QString src = sv->toPlainText();
+        for (auto it = kTypeRe.globalMatch(src); it.hasNext();) push(it.next().captured(1));
+        for (auto it = kVecDeclRe.globalMatch(src); it.hasNext();) { const auto m = it.next(); const QString v = !m.captured(1).isEmpty() ? m.captured(1) : m.captured(2); push(v); push(v + QStringLiteral("[0]")); }
+        for (auto it = kIdxRe.globalMatch(src); it.hasNext();) push(it.next().captured(1));
+        for (auto it = kDeclRe.globalMatch(src); it.hasNext();) { const QString id = it.next().captured(1); if (id != QLatin1String("return") && id != QLatin1String("if") && id != QLatin1String("for") && id != QLatin1String("while") && id != QLatin1String("main")) push(id); }
+    }
+    if (auto* symTbl = mw->projectExplorerWidget() ? mw->projectExplorerWidget()->findChild<QTableWidget*>(QStringLiteral("explorerSymbolsTable")) : nullptr) {
+        for (int r = 0, cap = qMin(250, symTbl->rowCount()); r < cap; ++r) if (auto* it = symTbl->item(r, 2)) push(it->text());
+    }
+    return out;
+}
+void refreshDialogCompleters(MainWindow* mw) {
+    if (!mw || !mw->variablesDockWidget()) return;
+    if (auto* model = mw->variablesDockWidget()->findChild<VariableTreeModel*>(); model && !model->property("gl_completer_wired").toBool()) {
+        model->setProperty("gl_completer_wired", true);
+        QPointer<MainWindow> safeMw(mw);
+        QObject::connect(model, &QAbstractItemModel::modelReset, mw, [safeMw]() { if (safeMw && safeMw->variablesDockWidget()) refreshDialogCompleters(safeMw); }, Qt::QueuedConnection);
+        QObject::connect(model, &QAbstractItemModel::rowsInserted, mw, [safeMw]() { if (safeMw && safeMw->variablesDockWidget()) refreshDialogCompleters(safeMw); }, Qt::QueuedConnection);
+    }
+    const auto pgs = mw->findChildren<PointerGraphDialog*>(); const auto aps = mw->findChildren<ArrayPlotDialog*>();
+    if (pgs.isEmpty() && aps.isEmpty()) return;
+    const QStringList cands = collectExpressionCandidates(mw);
+    for (auto* pg : pgs) pg->setCompletionCandidates(cands);
+    for (auto* ap : aps) ap->setCompletionCandidates(cands);
+}
+void graphStructTypeFromSource(MainWindow* mw, const QString& typeName) {
+    if (!mw || typeName.trimmed().isEmpty()) return;
+    const QString cleanType = typeName.trimmed(); QStringList matchedExprs;
+    if (auto* model = mw->variablesDockWidget() ? mw->variablesDockWidget()->findChild<VariableTreeModel*>() : nullptr) {
+        for (int r = 0; r < model->rowCount(); ++r) {
+            const QModelIndex idx = model->index(r, 0);
+            const QString expr = model->expressionPath(idx), tp = model->data(model->index(r, 2)).toString();
+            if (tp.contains(cleanType)) matchedExprs.append((tp.contains(QStringLiteral("vector")) || tp.contains(QStringLiteral("array")) || tp.contains(QLatin1Char('['))) ? (expr + QStringLiteral("[0]")) : expr);
+        }
+    }
+    if (matchedExprs.isEmpty() && mw->sourceCodeView()) {
+        const QString src = mw->sourceCodeView()->toPlainText();
+        const QRegularExpression arrInst(QStringLiteral(R"(\b(?:(?:vector|array)\s*<\s*(?:const\s+)?%1\b[^>]*>\s+([A-Za-z_][A-Za-z0-9_]*)|%1\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[[0-9]+\]))").arg(QRegularExpression::escape(cleanType)));
+        for (auto it = arrInst.globalMatch(src); it.hasNext();) { const auto m = it.next(); const QString v = !m.captured(1).isEmpty() ? m.captured(1) : m.captured(2); matchedExprs.append(v + QStringLiteral("[0]")); }
+        const QRegularExpression dirInst(QStringLiteral(R"(\b%1\s*[\*&]?\s+([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\[))").arg(QRegularExpression::escape(cleanType)));
+        for (auto it = dirInst.globalMatch(src); it.hasNext();) { const QString v = it.next().captured(1); if (v != cleanType && !matchedExprs.contains(v)) matchedExprs.append(v); }
+    }
+    mw->openPointerGraphVisualizer();
+    if (auto* pg = mw->findChild<PointerGraphDialog*>(QStringLiteral("PointerGraphDialog"))) {
+        for (const QString& ex : matchedExprs) pg->addAndEvaluateRootExpression(ex, cleanType);
+        pg->setRootInputText(matchedExprs.isEmpty() ? cleanType : matchedExprs.first());
+    }
+    refreshDialogCompleters(mw);
+}
+void bindSourceViewGraphSignals(MainWindow* mw, SourceCodeView* sv) {
+    if (!mw || !sv || sv->property("gl_graph_ctx_wired").toBool()) return;
+    sv->setProperty("gl_graph_ctx_wired", true);
+    QObject::connect(sv, &SourceCodeView::graphExpressionRequested, mw, [mw](const QString& expr) { mw->openPointerGraphVisualizer(expr); });
+    QObject::connect(sv, &SourceCodeView::graphStructTypeRequested, mw, [mw](const QString& tp) { graphStructTypeFromSource(mw, tp); });
+}
+}  // namespace
+
 /**
- * @brief Opens the modeless DDD Pointer & Struct Graph Visualizer and optionally graphs @p exprPath.
+ * @brief Opens the modeless Pointer & Struct Graph Visualizer and optionally graphs @p exprPath.
  * @param exprPath Optional C++ expression path to graph immediately.
  * @param varValue Optional runtime value or pointer address hint.
  * @param varType Optional static C/C++ type hint.
@@ -919,6 +916,7 @@ void MainWindow::syncTabBreakpointMetadata(SourceCodeView* view) const {
 void MainWindow::openPointerGraphVisualizer(const QString& exprPath, const QString& varValue, const QString& varType) {
     if (!m_pointerGraphDialog) m_pointerGraphDialog = new PointerGraphDialog(m_coordinator, this);
     m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank);
+    refreshDialogCompleters(this);
     if (!exprPath.trimmed().isEmpty()) { m_pointerGraphDialog->addAndEvaluateRootExpression(exprPath.trimmed(), varType, varValue); }
     m_pointerGraphDialog->show(); m_pointerGraphDialog->raise(); m_pointerGraphDialog->activateWindow();
 }
@@ -926,12 +924,13 @@ void MainWindow::openPointerGraphVisualizer(const QString& exprPath, const QStri
  * @brief Safely shuts down live coordinators and disconnects signals before Qt destroys child docks.
  */
 MainWindow::~MainWindow() {
+    m_isClosing = true;
     // Detach global shortcut/hover event filter before child widget destruction begins.
     if (qApp) qApp->removeEventFilter(this);
     delete m_deadlockAnalyzer; m_deadlockAnalyzer = nullptr; if (m_coordinator) QObject::disconnect(m_coordinator, nullptr, this, nullptr);
     // Silence and destroy owned coordinator cleanly without post-delete signal-blocker UB.
     if (m_ownedCoordinator) { m_ownedCoordinator->blockSignals(true); m_ownedCoordinator->terminateSession(); delete m_ownedCoordinator; m_ownedCoordinator = nullptr; }
     // Nullify cached dock and view pointers prior to QMainWindow child tree cleanup.
-    m_coordinator = nullptr; m_callStackDockWidget = nullptr; m_mpiDiagnosticsWidget = nullptr; m_gdbConsoleWidget = nullptr; m_variablesDockWidget = nullptr; m_serverRackView = nullptr;
+    m_coordinator = nullptr; m_callStackDockWidget = nullptr; m_mpiDiagnosticsWidget = nullptr; m_gdbConsoleWidget = nullptr; m_variablesDockWidget = nullptr; m_serverRackView = nullptr; m_projectExplorerWidget = nullptr; m_editorTabManager = nullptr; m_pointerGraphDialog = nullptr;
 }
 }  // namespace gridlock::ui

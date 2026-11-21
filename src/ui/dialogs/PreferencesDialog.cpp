@@ -11,11 +11,13 @@
 #include "PreferencesDialog.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/DocsetManager.hpp"
+#include "../../core/managers/ShortcutManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
@@ -31,12 +33,125 @@
 
 namespace gridlock::ui {
 
+KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(parent) {
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(12);
+
+    auto* heading = new QLabel(tr("<b>Keyboard Shortcuts</b>"), this);
+    heading->setObjectName(QStringLiteral("heading"));
+    layout->addWidget(heading);
+
+    auto* separator = new QLabel(this);
+    separator->setFixedHeight(1);
+    separator->setObjectName(QStringLiteral("separator"));
+    layout->addWidget(separator);
+
+    auto* topRow = new QHBoxLayout();
+    topRow->setSpacing(8);
+    m_filterEdit = new QLineEdit(this);
+    m_filterEdit->setObjectName(QStringLiteral("keybindingsFilterEdit"));
+    m_filterEdit->setPlaceholderText(tr("Filter actions, categories, or shortcuts..."));
+    m_filterEdit->setClearButtonEnabled(true);
+    m_filterEdit->setToolTip(tr("Filter keyboard shortcuts by category, action title, or key sequence"));
+    topRow->addWidget(m_filterEdit, 1);
+
+    m_resetBtn = new QPushButton(tr("Reset Defaults"), this);
+    m_resetBtn->setObjectName(QStringLiteral("keybindingsResetDefaultsBtn"));
+    m_resetBtn->setToolTip(tr("Restore all keyboard shortcuts to their built-in defaults"));
+    topRow->addWidget(m_resetBtn);
+    layout->addLayout(topRow);
+
+    m_table = new QTableWidget(0, 3, this);
+    m_table->setObjectName(QStringLiteral("keybindingsTable"));
+    m_table->setHorizontalHeaderLabels({tr("Category"), tr("Action"), tr("Shortcut")});
+    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setAlternatingRowColors(true);
+    m_table->verticalHeader()->setVisible(false);
+    m_table->verticalHeader()->setDefaultSectionSize(32);
+    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Interactive);
+    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Interactive);
+    m_table->setColumnWidth(0, 125);
+    m_table->setColumnWidth(2, 210);
+    layout->addWidget(m_table, 1);
+
+    connect(m_filterEdit, &QLineEdit::textChanged, this, &KeybindingsSettingsPage::filterRows);
+    connect(m_resetBtn, &QPushButton::clicked, this, [this]() {
+        gridlock::core::ShortcutManager::instance().resetAllToDefaults(true);
+        refreshBindings();
+    });
+
+    refreshBindings();
+}
+
+void KeybindingsSettingsPage::refreshBindings() {
+    auto& sm = gridlock::core::ShortcutManager::instance();
+    sm.syncMenuActionsFromMainWindow();
+    const auto& bindings = sm.registeredBindings();
+    m_table->setRowCount(bindings.size());
+    for (int row = 0; row < bindings.size(); ++row) {
+        const auto& b = bindings[row];
+        auto* catItem = new QTableWidgetItem(b.category);
+        catItem->setToolTip(tr("Category: %1").arg(b.category));
+        auto* actItem = new QTableWidgetItem(b.label);
+        actItem->setData(Qt::UserRole, b.id);
+        const QString defStr = b.defaultShortcut.isEmpty() ? tr("Unassigned") : b.defaultShortcut.toString(QKeySequence::NativeText);
+        actItem->setToolTip(tr("%1 -> %2 (Default: %3)").arg(b.category, b.label, defStr));
+        m_table->setItem(row, 0, catItem);
+        m_table->setItem(row, 1, actItem);
+
+        auto* seqEdit = new QKeySequenceEdit(b.currentShortcut, m_table);
+        seqEdit->setObjectName(QStringLiteral("keySeqEdit_%1").arg(b.id));
+        seqEdit->setClearButtonEnabled(true);
+        seqEdit->setFixedHeight(26);
+        seqEdit->setToolTip(tr("Click and press a new shortcut for '%1' (Default: %2)").arg(b.label, defStr));
+        const QString actionId = b.id;
+        connect(seqEdit, &QKeySequenceEdit::keySequenceChanged, this, [actionId](const QKeySequence& seq) {
+            gridlock::core::ShortcutManager::instance().setShortcutForAction(actionId, seq, true);
+        });
+        m_table->setCellWidget(row, 2, seqEdit);
+    }
+    if (m_filterEdit && !m_filterEdit->text().isEmpty()) filterRows(m_filterEdit->text());
+}
+
+void KeybindingsSettingsPage::applyPendingChanges() {
+    if (!m_table) return;
+    auto& sm = gridlock::core::ShortcutManager::instance();
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        QTableWidgetItem* actItem = m_table->item(row, 1);
+        auto* seqEdit = qobject_cast<QKeySequenceEdit*>(m_table->cellWidget(row, 2));
+        if (!actItem || !seqEdit) continue;
+        const QString id = actItem->data(Qt::UserRole).toString();
+        if (sm.shortcutForAction(id) != seqEdit->keySequence()) {
+            sm.setShortcutForAction(id, seqEdit->keySequence(), true);
+        }
+    }
+}
+
+void KeybindingsSettingsPage::filterRows(const QString& query) {
+    if (!m_table) return;
+    const QString q = query.trimmed();
+    for (int row = 0; row < m_table->rowCount(); ++row) {
+        if (q.isEmpty()) {
+            m_table->setRowHidden(row, false);
+            continue;
+        }
+        const QString cat = m_table->item(row, 0) ? m_table->item(row, 0)->text() : QString();
+        const QString act = m_table->item(row, 1) ? m_table->item(row, 1)->text() : QString();
+        auto* seqEdit = qobject_cast<QKeySequenceEdit*>(m_table->cellWidget(row, 2));
+        const QString seq = seqEdit ? seqEdit->keySequence().toString(QKeySequence::NativeText) : QString();
+        const bool match = cat.contains(q, Qt::CaseInsensitive) || act.contains(q, Qt::CaseInsensitive) ||
+                           seq.contains(q, Qt::CaseInsensitive);
+        m_table->setRowHidden(row, !match);
+    }
+}
+
 /**
  * @brief Constructs the top-level preferences dialog.
  * @param parent Optional parent widget.
- *
- * Assembles the modal window chrome, configures the horizontal splitter between
- * sidebar and page stack, and wires the standard Ok/Apply/Cancel dialog buttons.
  */
 PreferencesDialog::PreferencesDialog(QWidget* parent)
     : QDialog(parent) {
@@ -45,25 +160,20 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setMinimumSize(780, 540);
     resize(860, 580);
 
-    // Enable styled QSS background painting and solid palette auto-fill so editor text never bleeds through.
     setAttribute(Qt::WA_StyledBackground, true);
     setAutoFillBackground(true);
 
-    // Root vertical layout containing the horizontal category splitter and bottom action button bar.
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    // Horizontal splitter separating the 195px category sidebar list from the active settings page stack.
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setHandleWidth(1);
     splitter->setChildrenCollapsible(false);
 
-    // Construct navigation sidebar and stacked settings pages.
     setupSidebar();
     setupPages();
 
-    // Mount sidebar and stacked page container with fixed sidebar stretch (0) and expanding content (1).
     splitter->addWidget(m_sidebar);
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
@@ -72,7 +182,6 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
 
     rootLayout->addWidget(splitter, 1);
 
-    // Subtle 1px horizontal divider line separating the page stack from the Ok/Cancel/Apply bar.
     auto* line = new QLabel(this);
     line->setFixedHeight(1);
     line->setObjectName(QStringLiteral("separator"));
@@ -81,35 +190,37 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     setupButtonBox();
     rootLayout->addWidget(m_buttonBox);
 
-    // Harmonize 26px control heights across settings pages while preserving modern footer button padding.
+    // Harmonize 26px control heights and attach descriptive per-item tooltips to all dropdowns.
     for (QPushButton* btn : findChildren<QPushButton*>()) {
         if (m_buttonBox && m_buttonBox->buttons().contains(btn)) continue;
         btn->setFixedHeight(26);
-        if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) {
-            btn->setMinimumWidth(96);
-        }
+        if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) btn->setMinimumWidth(96);
     }
-    for (QLineEdit* edit : findChildren<QLineEdit*>()) {
-        edit->setFixedHeight(26);
-    }
+    for (QLineEdit* edit : findChildren<QLineEdit*>()) edit->setFixedHeight(26);
     for (QComboBox* combo : findChildren<QComboBox*>()) {
         combo->setFixedHeight(26);
+        for (int i = 0; i < combo->count(); ++i) {
+            if (combo->itemData(i, Qt::ToolTipRole).toString().isEmpty()) {
+                const QString val = combo->itemData(i).toString();
+                const QString desc = val.isEmpty() ? combo->itemText(i)
+                                                   : QStringLiteral("%1 (%2)").arg(combo->itemText(i), val);
+                combo->setItemData(i, desc, Qt::ToolTipRole);
+            }
+        }
+        if (combo->toolTip().isEmpty() && combo->currentIndex() >= 0) {
+            combo->setToolTip(combo->itemData(combo->currentIndex(), Qt::ToolTipRole).toString());
+        }
+        connect(combo, &QComboBox::currentIndexChanged, this, [combo](int idx) {
+            if (idx >= 0) combo->setToolTip(combo->itemData(idx, Qt::ToolTipRole).toString());
+        });
     }
 
-    // Synchronize dialog theme chrome, sidebar contrast, and primary/secondary footer action buttons.
     applyDialogThemeChrome();
     connect(&gridlock::core::managers::ThemeManager::instance(),
             &gridlock::core::managers::ThemeManager::themeModeChanged,
             this, [this](bool) { applyDialogThemeChrome(); });
 }
 
-/**
- * @brief Synchronizes opaque dialog surfaces, sidebar typography, QSS rules, and QPalettes with the active theme.
- *
- * Queries semantic ThemePalette hex tokens (`canvasHex`, `headerHex`, `borderHex`, `accentHex`, `textHex`)
- * from ThemeManager and applies both explicit QSS rules and `Active`/`Inactive`/`Disabled` QPalette roles
- * across `PreferencesDialog`, `m_stack`, `m_sidebar`, and `m_sidebar->viewport()`.
- */
 void PreferencesDialog::applyDialogThemeChrome() {
     auto& tm = gridlock::core::managers::ThemeManager::instance();
     const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
@@ -119,23 +230,21 @@ void PreferencesDialog::applyDialogThemeChrome() {
     const QString accent = pal.accentHex;
     const QString text = pal.textHex;
 
-    // Select crisp white (#ffffff) text when accent lightness < 165, otherwise dark charcoal (#16181d).
     const QColor accentCol(accent);
-    const QString selFg = (accentCol.lightness() < 165)
-                              ? QStringLiteral("#ffffff")
-                              : QStringLiteral("#16181d");
+    const QString selFg = (accentCol.lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
     const QString hoverBg = pal.isDark ? QStringLiteral("#252932") : canvas;
     const QString hoverFg = pal.isDark ? QStringLiteral("#ffffff") : text;
 
-    // Style root dialog, stacked pages, group boxes, 13px dialog controls, buttons, and divider explicitly.
     setStyleSheet(QStringLiteral(
         "QDialog, QDialog#PreferencesDialog, QWidget#PreferencesDialog, "
         "QStackedWidget, QStackedWidget > QWidget, QScrollArea { background-color: %1; color: %5; font-size: 13px; }"
         "QLabel, QCheckBox { color: %5; font-size: 13px; }"
         "QGroupBox { background-color: %2; border: 1px solid %3; border-radius: 4px; "
         "margin-top: 8px; padding-top: 10px; color: %5; font-size: 13px; font-weight: 600; }"
-        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %5; "
+        "QLineEdit, QComboBox, QSpinBox, QKeySequenceEdit { background-color: %1; color: %5; "
         "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 22px; max-height: 26px; font-size: 13px; }"
+        "QTableWidget { background-color: %1; alternate-background-color: %2; color: %5; gridline-color: %3; border: 1px solid %3; border-radius: 4px; }"
+        "QHeaderView::section { background-color: %2; color: %5; border: none; border-bottom: 1px solid %3; border-right: 1px solid %3; padding: 4px 8px; font-weight: 600; }"
         "QStackedWidget QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
         "border-radius: 3px; padding: 2px 10px; min-height: 22px; max-height: 26px; font-size: 13px; }"
         "QStackedWidget QPushButton:hover { background-color: %6; color: %7; border-color: %4; }"
@@ -331,9 +440,10 @@ void PreferencesDialog::setupSidebar() {
     };
     const QList<Entry> entries = {
         {tr("Appearance"), "\uf1fc"},      {tr("Editing"), "\uf044"},
-        {tr("Behavior"), "\uf085"},        {tr("Debugger"), "\uf188"},
-        {tr("HPC / Cluster"), "\uf233"},   {tr("HPC Integration"), "\uf1c0"},
-        {tr("Terminal"), "\uf120"},        {tr("Docsets"), "\uf02d"},
+        {tr("Behavior"), "\uf085"},        {tr("Keybindings"), "\uf11c"},
+        {tr("Debugger"), "\uf188"},        {tr("HPC / Cluster"), "\uf233"},
+        {tr("HPC Integration"), "\uf1c0"}, {tr("Terminal"), "\uf120"},
+        {tr("Docsets"), "\uf02d"},
     };
 
     // Populate category items with spacious 36px row hints and stored Nerd Font glyph metadata.
@@ -367,6 +477,7 @@ void PreferencesDialog::setupPages() {
     m_appearancePage = new AppearanceSettingsPage(m_stack);
     m_editingPage = new EditingSettingsPage(m_stack);
     m_behaviorPage = new BehaviorSettingsPage(m_stack);
+    m_keybindingsPage = new KeybindingsSettingsPage(m_stack);
     m_debuggerPage = new DebuggerSettingsPage(m_stack);
     m_hpcPage = new HpcSettingsPage(m_stack);
     m_hpcIntegrationPage = new HpcIntegrationSettingsPage(m_stack);
@@ -377,6 +488,7 @@ void PreferencesDialog::setupPages() {
     for (QWidget* page : {static_cast<QWidget*>(m_appearancePage),
                           static_cast<QWidget*>(m_editingPage),
                           static_cast<QWidget*>(m_behaviorPage),
+                          static_cast<QWidget*>(m_keybindingsPage),
                           static_cast<QWidget*>(m_debuggerPage),
                           static_cast<QWidget*>(m_hpcPage),
                           static_cast<QWidget*>(m_hpcIntegrationPage),
@@ -539,6 +651,7 @@ void PreferencesDialog::apply() {
     ts.fontFamily = m_terminalPage->fontFamily();
     ts.fontSize = m_terminalPage->fontSize();
     cfg.saveTerminalSettings(ts);
+    if (m_keybindingsPage) m_keybindingsPage->applyPendingChanges();
 
     s.sync();
     if (qApp) qApp->setProperty("gridlock_disasm_prefs_rev", qApp->property("gridlock_disasm_prefs_rev").toInt() + 1);

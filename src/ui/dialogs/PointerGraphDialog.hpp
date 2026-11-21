@@ -7,6 +7,7 @@
 #pragma once
 
 #include <QCheckBox>
+#include <QCompleter>
 #include <QDialog>
 #include <QGraphicsScene>
 #include <QLineEdit>
@@ -19,6 +20,7 @@
 #include <QSizeF>
 #include <QString>
 #include <QStringList>
+#include <QStringListModel>
 #include <QVariantList>
 #include <QVector>
 
@@ -146,6 +148,13 @@ class PointerGraphDialog : public QDialog {
   bool exportGraphToPng(const QString& filePath);
   bool exportGraphToSvg(const QString& filePath);
 
+  // --- Live Symbol & Variable Autocomplete ---
+  void setCompletionCandidates(const QStringList& candidates);
+  QStringList completionCandidates() const { return m_completionCandidates; }
+  QCompleter* expressionCompleter() const { return m_completer; }
+  QLineEdit* rootInputEdit() const { return m_rootEdit; }
+  void setRootInputText(const QString& text);
+
  public slots:
   void refreshPinnedRoots();
   void onTargetStopped(int rankId);
@@ -177,6 +186,9 @@ class PointerGraphDialog : public QDialog {
   bool m_suppressPositionPinning = false;
 
   QLineEdit* m_rootEdit = nullptr;
+  QCompleter* m_completer = nullptr;
+  QStringListModel* m_completerModel = nullptr;
+  QStringList m_completionCandidates;
   QPushButton* m_addBtn = nullptr;
   QPushButton* m_refreshBtn = nullptr;
   QCheckBox* m_autoRefreshCheck = nullptr;

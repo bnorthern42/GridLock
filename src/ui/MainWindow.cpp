@@ -183,22 +183,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
       // Fall back to read-only AppImage share path ($APPDIR/usr/share/gridlock/tutorial/) if external.
       const QString targetData = localExists ? entry.second : resolveTutorialTarget(entry.second);
       // Update existing default items (inspection_demo, deadlock_ring) or insert new tutorial targets.
-      const int existingIdx = m_targetSelector->findText(entry.first);
-      if (existingIdx >= 0) {
-        // Synchronize item data with resolved file path so toolbar selection activates proper source.
-        m_targetSelector->setItemData(existingIdx, targetData);
+      int idx = m_targetSelector->findText(entry.first);
+      if (idx >= 0) {
+        m_targetSelector->setItemData(idx, targetData);
       } else {
-        // Position new tutorial entries directly before the open binary file chooser item.
         const int openIdx = m_targetSelector->findData(QStringLiteral("__open_binary__"));
-        if (openIdx >= 0) m_targetSelector->insertItem(openIdx, entry.first, targetData);
-        else m_targetSelector->addItem(entry.first, targetData);
+        idx = (openIdx >= 0) ? openIdx : m_targetSelector->count();
+        m_targetSelector->insertItem(idx, entry.first, targetData);
       }
+      m_targetSelector->setItemData(idx, QStringLiteral("MPI Showcase Target (%1)").arg(entry.second), Qt::ToolTipRole);
+    }
+  }
+  for (QComboBox* cb : findChildren<QComboBox*>()) {
+    for (int i = 0; i < cb->count(); ++i) {
+      if (cb->itemData(i, Qt::ToolTipRole).toString().isEmpty()) cb->setItemData(i, cb->itemText(i), Qt::ToolTipRole);
     }
   }
   // Resolve initial demonstration source file across local workspace and AppImage paths.
   const QString initialSource = resolveTutorialTarget(QStringLiteral("tutorial/inspection_demo.cpp"));
   // Eagerly load resolved demo source file into editor canvas if present on disk.
   if (QFileInfo::exists(initialSource)) loadSourceFile(initialSource);
+  bindSourceViewGraphSignals(this, sourceCodeView());
 
   // Load offline persistence TOML breakpoints and connect per-rank breakpoint metadata sync.
   m_persistentBreakpoints = gridlock::core::ConfigManager::instance().getBreakpoints();
@@ -535,12 +540,10 @@ void MainWindow::setupMenu() {
     gridlock::ui::dialogs::ProjectWizard dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
       QString projectRoot = dialog.getProjectRoot();
-      if (projectRoot.isEmpty())
-        return;
+      if (projectRoot.isEmpty()) return;
 
       // Atomically switch workspace directory, FILES tree, and target discovery before saving wizard overrides.
       switchWorkspaceDirectory(projectRoot);
-
       auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
       ps.targetBinary = dialog.getTargetBinary().toStdString();
       ps.workingDirectory = dialog.getProjectRoot().toStdString();
@@ -548,14 +551,9 @@ void MainWindow::setupMenu() {
 
       // Configure default MPI launcher settings based on wizard selections.
       auto dbgSettings = gridlock::core::ConfigManager::instance().getDebuggerSettings();
-      dbgSettings.mpiExecutable = "mpirun";
-      dbgSettings.defaultRanks = dialog.getRanks();
+      dbgSettings.mpiExecutable = "mpirun"; dbgSettings.defaultRanks = dialog.getRanks();
       // Strip launcher prefix and target binary path to persist pure MPI flags.
-      dbgSettings.mpiArgs = dialog.getMpiLaunchCommand()
-                               .remove("mpirun ")
-                               .remove("-np " + QString::number(dialog.getRanks()) + " ")
-                               .remove(dialog.getTargetBinary())
-                               .trimmed();
+      dbgSettings.mpiArgs = dialog.getMpiLaunchCommand().remove("mpirun ").remove("-np " + QString::number(dialog.getRanks()) + " ").remove(dialog.getTargetBinary()).trimmed();
       gridlock::core::ConfigManager::instance().saveDebuggerSettings(dbgSettings);
 
       // Immediately launch debugging session if coordinator is available.
@@ -837,8 +835,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
     else if (dp->propertyName() == QByteArrayLiteral("gridlock_editor_highlight_rev") && m_editorTabManager)
       m_editorTabManager->rehighlightAllTabs();
   }
-  // Connect PreferencesDialog::preferencesChanged and configure QFileDialogs on Show/Polish.
+  // Connect PreferencesDialog, dialog completers, SourceCodeView graph signals, and QFileDialogs on Show/Polish.
   if (event->type() == QEvent::Show || event->type() == QEvent::Polish) {
+    if (auto *sv = qobject_cast<SourceCodeView *>(watched)) bindSourceViewGraphSignals(this, sv);
     if (auto *fd = qobject_cast<QFileDialog *>(watched))
       FileDialogHelper::configureFileDialog(fd, !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : (m_projectExplorerWidget ? m_projectExplorerWidget->rootPath() : QString()));
     if (auto *psPre = qobject_cast<ProjectSettingsDialog *>(watched)) {
@@ -846,7 +845,10 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
       if (!psPre->property("_glWd").toBool()) { psPre->setProperty("_glWd", true); connect(psPre, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); if (!m_activeWorkspaceDir.isEmpty()) saveSession(false); }); }
     }
     if (event->type() == QEvent::Show) {
+      if (qobject_cast<PointerGraphDialog *>(watched) || qobject_cast<ArrayPlotDialog *>(watched)) refreshDialogCompleters(this);
       if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
+        gridlock::core::ShortcutManager::instance().syncMenuActionsFromMainWindow();
+        if (prefs->keybindingsPage()) prefs->keybindingsPage()->refreshBindings();
         connect(prefs, &PreferencesDialog::preferencesChanged, this, &MainWindow::syncCoordinatorWithConfig, Qt::UniqueConnection);
         connect(prefs, &PreferencesDialog::preferencesChanged, this, qOverload<>(&MainWindow::syncDisassemblyDecompilerVisibility), Qt::UniqueConnection);
         if (m_editorTabManager) connect(prefs, &PreferencesDialog::preferencesChanged, m_editorTabManager, &EditorTabManager::rehighlightAllTabs, Qt::UniqueConnection);
@@ -860,25 +862,25 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
 
   // Keep tabified sibling QDockWidgets synchronized to the active dock's dimensions.
   if (event->type() == QEvent::Resize) {
-    if (auto *dock = qobject_cast<QDockWidget *>(watched)) {
-      if (dock->parentWidget() == this && !dock->isFloating() && dock->width() > 155 && dock->height() > 155) {
-        for (QDockWidget *sib : tabifiedDockWidgets(dock)) {
-          if (sib && !sib->isFloating() && sib->size() != dock->size()) sib->resize(dock->size());
-        }
-      }
+    if (auto *dock = qobject_cast<QDockWidget *>(watched); dock && dock->parentWidget() == this && !dock->isFloating() && dock->width() > 155 && dock->height() > 155) {
+      for (QDockWidget *sib : tabifiedDockWidgets(dock)) if (sib && !sib->isFloating() && sib->size() != dock->size()) sib->resize(dock->size());
     }
   }
-  // Route global customizable IDE keybindings through ShortcutManager before default widget handling.
+  // Route global customizable IDE keybindings through live QAction shortcuts and ShortcutManager.
   if (event->type() == QEvent::KeyPress) {
     auto *ke = static_cast<QKeyEvent *>(event);
     const auto mods = ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
-    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::ShiftModifier)) { openCommandPalette(QStringLiteral(">")); return true; }
-    if (ke->key() == Qt::Key_P && mods == (Qt::ControlModifier | Qt::AltModifier)) { attachToProcessWorkflow(); return true; }
-    if (ke->key() == Qt::Key_C && mods == (Qt::ControlModifier | Qt::AltModifier)) { openProgrammerCalculator(); return true; }
-    if (ke->key() == Qt::Key_S && mods == (Qt::ControlModifier | Qt::AltModifier)) { openSignalsAndCatchpoints(); return true; }
-    if (ke->key() == Qt::Key_P && mods == Qt::ControlModifier) {
-      if (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible()) { openCommandPalette(QString()); return true; }
-    }
+    const QKeySequence pressed(ke->key() | mods);
+    auto matchesAct = [this, &pressed](const QString &objName, const QKeySequence &fallback) {
+      if (pressed.isEmpty()) return false;
+      if (auto *a = findChild<QAction *>(objName)) return !a->shortcut().isEmpty() && a->shortcut() == pressed;
+      return !fallback.isEmpty() && fallback == pressed;
+    };
+    if (matchesAct(QStringLiteral("actionCommandPalette"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P))) { openCommandPalette(QStringLiteral(">")); return true; }
+    if (matchesAct(QStringLiteral("actionAttachProcess"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P))) { attachToProcessWorkflow(); return true; }
+    if (matchesAct(QStringLiteral("actionProgrammerCalculator"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C))) { openProgrammerCalculator(); return true; }
+    if (matchesAct(QStringLiteral("actionSignalsAndCatchpoints"), QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S))) { openSignalsAndCatchpoints(); return true; }
+    if (matchesAct(QStringLiteral("actionQuickOpen"), QKeySequence(Qt::CTRL | Qt::Key_P)) && (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible())) { openCommandPalette(QString()); return true; }
     if (gridlock::core::ShortcutManager::instance().handleKeyPress(watched, ke)) return true;
   }
   return QMainWindow::eventFilter(watched, event);
@@ -886,8 +888,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
 /** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix. */
 void MainWindow::openCommandPalette(const QString &initialPrefix) {
   if (!m_commandPaletteDialog) m_commandPaletteDialog = new CommandPaletteDialog(this);
-  m_commandPaletteDialog->populateFromMainWindow(this);
-  m_commandPaletteDialog->openWithPrefix(initialPrefix);
+  m_commandPaletteDialog->populateFromMainWindow(this); m_commandPaletteDialog->openWithPrefix(initialPrefix);
 }
 /** @brief Opens or raises the floating Programmer's Calculator tool window. */
 void MainWindow::openProgrammerCalculator() {
@@ -913,9 +914,11 @@ void MainWindow::rebuildRecentSessionsMenu() {
   // Query live normalized MRU workspaces/TOML paths (most recent first, capped at 10).
   const QStringList entries = gridlock::core::managers::SessionManager::instance().recentSessions();
   for (const QString &path : entries) {
-    // Format label as `<workspaceName> (<path>)` and store canonical path in action user data.
-    const QFileInfo fi(path); const QString name = fi.isDir() ? QDir(path).dirName() : fi.completeBaseName();
-    QAction *act = m_recentSessionsMenu->addAction(QStringLiteral("%1 (%2)").arg(name.isEmpty() ? path : name, path)); act->setData(path);
+    // Format human-readable workspace title without underscores and store canonical path in data & tooltip.
+    const QFileInfo fi(path); QString label = fi.isDir() ? QDir(path).dirName() : fi.completeBaseName();
+    label.replace(QLatin1Char('_'), QLatin1Char(' '));
+    if (label.trimmed().isEmpty()) label = QStringLiteral("Workspace Session");
+    QAction *act = m_recentSessionsMenu->addAction(label); act->setData(path); act->setToolTip(path);
     connect(act, &QAction::triggered, this, [this, path]() {
       // Restore workspace TOML state if present; otherwise switch directly to the workspace directory.
       const QString toml = QFileInfo(path).isDir() ? QDir(path).filePath(QStringLiteral(".gridlock/workspace.toml")) : path;

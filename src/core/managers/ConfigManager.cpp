@@ -799,19 +799,14 @@ void ConfigManager::setDebuggerEngine(const QString& engine) {
 /** @brief Returns whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor (default: false). */
 bool ConfigManager::showDecompilerWithSource() const {
   if (!m_workspacePath.isEmpty()) {
-    try {
-      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
-      if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("show_decompiler_with_source"); v && v->is_boolean()) return v->as_boolean()->get();
-    } catch (...) {}
+    try { auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString()); if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("show_decompiler_with_source"); v && v->is_boolean()) return v->as_boolean()->get(); } catch (...) {}
   }
   return QSettings(kOrg, kApp).value(QStringLiteral("debugger/show_decompiler_with_source"), false).toBool();
 }
-
 /** @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor. */
 void ConfigManager::setShowDecompilerWithSource(bool show) {
   if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
-    const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
     dbgTbl.insert_or_assign("show_decompiler_with_source", show); tbl.insert_or_assign("debugger", dbgTbl);
@@ -819,24 +814,18 @@ void ConfigManager::setShowDecompilerWithSource(bool show) {
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/show_decompiler_with_source"), show); s.sync();
 }
-
 /** @brief Returns the default DisassemblyView presentation mode ("cfg", "linear", or "split"; default: "cfg"). */
 QString ConfigManager::defaultDisassemblyMode() const {
   if (!m_workspacePath.isEmpty()) {
-    try {
-      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
-      if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("default_disassembly_mode"); v && v->is_string()) return QString::fromStdString(v->as_string()->get());
-    } catch (...) {}
+    try { auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString()); if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("default_disassembly_mode"); v && v->is_string()) return QString::fromStdString(v->as_string()->get()); } catch (...) {}
   }
   return QSettings(kOrg, kApp).value(QStringLiteral("debugger/default_disassembly_mode"), QStringLiteral("cfg")).toString();
 }
-
 /** @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split"). */
 void ConfigManager::setDefaultDisassemblyMode(const QString& mode) {
   const QString clean = mode.trimmed().isEmpty() ? QStringLiteral("cfg") : mode.trimmed().toLower();
   if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
-    const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
     dbgTbl.insert_or_assign("default_disassembly_mode", clean.toStdString()); tbl.insert_or_assign("debugger", dbgTbl);
@@ -844,24 +833,18 @@ void ConfigManager::setDefaultDisassemblyMode(const QString& mode) {
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/default_disassembly_mode"), clean); s.sync();
 }
-
 /** @brief Returns the status bar resource telemetry display format ("gb", "percent", or "both"; default: "gb"). */
 QString ConfigManager::telemetryDisplayFormat() const {
   if (!m_workspacePath.isEmpty()) {
-    try {
-      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
-      if (auto* uiTbl = tbl["ui"].as_table()) if (auto v = uiTbl->get("telemetry_display_format"); v && v->is_string()) return QString::fromStdString(v->as_string()->get());
-    } catch (...) {}
+    try { auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString()); if (auto* uiTbl = tbl["ui"].as_table()) if (auto v = uiTbl->get("telemetry_display_format"); v && v->is_string()) return QString::fromStdString(v->as_string()->get()); } catch (...) {}
   }
   return QSettings(kOrg, kApp).value(QStringLiteral("ui/telemetry_display_format"), QStringLiteral("gb")).toString();
 }
-
 /** @brief Sets and persists the status bar resource telemetry display format ("gb", "percent", or "both"). */
 void ConfigManager::setTelemetryDisplayFormat(const QString& fmt) {
   const QString clean = fmt.trimmed().isEmpty() ? QStringLiteral("gb") : fmt.trimmed().toLower();
   if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
-    const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
+    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table uiTbl; if (auto* ex = tbl["ui"].as_table()) uiTbl = *ex;
     uiTbl.insert_or_assign("telemetry_display_format", clean.toStdString()); tbl.insert_or_assign("ui", uiTbl);
@@ -869,7 +852,6 @@ void ConfigManager::setTelemetryDisplayFormat(const QString& fmt) {
   }
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("ui/telemetry_display_format"), clean); s.sync();
 }
-
 /** @brief Returns whether nested Rainbow Brackets depth coloring is enabled (default: true). */
 bool ConfigManager::rainbowBracketsEnabled() const {
   QSettings s(kOrg, kApp);
@@ -877,7 +859,6 @@ bool ConfigManager::rainbowBracketsEnabled() const {
   if (auto* ed = m_config["editing"].as_table()) if (auto v = ed->get("rainbow_brackets"); v && v->is_boolean()) return v->as_boolean()->get();
   return true;
 }
-
 /** @brief Returns whether TOML, YAML, Markdown, and CSV syntax highlighting is enabled (default: true). */
 bool ConfigManager::dataDocHighlightingEnabled() const {
   QSettings s(kOrg, kApp);
@@ -885,7 +866,6 @@ bool ConfigManager::dataDocHighlightingEnabled() const {
   if (auto* ed = m_config["editing"].as_table()) if (auto v = ed->get("data_doc_highlighting"); v && v->is_boolean()) return v->as_boolean()->get();
   return true;
 }
-
 /** @brief Sets and persists Rainbow Brackets enabled state and broadcasts a live editor rehighlight property. */
 void ConfigManager::setRainbowBracketsEnabled(bool enabled) {
   toml::table edTbl; if (auto* ex = m_config["editing"].as_table()) edTbl = *ex;
@@ -893,7 +873,6 @@ void ConfigManager::setRainbowBracketsEnabled(bool enabled) {
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editing/rainbow_brackets"), enabled); s.sync();
   if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_rainbow_brackets", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
 }
-
 void ConfigManager::setDataDocHighlightingEnabled(bool enabled) {
   toml::table edTbl; if (auto* ex = m_config["editing"].as_table()) edTbl = *ex;
   edTbl.insert_or_assign("data_doc_highlighting", enabled); m_config.insert_or_assign("editing", edTbl); saveGlobalConfig();
@@ -926,6 +905,25 @@ void ConfigManager::setMemoryMapColorScheme(const QString& scheme) {
   apTbl.insert_or_assign("memory_map_color_scheme", norm.toStdString()); m_config.insert_or_assign("appearance", apTbl); saveGlobalConfig();
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("appearance/memory_map_color_scheme"), norm); s.sync();
   if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_memmap_color_scheme", norm); app->setProperty("gridlock_memmap_scheme_rev", app->property("gridlock_memmap_scheme_rev").toInt() + 1); }
+}
+/** @brief Loads persisted user-customized shortcut overrides keyed by action identifier. */
+QMap<QString, QKeySequence> ConfigManager::customShortcuts() const {
+  QMap<QString, QKeySequence> out;
+  if (auto* kb = m_config["keybindings"].as_table()) {
+    for (const auto& [k, v] : *kb) if (v.is_string()) out.insert(QString::fromStdString(std::string(k.str())), QKeySequence::fromString(QString::fromStdString(v.as_string()->get()), QKeySequence::PortableText));
+  }
+  QSettings s(kOrg, kApp); s.beginGroup(QStringLiteral("keybindings"));
+  for (const QString& key : s.childKeys()) out.insert(key, QKeySequence::fromString(s.value(key).toString(), QKeySequence::PortableText));
+  s.endGroup(); return out;
+}
+/** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
+void ConfigManager::setCustomShortcuts(const QMap<QString, QKeySequence>& overrides) {
+  toml::table kbTbl;
+  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) kbTbl.insert_or_assign(it.key().toStdString(), it.value().toString(QKeySequence::PortableText).toStdString());
+  m_config.insert_or_assign("keybindings", kbTbl); saveGlobalConfig();
+  QSettings s(kOrg, kApp); s.remove(QStringLiteral("keybindings")); s.beginGroup(QStringLiteral("keybindings"));
+  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) s.setValue(it.key(), it.value().toString(QKeySequence::PortableText));
+  s.endGroup(); s.sync();
 }
 /** @brief Loads extended breakpoint metadata (condition, ignoreCount, logMessage) from QSettings. */
 QList<BreakpointConfig> ConfigManager::getBreakpointConfigs(const QString& targetExecutable) const {

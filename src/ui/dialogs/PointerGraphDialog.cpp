@@ -16,6 +16,7 @@
 #include "../../core/hpc/IBackendCoordinator.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
+#include <QAbstractItemView>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -52,86 +53,59 @@ void PointerGraphDialog::setupUi() {
   rootLayout->setContentsMargins(8, 8, 8, 8);
   rootLayout->setSpacing(6);
 
-  // Row 1: Incremental Root Expression input, Refresh, Auto-Refresh, Prune Unreferenced, and Close.
-  auto* row1 = new QHBoxLayout();
-  row1->setSpacing(6);
-  m_rootEdit = new QLineEdit(this);
-  m_rootEdit->setObjectName(QStringLiteral("pointerGraphRootEdit"));
-  m_rootEdit->setPlaceholderText(QStringLiteral("Add root pointer or struct expression (e.g., headA, mesh, cfg)..."));
-  m_addBtn = new QPushButton(QStringLiteral("Graph Expression"), this);
-  m_addBtn->setObjectName(QStringLiteral("pointerGraphAddBtn"));
-  m_refreshBtn = new QPushButton(QStringLiteral("Refresh Now"), this);
-  m_refreshBtn->setObjectName(QStringLiteral("pointerGraphRefreshBtn"));
-  m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh on Stop"), this);
-  m_autoRefreshCheck->setObjectName(QStringLiteral("pointerGraphAutoRefreshCheck"));
-  m_autoRefreshCheck->setChecked(true);
-  m_pruneCheck = new QCheckBox(QStringLiteral("Prune Unreferenced Nodes"), this);
-  m_pruneCheck->setObjectName(QStringLiteral("pointerGraphPruneCheck"));
-  m_pruneCheck->setChecked(true);
-  m_closeBtn = new QPushButton(QStringLiteral("✕ CLOSE"), this);
-  m_closeBtn->setObjectName(QStringLiteral("pointerGraphCloseBtn"));
+  // Row 1: Incremental Root Expression input with live autocomplete, Refresh, Auto-Refresh, Prune, and Close.
+  auto* row1 = new QHBoxLayout(); row1->setSpacing(6);
+  m_rootEdit = new QLineEdit(this); m_rootEdit->setObjectName(QStringLiteral("pointerGraphRootEdit"));
+  m_rootEdit->setPlaceholderText(QStringLiteral("Add root pointer or struct expression (e.g., headA, data[0], cfg)..."));
+  m_completerModel = new QStringListModel(this);
+  m_completer = new QCompleter(m_completerModel, this);
+  m_completer->setCompletionMode(QCompleter::PopupCompletion);
+  m_completer->setCaseSensitivity(Qt::CaseInsensitive);
+  m_completer->setFilterMode(Qt::MatchContains);
+  if (auto* pop = m_completer->popup()) {
+    pop->setObjectName(QStringLiteral("pointerGraphCompleterPopup"));
+    pop->setStyleSheet(QStringLiteral("QAbstractItemView { background-color: #1e222a; color: #e5e9f0; selection-background-color: #3b82f6; selection-color: #ffffff; border: 1px solid #3b4252; padding: 2px; font-size: 12px; }"));
+  }
+  m_rootEdit->setCompleter(m_completer);
 
-  row1->addWidget(m_rootEdit, 1);
-  row1->addWidget(m_addBtn);
-  row1->addWidget(m_refreshBtn);
-  row1->addWidget(m_autoRefreshCheck);
-  row1->addWidget(m_pruneCheck);
-  row1->addWidget(m_closeBtn);
+  m_addBtn = new QPushButton(QStringLiteral("Graph Expression"), this); m_addBtn->setObjectName(QStringLiteral("pointerGraphAddBtn"));
+  m_refreshBtn = new QPushButton(QStringLiteral("Refresh Now"), this); m_refreshBtn->setObjectName(QStringLiteral("pointerGraphRefreshBtn"));
+  m_autoRefreshCheck = new QCheckBox(QStringLiteral("Auto-Refresh on Stop"), this); m_autoRefreshCheck->setObjectName(QStringLiteral("pointerGraphAutoRefreshCheck")); m_autoRefreshCheck->setChecked(true);
+  m_pruneCheck = new QCheckBox(QStringLiteral("Prune Unreferenced Nodes"), this); m_pruneCheck->setObjectName(QStringLiteral("pointerGraphPruneCheck")); m_pruneCheck->setChecked(true);
+  m_closeBtn = new QPushButton(QStringLiteral("✕ CLOSE"), this); m_closeBtn->setObjectName(QStringLiteral("pointerGraphCloseBtn"));
+  row1->addWidget(m_rootEdit, 1); row1->addWidget(m_addBtn); row1->addWidget(m_refreshBtn);
+  row1->addWidget(m_autoRefreshCheck); row1->addWidget(m_pruneCheck); row1->addWidget(m_closeBtn);
   rootLayout->addLayout(row1);
 
   // Row 2: Re-Layout DAG, Expand 1-Hop, Clear Graph, SVG/PNG Export, and Zoom/Fit controls.
-  auto* row2 = new QHBoxLayout();
-  row2->setSpacing(6);
-  m_layoutBtn = new QPushButton(QStringLiteral("Re-Layout DAG"), this);
-  m_layoutBtn->setObjectName(QStringLiteral("pointerGraphLayoutBtn"));
+  auto* row2 = new QHBoxLayout(); row2->setSpacing(6);
+  m_layoutBtn = new QPushButton(QStringLiteral("Re-Layout DAG"), this); m_layoutBtn->setObjectName(QStringLiteral("pointerGraphLayoutBtn"));
   m_layoutBtn->setToolTip(QStringLiteral("Reset manual card positions and compute a layered Sugiyama DAG layout"));
-  m_expandHopBtn = new QPushButton(QStringLiteral("Expand All Pointers (1 Hop)"), this);
-  m_expandHopBtn->setObjectName(QStringLiteral("pointerGraphExpandHopBtn"));
-  m_clearBtn = new QPushButton(QStringLiteral("Clear Graph"), this);
-  m_clearBtn->setObjectName(QStringLiteral("pointerGraphClearBtn"));
-
-  m_exportSvgBtn = new QPushButton(QStringLiteral("Export SVG..."), this);
-  m_exportSvgBtn->setObjectName(QStringLiteral("pointerGraphExportSvgBtn"));
-  m_exportPngBtn = new QPushButton(QStringLiteral("Export PNG..."), this);
-  m_exportPngBtn->setObjectName(QStringLiteral("pointerGraphExportPngBtn"));
-
+  m_expandHopBtn = new QPushButton(QStringLiteral("Expand All Pointers (1 Hop)"), this); m_expandHopBtn->setObjectName(QStringLiteral("pointerGraphExpandHopBtn"));
+  m_clearBtn = new QPushButton(QStringLiteral("Clear Graph"), this); m_clearBtn->setObjectName(QStringLiteral("pointerGraphClearBtn"));
+  m_exportSvgBtn = new QPushButton(QStringLiteral("Export SVG..."), this); m_exportSvgBtn->setObjectName(QStringLiteral("pointerGraphExportSvgBtn"));
+  m_exportPngBtn = new QPushButton(QStringLiteral("Export PNG..."), this); m_exportPngBtn->setObjectName(QStringLiteral("pointerGraphExportPngBtn"));
   auto* zoomOutBtn = new QPushButton(QStringLiteral("Zoom -"), this);
-  m_resetZoomBtn = new QPushButton(QStringLiteral("100%"), this);
-  m_resetZoomBtn->setObjectName(QStringLiteral("pointerGraphResetZoomBtn"));
+  m_resetZoomBtn = new QPushButton(QStringLiteral("100%"), this); m_resetZoomBtn->setObjectName(QStringLiteral("pointerGraphResetZoomBtn"));
   auto* zoomInBtn = new QPushButton(QStringLiteral("Zoom +"), this);
-  m_fitBtn = new QPushButton(QStringLiteral("Fit Graph"), this);
-  m_fitBtn->setObjectName(QStringLiteral("pointerGraphFitBtn"));
+  m_fitBtn = new QPushButton(QStringLiteral("Fit Graph"), this); m_fitBtn->setObjectName(QStringLiteral("pointerGraphFitBtn"));
 
-  row2->addWidget(m_layoutBtn);
-  row2->addWidget(m_expandHopBtn);
-  row2->addWidget(m_clearBtn);
-  row2->addStretch(1);
-  row2->addWidget(m_exportSvgBtn);
-  row2->addWidget(m_exportPngBtn);
-  row2->addWidget(zoomOutBtn);
-  row2->addWidget(m_resetZoomBtn);
-  row2->addWidget(zoomInBtn);
-  row2->addWidget(m_fitBtn);
+  row2->addWidget(m_layoutBtn); row2->addWidget(m_expandHopBtn); row2->addWidget(m_clearBtn); row2->addStretch(1);
+  row2->addWidget(m_exportSvgBtn); row2->addWidget(m_exportPngBtn);
+  row2->addWidget(zoomOutBtn); row2->addWidget(m_resetZoomBtn); row2->addWidget(zoomInBtn); row2->addWidget(m_fitBtn);
   rootLayout->addLayout(row2);
 
-  // 2D Interactive Canvas with cursor-centered wheel zoom & corner minimap.
   m_scene = new QGraphicsScene(this);
-  m_view = new PointerGraphView(m_scene, this);
-  m_view->setObjectName(QStringLiteral("pointerGraphView"));
+  m_view = new PointerGraphView(m_scene, this); m_view->setObjectName(QStringLiteral("pointerGraphView"));
   rootLayout->addWidget(m_view, 1);
 
   connect(m_addBtn, &QPushButton::clicked, this, [this]() {
-    if (m_rootEdit && !m_rootEdit->text().trimmed().isEmpty()) {
-      addAndEvaluateRootExpression(m_rootEdit->text().trimmed());
-    }
+    if (m_rootEdit && !m_rootEdit->text().trimmed().isEmpty()) addAndEvaluateRootExpression(m_rootEdit->text().trimmed());
   });
   connect(m_rootEdit, &QLineEdit::returnPressed, m_addBtn, &QPushButton::click);
   connect(m_refreshBtn, &QPushButton::clicked, this, &PointerGraphDialog::refreshPinnedRoots);
   connect(m_pruneCheck, &QCheckBox::toggled, this, [this](bool checked) {
-    if (checked) {
-      pruneUnreferencedNodes();
-      recomputeCyclesAndRefreshEdges();
-    }
+    if (checked) { pruneUnreferencedNodes(); recomputeCyclesAndRefreshEdges(); }
   });
   connect(m_layoutBtn, &QPushButton::clicked, this, &PointerGraphDialog::resetLayoutAndRelayoutDag);
   connect(m_expandHopBtn, &QPushButton::clicked, this, &PointerGraphDialog::expandAllPointersOneHop);
@@ -139,22 +113,41 @@ void PointerGraphDialog::setupUi() {
   connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::close);
 
   connect(m_exportSvgBtn, &QPushButton::clicked, this, [this]() {
-    const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("Export Pointer Graph SVG"),
-        QStringLiteral("pointer_graph.svg"), QStringLiteral("SVG Vector (*.svg)"));
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export Pointer Graph SVG"), QStringLiteral("pointer_graph.svg"), QStringLiteral("SVG Vector (*.svg)"));
     if (!path.isEmpty()) exportGraphToSvg(path);
   });
   connect(m_exportPngBtn, &QPushButton::clicked, this, [this]() {
-    const QString path = QFileDialog::getSaveFileName(
-        this, QStringLiteral("Export Pointer Graph PNG"),
-        QStringLiteral("pointer_graph.png"), QStringLiteral("PNG Image (*.png)"));
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export Pointer Graph PNG"), QStringLiteral("pointer_graph.png"), QStringLiteral("PNG Image (*.png)"));
     if (!path.isEmpty()) exportGraphToPng(path);
   });
-
   connect(zoomInBtn, &QPushButton::clicked, this, [this]() { setZoomFactor(zoomFactor() * 1.15); });
   connect(zoomOutBtn, &QPushButton::clicked, this, [this]() { setZoomFactor(zoomFactor() / 1.15); });
   connect(m_resetZoomBtn, &QPushButton::clicked, this, &PointerGraphDialog::resetZoom);
   connect(m_fitBtn, &QPushButton::clicked, this, &PointerGraphDialog::fitGraphInView);
+}
+
+void PointerGraphDialog::setCompletionCandidates(const QStringList& candidates) {
+  QStringList deduped;
+  QSet<QString> seen;
+  auto push = [&](const QString& raw) {
+    const QString s = raw.trimmed();
+    if (!s.isEmpty() && !seen.contains(s)) { seen.insert(s); deduped.append(s); }
+  };
+  for (const QString& c : candidates) push(c);
+  for (const QString& r : m_rootExpressions) push(r);
+  for (const auto* n : m_nodes) if (n) push(n->expression());
+  m_completionCandidates = deduped;
+  if (m_completerModel) m_completerModel->setStringList(m_completionCandidates);
+}
+
+void PointerGraphDialog::setRootInputText(const QString& text) {
+  if (!m_rootEdit) return;
+  m_rootEdit->setText(text);
+  m_rootEdit->setFocus();
+  if (m_completer && !text.trimmed().isEmpty()) {
+    m_completer->setCompletionPrefix(text.trimmed());
+    m_completer->complete();
+  }
 }
 
 void PointerGraphDialog::setCoordinator(::IBackendCoordinator* coordinator) {

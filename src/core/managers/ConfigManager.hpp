@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <QDir>
+#include <QKeySequence>
 #include <QMap>
 #include <QSet>
 #include <QSettings>
@@ -287,6 +288,11 @@ class ConfigManager {
   QString memoryMapColorScheme() const;
   /** @brief Sets and persists the Memory Map treemap color scheme and broadcasts live update. */
   void setMemoryMapColorScheme(const QString& scheme);
+
+  /** @brief Returns persisted user-customized shortcut overrides keyed by stable action identifier. */
+  QMap<QString, QKeySequence> customShortcuts() const;
+  /** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
+  void setCustomShortcuts(const QMap<QString, QKeySequence>& overrides);
 
   /** @brief Returns the persistent GDB console command history file path (`~/.config/gridlock/gdb_history` or test override). */
   QString gdbHistoryFilePath() const { return resolveGdbHistoryFilePath(); }

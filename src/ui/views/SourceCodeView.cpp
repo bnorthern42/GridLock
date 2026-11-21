@@ -27,33 +27,24 @@ QStringList activeAppSwatchColors() {
                ? QStringList{QStringLiteral("#16181d"), QStringLiteral("#21252b"), QStringLiteral("#2c313a"), QStringLiteral("#00a2ff"), QStringLiteral("#d7dae0")}
                : QStringList{QStringLiteral("#f5f6f8"), QStringLiteral("#e6e9ef"), QStringLiteral("#ccd0da"), QStringLiteral("#1e66f5"), QStringLiteral("#1f2328")};
 }
+bool isCppKeywordToken(const QString& tok) {
+    static const QSet<QString> kKw = {QStringLiteral("auto"), QStringLiteral("bool"), QStringLiteral("break"), QStringLiteral("case"), QStringLiteral("catch"), QStringLiteral("char"), QStringLiteral("class"), QStringLiteral("const"), QStringLiteral("constexpr"), QStringLiteral("continue"), QStringLiteral("default"), QStringLiteral("delete"), QStringLiteral("do"), QStringLiteral("double"), QStringLiteral("else"), QStringLiteral("enum"), QStringLiteral("explicit"), QStringLiteral("extern"), QStringLiteral("false"), QStringLiteral("float"), QStringLiteral("for"), QStringLiteral("if"), QStringLiteral("include"), QStringLiteral("inline"), QStringLiteral("int"), QStringLiteral("long"), QStringLiteral("namespace"), QStringLiteral("new"), QStringLiteral("nullptr"), QStringLiteral("override"), QStringLiteral("private"), QStringLiteral("protected"), QStringLiteral("public"), QStringLiteral("return"), QStringLiteral("short"), QStringLiteral("signed"), QStringLiteral("sizeof"), QStringLiteral("static"), QStringLiteral("std"), QStringLiteral("struct"), QStringLiteral("switch"), QStringLiteral("template"), QStringLiteral("this"), QStringLiteral("true"), QStringLiteral("typedef"), QStringLiteral("typename"), QStringLiteral("unsigned"), QStringLiteral("using"), QStringLiteral("virtual"), QStringLiteral("void"), QStringLiteral("volatile"), QStringLiteral("while")};
+    return kKw.contains(tok);
+}
 }  // namespace
 
-/**
- * @brief Constructs a new SourceCodeView editor widget.
- *
- * Configures monospace font, line number gutter, syntax highlighting, hover inspection timer,
- * and mouse tracking.
- *
- * @param parent Optional parent widget.
- */
 SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
-    // Configure borderless editor frame and line number area gutter.
     setFrameShape(QFrame::NoFrame);
     m_lineNumberArea = new LineNumberArea(this);
     connect(document(), &QTextDocument::blockCountChanged, this, &SourceCodeView::updateLineNumberAreaWidth);
     connect(this, &SourceCodeView::updateRequest, this, &SourceCodeView::updateLineNumberArea);
     updateLineNumberAreaWidth(0);
-    setReadOnly(false); setTextInteractionFlags(Qt::TextEditorInteraction);
-    setLineWrapMode(QPlainTextEdit::NoWrap);
-    // Install multi-format syntax highlighter before initial reloadStyle so config & palette sync immediately
+    setReadOnly(false); setTextInteractionFlags(Qt::TextEditorInteraction); setLineWrapMode(QPlainTextEdit::NoWrap);
     m_highlighter = new EditorSyntaxHighlighter(document());
     reloadStyle();
-    // Enable mouse tracking for interactive variable hover inspector and dirty state propagation
     viewport()->setMouseTracking(true);
     m_hoverTimer = new QTimer(this); m_hoverTimer->setSingleShot(true);
     connect(m_hoverTimer, &QTimer::timeout, this, &SourceCodeView::handleHoverTimeout);
-    // Debounce live C/C++ text edits (250ms) into clangd `didOpen`/`didChange` and bind `publishDiagnostics` & `completionReady`.
     m_lspSyncTimer = new QTimer(this); m_lspSyncTimer->setSingleShot(true);
     connect(m_lspSyncTimer, &QTimer::timeout, this, &SourceCodeView::syncLspDocument);
     m_gitDiffTimer = new QTimer(this); m_gitDiffTimer->setSingleShot(true);
@@ -84,7 +75,7 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, qOverload<>(&SourceCodeView::highlightCurrentLine));
     connect(document(), &QTextDocument::modificationChanged, this, &SourceCodeView::modificationStateChanged);
 }
-/** @brief Sets the active file path, restores cached diagnostics, syncs clangd, and refreshes Git gutter. */
+
 void SourceCodeView::setCurrentFile(const QString& filePath) {
     m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
                             ? QFileInfo(filePath).canonicalFilePath() : filePath;
@@ -95,35 +86,19 @@ void SourceCodeView::setCurrentFile(const QString& filePath) {
     }
     refreshGitDiffGutter();
 }
-/** @brief Pushes the current editor buffer to ClangdLspClient (`textDocument/didOpen` or `didChange`). */
 void SourceCodeView::syncLspDocument() {
     if (!m_currentFilePath.isEmpty()) core::ClangdLspClient::instance().syncDocument(m_currentFilePath, toPlainText());
 }
-
-/**
- * @brief Computes the two-lane gutter width reserving 20px for vector badges plus right-aligned line digits.
- * @return Total gutter width in pixels (>= 48px).
- */
 int SourceCodeView::lineNumberAreaWidth() const {
     int digits = 3, maxBlocks = qMax(1, blockCount());
     while (maxBlocks >= 1000) { maxBlocks /= 10; ++digits; }
-    const int digitsWidth = fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits;
-    return qMax(48, gutterIconLaneWidth() + digitsWidth + 18);
+    return qMax(48, gutterIconLaneWidth() + fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits + 18);
 }
-
-/** @brief Computes deterministic crimson (#ef4444) for All Ranks or non-red accordion color per rank. */
 QColor SourceCodeView::colorForRankBreakpoint(int rankFilter) {
     if (rankFilter < 0) return QColor(QStringLiteral("#ef4444"));
-    static const QColor kPalette[8] = {
-        QColor(QStringLiteral("#06b6d4")), QColor(QStringLiteral("#f59e0b")),
-        QColor(QStringLiteral("#10b981")), QColor(QStringLiteral("#a855f7")),
-        QColor(QStringLiteral("#ec4899")), QColor(QStringLiteral("#84cc16")),
-        QColor(QStringLiteral("#3b82f6")), QColor(QStringLiteral("#f97316"))};
-    if (rankFilter < 8) return kPalette[rankFilter];
-    return QColor::fromHsl((45 + rankFilter * 137) % 330 + 20, 215, 135);
+    static const QColor kPalette[8] = {QColor(QStringLiteral("#06b6d4")), QColor(QStringLiteral("#f59e0b")), QColor(QStringLiteral("#10b981")), QColor(QStringLiteral("#a855f7")), QColor(QStringLiteral("#ec4899")), QColor(QStringLiteral("#84cc16")), QColor(QStringLiteral("#3b82f6")), QColor(QStringLiteral("#f97316"))};
+    return (rankFilter < 8) ? kPalette[rankFilter] : QColor::fromHsl((45 + rankFilter * 137) % 330 + 20, 215, 135);
 }
-
-/** @brief Sets active breakpoints from a set of 1-based line numbers while preserving existing rank metadata. */
 void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     const auto prevInfo = m_breakpointInfo; m_breakpoints.clear(); m_breakpointSuspendScopes.clear(); m_breakpointInfo.clear();
     for (int bp : bps) {
@@ -132,7 +107,6 @@ void SourceCodeView::setBreakpoints(const QSet<int>& bps) {
     }
     highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
 }
-/** @brief Restores per-line rank-filtered breakpoint metadata without emitting toggle signals. */
 void SourceCodeView::syncBreakpointMetadata(const QMap<int, BreakpointVisualInfo>& metaByLine) {
     m_breakpoints.clear(); m_breakpointSuspendScopes.clear(); m_breakpointInfo.clear();
     for (auto it = metaByLine.constBegin(); it != metaByLine.constEnd(); ++it) {
@@ -142,21 +116,12 @@ void SourceCodeView::syncBreakpointMetadata(const QMap<int, BreakpointVisualInfo
     }
     highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
 }
-
-/** @brief Returns the set of active 1-based breakpoint line numbers. */
 QSet<int> SourceCodeView::breakpoints() const {
-    QSet<int> result;
-    for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) result.insert(it.key());
-    return result;
+    QSet<int> result; for (auto it = m_breakpoints.constBegin(); it != m_breakpoints.constEnd(); ++it) result.insert(it.key()); return result;
 }
-
-/** @brief Checks whether a breakpoint is set on the given 1-based line number. */
 bool SourceCodeView::hasBreakpoint(int lineOneBased) const { return m_breakpoints.contains(lineOneBased); }
-
-/** @brief Returns the active canvas background color resolved from the active workstation theme. */
 QColor SourceCodeView::activeCanvasBackgroundColor() const {
-    const QStringList sw = activeAppSwatchColors();
-    return QColor(sw.value(0, isAppDarkThemeActive() ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8")));
+    return QColor(activeAppSwatchColors().value(0, isAppDarkThemeActive() ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8")));
 }
 
 /** @brief Reloads font size, font family, word wrap, and active theme surface from user configuration. */
@@ -504,45 +469,65 @@ void SourceCodeView::lineNumberAreaPaintEvent(QPaintEvent *event) {
 bool SourceCodeView::shouldOpenEditorContextMenuAt(const QPoint& pos) const {
     return pos.x() >= lineNumberAreaWidth() && !(m_lineNumberArea && m_lineNumberArea->geometry().contains(pos));
 }
-/** @brief Suppresses editor menu over gutter; adds Go-to-Definition, Calculator, and per-rank breakpoint actions. */
-void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
-    if (!event) return;
-    QPoint editorPos = event->pos();
-    if (event->reason() == QContextMenuEvent::Mouse && !event->globalPos().isNull()) {
-        const QPoint mapped = mapFromGlobal(event->globalPos());
-        if (rect().contains(mapped)) editorPos = mapped;
+QString SourceCodeView::detectStructOrClassAtLine(const QString& lineText) {
+    static const QRegularExpression kTypeRe(QStringLiteral(R"(^\s*(?:template\s*<[^>]*>\s*)?(?:typedef\s+)?(?:struct|class)\s+(?:\[\[[^\]]*\]\]\s*)?([A-Za-z_][A-Za-z0-9_]*)\b)"));
+    const auto m = kTypeRe.match(lineText); return m.hasMatch() ? m.captured(1) : QString();
+}
+QMenu* SourceCodeView::createEditorContextMenuAt(const QPoint& editorPos) {
+    if (!shouldOpenEditorContextMenuAt(editorPos)) return nullptr;
+    const QTextCursor posCur = cursorForPosition(editorPos); const int clickedLine = qMax(1, posCur.blockNumber() + 1);
+    const QString lineText = posCur.block().text(), selected = textCursor().hasSelection() ? textCursor().selectedText().replace(QChar::ParagraphSeparator, QLatin1Char(' ')).trimmed() : QString();
+    QString exprTok = selected;
+    if (exprTok.isEmpty() && !lineText.isEmpty()) {
+        int l = qBound(0, posCur.positionInBlock(), lineText.size()), r = l;
+        auto isExprCh = [](QChar ch) { return ch.isLetterOrNumber() || ch == QLatin1Char('_') || ch == QLatin1Char('.') || ch == QLatin1Char('[') || ch == QLatin1Char(']') || ch == QLatin1Char('-') || ch == QLatin1Char('>') || ch == QLatin1Char('*'); };
+        while (l > 0 && isExprCh(lineText[l - 1])) --l;
+        while (r < lineText.size() && isExprCh(lineText[r])) ++r;
+        exprTok = lineText.mid(l, r - l).trimmed();
     }
-    if (!shouldOpenEditorContextMenuAt(editorPos)) { event->accept(); return; }
-    const QTextCursor posCur = cursorForPosition(editorPos);
-    const int clickedLine = qMax(1, posCur.blockNumber() + 1);
-    QString calcTok = textCursor().hasSelection() ? textCursor().selectedText().replace(QChar::ParagraphSeparator, QLatin1Char(' ')).trimmed() : QString();
+    while (exprTok.startsWith(QLatin1Char('.')) || exprTok.startsWith(QLatin1Char('-')) || exprTok.startsWith(QLatin1Char('>'))) exprTok.remove(0, 1);
+    while (exprTok.endsWith(QLatin1Char('.')) || exprTok.endsWith(QLatin1Char('-')) || exprTok.endsWith(QLatin1Char('>'))) exprTok.chop(1);
+    QString structType = detectStructOrClassAtLine(lineText);
+    if (structType.isEmpty() && !exprTok.isEmpty()) {
+        static const QRegularExpression kAllStructs(QStringLiteral(R"(\b(?:struct|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b)"));
+        for (auto it = kAllStructs.globalMatch(toPlainText()); it.hasNext();) { const QString tn = it.next().captured(1); if (tn == exprTok) { structType = tn; break; } }
+    }
+    bool isNum = false; exprTok.toDouble(&isNum); if (isNum || isCppKeywordToken(exprTok)) exprTok.clear();
+    QString calcTok = selected;
     if (calcTok.isEmpty()) { QTextCursor wc = posCur; wc.select(QTextCursor::WordUnderCursor); calcTok = wc.selectedText().trimmed(); }
     if (!calcTok.isEmpty() && m_inlineVarValues.contains(calcTok)) calcTok = m_inlineVarValues.value(calcTok);
-    QMenu* menu = createStandardContextMenu();
+    QMenu* menu = createStandardContextMenu(); menu->addSeparator();
+    menu->addAction(QStringLiteral("Go to Definition"), this, &SourceCodeView::triggerGoToDefinition)->setShortcut(QKeySequence(Qt::Key_F12));
+    if (!exprTok.isEmpty() && exprTok != structType) menu->addAction(QStringLiteral("Graph '%1' in Pointer Graph").arg(exprTok), this, [this, exprTok]() { emit graphExpressionRequested(exprTok); });
+    if (!structType.isEmpty()) menu->addAction(QStringLiteral("Graph '%1' Struct Instances").arg(structType), this, [this, structType]() { emit graphStructTypeRequested(structType); });
+    if (!calcTok.isEmpty()) menu->addAction(QStringLiteral("Open Selection in Programmer's Calculator"), this, [this, calcTok]() { emit sendToCalculatorRequested(calcTok); if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, calcTok)); });
     menu->addSeparator();
-    menu->addAction(QStringLiteral("Go to Definition (F12)"), this, &SourceCodeView::triggerGoToDefinition);
-    if (!calcTok.isEmpty()) {
-        menu->addAction(QStringLiteral("Open Selection in Programmer's Calculator"), this, [this, calcTok]() {
-            emit sendToCalculatorRequested(calcTok);
-            if (QWidget* win = window()) QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, calcTok));
-        });
-    }
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("Run to Cursor (Ctrl+F10)"), this, [this, clickedLine]() { emit runToCursorRequested(m_currentFilePath, clickedLine); });
+    QAction* rtcAct = menu->addAction(QStringLiteral("Run to Cursor"), this, [this, clickedLine]() { emit runToCursorRequested(m_currentFilePath, clickedLine); });
+    const QAction* winRtc = window() ? window()->findChild<QAction*>(QStringLiteral("actionRunToCursor")) : nullptr;
+    const QKeySequence rtcSeq = winRtc ? winRtc->shortcut() : core::ConfigManager::instance().customShortcuts().value(QStringLiteral("actionRunToCursor"), QKeySequence(Qt::CTRL | Qt::Key_F10));
+    rtcAct->setShortcut(rtcSeq);
     menu->addAction(QStringLiteral("Set Next Statement / Jump Here"), this, [this, clickedLine]() { emit jumpToLineRequested(m_currentFilePath, clickedLine); });
     menu->addSeparator();
-    if (hasBreakpoint(clickedLine)) {
-        const bool en = isBreakpointEnabledForLine(clickedLine);
-        menu->addAction(en ? QStringLiteral("Disable Breakpoint") : QStringLiteral("Enable Breakpoint"), this, [this, clickedLine, en]() { setBreakpointEnabled(clickedLine, !en); });
-    }
+    if (hasBreakpoint(clickedLine)) { const bool en = isBreakpointEnabledForLine(clickedLine); menu->addAction(en ? QStringLiteral("Disable Breakpoint") : QStringLiteral("Enable Breakpoint"), this, [this, clickedLine, en]() { setBreakpointEnabled(clickedLine, !en); }); }
     menu->addAction(QStringLiteral("Insert Temporary Breakpoint (tbreak)"), this, [this, clickedLine]() { setTemporaryBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint (All Ranks)"), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint for Active Rank (Rank %1)").arg(m_activeFocusRank), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, m_activeFocusRank); });
-    menu->addAction(QStringLiteral("Set Breakpoint for Rank..."), this, [this, clickedLine]() {
-        bool ok = false; const int r = QInputDialog::getInt(this, QStringLiteral("Breakpoint Rank Filter"), QStringLiteral("Target MPI Rank (0+):"), m_activeFocusRank, 0, 4095, 1, &ok);
-        if (ok) setRankBreakpoint(clickedLine, r);
-    });
-    menu->exec(event->globalPos()); delete menu;
+    menu->addAction(QStringLiteral("Set Breakpoint for Rank..."), this, [this, clickedLine]() { bool ok = false; const int r = QInputDialog::getInt(this, QStringLiteral("Breakpoint Rank Filter"), QStringLiteral("Target MPI Rank (0+):"), m_activeFocusRank, 0, 4095, 1, &ok); if (ok) setRankBreakpoint(clickedLine, r); });
+    return menu;
+}
+bool SourceCodeView::triggerContextActionAtLine(int lineOneBased, const QString& actionSubstring) {
+    QTextBlock b = document()->findBlockByNumber(qMax(0, lineOneBased - 1)); if (!b.isValid()) return false;
+    if (!textCursor().hasSelection()) { QTextCursor c(b); setTextCursor(c); }
+    QPoint pos = cursorRect(QTextCursor(b)).center(); pos.setX(qMax(pos.x(), lineNumberAreaWidth() + 12)); pos.setY(qMax(4, pos.y()));
+    std::unique_ptr<QMenu> menu(createEditorContextMenuAt(pos)); if (!menu) return false;
+    for (QAction* act : menu->actions()) if (act && !act->isSeparator() && act->text().contains(actionSubstring, Qt::CaseInsensitive)) { act->trigger(); return true; }
+    return false;
+}
+void SourceCodeView::contextMenuEvent(QContextMenuEvent *event) {
+    if (!event) return;
+    QPoint editorPos = event->pos();
+    if (event->reason() == QContextMenuEvent::Mouse && !event->globalPos().isNull()) { const QPoint mapped = mapFromGlobal(event->globalPos()); if (rect().contains(mapped)) editorPos = mapped; }
+    if (QMenu* menu = createEditorContextMenuAt(editorPos)) { menu->exec(event->globalPos()); delete menu; } else event->accept();
 }
 /** @brief Legacy 6-arg overload preserving deletion semantics when unchecking without explicit removeRequested. */
 void SourceCodeView::handleBreakpointPopoverResult(int lineOneBased, bool wasPreviouslySet, bool accepted, bool enabledChecked, const QString& condition, const QString& suspendScope) {

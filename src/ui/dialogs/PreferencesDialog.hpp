@@ -13,6 +13,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QKeySequenceEdit>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -283,6 +284,32 @@ private:
     QSpinBox* m_fontSizeBox = nullptr;
 };
 
+/**
+ * @class KeybindingsSettingsPage
+ * @brief Searchable shortcut customization page backed by ShortcutManager and ConfigManager.
+ */
+class KeybindingsSettingsPage : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit KeybindingsSettingsPage(QWidget* parent = nullptr);
+
+    void refreshBindings();
+    void applyPendingChanges();
+
+    QLineEdit* filterEdit() const { return m_filterEdit; }
+    QTableWidget* table() const { return m_table; }
+    QPushButton* resetDefaultsButton() const { return m_resetBtn; }
+
+private slots:
+    void filterRows(const QString& query);
+
+private:
+    QLineEdit* m_filterEdit = nullptr;
+    QTableWidget* m_table = nullptr;
+    QPushButton* m_resetBtn = nullptr;
+};
+
 // ============================================================================
 // Main Preferences Dialog
 // ============================================================================
@@ -296,6 +323,9 @@ class PreferencesDialog : public QDialog {
 
 public:
     explicit PreferencesDialog(QWidget* parent = nullptr);
+
+    /// Returns the editable Keybindings settings page.
+    KeybindingsSettingsPage* keybindingsPage() const { return m_keybindingsPage; }
 
     /// Parses `#SBATCH` directives and module load lines into the SLURM settings page.
     bool parseSlurmBatchScript(const QString& scriptText);
@@ -333,6 +363,7 @@ private:
     AppearanceSettingsPage* m_appearancePage = nullptr;
     EditingSettingsPage* m_editingPage = nullptr;
     BehaviorSettingsPage* m_behaviorPage = nullptr;
+    KeybindingsSettingsPage* m_keybindingsPage = nullptr;
     DebuggerSettingsPage* m_debuggerPage = nullptr;
     HpcSettingsPage* m_hpcPage = nullptr;
     HpcIntegrationSettingsPage* m_hpcIntegrationPage = nullptr;

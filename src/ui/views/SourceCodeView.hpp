@@ -547,6 +547,15 @@ public:
      */
     bool renameSymbolAtCursor(const QString& newName);
 
+    /** @brief Extracts `<TypeName>` when @p lineText declares a C/C++ `struct <TypeName>` or `class <TypeName>`. */
+    static QString detectStructOrClassAtLine(const QString& lineText);
+
+    /** @brief Builds and returns a caller-owned editor context menu for @p editorPos (`nullptr` over the gutter). */
+    QMenu* createEditorContextMenuAt(const QPoint& editorPos);
+
+    /** @brief Headless-safe helper invoking the first context-menu action matching @p actionSubstring on @p lineOneBased. */
+    bool triggerContextActionAtLine(int lineOneBased, const QString& actionSubstring);
+
 signals:
     /** @brief Emitted to request running the target application. */
     void runTargetRequested();
@@ -600,7 +609,13 @@ signals:
     /** @brief Emitted when the user chooses "Open Selection in Programmer's Calculator" from the editor context menu. */
     void sendToCalculatorRequested(const QString& text);
 
-    /** @brief Emitted when the user selects "Run to Cursor (Ctrl+F10)" for a 1-based source line. */
+    /** @brief Emitted when the user chooses "Graph '<expr>' in Pointer Graph" from the editor context menu. */
+    void graphExpressionRequested(const QString& expression);
+
+    /** @brief Emitted when the user chooses "Graph '<TypeName>' Struct Instances" on a struct/class line. */
+    void graphStructTypeRequested(const QString& typeName);
+
+    /** @brief Emitted when the user selects "Run to Cursor" for a 1-based source line. */
     void runToCursorRequested(const QString& filePath, int lineOneBased);
 
     /** @brief Emitted when the user drags the gutter PC arrow or selects "Set Next Statement / Jump Here". */

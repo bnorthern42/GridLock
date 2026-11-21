@@ -11,6 +11,7 @@
 #include <QByteArray>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -21,6 +22,8 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QString>
+#include <QStringList>
+#include <QStringListModel>
 #include <QTableView>
 #include <QVector>
 
@@ -277,6 +280,13 @@ public:
     /** @brief Reloads dialog colors and widget styling from the active ThemeManager theme. */
     void reloadStyle();
 
+    /** @brief Populates live variable, struct field, and symbol autocomplete candidates on the expression box. */
+    void setCompletionCandidates(const QStringList& candidates);
+    /** @brief Returns the active expression autocomplete candidate list. */
+    QStringList completionCandidates() const { return m_completionCandidates; }
+    /** @brief Returns the QCompleter attached to the expression input box. */
+    QCompleter* expressionCompleter() const { return m_completer; }
+
 signals:
     /** @brief Emitted when multi-rank 1D overlay refresh requests memory slices across selected MPI ranks. */
     void multiRankPlotRequested(const QString& baseExpression,
@@ -332,6 +342,9 @@ private:
     int m_changedElementCount = 0;
 
     QLineEdit* m_exprEdit = nullptr;
+    QCompleter* m_completer = nullptr;
+    QStringListModel* m_completerModel = nullptr;
+    QStringList m_completionCandidates;
     QComboBox* m_typeCombo = nullptr;
     QComboBox* m_componentCombo = nullptr;
     QComboBox* m_modeCombo = nullptr;

@@ -12,6 +12,7 @@
 #include <limits>
 #include <utility>
 
+#include <QAbstractItemView>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -122,21 +123,11 @@ bool ArrayPlotDialog::parseScalarResult(const QString& resultText, double* outVa
     s = s.trimmed();
 
     const QString lower = s.toLower();
-    if (lower == QStringLiteral("nan") || lower == QStringLiteral("-nan")) {
-        *outVal = std::numeric_limits<double>::quiet_NaN();
-        return true;
-    }
-    if (lower == QStringLiteral("inf") || lower == QStringLiteral("+inf") || lower == QStringLiteral("infinity")) {
-        *outVal = std::numeric_limits<double>::infinity();
-        return true;
-    }
-    if (lower == QStringLiteral("-inf") || lower == QStringLiteral("-infinity")) {
-        *outVal = -std::numeric_limits<double>::infinity();
-        return true;
-    }
+    if (lower == QStringLiteral("nan") || lower == QStringLiteral("-nan")) { *outVal = std::numeric_limits<double>::quiet_NaN(); return true; }
+    if (lower == QStringLiteral("inf") || lower == QStringLiteral("+inf") || lower == QStringLiteral("infinity")) { *outVal = std::numeric_limits<double>::infinity(); return true; }
+    if (lower == QStringLiteral("-inf") || lower == QStringLiteral("-infinity")) { *outVal = -std::numeric_limits<double>::infinity(); return true; }
     if (lower.startsWith(QStringLiteral("0x"))) {
-        bool ok = false;
-        const quint64 hv = lower.mid(2).section(QLatin1Char(' '), 0, 0).toULongLong(&ok, 16);
+        bool ok = false; const quint64 hv = lower.mid(2).section(QLatin1Char(' '), 0, 0).toULongLong(&ok, 16);
         if (ok) { *outVal = static_cast<double>(hv); return true; }
     }
     bool ok = false;
@@ -152,95 +143,86 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     : QDialog(parent, Qt::Window) {
     setObjectName(QStringLiteral("ArrayPlotDialog"));
     setWindowTitle(QStringLiteral("Scientific 1D/2D/3D Array, Complex & Tensor Plotter"));
-    setModal(false);
-    setMinimumSize(960, 560);
-    resize(1080, 640);
+    setModal(false); setMinimumSize(960, 560); resize(1080, 640);
 
-    auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(10, 10, 10, 10);
-    root->setSpacing(6);
-
+    auto* root = new QVBoxLayout(this); root->setContentsMargins(10, 10, 10, 10); root->setSpacing(6);
     auto makeCombo = [this](const QString& name, int h) {
-        auto* cb = new QComboBox(this);
-        cb->setObjectName(name);
-        cb->setFixedHeight(h);
+        auto* cb = new QComboBox(this); cb->setObjectName(name); cb->setFixedHeight(h);
+        connect(cb, &QComboBox::currentIndexChanged, this, [cb](int idx) {
+            if (idx >= 0) cb->setToolTip(cb->itemData(idx, Qt::ToolTipRole).toString());
+        });
         return cb;
     };
+    auto addItemWithTip = [](QComboBox* cb, const QString& label, const QVariant& data, const QString& tip) {
+        const int idx = cb->count(); cb->addItem(label, data); cb->setItemData(idx, tip, Qt::ToolTipRole);
+        if (idx == 0) cb->setToolTip(tip);
+    };
     auto makeSpin = [this](const QString& name, int minV, int maxV, int initV, int maxW) {
-        auto* sp = new QSpinBox(this);
-        sp->setObjectName(name);
-        sp->setRange(minV, maxV);
-        sp->setValue(initV);
-        sp->setFixedHeight(24);
-        sp->setMaximumWidth(maxW);
-        return sp;
+        auto* sp = new QSpinBox(this); sp->setObjectName(name); sp->setRange(minV, maxV);
+        sp->setValue(initV); sp->setFixedHeight(24); sp->setMaximumWidth(maxW); return sp;
     };
     auto makeBtn = [this](const QString& text, const QString& name, int h = 24) {
-        auto* b = new QPushButton(text, this);
-        b->setObjectName(name);
-        b->setFixedHeight(h);
-        return b;
+        auto* b = new QPushButton(text, this); b->setObjectName(name); b->setFixedHeight(h); return b;
     };
     auto makeCheck = [this](const QString& text, const QString& name) {
-        auto* c = new QCheckBox(text, this);
-        c->setObjectName(name);
-        c->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-        return c;
+        auto* c = new QCheckBox(text, this); c->setObjectName(name); c->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed); return c;
     };
 
-    // Row 1: Expression, ElementType, ComplexComponent, PlotMode, Colormap, Refresh, Close.
-    auto* topRow = new QHBoxLayout();
-    topRow->setSpacing(6);
-    m_exprEdit = new QLineEdit(this);
-    m_exprEdit->setObjectName(QStringLiteral("arrayPlotExprEdit"));
-    m_exprEdit->setPlaceholderText(QStringLiteral("Expr or slice (e.g., u[16:128:2], fft_buf, residual)..."));
+    // Row 1: Expression with live autocomplete, ElementType, ComplexComponent, PlotMode, Colormap, Refresh, Close.
+    auto* topRow = new QHBoxLayout(); topRow->setSpacing(6);
+    m_exprEdit = new QLineEdit(this); m_exprEdit->setObjectName(QStringLiteral("arrayPlotExprEdit"));
+    m_exprEdit->setPlaceholderText(QStringLiteral("Expr or slice (e.g., u[16:128:2], data[0], residual)..."));
     m_exprEdit->setFixedHeight(26);
+    m_completerModel = new QStringListModel(this);
+    m_completer = new QCompleter(m_completerModel, this);
+    m_completer->setCompletionMode(QCompleter::PopupCompletion);
+    m_completer->setCaseSensitivity(Qt::CaseInsensitive);
+    m_completer->setFilterMode(Qt::MatchContains);
+    if (auto* pop = m_completer->popup()) {
+        pop->setObjectName(QStringLiteral("arrayPlotCompleterPopup"));
+        pop->setStyleSheet(QStringLiteral("QAbstractItemView { background-color: #1e222a; color: #e5e9f0; selection-background-color: #3b82f6; selection-color: #ffffff; border: 1px solid #3b4252; padding: 2px; font-size: 12px; }"));
+    }
+    m_exprEdit->setCompleter(m_completer);
 
     m_typeCombo = makeCombo(QStringLiteral("arrayPlotTypeCombo"), 26);
-    m_typeCombo->addItem(QStringLiteral("double"), static_cast<int>(ElementType::Float64));
-    m_typeCombo->addItem(QStringLiteral("float"), static_cast<int>(ElementType::Float32));
-    m_typeCombo->addItem(QStringLiteral("int32_t"), static_cast<int>(ElementType::Int32));
-    m_typeCombo->addItem(QStringLiteral("int64_t"), static_cast<int>(ElementType::Int64));
-    m_typeCombo->addItem(QStringLiteral("uint8_t"), static_cast<int>(ElementType::UInt8));
-    m_typeCombo->addItem(QStringLiteral("Complex64 (std::complex<float>)"), static_cast<int>(ElementType::Complex64));
-    m_typeCombo->addItem(QStringLiteral("Complex128 (std::complex<double>)"), static_cast<int>(ElementType::Complex128));
+    addItemWithTip(m_typeCombo, QStringLiteral("double"), static_cast<int>(ElementType::Float64), QStringLiteral("64-bit IEEE-754 double-precision floating point (8 bytes)"));
+    addItemWithTip(m_typeCombo, QStringLiteral("float"), static_cast<int>(ElementType::Float32), QStringLiteral("32-bit IEEE-754 single-precision floating point (4 bytes)"));
+    addItemWithTip(m_typeCombo, QStringLiteral("int32_t"), static_cast<int>(ElementType::Int32), QStringLiteral("32-bit signed two's-complement integer (4 bytes)"));
+    addItemWithTip(m_typeCombo, QStringLiteral("int64_t"), static_cast<int>(ElementType::Int64), QStringLiteral("64-bit signed two's-complement integer (8 bytes)"));
+    addItemWithTip(m_typeCombo, QStringLiteral("uint8_t"), static_cast<int>(ElementType::UInt8), QStringLiteral("8-bit unsigned byte buffer (1 byte)"));
+    addItemWithTip(m_typeCombo, QStringLiteral("Complex64"), static_cast<int>(ElementType::Complex64), QStringLiteral("Interleaved std::complex<float> / float _Complex (2 x 32-bit float: Re, Im)"));
+    addItemWithTip(m_typeCombo, QStringLiteral("Complex128"), static_cast<int>(ElementType::Complex128), QStringLiteral("Interleaved std::complex<double> / double _Complex (2 x 64-bit double: Re, Im)"));
 
     m_componentCombo = makeCombo(QStringLiteral("arrayPlotComponentCombo"), 26);
-    m_componentCombo->addItem(QStringLiteral("Magnitude |z|"), static_cast<int>(ComplexComponent::Magnitude));
-    m_componentCombo->addItem(QStringLiteral("Phase arg(z) (rad)"), static_cast<int>(ComplexComponent::Phase));
-    m_componentCombo->addItem(QStringLiteral("Real Re(z)"), static_cast<int>(ComplexComponent::Real));
-    m_componentCombo->addItem(QStringLiteral("Imaginary Im(z)"), static_cast<int>(ComplexComponent::Imaginary));
+    addItemWithTip(m_componentCombo, QStringLiteral("Magnitude |z|"), static_cast<int>(ComplexComponent::Magnitude), QStringLiteral("Complex modulus sqrt(Re(z)^2 + Im(z)^2)"));
+    addItemWithTip(m_componentCombo, QStringLiteral("Phase arg(z)"), static_cast<int>(ComplexComponent::Phase), QStringLiteral("Complex phase angle atan2(Im(z), Re(z)) in radians [-pi, pi]"));
+    addItemWithTip(m_componentCombo, QStringLiteral("Real Re(z)"), static_cast<int>(ComplexComponent::Real), QStringLiteral("Real component Re(z)"));
+    addItemWithTip(m_componentCombo, QStringLiteral("Imag Im(z)"), static_cast<int>(ComplexComponent::Imaginary), QStringLiteral("Imaginary component Im(z)"));
     m_componentCombo->setEnabled(false);
 
     m_modeCombo = makeCombo(QStringLiteral("arrayPlotModeCombo"), 26);
-    m_modeCombo->addItem(QStringLiteral("1D Line Plot"), static_cast<int>(PlotMode::Line1D));
-    m_modeCombo->addItem(QStringLiteral("1D Bar / Stem"), static_cast<int>(PlotMode::Stem1D));
-    m_modeCombo->addItem(QStringLiteral("2D Heatmap"), static_cast<int>(PlotMode::Heatmap2D));
-    m_modeCombo->addItem(QStringLiteral("Scalar History (Over Stops)"), static_cast<int>(PlotMode::ScalarHistory));
+    addItemWithTip(m_modeCombo, QStringLiteral("1D Line Plot"), static_cast<int>(PlotMode::Line1D), QStringLiteral("Continuous 1D line series with optional previous-stop delta curve and multi-rank overlay"));
+    addItemWithTip(m_modeCombo, QStringLiteral("1D Bar / Stem"), static_cast<int>(PlotMode::Stem1D), QStringLiteral("Discrete 1D stem/impulse plot suited for FFT bins and histograms"));
+    addItemWithTip(m_modeCombo, QStringLiteral("2D Heatmap"), static_cast<int>(PlotMode::Heatmap2D), QStringLiteral("2D false-color matrix heatmap over [Ny x Nx] cells"));
+    addItemWithTip(m_modeCombo, QStringLiteral("Scalar History"), static_cast<int>(PlotMode::ScalarHistory), QStringLiteral("Scalar convergence time-series accumulated across debugger stops"));
 
     m_colormapCombo = makeCombo(QStringLiteral("arrayPlotColormapCombo"), 26);
-    m_colormapCombo->addItem(QStringLiteral("Viridis"), static_cast<int>(Colormap::Viridis));
-    m_colormapCombo->addItem(QStringLiteral("Plasma"), static_cast<int>(Colormap::Plasma));
-    m_colormapCombo->addItem(QStringLiteral("Cool-Warm"), static_cast<int>(Colormap::CoolWarm));
-    m_colormapCombo->addItem(QStringLiteral("Grayscale"), static_cast<int>(Colormap::Grayscale));
+    addItemWithTip(m_colormapCombo, QStringLiteral("Viridis"), static_cast<int>(Colormap::Viridis), QStringLiteral("Perceptually uniform Viridis scientific colormap"));
+    addItemWithTip(m_colormapCombo, QStringLiteral("Plasma"), static_cast<int>(Colormap::Plasma), QStringLiteral("High-contrast Plasma thermal colormap"));
+    addItemWithTip(m_colormapCombo, QStringLiteral("Cool-Warm"), static_cast<int>(Colormap::CoolWarm), QStringLiteral("Diverging blue-to-red Cool-Warm colormap for signed fields"));
+    addItemWithTip(m_colormapCombo, QStringLiteral("Grayscale"), static_cast<int>(Colormap::Grayscale), QStringLiteral("Linear luminance grayscale colormap"));
 
     m_refreshBtn = makeBtn(QStringLiteral("Plot / Refresh"), QStringLiteral("arrayPlotRefreshBtn"), 26);
     m_closeBtn = makeBtn(QStringLiteral("✕ CLOSE"), QStringLiteral("arrayPlotCloseBtn"), 26);
 
-    topRow->addWidget(new QLabel(QStringLiteral("Expr:"), this));
-    topRow->addWidget(m_exprEdit, 1);
-    topRow->addWidget(new QLabel(QStringLiteral("Type:"), this));
-    topRow->addWidget(m_typeCombo);
-    topRow->addWidget(m_componentCombo);
-    topRow->addWidget(m_modeCombo);
-    topRow->addWidget(m_colormapCombo);
-    topRow->addWidget(m_refreshBtn);
-    topRow->addWidget(m_closeBtn);
+    topRow->addWidget(new QLabel(QStringLiteral("Expr:"), this)); topRow->addWidget(m_exprEdit, 1);
+    topRow->addWidget(new QLabel(QStringLiteral("Type:"), this)); topRow->addWidget(m_typeCombo);
+    topRow->addWidget(m_componentCombo); topRow->addWidget(m_modeCombo); topRow->addWidget(m_colormapCombo);
+    topRow->addWidget(m_refreshBtn); topRow->addWidget(m_closeBtn);
     root->addLayout(topRow);
 
     // Row 2: Tensor shape (Ny, Nx, Nz, Z, Memory Order), Slicing (Off, Str), Log10, Zoom, History.
-    auto* sliceRow = new QHBoxLayout();
-    sliceRow->setSpacing(5);
+    auto* sliceRow = new QHBoxLayout(); sliceRow->setSpacing(5);
     m_rowsSpin = makeSpin(QStringLiteral("arrayPlotRowsSpin"), 1, 8192, 1, 64);
     m_colsSpin = makeSpin(QStringLiteral("arrayPlotColsSpin"), 1, 65536, 64, 70);
     m_depthSpin = makeSpin(QStringLiteral("arrayPlotDepthSpin"), 1, 4096, 1, 60);
@@ -248,8 +230,8 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     m_zSliceSpin->setEnabled(false);
 
     m_memoryOrderCombo = makeCombo(QStringLiteral("arrayPlotMemoryOrderCombo"), 24);
-    m_memoryOrderCombo->addItem(QStringLiteral("C Row-Major"), static_cast<int>(TensorSliceTableModel::MemoryOrder::CRowMajor));
-    m_memoryOrderCombo->addItem(QStringLiteral("Fortran Col-Major"), static_cast<int>(TensorSliceTableModel::MemoryOrder::FortranColMajor));
+    addItemWithTip(m_memoryOrderCombo, QStringLiteral("C Row-Major"), static_cast<int>(TensorSliceTableModel::MemoryOrder::CRowMajor), QStringLiteral("C/C++ row-major contiguous layout: ((z * Ny + row) * Nx) + col"));
+    addItemWithTip(m_memoryOrderCombo, QStringLiteral("Fortran Col"), static_cast<int>(TensorSliceTableModel::MemoryOrder::FortranColMajor), QStringLiteral("Fortran/BLAS column-major contiguous layout: ((z * Nx + col) * Ny) + row"));
 
     m_offsetSpin = makeSpin(QStringLiteral("arrayPlotOffsetSpin"), 0, 10000000, 0, 72);
     m_strideSpin = makeSpin(QStringLiteral("arrayPlotStrideSpin"), 1, 65536, 1, 58);
@@ -265,23 +247,16 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     sliceRow->addWidget(m_memoryOrderCombo);
     sliceRow->addWidget(new QLabel(QStringLiteral("Off:"), this)); sliceRow->addWidget(m_offsetSpin);
     sliceRow->addWidget(new QLabel(QStringLiteral("Str:"), this)); sliceRow->addWidget(m_strideSpin);
-    sliceRow->addWidget(m_logScaleCheck);
-    sliceRow->addWidget(m_resetZoomBtn);
-    sliceRow->addWidget(m_clearHistoryBtn);
-    sliceRow->addStretch(1);
-    root->addLayout(sliceRow);
+    sliceRow->addWidget(m_logScaleCheck); sliceRow->addWidget(m_resetZoomBtn); sliceRow->addWidget(m_clearHistoryBtn);
+    sliceRow->addStretch(1); root->addLayout(sliceRow);
 
     // Row 3: Chart / Tensor Table view switcher, Rank controls, Auto-Refresh, and Exports.
-    auto* rankRow = new QHBoxLayout();
-    rankRow->setSpacing(6);
-    m_chartViewBtn = makeBtn(QStringLiteral("Chart"), QStringLiteral("arrayPlotChartViewBtn"));
-    m_chartViewBtn->setCheckable(true);
-    m_chartViewBtn->setChecked(true);
-    m_tableViewBtn = makeBtn(QStringLiteral("Tensor Table"), QStringLiteral("arrayPlotTableViewBtn"));
-    m_tableViewBtn->setCheckable(true);
+    auto* rankRow = new QHBoxLayout(); rankRow->setSpacing(6);
+    m_chartViewBtn = makeBtn(QStringLiteral("Chart"), QStringLiteral("arrayPlotChartViewBtn")); m_chartViewBtn->setCheckable(true); m_chartViewBtn->setChecked(true);
+    m_tableViewBtn = makeBtn(QStringLiteral("Tensor Table"), QStringLiteral("arrayPlotTableViewBtn")); m_tableViewBtn->setCheckable(true);
 
     m_rankCombo = makeCombo(QStringLiteral("arrayPlotRankCombo"), 24);
-    for (int r = 0; r < 8; ++r) m_rankCombo->addItem(QStringLiteral("Rank %1").arg(r), r);
+    for (int r = 0; r < 8; ++r) addItemWithTip(m_rankCombo, QStringLiteral("Rank %1").arg(r), r, QStringLiteral("Inspect array memory on MPI Rank %1").arg(r));
     m_overlayRanksCheck = makeCheck(QStringLiteral("Overlay Ranks"), QStringLiteral("arrayPlotOverlayAllRanksCheck"));
     m_rankSubsetEdit = new QLineEdit(QStringLiteral("All"), this);
     m_rankSubsetEdit->setObjectName(QStringLiteral("arrayPlotRankSubsetEdit"));
@@ -921,6 +896,19 @@ void ArrayPlotDialog::reloadStyle() {
         "QLabel#arrayPlotHoverLabel { color: %7; font-family: 'JetBrains Mono', monospace; font-size: 10px; }")
                       .arg(bg, pal.textHex, inputBg, pal.borderHex, btnBg, pal.accentHex, muted));
     if (m_canvas) m_canvas->update();
+}
+
+void ArrayPlotDialog::setCompletionCandidates(const QStringList& candidates) {
+    QStringList deduped;
+    QSet<QString> seen;
+    auto push = [&](const QString& raw) {
+        const QString s = raw.trimmed();
+        if (!s.isEmpty() && !seen.contains(s)) { seen.insert(s); deduped.append(s); }
+    };
+    for (const QString& c : candidates) push(c);
+    if (m_exprEdit && !m_exprEdit->text().trimmed().isEmpty()) push(m_exprEdit->text().trimmed());
+    m_completionCandidates = deduped;
+    if (m_completerModel) m_completerModel->setStringList(m_completionCandidates);
 }
 
 }  // namespace gridlock::ui

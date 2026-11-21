@@ -18,6 +18,8 @@
 #include "../src/core/hpc/GdbRankCoordinator.hpp"
 #include "../src/core/hpc/IBackendCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
+#include "../src/core/managers/SessionManager.hpp"
+#include "../src/core/managers/ShortcutManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/utils/ClangdLspClient.hpp"
 #include "../src/ui/EditorTabManager.hpp"
@@ -648,28 +650,23 @@ static void testPointerGraphDagLayoutAndAliasSplitting() {
     pg.upsertStructNode(QStringLiteral("root"), QStringLiteral("Tree"), QStringLiteral("0x100"), {F{QStringLiteral("left"), QStringLiteral("0x200"), QStringLiteral("Node*")}, F{QStringLiteral("right"), QStringLiteral("0x210"), QStringLiteral("Node*")}});
     pg.upsertStructNode(QStringLiteral("child"), QStringLiteral("Node"), QStringLiteral("0x200"), {F{QStringLiteral("next"), QStringLiteral("0x300"), QStringLiteral("Node*")}}, QStringLiteral("root"), QStringLiteral("left"));
     pg.upsertStructNode(QStringLiteral("altChild"), QStringLiteral("Node"), QStringLiteral("0x210"), {F{QStringLiteral("val"), QStringLiteral("7"), QStringLiteral("int")}}, QStringLiteral("root"), QStringLiteral("right"));
-    pg.upsertStructNode(QStringLiteral("grandchild"), QStringLiteral("Node"), QStringLiteral("0x300"), {F{QStringLiteral("val"), QStringLiteral("9"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("next"));
-    pg.autoLayoutNodes();
+    pg.upsertStructNode(QStringLiteral("grandchild"), QStringLiteral("Node"), QStringLiteral("0x300"), {F{QStringLiteral("val"), QStringLiteral("9"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("next")); pg.autoLayoutNodes();
     QVERIFY(pg.nodeLayer(QStringLiteral("root")) == 0 && pg.nodeLayer(QStringLiteral("child")) == 1 && pg.nodeLayer(QStringLiteral("grandchild")) == 2 && pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x() && pg.nodePosition(QStringLiteral("child")).y() < pg.nodePosition(QStringLiteral("altChild")).y());
     const QPointF manualPos(555.0, 444.0); QVERIFY(pg.setNodePosition(QStringLiteral("child"), manualPos) && pg.isNodeManuallyPositioned(QStringLiteral("child")));
     pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("child"), QStringLiteral("Node"), QStringLiteral("0x200"), {F{QStringLiteral("next"), QStringLiteral("0x300"), QStringLiteral("Node*")}, F{QStringLiteral("tag"), QStringLiteral("1"), QStringLiteral("int")}});
-    pg.upsertStructNode(QStringLiteral("extra"), QStringLiteral("Node"), QStringLiteral("0x310"), {F{QStringLiteral("val"), QStringLiteral("3"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("tag"));
-    pg.autoLayoutNodes(false); QCOMPARE(pg.nodePosition(QStringLiteral("child")), manualPos);
+    pg.upsertStructNode(QStringLiteral("extra"), QStringLiteral("Node"), QStringLiteral("0x310"), {F{QStringLiteral("val"), QStringLiteral("3"), QStringLiteral("int")}}, QStringLiteral("child"), QStringLiteral("tag")); pg.autoLayoutNodes(false); QCOMPARE(pg.nodePosition(QStringLiteral("child")), manualPos);
     layoutBtn->click(); QVERIFY(!pg.isNodeManuallyPositioned(QStringLiteral("child")) && pg.nodePosition(QStringLiteral("root")).x() < pg.nodePosition(QStringLiteral("child")).x() && pg.nodePosition(QStringLiteral("child")).x() < pg.nodePosition(QStringLiteral("grandchild")).x());
     clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0 && pg.pinnedRootExpressions().isEmpty());
     pg.addAndEvaluateRootExpression(QStringLiteral("headA"), QStringLiteral("Holder*"), QStringLiteral("0x100")); pg.upsertStructNode(QStringLiteral("headA"), QStringLiteral("Holder"), QStringLiteral("0x100"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
     pg.addAndEvaluateRootExpression(QStringLiteral("headB"), QStringLiteral("Holder*"), QStringLiteral("0x200")); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
-    QVERIFY(pg.nodeCount() == 2 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA"), QStringLiteral("headB")}) && pg.nodePosition(QStringLiteral("headA")).y() != pg.nodePosition(QStringLiteral("headB")).y());
-    QVERIFY(pg.unpinRootExpression(QStringLiteral("headB")) && pg.nodeCount() == 1 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA")}));
+    QVERIFY(pg.nodeCount() == 2 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA"), QStringLiteral("headB")}) && pg.nodePosition(QStringLiteral("headA")).y() != pg.nodePosition(QStringLiteral("headB")).y() && pg.unpinRootExpression(QStringLiteral("headB")) && pg.nodeCount() == 1 && pg.pinnedRootExpressions() == (QStringList{QStringLiteral("headA")}));
     pg.addAndEvaluateRootExpression(QStringLiteral("headB"), QStringLiteral("Holder*"), QStringLiteral("0x200")); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x1000"), QStringLiteral("Node*")}});
     pg.upsertStructNode(QStringLiteral("n1"), QStringLiteral("Node"), QStringLiteral("0x1000"), {F{QStringLiteral("val"), QStringLiteral("10"), QStringLiteral("int")}}, QStringLiteral("headA"), QStringLiteral("ptr"));
     QVERIFY(pg.connectPointerField(QStringLiteral("headB"), QStringLiteral("ptr"), QStringLiteral("0x1000")) && pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.hasCycleOrSharedAlias());
-    pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x2000"), QStringLiteral("Node*")}});
-    pg.upsertStructNode(QStringLiteral("n2"), QStringLiteral("Node"), QStringLiteral("0x2000"), {F{QStringLiteral("val"), QStringLiteral("20"), QStringLiteral("int")}}, QStringLiteral("headB"), QStringLiteral("ptr"));
+    pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("headB"), QStringLiteral("Holder"), QStringLiteral("0x200"), {F{QStringLiteral("ptr"), QStringLiteral("0x2000"), QStringLiteral("Node*")}}); pg.upsertStructNode(QStringLiteral("n2"), QStringLiteral("Node"), QStringLiteral("0x2000"), {F{QStringLiteral("val"), QStringLiteral("20"), QStringLiteral("int")}}, QStringLiteral("headB"), QStringLiteral("ptr"));
     QVERIFY(pg.nodeCount() == 4 && pg.edgeCount() == 2 && pg.edgeTargetAddressOrExpr(QStringLiteral("headA"), QStringLiteral("ptr")) == QStringLiteral("0x1000") && pg.edgeTargetAddressOrExpr(QStringLiteral("headB"), QStringLiteral("ptr")) == QStringLiteral("0x2000") && !pg.hasCycleOrSharedAlias() && pg.fieldMutationSummary(QStringLiteral("headB"), QStringLiteral("ptr")) == QStringLiteral("0x1000 -> 0x2000"));
     pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("headA"), QStringLiteral("Holder"), QStringLiteral("0x100"), {F{QStringLiteral("ptr"), QStringLiteral("0x2000"), QStringLiteral("Node*")}});
-    QVERIFY(pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.edgeTargetAddressOrExpr(QStringLiteral("headA"), QStringLiteral("ptr")) == QStringLiteral("0x2000") && pg.hasCycleOrSharedAlias());
-    clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0);
+    QVERIFY(pg.nodeCount() == 3 && pg.edgeCount() == 2 && pg.edgeTargetAddressOrExpr(QStringLiteral("headA"), QStringLiteral("ptr")) == QStringLiteral("0x2000") && pg.hasCycleOrSharedAlias()); clearBtn->click(); QVERIFY(pg.nodeCount() == 0 && pg.edgeCount() == 0);
 }
 /** @brief Verifies PointerGraphDialog wheel zoom, corner minimap, field suppression, horizontal orientation, /x /d /b overrides, and SVG/PNG export. */
 static void testPointerGraphControlsAndExport() {
@@ -677,21 +674,17 @@ static void testPointerGraphControlsAndExport() {
     PointerGraphDialog pg; pg.resize(960, 620); pg.show(); QApplication::processEvents();
     QVERIFY(pg.findChild<QPushButton*>(QStringLiteral("pointerGraphExportSvgBtn")) && pg.findChild<QPushButton*>(QStringLiteral("pointerGraphExportPngBtn")) && pg.findChild<QPushButton*>(QStringLiteral("pointerGraphResetZoomBtn")) && pg.findChild<QPushButton*>(QStringLiteral("pointerGraphFitBtn")));
     pg.upsertStructNode(QStringLiteral("pkt"), QStringLiteral("Packet"), QStringLiteral("0x5000"), {F{QStringLiteral("magic"), QStringLiteral("42"), QStringLiteral("int")}, F{QStringLiteral("seq"), QStringLiteral("7"), QStringLiteral("int")}, F{QStringLiteral("crc"), QStringLiteral("255"), QStringLiteral("uint32_t")}, F{QStringLiteral("next"), QStringLiteral("0x5100"), QStringLiteral("Packet*")}});
-    pg.upsertStructNode(QStringLiteral("peer"), QStringLiteral("Packet"), QStringLiteral("0x5100"), {F{QStringLiteral("magic"), QStringLiteral("99"), QStringLiteral("int")}}, QStringLiteral("pkt"), QStringLiteral("next"));
-    QApplication::processEvents();
+    pg.upsertStructNode(QStringLiteral("peer"), QStringLiteral("Packet"), QStringLiteral("0x5100"), {F{QStringLiteral("magic"), QStringLiteral("99"), QStringLiteral("int")}}, QStringLiteral("pkt"), QStringLiteral("next")); QApplication::processEvents();
     QVERIFY(pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0 && pg.setNodeFieldHidden(QStringLiteral("pkt"), QStringLiteral("crc"), true) && pg.visibleFieldCount(QStringLiteral("pkt")) == 3 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.hiddenFieldsBadgeText(QStringLiteral("pkt")).contains(QStringLiteral("(+1 hidden)")));
     pg.onTargetStopped(0); pg.upsertStructNode(QStringLiteral("pkt"), QStringLiteral("Packet"), QStringLiteral("0x5000"), {F{QStringLiteral("magic"), QStringLiteral("42"), QStringLiteral("int")}, F{QStringLiteral("seq"), QStringLiteral("8"), QStringLiteral("int")}, F{QStringLiteral("crc"), QStringLiteral("255"), QStringLiteral("uint32_t")}, F{QStringLiteral("next"), QStringLiteral("0x5100"), QStringLiteral("Packet*")}});
-    QVERIFY(pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.restoreAllHiddenFields(QStringLiteral("pkt")) && pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0);
-    QVERIFY(!pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.toggleNodeOrientation(QStringLiteral("pkt")) && pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.nodeCardSize(QStringLiteral("pkt")).width() > pg.nodeCardSize(QStringLiteral("pkt")).height());
+    QVERIFY(pg.hiddenFieldCount(QStringLiteral("pkt")) == 1 && pg.restoreAllHiddenFields(QStringLiteral("pkt")) && pg.visibleFieldCount(QStringLiteral("pkt")) == 4 && pg.hiddenFieldCount(QStringLiteral("pkt")) == 0 && !pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.toggleNodeOrientation(QStringLiteral("pkt")) && pg.isNodeHorizontal(QStringLiteral("pkt")) && pg.nodeCardSize(QStringLiteral("pkt")).width() > pg.nodeCardSize(QStringLiteral("pkt")).height());
     QVERIFY(pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/x")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0x2a") && pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/b")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("0b101010") && pg.setNodeFormatOverride(QStringLiteral("pkt"), QStringLiteral("/d")) && pg.fieldValue(QStringLiteral("pkt"), QStringLiteral("magic")) == QStringLiteral("42"));
     auto* gv = pg.findChild<QGraphicsView*>(QStringLiteral("pointerGraphView")); QVERIFY(gv != nullptr && !pg.minimapViewportRect().isEmpty());
     QWheelEvent wheelIn(QPointF(100, 100), gv->mapToGlobal(QPointF(100, 100)), QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-    QApplication::sendEvent(gv->viewport(), &wheelIn); QVERIFY(pg.zoomFactor() > 1.05);
-    pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3); pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
+    QApplication::sendEvent(gv->viewport(), &wheelIn); QVERIFY(pg.zoomFactor() > 1.05); pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3); pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
     QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, pg.minimapViewportRect().center().toPoint());
     QTemporaryDir expDir; QVERIFY(expDir.isValid()); const QString pngOut = expDir.filePath(QStringLiteral("graph.png")), svgOut = expDir.filePath(QStringLiteral("graph.svg"));
-    QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400);
-    QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg"))); pg.close();
+    QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400); QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg"))); pg.close();
 }
 /** @brief Verifies ArrayPlotDialog v0.8.8 multi-rank 1D overlay, start:end:stride slicing, Log10 scale, drag-box zoom, and Scalar History mode. */
 static void testArrayPlotterScientificExtensions() {
@@ -704,8 +697,8 @@ static void testArrayPlotterScientificExtensions() {
     QVERIFY(logChk && overlayChk && resetZoomBtn && clearHistBtn && dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotOffsetSpin")) && dlg.findChild<QSpinBox*>(QStringLiteral("arrayPlotStrideSpin")) && dlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotRankSubsetEdit")));
     QVector<double> buf12(12); for (int i = 0; i < 12; ++i) buf12[i] = static_cast<double>(i); dlg.setExpression(QStringLiteral("arr[2:10:2]"));
     QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(buf12.constData()), buf12.size() * sizeof(double)), ArrayPlotDialog::ElementType::Float64) && dlg.currentSamples() == (QVector<double>{2.0, 4.0, 6.0, 8.0}) && dlg.sliceOffset() == 2 && dlg.sliceStride() == 2);
-    QSignalSpy multiSpy(&dlg, &ArrayPlotDialog::multiRankPlotRequested); dlg.setExpression(QStringLiteral("halo[0:4]")); dlg.setRankSubsetSpec(QStringLiteral("0..3"));
-    overlayChk->setChecked(true); QApplication::processEvents(); QVERIFY(multiSpy.count() >= 1 && multiSpy.first().at(0).toString() == QStringLiteral("halo") && multiSpy.first().at(1).toInt() == 32);
+    QSignalSpy multiSpy(&dlg, &ArrayPlotDialog::multiRankPlotRequested); dlg.setExpression(QStringLiteral("halo[0:4]")); dlg.setRankSubsetSpec(QStringLiteral("0..3")); overlayChk->setChecked(true); QApplication::processEvents();
+    QVERIFY(multiSpy.count() >= 1 && multiSpy.first().at(0).toString() == QStringLiteral("halo") && multiSpy.first().at(1).toInt() == 32);
     for (int r = 0; r < 4; ++r) { const double vals[4] = {r * 10.0 + 1.0, r * 10.0 + 2.0, r * 10.0 + 3.0, r * 10.0 + 4.0}; emit coord.memoryRead(r, QStringLiteral("&(halo)[0]"), QByteArray(reinterpret_cast<const char*>(vals), sizeof(vals))); }
     QVERIFY(dlg.rankOverlays().size() == 4 && dlg.rankOverlays().value(3).first() == 31.0 && !dlg.grab().isNull()); overlayChk->setChecked(false); QVERIFY(dlg.rankOverlays().isEmpty());
     dlg.setSliceOffset(0); dlg.setSliceStride(1); dlg.setSamples({1e-4, 1e-2, 1.0, 0.0, -5.0}, 1, 5); logChk->setChecked(true); QApplication::processEvents(); QVERIFY(dlg.isLogScale() && !dlg.grab().isNull());
@@ -718,8 +711,7 @@ static void testArrayPlotterScientificExtensions() {
     QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, p0); QTest::mouseMove(canvas, p1); QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, p1); QVERIFY(dlg.isZoomed()); QTest::mouseDClick(canvas, Qt::LeftButton, Qt::NoModifier, pr.center()); QVERIFY(!dlg.isZoomed());
     dlg.setPlotMode(ArrayPlotDialog::PlotMode::ScalarHistory); dlg.setExpression(QStringLiteral("residual"));
     for (const QString& rv : {QStringLiteral("$1 = 1.0"), QStringLiteral("$2 = 0.1"), QStringLiteral("$3 = 0.01"), QStringLiteral("$4 = 0.001")}) { dlg.onTargetStopped(0); emit coord.expressionEvaluated(0, QStringLiteral("residual"), rv); }
-    QVERIFY(dlg.scalarHistory().size() == 4 && dlg.currentSamples().size() == 4 && std::abs(dlg.scalarHistory().constLast() - 0.001) < 1e-12 && !dlg.grab().isNull());
-    clearHistBtn->click(); QVERIFY(dlg.scalarHistory().isEmpty() && dlg.currentSamples().isEmpty()); dlg.close();
+    QVERIFY(dlg.scalarHistory().size() == 4 && dlg.currentSamples().size() == 4 && std::abs(dlg.scalarHistory().constLast() - 0.001) < 1e-12 && !dlg.grab().isNull()); clearHistBtn->click(); QVERIFY(dlg.scalarHistory().isEmpty() && dlg.currentSamples().isEmpty()); dlg.close();
 }
 /** @brief Verifies Complex64/Complex128 decoding, 2D splot/pm3d gnuplot script generation, and virtualized C/Fortran 2D/3D TensorSliceTableModel. */
 static void testComplexAndTensorTableExtensions() {
@@ -727,52 +719,68 @@ static void testComplexAndTensorTableExtensions() {
     ArrayPlotDialog dlg; const float c64[2] = {3.0f, 4.0f}; const double c128[4] = {-1.0, 0.0, 1.0, std::numeric_limits<double>::quiet_NaN()};
     QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(c64), sizeof(c64)), ArrayPlotDialog::ElementType::Complex64, 1, 1) && std::abs(dlg.currentSamples().first() - 5.0) < 1e-6);
     dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Phase); QVERIFY(std::abs(dlg.currentSamples().first() - std::atan2(4.0, 3.0)) < 1e-6);
-    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Real); QCOMPARE(dlg.currentSamples().first(), 3.0); dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Imaginary); QCOMPARE(dlg.currentSamples().first(), 4.0);
-    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Magnitude);
+    dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Real); QCOMPARE(dlg.currentSamples().first(), 3.0); dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Imaginary); QCOMPARE(dlg.currentSamples().first(), 4.0); dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Magnitude);
     QVERIFY(dlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(c128), sizeof(c128)), ArrayPlotDialog::ElementType::Complex128, 1, 2) && std::abs(dlg.currentSamples().first() - 1.0) < 1e-12 && dlg.nanCount() == 1);
     dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Phase); QVERIFY(std::abs(dlg.currentSamples().first() - std::acos(-1.0)) < 1e-12 && dlg.nanCount() == 1);
     dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Real); QCOMPARE(dlg.currentSamples().first(), -1.0); dlg.setComplexComponent(ArrayPlotDialog::ComplexComponent::Imaginary); QCOMPARE(dlg.currentSamples().first(), 0.0);
-    QVector<double> m32(32, 1.5); dlg.setSamples(m32, 4, 8); const QString gp2d = dlg.buildGnuplotScript(QStringLiteral("/tmp/m.dat"));
-    QVERIFY(gp2d.contains(QStringLiteral("splot")) && gp2d.contains(QStringLiteral("with pm3d")) && gp2d.contains(QStringLiteral("matrix")));
+    QVector<double> m32(32, 1.5); dlg.setSamples(m32, 4, 8); const QString gp2d = dlg.buildGnuplotScript(QStringLiteral("/tmp/m.dat")); QVERIFY(gp2d.contains(QStringLiteral("splot")) && gp2d.contains(QStringLiteral("with pm3d")) && gp2d.contains(QStringLiteral("matrix")));
     dlg.setSamples({1.0, 2.0, 3.0, 4.0}, 1, 4); const QString gp1d = dlg.buildGnuplotScript(QStringLiteral("/tmp/l.dat")); QVERIFY(gp1d.contains(QStringLiteral("plot '")) && !gp1d.contains(QStringLiteral("splot")));
-    QVector<double> t12(12); for (int i = 0; i < 12; ++i) t12[i] = static_cast<double>(i);
-    dlg.setTensorDimensions(3, 2, 2); dlg.setSamples(t12, 2, 3); dlg.setTensorTableActive(true); auto* tm = dlg.tensorTableModel(); QVERIFY(dlg.isTensorTableActive() && tm && tm->rowCount() == 2 && tm->columnCount() == 3);
-    dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor); dlg.setZSlice(0); QVERIFY(tm->cellValue(0, 2) == 2.0 && tm->cellValue(1, 0) == 3.0 && tm->data(tm->index(1, 0), Qt::ToolTipRole).toString().contains(QStringLiteral("[3]")));
-    dlg.setZSlice(1); QVERIFY(tm->cellValue(0, 0) == 6.0 && tm->cellValue(1, 2) == 11.0);
-    dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::FortranColMajor); dlg.setZSlice(0); QVERIFY(tm->cellValue(1, 0) == 1.0 && tm->cellValue(0, 1) == 2.0 && tm->cellValue(1, 2) == 5.0);
-    dlg.setZSlice(1); QVERIFY(tm->cellValue(0, 1) == 8.0 && tm->cellValue(1, 2) == 11.0);
-    QVector<double> big(120000); for (int i = 0; i < big.size(); ++i) big[i] = static_cast<double>(i);
-    dlg.setTensorDimensions(400, 300, 1); dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor); dlg.setSamples(big, 300, 400);
+    QVector<double> t12(12); for (int i = 0; i < 12; ++i) t12[i] = static_cast<double>(i); dlg.setTensorDimensions(3, 2, 2); dlg.setSamples(t12, 2, 3); dlg.setTensorTableActive(true); auto* tm = dlg.tensorTableModel(); QVERIFY(dlg.isTensorTableActive() && tm && tm->rowCount() == 2 && tm->columnCount() == 3);
+    dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor); dlg.setZSlice(0); QVERIFY(tm->cellValue(0, 2) == 2.0 && tm->cellValue(1, 0) == 3.0 && tm->data(tm->index(1, 0), Qt::ToolTipRole).toString().contains(QStringLiteral("[3]"))); dlg.setZSlice(1); QVERIFY(tm->cellValue(0, 0) == 6.0 && tm->cellValue(1, 2) == 11.0);
+    dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::FortranColMajor); dlg.setZSlice(0); QVERIFY(tm->cellValue(1, 0) == 1.0 && tm->cellValue(0, 1) == 2.0 && tm->cellValue(1, 2) == 5.0); dlg.setZSlice(1); QVERIFY(tm->cellValue(0, 1) == 8.0 && tm->cellValue(1, 2) == 11.0);
+    QVector<double> big(120000); for (int i = 0; i < big.size(); ++i) big[i] = static_cast<double>(i); dlg.setTensorDimensions(400, 300, 1); dlg.setMemoryOrder(TensorSliceTableModel::MemoryOrder::CRowMajor); dlg.setSamples(big, 300, 400);
     QVERIFY(tm->rowCount() == 300 && tm->columnCount() == 400 && tm->cellValue(299, 399) == 119999.0);
+}
+/** @brief Verifies expression autocomplete in PointerGraphDialog/ArrayPlotDialog, SourceCodeView struct/pointer graph actions, underscore-free menu labels, dropdown tooltips, and editable Keybindings preferences. */
+static void testAutocompleteContextGraphAndKeybindPreferences() {
+    struct ShortcutResetGuard { ~ShortcutResetGuard() { gridlock::core::ShortcutManager::instance().resetAllToDefaults(true); } } resetGuard;
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
+    mw.selectTargetByName(QStringLiteral("inspection_demo")); gridlock::core::managers::SessionManager::instance().addRecentSession(QStringLiteral("/tmp/mpi_test_workspace")); QApplication::processEvents();
+    auto* sv = mw.sourceCodeView(); QVERIFY(sv != nullptr && sv->toPlainText().contains(QStringLiteral("struct DeeplyNested")));
+    mw.openPointerGraphVisualizer(); auto* plotAct = mw.findChild<QAction*>(QStringLiteral("actionArrayPlotter")); QVERIFY(plotAct != nullptr); plotAct->trigger(); QApplication::processEvents();
+    auto* pgDlg = mw.findChild<gridlock::ui::PointerGraphDialog*>(QStringLiteral("PointerGraphDialog")); auto* apDlg = mw.findChild<gridlock::ui::ArrayPlotDialog*>(QStringLiteral("ArrayPlotDialog")); QVERIFY(pgDlg && apDlg && pgDlg->expressionCompleter() && apDlg->expressionCompleter());
+    auto matchesFor = [](QCompleter* comp, const QString& prefix) { comp->setCompletionPrefix(prefix); QStringList res; if (auto* m = comp->completionModel()) for (int r = 0; r < m->rowCount(); ++r) res.append(m->data(m->index(r, 0)).toString()); return res; };
+    const QStringList pgDa = matchesFor(pgDlg->expressionCompleter(), QStringLiteral("da")), apDa = matchesFor(apDlg->expressionCompleter(), QStringLiteral("da"));
+    QVERIFY(pgDa.contains(QStringLiteral("data")) && pgDa.contains(QStringLiteral("data[0]")) && apDa.contains(QStringLiteral("data")) && apDa.contains(QStringLiteral("data[0]")) && matchesFor(pgDlg->expressionCompleter(), QStringLiteral("Dee")).contains(QStringLiteral("DeeplyNested")));
+    int structLine = -1, dataLine = -1;
+    for (QTextBlock b = sv->document()->begin(); b.isValid(); b = b.next()) { if (structLine < 0 && b.text().contains(QStringLiteral("struct DeeplyNested"))) structLine = b.blockNumber() + 1; if (dataLine < 0 && b.text().contains(QStringLiteral("data[i].id"))) dataLine = b.blockNumber() + 1; }
+    QVERIFY(structLine > 0 && dataLine > 0); QSignalSpy structSpy(sv, &gridlock::ui::SourceCodeView::graphStructTypeRequested); QSignalSpy exprSpy(sv, &gridlock::ui::SourceCodeView::graphExpressionRequested);
+    QVERIFY(sv->triggerContextActionAtLine(structLine, QStringLiteral("Graph 'DeeplyNested' Struct Instances")) && structSpy.count() == 1 && structSpy.first().at(0).toString() == QStringLiteral("DeeplyNested") && pgDlg->pinnedRootExpressions().contains(QStringLiteral("data[0]")));
+    QTextBlock db = sv->document()->findBlockByNumber(dataLine - 1); const int dPos = db.text().indexOf(QStringLiteral("data[i]")); QVERIFY(dPos >= 0);
+    QTextCursor selCur(db); selCur.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, dPos); selCur.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 7); sv->setTextCursor(selCur);
+    QVERIFY(sv->triggerContextActionAtLine(dataLine, QStringLiteral("Graph 'data[i]' in Pointer Graph")) && exprSpy.count() == 1 && exprSpy.first().at(0).toString() == QStringLiteral("data[i]"));
+    auto checkMenus = [&](auto& self, QMenu* m) -> void { if (!m) return; emit m->aboutToShow(); for (QAction* a : m->actions()) { if (!a || a->isSeparator()) continue; QVERIFY2(!a->text().contains(QLatin1Char('_')), qPrintable(a->text())); if (a->menu()) self(self, a->menu()); } };
+    for (QAction* top : mw.menuBar()->actions()) if (top && top->menu()) checkMenus(checkMenus, top->menu());
+    for (QComboBox* cb : apDlg->findChildren<QComboBox*>()) for (int i = 0; i < cb->count(); ++i) QVERIFY(!cb->itemData(i, Qt::ToolTipRole).toString().isEmpty() && cb->itemText(i).size() <= 24);
+    gridlock::ui::PreferencesDialog prefs(&mw); prefs.show(); QApplication::processEvents();
+    auto* catList = prefs.findChild<QListWidget*>(QStringLiteral("preferencesCategoryList")); auto* seqEdit = prefs.findChild<QKeySequenceEdit*>(QStringLiteral("keySeqEdit_actionArrayPlotter")); auto* resetBtn = prefs.findChild<QPushButton*>(QStringLiteral("keybindingsResetDefaultsBtn"));
+    int kbRow = -1; if (catList) for (int i = 0; i < catList->count(); ++i) if (catList->item(i)->text() == QStringLiteral("Keybindings")) kbRow = i;
+    QVERIFY(kbRow > 0 && seqEdit && resetBtn); catList->setCurrentRow(kbRow); QApplication::processEvents();
+    const QKeySequence customSeq(QStringLiteral("Ctrl+Alt+Y")); seqEdit->setKeySequence(customSeq); QApplication::processEvents();
+    QVERIFY(plotAct->shortcut() == customSeq && gridlock::core::ConfigManager::instance().customShortcuts().value(QStringLiteral("actionArrayPlotter")) == customSeq);
+    resetBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G) && gridlock::core::ConfigManager::instance().customShortcuts().isEmpty());
+    prefs.close(); apDlg->close(); pgDlg->close();
 }
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     using gridlock::ui::ArrayPlotDialog; using gridlock::ui::PointerGraphDialog;
     ArrayPlotDialog plotDlg; QVERIFY(plotDlg.findChild<QLineEdit*>(QStringLiteral("arrayPlotExprEdit")) && plotDlg.findChild<QCheckBox*>(QStringLiteral("arrayPlotAutoRefreshCheck")) && plotDlg.isAutoRefreshEnabled());
-    const double d0[4] = {1.0, 2.0, 3.0, 4.0}, d1[4] = {1.0, 9.0, 3.0, std::numeric_limits<double>::quiet_NaN()};
+    const double d0[4] = {1.0, 2.0, 3.0, 4.0}, d1[4] = {1.0, 9.0, 3.0, std::numeric_limits<double>::quiet_NaN()}; const float f0[3] = {-2.5f, 0.0f, 5.5f}; const int32_t i0[4] = {10, 20, 30, 40};
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d0), sizeof(d0)), ArrayPlotDialog::ElementType::Float64, 1, 4) && plotDlg.currentSamples().size() == 4 && plotDlg.minValue() == 1.0 && plotDlg.maxValue() == 4.0 && plotDlg.meanValue() == 2.5 && std::abs(plotDlg.l2Norm() - std::sqrt(30.0)) < 1e-9 && plotDlg.nanInfCount() == 0);
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(d1), sizeof(d1)), ArrayPlotDialog::ElementType::Float64, 2, 2) && plotDlg.plotMode() == ArrayPlotDialog::PlotMode::Heatmap2D && plotDlg.nanCount() == 1 && plotDlg.changedElementCount() == 2);
-    const float f0[3] = {-2.5f, 0.0f, 5.5f}; const int32_t i0[4] = {10, 20, 30, 40};
     QVERIFY(plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(f0), sizeof(f0)), QStringLiteral("float"), 1, 3) && plotDlg.minValue() == -2.5 && plotDlg.maxValue() == 5.5 && plotDlg.loadFromRawBytes(QByteArray(reinterpret_cast<const char*>(i0), sizeof(i0)), QStringLiteral("int32_t"), 2, 2) && plotDlg.meanValue() == 25.0);
     QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); const QString csvPath = tmpDir.filePath(QStringLiteral("field.csv")), pngPath = tmpDir.filePath(QStringLiteral("field.png"));
-    QVERIFY(plotDlg.exportCsv(csvPath) && plotDlg.savePng(pngPath) && QFileInfo::exists(pngPath));
-    QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll()); QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));
+    QVERIFY(plotDlg.exportCsv(csvPath) && plotDlg.savePng(pngPath) && QFileInfo::exists(pngPath)); QFile cf(csvPath); QVERIFY(cf.open(QIODevice::ReadOnly)); const QString csvText = QString::fromUtf8(cf.readAll()); QVERIFY(csvText.contains(QStringLiteral("10")) && csvText.contains(QStringLiteral("40")));
     PointerGraphDialog pgDlg; QVERIFY(pgDlg.findChild<QPushButton*>(QStringLiteral("pointerGraphRefreshBtn")) && pgDlg.findChild<QCheckBox*>(QStringLiteral("pointerGraphAutoRefreshCheck")) && pgDlg.isAutoRefreshEnabled());
-    pgDlg.pinRootExpression(QStringLiteral("head")); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("42"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
-    QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
+    pgDlg.pinRootExpression(QStringLiteral("head")); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("42"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}}); QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.mutatedFieldCount() == 0);
     pgDlg.onTargetStopped(0); pgDlg.upsertStructNode(QStringLiteral("head"), QStringLiteral("ListNode"), QStringLiteral("0x7fff1000"), {{QStringLiteral("val"), QStringLiteral("99"), QStringLiteral("int")}, {QStringLiteral("next"), QStringLiteral("0x7fff2000"), QStringLiteral("ListNode*")}});
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
-    testPointerGraphDagLayoutAndAliasSplitting(); testPointerGraphControlsAndExport(); testArrayPlotterScientificExtensions(); testComplexAndTensorTableExtensions();
-    auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true);
-    const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
-    QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show();
-    const qint64 startupMs = startupTimer.elapsed(); QVERIFY2(startupMs < 450, qPrintable(QStringLiteral("Startup took %1 ms").arg(startupMs)));
-    QApplication::processEvents(); auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"));
-    auto* pm = static_cast<gridlock::ui::HpcConsoleWidget*>(mw.findChild<QWidget*>(QStringLiteral("HpcConsoleDock")));
-    auto* term = mw.findChild<gridlock::ui::TerminalDockWidget*>(); auto* ref = mw.findChild<gridlock::ui::ReferenceManualWidget*>();
+    testPointerGraphDagLayoutAndAliasSplitting(); testPointerGraphControlsAndExport(); testArrayPlotterScientificExtensions(); testComplexAndTensorTableExtensions(); testAutocompleteContextGraphAndKeybindPreferences();
+    auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true); const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
+    QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show(); const qint64 startupMs = startupTimer.elapsed(); QVERIFY2(startupMs < 450, qPrintable(QStringLiteral("Startup took %1 ms").arg(startupMs)));
+    QApplication::processEvents(); auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* pm = static_cast<gridlock::ui::HpcConsoleWidget*>(mw.findChild<QWidget*>(QStringLiteral("HpcConsoleDock"))); auto* term = mw.findChild<gridlock::ui::TerminalDockWidget*>(); auto* ref = mw.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(bottomTabs && pm && term && ref && !pm->isPackagesLoaded() && !term->isShellStarted() && !ref->isDocsetsInitialized());
-    bottomTabs->setCurrentWidget(term); QApplication::processEvents(); bottomTabs->setCurrentWidget(ref); QApplication::processEvents(); bottomTabs->setCurrentWidget(pm); QApplication::processEvents();
-    QVERIFY(term->isShellStarted() && ref->isDocsetsInitialized() && pm->isPackagesLoaded());
+    bottomTabs->setCurrentWidget(term); QApplication::processEvents(); bottomTabs->setCurrentWidget(ref); QApplication::processEvents(); bottomTabs->setCurrentWidget(pm); QApplication::processEvents(); QVERIFY(term->isShellStarted() && ref->isDocsetsInitialized() && pm->isPackagesLoaded());
 }
 /** @brief Verifies GdbRankCoordinator signal disposition/catchpoint MI commands and SignalCatchpointDialog UI integration. */
 void TestMainWindowUI::testSignalDispositionAndCatchpoints() {
