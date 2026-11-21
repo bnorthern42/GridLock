@@ -12,9 +12,13 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QLineEdit>
+#include <QMap>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSet>
 #include <QString>
+#include <QTimer>
+#include <QVector>
 
 namespace gridlock::ui {
 
@@ -26,87 +30,60 @@ class ExpressionEvaluatorWidget : public QDockWidget {
     Q_OBJECT
 
 public:
-    /**
-     * @brief Constructs a new ExpressionEvaluatorWidget.
-     * @param parent Optional parent widget.
-     */
     explicit ExpressionEvaluatorWidget(QWidget* parent = nullptr);
-
-    /**
-     * @brief Destructor.
-     */
     ~ExpressionEvaluatorWidget() override = default;
 
-    /**
-     * @brief Sets the current expression input field text.
-     * @param expr Expression string to populate into the evaluator field.
-     */
+    /** @brief Sets the current expression input field text. */
     void setExpression(const QString& expr);
 
-    /**
-     * @brief Promotes the currently entered expression to the Watch Expressions dock.
-     * @return True if a non-empty expression was promoted, false otherwise.
-     */
+    /** @brief Promotes the currently entered expression to the Watch Expressions dock. */
     bool promoteCurrentToWatch();
 
-    /**
-     * @brief Returns the pixel height of the top target/action header strip.
-     * @return Header bar height in pixels.
-     */
+    /** @brief Returns the pixel height of the top target/action header strip. */
     int headerBarHeight() const;
 
-    /**
-     * @brief Returns the pixel height of the bottom eval> prompt strip.
-     * @return Prompt bar height in pixels.
-     */
+    /** @brief Returns the pixel height of the bottom eval> prompt strip. */
     int promptBarHeight() const;
 
+    /** @brief Updates `#evaluatorRankCombo` entries to `All Ranks` + `Rank 0..rankCount-1`. */
+    void setAvailableRankCount(int rankCount);
+
+    /** @brief Returns `-1` when `All Ranks` is selected, or the 0-based selected rank ID. */
+    int selectedTargetRank() const;
+
+    /** @brief Selects `-1` (`All Ranks`) or a specific 0-based rank in `#evaluatorRankCombo`. */
+    void setSelectedTargetRank(int rankId);
+
+    /** @brief Starts an All-Ranks batch expecting `appendResult()` replies for @p ranks. */
+    void beginMultiRankEvaluation(const QString& expr, const QVector<int>& ranks);
+
 public slots:
-    /**
-     * @brief Appends evaluated expression results for a specific rank to the history console.
-     * @param rankId Evaluated MPI rank index.
-     * @param expr The submitted expression string.
-     * @param result Formatted evaluation output or error.
-     */
+    /** @brief Appends evaluated expression results for @p rankId (or aggregates into an active All-Ranks batch). */
     void appendResult(int rankId, const QString& expr, const QString& result);
 
 signals:
-    /**
-     * @brief Emitted when the user submits an expression for evaluation.
-     * @param expression The expression string.
-     */
+    /** @brief Emitted when the user submits an expression for evaluation. */
     void evaluateRequested(const QString& expression);
 
-    /**
-     * @brief Emitted when the user promotes an expression to the Watch Expressions dock.
-     * @param expression The expression string to watch across ranks.
-     */
+    /** @brief Emitted when the user promotes an expression to the Watch Expressions dock. */
     void watchExpressionRequested(const QString& expression);
 
 private:
-    /// Top 26px control strip.
+    void flushPendingMultiRankBatch();
+
     QWidget* m_headerBar = nullptr;
-
-    /// Bottom 26px eval> prompt strip.
     QWidget* m_promptBar = nullptr;
-
-    /// Target MPI rank selector dropdown.
     QComboBox* m_rankCombo = nullptr;
-
-    /// Input field for typing expressions.
     QLineEdit* m_inputField = nullptr;
-
-    /// Submission button.
     QPushButton* m_evaluateBtn = nullptr;
-
-    /// Promote-to-watch button in the header strip.
     QPushButton* m_watchBtn = nullptr;
-
-    /// Clear history button in the header strip.
     QPushButton* m_clearBtn = nullptr;
-
-    /// Monospace scrollable history output console.
     QPlainTextEdit* m_historyArea = nullptr;
+
+    QString m_pendingBatchExpr;
+    QSet<int> m_pendingBatchRanks;
+    QMap<int, QString> m_pendingBatchResults;
+    QTimer* m_batchFlushTimer = nullptr;
 };
 
 }  // namespace gridlock::ui

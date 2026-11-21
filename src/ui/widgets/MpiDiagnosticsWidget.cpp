@@ -175,6 +175,11 @@ MpiDiagnosticsWidget::MpiDiagnosticsWidget(QWidget* parent)
     // Connect item activation and table double-click to frame seek dispatcher.
     connect(m_deadlockList, &QListWidget::itemDoubleClicked,
             this, &MpiDiagnosticsWidget::onItemDoubleClicked);
+    connect(m_rankWaitTable, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (const QTableWidgetItem* item = m_rankWaitTable->item(row, 0)) {
+            emit jumpToFrameRequested(item->data(Qt::UserRole).toInt());
+        }
+    });
     connect(m_rankWaitTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
         if (const QTableWidgetItem* item = m_rankWaitTable->item(row, 0)) {
             emit jumpToFrameRequested(item->data(Qt::UserRole).toInt());

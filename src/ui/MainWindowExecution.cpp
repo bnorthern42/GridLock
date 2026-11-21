@@ -18,11 +18,13 @@
 #include "../core/managers/ConfigManager.hpp"
 #include "dialogs/ArrayPlotDialog.hpp"
 #include "dialogs/AttachProcessDialog.hpp"
+#include "dialogs/CheckpointDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
 #include "docks/CallStackDockWidget.hpp"
 #include "views/MemView.hpp"
-
+#include "widgets/ExpressionEvaluatorWidget.hpp"
 #include <QAction>
+#include <QPushButton>
 #include <QCoreApplication>
 #include <QDir>
 #include <QEventLoop>
@@ -316,102 +318,98 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
     }
 }
 
-/**
- * @brief Focuses inspection views (Disassembly, Registers, Call Stack, Variables, Source) on a selected MPI rank.
- * @param rankId The target 0-based rank index selected by the user.
- */
-void MainWindow::onRankSelected(int rankId) {
-    // Track newly focused rank and synchronize VariablesDockWidget, CallStackDockWidget, and EditorTabManager.
-    m_focusedRank = rankId;
-    if (m_serverRackView && m_serverRackView->selectedRank() != rankId) { m_serverRackView->blockSignals(true); m_serverRackView->selectRank(rankId); m_serverRackView->blockSignals(false); }
+/** @brief Delegates legacy rank-selection slots directly to the master `setFocusedRank()` hub. */
+void MainWindow::onRankSelected(int rankId) { setFocusedRank(rankId); }
+
+/** @brief Master rank-focus hub synchronizing all docks, dialogs, toolbar state, and views without signal loops. */
+void MainWindow::setFocusedRank(int rank) {
+    if (m_syncingFocusedRank) return;
+    m_syncingFocusedRank = true;
+    const int target = qMax(0, rank);
+    const bool changed = (m_focusedRank != target);
+    m_focusedRank = target;
+    const int effRanks = (m_coordinator && m_coordinator->getProcessCount() > 0)
+                             ? m_coordinator->getProcessCount()
+                             : qMax(m_rankCountSpin ? m_rankCountSpin->value() : 1, target + 1);
+    if (m_serverRackView && m_serverRackView->selectedRank() != target && target < m_serverRackView->count()) {
+        QSignalBlocker sb(m_serverRackView); m_serverRackView->selectRank(target);
+    }
+    if (m_variablesDockWidget) m_variablesDockWidget->setFocusedRank(target, effRanks);
+    if (m_memView) m_memView->setFocusedRank(target, effRanks);
+    if (m_arrayPlotDialog) m_arrayPlotDialog->setFocusedRank(target);
+    if (m_pointerGraphDialog) m_pointerGraphDialog->setFocusedRank(target);
+    if (m_checkpointDialog) m_checkpointDialog->setFocusedRank(target);
+    if (auto* recBtn = findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"))) {
+        QSignalBlocker sb(recBtn);
+        recBtn->setChecked(m_coordinator && m_coordinator->isReverseRecordingEnabled(target));
+    }
+    if (changed && m_editorTabManager) m_editorTabManager->clearInlineVariableValues();
     updateDebugToolbarState(); syncExecutionScopeUi();
-    if (m_editorTabManager) m_editorTabManager->setActiveFocusRank(rankId);
-    if (m_variablesDockWidget) {
-        if (auto* rankCombo = m_variablesDockWidget->findChild<QComboBox*>()) {
-            const int idx = rankCombo->findData(rankId);
-            if (idx >= 0 && rankCombo->currentIndex() != idx) rankCombo->setCurrentIndex(idx);
-        }
-    }
+    if (m_editorTabManager) m_editorTabManager->setActiveFocusRank(target);
     if (m_callStackDockWidget) {
-        // Hydrate thread selector and stack frame rows from the newly focused rank's cache.
-        m_callStackDockWidget->setThreads(m_cachedThreads.value(rankId));
-        m_callStackDockWidget->setStackFrames(m_cachedStackFrames.value(rankId),
-                                              m_selectedFrameLevel.value(rankId, 0));
+        m_callStackDockWidget->setThreads(m_cachedThreads.value(target));
+        m_callStackDockWidget->setStackFrames(m_cachedStackFrames.value(target), m_selectedFrameLevel.value(target, 0));
     }
-
-    if (m_latestStates.count(rankId)) {
-        // Extract cached RankState and active $rip / $pc address for the selected rank.
-        const auto& state = m_latestStates[rankId];
-        const QString pcAddr = state.registers.value(16, m_currentSeekOrPc);
-        const QString pcToken = pcAddr.section(QLatin1Char(' '), 0, 0);
+    if (m_latestStates.count(target)) {
+        const auto& state = m_latestStates[target];
+        const QString pcAddr = state.registers.value(16, m_currentSeekOrPc), pcToken = pcAddr.section(QLatin1Char(' '), 0, 0);
         bool pcOk = false;
-        const uint64_t pcVal = pcToken
-                                   .mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0)
-                                   .toULongLong(&pcOk, 16);
-
-        // Synchronize status bar PC, rank state badge, and live /proc RSS/stack telemetry.
-        updateStatusTelemetry(
-            pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
+        const uint64_t pcVal = pcToken.mid(pcToken.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? 2 : 0).toULongLong(&pcOk, 16);
+        updateStatusTelemetry(pcAddr, state.currentState.isEmpty() ? m_currentTargetState : state.currentState.toUpper());
         refreshStatusBarMemoryTelemetry();
-        // Update DisassemblyView text when running without a static ELF dump or outside mapped lines.
-        if (m_disassemblyView && !state.disassemblyText.isEmpty() &&
-            (!m_useRealBinaryTarget || !pcOk || pcVal == 0ULL ||
-             m_disassemblyView->lineForAddress(pcVal) < 0)) {
+        if (m_disassemblyView && !state.disassemblyText.isEmpty() && (!m_useRealBinaryTarget || !pcOk || pcVal == 0ULL || m_disassemblyView->lineForAddress(pcVal) < 0))
             m_disassemblyView->updateDisassembly(state.disassemblyText);
-        }
-        // Highlight the selected rank's current instruction address in Linear ASM and CFG views.
-        if (m_disassemblyView && pcOk && pcVal != 0ULL) {
-            m_disassemblyView->setCurrentAddress(pcVal);
-            m_disassemblyView->setActiveSteppingRank(rankId, pcVal);
-        }
-        // When the focused rank is halted, refresh its disassembly fallback, 64-frame backtrace, threads, and editor PC line.
+        if (m_disassemblyView && pcOk && pcVal != 0ULL) { m_disassemblyView->setCurrentAddress(pcVal); m_disassemblyView->setActiveSteppingRank(target, pcVal); }
         if (state.currentState == QLatin1String("stopped")) {
-            if (state.disassemblyText.isEmpty()) {
-                if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) gdbCoord->requestDisassemblyFallback(rankId);
-            }
-            if (m_coordinator) m_coordinator->requestStackAndThreads(rankId);
+            if (state.disassemblyText.isEmpty())
+                if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) gdbCoord->requestDisassemblyFallback(target);
+            if (m_coordinator) m_coordinator->requestStackAndThreads(target);
             if (state.currentLine > 0) {
-                SourceCodeView* view =
-                    (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager)
-                        ? m_editorTabManager->openFile(state.currentFile)
-                        : getSourceCodeView();
-                if (view) {
-                    syncTabBreakpointMetadata(view);
-                    view->highlightCurrentLine(state.currentLine);
-                    view->highlightExecutionLine(state.currentLine);
-                }
+                SourceCodeView* view = (!state.currentFile.isEmpty() && QFileInfo::exists(state.currentFile) && m_editorTabManager) ? m_editorTabManager->openFile(state.currentFile) : getSourceCodeView();
+                if (view) { syncTabBreakpointMetadata(view); view->highlightCurrentLine(state.currentLine); view->highlightExecutionLine(state.currentLine); }
             }
         }
-        // Push cached watch expressions and CPU register bank values into their respective docks.
-        if (m_differentialGrid) m_differentialGrid->setVariableData(rankId, state.variableWatches);
+        if (m_differentialGrid) m_differentialGrid->setVariableData(target, state.variableWatches);
         if (m_registerView && !state.registers.isEmpty()) m_registerView->updateRegisters(state);
-    } else {
-        // Refresh baseline status bar telemetry without querying GDB while rank state is not stopped.
-        updateStatusTelemetry();
-        refreshStatusBarMemoryTelemetry();
-    }
+    } else { updateStatusTelemetry(); refreshStatusBarMemoryTelemetry(); }
+    m_syncingFocusedRank = false;
+    if (changed) emit focusedRankChanged(m_focusedRank);
 }
 
-/**
- * @brief Connects `CallStackDockWidget` and `m_coordinator` stack/thread signals for caller frame switching.
- *
- * Synchronizes 64-frame call stacks, OS/OpenMP thread selectors, caller-frame DWARF `file:line`
- * jumps, `DisassemblyView` `$pc` updates, and live `MPI_*` primitive telemetry in `MpiDiagnosticsWidget`.
- */
+/** @brief Evaluates @p expr on the target chosen in `#evaluatorRankCombo` (broadcasting across ranks when `All Ranks`). */
+void MainWindow::evaluateExpressionFromWidget(const QString& expr) {
+    const QString trimmed = expr.trimmed();
+    if (!m_coordinator || trimmed.isEmpty()) return;
+    const int target = m_expressionEvaluatorWidget ? m_expressionEvaluatorWidget->selectedTargetRank() : m_focusedRank;
+    if (target >= 0) { m_coordinator->evaluateExpression(target, trimmed); return; }
+    const int count = qMax(1, m_coordinator->getProcessCount());
+    QVector<int> ranks; ranks.reserve(count);
+    for (int r = 0; r < count; ++r) {
+        const auto it = m_latestStates.find(r);
+        if (it == m_latestStates.end() || (it->second.currentState != QLatin1String("running") && it->second.currentState != QLatin1String("exited")))
+            ranks.append(r);
+    }
+    if (ranks.isEmpty()) for (int r = 0; r < count; ++r) ranks.append(r);
+    if (m_expressionEvaluatorWidget) m_expressionEvaluatorWidget->beginMultiRankEvaluation(trimmed, ranks);
+    for (int r : ranks) m_coordinator->evaluateExpression(r, trimmed);
+}
+
+/** @brief Connects `CallStackDockWidget` and `m_coordinator` stack/thread signals for caller frame switching. */
 void MainWindow::bindCallStackCoordinatorRoutes() {
-    // Sync paused locals via QSortFilterProxyModel (survives setCoordinator model swaps) with QPointer shutdown guard.
     if (m_variablesDockWidget && !m_variablesDockWidget->property("gl_inline_var_bound").toBool()) {
         m_variablesDockWidget->setProperty("gl_inline_var_bound", true);
         auto* tree = m_variablesDockWidget->findChild<QTreeView*>();
         if (auto* proxy = tree ? qobject_cast<QAbstractProxyModel*>(tree->model()) : nullptr) {
             QPointer<EditorTabManager> etmPtr(m_editorTabManager); auto* evalTimer = new QTimer(m_variablesDockWidget); evalTimer->setSingleShot(true); evalTimer->setInterval(120);
             auto syncVars = [this, proxy, etmPtr, evalTimer]() {
+                if (!m_variablesDockWidget || m_variablesDockWidget->focusedRank() != m_focusedRank) return;
                 QAbstractItemModel* src = proxy ? proxy->sourceModel() : nullptr; if (!src || !etmPtr) return;
                 QMap<QString, QString> varMap;
                 std::function<void(const QModelIndex&, const QString&)> collect = [&](const QModelIndex& p, const QString& pfx) { for (int r = 0; r < src->rowCount(p); ++r) { const QModelIndex idx = src->index(r, 0, p); const QString n = src->data(idx).toString().trimmed(), v = src->data(src->index(r, 1, p)).toString().trimmed(), full = pfx.isEmpty() ? n : (pfx + QLatin1Char('.') + n); if (!full.isEmpty() && !v.isEmpty()) varMap.insert(full, v); if (src->rowCount(idx) > 0) collect(idx, full); } };
                 collect(QModelIndex(), QString()); etmPtr->setInlineVariableValues(varMap); evalTimer->start();
             };
             connect(evalTimer, &QTimer::timeout, this, [this, proxy, etmPtr]() {
+                if (!m_variablesDockWidget || m_variablesDockWidget->focusedRank() != m_focusedRank) return;
                 QAbstractItemModel* src = proxy ? proxy->sourceModel() : nullptr; auto* sv = etmPtr ? etmPtr->currentSourceCodeView() : nullptr; if (!src || !sv || !m_coordinator || sv->executionLine() <= 0 || src->rowCount() == 0) return;
                 QSet<QString> roots, q; for (int r = 0; r < src->rowCount(); ++r) roots.insert(src->data(src->index(r, 0)).toString().trimmed());
                 static const QRegularExpression kChainRe(QStringLiteral("\\b([A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)+)\\b")); int sent = 0;

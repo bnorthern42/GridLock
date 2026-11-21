@@ -213,10 +213,8 @@ int MainWindow::findSourceLineForStatement(const QString& pattern) const {
     return -1;
 }
 
-/** @brief Returns the 0-based active stepping rank synchronized with ServerRackView. */
-int MainWindow::activeSteppingRank() const {
-    return m_serverRackView ? m_serverRackView->selectedRank() : m_focusedRank;
-}
+/** @brief Returns the 0-based active stepping rank governed by the master setFocusedRank() hub. */
+int MainWindow::activeSteppingRank() const { return m_focusedRank; }
 
 /** @brief Computes the next instruction address for an MPI rank considering control-flow branches and loops. */
 uint64_t MainWindow::advanceRankProgramCounter(int rank, uint64_t currentPc) {
@@ -828,8 +826,10 @@ void MainWindow::openArrayPlotter(const QString& exprPath, const QString& typeHi
         connect(m_arrayPlotDialog, &ArrayPlotDialog::multiRankPlotRequested, this, [this](const QString& baseExpr, int byteCount, ArrayPlotDialog::ElementType, int, int) {
             if (!m_coordinator || !m_arrayPlotDialog || baseExpr.isEmpty() || byteCount <= 0) return;
             const QString addr = (baseExpr.startsWith(QLatin1Char('&')) || baseExpr.startsWith(QStringLiteral("0x"))) ? baseExpr : QStringLiteral("&(%1)[0]").arg(baseExpr);
-            for (int r : m_arrayPlotDialog->selectedOverlayRanks(m_coordinator->getProcessCount())) { m_arrayPlotDialog->expectOverlayReadForRank(r); m_coordinator->readMemory(r, addr, byteCount); } }); }
-    m_arrayPlotDialog->setCoordinator(m_coordinator); m_arrayPlotDialog->setFocusedRank(activeSteppingRank());
+            for (int r : m_arrayPlotDialog->selectedOverlayRanks(m_coordinator->getProcessCount())) { m_arrayPlotDialog->expectOverlayReadForRank(r); m_coordinator->readMemory(r, addr, byteCount); } });
+        if (auto* rc = m_arrayPlotDialog->findChild<QComboBox*>(QStringLiteral("arrayPlotRankCombo")))
+            connect(rc, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, rc](int idx) { if (idx >= 0) setFocusedRank(rc->itemData(idx).toInt()); }); }
+    m_arrayPlotDialog->setCoordinator(m_coordinator); m_arrayPlotDialog->setFocusedRank(m_focusedRank);
     if (!typeHint.trimmed().isEmpty()) m_arrayPlotDialog->setElementTypeFromString(typeHint);
     if (!exprPath.trimmed().isEmpty()) { m_arrayPlotDialog->setExpression(exprPath.trimmed()); m_arrayPlotDialog->refreshPlot(); }
     m_arrayPlotDialog->show(); m_arrayPlotDialog->raise(); m_arrayPlotDialog->activateWindow();
@@ -842,8 +842,10 @@ void MainWindow::openSignalsAndCatchpoints() {
 }
 /** @brief Opens or raises the Copy-on-Write Process Checkpoints manager dialog (Ctrl+Alt+K). */
 void MainWindow::openProcessCheckpoints() {
-    if (!m_checkpointDialog) m_checkpointDialog = new CheckpointDialog(m_coordinator, this);
-    m_checkpointDialog->setCoordinator(m_coordinator); m_checkpointDialog->setFocusedRank(activeSteppingRank()); m_checkpointDialog->reloadStyle();
+    if (!m_checkpointDialog) { m_checkpointDialog = new CheckpointDialog(m_coordinator, this);
+        if (auto* rs = m_checkpointDialog->findChild<QSpinBox*>(QStringLiteral("checkpointRankSpin")))
+            connect(rs, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::setFocusedRank); }
+    m_checkpointDialog->setCoordinator(m_coordinator); m_checkpointDialog->setFocusedRank(m_focusedRank); m_checkpointDialog->reloadStyle();
     m_checkpointDialog->show(); m_checkpointDialog->raise(); m_checkpointDialog->activateWindow();
 }
 /** @brief Steps over a single machine instruction (`nexti` / `-exec-next-instruction`) on the focused MPI rank. */

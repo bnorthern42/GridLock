@@ -157,9 +157,13 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     m_exportBtn = new QPushButton("Export", hexBar); configureToolbarButton(m_exportBtn); hexLayout->addWidget(m_exportBtn);
 
     hexLayout->addWidget(new QLabel("Base:", hexBar));
-    m_baselineRankBox = new QSpinBox(hexBar);
+    m_baselineRankBox = new QSpinBox(hexBar); m_baselineRankBox->setObjectName(QStringLiteral("memBaselineRankSpin"));
     m_baselineRankBox->setRange(0, 1000); m_baselineRankBox->setMinimumWidth(56); m_baselineRankBox->setFixedHeight(22);
     hexLayout->addWidget(m_baselineRankBox);
+    m_pinRankBtn = new QPushButton(QStringLiteral("Pin Rank"), hexBar); m_pinRankBtn->setObjectName(QStringLiteral("memPinRankBtn"));
+    m_pinRankBtn->setCheckable(true); m_pinRankBtn->setChecked(false);
+    m_pinRankBtn->setToolTip(QStringLiteral("Pin MemView to the selected Base rank instead of following global rank focus"));
+    configureToolbarButton(m_pinRankBtn); hexLayout->addWidget(m_pinRankBtn);
 
     hexLayout->addWidget(new QLabel("Target:", hexBar));
     m_targetRankBox = new QSpinBox(hexBar);
@@ -206,14 +210,11 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     mainLayout->addWidget(m_contentContainer, 1);
 
     // Docked placeholder shown while MemView is popped out into a standalone window.
-    m_placeholderWidget = new QWidget(this);
-    m_placeholderWidget->setVisible(false);
-    auto* phLayout = new QVBoxLayout(m_placeholderWidget);
-    phLayout->addStretch(1);
+    m_placeholderWidget = new QWidget(this); m_placeholderWidget->setVisible(false);
+    auto* phLayout = new QVBoxLayout(m_placeholderWidget); phLayout->addStretch(1);
     auto* dockBackBtn = new QPushButton(QStringLiteral("Memory View is popped out — Click to Dock Back"), m_placeholderWidget);
     dockBackBtn->setObjectName(QStringLiteral("memDockBackPlaceholderBtn"));
-    phLayout->addWidget(dockBackBtn, 0, Qt::AlignCenter);
-    phLayout->addStretch(1);
+    phLayout->addWidget(dockBackBtn, 0, Qt::AlignCenter); phLayout->addStretch(1);
     mainLayout->addWidget(m_placeholderWidget, 1);
 
     connect(m_readBtn, &QPushButton::clicked, this, &MemView::onReadClicked);
@@ -222,20 +223,19 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
     connect(m_diffBtn, &QPushButton::clicked, this, &MemView::onDiffClicked);
     connect(m_popOutBtn, &QPushButton::clicked, this, [this]() { setPoppedOut(!m_isPoppedOut); });
     connect(dockBackBtn, &QPushButton::clicked, this, [this]() { setPoppedOut(false); });
+    connect(m_baselineRankBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
+        m_focusedRank = qMax(0, val);
+        if (!isRankPinned()) emit rankSelected(m_focusedRank);
+    });
 
-    // Wire mode toggle buttons and double-click hex navigation from the profiler treemap/table.
     connect(m_hexModeBtn, &QPushButton::clicked, this, [this]() {
-        m_hexModeBtn->setChecked(true);
-        if (m_mapModeBtn) m_mapModeBtn->setChecked(false);
-        setHexControlsVisible(true);
-        if (m_viewStack) m_viewStack->setCurrentIndex(0);
+        m_hexModeBtn->setChecked(true); if (m_mapModeBtn) m_mapModeBtn->setChecked(false);
+        setHexControlsVisible(true); if (m_viewStack) m_viewStack->setCurrentIndex(0);
     });
     connect(m_mapModeBtn, &QPushButton::clicked, this, [this]() {
-        m_mapModeBtn->setChecked(true);
-        if (m_hexModeBtn) m_hexModeBtn->setChecked(false);
-        setHexControlsVisible(false);
-        if (m_viewStack) m_viewStack->setCurrentIndex(1);
-        const int rank = m_baselineRankBox ? m_baselineRankBox->value() : 0;
+        m_mapModeBtn->setChecked(true); if (m_hexModeBtn) m_hexModeBtn->setChecked(false);
+        setHexControlsVisible(false); if (m_viewStack) m_viewStack->setCurrentIndex(1);
+        const int rank = focusedRank();
         const qint64 pid = m_pidGetter ? m_pidGetter(rank) : 0LL;
         if (pid > 0 && m_profilerWidget) m_profilerWidget->refreshForPid(pid);
     });
@@ -247,12 +247,8 @@ MemView::MemView(QWidget* parent) : QWidget(parent) {
         seekToAddress(addr);
     });
 
-    // Initialize clean empty state until a real ELF binary or live debug rank supplies bytes.
-    clear();
-    reloadStyle();
-    connect(&gridlock::core::ThemeManager::instance(),
-            &gridlock::core::ThemeManager::themeModeChanged,
-            this, [this](bool) { reloadStyle(); });
+    clear(); reloadStyle();
+    connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged, this, [this](bool) { reloadStyle(); });
 }
 
 /** @brief Cleans up any detached pop-out window and reparents m_contentContainer safely. */
@@ -266,20 +262,41 @@ MemView::~MemView() {
     delete m_popOutWindow; m_popOutWindow = nullptr;
 }
 
-void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver,
-                                     RankBytesFetcher fetcher,
-                                     RankPidGetter pidGetter) {
-    // Store coordinator-backed callbacks for live per-rank address evaluation and byte reads.
-    m_addressResolver = std::move(resolver);
-    m_bytesFetcher = std::move(fetcher);
-    m_pidGetter = std::move(pidGetter);
+void MemView::setLiveMemoryCallbacks(RankAddressResolver resolver, RankBytesFetcher fetcher, RankPidGetter pidGetter) {
+    m_addressResolver = std::move(resolver); m_bytesFetcher = std::move(fetcher); m_pidGetter = std::move(pidGetter);
     if (m_profilerWidget) m_profilerWidget->setAvailableRanks(1, 0, m_pidGetter);
 }
 
 bool MemView::isMemoryMapMode() const { return m_viewStack && m_viewStack->currentIndex() == 1; }
+int MemView::focusedRank() const { return m_baselineRankBox ? m_baselineRankBox->value() : m_focusedRank; }
+bool MemView::isRankPinned() const { return m_pinRankBtn && m_pinRankBtn->isChecked(); }
+void MemView::setRankPinned(bool pinned) { if (m_pinRankBtn) m_pinRankBtn->setChecked(pinned); }
+
+void MemView::setFocusedRank(int rank, int rankCount) {
+    const int target = qMax(0, rank);
+    if (rankCount > 0) {
+        const int maxRank = qMax(1000, rankCount - 1);
+        if (m_baselineRankBox && m_baselineRankBox->maximum() < maxRank) m_baselineRankBox->setMaximum(maxRank);
+        if (m_targetRankBox && m_targetRankBox->maximum() < maxRank) m_targetRankBox->setMaximum(maxRank);
+    }
+    if (isRankPinned()) return;
+    m_focusedRank = target;
+    if (m_baselineRankBox && m_baselineRankBox->value() != target) {
+        QSignalBlocker sb(m_baselineRankBox);
+        if (target > m_baselineRankBox->maximum()) m_baselineRankBox->setMaximum(target);
+        m_baselineRankBox->setValue(target);
+    }
+    const qint64 pid = m_pidGetter ? m_pidGetter(target) : 0LL;
+    notifyRankStoppedOrSelected(target, pid, rankCount > 0 ? rankCount : qMax(1, target + 1));
+    if (pid > 0 && m_currentBaseAddress != 0ULL && m_bytesFetcher) {
+        const QByteArray bytes = m_bytesFetcher(target, m_currentBaseAddress, m_lengthBox ? m_lengthBox->value() : 256);
+        if (!bytes.isEmpty()) setMemoryData(static_cast<qint64>(m_currentBaseAddress), QString::fromLatin1(bytes.toHex()));
+    }
+}
 
 /** @brief Updates the profiler's rank selector and refreshes automatically when `LIBRARY MEMORY MAP` is active. */
 void MemView::notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount) {
+    if (isRankPinned() && rank != focusedRank()) return;
     if (pid > 0) setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rank).arg(pid));
     if (!m_profilerWidget) return;
     m_profilerWidget->setAvailableRanks(rankCount, rank, m_pidGetter);

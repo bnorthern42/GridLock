@@ -264,6 +264,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
   propagateThemeToAllWidgets();
   setWorkspacePerspective(QStringLiteral("Source"));
   syncExecutionScopeUi();
+  if (m_variablesDockWidget) connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::rankSelectionChanged, this, &MainWindow::setFocusedRank, Qt::UniqueConnection);
+  if (m_memView) connect(m_memView, &MemView::rankSelected, this, &MainWindow::setFocusedRank, Qt::UniqueConnection);
+  if (m_expressionEvaluatorWidget) {
+    disconnect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::evaluateRequested, this, nullptr);
+    connect(m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::evaluateRequested, this, &MainWindow::evaluateExpressionFromWidget);
+  }
   if (m_pauseAllAction && menuBar()) {
     for (QAction *ma : menuBar()->actions()) {
       if (QMenu *dm = ma ? ma->menu() : nullptr; dm && dm->title().remove(QLatin1Char('&')) == QLatin1String("Debug") && !dm->actions().contains(m_pauseAllAction)) {
@@ -374,20 +380,21 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
 
   // Connect variable inspection dock and polymorphic live DeadlockAnalyzer across GDB and DAP.
   if (m_variablesDockWidget) m_variablesDockWidget->setCoordinator(m_coordinator);
+  if (m_expressionEvaluatorWidget && m_coordinator && m_coordinator->getProcessCount() > 0)
+    m_expressionEvaluatorWidget->setAvailableRankCount(m_coordinator->getProcessCount());
   if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
     connect(gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged, this, [self](int rankId, const RankState &st) {
       if (self && !self->m_isShuttingDown && !self->m_isClosing) self->onRankStateChanged(rankId, st);
     });
     connect(gdbCoord, &gridlock::GdbRankCoordinator::localsUpdated, this, [self](int rankId, const QJsonArray &locals) {
       if (!self || self->m_isShuttingDown || self->m_isClosing) return;
-      if (rankId == self->m_focusedRank && self->m_variablesDockWidget) {
-        if (auto *vm = self->m_variablesDockWidget->findChild<gridlock::VariableTreeModel *>()) vm->onLocalsUpdated(rankId, 0, locals);
-      }
+      if (rankId == self->m_focusedRank && self->m_variablesDockWidget) self->m_variablesDockWidget->applyLocalsForRank(rankId, locals);
     });
   }
 
   // Bind coordinator execution, call-stack, console REPL, watchpoints, and deadlock routes.
   if (m_coordinator) {
+    if (m_expressionEvaluatorWidget) connect(m_coordinator, &IBackendCoordinator::expressionEvaluated, m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult, Qt::UniqueConnection);
     connect(m_coordinator, &IBackendCoordinator::sessionErrorOccurred, this, [self](const QString &errMsg) {
       if (!self || self->m_isShuttingDown || self->m_isClosing) return;
       if (self->m_debugSessionActive) self->stopTargetWorkflow();
@@ -426,13 +433,12 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
       if (view) { self->syncTabBreakpointMetadata(view); view->highlightExecutionLine(line); }
     });
 
-    // Wire GDB-specific hover, evaluator, raw MI stream, and SIGFPE handlers when using GDB.
+    // Wire GDB-specific hover, raw MI stream, and SIGFPE handlers when using GDB.
     if (auto *gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator)) {
       connect(gdbCoord, &gridlock::GdbRankCoordinator::hoverEvaluationComplete, this, [self](const QString &varName, const QString &result, QPoint globalPos) {
         if (self && !self->m_isShuttingDown && !self->m_isClosing && self->getSourceCodeView() && self->m_plainJaneTooltip)
           self->m_plainJaneTooltip->showTooltip(globalPos, QString("<b>%1</b>: %2").arg(varName).arg(result));
       });
-      if (m_expressionEvaluatorWidget) connect(gdbCoord, &gridlock::GdbRankCoordinator::expressionEvaluated, m_expressionEvaluatorWidget, &ExpressionEvaluatorWidget::appendResult);
       if (m_gdbConsoleWidget) {
         connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbOutput, Qt::UniqueConnection);
         connect(gdbCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, m_gdbConsoleWidget, &GdbConsoleWidget::appendGdbInput, Qt::UniqueConnection);
@@ -442,13 +448,13 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
       connect(gdbCoord, &gridlock::GdbRankCoordinator::gdbOutputReceived, this, [self](int rankId, const QString &output) {
         if (!self || self->m_isShuttingDown || self->m_isClosing) return;
         if (output.contains("reason=\"signal-received\"") && output.contains("signal-name=\"SIGFPE\"")) {
-          self->onRankSelected(rankId);
+          self->setFocusedRank(rankId);
           if (self->networkLog()) self->networkLog()->appendError(QString("SIGFPE (Floating-Point Exception) detected on Rank %1!\n").arg(rankId));
         }
       });
       connect(gdbCoord, &gridlock::GdbRankCoordinator::memoryDataReady, this, [self](int rankId, qint64 beginAddress, const QString &hexContents) {
         if (!self || self->m_isShuttingDown || self->m_isClosing) return;
-        if (!self->m_suppressMemViewBroadcast && rankId == self->m_focusedRank && self->m_memView) {
+        if (!self->m_suppressMemViewBroadcast && self->m_memView && rankId == self->m_memView->focusedRank()) {
           self->m_memView->setMemoryData(beginAddress, hexContents);
           self->m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(self->m_coordinator ? self->m_coordinator->getPidForRank(rankId) : 0LL));
         }
@@ -464,7 +470,7 @@ void MainWindow::setCoordinator(IBackendCoordinator *coord) {
     }
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this, [self](int rankId, const QString &address, const QByteArray &data) {
       if (!self || self->m_isShuttingDown || self->m_isClosing) return;
-      if (!self->m_suppressMemViewBroadcast && rankId == self->m_focusedRank && self->m_memView) {
+      if (!self->m_suppressMemViewBroadcast && self->m_memView && rankId == self->m_memView->focusedRank()) {
         self->m_memView->setMemoryData(address, data);
         self->m_memView->setSourceModeLabel(QStringLiteral("LIVE RANK %1 (PID %2)").arg(rankId).arg(self->m_coordinator ? self->m_coordinator->getPidForRank(rankId) : 0LL));
       }

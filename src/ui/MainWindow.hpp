@@ -703,7 +703,11 @@ public slots:
     void syncDisassemblyDecompilerVisibility() { syncDisassemblyDecompilerVisibility(true); }
 
     void onRankStateChanged(int rankId, const RankState& state);
+    /** @brief Master rank-focus synchronization hub across all docks, dialogs, and toolbar controls. */
+    void setFocusedRank(int rank);
     void onRankSelected(int rankId);
+    /** @brief Evaluates @p expr against the target selected in `#evaluatorRankCombo` (`All Ranks` or `Rank k`). */
+    void evaluateExpressionFromWidget(const QString& expr);
     void onRankBreakpointChanged(const QString& file, int line, bool isSet, int rankFilter,
                                  const QString& condition);
     void syncTabBreakpointMetadata(SourceCodeView* view) const;
@@ -757,8 +761,10 @@ private:
 
 signals:
     void runTargetRequested();
+    void focusedRankChanged(int rank);
 
 private:
+    bool m_syncingFocusedRank = false;
     ServerRackView* m_serverRackView = nullptr;
     QMenu* m_recentSessionsMenu = nullptr;
     EditorTabManager* m_editorTabManager = nullptr;

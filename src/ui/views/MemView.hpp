@@ -51,6 +51,14 @@ public:
 
     /// Synchronizes active rank/PID context with `MemoryProfilerWidget` and refreshes when visible.
     void notifyRankStoppedOrSelected(int rank, qint64 pid, int rankCount);
+    /// Synchronizes MemView's inspected rank to global focused @p rank unless `Pin Rank` is enabled.
+    void setFocusedRank(int rank, int rankCount = -1);
+    /// Returns the 0-based MPI rank currently targeted by MemView.
+    int focusedRank() const;
+    /// Returns true when `Pin Rank` is toggled on (suppresses automatic global focused-rank updates).
+    bool isRankPinned() const;
+    /// Toggles `Pin Rank` mode on or off.
+    void setRankPinned(bool pinned);
     /// Returns true when the `LIBRARY MEMORY MAP` view is currently selected.
     bool isMemoryMapMode() const;
     /// Returns the embedded visual library and heap memory profiler widget.
@@ -112,6 +120,8 @@ signals:
     void requestMemoryDiff(int baseRank, int targetRank, const QString& address, int length);
     /// Emitted when user selects "Open Address / Word in Programmer's Calculator" from the hex dump context menu.
     void sendToCalculatorRequested(const QString& text);
+    /// Emitted when the user changes MemView's Base rank while unpinned.
+    void rankSelected(int rank);
 
 private slots:
     void onReadClicked();
@@ -134,6 +144,7 @@ private:
     QComboBox* m_typeBox = nullptr;
     QSpinBox* m_baselineRankBox = nullptr;
     QSpinBox* m_targetRankBox = nullptr;
+    QPushButton* m_pinRankBtn = nullptr;
     QPushButton* m_diffBtn = nullptr;
     QPushButton* m_hexModeBtn = nullptr;
     QPushButton* m_mapModeBtn = nullptr;
@@ -151,6 +162,7 @@ private:
     uint64_t m_currentBaseAddress = 0ULL;
     uint64_t m_previousBaseAddress = 0ULL;
     int m_changedByteCount = 0;
+    int m_focusedRank = 0;
     bool m_hasDiffBaseline = false;
     bool m_isPoppedOut = false;
     QString m_lastStyledThemeId;

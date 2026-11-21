@@ -258,7 +258,8 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
     m_tableViewBtn = makeBtn(QStringLiteral("Tensor Table"), QStringLiteral("arrayPlotTableViewBtn")); m_tableViewBtn->setCheckable(true);
 
     m_rankCombo = makeCombo(QStringLiteral("arrayPlotRankCombo"), 24);
-    for (int r = 0; r < 8; ++r) addItemWithTip(m_rankCombo, QStringLiteral("Rank %1").arg(r), r, QStringLiteral("Inspect array memory on MPI Rank %1").arg(r));
+    const int initRanks = qMax(1, coordinator ? coordinator->getProcessCount() : 1);
+    for (int r = 0; r < initRanks; ++r) addItemWithTip(m_rankCombo, QStringLiteral("Rank %1").arg(r), r, QStringLiteral("Inspect array memory on MPI Rank %1").arg(r));
     m_overlayRanksCheck = makeCheck(QStringLiteral("Overlay Ranks"), QStringLiteral("arrayPlotOverlayAllRanksCheck"));
     m_rankSubsetEdit = new QLineEdit(QStringLiteral("All"), this);
     m_rankSubsetEdit->setObjectName(QStringLiteral("arrayPlotRankSubsetEdit"));
@@ -374,9 +375,10 @@ ArrayPlotDialog::ArrayPlotDialog(::IBackendCoordinator* coordinator, QWidget* pa
 }
 
 void ArrayPlotDialog::setCoordinator(::IBackendCoordinator* coordinator) {
-    if (m_coordinator == coordinator) return;
+    if (m_coordinator == coordinator) { setFocusedRank(m_focusedRank); return; }
     if (m_coordinator) disconnect(m_coordinator, nullptr, this, nullptr);
     m_coordinator = coordinator;
+    setFocusedRank(m_focusedRank);
     if (!m_coordinator) return;
 
     connect(m_coordinator, &IBackendCoordinator::memoryRead, this,
@@ -593,10 +595,14 @@ QPair<int, int> ArrayPlotDialog::visibleYRange() const { return m_canvas ? m_can
 
 void ArrayPlotDialog::setFocusedRank(int rankId) {
     m_focusedRank = qMax(0, rankId);
-    if (m_rankCombo) {
-        const int idx = m_rankCombo->findData(m_focusedRank);
-        if (idx >= 0 && m_rankCombo->currentIndex() != idx) { QSignalBlocker b(m_rankCombo); m_rankCombo->setCurrentIndex(idx); }
+    if (!m_rankCombo) return;
+    const int needed = qMax(1, qMax(m_coordinator ? m_coordinator->getProcessCount() : 0, m_focusedRank + 1));
+    QSignalBlocker b(m_rankCombo);
+    if (m_rankCombo->count() != needed || m_rankCombo->findData(m_focusedRank) < 0) {
+        m_rankCombo->clear();
+        for (int r = 0; r < needed; ++r) { m_rankCombo->addItem(QStringLiteral("Rank %1").arg(r), r); m_rankCombo->setItemData(r, QStringLiteral("Inspect array memory on MPI Rank %1").arg(r), Qt::ToolTipRole); }
     }
+    if (const int idx = m_rankCombo->findData(m_focusedRank); idx >= 0 && m_rankCombo->currentIndex() != idx) m_rankCombo->setCurrentIndex(idx);
 }
 
 void ArrayPlotDialog::setOverlayRanksEnabled(bool enabled) { if (m_overlayRanksCheck) m_overlayRanksCheck->setChecked(enabled); }

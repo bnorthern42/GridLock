@@ -314,29 +314,57 @@ bool VariablesDockWidget::copySelectedVariableValue() const {
     return true;
 }
 
+void VariablesDockWidget::setFocusedRank(int rankId, int rankCount) {
+    const int target = qMax(0, rankId);
+    const int coordCount = m_coordinator ? m_coordinator->getProcessCount() : 0;
+    const int desiredCount = qMax(qMax(coordCount, rankCount), target + 1);
+    if (m_rankSelector) {
+        QSignalBlocker sb(m_rankSelector);
+        if (m_rankSelector->count() < desiredCount || m_rankSelector->findData(target) < 0) {
+            m_rankSelector->clear();
+            for (int i = 0; i < desiredCount; ++i) {
+                m_rankSelector->addItem(i == 0 ? QStringLiteral("Rank 0 (Master)") : QStringLiteral("Rank %1").arg(i), i);
+            }
+        }
+        m_rankSelector->setVisible(desiredCount > 1);
+        if (auto* sl = findChild<QLabel*>(QStringLiteral("variablesScopeLabel"))) sl->setVisible(desiredCount > 1);
+        const int idx = m_rankSelector->findData(target);
+        if (idx >= 0) m_rankSelector->setCurrentIndex(idx);
+    }
+    const bool rankChanged = (m_currentRankId != target);
+    m_currentRankId = target;
+    if (rankChanged && m_model && m_coordinator) m_model->loadLocals(m_currentRankId);
+}
+
+bool VariablesDockWidget::applyLocalsForRank(int rankId, const QJsonArray& locals) {
+    if (rankId != m_currentRankId || !m_model) return false;
+    m_model->onLocalsUpdated(rankId, 0, locals);
+    return true;
+}
+
 /**
  * @brief Rebuilds rank selector dropdown items to match active MPI cluster size.
  */
 void VariablesDockWidget::onProcessCountChanged() {
     if (!m_coordinator) return;
-    
-    // Suppress signals during batch combobox repopulation.
-    m_rankSelector->blockSignals(true);
-    m_rankSelector->clear();
-    int count = m_coordinator->getProcessCount();
-    for (int i = 0; i < count; ++i) {
-        if (i == 0) {
-            m_rankSelector->addItem("Rank 0 (Master)", i);
-        } else {
-            m_rankSelector->addItem(QString("Rank %1").arg(i), i);
+    const int count = m_coordinator->getProcessCount();
+    const int target = (count > 0 && m_currentRankId >= 0 && m_currentRankId < count) ? m_currentRankId : 0;
+    {
+        QSignalBlocker sb(m_rankSelector);
+        m_rankSelector->clear();
+        for (int i = 0; i < count; ++i) {
+            m_rankSelector->addItem(i == 0 ? QStringLiteral("Rank 0 (Master)") : QStringLiteral("Rank %1").arg(i), i);
+        }
+        if (count > 0) {
+            m_rankSelector->setVisible(count > 1);
+            if (auto* sl = findChild<QLabel*>(QStringLiteral("variablesScopeLabel"))) sl->setVisible(count > 1);
+            const int idx = m_rankSelector->findData(target);
+            if (idx >= 0) m_rankSelector->setCurrentIndex(idx);
         }
     }
-    m_rankSelector->blockSignals(false);
     if (count > 0) {
-        m_rankSelector->setVisible(count > 1);
-        if (auto* sl = findChild<QLabel*>(QStringLiteral("variablesScopeLabel"))) sl->setVisible(count > 1);
-        m_rankSelector->setCurrentIndex(0);
-        onRankSelected(0);
+        m_currentRankId = target;
+        if (m_model) m_model->loadLocals(target);
     }
 }
 
@@ -345,10 +373,11 @@ void VariablesDockWidget::onProcessCountChanged() {
  * @param index Selected index in combobox.
  */
 void VariablesDockWidget::onRankSelected(int index) {
-    if (index < 0 || !m_coordinator) return;
-    int rankId = m_rankSelector->itemData(index).toInt();
+    if (index < 0 || !m_rankSelector) return;
+    const int rankId = qMax(0, m_rankSelector->itemData(index).toInt());
     m_currentRankId = rankId;
-    m_model->loadLocals(rankId);
+    if (m_coordinator && m_model) m_model->loadLocals(rankId);
+    emit rankSelectionChanged(rankId);
 }
 
 /**

@@ -132,58 +132,106 @@ ExpressionEvaluatorWidget::ExpressionEvaluatorWidget(QWidget* parent)
     connect(m_inputField, &QLineEdit::returnPressed, this, triggerEval);
     connect(m_watchBtn, &QPushButton::clicked, this, &ExpressionEvaluatorWidget::promoteCurrentToWatch);
     connect(m_clearBtn, &QPushButton::clicked, m_historyArea, &QPlainTextEdit::clear);
+
+    m_batchFlushTimer = new QTimer(this);
+    m_batchFlushTimer->setSingleShot(true);
+    m_batchFlushTimer->setInterval(1200);
+    connect(m_batchFlushTimer, &QTimer::timeout, this, &ExpressionEvaluatorWidget::flushPendingMultiRankBatch);
 }
 
-/**
- * @brief Returns the pixel height of the top target/action header strip.
- * @return Header bar height in pixels.
- */
 int ExpressionEvaluatorWidget::headerBarHeight() const {
     return m_headerBar ? m_headerBar->height() : 0;
 }
 
-/**
- * @brief Returns the pixel height of the bottom eval> prompt strip.
- * @return Prompt bar height in pixels.
- */
 int ExpressionEvaluatorWidget::promptBarHeight() const {
     return m_promptBar ? m_promptBar->height() : 0;
 }
 
-/**
- * @brief Sets the current expression input field text.
- * @param expr Expression string to populate into the evaluator field.
- */
 void ExpressionEvaluatorWidget::setExpression(const QString& expr) {
-    if (m_inputField) {
-        m_inputField->setText(expr);
-    }
+    if (m_inputField) m_inputField->setText(expr);
 }
 
-/**
- * @brief Promotes the currently entered expression to the Watch Expressions dock.
- * @return True if a non-empty expression was promoted, false otherwise.
- */
 bool ExpressionEvaluatorWidget::promoteCurrentToWatch() {
-    if (!m_inputField) {
-        return false;
-    }
+    if (!m_inputField) return false;
     const QString expr = m_inputField->text().trimmed();
-    if (expr.isEmpty()) {
-        return false;
-    }
+    if (expr.isEmpty()) return false;
     emit watchExpressionRequested(expr);
     return true;
 }
 
-/**
- * @brief Appends evaluated expression results to the history console.
- * @param rankId Rank index whose context evaluated the expression.
- * @param expr Evaluated expression string.
- * @param result Evaluated outcome or error message.
- */
+void ExpressionEvaluatorWidget::setAvailableRankCount(int rankCount) {
+    if (!m_rankCombo) return;
+    const int prevData = m_rankCombo->currentData().toInt();
+    const int n = qMax(1, rankCount);
+    QSignalBlocker sb(m_rankCombo);
+    m_rankCombo->clear();
+    m_rankCombo->addItem(QStringLiteral("All Ranks"), -1);
+    for (int r = 0; r < n; ++r) {
+        m_rankCombo->addItem(QStringLiteral("Rank %1").arg(r), r);
+    }
+    const int idx = m_rankCombo->findData(prevData);
+    m_rankCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+}
+
+int ExpressionEvaluatorWidget::selectedTargetRank() const {
+    return m_rankCombo ? m_rankCombo->currentData().toInt() : -1;
+}
+
+void ExpressionEvaluatorWidget::setSelectedTargetRank(int rankId) {
+    if (!m_rankCombo) return;
+    if (rankId >= 0 && m_rankCombo->findData(rankId) < 0) setAvailableRankCount(rankId + 1);
+    const int idx = m_rankCombo->findData(rankId < 0 ? -1 : rankId);
+    if (idx >= 0) m_rankCombo->setCurrentIndex(idx);
+}
+
+void ExpressionEvaluatorWidget::beginMultiRankEvaluation(const QString& expr, const QVector<int>& ranks) {
+    if (!m_pendingBatchResults.isEmpty()) flushPendingMultiRankBatch();
+    m_pendingBatchExpr = expr.trimmed();
+    m_pendingBatchRanks.clear();
+    m_pendingBatchResults.clear();
+    for (int r : ranks) m_pendingBatchRanks.insert(r);
+    if (!m_pendingBatchRanks.isEmpty() && m_batchFlushTimer) m_batchFlushTimer->start();
+}
+
+void ExpressionEvaluatorWidget::flushPendingMultiRankBatch() {
+    if (m_batchFlushTimer) m_batchFlushTimer->stop();
+    if (m_pendingBatchResults.isEmpty()) {
+        m_pendingBatchExpr.clear();
+        m_pendingBatchRanks.clear();
+        return;
+    }
+    QSet<QString> uniqueVals;
+    for (auto it = m_pendingBatchResults.constBegin(); it != m_pendingBatchResults.constEnd(); ++it) {
+        uniqueVals.insert(it.value().trimmed());
+    }
+    const bool divergent = (uniqueVals.size() > 1);
+    QStringList htmlParts;
+    for (auto it = m_pendingBatchResults.constBegin(); it != m_pendingBatchResults.constEnd(); ++it) {
+        const QString valEsc = it.value().toHtmlEscaped();
+        const QString color = divergent ? QStringLiteral("#f59e0b") : QStringLiteral("#4ec9b0");
+        htmlParts.append(QStringLiteral("<span style='color:#94a3b8;'>[Rank %1]:</span> <span style='color:%2;font-weight:%3;'>%4</span>")
+                             .arg(it.key())
+                             .arg(color, divergent ? QStringLiteral("700") : QStringLiteral("400"), valEsc));
+    }
+    const QString exprEsc = m_pendingBatchExpr.toHtmlEscaped();
+    const QString divBadge = divergent
+                                 ? QStringLiteral(" <span style='color:#f44747;font-weight:700;'>[DIVERGENT]</span>")
+                                 : QString();
+    m_historyArea->appendHtml(QStringLiteral("<span style='color:#61afef;'>%1</span> =&gt; %2%3")
+                                  .arg(exprEsc, htmlParts.join(QStringLiteral("  |  ")), divBadge));
+    m_pendingBatchExpr.clear();
+    m_pendingBatchRanks.clear();
+    m_pendingBatchResults.clear();
+}
+
 void ExpressionEvaluatorWidget::appendResult(int rankId, const QString& expr, const QString& result) {
-    m_historyArea->appendPlainText(QString("[Rank %1] %2 = %3").arg(rankId).arg(expr).arg(result));
+    if (!m_pendingBatchRanks.isEmpty() && expr.trimmed() == m_pendingBatchExpr && m_pendingBatchRanks.contains(rankId)) {
+        m_pendingBatchResults.insert(rankId, result);
+        m_pendingBatchRanks.remove(rankId);
+        if (m_pendingBatchRanks.isEmpty()) flushPendingMultiRankBatch();
+        return;
+    }
+    m_historyArea->appendPlainText(QString("[Rank %1] %2 = %3").arg(rankId).arg(expr, result));
 }
 
 }  // namespace gridlock::ui

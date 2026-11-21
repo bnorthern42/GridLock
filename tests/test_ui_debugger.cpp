@@ -33,6 +33,7 @@
 #include "../src/ui/views/RegisterView.hpp"
 #include "../src/ui/views/ServerRackView.hpp"
 #include "../src/ui/views/SourceCodeView.hpp"
+#include "../src/ui/widgets/ExpressionEvaluatorWidget.hpp"
 #include "../src/ui/widgets/HpcConsoleWidget.hpp"
 #include "../src/ui/widgets/MpiDiagnosticsWidget.hpp"
 #include "../src/ui/widgets/ProjectExplorerWidget.hpp"
@@ -774,40 +775,27 @@ void TestMainWindowUI::testGdbConsoleReadlineErgonomics() {
 }
 /** @brief Verifies nexti, Ctrl+F10 Run to Cursor, draggable gutter PC jump, lexical scope guard, Force Early Return, and shortcut uniqueness. */
 void TestMainWindowUI::testNonLinearExecutionControl() {
-    // 1. Verify GdbRankCoordinator emits exact MI3 commands for nexti, until, jump, and return.
     gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
-    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"4\",args=[]}\n"));
-    coord.processGdbOutput(1, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"4\",args=[]}\n"));
+    for (int r = 0; r < 2; ++r) coord.processGdbOutput(r, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/solver.cpp\",line=\"4\",args=[]}\n"));
     QStringList sent; connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& c) { if (r == 0) sent.append(c.trimmed()); });
-    coord.nextInstruction(0); coord.runToCursor(QStringLiteral("/tmp/solver.cpp"), 12, 0); coord.runToAddress(0x401180ULL, 0);
-    coord.jumpToLocation(QStringLiteral("/tmp/solver.cpp"), 15, 0); coord.jumpToAddress(0x401190ULL, 0); coord.forceEarlyReturn(QString(), 0); coord.forceEarlyReturn(QStringLiteral("42"), 0);
-    QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")) && sent.contains(QStringLiteral("-exec-until \"/tmp/solver.cpp:12\"")) && sent.contains(QStringLiteral("-exec-until *0x401180")));
-    QVERIFY(sent.contains(QStringLiteral("-exec-jump \"/tmp/solver.cpp:15\"")) && sent.contains(QStringLiteral("-exec-jump *0x401190")) && sent.contains(QStringLiteral("-exec-return")) && sent.contains(QStringLiteral("-exec-return 42")));
-    // 2. Verify lexical scope safety guard distinguishes safe intra-block jumps from declaration, block, and cross-function hazards.
+    coord.nextInstruction(0); coord.runToCursor(QStringLiteral("/tmp/solver.cpp"), 12, 0); coord.runToAddress(0x401180ULL, 0); coord.jumpToLocation(QStringLiteral("/tmp/solver.cpp"), 15, 0); coord.jumpToAddress(0x401190ULL, 0); coord.forceEarlyReturn(QString(), 0); coord.forceEarlyReturn(QStringLiteral("42"), 0);
+    QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")) && sent.contains(QStringLiteral("-exec-until \"/tmp/solver.cpp:12\"")) && sent.contains(QStringLiteral("-exec-until *0x401180")) && sent.contains(QStringLiteral("-exec-jump \"/tmp/solver.cpp:15\"")) && sent.contains(QStringLiteral("-exec-jump *0x401190")) && sent.contains(QStringLiteral("-exec-return")) && sent.contains(QStringLiteral("-exec-return 42")));
     const QString sampleCpp = QStringLiteral("int solve(int x) {\n  int a = 1;\n  a += x;\n  a *= 2;\n  int b = 7;\n  if (a > 0) {\n    a += b;\n  }\n  return a;\n}\nint helper() {\n  return 0;\n}\n");
-    QVERIFY(gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 4, QStringLiteral("solve")).isEmpty());
-    QVERIFY(!gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 4, 6, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 7, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 12, QStringLiteral("solve")).isEmpty());
-    // 3. Verify draggable gutter PC arrow emits jumpToLineRequested and MainWindow routes Ctrl+F10, nexti, DisassemblyView, & Force Early Return with zero shortcut collisions.
+    QVERIFY(gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 4, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 4, 6, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 7, QStringLiteral("solve")).isEmpty() && !gridlock::ui::MainWindow::checkJumpLexicalScopeHazard(sampleCpp, 3, 12, QStringLiteral("solve")).isEmpty());
     static QStringList s_execWarnings; s_execWarnings.clear();
     const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_execWarnings.append(m); });
     struct WarnGuard { QtMessageHandler p; ~WarnGuard() { qInstallMessageHandler(p); } } wg{prevH};
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents(); mw.setCoordinator(&coord); sent.clear();
-    auto* sv = mw.sourceCodeView(); auto* dv = mw.disassemblyView(); QVERIFY(sv && dv);
-    sv->setCurrentFile(QStringLiteral("/tmp/solver.cpp")); sv->setSourceCode(sampleCpp); sv->highlightExecutionLine(3); QApplication::processEvents();
+    auto* sv = mw.sourceCodeView(); auto* dv = mw.disassemblyView(); QVERIFY(sv && dv); sv->setCurrentFile(QStringLiteral("/tmp/solver.cpp")); sv->setSourceCode(sampleCpp); sv->highlightExecutionLine(3); QApplication::processEvents();
     QWidget* gutter = nullptr; for (QWidget* w : sv->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly)) if (w != sv->viewport() && w->width() == sv->lineNumberAreaWidth()) { gutter = w; break; }
     QVERIFY(gutter != nullptr); QSignalSpy jumpSpy(sv, &gridlock::ui::SourceCodeView::jumpToLineRequested);
     const int rowH = qMax(14, sv->fontMetrics().lineSpacing()); const QPoint pStart(10, 2 * rowH + rowH / 2), pEnd(10, 3 * rowH + rowH / 2);
-    QTest::mousePress(gutter, Qt::LeftButton, Qt::NoModifier, pStart); QTest::mouseMove(gutter, pEnd); QApplication::processEvents();
-    QVERIFY(sv->isDraggingExecutionPc() && sv->dragTargetLine() == 4);
-    QTest::mouseRelease(gutter, Qt::LeftButton, Qt::NoModifier, pEnd); QApplication::processEvents();
-    QCOMPARE(jumpSpy.count(), 1); QCOMPARE(jumpSpy.first().at(1).toInt(), 4); QVERIFY(sent.contains(QStringLiteral("-exec-jump \"/tmp/solver.cpp:4\"")));
-    sv->setTextCursor(QTextCursor(sv->document()->findBlockByNumber(8))); sv->setFocus();
-    QTest::keyClick(&mw, Qt::Key_F10, Qt::ControlModifier); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-until \"/tmp/solver.cpp:9\"")));
+    QTest::mousePress(gutter, Qt::LeftButton, Qt::NoModifier, pStart); QTest::mouseMove(gutter, pEnd); QApplication::processEvents(); QVERIFY(sv->isDraggingExecutionPc() && sv->dragTargetLine() == 4);
+    QTest::mouseRelease(gutter, Qt::LeftButton, Qt::NoModifier, pEnd); QApplication::processEvents(); QVERIFY(jumpSpy.count() == 1 && jumpSpy.first().at(1).toInt() == 4 && sent.contains(QStringLiteral("-exec-jump \"/tmp/solver.cpp:4\"")));
+    sv->setTextCursor(QTextCursor(sv->document()->findBlockByNumber(8))); sv->setFocus(); QTest::keyClick(&mw, Qt::Key_F10, Qt::ControlModifier); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-until \"/tmp/solver.cpp:9\"")));
     QTest::keyClick(&mw, Qt::Key_F10, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")));
-    auto* nextiBtn = dv->findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")); QVERIFY(nextiBtn && dv->findChild<QPushButton*>(QStringLiteral("disasmStepiBtn")));
-    sent.clear(); nextiBtn->click(); QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")));
-    emit dv->runToAddressRequested(0x401180ULL); emit dv->jumpToAddressRequested(0x401190ULL); QVERIFY(sent.contains(QStringLiteral("-exec-until *0x401180")) && sent.contains(QStringLiteral("-exec-jump *0x401190")));
-    QVERIFY(mw.forceEarlyReturnWorkflow(QStringLiteral("7"), false) && sent.contains(QStringLiteral("-exec-return 7")));
+    auto* nextiBtn = dv->findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")); QVERIFY(nextiBtn && dv->findChild<QPushButton*>(QStringLiteral("disasmStepiBtn"))); sent.clear(); nextiBtn->click(); QVERIFY(sent.contains(QStringLiteral("-exec-next-instruction")));
+    emit dv->runToAddressRequested(0x401180ULL); emit dv->jumpToAddressRequested(0x401190ULL); QVERIFY(sent.contains(QStringLiteral("-exec-until *0x401180")) && sent.contains(QStringLiteral("-exec-jump *0x401190")) && mw.forceEarlyReturnWorkflow(QStringLiteral("7"), false) && sent.contains(QStringLiteral("-exec-return 7")));
     QVERIFY(mw.findChild<QAction*>(QStringLiteral("actionNextInstruction")) && mw.findChild<QAction*>(QStringLiteral("actionRunToCursor")) && mw.findChild<QAction*>(QStringLiteral("actionJumpToLine")) && mw.findChild<QAction*>(QStringLiteral("actionForceEarlyReturn")));
     for (const QString& w : s_execWarnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
     mw.setCoordinator(nullptr);
@@ -911,7 +899,22 @@ static void testMultiRankScopePauseAllAndRackFilter() {
     fDead->click(); QVERIFY(rack->visibleRankCount() == 1 && !rack->item(0)->isHidden() && rack->item(1)->isHidden());
     fStop->click(); QVERIFY(rack->visibleRankCount() == 1 && !rack->item(1)->isHidden() && rack->item(0)->isHidden());
     fRun->click(); QVERIFY(rack->visibleRankCount() == 1 && !rack->item(2)->isHidden() && rack->item(3)->isHidden());
-    fAll->click(); QVERIFY(rack->visibleRankCount() == 4 && !rack->grab().isNull()); mw.setCoordinator(nullptr);
+    fAll->click(); QVERIFY(rack->visibleRankCount() == 4 && !rack->grab().isNull());
+    gridlock::GdbRankCoordinator coord16; coord16.initializeMockSession(16); QList<gridlock::RankState> st16(16); for (int r = 0; r < 16; ++r) { st16[r].rankId = r; st16[r].currentState = QStringLiteral("stopped"); }
+    rack->updateRanks(st16); mw.setCoordinator(&coord16); mw.openArrayPlotter(); mw.openProcessCheckpoints(); QApplication::processEvents();
+    auto* varsDock = mw.variablesDockWidget(); auto* memView = mw.memView(); auto* apDlg = mw.findChild<gridlock::ui::ArrayPlotDialog*>(QStringLiteral("ArrayPlotDialog")); auto* cpDlg = mw.checkpointDialog();
+    auto* apCombo = apDlg ? apDlg->findChild<QComboBox*>(QStringLiteral("arrayPlotRankCombo")) : nullptr; auto* cpSpin = cpDlg ? cpDlg->findChild<QSpinBox*>(QStringLiteral("checkpointRankSpin")) : nullptr;
+    QSignalSpy focusSpy(&mw, &gridlock::ui::MainWindow::focusedRankChanged); mw.setFocusedRank(3); QApplication::processEvents();
+    QVERIFY(mw.focusedRank() == 3 && mw.activeSteppingRank() == 3 && focusSpy.count() == 1 && rack->selectedRank() == 3 && varsDock->focusedRank() == 3 && memView->focusedRank() == 3 && apCombo && apCombo->count() == 16 && apCombo->currentData().toInt() == 3 && cpSpin && cpSpin->value() == 3);
+    mw.setFocusedRank(11); QApplication::processEvents(); QVERIFY(mw.focusedRank() == 11 && rack->selectedRank() == 11 && varsDock->focusedRank() == 11 && memView->focusedRank() == 11 && apCombo->currentData().toInt() == 11 && cpSpin->value() == 11);
+    memView->setRankPinned(true); mw.setFocusedRank(2); QApplication::processEvents(); QVERIFY(mw.focusedRank() == 2 && varsDock->focusedRank() == 2 && memView->focusedRank() == 11);
+    memView->setRankPinned(false); mw.setFocusedRank(4); QApplication::processEvents(); QVERIFY(memView->focusedRank() == 4);
+    QVERIFY(varsDock->applyLocalsForRank(4, {QJsonObject{{QStringLiteral("name"), QStringLiteral("tag")}, {QStringLiteral("value"), QStringLiteral("400")}, {QStringLiteral("type"), QStringLiteral("int")}}}) && !varsDock->applyLocalsForRank(2, {QJsonObject{{QStringLiteral("name"), QStringLiteral("tag")}, {QStringLiteral("value"), QStringLiteral("200")}, {QStringLiteral("type"), QStringLiteral("int")}}}));
+    if (auto* mpiW = mw.findChild<gridlock::ui::MpiDiagnosticsWidget*>()) { mpiW->beginLiveSession(8); if (auto* wt = mpiW->findChild<QTableWidget*>(QStringLiteral("mpiRankWaitTable"))) { emit wt->cellClicked(5, 0); QApplication::processEvents(); QCOMPARE(mw.focusedRank(), 5); } }
+    auto* evalW = mw.findChild<gridlock::ui::ExpressionEvaluatorWidget*>(QStringLiteral("ExpressionEvaluatorDock")); auto* evalHist = evalW ? evalW->findChild<QPlainTextEdit*>(QStringLiteral("evaluatorHistoryArea")) : nullptr;
+    QVERIFY(evalW && evalHist); mw.setCoordinator(&coord); stopAll3(); evalW->setSelectedTargetRank(-1); sent.clear(); mw.evaluateExpressionFromWidget(QStringLiteral("my_val")); for (int r = 0; r < 3; ++r) QVERIFY(sent[r].join(QLatin1Char('\n')).contains(QStringLiteral("-data-evaluate-expression \"my_val\"")));
+    emit coord.expressionEvaluated(0, QStringLiteral("my_val"), QStringLiteral("42")); emit coord.expressionEvaluated(1, QStringLiteral("my_val"), QStringLiteral("43")); emit coord.expressionEvaluated(2, QStringLiteral("my_val"), QStringLiteral("42")); QApplication::processEvents();
+    const QString hTxt = evalHist->toPlainText(); QVERIFY(hTxt.contains(QStringLiteral("[Rank 0]: 42")) && hTxt.contains(QStringLiteral("[Rank 1]: 43")) && hTxt.contains(QStringLiteral("[Rank 2]: 42")) && hTxt.contains(QStringLiteral("[DIVERGENT]"))); apDlg->close(); cpDlg->close(); mw.setCoordinator(nullptr);
 }
 /** @brief Verifies Copy-on-Write GDB checkpoints, /proc fd/maps safety checks, CheckpointDialog, clean exit, and multi-rank scope/rack filter. */
 void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
@@ -934,14 +937,11 @@ void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
     coord.processGdbOutput(0, QStringLiteral("~\"  1 process 4242 at 0x401120, file solver.cpp, line 28\\n\"\n~\"  0 process 4200 (main process) at 0x401100\\n\"\n213^done\n"));
     QVERIFY(coord.checkpointsForRank(0).size() == 2 && coord.checkpointsForRank(0).first().note == QStringLiteral("before halo") && coord.checkpointsForRank(0).first().location.contains(QStringLiteral("solver.cpp")));
     coord.restoreCheckpoint(0, 1); coord.deleteCheckpoint(0, 1); QVERIFY(sent.contains(QStringLiteral("-interpreter-exec console \"restart 1\"")) && sent.contains(QStringLiteral("-interpreter-exec console \"delete checkpoint 1\"")) && coord.checkpointsForRank(0).size() == 1);
-    CheckpointDialog cpDlg(&coord); cpDlg.setProcRootForTesting(fakeProc.path()); cpDlg.show(); QApplication::processEvents();
-    QVERIFY(cpDlg.findChild<QPushButton*>(QStringLiteral("checkpointCloseBtn")) && cpDlg.findChild<QPushButton*>(QStringLiteral("createCheckpointBtn")) && cpDlg.checkpointTable() && cpDlg.checkpointTable()->rowCount() == 1);
-    sent.clear(); QVERIFY(cpDlg.createCheckpointNow(true) && sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\""))); cpDlg.close();
-    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
-    auto* cpAct = mw.findChild<QAction*>(QStringLiteral("actionProcessCheckpoints")); QVERIFY(cpAct && cpAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K));
+    CheckpointDialog cpDlg(&coord); cpDlg.setProcRootForTesting(fakeProc.path()); cpDlg.show(); QApplication::processEvents(); sent.clear();
+    QVERIFY(cpDlg.findChild<QPushButton*>(QStringLiteral("checkpointCloseBtn")) && cpDlg.findChild<QPushButton*>(QStringLiteral("createCheckpointBtn")) && cpDlg.checkpointTable() && cpDlg.checkpointTable()->rowCount() == 1 && cpDlg.createCheckpointNow(true) && sent.contains(QStringLiteral("212-interpreter-exec console \"checkpoint\""))); cpDlg.close();
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents(); auto* cpAct = mw.findChild<QAction*>(QStringLiteral("actionProcessCheckpoints")); QVERIFY(cpAct && cpAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_K));
     QTest::keyClick(&mw, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(mw.checkpointDialog() && mw.checkpointDialog()->isVisible()); mw.checkpointDialog()->close();
-    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
-    auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(pal && pal->isVisible());
-    pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints"))); QTest::keyClick(pal->inputEdit(), Qt::Key_Escape);
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents(); auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
+    QVERIFY(pal && pal->isVisible()); pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints"))); QTest::keyClick(pal->inputEdit(), Qt::Key_Escape);
     testCleanExitWhileTargetRunning(); testMultiRankScopePauseAllAndRackFilter();
 }

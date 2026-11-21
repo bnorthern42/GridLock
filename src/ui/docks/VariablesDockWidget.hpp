@@ -55,12 +55,22 @@ public:
      */
     bool promoteVariableToWatch(const QString& variableName);
 
-    /**
-     * @brief Copies the currently selected variable value (Ctrl+C) to the system clipboard.
-     */
+    /** @brief Copies the currently selected variable value (Ctrl+C) to the system clipboard. */
     bool copySelectedVariableValue() const;
 
+    /** @brief Returns the 0-based MPI rank currently displayed in this dock. */
+    int focusedRank() const { return m_currentRankId; }
+
+    /** @brief Synchronizes the rank selector dropdown and model to @p rankId without emitting `rankSelectionChanged`. */
+    void setFocusedRank(int rankId, int rankCount = -1);
+
+    /** @brief Updates local variables in the tree strictly when @p rankId matches `focusedRank()`. */
+    bool applyLocalsForRank(int rankId, const QJsonArray& locals);
+
 signals:
+    /** @brief Emitted when the user interactively selects a different rank from the Scope dropdown. */
+    void rankSelectionChanged(int rankId);
+
     /**
      * @brief Emitted when a user promotes a variable from the tree into Watch Expressions.
      * @param expression The variable or expression string to add to Watch Expressions.

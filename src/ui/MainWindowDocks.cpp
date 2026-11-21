@@ -879,6 +879,7 @@ void MainWindow::syncRankCountChrome(int rankCount) {
     if (QWidget* w = findChild<QWidget*>(id)) w->setVisible(multi);
   }
   if (m_programOutputRankFilter) m_programOutputRankFilter->setVisible(multi);
+  if (m_expressionEvaluatorWidget) m_expressionEvaluatorWidget->setAvailableRankCount(ranks);
 }
 void MainWindow::setVulkanInstance([[maybe_unused]] QVulkanInstance *inst) {}
 
