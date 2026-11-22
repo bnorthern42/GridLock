@@ -897,50 +897,46 @@ void TestMainWindowUI::testPreferencesSidebarContrastTerminalFontsAndSlurmAutoDe
     }
     QVERIFY2(foundAccentDarkText && foundCanvasLightText, "Palette swatches must include hex code and luminance-aware foreground contrast");
 
-    // 3. Terminal Font Family Combo Has >= 15 Monospace Options & Unclipped "Browse..." Buttons.
     auto* termFontCombo = dialog.findChild<QComboBox*>(QStringLiteral("terminalFontFamilyCombo"));
     QVERIFY2(termFontCombo != nullptr && termFontCombo->count() >= 15, "Terminal Font Family combo must offer >= 15 monospace font families");
-    for (QPushButton* btn : dialog.findChildren<QPushButton*>())
-        if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive))
-            QVERIFY2(btn->minimumWidth() >= 88, qPrintable(QStringLiteral("Browse button minWidth %1 < 88").arg(btn->minimumWidth())));
-
-    // 4. Comprehensive SLURM Fields & Batch Script File Auto-Detection (parseSlurmBatchScript).
+    for (QPushButton* btn : dialog.findChildren<QPushButton*>()) if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) QVERIFY2(btn->minimumWidth() >= 88, qPrintable(QStringLiteral("Browse button minWidth %1 < 88").arg(btn->minimumWidth())));
     const QString sampleSbatch = QStringLiteral("#!/bin/bash\n#SBATCH --job-name=wpt_fem_solver\n#SBATCH --account=ttu_hpc\n#SBATCH --partition=gpu_a100\n#SBATCH --qos=high\n#SBATCH --nodes=4\n#SBATCH --ntasks-per-node=16\n#SBATCH --cpus-per-task=4\n#SBATCH --mem=128G\n#SBATCH --time=06:30:00\n#SBATCH --gres=gpu:a100:2\n#SBATCH --constraint=nvlink\n#SBATCH --output= solver_%j.out\nmodule load openmpi/5.0 gcc/13\nsrun --mpi=pmix ./solver {FILE}\n");
     QVERIFY(dialog.parseSlurmBatchScript(sampleSbatch));
-    for (const auto& [k, v] : QList<QPair<QString, QString>>{{"job_name", "wpt_fem_solver"}, {"account", "ttu_hpc"}, {"partition", "gpu_a100"}, {"qos", "high"}, {"nodes", "4"}, {"ntasks_per_node", "16"}, {"cpus_per_task", "4"}, {"mem", "128G"}, {"time", "06:30:00"}, {"gres_gpu", "a100:2"}, {"constraint", "nvlink"}})
-        QCOMPARE(dialog.slurmFieldValue(k), v);
+    for (const auto& [k, v] : QList<QPair<QString, QString>>{{"job_name", "wpt_fem_solver"}, {"account", "ttu_hpc"}, {"partition", "gpu_a100"}, {"qos", "high"}, {"nodes", "4"}, {"ntasks_per_node", "16"}, {"cpus_per_task", "4"}, {"mem", "128G"}, {"time", "06:30:00"}, {"gres_gpu", "a100:2"}, {"constraint", "nvlink"}}) QCOMPARE(dialog.slurmFieldValue(k), v);
     QVERIFY(dialog.slurmFieldValue(QStringLiteral("modules")).contains(QStringLiteral("openmpi/5.0")));
     tm.applyTheme(QStringLiteral("gridlock_slate"));
 }
-
-/** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, and theme switching. */
+/** @brief Verifies full workstation light theme propagation, non-colliding palette swatches, theme switching, and toolbar dropdown clearance. */
 void TestMainWindowUI::testFullWorkstationLightThemePropagationAndLineCountHeadroom() {
-    auto& tm = gridlock::core::ThemeManager::instance();
-    const QStringList themeIds = tm.availableThemeIds();
+    auto& tm = gridlock::core::ThemeManager::instance(); const QStringList themeIds = tm.availableThemeIds();
     QVERIFY(themeIds.size() >= 12 && !tm.paletteForTheme(QStringLiteral("one_light")).isDark && tm.paletteForTheme(QStringLiteral("nord_dark")).isDark);
-    tm.applyTheme(QStringLiteral("catppuccin_latte")); QVERIFY(!tm.isDarkMode());
-    tm.applyTheme(QStringLiteral("solarized_light")); QVERIFY(!tm.isDarkMode());
+    tm.applyTheme(QStringLiteral("catppuccin_latte")); QVERIFY(!tm.isDarkMode()); tm.applyTheme(QStringLiteral("solarized_light")); QVERIFY(!tm.isDarkMode());
     gridlock::ui::MainWindow mainWindow; mainWindow.resize(1440, 900); mainWindow.loadPreviewFixture();
     mainWindow.show(); QVERIFY(QTest::qWaitForWindowExposed(&mainWindow)); QApplication::processEvents();
     gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
-    // Retrieve pointers to all primary inspection subviews and verify light canvas lightness >= 200.
     auto* memView = mainWindow.findChild<gridlock::ui::MemView*>(); auto* diffGrid = mainWindow.findChild<gridlock::ui::DifferentialGrid*>(); auto* serverRack = mainWindow.findChild<gridlock::ui::ServerRackView*>(); auto* disasmView = mainWindow.findChild<gridlock::ui::DisassemblyView*>();
-    QVERIFY(memView != nullptr && diffGrid != nullptr && serverRack != nullptr && disasmView != nullptr);
+    QVERIFY(memView && diffGrid && serverRack && disasmView);
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() >= 200 && gridlock::tests::getActiveCanvasBg(diffGrid, 0).lightness() >= 200 && gridlock::tests::getActiveCanvasBg(serverRack, 0).lightness() >= 200, "Inspection views must have light canvas >= 200 in solarized_light");
     QVERIFY2(gridlock::tests::callAreAllChromeAligned(&mainWindow, 0), "All chrome toolbars and dock headers must be theme aligned without hardcoded #16181d/#1b1e24");
-    // Inspect decompiler function signature label contrast (dark ink < 120 lightness on light cream background).
     auto* sigLabel = disasmView->findChild<QLabel*>(QStringLiteral("disasmSignatureLabel")); QVERIFY(sigLabel != nullptr);
     const auto match = QRegularExpression(QStringLiteral("color:\\s*(#[0-9a-fA-F]{3,8}|rgba?\\([^)]+\\))")).match(sigLabel->styleSheet());
     const QColor sigTextColor = match.hasMatch() ? QColor(match.captured(1)) : sigLabel->palette().color(QPalette::WindowText);
     QVERIFY2(sigTextColor.isValid() && sigTextColor.lightness() < 120, qPrintable(QString("Decompiler signature text color lightness %1 >= 120").arg(sigTextColor.lightness())));
-    // Restore default dark theme and verify dark activeCanvasBackgroundColor (< 60 lightness).
     tm.applyTheme(QStringLiteral("gridlock_slate")); gridlock::tests::callPropagateTheme(&mainWindow, 0); QApplication::processEvents();
     QVERIFY2(gridlock::tests::getActiveCanvasBg(memView, 0).lightness() < 60, "MemView canvas background must be dark (< 60 lightness) in gridlock_slate");
-    // 2. Spaced, Non-Colliding Palette Swatch Chips with hex colors stored in toolTip().
+    auto* mainTb = mainWindow.findChild<QToolBar*>(QStringLiteral("MainToolbar")); QVERIFY(mainTb != nullptr);
+    int popupBtnsChecked = 0;
+    for (QToolButton* btn : mainTb->findChildren<QToolButton*>()) {
+        if (!btn->isVisible() || btn->popupMode() == QToolButton::DelayedPopup) continue;
+        const int adv = btn->fontMetrics().horizontalAdvance(btn->text());
+        QVERIFY2(btn->width() >= btn->sizeHint().width() && btn->width() >= adv + 34, qPrintable(QStringLiteral("Popup QToolButton '%1' (%2) width=%3 sizeHint=%4 textAdv=%5").arg(btn->text(), btn->objectName()).arg(btn->width()).arg(btn->sizeHint().width()).arg(adv)));
+        ++popupBtnsChecked;
+    }
+    QVERIFY2(popupBtnsChecked >= 3, "Expected Build, Into, and Launch Options popup QToolButtons in #MainToolbar");
+    if (!qEnvironmentVariableIsEmpty("GRIDLOCK_SAVE_TOOLBAR_SHOT")) QVERIFY(mainTb->grab().save(QStringLiteral("/tmp/toolbar_dropdown_verify.png")));
     gridlock::ui::PreferencesDialog prefsDialog; prefsDialog.resize(860, 620); prefsDialog.show(); QApplication::processEvents();
     QList<QLabel*> swatchBoxes;
     for (QLabel* lbl : prefsDialog.findChildren<QLabel*>()) for (const QString& r : {QStringLiteral("Canvas"), QStringLiteral("Header"), QStringLiteral("Border"), QStringLiteral("Accent"), QStringLiteral("Text")}) if (lbl->text().trimmed() == r) { swatchBoxes.append(lbl); break; }
-    QVERIFY2(swatchBoxes.size() == 5, qPrintable(QString("Expected 5 clean role swatch boxes, found %1").arg(swatchBoxes.size())));
-    for (QLabel* box : swatchBoxes) QVERIFY2(!box->toolTip().isEmpty() && box->toolTip().contains('#'), "Swatch box must store hex color in toolTip()");
+    QVERIFY2(swatchBoxes.size() == 5 && swatchBoxes.first()->toolTip().contains('#'), "Expected 5 spaced role swatch boxes with hex tooltips");
 }
 

@@ -661,14 +661,19 @@ void MainWindow::propagateThemeToAllWidgets() {
   if (auto* mainToolBar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
     mainToolBar->setMovable(true);
     mainToolBar->setStyleSheet(QStringLiteral(
-        "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; spacing: 2px; padding: 1px 3px; height: 28px; min-height: 28px; max-height: 30px; }"
-        "QToolBar#MainToolbar::handle { background-color: %2; width: 5px; margin: 4px 2px; border-radius: 2px; }"
-        "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 2px; }"
+        "QToolBar#MainToolbar { background-color: %1; border-bottom: 1px solid %2; spacing: 1px; padding: 1px 2px; height: 28px; min-height: 28px; max-height: 30px; }"
+        "QToolBar#MainToolbar::handle { background-color: %2; width: 4px; margin: 4px 1px; border-radius: 2px; }"
+        "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 1px; }"
         "QToolBar#MainToolbar QLabel { background: transparent; color: %3; font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
-        "QToolBar#MainToolbar QComboBox, #toolbarTargetSelector { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 6px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
-        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 4px; padding-right: 16px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 500; }"
-        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 14px; margin-right: 1px; }"
-        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 4px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 600; }"
+        "QToolBar#MainToolbar QComboBox, #toolbarTargetSelector { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 5px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
+        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 3px; padding-right: 14px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 500; }"
+        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 13px; margin-right: 1px; }"
+        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 3px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 600; }"
+        "QToolBar#MainToolbar QToolButton[popupMode=\"1\"] { padding-left: 6px; padding-right: 22px; }"
+        "QToolBar#MainToolbar QToolButton::menu-button { width: 18px; border-left: 1px solid %2; subcontrol-origin: padding; subcontrol-position: top right; }"
+        "QToolBar#MainToolbar QToolButton::menu-arrow { width: 10px; height: 10px; }"
+        "QToolBar#MainToolbar QToolButton[popupMode=\"2\"] { padding-left: 6px; padding-right: 20px; }"
+        "QToolBar#MainToolbar QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; right: 6px; }"
         "QToolBar#MainToolbar QToolButton:hover:enabled, QToolBar#MainToolbar QPushButton:hover:enabled { background-color: %2; border: 1px solid %5; color: %3; }"
         "QToolBar#MainToolbar QToolButton:pressed:enabled, QToolBar#MainToolbar QPushButton:pressed:enabled { background-color: %4; border: 1px solid %5; }"
         "QToolBar#MainToolbar QToolButton:checked, QToolBar#MainToolbar QPushButton:checked { background-color: %6; color: #ffffff; border: 1px solid %5; font-weight: 600; }"
@@ -678,8 +683,8 @@ void MainWindow::propagateThemeToAllWidgets() {
              isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
     for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
     for (QPushButton* btn : mainToolBar->findChildren<QPushButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
-    if (m_rankCountSpin) { m_rankCountSpin->setMinimumWidth(56); m_rankCountSpin->setMaximumWidth(68); m_rankCountSpin->setFixedHeight(26); }
-    if (m_targetSelector) { m_targetSelector->setMinimumWidth(100); m_targetSelector->setMaximumWidth(190); m_targetSelector->setFixedHeight(26); }
+    if (m_rankCountSpin) { m_rankCountSpin->setMinimumWidth(48); m_rankCountSpin->setMaximumWidth(56); m_rankCountSpin->setFixedHeight(26); }
+    if (m_targetSelector) { m_targetSelector->setMinimumWidth(68); m_targetSelector->setMaximumWidth(144); m_targetSelector->setFixedHeight(26); }
     // Highlight Run Target (m_runAction) via theme accent fill while preserving identical 26px height and padding.
     if (m_runAction) {
       if (QWidget* runBtn = mainToolBar->widgetForAction(m_runAction)) {

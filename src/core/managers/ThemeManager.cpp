@@ -96,6 +96,11 @@ static QString getHighContrastLightQssOverlay() {
         "    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 3px;\n"
         "    color: #1f2328; font-size: 12px; font-weight: 600;\n"
         "}\n"
+        "QToolButton[popupMode=\"1\"], QToolBar QToolButton[popupMode=\"1\"] { padding-right: 22px; }\n"
+        "QToolButton::menu-button, QToolBar QToolButton::menu-button { width: 18px; border-left: 1px solid #d0d7de; subcontrol-origin: padding; subcontrol-position: top right; }\n"
+        "QToolButton::menu-arrow, QToolBar QToolButton::menu-arrow { width: 10px; height: 10px; }\n"
+        "QToolButton[popupMode=\"2\"], QToolBar QToolButton[popupMode=\"2\"] { padding-right: 20px; }\n"
+        "QToolButton::menu-indicator, QToolBar QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; right: 6px; }\n"
         // Hover and disabled button states in Light Mode.
         "QPushButton:hover:enabled, QToolButton:hover { background: #eaeef2; border: 1px solid #0969da; color: #0969da; }\n"
         "QToolButton:checked, QToolBar QToolButton:checked { background: #dafbe1; color: #1a7f37; border: 1px solid #2ea043; font-weight: 600; }\n"
@@ -285,6 +290,11 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    background: #252932; border: 1px solid #323844; border-radius: 4px;\n"
         "    color: #d7dae0; font-size: 12px; font-weight: 600;\n"
         "}\n"
+        "QToolButton[popupMode=\"1\"], QToolBar QToolButton[popupMode=\"1\"] { padding-right: 22px; }\n"
+        "QToolButton::menu-button, QToolBar QToolButton::menu-button { width: 18px; border-left: 1px solid #323844; subcontrol-origin: padding; subcontrol-position: top right; }\n"
+        "QToolButton::menu-arrow, QToolBar QToolButton::menu-arrow { width: 10px; height: 10px; }\n"
+        "QToolButton[popupMode=\"2\"], QToolBar QToolButton[popupMode=\"2\"] { padding-right: 20px; }\n"
+        "QToolButton::menu-indicator, QToolBar QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; right: 6px; }\n"
         // Toolbar button hover state.
         "QToolButton:hover, QToolBar QToolButton:hover {\n"
         "    background: #2c323d; border: 1px solid #3e4452; color: #ffffff;\n"
@@ -646,7 +656,7 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
     const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
     const QString svgThemeDir = acssDir + QStringLiteral("/qt_material/") + acssTheme;
     const QString qssCacheFile = cachedQssFilePath(m_activeThemeId);
-    const QString fontTag = QStringLiteral("/* gridlock-font:%1:%2 */\n").arg(uiFontFamily.trimmed()).arg(uiFontSize);
+    const QString fontTag = QStringLiteral("/* gridlock-font:%1:%2:v2 */\n").arg(uiFontFamily.trimmed()).arg(uiFontSize);
 
     bool loadedFromDiskCache = false;
     if (QFileInfo::exists(qssCacheFile) && QFileInfo(qssCacheFile).size() > 0 && QDir(svgThemeDir).exists()) {

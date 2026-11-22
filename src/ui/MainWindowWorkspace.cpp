@@ -103,9 +103,9 @@ void MainWindow::setupToolbar() {
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  m_targetSelector->setMinimumContentsLength(6);
-  m_targetSelector->setMinimumWidth(76);
-  m_targetSelector->setMaximumWidth(156);
+  m_targetSelector->setMinimumContentsLength(5);
+  m_targetSelector->setMinimumWidth(68);
+  m_targetSelector->setMaximumWidth(144);
   m_targetSelector->setFixedHeight(26);
   if (m_targetSelector->view()) { m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle); m_targetSelector->view()->setMinimumWidth(260); }
   QFont selectorFont = m_targetSelector->font(); selectorFont.setItalic(false); selectorFont.setWeight(QFont::Medium);
@@ -149,7 +149,7 @@ void MainWindow::setupToolbar() {
   m_launchOptionsBtn->setText(QStringLiteral("⚙"));
   m_launchOptionsBtn->setPopupMode(QToolButton::InstantPopup);
   m_launchOptionsBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
-  m_launchOptionsBtn->setFixedSize(22, 26);
+  m_launchOptionsBtn->setFixedHeight(26);
   m_launchOptionsBtn->setToolTip(QStringLiteral("Launch Options: Program Arguments (--args), Working Directory, and Entry Breakpoint"));
   auto *launchOptMenu = new QMenu(m_launchOptionsBtn);
   launchOptMenu->setObjectName(QStringLiteral("toolbarLaunchOptionsMenu"));
@@ -204,7 +204,7 @@ void MainWindow::setupToolbar() {
   // Compact self-labeled MPI rank count spin box ("np:8").
   m_rankCountSpin = new QSpinBox(toolbar); m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
   m_rankCountSpin->setPrefix(QStringLiteral("np:")); m_rankCountSpin->setRange(1, 256); m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setMinimumWidth(56); m_rankCountSpin->setMaximumWidth(68); m_rankCountSpin->setFixedHeight(26); m_rankCountSpin->setFont(selectorFont);
+  m_rankCountSpin->setMinimumWidth(48); m_rankCountSpin->setMaximumWidth(56); m_rankCountSpin->setFixedHeight(26); m_rankCountSpin->setFont(selectorFont);
   m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
   connect(m_rankCountSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
     if (!m_debugSessionActive && !m_previewFixtureOnly && m_serverRackView) m_serverRackView->setSessionIdle(val);
@@ -324,12 +324,12 @@ void MainWindow::setupToolbar() {
 
   // History back/forward navigation buttons (< / >) with shortcut tooltips.
   m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar); m_navBackBtn->setObjectName("navBackButton");
-  m_navBackBtn->setFixedSize(22, 26); m_navBackBtn->setEnabled(false); m_navBackBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  m_navBackBtn->setFixedSize(20, 26); m_navBackBtn->setEnabled(false); m_navBackBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   m_navBackBtn->setToolTip(QStringLiteral("Navigate Back in Address History (Alt+Left)"));
   connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack); toolbar->addWidget(m_navBackBtn);
 
   m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar); m_navForwardBtn->setObjectName("navForwardButton");
-  m_navForwardBtn->setFixedSize(22, 26); m_navForwardBtn->setEnabled(false); m_navForwardBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  m_navForwardBtn->setFixedSize(20, 26); m_navForwardBtn->setEnabled(false); m_navForwardBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   m_navForwardBtn->setToolTip(QStringLiteral("Navigate Forward in Address History (Alt+Right)"));
   connect(m_navForwardBtn, &QPushButton::clicked, this, &MainWindow::navigateForward); toolbar->addWidget(m_navForwardBtn);
 
@@ -340,7 +340,7 @@ void MainWindow::setupToolbar() {
   m_seekBar = new QLineEdit(toolbar); m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to addr/sym (Ctrl+G)");
   m_seekBar->setToolTip(QStringLiteral("Go to Address or Symbol (Ctrl+G) — enter hex address (0x401000) or function symbol"));
-  m_seekBar->setFixedHeight(26); m_seekBar->setFixedWidth(78); toolbar->addWidget(m_seekBar);
+  m_seekBar->setFixedHeight(26); m_seekBar->setFixedWidth(64); toolbar->addWidget(m_seekBar);
   connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() { seekToAddressOrExpression(m_seekBar->text()); });
 
   // Secondary toolbar break for address space navigation ribbon.
