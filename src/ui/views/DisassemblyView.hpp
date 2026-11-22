@@ -88,8 +88,34 @@ private:
     QVector<HighlightingRule> highlightingRules;
 };
 
+class DisassemblyView;
 class DisassemblyTextEdit;
-class BranchFlowGutter;
+
+/** @brief Left gutter widget painting branch flow arcs, PC markers, and user bookmarks. */
+class BranchFlowGutter : public QWidget {
+public:
+    explicit BranchFlowGutter(DisassemblyTextEdit* editor, DisassemblyView* owner);
+    QSize sizeHint() const override;
+protected:
+    void paintEvent(QPaintEvent* event) override;
+private:
+    DisassemblyTextEdit* m_editor = nullptr;
+    DisassemblyView* m_owner = nullptr;
+};
+
+/** @brief Specialized text editor embedding the branch flow gutter and viewport margins. */
+class DisassemblyTextEdit : public QPlainTextEdit {
+public:
+    explicit DisassemblyTextEdit(DisassemblyView* owner, QWidget* parent = nullptr);
+    int gutterWidth() const { return 46; }
+    void updateGutter();
+    void paintGutter(QPaintEvent* event);
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+private:
+    DisassemblyView* m_owner = nullptr;
+    BranchFlowGutter* m_gutter = nullptr;
+};
 
 /**
  * @brief Interactive hybrid assembly listing, CFG graph, and decompiler widget.

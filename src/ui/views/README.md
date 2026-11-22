@@ -10,8 +10,10 @@ Primary source editor, fast CSV table preview, disassembly/CFG/decompiler panes,
   - Files `>= 512 KB` (`kLargeFileThresholdBytes`) or `.csv`/`.tsv` files (`isPlainDataFile`) disable synchronous C++ syntax highlighting, rainbow brackets, and `clangd`.
 - `CsvTablePreviewWidget.hpp` (`140`), `CsvTablePreviewWidget.cpp`:
   - Virtualized `QAbstractTableModel` (`CsvVirtualTableModel`) + `QTableView` indexing newline offsets over large `.csv`/`.tsv` files (`>= 256 KB`), with a raw-text preview toggle.
-- `DisassemblyView.hpp` (`395`), `DisassemblyView.cpp` (`927`), `DisassemblyAnalysis.cpp` (`836`), `DisassemblyDecompiler.cpp` (`938`):
-  - Assembly tracker (`AsmSyntaxHighlighter`), basic-block CFG (`BranchFlowGutter`), cross-references, bookmarks, and structured C/C++/pseudocode decompiler.
+- `DisassemblyView.hpp` (`421`), `DisassemblyView.cpp` (`393`), `DisassemblyViewActions.cpp` (`360`), `DisassemblyAnalysis.cpp` (`836`), `DisassemblyDecompiler.cpp` (`397`), `DisassemblyDecompilerPasses.cpp` (`311`):
+  - Assembly syntax highlighting (`AsmSyntaxHighlighter`), basic-block CFG gutter (`BranchFlowGutter`), `DisassemblyTextEdit`, and widget/toolbar construction (`DisassemblyView.cpp`).
+  - Address/PC tracking, context menus, byte patching, comments, bookmarks, symbol renames, theme application, and `Esc` handling (`DisassemblyViewActions.cpp`).
+  - Binary section/symbol analysis and CFG extraction (`DisassemblyAnalysis.cpp`), instruction lifter and expression simplifier (`DisassemblyDecompiler.cpp`), and loop/if-else/for-loop structuring plus syntax coloring (`DisassemblyDecompilerPasses.cpp`).
 - `MemView.hpp` (`174`), `MemView.cpp` (`468`), `MemViewRender.cpp` (`316`):
   - Segmented `HEX DUMP | LIBRARY MEMORY MAP` container, pop-out windowing, rank pinning, live reads, byte patching, CSV/binary export, and diff dispatch (`MemView.cpp`), plus HTML/plain-text hex formatting, diff spans, styling, and byte-offset word extraction (`MemViewRender.cpp`).
 - `MemoryProfilerWidget.hpp` (`178`), `MemoryProfilerWidget.cpp` (`476`), `MemoryProfilerChart.cpp` (`360`):
@@ -26,7 +28,7 @@ Primary source editor, fast CSV table preview, disassembly/CFG/decompiler panes,
 - **Fast Large-File & CSV Handling**:
   - Large `.csv`/`.tsv` files (`>= 256 KB`) load virtually via `CsvTablePreviewWidget`; source files `>= 512 KB` bypass synchronous highlighting and `clangd` to eliminate UI freezes.
 - **Translation Unit Line Budget**:
-  - `SourceCodeView*.cpp` (`446`, `463`), `MemView*.cpp` (`468`, `316`), and `MemoryProfiler*.cpp` (`476`, `360`) sit strictly `< 500` lines; `DisassemblyDecompiler.cpp` (`938`) and `DisassemblyView.cpp` (`927`) sit near `< 950` lines and must be split before adding features.
+  - `SourceCodeView*.cpp` (`446`, `463`), `DisassemblyView*.cpp` (`393`, `360`), `DisassemblyDecompiler*.cpp` (`397`, `311`), `MemView*.cpp` (`468`, `316`), and `MemoryProfiler*.cpp` (`476`, `360`) all sit strictly `< 500` lines; `DisassemblyAnalysis.cpp` (`836`) sits below `< 950` lines.
 - **Strict `QPainter` Geometry**:
   - Custom gutters (`LineNumberArea`, `BranchFlowGutter`), `MemoryTreemapCanvas`, and `ServerRackView` must calculate exact `QRect` bounds and reset pens/brushes inside every loop iteration.
 - **Verification**:
@@ -35,7 +37,7 @@ Primary source editor, fast CSV table preview, disassembly/CFG/decompiler panes,
 ## Maintainer & Agent Notes
 
 - Line Ceiling & Splitting Rules:
-  - Keep split view units (`SourceCodeView*.cpp`, `MemView*.cpp`, `MemoryProfiler*.cpp`) under `500` lines and never expand `Disassembly*.cpp` past `< 950` lines without extracting helpers first.
+  - Keep split view units (`SourceCodeView*.cpp`, `DisassemblyView*.cpp`, `DisassemblyDecompiler*.cpp`, `MemView*.cpp`, `MemoryProfiler*.cpp`) strictly under `500` lines and never expand `DisassemblyAnalysis.cpp` past `< 950` lines without splitting helpers first.
 - Build Sync & Static Cohesion Checks:
   - Preserve static source checks in `tests/ui/test_ui_cohesion.cpp` (e.g., `../src/ui/views/DisassemblyAnalysis.cpp`) and toolbar/dock chrome alignment tests.
   - Keep `SourceCodeView*.cpp` and `EditorSyntaxHighlighter.cpp` registered in `lsp_test_src` and `dap_commands_test_src` in `meson.build` alongside `src_files` and `ui_test_src`.
