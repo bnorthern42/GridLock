@@ -430,24 +430,42 @@ QString SearchEverywhereEngine::loadFilePreviewSnippet(const QString& filePath,
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return QString();
 
     const int target = std::max(1, targetOneBasedLine);
-    const int startLine = std::max(1, target - std::max(1, contextLines));
-    const int endLine = target + std::max(1, contextLines);
+    const int before = std::max(1, contextLines);
+    const int windowSize = before * 2 + 5;  // 15 before + target + 19 after = 35 lines
+    const int startLine = std::max(1, target - before);
+    const int endLine = startLine + windowSize - 1;
 
-    QStringList snippetLines;
+    constexpr int kMaxLinesRead = 250;
+    constexpr qint64 kMaxBytesRead = 32 * 1024;
+
+    QStringList rawLines;
     QTextStream in(&file);
     int cur = 0;
-    while (!in.atEnd() && cur < endLine) {
+    qint64 bytesRead = 0;
+    while (!in.atEnd() && cur < endLine && cur < kMaxLinesRead && bytesRead < kMaxBytesRead) {
         const QString line = in.readLine();
         ++cur;
-        if (cur >= startLine) snippetLines.append(line);
+        bytesRead += static_cast<qint64>(line.size()) + 1;
+        if (cur >= startLine) rawLines.append(line);
     }
-    if (snippetLines.isEmpty()) return QString();
+    if (rawLines.isEmpty()) return QString();
+
+    const int lastLine = startLine + static_cast<int>(rawLines.size()) - 1;
+    const int numWidth = std::max(2, static_cast<int>(QString::number(lastLine).size()));
+    QStringList formattedLines;
+    formattedLines.reserve(rawLines.size());
+    for (int i = 0; i < rawLines.size(); ++i) {
+        const int lineNum = startLine + i;
+        const QString marker = (lineNum == target) ? QStringLiteral("> ") : QStringLiteral("  ");
+        const QString numStr = QString::number(lineNum).rightJustified(numWidth, QLatin1Char(' '));
+        formattedLines.append(QStringLiteral("%1%2 | %3").arg(marker, numStr, rawLines.at(i)));
+    }
 
     if (outStartLine) *outStartLine = startLine;
     if (outHighlightedBlock) {
-        *outHighlightedBlock = std::clamp(target - startLine, 0, static_cast<int>(snippetLines.size()) - 1);
+        *outHighlightedBlock = std::clamp(target - startLine, 0, static_cast<int>(formattedLines.size()) - 1);
     }
-    return snippetLines.join(QLatin1Char('\n'));
+    return formattedLines.join(QLatin1Char('\n'));
 }
 
 }  // namespace gridlock::core::utils

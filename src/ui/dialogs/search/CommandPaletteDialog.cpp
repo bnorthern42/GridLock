@@ -378,7 +378,7 @@ void CommandPaletteDialog::updatePreviewForRow(int row) {
     }
     const PaletteItem& item = m_filteredItems.at(row);
     int startLn = 1, hiBlock = -1;
-    const QString snippet = !item.filePath.isEmpty() ? gridlock::core::utils::SearchEverywhereEngine::loadFilePreviewSnippet(item.filePath, item.lineNumber, 6, &startLn, &hiBlock) : QString();
+    const QString snippet = !item.filePath.isEmpty() ? gridlock::core::utils::SearchEverywhereEngine::loadFilePreviewSnippet(item.filePath, item.lineNumber, 15, &startLn, &hiBlock) : QString();
     if (!snippet.isEmpty()) {
         if (m_previewHighlighter) m_previewHighlighter->setFilePath(item.filePath);
         m_previewHeaderLabel->setText(QStringLiteral("%1:%2  (lines %3..%4)").arg(QFileInfo(item.filePath).fileName()).arg(item.lineNumber).arg(startLn).arg(startLn + snippet.count(QLatin1Char('\n'))));

@@ -286,6 +286,17 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     const QString prevHeader0 = mwPalette->previewHeaderLabel()->text();
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Down); QApplication::processEvents();
     QVERIFY(!mwPalette->previewEdit()->toPlainText().isEmpty() && mwPalette->previewHeaderLabel()->text() != prevHeader0);
+    {
+        const QStringList prevLines = mwPalette->previewEdit()->toPlainText().split(QLatin1Char('\n'));
+        QVERIFY2(prevLines.size() >= 25 && prevLines.first().contains(QStringLiteral(" | ")), qPrintable(QStringLiteral("prevLines=%1").arg(prevLines.size())));
+        QTemporaryDir bigTmp; QVERIFY(bigTmp.isValid());
+        const QString bigFile = bigTmp.filePath(QStringLiteral("huge_2000.cpp"));
+        { QFile bf(bigFile); QVERIFY(bf.open(QIODevice::WriteOnly | QIODevice::Text)); for (int i = 1; i <= 2000; ++i) bf.write(QStringLiteral("int line_%1 = %1;\n").arg(i).toUtf8()); }
+        int sLn = 0, hBlk = -1;
+        const QString capped = gridlock::core::utils::SearchEverywhereEngine::loadFilePreviewSnippet(bigFile, 100, 15, &sLn, &hBlk);
+        const QStringList capLines = capped.split(QLatin1Char('\n'));
+        QVERIFY2(capLines.size() == 35 && sLn == 85 && hBlk == 15 && capLines.at(15).startsWith(QStringLiteral("> 100 | ")), qPrintable(QStringLiteral("cap=%1 sLn=%2 hBlk=%3").arg(capLines.size()).arg(sLn).arg(hBlk)));
+    }
     auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(tabMgr && !tabMgr->isSplitActive());
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return, Qt::ControlModifier); QApplication::processEvents();
     QVERIFY(!mwPalette->isVisible() && tabMgr->isSplitActive()); tabMgr->closeSplit();
