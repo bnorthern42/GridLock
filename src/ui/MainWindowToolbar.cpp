@@ -74,13 +74,12 @@ void MainWindow::setupToolbar() {
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  m_targetSelector->setMinimumContentsLength(4);
-  m_targetSelector->setFixedWidth(62);
+  m_targetSelector->setMinimumContentsLength(15);
+  m_targetSelector->setMinimumWidth(168);
+  m_targetSelector->setMaximumWidth(190);
+  m_targetSelector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_targetSelector->setFixedHeight(26);
-  if (m_targetSelector->view()) {
-    m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle);
-    m_targetSelector->view()->setMinimumWidth(260);
-  }
+  if (m_targetSelector->view()) { m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle); m_targetSelector->view()->setMinimumWidth(260); }
   QFont selectorFont = m_targetSelector->font();
   selectorFont.setItalic(false);
   selectorFont.setWeight(QFont::Medium);
@@ -215,13 +214,14 @@ void MainWindow::setupToolbar() {
   connect(m_launchOptionsStopAtMainCheck, &QCheckBox::toggled, this, &MainWindow::setStopAtMainOnLaunch);
   toolbar->addWidget(m_launchOptionsBtn)->setToolTip(m_launchOptionsBtn->toolTip());
 
-  // Compact self-labeled MPI rank count spin box ("np:8").
+  // Compact self-labeled MPI rank count spin box ("np: 8").
   m_rankCountSpin = new QSpinBox(toolbar);
   m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
-  m_rankCountSpin->setPrefix(QStringLiteral("np:"));
+  m_rankCountSpin->setPrefix(QStringLiteral("np: "));
   m_rankCountSpin->setRange(1, 256);
   m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setFixedWidth(44);
+  m_rankCountSpin->setMinimumWidth(82);
+  m_rankCountSpin->setMaximumWidth(104);
   m_rankCountSpin->setFixedHeight(26);
   m_rankCountSpin->setFont(selectorFont);
   m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
@@ -276,7 +276,8 @@ void MainWindow::setupToolbar() {
   m_executionScopeCombo = new QComboBox(toolbar);
   m_executionScopeCombo->setObjectName(QStringLiteral("toolbarExecutionScopeCombo"));
   m_executionScopeCombo->setFont(selectorFont);
-  m_executionScopeCombo->setFixedWidth(70);
+  m_executionScopeCombo->setMinimumWidth(115);
+  m_executionScopeCombo->setMaximumWidth(140);
   m_executionScopeCombo->setFixedHeight(26);
   m_executionScopeCombo->addItem(QStringLiteral("All Ranks"), -1);
   m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0);

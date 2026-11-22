@@ -500,30 +500,31 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QApplication::processEvents(); auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* pm = static_cast<gridlock::ui::HpcConsoleWidget*>(mw.findChild<QWidget*>(QStringLiteral("HpcConsoleDock"))); auto* term = mw.findChild<gridlock::ui::TerminalDockWidget*>(); auto* ref = mw.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(bottomTabs && pm && term && ref && !pm->isPackagesLoaded() && !term->isShellStarted() && !ref->isDocsetsInitialized());
     bottomTabs->setCurrentWidget(term); QApplication::processEvents(); bottomTabs->setCurrentWidget(ref); QApplication::processEvents(); bottomTabs->setCurrentWidget(pm); QApplication::processEvents(); QVERIFY(term->isShellStarted() && ref->isDocsetsInitialized() && pm->isPackagesLoaded());
-    // Progressive disclosure & <=1040px toolbar audit across Source (ranks=1), Debug (ranks=1), Binary, and MPI (ranks=4).
+    // Progressive disclosure & <=1180px toolbar audit across Source, Debug, Binary, and MPI (ranks=8) at 1280x800.
     auto* mainTb = mw.findChild<QToolBar*>(QStringLiteral("MainToolbar")); auto* navTb = mw.findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"));
     auto* rackDock = mw.findChild<QDockWidget*>(QStringLiteral("ServerRackDock")); auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    auto* scopeCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarExecutionScopeCombo")); auto* pauseAllBtn = mw.findChild<QToolButton*>(QStringLiteral("toolbarPauseAllRanksBtn"));
-    QVERIFY(mainTb && navTb && rackDock && rankSpin && scopeCombo && pauseAllBtn);
+    auto* targetSel = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* scopeCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarExecutionScopeCombo")); auto* pauseAllBtn = mw.findChild<QToolButton*>(QStringLiteral("toolbarPauseAllRanksBtn"));
+    QVERIFY(mainTb && navTb && rackDock && rankSpin && targetSel && scopeCombo && pauseAllBtn);
     rankSpin->setValue(1); mw.setWorkspacePerspective(QStringLiteral("Source")); QApplication::processEvents();
     auto* extBtn = mainTb->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
-    QVERIFY(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && !pauseAllBtn->isVisible() && mainTb->sizeHint().width() <= 1040 && (!extBtn || !extBtn->isVisible()));
-    mw.setWorkspacePerspective(QStringLiteral("Debug")); QApplication::processEvents(); QVERIFY(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible());
-    mw.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents(); QVERIFY(navTb->isVisible() && mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && mainTb->sizeHint().width() <= 1040);
-    rankSpin->setValue(4); mw.setWorkspacePerspective(QStringLiteral("MPI")); QApplication::processEvents();
-    QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && rackDock->isVisible() && scopeCombo->isVisible() && pauseAllBtn->isVisible() && mainTb->sizeHint().width() <= 1040 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("w=%1 nav=%2 dis=%3 rack=%4 sc=%5 pa=%6 ext=%7").arg(mainTb->sizeHint().width()).arg(navTb->isVisible()).arg(mw.disassemblyView()->isVisible()).arg(rackDock->isVisible()).arg(scopeCombo->isVisible()).arg(pauseAllBtn->isVisible()).arg(extBtn && extBtn->isVisible())));
+    QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && !pauseAllBtn->isVisible() && targetSel->width() >= 165 && rankSpin->width() >= 80 && scopeCombo->minimumWidth() >= 115 && mainTb->sizeHint().width() <= 1180 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("src w=%1 ts=%2 rs=%3 scMin=%4 ext=%5").arg(mainTb->sizeHint().width()).arg(targetSel->width()).arg(rankSpin->width()).arg(scopeCombo->minimumWidth()).arg(extBtn && extBtn->isVisible())));
+    const QImage tbSrc1280 = mainTb->grab().toImage();
+    mw.setWorkspacePerspective(QStringLiteral("Debug")); QApplication::processEvents(); QVERIFY(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && mainTb->sizeHint().width() <= 1180);
+    mw.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents(); QVERIFY(navTb->isVisible() && mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && mainTb->sizeHint().width() <= 1180);
+    rankSpin->setValue(8); mw.setWorkspacePerspective(QStringLiteral("MPI")); QApplication::processEvents();
+    QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && rackDock->isVisible() && scopeCombo->isVisible() && pauseAllBtn->isVisible() && targetSel->width() >= 165 && rankSpin->width() >= 80 && scopeCombo->width() >= 115 && mainTb->sizeHint().width() <= 1180 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("mpi w=%1 ts=%2 rs=%3 sc=%4 ext=%5").arg(mainTb->sizeHint().width()).arg(targetSel->width()).arg(rankSpin->width()).arg(scopeCombo->width()).arg(extBtn && extBtn->isVisible())));
+    if (const QString tbPng = qEnvironmentVariable("GRIDLOCK_VERIFY_TOOLBAR_PNG"); !tbPng.isEmpty()) {
+        const QImage tbMpi1280 = mainTb->grab().toImage(); mw.resize(1600, 900); QApplication::processEvents(); const QImage tbMpi1600 = mainTb->grab().toImage();
+        QImage out(1600, tbSrc1280.height() + tbMpi1280.height() + tbMpi1600.height() + 24, QImage::Format_ARGB32_Premultiplied); out.fill(QColor(15, 23, 42)); QPainter p(&out); p.drawImage(0, 4, tbSrc1280); p.drawImage(0, tbSrc1280.height() + 12, tbMpi1280); p.drawImage(0, tbSrc1280.height() + tbMpi1280.height() + 20, tbMpi1600); p.end(); out.save(tbPng);
+    }
     // Performance regression: 5+ MB (~100,000-row) CSV must open via virtualized CsvTablePreviewWidget in < 1000 ms.
     const QString bigCsv = tmpDir.filePath(QStringLiteral("telemetry_5mb.csv"));
-    { QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly)); QByteArray chunk; chunk.reserve(6 * 1024 * 1024); chunk.append("rank,step,pressure,velocity,tag\n");
-      for (int r = 0; r < 100000; ++r) { chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_"); chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n"); }
-      QVERIFY(cf.write(chunk) > 5 * 1024 * 1024); }
+    { QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly)); QByteArray chunk; chunk.reserve(6 * 1024 * 1024); chunk.append("rank,step,pressure,velocity,tag\n"); for (int r = 0; r < 100000; ++r) { chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_"); chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n"); } QVERIFY(cf.write(chunk) > 5 * 1024 * 1024); }
     gridlock::ui::EditorTabManager csvTabs; csvTabs.resize(900, 600); csvTabs.show(); QElapsedTimer csvTimer; csvTimer.start();
-    QVERIFY(csvTabs.openFile(bigCsv) == nullptr); QApplication::processEvents(); const qint64 csvMs = csvTimer.elapsed();
-    QVERIFY2(csvMs < 1000, qPrintable(QStringLiteral("Opening 5 MB CSV took %1 ms").arg(csvMs)));
+    QVERIFY(csvTabs.openFile(bigCsv) == nullptr); QApplication::processEvents(); const qint64 csvMs = csvTimer.elapsed(); QVERIFY2(csvMs < 1000, qPrintable(QStringLiteral("Opening 5 MB CSV took %1 ms").arg(csvMs)));
     auto* csvPreview = qobject_cast<gridlock::ui::CsvTablePreviewWidget*>(csvTabs.currentWidget()); QVERIFY(csvPreview && csvPreview->rowCount() == 100000 && csvPreview->columnCount() == 5);
     auto* csvModel = csvPreview->model(); QVERIFY(csvModel->headerData(0, Qt::Horizontal).toString() == QStringLiteral("rank") && csvModel->headerData(4, Qt::Horizontal).toString() == QStringLiteral("tag") && csvModel->data(csvModel->index(0, 0)).toString() == QStringLiteral("0") && csvModel->data(csvModel->index(0, 4)).toString() == QStringLiteral("halo,cell_partition_0") && csvModel->data(csvModel->index(99999, 0)).toString() == QStringLiteral("99999"));
-    csvPreview->rawTextButton()->click(); QApplication::processEvents();
-    auto* rawView = qobject_cast<gridlock::ui::SourceCodeView*>(csvTabs.currentWidget()); QVERIFY(rawView && rawView->isLargeFileMode() && rawView->lineWrapMode() == QPlainTextEdit::NoWrap && rawView->toPlainText().contains(QStringLiteral("Truncated at")));
+    csvPreview->rawTextButton()->click(); QApplication::processEvents(); auto* rawView = qobject_cast<gridlock::ui::SourceCodeView*>(csvTabs.currentWidget()); QVERIFY(rawView && rawView->isLargeFileMode() && rawView->lineWrapMode() == QPlainTextEdit::NoWrap && rawView->toPlainText().contains(QStringLiteral("Truncated at")));
     const QString bigLog = tmpDir.filePath(QStringLiteral("solver_600kb.log")); { QFile lf(bigLog); QVERIFY(lf.open(QIODevice::WriteOnly)); lf.write(QByteArray(600 * 1024, 'A')); }
     auto* logView = csvTabs.openFile(bigLog); QVERIFY(logView && logView->isLargeFileMode() && logView->lineWrapMode() == QPlainTextEdit::NoWrap); csvTabs.close();
 }
@@ -531,8 +532,7 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
 void TestMainWindowUI::testGdbConsoleReadlineErgonomics() {
     QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid()); gridlock::core::ConfigManager::instance().setGdbHistoryFilePathOverride(tmpDir.filePath(QStringLiteral("gdb_history")));
     struct HistGuard { ~HistGuard() { gridlock::core::ConfigManager::instance().setGdbHistoryFilePathOverride(QString()); } } guard;
-    gridlock::ui::GdbConsoleWidget console; console.resize(640, 320); console.show(); QApplication::processEvents();
-    auto* edit = console.commandEdit(); QVERIFY(edit != nullptr);
+    gridlock::ui::GdbConsoleWidget console; console.resize(640, 320); console.show(); QApplication::processEvents(); auto* edit = console.commandEdit(); QVERIFY(edit != nullptr);
     for (const QString& cmd : {QStringLiteral("info registers"), QStringLiteral("break main"), QStringLiteral("x/16gx $rsp"), QStringLiteral("break main")}) { edit->setText(cmd); QTest::keyClick(edit, Qt::Key_Return); }
     QCOMPARE(console.commandHistory(), (QStringList{QStringLiteral("info registers"), QStringLiteral("x/16gx $rsp"), QStringLiteral("break main")}));
     edit->setText(QStringLiteral("print draft_val")); QTest::keyClick(edit, Qt::Key_Up); QCOMPARE(edit->text(), QStringLiteral("break main")); QTest::keyClick(edit, Qt::Key_Up); QCOMPARE(edit->text(), QStringLiteral("x/16gx $rsp"));
