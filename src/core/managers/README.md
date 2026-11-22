@@ -16,8 +16,9 @@ Application-wide persistence, theming, keyboard chord routing, offline documenta
   - Singleton managing `QtAdvancedStylesheet` palettes, workstation chrome QSS overlays, font sizing, and `themeChanged` broadcasts.
 - `ShortcutManager.hpp` (`99`), `ShortcutManager.cpp`:
   - Singleton keyboard chord state machine and `ActionBinding` registry handling single-key shortcuts (`F5`, `F10`, `F11`) and multi-stroke chords (`Ctrl+W, H`).
-- `DocsetManager.hpp` (`177`), `DocsetManager.cpp` (`934`):
-  - Scans Dash/Zeal docset folders, queries SQLite `docSet.dsidx` symbol indices, and resolves offline HTML entries (`tests/core/test_docset.cpp`).
+- `DocsetManager.hpp` (`178`), `DocsetManager.cpp` (`468`), `DocsetManagerIndex.cpp` (`487`):
+  - Singleton lifecycle, bundle metadata accessors, symbol normalization, and built-in dark-slate HTML5 manuals for MPI-3.1, System V AMD64 ABI, GDB/MI, x86_64 instructions, and system man pages (`DocsetManager.cpp`).
+  - Zeal/Dash directory discovery, SQLite `ATTACH DATABASE` (`docSet.dsidx`) indexing, `searchIndex`/`ZTOKEN` symbol queries, `.docset` HTML dark-reader styling, and concurrent workspace header scanning (`DocsetManagerIndex.cpp`, tested in `tests/core/test_docset.cpp`).
 - `SessionManager.hpp` (`104`), `SessionManager.cpp`:
   - Serializes `SessionState` (watches, `file:line` breakpoints, selected ranks) to `.toml` files and maintains MRU session lists.
 - `SpackManager.hpp` (`94`), `SpackManager.cpp`:
@@ -30,7 +31,7 @@ Application-wide persistence, theming, keyboard chord routing, offline documenta
 - **Safe QAction Pointers**:
   - `ShortcutManager` tracks live menu actions via `QPointer<QAction>` and validates callbacks on window destruction.
 - **Translation Unit Line Budget**:
-  - All `ConfigManager*.cpp` splits (`300`, `212`, `396` lines) sit strictly `< 500` lines; `DocsetManager.cpp` (`934` lines) sits near `< 950` lines and should be split before adding new SQLite/HTML parsers.
+  - All `ConfigManager*.cpp` (`300`, `212`, `396` lines) and `DocsetManager*.cpp` (`468`, `487` lines) splits sit strictly `< 500` lines; `ThemeManager.cpp` (`822` lines) sits below `< 950` lines.
 - **Verification**:
   - Run `meson test -C builddir config_tests docset_tests ui_tests --print-errorlogs` after modifying persistence, docset lookups, shortcuts, or theme overlays.
 
@@ -41,4 +42,4 @@ Application-wide persistence, theming, keyboard chord routing, offline documenta
   - Never let test cases touch `~/.config/gridlock/`; verify `GRIDLOCK_TEST_CONFIG_DIR` and `XDG_CONFIG_HOME` overrides remain honored on every new save path.
 - Build Sync & Dependency Discipline:
   - Keep `ConfigManager`, `DocsetManager`, and `SessionManager` decoupled from `MainWindow` so `config_tests` and `docset_tests` compile cleanly without full UI linkage.
-  - Whenever splitting a manager `.cpp` file, register every new unit across all standalone test targets in `meson.build` and update this `README.md`.
+  - Keep split manager units (`ConfigManager*.cpp`, `DocsetManager*.cpp`) strictly `< 500` lines, register every new unit across all standalone test targets in `meson.build`, and update this `README.md`.

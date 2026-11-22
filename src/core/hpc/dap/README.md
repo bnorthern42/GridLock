@@ -4,15 +4,15 @@ Debug Adapter Protocol (DAP) coordinator implementing `IBackendCoordinator` for 
 
 ## Contents
 
-- `DapCoordinator.hpp` (`407` lines):
-  - Defines `SessionState` lifecycle enum (`Disconnected`, `Initializing`, `Configured`, `Running`, `Stopped`, `Terminated`).
-  - Declares `DapCoordinator` implementing `IBackendCoordinator`.
-  - Manages DAP subprocess/transport streams, monotonically increasing `seq` request IDs, breakpoint caches, and `variablesReference` handles.
-- `DapCoordinator.cpp` (`932` lines):
-  - Implements `Content-Length` framed DAP JSON packet accumulation, header parsing, and request serialization.
-  - Handles `initialize`, `launch`/`attach`, and `configurationDone` handshakes.
-  - Implements execution/stepping (`continue`, `next`, `stepIn`, `stepOut`, `pause`), `threads`, `stackTrace`, `scopes`, `variables`, `evaluate`, `setBreakpoints`, `readMemory`/`writeMemory`, and `disassemble`.
-  - Extracts debuggee OS PIDs from DAP `process` events to bridge large memory reads directly to `NativeMemoryReader` (`process_vm_readv`).
+- `DapCoordinator.hpp` (`408` lines):
+  - Defines `SessionState` lifecycle enum (`Disconnected`, `Launching`, `Queued`, `Running`, `Paused`, `Terminating`).
+  - Declares `DapCoordinator` implementing `IBackendCoordinator`, managing DAP subprocess streams, monotonically increasing `seq` request IDs, breakpoint caches, and `variablesReference` handles.
+- `DapCoordinator.cpp` (`491` lines):
+  - Implements `QProcess` adapter lifecycle, `Content-Length` framed DAP JSON packet accumulation, header parsing, request serialization, and session teardown (`stopSession` / `terminateSession`).
+  - Dispatches incoming `response` (`initialize`, `stackTrace`, `threads`, `scopes`, `variables`, `readMemory`, `evaluate`, `dataBreakpointInfo`) and `event` (`initialized`, `stopped`, `output`, `process`, `terminated`) messages in `handleMessage`.
+- `DapCoordinatorRequests.cpp` (`460` lines):
+  - Implements outbound target `launch`/`attach` setup, environment validation, execution/stepping (`continue`, `next`, `stepIn`, `pause`), source breakpoints, and hardware data watchpoints (`setDataWatchpoint` / `syncDataBreakpoints`).
+  - Implements outbound `stackTrace`, `threads`, `scopes`, `variables`, `evaluate`, `NativeMemoryReader` (`process_vm_readv`) fast-path `readMemory` / heatmap queries, `MiSanitizer`-guarded REPL commands, and live variable/register writes.
 
 ## Expected Behavior & Invariants
 
@@ -30,11 +30,9 @@ Debug Adapter Protocol (DAP) coordinator implementing `IBackendCoordinator` for 
 
 ## Maintainer & Agent Notes
 
-- **Critical Line Ceiling Warning (`932 / 950`)**:
-  - `DapCoordinator.cpp` sits at `932` lines (strict ceiling is `< 950` lines).
-  - Do NOT add non-trivial features directly to `DapCoordinator.cpp`; extract DAP JSON builders, parsers, or inspection handlers into a separate translation unit (e.g., `DapProtocolParser.cpp` or `DapInspection.cpp`) first.
-- Check all 9 `dap_*_test_src` targets plus `src_files`, `ui_test_src`, and `advanced_features_test_src` in `meson.build` whenever splitting `DapCoordinator.cpp` so standalone tests keep linking cleanly.
+- **Translation Unit Line Budget (`< 500`)**:
+  - Keep `DapCoordinator.cpp` (`491` lines) and `DapCoordinatorRequests.cpp` (`460` lines) strictly `< 500` lines; extract additional protocol helpers before expanding either file.
+- Synchronize both `DapCoordinator.cpp` and `DapCoordinatorRequests.cpp` across all 13 Meson targets (`src_files`, `test_src`, `ui_test_src`, `advanced_features_test_src`, and all 9 `dap_*_test_src` arrays) in `meson.build`.
 - Keep `DapCoordinator` completely free of `QtWidgets` includes so headless DAP tests remain lightweight and fast.
 - Guard all pending request sequence lookups against empty/cancelled responses during adapter shutdown or sudden EOF.
-- Preserve strict `const` correctness, `override` markers on `IBackendCoordinator` overrides, and Google C++ formatting.
-- Always update this `README.md` in the same commit when splitting `DapCoordinator.cpp` or adding new DAP helpers.
+- Preserve strict `const` correctness, `override` markers on `IBackendCoordinator` overrides, and Google C++ formatting, and update this `README.md` whenever splitting DAP files.
