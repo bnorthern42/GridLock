@@ -81,18 +81,28 @@ SourceCodeView::SourceCodeView(QWidget *parent) : QPlainTextEdit(parent) {
 void SourceCodeView::openFindBar() { if (m_findBar) m_findBar->openAndFocus(); }
 void SourceCodeView::closeFindBar() { if (m_findBar) m_findBar->closeBar(); }
 
+bool SourceCodeView::isPlainDataFile(const QString& filePath) {
+    const QString ext = QFileInfo(filePath).suffix().toLower();
+    return ext == QStringLiteral("csv") || ext == QStringLiteral("tsv") || ext == QStringLiteral("dat") || ext == QStringLiteral("log");
+}
+void SourceCodeView::setLargeFileMode(bool enabled) {
+    m_largeFileMode = enabled;
+    if (enabled) { if (m_highlighter) m_highlighter->setDocument(nullptr); setLineWrapMode(QPlainTextEdit::NoWrap); }
+    else if (m_highlighter && !m_highlighter->document()) m_highlighter->setDocument(document());
+}
 void SourceCodeView::setCurrentFile(const QString& filePath) {
-    m_currentFilePath = (!filePath.isEmpty() && QFileInfo::exists(filePath) && !QFileInfo(filePath).canonicalFilePath().isEmpty())
-                            ? QFileInfo(filePath).canonicalFilePath() : filePath;
+    const QFileInfo fi(filePath);
+    m_currentFilePath = (!filePath.isEmpty() && fi.exists() && !fi.canonicalFilePath().isEmpty()) ? fi.canonicalFilePath() : filePath;
+    const bool plainData = isPlainDataFile(m_currentFilePath);
+    const qint64 limit = plainData ? (256 * 1024) : kLargeFileThresholdBytes;
+    if (fi.exists() && fi.size() >= limit) setLargeFileMode(true);
+    if (m_largeFileMode) return;
     if (m_highlighter) m_highlighter->setFilePath(m_currentFilePath);
-    if (!m_currentFilePath.isEmpty()) {
-        setDiagnostics(core::ClangdLspClient::instance().cachedDiagnosticsForFile(m_currentFilePath));
-        if (!toPlainText().trimmed().isEmpty()) syncLspDocument();
-    }
-    refreshGitDiffGutter();
+    if (!plainData && !m_currentFilePath.isEmpty()) { setDiagnostics(core::ClangdLspClient::instance().cachedDiagnosticsForFile(m_currentFilePath)); if (!toPlainText().trimmed().isEmpty()) syncLspDocument(); }
+    if (!plainData) refreshGitDiffGutter();
 }
 void SourceCodeView::syncLspDocument() {
-    if (!m_currentFilePath.isEmpty()) core::ClangdLspClient::instance().syncDocument(m_currentFilePath, toPlainText());
+    if (!m_largeFileMode && !m_currentFilePath.isEmpty() && !isPlainDataFile(m_currentFilePath)) core::ClangdLspClient::instance().syncDocument(m_currentFilePath, toPlainText());
 }
 int SourceCodeView::lineNumberAreaWidth() const {
     int digits = 3, maxBlocks = qMax(1, blockCount());
@@ -135,7 +145,7 @@ void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
     const int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
     const QString codeFontFamily = s.value("appearance/code_font_family", QStringLiteral("JetBrains Mono")).toString();
-    setLineWrapMode(s.value("editing/word_wrap", false).toBool() ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
+    setLineWrapMode((!m_largeFileMode && s.value("editing/word_wrap", false).toBool()) ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
     // Update widget QFont directly so font().pointSize() and fontMetrics() reflect live changes.
     QFont codeFont = font();
     if (!codeFontFamily.trimmed().isEmpty()) codeFont.setFamily(codeFontFamily.trimmed());
@@ -154,7 +164,7 @@ void SourceCodeView::reloadStyle() {
         pal.setColor(QPalette::Base, QColor(canvasHex)); pal.setColor(QPalette::Window, QColor(canvasHex));
         pal.setColor(QPalette::Text, QColor(textHex)); viewport()->setPalette(pal); viewport()->setAutoFillBackground(true);
     }
-    if (m_highlighter) m_highlighter->reloadPalette();
+    if (m_highlighter && !m_largeFileMode) m_highlighter->reloadPalette();
     highlightCurrentLine(); updateLineNumberAreaWidth(0); if (m_lineNumberArea) m_lineNumberArea->update();
 }
 
@@ -652,7 +662,8 @@ void SourceCodeView::resizeEvent(QResizeEvent *e) {
 
 /** @brief Populates the editor with source code, highlights activeLine, and syncs live clangd diagnostics. */
 void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
-    if (!code.isEmpty() && toPlainText() != code) { QPlainTextEdit::setPlainText(code); document()->setModified(false); }
+    if (code.size() >= kLargeFileThresholdBytes && !m_largeFileMode) setLargeFileMode(true);
+    if (!code.isEmpty() && (m_largeFileMode || toPlainText() != code)) { QPlainTextEdit::setPlainText(code); document()->setModified(false); }
     QList<QTextEdit::ExtraSelection> extraSelections;
     if (activeLine > 0) {
         QTextBlock block = document()->findBlockByLineNumber(activeLine - 1);
@@ -664,7 +675,7 @@ void SourceCodeView::setSourceCode(const QString& code, int activeLine) {
         }
     }
     setExtraSelections(extraSelections);
-    if (!m_currentFilePath.isEmpty() && !code.trimmed().isEmpty()) syncLspDocument();
+    if (!m_largeFileMode && !m_currentFilePath.isEmpty() && !code.trimmed().isEmpty()) syncLspDocument();
 }
 
 /** @brief Restarts the hover evaluation debounce timer on mouse movement. */
@@ -801,6 +812,7 @@ void SourceCodeView::ensureCompletionPopup() {
 
 /** @brief Triggers non-blocking floating LSP IntelliSense below cursorRect() at lineOneBased. */
 void SourceCodeView::triggerCompletionPopupAtCursor(const QString& linePrefix, int lineOneBased) {
+    if (m_largeFileMode) return;
     // Use fast 0ms structural completion only on compact buffers (<= 500 blocks) to avoid GUI stalls.
     const auto items = (document()->blockCount() <= 500) ? core::ClangdLspClient::completeDetailedAtLine(m_currentFilePath, toPlainText(), lineOneBased, linePrefix, 0) : QVector<core::ClangdLspClient::LspCompletionItem>{};
     if (!items.isEmpty()) { ensureCompletionPopup(); m_completionPopup->setItems(items); m_completionPopup->positionBelow(mapToGlobal(cursorRect().bottomLeft() + QPoint(0, 4)), 320); m_completionPopup->show(); }

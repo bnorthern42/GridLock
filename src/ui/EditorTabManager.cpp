@@ -24,6 +24,7 @@
 #include <QVBoxLayout>
 
 #include "../core/managers/ConfigManager.hpp"
+#include "views/CsvTablePreviewWidget.hpp"
 #include "views/SourceCodeView.hpp"
 
 namespace gridlock::ui {
@@ -129,45 +130,87 @@ SourceCodeView* EditorTabManager::openFile(const QString& filePath) {
         m_primaryTabWidget->setCurrentWidget(m_openFiles[absolutePath]);
         return m_openFiles[absolutePath];
     }
+    if (m_openPreviewTabs.contains(absolutePath)) { m_lastActiveSecondary = false; m_primaryTabWidget->setCurrentWidget(m_openPreviewTabs[absolutePath]); return nullptr; }
 
-    QFile file(resolvedPath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    const QString ext = resolvedInfo.suffix().toLower();
+    if ((ext == QStringLiteral("csv") || ext == QStringLiteral("tsv")) && resolvedInfo.exists() &&
+        resolvedInfo.size() >= kLargeCsvPreviewThresholdBytes) {
+        auto* preview = new CsvTablePreviewWidget(m_primaryTabWidget);
+        if (!preview->loadFile(absolutePath)) { delete preview; return nullptr; }
+        preview->setProperty("absolutePath", absolutePath);
+        connect(preview, &CsvTablePreviewWidget::openRawTextRequested, this, [this](const QString& p) { openRawTextPreview(p); });
+        const int idx = m_primaryTabWidget->addTab(preview, resolvedInfo.fileName());
+        m_primaryTabWidget->setTabToolTip(idx, absolutePath);
+        m_openPreviewTabs[absolutePath] = preview;
+        m_lastActiveSecondary = false;
+        m_primaryTabWidget->setCurrentIndex(idx);
+        if (m_primaryTabWidget->tabBar() && m_primaryTabWidget->tabBar()->isHidden()) m_primaryTabWidget->tabBar()->show();
         return nullptr;
     }
 
+    const qint64 largeLimit = SourceCodeView::isPlainDataFile(absolutePath) ? kLargeCsvPreviewThresholdBytes
+                                                                            : SourceCodeView::kLargeFileThresholdBytes;
+    const bool fastLargeOrData = resolvedInfo.exists() && resolvedInfo.size() >= largeLimit;
+    if (fastLargeOrData && resolvedInfo.size() > 2 * 1024 * 1024) return openRawTextPreview(absolutePath, 2 * 1024 * 1024);
+
+    QFile file(resolvedPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return nullptr;
     QString code = QString::fromUtf8(file.readAll());
     code.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
     file.close();
 
     auto* view = new SourceCodeView(m_primaryTabWidget);
     view->setProperty("absolutePath", absolutePath);
-    view->setSourceCode(code);
+    if (fastLargeOrData) view->setLargeFileMode(true);
     view->setCurrentFile(absolutePath);
+    view->setSourceCode(code);
     view->setActiveFocusRank(m_activeFocusRank);
-
     const auto breakpoints = core::ConfigManager::instance().getBreakpoints();
     view->setBreakpoints(breakpoints.contains(absolutePath) ? breakpoints[absolutePath] : QSet<int>());
-
     wireEditorView(view);
 
-    const QFileInfo fi(absolutePath);
-    const QString baseName = fi.fileName();
+    const QString baseName = resolvedInfo.fileName();
     const int index = m_primaryTabWidget->addTab(view, baseName);
     m_primaryTabWidget->setTabToolTip(index, absolutePath);
-
     connect(view, &SourceCodeView::modificationStateChanged, this, [this, view, baseName](bool modified) {
         const int tabIdx = m_primaryTabWidget->indexOf(view);
-        if (tabIdx >= 0) {
-            m_primaryTabWidget->setTabText(tabIdx, modified ? (QStringLiteral("● ") + baseName) : baseName);
-        }
+        if (tabIdx >= 0) m_primaryTabWidget->setTabText(tabIdx, modified ? (QStringLiteral("● ") + baseName) : baseName);
     });
-
     m_openFiles[absolutePath] = view;
     m_lastActiveSecondary = false;
     m_primaryTabWidget->setCurrentIndex(index);
-    if (m_primaryTabWidget->tabBar() && m_primaryTabWidget->tabBar()->isHidden()) {
-        m_primaryTabWidget->tabBar()->show();
+    if (m_primaryTabWidget->tabBar() && m_primaryTabWidget->tabBar()->isHidden()) m_primaryTabWidget->tabBar()->show();
+    return view;
+}
+
+SourceCodeView* EditorTabManager::openRawTextPreview(const QString& filePath, qint64 maxBytes) {
+    const QFileInfo fi(filePath);
+    const QString absolutePath = !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath();
+    QFile file(absolutePath);
+    if (!file.open(QIODevice::ReadOnly)) return nullptr;
+    const qint64 totalSize = file.size();
+    QByteArray raw = file.read(qMax<qint64>(1024, maxBytes));
+    file.close();
+    const bool truncated = totalSize > raw.size();
+    if (truncated) { if (const qsizetype nl = raw.lastIndexOf('\n'); nl > 0) raw.truncate(nl + 1); }
+    QString text = QString::fromUtf8(raw);
+    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    if (truncated) {
+        text.append(QStringLiteral("\n--- [Truncated at %1 KB of %2 KB for responsive viewing] ---\n").arg(raw.size() / 1024).arg(totalSize / 1024));
     }
+    auto* view = new SourceCodeView(m_primaryTabWidget);
+    view->setProperty("absolutePath", absolutePath);
+    view->setLargeFileMode(true);
+    view->setCurrentFile(absolutePath);
+    view->setSourceCode(text);
+    view->setReadOnly(truncated);
+    wireEditorView(view);
+    const int idx = m_primaryTabWidget->addTab(view, truncated ? (fi.fileName() + QStringLiteral(" (Raw)")) : fi.fileName());
+    m_primaryTabWidget->setTabToolTip(idx, absolutePath);
+    m_openFiles[absolutePath] = view;
+    m_lastActiveSecondary = false;
+    m_primaryTabWidget->setCurrentIndex(idx);
+    if (m_primaryTabWidget->tabBar() && m_primaryTabWidget->tabBar()->isHidden()) m_primaryTabWidget->tabBar()->show();
     return view;
 }
 
@@ -210,8 +253,11 @@ void EditorTabManager::closeTabUnchecked(int index) {
     if (!m_primaryTabWidget) return;
     QWidget* w = m_primaryTabWidget->widget(index);
     if (!w) return;
-    if (auto* view = qobject_cast<SourceCodeView*>(w)) {
-        m_openFiles.remove(view->property("absolutePath").toString());
+    const QString path = w->property("absolutePath").toString();
+    if (qobject_cast<SourceCodeView*>(w)) {
+        m_openFiles.remove(path);
+    } else if (m_openPreviewTabs.value(path) == w) {
+        m_openPreviewTabs.remove(path);
     }
     m_primaryTabWidget->removeTab(index);
     w->deleteLater();

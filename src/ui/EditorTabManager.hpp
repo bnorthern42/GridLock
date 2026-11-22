@@ -53,6 +53,17 @@ public:
      */
     SourceCodeView* openFile(const QString& filePath);
 
+    /// Byte threshold (256 KB) above which `.csv`/`.tsv` files open in the virtualized CsvTablePreviewWidget.
+    static constexpr qint64 kLargeCsvPreviewThresholdBytes = 256 * 1024;
+
+    /**
+     * @brief Opens up to @p maxBytes of @p filePath in a fast raw-text SourceCodeView (no highlighting/wrap).
+     * @param filePath Path to the file on disk.
+     * @param maxBytes Maximum byte prefix to read (default 2 MB).
+     * @return Pointer to the opened SourceCodeView, or nullptr if read failed.
+     */
+    SourceCodeView* openRawTextPreview(const QString& filePath, qint64 maxBytes = 2 * 1024 * 1024);
+
     /**
      * @brief Returns the focused SourceCodeView across both split panes (falling back to primary active tab).
      * @return Pointer to current SourceCodeView, or nullptr if no tabs are open.
@@ -195,6 +206,7 @@ private:
     QMessageBox::StandardButton promptUnsavedDecision(const QString& filePath) const;
 
     QMap<QString, SourceCodeView*> m_openFiles;
+    QMap<QString, QWidget*> m_openPreviewTabs;
     UnsavedPromptHandler m_unsavedPromptHandler;
     QSplitter* m_splitter = nullptr;
     QTabWidget* m_primaryTabWidget = nullptr;

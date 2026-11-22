@@ -73,11 +73,20 @@ public:
      */
     void setCurrentFile(const QString& filePath);
 
-    /**
-     * @brief Returns the path of the currently open source file.
-     * @return File path string.
-     */
+    /** @brief Returns the path of the currently open source file. */
     QString currentFile() const { return m_currentFilePath; }
+
+    /// Byte threshold (512 KB) above which syntax highlighting, soft-wrap, and clangd are bypassed.
+    static constexpr qint64 kLargeFileThresholdBytes = 512 * 1024;
+
+    /** @brief Returns true for plain tabular/data extensions (.csv, .tsv, .dat, .log) that bypass C++ highlighting and clangd. */
+    static bool isPlainDataFile(const QString& filePath);
+
+    /** @brief Enables or disables fast large-file mode (detaches highlighter, enforces NoWrap, skips clangd/git-diff). */
+    void setLargeFileMode(bool enabled);
+
+    /** @brief Returns true when fast large-file/plain-data mode is active. */
+    bool isLargeFileMode() const { return m_largeFileMode; }
 
     /**
      * @brief Highlights a specific 1-based line as the active execution pointer.
@@ -672,6 +681,7 @@ private:
 
     LineNumberArea* m_lineNumberArea = nullptr;
     EditorSyntaxHighlighter* m_highlighter = nullptr;
+    bool m_largeFileMode = false;
     LspCompletionPopup* m_completionPopup = nullptr;
     InlineFindBar* m_findBar = nullptr;
     QMap<int, QString> m_breakpoints;
