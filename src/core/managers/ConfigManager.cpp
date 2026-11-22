@@ -1,249 +1,44 @@
 /**
  * @file ConfigManager.cpp
- * @brief Implementation of TOML and QSettings configuration persistence for GridLock.
+ * @brief Core ConfigManager singleton lifecycle, QSettings-backed PODs, and live editor/shortcut preferences.
  *
- * Coordinates three configuration tiers:
- * 1. Global `config.toml` (under `QStandardPaths::AppConfigLocation` or
- *    `GRIDLOCK_TEST_CONFIG_DIR`) for toolchain paths, UI monitor hints, and
- *    syntax colors.
- * 2. QSettings (`gridlock`/`debugger`) for interactive dialog settings
- *    (MPI rank counts, SSH keys, SLURM templates, docset directories).
- * 3. Per-workspace `.gridlock/settings.toml` and `.gridlock/workspace.toml`
- *    for target binaries, source breakpoints, and watch expressions.
+ * Implements singleton initialization, active workspace switching, QSettings-backed
+ * DebuggerSettings, HpcSettings, SshSettings, SlurmSettings, docset/dialog path
+ * helpers, live editor highlight/treemap toggles, and custom keybinding overrides.
  */
 
 #include "ConfigManager.hpp"
 
-#include <fstream>
-#include <iostream>
+#include <string>
 
 #include <QCoreApplication>
-#include <QDebug>
 #include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QStandardPaths>
-#include <QTextStream>
+#include <QSettings>
+#include <QStringList>
 
 namespace gridlock::core {
 
-// ─── Construction / TOML loading ────────────────────────────────────────────
-
-/**
- * @brief Initializes the singleton with the current working directory and loads `config.toml`.
- */
+/** @brief Initializes the singleton with the current working directory and loads `config.toml`. */
 ConfigManager::ConfigManager() {
   m_workspacePath = QDir::currentPath();
   m_debuggerEngine.clear();
   loadConfig();
 }
 
-/**
- * @brief Updates the active workspace root directory used for `.gridlock/` TOML files.
- */
+/** @brief Updates the active workspace root directory used for `.gridlock/` TOML files. */
 void ConfigManager::setWorkspace(const QString& path) {
   m_workspacePath = path;
   m_debuggerEngine.clear();
 }
 
-/**
- * @brief Loads `config.toml` from disk, creating a default file on first launch.
- *
- * Respects `GRIDLOCK_TEST_CONFIG_DIR` when running under the automated test suite
- * so test cases never mutate the developer's personal `~/.config/gridlock/config.toml`.
- */
-void ConfigManager::loadConfig() {
-  const QString configDir = configDirectory();
-  QDir dir(configDir);
-  if (!dir.exists()) dir.mkpath(QStringLiteral("."));
-  m_globalConfigPath = dir.filePath(QStringLiteral("config.toml"));
+// ─── Debugger settings (QSettings-backed, seeded from TOML) ──────────────────
 
-  // Non-destructive one-time migration from legacy ~/.config/gridlock/gridlock/config.toml and ~/.config/GridLock/*.conf.
-  if (!QFile::exists(m_globalConfigPath) && !qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
-    const QString legacyNested = dir.filePath(QStringLiteral("gridlock/config.toml"));
-    if (QFile::exists(legacyNested)) QFile::copy(legacyNested, m_globalConfigPath);
-  }
-  if (!QFile::exists(workstationSettingsPath()) && !qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
-    const QString genericBase = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
-    for (const QString& legacyName : {QStringLiteral("GridLock/GridLockWorkstation.conf"), QStringLiteral("GridLock/Workstation.conf")}) {
-      const QString legacyFile = QDir(genericBase).filePath(legacyName);
-      if (!QFile::exists(legacyFile)) continue;
-      QSettings oldS(legacyFile, QSettings::IniFormat);
-      QSettings newS(workstationSettingsPath(), QSettings::IniFormat);
-      for (const QString& k : oldS.allKeys()) newS.setValue(k, oldS.value(k));
-      newS.sync();
-      break;
-    }
-  }
-
-  // Seed a default `config.toml` if none exists on disk yet.
-  if (!QFile::exists(m_globalConfigPath)) {
-    QFile file(m_globalConfigPath);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-      QTextStream out(&file);
-      out << "[global]\nclangd_path = \"clangd\"\ndap_adapter_path = \"lldb-dap\"\ngdb_path = \"gdb\"\nmpi_launch_args = \"--oversubscribe\"\n\n"
-          << "[theme.source]\nbackground = \"#1e1e1e\"\ntext = \"#f0f0f0\"\nactive_line = \"#505000\"\n\n"
-          << "[theme.assembly]\nopcode = \"#00ff7f\"\nregister = \"#ff7f50\"\naddress = \"#555555\"\n\n"
-          << "[debugger]\ndefault_ranks = 2\ngdb_path = \"gdb\"\n\n"
-          << "[ui]\npreferred_monitor = \"\"\nopen_unfocused = false\n";
-      file.close();
-    }
-  }
-
-  try {
-    m_config = toml::parse_file(m_globalConfigPath.toStdString());
-  } catch (const toml::parse_error& err) {
-    std::cerr << "Parsing failed:\n" << err << "\n";
-    m_config = toml::table();
-  }
-}
-
-// ─── Theme accessors (TOML) ──────────────────────────────────────────────────
-
-/** @brief Returns `[theme.source] background` from `config.toml`. */
-QString ConfigManager::getSourceBackground() const { return QString::fromStdString(m_config["theme"]["source"]["background"].value_or("#1e1e1e")); }
-
-/** @brief Returns `[theme.source] text` from `config.toml`. */
-QString ConfigManager::getSourceText() const { return QString::fromStdString(m_config["theme"]["source"]["text"].value_or("#f0f0f0")); }
-
-/** @brief Returns `[theme.source] active_line` from `config.toml`. */
-QString ConfigManager::getSourceActiveLine() const { return QString::fromStdString(m_config["theme"]["source"]["active_line"].value_or("#505000")); }
-
-// ─── Global settings (TOML) ──────────────────────────────────────────────────
-
-/** @brief Returns `[global] clangd_path` from `config.toml`. */
-QString ConfigManager::getGlobalClangdPath() const { return QString::fromStdString(m_config["global"]["clangd_path"].value_or("clangd")); }
-
-/** @brief Sets `[global] clangd_path` in `config.toml` and flushes to disk. */
-void ConfigManager::setGlobalClangdPath(const QString& path) {
-  if (!m_config.contains("global")) m_config.insert("global", toml::table{});
-  m_config["global"].as_table()->insert_or_assign("clangd_path", path.toStdString());
-  saveGlobalConfig();
-}
-
-/** @brief Returns `[theme.assembly] opcode` from `config.toml`. */
-QString ConfigManager::getAssemblyOpcode() const { return QString::fromStdString(m_config["theme"]["assembly"]["opcode"].value_or("#00ff7f")); }
-
-/** @brief Returns `[theme.assembly] register` from `config.toml`. */
-QString ConfigManager::getAssemblyRegister() const { return QString::fromStdString(m_config["theme"]["assembly"]["register"].value_or("#ff7f50")); }
-
-/** @brief Returns `[theme.assembly] address` from `config.toml`. */
-QString ConfigManager::getAssemblyAddress() const { return QString::fromStdString(m_config["theme"]["assembly"]["address"].value_or("#555555")); }
-
-/** @brief Returns `[global] dap_adapter_path` from `config.toml`. */
-QString ConfigManager::getGlobalDapAdapterPath() const { return QString::fromStdString(m_config["global"]["dap_adapter_path"].value_or("lldb-dap")); }
-
-/**
- * @brief Sets `[global] dap_adapter_path` in `config.toml` and flushes to disk.
- */
-void ConfigManager::setGlobalDapAdapterPath(const QString& path) {
-  if (!m_config.contains("global")) {
-    m_config.insert("global", toml::table{});
-  }
-  m_config["global"].as_table()->insert_or_assign("dap_adapter_path",
-                                                  path.toStdString());
-  saveGlobalConfig();
-}
-
-/**
- * @brief Returns `[global] gdb_path` from `config.toml`.
- */
-QString ConfigManager::getGlobalGdbPath() const {
-  return QString::fromStdString(m_config["global"]["gdb_path"].value_or("gdb"));
-}
-
-/**
- * @brief Sets `[global] gdb_path` in `config.toml` and flushes to disk.
- */
-void ConfigManager::setGlobalGdbPath(const QString& path) {
-  if (!m_config.contains("global")) {
-    m_config.insert("global", toml::table{});
-  }
-  m_config["global"].as_table()->insert_or_assign("gdb_path",
-                                                  path.toStdString());
-  saveGlobalConfig();
-}
-
-/**
- * @brief Returns `[global] mpi_launch_args` from `config.toml`.
- */
-QString ConfigManager::getGlobalMpiArgs() const {
-  return QString::fromStdString(
-      m_config["global"]["mpi_launch_args"].value_or("--oversubscribe"));
-}
-
-/**
- * @brief Sets `[global] mpi_launch_args` in `config.toml` and flushes to disk.
- */
-void ConfigManager::setGlobalMpiArgs(const QString& args) {
-  if (!m_config.contains("global")) {
-    m_config.insert("global", toml::table{});
-  }
-  m_config["global"].as_table()->insert_or_assign("mpi_launch_args",
-                                                  args.toStdString());
-  saveGlobalConfig();
-}
-
-/**
- * @brief Returns `[ui] preferred_monitor` from `config.toml`.
- */
-QString ConfigManager::preferredMonitor() const {
-  return QString::fromStdString(
-      m_config["ui"]["preferred_monitor"].value_or(""));
-}
-
-/**
- * @brief Sets `[ui] preferred_monitor` in `config.toml` and flushes to disk.
- */
-void ConfigManager::setPreferredMonitor(const QString& monitorHint) {
-  if (!m_config.contains("ui")) {
-    m_config.insert("ui", toml::table{});
-  }
-  m_config["ui"].as_table()->insert_or_assign("preferred_monitor",
-                                              monitorHint.toStdString());
-  saveGlobalConfig();
-}
-
-/**
- * @brief Returns `[ui] open_unfocused` from `config.toml`.
- */
-bool ConfigManager::openUnfocused() const {
-  return m_config["ui"]["open_unfocused"].value_or(false);
-}
-
-/**
- * @brief Sets `[ui] open_unfocused` in `config.toml` and flushes to disk.
- */
-void ConfigManager::setOpenUnfocused(bool unfocused) {
-  if (!m_config.contains("ui")) {
-    m_config.insert("ui", toml::table{});
-  }
-  m_config["ui"].as_table()->insert_or_assign("open_unfocused", unfocused);
-  saveGlobalConfig();
-}
-
-/**
- * @brief Serializes the in-memory `m_config` TOML table to `m_globalConfigPath`.
- */
-void ConfigManager::saveGlobalConfig() {
-  std::ofstream out(m_globalConfigPath.toStdString());
-  if (out.is_open()) {
-    out << m_config;
-  }
-}
-
-// ─── Debugger settings — QSettings-backed single source of truth ─────────────
-
-/**
- * @brief Retrieves local MPI and GDB execution settings from QSettings.
- */
+/** @brief Retrieves local MPI and GDB execution settings from QSettings. */
 DebuggerSettings ConfigManager::getDebuggerSettings() const {
   QSettings s(kOrg, kApp);
 
-  // Seed defaults from TOML so the first-run experience honours `config.toml`.
   const int tomlRanks = m_config["debugger"]["default_ranks"].value_or(2);
-  const QString tomlGdb =
-      QString::fromStdString(m_config["debugger"]["gdb_path"].value_or("gdb"));
+  const QString tomlGdb = QString::fromStdString(m_config["debugger"]["gdb_path"].value_or("gdb"));
 
   DebuggerSettings ds;
   ds.gdbPath = s.value("debugger/gdb_path", tomlGdb).toString();
@@ -252,23 +47,18 @@ DebuggerSettings ConfigManager::getDebuggerSettings() const {
   ds.defaultRanks = s.value("debugger/default_ranks", tomlRanks).toInt();
   ds.trapFpe = s.value("debugger/trap_fpe", false).toBool();
 
-  // Safety clamp: reject non-positive values stored by an old/buggy write.
   if (ds.defaultRanks < 1) {
     ds.defaultRanks = 1;
   }
-
   return ds;
 }
 
-/**
- * @brief Persists local MPI and GDB execution settings to QSettings.
- */
+/** @brief Persists local MPI and GDB execution settings to QSettings. */
 void ConfigManager::saveDebuggerSettings(const DebuggerSettings& ds) {
   QSettings s(kOrg, kApp);
   s.setValue("debugger/gdb_path", ds.gdbPath);
   s.setValue("debugger/mpi_executable", ds.mpiExecutable);
   s.setValue("debugger/mpi_args", ds.mpiArgs);
-  // Clamp before persisting so we never write an invalid rank count.
   s.setValue("debugger/default_ranks", qMax(1, ds.defaultRanks));
   s.setValue("debugger/trap_fpe", ds.trapFpe);
   s.sync();
@@ -276,9 +66,7 @@ void ConfigManager::saveDebuggerSettings(const DebuggerSettings& ds) {
 
 // ─── HPC settings ────────────────────────────────────────────────────────────
 
-/**
- * @brief Retrieves HPC cluster hostfile, environment, and affinity settings.
- */
+/** @brief Retrieves HPC cluster hostfile, environment, and affinity settings. */
 HpcSettings ConfigManager::getHpcSettings() const {
   QSettings s(kOrg, kApp);
   HpcSettings hs;
@@ -288,9 +76,7 @@ HpcSettings ConfigManager::getHpcSettings() const {
   return hs;
 }
 
-/**
- * @brief Persists HPC cluster hostfile, environment, and affinity settings.
- */
+/** @brief Persists HPC cluster hostfile, environment, and affinity settings. */
 void ConfigManager::saveHpcSettings(const HpcSettings& hs) {
   QSettings s(kOrg, kApp);
   s.setValue("hpc/hosts_file", hs.hostsFile);
@@ -299,11 +85,9 @@ void ConfigManager::saveHpcSettings(const HpcSettings& hs) {
   s.sync();
 }
 
-// ─── SSH settings ───────────────────────────────────────────────────────────
+// ─── SSH settings ────────────────────────────────────────────────────────────
 
-/**
- * @brief Retrieves remote cluster SSH login node settings from QSettings.
- */
+/** @brief Retrieves remote cluster SSH login node settings from QSettings. */
 SshSettings ConfigManager::getSshSettings() const {
   QSettings s(kOrg, kApp);
   SshSettings ss;
@@ -313,9 +97,7 @@ SshSettings ConfigManager::getSshSettings() const {
   return ss;
 }
 
-/**
- * @brief Persists remote cluster SSH login node settings to QSettings.
- */
+/** @brief Persists remote cluster SSH login node settings to QSettings. */
 void ConfigManager::saveSshSettings(const SshSettings& ss) {
   QSettings s(kOrg, kApp);
   s.setValue("ssh/host", ss.host);
@@ -324,11 +106,9 @@ void ConfigManager::saveSshSettings(const SshSettings& ss) {
   s.sync();
 }
 
-// ─── SLURM / Spack settings ────────────────────────────────────────────────
+// ─── SLURM / Spack settings ─────────────────────────────────────────────────
 
-/**
- * @brief Retrieves SLURM batch allocation and remote Spack root settings.
- */
+/** @brief Retrieves SLURM batch allocation and remote Spack root settings. */
 SlurmSettings ConfigManager::getSlurmSettings() const {
   QSettings s(kOrg, kApp);
   SlurmSettings sl;
@@ -342,9 +122,7 @@ SlurmSettings ConfigManager::getSlurmSettings() const {
   return sl;
 }
 
-/**
- * @brief Persists SLURM batch allocation and remote Spack root settings.
- */
+/** @brief Persists SLURM batch allocation and remote Spack root settings. */
 void ConfigManager::saveSlurmSettings(const SlurmSettings& sl) {
   QSettings s(kOrg, kApp);
   s.setValue("slurm/script_template", sl.scriptTemplate);
@@ -357,66 +135,19 @@ void ConfigManager::saveSlurmSettings(const SlurmSettings& sl) {
   s.sync();
 }
 
-// ─── Terminal settings ──────────────────────────────────────────────────────
-
-/**
- * @brief Retrieves embedded terminal shell and font settings from `config.toml`.
- */
-TerminalSettings ConfigManager::getTerminalSettings() const {
-  TerminalSettings ts;
-
-  // Fall back to `$SHELL` or `/bin/bash` when no explicit shell is configured.
-  QString defaultShell = qEnvironmentVariable("SHELL");
-  if (defaultShell.isEmpty()) {
-    defaultShell = "/bin/bash";
-  }
-
-  ts.shellPath = QString::fromStdString(
-      m_config["terminal"]["shell_path"].value_or(defaultShell.toStdString()));
-  ts.fontFamily = QString::fromStdString(
-      m_config["terminal"]["font_family"].value_or("FiraCode Nerd Font"));
-  ts.fontSize = m_config["terminal"]["font_size"].value_or(12);
-
-  return ts;
-}
-
-/**
- * @brief Persists embedded terminal shell and font settings to `config.toml`.
- */
-void ConfigManager::saveTerminalSettings(const TerminalSettings& ts) {
-  if (!m_config.contains("terminal")) {
-    m_config.insert("terminal", toml::table{});
-  }
-
-  auto* table = m_config["terminal"].as_table();
-  table->insert_or_assign("shell_path", ts.shellPath.toStdString());
-  table->insert_or_assign("font_family", ts.fontFamily.toStdString());
-  table->insert_or_assign("font_size", qMax(1, ts.fontSize));
-
-  saveGlobalConfig();
-}
-
-// ─── Convenience shims ───────────────────────────────────────────────────────
+// ─── Convenience shims & dialog/docset directories ──────────────────────────
 
 /** @brief Returns the configured default MPI rank count. */
-int ConfigManager::getDefaultRanks() const {
-  return getDebuggerSettings().defaultRanks;
-}
+int ConfigManager::getDefaultRanks() const { return getDebuggerSettings().defaultRanks; }
 
 /** @brief Returns the active project's custom GDB path. */
-QString ConfigManager::getGdbPath() const {
-  return QString::fromStdString(loadProjectSettings().customGdbPath);
-}
+QString ConfigManager::getGdbPath() const { return QString::fromStdString(loadProjectSettings().customGdbPath); }
 
 /** @brief Returns the configured MPI launcher executable name. */
-QString ConfigManager::getMpiExecutable() const {
-  return getDebuggerSettings().mpiExecutable;
-}
+QString ConfigManager::getMpiExecutable() const { return getDebuggerSettings().mpiExecutable; }
 
 /** @brief Returns the configured MPI launcher CLI arguments. */
-QString ConfigManager::getMpiArgs() const {
-  return getDebuggerSettings().mpiArgs;
-}
+QString ConfigManager::getMpiArgs() const { return getDebuggerSettings().mpiArgs; }
 
 /** @brief Returns the last directory visited by a file-open dialog. */
 QString ConfigManager::getLastOpenDir() const {
@@ -444,340 +175,8 @@ void ConfigManager::setDocsetDirectory(const QString& path) {
   s.sync();
 }
 
-// ─── Breakpoints (TOML) ──────────────────────────────────────────────────────
+// ─── Live editor, visualization, and shortcut preferences ───────────────────
 
-/**
- * @brief Loads source breakpoints for @p targetExecutable from `.gridlock/workspace.toml`.
- *
- * Normalizes relative file keys against `m_workspacePath` so GDB always receives
- * canonical absolute file paths.
- */
-QMap<QString, QSet<int>> ConfigManager::getBreakpoints(
-    QString targetExecutable) const {
-  QMap<QString, QSet<int>> breakpoints;
-  if (m_workspacePath.isEmpty()) {
-    return breakpoints;
-  }
-
-  if (targetExecutable.isEmpty()) {
-    targetExecutable =
-        QString::fromStdString(loadProjectSettings().targetBinary);
-  }
-
-  const QString workspaceFile =
-      QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
-  toml::table tbl;
-  try {
-    tbl = toml::parse_file(workspaceFile.toStdString());
-  } catch (...) {
-    return breakpoints;
-  }
-
-  // Extract the `[breakpoints.<targetExecutable>]` sub-table and populate line sets.
-  if (auto* bps = tbl["breakpoints"].as_table()) {
-    if (auto* targetBps = bps->get(targetExecutable.toStdString())) {
-      if (auto* targetTbl = targetBps->as_table()) {
-        for (auto& [file, lines] : *targetTbl) {
-          if (auto* linesArr = lines.as_array()) {
-            QString path = QString::fromStdString(std::string(file.str()));
-            if (QFileInfo(path).isRelative()) {
-              path = QDir(m_workspacePath).filePath(path);
-            }
-            QSet<int> lineSet;
-            for (auto& elem : *linesArr) {
-              if (auto* val = elem.as_integer()) {
-                lineSet.insert(val->get());
-              }
-            }
-            breakpoints[QFileInfo(path).absoluteFilePath()] = lineSet;
-          }
-        }
-      }
-    }
-  }
-  return breakpoints;
-}
-
-/**
- * @brief Saves source breakpoints for @p targetExecutable to `.gridlock/workspace.toml`.
- */
-void ConfigManager::saveBreakpoints(
-    const QMap<QString, QSet<int>>& breakpoints, QString targetExecutable) {
-  if (m_workspacePath.isEmpty()) {
-    return;
-  }
-
-  if (targetExecutable.isEmpty()) {
-    targetExecutable =
-        QString::fromStdString(loadProjectSettings().targetBinary);
-  }
-
-  // Ensure `.gridlock/` exists inside the active workspace directory.
-  QDir dir(m_workspacePath);
-  if (!dir.exists(".gridlock")) {
-    dir.mkdir(".gridlock");
-  }
-  const QString workspaceFile = dir.filePath(".gridlock/workspace.toml");
-
-  toml::table tbl;
-  try {
-    tbl = toml::parse_file(workspaceFile.toStdString());
-  } catch (...) {
-  }
-
-  toml::table allBpsTable;
-  if (auto* existingBps = tbl["breakpoints"].as_table()) {
-    allBpsTable = *existingBps;
-  }
-
-  // Store canonical absolute source paths to prevent GDB `No source file named...` errors.
-  toml::table targetBpsTable;
-  for (auto it = breakpoints.constBegin(); it != breakpoints.constEnd(); ++it) {
-    toml::array linesArr;
-    for (int line : *it) {
-      linesArr.push_back(line);
-    }
-    const QString absPath = QFileInfo(it.key()).absoluteFilePath();
-    targetBpsTable.insert(absPath.toStdString(), linesArr);
-  }
-
-  allBpsTable.insert_or_assign(targetExecutable.toStdString(), targetBpsTable);
-  tbl.insert_or_assign("breakpoints", allBpsTable);
-
-  std::ofstream out(workspaceFile.toStdString());
-  if (out.is_open()) {
-    out << tbl;
-  }
-}
-
-/**
- * @brief Loads target binary settings from `.gridlock/settings.toml` and watches from `workspace.toml`.
- */
-ProjectSettings ConfigManager::loadProjectSettings() const {
-  const DebuggerSettings ds = getDebuggerSettings();
-  ProjectSettings ps;
-  ps.mpiRanks = ds.defaultRanks;
-  ps.mpiArgs = ds.mpiArgs;
-  if (m_workspacePath.isEmpty()) {
-    // Fall back to user-scoped QSettings when no active workspace directory is open.
-    QSettings s(kOrg, kApp);
-    ps.targetBinary = s.value("project/targetBinary", "").toString().toStdString();
-    ps.targetArguments = s.value("project/targetArguments", "").toString();
-    ps.programArguments = ps.targetArguments.toStdString();
-    ps.workingDirectory = s.value("project/workingDirectory", "").toString().toStdString();
-    ps.mpiRanks = qMax(1, s.value("project/mpiRanks", ds.defaultRanks).toInt());
-    ps.mpiArgs = s.value("project/mpiArgs", ds.mpiArgs).toString();
-    return ps;
-  }
-  // Read target executable, arguments, environment, and MPI overrides from `settings.toml`.
-  const QString settingsFile = QDir(m_workspacePath).filePath(".gridlock/settings.toml");
-  toml::table tbl;
-  try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
-  if (auto* proj = tbl["project"].as_table()) {
-    ps.targetBinary = (*proj)["targetBinary"].value_or("");
-    ps.programArguments = (*proj)["programArguments"].value_or("");
-    const std::string tArgs = (*proj)["targetArguments"].value_or(ps.programArguments);
-    ps.targetArguments = QString::fromStdString(tArgs);
-    if (ps.programArguments.empty()) ps.programArguments = tArgs;
-    ps.environmentVariables = (*proj)["environmentVariables"].value_or("");
-    ps.workingDirectory = (*proj)["workingDirectory"].value_or("");
-    ps.customGdbPath = (*proj)["customGdbPath"].value_or("gdb");
-    ps.mpiRanks = qMax(1, (*proj)["mpiRanks"].value_or(ds.defaultRanks));
-    if (proj->contains("mpiArgs")) ps.mpiArgs = QString::fromStdString((*proj)["mpiArgs"].value_or(""));
-  }
-  // Read persisted watch expressions from `.gridlock/workspace.toml`.
-  const QString workspaceFile = QDir(m_workspacePath).filePath(".gridlock/workspace.toml");
-  toml::table wTbl;
-  try { wTbl = toml::parse_file(workspaceFile.toStdString()); } catch (...) {}
-  if (auto* proj = wTbl["workspace"].as_table()) {
-    if (auto* watches = (*proj)["watchExpressions"].as_array()) {
-      for (auto& elem : *watches) {
-        if (auto* str = elem.as_string()) ps.watchExpressions.push_back(str->get());
-      }
-    }
-  }
-  return ps;
-}
-
-/**
- * @brief Persists project target settings to `.gridlock/settings.toml` and watches to `workspace.toml`.
- */
-void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
-  const QString effArgs = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
-  QSettings s(kOrg, kApp);
-  s.setValue("project/targetBinary", QString::fromStdString(ps.targetBinary));
-  s.setValue("project/targetArguments", effArgs);
-  s.setValue("project/workingDirectory", QString::fromStdString(ps.workingDirectory));
-  s.setValue("project/mpiRanks", ps.mpiRanks > 0 ? ps.mpiRanks : getDefaultRanks());
-  s.setValue("project/mpiArgs", ps.mpiArgs);
-  if (m_workspacePath.isEmpty()) { s.sync(); return; }
-  QDir dir(m_workspacePath);
-  if (!dir.exists(".gridlock")) dir.mkdir(".gridlock");
-  const QString settingsFile = dir.filePath(".gridlock/settings.toml");
-  toml::table tbl;
-  try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
-  // Populate the `[project]` table with target binary, CLI args, cwd, and MPI parameters.
-  toml::table projTbl;
-  projTbl.insert_or_assign("targetBinary", ps.targetBinary.empty() ? "" : ps.targetBinary);
-  projTbl.insert_or_assign("programArguments", effArgs.toStdString());
-  projTbl.insert_or_assign("targetArguments", effArgs.toStdString());
-  projTbl.insert_or_assign("environmentVariables", ps.environmentVariables.empty() ? "" : ps.environmentVariables);
-  projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty() ? "" : ps.workingDirectory);
-  projTbl.insert_or_assign("customGdbPath", ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);
-  projTbl.insert_or_assign("mpiRanks", ps.mpiRanks > 0 ? ps.mpiRanks : getDefaultRanks());
-  projTbl.insert_or_assign("mpiArgs", ps.mpiArgs.toStdString());
-  tbl.insert_or_assign("project", projTbl);
-  if (std::ofstream out(settingsFile.toStdString()); out.is_open()) out << tbl;
-  // Persist watch expressions into the `[workspace]` table of `workspace.toml`.
-  const QString workspaceFile = dir.filePath(".gridlock/workspace.toml");
-  toml::table wTbl;
-  try {
-    wTbl = toml::parse_file(workspaceFile.toStdString());
-  } catch (...) {
-  }
-
-  toml::table wProjTbl;
-  if (auto* existing = wTbl["workspace"].as_table()) {
-    wProjTbl = *existing;
-  }
-
-  toml::array watches;
-  for (const auto& w : ps.watchExpressions) {
-    if (!w.empty()) {
-      watches.push_back(w);
-    }
-  }
-  wProjTbl.insert_or_assign("watchExpressions", watches);
-  wTbl.insert_or_assign("workspace", wProjTbl);
-
-  std::ofstream wOut(workspaceFile.toStdString());
-  if (wOut.is_open()) {
-    wOut << wTbl;
-  }
-}
-
-/**
- * @brief Returns the persisted theme identifier from .gridlock/workspace.toml or QSettings.
- * @return Curated theme identifier string (e.g. "tokyo_night", "gridlock_slate").
- */
-QString ConfigManager::getThemeName() const {
-  if (!m_workspacePath.isEmpty()) {
-    try {
-      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
-      if (auto* app = tbl["appearance"].as_table()) if (auto val = app->get("theme_id"); val && val->is_string()) return QString::fromStdString(val->as_string()->get());
-      if (auto* thm = tbl["theme"].as_table()) if (auto val = thm->get("name"); val && val->is_string()) return QString::fromStdString(val->as_string()->get());
-    } catch (...) {}
-  }
-  QSettings ws(workstationSettingsPath(), QSettings::IniFormat);
-  QString t = ws.value(QStringLiteral("appearance/theme_id"), ws.value(QStringLiteral("appearance/theme"))).toString().trimmed();
-  if (t.isEmpty()) {
-    QSettings ds(debuggerSettingsPath(), QSettings::IniFormat);
-    t = ds.value(QStringLiteral("appearance/theme_id"), ds.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString().trimmed();
-  }
-  return t.isEmpty() ? QStringLiteral("gridlock_slate") : t;
-}
-
-/** @brief Persists the theme identifier to .gridlock/workspace.toml and unified ~/.config/gridlock/ INI stores. */
-void ConfigManager::setThemeName(const QString& name) {
-  const QString id = name.trimmed().isEmpty() ? QStringLiteral("gridlock_slate") : name.trimmed();
-  if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock"));
-    const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
-    toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
-    toml::table appTbl; if (auto* ex = tbl["appearance"].as_table()) appTbl = *ex;
-    appTbl.insert_or_assign("theme_id", id.toStdString()); tbl.insert_or_assign("appearance", appTbl);
-    std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
-  }
-  for (const QString& iniPath : {workstationSettingsPath(), debuggerSettingsPath()}) {
-    QSettings s(iniPath, QSettings::IniFormat);
-    s.setValue(QStringLiteral("appearance/theme_id"), id); s.setValue(QStringLiteral("appearance/theme"), id); s.sync();
-  }
-}
-
-/** @brief Returns the configured local debugger backend engine ("gdb", "lldb-dap", "cuda-gdb", "rocgdb"). */
-QString ConfigManager::debuggerEngine() const {
-  if (!m_debuggerEngine.trimmed().isEmpty()) return m_debuggerEngine.trimmed();
-  if (!m_workspacePath.isEmpty()) {
-    try {
-      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
-      if (auto* dbg = tbl["debugger"].as_table()) if (auto val = dbg->get("engine"); val && val->is_string()) { const QString eng = QString::fromStdString(val->as_string()->get()).trimmed(); if (!eng.isEmpty()) return eng; }
-    } catch (...) {}
-  }
-  const QString persisted = QSettings(kOrg, kApp).value(QStringLiteral("debugger/engine"), QStringLiteral("gdb")).toString().trimmed();
-  return persisted.isEmpty() ? QStringLiteral("gdb") : persisted;
-}
-
-/** @brief Sets and persists the local debugger backend engine in workspace.toml and QSettings. */
-void ConfigManager::setDebuggerEngine(const QString& engine) {
-  const QString clean = engine.trimmed().isEmpty() ? QStringLiteral("gdb") : engine.trimmed(); m_debuggerEngine = clean;
-  if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
-    toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
-    toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
-    dbgTbl.insert_or_assign("engine", clean.toStdString()); tbl.insert_or_assign("debugger", dbgTbl);
-    std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
-  }
-  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/engine"), clean); s.sync();
-  // Broadcast dynamic property update on qApp so active MainWindow instances switch coordinators live.
-  if (auto* app = QCoreApplication::instance()) app->setProperty("gridlock_debugger_engine", clean);
-}
-
-/** @brief Returns whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor (default: false). */
-bool ConfigManager::showDecompilerWithSource() const {
-  if (!m_workspacePath.isEmpty()) {
-    try { auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString()); if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("show_decompiler_with_source"); v && v->is_boolean()) return v->as_boolean()->get(); } catch (...) {}
-  }
-  return QSettings(kOrg, kApp).value(QStringLiteral("debugger/show_decompiler_with_source"), false).toBool();
-}
-/** @brief Sets and persists whether the pseudo-C decompiler may stay visible alongside the C++ Source Editor. */
-void ConfigManager::setShowDecompilerWithSource(bool show) {
-  if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
-    toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
-    toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
-    dbgTbl.insert_or_assign("show_decompiler_with_source", show); tbl.insert_or_assign("debugger", dbgTbl);
-    std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
-  }
-  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/show_decompiler_with_source"), show); s.sync();
-}
-/** @brief Returns the default DisassemblyView presentation mode ("cfg", "linear", or "split"; default: "cfg"). */
-QString ConfigManager::defaultDisassemblyMode() const {
-  if (!m_workspacePath.isEmpty()) {
-    try { auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString()); if (auto* dbg = tbl["debugger"].as_table()) if (auto v = dbg->get("default_disassembly_mode"); v && v->is_string()) return QString::fromStdString(v->as_string()->get()); } catch (...) {}
-  }
-  return QSettings(kOrg, kApp).value(QStringLiteral("debugger/default_disassembly_mode"), QStringLiteral("cfg")).toString();
-}
-/** @brief Sets and persists the default DisassemblyView presentation mode ("cfg", "linear", or "split"). */
-void ConfigManager::setDefaultDisassemblyMode(const QString& mode) {
-  const QString clean = mode.trimmed().isEmpty() ? QStringLiteral("cfg") : mode.trimmed().toLower();
-  if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
-    toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
-    toml::table dbgTbl; if (auto* ex = tbl["debugger"].as_table()) dbgTbl = *ex;
-    dbgTbl.insert_or_assign("default_disassembly_mode", clean.toStdString()); tbl.insert_or_assign("debugger", dbgTbl);
-    std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
-  }
-  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("debugger/default_disassembly_mode"), clean); s.sync();
-}
-/** @brief Returns the status bar resource telemetry display format ("gb", "percent", or "both"; default: "gb"). */
-QString ConfigManager::telemetryDisplayFormat() const {
-  if (!m_workspacePath.isEmpty()) {
-    try { auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString()); if (auto* uiTbl = tbl["ui"].as_table()) if (auto v = uiTbl->get("telemetry_display_format"); v && v->is_string()) return QString::fromStdString(v->as_string()->get()); } catch (...) {}
-  }
-  return QSettings(kOrg, kApp).value(QStringLiteral("ui/telemetry_display_format"), QStringLiteral("gb")).toString();
-}
-/** @brief Sets and persists the status bar resource telemetry display format ("gb", "percent", or "both"). */
-void ConfigManager::setTelemetryDisplayFormat(const QString& fmt) {
-  const QString clean = fmt.trimmed().isEmpty() ? QStringLiteral("gb") : fmt.trimmed().toLower();
-  if (!m_workspacePath.isEmpty()) {
-    QDir dir(m_workspacePath); dir.mkpath(QStringLiteral(".gridlock")); const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
-    toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
-    toml::table uiTbl; if (auto* ex = tbl["ui"].as_table()) uiTbl = *ex;
-    uiTbl.insert_or_assign("telemetry_display_format", clean.toStdString()); tbl.insert_or_assign("ui", uiTbl);
-    std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
-  }
-  QSettings s(kOrg, kApp); s.setValue(QStringLiteral("ui/telemetry_display_format"), clean); s.sync();
-}
 /** @brief Returns whether nested Rainbow Brackets depth coloring is enabled (default: true). */
 bool ConfigManager::rainbowBracketsEnabled() const {
   QSettings s(kOrg, kApp);
@@ -785,6 +184,7 @@ bool ConfigManager::rainbowBracketsEnabled() const {
   if (auto* ed = m_config["editing"].as_table()) if (auto v = ed->get("rainbow_brackets"); v && v->is_boolean()) return v->as_boolean()->get();
   return true;
 }
+
 /** @brief Returns whether TOML, YAML, Markdown, and CSV syntax highlighting is enabled (default: true). */
 bool ConfigManager::dataDocHighlightingEnabled() const {
   QSettings s(kOrg, kApp);
@@ -792,124 +192,110 @@ bool ConfigManager::dataDocHighlightingEnabled() const {
   if (auto* ed = m_config["editing"].as_table()) if (auto v = ed->get("data_doc_highlighting"); v && v->is_boolean()) return v->as_boolean()->get();
   return true;
 }
+
 /** @brief Sets and persists Rainbow Brackets enabled state and broadcasts a live editor rehighlight property. */
 void ConfigManager::setRainbowBracketsEnabled(bool enabled) {
   toml::table edTbl; if (auto* ex = m_config["editing"].as_table()) edTbl = *ex;
   edTbl.insert_or_assign("rainbow_brackets", enabled); m_config.insert_or_assign("editing", edTbl); saveGlobalConfig();
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editing/rainbow_brackets"), enabled); s.sync();
-  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_rainbow_brackets", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
+  if (auto* app = QCoreApplication::instance()) {
+    app->setProperty("gridlock_rainbow_brackets", enabled);
+    app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1);
+  }
 }
+
+/** @brief Sets and persists TOML/YAML/Markdown/CSV syntax highlighting and broadcasts a live editor rehighlight property. */
 void ConfigManager::setDataDocHighlightingEnabled(bool enabled) {
   toml::table edTbl; if (auto* ex = m_config["editing"].as_table()) edTbl = *ex;
   edTbl.insert_or_assign("data_doc_highlighting", enabled); m_config.insert_or_assign("editing", edTbl); saveGlobalConfig();
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editing/data_doc_highlighting"), enabled); s.sync();
-  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_data_doc_highlighting", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
+  if (auto* app = QCoreApplication::instance()) {
+    app->setProperty("gridlock_data_doc_highlighting", enabled);
+    app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1);
+  }
 }
+
+/** @brief Returns whether CLion-style inline variable ghost values are shown when paused (default: true). */
 bool ConfigManager::inlineVariableValuesEnabled() const {
   QSettings s(kOrg, kApp);
   if (s.contains(QStringLiteral("editor/inline_variable_values"))) return s.value(QStringLiteral("editor/inline_variable_values"), true).toBool();
   if (auto* ed = m_config["editor"].as_table()) if (auto v = ed->get("inline_variable_values"); v && v->is_boolean()) return v->as_boolean()->get();
   return true;
 }
+
+/** @brief Sets and persists whether inline variable ghost values are shown and broadcasts live update. */
 void ConfigManager::setInlineVariableValuesEnabled(bool enabled) {
   toml::table edTbl; if (auto* ex = m_config["editor"].as_table()) edTbl = *ex;
   edTbl.insert_or_assign("inline_variable_values", enabled); m_config.insert_or_assign("editor", edTbl); saveGlobalConfig();
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("editor/inline_variable_values"), enabled); s.sync();
-  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_inline_var_values", enabled); app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1); }
+  if (auto* app = QCoreApplication::instance()) {
+    app->setProperty("gridlock_inline_var_values", enabled);
+    app->setProperty("gridlock_editor_highlight_rev", app->property("gridlock_editor_highlight_rev").toInt() + 1);
+  }
 }
+
+/** @brief Returns the active Memory Map treemap color scheme (`Distinct`, `Viridis`, `Plasma`, `Ocean`, `HighContrast`). */
 QString ConfigManager::memoryMapColorScheme() const {
   QSettings s(kOrg, kApp);
-  if (s.contains(QStringLiteral("appearance/memory_map_color_scheme"))) return s.value(QStringLiteral("appearance/memory_map_color_scheme"), QStringLiteral("Distinct")).toString();
-  if (auto* ap = m_config["appearance"].as_table()) if (auto v = ap->get("memory_map_color_scheme"); v && v->is_string()) return QString::fromStdString(std::string(v->as_string()->get()));
+  if (s.contains(QStringLiteral("appearance/memory_map_color_scheme"))) {
+    return s.value(QStringLiteral("appearance/memory_map_color_scheme"), QStringLiteral("Distinct")).toString();
+  }
+  if (auto* ap = m_config["appearance"].as_table()) {
+    if (auto v = ap->get("memory_map_color_scheme"); v && v->is_string()) {
+      return QString::fromStdString(std::string(v->as_string()->get()));
+    }
+  }
   return QStringLiteral("Distinct");
 }
+
 /** @brief Persists Memory Map color scheme to TOML/QSettings and notifies live MemoryProfilerWidget instances. */
 void ConfigManager::setMemoryMapColorScheme(const QString& scheme) {
-  static const QStringList kValid = {QStringLiteral("Distinct"), QStringLiteral("Viridis"), QStringLiteral("Plasma"), QStringLiteral("Ocean"), QStringLiteral("HighContrast")};
+  static const QStringList kValid = {
+      QStringLiteral("Distinct"), QStringLiteral("Viridis"), QStringLiteral("Plasma"),
+      QStringLiteral("Ocean"), QStringLiteral("HighContrast")};
   const QString norm = kValid.contains(scheme) ? scheme : QStringLiteral("Distinct");
   toml::table apTbl; if (auto* ex = m_config["appearance"].as_table()) apTbl = *ex;
   apTbl.insert_or_assign("memory_map_color_scheme", norm.toStdString()); m_config.insert_or_assign("appearance", apTbl); saveGlobalConfig();
   QSettings s(kOrg, kApp); s.setValue(QStringLiteral("appearance/memory_map_color_scheme"), norm); s.sync();
-  if (auto* app = QCoreApplication::instance()) { app->setProperty("gridlock_memmap_color_scheme", norm); app->setProperty("gridlock_memmap_scheme_rev", app->property("gridlock_memmap_scheme_rev").toInt() + 1); }
+  if (auto* app = QCoreApplication::instance()) {
+    app->setProperty("gridlock_memmap_color_scheme", norm);
+    app->setProperty("gridlock_memmap_scheme_rev", app->property("gridlock_memmap_scheme_rev").toInt() + 1);
+  }
 }
+
 /** @brief Loads persisted user-customized shortcut overrides keyed by action identifier. */
 QMap<QString, QKeySequence> ConfigManager::customShortcuts() const {
   QMap<QString, QKeySequence> out;
   if (auto* kb = m_config["keybindings"].as_table()) {
-    for (const auto& [k, v] : *kb) if (v.is_string()) out.insert(QString::fromStdString(std::string(k.str())), QKeySequence::fromString(QString::fromStdString(v.as_string()->get()), QKeySequence::PortableText));
-  }
-  QSettings s(kOrg, kApp); s.beginGroup(QStringLiteral("keybindings"));
-  for (const QString& key : s.childKeys()) out.insert(key, QKeySequence::fromString(s.value(key).toString(), QKeySequence::PortableText));
-  s.endGroup(); return out;
-}
-/** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
-void ConfigManager::setCustomShortcuts(const QMap<QString, QKeySequence>& overrides) {
-  toml::table kbTbl;
-  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) kbTbl.insert_or_assign(it.key().toStdString(), it.value().toString(QKeySequence::PortableText).toStdString());
-  m_config.insert_or_assign("keybindings", kbTbl); saveGlobalConfig();
-  QSettings s(kOrg, kApp); s.remove(QStringLiteral("keybindings")); s.beginGroup(QStringLiteral("keybindings"));
-  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) s.setValue(it.key(), it.value().toString(QKeySequence::PortableText));
-  s.endGroup(); s.sync();
-}
-/** @brief Loads extended breakpoint metadata (condition, ignoreCount, logMessage) from QSettings. */
-QList<BreakpointConfig> ConfigManager::getBreakpointConfigs(const QString& targetExecutable) const {
-  QSettings s("gridlock", "debugger"); const int n = s.beginReadArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable)); QList<BreakpointConfig> out;
-  for (int i = 0; i < n; ++i) { s.setArrayIndex(i); out.append({s.value("file").toString(), s.value("line").toInt(), s.value("rank", -1).toInt(), s.value("cond").toString(), s.value("ignore", 0).toInt(), s.value("log").toString()}); }
-  s.endArray(); return out;
-}
-void ConfigManager::saveBreakpointConfigs(const QList<BreakpointConfig>& configs, const QString& targetExecutable) {
-  QSettings s(debuggerSettingsPath(), QSettings::IniFormat); s.beginWriteArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable));
-  for (int i = 0; i < configs.size(); ++i) { s.setArrayIndex(i); s.setValue("file", configs[i].file); s.setValue("line", configs[i].line); s.setValue("rank", configs[i].rankFilter); s.setValue("cond", configs[i].condition); s.setValue("ignore", qMax(0, configs[i].ignoreCount)); s.setValue("log", configs[i].logMessage); }
-  s.endArray();
-}
-
-static QString normalizeRecentPath(const QString& raw) {
-  const QString t = raw.trimmed(); if (t.isEmpty()) return QString();
-  const QFileInfo fi(t);
-  return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : QDir::cleanPath(fi.absoluteFilePath());
-}
-
-/** @brief Returns deduplicated existing recent session/workspace paths (most recent first, capped at 10). */
-QStringList ConfigManager::recentSessions() const {
-  QStringList out;
-  auto push = [&](const QString& raw) {
-    const QString norm = normalizeRecentPath(raw);
-    if (!norm.isEmpty() && QFileInfo::exists(norm) && !out.contains(norm) && out.size() < 10) out.append(norm);
-  };
-  if (auto* sess = m_config["session"].as_table()) {
-    if (auto* arr = sess->get_as<toml::array>("recent_sessions")) {
-      for (const auto& elem : *arr) if (elem.is_string()) push(QString::fromStdString(elem.as_string()->get()));
+    for (const auto& [k, v] : *kb) {
+      if (v.is_string()) {
+        out.insert(QString::fromStdString(std::string(k.str())),
+                   QKeySequence::fromString(QString::fromStdString(v.as_string()->get()), QKeySequence::PortableText));
+      }
     }
   }
-  QSettings ws(workstationSettingsPath(), QSettings::IniFormat);
-  for (const QString& p : ws.value(QStringLiteral("session/recent_sessions")).toStringList()) push(p);
-  QSettings ds(debuggerSettingsPath(), QSettings::IniFormat);
-  for (const QString& p : ds.value(QStringLiteral("recentSessions")).toStringList()) push(p);
+  QSettings s(kOrg, kApp); s.beginGroup(QStringLiteral("keybindings"));
+  for (const QString& key : s.childKeys()) {
+    out.insert(key, QKeySequence::fromString(s.value(key).toString(), QKeySequence::PortableText));
+  }
+  s.endGroup();
   return out;
 }
 
-/** @brief Records @p path at index 0 of `recent_sessions` in `config.toml` and INI stores immediately. */
-void ConfigManager::recordRecentSession(const QString& path) {
-  const QString norm = normalizeRecentPath(path);
-  if (norm.isEmpty()) return;
-  QStringList entries = recentSessions();
-  entries.removeAll(norm); entries.prepend(norm);
-  while (entries.size() > 10) entries.removeLast();
-  toml::table sessTbl; if (auto* ex = m_config["session"].as_table()) sessTbl = *ex;
-  toml::array arr; for (const QString& e : entries) arr.push_back(e.toStdString());
-  sessTbl.insert_or_assign("recent_sessions", arr); m_config.insert_or_assign("session", sessTbl);
+/** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
+void ConfigManager::setCustomShortcuts(const QMap<QString, QKeySequence>& overrides) {
+  toml::table kbTbl;
+  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) {
+    kbTbl.insert_or_assign(it.key().toStdString(), it.value().toString(QKeySequence::PortableText).toStdString());
+  }
+  m_config.insert_or_assign("keybindings", kbTbl);
   saveGlobalConfig();
-  QSettings ws(workstationSettingsPath(), QSettings::IniFormat); ws.setValue(QStringLiteral("session/recent_sessions"), entries); ws.sync();
-  QSettings ds(debuggerSettingsPath(), QSettings::IniFormat); ds.setValue(QStringLiteral("recentSessions"), entries); ds.sync();
-}
-
-/** @brief Clears all persisted recent session entries from `config.toml` and INI stores. */
-void ConfigManager::clearRecentSessions() {
-  toml::table sessTbl; if (auto* ex = m_config["session"].as_table()) sessTbl = *ex;
-  sessTbl.insert_or_assign("recent_sessions", toml::array{}); m_config.insert_or_assign("session", sessTbl);
-  saveGlobalConfig();
-  QSettings ws(workstationSettingsPath(), QSettings::IniFormat); ws.remove(QStringLiteral("session/recent_sessions")); ws.sync();
-  QSettings ds(debuggerSettingsPath(), QSettings::IniFormat); ds.remove(QStringLiteral("recentSessions")); ds.sync();
+  QSettings s(kOrg, kApp); s.remove(QStringLiteral("keybindings")); s.beginGroup(QStringLiteral("keybindings"));
+  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) {
+    s.setValue(it.key(), it.value().toString(QKeySequence::PortableText));
+  }
+  s.endGroup();
+  s.sync();
 }
 
 }  // namespace gridlock::core

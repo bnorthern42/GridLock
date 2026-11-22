@@ -31,7 +31,7 @@ src_files = [
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp', 'src/core/hpc/gdb/MiSanitizer.cpp',
   'src/core/hpc/system/TelemetryObfuscator.cpp', 'src/core/hpc/memory/MemoryExporter.cpp',
-  'src/core/hpc/memory/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp',
+  'src/core/hpc/memory/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/core/managers/SessionManager.cpp', 'src/core/hpc/lsp/LspCoordinator.cpp',
   'src/core/hpc/analysis/DeadlockAnalyzer.cpp', 'src/core/hpc/system/ProcessScanner.cpp',
   'src/ui/MainWindow.cpp', 'src/ui/MainWindowLifecycle.cpp', 'src/ui/MainWindowWorkspace.cpp',
@@ -136,7 +136,7 @@ test_src = [
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp', 'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/hpc/system/ProcessScanner.cpp', 'src/core/managers/ConfigManager.cpp'
+  'src/core/hpc/system/ProcessScanner.cpp', 'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 test_moc_headers = [
@@ -164,7 +164,7 @@ test('coordinator_tests', gridlock_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 lsp_test_src = [
   'tests/hpc/test_lsp.cpp',
   'src/core/hpc/lsp/LspCoordinator.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
-  'src/core/managers/ConfigManager.cpp', 'src/ui/views/SourceCodeView.cpp',
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp', 'src/ui/views/SourceCodeView.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp',
   'src/ui/widgets/InlineFindBar.cpp'
 ]
@@ -219,7 +219,7 @@ ui_test_src = [
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
   'src/core/hpc/analysis/DeadlockAnalyzer.cpp', 'src/core/hpc/system/ProcessScanner.cpp', 'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp', 'src/core/hpc/memory/MemoryExporter.cpp',
-  'src/core/hpc/memory/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp',
+  'src/core/hpc/memory/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/core/managers/SessionManager.cpp', 'src/core/hpc/lsp/LspCoordinator.cpp',
   'src/ui/views/MemView.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
@@ -277,7 +277,7 @@ test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout:
 
 config_test_src = [
   'tests/core/test_config.cpp',
-  'src/core/managers/ConfigManager.cpp',
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/core/managers/SessionManager.cpp'
 ]
 
@@ -304,7 +304,7 @@ test('config_tests', gridlock_config_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 docset_test_src = [
   'tests/core/test_docset.cpp',
   'src/core/managers/DocsetManager.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 docset_test_moc_headers = [
@@ -332,7 +332,7 @@ dap_parser_test_src = [
   'tests/dap/test_dap_parser.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_parser_test_moc_headers = [
@@ -363,7 +363,7 @@ dap_commands_test_src = [
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
   'src/core/commands/DebugCommands.cpp',
-  'src/core/managers/ConfigManager.cpp',
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/ui/views/SourceCodeView.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp',
   'src/ui/widgets/InlineFindBar.cpp',
@@ -400,7 +400,7 @@ dap_breakpoints_test_src = [
   'tests/dap/test_dap_breakpoints.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_breakpoints_test_moc_headers = [
@@ -428,7 +428,7 @@ dap_stacktrace_test_src = [
   'tests/dap/test_dap_stacktrace.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_stacktrace_test_moc_headers = [
@@ -458,7 +458,7 @@ dap_variables_test_src = [
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
-  'src/core/managers/ConfigManager.cpp',
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/core/models/VariableTreeModel.cpp'
 ]
 
@@ -489,7 +489,7 @@ dap_evaluate_test_src = [
   'tests/dap/test_dap_evaluate.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_evaluate_test_moc_headers = [
@@ -517,7 +517,7 @@ dap_lifecycle_test_src = [
   'tests/dap/test_dap_lifecycle.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_lifecycle_test_moc_headers = [
@@ -545,7 +545,7 @@ dap_memory_test_src = [
   'tests/dap/test_dap_memory.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_memory_test_moc_headers = [
@@ -621,7 +621,7 @@ dap_native_bridge_test_src = [
   'tests/dap/test_dap_native_bridge.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 dap_native_bridge_test_moc_headers = [
@@ -702,7 +702,7 @@ advanced_features_test_src = [
   'src/core/models/VariableTreeModel.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
-  'src/core/managers/ConfigManager.cpp'
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp'
 ]
 
 advanced_features_test_moc_headers = [

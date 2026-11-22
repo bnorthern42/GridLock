@@ -4,9 +4,14 @@ Application-wide persistence, theming, keyboard chord routing, offline documenta
 
 ## Contents
 
-- `ConfigManager.hpp` (`349`), `ConfigManager.cpp` (`914`):
-  - Unified TOML + `QSettings` manager handling `~/.config/gridlock/config.toml` (`XDG_CONFIG_HOME` / `GRIDLOCK_TEST_CONFIG_DIR`), `.gridlock/workspace.toml`, and `.gridlock/settings.toml`.
-  - Defines typed settings PODs: `DebuggerSettings`, `HpcSettings`, `SshSettings`, `SlurmSettings`, `TerminalSettings`, `ProjectSettings`, and `BreakpointConfig`.
+- `ConfigManager.hpp` (`349`):
+  - Singleton facade and typed settings PODs: `DebuggerSettings`, `HpcSettings`, `SshSettings`, `SlurmSettings`, `TerminalSettings`, `ProjectSettings`, and `BreakpointConfig`.
+- `ConfigManager.cpp` (`300`):
+  - Singleton lifecycle, workspace switching, `QSettings`-backed debugger/HPC/SSH/SLURM/docset PODs, live editor/treemap toggles, and custom shortcut overrides.
+- `ConfigManagerToml.cpp` (`212`):
+  - Global `~/.config/gridlock/config.toml` bootstrap (`XDG_CONFIG_HOME` / `GRIDLOCK_TEST_CONFIG_DIR`), legacy migration, `saveGlobalConfig()`, toolchain paths, syntax colors, `[ui]` monitor routing, and `TerminalSettings`.
+- `ConfigManagerWorkspace.cpp` (`396`):
+  - Per-workspace `.gridlock/workspace.toml` and `.gridlock/settings.toml` persistence (`ProjectSettings`, breakpoints, `BreakpointConfig`), workspace-scoped engine/theme/disassembly/telemetry overrides, and `Recent Sessions`.
 - `ThemeManager.hpp` (`122`), `ThemeManager.cpp` (`822`):
   - Singleton managing `QtAdvancedStylesheet` palettes, workstation chrome QSS overlays, font sizing, and `themeChanged` broadcasts.
 - `ShortcutManager.hpp` (`99`), `ShortcutManager.cpp`:
@@ -24,19 +29,16 @@ Application-wide persistence, theming, keyboard chord routing, offline documenta
   - `ConfigManager` evaluates `GRIDLOCK_TEST_CONFIG_DIR` and `XDG_CONFIG_HOME` before resolving config paths so test runs never alter live `~/.config/gridlock/` state.
 - **Safe QAction Pointers**:
   - `ShortcutManager` tracks live menu actions via `QPointer<QAction>` and validates callbacks on window destruction.
-- **Critical Line Ceiling Watch**:
-  - `DocsetManager.cpp` (`934` lines) and `ConfigManager.cpp` (`914` lines) sit right below `< 950` lines; split new serializers or SQLite/HTML parsers before adding major functionality.
+- **Translation Unit Line Budget**:
+  - All `ConfigManager*.cpp` splits (`300`, `212`, `396` lines) sit strictly `< 500` lines; `DocsetManager.cpp` (`934` lines) sits near `< 950` lines and should be split before adding new SQLite/HTML parsers.
 - **Verification**:
   - Run `meson test -C builddir config_tests docset_tests ui_tests --print-errorlogs` after modifying persistence, docset lookups, shortcuts, or theme overlays.
 
 ## Maintainer & Agent Notes
 
 - Persistence & Config Isolation:
-  - Add new persisted fields to a typed struct in `ConfigManager.hpp` and test TOML round-trips plus corrupt-file fallbacks in `tests/core/test_config.cpp`.
+  - Add new persisted fields to a typed struct in `ConfigManager.hpp`, implement global TOML serializers in `ConfigManagerToml.cpp` or workspace TOML serializers in `ConfigManagerWorkspace.cpp`, and test round-trips plus corrupt-file fallbacks in `tests/core/test_config.cpp`.
   - Never let test cases touch `~/.config/gridlock/`; verify `GRIDLOCK_TEST_CONFIG_DIR` and `XDG_CONFIG_HOME` overrides remain honored on every new save path.
-- UI Metrics & Shortcuts:
-  - Route UI chrome metrics and theme tokens through `ThemeManager` instead of hardcoding hex colors inside views/dialogs.
-  - Ensure `ShortcutManager` keybinding defaults remain conflict-free and propagate overrides immediately to `PreferencesDialog` and `#MainToolbar` tooltips.
-- Dependency & Size Discipline:
+- Build Sync & Dependency Discipline:
   - Keep `ConfigManager`, `DocsetManager`, and `SessionManager` decoupled from `MainWindow` so `config_tests` and `docset_tests` compile cleanly without full UI linkage.
-  - Update this `README.md` and `meson.build` before expanding `DocsetManager.cpp` (`934`) or `ConfigManager.cpp` (`914`) past safe limits.
+  - Whenever splitting a manager `.cpp` file, register every new unit across all standalone test targets in `meson.build` and update this `README.md`.
