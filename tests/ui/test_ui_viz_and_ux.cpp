@@ -580,6 +580,12 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QMenu* debugMenu = nullptr; for (QAction* ma : mw.menuBar()->actions()) if (ma->menu() && ma->menu()->title().remove(QLatin1Char('&')) == QLatin1String("Debug")) debugMenu = ma->menu();
     QAction* runMenuAct = nullptr; for (QAction* da : debugMenu ? debugMenu->actions() : QList<QAction*>()) { if (da->objectName() == QLatin1String("actionRunTarget") || da->text().contains(QStringLiteral("Run Target"))) runMenuAct = da; QVERIFY2(!da->isCheckable(), qPrintable(QStringLiteral("Non-toggle Debug menu action '%1' must not be checkable").arg(da->text()))); }
     QVERIFY(debugMenu != nullptr && runMenuAct != nullptr && !runMenuAct->isCheckable());
+    auto* searchBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarSearchEverywhereBtn"));
+    QVERIFY2(searchBtn && searchBtn->width() >= 26 && searchBtn->height() >= 22, qPrintable(QStringLiteral("searchBtn=%1x%2").arg(searchBtn ? searchBtn->width() : -1).arg(searchBtn ? searchBtn->height() : -1)));
+    searchBtn->click(); QApplication::processEvents();
+    auto* palDlg = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
+    QVERIFY2(palDlg && palDlg->isVisible() && palDlg->width() >= 860 && palDlg->height() >= 500, qPrintable(QStringLiteral("palDlg=%1x%2").arg(palDlg ? palDlg->width() : -1).arg(palDlg ? palDlg->height() : -1)));
+    palDlg->reject(); QApplication::processEvents();
     rankSpin->setValue(1); mw.setWorkspacePerspective(QStringLiteral("Source")); QApplication::processEvents();
     auto* extBtn = mainTb->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
     QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && !pauseAllBtn->isVisible() && targetSel->width() >= 165 && rankSpin->width() >= 80 && scopeCombo->minimumWidth() >= 115 && mainTb->sizeHint().width() <= 1180 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("src w=%1 ts=%2 rs=%3 scMin=%4 ext=%5").arg(mainTb->sizeHint().width()).arg(targetSel->width()).arg(rankSpin->width()).arg(scopeCombo->minimumWidth()).arg(extBtn && extBtn->isVisible())));

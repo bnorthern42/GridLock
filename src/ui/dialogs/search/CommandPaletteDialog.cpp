@@ -42,7 +42,7 @@ namespace {
 class CommandPaletteItemDelegate : public QStyledItemDelegate {
 public:
     explicit CommandPaletteItemDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
-    QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override { return QSize(440, 36); }
+    QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override { return QSize(540, 34); }
     void paint(QPainter* p, const QStyleOptionViewItem& opt, const QModelIndex& idx) const override {
         if (!p) return;
         p->save(); p->setRenderHint(QPainter::Antialiasing, true);
@@ -124,7 +124,7 @@ int CommandPaletteDialog::fuzzyScore(const QString& pattern, const QString& cand
 CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint) {
     setObjectName(QStringLiteral("CommandPaletteDialog")); setWindowTitle(QStringLiteral("Search Everywhere"));
-    setModal(false); resize(860, 480);
+    setModal(false); resize(920, 560);
     auto* rootLayout = new QVBoxLayout(this); rootLayout->setContentsMargins(10, 8, 10, 10); rootLayout->setSpacing(6);
 
     auto* scopeBar = new QHBoxLayout(); scopeBar->setObjectName(QStringLiteral("commandPaletteScopeBar"));
@@ -187,7 +187,7 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     prevLayout->addWidget(m_previewHeaderLabel); prevLayout->addWidget(m_previewEdit, 1);
 
     m_contentSplitter->addWidget(m_resultsList); m_contentSplitter->addWidget(m_previewPane);
-    m_contentSplitter->setStretchFactor(0, 5); m_contentSplitter->setStretchFactor(1, 5); m_contentSplitter->setSizes({430, 410});
+    m_contentSplitter->setStretchFactor(0, 58); m_contentSplitter->setStretchFactor(1, 42); m_contentSplitter->setSizes({540, 360});
     rootLayout->addWidget(m_contentSplitter, 1);
 
     auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
@@ -346,8 +346,12 @@ void CommandPaletteDialog::keyPressEvent(QKeyEvent* event) {
 void CommandPaletteDialog::positionOverlayNearTopCenter() {
     if (QWidget* p = parentWidget()) {
         const QRect g = p->geometry();
-        const int w = qBound(640, (g.width() * 64) / 100, 940), h = qBound(380, (g.height() * 54) / 100, 540);
-        resize(w, h); move(p->mapToGlobal(QPoint((g.width() - w) / 2, 40)));
+        const int maxW = qMax(640, g.width() - 64), maxH = qMax(420, g.height() - 64);
+        const int w = qMin(maxW, qBound(920, (g.width() * 66) / 100, 1120));
+        const int h = qMin(maxH, qBound(560, (g.height() * 64) / 100, 720));
+        resize(w, h);
+        if (m_contentSplitter) m_contentSplitter->setSizes({(w * 58) / 100, (w * 42) / 100});
+        move(p->mapToGlobal(QPoint((g.width() - w) / 2, qMax(24, (g.height() - h) / 5))));
     }
 }
 

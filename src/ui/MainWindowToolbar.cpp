@@ -70,7 +70,7 @@ void MainWindow::setupToolbar() {
   toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   toolbar->setFixedHeight(32);
   toolbar->setIconSize(QSize(10, 10));
-  toolbar->setContentsMargins(1, 0, 1, 0);
+  toolbar->setContentsMargins(0, 0, 0, 0);
   toolbar->setStyleSheet(QStringLiteral(
       "#MainToolbar QToolButton, #MainToolbar QPushButton { padding: 1px 2px; margin: 0px; min-width: 0px; }"
       " #MainToolbar QToolButton[popupMode=\"1\"] { padding-right: 16px; }"));
@@ -296,7 +296,7 @@ void MainWindow::setupToolbar() {
   if (auto* contBtn = qobject_cast<QToolButton*>(toolbar->widgetForAction(m_continueAction))) {
     contBtn->setObjectName(QStringLiteral("toolbarContinueBtn"));
     contBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    contBtn->setStyleSheet(QStringLiteral("QToolButton { padding: 2px 4px; }"));
+    contBtn->setStyleSheet(QStringLiteral("QToolButton { padding: 1px 2px; }"));
   }
   connect(m_continueAction, &QAction::changed, this, &MainWindow::syncExecutionScopeUi);
   m_stepOverAction = makeDbgAct(QStringLiteral("Step Over"), QStringLiteral("debug.step_over"), QStringLiteral("↷ Over"),
@@ -374,7 +374,11 @@ void MainWindow::setupToolbar() {
   // Global Search Everywhere pill button (#toolbarSearchEverywhereBtn) advertising Double Shift / Ctrl+P.
   auto* searchEverywhereBtn = new QPushButton(QStringLiteral("⌕"), toolbar);
   searchEverywhereBtn->setObjectName(QStringLiteral("toolbarSearchEverywhereBtn"));
-  searchEverywhereBtn->setFixedSize(22, 26); searchEverywhereBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  searchEverywhereBtn->setMinimumSize(28, 24);
+  searchEverywhereBtn->setFixedSize(28, 26);
+  searchEverywhereBtn->setIconSize(QSize(14, 14));
+  searchEverywhereBtn->setStyleSheet(QStringLiteral("QPushButton#toolbarSearchEverywhereBtn { min-width: 28px; min-height: 24px; padding: 2px 4px; font-size: 13px; }"));
+  searchEverywhereBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   searchEverywhereBtn->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
   connect(searchEverywhereBtn, &QPushButton::clicked, this, [this]() { openSearchEverywhere(0); });
   toolbar->addWidget(searchEverywhereBtn);
