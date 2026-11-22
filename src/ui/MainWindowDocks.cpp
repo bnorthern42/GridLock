@@ -37,6 +37,8 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include "../core/managers/ConfigManager.hpp"
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
@@ -45,6 +47,8 @@
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollBar>
+#include <QSettings>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabBar>
@@ -707,63 +711,18 @@ void MainWindow::propagateThemeToAllWidgets() {
   if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 5px; min-height: 22px; max-height: 24px; font-size: 11px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
 
   // Style SOURCE | DEBUG | BINARY | MPI segmented mode buttons: 24px height, compact 0px 4px padding.
-  const QString perspStyle = QStringLiteral(
-      "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; "
-      "padding: 0px 4px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 24px; max-height: 24px; } "
-      "QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } "
-      "QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }")
-      .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
+  const QString perspStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 4px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 24px; max-height: 24px; } QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
   for (QPushButton* btn : {m_perspSourceBtn, m_perspDebugBtn, m_perspBinaryBtn, m_perspMpiBtn}) if (btn) btn->setStyleSheet(perspStyle);
-
-  // 3. Re-style Bottom Tool Window Rail (#bottomToolWindowRail)
   if (m_bottomToolRail) {
-    m_bottomToolRail->setStyleSheet(QStringLiteral(
-        "#bottomToolWindowRail { background-color: %1; border-right: 1px solid %2; }"
-        "#bottomToolWindowRail QToolButton { background-color: transparent; color: %3; "
-        "border: 1px solid transparent; border-radius: 4px; min-width: 28px; max-width: 28px; "
-        "min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; }"
-        "#bottomToolWindowRail QToolButton:hover { background-color: %4; color: %3; border: 1px solid %2; }"
-        "#bottomToolWindowRail QToolButton:checked { background-color: %4; color: %5; border: 1px solid %5; border-left: 2px solid %5; }")
-        .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));
+    m_bottomToolRail->setStyleSheet(QStringLiteral("#bottomToolWindowRail { background-color: %1; border-right: 1px solid %2; } #bottomToolWindowRail QToolButton { background-color: transparent; color: %3; border: 1px solid transparent; border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; } #bottomToolWindowRail QToolButton:hover { background-color: %4; color: %3; border: 1px solid %2; } #bottomToolWindowRail QToolButton:checked { background-color: %4; color: %5; border: 1px solid %5; border-left: 2px solid %5; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));
   }
-
-  // 4. Re-style Bottom Console Tabs (m_bottomTabs) with >= 12px UI chrome and monospace console viewports
   if (m_bottomTabs) {
-    m_bottomTabs->setStyleSheet(QStringLiteral(
-        "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background-color: %1; }"
-        "QTabBar { background-color: %2; border-bottom: 1px solid %3; }"
-        "QTabBar::tab { background-color: %2; color: %4; padding: 3px 10px; min-height: 20px; max-height: 24px; "
-        "border-right: 1px solid %3; border-bottom: 1px solid %3; font-size: 12px; font-weight: 600; }"
-        "QTabBar::tab:selected { background-color: %1; color: %4; border-bottom: 2px solid %5; }"
-        "QTabBar::tab:hover:!selected { background-color: %3; color: %4; }"
-        "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %4; border: 1px solid %3; border-radius: 3px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 12px; }"
-        "QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid %5; background-color: %1; }"
-        "QPushButton { background-color: %2; color: %4; border: 1px solid %3; border-radius: 3px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; }"
-        "QPushButton:hover { background-color: %3; border: 1px solid %5; color: %4; }"
-        "QCheckBox { color: %4; font-size: 12px; font-weight: 600; spacing: 5px; }"
-        "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background-color: %1; color: %4; border: none; font-family: 'JetBrains Mono', monospace; font-size: 12px; }")
-        .arg(pal.canvasHex, pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
+    m_bottomTabs->setStyleSheet(QStringLiteral("QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background-color: %1; } QTabBar { background-color: %2; border-bottom: 1px solid %3; } QTabBar::tab { background-color: %2; color: %4; padding: 3px 10px; min-height: 20px; max-height: 24px; border-right: 1px solid %3; border-bottom: 1px solid %3; font-size: 12px; font-weight: 600; } QTabBar::tab:selected { background-color: %1; color: %4; border-bottom: 2px solid %5; } QTabBar::tab:hover:!selected { background-color: %3; color: %4; } QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %4; border: 1px solid %3; border-radius: 3px; padding: 0px 6px; min-height: 20px; max-height: 22px; font-size: 12px; } QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid %5; background-color: %1; } QPushButton { background-color: %2; color: %4; border: 1px solid %3; border-radius: 3px; padding: 1px 8px; min-height: 20px; max-height: 22px; font-size: 12px; font-weight: 600; } QPushButton:hover { background-color: %3; border: 1px solid %5; color: %4; } QCheckBox { color: %4; font-size: 12px; font-weight: 600; spacing: 5px; } QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background-color: %1; color: %4; border: none; font-family: 'JetBrains Mono', monospace; font-size: 12px; }").arg(pal.canvasHex, pal.headerHex, pal.borderHex, pal.textHex, pal.accentHex));
   }
-
-  // 5. Re-style custom dock headers (#customDockHeader) and dock tab bars cleanly.
-  const QString dockHeaderStyle = QStringLiteral(
-      "#customDockHeader { background-color: %1; border-bottom: 1px solid %2; } "
-      "#customDockHeader QLabel { color: %3; font-size: 12px; font-weight: 700; padding-left: 6px; } "
-      "#dockFloatBtn, #dockCloseBtn { background-color: transparent; color: %3; border: none; font-size: 12px; "
-      "font-weight: 700; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; } "
-      "#dockFloatBtn:hover, #dockCloseBtn:hover { background: %2; color: %3; border-radius: 2px; }")
-      .arg(pal.headerHex, pal.borderHex, pal.textHex);
+  const QString dockHeaderStyle = QStringLiteral("#customDockHeader { background-color: %1; border-bottom: 1px solid %2; } #customDockHeader QLabel { color: %3; font-size: 12px; font-weight: 700; padding-left: 6px; } #dockFloatBtn, #dockCloseBtn { background-color: transparent; color: %3; border: none; font-size: 12px; font-weight: 700; min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; } #dockFloatBtn:hover, #dockCloseBtn:hover { background: %2; color: %3; border-radius: 2px; }").arg(pal.headerHex, pal.borderHex, pal.textHex);
   for (auto* dock : findChildren<QDockWidget*>()) { if (dock && dock->titleBarWidget() && dock->titleBarWidget()->objectName() == QStringLiteral("customDockHeader")) dock->titleBarWidget()->setStyleSheet(dockHeaderStyle); }
-  const QString dockTabStyle = QStringLiteral(
-      "QTabBar { background-color: %1; border-bottom: 1px solid %2; }"
-      "QTabBar::tab { background-color: %1; color: %3; padding: 3px 4px; margin: 0px; min-height: 20px; max-height: 24px; "
-      "border-right: 1px solid %2; font-size: 12px; font-weight: 600; }"
-      "QTabBar::tab:selected { background-color: %4; color: %3; border-bottom: 2px solid %5; }"
-      "QTabBar::tab:hover:!selected { background-color: %2; color: %3; }")
-      .arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex);
+  const QString dockTabStyle = QStringLiteral("QTabBar { background-color: %1; border-bottom: 1px solid %2; } QTabBar::tab { background-color: %1; color: %3; padding: 3px 4px; margin: 0px; min-height: 20px; max-height: 24px; border-right: 1px solid %2; font-size: 12px; font-weight: 600; } QTabBar::tab:selected { background-color: %4; color: %3; border-bottom: 2px solid %5; } QTabBar::tab:hover:!selected { background-color: %2; color: %3; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex);
   for (auto* tb : findChildren<QTabBar*>()) { tb->setUsesScrollButtons(false); tb->setElideMode(Qt::ElideNone); tb->setExpanding(false); if (tb->parentWidget() == this) tb->setStyleSheet(dockTabStyle); }
-
-  // 7. Propagate theme to subviews, Variables scope strip, and CallStackDockWidget
   if (auto* vh = m_variablesDockWidget ? m_variablesDockWidget->findChild<QWidget*>(QStringLiteral("variablesHeaderBar")) : nullptr) {
     vh->setStyleSheet(QStringLiteral("#variablesHeaderBar { background-color: %1; border-bottom: 1px solid %2; } #variablesHeaderBar QLabel { color: %3; font-size: 12px; font-weight: 600; }").arg(pal.headerHex, pal.borderHex, pal.textHex));
   }
@@ -786,16 +745,59 @@ bool MainWindow::areAllChromeToolbarsAndDockHeadersThemeAligned() const {
   return true;
 }
 
-/** @brief Launches a multi-rank MPI debugging session. */
-void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
-  if (!m_coordinator) return;
-  m_coordinator->launchParallelSession(binaryPath, ranks);
-  syncProgramOutputForLaunch(ranks);
-  if (m_gdbConsoleWidget) m_gdbConsoleWidget->resetRanks(ranks);
-  if (m_serverRackView) m_serverRackView->resetRanks(ranks);
-  if (auto *gdbCoord = m_differentialGrid ? dynamic_cast<gridlock::GdbRankCoordinator *>(m_coordinator) : nullptr) {
-    for (const auto &w : m_differentialGrid->getWatchExpressions()) gdbCoord->registerWatchVariable(QString::fromStdString(w));
+/** @brief Updates automatic `Stop at main()` launch behavior and syncs `#launchOptionsStopAtMainCheck`. */
+void MainWindow::setStopAtMainOnLaunch(bool enabled) {
+  m_stopAtMainOnLaunch = enabled; m_stopAtMainExplicit = true; m_sessionRestoredEmptyBps = false;
+  if (m_launchOptionsStopAtMainCheck) { QSignalBlocker b(m_launchOptionsStopAtMainCheck); m_launchOptionsStopAtMainCheck->setChecked(enabled); }
+  QSettings s(QStringLiteral("gridlock"), QStringLiteral("gridlock")); s.setValue(QStringLiteral("debugger/stopOnEntry"), enabled);
+}
+
+/** @brief Applies CLI `<binary_or_workspace_dir>` and `-- <program_args...>` into the active workspace and `ProjectSettings`. */
+bool MainWindow::applyCliLaunchOptions(const QString& targetPath, const QStringList& programArgs) {
+  bool ok = false; const QString rawTarget = targetPath.trimmed(); QString resolvedFile;
+  if (!rawTarget.isEmpty()) {
+    const QFileInfo rawFi(rawTarget); const QFileInfo fi(rawFi.exists() ? rawFi.absoluteFilePath() : resolveWorkspacePath(rawTarget));
+    if (fi.exists() && fi.isDir()) { ok = switchWorkspaceDirectory(fi.absoluteFilePath()); }
+    else if (fi.exists() && fi.isFile()) {
+      resolvedFile = fi.absoluteFilePath(); QDir wsDir = fi.dir();
+      if (wsDir.dirName().startsWith(QStringLiteral("build"), Qt::CaseInsensitive)) wsDir.cdUp();
+      if (wsDir.exists() && m_activeWorkspaceDir != wsDir.absolutePath()) switchWorkspaceDirectory(wsDir.absolutePath());
+      if (m_targetSelector && !selectTargetByName(resolvedFile)) {
+        const QString lbl = QStringLiteral("%1 (%2)").arg(fi.fileName(), fi.suffix().isEmpty() ? QStringLiteral("ELF") : QStringLiteral("Source"));
+        m_targetSelector->blockSignals(true); m_targetSelector->insertItem(0, lbl, resolvedFile); m_targetSelector->blockSignals(false);
+        selectTargetByName(resolvedFile);
+      }
+      ok = true;
+    }
   }
+  if (!programArgs.isEmpty() || !resolvedFile.isEmpty()) {
+    QStringList qArgs; for (const QString& t : programArgs) { QString e = t; if (t.isEmpty() || t.contains(QLatin1Char(' ')) || t.contains(QLatin1Char('"'))) { e.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\"")); qArgs << QStringLiteral("\"%1\"").arg(e); } else qArgs << t; }
+    auto& cfg = gridlock::core::ConfigManager::instance(); auto ps = cfg.loadProjectSettings();
+    if (!resolvedFile.isEmpty()) ps.targetBinary = activeTargetBinaryPath().toStdString();
+    if (!programArgs.isEmpty()) { ps.targetArguments = qArgs.join(QLatin1Char(' ')); ps.programArguments = ps.targetArguments.toStdString(); }
+    cfg.saveProjectSettings(ps);
+    if (!programArgs.isEmpty() && m_launchOptionsArgsEdit) { QSignalBlocker b(m_launchOptionsArgsEdit); m_launchOptionsArgsEdit->setText(ps.targetArguments); }
+    syncCoordinatorWithConfig(); ok = true;
+  }
+  return ok;
+}
+
+/** @brief Launches a multi-rank MPI debugging session through the unified `startTargetWorkflow()` pipeline. */
+void MainWindow::startDebuggingSession(const QString &binaryPath, int ranks) {
+  m_sessionRestoredEmptyBps = false;
+  if (ranks > 0 && m_rankCountSpin) { m_rankCountSpin->setValue(std::clamp(ranks, 1, 256)); }
+  const QString resolvedBin = binaryPath.trimmed().isEmpty() ? QString() : resolveWorkspacePath(binaryPath.trimmed());
+  if (!resolvedBin.isEmpty() && QFileInfo::exists(resolvedBin) && QFileInfo(resolvedBin).isFile()) {
+    m_previewFixtureOnly = false;
+    auto &cfg = gridlock::core::ConfigManager::instance(); auto ps = cfg.loadProjectSettings();
+    ps.targetBinary = resolvedBin.toStdString(); if (ranks > 0) ps.mpiRanks = ranks; cfg.saveProjectSettings(ps);
+    if (m_targetSelector && !selectTargetByName(resolvedBin)) {
+      m_targetSelector->blockSignals(true); m_targetSelector->insertItem(0, QStringLiteral("%1 (ELF)").arg(QFileInfo(resolvedBin).fileName()), resolvedBin); m_targetSelector->blockSignals(false);
+      selectTargetByName(resolvedBin);
+    }
+  }
+  startTargetWorkflow();
+  updateDebugToolbarState();
 }
 /** @brief Builds the Program Output bottom tab with read-only launch command banner and batched stdout view. */
 QWidget* MainWindow::createProgramOutputTab() {

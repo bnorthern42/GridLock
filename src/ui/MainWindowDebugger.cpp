@@ -263,7 +263,7 @@ void MainWindow::startTargetWorkflow() {
         // Synchronize all active editor tabs and workspace breakpoints (including conditions and rank filters).
         m_coordinator->clearBreakpoints();
         const QString srcPath = activeTargetSourcePath();
-        QSet<QString> syncedFiles;
+        QSet<QString> syncedFiles; int activeUserBpCount = 0;
         const auto syncOpenView = [&](SourceCodeView* sv) {
             if (!sv) return;
             const QString viewPath = sv->currentFile().isEmpty() ? srcPath : QFileInfo(sv->currentFile()).absoluteFilePath();
@@ -273,6 +273,7 @@ void MainWindow::startTargetWorkflow() {
                 int rf = sv->breakpointRankFilterForLine(bpLine);
                 if (rf < 0 && sv->breakpointSuspendScope(bpLine).compare(QStringLiteral("Rank"), Qt::CaseInsensitive) == 0) rf = preserveRank;
                 const auto bm = sv->breakpointInfoForLine(bpLine);
+                if (bm.enabled) ++activeUserBpCount;
                 if (bm.temporary) m_coordinator->insertTemporaryBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
                 else m_coordinator->setBreakpoint(viewPath, bpLine, sv->breakpointCondition(bpLine), rf);
                 m_coordinator->configureBreakpointOptions(viewPath, bpLine, bm.ignoreCount, bm.logMessage);
@@ -288,31 +289,43 @@ void MainWindow::startTargetWorkflow() {
             const QString absKey = QFileInfo(it.key()).absoluteFilePath();
             if (syncedFiles.contains(absKey) || !QFileInfo::exists(it.key())) continue;
             const auto metaMap = m_breakpointRankMeta.value(absKey);
-            for (int bpLine : *it) { const auto bm = metaMap.value(bpLine); m_coordinator->setBreakpoint(it.key(), bpLine, bm.condition, bm.rankFilter); }
+            for (int bpLine : *it) { const auto bm = metaMap.value(bpLine); ++activeUserBpCount; m_coordinator->setBreakpoint(it.key(), bpLine, bm.condition, bm.rankFilter); }
+        }
+        // When Stop at main() is enabled and no user breakpoints exist (or explicitly toggled), queue a temporary main() stop before -exec-run.
+        if (m_stopAtMainOnLaunch && (!m_sessionRestoredEmptyBps || m_stopAtMainExplicit) && (activeUserBpCount == 0 || m_stopAtMainExplicit)) {
+            QString mainFile = QFileInfo(srcPath).isFile() ? QFileInfo(srcPath).absoluteFilePath() : (sourceCodeView() && QFileInfo(sourceCodeView()->currentFile()).isFile() ? QFileInfo(sourceCodeView()->currentFile()).absoluteFilePath() : QString());
+            if (mainFile.isEmpty() && m_targetSelector) { for (int i = 0; i < m_targetSelector->count(); ++i) { const QString d = resolveWorkspacePath(m_targetSelector->itemData(i).toString()); if (QFileInfo(d).isFile() && (d.endsWith(QStringLiteral(".cpp")) || d.endsWith(QStringLiteral(".c")))) { mainFile = d; break; } } }
+            int mainLine = 0;
+            if (!mainFile.isEmpty()) {
+                QFile mf(mainFile);
+                if (mf.open(QIODevice::ReadOnly)) {
+                    static const QRegularExpression mainRe(QStringLiteral("^\\s*(?:int|void|auto)\\s+main\\s*\\("));
+                    int ln = 0; while (!mf.atEnd()) { ++ln; if (mainRe.match(QString::fromUtf8(mf.readLine())).hasMatch()) { mainLine = ln; break; } }
+                }
+                if (mainLine <= 0 && !m_dwarfLineToAddress.isEmpty()) mainLine = m_dwarfLineToAddress.firstKey();
+            }
+            if (!mainFile.isEmpty() && mainLine > 0) m_coordinator->insertTemporaryBreakpoint(mainFile, mainLine);
+            else m_coordinator->insertRegexBreakpoint(QStringLiteral("^main$"));
         }
 
         // Reset rank telemetry rows to RUNNING prior to spawning child processes; live signals drive all stops.
         m_latestStates.clear(); m_rankLoopCounter.clear(); m_focusedRank = preserveRank;
         if (m_disassemblyView) m_disassemblyView->setDeadlockCycleRanks({});
         if (m_gdbConsoleWidget) m_gdbConsoleWidget->resetRanks(rankCount);
-
         QList<RankState> initialRanks; initialRanks.reserve(rankCount);
         for (int r = 0; r < rankCount; ++r) {
-            RankState st; st.rankId = r; st.currentState = QStringLiteral("running");
-            m_latestStates[r] = st; initialRanks.append(st);
+            RankState st; st.rankId = r; st.currentState = QStringLiteral("running"); m_latestStates[r] = st; initialRanks.append(st);
             if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateRankStateRow(r, QStringLiteral("RUNNING"), QStringLiteral("main"), QStringLiteral("ALL RANKS"), 0ULL, rankCount);
         }
         if (m_serverRackView) { m_serverRackView->updateRanks(initialRanks); m_serverRackView->selectRank(preserveRank); }
         m_debugSessionActive = true;
         if (m_workspacePerspective == QStringLiteral("Source")) setWorkspacePerspective(QStringLiteral("Debug"));
-        updateDebugToolbarState(); syncRankCountChrome(rankCount);
-        updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("RUNNING"));
+        updateDebugToolbarState(); syncRankCountChrome(rankCount); updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("RUNNING"));
 
         // Push active project CLI arguments and working directory, then spawn live MPI GDB / LLDB-DAP session.
         const auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings();
         const QString tArgs = !projCfg.targetArguments.isEmpty() ? projCfg.targetArguments : QString::fromStdString(projCfg.programArguments);
-        QString tWd = QString::fromStdString(projCfg.workingDirectory).trimmed();
-        if (tWd.isEmpty()) tWd = m_activeWorkspaceDir;
+        const QString tWd = QString::fromStdString(projCfg.workingDirectory).trimmed().isEmpty() ? m_activeWorkspaceDir : QString::fromStdString(projCfg.workingDirectory).trimmed();
         m_coordinator->setTargetExecutionContext(tArgs, tWd);
         m_coordinator->launchParallelSession(binPath, rankCount, projCfg.mpiArgs.isEmpty() ? mpiArgs : projCfg.mpiArgs);
         syncProgramOutputForLaunch(rankCount);
@@ -761,7 +774,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     const QString resolvedDir = !dirInfo.canonicalFilePath().isEmpty() ? dirInfo.canonicalFilePath() : QDir::cleanPath(dirInfo.absoluteFilePath());
 
     struct ReentrancyGuard { bool& flag; ~ReentrancyGuard() { flag = false; } } guard{m_switchingWorkspace};
-    m_switchingWorkspace = true;
+    m_switchingWorkspace = true; m_sessionRestoredEmptyBps = false;
     if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
     if (m_debugSessionActive) stopTargetWorkflow();
     if (m_editorTabManager) m_editorTabManager->clearInlineVariableValues();
@@ -772,7 +785,6 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) { m_editorTabManager->clearAllTabs(); m_currentFile.clear(); }
     m_activeWorkspaceDir = resolvedDir; m_activeSessionFilePath = QDir(resolvedDir).filePath(QStringLiteral(".gridlock/workspace.toml"));
     gridlock::core::ClangdLspClient::instance().setWorkspaceRoot(resolvedDir);
-    // 1. Re-root ProjectExplorerWidget to resolvedDir and ensure FILES mode is active.
     if (m_projectExplorerWidget && (m_projectExplorerWidget->rootPath() != resolvedDir || m_projectExplorerWidget->isSymbolsMode() || m_projectExplorerWidget->isStringsMode()))
         m_projectExplorerWidget->setRootPath(resolvedDir);
 
@@ -784,24 +796,19 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     const QString folderName = QFileInfo(resolvedDir).fileName();
     setWindowTitle(QStringLiteral("GridLock - %1").arg(folderName.isEmpty() ? resolvedDir : folderName));
 
-    // 3. Scan workspace and build* subdirectories for runnable ELF binaries and C/C++ entry targets.
-    QStringList elfTargets, mainSources;
-    discoverWorkspaceTargets(resolvedDir, &elfTargets, &mainSources);
+    // Scan workspace and build* subdirectories for runnable ELF binaries and C/C++ entry targets.
+    QStringList elfTargets, mainSources; discoverWorkspaceTargets(resolvedDir, &elfTargets, &mainSources);
     if (m_targetSelector) {
         m_targetSelector->blockSignals(true); m_targetSelector->clear();
         for (const QString& elfPath : elfTargets) {
             const QString relDir = QDir(resolvedDir).relativeFilePath(QFileInfo(elfPath).absolutePath());
             m_targetSelector->addItem((relDir.isEmpty() || relDir == QStringLiteral(".")) ? QStringLiteral("%1 (ELF)").arg(QFileInfo(elfPath).fileName()) : QStringLiteral("%1 (%2)").arg(QFileInfo(elfPath).fileName(), relDir), elfPath);
         }
-        for (const QString& srcPath : mainSources) {
-            const QString relSrc = QDir(resolvedDir).relativeFilePath(srcPath);
-            m_targetSelector->addItem(elfTargets.isEmpty() ? QFileInfo(srcPath).fileName() : QStringLiteral("%1 (Source)").arg(relSrc), srcPath);
-        }
+        for (const QString& srcPath : mainSources) m_targetSelector->addItem(elfTargets.isEmpty() ? QFileInfo(srcPath).fileName() : QStringLiteral("%1 (Source)").arg(QDir(resolvedDir).relativeFilePath(srcPath)), srcPath);
         if (m_targetSelector->count() == 0) m_targetSelector->addItem(QStringLiteral("%1 (Workspace)").arg(folderName.isEmpty() ? QStringLiteral("Workspace") : folderName), resolvedDir);
         m_targetSelector->addItem(QStringLiteral("Open ELF / Binary..."), QStringLiteral("__open_binary__"));
         m_targetSelector->setCurrentIndex(0); m_targetSelector->setProperty("gl_confirmed_idx", 0); m_targetSelector->blockSignals(false);
     }
-    // 4. Open primary workspace source file (activating ClangdLspClient) and load primary ELF binary.
     if (!mainSources.isEmpty() && m_currentFile.isEmpty()) loadSourceFile(mainSources.first());
     if (!elfTargets.isEmpty()) {
         m_previewFixtureOnly = false; m_useRealBinaryTarget = true; loadBinaryTarget(elfTargets.first());
@@ -810,7 +817,6 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
             rebuildDynamicSourceLineMap();
         }
     } else {
-        // Clear binary-derived symbols, strings, disassembly, and section ribbon when switching to an unbuilt workspace.
         if (m_projectExplorerWidget) { m_projectExplorerWidget->setSymbols({}); m_projectExplorerWidget->setStrings({}); }
         if (m_disassemblyView) m_disassemblyView->clear();
         if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(nullptr, false);

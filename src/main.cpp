@@ -90,6 +90,7 @@ int main(int argc, char* argv[]) {
   // This ensures `./gridlock --version` succeeds in headless containers without X11/Wayland.
   for (int i = 1; i < argc; ++i) {
     const QString arg = QString::fromUtf8(argv[i]);
+    if (arg == QLatin1String("--")) break;
     if (arg == QLatin1String("--version") || arg == QLatin1String("-v")) {
       // Print semantic version banner directly to stdout and exit with code 0.
       fprintf(stdout, "gridlock %s\n", gridlock::core::Version::getString().toUtf8().constData());
@@ -232,6 +233,9 @@ int main(int argc, char* argv[]) {
 
   // In automated test mode, optionally compile a positional MPI source file and start a 2-rank session.
   if (parser.isTestMode()) {
+    if (!parser.programArgs().isEmpty()) {
+      window.applyCliLaunchOptions(QString(), parser.programArgs());
+    }
     const QString testFile = parser.getTestFilePath();
     if (!testFile.isEmpty()) {
       const QFileInfo fi(testFile);
@@ -248,6 +252,9 @@ int main(int argc, char* argv[]) {
       }
     }
     new gridlock::backend::GridLockAutomationRunner(&window, &app);
+  } else if (!parser.targetPath().isEmpty() || !parser.programArgs().isEmpty()) {
+    // Standard CLI target / workspace invocation: `./gridlock <binary_or_dir> [-- <program_args...>]`.
+    window.applyCliLaunchOptions(parser.targetPath(), parser.programArgs());
   }
 
   // Guarantee clean background worker and clangd teardown while QApplication is still alive.

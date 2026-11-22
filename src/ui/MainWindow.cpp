@@ -521,18 +521,23 @@ void MainWindow::setupMenu() {
       // Atomically switch workspace directory, FILES tree, and target discovery before saving wizard overrides.
       switchWorkspaceDirectory(projectRoot);
       auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
-      ps.targetBinary = dialog.getTargetBinary().toStdString();
-      ps.workingDirectory = dialog.getProjectRoot().toStdString();
+      ps.targetBinary = dialog.getTargetBinary().trimmed().toStdString();
+      ps.workingDirectory = projectRoot.trimmed().toStdString();
+      ps.targetArguments = dialog.getExecutableArguments().trimmed();
+      ps.programArguments = ps.targetArguments.toStdString();
+      ps.mpiRanks = dialog.getRanks();
+      QString pureMpiArgs = dialog.getMpiLaunchCommand();
+      pureMpiArgs.remove(QStringLiteral("mpirun ")).remove(QStringLiteral("-np %1").arg(dialog.getRanks())).remove(dialog.getTargetBinary());
+      ps.mpiArgs = pureMpiArgs.simplified();
       gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
 
-      // Configure default MPI launcher settings based on wizard selections.
+      // Configure default MPI launcher settings based on wizard selections (without inferior execArgs).
       auto dbgSettings = gridlock::core::ConfigManager::instance().getDebuggerSettings();
       dbgSettings.mpiExecutable = "mpirun"; dbgSettings.defaultRanks = dialog.getRanks();
-      // Strip launcher prefix and target binary path to persist pure MPI flags.
-      dbgSettings.mpiArgs = dialog.getMpiLaunchCommand().remove("mpirun ").remove("-np " + QString::number(dialog.getRanks()) + " ").remove(dialog.getTargetBinary()).trimmed();
+      dbgSettings.mpiArgs = ps.mpiArgs;
       gridlock::core::ConfigManager::instance().saveDebuggerSettings(dbgSettings);
 
-      // Immediately launch debugging session if coordinator is available.
+      // Immediately launch debugging session through unified startTargetWorkflow() if coordinator is available.
       if (m_coordinator) startDebuggingSession(dialog.getTargetBinary(), dialog.getRanks());
     }
   });

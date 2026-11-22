@@ -33,6 +33,7 @@
 #include <unordered_map>
 
 class QVulkanInstance;
+class QCheckBox;
 class QDockWidget;
 class QMenu;
 class QPlainTextEdit;
@@ -154,6 +155,13 @@ public:
      * @return True if running or paused at a breakpoint; false when idle.
      */
     bool isDebugSessionActive() const { return m_debugSessionActive; }
+
+    /** @brief Returns whether zero-breakpoint launches automatically pause at `main()`. */
+    bool stopAtMainOnLaunch() const { return m_stopAtMainOnLaunch; }
+    /** @brief Enables or disables automatic temporary `main()` breakpoint insertion on launch. */
+    void setStopAtMainOnLaunch(bool enabled);
+    /** @brief Applies a CLI positional target binary/workspace/source path and `-- <program_args...>`. */
+    bool applyCliLaunchOptions(const QString& targetPath, const QStringList& programArgs);
 
     /**
      * @brief Starts the target debugging workflow, spawning configured MPI ranks and pausing at entry.
@@ -804,6 +812,13 @@ private:
     bool m_isClosing = false;
     bool m_isShuttingDown = false;
     QComboBox* m_targetSelector = nullptr;
+    QToolButton* m_launchOptionsBtn = nullptr;
+    QLineEdit* m_launchOptionsArgsEdit = nullptr;
+    QLineEdit* m_launchOptionsWorkDirEdit = nullptr;
+    QCheckBox* m_launchOptionsStopAtMainCheck = nullptr;
+    bool m_stopAtMainOnLaunch = true;
+    bool m_stopAtMainExplicit = false;
+    bool m_sessionRestoredEmptyBps = false;
     QSpinBox* m_rankCountSpin = nullptr;
     QComboBox* m_executionScopeCombo = nullptr;
     QAction* m_executionScopeAction = nullptr;

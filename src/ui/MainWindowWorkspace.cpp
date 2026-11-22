@@ -36,28 +36,32 @@
 #include <QAction>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QFont>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
-#include <QMessageBox>
-#include <memory>
 #include <QMenuBar>
-#include <QStatusBar>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
-#include <QVariant>
 #include <QVBoxLayout>
+#include <QVariant>
+#include <QWidgetAction>
+#include <memory>
 #include <QtConcurrent/QtConcurrent>
 #include <algorithm>
 
@@ -95,21 +99,16 @@ void MainWindow::setupToolbar() {
   toolbar->setFixedHeight(32);
   toolbar->setContentsMargins(2, 0, 2, 0);
 
-  // Target selector capped at 190 px with middle text elision and full-path tooltip.
+  // Target selector + inline ⚙ Launch Options popover (--args, Working Directory, Stop at main()).
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  m_targetSelector->setMinimumContentsLength(8);
-  m_targetSelector->setMinimumWidth(100);
-  m_targetSelector->setMaximumWidth(190);
+  m_targetSelector->setMinimumContentsLength(6);
+  m_targetSelector->setMinimumWidth(76);
+  m_targetSelector->setMaximumWidth(156);
   m_targetSelector->setFixedHeight(26);
-  if (m_targetSelector->view()) {
-    m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle);
-    m_targetSelector->view()->setMinimumWidth(260);
-  }
-  QFont selectorFont = m_targetSelector->font();
-  selectorFont.setItalic(false);
-  selectorFont.setWeight(QFont::Medium);
+  if (m_targetSelector->view()) { m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle); m_targetSelector->view()->setMinimumWidth(260); }
+  QFont selectorFont = m_targetSelector->font(); selectorFont.setItalic(false); selectorFont.setWeight(QFont::Medium);
   m_targetSelector->setFont(selectorFont);
   m_targetSelector->addItem(QStringLiteral("inspection_demo (MPI)"), QStringLiteral("tutorial/inspection_demo.cpp"));
   m_targetSelector->addItem(QStringLiteral("deadlock_ring (MPI)"), QStringLiteral("tutorial/deadlock_ring.cpp"));
@@ -128,48 +127,88 @@ void MainWindow::setupToolbar() {
     const int prevIdx = m_targetSelector->property("gl_confirmed_idx").toInt();
     const QString data = m_targetSelector->itemData(index).toString();
     if (data == QStringLiteral("__open_binary__")) {
-      m_targetSelector->blockSignals(true);
-      m_targetSelector->setCurrentIndex(prevIdx >= 0 && prevIdx < m_targetSelector->count() ? prevIdx : 0);
-      m_targetSelector->blockSignals(false);
-      syncTargetTooltip();
-      openFile();
+      m_targetSelector->blockSignals(true); m_targetSelector->setCurrentIndex(prevIdx >= 0 && prevIdx < m_targetSelector->count() ? prevIdx : 0); m_targetSelector->blockSignals(false);
+      syncTargetTooltip(); openFile();
     } else if (!data.isEmpty()) {
       if (m_debugSessionActive && !m_switchingWorkspace && index != prevIdx && !property("gl_bypass_confirm").toBool()) {
-        const int r = activeSteppingRank();
         if (QMessageBox::warning(this, tr("Switch Active Target"),
-                                 tr("A debug session is active on Rank %1.\n\nTerminate the active session and switch target to '%2'?")
-                                     .arg(r)
-                                     .arg(m_targetSelector->itemText(index)),
+                                 tr("A debug session is active on Rank %1.\n\nTerminate the active session and switch target to '%2'?").arg(activeSteppingRank()).arg(m_targetSelector->itemText(index)),
                                  QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
-          m_targetSelector->blockSignals(true);
-          m_targetSelector->setCurrentIndex(prevIdx >= 0 && prevIdx < m_targetSelector->count() ? prevIdx : 0);
-          m_targetSelector->blockSignals(false);
-          syncTargetTooltip();
-          return;
+          m_targetSelector->blockSignals(true); m_targetSelector->setCurrentIndex(prevIdx >= 0 && prevIdx < m_targetSelector->count() ? prevIdx : 0); m_targetSelector->blockSignals(false);
+          syncTargetTooltip(); return;
         }
       }
-      m_targetSelector->setProperty("gl_confirmed_idx", index);
-      selectTargetByName(data);
-      syncTargetTooltip();
+      m_targetSelector->setProperty("gl_confirmed_idx", index); selectTargetByName(data); syncTargetTooltip();
     }
   });
   toolbar->addWidget(m_targetSelector);
 
+  // Inline ⚙ Launch Options popover bound directly to ProjectSettings (--args, Working Directory, Stop at main()).
+  m_launchOptionsBtn = new QToolButton(toolbar);
+  m_launchOptionsBtn->setObjectName(QStringLiteral("toolbarLaunchOptionsBtn"));
+  m_launchOptionsBtn->setText(QStringLiteral("⚙"));
+  m_launchOptionsBtn->setPopupMode(QToolButton::InstantPopup);
+  m_launchOptionsBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  m_launchOptionsBtn->setFixedSize(22, 26);
+  m_launchOptionsBtn->setToolTip(QStringLiteral("Launch Options: Program Arguments (--args), Working Directory, and Entry Breakpoint"));
+  auto *launchOptMenu = new QMenu(m_launchOptionsBtn);
+  launchOptMenu->setObjectName(QStringLiteral("toolbarLaunchOptionsMenu"));
+  auto *launchPanel = new QWidget(launchOptMenu);
+  launchPanel->setMinimumWidth(320);
+  launchPanel->setStyleSheet(QStringLiteral("QWidget { background: #1e222a; color: #d7dae0; } QLineEdit { background: #15181e; color: #e5e9f0; border: 1px solid #353b45; border-radius: 3px; padding: 2px 6px; min-height: 22px; } QPushButton { background: #282c34; color: #d7dae0; border: 1px solid #3b4048; border-radius: 3px; padding: 2px 8px; min-height: 22px; } QCheckBox { spacing: 6px; }"));
+  auto *lpForm = new QFormLayout(launchPanel); lpForm->setContentsMargins(10, 8, 10, 8); lpForm->setSpacing(6);
+  m_launchOptionsArgsEdit = new QLineEdit(launchPanel); m_launchOptionsArgsEdit->setObjectName(QStringLiteral("launchOptionsArgsEdit")); m_launchOptionsArgsEdit->setPlaceholderText(QStringLiteral("--nx 64 --tol 1e-6"));
+  lpForm->addRow(QStringLiteral("Program Arguments (--args):"), m_launchOptionsArgsEdit);
+  auto *wdRow = new QWidget(launchPanel); auto *wdHb = new QHBoxLayout(wdRow); wdHb->setContentsMargins(0, 0, 0, 0); wdHb->setSpacing(4);
+  m_launchOptionsWorkDirEdit = new QLineEdit(wdRow); m_launchOptionsWorkDirEdit->setObjectName(QStringLiteral("launchOptionsWorkDirEdit")); m_launchOptionsWorkDirEdit->setPlaceholderText(QStringLiteral("Workspace root (default)"));
+  auto *wdBrowseBtn = new QPushButton(QStringLiteral("..."), wdRow); wdBrowseBtn->setObjectName(QStringLiteral("launchOptionsWorkDirBrowseBtn")); wdBrowseBtn->setFixedWidth(28);
+  wdHb->addWidget(m_launchOptionsWorkDirEdit, 1); wdHb->addWidget(wdBrowseBtn);
+  lpForm->addRow(QStringLiteral("Working Directory:"), wdRow);
+  m_launchOptionsStopAtMainCheck = new QCheckBox(QStringLiteral("Stop at main()"), launchPanel); m_launchOptionsStopAtMainCheck->setObjectName(QStringLiteral("launchOptionsStopAtMainCheck"));
+  m_launchOptionsStopAtMainCheck->setChecked(m_stopAtMainOnLaunch);
+  m_launchOptionsStopAtMainCheck->setToolTip(QStringLiteral("Automatically insert a temporary breakpoint at main() when no user breakpoints are set"));
+  lpForm->addRow(QString(), m_launchOptionsStopAtMainCheck);
+  auto *launchWidgetAct = new QWidgetAction(launchOptMenu); launchWidgetAct->setDefaultWidget(launchPanel); launchOptMenu->addAction(launchWidgetAct);
+  m_launchOptionsBtn->setMenu(launchOptMenu);
+  auto persistLaunchOpts = [this]() {
+    auto &cfg = gridlock::core::ConfigManager::instance();
+    auto ps = cfg.loadProjectSettings();
+    ps.targetArguments = m_launchOptionsArgsEdit ? m_launchOptionsArgsEdit->text().trimmed() : QString();
+    ps.programArguments = ps.targetArguments.toStdString();
+    ps.workingDirectory = (m_launchOptionsWorkDirEdit ? m_launchOptionsWorkDirEdit->text().trimmed() : QString()).toStdString();
+    cfg.saveProjectSettings(ps);
+    if (!ps.workingDirectory.empty() && m_terminalDock && QDir(QString::fromStdString(ps.workingDirectory)).exists()) m_terminalDock->setWorkingDirectory(QString::fromStdString(ps.workingDirectory));
+    syncCoordinatorWithConfig();
+  };
+  connect(launchOptMenu, &QMenu::aboutToShow, this, [this]() {
+    const auto ps = gridlock::core::ConfigManager::instance().loadProjectSettings();
+    const QString args = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+    const QString wd = !ps.workingDirectory.empty() ? QString::fromStdString(ps.workingDirectory) : m_activeWorkspaceDir;
+    if (m_launchOptionsArgsEdit) { QSignalBlocker b(m_launchOptionsArgsEdit); m_launchOptionsArgsEdit->setText(args); }
+    if (m_launchOptionsWorkDirEdit) { QSignalBlocker b(m_launchOptionsWorkDirEdit); m_launchOptionsWorkDirEdit->setText(wd); }
+    if (m_launchOptionsStopAtMainCheck) { QSignalBlocker b(m_launchOptionsStopAtMainCheck); m_launchOptionsStopAtMainCheck->setChecked(m_stopAtMainOnLaunch); }
+  });
+  connect(m_launchOptionsArgsEdit, &QLineEdit::textEdited, this, [persistLaunchOpts](const QString &) { persistLaunchOpts(); });
+  connect(m_launchOptionsArgsEdit, &QLineEdit::editingFinished, this, persistLaunchOpts);
+  connect(m_launchOptionsWorkDirEdit, &QLineEdit::textEdited, this, [persistLaunchOpts](const QString &) { persistLaunchOpts(); });
+  connect(m_launchOptionsWorkDirEdit, &QLineEdit::editingFinished, this, persistLaunchOpts);
+  connect(wdBrowseBtn, &QPushButton::clicked, this, [this, persistLaunchOpts]() {
+    const QString cur = (m_launchOptionsWorkDirEdit && !m_launchOptionsWorkDirEdit->text().trimmed().isEmpty()) ? m_launchOptionsWorkDirEdit->text().trimmed() : m_activeWorkspaceDir;
+    const QString picked = FileDialogHelper::getExistingDirectory(this, QStringLiteral("Select Working Directory"), cur);
+    if (!picked.isEmpty() && m_launchOptionsWorkDirEdit) { m_launchOptionsWorkDirEdit->setText(picked); persistLaunchOpts(); }
+  });
+  connect(m_launchOptionsStopAtMainCheck, &QCheckBox::toggled, this, &MainWindow::setStopAtMainOnLaunch);
+  QAction *launchOptTbAct = toolbar->addWidget(m_launchOptionsBtn);
+  launchOptTbAct->setToolTip(m_launchOptionsBtn->toolTip());
+
   // Compact self-labeled MPI rank count spin box ("np:8").
-  m_rankCountSpin = new QSpinBox(toolbar);
-  m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
-  m_rankCountSpin->setPrefix(QStringLiteral("np:"));
-  m_rankCountSpin->setRange(1, 256);
-  m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setMinimumWidth(56);
-  m_rankCountSpin->setMaximumWidth(68);
-  m_rankCountSpin->setFixedHeight(26);
-  m_rankCountSpin->setFont(selectorFont);
+  m_rankCountSpin = new QSpinBox(toolbar); m_rankCountSpin->setObjectName(QStringLiteral("toolbarRankSpin"));
+  m_rankCountSpin->setPrefix(QStringLiteral("np:")); m_rankCountSpin->setRange(1, 256); m_rankCountSpin->setValue(8);
+  m_rankCountSpin->setMinimumWidth(56); m_rankCountSpin->setMaximumWidth(68); m_rankCountSpin->setFixedHeight(26); m_rankCountSpin->setFont(selectorFont);
   m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
   connect(m_rankCountSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
     if (!m_debugSessionActive && !m_previewFixtureOnly && m_serverRackView) m_serverRackView->setSessionIdle(val);
-    syncRankCountChrome(val);
-    syncExecutionScopeUi();
+    syncRankCountChrome(val); syncExecutionScopeUi();
   });
   toolbar->addWidget(m_rankCountSpin);
   toolbar->addSeparator();
@@ -179,11 +218,8 @@ void MainWindow::setupToolbar() {
   toolbarBuildAct->setIconText(QStringLiteral("⚙ Build"));
   toolbarBuildAct->setToolTip(QStringLiteral("Build Active Target (Ctrl+B) — click arrow for Clean / Rebuild"));
   connect(toolbarBuildAct, &QAction::triggered, this, &MainWindow::buildTargetWorkflow);
-  auto *buildSplitBtn = new QToolButton(toolbar);
-  buildSplitBtn->setObjectName(QStringLiteral("toolbarBuildSplitBtn"));
-  buildSplitBtn->setPopupMode(QToolButton::MenuButtonPopup);
-  buildSplitBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
-  buildSplitBtn->setDefaultAction(toolbarBuildAct);
+  auto *buildSplitBtn = new QToolButton(toolbar); buildSplitBtn->setObjectName(QStringLiteral("toolbarBuildSplitBtn"));
+  buildSplitBtn->setPopupMode(QToolButton::MenuButtonPopup); buildSplitBtn->setToolButtonStyle(Qt::ToolButtonTextOnly); buildSplitBtn->setDefaultAction(toolbarBuildAct);
   auto *buildMenu = new QMenu(buildSplitBtn);
   buildMenu->addAction(QStringLiteral("Build Target (Ctrl+B)"), this, &MainWindow::buildTargetWorkflow);
   buildMenu->addAction(QStringLiteral("Clean Target"), this, &MainWindow::cleanTargetWorkflow);
@@ -191,12 +227,13 @@ void MainWindow::setupToolbar() {
   buildSplitBtn->setMenu(buildMenu);
   toolbar->addWidget(buildSplitBtn);
 
-  // Run Action: Compiles active target on-demand, latches Running state only on valid launch, and advances to first BP.
+  // Run Action: Compiles active target on-demand, latches Running state only on valid launch, and pauses at main() or first BP.
   m_runAction = new QAction(QStringLiteral("▶ Run Target"), this);
   m_runAction->setObjectName(QStringLiteral("actionRunTarget"));
   m_runAction->setIconText(QStringLiteral("▶ Run"));
   m_runAction->setCheckable(true);
   connect(m_runAction, &QAction::triggered, this, [this]() {
+    m_sessionRestoredEmptyBps = false;
     if (!m_previewFixtureOnly && !ensureTargetBinaryCompiled()) { updateDebugToolbarState(); return; }
     startTargetWorkflow();
     updateDebugToolbarState();
@@ -206,104 +243,69 @@ void MainWindow::setupToolbar() {
   toolbar->addSeparator();
 
   // Multi-rank execution scope pill: All Ranks vs. Focused Rank k (shown automatically when ranks > 1).
-  m_executionScopeCombo = new QComboBox(toolbar);
-  m_executionScopeCombo->setObjectName(QStringLiteral("toolbarExecutionScopeCombo"));
-  m_executionScopeCombo->setFont(selectorFont);
-  m_executionScopeCombo->setMinimumWidth(98);
-  m_executionScopeCombo->setMaximumWidth(122);
-  m_executionScopeCombo->setFixedHeight(26);
-  m_executionScopeCombo->addItem(QStringLiteral("All Ranks"), -1);
-  m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0);
-  m_executionScopeCombo->setCurrentIndex(0);
+  m_executionScopeCombo = new QComboBox(toolbar); m_executionScopeCombo->setObjectName(QStringLiteral("toolbarExecutionScopeCombo"));
+  m_executionScopeCombo->setFont(selectorFont); m_executionScopeCombo->setMinimumWidth(98); m_executionScopeCombo->setMaximumWidth(122); m_executionScopeCombo->setFixedHeight(26);
+  m_executionScopeCombo->addItem(QStringLiteral("All Ranks"), -1); m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0); m_executionScopeCombo->setCurrentIndex(0);
   connect(m_executionScopeCombo, &QComboBox::currentIndexChanged, this, [this](int) { syncExecutionScopeUi(); });
   m_executionScopeAction = toolbar->addWidget(m_executionScopeCombo);
 
   // Continue Action (F5).
-  m_continueAction = new QAction(QStringLiteral("Continue"), this);
-  m_continueAction->setObjectName(QStringLiteral("debug.continue"));
-  m_continueAction->setIconText(QStringLiteral("⏭"));
-  m_continueAction->setShortcut(QKeySequence(Qt::Key_F5));
+  m_continueAction = new QAction(QStringLiteral("Continue"), this); m_continueAction->setObjectName(QStringLiteral("debug.continue"));
+  m_continueAction->setIconText(QStringLiteral("⏭")); m_continueAction->setShortcut(QKeySequence(Qt::Key_F5));
   connect(m_continueAction, &QAction::triggered, this, &MainWindow::continueExecutionWorkflow);
   connect(m_continueAction, &QAction::changed, this, &MainWindow::syncExecutionScopeUi);
   toolbar->addAction(m_continueAction);
 
   // Source-Level Stepping: Step Over (F10), Step Into (F11, with stepi/nexti dropdown), Step Out (Shift+F11).
-  m_stepOverAction = new QAction(QStringLiteral("Step Over"), this);
-  m_stepOverAction->setObjectName(QStringLiteral("debug.step_over"));
-  m_stepOverAction->setIconText(QStringLiteral("↷ Over"));
-  m_stepOverAction->setShortcut(QKeySequence(Qt::Key_F10));
+  m_stepOverAction = new QAction(QStringLiteral("Step Over"), this); m_stepOverAction->setObjectName(QStringLiteral("debug.step_over"));
+  m_stepOverAction->setIconText(QStringLiteral("↷ Over")); m_stepOverAction->setShortcut(QKeySequence(Qt::Key_F10));
   connect(m_stepOverAction, &QAction::triggered, this, &MainWindow::stepOverWorkflow);
   toolbar->addAction(m_stepOverAction);
 
-  m_stepIntoAction = new QAction(QStringLiteral("Step Into"), this);
-  m_stepIntoAction->setObjectName(QStringLiteral("debug.step_into"));
-  m_stepIntoAction->setIconText(QStringLiteral("↳ Into"));
-  m_stepIntoAction->setShortcut(QKeySequence(Qt::Key_F11));
+  m_stepIntoAction = new QAction(QStringLiteral("Step Into"), this); m_stepIntoAction->setObjectName(QStringLiteral("debug.step_into"));
+  m_stepIntoAction->setIconText(QStringLiteral("↳ Into")); m_stepIntoAction->setShortcut(QKeySequence(Qt::Key_F11));
   connect(m_stepIntoAction, &QAction::triggered, this, &MainWindow::stepIntoWorkflow);
   toolbar->addAction(m_stepIntoAction);
 
-  m_stepAction = new QAction(QStringLiteral("Step Instruction (stepi)"), this);
-  m_stepAction->setObjectName(QStringLiteral("actionStepInstruction"));
+  m_stepAction = new QAction(QStringLiteral("Step Instruction (stepi)"), this); m_stepAction->setObjectName(QStringLiteral("actionStepInstruction"));
   connect(m_stepAction, &QAction::triggered, this, &MainWindow::stepInstructionWorkflow);
   if (auto *intoBtn = qobject_cast<QToolButton *>(toolbar->widgetForAction(m_stepIntoAction))) {
-    intoBtn->setObjectName(QStringLiteral("toolbarStepIntoBtn"));
-    intoBtn->setPopupMode(QToolButton::MenuButtonPopup);
-    auto *stepMenu = new QMenu(intoBtn);
-    stepMenu->addAction(m_stepAction);
+    intoBtn->setObjectName(QStringLiteral("toolbarStepIntoBtn")); intoBtn->setPopupMode(QToolButton::MenuButtonPopup);
+    auto *stepMenu = new QMenu(intoBtn); stepMenu->addAction(m_stepAction);
     QAction *nextiAct = stepMenu->addAction(QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"), this, &MainWindow::nextInstructionWorkflow);
-    nextiAct->setObjectName(QStringLiteral("actionToolbarNexti"));
-    intoBtn->setMenu(stepMenu);
+    nextiAct->setObjectName(QStringLiteral("actionToolbarNexti")); intoBtn->setMenu(stepMenu);
   }
 
-  m_stepOutAction = new QAction(QStringLiteral("Step Out"), this);
-  m_stepOutAction->setObjectName(QStringLiteral("debug.step_out"));
-  m_stepOutAction->setIconText(QStringLiteral("↱ Out"));
-  m_stepOutAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
+  m_stepOutAction = new QAction(QStringLiteral("Step Out"), this); m_stepOutAction->setObjectName(QStringLiteral("debug.step_out"));
+  m_stepOutAction->setIconText(QStringLiteral("↱ Out")); m_stepOutAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F11));
   connect(m_stepOutAction, &QAction::triggered, this, &MainWindow::stepOutWorkflow);
   toolbar->addAction(m_stepOutAction);
 
   // Scoped Pause, Pause All Ranks (F6), & Single Merged Stop Action (Shift+F5).
-  m_pauseAction = new QAction(QStringLiteral("Pause"), this);
-  m_pauseAction->setObjectName(QStringLiteral("actionPauseRank"));
+  m_pauseAction = new QAction(QStringLiteral("Pause"), this); m_pauseAction->setObjectName(QStringLiteral("actionPauseRank"));
   m_pauseAction->setIconText(QStringLiteral("⏸"));
   connect(m_pauseAction, &QAction::triggered, this, &MainWindow::pauseRankWorkflow);
   toolbar->addAction(m_pauseAction);
 
-  m_pauseAllAction = new QAction(QStringLiteral("Pause All Ranks"), this);
-  m_pauseAllAction->setObjectName(QStringLiteral("actionPauseAllRanks"));
-  m_pauseAllAction->setIconText(QStringLiteral("⏸ All"));
-  m_pauseAllAction->setShortcut(QKeySequence(Qt::Key_F6));
+  m_pauseAllAction = new QAction(QStringLiteral("Pause All Ranks"), this); m_pauseAllAction->setObjectName(QStringLiteral("actionPauseAllRanks"));
+  m_pauseAllAction->setIconText(QStringLiteral("⏸ All")); m_pauseAllAction->setShortcut(QKeySequence(Qt::Key_F6));
   connect(m_pauseAllAction, &QAction::triggered, this, &MainWindow::pauseAllRanksWorkflow);
-  auto *pauseAllBtn = new QToolButton(toolbar);
-  pauseAllBtn->setObjectName(QStringLiteral("toolbarPauseAllRanksBtn"));
-  pauseAllBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
-  pauseAllBtn->setDefaultAction(m_pauseAllAction);
-  QAction *pauseAllTbAct = toolbar->addWidget(pauseAllBtn);
-  pauseAllTbAct->setObjectName(QStringLiteral("actionToolbarPauseAllRanks"));
-  pauseAllTbAct->setVisible(false);
+  auto *pauseAllBtn = new QToolButton(toolbar); pauseAllBtn->setObjectName(QStringLiteral("toolbarPauseAllRanksBtn"));
+  pauseAllBtn->setToolButtonStyle(Qt::ToolButtonTextOnly); pauseAllBtn->setDefaultAction(m_pauseAllAction);
+  QAction *pauseAllTbAct = toolbar->addWidget(pauseAllBtn); pauseAllTbAct->setObjectName(QStringLiteral("actionToolbarPauseAllRanks")); pauseAllTbAct->setVisible(false);
 
-  m_stopAction = new QAction(QStringLiteral("Stop Session"), this);
-  m_stopAction->setObjectName(QStringLiteral("debug.stop"));
-  m_stopAction->setIconText(QStringLiteral("■ Stop"));
-  m_stopAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F5));
+  m_stopAction = new QAction(QStringLiteral("Stop Session"), this); m_stopAction->setObjectName(QStringLiteral("debug.stop"));
+  m_stopAction->setIconText(QStringLiteral("■ Stop")); m_stopAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F5));
   connect(m_stopAction, &QAction::triggered, this, &MainWindow::stopTargetWorkflow);
   toolbar->addAction(m_stopAction);
 
   // Time-travel Record button next to stepping group (Step Back & Rev Continue stay hidden until recording is active).
-  auto *recBtn = new QPushButton(QStringLiteral("⏺ Rec"), toolbar);
-  recBtn->setObjectName(QStringLiteral("toolbarRecordHistoryBtn"));
-  recBtn->setCheckable(true);
-  auto *sbBtn = new QPushButton(QStringLiteral("↶ Back"), toolbar);
-  sbBtn->setObjectName(QStringLiteral("toolbarStepBackBtn"));
-  auto *rcBtn = new QPushButton(QStringLiteral("⏮ Rev"), toolbar);
-  rcBtn->setObjectName(QStringLiteral("toolbarReverseContinueBtn"));
+  auto *recBtn = new QPushButton(QStringLiteral("⏺ Rec"), toolbar); recBtn->setObjectName(QStringLiteral("toolbarRecordHistoryBtn")); recBtn->setCheckable(true);
+  auto *sbBtn = new QPushButton(QStringLiteral("↶ Back"), toolbar); sbBtn->setObjectName(QStringLiteral("toolbarStepBackBtn"));
+  auto *rcBtn = new QPushButton(QStringLiteral("⏮ Rev"), toolbar); rcBtn->setObjectName(QStringLiteral("toolbarReverseContinueBtn"));
   toolbar->addWidget(recBtn);
-  QAction *sbAct = toolbar->addWidget(sbBtn);
-  sbAct->setObjectName(QStringLiteral("actionToolbarStepBack"));
-  sbAct->setVisible(false);
-  QAction *rcAct = toolbar->addWidget(rcBtn);
-  rcAct->setObjectName(QStringLiteral("actionToolbarReverseContinue"));
-  rcAct->setVisible(false);
+  QAction *sbAct = toolbar->addWidget(sbBtn); sbAct->setObjectName(QStringLiteral("actionToolbarStepBack")); sbAct->setVisible(false);
+  QAction *rcAct = toolbar->addWidget(rcBtn); rcAct->setObjectName(QStringLiteral("actionToolbarReverseContinue")); rcAct->setVisible(false);
   connect(recBtn, &QPushButton::toggled, this, [this](bool on) {
     if (m_coordinator) m_coordinator->setReverseRecordingEnabled(activeSteppingRank(), on);
     updateDebugToolbarState();
@@ -312,75 +314,44 @@ void MainWindow::setupToolbar() {
   connect(rcBtn, &QPushButton::clicked, this, [this]() { reverseContinueWorkflow(); });
 
   // Initialize state-aware toolbar button enablement and descriptive tooltips.
-  updateDebugToolbarState();
-  syncExecutionScopeUi();
-  for (QToolButton *btn : toolbar->findChildren<QToolButton *>()) {
-    btn->setFixedHeight(26);
-    btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
-  }
-  for (QPushButton *btn : toolbar->findChildren<QPushButton *>()) {
-    btn->setFixedHeight(26);
-    btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
-  }
+  updateDebugToolbarState(); syncExecutionScopeUi();
+  for (QToolButton *btn : toolbar->findChildren<QToolButton *>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
+  for (QPushButton *btn : toolbar->findChildren<QPushButton *>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
 
   // Expanding spacer separating execution controls from right-aligned navigation & perspective pills.
-  QWidget *spacer = new QWidget(toolbar);
-  spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-  spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
-  toolbar->addWidget(spacer);
+  QWidget *spacer = new QWidget(toolbar); spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;")); toolbar->addWidget(spacer);
 
   // History back/forward navigation buttons (< / >) with shortcut tooltips.
-  m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar);
-  m_navBackBtn->setObjectName("navBackButton");
-  m_navBackBtn->setFixedSize(22, 26);
-  m_navBackBtn->setEnabled(false);
-  m_navBackBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  m_navBackBtn = new QPushButton(QStringLiteral("<"), toolbar); m_navBackBtn->setObjectName("navBackButton");
+  m_navBackBtn->setFixedSize(22, 26); m_navBackBtn->setEnabled(false); m_navBackBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   m_navBackBtn->setToolTip(QStringLiteral("Navigate Back in Address History (Alt+Left)"));
-  connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack);
-  toolbar->addWidget(m_navBackBtn);
+  connect(m_navBackBtn, &QPushButton::clicked, this, &MainWindow::navigateBack); toolbar->addWidget(m_navBackBtn);
 
-  m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar);
-  m_navForwardBtn->setObjectName("navForwardButton");
-  m_navForwardBtn->setFixedSize(22, 26);
-  m_navForwardBtn->setEnabled(false);
-  m_navForwardBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  m_navForwardBtn = new QPushButton(QStringLiteral(">"), toolbar); m_navForwardBtn->setObjectName("navForwardButton");
+  m_navForwardBtn->setFixedSize(22, 26); m_navForwardBtn->setEnabled(false); m_navForwardBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   m_navForwardBtn->setToolTip(QStringLiteral("Navigate Forward in Address History (Alt+Right)"));
-  connect(m_navForwardBtn, &QPushButton::clicked, this, &MainWindow::navigateForward);
-  toolbar->addWidget(m_navForwardBtn);
+  connect(m_navForwardBtn, &QPushButton::clicked, this, &MainWindow::navigateForward); toolbar->addWidget(m_navForwardBtn);
 
   // Global seek bar for hexadecimal address or symbol jumps (Ctrl+G).
-  QShortcut *navBackShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this);
-  connect(navBackShortcut, &QShortcut::activated, this, &MainWindow::navigateBack);
-  QShortcut *navFwdShortcut = new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this);
-  connect(navFwdShortcut, &QShortcut::activated, this, &MainWindow::navigateForward);
+  connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this), &QShortcut::activated, this, &MainWindow::navigateBack);
+  connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this), &QShortcut::activated, this, &MainWindow::navigateForward);
 
-  m_seekBar = new QLineEdit(toolbar);
-  m_seekBar->setObjectName("cutterSeekBar");
+  m_seekBar = new QLineEdit(toolbar); m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText("Go to addr/sym (Ctrl+G)");
   m_seekBar->setToolTip(QStringLiteral("Go to Address or Symbol (Ctrl+G) — enter hex address (0x401000) or function symbol"));
-  m_seekBar->setFixedHeight(26);
-  m_seekBar->setFixedWidth(88);
-  toolbar->addWidget(m_seekBar);
-
-  connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() {
-    seekToAddressOrExpression(m_seekBar->text());
-  });
+  m_seekBar->setFixedHeight(26); m_seekBar->setFixedWidth(78); toolbar->addWidget(m_seekBar);
+  connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() { seekToAddressOrExpression(m_seekBar->text()); });
 
   // Secondary toolbar break for address space navigation ribbon.
   addToolBarBreak(Qt::TopToolBarArea);
-  QToolBar *navToolbar = addToolBar("Address Space Navigation");
-  navToolbar->setObjectName("AddressNavToolbar");
-  navToolbar->setMovable(true);
-  navToolbar->setFloatable(false);
-  navToolbar->setFixedHeight(22);
-  navToolbar->setContentsMargins(0, 0, 0, 0);
+  QToolBar *navToolbar = addToolBar("Address Space Navigation"); navToolbar->setObjectName("AddressNavToolbar");
+  navToolbar->setMovable(true); navToolbar->setFloatable(false); navToolbar->setFixedHeight(22); navToolbar->setContentsMargins(0, 0, 0, 0);
 
   // Instantiate interactive address space navigation bar ribbon.
   m_addressNavBar = createAddressSpaceNavBar(this, navToolbar);
   m_addressNavBar->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-  new DynamicAddressRibbonFilter(m_addressNavBar, [this](uint64_t addr) {
-    seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
-  });
+  new DynamicAddressRibbonFilter(m_addressNavBar, [this](uint64_t addr) { seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0'))); });
   navToolbar->addWidget(m_addressNavBar);
 }
 
@@ -392,41 +363,22 @@ void MainWindow::setupToolbar() {
  */
 void MainWindow::setupDocks() {
   // Left Zone: Project Explorer / Symbols & Functions list
-  m_projectExplorerWidget = new ProjectExplorerWidget(this);
-  m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
+  m_projectExplorerWidget = new ProjectExplorerWidget(this); m_projectExplorerWidget->setObjectName("ProjectExplorerDock");
   addDockWidget(Qt::LeftDockWidgetArea, m_projectExplorerWidget);
   setupDockTitleBar(m_projectExplorerWidget, QStringLiteral("PROJECT / SYMBOLS"));
   m_dockHomeSlots.insert(m_projectExplorerWidget, {nullptr, -1, Qt::LeftDockWidgetArea});
 
   // Synchronize workspace directory, FILES tree, and TARGET selector when a TOML session is restored.
-  connect(&gridlock::core::managers::SessionManager::instance(),
-          &gridlock::core::managers::SessionManager::sessionLoaded,
-          this, &MainWindow::switchWorkspaceDirectory);
+  connect(&gridlock::core::managers::SessionManager::instance(), &gridlock::core::managers::SessionManager::sessionLoaded,
+          this, [this](const QString &dir) { switchWorkspaceDirectory(dir); m_sessionRestoredEmptyBps = m_persistentBreakpoints.isEmpty(); });
   // Route Open Folder selections in ProjectExplorerWidget through the unified workspace switcher.
-  connect(m_projectExplorerWidget, &ProjectExplorerWidget::workspaceRootChanged,
-          this, &MainWindow::switchWorkspaceDirectory);
-
-  // Route file double-clicks from project explorer directly into editor tabs.
-  connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked,
-          this, [this](const QString &filePath) {
-            if (m_editorTabManager) {
-              loadSourceFile(filePath);
-            }
-          });
-  // Route symbol clicks to synchronous multi-viewport address seek.
-  connect(m_projectExplorerWidget,
-          &ProjectExplorerWidget::symbolAddressSelected, this,
-          [this](uint64_t address, const QString & /*symbolName*/) {
-            seekToAddressOrExpression(
-                QStringLiteral("0x%1").arg(address, 8, 16, QChar('0')));
-          });
+  connect(m_projectExplorerWidget, &ProjectExplorerWidget::workspaceRootChanged, this, &MainWindow::switchWorkspaceDirectory);
+  connect(m_projectExplorerWidget, &ProjectExplorerWidget::fileDoubleClicked, this, [this](const QString &filePath) { if (m_editorTabManager) loadSourceFile(filePath); });
+  connect(m_projectExplorerWidget, &ProjectExplorerWidget::symbolAddressSelected, this, [this](uint64_t address, const QString &) { seekToAddressOrExpression(QStringLiteral("0x%1").arg(address, 8, 16, QChar('0'))); });
 
   // Center & Bottom Zone Splitter: Divides central code/disassembly from bottom tabs.
-  QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this);
-  mainVerticalSplitter->setObjectName("MainVerticalSplitter");
-  mainVerticalSplitter->setMinimumWidth(240);
-  mainVerticalSplitter->setContentsMargins(0, 0, 0, 0);
-  mainVerticalSplitter->setHandleWidth(4);
+  QSplitter *mainVerticalSplitter = new QSplitter(Qt::Vertical, this); mainVerticalSplitter->setObjectName("MainVerticalSplitter");
+  mainVerticalSplitter->setMinimumWidth(240); mainVerticalSplitter->setContentsMargins(0, 0, 0, 0); mainVerticalSplitter->setHandleWidth(4);
   // Prevent child widgets from being collapsed completely via splitter drag and use opaque resize on Wayland.
   mainVerticalSplitter->setChildrenCollapsible(false); mainVerticalSplitter->setOpaqueResize(true);
 
