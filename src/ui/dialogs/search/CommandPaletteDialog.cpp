@@ -42,7 +42,7 @@ namespace {
 class CommandPaletteItemDelegate : public QStyledItemDelegate {
 public:
     explicit CommandPaletteItemDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
-    QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override { return QSize(540, 34); }
+    QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override { return QSize(420, 42); }
     void paint(QPainter* p, const QStyleOptionViewItem& opt, const QModelIndex& idx) const override {
         if (!p) return;
         p->save(); p->setRenderHint(QPainter::Antialiasing, true);
@@ -63,14 +63,16 @@ public:
             case PaletteItem::Category::Theme:  catTag = QStringLiteral("THEME"); catColor = QColor(QStringLiteral("#f472b6")); break;
             case PaletteItem::Category::Text:   catTag = QStringLiteral("TEXT");  catColor = QColor(QStringLiteral("#fb923c")); break;
         }
+        // Line 1: [BADGE] + bold primary Title + right-aligned [Tag Pill]
+        const int line1Top = rr.top() + 3, line1H = 18;
         QFont tagFont = opt.font; tagFont.setPointSize(qMax(8, opt.font.pointSize() - 2)); tagFont.setBold(true); p->setFont(tagFont);
-        const QRect tagRect(rr.left() + 8, rr.top() + 7, 44, 18);
+        const QRect tagRect(rr.left() + 8, line1Top, 44, line1H);
         QColor tagFill = catColor; tagFill.setAlpha(isDark ? 38 : 32);
         p->setPen(catColor); p->setBrush(tagFill); p->drawRoundedRect(tagRect, 3.0, 3.0); p->drawText(tagRect, Qt::AlignCenter, catTag);
         int rightLimit = rr.right() - 8;
         if (!badge.isEmpty()) {
-            const QFontMetrics bfm(tagFont); const int bw = qMin(150, bfm.horizontalAdvance(badge) + 12);
-            const QRect br(rightLimit - bw, rr.top() + 7, bw, 18);
+            const QFontMetrics bfm(tagFont); const int bw = qMin(130, bfm.horizontalAdvance(badge) + 12);
+            const QRect br(rightLimit - bw, line1Top, bw, line1H);
             p->setPen(QColor(isDark ? QStringLiteral("#334155") : QStringLiteral("#cbd5e1")));
             p->setBrush(QColor(isDark ? QStringLiteral("#0f172a") : QStringLiteral("#e2e8f0")));
             p->drawRoundedRect(br, 3.0, 3.0);
@@ -78,21 +80,35 @@ public:
             p->drawText(br, Qt::AlignCenter, bfm.elidedText(badge, Qt::ElideRight, bw - 6));
             rightLimit = br.left() - 8;
         }
-        int cursorX = tagRect.right() + 8;
-        const int textTop = rr.top() + 2, textH = rr.height() - 4;
-        QFont normalFont = opt.font, boldFont = opt.font; boldFont.setBold(true);
-        const QFontMetrics nfm(normalFont), bfm(boldFont);
-        const QColor normalFg(isDark ? QStringLiteral("#e2e8f0") : QStringLiteral("#0f172a")), matchFg(isDark ? QStringLiteral("#38bdf8") : QColor(QStringLiteral("#0284c7")));
+        const int titleX = tagRect.right() + 8;
+        int cursorX = titleX;
+        QFont titleFont = opt.font; titleFont.setWeight(QFont::DemiBold);
+        QFont matchFont = opt.font; matchFont.setBold(true);
+        const QFontMetrics tfm(titleFont), mfm(matchFont);
+        const QColor normalFg(isDark ? QStringLiteral("#e2e8f0") : QStringLiteral("#0f172a"));
+        const QColor matchFg(isDark ? QStringLiteral("#38bdf8") : QStringLiteral("#0284c7"));
+        const int ellW = tfm.horizontalAdvance(QStringLiteral("…"));
         for (int i = 0; i < title.size(); ++i) {
-            const bool m = matchedSet.contains(i); p->setFont(m ? boldFont : normalFont); p->setPen(m ? matchFg : normalFg);
-            const QString ch(title.at(i)); const int cw = m ? bfm.horizontalAdvance(ch) : nfm.horizontalAdvance(ch);
-            if (cursorX + cw > rightLimit) break;
-            p->drawText(QRect(cursorX, textTop, cw + 2, textH), Qt::AlignLeft | Qt::AlignVCenter, ch); cursorX += cw;
+            const bool m = matchedSet.contains(i); p->setFont(m ? matchFont : titleFont); p->setPen(m ? matchFg : normalFg);
+            const QString ch(title.at(i)); const int cw = m ? mfm.horizontalAdvance(ch) : tfm.horizontalAdvance(ch);
+            if (cursorX + cw > rightLimit - (i + 1 < title.size() ? ellW : 0)) {
+                p->setFont(titleFont); p->setPen(normalFg);
+                p->drawText(QRect(cursorX, line1Top, ellW + 2, line1H), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("…"));
+                break;
+            }
+            p->drawText(QRect(cursorX, line1Top, cw + 2, line1H), Qt::AlignLeft | Qt::AlignVCenter, ch); cursorX += cw;
         }
-        if (!subtitle.isEmpty() && cursorX + 20 < rightLimit) {
-            QFont subFont = opt.font; subFont.setPointSize(qMax(8, opt.font.pointSize() - 1)); p->setFont(subFont); p->setPen(QColor(QStringLiteral("#64748b")));
-            const int avail = rightLimit - (cursorX + 10);
-            p->drawText(QRect(cursorX + 10, textTop, avail, textH), Qt::AlignLeft | Qt::AlignVCenter, QFontMetrics(subFont).elidedText(subtitle, Qt::ElideMiddle, avail));
+        // Line 2: muted, smaller (-1 pt) Description / Workspace-Relative Path aligned under Title
+        if (!subtitle.isEmpty()) {
+            const int line2Top = line1Top + line1H + 1, line2H = qMax(14, rr.bottom() - line2Top - 1);
+            const int subW = rr.right() - 8 - titleX;
+            if (subW > 16) {
+                QFont subFont = opt.font; subFont.setPointSize(qMax(8, opt.font.pointSize() - 1));
+                p->setFont(subFont);
+                p->setPen(QColor(isDark ? QStringLiteral("#94a3b8") : QStringLiteral("#64748b")));
+                const Qt::TextElideMode elide = subtitle.contains(QLatin1Char('/')) ? Qt::ElideMiddle : Qt::ElideRight;
+                p->drawText(QRect(titleX, line2Top, subW, line2H), Qt::AlignLeft | Qt::AlignVCenter, QFontMetrics(subFont).elidedText(subtitle, elide, subW));
+            }
         }
         p->restore();
     }
@@ -124,7 +140,7 @@ int CommandPaletteDialog::fuzzyScore(const QString& pattern, const QString& cand
 CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint) {
     setObjectName(QStringLiteral("CommandPaletteDialog")); setWindowTitle(QStringLiteral("Search Everywhere"));
-    setModal(false); resize(920, 560);
+    setModal(false); resize(780, 460);
     auto* rootLayout = new QVBoxLayout(this); rootLayout->setContentsMargins(10, 8, 10, 10); rootLayout->setSpacing(6);
 
     auto* scopeBar = new QHBoxLayout(); scopeBar->setObjectName(QStringLiteral("commandPaletteScopeBar"));
@@ -187,7 +203,7 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     prevLayout->addWidget(m_previewHeaderLabel); prevLayout->addWidget(m_previewEdit, 1);
 
     m_contentSplitter->addWidget(m_resultsList); m_contentSplitter->addWidget(m_previewPane);
-    m_contentSplitter->setStretchFactor(0, 58); m_contentSplitter->setStretchFactor(1, 42); m_contentSplitter->setSizes({540, 360});
+    m_contentSplitter->setStretchFactor(0, 56); m_contentSplitter->setStretchFactor(1, 44); m_contentSplitter->setSizes({430, 330});
     rootLayout->addWidget(m_contentSplitter, 1);
 
     auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
@@ -346,12 +362,12 @@ void CommandPaletteDialog::keyPressEvent(QKeyEvent* event) {
 void CommandPaletteDialog::positionOverlayNearTopCenter() {
     if (QWidget* p = parentWidget()) {
         const QRect g = p->geometry();
-        const int maxW = qMax(640, g.width() - 64), maxH = qMax(420, g.height() - 64);
-        const int w = qMin(maxW, qBound(920, (g.width() * 66) / 100, 1120));
-        const int h = qMin(maxH, qBound(560, (g.height() * 64) / 100, 720));
+        const int maxW = qMax(540, g.width() - 48), maxH = qMax(360, g.height() - 48);
+        const int w = qMin(maxW, 780);
+        const int h = qMin(maxH, 460);
         resize(w, h);
-        if (m_contentSplitter) m_contentSplitter->setSizes({(w * 58) / 100, (w * 42) / 100});
-        move(p->mapToGlobal(QPoint((g.width() - w) / 2, qMax(24, (g.height() - h) / 5))));
+        if (m_contentSplitter) m_contentSplitter->setSizes({(w * 56) / 100, (w * 44) / 100});
+        move(p->mapToGlobal(QPoint((g.width() - w) / 2, qMax(24, (g.height() - h) / 6))));
     }
 }
 
@@ -441,14 +457,18 @@ void CommandPaletteDialog::refreshFilteredResults() {
     });
 
     m_filteredItems.clear(); m_filteredMatchIndices.clear(); m_resultsList->clear();
+    QString wsPrefix = QDir::cleanPath(m_activeWorkspaceRoot);
+    if (!wsPrefix.isEmpty() && !wsPrefix.endsWith(QLatin1Char('/'))) wsPrefix.append(QLatin1Char('/'));
     const int maxVisible = qMin(static_cast<int>(scored.size()), 250);
     for (int i = 0; i < maxVisible; ++i) {
         const ScoredEntry& se = scored.at(i);
         const PaletteItem item = se.isDynamic ? se.dynamicItem : m_allItems.at(se.itemIndex);
         m_filteredItems.append(item); m_filteredMatchIndices.append(se.matchedIndices);
+        QString displaySub = item.subtitle;
+        if (!wsPrefix.isEmpty() && displaySub.startsWith(wsPrefix)) displaySub = displaySub.mid(wsPrefix.size());
         auto* li = new QListWidgetItem(item.title, m_resultsList);
         li->setToolTip(item.subtitle.isEmpty() ? item.title : item.subtitle);
-        li->setData(Qt::UserRole, item.title); li->setData(Qt::UserRole + 1, item.subtitle);
+        li->setData(Qt::UserRole, item.title); li->setData(Qt::UserRole + 1, displaySub);
         li->setData(Qt::UserRole + 2, item.isRecent && query.isEmpty() ? QStringLiteral("Recent") : item.badge);
         li->setData(Qt::UserRole + 3, static_cast<int>(item.category));
         QVariantList matchVars; for (int pos : se.matchedIndices) matchVars.append(pos);

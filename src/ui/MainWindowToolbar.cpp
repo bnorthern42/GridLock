@@ -9,6 +9,7 @@
 #include "MainWindow.hpp"
 
 #include "../core/managers/ConfigManager.hpp"
+#include "../core/managers/ThemeManager.hpp"
 #include "EditorTabManager.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "utils/FileDialogHelper.hpp"
@@ -24,11 +25,15 @@
 #include <QFont>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLayout>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPen>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
@@ -40,6 +45,26 @@
 #include <QWidgetAction>
 
 namespace gridlock::ui {
+namespace {
+
+QIcon makeSearchMagnifierIcon() {
+  QPixmap pm(32, 32);
+  pm.setDevicePixelRatio(2.0);
+  pm.fill(Qt::transparent);
+  QPainter p(&pm);
+  p.setRenderHint(QPainter::Antialiasing, true);
+  const auto pal = gridlock::core::ThemeManager::paletteForTheme(
+      gridlock::core::ThemeManager::instance().activeThemeId());
+  QPen pen(QColor(pal.textHex), 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+  p.setPen(pen);
+  p.setBrush(Qt::NoBrush);
+  p.drawEllipse(QRectF(2.5, 2.5, 8.2, 8.2));
+  p.drawLine(QPointF(9.6, 9.6), QPointF(13.6, 13.6));
+  p.end();
+  return QIcon(pm);
+}
+
+}  // namespace
 
 /** @brief Initializes main window geometry, Cutter-style dock layout, and toolbars. */
 void MainWindow::setupUi() {
@@ -82,7 +107,7 @@ void MainWindow::setupToolbar() {
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
   m_targetSelector->setMinimumContentsLength(12);
   m_targetSelector->setMinimumWidth(165);
-  m_targetSelector->setMaximumWidth(166);
+  m_targetSelector->setMaximumWidth(165);
   m_targetSelector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_targetSelector->setFixedHeight(26);
   if (m_targetSelector->view()) { m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle); m_targetSelector->view()->setMinimumWidth(260); }
@@ -372,12 +397,13 @@ void MainWindow::setupToolbar() {
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this), &QShortcut::activated, this, &MainWindow::navigateForward);
 
   // Global Search Everywhere pill button (#toolbarSearchEverywhereBtn) advertising Double Shift / Ctrl+P.
-  auto* searchEverywhereBtn = new QPushButton(QStringLiteral("⌕"), toolbar);
+  auto* searchEverywhereBtn = new QPushButton(QString(), toolbar);
   searchEverywhereBtn->setObjectName(QStringLiteral("toolbarSearchEverywhereBtn"));
-  searchEverywhereBtn->setMinimumSize(28, 24);
-  searchEverywhereBtn->setFixedSize(28, 26);
-  searchEverywhereBtn->setIconSize(QSize(14, 14));
-  searchEverywhereBtn->setStyleSheet(QStringLiteral("QPushButton#toolbarSearchEverywhereBtn { min-width: 28px; min-height: 24px; padding: 2px 4px; font-size: 13px; }"));
+  searchEverywhereBtn->setIcon(makeSearchMagnifierIcon());
+  searchEverywhereBtn->setIconSize(QSize(16, 16));
+  searchEverywhereBtn->setMinimumSize(30, 24);
+  searchEverywhereBtn->setFixedSize(30, 26);
+  searchEverywhereBtn->setStyleSheet(QStringLiteral("QPushButton#toolbarSearchEverywhereBtn { min-width: 28px; min-height: 24px; padding: 2px 4px; }"));
   searchEverywhereBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   searchEverywhereBtn->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
   connect(searchEverywhereBtn, &QPushButton::clicked, this, [this]() { openSearchEverywhere(0); });

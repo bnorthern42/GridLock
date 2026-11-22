@@ -581,10 +581,10 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QAction* runMenuAct = nullptr; for (QAction* da : debugMenu ? debugMenu->actions() : QList<QAction*>()) { if (da->objectName() == QLatin1String("actionRunTarget") || da->text().contains(QStringLiteral("Run Target"))) runMenuAct = da; QVERIFY2(!da->isCheckable(), qPrintable(QStringLiteral("Non-toggle Debug menu action '%1' must not be checkable").arg(da->text()))); }
     QVERIFY(debugMenu != nullptr && runMenuAct != nullptr && !runMenuAct->isCheckable());
     auto* searchBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarSearchEverywhereBtn"));
-    QVERIFY2(searchBtn && searchBtn->width() >= 26 && searchBtn->height() >= 22, qPrintable(QStringLiteral("searchBtn=%1x%2").arg(searchBtn ? searchBtn->width() : -1).arg(searchBtn ? searchBtn->height() : -1)));
+    QVERIFY2(searchBtn && !searchBtn->icon().isNull() && searchBtn->width() >= 26 && searchBtn->height() >= 22, qPrintable(QStringLiteral("searchBtn=%1x%2 iconNull=%3").arg(searchBtn ? searchBtn->width() : -1).arg(searchBtn ? searchBtn->height() : -1).arg(!searchBtn || searchBtn->icon().isNull())));
     searchBtn->click(); QApplication::processEvents();
     auto* palDlg = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
-    QVERIFY2(palDlg && palDlg->isVisible() && palDlg->width() >= 860 && palDlg->height() >= 500, qPrintable(QStringLiteral("palDlg=%1x%2").arg(palDlg ? palDlg->width() : -1).arg(palDlg ? palDlg->height() : -1)));
+    QVERIFY2(palDlg && palDlg->isVisible() && palDlg->width() >= 720 && palDlg->width() <= 860 && palDlg->height() >= 420 && palDlg->height() <= 520, qPrintable(QStringLiteral("palDlg=%1x%2").arg(palDlg ? palDlg->width() : -1).arg(palDlg ? palDlg->height() : -1)));
     palDlg->reject(); QApplication::processEvents();
     rankSpin->setValue(1); mw.setWorkspacePerspective(QStringLiteral("Source")); QApplication::processEvents();
     auto* extBtn = mainTb->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
