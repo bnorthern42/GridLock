@@ -10,16 +10,21 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <QDir>
 #include <QKeySequence>
 #include <QMap>
+#include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QString>
+#include <QStringList>
 #include <toml++/toml.h>
 
 namespace gridlock::core {
@@ -249,6 +254,17 @@ class ConfigManager {
   /** @brief Updates and saves `[ui] open_unfocused` in `config.toml`. */
   void setOpenUnfocused(bool unfocused);
 
+  /** @brief Returns the canonical default `#MainToolbar` ordered item token list. */
+  static QStringList defaultToolbarLayout();
+  /** @brief Returns the persisted `#MainToolbar` item token list from `[ui] toolbar_layout` in `config.toml` or `QSettings`. */
+  QStringList toolbarLayout() const;
+  /** @brief Persists @p items to `[ui] toolbar_layout` in `config.toml` and `QSettings`, then notifies listeners via `toolbarLayoutChanged()`. */
+  void setToolbarLayout(const QStringList& items);
+  /** @brief Broadcasts the updated toolbar layout to all live `QPointer`-guarded `MainWindow` listeners. */
+  void toolbarLayoutChanged();
+  /** @brief Registers a `QPointer`-guarded callback invoked whenever `setToolbarLayout()` updates the toolbar layout. */
+  void registerToolbarLayoutListener(QObject* context, std::function<void(const QStringList&)> callback);
+
   /** @brief Returns the persisted theme name from .gridlock/workspace.toml or QSettings. */
   QString getThemeName() const;
   /** @brief Persists the theme name to .gridlock/workspace.toml and QSettings. */
@@ -348,6 +364,7 @@ class ConfigManager {
   QString m_globalConfigPath; ///< Absolute path to the active `config.toml` file.
   QString m_debuggerEngine = QStringLiteral("gdb"); ///< Active local debugger backend engine identifier.
   mutable QMap<QString, QString> m_targetProgramArgs; ///< In-memory per-target CLI arguments for standalone binaries.
+  std::vector<std::pair<QPointer<QObject>, std::function<void(const QStringList&)>>> m_toolbarLayoutListeners; ///< Live toolbar layout observers.
 
   static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
   static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.

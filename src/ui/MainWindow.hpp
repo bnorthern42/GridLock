@@ -243,6 +243,8 @@ public:
     bool captureWorkspaceSnapshot(const QString& outputPath);
     /** @brief Applies standard workstation dock arrangement and metric constraints. */
     void applyCutterWorkspaceLayout();
+    /** @brief Reorders, shows/hides, and inserts spacers/separators on `#MainToolbar` from @p layout tokens. */
+    void rebuildToolbarFromLayout(const QStringList& layout);
     /** @brief Seeks memory, disassembly, and decompiler views to an address or symbol. */
     bool seekToAddressOrExpression(const QString& expr);
     /** @brief Synthesizes a deterministic memory window for preview/fallback targets. */
@@ -441,6 +443,22 @@ private:
     QPushButton* m_perspDebugBtn = nullptr;
     QPushButton* m_perspBinaryBtn = nullptr;
     QPushButton* m_perspMpiBtn = nullptr;
+    QAction* m_targetSelectorAct = nullptr;
+    QAction* m_launchOptionsAct = nullptr;
+    QAction* m_rankCountAct = nullptr;
+    QAction* m_buildSplitAct = nullptr;
+    QAction* m_pauseAllTbAct = nullptr;
+    QAction* m_recordHistoryAct = nullptr;
+    QAction* m_stepBackTbAct = nullptr;
+    QAction* m_revContinueTbAct = nullptr;
+    QAction* m_navBackTbAct = nullptr;
+    QAction* m_navForwardTbAct = nullptr;
+    QAction* m_searchEverywhereAct = nullptr;
+    QAction* m_seekBarTbAct = nullptr;
+    QMenu* m_stepIntoMenu = nullptr;
+    QList<QAction*> m_perspActs;
+    QList<QAction*> m_dynamicToolbarActions;
+    QList<QPointer<QWidget>> m_dynamicToolbarWidgets;
 
     // Backend Coordinators, Rank Caches & Modeless Tool Dialogs
     IBackendCoordinator* m_coordinator = nullptr;

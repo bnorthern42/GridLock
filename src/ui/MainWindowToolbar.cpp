@@ -18,10 +18,12 @@
 
 #include <QAbstractItemView>
 #include <QAction>
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QDockWidget>
+#include <QEvent>
 #include <QFont>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -161,7 +163,15 @@ void MainWindow::setupToolbar() {
       syncTargetTooltip();
     }
   });
-  toolbar->addWidget(m_targetSelector);
+  auto wrapToolbarWidget = [this, toolbar](QWidget* w, const QString& actObj = QString()) -> QAction* {
+    auto* wa = new QWidgetAction(this);
+    if (!actObj.isEmpty()) wa->setObjectName(actObj);
+    wa->setDefaultWidget(w);
+    wa->setToolTip(w->toolTip());
+    toolbar->addAction(wa);
+    return wa;
+  };
+  m_targetSelectorAct = wrapToolbarWidget(m_targetSelector);
 
   // Inline ⚙ Launch Options popover bound directly to ProjectSettings (--args, Working Directory, Stop at main()).
   m_launchOptionsBtn = new QToolButton(toolbar);
@@ -243,7 +253,7 @@ void MainWindow::setupToolbar() {
     if (!picked.isEmpty() && m_launchOptionsWorkDirEdit) { m_launchOptionsWorkDirEdit->setText(picked); persistLaunchOpts(); }
   });
   connect(m_launchOptionsStopAtMainCheck, &QCheckBox::toggled, this, &MainWindow::setStopAtMainOnLaunch);
-  toolbar->addWidget(m_launchOptionsBtn)->setToolTip(m_launchOptionsBtn->toolTip());
+  m_launchOptionsAct = wrapToolbarWidget(m_launchOptionsBtn);
 
   // Compact self-labeled MPI rank count spin box ("np: 8").
   m_rankCountSpin = new QSpinBox(toolbar);
@@ -261,8 +271,7 @@ void MainWindow::setupToolbar() {
     syncRankCountChrome(val);
     syncExecutionScopeUi();
   });
-  toolbar->addWidget(m_rankCountSpin);
-  toolbar->addSeparator();
+  m_rankCountAct = wrapToolbarWidget(m_rankCountSpin);
 
   auto makeDbgAct = [&](const QString& text, const QString& obj, const QString& iconText,
                         const QKeySequence& ks, auto slot, bool addToBar = true) {
@@ -289,7 +298,7 @@ void MainWindow::setupToolbar() {
   buildMenu->addAction(QStringLiteral("Clean Target"), this, &MainWindow::cleanTargetWorkflow);
   buildMenu->addAction(QStringLiteral("Rebuild Target"), this, &MainWindow::rebuildTargetWorkflow);
   buildSplitBtn->setMenu(buildMenu);
-  toolbar->addWidget(buildSplitBtn);
+  m_buildSplitAct = wrapToolbarWidget(buildSplitBtn);
 
   // Run Action: Compiles active target on-demand, latches Running state only on valid launch, and pauses at main() or first BP.
   m_runAction = makeDbgAct(QStringLiteral("▶ Run Target"), QStringLiteral("actionRunTarget"), QStringLiteral("▶ Run"), QKeySequence(), [this]() {
@@ -298,7 +307,6 @@ void MainWindow::setupToolbar() {
     startTargetWorkflow();
     updateDebugToolbarState();
   });
-  if (QWidget* runBtn = toolbar->widgetForAction(m_runAction)) runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
 
   // Multi-rank execution scope pill: All Ranks vs. Focused Rank k (shown automatically when ranks > 1).
   m_executionScopeCombo = new QComboBox(toolbar);
@@ -311,18 +319,13 @@ void MainWindow::setupToolbar() {
   m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0);
   m_executionScopeCombo->setCurrentIndex(0);
   connect(m_executionScopeCombo, &QComboBox::currentIndexChanged, this, [this](int) { syncExecutionScopeUi(); });
-  m_executionScopeAction = toolbar->addWidget(m_executionScopeCombo);
+  m_executionScopeAction = wrapToolbarWidget(m_executionScopeCombo);
   m_executionScopeAction->setVisible(false);
 
   // Continue (F5), Step Over (F10), Step Into (F11 + stepi/nexti menu), Step Out (Shift+F11), Pause, Pause All (F6), Stop (Shift+F5).
   m_continueAction = makeDbgAct(QStringLiteral("Continue"), QStringLiteral("debug.continue"), QStringLiteral("Cont"),
                                 QKeySequence(Qt::Key_F5), &MainWindow::continueExecutionWorkflow);
   if (style()) m_continueAction->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
-  if (auto* contBtn = qobject_cast<QToolButton*>(toolbar->widgetForAction(m_continueAction))) {
-    contBtn->setObjectName(QStringLiteral("toolbarContinueBtn"));
-    contBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    contBtn->setStyleSheet(QStringLiteral("QToolButton { padding: 1px 2px; }"));
-  }
   connect(m_continueAction, &QAction::changed, this, &MainWindow::syncExecutionScopeUi);
   m_stepOverAction = makeDbgAct(QStringLiteral("Step Over"), QStringLiteral("debug.step_over"), QStringLiteral("↷ Over"),
                                 QKeySequence(Qt::Key_F10), &MainWindow::stepOverWorkflow);
@@ -330,16 +333,11 @@ void MainWindow::setupToolbar() {
                                 QKeySequence(Qt::Key_F11), &MainWindow::stepIntoWorkflow);
   m_stepAction = makeDbgAct(QStringLiteral("Step Instruction (stepi)"), QStringLiteral("actionStepInstruction"),
                             QString(), QKeySequence(), &MainWindow::stepInstructionWorkflow, false);
-  if (auto* intoBtn = qobject_cast<QToolButton*>(toolbar->widgetForAction(m_stepIntoAction))) {
-    intoBtn->setObjectName(QStringLiteral("toolbarStepIntoBtn"));
-    intoBtn->setPopupMode(QToolButton::MenuButtonPopup);
-    auto* stepMenu = new QMenu(intoBtn);
-    stepMenu->addAction(m_stepAction);
-    QAction* nextiAct = stepMenu->addAction(QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"), this,
-                                            &MainWindow::nextInstructionWorkflow);
-    nextiAct->setObjectName(QStringLiteral("actionToolbarNexti"));
-    intoBtn->setMenu(stepMenu);
-  }
+  m_stepIntoMenu = new QMenu(this);
+  m_stepIntoMenu->addAction(m_stepAction);
+  QAction* nextiAct = m_stepIntoMenu->addAction(QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"), this,
+                                                &MainWindow::nextInstructionWorkflow);
+  nextiAct->setObjectName(QStringLiteral("actionToolbarNexti"));
   m_stepOutAction = makeDbgAct(QStringLiteral("Step Out"), QStringLiteral("debug.step_out"), QStringLiteral("↱ Out"),
                                QKeySequence(Qt::SHIFT | Qt::Key_F11), &MainWindow::stepOutWorkflow);
   m_pauseAction = makeDbgAct(QStringLiteral("Pause"), QStringLiteral("actionPauseRank"), QStringLiteral("⏸"),
@@ -350,9 +348,8 @@ void MainWindow::setupToolbar() {
   pauseAllBtn->setObjectName(QStringLiteral("toolbarPauseAllRanksBtn"));
   pauseAllBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
   pauseAllBtn->setDefaultAction(m_pauseAllAction);
-  QAction* pauseAllTbAct = toolbar->addWidget(pauseAllBtn);
-  pauseAllTbAct->setObjectName(QStringLiteral("actionToolbarPauseAllRanks"));
-  pauseAllTbAct->setVisible(false);
+  m_pauseAllTbAct = wrapToolbarWidget(pauseAllBtn, QStringLiteral("actionToolbarPauseAllRanks"));
+  m_pauseAllTbAct->setVisible(false);
   m_stopAction = makeDbgAct(QStringLiteral("Stop Session"), QStringLiteral("debug.stop"), QStringLiteral("■ Stop"),
                             QKeySequence(Qt::SHIFT | Qt::Key_F5), &MainWindow::stopTargetWorkflow);
 
@@ -364,35 +361,27 @@ void MainWindow::setupToolbar() {
   sbBtn->setObjectName(QStringLiteral("toolbarStepBackBtn"));
   auto* rcBtn = new QPushButton(QStringLiteral("⏮ Rev"), toolbar);
   rcBtn->setObjectName(QStringLiteral("toolbarReverseContinueBtn"));
-  toolbar->addWidget(recBtn);
-  QAction* sbAct = toolbar->addWidget(sbBtn); sbAct->setObjectName(QStringLiteral("actionToolbarStepBack")); sbAct->setVisible(false);
-  QAction* rcAct = toolbar->addWidget(rcBtn); rcAct->setObjectName(QStringLiteral("actionToolbarReverseContinue")); rcAct->setVisible(false);
+  m_recordHistoryAct = wrapToolbarWidget(recBtn);
+  m_stepBackTbAct = wrapToolbarWidget(sbBtn, QStringLiteral("actionToolbarStepBack"));
+  m_stepBackTbAct->setVisible(false);
+  m_revContinueTbAct = wrapToolbarWidget(rcBtn, QStringLiteral("actionToolbarReverseContinue"));
+  m_revContinueTbAct->setVisible(false);
   connect(recBtn, &QPushButton::toggled, this, [this](bool on) { if (m_coordinator) m_coordinator->setReverseRecordingEnabled(activeSteppingRank(), on); updateDebugToolbarState(); });
   connect(sbBtn, &QPushButton::clicked, this, [this]() { reverseStepOverWorkflow(); });
   connect(rcBtn, &QPushButton::clicked, this, [this]() { reverseContinueWorkflow(); });
 
-  // Initialize state-aware toolbar button enablement and descriptive tooltips.
-  updateDebugToolbarState(); syncExecutionScopeUi();
-  for (QToolButton* btn : toolbar->findChildren<QToolButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
-  for (QPushButton* btn : toolbar->findChildren<QPushButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
-
-  // Expanding spacer separating execution controls from right-aligned navigation & seek controls.
-  auto* spacer = new QWidget(toolbar);
-  spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-  spacer->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
-  toolbar->addWidget(spacer);
-
   // History back/forward navigation buttons (< / >) and Alt+Left/Right shortcuts.
-  auto makeNavBtn = [&](const QString& label, const QString& obj, const QString& actObj, const QString& tip, auto slot) {
+  auto makeNavBtn = [&](const QString& label, const QString& obj, const QString& actObj, const QString& tip, auto slot, QAction** outAct) {
     auto* btn = new QPushButton(label, toolbar);
     btn->setObjectName(obj); btn->setFixedSize(20, 26); btn->setEnabled(false);
     btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); btn->setToolTip(tip);
     connect(btn, &QPushButton::clicked, this, slot);
-    QAction* act = toolbar->addWidget(btn); act->setObjectName(actObj); act->setVisible(false);
+    *outAct = wrapToolbarWidget(btn, actObj);
+    (*outAct)->setVisible(false);
     return btn;
   };
-  m_navBackBtn = makeNavBtn(QStringLiteral("<"), QStringLiteral("navBackButton"), QStringLiteral("actionToolbarNavBack"), QStringLiteral("Navigate Back in Address History (Alt+Left)"), &MainWindow::navigateBack);
-  m_navForwardBtn = makeNavBtn(QStringLiteral(">"), QStringLiteral("navForwardButton"), QStringLiteral("actionToolbarNavForward"), QStringLiteral("Navigate Forward in Address History (Alt+Right)"), &MainWindow::navigateForward);
+  m_navBackBtn = makeNavBtn(QStringLiteral("<"), QStringLiteral("navBackButton"), QStringLiteral("actionToolbarNavBack"), QStringLiteral("Navigate Back in Address History (Alt+Left)"), &MainWindow::navigateBack, &m_navBackTbAct);
+  m_navForwardBtn = makeNavBtn(QStringLiteral(">"), QStringLiteral("navForwardButton"), QStringLiteral("actionToolbarNavForward"), QStringLiteral("Navigate Forward in Address History (Alt+Right)"), &MainWindow::navigateForward, &m_navForwardTbAct);
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this), &QShortcut::activated, this, &MainWindow::navigateBack);
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this), &QShortcut::activated, this, &MainWindow::navigateForward);
 
@@ -407,15 +396,20 @@ void MainWindow::setupToolbar() {
   searchEverywhereBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
   searchEverywhereBtn->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
   connect(searchEverywhereBtn, &QPushButton::clicked, this, [this]() { openSearchEverywhere(0); });
-  toolbar->addWidget(searchEverywhereBtn);
+  m_searchEverywhereAct = wrapToolbarWidget(searchEverywhereBtn);
 
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
   m_seekBar->setPlaceholderText(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
   m_seekBar->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P) — or Go to Address / Symbol (Ctrl+G)"));
   m_seekBar->setFixedHeight(26); m_seekBar->setFixedWidth(40);
-  QAction* seekAct = toolbar->addWidget(m_seekBar); seekAct->setObjectName(QStringLiteral("actionToolbarSeekBar")); seekAct->setVisible(false);
+  m_seekBarTbAct = wrapToolbarWidget(m_seekBar, QStringLiteral("actionToolbarSeekBar"));
+  m_seekBarTbAct->setVisible(false);
   connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() { seekToAddressOrExpression(m_seekBar->text()); });
+
+  auto& cfg = gridlock::core::ConfigManager::instance();
+  cfg.registerToolbarLayoutListener(this, [this](const QStringList& layout) { rebuildToolbarFromLayout(layout); });
+  rebuildToolbarFromLayout(cfg.toolbarLayout());
 
   // Secondary toolbar break for interactive address space navigation ribbon (hidden until Binary perspective / DisassemblyView).
   addToolBarBreak(Qt::TopToolBarArea);
@@ -427,6 +421,173 @@ void MainWindow::setupToolbar() {
   new DynamicAddressRibbonFilter(m_addressNavBar, [this](uint64_t addr) { seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0'))); });
   navToolbar->addWidget(m_addressNavBar);
   navToolbar->setVisible(false);
+}
+
+/** @brief Rebuilds `#MainToolbar` item ordering, visibility, spacers, and separators from @p layout. */
+void MainWindow::rebuildToolbarFromLayout(const QStringList& layout) {
+  auto* toolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"));
+  if (!toolbar) return;
+
+  if (m_perspSourceBtn && m_perspActs.isEmpty()) {
+    for (QPushButton* pb : {m_perspSourceBtn, m_perspDebugBtn, m_perspBinaryBtn, m_perspMpiBtn}) {
+      if (!pb) continue;
+      QAction* found = nullptr;
+      for (QAction* a : toolbar->actions()) {
+        if (auto* wa = qobject_cast<QWidgetAction*>(a); wa && wa->defaultWidget() == pb) {
+          wa->setParent(this);
+          found = wa;
+          break;
+        }
+      }
+      if (!found) {
+        auto* wa = new QWidgetAction(this);
+        wa->setDefaultWidget(pb);
+        found = wa;
+      }
+      m_perspActs.append(found);
+    }
+  }
+
+  for (QAction* da : m_dynamicToolbarActions) { toolbar->removeAction(da); delete da; }
+  m_dynamicToolbarActions.clear();
+  for (const QPointer<QWidget>& dw : m_dynamicToolbarWidgets) { if (dw) delete dw.data(); }
+  m_dynamicToolbarWidgets.clear();
+
+  const QList<QAction*> curActs = toolbar->actions();
+  for (QAction* act : curActs) {
+    toolbar->removeAction(act);
+    if (act && act->isSeparator() && act->parent() == toolbar) delete act;
+  }
+
+  auto hideWa = [toolbar](QAction* a) {
+    if (auto* wa = qobject_cast<QWidgetAction*>(a)) {
+      wa->setVisible(false);
+      if (QWidget* w = wa->defaultWidget()) {
+        if (w->parentWidget() != toolbar) w->setParent(toolbar);
+        w->hide();
+      }
+    }
+  };
+  for (QAction* a : {m_targetSelectorAct, m_launchOptionsAct, m_rankCountAct, m_buildSplitAct,
+                     m_executionScopeAction, m_pauseAllTbAct, m_recordHistoryAct, m_stepBackTbAct,
+                     m_revContinueTbAct, m_navBackTbAct, m_navForwardTbAct, m_searchEverywhereAct,
+                     m_seekBarTbAct}) {
+    hideWa(a);
+  }
+  for (QAction* pa : m_perspActs) hideWa(pa);
+
+  auto showAndAddWa = [toolbar](QAction* a) {
+    if (!a) return;
+    toolbar->addAction(a);
+    a->setVisible(true);
+    if (auto* wa = qobject_cast<QWidgetAction*>(a); wa && wa->defaultWidget()) wa->defaultWidget()->show();
+  };
+
+  const QStringList effective = layout.isEmpty() ? gridlock::core::ConfigManager::defaultToolbarLayout() : layout;
+  bool addedNavSeek = false;
+  for (const QString& rawTok : effective) {
+    const QString tok = rawTok.trimmed().toLower();
+    if (tok == QStringLiteral("target_selector")) {
+      showAndAddWa(m_targetSelectorAct);
+    } else if (tok == QStringLiteral("config_menu")) {
+      showAndAddWa(m_launchOptionsAct);
+    } else if (tok == QStringLiteral("rank_spin")) {
+      showAndAddWa(m_rankCountAct);
+    } else if (tok == QStringLiteral("build")) {
+      showAndAddWa(m_buildSplitAct);
+    } else if (tok == QStringLiteral("run")) {
+      if (m_runAction) toolbar->addAction(m_runAction);
+      if (m_executionScopeAction) toolbar->addAction(m_executionScopeAction);
+    } else if (tok == QStringLiteral("continue")) {
+      if (m_continueAction) toolbar->addAction(m_continueAction);
+    } else if (tok == QStringLiteral("step_over")) {
+      if (m_stepOverAction) toolbar->addAction(m_stepOverAction);
+    } else if (tok == QStringLiteral("step_into")) {
+      if (m_stepIntoAction) toolbar->addAction(m_stepIntoAction);
+    } else if (tok == QStringLiteral("step_out")) {
+      if (m_stepOutAction) toolbar->addAction(m_stepOutAction);
+    } else if (tok == QStringLiteral("pause")) {
+      if (m_pauseAction) toolbar->addAction(m_pauseAction);
+      if (m_pauseAllTbAct) toolbar->addAction(m_pauseAllTbAct);
+    } else if (tok == QStringLiteral("stop")) {
+      if (m_stopAction) toolbar->addAction(m_stopAction);
+    } else if (tok == QStringLiteral("record")) {
+      showAndAddWa(m_recordHistoryAct);
+      if (m_stepBackTbAct) toolbar->addAction(m_stepBackTbAct);
+      if (m_revContinueTbAct) toolbar->addAction(m_revContinueTbAct);
+    } else if (tok == QStringLiteral("search_everywhere")) {
+      if (m_navBackTbAct) toolbar->addAction(m_navBackTbAct);
+      if (m_navForwardTbAct) toolbar->addAction(m_navForwardTbAct);
+      showAndAddWa(m_searchEverywhereAct);
+      if (m_seekBarTbAct) toolbar->addAction(m_seekBarTbAct);
+      addedNavSeek = true;
+    } else if (tok == QStringLiteral("perspectives")) {
+      if (!addedNavSeek && !effective.contains(QStringLiteral("search_everywhere"))) {
+        if (m_navBackTbAct) toolbar->addAction(m_navBackTbAct);
+        if (m_navForwardTbAct) toolbar->addAction(m_navForwardTbAct);
+        if (m_seekBarTbAct) toolbar->addAction(m_seekBarTbAct);
+        addedNavSeek = true;
+      }
+      for (QAction* pa : m_perspActs) showAndAddWa(pa);
+    } else if (tok == QStringLiteral("separator")) {
+      m_dynamicToolbarActions.append(toolbar->addSeparator());
+    } else if (tok == QStringLiteral("spacer")) {
+      auto* sp = new QWidget(toolbar);
+      sp->setObjectName(QStringLiteral("toolbarFlexSpacer"));
+      sp->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+      sp->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+      QAction* sa = toolbar->addWidget(sp);
+      sp->show();
+      m_dynamicToolbarActions.append(sa);
+      m_dynamicToolbarWidgets.append(sp);
+    }
+  }
+  if (!addedNavSeek) {
+    if (m_navBackTbAct) toolbar->addAction(m_navBackTbAct);
+    if (m_navForwardTbAct) toolbar->addAction(m_navForwardTbAct);
+    if (m_seekBarTbAct) toolbar->addAction(m_seekBarTbAct);
+  }
+
+  QApplication::sendPostedEvents(toolbar, QEvent::LayoutRequest);
+  if (QLayout* tbLay = toolbar->layout()) {
+    tbLay->invalidate();
+    tbLay->activate();
+  }
+
+  if (QWidget* runBtn = toolbar->widgetForAction(m_runAction)) runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
+  if (auto* contBtn = qobject_cast<QToolButton*>(toolbar->widgetForAction(m_continueAction))) {
+    contBtn->setObjectName(QStringLiteral("toolbarContinueBtn"));
+    contBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    contBtn->setStyleSheet(QStringLiteral("QToolButton { padding: 1px 2px; }"));
+  }
+  if (auto* intoBtn = qobject_cast<QToolButton*>(toolbar->widgetForAction(m_stepIntoAction))) {
+    intoBtn->setObjectName(QStringLiteral("toolbarStepIntoBtn"));
+    intoBtn->setPopupMode(QToolButton::MenuButtonPopup);
+    intoBtn->setMenu(m_stepIntoMenu);
+  }
+  for (QToolButton* btn : toolbar->findChildren<QToolButton*>()) {
+    btn->setFixedHeight(26);
+    btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  }
+  for (QPushButton* btn : toolbar->findChildren<QPushButton*>()) {
+    if (!btn->objectName().startsWith(QStringLiteral("perspective"))) btn->setFixedHeight(26);
+    btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  }
+
+  updateDebugToolbarState();
+  syncExecutionScopeUi();
+  const bool isBin = (m_workspacePerspective.compare(QStringLiteral("Binary"), Qt::CaseInsensitive) == 0 ||
+                      m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0);
+  for (QAction* binAct : {m_navBackTbAct, m_navForwardTbAct, m_seekBarTbAct}) {
+    if (!binAct) continue;
+    binAct->setVisible(isBin);
+    if (auto* wa = qobject_cast<QWidgetAction*>(binAct); wa && wa->defaultWidget()) wa->defaultWidget()->setVisible(isBin);
+  }
+  if (QLayout* tbLay = toolbar->layout()) {
+    tbLay->invalidate();
+    tbLay->activate();
+  }
+  QApplication::sendPostedEvents(toolbar, QEvent::LayoutRequest);
 }
 
 /** @brief Synchronizes #MainToolbar action enablement, state-aware tooltips, and reverse-debug controls. */
@@ -490,6 +651,8 @@ void MainWindow::registerViewMenuToolbarAndDockActions() {
     for (auto* tb : findChildren<QToolBar*>()) { tb->setMovable(true); toolbarsMenu->addAction(tb->toggleViewAction()); }
     toolbarsMenu->addSeparator();
     toolbarsMenu->addAction(QStringLiteral("Reset Toolbars"), this, [this]() {
+      gridlock::core::ConfigManager::instance().setToolbarLayout(
+          gridlock::core::ConfigManager::defaultToolbarLayout());
       for (auto* tb : findChildren<QToolBar*>()) {
         addToolBar(Qt::TopToolBarArea, tb);
         tb->setVisible(tb->objectName() != QStringLiteral("AddressNavToolbar") || m_workspacePerspective == QStringLiteral("Binary") ||
@@ -516,6 +679,7 @@ void MainWindow::registerViewMenuToolbarAndDockActions() {
   QSettings settings("gridlock", "debugger");
   settings.remove("MainWindow/Geometry_v8"); settings.remove("MainWindow/State_v8");
   settings.remove("MainWindow/Splitter_v8_MasterHorizontalSplitter"); settings.remove("MainWindow/Splitter_v8_MainVerticalSplitter");
+  rebuildToolbarFromLayout(gridlock::core::ConfigManager::instance().toolbarLayout());
 }
 
 }  // namespace gridlock::ui

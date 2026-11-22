@@ -298,4 +298,48 @@ void ConfigManager::setCustomShortcuts(const QMap<QString, QKeySequence>& overri
   s.sync();
 }
 
+/** @brief Returns the canonical default `#MainToolbar` ordered item token list. */
+QStringList ConfigManager::defaultToolbarLayout() {
+  return {
+      QStringLiteral("target_selector"),
+      QStringLiteral("config_menu"),
+      QStringLiteral("rank_spin"),
+      QStringLiteral("separator"),
+      QStringLiteral("build"),
+      QStringLiteral("run"),
+      QStringLiteral("continue"),
+      QStringLiteral("step_over"),
+      QStringLiteral("step_into"),
+      QStringLiteral("step_out"),
+      QStringLiteral("pause"),
+      QStringLiteral("stop"),
+      QStringLiteral("record"),
+      QStringLiteral("spacer"),
+      QStringLiteral("search_everywhere"),
+      QStringLiteral("perspectives"),
+  };
+}
+
+/** @brief Registers a `QPointer`-guarded callback invoked whenever `setToolbarLayout()` updates the toolbar layout. */
+void ConfigManager::registerToolbarLayoutListener(
+    QObject* context, std::function<void(const QStringList&)> callback) {
+  if (!context || !callback) return;
+  m_toolbarLayoutListeners.emplace_back(QPointer<QObject>(context), std::move(callback));
+}
+
+/** @brief Broadcasts the active toolbar layout to all live `QPointer`-guarded listeners, pruning destroyed receivers. */
+void ConfigManager::toolbarLayoutChanged() {
+  const QStringList current = toolbarLayout();
+  auto it = m_toolbarLayoutListeners.begin();
+  while (it != m_toolbarLayoutListeners.end()) {
+    if (it->first.isNull()) {
+      it = m_toolbarLayoutListeners.erase(it);
+    } else {
+      auto cb = it->second;
+      ++it;
+      if (cb) cb(current);
+    }
+  }
+}
+
 }  // namespace gridlock::core

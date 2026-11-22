@@ -609,6 +609,26 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
         const QImage tbMpi1280 = mainTb->grab().toImage(); mw.resize(1600, 900); QApplication::processEvents(); const QImage tbMpi1600 = mainTb->grab().toImage();
         QImage out(1600, tbSrc1280.height() + tbMpi1280.height() + tbMpi1600.height() + 24, QImage::Format_ARGB32_Premultiplied); out.fill(QColor(15, 23, 42)); QPainter p(&out); p.drawImage(0, 4, tbSrc1280); p.drawImage(0, tbSrc1280.height() + 12, tbMpi1280); p.drawImage(0, tbSrc1280.height() + tbMpi1280.height() + 20, tbMpi1600); p.end(); out.save(tbPng);
     }
+    {
+        auto& cfg = gridlock::core::ConfigManager::instance();
+        struct TbLayoutGuard { ~TbLayoutGuard() { gridlock::core::ConfigManager::instance().setToolbarLayout(gridlock::core::ConfigManager::defaultToolbarLayout()); } } tbGuard;
+        QCOMPARE(cfg.defaultToolbarLayout(), (QStringList{QStringLiteral("target_selector"), QStringLiteral("config_menu"), QStringLiteral("rank_spin"), QStringLiteral("separator"), QStringLiteral("build"), QStringLiteral("run"), QStringLiteral("continue"), QStringLiteral("step_over"), QStringLiteral("step_into"), QStringLiteral("step_out"), QStringLiteral("pause"), QStringLiteral("stop"), QStringLiteral("record"), QStringLiteral("spacer"), QStringLiteral("search_everywhere"), QStringLiteral("perspectives")}));
+        QVERIFY(targetSel->x() < launchOptBtn->x() && launchOptBtn->x() < rankSpin->x() && rankSpin->x() < searchBtn->x());
+        cfg.setToolbarLayout({QStringLiteral("search_everywhere"), QStringLiteral("spacer"), QStringLiteral("run"), QStringLiteral("continue"), QStringLiteral("target_selector"), QStringLiteral("rank_spin"), QStringLiteral("perspectives")});
+        QApplication::processEvents();
+        QVERIFY2(searchBtn->isVisible() && targetSel->isVisible() && !launchOptBtn->isVisible() && searchBtn->x() < targetSel->x() && mw.findChild<QToolButton*>(QStringLiteral("toolbarLaunchOptionsBtn")) != nullptr && mw.findChild<QToolButton*>(QStringLiteral("toolbarContinueBtn")) != nullptr && mainTb->findChild<QWidget*>(QStringLiteral("toolbarFlexSpacer")) != nullptr, qPrintable(QStringLiteral("reordered sVis=%1 tVis=%2 optVis=%3 sX=%4 tX=%5 cont=%6 sp=%7").arg(searchBtn->isVisible()).arg(targetSel->isVisible()).arg(launchOptBtn->isVisible()).arg(searchBtn->x()).arg(targetSel->x()).arg(mw.findChild<QToolButton*>(QStringLiteral("toolbarContinueBtn")) != nullptr).arg(mainTb->findChild<QWidget*>(QStringLiteral("toolbarFlexSpacer")) != nullptr)));
+        gridlock::ui::PreferencesDialog tbPrefs(&mw);
+        auto* tbList = tbPrefs.findChild<QListWidget*>(QStringLiteral("toolbarLayoutList"));
+        auto* hiddenCombo = tbPrefs.findChild<QComboBox*>(QStringLiteral("toolbarHiddenControlsCombo"));
+        auto* resetTbBtn = tbPrefs.findChild<QPushButton*>(QStringLiteral("toolbarResetDefaultBtn"));
+        auto* bb = tbPrefs.findChild<QDialogButtonBox*>();
+        QVERIFY(tbList && hiddenCombo && resetTbBtn && bb && hiddenCombo->isEnabled() && hiddenCombo->findData(QStringLiteral("config_menu")) >= 0);
+        resetTbBtn->click();
+        bb->button(QDialogButtonBox::Apply)->click();
+        QApplication::processEvents();
+        QCOMPARE(cfg.toolbarLayout(), cfg.defaultToolbarLayout());
+        QVERIFY2(launchOptBtn->isVisible() && targetSel->x() < launchOptBtn->x() && launchOptBtn->x() < searchBtn->x(), qPrintable(QStringLiteral("reset targetX=%1 optX=%2 searchX=%3").arg(targetSel->x()).arg(launchOptBtn->x()).arg(searchBtn->x())));
+    }
     // Performance regression: 5+ MB (~100,000-row) CSV must open via virtualized CsvTablePreviewWidget in < 1000 ms.
     const QString bigCsv = tmpDir.filePath(QStringLiteral("telemetry_5mb.csv"));
     { QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly)); QByteArray chunk; chunk.reserve(6 * 1024 * 1024); chunk.append("rank,step,pressure,velocity,tag\n"); for (int r = 0; r < 100000; ++r) { chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_"); chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n"); } QVERIFY(cf.write(chunk) > 5 * 1024 * 1024); }

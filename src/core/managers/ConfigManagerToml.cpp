@@ -184,6 +184,66 @@ void ConfigManager::setOpenUnfocused(bool unfocused) {
   saveGlobalConfig();
 }
 
+namespace {
+QStringList normalizeToolbarTokens(const QStringList& raw) {
+  static const QSet<QString> kKnownControls = {
+      QStringLiteral("target_selector"), QStringLiteral("config_menu"),
+      QStringLiteral("rank_spin"),       QStringLiteral("build"),
+      QStringLiteral("run"),             QStringLiteral("continue"),
+      QStringLiteral("step_over"),       QStringLiteral("step_into"),
+      QStringLiteral("step_out"),        QStringLiteral("pause"),
+      QStringLiteral("stop"),            QStringLiteral("record"),
+      QStringLiteral("search_everywhere"), QStringLiteral("perspectives")};
+  QStringList out;
+  QSet<QString> seenControls;
+  for (const QString& entry : raw) {
+    const QString tok = entry.trimmed().toLower();
+    if (tok == QStringLiteral("spacer") || tok == QStringLiteral("separator")) {
+      out.append(tok);
+    } else if (kKnownControls.contains(tok) && !seenControls.contains(tok)) {
+      seenControls.insert(tok);
+      out.append(tok);
+    }
+  }
+  return out;
+}
+}  // namespace
+
+/** @brief Reads `[ui] toolbar_layout` from `config.toml` (falling back to `QSettings` or `defaultToolbarLayout()`). */
+QStringList ConfigManager::toolbarLayout() const {
+  if (const auto* uiTbl = m_config["ui"].as_table()) {
+    if (const auto* arr = (*uiTbl)["toolbar_layout"].as_array()) {
+      QStringList raw;
+      for (const auto& node : *arr) {
+        if (auto sv = node.value<std::string>()) raw.append(QString::fromStdString(*sv));
+      }
+      const QStringList norm = normalizeToolbarTokens(raw);
+      if (!norm.isEmpty()) return norm;
+    }
+  }
+  QSettings s(kOrg, kApp);
+  if (s.contains(QStringLiteral("ui/toolbar_layout"))) {
+    const QStringList norm = normalizeToolbarTokens(s.value(QStringLiteral("ui/toolbar_layout")).toStringList());
+    if (!norm.isEmpty()) return norm;
+  }
+  return defaultToolbarLayout();
+}
+
+/** @brief Persists `[ui] toolbar_layout` to `config.toml` and `QSettings`, then broadcasts `toolbarLayoutChanged()`. */
+void ConfigManager::setToolbarLayout(const QStringList& items) {
+  QStringList norm = normalizeToolbarTokens(items);
+  if (norm.isEmpty()) norm = defaultToolbarLayout();
+  if (!m_config.contains("ui")) m_config.insert("ui", toml::table{});
+  toml::array arr;
+  for (const QString& tok : norm) arr.push_back(tok.toStdString());
+  m_config["ui"].as_table()->insert_or_assign("toolbar_layout", std::move(arr));
+  saveGlobalConfig();
+  QSettings s(kOrg, kApp);
+  s.setValue(QStringLiteral("ui/toolbar_layout"), norm);
+  s.sync();
+  toolbarLayoutChanged();
+}
+
 /** @brief Retrieves embedded terminal shell and font settings from `config.toml`. */
 TerminalSettings ConfigManager::getTerminalSettings() const {
   TerminalSettings ts;

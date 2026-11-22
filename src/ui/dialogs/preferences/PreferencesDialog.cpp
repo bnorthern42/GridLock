@@ -13,12 +13,14 @@
 #include <QEvent>
 #include <QFont>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidgetItem>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSet>
 #include <QSettings>
 #include <QSplitter>
 #include <QVBoxLayout>
@@ -126,7 +128,7 @@ void PreferencesDialog::setupSidebar() {
         {tr("Behavior"), QStringLiteral("\uf085")},        {tr("Keybindings"), QStringLiteral("\uf11c")},
         {tr("Debugger"), QStringLiteral("\uf188")},        {tr("HPC / Cluster"), QStringLiteral("\uf233")},
         {tr("HPC Integration"), QStringLiteral("\uf1c0")}, {tr("Terminal"), QStringLiteral("\uf120")},
-        {tr("Docsets"), QStringLiteral("\uf02d")},
+        {tr("Docsets"), QStringLiteral("\uf02d")},         {tr("Toolbar"), QStringLiteral("\uf0ad")},
     };
     for (const auto& e : entries) {
         auto* item = new QListWidgetItem(m_sidebar);
@@ -160,6 +162,7 @@ void PreferencesDialog::setupPages() {
     m_hpcIntegrationPage = new HpcIntegrationSettingsPage(m_stack);
     m_terminalPage = new TerminalSettingsPage(m_stack);
     m_docsetPage = new DocsetSettingsPage(m_stack);
+    m_toolbarPage = createToolbarSettingsPage(m_stack);
 
     for (QWidget* page : {static_cast<QWidget*>(m_appearancePage),
                           static_cast<QWidget*>(m_editingPage),
@@ -169,7 +172,8 @@ void PreferencesDialog::setupPages() {
                           static_cast<QWidget*>(m_hpcPage),
                           static_cast<QWidget*>(m_hpcIntegrationPage),
                           static_cast<QWidget*>(m_terminalPage),
-                          static_cast<QWidget*>(m_docsetPage)}) {
+                          static_cast<QWidget*>(m_docsetPage),
+                          m_toolbarPage}) {
         page->setAttribute(Qt::WA_StyledBackground, true);
         page->setAutoFillBackground(true);
         auto* scroll = new QScrollArea(m_stack);
@@ -320,6 +324,7 @@ void PreferencesDialog::apply() {
     ts.fontSize = m_terminalPage->fontSize();
     cfg.saveTerminalSettings(ts);
     if (m_keybindingsPage) m_keybindingsPage->applyPendingChanges();
+    if (m_toolbarLayoutList) cfg.setToolbarLayout(pendingToolbarLayout());
 
     s.sync();
     if (qApp) qApp->setProperty("gridlock_disasm_prefs_rev", qApp->property("gridlock_disasm_prefs_rev").toInt() + 1);
@@ -327,6 +332,186 @@ void PreferencesDialog::apply() {
 }
 
 void PreferencesDialog::acceptAndApply() { apply(); accept(); }
+
+QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
+    static const QList<QPair<QString, QString>> kNamedControls = {
+        {QStringLiteral("target_selector"), QStringLiteral("Target Selector")},
+        {QStringLiteral("config_menu"), QStringLiteral("Launch Config Menu")},
+        {QStringLiteral("rank_spin"), QStringLiteral("MPI Rank Count (np:)")},
+        {QStringLiteral("build"), QStringLiteral("Build / Clean / Rebuild")},
+        {QStringLiteral("run"), QStringLiteral("Run Target")},
+        {QStringLiteral("continue"), QStringLiteral("Continue (Cont)")},
+        {QStringLiteral("step_over"), QStringLiteral("Step Over")},
+        {QStringLiteral("step_into"), QStringLiteral("Step Into")},
+        {QStringLiteral("step_out"), QStringLiteral("Step Out")},
+        {QStringLiteral("pause"), QStringLiteral("Pause")},
+        {QStringLiteral("stop"), QStringLiteral("Stop Session")},
+        {QStringLiteral("record"), QStringLiteral("Time-Travel Record")},
+        {QStringLiteral("search_everywhere"), QStringLiteral("Search Everywhere")},
+        {QStringLiteral("perspectives"), QStringLiteral("Workspace Perspectives")},
+    };
+    auto labelForToken = [](const QString& tok) -> QString {
+        if (tok == QStringLiteral("spacer")) return QStringLiteral("[ Flexible Spacer ]");
+        if (tok == QStringLiteral("separator")) return QStringLiteral("[ Separator ]");
+        for (const auto& p : kNamedControls) if (p.first == tok) return p.second;
+        return tok;
+    };
+
+    auto* page = new QWidget(parent);
+    page->setObjectName(QStringLiteral("preferencesToolbarPage"));
+    auto* root = new QVBoxLayout(page);
+    root->setContentsMargins(20, 16, 20, 24);
+    root->setSpacing(12);
+
+    auto* heading = new QLabel(QStringLiteral("<b>Main Toolbar Layout &amp; Spacing</b>"), page);
+    heading->setObjectName(QStringLiteral("heading"));
+    root->addWidget(heading);
+    auto* sep = new QLabel(page);
+    sep->setFixedHeight(1);
+    sep->setObjectName(QStringLiteral("separator"));
+    root->addWidget(sep);
+    auto* desc = new QLabel(
+        tr("Reorder toolbar items, insert flexible spacers or vertical separators, or hide optional controls."), page);
+    desc->setWordWrap(true);
+    root->addWidget(desc);
+
+    auto* midRow = new QHBoxLayout();
+    midRow->setSpacing(10);
+    m_toolbarLayoutList = new QListWidget(page);
+    m_toolbarLayoutList->setObjectName(QStringLiteral("toolbarLayoutList"));
+    m_toolbarLayoutList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_toolbarLayoutList->setDragDropMode(QAbstractItemView::InternalMove);
+    m_toolbarLayoutList->setMinimumHeight(280);
+    midRow->addWidget(m_toolbarLayoutList, 1);
+
+    auto* btnCol = new QVBoxLayout();
+    btnCol->setSpacing(6);
+    auto makeBtn = [&](const QString& text, const QString& obj) {
+        auto* b = new QPushButton(text, page);
+        b->setObjectName(obj);
+        b->setMinimumWidth(132);
+        btnCol->addWidget(b);
+        return b;
+    };
+    auto* moveUpBtn = makeBtn(tr("Move Up"), QStringLiteral("toolbarMoveUpBtn"));
+    auto* moveDownBtn = makeBtn(tr("Move Down"), QStringLiteral("toolbarMoveDownBtn"));
+    auto* addSpacerBtn = makeBtn(tr("Add Spacer"), QStringLiteral("toolbarAddSpacerBtn"));
+    auto* addSepBtn = makeBtn(tr("Add Separator"), QStringLiteral("toolbarAddSeparatorBtn"));
+    auto* removeBtn = makeBtn(tr("Remove"), QStringLiteral("toolbarRemoveItemBtn"));
+    btnCol->addStretch(1);
+    auto* resetBtn = makeBtn(tr("Reset Default"), QStringLiteral("toolbarResetDefaultBtn"));
+    midRow->addLayout(btnCol);
+    root->addLayout(midRow, 1);
+
+    auto* addHiddenRow = new QHBoxLayout();
+    addHiddenRow->setSpacing(8);
+    addHiddenRow->addWidget(new QLabel(tr("Hidden Controls:"), page));
+    m_toolbarHiddenCombo = new QComboBox(page);
+    m_toolbarHiddenCombo->setObjectName(QStringLiteral("toolbarHiddenControlsCombo"));
+    addHiddenRow->addWidget(m_toolbarHiddenCombo, 1);
+    m_toolbarAddHiddenBtn = new QPushButton(tr("Add Control"), page);
+    m_toolbarAddHiddenBtn->setObjectName(QStringLiteral("toolbarAddHiddenControlBtn"));
+    m_toolbarAddHiddenBtn->setMinimumWidth(132);
+    addHiddenRow->addWidget(m_toolbarAddHiddenBtn);
+    root->addLayout(addHiddenRow);
+
+    auto refreshHiddenCombo = [this]() {
+        if (!m_toolbarHiddenCombo || !m_toolbarLayoutList) return;
+        QSet<QString> active;
+        for (int i = 0; i < m_toolbarLayoutList->count(); ++i)
+            active.insert(m_toolbarLayoutList->item(i)->data(Qt::UserRole).toString());
+        m_toolbarHiddenCombo->clear();
+        for (const auto& p : kNamedControls)
+            if (!active.contains(p.first)) m_toolbarHiddenCombo->addItem(p.second, p.first);
+        const bool hasHidden = m_toolbarHiddenCombo->count() > 0;
+        if (!hasHidden) m_toolbarHiddenCombo->addItem(tr("(All controls visible)"), QString());
+        m_toolbarHiddenCombo->setEnabled(hasHidden);
+        if (m_toolbarAddHiddenBtn) m_toolbarAddHiddenBtn->setEnabled(hasHidden);
+    };
+    auto populateList = [this, labelForToken, refreshHiddenCombo](const QStringList& tokens) {
+        m_toolbarLayoutList->clear();
+        for (const QString& tok : tokens) {
+            auto* it = new QListWidgetItem(labelForToken(tok), m_toolbarLayoutList);
+            it->setData(Qt::UserRole, tok);
+            it->setSizeHint(QSize(220, 26));
+        }
+        if (m_toolbarLayoutList->count() > 0) m_toolbarLayoutList->setCurrentRow(0);
+        refreshHiddenCombo();
+    };
+    auto insertToken = [this, labelForToken, refreshHiddenCombo](const QString& tok) {
+        if (tok.isEmpty() || !m_toolbarLayoutList) return;
+        const int row = m_toolbarLayoutList->currentRow();
+        const int ins = (row >= 0) ? (row + 1) : m_toolbarLayoutList->count();
+        auto* it = new QListWidgetItem(labelForToken(tok));
+        it->setData(Qt::UserRole, tok);
+        it->setSizeHint(QSize(220, 26));
+        m_toolbarLayoutList->insertItem(ins, it);
+        m_toolbarLayoutList->setCurrentRow(ins);
+        refreshHiddenCombo();
+    };
+
+    populateList(gridlock::core::ConfigManager::instance().toolbarLayout());
+
+    connect(moveUpBtn, &QPushButton::clicked, this, [this]() {
+        const int r = m_toolbarLayoutList->currentRow();
+        if (r > 0) {
+            QListWidgetItem* it = m_toolbarLayoutList->takeItem(r);
+            m_toolbarLayoutList->insertItem(r - 1, it);
+            m_toolbarLayoutList->setCurrentRow(r - 1);
+        }
+    });
+    connect(moveDownBtn, &QPushButton::clicked, this, [this]() {
+        const int r = m_toolbarLayoutList->currentRow();
+        if (r >= 0 && r + 1 < m_toolbarLayoutList->count()) {
+            QListWidgetItem* it = m_toolbarLayoutList->takeItem(r);
+            m_toolbarLayoutList->insertItem(r + 1, it);
+            m_toolbarLayoutList->setCurrentRow(r + 1);
+        }
+    });
+    connect(addSpacerBtn, &QPushButton::clicked, this, [insertToken]() { insertToken(QStringLiteral("spacer")); });
+    connect(addSepBtn, &QPushButton::clicked, this, [insertToken]() { insertToken(QStringLiteral("separator")); });
+    connect(removeBtn, &QPushButton::clicked, this, [this, refreshHiddenCombo]() {
+        const int r = m_toolbarLayoutList->currentRow();
+        if (r >= 0 && m_toolbarLayoutList->count() > 1) {
+            delete m_toolbarLayoutList->takeItem(r);
+            m_toolbarLayoutList->setCurrentRow(qMin(r, m_toolbarLayoutList->count() - 1));
+            refreshHiddenCombo();
+        }
+    });
+    connect(m_toolbarAddHiddenBtn, &QPushButton::clicked, this, [this, insertToken]() {
+        if (m_toolbarHiddenCombo) insertToken(m_toolbarHiddenCombo->currentData().toString());
+    });
+    connect(resetBtn, &QPushButton::clicked, this, [populateList]() {
+        populateList(gridlock::core::ConfigManager::defaultToolbarLayout());
+    });
+
+    auto syncListTheme = [this]() {
+        if (!m_toolbarLayoutList) return;
+        const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(
+            gridlock::core::managers::ThemeManager::instance().activeThemeId());
+        const QString selFg = (QColor(pal.accentHex).lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
+        m_toolbarLayoutList->setStyleSheet(QStringLiteral(
+            "QListWidget#toolbarLayoutList { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 2px; }"
+            "QListWidget#toolbarLayoutList::item { padding: 3px 8px; border-radius: 3px; }"
+            "QListWidget#toolbarLayoutList::item:selected { background-color: %4; color: %5; }")
+            .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex, selFg));
+    };
+    syncListTheme();
+    connect(&gridlock::core::managers::ThemeManager::instance(),
+            &gridlock::core::managers::ThemeManager::themeModeChanged,
+            this, [syncListTheme](bool) { syncListTheme(); });
+    return page;
+}
+
+QStringList PreferencesDialog::pendingToolbarLayout() const {
+    if (!m_toolbarLayoutList) return gridlock::core::ConfigManager::instance().toolbarLayout();
+    QStringList out;
+    for (int i = 0; i < m_toolbarLayoutList->count(); ++i) {
+        const QString tok = m_toolbarLayoutList->item(i)->data(Qt::UserRole).toString();
+        if (!tok.isEmpty()) out.append(tok);
+    }
+    return out.isEmpty() ? gridlock::core::ConfigManager::defaultToolbarLayout() : out;
+}
 
 bool PreferencesDialog::parseSlurmBatchScript(const QString& scriptText) {
     return m_hpcIntegrationPage ? m_hpcIntegrationPage->parseSlurmBatchScript(scriptText) : false;

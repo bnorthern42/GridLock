@@ -41,6 +41,8 @@ public:
     QString generateSlurmBatchScript() const;
     /// Returns the string value of a SLURM form field by key for testing and inspection.
     QString slurmFieldValue(const QString& key) const;
+    /// Returns the ordered `#MainToolbar` token list currently staged in the Toolbar settings tab.
+    QStringList pendingToolbarLayout() const;
 
 signals:
     /// Emitted after preferences are committed to disk to trigger live UI updates.
@@ -58,6 +60,7 @@ protected:
 private:
     void setupSidebar();
     void setupPages();
+    QWidget* createToolbarSettingsPage(QWidget* parent);
     void setupButtonBox();
     void applyDialogThemeChrome();
     void refreshSidebarIcons();
@@ -75,6 +78,10 @@ private:
     HpcIntegrationSettingsPage* m_hpcIntegrationPage = nullptr;
     DocsetSettingsPage* m_docsetPage = nullptr;
     TerminalSettingsPage* m_terminalPage = nullptr;
+    QWidget* m_toolbarPage = nullptr;
+    QListWidget* m_toolbarLayoutList = nullptr;
+    QComboBox* m_toolbarHiddenCombo = nullptr;
+    QPushButton* m_toolbarAddHiddenBtn = nullptr;
 };
 
 }  // namespace gridlock::ui
