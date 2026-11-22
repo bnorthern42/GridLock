@@ -482,26 +482,18 @@ static void testLiveVariableRegisterEditingAndFullValueInspection() {
 }
 static void testKeybindingsLightThemeLegibility() {
     auto& tm = gridlock::core::managers::ThemeManager::instance();
-    const QString origTheme = tm.activeThemeId();
-    QString lightThemeId;
-    for (const QString& id : tm.availableThemes()) {
-        if (!gridlock::core::managers::ThemeManager::paletteForTheme(id).isDark) { lightThemeId = id; break; }
-    }
+    const QString origTheme = tm.activeThemeId(); QString lightThemeId;
+    for (const QString& id : tm.availableThemes()) if (!gridlock::core::managers::ThemeManager::paletteForTheme(id).isDark) { lightThemeId = id; break; }
     QVERIFY2(!lightThemeId.isEmpty(), "At least one Light theme must be registered in ThemeManager");
     struct ThemeGuard { QString orig; ~ThemeGuard() { gridlock::core::managers::ThemeManager::instance().applyTheme(orig, false); } } guard{origTheme};
     tm.applyTheme(lightThemeId, false);
-    gridlock::ui::PreferencesDialog dlg;
-    dlg.resize(960, 680);
-    if (auto* side = dlg.findChild<QListWidget*>(QStringLiteral("preferencesCategoryList"))) {
-        for (int i = 0; i < side->count(); ++i) {
-            if (side->item(i)->text().contains(QStringLiteral("Keybindings"), Qt::CaseInsensitive)) { side->setCurrentRow(i); break; }
-        }
-    }
+    gridlock::ui::PreferencesDialog dlg; dlg.resize(960, 680);
+    if (auto* side = dlg.findChild<QListWidget*>(QStringLiteral("preferencesCategoryList")))
+        for (int i = 0; i < side->count(); ++i) if (side->item(i)->text().contains(QStringLiteral("Keybindings"), Qt::CaseInsensitive)) { side->setCurrentRow(i); break; }
     dlg.show(); QApplication::processEvents();
     auto* tbl = dlg.findChild<QTableWidget*>(QStringLiteral("keybindingsTable"));
     QVERIFY2(tbl != nullptr && tbl->rowCount() >= 6, "Keybindings table must have at least 6 rows");
-    QVERIFY2(tbl->palette().color(QPalette::Base).lightness() > 180, "Light theme table base must have luminance > 180");
-    QVERIFY2(tbl->palette().color(QPalette::Text).lightness() < 110, "Light theme table text must have luminance < 110");
+    QVERIFY2(tbl->palette().color(QPalette::Base).lightness() > 180 && tbl->palette().color(QPalette::Text).lightness() < 110, "Light theme table contrast check");
     const QString outPng = qEnvironmentVariable("GRIDLOCK_VERIFY_KEYBINDINGS_PNG");
     if (!outPng.isEmpty()) dlg.grab().toImage().save(outPng);
     const QImage vpImg = tbl->viewport()->grab().toImage().convertToFormat(QImage::Format_RGB32);
@@ -509,20 +501,63 @@ static void testKeybindingsLightThemeLegibility() {
         for (int c = 0; c < 3; ++c) {
             QTableWidgetItem* it = tbl->item(r, c); QVERIFY(it != nullptr);
             const QVariant fg = it->data(Qt::ForegroundRole);
-            if (fg.isValid() && fg.canConvert<QBrush>() && fg.value<QBrush>().style() != Qt::NoBrush) {
+            if (fg.isValid() && fg.canConvert<QBrush>() && fg.value<QBrush>().style() != Qt::NoBrush)
                 QVERIFY2(fg.value<QBrush>().color().lightness() < 110, qPrintable(QStringLiteral("Row %1 col %2 has light foreground").arg(r).arg(c)));
-            }
         }
-        const QRect rRect = tbl->visualItemRect(tbl->item(r, 1)).intersected(vpImg.rect());
-        int darkInkPx = 0;
-        for (int y = rRect.top(); y <= rRect.bottom(); ++y) {
-            for (int x = rRect.left(); x <= rRect.right(); ++x) {
-                if (qGray(vpImg.pixel(x, y)) < 120) ++darkInkPx;
-            }
-        }
+        const QRect rRect = tbl->visualItemRect(tbl->item(r, 1)).intersected(vpImg.rect()); int darkInkPx = 0;
+        for (int y = rRect.top(); y <= rRect.bottom(); ++y) for (int x = rRect.left(); x <= rRect.right(); ++x) if (qGray(vpImg.pixel(x, y)) < 120) ++darkInkPx;
         QVERIFY2(darkInkPx > 10, qPrintable(QStringLiteral("Row %1 action label rendered invisible (darkInkPx=%2)").arg(r).arg(darkInkPx)));
     }
     dlg.close();
+}
+
+static void testPreLaunchExecutableGuardAndExtensionlessSiblingCompile() {
+    QTemporaryDir tDir; QVERIFY(tDir.isValid());
+    const QString nonExecFile = tDir.filePath(QStringLiteral("raw_unexecutable")), csvFile = tDir.filePath(QStringLiteral("metrics.csv")), subDir = tDir.filePath(QStringLiteral("target_dir"));
+    { QFile f(nonExecFile); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("not an executable binary\n"); }
+    QFile::setPermissions(nonExecFile, QFile::ReadOwner | QFile::WriteOwner);
+    { QFile cf(csvFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("rank,latency_us\n0,12.4\n"); }
+    QVERIFY(QDir().mkpath(subDir));
+
+    gridlock::ui::MainWindow mw; mw.resize(1280, 800); mw.show(); QApplication::processEvents();
+    auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
+    auto* progOut = mw.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView"));
+    auto* runAct = mw.findChild<QAction*>(QStringLiteral("actionRunTarget"));
+    QVERIFY(targetCombo && progOut && runAct);
+
+    // 1. Non-executable file, non-code .csv data file, and directory must fail pre-launch validation cleanly with 0 spawned ranks.
+    targetCombo->insertItem(0, QStringLiteral("raw_unexecutable"), nonExecFile);
+    QVERIFY(mw.selectTargetByName(QStringLiteral("raw_unexecutable")));
+    runAct->trigger(); QApplication::processEvents();
+    QVERIFY2(!mw.isDebugSessionActive() && !mw.isRunButtonLatched() && (!mw.coordinator() || mw.coordinator()->getProcessCount() == 0),
+             "Non-executable target must abort pre-launch without spawning MPI ranks");
+    QVERIFY2(progOut->toPlainText().contains(QStringLiteral("Target is not executable")) && !progOut->toPlainText().contains(QStringLiteral("permission denied")),
+             qPrintable(progOut->toPlainText()));
+
+    targetCombo->insertItem(0, QStringLiteral("metrics_csv"), csvFile);
+    QVERIFY(mw.selectTargetByName(QStringLiteral("metrics_csv")) && !QFileInfo::exists(tDir.filePath(QStringLiteral("metrics"))));
+    mw.startTargetWorkflow(); QApplication::processEvents();
+    QVERIFY(!mw.isDebugSessionActive() && (!mw.coordinator() || mw.coordinator()->getProcessCount() == 0) && progOut->toPlainText().contains(csvFile));
+
+    targetCombo->insertItem(0, QStringLiteral("dir_target"), subDir);
+    QVERIFY(mw.selectTargetByName(QStringLiteral("dir_target")));
+    mw.startTargetWorkflow(); QApplication::processEvents();
+    QVERIFY2(!mw.isDebugSessionActive() && progOut->toPlainText().contains(QStringLiteral("Target is a directory")), qPrintable(progOut->toPlainText()));
+
+    // 2. Extensionless target path with sibling .cpp source resolves, compiles, and enforces +x permissions cleanly.
+    const QString extlessBin = tDir.filePath(QStringLiteral("extless_demo")), extlessCpp = tDir.filePath(QStringLiteral("extless_demo.cpp"));
+    { QFile sf(extlessCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("int main() { return 0; }\n"); }
+    QVERIFY(!QFileInfo::exists(extlessBin));
+    targetCombo->insertItem(0, QStringLiteral("extless_demo"), extlessBin);
+    QVERIFY2(mw.selectTargetByName(QStringLiteral("extless_demo")) && mw.ensureTargetBinaryCompiled(),
+             "Extensionless target with sibling .cpp must resolve and compile cleanly");
+    QCOMPARE(QFileInfo(mw.activeTargetSourcePath()).canonicalFilePath(), QFileInfo(extlessCpp).canonicalFilePath());
+    QCOMPARE(QFileInfo(mw.activeTargetBinaryPath()).canonicalFilePath(), QFileInfo(extlessBin).canonicalFilePath());
+    QVERIFY2(QFileInfo(extlessBin).isFile() && QFileInfo(extlessBin).isExecutable(), "Compiled extensionless target binary must have execute permissions");
+
+    // Stripping +x on a binary with a sibling .cpp must trigger rebuild/chmod restoration on ensureTargetBinaryCompiled().
+    QVERIFY(QFile::setPermissions(extlessBin, QFile::ReadOwner | QFile::WriteOwner) && !QFileInfo(extlessBin).isExecutable());
+    QVERIFY2(mw.ensureTargetBinaryCompiled() && QFileInfo(extlessBin).isExecutable(), "Missing +x on target with sibling .cpp must restore executable binary");
 }
 
 void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
@@ -551,5 +586,5 @@ void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
     QTest::keyClick(&mw, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(mw.checkpointDialog() && mw.checkpointDialog()->isVisible()); mw.checkpointDialog()->close();
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents(); auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
     QVERIFY(pal && pal->isVisible()); pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints"))); QTest::keyClick(pal->inputEdit(), Qt::Key_Escape);
-    testCleanExitWhileTargetRunning(); testMultiRankScopePauseAllAndRackFilter(); testLaunchOptionsCliArgsAndUnifiedSessionStart(); testLiveVariableRegisterEditingAndFullValueInspection(); testKeybindingsLightThemeLegibility();
+    testCleanExitWhileTargetRunning(); testMultiRankScopePauseAllAndRackFilter(); testLaunchOptionsCliArgsAndUnifiedSessionStart(); testLiveVariableRegisterEditingAndFullValueInspection(); testKeybindingsLightThemeLegibility(); testPreLaunchExecutableGuardAndExtensionlessSiblingCompile();
 }
