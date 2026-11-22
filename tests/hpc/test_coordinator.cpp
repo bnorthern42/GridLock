@@ -238,8 +238,8 @@ void TestGdbCoordinator::testRegisterValuesParsing() {
     QCOMPARE(state.registers[1], QString("0x12345678"));
 }
 
-#include "../src/core/commands/DebugCommands.hpp"
-#include "../src/ui/MainWindow.hpp"
+#include "../../src/core/commands/DebugCommands.hpp"
+#include "../../src/ui/MainWindow.hpp"
 
 namespace {
 class MockCommandCoordinator : public gridlock::GdbRankCoordinator {

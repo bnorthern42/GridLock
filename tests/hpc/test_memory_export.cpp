@@ -16,7 +16,7 @@
 #include <QTemporaryFile>
 #include <QtTest/QtTest>
 
-#include "../src/core/hpc/memory/MemoryExporter.hpp"
+#include "../../src/core/hpc/memory/MemoryExporter.hpp"
 
 using namespace gridlock::core::hpc;
 

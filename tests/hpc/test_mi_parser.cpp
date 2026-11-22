@@ -10,7 +10,7 @@
 #include <QString>
 #include <QtTest/QtTest>
 
-#include "../src/ui/GdbConsoleWidget.hpp"
+#include "../../src/ui/GdbConsoleWidget.hpp"
 
 using namespace gridlock::ui;
 

@@ -14,7 +14,7 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 
-#include "../src/core/managers/DocsetManager.hpp"
+#include "../../src/core/managers/DocsetManager.hpp"
 
 namespace gridlock::tests {
 

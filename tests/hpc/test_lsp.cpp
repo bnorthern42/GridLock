@@ -20,10 +20,10 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
-#include "../src/core/hpc/lsp/LspCoordinator.hpp"
-#include "../src/core/managers/ConfigManager.hpp"
-#include "../src/core/utils/ClangdLspClient.cpp"
-#include "../src/ui/views/SourceCodeView.hpp"
+#include "../../src/core/hpc/lsp/LspCoordinator.hpp"
+#include "../../src/core/managers/ConfigManager.hpp"
+#include "../../src/core/utils/ClangdLspClient.cpp"
+#include "../../src/ui/views/SourceCodeView.hpp"
 
 using namespace gridlock::core;
 

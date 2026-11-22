@@ -17,7 +17,7 @@
 #include <QSignalSpy>
 #include <QTest>
 
-#include "../src/core/hpc/dap/DapCoordinator.hpp"
+#include "../../src/core/hpc/dap/DapCoordinator.hpp"
 
 #ifdef __linux__
 #include <unistd.h>

@@ -8,9 +8,9 @@
 
 #include "test_dap_commands.hpp"
 
-#include "../src/core/commands/DebugCommands.hpp"
-#include "../src/core/hpc/dap/DapCoordinator.hpp"
-#include "../src/ui/MainWindow.hpp"
+#include "../../src/core/commands/DebugCommands.hpp"
+#include "../../src/core/hpc/dap/DapCoordinator.hpp"
+#include "../../src/ui/MainWindow.hpp"
 
 /**
  * @class MockDapCoordinator

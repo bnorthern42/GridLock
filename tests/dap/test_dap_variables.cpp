@@ -15,9 +15,9 @@
 #include <QJsonObject>
 #include <QSignalSpy>
 
-#include "../src/core/hpc/dap/DapCoordinator.hpp"
-#include "../src/core/models/VariableNode.hpp"
-#include "../src/core/models/VariableTreeModel.hpp"
+#include "../../src/core/hpc/dap/DapCoordinator.hpp"
+#include "../../src/core/models/VariableNode.hpp"
+#include "../../src/core/models/VariableTreeModel.hpp"
 
 /**
  * @class MockDapCoordinatorVars

@@ -45,30 +45,30 @@
 #include <cstring>
 #include <QtTest/QtTest>
 
-#include "../src/RankState.hpp"
-#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
-#include "../src/core/managers/ConfigManager.hpp"
-#include "../src/core/managers/ThemeManager.hpp"
-#include "../src/core/models/VariableTreeModel.hpp"
-#include "../src/ui/GdbConsoleWidget.hpp"
-#include "../src/ui/MainWindow.hpp"
-#include "../src/ui/dialogs/plotter/ArrayPlotDialog.hpp"
-#include "../src/ui/dialogs/debugger/CheckpointDialog.hpp"
-#include "../src/ui/dialogs/graph/PointerGraphDialog.hpp"
-#include "../src/ui/docks/CallStackDockWidget.hpp"
-#include "../src/ui/docks/VariablesDockWidget.hpp"
+#include "../../src/RankState.hpp"
+#include "../../src/core/hpc/gdb/GdbRankCoordinator.hpp"
+#include "../../src/core/managers/ConfigManager.hpp"
+#include "../../src/core/managers/ThemeManager.hpp"
+#include "../../src/core/models/VariableTreeModel.hpp"
+#include "../../src/ui/GdbConsoleWidget.hpp"
+#include "../../src/ui/MainWindow.hpp"
+#include "../../src/ui/dialogs/plotter/ArrayPlotDialog.hpp"
+#include "../../src/ui/dialogs/debugger/CheckpointDialog.hpp"
+#include "../../src/ui/dialogs/graph/PointerGraphDialog.hpp"
+#include "../../src/ui/docks/CallStackDockWidget.hpp"
+#include "../../src/ui/docks/VariablesDockWidget.hpp"
 #include <QMessageBox>
 #include <QPushButton>
 #include <utime.h>
-#include "../src/ui/tutorial/TutorialDialog.hpp"
-#include "../src/ui/views/DisassemblyView.hpp"
-#include "../src/ui/views/MemView.hpp"
-#include "../src/ui/views/RegisterView.hpp"
-#include "../src/ui/views/ServerRackView.hpp"
-#include "../src/ui/views/SourceCodeView.hpp"
-#include "../src/ui/widgets/DifferentialGrid.hpp"
-#include "../src/ui/widgets/FileIconProvider.hpp"
-#include "../src/ui/widgets/ProjectExplorerWidget.hpp"
+#include "../../src/ui/tutorial/TutorialDialog.hpp"
+#include "../../src/ui/views/DisassemblyView.hpp"
+#include "../../src/ui/views/MemView.hpp"
+#include "../../src/ui/views/RegisterView.hpp"
+#include "../../src/ui/views/ServerRackView.hpp"
+#include "../../src/ui/views/SourceCodeView.hpp"
+#include "../../src/ui/widgets/DifferentialGrid.hpp"
+#include "../../src/ui/widgets/FileIconProvider.hpp"
+#include "../../src/ui/widgets/ProjectExplorerWidget.hpp"
 
 /**
  * @brief Tests loading C++ source code files into MainWindow's SourceCodeView.

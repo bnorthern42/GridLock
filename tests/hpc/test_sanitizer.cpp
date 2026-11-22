@@ -12,7 +12,7 @@
 
 #include <QtTest/QtTest>
 
-#include "../src/core/hpc/gdb/MiSanitizer.hpp"
+#include "../../src/core/hpc/gdb/MiSanitizer.hpp"
 
 /**
  * @brief Tests that standard GDB/MI breakpoint records pass through unmodified.

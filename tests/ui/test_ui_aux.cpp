@@ -7,33 +7,33 @@
 #include <QtWidgets>
 #include <QtTest/QtTest>
 
-#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
-#include "../src/core/managers/ConfigManager.hpp"
-#include "../src/core/managers/SessionManager.hpp"
-#include "../src/core/managers/ThemeManager.hpp"
-#include "../src/core/utils/ClangdLspClient.hpp"
-#include "../src/core/utils/CliParser.cpp"
-#include "../src/core/utils/ElfBinaryInspector.hpp"
-#include "../src/ui/EditorTabManager.hpp"
-#include "../src/ui/GdbConsoleWidget.hpp"
-#include "../src/ui/MainWindow.hpp"
-#include "../src/ui/dialogs/preferences/PreferencesDialog.hpp"
-#include "../src/ui/dialogs/project/ProjectSettingsDialog.hpp"
-#include "../src/ui/dialogs/debugger/XrefInspectorDialog.hpp"
-#include "../src/ui/docks/TerminalDockWidget.hpp"
-#include "../src/ui/views/DisassemblyView.hpp"
-#include "../src/ui/views/MemView.hpp"
-#include "../src/ui/views/RegisterView.hpp"
-#include "../src/ui/views/ServerRackView.hpp"
-#include "../src/ui/views/SourceCodeView.hpp"
-#include "../src/ui/widgets/DifferentialGrid.hpp"
-#include "../src/ui/widgets/InlineFindBar.hpp"
-#if __has_include("../src/ui/widgets/HpcConsoleWidget.hpp")
-#include "../src/ui/widgets/HpcConsoleWidget.hpp"
+#include "../../src/core/hpc/gdb/GdbRankCoordinator.hpp"
+#include "../../src/core/managers/ConfigManager.hpp"
+#include "../../src/core/managers/SessionManager.hpp"
+#include "../../src/core/managers/ThemeManager.hpp"
+#include "../../src/core/utils/ClangdLspClient.hpp"
+#include "../../src/core/utils/CliParser.cpp"
+#include "../../src/core/utils/ElfBinaryInspector.hpp"
+#include "../../src/ui/EditorTabManager.hpp"
+#include "../../src/ui/GdbConsoleWidget.hpp"
+#include "../../src/ui/MainWindow.hpp"
+#include "../../src/ui/dialogs/preferences/PreferencesDialog.hpp"
+#include "../../src/ui/dialogs/project/ProjectSettingsDialog.hpp"
+#include "../../src/ui/dialogs/debugger/XrefInspectorDialog.hpp"
+#include "../../src/ui/docks/TerminalDockWidget.hpp"
+#include "../../src/ui/views/DisassemblyView.hpp"
+#include "../../src/ui/views/MemView.hpp"
+#include "../../src/ui/views/RegisterView.hpp"
+#include "../../src/ui/views/ServerRackView.hpp"
+#include "../../src/ui/views/SourceCodeView.hpp"
+#include "../../src/ui/widgets/DifferentialGrid.hpp"
+#include "../../src/ui/widgets/InlineFindBar.hpp"
+#if __has_include("../../src/ui/widgets/HpcConsoleWidget.hpp")
+#include "../../src/ui/widgets/HpcConsoleWidget.hpp"
 #else
-#include "../src/core/managers/SpackManager.hpp"
+#include "../../src/core/managers/SpackManager.hpp"
 #endif
-#include "../src/ui/widgets/ProjectExplorerWidget.hpp"
+#include "../../src/ui/widgets/ProjectExplorerWidget.hpp"
 
 /** @brief Tests side dock resizability limits and xref / decompiler integration. */
 void TestMainWindowUI::testDockResizabilityAndXrefDecompiler() {

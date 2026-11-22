@@ -7,7 +7,7 @@
  */
 
 #include "test_config.hpp"
-#include "../src/core/managers/ConfigManager.hpp"
+#include "../../src/core/managers/ConfigManager.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -367,7 +367,7 @@ void TestConfig::testTerminalSettingsPersistence() {
     QDir::setCurrent(oldCwd);
 }
 
-#include "../src/core/managers/SessionManager.hpp"
+#include "../../src/core/managers/SessionManager.hpp"
 
 /**
  * @brief Tests MRU session queue capacity limiting, ordering, and re-insertion.

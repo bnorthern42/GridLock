@@ -8,8 +8,8 @@
 
 #include <QCoreApplication>
 #include <QtTest>
-#include "../src/core/utils/CliParser.hpp"
-#include "../src/core/Version.hpp"
+#include "../../src/core/utils/CliParser.hpp"
+#include "../../src/core/Version.hpp"
 
 /**
  * @class TestCliParser

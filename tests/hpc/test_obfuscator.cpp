@@ -14,7 +14,7 @@
 #include <QSignalSpy>
 #include <QtTest/QtTest>
 
-#include "../src/core/hpc/system/TelemetryObfuscator.hpp"
+#include "../../src/core/hpc/system/TelemetryObfuscator.hpp"
 
 /**
  * @brief Tests padding of variable-length messages to MTU_THRESHOLD.

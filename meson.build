@@ -131,7 +131,7 @@ install_data('resources/icon.png',
 
 # Test executable
 test_src = [
-  'tests/test_coordinator.cpp',
+  'tests/hpc/test_coordinator.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
@@ -140,7 +140,7 @@ test_src = [
 ]
 
 test_moc_headers = [
-  'tests/test_coordinator.hpp',
+  'tests/hpc/test_coordinator.hpp',
   'src/core/hpc/gdb/GdbRankCoordinator.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
@@ -162,7 +162,7 @@ gridlock_tests = executable('gridlock_tests',
 test('coordinator_tests', gridlock_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 lsp_test_src = [
-  'tests/test_lsp.cpp',
+  'tests/hpc/test_lsp.cpp',
   'src/core/hpc/lsp/LspCoordinator.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/core/managers/ConfigManager.cpp', 'src/ui/views/SourceCodeView.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp',
@@ -170,7 +170,7 @@ lsp_test_src = [
 ]
 
 lsp_test_moc_headers = [
-  'tests/test_lsp.hpp',
+  'tests/hpc/test_lsp.hpp',
   'src/core/hpc/lsp/LspCoordinator.hpp', 'src/core/utils/ClangdLspClient.hpp',
   'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/dialogs/debugger/ConditionalBreakpointDialog.hpp', 'src/ui/widgets/InlineFindBar.hpp'
@@ -192,9 +192,9 @@ gridlock_lsp_tests = executable('gridlock_lsp_tests',
 test('lsp_tests', gridlock_lsp_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 ui_test_src = [
-  'tests/test_ui.cpp', 'tests/test_ui_aux.cpp',
-  'tests/test_ui_cohesion.cpp', 'tests/test_ui_capture.cpp',
-  'tests/test_ui_debugger.cpp', 'tests/test_ui_viz_and_ux.cpp',
+  'tests/ui/test_ui.cpp', 'tests/ui/test_ui_aux.cpp',
+  'tests/ui/test_ui_cohesion.cpp', 'tests/ui/test_ui_capture.cpp',
+  'tests/ui/test_ui_debugger.cpp', 'tests/ui/test_ui_viz_and_ux.cpp',
   'src/ui/MainWindow.cpp', 'src/ui/MainWindowWorkspace.cpp',
   'src/ui/MainWindowToolbar.cpp', 'src/ui/MainWindowNavigation.cpp',
   'src/ui/MainWindowCohesion.cpp', 'src/ui/MainWindowPerspectives.cpp',
@@ -233,7 +233,7 @@ ui_test_src = [
 ]
 
 ui_test_moc_headers = [
-  'tests/test_ui.hpp', 'src/ui/MainWindow.hpp',
+  'tests/ui/test_ui.hpp', 'src/ui/MainWindow.hpp',
   'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/views/CsvTablePreviewWidget.hpp',
   'src/ui/dialogs/plotter/ArrayPlotCanvas.hpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.hpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.hpp',
@@ -276,13 +276,13 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
 test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout: 120)
 
 config_test_src = [
-  'tests/test_config.cpp',
+  'tests/core/test_config.cpp',
   'src/core/managers/ConfigManager.cpp',
   'src/core/managers/SessionManager.cpp'
 ]
 
 config_test_moc_headers = [
-  'tests/test_config.hpp',
+  'tests/core/test_config.hpp',
   'src/core/managers/SessionManager.hpp'
 ]
 
@@ -302,13 +302,13 @@ gridlock_config_tests = executable('gridlock_config_tests',
 test('config_tests', gridlock_config_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 docset_test_src = [
-  'tests/test_docset.cpp',
+  'tests/core/test_docset.cpp',
   'src/core/managers/DocsetManager.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 docset_test_moc_headers = [
-  'tests/test_docset.hpp',
+  'tests/core/test_docset.hpp',
   'src/core/managers/DocsetManager.hpp'
 ]
 
@@ -329,14 +329,14 @@ test('docset_tests', gridlock_docset_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 
 dap_parser_test_src = [
-  'tests/test_dap_parser.cpp',
+  'tests/dap/test_dap_parser.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_parser_test_moc_headers = [
-  'tests/test_dap_parser.hpp',
+  'tests/dap/test_dap_parser.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -357,7 +357,7 @@ gridlock_dap_parser_tests = executable('gridlock_dap_parser_tests',
 test('dap_parser_tests', gridlock_dap_parser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_commands_test_src = [
-  'tests/test_dap_commands.cpp',
+  'tests/dap/test_dap_commands.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
@@ -371,7 +371,7 @@ dap_commands_test_src = [
 ]
 
 dap_commands_test_moc_headers = [
-  'tests/test_dap_commands.hpp',
+  'tests/dap/test_dap_commands.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/gdb/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
@@ -397,14 +397,14 @@ gridlock_dap_commands_tests = executable('gridlock_dap_commands_tests',
 test('dap_commands_tests', gridlock_dap_commands_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_breakpoints_test_src = [
-  'tests/test_dap_breakpoints.cpp',
+  'tests/dap/test_dap_breakpoints.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_breakpoints_test_moc_headers = [
-  'tests/test_dap_breakpoints.hpp',
+  'tests/dap/test_dap_breakpoints.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -425,14 +425,14 @@ gridlock_dap_breakpoints_tests = executable('gridlock_dap_breakpoints_tests',
 test('dap_breakpoints_tests', gridlock_dap_breakpoints_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_stacktrace_test_src = [
-  'tests/test_dap_stacktrace.cpp',
+  'tests/dap/test_dap_stacktrace.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_stacktrace_test_moc_headers = [
-  'tests/test_dap_stacktrace.hpp',
+  'tests/dap/test_dap_stacktrace.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -453,7 +453,7 @@ gridlock_dap_stacktrace_tests = executable('gridlock_dap_stacktrace_tests',
 test('dap_stacktrace_tests', gridlock_dap_stacktrace_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_variables_test_src = [
-  'tests/test_dap_variables.cpp',
+  'tests/dap/test_dap_variables.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
@@ -463,7 +463,7 @@ dap_variables_test_src = [
 ]
 
 dap_variables_test_moc_headers = [
-  'tests/test_dap_variables.hpp',
+  'tests/dap/test_dap_variables.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/gdb/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp',
@@ -486,14 +486,14 @@ gridlock_dap_variables_tests = executable('gridlock_dap_variables_tests',
 test('dap_variables_tests', gridlock_dap_variables_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_evaluate_test_src = [
-  'tests/test_dap_evaluate.cpp',
+  'tests/dap/test_dap_evaluate.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_evaluate_test_moc_headers = [
-  'tests/test_dap_evaluate.hpp',
+  'tests/dap/test_dap_evaluate.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -514,14 +514,14 @@ gridlock_dap_evaluate_tests = executable('gridlock_dap_evaluate_tests',
 test('dap_evaluate_tests', gridlock_dap_evaluate_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_lifecycle_test_src = [
-  'tests/test_dap_lifecycle.cpp',
+  'tests/dap/test_dap_lifecycle.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_lifecycle_test_moc_headers = [
-  'tests/test_dap_lifecycle.hpp',
+  'tests/dap/test_dap_lifecycle.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -542,14 +542,14 @@ gridlock_dap_lifecycle_tests = executable('gridlock_dap_lifecycle_tests',
 test('dap_lifecycle_tests', gridlock_dap_lifecycle_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_memory_test_src = [
-  'tests/test_dap_memory.cpp',
+  'tests/dap/test_dap_memory.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_memory_test_moc_headers = [
-  'tests/test_dap_memory.hpp',
+  'tests/dap/test_dap_memory.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -570,12 +570,12 @@ gridlock_dap_memory_tests = executable('gridlock_dap_memory_tests',
 test('dap_memory_tests', gridlock_dap_memory_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 hpc_memory_test_src = [
-  'tests/test_hpc_memory.cpp',
+  'tests/hpc/test_hpc_memory.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp'
 ]
 
 hpc_memory_test_moc_headers = [
-  'tests/test_hpc_memory.hpp'
+  'tests/hpc/test_hpc_memory.hpp'
 ]
 
 processed_hpc_memory_test_files = qt6.compile_moc(
@@ -594,12 +594,12 @@ gridlock_hpc_memory_tests = executable('gridlock_hpc_memory_tests',
 test('hpc_memory_tests', gridlock_hpc_memory_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 stride_security_test_src = [
-  'tests/test_stride_security.cpp',
+  'tests/core/test_stride_security.cpp',
   'src/core/hpc/memory/MemoryBoundsValidator.cpp'
 ]
 
 stride_security_test_moc_headers = [
-  'tests/test_stride_security.hpp'
+  'tests/core/test_stride_security.hpp'
 ]
 
 processed_stride_security_test_files = qt6.compile_moc(
@@ -618,14 +618,14 @@ gridlock_stride_security_tests = executable('gridlock_stride_security_tests',
 test('stride_security_tests', gridlock_stride_security_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 dap_native_bridge_test_src = [
-  'tests/test_dap_native_bridge.cpp',
+  'tests/dap/test_dap_native_bridge.cpp',
   'src/core/hpc/dap/DapCoordinator.cpp',
   'src/core/hpc/memory/NativeMemoryReader.cpp',
   'src/core/managers/ConfigManager.cpp'
 ]
 
 dap_native_bridge_test_moc_headers = [
-  'tests/test_dap_native_bridge.hpp',
+  'tests/dap/test_dap_native_bridge.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
 ]
@@ -646,12 +646,12 @@ gridlock_dap_native_bridge_tests = executable('gridlock_dap_native_bridge_tests'
 test('dap_native_bridge_tests', gridlock_dap_native_bridge_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 sanitizer_test_src = [
-  'tests/test_sanitizer.cpp',
+  'tests/hpc/test_sanitizer.cpp',
   'src/core/hpc/gdb/MiSanitizer.cpp'
 ]
 
 sanitizer_test_moc_headers = [
-  'tests/test_sanitizer.hpp'
+  'tests/hpc/test_sanitizer.hpp'
 ]
 
 processed_sanitizer_test_files = qt6.compile_moc(
@@ -670,12 +670,12 @@ gridlock_sanitizer_tests = executable('gridlock_sanitizer_tests',
 test('sanitizer_tests', gridlock_sanitizer_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 obfuscator_test_src = [
-  'tests/test_obfuscator.cpp',
+  'tests/hpc/test_obfuscator.cpp',
   'src/core/hpc/system/TelemetryObfuscator.cpp'
 ]
 
 obfuscator_test_moc_headers = [
-  'tests/test_obfuscator.hpp',
+  'tests/hpc/test_obfuscator.hpp',
   'src/core/hpc/system/TelemetryObfuscator.hpp'
 ]
 
@@ -695,7 +695,7 @@ gridlock_obfuscator_tests = executable('gridlock_obfuscator_tests',
 test('obfuscator_tests', gridlock_obfuscator_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 advanced_features_test_src = [
-  'tests/test_advanced_features.cpp',
+  'tests/core/test_advanced_features.cpp',
   'src/core/hpc/analysis/DeadlockAnalyzer.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
@@ -706,7 +706,7 @@ advanced_features_test_src = [
 ]
 
 advanced_features_test_moc_headers = [
-  'tests/test_advanced_features.hpp',
+  'tests/core/test_advanced_features.hpp',
   'src/core/hpc/analysis/DeadlockAnalyzer.hpp',
   'src/core/hpc/gdb/GdbRankCoordinator.hpp',
   'src/core/hpc/dap/DapCoordinator.hpp',
@@ -730,12 +730,12 @@ gridlock_advanced_features_tests = executable('gridlock_advanced_features_tests'
 test('advanced_features_tests', gridlock_advanced_features_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 memory_export_test_src = [
-  'tests/test_memory_export.cpp',
+  'tests/hpc/test_memory_export.cpp',
   'src/core/hpc/memory/MemoryExporter.cpp'
 ]
 
 memory_export_test_moc_headers = [
-  'tests/test_memory_export.hpp'
+  'tests/hpc/test_memory_export.hpp'
 ]
 
 processed_memory_export_test_files = qt6.compile_moc(
@@ -754,7 +754,7 @@ gridlock_memory_export_tests = executable('gridlock_memory_export_tests',
 test('memory_export_tests', gridlock_memory_export_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 mi_parser_test_src = [
-  'tests/test_mi_parser.cpp',
+  'tests/hpc/test_mi_parser.cpp',
   'src/ui/GdbConsoleWidget.cpp',
   'src/ui/widgets/InlineFindBar.cpp'
 ]
@@ -766,7 +766,7 @@ mi_parser_test_moc_headers = [
 
 processed_mi_parser_test_files = qt6.compile_moc(
   headers : mi_parser_test_moc_headers,
-  sources : 'tests/test_mi_parser.cpp',
+  sources : 'tests/hpc/test_mi_parser.cpp',
   dependencies: qt6_dep
 )
 
@@ -781,13 +781,13 @@ gridlock_mi_parser_tests = executable('gridlock_mi_parser_tests',
 test('mi_parser_tests', gridlock_mi_parser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 cliparser_test_src = [
-  'tests/test_cliparser.cpp',
+  'tests/core/test_cliparser.cpp',
   'src/core/utils/CliParser.cpp',
   'src/core/Version.cpp'
 ]
 
 processed_cliparser_test_files = qt6.compile_moc(
-  sources : 'tests/test_cliparser.cpp',
+  sources : 'tests/core/test_cliparser.cpp',
   dependencies: qt6_dep
 )
 
