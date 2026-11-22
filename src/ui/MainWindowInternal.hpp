@@ -21,6 +21,7 @@ class QCheckBox;
 class QDockWidget;
 class QMenu;
 class QPlainTextEdit;
+class QPoint;
 class QSplitter;
 class QTimer;
 class QVulkanInstance;
@@ -90,6 +91,7 @@ struct BreakpointRankMeta {
 };
 
 // Cross-translation-unit internal helpers shared across MainWindow*.cpp files.
+void showPlainJaneTooltip(gridlock::PlainJaneTooltip* tooltip, const QPoint& globalPos, const QString& htmlText);
 QWidget* createAddressSpaceNavBar(MainWindow* window, QWidget* parent);
 QString resolveTutorialTarget(const QString& target);
 QString ensureWritableTutorialBinaryPath(const QString& sourcePath);
