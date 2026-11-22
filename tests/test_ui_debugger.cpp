@@ -390,7 +390,6 @@ void TestMainWindowUI::testAnchoredBreakpointPopoverAndGutterHover() {
     dlg.applyQuickPreset(QStringLiteral("rank == 0")); QCOMPARE(dlg.getCondition(), QStringLiteral("rank == 0"));
     const QPoint p(120, 340); dlg.positionNearAnchor(p); dlg.show(); QApplication::processEvents(); QVERIFY(std::abs(dlg.pos().x() - p.x()) <= 40 && std::abs(dlg.pos().y() - p.y()) <= 25); dlg.hide();
 }
-/** @brief Verifies gutter QContextMenuEvent suppression and clean rollback of canceled breakpoints. */
 void TestMainWindowUI::testGutterRightClickSuppressesEditorContextMenuAndCancelsCleanly() {
     gridlock::ui::SourceCodeView sv; QString sampleCode; for (int i = 1; i <= 30; ++i) sampleCode += QStringLiteral("    int rank_val_%1 = %1;\n").arg(i);
     sv.setSourceCode(sampleCode); sv.resize(720, 560); sv.show(); QApplication::processEvents();
@@ -412,8 +411,7 @@ template <typename C, typename... A> auto callCompleteDetailed(int, A&&... a) ->
 template <typename T> void verifyCompletions(const T& c) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QVERIFY(!c.isEmpty() && c.contains(QStringLiteral("id")) && c.contains(QStringLiteral("coords"))); } }
 template <typename T> void verifyDetailed(const T& items) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QVERIFY(!items.isEmpty()); bool fId = false, fCoords = false; for (const auto& it : items) { if (it.label == QStringLiteral("id")) { fId = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QCOMPARE(it.detailType, QStringLiteral("int")); } else if (it.label == QStringLiteral("coords")) { fCoords = true; QCOMPARE(it.kindLabel, QStringLiteral("Field")); QVERIFY(!it.detailType.isEmpty()); } } QVERIFY(fId && fCoords); } }
 template <typename T, typename M> void verifyLoadedTheme(const T&, M& tm) { if constexpr (!std::is_same_v<std::decay_t<T>, int>) { QCOMPARE(tm.activeThemeId(), QStringLiteral("tokyo_night")); } }
-}  // namespace (anonymous)
-/** @brief Verifies ClangdLspClient virtual-buffer splicing, JSON-RPC framing, and nested struct/vector expression completion in ConditionalBreakpointDialog. */
+}  // namespace
 void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp")), deadlockPath = resolveTutorialPath(QStringLiteral("tutorial/deadlock_ring.cpp"));
     const QString inspectionSource = readTutorialFile(QStringLiteral("tutorial/inspection_demo.cpp")), deadlockSource = readTutorialFile(QStringLiteral("tutorial/deadlock_ring.cpp"));
@@ -427,15 +425,13 @@ void TestMainWindowUI::testClangdLspBreakpointExpressionCompletion() {
     dialog.setSourceDocumentContext(deadlockPath, deadlockSource, 34); const QString joined3 = dialog.completionsForExpression(QStringLiteral("send_buf.")).join(QLatin1Char('|'));
     QVERIFY2(joined3.contains(QStringLiteral("data")) && joined3.contains(QStringLiteral("size")), qPrintable(joined3));
     QTemporaryDir lspDir; QVERIFY(lspDir.isValid()); const QString hdrFile = lspDir.filePath(QStringLiteral("math_ops.hpp")), cppFile = lspDir.filePath(QStringLiteral("caller.cpp"));
-    { QFile hf(hdrFile); QVERIFY(hf.open(QIODevice::WriteOnly)); hf.write("#pragma once\nstruct Vec2 {\n  double x;\n  double y;\n  double lengthSq() const { return x * x + y * y; }\n};\n"); }
-    { QFile cf(cppFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("#include \"math_ops.hpp\"\nint main() {\n  Vec2 v{3.0, 4.0};\n  int bad = \"not_an_int\";\n  return static_cast<int>(v.lengthSq()) + bad;\n}\n"); }
+    { QFile hf(hdrFile); QVERIFY(hf.open(QIODevice::WriteOnly)); hf.write("#pragma once\nstruct Vec2 {\n  double x;\n  double y;\n  double lengthSq() const { return x * x + y * y; }\n};\n"); QFile cf(cppFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("#include \"math_ops.hpp\"\nint main() {\n  Vec2 v{3.0, 4.0};\n  int bad = \"not_an_int\";\n  return static_cast<int>(v.lengthSq()) + bad;\n}\n"); }
     gridlock::ui::MainWindow mw; mw.loadSourceFile(cppFile); auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(tabMgr && tabMgr->currentSourceCodeView());
     auto* callerView = tabMgr->currentSourceCodeView(); QTRY_VERIFY_WITH_TIMEOUT(!callerView->diagnostics().isEmpty(), 4000);
     QTextCursor navCur(callerView->document()->findBlockByNumber(4)); navCur.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, 29);
     callerView->setTextCursor(navCur); QKeyEvent f12Press(QEvent::KeyPress, Qt::Key_F12, Qt::NoModifier); QApplication::sendEvent(callerView, &f12Press);
     QVERIFY(QFileInfo(tabMgr->currentSourceCodeView()->currentFile()).fileName() == QStringLiteral("math_ops.hpp") && tabMgr->currentSourceCodeView()->getCurrentLineNumber() == 5);
 }
-/** @brief Verifies editable SourceCodeView, live editor LSP completion, chained breakpoint popover suffix insertion, theme persistence, dirty tab indicators (`●`), `saveAllModifiedTabs()`, `switchHeaderSource()`, scope breadcrumbs, and split editors. */
 void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence() {
     const QString inspectionPath = resolveTutorialPath(QStringLiteral("tutorial/inspection_demo.cpp")), inspectionSource = readTutorialFile(QStringLiteral("tutorial/inspection_demo.cpp"));
     QVERIFY(!inspectionSource.isEmpty());
@@ -462,11 +458,8 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
     auto checkSplits = [](gridlock::ui::EditorTabManager& m) -> bool { if (m.isSplitActive()) return false; m.splitEditor(Qt::Horizontal); if (!m.isSplitActive() || m.splitOrientation() != Qt::Horizontal || m.secondaryEditorView() == nullptr) return false; m.splitEditor(Qt::Vertical); if (!m.isSplitActive() || m.splitOrientation() != Qt::Vertical) return false; m.closeSplit(); return !m.isSplitActive(); };
     QVERIFY2(checkSplits(tabManager), "EditorTabManager must support horizontal/vertical splitEditor() and closeSplit()");
 }
-
-/** @brief Verifies CommandPaletteDialog subsequence fuzzy scoring, prefix filtering (>, @, #), wrap-around keyboard navigation (Down, Up, Return, Escape), and MainWindow shortcuts. */
 void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     using gridlock::ui::CommandPaletteDialog; using gridlock::ui::PaletteItem;
-    // 1. Subsequence fuzzy scoring: boundary matches outrank loose matches and non-matches return -1.
     QVector<int> dtpIdx, drIdx, badIdx;
     const int dtpExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Debug: Attach to Process..."), &dtpIdx), dtpLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Edit: Copy desktop path"));
     const int drExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("tutorial/deadlock_ring.cpp"), &drIdx), drLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("src/core/hpc/DeadlockAnalyzer.cpp"));
