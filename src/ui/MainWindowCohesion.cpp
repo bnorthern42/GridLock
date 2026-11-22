@@ -4,100 +4,76 @@
  *        ELF binary target loader, workspace search engine, and deadlock cycle propagator.
  *
  * Implements the two-tier workstation layout normalization across all bottom console
- * tabs (stripping outer layout margins, enforcing <= 24px control heights, and removing
- * double QFrame borders), context-sensitive F1 documentation lookup into the Reference
- * Manual tab, offscreen tab PNG snapshot rendering, and binary inspection orchestration.
+ * tabs, context-sensitive F1 documentation lookup into the Reference Manual tab,
+ * offscreen tab PNG snapshot rendering, binary inspection orchestration, and edit actions.
  */
 
 #include "MainWindow.hpp"
 
 #include <algorithm>
 #include <memory>
-#include <vector>
 
 #include <QApplication>
-#include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QDir>
-#include <QDockWidget>
 #include <QFileInfo>
 #include <QFrame>
-#include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSet>
-#include <QSettings>
 #include <QShortcut>
 #include <QSpinBox>
-#include <QSplitter>
-#include <QStandardPaths>
-#include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTextEdit>
+#include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTreeView>
 #include <QVBoxLayout>
 
-#include "../core/commands/DebugCommands.hpp"
+#include "../core/hpc/DeadlockAnalyzer.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
-#include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/DocsetManager.hpp"
 #include "../core/managers/SpackManager.hpp"
-#include "../core/managers/ThemeManager.hpp"
+#include "../core/models/VariableTreeModel.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
-#include "dialogs/AttachProcessDialog.hpp"
-#include "dialogs/ConditionalBreakpointDialog.hpp"
+#include "dialogs/ArrayPlotDialog.hpp"
+#include "dialogs/CheckpointDialog.hpp"
 #include "dialogs/PointerGraphDialog.hpp"
-#include "dialogs/PreferencesDialog.hpp"
-#include "docks/TerminalDockWidget.hpp"
+#include "dialogs/SignalCatchpointDialog.hpp"
+#include "docks/CallStackDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
+#include "utils/FileDialogHelper.hpp"
 #include "views/DisassemblyView.hpp"
 #include "views/MemView.hpp"
-#include "views/MemoryProfilerWidget.hpp"
 #include "views/RegisterView.hpp"
-#include "views/ServerRackView.hpp"
 #include "views/SourceCodeView.hpp"
 #include "widgets/DifferentialGrid.hpp"
 #include "widgets/ExpressionEvaluatorWidget.hpp"
-#include "widgets/HpcConsoleWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
-#include "utils/FileDialogHelper.hpp"
+#include "widgets/MpiNetworkLogWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
 #include "widgets/ReferenceManualWidget.hpp"
 
 namespace gridlock::ui {
 
-/**
- * @brief Harmonizes all bottom console tab pages into the unified two-tier workstation layout.
- *
- * Eliminates default 9px-11px outer layout margins and double-walled frames across
- * all seven bottom tabs (Terminal, GDB Console, Memory View, MPI Diagnostics,
- * HPC Console, Evaluator, Reference Manual), enforces compact 22px control heights
- * on all interactive buttons, inputs, and combo boxes, and wires the global F1
- * context-sensitive documentation lookup shortcut.
- */
+/** @brief Harmonizes all bottom console tab pages into the unified two-tier workstation layout. */
 void MainWindow::harmonizeBottomConsoleTabs() {
-    if (!m_bottomTabs) {
-        return;
-    }
+    if (!m_bottomTabs) return;
 
-    // Apply self-contained dark-slate workstation stylesheet directly to BottomConsoleTabs.
     m_bottomTabs->setStyleSheet(QStringLiteral(
         "QTabWidget::pane { border: 0px; margin: 0px; padding: 0px; background: #16181d; }"
         "QTabBar { background: #181a1f; border-bottom: 1px solid #2c313a; }"
@@ -111,7 +87,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         "QCheckBox { color: #abb2bf; font-size: 11px; font-weight: 600; spacing: 5px; }"
         "QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget { background: #16181d; color: #d7dae0; border: none; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"));
 
-    // 1. Harmonize GdbConsoleWidget (GDB Console tab) outer layout and control bar metrics.
+    // 1. Harmonize GdbConsoleWidget outer layout and control bar metrics.
     if (m_gdbConsoleWidget) {
         m_gdbConsoleWidget->setAttribute(Qt::WA_StyledBackground, true);
         m_gdbConsoleWidget->setContentsMargins(0, 0, 0, 0);
@@ -144,12 +120,10 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         if (!page) continue;
         page->setContentsMargins(0, 0, 0, 0);
         if (QLayout* pl = page->layout()) { pl->setContentsMargins(0, 0, 0, 0); pl->setSpacing(0); }
-        // Cap interactive controls inside each tab page at 22px height.
         for (auto* b : page->findChildren<QPushButton*>()) if (b->maximumHeight() > 24) b->setFixedHeight(22);
         for (auto* e : page->findChildren<QLineEdit*>()) if (e->maximumHeight() > 24) e->setFixedHeight(22);
         for (auto* c : page->findChildren<QComboBox*>()) if (c->maximumHeight() > 24) c->setFixedHeight(22);
         for (auto* s : page->findChildren<QSpinBox*>()) if (s->maximumHeight() > 24) s->setFixedHeight(22);
-        // Strip redundant QFrame borders from embedded text and list viewports.
         for (auto* f : page->findChildren<QFrame*>()) {
             if (qobject_cast<QPlainTextEdit*>(f) || qobject_cast<QTextEdit*>(f) ||
                 qobject_cast<QTextBrowser*>(f) || qobject_cast<QListWidget*>(f) ||
@@ -165,7 +139,6 @@ void MainWindow::harmonizeBottomConsoleTabs() {
             const QTextCursor cursor = m_disassemblyView->textCursor();
             candidate = cursor.selectedText().trimmed();
             if (candidate.isEmpty()) {
-                // Extract MPI_* or <symbol@plt> identifier from the active disassembly line.
                 static const QRegularExpression kSymRegex(QStringLiteral("(MPI_[A-Za-z0-9_]+|<[A-Za-z0-9_@]+>)"));
                 const QRegularExpressionMatch match = kSymRegex.match(cursor.block().text());
                 if (match.hasMatch()) candidate = match.captured(1);
@@ -176,7 +149,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         lookupSymbolDocumentation(candidate);
     });
 
-    // 5. Wire cross-pane workflow bridges between Evaluator/Variables -> Watch Expressions and Disassembly -> Reference Manual.
+    // 5. Wire cross-pane workflow bridges between Evaluator/Variables -> Watch Expressions and Disassembly -> RefMan.
     auto addPromotedWatch = [this](const QString& expr) {
         const QString trimmed = expr.trimmed();
         if (trimmed.isEmpty() || !m_differentialGrid) return;
@@ -216,7 +189,12 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         }
     };
     bindActiveSourceView();
-    if (m_editorTabManager) connect(m_editorTabManager, &EditorTabManager::currentChanged, this, [this, bindActiveSourceView](int) { bindActiveSourceView(); syncDisassemblyDecompilerVisibility(false); });
+    if (m_editorTabManager) {
+        connect(m_editorTabManager, &EditorTabManager::currentChanged, this, [this, bindActiveSourceView](int) {
+            bindActiveSourceView();
+            syncDisassemblyDecompilerVisibility(false);
+        });
+    }
 
     // 7. Mount one-click Workspace Perspective Switcher (SOURCE | DEBUG | BINARY | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
@@ -234,7 +212,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         m_perspMpiBtn = makePerspBtn(QStringLiteral("MPI"), QStringLiteral("perspectiveMpiBtn"), QStringLiteral("MPI"), QStringLiteral("MPI Perspective (Alt+8) — topology & collective diagnostics"), false);
     }
 
-    // 8. Bind Alt+1/2/3/8 perspective shortcuts, Ctrl+M maximize toggle, and populate #bottomToolWindowRail.
+    // 8. Bind Alt+1/2/3/8 perspective shortcuts and Ctrl+M bottom console maximize toggle.
     connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_1), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Source")); });
     connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_2), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Debug")); });
     connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_3), this), &QShortcut::activated, this, [this]() { setWorkspacePerspective(QStringLiteral("Binary")); });
@@ -251,25 +229,24 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         auto* railLayout = new QVBoxLayout(m_bottomToolRail);
         railLayout->setContentsMargins(3, 4, 3, 4); railLayout->setSpacing(4);
 
-        // Render crisp 16x16 antialiased vector icons for Debug, MPI, Terminal, and Docs rail buttons.
         auto makeRailIcon = [](int kind) -> QIcon {
             QPixmap px(16, 16); px.fill(Qt::transparent);
             QPainter p(&px); p.setRenderHint(QPainter::Antialiasing, true);
             QPen pen(QColor(0xd7, 0xda, 0xe0), 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-            if (kind == 0) { // Debug: inspection crosshair ring with center core
+            if (kind == 0) {
                 pen.setColor(QColor(0x61, 0xaf, 0xef)); p.setPen(pen); p.drawEllipse(QRectF(3.0, 3.0, 10.0, 10.0));
                 p.drawLine(QPointF(8.0, 1.0), QPointF(8.0, 3.5)); p.drawLine(QPointF(8.0, 12.5), QPointF(8.0, 15.0));
                 p.setBrush(QColor(0x61, 0xaf, 0xef)); p.drawEllipse(QPointF(8.0, 8.0), 1.5, 1.5);
-            } else if (kind == 1) { // MPI: 3-node cluster topology graph
+            } else if (kind == 1) {
                 pen.setColor(QColor(0x4e, 0xc9, 0xb0)); p.setPen(pen);
                 p.drawLine(QPointF(8.0, 4.0), QPointF(3.5, 12.0)); p.drawLine(QPointF(8.0, 4.0), QPointF(12.5, 12.0)); p.drawLine(QPointF(3.5, 12.0), QPointF(12.5, 12.0));
                 p.setBrush(QColor(0x18, 0x1a, 0x1f));
                 p.drawEllipse(QPointF(8.0, 4.0), 2.2, 2.2); p.drawEllipse(QPointF(3.5, 12.0), 2.2, 2.2); p.drawEllipse(QPointF(12.5, 12.0), 2.2, 2.2);
-            } else if (kind == 2) { // Terminal: >_ command prompt glyph
+            } else if (kind == 2) {
                 pen.setColor(QColor(0xe5, 0xc0, 0x7b)); p.setPen(pen);
                 p.drawLine(QPointF(3.0, 4.5), QPointF(7.5, 8.0)); p.drawLine(QPointF(7.5, 8.0), QPointF(3.0, 11.5));
                 p.drawLine(QPointF(9.0, 11.5), QPointF(13.5, 11.5));
-            } else { // Docs: open reference manual pages
+            } else {
                 pen.setColor(QColor(0xc6, 0x78, 0xdd)); p.setPen(pen);
                 p.drawRoundedRect(QRectF(2.5, 3.0, 11.0, 10.0), 1.5, 1.5); p.drawLine(QPointF(8.0, 3.2), QPointF(8.0, 12.8));
             }
@@ -297,27 +274,15 @@ void MainWindow::harmonizeBottomConsoleTabs() {
         railLayout->addStretch(1);
     }
 
-    // Automatically synchronize the active tool-window group whenever BottomConsoleTabs changes programmatically.
     connect(m_bottomTabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (m_syncingBottomToolGroup || index < 0) return;
         const QString grp = bottomToolGroupForTabIndex(index);
-        if (!grp.isEmpty() && grp != m_activeBottomToolGroup) {
-            selectBottomToolGroup(grp);
-        }
+        if (!grp.isEmpty() && grp != m_activeBottomToolGroup) selectBottomToolGroup(grp);
     });
     selectBottomToolGroup(QStringLiteral("Debug"));
 }
 
-/**
- * @brief Resolves symbol documentation (stripping @plt/@got suffixes), switches to Reference Manual, and renders HTML.
- *
- * Normalizes the raw symbol string (e.g., "MPI_Init@plt" -> "MPI_Init"), instructs
- * ReferenceManualWidget to render the formatted dark-slate manual page, and activates
- * the Reference Manual tab in BottomConsoleTabs.
- *
- * @param rawSymbol Raw symbol name or topic identifier.
- * @return True if documentation was rendered and tab activated; false otherwise.
- */
+/** @brief Resolves symbol documentation (stripping @plt/@got suffixes) and activates Reference Manual. */
 bool MainWindow::lookupSymbolDocumentation(const QString& rawSymbol) {
     const QString normalized = gridlock::core::DocsetManager::normalizeSymbolName(rawSymbol);
     if (normalized.isEmpty() || !m_referenceManualWidget || !m_bottomTabs) return false;
@@ -329,22 +294,11 @@ bool MainWindow::lookupSymbolDocumentation(const QString& rawSymbol) {
     return true;
 }
 
-/**
- * @brief Switches to the specified bottom console tab index and captures a PNG audit snapshot.
- *
- * Activates tabIndex in BottomConsoleTabs, flushes pending layout/paint events,
- * grabs the MainWindow framebuffer pixmap, and writes a PNG image to outputPath.
- *
- * @param tabIndex Zero-based index in BottomConsoleTabs.
- * @param outputPath Destination PNG file path.
- * @return True if PNG snapshot was rendered and saved; false otherwise.
- */
+/** @brief Switches to the specified bottom console tab index and captures a PNG audit snapshot. */
 bool MainWindow::captureTabAuditSnapshot(int tabIndex, const QString& outputPath) {
     if (!m_bottomTabs || tabIndex < 0 || tabIndex >= m_bottomTabs->count() || outputPath.trimmed().isEmpty()) {
         return false;
     }
-
-    // Optional multi-tab visual audit export when GRIDLOCK_AUDIT_SNAPSHOTS=1 is set.
     if (qEnvironmentVariableIsSet("GRIDLOCK_AUDIT_SNAPSHOTS")) {
         const QList<QPair<int, QString>> targets = {
             {1, QStringLiteral("/tmp/gridlock_tab_gdb.png")}, {3, QStringLiteral("/tmp/gridlock_tab_mpidiag.png")},
@@ -361,11 +315,7 @@ bool MainWindow::captureTabAuditSnapshot(int tabIndex, const QString& outputPath
     return !pixmap.isNull() && pixmap.save(outputPath, "PNG");
 }
 
-/**
- * @brief Loads a 64-bit ELF binary executable or shared object for static inspection.
- * @param binaryPath Path to executable file on disk.
- * @return True if file is valid ELF64 and successfully parsed; false otherwise.
- */
+/** @brief Loads a 64-bit ELF binary executable or shared object for static inspection. */
 bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     auto inspector = std::make_unique<gridlock::core::ElfBinaryInspector>();
     if (!inspector->loadFile(binaryPath)) return false;
@@ -381,7 +331,6 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     m_elfInspector = std::move(inspector);
     m_loadedBinaryPath = binInfo.absoluteFilePath();
 
-    // Populate ProjectExplorerWidget with parsed ELF symbols and strings.
     uint64_t mainAddr = 0ULL;
     QString mainSymName;
     if (m_projectExplorerWidget) {
@@ -392,7 +341,6 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         for (const auto& str : m_elfInspector->strings()) strs.push_back({str.address, str.section, str.value});
         m_projectExplorerWidget->setStrings(strs);
     }
-    // Locate main symbol if present so user targets open directly at main with DWARF line info.
     for (const auto& s : m_elfInspector->symbols()) {
         if (s.isFunction && (s.name == QStringLiteral("main") || s.name == QStringLiteral("sym.main"))) { mainAddr = s.address; mainSymName = s.name; break; }
     }
@@ -414,29 +362,21 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
     if (m_memView && !m_debugSessionActive && m_elfInspector->isValid()) m_memView->setSourceModeLabel(QStringLiteral("STATIC ELF (READ-ONLY)"));
     if (m_workspacePerspective != QStringLiteral("Source")) if (auto* nt = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) nt->setVisible(true);
     if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
-    syncDisassemblyDecompilerVisibility(true); return true;
+    syncDisassemblyDecompilerVisibility(true);
+    return true;
 }
 
-/**
- * @brief Exports the in-memory patched ELF binary image to disk.
- * @param outputPath Destination file system path.
- * @return True if file was successfully written and marked executable; false otherwise.
- */
+/** @brief Exports the in-memory patched ELF binary image to disk. */
 bool MainWindow::exportPatchedBinary(const QString& outputPath) const {
     return (m_elfInspector && m_elfInspector->isValid()) ? m_elfInspector->savePatchedBinary(outputPath) : false;
 }
 
-/**
- * @brief Performs unified multi-domain case-insensitive search across the workspace.
- * @param query Target search query substring.
- * @return List of structured search match records.
- */
+/** @brief Performs unified multi-domain case-insensitive search across the workspace. */
 QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(const QString& query) const {
     QVector<WorkspaceSearchResult> matches;
     const QString q = query.trimmed();
     if (q.isEmpty()) return matches;
 
-    // 1. Search loaded ELF symbols and strings.
     if (m_elfInspector && m_elfInspector->isValid()) {
         for (const auto& s : m_elfInspector->symbols()) {
             if (s.name.contains(q, Qt::CaseInsensitive)) {
@@ -450,7 +390,6 @@ QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(const QSt
         }
     }
 
-    // 2. Search Disassembly lines, user comments, and Decompiled C statements.
     if (m_disassemblyView) {
         const QStringList lines = m_disassemblyView->toPlainText().split('\n');
         for (int i = 0; i < lines.size(); ++i) {
@@ -472,27 +411,19 @@ QVector<MainWindow::WorkspaceSearchResult> MainWindow::searchWorkspace(const QSt
     return matches;
 }
 
-/**
- * @brief Detects wait-for cycle among MPI ranks and highlights deadlocked nodes.
- * @param waitForGraph Directed edges where key rank waits for value rank.
- * @return List of ranks participating in the deadlock cycle sorted in ascending order.
- */
+/** @brief Detects wait-for cycle among MPI ranks and highlights deadlocked nodes. */
 QVector<int> MainWindow::detectAndHighlightDeadlock(const QMap<int, int>& waitForGraph) {
     QVector<int> cycleNodes;
     QSet<int> inCycle;
-
-    // Cycle detection via deterministic path tracing through directed wait-for edges.
     for (auto it = waitForGraph.cbegin(); it != waitForGraph.cend(); ++it) {
         int curr = it.key();
         QVector<int> path;
         QSet<int> visited;
-        // Follow dependency chain until a terminal node or previously visited node is reached.
         while (waitForGraph.contains(curr) && !visited.contains(curr)) {
             visited.insert(curr);
             path.append(curr);
             curr = waitForGraph.value(curr);
         }
-        // If terminal node was encountered earlier in current path, a cycle exists.
         if (waitForGraph.contains(curr)) {
             const int cycleStartIdx = path.indexOf(curr);
             for (int i = cycleStartIdx; cycleStartIdx != -1 && i < path.size(); ++i) {
@@ -505,7 +436,6 @@ QVector<int> MainWindow::detectAndHighlightDeadlock(const QMap<int, int>& waitFo
     }
     std::sort(cycleNodes.begin(), cycleNodes.end());
 
-    // Propagate deadlocked rank IDs to DisassemblyView and bottom status bar telemetry.
     if (m_disassemblyView) m_disassemblyView->setDeadlockCycleRanks(cycleNodes);
     if (auto* telemetryLabel = findChild<QLabel*>(QStringLiteral("cutterStatusTelemetry"))) {
         QString txt = telemetryLabel->text();
@@ -517,130 +447,12 @@ QVector<int> MainWindow::detectAndHighlightDeadlock(const QMap<int, int>& waitFo
     return cycleNodes;
 }
 
-/** @brief Synchronizes #MainToolbar action enablement, state-aware tooltips, and reverse-debug controls. */
-void MainWindow::updateDebugToolbarState() {
-    const bool active = m_debugSessionActive; const QString idleWhy = QStringLiteral(" — unavailable while idle (click ▶ Run first)");
-    if (m_runAction) {
-        m_runAction->setEnabled(true); m_runAction->setCheckable(true); m_runAction->setChecked(active);
-        m_runAction->setText(active ? QStringLiteral("● Running") : QStringLiteral("▶ Run Target")); m_runAction->setIconText(active ? QStringLiteral("● Running") : QStringLiteral("▶ Run"));
-        m_runAction->setToolTip(active ? QStringLiteral("Target Session Active — click ■ Stop (Shift+F5) to end session") : QStringLiteral("Run Target (Alt+R) — compile if needed and launch MPI debug session"));
-    }
-    auto syncAct = [&](QAction* a, const QString& onTip, const QString& name) { if (a) { a->setEnabled(active); a->setToolTip(active ? onTip : (name + idleWhy)); } };
-    syncAct(m_continueAction, QStringLiteral("Continue Execution (F5) — resume suspended ranks until the next breakpoint"), QStringLiteral("Continue Execution (F5)"));
-    syncAct(m_stepOverAction, QStringLiteral("Step Over (F10) — execute current source line without entering callees"), QStringLiteral("Step Over (F10)"));
-    syncAct(m_stepIntoAction, QStringLiteral("Step Into (F11) — step into called function (click arrow for stepi / nexti)"), QStringLiteral("Step Into (F11)"));
-    syncAct(m_stepOutAction, QStringLiteral("Step Out (Shift+F11) — finish current stack frame and pause in caller"), QStringLiteral("Step Out (Shift+F11)"));
-    syncAct(m_stepAction, QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
-    syncAct(findChild<QAction*>(QStringLiteral("actionNextInstruction")), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10) — step machine instruction over CALL"), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"));
-    syncAct(findChild<QAction*>(QStringLiteral("actionToolbarNexti")), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10) — step machine instruction over CALL"), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"));
-    syncAct(m_pauseAction, QStringLiteral("Pause Focused Rank — interrupt execution on the active MPI rank"), QStringLiteral("Pause Focused Rank"));
-    syncAct(m_stopAction, QStringLiteral("Stop Session (Shift+F5) — terminate active debugging session"), QStringLiteral("Stop Session (Shift+F5)"));
-    auto syncBtn = [&](QWidget* w, const QString& onTip, const QString& name) { if (w) { w->setEnabled(active); w->setToolTip(active ? onTip : (name + idleWhy)); } };
-    syncBtn(findChild<QPushButton*>(QStringLiteral("disasmStepiBtn")), QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
-    syncBtn(findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"));
-    syncBtn(findChild<QPushButton*>(QStringLiteral("addHardwareWatchpointBtn")), QStringLiteral("Arm CPU Hardware Data Watchpoint (Write / Read / R/W)"), QStringLiteral("Add Hardware Watchpoint"));
-    if (auto* wpCombo = findChild<QComboBox*>(QStringLiteral("watchpointAccessCombo"))) wpCombo->setEnabled(active);
-    if (auto* recBtn = findChild<QPushButton*>(QStringLiteral("toolbarRecordHistoryBtn"))) {
-        const bool recOn = active && (m_coordinator ? m_coordinator->isReverseRecordingEnabled(activeSteppingRank()) : recBtn->isChecked());
-        if (recBtn->isChecked() != recOn) { recBtn->blockSignals(true); recBtn->setChecked(recOn); recBtn->blockSignals(false); }
-        recBtn->setEnabled(active); recBtn->setToolTip(active ? (recOn ? QStringLiteral("Time-Travel Recording Active — click to stop recording") : QStringLiteral("Record Execution History — enable reverse stepping on focused rank")) : (QStringLiteral("Record Execution History") + idleWhy));
-        if (auto* sbAct = findChild<QAction*>(QStringLiteral("actionToolbarStepBack"))) sbAct->setVisible(recOn);
-        if (auto* rcAct = findChild<QAction*>(QStringLiteral("actionToolbarReverseContinue"))) rcAct->setVisible(recOn);
-        if (auto* sbBtn = findChild<QPushButton*>(QStringLiteral("toolbarStepBackBtn"))) { sbBtn->setVisible(recOn); sbBtn->setEnabled(recOn); sbBtn->setToolTip(QStringLiteral("Step Back — reverse step over previous source line (-exec-next --reverse)")); }
-        if (auto* rcBtn = findChild<QPushButton*>(QStringLiteral("toolbarReverseContinueBtn"))) { rcBtn->setVisible(recOn); rcBtn->setEnabled(recOn); rcBtn->setToolTip(QStringLiteral("Reverse Continue — run backward to previous breakpoint (-exec-continue --reverse)")); }
-    }
-    if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), active);
-}
-/** @brief Checks whether the toolbar Run Target button is currently latched in Running state. */
-bool MainWindow::isRunButtonLatched() const { return m_debugSessionActive && m_runAction && m_runAction->isChecked(); }
-
-/** @brief Switches workstation between "Source", "Debug", "Binary", and "MPI" without force-redocking floating panels. */
-void MainWindow::setWorkspacePerspective(const QString& perspective) {
-    auto* masterSplitter = findChild<QSplitter*>(QStringLiteral("MasterHorizontalSplitter"));
-    auto* mainVertSplitter = findChild<QSplitter*>(QStringLiteral("MainVerticalSplitter"));
-    auto* navTb = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"));
-    auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
-    auto* regsDock = findChild<QDockWidget*>(QStringLiteral("RegisterViewDock"));
-    auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"));
-    auto* cstackDock = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
-    if (varsDock && regsDock && watchDock && !isDockFloating(varsDock) && !isDockFloating(regsDock) && !isDockFloating(watchDock)) {
-        if (!tabifiedDockWidgets(varsDock).contains(regsDock)) tabifyDockWidget(varsDock, regsDock);
-        if (!tabifiedDockWidgets(varsDock).contains(watchDock)) tabifyDockWidget(regsDock, watchDock);
-    }
-    if (m_disassemblyView) m_disassemblyView->setMinimumWidth(120);
-
-    const bool wasBin = (m_workspacePerspective == QStringLiteral("Binary"));
-    const bool isBin = (perspective.compare(QStringLiteral("Binary"), Qt::CaseInsensitive) == 0 || perspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0);
-    const bool isMpi = (perspective.compare(QStringLiteral("MPI"), Qt::CaseInsensitive) == 0);
-    const bool isDbg = (perspective.compare(QStringLiteral("Debug"), Qt::CaseInsensitive) == 0 || perspective.compare(QStringLiteral("Code"), Qt::CaseInsensitive) == 0);
-    m_workspacePerspective = isBin ? QStringLiteral("Binary") : (isMpi ? QStringLiteral("MPI") : (isDbg ? QStringLiteral("Debug") : QStringLiteral("Source")));
-
-    const bool hideIdleRight = (m_workspacePerspective == QStringLiteral("Source") && !m_debugSessionActive);
-    for (QDockWidget* d : {varsDock, regsDock, watchDock, cstackDock}) {
-        if (d && !isDockFloating(d)) d->setVisible(!hideIdleRight);
-    }
-    if (!hideIdleRight && varsDock && !isDockFloating(varsDock)) { varsDock->raise(); resizeDocks({varsDock}, {320}, Qt::Horizontal); }
-    if (navTb) navTb->setVisible(isBin || (!hideIdleRight && m_workspacePerspective != QStringLiteral("Source") && (m_debugSessionActive || (m_elfInspector && m_elfInspector->isValid()))));
-
-    if (isBin) {
-        if (m_editorTabManager) m_editorTabManager->setVisible(false);
-        if (m_disassemblyView) { m_disassemblyView->setVisible(true); m_disassemblyView->setSplitGraphDecompilerMode(true); }
-        if (masterSplitter) masterSplitter->setSizes({0, (std::max)(width() - 360, 640)});
-    } else if (isMpi) {
-        const bool showDis = core::ConfigManager::instance().showDecompilerWithSource();
-        if (m_editorTabManager) m_editorTabManager->setVisible(true);
-        if (m_disassemblyView) m_disassemblyView->setVisible(showDis);
-        if (masterSplitter) masterSplitter->setSizes(showDis ? QList<int>{420, 500} : QList<int>{920, 0});
-        selectBottomToolGroup(QStringLiteral("MPI"));
-        if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
-        if (mainVertSplitter) mainVertSplitter->setSizes({430, 410});
-    } else if (isDbg) {
-        const bool showDis = (perspective.compare(QStringLiteral("Code"), Qt::CaseInsensitive) == 0) || core::ConfigManager::instance().showDecompilerWithSource();
-        if (m_editorTabManager) m_editorTabManager->setVisible(true);
-        if (m_disassemblyView) m_disassemblyView->setVisible(showDis);
-        if (masterSplitter) masterSplitter->setSizes(showDis ? QList<int>{440, 520} : QList<int>{940, 0});
-        if (mainVertSplitter) mainVertSplitter->setSizes({600, 260});
-        m_bottomConsoleMaximized = false;
-    } else {
-        if (m_editorTabManager) m_editorTabManager->setVisible(true);
-        if (m_disassemblyView) m_disassemblyView->setVisible(false);
-        if (masterSplitter) masterSplitter->setSizes({1020, 0});
-        if (mainVertSplitter) mainVertSplitter->setSizes({600, 260});
-        m_bottomConsoleMaximized = false;
-    }
-
-    if (m_perspSourceBtn) m_perspSourceBtn->setChecked(m_workspacePerspective == QStringLiteral("Source"));
-    if (m_perspDebugBtn) m_perspDebugBtn->setChecked(m_workspacePerspective == QStringLiteral("Debug"));
-    if (m_perspBinaryBtn) m_perspBinaryBtn->setChecked(m_workspacePerspective == QStringLiteral("Binary"));
-    if (m_perspMpiBtn) m_perspMpiBtn->setChecked(m_workspacePerspective == QStringLiteral("MPI"));
-    syncRankCountChrome();
-    syncDisassemblyDecompilerVisibility(isBin || wasBin);
-}
-
-/**
- * @brief Toggles the bottom console dock between standard height (260px) and maximized height (65%).
- */
-void MainWindow::toggleMaximizeBottomConsole() {
-    auto* mainVertSplitter = findChild<QSplitter*>(QStringLiteral("MainVerticalSplitter"));
-    if (!mainVertSplitter) return;
-    // Flip maximized state and adjust vertical splitter proportions accordingly.
-    m_bottomConsoleMaximized = !m_bottomConsoleMaximized;
-    const int totalH = (std::max)(mainVertSplitter->height(), 760);
-    mainVertSplitter->setSizes(m_bottomConsoleMaximized ? QList<int>{totalH * 32 / 100, totalH * 68 / 100}
-                                                        : QList<int>{600, 260});
-}
-
-/**
- * @brief Dispatches an Edit menu action to the currently focused or active source editor.
- * @param actionName Name or substring of the Edit menu action.
- * @return True if the action was recognized and executed; false otherwise.
- */
+/** @brief Dispatches an Edit menu action to the currently focused or active source editor. */
 bool MainWindow::triggerEditMenuAction(const QString& actionName) {
     const QString act = actionName.trimmed();
     if (act.isEmpty()) return false;
     if (act.contains(QStringLiteral("Preferences"), Qt::CaseInsensitive)) { openPreferences(); return true; }
 
-    // Resolve target QPlainTextEdit / SourceCodeView (prefer focused text editor, fallback to active SourceCodeView).
     SourceCodeView* srcView = sourceCodeView();
     QPlainTextEdit* plainEdit = qobject_cast<QPlainTextEdit*>(QApplication::focusWidget());
     if (!plainEdit) plainEdit = srcView;
@@ -653,7 +465,10 @@ bool MainWindow::triggerEditMenuAction(const QString& actionName) {
     if (act.contains(QStringLiteral("Select All"), Qt::CaseInsensitive)) { if (!plainEdit) return false; plainEdit->selectAll(); return true; }
     if (act.contains(QStringLiteral("Comment"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->toggleLineComment(); return true; }
     if (act.contains(QStringLiteral("Go to Line"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->selectSourceLine(1); return true; }
-    if (act.contains(QStringLiteral("Go to Address"), Qt::CaseInsensitive) && m_seekBar) { if (!m_seekBar->isVisible()) m_seekBar->show(); m_seekBar->setFocus(Qt::ShortcutFocusReason); m_seekBar->selectAll(); return true; }
+    if (act.contains(QStringLiteral("Go to Address"), Qt::CaseInsensitive) && m_seekBar) {
+        if (!m_seekBar->isVisible()) m_seekBar->show();
+        m_seekBar->setFocus(Qt::ShortcutFocusReason); m_seekBar->selectAll(); return true;
+    }
     if (act.contains(QStringLiteral("Find"), Qt::CaseInsensitive)) {
         QWidget* fw = QApplication::focusWidget();
         if (m_gdbConsoleWidget && fw && (fw == m_gdbConsoleWidget || m_gdbConsoleWidget->isAncestorOf(fw))) { m_gdbConsoleWidget->openFindBar(); return true; }
@@ -663,283 +478,42 @@ bool MainWindow::triggerEditMenuAction(const QString& actionName) {
     return false;
 }
 
-/**
- * @brief Applies UI and Code/Disassembly typography settings live across the entire workstation.
- * @param uiFamily UI font family name.
- * @param uiSize UI font point size.
- * @param codeFamily Code/Disassembly monospace font family name.
- * @param codeSize Code/Disassembly font point size.
- */
-void MainWindow::applyTypographySettings(const QString& uiFamily, int uiSize,
-                                         const QString& codeFamily, int codeSize) {
-    QSettings s("gridlock", "debugger");
-    if (!uiFamily.trimmed().isEmpty()) s.setValue("appearance/ui_font_family", uiFamily.trimmed());
-    s.setValue("appearance/ui_font_size", qBound(7, uiSize, 32));
-    if (!codeFamily.trimmed().isEmpty()) s.setValue("appearance/code_font_family", codeFamily.trimmed());
-    s.setValue("appearance/code_font_size", qBound(7, codeSize, 48));
-    s.sync();
+/** @brief Clears variable, register, call-stack, MPI diagnostics, network log, and memory docks to idle. */
+void clearAllInspectionDocks(VariablesDockWidget* varsDock, RegisterView* regView, CallStackDockWidget* csDock,
+                             MpiDiagnosticsWidget* mpiDiag, MpiNetworkLogWidget* netLog, MemView* memView) {
+    if (varsDock) if (auto* vm = varsDock->findChild<gridlock::VariableTreeModel*>()) vm->clear();
+    if (regView) regView->clearRegisters();
+    if (csDock) csDock->clearFrames();
+    if (mpiDiag) mpiDiag->clear();
+    if (netLog) netLog->clear();
+    if (memView) memView->clear();
+}
 
-    // Recompile and apply global workstation QSS with scaled UI font sizes and control heights.
-    gridlock::core::managers::ThemeManager::instance().applyThemeAndFonts();
-
-    // Propagate code typography live to all open SourceCodeView tabs, DisassemblyView, and Explorer.
-    if (m_editorTabManager) {
-        for (int i = 0; i < m_editorTabManager->count(); ++i) {
-            if (auto* view = qobject_cast<SourceCodeView*>(m_editorTabManager->widget(i))) view->reloadStyle();
+/** @brief Disconnects all child docks/dialogs from the active coordinator and stops live ranks synchronously. */
+void MainWindow::shutdownActiveSessionSync() {
+    m_isShuttingDown = true; m_isClosing = true;
+    if (m_telemetryTimer) m_telemetryTimer->stop();
+    if (m_programOutputFlushTimer) m_programOutputFlushTimer->stop();
+    if (m_deadlockAnalyzer) {
+        QObject::disconnect(m_deadlockAnalyzer, nullptr, this, nullptr);
+        if (m_mpiDiagnosticsWidget) QObject::disconnect(m_deadlockAnalyzer, nullptr, m_mpiDiagnosticsWidget, nullptr);
+    }
+    if (m_coordinator) {
+        for (QObject* child : {static_cast<QObject*>(this), static_cast<QObject*>(m_variablesDockWidget), static_cast<QObject*>(m_callStackDockWidget),
+                               static_cast<QObject*>(m_disassemblyView), static_cast<QObject*>(m_memView), static_cast<QObject*>(m_registerView),
+                               static_cast<QObject*>(m_differentialGrid), static_cast<QObject*>(m_arrayPlotDialog), static_cast<QObject*>(m_pointerGraphDialog),
+                               static_cast<QObject*>(m_gdbConsoleWidget), static_cast<QObject*>(m_expressionEvaluatorWidget),
+                               static_cast<QObject*>(m_signalCatchpointDialog), static_cast<QObject*>(m_checkpointDialog), static_cast<QObject*>(m_deadlockAnalyzer)}) {
+            if (child) { QObject::disconnect(m_coordinator, nullptr, child, nullptr); QObject::disconnect(child, nullptr, m_coordinator, nullptr); }
         }
+        if (m_variablesDockWidget) m_variablesDockWidget->setCoordinator(nullptr);
+        if (m_arrayPlotDialog) m_arrayPlotDialog->setCoordinator(nullptr);
+        if (m_pointerGraphDialog) m_pointerGraphDialog->setCoordinator(nullptr);
+        if (m_signalCatchpointDialog) m_signalCatchpointDialog->setCoordinator(nullptr);
+        if (m_checkpointDialog) m_checkpointDialog->setCoordinator(nullptr);
     }
-    if (m_disassemblyView) m_disassemblyView->reloadStyle();
-    if (m_projectExplorerWidget) m_projectExplorerWidget->reloadStyle();
-}
-
-/**
- * @brief Constructs the shell clean command for a given project directory or standalone source file.
- * @param targetPath Project directory path or source file path.
- * @return Shell command string to clean build artifacts.
- */
-QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
-    // Detect active build system and normalize workspace path before constructing clean command.
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
-    const QFileInfo info(resolvedPath);
-    const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    const QDir dir(dirPath);
-
-    // Dispatch build-system-specific clean commands (Meson, CMake, Make, or SingleFileMPI).
-    if (buildSys == QStringLiteral("Meson")) {
-        // Prefer builddir unless only build/build.ninja is already configured on disk.
-        const QString buildSubdir =
-            (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja")))
-                ? QStringLiteral("build") : QStringLiteral("builddir");
-        return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, buildSubdir);
-    }
-    if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
-    if (buildSys == QStringLiteral("Make")) return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
-    // Single-file MPI targets remove the compiled output binary sharing the source basename.
-    const QFileInfo srcInfo(!info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath());
-    return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
-}
-
-/**
- * @brief Switches BottomConsoleTabs to Terminal, dispatches the build command, and reloads SingleFileMPI ELF output.
- * @return True if the build command was generated and dispatched to TerminalDockWidget.
- */
-bool MainWindow::buildTargetWorkflow() {
-    if (!m_terminalDock) return false;
-    const QString targetPath = activeTargetSourcePath();
-
-    // Activate embedded Terminal group and dispatch build command.
-    selectBottomToolGroup(QStringLiteral("Terminal"));
-    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString cmd = buildCommandForPath(targetPath);
-    if (cmd.isEmpty()) return false;
-    m_terminalDock->sendCommand(cmd);
-    // Synchronize DisassemblyView and DWARF line mappings immediately for single-file MPI targets.
-    if (buildSys == QStringLiteral("SingleFileMPI")) ensureTargetBinaryCompiled();
-    // Reflect active build toolchain status in the main status bar telemetry badge.
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
-    return true;
-}
-
-/**
- * @brief Switches BottomConsoleTabs to Terminal and dispatches the detected clean command.
- * @return True if the clean command was generated and dispatched to TerminalDockWidget.
- */
-bool MainWindow::cleanTargetWorkflow() {
-    if (!m_terminalDock) return false;
-    const QString targetPath = activeTargetSourcePath();
-
-    // Activate embedded Terminal group and dispatch clean command.
-    selectBottomToolGroup(QStringLiteral("Terminal"));
-    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString cmd = cleanCommandForPath(targetPath);
-    if (cmd.isEmpty()) return false;
-    m_terminalDock->sendCommand(cmd);
-    // Update status bar telemetry so the user sees which build system is being cleaned.
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("CLEANING [%1]").arg(buildSys));
-    return true;
-}
-
-/**
- * @brief Switches BottomConsoleTabs to Terminal and dispatches a chained clean && build command.
- * @return True if the rebuild command was generated and dispatched to TerminalDockWidget.
- */
-bool MainWindow::rebuildTargetWorkflow() {
-    if (!m_terminalDock) return false;
-    const QString targetPath = activeTargetSourcePath();
-
-    // Activate embedded Terminal group and dispatch chained clean && build command.
-    selectBottomToolGroup(QStringLiteral("Terminal"));
-    if (m_bottomTabs) m_bottomTabs->setCurrentWidget(m_terminalDock);
-    const QString buildSys = detectBuildSystem(targetPath);
-    const QString cleanCmd = cleanCommandForPath(targetPath);
-    const QString buildCmd = buildCommandForPath(targetPath);
-    if (cleanCmd.isEmpty() || buildCmd.isEmpty()) return false;
-    // Chain clean and build with short-circuit && so compilation only runs if clean succeeds.
-    m_terminalDock->sendCommand(QStringLiteral("%1 && %2").arg(cleanCmd, buildCmd));
-    // Reflect active rebuild operation in the main status bar telemetry badge.
-    updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys));
-    return true;
-}
-
-/**
- * @brief Programmatically drives all workstation views, tool rail groups, dialogs, and themes
- *        to capture high-resolution 1600x960 documentation PNG screenshots into outputDir.
- * @param outputDir Destination directory for generated PNG assets (e.g., docs/screenshots).
- * @return True if all 16 core workstation, feature, and theme screenshots were saved cleanly.
- */
-bool MainWindow::captureDocumentationScreenshots(const QString& outputDir) {
-    QDir dir(outputDir);
-    if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) return false;
-
-    // Normalize window geometry to 1600x960 and populate realistic MPI debugging state.
-    resize(1600, 960);
-    loadPreviewFixture();
-    selectTargetByName(QStringLiteral("deadlock_ring"));
-    const QString deadlockSrc = resolveWorkspacePath(QStringLiteral("tutorial/deadlock_ring.cpp"));
-    if (m_editorTabManager && !deadlockSrc.isEmpty()) {
-        m_editorTabManager->clearAllTabs();
-        m_editorTabManager->openFile(deadlockSrc);
-    }
-    show();
-    QApplication::processEvents();
-
-    // Locate the actual MPI_Send line in tutorial/deadlock_ring.cpp and configure coherent state.
-    int bpLine = 34;
-    QString bpLineText = QStringLiteral("MPI_Send(send_buf.data(), static_cast<int>(send_buf.size()), MPI_INT,");
-    if (auto* sv = sourceCodeView()) {
-        const QStringList srcLines = sv->toPlainText().split(QLatin1Char('\n'));
-        for (int i = 0; i < srcLines.size(); ++i) {
-            if (srcLines[i].contains(QStringLiteral("MPI_Send("))) {
-                bpLine = i + 1;
-                bpLineText = srcLines[i].trimmed();
-                break;
-            }
-        }
-        if (!sv->hasBreakpoint(18)) sv->toggleBreakpoint(18);
-        sv->setConditionalBreakpoint(bpLine, QStringLiteral("rank == 0"));
-        sv->highlightExecutionLine(bpLine);
-        sv->setInlineVariableValues({
-            {QStringLiteral("rank"), QStringLiteral("0")},
-            {QStringLiteral("size"), QStringLiteral("8")},
-            {QStringLiteral("next_rank"), QStringLiteral("1")},
-            {QStringLiteral("prev_rank"), QStringLiteral("7")},
-            {QStringLiteral("tag"), QStringLiteral("100")}
-        });
-        QTextCursor cur(sv->document()->findBlockByNumber(bpLine - 1));
-        sv->setTextCursor(cur);
-        sv->centerCursor();
-    }
-    auto saveGrab = [&](const QString& fn) -> bool {
-        QApplication::processEvents();
-        return grab().save(dir.filePath(fn), "PNG", 88);
-    };
-
-    // 1. Capture all 8 curated theme screenshots plus default workspace_overview.
-    setWorkspacePerspective(QStringLiteral("Debug"));
-    for (const auto& [presetId, fileName] : std::vector<std::pair<QString, QString>>{
-             {QStringLiteral("dark_teal"), QStringLiteral("theme_obsidian_teal.png")}, {QStringLiteral("tokyo_night"), QStringLiteral("theme_tokyo_night.png")},
-             {QStringLiteral("catppuccin_mocha"), QStringLiteral("theme_catppuccin_mocha.png")}, {QStringLiteral("gruvbox_dark"), QStringLiteral("theme_gruvbox_dark.png")},
-             {QStringLiteral("daylight_light"), QStringLiteral("theme_daylight_light.png")}, {QStringLiteral("solarized_light"), QStringLiteral("theme_solarized_light.png")},
-             {QStringLiteral("catppuccin_latte"), QStringLiteral("theme_catppuccin_latte.png")}, {QStringLiteral("gridlock_slate"), QStringLiteral("theme_gridlock_slate.png")}}) {
-        core::managers::ThemeManager::instance().applyTheme(presetId, false); propagateThemeToAllWidgets();
-        if (!saveGrab(fileName)) return false;
-    }
-    if (core::managers::ThemeManager::instance().activeThemeId() != QStringLiteral("gridlock_slate")) {
-        core::managers::ThemeManager::instance().applyTheme(QStringLiteral("gridlock_slate"), false); propagateThemeToAllWidgets();
-    }
-    if (!saveGrab(QStringLiteral("workspace_overview.png"))) return false;
-    setWorkspacePerspective(QStringLiteral("Binary"));
-    if (!saveGrab(QStringLiteral("cfg_decompiler_split.png"))) return false;
-    setWorkspacePerspective(QStringLiteral("Debug"));
-
-    // 2. Composite cursor-anchored ConditionalBreakpointDialog popover directly beneath bpLine's gutter dot.
-    {
-        ConditionalBreakpointDialog popDlg(QStringLiteral("rank == 0"), this);
-        popDlg.setTargetLineContext(bpLine, bpLineText);
-        popDlg.adjustSize();
-        QPoint anchorPos(290, 260);
-        if (auto* sv = sourceCodeView()) {
-            QTextCursor bpCur(sv->document()->findBlockByNumber(bpLine - 1));
-            sv->setTextCursor(bpCur);
-            sv->centerCursor();
-            QApplication::processEvents();
-            const QRect lineRect = sv->cursorRect(bpCur);
-            anchorPos = sv->mapTo(this, QPoint(36, lineRect.bottom() + 4));
-        }
-        QPixmap basePix = grab();
-        QPainter painter(&basePix);
-        painter.drawPixmap(anchorPos, popDlg.grab());
-        painter.end();
-        if (!basePix.save(dir.filePath(QStringLiteral("breakpoint_popover.png")), "PNG", 88)) return false;
-    }
-
-    // 3. Capture bottom tool-window icon rail in Debug mode and MPI Diagnostics mode.
-    selectBottomToolGroup(QStringLiteral("Debug"));
-    if (!saveGrab(QStringLiteral("tool_rail_debug_tabs.png"))) return false;
-    selectBottomToolGroup(QStringLiteral("MPI"));
-    detectAndHighlightDeadlock({{0, 1}, {1, 2}, {2, 3}, {3, 0}});
-    if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
-    if (!saveGrab(QStringLiteral("tool_rail_mpi_diagnostics.png")) || !saveGrab(QStringLiteral("mpi_diagnostics_docsets.png"))) return false;
-
-    // 4. Populate Package Manager with live "mpi" search results in Table and List modes.
-    if (auto* pkgWidget = static_cast<HpcConsoleWidget*>(m_spackManager)) {
-        if (m_bottomTabs) m_bottomTabs->setCurrentWidget(pkgWidget);
-        pkgWidget->searchPackagesSynchronously(QStringLiteral("mpi"), 3000);
-        pkgWidget->setViewMode(QStringLiteral("Table"));
-        if (!saveGrab(QStringLiteral("package_manager_mpi_search.png"))) return false;
-        pkgWidget->setViewMode(QStringLiteral("List"));
-        if (!saveGrab(QStringLiteral("package_manager_list_view.png"))) return false;
-    }
-
-    // 5. Capture PreferencesDialog on HPC / Cluster page with 16-directive #SBATCH auto-detection.
-    {
-        PreferencesDialog prefsDlg(this); prefsDlg.resize(940, 660);
-        if (auto* catList = prefsDlg.findChild<QListWidget*>()) {
-            for (int i = 0; i < catList->count(); ++i) if (catList->item(i)->text().contains(QStringLiteral("HPC"), Qt::CaseInsensitive)) catList->setCurrentRow(i);
-        }
-        prefsDlg.parseSlurmBatchScript(QStringLiteral(
-            "#!/bin/bash\n#SBATCH --job-name=gridlock_ring_debug\n#SBATCH --partition=gpu-a100\n#SBATCH --account=hpc_devtools\n"
-            "#SBATCH --qos=interactive\n#SBATCH --nodes=4\n#SBATCH --ntasks=16\n#SBATCH --ntasks-per-node=4\n#SBATCH --cpus-per-task=8\n"
-            "#SBATCH --gres=gpu:a100:4\n#SBATCH --mem=128G\n#SBATCH --time=02:30:00\n#SBATCH --constraint=nvlink\n"
-            "#SBATCH --reservation=maint_window\n#SBATCH --chdir=/scratch/hpc/gridlock\n#SBATCH --output=logs/slurm-%j.out\n"
-            "#SBATCH --error=logs/slurm-%j.err\nmodule load openmpi/5.0.5 cuda/12.4\n"));
-        QApplication::processEvents();
-        QPixmap basePix = grab(); QPainter painter(&basePix); const QPixmap dlgPix = prefsDlg.grab();
-        painter.drawPixmap((width() - dlgPix.width()) / 2, (height() - dlgPix.height()) / 2, dlgPix); painter.end();
-        if (!basePix.save(dir.filePath(QStringLiteral("preferences_slurm_autodetect.png")), "PNG", 88)) return false;
-    }
-
-    // 6. Capture MemoryProfilerWidget populated from live /proc/<pid>/smaps at 1280x800.
-    {
-        MemoryProfilerWidget profWidget(nullptr);
-        profWidget.resize(1280, 800);
-        profWidget.reloadStyle();
-        profWidget.refreshForPid(QCoreApplication::applicationPid());
-        profWidget.show();
-        QApplication::processEvents();
-        if (!profWidget.grab().save(dir.filePath(QStringLiteral("memory_profiler.png")), "PNG", 88)) return false;
-    }
-
-    // 7. Capture PointerGraphDialog populated with open-source MPI/C++ tutorial structs at 1280x800.
-    {
-        using F = PointerGraphDialog::StructFieldEntry;
-        PointerGraphDialog pgDlg(nullptr, this); pgDlg.resize(1280, 800);
-        pgDlg.upsertStructNode("sim", "SimConfig", "0x7fff1000", {F{"rank", "0", "int"}, F{"domain", "0x7fff2000", "MeshDomain*"}, F{"ring_head", "0x7fff3000", "RankRingNode*"}});
-        pgDlg.upsertStructNode("domain", "MeshDomain", "0x7fff2000", {F{"nx", "256", "int"}, F{"ny", "256", "int"}, F{"root_field", "0x7fff4000", "FieldNode*"}}, "sim", "domain");
-        pgDlg.upsertStructNode("ring_head", "RankRingNode", "0x7fff3000", {F{"rank_id", "0", "int"}, F{"next", "0x7fff3100", "RankRingNode*"}}, "sim", "ring_head");
-        pgDlg.upsertStructNode("ring_peer", "RankRingNode", "0x7fff3100", {F{"rank_id", "1", "int"}, F{"next", "0x7fff3000", "RankRingNode*"}}, "ring_head", "next");
-        pgDlg.upsertStructNode("root_field", "FieldNode", "0x7fff4000", {F{"norm_l2", "1.41421", "double"}, F{"size", "65536", "size_t"}}, "domain", "root_field");
-        pgDlg.connectPointerField("sim", "domain", "0x7fff2000"); pgDlg.connectPointerField("sim", "ring_head", "0x7fff3000");
-        pgDlg.connectPointerField("domain", "root_field", "0x7fff4000"); pgDlg.connectPointerField("ring_head", "next", "0x7fff3100");
-        pgDlg.connectPointerField("ring_peer", "next", "0x7fff3000"); pgDlg.autoLayoutNodes();
-        pgDlg.show(); QApplication::processEvents();
-        if (!pgDlg.grab().save(dir.filePath(QStringLiteral("pointer_graph.png")), "PNG", 88)) return false;
-    }
-
-    return AttachProcessDialog::captureDocumentationPreviews(this, outputDir);
+    if (m_debugSessionActive || (m_coordinator && m_coordinator->getProcessCount() > 0)) stopTargetWorkflow();
+    else if (m_coordinator) m_coordinator->terminateSession();
 }
 
 }  // namespace gridlock::ui

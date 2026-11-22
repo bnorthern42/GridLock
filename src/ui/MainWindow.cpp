@@ -39,7 +39,8 @@
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/MpiNetworkLogWidget.hpp"
-#include "MainWindowExecution.cpp"
+#include "dialogs/ArrayPlotDialog.hpp"
+#include "dialogs/PointerGraphDialog.hpp"
 
 #include <QAction>
 #include <QApplication>

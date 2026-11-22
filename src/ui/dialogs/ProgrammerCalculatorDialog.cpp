@@ -5,13 +5,13 @@
  * Implements synchronized Hex/Dec/Oct/Bin base conversion, configurable 8/16/32/64-bit
  * word widths with signed/unsigned two's-complement support, BSWAP endianness toggling,
  * an interactive 64-bit clickable bit grid, IEEE-754 float/double and ASCII readouts,
- * and a recursive-descent C-style integer expression evaluator.
+ * and delegates expression evaluation and bit manipulation to CalculatorEngine.
  */
 
 #include "ProgrammerCalculatorDialog.hpp"
+#include "CalculatorEngine.hpp"
 
-#include <cmath>
-#include <cstring>
+#include <functional>
 
 #include <QApplication>
 #include <QClipboard>
@@ -26,300 +26,27 @@
 
 namespace gridlock::ui {
 
-namespace {
-
-/**
- * @class IntExprParser
- * @brief Self-contained recursive-descent parser for C-style 64-bit integer and floating-point expressions.
- *
- * Supports decimal, float/double (3.3, 3.3f, 2.5e-3), hexadecimal (0x), binary (0b), octal (0o),
- * '$'/'ans' current value, parentheses, unary (+, -, ~, !), multiplicative (*, /, %),
- * additive (+, -), shift (<<, >>), and bitwise (&, ^, |) operators.
- */
-class IntExprParser {
-public:
-    struct Val {
-        uint64_t i = 0ULL;
-        double f = 0.0;
-        bool isFloat = false;
-    };
-
-    IntExprParser(const QString& input, uint64_t currentValue, int widthBits, bool isSigned,
-                  double curFloat = 0.0, bool curIsFloat = false)
-        : m_input(input), m_curValue(currentValue), m_curFloat(curFloat), m_curIsFloat(curIsFloat),
-          m_width(widthBits), m_signed(isSigned) {}
-
-    bool parse(uint64_t* outValue, QString* outError, double* outFloat = nullptr, bool* outIsFloat = nullptr) {
-        skipWs();
-        if (m_pos >= m_input.size()) {
-            if (outError) *outError = QStringLiteral("Empty expression");
-            return false;
-        }
-        const Val val = parseBitOr();
-        skipWs();
-        if (!m_error.isEmpty()) {
-            if (outError) *outError = m_error;
-            return false;
-        }
-        if (m_pos < m_input.size()) {
-            if (outError) *outError = QStringLiteral("Unexpected token at position %1").arg(m_pos + 1);
-            return false;
-        }
-        if (outValue) *outValue = mask(val.i);
-        if (outFloat) *outFloat = val.f;
-        if (outIsFloat) *outIsFloat = val.isFloat;
-        return true;
-    }
-
-private:
-    uint64_t mask(uint64_t v) const {
-        if (m_width == 8) return v & 0xFFULL;
-        if (m_width == 16) return v & 0xFFFFULL;
-        if (m_width == 32) return v & 0xFFFFFFFFULL;
-        return v;
-    }
-
-    int64_t signExtend(uint64_t v) const {
-        if (m_width == 8) return static_cast<int64_t>(static_cast<int8_t>(v & 0xFFULL));
-        if (m_width == 16) return static_cast<int64_t>(static_cast<int16_t>(v & 0xFFFFULL));
-        if (m_width == 32) return static_cast<int64_t>(static_cast<int32_t>(v & 0xFFFFFFFFULL));
-        return static_cast<int64_t>(v);
-    }
-
-    Val makeInt(uint64_t v) const {
-        const uint64_t m = mask(v);
-        const double d = m_signed ? static_cast<double>(signExtend(m)) : static_cast<double>(m);
-        return Val{m, d, false};
-    }
-
-    Val makeFloat(double d) const {
-        const int64_t iv = (std::isfinite(d) && d >= static_cast<double>(INT64_MIN) && d <= static_cast<double>(INT64_MAX))
-                               ? static_cast<int64_t>(d)
-                               : 0;
-        return Val{mask(static_cast<uint64_t>(iv)), d, true};
-    }
-
-    void skipWs() { while (m_pos < m_input.size() && m_input.at(m_pos).isSpace()) ++m_pos; }
-
-    bool match(const QString& tok) {
-        skipWs();
-        if (m_input.mid(m_pos, tok.size()) == tok) { m_pos += tok.size(); return true; }
-        return false;
-    }
-
-    Val parseBitOr() {
-        Val lhs = parseBitXor();
-        while (m_error.isEmpty() && match(QStringLiteral("|"))) lhs = makeInt(lhs.i | parseBitXor().i);
-        return lhs;
-    }
-
-    Val parseBitXor() {
-        Val lhs = parseBitAnd();
-        while (m_error.isEmpty() && match(QStringLiteral("^"))) lhs = makeInt(lhs.i ^ parseBitAnd().i);
-        return lhs;
-    }
-
-    Val parseBitAnd() {
-        Val lhs = parseShift();
-        while (m_error.isEmpty() && match(QStringLiteral("&"))) lhs = makeInt(lhs.i & parseShift().i);
-        return lhs;
-    }
-
-    Val parseShift() {
-        Val lhs = parseAddSub();
-        while (m_error.isEmpty()) {
-            if (match(QStringLiteral("<<"))) {
-                const uint64_t sh = parseAddSub().i;
-                lhs = makeInt((sh >= static_cast<uint64_t>(m_width)) ? 0ULL : (lhs.i << sh));
-            } else if (match(QStringLiteral(">>"))) {
-                const uint64_t sh = parseAddSub().i;
-                if (m_signed) {
-                    const int64_t s = signExtend(lhs.i);
-                    lhs = makeInt((sh >= static_cast<uint64_t>(m_width)) ? (s < 0 ? ~0ULL : 0ULL) : static_cast<uint64_t>(s >> sh));
-                } else {
-                    lhs = makeInt((sh >= static_cast<uint64_t>(m_width)) ? 0ULL : (mask(lhs.i) >> sh));
-                }
-            } else {
-                break;
-            }
-        }
-        return lhs;
-    }
-
-    Val parseAddSub() {
-        Val lhs = parseMulDiv();
-        while (m_error.isEmpty()) {
-            if (match(QStringLiteral("+"))) {
-                const Val rhs = parseMulDiv();
-                lhs = (lhs.isFloat || rhs.isFloat) ? makeFloat(lhs.f + rhs.f) : makeInt(lhs.i + rhs.i);
-            } else if (match(QStringLiteral("-"))) {
-                const Val rhs = parseMulDiv();
-                lhs = (lhs.isFloat || rhs.isFloat) ? makeFloat(lhs.f - rhs.f) : makeInt(lhs.i - rhs.i);
-            } else {
-                break;
-            }
-        }
-        return lhs;
-    }
-
-    Val parseMulDiv() {
-        Val lhs = parseUnary();
-        while (m_error.isEmpty()) {
-            if (match(QStringLiteral("*"))) {
-                const Val rhs = parseUnary();
-                lhs = (lhs.isFloat || rhs.isFloat) ? makeFloat(lhs.f * rhs.f) : makeInt(lhs.i * rhs.i);
-            } else if (match(QStringLiteral("/"))) {
-                const Val rhs = parseUnary();
-                if (lhs.isFloat || rhs.isFloat) {
-                    if (rhs.f == 0.0) { m_error = QStringLiteral("Division by zero"); return makeFloat(0.0); }
-                    lhs = makeFloat(lhs.f / rhs.f);
-                } else {
-                    if (rhs.i == 0ULL) { m_error = QStringLiteral("Division by zero"); return makeInt(0ULL); }
-                    if (m_signed) {
-                        const int64_t a = signExtend(lhs.i), b = signExtend(rhs.i);
-                        lhs = makeInt((b == -1 && a == INT64_MIN) ? static_cast<uint64_t>(a) : static_cast<uint64_t>(a / b));
-                    } else {
-                        lhs = makeInt(mask(lhs.i) / mask(rhs.i));
-                    }
-                }
-            } else if (match(QStringLiteral("%"))) {
-                const Val rhs = parseUnary();
-                if (lhs.isFloat || rhs.isFloat) {
-                    if (rhs.f == 0.0) { m_error = QStringLiteral("Modulo by zero"); return makeFloat(0.0); }
-                    lhs = makeFloat(std::fmod(lhs.f, rhs.f));
-                } else {
-                    if (rhs.i == 0ULL) { m_error = QStringLiteral("Modulo by zero"); return makeInt(0ULL); }
-                    if (m_signed) {
-                        const int64_t a = signExtend(lhs.i), b = signExtend(rhs.i);
-                        lhs = makeInt((b == -1 && a == INT64_MIN) ? 0ULL : static_cast<uint64_t>(a % b));
-                    } else {
-                        lhs = makeInt(mask(lhs.i) % mask(rhs.i));
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-        return lhs;
-    }
-
-    Val parseUnary() {
-        skipWs();
-        if (match(QStringLiteral("+"))) return parseUnary();
-        if (match(QStringLiteral("-"))) {
-            const Val v = parseUnary();
-            return v.isFloat ? makeFloat(-v.f) : makeInt(0ULL - v.i);
-        }
-        if (match(QStringLiteral("~"))) return makeInt(~parseUnary().i);
-        if (match(QStringLiteral("!"))) return makeInt((mask(parseUnary().i) == 0ULL) ? 1ULL : 0ULL);
-        return parsePrimary();
-    }
-
-    Val parsePrimary() {
-        skipWs();
-        if (match(QStringLiteral("("))) {
-            const Val v = parseBitOr();
-            if (!match(QStringLiteral(")"))) m_error = QStringLiteral("Missing closing ')'");
-            return v;
-        }
-        if (match(QStringLiteral("$"))) return m_curIsFloat ? makeFloat(m_curFloat) : makeInt(m_curValue);
-        if (m_input.mid(m_pos, 3).compare(QStringLiteral("ans"), Qt::CaseInsensitive) == 0 &&
-            (m_pos + 3 >= m_input.size() || !m_input.at(m_pos + 3).isLetterOrNumber())) {
-            m_pos += 3;
-            return m_curIsFloat ? makeFloat(m_curFloat) : makeInt(m_curValue);
-        }
-
-        const int start = m_pos;
-        const bool isHex = m_input.mid(m_pos, 2).compare(QStringLiteral("0x"), Qt::CaseInsensitive) == 0;
-        while (m_pos < m_input.size()) {
-            const QChar c = m_input.at(m_pos);
-            if (c.isLetterOrNumber() || c == QLatin1Char('_') || c == QLatin1Char('\'') || (!isHex && c == QLatin1Char('.'))) {
-                ++m_pos;
-                if (!isHex && (c == QLatin1Char('e') || c == QLatin1Char('E')) && m_pos < m_input.size() &&
-                    (m_input.at(m_pos) == QLatin1Char('+') || m_input.at(m_pos) == QLatin1Char('-'))) {
-                    ++m_pos;
-                }
-            } else {
-                break;
-            }
-        }
-        if (m_pos == start) {
-            m_error = QStringLiteral("Expected number at position %1").arg(m_pos + 1);
-            return makeInt(0ULL);
-        }
-
-        QString tok = m_input.mid(start, m_pos - start).remove(QLatin1Char('_')).remove(QLatin1Char('\''));
-        if (!isHex && !tok.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive) &&
-            !tok.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive) &&
-            (tok.contains(QLatin1Char('.')) || tok.contains(QLatin1Char('e'), Qt::CaseInsensitive) ||
-             tok.endsWith(QLatin1Char('f'), Qt::CaseInsensitive))) {
-            if (tok.endsWith(QLatin1Char('f'), Qt::CaseInsensitive) || tok.endsWith(QLatin1Char('l'), Qt::CaseInsensitive)) {
-                tok.chop(1);
-            }
-            bool ok = false;
-            const double d = tok.toDouble(&ok);
-            if (!ok) { m_error = QStringLiteral("Invalid floating-point literal '%1'").arg(tok); return makeFloat(0.0); }
-            return makeFloat(d);
-        }
-
-        int base = 10;
-        if (tok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) { base = 16; tok = tok.mid(2); }
-        else if (tok.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) { base = 2; tok = tok.mid(2); }
-        else if (tok.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive)) { base = 8; tok = tok.mid(2); }
-        else if (tok.size() > 1 && tok.startsWith(QLatin1Char('0')) && tok.at(1).isDigit()) { base = 8; tok = tok.mid(1); }
-        while (tok.size() > 1 && (tok.back().toLower() == QLatin1Char('u') || tok.back().toLower() == QLatin1Char('l'))) {
-            tok.chop(1);
-        }
-        bool ok = false;
-        const uint64_t val = tok.toULongLong(&ok, base);
-        if (!ok) {
-            m_error = QStringLiteral("Invalid integer literal '%1'").arg(tok);
-            return makeInt(0ULL);
-        }
-        return makeInt(val);
-    }
-
-    QString m_input;
-    int m_pos = 0;
-    uint64_t m_curValue = 0ULL;
-    double m_curFloat = 0.0;
-    bool m_curIsFloat = false;
-    int m_width = 64;
-    bool m_signed = false;
-    QString m_error;
-};
-
-}  // namespace
-
 uint64_t ProgrammerCalculatorDialog::widthMask(int widthBits) {
-    if (widthBits == 8) return 0xFFULL;
-    if (widthBits == 16) return 0xFFFFULL;
-    if (widthBits == 32) return 0xFFFFFFFFULL;
-    return 0xFFFFFFFFFFFFFFFFULL;
+    return calc_engine::widthMask(widthBits);
 }
 
 int64_t ProgrammerCalculatorDialog::signExtend(uint64_t val, int widthBits) {
-    if (widthBits == 8) return static_cast<int64_t>(static_cast<int8_t>(val & 0xFFULL));
-    if (widthBits == 16) return static_cast<int64_t>(static_cast<int16_t>(val & 0xFFFFULL));
-    if (widthBits == 32) return static_cast<int64_t>(static_cast<int32_t>(val & 0xFFFFFFFFULL));
-    return static_cast<int64_t>(val);
+    return calc_engine::signExtend(val, widthBits);
 }
 
 QString ProgrammerCalculatorDialog::formatGroupedBinary(uint64_t val, int widthBits) {
-    QString out;
-    out.reserve(widthBits + widthBits / 4);
-    for (int bit = widthBits - 1; bit >= 0; --bit) {
-        out.append(((val >> bit) & 1ULL) ? QLatin1Char('1') : QLatin1Char('0'));
-        if (bit > 0 && (bit % 4) == 0) out.append(QLatin1Char(' '));
-    }
-    return out;
+    return calc_engine::formatGroupedBinary(val, widthBits);
 }
 
 bool ProgrammerCalculatorDialog::evaluateExpression(const QString& expr, uint64_t currentValue,
                                                     int widthBits, bool isSigned,
                                                     uint64_t* outValue, QString* outError) {
-    IntExprParser parser(expr, currentValue, widthBits, isSigned);
-    return parser.parse(outValue, outError);
+    calc_engine::EvalResult res;
+    if (!calc_engine::evaluate(expr, currentValue, widthBits, isSigned, 0.0, false, &res, outError)) {
+        return false;
+    }
+    if (outValue) *outValue = res.intValue;
+    return true;
 }
 
 ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
@@ -382,7 +109,8 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     basesGrid->setContentsMargins(10, 12, 10, 10);
     basesGrid->setSpacing(6);
 
-    auto addBaseRow = [&](int row, const QString& label, const QString& editObj, const QString& copyObj, QLineEdit** outEdit) {
+    auto addBaseRow = [&](int row, const QString& label, const QString& editObj,
+                          const QString& copyObj, int radix, QLineEdit** outEdit) {
         auto* lbl = new QLabel(label, basesGroup); lbl->setFixedWidth(48);
         auto* ed = new QLineEdit(basesGroup); ed->setObjectName(editObj); ed->setFixedHeight(26);
         auto* copyBtn = new QPushButton(QStringLiteral("Copy"), basesGroup);
@@ -390,57 +118,29 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
         connect(copyBtn, &QPushButton::clicked, this, [ed]() {
             if (QClipboard* cb = QApplication::clipboard()) cb->setText(ed->text());
         });
+        connect(ed, &QLineEdit::textChanged, this, [this, ed, radix](const QString& raw) {
+            if (m_updatingViews) return;
+            uint64_t parsed = 0ULL;
+            if (calc_engine::parseBaseInput(raw, radix, m_wordWidth, m_signedMode, &parsed)) {
+                m_hasFloatValue = false;
+                m_value = parsed;
+                syncAllViews(ed);
+            }
+        });
         basesGrid->addWidget(lbl, row, 0); basesGrid->addWidget(ed, row, 1); basesGrid->addWidget(copyBtn, row, 2);
         *outEdit = ed;
     };
-    addBaseRow(0, QStringLiteral("HEX"), QStringLiteral("calcHexEdit"), QStringLiteral("calcHexCopyBtn"), &m_hexEdit);
-    addBaseRow(1, QStringLiteral("DEC"), QStringLiteral("calcDecEdit"), QStringLiteral("calcDecCopyBtn"), &m_decEdit);
-    addBaseRow(2, QStringLiteral("OCT"), QStringLiteral("calcOctEdit"), QStringLiteral("calcOctCopyBtn"), &m_octEdit);
-    addBaseRow(3, QStringLiteral("BIN"), QStringLiteral("calcBinEdit"), QStringLiteral("calcBinCopyBtn"), &m_binEdit);
+    addBaseRow(0, QStringLiteral("HEX"), QStringLiteral("calcHexEdit"), QStringLiteral("calcHexCopyBtn"), 16, &m_hexEdit);
+    addBaseRow(1, QStringLiteral("DEC"), QStringLiteral("calcDecEdit"), QStringLiteral("calcDecCopyBtn"), 10, &m_decEdit);
+    addBaseRow(2, QStringLiteral("OCT"), QStringLiteral("calcOctEdit"), QStringLiteral("calcOctCopyBtn"), 8, &m_octEdit);
+    addBaseRow(3, QStringLiteral("BIN"), QStringLiteral("calcBinEdit"), QStringLiteral("calcBinCopyBtn"), 2, &m_binEdit);
 
-    // IEEE-754 Float/Double and ASCII byte interpretation row.
     m_floatReadoutLabel = new QLabel(basesGroup); m_floatReadoutLabel->setObjectName(QStringLiteral("calcFloatLabel"));
     m_asciiReadoutLabel = new QLabel(basesGroup); m_asciiReadoutLabel->setObjectName(QStringLiteral("calcAsciiLabel"));
     auto* metaRow = new QHBoxLayout();
     metaRow->addWidget(m_floatReadoutLabel, 1); metaRow->addWidget(m_asciiReadoutLabel);
     basesGrid->addLayout(metaRow, 4, 0, 1, 3);
     root->addWidget(basesGroup);
-
-    // Connect base editors so editing any base immediately updates all other bases and the bit grid.
-    connect(m_hexEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
-        if (m_updatingViews) return;
-        QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_'));
-        if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) s = s.mid(2);
-        if (s.isEmpty()) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_hexEdit); return; }
-        bool ok = false; const uint64_t parsed = s.toULongLong(&ok, 16);
-        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_hexEdit); }
-    });
-    connect(m_decEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
-        if (m_updatingViews) return;
-        QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_')).remove(QLatin1Char(','));
-        if (s.isEmpty() || s == QStringLiteral("-")) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_decEdit); return; }
-        bool ok = false;
-        const uint64_t parsed = (m_signedMode || s.startsWith(QLatin1Char('-')))
-                                    ? static_cast<uint64_t>(s.toLongLong(&ok, 10))
-                                    : s.toULongLong(&ok, 10);
-        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_decEdit); }
-    });
-    connect(m_octEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
-        if (m_updatingViews) return;
-        QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_'));
-        if (s.startsWith(QStringLiteral("0o"), Qt::CaseInsensitive)) s = s.mid(2);
-        if (s.isEmpty()) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_octEdit); return; }
-        bool ok = false; const uint64_t parsed = s.toULongLong(&ok, 8);
-        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_octEdit); }
-    });
-    connect(m_binEdit, &QLineEdit::textChanged, this, [this](const QString& raw) {
-        if (m_updatingViews) return;
-        QString s = raw.trimmed().remove(QLatin1Char(' ')).remove(QLatin1Char('_'));
-        if (s.startsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) s = s.mid(2);
-        if (s.isEmpty()) { m_hasFloatValue = false; m_value = 0ULL; syncAllViews(m_binEdit); return; }
-        bool ok = false; const uint64_t parsed = s.toULongLong(&ok, 2);
-        if (ok) { m_hasFloatValue = false; m_value = parsed & widthMask(m_wordWidth); syncAllViews(m_binEdit); }
-    });
 
     // 3. Interactive 64-Bit Clickable Bit-Toggle Grid (63..32 on top, 31..0 on bottom, nibble-grouped).
     auto* bitGroup = new QGroupBox(QStringLiteral("Interactive 64-Bit Toggle Grid"), this);
@@ -510,7 +210,6 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     exprRow->addWidget(ansBtn);
     exprVBox->addLayout(exprRow);
 
-    // Full tactile 5x8 Programmer's Calculator Button Grid.
     auto* padGrid = new QGridLayout();
     padGrid->setHorizontalSpacing(6); padGrid->setVerticalSpacing(6);
     for (int c = 0; c < 8; ++c) padGrid->setColumnStretch(c, 1);
@@ -537,12 +236,12 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     makePadBtn(QStringLiteral("OR"), QStringLiteral("calcOpOrBtn"), QStringLiteral("op"), 0, 6, 1, [this]() { insertOperatorToken(QStringLiteral(" | ")); });
     makePadBtn(QStringLiteral("AC"), QStringLiteral("calcOpClearBtn"), QStringLiteral("clear"), 0, 7, 1, [this]() { clearAll(); });
 
-    // Row 1: C, D, 4, 5, 6, XOR, NOT, ⌫
+    // Row 1: C, D, 4, 5, 6, XOR, NOT, Backspace
     makeDigitBtn(12, QStringLiteral("C"), 1, 0); makeDigitBtn(13, QStringLiteral("D"), 1, 1);
     makeDigitBtn(4, QStringLiteral("4"), 1, 2); makeDigitBtn(5, QStringLiteral("5"), 1, 3); makeDigitBtn(6, QStringLiteral("6"), 1, 4);
     makePadBtn(QStringLiteral("XOR"), QStringLiteral("calcOpXorBtn"), QStringLiteral("op"), 1, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" ^ ")); });
     makePadBtn(QStringLiteral("NOT"), QStringLiteral("calcOpNotBtn"), QStringLiteral("op"), 1, 6, 1, [this]() {
-        if (m_exprEdit && m_exprEdit->text().trimmed().isEmpty()) { setValue(~m_value); }
+        if (m_exprEdit && m_exprEdit->text().trimmed().isEmpty()) setValue(~m_value);
         else if (m_exprEdit) { m_exprEdit->insert(QStringLiteral("~")); m_exprEdit->setFocus(); }
     });
     makePadBtn(QStringLiteral("⌫"), QStringLiteral("calcKeyBackspace"), QStringLiteral("clear"), 1, 7, 1, [this]() { backspaceExpression(); });
@@ -553,10 +252,9 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
     makePadBtn(QStringLiteral("<<"), QStringLiteral("calcOpShlBtn"), QStringLiteral("op"), 2, 5, 1, [this]() { insertOperatorToken(QStringLiteral(" << ")); });
     makePadBtn(QStringLiteral(">>"), QStringLiteral("calcOpShrBtn"), QStringLiteral("op"), 2, 6, 1, [this]() { insertOperatorToken(QStringLiteral(" >> ")); });
     makePadBtn(QStringLiteral("("), QStringLiteral("calcKeyLParen"), QStringLiteral("op"), 2, 7, 1, [this]() {
-        if (m_exprEdit) {
-            if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
-            m_exprEdit->insert(QStringLiteral("(")); m_exprEdit->setFocus();
-        }
+        if (!m_exprEdit) return;
+        if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
+        m_exprEdit->insert(QStringLiteral("(")); m_exprEdit->setFocus();
     });
 
     // Row 3: ROL, ROR, ±, 0, ., ÷, ×, )
@@ -571,7 +269,7 @@ ProgrammerCalculatorDialog::ProgrammerCalculatorDialog(QWidget* parent)
         if (m_exprEdit) { m_exprEdit->insert(QStringLiteral(")")); m_exprEdit->setFocus(); }
     });
 
-    // Row 4: status label on left (cols 0..2), %, -, +, and wide highlighted = (cols 6..7)
+    // Row 4: status label (cols 0..2), %, -, +, and wide highlighted = (cols 6..7)
     m_exprStatusLabel = new QLabel(exprGroup);
     m_exprStatusLabel->setObjectName(QStringLiteral("calcExprStatusLabel"));
     padGrid->addWidget(m_exprStatusLabel, 4, 0, 1, 3);
@@ -609,98 +307,68 @@ void ProgrammerCalculatorDialog::setSigned(bool enabled) {
 
 void ProgrammerCalculatorDialog::byteSwap() {
     m_hasFloatValue = false;
-    if (m_wordWidth == 64) m_value = __builtin_bswap64(m_value);
-    else if (m_wordWidth == 32) m_value = static_cast<uint64_t>(__builtin_bswap32(static_cast<uint32_t>(m_value)));
-    else if (m_wordWidth == 16) m_value = static_cast<uint64_t>(__builtin_bswap16(static_cast<uint16_t>(m_value)));
-    m_value &= widthMask(m_wordWidth); syncAllViews();
+    m_value = calc_engine::byteSwap(m_value, m_wordWidth);
+    syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::rotateLeft(int count) {
-    const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
-    if (sh == 0) return;
     m_hasFloatValue = false;
-    const uint64_t masked = m_value & widthMask(m_wordWidth);
-    m_value = ((masked << sh) | (masked >> (m_wordWidth - sh))) & widthMask(m_wordWidth); syncAllViews();
+    m_value = calc_engine::rotateLeft(m_value, m_wordWidth, count);
+    syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::rotateRight(int count) {
-    const int sh = ((count % m_wordWidth) + m_wordWidth) % m_wordWidth;
-    if (sh == 0) return;
     m_hasFloatValue = false;
-    const uint64_t masked = m_value & widthMask(m_wordWidth);
-    m_value = ((masked >> sh) | (masked << (m_wordWidth - sh))) & widthMask(m_wordWidth); syncAllViews();
+    m_value = calc_engine::rotateRight(m_value, m_wordWidth, count);
+    syncAllViews();
 }
 
 void ProgrammerCalculatorDialog::toggleBit(int bitIndex) {
     if (bitIndex < 0 || bitIndex >= m_wordWidth) return;
     m_hasFloatValue = false;
-    m_value = (m_value ^ (1ULL << bitIndex)) & widthMask(m_wordWidth); syncAllViews();
+    m_value = (m_value ^ (1ULL << bitIndex)) & widthMask(m_wordWidth);
+    syncAllViews();
 }
 
 bool ProgrammerCalculatorDialog::evaluateAndApplyExpression(const QString& expr) {
-    uint64_t result = 0ULL; double fResult = 0.0; bool isFloat = false; QString err;
-    IntExprParser parser(expr, m_value, m_wordWidth, m_signedMode, m_floatValue, m_hasFloatValue);
-    if (!parser.parse(&result, &err, &fResult, &isFloat)) {
+    calc_engine::EvalResult res;
+    QString err;
+    if (!calc_engine::evaluate(expr, m_value, m_wordWidth, m_signedMode, m_floatValue, m_hasFloatValue, &res, &err)) {
         if (m_exprStatusLabel) m_exprStatusLabel->setText(QStringLiteral("Error: %1").arg(err));
         return false;
     }
-    m_value = result & widthMask(m_wordWidth);
-    m_floatValue = fResult;
-    m_hasFloatValue = isFloat;
+    m_value = res.intValue;
+    m_floatValue = res.floatValue;
+    m_hasFloatValue = res.isFloat;
     m_justEvaluated = true;
-    if (isFloat && fResult < 0.0 && !m_signedMode) setSigned(true);
+    if (res.isFloat && res.floatValue < 0.0 && !m_signedMode) setSigned(true);
     if (m_exprStatusLabel) {
-        if (isFloat) {
-            m_exprStatusLabel->setText(QStringLiteral("Result = %1 (int: %2, 0x%3)")
-                .arg(QString::number(fResult, 'g', 12),
-                     m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value),
-                     QString::number(m_value, 16).toUpper()));
-        } else {
-            m_exprStatusLabel->setText(QStringLiteral("Result = 0x%1 (%2)")
-                .arg(QString::number(m_value, 16).toUpper(),
-                     m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value)));
-        }
+        const QString decStr = m_signedMode ? QString::number(signExtend(m_value, m_wordWidth)) : QString::number(m_value);
+        const QString hexStr = QString::number(m_value, 16).toUpper();
+        m_exprStatusLabel->setText(res.isFloat
+                                       ? QStringLiteral("Result = %1 (int: %2, 0x%3)").arg(QString::number(res.floatValue, 'g', 12), decStr, hexStr)
+                                       : QStringLiteral("Result = 0x%1 (%2)").arg(hexStr, decStr));
     }
-    syncAllViews(); return true;
+    syncAllViews();
+    return true;
 }
 
 void ProgrammerCalculatorDialog::setInitialTextOrValue(const QString& text) {
-    QString s = text.trimmed();
-    while (!s.isEmpty() && (s.endsWith(QLatin1Char(';')) || s.endsWith(QLatin1Char(',')))) s.chop(1);
-    s = s.trimmed();
+    const QString s = calc_engine::normalizeInitialInput(text);
     if (s.isEmpty()) return;
-    const int atIdx = s.indexOf(QStringLiteral("@ 0x"), 0, Qt::CaseInsensitive);
-    if (atIdx >= 0) s = s.mid(atIdx + 2).trimmed().section(QLatin1Char(' '), 0, 0);
-    else if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) && s.contains(QLatin1Char(' '))) {
-        const QString firstTok = s.section(QLatin1Char(' '), 0, 0);
-        const QString rest = s.mid(firstTok.size()).trimmed();
-        if (rest.startsWith(QLatin1Char('<')) || rest.startsWith(QLatin1Char('[')) || rest.startsWith(QLatin1Char('('))) s = firstTok;
-    }
     if (s.startsWith(QLatin1Char('-')) && !s.mid(1).trimmed().contains(QLatin1Char(' '))) setSigned(true);
-    uint64_t result = 0ULL; double fResult = 0.0; bool isFloat = false; QString err;
-    IntExprParser parser(s, m_value, m_wordWidth, m_signedMode, m_floatValue, m_hasFloatValue);
-    if (parser.parse(&result, &err, &fResult, &isFloat)) {
-        m_value = result & widthMask(m_wordWidth);
-        m_floatValue = fResult;
-        m_hasFloatValue = isFloat;
+    calc_engine::EvalResult res;
+    QString err;
+    if (calc_engine::evaluate(s, m_value, m_wordWidth, m_signedMode, m_floatValue, m_hasFloatValue, &res, &err)) {
+        m_value = res.intValue;
+        m_floatValue = res.floatValue;
+        m_hasFloatValue = res.isFloat;
         m_justEvaluated = true;
-        if (isFloat && fResult < 0.0 && !m_signedMode) setSigned(true);
+        if (res.isFloat && res.floatValue < 0.0 && !m_signedMode) setSigned(true);
         if (m_exprStatusLabel) m_exprStatusLabel->clear();
-        if (m_exprEdit) {
-            if (isFloat && !s.contains(QLatin1Char(' '))) {
-                QString cleanFloat = s;
-                if (cleanFloat.endsWith(QLatin1Char('f'), Qt::CaseInsensitive) ||
-                    cleanFloat.endsWith(QLatin1Char('l'), Qt::CaseInsensitive)) {
-                    cleanFloat.chop(1);
-                }
-                m_exprEdit->setText(cleanFloat);
-            } else if (s.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) && !s.contains(QLatin1Char(' '))) {
-                m_exprEdit->setText(QStringLiteral("0x%1").arg(QString::number(m_value, 16).toUpper()));
-            } else {
-                m_exprEdit->setText(s);
-            }
-        }
-        syncAllViews(); return;
+        if (m_exprEdit) m_exprEdit->setText(calc_engine::formatInitialExpressionText(s, m_value, res.isFloat));
+        syncAllViews();
+        return;
     }
     if (m_exprEdit) m_exprEdit->setText(s);
     evaluateAndApplyExpression(s);
@@ -731,46 +399,24 @@ void ProgrammerCalculatorDialog::syncKeypadRadixState() {
 }
 
 QString ProgrammerCalculatorDialog::formatValueForRadix(uint64_t val, int radix) const {
-    if (radix == 10 && m_hasFloatValue) return QString::number(m_floatValue, 'g', 12);
-    const uint64_t masked = val & widthMask(m_wordWidth);
-    if (radix == 16) return QStringLiteral("0x%1").arg(QString::number(masked, 16).toUpper());
-    if (radix == 8) return QStringLiteral("0o%1").arg(QString::number(masked, 8));
-    if (radix == 2) return QStringLiteral("0b%1").arg(QString::number(masked, 2));
-    return m_signedMode ? QString::number(signExtend(masked, m_wordWidth)) : QString::number(masked);
+    return calc_engine::formatValueForRadix(val, m_wordWidth, radix, m_signedMode, m_floatValue, m_hasFloatValue);
 }
 
 void ProgrammerCalculatorDialog::pressDigitKey(QChar digitChar) {
     if (!m_exprEdit) return;
-    const QChar upper = digitChar.toUpper();
-    int digitVal = -1;
-    if (upper >= QLatin1Char('0') && upper <= QLatin1Char('9')) digitVal = upper.unicode() - QLatin1Char('0').unicode();
-    else if (upper >= QLatin1Char('A') && upper <= QLatin1Char('F')) digitVal = 10 + (upper.unicode() - QLatin1Char('A').unicode());
-    if (digitVal < 0 || digitVal >= m_inputRadix) return;
-
     if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
-    const QString cur = m_exprEdit->text();
-    const bool continuingToken = !cur.isEmpty() && (cur.back().isLetterOrNumber() || cur.back() == QLatin1Char('_') || cur.back() == QLatin1Char('.'));
-    QString prefix;
-    if (!continuingToken) {
-        if (m_inputRadix == 16) prefix = QStringLiteral("0x");
-        else if (m_inputRadix == 8) prefix = QStringLiteral("0o");
-        else if (m_inputRadix == 2) prefix = QStringLiteral("0b");
-    }
-    m_exprEdit->setText(cur + prefix + upper);
+    QString next;
+    if (!calc_engine::appendDigitToExpression(m_exprEdit->text(), digitChar, m_inputRadix, &next)) return;
+    m_exprEdit->setText(next);
     m_exprEdit->setFocus();
 }
 
 void ProgrammerCalculatorDialog::pressDotKey() {
     if (!m_exprEdit || m_inputRadix != 10) return;
     if (m_justEvaluated) { m_exprEdit->clear(); m_justEvaluated = false; }
-    const QString cur = m_exprEdit->text();
-    int i = cur.size() - 1;
-    while (i >= 0 && (cur.at(i).isDigit() || cur.at(i) == QLatin1Char('.'))) {
-        if (cur.at(i) == QLatin1Char('.')) return;
-        --i;
-    }
-    const bool afterDigit = !cur.isEmpty() && cur.back().isDigit();
-    m_exprEdit->setText(cur + (afterDigit ? QStringLiteral(".") : QStringLiteral("0.")));
+    QString next;
+    if (!calc_engine::appendDotToExpression(m_exprEdit->text(), &next)) return;
+    m_exprEdit->setText(next);
     m_exprEdit->setFocus();
 }
 
@@ -784,21 +430,8 @@ void ProgrammerCalculatorDialog::insertCurrentValueToken() {
 void ProgrammerCalculatorDialog::backspaceExpression() {
     if (!m_exprEdit) return;
     m_justEvaluated = false;
-    QString cur = m_exprEdit->text();
-    if (cur.isEmpty()) return;
-    if (cur.endsWith(QStringLiteral(" << ")) || cur.endsWith(QStringLiteral(" >> "))) {
-        cur.chop(4);
-    } else if (cur.size() >= 3 && cur.endsWith(QLatin1Char(' ')) && cur.at(cur.size() - 3) == QLatin1Char(' ')) {
-        cur.chop(3);
-    } else {
-        cur.chop(1);
-        if (cur.endsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ||
-            cur.endsWith(QStringLiteral("0o"), Qt::CaseInsensitive) ||
-            cur.endsWith(QStringLiteral("0b"), Qt::CaseInsensitive)) {
-            if (cur.size() == 2 || !cur.at(cur.size() - 3).isLetterOrNumber()) cur.chop(2);
-        }
-    }
-    m_exprEdit->setText(cur);
+    if (m_exprEdit->text().isEmpty()) return;
+    m_exprEdit->setText(calc_engine::backspaceExpressionText(m_exprEdit->text()));
     m_exprEdit->setFocus();
 }
 
@@ -857,7 +490,6 @@ void ProgrammerCalculatorDialog::syncAllViews(QLineEdit* skipEditor) {
     if (m_octEdit && skipEditor != m_octEdit) m_octEdit->setText(QString::number(masked, 8));
     if (m_binEdit && skipEditor != m_binEdit) m_binEdit->setText(formatGroupedBinary(masked, m_wordWidth));
 
-    // Update interactive 64-bit button states and active width enablement.
     for (int b = 0; b < 64; ++b) {
         QPushButton* btn = m_bitButtons[static_cast<size_t>(b)];
         if (!btn) continue;
@@ -866,42 +498,8 @@ void ProgrammerCalculatorDialog::syncAllViews(QLineEdit* skipEditor) {
         btn->setProperty("bitSet", bitSet); btn->style()->unpolish(btn); btn->style()->polish(btn);
     }
 
-    // Update IEEE-754 float/double readout (shows exact IEEE-754 hex bit patterns when a float is active).
-    if (m_floatReadoutLabel) {
-        if (m_hasFloatValue) {
-            const float f32 = static_cast<float>(m_floatValue);
-            const double f64 = m_floatValue;
-            uint32_t bits32 = 0;
-            uint64_t bits64 = 0;
-            std::memcpy(&bits32, &f32, sizeof(bits32));
-            std::memcpy(&bits64, &f64, sizeof(bits64));
-            m_floatReadoutLabel->setText(
-                QStringLiteral("IEEE-754 (%1): float32 = 0x%2  |  float64 = 0x%3")
-                    .arg(QString::number(m_floatValue, 'g', 12),
-                         QStringLiteral("%1").arg(bits32, 8, 16, QLatin1Char('0')).toUpper(),
-                         QStringLiteral("%1").arg(bits64, 16, 16, QLatin1Char('0')).toUpper()));
-        } else {
-            const uint32_t low32 = static_cast<uint32_t>(masked & 0xFFFFFFFFULL);
-            float f32 = 0.0f;
-            double f64 = 0.0;
-            std::memcpy(&f32, &low32, sizeof(f32));
-            std::memcpy(&f64, &masked, sizeof(f64));
-            m_floatReadoutLabel->setText(
-                QStringLiteral("IEEE-754: float = %1  |  double = %2")
-                    .arg(QString::number(static_cast<double>(f32), 'g', 7),
-                         QString::number(f64, 'g', 12)));
-        }
-    }
-    if (m_asciiReadoutLabel) {
-        const int byteCount = m_wordWidth / 8;
-        QString ascii;
-        ascii.reserve(byteCount);
-        for (int i = byteCount - 1; i >= 0; --i) {
-            const unsigned char ch = static_cast<unsigned char>((masked >> (i * 8)) & 0xFFU);
-            ascii.append((ch >= 0x20 && ch <= 0x7E) ? QChar::fromLatin1(static_cast<char>(ch)) : QLatin1Char('.'));
-        }
-        m_asciiReadoutLabel->setText(QStringLiteral("ASCII: \"%1\"").arg(ascii));
-    }
+    if (m_floatReadoutLabel) m_floatReadoutLabel->setText(calc_engine::formatIeee754Readout(masked, m_floatValue, m_hasFloatValue));
+    if (m_asciiReadoutLabel) m_asciiReadoutLabel->setText(calc_engine::formatAsciiReadout(masked, m_wordWidth));
     m_updatingViews = false;
 }
 
