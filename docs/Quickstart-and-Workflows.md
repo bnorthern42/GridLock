@@ -1,6 +1,6 @@
 # Quickstart and Workflows
 
-This guide covers the four main debugging workflows in GridLock (`v0.8.7`):
+This guide covers the four main debugging workflows in GridLock (`v0.8.8`):
 1. Launching a local multi-rank MPI program or standalone ELF64 binary.
 2. Attaching to a running Linux process or live `mpirun` / SLURM MPI job (`Ctrl+Alt+P`).
 3. Connecting to `qemu-user -g` cross-architecture stubs and `gdbserver` instances (`target remote` / `extended-remote`).
@@ -12,27 +12,29 @@ This guide covers the four main debugging workflows in GridLock (`v0.8.7`):
 
 ### Quick Launch From the Main Toolbar
 
-1. **Choose a Target (`TARGET:`)**:
-   * Select one of the 7 bundled MPI showcase programs (`inspection_demo (MPI)` through `simd_struct_watch (MPI)`), pick a discovered workspace target after `File -> Open Workspace...`, or choose `Open ELF / Binary...` to load any C/C++ source file or ELF64 executable.
-2. **Set the Rank Count (`RANKS (-np):`)**:
-   * Set the spinbox (`1..256`, default `8`). While idle, `ServerRackView` updates immediately to show that number of `IDLE` rank cards.
-3. **Select a Debugger Engine (Optional)**:
+1. **Choose a Target (`#toolbarTargetSelector`)**:
+   * Select one of the bundled MPI showcase programs (`inspection_demo` through `catchpoint_exceptions`), pick a discovered workspace target after `File -> Open Workspace...`, or choose `Open ELF / Binary...` to load any C/C++ source file or ELF64 executable.
+2. **Configure Per-Target Launch Options (`Config` Popover)**:
+   * Click **`Config`** next to the target dropdown to set CLI `--args` (persisted per target and per workspace so arguments never leak across unrelated binaries), custom working directory, and `Stop at main()`.
+3. **Set the Rank Count (`np:`)**:
+   * Set the spinbox (`1..256`, default `8`). When `np == 1`, multi-rank chrome collapses automatically; when `np >= 2`, `ServerRackView` displays `IDLE` rank cards immediately.
+4. **Select a Debugger Engine (Optional)**:
    * Open `Edit -> Preferences` (`Ctrl+,`) -> `Debugger` -> `Debugger Engine` to pick `GNU GDB (gdb)` (default, uses `GdbRankCoordinator`), `LLVM LLDB-DAP (lldb-dap)` (uses `DapCoordinator`), `NVIDIA CUDA-GDB (cuda-gdb)`, or `AMD ROCm GDB (rocgdb)`.
-4. **Set Breakpoints (Optional)**:
+5. **Set Breakpoints (Optional)**:
    * Left-click any line in the `SourceCodeView` gutter to toggle an all-ranks breakpoint, or right-click a line in the gutter to set a rank-filtered condition, hit ignore count, or non-suspending logpoint.
-5. **Start Execution (`▶ Run Target` or `Alt+R`)**:
-   * If a standalone `.cpp` or `.c` source file is selected and its binary is missing or older than the source, GridLock compiles it with `mpicxx -g -O0` (or `mpicc -g -O0`).
+6. **Start Execution (`▶ Run` or `Alt+R`)**:
+   * If a standalone `.cpp` or `.c` source file is selected and its binary is missing or older than the source, GridLock compiles it with `mpicxx -g -O0` (or `mpicc -g -O0`), enforces `+x` permissions, and blocks stale-binary launches if compilation fails.
    * `GdbRankCoordinator` creates per-rank POSIX named pipes (`/tmp/gridlock_mi_<pid>_<seq>/r<i>.in` and `r<i>.out`) and spawns a single MPMD `mpirun` job running one `gdb --interpreter=mi3` instance per rank. If `mpirun`/`mpiexec` is not installed on the host, it falls back to launching Rank 0 directly under `gdb`.
    * OpenMP thread counts are auto-tuned to `OMP_NUM_THREADS = max(1, idealThreadCount / rankCount)` with `OMP_WAIT_POLICY=PASSIVE` unless overridden in your environment or `MPI Args`.
-6. **Step, Inspect, and Reverse**:
-   * Click any card in **`SERVER RACK`** (`RANK 0 .. RANK N-1`) to focus that rank across `Variables`, `Registers`, `Call Stack`, `DisassemblyView`, and `Memory View`.
-   * Use **`⏭ Continue`** (`F5`), **`F10`** (Step Over), **`F11`** (Step Into), **`↷ Step Inst`** (single machine instruction), **`⏸ Pause Rank`**, and **`■ Stop`** / **`✕ Terminate Session`**.
-   * To step backward in GDB sessions, toggle **`⏺ Record`** on the toolbar (enables `record full` with `scheduler-locking on` and a 200,000-instruction ring buffer), then click **`↶ Step Back`** (`-exec-next --reverse`) or **`⏮ Rev Continue`** (`-exec-continue --reverse`).
+7. **Step, Scope Ranks, Inspect, and Reverse**:
+   * Click any card in **`SERVER RACK`** (`RANK 0 .. RANK N-1`) to focus that rank via `setFocusedRank()` across `Variables`, `Registers`, `Call Stack`, `SourceCodeView`, `DisassemblyView`, `Memory View`, `ArrayPlotDialog`, and `PointerGraphDialog`, and toggle execution scope between **`All Ranks`** and **`Rank k`**.
+   * Use **`▶ Cont`** (`F5`), **`Over`** (`F10`), **`Into`** (`F11` split button with `Step Instruction`), **`Out`** (`Shift+F11`), **`⏸ Pause`** / **`Pause All Ranks`** (`F6`), and **`■ Stop`**.
+   * To step backward in GDB sessions, toggle **`● REC`** on the toolbar (enables `record full` with `scheduler-locking on` and a 200,000-instruction ring buffer), then step or continue backward.
 
 ### Creating or Configuring a Workspace Project
 
 * **`File -> New Project...` (`ProjectWizard`)**: Two-page wizard that configures the workspace directory, target binary, program arguments, rank count (`-np`), and OpenMPI topology flags (`--bind-to core`, `--map-by node`, `--use-hwthread-cpus`, `--oversubscribe`, `--report-bindings`, `--display-map`, `--tag-output`, `--timestamp-output`), saves `.gridlock/settings.toml`, and launches the session.
-* **`File -> Project Settings` (`ProjectSettingsDialog`)**: Edits `Target Binary`, `Program Arguments`, `Working Directory`, `MPI Ranks (-np)` (`1..256`), and extra `MPI Args` for the current workspace.
+* **`File -> Project Settings` (`ProjectSettingsDialog`)**: Edits `Target Binary`, per-target `Program Arguments`, `Working Directory`, `MPI Ranks (-np)` (`1..256`), and extra `MPI Args` for the current workspace.
 
 ---
 

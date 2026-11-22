@@ -4,22 +4,26 @@ GridLock stores global preferences in `~/.config/gridlock/config.toml` and `~/.c
 
 ---
 
-## 1. Preferences Dialog (`Edit -> Preferences` / `Ctrl+,`)
+## 1. Hierarchical Preferences Dialog (`Edit -> Preferences` / `Ctrl+,`)
 
-`PreferencesDialog` is organized into 8 pages along its left sidebar:
+`PreferencesDialog` uses a hierarchical `QTreeWidget` category sidebar (`#preferencesCategoryTree`, expanded by default) grouping UI layout and chrome customization under **`Appearance`**:
 
-### 1. `Appearance` (`Appearance & Typography`)
+![Preferences Appearance -> Toolbar layout and spacing editor](screenshots/v088_preferences_toolbar.png)
+
+### 1. `Appearance` & `Appearance -> Toolbar`
 * **`Color Theme`**: Live-switching dropdown across all 12 built-in dark and light themes (`ThemeManager`), paired with 5 luminance-checked swatch chips (`Canvas`, `Header`, `Border`, `Accent`, `Text`).
 * **`Memory Map Color Scheme`**: Default palette for `MemoryProfilerWidget`: `Category & Library Distinct` (`Distinct`), `Viridis Scientific` (`Viridis`), `Plasma Thermal` (`Plasma`), `Ocean Cool-Warm` (`Ocean`), or `High-Contrast Accessible` (`HighContrast`, Okabe-Ito).
 * **`File Tree Style`** (`Compact`, `Comfortable`, `Large`) and **`Enable Colorful File Icons`**.
 * **`UI Font Family` & `UI Font Size`**: `Inter` (default), `Cantarell`, `Ubuntu`, `JetBrains Mono`, or `Monospace`, `7..32 pt` (default `11 pt`).
 * **`Code Font Family` & `Code Font Size`**: Seeded with 16 monospace families (`JetBrains Mono`, `Fira Code`, `FiraCode Nerd Font`, `Hack`, `Source Code Pro`, `Cascadia Code`, `Iosevka`, `IBM Plex Mono`, `DejaVu Sans Mono`, `Liberation Mono`, `Ubuntu Mono`, `Noto Sans Mono`, `Inconsolata`, `Victor Mono`, `Terminus`, `Monospace`) plus system fixed-pitch fonts, `7..48 pt` (default `11 pt`).
+* **`Search Everywhere Popup Size`**: Configures `CommandPaletteDialog` modal scale across `Small (760 x 440)`, `Medium (840 x 500)`, `Large (940 x 560)` *(default)*, and `X-Large (1080 x 640)`.
+* **`Appearance -> Toolbar` (`Main Toolbar Layout & Spacing`)**: Nested child page allowing you to reorder `#MainToolbar` items (`Move Up` / `Move Down`), hide or restore optional controls, insert `24px` fixed spacers (`Add Spacer (24px)`), insert right-aligning flexible springs (`Add Flex Spring`, ignored if trailing), insert vertical dividers (`Add Separator`), or click `Reset Default`.
 
 ### 2. `Editing`
-* **`Tab Width`** (`1..16`, default `4`), **`Indent With`** (`Spaces` or `Tabs`), **`Whitespace`** (`Hidden` or `Visible`).
-* **`Enable Word Wrap`** (default `false`), **`Show Edge Column Line`** (default `true`), **`Edge Column`** (`1..300`, default `80`).
+* **`Tab Width`** (`1..16`, default `4`, enforced as exact soft-tab spaces on `Tab`/`Shift+Tab` and pixel-exact `tabStopDistance`), **`Indent With`** (`Spaces` or `Tabs`), **`Whitespace`** (`Hidden` or `Visible`).
+* **`Enable Word Wrap`** (default `false`), **`Show Edge Column Line`** (default `true`), **`Edge Column`** (`1..300`, default `80`), **`Show Code Minimap`**.
 * **`Enable Rainbow Brackets`** (5-level cyclic depth coloring on `()`, `{}`, `[]`, default `true`).
-* **`Enable Syntax Highlighting for Config & Docs`** (`TOML`, `YAML`, `Markdown`, `CSV`/`TSV`, default `true`).
+* **`Enable Syntax Highlighting for Config & Docs`** (`TOML`, `YAML`, `Markdown`, `CSV`/`TSV`, default `true`, with automatic virtualized preview for multi-megabyte CSV files).
 * **`Show Inline Variable Values in Editor when Paused`** (default `true`).
 
 ### 3. `Behavior`
@@ -28,7 +32,10 @@ GridLock stores global preferences in `~/.config/gridlock/config.toml` and `~/.c
 * **`Focus on Stop`**: `Yes` (default) or `No`.
 * **`Status Bar Resource Format`**: `GB / Total GB + CPU %` (`gb`), `Percentage (%) Only` (`percent`), or `Both (GB / Total GB + %)` (`both`).
 
-### 4. `Debugger`
+### 4. `Keybindings`
+* Filterable shortcut table backed by `ShortcutManager` and `ShortcutItemDelegate` (`KeySequenceRecorderWidget`), supporting click-to-record key sequences (including `Toggle Code Minimap`), conflict detection, **`Clear Shortcut`**, and **`Reset Defaults`** across all 12 dark and light themes.
+
+### 5. `Debugger`
 * **`Debugger Engine`**: `GNU GDB (gdb)`, `LLVM LLDB-DAP (lldb-dap)`, `NVIDIA CUDA-GDB (cuda-gdb)`, or `AMD ROCm GDB (rocgdb)`.
 * **`Default Disassembly View`**: `Control Flow Graph (Map)` (`cfg`, default), `Linear Assembly List` (`linear`), or `Split CFG + Decompiler` (`split`).
 * **`Clangd Path`**, **`DAP Adapter Path`**, **`GDB Path`**: Executable names or absolute paths with `Browse...` pickers.
@@ -36,18 +43,18 @@ GridLock stores global preferences in `~/.config/gridlock/config.toml` and `~/.c
 * **`Trap FPE (NaN/Overflow)`**: Sends `catch signal SIGFPE` across GDB ranks on session start.
 * **`Show Pseudo-C Decompiler when Source Editor is visible`**: Keeps the decompiler split open even when DWARF C/C++ source is already displayed.
 
-### 5. `HPC / Cluster`
+### 6. `HPC / Cluster`
 * **`MPI Hosts File`** (`--hostfile`), **`MPI Env Vars`** (multi-line `KEY=VALUE`), and **`Strict Node Affinity`** (`--map-by node`).
 
-### 6. `HPC Integration`
+### 7. `HPC Integration`
 * **`Remote SSH Connection`**: `SSH Host`, `SSH User`, and `SSH Key Path`.
 * **`SLURM Batch Configuration`**: `"Load & Auto-Detect .sbatch Script..."`, `"Sync Fields -> Script Preview"`, 16 `#SBATCH` form controls (`--job-name`, `--account`, `--partition`, `--qos`, `--time`, `--mem`, `--nodes`, `--ntasks-per-node`, `--cpus-per-task`, `--constraint`, `--gres`, `MPI Launcher`, `module load`, `--output`, `--mail-type`, `--mail-user`), and editable `Script Template` (`{FILE}` placeholder).
 * **`Spack Install Path`**: Default `/opt/spack`.
 
-### 7. `Terminal`
+### 8. `Terminal`
 * **`Shell Path`** (defaults to `$SHELL` or `/bin/bash`), **`Font Family`** (default `FiraCode Nerd Font`), and **`Font Size`** (`6..72 pt`, default `12 pt`).
 
-### 8. `Docsets` (`Offline Docsets`)
+### 9. `Docsets` (`Offline Docsets`)
 * **`Docset Directory`**, **`Auto-Detect Zeal Docsets`** (scans `~/.local/share/Zeal/Zeal/docsets`, `~/.config/Zeal/Zeal.conf`, Flatpak `org.zealdocs.Zeal`, and `/usr/share/zeal/docsets`, attaching up to 10 SQLite `.docset` indices), and **`Auto-Detect Needs`** (scans workspace `#include` headers for `<mpi.h>` and C++ STL usage).
 
 ---
@@ -109,6 +116,8 @@ gdb_path = "gdb"
 [ui]
 preferred_monitor = ""
 open_unfocused = false
+search_popup_size = "large"
+toolbar_layout = ["target", "launch_config", "ranks", "separator", "build", "run", "continue", "step_over", "step_into", "step_out", "pause", "stop", "record", "flex_spacer", "search", "perspectives"]
 
 [appearance]
 memory_map_color_scheme = "Distinct"
@@ -116,6 +125,7 @@ memory_map_color_scheme = "Distinct"
 [editing]
 rainbow_brackets = true
 data_doc_highlighting = true
+show_minimap = true
 
 [editor]
 inline_variable_values = true
@@ -126,8 +136,9 @@ font_family = "FiraCode Nerd Font"
 font_size = 12
 ```
 
-### Per-Workspace `.gridlock/` Files (`settings.toml` & `workspace.toml`)
+### Per-Target & Per-Workspace `.gridlock/` Files (`settings.toml` & `workspace.toml`)
 
+* **Scoped `programArguments`**: Target CLI arguments (`--args`) are scoped per target binary and per workspace (`<workspace>/.gridlock/settings.toml` and per-target entries in `ConfigManager`) so arguments configured for one executable never leak onto unrelated binaries or tutorial targets.
 * **`<workspace>/.gridlock/settings.toml`** (`ProjectSettingsDialog` / `ProjectWizard`):
   ```toml
   [project]

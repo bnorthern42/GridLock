@@ -20,16 +20,17 @@ GridLock coordinates multi-rank MPI processes in real time, tracks per-rank exec
 
 ---
 
-## 2. Multi-Rank Control in `ServerRackView` and CFG Rank Badges
+## 2. Multi-Rank Control in `ServerRackView`, Execution Scope, and CFG Rank Badges
 
 * **`Server Rack` Dock (`ServerRackView`)**:
-  * Renders a wrapping grid of compact blade cards (`RANK 0 .. RANK N-1`).
+  * Renders a wrapping grid of compact blade cards (`RANK 0 .. RANK N-1`) with a state filter dropdown (`All`, `Running`, `Paused`, `Deadlock`, `Exited`).
   * Each card displays a color-coded state pill:
     * **`RUN`** (green `#2ecc71`): Rank is actively executing.
-    * **`BRK`** (amber `#f1c40f`): Rank is paused at a breakpoint, step, signal, or `Pause Rank`.
-    * **`IDLE`** (gray `#7f8c8d`): Session is idle or the rank has exited.
+    * **`BRK`** (amber `#f1c40f`): Rank is paused at a breakpoint, step, signal, or `Pause`.
+    * **`DEADLOCK`** (crimson): Rank participates in a detected MPI wait-for cycle or collective divergence.
+    * **`EXITED` / `IDLE`** (gray `#7f8c8d`): Session is idle or the rank has exited.
   * Below the rank title, each card shows the rank's live instruction pointer (`0x...`) when stopped.
-  * **Single-Click Rank Switching**: Clicking any card sets the focused rank across `Variables`, `Registers`, `Call Stack`, `SourceCodeView` (updating per-rank breakpoint defaults and inline ghost values), `DisassemblyView`, and `Memory View`.
+  * **Master `setFocusedRank()` Synchronization & Execution Scope**: Clicking any card routes through `MainWindow::setFocusedRank()`, synchronizing `Variables`, `Registers`, `Call Stack`, `SourceCodeView`, `DisassemblyView`, `Memory View`, `ArrayPlotDialog` (supporting all `1..256` ranks), and `PointerGraphDialog`. Toggle execution scope between **`All Ranks`** and **`Rank k`**, or press **`F6`** (`Pause All Ranks`) to halt all running processes simultaneously.
 * **CFG Basic-Block Rank Occupancy Badges (`DisassemblyView`)**:
   * In 2D Control Flow Graph mode (`Space`), every basic block displays pills on its header bar indicating which MPI ranks are currently stopped inside that block's address range (for example `[R0]` or collapsed `[R0-R3 (4)]`), plus a crimson **`[DEADLOCK]`** badge when a rank participates in a stall cycle.
 
@@ -37,7 +38,7 @@ GridLock coordinates multi-rank MPI processes in real time, tracks per-rank exec
 
 ## 3. Deadlock and Collective Divergence Detection (`DeadlockAnalyzer`)
 
-Press **`Alt+3`** (or click **`MPI`** on the bottom tool rail via **`Alt+5`**) to open **`MPI Diagnostics`** (`MpiDiagnosticsWidget`).
+Switch to the **`MPI`** perspective (or click **`MPI`** on the bottom tool rail) to open **`MPI Diagnostics`** (`MpiDiagnosticsWidget`).
 
 ![Bottom Tool Rail in MPI Diagnostics Mode](screenshots/tool_rail_mpi_diagnostics.png)
 
@@ -76,16 +77,16 @@ Inside **`MPI Diagnostics`**, click **`NETWORK LOG`** in the header bar to switc
 
 ## 5. Cross-Rank Outlier Detection (`DifferentialGrid` / `WATCH` Dock)
 
-When debugging numerical drift, ghost-cell corruption, or rank-dependent branching across `N` processes, evaluating variables one rank at a time does not scale. Use the **`WATCH`** dock (`DifferentialGrid`):
+When debugging numerical drift, ghost-cell corruption, or rank-dependent branching across `N` processes, evaluating variables one rank at a time does not scale. Use the **`WATCH`** dock (`DifferentialGrid`) or broadcast an expression across **`All Ranks`** in **`Evaluator`**:
 
 1. **Add Expressions**:
    * Type any C/C++ expression (such as `cfg.rank_branch_tag`, `left_ghost`, `stencil_center`, or `data[1].coords.x`) into `New watch expression...` at the top of **`WATCH`** and click **`+ Watch`** (or press `Enter`).
    * You can also right-click a row in **`Variables`** and choose **`Add to Watch Expressions`**, click **`+ Watch`** inside **`Evaluator`**, or **`Ctrl+LeftClick`** / **`DoubleClick`** an identifier in **`SourceCodeView`**.
 2. **Consensus Outlier Highlighting**:
    * Rows correspond to `Rank 0 .. Rank N-1`; columns correspond to watched expressions.
-   * On every stop, `DifferentialGrid::updateHighlights()` computes the modal (majority-vote) value string in each column across active ranks. Any rank cell whose value differs from the majority consensus is shaded light red (`rgb(255, 200, 200)`), immediately isolating a single diverged or `nan`-corrupted rank.
+   * On every stop, `DifferentialGrid::updateHighlights()` computes the modal (majority-vote) value string in each column across active ranks. Any rank cell whose value differs from the majority consensus is shaded light red (`rgb(255, 200, 200)`), immediately isolating a single diverged or `nan`-corrupted rank. double-click any cell to open the copyable **`Inspect Full Value...`** popover.
 
-> **Note on Multidimensional Array Heatmaps**: In `v0.8.7`, live auto-refreshing 1D line/stem and 2D colormapped heatmap plotting is built into `Tools -> Array & Field Plotter...` (`Ctrl+Alt+G`), cross-rank scalar and struct-member outlier comparison is handled by `DifferentialGrid`, and raw typed array slices (`Int32`, `Float`, `Double`) can be exported to `.csv` or `.bin` from `Memory View` (`Export`). Multi-rank 1D overlays and 3D tensor views are scheduled for `v0.8.8` (see [Engineering Roadmap](ROADMAP.md)).
+> **Note on Multidimensional Array & Multi-Rank Plotting**: In `v0.8.8`, `Tools -> Array & Field Plotter...` (`Ctrl+Alt+G`) supports multi-rank 1D curve overlays for halo/ghost-cell comparison, `start:end:stride` slicing, `Log10` scaling, `Complex64`/`Complex128` decoding, 2D colormapped heatmaps (`splot`/`pm3d` `gnuplot` export), and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major and Fortran column-major).
 
 ---
 

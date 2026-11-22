@@ -67,49 +67,45 @@ Inside **`Memory View`**, click **`LIBRARY MEMORY MAP`** in the top bar to switc
 
 ---
 
-## 3. Pointer and Struct Graph Visualizer (`PointerGraphDialog`)
+## 3. Topological Pointer and Struct Graph Visualizer (`PointerGraphDialog`)
 
-Open **`Tools -> Pointer & Struct Graph Visualizer...`** from the menu bar, or right-click any struct/pointer variable in the **`Variables`** dock and select **`Visualize in Pointer / Struct Graph...`**.
+Open **`Tools -> Pointer & Struct Graph Visualizer...`** from the menu bar, or right-click any struct/pointer variable in **`SourceCodeView`** or **`Variables`** and select **`Visualize in Pointer / Struct Graph...`**.
 
-![Pointer and Struct Graph Visualizer showing linked MeshDomain and cyclic RankRingNode cards](screenshots/pointer_graph.png)
+![Pointer and Struct Graph Visualizer showing expanded-width MeshDomain, full-value hover tooltip, mutation diffs, and minimap](screenshots/pointer_graph.png)
 
 ### Operating the Graph Canvas
 
-1. **Graph and Pin Root Expressions**: Type a C/C++ struct or pointer variable (such as `sim`, `pkt`, `cfg`, or `head`) into the top input box and click **`Graph Expression`** (or press `Enter`).
-2. **Persistent Auto-Updating Roots & Mutation Diffs (`v0.8.7`)**:
-   * Enable **`Auto-Refresh on Stop`** (checked by default) to keep pinned root expressions live across every step or breakpoint stop without re-typing them.
-   * On each stop, `PointerGraphDialog` re-evaluates every pinned root, diffs every scalar and pointer field against its previous-stop value, and highlights changed fields with an inline **`"old -> new"`** mutation badge.
-   * Click **`Refresh Now`** at any time to re-query all pinned roots on demand.
-3. **Interactive Dereferencing (`➔ Deref`)**:
-   * Each card displays `expression : Type @ 0xAddress` and lists its member fields (`name : value (type)`).
-   * Non-null pointer and composite fields show a clickable **`➔ Deref`** pill badge (null pointers display a muted **`nullptr`** badge and are guarded against dereferencing).
-   * Click **`➔ Deref`** (or double-click a field row) to expand that child node live via `IBackendCoordinator::requestVariableChildren`, or click **`Expand All Pointers (1 Hop)`** on the toolbar to expand every visible frontier pointer by one level.
-4. **Cycle and Shared-Alias Detection**:
-   * Cards are deduplicated by normalized virtual address (`0x...`), so multiple pointers referencing the same heap object converge onto the same card.
-   * Forward tree edges render as solid cyan (`#38bdf8`) cubic Bezier curves. Back-edges (linked-list rings, parent pointers) and multi-parent shared aliases render as dashed amber (`#f59e0b`) curves labeled **`CYCLE / SHARED ALIAS`**.
-5. **Layout and Navigation**: Drag cards freely on the canvas, pan with mouse drag, click **`Auto-Layout (Layered DAG)`** to arrange nodes left-to-right by depth, use **`Zoom +`**, **`Zoom -`**, **`Fit`**, **`Clear Graph`**, and **`✕ CLOSE`**.
+1. **Graph, Pin, and Unpin Multiple Root Expressions**: Type a C/C++ struct or pointer variable (with live symbol/variable autocomplete) into the top input box and click **`Graph Expression`**. Pin multiple roots simultaneously and unpin individual roots (`✕`) with optional orphan pruning.
+2. **Persistent Auto-Updating Roots & Mutation Diffs**:
+   * Enable **`Auto-Refresh on Stop`** (checked by default) to re-evaluate pinned roots on every breakpoint stop, highlighting changed scalar and pointer fields with inline **`[old -> new]`** mutation badges and dynamically splitting or merging alias edges when pointers change.
+3. **Interactive Dereferencing, `Shift+Click` Width Expansion & Tooltips**:
+   * Click **`-> Deref`** or **double-click** any pointer/composite field row to expand that child node live via `IBackendCoordinator::requestVariableChildren`, or click **`Expand All Pointers (1 Hop)`**.
+   * **`Shift+Click`** any node card (or right-click -> `Expand Card Width`) to widen that card up to `900px` for long strings/paths, hover any field row to read its un-elided full-value tooltip, suppress noisy fields (`+N hidden`), toggle horizontal/vertical card orientation, or apply `/x`, `/d`, `/b` scalar format overrides.
+4. **Sugiyama Layered DAG, Cycle Detection, Minimap & Export**:
+   * **`Re-Layout DAG`** arranges nodes in layered Sugiyama ranks while preserving manual drag coordinates across debugger steps (`Clear Graph` includes 1-click **`Undo Clear`**).
+   * Forward tree edges render as solid cyan (`#38bdf8`) cubic Bezier curves; cyclic back-edges and shared aliases render as dashed amber (`#f59e0b`) curves labeled **`CYCLE / SHARED ALIAS`**.
+   * Zoom smoothly with the mouse wheel (`0.25x` to `2.5x`), navigate via the bottom-right interactive minimap, and export `2x` high-DPI PNGs or vector SVGs (**`Export PNG...`** / **`Export SVG...`**).
 
 ---
 
-## 4. Live 1D/2D Array and Field Plotter (`ArrayPlotDialog`, `Ctrl+Alt+G`)
+## 4. Multi-Rank & Scientific Array Plotter (`ArrayPlotDialog`, `Ctrl+Alt+G`)
 
-Open **`Tools -> Array & Field Plotter...`** (`Ctrl+Alt+G`) or right-click an array/pointer expression in **`Variables`** to plot live numerical arrays and 2D matrices directly from inferior memory.
+Open **`Tools -> Array & Field Plotter...`** (`Ctrl+Alt+G`) or right-click an array/pointer expression in **`Variables`** to plot live numerical arrays, multi-rank overlays, 2D matrices, and 3D tensors directly from inferior memory.
 
 ![Live 1D/2D Array and Field Plotter with previous-stop ghost curve and NaN anomaly marker](screenshots/v087_array_plotter_1d_2d.png)
 
-* **Data Types & Plot Modes**:
-  * Supports `double`, `float`, `int32_t`, `int64_t`, and `uint8_t` slices read via `IBackendCoordinator::readMemory` (`process_vm_readv` / GDB / DAP).
-  * Switch between **`1D Line Plot`**, **`1D Bar / Stem`**, and **`2D Heatmap`** (`Rows x Cols` dimensions) with 4 selectable colormaps: **`Viridis`**, **`Plasma`**, **`Diverging Cool-Warm`**, and **`Grayscale`**.
-* **Numerical Telemetry & Anomaly Flagging**:
-  * Computes live **`Min`**, **`Max`**, **`Mean`**, **`L2 Norm`**, and IEEE-754 **`NaN` / `Inf`** counts on every refresh, flagging non-finite samples visually on the plot canvas.
-  * When **`Auto-Refresh`** is enabled, each step retains the previous stop's 1D curve as a translucent **ghost overlay** and reports how many elements mutated since the previous stop.
-* **Export & External Plotting**: Click **`Export CSV`**, **`Save PNG`**, or **`Open in gnuplot`** to save slices or hand off to an external `gnuplot` window.
+* **Data Types, Slicing & Multi-Rank Overlays**:
+  * Supports `double`, `float`, `int32_t`, `int64_t`, `uint8_t`, **`Complex64`**, and **`Complex128`** (`Magnitude`, `Phase`, `Real`, `Imaginary`) with `start:end:stride` slice notation.
+  * Switch between **`1D Line Plot`**, **`1D Bar / Stem`**, **Multi-Rank 1D Overlay** (comparing halo/ghost cells across up to 256 ranks), **Scalar Time-Series History**, **`2D Heatmap`** (`Viridis`, `Plasma`, `Diverging Cool-Warm`, `Grayscale`), and zero-copy virtualized **2D/3D Tensor Tables** (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
+* **Log10 Scaling, Drag-Box Zoom & Anomaly Flagging**:
+  * Toggle base-10 logarithmic (**`Log10`**) Y/colorbar scaling, drag a selection rectangle to zoom into subtle boundary features, and inspect live **`Min`**, **`Max`**, **`Mean`**, **`L2 Norm`**, and **`NaN` / `Inf`** counts with translucent previous-stop ghost overlays.
+* **Validated Export & External Plotting**: Click **`Export CSV`**, **`Save PNG`**, or **`Open in gnuplot`** (supports both 1D curves and 2D `splot`/`pm3d` matrices with `gnuplot` executable and stderr validation).
 
 ---
 
 ## 5. Floating Programmer's Calculator (`ProgrammerCalculatorDialog`, `Ctrl+Alt+C`)
 
-Open **`Tools -> Programmer's Calculator...`** (`Ctrl+Alt+C`), launch `> Programmer's Calculator` from the Command Palette, or right-click any value/address/selection in **`SourceCodeView`**, **`Variables`**, **`Registers`**, **`Memory View`**, or **`DisassemblyView`** and select **`Open in Programmer's Calculator`**.
+Open **`Tools -> Programmer's Calculator...`** (`Ctrl+Alt+C`), launch `> Programmer's Calculator` from Search Everywhere, or right-click any value/address/byte offset in **`SourceCodeView`**, **`Variables`**, **`Registers`**, **`Memory View`** (using the exact byte under the hex cursor), or **`DisassemblyView`** and select **`Open in Programmer's Calculator`**.
 
 ![Floating Programmer's Calculator showing synchronized bases, IEEE-754 float, 64-bit grid, and keypad](screenshots/v087_programmer_calculator.png)
 
@@ -122,11 +118,11 @@ Open **`Tools -> Programmer's Calculator...`** (`Ctrl+Alt+C`), launch `> Program
 
 ---
 
-## 6. Disassembly, 2D Control Flow Graph, Decompiler, and Patching
+## 6. Disassembly, 2D Control Flow Graph, Decompiler, and Validated Patching
 
-Press **`Alt+2`** for the full-width **`REVERSE`** perspective, or inspect assembly alongside C/C++ code in the **`CODE`** perspective (`Alt+1`).
+Switch to the **`BINARY`** perspective (`Alt+3`), or inspect assembly alongside C/C++ code when needed.
 
-![Reverse Perspective showing 2D Control Flow Graph with rank badges paired with the Decompiler](screenshots/cfg_decompiler_split.png)
+![Binary Perspective showing 2D Control Flow Graph with rank badges paired with the Decompiler](screenshots/cfg_decompiler_split.png)
 
 ### Modes and Navigation (`DisassemblyView`)
 
@@ -139,11 +135,11 @@ Press **`Alt+2`** for the full-width **`REVERSE`** perspective, or inspect assem
   * Clicking any line in the decompiler or `SourceCodeView` jumps the linear disassembly, CFG, and `MemView` to the corresponding DWARF instruction address; selecting any identifier token (`2..32` chars) highlights every occurrence across assembly, CFG blocks, and decompiled output.
   * By default, the decompiler pane hides automatically when `SourceCodeView` already shows matching DWARF source; enable `Show Pseudo-C Decompiler when Source Editor is visible` in `Preferences -> Debugger` to keep all three panes open together.
 
-### Cross-References (`X`) and Instruction Patching (`Alt+P`)
+### Cross-References (`X`) and Validated Instruction Patching (`Alt+P`)
 
 * **Cross-Reference Inspector (`XrefInspectorDialog`)**: Press **`X`** (or right-click -> **`Inspect Cross-References (X)`**) to inspect incoming callers/branches (**`XREFS TO`**) and outgoing `CALL`, `CJMP`, `JMP`, and RIP-relative `DATA` references (**`XREFS FROM`**) with a live filter bar and assembly preview pane. Double-click any row to jump to that address.
-* **Right-Click Context Menu**: Provides **`Run to Instruction Address`**, **`Jump / Set PC to Address`**, **`Open Address in Programmer's Calculator`**, **`Seek in Memory View`**, **`Inspect Cross-References (X)`**, **`Lookup in Reference Manual (F1)`**, **`Toggle Bookmark`** (auto-synced with source breakpoints), and **`Patch Instruction`** (`nop`).
-* **Instruction & ELF64 Patching**: Press **`Alt+P`** in `DisassemblyView` to assemble/patch an instruction at the current address (splicing `; [PATCHED]` into the listing and updating `ElfBinaryInspector`'s in-memory section image via `writeVirtualMemory`, which can be written out as an executable ELF64 binary via `ElfBinaryInspector::savePatchedBinary`).
+* **Single-Popup Context Menu**: Provides **`Run to Instruction Address`**, **`Jump / Set PC to Address`**, **`Open Address in Programmer's Calculator`**, **`Seek in Memory View`**, **`Inspect Cross-References (X)`**, **`Lookup in Reference Manual (F1)`**, **`Toggle Bookmark`**, **`Patch Instruction`**, and **`Revert All Patches`**.
+* **Validated Instruction & ELF64 Patching**: Press **`Alt+P`** in `DisassemblyView` to validate hex byte sequences or `nop` mnemonics against the instruction byte width, splicing `; [PATCHED]` into the listing, supporting **`Revert All Patches`**, and exporting via `ElfBinaryInspector::savePatchedBinary`.
 
 ---
 
@@ -151,7 +147,7 @@ Press **`Alt+2`** for the full-width **`REVERSE`** perspective, or inspect assem
 
 * **`Registers` Dock (`RegisterView`)**:
   * Pins `rip`, `rsp`, and `rbp` at the top, color-coding instruction pointers, stack pointers, and `eflags`.
-  * Changed register values highlight in bold red on each step.
+  * Supports live in-place register modification (`-gdb-set $reg=...`), **`Inspect Full Value...`**, and bold red step-delta highlighting.
   * The search bar (`Filter registers by name or hex/dec value...`) matches register names, hex strings (`401125`), and converted unsigned decimal values. Double-clicking any register seeks `DisassemblyView` and `MemView` to its pointer value; right-clicking sends its value to **`Programmer's Calculator`**.
 * **Bottom Status Bar Telemetry (`ElfBinaryInspector`)**:
   * Displays `ARCH`, focused `MPI RANK`, active `PC/SEEK`, session `STATUS`, per-rank `STACK` (active frame delta `stackTop - $rsp` plus mapped `[stack]` RSS) and `HEAP` (`[heap]` RSS from `/proc/<pid>/smaps`), plus host `RAM` (`/proc/meminfo`) and delta `CPU %` (`/proc/stat`), configurable as `GB`, `%`, or `Both` in `Preferences -> Behavior`.

@@ -5,6 +5,42 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] - 2026-11-22
+
+### Added
+- **Customizable Top Toolbar & Hierarchical Preferences (`PreferencesDialog`, `ConfigManager`, `MainWindowToolbar`)**:
+  - Added a hierarchical `QTreeWidget` category selector in `PreferencesDialog` (`Appearance -> Toolbar` expanded by default) and moved UI chrome sizing options under `Appearance`.
+  - Added `Preferences -> Appearance -> Toolbar` (`Main Toolbar Layout & Spacing`) to reorder toolbar controls, hide or restore optional items, insert fixed `24px` gaps (`spacer`), insert right-aligning springs (`flex_spacer`, ignored when trailing), insert vertical dividers (`separator`), and reset to the default `< 1,040 px` layout.
+  - Added `Config` (inline `Launch Options` popover for `--args`, working directory, and `Stop at main()`) and `Cont` (`Continue`) text labels, split build/step dropdown compartments, source-level stepping (`Step Over F10`, `Step Into F11`, `Step Out Shift+F11`), and a vector Search Everywhere trigger icon.
+- **JetBrains-Style Search Everywhere & Popup Scale Presets (`CommandPaletteDialog`, `SearchEverywhereEngine`, `ConfigManager`)**:
+  - Upgraded global search to Search Everywhere (`Double Shift` for `All`, `Ctrl+P` for `Files`, `Ctrl+Shift+P` for `Actions`) with tabbed scopes (`All | Files | Symbols | Text | Actions | Ranks` via click or `Tab` / `Shift+Tab`), CamelCase and acronym fuzzy ranking, empty-query Recent Files & Actions, an `ESC` close button, and `Enter` / `Ctrl+Enter` split-editor opening.
+  - Separated the top tab and control bar cleanly above the search input, rendered 2-line result rows with workspace-relative sub-labels, expanded the preview pane to 35 numbered context lines (capped at `250` lines / `32 KB` for mega-files), and added persisted `Small` (`760x440`), `Medium` (`840x500`), `Large` (`940x560`, default), and `X-Large` (`1080x640`) size presets with a live `S/M/L/XL` header toggle.
+- **Topological Pointer & Struct Graph Enhancements (`PointerGraphDialog`)**:
+  - Added layered Sugiyama DAG auto-layout preserving manual drag positions across stops, incremental multi-root pinning and unpinning, mouse-wheel zoom (`0.25x` to `2.5x`), an interactive corner minimap, per-node field suppression (`+N hidden`), horizontal/vertical card orientation toggles, `/x` `/d` `/b` scalar format overrides, dynamic alias splitting/merging, and `2x` PNG / vector SVG export.
+  - Added `Shift+Click` node width expansion (up to `900px`), un-elided full-value hover tooltips, working double-click pointer dereference expansion, and `SourceCodeView` right-click graph handoff.
+- **Multi-Rank & Scientific Array Plotter Extensions (`ArrayPlotDialog`)**:
+  - Added multi-rank 1D overlay curves for halo/ghost-cell comparison, `start:end:stride` slicing, `Log10` Y and colorbar scaling, interactive drag-box zoom, scalar time-series history across stops, `Complex64` / `Complex128` decoding (`Magnitude`, `Phase`, `Real`, `Imaginary`), validated 2D `splot` / `pm3d` `gnuplot` export with stderr reporting, and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
+- **Progressive Disclosure, Unified Multi-Rank Scope & Live Editing (`MainWindowPerspectives`, `MainWindowExecution`, `VariablesDockWidget`, `RegisterView`, `ServerRackView`)**:
+  - Added non-destructive `SOURCE | DEBUG | BINARY | MPI` perspectives without force-redocking floating panels, automatic collapsing of multi-rank chrome when `ranks == 1`, an explicit `All Ranks` vs. `Rank k` execution scope toggle, `Pause All Ranks` (`F6`), a master `setFocusedRank()` sync hub across all docks and dialogs, `All Ranks` expression evaluation broadcast, and `ServerRackView` `DEADLOCK` / `EXITED` badges with state filtering.
+  - Added live in-place variable and register editing (`-gdb-set`), a copyable `Inspect Full Value...` popover, live expression autocomplete, a `CodeMinimap` visibility toggle in `Preferences -> Editing` with a rebindable shortcut in `Keybindings`, proportional UI typography and multi-language vector icons in `ProjectExplorerWidget`, and CLI positional target plus `-- <program_args...>` parsing.
+- **Developer E2E Suite, Architectural Guides & Screenshots (`scripts/e2e_cli_suite.mjs`, `docs/`, `src/**/README.md`, `tests/**/README.md`)**:
+  - Added a zero-dependency Node.js CLI and tutorial end-to-end test runner (`scripts/e2e_cli_suite.mjs`, manual developer-only), per-subdirectory `README.md` guides across `src/` and `tests/`, Graphify AST knowledge graph integration, and refreshed `v0.8.8` workstation, Search Everywhere, Pointer Graph, and Toolbar Preferences screenshots.
+
+### Performance
+- **Fast Binary Launch & Virtualized Large-Data Editor (`MainWindowExecution`, `ElfBinaryInspector`, `SourceCodeView`)**:
+  - Eliminated synchronous startup stalls when launching target binaries and added a virtualized large-CSV viewer that bypasses heavy syntax highlighting and word-wrapping on multi-megabyte data files.
+
+### Fixed
+- **Per-Target Arguments, Terminal PTY Cleanup & Editor Indentation (`ConfigManager`, `TerminalDockWidget`, `SourceCodeView`, `MainWindow`)**:
+  - Unified configuration storage under `~/.config/gridlock/` with persistent `Recent Sessions`, scoped `programArgs` per target and per workspace instead of leaking globally across binaries, and isolated unit test binaries into temporary config directories.
+  - Fixed `Clear Terminal` in `TerminalDockWidget` to wipe scrollback and print a clean prompt without triggering Zsh `Ctrl+L` variable-expansion messages, fixed oversized right-click terminal context menus (`Copy`, `Paste`, `Select All`, `Clear Terminal`), added `Ctrl+Shift+C`/`V` and smart `Ctrl+C`/`V`, and cleanly reaped embedded PTYs on exit.
+  - Enforced exact 4-column soft `Tab` / `Shift+Tab` (`Backtab`) indentation and monospace pixel `setTabStopDistance()` in `SourceCodeView`, bound `Ctrl+F` to the inline editor find bar, and switched split editors to a real `QSplitter`.
+  - Ensured extensionless targets compile with `+x` permissions and pre-launch executability checks, blocked stale-binary launches on build errors, validated hex/NOP instruction patches with `Revert All Patches`, replaced persistent `QKeySequenceEdit` cells in `Keybindings` with an opaque `KeySequenceRecorderWidget` (`ShortcutItemDelegate`) with light-theme contrast, removed the accidental checkable checkbox on `Debug -> Run Target`, fixed `DisassemblyView` double context menus and `MemView` cursor offsets, and cleanly reaped active debug sessions and orphaned `/dev/shm/psm3_shm` segments on exit.
+
+### Changed
+- **Sub-500-Line Modular Refactoring (`src/`, `tests/`)**:
+  - Reorganized `src/core/hpc/` (`gdb/`, `dap/`, `lsp/`, `memory/`, `analysis/`, `system/`), `src/ui/dialogs/` (`plotter/`, `graph/`, `calculator/`, `debugger/`, `project/`, `search/`, `preferences/`), and `tests/` (`ui/`, `dap/`, `hpc/`, `core/`), splitting large UI and core manager translation units (`MainWindow*`, `ConfigManager*`, `SourceCodeView*`, `MemView*`, `MemoryProfilerWidget*`, `Disassembly*`, `ProjectExplorer*`, `HpcConsole*`, `DocsetManager*`, `DapCoordinator*`, `ElfBinaryInspector*`) under 500 lines.
+
 ## [0.8.7] - 2026-11-20
 
 ### Added
