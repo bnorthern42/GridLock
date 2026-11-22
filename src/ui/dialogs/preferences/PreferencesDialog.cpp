@@ -12,6 +12,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFont>
+#include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -155,6 +156,19 @@ void PreferencesDialog::setupPages() {
 
     m_appearancePage = new AppearanceSettingsPage(m_stack);
     m_editingPage = new EditingSettingsPage(m_stack);
+    if (auto* edForm = qobject_cast<QFormLayout*>(m_editingPage->layout())) {
+        m_searchPopupSizeCombo = new QComboBox(m_editingPage);
+        m_searchPopupSizeCombo->setObjectName(QStringLiteral("searchPopupSizeCombo"));
+        m_searchPopupSizeCombo->addItem(tr("Small (760 × 440)"), QStringLiteral("small"));
+        m_searchPopupSizeCombo->addItem(tr("Medium (860 × 500)"), QStringLiteral("medium"));
+        m_searchPopupSizeCombo->addItem(tr("Large (960 × 560)"), QStringLiteral("large"));
+        m_searchPopupSizeCombo->addItem(tr("X-Large (1120 × 650)"), QStringLiteral("xlarge"));
+        const int szIdx = m_searchPopupSizeCombo->findData(gridlock::core::ConfigManager::instance().searchPopupSize());
+        m_searchPopupSizeCombo->setCurrentIndex(szIdx >= 0 ? szIdx : 2);
+        m_searchPopupSizeCombo->setToolTip(
+            tr("Overlay footprint for Search Everywhere / Command Palette (Double Shift / Ctrl+P)."));
+        edForm->addRow(tr("Search Everywhere Popup Size:"), m_searchPopupSizeCombo);
+    }
     m_behaviorPage = new BehaviorSettingsPage(m_stack);
     m_keybindingsPage = new KeybindingsSettingsPage(m_stack);
     m_debuggerPage = new DebuggerSettingsPage(m_stack);
@@ -261,6 +275,9 @@ void PreferencesDialog::apply() {
     cfg.setRainbowBracketsEnabled(m_editingPage->rainbowBrackets());
     cfg.setDataDocHighlightingEnabled(m_editingPage->dataDocHighlighting());
     cfg.setInlineVariableValuesEnabled(m_editingPage->inlineVariableValues());
+    if (m_searchPopupSizeCombo) {
+        cfg.setSearchPopupSize(m_searchPopupSizeCombo->currentData().toString());
+    }
     if (auto* telemetryCombo = m_behaviorPage->findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"))) {
         cfg.setTelemetryDisplayFormat(telemetryCombo->currentData().toString());
     }

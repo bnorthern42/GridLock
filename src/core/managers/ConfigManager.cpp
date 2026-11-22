@@ -342,4 +342,11 @@ void ConfigManager::toolbarLayoutChanged() {
   }
 }
 
+/** @brief Registers a `QPointer`-guarded callback invoked whenever `setSearchPopupSize()` updates the size preset. */
+void ConfigManager::registerSearchPopupSizeListener(
+    QObject* context, std::function<void(const QString&)> callback) {
+  if (!context || !callback) return;
+  m_searchPopupSizeListeners.emplace_back(QPointer<QObject>(context), std::move(callback));
+}
+
 }  // namespace gridlock::core

@@ -593,10 +593,27 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(debugMenu != nullptr && runMenuAct != nullptr && !runMenuAct->isCheckable());
     auto* searchBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarSearchEverywhereBtn"));
     QVERIFY2(searchBtn && !searchBtn->icon().isNull() && searchBtn->width() >= 26 && searchBtn->height() >= 22, qPrintable(QStringLiteral("searchBtn=%1x%2 iconNull=%3").arg(searchBtn ? searchBtn->width() : -1).arg(searchBtn ? searchBtn->height() : -1).arg(!searchBtn || searchBtn->icon().isNull())));
-    searchBtn->click(); QApplication::processEvents();
-    auto* palDlg = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
-    QVERIFY2(palDlg && palDlg->isVisible() && palDlg->width() >= 720 && palDlg->width() <= 860 && palDlg->height() >= 420 && palDlg->height() <= 520, qPrintable(QStringLiteral("palDlg=%1x%2").arg(palDlg ? palDlg->width() : -1).arg(palDlg ? palDlg->height() : -1)));
-    palDlg->reject(); QApplication::processEvents();
+    {
+        struct SzGuard { ~SzGuard() { gridlock::core::ConfigManager::instance().setSearchPopupSize(QStringLiteral("large")); } } szGuard;
+        gridlock::core::ConfigManager::instance().setSearchPopupSize(QStringLiteral("large"));
+        searchBtn->click(); QApplication::processEvents();
+        auto* palDlg = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
+        QVERIFY(palDlg && palDlg->isVisible() && palDlg->headerBar() && palDlg->inputEdit() && palDlg->sizePresetButton());
+        const int hdrBot = palDlg->headerBar()->geometry().bottom();
+        const int inpTop = palDlg->inputEdit()->geometry().top();
+        QVERIFY2(inpTop - hdrBot >= 6, qPrintable(QStringLiteral("hdrBot=%1 inpTop=%2 gap=%3").arg(hdrBot).arg(inpTop).arg(inpTop - hdrBot)));
+        auto& cfg = gridlock::core::ConfigManager::instance();
+        cfg.setSearchPopupSize(QStringLiteral("small")); QApplication::processEvents(); const QSize szS = palDlg->size(); QCOMPARE(palDlg->sizePresetButton()->text(), QStringLiteral("S"));
+        cfg.setSearchPopupSize(QStringLiteral("medium")); QApplication::processEvents(); const QSize szM = palDlg->size(); QCOMPARE(palDlg->sizePresetButton()->text(), QStringLiteral("M"));
+        cfg.setSearchPopupSize(QStringLiteral("large")); QApplication::processEvents(); const QSize szL = palDlg->size(); QCOMPARE(palDlg->sizePresetButton()->text(), QStringLiteral("L"));
+        cfg.setSearchPopupSize(QStringLiteral("xlarge")); QApplication::processEvents(); const QSize szXL = palDlg->size(); QCOMPARE(palDlg->sizePresetButton()->text(), QStringLiteral("XL"));
+        QVERIFY2(szS.width() < szM.width() && szM.width() < szL.width() && szL.width() < szXL.width() && szS.height() < szM.height() && szM.height() < szL.height() && szL.height() < szXL.height(), qPrintable(QStringLiteral("S=%1x%2 M=%3x%4 L=%5x%6 XL=%7x%8").arg(szS.width()).arg(szS.height()).arg(szM.width()).arg(szM.height()).arg(szL.width()).arg(szL.height()).arg(szXL.width()).arg(szXL.height())));
+        palDlg->sizePresetButton()->click(); QApplication::processEvents(); QCOMPARE(cfg.searchPopupSize(), QStringLiteral("small"));
+        gridlock::ui::PreferencesDialog szPrefs(&mw);
+        auto* szCombo = szPrefs.findChild<QComboBox*>(QStringLiteral("searchPopupSizeCombo"));
+        QVERIFY(szCombo && szCombo->count() == 4 && szCombo->currentData().toString() == QStringLiteral("small"));
+        palDlg->reject(); QApplication::processEvents();
+    }
     rankSpin->setValue(1); mw.setWorkspacePerspective(QStringLiteral("Source")); QApplication::processEvents();
     auto* extBtn = mainTb->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
     QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && !pauseAllBtn->isVisible() && targetSel->width() >= 165 && rankSpin->width() >= 80 && scopeCombo->minimumWidth() >= 115 && mainTb->sizeHint().width() <= 1180 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("src w=%1 ts=%2 rs=%3 scMin=%4 ext=%5").arg(mainTb->sizeHint().width()).arg(targetSel->width()).arg(rankSpin->width()).arg(scopeCombo->minimumWidth()).arg(extBtn && extBtn->isVisible())));

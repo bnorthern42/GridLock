@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QListWidgetItem>
@@ -140,11 +141,13 @@ int CommandPaletteDialog::fuzzyScore(const QString& pattern, const QString& cand
 CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     : QDialog(parent, Qt::Dialog | Qt::FramelessWindowHint) {
     setObjectName(QStringLiteral("CommandPaletteDialog")); setWindowTitle(QStringLiteral("Search Everywhere"));
-    setModal(false); resize(780, 460);
+    setModal(false); resize(960, 560);
     auto* rootLayout = new QVBoxLayout(this); rootLayout->setContentsMargins(10, 8, 10, 10); rootLayout->setSpacing(6);
 
-    auto* scopeBar = new QHBoxLayout(); scopeBar->setObjectName(QStringLiteral("commandPaletteScopeBar"));
-    scopeBar->setContentsMargins(0, 0, 0, 0); scopeBar->setSpacing(4);
+    m_headerBar = new QWidget(this);
+    m_headerBar->setObjectName(QStringLiteral("commandPaletteHeaderBar"));
+    auto* scopeBar = new QHBoxLayout(m_headerBar); scopeBar->setObjectName(QStringLiteral("commandPaletteScopeBar"));
+    scopeBar->setContentsMargins(0, 0, 0, 2); scopeBar->setSpacing(4);
     struct TabSpec { Scope scope; const char* label; const char* objName; const char* tip; };
     for (const auto& ts : {TabSpec{Scope::All, "All", "scopeTabAll", "Search Everywhere (Double Shift)"},
                            TabSpec{Scope::Files, "Files", "scopeTabFiles", "Search Files (Ctrl+P)"},
@@ -152,7 +155,7 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
                            TabSpec{Scope::Text, "Text", "scopeTabText", "Search Workspace Text (/)"},
                            TabSpec{Scope::Actions, "Actions", "scopeTabActions", "Search Commands & Actions (Ctrl+Shift+P / >)"},
                            TabSpec{Scope::Ranks, "Ranks", "scopeTabRanks", "Search MPI Ranks (#)"}}) {
-        auto* btn = new QToolButton(this); btn->setObjectName(QLatin1String(ts.objName)); btn->setProperty("gl_scope_tab", true);
+        auto* btn = new QToolButton(m_headerBar); btn->setObjectName(QLatin1String(ts.objName)); btn->setProperty("gl_scope_tab", true);
         btn->setText(QLatin1String(ts.label)); btn->setToolTip(QStringLiteral("%1 — press Tab / Shift+Tab to cycle").arg(QLatin1String(ts.tip)));
         btn->setCheckable(true); btn->setFocusPolicy(Qt::NoFocus); btn->setCursor(Qt::PointingHandCursor);
         const Scope sc = ts.scope;
@@ -161,10 +164,16 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     }
     scopeBar->addStretch(1);
 
-    m_countLabel = new QLabel(QStringLiteral("0 matches"), this); m_countLabel->setObjectName(QStringLiteral("CommandPaletteCountLabel"));
+    m_countLabel = new QLabel(QStringLiteral("0 matches"), m_headerBar); m_countLabel->setObjectName(QStringLiteral("CommandPaletteCountLabel"));
     m_countLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter); scopeBar->addWidget(m_countLabel);
 
-    m_previewToggleBtn = new QToolButton(this); m_previewToggleBtn->setObjectName(QStringLiteral("commandPalettePreviewToggleBtn"));
+    m_sizePresetBtn = new QToolButton(m_headerBar); m_sizePresetBtn->setObjectName(QStringLiteral("commandPaletteSizePresetBtn"));
+    m_sizePresetBtn->setText(QStringLiteral("L"));
+    m_sizePresetBtn->setFocusPolicy(Qt::NoFocus); m_sizePresetBtn->setCursor(Qt::PointingHandCursor); m_sizePresetBtn->setFixedHeight(22);
+    connect(m_sizePresetBtn, &QToolButton::clicked, this, &CommandPaletteDialog::cycleSizePreset);
+    scopeBar->addWidget(m_sizePresetBtn);
+
+    m_previewToggleBtn = new QToolButton(m_headerBar); m_previewToggleBtn->setObjectName(QStringLiteral("commandPalettePreviewToggleBtn"));
     m_previewToggleBtn->setText(QStringLiteral("Preview"));
     m_previewToggleBtn->setToolTip(QStringLiteral("Toggle live source preview pane (Enter: jump, Ctrl+Enter: open in split)"));
     m_previewToggleBtn->setCheckable(true); m_previewToggleBtn->setChecked(true);
@@ -172,10 +181,17 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     connect(m_previewToggleBtn, &QToolButton::toggled, this, &CommandPaletteDialog::setPreviewVisible);
     scopeBar->addWidget(m_previewToggleBtn);
 
-    m_closeBtn = new QToolButton(this); m_closeBtn->setObjectName(QStringLiteral("commandPaletteCloseBtn"));
+    m_closeBtn = new QToolButton(m_headerBar); m_closeBtn->setObjectName(QStringLiteral("commandPaletteCloseBtn"));
     m_closeBtn->setText(QStringLiteral("ESC")); m_closeBtn->setToolTip(QStringLiteral("Close Command Palette (Esc)"));
     m_closeBtn->setFocusPolicy(Qt::NoFocus); m_closeBtn->setCursor(Qt::PointingHandCursor); m_closeBtn->setFixedHeight(22);
-    scopeBar->addWidget(m_closeBtn); rootLayout->addLayout(scopeBar);
+    scopeBar->addWidget(m_closeBtn);
+    rootLayout->addWidget(m_headerBar);
+
+    auto* headerSep = new QFrame(this);
+    headerSep->setObjectName(QStringLiteral("commandPaletteHeaderSep"));
+    headerSep->setFixedHeight(1);
+    rootLayout->addWidget(headerSep);
+    rootLayout->addSpacing(2);
 
     auto* topBarLayout = new QHBoxLayout(); topBarLayout->setContentsMargins(0, 0, 0, 0); topBarLayout->setSpacing(6);
     m_modePillLabel = new QLabel(QStringLiteral("ALL"), this); m_modePillLabel->setObjectName(QStringLiteral("CommandPaletteModePill"));
@@ -203,7 +219,7 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     prevLayout->addWidget(m_previewHeaderLabel); prevLayout->addWidget(m_previewEdit, 1);
 
     m_contentSplitter->addWidget(m_resultsList); m_contentSplitter->addWidget(m_previewPane);
-    m_contentSplitter->setStretchFactor(0, 56); m_contentSplitter->setStretchFactor(1, 44); m_contentSplitter->setSizes({430, 330});
+    m_contentSplitter->setStretchFactor(0, 56); m_contentSplitter->setStretchFactor(1, 44); m_contentSplitter->setSizes({530, 410});
     rootLayout->addWidget(m_contentSplitter, 1);
 
     auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
@@ -217,7 +233,9 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     connect(m_resultsList, &QListWidget::currentRowChanged, this, &CommandPaletteDialog::updatePreviewForRow);
     connect(m_resultsList, &QListWidget::itemActivated, this, [this](QListWidgetItem*) { triggerSelected(false); });
     connect(m_resultsList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { triggerSelected(false); });
-    syncScopeTabButtons(m_activeScope); reloadStyle();
+    gridlock::core::ConfigManager::instance().registerSearchPopupSizeListener(
+        this, [this](const QString& preset) { applySizePreset(preset); });
+    syncScopeTabButtons(m_activeScope); reloadStyle(); applySizePreset();
 }
 
 QToolButton* CommandPaletteDialog::scopeTabButton(Scope scope) const {
@@ -258,14 +276,16 @@ void CommandPaletteDialog::reloadStyle() {
     const QString capBdr = pal.isDark ? QStringLiteral("#334155") : QStringLiteral("#cbd5e1"), capFg = pal.isDark ? QStringLiteral("#cbd5e1") : QStringLiteral("#334155");
     setStyleSheet(QStringLiteral(
         "QDialog#CommandPaletteDialog { background-color: %1; border: 1px solid %2; border-radius: 8px; }"
+        "QWidget#commandPaletteHeaderBar { background-color: transparent; border: none; }"
+        "QFrame#commandPaletteHeaderSep { background-color: %2; border: none; }"
         "QLineEdit#CommandPaletteInput { background-color: %3; color: %4; border: 1px solid %5; border-radius: 5px; padding: 4px 8px; font-size: 11pt; }"
         "QLabel#CommandPaletteModePill { background-color: %3; color: %5; border: 1px solid %5; border-radius: 4px; padding: 2px 8px; font-size: 8pt; font-weight: bold; }"
         "QLabel#CommandPaletteCountLabel, QLabel#commandPalettePreviewHeader { color: %6; font-size: 9pt; font-weight: 600; padding: 0 4px; }"
         "QToolButton[gl_scope_tab=\"true\"], QToolButton#commandPalettePreviewToggleBtn { background-color: transparent; color: %6; border: 1px solid transparent; border-radius: 4px; padding: 2px 9px; min-height: 20px; max-height: 22px; font-size: 9pt; font-weight: 600; }"
         "QToolButton[gl_scope_tab=\"true\"]:hover, QToolButton#commandPalettePreviewToggleBtn:hover { color: %4; border-color: %8; }"
         "QToolButton[gl_scope_tab=\"true\"]:checked, QToolButton#commandPalettePreviewToggleBtn:checked { background-color: %3; color: %5; border: 1px solid %5; }"
-        "QToolButton#commandPaletteCloseBtn { background-color: %7; color: %9; border: 1px solid %8; border-radius: 4px; padding: 1px 7px; margin: 0px; min-width: 34px; max-width: 46px; min-height: 20px; max-height: 22px; font-size: 8pt; font-weight: bold; }"
-        "QToolButton#commandPaletteCloseBtn:hover { border-color: %5; color: %4; }"
+        "QToolButton#commandPaletteSizePresetBtn, QToolButton#commandPaletteCloseBtn { background-color: %7; color: %9; border: 1px solid %8; border-radius: 4px; padding: 1px 6px; margin: 0px; min-width: 28px; max-width: 46px; min-height: 20px; max-height: 22px; font-size: 8pt; font-weight: bold; }"
+        "QToolButton#commandPaletteSizePresetBtn:hover, QToolButton#commandPaletteCloseBtn:hover { border-color: %5; color: %4; }"
         "QListWidget#CommandPaletteResults { background-color: %1; color: %4; border: none; outline: none; }"
         "QPlainTextEdit#commandPalettePreviewEdit { background-color: %3; color: %4; border: 1px solid %2; border-radius: 5px; padding: 4px; }")
                       .arg(bg, pal.borderHex, inputBg, pal.textHex, pal.accentHex, muted, capBg, capBdr, capFg));
@@ -359,16 +379,48 @@ void CommandPaletteDialog::keyPressEvent(QKeyEvent* event) {
     QDialog::keyPressEvent(event);
 }
 
-void CommandPaletteDialog::positionOverlayNearTopCenter() {
+void CommandPaletteDialog::applySizePreset(const QString& preset) {
+    const QString key = (preset.isEmpty() ? gridlock::core::ConfigManager::instance().searchPopupSize() : preset).trimmed().toLower();
+    QSize target(960, 560);
+    QString badge = QStringLiteral("L"), fullName = QStringLiteral("Large");
+    if (key == QStringLiteral("small") || key == QStringLiteral("s")) {
+        target = QSize(760, 440); badge = QStringLiteral("S"); fullName = QStringLiteral("Small");
+    } else if (key == QStringLiteral("medium") || key == QStringLiteral("m")) {
+        target = QSize(860, 500); badge = QStringLiteral("M"); fullName = QStringLiteral("Medium");
+    } else if (key == QStringLiteral("xlarge") || key == QStringLiteral("x-large") || key == QStringLiteral("xl")) {
+        target = QSize(1120, 650); badge = QStringLiteral("XL"); fullName = QStringLiteral("X-Large");
+    }
+    if (m_sizePresetBtn) {
+        m_sizePresetBtn->setText(badge);
+        m_sizePresetBtn->setToolTip(
+            QStringLiteral("Search Everywhere Size: %1 (%2x%3) — click to cycle S / M / L / XL")
+                .arg(fullName).arg(target.width()).arg(target.height()));
+    }
     if (QWidget* p = parentWidget()) {
         const QRect g = p->geometry();
         const int maxW = qMax(540, g.width() - 48), maxH = qMax(360, g.height() - 48);
-        const int w = qMin(maxW, 780);
-        const int h = qMin(maxH, 460);
+        const int w = qMin(maxW, target.width()), h = qMin(maxH, target.height());
         resize(w, h);
         if (m_contentSplitter) m_contentSplitter->setSizes({(w * 56) / 100, (w * 44) / 100});
         move(p->mapToGlobal(QPoint((g.width() - w) / 2, qMax(24, (g.height() - h) / 6))));
+    } else {
+        resize(target);
+        if (m_contentSplitter) m_contentSplitter->setSizes({(target.width() * 56) / 100, (target.width() * 44) / 100});
     }
+}
+
+void CommandPaletteDialog::cycleSizePreset() {
+    static const QStringList kOrder = {
+        QStringLiteral("small"), QStringLiteral("medium"),
+        QStringLiteral("large"), QStringLiteral("xlarge")};
+    const QString cur = gridlock::core::ConfigManager::instance().searchPopupSize();
+    const int idx = kOrder.indexOf(cur);
+    const QString next = kOrder.at((idx < 0 ? 2 : (idx + 1)) % kOrder.size());
+    gridlock::core::ConfigManager::instance().setSearchPopupSize(next);
+}
+
+void CommandPaletteDialog::positionOverlayNearTopCenter() {
+    applySizePreset();
 }
 
 void CommandPaletteDialog::updatePreviewForRow(int row) {

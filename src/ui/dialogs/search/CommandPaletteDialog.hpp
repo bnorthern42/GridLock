@@ -107,12 +107,16 @@ public:
 
     QLineEdit* inputEdit() const { return m_inputEdit; }
     QListWidget* resultsList() const { return m_resultsList; }
+    QWidget* headerBar() const { return m_headerBar; }
+    QToolButton* sizePresetButton() const { return m_sizePresetBtn; }
     QToolButton* closeButton() const { return m_closeBtn; }
     QToolButton* scopeTabButton(Scope scope) const;
     QPlainTextEdit* previewEdit() const { return m_previewEdit; }
     QLabel* previewHeaderLabel() const { return m_previewHeaderLabel; }
     bool isPreviewVisible() const;
     void setPreviewVisible(bool visible);
+    void applySizePreset(const QString& preset = QString());
+    void cycleSizePreset();
 
     void reloadStyle();
 
@@ -135,9 +139,11 @@ private:
     void positionOverlayNearTopCenter();
 
     Scope m_activeScope = Scope::All;
+    QWidget* m_headerBar = nullptr;
     QLineEdit* m_inputEdit = nullptr;
     QLabel* m_modePillLabel = nullptr;
     QLabel* m_countLabel = nullptr;
+    QToolButton* m_sizePresetBtn = nullptr;
     QToolButton* m_previewToggleBtn = nullptr;
     QToolButton* m_closeBtn = nullptr;
     QVector<QToolButton*> m_scopeButtons;

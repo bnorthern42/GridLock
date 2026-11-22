@@ -82,6 +82,7 @@ private:
     QListWidget* m_toolbarLayoutList = nullptr;
     QComboBox* m_toolbarHiddenCombo = nullptr;
     QPushButton* m_toolbarAddHiddenBtn = nullptr;
+    QComboBox* m_searchPopupSizeCombo = nullptr;
 };
 
 }  // namespace gridlock::ui

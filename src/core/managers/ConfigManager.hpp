@@ -265,6 +265,13 @@ class ConfigManager {
   /** @brief Registers a `QPointer`-guarded callback invoked whenever `setToolbarLayout()` updates the toolbar layout. */
   void registerToolbarLayoutListener(QObject* context, std::function<void(const QStringList&)> callback);
 
+  /** @brief Returns the Search Everywhere popup size preset (`"small"`, `"medium"`, `"large"`, or `"xlarge"`; default: `"large"`). */
+  QString searchPopupSize() const;
+  /** @brief Persists the Search Everywhere popup size preset to `[ui] search_popup_size` in `config.toml` and `QSettings`. */
+  void setSearchPopupSize(const QString& preset);
+  /** @brief Registers a `QPointer`-guarded callback invoked whenever `setSearchPopupSize()` updates the size preset. */
+  void registerSearchPopupSizeListener(QObject* context, std::function<void(const QString&)> callback);
+
   /** @brief Returns the persisted theme name from .gridlock/workspace.toml or QSettings. */
   QString getThemeName() const;
   /** @brief Persists the theme name to .gridlock/workspace.toml and QSettings. */
@@ -365,6 +372,7 @@ class ConfigManager {
   QString m_debuggerEngine = QStringLiteral("gdb"); ///< Active local debugger backend engine identifier.
   mutable QMap<QString, QString> m_targetProgramArgs; ///< In-memory per-target CLI arguments for standalone binaries.
   std::vector<std::pair<QPointer<QObject>, std::function<void(const QStringList&)>>> m_toolbarLayoutListeners; ///< Live toolbar layout observers.
+  std::vector<std::pair<QPointer<QObject>, std::function<void(const QString&)>>> m_searchPopupSizeListeners; ///< Live Search Everywhere size observers.
 
   static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
   static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.

@@ -244,6 +244,55 @@ void ConfigManager::setToolbarLayout(const QStringList& items) {
   toolbarLayoutChanged();
 }
 
+namespace {
+QString normalizeSearchPopupPreset(const QString& raw) {
+  const QString v = raw.trimmed().toLower();
+  if (v == QStringLiteral("small") || v == QStringLiteral("s")) return QStringLiteral("small");
+  if (v == QStringLiteral("medium") || v == QStringLiteral("m")) return QStringLiteral("medium");
+  if (v == QStringLiteral("xlarge") || v == QStringLiteral("x-large") || v == QStringLiteral("xl")) return QStringLiteral("xlarge");
+  if (v == QStringLiteral("large") || v == QStringLiteral("l")) return QStringLiteral("large");
+  return QString();
+}
+}  // namespace
+
+/** @brief Reads `[ui] search_popup_size` from `config.toml` (falling back to `QSettings` or `"large"`). */
+QString ConfigManager::searchPopupSize() const {
+  if (const auto* uiTbl = m_config["ui"].as_table()) {
+    if (auto sv = (*uiTbl)["search_popup_size"].value<std::string>()) {
+      const QString norm = normalizeSearchPopupPreset(QString::fromStdString(*sv));
+      if (!norm.isEmpty()) return norm;
+    }
+  }
+  QSettings s(kOrg, kApp);
+  if (s.contains(QStringLiteral("ui/search_popup_size"))) {
+    const QString norm = normalizeSearchPopupPreset(s.value(QStringLiteral("ui/search_popup_size")).toString());
+    if (!norm.isEmpty()) return norm;
+  }
+  return QStringLiteral("large");
+}
+
+/** @brief Persists `[ui] search_popup_size` to `config.toml` and `QSettings`, then notifies live listeners. */
+void ConfigManager::setSearchPopupSize(const QString& preset) {
+  QString norm = normalizeSearchPopupPreset(preset);
+  if (norm.isEmpty()) norm = QStringLiteral("large");
+  if (!m_config.contains("ui")) m_config.insert("ui", toml::table{});
+  m_config["ui"].as_table()->insert_or_assign("search_popup_size", norm.toStdString());
+  saveGlobalConfig();
+  QSettings s(kOrg, kApp);
+  s.setValue(QStringLiteral("ui/search_popup_size"), norm);
+  s.sync();
+  auto it = m_searchPopupSizeListeners.begin();
+  while (it != m_searchPopupSizeListeners.end()) {
+    if (it->first.isNull()) {
+      it = m_searchPopupSizeListeners.erase(it);
+    } else {
+      auto cb = it->second;
+      ++it;
+      if (cb) cb(norm);
+    }
+  }
+}
+
 /** @brief Retrieves embedded terminal shell and font settings from `config.toml`. */
 TerminalSettings ConfigManager::getTerminalSettings() const {
   TerminalSettings ts;
