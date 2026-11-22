@@ -40,7 +40,7 @@ src_files = [
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/MainWindowExecution.cpp', 'src/ui/MainWindowInspection.cpp',
   'src/ui/MainWindowBuild.cpp',
-  'src/ui/views/ServerRackView.cpp', 'src/ui/views/SourceCodeView.cpp',
+  'src/ui/views/ServerRackView.cpp', 'src/ui/views/SourceCodeView.cpp', 'src/ui/views/SourceCodeViewInteraction.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
   'src/ui/dialogs/plotter/ArrayPlotCanvas.cpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.cpp', 'src/ui/dialogs/plotter/ArrayPlotExport.cpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.cpp',
   'src/ui/dialogs/graph/PointerGraphDialog.cpp', 'src/ui/dialogs/graph/PointerGraphEvaluator.cpp', 'src/ui/dialogs/graph/PointerGraphLayout.cpp',
@@ -55,7 +55,7 @@ src_files = [
   'src/ui/docks/TerminalDockWidget.cpp', 'src/ui/docks/CallStackDockWidget.cpp',
   'src/ui/widgets/MpiDiagnosticsWidget.cpp', 'src/ui/GdbConsoleWidget.cpp',
   'src/backend/TestGenerator.cpp', 'src/backend/GridLockAutomationRunner.cpp',
-  'src/ui/views/MemView.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/RegisterView.cpp',
+  'src/ui/views/MemView.cpp', 'src/ui/views/MemViewRender.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/MemoryProfilerChart.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
   'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp',
   'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
@@ -164,7 +164,7 @@ test('coordinator_tests', gridlock_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 lsp_test_src = [
   'tests/hpc/test_lsp.cpp',
   'src/core/hpc/lsp/LspCoordinator.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
-  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp', 'src/ui/views/SourceCodeView.cpp',
+  'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp', 'src/ui/views/SourceCodeView.cpp', 'src/ui/views/SourceCodeViewInteraction.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp',
   'src/ui/widgets/InlineFindBar.cpp'
 ]
@@ -201,7 +201,7 @@ ui_test_src = [
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/MainWindowExecution.cpp', 'src/ui/MainWindowInspection.cpp',
   'src/ui/MainWindowBuild.cpp',
-  'src/ui/views/SourceCodeView.cpp', 'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
+  'src/ui/views/SourceCodeView.cpp', 'src/ui/views/SourceCodeViewInteraction.cpp', 'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
   'src/ui/dialogs/plotter/ArrayPlotCanvas.cpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.cpp', 'src/ui/dialogs/plotter/ArrayPlotExport.cpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.cpp',
   'src/ui/dialogs/graph/PointerGraphDialog.cpp', 'src/ui/dialogs/graph/PointerGraphEvaluator.cpp', 'src/ui/dialogs/graph/PointerGraphLayout.cpp',
   'src/ui/dialogs/calculator/CalculatorEngine.cpp', 'src/ui/dialogs/calculator/ProgrammerCalculatorDialog.cpp',
@@ -221,7 +221,7 @@ ui_test_src = [
   'src/core/hpc/memory/NativeMemoryReader.cpp', 'src/core/hpc/memory/MemoryExporter.cpp',
   'src/core/hpc/memory/MemoryDiffer.cpp', 'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
   'src/core/managers/SessionManager.cpp', 'src/core/hpc/lsp/LspCoordinator.cpp',
-  'src/ui/views/MemView.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/RegisterView.cpp',
+  'src/ui/views/MemView.cpp', 'src/ui/views/MemViewRender.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/MemoryProfilerChart.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
   'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp',
   'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
@@ -364,7 +364,7 @@ dap_commands_test_src = [
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/managers/ConfigManager.cpp', 'src/core/managers/ConfigManagerToml.cpp', 'src/core/managers/ConfigManagerWorkspace.cpp',
-  'src/ui/views/SourceCodeView.cpp',
+  'src/ui/views/SourceCodeView.cpp', 'src/ui/views/SourceCodeViewInteraction.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp',
   'src/ui/widgets/InlineFindBar.cpp',
   'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
