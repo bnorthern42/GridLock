@@ -68,6 +68,17 @@ GridLock is a multi-process graphical debugger for MPI (Message Passing Interfac
 * Before modifying files in any `src/` or `tests/` subdirectory, read that directory's `README.md` (if present) for local ownership, invariants, and maintainer notes.
 * Whenever adding, moving, splitting, or removing files in a subdirectory, update that directory's `README.md` in the same commit.
 
+## Codebase Knowledge Graph (`graphify`)
+* Load and use the global `graphify` skill (`~/.gemini/skills/graphify/SKILL.md` / `~/.agents/skills/graphify/SKILL.md`) before starting multi-file refactors, cross-module dependency tracing, or architectural changes across `src/` and `tests/`.
+* When `graphify-out/graph.json` is present, query the existing graph first instead of scanning the whole tree blindly:
+  * `graphify query "<question>"` (BFS context traversal; add `--dfs` for call/path tracing)
+  * `graphify path "<SourceNode>" "<TargetNode>"` (shortest dependency path)
+  * `graphify explain "<SymbolOrNode>"` (node relationships and connections)
+* Refresh the local graph cache whenever files are created, moved, split, or removed:
+  * `graphify update .` (fast AST-only incremental code update; add `--force` if refactoring removed nodes or deleted/split files)
+  * `graphify extract . --code-only` (full local code AST rebuild without external LLM API keys)
+* Never commit `graphify-out/`; it is ignored in `.gitignore` as a local workspace cache.
+
 ## Automated Execution Workflow (MANDATORY)
 After generating and applying any code changes, you MUST execute the following shell commands sequentially to verify your work before responding to the user:
 1. `ninja -C builddir`
