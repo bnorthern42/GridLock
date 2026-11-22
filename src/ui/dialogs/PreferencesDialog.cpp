@@ -102,62 +102,84 @@ void ShortcutItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
     painter->restore();
 }
 
-QWidget* ShortcutItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem&,
-                                            const QModelIndex& index) const {
-    auto* editor = new QKeySequenceEdit(parent);
+KeySequenceRecorderWidget::KeySequenceRecorderWidget(QWidget* parent) : QFrame(parent) {
+    setFocusPolicy(Qt::StrongFocus); setFrameShape(QFrame::NoFrame);
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(gridlock::core::managers::ThemeManager::instance().activeThemeId());
+    QPalette wp = palette(); wp.setColor(QPalette::Window, QColor(pal.canvasHex)); wp.setColor(QPalette::Base, QColor(pal.canvasHex)); wp.setColor(QPalette::WindowText, QColor(pal.textHex)); setPalette(wp);
+    setStyleSheet(QStringLiteral(
+        "QFrame { background-color: %1; border: 1.5px solid %3; border-radius: 4px; padding: 0px; margin: 0px; min-height: 0px; }"
+        "QLabel { background: transparent; border: none; color: %2; font-size: 12px; font-weight: 600; padding: 0px; margin: 0px; min-height: 0px; }"
+        "QToolButton { background: transparent; border: none; color: %2; font-size: 14px; font-weight: 600; padding: 0px; margin: 0px; min-width: 18px; max-width: 20px; min-height: 18px; max-height: 20px; }"
+        "QToolButton:hover { color: %3; }").arg(pal.canvasHex, pal.textHex, pal.accentHex));
+    ensurePolished(); setAttribute(Qt::WA_StyledBackground, true); setAutoFillBackground(true);
+    auto* lay = new QHBoxLayout(this); lay->setContentsMargins(8, 0, 4, 0); lay->setSpacing(4);
+    m_label = new QLabel(this); m_label->setAlignment(Qt::AlignVCenter | Qt::AlignLeft); lay->addWidget(m_label, 1);
+    m_clearBtn = new QToolButton(this); m_clearBtn->setText(QStringLiteral("×")); m_clearBtn->setToolTip(tr("Clear shortcut"));
+    m_clearBtn->setFixedSize(20, 20); m_clearBtn->setFocusPolicy(Qt::NoFocus); m_clearBtn->setCursor(Qt::PointingHandCursor);
+    connect(m_clearBtn, &QToolButton::clicked, this, [this]() { setKeySequence(QKeySequence()); });
+    lay->addWidget(m_clearBtn); refreshDisplay();
+}
+void KeySequenceRecorderWidget::setKeySequence(const QKeySequence& seq) {
+    if (m_sequence == seq && !m_label->text().isEmpty()) return;
+    m_sequence = seq; refreshDisplay(); emit keySequenceChanged(m_sequence);
+}
+void KeySequenceRecorderWidget::refreshDisplay() {
+    if (!m_label) return;
+    const bool empty = m_sequence.isEmpty();
+    m_label->setText(empty ? tr("Press shortcut...") : m_sequence.toString(QKeySequence::NativeText));
+    if (m_clearBtn) m_clearBtn->setVisible(!empty);
+}
+bool KeySequenceRecorderWidget::event(QEvent* ev) {
+    if (ev && ev->type() == QEvent::ShortcutOverride) { ev->accept(); return true; }
+    return QFrame::event(ev);
+}
+void KeySequenceRecorderWidget::keyPressEvent(QKeyEvent* event) {
+    if (!event) return;
+    const int k = event->key();
+    if (k == Qt::Key_Shift || k == Qt::Key_Control || k == Qt::Key_Alt || k == Qt::Key_Meta || k == Qt::Key_AltGr || k == Qt::Key_unknown) { event->accept(); return; }
+    if (k == Qt::Key_Escape && event->modifiers() == Qt::NoModifier) { emit editingCancelled(); event->accept(); return; }
+    setKeySequence(QKeySequence(event->keyCombination())); emit editingFinished(); event->accept();
+}
+
+QWidget* ShortcutItemDelegate::createEditor(QWidget* parent, const QStyleOptionViewItem&, const QModelIndex& index) const {
+    auto* editor = new KeySequenceRecorderWidget(parent);
     const QString actionId = index.data(Qt::UserRole).toString();
-    editor->setObjectName(actionId.isEmpty() ? QStringLiteral("keySeqInlineEditor")
-                                             : QStringLiteral("keySeqEdit_%1").arg(actionId));
-    editor->setClearButtonEnabled(true);
-    editor->setContentsMargins(0, 0, 0, 0);
-    if (auto* lay = editor->layout()) {
-        lay->setContentsMargins(0, 0, 0, 0);
-        lay->setSpacing(0);
-    }
-    const QPointer<QKeySequenceEdit> edGuard(editor);
-    connect(editor, &QKeySequenceEdit::keySequenceChanged, this, [this, edGuard](const QKeySequence&) {
+    editor->setObjectName(actionId.isEmpty() ? QStringLiteral("keySeqInlineEditor") : QStringLiteral("keySeqEdit_%1").arg(actionId));
+    const QPointer<KeySequenceRecorderWidget> edGuard(editor);
+    connect(editor, &KeySequenceRecorderWidget::keySequenceChanged, this, [this, edGuard](const QKeySequence&) {
         if (!edGuard || !edGuard->isVisible() || edGuard->property("gl_populating").toBool()) return;
-        auto* self = const_cast<ShortcutItemDelegate*>(this);
-        emit self->commitData(edGuard.data());
+        emit const_cast<ShortcutItemDelegate*>(this)->commitData(edGuard.data());
+    });
+    connect(editor, &KeySequenceRecorderWidget::editingFinished, this, [this, edGuard]() {
+        if (edGuard) emit const_cast<ShortcutItemDelegate*>(this)->closeEditor(edGuard.data(), QAbstractItemDelegate::NoHint);
+    });
+    connect(editor, &KeySequenceRecorderWidget::editingCancelled, this, [this, edGuard]() {
+        if (edGuard) emit const_cast<ShortcutItemDelegate*>(this)->closeEditor(edGuard.data(), QAbstractItemDelegate::RevertModelCache);
     });
     return editor;
 }
-
 void ShortcutItemDelegate::setEditorData(QWidget* editor, const QModelIndex& index) const {
-    if (auto* keyEdit = qobject_cast<QKeySequenceEdit*>(editor)) {
-        keyEdit->setProperty("gl_populating", true);
-        keyEdit->setKeySequence(index.data(Qt::UserRole + 1).value<QKeySequence>());
-        keyEdit->setProperty("gl_populating", false);
+    if (auto* rec = qobject_cast<KeySequenceRecorderWidget*>(editor)) {
+        rec->setProperty("gl_populating", true);
+        rec->setKeySequence(index.data(Qt::UserRole + 1).value<QKeySequence>());
+        rec->setProperty("gl_populating", false);
     }
 }
-
-void ShortcutItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model,
-                                        const QModelIndex& index) const {
-    auto* keyEdit = qobject_cast<QKeySequenceEdit*>(editor);
-    if (!keyEdit || !model) return;
-    const QKeySequence seq = keyEdit->keySequence();
+void ShortcutItemDelegate::setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const {
+    auto* rec = qobject_cast<KeySequenceRecorderWidget*>(editor);
+    if (!rec || !model) return;
+    const QKeySequence seq = rec->keySequence();
+    if (index.data(Qt::UserRole + 1).value<QKeySequence>() == seq) return;
     model->setData(index, QVariant::fromValue(seq), Qt::UserRole + 1);
-    model->setData(index, seq.isEmpty() ? QObject::tr("Unassigned") : seq.toString(QKeySequence::NativeText),
-                   Qt::DisplayRole);
+    model->setData(index, seq.isEmpty() ? QObject::tr("Unassigned") : seq.toString(QKeySequence::NativeText), Qt::DisplayRole);
     const QString actionId = index.data(Qt::UserRole).toString();
     if (!actionId.isEmpty()) {
         gridlock::core::ShortcutManager::instance().setShortcutForAction(actionId, seq, true);
         emit const_cast<ShortcutItemDelegate*>(this)->shortcutAssigned(actionId, seq);
     }
 }
-
-void ShortcutItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
-                                                const QModelIndex&) const {
-    if (!editor) return;
-    const QRect clamped = option.rect.adjusted(3, 3, -3, -3);
-    const int h = std::max(24, clamped.height());
-    editor->setMinimumHeight(0);
-    editor->setMaximumHeight(h);
-    editor->setGeometry(clamped);
-    if (auto* le = editor->findChild<QLineEdit*>()) {
-        le->setFixedHeight(h);
-        le->setGeometry(QRect(0, 0, clamped.width(), h));
-    }
+void ShortcutItemDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex&) const {
+    if (editor) { editor->setAutoFillBackground(true); editor->setGeometry(option.rect.adjusted(3, 3, -3, -3)); }
 }
 
 KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(parent) {
@@ -252,7 +274,7 @@ KeybindingsSettingsPage::KeybindingsSettingsPage(QWidget* parent) : QWidget(pare
     connect(m_filterEdit, &QLineEdit::textChanged, this, &KeybindingsSettingsPage::filterRows);
     connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int col) {
         if (col != 2) return;
-        for (auto* ed : m_table->viewport()->findChildren<QKeySequenceEdit*>()) {
+        for (auto* ed : m_table->viewport()->findChildren<KeySequenceRecorderWidget*>()) {
             if (ed && ed->isVisible()) return;
         }
         if (QTableWidgetItem* it = m_table->item(row, 2); it && (it->flags() & Qt::ItemIsEditable)) {
@@ -399,7 +421,6 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
         if (btn->text().contains(QStringLiteral("Browse"), Qt::CaseInsensitive)) btn->setMinimumWidth(96);
     }
     for (QLineEdit* edit : findChildren<QLineEdit*>()) {
-        if (qobject_cast<QKeySequenceEdit*>(edit->parentWidget())) continue;
         edit->setFixedHeight(26);
     }
     for (QComboBox* combo : findChildren<QComboBox*>()) {
@@ -448,9 +469,6 @@ void PreferencesDialog::applyDialogThemeChrome() {
         "margin-top: 8px; padding-top: 10px; color: %5; font-size: 13px; font-weight: 600; }"
         "QLineEdit, QComboBox, QSpinBox { background-color: %1; color: %5; "
         "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 22px; max-height: 26px; font-size: 13px; }"
-        "QKeySequenceEdit { background: transparent; border: none; padding: 0px; margin: 0px; min-height: 0px; }"
-        "QKeySequenceEdit QLineEdit { background-color: %1; color: %5; "
-        "border: 1px solid %4; border-radius: 3px; padding: 0px 6px; margin: 0px; min-height: 28px; max-height: 31px; font-size: 12px; }"
         "QTableWidget { background-color: %1; alternate-background-color: %2; color: %5; selection-background-color: %4; selection-color: %8; gridline-color: %3; border: 1px solid %3; border-radius: 4px; }"
         "QTableWidget::item { color: %5; padding: 2px 8px; }"
         "QTableWidget::item:selected { background-color: %4; color: %8; }"
@@ -619,63 +637,37 @@ void PreferencesDialog::applyDialogThemeChrome() {
  */
 void PreferencesDialog::refreshSidebarIcons() {
     if (!m_sidebar) return;
-    auto& tm = gridlock::core::managers::ThemeManager::instance();
-    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
-    const QColor accentCol(pal.accentHex);
-    const QColor selFgCol = (accentCol.lightness() < 165) ? QColor(QStringLiteral("#ffffff"))
-                                                          : QColor(QStringLiteral("#16181d"));
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(gridlock::core::managers::ThemeManager::instance().activeThemeId());
+    const QColor selFgCol = (QColor(pal.accentHex).lightness() < 165) ? QColor(QStringLiteral("#ffffff")) : QColor(QStringLiteral("#16181d"));
     const QColor textCol(pal.textHex);
     const int activeRow = m_sidebar->currentRow();
-
     // Repaint each 16x16 transparent glyph pixmap with anti-aliased Symbols Nerd Font ink.
     for (int i = 0; i < m_sidebar->count(); ++i) {
         QListWidgetItem* item = m_sidebar->item(i);
         if (!item) continue;
-        const QString glyph = item->data(Qt::UserRole).toString();
-        const QColor iconColor = (i == activeRow) ? selFgCol : textCol;
-        QPixmap pixmap(16, 16);
-        pixmap.fill(Qt::transparent);
-        QPainter painter(&pixmap);
-        painter.setRenderHint(QPainter::Antialiasing);
+        QPixmap pixmap(16, 16); pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap); painter.setRenderHint(QPainter::Antialiasing);
         painter.setFont(QFont(QStringLiteral("Symbols Nerd Font"), 11));
-        painter.setPen(iconColor);
-        painter.drawText(0, 0, 16, 16, Qt::AlignCenter, glyph);
+        painter.setPen((i == activeRow) ? selFgCol : textCol);
+        painter.drawText(0, 0, 16, 16, Qt::AlignCenter, item->data(Qt::UserRole).toString());
         item->setIcon(QIcon(pixmap));
     }
 }
 
 /**
  * @brief Builds the vertical category navigation list with icons and opaque surface attributes.
- *
- * Configures a 195px sidebar (`minimumWidth >= 185px`) with 13px typography, 36px row height,
- * suppressed horizontal scrollbars, and dynamic Nerd Font glyph rendering.
  */
 void PreferencesDialog::setupSidebar() {
     m_sidebar = new QListWidget(this);
     m_sidebar->setObjectName(QStringLiteral("preferencesCategoryList"));
-    m_sidebar->setMinimumWidth(190);
-    m_sidebar->setFixedWidth(195);
-    m_sidebar->setIconSize(QSize(16, 16));
-    m_sidebar->setSpacing(0);
-    m_sidebar->setFrameShape(QFrame::NoFrame);
-    m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_sidebar->setProperty("role", "sidebar");
-    m_sidebar->setAttribute(Qt::WA_StyledBackground, true);
-    m_sidebar->setAutoFillBackground(true);
-    if (m_sidebar->viewport()) {
-        m_sidebar->viewport()->setAutoFillBackground(true);
-    }
+    m_sidebar->setMinimumWidth(190); m_sidebar->setFixedWidth(195); m_sidebar->setIconSize(QSize(16, 16));
+    m_sidebar->setSpacing(0); m_sidebar->setFrameShape(QFrame::NoFrame);
+    m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_sidebar->setProperty("role", "sidebar"); m_sidebar->setAttribute(Qt::WA_StyledBackground, true); m_sidebar->setAutoFillBackground(true);
+    if (m_sidebar->viewport()) m_sidebar->viewport()->setAutoFillBackground(true);
+    QFont sideFont = m_sidebar->font(); sideFont.setPixelSize(13); m_sidebar->setFont(sideFont);
 
-    // Apply clean 13px UI font sizing to category navigation labels.
-    QFont sideFont = m_sidebar->font();
-    sideFont.setPixelSize(13);
-    m_sidebar->setFont(sideFont);
-
-    struct Entry {
-        QString label;
-        QString iconName;
-    };
+    struct Entry { QString label; QString iconName; };
     const QList<Entry> entries = {
         {tr("Appearance"), "\uf1fc"},      {tr("Editing"), "\uf044"},
         {tr("Behavior"), "\uf085"},        {tr("Keybindings"), "\uf11c"},
@@ -683,23 +675,14 @@ void PreferencesDialog::setupSidebar() {
         {tr("HPC Integration"), "\uf1c0"}, {tr("Terminal"), "\uf120"},
         {tr("Docsets"), "\uf02d"},
     };
-
-    // Populate category items with spacious 36px row hints and stored Nerd Font glyph metadata.
     for (const auto& e : entries) {
         auto* item = new QListWidgetItem(m_sidebar);
-        item->setText(e.label);
-        item->setData(Qt::UserRole, e.iconName);
-        item->setSizeHint(QSize(190, 36));
+        item->setText(e.label); item->setData(Qt::UserRole, e.iconName); item->setSizeHint(QSize(190, 36));
         m_sidebar->addItem(item);
     }
-
-    // Default to the first page (Appearance) and keep icons & stacked page synchronized on selection.
-    m_sidebar->setCurrentRow(0);
-    refreshSidebarIcons();
+    m_sidebar->setCurrentRow(0); refreshSidebarIcons();
     connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (m_stack) {
-            m_stack->setCurrentIndex(row);
-        }
+        if (m_stack) m_stack->setCurrentIndex(row);
         refreshSidebarIcons();
     });
 }

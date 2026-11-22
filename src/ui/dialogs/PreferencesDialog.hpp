@@ -13,7 +13,9 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QKeySequenceEdit>
+#include <QFrame>
+#include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -24,6 +26,7 @@
 #include <QStyledItemDelegate>
 #include <QTableWidget>
 #include <QTextEdit>
+#include <QToolButton>
 #include <QVector>
 #include <QWidget>
 
@@ -286,8 +289,40 @@ private:
 };
 
 /**
+ * @class KeySequenceRecorderWidget
+ * @brief Opaque, vertically centered inline shortcut recorder replacing QKeySequenceEdit in KeybindingsSettingsPage.
+ */
+class KeySequenceRecorderWidget : public QFrame {
+    Q_OBJECT
+
+public:
+    explicit KeySequenceRecorderWidget(QWidget* parent = nullptr);
+
+    QKeySequence keySequence() const { return m_sequence; }
+    void setKeySequence(const QKeySequence& seq);
+    QLabel* displayLabel() const { return m_label; }
+    QToolButton* clearButton() const { return m_clearBtn; }
+
+signals:
+    void keySequenceChanged(const QKeySequence& seq);
+    void editingFinished();
+    void editingCancelled();
+
+protected:
+    bool event(QEvent* ev) override;
+    void keyPressEvent(QKeyEvent* event) override;
+
+private:
+    void refreshDisplay();
+
+    QKeySequence m_sequence;
+    QLabel* m_label = nullptr;
+    QToolButton* m_clearBtn = nullptr;
+};
+
+/**
  * @class ShortcutItemDelegate
- * @brief Paints rounded keycap shortcut badges and opens QKeySequenceEdit strictly on demand inside column 2.
+ * @brief Paints rounded keycap shortcut badges and opens KeySequenceRecorderWidget strictly on demand inside column 2.
  */
 class ShortcutItemDelegate : public QStyledItemDelegate {
     Q_OBJECT

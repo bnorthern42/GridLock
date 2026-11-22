@@ -426,29 +426,34 @@ static void testAutocompleteContextGraphAndKeybindPreferences() {
     emit kbTbl->cellClicked(plotRow, 0); emit kbTbl->cellClicked(plotRow, 1); QApplication::processEvents();
     kbTbl->scrollToItem(kbTbl->item(plotRow, 2)); kbTbl->setCurrentCell(plotRow, 2);
     emit kbTbl->cellClicked(plotRow, 2); emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
-    auto* seqEdit = kbTbl->viewport()->findChild<QKeySequenceEdit*>();
+    auto* seqRec = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>();
     const QRect cellRect = kbTbl->visualRect(kbTbl->model()->index(plotRow, 2));
-    QVERIFY2(seqEdit && cellRect.contains(seqEdit->geometry()), "QKeySequenceEdit must stay strictly clamped inside row cell bounds");
-    const QKeySequence customSeq(QStringLiteral("Ctrl+Alt+Y")); seqEdit->setKeySequence(customSeq); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == customSeq && gridlock::core::ConfigManager::instance().customShortcuts().value(QStringLiteral("actionArrayPlotter")) == customSeq);
-    // Assign Continue's F5 shortcut to plotRow and verify conflict banner appears and Continue is cleared.
-    seqEdit->setKeySequence(QKeySequence(Qt::Key_F5)); QApplication::processEvents();
+    QVERIFY2(seqRec && seqRec->autoFillBackground() && seqRec->height() >= 30 && cellRect.contains(seqRec->geometry()),
+             qPrintable(QStringLiteral("seqRec=%1 autoFill=%2 geom=(%3,%4 %5x%6) cell=(%7,%8 %9x%10)").arg(seqRec != nullptr).arg(seqRec && seqRec->autoFillBackground()).arg(seqRec ? seqRec->x() : -1).arg(seqRec ? seqRec->y() : -1).arg(seqRec ? seqRec->width() : -1).arg(seqRec ? seqRec->height() : -1).arg(cellRect.x()).arg(cellRect.y()).arg(cellRect.width()).arg(cellRect.height())));
+    const QKeySequence customSeq(QStringLiteral("Ctrl+Alt+Y"));
+    QTest::keyClick(seqRec, Qt::Key_Y, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
+    QVERIFY(plotAct->shortcut() == customSeq && gridlock::core::ConfigManager::instance().customShortcuts().value(QStringLiteral("actionArrayPlotter")) == customSeq);
+    // Re-open editor on plotRow and assign Continue's F5 shortcut via keyClick to verify conflict banner and clearing.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
+    auto* seqRec2 = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>();
+    QVERIFY(seqRec2 && seqRec2->isVisible()); seqRec2->setKeySequence(QKeySequence(Qt::Key_F5)); QApplication::processEvents();
     auto* conflictLbl = prefs.findChild<QLabel*>(QStringLiteral("keybindingsConflictLabel"));
     QVERIFY2(conflictLbl && conflictLbl->isVisible() && conflictLbl->text().contains(QStringLiteral("Continue")), "Duplicate shortcut must display conflict banner and reassign from Continue");
     QVERIFY2(kbTbl->item(contRow, 2)->text() == QStringLiteral("Unassigned"), "Conflicting action must be cleared on reassignment");
     qInstallMessageHandler(prevHandler);
     QVERIFY2(s_kbWarnings.isEmpty(), qPrintable(s_kbWarnings.join(QStringLiteral("; "))));
-    kbTbl->setCurrentCell(plotRow, 0); clearBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut().isEmpty()); resetBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G) && gridlock::core::ConfigManager::instance().customShortcuts().isEmpty() && kbTbl->viewport()->findChildren<QKeySequenceEdit*>().isEmpty());
-    // Verify Light-theme selected row foreground contrast and optional visual screenshot capture.
+    kbTbl->setCurrentCell(plotRow, 0); clearBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut().isEmpty()); resetBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G) && gridlock::core::ConfigManager::instance().customShortcuts().isEmpty());
+    // Verify Light-theme selected row contrast and active KeySequenceRecorderWidget on row 4 (Shift+F5).
     auto& tm = gridlock::core::managers::ThemeManager::instance(); const QString savedTheme = tm.activeThemeId();
     for (const QString& tid : tm.availableThemes()) if (!gridlock::core::managers::ThemeManager::paletteForTheme(tid).isDark) { tm.applyTheme(tid, false); break; }
-    QApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete); QApplication::processEvents();
     const QColor selBg = kbTbl->palette().color(QPalette::Highlight), selFg = kbTbl->palette().color(QPalette::HighlightedText);
     QVERIFY2(std::abs(selBg.lightness() - selFg.lightness()) >= 110, "Light-theme selected row text must have crisp contrast against highlight background");
-    kbTbl->selectRow(0); kbTbl->setCurrentCell(1, 2); emit kbTbl->cellClicked(1, 2); QApplication::processEvents();
-    auto* activeSeq = kbTbl->viewport()->findChild<QKeySequenceEdit*>();
-    auto* activeLe = activeSeq ? activeSeq->findChild<QLineEdit*>() : nullptr;
-    QVERIFY2(activeSeq && activeSeq->isVisible() && kbTbl->visualRect(kbTbl->model()->index(1, 2)).contains(activeSeq->geometry()) && activeLe && activeLe->height() >= 24, "Active shortcut editor and internal QLineEdit must fill clamped cell bounds");
-    if (const QString png = qEnvironmentVariable("GRIDLOCK_VERIFY_KEYBINDS_SELECT_PNG"); !png.isEmpty()) prefs.grab().toImage().save(png);
+    kbTbl->setCurrentCell(4, 2); emit kbTbl->cellClicked(4, 2); QApplication::processEvents();
+    auto* activeRec = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>();
+    QVERIFY2(activeRec && activeRec->isVisible() && activeRec->autoFillBackground() && activeRec->height() >= 30 && kbTbl->visualRect(kbTbl->model()->index(4, 2)).contains(activeRec->geometry()), "Active KeySequenceRecorderWidget on row 4 col 2 must be opaque and strictly within cell bounds");
+    if (const QString png = qEnvironmentVariable("GRIDLOCK_VERIFY_KEYBINDS_RECORDER_PNG"); !png.isEmpty()) prefs.grab().toImage().save(png);
     tm.applyTheme(savedTheme, false);
     prefs.close(); apDlg->close(); pgDlg->close();
 }
