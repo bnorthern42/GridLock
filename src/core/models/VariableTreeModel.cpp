@@ -150,7 +150,7 @@ QVariant VariableTreeModel::data(const QModelIndex& index, int role) const {
     }
     VariableNode* node = getNode(index);
 
-    if (role == Qt::DisplayRole) {
+    if (role == Qt::DisplayRole || role == Qt::EditRole) {
         // Map columns 0, 1, 2 to variable name, value, and C/C++ type string.
         if (index.column() == 0) return node->name;
         if (index.column() == 1) return node->value;
@@ -189,6 +189,35 @@ QVariant VariableTreeModel::data(const QModelIndex& index, int role) const {
         return tip;
     }
     return QVariant();
+}
+
+/** @brief Enables `Qt::ItemIsEditable` on scalar/enum/pointer leaf value cells (column 1). */
+Qt::ItemFlags VariableTreeModel::flags(const QModelIndex& index) const {
+    if (!index.isValid()) return Qt::NoItemFlags;
+    Qt::ItemFlags f = QAbstractItemModel::flags(index);
+    const VariableNode* node = getNode(index);
+    if (index.column() == 1 && node && node != m_rootNode.get() && !isCompositeVariable(node) && node->children.empty()) {
+        f |= Qt::ItemIsEditable;
+    }
+    return f;
+}
+
+/** @brief Commits an inline leaf variable edit and dispatches `variableEditRequested` / `writeVariableValue`. */
+bool VariableTreeModel::setData(const QModelIndex& index, const QVariant& value, int role) {
+    if (!index.isValid() || index.column() != 1 || role != Qt::EditRole) return false;
+    VariableNode* node = getNode(index);
+    if (!node || node == m_rootNode.get() || isCompositeVariable(node) || !node->children.empty()) return false;
+    const QString newVal = value.toString().trimmed();
+    if (newVal.isEmpty() || newVal == node->value.trimmed()) return false;
+    const QString fullExpr = buildExpressionPath(node).trimmed();
+    if (fullExpr.isEmpty()) return false;
+    m_previousValues[node->name] = node->value;
+    node->value = newVal;
+    const int rank = qMax(0, m_currentRankId);
+    emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole, Qt::BackgroundRole, Qt::ForegroundRole, Qt::ToolTipRole});
+    emit variableEditRequested(rank, fullExpr, newVal);
+    if (m_coordinator) m_coordinator->writeVariableValue(rank, fullExpr, newVal);
+    return true;
 }
 
 /**

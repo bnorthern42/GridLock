@@ -67,7 +67,19 @@ public:
     /** @brief Updates local variables in the tree strictly when @p rankId matches `focusedRank()`. */
     bool applyLocalsForRank(int rankId, const QJsonArray& locals);
 
+    /** @brief Returns the underlying `VariableTreeModel` instance. */
+    VariableTreeModel* variableModel() const { return m_model; }
+
+    /** @brief Opens the non-modal monospace Full-Value Inspection popover dialog for @p title and @p fullText. */
+    QDialog* inspectFullValue(const QString& title, const QString& fullText);
+
+    /** @brief Returns the most recent full-value text shown in the `Inspect Full Value...` popover. */
+    QString lastInspectedFullValue() const { return m_lastInspectedFullValue; }
+
 signals:
+    /** @brief Emitted when a leaf variable value is edited in-place. */
+    void variableEditRequested(int rankId, const QString& fullExpression, const QString& newValue);
+
     /** @brief Emitted when the user interactively selects a different rank from the Scope dropdown. */
     void rankSelectionChanged(int rankId);
 
@@ -138,6 +150,7 @@ private:
 
     int m_currentRankId{0};                           ///< Active focused rank ID.
     QMap<int, QString> m_lastRankStates;              ///< Cached prior operational states.
+    QString m_lastInspectedFullValue;                 ///< Most recent full-value inspection payload.
 };
 
 }  // namespace gridlock

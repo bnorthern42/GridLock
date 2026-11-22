@@ -16,12 +16,17 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QDialog>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QRegularExpression>
 #include <QShortcut>
+#include <QTextOption>
 #include <QVBoxLayout>
 
 namespace gridlock {
@@ -73,6 +78,7 @@ VariablesDockWidget::VariablesDockWidget(QWidget* parent)
     : QWidget(parent), m_coordinator(nullptr), m_currentRankId(0) {
     // Instantiate initial unattached tree model (kept parented to widget for findChild lookups).
     m_model = new VariableTreeModel(nullptr, this);
+    connect(m_model, &VariableTreeModel::variableEditRequested, this, &VariablesDockWidget::variableEditRequested);
     setupUi();
 }
 
@@ -100,6 +106,7 @@ void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
     m_coordinator = coordinator;
     if (m_model) { m_model->setParent(nullptr); m_model->deleteLater(); }
     m_model = new VariableTreeModel(coordinator, this);
+    connect(m_model, &VariableTreeModel::variableEditRequested, this, &VariablesDockWidget::variableEditRequested);
     m_proxyModel->setSourceModel(m_model);
 
     if (m_coordinator) {
@@ -172,7 +179,8 @@ void VariablesDockWidget::setupUi() {
     m_variablesTree->setRootIsDecorated(true);
     m_variablesTree->setIndentation(16);
     m_variablesTree->setItemsExpandable(true);
-    m_variablesTree->setExpandsOnDoubleClick(true);
+    m_variablesTree->setExpandsOnDoubleClick(false);
+    m_variablesTree->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     m_variablesTree->setSortingEnabled(true);
     m_variablesTree->sortByColumn(0, Qt::AscendingOrder);
     m_variablesTree->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -198,18 +206,15 @@ void VariablesDockWidget::setupUi() {
     // Filter rows live across all columns and expand already-fetched subtrees containing matches.
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         if (!m_proxyModel || !m_variablesTree) return;
-        // Escape regex metacharacters so substrings like `Iconfig.tol` or `vec[0]` match literally.
         const QString escaped = QRegularExpression::escape(text.trimmed());
         m_proxyModel->setFilterRegularExpression(
             QRegularExpression(escaped, QRegularExpression::CaseInsensitiveOption));
         if (!text.trimmed().isEmpty()) {
-            // Only expand nodes whose children are already loaded to avoid triggering lazy MI queries.
             std::function<void(const QModelIndex&)> expandLoadedMatches = [&](const QModelIndex& parentIdx) {
                 const int rows = m_proxyModel->rowCount(parentIdx);
                 for (int r = 0; r < rows; ++r) {
                     const QModelIndex childProxy = m_proxyModel->index(r, 0, parentIdx);
                     const QModelIndex childSrc = m_proxyModel->mapToSource(childProxy);
-                    // Skip canFetchMore nodes; expand only populated subtrees containing accepted matches.
                     if (m_model && !m_model->canFetchMore(childSrc) && m_proxyModel->rowCount(childProxy) > 0) {
                         m_variablesTree->expand(childProxy);
                         expandLoadedMatches(childProxy);
@@ -242,10 +247,14 @@ void VariablesDockWidget::setupUi() {
         }
     });
 
-    // Double-clicking any column of an expandable row expands it cleanly.
+    // Double-clicking an expandable composite toggles expansion; double-clicking a leaf opens inline value editing.
     connect(m_variablesTree, &QTreeView::doubleClicked, this, [this](const QModelIndex& proxyIdx) {
-        if (proxyIdx.isValid() && !m_variablesTree->isExpanded(proxyIdx)) {
-            m_variablesTree->expand(proxyIdx);
+        if (!proxyIdx.isValid() || !m_proxyModel) return;
+        const QModelIndex row0 = proxyIdx.siblingAtColumn(0);
+        if (m_proxyModel->hasChildren(row0)) {
+            m_variablesTree->setExpanded(row0, !m_variablesTree->isExpanded(row0));
+        } else if (proxyIdx.column() != 1) {
+            m_variablesTree->edit(proxyIdx.siblingAtColumn(1));
         }
     });
 
@@ -253,7 +262,7 @@ void VariablesDockWidget::setupUi() {
     copyShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(copyShortcut, &QShortcut::activated, this, [this]() { copySelectedVariableValue(); });
 
-    // Right-clicking a variable row opens a context menu to copy, plot, graph, or promote to Watches/Watchpoints.
+    // Right-clicking a variable row opens a context menu to set value, inspect full value, copy, plot, graph, or watch.
     connect(m_variablesTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const QModelIndex proxyIdx = m_variablesTree->indexAt(pos);
         if (!proxyIdx.isValid() || !m_model || !m_proxyModel) return;
@@ -264,8 +273,13 @@ void VariablesDockWidget::setupUi() {
         const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
         const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
         const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
+        const bool isLeafEditable = (m_model->flags(srcIdx.siblingAtColumn(1)) & Qt::ItemIsEditable);
 
         QMenu menu(this);
+        QAction* setValAct = menu.addAction(QStringLiteral("Set Value..."));
+        setValAct->setEnabled(isLeafEditable);
+        QAction* inspectFullAct = menu.addAction(QStringLiteral("Inspect Full Value..."));
+        menu.addSeparator();
         QAction* copyValAct = menu.addAction(QStringLiteral("Copy Value (Ctrl+C)"));
         QAction* copyExprAct = menu.addAction(QStringLiteral("Copy Expression"));
         menu.addSeparator();
@@ -279,7 +293,12 @@ void VariablesDockWidget::setupUi() {
         QAction* wpRwAct = menu.addAction(QStringLiteral("Watch Memory Read/Write (Hardware Watchpoint)"));
 
         QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
-        if (chosen == copyValAct) {
+        if (chosen == setValAct && isLeafEditable) {
+            m_variablesTree->edit(proxyIdx.siblingAtColumn(1));
+        } else if (chosen == inspectFullAct) {
+            inspectFullValue(QStringLiteral("%1 (%2)").arg(exprPath, varTyp.isEmpty() ? QStringLiteral("value") : varTyp),
+                             varVal.isEmpty() ? exprPath : varVal);
+        } else if (chosen == copyValAct) {
             QApplication::clipboard()->setText(varVal.isEmpty() ? exprPath : varVal);
         } else if (chosen == copyExprAct) {
             QApplication::clipboard()->setText(exprPath);
@@ -300,6 +319,42 @@ void VariablesDockWidget::setupUi() {
             emit dataWatchpointRequested(exprPath, static_cast<int>(mode));
         }
     });
+}
+
+QDialog* VariablesDockWidget::inspectFullValue(const QString& title, const QString& fullText) {
+    m_lastInspectedFullValue = fullText;
+    auto* dlg = findChild<QDialog*>(QStringLiteral("fullValueInspectorDialog"));
+    if (!dlg) {
+        dlg = new QDialog(this);
+        dlg->setObjectName(QStringLiteral("fullValueInspectorDialog"));
+        dlg->resize(520, 260);
+        auto* v = new QVBoxLayout(dlg);
+        v->setContentsMargins(10, 10, 10, 10);
+        v->setSpacing(8);
+        auto* te = new QPlainTextEdit(dlg);
+        te->setObjectName(QStringLiteral("fullValueInspectorTextEdit"));
+        te->setReadOnly(true);
+        te->setWordWrapMode(QTextOption::WrapAnywhere);
+        QFont mf(QStringLiteral("JetBrains Mono"), 10);
+        mf.setStyleHint(QFont::Monospace);
+        te->setFont(mf);
+        v->addWidget(te, 1);
+        auto* hb = new QHBoxLayout();
+        hb->addStretch(1);
+        auto* copyBtn = new QPushButton(QStringLiteral("Copy to Clipboard"), dlg);
+        copyBtn->setObjectName(QStringLiteral("fullValueInspectorCopyBtn"));
+        auto* closeBtn = new QPushButton(QStringLiteral("Close"), dlg);
+        closeBtn->setObjectName(QStringLiteral("fullValueInspectorCloseBtn"));
+        connect(copyBtn, &QPushButton::clicked, dlg, [te]() { QApplication::clipboard()->setText(te->toPlainText()); });
+        connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
+        hb->addWidget(copyBtn);
+        hb->addWidget(closeBtn);
+        v->addLayout(hb);
+    }
+    dlg->setWindowTitle(QStringLiteral("Inspect Full Value — %1").arg(title));
+    if (auto* te = dlg->findChild<QPlainTextEdit*>(QStringLiteral("fullValueInspectorTextEdit"))) te->setPlainText(fullText);
+    dlg->show();
+    return dlg;
 }
 
 bool VariablesDockWidget::copySelectedVariableValue() const {

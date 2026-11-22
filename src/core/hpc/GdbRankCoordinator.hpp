@@ -255,6 +255,12 @@ class GdbRankCoordinator : public IBackendCoordinator {
    */
   void requestVariableChildren(int rank, const QString& parentExpression) override;
 
+  /** @brief Issues `-gdb-set var <expression>=<newValue>` and refreshes locals/watches on @p rank. */
+  void writeVariableValue(int rank, const QString& expression, const QString& newValue) override;
+
+  /** @brief Issues `-gdb-set $<regName>=<newValue>` and refreshes CPU registers on @p rank. */
+  void writeRegisterValue(int rank, const QString& regName, const QString& newValue) override;
+
   /**
    * @brief Scrubs @p command via `MiSanitizer` and dispatches CLI/MI input to @p rank (`< 0` = all ranks).
    */

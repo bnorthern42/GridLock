@@ -913,3 +913,20 @@ void DapCoordinator::requestSignalDispositions() {}
 void DapCoordinator::insertCatchpoint(const CatchpointSpec& spec) { Q_UNUSED(spec); }
 void DapCoordinator::removeCatchpoint(int gdbId) { Q_UNUSED(gdbId); }
 
+void DapCoordinator::writeVariableValue(int rank, const QString& expression, const QString& newValue) {
+  const QString expr = expression.trimmed(), val = newValue.trimmed();
+  if (expr.isEmpty() || val.isEmpty() || !isAdapterRunning()) return;
+  const int r = qMax(0, rank);
+  sendRequest(QStringLiteral("setVariable"), QJsonObject{{QStringLiteral("variablesReference"), 1}, {QStringLiteral("name"), expr}, {QStringLiteral("value"), val}});
+  sendDebuggerCommand(r, QStringLiteral("expr %1 = %2").arg(expr, val));
+  const int activeFrame = getActiveFrameId(r);
+  if (activeFrame >= 0) requestScopes(activeFrame, r);
+}
+
+void DapCoordinator::writeRegisterValue(int rank, const QString& regName, const QString& newValue) {
+  QString reg = regName.trimmed().toLower(); if (reg.startsWith(QLatin1Char('$'))) reg = reg.mid(1).trimmed();
+  const QString val = newValue.trimmed();
+  if (reg.isEmpty() || val.isEmpty() || !isAdapterRunning()) return;
+  sendDebuggerCommand(qMax(0, rank), QStringLiteral("register write %1 %2").arg(reg, val));
+}
+

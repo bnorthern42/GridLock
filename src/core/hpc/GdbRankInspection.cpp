@@ -842,73 +842,51 @@ void GdbRankCoordinator::setReverseRecordingEnabled(int rank, bool enabled) {
 }
 
 /** @brief Returns true when GDB Process Record is enabled for @p rank. */
-bool GdbRankCoordinator::isReverseRecordingEnabled(int rank) const {
-  return IBackendCoordinator::isReverseRecordingEnabled(rank);
-}
+bool GdbRankCoordinator::isReverseRecordingEnabled(int rank) const { return IBackendCoordinator::isReverseRecordingEnabled(rank); }
 
-/** @brief Runs backward in recorded history (`-exec-continue --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseContinue(int rank) {
-  const int r = qMax(0, rank);
-  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  const int r = qMax(0, rank); if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-continue --reverse\n"));
 }
-/** @brief Steps backward over the previous source statement (`-exec-next --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseStepOver(int rank) {
-  const int r = qMax(0, rank);
-  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  const int r = qMax(0, rank); if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-next --reverse\n"));
 }
-/** @brief Steps backward into the previous function call (`-exec-step --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseStepInto(int rank) {
-  const int r = qMax(0, rank);
-  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  const int r = qMax(0, rank); if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-step --reverse\n"));
 }
-/** @brief Steps backward by a single machine instruction (`-exec-step-instruction --reverse`) on @p rank. */
 void GdbRankCoordinator::reverseStepInstruction(int rank) {
-  const int r = qMax(0, rank);
-  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  const int r = qMax(0, rank); if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
   if (!isReverseRecordingEnabled(r)) setReverseRecordingEnabled(r, true);
   writeCmd(r, QStringLiteral("-exec-step-instruction --reverse\n"));
 }
 
 void GdbRankCoordinator::setSignalDisposition(const QString& signalName, bool stop, bool print, bool pass) {
-  const QString sig = signalName.trimmed().toUpper();
-  if (sig.isEmpty()) return;
+  const QString sig = signalName.trimmed().toUpper(); if (sig.isEmpty()) return;
   SignalDisposition disp = m_signalDispositions.value(sig, {sig, stop, print, pass, QString()});
-  disp.signal = sig; disp.stop = stop; disp.print = print; disp.pass = pass;
-  m_signalDispositions.insert(sig, disp);
-  const QString cmd = QStringLiteral("-interpreter-exec console \"handle %1 %2 %3 %4\"\n")
-                          .arg(sig, stop ? QStringLiteral("stop") : QStringLiteral("nostop"),
-                               print ? QStringLiteral("print") : QStringLiteral("noprint"),
-                               pass ? QStringLiteral("pass") : QStringLiteral("nopass"));
+  disp.signal = sig; disp.stop = stop; disp.print = print; disp.pass = pass; m_signalDispositions.insert(sig, disp);
+  const QString cmd = QStringLiteral("-interpreter-exec console \"handle %1 %2 %3 %4\"\n").arg(sig, stop ? QStringLiteral("stop") : QStringLiteral("nostop"), print ? QStringLiteral("print") : QStringLiteral("noprint"), pass ? QStringLiteral("pass") : QStringLiteral("nopass"));
   for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) if (m_processes[r]) queueOrWriteCmd(r, cmd);
 }
 
 void GdbRankCoordinator::requestSignalDispositions() {
   for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) {
-    if (m_processes[r]) {
-      m_pendingInfoHandle[r] = true; m_infoHandleBuffer[r].clear();
-      queueOrWriteCmd(r, QStringLiteral("210-interpreter-exec console \"info handle\"\n"));
-      return;
-    }
+    if (m_processes[r]) { m_pendingInfoHandle[r] = true; m_infoHandleBuffer[r].clear(); queueOrWriteCmd(r, QStringLiteral("210-interpreter-exec console \"info handle\"\n")); return; }
   }
   if (!m_signalDispositions.isEmpty()) {
-    QVector<SignalDisposition> rows;
-    for (auto it = m_signalDispositions.constBegin(); it != m_signalDispositions.constEnd(); ++it) rows.append(it.value());
+    QVector<SignalDisposition> rows; for (auto it = m_signalDispositions.constBegin(); it != m_signalDispositions.constEnd(); ++it) rows.append(it.value());
     emit signalDispositionsReady(0, rows);
   }
 }
 
 void GdbRankCoordinator::insertCatchpoint(const CatchpointSpec& spec) {
   CatchpointSpec entry = spec; entry.filter = entry.filter.trimmed();
-  if (entry.gdbId <= 0) entry.gdbId = m_nextCatchpointId++;
-  else if (entry.gdbId >= m_nextCatchpointId) m_nextCatchpointId = entry.gdbId + 1;
-  entry.enabled = true; m_activeCatchpoints.append(entry);
-  QString cmd;
+  if (entry.gdbId <= 0) entry.gdbId = m_nextCatchpointId++; else if (entry.gdbId >= m_nextCatchpointId) m_nextCatchpointId = entry.gdbId + 1;
+  entry.enabled = true; m_activeCatchpoints.append(entry); QString cmd;
   if (entry.kind == CatchpointSpec::Kind::Syscall) {
     QString f = entry.filter; f.replace(QLatin1Char(','), QLatin1Char(' ')); f = f.simplified();
     cmd = f.isEmpty() ? QStringLiteral("-interpreter-exec console \"catch syscall\"\n") : QStringLiteral("-interpreter-exec console \"catch syscall %1\"\n").arg(f);
@@ -930,15 +908,32 @@ void GdbRankCoordinator::removeCatchpoint(int gdbId) {
 
 void GdbRankCoordinator::requestConsoleCompletions(const QString& prefix) {
   if (prefix.contains(QChar('\0')) || prefix.contains(QLatin1Char('\n')) || prefix.contains(QLatin1Char('\r'))) return;
-  QString escaped = prefix;
-  escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\")).replace(QStringLiteral("\""), QStringLiteral("\\\""));
+  QString escaped = prefix; escaped.replace(QStringLiteral("\\"), QStringLiteral("\\\\")).replace(QStringLiteral("\""), QStringLiteral("\\\""));
   for (int r = 0; r < static_cast<int>(m_processes.size()); ++r) {
-    if (m_processes[r]) {
-      m_pendingCompletePrefix[r] = prefix; m_completeBuffer[r].clear();
-      queueOrWriteCmd(r, QStringLiteral("211-interpreter-exec console \"complete %1\"\n").arg(escaped));
-      return;
-    }
+    if (m_processes[r]) { m_pendingCompletePrefix[r] = prefix; m_completeBuffer[r].clear(); queueOrWriteCmd(r, QStringLiteral("211-interpreter-exec console \"complete %1\"\n").arg(escaped)); return; }
   }
+}
+
+void GdbRankCoordinator::writeVariableValue(int rank, const QString& expression, const QString& newValue) {
+  const QString expr = expression.trimmed(), val = newValue.trimmed();
+  if (expr.isEmpty() || val.isEmpty() || !validateSafeDebuggerInput(expr) || !validateSafeDebuggerInput(val)) return;
+  const int r = qMax(0, rank);
+  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  queueOrWriteCmd(r, QStringLiteral("-gdb-set var %1=%2\n").arg(expr, val));
+  if (m_processes[r]->state.currentState == QLatin1String("stopped")) {
+    writeCmd(r, QStringLiteral("201-stack-list-variables --simple-values\n"));
+    for (const QString& w : m_watchVariables) evaluateExpression(r, w);
+  }
+}
+
+void GdbRankCoordinator::writeRegisterValue(int rank, const QString& regName, const QString& newValue) {
+  QString reg = regName.trimmed().toLower(); if (reg.startsWith(QLatin1Char('$'))) reg = reg.mid(1).trimmed();
+  const QString val = newValue.trimmed();
+  if (reg.isEmpty() || val.isEmpty() || !validateSafeDebuggerInput(reg) || !validateSafeDebuggerInput(val)) return;
+  const int r = qMax(0, rank);
+  if (r >= static_cast<int>(m_processes.size()) || !m_processes[r]) return;
+  queueOrWriteCmd(r, QStringLiteral("-gdb-set $%1=%2\n").arg(reg, val));
+  if (m_processes[r]->state.currentState == QLatin1String("stopped")) writeCmd(r, QStringLiteral("-data-list-register-values r\n"));
 }
 
 }  // namespace gridlock

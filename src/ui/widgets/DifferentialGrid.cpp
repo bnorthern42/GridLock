@@ -14,13 +14,19 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QDialog>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPalette>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QRegularExpression>
+#include <QTextOption>
+#include <QVBoxLayout>
 
 namespace gridlock::ui {
 
@@ -34,6 +40,59 @@ bool parseLeadingNumber(const QString& raw, double* outVal) {
     const double v = tok.contains(QLatin1String("0x"), Qt::CaseInsensitive) ? static_cast<double>(tok.toLongLong(&ok, 16)) : tok.toDouble(&ok);
     if (ok && outVal) *outVal = v;
     return ok;
+}
+
+void showGridFullValueDialog(DifferentialGrid* grid, int row, int col) {
+    if (!grid || col < 1 || col >= grid->columnCount()) return;
+    const QString colExpr = grid->horizontalHeaderItem(col) ? grid->horizontalHeaderItem(col)->text() : QStringLiteral("Watch");
+    QString fullText;
+    if (row >= 1 && row < grid->rowCount() && grid->item(row, col)) {
+        fullText = grid->item(row, col)->text();
+    } else {
+        QStringList lines;
+        for (int r = 1; r < grid->rowCount(); ++r) {
+            const QString rankLbl = grid->verticalHeaderItem(r) ? grid->verticalHeaderItem(r)->text() : QStringLiteral("Rank %1").arg(r - 1);
+            const QString val = grid->item(r, col) ? grid->item(r, col)->text() : QStringLiteral("-");
+            lines << QStringLiteral("%1: %2").arg(rankLbl, val);
+        }
+        fullText = lines.join(QLatin1Char('\n'));
+    }
+    grid->setProperty("lastInspectedFullValue", fullText);
+    auto* dlg = grid->findChild<QDialog*>(QStringLiteral("fullValueInspectorDialog"), Qt::FindDirectChildrenOnly);
+    if (!dlg) {
+        dlg = new QDialog(grid);
+        dlg->setObjectName(QStringLiteral("fullValueInspectorDialog"));
+        dlg->setModal(false);
+        dlg->resize(560, 280);
+        auto* v = new QVBoxLayout(dlg);
+        v->setContentsMargins(10, 10, 10, 10);
+        v->setSpacing(8);
+        auto* edit = new QPlainTextEdit(dlg);
+        edit->setObjectName(QStringLiteral("fullValueInspectorTextEdit"));
+        edit->setReadOnly(true);
+        edit->setWordWrapMode(QTextOption::WrapAnywhere);
+        edit->setFont(QFont(QStringLiteral("JetBrains Mono"), 10));
+        v->addWidget(edit, 1);
+        auto* btnRow = new QHBoxLayout();
+        btnRow->addStretch();
+        auto* copyBtn = new QPushButton(QStringLiteral("Copy to Clipboard"), dlg);
+        copyBtn->setObjectName(QStringLiteral("fullValueInspectorCopyBtn"));
+        QObject::connect(copyBtn, &QPushButton::clicked, dlg, [edit]() {
+            QApplication::clipboard()->setText(edit->toPlainText());
+        });
+        auto* closeBtn = new QPushButton(QStringLiteral("Close"), dlg);
+        QObject::connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
+        btnRow->addWidget(copyBtn);
+        btnRow->addWidget(closeBtn);
+        v->addLayout(btnRow);
+    }
+    dlg->setWindowTitle(row >= 1 ? QStringLiteral("Full Value — Rank %1: %2").arg(row - 1).arg(colExpr)
+                                 : QStringLiteral("Full Values — %1 (All Ranks)").arg(colExpr));
+    if (auto* edit = dlg->findChild<QPlainTextEdit*>(QStringLiteral("fullValueInspectorTextEdit"))) {
+        edit->setPlainText(fullText);
+    }
+    dlg->show();
+    dlg->raise();
 }
 }  // namespace
 
@@ -60,6 +119,9 @@ DifferentialGrid::DifferentialGrid(QWidget *parent) : QTableWidget(parent) {
     connect(horizontalHeader(), &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const int col = horizontalHeader()->logicalIndexAt(pos);
         showWatchContextMenu(-1, col >= 0 ? col : currentColumn(), horizontalHeader()->mapToGlobal(pos));
+    });
+    connect(this, &QTableWidget::cellDoubleClicked, this, [this](int row, int col) {
+        if (row >= 1 && col >= 1) showGridFullValueDialog(this, row, col);
     });
 
     reloadStyle();
@@ -126,6 +188,8 @@ void DifferentialGrid::showWatchContextMenu(int row, int col, const QPoint& glob
     const QString colExpr = (col >= 1 && horizontalHeaderItem(col)) ? horizontalHeaderItem(col)->text() : QString();
     const QString cellVal = (row >= 1 && col >= 1 && item(row, col)) ? item(row, col)->text() : QString();
     QMenu menu(this);
+    QAction* inspectAct = menu.addAction(QStringLiteral("Inspect Full Value..."));
+    inspectAct->setEnabled(col >= 1);
     QAction* copyAct = menu.addAction(QStringLiteral("Copy Value (Ctrl+C)"));
     copyAct->setEnabled(!cellVal.isEmpty());
     QAction* rmColAct = menu.addAction(colExpr.isEmpty() ? QStringLiteral("Remove Watch Column (Del)")
@@ -140,7 +204,8 @@ void DifferentialGrid::showWatchContextMenu(int row, int col, const QPoint& glob
     graphAct->setEnabled(!colExpr.isEmpty());
 
     QAction* chosen = menu.exec(globalPos);
-    if (chosen == copyAct && !cellVal.isEmpty()) QApplication::clipboard()->setText(cellVal);
+    if (chosen == inspectAct && col >= 1) showGridFullValueDialog(this, row, col);
+    else if (chosen == copyAct && !cellVal.isEmpty()) QApplication::clipboard()->setText(cellVal);
     else if (chosen == rmColAct && col >= 1) removeWatchColumn(col);
     else if (chosen == clearAct) clearWatches();
     else if (chosen == plotAct && !colExpr.isEmpty()) emit plotArrayRequested(colExpr);

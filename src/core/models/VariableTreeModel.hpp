@@ -53,8 +53,14 @@ public:
     /** @brief Returns the fixed column count (3: Name, Value, Type). */
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
 
-    /** @brief Returns display text, monospace font, alignment, or diff highlight brush for index. */
+    /** @brief Returns display text, edit text, monospace font, alignment, or diff highlight brush for index. */
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+
+    /** @brief Enables `Qt::ItemIsEditable` on scalar/enum/pointer leaf value cells (column 1). */
+    Qt::ItemFlags flags(const QModelIndex& index) const override;
+
+    /** @brief Commits an inline variable value edit and emits `variableEditRequested(rank, fullExpression, newValue)`. */
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
 
     /** @brief Returns horizontal column header titles ("Name", "Value", "Type"). */
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
@@ -79,6 +85,10 @@ public:
 
     /** @brief Deletes backend GDB varobjs and resets the tree model to an empty root. */
     void clear();
+
+signals:
+    /** @brief Emitted when a leaf variable value is modified via `setData()`. */
+    void variableEditRequested(int rankId, const QString& fullExpression, const QString& newValue);
 
 public slots:
     /**

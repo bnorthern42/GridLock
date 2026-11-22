@@ -353,6 +353,16 @@ class IBackendCoordinator : public QObject {
     Q_UNUSED(command);
   }
 
+  /** @brief Modifies a live variable or lvalue @p expression to @p newValue on @p rank (`-gdb-set var <expr>=<val>` / DAP `setVariable`). */
+  virtual void writeVariableValue(int rank, const QString& expression, const QString& newValue) {
+    Q_UNUSED(rank); Q_UNUSED(expression); Q_UNUSED(newValue);
+  }
+
+  /** @brief Modifies CPU register @p regName to @p newValue on @p rank (`-gdb-set $<reg>=<val>` / DAP `register write`). */
+  virtual void writeRegisterValue(int rank, const QString& regName, const QString& newValue) {
+    Q_UNUSED(rank); Q_UNUSED(regName); Q_UNUSED(newValue);
+  }
+
   /**
    * @brief Arms a hardware data watchpoint on @p expression across @p rankFilter (`-1` = all ranks).
    */

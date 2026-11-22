@@ -8,11 +8,18 @@
  */
 
 #include "RegisterView.hpp"
+#include <QApplication>
+#include <QClipboard>
+#include <QDialog>
 #include <QFont>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QMenu>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QTextOption>
 #include <QVBoxLayout>
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
@@ -53,23 +60,14 @@ QString RegisterView::x86RegisterNameForIndex(int idx) {
  * @return Canonical hex string (e.g. "0x401120") or lowercase trimmed string.
  */
 QString RegisterView::normalizeRegValue(const QString& val) {
-    // Strip leading and trailing whitespace
     QString trimmed = val.trimmed();
     int spaceIdx = trimmed.indexOf(' ');
-    // Isolate address from any appended symbol annotations
-    if (spaceIdx > 0) {
-        trimmed = trimmed.left(spaceIdx);
-    }
+    if (spaceIdx > 0) trimmed = trimmed.left(spaceIdx);
     bool ok = false;
     QString hexCandidate = trimmed;
-    if (hexCandidate.startsWith("0x", Qt::CaseInsensitive)) {
-        hexCandidate = hexCandidate.mid(2);
-    }
-    // Attempt parsing as 64-bit hexadecimal integer
+    if (hexCandidate.startsWith("0x", Qt::CaseInsensitive)) hexCandidate = hexCandidate.mid(2);
     uint64_t parsed = hexCandidate.toULongLong(&ok, 16);
-    if (ok) {
-        return QStringLiteral("0x%1").arg(parsed, 0, 16);
-    }
+    if (ok) return QStringLiteral("0x%1").arg(parsed, 0, 16);
     return trimmed.toLower();
 }
 
@@ -77,12 +75,11 @@ QString RegisterView::normalizeRegValue(const QString& val) {
  * @brief Constructs a new RegisterView instance.
  *
  * Initializes the two-column QTableWidget ("REG", "VALUE / ROLE"), configures
- * monospace styling, and installs cell double-click navigation handlers.
+ * monospace styling, and installs cell double-click navigation and inline edit handlers.
  *
  * @param parent Optional parent widget.
  */
 RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
-    // Configure zero-margin vertical layout
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -112,7 +109,7 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     m_table->setColumnWidth(0, 84);
     m_table->verticalHeader()->setVisible(false);
     m_table->verticalHeader()->setDefaultSectionSize(20);
-    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setShowGrid(true);
@@ -141,11 +138,22 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     // Filter rows live whenever the search query text changes.
     connect(m_searchEdit, &QLineEdit::textChanged, this, &RegisterView::filterRegisters);
 
-    // Double-clicking a register seeks the global disassembly or memory view
-    connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row, int /*col*/) {
-        if (QTableWidgetItem* nameItem = m_table->item(row, 0)) {
-            activateRegister(nameItem->text());
+    // Double-clicking column 0 seeks to address; double-clicking column 1 starts inline register editing.
+    connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row, int col) {
+        if (col == 0) {
+            if (QTableWidgetItem* nameItem = m_table->item(row, 0)) activateRegister(nameItem->text());
+        } else if (col == 1 && m_table->item(row, 1)) {
+            m_table->editItem(m_table->item(row, 1));
         }
+    });
+
+    // Commit inline cell edits on column 1 and emit registerEditRequested.
+    connect(m_table, &QTableWidget::cellChanged, this, [this](int row, int col) {
+        if (m_updatingTable || col != 1) return;
+        const QString regName = m_table->item(row, 0) ? m_table->item(row, 0)->text().trimmed().toLower() : QString();
+        const QString rawVal = m_table->item(row, 1) ? m_table->item(row, 1)->text().trimmed() : QString();
+        if (regName.isEmpty() || rawVal.isEmpty()) return;
+        setRegisterValue(regName, rawVal);
     });
 
     m_table->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -154,13 +162,21 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
         if (!idx.isValid()) return;
         const int row = idx.row();
         const QString regName = m_table->item(row, 0) ? m_table->item(row, 0)->text().trimmed() : QString();
-        const QString regVal = m_table->item(row, 1) ? m_table->item(row, 1)->text().section(QLatin1Char(' '), 0, 0).trimmed() : QString();
+        const QString fullVal = m_table->item(row, 1) ? m_table->item(row, 1)->text().trimmed() : QString();
+        const QString regVal = fullVal.section(QLatin1Char(' '), 0, 0).trimmed();
         if (regVal.isEmpty()) return;
         QMenu menu(this);
+        QAction* editAct = menu.addAction(QStringLiteral("Edit Register Value..."));
+        QAction* inspectAct = menu.addAction(QStringLiteral("Inspect Full Value..."));
+        menu.addSeparator();
         QAction* calcAct = menu.addAction(QStringLiteral("Open Register in Programmer's Calculator"));
         QAction* seekAct = menu.addAction(QStringLiteral("Seek to Register Address"));
         QAction* chosen = menu.exec(m_table->viewport()->mapToGlobal(pos));
-        if (chosen == calcAct) {
+        if (chosen == editAct && m_table->item(row, 1)) {
+            m_table->editItem(m_table->item(row, 1));
+        } else if (chosen == inspectAct) {
+            inspectFullValue(QStringLiteral("$%1 (Rank %2)").arg(regName).arg(m_focusedRank), fullVal);
+        } else if (chosen == calcAct) {
             emit sendToCalculatorRequested(regVal);
             if (QWidget* win = window()) {
                 QMetaObject::invokeMethod(win, "openProgrammerCalculatorWithText", Q_ARG(QString, regVal));
@@ -171,16 +187,71 @@ RegisterView::RegisterView(QWidget* parent) : QWidget(parent) {
     });
 
     layout->addWidget(m_table, 1);
-
-    // Start with zero rows when idle; live updates or explicit preview fixtures populate registers.
     clearRegisters();
 
-    // Re-color search bar and register rows whenever Dark/Light mode toggles
     connect(&gridlock::core::managers::ThemeManager::instance(),
             &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this, syncTheme](bool) {
                 syncTheme();
                 if (!m_currentRegisters.isEmpty()) updateRegisters(m_currentRegisters);
             });
+}
+
+bool RegisterView::setRegisterValue(const QString& regName, const QString& newValue) {
+    QString key = regName.trimmed().toLower();
+    if (key.startsWith(QLatin1Char('$'))) key = key.mid(1).trimmed();
+    const QString cleanVal = newValue.trimmed().section(QLatin1Char(' '), 0, 0).trimmed();
+    if (key.isEmpty() || cleanVal.isEmpty()) return false;
+    m_previousRegisters.insert(key, normalizeRegValue(m_currentRegisters.value(key)));
+    m_currentRegisters.insert(key, cleanVal);
+    m_modifiedRegisters.insert(key);
+    if (m_table && !m_updatingTable) {
+        m_updatingTable = true;
+        for (int r = 0; r < m_table->rowCount(); ++r) {
+            if (m_table->item(r, 0) && m_table->item(r, 0)->text().compare(key, Qt::CaseInsensitive) == 0) {
+                if (m_table->item(r, 1)) m_table->item(r, 1)->setText(cleanVal);
+                break;
+            }
+        }
+        m_updatingTable = false;
+    }
+    emit registerEditRequested(m_focusedRank, key, cleanVal);
+    return true;
+}
+
+QDialog* RegisterView::inspectFullValue(const QString& title, const QString& fullText) {
+    m_lastInspectedFullValue = fullText;
+    auto* dlg = findChild<QDialog*>(QStringLiteral("fullValueInspectorDialog"));
+    if (!dlg) {
+        dlg = new QDialog(this);
+        dlg->setObjectName(QStringLiteral("fullValueInspectorDialog"));
+        dlg->resize(520, 240);
+        auto* v = new QVBoxLayout(dlg);
+        v->setContentsMargins(10, 10, 10, 10);
+        v->setSpacing(8);
+        auto* te = new QPlainTextEdit(dlg);
+        te->setObjectName(QStringLiteral("fullValueInspectorTextEdit"));
+        te->setReadOnly(true);
+        te->setWordWrapMode(QTextOption::WrapAnywhere);
+        QFont mf(QStringLiteral("JetBrains Mono"), 10);
+        mf.setStyleHint(QFont::Monospace);
+        te->setFont(mf);
+        v->addWidget(te, 1);
+        auto* hb = new QHBoxLayout();
+        hb->addStretch(1);
+        auto* copyBtn = new QPushButton(QStringLiteral("Copy to Clipboard"), dlg);
+        copyBtn->setObjectName(QStringLiteral("fullValueInspectorCopyBtn"));
+        auto* closeBtn = new QPushButton(QStringLiteral("Close"), dlg);
+        closeBtn->setObjectName(QStringLiteral("fullValueInspectorCloseBtn"));
+        connect(copyBtn, &QPushButton::clicked, dlg, [te]() { QApplication::clipboard()->setText(te->toPlainText()); });
+        connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
+        hb->addWidget(copyBtn);
+        hb->addWidget(closeBtn);
+        v->addLayout(hb);
+    }
+    dlg->setWindowTitle(QStringLiteral("Inspect Full Value — %1").arg(title));
+    if (auto* te = dlg->findChild<QPlainTextEdit*>(QStringLiteral("fullValueInspectorTextEdit"))) te->setPlainText(fullText);
+    dlg->show();
+    return dlg;
 }
 
 /**
@@ -217,24 +288,18 @@ bool RegisterView::activateRegister(const QString& name) {
     if (!ok) {
         return false;
     }
-    // Emit signal to synchronize disassembly and memory views to this pointer
     emit addressActivated(addr);
     return true;
 }
 
 /**
  * @brief Updates table items from an ordered list of register names and values.
- *
- * Checks values against previous snapshot to identify mutations, marks modified
- * cells with red foreground and highlighted background, and applies role-based
- * colors (instruction pointer, stack pointers, status flags).
- *
- * @param orderedRegs Ordered vector of register mnemonic and value pairs.
  */
 void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& orderedRegs) {
     if (orderedRegs.isEmpty()) {
         return;
     }
+    m_updatingTable = true;
 
     const bool isDark = gridlock::core::managers::ThemeManager::instance().isDarkMode();
     QPalette regPal = m_table->palette();
@@ -246,11 +311,9 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
     m_modifiedRegisters.clear();
     m_currentRegisters.clear();
 
-    // Suppress automatic sorting while mutating rows so indices never shift mid-loop.
     const bool wasSorting = m_table->isSortingEnabled();
     m_table->setSortingEnabled(false);
 
-    // Adjust table row allocation to match incoming register count
     if (m_table->rowCount() != orderedRegs.size()) {
         m_table->setRowCount(orderedRegs.size());
     }
@@ -265,7 +328,6 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         const QString regVal = orderedRegs[row].second.trimmed();
         const QString normVal = normalizeRegValue(regVal);
 
-        // Detect register mutation against previous snapshot baseline
         bool changed = false;
         if (hasBaseline && m_previousRegisters.contains(key) &&
             m_previousRegisters.value(key) != normVal) {
@@ -276,7 +338,6 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         m_previousRegisters.insert(key, normVal);
         m_currentRegisters.insert(key, regVal);
 
-        // Populate or update name column item
         QTableWidgetItem* nameItem = m_table->item(row, 0);
         if (!nameItem) {
             nameItem = new QTableWidgetItem(key);
@@ -284,8 +345,8 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         } else {
             nameItem->setText(key);
         }
+        nameItem->setFlags(nameItem->flags() & ~Qt::ItemIsEditable);
 
-        // Populate or update value column item
         QTableWidgetItem* valItem = m_table->item(row, 1);
         if (!valItem) {
             valItem = new QTableWidgetItem(regVal);
@@ -293,19 +354,18 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
         } else {
             valItem->setText(regVal);
         }
+        valItem->setFlags(valItem->flags() | Qt::ItemIsEditable);
 
-        // Role-based register color classification with dark/light mode contrast awareness
         QColor roleColor = isDark ? QColor("#d4d7dc") : QColor("#1f2328");
         if (key == QStringLiteral("rip") || key == QStringLiteral("eip") || key == QStringLiteral("pc")) {
-            roleColor = isDark ? QColor("#4ec9b0") : QColor("#116329"); // Instruction pointer
+            roleColor = isDark ? QColor("#4ec9b0") : QColor("#116329");
         } else if (key == QStringLiteral("rsp") || key == QStringLiteral("rbp") ||
                    key == QStringLiteral("esp") || key == QStringLiteral("ebp")) {
-            roleColor = isDark ? QColor("#569cd6") : QColor("#0550ae"); // Stack frame pointers
+            roleColor = isDark ? QColor("#569cd6") : QColor("#0550ae");
         } else if (key.contains(QStringLiteral("flags"))) {
-            roleColor = isDark ? QColor("#dcdcaa") : QColor("#953800"); // Status flags
+            roleColor = isDark ? QColor("#dcdcaa") : QColor("#953800");
         }
 
-        // Apply distinct styling for mutated vs stable registers
         if (changed) {
             const QColor diffFg = isDark ? QColor("#f44747") : QColor("#cf222e");
             const QColor diffBg = isDark ? QColor(0x2d, 0x1b, 0x1e) : QColor(0xff, 0xeb, 0xe9);
@@ -326,6 +386,7 @@ void RegisterView::applyRegisterMap(const QList<QPair<QString, QString>>& ordere
     }
 
     m_table->setSortingEnabled(wasSorting);
+    m_updatingTable = false;
     filterRegisters(m_searchEdit ? m_searchEdit->text() : QString());
 }
 

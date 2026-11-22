@@ -64,7 +64,25 @@ public:
      */
     bool activateRegister(const QString& name);
 
+    /** @brief Sets the 0-based MPI rank associated with in-place register edits. */
+    void setFocusedRank(int rankId) { m_focusedRank = qMax(0, rankId); }
+
+    /** @brief Returns the 0-based MPI rank associated with this register view. */
+    int focusedRank() const { return m_focusedRank; }
+
+    /** @brief Edits register @p regName to @p newValue and emits `registerEditRequested(focusedRank(), regName, newValue)`. */
+    bool setRegisterValue(const QString& regName, const QString& newValue);
+
+    /** @brief Opens the non-modal monospace Full-Value Inspection popover dialog for @p title and @p fullText. */
+    QDialog* inspectFullValue(const QString& title, const QString& fullText);
+
+    /** @brief Returns the most recent full-value text shown in the `Inspect Full Value...` popover. */
+    QString lastInspectedFullValue() const { return m_lastInspectedFullValue; }
+
 signals:
+    /** @brief Emitted when a register value is edited in-place or via `Edit Register Value...`. */
+    void registerEditRequested(int rankId, const QString& regName, const QString& newValue);
+
     /**
      * @brief Emitted when a register holding a valid memory pointer is activated.
      * @param address 64-bit target address.
@@ -147,6 +165,10 @@ private:
 
     /// Set of register names whose values changed in the most recent update.
     QSet<QString> m_modifiedRegisters;
+
+    int m_focusedRank = 0;
+    bool m_updatingTable = false;
+    QString m_lastInspectedFullValue;
 };
 
 }  // namespace gridlock::ui

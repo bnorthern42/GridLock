@@ -243,6 +243,12 @@ class DapCoordinator : public IBackendCoordinator {
   /** @brief Clears all active breakpoints across tracked source files. */
   void clearBreakpoints() override;
 
+  /** @brief Modifies a live variable or lvalue @p expression to @p newValue on @p rank via DAP `setVariable` / `setExpression`. */
+  void writeVariableValue(int rank, const QString& expression, const QString& newValue) override;
+
+  /** @brief Modifies CPU register @p regName to @p newValue on @p rank via LLDB-DAP `register write`. */
+  void writeRegisterValue(int rank, const QString& regName, const QString& newValue) override;
+
   /** @brief Returns `"lldb-dap"` as the active debugger engine identifier. */
   QString activeEngineName() const override {
     return QStringLiteral("lldb-dap");

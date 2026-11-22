@@ -335,6 +335,7 @@ void MainWindow::setFocusedRank(int rank) {
         QSignalBlocker sb(m_serverRackView); m_serverRackView->selectRank(target);
     }
     if (m_variablesDockWidget) m_variablesDockWidget->setFocusedRank(target, effRanks);
+    if (m_registerView) m_registerView->setFocusedRank(target);
     if (m_memView) m_memView->setFocusedRank(target, effRanks);
     if (m_arrayPlotDialog) m_arrayPlotDialog->setFocusedRank(target);
     if (m_pointerGraphDialog) m_pointerGraphDialog->setFocusedRank(target);
@@ -418,22 +419,25 @@ void MainWindow::bindCallStackCoordinatorRoutes() {
             connect(proxy, &QAbstractItemModel::modelReset, this, syncVars); connect(proxy, &QAbstractItemModel::rowsInserted, this, [syncVars](const QModelIndex&, int, int) { syncVars(); });
         }
     }
+    if (m_registerView && !m_registerView->property("gl_reg_edit_bound").toBool()) {
+        m_registerView->setProperty("gl_reg_edit_bound", true);
+        m_registerView->setFocusedRank(m_focusedRank);
+        connect(m_registerView, &RegisterView::registerEditRequested, this, [this](int rankId, const QString& regName, const QString& newVal) {
+            if (m_coordinator) m_coordinator->writeRegisterValue(rankId >= 0 ? rankId : m_focusedRank, regName, newVal);
+        });
+    }
     if (m_coordinator && !m_coordinator->property("gl_inline_eval_bound").toBool()) {
         m_coordinator->setProperty("gl_inline_eval_bound", true); QPointer<EditorTabManager> etmPtr(m_editorTabManager);
         connect(m_coordinator, &IBackendCoordinator::expressionEvaluated, this, [this, etmPtr](int rank, const QString& expr, const QString& val) { if (rank == m_focusedRank && etmPtr && (expr.contains(QLatin1Char('.')) || expr.contains(QStringLiteral("->"))) && !val.startsWith(QStringLiteral("Error:"))) if (auto* sv = etmPtr->currentSourceCodeView()) sv->mergeInlineVariableValue(expr, val); });
     }
     if (m_pointerGraphDialog) { m_pointerGraphDialog->setCoordinator(m_coordinator); m_pointerGraphDialog->setFocusedRank(m_focusedRank); }
-    // Wire UI -> Coordinator signals once on `m_callStackDockWidget` (routing dynamically via `m_coordinator`).
     if (m_callStackDockWidget && !m_callStackDockWidget->property("gl_callstack_bound").toBool()) {
         m_callStackDockWidget->setProperty("gl_callstack_bound", true);
-
-        // Switching OS/OpenMP threads resets frame level to #0 and queries that thread's stack and locals when stopped.
         connect(m_callStackDockWidget, &CallStackDockWidget::threadSelected, this, [this](int threadId) {
             m_selectedFrameLevel[m_focusedRank] = 0;
             const auto stIt = m_latestStates.find(m_focusedRank);
             if (m_coordinator && stIt != m_latestStates.end() && stIt->second.currentState == QLatin1String("stopped")) m_coordinator->selectStackFrame(m_focusedRank, threadId, 0);
         });
-        // Activating a caller frame jumps SourceCodeView + DisassemblyView and re-queries frame locals/registers when stopped.
         connect(m_callStackDockWidget, &CallStackDockWidget::frameActivated, this, [this](int threadId, int frameLevel, const QString& file, int line, quint64 address) {
             m_selectedFrameLevel[m_focusedRank] = frameLevel;
             if (!file.isEmpty() && QFileInfo::exists(file) && line > 0) {
