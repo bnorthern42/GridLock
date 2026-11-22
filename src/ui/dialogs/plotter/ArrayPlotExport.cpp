@@ -28,7 +28,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
-#include "../../core/managers/ThemeManager.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
 
 namespace gridlock::ui {
 

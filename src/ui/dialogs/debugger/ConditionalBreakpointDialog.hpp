@@ -16,7 +16,7 @@
 
 #include <QTreeWidget>
 #include <QVector>
-#include "../../core/utils/ClangdLspClient.hpp"
+#include "../../../core/utils/ClangdLspClient.hpp"
 
 class QCheckBox;
 class QComboBox;

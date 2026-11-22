@@ -52,9 +52,9 @@
 #include "../src/core/models/VariableTreeModel.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
-#include "../src/ui/dialogs/ArrayPlotDialog.hpp"
-#include "../src/ui/dialogs/CheckpointDialog.hpp"
-#include "../src/ui/dialogs/PointerGraphDialog.hpp"
+#include "../src/ui/dialogs/plotter/ArrayPlotDialog.hpp"
+#include "../src/ui/dialogs/debugger/CheckpointDialog.hpp"
+#include "../src/ui/dialogs/graph/PointerGraphDialog.hpp"
 #include "../src/ui/docks/CallStackDockWidget.hpp"
 #include "../src/ui/docks/VariablesDockWidget.hpp"
 #include <QMessageBox>

@@ -10,7 +10,7 @@
 #include <QtWidgets>
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/utils/ClangdLspClient.hpp"
-#include "../dialogs/ConditionalBreakpointDialog.hpp"
+#include "../dialogs/debugger/ConditionalBreakpointDialog.hpp"
 #include "../widgets/InlineFindBar.hpp"
 
 namespace gridlock::ui {

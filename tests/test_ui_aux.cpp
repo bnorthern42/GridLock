@@ -1,7 +1,7 @@
 /** @file test_ui_aux.cpp @brief Companion translation unit for TestMainWindowUI integration tests. */
 #include "test_ui.hpp"
 #include "ui/views/MemoryProfilerWidget.hpp"
-#include "ui/dialogs/PointerGraphDialog.hpp"
+#include "ui/dialogs/graph/PointerGraphDialog.hpp"
 #include "ui/widgets/FileIconProvider.hpp"
 #include <cmath>
 #include <QtWidgets>
@@ -17,9 +17,9 @@
 #include "../src/ui/EditorTabManager.hpp"
 #include "../src/ui/GdbConsoleWidget.hpp"
 #include "../src/ui/MainWindow.hpp"
-#include "../src/ui/dialogs/PreferencesDialog.hpp"
-#include "../src/ui/dialogs/ProjectSettingsDialog.hpp"
-#include "../src/ui/dialogs/XrefInspectorDialog.hpp"
+#include "../src/ui/dialogs/preferences/PreferencesDialog.hpp"
+#include "../src/ui/dialogs/project/ProjectSettingsDialog.hpp"
+#include "../src/ui/dialogs/debugger/XrefInspectorDialog.hpp"
 #include "../src/ui/docks/TerminalDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"
 #include "../src/ui/views/MemView.hpp"

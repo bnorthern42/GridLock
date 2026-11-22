@@ -11,8 +11,8 @@
 #include <QLabel>
 #include <QVBoxLayout>
 
-#include "../../core/hpc/GdbRankCoordinator.hpp"
-#include "../../core/managers/ThemeManager.hpp"
+#include "../../../core/hpc/GdbRankCoordinator.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
 
 namespace gridlock::ui {
 

@@ -26,7 +26,7 @@
 #include <QVector>
 #include <QWidget>
 
-#include "../../core/utils/SearchEverywhereEngine.hpp"
+#include "../../../core/utils/SearchEverywhereEngine.hpp"
 
 namespace gridlock::ui {
 

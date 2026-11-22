@@ -22,7 +22,7 @@
 #include <QStyle>
 #include <QVBoxLayout>
 
-#include "../../core/managers/ThemeManager.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
 
 namespace gridlock::ui {
 

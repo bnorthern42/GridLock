@@ -8,7 +8,7 @@
 
 #include "ProjectWizard.hpp"
 
-#include "../../core/managers/ConfigManager.hpp"
+#include "../../../core/managers/ConfigManager.hpp"
 
 #include <QFileDialog>
 #include <QFormLayout>

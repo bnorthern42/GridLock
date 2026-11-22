@@ -21,11 +21,11 @@
 #include "../core/managers/ThemeManager.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
-#include "dialogs/CommandPaletteDialog.hpp"
-#include "dialogs/PreferencesDialog.hpp"
-#include "dialogs/ProgrammerCalculatorDialog.hpp"
-#include "dialogs/ProjectSettingsDialog.hpp"
-#include "dialogs/ProjectWizard.hpp"
+#include "dialogs/search/CommandPaletteDialog.hpp"
+#include "dialogs/preferences/PreferencesDialog.hpp"
+#include "dialogs/calculator/ProgrammerCalculatorDialog.hpp"
+#include "dialogs/project/ProjectSettingsDialog.hpp"
+#include "dialogs/project/ProjectWizard.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "docks/VariablesDockWidget.hpp"
 #include "widgets/ProjectExplorerWidget.hpp"
@@ -39,8 +39,8 @@
 #include "widgets/ExpressionEvaluatorWidget.hpp"
 #include "widgets/MpiDiagnosticsWidget.hpp"
 #include "widgets/MpiNetworkLogWidget.hpp"
-#include "dialogs/ArrayPlotDialog.hpp"
-#include "dialogs/PointerGraphDialog.hpp"
+#include "dialogs/plotter/ArrayPlotDialog.hpp"
+#include "dialogs/graph/PointerGraphDialog.hpp"
 
 #include <QAction>
 #include <QApplication>

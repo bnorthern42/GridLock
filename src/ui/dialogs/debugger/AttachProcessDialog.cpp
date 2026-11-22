@@ -32,7 +32,7 @@
 #include <QTemporaryDir>
 #include <QVBoxLayout>
 
-#include "../../core/managers/ConfigManager.hpp"
+#include "../../../core/managers/ConfigManager.hpp"
 
 namespace gridlock::ui {
 

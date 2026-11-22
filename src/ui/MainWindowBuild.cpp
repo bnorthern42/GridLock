@@ -15,7 +15,7 @@
 #include "../core/utils/ClangdLspClient.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
-#include "dialogs/AttachProcessDialog.hpp"
+#include "dialogs/debugger/AttachProcessDialog.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "utils/FileDialogHelper.hpp"
 #include "views/DisassemblyView.hpp"

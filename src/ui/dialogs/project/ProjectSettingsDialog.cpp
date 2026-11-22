@@ -9,9 +9,9 @@
  */
 
 #include "ProjectSettingsDialog.hpp"
-#include "ProgrammerCalculatorDialog.hpp"
-#include "../utils/FileDialogHelper.hpp"
-#include "../../core/managers/ConfigManager.hpp"
+#include "../calculator/ProgrammerCalculatorDialog.hpp"
+#include "../../utils/FileDialogHelper.hpp"
+#include "../../../core/managers/ConfigManager.hpp"
 
 #include <QAbstractItemView>
 #include <QColor>

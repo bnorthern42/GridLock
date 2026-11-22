@@ -26,15 +26,15 @@
 #include <QTextCursor>
 #include <QVBoxLayout>
 
-#include "../../core/managers/ConfigManager.hpp"
-#include "../../core/managers/ThemeManager.hpp"
-#include "../../core/utils/ElfBinaryInspector.hpp"
-#include "../EditorTabManager.hpp"
-#include "../MainWindow.hpp"
-#include "../views/EditorSyntaxHighlighter.hpp"
-#include "../views/ServerRackView.hpp"
-#include "../views/SourceCodeView.hpp"
-#include "../widgets/ProjectExplorerWidget.hpp"
+#include "../../../core/managers/ConfigManager.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
+#include "../../../core/utils/ElfBinaryInspector.hpp"
+#include "../../EditorTabManager.hpp"
+#include "../../MainWindow.hpp"
+#include "../../views/EditorSyntaxHighlighter.hpp"
+#include "../../views/ServerRackView.hpp"
+#include "../../views/SourceCodeView.hpp"
+#include "../../widgets/ProjectExplorerWidget.hpp"
 
 namespace gridlock::ui {
 namespace {

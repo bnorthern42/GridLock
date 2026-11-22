@@ -36,7 +36,7 @@
 #include "../src/core/models/VariableTreeModel.hpp"
 #include "../src/core/utils/ElfBinaryInspector.hpp"
 #include "../src/ui/MainWindow.hpp"
-#include "../src/ui/dialogs/PreferencesDialog.hpp"
+#include "../src/ui/dialogs/preferences/PreferencesDialog.hpp"
 #include "../src/ui/docks/CallStackDockWidget.hpp"
 #include "../src/ui/docks/VariablesDockWidget.hpp"
 #include "../src/ui/views/DisassemblyView.hpp"

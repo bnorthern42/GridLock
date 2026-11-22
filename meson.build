@@ -42,9 +42,12 @@ src_files = [
   'src/ui/MainWindowBuild.cpp',
   'src/ui/views/ServerRackView.cpp', 'src/ui/views/SourceCodeView.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
-  'src/ui/dialogs/ArrayPlotCanvas.cpp', 'src/ui/dialogs/ArrayPlotDialog.cpp', 'src/ui/dialogs/ArrayPlotExport.cpp', 'src/ui/dialogs/AttachProcessDialog.cpp', 'src/ui/dialogs/CheckpointDialog.cpp', 'src/ui/dialogs/CommandPaletteDialog.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/PointerGraphDialog.cpp', 'src/ui/dialogs/PointerGraphEvaluator.cpp', 'src/ui/dialogs/PointerGraphLayout.cpp', 'src/ui/dialogs/CalculatorEngine.cpp', 'src/ui/dialogs/ProgrammerCalculatorDialog.cpp', 'src/ui/dialogs/SignalCatchpointDialog.cpp', 'src/ui/dialogs/TensorSliceTableModel.cpp', 'src/ui/EditorTabManager.cpp',
-  'src/ui/widgets/ProjectExplorerWidget.cpp', 'src/ui/dialogs/ProjectSettingsDialog.cpp',
-  'src/ui/dialogs/ProjectWizard.cpp', 'src/ui/dialogs/XrefInspectorDialog.cpp',
+  'src/ui/dialogs/plotter/ArrayPlotCanvas.cpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.cpp', 'src/ui/dialogs/plotter/ArrayPlotExport.cpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.cpp',
+  'src/ui/dialogs/graph/PointerGraphDialog.cpp', 'src/ui/dialogs/graph/PointerGraphEvaluator.cpp', 'src/ui/dialogs/graph/PointerGraphLayout.cpp',
+  'src/ui/dialogs/calculator/CalculatorEngine.cpp', 'src/ui/dialogs/calculator/ProgrammerCalculatorDialog.cpp',
+  'src/ui/dialogs/debugger/AttachProcessDialog.cpp', 'src/ui/dialogs/debugger/CheckpointDialog.cpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/debugger/SignalCatchpointDialog.cpp', 'src/ui/dialogs/debugger/XrefInspectorDialog.cpp',
+  'src/ui/dialogs/project/ProjectSettingsDialog.cpp', 'src/ui/dialogs/project/ProjectWizard.cpp', 'src/ui/dialogs/search/CommandPaletteDialog.cpp',
+  'src/ui/EditorTabManager.cpp', 'src/ui/widgets/ProjectExplorerWidget.cpp',
   'src/ui/widgets/FileIconProvider.cpp', 'src/ui/widgets/ExpressionEvaluatorWidget.cpp', 'src/ui/widgets/InlineFindBar.cpp',
   'src/ui/views/DisassemblyView.cpp', 'src/ui/views/DisassemblyAnalysis.cpp',
   'src/ui/views/DisassemblyDecompiler.cpp', 'src/ui/widgets/ReferenceManualWidget.cpp',
@@ -72,10 +75,12 @@ moc_headers = [
   'src/ui/MainWindow.hpp', 'src/ui/views/ServerRackView.hpp',
   'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/views/CsvTablePreviewWidget.hpp',
-  'src/ui/dialogs/ArrayPlotCanvas.hpp', 'src/ui/dialogs/ArrayPlotDialog.hpp', 'src/ui/dialogs/CheckpointDialog.hpp', 'src/ui/dialogs/CommandPaletteDialog.hpp', 'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/ui/dialogs/PointerGraphDialog.hpp', 'src/ui/dialogs/ProgrammerCalculatorDialog.hpp', 'src/ui/dialogs/SignalCatchpointDialog.hpp', 'src/ui/dialogs/TensorSliceTableModel.hpp',
+  'src/ui/dialogs/plotter/ArrayPlotCanvas.hpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.hpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.hpp',
+  'src/ui/dialogs/graph/PointerGraphDialog.hpp', 'src/ui/dialogs/calculator/ProgrammerCalculatorDialog.hpp',
+  'src/ui/dialogs/debugger/CheckpointDialog.hpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.hpp', 'src/ui/dialogs/debugger/SignalCatchpointDialog.hpp', 'src/ui/dialogs/debugger/XrefInspectorDialog.hpp',
+  'src/ui/dialogs/project/ProjectSettingsDialog.hpp', 'src/ui/dialogs/project/ProjectWizard.hpp', 'src/ui/dialogs/search/CommandPaletteDialog.hpp',
   'src/ui/EditorTabManager.hpp', 'src/ui/widgets/ProjectExplorerWidget.hpp',
-  'src/ui/dialogs/ProjectSettingsDialog.hpp', 'src/ui/dialogs/ProjectWizard.hpp',
-  'src/ui/dialogs/XrefInspectorDialog.hpp', 'src/ui/widgets/ExpressionEvaluatorWidget.hpp', 'src/ui/widgets/InlineFindBar.hpp',
+  'src/ui/widgets/ExpressionEvaluatorWidget.hpp', 'src/ui/widgets/InlineFindBar.hpp',
   'src/ui/views/DisassemblyView.hpp', 'src/ui/widgets/ReferenceManualWidget.hpp',
   'src/ui/widgets/DifferentialGrid.hpp', 'src/ui/widgets/MpiNetworkLogWidget.hpp',
   'src/ui/docks/TerminalDockWidget.hpp', 'src/ui/docks/CallStackDockWidget.hpp',
@@ -160,7 +165,7 @@ lsp_test_src = [
   'tests/test_lsp.cpp',
   'src/core/hpc/LspCoordinator.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/core/managers/ConfigManager.cpp', 'src/ui/views/SourceCodeView.cpp',
-  'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp',
+  'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp',
   'src/ui/widgets/InlineFindBar.cpp'
 ]
 
@@ -168,7 +173,7 @@ lsp_test_moc_headers = [
   'tests/test_lsp.hpp',
   'src/core/hpc/LspCoordinator.hpp', 'src/core/utils/ClangdLspClient.hpp',
   'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/ui/widgets/InlineFindBar.hpp'
+  'src/ui/dialogs/debugger/ConditionalBreakpointDialog.hpp', 'src/ui/widgets/InlineFindBar.hpp'
 ]
 
 processed_lsp_test_files = qt6.compile_moc(
@@ -197,11 +202,13 @@ ui_test_src = [
   'src/ui/MainWindowExecution.cpp', 'src/ui/MainWindowInspection.cpp',
   'src/ui/MainWindowBuild.cpp',
   'src/ui/views/SourceCodeView.cpp', 'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
-  'src/ui/dialogs/ArrayPlotCanvas.cpp', 'src/ui/dialogs/ArrayPlotDialog.cpp', 'src/ui/dialogs/ArrayPlotExport.cpp', 'src/ui/dialogs/AttachProcessDialog.cpp', 'src/ui/dialogs/CheckpointDialog.cpp', 'src/ui/dialogs/CommandPaletteDialog.cpp', 'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/PointerGraphDialog.cpp', 'src/ui/dialogs/PointerGraphEvaluator.cpp', 'src/ui/dialogs/PointerGraphLayout.cpp', 'src/ui/dialogs/CalculatorEngine.cpp', 'src/ui/dialogs/ProgrammerCalculatorDialog.cpp', 'src/ui/dialogs/SignalCatchpointDialog.cpp', 'src/ui/dialogs/TensorSliceTableModel.cpp',
+  'src/ui/dialogs/plotter/ArrayPlotCanvas.cpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.cpp', 'src/ui/dialogs/plotter/ArrayPlotExport.cpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.cpp',
+  'src/ui/dialogs/graph/PointerGraphDialog.cpp', 'src/ui/dialogs/graph/PointerGraphEvaluator.cpp', 'src/ui/dialogs/graph/PointerGraphLayout.cpp',
+  'src/ui/dialogs/calculator/CalculatorEngine.cpp', 'src/ui/dialogs/calculator/ProgrammerCalculatorDialog.cpp',
+  'src/ui/dialogs/debugger/AttachProcessDialog.cpp', 'src/ui/dialogs/debugger/CheckpointDialog.cpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp', 'src/ui/dialogs/debugger/SignalCatchpointDialog.cpp', 'src/ui/dialogs/debugger/XrefInspectorDialog.cpp',
+  'src/ui/dialogs/project/ProjectSettingsDialog.cpp', 'src/ui/dialogs/project/ProjectWizard.cpp', 'src/ui/dialogs/search/CommandPaletteDialog.cpp',
   'src/ui/EditorTabManager.cpp', 'src/ui/widgets/ProjectExplorerWidget.cpp',
-  'src/ui/dialogs/ProjectSettingsDialog.cpp', 'src/ui/dialogs/ProjectWizard.cpp',
-  'src/ui/dialogs/XrefInspectorDialog.cpp', 'src/ui/widgets/FileIconProvider.cpp',
-  'src/ui/tutorial/TutorialDialog.cpp', 'src/ui/widgets/ExpressionEvaluatorWidget.cpp', 'src/ui/widgets/InlineFindBar.cpp',
+  'src/ui/widgets/FileIconProvider.cpp', 'src/ui/tutorial/TutorialDialog.cpp', 'src/ui/widgets/ExpressionEvaluatorWidget.cpp', 'src/ui/widgets/InlineFindBar.cpp',
   'src/ui/views/ServerRackView.cpp', 'src/ui/views/DisassemblyView.cpp',
   'src/ui/views/DisassemblyAnalysis.cpp', 'src/ui/views/DisassemblyDecompiler.cpp',
   'src/ui/widgets/ReferenceManualWidget.cpp', 'src/ui/widgets/DifferentialGrid.cpp',
@@ -229,10 +236,12 @@ ui_test_moc_headers = [
   'tests/test_ui.hpp', 'src/ui/MainWindow.hpp',
   'src/ui/views/SourceCodeView.hpp', 'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/views/CsvTablePreviewWidget.hpp',
-  'src/ui/dialogs/ArrayPlotCanvas.hpp', 'src/ui/dialogs/ArrayPlotDialog.hpp', 'src/ui/dialogs/CheckpointDialog.hpp', 'src/ui/dialogs/CommandPaletteDialog.hpp', 'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/ui/dialogs/PointerGraphDialog.hpp', 'src/ui/dialogs/ProgrammerCalculatorDialog.hpp', 'src/ui/dialogs/SignalCatchpointDialog.hpp', 'src/ui/dialogs/TensorSliceTableModel.hpp',
+  'src/ui/dialogs/plotter/ArrayPlotCanvas.hpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.hpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.hpp',
+  'src/ui/dialogs/graph/PointerGraphDialog.hpp', 'src/ui/dialogs/calculator/ProgrammerCalculatorDialog.hpp',
+  'src/ui/dialogs/debugger/CheckpointDialog.hpp', 'src/ui/dialogs/debugger/ConditionalBreakpointDialog.hpp', 'src/ui/dialogs/debugger/SignalCatchpointDialog.hpp', 'src/ui/dialogs/debugger/XrefInspectorDialog.hpp',
+  'src/ui/dialogs/project/ProjectSettingsDialog.hpp', 'src/ui/dialogs/project/ProjectWizard.hpp', 'src/ui/dialogs/search/CommandPaletteDialog.hpp',
   'src/ui/EditorTabManager.hpp', 'src/ui/widgets/ProjectExplorerWidget.hpp',
-  'src/ui/dialogs/ProjectSettingsDialog.hpp', 'src/ui/dialogs/ProjectWizard.hpp',
-  'src/ui/dialogs/XrefInspectorDialog.hpp', 'src/ui/tutorial/TutorialDialog.hpp',
+  'src/ui/tutorial/TutorialDialog.hpp',
   'src/ui/widgets/ExpressionEvaluatorWidget.hpp', 'src/ui/widgets/InlineFindBar.hpp', 'src/ui/views/ServerRackView.hpp',
   'src/ui/views/DisassemblyView.hpp', 'src/ui/widgets/ReferenceManualWidget.hpp',
   'src/ui/widgets/DifferentialGrid.hpp', 'src/ui/widgets/MpiNetworkLogWidget.hpp',
@@ -358,7 +367,7 @@ dap_commands_test_src = [
   'src/ui/views/SourceCodeView.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp',
   'src/ui/widgets/InlineFindBar.cpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
+  'src/ui/dialogs/debugger/ConditionalBreakpointDialog.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp'
 ]
 
 dap_commands_test_moc_headers = [
@@ -369,7 +378,7 @@ dap_commands_test_moc_headers = [
   'src/ui/views/SourceCodeView.hpp',
   'src/ui/views/EditorSyntaxHighlighter.hpp',
   'src/ui/widgets/InlineFindBar.hpp',
-  'src/ui/dialogs/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
+  'src/ui/dialogs/debugger/ConditionalBreakpointDialog.hpp', 'src/core/utils/ClangdLspClient.hpp'
 ]
 
 processed_dap_commands_test_files = qt6.compile_moc(

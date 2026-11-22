@@ -9,7 +9,7 @@
 #include "PointerGraphDialog.hpp"
 #include "PointerGraphLayout.hpp"
 
-#include "../../core/managers/ThemeManager.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
 
 #include <QAbstractItemView>
 #include <QFileDialog>

@@ -18,9 +18,9 @@
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
-#include "../../core/hpc/DapCoordinator.hpp"
-#include "../../core/hpc/GdbRankCoordinator.hpp"
-#include "../../core/hpc/IBackendCoordinator.hpp"
+#include "../../../core/hpc/DapCoordinator.hpp"
+#include "../../../core/hpc/GdbRankCoordinator.hpp"
+#include "../../../core/hpc/IBackendCoordinator.hpp"
 
 namespace gridlock::ui {
 

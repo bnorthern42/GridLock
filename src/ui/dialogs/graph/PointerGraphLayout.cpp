@@ -6,7 +6,7 @@
 
 #include "PointerGraphLayout.hpp"
 
-#include "../../core/managers/ThemeManager.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
 
 #include <QFontDatabase>
 #include <QGraphicsSceneContextMenuEvent>

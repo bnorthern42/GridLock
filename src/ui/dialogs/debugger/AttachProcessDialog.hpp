@@ -24,7 +24,7 @@
 #include <QTreeWidget>
 #include <QWidget>
 
-#include "../../core/hpc/ProcessScanner.hpp"
+#include "../../../core/hpc/ProcessScanner.hpp"
 
 namespace gridlock::ui {
 

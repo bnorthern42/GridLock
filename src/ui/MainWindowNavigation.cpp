@@ -17,7 +17,7 @@
 #include "../core/utils/ClangdLspClient.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "EditorTabManager.hpp"
-#include "dialogs/PreferencesDialog.hpp"
+#include "dialogs/preferences/PreferencesDialog.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "tutorial/TutorialDialog.hpp"
 #include "views/DisassemblyView.hpp"

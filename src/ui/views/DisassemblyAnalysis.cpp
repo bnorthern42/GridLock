@@ -8,7 +8,7 @@
  */
 
 #include "DisassemblyView.hpp"
-#include "../dialogs/XrefInspectorDialog.hpp"
+#include "../dialogs/debugger/XrefInspectorDialog.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 
 #include <algorithm>

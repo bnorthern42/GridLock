@@ -20,7 +20,7 @@
 #include <QTableWidget>
 #include <QVector>
 
-#include "../../core/hpc/IBackendCoordinator.hpp"
+#include "../../../core/hpc/IBackendCoordinator.hpp"
 
 namespace gridlock::ui {
 

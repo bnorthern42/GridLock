@@ -14,7 +14,7 @@
 #include <QVector>
 #include <cstdint>
 
-#include "../views/DisassemblyView.hpp"
+#include "../../views/DisassemblyView.hpp"
 
 class QLabel;
 class QLineEdit;
