@@ -13,8 +13,9 @@ Domain-organized Qt Test suites spanning headless `MainWindow` UI workflows (`ui
   - Seven backend/system test suites (`coordinator_tests`, `mi_parser_tests`, `sanitizer_tests`, `lsp_tests`, `hpc_memory_tests`, `memory_export_tests`, `obfuscator_tests`).
 - `core/`:
   - Five infrastructure suites (`cliparser_tests`, `config_tests`, `docset_tests`, `stride_security_tests`, `advanced_features_tests`).
-- `../scripts/e2e_cli_suite.mjs` (plus `../scripts/lib/e2e_helpers.mjs`):
-  - Zero-dependency Node.js end-to-end CLI runner driving `./builddir/gridlock` externally across all CLI flags, every `tutorial/` source (single-rank and `ranks = 2`), synthetic crash/args/5 MB CSV stress targets, XDG config unification, Recent Sessions persistence, and `/dev/shm/psm3_shm*` + process teardown hygiene.
+- `../scripts/e2e_cli_suite.mjs` (plus `../scripts/lib/e2e_helpers.mjs`, **manual developer-only**):
+  - Standalone zero-dependency Node.js CLI runner driving `./builddir/gridlock` externally across CLI flags, `tutorial/` sources, synthetic crash/args/5 MB CSV stress targets, XDG config unification, Recent Sessions, and `/dev/shm/psm3_shm*` teardown hygiene.
+  - **Policy**: Strictly manual developer-invoked only; never run during routine per-commit testing, never add to `meson.build`, and never add to `.github/workflows/release.yml`.
 
 ## Expected Behavior & Invariants
 
@@ -25,7 +26,7 @@ Domain-organized Qt Test suites spanning headless `MainWindow` UI workflows (`ui
     - `meson test -C builddir --print-errorlogs` (Meson sets `QT_QPA_PLATFORM=offscreen` on every test target).
   - Run the UI executable directly:
     - `QT_QPA_PLATFORM=offscreen ./builddir/gridlock_ui_tests`
-  - Run the standalone Node.js CLI E2E suite:
+  - Optional manual developer-only CLI E2E run (not part of routine test runs or CI/release):
     - `./scripts/e2e_cli_suite.mjs --verbose`
     - `./scripts/e2e_cli_suite.mjs --filter tutorial/inspection_demo` (run matching subset; add `--keep-tmp` to retain the temp sandbox directory).
 - **Config & Environment Isolation**:

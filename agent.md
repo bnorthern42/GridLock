@@ -90,6 +90,9 @@ After generating and applying any code changes, you MUST execute the following s
    - Provide the test source file and the updated `meson.build` diff showing the new test integration.
 If the compilation or tests fail, you must analyze the compiler error and attempt to fix your own code before halting.
 5. do not put code blocks into chat of files or diffs unless explicitly asked to.
+6. Manual Developer-Only E2E Script (`scripts/e2e_cli_suite.mjs`):
+   - Do NOT run `scripts/e2e_cli_suite.mjs` during routine per-change verification unless the user explicitly asks to run E2E tests.
+   - NEVER register `scripts/e2e_cli_suite.mjs` in `meson.build` (`meson test`) and NEVER invoke it inside `.github/workflows/release.yml` or any GitHub Actions / release pipeline. It is strictly a manual, local developer-run suite.
 
 [Section: AppImage Packaging & CI]
 <Description>
@@ -99,4 +102,5 @@ GridLock relies on CQtDeployer for Linux deployment due to its reliable parsing 
 <Directives>
 - When modifying the deployment pipeline, `CQtDeployer` MUST be used instead of `linuxdeploy`.
 - Wayland and Vulkan plugins MUST be forcefully bundled via `-ext "wayland,xcb,vulkan"`.
+- Never add `scripts/e2e_cli_suite.mjs` to `.github/workflows/release.yml` or any automated release step.
 </Directives>
