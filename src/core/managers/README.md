@@ -4,14 +4,14 @@ Application-wide persistence, theming, keyboard chord routing, offline documenta
 
 ## Contents
 
-- `ConfigManager.hpp` (`349`):
+- `ConfigManager.hpp` (`356`):
   - Singleton facade and typed settings PODs: `DebuggerSettings`, `HpcSettings`, `SshSettings`, `SlurmSettings`, `TerminalSettings`, `ProjectSettings`, and `BreakpointConfig`.
 - `ConfigManager.cpp` (`300`):
   - Singleton lifecycle, workspace switching, `QSettings`-backed debugger/HPC/SSH/SLURM/docset PODs, live editor/treemap toggles, and custom shortcut overrides.
 - `ConfigManagerToml.cpp` (`212`):
   - Global `~/.config/gridlock/config.toml` bootstrap (`XDG_CONFIG_HOME` / `GRIDLOCK_TEST_CONFIG_DIR`), legacy migration, `saveGlobalConfig()`, toolchain paths, syntax colors, `[ui]` monitor routing, and `TerminalSettings`.
-- `ConfigManagerWorkspace.cpp` (`396`):
-  - Per-workspace `.gridlock/workspace.toml` and `.gridlock/settings.toml` persistence (`ProjectSettings`, breakpoints, `BreakpointConfig`), workspace-scoped engine/theme/disassembly/telemetry overrides, and `Recent Sessions`.
+- `ConfigManagerWorkspace.cpp` (`481`):
+  - Per-workspace `.gridlock/workspace.toml` and `.gridlock/settings.toml` persistence (`ProjectSettings`, target-scoped `programArgs`/`setProgramArgs` via `[project.target_args]` and in-memory map without global `QSettings` leakage, breakpoints, `BreakpointConfig`), workspace-scoped engine/theme/disassembly/telemetry overrides, and `Recent Sessions`.
 - `ThemeManager.hpp` (`122`), `ThemeManager.cpp` (`822`):
   - Singleton managing `QtAdvancedStylesheet` palettes, workstation chrome QSS overlays, font sizing, and `themeChanged` broadcasts.
 - `ShortcutManager.hpp` (`99`), `ShortcutManager.cpp`:

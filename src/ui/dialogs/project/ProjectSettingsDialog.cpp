@@ -334,9 +334,24 @@ ProjectSettingsDialog::ProjectSettingsDialog(QWidget* parent) : QDialog(parent) 
         m_targetBinaryCombo->setCurrentText(savedTarget);
     }
 
-    // Populate program arguments, working directory (defaulting to workspace root), and MPI fields.
-    const QString savedArgs = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+    // Populate per-target program arguments, working directory (defaulting to workspace root), and MPI fields.
+    auto resolveSelectedTarget = [this]() -> QString {
+        const QString typed = m_targetBinaryCombo->currentText().trimmed();
+        const int idx = m_targetBinaryCombo->currentIndex();
+        if (idx >= 0 && m_targetBinaryCombo->itemText(idx) == typed) {
+            const QString dataPath = m_targetBinaryCombo->itemData(idx).toString().trimmed();
+            if (!dataPath.isEmpty()) return dataPath;
+        }
+        return typed;
+    };
+    const QString initTarget = resolveSelectedTarget();
+    const QString savedArgs = !initTarget.isEmpty() ? cfg.programArgs(initTarget)
+                                                    : (!ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments));
     m_binaryArguments->setText(savedArgs);
+    connect(m_targetBinaryCombo, &QComboBox::currentIndexChanged, this, [this, resolveSelectedTarget](int) {
+        const QString selected = resolveSelectedTarget();
+        if (!selected.isEmpty()) m_binaryArguments->setText(gridlock::core::ConfigManager::instance().programArgs(selected));
+    });
     const QString savedWd = QString::fromStdString(ps.workingDirectory).trimmed();
     m_workingDirectory->setText((!savedWd.isEmpty() && QFileInfo(savedWd).isDir()) ? savedWd : wsRoot);
     const int initRanks = ps.mpiRanks > 0 ? ps.mpiRanks : (parentRankSpin ? parentRankSpin->value() : cfg.getDefaultRanks());
@@ -349,7 +364,10 @@ ProjectSettingsDialog::ProjectSettingsDialog(QWidget* parent) : QDialog(parent) 
         const QString seed = (!wd.isEmpty() && QFileInfo(wd).isDir()) ? wd : wsRoot;
         const QString picked = FileDialogHelper::getOpenFileName(
             this, QStringLiteral("Select Target Executable"), seed, QStringLiteral("Executables (*);;All Files (*)"));
-        if (!picked.isEmpty()) m_targetBinaryCombo->setCurrentText(picked);
+        if (!picked.isEmpty()) {
+            m_targetBinaryCombo->setCurrentText(picked);
+            m_binaryArguments->setText(gridlock::core::ConfigManager::instance().programArgs(picked));
+        }
     });
     // Wire workspace-aware folder picker to working directory input.
     connect(m_workingDirBrowseBtn, &QPushButton::clicked, this, [this, wsRoot]() {
@@ -383,7 +401,7 @@ void ProjectSettingsDialog::accept() {
         if (QFileInfo::exists(candidate)) chosenTarget = QFileInfo(candidate).absoluteFilePath();
     }
 
-    // Persist updated project execution parameters into `.gridlock/settings.toml` and QSettings.
+    // Persist updated project execution parameters into `.gridlock/settings.toml` (target-scoped args).
     ps.targetBinary = chosenTarget.toStdString();
     ps.targetArguments = m_binaryArguments->text().trimmed();
     ps.programArguments = ps.targetArguments.toStdString();
@@ -391,6 +409,7 @@ void ProjectSettingsDialog::accept() {
     ps.mpiRanks = m_mpiRanksSpin->value();
     ps.mpiArgs = m_mpiArgsEdit->text().trimmed();
     cfg.saveProjectSettings(ps);
+    if (!chosenTarget.isEmpty()) cfg.setProgramArgs(chosenTarget, ps.targetArguments);
 
     // Persist Programmer's Calculator default bit-width and signed display settings.
     QSettings calcSettings(QStringLiteral("gridlock"), QStringLiteral("debugger"));

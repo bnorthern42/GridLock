@@ -48,7 +48,40 @@ void TestConfig::testSerialization() {
     QVERIFY(content.contains("/app/src/main.cpp"));
     QVERIFY(content.contains("/app/src/utils.cpp"));
     QVERIFY(content.contains("/app/src/solver.cpp"));
-    
+
+    // Verify programArgs are strictly scoped per target binary and workspace (never leaking globally via QSettings).
+    const QString appA = tempDir.filePath(QStringLiteral("app_a"));
+    const QString appB = tempDir.filePath(QStringLiteral("app_b"));
+    manager.setProgramArgs(appA, QStringLiteral("--mesh coarse.msh --steps 10"));
+    QCOMPARE(manager.programArgs(appA), QStringLiteral("--mesh coarse.msh --steps 10"));
+    QVERIFY2(manager.programArgs(appB).isEmpty(), "programArgs configured for app_a must never leak to app_b");
+
+    // Verify global QSettings does not store project/targetArguments and switching to a clean workspace starts empty.
+    QSettings globalSettings(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    QVERIFY2(!globalSettings.contains(QStringLiteral("project/targetArguments")),
+             "programArgs must not be persisted globally in QSettings");
+    QTemporaryDir otherWs;
+    QVERIFY(otherWs.isValid());
+    manager.setWorkspace(otherWs.path());
+    QVERIFY2(manager.loadProjectSettings().targetArguments.isEmpty(),
+             "Switching to a fresh workspace must not inherit previous workspace programArgs");
+    QVERIFY2(manager.programArgs(otherWs.filePath(QStringLiteral("other_bin"))).isEmpty(),
+             "Unconfigured target in another workspace must default to empty programArgs");
+
+    // Switching back to original workspace preserves app_a's args from .gridlock/settings.toml while keeping app_b empty.
+    manager.setWorkspace(tempDir.path());
+    QCOMPARE(manager.programArgs(appA), QStringLiteral("--mesh coarse.msh --steps 10"));
+    QVERIFY(manager.programArgs(appB).isEmpty());
+
+    // Standalone (no workspace) in-memory map also isolates targets cleanly.
+    manager.setWorkspace(QString());
+    const QString standaloneA = QStringLiteral("/tmp/gridlock_standalone_a");
+    const QString standaloneB = QStringLiteral("/tmp/gridlock_standalone_b");
+    manager.setProgramArgs(standaloneA, QStringLiteral("--tol 1e-8"));
+    QCOMPARE(manager.programArgs(standaloneA), QStringLiteral("--tol 1e-8"));
+    QVERIFY(manager.programArgs(standaloneB).isEmpty());
+    manager.setProgramArgs(standaloneA, QString());
+
     QDir::setCurrent(oldCwd);
 }
 

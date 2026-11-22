@@ -209,6 +209,11 @@ class ConfigManager {
   /** @brief Saves per-workspace target and watch settings to `.gridlock/settings.toml`. */
   void saveProjectSettings(const ProjectSettings& ps) const;
 
+  /** @brief Returns CLI arguments strictly scoped to @p targetBinaryPath (workspace TOML or in-memory map; never global QSettings). */
+  QString programArgs(const QString& targetBinaryPath = QString()) const;
+  /** @brief Persists CLI arguments strictly for @p targetBinaryPath in `.gridlock/settings.toml` and in-memory target map. */
+  void setProgramArgs(const QString& targetBinaryPath, const QString& args) const;
+
   /** @brief Sets the active project workspace root directory path. */
   void setWorkspace(const QString& path);
   /** @brief Returns the active project workspace root directory path. */
@@ -342,6 +347,7 @@ class ConfigManager {
   QString m_workspacePath;    ///< Active project workspace root directory.
   QString m_globalConfigPath; ///< Absolute path to the active `config.toml` file.
   QString m_debuggerEngine = QStringLiteral("gdb"); ///< Active local debugger backend engine identifier.
+  mutable QMap<QString, QString> m_targetProgramArgs; ///< In-memory per-target CLI arguments for standalone binaries.
 
   static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
   static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.

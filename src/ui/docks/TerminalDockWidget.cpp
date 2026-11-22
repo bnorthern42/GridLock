@@ -171,9 +171,8 @@ void TerminalDockWidget::clearTerminal() {
     ensureShellStarted();
     m_lastClearSentFormFeed = false;
     if (shellPid() > 0) {
-        // Trigger shell readline/zle `clear-screen` so the active prompt and partial input redraw immediately.
-        m_termWidget->sendText(QStringLiteral("\x0c"));
-        m_lastClearSentFormFeed = true;
+        // Send a clean newline (never Ctrl+L / \x0c) so zsh/bash prints a fresh prompt without triggering ZLE expansion widgets.
+        m_termWidget->sendText(QStringLiteral("\n"));
     }
     m_termWidget->setFocus(Qt::OtherFocusReason);
 }

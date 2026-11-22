@@ -606,7 +606,7 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
         QKeyEvent smartCopyEv(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier); QApplication::sendEvent(&term, &smartCopyEv); QVERIFY2(!term.hasSelection() || !QGuiApplication::clipboard()->text().isEmpty(), "Smart Ctrl+C copy");
         QAction* clearAct = nullptr; for (QAction* a : ctx->actions()) if (a->text() == QStringLiteral("Clear Terminal")) clearAct = a;
         QVERIFY(clearAct != nullptr && term.shellPid() > 0); term.activateWindow(); clearAct->trigger(); QTest::qWait(200); QApplication::processEvents();
-        QVERIFY2(term.lastClearSentFormFeed() && term.shellPid() > 0 && QApplication::focusWidget() && (QApplication::focusWidget() == &term || term.isAncestorOf(QApplication::focusWidget())), "Clear Terminal must send Ctrl+L and retain focus");
+        QVERIFY2(!term.lastClearSentFormFeed() && term.shellPid() > 0 && QApplication::focusWidget() && (QApplication::focusWidget() == &term || term.isAncestorOf(QApplication::focusWidget())), "Clear Terminal must not send Ctrl+L and must retain focus");
         term.selectAllText(); QGuiApplication::clipboard()->clear(); QApplication::sendEvent(&term, &copyEv); QVERIFY2(!QGuiApplication::clipboard()->text().contains(QStringLiteral("GRIDLOCK_COPY_TOKEN")), "Clear Terminal must wipe prior output");
     }
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.

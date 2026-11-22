@@ -137,6 +137,73 @@ void ConfigManager::saveBreakpointConfigs(const QList<BreakpointConfig>& configs
   s.endArray();
 }
 
+namespace {
+/** @brief Normalizes a target executable path to a canonical or clean absolute key for per-target argument storage. */
+QString normalizeTargetArgsKey(const QString& rawPath) {
+  const QString trimmed = rawPath.trimmed();
+  if (trimmed.isEmpty()) return QString();
+  const QFileInfo fi(trimmed);
+  const QString canon = fi.canonicalFilePath();
+  return !canon.isEmpty() ? canon : QDir::cleanPath(fi.absoluteFilePath());
+}
+}  // namespace
+
+/** @brief Returns CLI arguments strictly scoped to @p targetBinaryPath (workspace TOML or in-memory map; never global QSettings). */
+QString ConfigManager::programArgs(const QString& targetBinaryPath) const {
+  const QString key = normalizeTargetArgsKey(targetBinaryPath);
+  if (key.isEmpty()) return QString();
+  if (!m_workspacePath.isEmpty()) {
+    const QString settingsFile = QDir(m_workspacePath).filePath(".gridlock/settings.toml");
+    toml::table tbl;
+    try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
+    if (auto* proj = tbl["project"].as_table()) {
+      if (auto* targetArgsTbl = (*proj)["target_args"].as_table()) {
+        if (auto* node = targetArgsTbl->get(key.toStdString()); node && node->is_string())
+          return QString::fromStdString(node->as_string()->get());
+        if (auto* rawNode = targetArgsTbl->get(targetBinaryPath.trimmed().toStdString()); rawNode && rawNode->is_string())
+          return QString::fromStdString(rawNode->as_string()->get());
+      }
+      const QString savedBinKey = normalizeTargetArgsKey(QString::fromStdString((*proj)["targetBinary"].value_or("")));
+      const QString wsKey = normalizeTargetArgsKey(m_workspacePath);
+      const bool keyInWs = !wsKey.isEmpty() && (key == wsKey || key.startsWith(wsKey + QLatin1Char('/')));
+      if ((!savedBinKey.isEmpty() && savedBinKey == key) || (savedBinKey.isEmpty() && keyInWs)) {
+        const std::string fallback = (*proj)["targetArguments"].value_or((*proj)["programArguments"].value_or(""));
+        if (!fallback.empty()) return QString::fromStdString(fallback);
+      }
+    }
+  }
+  return m_targetProgramArgs.value(key);
+}
+
+/** @brief Persists CLI arguments strictly for @p targetBinaryPath in `.gridlock/settings.toml` and in-memory target map. */
+void ConfigManager::setProgramArgs(const QString& targetBinaryPath, const QString& args) const {
+  const QString key = normalizeTargetArgsKey(targetBinaryPath);
+  if (key.isEmpty()) return;
+  const QString trimmedArgs = args.trimmed();
+  if (trimmedArgs.isEmpty()) m_targetProgramArgs.remove(key);
+  else m_targetProgramArgs.insert(key, trimmedArgs);
+  if (m_workspacePath.isEmpty()) return;
+  QDir dir(m_workspacePath);
+  if (!dir.exists(".gridlock")) dir.mkdir(".gridlock");
+  const QString settingsFile = dir.filePath(".gridlock/settings.toml");
+  toml::table tbl;
+  try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
+  toml::table projTbl;
+  if (auto* existing = tbl["project"].as_table()) projTbl = *existing;
+  toml::table targetArgsTbl;
+  if (auto* existingArgs = projTbl["target_args"].as_table()) targetArgsTbl = *existingArgs;
+  if (trimmedArgs.isEmpty()) targetArgsTbl.erase(key.toStdString());
+  else targetArgsTbl.insert_or_assign(key.toStdString(), trimmedArgs.toStdString());
+  projTbl.insert_or_assign("target_args", targetArgsTbl);
+  const QString savedBinKey = normalizeTargetArgsKey(QString::fromStdString(projTbl["targetBinary"].value_or("")));
+  if (!savedBinKey.isEmpty() && savedBinKey == key) {
+    projTbl.insert_or_assign("programArguments", trimmedArgs.toStdString());
+    projTbl.insert_or_assign("targetArguments", trimmedArgs.toStdString());
+  }
+  tbl.insert_or_assign("project", projTbl);
+  if (std::ofstream out(settingsFile.toStdString()); out.is_open()) out << tbl;
+}
+
 /** @brief Loads target binary settings from `.gridlock/settings.toml` and watches from `workspace.toml`. */
 ProjectSettings ConfigManager::loadProjectSettings() const {
   const DebuggerSettings ds = getDebuggerSettings();
@@ -146,7 +213,7 @@ ProjectSettings ConfigManager::loadProjectSettings() const {
   if (m_workspacePath.isEmpty()) {
     QSettings s(kOrg, kApp);
     ps.targetBinary = s.value("project/targetBinary", "").toString().toStdString();
-    ps.targetArguments = s.value("project/targetArguments", "").toString();
+    ps.targetArguments = programArgs(QString::fromStdString(ps.targetBinary));
     ps.programArguments = ps.targetArguments.toStdString();
     ps.workingDirectory = s.value("project/workingDirectory", "").toString().toStdString();
     ps.mpiRanks = qMax(1, s.value("project/mpiRanks", ds.defaultRanks).toInt());
@@ -158,10 +225,20 @@ ProjectSettings ConfigManager::loadProjectSettings() const {
   try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
   if (auto* proj = tbl["project"].as_table()) {
     ps.targetBinary = (*proj)["targetBinary"].value_or("");
-    ps.programArguments = (*proj)["programArguments"].value_or("");
-    const std::string tArgs = (*proj)["targetArguments"].value_or(ps.programArguments);
-    ps.targetArguments = QString::fromStdString(tArgs);
-    if (ps.programArguments.empty()) ps.programArguments = tArgs;
+    const QString binKey = normalizeTargetArgsKey(QString::fromStdString(ps.targetBinary));
+    QString scopedArgs;
+    if (!binKey.isEmpty()) {
+      if (auto* targetArgsTbl = (*proj)["target_args"].as_table()) {
+        if (auto* node = targetArgsTbl->get(binKey.toStdString()); node && node->is_string())
+          scopedArgs = QString::fromStdString(node->as_string()->get());
+      }
+    }
+    if (scopedArgs.isEmpty()) {
+      const std::string fallback = (*proj)["targetArguments"].value_or((*proj)["programArguments"].value_or(""));
+      scopedArgs = QString::fromStdString(fallback);
+    }
+    ps.targetArguments = scopedArgs;
+    ps.programArguments = scopedArgs.toStdString();
     ps.environmentVariables = (*proj)["environmentVariables"].value_or("");
     ps.workingDirectory = (*proj)["workingDirectory"].value_or("");
     ps.customGdbPath = (*proj)["customGdbPath"].value_or("gdb");
@@ -183,10 +260,15 @@ ProjectSettings ConfigManager::loadProjectSettings() const {
 
 /** @brief Persists project target settings to `.gridlock/settings.toml` and watches to `workspace.toml`. */
 void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
-  const QString effArgs = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+  const QString effArgs = (!ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments)).trimmed();
+  const QString binKey = normalizeTargetArgsKey(QString::fromStdString(ps.targetBinary));
+  if (!binKey.isEmpty()) {
+    if (effArgs.isEmpty()) m_targetProgramArgs.remove(binKey);
+    else m_targetProgramArgs.insert(binKey, effArgs);
+  }
   QSettings s(kOrg, kApp);
   s.setValue("project/targetBinary", QString::fromStdString(ps.targetBinary));
-  s.setValue("project/targetArguments", effArgs);
+  s.remove("project/targetArguments");  // Never persist program arguments globally across targets/workspaces.
   s.setValue("project/workingDirectory", QString::fromStdString(ps.workingDirectory));
   s.setValue("project/mpiRanks", ps.mpiRanks > 0 ? ps.mpiRanks : getDefaultRanks());
   s.setValue("project/mpiArgs", ps.mpiArgs);
@@ -197,9 +279,17 @@ void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
   toml::table tbl;
   try { tbl = toml::parse_file(settingsFile.toStdString()); } catch (...) {}
   toml::table projTbl;
+  if (auto* existing = tbl["project"].as_table()) projTbl = *existing;
+  toml::table targetArgsTbl;
+  if (auto* existingArgs = projTbl["target_args"].as_table()) targetArgsTbl = *existingArgs;
+  if (!binKey.isEmpty()) {
+    if (effArgs.isEmpty()) targetArgsTbl.erase(binKey.toStdString());
+    else targetArgsTbl.insert_or_assign(binKey.toStdString(), effArgs.toStdString());
+  }
   projTbl.insert_or_assign("targetBinary", ps.targetBinary.empty() ? "" : ps.targetBinary);
   projTbl.insert_or_assign("programArguments", effArgs.toStdString());
   projTbl.insert_or_assign("targetArguments", effArgs.toStdString());
+  projTbl.insert_or_assign("target_args", targetArgsTbl);
   projTbl.insert_or_assign("environmentVariables", ps.environmentVariables.empty() ? "" : ps.environmentVariables);
   projTbl.insert_or_assign("workingDirectory", ps.workingDirectory.empty() ? "" : ps.workingDirectory);
   projTbl.insert_or_assign("customGdbPath", ps.customGdbPath.empty() ? "gdb" : ps.customGdbPath);

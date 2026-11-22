@@ -10,10 +10,10 @@ Dockable debugger and terminal panels integrated into `MainWindow`'s right and b
 - `VariablesDockWidget.hpp` (`156` lines), `VariablesDockWidget.cpp`:
   - Hierarchical local/watch tree wrapping `VariableTreeModel` and `QSortFilterProxyModel`.
   - Supports MPI rank switching, substring filtering, inline value editing, and lazy struct/pointer child expansion.
-- `TerminalDockWidget.hpp` (`198` lines), `TerminalDockWidget.cpp` (`469` lines):
+- `TerminalDockWidget.hpp` (`198` lines), `TerminalDockWidget.cpp` (`467` lines):
   - Embedded VT100/truecolor PTY terminal emulator wrapping `QTermWidget`.
   - Manages shell startup/teardown, monospace font sizing, and color-scheme updates.
-  - Implements `sendCommand()` automation, scrollback buffers, compact `QMenu#terminalContextMenu` (`Copy`, `Paste`, `Select All`, `Clear Terminal` with `\x0c` prompt redraw), and clipboard `Ctrl+Shift+C` / `Ctrl+Shift+V` shortcuts.
+  - Implements `sendCommand()` automation, scrollback buffers, compact `QMenu#terminalContextMenu` (`Copy`, `Paste`, `Select All`, `Clear Terminal` with clean newline prompt redraw), and clipboard `Ctrl+Shift+C` / `Ctrl+Shift+V` shortcuts.
 
 ## Expected Behavior & Invariants
 
@@ -23,7 +23,7 @@ Dockable debugger and terminal panels integrated into `MainWindow`'s right and b
   - `TerminalDockWidget` cleanly closes its child PTY shell prior to widget destruction so offscreen tests and app shutdown never hang on orphaned shell processes.
 - **Clipboard & Compact Context Menu Reliability**:
   - `Ctrl+Shift+C` and `Ctrl+Shift+V` intercept key events cleanly and interact directly with `QGuiApplication::clipboard()` without shell escape swallowing (`tests/ui/test_ui_aux.cpp`).
-  - `clearTerminal()` clears scrollback/output, writes `\x0c` (`Ctrl+L`) when the PTY shell is active so the prompt redraws immediately, and retains keyboard focus (`tests/ui/test_ui_aux.cpp`).
+  - `clearTerminal()` clears scrollback/output, writes `\n` (never `\x0c`) when the PTY shell is active so `zsh`/`bash` prints a fresh prompt without triggering Zsh `Ctrl+L` variable-expansion widgets, and retains keyboard focus (`tests/ui/test_ui_aux.cpp`).
   - `enforceMonospaceOnChildren()` and `eventFilter()` skip `QMenu` and `isWindow()` popups so `#terminalContextMenu` preserves its compact `Qt::Popup` `sizeHint()` and renders `Copy`, `Paste`, `Select All`, and `Clear Terminal` with legible disabled contrast (`tests/ui/test_ui_viz_and_ux.cpp`).
 - **Verification**:
   - Run `meson test -C builddir ui_tests --print-errorlogs` after modifying dock layouts, terminal PTY handling, or variable filtering.

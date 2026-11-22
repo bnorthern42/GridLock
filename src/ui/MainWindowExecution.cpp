@@ -83,7 +83,11 @@ void MainWindow::syncCoordinatorWithConfig() {
     auto pushExecutionContext = [&]() {
         if (!m_coordinator) return;
         const auto ps = cfg.loadProjectSettings();
-        const QString args = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+        const QString targetBin = activeTargetBinaryPath();
+        QString args = cfg.programArgs(targetBin);
+        if (args.isEmpty() && targetBin.isEmpty()) {
+            args = !ps.targetArguments.isEmpty() ? ps.targetArguments : QString::fromStdString(ps.programArguments);
+        }
         const QString wd = QString::fromStdString(ps.workingDirectory).trimmed();
         m_coordinator->setTargetExecutionContext(args, wd.isEmpty() ? m_activeWorkspaceDir : wd);
     };
