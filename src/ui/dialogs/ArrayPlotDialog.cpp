@@ -834,21 +834,15 @@ void ArrayPlotDialog::onTargetStopped(int rankId) {
 }
 
 QString ArrayPlotDialog::buildGnuplotScript(const QString& dataPath) const {
-    QString safeTitle = expression();
-    safeTitle.replace(QLatin1Char('\''), QLatin1Char(' '));
-    QString script;
-    QTextStream sout(&script);
+    QString safeTitle = expression(); safeTitle.replace(QLatin1Char('\''), QLatin1Char(' '));
+    QString script; QTextStream sout(&script);
     if (m_rows > 1) {
-        sout << "set title 'GridLock 2D Field: " << safeTitle << " (Rank " << m_focusedRank << ")'\n"
-             << "set xlabel 'Column (x)'\nset ylabel 'Row (y)'\n";
+        sout << "set title 'GridLock 2D Field: " << safeTitle << " (Rank " << m_focusedRank << ")'\nset xlabel 'Column (x)'\nset ylabel 'Row (y)'\n";
         if (isLogScale()) sout << "set logscale zcb\n";
-        sout << "set pm3d at bs\nset contour base\nset mouse\n"
-             << "splot '" << dataPath << "' matrix with pm3d title 'Rank " << m_focusedRank << "'\n";
+        sout << "set pm3d at bs\nset contour base\nset mouse\nsplot '" << dataPath << "' matrix with pm3d title 'Rank " << m_focusedRank << "'\n";
     } else {
-        sout << "set grid\n";
-        if (isLogScale()) sout << "set logscale y\n";
-        sout << "set title 'GridLock Array Plot: " << safeTitle << "'\n"
-             << "plot '" << dataPath << "' using 1:2 with linespoints title 'Rank " << m_focusedRank << "'\n";
+        sout << "set grid\n"; if (isLogScale()) sout << "set logscale y\n";
+        sout << "set title 'GridLock Array Plot: " << safeTitle << "'\nplot '" << dataPath << "' using 1:2 with linespoints title 'Rank " << m_focusedRank << "'\n";
     }
     return script;
 }
@@ -858,12 +852,10 @@ bool ArrayPlotDialog::exportCsv(const QString& filePath) const {
     QFile file(filePath); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream out(&file);
     if (plotMode() == PlotMode::ScalarHistory) {
-        out << "stop,value\n";
-        for (int i = 0; i < m_currentSamples.size(); ++i) out << i << "," << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
+        out << "stop,value\n"; for (int i = 0; i < m_currentSamples.size(); ++i) out << i << "," << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
     } else if (m_rows > 1) {
         out << "row,col,value\n";
-        for (int r = 0; r < m_rows; ++r) for (int c = 0; c < m_cols; ++c)
-            out << r << "," << c << "," << QString::number(m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c), 'g', 12) << "\n";
+        for (int r = 0; r < m_rows; ++r) for (int c = 0; c < m_cols; ++c) out << r << "," << c << "," << QString::number(m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c), 'g', 12) << "\n";
     } else {
         out << "index,value,prev_value,delta\n";
         for (int i = 0; i < m_currentSamples.size(); ++i) {
@@ -874,9 +866,7 @@ bool ArrayPlotDialog::exportCsv(const QString& filePath) const {
     return true;
 }
 
-bool ArrayPlotDialog::savePng(const QString& filePath) {
-    return m_canvas && !filePath.trimmed().isEmpty() && m_canvas->grab().save(filePath, "PNG");
-}
+bool ArrayPlotDialog::savePng(const QString& filePath) { return m_canvas && !filePath.trimmed().isEmpty() && m_canvas->grab().save(filePath, "PNG"); }
 
 QString ArrayPlotDialog::resolveGnuplotExecutable(const QString& overridePath) {
     const QString custom = overridePath.trimmed();
@@ -890,16 +880,9 @@ bool ArrayPlotDialog::openInGnuplot(bool showMessageBox) {
         setHoverSummaryText(status);
         if (allowModal) { if (isInfo) QMessageBox::information(this, title, detail); else QMessageBox::warning(this, title, detail); }
     };
-    if (m_currentSamples.isEmpty()) {
-        report(QStringLiteral("Cannot open Gnuplot: no plotted samples available."), tr("Open in Gnuplot"), tr("Plot an array expression first before opening in Gnuplot."), true);
-        return false;
-    }
+    if (m_currentSamples.isEmpty()) { report(QStringLiteral("Cannot open Gnuplot: no plotted samples available."), tr("Open in Gnuplot"), tr("Plot an array expression first before opening in Gnuplot."), true); return false; }
     const QString bin = resolveGnuplotExecutable(m_gnuplotExecutableOverride);
-    if (bin.isEmpty()) {
-        report(QStringLiteral("Gnuplot executable not found in PATH."), tr("Gnuplot Not Found"),
-               tr("Could not find 'gnuplot' on PATH.\n\nInstall it with:\n  sudo pacman -S gnuplot\n  sudo dnf install gnuplot\n  sudo apt install gnuplot\n\nOr export data using Export CSV."), false);
-        return false;
-    }
+    if (bin.isEmpty()) { report(QStringLiteral("Gnuplot executable not found in PATH."), tr("Gnuplot Not Found"), tr("Could not find 'gnuplot' on PATH.\n\nInstall it with:\n  sudo pacman -S gnuplot\n  sudo dnf install gnuplot\n  sudo apt install gnuplot\n\nOr export data using Export CSV."), false); return false; }
     const QString dataPath = QDir::temp().filePath(QStringLiteral("gridlock_array_plot.dat"));
     const QString scriptPath = QDir::temp().filePath(QStringLiteral("gridlock_array_plot.gp"));
     QFile df(dataPath);
