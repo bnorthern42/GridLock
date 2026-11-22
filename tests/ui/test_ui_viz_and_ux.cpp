@@ -72,7 +72,15 @@ void TestMainWindowUI::testTerminalDialogEventFilterLightModeContrastAndDocsetAu
     QFont proportionalFont(QStringLiteral("Cantarell"), 11); proportionalFont.setFixedPitch(false);
     for (QWidget* child : terminalDock->findChildren<QWidget*>()) { child->setFont(proportionalFont); QEvent fe(QEvent::FontChange); QApplication::sendEvent(child, &fe); QEvent se(QEvent::StyleChange); QApplication::sendEvent(child, &se); }
     QApplication::processEvents(); QVERIFY2(terminalDock->areAllChildWidgetsFixedPitch(), "TerminalDockWidget eventFilter must restore fixed-pitch font");
-    for (QWidget* child : terminalDock->findChildren<QWidget*>()) if (child->isVisible() && child->width() > 80) QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100, qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
+    for (QWidget* child : terminalDock->findChildren<QWidget*>()) if (!child->isWindow() && child->isVisible() && child->width() > 80) QVERIFY2(child->width() >= (terminalDock->width() * 95) / 100, qPrintable(QStringLiteral("Child %1 shrunk to %2px vs %3px").arg(child->metaObject()->className()).arg(child->width()).arg(terminalDock->width())));
+    { std::unique_ptr<QMenu> menu(terminalDock->createContextMenu(terminalDock)); QVERIFY(menu != nullptr && (menu->windowFlags() & Qt::Popup));
+      QVERIFY2(menu->sizeHint().width() > 80 && menu->sizeHint().width() <= 320 && menu->sizeHint().height() > 40 && menu->sizeHint().height() <= 260, qPrintable(QStringLiteral("Menu sizeHint=%1x%2").arg(menu->sizeHint().width()).arg(menu->sizeHint().height())));
+      QMap<QString, QAction*> acts; for (QAction* a : menu->actions()) if (a && !a->isSeparator()) acts.insert(a->text(), a);
+      QVERIFY(acts.contains(QStringLiteral("Copy")) && acts.contains(QStringLiteral("Paste")) && acts.contains(QStringLiteral("Select All")) && acts.contains(QStringLiteral("Clear Terminal")));
+      QVERIFY(acts[QStringLiteral("Copy")]->isVisible() && !acts[QStringLiteral("Copy")]->isEnabled() && acts[QStringLiteral("Copy")]->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C) && acts[QStringLiteral("Paste")]->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+      menu->popup(terminalDock->mapToGlobal(QPoint(32, 32))); QApplication::processEvents();
+      QVERIFY2(menu->width() > 80 && menu->width() <= 320 && menu->height() > 40 && menu->height() <= 260 && terminalDock->areAllChildWidgetsFixedPitch(), qPrintable(QStringLiteral("Popup menu stretched to %1x%2").arg(menu->width()).arg(menu->height())));
+      menu->hide(); }
     prefsDialog.close(); gridlock::core::ThemeManager::instance().setDarkMode(false); explorer->setSymbols({{QStringLiteral("sym.main"), 0x00401120ULL, 64}}); QApplication::processEvents();
     auto* symTable = explorer->findChild<QTableWidget*>(); QVERIFY(symTable && symTable->rowCount() > 0 && symTable->item(0, 0));
     const auto luminance = [](const QColor& c) { return (299 * c.red() + 587 * c.green() + 114 * c.blue()) / 1000; };

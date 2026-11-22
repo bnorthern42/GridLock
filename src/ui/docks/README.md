@@ -10,10 +10,10 @@ Dockable debugger and terminal panels integrated into `MainWindow`'s right and b
 - `VariablesDockWidget.hpp` (`156` lines), `VariablesDockWidget.cpp`:
   - Hierarchical local/watch tree wrapping `VariableTreeModel` and `QSortFilterProxyModel`.
   - Supports MPI rank switching, substring filtering, inline value editing, and lazy struct/pointer child expansion.
-- `TerminalDockWidget.hpp` (`194` lines), `TerminalDockWidget.cpp`:
+- `TerminalDockWidget.hpp` (`195` lines), `TerminalDockWidget.cpp` (`459` lines):
   - Embedded VT100/truecolor PTY terminal emulator wrapping `QTermWidget`.
   - Manages shell startup/teardown, monospace font sizing, and color-scheme updates.
-  - Implements `sendCommand()` automation, scrollback buffers, and clipboard `Ctrl+Shift+C` / `Ctrl+Shift+V` shortcuts.
+  - Implements `sendCommand()` automation, scrollback buffers, compact `QMenu#terminalContextMenu` (`Copy`, `Paste`, `Select All`, `Clear Terminal`), and clipboard `Ctrl+Shift+C` / `Ctrl+Shift+V` shortcuts.
 
 ## Expected Behavior & Invariants
 
@@ -21,8 +21,9 @@ Dockable debugger and terminal panels integrated into `MainWindow`'s right and b
   - `CallStackDockWidget` validates frame rows and instruction addresses before emitting frame/thread change signals so views never jump to unmapped `0x0` locations.
 - **Deterministic PTY Lifecycle & Teardown**:
   - `TerminalDockWidget` cleanly closes its child PTY shell prior to widget destruction so offscreen tests and app shutdown never hang on orphaned shell processes.
-- **Clipboard Copy/Paste Reliability**:
+- **Clipboard & Compact Context Menu Reliability**:
   - `Ctrl+Shift+C` and `Ctrl+Shift+V` intercept key events cleanly and interact directly with `QGuiApplication::clipboard()` without shell escape swallowing (`tests/ui/test_ui_aux.cpp`).
+  - `enforceMonospaceOnChildren()` and `eventFilter()` skip `QMenu` and `isWindow()` popups so `#terminalContextMenu` preserves its compact `Qt::Popup` `sizeHint()` and renders `Copy`, `Paste`, `Select All`, and `Clear Terminal` with legible disabled contrast (`tests/ui/test_ui_viz_and_ux.cpp`).
 - **Verification**:
   - Run `meson test -C builddir ui_tests --print-errorlogs` after modifying dock layouts, terminal PTY handling, or variable filtering.
 

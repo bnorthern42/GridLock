@@ -185,6 +185,7 @@ private:
     QString m_lastPastedText;              ///< Most recent clipboard payload pasted into the terminal.
     QString m_currentWorkingDir;           ///< Canonical active working directory for the shell PTY.
     bool m_applyingFontGuard{false};       ///< Reentrancy guard preventing recursive FontChange loops.
+    bool m_showingContextMenu{false};      ///< Reentrancy guard preventing duplicate nested right-click popups.
     bool m_shellStarted{false};            ///< True once m_termWidget->startShellProgram() has been invoked.
     bool m_pendingCdSync{false};           ///< Ensures active working directory is synced before the next shell command.
     int m_scrollbackLines{1000};           ///< Configured scrollback buffer capacity in lines.
