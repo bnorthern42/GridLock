@@ -156,12 +156,14 @@ public:
     void pasteFromClipboard();
     /** @brief Selects all visible and scrollback text in the embedded terminal. */
     void selectAllText();
-    /** @brief Clears the embedded terminal screen buffer. */
+    /** @brief Clears the embedded terminal screen/scrollback, sends Ctrl+L (`\x0c`) to redraw the active shell prompt, and restores focus. */
     void clearTerminal();
     /** @brief Builds a themed right-click context menu with Copy, Paste, Select All, and Clear Terminal. */
     QMenu* createContextMenu(QWidget* parent = nullptr);
     /** @brief Returns the most recent text pasted into the terminal via pasteFromClipboard(). */
     QString lastPastedText() const { return m_lastPastedText; }
+    /** @brief Returns true if the most recent clearTerminal() call wrote `\x0c` to an active PTY shell. */
+    bool lastClearSentFormFeed() const { return m_lastClearSentFormFeed; }
 
 protected:
     /** @brief Lazily launches the interactive shell PTY when the Terminal tab is first shown. */
@@ -188,6 +190,7 @@ private:
     bool m_showingContextMenu{false};      ///< Reentrancy guard preventing duplicate nested right-click popups.
     bool m_shellStarted{false};            ///< True once m_termWidget->startShellProgram() has been invoked.
     bool m_pendingCdSync{false};           ///< Ensures active working directory is synced before the next shell command.
+    bool m_lastClearSentFormFeed{false};   ///< True when the most recent clearTerminal() wrote `\x0c` to an active PTY.
     int m_scrollbackLines{1000};           ///< Configured scrollback buffer capacity in lines.
     QElapsedTimer m_shellStartTimer;       ///< Tracks elapsed time since startShellProgram() for initial PTY readiness.
 };

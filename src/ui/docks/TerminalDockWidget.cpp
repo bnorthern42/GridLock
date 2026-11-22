@@ -166,7 +166,16 @@ void TerminalDockWidget::selectAllText() {
 }
 
 void TerminalDockWidget::clearTerminal() {
-    if (m_termWidget) m_termWidget->clear();
+    if (!m_termWidget) return;
+    m_termWidget->clear();
+    ensureShellStarted();
+    m_lastClearSentFormFeed = false;
+    if (shellPid() > 0) {
+        // Trigger shell readline/zle `clear-screen` so the active prompt and partial input redraw immediately.
+        m_termWidget->sendText(QStringLiteral("\x0c"));
+        m_lastClearSentFormFeed = true;
+    }
+    m_termWidget->setFocus(Qt::OtherFocusReason);
 }
 
 QMenu* TerminalDockWidget::createContextMenu(QWidget* parent) {
