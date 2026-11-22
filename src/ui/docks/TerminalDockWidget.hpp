@@ -138,6 +138,17 @@ public:
      */
     bool isShellStarted() const { return m_shellStarted; }
 
+    /**
+     * @brief Returns the active PTY shell OS PID, or 0 if no shell process is running.
+     */
+    int shellPid() const;
+
+    /**
+     * @brief Gracefully exits and reaps the embedded PTY shell process (SIGTERM -> SIGKILL + QProcess::waitForFinished)
+     *        so QTermWidget::Session::close() never logs 'did not die with SIGHUP'.
+     */
+    void shutdownTerminalSession();
+
 protected:
     /**
      * @brief Lazily launches the interactive shell PTY when the Terminal tab is first shown.

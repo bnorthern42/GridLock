@@ -13,9 +13,11 @@
 #include <QChildEvent>
 #include <QDir>
 #include <QEvent>
+#include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QFontInfo>
+#include <QProcess>
 #include <QProcessEnvironment>
 #include <QSizePolicy>
 #include <QThread>
@@ -104,23 +106,62 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
 /** @brief Disconnects QTermWidget signals and terminates the PTY shell process before child destruction. */
 TerminalDockWidget::~TerminalDockWidget() {
     removeEventFilter(this);
-    if (m_termWidget) {
-        m_termWidget->blockSignals(true);
-        m_termWidget->disconnect(this);
-        for (QObject* child : m_termWidget->findChildren<QObject*>()) {
-            child->blockSignals(true);
-            child->disconnect(this);
-        }
-        const int shellPid = m_termWidget->getShellPID();
-        if (shellPid > 0 && ::kill(shellPid, 0) == 0) {
-            ::kill(-shellPid, SIGHUP);
-            ::kill(shellPid, SIGTERM);
-            for (int i = 0; i < 8 && ::kill(shellPid, 0) == 0; ++i) QThread::msleep(10);
-            if (::kill(shellPid, 0) == 0) { ::kill(-shellPid, SIGKILL); ::kill(shellPid, SIGKILL); }
-        }
-        delete m_termWidget;
-        m_termWidget = nullptr;
+    shutdownTerminalSession();
+    delete m_termWidget;
+    m_termWidget = nullptr;
+}
+
+int TerminalDockWidget::shellPid() const {
+    if (!m_termWidget) return 0;
+    const int pid = m_termWidget->getShellPID();
+    if (pid <= 0 || ::kill(pid, 0) != 0) return 0;
+    QFile statusFile(QStringLiteral("/proc/%1/status").arg(pid));
+    if (statusFile.open(QIODevice::ReadOnly) && statusFile.readAll().contains("State:\tZ")) return 0;
+    return pid;
+}
+
+void TerminalDockWidget::shutdownTerminalSession() {
+    if (!m_termWidget) return;
+    m_termWidget->disconnect(this);
+    for (QObject* child : m_termWidget->findChildren<QObject*>()) {
+        if (child) child->disconnect(this);
     }
+    const int pid = m_termWidget->getShellPID();
+    const auto ptyProcs = m_termWidget->findChildren<QProcess*>();
+    bool anyRunning = (pid > 0 && ::kill(pid, 0) == 0);
+    for (QProcess* proc : ptyProcs) {
+        if (proc && proc->state() != QProcess::NotRunning) anyRunning = true;
+    }
+    if (anyRunning) {
+        m_termWidget->sendText(QStringLiteral("\x03\x04\nexit\n"));
+        if (pid > 0) {
+            ::kill(-pid, SIGTERM);
+            ::kill(pid, SIGTERM);
+        }
+        for (QProcess* proc : ptyProcs) {
+            if (proc && proc->state() != QProcess::NotRunning) {
+                proc->waitForFinished(120);
+            }
+        }
+        if (ptyProcs.isEmpty() && pid > 0) {
+            for (int i = 0; i < 12 && ::kill(pid, 0) == 0; ++i) QThread::msleep(10);
+        }
+        if (pid > 0 && ::kill(pid, 0) == 0) {
+            ::kill(-pid, SIGKILL);
+            ::kill(pid, SIGKILL);
+        }
+        for (QProcess* proc : ptyProcs) {
+            if (proc && proc->state() != QProcess::NotRunning) {
+                proc->kill();
+                proc->waitForFinished(150);
+            }
+        }
+        if (pid > 0) {
+            int st = 0;
+            ::waitpid(pid, &st, WNOHANG);
+        }
+    }
+    m_termWidget->blockSignals(true);
 }
 
 void TerminalDockWidget::ensureShellStarted() {

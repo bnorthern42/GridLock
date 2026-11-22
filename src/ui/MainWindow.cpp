@@ -784,8 +784,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     settings.setValue("MainWindow/Geometry_v9", saveGeometry()); settings.setValue("MainWindow/State_v9", saveState());
     for (auto* splitter : findChildren<QSplitter*>()) if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
   }
-  // Synchronously disconnect and reap active debug/MPI sessions before QMainWindow tears down docks/widgets.
+  // Synchronously disconnect and reap active debug/MPI sessions and embedded terminal PTY before QMainWindow tears down docks/widgets.
   shutdownActiveSessionSync();
+  if (m_terminalDock) m_terminalDock->shutdownTerminalSession();
   if (m_lspCoordinator) { QObject::disconnect(m_lspCoordinator, nullptr, this, nullptr); m_lspCoordinator->stop(); }
   if (m_editorTabManager) QObject::disconnect(m_editorTabManager, nullptr, this, nullptr);
   QObject::disconnect(&gridlock::core::ClangdLspClient::instance(), nullptr, this, nullptr);

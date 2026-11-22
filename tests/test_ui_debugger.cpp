@@ -787,26 +787,27 @@ void TestMainWindowUI::testBreakpointLifecycleAndCommands() {
     pal->setFilterText(QStringLiteral("> rbreak")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("rbreak"), Qt::CaseInsensitive)); QTest::keyClick(pal->inputEdit(), Qt::Key_Escape); mw.setCoordinator(nullptr);
 }
 static void testCleanExitWhileTargetRunning() {
+    static QStringList s_exitWarnings; s_exitWarnings.clear();
+    const QtMessageHandler prevH = qInstallMessageHandler([](QtMsgType t, const QMessageLogContext&, const QString& m) { if (t == QtWarningMsg) s_exitWarnings.append(m); });
+    struct ExitWarnGuard { QtMessageHandler p; ~ExitWarnGuard() { qInstallMessageHandler(p); } } wg{prevH};
     QTemporaryDir spinDir; QVERIFY(spinDir.isValid()); const QString spinCpp = spinDir.filePath(QStringLiteral("spin_exit.cpp"));
     { QFile sf(spinCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("#include <unistd.h>\nint main() { while (true) { usleep(20000); } return 0; }\n"); }
     auto& cfg = gridlock::core::ConfigManager::instance(); cfg.setDebuggerEngine(QStringLiteral("gdb")); cfg.setGlobalMpiArgs(QStringLiteral("--oversubscribe"));
     auto isGone = [](qint64 pid) { if (pid <= 0 || ::kill(static_cast<pid_t>(pid), 0) != 0) return true; QFile f(QStringLiteral("/proc/%1/status").arg(pid)); return !f.open(QIODevice::ReadOnly) || f.readAll().contains("State:\tZ"); };
     const int ranks = (!QStandardPaths::findExecutable(QStringLiteral("mpirun")).isEmpty() || !QStandardPaths::findExecutable(QStringLiteral("mpiexec")).isEmpty()) ? 2 : 1;
     auto mw = std::make_unique<gridlock::ui::MainWindow>(); mw->resize(1440, 900); mw->show(); QApplication::processEvents();
-    if (auto* td = mw->findChild<gridlock::ui::TerminalDockWidget*>()) td->ensureShellStarted();
-    auto* tc = mw->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rs = mw->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    QVERIFY(tc && rs); rs->setValue(ranks); tc->insertItem(0, QStringLiteral("spin_exit"), spinCpp); QVERIFY(mw->selectTargetByName(QStringLiteral("spin_exit")) && mw->ensureTargetBinaryCompiled());
+    auto* td = mw->findChild<gridlock::ui::TerminalDockWidget*>(); QVERIFY(td != nullptr); td->ensureShellStarted(); td->sendCommand(QStringLiteral("trap '' HUP")); const int ptyPid = td->shellPid(); QVERIFY(ptyPid > 0 && !isGone(ptyPid));
+    auto* tc = mw->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rs = mw->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")); QVERIFY(tc && rs); rs->setValue(ranks); tc->insertItem(0, QStringLiteral("spin_exit"), spinCpp); QVERIFY(mw->selectTargetByName(QStringLiteral("spin_exit")) && mw->ensureTargetBinaryCompiled());
     if (auto* sv = mw->sourceCodeView()) for (int bp : sv->breakpoints().values()) sv->toggleBreakpoint(bp);
-    mw->startTargetWorkflow(); QVERIFY(mw->isDebugSessionActive() && mw->coordinator() != nullptr);
-    QTRY_VERIFY_WITH_TIMEOUT(mw->coordinator()->getPidForRank(0) > 0 && (ranks < 2 || mw->coordinator()->getPidForRank(1) > 0), 8000);
-    const qint64 pid0 = mw->coordinator()->getPidForRank(0), pid1 = (ranks >= 2) ? mw->coordinator()->getPidForRank(1) : 0;
-    QVERIFY(::kill(static_cast<pid_t>(pid0), 0) == 0 && (ranks < 2 || ::kill(static_cast<pid_t>(pid1), 0) == 0));
-    QVERIFY(mw->close()); QApplication::processEvents(); QVERIFY(mw->isShuttingDown() && !mw->isDebugSessionActive()); mw.reset(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(isGone(pid0) && isGone(pid1), 2500);
+    mw->startTargetWorkflow(); QVERIFY(mw->isDebugSessionActive() && mw->coordinator() != nullptr); QTRY_VERIFY_WITH_TIMEOUT(mw->coordinator()->getPidForRank(0) > 0 && (ranks < 2 || mw->coordinator()->getPidForRank(1) > 0), 8000);
+    const qint64 pid0 = mw->coordinator()->getPidForRank(0), pid1 = (ranks >= 2) ? mw->coordinator()->getPidForRank(1) : 0; QVERIFY(::kill(static_cast<pid_t>(pid0), 0) == 0 && (ranks < 2 || ::kill(static_cast<pid_t>(pid1), 0) == 0));
+    QVERIFY(mw->close()); QApplication::processEvents(); QVERIFY(mw->isShuttingDown() && !mw->isDebugSessionActive() && td->shellPid() == 0 && isGone(ptyPid)); mw.reset(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(isGone(pid0) && isGone(pid1) && isGone(ptyPid), 2500);
     auto mw2 = std::make_unique<gridlock::ui::MainWindow>(); mw2->resize(1280, 800); mw2->show(); QApplication::processEvents();
-    auto* tc2 = mw2->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rs2 = mw2->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
-    QVERIFY(tc2 && rs2); rs2->setValue(1); tc2->insertItem(0, QStringLiteral("spin_exit"), spinCpp); QVERIFY(mw2->selectTargetByName(QStringLiteral("spin_exit")) && mw2->ensureTargetBinaryCompiled());
+    auto* tc2 = mw2->findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector")); auto* rs2 = mw2->findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin")); QVERIFY(tc2 && rs2); rs2->setValue(1); tc2->insertItem(0, QStringLiteral("spin_exit"), spinCpp); QVERIFY(mw2->selectTargetByName(QStringLiteral("spin_exit")) && mw2->ensureTargetBinaryCompiled());
     mw2->startTargetWorkflow(); QTRY_VERIFY_WITH_TIMEOUT(mw2->isDebugSessionActive() && mw2->coordinator() && mw2->coordinator()->getPidForRank(0) > 0, 8000);
-    const qint64 pidDirect = mw2->coordinator()->getPidForRank(0); QVERIFY(::kill(static_cast<pid_t>(pidDirect), 0) == 0); mw2.reset(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(isGone(pidDirect), 2500);
+    const qint64 pidDirect = mw2->coordinator()->getPidForRank(0), ptyPid2 = mw2->findChild<gridlock::ui::TerminalDockWidget*>() ? mw2->findChild<gridlock::ui::TerminalDockWidget*>()->shellPid() : 0;
+    QVERIFY(::kill(static_cast<pid_t>(pidDirect), 0) == 0 && ptyPid2 > 0); mw2.reset(); QApplication::processEvents(); QTRY_VERIFY_WITH_TIMEOUT(isGone(pidDirect) && isGone(ptyPid2), 2500);
+    for (const QString& w : s_exitWarnings) QVERIFY2(!w.contains(QStringLiteral("did not die with SIGHUP"), Qt::CaseInsensitive), qPrintable(w));
 }
 static void testMultiRankScopePauseAllAndRackFilter() {
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
