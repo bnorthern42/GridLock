@@ -4,17 +4,7 @@
 #include "ui/dialogs/PointerGraphDialog.hpp"
 #include "ui/widgets/FileIconProvider.hpp"
 #include <cmath>
-#include <QDirIterator>
-#include <QElapsedTimer>
-#include <QSignalSpy>
-#include <QStandardPaths>
 #include <QtWidgets>
-#include <QTemporaryDir>
-#include <QTextBlock>
-#include <QTextBrowser>
-#include <QTextLayout>
-#include <QToolBar>
-#include <QTreeView>
 #include <QtTest/QtTest>
 
 #include "../src/core/hpc/GdbRankCoordinator.hpp"
@@ -597,6 +587,23 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
         gridlock::ui::ProjectExplorerWidget peVerify; peVerify.resize(280, 460); peVerify.setRootPath(iconDir.path()); peVerify.show(); QApplication::processEvents();
         auto* tv = peVerify.findChild<QTreeView*>(); QVERIFY2(tv && !QFontInfo(tv->font()).fixedPitch(), "ProjectExplorerWidget tree must use proportional UI font");
         if (const QString pngOut = qEnvironmentVariable("GRIDLOCK_VERIFY_PROJECT_TREE_PNG"); !pngOut.isEmpty()) { QTest::qWait(250); peVerify.grab().toImage().save(pngOut); }
+    }
+    // 11h. Verify TerminalDockWidget right-click context menu, Ctrl+Shift+V / Ctrl+V paste, and Ctrl+Shift+C / smart Ctrl+C copy.
+    {
+        gridlock::ui::TerminalDockWidget term(QStringLiteral("Terminal")); term.resize(600, 220); term.show(); QApplication::processEvents();
+        QGuiApplication::clipboard()->setText(QStringLiteral("echo GRIDLOCK_TERM_CLIP"));
+        std::unique_ptr<QMenu> ctx(term.createContextMenu(&term)); QStringList actTexts;
+        for (QAction* a : ctx->actions()) if (!a->isSeparator()) actTexts.append(a->text());
+        QVERIFY2(actTexts.contains(QStringLiteral("Copy")) && actTexts.contains(QStringLiteral("Paste")) && actTexts.contains(QStringLiteral("Select All")) && actTexts.contains(QStringLiteral("Clear Terminal")), qPrintable(actTexts.join(",")));
+        QKeyEvent ovV(QEvent::ShortcutOverride, Qt::Key_V, Qt::ControlModifier); QApplication::sendEvent(&term, &ovV); QVERIFY(ovV.isAccepted());
+        QKeyEvent pasteEv(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier); QApplication::sendEvent(&term, &pasteEv); QCOMPARE(term.lastPastedText(), QStringLiteral("echo GRIDLOCK_TERM_CLIP"));
+        QGuiApplication::clipboard()->setText(QStringLiteral("echo CTRL_V_PASTE"));
+        QKeyEvent pasteEv2(QEvent::KeyPress, Qt::Key_V, Qt::ControlModifier); QApplication::sendEvent(&term, &pasteEv2); QCOMPARE(term.lastPastedText(), QStringLiteral("echo CTRL_V_PASTE"));
+        term.sendCommand(QStringLiteral("echo GRIDLOCK_COPY_TOKEN")); QTest::qWait(200); QApplication::processEvents();
+        term.selectAllText(); QGuiApplication::clipboard()->clear();
+        QKeyEvent copyEv(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier); QApplication::sendEvent(&term, &copyEv); QVERIFY2(!term.hasSelection() || !QGuiApplication::clipboard()->text().isEmpty(), "Ctrl+Shift+C copy");
+        QGuiApplication::clipboard()->clear();
+        QKeyEvent smartCopyEv(QEvent::KeyPress, Qt::Key_C, Qt::ControlModifier); QApplication::sendEvent(&term, &smartCopyEv); QVERIFY2(!term.hasSelection() || !QGuiApplication::clipboard()->text().isEmpty(), "Smart Ctrl+C copy");
     }
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(mw.switchWorkspaceDirectory(unbuiltDir.path()), "Switching to unbuilt workspace must succeed");

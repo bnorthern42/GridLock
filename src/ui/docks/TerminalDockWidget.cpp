@@ -8,15 +8,22 @@
 
 #include "TerminalDockWidget.hpp"
 #include "../../core/managers/ConfigManager.hpp"
+#include "../../core/managers/ThemeManager.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QChildEvent>
+#include <QClipboard>
+#include <QContextMenuEvent>
 #include <QDir>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QFontInfo>
+#include <QGuiApplication>
+#include <QKeyEvent>
+#include <QMenu>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QSizePolicy>
@@ -98,6 +105,12 @@ TerminalDockWidget::TerminalDockWidget(const QString& title, QWidget* parent)
     m_termWidget->startShellProgram();
 
     m_activeFont = resolveMonospaceFont(ts.fontFamily, ts.fontSize);
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    m_termWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint& pos) { showTerminalContextMenu(mapToGlobal(pos)); });
+    connect(m_termWidget, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint& pos) { showTerminalContextMenu(m_termWidget->mapToGlobal(pos)); });
     installEventFilter(this);
 
     layout->addWidget(m_termWidget, 1);
@@ -164,6 +177,82 @@ void TerminalDockWidget::shutdownTerminalSession() {
     m_termWidget->blockSignals(true);
 }
 
+bool TerminalDockWidget::hasSelection() const {
+    return m_termWidget && !m_termWidget->selectedText(true).isEmpty();
+}
+
+void TerminalDockWidget::copySelection() {
+    if (!m_termWidget) return;
+    const QString sel = m_termWidget->selectedText(true);
+    if (sel.isEmpty()) return;
+    m_termWidget->copyClipboard();
+    if (QClipboard* cb = QGuiApplication::clipboard()) {
+        if (cb->text() != sel) cb->setText(sel);
+    }
+}
+
+void TerminalDockWidget::pasteFromClipboard() {
+    if (!m_termWidget) return;
+    QClipboard* cb = QGuiApplication::clipboard();
+    const QString clip = cb ? cb->text() : QString();
+    if (clip.isEmpty()) return;
+    m_lastPastedText = clip;
+    ensureShellStarted();
+    m_termWidget->pasteClipboard();
+}
+
+void TerminalDockWidget::selectAllText() {
+    if (!m_termWidget) return;
+    const int totalRows = std::max(0, m_termWidget->historyLinesCount() + m_termWidget->screenLinesCount() - 1);
+    const int cols = std::max(0, m_termWidget->screenColumnsCount());
+    m_termWidget->setSelectionStart(0, 0);
+    m_termWidget->setSelectionEnd(totalRows, cols);
+}
+
+void TerminalDockWidget::clearTerminal() {
+    if (m_termWidget) m_termWidget->clear();
+}
+
+QMenu* TerminalDockWidget::createContextMenu(QWidget* parent) {
+    auto* menu = new QMenu(parent ? parent : this);
+    menu->setObjectName(QStringLiteral("terminalContextMenu"));
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(
+        gridlock::core::managers::ThemeManager::instance().activeThemeId());
+    menu->setStyleSheet(QStringLiteral(
+        "QMenu { background-color: %1; color: %2; border: 1px solid %3; padding: 4px 0px; }"
+        "QMenu::item { padding: 5px 20px; }"
+        "QMenu::item:selected { background-color: %4; color: #ffffff; }"
+        "QMenu::item:disabled { color: %3; }"
+        "QMenu::separator { height: 1px; background: %3; margin: 4px 8px; }")
+                            .arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex));
+
+    QAction* copyAct = menu->addAction(tr("Copy"));
+    copyAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    copyAct->setEnabled(hasSelection());
+    connect(copyAct, &QAction::triggered, this, &TerminalDockWidget::copySelection);
+
+    QAction* pasteAct = menu->addAction(tr("Paste"));
+    pasteAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    const QClipboard* cb = QGuiApplication::clipboard();
+    pasteAct->setEnabled(cb && !cb->text().isEmpty());
+    connect(pasteAct, &QAction::triggered, this, &TerminalDockWidget::pasteFromClipboard);
+
+    QAction* selectAllAct = menu->addAction(tr("Select All"));
+    connect(selectAllAct, &QAction::triggered, this, &TerminalDockWidget::selectAllText);
+
+    menu->addSeparator();
+
+    QAction* clearAct = menu->addAction(tr("Clear Terminal"));
+    connect(clearAct, &QAction::triggered, this, &TerminalDockWidget::clearTerminal);
+    return menu;
+}
+
+void TerminalDockWidget::showTerminalContextMenu(const QPoint& globalPos) {
+    QMenu* menu = createContextMenu(this);
+    menu->exec(globalPos);
+    menu->deleteLater();
+}
+
 void TerminalDockWidget::ensureShellStarted() {
     if (m_shellStarted || !m_termWidget) return;
     m_shellStarted = true;
@@ -201,9 +290,10 @@ void TerminalDockWidget::enforceMonospaceOnChildren() {
         m_termWidget->setGeometry(0, 0, parentW, parentH);
     }
 
-    // Lock fixed-pitch font and full-width geometry on all internal QTermWidget child widgets (e.g. TerminalDisplay).
+    // Lock fixed-pitch font, context-menu policy, and full-width geometry on all internal QTermWidget child widgets.
     for (QWidget* child : findChildren<QWidget*>()) {
         child->installEventFilter(this);
+        child->setContextMenuPolicy(Qt::CustomContextMenu);
         child->setFont(m_activeFont);
         const QString cls = QString::fromLatin1(child->metaObject()->className());
         if ((cls.contains(QStringLiteral("TerminalDisplay"), Qt::CaseInsensitive) || child->width() > 80) &&
@@ -216,12 +306,54 @@ void TerminalDockWidget::enforceMonospaceOnChildren() {
 }
 
 /**
- * @brief Intercepts FontChange, StyleChange, and ChildAdded events to lock fixed-pitch font and full-width geometry.
+ * @brief Intercepts keyboard copy/paste shortcuts, ShortcutOverride, ContextMenu, and font/geometry events.
  * @param watched Target QObject receiving the event.
  * @param event Event payload.
- * @return Base QWidget::eventFilter result.
+ * @return True if the event was handled and consumed; otherwise base QWidget::eventFilter result.
  */
 bool TerminalDockWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (event != nullptr) {
+        const QEvent::Type t = event->type();
+        if (t == QEvent::ShortcutOverride || t == QEvent::KeyPress) {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            const Qt::KeyboardModifiers mods =
+                ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+            const bool isCtrlShiftC = (mods == (Qt::ControlModifier | Qt::ShiftModifier) && ke->key() == Qt::Key_C);
+            const bool isCtrlShiftV = (mods == (Qt::ControlModifier | Qt::ShiftModifier) && ke->key() == Qt::Key_V);
+            const bool isShiftInsert = (mods == Qt::ShiftModifier && ke->key() == Qt::Key_Insert);
+            const bool isCtrlC = (mods == Qt::ControlModifier && ke->key() == Qt::Key_C);
+            const bool isCtrlV = (mods == Qt::ControlModifier && ke->key() == Qt::Key_V);
+
+            if (t == QEvent::ShortcutOverride) {
+                if (isCtrlShiftC || isCtrlShiftV || isShiftInsert || isCtrlC || isCtrlV) {
+                    ke->accept();
+                    return true;
+                }
+            } else {
+                if (isCtrlShiftC) {
+                    copySelection();
+                    ke->accept();
+                    return true;
+                }
+                if (isCtrlShiftV || isShiftInsert || isCtrlV) {
+                    pasteFromClipboard();
+                    ke->accept();
+                    return true;
+                }
+                if (isCtrlC && hasSelection()) {
+                    copySelection();
+                    ke->accept();
+                    return true;
+                }
+            }
+        } else if (t == QEvent::ContextMenu) {
+            auto* ce = static_cast<QContextMenuEvent*>(event);
+            showTerminalContextMenu(ce->globalPos());
+            ce->accept();
+            return true;
+        }
+    }
+
     if (!m_applyingFontGuard && event != nullptr) {
         const QEvent::Type t = event->type();
         if (t == QEvent::ChildAdded) {
