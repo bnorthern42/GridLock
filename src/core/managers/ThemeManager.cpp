@@ -122,6 +122,9 @@ static QString getHighContrastLightQssOverlay() {
         "    background: #ffffff; alternate-background-color: #f6f8fa; color: #1f2328;\n"
         "    border: none; gridline-color: #d0d7de; selection-background-color: #ddf4ff; selection-color: #0969da;\n"
         "}\n"
+        "#ProjectExplorerWidget QTreeView, #ProjectExplorerDock QTreeView {\n"
+        "    font-family: 'Inter', 'Noto Sans', sans-serif;\n"
+        "}\n"
         // Table and tree section headers use 12px UI sans-serif typography.
         "QHeaderView, QHeaderView::section, QTableCornerButton::section {\n"
         "    font-family: 'Inter', sans-serif;\n"
@@ -237,6 +240,9 @@ static QString getHighDensityQssOverlay(bool isDark = true) {
         "    background: #16181d; alternate-background-color: #181b20; color: #d7dae0;\n"
         "    border: none; padding: 0px; gridline-color: #282c34;\n"
         "    selection-background-color: #264f78; selection-color: #ffffff;\n"
+        "}\n"
+        "#ProjectExplorerWidget QTreeView, #ProjectExplorerDock QTreeView {\n"
+        "    font-family: 'Inter', 'Noto Sans', sans-serif;\n"
         "}\n"
         // Compact 18px minimum row height maximizes visible rows in symbol and register tables.
         "QTreeView::item, QTableView::item { padding: 1px 4px; min-height: 18px; }\n"

@@ -1,43 +1,14 @@
-/**
- * @file test_ui_aux.cpp
- * @brief Companion translation unit for TestMainWindowUI integration tests.
- *
- * Implements test slots for dock resizability, memory view toolbars, display screen
- * routing, cross-pane navigation history, CFG minimap overlays, dynamic rank sync,
- * and repository-wide Google C++ Style Guide and documentation compliance auditing.
- */
-
+/** @file test_ui_aux.cpp @brief Companion translation unit for TestMainWindowUI integration tests. */
 #include "test_ui.hpp"
 #include "ui/views/MemoryProfilerWidget.hpp"
 #include "ui/dialogs/PointerGraphDialog.hpp"
+#include "ui/widgets/FileIconProvider.hpp"
 #include <cmath>
-#include <QApplication>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QCoreApplication>
-#include <QDir>
 #include <QDirIterator>
-#include <QDockWidget>
 #include <QElapsedTimer>
-#include <QFile>
-#include <QFileDialog>
-#include <QFileSystemModel>
-#include <QGraphicsView>
-#include <QGuiApplication>
-#include <QHeaderView>
-#include <QLabel>
-#include <QLineEdit>
-#include <QMenu>
-#include <QMessageBox>
-#include <QPlainTextEdit>
-#include <QProcess>
-#include <QPushButton>
-#include <QScreen>
-#include <QScrollBar>
 #include <QSignalSpy>
-#include <QSpinBox>
-#include <QSplitter>
 #include <QStandardPaths>
+#include <QtWidgets>
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextBrowser>
@@ -607,6 +578,25 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
         gridlock::ui::MainWindow freshMw; auto* freshRm = freshMw.findChild<QMenu*>(QStringLiteral("menuRecentSessions"));
         QVERIFY2(freshRm && freshRm->actions().size() >= 2 && freshRm->actions().at(0)->data().toString() == cB, "Fresh MainWindow must reload Recent Sessions on startup");
         actA->trigger(); QApplication::processEvents(); QCOMPARE(QFileInfo(pe->rootPath()).canonicalFilePath(), cA);
+    }
+    // 11g. Verify ProjectExplorerWidget proportional UI font and distinct multi-language vector file icons.
+    {
+        QTemporaryDir iconDir; QVERIFY(iconDir.isValid());
+        for (const QString& d : {QStringLiteral("src"), QStringLiteral("tests"), QStringLiteral("scripts"), QStringLiteral("docs")}) QDir(iconDir.path()).mkpath(d);
+        for (const QString& f : {QStringLiteral("Parameters.cpp"), QStringLiteral("Parameters.hpp"), QStringLiteral("run.sh"), QStringLiteral("README.md"), QStringLiteral("meson.build"), QStringLiteral("Parameters.o"), QStringLiteral("Parameters.d"), QStringLiteral("config.toml"), QStringLiteral("notes.unknown")}) {
+            QFile fh(QDir(iconDir.path()).filePath(f)); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("// sample\n");
+        }
+        gridlock::ui::FileIconProvider ip;
+        const QImage cppImg = ip.icon(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("Parameters.cpp")))).pixmap(16, 16).toImage();
+        const QImage hppImg = ip.icon(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("Parameters.hpp")))).pixmap(16, 16).toImage();
+        const QImage shImg = ip.icon(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("run.sh")))).pixmap(16, 16).toImage();
+        const QImage buildImg = ip.icon(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("meson.build")))).pixmap(16, 16).toImage();
+        const QImage genImg = ip.icon(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("notes.unknown")))).pixmap(16, 16).toImage();
+        QVERIFY2(cppImg != hppImg && shImg != genImg && buildImg != genImg && shImg != buildImg, "C++, header, shell, and build files must have distinct non-generic vector icons");
+        QVERIFY2(gridlock::ui::FileIconProvider::isBuildArtifactFile(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("Parameters.o")))) && !gridlock::ui::FileIconProvider::isBuildArtifactFile(QFileInfo(QDir(iconDir.path()).filePath(QStringLiteral("Parameters.cpp")))), "Artifact detection");
+        gridlock::ui::ProjectExplorerWidget peVerify; peVerify.resize(280, 460); peVerify.setRootPath(iconDir.path()); peVerify.show(); QApplication::processEvents();
+        auto* tv = peVerify.findChild<QTreeView*>(); QVERIFY2(tv && !QFontInfo(tv->font()).fixedPitch(), "ProjectExplorerWidget tree must use proportional UI font");
+        if (const QString pngOut = qEnvironmentVariable("GRIDLOCK_VERIFY_PROJECT_TREE_PNG"); !pngOut.isEmpty()) { QTest::qWait(250); peVerify.grab().toImage().save(pngOut); }
     }
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(mw.switchWorkspaceDirectory(unbuiltDir.path()), "Switching to unbuilt workspace must succeed");

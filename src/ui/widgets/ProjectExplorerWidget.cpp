@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -150,22 +151,38 @@ ProjectExplorerWidget::ProjectExplorerWidget(QWidget *parent)
   m_treeView->header()->setStretchLastSection(true);
   m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
 
-  // Initialize Qt standard file system model for directory traversal
+  // Subclass QFileSystemModel to subtly mute compiled object/dependency artifacts (.o, .d, .a).
+  class ExplorerFileSystemModel final : public QFileSystemModel {
+  public:
+    using QFileSystemModel::QFileSystemModel;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override {
+      if (role == Qt::ForegroundRole && index.isValid() && FileIconProvider::isBuildArtifactFile(fileInfo(index))) {
+        auto &tm = gridlock::core::managers::ThemeManager::instance();
+        QColor muted(tm.paletteForTheme(tm.activeThemeId()).textHex);
+        muted.setAlpha(128);
+        return QBrush(muted);
+      }
+      return QFileSystemModel::data(index, role);
+    }
+  };
+
+  // Initialize file system model for directory traversal with muted artifact styling.
   m_rootPath = QDir::currentPath();
-  m_fileSystemModel = new QFileSystemModel(this);
+  m_fileSystemModel = new ExplorerFileSystemModel(this);
   m_fileSystemModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
   m_fileSystemModel->setRootPath(m_rootPath);
 
-  // Attach high-DPI theme-aware icon provider to model
+  // Attach high-DPI vector icon provider to model.
   m_iconProvider = new FileIconProvider();
   m_fileSystemModel->setIconProvider(m_iconProvider);
+  m_treeView->setIconSize(QSize(16, 16));
   m_treeView->setModel(m_fileSystemModel);
   m_treeView->setRootIndex(m_fileSystemModel->index(QDir::currentPath()));
 
-  // Apply font size and item padding from configuration
+  // Apply proportional UI font, item padding, and theme palette.
   reloadStyle();
 
-  // Hide file size, type, and date columns in the compact sidebar
+  // Hide file size, type, and date columns in the compact sidebar.
   m_treeView->hideColumn(1);
   m_treeView->hideColumn(2);
   m_treeView->hideColumn(3);
@@ -678,23 +695,21 @@ void ProjectExplorerWidget::reloadStyle() {
     populateStringsTable(isStringsMode() && m_explorerFilterEdit ? m_explorerFilterEdit->text() : QString());
   }
 
-  // Apply canvas background, 12px UI sans-serif header style, text color, and item padding to the filesystem tree view.
+  // Apply proportional UI typography (never monospace), canvas surface, and crisp row padding to the file tree.
   if (m_treeView) {
+    QString uiFamily = s.value(QStringLiteral("appearance/ui_font_family"), QStringLiteral("Inter")).toString().trimmed();
+    if (uiFamily.isEmpty()) uiFamily = QStringLiteral("Inter");
+    QFont treeFont(uiFamily); treeFont.setStyleHint(QFont::SansSerif); treeFont.setFixedPitch(false); treeFont.setPixelSize(fontSize);
+    if (QFontInfo(treeFont).fixedPitch()) { treeFont = QFont(QStringLiteral("Sans Serif")); treeFont.setStyleHint(QFont::SansSerif); treeFont.setPixelSize(fontSize); }
+    m_treeView->setFont(treeFont); m_treeView->setIconSize(QSize(16, 16));
     m_treeView->setStyleSheet(QStringLiteral(
-        "QTreeView { background-color: %3; color: %4; font-size: %2px; border: none; } "
-        "QTreeView::item { padding: %1px; } "
-        "QHeaderView::section { font-family: 'Inter', sans-serif; background-color: %5; color: %4; "
+        "QTreeView { font-family: '%7', 'Inter', 'Noto Sans', sans-serif; background-color: %3; color: %4; font-size: %2px; border: none; } "
+        "QTreeView::item { padding: %1px 4px; } "
+        "QHeaderView::section { font-family: '%7', 'Inter', 'Noto Sans', sans-serif; background-color: %5; color: %4; "
         "border: 1px solid %6; padding: 2px 4px; font-size: 12px; font-weight: 600; }")
-        .arg(padding).arg(fontSize).arg(pal.canvasHex, pal.textHex, pal.headerHex, pal.borderHex));
+        .arg(padding).arg(fontSize).arg(pal.canvasHex, pal.textHex, pal.headerHex, pal.borderHex, uiFamily));
   }
-
-  // Rebuild FileIconProvider so folder and source icons reflect the current theme.
-  if (m_fileSystemModel) {
-    auto *newProvider = new FileIconProvider();
-    m_fileSystemModel->setIconProvider(newProvider);
-    delete m_iconProvider;
-    m_iconProvider = newProvider;
-  }
+  if (m_fileSystemModel) { auto *np = new FileIconProvider(); m_fileSystemModel->setIconProvider(np); delete m_iconProvider; m_iconProvider = np; }
 }
 
 /**
