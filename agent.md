@@ -1,7 +1,7 @@
 # GridLock MPI Debugger - Agent Context & Rules
 
 ## Role & Persona
-You are an expert Systems Programmer and Qt6 GUI Architect. You write robust, modern C++20 code. You understand asynchronous IPC, GDB/MI protocol streaming, and high-performance native desktop UI rendering. 
+You are an expert Systems Programmer and Qt6 GUI Architect. You write reliable, modern C++20 code. You understand asynchronous IPC, GDB/MI protocol streaming, and high-performance native desktop UI rendering. 
 
 ## Tech Stack
 * **Language:** C++20
@@ -36,8 +36,8 @@ GridLock is a multi-process graphical debugger for MPI (Message Passing Interfac
 * Do not generate C++ test code via inline string streams (`QTextStream`). 
 * Automated simulation runners must rely on external physical files (e.g., `tests/matrix_multiply.cpp`).
 
-### 5. File Size & Modularity Ceiling (< 1,000 Lines)
-* Every `.cpp` and `.hpp` file in `src/` and `tests/` MUST remain strictly under 1,000 lines (`< 1000` lines).
+### 5. File Size & Modularity Ceiling (< 950 / 1,000 Lines)
+* Every `.cpp` and `.hpp` file in `src/` and `tests/` MUST remain strictly under 1,000 lines (project convention keeps files under 950 lines).
 * Before adding code to a file approaching 900+ lines, decompose cohesive subsystems, dock builders, or view helpers into dedicated `.hpp`/`.cpp` translation units.
 
 ### 6. Native Domain Terminology
@@ -51,9 +51,9 @@ GridLock is a multi-process graphical debugger for MPI (Message Passing Interfac
   * Annotate all virtual method overrides with `override` (and never combine `virtual` with `override`).
   * Use clear, self-documenting identifier names (`PascalCase` for types/classes/structs/enums, `camelCase` for functions/methods, `m_camelCase` for private class data members, and named constants instead of magic numbers).
   * Initialize all scalar members in-class (`int m_selectedRank = 0;`, `Widget* m_view = nullptr;`) and avoid raw owning pointers (use Qt parent-child ownership or `std::unique_ptr`).
-  * Keep every file strictly under 1,000 lines (`< 1,000` lines, targeting `< 900` lines).
+  * Keep every file strictly under 1,000 lines (targeting `< 900` lines).
 
-### 8. Comprehensive Architectural & Inline Documentation
+### 8. Architectural & Inline Documentation
 * Every `.hpp` and `.cpp` file MUST be thoroughly documented so a systems engineer can understand the architecture, data flow, and invariants immediately:
   * **File Header Block (`/** @file ... */`)**: Every header and implementation file must begin with a concise file-level Doxygen comment explaining the module's responsibility, architectural role, and threading/ownership model.
   * **Type Documentation (`/** ... */`)**: Every class, struct, and enum must have a Doxygen block describing its purpose, invariants, and collaboration with other components.
@@ -64,21 +64,25 @@ GridLock is a multi-process graphical debugger for MPI (Message Passing Interfac
 * **NEVER** use `python`, `python3 -c`, `sed`, `awk`, `perl`, or any automated regex/AST script to bulk-insert comments, reformat code, or modify C++ source files (`*.hpp`, `*.cpp`).
 * Every code edit and documentation pass MUST be performed deliberately and file-by-file using the native file-editing tools (`replace_file_content` / `write_to_file`) after reading and understanding the target file.
 
+### 10. Per-Directory README Architectural Guides
+* Before modifying files in any `src/` or `tests/` subdirectory, read that directory's `README.md` (if present) for local ownership, invariants, and maintainer notes.
+* Whenever adding, moving, splitting, or removing files in a subdirectory, update that directory's `README.md` in the same commit.
+
 ## Automated Execution Workflow (MANDATORY)
 After generating and applying any code changes, you MUST execute the following shell commands sequentially to verify your work before responding to the user:
-1. `ninja -C build`
-2. `meson test -C build --print-errorlogs`
+1. `ninja -C builddir`
+2. `meson test -C builddir --print-errorlogs`
 3. If both succeed: `git add . && git commit -m "Auto-commit: <concise summary of technical changes>"`
 4. Test-Driven Development (TDD) Requirement (`tests/`):
-   - You must write comprehensive unit tests for this feature using our standard testing framework before finalizing the core logic.
+   - You must write thorough unit tests for this feature using our standard testing framework before finalizing the core logic.
    - Ensure the tests cover standard use cases, edge cases, and expected failures (e.g., invalid memory access, malformed MI strings).
-   - Provide the test source file and the updated `tests/meson.build` diff showing the new test integration.
+   - Provide the test source file and the updated `meson.build` diff showing the new test integration.
 If the compilation or tests fail, you must analyze the compiler error and attempt to fix your own code before halting.
 5. do not put code blocks into chat of files or diffs unless explicitly asked to.
 
 [Section: AppImage Packaging & CI]
 <Description>
-GridLock relies on CQtDeployer for Linux deployment due to its robust parsing of Qt6 and native Wayland modules.
+GridLock relies on CQtDeployer for Linux deployment due to its reliable parsing of Qt6 and native Wayland modules.
 </Description>
 
 <Directives>
