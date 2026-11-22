@@ -20,7 +20,10 @@
 #include <QVector>
 #include <functional>
 
+class QEvent;
 class QGraphicsSceneContextMenuEvent;
+class QGraphicsSceneHelpEvent;
+class QGraphicsSceneHoverEvent;
 class QGraphicsSceneMouseEvent;
 class QMouseEvent;
 class QPaintEvent;
@@ -30,6 +33,12 @@ namespace gridlock::ui {
 
 /** @brief Returns true when @p v represents a null pointer (`0x0`, `0x00000000`, `nullptr`). */
 bool isNullPointerValue(const QString& v);
+
+/** @brief Returns true when @p rawType is a C/C++ pointer type (`T *`, excluding function pointers). */
+bool isPointerTypeString(const QString& rawType);
+
+/** @brief Returns true when @p rawType is `void *` / `const void *` (opaque, non-dereferenceable). */
+bool isVoidPointerType(const QString& rawType);
 
 /** @brief Returns true when a struct field represents a non-null pointer or composite sub-object. */
 bool isExpandableOrPointerField(const PointerGraphDialog::StructFieldEntry& f);
@@ -81,22 +90,32 @@ struct AliasCycleAnalysis {
  */
 struct PointerNodeCallbacks {
   std::function<void(PointerGraphNodeItem*)> onMoved;
+  std::function<void(const QString&)> onExpandNode;
   std::function<void(const QString&, const QString&)> onExpandField;
   std::function<void(const QString&)> onUnpinRoot;
   std::function<void(PointerGraphNodeItem*)> onResetPos;
   std::function<void(PointerGraphNodeItem*, const QString&)> onHideField;
   std::function<void(PointerGraphNodeItem*)> onRestoreHidden;
   std::function<void(PointerGraphNodeItem*)> onToggleOrientation;
+  std::function<void(PointerGraphNodeItem*)> onToggleExpandedWidth;
   std::function<void(PointerGraphNodeItem*, const QString&)> onSetFormat;
 };
 
 /**
  * @class PointerGraphNodeItem
  * @brief Draggable 2D struct/class card supporting vertical/horizontal layouts,
- *        per-field suppression (`+N hidden`), and `/x`, `/d`, `/b` format overrides.
+ *        per-row hover tooltips, Shift+Click width expansion, per-field suppression,
+ *        and `/x`, `/d`, `/b` format overrides.
  */
 class PointerGraphNodeItem : public QGraphicsObject {
  public:
+  enum class PlaceholderState {
+    Unexpanded,  ///< `(double-click or expand fields...)`
+    Loading,     ///< `(loading fields...)`
+    NullPointer, ///< `(null pointer)`
+    NoFields     ///< `(no fields / opaque type)`
+  };
+
   PointerGraphNodeItem(QString expr,
                        QString type,
                        QString addr,
@@ -109,11 +128,14 @@ class PointerGraphNodeItem : public QGraphicsObject {
   void setIsRoot(bool isRoot);
   void setMutatedFields(const QMap<QString, QString>& transitions);
   void setDisplayOptions(const PointerGraphDialog::NodeDisplayOptions& opts);
+  void setPlaceholderState(PlaceholderState state);
 
   const QString& expression() const { return m_expression; }
   const QString& typeName() const { return m_typeName; }
   const QString& address() const { return m_address; }
   bool isRoot() const { return m_isRoot; }
+  PlaceholderState placeholderState() const { return m_placeholderState; }
+  QString placeholderStatusText() const;
   const PointerGraphDialog::NodeDisplayOptions& displayOptions() const { return m_displayOptions; }
   const QVector<PointerGraphDialog::StructFieldEntry>& fields() const { return m_fields; }
 
@@ -121,6 +143,10 @@ class PointerGraphNodeItem : public QGraphicsObject {
   int hiddenFieldCount() const;
   QString hiddenBadgeText() const;
   QString formattedFieldValue(int fieldIndex) const;
+  QString headerText() const;
+  QString fieldRowText(int fieldIndex) const;
+  QString tooltipForPosition(const QPointF& itemPos) const;
+  bool handleDoubleClickAt(const QPointF& itemPos);
 
   int indexOfField(const QString& fieldName) const;
   QPointF fieldSourceAnchor(const QString& fieldName) const;
@@ -129,12 +155,16 @@ class PointerGraphNodeItem : public QGraphicsObject {
   void paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) override;
 
  protected:
+  bool sceneEvent(QEvent* event) override;
   QVariant itemChange(GraphicsItemChange change, const QVariant& value) override;
+  void hoverMoveEvent(QGraphicsSceneHoverEvent* event) override;
+  void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
   void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
   void mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) override;
   void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
 
  private:
+  qreal computeEffectiveWidth() const;
   int hitTestVisibleSlot(const QPointF& itemPos, bool* hitDerefBadgeOut = nullptr) const;
   bool hitTestHiddenPill(const QPointF& itemPos) const;
 
@@ -142,9 +172,11 @@ class PointerGraphNodeItem : public QGraphicsObject {
   QString m_typeName;
   QString m_address;
   bool m_isRoot = false;
+  PlaceholderState m_placeholderState = PlaceholderState::Unexpanded;
   PointerGraphDialog::NodeDisplayOptions m_displayOptions;
   QVector<PointerGraphDialog::StructFieldEntry> m_fields;
   QMap<QString, QString> m_mutatedTransitions;
+  QString m_lastHoverTooltip;
   PointerNodeCallbacks m_cb;
 };
 
@@ -191,6 +223,7 @@ class PointerGraphView : public QGraphicsView {
   void wheelEvent(QWheelEvent* event) override;
   void paintEvent(QPaintEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
+  void mouseDoubleClickEvent(QMouseEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;
   void mouseReleaseEvent(QMouseEvent* event) override;
 

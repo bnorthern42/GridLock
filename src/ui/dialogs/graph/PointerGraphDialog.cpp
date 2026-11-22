@@ -16,9 +16,12 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QSvgGenerator>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -26,6 +29,12 @@
 namespace gridlock::ui {
 
 namespace {
+constexpr qreal kMinZoom = 0.25;
+constexpr qreal kMaxZoom = 2.50;
+constexpr qreal kMinimapW = 160.0;
+constexpr qreal kMinimapH = 110.0;
+constexpr qreal kMinimapMargin = 12.0;
+
 struct ScopedPinSuppress {
   bool& flag;
   bool prev;
@@ -33,6 +42,192 @@ struct ScopedPinSuppress {
   ~ScopedPinSuppress() { flag = prev; }
 };
 }  // namespace
+
+PointerGraphEdgeItem::PointerGraphEdgeItem(PointerGraphNodeItem* src, QString fieldName, PointerGraphNodeItem* dst)
+    : m_source(src), m_fieldName(std::move(fieldName)), m_target(dst) {
+  setZValue(-1.0);
+  updateGeometry();
+}
+
+void PointerGraphEdgeItem::setTargetNode(PointerGraphNodeItem* dst) { m_target = dst; updateGeometry(); }
+void PointerGraphEdgeItem::setCycleOrAlias(bool flag) { m_isCycleOrAlias = flag; updateGeometry(); }
+
+void PointerGraphEdgeItem::updateGeometry() {
+  if (!m_source || !m_target) return;
+  const QPointF p1 = m_source->fieldSourceAnchor(m_fieldName), p2 = m_target->targetAnchor();
+  QPainterPath path(p1);
+  if (p2.x() >= p1.x() + 20.0) {
+    const qreal dx = (p2.x() - p1.x()) * 0.5;
+    path.cubicTo(QPointF(p1.x() + dx, p1.y()), QPointF(p2.x() - dx, p2.y()), p2);
+  } else {
+    const qreal archY = std::max(m_source->sceneBoundingRect().bottom(), m_target->sceneBoundingRect().bottom()) + 75.0;
+    path.cubicTo(QPointF(p1.x() + 65.0, archY), QPointF(p2.x() - 65.0, archY), p2);
+  }
+  m_midPoint = path.pointAtPercent(0.5);
+  setPath(path);
+  update();
+}
+
+void PointerGraphEdgeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) {
+  painter->setRenderHint(QPainter::Antialiasing, true);
+  const QColor edgeColor = m_isCycleOrAlias ? QColor(QStringLiteral("#f59e0b")) : QColor(QStringLiteral("#38bdf8"));
+  painter->setPen(QPen(edgeColor, m_isCycleOrAlias ? 2.2 : 1.7, m_isCycleOrAlias ? Qt::DashLine : Qt::SolidLine));
+  painter->setBrush(Qt::NoBrush);
+  painter->drawPath(path());
+
+  const QPointF p2 = m_target ? m_target->targetAnchor() : QPointF();
+  QPolygonF arrow;
+  arrow << p2 << QPointF(p2.x() - 8.0, p2.y() - 4.5) << QPointF(p2.x() - 8.0, p2.y() + 4.5);
+  painter->setPen(Qt::NoPen);
+  painter->setBrush(edgeColor);
+  painter->drawPolygon(arrow);
+
+  if (m_isCycleOrAlias) {
+    const QRectF pill(m_midPoint.x() - 62.0, m_midPoint.y() - 9.0, 124.0, 18.0);
+    painter->setPen(QPen(QColor(QStringLiteral("#f59e0b")), 1.0));
+    painter->setBrush(QColor(QStringLiteral("#451a03")));
+    painter->drawRoundedRect(pill, 4.0, 4.0);
+    QFont f = painter->font();
+    f.setPixelSize(9); f.setBold(true); painter->setFont(f);
+    painter->setPen(QColor(QStringLiteral("#fde68a")));
+    painter->drawText(pill, Qt::AlignCenter, QStringLiteral("CYCLE / SHARED ALIAS"));
+  }
+}
+
+PointerGraphView::PointerGraphView(QGraphicsScene* scene, QWidget* parent)
+    : QGraphicsView(scene, parent) {
+  setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
+  setDragMode(QGraphicsView::ScrollHandDrag);
+  setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+  setResizeAnchor(QGraphicsView::AnchorViewCenter);
+  setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+  if (scene) connect(scene, &QGraphicsScene::changed, viewport(), QOverload<>::of(&QWidget::update));
+}
+
+void PointerGraphView::setZoomFactor(double factor) {
+  const double clamped = std::clamp(factor, static_cast<double>(kMinZoom), static_cast<double>(kMaxZoom));
+  const double cur = zoomFactor();
+  if (cur <= 0.0) return;
+  const double ratio = clamped / cur;
+  if (std::abs(ratio - 1.0) > 1e-4) { scale(ratio, ratio); viewport()->update(); }
+}
+
+QRectF PointerGraphView::minimapViewportRect() const {
+  if (!viewport() || viewport()->width() < 220 || viewport()->height() < 150) return QRectF();
+  if (!scene() || scene()->items().isEmpty()) return QRectF();
+  return QRectF(viewport()->width() - kMinimapW - kMinimapMargin,
+                viewport()->height() - kMinimapH - kMinimapMargin, kMinimapW, kMinimapH);
+}
+
+QRectF PointerGraphView::computeWorldBounds() const {
+  if (!scene()) return QRectF(0.0, 0.0, 1.0, 1.0);
+  QRectF world = scene()->itemsBoundingRect();
+  const QRectF cam = mapToScene(viewport()->rect()).boundingRect();
+  return (world.isEmpty() ? cam : world.united(cam)).adjusted(-40.0, -40.0, 40.0, 40.0);
+}
+
+QPointF PointerGraphView::minimapPointToScene(const QPointF& viewPos) const {
+  const QRectF mm = minimapViewportRect().adjusted(6.0, 6.0, -6.0, -6.0), world = computeWorldBounds();
+  if (mm.isEmpty() || world.width() <= 0.0 || world.height() <= 0.0) return QPointF();
+  const qreal s = std::min(mm.width() / world.width(), mm.height() / world.height());
+  const qreal ox = mm.left() + (mm.width() - world.width() * s) * 0.5;
+  const qreal oy = mm.top() + (mm.height() - world.height() * s) * 0.5;
+  return QPointF(world.left() + (viewPos.x() - ox) / s, world.top() + (viewPos.y() - oy) / s);
+}
+
+void PointerGraphView::wheelEvent(QWheelEvent* event) {
+  if (!event) return;
+  const int dy = (event->angleDelta().y() != 0) ? event->angleDelta().y() : event->pixelDelta().y();
+  if (dy != 0) setZoomFactor(zoomFactor() * ((dy > 0) ? 1.15 : (1.0 / 1.15)));
+  event->accept();
+}
+
+void PointerGraphView::paintEvent(QPaintEvent* event) {
+  QGraphicsView::paintEvent(event);
+  const QRectF mm = minimapViewportRect();
+  if (mm.isEmpty()) return;
+
+  QPainter p(viewport());
+  p.setRenderHint(QPainter::Antialiasing, true);
+  const bool isDark = core::ThemeManager::instance().isDarkMode();
+  p.setPen(QPen(isDark ? QColor(QStringLiteral("#334155")) : QColor(QStringLiteral("#94a3b8")), 1.1));
+  p.setBrush(isDark ? QColor(15, 23, 42, 220) : QColor(248, 250, 252, 230));
+  p.drawRoundedRect(mm, 6.0, 6.0);
+
+  const QRectF inner = mm.adjusted(6.0, 6.0, -6.0, -6.0), world = computeWorldBounds();
+  if (world.width() <= 0.0 || world.height() <= 0.0) return;
+  const qreal s = std::min(inner.width() / world.width(), inner.height() / world.height());
+  const qreal ox = inner.left() + (inner.width() - world.width() * s) * 0.5;
+  const qreal oy = inner.top() + (inner.height() - world.height() * s) * 0.5;
+  auto mapRect = [&](const QRectF& r) {
+    return QRectF(ox + (r.left() - world.left()) * s, oy + (r.top() - world.top()) * s,
+                  std::max<qreal>(3.0, r.width() * s), std::max<qreal>(2.5, r.height() * s));
+  };
+
+  p.save();
+  p.setClipRect(inner);
+  for (QGraphicsItem* item : scene()->items()) {
+    if (auto* node = dynamic_cast<PointerGraphNodeItem*>(item)) {
+      p.setPen(QPen(node->isRoot() ? QColor(QStringLiteral("#f59e0b")) : QColor(QStringLiteral("#38bdf8")), 1.0));
+      p.setBrush(isDark ? QColor(QStringLiteral("#1e293b")) : QColor(QStringLiteral("#cbd5e1")));
+      p.drawRoundedRect(mapRect(node->sceneBoundingRect()), 1.5, 1.5);
+    }
+  }
+  p.setPen(QPen(QColor(QStringLiteral("#38bdf8")), 1.4));
+  p.setBrush(QColor(56, 189, 248, 38));
+  p.drawRect(mapRect(mapToScene(viewport()->rect()).boundingRect()).intersected(inner));
+  p.restore();
+}
+
+void PointerGraphView::mousePressEvent(QMouseEvent* event) {
+  if (event && event->button() == Qt::LeftButton && minimapViewportRect().contains(event->position())) {
+    m_panningMinimap = true;
+    centerOn(minimapPointToScene(event->position()));
+    viewport()->update();
+    event->accept();
+    return;
+  }
+  QGraphicsView::mousePressEvent(event);
+}
+
+void PointerGraphView::mouseDoubleClickEvent(QMouseEvent* event) {
+  if (event && event->button() == Qt::LeftButton) {
+    if (minimapViewportRect().contains(event->position())) {
+      event->accept();
+      return;
+    }
+    const QPoint viewPos = event->position().toPoint();
+    for (QGraphicsItem* gi : items(viewPos)) {
+      if (auto* node = dynamic_cast<PointerGraphNodeItem*>(gi)) {
+        if (node->handleDoubleClickAt(node->mapFromScene(mapToScene(viewPos)))) {
+          event->accept();
+          return;
+        }
+        break;
+      }
+    }
+  }
+  QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+void PointerGraphView::mouseMoveEvent(QMouseEvent* event) {
+  if (event && m_panningMinimap) {
+    centerOn(minimapPointToScene(event->position()));
+    viewport()->update();
+    event->accept();
+    return;
+  }
+  QGraphicsView::mouseMoveEvent(event);
+}
+
+void PointerGraphView::mouseReleaseEvent(QMouseEvent* event) {
+  if (event && m_panningMinimap && event->button() == Qt::LeftButton) {
+    m_panningMinimap = false;
+    event->accept();
+    return;
+  }
+  QGraphicsView::mouseReleaseEvent(event);
+}
 
 PointerGraphDialog::PointerGraphDialog(::IBackendCoordinator* coordinator, QWidget* parent)
     : QDialog(parent, Qt::Window | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint) {
@@ -268,7 +463,8 @@ void PointerGraphDialog::clearGraph() {
   m_rootExpressions.clear(); m_pinnedPositions.clear(); m_nodeLayers.clear(); m_displayOptions.clear();
   m_previousFieldValues.clear(); m_mutatedFieldTransitions.clear(); m_nodes.clear();
   m_nodesByExpr.clear(); m_nodesByAddress.clear(); m_edges.clear();
-  m_pendingParentLinks.clear(); m_pendingTypeValueHints.clear(); m_autoExpandRoots.clear();
+  m_pendingParentLinks.clear(); m_pendingTypeValueHints.clear();
+  m_pendingQueryToNodeExpr.clear(); m_pendingExpandNodes.clear(); m_autoExpandRoots.clear();
   m_hasCycleOrSharedAlias = false;
   if (m_view && m_view->viewport()) m_view->viewport()->update();
 }
@@ -355,6 +551,25 @@ QSizeF PointerGraphDialog::nodeCardSize(const QString& nodeExprOrAddr) const {
   return node ? node->boundingRect().size() : QSizeF();
 }
 
+QString PointerGraphDialog::nodeTooltipAt(const QString& nodeExprOrAddr,
+                                          const QPointF& itemLocalPos) const {
+  const PointerGraphNodeItem* node = findNode(nodeExprOrAddr);
+  return node ? node->tooltipForPosition(itemLocalPos) : QString();
+}
+
+QString PointerGraphDialog::nodeFieldTooltip(const QString& nodeExprOrAddr,
+                                             const QString& fieldName) const {
+  const PointerGraphNodeItem* node = findNode(nodeExprOrAddr);
+  if (!node) return QString();
+  const int idx = node->indexOfField(fieldName.trimmed());
+  return (idx >= 0) ? node->fieldRowText(idx) : QString();
+}
+
+QString PointerGraphDialog::nodePlaceholderText(const QString& nodeExprOrAddr) const {
+  const PointerGraphNodeItem* node = findNode(nodeExprOrAddr);
+  return (node && node->fields().isEmpty()) ? node->placeholderStatusText() : QString();
+}
+
 QString PointerGraphDialog::edgeTargetAddressOrExpr(const QString& sourceExprOrAddr,
                                                     const QString& fieldName) const {
   const PointerGraphNodeItem* src = findNode(sourceExprOrAddr);
@@ -429,6 +644,36 @@ bool PointerGraphDialog::toggleNodeOrientation(const QString& nodeExprOrAddr) {
 
 bool PointerGraphDialog::isNodeHorizontal(const QString& nodeExprOrAddr) const {
   const PointerGraphNodeItem* n = findNode(nodeExprOrAddr); return n && n->displayOptions().horizontal;
+}
+
+bool PointerGraphDialog::setNodeExpandedWidth(const QString& nodeExprOrAddr, bool expanded) {
+  PointerGraphNodeItem* node = findNode(nodeExprOrAddr);
+  if (!node) return false;
+  m_displayOptions[canonicalNodeKey(node)].expandedWidth = expanded;
+  applyDisplayOptionsToNode(node);
+  autoLayoutNodes(false);
+  if (expanded) {
+    const QRectF expandedRect = node->sceneBoundingRect().adjusted(-12.0, -4.0, 12.0, 4.0);
+    ScopedPinSuppress guard(m_suppressPositionPinning);
+    for (auto* other : m_nodes) {
+      if (other != node && other->pos().x() >= node->pos().x() &&
+          expandedRect.intersects(other->sceneBoundingRect())) {
+        other->setPos(QPointF(node->pos().x() + node->boundingRect().width() + 40.0, other->pos().y()));
+      }
+    }
+    recomputeCyclesAndRefreshEdges();
+  }
+  return true;
+}
+
+bool PointerGraphDialog::toggleNodeExpandedWidth(const QString& nodeExprOrAddr) {
+  PointerGraphNodeItem* node = findNode(nodeExprOrAddr);
+  if (!node) return false;
+  return setNodeExpandedWidth(nodeExprOrAddr, !m_displayOptions.value(canonicalNodeKey(node)).expandedWidth);
+}
+
+bool PointerGraphDialog::isNodeExpandedWidth(const QString& nodeExprOrAddr) const {
+  const PointerGraphNodeItem* n = findNode(nodeExprOrAddr); return n && n->displayOptions().expandedWidth;
 }
 
 bool PointerGraphDialog::setNodeFormatOverride(const QString& nodeExprOrAddr, const QString& formatOverride) {

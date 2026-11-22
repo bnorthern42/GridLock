@@ -8,16 +8,19 @@
 
 #include "../../../core/managers/ThemeManager.hpp"
 
+#include <QEvent>
 #include <QFontDatabase>
+#include <QFontMetrics>
 #include <QGraphicsSceneContextMenuEvent>
+#include <QGraphicsSceneHelpEvent>
+#include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QMenu>
-#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QQueue>
-#include <QScrollBar>
-#include <QWheelEvent>
+#include <QRegularExpression>
+#include <QToolTip>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -26,17 +29,25 @@ namespace gridlock::ui {
 
 namespace {
 constexpr qreal kCardWidth = 290.0;
+constexpr qreal kMaxExpandedCardWidth = 900.0;
 constexpr qreal kHorizColWidth = 152.0;
 constexpr qreal kHorizBodyHeight = 44.0;
 constexpr qreal kHeaderHeight = 30.0;
 constexpr qreal kRowHeight = 24.0;
 constexpr qreal kHiddenPillHeight = 22.0;
 constexpr qreal kFooterPadding = 8.0;
-constexpr qreal kMinZoom = 0.25;
-constexpr qreal kMaxZoom = 2.50;
-constexpr qreal kMinimapW = 160.0;
-constexpr qreal kMinimapH = 110.0;
-constexpr qreal kMinimapMargin = 12.0;
+
+QString stripTrailingQualifiers(QString t) {
+  t = t.trimmed();
+  static const QRegularExpression rxQual(
+      QStringLiteral("(?:\\b(?:const|volatile|restrict|__restrict__|__restrict)\\b|&)+\\s*$"));
+  while (true) {
+    const QString next = QString(t).remove(rxQual).trimmed();
+    if (next == t) break;
+    t = next;
+  }
+  return t;
+}
 
 bool canReachIndex(int nodeCount, const QVector<QVector<int>>& adj, int startIdx, int goalIdx) {
   if (startIdx < 0 || goalIdx < 0 || startIdx >= nodeCount || goalIdx >= nodeCount) return false;
@@ -64,6 +75,20 @@ bool isNullPointerValue(const QString& v) {
   if (!t.startsWith(QLatin1String("0x"))) return false;
   bool ok = false;
   return t.mid(2).toULongLong(&ok, 16) == 0ULL && ok;
+}
+
+bool isPointerTypeString(const QString& rawType) {
+  const QString t = stripTrailingQualifiers(rawType);
+  return t.endsWith(QLatin1Char('*')) && !t.contains(QStringLiteral("(*)"));
+}
+
+bool isVoidPointerType(const QString& rawType) {
+  if (!isPointerTypeString(rawType)) return false;
+  QString base = stripTrailingQualifiers(rawType);
+  base.chop(1);
+  base = stripTrailingQualifiers(base);
+  if (base.startsWith(QStringLiteral("const "))) base = base.mid(6).trimmed();
+  return base == QLatin1String("void");
 }
 
 bool isExpandableOrPointerField(const PointerGraphDialog::StructFieldEntry& f) {
@@ -153,6 +178,7 @@ PointerGraphNodeItem::PointerGraphNodeItem(QString expr,
       m_cb(std::move(callbacks)) {
   setFlags(QGraphicsItem::ItemIsMovable | QGraphicsItem::ItemIsSelectable |
            QGraphicsItem::ItemSendsGeometryChanges);
+  setAcceptHoverEvents(true);
   setCacheMode(QGraphicsItem::DeviceCoordinateCache);
 }
 
@@ -166,11 +192,13 @@ void PointerGraphNodeItem::updateData(
   if (!type.isEmpty()) m_typeName = type;
   if (!addr.isEmpty()) m_address = addr;
   m_fields = fields;
+  if (!m_fields.isEmpty()) m_placeholderState = PlaceholderState::Unexpanded;
   update();
 }
 
 void PointerGraphNodeItem::setIsRoot(bool isRoot) {
   if (m_isRoot == isRoot) return;
+  prepareGeometryChange();
   m_isRoot = isRoot;
   update();
 }
@@ -181,17 +209,27 @@ void PointerGraphNodeItem::setDisplayOptions(const PointerGraphDialog::NodeDispl
   update();
 }
 
-void PointerGraphNodeItem::setMutatedFields(const QMap<QString, QString>& transitions) {
-  m_mutatedTransitions = transitions;
-  if (m_mutatedTransitions.isEmpty()) {
-    setToolTip(m_expression);
-  } else {
-    QStringList lines;
-    for (auto it = m_mutatedTransitions.cbegin(); it != m_mutatedTransitions.cend(); ++it) {
-      lines.append(QStringLiteral("%1.%2: %3").arg(m_expression, it.key(), it.value()));
-    }
-    setToolTip(lines.join(QLatin1Char('\n')));
+void PointerGraphNodeItem::setPlaceholderState(PlaceholderState state) {
+  if (m_placeholderState == state) return;
+  prepareGeometryChange();
+  m_placeholderState = state;
+  update();
+}
+
+QString PointerGraphNodeItem::placeholderStatusText() const {
+  switch (m_placeholderState) {
+    case PlaceholderState::Loading:     return QStringLiteral("(loading fields...)");
+    case PlaceholderState::NullPointer: return QStringLiteral("(null pointer)");
+    case PlaceholderState::NoFields:    return QStringLiteral("(no fields / opaque type)");
+    case PlaceholderState::Unexpanded:  return QStringLiteral("(double-click or expand fields...)");
   }
+  return QStringLiteral("(double-click or expand fields...)");
+}
+
+void PointerGraphNodeItem::setMutatedFields(const QMap<QString, QString>& transitions) {
+  prepareGeometryChange();
+  m_mutatedTransitions = transitions;
+  setToolTip(headerText());
   update();
 }
 
@@ -219,6 +257,51 @@ QString PointerGraphNodeItem::formattedFieldValue(int fieldIndex) const {
   return formatScalarWithOverride(f.value, f.type, m_displayOptions.formatOverride);
 }
 
+QString PointerGraphNodeItem::headerText() const {
+  QString hdr = m_expression;
+  if (!m_typeName.isEmpty()) hdr += QStringLiteral(" : %1").arg(m_typeName);
+  if (!m_address.isEmpty()) hdr += QStringLiteral(" @ %1").arg(m_address);
+  if (!m_displayOptions.formatOverride.isEmpty()) {
+    hdr += QStringLiteral(" [/%1]").arg(m_displayOptions.formatOverride);
+  }
+  return hdr;
+}
+
+QString PointerGraphNodeItem::fieldRowText(int fieldIndex) const {
+  if (fieldIndex < 0 || fieldIndex >= m_fields.size()) return QString();
+  const auto& f = m_fields[fieldIndex];
+  const QString dispVal = formattedFieldValue(fieldIndex);
+  QString txt = f.type.isEmpty()
+                    ? QStringLiteral("%1 : %2").arg(f.name, dispVal)
+                    : QStringLiteral("%1 : %2 (%3)").arg(f.name, dispVal, f.type);
+  if (m_mutatedTransitions.contains(f.name)) {
+    txt += QStringLiteral(" [%1]").arg(m_mutatedTransitions.value(f.name));
+  }
+  return txt;
+}
+
+QString PointerGraphNodeItem::tooltipForPosition(const QPointF& p) const {
+  if (!boundingRect().contains(p)) return QString();
+  if (p.y() >= 0.0 && p.y() < kHeaderHeight) {
+    QStringList lines{headerText()};
+    for (auto it = m_mutatedTransitions.cbegin(); it != m_mutatedTransitions.cend(); ++it) {
+      lines.append(QStringLiteral("%1.%2: %3").arg(m_expression, it.key(), it.value()));
+    }
+    return lines.join(QLatin1Char('\n'));
+  }
+  const int fIdx = hitTestVisibleSlot(p, nullptr);
+  if (fIdx >= 0) return fieldRowText(fIdx);
+  if (hitTestHiddenPill(p)) {
+    QStringList hiddenNames;
+    for (const auto& f : m_fields) {
+      if (m_displayOptions.hiddenFields.contains(f.name)) hiddenNames.append(f.name);
+    }
+    return QStringLiteral("Hidden fields: %1 (click to restore)").arg(hiddenNames.join(QStringLiteral(", ")));
+  }
+  if (m_fields.isEmpty()) return QStringLiteral("%1\n%2").arg(headerText(), placeholderStatusText());
+  return headerText();
+}
+
 int PointerGraphNodeItem::indexOfField(const QString& fieldName) const {
   for (int i = 0; i < m_fields.size(); ++i) {
     if (m_fields[i].name == fieldName) return i;
@@ -226,16 +309,63 @@ int PointerGraphNodeItem::indexOfField(const QString& fieldName) const {
   return -1;
 }
 
+qreal PointerGraphNodeItem::computeEffectiveWidth() const {
+  const QVector<int> vis = visibleFieldIndices();
+  if (!m_displayOptions.expandedWidth) {
+    if (m_displayOptions.horizontal) {
+      const int cols = qMax(1, static_cast<int>(vis.size()));
+      return std::max<qreal>(220.0, cols * kHorizColWidth);
+    }
+    return kCardWidth;
+  }
+
+  QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+  mono.setPixelSize(11);
+  mono.setBold(true);
+  const QFontMetrics hdrFm(mono);
+  const qreal hdrRightMargin = m_isRoot ? 52.0 : 30.0;
+  qreal neededW = hdrFm.horizontalAdvance(headerText()) + 24.0 + hdrRightMargin;
+
+  mono.setBold(false);
+  const QFontMetrics rowFm(mono);
+  if (m_displayOptions.horizontal) {
+    const int cols = qMax(1, static_cast<int>(vis.size()));
+    qreal maxColW = kHorizColWidth;
+    for (int fIdx : vis) {
+      const auto& f = m_fields[fIdx];
+      const bool expandable = isExpandableOrPointerField(f);
+      QString valTxt = formattedFieldValue(fIdx);
+      if (m_mutatedTransitions.contains(f.name)) valTxt += QStringLiteral(" [%1]").arg(m_mutatedTransitions.value(f.name));
+      maxColW = std::max<qreal>(maxColW, rowFm.horizontalAdvance(f.name) + (expandable ? 48.0 : 18.0));
+      maxColW = std::max<qreal>(maxColW, rowFm.horizontalAdvance(valTxt) + 18.0);
+    }
+    neededW = std::max(neededW, cols * maxColW);
+    return std::clamp(std::ceil(neededW), std::max<qreal>(220.0, cols * kHorizColWidth), kMaxExpandedCardWidth);
+  }
+
+  if (m_fields.isEmpty()) {
+    neededW = std::max<qreal>(neededW, rowFm.horizontalAdvance(placeholderStatusText()) + 28.0);
+  } else {
+    for (int fIdx : vis) {
+      const auto& f = m_fields[fIdx];
+      const bool expandable = isExpandableOrPointerField(f);
+      const bool nullPtr = !expandable && (f.type.contains(QLatin1Char('*')) || isNullPointerValue(f.value));
+      const qreal rightPad = (expandable || nullPtr) ? 68.0 : 10.0;
+      neededW = std::max<qreal>(neededW, rowFm.horizontalAdvance(fieldRowText(fIdx)) + 26.0 + rightPad);
+    }
+  }
+  return std::clamp(std::ceil(neededW), kCardWidth, kMaxExpandedCardWidth);
+}
+
 QRectF PointerGraphNodeItem::boundingRect() const {
   const QVector<int> vis = visibleFieldIndices();
   const qreal hiddenBar = (hiddenFieldCount() > 0) ? kHiddenPillHeight : 0.0;
+  const qreal w = computeEffectiveWidth();
   if (m_displayOptions.horizontal) {
-    const int cols = qMax(1, static_cast<int>(vis.size()));
-    const qreal w = std::max<qreal>(220.0, cols * kHorizColWidth);
     return QRectF(0.0, 0.0, w, kHeaderHeight + kHorizBodyHeight + hiddenBar + kFooterPadding);
   }
   const int rows = m_fields.isEmpty() ? 1 : static_cast<int>(vis.size());
-  return QRectF(0.0, 0.0, kCardWidth, kHeaderHeight + rows * kRowHeight + hiddenBar + kFooterPadding);
+  return QRectF(0.0, 0.0, w, kHeaderHeight + rows * kRowHeight + hiddenBar + kFooterPadding);
 }
 
 QPointF PointerGraphNodeItem::fieldSourceAnchor(const QString& fieldName) const {
@@ -332,12 +462,7 @@ void PointerGraphNodeItem::paint(QPainter* painter, const QStyleOptionGraphicsIt
   painter->setFont(mono);
   painter->setPen(isDark ? QColor(QStringLiteral("#f8fafc")) : QColor(QStringLiteral("#0f172a")));
 
-  QString hdrText = m_expression;
-  if (!m_typeName.isEmpty()) hdrText += QStringLiteral(" : %1").arg(m_typeName);
-  if (!m_address.isEmpty()) hdrText += QStringLiteral(" @ %1").arg(m_address);
-  if (!m_displayOptions.formatOverride.isEmpty()) {
-    hdrText += QStringLiteral(" [/%1]").arg(m_displayOptions.formatOverride);
-  }
+  const QString hdrText = headerText();
   const qreal hdrRightMargin = m_isRoot ? 52.0 : 30.0;
   painter->drawText(QRectF(10.0, 0.0, cardW - 10.0 - hdrRightMargin, kHeaderHeight),
                     Qt::AlignVCenter | Qt::AlignLeft,
@@ -366,9 +491,12 @@ void PointerGraphNodeItem::paint(QPainter* painter, const QStyleOptionGraphicsIt
   mono.setBold(false);
   painter->setFont(mono);
   if (m_fields.isEmpty()) {
-    painter->setPen(isDark ? QColor(QStringLiteral("#94a3b8")) : QColor(QStringLiteral("#64748b")));
+    const QColor emptyColor = (m_placeholderState == PlaceholderState::Loading)
+                                  ? QColor(QStringLiteral("#38bdf8"))
+                                  : (isDark ? QColor(QStringLiteral("#94a3b8")) : QColor(QStringLiteral("#64748b")));
+    painter->setPen(emptyColor);
     painter->drawText(QRectF(10.0, kHeaderHeight, cardW - 20.0, kRowHeight),
-                      Qt::AlignVCenter | Qt::AlignLeft, QStringLiteral("(double-click or expand fields...)"));
+                      Qt::AlignVCenter | Qt::AlignLeft, placeholderStatusText());
     return;
   }
 
@@ -433,11 +561,7 @@ void PointerGraphNodeItem::paint(QPainter* painter, const QStyleOptionGraphicsIt
       painter->setPen(isMutated
                           ? (isDark ? QColor(QStringLiteral("#fbbf24")) : QColor(QStringLiteral("#b45309")))
                           : (isDark ? QColor(QStringLiteral("#e2e8f0")) : QColor(QStringLiteral("#1e293b"))));
-      const QString dispVal = formattedFieldValue(fIdx);
-      QString rowTxt = f.type.isEmpty()
-                           ? QStringLiteral("%1 : %2").arg(f.name, dispVal)
-                           : QStringLiteral("%1 : %2 (%3)").arg(f.name, dispVal, f.type);
-      if (isMutated) rowTxt += QStringLiteral(" [%1]").arg(m_mutatedTransitions.value(f.name));
+      const QString rowTxt = fieldRowText(fIdx);
       painter->drawText(QRectF(10.0, y, cardW - 10.0 - rightPad, kRowHeight),
                         Qt::AlignVCenter | Qt::AlignLeft,
                         painter->fontMetrics().elidedText(rowTxt, Qt::ElideRight,
@@ -467,6 +591,41 @@ void PointerGraphNodeItem::paint(QPainter* painter, const QStyleOptionGraphicsIt
   }
 }
 
+bool PointerGraphNodeItem::sceneEvent(QEvent* event) {
+  if (event && event->type() == QEvent::GraphicsSceneHelp) {
+    auto* helpEv = static_cast<QGraphicsSceneHelpEvent*>(event);
+    const QString tip = tooltipForPosition(mapFromScene(helpEv->scenePos()));
+    setToolTip(tip);
+    if (!tip.isEmpty()) QToolTip::showText(helpEv->screenPos(), tip, helpEv->widget());
+    else QToolTip::hideText();
+    event->accept();
+    return true;
+  }
+  return QGraphicsObject::sceneEvent(event);
+}
+
+void PointerGraphNodeItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event) {
+  if (event) {
+    const QString tip = tooltipForPosition(event->pos());
+    setToolTip(tip);
+    if (tip != m_lastHoverTooltip) {
+      m_lastHoverTooltip = tip;
+      if (!tip.isEmpty() && scene() && !scene()->views().isEmpty() && scene()->views().constFirst()->isVisible()) {
+        QToolTip::showText(event->screenPos(), tip, scene()->views().constFirst()->viewport());
+      } else {
+        QToolTip::hideText();
+      }
+    }
+  }
+  QGraphicsObject::hoverMoveEvent(event);
+}
+
+void PointerGraphNodeItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
+  m_lastHoverTooltip.clear();
+  QToolTip::hideText();
+  QGraphicsObject::hoverLeaveEvent(event);
+}
+
 QVariant PointerGraphNodeItem::itemChange(GraphicsItemChange change, const QVariant& value) {
   if (change == ItemPositionHasChanged && m_cb.onMoved) m_cb.onMoved(this);
   return QGraphicsObject::itemChange(change, value);
@@ -474,6 +633,11 @@ QVariant PointerGraphNodeItem::itemChange(GraphicsItemChange change, const QVari
 
 void PointerGraphNodeItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
   if (event && event->button() == Qt::LeftButton) {
+    if (event->modifiers() & Qt::ShiftModifier) {
+      if (m_cb.onToggleExpandedWidth) m_cb.onToggleExpandedWidth(this);
+      event->accept();
+      return;
+    }
     const QPointF p = event->pos();
     const qreal cardW = boundingRect().width();
     if (p.y() >= 0.0 && p.y() <= kHeaderHeight) {
@@ -506,14 +670,23 @@ void PointerGraphNodeItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
   QGraphicsObject::mousePressEvent(event);
 }
 
+bool PointerGraphNodeItem::handleDoubleClickAt(const QPointF& itemPos) {
+  const int fIdx = hitTestVisibleSlot(itemPos, nullptr);
+  if (fIdx >= 0 && m_cb.onExpandField) {
+    if (isExpandableOrPointerField(m_fields[fIdx])) m_cb.onExpandField(m_expression, m_fields[fIdx].name);
+    return true;
+  }
+  if (m_fields.isEmpty() && m_cb.onExpandNode) {
+    m_cb.onExpandNode(m_expression);
+    return true;
+  }
+  return false;
+}
+
 void PointerGraphNodeItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
-  if (event) {
-    const int fIdx = hitTestVisibleSlot(event->pos(), nullptr);
-    if (fIdx >= 0 && m_cb.onExpandField) {
-      m_cb.onExpandField(m_expression, m_fields[fIdx].name);
-      event->accept();
-      return;
-    }
+  if (event && event->button() == Qt::LeftButton && handleDoubleClickAt(event->pos())) {
+    event->accept();
+    return;
   }
   QGraphicsObject::mouseDoubleClickEvent(event);
 }
@@ -522,6 +695,9 @@ void PointerGraphNodeItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* even
   if (!event) return;
   QMenu menu;
   const int fIdx = hitTestVisibleSlot(event->pos(), nullptr);
+  QAction* expandNodeAct = m_fields.isEmpty()
+      ? menu.addAction(QStringLiteral("Expand / Reload Node Fields"))
+      : nullptr;
   QAction* hideFieldAct = (fIdx >= 0)
       ? menu.addAction(QStringLiteral("Hide Field '%1'").arg(m_fields[fIdx].name))
       : nullptr;
@@ -529,8 +705,11 @@ void PointerGraphNodeItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* even
   QAction* showHiddenAct = (hiddenCnt > 0)
       ? menu.addAction(QStringLiteral("Show All Hidden Fields (%1)").arg(hiddenCnt))
       : nullptr;
-  if (hideFieldAct || showHiddenAct) menu.addSeparator();
+  if (expandNodeAct || hideFieldAct || showHiddenAct) menu.addSeparator();
 
+  QAction* expandWidthAct = menu.addAction(m_displayOptions.expandedWidth
+      ? QStringLiteral("Compact Card Width (Shift+Click)")
+      : QStringLiteral("Expand Card Width to Fit Values (Shift+Click)"));
   QAction* orientAct = menu.addAction(QStringLiteral("Toggle Horizontal / Vertical Layout"));
   QMenu* fmtMenu = menu.addMenu(QStringLiteral("Display Format"));
   QAction* fmtAuto = fmtMenu->addAction(QStringLiteral("Auto"));
@@ -550,8 +729,10 @@ void PointerGraphNodeItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* even
 
   QAction* chosen = menu.exec(event->screenPos());
   if (!chosen) return;
-  if (chosen == hideFieldAct && fIdx >= 0 && m_cb.onHideField) m_cb.onHideField(this, m_fields[fIdx].name);
+  if (chosen == expandNodeAct && m_cb.onExpandNode) m_cb.onExpandNode(m_expression);
+  else if (chosen == hideFieldAct && fIdx >= 0 && m_cb.onHideField) m_cb.onHideField(this, m_fields[fIdx].name);
   else if (chosen == showHiddenAct && m_cb.onRestoreHidden) m_cb.onRestoreHidden(this);
+  else if (chosen == expandWidthAct && m_cb.onToggleExpandedWidth) m_cb.onToggleExpandedWidth(this);
   else if (chosen == orientAct && m_cb.onToggleOrientation) m_cb.onToggleOrientation(this);
   else if (chosen == fmtAuto && m_cb.onSetFormat) m_cb.onSetFormat(this, QString());
   else if (chosen == fmtHex && m_cb.onSetFormat) m_cb.onSetFormat(this, QStringLiteral("x"));
@@ -560,176 +741,6 @@ void PointerGraphNodeItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* even
   else if (chosen == unpinAct && m_cb.onUnpinRoot) m_cb.onUnpinRoot(m_expression);
   else if (chosen == resetPosAct && m_cb.onResetPos) m_cb.onResetPos(this);
   event->accept();
-}
-
-// ============================================================================
-// PointerGraphEdgeItem
-// ============================================================================
-
-PointerGraphEdgeItem::PointerGraphEdgeItem(PointerGraphNodeItem* src, QString fieldName, PointerGraphNodeItem* dst)
-    : m_source(src), m_fieldName(std::move(fieldName)), m_target(dst) {
-  setZValue(-1.0);
-  updateGeometry();
-}
-
-void PointerGraphEdgeItem::setTargetNode(PointerGraphNodeItem* dst) { m_target = dst; updateGeometry(); }
-void PointerGraphEdgeItem::setCycleOrAlias(bool flag) { m_isCycleOrAlias = flag; updateGeometry(); }
-
-void PointerGraphEdgeItem::updateGeometry() {
-  if (!m_source || !m_target) return;
-  const QPointF p1 = m_source->fieldSourceAnchor(m_fieldName), p2 = m_target->targetAnchor();
-  QPainterPath path(p1);
-  if (p2.x() >= p1.x() + 20.0) {
-    const qreal dx = (p2.x() - p1.x()) * 0.5;
-    path.cubicTo(QPointF(p1.x() + dx, p1.y()), QPointF(p2.x() - dx, p2.y()), p2);
-  } else {
-    const qreal archY = std::max(m_source->sceneBoundingRect().bottom(), m_target->sceneBoundingRect().bottom()) + 75.0;
-    path.cubicTo(QPointF(p1.x() + 65.0, archY), QPointF(p2.x() - 65.0, archY), p2);
-  }
-  m_midPoint = path.pointAtPercent(0.5);
-  setPath(path);
-  update();
-}
-
-void PointerGraphEdgeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) {
-  painter->setRenderHint(QPainter::Antialiasing, true);
-  const QColor edgeColor = m_isCycleOrAlias ? QColor(QStringLiteral("#f59e0b")) : QColor(QStringLiteral("#38bdf8"));
-  painter->setPen(QPen(edgeColor, m_isCycleOrAlias ? 2.2 : 1.7, m_isCycleOrAlias ? Qt::DashLine : Qt::SolidLine));
-  painter->setBrush(Qt::NoBrush);
-  painter->drawPath(path());
-
-  const QPointF p2 = m_target ? m_target->targetAnchor() : QPointF();
-  QPolygonF arrow;
-  arrow << p2 << QPointF(p2.x() - 8.0, p2.y() - 4.5) << QPointF(p2.x() - 8.0, p2.y() + 4.5);
-  painter->setPen(Qt::NoPen);
-  painter->setBrush(edgeColor);
-  painter->drawPolygon(arrow);
-
-  if (m_isCycleOrAlias) {
-    const QRectF pill(m_midPoint.x() - 62.0, m_midPoint.y() - 9.0, 124.0, 18.0);
-    painter->setPen(QPen(QColor(QStringLiteral("#f59e0b")), 1.0));
-    painter->setBrush(QColor(QStringLiteral("#451a03")));
-    painter->drawRoundedRect(pill, 4.0, 4.0);
-    QFont f = painter->font();
-    f.setPixelSize(9); f.setBold(true); painter->setFont(f);
-    painter->setPen(QColor(QStringLiteral("#fde68a")));
-    painter->drawText(pill, Qt::AlignCenter, QStringLiteral("CYCLE / SHARED ALIAS"));
-  }
-}
-
-PointerGraphView::PointerGraphView(QGraphicsScene* scene, QWidget* parent)
-    : QGraphicsView(scene, parent) {
-  setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
-  setDragMode(QGraphicsView::ScrollHandDrag);
-  setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-  setResizeAnchor(QGraphicsView::AnchorViewCenter);
-  setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
-  if (scene) connect(scene, &QGraphicsScene::changed, viewport(), QOverload<>::of(&QWidget::update));
-}
-
-void PointerGraphView::setZoomFactor(double factor) {
-  const double clamped = std::clamp(factor, static_cast<double>(kMinZoom), static_cast<double>(kMaxZoom));
-  const double cur = zoomFactor();
-  if (cur <= 0.0) return;
-  const double ratio = clamped / cur;
-  if (std::abs(ratio - 1.0) > 1e-4) { scale(ratio, ratio); viewport()->update(); }
-}
-
-QRectF PointerGraphView::minimapViewportRect() const {
-  if (!viewport() || viewport()->width() < 220 || viewport()->height() < 150) return QRectF();
-  if (!scene() || scene()->items().isEmpty()) return QRectF();
-  return QRectF(viewport()->width() - kMinimapW - kMinimapMargin,
-                viewport()->height() - kMinimapH - kMinimapMargin, kMinimapW, kMinimapH);
-}
-
-QRectF PointerGraphView::computeWorldBounds() const {
-  if (!scene()) return QRectF(0.0, 0.0, 1.0, 1.0);
-  QRectF world = scene()->itemsBoundingRect();
-  const QRectF cam = mapToScene(viewport()->rect()).boundingRect();
-  return (world.isEmpty() ? cam : world.united(cam)).adjusted(-40.0, -40.0, 40.0, 40.0);
-}
-
-QPointF PointerGraphView::minimapPointToScene(const QPointF& viewPos) const {
-  const QRectF mm = minimapViewportRect().adjusted(6.0, 6.0, -6.0, -6.0), world = computeWorldBounds();
-  if (mm.isEmpty() || world.width() <= 0.0 || world.height() <= 0.0) return QPointF();
-  const qreal s = std::min(mm.width() / world.width(), mm.height() / world.height());
-  const qreal ox = mm.left() + (mm.width() - world.width() * s) * 0.5;
-  const qreal oy = mm.top() + (mm.height() - world.height() * s) * 0.5;
-  return QPointF(world.left() + (viewPos.x() - ox) / s, world.top() + (viewPos.y() - oy) / s);
-}
-
-void PointerGraphView::wheelEvent(QWheelEvent* event) {
-  if (!event) return;
-  const int dy = (event->angleDelta().y() != 0) ? event->angleDelta().y() : event->pixelDelta().y();
-  if (dy != 0) setZoomFactor(zoomFactor() * ((dy > 0) ? 1.15 : (1.0 / 1.15)));
-  event->accept();
-}
-
-void PointerGraphView::paintEvent(QPaintEvent* event) {
-  QGraphicsView::paintEvent(event);
-  const QRectF mm = minimapViewportRect();
-  if (mm.isEmpty()) return;
-
-  QPainter p(viewport());
-  p.setRenderHint(QPainter::Antialiasing, true);
-  const bool isDark = core::ThemeManager::instance().isDarkMode();
-  p.setPen(QPen(isDark ? QColor(QStringLiteral("#334155")) : QColor(QStringLiteral("#94a3b8")), 1.1));
-  p.setBrush(isDark ? QColor(15, 23, 42, 220) : QColor(248, 250, 252, 230));
-  p.drawRoundedRect(mm, 6.0, 6.0);
-
-  const QRectF inner = mm.adjusted(6.0, 6.0, -6.0, -6.0), world = computeWorldBounds();
-  if (world.width() <= 0.0 || world.height() <= 0.0) return;
-  const qreal s = std::min(inner.width() / world.width(), inner.height() / world.height());
-  const qreal ox = inner.left() + (inner.width() - world.width() * s) * 0.5;
-  const qreal oy = inner.top() + (inner.height() - world.height() * s) * 0.5;
-  auto mapRect = [&](const QRectF& r) {
-    return QRectF(ox + (r.left() - world.left()) * s, oy + (r.top() - world.top()) * s,
-                  std::max<qreal>(3.0, r.width() * s), std::max<qreal>(2.5, r.height() * s));
-  };
-
-  p.save();
-  p.setClipRect(inner);
-  for (QGraphicsItem* item : scene()->items()) {
-    if (auto* node = dynamic_cast<PointerGraphNodeItem*>(item)) {
-      p.setPen(QPen(node->isRoot() ? QColor(QStringLiteral("#f59e0b")) : QColor(QStringLiteral("#38bdf8")), 1.0));
-      p.setBrush(isDark ? QColor(QStringLiteral("#1e293b")) : QColor(QStringLiteral("#cbd5e1")));
-      p.drawRoundedRect(mapRect(node->sceneBoundingRect()), 1.5, 1.5);
-    }
-  }
-  p.setPen(QPen(QColor(QStringLiteral("#38bdf8")), 1.4));
-  p.setBrush(QColor(56, 189, 248, 38));
-  p.drawRect(mapRect(mapToScene(viewport()->rect()).boundingRect()).intersected(inner));
-  p.restore();
-}
-
-void PointerGraphView::mousePressEvent(QMouseEvent* event) {
-  if (event && event->button() == Qt::LeftButton && minimapViewportRect().contains(event->position())) {
-    m_panningMinimap = true;
-    centerOn(minimapPointToScene(event->position()));
-    viewport()->update();
-    event->accept();
-    return;
-  }
-  QGraphicsView::mousePressEvent(event);
-}
-
-void PointerGraphView::mouseMoveEvent(QMouseEvent* event) {
-  if (event && m_panningMinimap) {
-    centerOn(minimapPointToScene(event->position()));
-    viewport()->update();
-    event->accept();
-    return;
-  }
-  QGraphicsView::mouseMoveEvent(event);
-}
-
-void PointerGraphView::mouseReleaseEvent(QMouseEvent* event) {
-  if (event && m_panningMinimap && event->button() == Qt::LeftButton) {
-    m_panningMinimap = false;
-    event->accept();
-    return;
-  }
-  QGraphicsView::mouseReleaseEvent(event);
 }
 
 PointerLayoutResult computeLayeredDagLayout(const QVector<PointerLayoutNode>& nodes,

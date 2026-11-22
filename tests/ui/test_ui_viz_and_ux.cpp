@@ -372,7 +372,60 @@ static void testPointerGraphControlsAndExport() {
     QApplication::sendEvent(gv->viewport(), &wheelIn); QVERIFY(pg.zoomFactor() > 1.05); pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3); pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
     QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, pg.minimapViewportRect().center().toPoint());
     QTemporaryDir expDir; QVERIFY(expDir.isValid()); const QString pngOut = expDir.filePath(QStringLiteral("graph.png")), svgOut = expDir.filePath(QStringLiteral("graph.svg"));
-    QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400); QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg"))); pg.close();
+    QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400); QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg")));
+
+    // Regression coverage: (1) un-elided per-row hover tooltips, (2) Shift+Click width expansion without neighbor overlap, (3) double-click pointer deref expansion.
+    pg.clearGraph(); pg.resetZoom(); QApplication::processEvents();
+    const QString longEnumVal = QStringLiteral("mfem::Operator::Complex_Hypre_ParCSR");
+    const QString longEnumType = QStringLiteral("mfem::Operator::Type");
+    const QString expectedRowTip = QStringLiteral("type_id : mfem::Operator::Complex_Hypre_ParCSR (mfem::Operator::Type)");
+    pg.upsertStructNode(QStringLiteral("A"), QStringLiteral("mfem::HypreSmoother"), QStringLiteral("0x6000"),
+                        {F{QStringLiteral("type_id"), longEnumVal, longEnumType},
+                         F{QStringLiteral("oper"), QStringLiteral("0x6100"), QStringLiteral("mfem::Operator *")}});
+    pg.upsertStructNode(QStringLiteral("A.oper"), QStringLiteral("mfem::Operator *"), QStringLiteral("0x6100"), {},
+                        QStringLiteral("A"), QStringLiteral("oper"));
+    pg.autoLayoutNodes(true); gv->centerOn(pg.nodePosition(QStringLiteral("A")) + QPointF(145.0, 40.0)); QApplication::processEvents();
+    QCOMPARE(pg.nodeFieldTooltip(QStringLiteral("A"), QStringLiteral("type_id")), expectedRowTip);
+    QCOMPARE(pg.nodeTooltipAt(QStringLiteral("A"), QPointF(24.0, 42.0)), expectedRowTip);
+    QCOMPARE(pg.nodeTooltipAt(QStringLiteral("A"), QPointF(24.0, 14.0)), QStringLiteral("A : mfem::HypreSmoother @ 0x6000"));
+    const QPoint aRowViewPt = gv->mapFromScene(pg.nodePosition(QStringLiteral("A")) + QPointF(40.0, 42.0));
+    QTest::mouseMove(gv->viewport(), aRowViewPt); QApplication::processEvents();
+    if (QGraphicsItem* hitItem = gv->itemAt(aRowViewPt)) QCOMPARE(hitItem->toolTip(), expectedRowTip);
+
+    const qreal compactW = pg.nodeCardSize(QStringLiteral("A")).width();
+    const qreal operBeforeX = pg.nodePosition(QStringLiteral("A.oper")).x();
+    QVERIFY(!pg.isNodeExpandedWidth(QStringLiteral("A")) && std::abs(compactW - 290.0) < 1e-3);
+    QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::ShiftModifier, aRowViewPt); QApplication::processEvents();
+    const qreal expandedW = pg.nodeCardSize(QStringLiteral("A")).width();
+    const qreal operAfterX = pg.nodePosition(QStringLiteral("A.oper")).x();
+    QVERIFY2(pg.isNodeExpandedWidth(QStringLiteral("A")) && expandedW > compactW + 80.0 && expandedW <= 900.0,
+             qPrintable(QStringLiteral("isExpanded=%1 compactW=%2 expandedW=%3 viewPt=(%4,%5)")
+                            .arg(pg.isNodeExpandedWidth(QStringLiteral("A"))).arg(compactW).arg(expandedW).arg(aRowViewPt.x()).arg(aRowViewPt.y())));
+    QVERIFY(operAfterX > operBeforeX && operAfterX >= pg.nodePosition(QStringLiteral("A")).x() + expandedW + 30.0);
+    const QPoint aCollapsedPt = gv->mapFromScene(pg.nodePosition(QStringLiteral("A")) + QPointF(40.0, 42.0));
+    QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::ShiftModifier, aCollapsedPt); QApplication::processEvents();
+    QVERIFY(!pg.isNodeExpandedWidth(QStringLiteral("A")) && std::abs(pg.nodeCardSize(QStringLiteral("A")).width() - compactW) < 1e-3);
+
+    gv->centerOn(pg.nodePosition(QStringLiteral("A.oper")) + QPointF(145.0, 30.0)); QApplication::processEvents();
+    QCOMPARE(pg.nodePlaceholderText(QStringLiteral("A.oper")), QStringLiteral("(double-click or expand fields...)"));
+    QSignalSpy expandSpy(&pg, &PointerGraphDialog::nodeExpansionRequested);
+    const QPoint operBodyPt = gv->mapFromScene(pg.nodePosition(QStringLiteral("A.oper")) + QPointF(60.0, 42.0));
+    QTest::mouseDClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, operBodyPt); QApplication::processEvents();
+    QCOMPARE(expandSpy.count(), 1);
+    QCOMPARE(expandSpy.first().at(0).toString(), QStringLiteral("A.oper"));
+    QCOMPARE(expandSpy.first().at(1).toString(), QStringLiteral("*(A.oper)"));
+    QCOMPARE(pg.nodePlaceholderText(QStringLiteral("A.oper")), QStringLiteral("(loading fields...)"));
+    pg.onVariableChildrenUpdated(0, QStringLiteral("*(A.oper)"), {});
+    QCOMPARE(pg.nodePlaceholderText(QStringLiteral("A.oper")), QStringLiteral("(no fields / opaque type)"));
+    QTest::mouseDClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, operBodyPt); QApplication::processEvents();
+    QCOMPARE(pg.nodePlaceholderText(QStringLiteral("A.oper")), QStringLiteral("(loading fields...)"));
+    pg.onVariableChildrenUpdated(0, QStringLiteral("*(A.oper)"),
+                                 {QVariantMap{{QStringLiteral("name"), QStringLiteral("height")}, {QStringLiteral("value"), QStringLiteral("1024")}, {QStringLiteral("type"), QStringLiteral("int")}},
+                                  QVariantMap{{QStringLiteral("name"), QStringLiteral("width")}, {QStringLiteral("value"), QStringLiteral("1024")}, {QStringLiteral("type"), QStringLiteral("int")}}});
+    QVERIFY(pg.nodeHasField(QStringLiteral("A.oper"), QStringLiteral("height")) && pg.fieldValue(QStringLiteral("A.oper"), QStringLiteral("height")) == QStringLiteral("1024") && pg.nodePlaceholderText(QStringLiteral("A.oper")).isEmpty());
+    pg.upsertStructNode(QStringLiteral("nullOp"), QStringLiteral("mfem::Operator *"), QStringLiteral("0x0"), {});
+    QVERIFY(pg.nodePlaceholderText(QStringLiteral("nullOp")) == QStringLiteral("(null pointer)") && !pg.expandNode(QStringLiteral("nullOp")) && pg.nodePlaceholderText(QStringLiteral("nullOp")) == QStringLiteral("(null pointer)"));
+    pg.close();
 }
 /** @brief Verifies ArrayPlotDialog v0.8.8 multi-rank 1D overlay, start:end:stride slicing, Log10 scale, drag-box zoom, and Scalar History mode. */
 static void testArrayPlotterScientificExtensions() {

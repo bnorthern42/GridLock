@@ -57,6 +57,7 @@ class PointerGraphDialog : public QDialog {
   struct NodeDisplayOptions {
     QSet<QString> hiddenFields; ///< Suppressed field names collapsed into the hidden-fields pill.
     bool horizontal = false;    ///< True for horizontal tabular column layout, false for vertical rows.
+    bool expandedWidth = false; ///< True to expand card width (capped at 900px) to fit un-elided values.
     QString formatOverride;     ///< Scalar display format: `""` (Auto), `"x"` (Hex), `"d"` (Dec), `"b"` (Bin).
   };
 
@@ -96,6 +97,7 @@ class PointerGraphDialog : public QDialog {
                        const QString& typeHint = QString(),
                        const QString& valueHint = QString());
 
+  bool expandNode(const QString& nodeExprOrAddr);
   void expandNodeField(const QString& nodeExpr, const QString& fieldName);
   void expandAllPointersOneHop();
 
@@ -118,16 +120,19 @@ class PointerGraphDialog : public QDialog {
   int mutatedFieldCount() const;
   int stopRefreshCount() const { return m_stopRefreshCount; }
 
-  // --- Layout & Position Inspection ---
+  // --- Layout, Tooltip & Position Inspection ---
   QPointF nodePosition(const QString& nodeExprOrAddr) const;
   bool setNodePosition(const QString& nodeExprOrAddr, const QPointF& pos);
   bool isNodeManuallyPositioned(const QString& nodeExprOrAddr) const;
   int nodeLayer(const QString& nodeExprOrAddr) const;
   QSizeF nodeCardSize(const QString& nodeExprOrAddr) const;
+  QString nodeTooltipAt(const QString& nodeExprOrAddr, const QPointF& itemLocalPos) const;
+  QString nodeFieldTooltip(const QString& nodeExprOrAddr, const QString& fieldName) const;
+  QString nodePlaceholderText(const QString& nodeExprOrAddr) const;
   QString edgeTargetAddressOrExpr(const QString& sourceExprOrAddr, const QString& fieldName) const;
   bool isEdgeCycleOrAlias(const QString& sourceExprOrAddr, const QString& fieldName) const;
 
-  // --- Per-Node Field Suppression, Orientation & Format Overrides ---
+  // --- Per-Node Field Suppression, Orientation, Width & Format Overrides ---
   bool setNodeFieldHidden(const QString& nodeExprOrAddr, const QString& fieldName, bool hidden);
   bool restoreAllHiddenFields(const QString& nodeExprOrAddr);
   int hiddenFieldCount(const QString& nodeExprOrAddr) const;
@@ -137,6 +142,10 @@ class PointerGraphDialog : public QDialog {
   bool setNodeHorizontal(const QString& nodeExprOrAddr, bool horizontal);
   bool toggleNodeOrientation(const QString& nodeExprOrAddr);
   bool isNodeHorizontal(const QString& nodeExprOrAddr) const;
+
+  bool setNodeExpandedWidth(const QString& nodeExprOrAddr, bool expanded);
+  bool toggleNodeExpandedWidth(const QString& nodeExprOrAddr);
+  bool isNodeExpandedWidth(const QString& nodeExprOrAddr) const;
 
   bool setNodeFormatOverride(const QString& nodeExprOrAddr, const QString& formatOverride);
   QString nodeFormatOverride(const QString& nodeExprOrAddr) const;
@@ -157,6 +166,9 @@ class PointerGraphDialog : public QDialog {
   QCompleter* expressionCompleter() const { return m_completer; }
   QLineEdit* rootInputEdit() const { return m_rootEdit; }
   void setRootInputText(const QString& text);
+
+ signals:
+  void nodeExpansionRequested(const QString& nodeExpression, const QString& queryExpression);
 
  public slots:
   void refreshPinnedRoots();
@@ -203,6 +215,7 @@ class PointerGraphDialog : public QDialog {
   int m_focusedRank = 0;
   int m_stopRefreshCount = 0;
   bool m_suppressPositionPinning = false;
+  bool m_inBulkAutoExpand = false;
 
   QLineEdit* m_rootEdit = nullptr;
   QCompleter* m_completer = nullptr;
@@ -236,6 +249,8 @@ class PointerGraphDialog : public QDialog {
   QVector<PointerGraphEdgeItem*> m_edges;
   QMap<QString, QPair<QString, QString>> m_pendingParentLinks;
   QMap<QString, QPair<QString, QString>> m_pendingTypeValueHints;
+  QMap<QString, QString> m_pendingQueryToNodeExpr;
+  QSet<QString> m_pendingExpandNodes;
   QSet<QString> m_autoExpandRoots;
   bool m_hasCycleOrSharedAlias = false;
   bool m_hasUndoSnapshot = false;

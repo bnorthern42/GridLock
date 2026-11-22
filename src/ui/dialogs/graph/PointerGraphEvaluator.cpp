@@ -16,6 +16,37 @@
 
 namespace gridlock::ui {
 
+namespace {
+QString buildMemberExpression(const QString& parentExpr,
+                              const QString& parentType,
+                              const QString& fieldName) {
+  const QString p = parentExpr.trimmed();
+  const QString f = fieldName.trimmed();
+  if (f.startsWith(QLatin1Char('['))) {
+    return p.startsWith(QLatin1Char('*')) ? QStringLiteral("(%1)%2").arg(p, f)
+                                           : QStringLiteral("%1%2").arg(p, f);
+  }
+  if (isPointerTypeString(parentType)) {
+    return (p.startsWith(QLatin1Char('*')) || p.contains(QLatin1Char(' ')))
+               ? QStringLiteral("(%1)->%2").arg(p, f)
+               : QStringLiteral("%1->%2").arg(p, f);
+  }
+  return p.startsWith(QLatin1Char('*')) ? QStringLiteral("(%1).%2").arg(p, f)
+                                         : QStringLiteral("%1.%2").arg(p, f);
+}
+
+QString buildBackendChildQueryExpr(const QString& nodeExpr,
+                                   const QString& typeHint,
+                                   const QString& addrOrValueHint) {
+  const QString expr = nodeExpr.trimmed();
+  if (isPointerTypeString(typeHint) && !isVoidPointerType(typeHint) &&
+      !isNullPointerValue(addrOrValueHint) && !expr.startsWith(QLatin1Char('*'))) {
+    return QStringLiteral("*(%1)").arg(expr);
+  }
+  return expr;
+}
+}  // namespace
+
 void PointerGraphDialog::setCoordinator(::IBackendCoordinator* coordinator) {
   if (m_coordinator == coordinator) return;
   if (m_coordinator) disconnect(m_coordinator, nullptr, this, nullptr);
@@ -69,7 +100,13 @@ void PointerGraphDialog::refreshPinnedRoots() {
   }
   for (const QString& expr : targets) {
     m_autoExpandRoots.insert(expr);
-    if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, expr);
+    const PointerGraphNodeItem* node = findNode(expr);
+    const auto hints = m_pendingTypeValueHints.value(expr);
+    const QString typeHint = (node && !node->typeName().isEmpty()) ? node->typeName() : hints.first;
+    const QString addrHint = (node && !node->address().isEmpty()) ? node->address() : hints.second;
+    const QString queryExpr = buildBackendChildQueryExpr(expr, typeHint, addrHint);
+    if (queryExpr != expr) m_pendingQueryToNodeExpr.insert(queryExpr, expr);
+    if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, queryExpr);
   }
 }
 
@@ -121,6 +158,11 @@ void PointerGraphDialog::removeNode(PointerGraphNodeItem* node) {
   m_displayOptions.remove(node->expression());
   m_previousFieldValues.remove(node->expression());
   m_mutatedFieldTransitions.remove(node->expression());
+  m_pendingExpandNodes.remove(node->expression());
+  for (auto it = m_pendingQueryToNodeExpr.begin(); it != m_pendingQueryToNodeExpr.end();) {
+    if (it.value() == node->expression()) it = m_pendingQueryToNodeExpr.erase(it);
+    else ++it;
+  }
 
   for (auto it = m_nodesByExpr.begin(); it != m_nodesByExpr.end();) {
     if (it.value() == node) it = m_nodesByExpr.erase(it);
@@ -188,12 +230,14 @@ void PointerGraphDialog::reconcileEdgesForUpdatedNode(PointerGraphNodeItem* node
       if (m_nodesByAddress.contains(newAddr)) {
         connectPointerField(node->expression(), fName, newAddr);
       } else {
-        const QString childExpr = QStringLiteral("%1.%2").arg(node->expression(), fName);
+        const QString childExpr = buildMemberExpression(node->expression(), node->typeName(), fName);
         upsertStructNode(childExpr, dereferencedTypeName(it->type), newAddr, {}, node->expression(), fName);
         if (m_coordinator) {
           m_pendingParentLinks.insert(childExpr, {node->expression(), fName});
           m_pendingTypeValueHints.insert(childExpr, {it->type, it->value});
-          m_coordinator->requestVariableChildren(m_focusedRank, childExpr);
+          const QString queryExpr = buildBackendChildQueryExpr(childExpr, it->type, it->value);
+          if (queryExpr != childExpr) m_pendingQueryToNodeExpr.insert(queryExpr, childExpr);
+          m_coordinator->requestVariableChildren(m_focusedRank, queryExpr);
         }
       }
     }
@@ -223,6 +267,7 @@ void PointerGraphDialog::upsertStructNode(const QString& expression,
   if (isNewNode) {
     PointerNodeCallbacks cb;
     cb.onMoved = [this](PointerGraphNodeItem* moved) { recordManualNodePosition(moved); };
+    cb.onExpandNode = [this](const QString& nExpr) { expandNode(nExpr); };
     cb.onExpandField = [this](const QString& nExpr, const QString& fName) { expandNodeField(nExpr, fName); };
     cb.onUnpinRoot = [this](const QString& rExpr) { unpinRootExpression(rExpr, true); };
     cb.onResetPos = [this](PointerGraphNodeItem* target) {
@@ -237,6 +282,9 @@ void PointerGraphDialog::upsertStructNode(const QString& expression,
     };
     cb.onToggleOrientation = [this](PointerGraphNodeItem* target) {
       toggleNodeOrientation(canonicalNodeKey(target));
+    };
+    cb.onToggleExpandedWidth = [this](PointerGraphNodeItem* target) {
+      toggleNodeExpandedWidth(canonicalNodeKey(target));
     };
     cb.onSetFormat = [this](PointerGraphNodeItem* target, const QString& fmt) {
       setNodeFormatOverride(canonicalNodeKey(target), fmt);
@@ -266,6 +314,9 @@ void PointerGraphDialog::upsertStructNode(const QString& expression,
 
   const QString updatedExpr = (isNewNode || wasPlaceholder || oldExpr == cleanExpr) ? cleanExpr : oldExpr;
   node->updateData(updatedExpr, typeName.trimmed(), normAddr, fields);
+  if (fields.isEmpty() && isNullPointerValue(address)) {
+    node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::NullPointer);
+  }
   node->setMutatedFields(m_mutatedFieldTransitions.value(nodeKey));
 
   const QString newKey = canonicalNodeKey(node);
@@ -371,45 +422,119 @@ void PointerGraphDialog::graphExpression(const QString& expression,
   m_pendingTypeValueHints.insert(clean, {typeHint.trimmed(), valueHint.trimmed()});
   m_autoExpandRoots.insert(clean);
   upsertStructNode(clean, typeHint, normalizeHexAddress(valueHint), {});
-  if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, clean);
+  PointerGraphNodeItem* node = findNode(clean);
+  if (isPointerTypeString(typeHint) && isNullPointerValue(valueHint)) {
+    if (node) node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::NullPointer);
+    return;
+  }
+  if (isVoidPointerType(typeHint)) {
+    if (node) node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::NoFields);
+    return;
+  }
+  if (node && m_coordinator) {
+    node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::Loading);
+  }
+  const QString queryExpr = buildBackendChildQueryExpr(clean, typeHint, valueHint);
+  if (queryExpr != clean) m_pendingQueryToNodeExpr.insert(queryExpr, clean);
+  if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, queryExpr);
+}
+
+bool PointerGraphDialog::expandNode(const QString& nodeExprOrAddr) {
+  PointerGraphNodeItem* node = findNode(nodeExprOrAddr);
+  if (!node) return false;
+  const QString expr = node->expression().trimmed();
+  const auto pendingHints = m_pendingTypeValueHints.value(expr);
+  const QString addrHint = !node->address().isEmpty() ? node->address() : pendingHints.second;
+  if (node->placeholderState() == PointerGraphNodeItem::PlaceholderState::NullPointer ||
+      isNullPointerValue(addrHint)) {
+    node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::NullPointer);
+    if (m_view && m_view->viewport()) m_view->viewport()->update();
+    return false;
+  }
+  if (isVoidPointerType(node->typeName())) {
+    node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::NoFields);
+    if (m_view && m_view->viewport()) m_view->viewport()->update();
+    return false;
+  }
+
+  node->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::Loading);
+  if (m_view && m_view->viewport()) m_view->viewport()->update();
+  const QString queryExpr = buildBackendChildQueryExpr(expr, node->typeName(), addrHint);
+  m_pendingTypeValueHints.insert(expr, {node->typeName(), addrHint});
+  m_pendingExpandNodes.insert(expr);
+  if (queryExpr != expr) m_pendingQueryToNodeExpr.insert(queryExpr, expr);
+  emit nodeExpansionRequested(expr, queryExpr);
+  if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, queryExpr);
+  return true;
 }
 
 void PointerGraphDialog::expandNodeField(const QString& nodeExpr, const QString& fieldName) {
   PointerGraphNodeItem* src = findNode(nodeExpr);
   if (!src) return;
-  const int idx = src->indexOfField(fieldName.trimmed());
+  const QString cleanField = fieldName.trimmed();
+  const int idx = src->indexOfField(cleanField);
   const StructFieldEntry field = (idx >= 0) ? src->fields().at(idx)
-                                            : StructFieldEntry{fieldName.trimmed(), QString(), QString()};
+                                            : StructFieldEntry{cleanField, QString(), QString()};
   if (isNullPointerValue(field.value)) return;
 
   const QString normAddr = normalizeHexAddress(field.value);
   if (!normAddr.isEmpty() && m_nodesByAddress.contains(normAddr)) {
-    connectPointerField(src->expression(), fieldName.trimmed(), normAddr);
+    PointerGraphNodeItem* existing = m_nodesByAddress.value(normAddr);
+    connectPointerField(src->expression(), cleanField, normAddr);
+    if (!m_inBulkAutoExpand && existing && existing->fields().isEmpty()) {
+      expandNode(existing->expression());
+    }
     return;
   }
 
-  const QString childExpr = QStringLiteral("%1.%2").arg(src->expression(), fieldName.trimmed());
-  m_pendingParentLinks.insert(childExpr, {src->expression(), fieldName.trimmed()});
+  const QString childExpr = buildMemberExpression(src->expression(), src->typeName(), cleanField);
+  m_pendingParentLinks.insert(childExpr, {src->expression(), cleanField});
   m_pendingTypeValueHints.insert(childExpr, {field.type, field.value});
-  if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, childExpr);
+  if (isVoidPointerType(field.type)) {
+    if (!m_inBulkAutoExpand) {
+      upsertStructNode(childExpr, field.type, normAddr, {}, src->expression(), cleanField);
+      if (auto* n = findNode(childExpr)) n->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::NoFields);
+    }
+    return;
+  }
+
+  const QString queryExpr = buildBackendChildQueryExpr(childExpr, field.type, field.value);
+  if (queryExpr != childExpr) m_pendingQueryToNodeExpr.insert(queryExpr, childExpr);
+  if (!m_inBulkAutoExpand) {
+    m_pendingExpandNodes.insert(childExpr);
+    upsertStructNode(childExpr, field.type, normAddr, {}, src->expression(), cleanField);
+    if (auto* n = findNode(childExpr)) n->setPlaceholderState(PointerGraphNodeItem::PlaceholderState::Loading);
+  }
+  emit nodeExpansionRequested(childExpr, queryExpr);
+  if (m_coordinator) m_coordinator->requestVariableChildren(m_focusedRank, queryExpr);
 }
 
 void PointerGraphDialog::expandAllPointersOneHop() {
+  const bool prevBulk = m_inBulkAutoExpand;
+  m_inBulkAutoExpand = true;
   const auto snapshot = m_nodes;
   for (auto* node : snapshot) {
     for (const auto& f : node->fields()) {
       if (isExpandableOrPointerField(f)) expandNodeField(node->expression(), f.name);
     }
   }
+  m_inBulkAutoExpand = prevBulk;
 }
 
 void PointerGraphDialog::onVariableChildrenUpdated(int,
                                                    const QString& parentExpression,
                                                    const QVariantList& children) {
-  const QString cleanExpr = parentExpression.trimmed();
-  if (cleanExpr.isEmpty()) return;
+  const QString rawExpr = parentExpression.trimmed();
+  if (rawExpr.isEmpty()) return;
+  const QString cleanExpr = m_pendingQueryToNodeExpr.contains(rawExpr)
+                                ? m_pendingQueryToNodeExpr.take(rawExpr)
+                                : rawExpr;
+  for (auto it = m_pendingQueryToNodeExpr.begin(); it != m_pendingQueryToNodeExpr.end();) {
+    if (it.value() == cleanExpr) it = m_pendingQueryToNodeExpr.erase(it);
+    else ++it;
+  }
   if (!m_nodesByExpr.contains(cleanExpr) && !m_pendingParentLinks.contains(cleanExpr) &&
-      !m_pendingTypeValueHints.contains(cleanExpr)) {
+      !m_pendingTypeValueHints.contains(cleanExpr) && !m_pendingExpandNodes.contains(cleanExpr)) {
     return;
   }
 
@@ -425,12 +550,25 @@ void PointerGraphDialog::onVariableChildrenUpdated(int,
   }
   const auto hints = m_pendingTypeValueHints.value(cleanExpr);
   const auto parentLink = m_pendingParentLinks.take(cleanExpr);
+  const bool wasExplicitExpand = m_pendingExpandNodes.remove(cleanExpr);
   upsertStructNode(cleanExpr, hints.first, hints.second, parsedFields,
                    parentLink.first, parentLink.second);
+  if (PointerGraphNodeItem* updatedNode = findNode(cleanExpr)) {
+    if (parsedFields.isEmpty() && updatedNode->fields().isEmpty()) {
+      updatedNode->setPlaceholderState(isNullPointerValue(hints.second)
+                                           ? PointerGraphNodeItem::PlaceholderState::NullPointer
+                                           : PointerGraphNodeItem::PlaceholderState::NoFields);
+    } else if (!parsedFields.isEmpty() && wasExplicitExpand) {
+      autoLayoutNodes(false);
+    }
+  }
   if (m_autoExpandRoots.remove(cleanExpr)) {
+    const bool prevBulk = m_inBulkAutoExpand;
+    m_inBulkAutoExpand = true;
     for (const auto& f : parsedFields) {
       if (isExpandableOrPointerField(f)) expandNodeField(cleanExpr, f.name);
     }
+    m_inBulkAutoExpand = prevBulk;
   }
 }
 
