@@ -23,6 +23,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSignalBlocker>
@@ -56,27 +57,41 @@ qint64 GdbRankCoordinator::getPidForRank(int rank) const {
   return 0;
 }
 
+namespace {
+/** @brief Resolves and caches toolchain binaries (`gdb`, `mpirun`, `mpiexec`) keyed on `name` and `$PATH`. */
+QString resolveCachedToolPath(const QString& rawName, const QStringList& fallbackDirs) {
+  const QString name = rawName.trimmed();
+  if (name.isEmpty()) return {};
+  if (name.contains(QLatin1Char('/'))) {
+    const QFileInfo fi(name);
+    return (fi.exists() && fi.isFile() && fi.isExecutable()) ? fi.absoluteFilePath() : QString();
+  }
+  static QHash<QString, QString> s_cache;
+  const QString key = name + QLatin1Char('|') + qEnvironmentVariable("PATH");
+  if (const QString hit = s_cache.value(key); !hit.isEmpty() && QFileInfo(hit).isExecutable()) return hit;
+  QString found = QStandardPaths::findExecutable(name);
+  if (found.isEmpty() && !fallbackDirs.isEmpty()) found = QStandardPaths::findExecutable(name, fallbackDirs);
+  if (!found.isEmpty()) s_cache.insert(key, found);
+  return found;
+}
+}  // namespace
+
 /** @brief Pre-validates `gdb` and `mpirun`/`mpiexec` executables before UI marks ranks `RUNNING`. */
 bool GdbRankCoordinator::validateLaunchEnvironment(int ranks, QString* outError) const {
   const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"),
                                   QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
                                   QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
   const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
-  QString gdbBin = (!cfgGdb.isEmpty() && QFileInfo::exists(cfgGdb)) ? cfgGdb : QStandardPaths::findExecutable(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb);
-  if (gdbBin.isEmpty() && (cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb"))) gdbBin = QStandardPaths::findExecutable(QStringLiteral("gdb"), searchDirs);
+  const QString gdbBin = resolveCachedToolPath(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb,
+                                               (cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb")) ? searchDirs : QStringList{});
   if (gdbBin.isEmpty()) { if (outError) *outError = QStringLiteral("GDB debugger executable ('%1') was not found in PATH.").arg(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb); return false; }
   const QString prefMpi = core::ConfigManager::instance().getDebuggerSettings().mpiExecutable.trimmed();
-  const auto findMpi = [&](const QString& name) -> QString {
-    if (name.isEmpty()) return {};
-    if (QFileInfo::exists(name) && QFileInfo(name).isExecutable()) return name;
-    QString f = QStandardPaths::findExecutable(name);
-    return f.isEmpty() ? QStandardPaths::findExecutable(name, searchDirs) : f;
-  };
-  if (!prefMpi.isEmpty() && prefMpi != QStringLiteral("mpirun") && prefMpi != QStringLiteral("mpiexec") && findMpi(prefMpi).isEmpty()) {
+  if (!prefMpi.isEmpty() && prefMpi != QStringLiteral("mpirun") && prefMpi != QStringLiteral("mpiexec") && resolveCachedToolPath(prefMpi, searchDirs).isEmpty()) {
     if (outError) *outError = QStringLiteral("Configured MPI launcher ('%1') was not found.").arg(prefMpi);
     return false;
   }
-  if (ranks > 1 && findMpi(prefMpi).isEmpty() && findMpi(QStringLiteral("mpirun")).isEmpty() && findMpi(QStringLiteral("mpiexec")).isEmpty()) {
+  if (ranks > 1 && resolveCachedToolPath(prefMpi, searchDirs).isEmpty() && resolveCachedToolPath(QStringLiteral("mpirun"), searchDirs).isEmpty() &&
+      resolveCachedToolPath(QStringLiteral("mpiexec"), searchDirs).isEmpty()) {
     if (outError) *outError = QStringLiteral("Multi-rank MPI launch (-np %1) requires mpirun or mpiexec in PATH.").arg(ranks);
     return false;
   }
@@ -103,8 +118,8 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   if (pids.isEmpty()) return false;
   for (qint64 pid : pids) if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
   terminateAllSessions();
-  QString gdbPath = core::ConfigManager::instance().getGdbPath().trimmed();
-  if (gdbPath.isEmpty() || !QFileInfo::exists(gdbPath)) gdbPath = QStandardPaths::findExecutable(gdbPath.isEmpty() ? QStringLiteral("gdb") : gdbPath);
+  const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
+  const QString gdbPath = resolveCachedToolPath(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb, {});
   if (gdbPath.isEmpty()) return false;
 
   m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pids.first())).symLinkTarget();
@@ -295,18 +310,15 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
                                   QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
                                   QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
 
-  QString gdbPath = core::ConfigManager::instance().getGdbPath().trimmed();
-  if (gdbPath.isEmpty() || !QFileInfo::exists(gdbPath)) {
-    gdbPath = QStandardPaths::findExecutable(gdbPath.isEmpty() ? QStringLiteral("gdb") : gdbPath);
-    if (gdbPath.isEmpty()) gdbPath = QStandardPaths::findExecutable(QStringLiteral("gdb"), searchDirs);
-  }
+  const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
+  const QString gdbPath = resolveCachedToolPath(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb,
+                                                (cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb")) ? searchDirs : QStringList{});
   if (gdbPath.isEmpty()) { qWarning() << "[GDB] Could not locate gdb executable in PATH."; return; }
 
   const QString preferredMpi = ds.mpiExecutable.trimmed().isEmpty() ? QStringLiteral("mpirun") : ds.mpiExecutable.trimmed();
-  QString mpiBin = QFileInfo::exists(preferredMpi) ? preferredMpi : QStandardPaths::findExecutable(preferredMpi);
-  if (mpiBin.isEmpty()) mpiBin = QStandardPaths::findExecutable(preferredMpi, searchDirs);
-  if (mpiBin.isEmpty()) mpiBin = QStandardPaths::findExecutable(QStringLiteral("mpirun"), searchDirs);
-  if (mpiBin.isEmpty()) mpiBin = QStandardPaths::findExecutable(QStringLiteral("mpiexec"), searchDirs);
+  QString mpiBin = resolveCachedToolPath(preferredMpi, searchDirs);
+  if (mpiBin.isEmpty()) mpiBin = resolveCachedToolPath(QStringLiteral("mpirun"), searchDirs);
+  if (mpiBin.isEmpty()) mpiBin = resolveCachedToolPath(QStringLiteral("mpiexec"), searchDirs);
 
   const auto projCfg = core::ConfigManager::instance().loadProjectSettings();
   QString execArgs = targetArguments().trimmed();

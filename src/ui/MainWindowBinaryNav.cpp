@@ -286,12 +286,16 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
         }
     }
 
-    // Synchronize Disassembly and Decompiler graph/linear viewports.
+    // Synchronize Disassembly and Decompiler graph/linear viewports (deferring heavy CFG/decompiler layout when hidden).
     if (m_disassemblyView) {
         if (hexOk && parsedAddr != 0ULL) {
-            if (m_elfInspector && m_elfInspector->isValid()) {
-                const QString disasm = m_elfInspector->disassembleRange(parsedAddr, 64);
-                if (!disasm.isEmpty()) m_disassemblyView->setPlainText(disasm);
+            const bool disasmVisible = !m_disassemblyView->isHidden() || m_forceDecompilerFallback ||
+                                       m_workspacePerspective.compare(QStringLiteral("Binary"), Qt::CaseInsensitive) == 0 ||
+                                       m_workspacePerspective.compare(QStringLiteral("Reverse"), Qt::CaseInsensitive) == 0;
+            if (m_elfInspector && m_elfInspector->isValid() &&
+                (m_disassemblyView->toPlainText().isEmpty() || m_disassemblyView->lineForAddress(parsedAddr) < 0)) {
+                const QString disasm = m_elfInspector->disassembleRange(parsedAddr, disasmVisible ? 512 : 128);
+                if (!disasm.isEmpty() && m_disassemblyView->toPlainText() != disasm) m_disassemblyView->setPlainText(disasm);
             }
             const bool hasSourceMapping =
                 ((parsedAddr >= 0x00401120ULL && parsedAddr <= 0x004011ffULL) ||
@@ -306,13 +310,17 @@ bool MainWindow::seekToAddressOrExpression(const QString& expr) {
                 m_forceDecompilerFallback;
             if (!hasSourceMapping) {
                 m_showingDecompilerFallback = true;
-                if (allowDecompiler) m_disassemblyView->setSplitGraphDecompilerMode(true);
-                else m_disassemblyView->setDecompilerPaneVisible(false, false);
+                if (disasmVisible) {
+                    if (allowDecompiler) m_disassemblyView->setSplitGraphDecompilerMode(true);
+                    else m_disassemblyView->setDecompilerPaneVisible(false, false);
+                }
             } else if (m_showingDecompilerFallback) {
                 m_showingDecompilerFallback = false;
-                m_disassemblyView->setSplitGraphDecompilerMode(false);
-                m_disassemblyView->setGraphMode(false);
-            } else if (!allowDecompiler && m_disassemblyView->isDecompilerVisible()) {
+                if (disasmVisible) {
+                    m_disassemblyView->setSplitGraphDecompilerMode(false);
+                    m_disassemblyView->setGraphMode(false);
+                }
+            } else if (disasmVisible && !allowDecompiler && m_disassemblyView->isDecompilerVisible()) {
                 syncDisassemblyDecompilerVisibility(false);
             }
         } else if (!m_disassemblyView->toPlainText().isEmpty()) {
@@ -367,8 +375,9 @@ void MainWindow::syncDisassemblyDecompilerVisibility(bool applyDefaultMode) {
     if (!cfg.showDecompilerWithSource()) {
         m_showingDecompilerFallback = false;
         m_forceDecompilerFallback = false;
-        m_disassemblyView->setDecompilerPaneVisible(false, applyDefaultMode);
-    } else if (applyDefaultMode || !m_disassemblyView->isDecompilerVisible()) {
+        if (!m_disassemblyView->isHidden()) m_disassemblyView->setDecompilerPaneVisible(false, applyDefaultMode);
+        else if (m_disassemblyView->isDecompilerVisible()) m_disassemblyView->setDecompilerPaneVisible(false, false);
+    } else if (!m_disassemblyView->isHidden() && (applyDefaultMode || !m_disassemblyView->isDecompilerVisible())) {
         m_disassemblyView->setDecompilerPaneVisible(true, true);
     }
 }

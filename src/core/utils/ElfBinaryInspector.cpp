@@ -9,10 +9,12 @@
 
 #include "ElfBinaryInspector.hpp"
 
+#include <algorithm>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QStandardPaths>
 
 namespace gridlock {
 namespace core {
@@ -47,20 +49,15 @@ QString ElfBinaryInspector::disassembleSymbol(const QString& symbolName,
                                               QMap<uint64_t, int>* outAddrToLine) const {
     if (!m_valid) return {};
     QString cleanSym = symbolName.trimmed();
-    if (cleanSym.startsWith(QStringLiteral("sym."))) {
-        cleanSym = cleanSym.mid(4);
-    }
-    if (!sourceFilter.trimmed().isEmpty()) {
-        const_cast<ElfBinaryInspector*>(this)->setSourceFileFilter(sourceFilter);
-    }
+    if (cleanSym.startsWith(QStringLiteral("sym."))) cleanSym = cleanSym.mid(4);
+    if (!sourceFilter.trimmed().isEmpty()) const_cast<ElfBinaryInspector*>(this)->setSourceFileFilter(sourceFilter);
 
     // Locate target symbol in parsed ELF symbol table.
-    uint64_t symAddr = 0;
-    uint64_t symSize = 0;
+    uint64_t symAddr = 0, symSize = 0;
     for (const auto& s : m_symbols) {
         if (s.address != 0 && s.name == cleanSym) {
             symAddr = s.address;
-            symSize = (s.size > 0) ? s.size : 256;
+            symSize = (s.size > 0) ? std::min<uint64_t>(s.size, 2048ULL) : 256ULL;
             break;
         }
     }
@@ -75,9 +72,9 @@ QString ElfBinaryInspector::disassembleSymbol(const QString& symbolName,
 /**
  * @brief Disassembles an instruction range into formatted assembly lines with DWARF line markers.
  *
- * Expands any address inside a known ELF function symbol to the full enclosing function
- * boundaries so seeking mid-function preserves the complete procedure listing, invokes
- * `objdump -d -l -C -M intel --no-show-raw-insn`, filters DWARF `<file>:<line>` entries
+ * Expands any address inside a known ELF function symbol to enclosing function boundaries
+ * (capped at 2 KB so multi-kilobyte C++/LTO functions never stall UI CFG/decompiler layout),
+ * invokes `objdump -d -l -C -M intel --no-show-raw-insn`, filters DWARF `<file>:<line>` entries
  * against the primary source file basename, and normalizes branch target hex literals.
  *
  * @param startAddr Starting virtual memory address.
@@ -87,53 +84,50 @@ QString ElfBinaryInspector::disassembleSymbol(const QString& symbolName,
  */
 QString ElfBinaryInspector::disassembleRange(uint64_t startAddr, uint64_t size,
                                              const QString& symbolName) const {
-    if (!m_valid || size == 0) {
-        return {};
-    }
+    if (!m_valid || size == 0) return {};
 
-    // Expand mid-function requests to full enclosing ELF function symbol bounds.
+    // Expand mid-function requests to enclosing ELF function symbol bounds (capped at 2048 bytes).
+    constexpr uint64_t kMaxFunctionWindowBytes = 2048ULL;
     uint64_t effectiveStart = startAddr;
-    uint64_t effectiveSize = size;
+    uint64_t effectiveSize = std::min<uint64_t>(size, kMaxFunctionWindowBytes);
     QString effectiveSymName = symbolName;
     for (const auto& s : m_symbols) {
         if (s.isFunction && s.size > 0 && startAddr >= s.address && startAddr < (s.address + s.size)) {
-            effectiveStart = s.address;
-            effectiveSize = s.size;
+            if (s.size <= kMaxFunctionWindowBytes) {
+                effectiveStart = s.address;
+                effectiveSize = s.size;
+            } else {
+                const uint64_t maxStart = s.address + s.size - kMaxFunctionWindowBytes;
+                effectiveStart = (startAddr > s.address + 256ULL) ? std::min<uint64_t>(startAddr - 256ULL, maxStart) : s.address;
+                effectiveSize = kMaxFunctionWindowBytes;
+            }
             if (effectiveSymName.isEmpty()) effectiveSymName = s.name;
             break;
         }
     }
 
     // Return cached function disassembly when bounds and patch generation are unchanged.
-    if (effectiveStart == m_cachedDisasmStart &&
-        effectiveSize == m_cachedDisasmSize &&
-        m_patchedByteCount == m_cachedPatchGen &&
-        !m_cachedDisasmText.isEmpty()) {
+    if (effectiveStart == m_cachedDisasmStart && effectiveSize == m_cachedDisasmSize &&
+        m_patchedByteCount == m_cachedPatchGen && !m_cachedDisasmText.isEmpty()) {
         return m_cachedDisasmText;
     }
 
-    // Step 1: Invoke objdump with C++ demangling (-C) and DWARF line numbers (-l) if binary exists on disk.
+    // Step 1: Invoke cached objdump binary with C++ demangling (-C) and DWARF line numbers (-l).
+    static const QString kObjdumpBin = QStandardPaths::findExecutable(QStringLiteral("objdump"));
     uint64_t stopAddr = 0;
     const bool validRange = !__builtin_add_overflow(effectiveStart, effectiveSize, &stopAddr);
-    if (validRange && !m_filePath.isEmpty() && !m_filePath.contains(QChar('\0')) &&
+    if (validRange && !kObjdumpBin.isEmpty() && !m_filePath.isEmpty() && !m_filePath.contains(QChar('\0')) &&
         QFileInfo::exists(m_filePath)) {
         QProcess proc;
         const QStringList args = {
-            QStringLiteral("-d"),
-            QStringLiteral("-l"),
-            QStringLiteral("-C"),
-            QStringLiteral("-M"),
-            QStringLiteral("intel"),
-            QStringLiteral("--no-show-raw-insn"),
+            QStringLiteral("-d"), QStringLiteral("-l"), QStringLiteral("-C"),
+            QStringLiteral("-M"), QStringLiteral("intel"), QStringLiteral("--no-show-raw-insn"),
             QStringLiteral("--start-address=0x%1").arg(effectiveStart, 0, 16),
             QStringLiteral("--stop-address=0x%1").arg(stopAddr, 0, 16),
-            QStringLiteral("--"),
-            m_filePath
+            QStringLiteral("--"), m_filePath
         };
-        proc.start(QStringLiteral("objdump"), args);
-        if (proc.waitForFinished(2500) &&
-            proc.exitStatus() == QProcess::NormalExit &&
-            proc.exitCode() == 0) {
+        proc.start(kObjdumpBin, args);
+        if (proc.waitForFinished(2500) && proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) {
             const QString out = QString::fromUtf8(proc.readAllStandardOutput());
             const QStringList lines = out.split('\n');
             QString formatted;

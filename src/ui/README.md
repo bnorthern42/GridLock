@@ -8,14 +8,14 @@ Modular `MainWindow` workstation shell, multi-pane editor tab container, MI cons
   - Core `QMainWindow` shell construction, subview accessors, hover tooltip helper, menu bar setup, and shared cross-module structs/helpers.
 - `MainWindowLifecycle.cpp` (`454`):
   - Backend coordinator binding (`setCoordinator`), preview fixture seeding, status-bar memory telemetry, `closeEvent()` session/geometry save and synchronous MPI/PTY/LSP teardown, and global `eventFilter()` (`Double Shift` and IDE shortcuts).
-- `MainWindowNavigation.cpp` (`385`), `MainWindowBinaryNav.cpp` (`462`):
-  - Source/session TOML I/O, recent workspaces menu, Search Everywhere and Calculator triggers, workspace PNG snapshots, tutorial compilation (`MainWindowNavigation.cpp`), plus `AddressSpaceNavBar`, `seekToAddressOrExpression()` history, disassembly/CFG/decompiler visibility sync, `F12` symbol jumps, and synthetic ELF memory windows (`MainWindowBinaryNav.cpp`).
+- `MainWindowNavigation.cpp` (`385`), `MainWindowBinaryNav.cpp` (`471`):
+  - Source/session TOML I/O, recent workspaces menu, Search Everywhere and Calculator triggers, workspace PNG snapshots, tutorial compilation (`MainWindowNavigation.cpp`), plus `AddressSpaceNavBar`, `seekToAddressOrExpression()` history, lazy hidden-disassembly CFG/decompiler sync, `F12` symbol jumps, and synthetic ELF memory windows (`MainWindowBinaryNav.cpp`).
 - `MainWindowWorkspace.cpp` (`483`), `MainWindowDocks.cpp` (`652`), `MainWindowPerspectives.cpp` (`534`):
   - Four-zone splitter/dock choreography, float/redock transitions, Code/Debug/Binary perspectives, typography scaling, and theme propagation.
 - `MainWindowToolbar.cpp` (`533`), `MainWindowExecution.cpp` (`486`), `MainWindowDebugger.cpp` (`512`):
   - `#MainToolbar` creation, contextual HPC (`ranks > 1`) and `Binary` tool disclosure, pre-launch regular-executable validation (`validateTargetExecutableForLaunch`), execution scope dispatch, stepping workflows, and `setFocusedRank()`.
-- `MainWindowBuild.cpp` (`497`), `MainWindowInspection.cpp` (`516`), `MainWindowCohesion.cpp` (`522`):
-  - Pre-flight `-g -O0` compilation (resolving extensionless targets to sibling `.cpp`/`.c`/`.cc`/`.cxx` sources, skipping non-code data extensions, and enforcing `0755` execute permissions), attach flows, inspection pivots, F1 docset routing, ELF loading, Search Everywhere indexing, and cohesion audits.
+- `MainWindowBuild.cpp` (`496`), `MainWindowInspection.cpp` (`516`), `MainWindowCohesion.cpp` (`522`):
+  - Pre-flight `-g -O0` compilation (resolving extensionless targets to sibling `.cpp`/`.c`/`.cc`/`.cxx` sources, skipping non-code data extensions, enforcing `0755` execute permissions, and caching `(path, mtime, size)` stamps to skip redundant `loadBinaryTarget` reloads), attach flows, inspection pivots, F1 docset routing, ELF loading, Search Everywhere indexing, and cohesion audits.
 - `EditorTabManager.hpp` (`221`), `EditorTabManager.cpp`:
   - Split `QTabWidget` source container routing `.csv`/`.tsv` files `>= 256 KB` to `CsvTablePreviewWidget` and files `>= 512 KB` to fast plain-text mode.
 - `GdbConsoleWidget.hpp` (`221`), `GdbConsoleWidget.cpp`:

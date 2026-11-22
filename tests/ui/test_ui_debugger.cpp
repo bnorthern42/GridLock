@@ -558,6 +558,29 @@ static void testPreLaunchExecutableGuardAndExtensionlessSiblingCompile() {
     // Stripping +x on a binary with a sibling .cpp must trigger rebuild/chmod restoration on ensureTargetBinaryCompiled().
     QVERIFY(QFile::setPermissions(extlessBin, QFile::ReadOwner | QFile::WriteOwner) && !QFileInfo(extlessBin).isExecutable());
     QVERIFY2(mw.ensureTargetBinaryCompiled() && QFileInfo(extlessBin).isExecutable(), "Missing +x on target with sibling .cpp must restore executable binary");
+
+    // 3. Launching an already up-to-date binary must NOT recompile and must complete pre-launch setup in < 500 ms.
+    QTest::qWait(25);
+    const QDateTime warmMtime = QFileInfo(extlessBin).lastModified();
+    QElapsedTimer warmTimer; warmTimer.start();
+    QVERIFY(mw.ensureTargetBinaryCompiled());
+    mw.startDebuggingSession(extlessBin, 1);
+    const qint64 warmLaunchMs = warmTimer.elapsed();
+    mw.stopTargetWorkflow(); QApplication::processEvents();
+    QCOMPARE(QFileInfo(extlessBin).lastModified(), warmMtime);
+    QVERIFY2(warmLaunchMs < 500, qPrintable(QStringLiteral("Warm binary pre-launch setup took %1 ms (expected < 500 ms)").arg(warmLaunchMs)));
+
+    // Standalone ELF binary without sibling .cpp must also skip redundant ELF reloads and launch in < 500 ms.
+    const QString standaloneDir = tDir.filePath(QStringLiteral("standalone_bin")), standaloneElf = standaloneDir + QStringLiteral("/solver_elf");
+    QVERIFY(QDir().mkpath(standaloneDir) && QFile::copy(extlessBin, standaloneElf));
+    targetCombo->insertItem(0, QStringLiteral("solver_elf"), standaloneElf);
+    QVERIFY(mw.selectTargetByName(QStringLiteral("solver_elf")));
+    warmTimer.restart();
+    QVERIFY(mw.ensureTargetBinaryCompiled());
+    mw.startDebuggingSession(standaloneElf, 1);
+    const qint64 standaloneMs = warmTimer.elapsed();
+    mw.stopTargetWorkflow(); mw.shutdownActiveSessionSync(); QApplication::processEvents();
+    QVERIFY2(standaloneMs < 500, qPrintable(QStringLiteral("Standalone ELF pre-launch setup took %1 ms (expected < 500 ms)").arg(standaloneMs)));
 }
 
 void TestMainWindowUI::testCowCheckpointsAndProcSafety() {

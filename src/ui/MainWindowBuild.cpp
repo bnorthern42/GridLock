@@ -51,8 +51,7 @@ bool validateTargetExecutableForLaunch(const QString& targetPath, bool wasJustCo
 static QString findSiblingSourceFile(const QString& targetPath) {
     const QString trimmed = targetPath.trimmed();
     if (trimmed.isEmpty()) return QString();
-    const QFileInfo fi(trimmed);
-    if ((fi.exists() && fi.isDir()) || !fi.suffix().isEmpty()) return QString();
+    if (const QFileInfo fi(trimmed); (fi.exists() && fi.isDir()) || !fi.suffix().isEmpty()) return QString();
     for (const QString& ext : {QStringLiteral(".cpp"), QStringLiteral(".c"), QStringLiteral(".cc"), QStringLiteral(".cxx")})
         if (const QFileInfo cand(trimmed + ext); cand.exists() && cand.isFile()) return !cand.canonicalFilePath().isEmpty() ? cand.canonicalFilePath() : cand.absoluteFilePath();
     return QString();
@@ -60,8 +59,7 @@ static QString findSiblingSourceFile(const QString& targetPath) {
 
 /** @brief Returns true when @p extLower is a non-code data, config, or documentation extension that must skip compilation. */
 static bool isNonCodeDataExtension(const QString& extLower) {
-    static const QSet<QString> kDataExts = {QStringLiteral("csv"), QStringLiteral("tsv"), QStringLiteral("txt"), QStringLiteral("md"),
-                                            QStringLiteral("json"), QStringLiteral("toml"), QStringLiteral("xml"), QStringLiteral("log")};
+    static const QSet<QString> kDataExts = {QStringLiteral("csv"), QStringLiteral("tsv"), QStringLiteral("txt"), QStringLiteral("md"), QStringLiteral("json"), QStringLiteral("toml"), QStringLiteral("xml"), QStringLiteral("log")};
     return kDataExts.contains(extLower);
 }
 
@@ -69,6 +67,23 @@ static bool isNonCodeDataExtension(const QString& extLower) {
 static bool isCompilableCxxSource(const QString& extLower) {
     static const QSet<QString> kSrcExts = {QStringLiteral("c"), QStringLiteral("cc"), QStringLiteral("cpp"), QStringLiteral("cxx"), QStringLiteral("c++"), QStringLiteral("cp")};
     return kSrcExts.contains(extLower);
+}
+
+/** @brief Builds a cache stamp `absPath|mtimeMs|size|curFile` to skip redundant `loadBinaryTarget()` reloads. */
+static QString makeBinaryStamp(const QString& binPath, const QString& curFile) {
+    const QFileInfo fi(binPath);
+    return QStringLiteral("%1|%2|%3|%4").arg(fi.absoluteFilePath()).arg(fi.lastModified().toMSecsSinceEpoch()).arg(fi.size()).arg(curFile);
+}
+
+/** @brief Resolves and caches the preferred MPI or GNU C/C++ compiler executable path. */
+static QString resolveCompilerExecutable(bool isCFile) {
+    static QString s_cCompiler, s_cxxCompiler;
+    QString& cached = isCFile ? s_cCompiler : s_cxxCompiler;
+    if (!cached.isEmpty() && QFileInfo(cached).isExecutable()) return cached;
+    const QStringList dirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"), QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"), QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
+    const QString mpi = isCFile ? QStringLiteral("mpicc") : QStringLiteral("mpicxx"), gnu = isCFile ? QStringLiteral("gcc") : QStringLiteral("g++");
+    if ((cached = QStandardPaths::findExecutable(mpi)).isEmpty() && (cached = QStandardPaths::findExecutable(mpi, dirs)).isEmpty()) cached = QStandardPaths::findExecutable(gnu);
+    return cached;
 }
 
 /** @brief Resolves a tutorial target name or relative path across local and AppImage share directories. */
@@ -111,16 +126,17 @@ QString ensureWritableTutorialBinaryPath(const QString& sourcePath) {
 /** @brief Resolves a relative or absolute workspace file path across current and parent directories. */
 QString MainWindow::resolveWorkspacePath(const QString& rawPath) {
     for (QWidget* w : QApplication::topLevelWidgets())
-        if (auto* mw = qobject_cast<MainWindow*>(w); mw && !mw->findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints"))) mw->rebuildDynamicSourceLineMap();
+        if (auto* mw = qobject_cast<MainWindow*>(w); mw && !mw->property("gl_menus_init").toBool()) {
+            if (!mw->findChild<QAction*>(QStringLiteral("actionSignalsAndCatchpoints"))) mw->rebuildDynamicSourceLineMap();
+            mw->setProperty("gl_menus_init", true);
+        }
     const QString trimmed = rawPath.trimmed();
     if (trimmed.isEmpty()) return QString();
     if (QFileInfo::exists(trimmed)) { const QFileInfo fi(trimmed); return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath(); }
     const QString parentCandidate = QStringLiteral("../") + trimmed;
     if (QFileInfo::exists(parentCandidate)) { const QFileInfo fi(parentCandidate); return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : fi.absoluteFilePath(); }
-    if (QFileInfo(trimmed).suffix().isEmpty()) {
-        if (!findSiblingSourceFile(trimmed).isEmpty()) return QFileInfo(trimmed).absoluteFilePath();
-        if (!findSiblingSourceFile(parentCandidate).isEmpty()) return QFileInfo(parentCandidate).absoluteFilePath();
-    }
+    if (QFileInfo(trimmed).suffix().isEmpty() && (!findSiblingSourceFile(trimmed).isEmpty() || !findSiblingSourceFile(parentCandidate).isEmpty()))
+        return QFileInfo(!findSiblingSourceFile(trimmed).isEmpty() ? trimmed : parentCandidate).absoluteFilePath();
     return QFileInfo(trimmed).absoluteFilePath();
 }
 
@@ -182,13 +198,11 @@ void discoverWorkspaceTargets(const QString& rootDir, QStringList* outElfs, QStr
 /** @brief Returns the resolved source file path for the currently active target. */
 QString MainWindow::activeTargetSourcePath() const {
     if (!m_currentFile.trimmed().isEmpty()) {
-        const QString resolvedCur = resolveWorkspacePath(m_currentFile);
-        const QString sib = findSiblingSourceFile(resolvedCur);
+        const QString resolvedCur = resolveWorkspacePath(m_currentFile), sib = findSiblingSourceFile(resolvedCur);
         return !sib.isEmpty() ? sib : resolvedCur;
     }
     if (m_targetSelector) {
-        const QString selData = m_targetSelector->currentData().toString();
-        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
+        if (const QString selData = m_targetSelector->currentData().toString(); !selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
             const QString resolvedSel = resolveWorkspacePath(selData);
             if (const QString sib = findSiblingSourceFile(resolvedSel); !sib.isEmpty()) return sib;
             if (!isRunnableElfExecutable(resolvedSel)) return resolvedSel;
@@ -199,13 +213,9 @@ QString MainWindow::activeTargetSourcePath() const {
 
 /** @brief Returns the resolved output executable binary path for the currently active target. */
 QString MainWindow::activeTargetBinaryPath() const {
-    if (m_targetSelector) {
-        const QString selData = m_targetSelector->currentData().toString();
-        if (!selData.isEmpty() && selData != QStringLiteral("__open_binary__")) {
-            const QString resolvedSel = resolveWorkspacePath(selData);
-            if (isRunnableElfExecutable(resolvedSel)) return resolvedSel;
-        }
-    }
+    if (m_targetSelector)
+        if (const QString selData = m_targetSelector->currentData().toString(); !selData.isEmpty() && selData != QStringLiteral("__open_binary__"))
+            if (const QString resolvedSel = resolveWorkspacePath(selData); isRunnableElfExecutable(resolvedSel)) return resolvedSel;
     const QString srcPath = activeTargetSourcePath();
     if (srcPath.isEmpty()) return m_loadedBinaryPath;
     const QFileInfo srcInfo(srcPath);
@@ -229,22 +239,15 @@ bool MainWindow::ensureTargetBinaryCompiled() {
     if (binPath.isEmpty()) return abortTarget(QStringLiteral("[Launch Aborted] No runnable target binary is selected."), QStringLiteral("LAUNCH FAILED"));
     const QFileInfo srcInfo(srcPath), binInfo(binPath);
     const QString srcExt = srcInfo.suffix().toLower();
-    const bool directElfSelected = binSibling.isEmpty() && m_targetSelector &&
-                                   resolveWorkspacePath(m_targetSelector->currentData().toString()) == binInfo.absoluteFilePath() && isRunnableElfExecutable(binPath);
+    const bool directElfSelected = binSibling.isEmpty() && m_targetSelector && resolveWorkspacePath(m_targetSelector->currentData().toString()) == binInfo.absoluteFilePath() && isRunnableElfExecutable(binPath);
     const bool compilableSrc = !directElfSelected && !srcPath.isEmpty() && srcInfo.exists() && srcInfo.isFile() && !isNonCodeDataExtension(srcExt) && isCompilableCxxSource(srcExt);
     const bool needCompile = compilableSrc && (!binInfo.exists() || !binInfo.isFile() || binInfo.lastModified() < srcInfo.lastModified() || !binInfo.isExecutable());
     if (needCompile) {
         if (binInfo.exists() && binInfo.isDir()) return abortTarget(QStringLiteral("[Launch Aborted] Target is a directory: %1").arg(binInfo.absoluteFilePath()), QStringLiteral("LAUNCH FAILED"));
-        const bool isCFile = srcExt == QStringLiteral("c");
-        const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"), QStringLiteral("/usr/lib64/mpich/bin"),
-                                        QStringLiteral("/usr/lib/mpich/bin"), QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
-        const QString mpiName = isCFile ? QStringLiteral("mpicc") : QStringLiteral("mpicxx"), gnuName = isCFile ? QStringLiteral("gcc") : QStringLiteral("g++");
-        QString compiler = QStandardPaths::findExecutable(mpiName);
-        if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(mpiName, searchDirs);
-        if (compiler.isEmpty()) compiler = QStandardPaths::findExecutable(gnuName);
-        if (compiler.isEmpty()) return abortTarget(QStringLiteral("[Build Failed] No C/C++ or MPI compiler (%1/%2) found in PATH.").arg(mpiName, gnuName), QStringLiteral("BUILD FAILED"));
+        const bool isCFile = srcExt == QStringLiteral("c"); const QString compiler = resolveCompilerExecutable(isCFile);
+        if (compiler.isEmpty()) return abortTarget(QStringLiteral("[Build Failed] No C/C++ or MPI compiler (%1) found in PATH.").arg(isCFile ? QStringLiteral("mpicc/gcc") : QStringLiteral("mpicxx/g++")), QStringLiteral("BUILD FAILED"));
         QProcess proc; QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-        env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+        env.insert(QStringLiteral("PATH"), QStringLiteral("/usr/lib64/openmpi/bin:/usr/lib/openmpi/bin:/usr/lib64/mpich/bin:/usr/lib/mpich/bin:/usr/bin:/usr/local/bin:") + env.value(QStringLiteral("PATH")));
         proc.setProcessEnvironment(env); proc.setProcessChannelMode(QProcess::MergedChannels);
         proc.start(compiler, {QStringLiteral("-g"), QStringLiteral("-O0"), srcPath, QStringLiteral("-o"), binPath});
         const bool finished = proc.waitForFinished(15000); const QString diag = QString::fromUtf8(proc.readAll()).trimmed();
@@ -253,9 +256,12 @@ bool MainWindow::ensureTargetBinaryCompiled() {
         QFile::setPermissions(binPath, QFile::permissions(binPath) | QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup | QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther);
     }
     if (QString execErr; !validateTargetExecutableForLaunch(binPath, needCompile, &execErr)) return abortTarget(QStringLiteral("[Launch Aborted] %1").arg(execErr), QStringLiteral("LAUNCH FAILED"));
-    const QString absBinPath = QFileInfo(binPath).absoluteFilePath();
-    if ((needCompile || !m_elfInspector || !m_elfInspector->isValid() || m_loadedBinaryPath != absBinPath || m_dwarfLineToAddress.isEmpty()) && !loadBinaryTarget(binPath)) return false;
-    rebuildDynamicSourceLineMap(); return true;
+    const QString absBinPath = QFileInfo(binPath).absoluteFilePath(), stamp = makeBinaryStamp(binPath, m_currentFile);
+    if (needCompile || !m_elfInspector || !m_elfInspector->isValid() || m_loadedBinaryPath != absBinPath || property("gl_bin_stamp").toString() != stamp) {
+        if (!loadBinaryTarget(binPath)) return false;
+        setProperty("gl_bin_stamp", stamp); rebuildDynamicSourceLineMap();
+    } else if (m_dynamicLineToAddress.isEmpty() && !m_currentFile.isEmpty()) rebuildDynamicSourceLineMap();
+    return true;
 }
 
 /** @brief Selects an active target in `#toolbarTargetSelector` by name or path and loads its real ELF + DWARF info. */
@@ -270,17 +276,19 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     m_targetSelector->setProperty("gl_confirmed_idx", matchedIdx);
     const QString resolvedPath = resolveWorkspacePath(m_targetSelector->itemData(matchedIdx).toString());
     m_targetSelector->setToolTip(QStringLiteral("Active Target: %1\nPath: %2").arg(m_targetSelector->itemText(matchedIdx), resolvedPath));
-    if (QFileInfo(resolvedPath).isDir()) { m_currentFile.clear(); m_loadedBinaryPath.clear(); if (m_debugSessionActive) stopTargetWorkflow(); return true; }
+    if (QFileInfo(resolvedPath).isDir()) { m_currentFile.clear(); m_loadedBinaryPath.clear(); setProperty("gl_bin_stamp", QVariant()); if (m_debugSessionActive) stopTargetWorkflow(); return true; }
     if (m_disassemblyView) for (uint64_t oldBp : m_disassemblyView->bookmarkedAddresses()) m_disassemblyView->toggleBookmark(oldBp);
     if (const QString sib = findSiblingSourceFile(resolvedPath); !sib.isEmpty()) {
         m_currentFile = sib; loadSourceFile(sib); ensureTargetBinaryCompiled();
     } else if (isRunnableElfExecutable(resolvedPath)) {
-        m_useRealBinaryTarget = true; loadBinaryTarget(resolvedPath);
+        m_useRealBinaryTarget = true;
+        const QString absResolved = QFileInfo(resolvedPath).absoluteFilePath(), stamp = makeBinaryStamp(resolvedPath, m_currentFile);
+        if (!m_elfInspector || !m_elfInspector->isValid() || m_loadedBinaryPath != absResolved || property("gl_bin_stamp").toString() != stamp)
+            if (loadBinaryTarget(resolvedPath)) setProperty("gl_bin_stamp", stamp);
     } else {
         m_currentFile = resolvedPath;
         QFile probe(resolvedPath);
-        const bool isRawElf = probe.open(QIODevice::ReadOnly) && probe.read(4) == QByteArrayLiteral("\x7f""ELF");
-        if (!isRawElf && QFileInfo(resolvedPath).isFile()) loadSourceFile(resolvedPath);
+        if (!(probe.open(QIODevice::ReadOnly) && probe.read(4) == QByteArrayLiteral("\x7f""ELF")) && QFileInfo(resolvedPath).isFile()) loadSourceFile(resolvedPath);
         static const QStringList kCompilableExts = {QStringLiteral("c"), QStringLiteral("cc"), QStringLiteral("cpp"), QStringLiteral("cxx"), QStringLiteral("cu"), QStringLiteral("f"), QStringLiteral("f90"), QStringLiteral("f95"), QStringLiteral("s")};
         if (kCompilableExts.contains(QFileInfo(resolvedPath).suffix().toLower())) ensureTargetBinaryCompiled();
     }
@@ -308,7 +316,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     if (m_editorTabManager) m_editorTabManager->clearInlineVariableValues();
     clearAllInspectionDocks(m_variablesDockWidget, m_registerView, m_callStackDockWidget, m_mpiDiagnosticsWidget, networkLog(), m_memView);
     m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
-    m_previewFixtureOnly = false; m_useRealBinaryTarget = false; m_elfInspector.reset(); m_loadedBinaryPath.clear();
+    m_previewFixtureOnly = false; m_useRealBinaryTarget = false; m_elfInspector.reset(); m_loadedBinaryPath.clear(); setProperty("gl_bin_stamp", QVariant());
     if (m_differentialGrid) m_differentialGrid->clearWatches();
     if (m_editorTabManager && (m_currentFile.isEmpty() || !m_currentFile.startsWith(resolvedDir + QLatin1Char('/')))) { m_editorTabManager->clearAllTabs(); m_currentFile.clear(); }
     m_activeWorkspaceDir = resolvedDir; m_activeSessionFilePath = QDir(resolvedDir).filePath(QStringLiteral(".gridlock/workspace.toml"));
@@ -337,7 +345,8 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
     }
     if (!mainSources.isEmpty() && m_currentFile.isEmpty()) loadSourceFile(mainSources.first());
     if (!elfTargets.isEmpty()) {
-        m_previewFixtureOnly = false; m_useRealBinaryTarget = true; loadBinaryTarget(elfTargets.first());
+        m_previewFixtureOnly = false; m_useRealBinaryTarget = true;
+        if (loadBinaryTarget(elfTargets.first())) setProperty("gl_bin_stamp", makeBinaryStamp(elfTargets.first(), m_currentFile));
         if (!mainSources.isEmpty() && m_elfInspector && m_elfInspector->isValid() && m_dwarfLineToAddress.isEmpty()) {
             m_elfInspector->disassembleSymbol(QStringLiteral("main"), QFileInfo(mainSources.first()).fileName(), &m_dwarfLineToAddress, &m_dwarfAddressToLine);
             rebuildDynamicSourceLineMap();
@@ -354,8 +363,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
 
 /** @brief Detects the build system ("Meson", "CMake", "Make", or "SingleFileMPI") for @p targetPath. */
 QString MainWindow::detectBuildSystem(const QString& targetPath) const {
-    const QString root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
+    const QString root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath(), resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolved);
     QList<QDir> dirs = {QDir(info.isDir() ? info.absoluteFilePath() : info.absolutePath())};
     if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir)) dirs.append(QDir(m_activeWorkspaceDir));
@@ -369,27 +377,22 @@ QString MainWindow::detectBuildSystem(const QString& targetPath) const {
 
 /** @brief Constructs the shell build command for a project directory or standalone source file. */
 QString MainWindow::buildCommandForPath(const QString& targetPath) const {
-    const QString buildSys = detectBuildSystem(targetPath), root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath();
-    const QString resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
+    const QString buildSys = detectBuildSystem(targetPath), root = !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : QDir::currentPath(), resolved = targetPath.trimmed().isEmpty() ? root : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolved);
     QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir) && !QDir(dirPath).exists(QStringLiteral("meson.build")) &&
-        !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) && !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
+    if (!m_activeWorkspaceDir.isEmpty() && resolved.startsWith(m_activeWorkspaceDir) && !QDir(dirPath).exists(QStringLiteral("meson.build")) && !QDir(dirPath).exists(QStringLiteral("CMakeLists.txt")) && !QDir(dirPath).exists(QStringLiteral("Makefile"))) dirPath = m_activeWorkspaceDir;
     const QDir dir(dirPath);
     if (buildSys == QStringLiteral("Meson")) {
         for (const QString& b : {QStringLiteral("build_meson"), QStringLiteral("builddir"), QStringLiteral("build")})
             if (dir.exists(b + QStringLiteral("/build.ninja"))) return QStringLiteral("ninja -C \"%1/%2\"").arg(dirPath, b);
         return QStringLiteral("meson setup \"%1/builddir\" \"%1\" && ninja -C \"%1/builddir\"").arg(dirPath);
     }
-    if (buildSys == QStringLiteral("CMake"))
-        return QStringLiteral("cmake -S \"%1\" -B \"%1/%2\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/%2\" -j").arg(dirPath, dir.exists(QStringLiteral("build_cmake")) ? QStringLiteral("build_cmake") : QStringLiteral("build"));
+    if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake -S \"%1\" -B \"%1/%2\" -DCMAKE_BUILD_TYPE=Debug && cmake --build \"%1/%2\" -j").arg(dirPath, dir.exists(QStringLiteral("build_cmake")) ? QStringLiteral("build_cmake") : QStringLiteral("build"));
     if (buildSys == QStringLiteral("Make")) return QStringLiteral("make -C \"%1\" -j").arg(dirPath);
     QString singleSrc = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
     if (const QString sib = findSiblingSourceFile(singleSrc); !sib.isEmpty()) singleSrc = sib;
-    const QFileInfo srcInfo(singleSrc);
-    const bool isC = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
-    const QString cc = isC ? (!QStandardPaths::findExecutable(QStringLiteral("mpicc")).isEmpty() ? QStringLiteral("mpicc") : QStringLiteral("gcc"))
-                           : (!QStandardPaths::findExecutable(QStringLiteral("mpicxx")).isEmpty() ? QStringLiteral("mpicxx") : QStringLiteral("g++"));
+    const QFileInfo srcInfo(singleSrc); const bool isC = srcInfo.suffix().compare(QStringLiteral("c"), Qt::CaseInsensitive) == 0;
+    const QString resolvedCc = resolveCompilerExecutable(isC), cc = resolvedCc.isEmpty() ? (isC ? QStringLiteral("gcc") : QStringLiteral("g++")) : QFileInfo(resolvedCc).fileName();
     return QStringLiteral("%1 -g -O0 \"%2\" -o \"%3\"").arg(cc, srcInfo.absoluteFilePath(), srcInfo.dir().filePath(srcInfo.completeBaseName()));
 }
 
@@ -397,16 +400,12 @@ QString MainWindow::buildCommandForPath(const QString& targetPath) const {
 QString MainWindow::cleanCommandForPath(const QString& targetPath) const {
     const QString buildSys = detectBuildSystem(targetPath), resolvedPath = targetPath.trimmed().isEmpty() ? QDir::currentPath() : resolveWorkspacePath(targetPath);
     const QFileInfo info(resolvedPath); const QString dirPath = info.isDir() ? info.absoluteFilePath() : info.absolutePath(); const QDir dir(dirPath);
-    if (buildSys == QStringLiteral("Meson")) {
-        const QString buildSubdir = (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja"))) ? QStringLiteral("build") : QStringLiteral("builddir");
-        return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, buildSubdir);
-    }
+    if (buildSys == QStringLiteral("Meson")) return QStringLiteral("ninja -C \"%1/%2\" -t clean").arg(dirPath, (dir.exists(QStringLiteral("build/build.ninja")) && !dir.exists(QStringLiteral("builddir/build.ninja"))) ? QStringLiteral("build") : QStringLiteral("builddir"));
     if (buildSys == QStringLiteral("CMake")) return QStringLiteral("cmake --build \"%1/build\" --target clean").arg(dirPath);
     if (buildSys == QStringLiteral("Make")) return QStringLiteral("make clean -C \"%1\"").arg(dirPath);
     QString singleSrc = !info.isDir() ? info.absoluteFilePath() : activeTargetSourcePath();
     if (const QString sib = findSiblingSourceFile(singleSrc); !sib.isEmpty()) singleSrc = sib;
-    const QFileInfo srcInfo(singleSrc);
-    return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
+    const QFileInfo srcInfo(singleSrc); return QStringLiteral("rm -f \"%1\"").arg(srcInfo.dir().filePath(srcInfo.completeBaseName()));
 }
 
 /** @brief Switches BottomConsoleTabs to Terminal, dispatches the build command, and reloads SingleFileMPI ELF output. */
@@ -450,7 +449,7 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
     } else {
         for (int i = 0; i < explicitPids.size(); ++i) {
             if (explicitPids[i] <= 0) continue;
-            ProcessEntry e; e.pid = static_cast<pid_t>(explicitPids[i]); e.mpiRank = i; e.mpiWorldSize = explicitPids.size();
+            ProcessEntry e; e.pid = static_cast<pid_t>(explicitPids[i]); e.mpiRank = i; e.mpiWorldSize = static_cast<int>(explicitPids.size());
             e.executablePath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(e.pid)).symLinkTarget(); targets.append(e);
         }
     }
@@ -458,8 +457,7 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
     if (m_debugSessionActive) stopTargetWorkflow();
     syncCoordinatorWithConfig(); if (!m_coordinator) return false;
     const bool attached = qobject_cast<GdbRankCoordinator*>(m_coordinator) ? qobject_cast<GdbRankCoordinator*>(m_coordinator)->attachToProcesses(targets)
-                        : (qobject_cast<DapCoordinator*>(m_coordinator) ? qobject_cast<DapCoordinator*>(m_coordinator)->attachToProcesses(targets)
-                                                                        : m_coordinator->attachToProcess(static_cast<qint64>(targets.first().pid)));
+                        : (qobject_cast<DapCoordinator*>(m_coordinator) ? qobject_cast<DapCoordinator*>(m_coordinator)->attachToProcesses(targets) : m_coordinator->attachToProcess(static_cast<qint64>(targets.first().pid)));
     if (!attached) return false;
     const int rankCount = targets.size(); m_debugSessionActive = true; m_focusedRank = 0; m_latestStates.clear(); QList<RankState> rankStates;
     if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->beginLiveSession(rankCount);
