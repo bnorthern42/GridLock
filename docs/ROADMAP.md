@@ -41,9 +41,9 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 - [x] **Multi-Rank & Scientific Array Plotter Extensions**:
   - [x] Multi-rank 1D overlay mode for halo/ghost-cell comparison, `start:end:stride` slicing, base-10 logarithmic (`Log10`) Y and colorbar scaling, interactive drag-box zoom and reset, and scalar time-series history mode over stops.
   - [x] `Complex64` / `Complex128` decoding (`Magnitude`, `Phase`, `Real`, `Imaginary`), 2D matrix `splot` / `pm3d` Gnuplot export with executable/stderr validation, and zero-copy virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
-- [x] **Toolbar Consolidation & Progressive Disclosure**:
+- [x] **Progressive Disclosure and Toolbar Consolidation**: Grouping specialized HPC and reverse-engineering controls contextually so inactive tools do not crowd the main viewport.
   - [x] Compact `< 1,040 px` main toolbar with split dropdown compartments, source-level stepping (`Step Over F10`, `Step Into F11`, `Step Out Shift+F11`), and state-aware tooltips.
-  - [x] `Source` / `Debug` / `Binary` / `MPI` perspectives without force-redocking floating panels, automatic collapsing of multi-rank chrome when `ranks == 1`, and clean empty-state watch placeholders.
+  - [x] `Source` / `Debug` / `Binary` / `MPI` perspectives without force-redocking floating panels, contextual `AddressNavToolbar` and `DisassemblyView` gating, automatic collapsing of multi-rank chrome when `ranks == 1`, and clean empty-state watch placeholders.
 - [x] **Unified Multi-Rank Scope, Master Rank Focus & Launch Ergonomics**:
   - [x] Explicit `All Ranks` vs. `Rank k` execution scope toggle, `Pause All Ranks (F6)` (`haltAll`), `ServerRackView` `DEADLOCK` / `EXITED` badges and state filter, and master `setFocusedRank()` synchronization across all docks and dialogs (lifting the 8-rank plotter cap).
   - [x] `All Ranks` expression evaluation broadcast, inline `Launch Options` popover (`--args`, working directory, `Stop at main()`), and CLI positional target / `-- <args...>` parsing.
@@ -51,7 +51,7 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
   - [x] Single-popup `DisassemblyView` / CFG / Decompiler context menus, functional `Watch` registration/removal, exact `MemView` cursor offset handoff to Programmer's Calculator, `SourceCodeView` pointer/struct graph context actions, and live expression autocomplete.
   - [x] Full-value tooltips and `Inspect Full Value...` popover, live in-place variable and register value editing, fail-loud compilation checks blocking stale-binary launches, validated hex/NOP instruction patching with `Revert All Patches`, and confirmation/undo guardrails for checkpoints and graph/plot clearing.
 - [x] **Editor, Keybindings, Project Tree, Terminal & Lifecycle Stability**:
-  - [x] Real `QSplitter` split editor, inline `Ctrl+F` editor find bar, palette-aware `ShortcutItemDelegate` Keybindings settings tab, and single-column `HPC Integration` preferences layout.
+  - [x] Real `QSplitter` split editor, inline `Ctrl+F` editor find bar, virtualized large-CSV previewer, palette-aware `Keybindings` settings tab, and single-column `HPC Integration` preferences layout.
   - [x] Unified `~/.config/gridlock/` configuration and `Recent Sessions` persistence, proportional UI typography and multi-language vector file/folder icons in `ProjectExplorerWidget`, terminal `Ctrl+Shift+C`/`V` + smart `Ctrl+C`/`V` + right-click Copy/Paste, clean exit-while-running process/PTY reaping with orphaned `/dev/shm/psm3_shm` cleanup, and modular file-size refactoring (`<= 550` lines across core `MainWindow`, HPC coordinator, dialog, and UI test modules).
 
 ---
@@ -91,7 +91,6 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 
 ## `v0.9.x` to `v1.0.0`: UI/UX Cohesion and `v1.0.0` Stabilization
 
-- [ ] **Progressive Disclosure and Toolbar Consolidation**: Grouping specialized HPC and reverse-engineering controls contextually so inactive tools do not crowd the main viewport.
 - [ ] **Task-Focused Workspace Presets**: 1-click layout presets (*Source & MPI Debugging*, *Binary CFG & Decompiler*, *Memory & Numerical Profiling*, *Post-Mortem Crash Triage*) verified across 1080p, 1440p, 4K, and tiling Wayland compositors.
 - [ ] **Cross-View Selection and Keyboard Navigation**: Unified badge styling, keyboard focus traversal, and synchronized address/symbol/rank selection across all docks and pop-out windows.
 - [ ] **Production Hardening and `v1.0.0` Release Readiness**: Resolving OpenMPI, MPICH, PMIx, and SLURM edge cases and locking configuration file schemas for `v1.0.0`.

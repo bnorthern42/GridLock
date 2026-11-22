@@ -198,7 +198,7 @@ void MainWindow::harmonizeBottomConsoleTabs() {
 
     // 7. Mount one-click Workspace Perspective Switcher (SOURCE | DEBUG | BINARY | MPI) on MainToolbar.
     if (auto* mainToolbar = findChild<QToolBar*>(QStringLiteral("MainToolbar"))) {
-        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 4px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
+        const QString pStyle = QStringLiteral("QPushButton { background: #1e222a; color: #9da5b4; border: 1px solid #2c313a; border-radius: 2px; padding: 0px 3px; margin: 0px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 20px; max-height: 20px; } QPushButton:hover { background: #282c34; color: #fff; border-color: #528bff; } QPushButton:checked { background: #2c313c; color: #61afef; border: 1px solid #528bff; }");
         auto makePerspBtn = [&](const QString& label, const QString& obj, const QString& persp, const QString& tip, bool chk) {
             auto* b = new QPushButton(label, mainToolbar);
             b->setObjectName(obj); b->setCheckable(true); b->setChecked(chk); b->setToolTip(tip); b->setStyleSheet(pStyle);
@@ -360,7 +360,9 @@ bool MainWindow::loadBinaryTarget(const QString& binaryPath) {
         if (entry != 0ULL) seekToAddressOrExpression(QStringLiteral("0x%1").arg(entry, 0, 16));
     }
     if (m_memView && !m_debugSessionActive && m_elfInspector->isValid()) m_memView->setSourceModeLabel(QStringLiteral("STATIC ELF (READ-ONLY)"));
-    if (m_workspacePerspective != QStringLiteral("Source")) if (auto* nt = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) nt->setVisible(true);
+    const bool showBinNav = (m_workspacePerspective == QStringLiteral("Binary")) ||
+                            (m_disassemblyView && !m_disassemblyView->isHidden());
+    if (auto* nt = findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"))) nt->setVisible(showBinNav);
     if (auto* rf = DynamicAddressRibbonFilter::fromNavBar(m_addressNavBar)) rf->updateFromBinaryAndSession(m_elfInspector.get(), m_debugSessionActive);
     syncDisassemblyDecompilerVisibility(true);
     return true;
@@ -466,6 +468,7 @@ bool MainWindow::triggerEditMenuAction(const QString& actionName) {
     if (act.contains(QStringLiteral("Comment"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->toggleLineComment(); return true; }
     if (act.contains(QStringLiteral("Go to Line"), Qt::CaseInsensitive)) { if (!srcView) return false; srcView->selectSourceLine(1); return true; }
     if (act.contains(QStringLiteral("Go to Address"), Qt::CaseInsensitive) && m_seekBar) {
+        if (auto* sbAct = findChild<QAction*>(QStringLiteral("actionToolbarSeekBar"))) sbAct->setVisible(true);
         if (!m_seekBar->isVisible()) m_seekBar->show();
         m_seekBar->setFocus(Qt::ShortcutFocusReason); m_seekBar->selectAll(); return true;
     }

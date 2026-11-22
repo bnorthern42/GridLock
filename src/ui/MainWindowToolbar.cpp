@@ -12,6 +12,7 @@
 #include "EditorTabManager.hpp"
 #include "docks/TerminalDockWidget.hpp"
 #include "utils/FileDialogHelper.hpp"
+#include "views/DisassemblyView.hpp"
 #include "views/ServerRackView.hpp"
 
 #include <QAbstractItemView>
@@ -73,9 +74,8 @@ void MainWindow::setupToolbar() {
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  m_targetSelector->setMinimumContentsLength(5);
-  m_targetSelector->setMinimumWidth(68);
-  m_targetSelector->setMaximumWidth(144);
+  m_targetSelector->setMinimumContentsLength(4);
+  m_targetSelector->setFixedWidth(86);
   m_targetSelector->setFixedHeight(26);
   if (m_targetSelector->view()) {
     m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle);
@@ -221,8 +221,7 @@ void MainWindow::setupToolbar() {
   m_rankCountSpin->setPrefix(QStringLiteral("np:"));
   m_rankCountSpin->setRange(1, 256);
   m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setMinimumWidth(48);
-  m_rankCountSpin->setMaximumWidth(56);
+  m_rankCountSpin->setFixedWidth(44);
   m_rankCountSpin->setFixedHeight(26);
   m_rankCountSpin->setFont(selectorFont);
   m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
@@ -277,14 +276,14 @@ void MainWindow::setupToolbar() {
   m_executionScopeCombo = new QComboBox(toolbar);
   m_executionScopeCombo->setObjectName(QStringLiteral("toolbarExecutionScopeCombo"));
   m_executionScopeCombo->setFont(selectorFont);
-  m_executionScopeCombo->setMinimumWidth(98);
-  m_executionScopeCombo->setMaximumWidth(122);
+  m_executionScopeCombo->setFixedWidth(70);
   m_executionScopeCombo->setFixedHeight(26);
   m_executionScopeCombo->addItem(QStringLiteral("All Ranks"), -1);
   m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0);
   m_executionScopeCombo->setCurrentIndex(0);
   connect(m_executionScopeCombo, &QComboBox::currentIndexChanged, this, [this](int) { syncExecutionScopeUi(); });
   m_executionScopeAction = toolbar->addWidget(m_executionScopeCombo);
+  m_executionScopeAction->setVisible(false);
 
   // Continue (F5), Step Over (F10), Step Into (F11 + stepi/nexti menu), Step Out (Shift+F11), Pause, Pause All (F6), Stop (Shift+F5).
   m_continueAction = makeDbgAct(QStringLiteral("Continue"), QStringLiteral("debug.continue"), QStringLiteral("⏭"),
@@ -357,7 +356,7 @@ void MainWindow::setupToolbar() {
   toolbar->addWidget(spacer);
 
   // History back/forward navigation buttons (< / >) and Alt+Left/Right shortcuts.
-  auto makeNavBtn = [&](const QString& label, const QString& obj, const QString& tip, auto slot) {
+  auto makeNavBtn = [&](const QString& label, const QString& obj, const QString& actObj, const QString& tip, auto slot) {
     auto* btn = new QPushButton(label, toolbar);
     btn->setObjectName(obj);
     btn->setFixedSize(20, 26);
@@ -365,12 +364,14 @@ void MainWindow::setupToolbar() {
     btn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
     btn->setToolTip(tip);
     connect(btn, &QPushButton::clicked, this, slot);
-    toolbar->addWidget(btn);
+    QAction* act = toolbar->addWidget(btn);
+    act->setObjectName(actObj);
+    act->setVisible(false);
     return btn;
   };
-  m_navBackBtn = makeNavBtn(QStringLiteral("<"), QStringLiteral("navBackButton"),
+  m_navBackBtn = makeNavBtn(QStringLiteral("<"), QStringLiteral("navBackButton"), QStringLiteral("actionToolbarNavBack"),
                             QStringLiteral("Navigate Back in Address History (Alt+Left)"), &MainWindow::navigateBack);
-  m_navForwardBtn = makeNavBtn(QStringLiteral(">"), QStringLiteral("navForwardButton"),
+  m_navForwardBtn = makeNavBtn(QStringLiteral(">"), QStringLiteral("navForwardButton"), QStringLiteral("actionToolbarNavForward"),
                                QStringLiteral("Navigate Forward in Address History (Alt+Right)"), &MainWindow::navigateForward);
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this), &QShortcut::activated, this, &MainWindow::navigateBack);
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this), &QShortcut::activated, this, &MainWindow::navigateForward);
@@ -380,11 +381,13 @@ void MainWindow::setupToolbar() {
   m_seekBar->setPlaceholderText("Go to addr/sym (Ctrl+G)");
   m_seekBar->setToolTip(QStringLiteral("Go to Address or Symbol (Ctrl+G) — enter hex address (0x401000) or function symbol"));
   m_seekBar->setFixedHeight(26);
-  m_seekBar->setFixedWidth(64);
-  toolbar->addWidget(m_seekBar);
+  m_seekBar->setFixedWidth(48);
+  QAction* seekAct = toolbar->addWidget(m_seekBar);
+  seekAct->setObjectName(QStringLiteral("actionToolbarSeekBar"));
+  seekAct->setVisible(false);
   connect(m_seekBar, &QLineEdit::returnPressed, this, [this]() { seekToAddressOrExpression(m_seekBar->text()); });
 
-  // Secondary toolbar break for interactive address space navigation ribbon.
+  // Secondary toolbar break for interactive address space navigation ribbon (hidden until Binary perspective / DisassemblyView).
   addToolBarBreak(Qt::TopToolBarArea);
   QToolBar* navToolbar = addToolBar("Address Space Navigation");
   navToolbar->setObjectName("AddressNavToolbar");
@@ -398,6 +401,7 @@ void MainWindow::setupToolbar() {
     seekToAddressOrExpression(QStringLiteral("0x%1").arg(addr, 8, 16, QChar('0')));
   });
   navToolbar->addWidget(m_addressNavBar);
+  navToolbar->setVisible(false);
 }
 
 /** @brief Synchronizes #MainToolbar action enablement, state-aware tooltips, and reverse-debug controls. */
@@ -472,7 +476,12 @@ void MainWindow::registerViewMenuToolbarAndDockActions() {
     }
     toolbarsMenu->addSeparator();
     toolbarsMenu->addAction(QStringLiteral("Reset Toolbars"), this, [this]() {
-      for (auto* tb : findChildren<QToolBar*>()) { tb->show(); addToolBar(Qt::TopToolBarArea, tb); }
+      for (auto* tb : findChildren<QToolBar*>()) {
+        addToolBar(Qt::TopToolBarArea, tb);
+        const bool isAddrNav = (tb->objectName() == QStringLiteral("AddressNavToolbar"));
+        tb->setVisible(!isAddrNav || m_workspacePerspective == QStringLiteral("Binary") ||
+                       (m_disassemblyView && !static_cast<QWidget*>(m_disassemblyView)->isHidden()));
+      }
     });
     viewMenu->addSeparator();
     viewMenu->addAction(QStringLiteral("Split Editor Right"), this, [this]() {

@@ -157,14 +157,20 @@ void MainWindow::setWorkspacePerspective(const QString& perspective) {
     if (d && !isDockFloating(d)) d->setVisible(!hideIdleRight);
   }
   if (!hideIdleRight && varsDock && !isDockFloating(varsDock)) { varsDock->raise(); resizeDocks({varsDock}, {320}, Qt::Horizontal); }
-  if (navTb) navTb->setVisible(isBin || (!hideIdleRight && m_workspacePerspective != QStringLiteral("Source") && (m_debugSessionActive || (m_elfInspector && m_elfInspector->isValid()))));
+
+  const bool showDis = isBin || ((isMpi || isDbg) && core::ConfigManager::instance().showDecompilerWithSource()) ||
+                       (isDbg && perspective.compare(QStringLiteral("Code"), Qt::CaseInsensitive) == 0);
+  if (navTb) navTb->setVisible(showDis);
+  for (const QString& actId : {QStringLiteral("actionToolbarNavBack"), QStringLiteral("actionToolbarNavForward"),
+                               QStringLiteral("actionToolbarSeekBar")}) {
+    if (auto* a = findChild<QAction*>(actId)) a->setVisible(showDis);
+  }
 
   if (isBin) {
     if (m_editorTabManager) m_editorTabManager->setVisible(false);
     if (m_disassemblyView) { m_disassemblyView->setVisible(true); m_disassemblyView->setSplitGraphDecompilerMode(true); }
     if (masterSplitter) masterSplitter->setSizes({0, (std::max)(width() - 360, 640)});
   } else if (isMpi) {
-    const bool showDis = core::ConfigManager::instance().showDecompilerWithSource();
     if (m_editorTabManager) m_editorTabManager->setVisible(true);
     if (m_disassemblyView) m_disassemblyView->setVisible(showDis);
     if (masterSplitter) masterSplitter->setSizes(showDis ? QList<int>{420, 500} : QList<int>{920, 0});
@@ -172,8 +178,6 @@ void MainWindow::setWorkspacePerspective(const QString& perspective) {
     if (m_bottomTabs && m_mpiDiagnosticsWidget) m_bottomTabs->setCurrentWidget(m_mpiDiagnosticsWidget);
     if (mainVertSplitter) mainVertSplitter->setSizes({430, 410});
   } else if (isDbg) {
-    const bool showDis = (perspective.compare(QStringLiteral("Code"), Qt::CaseInsensitive) == 0) ||
-                         core::ConfigManager::instance().showDecompilerWithSource();
     if (m_editorTabManager) m_editorTabManager->setVisible(true);
     if (m_disassemblyView) m_disassemblyView->setVisible(showDis);
     if (masterSplitter) masterSplitter->setSizes(showDis ? QList<int>{440, 520} : QList<int>{940, 0});
@@ -251,21 +255,27 @@ void MainWindow::syncRankCountChrome(int rankCount) {
                            ? m_coordinator->getProcessCount()
                            : (m_rankCountSpin ? m_rankCountSpin->value() : 1));
   const bool multi = (ranks > 1);
+  const bool isMpiPersp = (m_workspacePerspective == QStringLiteral("MPI"));
+  const bool showMpiChrome = multi || isMpiPersp;
   const bool hideRight = (m_workspacePerspective == QStringLiteral("Source") && !m_debugSessionActive);
   auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
   auto* cstackDock = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
   auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
-  if (rackDock && !isDockFloating(rackDock)) rackDock->setVisible(!hideRight && multi);
+  if (rackDock && !isDockFloating(rackDock)) rackDock->setVisible(!hideRight && showMpiChrome);
   if (!hideRight && varsDock && cstackDock && !isDockFloating(varsDock) && !isDockFloating(cstackDock)) {
-    if (multi && rackDock && !isDockFloating(rackDock)) resizeDocks({varsDock, cstackDock, rackDock}, {320, 200, 260}, Qt::Vertical);
+    if (showMpiChrome && rackDock && !isDockFloating(rackDock)) resizeDocks({varsDock, cstackDock, rackDock}, {320, 200, 260}, Qt::Vertical);
     else resizeDocks({varsDock, cstackDock}, {460, 320}, Qt::Vertical);
   }
   for (const QString& id : {QStringLiteral("variablesScopeLabel"), QStringLiteral("variablesRankSelector"),
                             QStringLiteral("gdbConsoleTargetLabel"), QStringLiteral("gdbConsoleRankCombo"),
                             QStringLiteral("evaluatorRankCombo"), QStringLiteral("memProfileRankCombo")}) {
-    if (QWidget* w = findChild<QWidget*>(id)) w->setVisible(multi);
+    if (QWidget* w = findChild<QWidget*>(id)) w->setVisible(showMpiChrome);
   }
-  if (m_programOutputRankFilter) m_programOutputRankFilter->setVisible(multi);
+  if (m_programOutputRankFilter) m_programOutputRankFilter->setVisible(showMpiChrome);
+  const bool active = m_debugSessionActive || (m_coordinator && m_coordinator->getProcessCount() > 0);
+  const bool showTbMulti = (active && multi) || isMpiPersp;
+  if (m_executionScopeAction) m_executionScopeAction->setVisible(showTbMulti);
+  if (auto* paTbAct = findChild<QAction*>(QStringLiteral("actionToolbarPauseAllRanks"))) paTbAct->setVisible(showTbMulti);
   if (m_expressionEvaluatorWidget) m_expressionEvaluatorWidget->setAvailableRankCount(ranks);
 }
 
@@ -282,10 +292,12 @@ void MainWindow::propagateThemeToAllWidgets() {
         "QToolBar#MainToolbar::handle { background-color: %2; width: 4px; margin: 4px 1px; border-radius: 2px; }"
         "QToolBar#MainToolbar::separator { background-color: %2; width: 1px; margin: 4px 1px; }"
         "QToolBar#MainToolbar QLabel { background: transparent; color: %3; font-size: 12px; font-weight: 700; font-style: normal; padding: 0px 2px; border: none; }"
-        "QToolBar#MainToolbar QComboBox, #toolbarTargetSelector { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 5px; height: 24px; min-height: 24px; max-height: 24px; font-size: 12px; font-weight: 500; }"
-        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding-left: 3px; padding-right: 14px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 500; }"
-        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 13px; margin-right: 1px; }"
-        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 3px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 600; }"
+        "QToolBar#MainToolbar QComboBox { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 4px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 500; }"
+        "QComboBox#toolbarTargetSelector { min-width: 60px; max-width: 84px; }"
+        "QComboBox#toolbarExecutionScopeCombo { min-width: 62px; max-width: 68px; }"
+        "QToolBar#MainToolbar QSpinBox, #toolbarRankSpin { background-color: %4; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 11px 0px 2px; margin: 0px; min-width: 38px; max-width: 44px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 500; }"
+        "QToolBar#MainToolbar QSpinBox::up-button, QToolBar#MainToolbar QSpinBox::down-button { width: 11px; margin-right: 1px; }"
+        "QToolBar#MainToolbar QToolButton, QToolBar#MainToolbar QPushButton { background-color: %1; color: %3; border: 1px solid %2; border-radius: 4px; padding: 0px 2px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; font-size: 11px; font-weight: 600; }"
         "QToolBar#MainToolbar QToolButton[popupMode=\"1\"] { padding-left: 6px; padding-right: 22px; }"
         "QToolBar#MainToolbar QToolButton::menu-button { width: 18px; border-left: 1px solid %2; subcontrol-origin: padding; subcontrol-position: top right; }"
         "QToolBar#MainToolbar QToolButton::menu-arrow { width: 10px; height: 10px; }"
@@ -300,13 +312,14 @@ void MainWindow::propagateThemeToAllWidgets() {
              isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1")));
     for (QToolButton* btn : mainToolBar->findChildren<QToolButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
     for (QPushButton* btn : mainToolBar->findChildren<QPushButton*>()) { btn->setFixedHeight(26); btn->setAttribute(Qt::WA_AlwaysShowToolTips, true); }
-    if (m_rankCountSpin) { m_rankCountSpin->setMinimumWidth(48); m_rankCountSpin->setMaximumWidth(56); m_rankCountSpin->setFixedHeight(26); }
-    if (m_targetSelector) { m_targetSelector->setMinimumWidth(68); m_targetSelector->setMaximumWidth(144); m_targetSelector->setFixedHeight(26); }
+    if (m_rankCountSpin) { m_rankCountSpin->setFixedWidth(44); m_rankCountSpin->setFixedHeight(26); }
+    if (m_targetSelector) { m_targetSelector->setFixedWidth(86); m_targetSelector->setFixedHeight(26); }
+    if (m_executionScopeCombo) { m_executionScopeCombo->setFixedWidth(70); m_executionScopeCombo->setFixedHeight(26); }
     if (m_runAction) {
       if (QWidget* runBtn = mainToolBar->widgetForAction(m_runAction)) {
         runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn")); runBtn->setFixedHeight(26);
         runBtn->setStyleSheet(QStringLiteral(
-            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; font-size: 11px; font-weight: 600; border: 1px solid %1; border-radius: 4px; padding: 0px 5px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; }"
+            "QToolButton, QToolButton#toolbarRunTargetBtn { background-color: %1; color: #ffffff; font-size: 11px; font-weight: 600; border: 1px solid %1; border-radius: 4px; padding: 0px 4px; margin: 0px; min-width: 0px; height: 24px; min-height: 24px; max-height: 24px; }"
             "QToolButton:hover:enabled { background-color: %1; color: #ffffff; border: 1px solid %2; }"
             "QToolButton:checked { background-color: %3; color: #ffffff; border: 1px solid %1; font-weight: 600; }"
             "QToolButton:disabled { background-color: %4; color: %5; border: 1px solid %4; }")
@@ -336,9 +349,9 @@ void MainWindow::propagateThemeToAllWidgets() {
 
   const QString navBtnStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px; margin: 0px; font-size: 11px; font-weight: 700; min-width: 20px; max-width: 24px; min-height: 22px; max-height: 24px; } QPushButton:hover:enabled { background-color: %3; border-color: %4; color: %2; } QPushButton:disabled { background-color: %1; color: %5; border: 1px solid %3; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex, isDark ? QStringLiteral("#5c6370") : QStringLiteral("#93a1a1"));
   for (QPushButton* btn : {m_navBackBtn, m_navForwardBtn}) if (btn) btn->setStyleSheet(navBtnStyle);
-  if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 5px; min-height: 22px; max-height: 24px; font-size: 11px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
+  if (m_seekBar) m_seekBar->setStyleSheet(QStringLiteral("QLineEdit#cutterSeekBar { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 3px; margin: 0px; min-width: 40px; max-width: 48px; min-height: 22px; max-height: 24px; font-size: 11px; } QLineEdit#cutterSeekBar:focus { border: 1px solid %4; }").arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex));
 
-  const QString perspStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 4px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 24px; max-height: 24px; } QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
+  const QString perspStyle = QStringLiteral("QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 3px; padding: 0px 3px; margin: 0px; min-width: 0px; font-size: 10px; font-weight: 700; min-height: 24px; max-height: 24px; } QPushButton:hover { background-color: %3; color: %2; border: 1px solid %4; } QPushButton:checked { background-color: %4; color: #ffffff; border: 1px solid %4; }").arg(pal.headerHex, pal.textHex, pal.borderHex, pal.accentHex);
   for (QPushButton* btn : {m_perspSourceBtn, m_perspDebugBtn, m_perspBinaryBtn, m_perspMpiBtn}) if (btn) btn->setStyleSheet(perspStyle);
   if (m_bottomToolRail) {
     m_bottomToolRail->setStyleSheet(QStringLiteral("#bottomToolWindowRail { background-color: %1; border-right: 1px solid %2; } #bottomToolWindowRail QToolButton { background-color: transparent; color: %3; border: 1px solid transparent; border-radius: 4px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 2px; margin: 0px; } #bottomToolWindowRail QToolButton:hover { background-color: %4; color: %3; border: 1px solid %2; } #bottomToolWindowRail QToolButton:checked { background-color: %4; color: %5; border: 1px solid %5; border-left: 2px solid %5; }").arg(pal.headerHex, pal.borderHex, pal.textHex, pal.canvasHex, pal.accentHex));

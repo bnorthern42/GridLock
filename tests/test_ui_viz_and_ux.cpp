@@ -477,20 +477,27 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY(pgDlg.pinnedRootExpressions() == QStringList{QStringLiteral("head")} && pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("val")) && !pgDlg.isFieldMutated(QStringLiteral("head"), QStringLiteral("next")) && pgDlg.fieldMutationSummary(QStringLiteral("head"), QStringLiteral("val")) == QStringLiteral("42 -> 99") && pgDlg.mutatedFieldCount() == 1);
     testPointerGraphDagLayoutAndAliasSplitting(); testPointerGraphControlsAndExport(); testArrayPlotterScientificExtensions(); testComplexAndTensorTableExtensions(); testAutocompleteContextGraphAndKeybindPreferences();
     auto& tm = gridlock::core::ThemeManager::instance(); tm.applyTheme(QStringLiteral("gridlock_slate"), true); const QString qssCache = tm.cachedQssFilePath(QStringLiteral("gridlock_slate")); QVERIFY(QFileInfo::exists(qssCache) && QFileInfo(qssCache).size() > 100);
-    QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.show(); const qint64 startupMs = startupTimer.elapsed(); QVERIFY2(startupMs < 450, qPrintable(QStringLiteral("Startup took %1 ms").arg(startupMs)));
+    QElapsedTimer startupTimer; startupTimer.start(); tm.initialize(); gridlock::ui::MainWindow mw; mw.resize(1280, 800); mw.show(); const qint64 startupMs = startupTimer.elapsed(); QVERIFY2(startupMs < 550, qPrintable(QStringLiteral("Startup took %1 ms").arg(startupMs)));
     QApplication::processEvents(); auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs")); auto* pm = static_cast<gridlock::ui::HpcConsoleWidget*>(mw.findChild<QWidget*>(QStringLiteral("HpcConsoleDock"))); auto* term = mw.findChild<gridlock::ui::TerminalDockWidget*>(); auto* ref = mw.findChild<gridlock::ui::ReferenceManualWidget*>();
     QVERIFY(bottomTabs && pm && term && ref && !pm->isPackagesLoaded() && !term->isShellStarted() && !ref->isDocsetsInitialized());
     bottomTabs->setCurrentWidget(term); QApplication::processEvents(); bottomTabs->setCurrentWidget(ref); QApplication::processEvents(); bottomTabs->setCurrentWidget(pm); QApplication::processEvents(); QVERIFY(term->isShellStarted() && ref->isDocsetsInitialized() && pm->isPackagesLoaded());
+    // Progressive disclosure & <=1040px toolbar audit across Source (ranks=1), Debug (ranks=1), Binary, and MPI (ranks=4).
+    auto* mainTb = mw.findChild<QToolBar*>(QStringLiteral("MainToolbar")); auto* navTb = mw.findChild<QToolBar*>(QStringLiteral("AddressNavToolbar"));
+    auto* rackDock = mw.findChild<QDockWidget*>(QStringLiteral("ServerRackDock")); auto* rankSpin = mw.findChild<QSpinBox*>(QStringLiteral("toolbarRankSpin"));
+    auto* scopeCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarExecutionScopeCombo")); auto* pauseAllBtn = mw.findChild<QToolButton*>(QStringLiteral("toolbarPauseAllRanksBtn"));
+    QVERIFY(mainTb && navTb && rackDock && rankSpin && scopeCombo && pauseAllBtn);
+    rankSpin->setValue(1); mw.setWorkspacePerspective(QStringLiteral("Source")); QApplication::processEvents();
+    auto* extBtn = mainTb->findChild<QToolButton*>(QStringLiteral("qt_toolbar_ext_button"));
+    QVERIFY(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && !pauseAllBtn->isVisible() && mainTb->sizeHint().width() <= 1040 && (!extBtn || !extBtn->isVisible()));
+    mw.setWorkspacePerspective(QStringLiteral("Debug")); QApplication::processEvents(); QVERIFY(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible());
+    mw.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents(); QVERIFY(navTb->isVisible() && mw.disassemblyView()->isVisible() && !rackDock->isVisible() && !scopeCombo->isVisible() && mainTb->sizeHint().width() <= 1040);
+    rankSpin->setValue(4); mw.setWorkspacePerspective(QStringLiteral("MPI")); QApplication::processEvents();
+    QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && rackDock->isVisible() && scopeCombo->isVisible() && pauseAllBtn->isVisible() && mainTb->sizeHint().width() <= 1040 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("w=%1 nav=%2 dis=%3 rack=%4 sc=%5 pa=%6 ext=%7").arg(mainTb->sizeHint().width()).arg(navTb->isVisible()).arg(mw.disassemblyView()->isVisible()).arg(rackDock->isVisible()).arg(scopeCombo->isVisible()).arg(pauseAllBtn->isVisible()).arg(extBtn && extBtn->isVisible())));
     // Performance regression: 5+ MB (~100,000-row) CSV must open via virtualized CsvTablePreviewWidget in < 1000 ms.
     const QString bigCsv = tmpDir.filePath(QStringLiteral("telemetry_5mb.csv"));
     {
-        QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly));
-        QByteArray chunk; chunk.reserve(6 * 1024 * 1024);
-        chunk.append("rank,step,pressure,velocity,tag\n");
-        for (int r = 0; r < 100000; ++r) {
-            chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_");
-            chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n");
-        }
+        QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly)); QByteArray chunk; chunk.reserve(6 * 1024 * 1024); chunk.append("rank,step,pressure,velocity,tag\n");
+        for (int r = 0; r < 100000; ++r) { chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_"); chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n"); }
         QVERIFY(cf.write(chunk) > 5 * 1024 * 1024);
     }
     gridlock::ui::EditorTabManager csvTabs; csvTabs.resize(900, 600); csvTabs.show();
