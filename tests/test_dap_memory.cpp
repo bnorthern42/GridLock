@@ -14,7 +14,7 @@
 #include <QJsonObject>
 #include <QSignalSpy>
 
-#include "../src/core/hpc/DapCoordinator.hpp"
+#include "../src/core/hpc/dap/DapCoordinator.hpp"
 
 /**
  * @class MockDapCoordinatorMemory

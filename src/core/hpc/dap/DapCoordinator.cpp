@@ -22,8 +22,8 @@
 #include <QtConcurrent/QtConcurrent>
 #include <csignal>
 
-#include "MiSanitizer.hpp"
-#include "NativeMemoryReader.hpp"
+#include "../gdb/MiSanitizer.hpp"
+#include "../memory/NativeMemoryReader.hpp"
 #include "core/managers/ConfigManager.hpp"
 
 namespace gridlock::core {

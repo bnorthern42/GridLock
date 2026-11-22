@@ -10,7 +10,7 @@
 
 #include <QStringList>
 
-#include "HpcBackend.hpp"
+#include "../HpcBackend.hpp"
 
 namespace gridlock::core {
 

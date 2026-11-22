@@ -8,7 +8,7 @@
  */
 
 #include "MpiDiagnosticsWidget.hpp"
-#include "../../core/hpc/DeadlockAnalyzer.hpp"
+#include "../../core/hpc/analysis/DeadlockAnalyzer.hpp"
 #include "MpiNetworkLogWidget.hpp"
 #include <QAbstractItemView>
 #include <QColor>

@@ -25,8 +25,8 @@
 #include <QProcess>
 #include <QString>
 
-#include "IBackendCoordinator.hpp"
-#include "ProcessScanner.hpp"
+#include "../IBackendCoordinator.hpp"
+#include "../system/ProcessScanner.hpp"
 
 /**
  * @enum SessionState

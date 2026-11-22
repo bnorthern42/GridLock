@@ -13,7 +13,7 @@
 #include <QWidget>
 #include <cstdint>
 #include <functional>
-#include "../../core/hpc/MemoryDiffer.hpp"
+#include "../../core/hpc/memory/MemoryDiffer.hpp"
 
 class QLineEdit;
 class QSpinBox;

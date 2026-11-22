@@ -9,7 +9,7 @@
 #include "test_dap_commands.hpp"
 
 #include "../src/core/commands/DebugCommands.hpp"
-#include "../src/core/hpc/DapCoordinator.hpp"
+#include "../src/core/hpc/dap/DapCoordinator.hpp"
 #include "../src/ui/MainWindow.hpp"
 
 /**

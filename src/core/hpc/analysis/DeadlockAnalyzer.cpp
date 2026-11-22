@@ -18,8 +18,8 @@
 #include <QStringList>
 #include <QTextStream>
 
-#include "DapCoordinator.hpp"
-#include "GdbRankCoordinator.hpp"
+#include "../dap/DapCoordinator.hpp"
+#include "../gdb/GdbRankCoordinator.hpp"
 
 namespace gridlock::core {
 namespace {

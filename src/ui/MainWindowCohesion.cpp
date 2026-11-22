@@ -42,7 +42,7 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 
-#include "../core/hpc/DeadlockAnalyzer.hpp"
+#include "../core/hpc/analysis/DeadlockAnalyzer.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/managers/DocsetManager.hpp"
 #include "../core/managers/SpackManager.hpp"

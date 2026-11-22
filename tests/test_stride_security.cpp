@@ -13,7 +13,7 @@
 
 #include <QTest>
 
-#include "../src/core/hpc/MemoryBoundsValidator.hpp"
+#include "../src/core/hpc/memory/MemoryBoundsValidator.hpp"
 #include "../src/core/utils/ElfBinaryInspector.cpp"
 
 using namespace gridlock::hpc;

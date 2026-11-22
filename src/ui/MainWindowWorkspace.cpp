@@ -8,9 +8,9 @@
  */
 
 #include "MainWindow.hpp"
-#include "../core/hpc/DapCoordinator.hpp"
-#include "../core/hpc/GdbRankCoordinator.hpp"
-#include "../core/hpc/MemoryDiffer.hpp"
+#include "../core/hpc/dap/DapCoordinator.hpp"
+#include "../core/hpc/gdb/GdbRankCoordinator.hpp"
+#include "../core/hpc/memory/MemoryDiffer.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/SessionManager.hpp"
 #include "../core/managers/SpackManager.hpp"

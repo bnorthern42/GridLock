@@ -9,7 +9,7 @@
 
 #include "MainWindow.hpp"
 
-#include "../core/hpc/NativeMemoryReader.hpp"
+#include "../core/hpc/memory/NativeMemoryReader.hpp"
 #include "../core/models/VariableTreeModel.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"

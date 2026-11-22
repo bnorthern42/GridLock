@@ -26,7 +26,7 @@
 #include <QTableWidget>
 
 #include "../RankState.hpp"
-#include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "../core/managers/ShortcutManager.hpp"

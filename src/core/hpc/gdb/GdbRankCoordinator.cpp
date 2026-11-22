@@ -29,7 +29,7 @@
 #include <QStandardPaths>
 #include <QThread>
 
-#include "../managers/ConfigManager.hpp"
+#include "../../managers/ConfigManager.hpp"
 
 namespace gridlock {
 

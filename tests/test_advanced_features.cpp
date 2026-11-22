@@ -7,12 +7,12 @@
  */
 
 #include "test_advanced_features.hpp"
-#include "../src/core/hpc/DeadlockAnalyzer.hpp"
+#include "../src/core/hpc/analysis/DeadlockAnalyzer.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/models/VariableTreeModel.hpp"
 
 #define private public
-#include "../src/core/hpc/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #undef private
 
 #include <QJsonArray>

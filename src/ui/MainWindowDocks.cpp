@@ -8,7 +8,7 @@
  */
 
 #include "MainWindow.hpp"
-#include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../core/managers/SpackManager.hpp"
 #include "../core/managers/ThemeManager.hpp"
 #include "docks/CallStackDockWidget.hpp"

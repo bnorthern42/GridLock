@@ -6,7 +6,7 @@
 #include <cmath>
 #include <csignal>
 #include <unistd.h>
-#include "../src/core/hpc/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../src/core/hpc/IBackendCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"

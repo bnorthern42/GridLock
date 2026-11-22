@@ -6,8 +6,8 @@
 #include "PointerGraphDialog.hpp"
 #include "PointerGraphLayout.hpp"
 
-#include "../../../core/hpc/DapCoordinator.hpp"
-#include "../../../core/hpc/GdbRankCoordinator.hpp"
+#include "../../../core/hpc/dap/DapCoordinator.hpp"
+#include "../../../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../../../core/hpc/IBackendCoordinator.hpp"
 
 #include <QRegularExpression>

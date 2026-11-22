@@ -46,7 +46,7 @@
 #include <QtTest/QtTest>
 
 #include "../src/RankState.hpp"
-#include "../src/core/hpc/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/models/VariableTreeModel.hpp"

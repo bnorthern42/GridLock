@@ -7,7 +7,7 @@
 #include <QtWidgets>
 #include <QtTest/QtTest>
 
-#include "../src/core/hpc/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/managers/SessionManager.hpp"
 #include "../src/core/managers/ThemeManager.hpp"

@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/hpc/gdb/GdbRankCoordinator.hpp"
 
 #include <QObject>
 #include <QString>

@@ -17,8 +17,8 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 
-#include "../hpc/DapCoordinator.hpp"
-#include "../hpc/GdbRankCoordinator.hpp"
+#include "../hpc/dap/DapCoordinator.hpp"
+#include "../hpc/gdb/GdbRankCoordinator.hpp"
 #include "../hpc/IBackendCoordinator.hpp"
 
 namespace gridlock {

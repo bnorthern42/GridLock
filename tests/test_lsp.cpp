@@ -20,7 +20,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
-#include "../src/core/hpc/LspCoordinator.hpp"
+#include "../src/core/hpc/lsp/LspCoordinator.hpp"
 #include "../src/core/managers/ConfigManager.hpp"
 #include "../src/core/utils/ClangdLspClient.cpp"
 #include "../src/ui/views/SourceCodeView.hpp"

@@ -12,7 +12,7 @@
 #include <QObject>
 #include <QtTest/QtTest>
 
-#include "../src/core/hpc/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 
 /**
  * @class TestGdbCoordinator

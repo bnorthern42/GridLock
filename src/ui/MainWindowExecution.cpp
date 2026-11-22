@@ -9,9 +9,9 @@
 
 #include "MainWindow.hpp"
 
-#include "../core/hpc/DapCoordinator.hpp"
-#include "../core/hpc/DeadlockAnalyzer.hpp"
-#include "../core/hpc/GdbRankCoordinator.hpp"
+#include "../core/hpc/dap/DapCoordinator.hpp"
+#include "../core/hpc/analysis/DeadlockAnalyzer.hpp"
+#include "../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"

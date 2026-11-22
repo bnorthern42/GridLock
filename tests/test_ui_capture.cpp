@@ -39,8 +39,8 @@
 #include <limits>
 #include <unistd.h>
 
-#include "../src/core/hpc/DeadlockAnalyzer.hpp"
-#include "../src/core/hpc/GdbRankCoordinator.hpp"
+#include "../src/core/hpc/analysis/DeadlockAnalyzer.hpp"
+#include "../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../src/core/managers/ThemeManager.hpp"
 #include "../src/core/models/VariableTreeModel.hpp"
 #include "../src/ui/EditorTabManager.hpp"

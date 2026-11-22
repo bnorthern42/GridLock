@@ -11,8 +11,8 @@
 #include "MemoryProfilerWidget.hpp"
 #include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/ThemeManager.hpp"
-#include "../../core/hpc/MemoryExporter.hpp"
-#include "../../core/hpc/MemoryDiffer.hpp"
+#include "../../core/hpc/memory/MemoryExporter.hpp"
+#include "../../core/hpc/memory/MemoryDiffer.hpp"
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFont>

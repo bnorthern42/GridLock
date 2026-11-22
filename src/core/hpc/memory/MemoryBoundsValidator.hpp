@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <string>
 
-#include "../models/VariableNode.hpp"
+#include "../../models/VariableNode.hpp"
 
 namespace gridlock {
 namespace hpc {

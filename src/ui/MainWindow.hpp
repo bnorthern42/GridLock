@@ -11,7 +11,7 @@
 
 #include "../RankState.hpp"
 #include "../core/hpc/IBackendCoordinator.hpp"
-#include "../core/hpc/ProcessScanner.hpp"
+#include "../core/hpc/system/ProcessScanner.hpp"
 #include "../core/utils/ElfBinaryInspector.hpp"
 #include "MainWindowInternal.hpp"
 

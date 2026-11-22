@@ -24,9 +24,9 @@
 #include <QSocketNotifier>
 #include <QString>
 
-#include "../../RankState.hpp"
-#include "IBackendCoordinator.hpp"
-#include "ProcessScanner.hpp"
+#include "../../../RankState.hpp"
+#include "../IBackendCoordinator.hpp"
+#include "../system/ProcessScanner.hpp"
 
 namespace gridlock {
 

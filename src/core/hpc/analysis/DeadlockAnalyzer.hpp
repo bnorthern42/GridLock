@@ -14,7 +14,7 @@
 #include <QString>
 #include <QVector>
 
-#include "IBackendCoordinator.hpp"
+#include "../IBackendCoordinator.hpp"
 
 namespace gridlock {
 class GdbRankCoordinator;

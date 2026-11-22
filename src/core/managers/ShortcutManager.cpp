@@ -20,8 +20,8 @@
 #include "../../ui/views/SourceCodeView.hpp"
 #include "../../ui/widgets/ProjectExplorerWidget.hpp"
 #include "../commands/DebugCommands.hpp"
-#include "../hpc/DapCoordinator.hpp"
-#include "../hpc/GdbRankCoordinator.hpp"
+#include "../hpc/dap/DapCoordinator.hpp"
+#include "../hpc/gdb/GdbRankCoordinator.hpp"
 #include "../hpc/IBackendCoordinator.hpp"
 #include "ConfigManager.hpp"
 

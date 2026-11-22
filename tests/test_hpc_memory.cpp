@@ -12,7 +12,7 @@
 
 #include <QTest>
 
-#include "../src/core/hpc/NativeMemoryReader.hpp"
+#include "../src/core/hpc/memory/NativeMemoryReader.hpp"
 
 #ifdef __linux__
 #include <signal.h>
