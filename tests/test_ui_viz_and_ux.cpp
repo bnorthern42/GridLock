@@ -410,12 +410,45 @@ static void testAutocompleteContextGraphAndKeybindPreferences() {
     int kbRow = -1, hpcRow = -1; for (int i = 0; i < catList->count(); ++i) { if (catList->item(i)->text() == QStringLiteral("Keybindings")) kbRow = i; if (catList->item(i)->text() == QStringLiteral("HPC Integration")) hpcRow = i; catList->setCurrentRow(i); QApplication::processEvents(); if (auto* sa = qobject_cast<QScrollArea*>(stack->currentWidget())) QVERIFY2(sa->horizontalScrollBar()->maximum() == 0, qPrintable(QStringLiteral("Page %1 overflow: %2").arg(i).arg(sa->horizontalScrollBar()->maximum()))); }
     QVERIFY(kbRow > 0 && hpcRow > 0); catList->setCurrentRow(hpcRow); QApplication::processEvents(); if (auto* hpcPage = prefs.findChild<gridlock::ui::HpcIntegrationSettingsPage*>()) { for (auto* w : hpcPage->findChildren<QLineEdit*>()) if (!qobject_cast<QComboBox*>(w->parentWidget()) && !qobject_cast<QAbstractSpinBox*>(w->parentWidget())) QVERIFY2(w->width() >= 110, qPrintable(w->placeholderText())); for (auto* w : hpcPage->findChildren<QComboBox*>()) QVERIFY(w->width() >= 110); for (auto* w : hpcPage->findChildren<QSpinBox*>()) QVERIFY(w->width() >= 110); }
     catList->setCurrentRow(kbRow); QApplication::processEvents();
-    QVERIFY(kbTbl->rowHeight(0) >= 34 && kbTbl->columnWidth(0) >= 115 && kbTbl->columnWidth(2) >= 200 && kbTbl->columnViewportPosition(2) >= kbTbl->columnViewportPosition(1) + kbTbl->columnWidth(1) && kbTbl->viewport()->findChildren<QKeySequenceEdit*>().isEmpty());
-    int plotRow = -1; for (int r = 0; r < kbTbl->rowCount(); ++r) if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("actionArrayPlotter")) { plotRow = r; break; }
-    QVERIFY(plotRow >= 0); kbTbl->scrollToItem(kbTbl->item(plotRow, 2)); kbTbl->setCurrentCell(plotRow, 2); kbTbl->edit(kbTbl->model()->index(plotRow, 2)); QApplication::processEvents();
-    auto* seqEdit = kbTbl->viewport()->findChild<QKeySequenceEdit*>(); QVERIFY(seqEdit && seqEdit->geometry().left() >= kbTbl->columnViewportPosition(2) && seqEdit->geometry().right() <= kbTbl->columnViewportPosition(2) + kbTbl->columnWidth(2));
+    QVERIFY(kbTbl->rowHeight(0) >= 38 && kbTbl->columnWidth(0) >= 115 && kbTbl->columnWidth(2) >= 200 && kbTbl->columnViewportPosition(2) >= kbTbl->columnViewportPosition(1) + kbTbl->columnWidth(1) && kbTbl->viewport()->findChildren<QKeySequenceEdit*>().isEmpty());
+    // Verify zero "edit: editing failed" warnings when clicking non-editable cols & editing col 2, plus clamped geometry and duplicate conflict reassignment.
+    static QStringList s_kbWarnings; s_kbWarnings.clear();
+    const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& msg) {
+        if (msg.contains(QStringLiteral("edit: editing failed"), Qt::CaseInsensitive)) s_kbWarnings.append(msg);
+    });
+    int plotRow = -1, contRow = -1;
+    for (int r = 0; r < kbTbl->rowCount(); ++r) {
+        if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("actionArrayPlotter")) plotRow = r;
+        if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("debug.continue")) contRow = r;
+    }
+    QVERIFY(plotRow >= 0 && contRow >= 0);
+    emit kbTbl->cellClicked(plotRow, 0); emit kbTbl->cellClicked(plotRow, 1); QApplication::processEvents();
+    kbTbl->scrollToItem(kbTbl->item(plotRow, 2)); kbTbl->setCurrentCell(plotRow, 2);
+    emit kbTbl->cellClicked(plotRow, 2); emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
+    auto* seqEdit = kbTbl->viewport()->findChild<QKeySequenceEdit*>();
+    const QRect cellRect = kbTbl->visualRect(kbTbl->model()->index(plotRow, 2));
+    QVERIFY2(seqEdit && cellRect.contains(seqEdit->geometry()), "QKeySequenceEdit must stay strictly clamped inside row cell bounds");
     const QKeySequence customSeq(QStringLiteral("Ctrl+Alt+Y")); seqEdit->setKeySequence(customSeq); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == customSeq && gridlock::core::ConfigManager::instance().customShortcuts().value(QStringLiteral("actionArrayPlotter")) == customSeq);
+    // Assign Continue's F5 shortcut to plotRow and verify conflict banner appears and Continue is cleared.
+    seqEdit->setKeySequence(QKeySequence(Qt::Key_F5)); QApplication::processEvents();
+    auto* conflictLbl = prefs.findChild<QLabel*>(QStringLiteral("keybindingsConflictLabel"));
+    QVERIFY2(conflictLbl && conflictLbl->isVisible() && conflictLbl->text().contains(QStringLiteral("Continue")), "Duplicate shortcut must display conflict banner and reassign from Continue");
+    QVERIFY2(kbTbl->item(contRow, 2)->text() == QStringLiteral("Unassigned"), "Conflicting action must be cleared on reassignment");
+    qInstallMessageHandler(prevHandler);
+    QVERIFY2(s_kbWarnings.isEmpty(), qPrintable(s_kbWarnings.join(QStringLiteral("; "))));
     kbTbl->setCurrentCell(plotRow, 0); clearBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut().isEmpty()); resetBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G) && gridlock::core::ConfigManager::instance().customShortcuts().isEmpty() && kbTbl->viewport()->findChildren<QKeySequenceEdit*>().isEmpty());
+    // Verify Light-theme selected row foreground contrast and optional visual screenshot capture.
+    auto& tm = gridlock::core::managers::ThemeManager::instance(); const QString savedTheme = tm.activeThemeId();
+    for (const QString& tid : tm.availableThemes()) if (!gridlock::core::managers::ThemeManager::paletteForTheme(tid).isDark) { tm.applyTheme(tid, false); break; }
+    QApplication::processEvents();
+    const QColor selBg = kbTbl->palette().color(QPalette::Highlight), selFg = kbTbl->palette().color(QPalette::HighlightedText);
+    QVERIFY2(std::abs(selBg.lightness() - selFg.lightness()) >= 110, "Light-theme selected row text must have crisp contrast against highlight background");
+    kbTbl->selectRow(0); kbTbl->setCurrentCell(1, 2); emit kbTbl->cellClicked(1, 2); QApplication::processEvents();
+    auto* activeSeq = kbTbl->viewport()->findChild<QKeySequenceEdit*>();
+    auto* activeLe = activeSeq ? activeSeq->findChild<QLineEdit*>() : nullptr;
+    QVERIFY2(activeSeq && activeSeq->isVisible() && kbTbl->visualRect(kbTbl->model()->index(1, 2)).contains(activeSeq->geometry()) && activeLe && activeLe->height() >= 24, "Active shortcut editor and internal QLineEdit must fill clamped cell bounds");
+    if (const QString png = qEnvironmentVariable("GRIDLOCK_VERIFY_KEYBINDS_SELECT_PNG"); !png.isEmpty()) prefs.grab().toImage().save(png);
+    tm.applyTheme(savedTheme, false);
     prefs.close(); apDlg->close(); pgDlg->close();
 }
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */

@@ -304,6 +304,9 @@ public:
                       const QModelIndex& index) const override;
     void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
                               const QModelIndex& index) const override;
+
+signals:
+    void shortcutAssigned(const QString& actionId, const QKeySequence& sequence);
 };
 
 /**
@@ -323,6 +326,7 @@ public:
     QTableWidget* table() const { return m_table; }
     QPushButton* clearShortcutButton() const { return m_clearBtn; }
     QPushButton* resetDefaultsButton() const { return m_resetBtn; }
+    QLabel* conflictLabel() const { return m_conflictLabel; }
 
 private slots:
     void filterRows(const QString& query);
@@ -330,6 +334,7 @@ private slots:
 
 private:
     QLineEdit* m_filterEdit = nullptr;
+    QLabel* m_conflictLabel = nullptr;
     QTableWidget* m_table = nullptr;
     QPushButton* m_clearBtn = nullptr;
     QPushButton* m_resetBtn = nullptr;
