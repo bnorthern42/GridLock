@@ -47,6 +47,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QContextMenuEvent>
+#include <QDateTime>
 #include <QDialog>
 #include <QDockWidget>
 #include <QDynamicPropertyChangeEvent>
@@ -820,27 +821,23 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
     const auto *dp = static_cast<QDynamicPropertyChangeEvent *>(event);
     if (dp->propertyName() == QByteArrayLiteral("gridlock_debugger_engine")) syncCoordinatorWithConfig();
     else if (dp->propertyName() == QByteArrayLiteral("gridlock_disasm_prefs_rev")) syncDisassemblyDecompilerVisibility(true);
-    else if (dp->propertyName() == QByteArrayLiteral("gridlock_editor_highlight_rev") && m_editorTabManager)
-      m_editorTabManager->rehighlightAllTabs();
+    else if (dp->propertyName() == QByteArrayLiteral("gridlock_editor_highlight_rev") && m_editorTabManager) m_editorTabManager->rehighlightAllTabs();
   }
   // Connect PreferencesDialog, dialog completers, SourceCodeView graph signals, and QFileDialogs on Show/Polish.
   if (event->type() == QEvent::Show || event->type() == QEvent::Polish) {
     if (auto *sv = qobject_cast<SourceCodeView *>(watched)) bindSourceViewGraphSignals(this, sv);
-    if (auto *fd = qobject_cast<QFileDialog *>(watched))
-      FileDialogHelper::configureFileDialog(fd, !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : (m_projectExplorerWidget ? m_projectExplorerWidget->rootPath() : QString()));
+    if (auto *fd = qobject_cast<QFileDialog *>(watched)) FileDialogHelper::configureFileDialog(fd, !m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : (m_projectExplorerWidget ? m_projectExplorerWidget->rootPath() : QString()));
     if (auto *psPre = qobject_cast<ProjectSettingsDialog *>(watched)) {
       if (m_terminalDock) m_terminalDock->ensureShellStarted();
       if (!psPre->property("_glWd").toBool()) { psPre->setProperty("_glWd", true); connect(psPre, &QDialog::accepted, this, [this]() { if (m_terminalDock) m_terminalDock->setWorkingDirectory(QString::fromStdString(gridlock::core::ConfigManager::instance().projectSettings().workingDirectory)); if (!m_activeWorkspaceDir.isEmpty()) saveSession(false); }); }
     }
     if (event->type() == QEvent::Show) {
       if (m_pauseAllAction && menuBar()) {
-        for (QAction *ma : menuBar()->actions()) {
+        for (QAction *ma : menuBar()->actions())
           if (QMenu *dm = ma ? ma->menu() : nullptr; dm && dm->title().remove(QLatin1Char('&')) == QLatin1String("Debug") && !dm->actions().contains(m_pauseAllAction)) {
-            const QList<QAction *> acts = dm->actions();
-            const int pIdx = m_pauseAction ? acts.indexOf(m_pauseAction) : -1;
+            const QList<QAction *> acts = dm->actions(); const int pIdx = m_pauseAction ? acts.indexOf(m_pauseAction) : -1;
             dm->insertAction((pIdx >= 0 && pIdx + 1 < acts.size()) ? acts.at(pIdx + 1) : nullptr, m_pauseAllAction);
           }
-        }
       }
       if (qobject_cast<PointerGraphDialog *>(watched) || qobject_cast<ArrayPlotDialog *>(watched)) refreshDialogCompleters(this);
       if (auto *prefs = qobject_cast<PreferencesDialog *>(watched)) {
@@ -856,17 +853,29 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   if (watched == m_statusTelemetryLabel && (event->type() == QEvent::Paint || event->type() == QEvent::Show) && m_statusTelemetryLabel && !m_statusTelemetryLabel->text().contains(QStringLiteral("CPU:"))) refreshStatusBarMemoryTelemetry();
   // Delegate custom dock title-bar drag, pop-out, and double-click events first.
   if (handleDockHeaderEvent(watched, event)) return true;
-
   // Keep tabified sibling QDockWidgets synchronized to the active dock's dimensions.
-  if (event->type() == QEvent::Resize) {
-    if (auto *dock = qobject_cast<QDockWidget *>(watched); dock && dock->parentWidget() == this && !dock->isFloating() && dock->width() > 155 && dock->height() > 155) {
+  if (event->type() == QEvent::Resize)
+    if (auto *dock = qobject_cast<QDockWidget *>(watched); dock && dock->parentWidget() == this && !dock->isFloating() && dock->width() > 155 && dock->height() > 155)
       for (QDockWidget *sib : tabifiedDockWidgets(dock)) if (sib && !sib->isFloating() && sib->size() != dock->size()) sib->resize(dock->size());
+  if (event->type() == QEvent::MouseButtonPress) { m_bareShiftArmed = false; m_lastBareShiftReleaseMs = 0; }
+  // Detect bare Double-Shift (<= 350 ms, no intervening keys/modifiers) to open Search Everywhere in All mode.
+  if (watched && watched->isWidgetType() && event->type() == QEvent::KeyRelease) {
+    if (auto *ke = static_cast<QKeyEvent *>(event); !ke->isAutoRepeat() && ke->key() == Qt::Key_Shift && m_bareShiftArmed) {
+      m_bareShiftArmed = false; const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+      if (m_lastBareShiftReleaseMs > 0 && (nowMs - m_lastBareShiftReleaseMs) <= 350 && isVisible() && !QApplication::activeModalWidget() && (!m_commandPaletteDialog || !m_commandPaletteDialog->isVisible())) {
+        m_lastBareShiftReleaseMs = 0; openSearchEverywhere(0); return true;
+      }
+      m_lastBareShiftReleaseMs = nowMs;
     }
   }
   // Route global customizable IDE keybindings through live QAction shortcuts and ShortcutManager.
   if (event->type() == QEvent::KeyPress) {
     auto *ke = static_cast<QKeyEvent *>(event);
     const auto mods = ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+    if (watched && watched->isWidgetType() && !ke->isAutoRepeat()) {
+      if (ke->key() == Qt::Key_Shift && (mods & ~Qt::ShiftModifier) == 0) m_bareShiftArmed = true;
+      else { m_bareShiftArmed = false; m_lastBareShiftReleaseMs = 0; }
+    }
     const QKeySequence pressed(ke->key() | mods);
     auto matchesAct = [this, &pressed](const QString &objName, const QKeySequence &fallback) {
       if (pressed.isEmpty()) return false;
@@ -884,42 +893,30 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
   }
   return QMainWindow::eventFilter(watched, event);
 }
-/** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix. */
 void MainWindow::openCommandPalette(const QString &initialPrefix) {
   if (!m_commandPaletteDialog) m_commandPaletteDialog = new CommandPaletteDialog(this);
   m_commandPaletteDialog->populateFromMainWindow(this); m_commandPaletteDialog->openWithPrefix(initialPrefix);
 }
-/** @brief Opens or raises the floating Programmer's Calculator tool window. */
+void MainWindow::openSearchEverywhere(int scope, const QString &initialQuery) {
+  if (!m_commandPaletteDialog) m_commandPaletteDialog = new CommandPaletteDialog(this);
+  m_commandPaletteDialog->populateFromMainWindow(this); m_commandPaletteDialog->openWithScope(static_cast<CommandPaletteDialog::Scope>(std::clamp(scope, 0, 5)), initialQuery);
+}
 void MainWindow::openProgrammerCalculator() {
   if (!m_programmerCalculatorDialog) m_programmerCalculatorDialog = new ProgrammerCalculatorDialog(this);
-  m_programmerCalculatorDialog->reloadStyle();
-  m_programmerCalculatorDialog->show(); m_programmerCalculatorDialog->raise(); m_programmerCalculatorDialog->activateWindow();
+  m_programmerCalculatorDialog->reloadStyle(); m_programmerCalculatorDialog->show(); m_programmerCalculatorDialog->raise(); m_programmerCalculatorDialog->activateWindow();
 }
-/** @brief Opens or raises the floating Programmer's Calculator pre-populated with @p text. */
-void MainWindow::openProgrammerCalculatorWithText(const QString &text) {
-  openProgrammerCalculator();
-  if (m_programmerCalculatorDialog) m_programmerCalculatorDialog->setInitialTextOrValue(text);
-}
-/** @brief Records @p path in ConfigManager and SessionManager MRU history and refreshes File -> Recent Sessions. */
+void MainWindow::openProgrammerCalculatorWithText(const QString &text) { openProgrammerCalculator(); if (m_programmerCalculatorDialog) m_programmerCalculatorDialog->setInitialTextOrValue(text); }
 void MainWindow::recordRecentWorkspace(const QString &path) {
-  if (!path.isEmpty()) {
-    gridlock::core::ConfigManager::instance().recordRecentSession(path);
-    gridlock::core::managers::SessionManager::instance().addRecentSession(path);
-  }
+  if (!path.isEmpty()) { gridlock::core::ConfigManager::instance().recordRecentSession(path); gridlock::core::managers::SessionManager::instance().addRecentSession(path); }
   rebuildRecentSessionsMenu();
 }
-/** @brief Dynamically populates #menuRecentSessions from persisted MRU entries in ~/.config/gridlock/. */
 void MainWindow::rebuildRecentSessionsMenu() {
   if (!m_recentSessionsMenu) return;
-  m_recentSessionsMenu->clear();
-  QStringList entries = gridlock::core::ConfigManager::instance().recentSessions();
-  for (const QString &p : gridlock::core::managers::SessionManager::instance().recentSessions()) {
-    if (QFileInfo::exists(p) && !entries.contains(p) && entries.size() < 10) entries.append(p);
-  }
+  m_recentSessionsMenu->clear(); QStringList entries = gridlock::core::ConfigManager::instance().recentSessions();
+  for (const QString &p : gridlock::core::managers::SessionManager::instance().recentSessions()) if (QFileInfo::exists(p) && !entries.contains(p) && entries.size() < 10) entries.append(p);
   for (const QString &path : entries) {
     const QFileInfo fi(path); QString label = fi.isDir() ? QDir(path).dirName() : fi.completeBaseName();
-    label.replace(QLatin1Char('_'), QLatin1Char(' '));
-    if (label.trimmed().isEmpty()) label = QStringLiteral("Workspace Session");
+    label.replace(QLatin1Char('_'), QLatin1Char(' ')); if (label.trimmed().isEmpty()) label = QStringLiteral("Workspace Session");
     QAction *act = m_recentSessionsMenu->addAction(label); act->setData(path); act->setToolTip(path);
     connect(act, &QAction::triggered, this, [this, path]() {
       if (QFileInfo(path).isFile() && !path.endsWith(QStringLiteral(".toml"), Qt::CaseInsensitive)) { loadBinaryTarget(path); return; }
@@ -937,11 +934,7 @@ void MainWindow::rebuildRecentSessionsMenu() {
   }
   if (entries.isEmpty()) { m_recentSessionsMenu->addAction(QStringLiteral("(No Recent Sessions)"))->setEnabled(false); return; }
   m_recentSessionsMenu->addSeparator();
-  connect(m_recentSessionsMenu->addAction(QStringLiteral("Clear Recent Sessions")), &QAction::triggered, this, [this]() {
-    gridlock::core::ConfigManager::instance().clearRecentSessions();
-    gridlock::core::managers::SessionManager::instance().clearRecentSessions();
-    rebuildRecentSessionsMenu();
-  });
+  connect(m_recentSessionsMenu->addAction(QStringLiteral("Clear Recent Sessions")), &QAction::triggered, this, [this]() { gridlock::core::ConfigManager::instance().clearRecentSessions(); gridlock::core::managers::SessionManager::instance().clearRecentSessions(); rebuildRecentSessionsMenu(); });
 }
 
 }  // namespace gridlock::ui

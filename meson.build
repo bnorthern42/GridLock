@@ -60,7 +60,7 @@ src_files = [
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
-  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/SearchEverywhereEngine.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
 ]
 
@@ -221,7 +221,7 @@ ui_test_src = [
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
-  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
+  'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/SearchEverywhereEngine.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/core/Version.cpp',
 ]
 

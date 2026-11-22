@@ -314,7 +314,9 @@ public slots:
     void openArrayPlotter(const QString& exprPath = QString(), const QString& typeHint = QString());
     /** @brief Opens the unified fuzzy Command Palette overlay pre-populated with @p initialPrefix. */
     void openCommandPalette(const QString& initialPrefix = QStringLiteral(">"));
-    /** @brief Opens the unified Command Palette in Quick Open File mode (Ctrl+P). */
+    /** @brief Opens JetBrains-style Search Everywhere in the requested scope (0 = All, 1 = Files, 4 = Actions). */
+    void openSearchEverywhere(int scope = 0, const QString& initialQuery = QString());
+    /** @brief Opens Search Everywhere in Files mode (Ctrl+P). */
     void openQuickOpenPalette() { openCommandPalette(QString()); }
     /** @brief Opens or raises the floating Programmer's Calculator tool window (Ctrl+Alt+C). */
     void openProgrammerCalculator();
@@ -476,6 +478,8 @@ private:
     ProgrammerCalculatorDialog* m_programmerCalculatorDialog = nullptr;
     SignalCatchpointDialog* m_signalCatchpointDialog = nullptr;
     CheckpointDialog* m_checkpointDialog = nullptr;
+    qint64 m_lastBareShiftReleaseMs = 0;
+    bool m_bareShiftArmed = false;
 
     struct SessionShutdownGuard {
         MainWindow* self = nullptr;

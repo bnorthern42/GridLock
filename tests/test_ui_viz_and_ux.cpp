@@ -217,12 +217,20 @@ void TestMainWindowUI::testEditableSourceViewModernLspPopupAndThemePersistence()
 }
 void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     using gridlock::ui::CommandPaletteDialog; using gridlock::ui::PaletteItem;
-    QVector<int> dtpIdx, drIdx, badIdx;
+    QVector<int> dtpIdx, drIdx, badIdx, mwcIdx, grcIdx;
     const int dtpExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Debug: Attach to Process..."), &dtpIdx), dtpLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dtp"), QStringLiteral("Edit: Copy desktop path"));
     const int drExact = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("tutorial/deadlock_ring.cpp"), &drIdx), drLoose = CommandPaletteDialog::fuzzyScore(QStringLiteral("dr.cpp"), QStringLiteral("src/core/hpc/DeadlockAnalyzer.cpp"));
+    const int mwcUpper = CommandPaletteDialog::fuzzyScore(QStringLiteral("MWC"), QStringLiteral("src/ui/MainWindowCohesion.cpp"), &mwcIdx), mwcLower = CommandPaletteDialog::fuzzyScore(QStringLiteral("mwc"), QStringLiteral("src/ui/MainWindowCohesion.cpp")), mwcOther = CommandPaletteDialog::fuzzyScore(QStringLiteral("MWC"), QStringLiteral("src/ui/MainWindowPerspectives.cpp"));
+    const int grcCamel = CommandPaletteDialog::fuzzyScore(QStringLiteral("gRC"), QStringLiteral("GdbRankCoordinator"), &grcIdx);
+    const int srcScore = CommandPaletteDialog::fuzzyScore(QStringLiteral("main"), QStringLiteral("src/main.cpp")), objScore = CommandPaletteDialog::fuzzyScore(QStringLiteral("main"), QStringLiteral("builddir/main.cpp.o"));
     QVERIFY(dtpExact > 0 && dtpExact > dtpLoose && dtpIdx.size() == 3 && drExact > 0 && drExact > drLoose && drIdx.size() == 6 && CommandPaletteDialog::fuzzyScore(QStringLiteral("zqx_nomatch"), QStringLiteral("tutorial/deadlock_ring.cpp"), &badIdx) == -1 && badIdx.isEmpty());
+    QVERIFY(mwcUpper > 0 && mwcLower > 0 && mwcUpper > mwcOther && mwcIdx.size() == 3 && grcCamel > 0 && grcIdx.size() == 3 && srcScore > objScore);
     int firedId = -1; CommandPaletteDialog palette;
     palette.setItems({{PaletteItem::Category::Action, QStringLiteral("Debug: Attach to Process..."), QStringLiteral("Menu -> File"), QStringLiteral("Ctrl+Alt+P"), [&]() { firedId = 1; }}, {PaletteItem::Category::Action, QStringLiteral("Tools: Build Target"), QStringLiteral("Menu -> Tools"), QStringLiteral("Ctrl+B"), [&]() { firedId = 2; }}, {PaletteItem::Category::File, QStringLiteral("tutorial/deadlock_ring.cpp"), QStringLiteral("tutorial"), QStringLiteral("C/C++"), [&]() { firedId = 3; }}, {PaletteItem::Category::Symbol, QStringLiteral("DeeplyNested"), QStringLiteral("inspection_demo.cpp:6"), QStringLiteral("Struct"), [&]() { firedId = 4; }}, {PaletteItem::Category::Rank, QStringLiteral("Rank 2"), QStringLiteral("Focus MPI Rank 2 (PAUSED)"), QStringLiteral("PAUSED"), [&]() { firedId = 5; }}, {PaletteItem::Category::Theme, QStringLiteral("Theme: Solarized Dark"), QStringLiteral("Switch palette"), QStringLiteral("Dark"), [&]() { firedId = 6; }}});
+    palette.openWithScope(CommandPaletteDialog::Scope::All); QCOMPARE(palette.activeScope(), CommandPaletteDialog::Scope::All);
+    for (int s = 1; s <= 6; ++s) { QTest::keyClick(palette.inputEdit(), Qt::Key_Tab); QCOMPARE(palette.activeScope(), static_cast<CommandPaletteDialog::Scope>(s % 6)); }
+    QTest::keyClick(palette.inputEdit(), Qt::Key_Tab, Qt::ShiftModifier); QCOMPARE(palette.activeScope(), CommandPaletteDialog::Scope::Ranks);
+    QTest::mouseClick(palette.scopeTabButton(CommandPaletteDialog::Scope::Symbols), Qt::LeftButton); QCOMPARE(palette.activeScope(), CommandPaletteDialog::Scope::Symbols);
     palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.resultCount() == 2 && palette.resultItemAt(0).category == PaletteItem::Category::Action);
     palette.setFilterText(QStringLiteral("@")); QVERIFY(palette.resultCount() == 1 && palette.resultItemAt(0).category == PaletteItem::Category::Symbol);
     palette.setFilterText(QStringLiteral("#")); QVERIFY(palette.resultCount() == 1 && palette.resultItemAt(0).category == PaletteItem::Category::Rank);
@@ -233,15 +241,15 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QVERIFY(closeBtn && closeBtn->text() == QStringLiteral("ESC") && closeBtn->toolTip() == QStringLiteral("Close Command Palette (Esc)") && closeBtn->focusPolicy() == Qt::NoFocus);
     palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); palette.resultsList()->setFocus(); QTest::keyClick(palette.resultsList(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
     palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); palette.resultsList()->viewport()->setFocus(); QTest::keyClick(palette.resultsList()->viewport(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
-    for (QAbstractButton* btn : palette.findChildren<QAbstractButton*>()) {
-        palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); QTest::keyClick(btn, Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
-    }
+    for (QAbstractButton* btn : palette.findChildren<QAbstractButton*>()) { palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); QTest::keyClick(btn, Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1); }
     palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); QTest::mouseClick(closeBtn, Qt::LeftButton); QVERIFY(!palette.isVisible() && firedId == -1);
     palette.openWithPrefix(QStringLiteral(">")); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QTest::keyClick(palette.inputEdit(), Qt::Key_Return); QVERIFY(!palette.isVisible() && firedId == 2);
     static QStringList s_capturedWarnings; s_capturedWarnings.clear();
     const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) { if (type == QtWarningMsg) s_capturedWarnings.append(msg); });
     struct MsgGuard { QtMessageHandler prev; ~MsgGuard() { qInstallMessageHandler(prev); } } msgGuard{prevHandler};
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.loadPreviewFixture(); mw.show(); QApplication::processEvents();
+    auto* seBtn = mw.findChild<QAbstractButton*>(QStringLiteral("toolbarSearchEverywhereBtn")); auto* seekBar = mw.findChild<QLineEdit*>(QStringLiteral("cutterSeekBar"));
+    QVERIFY(seBtn && seBtn->toolTip().contains(QStringLiteral("Double Shift")) && seekBar && seekBar->placeholderText().contains(QStringLiteral("Double Shift")));
     auto* actCmd = mw.findChild<QAction*>(QStringLiteral("actionCommandPalette")); auto* actQuick = mw.findChild<QAction*>(QStringLiteral("actionQuickOpen")); auto* actAttach = mw.findChild<QAction*>(QStringLiteral("actionAttachProcess"));
     QVERIFY(actCmd && actCmd->shortcut() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P) && actQuick && actQuick->shortcut() == QKeySequence(Qt::CTRL | Qt::Key_P) && actAttach && actAttach->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
     int countCtrlShiftP = 0, countCtrlP = 0, countCtrlAltP = 0;
@@ -249,8 +257,23 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     for (QShortcut* s : mw.findChildren<QShortcut*>()) { if (s->key() == QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P)) ++countCtrlShiftP; if (s->key() == QKeySequence(Qt::CTRL | Qt::Key_P)) ++countCtrlP; if (s->key() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P)) ++countCtrlAltP; }
     QVERIFY(countCtrlShiftP == 1 && countCtrlP == 1 && countCtrlAltP == 1);
     if (auto* dv = mw.disassemblyView()) dv->setFocus();
+    // Double-Shift opens Search Everywhere in Scope::All with empty-query Recents; Shift + X + Shift does not.
+    QTest::keyClick(&mw, Qt::Key_Shift); QTest::keyClick(&mw, Qt::Key_A); QTest::keyClick(&mw, Qt::Key_Shift); QApplication::processEvents();
+    QVERIFY(!mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")));
+    QTest::keyClick(&mw, Qt::Key_Shift); QTest::keyClick(&mw, Qt::Key_Shift); QApplication::processEvents();
+    auto* mwPalette = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
+    QVERIFY(mwPalette && mwPalette->isVisible() && mwPalette->activeScope() == CommandPaletteDialog::Scope::All && mwPalette->filterText().isEmpty() && mwPalette->resultCount() > 0 && mwPalette->resultItemAt(0).isRecent);
+    // Live Preview pane updates across Text / File matches and Ctrl+Enter opens horizontal split view.
+    mwPalette->openWithScope(CommandPaletteDialog::Scope::Text, QStringLiteral("MPI_Init")); QApplication::processEvents();
+    QVERIFY(mwPalette->resultCount() >= 2 && mwPalette->isPreviewVisible() && mwPalette->previewEdit() && !mwPalette->previewEdit()->toPlainText().isEmpty());
+    const QString prevHeader0 = mwPalette->previewHeaderLabel()->text();
+    QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Down); QApplication::processEvents();
+    QVERIFY(!mwPalette->previewEdit()->toPlainText().isEmpty() && mwPalette->previewHeaderLabel()->text() != prevHeader0);
+    auto* tabMgr = mw.findChild<gridlock::ui::EditorTabManager*>(); QVERIFY(tabMgr && !tabMgr->isSplitActive());
+    QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return, Qt::ControlModifier); QApplication::processEvents();
+    QVERIFY(!mwPalette->isVisible() && tabMgr->isSplitActive()); tabMgr->closeSplit();
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
-    auto* mwPalette = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(mwPalette && mwPalette->isVisible() && mwPalette->filterText() == QStringLiteral(">") && mwPalette->resultCount() > 0);
+    QVERIFY(mwPalette->isVisible() && mwPalette->filterText() == QStringLiteral(">") && mwPalette->resultCount() > 0);
     for (int i = 0; i < mwPalette->resultCount(); ++i) QCOMPARE(mwPalette->resultItemAt(i).category, PaletteItem::Category::Action);
     mwPalette->resultsList()->setFocus(); QTest::keyClick(mwPalette->resultsList(), Qt::Key_Escape); QVERIFY(!mwPalette->isVisible());
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
@@ -425,35 +448,21 @@ static void testAutocompleteContextGraphAndKeybindPreferences() {
     QVERIFY(kbTbl->rowHeight(0) >= 38 && kbTbl->columnWidth(0) >= 115 && kbTbl->columnWidth(2) >= 200 && kbTbl->columnViewportPosition(2) >= kbTbl->columnViewportPosition(1) + kbTbl->columnWidth(1) && kbTbl->viewport()->findChildren<QKeySequenceEdit*>().isEmpty());
     // Verify zero "edit: editing failed" warnings when clicking non-editable cols & editing col 2, plus clamped geometry and duplicate conflict reassignment.
     static QStringList s_kbWarnings; s_kbWarnings.clear();
-    const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& msg) {
-        if (msg.contains(QStringLiteral("edit: editing failed"), Qt::CaseInsensitive)) s_kbWarnings.append(msg);
-    });
+    const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& msg) { if (msg.contains(QStringLiteral("edit: editing failed"), Qt::CaseInsensitive)) s_kbWarnings.append(msg); });
     int plotRow = -1, contRow = -1;
-    for (int r = 0; r < kbTbl->rowCount(); ++r) {
-        if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("actionArrayPlotter")) plotRow = r;
-        if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("debug.continue")) contRow = r;
-    }
-    QVERIFY(plotRow >= 0 && contRow >= 0);
-    emit kbTbl->cellClicked(plotRow, 0); emit kbTbl->cellClicked(plotRow, 1); QApplication::processEvents();
-    kbTbl->scrollToItem(kbTbl->item(plotRow, 2)); kbTbl->setCurrentCell(plotRow, 2);
-    emit kbTbl->cellClicked(plotRow, 2); emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
-    auto* seqRec = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>();
-    const QRect cellRect = kbTbl->visualRect(kbTbl->model()->index(plotRow, 2));
-    QVERIFY2(seqRec && seqRec->autoFillBackground() && seqRec->height() >= 30 && cellRect.contains(seqRec->geometry()),
-             qPrintable(QStringLiteral("seqRec=%1 autoFill=%2 geom=(%3,%4 %5x%6) cell=(%7,%8 %9x%10)").arg(seqRec != nullptr).arg(seqRec && seqRec->autoFillBackground()).arg(seqRec ? seqRec->x() : -1).arg(seqRec ? seqRec->y() : -1).arg(seqRec ? seqRec->width() : -1).arg(seqRec ? seqRec->height() : -1).arg(cellRect.x()).arg(cellRect.y()).arg(cellRect.width()).arg(cellRect.height())));
-    const QKeySequence customSeq(QStringLiteral("Ctrl+Alt+Y"));
-    QTest::keyClick(seqRec, Qt::Key_Y, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
+    for (int r = 0; r < kbTbl->rowCount(); ++r) { if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("actionArrayPlotter")) plotRow = r; if (kbTbl->item(r, 1) && kbTbl->item(r, 1)->data(Qt::UserRole).toString() == QStringLiteral("debug.continue")) contRow = r; }
+    QVERIFY(plotRow >= 0 && contRow >= 0); emit kbTbl->cellClicked(plotRow, 0); emit kbTbl->cellClicked(plotRow, 1); QApplication::processEvents();
+    kbTbl->scrollToItem(kbTbl->item(plotRow, 2)); kbTbl->setCurrentCell(plotRow, 2); emit kbTbl->cellClicked(plotRow, 2); emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
+    auto* seqRec = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>(); const QRect cellRect = kbTbl->visualRect(kbTbl->model()->index(plotRow, 2));
+    QVERIFY2(seqRec && seqRec->autoFillBackground() && seqRec->height() >= 30 && cellRect.contains(seqRec->geometry()), qPrintable(QStringLiteral("seqRec=%1 autoFill=%2 geom=(%3,%4 %5x%6) cell=(%7,%8 %9x%10)").arg(seqRec != nullptr).arg(seqRec && seqRec->autoFillBackground()).arg(seqRec ? seqRec->x() : -1).arg(seqRec ? seqRec->y() : -1).arg(seqRec ? seqRec->width() : -1).arg(seqRec ? seqRec->height() : -1).arg(cellRect.x()).arg(cellRect.y()).arg(cellRect.width()).arg(cellRect.height())));
+    const QKeySequence customSeq(QStringLiteral("Ctrl+Alt+Y")); QTest::keyClick(seqRec, Qt::Key_Y, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents();
     QVERIFY(plotAct->shortcut() == customSeq && gridlock::core::ConfigManager::instance().customShortcuts().value(QStringLiteral("actionArrayPlotter")) == customSeq);
     // Re-open editor on plotRow and assign Continue's F5 shortcut via keyClick to verify conflict banner and clearing.
-    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
-    auto* seqRec2 = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>();
-    QVERIFY(seqRec2 && seqRec2->isVisible()); seqRec2->setKeySequence(QKeySequence(Qt::Key_F5)); QApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete); emit kbTbl->cellClicked(plotRow, 2); QApplication::processEvents();
+    auto* seqRec2 = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>(); QVERIFY(seqRec2 && seqRec2->isVisible()); seqRec2->setKeySequence(QKeySequence(Qt::Key_F5)); QApplication::processEvents();
     auto* conflictLbl = prefs.findChild<QLabel*>(QStringLiteral("keybindingsConflictLabel"));
-    QVERIFY2(conflictLbl && conflictLbl->isVisible() && conflictLbl->text().contains(QStringLiteral("Continue")), "Duplicate shortcut must display conflict banner and reassign from Continue");
-    QVERIFY2(kbTbl->item(contRow, 2)->text() == QStringLiteral("Unassigned"), "Conflicting action must be cleared on reassignment");
-    qInstallMessageHandler(prevHandler);
-    QVERIFY2(s_kbWarnings.isEmpty(), qPrintable(s_kbWarnings.join(QStringLiteral("; "))));
+    QVERIFY2(conflictLbl && conflictLbl->isVisible() && conflictLbl->text().contains(QStringLiteral("Continue")) && kbTbl->item(contRow, 2)->text() == QStringLiteral("Unassigned"), "Duplicate shortcut must display conflict banner and clear conflicting action");
+    qInstallMessageHandler(prevHandler); QVERIFY2(s_kbWarnings.isEmpty(), qPrintable(s_kbWarnings.join(QStringLiteral("; "))));
     kbTbl->setCurrentCell(plotRow, 0); clearBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut().isEmpty()); resetBtn->click(); QApplication::processEvents(); QVERIFY(plotAct->shortcut() == QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G) && gridlock::core::ConfigManager::instance().customShortcuts().isEmpty());
     // Verify Light-theme selected row contrast and active KeySequenceRecorderWidget on row 4 (Shift+F5).
     auto& tm = gridlock::core::managers::ThemeManager::instance(); const QString savedTheme = tm.activeThemeId();
@@ -465,8 +474,7 @@ static void testAutocompleteContextGraphAndKeybindPreferences() {
     auto* activeRec = kbTbl->viewport()->findChild<gridlock::ui::KeySequenceRecorderWidget*>();
     QVERIFY2(activeRec && activeRec->isVisible() && activeRec->autoFillBackground() && activeRec->height() >= 30 && kbTbl->visualRect(kbTbl->model()->index(4, 2)).contains(activeRec->geometry()), "Active KeySequenceRecorderWidget on row 4 col 2 must be opaque and strictly within cell bounds");
     if (const QString png = qEnvironmentVariable("GRIDLOCK_VERIFY_KEYBINDS_RECORDER_PNG"); !png.isEmpty()) prefs.grab().toImage().save(png);
-    tm.applyTheme(savedTheme, false);
-    prefs.close(); apDlg->close(); pgDlg->close();
+    tm.applyTheme(savedTheme, false); prefs.close(); apDlg->close(); pgDlg->close();
 }
 /** @brief Verifies ArrayPlotDialog 1D/2D buffer decoding, stats, stop mutation diffing, CSV export, PointerGraphDialog persistent auto-updating roots, QSS disk cache, and lazy bottom tabs. */
 void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
@@ -506,32 +514,18 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
     QVERIFY2(!navTb->isVisible() && !mw.disassemblyView()->isVisible() && rackDock->isVisible() && scopeCombo->isVisible() && pauseAllBtn->isVisible() && mainTb->sizeHint().width() <= 1040 && (!extBtn || !extBtn->isVisible()), qPrintable(QStringLiteral("w=%1 nav=%2 dis=%3 rack=%4 sc=%5 pa=%6 ext=%7").arg(mainTb->sizeHint().width()).arg(navTb->isVisible()).arg(mw.disassemblyView()->isVisible()).arg(rackDock->isVisible()).arg(scopeCombo->isVisible()).arg(pauseAllBtn->isVisible()).arg(extBtn && extBtn->isVisible())));
     // Performance regression: 5+ MB (~100,000-row) CSV must open via virtualized CsvTablePreviewWidget in < 1000 ms.
     const QString bigCsv = tmpDir.filePath(QStringLiteral("telemetry_5mb.csv"));
-    {
-        QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly)); QByteArray chunk; chunk.reserve(6 * 1024 * 1024); chunk.append("rank,step,pressure,velocity,tag\n");
-        for (int r = 0; r < 100000; ++r) { chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_"); chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n"); }
-        QVERIFY(cf.write(chunk) > 5 * 1024 * 1024);
-    }
-    gridlock::ui::EditorTabManager csvTabs; csvTabs.resize(900, 600); csvTabs.show();
-    QElapsedTimer csvTimer; csvTimer.start();
-    QVERIFY(csvTabs.openFile(bigCsv) == nullptr); QApplication::processEvents();
-    const qint64 csvMs = csvTimer.elapsed();
+    { QFile cf(bigCsv); QVERIFY(cf.open(QIODevice::WriteOnly)); QByteArray chunk; chunk.reserve(6 * 1024 * 1024); chunk.append("rank,step,pressure,velocity,tag\n");
+      for (int r = 0; r < 100000; ++r) { chunk.append(QByteArray::number(r)); chunk.append(",42,101325.125000,340.500000,\"halo,cell_partition_"); chunk.append(QByteArray::number(r % 1000)); chunk.append("\"\n"); }
+      QVERIFY(cf.write(chunk) > 5 * 1024 * 1024); }
+    gridlock::ui::EditorTabManager csvTabs; csvTabs.resize(900, 600); csvTabs.show(); QElapsedTimer csvTimer; csvTimer.start();
+    QVERIFY(csvTabs.openFile(bigCsv) == nullptr); QApplication::processEvents(); const qint64 csvMs = csvTimer.elapsed();
     QVERIFY2(csvMs < 1000, qPrintable(QStringLiteral("Opening 5 MB CSV took %1 ms").arg(csvMs)));
-    auto* csvPreview = qobject_cast<gridlock::ui::CsvTablePreviewWidget*>(csvTabs.currentWidget());
-    QVERIFY(csvPreview != nullptr && csvPreview->rowCount() == 100000 && csvPreview->columnCount() == 5);
-    auto* csvModel = csvPreview->model();
-    QCOMPARE(csvModel->headerData(0, Qt::Horizontal).toString(), QStringLiteral("rank"));
-    QCOMPARE(csvModel->headerData(4, Qt::Horizontal).toString(), QStringLiteral("tag"));
-    QCOMPARE(csvModel->data(csvModel->index(0, 0)).toString(), QStringLiteral("0"));
-    QCOMPARE(csvModel->data(csvModel->index(0, 4)).toString(), QStringLiteral("halo,cell_partition_0"));
-    QCOMPARE(csvModel->data(csvModel->index(99999, 0)).toString(), QStringLiteral("99999"));
+    auto* csvPreview = qobject_cast<gridlock::ui::CsvTablePreviewWidget*>(csvTabs.currentWidget()); QVERIFY(csvPreview && csvPreview->rowCount() == 100000 && csvPreview->columnCount() == 5);
+    auto* csvModel = csvPreview->model(); QVERIFY(csvModel->headerData(0, Qt::Horizontal).toString() == QStringLiteral("rank") && csvModel->headerData(4, Qt::Horizontal).toString() == QStringLiteral("tag") && csvModel->data(csvModel->index(0, 0)).toString() == QStringLiteral("0") && csvModel->data(csvModel->index(0, 4)).toString() == QStringLiteral("halo,cell_partition_0") && csvModel->data(csvModel->index(99999, 0)).toString() == QStringLiteral("99999"));
     csvPreview->rawTextButton()->click(); QApplication::processEvents();
-    auto* rawView = qobject_cast<gridlock::ui::SourceCodeView*>(csvTabs.currentWidget());
-    QVERIFY(rawView && rawView->isLargeFileMode() && rawView->lineWrapMode() == QPlainTextEdit::NoWrap && rawView->toPlainText().contains(QStringLiteral("Truncated at")));
-    const QString bigLog = tmpDir.filePath(QStringLiteral("solver_600kb.log"));
-    { QFile lf(bigLog); QVERIFY(lf.open(QIODevice::WriteOnly)); lf.write(QByteArray(600 * 1024, 'A')); }
-    auto* logView = csvTabs.openFile(bigLog);
-    QVERIFY(logView && logView->isLargeFileMode() && logView->lineWrapMode() == QPlainTextEdit::NoWrap);
-    csvTabs.close();
+    auto* rawView = qobject_cast<gridlock::ui::SourceCodeView*>(csvTabs.currentWidget()); QVERIFY(rawView && rawView->isLargeFileMode() && rawView->lineWrapMode() == QPlainTextEdit::NoWrap && rawView->toPlainText().contains(QStringLiteral("Truncated at")));
+    const QString bigLog = tmpDir.filePath(QStringLiteral("solver_600kb.log")); { QFile lf(bigLog); QVERIFY(lf.open(QIODevice::WriteOnly)); lf.write(QByteArray(600 * 1024, 'A')); }
+    auto* logView = csvTabs.openFile(bigLog); QVERIFY(logView && logView->isLargeFileMode() && logView->lineWrapMode() == QPlainTextEdit::NoWrap); csvTabs.close();
 }
 /** @brief Verifies GdbConsoleWidget persistent gdb_history, Up/Down draft preservation, Ctrl+R reverse search, and Tab completion popup. */
 void TestMainWindowUI::testGdbConsoleReadlineErgonomics() {

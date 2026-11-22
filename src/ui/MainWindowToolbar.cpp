@@ -75,7 +75,7 @@ void MainWindow::setupToolbar() {
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
   m_targetSelector->setMinimumContentsLength(4);
-  m_targetSelector->setFixedWidth(86);
+  m_targetSelector->setFixedWidth(62);
   m_targetSelector->setFixedHeight(26);
   if (m_targetSelector->view()) {
     m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle);
@@ -376,10 +376,19 @@ void MainWindow::setupToolbar() {
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Left), this), &QShortcut::activated, this, &MainWindow::navigateBack);
   connect(new QShortcut(QKeySequence(Qt::ALT | Qt::Key_Right), this), &QShortcut::activated, this, &MainWindow::navigateForward);
 
+  // Global Search Everywhere pill button (#toolbarSearchEverywhereBtn) advertising Double Shift / Ctrl+P.
+  auto* searchEverywhereBtn = new QPushButton(QStringLiteral("⌕"), toolbar);
+  searchEverywhereBtn->setObjectName(QStringLiteral("toolbarSearchEverywhereBtn"));
+  searchEverywhereBtn->setFixedSize(22, 26);
+  searchEverywhereBtn->setAttribute(Qt::WA_AlwaysShowToolTips, true);
+  searchEverywhereBtn->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
+  connect(searchEverywhereBtn, &QPushButton::clicked, this, [this]() { openSearchEverywhere(0); });
+  toolbar->addWidget(searchEverywhereBtn);
+
   m_seekBar = new QLineEdit(toolbar);
   m_seekBar->setObjectName("cutterSeekBar");
-  m_seekBar->setPlaceholderText("Go to addr/sym (Ctrl+G)");
-  m_seekBar->setToolTip(QStringLiteral("Go to Address or Symbol (Ctrl+G) — enter hex address (0x401000) or function symbol"));
+  m_seekBar->setPlaceholderText(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
+  m_seekBar->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P) — or Go to Address / Symbol (Ctrl+G)"));
   m_seekBar->setFixedHeight(26);
   m_seekBar->setFixedWidth(48);
   QAction* seekAct = toolbar->addWidget(m_seekBar);
