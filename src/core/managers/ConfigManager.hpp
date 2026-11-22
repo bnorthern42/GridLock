@@ -294,6 +294,29 @@ class ConfigManager {
   /** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
   void setCustomShortcuts(const QMap<QString, QKeySequence>& overrides);
 
+  /** @brief Returns the canonical GridLock configuration directory (`~/.config/gridlock`, or `GRIDLOCK_TEST_CONFIG_DIR`). */
+  static QString configDirectory() {
+    if (qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
+      const QString overrideDir = qEnvironmentVariable("GRIDLOCK_TEST_CONFIG_DIR").trimmed();
+      if (!overrideDir.isEmpty()) return overrideDir;
+    }
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    return (base.isEmpty() ? (QDir::homePath() + QStringLiteral("/.config")) : base) + QStringLiteral("/gridlock");
+  }
+  /** @brief Returns the canonical INI path for workstation preferences (`~/.config/gridlock/workstation.conf`). */
+  static QString workstationSettingsPath() { return configDirectory() + QStringLiteral("/workstation.conf"); }
+  /** @brief Returns the canonical INI path for debugger preferences (`~/.config/gridlock/debugger.conf`). */
+  static QString debuggerSettingsPath() { return configDirectory() + QStringLiteral("/debugger.conf"); }
+  /** @brief Returns the active global `config.toml` file path. */
+  QString configFilePath() const { return m_globalConfigPath; }
+
+  /** @brief Returns deduplicated existing recent session/workspace paths (most recent first, capped at 10). */
+  QStringList recentSessions() const;
+  /** @brief Records @p path at index 0 of `recent_sessions` in `config.toml` and flushes immediately. */
+  void recordRecentSession(const QString& path);
+  /** @brief Clears all persisted recent session entries from `config.toml` and INI settings. */
+  void clearRecentSessions();
+
   /** @brief Returns the persistent GDB console command history file path (`~/.config/gridlock/gdb_history` or test override). */
   QString gdbHistoryFilePath() const { return resolveGdbHistoryFilePath(); }
   /** @brief Overrides the GDB console command history file path for isolated unit tests (empty restores default). */
@@ -301,8 +324,7 @@ class ConfigManager {
   /** @brief Static helper resolving the active GDB history file path without requiring `ConfigManager::instance()`. */
   static QString resolveGdbHistoryFilePath() {
     if (!s_gdbHistoryPathOverride().trimmed().isEmpty()) return s_gdbHistoryPathOverride().trimmed();
-    const QString cfgDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-    return (cfgDir.isEmpty() ? (QDir::homePath() + QStringLiteral("/.config/gridlock")) : cfgDir) + QStringLiteral("/gdb_history");
+    return configDirectory() + QStringLiteral("/gdb_history");
   }
   static QString& s_gdbHistoryPathOverride() { static QString p; return p; }
 

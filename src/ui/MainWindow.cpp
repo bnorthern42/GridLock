@@ -212,7 +212,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
   // Restore saved desktop geometry and dock configuration when running with an interactive display server.
   if (QGuiApplication::platformName() != QStringLiteral("offscreen")) {
-    QSettings settings("gridlock", "debugger");
+    QSettings settings(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
     if (settings.contains("MainWindow/Geometry_v9")) restoreGeometry(settings.value("MainWindow/Geometry_v9").toByteArray());
     if (settings.contains("MainWindow/State_v9")) restoreState(settings.value("MainWindow/State_v9").toByteArray());
     // Restore individual splitter sash positions.
@@ -754,7 +754,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     return;
   }
   const bool interactive = QGuiApplication::platformName() != QStringLiteral("offscreen");
-  if (!hadModified && interactive && QSettings("gridlock", "debugger").value("behavior/confirm_quit", true).toBool()) {
+  if (!hadModified && interactive && QSettings(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat).value("behavior/confirm_quit", true).toBool()) {
     if (QMessageBox::question(this, QStringLiteral("Quit GridLock"), QStringLiteral("Exit GridLock?"),
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) != QMessageBox::Yes) {
       if (event) event->ignore();
@@ -777,11 +777,13 @@ void MainWindow::closeEvent(QCloseEvent *event) {
       ps.watchExpressions = m_differentialGrid->getWatchExpressions();
       gridlock::core::ConfigManager::instance().saveProjectSettings(ps);
     }
+  } else if (!m_loadedBinaryPath.isEmpty()) {
+    gridlock::core::ConfigManager::instance().recordRecentSession(m_loadedBinaryPath);
   }
   // Persist active theme and interactive dock/splitter geometry.
   gridlock::core::ThemeManager::instance().savePersistedTheme();
   if (interactive) {
-    QSettings settings("gridlock", "debugger");
+    QSettings settings(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
     settings.setValue("MainWindow/Geometry_v9", saveGeometry()); settings.setValue("MainWindow/State_v9", saveState());
     for (auto* splitter : findChildren<QSplitter*>()) if (!splitter->objectName().isEmpty()) settings.setValue("MainWindow/Splitter_v9_" + splitter->objectName(), splitter->saveState());
   }
@@ -898,30 +900,32 @@ void MainWindow::openProgrammerCalculatorWithText(const QString &text) {
   openProgrammerCalculator();
   if (m_programmerCalculatorDialog) m_programmerCalculatorDialog->setInitialTextOrValue(text);
 }
-/** @brief Records @p path in SessionManager MRU history and refreshes File -> Recent Sessions. */
+/** @brief Records @p path in ConfigManager and SessionManager MRU history and refreshes File -> Recent Sessions. */
 void MainWindow::recordRecentWorkspace(const QString &path) {
-  // Persist normalized path into debugger.conf MRU before rebuilding submenu items.
-  if (!path.isEmpty()) gridlock::core::managers::SessionManager::instance().addRecentSession(path);
+  if (!path.isEmpty()) {
+    gridlock::core::ConfigManager::instance().recordRecentSession(path);
+    gridlock::core::managers::SessionManager::instance().addRecentSession(path);
+  }
   rebuildRecentSessionsMenu();
 }
-/** @brief Dynamically populates #menuRecentSessions from persisted MRU entries in debugger.conf. */
+/** @brief Dynamically populates #menuRecentSessions from persisted MRU entries in ~/.config/gridlock/. */
 void MainWindow::rebuildRecentSessionsMenu() {
   if (!m_recentSessionsMenu) return;
   m_recentSessionsMenu->clear();
-  // Query live normalized MRU workspaces/TOML paths (most recent first, capped at 10).
-  const QStringList entries = gridlock::core::managers::SessionManager::instance().recentSessions();
+  QStringList entries = gridlock::core::ConfigManager::instance().recentSessions();
+  for (const QString &p : gridlock::core::managers::SessionManager::instance().recentSessions()) {
+    if (QFileInfo::exists(p) && !entries.contains(p) && entries.size() < 10) entries.append(p);
+  }
   for (const QString &path : entries) {
-    // Format human-readable workspace title without underscores and store canonical path in data & tooltip.
     const QFileInfo fi(path); QString label = fi.isDir() ? QDir(path).dirName() : fi.completeBaseName();
     label.replace(QLatin1Char('_'), QLatin1Char(' '));
     if (label.trimmed().isEmpty()) label = QStringLiteral("Workspace Session");
     QAction *act = m_recentSessionsMenu->addAction(label); act->setData(path); act->setToolTip(path);
     connect(act, &QAction::triggered, this, [this, path]() {
-      // Restore workspace TOML state if present; otherwise switch directly to the workspace directory.
+      if (QFileInfo(path).isFile() && !path.endsWith(QStringLiteral(".toml"), Qt::CaseInsensitive)) { loadBinaryTarget(path); return; }
       const QString toml = QFileInfo(path).isDir() ? QDir(path).filePath(QStringLiteral(".gridlock/workspace.toml")) : path;
       const auto opt = QFileInfo::exists(toml) ? gridlock::core::managers::SessionManager::instance().loadSession(toml) : std::nullopt;
       if (!opt.has_value()) { switchWorkspaceDirectory(path); return; }
-      // Repopulate watched variables and persistent breakpoints from the loaded session snapshot.
       if (m_differentialGrid) { m_differentialGrid->clearWatches(); for (const auto &w : opt->watchedVariables) m_differentialGrid->addVariableColumn(w); }
       m_persistentBreakpoints.clear();
       for (const auto &bp : opt->activeBreakpoints) {
@@ -931,10 +935,13 @@ void MainWindow::rebuildRecentSessionsMenu() {
       }
     });
   }
-  // Show a disabled placeholder when empty; otherwise append a Clear Recent Sessions action.
   if (entries.isEmpty()) { m_recentSessionsMenu->addAction(QStringLiteral("(No Recent Sessions)"))->setEnabled(false); return; }
   m_recentSessionsMenu->addSeparator();
-  connect(m_recentSessionsMenu->addAction(QStringLiteral("Clear Recent Sessions")), &QAction::triggered, this, [this]() { gridlock::core::managers::SessionManager::instance().clearRecentSessions(); rebuildRecentSessionsMenu(); });
+  connect(m_recentSessionsMenu->addAction(QStringLiteral("Clear Recent Sessions")), &QAction::triggered, this, [this]() {
+    gridlock::core::ConfigManager::instance().clearRecentSessions();
+    gridlock::core::managers::SessionManager::instance().clearRecentSessions();
+    rebuildRecentSessionsMenu();
+  });
 }
 
 }  // namespace gridlock::ui

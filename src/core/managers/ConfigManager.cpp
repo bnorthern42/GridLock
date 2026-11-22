@@ -53,52 +53,43 @@ void ConfigManager::setWorkspace(const QString& path) {
  * so test cases never mutate the developer's personal `~/.config/gridlock/config.toml`.
  */
 void ConfigManager::loadConfig() {
-  QString configDir =
-      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-  if (qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
-    configDir = qEnvironmentVariable("GRIDLOCK_TEST_CONFIG_DIR");
-  }
-
-  // Ensure the configuration directory exists before attempting to read or write.
+  const QString configDir = configDirectory();
   QDir dir(configDir);
-  if (!dir.exists()) {
-    dir.mkpath(".");
+  if (!dir.exists()) dir.mkpath(QStringLiteral("."));
+  m_globalConfigPath = dir.filePath(QStringLiteral("config.toml"));
+
+  // Non-destructive one-time migration from legacy ~/.config/gridlock/gridlock/config.toml and ~/.config/GridLock/*.conf.
+  if (!QFile::exists(m_globalConfigPath) && !qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
+    const QString legacyNested = dir.filePath(QStringLiteral("gridlock/config.toml"));
+    if (QFile::exists(legacyNested)) QFile::copy(legacyNested, m_globalConfigPath);
   }
-  m_globalConfigPath = dir.filePath("config.toml");
+  if (!QFile::exists(workstationSettingsPath()) && !qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {
+    const QString genericBase = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    for (const QString& legacyName : {QStringLiteral("GridLock/GridLockWorkstation.conf"), QStringLiteral("GridLock/Workstation.conf")}) {
+      const QString legacyFile = QDir(genericBase).filePath(legacyName);
+      if (!QFile::exists(legacyFile)) continue;
+      QSettings oldS(legacyFile, QSettings::IniFormat);
+      QSettings newS(workstationSettingsPath(), QSettings::IniFormat);
+      for (const QString& k : oldS.allKeys()) newS.setValue(k, oldS.value(k));
+      newS.sync();
+      break;
+    }
+  }
 
   // Seed a default `config.toml` if none exists on disk yet.
   if (!QFile::exists(m_globalConfigPath)) {
     QFile file(m_globalConfigPath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
       QTextStream out(&file);
-      out << "[global]\n";
-      out << "clangd_path = \"clangd\"\n";
-      out << "dap_adapter_path = \"lldb-dap\"\n";
-      out << "gdb_path = \"gdb\"\n";
-      out << "mpi_launch_args = \"--oversubscribe\"\n\n";
-
-      out << "[theme.source]\n";
-      out << "background = \"#1e1e1e\"\n";
-      out << "text = \"#f0f0f0\"\n";
-      out << "active_line = \"#505000\"\n\n";
-
-      out << "[theme.assembly]\n";
-      out << "opcode = \"#00ff7f\"\n";
-      out << "register = \"#ff7f50\"\n";
-      out << "address = \"#555555\"\n\n";
-
-      out << "[debugger]\n";
-      out << "default_ranks = 2\n";
-      out << "gdb_path = \"gdb\"\n\n";
-
-      out << "[ui]\n";
-      out << "preferred_monitor = \"\"\n";
-      out << "open_unfocused = false\n";
+      out << "[global]\nclangd_path = \"clangd\"\ndap_adapter_path = \"lldb-dap\"\ngdb_path = \"gdb\"\nmpi_launch_args = \"--oversubscribe\"\n\n"
+          << "[theme.source]\nbackground = \"#1e1e1e\"\ntext = \"#f0f0f0\"\nactive_line = \"#505000\"\n\n"
+          << "[theme.assembly]\nopcode = \"#00ff7f\"\nregister = \"#ff7f50\"\naddress = \"#555555\"\n\n"
+          << "[debugger]\ndefault_ranks = 2\ngdb_path = \"gdb\"\n\n"
+          << "[ui]\npreferred_monitor = \"\"\nopen_unfocused = false\n";
       file.close();
     }
   }
 
-  // Parse the TOML table, falling back to an empty table on syntax errors.
   try {
     m_config = toml::parse_file(m_globalConfigPath.toStdString());
   } catch (const toml::parse_error& err) {
@@ -109,83 +100,38 @@ void ConfigManager::loadConfig() {
 
 // ─── Theme accessors (TOML) ──────────────────────────────────────────────────
 
-/**
- * @brief Returns `[theme.source] background` from `config.toml`.
- */
-QString ConfigManager::getSourceBackground() const {
-  return QString::fromStdString(
-      m_config["theme"]["source"]["background"].value_or("#1e1e1e"));
-}
+/** @brief Returns `[theme.source] background` from `config.toml`. */
+QString ConfigManager::getSourceBackground() const { return QString::fromStdString(m_config["theme"]["source"]["background"].value_or("#1e1e1e")); }
 
-/**
- * @brief Returns `[theme.source] text` from `config.toml`.
- */
-QString ConfigManager::getSourceText() const {
-  return QString::fromStdString(
-      m_config["theme"]["source"]["text"].value_or("#f0f0f0"));
-}
+/** @brief Returns `[theme.source] text` from `config.toml`. */
+QString ConfigManager::getSourceText() const { return QString::fromStdString(m_config["theme"]["source"]["text"].value_or("#f0f0f0")); }
 
-/**
- * @brief Returns `[theme.source] active_line` from `config.toml`.
- */
-QString ConfigManager::getSourceActiveLine() const {
-  return QString::fromStdString(
-      m_config["theme"]["source"]["active_line"].value_or("#505000"));
-}
+/** @brief Returns `[theme.source] active_line` from `config.toml`. */
+QString ConfigManager::getSourceActiveLine() const { return QString::fromStdString(m_config["theme"]["source"]["active_line"].value_or("#505000")); }
 
 // ─── Global settings (TOML) ──────────────────────────────────────────────────
 
-/**
- * @brief Returns `[global] clangd_path` from `config.toml`.
- */
-QString ConfigManager::getGlobalClangdPath() const {
-  return QString::fromStdString(
-      m_config["global"]["clangd_path"].value_or("clangd"));
-}
+/** @brief Returns `[global] clangd_path` from `config.toml`. */
+QString ConfigManager::getGlobalClangdPath() const { return QString::fromStdString(m_config["global"]["clangd_path"].value_or("clangd")); }
 
-/**
- * @brief Sets `[global] clangd_path` in `config.toml` and flushes to disk.
- */
+/** @brief Sets `[global] clangd_path` in `config.toml` and flushes to disk. */
 void ConfigManager::setGlobalClangdPath(const QString& path) {
-  if (!m_config.contains("global")) {
-    m_config.insert("global", toml::table{});
-  }
-  m_config["global"].as_table()->insert_or_assign("clangd_path",
-                                                  path.toStdString());
+  if (!m_config.contains("global")) m_config.insert("global", toml::table{});
+  m_config["global"].as_table()->insert_or_assign("clangd_path", path.toStdString());
   saveGlobalConfig();
 }
 
-/**
- * @brief Returns `[theme.assembly] opcode` from `config.toml`.
- */
-QString ConfigManager::getAssemblyOpcode() const {
-  return QString::fromStdString(
-      m_config["theme"]["assembly"]["opcode"].value_or("#00ff7f"));
-}
+/** @brief Returns `[theme.assembly] opcode` from `config.toml`. */
+QString ConfigManager::getAssemblyOpcode() const { return QString::fromStdString(m_config["theme"]["assembly"]["opcode"].value_or("#00ff7f")); }
 
-/**
- * @brief Returns `[theme.assembly] register` from `config.toml`.
- */
-QString ConfigManager::getAssemblyRegister() const {
-  return QString::fromStdString(
-      m_config["theme"]["assembly"]["register"].value_or("#ff7f50"));
-}
+/** @brief Returns `[theme.assembly] register` from `config.toml`. */
+QString ConfigManager::getAssemblyRegister() const { return QString::fromStdString(m_config["theme"]["assembly"]["register"].value_or("#ff7f50")); }
 
-/**
- * @brief Returns `[theme.assembly] address` from `config.toml`.
- */
-QString ConfigManager::getAssemblyAddress() const {
-  return QString::fromStdString(
-      m_config["theme"]["assembly"]["address"].value_or("#555555"));
-}
+/** @brief Returns `[theme.assembly] address` from `config.toml`. */
+QString ConfigManager::getAssemblyAddress() const { return QString::fromStdString(m_config["theme"]["assembly"]["address"].value_or("#555555")); }
 
-/**
- * @brief Returns `[global] dap_adapter_path` from `config.toml`.
- */
-QString ConfigManager::getGlobalDapAdapterPath() const {
-  return QString::fromStdString(
-      m_config["global"]["dap_adapter_path"].value_or("lldb-dap"));
-}
+/** @brief Returns `[global] dap_adapter_path` from `config.toml`. */
+QString ConfigManager::getGlobalDapAdapterPath() const { return QString::fromStdString(m_config["global"]["dap_adapter_path"].value_or("lldb-dap")); }
 
 /**
  * @brief Sets `[global] dap_adapter_path` in `config.toml` and flushes to disk.
@@ -716,42 +662,22 @@ void ConfigManager::saveProjectSettings(const ProjectSettings& ps) const {
  */
 QString ConfigManager::getThemeName() const {
   if (!m_workspacePath.isEmpty()) {
-    const QString workspaceFile =
-        QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml"));
     try {
-      auto tbl = toml::parse_file(workspaceFile.toStdString());
-      if (auto* app = tbl["appearance"].as_table()) {
-        if (auto val = app->get("theme_id"); val && val->is_string()) {
-          return QString::fromStdString(val->as_string()->get());
-        }
-      }
-      if (auto* thm = tbl["theme"].as_table()) {
-        if (auto val = thm->get("name"); val && val->is_string()) {
-          return QString::fromStdString(val->as_string()->get());
-        }
-      }
-    } catch (...) {
-    }
+      auto tbl = toml::parse_file(QDir(m_workspacePath).filePath(QStringLiteral(".gridlock/workspace.toml")).toStdString());
+      if (auto* app = tbl["appearance"].as_table()) if (auto val = app->get("theme_id"); val && val->is_string()) return QString::fromStdString(val->as_string()->get());
+      if (auto* thm = tbl["theme"].as_table()) if (auto val = thm->get("name"); val && val->is_string()) return QString::fromStdString(val->as_string()->get());
+    } catch (...) {}
   }
-
-  QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
-  QString t = s1.value(QStringLiteral("appearance/theme_id")).toString();
-  if (t.trimmed().isEmpty()) {
-    QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
-    t = s2.value(QStringLiteral("appearance/theme_id")).toString();
+  QSettings ws(workstationSettingsPath(), QSettings::IniFormat);
+  QString t = ws.value(QStringLiteral("appearance/theme_id"), ws.value(QStringLiteral("appearance/theme"))).toString().trimmed();
+  if (t.isEmpty()) {
+    QSettings ds(debuggerSettingsPath(), QSettings::IniFormat);
+    t = ds.value(QStringLiteral("appearance/theme_id"), ds.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString().trimmed();
   }
-  if (t.trimmed().isEmpty()) {
-    QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
-    t = s3.value(QStringLiteral("appearance/theme_id"),
-                 s3.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString();
-  }
-  return t.trimmed().isEmpty() ? QStringLiteral("gridlock_slate") : t.trimmed();
+  return t.isEmpty() ? QStringLiteral("gridlock_slate") : t;
 }
 
-/**
- * @brief Persists the theme identifier to .gridlock/workspace.toml and QSettings.
- * @param name Selected theme identifier string.
- */
+/** @brief Persists the theme identifier to .gridlock/workspace.toml and unified ~/.config/gridlock/ INI stores. */
 void ConfigManager::setThemeName(const QString& name) {
   const QString id = name.trimmed().isEmpty() ? QStringLiteral("gridlock_slate") : name.trimmed();
   if (!m_workspacePath.isEmpty()) {
@@ -759,12 +685,12 @@ void ConfigManager::setThemeName(const QString& name) {
     const QString wf = dir.filePath(QStringLiteral(".gridlock/workspace.toml"));
     toml::table tbl; try { tbl = toml::parse_file(wf.toStdString()); } catch (...) {}
     toml::table appTbl; if (auto* ex = tbl["appearance"].as_table()) appTbl = *ex;
-    appTbl.insert_or_assign("theme_id", id.toStdString());
-    tbl.insert_or_assign("appearance", appTbl);
+    appTbl.insert_or_assign("theme_id", id.toStdString()); tbl.insert_or_assign("appearance", appTbl);
     std::ofstream out(wf.toStdString()); if (out.is_open()) out << tbl;
   }
-  for (const auto& pair : {std::make_pair(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation")), std::make_pair(QStringLiteral("GridLock"), QStringLiteral("Workstation")), std::make_pair(QStringLiteral("gridlock"), QStringLiteral("debugger"))}) {
-    QSettings s(pair.first, pair.second); s.setValue(QStringLiteral("appearance/theme_id"), id); s.setValue(QStringLiteral("appearance/theme"), id); s.sync();
+  for (const QString& iniPath : {workstationSettingsPath(), debuggerSettingsPath()}) {
+    QSettings s(iniPath, QSettings::IniFormat);
+    s.setValue(QStringLiteral("appearance/theme_id"), id); s.setValue(QStringLiteral("appearance/theme"), id); s.sync();
   }
 }
 
@@ -932,8 +858,58 @@ QList<BreakpointConfig> ConfigManager::getBreakpointConfigs(const QString& targe
   s.endArray(); return out;
 }
 void ConfigManager::saveBreakpointConfigs(const QList<BreakpointConfig>& configs, const QString& targetExecutable) {
-  QSettings s("gridlock", "debugger"); s.beginWriteArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable));
+  QSettings s(debuggerSettingsPath(), QSettings::IniFormat); s.beginWriteArray(QStringLiteral("bp_meta/%1").arg(targetExecutable.isEmpty() ? QStringLiteral("default") : targetExecutable));
   for (int i = 0; i < configs.size(); ++i) { s.setArrayIndex(i); s.setValue("file", configs[i].file); s.setValue("line", configs[i].line); s.setValue("rank", configs[i].rankFilter); s.setValue("cond", configs[i].condition); s.setValue("ignore", qMax(0, configs[i].ignoreCount)); s.setValue("log", configs[i].logMessage); }
   s.endArray();
 }
+
+static QString normalizeRecentPath(const QString& raw) {
+  const QString t = raw.trimmed(); if (t.isEmpty()) return QString();
+  const QFileInfo fi(t);
+  return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : QDir::cleanPath(fi.absoluteFilePath());
+}
+
+/** @brief Returns deduplicated existing recent session/workspace paths (most recent first, capped at 10). */
+QStringList ConfigManager::recentSessions() const {
+  QStringList out;
+  auto push = [&](const QString& raw) {
+    const QString norm = normalizeRecentPath(raw);
+    if (!norm.isEmpty() && QFileInfo::exists(norm) && !out.contains(norm) && out.size() < 10) out.append(norm);
+  };
+  if (auto* sess = m_config["session"].as_table()) {
+    if (auto* arr = sess->get_as<toml::array>("recent_sessions")) {
+      for (const auto& elem : *arr) if (elem.is_string()) push(QString::fromStdString(elem.as_string()->get()));
+    }
+  }
+  QSettings ws(workstationSettingsPath(), QSettings::IniFormat);
+  for (const QString& p : ws.value(QStringLiteral("session/recent_sessions")).toStringList()) push(p);
+  QSettings ds(debuggerSettingsPath(), QSettings::IniFormat);
+  for (const QString& p : ds.value(QStringLiteral("recentSessions")).toStringList()) push(p);
+  return out;
+}
+
+/** @brief Records @p path at index 0 of `recent_sessions` in `config.toml` and INI stores immediately. */
+void ConfigManager::recordRecentSession(const QString& path) {
+  const QString norm = normalizeRecentPath(path);
+  if (norm.isEmpty()) return;
+  QStringList entries = recentSessions();
+  entries.removeAll(norm); entries.prepend(norm);
+  while (entries.size() > 10) entries.removeLast();
+  toml::table sessTbl; if (auto* ex = m_config["session"].as_table()) sessTbl = *ex;
+  toml::array arr; for (const QString& e : entries) arr.push_back(e.toStdString());
+  sessTbl.insert_or_assign("recent_sessions", arr); m_config.insert_or_assign("session", sessTbl);
+  saveGlobalConfig();
+  QSettings ws(workstationSettingsPath(), QSettings::IniFormat); ws.setValue(QStringLiteral("session/recent_sessions"), entries); ws.sync();
+  QSettings ds(debuggerSettingsPath(), QSettings::IniFormat); ds.setValue(QStringLiteral("recentSessions"), entries); ds.sync();
+}
+
+/** @brief Clears all persisted recent session entries from `config.toml` and INI stores. */
+void ConfigManager::clearRecentSessions() {
+  toml::table sessTbl; if (auto* ex = m_config["session"].as_table()) sessTbl = *ex;
+  sessTbl.insert_or_assign("recent_sessions", toml::array{}); m_config.insert_or_assign("session", sessTbl);
+  saveGlobalConfig();
+  QSettings ws(workstationSettingsPath(), QSettings::IniFormat); ws.remove(QStringLiteral("session/recent_sessions")); ws.sync();
+  QSettings ds(debuggerSettingsPath(), QSettings::IniFormat); ds.remove(QStringLiteral("recentSessions")); ds.sync();
+}
+
 }  // namespace gridlock::core

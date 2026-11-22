@@ -366,6 +366,7 @@ void MainWindow::startTargetWorkflow() {
         const QString tWd = QString::fromStdString(projCfg.workingDirectory).trimmed().isEmpty() ? m_activeWorkspaceDir : QString::fromStdString(projCfg.workingDirectory).trimmed();
         m_coordinator->setTargetExecutionContext(tArgs, tWd);
         m_coordinator->launchParallelSession(binPath, rankCount, projCfg.mpiArgs.isEmpty() ? mpiArgs : projCfg.mpiArgs);
+        recordRecentWorkspace(!m_activeWorkspaceDir.isEmpty() ? m_activeWorkspaceDir : binPath);
         syncProgramOutputForLaunch(rankCount);
         if (m_differentialGrid) {
             if (auto* gdbCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator)) {

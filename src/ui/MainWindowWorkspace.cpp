@@ -469,6 +469,7 @@ bool MainWindow::saveSession(bool showStatusMessage) {
   const bool ok = gridlock::core::managers::SessionManager::instance().saveSession(targetPath, state);
   if (ok) {
     m_activeSessionFilePath = targetPath;
+    gridlock::core::ConfigManager::instance().recordRecentSession(wsRoot);
     rebuildRecentSessionsMenu();
     if (showStatusMessage && statusBar()) {
       statusBar()->showMessage(QStringLiteral("Session saved to %1").arg(targetPath), 3000);

@@ -583,23 +583,31 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     for (int i = 0; i < 10; ++i) emit coord->programOutputReceived(i % 8, QStringLiteral("PinnedLine %1").arg(i), false);
     flushOut(); QApplication::processEvents();
     QCOMPARE(outSb->value(), outSb->maximum());
-    // 11f. Verify Recent Sessions persistence in ~/.config/gridlock/debugger.conf, dynamic rebuild, and workspace switch.
-    QTemporaryDir wsA, wsB; QVERIFY(wsA.isValid() && wsB.isValid()); QDir(wsA.path()).mkpath("src"); QDir(wsB.path()).mkpath("src");
-    const QString cA = QFileInfo(wsA.path()).canonicalFilePath(), cB = QFileInfo(wsB.path()).canonicalFilePath();
-    QVERIFY2(mw.switchWorkspaceDirectory(wsA.path()), "wsA switch failed"); saveSessAct->trigger(); QApplication::processEvents(); QVERIFY2(mw.switchWorkspaceDirectory(wsB.path()), "wsB switch failed");
-    // Open #menuRecentSessions via aboutToShow and confirm wsB precedes wsA plus Clear Recent Sessions.
-    auto* rm = mw.findChild<QMenu*>(QStringLiteral("menuRecentSessions")); QVERIFY2(rm != nullptr, "#menuRecentSessions missing");
-    emit rm->aboutToShow(); QApplication::processEvents(); QAction* actA = nullptr; int iA = -1, iB = -1; bool hasClr = false;
-    for (int i = 0; i < rm->actions().size(); ++i) { QAction* a = rm->actions().at(i); const QString d = a->data().toString();
-        if (d.contains(cB) && iB < 0) iB = i; else if (d.contains(cA) && !actA) { iA = i; actA = a; }
-        if (a->text().contains(QStringLiteral("Clear Recent Sessions"))) hasClr = true; }
-    QVERIFY2(iB >= 0 && iA > iB && hasClr && actA != nullptr, "Recent Sessions must order wsB then wsA with Clear action");
-    // Construct a fresh SessionManager and assert wsB & wsA persisted to debugger.conf, then click wsA to restore workspace.
+    // 11f. Verify unified ~/.config/gridlock/config.toml path and Recent Sessions persistence under isolated XDG_CONFIG_HOME.
     {
-        gridlock::core::managers::SessionManager re;
-        QVERIFY2(re.recentSessions().join('|').contains(cB) && re.recentSessions().join('|').contains(cA), qPrintable(re.recentSessions().join(",")));
+        QTemporaryDir xdgDir, wsA, wsB; QVERIFY(xdgDir.isValid() && wsA.isValid() && wsB.isValid());
+        struct XdgGuard { QByteArray x = qgetenv("XDG_CONFIG_HOME"), t = qgetenv("GRIDLOCK_TEST_CONFIG_DIR"); gridlock::core::ConfigManager* c;
+            ~XdgGuard() { if (x.isEmpty()) qunsetenv("XDG_CONFIG_HOME"); else qputenv("XDG_CONFIG_HOME", x); if (t.isEmpty()) qunsetenv("GRIDLOCK_TEST_CONFIG_DIR"); else qputenv("GRIDLOCK_TEST_CONFIG_DIR", t); c->loadConfig(); }
+        } xdgGuard{qgetenv("XDG_CONFIG_HOME"), qgetenv("GRIDLOCK_TEST_CONFIG_DIR"), &cfg};
+        qunsetenv("GRIDLOCK_TEST_CONFIG_DIR"); qputenv("XDG_CONFIG_HOME", xdgDir.path().toUtf8());
+        cfg.loadConfig(); cfg.setThemeName(QStringLiteral("gridlock_slate"));
+        const QString expectedToml = QDir(xdgDir.path()).filePath(QStringLiteral("gridlock/config.toml"));
+        QCOMPARE(QFileInfo(cfg.configFilePath()).absoluteFilePath(), QFileInfo(expectedToml).absoluteFilePath());
+        QVERIFY2(QFileInfo::exists(expectedToml) && !QDir(xdgDir.path()).exists(QStringLiteral("GridLock")) && !QFileInfo::exists(QDir(xdgDir.path()).filePath(QStringLiteral("gridlock/gridlock/config.toml"))), "Config must live under <xdg>/gridlock/config.toml without nested gridlock/ or GridLock/");
+        QDir(wsA.path()).mkpath("src"); QDir(wsB.path()).mkpath("src");
+        const QString cA = QFileInfo(wsA.path()).canonicalFilePath(), cB = QFileInfo(wsB.path()).canonicalFilePath();
+        QVERIFY2(mw.switchWorkspaceDirectory(wsA.path()), "wsA switch failed"); saveSessAct->trigger(); QApplication::processEvents(); QVERIFY2(mw.switchWorkspaceDirectory(wsB.path()), "wsB switch failed");
+        auto* rm = mw.findChild<QMenu*>(QStringLiteral("menuRecentSessions")); QVERIFY2(rm != nullptr, "#menuRecentSessions missing");
+        emit rm->aboutToShow(); QApplication::processEvents(); QAction* actA = nullptr; int iA = -1, iB = -1; bool hasClr = false;
+        for (int i = 0; i < rm->actions().size(); ++i) { QAction* a = rm->actions().at(i); const QString d = a->data().toString();
+            if (d.contains(cB) && iB < 0) iB = i; else if (d.contains(cA) && !actA) { iA = i; actA = a; }
+            if (a->text().contains(QStringLiteral("Clear Recent Sessions"))) hasClr = true; }
+        QVERIFY2(iB >= 0 && iA > iB && hasClr && actA != nullptr, "Recent Sessions must order wsB then wsA with Clear action");
+        cfg.loadConfig(); QVERIFY2(cfg.recentSessions().size() >= 2 && cfg.recentSessions().at(0) == cB && cfg.recentSessions().contains(cA), qPrintable(cfg.recentSessions().join(",")));
+        gridlock::ui::MainWindow freshMw; auto* freshRm = freshMw.findChild<QMenu*>(QStringLiteral("menuRecentSessions"));
+        QVERIFY2(freshRm && freshRm->actions().size() >= 2 && freshRm->actions().at(0)->data().toString() == cB, "Fresh MainWindow must reload Recent Sessions on startup");
+        actA->trigger(); QApplication::processEvents(); QCOMPARE(QFileInfo(pe->rootPath()).canonicalFilePath(), cA);
     }
-    actA->trigger(); QApplication::processEvents(); QCOMPARE(QFileInfo(pe->rootPath()).canonicalFilePath(), cA);
     // 12. Switch to unbuilt C++ workspace (no ELF binary) and verify symbols, strings, disassembly, and #addressNavBar are completely cleared.
     QVERIFY2(mw.switchWorkspaceDirectory(unbuiltDir.path()), "Switching to unbuilt workspace must succeed");
     auto* disasm = mw.findChild<gridlock::ui::DisassemblyView*>(); auto* navBar = mw.findChild<QWidget*>(QStringLiteral("addressNavBar"));

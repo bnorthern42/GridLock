@@ -158,6 +158,14 @@ int main(int argc, char* argv[]) {
   QApplication::setApplicationName("gridlock");
   QApplication::setApplicationVersion(gridlock::core::Version::getString());
 
+  // Isolate --test-mode runs from the user's real ~/.config/gridlock/ configuration and recent sessions.
+  for (int i = 1; i < argc; ++i) {
+    if (QString::fromLocal8Bit(argv[i]) == QLatin1String("--test-mode")) {
+      QStandardPaths::setTestModeEnabled(true);
+      break;
+    }
+  }
+
   // Bind the Wayland xdg_toplevel app_id to the desktop entry name.
   QGuiApplication::setDesktopFileName("gridlock");
   QApplication::setWindowIcon(QIcon(":/icon.png"));
