@@ -47,15 +47,17 @@ void ShortcutItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
     initStyleOption(&opt, index);
     opt.text.clear();
     const QStyle* st = opt.widget ? opt.widget->style() : QApplication::style();
+    painter->save();
     st->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+    painter->restore();
 
     const QKeySequence seq = index.data(Qt::UserRole + 1).value<QKeySequence>();
     const bool assigned = !seq.isEmpty();
     const QString text = assigned ? seq.toString(QKeySequence::NativeText) : QObject::tr("Unassigned");
 
-    auto& tm = gridlock::core::managers::ThemeManager::instance();
-    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
     const bool selected = (opt.state & QStyle::State_Selected) != 0;
+    const QColor baseCol = opt.palette.color(QPalette::Base);
+    const bool isDark = baseCol.lightness() < 128;
 
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
@@ -67,13 +69,9 @@ void ShortcutItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
 
     const QRect avail = opt.rect.adjusted(8, 4, -8, -4);
     if (!assigned) {
-        QColor muted(pal.textHex);
-        if (selected) {
-            const QColor acc(pal.accentHex);
-            muted = (acc.lightness() < 165) ? QColor(255, 255, 255, 195) : QColor(22, 24, 29, 195);
-        } else {
-            muted.setAlpha(135);
-        }
+        QColor muted = selected ? opt.palette.color(QPalette::HighlightedText)
+                                : opt.palette.color(QPalette::Text);
+        muted.setAlpha(selected ? 210 : 185);
         painter->setPen(muted);
         painter->drawText(avail.adjusted(2, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, text);
         painter->restore();
@@ -85,9 +83,15 @@ void ShortcutItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& 
     const int pillH = std::min(24, std::max(18, avail.height()));
     const QRectF pillRect(avail.left(), avail.center().y() - pillH / 2.0 + 0.5, pillW, pillH);
 
-    const QColor fillCol = pal.isDark ? QColor(pal.headerHex).lighter(128) : QColor(pal.headerHex).darker(105);
-    const QColor borderCol = selected ? QColor(pal.accentHex) : QColor(pal.borderHex);
-    const QColor textCol(pal.textHex);
+    const QColor btnCol = opt.palette.color(QPalette::Button);
+    const QColor altCol = opt.palette.color(QPalette::AlternateBase);
+    const QColor fillCol = isDark ? btnCol.lighter(128) : altCol.darker(105);
+    const QColor borderCol = selected ? opt.palette.color(QPalette::Highlight)
+                                      : opt.palette.color(QPalette::Mid);
+    QColor textCol = opt.palette.color(QPalette::Text);
+    if (std::abs(textCol.lightness() - fillCol.lightness()) < 100) {
+        textCol = (fillCol.lightness() < 128) ? QColor(255, 255, 255) : QColor(22, 24, 29);
+    }
 
     painter->setBrush(fillCol);
     painter->setPen(QPen(borderCol, 1.0));
@@ -403,20 +407,25 @@ void PreferencesDialog::applyDialogThemeChrome() {
         "border: 1px solid %3; border-radius: 3px; padding: 1px 6px; min-height: 22px; max-height: 26px; font-size: 13px; }"
         "QKeySequenceEdit { background-color: %1; color: %5; "
         "border: 1px solid %4; border-radius: 3px; padding: 0px 4px; min-height: 24px; max-height: 30px; font-size: 12px; }"
-        "QTableWidget { background-color: %1; alternate-background-color: %2; color: %5; gridline-color: %3; border: 1px solid %3; border-radius: 4px; }"
-        "QTableWidget::item { padding: 2px 8px; }"
+        "QTableWidget { background-color: %1; alternate-background-color: %2; color: %5; selection-background-color: %4; selection-color: %8; gridline-color: %3; border: 1px solid %3; border-radius: 4px; }"
+        "QTableWidget::item { color: %5; padding: 2px 8px; }"
+        "QTableWidget::item:selected { background-color: %4; color: %8; }"
+        "QHeaderView:vertical { min-height: 0px; max-height: 16777215px; }"
         "QHeaderView::section { background-color: %2; color: %5; border: none; border-bottom: 1px solid %3; border-right: 1px solid %3; padding: 4px 8px; font-weight: 600; }"
         "QStackedWidget QPushButton { background-color: %2; color: %5; border: 1px solid %3; "
         "border-radius: 3px; padding: 2px 10px; min-height: 22px; max-height: 26px; font-size: 13px; }"
         "QStackedWidget QPushButton:hover { background-color: %6; color: %7; border-color: %4; }"
         "QLabel#separator { background-color: %3; }")
-                      .arg(canvas, header, border, accent, text, hoverBg, hoverFg));
+                      .arg(canvas, header, border, accent, text, hoverBg, hoverFg, selFg));
     ensurePolished();
 
     const QColor canvasCol(canvas);
     const QColor headerCol(header);
+    const QColor borderCol(border);
     const QColor textCol(text);
     const QColor selFgCol(selFg);
+    QColor placeholderCol(textCol);
+    placeholderCol.setAlpha(185);
 
     // Apply solid opaque QPalette roles across Active, Inactive, and Disabled groups for dialog & pages.
     QPalette dlgPal = palette();
@@ -426,8 +435,10 @@ void PreferencesDialog::applyDialogThemeChrome() {
         dlgPal.setColor(cg, QPalette::AlternateBase, headerCol);
         dlgPal.setColor(cg, QPalette::WindowText, textCol);
         dlgPal.setColor(cg, QPalette::Text, textCol);
+        dlgPal.setColor(cg, QPalette::PlaceholderText, placeholderCol);
         dlgPal.setColor(cg, QPalette::Button, headerCol);
         dlgPal.setColor(cg, QPalette::ButtonText, textCol);
+        dlgPal.setColor(cg, QPalette::Mid, borderCol);
         dlgPal.setColor(cg, QPalette::Highlight, accentCol);
         dlgPal.setColor(cg, QPalette::HighlightedText, selFgCol);
     }
@@ -456,6 +467,17 @@ void PreferencesDialog::applyDialogThemeChrome() {
                         sa->widget()->setAutoFillBackground(true);
                     }
                 }
+            }
+        }
+        for (QTableWidget* tbl : m_stack->findChildren<QTableWidget*>()) {
+            tbl->setPalette(dlgPal);
+            if (QHeaderView* vh = tbl->verticalHeader()) {
+                vh->setStyleSheet(QStringLiteral("QHeaderView { min-height: 0px; max-height: 16777215px; height: auto; }"));
+                vh->setMaximumHeight(QWIDGETSIZE_MAX);
+            }
+            if (tbl->viewport()) {
+                tbl->viewport()->setPalette(dlgPal);
+                tbl->viewport()->update();
             }
         }
     }

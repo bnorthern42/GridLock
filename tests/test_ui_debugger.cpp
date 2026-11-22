@@ -480,6 +480,51 @@ static void testLiveVariableRegisterEditingAndFullValueInspection() {
     auto* gEdit = diffGrid->findChild<QPlainTextEdit*>(QStringLiteral("fullValueInspectorTextEdit")); QVERIFY(gEdit && gEdit->toPlainText() == longStr && diffGrid->property("lastInspectedFullValue").toString() == longStr);
     mw.setCoordinator(nullptr);
 }
+static void testKeybindingsLightThemeLegibility() {
+    auto& tm = gridlock::core::managers::ThemeManager::instance();
+    const QString origTheme = tm.activeThemeId();
+    QString lightThemeId;
+    for (const QString& id : tm.availableThemes()) {
+        if (!gridlock::core::managers::ThemeManager::paletteForTheme(id).isDark) { lightThemeId = id; break; }
+    }
+    QVERIFY2(!lightThemeId.isEmpty(), "At least one Light theme must be registered in ThemeManager");
+    struct ThemeGuard { QString orig; ~ThemeGuard() { gridlock::core::managers::ThemeManager::instance().applyTheme(orig, false); } } guard{origTheme};
+    tm.applyTheme(lightThemeId, false);
+    gridlock::ui::PreferencesDialog dlg;
+    dlg.resize(960, 680);
+    if (auto* side = dlg.findChild<QListWidget*>(QStringLiteral("preferencesCategoryList"))) {
+        for (int i = 0; i < side->count(); ++i) {
+            if (side->item(i)->text().contains(QStringLiteral("Keybindings"), Qt::CaseInsensitive)) { side->setCurrentRow(i); break; }
+        }
+    }
+    dlg.show(); QApplication::processEvents();
+    auto* tbl = dlg.findChild<QTableWidget*>(QStringLiteral("keybindingsTable"));
+    QVERIFY2(tbl != nullptr && tbl->rowCount() >= 6, "Keybindings table must have at least 6 rows");
+    QVERIFY2(tbl->palette().color(QPalette::Base).lightness() > 180, "Light theme table base must have luminance > 180");
+    QVERIFY2(tbl->palette().color(QPalette::Text).lightness() < 110, "Light theme table text must have luminance < 110");
+    const QString outPng = qEnvironmentVariable("GRIDLOCK_VERIFY_KEYBINDINGS_PNG");
+    if (!outPng.isEmpty()) dlg.grab().toImage().save(outPng);
+    const QImage vpImg = tbl->viewport()->grab().toImage().convertToFormat(QImage::Format_RGB32);
+    for (int r = 0; r < qMin(6, tbl->rowCount()); ++r) {
+        for (int c = 0; c < 3; ++c) {
+            QTableWidgetItem* it = tbl->item(r, c); QVERIFY(it != nullptr);
+            const QVariant fg = it->data(Qt::ForegroundRole);
+            if (fg.isValid() && fg.canConvert<QBrush>() && fg.value<QBrush>().style() != Qt::NoBrush) {
+                QVERIFY2(fg.value<QBrush>().color().lightness() < 110, qPrintable(QStringLiteral("Row %1 col %2 has light foreground").arg(r).arg(c)));
+            }
+        }
+        const QRect rRect = tbl->visualItemRect(tbl->item(r, 1)).intersected(vpImg.rect());
+        int darkInkPx = 0;
+        for (int y = rRect.top(); y <= rRect.bottom(); ++y) {
+            for (int x = rRect.left(); x <= rRect.right(); ++x) {
+                if (qGray(vpImg.pixel(x, y)) < 120) ++darkInkPx;
+            }
+        }
+        QVERIFY2(darkInkPx > 10, qPrintable(QStringLiteral("Row %1 action label rendered invisible (darkInkPx=%2)").arg(r).arg(darkInkPx)));
+    }
+    dlg.close();
+}
+
 void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
     using gridlock::ui::CheckpointDialog; using gridlock::ui::SafetyLevel; QTemporaryDir fakeProc; QVERIFY(fakeProc.isValid());
     auto mkProc = [&](int pid, const QMap<QString, QString>& fds, const QByteArray& maps) {
@@ -506,5 +551,5 @@ void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
     QTest::keyClick(&mw, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier); QApplication::processEvents(); QVERIFY(mw.checkpointDialog() && mw.checkpointDialog()->isVisible()); mw.checkpointDialog()->close();
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents(); auto* pal = mw.findChild<gridlock::ui::CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog"));
     QVERIFY(pal && pal->isVisible()); pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints"))); QTest::keyClick(pal->inputEdit(), Qt::Key_Escape);
-    testCleanExitWhileTargetRunning(); testMultiRankScopePauseAllAndRackFilter(); testLaunchOptionsCliArgsAndUnifiedSessionStart(); testLiveVariableRegisterEditingAndFullValueInspection();
+    testCleanExitWhileTargetRunning(); testMultiRankScopePauseAllAndRackFilter(); testLaunchOptionsCliArgsAndUnifiedSessionStart(); testLiveVariableRegisterEditingAndFullValueInspection(); testKeybindingsLightThemeLegibility();
 }
