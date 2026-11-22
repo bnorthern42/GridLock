@@ -117,6 +117,15 @@ void TestMainWindowUI::testEditMenuActionsDynamicFontScalingAndCuratedThemes() {
     const QString activeQss = gridlock::core::ThemeManager::instance().currentStyleSheet();
     QVERIFY((activeQss.contains(QStringLiteral("15pt")) || activeQss.contains(QStringLiteral("15px"))) && srcView->font().pointSize() == 16 && disasmView->codeFontPointSize() == 16);
     mainWindow.applyTypographySettings(QStringLiteral("Inter"), 11, QStringLiteral("JetBrains Mono"), 10); QApplication::processEvents();
+    { gridlock::ui::SourceCodeView tabEd; tabEd.resize(640, 240); tabEd.show(); tabEd.setPlainText(QString()); tabEd.setFocus(); QApplication::processEvents();
+      QCOMPARE(tabEd.tabWidth(), 4);
+      const qreal expectedTabPx = QFontMetricsF(tabEd.font()).horizontalAdvance(QLatin1Char(' ')) * 4.0;
+      QVERIFY2(std::abs(tabEd.tabStopDistance() - expectedTabPx) <= 1.0, qPrintable(QStringLiteral("tabStopDistance=%1 expected=%2").arg(tabEd.tabStopDistance()).arg(expectedTabPx)));
+      QTest::keyClick(&tabEd, Qt::Key_Tab); QCOMPARE(tabEd.textCursor().columnNumber(), 4); QCOMPARE(tabEd.toPlainText(), QStringLiteral("    "));
+      QTest::keyClick(&tabEd, Qt::Key_Backtab); QCOMPARE(tabEd.textCursor().columnNumber(), 0); QVERIFY(tabEd.toPlainText().isEmpty());
+      tabEd.setPlainText(QStringLiteral("alpha\nbeta")); tabEd.selectAll();
+      QTest::keyClick(&tabEd, Qt::Key_Tab); QCOMPARE(tabEd.toPlainText(), QStringLiteral("    alpha\n    beta"));
+      tabEd.selectAll(); QTest::keyClick(&tabEd, Qt::Key_Backtab); QCOMPARE(tabEd.toPlainText(), QStringLiteral("alpha\nbeta")); }
     QVERIFY(gridlock::core::ThemeManager::instance().availableThemeIds().size() >= 6); gridlock::ui::PreferencesDialog prefsDlg(&mainWindow);
     auto* themeCombo = prefsDlg.findChild<QComboBox*>(QStringLiteral("themeSelectorCombo")); QVERIFY(themeCombo && themeCombo->count() >= 6);
     for (int i = 0; i < themeCombo->count(); ++i) QVERIFY2(!themeCombo->itemText(i).contains(QLatin1Char('_')), qPrintable(themeCombo->itemText(i)));

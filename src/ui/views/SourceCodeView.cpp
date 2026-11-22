@@ -156,11 +156,12 @@ QColor SourceCodeView::activeCanvasBackgroundColor() const {
     return QColor(activeAppSwatchColors().value(0, isAppDarkThemeActive() ? QStringLiteral("#16181d") : QStringLiteral("#f5f6f8")));
 }
 
-/** @brief Reloads font size, font family, word wrap, and active theme surface from user configuration. */
+/** @brief Reloads font size, font family, word wrap, tab width, and active theme surface from user configuration. */
 void SourceCodeView::reloadStyle() {
     QSettings s("gridlock", "debugger");
     const int codeFontSize = s.value("appearance/code_font_size", 11).toInt();
     const QString codeFontFamily = s.value("appearance/code_font_family", QStringLiteral("JetBrains Mono")).toString();
+    m_tabWidth = qBound(1, s.value("editing/tab_width", 4).toInt(), 16);
     setLineWrapMode((!m_largeFileMode && s.value("editing/word_wrap", false).toBool()) ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
     QFont codeFont = font();
     if (!codeFontFamily.trimmed().isEmpty()) codeFont.setFamily(codeFontFamily.trimmed());
@@ -178,8 +179,26 @@ void SourceCodeView::reloadStyle() {
         pal.setColor(QPalette::Base, QColor(canvasHex)); pal.setColor(QPalette::Window, QColor(canvasHex));
         pal.setColor(QPalette::Text, QColor(textHex)); viewport()->setPalette(pal); viewport()->setAutoFillBackground(true);
     }
+    updateTabStopDistance();
     if (m_highlighter && !m_largeFileMode) m_highlighter->reloadPalette();
     highlightCurrentLine(); updateLineNumberAreaWidth(0); if (m_lineNumberArea) m_lineNumberArea->update();
+}
+
+void SourceCodeView::setTabWidth(int spaces) {
+    m_tabWidth = qBound(1, spaces, 16);
+    updateTabStopDistance();
+}
+
+void SourceCodeView::updateTabStopDistance() {
+    const qreal spacePx = QFontMetricsF(font()).horizontalAdvance(QLatin1Char(' '));
+    if (spacePx > 0.0) setTabStopDistance(spacePx * static_cast<qreal>(m_tabWidth));
+}
+
+void SourceCodeView::changeEvent(QEvent* event) {
+    QPlainTextEdit::changeEvent(event);
+    if (event && (event->type() == QEvent::FontChange || event->type() == QEvent::StyleChange)) {
+        updateTabStopDistance();
+    }
 }
 
 void SourceCodeView::setLanguageMode(LanguageMode mode) { if (m_highlighter) m_highlighter->setLanguageMode(mode); }

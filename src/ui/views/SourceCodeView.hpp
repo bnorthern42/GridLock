@@ -648,6 +648,15 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void changeEvent(QEvent *event) override;
+
+public:
+    /** @brief Returns the active soft-tab and tab-stop width in monospace columns (default 4). */
+    int tabWidth() const { return m_tabWidth; }
+    /** @brief Sets the soft-tab and tab-stop width in monospace columns (clamped 1..16) and updates tabStopDistance(). */
+    void setTabWidth(int spaces);
+    /** @brief Recomputes QPlainTextEdit::setTabStopDistance() in exact pixels from the active monospace font metrics. */
+    void updateTabStopDistance();
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
@@ -706,6 +715,7 @@ private:
     bool m_pcDragCandidate = false;
     bool m_draggingExecutionPc = false;
     int m_dragTargetLine = -1;
+    int m_tabWidth = 4;
     QPoint m_pcDragPressPos;
 };
 

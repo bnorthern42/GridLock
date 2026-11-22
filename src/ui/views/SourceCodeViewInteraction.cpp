@@ -281,7 +281,7 @@ void SourceCodeView::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
         QFont f = font(); const int d = event->angleDelta().y();
         f.setPointSize(qBound(6, f.pointSize() + ((d > 0) ? 1 : ((d < 0) ? -1 : 0)), 72));
-        setFont(f); updateLineNumberAreaWidth(0); event->accept();
+        setFont(f); updateTabStopDistance(); updateLineNumberAreaWidth(0); event->accept();
     } else QPlainTextEdit::wheelEvent(event);
 }
 
@@ -453,6 +453,41 @@ void SourceCodeView::keyPressEvent(QKeyEvent* event) {
     }
     if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_Space) {
         QTextCursor cur = textCursor(); triggerCompletionPopupAtCursor(cur.block().text().left(cur.positionInBlock()), cur.blockNumber() + 1); event->accept(); return;
+    }
+    const Qt::KeyboardModifiers navMods = event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+    if (navMods == Qt::NoModifier && (event->key() == Qt::Key_Tab || event->key() == Qt::Key_Backtab)) {
+        const bool isUnindent = (event->key() == Qt::Key_Backtab) || (event->modifiers() & Qt::ShiftModifier);
+        const int width = qBound(1, m_tabWidth, 16);
+        QTextCursor cur = textCursor();
+        const int selStart = cur.selectionStart(), selEnd = cur.selectionEnd();
+        QTextBlock startBlk = document()->findBlock(selStart), endBlk = document()->findBlock(selEnd);
+        if (cur.hasSelection() && endBlk != startBlk && selEnd == endBlk.position()) endBlk = endBlk.previous();
+        if (isUnindent) {
+            cur.beginEditBlock();
+            for (QTextBlock blk = startBlk; blk.isValid(); blk = blk.next()) {
+                const QString lineTxt = blk.text();
+                int removeCnt = 0;
+                if (!lineTxt.isEmpty() && lineTxt.at(0) == QLatin1Char('\t')) removeCnt = 1;
+                else while (removeCnt < width && removeCnt < lineTxt.size() && lineTxt.at(removeCnt) == QLatin1Char(' ')) ++removeCnt;
+                if (removeCnt > 0) {
+                    QTextCursor lineCur(blk); lineCur.setPosition(blk.position() + removeCnt, QTextCursor::KeepAnchor); lineCur.removeSelectedText();
+                }
+                if (blk == endBlk) break;
+            }
+            cur.endEditBlock();
+        } else if (cur.hasSelection() && startBlk != endBlk) {
+            const QString pad(width, QLatin1Char(' '));
+            cur.beginEditBlock();
+            for (QTextBlock blk = startBlk; blk.isValid(); blk = blk.next()) {
+                QTextCursor lineCur(blk); lineCur.insertText(pad);
+                if (blk == endBlk) break;
+            }
+            cur.endEditBlock();
+        } else {
+            cur.insertText(QString(width, QLatin1Char(' ')));
+            setTextCursor(cur);
+        }
+        event->accept(); return;
     }
     QPlainTextEdit::keyPressEvent(event); const QString txt = event->text();
     if (txt == QStringLiteral(".") || txt == QStringLiteral(">") || txt == QStringLiteral(":")) {
