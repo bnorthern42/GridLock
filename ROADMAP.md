@@ -35,24 +35,24 @@ For capabilities already shipped in **`v0.8.66`** (including live MPMD GDB/MI3 a
 
 ## `v0.8.8`: UX Polish, Progressive Disclosure & Workflow Ergonomics
 
-- [x] **Topological Pointer and Struct Graph Enhancements**:
-  - [x] Upgrade `PointerGraphDialog` from a fixed grid to a layered DAG layout that preserves manual node positions across steps and supports incremental multi-root pinning without clearing existing graphs.
-  - [x] Add mouse-wheel zoom, a corner minimap, per-node field suppression, horizontal/vertical orientation, format overrides (`/x`, `/d`, `/b`), dynamic alias splitting/merging on pointer reassignment, SVG/PNG export, and expression autocomplete.
-- [x] **Multi-Rank and Scientific Array Plotter Extensions**:
-  - [x] Connect multi-rank 1D overlay mode in `ArrayPlotDialog` for halo/ghost-cell comparison, and add `start:end:stride` slicing, Log10 scale, drag-box zoom/reset, and scalar time-series history mode.
-  - [x] Add complex-number (`Complex64` / `Complex128` real/imaginary/magnitude) decoding, 2D matrix `splot`/`pm3d` export, and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
-- [x] **Clean Menu Labels, Editable Keybindings Preferences, and `SourceCodeView` Struct/Pointer Graph Actions**:
-  - [x] Replace raw underscore identifiers in menu labels with human-readable titles, expose editable shortcut preferences in `PreferencesDialog`, and add right-click `SourceCodeView` actions to graph struct types and pointer expressions directly.
-- [ ] **Toolbar Consolidation and Progressive Disclosure**:
-  - [ ] Compact `< 1040px` toolbar with source-level `Step Over (F10)` / `Step Into (F11)` / `Step Out (Shift+F11)` controls, context-sensitive hiding when idle or single-rank, `Source`/`Debug`/`Binary`/`MPI` perspectives that preserve floating docks without force-redocking, and state-aware tooltips.
-- [ ] **Real `QSplitter` Split Editor and Inline `Ctrl+F` Editor Search**:
-  - [ ] Replace the overlay split-editor container in `EditorTabManager` with a horizontal `QSplitter` so both panes resize cleanly with visible scrollbars, and bind `Ctrl+F` to a compact inline search bar inside the active editor while reserving `Ctrl+G` for `#cutterSeekBar`.
-- [ ] **Unified Multi-Rank Scope (`All Ranks` vs. `Rank k`), `Pause All Ranks (F6)`, and Synchronized Master Rank Focus**:
-  - [ ] Provide a single execution-scope toggle (`All Ranks` vs. `Rank k`), an always-reachable `Pause All Ranks (F6)` interrupt control, and synchronized master rank focus across source, disassembly, call stack, variables, registers, and memory views.
-- [ ] **Fail-Loud Build/Launch Guardrails, Safe Byte/NOP Instruction Patching, and Confirmation/Undo Prompts**:
-  - [ ] Surface clear diagnostics when a build or launch pre-check fails, guard live byte/NOP patching with explicit confirmation and undo prompts, and prevent silent no-op execution failures.
-- [ ] **Symmetrical Cross-View Context Handoffs, Full-Value Tooltips, and Live Variable/Register Editing**:
-  - [ ] Standardize right-click handoffs across source, variables, registers, memory, and disassembly views, add full-value hover tooltips for truncated entries, and support inline variable and register value editing.
+- [x] **Topological Pointer & Struct Graph Enhancements**:
+  - [x] Layered Sugiyama DAG layout preserving manual node drag positions across steps, incremental multi-root pinning, and per-root unpinning.
+  - [x] Mouse-wheel zoom (`0.25x` to `2.5x`), interactive corner minimap, per-node field suppression (`+N hidden`), horizontal/vertical card orientation toggle, scalar format overrides (`/x`, `/d`, `/b`), dynamic alias splitting/merging on pointer reassignment, and `2x` PNG / vector SVG export.
+- [x] **Multi-Rank & Scientific Array Plotter Extensions**:
+  - [x] Multi-rank 1D overlay mode for halo/ghost-cell comparison, `start:end:stride` slicing, base-10 logarithmic (`Log10`) Y and colorbar scaling, interactive drag-box zoom and reset, and scalar time-series history mode over stops.
+  - [x] `Complex64` / `Complex128` decoding (`Magnitude`, `Phase`, `Real`, `Imaginary`), 2D matrix `splot` / `pm3d` Gnuplot export with executable/stderr validation, and zero-copy virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major vs. Fortran column-major).
+- [x] **Toolbar Consolidation & Progressive Disclosure**:
+  - [x] Compact `< 1,040 px` main toolbar with split dropdown compartments, source-level stepping (`Step Over F10`, `Step Into F11`, `Step Out Shift+F11`), and state-aware tooltips.
+  - [x] `Source` / `Debug` / `Binary` / `MPI` perspectives without force-redocking floating panels, automatic collapsing of multi-rank chrome when `ranks == 1`, and clean empty-state watch placeholders.
+- [x] **Unified Multi-Rank Scope, Master Rank Focus & Launch Ergonomics**:
+  - [x] Explicit `All Ranks` vs. `Rank k` execution scope toggle, `Pause All Ranks (F6)` (`haltAll`), `ServerRackView` `DEADLOCK` / `EXITED` badges and state filter, and master `setFocusedRank()` synchronization across all docks and dialogs (lifting the 8-rank plotter cap).
+  - [x] `All Ranks` expression evaluation broadcast, inline `Launch Options` popover (`--args`, working directory, `Stop at main()`), and CLI positional target / `-- <args...>` parsing.
+- [x] **Cross-View Inspection, Live Editing & Safety Guardrails**:
+  - [x] Single-popup `DisassemblyView` / CFG / Decompiler context menus, functional `Watch` registration/removal, exact `MemView` cursor offset handoff to Programmer's Calculator, `SourceCodeView` pointer/struct graph context actions, and live expression autocomplete.
+  - [x] Full-value tooltips and `Inspect Full Value...` popover, live in-place variable and register value editing, fail-loud compilation checks blocking stale-binary launches, validated hex/NOP instruction patching with `Revert All Patches`, and confirmation/undo guardrails for checkpoints and graph/plot clearing.
+- [x] **Editor, Keybindings, Project Tree, Terminal & Lifecycle Stability**:
+  - [x] Real `QSplitter` split editor, inline `Ctrl+F` editor find bar, palette-aware `ShortcutItemDelegate` Keybindings settings tab, and single-column `HPC Integration` preferences layout.
+  - [x] Unified `~/.config/gridlock/` configuration and `Recent Sessions` persistence, proportional UI typography and multi-language vector file/folder icons in `ProjectExplorerWidget`, terminal `Ctrl+Shift+C`/`V` + smart `Ctrl+C`/`V` + right-click Copy/Paste, clean exit-while-running process/PTY reaping with orphaned `/dev/shm/psm3_shm` cleanup, and modular file-size refactoring (`<= 550` lines across core `MainWindow`, HPC coordinator, dialog, and UI test modules).
 
 ---
 
