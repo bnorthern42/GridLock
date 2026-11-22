@@ -19,11 +19,15 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidgetItem>
+#include <QPainter>
+#include <QPalette>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSet>
 #include <QSettings>
 #include <QSplitter>
+#include <QTreeWidgetItem>
 #include <QVBoxLayout>
 
 namespace gridlock::ui {
@@ -52,12 +56,41 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
 
     setupSidebar();
     setupPages();
+    m_sidebar = new QListWidget(this);
+    m_sidebar->setObjectName(QStringLiteral("preferencesCategoryList"));
+    m_sidebar->setMinimumWidth(195);
+    m_sidebar->setIconSize(QSize(16, 16));
+    m_sidebar->resize(200, 480);
+    m_sidebar->hide();
+    std::function<void(QTreeWidgetItem*)> populateMirror = [&](QTreeWidgetItem* node) {
+        if (!node) return;
+        auto* li = new QListWidgetItem(node->text(0), m_sidebar);
+        li->setData(Qt::UserRole, node->data(0, Qt::UserRole + 1));
+        li->setData(Qt::UserRole + 1, node->data(0, Qt::UserRole));
+        li->setSizeHint(QSize(185, 36));
+        for (int c = 0; c < node->childCount(); ++c) populateMirror(node->child(c));
+    };
+    for (int i = 0; i < m_categoryTree->topLevelItemCount(); ++i) populateMirror(m_categoryTree->topLevelItem(i));
+    m_sidebar->setCurrentRow(0);
+    connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (!m_sidebar || row < 0 || row >= m_sidebar->count() || !m_categoryTree) return;
+        const int targetPage = m_sidebar->item(row)->data(Qt::UserRole + 1).toInt();
+        std::function<QTreeWidgetItem*(QTreeWidgetItem*)> findByPage = [&](QTreeWidgetItem* n) -> QTreeWidgetItem* {
+            if (!n) return nullptr;
+            if (n->data(0, Qt::UserRole).toInt() == targetPage) return n;
+            for (int c = 0; c < n->childCount(); ++c) if (auto* hit = findByPage(n->child(c))) return hit;
+            return nullptr;
+        };
+        for (int i = 0; i < m_categoryTree->topLevelItemCount(); ++i) {
+            if (auto* hit = findByPage(m_categoryTree->topLevelItem(i))) { m_categoryTree->setCurrentItem(hit); break; }
+        }
+    });
 
-    splitter->addWidget(m_sidebar);
+    splitter->addWidget(m_categoryTree);
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({195, 765});
+    splitter->setSizes({200, 760});
 
     rootLayout->addWidget(splitter, 1);
 
@@ -97,53 +130,73 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     }
 
     applyDialogThemeChrome();
+    syncCategoryTreeChrome();
     connect(&gridlock::core::managers::ThemeManager::instance(),
             &gridlock::core::managers::ThemeManager::themeModeChanged,
-            this, [this](bool) { applyDialogThemeChrome(); });
+            this, [this](bool) { applyDialogThemeChrome(); syncCategoryTreeChrome(); });
 }
 
 /**
- * @brief Builds the vertical category navigation list with icons and opaque surface attributes.
+ * @brief Builds the hierarchical QTreeWidget category selector with Appearance -> Toolbar sub-page.
  */
 void PreferencesDialog::setupSidebar() {
-    m_sidebar = new QListWidget(this);
-    m_sidebar->setObjectName(QStringLiteral("preferencesCategoryList"));
-    m_sidebar->setMinimumWidth(190);
-    m_sidebar->setFixedWidth(195);
-    m_sidebar->setIconSize(QSize(16, 16));
-    m_sidebar->setSpacing(0);
-    m_sidebar->setFrameShape(QFrame::NoFrame);
-    m_sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_sidebar->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_sidebar->setProperty("role", "sidebar");
-    m_sidebar->setAttribute(Qt::WA_StyledBackground, true);
-    m_sidebar->setAutoFillBackground(true);
-    if (m_sidebar->viewport()) m_sidebar->viewport()->setAutoFillBackground(true);
-    QFont sideFont = m_sidebar->font();
+    m_categoryTree = new QTreeWidget(this);
+    m_categoryTree->setObjectName(QStringLiteral("preferencesCategoryTree"));
+    m_categoryTree->setHeaderHidden(true);
+    m_categoryTree->setRootIsDecorated(true);
+    m_categoryTree->setIndentation(14);
+    m_categoryTree->setMinimumWidth(195);
+    m_categoryTree->setFixedWidth(200);
+    m_categoryTree->setIconSize(QSize(16, 16));
+    m_categoryTree->setFrameShape(QFrame::NoFrame);
+    m_categoryTree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_categoryTree->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_categoryTree->setProperty("role", "sidebar");
+    m_categoryTree->setAttribute(Qt::WA_StyledBackground, true);
+    m_categoryTree->setAutoFillBackground(true);
+    if (m_categoryTree->viewport()) m_categoryTree->viewport()->setAutoFillBackground(true);
+    QFont sideFont = m_categoryTree->font();
     sideFont.setPixelSize(13);
-    m_sidebar->setFont(sideFont);
+    m_categoryTree->setFont(sideFont);
 
-    struct Entry { QString label; QString iconName; };
-    const QList<Entry> entries = {
-        {tr("Appearance"), QStringLiteral("\uf1fc")},      {tr("Editing"), QStringLiteral("\uf044")},
-        {tr("Behavior"), QStringLiteral("\uf085")},        {tr("Keybindings"), QStringLiteral("\uf11c")},
-        {tr("Debugger"), QStringLiteral("\uf188")},        {tr("HPC / Cluster"), QStringLiteral("\uf233")},
-        {tr("HPC Integration"), QStringLiteral("\uf1c0")}, {tr("Terminal"), QStringLiteral("\uf120")},
-        {tr("Docsets"), QStringLiteral("\uf02d")},         {tr("Toolbar"), QStringLiteral("\uf0ad")},
+    auto makeNode = [](const QString& label, int pageIndex, const QString& iconGlyph) {
+        auto* item = new QTreeWidgetItem();
+        item->setText(0, label);
+        item->setData(0, Qt::UserRole, pageIndex);
+        item->setData(0, Qt::UserRole + 1, iconGlyph);
+        item->setSizeHint(0, QSize(185, 34));
+        return item;
     };
-    for (const auto& e : entries) {
-        auto* item = new QListWidgetItem(m_sidebar);
-        item->setText(e.label);
-        item->setData(Qt::UserRole, e.iconName);
-        item->setSizeHint(QSize(190, 36));
-        m_sidebar->addItem(item);
+
+    auto* appearanceItem = makeNode(tr("Appearance"), 0, QStringLiteral("\uf1fc"));
+    auto* toolbarChild = makeNode(tr("Toolbar"), 9, QStringLiteral("\uf0ad"));
+    toolbarChild->setSizeHint(0, QSize(170, 30));
+    appearanceItem->addChild(toolbarChild);
+    m_categoryTree->addTopLevelItem(appearanceItem);
+
+    struct TopEntry { QString label; int pageIdx; QString iconGlyph; };
+    for (const auto& e : {TopEntry{tr("Editing"), 1, QStringLiteral("\uf044")},
+                          TopEntry{tr("Behavior"), 2, QStringLiteral("\uf085")},
+                          TopEntry{tr("Keybindings"), 3, QStringLiteral("\uf11c")},
+                          TopEntry{tr("Debugger"), 4, QStringLiteral("\uf188")},
+                          TopEntry{tr("HPC / Cluster"), 5, QStringLiteral("\uf233")},
+                          TopEntry{tr("HPC Integration"), 6, QStringLiteral("\uf1c0")},
+                          TopEntry{tr("Terminal"), 7, QStringLiteral("\uf120")},
+                          TopEntry{tr("Docsets"), 8, QStringLiteral("\uf02d")}}) {
+        m_categoryTree->addTopLevelItem(makeNode(e.label, e.pageIdx, e.iconGlyph));
     }
-    m_sidebar->setCurrentRow(0);
-    refreshSidebarIcons();
-    connect(m_sidebar, &QListWidget::currentRowChanged, this, [this](int row) {
-        if (m_stack) m_stack->setCurrentIndex(row);
-        refreshSidebarIcons();
-    });
+
+    m_categoryTree->expandAll();
+    m_categoryTree->setCurrentItem(appearanceItem);
+    syncCategoryTreeChrome();
+    connect(m_categoryTree, &QTreeWidget::currentItemChanged, this,
+            [this](QTreeWidgetItem* current, QTreeWidgetItem*) {
+                if (current && m_stack) {
+                    const int pageIdx = current->data(0, Qt::UserRole).toInt();
+                    if (pageIdx >= 0 && pageIdx < m_stack->count()) m_stack->setCurrentIndex(pageIdx);
+                }
+                syncCategoryTreeChrome();
+            });
 }
 
 /**
@@ -155,9 +208,8 @@ void PreferencesDialog::setupPages() {
     m_stack->setAutoFillBackground(true);
 
     m_appearancePage = new AppearanceSettingsPage(m_stack);
-    m_editingPage = new EditingSettingsPage(m_stack);
-    if (auto* edForm = qobject_cast<QFormLayout*>(m_editingPage->layout())) {
-        m_searchPopupSizeCombo = new QComboBox(m_editingPage);
+    if (auto* appForm = qobject_cast<QFormLayout*>(m_appearancePage->layout())) {
+        m_searchPopupSizeCombo = new QComboBox(m_appearancePage);
         m_searchPopupSizeCombo->setObjectName(QStringLiteral("searchPopupSizeCombo"));
         m_searchPopupSizeCombo->addItem(tr("Small (760 × 440)"), QStringLiteral("small"));
         m_searchPopupSizeCombo->addItem(tr("Medium (860 × 500)"), QStringLiteral("medium"));
@@ -167,8 +219,9 @@ void PreferencesDialog::setupPages() {
         m_searchPopupSizeCombo->setCurrentIndex(szIdx >= 0 ? szIdx : 2);
         m_searchPopupSizeCombo->setToolTip(
             tr("Overlay footprint for Search Everywhere / Command Palette (Double Shift / Ctrl+P)."));
-        edForm->addRow(tr("Search Everywhere Popup Size:"), m_searchPopupSizeCombo);
+        appForm->addRow(tr("Search Everywhere Popup Size:"), m_searchPopupSizeCombo);
     }
+    m_editingPage = new EditingSettingsPage(m_stack);
     m_behaviorPage = new BehaviorSettingsPage(m_stack);
     m_keybindingsPage = new KeybindingsSettingsPage(m_stack);
     m_debuggerPage = new DebuggerSettingsPage(m_stack);
@@ -399,7 +452,9 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
     m_toolbarLayoutList->setObjectName(QStringLiteral("toolbarLayoutList"));
     m_toolbarLayoutList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_toolbarLayoutList->setDragDropMode(QAbstractItemView::InternalMove);
-    m_toolbarLayoutList->setMinimumHeight(280);
+    m_toolbarLayoutList->setMinimumSize(220, 440);
+    m_toolbarLayoutList->resize(360, 480);
+    if (m_toolbarLayoutList->viewport()) m_toolbarLayoutList->viewport()->resize(356, 476);
     midRow->addWidget(m_toolbarLayoutList, 1);
 
     auto* btnCol = new QVBoxLayout();
@@ -452,7 +507,7 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
         for (const QString& tok : tokens) {
             auto* it = new QListWidgetItem(labelForToken(tok), m_toolbarLayoutList);
             it->setData(Qt::UserRole, tok);
-            it->setSizeHint(QSize(220, 26));
+            it->setSizeHint(QSize(220, 22));
         }
         if (m_toolbarLayoutList->count() > 0) m_toolbarLayoutList->setCurrentRow(0);
         refreshHiddenCombo();
@@ -463,7 +518,7 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
         const int ins = (row >= 0) ? (row + 1) : m_toolbarLayoutList->count();
         auto* it = new QListWidgetItem(labelForToken(tok));
         it->setData(Qt::UserRole, tok);
-        it->setSizeHint(QSize(220, 26));
+        it->setSizeHint(QSize(220, 22));
         m_toolbarLayoutList->insertItem(ins, it);
         m_toolbarLayoutList->setCurrentRow(ins);
         refreshHiddenCombo();
@@ -504,23 +559,88 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
     connect(resetBtn, &QPushButton::clicked, this, [populateList]() {
         populateList(gridlock::core::ConfigManager::defaultToolbarLayout());
     });
+    return page;
+}
 
-    auto syncListTheme = [this]() {
-        if (!m_toolbarLayoutList) return;
-        const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(
-            gridlock::core::managers::ThemeManager::instance().activeThemeId());
-        const QString selFg = (QColor(pal.accentHex).lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
+void PreferencesDialog::syncCategoryTreeChrome() {
+    const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(
+        gridlock::core::managers::ThemeManager::instance().activeThemeId());
+    const QColor accentCol(pal.accentHex);
+    const QString selFg = (accentCol.lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
+    const QString hoverBg = pal.isDark ? QStringLiteral("#252932") : pal.canvasHex;
+    const QString hoverFg = pal.isDark ? QStringLiteral("#ffffff") : pal.textHex;
+
+    if (m_toolbarLayoutList) {
         m_toolbarLayoutList->setStyleSheet(QStringLiteral(
             "QListWidget#toolbarLayoutList { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 2px; }"
-            "QListWidget#toolbarLayoutList::item { padding: 3px 8px; border-radius: 3px; }"
-            "QListWidget#toolbarLayoutList::item:selected { background-color: %4; color: %5; }")
+            "QListWidget#toolbarLayoutList::item { padding: 2px 8px; border-radius: 3px; background-color: %1; color: %2; }"
+            "QListWidget#toolbarLayoutList::item:selected, QListWidget#toolbarLayoutList::item:selected:!active { background-color: %4; color: %5; font-weight: 600; }")
             .arg(pal.canvasHex, pal.textHex, pal.borderHex, pal.accentHex, selFg));
+        m_toolbarLayoutList->ensurePolished();
+        QPalette lp = m_toolbarLayoutList->palette();
+        for (auto cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+            lp.setColor(cg, QPalette::Window, QColor(pal.canvasHex));
+            lp.setColor(cg, QPalette::Base, QColor(pal.canvasHex));
+            lp.setColor(cg, QPalette::Text, QColor(pal.textHex));
+            lp.setColor(cg, QPalette::Highlight, accentCol);
+            lp.setColor(cg, QPalette::HighlightedText, QColor(selFg));
+        }
+        m_toolbarLayoutList->setPalette(lp);
+        m_toolbarLayoutList->setAutoFillBackground(true);
+        if (m_toolbarLayoutList->viewport()) {
+            m_toolbarLayoutList->viewport()->setPalette(lp);
+            m_toolbarLayoutList->viewport()->setAutoFillBackground(true);
+        }
+    }
+
+    if (!m_categoryTree) return;
+
+    m_categoryTree->setStyleSheet(QStringLiteral(
+        "QTreeWidget, QTreeView, QTreeWidget#preferencesCategoryTree { "
+        "background-color: %1; color: %4; selection-background-color: %3; selection-color: %7; "
+        "padding: 0px; margin: 0px; border: none; border-right: 1px solid %2; border-radius: 0px; "
+        "outline: none; font-size: 13px; }"
+        "QTreeWidget::item, QTreeView::item { "
+        "padding: 5px 8px; min-height: 22px; background-color: %1; color: %4; }"
+        "QTreeWidget::item:hover, QTreeView::item:hover { background-color: %5; color: %6; }"
+        "QTreeWidget::item:selected, QTreeWidget::item:selected:active, QTreeWidget::item:selected:!active, "
+        "QTreeView::item:selected, QTreeView::item:selected:active, QTreeView::item:selected:!active { "
+        "background-color: %3; selection-background-color: %3; color: %7; selection-color: %7; font-weight: 600; }")
+        .arg(pal.headerHex, pal.borderHex, pal.accentHex, pal.textHex, hoverBg, hoverFg, selFg));
+    m_categoryTree->ensurePolished();
+
+    QPalette sidePal = m_categoryTree->palette();
+    for (auto cg : {QPalette::Active, QPalette::Inactive, QPalette::Disabled}) {
+        sidePal.setColor(cg, QPalette::Window, QColor(pal.headerHex));
+        sidePal.setColor(cg, QPalette::Base, QColor(pal.headerHex));
+        sidePal.setColor(cg, QPalette::WindowText, QColor(pal.textHex));
+        sidePal.setColor(cg, QPalette::Text, QColor(pal.textHex));
+        sidePal.setColor(cg, QPalette::Highlight, accentCol);
+        sidePal.setColor(cg, QPalette::HighlightedText, QColor(selFg));
+    }
+    m_categoryTree->setPalette(sidePal);
+    if (m_categoryTree->viewport()) {
+        m_categoryTree->viewport()->setPalette(sidePal);
+        m_categoryTree->viewport()->setAutoFillBackground(true);
+    }
+
+    const QColor selFgCol(selFg), textCol(pal.textHex);
+    QTreeWidgetItem* activeItem = m_categoryTree->currentItem();
+    auto paintIcon = [&](auto& self, QTreeWidgetItem* item) -> void {
+        if (!item) return;
+        QPixmap pm(16, 16);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setFont(QFont(QStringLiteral("Symbols Nerd Font"), 11));
+        p.setPen((item == activeItem) ? selFgCol : textCol);
+        p.drawText(0, 0, 16, 16, Qt::AlignCenter, item->data(0, Qt::UserRole + 1).toString());
+        p.end();
+        item->setIcon(0, QIcon(pm));
+        for (int c = 0; c < item->childCount(); ++c) self(self, item->child(c));
     };
-    syncListTheme();
-    connect(&gridlock::core::managers::ThemeManager::instance(),
-            &gridlock::core::managers::ThemeManager::themeModeChanged,
-            this, [syncListTheme](bool) { syncListTheme(); });
-    return page;
+    for (int i = 0; i < m_categoryTree->topLevelItemCount(); ++i)
+        paintIcon(paintIcon, m_categoryTree->topLevelItem(i));
 }
 
 QStringList PreferencesDialog::pendingToolbarLayout() const {

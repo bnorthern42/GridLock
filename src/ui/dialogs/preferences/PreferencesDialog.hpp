@@ -17,6 +17,7 @@
 #include <QListWidget>
 #include <QStackedWidget>
 #include <QString>
+#include <QTreeWidget>
 
 namespace gridlock::ui {
 
@@ -32,6 +33,8 @@ public:
 
     /// Returns the editable Keybindings settings page.
     KeybindingsSettingsPage* keybindingsPage() const { return m_keybindingsPage; }
+    /// Returns the hierarchical category navigation tree.
+    QTreeWidget* categoryTree() const { return m_categoryTree; }
 
     /// Parses `#SBATCH` directives and module load lines into the SLURM settings page.
     bool parseSlurmBatchScript(const QString& scriptText);
@@ -64,8 +67,10 @@ private:
     void setupButtonBox();
     void applyDialogThemeChrome();
     void refreshSidebarIcons();
+    void syncCategoryTreeChrome();
 
     QListWidget* m_sidebar = nullptr;
+    QTreeWidget* m_categoryTree = nullptr;
     QStackedWidget* m_stack = nullptr;
     QDialogButtonBox* m_buttonBox = nullptr;
 

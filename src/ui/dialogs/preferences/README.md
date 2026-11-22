@@ -1,15 +1,15 @@
 # Workstation Preferences (`src/ui/dialogs/preferences/`)
 
-Modular sidebar `PreferencesDialog` shell paired with per-category settings pages and shared form/chrome helpers, keeping every file under 400 lines.
+Modular `PreferencesDialog` shell with a hierarchical `QTreeWidget` category tree paired with per-category settings pages and shared form/chrome helpers.
 
 ## Contents
 
-- `PreferencesDialog.hpp` (`80`), `PreferencesDialog.cpp` (`344`), `PreferencesDialogChrome.cpp` (`228`):
-  - Thin dialog coordinator owning sidebar navigation, vertical `QScrollArea` page wrappers, `preferencesApplied` signaling, and `ThemeManager` QSS/palette/icon chrome.
+- `PreferencesDialog.hpp` (`93`), `PreferencesDialog.cpp` (`669`), `PreferencesDialogChrome.cpp` (`228`):
+  - Dialog coordinator owning the hierarchical `QTreeWidget` category selector (`Appearance -> Toolbar` expanded by default), vertical `QScrollArea` page wrappers, main toolbar layout editor (`#preferencesToolbarPage`), `Search Everywhere Popup Size` selector inside `Appearance`, `preferencesChanged` signaling, and `ThemeManager` QSS/palette/icon chrome.
 - `PreferencesFormHelpers.hpp` (`126`):
   - Shared form row builders, file/directory browse rows, section headers, and monospace font discovery helpers.
 - `AppearanceSettingsPage.hpp` (`54`), `AppearanceSettingsPage.cpp` (`227`):
-  - Theme preset selector, global UI font sizing, and editor font family/size controls.
+  - Theme preset selector, global UI font sizing, editor font family/size controls, and general UI chrome layout controls.
 - `DebuggerSettingsPage.hpp` (`46`), `DebuggerSettingsPage.cpp` (`139`):
   - GDB/LLDB binary paths, backend engine mode, MPI launcher defaults, and MI console logging.
 - `EditingBehaviorPages.hpp` (`72`), `EditingBehaviorPages.cpp` (`206`):
@@ -23,12 +23,14 @@ Modular sidebar `PreferencesDialog` shell paired with per-category settings page
 
 ## Expected Behavior & Invariants
 
-- **Strict Size Target (`<= 400` Lines)**:
-  - Every file in this directory stays strictly at or below `400` lines by placing new settings tabs in dedicated page files.
+- **Translation Unit Headroom (`< 950` Lines)**:
+  - Keep every file well below `< 950` lines by placing separate settings categories in dedicated page files.
+- **Hierarchical Category Tree (`Appearance -> Toolbar`)**:
+  - Top-level categories expand by default in `#preferencesCategoryTree` (`headerHidden = true`, `indentation = 14`), and selecting either a top-level category or nested child item (`Toolbar`) switches `QStackedWidget` directly via `Qt::UserRole`.
 - **Opaque Key Sequence Recorder**:
   - `KeySequenceRecorderWidget` paints an opaque vertically centered recorder widget without badge bleed-through (`tests/ui/test_ui_viz_and_ux.cpp`).
 - **Selector & Persistence Parity**:
-  - Preserve 100% of existing `QWidget::objectName()` strings, `QScrollArea` wrappers, page ordering, `preferencesApplied` signals, and `ConfigManager`/`ShortcutManager`/`ThemeManager` round-trips.
+  - Preserve existing `QWidget::objectName()` strings, `QScrollArea` wrappers, page ordering, `preferencesChanged` signals, and `ConfigManager`/`ShortcutManager`/`ThemeManager` round-trips.
 - **Verification**:
   - Run `meson test -C builddir ui_tests config_tests --print-errorlogs`.
 
