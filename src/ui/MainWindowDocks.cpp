@@ -551,6 +551,7 @@ bool MainWindow::applyCliLaunchOptions(const QString& targetPath, const QStringL
         m_targetSelector->blockSignals(true); m_targetSelector->insertItem(0, lbl, resolvedFile); m_targetSelector->blockSignals(false);
         selectTargetByName(resolvedFile);
       }
+      gridlock::core::ConfigManager::instance().recordRecentSession(resolvedFile);
       ok = true;
     }
   }

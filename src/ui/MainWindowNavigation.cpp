@@ -557,6 +557,9 @@ void MainWindow::loadSourceFile(const QString& filePath) {
             // Ensure legacy secondary LspCoordinator remains stopped so ClangdLspClient owns the sole clangd daemon.
             if (m_lspCoordinator) m_lspCoordinator->stop();
             syncDisassemblyDecompilerVisibility(false);
+        } else if (m_editorTabManager->primaryTabWidget() && m_editorTabManager->primaryTabWidget()->currentWidget() &&
+                   !m_editorTabManager->primaryTabWidget()->currentWidget()->property("absolutePath").toString().isEmpty()) {
+            m_currentFile = m_editorTabManager->primaryTabWidget()->currentWidget()->property("absolutePath").toString();
         } else if (networkLog()) {
             networkLog()->appendError("CRITICAL: Failed to load " + filePath + "\n");
         }

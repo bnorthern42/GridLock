@@ -9,6 +9,7 @@
  */
 
 #include "ReferenceManualWidget.hpp"
+#include "../../core/managers/ConfigManager.hpp"
 #include "../../core/managers/DocsetManager.hpp"
 
 #include <QColor>
@@ -608,7 +609,7 @@ ReferenceManualWidget::ReferenceManualWidget(QWidget* parent)
         if (m_manPageViewer && m_manPageViewer->searchEdit()) {
             m_manPageViewer->searchEdit()->setVisible(!isDocsets);
         }
-        QSettings settings("GridLock", "Debugger");
+        QSettings settings(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
         settings.setValue("ui/reference_manual_tab", isDocsets ? 0 : 1);
     };
 
@@ -616,7 +617,7 @@ ReferenceManualWidget::ReferenceManualWidget(QWidget* parent)
     connect(m_manPagesModeBtn, &QPushButton::clicked, this, [setModeIndex]() { setModeIndex(1); });
 
     // Restore last visited mode from persistent application settings.
-    QSettings settings("GridLock", "Debugger");
+    QSettings settings(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
     const int savedIndex = settings.value("ui/reference_manual_tab", 0).toInt();
     setModeIndex(savedIndex == 1 ? 1 : 0);
 }

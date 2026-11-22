@@ -632,7 +632,7 @@ void ThemeManager::initialize() {
 
 /** @brief Returns the on-disk QSS cache file path for a given theme identifier. */
 QString ThemeManager::cachedQssFilePath(const QString& themeId) const {
-    const QString acssDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/acss");
+    const QString acssDir = gridlock::core::ConfigManager::configDirectory() + QStringLiteral("/acss");
     return acssDir + QStringLiteral("/%1-%2.qss").arg(themeId.trimmed(), gridlock::core::Version::getString());
 }
 
@@ -660,10 +660,10 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
                               m_activeThemeId.contains(QStringLiteral("latte"), Qt::CaseInsensitive);
     m_darkMode = isDark && !isLightTheme;
 
-    QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    QSettings s(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
     const int uiFontSize = s.value(QStringLiteral("appearance/ui_font_size"), 11).toInt();
     const QString uiFontFamily = s.value(QStringLiteral("appearance/ui_font_family"), QString()).toString();
-    const QString acssDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/acss");
+    const QString acssDir = gridlock::core::ConfigManager::configDirectory() + QStringLiteral("/acss");
 
     const QString acssTheme = m_darkMode ? QStringLiteral("dark_teal") : QStringLiteral("light_blue");
     const QString svgThemeDir = acssDir + QStringLiteral("/qt_material/") + acssTheme;
@@ -735,51 +735,40 @@ void ThemeManager::setTheme(const QString& themeName, bool isDark, bool persist)
 }
 
 /**
- * @brief Persists active theme identifier and typography settings to QSettings and ConfigManager.
+ * @brief Persists active theme identifier and typography settings to unified ConfigManager stores.
  */
 void ThemeManager::savePersistedTheme() const {
     if (m_activeThemeId.trimmed().isEmpty()) return;
     const QString id = m_activeThemeId.trimmed();
-    QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
-    s1.setValue(QStringLiteral("appearance/theme_id"), id);
-    s1.setValue(QStringLiteral("appearance/theme"), id);
-    s1.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
+    QSettings ws(gridlock::core::ConfigManager::workstationSettingsPath(), QSettings::IniFormat);
+    ws.setValue(QStringLiteral("appearance/theme_id"), id);
+    ws.setValue(QStringLiteral("appearance/theme"), id);
+    ws.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
 
-    QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
-    s2.setValue(QStringLiteral("appearance/theme_id"), id);
-    s2.setValue(QStringLiteral("appearance/theme"), id);
-    s2.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
-
-    QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
-    s3.setValue(QStringLiteral("appearance/theme_id"), id);
-    s3.setValue(QStringLiteral("appearance/theme"), id);
-    s3.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
+    QSettings ds(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
+    ds.setValue(QStringLiteral("appearance/theme_id"), id);
+    ds.setValue(QStringLiteral("appearance/theme"), id);
+    ds.setValue(QStringLiteral("appearance/dark_mode"), m_darkMode);
 
     gridlock::core::ConfigManager::instance().setThemeName(id);
 }
 
 /**
- * @brief Restores active theme from ConfigManager / QSettings, applies it, and returns the theme ID.
+ * @brief Restores active theme from ConfigManager / unified INI settings, applies it, and returns the theme ID.
  * @return Restored active theme identifier.
  */
 QString ThemeManager::loadPersistedTheme() {
     QString themeId = gridlock::core::ConfigManager::instance().getThemeName();
     if (themeId.trimmed().isEmpty() || themeId == QStringLiteral("gridlock_slate")) {
-        QSettings s1(QStringLiteral("GridLock"), QStringLiteral("GridLockWorkstation"));
-        QString sVal = s1.value(QStringLiteral("appearance/theme_id")).toString();
+        QSettings ws(gridlock::core::ConfigManager::workstationSettingsPath(), QSettings::IniFormat);
+        QString sVal = ws.value(QStringLiteral("appearance/theme_id")).toString();
         if (!sVal.trimmed().isEmpty()) {
             themeId = sVal;
         } else {
-            QSettings s2(QStringLiteral("GridLock"), QStringLiteral("Workstation"));
-            sVal = s2.value(QStringLiteral("appearance/theme_id")).toString();
-            if (!sVal.trimmed().isEmpty()) {
-                themeId = sVal;
-            } else {
-                QSettings s3(QStringLiteral("gridlock"), QStringLiteral("debugger"));
-                sVal = s3.value(QStringLiteral("appearance/theme_id"),
-                                s3.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString();
-                if (!sVal.trimmed().isEmpty()) themeId = sVal;
-            }
+            QSettings ds(gridlock::core::ConfigManager::debuggerSettingsPath(), QSettings::IniFormat);
+            sVal = ds.value(QStringLiteral("appearance/theme_id"),
+                            ds.value(QStringLiteral("appearance/theme"), QStringLiteral("gridlock_slate"))).toString();
+            if (!sVal.trimmed().isEmpty()) themeId = sVal;
         }
     }
     if (!themeId.trimmed().isEmpty()) {

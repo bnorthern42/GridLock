@@ -279,7 +279,14 @@ bool MainWindow::selectTargetByName(const QString& targetName) {
     if (QFileInfo(resolvedPath).isDir()) return true;
     if (m_disassemblyView) for (uint64_t oldBp : m_disassemblyView->bookmarkedAddresses()) m_disassemblyView->toggleBookmark(oldBp);
     if (isRunnableElfExecutable(resolvedPath)) { m_useRealBinaryTarget = true; loadBinaryTarget(resolvedPath); }
-    else { m_currentFile = resolvedPath; loadSourceFile(resolvedPath); ensureTargetBinaryCompiled(); }
+    else {
+        m_currentFile = resolvedPath;
+        loadSourceFile(resolvedPath);
+        static const QStringList kCompilableExts = {QStringLiteral("c"), QStringLiteral("cc"), QStringLiteral("cpp"),
+                                                    QStringLiteral("cxx"), QStringLiteral("cu"), QStringLiteral("f"),
+                                                    QStringLiteral("f90"), QStringLiteral("f95"), QStringLiteral("s")};
+        if (kCompilableExts.contains(QFileInfo(resolvedPath).suffix().toLower())) ensureTargetBinaryCompiled();
+    }
     if (SourceCodeView* sv = sourceCodeView()) {
         for (int bpLine : sv->breakpoints()) {
             if (const uint64_t addr = sourceLineToAddress(bpLine); m_disassemblyView && addr != 0ULL && !m_disassemblyView->isBookmarked(addr)) {
