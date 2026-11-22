@@ -14,16 +14,21 @@
 
 #include <QAbstractItemView>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QMessageBox>
+#include <QPointer>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QVBoxLayout>
+#include <memory>
 
 #include "../../core/hpc/DapCoordinator.hpp"
 #include "../../core/hpc/GdbRankCoordinator.hpp"
@@ -850,25 +855,20 @@ QString ArrayPlotDialog::buildGnuplotScript(const QString& dataPath) const {
 
 bool ArrayPlotDialog::exportCsv(const QString& filePath) const {
     if (filePath.trimmed().isEmpty() || m_currentSamples.isEmpty()) return false;
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    QFile file(filePath); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
     QTextStream out(&file);
     if (plotMode() == PlotMode::ScalarHistory) {
         out << "stop,value\n";
         for (int i = 0; i < m_currentSamples.size(); ++i) out << i << "," << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
     } else if (m_rows > 1) {
         out << "row,col,value\n";
-        for (int r = 0; r < m_rows; ++r)
-            for (int c = 0; c < m_cols; ++c) {
-                const double v = m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c);
-                out << r << "," << c << "," << QString::number(v, 'g', 12) << "\n";
-            }
+        for (int r = 0; r < m_rows; ++r) for (int c = 0; c < m_cols; ++c)
+            out << r << "," << c << "," << QString::number(m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c), 'g', 12) << "\n";
     } else {
         out << "index,value,prev_value,delta\n";
         for (int i = 0; i < m_currentSamples.size(); ++i) {
             const double cur = m_currentSamples.at(i), prev = (i < m_previousSamples.size()) ? m_previousSamples.at(i) : cur;
-            out << (m_sliceOffset + i * m_sliceStride) << "," << QString::number(cur, 'g', 12) << ","
-                << QString::number(prev, 'g', 12) << "," << QString::number(cur - prev, 'g', 12) << "\n";
+            out << (m_sliceOffset + i * m_sliceStride) << "," << QString::number(cur, 'g', 12) << "," << QString::number(prev, 'g', 12) << "," << QString::number(cur - prev, 'g', 12) << "\n";
         }
     }
     return true;
@@ -878,68 +878,76 @@ bool ArrayPlotDialog::savePng(const QString& filePath) {
     return m_canvas && !filePath.trimmed().isEmpty() && m_canvas->grab().save(filePath, "PNG");
 }
 
-bool ArrayPlotDialog::openInGnuplot() const {
-    if (m_currentSamples.isEmpty()) return false;
+QString ArrayPlotDialog::resolveGnuplotExecutable(const QString& overridePath) {
+    const QString custom = overridePath.trimmed();
+    if (!custom.isEmpty()) return (QFileInfo::exists(custom) && QFileInfo(custom).isExecutable()) ? custom : QStandardPaths::findExecutable(custom);
+    return QStandardPaths::findExecutable(QStringLiteral("gnuplot"));
+}
+
+bool ArrayPlotDialog::openInGnuplot(bool showMessageBox) {
+    const bool allowModal = showMessageBox && QGuiApplication::platformName() != QLatin1String("offscreen");
+    auto report = [&](const QString& status, const QString& title, const QString& detail, bool isInfo) {
+        setHoverSummaryText(status);
+        if (allowModal) { if (isInfo) QMessageBox::information(this, title, detail); else QMessageBox::warning(this, title, detail); }
+    };
+    if (m_currentSamples.isEmpty()) {
+        report(QStringLiteral("Cannot open Gnuplot: no plotted samples available."), tr("Open in Gnuplot"), tr("Plot an array expression first before opening in Gnuplot."), true);
+        return false;
+    }
+    const QString bin = resolveGnuplotExecutable(m_gnuplotExecutableOverride);
+    if (bin.isEmpty()) {
+        report(QStringLiteral("Gnuplot executable not found in PATH."), tr("Gnuplot Not Found"),
+               tr("Could not find 'gnuplot' on PATH.\n\nInstall it with:\n  sudo pacman -S gnuplot\n  sudo dnf install gnuplot\n  sudo apt install gnuplot\n\nOr export data using Export CSV."), false);
+        return false;
+    }
     const QString dataPath = QDir::temp().filePath(QStringLiteral("gridlock_array_plot.dat"));
     const QString scriptPath = QDir::temp().filePath(QStringLiteral("gridlock_array_plot.gp"));
     QFile df(dataPath);
-    if (!df.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    if (!df.open(QIODevice::WriteOnly | QIODevice::Text)) { report(QStringLiteral("Failed to write Gnuplot data file."), tr("Gnuplot Error"), tr("Could not write temporary data file: %1").arg(dataPath), false); return false; }
     QTextStream dout(&df);
     if (m_rows > 1) {
-        for (int r = 0; r < m_rows; ++r) {
-            for (int c = 0; c < m_cols; ++c) {
-                if (c > 0) dout << " ";
-                dout << QString::number(m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c), 'g', 12);
-            }
-            dout << "\n";
-        }
+        for (int r = 0; r < m_rows; ++r) { for (int c = 0; c < m_cols; ++c) { if (c > 0) dout << " "; dout << QString::number(m_tensorModel ? m_tensorModel->cellValue(r, c) : m_currentSamples.value(r * m_cols + c), 'g', 12); } dout << "\n"; }
     } else {
-        for (int i = 0; i < m_currentSamples.size(); ++i) {
-            const int x = (plotMode() == PlotMode::ScalarHistory) ? i : (m_sliceOffset + i * m_sliceStride);
-            dout << x << " " << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
-        }
+        for (int i = 0; i < m_currentSamples.size(); ++i) dout << ((plotMode() == PlotMode::ScalarHistory) ? i : (m_sliceOffset + i * m_sliceStride)) << " " << QString::number(m_currentSamples.at(i), 'g', 12) << "\n";
     }
     df.close();
     QFile sf(scriptPath);
-    if (!sf.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
-    QTextStream(&sf) << buildGnuplotScript(dataPath);
-    sf.close();
-    if (const QString bin = QStandardPaths::findExecutable(QStringLiteral("gnuplot")); !bin.isEmpty())
-        QProcess::startDetached(bin, {QStringLiteral("-persist"), scriptPath});
+    if (!sf.open(QIODevice::WriteOnly | QIODevice::Text)) { report(QStringLiteral("Failed to write Gnuplot script."), tr("Gnuplot Error"), tr("Could not write temporary Gnuplot script: %1").arg(scriptPath), false); return false; }
+    QTextStream(&sf) << buildGnuplotScript(dataPath); sf.close();
+    auto* proc = new QProcess(qApp);
+    QPointer<ArrayPlotDialog> self(this);
+    auto elapsed = std::make_shared<QElapsedTimer>(); elapsed->start();
+    connect(proc, &QProcess::errorOccurred, proc, [proc, self, allowModal](QProcess::ProcessError) {
+        const QString err = QString::fromUtf8(proc->readAllStandardError()).trimmed();
+        const QString msg = QStringLiteral("Gnuplot launch failed: %1").arg(err.isEmpty() ? proc->errorString() : err);
+        if (self) { self->setHoverSummaryText(msg); if (allowModal) QMessageBox::warning(self, QObject::tr("Gnuplot Launch Failed"), msg); }
+        proc->deleteLater();
+    });
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), proc, [proc, self, elapsed, allowModal](int code, QProcess::ExitStatus st) {
+        if ((st != QProcess::NormalExit || code != 0) && elapsed->elapsed() <= 1500) {
+            const QString err = QString::fromUtf8(proc->readAllStandardError()).trimmed();
+            const QString msg = QStringLiteral("Gnuplot exited (%1): %2").arg(code).arg(err.isEmpty() ? QStringLiteral("unknown error") : err);
+            if (self) { self->setHoverSummaryText(msg); if (allowModal) QMessageBox::warning(self, QObject::tr("Gnuplot Error"), msg); }
+        }
+        proc->deleteLater();
+    });
+    proc->start(bin, {QStringLiteral("-persist"), scriptPath});
+    setHoverSummaryText(QStringLiteral("Launched Gnuplot (%1)").arg(QFileInfo(bin).fileName()));
     return true;
 }
 
 void ArrayPlotDialog::setHoverSummaryText(const QString& text) { if (m_hoverLabel) m_hoverLabel->setText(text); }
 
 void ArrayPlotDialog::reloadStyle() {
-    const auto& tm = gridlock::core::ThemeManager::instance();
-    const auto pal = gridlock::core::ThemeManager::paletteForTheme(tm.activeThemeId());
-    const QString bg = pal.isDark ? QStringLiteral("#141821") : QStringLiteral("#f8fafc");
-    const QString inputBg = pal.isDark ? QStringLiteral("#0d1117") : QStringLiteral("#ffffff");
-    const QString btnBg = pal.isDark ? QStringLiteral("#252b38") : QStringLiteral("#e2e8f0");
-    const QString muted = pal.isDark ? QStringLiteral("#94a3b8") : QStringLiteral("#475569");
-
-    setStyleSheet(QStringLiteral(
-        "QDialog#ArrayPlotDialog { background: %1; color: %2; }"
-        "QLineEdit, QComboBox, QSpinBox, QTableView { background: %3; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
-        "QHeaderView::section { background: %5; color: %2; border: 1px solid %4; padding: 2px 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }"
-        "QPushButton { background: %5; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 8px; font-size: 11px; }"
-        "QPushButton:checked { border: 1px solid %6; color: %6; font-weight: bold; }"
-        "QPushButton:hover { border: 1px solid %6; }"
-        "QPushButton:disabled { color: %7; }"
-        "QLabel#arrayPlotStatsLabel { color: %6; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; }"
-        "QLabel#arrayPlotHoverLabel { color: %7; font-family: 'JetBrains Mono', monospace; font-size: 10px; }")
-                      .arg(bg, pal.textHex, inputBg, pal.borderHex, btnBg, pal.accentHex, muted));
+    const auto pal = gridlock::core::ThemeManager::paletteForTheme(gridlock::core::ThemeManager::instance().activeThemeId());
+    const QString bg = pal.isDark ? QStringLiteral("#141821") : QStringLiteral("#f8fafc"), inputBg = pal.isDark ? QStringLiteral("#0d1117") : QStringLiteral("#ffffff"), btnBg = pal.isDark ? QStringLiteral("#252b38") : QStringLiteral("#e2e8f0"), muted = pal.isDark ? QStringLiteral("#94a3b8") : QStringLiteral("#475569");
+    setStyleSheet(QStringLiteral("QDialog#ArrayPlotDialog { background: %1; color: %2; } QLineEdit, QComboBox, QSpinBox, QTableView { background: %3; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; } QHeaderView::section { background: %5; color: %2; border: 1px solid %4; padding: 2px 4px; font-family: 'JetBrains Mono', monospace; font-size: 10px; } QPushButton { background: %5; color: %2; border: 1px solid %4; border-radius: 3px; padding: 2px 8px; font-size: 11px; } QPushButton:checked { border: 1px solid %6; color: %6; font-weight: bold; } QPushButton:hover { border: 1px solid %6; } QPushButton:disabled { color: %7; } QLabel#arrayPlotStatsLabel { color: %6; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; } QLabel#arrayPlotHoverLabel { color: %7; font-family: 'JetBrains Mono', monospace; font-size: 10px; }").arg(bg, pal.textHex, inputBg, pal.borderHex, btnBg, pal.accentHex, muted));
     if (m_canvas) m_canvas->update();
 }
 
 void ArrayPlotDialog::setCompletionCandidates(const QStringList& candidates) {
-    QStringList deduped;
-    QSet<QString> seen;
-    auto push = [&](const QString& raw) {
-        const QString s = raw.trimmed();
-        if (!s.isEmpty() && !seen.contains(s)) { seen.insert(s); deduped.append(s); }
-    };
+    QStringList deduped; QSet<QString> seen;
+    auto push = [&](const QString& raw) { const QString s = raw.trimmed(); if (!s.isEmpty() && !seen.contains(s)) { seen.insert(s); deduped.append(s); } };
     for (const QString& c : candidates) push(c);
     if (m_exprEdit && !m_exprEdit->text().trimmed().isEmpty()) push(m_exprEdit->text().trimmed());
     m_completionCandidates = deduped;

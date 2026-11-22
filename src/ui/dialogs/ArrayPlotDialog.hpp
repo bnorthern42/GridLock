@@ -278,11 +278,17 @@ public:
     bool exportCsv(const QString& filePath) const;
     /** @brief Renders the plot canvas to a PNG image file on disk. */
     bool savePng(const QString& filePath);
-    /** @brief Pipes the active 1D or 2D dataset to an external `gnuplot -persist` process if installed. */
-    bool openInGnuplot() const;
+    /** @brief Resolves the `gnuplot` executable path (or @p overridePath when provided). */
+    static QString resolveGnuplotExecutable(const QString& overridePath = QString());
+    /** @brief Overrides the `gnuplot` executable path (primarily for testing). */
+    void setGnuplotExecutableOverride(const QString& path) { m_gnuplotExecutableOverride = path; }
+    /** @brief Pipes the active 1D or 2D dataset to an external `gnuplot -persist` process with preflight/stderr checks. */
+    bool openInGnuplot(bool showMessageBox = true);
 
-    /** @brief Updates the hover readout bar at the bottom of the dialog. */
+    /** @brief Updates the hover/status readout bar at the bottom of the dialog. */
     void setHoverSummaryText(const QString& text);
+    /** @brief Returns the current text displayed in the plotter status strip. */
+    QString statusText() const { return m_hoverLabel ? m_hoverLabel->text() : QString(); }
     /** @brief Reloads dialog colors and widget styling from the active ThemeManager theme. */
     void reloadStyle();
 
@@ -393,6 +399,7 @@ private:
     QTableView* m_tensorTableView = nullptr;
     QLabel* m_statsLabel = nullptr;
     QLabel* m_hoverLabel = nullptr;
+    QString m_gnuplotExecutableOverride;
 };
 
 }  // namespace gridlock::ui
