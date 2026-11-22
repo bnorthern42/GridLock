@@ -368,7 +368,8 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
         {QStringLiteral("perspectives"), QStringLiteral("Workspace Perspectives")},
     };
     auto labelForToken = [](const QString& tok) -> QString {
-        if (tok == QStringLiteral("spacer")) return QStringLiteral("[ Flexible Spacer ]");
+        if (tok == QStringLiteral("spacer")) return QStringLiteral("[ Spacer (24px) ]");
+        if (tok == QStringLiteral("flex_spacer")) return QStringLiteral("[ Flex Spring ]");
         if (tok == QStringLiteral("separator")) return QStringLiteral("[ Separator ]");
         for (const auto& p : kNamedControls) if (p.first == tok) return p.second;
         return tok;
@@ -388,7 +389,7 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
     sep->setObjectName(QStringLiteral("separator"));
     root->addWidget(sep);
     auto* desc = new QLabel(
-        tr("Reorder toolbar items, insert flexible spacers or vertical separators, or hide optional controls."), page);
+        tr("Reorder toolbar items, insert fixed 24px spacers, right-aligning flex springs, or vertical separators, or hide optional controls."), page);
     desc->setWordWrap(true);
     root->addWidget(desc);
 
@@ -406,13 +407,14 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
     auto makeBtn = [&](const QString& text, const QString& obj) {
         auto* b = new QPushButton(text, page);
         b->setObjectName(obj);
-        b->setMinimumWidth(132);
+        b->setMinimumWidth(140);
         btnCol->addWidget(b);
         return b;
     };
     auto* moveUpBtn = makeBtn(tr("Move Up"), QStringLiteral("toolbarMoveUpBtn"));
     auto* moveDownBtn = makeBtn(tr("Move Down"), QStringLiteral("toolbarMoveDownBtn"));
-    auto* addSpacerBtn = makeBtn(tr("Add Spacer"), QStringLiteral("toolbarAddSpacerBtn"));
+    auto* addSpacerBtn = makeBtn(tr("Add Spacer (24px)"), QStringLiteral("toolbarAddSpacerBtn"));
+    auto* addFlexBtn = makeBtn(tr("Add Flex Spring"), QStringLiteral("toolbarAddFlexSpacerBtn"));
     auto* addSepBtn = makeBtn(tr("Add Separator"), QStringLiteral("toolbarAddSeparatorBtn"));
     auto* removeBtn = makeBtn(tr("Remove"), QStringLiteral("toolbarRemoveItemBtn"));
     btnCol->addStretch(1);
@@ -428,7 +430,7 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
     addHiddenRow->addWidget(m_toolbarHiddenCombo, 1);
     m_toolbarAddHiddenBtn = new QPushButton(tr("Add Control"), page);
     m_toolbarAddHiddenBtn->setObjectName(QStringLiteral("toolbarAddHiddenControlBtn"));
-    m_toolbarAddHiddenBtn->setMinimumWidth(132);
+    m_toolbarAddHiddenBtn->setMinimumWidth(140);
     addHiddenRow->addWidget(m_toolbarAddHiddenBtn);
     root->addLayout(addHiddenRow);
 
@@ -486,6 +488,7 @@ QWidget* PreferencesDialog::createToolbarSettingsPage(QWidget* parent) {
         }
     });
     connect(addSpacerBtn, &QPushButton::clicked, this, [insertToken]() { insertToken(QStringLiteral("spacer")); });
+    connect(addFlexBtn, &QPushButton::clicked, this, [insertToken]() { insertToken(QStringLiteral("flex_spacer")); });
     connect(addSepBtn, &QPushButton::clicked, this, [insertToken]() { insertToken(QStringLiteral("separator")); });
     connect(removeBtn, &QPushButton::clicked, this, [this, refreshHiddenCombo]() {
         const int r = m_toolbarLayoutList->currentRow();

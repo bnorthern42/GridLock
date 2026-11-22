@@ -110,7 +110,7 @@ void MainWindow::setupToolbar() {
   m_targetSelector->setMinimumContentsLength(12);
   m_targetSelector->setMinimumWidth(165);
   m_targetSelector->setMaximumWidth(165);
-  m_targetSelector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  m_targetSelector->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
   m_targetSelector->setFixedHeight(26);
   if (m_targetSelector->view()) { m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle); m_targetSelector->view()->setMinimumWidth(260); }
   QFont selectorFont = m_targetSelector->font();
@@ -483,10 +483,18 @@ void MainWindow::rebuildToolbarFromLayout(const QStringList& layout) {
     if (auto* wa = qobject_cast<QWidgetAction*>(a); wa && wa->defaultWidget()) wa->defaultWidget()->show();
   };
 
+  static const QSet<QString> kControlTokens = {
+      QStringLiteral("target_selector"), QStringLiteral("config_menu"),
+      QStringLiteral("rank_spin"),       QStringLiteral("build"),
+      QStringLiteral("run"),             QStringLiteral("continue"),
+      QStringLiteral("step_over"),       QStringLiteral("step_into"),
+      QStringLiteral("step_out"),        QStringLiteral("pause"),
+      QStringLiteral("stop"),            QStringLiteral("record"),
+      QStringLiteral("search_everywhere"), QStringLiteral("perspectives")};
   const QStringList effective = layout.isEmpty() ? gridlock::core::ConfigManager::defaultToolbarLayout() : layout;
   bool addedNavSeek = false;
-  for (const QString& rawTok : effective) {
-    const QString tok = rawTok.trimmed().toLower();
+  for (int i = 0; i < effective.size(); ++i) {
+    const QString tok = effective.at(i).trimmed().toLower();
     if (tok == QStringLiteral("target_selector")) {
       showAndAddWa(m_targetSelectorAct);
     } else if (tok == QStringLiteral("config_menu")) {
@@ -533,13 +541,33 @@ void MainWindow::rebuildToolbarFromLayout(const QStringList& layout) {
       m_dynamicToolbarActions.append(toolbar->addSeparator());
     } else if (tok == QStringLiteral("spacer")) {
       auto* sp = new QWidget(toolbar);
-      sp->setObjectName(QStringLiteral("toolbarFlexSpacer"));
-      sp->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+      sp->setObjectName(QStringLiteral("toolbarFixedSpacer"));
+      sp->setFixedSize(24, 26);
+      sp->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
       sp->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
       QAction* sa = toolbar->addWidget(sp);
       sp->show();
       m_dynamicToolbarActions.append(sa);
       m_dynamicToolbarWidgets.append(sp);
+    } else if (tok == QStringLiteral("flex_spacer")) {
+      bool hasVisibleControlAfter = false;
+      for (int j = i + 1; j < effective.size(); ++j) {
+        const QString nxt = effective.at(j).trimmed().toLower();
+        if (kControlTokens.contains(nxt) && (nxt != QStringLiteral("perspectives") || !m_perspActs.isEmpty())) {
+          hasVisibleControlAfter = true;
+          break;
+        }
+      }
+      if (hasVisibleControlAfter) {
+        auto* sp = new QWidget(toolbar);
+        sp->setObjectName(QStringLiteral("toolbarFlexSpacer"));
+        sp->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        sp->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+        QAction* sa = toolbar->addWidget(sp);
+        sp->show();
+        m_dynamicToolbarActions.append(sa);
+        m_dynamicToolbarWidgets.append(sp);
+      }
     }
   }
   if (!addedNavSeek) {

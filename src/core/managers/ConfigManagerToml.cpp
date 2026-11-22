@@ -198,13 +198,23 @@ QStringList normalizeToolbarTokens(const QStringList& raw) {
   QSet<QString> seenControls;
   for (const QString& entry : raw) {
     const QString tok = entry.trimmed().toLower();
-    if (tok == QStringLiteral("spacer") || tok == QStringLiteral("separator")) {
+    if (tok == QStringLiteral("spacer") || tok == QStringLiteral("flex_spacer") || tok == QStringLiteral("separator")) {
       out.append(tok);
     } else if (kKnownControls.contains(tok) && !seenControls.contains(tok)) {
       seenControls.insert(tok);
       out.append(tok);
     }
   }
+  static const QStringList kLegacyDefault = {
+      QStringLiteral("target_selector"), QStringLiteral("config_menu"),
+      QStringLiteral("rank_spin"),       QStringLiteral("separator"),
+      QStringLiteral("build"),           QStringLiteral("run"),
+      QStringLiteral("continue"),        QStringLiteral("step_over"),
+      QStringLiteral("step_into"),       QStringLiteral("step_out"),
+      QStringLiteral("pause"),           QStringLiteral("stop"),
+      QStringLiteral("record"),          QStringLiteral("spacer"),
+      QStringLiteral("search_everywhere"), QStringLiteral("perspectives")};
+  if (out == kLegacyDefault) out[13] = QStringLiteral("flex_spacer");
   return out;
 }
 }  // namespace

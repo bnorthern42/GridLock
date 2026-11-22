@@ -15,11 +15,21 @@
 #include <QDir>
 #include <QSettings>
 #include <QStringList>
+#include <QTemporaryDir>
 
 namespace gridlock::core {
 
 /** @brief Initializes the singleton with the current working directory and loads `config.toml`. */
 ConfigManager::ConfigManager() {
+  if (!qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR") &&
+      QCoreApplication::applicationName().endsWith(QStringLiteral("_tests"))) {
+    static QTemporaryDir s_testCfgDir;
+    if (s_testCfgDir.isValid()) {
+      qputenv("GRIDLOCK_TEST_CONFIG_DIR", s_testCfgDir.path().toUtf8());
+      QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, s_testCfgDir.path());
+      QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, s_testCfgDir.path());
+    }
+  }
   m_workspacePath = QDir::currentPath();
   m_debuggerEngine.clear();
   loadConfig();
@@ -314,7 +324,7 @@ QStringList ConfigManager::defaultToolbarLayout() {
       QStringLiteral("pause"),
       QStringLiteral("stop"),
       QStringLiteral("record"),
-      QStringLiteral("spacer"),
+      QStringLiteral("flex_spacer"),
       QStringLiteral("search_everywhere"),
       QStringLiteral("perspectives"),
   };
