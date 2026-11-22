@@ -34,6 +34,7 @@
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStyle>
 #include <QToolBar>
 #include <QToolButton>
 #include <QWidgetAction>
@@ -68,15 +69,20 @@ void MainWindow::setupToolbar() {
   toolbar->setMovable(true);
   toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
   toolbar->setFixedHeight(32);
-  toolbar->setContentsMargins(2, 0, 2, 0);
+  toolbar->setIconSize(QSize(10, 10));
+  toolbar->setContentsMargins(1, 0, 1, 0);
+  toolbar->setStyleSheet(QStringLiteral(
+      "#MainToolbar QToolButton, #MainToolbar QPushButton { padding: 1px 2px; margin: 0px; min-width: 0px; }"
+      " #MainToolbar QToolButton[popupMode=\"1\"] { padding-right: 16px; }"));
+  if (QLayout* tbLayout = toolbar->layout()) tbLayout->setSpacing(0);
 
   // Target selector + inline ⚙ Launch Options popover (--args, Working Directory, Stop at main()).
   m_targetSelector = new QComboBox(toolbar);
   m_targetSelector->setObjectName(QStringLiteral("toolbarTargetSelector"));
   m_targetSelector->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  m_targetSelector->setMinimumContentsLength(15);
-  m_targetSelector->setMinimumWidth(168);
-  m_targetSelector->setMaximumWidth(190);
+  m_targetSelector->setMinimumContentsLength(12);
+  m_targetSelector->setMinimumWidth(165);
+  m_targetSelector->setMaximumWidth(166);
   m_targetSelector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   m_targetSelector->setFixedHeight(26);
   if (m_targetSelector->view()) { m_targetSelector->view()->setTextElideMode(Qt::ElideMiddle); m_targetSelector->view()->setMinimumWidth(260); }
@@ -135,9 +141,9 @@ void MainWindow::setupToolbar() {
   // Inline ⚙ Launch Options popover bound directly to ProjectSettings (--args, Working Directory, Stop at main()).
   m_launchOptionsBtn = new QToolButton(toolbar);
   m_launchOptionsBtn->setObjectName(QStringLiteral("toolbarLaunchOptionsBtn"));
-  m_launchOptionsBtn->setText(QStringLiteral("⚙"));
+  m_launchOptionsBtn->setText(QStringLiteral("Config"));
   m_launchOptionsBtn->setPopupMode(QToolButton::InstantPopup);
-  m_launchOptionsBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  m_launchOptionsBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
   m_launchOptionsBtn->setFixedHeight(26);
   m_launchOptionsBtn->setToolTip(
       QStringLiteral("Launch Options: Program Arguments (--args), Working Directory, and Entry Breakpoint"));
@@ -220,8 +226,8 @@ void MainWindow::setupToolbar() {
   m_rankCountSpin->setPrefix(QStringLiteral("np: "));
   m_rankCountSpin->setRange(1, 256);
   m_rankCountSpin->setValue(8);
-  m_rankCountSpin->setMinimumWidth(82);
-  m_rankCountSpin->setMaximumWidth(104);
+  m_rankCountSpin->setMinimumWidth(80);
+  m_rankCountSpin->setMaximumWidth(80);
   m_rankCountSpin->setFixedHeight(26);
   m_rankCountSpin->setFont(selectorFont);
   m_rankCountSpin->setToolTip(QStringLiteral("MPI Rank Count (-np): number of parallel processes spawned when launching the target"));
@@ -270,14 +276,13 @@ void MainWindow::setupToolbar() {
                            });
   m_runAction->setCheckable(true);
   if (QWidget* runBtn = toolbar->widgetForAction(m_runAction)) runBtn->setObjectName(QStringLiteral("toolbarRunTargetBtn"));
-  toolbar->addSeparator();
 
   // Multi-rank execution scope pill: All Ranks vs. Focused Rank k (shown automatically when ranks > 1).
   m_executionScopeCombo = new QComboBox(toolbar);
   m_executionScopeCombo->setObjectName(QStringLiteral("toolbarExecutionScopeCombo"));
   m_executionScopeCombo->setFont(selectorFont);
   m_executionScopeCombo->setMinimumWidth(115);
-  m_executionScopeCombo->setMaximumWidth(140);
+  m_executionScopeCombo->setMaximumWidth(115);
   m_executionScopeCombo->setFixedHeight(26);
   m_executionScopeCombo->addItem(QStringLiteral("All Ranks"), -1);
   m_executionScopeCombo->addItem(QStringLiteral("Rank 0"), 0);
@@ -287,8 +292,14 @@ void MainWindow::setupToolbar() {
   m_executionScopeAction->setVisible(false);
 
   // Continue (F5), Step Over (F10), Step Into (F11 + stepi/nexti menu), Step Out (Shift+F11), Pause, Pause All (F6), Stop (Shift+F5).
-  m_continueAction = makeDbgAct(QStringLiteral("Continue"), QStringLiteral("debug.continue"), QStringLiteral("⏭"),
+  m_continueAction = makeDbgAct(QStringLiteral("Continue"), QStringLiteral("debug.continue"), QStringLiteral("Cont"),
                                 QKeySequence(Qt::Key_F5), &MainWindow::continueExecutionWorkflow);
+  if (style()) m_continueAction->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+  if (auto* contBtn = qobject_cast<QToolButton*>(toolbar->widgetForAction(m_continueAction))) {
+    contBtn->setObjectName(QStringLiteral("toolbarContinueBtn"));
+    contBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    contBtn->setStyleSheet(QStringLiteral("QToolButton { padding: 2px 4px; }"));
+  }
   connect(m_continueAction, &QAction::changed, this, &MainWindow::syncExecutionScopeUi);
   m_stepOverAction = makeDbgAct(QStringLiteral("Step Over"), QStringLiteral("debug.step_over"), QStringLiteral("↷ Over"),
                                 QKeySequence(Qt::Key_F10), &MainWindow::stepOverWorkflow);
@@ -311,7 +322,7 @@ void MainWindow::setupToolbar() {
   m_pauseAction = makeDbgAct(QStringLiteral("Pause"), QStringLiteral("actionPauseRank"), QStringLiteral("⏸"),
                              QKeySequence(), &MainWindow::pauseRankWorkflow);
   m_pauseAllAction = makeDbgAct(QStringLiteral("Pause All Ranks"), QStringLiteral("actionPauseAllRanks"),
-                                QStringLiteral("⏸ All"), QKeySequence(Qt::Key_F6), &MainWindow::pauseAllRanksWorkflow, false);
+                                QStringLiteral("⏸All"), QKeySequence(Qt::Key_F6), &MainWindow::pauseAllRanksWorkflow, false);
   auto* pauseAllBtn = new QToolButton(toolbar);
   pauseAllBtn->setObjectName(QStringLiteral("toolbarPauseAllRanksBtn"));
   pauseAllBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -391,7 +402,7 @@ void MainWindow::setupToolbar() {
   m_seekBar->setPlaceholderText(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P)"));
   m_seekBar->setToolTip(QStringLiteral("Search Everywhere (Double Shift / Ctrl+P) — or Go to Address / Symbol (Ctrl+G)"));
   m_seekBar->setFixedHeight(26);
-  m_seekBar->setFixedWidth(48);
+  m_seekBar->setFixedWidth(40);
   QAction* seekAct = toolbar->addWidget(m_seekBar);
   seekAct->setObjectName(QStringLiteral("actionToolbarSeekBar"));
   seekAct->setVisible(false);
