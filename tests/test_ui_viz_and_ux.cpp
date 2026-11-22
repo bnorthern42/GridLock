@@ -229,6 +229,14 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     palette.setFilterText(QStringLiteral(">")); QCOMPARE(palette.selectedIndex(), 0);
     QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 1); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QCOMPARE(palette.selectedIndex(), 0);
     QTest::keyClick(palette.inputEdit(), Qt::Key_Up); QCOMPARE(palette.selectedIndex(), 1); QTest::keyClick(palette.inputEdit(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
+    auto* closeBtn = palette.findChild<QToolButton*>(QStringLiteral("commandPaletteCloseBtn"));
+    QVERIFY(closeBtn && closeBtn->text() == QStringLiteral("ESC") && closeBtn->toolTip() == QStringLiteral("Close Command Palette (Esc)") && closeBtn->focusPolicy() == Qt::NoFocus);
+    palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); palette.resultsList()->setFocus(); QTest::keyClick(palette.resultsList(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
+    palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); palette.resultsList()->viewport()->setFocus(); QTest::keyClick(palette.resultsList()->viewport(), Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
+    for (QAbstractButton* btn : palette.findChildren<QAbstractButton*>()) {
+        palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); QTest::keyClick(btn, Qt::Key_Escape); QVERIFY(!palette.isVisible() && firedId == -1);
+    }
+    palette.openWithPrefix(QStringLiteral(">")); QVERIFY(palette.isVisible()); QTest::mouseClick(closeBtn, Qt::LeftButton); QVERIFY(!palette.isVisible() && firedId == -1);
     palette.openWithPrefix(QStringLiteral(">")); QTest::keyClick(palette.inputEdit(), Qt::Key_Down); QTest::keyClick(palette.inputEdit(), Qt::Key_Return); QVERIFY(!palette.isVisible() && firedId == 2);
     static QStringList s_capturedWarnings; s_capturedWarnings.clear();
     const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) { if (type == QtWarningMsg) s_capturedWarnings.append(msg); });
@@ -244,7 +252,10 @@ void TestMainWindowUI::testCommandPaletteFuzzyAndNavigation() {
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     auto* mwPalette = mw.findChild<CommandPaletteDialog*>(QStringLiteral("CommandPaletteDialog")); QVERIFY(mwPalette && mwPalette->isVisible() && mwPalette->filterText() == QStringLiteral(">") && mwPalette->resultCount() > 0);
     for (int i = 0; i < mwPalette->resultCount(); ++i) QCOMPARE(mwPalette->resultItemAt(i).category, PaletteItem::Category::Action);
-    QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Escape); QVERIFY(!mwPalette->isVisible());
+    mwPalette->resultsList()->setFocus(); QTest::keyClick(mwPalette->resultsList(), Qt::Key_Escape); QVERIFY(!mwPalette->isVisible());
+    QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
+    auto* mwCloseBtn = mwPalette->findChild<QToolButton*>(QStringLiteral("commandPaletteCloseBtn")); QVERIFY(mwPalette->isVisible() && mwCloseBtn != nullptr);
+    QTest::mouseClick(mwCloseBtn, Qt::LeftButton); QApplication::processEvents(); QVERIFY(!mwPalette->isVisible());
     QTest::keyClick(&mw, Qt::Key_P, Qt::ControlModifier); QApplication::processEvents(); QVERIFY(mwPalette->isVisible() && mwPalette->filterText().isEmpty() && mwPalette->resultCount() > 0);
     mwPalette->setFilterText(QStringLiteral("dr.cpp")); QVERIFY(mwPalette->resultCount() > 0 && mwPalette->resultItemAt(0).title.contains(QStringLiteral("deadlock_ring.cpp")));
     QTest::keyClick(mwPalette->inputEdit(), Qt::Key_Return); QApplication::processEvents(); QVERIFY(!mwPalette->isVisible() && mw.sourceCodeView() && mw.sourceCodeView()->currentFile().endsWith(QStringLiteral("deadlock_ring.cpp")));

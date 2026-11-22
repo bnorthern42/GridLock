@@ -13,8 +13,10 @@
 #include <algorithm>
 #include <limits>
 
+#include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QChildEvent>
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
@@ -28,6 +30,7 @@
 #include <QPainter>
 #include <QRegularExpression>
 #include <QSet>
+#include <QShortcut>
 #include <QStyledItemDelegate>
 #include <QTextBlock>
 #include <QTextCursor>
@@ -317,9 +320,18 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     m_countLabel->setObjectName(QStringLiteral("CommandPaletteCountLabel"));
     m_countLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
+    m_closeBtn = new QToolButton(this);
+    m_closeBtn->setObjectName(QStringLiteral("commandPaletteCloseBtn"));
+    m_closeBtn->setText(QStringLiteral("ESC"));
+    m_closeBtn->setToolTip(QStringLiteral("Close Command Palette (Esc)"));
+    m_closeBtn->setFocusPolicy(Qt::NoFocus);
+    m_closeBtn->setCursor(Qt::PointingHandCursor);
+    m_closeBtn->setFixedHeight(22);
+
     topBarLayout->addWidget(m_modePillLabel);
     topBarLayout->addWidget(m_inputEdit, 1);
     topBarLayout->addWidget(m_countLabel);
+    topBarLayout->addWidget(m_closeBtn);
     rootLayout->addLayout(topBarLayout);
 
     // Filtered results list widget with custom match-highlighting item delegate.
@@ -332,9 +344,14 @@ CommandPaletteDialog::CommandPaletteDialog(QWidget* parent)
     m_resultsList->setSelectionMode(QAbstractItemView::SingleSelection);
     rootLayout->addWidget(m_resultsList, 1);
 
-    // Install event filters on input and results list for seamless Up/Down/Enter/Escape routing.
-    m_inputEdit->installEventFilter(this);
-    m_resultsList->installEventFilter(this);
+    // Bind WidgetWithChildrenShortcut Escape shortcut and install event filters on this and all child widgets.
+    auto* escShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    escShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(escShortcut, &QShortcut::activated, this, &QDialog::reject);
+    connect(m_closeBtn, &QToolButton::clicked, this, &QDialog::reject);
+
+    installEventFilter(this);
+    for (QWidget* child : findChildren<QWidget*>()) child->installEventFilter(this);
 
     connect(m_inputEdit, &QLineEdit::textChanged, this, [this]() { refreshFilteredResults(); });
     connect(m_resultsList, &QListWidget::itemActivated, this, [this](QListWidgetItem*) { triggerSelected(); });
@@ -349,14 +366,19 @@ void CommandPaletteDialog::reloadStyle() {
     const QString bg = pal.isDark ? QStringLiteral("#131722") : QStringLiteral("#f8fafc");
     const QString inputBg = pal.isDark ? QStringLiteral("#0d1117") : QStringLiteral("#ffffff");
     const QString muted = pal.isDark ? QStringLiteral("#94a3b8") : QStringLiteral("#475569");
+    const QString capBg = pal.isDark ? QStringLiteral("#0f172a") : QStringLiteral("#e2e8f0");
+    const QString capBdr = pal.isDark ? QStringLiteral("#334155") : QStringLiteral("#cbd5e1");
+    const QString capFg = pal.isDark ? QStringLiteral("#cbd5e1") : QStringLiteral("#334155");
 
     setStyleSheet(QStringLiteral(
         "QDialog#CommandPaletteDialog { background-color: %1; border: 1px solid %2; border-radius: 8px; }"
         "QLineEdit#CommandPaletteInput { background-color: %3; color: %4; border: 1px solid %5; border-radius: 5px; padding: 4px 8px; font-size: 11pt; }"
         "QLabel#CommandPaletteModePill { background-color: %3; color: %5; border: 1px solid %5; border-radius: 4px; padding: 2px 8px; font-size: 8pt; font-weight: bold; }"
         "QLabel#CommandPaletteCountLabel { color: %6; font-size: 9pt; padding: 0 4px; }"
+        "QToolButton#commandPaletteCloseBtn { background-color: %7; color: %9; border: 1px solid %8; border-radius: 4px; padding: 1px 7px; margin: 0px; min-width: 34px; max-width: 46px; min-height: 20px; max-height: 22px; font-size: 8pt; font-weight: bold; }"
+        "QToolButton#commandPaletteCloseBtn:hover { border-color: %5; color: %4; }"
         "QListWidget#CommandPaletteResults { background-color: %1; color: %4; border: none; outline: none; }")
-                      .arg(bg, pal.borderHex, inputBg, pal.textHex, pal.accentHex, muted));
+                      .arg(bg, pal.borderHex, inputBg, pal.textHex, pal.accentHex, muted, capBg, capBdr, capFg));
     if (m_resultsList && m_resultsList->viewport()) m_resultsList->viewport()->update();
 }
 
@@ -444,14 +466,25 @@ bool CommandPaletteDialog::triggerSelected() {
 }
 
 bool CommandPaletteDialog::eventFilter(QObject* watched, QEvent* event) {
-    if ((watched == m_inputEdit || watched == m_resultsList) && event->type() == QEvent::KeyPress) {
+    if (!event) return QDialog::eventFilter(watched, event);
+    if (event->type() == QEvent::ChildAdded) {
+        if (auto* cw = qobject_cast<QWidget*>(static_cast<QChildEvent*>(event)->child())) cw->installEventFilter(this);
+    } else if (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress) {
         auto* ke = static_cast<QKeyEvent*>(event);
-        const int key = ke->key();
-        const auto mods = ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
-        if (key == Qt::Key_Down || (key == Qt::Key_N && mods == Qt::ControlModifier)) { moveSelection(+1); return true; }
-        if (key == Qt::Key_Up || (key == Qt::Key_P && mods == Qt::ControlModifier)) { moveSelection(-1); return true; }
-        if (key == Qt::Key_Return || key == Qt::Key_Enter) { triggerSelected(); return true; }
-        if (key == Qt::Key_Escape) { reject(); return true; }
+        if (ke->key() == Qt::Key_Escape) {
+            ke->accept();
+            if (isVisible()) reject();
+            return true;
+        }
+        if (event->type() == QEvent::KeyPress &&
+            (watched == this || watched == m_inputEdit || watched == m_resultsList ||
+             (m_resultsList && watched == m_resultsList->viewport()))) {
+            const int key = ke->key();
+            const auto mods = ke->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+            if (key == Qt::Key_Down || (key == Qt::Key_N && mods == Qt::ControlModifier)) { moveSelection(+1); return true; }
+            if (key == Qt::Key_Up || (key == Qt::Key_P && mods == Qt::ControlModifier)) { moveSelection(-1); return true; }
+            if (key == Qt::Key_Return || key == Qt::Key_Enter) { triggerSelected(); return true; }
+        }
     }
     return QDialog::eventFilter(watched, event);
 }

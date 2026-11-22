@@ -20,6 +20,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QString>
+#include <QToolButton>
 #include <QVector>
 #include <QWidget>
 
@@ -195,6 +196,12 @@ public:
     QListWidget* resultsList() const { return m_resultsList; }
 
     /**
+     * @brief Accessor for the integrated ESC keycap close button (#commandPaletteCloseBtn).
+     * @return Pointer to the ESC close QToolButton.
+     */
+    QToolButton* closeButton() const { return m_closeBtn; }
+
+    /**
      * @brief Reloads palette colors and borders from the active ThemeManager theme.
      */
     void reloadStyle();
@@ -238,6 +245,7 @@ private:
     QLineEdit* m_inputEdit = nullptr;
     QLabel* m_modePillLabel = nullptr;
     QLabel* m_countLabel = nullptr;
+    QToolButton* m_closeBtn = nullptr;
     QListWidget* m_resultsList = nullptr;
     QVector<PaletteItem> m_allItems;
     QVector<PaletteItem> m_filteredItems;
