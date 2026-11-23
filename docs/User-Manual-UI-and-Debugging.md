@@ -17,7 +17,7 @@ Switch perspectives non-destructively from the right side of the main toolbar (`
 
 Press **`Ctrl+M`** at any time to toggle maximizing and restoring the height of the bottom console dock.
 
-### JetBrains-Style Search Everywhere (`CommandPaletteDialog`)
+### Multi-Scope Search Everywhere (`CommandPaletteDialog`)
 
 ![Search Everywhere showing tabbed scopes, 2-line rows, S/M/L/XL size toggle, and 35-line numbered context preview](screenshots/v088_search_everywhere.png)
 

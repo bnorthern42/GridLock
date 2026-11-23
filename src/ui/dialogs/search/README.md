@@ -1,6 +1,6 @@
 # Search Everywhere & Command Palette (`src/ui/dialogs/search/`)
 
-JetBrains-style global Search Everywhere and fuzzy command palette overlay triggered via Double-Shift, `Ctrl+P`, or `Ctrl+Shift+P`.
+Multi-scope global Search Everywhere and fuzzy command palette overlay triggered via Double-Shift, `Ctrl+P`, or `Ctrl+Shift+P`.
 
 ## Contents
 

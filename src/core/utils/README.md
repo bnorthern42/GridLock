@@ -9,7 +9,7 @@ Standalone infrastructure utilities for CLI argument parsing, Search Everywhere 
   - Exposes `shouldEnableOffscreenPlatform()` prior to `QApplication` initialization (`tests/core/test_cliparser.cpp`).
 - `SearchEverywhereEngine.hpp` (`125` lines), `SearchEverywhereEngine.cpp`:
   - Defines `SearchScope`, `IndexedSymbol`, `TextSearchHit`, and `IndexedFile`.
-  - Implements deterministic JetBrains-style CamelCase, `snake_case`, and path-segment fuzzy scoring.
+  - Implements deterministic CamelCase, `snake_case`, and path-segment fuzzy scoring.
   - Caches workspace file/symbol indices, performs fast capped text grep, and extracts context-window source snippets.
 - `ElfBinaryInspector.hpp` (`267` lines), `ElfBinaryParser.cpp` (`494` lines), `ElfBinaryInspector.cpp` (`455` lines):
   - Overflow-checked `<elf.h>` ELF64 header validation, `.shstrtab` section metadata, `.symtab`/`.dynsym` symbol tables, printable ASCII strings, virtual-address memory slicing, and binary patching (`ElfBinaryParser.cpp`).

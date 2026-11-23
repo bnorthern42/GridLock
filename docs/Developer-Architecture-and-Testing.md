@@ -57,7 +57,7 @@ GridLock/
 
 ### Floating Diagnostic & Navigation Dialogs (`src/ui/dialogs/`)
 
-* **`CommandPaletteDialog` + `SearchEverywhereEngine` (`search/`)**: JetBrains-style Search Everywhere (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`) with 6 tabbed scopes, CamelCase/acronym fuzzy scoring, 2-line workspace-relative rows, 35-line numbered context preview (`250`-line / `32 KB` mega-file cap), and `Small`/`Medium`/`Large`/`X-Large` size presets.
+* **`CommandPaletteDialog` + `SearchEverywhereEngine` (`search/`)**: Multi-scope Search Everywhere (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`) with 6 tabbed scopes, CamelCase/acronym fuzzy scoring, 2-line workspace-relative rows, 35-line numbered context preview (`250`-line / `32 KB` mega-file cap), and `Small`/`Medium`/`Large`/`X-Large` size presets.
 * **`PointerGraphDialog` (`graph/`)**: Topological Sugiyama DAG canvas preserving manual drag positions, with multi-root pinning, `"old -> new"` mutation badges, `Shift+Click` per-node width expansion, full-value hover tooltips, double-click pointer expansion, corner minimap, `/x` `/d` `/b` format overrides, and `2x` PNG / SVG export.
 * **`ArrayPlotDialog` (`plotter/`)**: Multi-rank 1D curve overlays, `start:end:stride` slicing, `Log10` scaling, `Complex64`/`Complex128` decoding, 2D colormapped heatmaps, validated `splot`/`pm3d` `gnuplot` export, and virtualized 2D/3D C/Fortran tensor tables.
 * **`PreferencesDialog` (`preferences/`)**: Modular per-page preferences coordinated via a hierarchical `QTreeWidget` (`Appearance -> Toolbar` layout customizer, `Keybindings` `KeySequenceRecorderWidget`, `SlurmBatchParser`, etc.).
