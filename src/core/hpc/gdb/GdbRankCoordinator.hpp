@@ -532,19 +532,37 @@ class GdbRankCoordinator : public IBackendCoordinator {
     QVariantList resolved;     ///< Collected real member descriptors (`name`, `value`, `type`, `hasChildren`).
   };
 
-  /** @brief Parses `^done,bkpt={...}`, `=breakpoint-created`, and `=breakpoint-deleted` records for @p rankId. */
+  /** @brief Parses `^done,bkpt={...}`, `=breakpoint-created`, `=breakpoint-modified`, and `=breakpoint-deleted` records. */
   bool handleBreakpointMiRecord(int rankId, const QString& line) {
     auto& rp = m_processes[rankId];
-    if (line.startsWith("^done,bkpt={") || line.startsWith("=breakpoint-created,bkpt={")) {
-      static const QRegularExpression idRe("number=\"(\\d+)\""), fileRe("(?:fullname|file)=\"([^\"]+)\""), lnRe("line=\"(\\d+)\""), fnRe("func=\"([^\"]+)\"");
+    auto parsePendingLoc = [](const QString& rawLoc, QString* outFile, int* outLine) {
+      static const QRegularExpression locRe(QStringLiteral("^(.+):(\\d+)$"));
+      if (const auto m = locRe.match(rawLoc.trimmed()); m.hasMatch()) {
+        *outFile = m.captured(1);
+        *outLine = m.captured(2).toInt();
+      }
+    };
+    if (line.startsWith("^done,bkpt={") || line.startsWith("=breakpoint-created,bkpt={") ||
+        line.startsWith("=breakpoint-modified,bkpt={")) {
+      static const QRegularExpression idRe("number=\"(\\d+)\""), fileRe("(?:fullname|file)=\"([^\"]+)\""),
+          lnRe("line=\"(\\d+)\""), fnRe("func=\"([^\"]+)\""),
+          pendRe("(?:pending|original-location)=\"((?:\\\\.|[^\"])*)\"");
       if (const auto idM = idRe.match(line); idM.hasMatch()) {
         const int bkptId = idM.captured(1).toInt();
         const auto fM = fileRe.match(line); const auto lM = lnRe.match(line);
-        const QString fPath = fM.hasMatch() ? fM.captured(1) : QString();
-        const int bkptLn = lM.hasMatch() ? lM.captured(1).toInt() : 0;
+        QString fPath = fM.hasMatch() ? fM.captured(1) : QString();
+        int bkptLn = lM.hasMatch() ? lM.captured(1).toInt() : 0;
+        if ((fPath.isEmpty() || bkptLn <= 0)) {
+          if (const auto pM = pendRe.match(line); pM.hasMatch()) parsePendingLoc(pM.captured(1), &fPath, &bkptLn);
+        }
+        const bool isModified = line.startsWith("=breakpoint-modified");
         const bool isTemp = line.contains(QStringLiteral("disp=\"del\"")), isCreated = line.startsWith("=breakpoint-created");
         if (!fPath.isEmpty() && bkptLn > 0) rp->state.breakpoints[bkptId] = QString("%1:%2").arg(fPath).arg(bkptLn);
         else if (const auto fnM = fnRe.match(line); fnM.hasMatch()) rp->state.breakpoints[bkptId] = fnM.captured(1);
+        if (isModified) {
+          if (rp->state.currentState != "stopped") emit rankStateChanged(rankId, rp->state);
+          return true;
+        }
         if (isCreated) {
           BreakpointSpec sp; sp.file = fPath; sp.line = bkptLn; sp.temporary = isTemp; sp.gdbId = bkptId;
           sp.enabled = !line.contains(QStringLiteral("enabled=\"n\""));
@@ -707,7 +725,16 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, QString> m_pendingCheckpointNote;            ///< Pending user note for in-flight `checkpoint` creation.
   QMap<int, bool> m_pendingInfoCheckpoints;              ///< True while `213` `info checkpoints` is in flight per rank.
   QMap<int, QString> m_infoCheckpointsBuffer;            ///< Buffered `~` output for `213` `info checkpoints`.
+  QMap<int, QString> m_rankArch;                         ///< Active frame architecture per rank (e.g. `amdgcn:gfx1101`).
+  QMap<int, int> m_activeLaneIds;                        ///< Active GPU wavefront SIMD lane ID per rank (`-1` on host CPU).
+  QMap<QString, QHash<int, QString>> m_archRegisterNames; ///< Cached `regNumber -> regName` table keyed by frame `arch`.
   bool m_shuttingDown = false;                           ///< Suppresses async MI/FIFO processing while stopping or destroying.
+
+ public:
+  /** @brief Returns the active GPU wavefront SIMD lane ID for @p rank (`-1` when stopped on a host CPU thread). */
+  int activeLaneForRank(int rank) const { return m_activeLaneIds.value(rank, -1); }
+  /** @brief Returns the active target architecture string for @p rank (e.g. `"amdgcn:gfx1101"` or `"i386:x86-64"`). */
+  QString activeArchitectureForRank(int rank) const { return m_rankArch.value(rank); }
 };
 
 }  // namespace gridlock

@@ -160,10 +160,16 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
       static const QRegularExpression rxFile("fullname=\"([^\"]+)\""), rxLine("frame=\\{.*?line=\"(\\d+)\"");
       static const QRegularExpression rxFunc("frame=\\{[^}]*func=\"([^\"]+)\""), rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
+      static const QRegularExpression rxArch("arch=\"([^\"]+)\""), rxLane("lane-id=\"(\\d+)\"");
       const auto matchFile = rxFile.match(line), matchLine = rxLine.match(line);
       rp->state.currentFile = matchFile.hasMatch() ? matchFile.captured(1) : rp->state.currentFile;
       rp->state.currentLine = matchLine.hasMatch() ? matchLine.captured(1).toInt() : (rp->state.currentLine > 0 ? rp->state.currentLine : -1);
       if (const auto matchFunc = rxFunc.match(line); matchFunc.hasMatch()) rp->state.currentFunction = matchFunc.captured(1);
+      const auto matchArch = rxArch.match(line);
+      const QString frameArch = matchArch.hasMatch() ? matchArch.captured(1) : m_rankArch.value(rankId);
+      if (!frameArch.isEmpty()) m_rankArch[rankId] = frameArch;
+      const auto matchLane = rxLane.match(line);
+      m_activeLaneIds[rankId] = matchLane.hasMatch() ? matchLane.captured(1).toInt() : -1;
       const auto matchAddr = rxAddr.match(line);
       const QString stopAddress = matchAddr.hasMatch() ? matchAddr.captured(1) : QStringLiteral("$pc");
       if (matchAddr.hasMatch()) rp->state.registers[16] = stopAddress;
@@ -220,6 +226,11 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         rp->state.currentState = "running";
       } else {
         writeCmd(rankId, QString("200-data-disassemble -s %1 -e \"%1 + 64\" -- 0\n").arg(stopAddress));
+        const bool isNonX86Arch = !frameArch.isEmpty() && !frameArch.contains(QLatin1String("x86"), Qt::CaseInsensitive) &&
+                                  !frameArch.contains(QLatin1String("i386"), Qt::CaseInsensitive);
+        if (isNonX86Arch && !m_archRegisterNames.contains(frameArch)) {
+          writeCmd(rankId, QStringLiteral("214-data-list-register-names\n"));
+        }
         writeCmd(rankId, "-data-list-register-values r\n");
         writeCmd(rankId, "201-stack-list-variables --simple-values\n");
         static const QRegularExpression threadRe("thread-id=\"(\\d+)\"");
@@ -236,6 +247,43 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         requestStackAndThreads(rankId);
         emit rankStateChanged(rankId, rp->state);
         if (rp->state.currentLine > 0) emit locationChanged(rankId, rp->state.currentFile, rp->state.currentLine);
+      }
+    } else if (line.startsWith("=thread-selected,") || line.startsWith("^done,new-thread-id=")) {
+      static const QRegularExpression tidRe("(?:^=thread-selected,id|\\bnew-thread-id)=\"(\\d+)\""),
+          laneRe("lane-id=\"(\\d+)\""), archRe("arch=\"([^\"]+)\""),
+          fullRe("fullname=\"([^\"]+)\""), lnRe("line=\"(\\d+)\""), fnRe("func=\"([^\"]+)\"");
+      const bool isAsyncSwitch = line.startsWith("=thread-selected,");
+      const QString prevArch = m_rankArch.value(rankId);
+      if (const auto tm = tidRe.match(line); tm.hasMatch()) {
+        const int tid = tm.captured(1).toInt();
+        m_activeThreadIds[rankId] = tid;
+        if (m_rankThreads.contains(rankId)) {
+          auto& list = m_rankThreads[rankId];
+          for (auto& th : list) th.isCurrent = (th.threadId == tid);
+          if (isAsyncSwitch) emit threadsUpdated(rankId, list);
+        }
+      }
+      m_activeLaneIds[rankId] = laneRe.match(line).hasMatch() ? laneRe.match(line).captured(1).toInt() : -1;
+      const QString nextArch = archRe.match(line).hasMatch() ? archRe.match(line).captured(1) : prevArch;
+      if (!nextArch.isEmpty()) m_rankArch[rankId] = nextArch;
+      const bool archChanged = (!nextArch.isEmpty() && nextArch != prevArch);
+      if (isAsyncSwitch && rp->state.currentState == "stopped") {
+        if (const auto fm = fullRe.match(line); fm.hasMatch()) rp->state.currentFile = fm.captured(1);
+        if (const auto lm = lnRe.match(line); lm.hasMatch()) rp->state.currentLine = lm.captured(1).toInt();
+        if (const auto fnm = fnRe.match(line); fnm.hasMatch()) rp->state.currentFunction = fnm.captured(1);
+        if (!nextArch.isEmpty() && !nextArch.contains(QLatin1String("x86"), Qt::CaseInsensitive) &&
+            !nextArch.contains(QLatin1String("i386"), Qt::CaseInsensitive) && !m_archRegisterNames.contains(nextArch)) {
+          writeCmd(rankId, QStringLiteral("214-data-list-register-names\n"));
+        }
+        writeCmd(rankId, QStringLiteral("201-stack-list-variables --simple-values\n"));
+        writeCmd(rankId, QStringLiteral("-data-list-register-values r\n"));
+        emit rankStateChanged(rankId, rp->state);
+      } else if (archChanged && rp->state.currentState == "stopped") {
+        if (!nextArch.contains(QLatin1String("x86"), Qt::CaseInsensitive) &&
+            !nextArch.contains(QLatin1String("i386"), Qt::CaseInsensitive) && !m_archRegisterNames.contains(nextArch)) {
+          writeCmd(rankId, QStringLiteral("214-data-list-register-names\n"));
+        }
+        writeCmd(rankId, QStringLiteral("-data-list-register-values r\n"));
       }
     } else if (line.startsWith("*running")) {
       rp->state.currentState = "running";
@@ -303,17 +351,37 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         emit memoryDataReady(rankId, beginAddress, hex);
         emit memoryRead(rankId, match.captured(1), QByteArray::fromHex(hex.toLatin1()));
       }
+    } else if (line.startsWith("214^done,register-names=[") || line.startsWith("^done,register-names=[")) {
+      const int lb = line.indexOf(QLatin1Char('[')), rb = line.lastIndexOf(QLatin1Char(']'));
+      if (lb >= 0 && rb > lb) {
+        static const QRegularExpression quotedNameRe(QStringLiteral("\"((?:\\\\.|[^\"])*)\""));
+        const QString archKey = m_rankArch.value(rankId, QStringLiteral("gpu"));
+        QHash<int, QString>& nameTable = m_archRegisterNames[archKey];
+        int regIdx = 0;
+        for (auto it = quotedNameRe.globalMatch(line.mid(lb + 1, rb - lb - 1)); it.hasNext(); ++regIdx) {
+          const QString rn = detail::unescapeMiValue(it.next().captured(1)).trimmed();
+          if (!rn.isEmpty()) nameTable.insert(regIdx, rn);
+        }
+      }
     } else if (line.startsWith("^done,register-values=[")) {
-      static const QRegularExpression regRe("number=\"(\\d+)\".*?value=\"([^\"]+)\"");
+      static const QRegularExpression regRe("number=\"(\\d+)\".*?value=\"((?:\\\\.|[^\"])*)\"");
       auto it = regRe.globalMatch(line);
       QJsonArray jsonRegs;
       bool updated = false;
+      const QString archKey = m_rankArch.value(rankId);
+      const bool useArchTable = (!archKey.isEmpty() && m_archRegisterNames.contains(archKey));
+      const bool useFallbackGpuTable = (!useArchTable && m_archRegisterNames.contains(QStringLiteral("gpu")));
       while (it.hasNext()) {
         const auto m = it.next();
         const int regNum = m.captured(1).toInt();
-        const QString regVal = m.captured(2);
+        const QString regVal = detail::unescapeMiValue(m.captured(2));
         rp->state.registers[regNum] = regVal;
-        if (const QString name = x86RegName(regNum); !name.isEmpty()) jsonRegs.append(QJsonObject{{"name", name}, {"value", regVal}});
+        QString name;
+        if (useArchTable) name = m_archRegisterNames[archKey].value(regNum);
+        else if (useFallbackGpuTable && regNum >= 18) name = m_archRegisterNames[QStringLiteral("gpu")].value(regNum);
+        else name = x86RegName(regNum);
+        if (name == QLatin1String("pc")) rp->state.registers[16] = regVal;
+        if (!name.isEmpty()) jsonRegs.append(QJsonObject{{"name", name}, {"value", regVal}});
         updated = true;
       }
       if (updated) {
@@ -321,7 +389,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         emit rankStateChanged(rankId, rp->state);
       }
     } else if (handleBreakpointMiRecord(rankId, line)) {
-      // Handled `^done,bkpt={...}`, `=breakpoint-created`, and `=breakpoint-deleted` records.
+      // Handled `^done,bkpt={...}`, `=breakpoint-created`, `=breakpoint-modified`, and `=breakpoint-deleted` records.
     } else if (line.startsWith("100")) {
       static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\""), err100Re("msg=\"([^\"]+)\"");
       if (const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line); match.hasMatch()) {
@@ -388,6 +456,11 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         emit sessionErrorOccurred(msg);
         return;
       }
+    } else if (line.startsWith("rocgdb execution Failed:")) {
+      emit debuggerConsoleOutput(rankId, line, true);
+      terminateAllSessions();
+      emit sessionErrorOccurred(line);
+      return;
     } else if (line.contains("asm_insns=")) {
       const QString prettyAsm = formatMiDisassembly(line);
       if (!prettyAsm.isEmpty()) { rp->state.disassemblyText = prettyAsm; emit rankStateChanged(rankId, rp->state); }
@@ -398,7 +471,9 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
     } else {
       static const QRegularExpression miPrefRe("^\\d*[\\^*+=~&@]|^\\(gdb\\)");
       if (!miPrefRe.match(line).hasMatch() && !line.startsWith("[New ") && !line.startsWith("[Thread ") &&
-          !line.startsWith("[Inferior ") && !line.startsWith("[Detaching") && !line.startsWith("Reading symbols") && !line.startsWith("warning:"))
+          !line.startsWith("[Inferior ") && !line.startsWith("[Detaching") && !line.startsWith("Reading symbols") &&
+          !line.startsWith("warning:") && !line.startsWith("Not successful in running rocgdb") &&
+          !line.startsWith("Checking for working Python Version"))
         batchedProgramOut << line;
     }
   }

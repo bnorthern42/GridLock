@@ -238,7 +238,10 @@ void TestGdbCoordinator::testRegisterValuesParsing() {
     QCOMPARE(state.registers[1], QString("0x12345678"));
 }
 
+#include <QStandardPaths>
+
 #include "../../src/core/commands/DebugCommands.hpp"
+#include "../../src/core/managers/ConfigManager.hpp"
 #include "../../src/ui/MainWindow.hpp"
 
 namespace {
@@ -425,6 +428,389 @@ void TestGdbCoordinator::testProcessScannerAndCoordinatorAttach() {
     QCOMPARE(remState.currentState, QStringLiteral("stopped"));
     QCOMPARE(remState.currentFunction, QStringLiteral("main"));
     QCOMPARE(remState.currentLine, 15);
+    coord.terminateSession();
+}
+
+/**
+ * @brief Verifies ROCm rocgdb MI3 pending-to-resolved kernel breakpoints, AMDGPU wavefront threads, SIMD lanes, and VGPR/PC registers.
+ */
+void TestGdbCoordinator::testRocgdbMockMiParsingAndPendingKernelBreakpoint() {
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(1);
+
+    QStringList sentCmds;
+    QStringList progOut;
+    QJsonArray lastRegs;
+    QJsonArray lastLocals;
+    QVector<ThreadEntry> lastThreads;
+    QString createdFile;
+    int createdLine = -1;
+    int createdId = -1;
+
+    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord,
+            [&](int, const QString& cmd) { sentCmds.append(cmd); });
+    connect(&coord, &gridlock::GdbRankCoordinator::programOutputReceived, &coord,
+            [&](int, const QString& out, bool) { progOut.append(out); });
+    connect(&coord, &gridlock::GdbRankCoordinator::registersUpdated, &coord,
+            [&](int, const QJsonArray& regs) { lastRegs = regs; });
+    connect(&coord, &gridlock::GdbRankCoordinator::localsUpdated, &coord,
+            [&](int, const QJsonArray& locals) { lastLocals = locals; });
+    connect(&coord, &gridlock::GdbRankCoordinator::threadsUpdated, &coord,
+            [&](int, const QVector<ThreadEntry>& threads) { lastThreads = threads; });
+    connect(&coord, &gridlock::GdbRankCoordinator::breakpointRecordCreated, &coord,
+            [&](int, const QString& f, int ln, int id, bool) {
+                createdFile = f;
+                createdLine = ln;
+                createdId = id;
+            });
+
+    // 1. Wrapper banner noise from /opt/rocm/bin/rocgdb must not pollute inferior stdout.
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("Not successful in running rocgdb with active Python Version: 3.14 in the system\n"
+                       "Checking for working Python Version Installed\n"));
+    QVERIFY(progOut.isEmpty());
+
+    // 2. Pending device kernel breakpoint before HIP fat-binary code object loads on gfx1101.
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("^done,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\","
+                       "addr=\"<PENDING>\",pending=\"/tmp/gridlock_rocm_probe.cpp:62\",times=\"0\","
+                       "original-location=\"/tmp/gridlock_rocm_probe.cpp:62\"}\n"));
+    QCOMPARE(createdId, 1);
+    QCOMPARE(createdFile, QStringLiteral("/tmp/gridlock_rocm_probe.cpp"));
+    QCOMPARE(createdLine, 62);
+    QCOMPARE(coord.getRankState(0).breakpoints.value(1), QStringLiteral("/tmp/gridlock_rocm_probe.cpp:62"));
+
+    // 3. HIP code-object load resolves the pending breakpoint via =breakpoint-modified.
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("=library-loaded,id=\"code_object_2\",target-name=\"code_object_2\","
+                       "host-name=\"memory://3537494#offset=0x555555fae740&size=39720\",symbols-loaded=\"0\",thread-group=\"i1\"\n"
+                       "=breakpoint-modified,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\","
+                       "addr=\"0x00007ffff7db3428\",func=\"vectorScaleKernel(float const*, float*, float, int)\","
+                       "file=\"/tmp/gridlock_rocm_probe.cpp\",fullname=\"/tmp/gridlock_rocm_probe.cpp\",line=\"62\","
+                       "thread-groups=[\"i1\"],times=\"0\",original-location=\"/tmp/gridlock_rocm_probe.cpp:62\"}\n"));
+    QCOMPARE(coord.getRankState(0).breakpoints.value(1), QStringLiteral("/tmp/gridlock_rocm_probe.cpp:62"));
+
+    // 4. Hit breakpoint on AMD Radeon RX 7700 XT wavefront (thread-id="7", lane-id="0", arch="amdgcn:gfx1101").
+    sentCmds.clear();
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("*stopped,reason=\"breakpoint-hit\",disp=\"keep\",bkptno=\"1\",hit-lanes=\"0-31\","
+                       "frame={addr=\"0x00007ffff7db3428\",func=\"vectorScaleKernel\","
+                       "args=[{name=\"in\",value=\"0x7ffee5c00000\"},{name=\"out\",value=\"0x7ffee5c01000\"},"
+                       "{name=\"scale\",value=\"2.5\"},{name=\"n\",value=\"64\"}],"
+                       "file=\"/tmp/gridlock_rocm_probe.cpp\",fullname=\"/tmp/gridlock_rocm_probe.cpp\","
+                       "line=\"62\",arch=\"amdgcn:gfx1101\"},thread-id=\"7\",lane-id=\"0\",stopped-threads=\"all\"\n"));
+    const gridlock::RankState stoppedSt = coord.getRankState(0);
+    QCOMPARE(stoppedSt.currentState, QStringLiteral("stopped"));
+    QCOMPARE(stoppedSt.currentFile, QStringLiteral("/tmp/gridlock_rocm_probe.cpp"));
+    QCOMPARE(stoppedSt.currentLine, 62);
+    QCOMPARE(stoppedSt.currentFunction, QStringLiteral("vectorScaleKernel"));
+    QCOMPARE(coord.activeArchitectureForRank(0), QStringLiteral("amdgcn:gfx1101"));
+    QCOMPARE(coord.activeLaneForRank(0), 0);
+    QVERIFY(sentCmds.contains(QStringLiteral("214-data-list-register-names")));
+
+    // 5. Parse AMDGPU register-names + vector/scalar register-values (v0, pc, exec, vcc).
+    QStringList regNames(742, QString());
+    regNames[256] = QStringLiteral("v0");
+    regNames[734] = QStringLiteral("pc");
+    regNames[739] = QStringLiteral("exec");
+    regNames[741] = QStringLiteral("vcc");
+    QStringList quotedNames;
+    quotedNames.reserve(regNames.size());
+    for (const QString& n : regNames) quotedNames.append(QStringLiteral("\"%1\"").arg(n));
+    coord.processGdbOutput(0, QStringLiteral("214^done,register-names=[%1]\n").arg(quotedNames.join(QLatin1Char(','))));
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("^done,register-values=[{number=\"256\",value=\"{0x00000000, 0x00000001, 0x00000002, 0x00000003}\"},"
+                       "{number=\"734\",value=\"0x00007ffff7db3428\"},{number=\"739\",value=\"0xffffffff\"},"
+                       "{number=\"741\",value=\"0xffffffff\"}]\n"));
+    QCOMPARE(lastRegs.size(), 4);
+    QMap<QString, QString> regMap;
+    for (const QJsonValue& v : lastRegs) {
+        const QJsonObject o = v.toObject();
+        regMap.insert(o.value(QStringLiteral("name")).toString(), o.value(QStringLiteral("value")).toString());
+    }
+    QVERIFY(regMap.value(QStringLiteral("v0")).startsWith(QStringLiteral("{0x00000000, 0x00000001")));
+    QCOMPARE(regMap.value(QStringLiteral("pc")), QStringLiteral("0x00007ffff7db3428"));
+    QCOMPARE(regMap.value(QStringLiteral("exec")), QStringLiteral("0xffffffff"));
+    QCOMPARE(regMap.value(QStringLiteral("vcc")), QStringLiteral("0xffffffff"));
+    QCOMPARE(coord.getRankState(0).registers.value(16), QStringLiteral("0x00007ffff7db3428"));
+
+    // 6. Parse mixed CPU + AMDGPU Wavefront thread list (`AMDGPU Wave 1:1:1:1 (0,0,0)/0` and `(1,0,0)/0`).
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("203^done,threads=["
+                       "{id=\"1\",target-id=\"Thread 0x7ffff7dcd8c0 (LWP 3537494)\",name=\"gridlock_rocm_p\","
+                       "frame={level=\"0\",addr=\"0x00007ffff5a590cb\",func=\"BusyWaitSignal::WaitRelaxed\",args=[],"
+                       "from=\"/lib64/libhsa-runtime64.so.1\",arch=\"i386:x86-64\"},state=\"stopped\",core=\"23\"},"
+                       "{id=\"7\",target-id=\"AMDGPU Wave 1:1:1:1 (0,0,0)/0\",name=\"vectorScale-5c6e\","
+                       "frame={level=\"0\",addr=\"0x00007ffff7db3428\",func=\"vectorScaleKernel\",args=[],"
+                       "file=\"/tmp/gridlock_rocm_probe.cpp\",fullname=\"/tmp/gridlock_rocm_probe.cpp\",line=\"62\","
+                       "arch=\"amdgcn:gfx1101\"},state=\"stopped\"},"
+                       "{id=\"8\",target-id=\"AMDGPU Wave 1:1:1:2 (1,0,0)/0\",name=\"vectorScale-5c6e\","
+                       "frame={level=\"0\",addr=\"0x00007ffff7db3428\",func=\"vectorScaleKernel\",args=[],"
+                       "file=\"/tmp/gridlock_rocm_probe.cpp\",fullname=\"/tmp/gridlock_rocm_probe.cpp\",line=\"62\","
+                       "arch=\"amdgcn:gfx1101\"},state=\"stopped\"}],current-thread-id=\"7\"\n"));
+    QCOMPARE(lastThreads.size(), 3);
+    QCOMPARE(lastThreads[0].name, QStringLiteral("gridlock_rocm_p"));
+    QVERIFY(!lastThreads[0].isCurrent);
+    QCOMPARE(lastThreads[1].name, QStringLiteral("AMDGPU Wave 1:1:1:1 (0,0,0)/0 [vectorScale-5c6e]"));
+    QVERIFY(lastThreads[1].isCurrent);
+    QCOMPARE(lastThreads[2].name, QStringLiteral("AMDGPU Wave 1:1:1:2 (1,0,0)/0 [vectorScale-5c6e]"));
+    QVERIFY(!lastThreads[2].isCurrent);
+
+    // 7. Parse kernel locals and async SIMD lane switch (`lane 5` -> `=thread-selected,id="7",lane-id="5"`).
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("201^done,variables=[{name=\"in\",arg=\"1\",type=\"const float *\",value=\"0x7ffee5c00000\"},"
+                       "{name=\"out\",arg=\"1\",type=\"float *\",value=\"0x7ffee5c01000\"},"
+                       "{name=\"tid\",type=\"int\",value=\"0\"},{name=\"gid\",type=\"int\",value=\"0\"}]\n"));
+    QCOMPARE(lastLocals.size(), 4);
+
+    sentCmds.clear();
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("=thread-selected,id=\"7\",lane-id=\"5\",frame={level=\"0\",addr=\"0x00007ffff7db3428\","
+                       "func=\"vectorScaleKernel\",args=[],file=\"/tmp/gridlock_rocm_probe.cpp\","
+                       "fullname=\"/tmp/gridlock_rocm_probe.cpp\",line=\"62\",arch=\"amdgcn:gfx1101\"}\n"));
+    QCOMPARE(coord.activeLaneForRank(0), 5);
+    QVERIFY(sentCmds.contains(QStringLiteral("201-stack-list-variables --simple-values")));
+    QVERIFY(sentCmds.contains(QStringLiteral("-data-list-register-values r")));
+}
+
+/**
+ * @brief End-to-end live HIP GPU kernel debugging test via GdbRankCoordinator + rocgdb (QSKIPs on CPU-only CI).
+ */
+void TestGdbCoordinator::testLiveRocgdbHipKernelOnGpuIfAvailable() {
+    QFileInfo kfdInfo(QStringLiteral("/dev/kfd"));
+    if (!kfdInfo.exists() || !kfdInfo.isReadable() || !kfdInfo.isWritable()) {
+        QSKIP("Skipping live ROCm GPU test: /dev/kfd is not accessible on this host.");
+    }
+    const QString hipccBin = QStandardPaths::findExecutable(QStringLiteral("hipcc"));
+    if (hipccBin.isEmpty()) {
+        QSKIP("Skipping live ROCm GPU test: hipcc compiler is not installed.");
+    }
+
+    auto& cfg = gridlock::core::ConfigManager::instance();
+    const QString origEngine = cfg.debuggerEngine();
+    const auto origDs = cfg.getDebuggerSettings();
+    auto origPs = cfg.loadProjectSettings();
+    struct RestoreGuard {
+        gridlock::core::ConfigManager* c;
+        QString eng;
+        gridlock::core::DebuggerSettings ds;
+        gridlock::core::ProjectSettings ps;
+        ~RestoreGuard() {
+            c->setDebuggerEngine(eng);
+            c->saveDebuggerSettings(ds);
+            c->saveProjectSettings(ps);
+        }
+    } guard{&cfg, origEngine, origDs, origPs};
+
+    cfg.setDebuggerEngine(QStringLiteral("rocgdb"));
+    auto testDs = origDs;
+    testDs.gdbPath = QStringLiteral("gdb");
+    cfg.saveDebuggerSettings(testDs);
+    auto testPs = origPs;
+    testPs.customGdbPath = "gdb";
+    cfg.saveProjectSettings(testPs);
+
+    gridlock::GdbRankCoordinator coord;
+    QString launchErr;
+    if (!coord.validateLaunchEnvironment(1, &launchErr)) {
+        QSKIP(qPrintable(QStringLiteral("Skipping live ROCm GPU test: %1").arg(launchErr)));
+    }
+
+    QString gpuArch;
+    for (const QString& archTool : {QStandardPaths::findExecutable(QStringLiteral("amdgpu-arch")),
+                                    QStringLiteral("/usr/lib64/rocm/llvm/bin/amdgpu-arch"),
+                                    QStringLiteral("/opt/rocm/llvm/bin/amdgpu-arch")}) {
+        if (archTool.isEmpty() || !QFileInfo(archTool).isExecutable()) continue;
+        QProcess ap;
+        ap.start(archTool, {});
+        if (ap.waitForFinished(3000) && ap.exitCode() == 0) {
+            const QString line = QString::fromUtf8(ap.readAllStandardOutput()).trimmed().section(QLatin1Char('\n'), 0, 0).trimmed();
+            if (line.startsWith(QStringLiteral("gfx"))) { gpuArch = line; break; }
+        }
+    }
+    if (gpuArch.isEmpty()) {
+        QSKIP("Skipping live ROCm GPU test: no active AMDGPU gfx target reported by amdgpu-arch.");
+    }
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString srcPath = tempDir.filePath(QStringLiteral("rocm_kernel_probe.cpp"));
+    const QString binPath = tempDir.filePath(QStringLiteral("rocm_kernel_probe"));
+
+    static const char* const kHipSource = R"HIP(
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+
+#if __has_include(<hip/hip_runtime.h>)
+#include <hip/hip_runtime.h>
+#else
+extern "C" __device__ size_t __ockl_get_local_id(uint32_t);
+extern "C" __device__ size_t __ockl_get_group_id(uint32_t);
+extern "C" __device__ size_t __ockl_get_local_size(uint32_t);
+struct dim3 {
+  uint32_t x, y, z;
+  __host__ __device__ constexpr dim3(uint32_t vx = 1, uint32_t vy = 1, uint32_t vz = 1) : x(vx), y(vy), z(vz) {}
+};
+struct HipThreadIdx { static inline __attribute__((always_inline)) __device__ uint32_t getX() { return static_cast<uint32_t>(__ockl_get_local_id(0)); } __declspec(property(get = getX)) uint32_t x; };
+struct HipBlockIdx  { static inline __attribute__((always_inline)) __device__ uint32_t getX() { return static_cast<uint32_t>(__ockl_get_group_id(0)); } __declspec(property(get = getX)) uint32_t x; };
+struct HipBlockDim  { static inline __attribute__((always_inline)) __device__ uint32_t getX() { return static_cast<uint32_t>(__ockl_get_local_size(0)); } __declspec(property(get = getX)) uint32_t x; };
+extern const __attribute__((device)) __attribute__((weak)) HipThreadIdx threadIdx;
+extern const __attribute__((device)) __attribute__((weak)) HipBlockIdx blockIdx;
+extern const __attribute__((device)) __attribute__((weak)) HipBlockDim blockDim;
+enum hipError_t : int { hipSuccess = 0 };
+enum hipMemcpyKind : int { hipMemcpyHostToDevice = 1, hipMemcpyDeviceToHost = 2 };
+typedef struct ihipStream_t* hipStream_t;
+extern "C" {
+hipError_t hipMalloc(void** ptr, size_t size);
+hipError_t hipFree(void* ptr);
+hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
+hipError_t hipDeviceSynchronize(void);
+hipError_t hipLaunchKernel(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream);
+int __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shmem = 0, hipStream_t stream = nullptr);
+hipError_t __hipPopCallConfiguration(dim3* grid, dim3* block, size_t* shmem, hipStream_t* stream);
+}
+#endif
+
+__global__ void vectorScaleKernel(const float* in, float* out, float scale, int n) {
+  int tid = static_cast<int>(threadIdx.x);
+  int bid = static_cast<int>(blockIdx.x);
+  int gid = bid * static_cast<int>(blockDim.x) + tid;
+  if (gid < n) {
+    float val = in[gid] * scale + static_cast<float>(tid); // KERNEL_BP_LINE
+    out[gid] = val;
+  }
+}
+
+int main() {
+  constexpr int kCount = 64;
+  float hostIn[kCount], hostOut[kCount];
+  for (int i = 0; i < kCount; ++i) { hostIn[i] = static_cast<float>(i + 1); hostOut[i] = 0.0f; }
+  float *devIn = nullptr, *devOut = nullptr;
+  if (hipMalloc(reinterpret_cast<void**>(&devIn), sizeof(hostIn)) != hipSuccess) return 2;
+  if (hipMalloc(reinterpret_cast<void**>(&devOut), sizeof(hostOut)) != hipSuccess) return 3;
+  if (hipMemcpy(devIn, hostIn, sizeof(hostIn), hipMemcpyHostToDevice) != hipSuccess) return 4;
+  vectorScaleKernel<<<dim3(2), dim3(32)>>>(devIn, devOut, 2.5f, kCount);
+  if (hipDeviceSynchronize() != hipSuccess) return 5;
+  if (hipMemcpy(hostOut, devOut, sizeof(hostOut), hipMemcpyDeviceToHost) != hipSuccess) return 6;
+  std::printf("GPU_OK out[0]=%.1f out[5]=%.1f out[63]=%.1f\n", hostOut[0], hostOut[5], hostOut[63]);
+  std::fflush(stdout);
+  hipFree(devIn);
+  hipFree(devOut);
+  return (hostOut[0] == 2.5f && hostOut[5] == 20.0f) ? 0 : 1;
+}
+)HIP";
+
+    {
+        QFile sf(srcPath);
+        QVERIFY(sf.open(QIODevice::WriteOnly));
+        sf.write(kHipSource);
+    }
+    int kernelBpLine = 0;
+    {
+        QFile sf(srcPath);
+        QVERIFY(sf.open(QIODevice::ReadOnly));
+        const QStringList lines = QString::fromUtf8(sf.readAll()).split(QLatin1Char('\n'));
+        for (int i = 0; i < lines.size(); ++i) {
+            if (lines[i].contains(QStringLiteral("KERNEL_BP_LINE"))) { kernelBpLine = i + 1; break; }
+        }
+    }
+    QVERIFY(kernelBpLine > 0);
+
+    QStringList compileArgs{QStringLiteral("-g"), QStringLiteral("-O0"), QStringLiteral("--offload-arch=") + gpuArch};
+    if (!QFileInfo::exists(QStringLiteral("/usr/include/hip/hip_runtime.h")) &&
+        !QFileInfo::exists(QStringLiteral("/opt/rocm/include/hip/hip_runtime.h"))) {
+        QString hipSo;
+        for (const QString& cand : {QStringLiteral("/usr/lib64/libamdhip64.so"), QStringLiteral("/usr/lib64/libamdhip64.so.7"),
+                                    QStringLiteral("/opt/rocm/lib/libamdhip64.so")}) {
+            if (QFileInfo::exists(cand)) { hipSo = cand; break; }
+        }
+        if (hipSo.isEmpty()) QSKIP("Skipping live ROCm GPU test: libamdhip64.so not found.");
+        compileArgs << QStringLiteral("-no-hip-rt") << (QStringLiteral("-Wl,") + hipSo);
+    }
+    compileArgs << srcPath << QStringLiteral("-o") << binPath;
+
+    QProcess cc;
+    cc.start(hipccBin, compileArgs);
+    if (!cc.waitForFinished(20000) || cc.exitCode() != 0 || !QFileInfo::exists(binPath)) {
+        QSKIP(qPrintable(QStringLiteral("Skipping live ROCm GPU test: hipcc build skipped (%1)")
+                             .arg(QString::fromUtf8(cc.readAllStandardError()).trimmed())));
+    }
+
+    QJsonArray capturedLocals;
+    QJsonArray capturedRegs;
+    QVector<ThreadEntry> capturedThreads;
+    QString evalResult;
+    QString memHex;
+    QString combinedStdout;
+
+    connect(&coord, &gridlock::GdbRankCoordinator::localsUpdated, &coord,
+            [&](int, const QJsonArray& loc) { if (!loc.isEmpty()) capturedLocals = loc; });
+    connect(&coord, &gridlock::GdbRankCoordinator::registersUpdated, &coord,
+            [&](int, const QJsonArray& regs) { if (!regs.isEmpty()) capturedRegs = regs; });
+    connect(&coord, &gridlock::GdbRankCoordinator::threadsUpdated, &coord,
+            [&](int, const QVector<ThreadEntry>& th) { if (!th.isEmpty()) capturedThreads = th; });
+    connect(&coord, &gridlock::GdbRankCoordinator::expressionEvaluated, &coord,
+            [&](int, const QString&, const QString& val) { evalResult = val; });
+    connect(&coord, &gridlock::GdbRankCoordinator::memoryDataReady, &coord,
+            [&](int, qint64, const QString& hex) { memHex = hex; });
+    connect(&coord, &gridlock::GdbRankCoordinator::programOutputReceived, &coord,
+            [&](int, const QString& out, bool) { combinedStdout += out + QLatin1Char('\n'); });
+
+    coord.setBreakpoint(srcPath, kernelBpLine);
+    coord.launchParallelSession(binPath, 1, QString());
+
+    QTRY_COMPARE_WITH_TIMEOUT(coord.getRankState(0).currentState, QStringLiteral("stopped"), 15000);
+    QCOMPARE(coord.getRankState(0).currentLine, kernelBpLine);
+    QCOMPARE(coord.getRankState(0).currentFunction, QStringLiteral("vectorScaleKernel"));
+    QVERIFY(coord.activeArchitectureForRank(0).startsWith(QStringLiteral("amdgcn:")));
+    QCOMPARE(coord.activeLaneForRank(0), 0);
+
+    QTRY_VERIFY_WITH_TIMEOUT(!capturedLocals.isEmpty() && !capturedRegs.isEmpty() && !capturedThreads.isEmpty(), 5000);
+
+    bool sawGpuWaveThread = false;
+    for (const auto& th : capturedThreads) {
+        if (th.name.startsWith(QStringLiteral("AMDGPU Wave "))) { sawGpuWaveThread = true; break; }
+    }
+    QVERIFY2(sawGpuWaveThread, "Expected AMDGPU Wave thread entry in threadsUpdated");
+
+    QString devInPtr;
+    for (const QJsonValue& v : capturedLocals) {
+        const QJsonObject o = v.toObject();
+        if (o.value(QStringLiteral("name")).toString() == QStringLiteral("in")) {
+            devInPtr = o.value(QStringLiteral("value")).toString();
+        }
+    }
+    QVERIFY2(devInPtr.startsWith(QStringLiteral("0x")), "Expected device pointer `in` in kernel locals");
+
+    coord.readMemory(0, devInPtr, 8);
+    QTRY_VERIFY_WITH_TIMEOUT(!memHex.isEmpty(), 4000);
+    // hostIn[0] = 1.0f (0000803f LE), hostIn[1] = 2.0f (00000040 LE).
+    QCOMPARE(memHex.left(16).toLower(), QStringLiteral("0000803f00000040"));
+
+    coord.evaluateExpression(0, QStringLiteral("scale"));
+    QTRY_COMPARE_WITH_TIMEOUT(evalResult, QStringLiteral("2.5"), 4000);
+
+    // Switch to SIMD lane 5 via debugger console and verify tid updates to 5.
+    evalResult.clear();
+    coord.sendDebuggerCommand(0, QStringLiteral("lane 5"));
+    QTRY_COMPARE_WITH_TIMEOUT(coord.activeLaneForRank(0), 5, 4000);
+    coord.evaluateExpression(0, QStringLiteral("tid"));
+    QTRY_COMPARE_WITH_TIMEOUT(evalResult, QStringLiteral("5"), 4000);
+
+    coord.clearBreakpoints();
+    coord.continueAll();
+    QTRY_COMPARE_WITH_TIMEOUT(coord.getRankState(0).currentState, QStringLiteral("exited"), 10000);
+    QVERIFY2(combinedStdout.contains(QStringLiteral("GPU_OK out[0]=2.5 out[5]=20.0 out[63]=191.0")),
+             qPrintable(combinedStdout));
     coord.terminateSession();
 }
 

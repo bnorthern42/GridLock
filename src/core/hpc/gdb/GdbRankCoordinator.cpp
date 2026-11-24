@@ -58,7 +58,15 @@ qint64 GdbRankCoordinator::getPidForRank(int rank) const {
 }
 
 namespace {
-/** @brief Resolves and caches toolchain binaries (`gdb`, `mpirun`, `mpiexec`) keyed on `name` and `$PATH`. */
+const QStringList& defaultDebuggerSearchDirs() {
+  static const QStringList kDirs = {QStringLiteral("/opt/rocm/bin"), QStringLiteral("/usr/local/cuda/bin"),
+                                    QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"),
+                                    QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
+                                    QStringLiteral("/usr/local/bin"), QStringLiteral("/usr/bin")};
+  return kDirs;
+}
+
+/** @brief Resolves and caches toolchain binaries (`gdb`, `rocgdb`, `cuda-gdb`, `mpirun`) keyed on `name` and `$PATH`. */
 QString resolveCachedToolPath(const QString& rawName, const QStringList& fallbackDirs) {
   const QString name = rawName.trimmed();
   if (name.isEmpty()) return {};
@@ -74,17 +82,152 @@ QString resolveCachedToolPath(const QString& rawName, const QStringList& fallbac
   if (!found.isEmpty()) s_cache.insert(key, found);
   return found;
 }
+
+struct ResolvedGdbBinary {
+  QString executablePath;
+  QString extraLdLibraryPath;
+  QString pythonHome;
+  QString errorReason;
+};
+
+bool probeRocgdbVersion(const QString& binPath, const QString& extraLdLib, const QString& pyHome) {
+  QProcess proc;
+  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+  if (!extraLdLib.isEmpty()) {
+    const QString curLd = env.value(QStringLiteral("LD_LIBRARY_PATH"));
+    env.insert(QStringLiteral("LD_LIBRARY_PATH"), curLd.isEmpty() ? extraLdLib : (extraLdLib + QLatin1Char(':') + curLd));
+  }
+  if (!pyHome.isEmpty()) env.insert(QStringLiteral("PYTHONHOME"), pyHome);
+  proc.setProcessEnvironment(env);
+  proc.start(binPath, {QStringLiteral("--version")});
+  if (!proc.waitForFinished(1500) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) return false;
+  const QString out = QString::fromUtf8(proc.readAllStandardOutput()) + QString::fromUtf8(proc.readAllStandardError());
+  return out.contains(QStringLiteral("GNU gdb")) && !out.contains(QStringLiteral("No working ROCgdb")) &&
+         !out.contains(QStringLiteral("Python initialization failed"));
+}
+
+QStringList collectCandidatePythonPrefixes() {
+  QStringList prefixes{QStringLiteral("/usr"), QStringLiteral("/usr/local")};
+  const QString home = QDir::homePath();
+  auto appendSubdirs = [&](const QString& root, const QStringList& filters = {}) {
+    QDir d(root);
+    if (!d.exists()) return;
+    const auto entries = filters.isEmpty() ? d.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)
+                                           : d.entryInfoList(filters, QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo& fi : entries) prefixes.append(fi.absoluteFilePath());
+  };
+  appendSubdirs(home + QStringLiteral("/.local/share/uv/python"));
+  appendSubdirs(home + QStringLiteral("/.conda/envs"));
+  appendSubdirs(home + QStringLiteral("/.conda/pkgs"), {QStringLiteral("python-3.*")});
+  for (const QString& dist : {QStringLiteral("/miniforge3"), QStringLiteral("/miniconda3"), QStringLiteral("/anaconda3")}) {
+    if (QDir(home + dist).exists()) { prefixes.append(home + dist); appendSubdirs(home + dist + QStringLiteral("/envs")); }
+  }
+  appendSubdirs(home + QStringLiteral("/.pyenv/versions"));
+  QDir visitDir(QStringLiteral("/usr/local/visit"));
+  if (visitDir.exists()) {
+    for (const QFileInfo& ver : visitDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+      for (const QFileInfo& arch : QDir(ver.absoluteFilePath()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
+        prefixes.append(arch.absoluteFilePath());
+    }
+  }
+  prefixes.removeDuplicates();
+  return prefixes;
+}
+
+ResolvedGdbBinary resolveEffectiveGdbLaunch(const QString& explicitOverride = QString()) {
+  const auto& cfg = core::ConfigManager::instance();
+  const QString engine = cfg.debuggerEngine().trimmed().toLower();
+  const QString cfgGdb = explicitOverride.trimmed().isEmpty() ? cfg.getGdbPath().trimmed() : explicitOverride.trimmed();
+  const bool isDefaultToken = cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb") ||
+                              cfgGdb == QStringLiteral("cuda-gdb") || cfgGdb == QStringLiteral("rocgdb");
+  QString targetName = cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb;
+  if (explicitOverride.trimmed().isEmpty() && isDefaultToken) {
+    if (engine == QStringLiteral("rocgdb")) targetName = QStringLiteral("rocgdb");
+    else if (engine == QStringLiteral("cuda-gdb")) targetName = QStringLiteral("cuda-gdb");
+  }
+  const QString rawBin = resolveCachedToolPath(targetName, isDefaultToken ? defaultDebuggerSearchDirs() : QStringList{});
+  if (rawBin.isEmpty()) {
+    return {QString(), QString(), QString(), QStringLiteral("Debugger executable ('%1') was not found in PATH.").arg(targetName)};
+  }
+  const QFileInfo rawInfo(rawBin);
+  const QString canonicalBin = rawInfo.canonicalFilePath().isEmpty() ? rawBin : rawInfo.canonicalFilePath();
+  if (!QFileInfo(canonicalBin).fileName().startsWith(QStringLiteral("rocgdb"))) {
+    return {rawBin, QString(), QString(), QString()};
+  }
+  static QHash<QString, ResolvedGdbBinary> s_rocgdbCache;
+  const QString cacheKey = canonicalBin + QLatin1Char('|') + qEnvironmentVariable("LD_LIBRARY_PATH") + QLatin1Char('|') + qEnvironmentVariable("PYTHONHOME");
+  if (s_rocgdbCache.contains(cacheKey)) return s_rocgdbCache.value(cacheKey);
+
+  const QString binDir = QFileInfo(canonicalBin).absolutePath();
+  QStringList rocmLibList{QStringLiteral("/usr/lib64"), QStringLiteral("/lib64")};
+  for (const QString& p : {QFileInfo(binDir + QStringLiteral("/../lib")).canonicalFilePath(),
+                           QStringLiteral("/opt/rocm/lib"), QStringLiteral("/opt/rocm/lib64")}) {
+    if (!p.isEmpty() && QDir(p).exists() && !rocmLibList.contains(p)) rocmLibList.append(p);
+  }
+  const QString baseRocmLd = rocmLibList.join(QLatin1Char(':'));
+
+  if (QFileInfo(canonicalBin).fileName() == QStringLiteral("rocgdb")) {
+    QFileInfoList pyVariants = QDir(binDir).entryInfoList({QStringLiteral("rocgdb-py_3.*")}, QDir::Files | QDir::Executable);
+    std::sort(pyVariants.begin(), pyVariants.end(), [](const QFileInfo& a, const QFileInfo& b) {
+      return a.fileName().section(QLatin1Char('.'), -1).toInt() > b.fileName().section(QLatin1Char('.'), -1).toInt();
+    });
+    for (const QFileInfo& cand : pyVariants) {
+      if (probeRocgdbVersion(cand.absoluteFilePath(), baseRocmLd, QString())) {
+        const ResolvedGdbBinary ok{cand.absoluteFilePath(), baseRocmLd, QString(), QString()};
+        s_rocgdbCache.insert(cacheKey, ok);
+        return ok;
+      }
+    }
+    if (!pyVariants.isEmpty()) {
+      const QStringList prefixes = collectCandidatePythonPrefixes();
+      for (const QFileInfo& cand : pyVariants) {
+        const QString pyVer = cand.fileName().mid(QStringLiteral("rocgdb-py_").size());
+        for (const QString& pref : prefixes) {
+          if (!QDir(pref + QStringLiteral("/lib/python") + pyVer + QStringLiteral("/encodings")).exists()) continue;
+          for (const QString& libSub : {QStringLiteral("/lib"), QStringLiteral("/lib64")}) {
+            const QString libDir = pref + libSub;
+            if (!QDir(libDir).entryList({QStringLiteral("libpython") + pyVer + QStringLiteral(".so*")}, QDir::Files).isEmpty()) {
+              const QString fullLd = baseRocmLd + QLatin1Char(':') + libDir;
+              if (probeRocgdbVersion(cand.absoluteFilePath(), fullLd, pref)) {
+                const ResolvedGdbBinary ok{cand.absoluteFilePath(), fullLd, pref, QString()};
+                s_rocgdbCache.insert(cacheKey, ok);
+                return ok;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (probeRocgdbVersion(canonicalBin, baseRocmLd, QString())) {
+    const ResolvedGdbBinary ok{canonicalBin, baseRocmLd, QString(), QString()};
+    s_rocgdbCache.insert(cacheKey, ok);
+    return ok;
+  }
+  const ResolvedGdbBinary fail{QString(), QString(), QString(),
+                               QStringLiteral("ROCgdb ('%1') could not initialize a compatible Python 3 runtime.").arg(canonicalBin)};
+  s_rocgdbCache.insert(cacheKey, fail);
+  return fail;
+}
+
+void applyResolvedGdbEnv(QProcessEnvironment* env, const ResolvedGdbBinary& resolved) {
+  if (!env) return;
+  if (!resolved.extraLdLibraryPath.isEmpty()) {
+    const QString cur = env->value(QStringLiteral("LD_LIBRARY_PATH"));
+    env->insert(QStringLiteral("LD_LIBRARY_PATH"), cur.isEmpty() ? resolved.extraLdLibraryPath : (resolved.extraLdLibraryPath + QLatin1Char(':') + cur));
+  }
+  if (!resolved.pythonHome.isEmpty()) env->insert(QStringLiteral("PYTHONHOME"), resolved.pythonHome);
+}
 }  // namespace
 
-/** @brief Pre-validates `gdb` and `mpirun`/`mpiexec` executables before UI marks ranks `RUNNING`. */
+/** @brief Pre-validates `gdb`/`rocgdb`/`cuda-gdb` and `mpirun`/`mpiexec` executables before UI marks ranks `RUNNING`. */
 bool GdbRankCoordinator::validateLaunchEnvironment(int ranks, QString* outError) const {
-  const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"),
-                                  QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
-                                  QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
-  const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
-  const QString gdbBin = resolveCachedToolPath(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb,
-                                               (cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb")) ? searchDirs : QStringList{});
-  if (gdbBin.isEmpty()) { if (outError) *outError = QStringLiteral("GDB debugger executable ('%1') was not found in PATH.").arg(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb); return false; }
+  const QStringList& searchDirs = defaultDebuggerSearchDirs();
+  const ResolvedGdbBinary resolved = resolveEffectiveGdbLaunch();
+  if (resolved.executablePath.isEmpty()) {
+    if (outError) *outError = resolved.errorReason;
+    return false;
+  }
   const QString prefMpi = core::ConfigManager::instance().getDebuggerSettings().mpiExecutable.trimmed();
   if (!prefMpi.isEmpty() && prefMpi != QStringLiteral("mpirun") && prefMpi != QStringLiteral("mpiexec") && resolveCachedToolPath(prefMpi, searchDirs).isEmpty()) {
     if (outError) *outError = QStringLiteral("Configured MPI launcher ('%1') was not found.").arg(prefMpi);
@@ -118,9 +261,10 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   if (pids.isEmpty()) return false;
   for (qint64 pid : pids) if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
   terminateAllSessions();
-  const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
-  const QString gdbPath = resolveCachedToolPath(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb, {});
-  if (gdbPath.isEmpty()) return false;
+  const ResolvedGdbBinary resolved = resolveEffectiveGdbLaunch();
+  if (resolved.executablePath.isEmpty()) return false;
+  QProcessEnvironment procEnv = QProcessEnvironment::systemEnvironment();
+  applyResolvedGdbEnv(&procEnv, resolved);
 
   m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pids.first())).symLinkTarget();
   for (int r = 0; r < pids.size(); ++r) {
@@ -128,11 +272,12 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
     auto rp = std::make_unique<RankProcess>();
     rp->id = r; rp->process = std::make_unique<QProcess>(); rp->inferiorPid = static_cast<pid_t>(pid);
     rp->pendingAttach = true; rp->isAttached = true; rp->state.rankId = r; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
+    rp->process->setProcessEnvironment(procEnv);
     m_rankPids[r] = pid;
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
     QStringList args{QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
     if (!m_currentBinaryPath.isEmpty() && QFileInfo::exists(m_currentBinaryPath)) args.append(m_currentBinaryPath);
-    rp->process->start(gdbPath, args);
+    rp->process->start(resolved.executablePath, args);
     const bool started = rp->process->waitForStarted(2000);
     m_processes.push_back(std::move(rp));
     if (!started) { terminateAllSessions(); return false; }
@@ -265,6 +410,7 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
   const bool hadActiveSession = !m_processes.empty() || !m_rankFrames.isEmpty() || !m_rankThreads.isEmpty();
   m_processes.clear(); m_rankPids.clear(); m_varNameMap.clear(); m_varNameRevMap.clear();
   m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear(); m_pendingFrameSelect.clear();
+  m_rankArch.clear(); m_activeLaneIds.clear();
   m_pendingConsoleCmdCount.clear(); m_consoleReplyBuffer.clear(); m_watchpointIds.clear();
   if (m_mpirunProcess) {
     if (m_mpirunProcess->state() == QProcess::Starting) m_mpirunProcess->waitForStarted(250);
@@ -306,14 +452,14 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   const int rankCount = std::max(1, (explicitRankCount > 0) ? explicitRankCount : ds.defaultRanks);
   m_currentBinaryPath = executable;
 
-  const QStringList searchDirs = {QStringLiteral("/usr/lib64/openmpi/bin"), QStringLiteral("/usr/lib/openmpi/bin"),
-                                  QStringLiteral("/usr/lib64/mpich/bin"), QStringLiteral("/usr/lib/mpich/bin"),
-                                  QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin")};
-
-  const QString cfgGdb = core::ConfigManager::instance().getGdbPath().trimmed();
-  const QString gdbPath = resolveCachedToolPath(cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb,
-                                                (cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb")) ? searchDirs : QStringList{});
-  if (gdbPath.isEmpty()) { qWarning() << "[GDB] Could not locate gdb executable in PATH."; return; }
+  const QStringList& searchDirs = defaultDebuggerSearchDirs();
+  const ResolvedGdbBinary resolvedGdb = resolveEffectiveGdbLaunch();
+  const QString gdbPath = resolvedGdb.executablePath;
+  if (gdbPath.isEmpty()) {
+    qWarning() << "[GDB]" << resolvedGdb.errorReason;
+    emit sessionErrorOccurred(resolvedGdb.errorReason);
+    return;
+  }
 
   const QString preferredMpi = ds.mpiExecutable.trimmed().isEmpty() ? QStringLiteral("mpirun") : ds.mpiExecutable.trimmed();
   QString mpiBin = resolveCachedToolPath(preferredMpi, searchDirs);
@@ -332,6 +478,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
   env.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:") + env.value(QStringLiteral("LD_LIBRARY_PATH")));
+  applyResolvedGdbEnv(&env, resolvedGdb);
   for (const QString& pair : hs.envVars.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
     if (const int eq = pair.indexOf(QLatin1Char('=')); eq > 0) env.insert(pair.left(eq).trimmed(), pair.mid(eq + 1).trimmed());
   }

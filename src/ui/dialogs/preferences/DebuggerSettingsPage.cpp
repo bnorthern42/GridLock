@@ -56,8 +56,23 @@ DebuggerSettingsPage::DebuggerSettingsPage(QWidget* parent)
         tr("Select DAP Adapter"));
     m_gdbPathEdit = addBrowsePathRow(
         this, form, tr("GDB Path:"), QStringLiteral("gdb"),
-        tr("Full path to the GDB binary, e.g. /usr/bin/gdb or a custom build."),
+        tr("Full path to the GDB binary (e.g. gdb, rocgdb, cuda-gdb, or a custom build)."),
         tr("Select GDB Path"));
+
+    connect(engineCombo, &QComboBox::currentIndexChanged, this, [this, engineCombo](int) {
+        if (!m_gdbPathEdit) return;
+        const QString eng = engineCombo->currentData().toString().trimmed().toLower();
+        if (eng != QStringLiteral("gdb") && eng != QStringLiteral("cuda-gdb") &&
+            eng != QStringLiteral("rocgdb")) {
+            return;
+        }
+        m_gdbPathEdit->setPlaceholderText(eng);
+        const QString cur = m_gdbPathEdit->text().trimmed();
+        if (cur.isEmpty() || cur == QStringLiteral("gdb") ||
+            cur == QStringLiteral("cuda-gdb") || cur == QStringLiteral("rocgdb")) {
+            m_gdbPathEdit->setText(eng);
+        }
+    });
 
     // MPI launcher executable command.
     m_mpiExecEdit = new QLineEdit(this);
@@ -129,7 +144,13 @@ void DebuggerSettingsPage::loadFromSettings() {
     }
     m_clangdPathEdit->setText(cfg.getGlobalClangdPath());
     m_dapAdapterEdit->setText(cfg.getGlobalDapAdapterPath());
-    m_gdbPathEdit->setText(ds.gdbPath);
+    const QString eng = cfg.debuggerEngine().trimmed().toLower();
+    QString effectiveGdb = ds.gdbPath.trimmed();
+    if ((eng == QStringLiteral("rocgdb") || eng == QStringLiteral("cuda-gdb")) &&
+        (effectiveGdb.isEmpty() || effectiveGdb == QStringLiteral("gdb"))) {
+        effectiveGdb = eng;
+    }
+    m_gdbPathEdit->setText(effectiveGdb.isEmpty() ? ds.gdbPath : effectiveGdb);
     m_mpiExecEdit->setText(ds.mpiExecutable);
     m_mpiArgsEdit->setText(ds.mpiArgs);
     m_rankBox->setValue(ds.defaultRanks);

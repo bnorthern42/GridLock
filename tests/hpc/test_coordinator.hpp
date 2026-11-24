@@ -78,6 +78,16 @@ private slots:
     void testProcessScannerAndCoordinatorAttach();
 
     /**
+     * @brief Verifies deterministic ROCm rocgdb MI3 parsing (pending kernel bkpt, AMDGPU waves/lanes, registers).
+     */
+    void testRocgdbMockMiParsingAndPendingKernelBreakpoint();
+
+    /**
+     * @brief Compiles and debugs a live HIP kernel under rocgdb when AMD GPU (/dev/kfd + hipcc + rocgdb) is present.
+     */
+    void testLiveRocgdbHipKernelOnGpuIfAvailable();
+
+    /**
      * @brief Post-test environment cleanup.
      */
     void cleanupTestCase();

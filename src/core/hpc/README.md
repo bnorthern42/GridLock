@@ -11,7 +11,7 @@ Top-level backend abstractions (`IBackendCoordinator`, `HpcBackend`) and domain-
 - `HpcBackend.hpp` (`72` lines):
   - Defines `HpcResult` and the abstract `HpcBackend` interface for asynchronous cluster queries (`fetchPackages()`, `submitSlurmJob()`, `cancelSlurmJob()`).
 - Subdirectories:
-  - `gdb/`: Multi-rank `gdb --interpreter=mi3` orchestration, FIFO transport, MI parser, inspection, command builders, and payload sanitizer.
+  - `gdb/`: Multi-rank `gdb` / `rocgdb` / `cuda-gdb` (`--interpreter=mi3`) orchestration, FIFO transport, pending-to-resolved GPU kernel breakpoint handling, AMDGPU wavefront/lane and register MI parser, inspection, command builders, and payload sanitizer.
   - `dap/`: Debug Adapter Protocol coordinator (`DapCoordinator`) for local, multi-rank, and remote DAP sessions.
   - `lsp/`: JSON-RPC 2.0 `clangd` coordinator (`LspCoordinator`) for AST hover telemetry.
   - `memory/`: Linux `process_vm_readv` zero-copy reader, cross-rank differ, bounds validator, and CSV/binary exporter.

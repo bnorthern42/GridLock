@@ -4,19 +4,19 @@ Multi-rank GDB Machine Interface v3 (`gdb --interpreter=mi3`) process launcher, 
 
 ## Contents
 
-- `GdbRankCoordinator.hpp` (`712` lines):
+- `GdbRankCoordinator.hpp` (`739` lines):
   - Declares `GdbRankCoordinator` implementing `IBackendCoordinator`.
-  - Owns per-rank `QProcess` instances, POSIX named pipe descriptors, breakpoint/watchpoint/catchpoint tables, signal dispositions, and checkpoint records.
-- `GdbRankCoordinator.cpp`:
-  - Launches multi-rank sessions via `mpirun`/`mpiexec` and `mkfifo` named pipes, or standalone single-rank `gdb`.
-  - Handles local `/proc` attach, remote `gdbserver`/`qemu-user` target connection, signal injection, and process teardown.
-- `GdbMiParser.cpp`:
+  - Owns per-rank `QProcess` instances, POSIX named pipe descriptors, pending/resolved breakpoint (`^done,bkpt`, `=breakpoint-created`, `=breakpoint-modified`) and watchpoint/catchpoint tables, per-rank target architecture and GPU SIMD lane tracking (`activeArchitectureForRank()`, `activeLaneForRank()`), signal dispositions, and checkpoint records.
+- `GdbRankCoordinator.cpp` (`620` lines):
+  - Launches multi-rank sessions via `mpirun`/`mpiexec` and `mkfifo` named pipes, or standalone single-rank `gdb` / `rocgdb` / `cuda-gdb`.
+  - Resolves `ConfigManager::debuggerEngine()` (`gdb`, `rocgdb`, `cuda-gdb`), probes sibling `rocgdb-py_3.x` binaries against local Python 3 runtimes (`LD_LIBRARY_PATH` + `PYTHONHOME`) when host Python exceeds the packaged `rocm-gdb` wrapper version, and handles local `/proc` attach, remote `gdbserver`/`qemu-user` connection, and process teardown.
+- `GdbMiParser.cpp` (`483` lines):
   - Implements incremental GDB/MI3 stream parsing in `processGdbOutput`.
-  - Routes `*stopped`/`*running`, `^done`/`^error` tokens, hover/expression evaluations, locals, registers, memory reads, watchpoint triggers, and inferior stdout/stderr.
+  - Routes `*stopped`/`*running`, `=thread-selected`/`^done,new-thread-id` GPU lane/thread switches, `214-data-list-register-names` per-architecture register name tables (for AMDGPU `amdgcn:gfx*` vector/scalar/PC registers alongside `x86_64`), hover/expression evaluations, locals, memory reads, watchpoint triggers, and inferior stdout/stderr.
 - `GdbRankCommands.cpp`:
   - Emits MI commands for execution stepping (`-exec-*`), reverse debugging, breakpoints, watchpoints, catchpoints, signal `handle` rules, checkpoints, and variable/register writes.
-- `GdbRankInspection.cpp`:
-  - Implements 64-frame backtrace unwinding (`requestStackAndThreads`), OS/OpenMP thread parsing, `selectStackFrame`, and lazy `varobj` child expansion (`requestVariableChildren`).
+- `GdbRankInspection.cpp` (`535` lines):
+  - Implements 64-frame backtrace unwinding (`requestStackAndThreads`), OS/OpenMP and `AMDGPU Wave` / `CUDA` thread parsing, `selectStackFrame`, and lazy `varobj` child expansion (`requestVariableChildren`).
 - `MiSanitizer.hpp` (`57` lines), `MiSanitizer.cpp`:
   - Enforces payload size truncation, brace/bracket nesting depth limits, and ASCII control-character escaping on untrusted MI streams.
 

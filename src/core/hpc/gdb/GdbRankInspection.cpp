@@ -337,12 +337,13 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
     return true;
   }
 
-  // 2. Parse OS / OpenMP thread list response (`203^done,threads=[...]` or untokenized `^done,threads=[...]`).
+  // 2. Parse OS / OpenMP / GPU wavefront thread list response (`203^done,threads=[...]` or `^done,threads=[...]`).
   if (line.startsWith(QLatin1String("203^done,threads=[")) || line.startsWith(QLatin1String("^done,threads=["))) {
     static const QRegularExpression curThreadRe(QStringLiteral("current-thread-id=\"(\\d+)\"")), idRe(QStringLiteral("\\bid=\"(\\d+)\"")),
         nameRe(QStringLiteral("\\bname=\"((?:\\\\.|[^\"])*)\"")), targetIdRe(QStringLiteral("target-id=\"((?:\\\\.|[^\"])*)\"")),
         stateRe(QStringLiteral("\\bstate=\"([^\"]+)\"")), funcRe(QStringLiteral("func=\"((?:\\\\.|[^\"])*)\"")),
-        fileRe(QStringLiteral("file=\"((?:\\\\.|[^\"])*)\"")), lineRe(QStringLiteral("line=\"(\\d+)\""));
+        fileRe(QStringLiteral("file=\"((?:\\\\.|[^\"])*)\"")), lineRe(QStringLiteral("line=\"(\\d+)\"")),
+        archRe(QStringLiteral("arch=\"([^\"]+)\""));
     const auto curMatch = curThreadRe.match(line);
     const int currentThreadId = curMatch.hasMatch() ? curMatch.captured(1).toInt() : m_activeThreadIds.value(rankId, 1);
     if (currentThreadId > 0) m_activeThreadIds[rankId] = currentThreadId;
@@ -358,8 +359,16 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
       const auto idm = idRe.match(headerPart);
       entry.threadId = idm.hasMatch() ? idm.captured(1).toInt() : (idx + 1);
       const auto nm = nameRe.match(headerPart), tm = targetIdRe.match(headerPart);
-      entry.name = (nm.hasMatch() && !nm.captured(1).isEmpty()) ? detail::unescapeMiValue(nm.captured(1))
-                                                                : (tm.hasMatch() ? detail::unescapeMiValue(tm.captured(1)) : QStringLiteral("main"));
+      const QString rawName = (nm.hasMatch() && !nm.captured(1).isEmpty()) ? detail::unescapeMiValue(nm.captured(1)) : QString();
+      const QString targetId = (tm.hasMatch() && !tm.captured(1).isEmpty()) ? detail::unescapeMiValue(tm.captured(1)) : QString();
+      const QString frameArch = archRe.match(framePart).hasMatch() ? archRe.match(framePart).captured(1) : QString();
+      const bool isGpuWave = targetId.startsWith(QStringLiteral("AMDGPU ")) || targetId.startsWith(QStringLiteral("CUDA ")) ||
+                             frameArch.startsWith(QStringLiteral("amdgcn"));
+      if (isGpuWave && !targetId.isEmpty()) {
+        entry.name = (!rawName.isEmpty() && !targetId.contains(rawName)) ? QStringLiteral("%1 [%2]").arg(targetId, rawName) : targetId;
+      } else {
+        entry.name = !rawName.isEmpty() ? rawName : (!targetId.isEmpty() ? targetId : QStringLiteral("main"));
+      }
       const auto sm = stateRe.match(t);
       entry.state = sm.hasMatch() ? sm.captured(1) : QStringLiteral("stopped");
       const auto fnm = funcRe.match(framePart), fim = fileRe.match(framePart), lnm = lineRe.match(framePart);
@@ -370,6 +379,7 @@ bool GdbRankCoordinator::handleMiStackOrThreadRecord(int rankId, const QString& 
         }
       }
       entry.isCurrent = (entry.threadId == currentThreadId);
+      if (entry.isCurrent && !frameArch.isEmpty()) m_rankArch[rankId] = frameArch;
       threads.append(entry);
     }
     m_rankThreads[rankId] = threads;
