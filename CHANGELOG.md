@@ -5,6 +5,16 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.81] - 2026-11-23
+
+### Fixed
+- **Floating Desktop Window Decorations (`MainWindow`, `main.cpp`)**:
+  - Restored native OS and window-manager decorations by default (stopping unconditional `QT_WAYLAND_DISABLE_WINDOWDECORATION=1` export on Wayland and keeping `Qt::FramelessWindowHint` unset on `MainWindow`) so floating desktop environments (GNOME, KDE Plasma, X11, and Windows) render standard titlebars, drag-to-move handles, edge resize borders, and window buttons by default while keeping tiling Wayland compositors such as Niri unaffected.
+
+### Added
+- **Menu-Bar Window Controls Option (`PreferencesDialog`, `ConfigManager`, `MainWindow`)**:
+  - Added **Show Window Controls in Menu Bar** in `Preferences -> Appearance` (`ConfigManager::showMenuBarWindowControls`, default `true`, persisted under `[ui] show_menubar_window_controls` in `~/.config/gridlock/config.toml`), mounting compact `Minimize`, `Maximize/Restore`, and `Close` corner buttons alongside empty-space `startSystemMove()` drag and double-click maximize support on `menuBar()`.
+
 ## [0.8.8] - 2026-11-22
 
 ### Added

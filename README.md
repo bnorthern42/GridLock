@@ -1,6 +1,6 @@
 # GridLock: Multi-Rank MPI Debugger & ELF64 Binary Inspector
 
-![Version](https://img.shields.io/badge/Release-v0.8.8-brightgreen.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/Release-v0.8.81-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -19,12 +19,12 @@
 ### Option 1: Standalone Linux AppImage (`x86_64`, Wayland & X11)
 
 Download either AppImage from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) (bundles Qt6 Wayland and XCB platform plugins plus `libxcb-cursor.so.0`):
-* **`GridLock-0.8.8-x86_64.AppImage`** (Lite Edition)
-* **`GridLock-0.8.8-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
+* **`GridLock-0.8.81-x86_64.AppImage`** (Lite Edition)
+* **`GridLock-0.8.81-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
 
 ```bash
-chmod +x GridLock-0.8.8-Tutorials-x86_64.AppImage
-./GridLock-0.8.8-Tutorials-x86_64.AppImage
+chmod +x GridLock-0.8.81-Tutorials-x86_64.AppImage
+./GridLock-0.8.81-Tutorials-x86_64.AppImage
 ```
 
 ### Option 2: Build From Source (`Meson` + `Ninja`)
@@ -74,7 +74,7 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 
 ---
 
-## Feature Summary (`v0.8.8`)
+## Feature Summary (`v0.8.81`)
 
 * **Execution, Checkpoints & Target Modes**:
   * **Local MPI & ELF64 Launch**: MPMD `mpirun` / `mpiexec` orchestration (`1..256` ranks) over POSIX FIFOs via `GdbRankCoordinator` (`gdb`, `cuda-gdb`, `rocgdb`) or JSON-RPC via `DapCoordinator` (`lldb-dap`), inline `Config` launch popover (per-target/workspace `--args`, working directory, `Stop at main()`), unified `All Ranks` vs. `Rank k` execution scope, `Pause All Ranks (F6)`, OpenMP `OMP_NUM_THREADS` / `OMP_WAIT_POLICY=PASSIVE` auto-tuning, and time-travel reverse execution (`REC`, `Step Back`, `Rev Continue`).
@@ -91,7 +91,7 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
   * **`MemView` & `MemoryProfilerWidget`**: `process_vm_readv` hex/ASCII reader (`MemoryBoundsValidator`), cross-rank byte diffing (`Diff Ranks`), typed CSV/`.bin` export, and `/proc/<pid>/smaps` + `LD_PRELOAD` heap-caller treemap profiler with 5 palettes.
   * **`ArrayPlotDialog` (`Ctrl+Alt+G`) & `PointerGraphDialog`**: Multi-rank 1D overlays, `start:end:stride` slicing, `Log10` scale, drag-box zoom, scalar history, `Complex64`/`Complex128` decoding, virtualized 2D/3D C/Fortran tensor tables, and validated `splot`/`pm3d` `gnuplot` export; plus Sugiyama DAG pointer graphs with persistent roots, `"old -> new"` mutation badges, `Shift+Click` node width expansion, full-value hover tooltips, corner minimap, `/x` `/d` `/b` format overrides, and `2x` PNG/SVG export.
   * **`ProgrammerCalculatorDialog` (`Ctrl+Alt+C`)**: Floating base converter (`HEX`/`DEC`/`OCT`/`BIN`, IEEE-754 `float`/`double`, `8/16/32/64-bit`, `BSWAP`, 64-bit interactive bit grid, radix keypad) with exact cursor-offset handoff across views.
-  * **Search Everywhere, Customizable Toolbar & `ClangdLspClient`**: multi-scope Search Everywhere overlay (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`, 6 scope tabs, 35-line numbered context preview, `S/M/L/XL` size presets), customizable `< 1,040 px` top toolbar (`Appearance -> Toolbar` with `24px` spacers, flex springs, separators), non-destructive `SOURCE | DEBUG | BINARY | MPI` perspectives, ELF64 2D CFG (`Space`) + decompiler + validated `Alt+P` instruction patching, `clangd` LSP (`F12`), exact 4-column soft `Tab`/`Backtab`, `CodeMinimap` toggle, virtualized large-CSV viewer, offline Zeal `.docset`/`man` viewer (`F1`), and 12 dark/light themes.
+  * **Search Everywhere, Customizable Toolbar & `ClangdLspClient`**: Multi-scope Search Everywhere overlay (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`, 6 scope tabs, 35-line numbered context preview, `S/M/L/XL` size presets), customizable `< 1,040 px` top toolbar (`Appearance -> Toolbar` with `24px` spacers, flex springs, separators), native OS/WM window decorations with optional menu-bar `Minimize`/`Maximize`/`Close` controls, non-destructive `SOURCE | DEBUG | BINARY | MPI` perspectives, ELF64 2D CFG (`Space`) + decompiler + validated `Alt+P` instruction patching, `clangd` LSP (`F12`), exact 4-column soft `Tab`/`Backtab`, `CodeMinimap` toggle, virtualized large-CSV viewer, offline Zeal `.docset`/`man` viewer (`F1`), and 12 dark/light themes.
 
 ---
 
