@@ -16,10 +16,12 @@
 #include <QDockWidget>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPixmap>
 #include <QProcess>
 #include <QScreen>
@@ -29,6 +31,8 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
+#include <QToolButton>
+#include <QWindow>
 
 #include "../core/Version.hpp"
 #include "../core/hpc/analysis/MockHpcBackend.hpp"
@@ -195,6 +199,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
 
     auto& cfg = gridlock::core::ConfigManager::instance();
+    setFramelessWindowMode(cfg.framelessWindow());
+    cfg.registerFramelessWindowListener(this, [this](bool en) { setFramelessWindowMode(en); });
     applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
     syncCoordinatorWithConfig();
     bindLiveMemViewHandlers();
@@ -239,6 +245,30 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_telemetryTimer->start(1500);
 }
 
+void MainWindow::setFramelessWindowMode(bool frameless) {
+    m_framelessWindow = frameless;
+    const bool wasVisible = isVisible();
+    const Qt::WindowFlags cur = windowFlags();
+    const Qt::WindowFlags desired = frameless
+        ? (cur | Qt::Window | Qt::FramelessWindowHint)
+        : ((cur & ~Qt::FramelessWindowHint) | Qt::Window | Qt::WindowTitleHint |
+           Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint);
+    if (cur != desired) {
+        setWindowFlags(desired);
+        if (wasVisible) show();
+    }
+    if (QMenuBar* mb = menuBar(); mb && m_windowControlsWidget) {
+        if (frameless) {
+            if (mb->cornerWidget(Qt::TopRightCorner) != m_windowControlsWidget) mb->setCornerWidget(m_windowControlsWidget, Qt::TopRightCorner);
+            m_windowControlsWidget->setVisible(true);
+        } else {
+            if (mb->cornerWidget(Qt::TopRightCorner) == m_windowControlsWidget) mb->setCornerWidget(nullptr, Qt::TopRightCorner);
+            m_windowControlsWidget->setParent(this);
+            m_windowControlsWidget->setVisible(false);
+        }
+    }
+}
+
 /**
  * @brief Constructs application menu bar actions, shortcuts, and dialog triggers.
  *
@@ -248,6 +278,41 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 void MainWindow::setupMenu() {
     QMenuBar* menuBar = new QMenuBar(this);
     setMenuBar(menuBar);
+    class MenuBarDragFilter final : public QObject {
+    public:
+        MenuBarDragFilter(MainWindow* mw, QMenuBar* mb) : QObject(mb), m_mw(mw), m_mb(mb) {}
+        bool eventFilter(QObject*, QEvent* ev) override {
+            if (!m_mw || !m_mb || !m_mw->isFramelessWindowMode()) return false;
+            if (ev->type() == QEvent::MouseButtonPress || ev->type() == QEvent::MouseButtonDblClick) {
+                auto* me = static_cast<QMouseEvent*>(ev);
+                if (me->button() == Qt::LeftButton && !m_mb->actionAt(me->position().toPoint())) {
+                    if (ev->type() == QEvent::MouseButtonDblClick) m_mw->isMaximized() ? m_mw->showNormal() : m_mw->showMaximized();
+                    else if (QWindow* win = m_mw->windowHandle()) win->startSystemMove();
+                    return true;
+                }
+            }
+            return false;
+        }
+    private:
+        MainWindow* m_mw = nullptr; QMenuBar* m_mb = nullptr;
+    };
+    menuBar->installEventFilter(new MenuBarDragFilter(this, menuBar));
+    m_windowControlsWidget = new QWidget(this); m_windowControlsWidget->setObjectName(QStringLiteral("windowControlsWidget"));
+    auto* wcLay = new QHBoxLayout(m_windowControlsWidget); wcLay->setContentsMargins(4, 0, 2, 0); wcLay->setSpacing(2);
+    auto mkWinBtn = [&](const QString& objName, const QString& glyph, const QString& tip, bool isClose) {
+        auto* btn = new QToolButton(m_windowControlsWidget); btn->setObjectName(objName); btn->setText(glyph); btn->setToolTip(tip);
+        btn->setFixedSize(28, 22); btn->setCursor(Qt::PointingHandCursor);
+        btn->setStyleSheet(isClose ? QStringLiteral("QToolButton { border: none; border-radius: 3px; font-weight: 700; } QToolButton:hover { background: #e06c75; color: #ffffff; }")
+                                   : QStringLiteral("QToolButton { border: none; border-radius: 3px; font-weight: 700; } QToolButton:hover { background: rgba(128,140,160,0.25); }"));
+        wcLay->addWidget(btn); return btn;
+    };
+    m_windowMinimizeBtn = mkWinBtn(QStringLiteral("windowMinimizeBtn"), QStringLiteral("\u2500"), tr("Minimize Window"), false);
+    m_windowMaximizeBtn = mkWinBtn(QStringLiteral("windowMaximizeBtn"), QStringLiteral("\u25a1"), tr("Maximize / Restore Window"), false);
+    m_windowCloseBtn = mkWinBtn(QStringLiteral("windowCloseBtn"), QStringLiteral("\u2715"), tr("Close Window"), true);
+    connect(m_windowMinimizeBtn, &QToolButton::clicked, this, &QWidget::showMinimized);
+    connect(m_windowMaximizeBtn, &QToolButton::clicked, this, [this]() { isMaximized() ? showNormal() : showMaximized(); });
+    connect(m_windowCloseBtn, &QToolButton::clicked, this, &QWidget::close);
+    m_windowControlsWidget->hide();
 
     // Construct File menu with workspace, project wizard, session, and SLURM triggers.
     QMenu* fileMenu = menuBar->addMenu("&File");

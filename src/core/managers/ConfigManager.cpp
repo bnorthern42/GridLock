@@ -359,4 +359,11 @@ void ConfigManager::registerSearchPopupSizeListener(
   m_searchPopupSizeListeners.emplace_back(QPointer<QObject>(context), std::move(callback));
 }
 
+/** @brief Registers a `QPointer`-guarded callback invoked whenever `setFramelessWindow()` updates the window frame mode. */
+void ConfigManager::registerFramelessWindowListener(
+    QObject* context, std::function<void(bool)> callback) {
+  if (!context || !callback) return;
+  m_framelessWindowListeners.emplace_back(QPointer<QObject>(context), std::move(callback));
+}
+
 }  // namespace gridlock::core

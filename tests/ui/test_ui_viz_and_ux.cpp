@@ -660,6 +660,26 @@ void TestMainWindowUI::testArrayPlotterAndPersistentPointerGraph() {
         QApplication::processEvents();
         QCOMPARE(cfg.toolbarLayout(), cfg.defaultToolbarLayout());
         QVERIFY2(launchOptBtn->isVisible() && targetSel->x() < launchOptBtn->x() && launchOptBtn->x() < searchBtn->x(), qPrintable(QStringLiteral("reset targetX=%1 optX=%2 searchX=%3").arg(targetSel->x()).arg(launchOptBtn->x()).arg(searchBtn->x())));
+
+        // Verify native OS window decorations by default and optional frameless menu-bar controls.
+        struct FramelessGuard { ~FramelessGuard() { gridlock::core::ConfigManager::instance().setFramelessWindow(false); } } flGuard;
+        QVERIFY2(!cfg.framelessWindow() && !mw.isFramelessWindowMode() && !(mw.windowFlags() & Qt::FramelessWindowHint), "MainWindow must default to native window decorations");
+        auto* winCtrlBox = mw.findChild<QWidget*>(QStringLiteral("windowControlsWidget"));
+        auto* minBtn = mw.findChild<QToolButton*>(QStringLiteral("windowMinimizeBtn"));
+        auto* maxBtn = mw.findChild<QToolButton*>(QStringLiteral("windowMaximizeBtn"));
+        auto* clsBtn = mw.findChild<QToolButton*>(QStringLiteral("windowCloseBtn"));
+        QVERIFY(winCtrlBox && minBtn && maxBtn && clsBtn && !winCtrlBox->isVisible() && mw.menuBar()->cornerWidget(Qt::TopRightCorner) == nullptr);
+        gridlock::ui::PreferencesDialog flPrefs(&mw);
+        auto* flChk = flPrefs.findChild<QCheckBox*>(QStringLiteral("framelessWindowCheck"));
+        auto* flBb = flPrefs.findChild<QDialogButtonBox*>();
+        QVERIFY(flChk && !flChk->isChecked() && flBb && flBb->button(QDialogButtonBox::Apply));
+        flChk->setChecked(true);
+        flBb->button(QDialogButtonBox::Apply)->click();
+        QApplication::processEvents();
+        QVERIFY2(cfg.framelessWindow() && mw.isFramelessWindowMode() && (mw.windowFlags() & Qt::FramelessWindowHint) && mw.isVisible() && mw.menuBar()->cornerWidget(Qt::TopRightCorner) == winCtrlBox && winCtrlBox->isVisible() && minBtn->isVisible() && maxBtn->isVisible() && clsBtn->isVisible(), "Enabling framelessWindow must apply Qt::FramelessWindowHint and reveal menuBar window controls");
+        cfg.setFramelessWindow(false);
+        QApplication::processEvents();
+        QVERIFY(!cfg.framelessWindow() && !mw.isFramelessWindowMode() && !(mw.windowFlags() & Qt::FramelessWindowHint) && !winCtrlBox->isVisible() && mw.menuBar()->cornerWidget(Qt::TopRightCorner) == nullptr);
     }
     // Performance regression: 5+ MB (~100,000-row) CSV must open via virtualized CsvTablePreviewWidget in < 1000 ms.
     const QString bigCsv = tmpDir.filePath(QStringLiteral("telemetry_5mb.csv"));

@@ -136,9 +136,18 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // Disable client-side Wayland window decorations on native compositors to prevent buffer damage loops.
-  if (waylandDisplay.contains("wayland", Qt::CaseInsensitive) && !isWsl) {
-    qputenv("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
+  // Preserve Wayland decorations by default for GNOME/KDE; only disable when frameless_window = true.
+  if (waylandDisplay.contains("wayland", Qt::CaseInsensitive) && !isWsl &&
+      qEnvironmentVariableIsEmpty("QT_WAYLAND_DISABLE_WINDOWDECORATION")) {
+    bool wantFrameless = false;
+    try {
+      const QString cfgPath = gridlock::core::ConfigManager::configDirectory() + QStringLiteral("/config.toml");
+      if (QFile::exists(cfgPath)) {
+        const auto tbl = toml::parse_file(cfgPath.toStdString());
+        wantFrameless = tbl["ui"]["frameless_window"].value_or(false);
+      }
+    } catch (...) {}
+    if (wantFrameless) qputenv("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
   }
   qputenv("vblank_mode", "3");
 
