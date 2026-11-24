@@ -4,8 +4,8 @@ Modular `MainWindow` workstation shell, multi-pane editor tab container, MI cons
 
 ## Contents
 
-- `MainWindow.hpp` (`520`), `MainWindowInternal.hpp` (`240`), `MainWindow.cpp` (`497`):
-  - Core `QMainWindow` shell construction (defaulting to native OS window decorations for floating desktop managers, with optional frameless mode mounting `Minimize`/`Maximize`/`Close` corner controls and `startSystemMove()` drag handling on `menuBar()`), subview accessors, hover tooltip helper, and menu bar setup.
+- `MainWindow.hpp` (`519`), `MainWindowInternal.hpp` (`240`), `MainWindow.cpp` (`496`):
+  - Core `QMainWindow` shell construction (preserving native OS window decorations across floating and tiling window managers, with configurable `Minimize`/`Maximize`/`Close` corner buttons and `startSystemMove()` drag handling on `menuBar()`), subview accessors, hover tooltip helper, and menu bar setup.
 - `MainWindowLifecycle.cpp` (`454`):
   - Backend coordinator binding (`setCoordinator`), preview fixture seeding, status-bar memory telemetry, `closeEvent()` session/geometry save and synchronous MPI/PTY/LSP teardown, and global `eventFilter()` (`Double Shift` and IDE shortcuts).
 - `MainWindowNavigation.cpp` (`385`), `MainWindowBinaryNav.cpp` (`471`):

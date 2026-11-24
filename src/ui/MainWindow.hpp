@@ -245,10 +245,10 @@ public:
     void applyCutterWorkspaceLayout();
     /** @brief Reorders, shows/hides, and inserts spacers/separators on `#MainToolbar` from @p layout tokens. */
     void rebuildToolbarFromLayout(const QStringList& layout);
-    /** @brief Applies native OS window decorations (`false`, default) or frameless menu-bar controls (`true`). */
-    void setFramelessWindowMode(bool frameless);
-    /** @brief Returns true when frameless window mode (`Qt::FramelessWindowHint`) is active on `MainWindow`. */
-    bool isFramelessWindowMode() const { return m_framelessWindow; }
+    /** @brief Shows (`true`, default) or hides (`false`) the `Minimize / Maximize / Close` corner controls in `menuBar()`. */
+    void setMenuBarWindowControlsVisible(bool visible);
+    /** @brief Returns true when the menu-bar window control buttons are visible. */
+    bool areMenuBarWindowControlsVisible() const { return m_menuBarWindowControlsVisible; }
     /** @brief Seeks memory, disassembly, and decompiler views to an address or symbol. */
     bool seekToAddressOrExpression(const QString& expr);
     /** @brief Synthesizes a deterministic memory window for preview/fallback targets. */
@@ -506,7 +506,7 @@ private:
     QToolButton* m_windowMinimizeBtn = nullptr;
     QToolButton* m_windowMaximizeBtn = nullptr;
     QToolButton* m_windowCloseBtn = nullptr;
-    bool m_framelessWindow = false;
+    bool m_menuBarWindowControlsVisible = true;
 
     struct SessionShutdownGuard {
         MainWindow* self = nullptr;

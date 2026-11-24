@@ -61,7 +61,7 @@ void ConfigManager::loadConfig() {
           << "[theme.source]\nbackground = \"#1e1e1e\"\ntext = \"#f0f0f0\"\nactive_line = \"#505000\"\n\n"
           << "[theme.assembly]\nopcode = \"#00ff7f\"\nregister = \"#ff7f50\"\naddress = \"#555555\"\n\n"
           << "[debugger]\ndefault_ranks = 2\ngdb_path = \"gdb\"\n\n"
-          << "[ui]\npreferred_monitor = \"\"\nopen_unfocused = false\nframeless_window = false\n";
+          << "[ui]\npreferred_monitor = \"\"\nopen_unfocused = false\nshow_menubar_window_controls = true\n";
       file.close();
     }
   }
@@ -184,27 +184,27 @@ void ConfigManager::setOpenUnfocused(bool unfocused) {
   saveGlobalConfig();
 }
 
-/** @brief Reads `[ui] frameless_window` from `config.toml` (falling back to `QSettings` or `false`). */
-bool ConfigManager::framelessWindow() const {
+/** @brief Reads `[ui] show_menubar_window_controls` from `config.toml` (falling back to `QSettings` or `true`). */
+bool ConfigManager::showMenuBarWindowControls() const {
   if (const auto* uiTbl = m_config["ui"].as_table()) {
-    if (auto bv = (*uiTbl)["frameless_window"].value<bool>()) return *bv;
+    if (auto bv = (*uiTbl)["show_menubar_window_controls"].value<bool>()) return *bv;
   }
   QSettings s(kOrg, kApp);
-  return s.value(QStringLiteral("ui/frameless_window"), false).toBool();
+  return s.value(QStringLiteral("ui/show_menubar_window_controls"), true).toBool();
 }
 
-/** @brief Persists `[ui] frameless_window` to `config.toml` and `QSettings`, then notifies live listeners. */
-void ConfigManager::setFramelessWindow(bool enabled) {
+/** @brief Persists `[ui] show_menubar_window_controls` to `config.toml` and `QSettings`, then notifies live listeners. */
+void ConfigManager::setShowMenuBarWindowControls(bool enabled) {
   if (!m_config.contains("ui")) m_config.insert("ui", toml::table{});
-  m_config["ui"].as_table()->insert_or_assign("frameless_window", enabled);
+  m_config["ui"].as_table()->insert_or_assign("show_menubar_window_controls", enabled);
   saveGlobalConfig();
   QSettings s(kOrg, kApp);
-  s.setValue(QStringLiteral("ui/frameless_window"), enabled);
+  s.setValue(QStringLiteral("ui/show_menubar_window_controls"), enabled);
   s.sync();
-  auto it = m_framelessWindowListeners.begin();
-  while (it != m_framelessWindowListeners.end()) {
+  auto it = m_menuBarWindowControlsListeners.begin();
+  while (it != m_menuBarWindowControlsListeners.end()) {
     if (it->first.isNull()) {
-      it = m_framelessWindowListeners.erase(it);
+      it = m_menuBarWindowControlsListeners.erase(it);
     } else {
       auto cb = it->second;
       ++it;

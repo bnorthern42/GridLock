@@ -220,12 +220,12 @@ void PreferencesDialog::setupPages() {
         m_searchPopupSizeCombo->setToolTip(
             tr("Overlay footprint for Search Everywhere / Command Palette (Double Shift / Ctrl+P)."));
         appForm->addRow(tr("Search Everywhere Popup Size:"), m_searchPopupSizeCombo);
-        m_framelessWindowCheck = new QCheckBox(tr("Frameless Window (Hide System Titlebar)"), m_appearancePage);
-        m_framelessWindowCheck->setObjectName(QStringLiteral("framelessWindowCheck"));
-        m_framelessWindowCheck->setChecked(gridlock::core::ConfigManager::instance().framelessWindow());
-        m_framelessWindowCheck->setToolTip(
-            tr("Hide native OS window decorations and show Minimize, Maximize, and Close buttons on the menu bar."));
-        appForm->addRow(tr("Window Chrome:"), m_framelessWindowCheck);
+        m_menuBarWindowControlsCheck = new QCheckBox(tr("Show Window Controls in Menu Bar"), m_appearancePage);
+        m_menuBarWindowControlsCheck->setObjectName(QStringLiteral("menuBarWindowControlsCheck"));
+        m_menuBarWindowControlsCheck->setChecked(gridlock::core::ConfigManager::instance().showMenuBarWindowControls());
+        m_menuBarWindowControlsCheck->setToolTip(
+            tr("Show Minimize, Maximize, and Close corner buttons and drag-to-move support on the menu bar."));
+        appForm->addRow(tr("Window Chrome:"), m_menuBarWindowControlsCheck);
     }
     m_editingPage = new EditingSettingsPage(m_stack);
     m_behaviorPage = new BehaviorSettingsPage(m_stack);
@@ -337,8 +337,8 @@ void PreferencesDialog::apply() {
     if (m_searchPopupSizeCombo) {
         cfg.setSearchPopupSize(m_searchPopupSizeCombo->currentData().toString());
     }
-    if (m_framelessWindowCheck) {
-        cfg.setFramelessWindow(m_framelessWindowCheck->isChecked());
+    if (m_menuBarWindowControlsCheck) {
+        cfg.setShowMenuBarWindowControls(m_menuBarWindowControlsCheck->isChecked());
     }
     if (auto* telemetryCombo = m_behaviorPage->findChild<QComboBox*>(QStringLiteral("telemetryFormatCombo"))) {
         cfg.setTelemetryDisplayFormat(telemetryCombo->currentData().toString());

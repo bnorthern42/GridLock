@@ -254,12 +254,12 @@ class ConfigManager {
   /** @brief Updates and saves `[ui] open_unfocused` in `config.toml`. */
   void setOpenUnfocused(bool unfocused);
 
-  /** @brief Returns whether `[ui] frameless_window` is enabled (default: `false`, preserving native OS window decorations). */
-  bool framelessWindow() const;
-  /** @brief Persists `[ui] frameless_window` to `config.toml` and `QSettings`, then notifies live `MainWindow` listeners. */
-  void setFramelessWindow(bool enabled);
-  /** @brief Registers a `QPointer`-guarded callback invoked whenever `setFramelessWindow()` updates the window frame mode. */
-  void registerFramelessWindowListener(QObject* context, std::function<void(bool)> callback);
+  /** @brief Returns whether `[ui] show_menubar_window_controls` is enabled (default: `true`). */
+  bool showMenuBarWindowControls() const;
+  /** @brief Persists `[ui] show_menubar_window_controls` to `config.toml` and `QSettings`, then notifies live `MainWindow` listeners. */
+  void setShowMenuBarWindowControls(bool enabled);
+  /** @brief Registers a `QPointer`-guarded callback invoked whenever `setShowMenuBarWindowControls()` updates menu-bar window control visibility. */
+  void registerMenuBarWindowControlsListener(QObject* context, std::function<void(bool)> callback);
 
   /** @brief Returns the canonical default `#MainToolbar` ordered item token list. */
   static QStringList defaultToolbarLayout();
@@ -380,7 +380,7 @@ class ConfigManager {
   mutable QMap<QString, QString> m_targetProgramArgs; ///< In-memory per-target CLI arguments for standalone binaries.
   std::vector<std::pair<QPointer<QObject>, std::function<void(const QStringList&)>>> m_toolbarLayoutListeners; ///< Live toolbar layout observers.
   std::vector<std::pair<QPointer<QObject>, std::function<void(const QString&)>>> m_searchPopupSizeListeners; ///< Live Search Everywhere size observers.
-  std::vector<std::pair<QPointer<QObject>, std::function<void(bool)>>> m_framelessWindowListeners; ///< Live frameless window mode observers.
+  std::vector<std::pair<QPointer<QObject>, std::function<void(bool)>>> m_menuBarWindowControlsListeners; ///< Live menu-bar window controls visibility observers.
 
   static constexpr const char* kOrg = "gridlock"; ///< QSettings organization identifier.
   static constexpr const char* kApp = "debugger"; ///< QSettings application identifier.

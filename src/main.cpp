@@ -125,30 +125,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // Inspect WAYLAND_DISPLAY and /proc/version to detect native Wayland vs. WSLg environments.
-  const QString waylandDisplay = qEnvironmentVariable("WAYLAND_DISPLAY");
-  QFile versionFile("/proc/version");
-  bool isWsl = false;
-  if (versionFile.open(QIODevice::ReadOnly)) {
-    const QString versionStr = QString::fromUtf8(versionFile.readAll()).toLower();
-    if (versionStr.contains("microsoft") || versionStr.contains("wsl")) {
-      isWsl = true;
-    }
-  }
-
-  // Preserve Wayland decorations by default for GNOME/KDE; only disable when frameless_window = true.
-  if (waylandDisplay.contains("wayland", Qt::CaseInsensitive) && !isWsl &&
-      qEnvironmentVariableIsEmpty("QT_WAYLAND_DISABLE_WINDOWDECORATION")) {
-    bool wantFrameless = false;
-    try {
-      const QString cfgPath = gridlock::core::ConfigManager::configDirectory() + QStringLiteral("/config.toml");
-      if (QFile::exists(cfgPath)) {
-        const auto tbl = toml::parse_file(cfgPath.toStdString());
-        wantFrameless = tbl["ui"]["frameless_window"].value_or(false);
-      }
-    } catch (...) {}
-    if (wantFrameless) qputenv("QT_WAYLAND_DISABLE_WINDOWDECORATION", "1");
-  }
+  // Keep native Wayland/X11 window decorations active by default across GNOME, KDE, and tiling WMs.
   qputenv("vblank_mode", "3");
 
   // Route to the offscreen QPA platform when --headless/--snapshot is passed or when no display server exists.

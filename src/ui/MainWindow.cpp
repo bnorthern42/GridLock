@@ -199,8 +199,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
 
     auto& cfg = gridlock::core::ConfigManager::instance();
-    setFramelessWindowMode(cfg.framelessWindow());
-    cfg.registerFramelessWindowListener(this, [this](bool en) { setFramelessWindowMode(en); });
+    if (windowFlags() & Qt::FramelessWindowHint) {
+        setWindowFlags((windowFlags() & ~Qt::FramelessWindowHint) | Qt::Window | Qt::WindowTitleHint |
+                       Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint);
+    }
+    setMenuBarWindowControlsVisible(cfg.showMenuBarWindowControls());
+    cfg.registerMenuBarWindowControlsListener(this, [this](bool vis) { setMenuBarWindowControlsVisible(vis); });
     applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
     syncCoordinatorWithConfig();
     bindLiveMemViewHandlers();
@@ -245,26 +249,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_telemetryTimer->start(1500);
 }
 
-void MainWindow::setFramelessWindowMode(bool frameless) {
-    m_framelessWindow = frameless;
-    const bool wasVisible = isVisible();
-    const Qt::WindowFlags cur = windowFlags();
-    const Qt::WindowFlags desired = frameless
-        ? (cur | Qt::Window | Qt::FramelessWindowHint)
-        : ((cur & ~Qt::FramelessWindowHint) | Qt::Window | Qt::WindowTitleHint |
-           Qt::WindowSystemMenuHint | Qt::WindowMinMaxButtonsHint | Qt::WindowCloseButtonHint);
-    if (cur != desired) {
-        setWindowFlags(desired);
-        if (wasVisible) show();
-    }
+void MainWindow::setMenuBarWindowControlsVisible(bool visible) {
+    m_menuBarWindowControlsVisible = visible;
     if (QMenuBar* mb = menuBar(); mb && m_windowControlsWidget) {
-        if (frameless) {
-            if (mb->cornerWidget(Qt::TopRightCorner) != m_windowControlsWidget) mb->setCornerWidget(m_windowControlsWidget, Qt::TopRightCorner);
+        if (visible) {
+            if (mb->cornerWidget(Qt::TopRightCorner) != m_windowControlsWidget) {
+                mb->setCornerWidget(m_windowControlsWidget, Qt::TopRightCorner);
+            }
             m_windowControlsWidget->setVisible(true);
+            mb->updateGeometry();
         } else {
-            if (mb->cornerWidget(Qt::TopRightCorner) == m_windowControlsWidget) mb->setCornerWidget(nullptr, Qt::TopRightCorner);
+            if (mb->cornerWidget(Qt::TopRightCorner) == m_windowControlsWidget) {
+                mb->setCornerWidget(nullptr, Qt::TopRightCorner);
+            }
             m_windowControlsWidget->setParent(this);
             m_windowControlsWidget->setVisible(false);
+            mb->updateGeometry();
         }
     }
 }
@@ -282,7 +282,7 @@ void MainWindow::setupMenu() {
     public:
         MenuBarDragFilter(MainWindow* mw, QMenuBar* mb) : QObject(mb), m_mw(mw), m_mb(mb) {}
         bool eventFilter(QObject*, QEvent* ev) override {
-            if (!m_mw || !m_mb || !m_mw->isFramelessWindowMode()) return false;
+            if (!m_mw || !m_mb || !m_mw->areMenuBarWindowControlsVisible()) return false;
             if (ev->type() == QEvent::MouseButtonPress || ev->type() == QEvent::MouseButtonDblClick) {
                 auto* me = static_cast<QMouseEvent*>(ev);
                 if (me->button() == Qt::LeftButton && !m_mb->actionAt(me->position().toPoint())) {
@@ -312,7 +312,6 @@ void MainWindow::setupMenu() {
     connect(m_windowMinimizeBtn, &QToolButton::clicked, this, &QWidget::showMinimized);
     connect(m_windowMaximizeBtn, &QToolButton::clicked, this, [this]() { isMaximized() ? showNormal() : showMaximized(); });
     connect(m_windowCloseBtn, &QToolButton::clicked, this, &QWidget::close);
-    m_windowControlsWidget->hide();
 
     // Construct File menu with workspace, project wizard, session, and SLURM triggers.
     QMenu* fileMenu = menuBar->addMenu("&File");
