@@ -582,9 +582,12 @@ void TestGdbCoordinator::testRocgdbMockMiParsingAndPendingKernelBreakpoint() {
 }
 
 /**
- * @brief End-to-end live HIP GPU kernel debugging test via GdbRankCoordinator + rocgdb (QSKIPs on CPU-only CI).
+ * @brief Opt-in live HIP GPU kernel debugging test via GdbRankCoordinator + rocgdb (requires GRIDLOCK_ENABLE_GPU_TESTS=1).
  */
 void TestGdbCoordinator::testLiveRocgdbHipKernelOnGpuIfAvailable() {
+    if (qEnvironmentVariableIntValue("GRIDLOCK_ENABLE_GPU_TESTS") != 1) {
+        QSKIP("Live GPU tests disabled by default; set GRIDLOCK_ENABLE_GPU_TESTS=1 to run.");
+    }
     QFileInfo kfdInfo(QStringLiteral("/dev/kfd"));
     if (!kfdInfo.exists() || !kfdInfo.isReadable() || !kfdInfo.isWritable()) {
         QSKIP("Skipping live ROCm GPU test: /dev/kfd is not accessible on this host.");

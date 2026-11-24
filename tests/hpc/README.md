@@ -5,7 +5,7 @@ Targeted unit and integration suites for multi-rank GDB/MI3 coordination, MI par
 ## Contents
 
 - `test_coordinator.hpp`, `test_coordinator.cpp` (`coordinator_tests` / `gridlock_tests`):
-  - Tests `GdbRankCoordinator` multi-rank startup, `*stopped`/`*running` state transitions, breakpoint routing, register extraction, variable inspection, deterministic ROCm `rocgdb` MI3 parsing (`amdgcn:gfx*` pending-to-resolved kernel breakpoints, `AMDGPU Wave` threads, SIMD lanes, and VGPR/PC registers), and live HIP GPU kernel debugging when `/dev/kfd`, `hipcc`, and `rocgdb` are available (gracefully calling `QSKIP` on CPU-only hosts).
+  - Tests `GdbRankCoordinator` multi-rank startup, `*stopped`/`*running` state transitions, breakpoint routing, register extraction, variable inspection, deterministic CPU-only ROCm `rocgdb` MI3 parsing (`amdgcn:gfx*` pending-to-resolved kernel breakpoints, `AMDGPU Wave` threads, SIMD lanes, and VGPR/PC registers), and opt-in live HIP GPU kernel debugging (`testLiveRocgdbHipKernelOnGpuIfAvailable`, disabled by default via `QSKIP` unless `GRIDLOCK_ENABLE_GPU_TESTS=1` is set).
 - `test_mi_parser.cpp` (`mi_parser_tests`):
   - Tests `GdbConsoleWidget` GDB/MI output normalization, record stream classification, and `InlineFindBar` integration (embeds its `QObject` fixture via `#include "test_mi_parser.moc"`).
 - `test_sanitizer.hpp`, `test_sanitizer.cpp` (`sanitizer_tests`):
@@ -21,6 +21,8 @@ Targeted unit and integration suites for multi-rank GDB/MI3 coordination, MI par
 
 ## Expected Behavior & Invariants
 
+- **Opt-In Hardware GPU Probing (`GRIDLOCK_ENABLE_GPU_TESTS=1`)**:
+  - Standard `meson test` and CI runs skip live GPU hardware execution (`testLiveRocgdbHipKernelOnGpuIfAvailable`) by default while keeping CPU-only mock `rocgdb` MI3 tests active; pass `GRIDLOCK_ENABLE_GPU_TESTS=1` manually (matching the manual opt-in policy for `./scripts/e2e_cli_suite.mjs`) to run live `/dev/kfd` + `hipcc` + `rocgdb` kernel verification.
 - **Ptrace Environment Awareness (`hpc_memory_tests`)**:
   - `test_hpc_memory.cpp` uses Linux `process_vm_readv` between parent and forked child processes under Yama `ptrace_scope`.
 - **Single-File `.moc` Rule (`mi_parser_tests`)**:
@@ -28,7 +30,7 @@ Targeted unit and integration suites for multi-rank GDB/MI3 coordination, MI par
 - **Adversarial Input Hardening**:
   - New GDB/MI parsing or escaping fixes must add regression coverage in `test_sanitizer.cpp` or `test_coordinator.cpp`.
 - **Verification**:
-  - Run `meson test -C builddir coordinator_tests mi_parser_tests sanitizer_tests lsp_tests hpc_memory_tests memory_export_tests obfuscator_tests --print-errorlogs`.
+  - Run `meson test -C builddir coordinator_tests mi_parser_tests sanitizer_tests lsp_tests hpc_memory_tests memory_export_tests obfuscator_tests --print-errorlogs` (or `GRIDLOCK_ENABLE_GPU_TESTS=1 QT_QPA_PLATFORM=offscreen ./builddir/gridlock_tests testLiveRocgdbHipKernelOnGpuIfAvailable` on ROCm workstations).
 
 ## Maintainer & Agent Notes
 

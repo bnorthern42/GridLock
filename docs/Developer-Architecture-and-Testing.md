@@ -93,7 +93,7 @@ Every test target in `meson.build` runs with `QT_QPA_PLATFORM=offscreen`:
 
 | # | Suite Name | Executable | Scope Tested |
 | :--- | :--- | :--- | :--- |
-| 1 | `coordinator_tests` | `gridlock_tests` | `GdbRankCoordinator`, `ProcessScanner` (`/proc` & remote endpoint ranges), `DeadlockAnalyzer` |
+| 1 | `coordinator_tests` | `gridlock_tests` | `GdbRankCoordinator` (including CPU-side mock `rocgdb` MI3 parsing and opt-in live GPU test), `ProcessScanner` (`/proc` & remote endpoint ranges), `DeadlockAnalyzer` |
 | 2 | `lsp_tests` | `gridlock_lsp_tests` | `ClangdLspClient` completion, diagnostics, hover, definition, references, rename |
 | 3 | `ui_tests` | `gridlock_ui_tests` | 64 offscreen end-to-end UI tests across `MainWindow`, customizable toolbar, Search Everywhere, Calculator, Array Plotter, Pointer Graph, Preferences tree, Signals/Catchpoints, GDB Readline, Non-Linear Execution, Breakpoint Lifecycle, CoW Checkpoints, and QSS caching |
 | 4 | `config_tests` | `gridlock_config_tests` | `ConfigManager` (per-target `programArgs`, toolbar layouts, popup presets) and `SessionManager` round-trips |
@@ -116,7 +116,7 @@ Every test target in `meson.build` runs with `QT_QPA_PLATFORM=offscreen`:
 | 21 | `mi_parser_tests` | `gridlock_mi_parser_tests` | GDB/MI3 tuple/list parsing, `@entry` filtering, and C++ access-specifier unwrapping |
 | 22 | `cliparser_tests` | `gridlock_cliparser_tests` | `CliParser` flag, positional target, and `-- <args...>` parsing |
 
-### Individual UI Tests, Manual CLI/Tutorial E2E Suite, Coverage, Screenshots, and Wiki Sync
+### Individual UI Tests, Manual CLI/GPU Opt-In Suites, Coverage, Screenshots, and Wiki Sync
 
 * **Run a Single `QtTest` Slot in `gridlock_ui_tests`**:
   ```bash
@@ -127,6 +127,12 @@ Every test target in `meson.build` runs with `QT_QPA_PLATFORM=offscreen`:
   Zero-dependency Node.js runner exercising CLI flags (`--version`, `--help`, `--snapshot`, `--test-mode`) and real `mpicxx`/`mpicc` tutorial builds and launches (manual developer verification tool; excluded from automated Meson/CI test runs and packaged releases):
   ```bash
   ./scripts/e2e_cli_suite.mjs
+  ```
+* **Manual Opt-In ROCm / `rocgdb` Live GPU Kernel Probe (`GRIDLOCK_ENABLE_GPU_TESTS=1`)**:
+  Deterministic mock `rocgdb` MI3 tests (`testRocgdbMockMiParsingAndPendingKernelBreakpoint`) run unconditionally in `meson test`, whereas live AMD GPU kernel compilation and `/dev/kfd` execution (`testLiveRocgdbHipKernelOnGpuIfAvailable`) are skipped by default in automated Meson/CI runs unless explicitly enabled:
+  ```bash
+  ninja -C builddir gridlock_tests
+  GRIDLOCK_ENABLE_GPU_TESTS=1 QT_QPA_PLATFORM=offscreen ./builddir/gridlock_tests testLiveRocgdbHipKernelOnGpuIfAvailable
   ```
 * **Generate HTML Line/Branch Coverage (`scripts/run_coverage.sh`)**:
   ```bash
