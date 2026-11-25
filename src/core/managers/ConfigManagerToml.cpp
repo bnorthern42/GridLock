@@ -357,4 +357,43 @@ void ConfigManager::saveTerminalSettings(const TerminalSettings& ts) {
   saveGlobalConfig();
 }
 
+/** @brief Reads `[plugins] disabled_ids` from `config.toml` (falling back to `QSettings`). */
+QStringList ConfigManager::disabledPluginIds() const {
+  QStringList out;
+  auto appendUnique = [&out](const QString& raw) {
+    const QString trimmed = raw.trimmed();
+    if (!trimmed.isEmpty() && !out.contains(trimmed)) out.append(trimmed);
+  };
+  if (const auto* plugTbl = m_config["plugins"].as_table()) {
+    if (const auto* arr = (*plugTbl)["disabled_ids"].as_array()) {
+      for (const auto& node : *arr) {
+        if (auto sv = node.value<std::string>()) appendUnique(QString::fromStdString(*sv));
+      }
+      return out;
+    }
+  }
+  QSettings s(kOrg, kApp);
+  for (const QString& id : s.value(QStringLiteral("plugins/disabled_ids")).toStringList()) {
+    appendUnique(id);
+  }
+  return out;
+}
+
+/** @brief Persists `[plugins] disabled_ids` to `config.toml` and `QSettings`. */
+void ConfigManager::setDisabledPluginIds(const QStringList& ids) {
+  QStringList norm;
+  for (const QString& raw : ids) {
+    const QString trimmed = raw.trimmed();
+    if (!trimmed.isEmpty() && !norm.contains(trimmed)) norm.append(trimmed);
+  }
+  if (!m_config.contains("plugins")) m_config.insert("plugins", toml::table{});
+  toml::array arr;
+  for (const QString& id : norm) arr.push_back(id.toStdString());
+  m_config["plugins"].as_table()->insert_or_assign("disabled_ids", std::move(arr));
+  saveGlobalConfig();
+  QSettings s(kOrg, kApp);
+  s.setValue(QStringLiteral("plugins/disabled_ids"), norm);
+  s.sync();
+}
+
 }  // namespace gridlock::core

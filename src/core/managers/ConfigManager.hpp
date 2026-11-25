@@ -329,6 +329,15 @@ class ConfigManager {
   /** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
   void setCustomShortcuts(const QMap<QString, QKeySequence>& overrides);
 
+  /** @brief Returns deduplicated plugin IDs disabled under `[plugins] disabled_ids` in `config.toml`. */
+  QStringList disabledPluginIds() const;
+  /** @brief Persists `[plugins] disabled_ids` to `config.toml` and `QSettings`. */
+  void setDisabledPluginIds(const QStringList& ids);
+  /** @brief Returns true if @p pluginId appears in `disabledPluginIds()`. */
+  bool isPluginDisabled(const QString& pluginId) const;
+  /** @brief Adds or removes @p pluginId in `[plugins] disabled_ids` and persists immediately. */
+  void setPluginDisabled(const QString& pluginId, bool disabled);
+
   /** @brief Returns the canonical GridLock configuration directory (`~/.config/gridlock`, or `GRIDLOCK_TEST_CONFIG_DIR`). */
   static QString configDirectory() {
     if (qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {

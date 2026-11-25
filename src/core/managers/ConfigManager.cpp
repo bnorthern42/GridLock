@@ -308,6 +308,25 @@ void ConfigManager::setCustomShortcuts(const QMap<QString, QKeySequence>& overri
   s.sync();
 }
 
+/** @brief Returns true when @p pluginId is listed in `[plugins] disabled_ids`. */
+bool ConfigManager::isPluginDisabled(const QString& pluginId) const {
+  const QString trimmed = pluginId.trimmed();
+  return !trimmed.isEmpty() && disabledPluginIds().contains(trimmed);
+}
+
+/** @brief Inserts or removes @p pluginId in `[plugins] disabled_ids` and persists the list. */
+void ConfigManager::setPluginDisabled(const QString& pluginId, bool disabled) {
+  const QString trimmed = pluginId.trimmed();
+  if (trimmed.isEmpty()) return;
+  QStringList ids = disabledPluginIds();
+  if (disabled) {
+    if (!ids.contains(trimmed)) ids.append(trimmed);
+  } else {
+    ids.removeAll(trimmed);
+  }
+  setDisabledPluginIds(ids);
+}
+
 /** @brief Returns the canonical default `#MainToolbar` ordered item token list. */
 QStringList ConfigManager::defaultToolbarLayout() {
   return {

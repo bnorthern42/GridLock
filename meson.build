@@ -63,6 +63,7 @@ src_files = [
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
+  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginManager.cpp',
   'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ElfBinaryParser.cpp', 'src/core/utils/SearchEverywhereEngine.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
 ]
@@ -94,6 +95,7 @@ moc_headers = [
   'src/core/managers/ThemeManager.hpp', 'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp', 'src/ui/docks/VariablesDockWidget.hpp',
   'src/ui/tutorial/TutorialDialog.hpp', 'src/core/utils/ClangdLspClient.hpp',
+  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginManager.hpp',
 ]
 
 # Process Qt6 files
@@ -829,6 +831,65 @@ gridlock_plugin_abi_tests = executable('gridlock_plugin_abi_tests',
 )
 
 test('plugin_abi_tests', gridlock_plugin_abi_tests, env: ['QT_QPA_PLATFORM=offscreen'])
+
+test_dummy_plugin = shared_module('test_dummy_plugin',
+  'tests/core/test_dummy_plugin.c',
+  include_directories : inc,
+  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror'],
+  build_by_default : true
+)
+
+test_bad_abi_plugin = shared_module('test_bad_abi_plugin',
+  'tests/core/test_dummy_plugin.c',
+  include_directories : inc,
+  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN=1'],
+  build_by_default : true
+)
+
+plugin_manager_test_src = [
+  'tests/core/test_plugin_manager.cpp',
+  'src/core/plugins/PluginHostBridge.cpp',
+  'src/core/plugins/PluginManager.cpp',
+  'src/core/hpc/gdb/GdbRankCoordinator.cpp',
+  'src/core/hpc/gdb/GdbMiParser.cpp',
+  'src/core/hpc/gdb/GdbRankInspection.cpp',
+  'src/core/hpc/gdb/GdbRankCommands.cpp',
+  'src/core/hpc/memory/NativeMemoryReader.cpp',
+  'src/core/hpc/system/ProcessScanner.cpp',
+  'src/core/managers/ConfigManager.cpp',
+  'src/core/managers/ConfigManagerToml.cpp',
+  'src/core/managers/ConfigManagerWorkspace.cpp'
+]
+
+plugin_manager_test_moc_headers = [
+  'src/core/plugins/PluginHostBridge.hpp',
+  'src/core/plugins/PluginManager.hpp',
+  'src/core/hpc/gdb/GdbRankCoordinator.hpp',
+  'src/core/hpc/IBackendCoordinator.hpp'
+]
+
+processed_plugin_manager_test_files = qt6.compile_moc(
+  headers : plugin_manager_test_moc_headers,
+  sources : 'tests/core/test_plugin_manager.cpp',
+  dependencies: qt6_dep
+)
+
+gridlock_plugin_manager_tests = executable('gridlock_plugin_manager_tests',
+  plugin_manager_test_src,
+  processed_plugin_manager_test_files,
+  include_directories : inc,
+  cpp_args : [
+    '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SO="' + test_dummy_plugin.full_path() + '"',
+    '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN_SO="' + test_bad_abi_plugin.full_path() + '"'
+  ],
+  dependencies : [qt6_dep, tomlplusplus_dep],
+  build_by_default : false
+)
+
+test('plugin_manager_tests', gridlock_plugin_manager_tests,
+  depends : [test_dummy_plugin, test_bad_abi_plugin],
+  env: ['QT_QPA_PLATFORM=offscreen']
+)
 
 
 
