@@ -17,6 +17,13 @@
 #include <unordered_map>
 #include "../../RankState.hpp"
 
+class QContextMenuEvent;
+class QMenu;
+
+namespace gridlock::core::plugins {
+class PluginHostBridge;
+}  // namespace gridlock::core::plugins
+
 namespace gridlock::core::hpc {
 using RankState = ::gridlock::RankState;
 }  // namespace gridlock::core::hpc
@@ -132,6 +139,16 @@ public:
     /** @brief Returns the accent color rendered for rank execution @p state. */
     static QColor badgeColorForState(const QString& state);
 
+    /** @brief Attaches the native plugin host bridge for `GRIDLOCK_SURFACE_RANK_LIST` context actions. */
+    void setPluginHostBridge(gridlock::core::plugins::PluginHostBridge* bridge) { m_pluginBridge = bridge; }
+
+    /** @brief Builds a caller-owned context menu for @p rankId including matching **Plugin Actions**. */
+    QMenu* createContextMenuForRank(int rankId, QWidget* menuParent = nullptr);
+
+protected:
+    /** @brief Opens the rank context menu on right-click over a server-rack blade item. */
+    void contextMenuEvent(QContextMenuEvent* event) override;
+
 signals:
     /**
      * @brief Emitted when a rank node is selected by user click or programmatic seek.
@@ -176,6 +193,9 @@ private:
 
     /// Internal cache of rank states indexed by rank ID.
     std::unordered_map<int, RankState> m_states;
+
+    /// Optional plugin host bridge providing `GRIDLOCK_SURFACE_RANK_LIST` actions.
+    gridlock::core::plugins::PluginHostBridge* m_pluginBridge = nullptr;
 };
 
 }  // namespace gridlock::ui

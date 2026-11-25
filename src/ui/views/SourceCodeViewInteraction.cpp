@@ -91,7 +91,30 @@ QMenu* SourceCodeView::createEditorContextMenuAt(const QPoint& editorPos) {
     menu->addAction(QStringLiteral("Set Breakpoint (All Ranks)"), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, -1); });
     menu->addAction(QStringLiteral("Set Breakpoint for Active Rank (Rank %1)").arg(m_activeFocusRank), this, [this, clickedLine]() { setRankBreakpoint(clickedLine, m_activeFocusRank); });
     menu->addAction(QStringLiteral("Set Breakpoint for Rank..."), this, [this, clickedLine]() { bool ok = false; const int r = QInputDialog::getInt(this, QStringLiteral("Breakpoint Rank Filter"), QStringLiteral("Target MPI Rank (0+):"), m_activeFocusRank, 0, 4095, 1, &ok); if (ok) setRankBreakpoint(clickedLine, r); });
+    if (m_editorPluginMenuHook) {
+        const int clickedCol = qMax(1, posCur.positionInBlock() + 1);
+        m_editorPluginMenuHook(menu, m_currentFilePath, clickedLine, clickedCol, exprTok, selected);
+    }
     return menu;
+}
+
+QMenu* SourceCodeView::createBreakpointContextMenuAtLine(int lineOneBased, QWidget* menuParent) {
+    auto* gMenu = new QMenu(menuParent ? menuParent : this);
+    if (lineOneBased <= 0) return gMenu;
+    if (hasBreakpoint(lineOneBased)) {
+        const bool en = isBreakpointEnabledForLine(lineOneBased);
+        gMenu->addAction(en ? QStringLiteral("Disable Breakpoint") : QStringLiteral("Enable Breakpoint"),
+                         this, [this, lineOneBased, en]() { setBreakpointEnabled(lineOneBased, !en); });
+    }
+    gMenu->addAction(QStringLiteral("Insert Temporary Breakpoint (tbreak)"),
+                     this, [this, lineOneBased]() { setTemporaryBreakpoint(lineOneBased, -1); });
+    if (hasBreakpoint(lineOneBased)) {
+        gMenu->addAction(QStringLiteral("Remove Breakpoint"), this, [this, lineOneBased]() { toggleBreakpoint(lineOneBased); });
+    }
+    if (m_breakpointPluginMenuHook) {
+        m_breakpointPluginMenuHook(gMenu, m_currentFilePath, lineOneBased, hasBreakpoint(lineOneBased) ? lineOneBased : -1);
+    }
+    return gMenu;
 }
 
 bool SourceCodeView::triggerContextActionAtLine(int lineOneBased, const QString& actionSubstring) {
@@ -140,11 +163,8 @@ void SourceCodeView::lineNumberAreaMousePressEvent(QMouseEvent* event) {
     event->accept(); int top = 0, bottom = 0; const int lineNum = gutterLineAtY(event->pos().y(), &top, &bottom);
     if (lineNum <= 0) return;
     if (event->button() == Qt::RightButton && (event->modifiers() & Qt::ShiftModifier)) {
-        QMenu gMenu(this);
-        if (hasBreakpoint(lineNum)) { const bool en = isBreakpointEnabledForLine(lineNum); gMenu.addAction(en ? QStringLiteral("Disable Breakpoint") : QStringLiteral("Enable Breakpoint"), this, [this, lineNum, en]() { setBreakpointEnabled(lineNum, !en); }); }
-        gMenu.addAction(QStringLiteral("Insert Temporary Breakpoint (tbreak)"), this, [this, lineNum]() { setTemporaryBreakpoint(lineNum, -1); });
-        if (hasBreakpoint(lineNum)) gMenu.addAction(QStringLiteral("Remove Breakpoint"), this, [this, lineNum]() { toggleBreakpoint(lineNum); });
-        gMenu.exec(m_lineNumberArea->mapToGlobal(event->pos())); return;
+        std::unique_ptr<QMenu> gMenu(createBreakpointContextMenuAtLine(lineNum, this));
+        gMenu->exec(m_lineNumberArea->mapToGlobal(event->pos())); return;
     }
     if (event->button() == Qt::RightButton) {
         const bool wasPreviouslySet = hasBreakpoint(lineNum); if (!wasPreviouslySet) toggleBreakpoint(lineNum);
@@ -248,6 +268,13 @@ void SourceCodeView::handleHoverTimeout() {
     for (const auto& diag : m_diagnostics) {
         if (diag.line == hoveredLine && !diag.message.isEmpty()) { QToolTip::showText(m_lastGlobalMousePos, diag.message, this); break; }
     }
+    for (const auto& ann : m_pluginAnnotations) {
+        if (ann.line == hoveredLine && (!ann.detailText.isEmpty() || !ann.badgeText.isEmpty())) {
+            const QString tip = ann.detailText.isEmpty() ? ann.badgeText : QStringLiteral("[%1] %2").arg(ann.badgeText, ann.detailText);
+            QToolTip::showText(m_lastGlobalMousePos, tip, this);
+            break;
+        }
+    }
     cursor.select(QTextCursor::WordUnderCursor);
     const QString word = cursor.selectedText();
     static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
@@ -313,16 +340,44 @@ void SourceCodeView::paintEvent(QPaintEvent* event) {
             p.setPen(QPen(QColor(245, 158, 11, 220), 1.5, Qt::DashLine)); p.drawLine(0, qRound(g.top()), viewport()->width(), qRound(g.top()));
         }
     }
-    if (m_inlineVarValues.isEmpty() || !gridlock::core::ConfigManager::instance().inlineVariableValuesEnabled()) return;
-    QPainter painter(viewport()); QFont ghostFont = font(); ghostFont.setItalic(true); painter.setFont(ghostFont);
-    QColor ghostColor(gridlock::core::ConfigManager::instance().getSourceText()); ghostColor.setAlpha(140); painter.setPen(ghostColor);
-    const QFontMetrics fm(font()); QTextBlock block = firstVisibleBlock(); const int vpBottom = viewport()->rect().bottom();
+    const bool drawGhostVars = !m_inlineVarValues.isEmpty() && gridlock::core::ConfigManager::instance().inlineVariableValuesEnabled();
+    if (!drawGhostVars && m_pluginAnnotations.isEmpty()) return;
+    QPainter painter(viewport()); painter.setRenderHint(QPainter::Antialiasing, true);
+    QFont ghostFont = font(); ghostFont.setItalic(true);
+    QFont badgeFont = font(); badgeFont.setBold(true); badgeFont.setPointSize(qMax(8, font().pointSize() - 1));
+    QColor ghostColor(gridlock::core::ConfigManager::instance().getSourceText()); ghostColor.setAlpha(140);
+    const QFontMetrics fm(font()), bfm(badgeFont); QTextBlock block = firstVisibleBlock(); const int vpBottom = viewport()->rect().bottom();
     while (block.isValid()) {
         const QRectF geom = blockBoundingGeometry(block).translated(contentOffset());
         if (geom.top() > vpBottom) break;
-        if (block.isVisible() && geom.bottom() >= 0) if (const QString ghost = inlineGhostTextForLine(block.blockNumber() + 1); !ghost.isEmpty()) {
-            const int x = qRound(geom.left()) + fm.horizontalAdvance(block.text()) + 20;
-            painter.drawText(QRect(x, qRound(geom.top()), viewport()->width() - x - 4, qRound(geom.height())), Qt::AlignLeft | Qt::AlignVCenter, ghost);
+        if (block.isVisible() && geom.bottom() >= 0) {
+            const int lineOneBased = block.blockNumber() + 1;
+            int curX = qRound(geom.left()) + fm.horizontalAdvance(block.text()) + 20;
+            if (drawGhostVars) if (const QString ghost = inlineGhostTextForLine(lineOneBased); !ghost.isEmpty()) {
+                painter.setFont(ghostFont); painter.setPen(ghostColor); painter.setBrush(Qt::NoBrush);
+                painter.drawText(QRect(curX, qRound(geom.top()), viewport()->width() - curX - 4, qRound(geom.height())), Qt::AlignLeft | Qt::AlignVCenter, ghost);
+                curX += QFontMetrics(ghostFont).horizontalAdvance(ghost) + 14;
+            }
+            for (const auto& ann : m_pluginAnnotations) {
+                if (ann.line != lineOneBased || curX >= viewport()->width() - 24) continue;
+                const QString tok = ann.colorToken.trimmed().toLower();
+                const QColor ac = (tok == QStringLiteral("error")) ? QColor(QStringLiteral("#ef4444"))
+                                  : (tok == QStringLiteral("warning")) ? QColor(QStringLiteral("#f59e0b"))
+                                  : (QColor::isValidColorName(ann.colorToken) ? QColor(ann.colorToken) : QColor(QStringLiteral("#38bdf8")));
+                const int pillW = bfm.horizontalAdvance(ann.badgeText) + 12;
+                const int pillH = qMax(14, qRound(geom.height()) - 4);
+                const QRect pillRect(curX, qRound(geom.top()) + (qRound(geom.height()) - pillH) / 2, pillW, pillH);
+                QColor fill = ac; fill.setAlpha(42);
+                painter.setPen(QPen(ac, 1.0)); painter.setBrush(fill); painter.drawRoundedRect(pillRect, 3.0, 3.0);
+                painter.setFont(badgeFont); painter.setPen(ac); painter.drawText(pillRect, Qt::AlignCenter, ann.badgeText);
+                curX += pillW + 8;
+                if (!ann.detailText.isEmpty() && curX < viewport()->width() - 16) {
+                    painter.setFont(ghostFont); QColor dc = ac; dc.setAlpha(205); painter.setPen(dc); painter.setBrush(Qt::NoBrush);
+                    const QString elided = QFontMetrics(ghostFont).elidedText(ann.detailText, Qt::ElideRight, viewport()->width() - curX - 6);
+                    painter.drawText(QRect(curX, qRound(geom.top()), viewport()->width() - curX - 6, qRound(geom.height())), Qt::AlignLeft | Qt::AlignVCenter, elided);
+                    curX += QFontMetrics(ghostFont).horizontalAdvance(elided) + 12;
+                }
+            }
         }
         block = block.next();
     }

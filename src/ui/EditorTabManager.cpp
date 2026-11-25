@@ -93,6 +93,8 @@ EditorTabManager::EditorTabManager(QWidget* parent)
 void EditorTabManager::wireEditorView(SourceCodeView* view) {
     if (!view) return;
     view->installEventFilter(this);
+    if (m_editorPluginMenuHook) view->setEditorPluginMenuHook(m_editorPluginMenuHook);
+    if (m_breakpointPluginMenuHook) view->setBreakpointPluginMenuHook(m_breakpointPluginMenuHook);
     connect(view, &SourceCodeView::toggleBreakpointRequested, this, &EditorTabManager::toggleBreakpointRequested);
     connect(view, &SourceCodeView::breakpointToggled, this, &EditorTabManager::breakpointToggled);
     connect(view, &SourceCodeView::rankBreakpointChanged, this, &EditorTabManager::rankBreakpointChanged);
@@ -100,6 +102,7 @@ void EditorTabManager::wireEditorView(SourceCodeView* view) {
     connect(view, &SourceCodeView::hideHoverTooltip, this, &EditorTabManager::hideHoverTooltip);
     connect(view, &SourceCodeView::pinVariableRequested, this, &EditorTabManager::pinVariableRequested);
     connect(view, &SourceCodeView::definitionJumpRequested, this, &EditorTabManager::navigateToLocation);
+    emit sourceViewCreated(view);
 }
 
 bool EditorTabManager::eventFilter(QObject* watched, QEvent* event) {
@@ -501,6 +504,21 @@ QList<SourceCodeView*> EditorTabManager::openViews() const {
         views.append(m_secondaryEditorView);
     }
     return views;
+}
+
+void EditorTabManager::setPluginMenuHooks(EditorPluginMenuHook editorHook, BreakpointPluginMenuHook breakpointHook) {
+    m_editorPluginMenuHook = std::move(editorHook);
+    m_breakpointPluginMenuHook = std::move(breakpointHook);
+    for (SourceCodeView* v : m_openFiles) {
+        if (v) {
+            v->setEditorPluginMenuHook(m_editorPluginMenuHook);
+            v->setBreakpointPluginMenuHook(m_breakpointPluginMenuHook);
+        }
+    }
+    if (m_secondaryEditorView) {
+        m_secondaryEditorView->setEditorPluginMenuHook(m_editorPluginMenuHook);
+        m_secondaryEditorView->setBreakpointPluginMenuHook(m_breakpointPluginMenuHook);
+    }
 }
 
 void EditorTabManager::setInlineVariableValues(const QMap<QString, QString>& varValues) {

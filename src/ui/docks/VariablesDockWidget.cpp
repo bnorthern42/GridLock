@@ -329,12 +329,12 @@ QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyId
         });
     }
 
-    if (m_pluginBridge != nullptr && !varTyp.isEmpty()) {
-        const auto matches = m_pluginBridge->matchingVariableActions(varTyp.left(2048));
-        if (!matches.isEmpty()) {
-            QVector<QPair<QString, QString>> actionSpecs;
-            actionSpecs.reserve(matches.size());
-            for (const auto& m : matches) actionSpecs.append(qMakePair(m.actionId, m.menuLabel));
+    if (m_pluginBridge != nullptr) {
+        const auto varMatches = varTyp.isEmpty() ? QVector<gridlock::core::plugins::RegisteredVariableAction>{}
+                                                 : m_pluginBridge->matchingVariableActions(varTyp.left(2048));
+        const QString ctxTarget = (varTyp.isEmpty() ? varName : varTyp).left(2048);
+        const auto ctxMatches = m_pluginBridge->matchingContextActions(GRIDLOCK_SURFACE_VARIABLES, ctxTarget);
+        if (!varMatches.isEmpty() || !ctxMatches.isEmpty()) {
             menu->addSeparator();
             QMenu* pluginSub = menu->addMenu(QStringLiteral("Plugin Actions"));
             pluginSub->setObjectName(QStringLiteral("variablePluginActionsMenu"));
@@ -342,8 +342,9 @@ QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyId
             bool addrOk = false;
             const uint64_t parsedAddr = hexTok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
                                             ? hexTok.mid(2).toULongLong(&addrOk, 16) : 0u;
-            for (const auto& [actId, actLabel] : actionSpecs) {
-                QAction* pAct = pluginSub->addAction(actLabel);
+            for (const auto& m : varMatches) {
+                const QString actId = m.actionId;
+                QAction* pAct = pluginSub->addAction(m.menuLabel);
                 pAct->setObjectName(QStringLiteral("pluginVarAct_") + actId);
                 connect(pAct, &QAction::triggered, this,
                         [this, actId, varName, exprPath, varTyp, varVal, parsedAddr]() {
@@ -369,6 +370,37 @@ QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyId
                             ctx.type_utf8 = tUtf8.constData();
                             ctx.value_utf8 = vUtf8.constData();
                             (void)m_pluginBridge->invokeVariableAction(actId, ctx);
+                        });
+            }
+            for (const auto& cAct : ctxMatches) {
+                const QString actId = cAct.actionId;
+                QAction* pAct = pluginSub->addAction(cAct.menuLabel);
+                pAct->setObjectName(QStringLiteral("pluginCtxAct_") + actId);
+                connect(pAct, &QAction::triggered, this,
+                        [this, actId, exprPath, varTyp, varVal, parsedAddr]() {
+                            if (!m_pluginBridge) return;
+                            int activeFrame = 0;
+                            if (QWidget* topWin = window()) {
+                                if (const auto* csDock = topWin->findChild<gridlock::ui::CallStackDockWidget*>()) {
+                                    activeFrame = std::max(0, csDock->activeFrameLevel());
+                                }
+                            }
+                            const QByteArray symUtf8 = exprPath.toUtf8(), tUtf8 = varTyp.toUtf8(), selUtf8 = varVal.toUtf8();
+                            GridLockSurfaceContext ctx{};
+                            ctx.struct_size = static_cast<uint32_t>(sizeof(GridLockSurfaceContext));
+                            ctx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+                            ctx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+                            ctx.surface = GRIDLOCK_SURFACE_VARIABLES;
+                            ctx.rank = m_currentRankId;
+                            ctx.frame_level = static_cast<int32_t>(activeFrame);
+                            ctx.line = -1;
+                            ctx.column = -1;
+                            ctx.bp_id = -1;
+                            ctx.address = parsedAddr;
+                            ctx.symbol_utf8 = symUtf8.isEmpty() ? nullptr : symUtf8.constData();
+                            ctx.type_utf8 = tUtf8.isEmpty() ? nullptr : tUtf8.constData();
+                            ctx.selected_text_utf8 = selUtf8.isEmpty() ? nullptr : selUtf8.constData();
+                            (void)m_pluginBridge->invokeContextAction(actId, ctx);
                         });
             }
         }

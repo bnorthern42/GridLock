@@ -38,6 +38,8 @@ class PluginManager;
 
 namespace gridlock::ui {
 
+class PluginReportDockWidget;
+
 /**
  * @class MainWindow
  * @brief Central workstation window integrating all parallel debugging and disassembly views.
@@ -81,6 +83,7 @@ public:
     PointerGraphDialog* pointerGraphDialog() const { return m_pointerGraphDialog; }
     CommandPaletteDialog* commandPaletteDialog() const { return m_commandPaletteDialog; }
     ProgrammerCalculatorDialog* programmerCalculatorDialog() const { return m_programmerCalculatorDialog; }
+    PluginReportDockWidget* pluginReportDockWidget() const { return m_pluginReportDock; }
     gridlock::core::plugins::PluginManager* pluginManager() const { return m_pluginManager; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
@@ -312,6 +315,8 @@ public slots:
     void openFile();
     void openPreferences();
     void loadSourceFile(const QString& filePath);
+    /** @brief Opens @p filePath in the source editor and positions the cursor at 1-based `(lineOneBased, columnOneBased)`. */
+    bool openFileAtLine(const QString& filePath, int lineOneBased, int columnOneBased = 1);
     bool saveSession(bool showStatusMessage = true);
     void saveSessionAs();
     void loadSession();
@@ -481,6 +486,7 @@ private:
     QToolButton* m_windowCloseBtn = nullptr;
     bool m_menuBarWindowControlsVisible = true;
     gridlock::core::plugins::PluginManager* m_pluginManager = nullptr;
+    PluginReportDockWidget* m_pluginReportDock = nullptr;
     QMenu* m_toolsPluginsMenu = nullptr;
     QList<QMetaObject::Connection> m_pluginCoordConns;
     bool m_pluginSessionActive = false;

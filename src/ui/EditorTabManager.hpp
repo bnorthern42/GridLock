@@ -21,6 +21,8 @@
 #include <QTabWidget>
 #include <QWidget>
 
+class QMenu;
+
 namespace gridlock::ui {
 
 class SourceCodeView;
@@ -146,6 +148,12 @@ public:
     /** @brief Returns all open SourceCodeView instances (including the secondary split view when active). */
     QList<SourceCodeView*> openViews() const;
 
+    using EditorPluginMenuHook = std::function<void(QMenu*, const QString&, int, int, const QString&, const QString&)>;
+    using BreakpointPluginMenuHook = std::function<void(QMenu*, const QString&, int, int)>;
+
+    /** @brief Installs plugin context-menu hooks across all open and newly created SourceCodeView tabs. */
+    void setPluginMenuHooks(EditorPluginMenuHook editorHook, BreakpointPluginMenuHook breakpointHook);
+
     // QTabWidget-compatible forwarding API for callers managing primary tabs.
     int count() const { return m_primaryTabWidget ? m_primaryTabWidget->count() : 0; }
     QWidget* widget(int index) const { return m_primaryTabWidget ? m_primaryTabWidget->widget(index) : nullptr; }
@@ -187,6 +195,9 @@ signals:
     /// Emitted when cross-file Go-to-Definition opens or switches to a target file and line.
     void definitionJumpRequested(const QString& filePath, int oneBasedLine, int zeroBasedColumn);
 
+    /// Emitted whenever a new SourceCodeView tab or split view is instantiated and wired.
+    void sourceViewCreated(SourceCodeView* view);
+
 protected:
     /** @brief Tracks focus transitions between primary and secondary split editors. */
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -208,6 +219,8 @@ private:
     QMap<QString, SourceCodeView*> m_openFiles;
     QMap<QString, QWidget*> m_openPreviewTabs;
     UnsavedPromptHandler m_unsavedPromptHandler;
+    EditorPluginMenuHook m_editorPluginMenuHook;
+    BreakpointPluginMenuHook m_breakpointPluginMenuHook;
     QSplitter* m_splitter = nullptr;
     QTabWidget* m_primaryTabWidget = nullptr;
     QTabWidget* m_secondaryTabWidget = nullptr;
