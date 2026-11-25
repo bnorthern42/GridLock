@@ -24,6 +24,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QQueue>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -153,11 +154,33 @@ class PluginManager : public QObject {
    */
   bool refreshInstalledLockMetadata();
 
+  /**
+   * @brief Inspects @p canonicalSoPath on POSIX/ELF for defined `STB_GNU_UNIQUE` (`'u'`) dynamic symbols.
+   * @return True when the shared object exports `STB_GNU_UNIQUE` symbols that prevent Linux `dlclose()` unmapping.
+   */
+  static bool hasGnuUniqueSymbols(const QString& canonicalSoPath);
+
+  /** @brief Returns true if any active or previously `dlopen`-pinned existing plugin on disk had `STB_GNU_UNIQUE` symbols. */
+  bool hasLoadedGnuUniquePlugins() const;
+
+  /** @brief Returns the active process/rank count from the bound `GdbRankCoordinator` (`0` when idle). */
+  int activeCoordinatorRankCount() const;
+
+  /**
+   * @brief Hot-reloads all discovered plugins in-place and replays `on_session_start` when an MPI session is active.
+   * @param activeSessionRankCount Active rank count (`> 0` replays `notifySessionStarted` onto newly loaded plugins).
+   * @return Number of active loaded plugins, or `-1` if refused because `m_callbackDepth > 0`.
+   */
+  int hotReloadPlugins(int activeSessionRankCount);
+
   /** @brief Returns formatted load diagnostic strings (`Loaded <Name> <Version> (<Commit>) [ABI x.y]`) from the latest scan. */
   const QStringList& loadDiagnostics() const noexcept { return m_loadDiagnostics; }
 
   /** @brief Dispatches `on_session_start` to every active plugin that defines the hook. */
   void notifySessionStarted(int32_t rankCount);
+
+  /** @brief Alias for `notifySessionStarted(rankCount)`. */
+  void notifySessionStart(int32_t rankCount) { notifySessionStarted(rankCount); }
 
   /** @brief Dispatches `on_rank_stopped` serially via a FIFO queue to prevent nested `QEventLoop` recursion. */
   void notifyRankStopped(const GridLockStopInfo& stopInfo);
@@ -241,6 +264,7 @@ class PluginManager : public QObject {
   QQueue<PendingStopEvent> m_pendingStops;
   QHash<QString, LoadedPluginInfo> m_pathMetadataCache;
   QHash<QString, LoadedPluginInfo> m_dirtyMetadataCache;
+  QSet<QString> m_pinnedGnuUniquePaths;
   int m_callbackDepth = 0;
   bool m_dispatchingStop = false;
   bool m_sessionActive = false;

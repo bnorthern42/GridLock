@@ -559,16 +559,11 @@ class TestPluginManager : public QObject {
         "[[plugins]]\nrepo = \"https://gitea.example.org/user/custom-probe.git\"\n");
     QVERIFY2(PluginManifest::parseManifestToml(sampleToml, &parsed, &parseErr), qPrintable(parseErr));
     QCOMPARE(parsed.size(), 3);
-    QCOMPARE(parsed.at(0).normalizedUrl, QStringLiteral("https://codeberg.org/bnorthern42/gridlock-stl-inspector.git"));
-    QCOMPARE(parsed.at(0).ref, QStringLiteral("main"));
-    QCOMPARE(parsed.at(0).build, QStringLiteral("meson"));
-    QVERIFY(parsed.at(0).enabled);
-    QCOMPARE(parsed.at(1).normalizedUrl, QStringLiteral("https://gitlab.com/hpc/sub/disabled-probe.git"));
-    QCOMPARE(parsed.at(1).build, QStringLiteral("single"));
-    QVERIFY(!parsed.at(1).enabled);
-    QCOMPARE(parsed.at(2).normalizedUrl, QStringLiteral("https://gitea.example.org/user/custom-probe.git"));
-    QVERIFY(parsed.at(2).enabled);
-
+    QVERIFY(parsed.at(0).normalizedUrl == QStringLiteral("https://codeberg.org/bnorthern42/gridlock-stl-inspector.git") &&
+            parsed.at(0).ref == QStringLiteral("main") && parsed.at(0).build == QStringLiteral("meson") && parsed.at(0).enabled);
+    QVERIFY(parsed.at(1).normalizedUrl == QStringLiteral("https://gitlab.com/hpc/sub/disabled-probe.git") &&
+            parsed.at(1).build == QStringLiteral("single") && !parsed.at(1).enabled);
+    QVERIFY(parsed.at(2).normalizedUrl == QStringLiteral("https://gitea.example.org/user/custom-probe.git") && parsed.at(2).enabled);
     QVERIFY(!PluginManifest::parseManifestToml(
         QStringLiteral("[[plugins]]\nrepo = \"owner/repo\"\nbuild = \"bazel\"\n"), &parsed, &parseErr));
 
@@ -588,20 +583,17 @@ class TestPluginManager : public QObject {
         QStringLiteral("gridlock-test/local-plugin"), QStringLiteral("main"), PluginScope::UserGlobal));
     QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
     const auto installRes = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
-    QVERIFY2(installRes.success, qPrintable(installRes.fullCompilerLog));
-    QCOMPARE(installRes.commitSha, firstCommitSha);
+    QVERIFY2(installRes.success && installRes.commitSha == firstCommitSha, qPrintable(installRes.fullCompilerLog));
 
     QVector<PluginManifestEntry> userManifestEntries;
     QVERIFY(PluginManifest::loadManifestFile(PluginManifest::userManifestPath(), &userManifestEntries));
-    QCOMPARE(userManifestEntries.size(), 1);
-    QCOMPARE(userManifestEntries.first().repo, QStringLiteral("gridlock-test/local-plugin"));
+    QVERIFY(userManifestEntries.size() == 1 && userManifestEntries.first().repo == QStringLiteral("gridlock-test/local-plugin"));
 
     QVector<PluginLockEntry> lockEntries;
     QVERIFY(PluginManifest::loadLockFile(PluginManifest::userLockFilePath(), &lockEntries));
-    QCOMPARE(lockEntries.size(), 1);
-    QCOMPARE(lockEntries.first().repo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
-    QCOMPARE(lockEntries.first().commitSha, firstCommitSha);
-    QCOMPARE(lockEntries.first().binarySha256, sha256OfFile(installRes.installedPath));
+    QVERIFY(lockEntries.size() == 1 && lockEntries.first().commitSha == firstCommitSha);
+    QVERIFY(lockEntries.first().repo == QStringLiteral("https://github.com/gridlock-test/local-plugin.git") &&
+            lockEntries.first().binarySha256 == sha256OfFile(installRes.installedPath));
     QVERIFY(!QFileInfo::exists(QDir(env.workspaceRoot()).filePath(QStringLiteral(".gridlock/plugins-lock.toml"))));
 
     // 5. Write workspace plugins.toml: UserGlobal sync must be up-to-date (0 built) and NOT auto-build/trust workspace.
@@ -612,9 +604,7 @@ class TestPluginManager : public QObject {
     QVERIFY(installer.syncFromManifests(PluginManifest::userManifestPath(), wsManifest, PluginScope::UserGlobal));
     QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
     const auto noopRes = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
-    QVERIFY(noopRes.success);
-    QCOMPARE(noopRes.installedCount, 0);
-    QVERIFY(QDir(env.workspacePluginDir()).entryList(QDir::Files).isEmpty());
+    QVERIFY(noopRes.success && noopRes.installedCount == 0 && QDir(env.workspacePluginDir()).entryList(QDir::Files).isEmpty());
 
     // 6. Push a new upstream commit on main, then explicitly sync Workspace scope: both outdated global & missing workspace build!
     {
@@ -671,18 +661,22 @@ class TestPluginManager : public QObject {
     QCOMPARE(mgr.loadDiagnostics(),
              QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.0.0 (%1) [ABI 1.0]").arg(sha1.left(7))});
 
-    // Push upstream commit updating plugin_version_utf8 -> 1.1.0, then run startUpdatePlugins + refreshInstalledLockMetadata.
+    coord.initializeMockSession(4);
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",func=\"main\",fullname=\"/tmp/t.c\",line=\"5\"}\n"));
+    mgr.notifySessionStarted(4);
     {
-      QFile srcFile(dstSrc);
-      QVERIFY(srcFile.open(QIODevice::ReadOnly));
-      QByteArray content = srcFile.readAll();
-      srcFile.close();
+      QFile sf(dstSrc);
+      QVERIFY(sf.open(QIODevice::ReadOnly));
+      QByteArray content = sf.readAll();
+      sf.close();
       content.replace("\"1.0.0\"", "\"1.1.0\"");
-      QVERIFY(srcFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
-      QVERIFY(srcFile.write(content) == content.size());
+      content.replace("return host->log_message(host->host_ctx, GRIDLOCK_LOG_INFO, \"dummy session started\");",
+                      "char sb[48]; (void)snprintf(sb, sizeof(sb), \"{\\\"ranks\\\":%d}\", (int)rank_count); "
+                      "return host->emit_structured_event(host->host_ctx, \"dummy.session_start\", sb);");
+      QVERIFY(sf.open(QIODevice::WriteOnly | QIODevice::Truncate) && sf.write(content) == content.size());
     }
-    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("bump version 1.1.0")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("bump version 1.1.0")}) &&
+            runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
     const QString sha2 = PluginManifest::queryLocalHeadSha(workRepo);
     QVERIFY(sha2 != sha1);
 
@@ -691,16 +685,38 @@ class TestPluginManager : public QObject {
         env.userPluginDir(), QFileInfo(info1.libraryPath).fileName(), true}}));
     QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
     const auto res2 = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
-    QVERIFY2(res2.success && res2.anyBinaryChanged, qPrintable(res2.fullCompilerLog));
-    QVERIFY(sha256OfFile(res2.installedPath) != binSha1);
-    QVERIFY(mgr.refreshInstalledLockMetadata());
-    QCOMPARE(mgr.plugins().first().gitCommitShort, sha2.left(7));
-    QVERIFY(mgr.plugins().first().requiresRestart);
+    QVERIFY2(res2.success && res2.anyBinaryChanged && sha256OfFile(res2.installedPath) != binSha1, qPrintable(res2.fullCompilerLog));
+    QVERIFY(!PluginManager::hasGnuUniqueSymbols(res2.installedPath) && mgr.refreshInstalledLockMetadata());
+    QVERIFY(mgr.plugins().first().gitCommitShort == sha2.left(7) && mgr.plugins().first().requiresRestart);
 
-    QCOMPARE(mgr.discoverAndLoad(), 1);
-    QCOMPARE(mgr.plugins().first().version, QStringLiteral("1.1.0"));
-    QCOMPARE(mgr.loadDiagnostics(),
-             QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.1.0 (%1) [ABI 1.0]").arg(sha2.left(7))});
+    int reentrantHotReloadRc = 0;
+    QVector<QPair<QString, QString>> hotEvents;
+    const auto hotConn = QObject::connect(mgr.hostBridge(), &PluginHostBridge::structuredEventEmitted, &coord,
+                                          [&](const QString& ch, const QString& pl) {
+                                            hotEvents.append(qMakePair(ch, pl));
+                                            if (ch == QStringLiteral("dummy.stop")) reentrantHotReloadRc = mgr.hotReloadPlugins(4);
+                                          });
+    mgr.notifyRankStopped(0, QStringLiteral("/tmp/t.c"), 5, QStringLiteral("main"), 0x401000u);
+    QCOMPARE(reentrantHotReloadRc, -1);
+
+    hotEvents.clear();
+    QVERIFY(mgr.hotReloadPlugins(4) == 1 && mgr.plugins().first().version == QStringLiteral("1.1.0"));
+    QVERIFY(!mgr.plugins().first().requiresRestart && !mgr.property("gl_restart_required").toBool());
+    QVERIFY(coord.getProcessCount() == 4 && coord.getRankState(0).currentState == QStringLiteral("stopped"));
+    QVERIFY(std::any_of(hotEvents.cbegin(), hotEvents.cend(), [](const auto& ev) {
+      return ev.first == QStringLiteral("dummy.session_start") && ev.second == QStringLiteral("{\"ranks\":4}");
+    }));
+    QCOMPARE(mgr.loadDiagnostics(), QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.1.0 (%1) [ABI 1.0]").arg(sha2.left(7))});
+    QObject::disconnect(hotConn);
+
+#ifdef __linux__
+    const QString uniqCpp = QDir(gitSandbox.path()).filePath(QStringLiteral("uniq_probe.cpp"));
+    const QString uniqSo = QDir(gitSandbox.path()).filePath(QStringLiteral("libuniq_probe.so"));
+    { QFile uf(uniqCpp); QVERIFY(uf.open(QIODevice::WriteOnly) && uf.write("inline int& u() { static int v = 7; return v; } extern \"C\" int f() { return u(); }\n") > 0); }
+    QProcess gpp;
+    gpp.start(QStringLiteral("g++"), {QStringLiteral("-shared"), QStringLiteral("-fPIC"), uniqCpp, QStringLiteral("-o"), uniqSo});
+    QVERIFY(gpp.waitForFinished(10000) && gpp.exitCode() == 0 && PluginManager::hasGnuUniqueSymbols(uniqSo));
+#endif
   }
 
   void testZeroCallDwarfTypeInfoAndContiguousRanges() {
@@ -749,6 +765,12 @@ class TestPluginManager : public QObject {
 
     auto makeTypeInfo = []() { GridLockTypeInfo i{sizeof(GridLockTypeInfo), 1u, 0u, 0u, 0u, 0, 0, {}}; return i; };
     auto makeRange = []() { GridLockContiguousRange g{sizeof(GridLockContiguousRange), 1u, 0u, 0u, 0u, 0u, 0u, {}, {}}; return g; };
+    auto checkRange = [&](const char* expr, uint64_t addr, uint64_t cnt, uint64_t esz, const char* etype) {
+      GridLockContiguousRange r = makeRange();
+      QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, expr, &r), GRIDLOCK_OK);
+      QVERIFY(r.data_address == addr && r.element_count == cnt && r.element_size == esz);
+      QCOMPARE(QString::fromUtf8(r.element_type_utf8), QString::fromUtf8(etype));
+    };
 
     GridLockTypeInfo ti = makeTypeInfo();
     QCOMPARE(api->query_type_info(api->host_ctx, 0, "raw_ptr", &ti), GRIDLOCK_OK);
@@ -757,34 +779,16 @@ class TestPluginManager : public QObject {
     GridLockContiguousRange rng = makeRange();
     QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "raw_ptr", &rng), GRIDLOCK_ERR_UNSUPPORTED);
 
-    ti = makeTypeInfo(); rng = makeRange();
+    ti = makeTypeInfo();
     QCOMPARE(api->query_type_info(api->host_ctx, 0, "c_arr", &ti), GRIDLOCK_OK);
     QVERIFY(ti.byte_size == 128u && ti.is_pointer == 0 && ti.is_contiguous_container == 1);
-    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "c_arr", &rng), GRIDLOCK_OK);
-    QVERIFY(rng.data_address == 0x7ffd1000ULL && rng.element_count == 16u && rng.element_size == 8u);
-    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("double"));
+    checkRange("c_arr", 0x7ffd1000ULL, 16u, 8u, "double");
+    checkRange("std_arr", 0x7ffd2000ULL, 8u, 8u, "double");
+    checkRange("gnu_vec", 0x600000ULL, 16u, 8u, "double");
+    checkRange("llvm_vec", 0x700000ULL, 10u, 4u, "float");
+    checkRange("dyn_span", 0x800000ULL, 32u, 4u, "int32_t");
 
-    rng = makeRange();
-    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "std_arr", &rng), GRIDLOCK_OK);
-    QVERIFY(rng.data_address == 0x7ffd2000ULL && rng.element_count == 8u && rng.element_size == 8u);
-
-    rng = makeRange();
-    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "gnu_vec", &rng), GRIDLOCK_OK);
-    QVERIFY(rng.data_address == 0x600000ULL && rng.element_count == 16u && rng.element_size == 8u);
-    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("double"));
-
-    rng = makeRange();
-    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "llvm_vec", &rng), GRIDLOCK_OK);
-    QVERIFY(rng.data_address == 0x700000ULL && rng.element_count == 10u && rng.element_size == 4u);
-    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("float"));
-
-    rng = makeRange();
-    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "dyn_span", &rng), GRIDLOCK_OK);
-    QVERIFY(rng.data_address == 0x800000ULL && rng.element_count == 32u && rng.element_size == 4u);
-    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("int32_t"));
-
-    QVERIFY(!sawInferiorFnCall);
-    QCOMPARE(userEvalSpy.count(), 0);
+    QVERIFY(!sawInferiorFnCall && userEvalSpy.count() == 0);
     QObject::disconnect(responder);
   }
 };

@@ -576,11 +576,77 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
 
   QCOMPARE(tbl3->item(gitRow, 3)->text(), QStringLiteral("1.0.0 (%1)").arg(sha3.left(7)));
   QVERIFY(!page3->restartBanner()->isHidden());
+  QVERIFY(page3->hotReloadButton() != nullptr && !page3->hotReloadButton()->isHidden());
+  QCOMPARE(page3->hotReloadButton()->objectName(), QStringLiteral("pluginHotReloadBtn"));
+  QCOMPARE(page3->hotReloadButton()->text(), QStringLiteral("Hot-Reload Now"));
+  QVERIFY(mwBanner != nullptr && !mwBanner->isHidden());
+  auto* mwHotReloadBtn = mwBanner->findChild<QPushButton*>(QStringLiteral("pluginHotReloadBtn"));
+  QVERIFY(mwHotReloadBtn != nullptr && !mwHotReloadBtn->isHidden());
   QVector<gridlock::core::plugins::PluginLockEntry> locksAfterAll;
   QVERIFY(gridlock::core::plugins::PluginManifest::loadLockFile(lockPath, &locksAfterAll) && !locksAfterAll.isEmpty());
   QVERIFY(locksAfterAll.first().binarySha256 != locksAfterRow.first().binarySha256);
   QCOMPARE(locksAfterAll.first().commitSha, sha3);
 
+  // 8. Verify live "Hot-Reload Now" (#pluginHotReloadBtn) reloads updated .so in-place, replays on_session_start(4),
+  //    hides both restart banners, and keeps the active 4-rank paused MPI debug session intact.
+  gridlock::GdbRankCoordinator hotCoord;
+  hotCoord.initializeMockSession(4);
+  mw.setCoordinator(&hotCoord);
+  hotCoord.processGdbOutput(
+      0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/sim.c\",line=\"12\",args=[]}\n"));
+  QSignalSpy logSpy(mw.pluginManager()->hostBridge(), &gridlock::core::plugins::PluginHostBridge::pluginLogReceived);
+  page3->hotReloadButton()->click();
+  QApplication::processEvents();
+
+  QVERIFY(page3->restartBanner()->isHidden());
+  QVERIFY(mwBanner->isHidden());
+  QCOMPARE(tbl3->item(gitRow, 5)->text(), QStringLiteral("Loaded"));
+  QCOMPARE(hotCoord.getProcessCount(), 4);
+  QCOMPARE(hotCoord.getRankState(0).currentState, QStringLiteral("stopped"));
+  bool sawSessionReplayLog = false;
+  for (int i = 0; i < logSpy.count(); ++i) {
+    if (logSpy.at(i).at(2).toString() == QStringLiteral("dummy session started")) sawSessionReplayLog = true;
+  }
+  QVERIFY(sawSessionReplayLog);
+  for (const auto& p : mw.pluginManager()->plugins()) QVERIFY(!p.requiresRestart);
+
+#ifdef __linux__
+  // Verify STB_GNU_UNIQUE ('u') plugin shows inline warning advising full restart and -Wl,--version-script.
+  const QString uniqCppPath = QDir(gitDir.path()).filePath(QStringLiteral("gnu_unique_plug.cpp"));
+  const QString uniqSoPath = QDir(globalPlugDir).filePath(QStringLiteral("99_gnu_unique.so"));
+  {
+    QFile uf(uniqCppPath);
+    QVERIFY(uf.open(QIODevice::WriteOnly));
+    uf.write(
+        "#include \"gridlock/plugin_api.h\"\n"
+        "inline int& uniqueCounter() { static int c = 1; return c; }\n"
+        "extern \"C\" GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL "
+        "gridlock_plugin_init_v1(const GridLockHostApi*, GridLockPluginDescriptor* d) {\n"
+        "  (void)uniqueCounter();\n"
+        "  d->struct_size = sizeof(GridLockPluginDescriptor); d->abi_major = 1u; d->abi_minor = 0u;\n"
+        "  d->plugin_id_utf8 = \"org.gridlock.gnu_unique_test\"; d->plugin_name_utf8 = \"GNU Unique Test\";\n"
+        "  d->plugin_version_utf8 = \"0.1.0\"; return GRIDLOCK_OK;\n"
+        "}\n");
+  }
+  {
+    QProcess gpp;
+    gpp.start(QStringLiteral("g++"), {QStringLiteral("-std=c++23"), QStringLiteral("-shared"), QStringLiteral("-fPIC"),
+                                      QStringLiteral("-I") + QStringLiteral(GRIDLOCK_TEST_INCLUDE_DIR),
+                                      uniqCppPath, QStringLiteral("-o"), uniqSoPath});
+    QVERIFY(gpp.waitForFinished(10000) && gpp.exitCode() == 0);
+  }
+  QVERIFY(gridlock::core::plugins::PluginManager::hasGnuUniqueSymbols(uniqSoPath));
+  page3->hotReloadButton()->click();
+  QApplication::processEvents();
+  QVERIFY(!page3->restartBanner()->isHidden());
+  QVERIFY(!mwBanner->isHidden());
+  auto* bannerLbl = pd3.findChild<QLabel*>(QStringLiteral("pluginRestartBannerLabel"));
+  QVERIFY(bannerLbl != nullptr && bannerLbl->text().contains(QStringLiteral("STB_GNU_UNIQUE")) &&
+          bannerLbl->text().contains(QStringLiteral("--version-script")));
+  QFile::remove(uniqSoPath);
+#endif
+
+  mw.setCoordinator(nullptr);
   pd3.reject();
   mw.pluginManager()->unloadAll();
 }

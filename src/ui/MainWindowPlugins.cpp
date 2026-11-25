@@ -1,12 +1,6 @@
 /**
  * @file MainWindowPlugins.cpp
- * @brief Native plugin UI integration: dialogs, toasts, nested menus, status badges, multi-surface context hooks, annotations, theme sync, and report dock.
- *
- * Owns `PluginManager` and `PluginReportDockWidget` inside `MainWindow`, binds `PluginHostBridge`
- * signals to modal dialogs (`QMessageBox`, `QInputDialog`), timed toast banners, hierarchical
- * **Tools -> Plugins** submenus with `ShortcutManager` collision checks, clickable status-bar
- * badges, source-editor navigation and inline annotations, multi-surface context menus, and
- * live `ThemeManager` synchronization.
+ * @brief Native plugin UI integration: dialogs, toasts, nested menus, status badges, context hooks, annotations, theme sync, and hot-reload.
  */
 
 #include "MainWindow.hpp"
@@ -67,10 +61,7 @@ constexpr int kMaxPluginLinesPerWindow = 64;
 
 QString truncatePluginConsoleLine(QString line) {
   line.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
-  if (line.size() > kMaxPluginConsolePreviewChars) {
-    line.truncate(kMaxPluginConsolePreviewChars - 3);
-    line.append(QStringLiteral("..."));
-  }
+  if (line.size() > kMaxPluginConsolePreviewChars) line = line.left(kMaxPluginConsolePreviewChars - 3) + QStringLiteral("...");
   return line;
 }
 
@@ -78,12 +69,7 @@ struct PendingPluginConsoleBatch {
   QStringList lines;
   bool hasError = false;
   int droppedCount = 0;
-
-  void clear() {
-    lines.clear();
-    hasError = false;
-    droppedCount = 0;
-  }
+  void clear() { lines.clear(); hasError = false; droppedCount = 0; }
 };
 
 QString canonicalOrAbsolutePath(const QString& rawPath) {
@@ -155,11 +141,9 @@ void applyPluginShortcutChecked(QAction* act, const QString& shortcutHint) {
   if (!act || shortcutHint.trimmed().isEmpty()) return;
   const QKeySequence seq = QKeySequence::fromString(shortcutHint.trimmed(), QKeySequence::PortableText);
   if (seq.isEmpty()) return;
-  if (hasNonPluginShortcutCollision(seq)) {
+  if (hasNonPluginShortcutCollision(seq))
     act->setToolTip(QStringLiteral("%1 (shortcut '%2' already bound)").arg(act->text(), shortcutHint.trimmed()));
-  } else {
-    act->setShortcut(seq);
-  }
+  else act->setShortcut(seq);
 }
 
 struct PluginUiRuntimeState {
@@ -225,18 +209,14 @@ void MainWindow::initializePluginSubsystem() {
     m_callStackDockWidget->setPluginHostBridge(bridge);
     m_callStackDockWidget->setFocusedRank(m_focusedRank);
   }
-  if (m_serverRackView != nullptr) {
-    m_serverRackView->setPluginHostBridge(bridge);
-  }
+  if (m_serverRackView != nullptr) m_serverRackView->setPluginHostBridge(bridge);
 
-  // Instantiate host-owned PluginReportDockWidget tabified in the right dock area (hidden until populated).
   m_pluginReportDock = new PluginReportDockWidget(this);
   m_pluginReportDock->installEventFilter(this);
   setupDockTitleBar(m_pluginReportDock, QStringLiteral("PLUGIN REPORTS"));
   addDockWidget(Qt::RightDockWidgetArea, m_pluginReportDock);
-  if (auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock"))) {
+  if (auto* watchDock = findChild<QDockWidget*>(QStringLiteral("WatchExpressionsDock")))
     tabifyDockWidget(watchDock, m_pluginReportDock);
-  }
   m_dockHomeSlots.insert(m_pluginReportDock, {nullptr, -1, Qt::RightDockWidgetArea});
   m_pluginReportDock->hide();
 
@@ -245,18 +225,14 @@ void MainWindow::initializePluginSubsystem() {
     if (m_callStackDockWidget != nullptr) m_callStackDockWidget->setFocusedRank(rank);
   });
 
-  // Wire multi-surface context menus (Code Editor + Breakpoints) and annotation sync on EditorTabManager.
   auto syncAnnotationsForView = [bridge](SourceCodeView* view) {
     if (!view || !bridge) return;
     view->clearPluginAnnotations();
     const QString viewCanon = canonicalOrAbsolutePath(view->currentFile());
     if (viewCanon.isEmpty()) return;
-    for (const auto& ann : bridge->editorAnnotations()) {
-      if (canonicalOrAbsolutePath(ann.filePath) == viewCanon) {
-        view->upsertPluginAnnotation({ann.pluginId, ann.annotationId, ann.line,
-                                      ann.badgeText, ann.detailText, ann.colorToken});
-      }
-    }
+    for (const auto& ann : bridge->editorAnnotations())
+      if (canonicalOrAbsolutePath(ann.filePath) == viewCanon)
+        view->upsertPluginAnnotation({ann.pluginId, ann.annotationId, ann.line, ann.badgeText, ann.detailText, ann.colorToken});
   };
 
   if (m_editorTabManager != nullptr) {
@@ -342,18 +318,13 @@ void MainWindow::initializePluginSubsystem() {
   // Coalesce console preview updates on a 50 ms single-shot timer so tight stop loops never stall UI layout.
   auto consoleBatch = std::make_shared<PendingPluginConsoleBatch>();
   auto* consoleFlushTimer = new QTimer(this);
-  consoleFlushTimer->setSingleShot(true);
-  consoleFlushTimer->setInterval(kPluginConsoleBatchFlushMs);
+  consoleFlushTimer->setSingleShot(true); consoleFlushTimer->setInterval(kPluginConsoleBatchFlushMs);
   connect(consoleFlushTimer, &QTimer::timeout, this, [this, consoleBatch]() {
-    if (m_isShuttingDown || m_isClosing || m_spackManager == nullptr) {
-      consoleBatch->clear();
-      return;
-    }
+    if (m_isShuttingDown || m_isClosing || m_spackManager == nullptr) { consoleBatch->clear(); return; }
     if (consoleBatch->lines.isEmpty() && consoleBatch->droppedCount == 0) return;
     QStringList out = std::move(consoleBatch->lines);
-    if (consoleBatch->droppedCount > 0) {
+    if (consoleBatch->droppedCount > 0)
       out.append(QStringLiteral("[Plugin] ... (%1 additional messages coalesced)").arg(consoleBatch->droppedCount));
-    }
     const bool isErr = consoleBatch->hasError;
     consoleBatch->clear();
     m_spackManager->appendMessage(out.join(QLatin1Char('\n')), isErr);
@@ -361,11 +332,8 @@ void MainWindow::initializePluginSubsystem() {
 
   auto enqueueConsoleLine = [this, consoleBatch, consoleFlushTimer](const QString& rawLine, bool isError) {
     if (m_isShuttingDown || m_isClosing || m_spackManager == nullptr) return;
-    if (consoleBatch->lines.size() < kMaxPluginLinesPerWindow) {
-      consoleBatch->lines.append(truncatePluginConsoleLine(rawLine));
-    } else {
-      ++consoleBatch->droppedCount;
-    }
+    if (consoleBatch->lines.size() < kMaxPluginLinesPerWindow) consoleBatch->lines.append(truncatePluginConsoleLine(rawLine));
+    else ++consoleBatch->droppedCount;
     if (isError) consoleBatch->hasError = true;
     if (!consoleFlushTimer->isActive()) consoleFlushTimer->start();
   };
@@ -376,13 +344,10 @@ void MainWindow::initializePluginSubsystem() {
             enqueueConsoleLine(QStringLiteral("[Plugin:%1] %2").arg(channel, jsonPayload), false);
             emit pluginStructuredEventEmitted(channel, jsonPayload);
           });
-
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::pluginLogReceived, this,
           [this, enqueueConsoleLine](const QString& pluginId, int level, const QString& message) {
             if (m_isShuttingDown || m_isClosing) return;
-            if (level <= GRIDLOCK_LOG_DEBUG && qEnvironmentVariableIntValue("GRIDLOCK_PLUGIN_VERBOSE_LOGS") != 1) {
-              return;
-            }
+            if (level <= GRIDLOCK_LOG_DEBUG && qEnvironmentVariableIntValue("GRIDLOCK_PLUGIN_VERBOSE_LOGS") != 1) return;
             const QString tag = pluginId.isEmpty() ? QStringLiteral("plugin") : pluginId;
             enqueueConsoleLine(QStringLiteral("[PluginLog:%1] %2").arg(tag, message), level >= GRIDLOCK_LOG_ERROR);
           });
@@ -483,16 +448,13 @@ void MainWindow::initializePluginSubsystem() {
       uiState->statusButtons.insert(item.itemId, btn);
     }
     uiState->statusColorTokens.insert(item.itemId, item.colorToken);
-    btn->setText(item.text);
-    btn->setToolTip(item.tooltip.isEmpty() ? item.text : item.tooltip);
+    btn->setText(item.text); btn->setToolTip(item.tooltip.isEmpty() ? item.text : item.tooltip);
     btn->setCursor(item.callback != nullptr ? Qt::PointingHandCursor : Qt::ArrowCursor);
     styleStatusButton(btn, item.colorToken);
     btn->disconnect(this);
     if (item.callback != nullptr) {
       const QString itemId = item.itemId;
-      connect(btn, &QToolButton::clicked, this, [bridge, itemId]() {
-        if (bridge) (void)bridge->invokeStatusItem(itemId);
-      });
+      connect(btn, &QToolButton::clicked, this, [bridge, itemId]() { if (bridge) (void)bridge->invokeStatusItem(itemId); });
     }
     btn->show();
   };
@@ -503,12 +465,9 @@ void MainWindow::initializePluginSubsystem() {
             uiState->statusColorTokens.remove(itemId);
             if (QToolButton* btn = uiState->statusButtons.take(itemId).data()) {
               if (statusBar()) statusBar()->removeWidget(btn);
-              btn->setObjectName(QString());
-              btn->setParent(nullptr);
-              btn->deleteLater();
+              btn->setObjectName(QString()); btn->setParent(nullptr); btn->deleteLater();
             }
           });
-
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::navigateRequested, this,
           [this](const QString&, const QString& filePath, int line, int column) {
             if (!m_isShuttingDown && !m_isClosing) openFileAtLine(filePath, line, column);
@@ -554,8 +513,9 @@ void MainWindow::initializePluginSubsystem() {
             if (m_pluginReportDock) m_pluginReportDock->removePanel(pluginId, panelId);
           });
 
-  // Status-bar notification banner with "Restart GridLock Now" action when plugin configuration requires restart.
+  // Status-bar notification banner with "Hot-Reload Now" + "Restart GridLock Now" when plugin configuration changes.
   QFrame* restartNotice = nullptr;
+  QLabel* noticeLbl = nullptr;
   if (QStatusBar* bar = statusBar()) {
     restartNotice = new QFrame(bar);
     restartNotice->setObjectName(QStringLiteral("mainWindowPluginRestartBanner"));
@@ -563,11 +523,15 @@ void MainWindow::initializePluginSubsystem() {
         "QFrame#mainWindowPluginRestartBanner { background-color: rgba(217, 119, 6, 0.20); "
         "border: 1px solid #d97706; border-radius: 4px; }"));
     auto* noticeLay = new QHBoxLayout(restartNotice);
-    noticeLay->setContentsMargins(8, 1, 6, 1);
-    noticeLay->setSpacing(8);
-    auto* noticeLbl = new QLabel(tr("Plugin changes require restart"), restartNotice);
+    noticeLay->setContentsMargins(8, 1, 6, 1); noticeLay->setSpacing(8);
+    noticeLbl = new QLabel(tr("Plugin changes require restart"), restartNotice);
     noticeLbl->setObjectName(QStringLiteral("mainWindowPluginRestartLabel"));
     noticeLay->addWidget(noticeLbl);
+
+    auto* hotReloadBtn = new QPushButton(tr("Hot-Reload Now"), restartNotice);
+    hotReloadBtn->setObjectName(QStringLiteral("pluginHotReloadBtn"));
+    hotReloadBtn->setFixedHeight(20);
+    noticeLay->addWidget(hotReloadBtn);
 
     auto* restartBtn = new QPushButton(tr("Restart GridLock Now"), restartNotice);
     restartBtn->setObjectName(QStringLiteral("mainWindowRestartGridLockBtn"));
@@ -575,6 +539,33 @@ void MainWindow::initializePluginSubsystem() {
     noticeLay->addWidget(restartBtn);
     restartNotice->setVisible(false);
     bar->addPermanentWidget(restartNotice);
+
+    connect(hotReloadBtn, &QPushButton::clicked, this, [this, restartNotice, noticeLbl, enqueueConsoleLine]() {
+      if (!m_pluginManager) return;
+      const int ranks = (m_coordinator != nullptr && m_coordinator->getProcessCount() > 0)
+                            ? m_coordinator->getProcessCount()
+                            : (m_debugSessionActive ? configuredRankCount() : 0);
+      const bool hadPinnedUnique = m_pluginManager->hasLoadedGnuUniquePlugins();
+      const int rc = m_pluginManager->hotReloadPlugins(ranks);
+      const bool hasUniqueAfter = m_pluginManager->hasLoadedGnuUniquePlugins();
+      if (rc < 0 || hadPinnedUnique || hasUniqueAfter) {
+        const QString warnMsg =
+            (rc < 0)
+                ? tr("Plugin callback active: full restart required")
+                : tr("STB_GNU_UNIQUE ('u') symbols pinned by glibc (use -Wl,--version-script): full restart required");
+        m_pluginManager->setProperty("gl_restart_required", true);
+        m_pluginManager->setProperty("gl_gnu_unique_warning", rc >= 0);
+        if (noticeLbl) noticeLbl->setText(warnMsg);
+        if (restartNotice) restartNotice->setVisible(true);
+        if (statusBar()) statusBar()->showMessage(warnMsg, 10000);
+        enqueueConsoleLine(QStringLiteral("[Plugins] ") + warnMsg, true);
+        return;
+      }
+      if (ranks > 0) m_pluginSessionActive = true;
+      if (noticeLbl) noticeLbl->setText(tr("Plugin changes require restart"));
+      if (restartNotice) restartNotice->setVisible(false);
+      if (statusBar()) statusBar()->showMessage(tr("Hot-reloaded %1 plugin(s) cleanly.").arg(rc), 5000);
+    });
 
     connect(restartBtn, &QPushButton::clicked, this, [this]() {
       if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
@@ -586,8 +577,7 @@ void MainWindow::initializePluginSubsystem() {
         return;
       }
       const QString appPath = QCoreApplication::applicationFilePath();
-      const QStringList appArgs = QCoreApplication::arguments().mid(1);
-      if (!appPath.isEmpty()) QProcess::startDetached(appPath, appArgs);
+      if (!appPath.isEmpty()) QProcess::startDetached(appPath, QCoreApplication::arguments().mid(1));
       QCoreApplication::quit();
     });
   }
@@ -628,19 +618,26 @@ void MainWindow::initializePluginSubsystem() {
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::registeredActionsChanged, this, &MainWindow::rebuildToolsPluginsMenu);
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::menuActionsChanged, this, &MainWindow::rebuildToolsPluginsMenu);
   connect(m_pluginManager, &gridlock::core::plugins::PluginManager::pluginsChanged, this,
-          [this, restartNotice, enqueueConsoleLine, reconcilePluginUiState]() {
+          [this, restartNotice, noticeLbl, enqueueConsoleLine, reconcilePluginUiState]() {
             rebuildToolsPluginsMenu(); reconcilePluginUiState();
             if (m_isShuttingDown || m_isClosing || m_pluginManager == nullptr) return;
+            if (m_coordinator != nullptr && m_coordinator->getProcessCount() > 0) m_pluginSessionActive = true;
             const auto& list = m_pluginManager->plugins();
             const bool needRestart = m_pluginManager->property("gl_restart_required").toBool() ||
                                      std::any_of(list.cbegin(), list.cend(), [](const auto& i) { return i.requiresRestart; });
             if (restartNotice != nullptr) {
+              if (noticeLbl != nullptr) {
+                noticeLbl->setText(
+                    m_pluginManager->property("gl_gnu_unique_warning").toBool()
+                        ? tr("STB_GNU_UNIQUE ('u') symbols pinned by glibc (use -Wl,--version-script): full restart required")
+                        : tr("Plugin changes require restart"));
+              }
               const bool wasHidden = restartNotice->isHidden();
               restartNotice->setVisible(needRestart);
               if (needRestart && wasHidden) {
                 if (statusBar() != nullptr)
-                  statusBar()->showMessage(tr("Plugin settings updated: click 'Restart GridLock Now' to apply all changes."), 10000);
-                enqueueConsoleLine(QStringLiteral("[Plugins] Restart GridLock to apply updated plugin enablement/trust."), false);
+                  statusBar()->showMessage(tr("Plugin settings updated: click 'Hot-Reload Now' or 'Restart GridLock Now'."), 10000);
+                enqueueConsoleLine(QStringLiteral("[Plugins] Click Hot-Reload Now or Restart GridLock to apply plugin updates."), false);
               }
             }
           });

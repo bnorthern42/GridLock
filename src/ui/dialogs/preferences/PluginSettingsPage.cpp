@@ -53,12 +53,9 @@ using gridlock::core::plugins::PluginUpdateTarget;
 class CompilerLogHighlighter final : public QSyntaxHighlighter {
  public:
   explicit CompilerLogHighlighter(QTextDocument* doc) : QSyntaxHighlighter(doc) {
-    m_errFmt.setForeground(QColor(QStringLiteral("#ef4444")));
-    m_errFmt.setFontWeight(QFont::Bold);
-    m_warnFmt.setForeground(QColor(QStringLiteral("#f59e0b")));
-    m_warnFmt.setFontWeight(QFont::DemiBold);
-    m_stepFmt.setForeground(QColor(QStringLiteral("#38bdf8")));
-    m_stepFmt.setFontWeight(QFont::Bold);
+    m_errFmt.setForeground(QColor(QStringLiteral("#ef4444"))); m_errFmt.setFontWeight(QFont::Bold);
+    m_warnFmt.setForeground(QColor(QStringLiteral("#f59e0b"))); m_warnFmt.setFontWeight(QFont::DemiBold);
+    m_stepFmt.setForeground(QColor(QStringLiteral("#38bdf8"))); m_stepFmt.setFontWeight(QFont::Bold);
   }
 
  protected:
@@ -66,21 +63,14 @@ class CompilerLogHighlighter final : public QSyntaxHighlighter {
     static const QRegularExpression kErrRe(
         QStringLiteral("(?:(?:^|\\s|:)(?:fatal )?error:\\s|undefined reference to\\b|CMake Error\\b)"),
         QRegularExpression::CaseInsensitiveOption);
-    static const QRegularExpression kWarnRe(QStringLiteral("(?:^|\\s|:)warning:\\s"),
-                                           QRegularExpression::CaseInsensitiveOption);
-    if (text.startsWith(QStringLiteral("==>"))) {
-      setFormat(0, text.size(), m_stepFmt);
-    } else if (kErrRe.match(text).hasMatch()) {
-      setFormat(0, text.size(), m_errFmt);
-    } else if (kWarnRe.match(text).hasMatch()) {
-      setFormat(0, text.size(), m_warnFmt);
-    }
+    static const QRegularExpression kWarnRe(QStringLiteral("(?:^|\\s|:)warning:\\s"), QRegularExpression::CaseInsensitiveOption);
+    if (text.startsWith(QStringLiteral("==>"))) setFormat(0, text.size(), m_stepFmt);
+    else if (kErrRe.match(text).hasMatch()) setFormat(0, text.size(), m_errFmt);
+    else if (kWarnRe.match(text).hasMatch()) setFormat(0, text.size(), m_warnFmt);
   }
 
  private:
-  QTextCharFormat m_errFmt;
-  QTextCharFormat m_warnFmt;
-  QTextCharFormat m_stepFmt;
+  QTextCharFormat m_errFmt, m_warnFmt, m_stepFmt;
 };
 
 QString pluginRowKey(const LoadedPluginInfo& info) {
@@ -132,15 +122,10 @@ QWidget* makeCenteredCheckboxCell(QTableWidget* parent, QCheckBox** outCheck, co
                                   bool checked, bool enabled, const QString& tooltip) {
   auto* holder = new QWidget(parent);
   auto* lay = new QHBoxLayout(holder);
-  lay->setContentsMargins(6, 0, 6, 0);
-  lay->setAlignment(Qt::AlignCenter);
+  lay->setContentsMargins(6, 0, 6, 0); lay->setAlignment(Qt::AlignCenter);
   auto* chk = new QCheckBox(holder);
-  chk->setObjectName(objName);
-  chk->setChecked(checked);
-  chk->setEnabled(enabled);
-  chk->setToolTip(tooltip);
-  lay->addWidget(chk);
-  *outCheck = chk;
+  chk->setObjectName(objName); chk->setChecked(checked); chk->setEnabled(enabled); chk->setToolTip(tooltip);
+  lay->addWidget(chk); *outCheck = chk;
   return holder;
 }
 
@@ -149,18 +134,14 @@ QWidget* makeCenteredCheckboxCell(QTableWidget* parent, QCheckBox** outCheck, co
 PluginSettingsPage::PluginSettingsPage(PluginManager* pluginManager, QWidget* parent)
     : QWidget(parent), m_pluginManager(pluginManager), m_installer(new PluginInstaller(this)) {
   setObjectName(QStringLiteral("preferencesPluginsPage"));
-
   auto* root = new QVBoxLayout(this);
-  root->setContentsMargins(14, 14, 14, 16);
-  root->setSpacing(10);
+  root->setContentsMargins(14, 14, 14, 16); root->setSpacing(10);
 
   auto* heading = new QLabel(QStringLiteral("<b>Native C99 Debugger Plugins</b>"), this);
   heading->setObjectName(QStringLiteral("heading"));
   root->addWidget(heading);
-
   auto* sep = new QLabel(this);
-  sep->setFixedHeight(1);
-  sep->setObjectName(QStringLiteral("separator"));
+  sep->setFixedHeight(1); sep->setObjectName(QStringLiteral("separator"));
   root->addWidget(sep);
 
   m_tabs = new QTabWidget(this);
@@ -175,12 +156,10 @@ PluginSettingsPage::PluginSettingsPage(PluginManager* pluginManager, QWidget* pa
   });
   connect(m_installer, &PluginInstaller::logOutputReceived, this, [this](const QString& chunk) {
     if (!m_compilerLogView) return;
-    m_compilerLogView->moveCursor(QTextCursor::End);
-    m_compilerLogView->insertPlainText(chunk);
+    m_compilerLogView->moveCursor(QTextCursor::End); m_compilerLogView->insertPlainText(chunk);
     if (QScrollBar* sb = m_compilerLogView->verticalScrollBar()) sb->setValue(sb->maximum());
   });
   connect(m_installer, &PluginInstaller::installFinished, this, &PluginSettingsPage::onInstallFinished);
-
   refreshTable();
 }
 
@@ -188,20 +167,17 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   auto* tab = new QWidget(parent);
   tab->setObjectName(QStringLiteral("pluginInstalledTab"));
   auto* lay = new QVBoxLayout(tab);
-  lay->setContentsMargins(8, 10, 8, 8);
-  lay->setSpacing(10);
+  lay->setContentsMargins(8, 10, 8, 8); lay->setSpacing(10);
 
   auto* desc = new QLabel(
       tr("Manage compiled native extensions (.so / .dylib / .dll) conforming to the frozen "
-         "GridLock Plugin ABI v1.x across Global and Workspace scopes."),
-      tab);
+         "GridLock Plugin ABI v1.x across Global and Workspace scopes."), tab);
   desc->setWordWrap(true);
   lay->addWidget(desc);
 
   auto* dirRow = new QHBoxLayout();
   dirRow->setSpacing(8);
   dirRow->addWidget(new QLabel(tr("Plugin Directories:"), tab));
-
   m_searchDirsCombo = new QComboBox(tab);
   m_searchDirsCombo->setObjectName(QStringLiteral("pluginSearchDirsCombo"));
   m_searchDirsCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -216,8 +192,7 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   lay->addLayout(dirRow);
 
   auto* actionRow = new QHBoxLayout();
-  actionRow->setSpacing(8);
-  actionRow->addStretch(1);
+  actionRow->setSpacing(8); actionRow->addStretch(1);
   m_reloadBtn = new QPushButton(tr("Reload Plugins"), tab);
   m_reloadBtn->setObjectName(QStringLiteral("reloadPluginsBtn"));
   m_reloadBtn->setToolTip(tr("Discard staged edits, unload active plugins, and rescan plugin directories."));
@@ -234,24 +209,26 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
 
   m_installedStatusLabel = new QLabel(tab);
   m_installedStatusLabel->setObjectName(QStringLiteral("pluginInstalledStatusLabel"));
-  m_installedStatusLabel->setWordWrap(true);
-  m_installedStatusLabel->setVisible(false);
+  m_installedStatusLabel->setWordWrap(true); m_installedStatusLabel->setVisible(false);
   lay->addWidget(m_installedStatusLabel);
 
   m_restartBanner = new QFrame(tab);
   m_restartBanner->setObjectName(QStringLiteral("pluginRestartBanner"));
   m_restartBanner->setStyleSheet(QStringLiteral(
-      "QFrame#pluginRestartBanner { background-color: rgba(217, 119, 6, 0.16); "
-      "border: 1px solid #d97706; border-radius: 5px; }"));
+      "QFrame#pluginRestartBanner { background-color: rgba(217, 119, 6, 0.16); border: 1px solid #d97706; border-radius: 5px; }"));
   auto* bannerLay = new QHBoxLayout(m_restartBanner);
-  bannerLay->setContentsMargins(12, 8, 12, 8);
-  bannerLay->setSpacing(10);
+  bannerLay->setContentsMargins(12, 8, 12, 8); bannerLay->setSpacing(10);
   m_restartBannerLabel = new QLabel(
-      tr("Plugin enablement or workspace trust changes were saved. Restart GridLock to apply all updates cleanly."),
-      m_restartBanner);
+      tr("Plugin changes were saved. Click Hot-Reload Now to apply in-place or Restart GridLock Now."), m_restartBanner);
   m_restartBannerLabel->setObjectName(QStringLiteral("pluginRestartBannerLabel"));
   m_restartBannerLabel->setWordWrap(true);
   bannerLay->addWidget(m_restartBannerLabel, 1);
+
+  m_hotReloadBtn = new QPushButton(tr("Hot-Reload Now"), m_restartBanner);
+  m_hotReloadBtn->setObjectName(QStringLiteral("pluginHotReloadBtn"));
+  m_hotReloadBtn->setMinimumWidth(136);
+  applyPrimaryAccentButtonStyle(m_hotReloadBtn);
+  bannerLay->addWidget(m_hotReloadBtn);
 
   m_restartNowBtn = new QPushButton(tr("Restart GridLock Now"), m_restartBanner);
   m_restartNowBtn->setObjectName(QStringLiteral("restartGridLockNowBtn"));
@@ -269,8 +246,7 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_pluginTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   m_pluginTable->setSelectionMode(QAbstractItemView::SingleSelection);
   m_pluginTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  m_pluginTable->setAlternatingRowColors(true);
-  m_pluginTable->setWordWrap(false);
+  m_pluginTable->setAlternatingRowColors(true); m_pluginTable->setWordWrap(false);
   m_pluginTable->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   m_pluginTable->setStyleSheet(QStringLiteral(
       "QTableWidget#pluginsTableWidget { font-size: 12px; } "
@@ -285,13 +261,14 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   lay->addWidget(m_pluginTable, 1);
 
   connect(m_openFolderBtn, &QPushButton::clicked, this, [this]() {
-    if (!m_searchDirsCombo) return;
-    if (const QString d = m_searchDirsCombo->currentText().trimmed(); !d.isEmpty()) {
-      QDir().mkpath(d); QDesktopServices::openUrl(QUrl::fromLocalFile(d));
-    }
+    if (m_searchDirsCombo)
+      if (const QString d = m_searchDirsCombo->currentText().trimmed(); !d.isEmpty()) {
+        QDir().mkpath(d); QDesktopServices::openUrl(QUrl::fromLocalFile(d));
+      }
   });
   connect(m_reloadBtn, &QPushButton::clicked, this, &PluginSettingsPage::reloadPlugins);
   connect(m_updateAllBtn, &QPushButton::clicked, this, &PluginSettingsPage::onUpdateAllClicked);
+  connect(m_hotReloadBtn, &QPushButton::clicked, this, &PluginSettingsPage::triggerHotReloadNow);
   connect(m_restartNowBtn, &QPushButton::clicked, this, &PluginSettingsPage::triggerRestartNow);
   return tab;
 }
@@ -354,10 +331,8 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   auto* manifestField = new QWidget(tab);
   manifestField->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   auto* manifestRow = new QHBoxLayout(manifestField);
-  manifestRow->setContentsMargins(0, 2, 0, 2);
-  manifestRow->setSpacing(8);
-  auto* manifestHint = new QLabel(
-      tr("Declarative manifest (plugins.toml + user-global plugins-lock.toml):"), manifestField);
+  manifestRow->setContentsMargins(0, 2, 0, 2); manifestRow->setSpacing(8);
+  auto* manifestHint = new QLabel(tr("Declarative manifest (plugins.toml + user-global plugins-lock.toml):"), manifestField);
   manifestHint->setObjectName(QStringLiteral("pluginManifestSyncHintLabel"));
   manifestHint->setWordWrap(true);
   manifestHint->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -375,8 +350,7 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   form->addRow(tr("Manifest Sync:"), manifestField);
   lay->addLayout(form);
 
-  m_buildSummaryBadge = new QLabel(
-      tr("Ready to install from GitHub, GitLab, Codeberg, Gitea, or custom Git URLs."), tab);
+  m_buildSummaryBadge = new QLabel(tr("Ready to install from GitHub, GitLab, Codeberg, Gitea, or custom Git URLs."), tab);
   m_buildSummaryBadge->setObjectName(QStringLiteral("pluginBuildSummaryBadge"));
   m_buildSummaryBadge->setWordWrap(true);
   lay->addWidget(m_buildSummaryBadge);
@@ -396,10 +370,9 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   lay->addWidget(m_compilerLogView, 1);
 
   updateGitRepoPlaceholder();
-  connect(&gridlock::core::managers::ThemeManager::instance(),
-          &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
-            applyPrimaryAccentButtonStyle(m_cloneBuildBtn);
-            applyPrimaryAccentButtonStyle(m_updateAllBtn);
+  connect(&gridlock::core::managers::ThemeManager::instance(), &gridlock::core::managers::ThemeManager::themeModeChanged,
+          this, [this](bool) {
+            for (auto* b : {m_cloneBuildBtn, m_updateAllBtn, m_hotReloadBtn}) applyPrimaryAccentButtonStyle(b);
           });
   connect(m_gitHostCombo, &QComboBox::currentIndexChanged, this, [this](int) { updateGitRepoPlaceholder(); });
   connect(m_cloneBuildBtn, &QPushButton::clicked, this, &PluginSettingsPage::onCloneOrCancelClicked);
@@ -412,14 +385,10 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
 void PluginSettingsPage::updateGitRepoPlaceholder() {
   if (!m_repoUrlEdit || !m_gitHostCombo) return;
   switch (static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt())) {
-    case GitForgeHost::GitHub:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (e.g. bnorthern42/gridlock-stl-inspector)")); break;
-    case GitForgeHost::GitLab:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo or group/sub/repo (gitlab.com)")); break;
-    case GitForgeHost::Codeberg:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (codeberg.org)")); break;
-    case GitForgeHost::CustomUrl:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("https://gitea.example.org/owner/repo.git or git@host:owner/repo.git")); break;
+    case GitForgeHost::GitHub: m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (e.g. bnorthern42/gridlock-stl-inspector)")); break;
+    case GitForgeHost::GitLab: m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo or group/sub/repo (gitlab.com)")); break;
+    case GitForgeHost::Codeberg: m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (codeberg.org)")); break;
+    case GitForgeHost::CustomUrl: m_repoUrlEdit->setPlaceholderText(QStringLiteral("https://gitea.example.org/owner/repo.git or git@host:owner/repo.git")); break;
   }
 }
 
@@ -523,26 +492,29 @@ void PluginSettingsPage::onInstallFinished(const PluginBuildResult& result) {
 }
 
 MainWindow* PluginSettingsPage::resolveMainWindow() const {
-  for (QWidget* w = parentWidget(); w != nullptr; w = w->parentWidget()) {
+  for (QWidget* w = parentWidget(); w != nullptr; w = w->parentWidget())
     if (auto* mw = qobject_cast<MainWindow*>(w)) return mw;
-  }
-  for (QWidget* top : QApplication::topLevelWidgets()) {
+  for (QWidget* top : QApplication::topLevelWidgets())
     if (auto* mw = qobject_cast<MainWindow*>(top)) return mw;
-  }
   return nullptr;
 }
 
 PluginManager* PluginSettingsPage::resolvePluginManager() {
   if (!m_pluginManager.isNull()) return m_pluginManager.data();
-  if (MainWindow* mw = resolveMainWindow(); mw != nullptr && mw->pluginManager() != nullptr) {
+  if (MainWindow* mw = resolveMainWindow(); mw != nullptr && mw->pluginManager() != nullptr)
     m_pluginManager = mw->pluginManager();
-    return m_pluginManager.data();
-  }
-  return nullptr;
+  return m_pluginManager.data();
 }
 
 void PluginSettingsPage::setRestartBannerVisible(bool visible) {
   m_restartRequired = visible;
+  if (visible && m_restartBannerLabel != nullptr) {
+    auto* mgr = resolvePluginManager();
+    if (mgr == nullptr || !mgr->property("gl_gnu_unique_warning").toBool()) {
+      m_restartBannerLabel->setText(
+          tr("Plugin changes were saved. Click Hot-Reload Now to apply in-place or Restart GridLock Now."));
+    }
+  }
   if (m_restartBanner != nullptr) m_restartBanner->setVisible(visible);
 }
 
@@ -550,9 +522,49 @@ void PluginSettingsPage::reloadPlugins() {
   m_stagedStates.clear();
   if (auto* mgr = resolvePluginManager()) {
     mgr->setProperty("gl_restart_required", false);
+    mgr->setProperty("gl_gnu_unique_warning", false);
     mgr->discoverAndLoad();
   }
   setRestartBannerVisible(false);
+  refreshTable();
+}
+
+void PluginSettingsPage::triggerHotReloadNow() {
+  auto* mgr = resolvePluginManager();
+  if (mgr == nullptr) return;
+  (void)applyChanges();
+  const bool hadPinnedUnique = mgr->hasLoadedGnuUniquePlugins();
+  int rankCount = mgr->activeCoordinatorRankCount();
+  if (rankCount <= 0) {
+    if (MainWindow* mw = resolveMainWindow(); mw != nullptr && mw->coordinator() != nullptr)
+      rankCount = mw->coordinator()->getProcessCount();
+  }
+  const int rc = mgr->hotReloadPlugins(rankCount);
+  const bool hasUniqueAfter = mgr->hasLoadedGnuUniquePlugins();
+  if (rc < 0 || hadPinnedUnique || hasUniqueAfter) {
+    const QString warnText =
+        (rc < 0)
+            ? tr("Warning: A plugin callback is active on the stack; full restart is required to unload safely.")
+            : tr("Warning: Loaded plugin shared library contains STB_GNU_UNIQUE ('u') symbols pinned in memory by "
+                 "Linux glibc until process exit. Restart GridLock Now, and link C++ plugins with -Wl,--version-script.");
+    mgr->setProperty("gl_restart_required", true);
+    mgr->setProperty("gl_gnu_unique_warning", rc >= 0);
+    if (m_restartBannerLabel) m_restartBannerLabel->setText(warnText);
+    if (m_installedStatusLabel) { m_installedStatusLabel->setText(warnText); m_installedStatusLabel->setVisible(true); }
+    setRestartBannerVisible(true);
+    emit mgr->pluginsChanged();
+    refreshTable();
+    return;
+  }
+  m_stagedStates.clear();
+  if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
+  setRestartBannerVisible(false);
+  if (m_installedStatusLabel) {
+    m_installedStatusLabel->setText(tr("Hot-reloaded %1 plugin(s) in-place.").arg(rc));
+    m_installedStatusLabel->setVisible(true);
+  }
+  emit restartRequiredChanged(false);
+  emit mgr->pluginsChanged();
   refreshTable();
 }
 
@@ -720,16 +732,10 @@ void PluginSettingsPage::refreshTable() {
     }
 
     connect(globalChk, &QCheckBox::toggled, this, [this, row, rowKey](bool checked) {
-      if (m_stagedStates.contains(rowKey)) {
-        m_stagedStates[rowKey].globalEnabled = checked;
-        updateRowPreview(row, rowKey);
-      }
+      if (m_stagedStates.contains(rowKey)) { m_stagedStates[rowKey].globalEnabled = checked; updateRowPreview(row, rowKey); }
     });
     connect(wsChk, &QCheckBox::toggled, this, [this, row, rowKey](bool checked) {
-      if (m_stagedStates.contains(rowKey)) {
-        m_stagedStates[rowKey].workspaceEnabled = checked;
-        updateRowPreview(row, rowKey);
-      }
+      if (m_stagedStates.contains(rowKey)) { m_stagedStates[rowKey].workspaceEnabled = checked; updateRowPreview(row, rowKey); }
     });
     updateRowPreview(row, rowKey);
   }
@@ -740,59 +746,44 @@ bool PluginSettingsPage::applyChanges() {
   if (mgr == nullptr) return false;
   const QVector<LoadedPluginInfo> snapshot = mgr->plugins();
   bool anyChanged = false;
-
   for (const LoadedPluginInfo& info : snapshot) {
     const QString rowKey = pluginRowKey(info);
     if (!m_stagedStates.contains(rowKey) || info.id.isEmpty()) continue;
     const StagedPluginState staged = m_stagedStates.value(rowKey);
     const bool isWs = (info.scope == PluginScope::Workspace);
-    const bool curGlobal = mgr->isPluginGloballyEnabled(info.id);
-    const bool curWorkspace = mgr->isPluginWorkspaceEnabled(info.id);
+    const bool curGlobal = mgr->isPluginGloballyEnabled(info.id), curWorkspace = mgr->isPluginWorkspaceEnabled(info.id);
     const bool curTrusted = !isWs || info.trusted;
-    if (staged.globalEnabled == curGlobal && staged.workspaceEnabled == curWorkspace &&
-        (!isWs || staged.workspaceTrusted == curTrusted)) {
+    if (staged.globalEnabled == curGlobal && staged.workspaceEnabled == curWorkspace && (!isWs || staged.workspaceTrusted == curTrusted))
       continue;
-    }
     mgr->setProperty("gl_restart_required", true);
+    mgr->setProperty("gl_gnu_unique_warning", false);
     anyChanged = true;
     if (staged.globalEnabled != curGlobal) mgr->setPluginGloballyEnabled(info.id, staged.globalEnabled);
     if (staged.workspaceEnabled != curWorkspace) mgr->setPluginWorkspaceEnabled(info.id, staged.workspaceEnabled);
     if (isWs && staged.workspaceTrusted != curTrusted) {
-      if (staged.workspaceTrusted) mgr->trustWorkspacePlugin(info.id);
-      else mgr->revokeWorkspacePluginTrust(info.id);
+      if (staged.workspaceTrusted) mgr->trustWorkspacePlugin(info.id); else mgr->revokeWorkspacePluginTrust(info.id);
     }
   }
-
   m_stagedStates.clear();
   refreshTable();
-  if (anyChanged) {
-    setRestartBannerVisible(true);
-    emit restartRequiredChanged(true);
-  }
+  if (anyChanged) { setRestartBannerVisible(true); emit restartRequiredChanged(true); }
   return anyChanged;
 }
 
 void PluginSettingsPage::triggerRestartNow() {
-  if (auto* dlg = qobject_cast<QDialog*>(window())) {
-    (void)QMetaObject::invokeMethod(dlg, "apply");
-  } else {
-    (void)applyChanges();
-  }
-  if (MainWindow* mw = resolveMainWindow(); mw != nullptr && !mw->activeWorkspaceDirectory().isEmpty()) {
-    mw->saveSession(false);
-  }
+  if (auto* dlg = qobject_cast<QDialog*>(window())) (void)QMetaObject::invokeMethod(dlg, "apply");
+  else (void)applyChanges();
+  if (MainWindow* mw = resolveMainWindow(); mw != nullptr && !mw->activeWorkspaceDirectory().isEmpty()) mw->saveSession(false);
   gridlock::core::ConfigManager::instance().saveGlobalConfig();
   QSettings(QStringLiteral("gridlock"), QStringLiteral("debugger")).sync();
   emit restartRequested();
   if (auto* dlg = qobject_cast<QDialog*>(window())) dlg->accept();
-
   if (qEnvironmentVariableIntValue("GRIDLOCK_DRY_RUN_SELF_RESTART") == 1) {
     if (qApp != nullptr) qApp->setProperty("gridlock_restart_triggered", true);
     return;
   }
   const QString appPath = QCoreApplication::applicationFilePath();
-  const QStringList appArgs = QCoreApplication::arguments().mid(1);
-  if (!appPath.isEmpty()) QProcess::startDetached(appPath, appArgs);
+  if (!appPath.isEmpty()) QProcess::startDetached(appPath, QCoreApplication::arguments().mid(1));
   QCoreApplication::quit();
 }
 

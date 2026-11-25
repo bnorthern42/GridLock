@@ -79,6 +79,9 @@ class PluginSettingsPage : public QWidget {
   /** @brief Returns the inline restart-required notification banner frame on the `Installed` tab. */
   QFrame* restartBanner() const noexcept { return m_restartBanner; }
 
+  /** @brief Returns the **Hot-Reload Now** button (`#pluginHotReloadBtn`) inside `restartBanner()`. */
+  QPushButton* hotReloadButton() const noexcept { return m_hotReloadBtn; }
+
   /** @brief Returns the **Restart GridLock Now** button inside `restartBanner()`. */
   QPushButton* restartNowButton() const noexcept { return m_restartNowBtn; }
 
@@ -136,6 +139,9 @@ class PluginSettingsPage : public QWidget {
    */
   bool applyChanges();
 
+  /** @brief Hot-reloads plugins in-place while preserving active MPI sessions (or warns on `STB_GNU_UNIQUE`). */
+  void triggerHotReloadNow();
+
   /** @brief Flushes pending preferences/session state, spawns a detached GridLock instance, and quits. */
   void triggerRestartNow();
 
@@ -181,6 +187,7 @@ class PluginSettingsPage : public QWidget {
   QLabel* m_installedStatusLabel = nullptr;
   QFrame* m_restartBanner = nullptr;
   QLabel* m_restartBannerLabel = nullptr;
+  QPushButton* m_hotReloadBtn = nullptr;
   QPushButton* m_restartNowBtn = nullptr;
   QTableWidget* m_pluginTable = nullptr;
   QComboBox* m_gitHostCombo = nullptr;

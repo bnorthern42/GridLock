@@ -7,12 +7,20 @@
 
 #include "PluginManifest.hpp"
 
+#ifdef __linux__
+#include <elf.h>
+#ifndef STB_GNU_UNIQUE
+#define STB_GNU_UNIQUE 10
+#endif
+#endif
+
 #ifndef _WIN32
 #include <sys/stat.h>
 #endif
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <utility>
 
 #include <QCryptographicHash>
@@ -20,6 +28,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QIODevice>
+#include <QProcess>
 #include <QSettings>
 
 #include "../hpc/gdb/GdbRankCoordinator.hpp"
@@ -322,6 +331,68 @@ bool PluginManager::refreshInstalledLockMetadata() {
   return anyShaChanged;
 }
 
+bool PluginManager::hasGnuUniqueSymbols(const QString& canonicalSoPath) {
+#ifdef __linux__
+  QFile f(canonicalSoPath);
+  if (!f.open(QIODevice::ReadOnly)) return false;
+  const QByteArray buf = f.readAll();
+  const auto* raw = reinterpret_cast<const unsigned char*>(buf.constData());
+  const size_t len = static_cast<size_t>(buf.size());
+  if (len < sizeof(Elf64_Ehdr) || std::memcmp(raw, ELFMAG, SELFMAG) != 0) return false;
+  if (raw[EI_CLASS] == ELFCLASS64 && raw[EI_DATA] == ELFDATA2LSB) {
+    Elf64_Ehdr eh{};
+    std::memcpy(&eh, raw, sizeof(eh));
+    if (eh.e_shoff == 0 || eh.e_shentsize < sizeof(Elf64_Shdr) ||
+        eh.e_shoff + static_cast<uint64_t>(eh.e_shnum) * eh.e_shentsize > len) return false;
+    for (uint16_t i = 0; i < eh.e_shnum; ++i) {
+      Elf64_Shdr sh{};
+      std::memcpy(&sh, raw + eh.e_shoff + static_cast<size_t>(i) * eh.e_shentsize, sizeof(sh));
+      if (sh.sh_type != SHT_DYNSYM || sh.sh_entsize < sizeof(Elf64_Sym) || sh.sh_offset + sh.sh_size > len) continue;
+      for (uint64_t off = 0; off + sizeof(Elf64_Sym) <= sh.sh_size; off += sh.sh_entsize) {
+        Elf64_Sym sym{};
+        std::memcpy(&sym, raw + sh.sh_offset + off, sizeof(sym));
+        if (sym.st_shndx != SHN_UNDEF && ELF64_ST_BIND(sym.st_info) == STB_GNU_UNIQUE) return true;
+      }
+    }
+  }
+  return false;
+#elif !defined(_WIN32)
+  QProcess proc;
+  proc.start(QStringLiteral("nm"), {QStringLiteral("-D"), QStringLiteral("--defined-only"), canonicalSoPath});
+  if (!proc.waitForFinished(3000) || proc.exitCode() != 0) return false;
+  for (const QByteArray& line : proc.readAllStandardOutput().split('\n')) {
+    const QList<QByteArray> cols = line.simplified().split(' ');
+    if (cols.size() >= 2 && cols.at(1) == QByteArrayLiteral("u")) return true;
+  }
+  return false;
+#else
+  Q_UNUSED(canonicalSoPath);
+  return false;
+#endif
+}
+
+bool PluginManager::hasLoadedGnuUniquePlugins() const {
+  for (const QString& pinned : m_pinnedGnuUniquePaths) {
+    if (QFileInfo::exists(pinned)) return true;
+  }
+  return std::any_of(m_activePlugins.cbegin(), m_activePlugins.cend(),
+                     [](const ActivePluginHandle& h) { return hasGnuUniqueSymbols(h.libraryPath); });
+}
+
+int PluginManager::activeCoordinatorRankCount() const {
+  return m_coordinator ? m_coordinator->getProcessCount() : 0;
+}
+
+int PluginManager::hotReloadPlugins(int activeSessionRankCount) {
+  if (m_callbackDepth > 0) return -1;
+  setProperty("gl_restart_required", false);
+  setProperty("gl_gnu_unique_warning", false);
+  const int loaded = discoverAndLoad();
+  for (LoadedPluginInfo& info : m_pluginInfos) info.requiresRestart = false;
+  if (activeSessionRankCount > 0) notifySessionStarted(static_cast<int32_t>(activeSessionRankCount));
+  return loaded;
+}
+
 bool PluginManager::loadPluginFromPath(const QString& libraryPath) {
   const QFileInfo fi(libraryPath);
   const QString canonical = fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
@@ -383,6 +454,7 @@ bool PluginManager::loadPluginInternal(const QString& libraryPath, PluginScope s
                               QStringLiteral("Failed to load shared library: %1").arg(lib->errorString())));
     return false;
   }
+  if (hasGnuUniqueSymbols(canonical)) m_pinnedGnuUniquePaths.insert(canonical);
   const QFunctionPointer rawSym = lib->resolve(GRIDLOCK_PLUGIN_INIT_SYMBOL_V1);
   if (rawSym == nullptr) {
     const QString err = lib->errorString(); lib->unload();
