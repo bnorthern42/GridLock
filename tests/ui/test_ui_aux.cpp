@@ -11,6 +11,7 @@
 #include "../../src/core/managers/ConfigManager.hpp"
 #include "../../src/core/managers/SessionManager.hpp"
 #include "../../src/core/managers/ThemeManager.hpp"
+#include "../../src/core/plugins/PluginManager.hpp"
 #include "../../src/core/utils/ClangdLspClient.hpp"
 #include "../../src/core/utils/CliParser.cpp"
 #include "../../src/core/utils/ElfBinaryInspector.hpp"
@@ -21,6 +22,7 @@
 #include "../../src/ui/dialogs/project/ProjectSettingsDialog.hpp"
 #include "../../src/ui/dialogs/debugger/XrefInspectorDialog.hpp"
 #include "../../src/ui/docks/TerminalDockWidget.hpp"
+#include "../../src/ui/docks/VariablesDockWidget.hpp"
 #include "../../src/ui/views/DisassemblyView.hpp"
 #include "../../src/ui/views/MemView.hpp"
 #include "../../src/ui/views/RegisterView.hpp"
@@ -678,101 +680,56 @@ void TestMainWindowUI::testGitDiffGutterAndDebuggerEngineSelector() {
 }
 
 void TestMainWindowUI::testSplitEditorQSplitterAndInlineFindBar() {
-    QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    const QString cppPath = dir.filePath(QStringLiteral("split_demo.cpp"));
-    const QString hppPath = dir.filePath(QStringLiteral("split_demo.hpp"));
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const QString cppPath = dir.filePath(QStringLiteral("split_demo.cpp")), hppPath = dir.filePath(QStringLiteral("split_demo.hpp"));
     QString body = QStringLiteral("int alpha = 1;\nint ALPHA = 2;\nint alpha_tail = 3;\n");
     for (int i = 0; i < 80; ++i) body += QStringLiteral("int line_%1 = %1;\n").arg(i);
-    {
-        QFile fc(cppPath); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(body.toUtf8());
-        QFile fh(hppPath); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write((QStringLiteral("#pragma once\n") + body).toUtf8());
-    }
+    { QFile fc(cppPath); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write(body.toUtf8());
+      QFile fh(hppPath); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write((QStringLiteral("#pragma once\n") + body).toUtf8()); }
 
-    gridlock::ui::MainWindow mw;
-    mw.resize(1600, 900);
-    mw.show();
-    mw.activateWindow();
-    QApplication::processEvents();
-
-    auto* tabMgr = mw.editorTabManager();
-    auto* seekBar = mw.findChild<QLineEdit*>(QStringLiteral("cutterSeekBar"));
-    QVERIFY(tabMgr != nullptr && seekBar != nullptr);
-    tabMgr->clearAllTabs();
-    auto* primaryView = tabMgr->openFile(cppPath);
-    QVERIFY(primaryView != nullptr);
-    QApplication::processEvents();
+    gridlock::ui::MainWindow mw; mw.resize(1600, 900); mw.show(); mw.activateWindow(); QApplication::processEvents();
+    auto* tabMgr = mw.editorTabManager(); auto* seekBar = mw.findChild<QLineEdit*>(QStringLiteral("cutterSeekBar"));
+    QVERIFY(tabMgr != nullptr && seekBar != nullptr); tabMgr->clearAllTabs();
+    auto* primaryView = tabMgr->openFile(cppPath); QVERIFY(primaryView != nullptr); QApplication::processEvents();
 
     // 1. Verify QSplitter splitEditor creates two non-overlapping sibling panes with visible scrollbars.
-    tabMgr->splitEditor(Qt::Horizontal);
-    QApplication::processEvents();
-    auto* splitter = tabMgr->editorSplitter();
-    auto* leftTabs = tabMgr->primaryTabWidget();
-    auto* rightTabs = tabMgr->secondaryTabWidget();
-    auto* secView = tabMgr->secondaryEditorView();
-    QVERIFY(splitter && leftTabs && rightTabs && secView && tabMgr->isSplitActive());
-    QVERIFY(leftTabs->isVisible() && rightTabs->isVisible());
-    const QRect leftGeom = leftTabs->geometry();
-    const QRect rightGeom = rightTabs->geometry();
+    tabMgr->splitEditor(Qt::Horizontal); QApplication::processEvents();
+    auto* splitter = tabMgr->editorSplitter(); auto* leftTabs = tabMgr->primaryTabWidget();
+    auto* rightTabs = tabMgr->secondaryTabWidget(); auto* secView = tabMgr->secondaryEditorView();
+    QVERIFY(splitter && leftTabs && rightTabs && secView && tabMgr->isSplitActive() && leftTabs->isVisible() && rightTabs->isVisible());
+    const QRect leftGeom = leftTabs->geometry(), rightGeom = rightTabs->geometry();
     QVERIFY2(leftGeom.width() >= 140 && rightGeom.width() >= 140 && leftGeom.right() <= rightGeom.left(),
              qPrintable(QStringLiteral("left=%1..%2 right=%3..%4").arg(leftGeom.left()).arg(leftGeom.right()).arg(rightGeom.left()).arg(rightGeom.right())));
     QVERIFY(primaryView->verticalScrollBar()->isVisible() && secView->verticalScrollBar()->isVisible());
 
-    // Verify active-editor tracking, gutter breakpoint signals, and dirty-tab checks work in the secondary pane.
-    secView->setFocus();
-    QApplication::processEvents();
-    QCOMPARE(tabMgr->currentSourceCodeView(), secView);
+    secView->setFocus(); QApplication::processEvents(); QCOMPARE(tabMgr->currentSourceCodeView(), secView);
     QSignalSpy bpSpy(tabMgr, &gridlock::ui::EditorTabManager::breakpointToggled);
-    secView->toggleBreakpoint(2);
-    QCOMPARE(bpSpy.count(), 1);
-    {
-        QTextCursor cur(secView->document());
-        cur.movePosition(QTextCursor::End);
-        cur.insertText(QStringLiteral("// split edit\n"));
-    }
-    QVERIFY(tabMgr->hasModifiedTabs());
-    QVERIFY(tabMgr->saveAllModifiedTabs() >= 1 && !tabMgr->hasModifiedTabs());
+    secView->toggleBreakpoint(2); QCOMPARE(bpSpy.count(), 1);
+    { QTextCursor cur(secView->document()); cur.movePosition(QTextCursor::End); cur.insertText(QStringLiteral("// split edit\n")); }
+    QVERIFY(tabMgr->hasModifiedTabs() && tabMgr->saveAllModifiedTabs() >= 1 && !tabMgr->hasModifiedTabs());
 
-    // Closing the split hides the secondary pane and restores full width to the primary pane.
-    tabMgr->closeSplit();
-    QApplication::processEvents();
+    tabMgr->closeSplit(); QApplication::processEvents();
     QVERIFY(!tabMgr->isSplitActive() && !rightTabs->isVisible() && leftTabs->width() >= tabMgr->width() - 4);
 
     // 2. Verify Ctrl+F opens the inline editor find bar without stealing focus to #cutterSeekBar, while Ctrl+G focuses #cutterSeekBar.
-    primaryView->setFocus();
-    QApplication::processEvents();
-    QTest::keyClick(primaryView, Qt::Key_F, Qt::ControlModifier);
-    QApplication::processEvents();
+    primaryView->setFocus(); QApplication::processEvents();
+    QTest::keyClick(primaryView, Qt::Key_F, Qt::ControlModifier); QApplication::processEvents();
     auto* findBar = primaryView->findBar();
     QVERIFY(findBar != nullptr && findBar->isVisible() && findBar->findEdit()->hasFocus() && !seekBar->hasFocus());
-
-    findBar->setSearchText(QStringLiteral("alpha"));
-    QApplication::processEvents();
-    QCOMPARE(findBar->matchCount(), 3);
-    QCOMPARE(findBar->currentMatchIndex(), 0);
-    QTest::keyClick(findBar->findEdit(), Qt::Key_Return);
-    QCOMPARE(findBar->currentMatchIndex(), 1);
-    QTest::keyClick(findBar->findEdit(), Qt::Key_Return, Qt::ShiftModifier);
-    QCOMPARE(findBar->currentMatchIndex(), 0);
-    findBar->setCaseSensitive(true);
-    QCOMPARE(findBar->matchCount(), 2);
-
-    QTest::keyClick(findBar->findEdit(), Qt::Key_Escape);
-    QApplication::processEvents();
+    findBar->setSearchText(QStringLiteral("alpha")); QApplication::processEvents();
+    QCOMPARE(findBar->matchCount(), 3); QCOMPARE(findBar->currentMatchIndex(), 0);
+    QTest::keyClick(findBar->findEdit(), Qt::Key_Return); QCOMPARE(findBar->currentMatchIndex(), 1);
+    QTest::keyClick(findBar->findEdit(), Qt::Key_Return, Qt::ShiftModifier); QCOMPARE(findBar->currentMatchIndex(), 0);
+    findBar->setCaseSensitive(true); QCOMPARE(findBar->matchCount(), 2);
+    QTest::keyClick(findBar->findEdit(), Qt::Key_Escape); QApplication::processEvents();
     QVERIFY(!findBar->isVisible() && primaryView->hasFocus() && !seekBar->hasFocus());
-
-    // Verify Ctrl+G focuses #cutterSeekBar.
-    QTest::keyClick(primaryView, Qt::Key_G, Qt::ControlModifier);
-    QApplication::processEvents();
+    QTest::keyClick(primaryView, Qt::Key_G, Qt::ControlModifier); QApplication::processEvents();
     QVERIFY(seekBar->hasFocus());
 
-    // Verify Ctrl+F inside GdbConsoleWidget opens its inline find bar without focusing #cutterSeekBar.
     if (auto* gdbConsole = mw.findChild<gridlock::ui::GdbConsoleWidget*>()) {
         if (auto* bottomTabs = mw.findChild<QTabWidget*>(QStringLiteral("BottomConsoleTabs"))) bottomTabs->setCurrentWidget(gdbConsole);
-        gdbConsole->commandEdit()->setFocus();
-        QApplication::processEvents();
-        QTest::keyClick(gdbConsole->commandEdit(), Qt::Key_F, Qt::ControlModifier);
-        QApplication::processEvents();
+        gdbConsole->commandEdit()->setFocus(); QApplication::processEvents();
+        QTest::keyClick(gdbConsole->commandEdit(), Qt::Key_F, Qt::ControlModifier); QApplication::processEvents();
         QVERIFY(gdbConsole->findBar() && gdbConsole->findBar()->isVisible() && !seekBar->hasFocus());
         gdbConsole->findBar()->closeBar();
     }
@@ -780,28 +737,18 @@ void TestMainWindowUI::testSplitEditorQSplitterAndInlineFindBar() {
 }
 
 void TestMainWindowUI::testConsolidatedToolbarSourceSteppingAndTooltips() {
-    static QStringList s_warnings;
-    s_warnings.clear();
+    static QStringList s_warnings; s_warnings.clear();
     const QtMessageHandler prevHandler = qInstallMessageHandler([](QtMsgType type, const QMessageLogContext&, const QString& msg) {
         if (type == QtWarningMsg) s_warnings.append(msg);
     });
     struct WarnGuard { QtMessageHandler prev; ~WarnGuard() { qInstallMessageHandler(prev); } } guard{prevHandler};
 
-    QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    const QString cppPath = dir.filePath(QStringLiteral("stepper.cpp"));
-    const QString hppPath = dir.filePath(QStringLiteral("stepper.hpp"));
-    {
-        QFile fc(cppPath); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write("#include \"stepper.hpp\"\nint helper(int v) { return v + 1; }\nint main() { return helper(4); }\n");
-        QFile fh(hppPath); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nint helper(int v);\n");
-    }
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const QString cppPath = dir.filePath(QStringLiteral("stepper.cpp")), hppPath = dir.filePath(QStringLiteral("stepper.hpp"));
+    { QFile fc(cppPath); QVERIFY(fc.open(QIODevice::WriteOnly)); fc.write("#include \"stepper.hpp\"\nint helper(int v) { return v + 1; }\nint main() { return helper(4); }\n");
+      QFile fh(hppPath); QVERIFY(fh.open(QIODevice::WriteOnly)); fh.write("#pragma once\nint helper(int v);\n"); }
 
-    gridlock::ui::MainWindow mw;
-    mw.resize(1280, 800);
-    mw.show();
-    mw.activateWindow();
-    QApplication::processEvents();
-
+    gridlock::ui::MainWindow mw; mw.resize(1280, 800); mw.show(); mw.activateWindow(); QApplication::processEvents();
     auto* mainTb = mw.findChild<QToolBar*>(QStringLiteral("MainToolbar"));
     auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* buildBtn = mw.findChild<QToolButton*>(QStringLiteral("toolbarBuildSplitBtn"));
@@ -810,22 +757,16 @@ void TestMainWindowUI::testConsolidatedToolbarSourceSteppingAndTooltips() {
     auto* sbBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarStepBackBtn"));
     auto* rcBtn = mw.findChild<QPushButton*>(QStringLiteral("toolbarReverseContinueBtn"));
     QVERIFY(mainTb && targetCombo && buildBtn && buildBtn->menu() && intoBtn && intoBtn->menu() && recBtn && sbBtn && rcBtn);
-
-    // 1. Verify compact toolbar width <= 1040, 190px target selector cap + tooltip, single Stop action, and hidden reverse step buttons while idle.
     QVERIFY2(mainTb->sizeHint().width() <= 1040, qPrintable(QStringLiteral("MainToolbar sizeHint width: %1").arg(mainTb->sizeHint().width())));
-    QVERIFY(targetCombo->maximumWidth() <= 190 && !targetCombo->toolTip().isEmpty());
-    QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
+    QVERIFY(targetCombo->maximumWidth() <= 190 && !targetCombo->toolTip().isEmpty() && !sbBtn->isVisible() && !rcBtn->isVisible());
 
     int stopCount = 0, terminateCount = 0;
     for (QAction* a : mainTb->actions()) {
         if (a->text().contains(QStringLiteral("Stop"), Qt::CaseInsensitive)) ++stopCount;
         if (a->text().contains(QStringLiteral("Terminate"), Qt::CaseInsensitive)) ++terminateCount;
-        if (!a->isSeparator() && !a->text().isEmpty()) {
-            QVERIFY2(!a->toolTip().isEmpty(), qPrintable(QStringLiteral("Empty tooltip on toolbar action: %1").arg(a->text())));
-        }
+        if (!a->isSeparator() && !a->text().isEmpty()) QVERIFY2(!a->toolTip().isEmpty(), qPrintable(a->text()));
     }
-    QCOMPARE(stopCount, 1);
-    QCOMPARE(terminateCount, 0);
+    QCOMPARE(stopCount, 1); QCOMPARE(terminateCount, 0);
 
     auto* stepOverAct = mw.findChild<QAction*>(QStringLiteral("debug.step_over"));
     auto* stepIntoAct = mw.findChild<QAction*>(QStringLiteral("debug.step_into"));
@@ -838,65 +779,33 @@ void TestMainWindowUI::testConsolidatedToolbarSourceSteppingAndTooltips() {
     QCOMPARE(stepOutAct->shortcut(), QKeySequence(Qt::SHIFT | Qt::Key_F11));
     QCOMPARE(stopAct->shortcut(), QKeySequence(Qt::SHIFT | Qt::Key_F5));
     QCOMPARE(switchHdrAct->shortcut(), QKeySequence(Qt::Key_F4));
-
-    // Verify idle tooltips explain both shortcuts and why disabled actions are unavailable.
     QVERIFY(stepOverAct->toolTip().contains(QStringLiteral("F10")) && stepOverAct->toolTip().contains(QStringLiteral("idle"), Qt::CaseInsensitive));
     QVERIFY(stepIntoAct->toolTip().contains(QStringLiteral("F11")) && stepOutAct->toolTip().contains(QStringLiteral("Shift+F11")));
 
-    // 2. Verify F4 switches Header/Source while F10/F11/Shift+F11 dispatch Step Over / Step Into / Step Out with zero ambiguous shortcut warnings.
-    auto* tabMgr = mw.editorTabManager();
-    QVERIFY(tabMgr && tabMgr->openFile(cppPath));
-    QTest::keyClick(&mw, Qt::Key_F4);
-    QApplication::processEvents();
+    auto* tabMgr = mw.editorTabManager(); QVERIFY(tabMgr && tabMgr->openFile(cppPath));
+    QTest::keyClick(&mw, Qt::Key_F4); QApplication::processEvents();
     QVERIFY(tabMgr->tabText(tabMgr->currentIndex()).contains(QStringLiteral("stepper.hpp")));
 
-    gridlock::GdbRankCoordinator coord;
-    coord.initializeMockSession(2);
+    gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
     auto markStopped = [&]() {
         coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"main\",fullname=\"/tmp/stepper.cpp\",line=\"3\",args=[]}\n"));
         coord.processGdbOutput(1, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"main\",fullname=\"/tmp/stepper.cpp\",line=\"3\",args=[]}\n"));
     };
     QStringList sent;
-    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& cmd) {
-        if (r == 0) sent.append(cmd.trimmed());
-    });
-    mw.setCoordinator(&coord);
-    markStopped();
-    QApplication::processEvents();
+    connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int r, const QString& cmd) { if (r == 0) sent.append(cmd.trimmed()); });
+    mw.setCoordinator(&coord); markStopped(); QApplication::processEvents();
     QVERIFY(recBtn->isEnabled() && !sbBtn->isVisible() && !rcBtn->isVisible());
-    recBtn->click();
-    QApplication::processEvents();
-    QVERIFY(sbBtn->isVisible() && rcBtn->isVisible());
-    mw.onRankSelected(1);
-    QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
-    mw.onRankSelected(0);
-    QVERIFY(sbBtn->isVisible() && rcBtn->isVisible());
-    recBtn->click();
-    QApplication::processEvents();
-    QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
+    recBtn->click(); QApplication::processEvents(); QVERIFY(sbBtn->isVisible() && rcBtn->isVisible());
+    mw.onRankSelected(1); QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
+    mw.onRankSelected(0); QVERIFY(sbBtn->isVisible() && rcBtn->isVisible());
+    recBtn->click(); QApplication::processEvents(); QVERIFY(!sbBtn->isVisible() && !rcBtn->isVisible());
 
-    QTest::keyClick(&mw, Qt::Key_F10);
-    QApplication::processEvents();
+    QTest::keyClick(&mw, Qt::Key_F10); QApplication::processEvents();
     QVERIFY(sent.contains(QStringLiteral("-exec-next")) && tabMgr->tabText(tabMgr->currentIndex()).contains(QStringLiteral("stepper.hpp")));
-
-    markStopped();
-    sent.clear();
-    QTest::keyClick(&mw, Qt::Key_F11);
-    QApplication::processEvents();
-    QVERIFY(sent.contains(QStringLiteral("-exec-step")));
-
-    markStopped();
-    sent.clear();
-    QTest::keyClick(&mw, Qt::Key_F11, Qt::ShiftModifier);
-    QApplication::processEvents();
-    QVERIFY(sent.contains(QStringLiteral("-exec-finish")));
-
-    for (const QString& w : s_warnings) {
-        QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
-    }
-
-    mw.setCoordinator(nullptr);
-    mw.close();
+    markStopped(); sent.clear(); QTest::keyClick(&mw, Qt::Key_F11); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-step")));
+    markStopped(); sent.clear(); QTest::keyClick(&mw, Qt::Key_F11, Qt::ShiftModifier); QApplication::processEvents(); QVERIFY(sent.contains(QStringLiteral("-exec-finish")));
+    for (const QString& w : s_warnings) QVERIFY2(!w.contains(QStringLiteral("Ambiguous shortcut overload"), Qt::CaseInsensitive), qPrintable(w));
+    mw.setCoordinator(nullptr); mw.close();
 }
 
 void TestMainWindowUI::testProgressiveDisclosurePerspectivesAndSingleRank() {
@@ -942,7 +851,80 @@ void TestMainWindowUI::testProgressiveDisclosurePerspectivesAndSingleRank() {
     mw.toggleDockFloating(regDock); QVERIFY(mw.isDockFloating(regDock));
     mw.setWorkspacePerspective(QStringLiteral("Binary")); QApplication::processEvents();
     QVERIFY(mw.isDockFloating(regDock) && disasm->isVisible() && disasm->minimumWidth() < 720 && mw.width() <= 1280);
-    mw.redockAllFloatingPanels(); mw.close();
+    mw.redockAllFloatingPanels();
+
+    // 5. Verify Preferences -> Plugins page, live enable/disable toggle, Tools -> Plugins menu, and VariablesDockWidget Plugin Actions submenu.
+    {
+        QTemporaryDir plugCfgDir; QVERIFY(plugCfgDir.isValid());
+        const bool hadEnv = qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR");
+        const QByteArray prevEnv = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
+        qputenv("GRIDLOCK_TEST_CONFIG_DIR", plugCfgDir.path().toUtf8());
+        auto& cfg = gridlock::core::ConfigManager::instance();
+        cfg.loadConfig(); cfg.setDisabledPluginIds({});
+        const QString pDir = plugCfgDir.path() + QStringLiteral("/plugins");
+        QVERIFY(QDir().mkpath(pDir));
+        QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO), QDir(pDir).filePath(QStringLiteral("01_dummy.so"))));
+        QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_BAD_ABI_PLUGIN_SO), QDir(pDir).filePath(QStringLiteral("02_bad_abi.so"))));
+
+        QVERIFY(mw.pluginManager() != nullptr);
+        QCOMPARE(mw.pluginManager()->discoverAndLoad(), 1);
+        mw.rebuildToolsPluginsMenu();
+        auto* toolsPlugMenu = mw.findChild<QMenu*>(QStringLiteral("menuToolsPlugins"));
+        QVERIFY(toolsPlugMenu != nullptr && mw.findChild<QAction*>(QStringLiteral("pluginCmd_dummy.ping_ranks")) != nullptr);
+
+        gridlock::ui::PreferencesDialog pd(&mw); pd.show(); QApplication::processEvents();
+        QTreeWidgetItem* plugNode = nullptr;
+        for (int i = 0; i < pd.categoryTree()->topLevelItemCount(); ++i)
+            if (pd.categoryTree()->topLevelItem(i)->text(0) == QStringLiteral("Plugins")) plugNode = pd.categoryTree()->topLevelItem(i);
+        QVERIFY(plugNode != nullptr && pd.pluginPage() != nullptr);
+        pd.categoryTree()->setCurrentItem(plugNode); QApplication::processEvents();
+        QTableWidget* tbl = pd.pluginPage()->pluginTable();
+        QVERIFY(tbl != nullptr && tbl->rowCount() == 2 && pd.pluginPage()->openFolderButton() && pd.pluginPage()->reloadPluginsButton());
+        QCOMPARE(tbl->item(0, 3)->text(), QStringLiteral("v1.0"));
+        QCOMPARE(tbl->item(0, 4)->text(), QStringLiteral("Loaded"));
+        QVERIFY(tbl->item(1, 4)->text().startsWith(QStringLiteral("ABI Rejected:")));
+
+        // Toggle plugin disabled via checkbox and verify ConfigManager + live unload, then re-enable.
+        auto* chk0 = pd.findChild<QCheckBox*>(QStringLiteral("pluginEnableCheck_org.gridlock.test_dummy"));
+        QVERIFY(chk0 != nullptr && chk0->isChecked());
+        chk0->setChecked(false); QApplication::processEvents();
+        QVERIFY(cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")) && tbl->item(0, 4)->text() == QStringLiteral("Disabled"));
+        QVERIFY(mw.findChild<QAction*>(QStringLiteral("pluginCmd_dummy.ping_ranks")) == nullptr);
+        chk0 = pd.findChild<QCheckBox*>(QStringLiteral("pluginEnableCheck_org.gridlock.test_dummy"));
+        QVERIFY(chk0 != nullptr); chk0->setChecked(true); QApplication::processEvents();
+        QCOMPARE(tbl->item(0, 4)->text(), QStringLiteral("Loaded"));
+        pd.pluginPage()->reloadPluginsButton()->click(); QApplication::processEvents();
+        QCOMPARE(tbl->rowCount(), 2); pd.close();
+
+        // Bind stopped GdbRankCoordinator, populate PetscVec row in VariablesDockWidget, and trigger Plugin Actions -> Inspect Domain Field.
+        gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
+        mw.setCoordinator(&coord);
+        coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/sim.c\",line=\"12\",args=[]}\n"));
+        const auto evalConn = connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord, [&](int r, const QString& cmd) {
+            if (cmd.contains(QStringLiteral("-data-evaluate-expression"))) {
+                const QString tok = cmd.section(QLatin1Char('-'), 0, 0);
+                coord.processGdbOutput(r, QStringLiteral("%1^done,value=\"petsc_vec_norm_3.14159\"\n").arg(tok));
+            }
+        });
+        QSignalSpy evSpy(&mw, &gridlock::ui::MainWindow::pluginStructuredEventEmitted);
+        auto* varDock = mw.variablesDockWidget(); QVERIFY(varDock != nullptr);
+        varDock->setFocusedRank(0, 2);
+        varDock->applyLocalsForRank(0, QJsonArray{QJsonObject{{"name", "solution_vec"}, {"value", "0x5000"}, {"type", "PetscVec"}}});
+        auto* varTree = varDock->findChild<QTreeView*>(); QVERIFY(varTree && varTree->model()->rowCount() >= 1);
+        std::unique_ptr<QMenu> ctxMenu(varDock->createContextMenuForIndex(varTree->model()->index(0, 0), varDock));
+        QVERIFY(ctxMenu != nullptr);
+        auto* plugSub = ctxMenu->findChild<QMenu*>(QStringLiteral("variablePluginActionsMenu"));
+        auto* varPlugAct = ctxMenu->findChild<QAction*>(QStringLiteral("pluginVarAct_dummy.inspect_field"));
+        QVERIFY(plugSub != nullptr && varPlugAct != nullptr);
+        varPlugAct->trigger(); QApplication::processEvents();
+        QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.var_eval") &&
+                evSpy.last().at(1).toString() == QStringLiteral("petsc_vec_norm_3.14159"));
+        disconnect(evalConn); mw.setCoordinator(nullptr);
+        mw.pluginManager()->unloadAll();
+        if (hadEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevEnv); else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
+        cfg.loadConfig();
+    }
+    mw.close();
 }
 
 

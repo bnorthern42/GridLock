@@ -10,6 +10,7 @@
 #include "EditingBehaviorPages.hpp"
 #include "HpcSettingsPages.hpp"
 #include "KeybindingsSettingsPage.hpp"
+#include "PluginSettingsPage.hpp"
 #include "TerminalDocsetsPages.hpp"
 
 #include <QDialog>
@@ -33,6 +34,8 @@ public:
 
     /// Returns the editable Keybindings settings page.
     KeybindingsSettingsPage* keybindingsPage() const { return m_keybindingsPage; }
+    /// Returns the native C99 Plugins settings page.
+    PluginSettingsPage* pluginPage() const { return m_pluginPage; }
     /// Returns the hierarchical category navigation tree.
     QTreeWidget* categoryTree() const { return m_categoryTree; }
 
@@ -83,6 +86,7 @@ private:
     HpcIntegrationSettingsPage* m_hpcIntegrationPage = nullptr;
     DocsetSettingsPage* m_docsetPage = nullptr;
     TerminalSettingsPage* m_terminalPage = nullptr;
+    PluginSettingsPage* m_pluginPage = nullptr;
     QWidget* m_toolbarPage = nullptr;
     QListWidget* m_toolbarLayoutList = nullptr;
     QComboBox* m_toolbarHiddenCombo = nullptr;

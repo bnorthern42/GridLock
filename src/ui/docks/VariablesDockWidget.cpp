@@ -11,8 +11,10 @@
 #include "../../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../../core/hpc/IBackendCoordinator.hpp"
 #include "../../core/managers/ThemeManager.hpp"
+#include "../../core/plugins/PluginHostBridge.hpp"
 
 #include <functional>
+#include <memory>
 
 #include <QApplication>
 #include <QClipboard>
@@ -128,6 +130,7 @@ void VariablesDockWidget::setCoordinator(::IBackendCoordinator* coordinator) {
         }
         onProcessCountChanged();
     }
+    emit coordinatorBound(m_coordinator);
 }
 
 /**
@@ -262,96 +265,123 @@ void VariablesDockWidget::setupUi() {
     copyShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(copyShortcut, &QShortcut::activated, this, [this]() { copySelectedVariableValue(); });
 
-    // Right-clicking a variable row opens a context menu to set value, inspect full value, copy, plot, graph, or watch.
+    // Right-clicking a variable row opens a context menu including dynamic Plugin Actions.
     connect(m_variablesTree, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         const QModelIndex proxyIdx = m_variablesTree->indexAt(pos);
-        if (!proxyIdx.isValid() || !m_model || !m_proxyModel) return;
-        const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
-        QString exprPath = m_model->expressionPath(srcIdx.siblingAtColumn(0)).trimmed();
-        if (exprPath.isEmpty()) exprPath = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
-        if (exprPath.isEmpty()) return;
-        const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
-        const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
-        const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
-        const bool isLeafEditable = (m_model->flags(srcIdx.siblingAtColumn(1)) & Qt::ItemIsEditable);
+        std::unique_ptr<QMenu> menu(createContextMenuForIndex(proxyIdx, this));
+        if (menu) menu->exec(m_variablesTree->viewport()->mapToGlobal(pos));
+    });
+}
 
-        QMenu menu(this);
-        QAction* setValAct = menu.addAction(QStringLiteral("Set Value..."));
-        setValAct->setEnabled(isLeafEditable);
-        QAction* inspectFullAct = menu.addAction(QStringLiteral("Inspect Full Value..."));
-        menu.addSeparator();
-        QAction* copyValAct = menu.addAction(QStringLiteral("Copy Value (Ctrl+C)"));
-        QAction* copyExprAct = menu.addAction(QStringLiteral("Copy Expression"));
-        menu.addSeparator();
-        QAction* watchAct = menu.addAction(QStringLiteral("Add to Watch Expressions"));
-        QAction* plotAct = menu.addAction(QStringLiteral("Plot 1D/2D Array..."));
-        QAction* graphAct = menu.addAction(QStringLiteral("Graph Pointer / Struct..."));
-        QAction* calcAct = menu.addAction(QStringLiteral("Open Value in Programmer's Calculator"));
-        menu.addSeparator();
-        QAction* wpWriteAct = menu.addAction(QStringLiteral("Watch Memory Write (Hardware Watchpoint)"));
-        QAction* wpReadAct = menu.addAction(QStringLiteral("Watch Memory Read (Hardware Watchpoint)"));
-        QAction* wpRwAct = menu.addAction(QStringLiteral("Watch Memory Read/Write (Hardware Watchpoint)"));
+QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyIdx, QWidget* menuParent) {
+    if (!proxyIdx.isValid() || !m_model || !m_proxyModel) return nullptr;
+    const QModelIndex srcIdx = m_proxyModel->mapToSource(proxyIdx);
+    QString exprPath = m_model->expressionPath(srcIdx.siblingAtColumn(0)).trimmed();
+    if (exprPath.isEmpty()) exprPath = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
+    if (exprPath.isEmpty()) return nullptr;
+    const QString varName = m_model->data(srcIdx.siblingAtColumn(0), Qt::DisplayRole).toString().trimmed();
+    const QString varVal = m_model->data(srcIdx.siblingAtColumn(1), Qt::DisplayRole).toString().trimmed();
+    const QString varTyp = m_model->data(srcIdx.siblingAtColumn(2), Qt::DisplayRole).toString().trimmed();
+    const bool isLeafEditable = (m_model->flags(srcIdx.siblingAtColumn(1)) & Qt::ItemIsEditable);
 
-        QAction* chosen = menu.exec(m_variablesTree->viewport()->mapToGlobal(pos));
-        if (chosen == setValAct && isLeafEditable) {
-            m_variablesTree->edit(proxyIdx.siblingAtColumn(1));
-        } else if (chosen == inspectFullAct) {
-            inspectFullValue(QStringLiteral("%1 (%2)").arg(exprPath, varTyp.isEmpty() ? QStringLiteral("value") : varTyp),
-                             varVal.isEmpty() ? exprPath : varVal);
-        } else if (chosen == copyValAct) {
-            QApplication::clipboard()->setText(varVal.isEmpty() ? exprPath : varVal);
-        } else if (chosen == copyExprAct) {
-            QApplication::clipboard()->setText(exprPath);
-        } else if (chosen == watchAct) {
-            promoteVariableToWatch(exprPath);
-        } else if (chosen == plotAct) {
-            emit plotArrayRequested(exprPath, varTyp);
-        } else if (chosen == graphAct) {
-            emit visualizeInPointerGraphRequested(exprPath, varName, varVal, varTyp);
-        } else if (chosen == calcAct) {
-            emit sendToCalculatorRequested(varVal.isEmpty() ? exprPath : varVal);
-        } else if (chosen == wpWriteAct || chosen == wpReadAct || chosen == wpRwAct) {
-            const auto mode = (chosen == wpReadAct)
-                                  ? ::WatchpointAccessMode::Read
-                                  : ((chosen == wpRwAct) ? ::WatchpointAccessMode::ReadWrite
-                                                         : ::WatchpointAccessMode::Write);
+    auto* menu = new QMenu(menuParent ? menuParent : this);
+    QAction* setValAct = menu->addAction(QStringLiteral("Set Value..."));
+    setValAct->setEnabled(isLeafEditable);
+    connect(setValAct, &QAction::triggered, this, [this, proxyIdx, isLeafEditable]() {
+        if (isLeafEditable && m_variablesTree) m_variablesTree->edit(proxyIdx.siblingAtColumn(1));
+    });
+    QAction* inspectFullAct = menu->addAction(QStringLiteral("Inspect Full Value..."));
+    connect(inspectFullAct, &QAction::triggered, this, [this, exprPath, varTyp, varVal]() {
+        inspectFullValue(QStringLiteral("%1 (%2)").arg(exprPath, varTyp.isEmpty() ? QStringLiteral("value") : varTyp),
+                         varVal.isEmpty() ? exprPath : varVal);
+    });
+    menu->addSeparator();
+    QAction* copyValAct = menu->addAction(QStringLiteral("Copy Value (Ctrl+C)"));
+    connect(copyValAct, &QAction::triggered, this, [varVal, exprPath]() {
+        QApplication::clipboard()->setText(varVal.isEmpty() ? exprPath : varVal);
+    });
+    QAction* copyExprAct = menu->addAction(QStringLiteral("Copy Expression"));
+    connect(copyExprAct, &QAction::triggered, this, [exprPath]() { QApplication::clipboard()->setText(exprPath); });
+    menu->addSeparator();
+    QAction* watchAct = menu->addAction(QStringLiteral("Add to Watch Expressions"));
+    connect(watchAct, &QAction::triggered, this, [this, exprPath]() { promoteVariableToWatch(exprPath); });
+    QAction* plotAct = menu->addAction(QStringLiteral("Plot 1D/2D Array..."));
+    connect(plotAct, &QAction::triggered, this, [this, exprPath, varTyp]() { emit plotArrayRequested(exprPath, varTyp); });
+    QAction* graphAct = menu->addAction(QStringLiteral("Graph Pointer / Struct..."));
+    connect(graphAct, &QAction::triggered, this, [this, exprPath, varName, varVal, varTyp]() {
+        emit visualizeInPointerGraphRequested(exprPath, varName, varVal, varTyp);
+    });
+    QAction* calcAct = menu->addAction(QStringLiteral("Open Value in Programmer's Calculator"));
+    connect(calcAct, &QAction::triggered, this, [this, varVal, exprPath]() {
+        emit sendToCalculatorRequested(varVal.isEmpty() ? exprPath : varVal);
+    });
+    menu->addSeparator();
+    for (const auto& [label, mode] : {std::pair{QStringLiteral("Watch Memory Write (Hardware Watchpoint)"), ::WatchpointAccessMode::Write},
+                                      std::pair{QStringLiteral("Watch Memory Read (Hardware Watchpoint)"), ::WatchpointAccessMode::Read},
+                                      std::pair{QStringLiteral("Watch Memory Read/Write (Hardware Watchpoint)"), ::WatchpointAccessMode::ReadWrite}}) {
+        QAction* wpAct = menu->addAction(label);
+        connect(wpAct, &QAction::triggered, this, [this, exprPath, mode]() {
             if (m_coordinator) m_coordinator->setDataWatchpoint(exprPath, mode, -1);
             emit dataWatchpointRequested(exprPath, static_cast<int>(mode));
+        });
+    }
+
+    if (m_pluginBridge != nullptr) {
+        const auto matches = m_pluginBridge->matchingVariableActions(varTyp);
+        if (!matches.isEmpty()) {
+            menu->addSeparator();
+            QMenu* pluginSub = menu->addMenu(QStringLiteral("Plugin Actions"));
+            pluginSub->setObjectName(QStringLiteral("variablePluginActionsMenu"));
+            const QString hexTok = varVal.section(QLatin1Char(' '), 0, 0);
+            bool addrOk = false;
+            const uint64_t parsedAddr = hexTok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
+                                            ? hexTok.mid(2).toULongLong(&addrOk, 16) : 0u;
+            for (const auto& item : matches) {
+                QAction* pAct = pluginSub->addAction(item.menuLabel);
+                pAct->setObjectName(QStringLiteral("pluginVarAct_") + item.actionId);
+                const QString actId = item.actionId;
+                connect(pAct, &QAction::triggered, this,
+                        [this, actId, varName, exprPath, varTyp, varVal, parsedAddr]() {
+                            if (!m_pluginBridge) return;
+                            const QByteArray aUtf8 = actId.toUtf8(), nUtf8 = varName.toUtf8();
+                            const QByteArray eUtf8 = exprPath.toUtf8(), tUtf8 = varTyp.toUtf8(), vUtf8 = varVal.toUtf8();
+                            GridLockVariableContext ctx{};
+                            ctx.struct_size = static_cast<uint32_t>(sizeof(GridLockVariableContext));
+                            ctx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+                            ctx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+                            ctx.rank = m_currentRankId;
+                            ctx.address = parsedAddr;
+                            ctx.action_id_utf8 = aUtf8.constData();
+                            ctx.name_utf8 = nUtf8.constData();
+                            ctx.expression_utf8 = eUtf8.constData();
+                            ctx.type_utf8 = tUtf8.constData();
+                            ctx.value_utf8 = vUtf8.constData();
+                            (void)m_pluginBridge->invokeVariableAction(actId, ctx);
+                        });
+            }
         }
-    });
+    }
+    return menu;
 }
 
 QDialog* VariablesDockWidget::inspectFullValue(const QString& title, const QString& fullText) {
     m_lastInspectedFullValue = fullText;
     auto* dlg = findChild<QDialog*>(QStringLiteral("fullValueInspectorDialog"));
     if (!dlg) {
-        dlg = new QDialog(this);
-        dlg->setObjectName(QStringLiteral("fullValueInspectorDialog"));
-        dlg->resize(520, 260);
-        auto* v = new QVBoxLayout(dlg);
-        v->setContentsMargins(10, 10, 10, 10);
-        v->setSpacing(8);
-        auto* te = new QPlainTextEdit(dlg);
-        te->setObjectName(QStringLiteral("fullValueInspectorTextEdit"));
-        te->setReadOnly(true);
-        te->setWordWrapMode(QTextOption::WrapAnywhere);
-        QFont mf(QStringLiteral("JetBrains Mono"), 10);
-        mf.setStyleHint(QFont::Monospace);
-        te->setFont(mf);
+        dlg = new QDialog(this); dlg->setObjectName(QStringLiteral("fullValueInspectorDialog")); dlg->resize(520, 260);
+        auto* v = new QVBoxLayout(dlg); v->setContentsMargins(10, 10, 10, 10); v->setSpacing(8);
+        auto* te = new QPlainTextEdit(dlg); te->setObjectName(QStringLiteral("fullValueInspectorTextEdit"));
+        te->setReadOnly(true); te->setWordWrapMode(QTextOption::WrapAnywhere);
+        QFont mf(QStringLiteral("JetBrains Mono"), 10); mf.setStyleHint(QFont::Monospace); te->setFont(mf);
         v->addWidget(te, 1);
-        auto* hb = new QHBoxLayout();
-        hb->addStretch(1);
-        auto* copyBtn = new QPushButton(QStringLiteral("Copy to Clipboard"), dlg);
-        copyBtn->setObjectName(QStringLiteral("fullValueInspectorCopyBtn"));
-        auto* closeBtn = new QPushButton(QStringLiteral("Close"), dlg);
-        closeBtn->setObjectName(QStringLiteral("fullValueInspectorCloseBtn"));
+        auto* hb = new QHBoxLayout(); hb->addStretch(1);
+        auto* copyBtn = new QPushButton(QStringLiteral("Copy to Clipboard"), dlg); copyBtn->setObjectName(QStringLiteral("fullValueInspectorCopyBtn"));
+        auto* closeBtn = new QPushButton(QStringLiteral("Close"), dlg); closeBtn->setObjectName(QStringLiteral("fullValueInspectorCloseBtn"));
         connect(copyBtn, &QPushButton::clicked, dlg, [te]() { QApplication::clipboard()->setText(te->toPlainText()); });
         connect(closeBtn, &QPushButton::clicked, dlg, &QDialog::close);
-        hb->addWidget(copyBtn);
-        hb->addWidget(closeBtn);
-        v->addLayout(hb);
+        hb->addWidget(copyBtn); hb->addWidget(closeBtn); v->addLayout(hb);
     }
-    dlg->setWindowTitle(QStringLiteral("Inspect Full Value — %1").arg(title));
+    dlg->setWindowTitle(QStringLiteral("Inspect Full Value - %1").arg(title));
     if (auto* te = dlg->findChild<QPlainTextEdit*>(QStringLiteral("fullValueInspectorTextEdit"))) te->setPlainText(fullText);
     dlg->show();
     return dlg;

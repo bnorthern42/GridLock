@@ -20,6 +20,11 @@
 #include "../../core/models/VariableTreeModel.hpp"
 
 class IBackendCoordinator;
+class QMenu;
+
+namespace gridlock::core::plugins {
+class PluginHostBridge;
+}  // namespace gridlock::core::plugins
 
 namespace gridlock {
 
@@ -73,10 +78,18 @@ public:
     /** @brief Opens the non-modal monospace Full-Value Inspection popover dialog for @p title and @p fullText. */
     QDialog* inspectFullValue(const QString& title, const QString& fullText);
 
+    /** @brief Attaches the native plugin host bridge to populate dynamic variable context actions. */
+    void setPluginHostBridge(gridlock::core::plugins::PluginHostBridge* bridge) { m_pluginBridge = bridge; }
+
+    /** @brief Builds a context menu for @p proxyIdx including matching **Plugin Actions** entries. */
+    QMenu* createContextMenuForIndex(const QModelIndex& proxyIdx, QWidget* menuParent = nullptr);
+
     /** @brief Returns the most recent full-value text shown in the `Inspect Full Value...` popover. */
     QString lastInspectedFullValue() const { return m_lastInspectedFullValue; }
 
 signals:
+    /** @brief Emitted whenever `setCoordinator` attaches or clears the active backend coordinator. */
+    void coordinatorBound(::IBackendCoordinator* coordinator);
     /** @brief Emitted when a leaf variable value is edited in-place. */
     void variableEditRequested(int rankId, const QString& fullExpression, const QString& newValue);
 
@@ -141,6 +154,7 @@ private:
     void setupUi();
 
     ::IBackendCoordinator* m_coordinator{nullptr};   ///< Attached backend coordinator.
+    gridlock::core::plugins::PluginHostBridge* m_pluginBridge{nullptr}; ///< Optional plugin host bridge.
     VariableTreeModel* m_model{nullptr};              ///< Source hierarchical variable model.
     QSortFilterProxyModel* m_proxyModel{nullptr};     ///< Recursive case-insensitive filter & sort proxy.
 

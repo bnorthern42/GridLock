@@ -32,6 +32,10 @@
 #include <memory>
 #include <unordered_map>
 
+namespace gridlock::core::plugins {
+class PluginManager;
+}  // namespace gridlock::core::plugins
+
 namespace gridlock::ui {
 
 /**
@@ -77,6 +81,7 @@ public:
     PointerGraphDialog* pointerGraphDialog() const { return m_pointerGraphDialog; }
     CommandPaletteDialog* commandPaletteDialog() const { return m_commandPaletteDialog; }
     ProgrammerCalculatorDialog* programmerCalculatorDialog() const { return m_programmerCalculatorDialog; }
+    gridlock::core::plugins::PluginManager* pluginManager() const { return m_pluginManager; }
     IBackendCoordinator* coordinator() const { return m_coordinator; }
     int focusedRank() const { return m_focusedRank; }
     int configuredRankCount() const { return m_rankCountSpin ? m_rankCountSpin->value() : 4; }
@@ -332,10 +337,19 @@ public slots:
     void openSignalsAndCatchpoints();
     /** @brief Opens or raises the Copy-on-Write Process Checkpoints dialog (Ctrl+Alt+K). */
     void openProcessCheckpoints();
+    /** @brief Forwards debug session start metadata to all enabled native plugins. */
+    void notifySessionStart(int numRanks, const QString& targetPath = QString());
+    /** @brief Forwards MPI rank stop metadata to all enabled native plugins. */
+    void notifyRankStopped(int rank, const QString& file, int line, const QString& reason = QStringLiteral("stopped"));
+    /** @brief Forwards debug session termination to all enabled native plugins. */
+    void notifySessionEnd();
+    /** @brief Rebuilds the Tools -> Plugins submenu from active plugin command registrations. */
+    void rebuildToolsPluginsMenu();
 
 signals:
     void runTargetRequested();
     void focusedRankChanged(int rank);
+    void pluginStructuredEventEmitted(const QString& channel, const QString& jsonPayload);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -368,33 +382,25 @@ private:
     void appendProgramOutput(int rank, const QString& text, bool isError);
     Q_INVOKABLE void flushProgramOutputBatch();
     void syncProgramOutputForLaunch(int rankCount);
+    void initializePluginSubsystem();
+    void bindPluginCoordinatorSignals(IBackendCoordinator* coord);
     static QString resolveWorkspacePath(const QString& rawPath);
 
     // Dock, View & Chrome Widget Pointers
     bool m_syncingFocusedRank = false;
-    ServerRackView* m_serverRackView = nullptr;
-    QMenu* m_recentSessionsMenu = nullptr;
-    EditorTabManager* m_editorTabManager = nullptr;
-    DisassemblyView* m_disassemblyView = nullptr;
-    ReferenceManualWidget* m_referenceManualWidget = nullptr;
-    DifferentialGrid* m_differentialGrid = nullptr;
-    ProjectExplorerWidget* m_projectExplorerWidget = nullptr;
-    TerminalDockWidget* m_terminalDock = nullptr;
-    GdbConsoleWidget* m_gdbConsoleWidget = nullptr;
-    MemView* m_memView = nullptr;
-    RegisterView* m_registerView = nullptr;
+    ServerRackView* m_serverRackView = nullptr; QMenu* m_recentSessionsMenu = nullptr;
+    EditorTabManager* m_editorTabManager = nullptr; DisassemblyView* m_disassemblyView = nullptr;
+    ReferenceManualWidget* m_referenceManualWidget = nullptr; DifferentialGrid* m_differentialGrid = nullptr;
+    ProjectExplorerWidget* m_projectExplorerWidget = nullptr; TerminalDockWidget* m_terminalDock = nullptr;
+    GdbConsoleWidget* m_gdbConsoleWidget = nullptr; MemView* m_memView = nullptr; RegisterView* m_registerView = nullptr;
     ExpressionEvaluatorWidget* m_expressionEvaluatorWidget = nullptr;
     gridlock::VariablesDockWidget* m_variablesDockWidget = nullptr;
-    CallStackDockWidget* m_callStackDockWidget = nullptr;
-    MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
-    QWidget* m_bottomToolRail = nullptr;
-    QTabWidget* m_bottomTabs = nullptr;
-    QLineEdit* m_programLaunchCommandEdit = nullptr;
-    QPlainTextEdit* m_programOutputView = nullptr;
+    CallStackDockWidget* m_callStackDockWidget = nullptr; MpiDiagnosticsWidget* m_mpiDiagnosticsWidget = nullptr;
+    QWidget* m_bottomToolRail = nullptr; QTabWidget* m_bottomTabs = nullptr;
+    QLineEdit* m_programLaunchCommandEdit = nullptr; QPlainTextEdit* m_programOutputView = nullptr;
     QComboBox* m_programOutputRankFilter = nullptr;
     QVector<QPair<int, QString>> m_programOutputLines;
-    QTimer* m_programOutputFlushTimer = nullptr;
-    QTimer* m_telemetryTimer = nullptr;
+    QTimer* m_programOutputFlushTimer = nullptr; QTimer* m_telemetryTimer = nullptr;
     QStringList m_pendingProgramOutputBatch;
     QString m_activeSessionFilePath;
     QMap<QString, QToolButton*> m_bottomRailButtons;
@@ -404,64 +410,31 @@ private:
     bool m_isShuttingDown = false;
 
     // Toolbar, Execution Scope & Launch Options Controls
-    QComboBox* m_targetSelector = nullptr;
-    QToolButton* m_launchOptionsBtn = nullptr;
-    QLineEdit* m_launchOptionsArgsEdit = nullptr;
-    QLineEdit* m_launchOptionsWorkDirEdit = nullptr;
+    QComboBox* m_targetSelector = nullptr; QToolButton* m_launchOptionsBtn = nullptr;
+    QLineEdit* m_launchOptionsArgsEdit = nullptr; QLineEdit* m_launchOptionsWorkDirEdit = nullptr;
     QCheckBox* m_launchOptionsStopAtMainCheck = nullptr;
-    bool m_stopAtMainOnLaunch = true;
-    bool m_stopAtMainExplicit = false;
-    bool m_sessionRestoredEmptyBps = false;
-    QSpinBox* m_rankCountSpin = nullptr;
-    QComboBox* m_executionScopeCombo = nullptr;
-    QAction* m_executionScopeAction = nullptr;
-    QAction* m_runAction = nullptr;
-    QAction* m_continueAction = nullptr;
-    QAction* m_stepOverAction = nullptr;
-    QAction* m_stepIntoAction = nullptr;
-    QAction* m_stepOutAction = nullptr;
-    QAction* m_stepAction = nullptr;
-    QAction* m_pauseAction = nullptr;
-    QAction* m_pauseAllAction = nullptr;
-    QAction* m_stopAction = nullptr;
+    bool m_stopAtMainOnLaunch = true, m_stopAtMainExplicit = false, m_sessionRestoredEmptyBps = false;
+    QSpinBox* m_rankCountSpin = nullptr; QComboBox* m_executionScopeCombo = nullptr;
+    QAction* m_executionScopeAction = nullptr; QAction* m_runAction = nullptr; QAction* m_continueAction = nullptr;
+    QAction* m_stepOverAction = nullptr; QAction* m_stepIntoAction = nullptr; QAction* m_stepOutAction = nullptr;
+    QAction* m_stepAction = nullptr; QAction* m_pauseAction = nullptr; QAction* m_pauseAllAction = nullptr; QAction* m_stopAction = nullptr;
     bool m_syncingScopeUi = false;
-    QPushButton* m_navBackBtn = nullptr;
-    QPushButton* m_navForwardBtn = nullptr;
-    QLineEdit* m_seekBar = nullptr;
-    QWidget* m_addressNavBar = nullptr;
-    QLabel* m_statusTelemetryLabel = nullptr;
-    QString m_currentSeekOrPc = QStringLiteral("0x00000000");
-    QString m_currentTargetState = QStringLiteral("IDLE");
-    QString m_preferredMonitorHint;
-    QVector<QString> m_seekHistory;
-    int m_seekHistoryIndex = -1;
-    bool m_isNavigatingHistory = false;
-    bool m_showingDecompilerFallback = false;
-    bool m_forceDecompilerFallback = false;
-    bool m_debugSessionActive = false;
-    bool m_suppressMemViewBroadcast = false;
-    bool m_suppressExecutionTabSwitch = false;
-    bool m_bottomConsoleMaximized = false;
+    QPushButton* m_navBackBtn = nullptr; QPushButton* m_navForwardBtn = nullptr;
+    QLineEdit* m_seekBar = nullptr; QWidget* m_addressNavBar = nullptr; QLabel* m_statusTelemetryLabel = nullptr;
+    QString m_currentSeekOrPc = QStringLiteral("0x00000000"), m_currentTargetState = QStringLiteral("IDLE"), m_preferredMonitorHint;
+    QVector<QString> m_seekHistory; int m_seekHistoryIndex = -1;
+    bool m_isNavigatingHistory = false, m_showingDecompilerFallback = false, m_forceDecompilerFallback = false;
+    bool m_debugSessionActive = false, m_suppressMemViewBroadcast = false, m_suppressExecutionTabSwitch = false, m_bottomConsoleMaximized = false;
     QString m_workspacePerspective = QStringLiteral("Source");
-    QPushButton* m_perspSourceBtn = nullptr;
-    QPushButton* m_perspDebugBtn = nullptr;
-    QPushButton* m_perspBinaryBtn = nullptr;
-    QPushButton* m_perspMpiBtn = nullptr;
-    QAction* m_targetSelectorAct = nullptr;
-    QAction* m_launchOptionsAct = nullptr;
-    QAction* m_rankCountAct = nullptr;
-    QAction* m_buildSplitAct = nullptr;
-    QAction* m_pauseAllTbAct = nullptr;
-    QAction* m_recordHistoryAct = nullptr;
-    QAction* m_stepBackTbAct = nullptr;
-    QAction* m_revContinueTbAct = nullptr;
-    QAction* m_navBackTbAct = nullptr;
-    QAction* m_navForwardTbAct = nullptr;
-    QAction* m_searchEverywhereAct = nullptr;
-    QAction* m_seekBarTbAct = nullptr;
+    QPushButton* m_perspSourceBtn = nullptr; QPushButton* m_perspDebugBtn = nullptr;
+    QPushButton* m_perspBinaryBtn = nullptr; QPushButton* m_perspMpiBtn = nullptr;
+    QAction* m_targetSelectorAct = nullptr; QAction* m_launchOptionsAct = nullptr; QAction* m_rankCountAct = nullptr;
+    QAction* m_buildSplitAct = nullptr; QAction* m_pauseAllTbAct = nullptr; QAction* m_recordHistoryAct = nullptr;
+    QAction* m_stepBackTbAct = nullptr; QAction* m_revContinueTbAct = nullptr;
+    QAction* m_navBackTbAct = nullptr; QAction* m_navForwardTbAct = nullptr;
+    QAction* m_searchEverywhereAct = nullptr; QAction* m_seekBarTbAct = nullptr;
     QMenu* m_stepIntoMenu = nullptr;
-    QList<QAction*> m_perspActs;
-    QList<QAction*> m_dynamicToolbarActions;
+    QList<QAction*> m_perspActs, m_dynamicToolbarActions;
     QList<QPointer<QWidget>> m_dynamicToolbarWidgets;
 
     // Backend Coordinators, Rank Caches & Modeless Tool Dialogs
@@ -507,6 +480,10 @@ private:
     QToolButton* m_windowMaximizeBtn = nullptr;
     QToolButton* m_windowCloseBtn = nullptr;
     bool m_menuBarWindowControlsVisible = true;
+    gridlock::core::plugins::PluginManager* m_pluginManager = nullptr;
+    QMenu* m_toolsPluginsMenu = nullptr;
+    QList<QMetaObject::Connection> m_pluginCoordConns;
+    bool m_pluginSessionActive = false;
 
     struct SessionShutdownGuard {
         MainWindow* self = nullptr;

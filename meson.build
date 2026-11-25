@@ -39,7 +39,7 @@ src_files = [
   'src/ui/MainWindowCohesion.cpp', 'src/ui/MainWindowPerspectives.cpp',
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/MainWindowExecution.cpp', 'src/ui/MainWindowInspection.cpp',
-  'src/ui/MainWindowBuild.cpp',
+  'src/ui/MainWindowBuild.cpp', 'src/ui/MainWindowPlugins.cpp',
   'src/ui/views/ServerRackView.cpp', 'src/ui/views/SourceCodeView.cpp', 'src/ui/views/SourceCodeViewInteraction.cpp',
   'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
   'src/ui/dialogs/plotter/ArrayPlotCanvas.cpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.cpp', 'src/ui/dialogs/plotter/ArrayPlotExport.cpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.cpp',
@@ -57,13 +57,13 @@ src_files = [
   'src/backend/TestGenerator.cpp', 'src/backend/GridLockAutomationRunner.cpp',
   'src/ui/views/MemView.cpp', 'src/ui/views/MemViewRender.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/MemoryProfilerChart.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
-  'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp',
+  'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp', 'src/ui/dialogs/preferences/PluginSettingsPage.cpp',
+  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginManager.cpp',
   'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
   'src/core/models/VariableTreeModel.cpp', 'src/ui/docks/VariablesDockWidget.cpp',
   'src/core/utils/CliParser.cpp',
-  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginManager.cpp',
   'src/core/utils/ElfBinaryInspector.cpp', 'src/core/utils/ElfBinaryParser.cpp', 'src/core/utils/SearchEverywhereEngine.cpp', 'src/core/utils/ClangdLspClient.cpp', 'src/core/utils/ClangdLspNavigation.cpp',
   'src/ui/tutorial/TutorialDialog.cpp',
 ]
@@ -89,13 +89,13 @@ moc_headers = [
   'src/core/hpc/IBackendCoordinator.hpp', 'src/backend/GridLockAutomationRunner.hpp',
   'src/ui/views/MemView.hpp', 'src/ui/views/MemoryProfilerWidget.hpp', 'src/ui/views/RegisterView.hpp',
   'src/ui/dialogs/preferences/PreferencesDialog.hpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.hpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.hpp', 'src/ui/dialogs/preferences/KeybindingsSettingsPage.hpp',
-  'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/core/hpc/HpcBackend.hpp',
+  'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/ui/dialogs/preferences/PluginSettingsPage.hpp',
+  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginManager.hpp', 'src/core/hpc/HpcBackend.hpp',
   'src/core/hpc/analysis/MockHpcBackend.hpp', 'src/core/managers/SpackManager.hpp',
   'src/core/managers/ShortcutManager.hpp', 'src/core/managers/DocsetManager.hpp',
   'src/core/managers/ThemeManager.hpp', 'src/core/managers/SessionManager.hpp',
   'src/core/models/VariableTreeModel.hpp', 'src/ui/docks/VariablesDockWidget.hpp',
   'src/ui/tutorial/TutorialDialog.hpp', 'src/core/utils/ClangdLspClient.hpp',
-  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginManager.hpp',
 ]
 
 # Process Qt6 files
@@ -206,6 +206,20 @@ gridlock_lsp_tests = executable('gridlock_lsp_tests',
 
 test('lsp_tests', gridlock_lsp_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
+test_dummy_plugin = shared_module('test_dummy_plugin',
+  'tests/core/test_dummy_plugin.c',
+  include_directories : inc,
+  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror'],
+  build_by_default : true
+)
+
+test_bad_abi_plugin = shared_module('test_bad_abi_plugin',
+  'tests/core/test_dummy_plugin.c',
+  include_directories : inc,
+  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN=1'],
+  build_by_default : true
+)
+
 ui_test_src = [
   'tests/ui/test_ui.cpp', 'tests/ui/test_ui_aux.cpp',
   'tests/ui/test_ui_cohesion.cpp', 'tests/ui/test_ui_capture.cpp',
@@ -215,7 +229,7 @@ ui_test_src = [
   'src/ui/MainWindowCohesion.cpp', 'src/ui/MainWindowPerspectives.cpp',
   'src/ui/MainWindowDocks.cpp', 'src/ui/MainWindowDebugger.cpp',
   'src/ui/MainWindowExecution.cpp', 'src/ui/MainWindowInspection.cpp',
-  'src/ui/MainWindowBuild.cpp',
+  'src/ui/MainWindowBuild.cpp', 'src/ui/MainWindowPlugins.cpp',
   'src/ui/views/SourceCodeView.cpp', 'src/ui/views/SourceCodeViewInteraction.cpp', 'src/ui/views/EditorSyntaxHighlighter.cpp', 'src/ui/views/CsvTablePreviewWidget.cpp',
   'src/ui/dialogs/plotter/ArrayPlotCanvas.cpp', 'src/ui/dialogs/plotter/ArrayPlotDialog.cpp', 'src/ui/dialogs/plotter/ArrayPlotExport.cpp', 'src/ui/dialogs/plotter/TensorSliceTableModel.cpp',
   'src/ui/dialogs/graph/PointerGraphDialog.cpp', 'src/ui/dialogs/graph/PointerGraphEvaluator.cpp', 'src/ui/dialogs/graph/PointerGraphLayout.cpp',
@@ -238,7 +252,8 @@ ui_test_src = [
   'src/core/managers/SessionManager.cpp', 'src/core/hpc/lsp/LspCoordinator.cpp',
   'src/ui/views/MemView.cpp', 'src/ui/views/MemViewRender.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/MemoryProfilerChart.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
-  'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp',
+  'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp', 'src/ui/dialogs/preferences/PluginSettingsPage.cpp',
+  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginManager.cpp',
   'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
@@ -266,7 +281,8 @@ ui_test_moc_headers = [
   'src/core/hpc/dap/DapCoordinator.hpp', 'src/core/hpc/IBackendCoordinator.hpp',
   'src/core/hpc/lsp/LspCoordinator.hpp', 'src/ui/views/MemView.hpp', 'src/ui/views/MemoryProfilerWidget.hpp',
   'src/ui/views/RegisterView.hpp', 'src/ui/dialogs/preferences/PreferencesDialog.hpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.hpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.hpp', 'src/ui/dialogs/preferences/KeybindingsSettingsPage.hpp',
-  'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp',
+  'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/ui/dialogs/preferences/PluginSettingsPage.hpp',
+  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginManager.hpp',
   'src/core/hpc/HpcBackend.hpp', 'src/core/hpc/analysis/MockHpcBackend.hpp',
   'src/core/managers/SpackManager.hpp', 'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp', 'src/core/managers/ThemeManager.hpp',
@@ -284,11 +300,19 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   processed_ui_test_files,
   compiled_resources,
   include_directories : inc,
+  cpp_args : [
+    '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SO="' + test_dummy_plugin.full_path() + '"',
+    '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN_SO="' + test_bad_abi_plugin.full_path() + '"'
+  ],
   dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep],
   build_by_default : false
 )
 
-test('ui_tests', gridlock_ui_tests, env: ['QT_QPA_PLATFORM=offscreen'], timeout: 120)
+test('ui_tests', gridlock_ui_tests,
+  depends : [test_dummy_plugin, test_bad_abi_plugin],
+  env: ['QT_QPA_PLATFORM=offscreen'],
+  timeout: 120
+)
 
 config_test_src = [
   'tests/core/test_config.cpp',
@@ -831,20 +855,6 @@ gridlock_plugin_abi_tests = executable('gridlock_plugin_abi_tests',
 )
 
 test('plugin_abi_tests', gridlock_plugin_abi_tests, env: ['QT_QPA_PLATFORM=offscreen'])
-
-test_dummy_plugin = shared_module('test_dummy_plugin',
-  'tests/core/test_dummy_plugin.c',
-  include_directories : inc,
-  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror'],
-  build_by_default : true
-)
-
-test_bad_abi_plugin = shared_module('test_bad_abi_plugin',
-  'tests/core/test_dummy_plugin.c',
-  include_directories : inc,
-  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN=1'],
-  build_by_default : true
-)
 
 plugin_manager_test_src = [
   'tests/core/test_plugin_manager.cpp',
