@@ -1,6 +1,6 @@
 /**
  * @file test_ui_plugins.cpp
- * @brief UI integration regression tests for `Preferences -> Plugins`, dual-scope staging, SHA-256 trust, and GitHub installer tab.
+ * @brief UI integration tests for Preferences -> Plugins, nested menus, status items, 5 context surfaces, annotations, themes, and report dock.
  */
 
 #include <memory>
@@ -12,6 +12,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
@@ -19,23 +20,33 @@
 #include <QMenu>
 #include <QMetaObject>
 #include <QPlainTextEdit>
+#include <QPoint>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QToolButton>
 #include <QTreeView>
 #include <QTreeWidget>
 #include <QtTest/QtTest>
 
 #include "../../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../../src/core/managers/ConfigManager.hpp"
+#include "../../src/core/managers/ThemeManager.hpp"
 #include "../../src/core/plugins/PluginInstaller.hpp"
 #include "../../src/core/plugins/PluginManager.hpp"
+#include "../../src/ui/EditorTabManager.hpp"
 #include "../../src/ui/MainWindow.hpp"
 #include "../../src/ui/dialogs/preferences/PluginSettingsPage.hpp"
 #include "../../src/ui/dialogs/preferences/PreferencesDialog.hpp"
+#include "../../src/ui/docks/CallStackDockWidget.hpp"
+#include "../../src/ui/docks/PluginReportDockWidget.hpp"
 #include "../../src/ui/docks/VariablesDockWidget.hpp"
+#include "../../src/ui/views/ServerRackView.hpp"
+#include "../../src/ui/views/SourceCodeView.hpp"
 
 void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QTemporaryDir plugCfgDir;
@@ -46,6 +57,21 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   const QByteArray prevEnv = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
   const QString prevWs = gridlock::core::ConfigManager::instance().workspacePath();
   qputenv("GRIDLOCK_TEST_CONFIG_DIR", plugCfgDir.path().toUtf8());
+
+  struct PluginUiScopeCleanup {
+    gridlock::ui::MainWindow& win;
+    bool restoreEnv;
+    QByteArray savedEnv;
+    QString savedWs;
+    ~PluginUiScopeCleanup() {
+      win.setCoordinator(nullptr);
+      if (win.pluginManager()) win.pluginManager()->unloadAll();
+      if (restoreEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", savedEnv);
+      else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
+      gridlock::core::ConfigManager::instance().loadConfig();
+      gridlock::core::ConfigManager::instance().setWorkspace(savedWs);
+    }
+  } scopeCleanup{mw, hadEnv, prevEnv, prevWs};
 
   auto& cfg = gridlock::core::ConfigManager::instance();
   cfg.loadConfig();
@@ -61,7 +87,7 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_BAD_ABI_PLUGIN_SO),
                       QDir(globalPlugDir).filePath(QStringLiteral("02_bad_abi.so"))));
 
-  // Create a distinct untrusted workspace binary (append 1 trailing zero byte so its SHA-256 differs from 01_dummy.so).
+  // Create a distinct untrusted workspace binary by appending 1 trailing zero byte so its SHA-256 differs.
   const QString wsUntrustedPath = QDir(wsPlugDir).filePath(QStringLiteral("03_ws_probe.so"));
   QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO), wsUntrustedPath));
   {
@@ -75,6 +101,13 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   mw.rebuildToolsPluginsMenu();
   auto* toolsPlugMenu = mw.findChild<QMenu*>(QStringLiteral("menuToolsPlugins"));
   QVERIFY(toolsPlugMenu != nullptr && mw.findChild<QAction*>(QStringLiteral("pluginCmd_dummy.ping_ranks")) != nullptr);
+
+  // Verify nested "/"-delimited submenus under Tools -> Plugins ("Mesh Tools/Refinement/Export VTK").
+  auto* meshSubMenu = mw.findChild<QMenu*>(QStringLiteral("pluginSubMenu_Mesh Tools"));
+  auto* refineSubMenu = mw.findChild<QMenu*>(QStringLiteral("pluginSubMenu_Mesh Tools/Refinement"));
+  auto* exportMenuAct = mw.findChild<QAction*>(QStringLiteral("pluginMenuAct_dummy.export_vtk"));
+  QVERIFY(meshSubMenu != nullptr && refineSubMenu != nullptr && exportMenuAct != nullptr);
+  QCOMPARE(exportMenuAct->text(), QStringLiteral("Export VTK"));
 
   // 1. Open Preferences -> Plugins and verify 7-column table, untrusted workspace button, and Cancel staging.
   gridlock::ui::PreferencesDialog pd(&mw);
@@ -112,7 +145,6 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   wsChk->setChecked(false);
   trustBtn->click();
   QApplication::processEvents();
-  // Before Apply: ConfigManager must remain completely untouched, and Cancel discards all staged edits.
   QVERIFY(cfg.isPluginGloballyEnabled(QStringLiteral("org.gridlock.test_dummy")));
   QVERIFY(cfg.isPluginWorkspaceEnabled(QStringLiteral("org.gridlock.test_dummy")));
   QVERIFY(tbl->item(0, 5)->text().contains(QStringLiteral("Staged")));
@@ -120,7 +152,7 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(cfg.isPluginGloballyEnabled(QStringLiteral("org.gridlock.test_dummy")));
   QVERIFY(cfg.isPluginWorkspaceEnabled(QStringLiteral("org.gridlock.test_dummy")));
 
-  // 2. Reopen Preferences -> Plugins, stage Workspace disable, click Apply, and verify Restart banners & dry-run restart.
+  // 2. Reopen Preferences -> Plugins, stage Workspace disable, click Apply, and verify Restart banners + GitHub tab.
   gridlock::ui::PreferencesDialog pd2(&mw);
   pd2.show();
   QApplication::processEvents();
@@ -135,7 +167,6 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   auto* mwBanner = mw.findChild<QWidget*>(QStringLiteral("mainWindowPluginRestartBanner"));
   QVERIFY(mwBanner != nullptr && !mwBanner->isHidden() && pd2.pluginPage()->restartNowButton() != nullptr);
 
-  // Verify Tab 2 (Install from GitHub) controls and flag-injection rejection diagnostic.
   pd2.pluginPage()->tabWidget()->setCurrentIndex(1);
   QApplication::processEvents();
   QVERIFY(pd2.pluginPage()->githubUrlEdit() != nullptr && pd2.pluginPage()->githubRefEdit() != nullptr &&
@@ -147,7 +178,6 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(pd2.pluginPage()->buildSummaryBadge()->text().contains(QStringLiteral("Build Failed")));
   QVERIFY(pd2.pluginPage()->compilerLogView()->toPlainText().contains(QStringLiteral("must not begin with '-'")));
 
-  // Re-enable workspace flag, dry-run Restart GridLock Now button, and reload plugins cleanly.
   pd2.pluginPage()->tabWidget()->setCurrentIndex(0);
   wsChk2 = pd2.findChild<QCheckBox*>(QStringLiteral("pluginWorkspaceCheck_org.gridlock.test_dummy"));
   QVERIFY(wsChk2 != nullptr);
@@ -160,8 +190,117 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(cfg.isPluginWorkspaceEnabled(QStringLiteral("org.gridlock.test_dummy")));
   QFile::remove(wsUntrustedPath);
   QCOMPARE(mw.pluginManager()->discoverAndLoad(), 1);
+  QApplication::processEvents();
 
-  // 3. Bind stopped GdbRankCoordinator and verify VariablesDockWidget Plugin Actions -> Inspect Domain Field.
+  // 3. Verify Status-Bar badge mounting, clicking, message-box + two-pass promptInput, and toast + PluginReportDockWidget.
+  QSignalSpy evSpy(&mw, &gridlock::ui::MainWindow::pluginStructuredEventEmitted);
+  auto* statusBtn = mw.findChild<QToolButton*>(QStringLiteral("pluginStatusItem_dummy.mesh_status"));
+  QVERIFY(statusBtn != nullptr && !statusBtn->isHidden());
+  QCOMPARE(statusBtn->text(), QStringLiteral("Mesh: Ready"));
+
+  mw.setProperty("gl_plugin_msgbox_auto_result", static_cast<int>(GRIDLOCK_RESULT_YES));
+  mw.setProperty("gl_plugin_prompt_auto_accept", true);
+  mw.setProperty("gl_plugin_prompt_auto_value", QStringLiteral("ui_mesh_probe_tag_99"));
+  statusBtn->click();
+  QApplication::processEvents();
+  QCOMPARE(statusBtn->text(), QStringLiteral("Mesh: Active"));
+  QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.status_click") &&
+          evSpy.last().at(1).toString().contains(QStringLiteral("ui_mesh_probe_tag_99")));
+  mw.setProperty("gl_plugin_msgbox_auto_result", QVariant());
+  mw.setProperty("gl_plugin_prompt_auto_accept", QVariant());
+  mw.setProperty("gl_plugin_prompt_auto_value", QVariant());
+
+  exportMenuAct = mw.findChild<QAction*>(QStringLiteral("pluginMenuAct_dummy.export_vtk"));
+  QVERIFY(exportMenuAct != nullptr);
+  exportMenuAct->trigger();
+  QApplication::processEvents();
+
+  auto* reportDock = mw.pluginReportDockWidget();
+  QVERIFY(reportDock != nullptr && !reportDock->isHidden() && reportDock->panelCount() == 3);
+  auto* mdBrowser = qobject_cast<QTextBrowser*>(reportDock->panelWidget(QStringLiteral("dummy.report.md")));
+  auto* kvTable = qobject_cast<QTableWidget*>(reportDock->panelWidget(QStringLiteral("dummy.report.kv")));
+  auto* jsonTree = qobject_cast<QTreeWidget*>(reportDock->panelWidget(QStringLiteral("dummy.report.json")));
+  QVERIFY(mdBrowser != nullptr && mdBrowser->toPlainText().contains(QStringLiteral("All ranks converged")));
+  QVERIFY(kvTable != nullptr && kvTable->rowCount() == 2);
+  QVERIFY(jsonTree != nullptr && jsonTree->topLevelItemCount() == 2);
+  auto* toastBanner = mw.findChild<QWidget*>(QStringLiteral("pluginToastBanner"));
+  QVERIFY(toastBanner != nullptr && !toastBanner->isHidden());
+
+  // 4. Verify all 5 multi-surface context menus, editor line annotations, call-stack navigation, and theme propagation.
+  const QString demoSrc = QFileInfo::exists(QStringLiteral("tutorial/inspection_demo.cpp"))
+                              ? QFileInfo(QStringLiteral("tutorial/inspection_demo.cpp")).canonicalFilePath()
+                              : QFileInfo(QStringLiteral("../tutorial/inspection_demo.cpp")).canonicalFilePath();
+  QVERIFY(!demoSrc.isEmpty());
+  mw.loadSourceFile(demoSrc);
+  QApplication::processEvents();
+
+  auto* srcView = mw.sourceCodeView();
+  QVERIFY(srcView != nullptr);
+  const QPoint edMenuPos(srcView->lineNumberAreaWidth() + 24, 12);
+  std::unique_ptr<QMenu> edMenu(srcView->createEditorContextMenuAt(edMenuPos));
+  QVERIFY(edMenu != nullptr && edMenu->findChild<QMenu*>(QStringLiteral("codeEditorPluginActionsMenu")) != nullptr);
+  auto* edCtxAct = edMenu->findChild<QAction*>(QStringLiteral("pluginCtxAct_dummy.ctx.editor"));
+  QVERIFY(edCtxAct != nullptr);
+  edCtxAct->trigger();
+  QApplication::processEvents();
+  QVERIFY(!srcView->pluginAnnotations().isEmpty());
+  QCOMPARE(srcView->pluginAnnotations().first().badgeText, QStringLiteral("HOTSPOT"));
+
+  std::unique_ptr<QMenu> bpMenu(srcView->createBreakpointContextMenuAtLine(5, srcView));
+  QVERIFY(bpMenu != nullptr && bpMenu->findChild<QMenu*>(QStringLiteral("breakpointPluginActionsMenu")) != nullptr);
+  auto* bpCtxAct = bpMenu->findChild<QAction*>(QStringLiteral("pluginCtxAct_dummy.ctx.bp"));
+  QVERIFY(bpCtxAct != nullptr);
+  bpCtxAct->trigger();
+  QApplication::processEvents();
+  QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.ctx") &&
+          evSpy.last().at(1).toString().contains(QStringLiteral("\"surface\":4")));
+
+  auto* csDock = mw.callStackDockWidget();
+  QVERIFY(csDock != nullptr);
+  StackFrameEntry frameEntry;
+  frameEntry.level = 0;
+  frameEntry.function = QStringLiteral("main");
+  frameEntry.file = demoSrc;
+  frameEntry.line = 12;
+  frameEntry.address = 0x401120ULL;
+  csDock->setStackFrames({frameEntry}, 0);
+  std::unique_ptr<QMenu> csMenu(csDock->createContextMenuForRow(0, csDock));
+  QVERIFY(csMenu != nullptr && csMenu->findChild<QMenu*>(QStringLiteral("callStackPluginActionsMenu")) != nullptr);
+  auto* csCtxAct = csMenu->findChild<QAction*>(QStringLiteral("pluginCtxAct_dummy.ctx.stack"));
+  QVERIFY(csCtxAct != nullptr);
+  csCtxAct->trigger();
+  QApplication::processEvents();
+  QCOMPARE(srcView->getCurrentLineNumber(), 12);
+
+  auto* rackView = mw.serverRackView();
+  QVERIFY(rackView != nullptr && rackView->rankNodeCount() >= 1);
+  std::unique_ptr<QMenu> rackMenu(rackView->createContextMenuForRank(0, rackView));
+  QVERIFY(rackMenu != nullptr && rackMenu->findChild<QMenu*>(QStringLiteral("rankListPluginActionsMenu")) != nullptr);
+  auto* rackCtxAct = rackMenu->findChild<QAction*>(QStringLiteral("pluginCtxAct_dummy.ctx.rank"));
+  QVERIFY(rackCtxAct != nullptr);
+  rackCtxAct->trigger();
+  QApplication::processEvents();
+  QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.ctx") &&
+          evSpy.last().at(1).toString().contains(QStringLiteral("\"surface\":5")));
+
+  // Verify live ThemeManager switch broadcasts on_theme_changed to active C99 plugins.
+  auto& tm = gridlock::core::ThemeManager::instance();
+  const QString prevTheme = tm.activeThemeId();
+  tm.applyTheme(QStringLiteral("daylight_light"), false);
+  QApplication::processEvents();
+  bool sawThemeBroadcast = false;
+  for (int i = 0; i < evSpy.count(); ++i) {
+    if (evSpy.at(i).at(0).toString() == QStringLiteral("dummy.theme_changed") &&
+        evSpy.at(i).at(1).toString().contains(QStringLiteral("daylight_light"))) {
+      sawThemeBroadcast = true;
+      break;
+    }
+  }
+  QVERIFY(sawThemeBroadcast);
+  tm.applyTheme(prevTheme.isEmpty() ? QStringLiteral("gridlock_slate") : prevTheme, false);
+  QApplication::processEvents();
+
+  // 5. Bind stopped GdbRankCoordinator and verify VariablesDockWidget Plugin Actions (both variable + surface actions).
   gridlock::GdbRankCoordinator coord;
   coord.initializeMockSession(2);
   mw.setCoordinator(&coord);
@@ -174,7 +313,6 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
           coord.processGdbOutput(r, QStringLiteral("%1^done,value=\"petsc_vec_norm_3.14159\"\n").arg(tok));
         }
       });
-  QSignalSpy evSpy(&mw, &gridlock::ui::MainWindow::pluginStructuredEventEmitted);
   auto* varDock = mw.variablesDockWidget();
   QVERIFY(varDock != nullptr);
   varDock->setFocusedRank(0, 2);
@@ -186,17 +324,19 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(ctxMenu != nullptr);
   auto* plugSub = ctxMenu->findChild<QMenu*>(QStringLiteral("variablePluginActionsMenu"));
   auto* varPlugAct = ctxMenu->findChild<QAction*>(QStringLiteral("pluginVarAct_dummy.inspect_field"));
-  QVERIFY(plugSub != nullptr && varPlugAct != nullptr);
+  auto* varSurfAct = ctxMenu->findChild<QAction*>(QStringLiteral("pluginCtxAct_dummy.ctx.vars"));
+  QVERIFY(plugSub != nullptr && varPlugAct != nullptr && varSurfAct != nullptr);
   varPlugAct->trigger();
   QApplication::processEvents();
   QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.var_eval") &&
           evSpy.last().at(1).toString() == QStringLiteral("petsc_vec_norm_3.14159"));
 
+  // 6. Unload all plugins and verify status items, editor annotations, and report dock panels are purged.
   QObject::disconnect(evalConn);
   mw.setCoordinator(nullptr);
   mw.pluginManager()->unloadAll();
-  if (hadEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevEnv);
-  else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
-  cfg.loadConfig();
-  cfg.setWorkspace(prevWs);
+  QApplication::processEvents();
+  QVERIFY(srcView->pluginAnnotations().isEmpty());
+  QCOMPARE(reportDock->panelCount(), 0);
+  QVERIFY(mw.findChild<QToolButton*>(QStringLiteral("pluginStatusItem_dummy.mesh_status")) == nullptr);
 }

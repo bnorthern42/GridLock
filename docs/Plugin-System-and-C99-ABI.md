@@ -1,19 +1,19 @@
 # Plugin System and C99 ABI Reference
 
-GridLock supports dynamically loaded native extensions written in C99 or C++23 (or any language capable of exporting a C ABI symbol). Plugins inspect stopped MPI ranks, evaluate expressions, read or write target memory, manage breakpoints, add type-matched actions to `VariablesDockWidget`, register commands under **Tools -> Plugins**, and emit structured JSON telemetry without linking Qt6 or internal GridLock libraries.
+GridLock supports dynamically loaded native extensions written in C99 or C++23 (or any language capable of exporting a C ABI symbol). Plugins inspect stopped MPI ranks, evaluate expressions, read or write target memory, manage breakpoints, display modal dialogs and non-blocking toasts, register slash-delimited nested menus under **Tools -> Plugins**, mount clickable status-bar items, inject context-menu actions across five workstation surfaces, navigate and annotate source files, query and track active theme tokens, publish declarative report panels (`MARKDOWN`, `KEY_VALUE_TABLE`, `JSON_TREE`), and emit structured JSON telemetry without linking Qt6 or internal GridLock libraries.
 
 ---
 
 ## 1. Overview, Discovery Directories & Workspace SHA-256 Trust Model
 
-`PluginManager` (`src/core/plugins/PluginManager.{hpp,cpp}`) scans two plugin directories in order at startup, on workspace switches, and whenever **Reload Plugins** is triggered:
+`PluginManager` (`src/core/plugins/PluginManager.{hpp,cpp}`) scans two plugin directories in order at startup, on workspace switches, and whenever plugins are reloaded:
 
 1. **Per-user global plugins**: `~/.config/gridlock/plugins/` (or `$GRIDLOCK_TEST_CONFIG_DIR/plugins/` in isolated test runs).
 2. **Workspace plugins**: `<workspace>/.gridlock/plugins/`.
 
 ### Workspace SHA-256 Trust Allowlist
 
-To prevent arbitrary code execution when opening an untrusted project directory containing `<workspace>/.gridlock/plugins/`, `PluginManager` enforces pre-load binary verification:
+To prevent unprompted code execution when opening an untrusted project directory containing `<workspace>/.gridlock/plugins/`, `PluginManager` enforces pre-load binary verification:
 
 * **Pre-`dlopen` Hashing**: Before calling `QLibrary::load()` on any workspace plugin, `PluginManager` rejects symbolic links and world-writable files, opens the regular binary, and computes its lowercase `SHA-256` hex digest.
 * **User-Global Trust Storage**: Workspace trust is stored exclusively in `~/.config/gridlock/config.toml` under `[plugins.trusted_workspace_binaries]` mapping canonical binary path to approved `SHA-256` digest. Trust metadata is never read from `<workspace>/.gridlock/`.
@@ -31,8 +31,8 @@ To prevent arbitrary code execution when opening an untrusted project directory 
 
 The public binary contract is frozen in [`include/gridlock/plugin_api.h`](../include/gridlock/plugin_api.h) at `GRIDLOCK_PLUGIN_ABI_MAJOR = 1u` and `GRIDLOCK_PLUGIN_ABI_MINOR = 0u`.
 
-* **Strict C99 Boundary & Calling Convention**: `plugin_api.h` compiles cleanly under both `-std=c99 -Wall -Wextra -Werror` and `-std=c++23 -Wall -Wextra -Werror`. Every function pointer typedef and `gridlock_plugin_init_v1` uses `GRIDLOCK_CALL` (`__cdecl` on `_WIN32`, empty elsewhere). Host builds define `-DGRIDLOCK_BUILDING_HOST` so `GRIDLOCK_PLUGIN_EXPORT` never exports `gridlock_plugin_init_v1` from the main executable on Windows.
-* **16-Byte Versioned Header at Offset `0`**: Every ABI struct (`GridLockHostApi`, `GridLockPluginDescriptor`, `GridLockStopInfo`, `GridLockVariableContext`, `GridLockCommandSpec`) begins with:
+* **Strict C99 Boundary & Calling Convention**: `plugin_api.h` compiles cleanly under both `-std=c99 -Wall -Wextra -Wpedantic -Werror` and `-std=c++23 -Wall -Wextra -Wpedantic -Werror` with zero GUI headers. Every function pointer typedef and `gridlock_plugin_init_v1` uses `GRIDLOCK_CALL` (`__cdecl` on `_WIN32`, empty elsewhere). Host builds define `-DGRIDLOCK_BUILDING_HOST` so `GRIDLOCK_PLUGIN_EXPORT` never exports `gridlock_plugin_init_v1` from the main executable on Windows.
+* **16-Byte Versioned Header at Offset `0`**: Every ABI struct (`GridLockHostApi` `296 B`, `GridLockPluginDescriptor` `160 B`, `GridLockStopInfo` `56 B`, `GridLockVariableContext` `80 B`, `GridLockCommandSpec` `56 B`, `GridLockSurfaceContext` `80 B`, and `GridLockThemeInfo` `212 B`) begins with:
   ```c
   uint32_t struct_size;
   uint32_t abi_major;
@@ -43,54 +43,86 @@ The public binary contract is frozen in [`include/gridlock/plugin_api.h`](../inc
   * `status == GRIDLOCK_OK`
   * `desc.abi_major == GRIDLOCK_PLUGIN_ABI_MAJOR`
   * `desc.struct_size >= offsetof(GridLockPluginDescriptor, reserved)`
-  * `tests/core/test_plugin_abi.cpp` locks exact `sizeof` and `offsetof` values via compile-time `static_assert`.
+  * `tests/core/test_plugin_abi.cpp` locks exact `sizeof` and `offsetof` values on 64-bit targets via compile-time `static_assert`.
 * **Pointer Storage Duration**:
   * Strings on `GridLockPluginDescriptor` (`plugin_id_utf8`, `plugin_name_utf8`, `plugin_version_utf8`, `description_utf8`) must remain valid until `shutdown` returns.
-  * Borrowed strings on `GridLockStopInfo`, `GridLockVariableContext`, and `GridLockCommandSpec` are valid only for the duration of that callback invocation.
-* **Per-Plugin Host Contexts & Safe Teardown**: Each loaded plugin receives a dedicated `GridLockHostApi` table and `PluginBindingContext`. During teardown, `PluginManager` locks out new registrations, runs `on_session_end` (if active) and `shutdown`, unregisters all actions and breakpoints owned by that plugin, and only then calls `QLibrary::unload()`. Re-entrant `unloadAll()` or `on_rank_stopped` events arriving while a callback is on the call stack are deferred through a FIFO queue.
+  * Borrowed strings on `GridLockStopInfo`, `GridLockVariableContext`, `GridLockCommandSpec`, and `GridLockSurfaceContext` are valid strictly for the synchronous duration of that callback invocation.
+* **Per-Plugin Host Contexts & Safe Teardown**: Each loaded plugin receives a dedicated `GridLockHostApi` table and `PluginBindingContext`. During teardown, `PluginManager` sets `shuttingDown = true` to lock out late registrations or modal UI invocations, runs `on_session_end` (if active) and `shutdown`, purges all actions, menus, status items, context actions, editor annotations, breakpoints, and report panels owned by that plugin via `unregisterPluginResources(pluginId)`, and only afterward calls `QLibrary::unload()`. Re-entrant `unloadAll()` or `on_rank_stopped` events arriving while a callback is active (`m_callbackDepth > 0`) are deferred safely through a FIFO queue.
 
 ---
 
-## 3. C99 Host API & Status Reference
+## 3. C99 Host API, Enums & Struct Reference
 
 ### `GridLockStatus` (`int32_t`)
 
 | Constant | Value | Meaning |
 | :--- | :---: | :--- |
 | `GRIDLOCK_OK` | `0` | Operation succeeded. |
-| `GRIDLOCK_ERR_INVALID_ARG` | `-1` | Null pointer, control character, oversized regex/payload, or out-of-range argument. |
+| `GRIDLOCK_ERR_INVALID_ARG` | `-1` | Null pointer, control character, quota exceeded, oversized regex/payload, or out-of-range argument. |
 | `GRIDLOCK_ERR_ABI_MISMATCH` | `-2` | Incompatible `abi_major` or invalid `struct_size`. |
-| `GRIDLOCK_ERR_BUFFER_TOO_SMALL` | `-3` | Caller output buffer `cap` is too small; `*out_len` holds required byte count. |
+| `GRIDLOCK_ERR_BUFFER_TOO_SMALL` | `-3` | Caller output buffer `cap` is too small; `*out_len` holds required byte count (excluding NUL). |
 | `GRIDLOCK_ERR_NOT_STOPPED` | `-4` | Target MPI rank is running or exited rather than stopped. |
 | `GRIDLOCK_ERR_INVALID_RANK` | `-5` | Requested rank index is outside `[0, rank_count)`. |
 | `GRIDLOCK_ERR_EVAL_FAILED` | `-6` | Debugger expression evaluation failed. |
 | `GRIDLOCK_ERR_MEMORY_READ_FAILED` | `-7` | Inferior memory read or write faulted. |
 | `GRIDLOCK_ERR_UNSUPPORTED` | `-8` | Operation is unsupported or disallowed during plugin shutdown. |
 | `GRIDLOCK_ERR_TIMEOUT` | `-9` | Synchronous GDB/MI request timed out before completion. |
+| `GRIDLOCK_ERR_CANCELLED` | `-10` | Interactive input prompt cancelled by the user. |
 
-### `GridLockLogLevel` (`int32_t`)
+### UI, Surface & Report Enumerations (`int32_t`)
 
-`GRIDLOCK_LOG_TRACE = 0`, `GRIDLOCK_LOG_DEBUG = 1`, `GRIDLOCK_LOG_INFO = 2`, `GRIDLOCK_LOG_WARN = 3`, `GRIDLOCK_LOG_ERROR = 4`. (`TRACE` and `DEBUG` are filtered from console output unless `GRIDLOCK_PLUGIN_VERBOSE_LOGS=1` is set.)
+* **`GridLockLogLevel`**: `GRIDLOCK_LOG_TRACE = 0`, `DEBUG = 1`, `INFO = 2`, `WARN = 3`, `ERROR = 4` (`TRACE` and `DEBUG` are filtered from console output unless `GRIDLOCK_PLUGIN_VERBOSE_LOGS=1` is set).
+* **`GridLockDialogSeverity`**: `GRIDLOCK_DIALOG_INFO = 0`, `WARNING = 1`, `ERROR = 2`, `QUESTION = 3`.
+* **`GridLockDialogButtons`**: `GRIDLOCK_BUTTONS_OK = 1`, `OK_CANCEL = 2`, `YES_NO = 3`.
+* **`GridLockDialogResult`**: `GRIDLOCK_RESULT_OK = 1`, `CANCEL = 2`, `YES = 3`, `NO = 4`.
+* **`GridLockContextSurface`**:
+  * `GRIDLOCK_SURFACE_VARIABLES = 1` (`VariablesDockWidget` tree rows)
+  * `GRIDLOCK_SURFACE_CODE_EDITOR = 2` (`SourceCodeView` editor viewport and selection)
+  * `GRIDLOCK_SURFACE_CALL_STACK = 3` (`CallStackDockWidget` frame rows)
+  * `GRIDLOCK_SURFACE_BREAKPOINTS = 4` (`SourceCodeView` breakpoint gutter menu)
+  * `GRIDLOCK_SURFACE_RANK_LIST = 5` (`ServerRackView` MPI rank blade entries)
+* **`GridLockReportFormat`**:
+  * `GRIDLOCK_REPORT_MARKDOWN = 1` (`QTextBrowser` Markdown view)
+  * `GRIDLOCK_REPORT_KEY_VALUE_TABLE = 2` (2-column `QTableWidget` from JSON object/array or `key=value` lines)
+  * `GRIDLOCK_REPORT_JSON_TREE = 3` (2-column expandable `QTreeWidget` from hierarchical JSON)
 
-### `GridLockHostApi` Callbacks
+### `GridLockSurfaceContext` & `GridLockThemeInfo`
 
-`PluginHostBridge` (`src/core/plugins/PluginHostBridge.{hpp,cpp}`) implements all 13 callbacks with `noexcept` boundaries, thread-safe coordinator marshaling, tokenized private memory MI channels (`<= 64 MiB` read with local `process_vm_readv` fast path, `<= 16 MiB` synchronous write), GDB/MI breakpoint input sanitization, and PCRE2 match/recursion limits on `type_regex` (`<= 512` bytes).
+* **`GridLockSurfaceContext`**: Delivers `surface`, `rank`, `frame_level`, `line`, `column`, `bp_id`, `address`, `symbol_utf8`, `type_utf8`, `file_utf8`, and `selected_text_utf8` to `GridLockContextActionFn`.
+* **`GridLockThemeInfo`**: Fixed-size `212`-byte POD struct containing `is_dark` (`1` dark, `0` light), `theme_id_utf8[64]`, and `#RRGGBB` tokens `bg_primary_hex`, `bg_secondary_hex`, `fg_primary_hex`, `fg_muted_hex`, `accent_hex`, `selection_hex`, `warning_hex`, and `error_hex`.
 
-| Callback | Signature | Behavior |
+### `GridLockHostApi` Callbacks (All 26 Entry Points)
+
+`PluginHostBridge` (`src/core/plugins/PluginHostBridge.{hpp,cpp}`, `PluginHostBridgeUi.cpp`) implements every callback with `noexcept` boundaries, GUI/coordinator thread marshaling (`Qt::BlockingQueuedConnection` when invoked off-thread), tokenized private memory MI channels (`<= 64 MiB` read with local `process_vm_readv` fast path, `<= 16 MiB` synchronous write), GDB/MI breakpoint sanitization, string/item quotas (`title <= 256 B` without control characters, `body/content <= 1 MiB`, `<= 16` status items per plugin, `<= 256` annotations per plugin, `<= 4` menu path segments), and PCRE2 match/recursion limits (`(*LIMIT_MATCH=10000)(*LIMIT_RECURSION=250)`) on regexes (`<= 512` bytes).
+
+| Callback | Signature Summary | Behavior |
 | :--- | :--- | :--- |
-| `alloc_bytes` | `void* (void* host_ctx, size_t num_bytes)` | Allocates `num_bytes` on the host heap. |
-| `free_bytes` | `void (void* host_ctx, void* ptr)` | Releases memory previously returned by `alloc_bytes`. |
-| `log_message` | `GridLockStatus (void* host_ctx, GridLockLogLevel level, const char* utf8_msg)` | Writes a bounded (`<= 16 KiB`) log entry coalesced onto the console sink. |
-| `get_rank_count` | `GridLockStatus (void* host_ctx, int32_t* out_ranks)` | Returns the active MPI session rank count. |
-| `get_active_rank` | `GridLockStatus (void* host_ctx, int32_t* out_rank)` | Returns the currently focused zero-based MPI rank index. |
-| `eval_expr` | `GridLockStatus (void* host_ctx, int32_t rank, const char* expr_utf8, char* out_utf8, size_t cap, size_t* out_len)` | Evaluates a C/C++ expression on a stopped rank into caller-owned `out_utf8`. |
-| `read_memory` | `GridLockStatus (void* host_ctx, int32_t rank, uint64_t address, void* out_bytes, size_t num_bytes, size_t* out_read)` | Reads `num_bytes` (`<= 64 MiB`) from virtual `address` on `rank` without disturbing open `MemView` docks. |
-| `write_memory` | `GridLockStatus (void* host_ctx, int32_t rank, uint64_t address, const void* in_bytes, size_t num_bytes, size_t* out_written)` | Writes `num_bytes` (`<= 16 MiB`) synchronously via tokenized `-data-write-memory-bytes`. |
-| `set_breakpoint` | `GridLockStatus (void* host_ctx, const char* file_utf8, int32_t line, const char* condition_utf8, int32_t* out_bp_id)` | Validates and quotes `file_utf8:line` and optional condition before installing a breakpoint. |
-| `remove_breakpoint` | `GridLockStatus (void* host_ctx, int32_t bp_id)` | Removes a breakpoint previously created via `set_breakpoint`. |
-| `register_variable_action` | `GridLockStatus (void* host_ctx, const char* action_id, const char* menu_label, const char* type_regex, GridLockVariableActionCallback cb, void* plugin_ctx)` | Registers a PCRE2-bounded regex context-menu action for `VariablesDockWidget`. |
-| `register_command_action` | `GridLockStatus (void* host_ctx, const char* command_id, const char* menu_label, const char* shortcut_hint, GridLockCommandActionCallback cb, void* plugin_ctx)` | Registers a menu command under **Tools -> Plugins**. |
-| `emit_structured_event` | `GridLockStatus (void* host_ctx, const char* channel_utf8, const char* json_payload_utf8)` | Emits a UTF-8 JSON payload (`<= 1 MiB`) on `channel_utf8`. |
+| `alloc_bytes` | `void* (host_ctx, num_bytes)` | Allocates `num_bytes` on the host heap. |
+| `free_bytes` | `void (host_ctx, ptr)` | Releases memory previously returned by `alloc_bytes`. |
+| `log_message` | `GridLockStatus (host_ctx, level, utf8_msg)` | Writes a bounded (`<= 16 KiB`) log entry coalesced onto the console sink. |
+| `get_rank_count` | `GridLockStatus (host_ctx, out_ranks)` | Returns the active MPI session rank count. |
+| `get_active_rank` | `GridLockStatus (host_ctx, out_rank)` | Returns the currently focused zero-based MPI rank index. |
+| `eval_expr` | `GridLockStatus (host_ctx, rank, expr_utf8, out_utf8, cap, out_len)` | Evaluates a C/C++ expression on a stopped rank into caller-owned `out_utf8`. |
+| `read_memory` | `GridLockStatus (host_ctx, rank, address, out_bytes, num_bytes, out_read)` | Reads `num_bytes` (`<= 64 MiB`) from `address` on `rank` without disturbing `MemView`. |
+| `write_memory` | `GridLockStatus (host_ctx, rank, address, in_bytes, num_bytes, out_written)` | Writes `num_bytes` (`<= 16 MiB`) synchronously via tokenized `-data-write-memory-bytes`. |
+| `set_breakpoint` | `GridLockStatus (host_ctx, file_utf8, line, condition_utf8, out_bp_id)` | Validates and quotes `file_utf8:line` and optional condition before installing a breakpoint. |
+| `remove_breakpoint` | `GridLockStatus (host_ctx, bp_id)` | Removes a breakpoint previously created via `set_breakpoint`. |
+| `register_variable_action` | `GridLockStatus (host_ctx, action_id, menu_label, type_regex, cb, plugin_ctx)` | Registers a PCRE2-bounded regex context action for `VariablesDockWidget`. |
+| `register_command_action` | `GridLockStatus (host_ctx, command_id, menu_label, shortcut_hint, cb, plugin_ctx)` | Registers a flat command under **Tools -> Plugins**. |
+| `emit_structured_event` | `GridLockStatus (host_ctx, channel_utf8, json_payload_utf8)` | Emits a UTF-8 JSON payload (`<= 1 MiB`) on `channel_utf8`. |
+| `show_message_box` | `GridLockStatus (host_ctx, severity, buttons, title_utf8, body_utf8, out_result)` | Marshals to the GUI thread, displays a modal `QMessageBox`, and writes `GridLockDialogResult`. |
+| `prompt_input` | `GridLockStatus (host_ctx, title_utf8, label_utf8, default_utf8, out_utf8, cap, out_len)` | Marshals to the GUI thread for single-line UTF-8 input (`GRIDLOCK_ERR_CANCELLED` on cancel). |
+| `show_toast` | `GridLockStatus (host_ctx, severity, title_utf8, body_utf8, duration_ms)` | Shows a timed non-modal toast banner (`500..30000 ms`) and status-bar message. |
+| `register_menu_action` | `GridLockStatus (host_ctx, action_id, menu_path_utf8, shortcut_hint, cb, plugin_ctx)` | Builds slash-delimited nested submenus (`<= 4` segments) under **Tools -> Plugins**. |
+| `set_status_item` | `GridLockStatus (host_ctx, item_id, text_utf8, tooltip_utf8, color_token_utf8, cb, plugin_ctx)` | Creates or updates up to `16` clickable status-bar badges (`accent`, `warning`, `error`, or `#RRGGBB`). |
+| `remove_status_item` | `GridLockStatus (host_ctx, item_id)` | Removes a status-bar badge owned by the calling plugin. |
+| `register_context_action` | `GridLockStatus (host_ctx, surface, action_id, menu_label, filter_regex, cb, plugin_ctx)` | Adds an optional-regex **Plugin Actions** item on any `GridLockContextSurface`. |
+| `navigate_to_location` | `GridLockStatus (host_ctx, file_utf8, line, column)` | Opens `file_utf8` in `SourceCodeView` at 1-based `line:column`. |
+| `set_editor_annotation` | `GridLockStatus (host_ctx, annotation_id, file_utf8, line, badge_utf8, detail_utf8, color_token_utf8)` | Renders up to `256` inline pill badges, line tints, and hover tooltips in `SourceCodeView`. |
+| `clear_editor_annotations` | `GridLockStatus (host_ctx, id_prefix_utf8)` | Clears owned editor annotations matching `id_prefix_utf8` (`NULL` or `""` clears all). |
+| `get_theme_info` | `GridLockStatus (host_ctx, out_theme)` | Populates `GridLockThemeInfo` from `ThemeManager` on the GUI thread. |
+| `publish_report_view` | `GridLockStatus (host_ctx, panel_id, title_utf8, format, content_utf8)` | Opens or updates a declarative tab in `PluginReportDockWidget`. |
+| `close_report_view` | `GridLockStatus (host_ctx, panel_id)` | Closes a report tab owned by the calling plugin. |
 
 ---
 
@@ -110,6 +142,7 @@ Every plugin populates `GridLockPluginDescriptor` inside `gridlock_plugin_init_v
 | `on_rank_stopped` | `GridLockRankStoppedCallback` | No | Called strictly on GDB/MI `*stopped` events (`const GridLockStopInfo*`). |
 | `on_session_end` | `GridLockSessionEndCallback` | No | Called when the active debug session terminates. |
 | `shutdown` | `GridLockPluginShutdownCallback` | No | Called before `QLibrary::unload()` to release `plugin_ctx`. |
+| `on_theme_changed` | `GridLockThemeChangedCallback` | No | Called whenever `ThemeManager` switches dark/light polarity or active palette (`const GridLockThemeInfo*`). |
 
 ### Minimal C99 Plugin Skeleton
 
@@ -125,10 +158,12 @@ static GridLockStatus GRIDLOCK_CALL on_stopped(
   MyCtx* state = (MyCtx*)ctx;
   if (!state || !host || !info) return GRIDLOCK_ERR_INVALID_ARG;
   state->stops_seen += 1;
-  if (host->log_message) {
-    host->log_message(host->host_ctx, GRIDLOCK_LOG_INFO, "Rank stopped");
-  }
-  return GRIDLOCK_OK;
+  return host->log_message(host->host_ctx, GRIDLOCK_LOG_INFO, "Rank stopped");
+}
+
+static void GRIDLOCK_CALL on_theme(void* ctx, const GridLockThemeInfo* theme) {
+  (void)ctx;
+  (void)theme;
 }
 
 static void GRIDLOCK_CALL on_shutdown(void* ctx, const GridLockHostApi* host) {
@@ -152,6 +187,7 @@ GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL gridlock_plugin_init_v1(
   out_desc->plugin_version_utf8 = "1.0.0";
   out_desc->plugin_ctx = calloc(1, sizeof(MyCtx));
   out_desc->on_rank_stopped = &on_stopped;
+  out_desc->on_theme_changed = &on_theme;
   out_desc->shutdown = &on_shutdown;
   return GRIDLOCK_OK;
 }
@@ -161,7 +197,7 @@ GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL gridlock_plugin_init_v1(
 
 ## 5. Optional C++23 Convenience Helpers (`include/gridlock/plugin_cpp_helpers.hpp`)
 
-C++23 plugins may include [`include/gridlock/plugin_cpp_helpers.hpp`](../include/gridlock/plugin_cpp_helpers.hpp) (`namespace gridlock::plugin`) for `noexcept` `std::expected` error handling, `16 MiB`-bounded `eval_expr` buffer retries, `std::is_trivially_copyable_v` `readPod<T>` helpers, `std::span` memory reads, forward-compatible `validateHostAbi`, and RAII host allocations:
+C++23 plugins may include [`include/gridlock/plugin_cpp_helpers.hpp`](../include/gridlock/plugin_cpp_helpers.hpp) (`namespace gridlock::plugin`) for `noexcept` `std::expected` error handling, `16 MiB`-bounded `evalExpr` and `promptInput` two-pass buffer retries, `getThemeInfo`, `std::is_trivially_copyable_v` `readPod<T>` helpers, `std::span` memory reads, forward-compatible `validateHostAbi`, and RAII host allocations:
 
 ```cpp
 #include "gridlock/plugin_api.h"
@@ -170,31 +206,34 @@ C++23 plugins may include [`include/gridlock/plugin_cpp_helpers.hpp`](../include
 namespace gp = gridlock::plugin;
 
 GridLockStatus inspectRank(const GridLockHostApi* host, int32_t rank, uint64_t ptrAddr) {
+  auto theme = gp::getThemeInfo(host);
+  if (!theme) return theme.error();
+
+  auto tag = gp::promptInput(host, "Mesh Snapshot", "Label:", "step_0");
+  if (!tag && tag.error() != GRIDLOCK_ERR_CANCELLED) return tag.error();
+
   auto countStr = gp::evalExpr(host, rank, "mesh.num_vertices");
   if (!countStr) return countStr.error();
 
   auto firstCoord = gp::readPod<double>(host, rank, ptrAddr);
   if (!firstCoord) return firstCoord.error();
-
-  std::array<std::byte, 24> vertexBytes{};
-  auto bytesRead = gp::readBytes(host, rank, ptrAddr, vertexBytes);
-  if (!bytesRead) return bytesRead.error();
-
-  auto scratch = gp::allocHostBytes(host, 256);
-  if (!scratch) return scratch.error();
   return GRIDLOCK_OK;
 }
 ```
 
 ---
 
-## 6. UI Integration, Staged Preferences, Self-Restart & GitHub Installer
+## 6. Workstation UI Integration, Staged Preferences, Self-Restart & GitHub Installer
 
-* **`VariablesDockWidget` (**Plugin Actions** Submenu)**: Right-clicking a variable row matches its type string against active `register_variable_action` patterns outside the bridge mutex and populates `ctx.frame_level` from `CallStackDockWidget::activeFrameLevel()`.
-* **Tools -> Plugins Menu (`MainWindowPlugins.cpp`)**: Lists registered plugin commands alongside **Manage Plugins...**. Console telemetry previews are truncated to `<= 1024` characters and coalesced on a `50 ms` timer.
+* **Tools -> Plugins Nested Menus & Shortcut Checks (`MainWindowPlugins.cpp`)**: Materializes flat commands (`register_command_action`) and `"/"`-delimited submenu trees (`register_menu_action`, e.g., `"Mesh Tools/Refinement/Export VTK"`). Shortcuts are checked against `ShortcutManager::registeredBindings()` before assignment so plugin hints never override built-in debugger keybindings.
+* **Multi-Surface Context Menus**: Populates a **Plugin Actions** submenu on right-click across `VariablesDockWidget` (`GRIDLOCK_SURFACE_VARIABLES` + `register_variable_action`), `SourceCodeView` (`GRIDLOCK_SURFACE_CODE_EDITOR` and `GRIDLOCK_SURFACE_BREAKPOINTS` gutter menu), `CallStackDockWidget` (`GRIDLOCK_SURFACE_CALL_STACK`), and `ServerRackView` (`GRIDLOCK_SURFACE_RANK_LIST`).
+* **Status-Bar Badges, Editor Annotations & `PluginReportDockWidget`**:
+  * `set_status_item` mounts clickable `QToolButton` pills on `MainWindow::statusBar()` styled with active theme tokens.
+  * `navigate_to_location` opens the target source file at `line:column` via `MainWindow::openFileAtLine()`, while `set_editor_annotation` renders line background tints, inline rounded pill badges, detail text, and hover tooltips in `SourceCodeView`.
+  * `PluginReportDockWidget` (`src/ui/docks/PluginReportDockWidget.{hpp,cpp}`) renders closable tabs for `MARKDOWN`, `KEY_VALUE_TABLE`, and `JSON_TREE` reports without exposing GUI pointers across the C99 boundary.
 * **Preferences -> Plugins (`Installed` Tab)**:
   * Displays a 7-column table: **Global** (checkbox), **Workspace** (checkbox), **Name**, **Version**, **Scope / ABI**, **Status**, and **Trust** (**Trust & Approve (<sha8>)** for untrusted workspace binaries).
-  * All checkbox and trust edits are staged in memory without mutating `ConfigManager` on click; clicking **Cancel** discards staged edits, whereas **Apply** / **OK** commits them.
+  * Checkbox and trust edits are staged in memory without mutating `ConfigManager` on click; **Cancel** discards staged edits and **Apply** / **OK** commits them.
   * When applied changes alter plugin enablement or workspace trust, both `PluginSettingsPage` (`#pluginRestartBanner`) and `MainWindow`'s status bar (`#mainWindowPluginRestartBanner`) display a **Restart GridLock Now** button that saves open workspace/preferences state, launches `QProcess::startDetached`, and exits cleanly.
 * **Preferences -> Plugins (`Install from GitHub` Tab & `PluginInstaller`)**:
   * Accepts validated `https://github.com/<owner>/<repo>[.git]` or `git@github.com:<owner>/<repo>.git` URLs and an optional branch/tag ref, rejecting leading `-` flags, whitespace, and shell metacharacters.
@@ -211,11 +250,11 @@ GridLockStatus inspectRank(const GridLockHostApi* host, int32_t rank, uint64_t p
 
 ```bash
 # C99 plugin
-gcc -std=c99 -O2 -Wall -Wextra -Werror -fvisibility=hidden -fPIC -shared \
+gcc -std=c99 -O2 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden -fPIC -shared \
     -Iinclude my_plugin.c -o libmy_plugin.so
 
 # C++23 plugin
-g++ -std=c++23 -O2 -Wall -Wextra -Werror -fvisibility=hidden -fvisibility-inlines-hidden \
+g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic -Werror -fvisibility=hidden -fvisibility-inlines-hidden \
     -fPIC -shared -Iinclude my_plugin.cpp -o libmy_plugin.so
 
 # Verify that only gridlock_plugin_init_v1 is exported

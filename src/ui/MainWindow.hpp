@@ -487,7 +487,7 @@ private:
     bool m_menuBarWindowControlsVisible = true;
     gridlock::core::plugins::PluginManager* m_pluginManager = nullptr;
     PluginReportDockWidget* m_pluginReportDock = nullptr;
-    QMenu* m_toolsPluginsMenu = nullptr;
+    QPointer<QMenu> m_toolsPluginsMenu;
     QList<QMetaObject::Connection> m_pluginCoordConns;
     bool m_pluginSessionActive = false;
 

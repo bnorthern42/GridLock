@@ -370,8 +370,8 @@ class TestPluginManager : public QObject {
     QVERIFY(runGit(workRepo, {QStringLiteral("checkout"), QStringLiteral("-b"), QStringLiteral("broken")}));
     {
       QFile truncFile(dstSrc);
-      QVERIFY(truncFile.open(QIODevice::ReadWrite));
-      QVERIFY(truncFile.resize(700));
+      QVERIFY(truncFile.open(QIODevice::ReadWrite | QIODevice::Append));
+      QVERIFY(truncFile.write("\nint broken_unclosed_syntax_error( {\n") > 0);
     }
     QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("truncate source")}));
     QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("broken")}));
@@ -415,6 +415,122 @@ class TestPluginManager : public QObject {
     qunsetenv("GIT_CONFIG_KEY_1");
     qunsetenv("GIT_CONFIG_VALUE_1");
     qunsetenv("GRIDLOCK_INCLUDE_DIR");
+  }
+
+  void testUiCallbacksMenusSurfacesAnnotationsReportsAndUnloadPurge() {
+    ScopedPluginEnv env;
+    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
+                               env.userPluginDir(), QStringLiteral("01_dummy.so")));
+
+    gridlock::GdbRankCoordinator coord;
+    gridlock::core::plugins::PluginManager mgr(&coord);
+    auto* bridge = mgr.hostBridge();
+
+    QVector<QPair<QString, QString>> events;
+    QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::structuredEventEmitted,
+                     &coord, [&](const QString& ch, const QString& payload) { events.append(qMakePair(ch, payload)); });
+
+    int msgBoxCalls = 0, promptCalls = 0, toastCalls = 0, navLine = 0;
+    QString navFile;
+    QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::messageBoxRequested,
+                     &coord, [&](const QString&, int, int, const QString&, const QString&,
+                                 int32_t* outRes, bool* outHandled) {
+                       ++msgBoxCalls;
+                       *outRes = GRIDLOCK_RESULT_YES;
+                       *outHandled = true;
+                     });
+    QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::promptInputRequested,
+                     &coord, [&](const QString&, const QString&, const QString&, const QString&,
+                                 QString* outVal, bool* outAccepted, bool* outHandled) {
+                       ++promptCalls;
+                       *outVal = QStringLiteral("long_custom_mesh_tag_exceeding_stack_probe");
+                       *outAccepted = true;
+                       *outHandled = true;
+                     });
+    QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::toastRequested,
+                     &coord, [&](const QString&, int, const QString&, const QString&, int) { ++toastCalls; });
+    QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::navigateRequested,
+                     &coord, [&](const QString&, const QString& file, int line, int) {
+                       navFile = file;
+                       navLine = line;
+                     });
+
+    QCOMPARE(mgr.discoverAndLoad(), 1);
+    QCOMPARE(bridge->menuActions().size(), 1);
+    QCOMPARE(bridge->menuActions().first().pathSegments,
+             (QStringList{QStringLiteral("Mesh Tools"), QStringLiteral("Refinement"), QStringLiteral("Export VTK")}));
+    QCOMPARE(bridge->statusItems().size(), 1);
+    QCOMPARE(bridge->statusItems().first().text, QStringLiteral("Mesh: Ready"));
+    QCOMPARE(bridge->contextActions().size(), 5);
+    QCOMPARE(bridge->matchingContextActions(GRIDLOCK_SURFACE_VARIABLES, QStringLiteral("PetscVec")).size(), 1);
+    QCOMPARE(bridge->matchingContextActions(GRIDLOCK_SURFACE_VARIABLES, QStringLiteral("int")).size(), 0);
+    QCOMPARE(bridge->matchingContextActions(GRIDLOCK_SURFACE_CODE_EDITOR, QStringLiteral("main.c")).size(), 1);
+    QCOMPARE(bridge->matchingContextActions(GRIDLOCK_SURFACE_CALL_STACK, QStringLiteral("solve")).size(), 1);
+    QCOMPARE(bridge->matchingContextActions(GRIDLOCK_SURFACE_BREAKPOINTS, QStringLiteral("main.c:12")).size(), 1);
+    QCOMPARE(bridge->matchingContextActions(GRIDLOCK_SURFACE_RANK_LIST, QStringLiteral("stopped")).size(), 1);
+
+    // 1. Click status-bar item: exercises message box + two-pass cached promptInput without opening prompt twice.
+    QCOMPARE(bridge->invokeStatusItem(QStringLiteral("dummy.mesh_status")), GRIDLOCK_OK);
+    QCOMPARE(msgBoxCalls, 1);
+    QCOMPARE(promptCalls, 1);
+    QCOMPARE(bridge->statusItems().first().text, QStringLiteral("Mesh: Active"));
+    QVERIFY(!events.isEmpty() && events.last().first == QStringLiteral("dummy.status_click"));
+    QVERIFY(events.last().second.contains(QStringLiteral("long_custom_mesh_tag_exceeding_stack_probe")));
+
+    // 2. Invoke nested menu action: publishes Markdown, Key-Value, and JSON Tree report panels + toast.
+    GridLockCommandSpec menuSpec{static_cast<uint32_t>(sizeof(GridLockCommandSpec)),
+                                 GRIDLOCK_PLUGIN_ABI_MAJOR, GRIDLOCK_PLUGIN_ABI_MINOR, 0u,
+                                 0, 2, "dummy.export_vtk", "Mesh Tools/Refinement/Export VTK", "Ctrl+Alt+M", nullptr};
+    QCOMPARE(bridge->invokeMenuAction(QStringLiteral("dummy.export_vtk"), menuSpec), GRIDLOCK_OK);
+    QCOMPARE(bridge->reportPanels().size(), 3);
+    QCOMPARE(toastCalls, 1);
+
+    // 3. Invoke context actions on CodeEditor (sets annotation) and CallStack (triggers navigate_to_location).
+    GridLockSurfaceContext edCtx{static_cast<uint32_t>(sizeof(GridLockSurfaceContext)),
+                                 GRIDLOCK_PLUGIN_ABI_MAJOR, GRIDLOCK_PLUGIN_ABI_MINOR, 0u,
+                                 GRIDLOCK_SURFACE_CODE_EDITOR, 0, 0, 42, 8, -1, 0x401000ULL,
+                                 "halo_buf", nullptr, "/tmp/sim.c", "halo_buf"};
+    QCOMPARE(bridge->invokeContextAction(QStringLiteral("dummy.ctx.editor"), edCtx), GRIDLOCK_OK);
+    QCOMPARE(bridge->editorAnnotations(QStringLiteral("/tmp/sim.c")).size(), 1);
+    QCOMPARE(bridge->editorAnnotations(QStringLiteral("/tmp/sim.c")).first().badgeText, QStringLiteral("HOTSPOT"));
+
+    GridLockSurfaceContext csCtx{static_cast<uint32_t>(sizeof(GridLockSurfaceContext)),
+                                 GRIDLOCK_PLUGIN_ABI_MAJOR, GRIDLOCK_PLUGIN_ABI_MINOR, 0u,
+                                 GRIDLOCK_SURFACE_CALL_STACK, 0, 1, 88, -1, -1, 0x402000ULL,
+                                 "caller_fn", nullptr, "/tmp/sim.c", nullptr};
+    QCOMPARE(bridge->invokeContextAction(QStringLiteral("dummy.ctx.stack"), csCtx), GRIDLOCK_OK);
+    QCOMPARE(navFile, QStringLiteral("/tmp/sim.c"));
+    QCOMPARE(navLine, 88);
+
+    // 4. Validate bounds: menu depth > 4, control characters, and theme change broadcast.
+    const GridLockHostApi* rawApi = bridge->hostApi();
+    QCOMPARE(rawApi->register_menu_action(
+                 rawApi->host_ctx, "bad.depth", "A/B/C/D/E", nullptr,
+                 [](void*, const GridLockHostApi*, const GridLockCommandSpec*) noexcept -> GridLockStatus {
+                   return GRIDLOCK_OK;
+                 }, nullptr),
+             GRIDLOCK_ERR_INVALID_ARG);
+    QCOMPARE(rawApi->set_status_item(rawApi->host_ctx, "bad\nid", "Txt", nullptr, nullptr, nullptr, nullptr),
+             GRIDLOCK_ERR_INVALID_ARG);
+
+    GridLockThemeInfo lightTheme{};
+    lightTheme.struct_size = static_cast<uint32_t>(sizeof(GridLockThemeInfo));
+    lightTheme.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+    lightTheme.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+    lightTheme.is_dark = 0;
+    std::snprintf(lightTheme.theme_id_utf8, sizeof(lightTheme.theme_id_utf8), "%s", "daylight_light");
+    mgr.notifyThemeChanged(lightTheme);
+    QVERIFY(!events.isEmpty() && events.last().first == QStringLiteral("dummy.theme_changed"));
+    QVERIFY(events.last().second.contains(QStringLiteral("daylight_light")));
+
+    // 5. Unload must purge all menus, status items, context actions, annotations, and report panels.
+    mgr.unloadAll();
+    QVERIFY(bridge->menuActions().isEmpty());
+    QVERIFY(bridge->statusItems().isEmpty());
+    QVERIFY(bridge->contextActions().isEmpty());
+    QVERIFY(bridge->editorAnnotations().isEmpty());
+    QVERIFY(bridge->reportPanels().isEmpty());
+    QCOMPARE(bridge->liveAllocationCount(), 0);
   }
 };
 

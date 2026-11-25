@@ -464,6 +464,8 @@ void MainWindow::initializePluginSubsystem() {
             uiState->statusColorTokens.remove(itemId);
             if (QToolButton* btn = uiState->statusButtons.take(itemId).data()) {
               if (statusBar()) statusBar()->removeWidget(btn);
+              btn->setObjectName(QString());
+              btn->setParent(nullptr);
               btn->deleteLater();
             }
           });
@@ -588,6 +590,8 @@ void MainWindow::initializePluginSubsystem() {
         uiState->statusColorTokens.remove(existingId);
         if (QToolButton* btn = uiState->statusButtons.take(existingId).data()) {
           if (statusBar()) statusBar()->removeWidget(btn);
+          btn->setObjectName(QString());
+          btn->setParent(nullptr);
           btn->deleteLater();
         }
       }
@@ -714,7 +718,7 @@ void MainWindow::notifySessionEnd() {
 }
 
 void MainWindow::rebuildToolsPluginsMenu() {
-  if (m_toolsPluginsMenu == nullptr || m_pluginManager == nullptr) return;
+  if (m_isShuttingDown || m_isClosing || m_toolsPluginsMenu == nullptr || m_pluginManager == nullptr) return;
   m_toolsPluginsMenu->clear();
 
   auto* bridge = m_pluginManager->hostBridge();
