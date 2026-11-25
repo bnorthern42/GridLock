@@ -342,6 +342,17 @@ void SourceCodeView::highlightCurrentLine() {
     }
     if (m_executionLine > 0) if (QTextBlock eb = document()->findBlockByLineNumber(m_executionLine - 1); eb.isValid())
         addFullSel(QTextCursor(eb), isDark ? QColor("#20342c") : QColor(46, 160, 67, 45));
+    for (const auto& ann : m_pluginAnnotations) {
+        if (ann.line <= 0) continue;
+        if (QTextBlock ab = document()->findBlockByLineNumber(ann.line - 1); ab.isValid()) {
+            const QString tok = ann.colorToken.trimmed().toLower();
+            QColor c = (tok == QStringLiteral("error")) ? QColor(QStringLiteral("#ef4444"))
+                       : (tok == QStringLiteral("warning")) ? QColor(QStringLiteral("#f59e0b"))
+                       : (QColor::isValidColorName(ann.colorToken) ? QColor(ann.colorToken) : QColor(QStringLiteral("#38bdf8")));
+            c.setAlpha(isDark ? 24 : 32);
+            addFullSel(QTextCursor(ab), c);
+        }
+    }
     for (const auto& diag : m_diagnostics) {
         QTextBlock dBlock = document()->findBlockByLineNumber(qMax(0, diag.line - 1)); if (!dBlock.isValid()) continue;
         QTextEdit::ExtraSelection dSel; dSel.format.setUnderlineStyle(QTextCharFormat::WaveUnderline);
@@ -358,6 +369,41 @@ void SourceCodeView::highlightCurrentLine() {
 
 void SourceCodeView::setDiagnostics(const QVector<core::utils::LspDiagnostic>& diagnostics) {
     m_diagnostics = diagnostics; highlightCurrentLine(); if (m_lineNumberArea) m_lineNumberArea->update();
+}
+
+void SourceCodeView::upsertPluginAnnotation(const PluginLineAnnotation& annotation) {
+    if (annotation.annotationId.isEmpty() || annotation.line <= 0) return;
+    bool updated = false;
+    for (auto& existing : m_pluginAnnotations) {
+        if (existing.annotationId == annotation.annotationId &&
+            (annotation.pluginId.isEmpty() || existing.pluginId == annotation.pluginId)) {
+            existing = annotation;
+            updated = true;
+            break;
+        }
+    }
+    if (!updated) m_pluginAnnotations.append(annotation);
+    highlightCurrentLine();
+    if (viewport()) viewport()->update();
+}
+
+void SourceCodeView::clearPluginAnnotations(const QString& pluginId, const QString& idPrefix) {
+    const auto before = m_pluginAnnotations.size();
+    m_pluginAnnotations.removeIf([&](const PluginLineAnnotation& a) {
+        const bool plugMatch = pluginId.isEmpty() || a.pluginId == pluginId;
+        const bool prefMatch = idPrefix.isEmpty() || a.annotationId.startsWith(idPrefix);
+        return plugMatch && prefMatch;
+    });
+    if (m_pluginAnnotations.size() != before) {
+        highlightCurrentLine();
+        if (viewport()) viewport()->update();
+    }
+}
+
+QVector<SourceCodeView::PluginLineAnnotation> SourceCodeView::pluginAnnotationsForLine(int lineOneBased) const {
+    QVector<PluginLineAnnotation> out;
+    for (const auto& a : m_pluginAnnotations) if (a.line == lineOneBased) out.append(a);
+    return out;
 }
 
 /** @brief Paints the two-lane gutter with hover previews, vector badges, line numbers, and Git diff bars. */

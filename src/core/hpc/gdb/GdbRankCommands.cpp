@@ -32,18 +32,19 @@ QString escapeGdbMiString(const QString& str) {
   return "\"" + res + "\"";
 }
 
-/** @brief Builds a GDB/MI `-break-insert` command string for `file:line`, optional condition, ignoreCount, `-t`, and `-d`. */
+/** @brief Builds a GDB/MI `-break-insert` command string for quoted/escaped `file:line`, optional condition, ignoreCount, `-t`, and `-d`. */
 QString buildBreakInsertCmd(const QString& file, int line, const QString& condition,
                             int ignoreCount = 0, bool temporary = false, bool disabled = false) {
-  const QString loc = QString("%1:%2").arg(file).arg(line);
-  const QString flags = QString("%1%2%3")
+  const QString loc = escapeGdbMiString(QStringLiteral("%1:%2").arg(file).arg(line));
+  const QString flags = QStringLiteral("%1%2%3")
                             .arg(temporary ? QStringLiteral("-t ") : QString(),
                                  disabled ? QStringLiteral("-d ") : QString(),
-                                 ignoreCount > 0 ? QString("-i %1 ").arg(ignoreCount) : QString());
+                                 ignoreCount > 0 ? QStringLiteral("-i %1 ").arg(ignoreCount) : QString());
   if (!condition.trimmed().isEmpty()) {
-    return QString("-break-insert %1-c %2 %3\n").arg(flags, escapeGdbMiString(condition.trimmed()), loc);
+    return QStringLiteral("-break-insert %1-c %2 %3\n")
+        .arg(flags, escapeGdbMiString(condition.trimmed()), loc);
   }
-  return QString("-break-insert %1-f %2\n").arg(flags, loc);
+  return QStringLiteral("-break-insert %1-f %2\n").arg(flags, loc);
 }
 
 }  // namespace detail
@@ -95,6 +96,64 @@ void GdbRankCoordinator::configureBreakpointOptions(const QString& file, int lin
       if (it.value() == locFull || it.value() == locBase) {
         queueOrWriteCmd(static_cast<int>(i), QString("-break-after %1 %2\n").arg(it.key()).arg(cleanIgn));
       }
+    }
+  }
+}
+
+void GdbRankCoordinator::setBreakpointEnabled(const QString& filePath, int line, bool enabled) {
+  if (filePath.trimmed().isEmpty() || line <= 0) return;
+  IBackendCoordinator::setBreakpointEnabled(filePath, line, enabled);
+  const QString locFull = QStringLiteral("%1:%2").arg(filePath).arg(line), locBase = QStringLiteral("%1:%2").arg(QFileInfo(filePath).fileName()).arg(line);
+  for (auto& bp : m_pendingBreakpoints)
+    if (bp.line == line && (bp.file == filePath || QFileInfo(bp.file).fileName() == QFileInfo(filePath).fileName())) bp.enabled = enabled;
+  const QString verb = enabled ? QStringLiteral("-break-enable") : QStringLiteral("-break-disable");
+  for (size_t i = 0; i < m_processes.size(); ++i) {
+    if (!m_processes[i]) continue;
+    for (auto it = m_processes[i]->state.breakpoints.constBegin(); it != m_processes[i]->state.breakpoints.constEnd(); ++it) {
+      if (it.value() == locFull || it.value() == locBase || QFileInfo(it.value().section(QLatin1Char(':'), 0, -2)).fileName() + QLatin1Char(':') + it.value().section(QLatin1Char(':'), -1) == locBase)
+        queueOrWriteCmd(static_cast<int>(i), QStringLiteral("%1 %2\n").arg(verb).arg(it.key()));
+    }
+  }
+}
+
+void GdbRankCoordinator::insertTemporaryBreakpoint(const QString& filePath, int line, const QString& condition, int targetRank) {
+  if (filePath.trimmed().isEmpty() || line <= 0) return;
+  m_breakpointsCleared = false;
+  IBackendCoordinator::insertTemporaryBreakpoint(filePath, line, condition, targetRank);
+  const QString cleanCond = condition.trimmed();
+  m_pendingBreakpoints.erase(std::remove_if(m_pendingBreakpoints.begin(), m_pendingBreakpoints.end(), [&](const PendingBreakpoint& bp) { return bp.file == filePath && bp.line == line; }), m_pendingBreakpoints.end());
+  m_pendingBreakpoints.push_back({filePath, line, cleanCond, targetRank, 0, QString(), true, true, {}});
+  QString escCond = cleanCond;
+  escCond.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+  const QString loc = QStringLiteral("%1:%2").arg(filePath).arg(line);
+  const QString cmd = cleanCond.isEmpty() ? QStringLiteral("-break-insert -t -f %1\n").arg(loc) : QStringLiteral("-break-insert -t -c \"%1\" %2\n").arg(escCond, loc);
+  for (size_t i = 0; i < m_processes.size(); ++i)
+    if (m_processes[i] && (targetRank < 0 || targetRank == static_cast<int>(i))) queueOrWriteCmd(static_cast<int>(i), cmd);
+}
+
+void GdbRankCoordinator::insertRegexBreakpoint(const QString& regexPattern) {
+  const QString pat = regexPattern.trimmed();
+  if (pat.isEmpty() || pat.contains(QLatin1Char('\n')) || pat.contains(QLatin1Char('\r')) || pat.contains(QChar('\0'))) return;
+  if (!m_pendingRegexBreakpoints.contains(pat)) m_pendingRegexBreakpoints.append(pat);
+  QString esc = pat;
+  esc.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+  const QString cmd = QStringLiteral("-interpreter-exec console \"rbreak %1\"\n").arg(esc);
+  for (size_t i = 0; i < m_processes.size(); ++i) if (m_processes[i]) queueOrWriteCmd(static_cast<int>(i), cmd);
+}
+
+void GdbRankCoordinator::setBreakpointCommands(const QString& filePath, int line, const QStringList& commands) {
+  if (filePath.trimmed().isEmpty() || line <= 0) return;
+  QStringList cleaned;
+  for (const QString& ln : commands) if (const QString t = ln.trimmed(); !t.isEmpty() && !t.contains(QLatin1Char('\n')) && !t.contains(QLatin1Char('\r'))) cleaned.append(t);
+  IBackendCoordinator::setBreakpointCommands(filePath, line, cleaned);
+  const QString locFull = QStringLiteral("%1:%2").arg(filePath).arg(line), locBase = QStringLiteral("%1:%2").arg(QFileInfo(filePath).fileName()).arg(line);
+  for (auto& bp : m_pendingBreakpoints)
+    if (bp.line == line && (bp.file == filePath || QFileInfo(bp.file).fileName() == QFileInfo(filePath).fileName())) bp.commands = cleaned;
+  for (size_t i = 0; i < m_processes.size(); ++i) {
+    if (!m_processes[i]) continue;
+    for (auto it = m_processes[i]->state.breakpoints.constBegin(); it != m_processes[i]->state.breakpoints.constEnd(); ++it) {
+      if (it.value() == locFull || it.value() == locBase || QFileInfo(it.value().section(QLatin1Char(':'), 0, -2)).fileName() + QLatin1Char(':') + it.value().section(QLatin1Char(':'), -1) == locBase)
+        queueOrWriteCmd(static_cast<int>(i), formatBreakCommandsMi(it.key(), cleaned));
     }
   }
 }

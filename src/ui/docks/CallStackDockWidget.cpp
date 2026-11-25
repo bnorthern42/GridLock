@@ -10,9 +10,14 @@
 #include "CallStackDockWidget.hpp"
 
 #include "../../core/managers/ThemeManager.hpp"
+#include "../../core/plugins/PluginHostBridge.hpp"
+
+#include <memory>
 
 #include <QAbstractItemView>
+#include <QApplication>
 #include <QBrush>
+#include <QClipboard>
 #include <QColor>
 #include <QFileInfo>
 #include <QFont>
@@ -20,6 +25,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
@@ -99,6 +105,13 @@ void CallStackDockWidget::setupUi() {
           this, &CallStackDockWidget::onFrameRowActivated);
   connect(m_table, &QTableWidget::cellActivated,
           this, &CallStackDockWidget::onFrameRowActivated);
+  m_table->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(m_table, &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+    const int row = m_table->rowAt(pos.y());
+    if (row < 0) return;
+    std::unique_ptr<QMenu> menu(createContextMenuForRow(row, this));
+    if (menu) menu->exec(m_table->viewport()->mapToGlobal(pos));
+  });
 }
 
 /**
@@ -278,6 +291,57 @@ void CallStackDockWidget::onFrameRowActivated(int row, int column) {
   m_activeFrameLevel = entry.level;
   refreshActiveRowHighlight();
   emit frameActivated(m_activeThreadId, entry.level, entry.file, entry.line, entry.address);
+}
+
+QMenu* CallStackDockWidget::createContextMenuForRow(int row, QWidget* menuParent) {
+  if (row < 0 || row >= m_frames.size()) return nullptr;
+  selectFrameRow(row);
+  const StackFrameEntry entry = m_frames.at(row);
+
+  auto* menu = new QMenu(menuParent ? menuParent : this);
+  const QString summary = QStringLiteral("#%1 %2 (%3:%4)")
+                              .arg(entry.level)
+                              .arg(entry.function.isEmpty() ? QStringLiteral("??") : entry.function,
+                                   entry.file.isEmpty() ? QStringLiteral("<unknown>") : entry.file)
+                              .arg(entry.line);
+  menu->addAction(QStringLiteral("Copy Frame Summary"), this,
+                  [summary]() { QApplication::clipboard()->setText(summary); });
+
+  if (m_pluginBridge != nullptr) {
+    const auto matches =
+        m_pluginBridge->matchingContextActions(GRIDLOCK_SURFACE_CALL_STACK, entry.function.left(2048));
+    if (!matches.isEmpty()) {
+      menu->addSeparator();
+      QMenu* plugSub = menu->addMenu(QStringLiteral("Plugin Actions"));
+      plugSub->setObjectName(QStringLiteral("callStackPluginActionsMenu"));
+      const int rank = m_focusedRank;
+      for (const auto& act : matches) {
+        const QString actId = act.actionId;
+        QAction* pAct = plugSub->addAction(act.menuLabel);
+        pAct->setObjectName(QStringLiteral("pluginCtxAct_") + actId);
+        connect(pAct, &QAction::triggered, this, [this, actId, rank, entry]() {
+          if (m_pluginBridge == nullptr) return;
+          const QByteArray fnUtf8 = entry.function.toUtf8();
+          const QByteArray fileUtf8 = entry.file.toUtf8();
+          GridLockSurfaceContext ctx{};
+          ctx.struct_size = static_cast<uint32_t>(sizeof(GridLockSurfaceContext));
+          ctx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+          ctx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+          ctx.surface = GRIDLOCK_SURFACE_CALL_STACK;
+          ctx.rank = rank;
+          ctx.frame_level = entry.level;
+          ctx.line = (entry.line > 0) ? entry.line : -1;
+          ctx.column = -1;
+          ctx.bp_id = -1;
+          ctx.address = entry.address;
+          ctx.symbol_utf8 = fnUtf8.isEmpty() ? nullptr : fnUtf8.constData();
+          ctx.file_utf8 = fileUtf8.isEmpty() ? nullptr : fileUtf8.constData();
+          (void)m_pluginBridge->invokeContextAction(actId, ctx);
+        });
+      }
+    }
+  }
+  return menu;
 }
 
 /**

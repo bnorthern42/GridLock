@@ -4,11 +4,13 @@ Dockable debugger and terminal panels integrated into `MainWindow`'s right and b
 
 ## Contents
 
-- `CallStackDockWidget.hpp` (`137` lines), `CallStackDockWidget.cpp`:
-  - Combines an OS/OpenMP thread selector (`threadSelectorCombo`) with a 64-frame unwound call stack table (`callStackTable`).
+- `CallStackDockWidget.hpp` (`148` lines), `CallStackDockWidget.cpp`:
+  - Combines an OS/OpenMP thread selector (`threadSelectorCombo`) with a 64-frame unwound call stack table (`callStackTable`) and **Plugin Actions** context menus (`GRIDLOCK_SURFACE_CALL_STACK`).
   - Clicking any caller frame or switching active threads synchronizes `SourceCodeView`, `DisassemblyView`, `VariablesDockWidget`, and `RegisterView`.
-- `VariablesDockWidget.hpp` (`156` lines), `VariablesDockWidget.cpp`:
-  - Hierarchical local/watch tree wrapping `VariableTreeModel` and `QSortFilterProxyModel`.
+- `PluginReportDockWidget.hpp` (`96` lines), `PluginReportDockWidget.cpp`:
+  - Host-owned closable `QTabWidget` dock (`PluginReportDock`) rendering C99 plugin report panels in `MARKDOWN` (`QTextBrowser`), `KEY_VALUE_TABLE` (`QTableWidget`), and `JSON_TREE` (`QTreeWidget`) formats.
+- `VariablesDockWidget.hpp` (`170` lines), `VariablesDockWidget.cpp`:
+  - Hierarchical local/watch tree wrapping `VariableTreeModel` and `QSortFilterProxyModel`, exposing **Plugin Actions** context menus for both `register_variable_action` and `GRIDLOCK_SURFACE_VARIABLES`.
   - Supports MPI rank switching, substring filtering, inline value editing, and lazy struct/pointer child expansion.
 - `TerminalDockWidget.hpp` (`198` lines), `TerminalDockWidget.cpp` (`467` lines):
   - Embedded VT100/truecolor PTY terminal emulator wrapping `QTermWidget`.

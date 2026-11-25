@@ -9,7 +9,11 @@
 
 #include "ServerRackView.hpp"
 #include "../../core/managers/ThemeManager.hpp"
+#include "../../core/plugins/PluginHostBridge.hpp"
+#include <memory>
 #include <QApplication>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <QPalette>
 #include <QPainter>
 #include <QPainterPath>
@@ -455,6 +459,66 @@ void ServerRackView::onItemClicked(QListWidgetItem* item) {
         int rankId = item->data(Qt::UserRole).toInt();
         selectRank(rankId);
     }
+}
+
+QMenu* ServerRackView::createContextMenuForRank(int rankId, QWidget* menuParent) {
+    if (rankId < 0 || rankId >= count()) return nullptr;
+    selectRank(rankId);
+    const auto stIt = m_states.find(rankId);
+    const RankState st = (stIt != m_states.end()) ? stIt->second : RankState{};
+    const QString stateStr = st.currentState.trimmed().isEmpty() ? QStringLiteral("idle") : st.currentState.trimmed();
+
+    auto* menu = new QMenu(menuParent ? menuParent : this);
+    menu->addAction(QStringLiteral("Focus Rank %1 (%2)").arg(rankId).arg(badgeTextForState(stateStr)),
+                    this, [this, rankId]() { selectRank(rankId); });
+
+    if (m_pluginBridge != nullptr) {
+        const auto matches = m_pluginBridge->matchingContextActions(GRIDLOCK_SURFACE_RANK_LIST, stateStr.left(2048));
+        if (!matches.isEmpty()) {
+            menu->addSeparator();
+            QMenu* plugSub = menu->addMenu(QStringLiteral("Plugin Actions"));
+            plugSub->setObjectName(QStringLiteral("rankListPluginActionsMenu"));
+            const uint64_t pcAddr = rankPcAddress(rankId);
+            for (const auto& act : matches) {
+                const QString actId = act.actionId;
+                QAction* pAct = plugSub->addAction(act.menuLabel);
+                pAct->setObjectName(QStringLiteral("pluginCtxAct_") + actId);
+                connect(pAct, &QAction::triggered, this, [this, actId, rankId, pcAddr, st, stateStr]() {
+                    if (m_pluginBridge == nullptr) return;
+                    const QByteArray symUtf8 = (st.currentFunction.isEmpty() ? stateStr : st.currentFunction).toUtf8();
+                    const QByteArray stateUtf8 = stateStr.toUtf8();
+                    const QByteArray fileUtf8 = st.currentFile.toUtf8();
+                    GridLockSurfaceContext ctx{};
+                    ctx.struct_size = static_cast<uint32_t>(sizeof(GridLockSurfaceContext));
+                    ctx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+                    ctx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+                    ctx.surface = GRIDLOCK_SURFACE_RANK_LIST;
+                    ctx.rank = rankId;
+                    ctx.frame_level = 0;
+                    ctx.line = (st.currentLine > 0) ? st.currentLine : -1;
+                    ctx.column = -1;
+                    ctx.bp_id = -1;
+                    ctx.address = pcAddr;
+                    ctx.symbol_utf8 = symUtf8.constData();
+                    ctx.type_utf8 = stateUtf8.constData();
+                    ctx.file_utf8 = fileUtf8.isEmpty() ? nullptr : fileUtf8.constData();
+                    ctx.selected_text_utf8 = stateUtf8.constData();
+                    (void)m_pluginBridge->invokeContextAction(actId, ctx);
+                });
+            }
+        }
+    }
+    return menu;
+}
+
+void ServerRackView::contextMenuEvent(QContextMenuEvent* event) {
+    if (!event) return;
+    QListWidgetItem* clicked = itemAt(event->pos());
+    if (!clicked && currentItem()) clicked = currentItem();
+    if (!clicked) return;
+    const int rankId = clicked->data(Qt::UserRole).toInt();
+    std::unique_ptr<QMenu> menu(createContextMenuForRank(rankId, this));
+    if (menu) menu->exec(event->globalPos());
 }
 
 /**

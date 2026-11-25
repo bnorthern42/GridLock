@@ -207,6 +207,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     cfg.registerMenuBarWindowControlsListener(this, [this](bool vis) { setMenuBarWindowControlsVisible(vis); });
     applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
     syncCoordinatorWithConfig();
+    initializePluginSubsystem();
     bindLiveMemViewHandlers();
     if (m_variablesDockWidget) connect(m_variablesDockWidget, &gridlock::VariablesDockWidget::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);
     if (m_registerView) connect(m_registerView, &RegisterView::sendToCalculatorRequested, this, &MainWindow::openProgrammerCalculatorWithText, Qt::UniqueConnection);

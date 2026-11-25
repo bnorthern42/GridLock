@@ -25,6 +25,7 @@
 #include <QTemporaryFile>
 #include <QThreadPool>
 #include <atomic>
+#include <functional>
 #include "../../core/utils/ClangdLspClient.hpp"
 #include "EditorSyntaxHighlighter.hpp"
 
@@ -570,8 +571,37 @@ public:
     /** @brief Builds and returns a caller-owned editor context menu for @p editorPos (`nullptr` over the gutter). */
     QMenu* createEditorContextMenuAt(const QPoint& editorPos);
 
+    /** @brief Builds and returns a caller-owned breakpoint gutter context menu for @p lineOneBased. */
+    QMenu* createBreakpointContextMenuAtLine(int lineOneBased, QWidget* menuParent = nullptr);
+
     /** @brief Headless-safe helper invoking the first context-menu action matching @p actionSubstring on @p lineOneBased. */
     bool triggerContextActionAtLine(int lineOneBased, const QString& actionSubstring);
+
+    /** @brief Inline plugin diagnostic/badge annotation rendered alongside source text on a 1-based line. */
+    struct PluginLineAnnotation {
+        QString pluginId;
+        QString annotationId;
+        int line = 0;
+        QString badgeText;
+        QString detailText;
+        QString colorToken;
+    };
+
+    using EditorPluginMenuHook = std::function<void(QMenu*, const QString&, int, int, const QString&, const QString&)>;
+    using BreakpointPluginMenuHook = std::function<void(QMenu*, const QString&, int, int)>;
+
+    /** @brief Installs a callback appending plugin context actions to the editor right-click menu. */
+    void setEditorPluginMenuHook(EditorPluginMenuHook hook) { m_editorPluginMenuHook = std::move(hook); }
+    /** @brief Installs a callback appending plugin context actions to the breakpoint gutter menu. */
+    void setBreakpointPluginMenuHook(BreakpointPluginMenuHook hook) { m_breakpointPluginMenuHook = std::move(hook); }
+    /** @brief Inserts or updates an inline plugin line annotation and repaints the viewport. */
+    void upsertPluginAnnotation(const PluginLineAnnotation& annotation);
+    /** @brief Removes plugin annotations matching @p pluginId and optional @p idPrefix. */
+    void clearPluginAnnotations(const QString& pluginId = QString(), const QString& idPrefix = QString());
+    /** @brief Returns all active plugin line annotations on this editor buffer. */
+    QVector<PluginLineAnnotation> pluginAnnotations() const { return m_pluginAnnotations; }
+    /** @brief Returns plugin annotations attached to 1-based @p lineOneBased. */
+    QVector<PluginLineAnnotation> pluginAnnotationsForLine(int lineOneBased) const;
 
 signals:
     /** @brief Emitted to request running the target application. */
@@ -698,6 +728,9 @@ private:
     QMap<int, BreakpointVisualInfo> m_breakpointInfo;
     QHash<int, GitLineState> m_gitLineStates;
     QVector<core::utils::LspDiagnostic> m_diagnostics;
+    QVector<PluginLineAnnotation> m_pluginAnnotations;
+    EditorPluginMenuHook m_editorPluginMenuHook;
+    BreakpointPluginMenuHook m_breakpointPluginMenuHook;
     QMap<QString, QString> m_inlineVarValues;
     QString m_currentFilePath;
     QString m_lastHoveredWord;

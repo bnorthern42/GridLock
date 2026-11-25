@@ -4,9 +4,9 @@ Primary source editor, fast CSV table preview, disassembly/CFG/decompiler panes,
 
 ## Contents
 
-- `SourceCodeView.hpp` (`837`), `SourceCodeView.cpp` (`446`), `SourceCodeViewInteraction.cpp` (`463`), `EditorSyntaxHighlighter.{hpp,cpp}`:
-  - Breakpoint-gutter editor (`LineNumberArea`), active-line stepper highlight, rainbow brackets, and two-lane gutter badge painting (`SourceCodeView.cpp`).
-  - Context menus, breakpoint popovers, PC drag-and-drop, hover inspect, inline variable ghost values, `clangd` completion/F12/rename, and Git diff hunk parsing (`SourceCodeViewInteraction.cpp`).
+- `SourceCodeView.hpp` (`879`), `SourceCodeView.cpp` (`511`), `SourceCodeViewInteraction.cpp` (`556`), `EditorSyntaxHighlighter.{hpp,cpp}`:
+  - Breakpoint-gutter editor (`LineNumberArea`), active-line stepper highlight, inline plugin annotations (`PluginLineAnnotation`), rainbow brackets, and two-lane gutter badge painting (`SourceCodeView.cpp`).
+  - Context menus (including `GRIDLOCK_SURFACE_CODE_EDITOR` and `GRIDLOCK_SURFACE_BREAKPOINTS` **Plugin Actions** hooks), breakpoint popovers, PC drag-and-drop, hover inspect, inline variable ghost values, `clangd` completion/F12/rename, and Git diff hunk parsing (`SourceCodeViewInteraction.cpp`).
   - Files `>= 512 KB` (`kLargeFileThresholdBytes`) or `.csv`/`.tsv` files (`isPlainDataFile`) disable synchronous C++ syntax highlighting, rainbow brackets, and `clangd`.
 - `CsvTablePreviewWidget.hpp` (`140`), `CsvTablePreviewWidget.cpp`:
   - Virtualized `QAbstractTableModel` (`CsvVirtualTableModel`) + `QTableView` indexing newline offsets over large `.csv`/`.tsv` files (`>= 256 KB`), with a raw-text preview toggle.
@@ -20,8 +20,8 @@ Primary source editor, fast CSV table preview, disassembly/CFG/decompiler panes,
   - Controls, `>= 4 KB` `LD_PRELOAD` interposer compilation, and `/proc/<pid>/smaps` + `.tsv` VMA aggregation (`MemoryProfilerWidget.cpp`), plus `MemoryTreemapCanvas`, scientific/Okabe-Ito palettes, and sortable breakdown table population (`MemoryProfilerChart.cpp`).
 - `RegisterView.hpp` (`175`), `RegisterView.cpp`:
   - Per-rank/per-thread GP/SIMD register table with value-delta highlighting.
-- `ServerRackView.hpp` (`182`), `ServerRackView.cpp`:
-  - Custom-painted vertical MPI rank hardware blade slivers showing stopped, running, and deadlocked status.
+- `ServerRackView.hpp` (`202`), `ServerRackView.cpp`:
+  - Custom-painted vertical MPI rank hardware blade slivers showing stopped, running, and deadlocked status, with right-click **Plugin Actions** context menus (`GRIDLOCK_SURFACE_RANK_LIST`).
 
 ## Expected Behavior & Invariants
 

@@ -17,6 +17,12 @@
 #include <QVector>
 #include <QWidget>
 
+class QMenu;
+
+namespace gridlock::core::plugins {
+class PluginHostBridge;
+}  // namespace gridlock::core::plugins
+
 namespace gridlock::ui {
 
 /**
@@ -77,6 +83,15 @@ class CallStackDockWidget : public QWidget {
   /** @brief Returns the function name of the currently active stack frame, if known. */
   QString activeFrameFunction() const;
 
+  /** @brief Attaches the native plugin host bridge for `GRIDLOCK_SURFACE_CALL_STACK` context actions. */
+  void setPluginHostBridge(gridlock::core::plugins::PluginHostBridge* bridge) { m_pluginBridge = bridge; }
+
+  /** @brief Updates the zero-based focused MPI rank passed in `GridLockSurfaceContext::rank`. */
+  void setFocusedRank(int rank) { m_focusedRank = (rank >= 0) ? rank : 0; }
+
+  /** @brief Builds a caller-owned context menu for call-stack @p row including matching **Plugin Actions**. */
+  QMenu* createContextMenuForRow(int row, QWidget* menuParent = nullptr);
+
   /**
    * @brief Reapplies active `ThemeManager` palette tokens across header chrome and frame rows.
    */
@@ -132,6 +147,8 @@ class CallStackDockWidget : public QWidget {
   QVector<ThreadEntry> m_threads;         ///< Cached OS/OpenMP threads for the focused MPI rank.
   int m_activeThreadId = 1;               ///< Currently selected 1-based thread identifier.
   int m_activeFrameLevel = 0;             ///< Currently inspected 0-based stack frame level.
+  int m_focusedRank = 0;                  ///< Zero-based MPI rank owning the displayed stack trace.
+  gridlock::core::plugins::PluginHostBridge* m_pluginBridge = nullptr;
 };
 
 }  // namespace gridlock::ui

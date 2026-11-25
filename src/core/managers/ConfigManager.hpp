@@ -329,6 +329,37 @@ class ConfigManager {
   /** @brief Persists user-customized shortcut overrides to QSettings and global TOML configuration. */
   void setCustomShortcuts(const QMap<QString, QKeySequence>& overrides);
 
+  /** @brief Returns deduplicated plugin IDs disabled under `[plugins] disabled_ids` in `config.toml`. */
+  QStringList disabledPluginIds() const;
+  /** @brief Persists `[plugins] disabled_ids` to `config.toml` and `QSettings`. */
+  void setDisabledPluginIds(const QStringList& ids);
+  /** @brief Returns true if @p pluginId appears in `disabledPluginIds()`. */
+  bool isPluginDisabled(const QString& pluginId) const;
+  /** @brief Adds or removes @p pluginId in `[plugins] disabled_ids` and persists immediately. */
+  void setPluginDisabled(const QString& pluginId, bool disabled);
+
+  /** @brief Returns plugin IDs disabled for the active workspace under `[plugins.workspaces."<path>"]`. */
+  QStringList workspaceDisabledPluginIds() const;
+  /** @brief Persists `workspace_disabled_ids` for the active workspace in user-global `config.toml`. */
+  void setWorkspaceDisabledPluginIds(const QStringList& ids);
+  /** @brief Returns true when @p pluginId is enabled globally (not in `[plugins] disabled_ids`). */
+  bool isPluginGloballyEnabled(const QString& pluginId) const;
+  /** @brief Persists global enablement state for @p pluginId in user-global `config.toml`. */
+  void setPluginGloballyEnabled(const QString& pluginId, bool enabled);
+  /** @brief Returns true when @p pluginId is enabled in the active workspace. */
+  bool isPluginWorkspaceEnabled(const QString& pluginId) const;
+  /** @brief Persists active-workspace enablement state for @p pluginId in user-global `config.toml`. */
+  void setPluginWorkspaceEnabled(const QString& pluginId, bool enabled);
+  /** @brief Returns true when @p pluginId is enabled both globally and for the active workspace. */
+  bool effectivePluginEnabled(const QString& pluginId) const;
+
+  /** @brief Returns true when @p canonicalPath matches @p sha256Hex in `[plugins.trusted_workspace_binaries]`. */
+  bool isWorkspacePluginTrusted(const QString& canonicalPath, const QString& sha256Hex) const;
+  /** @brief Records @p canonicalPath -> lowercase @p sha256Hex under `[plugins.trusted_workspace_binaries]`. */
+  void trustWorkspacePlugin(const QString& canonicalPath, const QString& sha256Hex);
+  /** @brief Removes @p canonicalPath from `[plugins.trusted_workspace_binaries]` in `config.toml`. */
+  void revokeWorkspacePluginTrust(const QString& canonicalPath);
+
   /** @brief Returns the canonical GridLock configuration directory (`~/.config/gridlock`, or `GRIDLOCK_TEST_CONFIG_DIR`). */
   static QString configDirectory() {
     if (qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR")) {

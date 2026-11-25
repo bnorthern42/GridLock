@@ -16,6 +16,9 @@ Look at the top-left of the main toolbar (outlined in cyan above):
    * To open your own file or binary instead, choose **`Open ELF / Binary...`** at the bottom of **`TARGET:`**, or use **`File -> Open Source File`**.
 2. Click **`⚙ Build`** on the toolbar (or press **`Ctrl+B`**, or choose **`Tools -> Build Target`**) to compile the target with debug symbols (`mpicxx -g -O0`). Clicking **`▶ Run Target`** also compiles any unbuilt tutorial file automatically.
 
+> [!IMPORTANT]
+> Always keep `-g -O0` enabled when running the tutorial labs so DWARF locals (`data`, `packet`, `left_ghost`, `send_tag`) and exact source line numbers match the step-by-step instructions.
+
 ### Step 2: Set the MPI Rank Count (`-np`)
 1. Next to **`TARGET:`**, find the **`RANKS (-np):`** spinbox.
 2. Set it to **`4`** (you can choose anywhere from `1` to `256` processes).
@@ -98,6 +101,9 @@ int main(int argc, char** argv) {
 
 ### Why This Program Hangs
 In `tutorial/deadlock_ring.cpp`, every rank tries to pass a 64 KB `std::vector<int>` (`16384 * 4` bytes) to its right neighbor (`next_rank`) using a synchronous-mode blocking `MPI_Send` **before** calling `MPI_Recv` from its left neighbor (`prev_rank`). Small MPI messages often fit inside an internal library buffer ("eager" protocol) and return immediately, hiding the bug. Once the payload exceeds that threshold (typically 4 KB to 32 KB), `MPI_Send` switches to the "rendezvous" protocol and blocks until the receiver posts `MPI_Recv`. Because every rank is stuck on line 34 waiting for the next rank in the ring, nobody ever reaches line 36.
+
+> [!TIP]
+> Because small buffers (`< 4 KB`) can pass under OpenMPI/MPICH's eager protocol and fail only when problem sizes scale up, `deadlock_ring.cpp` uses 64 KB (`16384` `int`s) to reproduce the production rendezvous hang deterministically on 2+ ranks.
 
 ### Source Code (`tutorial/deadlock_ring.cpp`, lines 23-40)
 ```cpp
@@ -242,6 +248,9 @@ Not all MPI bugs hang; silent numerical corruption is often harder to catch. `tu
    * In **`WATCH`**, look at `Rank 2`: `send_right` is **`nan`**, while `left_ghost` on `Rank 2` is still a valid number (`110.0`).
    * Look one row down at `Rank 3` (Rank 2's right neighbor): `Rank 3`'s `left_ghost` has just turned **`nan`** because line 53 received `send_right` from Rank 2!
    * Click **`⏭ Continue`** (`F5`) once (if you used `Ignore: 3` rather than `step == 3`) to advance to `step == 4` and watch `nan` propagate inward across `domain`.
+
+> [!TIP]
+> Pairing conditional/ignore-count breakpoints (`step == 3` or `Ignore: 3`) with **`WATCH`** minority-consensus highlighting lets you fast-forward cleanly to the exact iteration where numerical divergence starts without stepping manually through healthy iterations.
 6. **How to Fix the Bug**: Delete the `if (step == 3 && rank == faulty_rank)` block on lines `48-50` (and in real stencil codes, verify boundary indices `0` and `domain.size() - 1` never read one element past the local buffer).
 
 ---
