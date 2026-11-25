@@ -349,8 +349,7 @@ void PluginManager::shutdownAndUnloadHandle(ActivePluginHandle& handle) {
     ScopedCallbackDepth guard(this);
     handle.descriptor.shutdown(handle.descriptor.plugin_ctx, api);
   }
-  m_bridge.unregisterPluginActions(handle.id);
-  m_bridge.unregisterPluginBreakpoints(handle.id);
+  m_bridge.unregisterPluginResources(handle.id);
   if (handle.library) { handle.library->unload(); handle.library.reset(); }
 }
 
@@ -496,6 +495,19 @@ void PluginManager::notifySessionEnded() {
   for (size_t i = 0; i < m_activePlugins.size() && !m_pendingUnloadAll && !m_pendingDiscoverAndLoad; ++i) {
     auto& h = m_activePlugins[i];
     if (h.descriptor.on_session_end != nullptr) (void)h.descriptor.on_session_end(h.descriptor.plugin_ctx, h.hostApi.get());
+  }
+}
+
+void PluginManager::notifyThemeChanged(const GridLockThemeInfo& theme) {
+  ScopedCallbackDepth guard(this);
+  for (size_t i = 0; i < m_activePlugins.size() && !m_pendingUnloadAll && !m_pendingDiscoverAndLoad; ++i) {
+    auto& h = m_activePlugins[i];
+    if (h.descriptor.on_theme_changed != nullptr) {
+      try {
+        h.descriptor.on_theme_changed(h.descriptor.plugin_ctx, &theme);
+      } catch (...) {
+      }
+    }
   }
 }
 

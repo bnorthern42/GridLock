@@ -159,6 +159,9 @@ class PluginManager : public QObject {
   /** @brief Dispatches `on_session_end` to every active plugin that defines the hook. */
   void notifySessionEnded();
 
+  /** @brief Broadcasts `on_theme_changed` with @p theme to every active plugin that defines the hook. */
+  void notifyThemeChanged(const GridLockThemeInfo& theme);
+
  signals:
   /** @brief Emitted whenever the discovered/enabled/trusted plugin list changes. */
   void pluginsChanged();

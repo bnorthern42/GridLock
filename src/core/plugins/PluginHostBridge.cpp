@@ -1,6 +1,6 @@
 /**
  * @file PluginHostBridge.cpp
- * @brief Implementation of the thread-safe synchronous `GridLockHostApi` bridge.
+ * @brief Implementation of the thread-safe synchronous `GridLockHostApi` bridge and UI/editor/report handlers.
  */
 
 #include "PluginHostBridge.hpp"
@@ -9,6 +9,7 @@
 #include <sys/uio.h>
 #endif
 
+#include <cstdio>
 #include <cstring>
 
 #include <QByteArray>
@@ -32,9 +33,6 @@ constexpr size_t kMaxPluginMemoryBytes = 64u * 1024u * 1024u;
 constexpr size_t kMaxPluginWriteBytes = 16u * 1024u * 1024u;
 constexpr size_t kPluginReadChunkBytes = 65536u;
 constexpr size_t kPluginWriteChunkBytes = 16384u;
-constexpr size_t kMaxTypeRegexBytes = 512u;
-constexpr size_t kMaxStructuredEventPayloadBytes = 1024u * 1024u;
-constexpr size_t kMaxLogMessageBytes = 16u * 1024u;
 
 bool hasControlChars(const char* raw, const QString& decoded) noexcept {
   if (raw != nullptr) {
@@ -105,20 +103,62 @@ struct CoordinatorReplyWaiter {
   }
 };
 
+template <typename CallbackFn>
+GridLockStatus dispatchGuardedCallback(const PluginBindingContext* bindingCtx,
+                                       const std::function<void(bool)>& scopeHook,
+                                       CallbackFn&& fn) noexcept {
+  if (bindingCtx != nullptr && bindingCtx->shuttingDown.load(std::memory_order_acquire)) {
+    return GRIDLOCK_ERR_UNSUPPORTED;
+  }
+  struct ScopeGuard {
+    std::function<void(bool)> hook;
+    ~ScopeGuard() { if (hook) hook(false); }
+  } guard{scopeHook};
+  if (guard.hook) guard.hook(true);
+  try {
+    return fn();
+  } catch (...) {
+    return GRIDLOCK_ERR_UNSUPPORTED;
+  }
+}
+
 }  // namespace
 
 PluginHostBridge::PluginHostBridge(gridlock::GdbRankCoordinator* coordinator, QObject* parent)
     : QObject(parent), m_coordinator(coordinator) {
+  qRegisterMetaType<gridlock::core::plugins::PluginStatusItem>("gridlock::core::plugins::PluginStatusItem");
+  qRegisterMetaType<gridlock::core::plugins::PluginEditorAnnotation>("gridlock::core::plugins::PluginEditorAnnotation");
+  qRegisterMetaType<gridlock::core::plugins::PluginReportPanel>("gridlock::core::plugins::PluginReportPanel");
   m_defaultContext.bridge = this;
   m_hostApi = makeHostApi(&m_defaultContext);
   m_defaultContext.boundApi = &m_hostApi;
 }
 
 void PluginHostBridge::setCoordinator(gridlock::GdbRankCoordinator* coordinator) {
-  std::lock_guard<std::mutex> lock(m_mutex); m_coordinator = coordinator;
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_coordinator = coordinator;
 }
 gridlock::GdbRankCoordinator* PluginHostBridge::coordinator() const {
-  std::lock_guard<std::mutex> lock(m_mutex); return m_coordinator.data();
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_coordinator.data();
+}
+
+GridLockStatus PluginHostBridge::runOnGuiThread(const PluginBindingContext* ctx,
+                                                const std::function<GridLockStatus()>& fn) {
+  if (ctx != nullptr && ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
+  if (QThread::currentThread() == this->thread()) return fn();
+  GridLockStatus result = GRIDLOCK_ERR_UNSUPPORTED;
+  const bool ok = QMetaObject::invokeMethod(
+      this,
+      [&]() {
+        if (ctx != nullptr && ctx->shuttingDown.load(std::memory_order_acquire)) {
+          result = GRIDLOCK_ERR_UNSUPPORTED;
+          return;
+        }
+        result = fn();
+      },
+      Qt::BlockingQueuedConnection);
+  return ok ? result : GRIDLOCK_ERR_UNSUPPORTED;
 }
 
 GridLockStatus PluginHostBridge::runOnObjectThread(
@@ -138,11 +178,87 @@ GridLockStatus PluginHostBridge::runOnObjectThread(
   return ok ? result : GRIDLOCK_ERR_UNSUPPORTED;
 }
 
+void PluginHostBridge::beginInitStaging() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_stagingActive = true;
+  m_stagedVariableActions.clear();
+  m_stagedCommandActions.clear();
+  m_stagedMenuActions.clear();
+  m_stagedStatusItems.clear();
+  m_stagedContextActions.clear();
+  m_stagedEditorAnnotations.clear();
+  m_stagedReportPanels.clear();
+}
+
+bool PluginHostBridge::commitStagedActions(const QString& pluginId, const GridLockHostApi* pluginHostApi) {
+  bool regChanged = false, menusChanged = false, ctxChanged = false;
+  QVector<PluginStatusItem> committedStatus;
+  QVector<PluginEditorAnnotation> committedAnnotations;
+  QVector<PluginReportPanel> committedPanels;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (const auto& a : m_stagedVariableActions)
+      if (std::any_of(m_variableActions.cbegin(), m_variableActions.cend(),
+                      [&](const auto& x) { return x.actionId == a.actionId; })) return false;
+    for (const auto& c : m_stagedCommandActions)
+      if (std::any_of(m_commandActions.cbegin(), m_commandActions.cend(),
+                      [&](const auto& x) { return x.commandId == c.commandId; })) return false;
+    for (const auto& m : m_stagedMenuActions)
+      if (std::any_of(m_menuActions.cbegin(), m_menuActions.cend(),
+                      [&](const auto& x) { return x.actionId == m.actionId; })) return false;
+    for (const auto& s : m_stagedContextActions)
+      if (std::any_of(m_contextActions.cbegin(), m_contextActions.cend(),
+                      [&](const auto& x) { return x.actionId == s.actionId; })) return false;
+
+    m_stagingActive = false;
+    for (auto& a : m_stagedVariableActions) {
+      a.pluginId = pluginId; if (pluginHostApi) a.hostApi = pluginHostApi;
+      m_variableActions.append(std::move(a)); regChanged = true;
+    }
+    for (auto& c : m_stagedCommandActions) {
+      c.pluginId = pluginId; if (pluginHostApi) c.hostApi = pluginHostApi;
+      m_commandActions.append(std::move(c)); regChanged = true;
+    }
+    for (auto& m : m_stagedMenuActions) {
+      m.pluginId = pluginId; if (pluginHostApi) m.hostApi = pluginHostApi;
+      m_menuActions.append(std::move(m)); menusChanged = true;
+    }
+    for (auto& s : m_stagedContextActions) {
+      s.pluginId = pluginId; if (pluginHostApi) s.hostApi = pluginHostApi;
+      m_contextActions.append(std::move(s)); ctxChanged = true;
+    }
+    for (auto& st : m_stagedStatusItems) {
+      st.pluginId = pluginId; if (pluginHostApi) st.hostApi = pluginHostApi;
+      committedStatus.append(st); m_statusItems.append(std::move(st));
+    }
+    for (auto& ann : m_stagedEditorAnnotations) {
+      ann.pluginId = pluginId; committedAnnotations.append(ann); m_editorAnnotations.append(std::move(ann));
+    }
+    for (auto& rp : m_stagedReportPanels) {
+      rp.pluginId = pluginId; committedPanels.append(rp); m_reportPanels.append(std::move(rp));
+    }
+    for (auto& bp : m_breakpoints) if (bp.staged) { bp.pluginId = pluginId; bp.staged = false; }
+    m_stagedVariableActions.clear(); m_stagedCommandActions.clear(); m_stagedMenuActions.clear();
+    m_stagedStatusItems.clear(); m_stagedContextActions.clear(); m_stagedEditorAnnotations.clear();
+    m_stagedReportPanels.clear();
+  }
+  if (regChanged) emit registeredActionsChanged();
+  if (menusChanged) emit menuActionsChanged();
+  if (ctxChanged) emit contextActionsChanged();
+  for (const auto& st : committedStatus) emit statusItemUpdated(st);
+  for (const auto& ann : committedAnnotations) emit editorAnnotationUpdated(ann);
+  for (const auto& rp : committedPanels) emit reportViewPublished(rp);
+  return true;
+}
+
 void PluginHostBridge::discardStagedActions() {
   QVector<PluginBreakpointRecord> toClear;
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_stagingActive = false; m_stagedVariableActions.clear(); m_stagedCommandActions.clear();
+    m_stagingActive = false;
+    m_stagedVariableActions.clear(); m_stagedCommandActions.clear(); m_stagedMenuActions.clear();
+    m_stagedStatusItems.clear(); m_stagedContextActions.clear(); m_stagedEditorAnnotations.clear();
+    m_stagedReportPanels.clear();
     QVector<PluginBreakpointRecord> stagedBps;
     for (auto it = m_breakpoints.begin(); it != m_breakpoints.end();) {
       if (it.value().staged) { stagedBps.append(it.value()); it = m_breakpoints.erase(it); } else ++it;
@@ -159,6 +275,25 @@ void PluginHostBridge::discardStagedActions() {
       return GRIDLOCK_OK;
     });
   }
+}
+
+void PluginHostBridge::unregisterPluginActions(const QString& pluginId) {
+  bool regRemoved = false, menuRemoved = false, ctxRemoved = false;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto bVar = m_variableActions.size(), bCmd = m_commandActions.size();
+    const auto bMenu = m_menuActions.size(), bCtx = m_contextActions.size();
+    m_variableActions.removeIf([&](const auto& a) { return a.pluginId == pluginId; });
+    m_commandActions.removeIf([&](const auto& c) { return c.pluginId == pluginId; });
+    m_menuActions.removeIf([&](const auto& m) { return m.pluginId == pluginId; });
+    m_contextActions.removeIf([&](const auto& s) { return s.pluginId == pluginId; });
+    regRemoved = (m_variableActions.size() != bVar) || (m_commandActions.size() != bCmd);
+    menuRemoved = (m_menuActions.size() != bMenu);
+    ctxRemoved = (m_contextActions.size() != bCtx);
+  }
+  if (regRemoved) emit registeredActionsChanged();
+  if (menuRemoved) emit menuActionsChanged();
+  if (ctxRemoved) emit contextActionsChanged();
 }
 
 void PluginHostBridge::unregisterPluginBreakpoints(const QString& pluginId) {
@@ -182,6 +317,112 @@ void PluginHostBridge::unregisterPluginBreakpoints(const QString& pluginId) {
       return GRIDLOCK_OK;
     });
   }
+}
+
+void PluginHostBridge::unregisterPluginResources(const QString& pluginId) {
+  if (pluginId.isEmpty()) return;
+  unregisterPluginActions(pluginId);
+  unregisterPluginBreakpoints(pluginId);
+
+  QStringList removedStatusIds, closedReportIds;
+  bool hadAnnotations = false;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_cachedPrompt.pluginId == pluginId) m_cachedPrompt = CachedPromptReply{};
+    for (const auto& st : m_statusItems) if (st.pluginId == pluginId) removedStatusIds.append(st.itemId);
+    m_statusItems.removeIf([&](const auto& st) { return st.pluginId == pluginId; });
+
+    const auto bAnn = m_editorAnnotations.size();
+    m_editorAnnotations.removeIf([&](const auto& a) { return a.pluginId == pluginId; });
+    hadAnnotations = (m_editorAnnotations.size() != bAnn);
+
+    for (const auto& rp : m_reportPanels) if (rp.pluginId == pluginId) closedReportIds.append(rp.panelId);
+    m_reportPanels.removeIf([&](const auto& rp) { return rp.pluginId == pluginId; });
+  }
+  for (const QString& id : removedStatusIds) emit statusItemRemoved(pluginId, id);
+  if (hadAnnotations) emit editorAnnotationsCleared(pluginId, QString());
+  for (const QString& id : closedReportIds) emit reportViewClosed(pluginId, id);
+}
+
+GridLockStatus PluginHostBridge::invokeVariableAction(const QString& actionId,
+                                                      const GridLockVariableContext& varCtx) {
+  RegisteredVariableAction target;
+  std::function<void(bool)> hook;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = std::find_if(m_variableActions.cbegin(), m_variableActions.cend(),
+                           [&](const auto& a) { return a.actionId == actionId; });
+    if (it == m_variableActions.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    target = *it; hook = m_callbackScopeHook;
+  }
+  return dispatchGuardedCallback(target.bindingCtx, hook, [&]() {
+    return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi, &varCtx);
+  });
+}
+
+GridLockStatus PluginHostBridge::invokeCommandAction(const QString& commandId,
+                                                     const GridLockCommandSpec& cmdSpec) {
+  RegisteredCommandAction target;
+  std::function<void(bool)> hook;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = std::find_if(m_commandActions.cbegin(), m_commandActions.cend(),
+                           [&](const auto& c) { return c.commandId == commandId; });
+    if (it == m_commandActions.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    target = *it; hook = m_callbackScopeHook;
+  }
+  return dispatchGuardedCallback(target.bindingCtx, hook, [&]() {
+    return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi, &cmdSpec);
+  });
+}
+
+GridLockStatus PluginHostBridge::invokeMenuAction(const QString& actionId,
+                                                  const GridLockCommandSpec& cmdSpec) {
+  RegisteredMenuAction target;
+  std::function<void(bool)> hook;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = std::find_if(m_menuActions.cbegin(), m_menuActions.cend(),
+                           [&](const auto& m) { return m.actionId == actionId; });
+    if (it == m_menuActions.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    target = *it; hook = m_callbackScopeHook;
+  }
+  return dispatchGuardedCallback(target.bindingCtx, hook, [&]() {
+    return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi, &cmdSpec);
+  });
+}
+
+GridLockStatus PluginHostBridge::invokeStatusItem(const QString& itemId) {
+  PluginStatusItem target;
+  std::function<void(bool)> hook;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = std::find_if(m_statusItems.cbegin(), m_statusItems.cend(),
+                           [&](const auto& s) { return s.itemId == itemId; });
+    if (it == m_statusItems.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    target = *it; hook = m_callbackScopeHook;
+  }
+  const QByteArray idUtf8 = target.itemId.toUtf8();
+  return dispatchGuardedCallback(target.bindingCtx, hook, [&]() {
+    return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi,
+                           idUtf8.constData());
+  });
+}
+
+GridLockStatus PluginHostBridge::invokeContextAction(const QString& actionId,
+                                                     const GridLockSurfaceContext& surfaceCtx) {
+  RegisteredContextAction target;
+  std::function<void(bool)> hook;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = std::find_if(m_contextActions.cbegin(), m_contextActions.cend(),
+                           [&](const auto& s) { return s.actionId == actionId; });
+    if (it == m_contextActions.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    target = *it; hook = m_callbackScopeHook;
+  }
+  return dispatchGuardedCallback(target.bindingCtx, hook, [&]() {
+    return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi, &surfaceCtx);
+  });
 }
 
 GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbGetRankCount(void* hostCtx, int32_t* outRanks) noexcept {
@@ -281,8 +522,7 @@ GridLockStatus PluginHostBridge::readMemoryOnCoordinatorThread(
     if (coord->isMockRank(rank) && timeoutMs > 20) {
       waiter.waitIfPending(15);
       if (waiter.timedOut && !waiter.aborted) {
-        waiter.timedOut = false;
-        waiter.completed = false;
+        waiter.timedOut = false; waiter.completed = false;
         coord->writeCmd(rank, QStringLiteral("-data-read-memory-bytes 0x%1 %2\n").arg(chunkAddr, 0, 16).arg(chunkLen));
         waiter.waitIfPending(timeoutMs - 15);
       }
@@ -391,7 +631,7 @@ GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbSetBreakpoint(
   try {
     auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
     if (ctx == nullptr || ctx->bridge == nullptr || fileUtf8 == nullptr || fileUtf8[0] == '\0' ||
-        line <= 0 || outBpId == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+         line <= 0 || outBpId == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
     if (ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
 
     const QString file = QString::fromUtf8(fileUtf8);
@@ -444,10 +684,7 @@ GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbRemoveBreakpoint(void* hostCtx,
 
 QVector<RegisteredVariableAction> PluginHostBridge::matchingVariableActions(const QString& typeName) const {
   QVector<RegisteredVariableAction> snapshot;
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    snapshot = m_variableActions;
-  }
+  { std::lock_guard<std::mutex> lock(m_mutex); snapshot = m_variableActions; }
   const QString boundedType = (typeName.size() > 2048) ? typeName.left(2048) : typeName;
   QVector<RegisteredVariableAction> matches;
   for (const auto& act : snapshot) {
@@ -459,74 +696,6 @@ QVector<RegisteredVariableAction> PluginHostBridge::matchingVariableActions(cons
     }
   }
   return matches;
-}
-
-GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbLogMessage(
-    void* hostCtx, GridLockLogLevel level, const char* utf8Msg) noexcept {
-  try {
-    auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
-    if (ctx == nullptr || ctx->bridge == nullptr || utf8Msg == nullptr ||
-        level < GRIDLOCK_LOG_TRACE || level > GRIDLOCK_LOG_ERROR) return GRIDLOCK_ERR_INVALID_ARG;
-    const size_t msgLen = ::strnlen(utf8Msg, kMaxLogMessageBytes);
-    emit ctx->bridge->pluginLogReceived(
-        ctx->pluginId, static_cast<int>(level), QString::fromUtf8(utf8Msg, static_cast<qsizetype>(msgLen)));
-    return GRIDLOCK_OK;
-  } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
-}
-
-GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbRegisterVariableAction(
-    void* hostCtx, const char* actionId, const char* menuLabel, const char* typeRegex,
-    GridLockVariableActionCallback cb, void* pluginCtx) noexcept {
-  try {
-    auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
-    if (ctx == nullptr || ctx->bridge == nullptr || actionId == nullptr || actionId[0] == '\0' ||
-        menuLabel == nullptr || menuLabel[0] == '\0' || typeRegex == nullptr ||
-        typeRegex[0] == '\0' || cb == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
-    if (ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
-    const size_t regexLen = ::strnlen(typeRegex, kMaxTypeRegexBytes + 1u);
-    if (regexLen > kMaxTypeRegexBytes) return GRIDLOCK_ERR_INVALID_ARG;
-
-    const QString rawPattern = QString::fromUtf8(typeRegex, static_cast<qsizetype>(regexLen));
-    const QRegularExpression compiled(QStringLiteral("(*LIMIT_MATCH=10000)(*LIMIT_RECURSION=250)") + rawPattern);
-    if (!compiled.isValid()) return GRIDLOCK_ERR_INVALID_ARG;
-    compiled.optimize();
-
-    auto* self = ctx->bridge;
-    const QString idStr = QString::fromUtf8(actionId);
-    bool notify = false;
-    {
-      std::lock_guard<std::mutex> lock(self->m_mutex);
-      const bool dupActive = !self->m_stagingActive && std::any_of(
-          self->m_variableActions.cbegin(), self->m_variableActions.cend(),
-          [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
-      const bool dupStaged = std::any_of(
-          self->m_stagedVariableActions.cbegin(), self->m_stagedVariableActions.cend(),
-          [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
-      if (dupActive || dupStaged) return GRIDLOCK_ERR_INVALID_ARG;
-      RegisteredVariableAction entry{
-          ctx->pluginId, idStr, QString::fromUtf8(menuLabel), rawPattern,
-          compiled, cb, pluginCtx, (ctx->boundApi != nullptr) ? ctx->boundApi : &self->m_hostApi, ctx};
-      if (self->m_stagingActive) self->m_stagedVariableActions.append(std::move(entry));
-      else { self->m_variableActions.append(std::move(entry)); notify = true; }
-    }
-    if (notify) emit self->registeredActionsChanged();
-    return GRIDLOCK_OK;
-  } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
-}
-
-GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbEmitStructuredEvent(
-    void* hostCtx, const char* channelUtf8, const char* jsonPayloadUtf8) noexcept {
-  try {
-    auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
-    if (ctx == nullptr || ctx->bridge == nullptr || channelUtf8 == nullptr ||
-        channelUtf8[0] == '\0' || jsonPayloadUtf8 == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
-    const size_t payloadLen = ::strnlen(jsonPayloadUtf8, kMaxStructuredEventPayloadBytes + 1u);
-    if (payloadLen > kMaxStructuredEventPayloadBytes) return GRIDLOCK_ERR_INVALID_ARG;
-    emit ctx->bridge->structuredEventEmitted(
-        QString::fromUtf8(channelUtf8),
-        QString::fromUtf8(jsonPayloadUtf8, static_cast<qsizetype>(payloadLen)));
-    return GRIDLOCK_OK;
-  } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
 }
 
 }  // namespace gridlock::core::plugins
