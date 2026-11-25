@@ -70,6 +70,9 @@ GridLock/
 2. **`DapCoordinator` (`DapCoordinator.cpp`, `DapCoordinatorRequests.cpp`)**:
    * Speaks JSON-RPC 2.0 (`Content-Length` framing) to `lldb-dap` (or `lldb-vscode`), mapping 0-based `rankId` to 1-based DAP `threadId`, supporting `launch`, `attach`, `setBreakpoints` (`condition`, `hitCondition`, `logMessage`), `dataBreakpointInfo` / `setDataBreakpoints`, `stackTrace`, `scopes`, `variables`, `evaluate`, `readMemory` (with `NativeMemoryReader` fast path for reads `> 1024` doubles), and `stepBack` / `reverseContinue`.
 
+> [!WARNING]
+> **Coordinator & Translation-Unit Invariants (`agent.md`)**: Disassembly and register queries must never run until a `*stopped` record (with valid thread/frame context) has been parsed, and every `.hpp`/`.cpp` file under `src/` and `tests/` must remain under `1,000` lines (targeting `< 500` lines per module).
+
 ### Floating Diagnostic & Navigation Dialogs (`src/ui/dialogs/`)
 
 * **`CommandPaletteDialog` + `SearchEverywhereEngine` (`search/`)**: Multi-scope Search Everywhere (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`) with 6 tabbed scopes, CamelCase/acronym fuzzy scoring, 2-line workspace-relative rows, 35-line numbered context preview (`250`-line / `32 KB` mega-file cap), and `Small`/`Medium`/`Large`/`X-Large` size presets.

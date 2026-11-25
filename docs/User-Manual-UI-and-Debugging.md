@@ -27,6 +27,9 @@ Press **`Ctrl+M`** at any time to toggle maximizing and restoring the height of 
 * **Dedicated Top Header & `S / M / L / XL` Popup Scale**: Switch scopes by clicking **`All | Files | Symbols | Text | Actions | Ranks`** or pressing `Tab` / `Shift+Tab` (or typing `>`, `@`, `/`, `#`). Click the **`S` / `M` / `L` / `XL`** header pill (or configure `Preferences -> Appearance -> Search Everywhere Popup Size`) to cycle between `Small` (`760x440`), `Medium` (`840x500`), `Large` (`940x560`, default), and `X-Large` (`1080x640`).
 * **2-Line Workspace-Relative Rows & 35-Line Context Preview**: Result rows display full titles above clean workspace-relative sub-labels (`tutorial/deadlock_ring.cpp:34`), paired with a syntax-highlighted **35-line numbered context preview** (capped at `250` lines / `32 KB` for mega-files). Press `Enter` to open in the active editor, `Ctrl+Enter` to open in a split pane, or `Esc` (or click **`ESC`**) to dismiss.
 
+> [!TIP]
+> Press `Double Shift` from anywhere in GridLock to search files, ELF/`clangd` symbols, workspace text, menu actions, themes, and MPI ranks together, and press `Tab` inside the overlay to jump directly to a specific tab.
+
 ---
 
 ## 2. Menu Bar Reference
@@ -103,6 +106,9 @@ Press **`Ctrl+M`** at any time to toggle maximizing and restoring the height of 
 * **Draggable Gutter PC Arrow & Set Next Statement / Jump (`-exec-jump`)**: Drag the active execution `▶` arrow vertically inside `SourceCodeView`'s gutter to another line (or use `Debug -> Set Next Statement / Jump...` or right-click **`Set Next Statement / Jump Here`**). Before executing `-exec-jump`, `MainWindow::checkJumpLexicalScopeHazard` checks whether the jump crosses function boundaries, enters/exits lexical `{}` scopes, or skips local variable declarations and asks for confirmation if a hazard is detected.
 * **Force Early Return (`-exec-return`)**: Choose `Debug -> Force Early Return...` or right-click any row in **`CALL STACK`** to force an immediate return from the active frame, optionally supplying a C/C++ return expression (leave empty for `void` functions).
 
+> [!CAUTION]
+> Non-linear execution controls (`Set Next Statement / Jump` and `Force Early Return`) mutate the target rank's instruction pointer or unwind its stack frame without invoking skipped C++ constructors/destructors or MPI collective barriers. Confirm the lexical scope warning before jumping across variable initializations.
+
 ### Row 2: `Address Space Navigation` Ribbon (`22px`, Contextual to `BINARY` / Disassembly)
 
 Displays proportional clickable segments for the loaded ELF64 binary: **`.plt`**, **`.text`** (annotated with `sym.main`), **`.rodata`**, **`.data`** (or **`.bss`**), plus a live **`stack 0x<rsp>`** segment while a debugging session is active. Clicking any segment seeks both `DisassemblyView` and `MemView` to that section's base virtual address.
@@ -168,10 +174,13 @@ Open **`Debug -> Process Checkpoints...`** (`Ctrl+Alt+K`) to save and restore li
 ![Copy-on-Write Process Checkpoints dialog with /proc safety banner](screenshots/v087_cow_checkpoints.png)
 
 * **Pre-Checkpoint `/proc/[pid]/fd` & `/proc/[pid]/maps` Safety Scanner**: Before creating a fork snapshot, `inspectProcessCheckpointSafety()` inspects open file descriptors and memory mappings for the focused rank's PID and displays a color-coded status banner plus expandable `/proc` diagnostics:
-  * **`SAFE`** (green): No external sockets, pipes, shared-memory IPC, RDMA verbs, or GPU device mappings detected.
-  * **`WARNING: Active Sockets / Pipes / SHM`** (amber): Active `socket:[...]`, `pipe:[...]`, `eventfd`, `/dev/shm/`, `SYSV`, or writable file handles (typical for OpenMPI/MPICH ranks; safe for local single-rank forks if collective barriers are not crossed).
-  * **`UNSAFE: RDMA / GPU Device Mapping Detected`** (red): Active `/dev/infiniband/*`, `uverbs`, `mlx5`, `/dev/nvidia*`, `/dev/kfd`, or `/dev/dri/` device handles/VMAs where `fork()` can trigger `EFAULT` or driver faults.
+  * **`SAFE`** (`#15803d` badge, `#22c55e` border): No external sockets, pipes, shared-memory IPC, RDMA verbs, or GPU device mappings detected.
+  * **`WARNING: Active Sockets / Pipes / SHM`** (`#b45309` badge, `#f59e0b` border): Active `socket:[...]`, `pipe:[...]`, `eventfd`, `/dev/shm/`, `SYSV`, or writable file handles (typical for OpenMPI/MPICH ranks; safe for local single-rank forks if collective barriers are not crossed).
+  * **`UNSAFE: RDMA / GPU Device Mapping Detected`** (`#b91c1c` badge, `#ef4444` border): Active `/dev/infiniband/*`, `uverbs`, `mlx5`, `/dev/nvidia*`, `/dev/kfd`, or `/dev/dri/` device handles/VMAs where `fork()` can trigger `EFAULT` or driver faults.
 * **Create, Restore, and Delete**: Enter an optional note and click **`Create CoW Checkpoint (Ctrl+Shift+K)`** (prompts confirmation on `WARNING`/`UNSAFE`), then click **`Restore`** (`restart <id>`) to jump backward in execution and refresh frames/variables/registers, or **`Delete`** (`delete checkpoint <id>`) to reclaim a snapshot.
+
+> [!WARNING]
+> Avoid restoring a single-rank CoW checkpoint backward past a completed `MPI_Barrier`, `MPI_Allreduce`, or `MPI_Sendrecv` call unless sibling ranks were also restored symmetrically; otherwise peer ranks remain ahead of the rolled-back rank in the communicator state.
 
 ### Hardware Data Watchpoints (`Variables` Dock)
 

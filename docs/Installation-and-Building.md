@@ -26,6 +26,9 @@ chmod +x GridLock-0.8.8-Tutorials-x86_64.AppImage
   ```
 * **External Host Tools Used at Runtime**: The AppImage bundles the GUI and Qt6 runtime. Host debugging, compilation, and LSP features invoke tools from your system `PATH` when present: `gdb` (or `gdb-multiarch`, `lldb-dap`, `cuda-gdb`, `rocgdb`), `mpirun` / `mpiexec`, `mpicxx` / `mpicc` / `g++`, `objdump` (`binutils`), `clangd`, and `man`.
 
+> [!IMPORTANT]
+> **Wayland vs. X11 Platform Selection**: When both `WAYLAND_DISPLAY` and `DISPLAY` are active and `QT_QPA_PLATFORM` is unset, `AppRun` exports `QT_QPA_PLATFORM="wayland;xcb"` while `src/main.cpp` disables client-side decorations (`QT_WAYLAND_DISABLE_WINDOWDECORATION=1`) outside WSLg so tiling Wayland compositors manage frames natively. Set `QT_QPA_PLATFORM=xcb` if you need to force X11/XWayland.
+
 ---
 
 ## 2. System Dependencies for Source Builds
@@ -55,7 +58,8 @@ sudo apt install -y \
   libxcb-cursor0 libxcb-cursor-dev patchelf man-db
 ```
 
-> **Note for `qtermwidget6` on older Debian/Ubuntu releases**: If `libqtermwidget6-dev` is not in your APT repositories, build `lxqt-build-tools` (`2.0.0`) and `qtermwidget` (`2.0.1`) from source with `-DCMAKE_INSTALL_PREFIX=/usr` (see `.github/workflows/release.yml` for exact commands).
+> [!NOTE]
+> **`qtermwidget6` on Older Debian/Ubuntu Releases**: If `libqtermwidget6-dev` is not in your APT repositories, build `lxqt-build-tools` (`2.0.0`) and `qtermwidget` (`2.0.1`) from source with `-DCMAKE_INSTALL_PREFIX=/usr` (see `.github/workflows/release.yml` for exact commands).
 
 ### Fedora 40+ / Ultramarine / RHEL (`dnf`)
 
@@ -151,6 +155,9 @@ mpicxx -g -O0 tutorial/memview_diff_demo.cpp -o tutorial/memview_diff_demo
 ```
 
 See [Tutorials Walkthrough](Tutorials-Walkthrough.md) for line-by-line instructions on reproducing and inspecting each bug.
+
+> [!TIP]
+> Always pass `-g -O0` when compiling tutorial or solver debug binaries. Optimization flags (`-O2`, `-O3`) inline STL accessors, eliminate local variables, and reorder loops away from source line numbers.
 
 ---
 

@@ -15,6 +15,9 @@ GridLock coordinates multi-rank MPI processes in real time, tracks per-rank exec
 * **OpenMP Hybrid Thread Control**:
   * Unless `OMP_NUM_THREADS` is already set in your environment or `MPI Args`, `GdbRankCoordinator` sets `OMP_NUM_THREADS = max(1, idealThreadCount / rankCount)` and `OMP_WAIT_POLICY=PASSIVE` so oversubscribed multi-rank + OpenMP jobs do not spin-lock host cores.
   * Within any stopped rank, use the **`Thread:`** dropdown at the top of **`CALL STACK`** to switch between OpenMP worker threads (`-thread-info` / `-thread-select`).
+
+> [!IMPORTANT]
+> Set `OMP_NUM_THREADS` explicitly in **Preferences -> HPC / Cluster -> MPI Env Vars** (or your shell) if you need to debug oversubscribed OpenMP teams where `idealThreadCount / rankCount == 1`.
 * **Debug Adapter Protocol (`DapCoordinator`)**:
   * Selecting `LLVM LLDB-DAP (lldb-dap)` in `Preferences -> Debugger` switches `MainWindow` to `DapCoordinator`, communicating over `Content-Length` JSON-RPC framing for `launch`, `attach`, `setBreakpoints`, `dataBreakpointInfo` / `setDataBreakpoints`, `stackTrace`, `scopes`, `variables`, `evaluate`, `readMemory`, and `stepBack` / `reverseContinue`.
 
@@ -27,8 +30,8 @@ GridLock coordinates multi-rank MPI processes in real time, tracks per-rank exec
   * Each card displays a color-coded state pill:
     * **`RUN`** (green `#2ecc71`): Rank is actively executing.
     * **`BRK`** (amber `#f1c40f`): Rank is paused at a breakpoint, step, signal, or `Pause`.
-    * **`DEADLOCK`** (crimson): Rank participates in a detected MPI wait-for cycle or collective divergence.
-    * **`EXITED` / `IDLE`** (gray `#7f8c8d`): Session is idle or the rank has exited.
+    * **`DEADLOCK`** (crimson `#f44747`): Rank participates in a detected MPI wait-for cycle or collective divergence.
+    * **`EXITED` / `IDLE`** (gray `#64748b` / `#7f8c8d`): The rank has exited or the session is idle.
   * Below the rank title, each card shows the rank's live instruction pointer (`0x...`) when stopped.
   * **Master `setFocusedRank()` Synchronization & Execution Scope**: Clicking any card routes through `MainWindow::setFocusedRank()`, synchronizing `Variables`, `Registers`, `Call Stack`, `SourceCodeView`, `DisassemblyView`, `Memory View`, `ArrayPlotDialog` (supporting all `1..256` ranks), and `PointerGraphDialog`. Toggle execution scope between **`All Ranks`** and **`Rank k`**, or press **`F6`** (`Pause All Ranks`) to halt all running processes simultaneously.
 * **CFG Basic-Block Rank Occupancy Badges (`DisassemblyView`)**:
@@ -55,14 +58,17 @@ When a rank stops inside an internal MPI library frame without DWARF symbols (`f
 
 The header badge (`#mpiDeadlockStatusBadge`) updates automatically as ranks pause or resume:
 
-1. **`STATUS: NO CYCLE`** (teal): Fewer than two ranks are stalled in incompatible blocking MPI primitives.
-2. **`STATUS: COLL DIVERGENCE`** (crimson): Triggered when two or more paused ranks are blocked in **different** collective calls (for example Rank 0 in `MPI_Bcast` while Rank 1 is in `MPI_Barrier`), or when at least one rank is in a collective call while another rank is blocked in a point-to-point wait.
-3. **`STATUS: CYCLE DETECTED`** (crimson): Triggered when two or more ranks are simultaneously paused in blocking point-to-point or `MPI_Wait*` primitives (such as every rank blocked in `MPI_Send` in `deadlock_ring.cpp`, or Rank 0/Rank 1 stalled on mismatched tags in `tag_mismatch_stall.cpp`).
+1. **`STATUS: NO CYCLE`** (teal `#4ec9b0`): Fewer than two ranks are stalled in incompatible blocking MPI primitives.
+2. **`STATUS: COLL DIVERGENCE`** (crimson `#f44747`): Triggered when two or more paused ranks are blocked in **different** collective calls (for example Rank 0 in `MPI_Bcast` while Rank 1 is in `MPI_Barrier`), or when at least one rank is in a collective call while another rank is blocked in a point-to-point wait.
+3. **`STATUS: CYCLE DETECTED`** (crimson `#f44747`): Triggered when two or more ranks are simultaneously paused in blocking point-to-point or `MPI_Wait*` primitives (such as every rank blocked in `MPI_Send` in `deadlock_ring.cpp`, or Rank 0/Rank 1 stalled on mismatched tags in `tag_mismatch_stall.cpp`).
 
 ### Inspecting Stalled Ranks
 
 * **`DEADLOCK ANALYZER` Table (`#mpiRankWaitTable`)**: Shows `RANK` (with live OS PID), `STATE`, `MPI PRIMITIVE`, `PEER / TARGET`, `COMMUNICATOR`, and `PC / LOCATION` (`file:line`), filtered live via the header search box.
 * **Jump to Stalled Rank**: **Double-click** any row in the wait table or the bottom alert list to focus that rank and jump `SourceCodeView` and `DisassemblyView` to its caller site.
+
+> [!TIP]
+> When multiple ranks stall inside stripped MPI library frames (`func="??"`), double-clicking a row in **`DEADLOCK ANALYZER`** unwinds directly to the first user C/C++ caller frame outside `MPI_*` / `PMPI_*` so you land on your own communication call site.
 
 ---
 
@@ -86,7 +92,8 @@ When debugging numerical drift, ghost-cell corruption, or rank-dependent branchi
    * Rows correspond to `Rank 0 .. Rank N-1`; columns correspond to watched expressions.
    * On every stop, `DifferentialGrid::updateHighlights()` computes the modal (majority-vote) value string in each column across active ranks. Any rank cell whose value differs from the majority consensus is shaded light red (`rgb(255, 200, 200)`), immediately isolating a single diverged or `nan`-corrupted rank. double-click any cell to open the copyable **`Inspect Full Value...`** popover.
 
-> **Note on Multidimensional Array & Multi-Rank Plotting**: In `v0.8.8`, `Tools -> Array & Field Plotter...` (`Ctrl+Alt+G`) supports multi-rank 1D curve overlays for halo/ghost-cell comparison, `start:end:stride` slicing, `Log10` scaling, `Complex64`/`Complex128` decoding, 2D colormapped heatmaps (`splot`/`pm3d` `gnuplot` export), and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major and Fortran column-major).
+> [!NOTE]
+> **Multidimensional Array & Multi-Rank Plotting**: `Tools -> Array & Field Plotter...` (`Ctrl+Alt+G`) supports multi-rank 1D curve overlays for halo/ghost-cell comparison, `start:end:stride` slicing, `Log10` scaling, `Complex64`/`Complex128` decoding, 2D colormapped heatmaps (`splot`/`pm3d` `gnuplot` export), and virtualized 2D/3D tensor tables (`[Nx, Ny, Nz]` C row-major and Fortran column-major).
 
 ---
 

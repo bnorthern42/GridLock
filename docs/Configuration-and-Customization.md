@@ -19,6 +19,9 @@ GridLock stores global preferences in `~/.config/gridlock/config.toml` and `~/.c
 * **`Search Everywhere Popup Size`**: Configures `CommandPaletteDialog` modal scale across `Small (760 x 440)`, `Medium (840 x 500)`, `Large (940 x 560)` *(default)*, and `X-Large (1080 x 640)`.
 * **`Appearance -> Toolbar` (`Main Toolbar Layout & Spacing`)**: Nested child page allowing you to reorder `#MainToolbar` items (`Move Up` / `Move Down`), hide or restore optional controls, insert `24px` fixed spacers (`Add Spacer (24px)`), insert right-aligning flexible springs (`Add Flex Spring`, ignored if trailing), insert vertical dividers (`Add Separator`), or click `Reset Default`.
 
+> [!TIP]
+> Compiled QSS theme stylesheets are hashed and cached per version in `~/.config/gridlock/acss/<themeId>-<ver>.qss` (`ThemeManager`), so switching across all 12 dark and light palettes stays instantaneous on subsequent launches.
+
 ### 2. `Editing`
 * **`Tab Width`** (`1..16`, default `4`, enforced as exact soft-tab spaces on `Tab`/`Shift+Tab` and pixel-exact `tabStopDistance`), **`Indent With`** (`Spaces` or `Tabs`), **`Whitespace`** (`Hidden` or `Visible`).
 * **`Enable Word Wrap`** (default `false`), **`Show Edge Column Line`** (default `true`), **`Edge Column`** (`1..300`, default `80`), **`Show Code Minimap`**.
@@ -42,6 +45,9 @@ GridLock stores global preferences in `~/.config/gridlock/config.toml` and `~/.c
 * **`MPI Executable`** (default `mpiexec`), **`MPI Args`** (default `--oversubscribe`), **`Default Rank Count`** (`1..256`, default `2`).
 * **`Trap FPE (NaN/Overflow)`**: Sends `catch signal SIGFPE` across GDB ranks on session start.
 * **`Show Pseudo-C Decompiler when Source Editor is visible`**: Keeps the decompiler split open even when DWARF C/C++ source is already displayed.
+
+> [!WARNING]
+> Enabling **`Trap FPE (NaN/Overflow)`** installs a `SIGFPE` catchpoint across all GDB ranks on launch. Only combine it with targets that unmask `FE_INVALID` / `FE_DIVBYZERO` / `FE_OVERFLOW` exceptions or when diagnosing floating-point faults.
 
 ### 6. `HPC / Cluster`
 * **`MPI Hosts File`** (`--hostfile`), **`MPI Env Vars`** (multi-line `KEY=VALUE`), and **`Strict Node Affinity`** (`--map-by node`).
@@ -152,7 +158,9 @@ font_size = 12
 * **`<workspace>/.gridlock/workspace.toml`** (`SessionManager` / `ConfigManager`):
   * `File -> Save Session` and `File -> Save Session As...` write `[workspace]` (`watched_variables`, `active_breakpoints`, `selected_ranks`).
   * `ConfigManager` also reads per-workspace `[appearance] theme_id`, `[debugger] engine`, `[debugger] default_disassembly_mode`, `[debugger] show_decompiler_with_source`, and `[ui] telemetry_display_format`.
-  * Note that `.gridlock/` is listed in `.gitignore` so local debugger state is not committed into git repositories by default.
+
+> [!NOTE]
+> `.gridlock/` is listed in `.gitignore` so per-machine session state (`workspace.toml`, `settings.toml`, and local `.gridlock/plugins/*.so` binaries) is never committed into Git repositories accidentally. Note that `<workspace>/.gridlock/plugins.toml` can still be shared selectively if version-controlled intentionally.
 
 ### Build Runner Auto-Detection (`Tools -> Build Target` / `Ctrl+B`)
 

@@ -19,6 +19,9 @@ Open the **`Memory View`** tab in the bottom dock (`Alt+4` -> `Memory View`). En
 * **Step Mutation Highlighting**: Bytes that changed since the previous debugger stop are highlighted in bold red (`#f44747`) across the 16-byte-per-row hex and ASCII columns.
 * **Standalone Pop-Out Window**: Click **`⤢ POP OUT`** in the top-right corner of `MemView` to detach the entire memory inspector (`1280x820`) onto a second monitor; click **`⤡ DOCK`** (or close the window) to snap it back into the bottom dock.
 
+> [!NOTE]
+> When reading local targets, `NativeMemoryReader` transfers up to `64 MiB` via Linux `process_vm_readv` and falls back to GDB/MI or DAP memory commands automatically if `kernel.yama.ptrace_scope` denies direct reads or when debugging a remote `gdbserver` / `qemu-user` target.
+
 ### Cross-Rank Byte Diffing (`Diff Ranks` / `MemoryDiffer`)
 
 1. Pause at least two MPI ranks at a synchronization point (for example before `MPI_Allreduce` or `MPI_Barrier`).
@@ -53,6 +56,9 @@ Inside **`Memory View`**, click **`LIBRARY MEMORY MAP`** in the top bar to switc
 2. **`LD_PRELOAD` Heap Caller Attribution (`Track Heap Callers (LD_PRELOAD)`)**:
    * Checked by default. When `gcc` or `cc` is available, GridLock compiles a small interposition library (`/tmp/gridlock_memtrack_v2_<uid>.so`) and injects it via `LD_PRELOAD` into GDB-spawned ranks.
    * Allocations `>= 4 KB` via `malloc`, `calloc`, `realloc`, and `free` unwind past `libstdc++` `operator new` frames using `_Unwind_Backtrace`, `dladdr`, and `addr2line`, writing live call-site totals to `/tmp/gridlock_mem_<pid>.tsv` and deducting attributed heap bytes from the raw `[heap]` bucket so totals are never double-counted.
+
+> [!WARNING]
+> **`LD_PRELOAD` Attribution Scope**: Heap call-site attribution applies only to locally launched GDB ranks (`< 4 KB` small allocations stay grouped in `[heap]`) and requires `gcc` or `cc` on `PATH` to compile `/tmp/gridlock_memtrack_v2_<uid>.so`. Attach and remote targets still show full `/proc/<pid>/smaps` VMA attribution.
 
 ### Visual Controls and Colorblind-Safe Palettes
 
@@ -140,6 +146,9 @@ Switch to the **`BINARY`** perspective (`Alt+3`), or inspect assembly alongside 
 * **Cross-Reference Inspector (`XrefInspectorDialog`)**: Press **`X`** (or right-click -> **`Inspect Cross-References (X)`**) to inspect incoming callers/branches (**`XREFS TO`**) and outgoing `CALL`, `CJMP`, `JMP`, and RIP-relative `DATA` references (**`XREFS FROM`**) with a live filter bar and assembly preview pane. Double-click any row to jump to that address.
 * **Single-Popup Context Menu**: Provides **`Run to Instruction Address`**, **`Jump / Set PC to Address`**, **`Open Address in Programmer's Calculator`**, **`Seek in Memory View`**, **`Inspect Cross-References (X)`**, **`Lookup in Reference Manual (F1)`**, **`Toggle Bookmark`**, **`Patch Instruction`**, and **`Revert All Patches`**.
 * **Validated Instruction & ELF64 Patching**: Press **`Alt+P`** in `DisassemblyView` to validate hex byte sequences or `nop` mnemonics against the instruction byte width, splicing `; [PATCHED]` into the listing, supporting **`Revert All Patches`**, and exporting via `ElfBinaryInspector::savePatchedBinary`.
+
+> [!CAUTION]
+> Exporting patched binaries via `savePatchedBinary` modifies executable `.text` bytes on disk. Always verify instruction byte lengths and relative branch targets (or use **`Revert All Patches`**) before writing over production or cluster executables.
 
 ---
 

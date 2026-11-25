@@ -2,6 +2,9 @@
 
 Compact lookup reference for GridLock (`v0.8.8`) execution controls, Search Everywhere scopes, floating diagnostic windows, breakpoint lifecycle actions, editor/terminal shortcuts, GDB console readline bindings, and disassembly/CFG navigation.
 
+> [!TIP]
+> Every global and editor binding listed below can be re-recorded interactively in **Edit -> Preferences -> Keybindings** (`KeySequenceRecorderWidget`), and toolbar button order/spacing can be customized in **Preferences -> Appearance -> Toolbar**.
+
 ---
 
 ## 1. Global Execution and Stepping Controls
@@ -109,3 +112,6 @@ Compact lookup reference for GridLock (`v0.8.8`) execution controls, Search Ever
 | `X` | Open `XrefInspectorDialog` (`XREFS TO` and `XREFS FROM`) for selected address | `DisassemblyView` |
 | `Alt+P` | Patch instruction at active address (default `nop`) and update ELF64 image | `DisassemblyView` |
 | Right-Click Instruction | `Run to Instruction Address`, `Jump / Set PC to Address`, `Open Address in Programmer's Calculator`, `Seek in Memory View`, `Inspect Cross-References (X)`, `Lookup in Reference Manual (F1)`, `Toggle Bookmark`, `Patch Instruction` | Linear / CFG |
+
+> [!WARNING]
+> **Binary Patching (`Alt+P`)**: Patching instructions updates the loaded ELF64 image buffer and marks the site `; [PATCHED]`. Use right-click **`Revert All Patches`** to restore original bytes before calling `savePatchedBinary` if an instruction replacement changes branch offsets or byte lengths unintentionally.

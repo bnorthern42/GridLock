@@ -31,6 +31,9 @@ This guide covers the four main debugging workflows in GridLock (`v0.8.8`):
    * Use **`▶ Cont`** (`F5`), **`Over`** (`F10`), **`Into`** (`F11` split button with `Step Instruction`), **`Out`** (`Shift+F11`), **`⏸ Pause`** / **`Pause All Ranks`** (`F6`), and **`■ Stop`**.
    * To step backward in GDB sessions, toggle **`● REC`** on the toolbar (enables `record full` with `scheduler-locking on` and a 200,000-instruction ring buffer), then step or continue backward.
 
+> [!TIP]
+> Click any rank card in **`SERVER RACK`** (`RANK 0 .. RANK N-1`) to refocus all docks simultaneously, or toggle **`All Ranks`** vs. **`Rank k`** execution scope when stepping a single divergent process past a barrier.
+
 ### Creating or Configuring a Workspace Project
 
 * **`File -> New Project...` (`ProjectWizard`)**: Two-page wizard that configures the workspace directory, target binary, program arguments, rank count (`-np`), and OpenMPI topology flags (`--bind-to core`, `--map-by node`, `--use-hwthread-cpus`, `--oversubscribe`, `--report-bindings`, `--display-map`, `--tag-output`, `--timestamp-output`), saves `.gridlock/settings.toml`, and launches the session.
@@ -65,6 +68,9 @@ All sibling ranks belonging to the same job appear under an expandable **`MPI Jo
      echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
      ```
    * Alternatively, grant `CAP_SYS_PTRACE` directly to your local `gdb` binary (`sudo setcap cap_sys_ptrace=eip /usr/bin/gdb`) or set `kernel.yama.ptrace_scope = 0` in `/etc/sysctl.d/10-ptrace.conf`.
+
+> [!WARNING]
+> When `kernel.yama.ptrace_scope` is `1` (or `2`), GridLock's `process_vm_readv` direct memory reader and `gdb -p <pid>` attach calls fail with `EPERM` on external MPI jobs started from a separate terminal until one of the permissions above is granted.
 4. Filter the list using the **`Filter:`** box (matches PID, rank label, binary name, command line, or MPI job tag) and click **`Refresh`** if you started the process after opening the dialog.
 5. Select what to attach:
    * **Entire MPI Job**: Click the top-level **`MPI Job (N ranks)`** row. `AttachProcessDialog::selectedProcesses()` expands all child rank PIDs in world-rank order.
@@ -134,4 +140,6 @@ Open **`Edit -> Preferences`** (`Ctrl+,`) to configure MPI hostfiles, environmen
 1. Click **`Load & Auto-Detect .sbatch Script...`** (or paste an existing batch script into the **`Script Template`** editor).
 2. `PreferencesDialog::parseSlurmBatchScript` extracts `module load` statements, the launcher (`srun`, `srun --mpi=pmix`, `mpirun`, `mpiexec`), and 16 SLURM flags (`--job-name`/`-J`, `--account`/`-A`, `--partition`/`-p`, `--qos`/`-q`, `--time`/`-t`, `--mem`/`--mem-per-cpu`, `--nodes`/`-N`, `--ntasks-per-node`/`--ntasks`/`-n`, `--cpus-per-task`, `--constraint`/`-C`, `--gres=gpu:...`/`--gpus`, `--output`/`-o`, `--mail-type`, `--mail-user`).
 3. Edit any form field and click **`Sync Fields -> Script Preview`** to regenerate a clean `#SBATCH` script using `{FILE}` as the binary placeholder.
-4. **Scope Note on `File -> Submit SLURM Job`**: Selecting `File -> Submit SLURM Job` substitutes `{FILE}` in your `Script Template` and submits it to the built-in `MockHpcBackend` preview log in the `Package Manager` (`>_ Raw`) view. Live SSH queue submission to remote SLURM head nodes is not performed directly by GridLock; copy the generated `.sbatch` script to your cluster or tunnel remote `gdbserver` ports over SSH (`ssh -L 1234:compute01:1234 login.cluster.edu`) and attach via **`Remote Target (gdbserver / QEMU)`**.
+
+> [!NOTE]
+> **Scope of `File -> Submit SLURM Job`**: Selecting `File -> Submit SLURM Job` substitutes `{FILE}` in your `Script Template` and dispatches a local preview log to `MockHpcBackend` inside `Package Manager` (`>_ Raw`). Live SSH batch submission to remote SLURM login nodes is out of scope; copy the generated `.sbatch` script to your cluster or tunnel remote `gdbserver` ports over SSH (`ssh -L 1234:compute01:1234 login.cluster.edu`) and attach via **`Remote Target (gdbserver / QEMU)`**.
