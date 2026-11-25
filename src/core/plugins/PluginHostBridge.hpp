@@ -1,13 +1,6 @@
 /**
  * @file PluginHostBridge.hpp
  * @brief Thread-safe synchronous C99 `GridLockHostApi` adapter over `GdbRankCoordinator`.
- *
- * Implements every callback in `GridLockHostApi` (`alloc_bytes`, `free_bytes`,
- * `log_message`, `get_rank_count`, `get_active_rank`, `eval_expr`, `read_memory`,
- * `write_memory`, `set_breakpoint`, `remove_breakpoint`, `register_variable_action`,
- * `register_command_action`, and `emit_structured_event`). Each loaded plugin binds
- * its own `GridLockHostApi` table whose `host_ctx` points to a heap-owned
- * `PluginBindingContext`, eliminating shared mutable plugin-attribution state.
  */
 
 #pragma once
@@ -18,6 +11,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <mutex>
 #include <utility>
@@ -53,15 +47,15 @@ struct PluginBindingContext {
  * @brief Host-side record for a variable context action registered by a plugin.
  */
 struct RegisteredVariableAction {
-  QString pluginId;                                   ///< Owning plugin identifier.
-  QString actionId;                                   ///< Unique action identifier.
-  QString menuLabel;                                  ///< Display label for variable menus.
-  QString typeRegex;                                  ///< Raw regular expression matching C/C++ types.
-  QRegularExpression compiledRegex;                   ///< Pre-compiled type matcher.
-  GridLockVariableActionCallback callback = nullptr;  ///< Plugin callback pointer.
-  void* pluginCtx = nullptr;                          ///< Opaque plugin user-data pointer.
-  const GridLockHostApi* hostApi = nullptr;           ///< Per-plugin host API table passed on invoke.
-  const PluginBindingContext* bindingCtx = nullptr;   ///< Per-plugin binding context for teardown checks.
+  QString pluginId;
+  QString actionId;
+  QString menuLabel;
+  QString typeRegex;
+  QRegularExpression compiledRegex;
+  GridLockVariableActionCallback callback = nullptr;
+  void* pluginCtx = nullptr;
+  const GridLockHostApi* hostApi = nullptr;
+  const PluginBindingContext* bindingCtx = nullptr;
 };
 
 /**
@@ -69,14 +63,14 @@ struct RegisteredVariableAction {
  * @brief Host-side record for a global command action registered by a plugin.
  */
 struct RegisteredCommandAction {
-  QString pluginId;                                  ///< Owning plugin identifier.
-  QString commandId;                                 ///< Unique command identifier.
-  QString menuLabel;                                 ///< Display label for menus/command palette.
-  QString shortcutHint;                              ///< Optional portable shortcut hint string.
-  GridLockCommandActionCallback callback = nullptr;  ///< Plugin callback pointer.
-  void* pluginCtx = nullptr;                         ///< Opaque plugin user-data pointer.
-  const GridLockHostApi* hostApi = nullptr;          ///< Per-plugin host API table passed on invoke.
-  const PluginBindingContext* bindingCtx = nullptr;  ///< Per-plugin binding context for teardown checks.
+  QString pluginId;
+  QString commandId;
+  QString menuLabel;
+  QString shortcutHint;
+  GridLockCommandActionCallback callback = nullptr;
+  void* pluginCtx = nullptr;
+  const GridLockHostApi* hostApi = nullptr;
+  const PluginBindingContext* bindingCtx = nullptr;
 };
 
 /**
@@ -87,101 +81,66 @@ class PluginHostBridge : public QObject {
   Q_OBJECT
 
  public:
-  /**
-   * @brief Constructs the bridge bound to an optional `GdbRankCoordinator`.
-   * @param coordinator Target GDB/MI coordinator (may be attached or replaced later).
-   * @param parent Optional owning `QObject`.
-   */
-  explicit PluginHostBridge(gridlock::GdbRankCoordinator* coordinator = nullptr,
-                            QObject* parent = nullptr);
-
-  /** @brief Destroys the bridge. */
+  explicit PluginHostBridge(gridlock::GdbRankCoordinator* coordinator = nullptr, QObject* parent = nullptr);
   ~PluginHostBridge() override = default;
 
-  /** @brief Returns the default `GridLockHostApi` v1.0 function table pointer. */
   const GridLockHostApi* hostApi() const noexcept { return &m_hostApi; }
 
-  /** @brief Builds a `GridLockHostApi` v1.0 dispatch table bound to @p bindingCtx. */
   GridLockHostApi makeHostApi(PluginBindingContext* bindingCtx) const noexcept {
     return GridLockHostApi{
-        static_cast<uint32_t>(sizeof(GridLockHostApi)),
-        GRIDLOCK_PLUGIN_ABI_MAJOR,
-        GRIDLOCK_PLUGIN_ABI_MINOR,
-        0u,
-        bindingCtx,
-        &PluginHostBridge::cbAllocBytes,
-        &PluginHostBridge::cbFreeBytes,
-        &PluginHostBridge::cbLogMessage,
-        &PluginHostBridge::cbGetRankCount,
-        &PluginHostBridge::cbGetActiveRank,
-        &PluginHostBridge::cbEvalExpr,
-        &PluginHostBridge::cbReadMemory,
-        &PluginHostBridge::cbWriteMemory,
-        &PluginHostBridge::cbSetBreakpoint,
-        &PluginHostBridge::cbRemoveBreakpoint,
-        &PluginHostBridge::cbRegisterVariableAction,
-        &PluginHostBridge::cbRegisterCommandAction,
-        &PluginHostBridge::cbEmitStructuredEvent,
-        {}};
+        static_cast<uint32_t>(sizeof(GridLockHostApi)), GRIDLOCK_PLUGIN_ABI_MAJOR, GRIDLOCK_PLUGIN_ABI_MINOR, 0u,
+        bindingCtx, &PluginHostBridge::cbAllocBytes, &PluginHostBridge::cbFreeBytes, &PluginHostBridge::cbLogMessage,
+        &PluginHostBridge::cbGetRankCount, &PluginHostBridge::cbGetActiveRank, &PluginHostBridge::cbEvalExpr,
+        &PluginHostBridge::cbReadMemory, &PluginHostBridge::cbWriteMemory, &PluginHostBridge::cbSetBreakpoint,
+        &PluginHostBridge::cbRemoveBreakpoint, &PluginHostBridge::cbRegisterVariableAction,
+        &PluginHostBridge::cbRegisterCommandAction, &PluginHostBridge::cbEmitStructuredEvent, {}};
   }
 
-  /** @brief Binds or updates the active `GdbRankCoordinator` instance. */
   void setCoordinator(gridlock::GdbRankCoordinator* coordinator);
-
-  /** @brief Returns the currently bound `GdbRankCoordinator`, or `nullptr`. */
   gridlock::GdbRankCoordinator* coordinator() const;
 
-  /** @brief Installs an optional callback-depth observer invoked around action dispatch. */
   void setCallbackScopeHook(std::function<void(bool)> hook) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_callbackScopeHook = std::move(hook);
+    std::lock_guard<std::mutex> lock(m_mutex); m_callbackScopeHook = std::move(hook);
   }
+  void setActiveRank(int32_t rank) { std::lock_guard<std::mutex> lock(m_mutex); m_activeRank = rank; }
+  int32_t activeRank() const { std::lock_guard<std::mutex> lock(m_mutex); return m_activeRank; }
+  void setRequestTimeoutMs(int timeoutMs) { std::lock_guard<std::mutex> lock(m_mutex); m_timeoutMs = std::max(10, timeoutMs); }
+  int requestTimeoutMs() const { std::lock_guard<std::mutex> lock(m_mutex); return m_timeoutMs; }
+  int32_t liveAllocationCount() const noexcept { return m_liveAllocations.load(std::memory_order_relaxed); }
 
-  /** @brief Updates the focused zero-based MPI rank reported by `get_active_rank`. */
-  void setActiveRank(int32_t rank) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_activeRank = rank;
-  }
-
-  /** @brief Returns the currently focused zero-based MPI rank. */
-  int32_t activeRank() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_activeRank;
-  }
-
-  /** @brief Sets the bounded timeout (in milliseconds) for `eval_expr` and `read_memory`. */
-  void setRequestTimeoutMs(int timeoutMs) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_timeoutMs = std::max(10, timeoutMs);
-  }
-
-  /** @brief Returns the active synchronous request timeout in milliseconds. */
-  int requestTimeoutMs() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_timeoutMs;
-  }
-
-  /** @brief Returns the current count of unfreed `alloc_bytes` blocks (for leak assertions). */
-  int32_t liveAllocationCount() const noexcept {
-    return m_liveAllocations.load(std::memory_order_relaxed);
-  }
-
-  /** @brief Begins staging registrations during `gridlock_plugin_init_v1` before ID validation. */
   void beginInitStaging() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_stagingActive = true;
-    m_stagedVariableActions.clear();
-    m_stagedCommandActions.clear();
+    m_stagingActive = true; m_stagedVariableActions.clear(); m_stagedCommandActions.clear();
   }
 
-  /** @brief Commits all staged registrations to `pluginId` (and optional `pluginHostApi`). */
-  bool commitStagedActions(const QString& pluginId,
-                           const GridLockHostApi* pluginHostApi = nullptr);
+  bool commitStagedActions(const QString& pluginId, const GridLockHostApi* pluginHostApi = nullptr) {
+    bool changed = false;
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      for (const auto& act : m_stagedVariableActions)
+        if (std::any_of(m_variableActions.cbegin(), m_variableActions.cend(),
+                        [&](const RegisteredVariableAction& a) { return a.actionId == act.actionId; })) return false;
+      for (const auto& cmd : m_stagedCommandActions)
+        if (std::any_of(m_commandActions.cbegin(), m_commandActions.cend(),
+                        [&](const RegisteredCommandAction& c) { return c.commandId == cmd.commandId; })) return false;
+      m_stagingActive = false;
+      for (auto& act : m_stagedVariableActions) {
+        act.pluginId = pluginId; if (pluginHostApi != nullptr) act.hostApi = pluginHostApi;
+        m_variableActions.append(std::move(act)); changed = true;
+      }
+      for (auto& cmd : m_stagedCommandActions) {
+        cmd.pluginId = pluginId; if (pluginHostApi != nullptr) cmd.hostApi = pluginHostApi;
+        m_commandActions.append(std::move(cmd)); changed = true;
+      }
+      for (auto& bp : m_breakpoints) if (bp.staged) { bp.pluginId = pluginId; bp.staged = false; }
+      m_stagedVariableActions.clear(); m_stagedCommandActions.clear();
+    }
+    if (changed) emit registeredActionsChanged();
+    return true;
+  }
 
-  /** @brief Discards all uncommitted staged registrations and breakpoints when init fails. */
   void discardStagedActions();
 
-  /** @brief Removes all variable and command actions owned by `pluginId`. */
   void unregisterPluginActions(const QString& pluginId) {
     bool removed = false;
     {
@@ -194,47 +153,61 @@ class PluginHostBridge : public QObject {
     if (removed) emit registeredActionsChanged();
   }
 
-  /** @brief Removes and clears all breakpoints installed by `pluginId`. */
   void unregisterPluginBreakpoints(const QString& pluginId);
 
-  /** @brief Returns a snapshot of all registered variable actions across active plugins. */
   QVector<RegisteredVariableAction> variableActions() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_variableActions;
+    std::lock_guard<std::mutex> lock(m_mutex); return m_variableActions;
   }
-
-  /** @brief Returns registered variable actions whose `typeRegex` matches `typeName`. */
   QVector<RegisteredVariableAction> matchingVariableActions(const QString& typeName) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     QVector<RegisteredVariableAction> matches;
-    for (const auto& act : m_variableActions) {
+    for (const auto& act : m_variableActions)
       if (act.compiledRegex.isValid() && act.compiledRegex.match(typeName).hasMatch()) matches.append(act);
-    }
     return matches;
   }
-
-  /** @brief Returns a snapshot of all registered command actions across active plugins. */
   QVector<RegisteredCommandAction> commandActions() const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_commandActions;
+    std::lock_guard<std::mutex> lock(m_mutex); return m_commandActions;
   }
 
-  /** @brief Invokes a registered variable action by `actionId` with `varCtx`. */
-  GridLockStatus invokeVariableAction(const QString& actionId,
-                                      const GridLockVariableContext& varCtx);
+  GridLockStatus invokeVariableAction(const QString& actionId, const GridLockVariableContext& varCtx) {
+    RegisteredVariableAction target;
+    std::function<void(bool)> hook;
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      auto it = std::find_if(m_variableActions.cbegin(), m_variableActions.cend(),
+                             [&](const RegisteredVariableAction& a) { return a.actionId == actionId; });
+      if (it == m_variableActions.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+      target = *it; hook = m_callbackScopeHook;
+    }
+    if (target.bindingCtx != nullptr && target.bindingCtx->shuttingDown.load(std::memory_order_acquire))
+      return GRIDLOCK_ERR_UNSUPPORTED;
+    struct Guard { std::function<void(bool)> h; ~Guard() { if (h) h(false); } } guard{hook};
+    if (guard.h) guard.h(true);
+    try { return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi, &varCtx); }
+    catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
 
-  /** @brief Invokes a registered command action by `commandId` with `cmdSpec`. */
-  GridLockStatus invokeCommandAction(const QString& commandId,
-                                     const GridLockCommandSpec& cmdSpec);
+  GridLockStatus invokeCommandAction(const QString& commandId, const GridLockCommandSpec& cmdSpec) {
+    RegisteredCommandAction target;
+    std::function<void(bool)> hook;
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      auto it = std::find_if(m_commandActions.cbegin(), m_commandActions.cend(),
+                             [&](const RegisteredCommandAction& c) { return c.commandId == commandId; });
+      if (it == m_commandActions.cend() || it->callback == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+      target = *it; hook = m_callbackScopeHook;
+    }
+    if (target.bindingCtx != nullptr && target.bindingCtx->shuttingDown.load(std::memory_order_acquire))
+      return GRIDLOCK_ERR_UNSUPPORTED;
+    struct Guard { std::function<void(bool)> h; ~Guard() { if (h) h(false); } } guard{hook};
+    if (guard.h) guard.h(true);
+    try { return target.callback(target.pluginCtx, (target.hostApi != nullptr) ? target.hostApi : &m_hostApi, &cmdSpec); }
+    catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
 
  signals:
-  /** @brief Emitted when a plugin logs a diagnostic via `GridLockHostApi::log_message`. */
   void pluginLogReceived(const QString& pluginId, int level, const QString& message);
-
-  /** @brief Emitted when a plugin publishes telemetry via `emit_structured_event`. */
   void structuredEventEmitted(const QString& channel, const QString& jsonPayload);
-
-  /** @brief Emitted whenever variable or command action registrations change. */
   void registeredActionsChanged();
 
  private:
@@ -246,13 +219,47 @@ class PluginHostBridge : public QObject {
     bool staged = false;
   };
 
-  static void* GRIDLOCK_CALL cbAllocBytes(void* hostCtx, size_t numBytes) noexcept;
-  static void GRIDLOCK_CALL cbFreeBytes(void* hostCtx, void* ptr) noexcept;
-  static GridLockStatus GRIDLOCK_CALL cbLogMessage(void* hostCtx,
-                                                   GridLockLogLevel level,
-                                                   const char* utf8Msg) noexcept;
+  static void* GRIDLOCK_CALL cbAllocBytes(void* hostCtx, size_t numBytes) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx == nullptr || ctx->bridge == nullptr || numBytes == 0u) return nullptr;
+      void* mem = std::malloc(numBytes);
+      if (mem != nullptr) ctx->bridge->m_liveAllocations.fetch_add(1, std::memory_order_relaxed);
+      return mem;
+    } catch (...) { return nullptr; }
+  }
+
+  static void GRIDLOCK_CALL cbFreeBytes(void* hostCtx, void* ptr) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx != nullptr && ctx->bridge != nullptr && ptr != nullptr) {
+        ctx->bridge->m_liveAllocations.fetch_sub(1, std::memory_order_relaxed);
+        std::free(ptr);
+      }
+    } catch (...) {}
+  }
+
+  static GridLockStatus GRIDLOCK_CALL cbLogMessage(void* hostCtx, GridLockLogLevel level, const char* utf8Msg) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx == nullptr || ctx->bridge == nullptr || utf8Msg == nullptr ||
+          level < GRIDLOCK_LOG_TRACE || level > GRIDLOCK_LOG_ERROR) return GRIDLOCK_ERR_INVALID_ARG;
+      emit ctx->bridge->pluginLogReceived(ctx->pluginId, static_cast<int>(level), QString::fromUtf8(utf8Msg));
+      return GRIDLOCK_OK;
+    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
+
   static GridLockStatus GRIDLOCK_CALL cbGetRankCount(void* hostCtx, int32_t* outRanks) noexcept;
-  static GridLockStatus GRIDLOCK_CALL cbGetActiveRank(void* hostCtx, int32_t* outRank) noexcept;
+
+  static GridLockStatus GRIDLOCK_CALL cbGetActiveRank(void* hostCtx, int32_t* outRank) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx == nullptr || ctx->bridge == nullptr || outRank == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+      *outRank = ctx->bridge->activeRank();
+      return GRIDLOCK_OK;
+    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
+
   static GridLockStatus GRIDLOCK_CALL cbEvalExpr(void* hostCtx, int32_t rank, const char* exprUtf8,
                                                  char* outUtf8, size_t cap, size_t* outLen) noexcept;
   static GridLockStatus GRIDLOCK_CALL cbReadMemory(void* hostCtx, int32_t rank, uint64_t address,
@@ -264,30 +271,92 @@ class PluginHostBridge : public QObject {
   static GridLockStatus GRIDLOCK_CALL cbRemoveBreakpoint(void* hostCtx, int32_t bpId) noexcept;
   static GridLockStatus GRIDLOCK_CALL cbRegisterVariableAction(
       void* hostCtx, const char* actionId, const char* menuLabel, const char* typeRegex,
-      GridLockVariableActionCallback cb, void* pluginCtx) noexcept;
+      GridLockVariableActionCallback cb, void* pluginCtx) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx == nullptr || ctx->bridge == nullptr || actionId == nullptr || actionId[0] == '\0' ||
+          menuLabel == nullptr || menuLabel[0] == '\0' || typeRegex == nullptr ||
+          typeRegex[0] == '\0' || cb == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+      if (ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
+      const QRegularExpression compiled(QString::fromUtf8(typeRegex));
+      if (!compiled.isValid()) return GRIDLOCK_ERR_INVALID_ARG;
+      auto* self = ctx->bridge;
+      const QString idStr = QString::fromUtf8(actionId);
+      bool notify = false;
+      {
+        std::lock_guard<std::mutex> lock(self->m_mutex);
+        const bool dupActive = !self->m_stagingActive && std::any_of(
+            self->m_variableActions.cbegin(), self->m_variableActions.cend(),
+            [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
+        const bool dupStaged = std::any_of(
+            self->m_stagedVariableActions.cbegin(), self->m_stagedVariableActions.cend(),
+            [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
+        if (dupActive || dupStaged) return GRIDLOCK_ERR_INVALID_ARG;
+        RegisteredVariableAction entry{
+            ctx->pluginId, idStr, QString::fromUtf8(menuLabel), QString::fromUtf8(typeRegex),
+            compiled, cb, pluginCtx, (ctx->boundApi != nullptr) ? ctx->boundApi : &self->m_hostApi, ctx};
+        if (self->m_stagingActive) self->m_stagedVariableActions.append(std::move(entry));
+        else { self->m_variableActions.append(std::move(entry)); notify = true; }
+      }
+      if (notify) emit self->registeredActionsChanged();
+      return GRIDLOCK_OK;
+    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
+
   static GridLockStatus GRIDLOCK_CALL cbRegisterCommandAction(
       void* hostCtx, const char* commandId, const char* menuLabel, const char* shortcutHint,
-      GridLockCommandActionCallback cb, void* pluginCtx) noexcept;
+      GridLockCommandActionCallback cb, void* pluginCtx) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx == nullptr || ctx->bridge == nullptr || commandId == nullptr || commandId[0] == '\0' ||
+          menuLabel == nullptr || menuLabel[0] == '\0' || cb == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+      if (ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
+      auto* self = ctx->bridge;
+      const QString idStr = QString::fromUtf8(commandId);
+      bool notify = false;
+      {
+        std::lock_guard<std::mutex> lock(self->m_mutex);
+        const bool dupActive = !self->m_stagingActive && std::any_of(
+            self->m_commandActions.cbegin(), self->m_commandActions.cend(),
+            [&](const RegisteredCommandAction& c) { return c.commandId == idStr; });
+        const bool dupStaged = std::any_of(
+            self->m_stagedCommandActions.cbegin(), self->m_stagedCommandActions.cend(),
+            [&](const RegisteredCommandAction& c) { return c.commandId == idStr; });
+        if (dupActive || dupStaged) return GRIDLOCK_ERR_INVALID_ARG;
+        RegisteredCommandAction entry{
+            ctx->pluginId, idStr, QString::fromUtf8(menuLabel),
+            (shortcutHint != nullptr) ? QString::fromUtf8(shortcutHint) : QString(), cb, pluginCtx,
+            (ctx->boundApi != nullptr) ? ctx->boundApi : &self->m_hostApi, ctx};
+        if (self->m_stagingActive) self->m_stagedCommandActions.append(std::move(entry));
+        else { self->m_commandActions.append(std::move(entry)); notify = true; }
+      }
+      if (notify) emit self->registeredActionsChanged();
+      return GRIDLOCK_OK;
+    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
+
   static GridLockStatus GRIDLOCK_CALL cbEmitStructuredEvent(
-      void* hostCtx, const char* channelUtf8, const char* jsonPayloadUtf8) noexcept;
+      void* hostCtx, const char* channelUtf8, const char* jsonPayloadUtf8) noexcept {
+    try {
+      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+      if (ctx == nullptr || ctx->bridge == nullptr || channelUtf8 == nullptr ||
+          channelUtf8[0] == '\0' || jsonPayloadUtf8 == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+      emit ctx->bridge->structuredEventEmitted(QString::fromUtf8(channelUtf8), QString::fromUtf8(jsonPayloadUtf8));
+      return GRIDLOCK_OK;
+    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+  }
 
   GridLockStatus runOnObjectThread(
       const PluginBindingContext* ctx,
       const std::function<GridLockStatus(gridlock::GdbRankCoordinator*)>& fn,
       GridLockStatus missingCoordStatus = GRIDLOCK_ERR_NOT_STOPPED);
-  GridLockStatus evalExprOnCoordinatorThread(const PluginBindingContext* ctx,
-                                             gridlock::GdbRankCoordinator* coord,
-                                             int32_t rank,
-                                             const QString& expr,
-                                             int timeoutMs,
-                                             QByteArray* outPayload);
-  GridLockStatus readMemoryOnCoordinatorThread(const PluginBindingContext* ctx,
-                                               gridlock::GdbRankCoordinator* coord,
-                                               int32_t rank,
-                                               uint64_t address,
-                                               size_t numBytes,
-                                               int timeoutMs,
-                                               QByteArray* outBytes);
+  GridLockStatus evalExprOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
+                                             int32_t rank, const QString& expr, int timeoutMs, QByteArray* outPayload);
+  GridLockStatus readMemoryOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
+                                               int32_t rank, uint64_t address, size_t numBytes, int timeoutMs, QByteArray* outBytes);
+  GridLockStatus writeMemoryOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
+                                                int32_t rank, uint64_t address, const uint8_t* inBytes,
+                                                size_t numBytes, int timeoutMs, size_t* outWritten);
 
   PluginBindingContext m_defaultContext{};
   GridLockHostApi m_hostApi{};

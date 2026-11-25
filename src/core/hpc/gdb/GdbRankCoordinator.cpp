@@ -1,23 +1,19 @@
 /**
  * @file GdbRankCoordinator.cpp
  * @brief Multi-rank GDB/MI3 process lifecycle, attach, FIFO/QProcess transport, and session teardown.
- *
- * Coordinates multi-rank MPI debugging by launching per-rank `gdb --interpreter=mi3`
- * instances over non-blocking POSIX named pipes (`mkfifo`) under `mpirun`/`mpiexec`
- * (or standalone `gdb` when `rankCount == 1` without MPI). MI output parsing resides in
- * `GdbMiParser.cpp`, stack/thread/varobj inspection in `GdbRankInspection.cpp`, and
- * execution/breakpoint/watchpoint/catchpoint command builders in `GdbRankCommands.cpp`.
  */
 
 #include "GdbRankCoordinator.hpp"
 
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -40,21 +36,10 @@ QString buildBreakInsertCmd(const QString& file, int line, const QString& condit
                             int ignoreCount = 0, bool temporary = false, bool disabled = false);
 }  // namespace detail
 
-/** @brief Constructs `GdbRankCoordinator` and forwards @p parent to `IBackendCoordinator`. */
 GdbRankCoordinator::GdbRankCoordinator(QObject* parent) : IBackendCoordinator(parent) {}
-
-/** @brief Ensures all GDB, FIFO, and `mpiexec` resources are cleaned up on destruction without emitting teardown signals. */
 GdbRankCoordinator::~GdbRankCoordinator() { m_shuttingDown = true; QSignalBlocker b(this); stopAll(true); }
-
-/** @brief Implements `IBackendCoordinator::terminateSession()` by tearing down all rank processes. */
-void GdbRankCoordinator::terminateSession() { stopAll(m_shuttingDown); }
-
-/** @brief Returns the live inferior OS PID for @p rank if known, or `0` otherwise. */
-qint64 GdbRankCoordinator::getPidForRank(int rank) const {
-  if (m_rankPids.contains(rank) && m_rankPids.value(rank) > 0) return m_rankPids.value(rank);
-  if (rank >= 0 && rank < static_cast<int>(m_processes.size()) && m_processes[rank] && m_processes[rank]->inferiorPid > 0)
-    return static_cast<qint64>(m_processes[rank]->inferiorPid);
-  return 0;
+void GdbRankCoordinator::launchParallelSession(const QString& executable, int explicitRankCount) {
+  launchParallelSession(executable, explicitRankCount, core::ConfigManager::instance().getMpiArgs());
 }
 
 namespace {
@@ -66,7 +51,6 @@ const QStringList& defaultDebuggerSearchDirs() {
   return kDirs;
 }
 
-/** @brief Resolves and caches toolchain binaries (`gdb`, `rocgdb`, `cuda-gdb`, `mpirun`) keyed on `name` and `$PATH`. */
 QString resolveCachedToolPath(const QString& rawName, const QStringList& fallbackDirs) {
   const QString name = rawName.trimmed();
   if (name.isEmpty()) return {};
@@ -83,12 +67,7 @@ QString resolveCachedToolPath(const QString& rawName, const QStringList& fallbac
   return found;
 }
 
-struct ResolvedGdbBinary {
-  QString executablePath;
-  QString extraLdLibraryPath;
-  QString pythonHome;
-  QString errorReason;
-};
+struct ResolvedGdbBinary { QString executablePath, extraLdLibraryPath, pythonHome, errorReason; };
 
 bool probeRocgdbVersion(const QString& binPath, const QString& extraLdLib, const QString& pyHome) {
   QProcess proc;
@@ -119,16 +98,13 @@ QStringList collectCandidatePythonPrefixes() {
   appendSubdirs(home + QStringLiteral("/.local/share/uv/python"));
   appendSubdirs(home + QStringLiteral("/.conda/envs"));
   appendSubdirs(home + QStringLiteral("/.conda/pkgs"), {QStringLiteral("python-3.*")});
-  for (const QString& dist : {QStringLiteral("/miniforge3"), QStringLiteral("/miniconda3"), QStringLiteral("/anaconda3")}) {
+  for (const QString& dist : {QStringLiteral("/miniforge3"), QStringLiteral("/miniconda3"), QStringLiteral("/anaconda3")})
     if (QDir(home + dist).exists()) { prefixes.append(home + dist); appendSubdirs(home + dist + QStringLiteral("/envs")); }
-  }
   appendSubdirs(home + QStringLiteral("/.pyenv/versions"));
-  QDir visitDir(QStringLiteral("/usr/local/visit"));
-  if (visitDir.exists()) {
-    for (const QFileInfo& ver : visitDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+  if (QDir visitDir(QStringLiteral("/usr/local/visit")); visitDir.exists()) {
+    for (const QFileInfo& ver : visitDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
       for (const QFileInfo& arch : QDir(ver.absoluteFilePath()).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
         prefixes.append(arch.absoluteFilePath());
-    }
   }
   prefixes.removeDuplicates();
   return prefixes;
@@ -141,29 +117,22 @@ ResolvedGdbBinary resolveEffectiveGdbLaunch(const QString& explicitOverride = QS
   const bool isDefaultToken = cfgGdb.isEmpty() || cfgGdb == QStringLiteral("gdb") ||
                               cfgGdb == QStringLiteral("cuda-gdb") || cfgGdb == QStringLiteral("rocgdb");
   QString targetName = cfgGdb.isEmpty() ? QStringLiteral("gdb") : cfgGdb;
-  if (explicitOverride.trimmed().isEmpty() && isDefaultToken) {
-    if (engine == QStringLiteral("rocgdb")) targetName = QStringLiteral("rocgdb");
-    else if (engine == QStringLiteral("cuda-gdb")) targetName = QStringLiteral("cuda-gdb");
-  }
+  if (explicitOverride.trimmed().isEmpty() && isDefaultToken && (engine == QStringLiteral("rocgdb") || engine == QStringLiteral("cuda-gdb")))
+    targetName = engine;
   const QString rawBin = resolveCachedToolPath(targetName, isDefaultToken ? defaultDebuggerSearchDirs() : QStringList{});
-  if (rawBin.isEmpty()) {
-    return {QString(), QString(), QString(), QStringLiteral("Debugger executable ('%1') was not found in PATH.").arg(targetName)};
-  }
+  if (rawBin.isEmpty()) return {QString(), QString(), QString(), QStringLiteral("Debugger executable ('%1') was not found in PATH.").arg(targetName)};
   const QFileInfo rawInfo(rawBin);
   const QString canonicalBin = rawInfo.canonicalFilePath().isEmpty() ? rawBin : rawInfo.canonicalFilePath();
-  if (!QFileInfo(canonicalBin).fileName().startsWith(QStringLiteral("rocgdb"))) {
-    return {rawBin, QString(), QString(), QString()};
-  }
+  if (!QFileInfo(canonicalBin).fileName().startsWith(QStringLiteral("rocgdb"))) return {rawBin, QString(), QString(), QString()};
+
   static QHash<QString, ResolvedGdbBinary> s_rocgdbCache;
   const QString cacheKey = canonicalBin + QLatin1Char('|') + qEnvironmentVariable("LD_LIBRARY_PATH") + QLatin1Char('|') + qEnvironmentVariable("PYTHONHOME");
   if (s_rocgdbCache.contains(cacheKey)) return s_rocgdbCache.value(cacheKey);
 
   const QString binDir = QFileInfo(canonicalBin).absolutePath();
   QStringList rocmLibList{QStringLiteral("/usr/lib64"), QStringLiteral("/lib64")};
-  for (const QString& p : {QFileInfo(binDir + QStringLiteral("/../lib")).canonicalFilePath(),
-                           QStringLiteral("/opt/rocm/lib"), QStringLiteral("/opt/rocm/lib64")}) {
+  for (const QString& p : {QFileInfo(binDir + QStringLiteral("/../lib")).canonicalFilePath(), QStringLiteral("/opt/rocm/lib"), QStringLiteral("/opt/rocm/lib64")})
     if (!p.isEmpty() && QDir(p).exists() && !rocmLibList.contains(p)) rocmLibList.append(p);
-  }
   const QString baseRocmLd = rocmLibList.join(QLatin1Char(':'));
 
   if (QFileInfo(canonicalBin).fileName() == QStringLiteral("rocgdb")) {
@@ -171,12 +140,9 @@ ResolvedGdbBinary resolveEffectiveGdbLaunch(const QString& explicitOverride = QS
     std::sort(pyVariants.begin(), pyVariants.end(), [](const QFileInfo& a, const QFileInfo& b) {
       return a.fileName().section(QLatin1Char('.'), -1).toInt() > b.fileName().section(QLatin1Char('.'), -1).toInt();
     });
-    for (const QFileInfo& cand : pyVariants) {
-      if (probeRocgdbVersion(cand.absoluteFilePath(), baseRocmLd, QString())) {
-        const ResolvedGdbBinary ok{cand.absoluteFilePath(), baseRocmLd, QString(), QString()};
-        s_rocgdbCache.insert(cacheKey, ok);
-        return ok;
-      }
+    for (const QFileInfo& cand : pyVariants) if (probeRocgdbVersion(cand.absoluteFilePath(), baseRocmLd, QString())) {
+      const ResolvedGdbBinary ok{cand.absoluteFilePath(), baseRocmLd, QString(), QString()};
+      s_rocgdbCache.insert(cacheKey, ok); return ok;
     }
     if (!pyVariants.isEmpty()) {
       const QStringList prefixes = collectCandidatePythonPrefixes();
@@ -190,8 +156,7 @@ ResolvedGdbBinary resolveEffectiveGdbLaunch(const QString& explicitOverride = QS
               const QString fullLd = baseRocmLd + QLatin1Char(':') + libDir;
               if (probeRocgdbVersion(cand.absoluteFilePath(), fullLd, pref)) {
                 const ResolvedGdbBinary ok{cand.absoluteFilePath(), fullLd, pref, QString()};
-                s_rocgdbCache.insert(cacheKey, ok);
-                return ok;
+                s_rocgdbCache.insert(cacheKey, ok); return ok;
               }
             }
           }
@@ -201,11 +166,9 @@ ResolvedGdbBinary resolveEffectiveGdbLaunch(const QString& explicitOverride = QS
   }
   if (probeRocgdbVersion(canonicalBin, baseRocmLd, QString())) {
     const ResolvedGdbBinary ok{canonicalBin, baseRocmLd, QString(), QString()};
-    s_rocgdbCache.insert(cacheKey, ok);
-    return ok;
+    s_rocgdbCache.insert(cacheKey, ok); return ok;
   }
-  const ResolvedGdbBinary fail{QString(), QString(), QString(),
-                               QStringLiteral("ROCgdb ('%1') could not initialize a compatible Python 3 runtime.").arg(canonicalBin)};
+  const ResolvedGdbBinary fail{QString(), QString(), QString(), QStringLiteral("ROCgdb ('%1') could not initialize a compatible Python 3 runtime.").arg(canonicalBin)};
   s_rocgdbCache.insert(cacheKey, fail);
   return fail;
 }
@@ -220,14 +183,10 @@ void applyResolvedGdbEnv(QProcessEnvironment* env, const ResolvedGdbBinary& reso
 }
 }  // namespace
 
-/** @brief Pre-validates `gdb`/`rocgdb`/`cuda-gdb` and `mpirun`/`mpiexec` executables before UI marks ranks `RUNNING`. */
 bool GdbRankCoordinator::validateLaunchEnvironment(int ranks, QString* outError) const {
   const QStringList& searchDirs = defaultDebuggerSearchDirs();
   const ResolvedGdbBinary resolved = resolveEffectiveGdbLaunch();
-  if (resolved.executablePath.isEmpty()) {
-    if (outError) *outError = resolved.errorReason;
-    return false;
-  }
+  if (resolved.executablePath.isEmpty()) { if (outError) *outError = resolved.errorReason; return false; }
   const QString prefMpi = core::ConfigManager::instance().getDebuggerSettings().mpiExecutable.trimmed();
   if (!prefMpi.isEmpty() && prefMpi != QStringLiteral("mpirun") && prefMpi != QStringLiteral("mpiexec") && resolveCachedToolPath(prefMpi, searchDirs).isEmpty()) {
     if (outError) *outError = QStringLiteral("Configured MPI launcher ('%1') was not found.").arg(prefMpi);
@@ -241,10 +200,8 @@ bool GdbRankCoordinator::validateLaunchEnvironment(int ranks, QString* outError)
   return true;
 }
 
-/** @brief Attaches a single GDB/MI3 rank session to running OS process @p pid. */
 bool GdbRankCoordinator::attachToProcess(qint64 pid) { return attachToPids({pid}); }
 
-/** @brief Attaches one GDB/MI3 rank session per target `ProcessEntry` (ordered by `mpiRank`). */
 bool GdbRankCoordinator::attachToProcesses(const QList<ProcessEntry>& targets) {
   if (targets.isEmpty()) return false;
   QList<ProcessEntry> ordered = targets;
@@ -256,7 +213,6 @@ bool GdbRankCoordinator::attachToProcesses(const QList<ProcessEntry>& targets) {
   return attachToPids(pids);
 }
 
-/** @brief Spawns one GDB/MI3 session per PID in @p pids and issues `-target-attach <pid>`. */
 bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   if (pids.isEmpty()) return false;
   for (qint64 pid : pids) if (pid <= 0 || !QFileInfo::exists(QStringLiteral("/proc/%1/status").arg(pid))) return false;
@@ -265,15 +221,13 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   if (resolved.executablePath.isEmpty()) return false;
   QProcessEnvironment procEnv = QProcessEnvironment::systemEnvironment();
   applyResolvedGdbEnv(&procEnv, resolved);
-
   m_currentBinaryPath = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pids.first())).symLinkTarget();
   for (int r = 0; r < pids.size(); ++r) {
     const qint64 pid = pids[r];
     auto rp = std::make_unique<RankProcess>();
     rp->id = r; rp->process = std::make_unique<QProcess>(); rp->inferiorPid = static_cast<pid_t>(pid);
     rp->pendingAttach = true; rp->isAttached = true; rp->state.rankId = r; rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced";
-    rp->process->setProcessEnvironment(procEnv);
-    m_rankPids[r] = pid;
+    rp->process->setProcessEnvironment(procEnv); m_rankPids[r] = pid;
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
     QStringList args{QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
     if (!m_currentBinaryPath.isEmpty() && QFileInfo::exists(m_currentBinaryPath)) args.append(m_currentBinaryPath);
@@ -288,7 +242,6 @@ bool GdbRankCoordinator::attachToPids(const QList<qint64>& pids) {
   return true;
 }
 
-/** @brief Connects one GDB/MI3 session per remote `gdbserver` / `qemu-user -g` endpoint. */
 bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& targets) {
   if (targets.isEmpty()) return false;
   for (const RemoteTargetSpec& t : targets) if (t.endpoint.trimmed().isEmpty()) return false;
@@ -296,13 +249,11 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
   m_currentBinaryPath = targets.first().localSymbolBinary.trimmed();
   for (int r = 0; r < targets.size(); ++r) {
     const RemoteTargetSpec& t = targets[r];
-    QString gdbPath = t.gdbBinary.trimmed();
-    if (gdbPath.isEmpty()) gdbPath = core::ConfigManager::instance().getGdbPath().trimmed();
+    QString gdbPath = t.gdbBinary.trimmed().isEmpty() ? core::ConfigManager::instance().getGdbPath().trimmed() : t.gdbBinary.trimmed();
     if (!QFileInfo::exists(gdbPath)) gdbPath = QStandardPaths::findExecutable(gdbPath);
     if (gdbPath.isEmpty()) gdbPath = QStandardPaths::findExecutable(QStringLiteral("gdb-multiarch"));
     if (gdbPath.isEmpty()) gdbPath = QStandardPaths::findExecutable(QStringLiteral("gdb"));
     if (gdbPath.isEmpty()) { terminateAllSessions(); return false; }
-
     auto rp = std::make_unique<RankProcess>();
     rp->id = r; rp->process = std::make_unique<QProcess>(); rp->pendingAttach = true; rp->isAttached = true;
     rp->state.rankId = r; rp->state.currentState = "stopped"; rp->state.lastFiredTimestamp = "synced";
@@ -312,8 +263,8 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     m_processes.push_back(std::move(rp));
     if (!started) { terminateAllSessions(); return false; }
     writeCmd(r, "-gdb-set pagination off\n"); writeCmd(r, "-gdb-set confirm off\n");
-    const QString symBin = t.localSymbolBinary.trimmed();
-    if (!symBin.isEmpty()) writeCmd(r, QStringLiteral("-file-exec-and-symbols %1\n").arg(detail::escapeGdbMiString(symBin)));
+    if (const QString symBin = t.localSymbolBinary.trimmed(); !symBin.isEmpty())
+      writeCmd(r, QStringLiteral("-file-exec-and-symbols %1\n").arg(detail::escapeGdbMiString(symBin)));
     writeCmd(r, QStringLiteral("-target-select %1 %2\n").arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"), t.endpoint.trimmed()));
     flushCachedBreakpoints(r);
     emit rankStateChanged(r, m_processes[r]->state);
@@ -321,7 +272,6 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
   return true;
 }
 
-/** @brief Queues @p cmd behind a transient SIGINT if @p rankId is running, or writes immediately when stopped. */
 void GdbRankCoordinator::queueOrWriteCmd(int rankId, const QString& cmd) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()) || !m_processes[rankId]) return;
   auto& rp = m_processes[rankId];
@@ -336,70 +286,66 @@ void GdbRankCoordinator::queueOrWriteCmd(int rankId, const QString& cmd) {
   writeCmd(rankId, cmd);
 }
 
-/** @brief Writes @p cmd to @p rankId's FIFO or `QProcess` stdin and emits `commandSentToGdb`. */
 void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
-  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
+  if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()) || !m_processes[rankId]) return;
   auto& rp = m_processes[rankId];
-  if (!rp) return;
   static const QRegularExpression kInspectMiRe(QStringLiteral("^\\d*-(?:stack|thread|var|data)-"));
   if (rp->state.currentState != QLatin1String("stopped") && kInspectMiRe.match(cmd.trimmed()).hasMatch()) return;
   if (rp->fifoInFd >= 0) {
     const QByteArray bytes = cmd.toUtf8();
-    if (::write(rp->fifoInFd, bytes.constData(), static_cast<size_t>(bytes.size())) > 0) emit commandSentToGdb(rankId, cmd.trimmed());
+    const char* ptr = bytes.constData();
+    size_t remaining = static_cast<size_t>(bytes.size());
+    while (remaining > 0u) {
+      const ssize_t n = ::write(rp->fifoInFd, ptr, remaining);
+      if (n > 0) { ptr += n; remaining -= static_cast<size_t>(n); continue; }
+      if (n < 0 && errno == EINTR) continue;
+      if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        struct pollfd pfd{rp->fifoInFd, POLLOUT, 0};
+        if (::poll(&pfd, 1, 2000) > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) == 0) continue;
+      }
+      break;
+    }
+    if (remaining == 0u && !bytes.isEmpty()) emit commandSentToGdb(rankId, cmd.trimmed());
     return;
   }
   if (rp->process) {
     if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(1000);
     if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
-      rp->process->write(cmd.toUtf8());
-      emit commandSentToGdb(rankId, cmd.trimmed());
+      rp->process->write(cmd.toUtf8()); emit commandSentToGdb(rankId, cmd.trimmed());
     }
   } else {
     emit commandSentToGdb(rankId, cmd.trimmed());
   }
 }
 
-/** @brief Pushes persisted workspace breakpoints to @p rankId upon initial attach stop. */
 void GdbRankCoordinator::flushCachedBreakpoints(int rankId) {
   const auto bps = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
   auto& rp = m_processes[rankId];
   int count = 0;
   for (auto it = bps.constBegin(); it != bps.constEnd(); ++it)
-    for (int line : *it) { writeCmd(rankId, QString("-break-insert -f %1:%2\n").arg(it.key()).arg(line)); count++; }
+    for (int line : *it) { writeCmd(rankId, detail::buildBreakInsertCmd(it.key(), line, QString())); count++; }
   if (count == 0) { writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running"; }
   else { rp->state.pendingBreakpoints = count; rp->state.currentState = "sync_flushing"; }
 }
-
-/** @brief Cleanly stops all per-rank GDB sessions, closes FIFOs, kills `mpirun`, and removes temp files. */
-void GdbRankCoordinator::terminateAllSessions() { stopAll(m_shuttingDown); }
 
 void GdbRankCoordinator::stopAll(bool silentShutdown) {
   const bool prevShuttingDown = m_shuttingDown;
   m_shuttingDown = true;
   QVector<pid_t> spawnedPids;
   if (m_mpirunProcess) m_mpirunProcess->disconnect();
-  for (size_t i = 0; i < m_processes.size(); ++i) {
-    auto& rp = m_processes[i];
+  for (auto& rp : m_processes) {
     if (!rp) continue;
-    const bool wasFifo = (rp->fifoInFd >= 0 || rp->fifoOutFd >= 0);
-    const bool wasAttached = rp->isAttached || rp->pendingAttach;
+    const bool wasFifo = (rp->fifoInFd >= 0 || rp->fifoOutFd >= 0), wasAttached = rp->isAttached || rp->pendingAttach;
     if (rp->fifoNotifier) { rp->fifoNotifier->setEnabled(false); rp->fifoNotifier->disconnect(); delete rp->fifoNotifier; rp->fifoNotifier = nullptr; }
     if (rp->process) rp->process->disconnect();
-    if (!wasAttached && rp->inferiorPid > 0) {
-      spawnedPids.append(rp->inferiorPid);
-      ::kill(rp->inferiorPid, SIGINT);
-    }
-    if (rp->fifoInFd >= 0) {
-      [[maybe_unused]] const ssize_t n = ::write(rp->fifoInFd, "-gdb-exit\n", 10);
-      ::close(rp->fifoInFd); rp->fifoInFd = -1;
-    }
+    if (!wasAttached && rp->inferiorPid > 0) { spawnedPids.append(rp->inferiorPid); ::kill(rp->inferiorPid, SIGINT); }
+    if (rp->fifoInFd >= 0) { [[maybe_unused]] const ssize_t n = ::write(rp->fifoInFd, "-gdb-exit\n", 10); ::close(rp->fifoInFd); rp->fifoInFd = -1; }
     if (rp->fifoOutFd >= 0) { ::close(rp->fifoOutFd); rp->fifoOutFd = -1; }
     if (wasFifo && !wasAttached && rp->inferiorPid > 0) ::kill(rp->inferiorPid, SIGTERM);
     if (rp->process) {
       if (rp->process->state() == QProcess::Starting) rp->process->waitForStarted(250);
-      if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable()) {
+      if (rp->process->state() == QProcess::Running && rp->process->isOpen() && rp->process->isWritable())
         rp->process->write(wasAttached ? "-target-detach\n-gdb-exit\n" : "-gdb-exit\n");
-      }
       if (rp->process->state() != QProcess::NotRunning && !rp->process->waitForFinished(250)) {
         rp->process->terminate();
         if (!rp->process->waitForFinished(250)) { rp->process->kill(); rp->process->waitForFinished(250); }
@@ -410,7 +356,7 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
   const bool hadActiveSession = !m_processes.empty() || !m_rankFrames.isEmpty() || !m_rankThreads.isEmpty();
   m_processes.clear(); m_rankPids.clear(); m_varNameMap.clear(); m_varNameRevMap.clear();
   m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear(); m_pendingFrameSelect.clear();
-  m_rankArch.clear(); m_activeLaneIds.clear();
+  m_rankArch.clear(); m_activeLaneIds.clear(); m_pendingPluginMemReads.clear(); m_pendingPluginMemWrites.clear();
   m_pendingConsoleCmdCount.clear(); m_consoleReplyBuffer.clear(); m_watchpointIds.clear();
   if (m_mpirunProcess) {
     if (m_mpirunProcess->state() == QProcess::Starting) m_mpirunProcess->waitForStarted(250);
@@ -420,9 +366,7 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
     }
     m_mpirunProcess.reset();
   }
-  for (pid_t pid : spawnedPids) {
-    if (pid > 0 && ::kill(pid, 0) == 0) ::kill(pid, SIGKILL);
-  }
+  for (pid_t pid : spawnedPids) if (pid > 0 && ::kill(pid, 0) == 0) ::kill(pid, SIGKILL);
   if (!m_fifoTempDir.isEmpty()) { QDir(m_fifoTempDir).removeRecursively(); m_fifoTempDir.clear(); }
   m_currentBinaryPath.clear();
   if (!silentShutdown) {
@@ -431,22 +375,9 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
   }
 }
 
-/** @brief Convenience entry point forwarding to `launchParallelSession()`. */
-void GdbRankCoordinator::startDebugSession(int rankCount, const QString& executable) {
-  launchParallelSession(executable, rankCount);
-}
-
-/** @brief Spawns `mpirun`/`mpiexec` using configured MPI arguments from `ConfigManager`. */
-void GdbRankCoordinator::launchParallelSession(const QString& executable, int explicitRankCount) {
-  launchParallelSession(executable, explicitRankCount, core::ConfigManager::instance().getMpiArgs());
-}
-
-/** @brief Launches `N` parallel GDB/MI3 sessions across MPI ranks via POSIX FIFOs (or direct `gdb`). */
-void GdbRankCoordinator::launchParallelSession(const QString& executable, int explicitRankCount,
-                                               const QString& customMpiArgs) {
+void GdbRankCoordinator::launchParallelSession(const QString& executable, int explicitRankCount, const QString& customMpiArgs) {
   terminateAllSessions();
   if (executable.trimmed().isEmpty()) return;
-
   const auto ds = core::ConfigManager::instance().getDebuggerSettings();
   const auto hs = core::ConfigManager::instance().getHpcSettings();
   const int rankCount = std::max(1, (explicitRankCount > 0) ? explicitRankCount : ds.defaultRanks);
@@ -455,11 +386,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   const QStringList& searchDirs = defaultDebuggerSearchDirs();
   const ResolvedGdbBinary resolvedGdb = resolveEffectiveGdbLaunch();
   const QString gdbPath = resolvedGdb.executablePath;
-  if (gdbPath.isEmpty()) {
-    qWarning() << "[GDB]" << resolvedGdb.errorReason;
-    emit sessionErrorOccurred(resolvedGdb.errorReason);
-    return;
-  }
+  if (gdbPath.isEmpty()) { qWarning() << "[GDB]" << resolvedGdb.errorReason; emit sessionErrorOccurred(resolvedGdb.errorReason); return; }
 
   const QString preferredMpi = ds.mpiExecutable.trimmed().isEmpty() ? QStringLiteral("mpirun") : ds.mpiExecutable.trimmed();
   QString mpiBin = resolveCachedToolPath(preferredMpi, searchDirs);
@@ -479,9 +406,9 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   env.insert(QStringLiteral("PATH"), searchDirs.join(QLatin1Char(':')) + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
   env.insert(QStringLiteral("LD_LIBRARY_PATH"), QStringLiteral("/usr/lib64/openmpi/lib:/usr/lib/openmpi/lib:") + env.value(QStringLiteral("LD_LIBRARY_PATH")));
   applyResolvedGdbEnv(&env, resolvedGdb);
-  for (const QString& pair : hs.envVars.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+  for (const QString& pair : hs.envVars.split(QLatin1Char('\n'), Qt::SkipEmptyParts))
     if (const int eq = pair.indexOf(QLatin1Char('=')); eq > 0) env.insert(pair.left(eq).trimmed(), pair.mid(eq + 1).trimmed());
-  }
+
   QStringList mpiArgs;
   const QStringList rawMpiTokens = QProcess::splitCommand(customMpiArgs);
   for (int ti = 0; ti < rawMpiTokens.size(); ++ti) {
@@ -514,8 +441,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
                             it.value().print ? QStringLiteral("print") : QStringLiteral("noprint"),
                             it.value().pass ? QStringLiteral("pass") : QStringLiteral("nopass")));
     writeCmd(id, "-gdb-set max-value-size unlimited\n");
-    const QString memTrackSo = qEnvironmentVariable("GRIDLOCK_MEMTRACK_SO");
-    if (!memTrackSo.isEmpty() && QFileInfo::exists(memTrackSo))
+    if (const QString memTrackSo = qEnvironmentVariable("GRIDLOCK_MEMTRACK_SO"); !memTrackSo.isEmpty() && QFileInfo::exists(memTrackSo))
       writeCmd(id, QStringLiteral("-gdb-set environment LD_PRELOAD %1\n").arg(memTrackSo));
     if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) {
       QString escWd = workDir; escWd.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
@@ -551,10 +477,8 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
     rp->state.currentState = "launching"; rp->state.lastFiredTimestamp = "synced"; rp->process->setProcessEnvironment(env);
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this]() { handleGdbOutput(0); });
     if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) rp->process->setWorkingDirectory(workDir);
-    QStringList gdbArgs = {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"),
-                           QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
-    if (!splitExecArgs.isEmpty()) gdbArgs << QStringLiteral("--args") << executable << splitExecArgs;
-    else gdbArgs << executable;
+    QStringList gdbArgs = {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")};
+    if (!splitExecArgs.isEmpty()) gdbArgs << QStringLiteral("--args") << executable << splitExecArgs; else gdbArgs << executable;
     rp->process->start(gdbPath, gdbArgs); m_processes.push_back(std::move(rp));
     bootstrapRankGdb(0); emit rankStateChanged(0, m_processes[0]->state); return;
   }
@@ -582,8 +506,7 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
             << QStringLiteral("in=\"$1\"; out=\"$2\"; shift 2; exec \"$@\" <\"$in\" >\"$out\" 2>&1")
             << QStringLiteral("sh") << inFifo << outFifo << gdbPath << QStringLiteral("--quiet") << QStringLiteral("--nx")
             << QStringLiteral("-iex") << QStringLiteral("set debuginfod enabled off") << QStringLiteral("--interpreter=mi3");
-    if (!splitExecArgs.isEmpty()) mpiArgs << QStringLiteral("--args") << executable << splitExecArgs;
-    else mpiArgs << executable;
+    if (!splitExecArgs.isEmpty()) mpiArgs << QStringLiteral("--args") << executable << splitExecArgs; else mpiArgs << executable;
   }
   m_mpirunProcess = std::make_unique<QProcess>();
   if (!workDir.isEmpty() && QFileInfo(workDir).isDir()) m_mpirunProcess->setWorkingDirectory(workDir);
@@ -594,21 +517,9 @@ void GdbRankCoordinator::launchParallelSession(const QString& executable, int ex
   for (int i = 0; i < rankCount; ++i) { bootstrapRankGdb(i); emit rankStateChanged(i, m_processes[i]->state); }
 }
 
-/** @brief Populates `m_processes` with in-memory mock rank slots for unit testing without `QProcess`. */
-void GdbRankCoordinator::initializeMockSession(int rankCount, bool simulateInitialSync) {
-  terminateAllSessions(); m_watchVariables.clear();
-  for (int i = 0; i < rankCount; ++i) {
-    auto rp = std::make_unique<RankProcess>();
-    rp->id = i; rp->state.rankId = i; rp->state.currentState = "running"; rp->state.currentLine = 0;
-    if (!simulateInitialSync) rp->state.lastFiredTimestamp = "mocked";
-    m_processes.push_back(std::move(rp));
-  }
-}
-
-/** @brief Drains available bytes from @p rankId's FIFO or `QProcess` into `processGdbOutput()`. */
 void GdbRankCoordinator::handleGdbOutput(int rankId) {
-  if (m_shuttingDown || rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
-  auto& rp = m_processes[rankId]; if (!rp) return;
+  if (m_shuttingDown || rankId < 0 || rankId >= static_cast<int>(m_processes.size()) || !m_processes[rankId]) return;
+  auto& rp = m_processes[rankId];
   if (rp->fifoOutFd >= 0) {
     QByteArray acc; char buf[8192];
     while (!m_shuttingDown) { const ssize_t n = ::read(rp->fifoOutFd, buf, sizeof(buf)); if (n <= 0) break; acc.append(buf, static_cast<qsizetype>(n)); }
