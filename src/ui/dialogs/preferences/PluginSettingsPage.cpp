@@ -30,6 +30,7 @@
 #include <QVBoxLayout>
 
 #include "../../../core/managers/ConfigManager.hpp"
+#include "../../../core/managers/ThemeManager.hpp"
 #include "../../../core/plugins/PluginInstaller.hpp"
 #include "../../../core/plugins/PluginManager.hpp"
 #include "../../../core/plugins/PluginManifest.hpp"
@@ -82,6 +83,21 @@ class CompilerLogHighlighter final : public QSyntaxHighlighter {
 
 QString pluginRowKey(const LoadedPluginInfo& info) {
   return !info.id.isEmpty() ? info.id : info.libraryPath;
+}
+
+void applyPrimaryInstallButtonStyle(QPushButton* btn) {
+  if (!btn) return;
+  auto& tm = gridlock::core::managers::ThemeManager::instance();
+  const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
+  const QString fgHex =
+      (QColor(pal.accentHex).lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
+  btn->setStyleSheet(QStringLiteral(
+      "QPushButton, QPushButton#pluginCloneAndBuildBtn { background-color: %1; color: %2; border: 1px solid %1; "
+      "font-size: 13px; font-weight: 600; text-transform: none; padding: 2px 16px; border-radius: 4px; "
+      "min-height: 22px; max-height: 26px; }"
+      "QPushButton:hover, QPushButton#pluginCloneAndBuildBtn:hover { background-color: %1; color: %2; "
+      "border: 1px solid %3; }")
+                         .arg(pal.accentHex, fgHex, pal.textHex));
 }
 
 QWidget* makeCenteredCheckboxCell(QTableWidget* parent, QCheckBox** outCheck, const QString& objName,
@@ -264,44 +280,55 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   auto* refScopeRow = new QHBoxLayout();
   refScopeRow->setSpacing(8);
   m_gitRefEdit = new QLineEdit(tab);
-  m_gitRefEdit->setObjectName(QStringLiteral("pluginGitRefEdit"));
-  m_gitRefEdit->setPlaceholderText(tr("Optional branch, tag, or commit SHA (e.g. main, v1.0.0)"));
+  m_gitRefEdit->setObjectName(QStringLiteral("pluginGithubRefEdit"));
+  m_gitRefEdit->setPlaceholderText(tr("Optional branch/tag..."));
+  m_gitRefEdit->setMinimumWidth(180);
+  m_gitRefEdit->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
   refScopeRow->addWidget(m_gitRefEdit, 1);
 
   m_installScopeCombo = new QComboBox(tab);
   m_installScopeCombo->setObjectName(QStringLiteral("pluginInstallScopeCombo"));
+  m_installScopeCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  m_installScopeCombo->setMinimumContentsLength(18);
+  m_installScopeCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   m_installScopeCombo->addItem(tr("Global (~/.config/gridlock/plugins)"), static_cast<int>(PluginScope::UserGlobal));
   m_installScopeCombo->addItem(tr("This Workspace (<workspace>/.gridlock/plugins)"),
                                static_cast<int>(PluginScope::Workspace));
   refScopeRow->addWidget(m_installScopeCombo, 1);
 
-  m_cloneBuildBtn = new QPushButton(tr("Clone & Build"), tab);
+  m_cloneBuildBtn = new QPushButton(tr("Install"), tab);
   m_cloneBuildBtn->setObjectName(QStringLiteral("pluginCloneAndBuildBtn"));
-  m_cloneBuildBtn->setMinimumWidth(132);
+  m_cloneBuildBtn->setMinimumWidth(96);
+  applyPrimaryInstallButtonStyle(m_cloneBuildBtn);
   refScopeRow->addWidget(m_cloneBuildBtn);
   form->addRow(tr("Ref & Install Scope:"), refScopeRow);
 
-  auto* manifestRow = new QHBoxLayout();
+  auto* manifestField = new QWidget(tab);
+  manifestField->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  auto* manifestRow = new QHBoxLayout(manifestField);
+  manifestRow->setContentsMargins(0, 2, 0, 2);
   manifestRow->setSpacing(8);
   auto* manifestHint = new QLabel(
-      tr("Declarative manifest (<code>plugins.toml</code> + user-global <code>plugins-lock.toml</code>):"), tab);
+      tr("Declarative manifest (plugins.toml + user-global plugins-lock.toml):"), manifestField);
+  manifestHint->setObjectName(QStringLiteral("pluginManifestSyncHintLabel"));
   manifestHint->setWordWrap(true);
+  manifestHint->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   manifestRow->addWidget(manifestHint, 1);
 
-  m_openManifestBtn = new QPushButton(tr("Open plugins.toml"), tab);
+  m_openManifestBtn = new QPushButton(tr("Open plugins.toml"), manifestField);
   m_openManifestBtn->setObjectName(QStringLiteral("pluginOpenManifestBtn"));
   m_openManifestBtn->setToolTip(tr("Create (if missing) and open plugins.toml for the selected scope."));
   manifestRow->addWidget(m_openManifestBtn);
 
-  m_syncManifestBtn = new QPushButton(tr("Sync plugins.toml"), tab);
+  m_syncManifestBtn = new QPushButton(tr("Sync plugins.toml"), manifestField);
   m_syncManifestBtn->setObjectName(QStringLiteral("pluginSyncManifestBtn"));
   m_syncManifestBtn->setToolTip(tr("Clone and compile any missing or outdated plugins declared in plugins.toml."));
   manifestRow->addWidget(m_syncManifestBtn);
-  form->addRow(tr("Manifest Sync:"), manifestRow);
+  form->addRow(tr("Manifest Sync:"), manifestField);
   lay->addLayout(form);
 
   m_buildSummaryBadge = new QLabel(
-      tr("Ready to clone/build from GitHub, GitLab, Codeberg, Gitea, or custom Git URLs."), tab);
+      tr("Ready to install from GitHub, GitLab, Codeberg, Gitea, or custom Git URLs."), tab);
   m_buildSummaryBadge->setObjectName(QStringLiteral("pluginBuildSummaryBadge"));
   m_buildSummaryBadge->setWordWrap(true);
   lay->addWidget(m_buildSummaryBadge);
@@ -321,6 +348,9 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   lay->addWidget(m_compilerLogView, 1);
 
   updateGitRepoPlaceholder();
+  connect(&gridlock::core::managers::ThemeManager::instance(),
+          &gridlock::core::managers::ThemeManager::themeModeChanged, this,
+          [this](bool) { applyPrimaryInstallButtonStyle(m_cloneBuildBtn); });
   connect(m_gitHostCombo, &QComboBox::currentIndexChanged, this, [this](int) { updateGitRepoPlaceholder(); });
   connect(m_cloneBuildBtn, &QPushButton::clicked, this, &PluginSettingsPage::onCloneOrCancelClicked);
   connect(m_syncManifestBtn, &QPushButton::clicked, this, &PluginSettingsPage::onSyncManifestClicked);
@@ -366,7 +396,7 @@ void PluginSettingsPage::onCloneOrCancelClicked() {
           ? PluginScope::Workspace
           : PluginScope::UserGlobal;
   if (m_installer->startInstallFromGit(repoSpec, ref, scope, forge)) {
-    if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel Build"));
+    if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel"));
     if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
   }
 }
@@ -383,7 +413,7 @@ void PluginSettingsPage::onSyncManifestClicked() {
   const bool started = m_installer->syncFromManifests(PluginManifest::userManifestPath(),
                                                       PluginManifest::workspaceManifestPath(), scope);
   if (started && m_installer->isRunning()) {
-    if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel Build"));
+    if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel"));
     if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
   }
 }
@@ -402,7 +432,7 @@ void PluginSettingsPage::onOpenManifestClicked() {
 }
 
 void PluginSettingsPage::onInstallFinished(const PluginBuildResult& result) {
-  if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Clone & Build"));
+  if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Install"));
   if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(true);
   const int warnCount = static_cast<int>(result.warnings.size());
   const int errCount = static_cast<int>(result.errors.size());

@@ -155,6 +155,11 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   // 2. Reopen Preferences -> Plugins, stage Workspace disable, click Apply, and verify Restart banners + GitHub tab.
   gridlock::ui::PreferencesDialog pd2(&mw);
   pd2.show();
+  for (int i = 0; i < pd2.categoryTree()->topLevelItemCount(); ++i) {
+    if (pd2.categoryTree()->topLevelItem(i)->text(0) == QStringLiteral("Plugins")) {
+      pd2.categoryTree()->setCurrentItem(pd2.categoryTree()->topLevelItem(i));
+    }
+  }
   QApplication::processEvents();
   auto* wsChk2 = pd2.findChild<QCheckBox*>(QStringLiteral("pluginWorkspaceCheck_org.gridlock.test_dummy"));
   QVERIFY(wsChk2 != nullptr && wsChk2->isChecked());
@@ -171,12 +176,19 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QApplication::processEvents();
   auto* hostCombo = pd2.findChild<QComboBox*>(QStringLiteral("pluginGitHostCombo"));
   auto* repoEdit = pd2.findChild<QLineEdit*>(QStringLiteral("pluginGitRepoEdit"));
+  auto* refEdit = pd2.findChild<QLineEdit*>(QStringLiteral("pluginGithubRefEdit"));
+  auto* manifestHint = pd2.findChild<QLabel*>(QStringLiteral("pluginManifestSyncHintLabel"));
   QVERIFY(pd2.findChild<QWidget*>(QStringLiteral("pluginInstallTab")) != nullptr);
-  QVERIFY(hostCombo != nullptr && hostCombo->count() == 4 && repoEdit != nullptr);
-  QVERIFY(pd2.pluginPage()->gitRepoEdit() == repoEdit && pd2.pluginPage()->githubRefEdit() != nullptr &&
+  QVERIFY(hostCombo != nullptr && hostCombo->count() == 4 && repoEdit != nullptr && refEdit != nullptr);
+  QVERIFY(pd2.pluginPage()->gitRepoEdit() == repoEdit && pd2.pluginPage()->githubRefEdit() == refEdit &&
           pd2.pluginPage()->installScopeCombo() != nullptr && pd2.pluginPage()->cloneAndBuildButton() != nullptr &&
           pd2.pluginPage()->syncManifestButton() != nullptr && pd2.pluginPage()->openManifestButton() != nullptr &&
           pd2.pluginPage()->compilerLogView() != nullptr);
+  QCOMPARE(pd2.pluginPage()->cloneAndBuildButton()->text(), QStringLiteral("Install"));
+  QVERIFY(refEdit->minimumWidth() >= 150 && refEdit->width() >= 150);
+  QVERIFY(manifestHint != nullptr && manifestHint->wordWrap() &&
+          manifestHint->sizePolicy().verticalPolicy() == QSizePolicy::Preferred &&
+          manifestHint->height() >= manifestHint->heightForWidth(manifestHint->width()));
   QVERIFY(repoEdit->placeholderText().contains(QStringLiteral("owner/repo")));
   hostCombo->setCurrentIndex(1);
   QApplication::processEvents();
