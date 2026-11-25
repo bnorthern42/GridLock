@@ -1,23 +1,33 @@
 /**
  * @file MainWindowPlugins.cpp
- * @brief Native plugin lifecycle wiring, throttled console telemetry routing, and Tools -> Plugins menu.
+ * @brief Native plugin lifecycle wiring, throttled console telemetry routing, Tools -> Plugins menu, and self-restart notice.
  *
  * Owns `PluginManager` inside `MainWindow`, synchronizes its `GdbRankCoordinator`
  * binding across engine switches, forwards session start/end events, coalesces
- * plugin log/event console previews on a `50 ms` timer, and populates **Tools -> Plugins**.
+ * plugin log/event console previews on a `50 ms` timer, surfaces a status-bar
+ * restart notification banner with **Restart GridLock Now**, and populates **Tools -> Plugins**.
  */
 
 #include "MainWindow.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
 #include <QAction>
 #include <QByteArray>
+#include <QCoreApplication>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
+#include <QProcess>
+#include <QPushButton>
+#include <QSettings>
+#include <QStatusBar>
 #include <QStringList>
 #include <QTimer>
 #include <QTreeWidget>
@@ -128,6 +138,44 @@ void MainWindow::initializePluginSubsystem() {
             enqueueConsoleLine(QStringLiteral("[PluginLog:%1] %2").arg(tag, message), level >= GRIDLOCK_LOG_ERROR);
           });
 
+  // Status-bar notification banner with "Restart GridLock Now" action when plugin configuration requires restart.
+  QFrame* restartNotice = nullptr;
+  if (QStatusBar* bar = statusBar()) {
+    restartNotice = new QFrame(bar);
+    restartNotice->setObjectName(QStringLiteral("mainWindowPluginRestartBanner"));
+    restartNotice->setStyleSheet(QStringLiteral(
+        "QFrame#mainWindowPluginRestartBanner { background-color: rgba(217, 119, 6, 0.20); "
+        "border: 1px solid #d97706; border-radius: 4px; }"));
+    auto* noticeLay = new QHBoxLayout(restartNotice);
+    noticeLay->setContentsMargins(8, 1, 6, 1);
+    noticeLay->setSpacing(8);
+    auto* noticeLbl = new QLabel(tr("Plugin changes require restart"), restartNotice);
+    noticeLbl->setObjectName(QStringLiteral("mainWindowPluginRestartLabel"));
+    noticeLay->addWidget(noticeLbl);
+
+    auto* restartBtn = new QPushButton(tr("Restart GridLock Now"), restartNotice);
+    restartBtn->setObjectName(QStringLiteral("mainWindowRestartGridLockBtn"));
+    restartBtn->setFixedHeight(20);
+    noticeLay->addWidget(restartBtn);
+    restartNotice->setVisible(false);
+    bar->addPermanentWidget(restartNotice);
+
+    connect(restartBtn, &QPushButton::clicked, this, [this]() {
+      if (!m_activeWorkspaceDir.isEmpty()) saveSession(false);
+      if (m_debugSessionActive) stopTargetWorkflow();
+      gridlock::core::ConfigManager::instance().saveGlobalConfig();
+      QSettings(QStringLiteral("gridlock"), QStringLiteral("debugger")).sync();
+      if (qEnvironmentVariableIntValue("GRIDLOCK_DRY_RUN_SELF_RESTART") == 1) {
+        if (qApp != nullptr) qApp->setProperty("gridlock_restart_triggered", true);
+        return;
+      }
+      const QString appPath = QCoreApplication::applicationFilePath();
+      const QStringList appArgs = QCoreApplication::arguments().mid(1);
+      if (!appPath.isEmpty()) QProcess::startDetached(appPath, appArgs);
+      QCoreApplication::quit();
+    });
+  }
+
   if (menuBar() != nullptr) {
     for (QAction* topAct : menuBar()->actions()) {
       QMenu* m = topAct ? topAct->menu() : nullptr;
@@ -143,8 +191,28 @@ void MainWindow::initializePluginSubsystem() {
 
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::registeredActionsChanged,
           this, &MainWindow::rebuildToolsPluginsMenu);
-  connect(m_pluginManager, &gridlock::core::plugins::PluginManager::pluginsChanged,
-          this, &MainWindow::rebuildToolsPluginsMenu);
+  connect(m_pluginManager, &gridlock::core::plugins::PluginManager::pluginsChanged, this,
+          [this, restartNotice, enqueueConsoleLine]() {
+            rebuildToolsPluginsMenu();
+            if (m_isShuttingDown || m_isClosing || m_pluginManager == nullptr) return;
+            const auto& list = m_pluginManager->plugins();
+            const bool needRestart =
+                m_pluginManager->property("gl_restart_required").toBool() ||
+                std::any_of(list.cbegin(), list.cend(),
+                            [](const gridlock::core::plugins::LoadedPluginInfo& i) { return i.requiresRestart; });
+            if (restartNotice != nullptr) {
+              const bool wasHidden = restartNotice->isHidden();
+              restartNotice->setVisible(needRestart);
+              if (needRestart && wasHidden) {
+                if (statusBar() != nullptr) {
+                  statusBar()->showMessage(
+                      tr("Plugin settings updated — click 'Restart GridLock Now' to apply all changes."), 10000);
+                }
+                enqueueConsoleLine(
+                    QStringLiteral("[Plugins] Restart GridLock to apply updated plugin enablement/trust."), false);
+              }
+            }
+          });
 
   if (m_runAction != nullptr) {
     connect(m_runAction, &QAction::changed, this, [this]() {

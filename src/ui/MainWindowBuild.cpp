@@ -12,6 +12,7 @@
 #include "../core/hpc/dap/DapCoordinator.hpp"
 #include "../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../core/managers/ConfigManager.hpp"
+#include "../core/plugins/PluginManager.hpp"
 #include "../core/utils/ClangdLspClient.hpp"
 #include "EditorTabManager.hpp"
 #include "GdbConsoleWidget.hpp"
@@ -325,6 +326,7 @@ bool MainWindow::switchWorkspaceDirectory(const QString& dirPath) {
         m_projectExplorerWidget->setRootPath(resolvedDir);
     auto& cfg = gridlock::core::ConfigManager::instance();
     cfg.setWorkspace(resolvedDir); cfg.setLastOpenDir(resolvedDir); m_persistentBreakpoints = cfg.getBreakpoints();
+    if (m_pluginManager != nullptr) { m_pluginManager->discoverAndLoad(); rebuildToolsPluginsMenu(); }
     const auto loadedPs = cfg.loadProjectSettings();
     for (const auto& w : loadedPs.watchExpressions) if (m_differentialGrid) m_differentialGrid->addVariableColumn(QString::fromStdString(w));
     if (m_terminalDock) { const QString psWd = QString::fromStdString(loadedPs.workingDirectory); m_terminalDock->setWorkingDirectory((!psWd.isEmpty() && QDir(psWd).exists()) ? psWd : resolvedDir); }

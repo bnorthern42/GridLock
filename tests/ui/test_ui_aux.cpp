@@ -879,22 +879,31 @@ void TestMainWindowUI::testProgressiveDisclosurePerspectivesAndSingleRank() {
         QVERIFY(plugNode != nullptr && pd.pluginPage() != nullptr);
         pd.categoryTree()->setCurrentItem(plugNode); QApplication::processEvents();
         QTableWidget* tbl = pd.pluginPage()->pluginTable();
-        QVERIFY(tbl != nullptr && tbl->rowCount() == 2 && pd.pluginPage()->openFolderButton() && pd.pluginPage()->reloadPluginsButton());
-        QCOMPARE(tbl->item(0, 3)->text(), QStringLiteral("v1.0"));
-        QCOMPARE(tbl->item(0, 4)->text(), QStringLiteral("Loaded"));
-        QVERIFY(tbl->item(1, 4)->text().startsWith(QStringLiteral("ABI Rejected:")));
+        QVERIFY(tbl != nullptr && tbl->rowCount() == 2 && tbl->columnCount() == 7 && pd.pluginPage()->openFolderButton() && pd.pluginPage()->reloadPluginsButton());
+        QCOMPARE(tbl->item(0, 3)->text(), QStringLiteral("1.0.0"));
+        QVERIFY(tbl->item(0, 4)->text().contains(QStringLiteral("v1.0")));
+        QCOMPARE(tbl->item(0, 5)->text(), QStringLiteral("Loaded"));
+        QVERIFY(tbl->item(1, 5)->text().startsWith(QStringLiteral("ABI Rejected:")));
 
-        // Toggle plugin disabled via checkbox and verify ConfigManager + live unload, then re-enable.
-        auto* chk0 = pd.findChild<QCheckBox*>(QStringLiteral("pluginEnableCheck_org.gridlock.test_dummy"));
-        QVERIFY(chk0 != nullptr && chk0->isChecked());
-        chk0->setChecked(false); QApplication::processEvents();
-        QVERIFY(cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")) && tbl->item(0, 4)->text() == QStringLiteral("Disabled"));
-        QVERIFY(mw.findChild<QAction*>(QStringLiteral("pluginCmd_dummy.ping_ranks")) == nullptr);
-        chk0 = pd.findChild<QCheckBox*>(QStringLiteral("pluginEnableCheck_org.gridlock.test_dummy"));
-        QVERIFY(chk0 != nullptr); chk0->setChecked(true); QApplication::processEvents();
-        QCOMPARE(tbl->item(0, 4)->text(), QStringLiteral("Loaded"));
-        pd.pluginPage()->reloadPluginsButton()->click(); QApplication::processEvents();
-        QCOMPARE(tbl->rowCount(), 2); pd.close();
+        // Verify staged Cancel vs Apply semantics, dual Global/Workspace checkboxes, and Restart banner/notification.
+        auto* globalChk = pd.findChild<QCheckBox*>(QStringLiteral("pluginGlobalCheck_org.gridlock.test_dummy"));
+        auto* wsChk = pd.findChild<QCheckBox*>(QStringLiteral("pluginWorkspaceCheck_org.gridlock.test_dummy"));
+        QVERIFY(globalChk != nullptr && wsChk != nullptr && globalChk->isChecked() && wsChk->isChecked());
+        globalChk->setChecked(false); QApplication::processEvents();
+        QVERIFY(!cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")) && tbl->item(0, 5)->text().contains(QStringLiteral("Staged")));
+        pd.reject(); QVERIFY(!cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")));
+
+        gridlock::ui::PreferencesDialog pd2(&mw); pd2.show(); QApplication::processEvents();
+        auto* globalChk2 = pd2.findChild<QCheckBox*>(QStringLiteral("pluginGlobalCheck_org.gridlock.test_dummy"));
+        QVERIFY(globalChk2 != nullptr && globalChk2->isChecked());
+        globalChk2->setChecked(false); QVERIFY(QMetaObject::invokeMethod(&pd2, "apply")); QApplication::processEvents();
+        QVERIFY(cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")) && !pd2.pluginPage()->restartBanner()->isHidden());
+        auto* mwBanner = mw.findChild<QWidget*>(QStringLiteral("mainWindowPluginRestartBanner"));
+        QVERIFY(mwBanner != nullptr && !mwBanner->isHidden() && pd2.pluginPage()->restartNowButton() != nullptr);
+        globalChk2 = pd2.findChild<QCheckBox*>(QStringLiteral("pluginGlobalCheck_org.gridlock.test_dummy"));
+        QVERIFY(globalChk2 != nullptr); globalChk2->setChecked(true); QVERIFY(QMetaObject::invokeMethod(&pd2, "apply"));
+        pd2.pluginPage()->reloadPluginsButton()->click(); QApplication::processEvents();
+        QCOMPARE(pd2.pluginPage()->pluginTable()->rowCount(), 2); pd2.close();
 
         // Bind stopped GdbRankCoordinator, populate PetscVec row in VariablesDockWidget, and trigger Plugin Actions -> Inspect Domain Field.
         gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);

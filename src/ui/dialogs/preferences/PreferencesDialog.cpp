@@ -275,7 +275,7 @@ void PreferencesDialog::apply() {
     cfg.saveTerminalSettings({m_terminalPage->shellPath(), m_terminalPage->fontFamily(), m_terminalPage->fontSize()});
     if (m_keybindingsPage) m_keybindingsPage->applyPendingChanges();
     if (m_toolbarLayoutList) cfg.setToolbarLayout(pendingToolbarLayout());
-    if (m_pluginPage) m_pluginPage->applyChanges();
+    if (m_pluginPage) (void)m_pluginPage->applyChanges();
 
     s.sync();
     if (qApp) qApp->setProperty("gridlock_disasm_prefs_rev", qApp->property("gridlock_disasm_prefs_rev").toInt() + 1);
