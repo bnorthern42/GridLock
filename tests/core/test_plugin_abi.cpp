@@ -83,6 +83,10 @@ static_assert(std::is_standard_layout_v<GridLockSurfaceContext>);
 static_assert(std::is_trivially_copyable_v<GridLockSurfaceContext>);
 static_assert(std::is_standard_layout_v<GridLockThemeInfo>);
 static_assert(std::is_trivially_copyable_v<GridLockThemeInfo>);
+static_assert(std::is_standard_layout_v<GridLockTypeInfo>);
+static_assert(std::is_trivially_copyable_v<GridLockTypeInfo>);
+static_assert(std::is_standard_layout_v<GridLockContiguousRange>);
+static_assert(std::is_trivially_copyable_v<GridLockContiguousRange>);
 static_assert(std::is_standard_layout_v<GridLockHostApi>);
 static_assert(std::is_trivially_copyable_v<GridLockHostApi>);
 static_assert(std::is_standard_layout_v<GridLockPluginDescriptor>);
@@ -174,7 +178,30 @@ static_assert(offsetof(GridLockThemeInfo, warning_hex) == 180u);
 static_assert(offsetof(GridLockThemeInfo, error_hex) == 196u);
 static_assert(sizeof(GridLockThemeInfo) == 212u);
 
-// GridLockHostApi (296 bytes, including void* reserved[8] tail padding)
+// GridLockTypeInfo (288 bytes, zero implicit padding)
+static_assert(offsetof(GridLockTypeInfo, struct_size) == 0u);
+static_assert(offsetof(GridLockTypeInfo, abi_major) == 4u);
+static_assert(offsetof(GridLockTypeInfo, abi_minor) == 8u);
+static_assert(offsetof(GridLockTypeInfo, reserved_flags) == 12u);
+static_assert(offsetof(GridLockTypeInfo, byte_size) == 16u);
+static_assert(offsetof(GridLockTypeInfo, is_pointer) == 24u);
+static_assert(offsetof(GridLockTypeInfo, is_contiguous_container) == 28u);
+static_assert(offsetof(GridLockTypeInfo, type_name_utf8) == 32u);
+static_assert(sizeof(GridLockTypeInfo) == 288u);
+
+// GridLockContiguousRange (424 bytes, zero implicit padding)
+static_assert(offsetof(GridLockContiguousRange, struct_size) == 0u);
+static_assert(offsetof(GridLockContiguousRange, abi_major) == 4u);
+static_assert(offsetof(GridLockContiguousRange, abi_minor) == 8u);
+static_assert(offsetof(GridLockContiguousRange, reserved_flags) == 12u);
+static_assert(offsetof(GridLockContiguousRange, data_address) == 16u);
+static_assert(offsetof(GridLockContiguousRange, element_count) == 24u);
+static_assert(offsetof(GridLockContiguousRange, element_size) == 32u);
+static_assert(offsetof(GridLockContiguousRange, element_type_utf8) == 40u);
+static_assert(offsetof(GridLockContiguousRange, container_type_utf8) == 168u);
+static_assert(sizeof(GridLockContiguousRange) == 424u);
+
+// GridLockHostApi (312 bytes, including void* reserved[8] tail padding)
 static_assert(offsetof(GridLockHostApi, struct_size) == 0u);
 static_assert(offsetof(GridLockHostApi, abi_major) == 4u);
 static_assert(offsetof(GridLockHostApi, abi_minor) == 8u);
@@ -206,9 +233,11 @@ static_assert(offsetof(GridLockHostApi, clear_editor_annotations) == 200u);
 static_assert(offsetof(GridLockHostApi, get_theme_info) == 208u);
 static_assert(offsetof(GridLockHostApi, publish_report_view) == 216u);
 static_assert(offsetof(GridLockHostApi, close_report_view) == 224u);
-static_assert(offsetof(GridLockHostApi, reserved) == 232u);
+static_assert(offsetof(GridLockHostApi, query_type_info) == 232u);
+static_assert(offsetof(GridLockHostApi, resolve_contiguous_range) == 240u);
+static_assert(offsetof(GridLockHostApi, reserved) == 248u);
 static_assert(sizeof(std::declval<GridLockHostApi>().reserved) == 64u);
-static_assert(sizeof(GridLockHostApi) == 296u);
+static_assert(sizeof(GridLockHostApi) == 312u);
 
 // GridLockPluginDescriptor (160 bytes, including void* reserved[8] tail padding)
 static_assert(offsetof(GridLockPluginDescriptor, struct_size) == 0u);
@@ -233,42 +262,21 @@ namespace {
 
 /** @brief Fake host backing store exercising every callback slot in `GridLockHostApi`. */
 struct MockHostState {
-  int32_t rankCount = 4;
-  int32_t activeRank = 2;
-  int32_t liveAllocs = 0;
-  int32_t evalCallCount = 0;
-  int32_t promptCallCount = 0;
-  int32_t nextBreakpointId = 10;
-  int32_t nextDialogResult = GRIDLOCK_RESULT_YES;
-  int32_t lastNavLine = -1;
-  int32_t lastNavCol = -1;
+  int32_t rankCount = 4, activeRank = 2, liveAllocs = 0, evalCallCount = 0, promptCallCount = 0;
+  int32_t nextBreakpointId = 10, nextDialogResult = GRIDLOCK_RESULT_YES, lastNavLine = -1, lastNavCol = -1;
   bool promptCancelled = false;
-  size_t simulatedShortReadLimit = 0;
-  size_t simulatedOversizedEvalLen = 0;
-  size_t simulatedOversizedPromptLen = 0;
-  std::string evalPayload = "42";
-  std::string promptPayload = "solver_field";
-  std::string lastChannel;
-  std::string lastJsonPayload;
-  std::string lastLog;
-  std::string lastToastTitle;
-  std::string lastMenuPath;
-  std::string lastStatusItemId;
-  std::string lastStatusText;
-  std::string lastAnnotationId;
-  std::string lastClearedPrefix;
-  std::string lastReportPanelId;
-  std::string lastReportContent;
+  size_t simulatedShortReadLimit = 0, simulatedOversizedEvalLen = 0, simulatedOversizedPromptLen = 0;
+  std::string evalPayload = "42", promptPayload = "solver_field";
+  std::string lastChannel, lastJsonPayload, lastLog, lastToastTitle, lastMenuPath;
+  std::string lastStatusItemId, lastStatusText, lastAnnotationId, lastClearedPrefix;
+  std::string lastReportPanelId, lastReportContent;
   GridLockReportFormat lastReportFormat = GRIDLOCK_REPORT_MARKDOWN;
   std::vector<std::byte> targetMemory;
   GridLockVariableActionCallback varCb = nullptr;
-  void* varPluginCtx = nullptr;
   GridLockCommandActionCallback cmdCb = nullptr;
-  void* cmdPluginCtx = nullptr;
   GridLockStatusItemCallback statusCb = nullptr;
-  void* statusPluginCtx = nullptr;
   GridLockContextActionFn surfaceCb = nullptr;
-  void* surfacePluginCtx = nullptr;
+  void *varPluginCtx = nullptr, *cmdPluginCtx = nullptr, *statusPluginCtx = nullptr, *surfacePluginCtx = nullptr;
   GridLockContextSurface registeredSurface = GRIDLOCK_SURFACE_VARIABLES;
 };
 
@@ -414,72 +422,47 @@ GridLockStatus GRIDLOCK_CALL mockPromptInput(
   return GRIDLOCK_OK;
 }
 
-GridLockStatus GRIDLOCK_CALL mockShowToast(
-    void* hostCtx, GridLockDialogSeverity, const char* title, const char* body, int32_t) {
+GridLockStatus GRIDLOCK_CALL mockShowToast(void* hostCtx, GridLockDialogSeverity, const char* title, const char* body, int32_t) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !title || !body) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastToastTitle = title;
-  return GRIDLOCK_OK;
+  state->lastToastTitle = title; return GRIDLOCK_OK;
 }
-
-GridLockStatus GRIDLOCK_CALL mockRegisterMenuAction(
-    void* hostCtx, const char* actionId, const char* menuPath, const char*,
-    GridLockCommandActionCallback cb, void* pluginCtx) {
+GridLockStatus GRIDLOCK_CALL mockRegisterMenuAction(void* hostCtx, const char* actionId, const char* menuPath, const char*, GridLockCommandActionCallback cb, void* pluginCtx) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !actionId || !menuPath || !cb) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastMenuPath = menuPath; state->cmdCb = cb; state->cmdPluginCtx = pluginCtx;
-  return GRIDLOCK_OK;
+  state->lastMenuPath = menuPath; state->cmdCb = cb; state->cmdPluginCtx = pluginCtx; return GRIDLOCK_OK;
 }
-
-GridLockStatus GRIDLOCK_CALL mockSetStatusItem(
-    void* hostCtx, const char* itemId, const char* text, const char*,
-    const char*, GridLockStatusItemCallback cb, void* pluginCtx) {
+GridLockStatus GRIDLOCK_CALL mockSetStatusItem(void* hostCtx, const char* itemId, const char* text, const char*, const char*, GridLockStatusItemCallback cb, void* pluginCtx) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !itemId || !text) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastStatusItemId = itemId; state->lastStatusText = text;
-  state->statusCb = cb; state->statusPluginCtx = pluginCtx;
-  return GRIDLOCK_OK;
+  state->lastStatusItemId = itemId; state->lastStatusText = text; state->statusCb = cb; state->statusPluginCtx = pluginCtx; return GRIDLOCK_OK;
 }
-
 GridLockStatus GRIDLOCK_CALL mockRemoveStatusItem(void* hostCtx, const char* itemId) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !itemId) return GRIDLOCK_ERR_INVALID_ARG;
   if (state->lastStatusItemId == itemId) state->lastStatusItemId.clear();
   return GRIDLOCK_OK;
 }
-
-GridLockStatus GRIDLOCK_CALL mockRegisterContextAction(
-    void* hostCtx, GridLockContextSurface surface, const char* actionId, const char* label,
-    const char*, GridLockContextActionFn cb, void* pluginCtx) {
+GridLockStatus GRIDLOCK_CALL mockRegisterContextAction(void* hostCtx, GridLockContextSurface surface, const char* actionId, const char* label, const char*, GridLockContextActionFn cb, void* pluginCtx) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !actionId || !label || !cb || surface < GRIDLOCK_SURFACE_VARIABLES) return GRIDLOCK_ERR_INVALID_ARG;
-  state->registeredSurface = surface; state->surfaceCb = cb; state->surfacePluginCtx = pluginCtx;
-  return GRIDLOCK_OK;
+  state->registeredSurface = surface; state->surfaceCb = cb; state->surfacePluginCtx = pluginCtx; return GRIDLOCK_OK;
 }
-
 GridLockStatus GRIDLOCK_CALL mockNavigateToLocation(void* hostCtx, const char* file, int32_t line, int32_t col) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !file || line <= 0) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastNavLine = line; state->lastNavCol = col;
-  return GRIDLOCK_OK;
+  state->lastNavLine = line; state->lastNavCol = col; return GRIDLOCK_OK;
 }
-
-GridLockStatus GRIDLOCK_CALL mockSetEditorAnnotation(
-    void* hostCtx, const char* annId, const char* file, int32_t line,
-    const char* badge, const char*, const char*) {
+GridLockStatus GRIDLOCK_CALL mockSetEditorAnnotation(void* hostCtx, const char* annId, const char* file, int32_t line, const char* badge, const char*, const char*) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !annId || !file || !badge || line <= 0) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastAnnotationId = annId;
-  return GRIDLOCK_OK;
+  state->lastAnnotationId = annId; return GRIDLOCK_OK;
 }
-
 GridLockStatus GRIDLOCK_CALL mockClearEditorAnnotations(void* hostCtx, const char* prefix) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastClearedPrefix = prefix ? prefix : "";
-  return GRIDLOCK_OK;
+  state->lastClearedPrefix = prefix ? prefix : ""; return GRIDLOCK_OK;
 }
-
 GridLockStatus GRIDLOCK_CALL mockGetThemeInfo(void* hostCtx, GridLockThemeInfo* outTheme) {
   if (!hostCtx || !outTheme || outTheme->struct_size < sizeof(GridLockThemeInfo)) return GRIDLOCK_ERR_INVALID_ARG;
   outTheme->is_dark = 1;
@@ -494,55 +477,53 @@ GridLockStatus GRIDLOCK_CALL mockGetThemeInfo(void* hostCtx, GridLockThemeInfo* 
   std::snprintf(outTheme->error_hex, sizeof(outTheme->error_hex), "%s", "#ef4444");
   return GRIDLOCK_OK;
 }
-
-GridLockStatus GRIDLOCK_CALL mockPublishReportView(
-    void* hostCtx, const char* panelId, const char* title, GridLockReportFormat format, const char* content) {
+GridLockStatus GRIDLOCK_CALL mockPublishReportView(void* hostCtx, const char* panelId, const char* title, GridLockReportFormat format, const char* content) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !panelId || !title || !content) return GRIDLOCK_ERR_INVALID_ARG;
-  state->lastReportPanelId = panelId; state->lastReportFormat = format; state->lastReportContent = content;
-  return GRIDLOCK_OK;
+  state->lastReportPanelId = panelId; state->lastReportFormat = format; state->lastReportContent = content; return GRIDLOCK_OK;
 }
-
 GridLockStatus GRIDLOCK_CALL mockCloseReportView(void* hostCtx, const char* panelId) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (!state || !panelId) return GRIDLOCK_ERR_INVALID_ARG;
   if (state->lastReportPanelId == panelId) state->lastReportPanelId.clear();
   return GRIDLOCK_OK;
 }
+GridLockStatus GRIDLOCK_CALL mockQueryTypeInfo(void* hostCtx, int32_t rank, const char* expr, GridLockTypeInfo* outInfo) {
+  auto* state = static_cast<MockHostState*>(hostCtx);
+  if (!state || !expr || !outInfo || outInfo->struct_size < sizeof(GridLockTypeInfo)) return GRIDLOCK_ERR_INVALID_ARG;
+  if (rank < 0 || rank >= state->rankCount) return GRIDLOCK_ERR_INVALID_RANK;
+  outInfo->byte_size = 24u; outInfo->is_pointer = 0; outInfo->is_contiguous_container = 1;
+  std::snprintf(outInfo->type_name_utf8, sizeof(outInfo->type_name_utf8), "%s", "std::vector<double>");
+  return GRIDLOCK_OK;
+}
+GridLockStatus GRIDLOCK_CALL mockResolveContiguousRange(void* hostCtx, int32_t rank, const char* expr, GridLockContiguousRange* outRange) {
+  auto* state = static_cast<MockHostState*>(hostCtx);
+  if (!state || !expr || !outRange || outRange->struct_size < sizeof(GridLockContiguousRange)) return GRIDLOCK_ERR_INVALID_ARG;
+  if (rank < 0 || rank >= state->rankCount) return GRIDLOCK_ERR_INVALID_RANK;
+  outRange->data_address = 0x7ffd1000ULL; outRange->element_count = 64u; outRange->element_size = 8u;
+  std::snprintf(outRange->element_type_utf8, sizeof(outRange->element_type_utf8), "%s", "double");
+  std::snprintf(outRange->container_type_utf8, sizeof(outRange->container_type_utf8), "%s", "std::vector<double>");
+  return GRIDLOCK_OK;
+}
 
 GridLockHostApi makeMockHostApi(MockHostState* state) {
   GridLockHostApi api{};
   api.struct_size = static_cast<uint32_t>(sizeof(GridLockHostApi));
-  api.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-  api.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-  api.reserved_flags = 0u;
+  api.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR; api.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
   api.host_ctx = state;
-  api.alloc_bytes = &mockAllocBytes;
-  api.free_bytes = &mockFreeBytes;
-  api.log_message = &mockLogMessage;
-  api.get_rank_count = &mockGetRankCount;
-  api.get_active_rank = &mockGetActiveRank;
-  api.eval_expr = &mockEvalExpr;
-  api.read_memory = &mockReadMemory;
-  api.write_memory = &mockWriteMemory;
-  api.set_breakpoint = &mockSetBreakpoint;
-  api.remove_breakpoint = &mockRemoveBreakpoint;
-  api.register_variable_action = &mockRegisterVarAction;
-  api.register_command_action = &mockRegisterCmdAction;
-  api.emit_structured_event = &mockEmitEvent;
-  api.show_message_box = &mockShowMessageBox;
-  api.prompt_input = &mockPromptInput;
-  api.show_toast = &mockShowToast;
-  api.register_menu_action = &mockRegisterMenuAction;
-  api.set_status_item = &mockSetStatusItem;
-  api.remove_status_item = &mockRemoveStatusItem;
-  api.register_context_action = &mockRegisterContextAction;
-  api.navigate_to_location = &mockNavigateToLocation;
-  api.set_editor_annotation = &mockSetEditorAnnotation;
-  api.clear_editor_annotations = &mockClearEditorAnnotations;
-  api.get_theme_info = &mockGetThemeInfo;
-  api.publish_report_view = &mockPublishReportView;
-  api.close_report_view = &mockCloseReportView;
+  api.alloc_bytes = &mockAllocBytes; api.free_bytes = &mockFreeBytes; api.log_message = &mockLogMessage;
+  api.get_rank_count = &mockGetRankCount; api.get_active_rank = &mockGetActiveRank;
+  api.eval_expr = &mockEvalExpr; api.read_memory = &mockReadMemory; api.write_memory = &mockWriteMemory;
+  api.set_breakpoint = &mockSetBreakpoint; api.remove_breakpoint = &mockRemoveBreakpoint;
+  api.register_variable_action = &mockRegisterVarAction; api.register_command_action = &mockRegisterCmdAction;
+  api.emit_structured_event = &mockEmitEvent; api.show_message_box = &mockShowMessageBox;
+  api.prompt_input = &mockPromptInput; api.show_toast = &mockShowToast;
+  api.register_menu_action = &mockRegisterMenuAction; api.set_status_item = &mockSetStatusItem;
+  api.remove_status_item = &mockRemoveStatusItem; api.register_context_action = &mockRegisterContextAction;
+  api.navigate_to_location = &mockNavigateToLocation; api.set_editor_annotation = &mockSetEditorAnnotation;
+  api.clear_editor_annotations = &mockClearEditorAnnotations; api.get_theme_info = &mockGetThemeInfo;
+  api.publish_report_view = &mockPublishReportView; api.close_report_view = &mockCloseReportView;
+  api.query_type_info = &mockQueryTypeInfo; api.resolve_contiguous_range = &mockResolveContiguousRange;
   return api;
 }
 
@@ -565,6 +546,8 @@ concept CanReadPod = requires(const GridLockHostApi* h) {
 static_assert(noexcept(gridlock::plugin::evalExpr(nullptr, 0, "x")));
 static_assert(noexcept(gridlock::plugin::promptInput(nullptr, "t", "l", "d")));
 static_assert(noexcept(gridlock::plugin::getThemeInfo(nullptr)));
+static_assert(noexcept(gridlock::plugin::queryTypeInfo(nullptr, 0, "x")));
+static_assert(noexcept(gridlock::plugin::resolveContiguousRange(nullptr, 0, "x")));
 static_assert(CanReadPod<SamplePodHeader>);
 static_assert(CanReadPod<uint32_t>);
 static_assert(!CanReadPod<bool>);
@@ -753,18 +736,10 @@ class TestPluginAbi : public QObject {
     QCOMPARE(host.register_context_action(host.host_ctx, GRIDLOCK_SURFACE_CALL_STACK, "mesh.frame_inspect",
                                           "Inspect Frame Domain", "solve.*", dummySurfaceCb, nullptr),
              GRIDLOCK_OK);
-    GridLockSurfaceContext surfCtx{};
-    surfCtx.struct_size = static_cast<uint32_t>(sizeof(GridLockSurfaceContext));
-    surfCtx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-    surfCtx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-    surfCtx.surface = GRIDLOCK_SURFACE_CALL_STACK;
-    surfCtx.rank = 1;
-    surfCtx.frame_level = 2;
-    surfCtx.line = 95;
-    surfCtx.column = 4;
-    surfCtx.bp_id = -1;
-    surfCtx.address = 0x401280ULL;
-    surfCtx.symbol_utf8 = "solveStep";
+    GridLockSurfaceContext surfCtx{static_cast<uint32_t>(sizeof(GridLockSurfaceContext)),
+                                   GRIDLOCK_PLUGIN_ABI_MAJOR, GRIDLOCK_PLUGIN_ABI_MINOR, 0u,
+                                   GRIDLOCK_SURFACE_CALL_STACK, 1, 2, 95, 4, -1, 0x401280ULL,
+                                   "solveStep", nullptr, nullptr, nullptr};
     QCOMPARE(state.surfaceCb(nullptr, &host, &surfCtx), GRIDLOCK_OK);
 
     QCOMPARE(host.navigate_to_location(host.host_ctx, "src/solver.cpp", 128, 12), GRIDLOCK_OK);
@@ -790,6 +765,22 @@ class TestPluginAbi : public QObject {
     QCOMPARE(state.lastReportFormat, GRIDLOCK_REPORT_KEY_VALUE_TABLE);
     QCOMPARE(host.close_report_view(host.host_ctx, "mesh.report"), GRIDLOCK_OK);
     QVERIFY(state.lastReportPanelId.empty());
+
+    const auto typeInfo = gridlock::plugin::queryTypeInfo(&host, 0, "domain");
+    QVERIFY(typeInfo.has_value());
+    QCOMPARE(typeInfo->byte_size, uint64_t{24u});
+    QCOMPARE(typeInfo->is_pointer, 0);
+    QCOMPARE(typeInfo->is_contiguous_container, 1);
+    QCOMPARE(std::string(typeInfo->type_name_utf8), std::string("std::vector<double>"));
+
+    const auto rangeRes = gridlock::plugin::resolveContiguousRange(&host, 0, "domain");
+    QVERIFY(rangeRes.has_value());
+    QCOMPARE(rangeRes->data_address, uint64_t{0x7ffd1000ULL});
+    QCOMPARE(rangeRes->element_count, uint64_t{64u});
+    QCOMPARE(rangeRes->element_size, uint64_t{8u});
+    QCOMPARE(std::string(rangeRes->element_type_utf8), std::string("double"));
+    QCOMPARE(std::string(rangeRes->container_type_utf8), std::string("std::vector<double>"));
+    QCOMPARE(gridlock::plugin::resolveContiguousRange(&host, 99, "domain").error(), GRIDLOCK_ERR_INVALID_RANK);
   }
 };
 

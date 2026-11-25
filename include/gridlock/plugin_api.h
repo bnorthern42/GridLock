@@ -192,6 +192,8 @@ typedef struct GridLockVariableContext GridLockVariableContext;
 typedef struct GridLockCommandSpec GridLockCommandSpec;
 typedef struct GridLockSurfaceContext GridLockSurfaceContext;
 typedef struct GridLockThemeInfo GridLockThemeInfo;
+typedef struct GridLockTypeInfo GridLockTypeInfo;
+typedef struct GridLockContiguousRange GridLockContiguousRange;
 
 /**
  * @struct GridLockStopInfo
@@ -307,6 +309,37 @@ struct GridLockThemeInfo {
   char selection_hex[16];     /**< Active row/text selection background `#RRGGBB`. */
   char warning_hex[16];       /**< Semantic warning token `#RRGGBB`. */
   char error_hex[16];         /**< Semantic error/fault token `#RRGGBB`. */
+};
+
+/**
+ * @struct GridLockTypeInfo
+ * @brief Fixed-size POD snapshot of DWARF type metadata resolved without inferior calls.
+ */
+struct GridLockTypeInfo {
+  uint32_t struct_size;             /**< Must equal `sizeof(GridLockTypeInfo)`. */
+  uint32_t abi_major;               /**< Producer ABI major version (`GRIDLOCK_PLUGIN_ABI_MAJOR`). */
+  uint32_t abi_minor;               /**< Producer ABI minor version (`GRIDLOCK_PLUGIN_ABI_MINOR`). */
+  uint32_t reserved_flags;          /**< Bitmask reserved for future flags; must be `0`. */
+  uint64_t byte_size;               /**< Static `sizeof(expr)` in bytes on `rank`. */
+  int32_t is_pointer;               /**< `1` when resolved DWARF type is a pointer, else `0`. */
+  int32_t is_contiguous_container;  /**< `1` for C arrays, `std::array`, `std::vector`, `std::span`, `std::valarray`. */
+  char type_name_utf8[256];         /**< NUL-terminated resolved DWARF type name. */
+};
+
+/**
+ * @struct GridLockContiguousRange
+ * @brief Contiguous element buffer descriptor resolved via DWARF without inferior calls.
+ */
+struct GridLockContiguousRange {
+  uint32_t struct_size;          /**< Must equal `sizeof(GridLockContiguousRange)`. */
+  uint32_t abi_major;            /**< Producer ABI major version (`GRIDLOCK_PLUGIN_ABI_MAJOR`). */
+  uint32_t abi_minor;            /**< Producer ABI minor version (`GRIDLOCK_PLUGIN_ABI_MINOR`). */
+  uint32_t reserved_flags;       /**< Bitmask reserved for future flags; must be `0`. */
+  uint64_t data_address;         /**< Virtual address of element `0` (or `0` when empty). */
+  uint64_t element_count;        /**< Number of contiguous elements in `[0, element_count)`. */
+  uint64_t element_size;         /**< Byte size of a single element (`sizeof(T)`). */
+  char element_type_utf8[128];   /**< NUL-terminated element DWARF type name (`T`). */
+  char container_type_utf8[256]; /**< NUL-terminated outer container/array DWARF type name. */
 };
 
 /** @brief Callback invoked when a user or automation triggers a variable action. */
@@ -532,6 +565,20 @@ typedef GridLockStatus (GRIDLOCK_CALL *GridLockCloseReportViewFn)(
     void* host_ctx,
     const char* panel_id);
 
+/** @brief Queries DWARF type name, `sizeof`, pointer, and contiguous-container flags without inferior calls. */
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockQueryTypeInfoFn)(
+    void* host_ctx,
+    int32_t rank,
+    const char* expr_utf8,
+    GridLockTypeInfo* out_info);
+
+/** @brief Resolves base address, element count, element size, and types of a contiguous container/array without inferior calls. */
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockResolveContiguousRangeFn)(
+    void* host_ctx,
+    int32_t rank,
+    const char* expr_utf8,
+    GridLockContiguousRange* out_range);
+
 /**
  * @struct GridLockHostApi
  * @brief Host service table passed by pointer to plugins at initialization and callbacks.
@@ -568,6 +615,8 @@ struct GridLockHostApi {
   GridLockGetThemeInfoFn get_theme_info;                      /**< Active theme token query callback. */
   GridLockPublishReportViewFn publish_report_view;            /**< Declarative report view publisher. */
   GridLockCloseReportViewFn close_report_view;                /**< Declarative report view closer. */
+  GridLockQueryTypeInfoFn query_type_info;                    /**< Zero-call DWARF type query callback. */
+  GridLockResolveContiguousRangeFn resolve_contiguous_range;  /**< Zero-call contiguous range resolver. */
   void* reserved[8];                                          /**< Future minor-ABI expansion slots. */
 };
 

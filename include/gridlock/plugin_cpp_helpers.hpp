@@ -264,6 +264,69 @@ using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
 }
 
 /**
+ * @brief Queries DWARF type metadata (`byte_size`, `is_pointer`, `is_contiguous_container`, `type_name_utf8`) on `rank`.
+ * @param host Non-null host API table providing `query_type_info`.
+ * @param rank Zero-based stopped MPI rank index to inspect.
+ * @param expr C/C++ debugger expression view (need not be NUL-terminated by caller).
+ * @return Populated `GridLockTypeInfo` on `GRIDLOCK_OK`, or negative `GridLockStatus` on error.
+ */
+[[nodiscard]] inline std::expected<GridLockTypeInfo, GridLockStatus> queryTypeInfo(
+    const GridLockHostApi* host,
+    int32_t rank,
+    std::string_view expr) noexcept {
+  if (host == nullptr || host->query_type_info == nullptr || expr.empty()) {
+    return std::unexpected(GRIDLOCK_ERR_INVALID_ARG);
+  }
+  try {
+    const std::string exprNullTerm(expr);
+    GridLockTypeInfo info{};
+    info.struct_size = static_cast<uint32_t>(sizeof(GridLockTypeInfo));
+    info.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+    info.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+    info.reserved_flags = 0u;
+    const GridLockStatus status = host->query_type_info(host->host_ctx, rank, exprNullTerm.c_str(), &info);
+    if (status != GRIDLOCK_OK) {
+      return std::unexpected(status);
+    }
+    return info;
+  } catch (...) {
+    return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+  }
+}
+
+/**
+ * @brief Resolves contiguous container/array layout (`data_address`, `element_count`, `element_size`, types) on `rank`.
+ * @param host Non-null host API table providing `resolve_contiguous_range`.
+ * @param rank Zero-based stopped MPI rank index to inspect.
+ * @param expr C/C++ contiguous container or fixed-array expression view.
+ * @return Populated `GridLockContiguousRange` on `GRIDLOCK_OK`, or negative `GridLockStatus` on error.
+ */
+[[nodiscard]] inline std::expected<GridLockContiguousRange, GridLockStatus> resolveContiguousRange(
+    const GridLockHostApi* host,
+    int32_t rank,
+    std::string_view expr) noexcept {
+  if (host == nullptr || host->resolve_contiguous_range == nullptr || expr.empty()) {
+    return std::unexpected(GRIDLOCK_ERR_INVALID_ARG);
+  }
+  try {
+    const std::string exprNullTerm(expr);
+    GridLockContiguousRange range{};
+    range.struct_size = static_cast<uint32_t>(sizeof(GridLockContiguousRange));
+    range.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+    range.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+    range.reserved_flags = 0u;
+    const GridLockStatus status =
+        host->resolve_contiguous_range(host->host_ctx, rank, exprNullTerm.c_str(), &range);
+    if (status != GRIDLOCK_OK) {
+      return std::unexpected(status);
+    }
+    return range;
+  } catch (...) {
+    return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+  }
+}
+
+/**
  * @brief Reads raw target memory from `rank` at `addr` into caller-supplied `out` span.
  * @param host Non-null host API table providing `read_memory`.
  * @param rank Zero-based MPI rank index to read from.

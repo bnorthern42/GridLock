@@ -20,7 +20,9 @@
 #include <QHash>
 #include <QObject>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace gridlock {
@@ -28,6 +30,130 @@ class GdbRankCoordinator;
 }  // namespace gridlock
 
 namespace gridlock::core::plugins {
+
+namespace detail {
+
+enum class ContiguousKind : uint8_t { None = 0, CArray, StdArray, StdVector, StdSpan, StdValarray };
+
+struct ParsedContainerType {
+  ContiguousKind kind = ContiguousKind::None;
+  QString elementType;
+  uint64_t staticCount = 0u;
+  bool hasStaticCount = false;
+  bool isPointer = false;
+};
+
+inline QString stripOuterQualifiers(QString t) {
+  t = t.trimmed();
+  while (t.endsWith(QLatin1Char('&'))) t.chop(1);
+  t = t.trimmed();
+  static const QRegularExpression kLeadCv(QStringLiteral(R"(^(?:(?:const|volatile)\s+)+)"));
+  static const QRegularExpression kTrailCv(
+      QStringLiteral(R"(\s+(?:const|volatile|__restrict__|__restrict|restrict)$)"));
+  t.remove(kLeadCv);
+  while (kTrailCv.match(t).hasMatch()) t.remove(kTrailCv);
+  return t.trimmed();
+}
+
+inline QStringList splitTopLevelTemplateArgs(const QString& inner) {
+  QStringList args;
+  int angleDepth = 0, parenDepth = 0, segStart = 0;
+  for (int i = 0; i < inner.size(); ++i) {
+    const QChar c = inner[i];
+    if (c == QLatin1Char('<')) ++angleDepth;
+    else if (c == QLatin1Char('>') && angleDepth > 0) --angleDepth;
+    else if (c == QLatin1Char('(')) ++parenDepth;
+    else if (c == QLatin1Char(')') && parenDepth > 0) --parenDepth;
+    else if (c == QLatin1Char(',') && angleDepth == 0 && parenDepth == 0) {
+      args.append(inner.mid(segStart, i - segStart).trimmed());
+      segStart = i + 1;
+    }
+  }
+  if (segStart <= inner.size()) args.append(inner.mid(segStart).trimmed());
+  return args;
+}
+
+inline bool parseTemplateUint(QString raw, uint64_t* outVal) {
+  raw = raw.trimmed();
+  static const QRegularExpression kLitSuffix(QStringLiteral("[uUlLzZ]+$"));
+  raw.remove(kLitSuffix);
+  bool ok = false;
+  const uint64_t v = raw.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
+                         ? raw.mid(2).toULongLong(&ok, 16)
+                         : raw.toULongLong(&ok, 10);
+  if (ok && outVal != nullptr) *outVal = v;
+  return ok;
+}
+
+inline ParsedContainerType classifyDwarfType(const QString& rawType) {
+  ParsedContainerType out;
+  const QString stripped = stripOuterQualifiers(rawType);
+  if (stripped.isEmpty()) return out;
+  static const QRegularExpression kFnOrArrPtrRe(QStringLiteral(R"(\(\s*\*\s*\)\s*[\[(])"));
+  if ((stripped.endsWith(QLatin1Char('*')) && !stripped.endsWith(QStringLiteral("::*"))) ||
+      kFnOrArrPtrRe.match(stripped).hasMatch()) {
+    out.isPointer = true;
+    return out;
+  }
+  static const QRegularExpression kCArrRe(QStringLiteral(R"(^(.+?)\s*\[\s*(\d+)\s*\]$)"));
+  if (const auto am = kCArrRe.match(stripped);
+      am.hasMatch() && !am.captured(1).trimmed().endsWith(QLatin1Char(')'))) {
+    out.kind = ContiguousKind::CArray;
+    out.elementType = stripOuterQualifiers(am.captured(1));
+    out.staticCount = am.captured(2).toULongLong(&out.hasStaticCount, 10);
+    return out;
+  }
+  const int lt = stripped.indexOf(QLatin1Char('<')), gt = stripped.lastIndexOf(QLatin1Char('>'));
+  if (lt <= 0 || gt <= lt) return out;
+  const QString head = stripped.left(lt).trimmed();
+  if (!head.startsWith(QStringLiteral("std::")) && head.contains(QStringLiteral("::"))) return out;
+  const QString tmpl = head.contains(QStringLiteral("::")) ? head.section(QStringLiteral("::"), -1) : head;
+  const QStringList args = splitTopLevelTemplateArgs(stripped.mid(lt + 1, gt - lt - 1));
+  if (args.isEmpty() || args.first().isEmpty()) return out;
+  if (tmpl == QLatin1String("array") && args.size() >= 2 && parseTemplateUint(args.at(1), &out.staticCount)) {
+    out.kind = ContiguousKind::StdArray; out.elementType = args.at(0); out.hasStaticCount = true;
+  } else if (tmpl == QLatin1String("vector") && stripOuterQualifiers(args.at(0)) != QLatin1String("bool")) {
+    out.kind = ContiguousKind::StdVector; out.elementType = args.at(0);
+  } else if (tmpl == QLatin1String("span")) {
+    out.kind = ContiguousKind::StdSpan; out.elementType = args.at(0);
+    uint64_t ext = 0u;
+    if (args.size() >= 2 && parseTemplateUint(args.at(1), &ext) && ext != UINT64_MAX && ext != UINT32_MAX) {
+      out.staticCount = ext; out.hasStaticCount = true;
+    }
+  } else if (tmpl == QLatin1String("valarray")) {
+    out.kind = ContiguousKind::StdValarray; out.elementType = args.at(0);
+  }
+  return out;
+}
+
+inline bool parseMiHexAddress(const QByteArray& utf8, uint64_t* outAddr) {
+  const QString s = QString::fromUtf8(utf8).trimmed();
+  if (s == QLatin1String("0x0") || s == QLatin1String("0") || s.endsWith(QLatin1String(" 0x0"))) {
+    *outAddr = 0u;
+    return true;
+  }
+  static const QRegularExpression kHexRe(QStringLiteral("0x([0-9a-fA-F]+)"));
+  const auto m = kHexRe.match(s);
+  if (!m.hasMatch()) return false;
+  bool ok = false;
+  *outAddr = m.captured(1).toULongLong(&ok, 16);
+  return ok;
+}
+
+inline bool parseMiUint64(const QByteArray& utf8, uint64_t* outVal) {
+  const QString s = QString::fromUtf8(utf8).trimmed();
+  static const QRegularExpression kExtentFieldRe(QStringLiteral("_M_extent_value\\s*=\\s*(\\d+)"));
+  if (const auto fm = kExtentFieldRe.match(s); fm.hasMatch()) {
+    bool ok = false;
+    *outVal = fm.captured(1).toULongLong(&ok, 10);
+    return ok;
+  }
+  static const QRegularExpression kIntRe(QStringLiteral("^(?:\\([^)]+\\)\\s*)?(0x[0-9a-fA-F]+|\\d+)\\b"));
+  const auto m = kIntRe.match(s);
+  return m.hasMatch() && parseTemplateUint(m.captured(1), outVal);
+}
+
+}  // namespace detail
 
 /**
  * @class PluginHostBridge
@@ -75,6 +201,8 @@ class PluginHostBridge : public QObject {
         &PluginHostBridge::cbGetThemeInfo,
         &PluginHostBridge::cbPublishReportView,
         &PluginHostBridge::cbCloseReportView,
+        &PluginHostBridge::cbQueryTypeInfo,
+        &PluginHostBridge::cbResolveContiguousRange,
         {}};
   }
 
@@ -103,7 +231,13 @@ class PluginHostBridge : public QObject {
   }
   int32_t liveAllocationCount() const noexcept { return m_liveAllocations.load(std::memory_order_relaxed); }
 
-  void beginInitStaging();
+  void beginInitStaging() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_stagingActive = true;
+    m_stagedVariableActions.clear(); m_stagedCommandActions.clear(); m_stagedMenuActions.clear();
+    m_stagedStatusItems.clear(); m_stagedContextActions.clear();
+    m_stagedEditorAnnotations.clear(); m_stagedReportPanels.clear();
+  }
   bool commitStagedActions(const QString& pluginId, const GridLockHostApi* pluginHostApi = nullptr);
   void discardStagedActions();
 
@@ -266,6 +400,10 @@ class PluginHostBridge : public QObject {
       void* hostCtx, const char* panelId, const char* titleUtf8,
       GridLockReportFormat format, const char* contentUtf8) noexcept;
   static GridLockStatus GRIDLOCK_CALL cbCloseReportView(void* hostCtx, const char* panelId) noexcept;
+  static GridLockStatus GRIDLOCK_CALL cbQueryTypeInfo(
+      void* hostCtx, int32_t rank, const char* exprUtf8, GridLockTypeInfo* outInfo) noexcept;
+  static GridLockStatus GRIDLOCK_CALL cbResolveContiguousRange(
+      void* hostCtx, int32_t rank, const char* exprUtf8, GridLockContiguousRange* outRange) noexcept;
 
   GridLockStatus runOnGuiThread(const PluginBindingContext* ctx, const std::function<GridLockStatus()>& fn);
   GridLockStatus runOnObjectThread(
@@ -274,6 +412,13 @@ class PluginHostBridge : public QObject {
       GridLockStatus missingCoordStatus = GRIDLOCK_ERR_NOT_STOPPED);
   GridLockStatus evalExprOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
                                              int32_t rank, const QString& expr, int timeoutMs, QByteArray* outPayload);
+  GridLockStatus queryDwarfTypeOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
+                                                   int32_t rank, const QString& expr, int timeoutMs, QString* outType);
+  GridLockStatus queryTypeInfoOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
+                                                  int32_t rank, const QString& expr, int timeoutMs, GridLockTypeInfo* outInfo);
+  GridLockStatus resolveContiguousRangeOnCoordinatorThread(
+      const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord, int32_t rank,
+      const QString& expr, int timeoutMs, GridLockContiguousRange* outRange);
   GridLockStatus readMemoryOnCoordinatorThread(const PluginBindingContext* ctx, gridlock::GdbRankCoordinator* coord,
                                                int32_t rank, uint64_t address, size_t numBytes, int timeoutMs,
                                                QByteArray* outBytes);

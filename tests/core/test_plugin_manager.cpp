@@ -42,30 +42,23 @@ class ScopedPluginEnv {
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_cfgDir.path());
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_cfgDir.path());
     auto& cfg = gridlock::core::ConfigManager::instance();
-    cfg.loadConfig();
-    cfg.setWorkspace(m_wsDir.path());
-    cfg.setDisabledPluginIds({});
-    cfg.setWorkspaceDisabledPluginIds({});
+    cfg.loadConfig(); cfg.setWorkspace(m_wsDir.path());
+    cfg.setDisabledPluginIds({}); cfg.setWorkspaceDisabledPluginIds({});
     QDir().mkpath(m_cfgDir.path() + QStringLiteral("/plugins"));
     QDir().mkpath(m_wsDir.path() + QStringLiteral("/.gridlock/plugins"));
   }
-
   ~ScopedPluginEnv() {
-    if (m_hadPrevEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", m_prevEnv);
-    else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
+    if (m_hadPrevEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", m_prevEnv); else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
     auto& cfg = gridlock::core::ConfigManager::instance();
-    cfg.loadConfig();
-    cfg.setWorkspace(m_prevWorkspace);
+    cfg.loadConfig(); cfg.setWorkspace(m_prevWorkspace);
   }
-
   QString tempRoot() const { return m_cfgDir.path(); }
   QString workspaceRoot() const { return m_wsDir.path(); }
   QString userPluginDir() const { return m_cfgDir.path() + QStringLiteral("/plugins"); }
   QString workspacePluginDir() const { return m_wsDir.path() + QStringLiteral("/.gridlock/plugins"); }
 
  private:
-  QTemporaryDir m_cfgDir;
-  QTemporaryDir m_wsDir;
+  QTemporaryDir m_cfgDir, m_wsDir;
   bool m_hadPrevEnv = false;
   QByteArray m_prevEnv;
   QString m_prevWorkspace;
@@ -224,14 +217,9 @@ class TestPluginManager : public QObject {
 
     GridLockVariableContext varCtx{};
     varCtx.struct_size = static_cast<uint32_t>(sizeof(GridLockVariableContext));
-    varCtx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-    varCtx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-    varCtx.rank = 0;
-    varCtx.action_id_utf8 = "dummy.inspect_field";
-    varCtx.name_utf8 = "mesh_field";
-    varCtx.expression_utf8 = "mesh_field";
-    varCtx.type_utf8 = "PetscVec";
-    varCtx.value_utf8 = "0x5000";
+    varCtx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR; varCtx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR; varCtx.rank = 0;
+    varCtx.action_id_utf8 = "dummy.inspect_field"; varCtx.name_utf8 = "mesh_field";
+    varCtx.expression_utf8 = "mesh_field"; varCtx.type_utf8 = "PetscVec"; varCtx.value_utf8 = "0x5000";
     QCOMPARE(mgr.hostBridge()->invokeVariableAction(QStringLiteral("dummy.inspect_field"), varCtx), GRIDLOCK_OK);
     QCOMPARE(events.last().second, QStringLiteral("extent_256x128x64_double_grid"));
     QCOMPARE(api->eval_expr(api->host_ctx, 0, "broken_sym", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_EVAL_FAILED);
@@ -367,17 +355,13 @@ class TestPluginManager : public QObject {
     QVERIFY(mgr.effectivePluginEnabled(plugId));
     QVERIFY(mgr.setPluginWorkspaceEnabled(plugId, false));
     QVERIFY(!mgr.effectivePluginEnabled(plugId) && mgr.isPluginGloballyEnabled(plugId));
-
     QTemporaryDir secondWs;
     QVERIFY(secondWs.isValid());
     gridlock::core::ConfigManager::instance().setWorkspace(secondWs.path());
     QVERIFY(mgr.effectivePluginEnabled(plugId));
-
-    QVERIFY(mgr.setPluginGloballyEnabled(plugId, false));
-    QVERIFY(!mgr.effectivePluginEnabled(plugId));
+    QVERIFY(mgr.setPluginGloballyEnabled(plugId, false) && !mgr.effectivePluginEnabled(plugId));
     gridlock::core::ConfigManager::instance().setWorkspace(env.workspaceRoot());
-    QVERIFY(mgr.setPluginGloballyEnabled(plugId, true));
-    QVERIFY(mgr.setPluginWorkspaceEnabled(plugId, true));
+    QVERIFY(mgr.setPluginGloballyEnabled(plugId, true) && mgr.setPluginWorkspaceEnabled(plugId, true));
     mgr.unloadAll();
 
     // 2. Validate URL security gates against leading '-' flag injection and insecure HTTP schemes.
@@ -447,27 +431,19 @@ class TestPluginManager : public QObject {
     int msgBoxCalls = 0, promptCalls = 0, toastCalls = 0, navLine = 0;
     QString navFile;
     QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::messageBoxRequested,
-                     &coord, [&](const QString&, int, int, const QString&, const QString&,
-                                 int32_t* outRes, bool* outHandled) {
-                       ++msgBoxCalls;
-                       *outRes = GRIDLOCK_RESULT_YES;
-                       *outHandled = true;
+                     &coord, [&](const QString&, int, int, const QString&, const QString&, int32_t* outRes, bool* outHandled) {
+                       ++msgBoxCalls; *outRes = GRIDLOCK_RESULT_YES; *outHandled = true;
                      });
     QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::promptInputRequested,
                      &coord, [&](const QString&, const QString&, const QString&, const QString&,
                                  QString* outVal, bool* outAccepted, bool* outHandled) {
-                       ++promptCalls;
-                       *outVal = QStringLiteral("long_custom_mesh_tag_exceeding_stack_probe");
-                       *outAccepted = true;
-                       *outHandled = true;
+                       ++promptCalls; *outVal = QStringLiteral("long_custom_mesh_tag_exceeding_stack_probe");
+                       *outAccepted = true; *outHandled = true;
                      });
     QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::toastRequested,
                      &coord, [&](const QString&, int, const QString&, const QString&, int) { ++toastCalls; });
     QObject::connect(bridge, &gridlock::core::plugins::PluginHostBridge::navigateRequested,
-                     &coord, [&](const QString&, const QString& file, int line, int) {
-                       navFile = file;
-                       navLine = line;
-                     });
+                     &coord, [&](const QString&, const QString& file, int line, int) { navFile = file; navLine = line; });
 
     QCOMPARE(mgr.discoverAndLoad(), 1);
     QCOMPARE(bridge->menuActions().size(), 1);
@@ -529,9 +505,7 @@ class TestPluginManager : public QObject {
 
     GridLockThemeInfo lightTheme{};
     lightTheme.struct_size = static_cast<uint32_t>(sizeof(GridLockThemeInfo));
-    lightTheme.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-    lightTheme.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-    lightTheme.is_dark = 0;
+    lightTheme.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR; lightTheme.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR; lightTheme.is_dark = 0;
     std::snprintf(lightTheme.theme_id_utf8, sizeof(lightTheme.theme_id_utf8), "%s", "daylight_light");
     mgr.notifyThemeChanged(lightTheme);
     QVERIFY(!events.isEmpty() && events.last().first == QStringLiteral("dummy.theme_changed"));
@@ -539,88 +513,50 @@ class TestPluginManager : public QObject {
 
     // 5. Unload must purge all menus, status items, context actions, annotations, and report panels.
     mgr.unloadAll();
-    QVERIFY(bridge->menuActions().isEmpty());
-    QVERIFY(bridge->statusItems().isEmpty());
-    QVERIFY(bridge->contextActions().isEmpty());
-    QVERIFY(bridge->editorAnnotations().isEmpty());
-    QVERIFY(bridge->reportPanels().isEmpty());
+    QVERIFY(bridge->menuActions().isEmpty() && bridge->statusItems().isEmpty() && bridge->contextActions().isEmpty());
+    QVERIFY(bridge->editorAnnotations().isEmpty() && bridge->reportPanels().isEmpty());
     QCOMPARE(bridge->liveAllocationCount(), 0);
   }
 
   void testOwnerRepoShorthandAndDeclarativeManifestSync() {
     ScopedPluginEnv env;
-    using gridlock::core::plugins::GitForgeHost;
-    using gridlock::core::plugins::PluginBuildResult;
-    using gridlock::core::plugins::PluginInstaller;
-    using gridlock::core::plugins::PluginLockEntry;
-    using gridlock::core::plugins::PluginManifest;
-    using gridlock::core::plugins::PluginManifestEntry;
-    using gridlock::core::plugins::PluginScope;
+    using namespace gridlock::core::plugins;
 
     // 1. Validate multi-host forge shorthands (GitHub, GitLab subgroups, Codeberg), Gitea/custom URLs, and rejections.
     QString normUrl, slug;
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("bnorthern42/gridlock-stl-inspector"), GitForgeHost::GitHub, &normUrl, &slug));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("bnorthern42/gridlock-stl-inspector"), GitForgeHost::GitHub, &normUrl, &slug));
+    QVERIFY(normUrl == QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git") && slug == QStringLiteral("gridlock-stl-inspector"));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("github:bnorthern42/gridlock-stl-inspector"), GitForgeHost::CustomUrl, &normUrl, &slug));
     QCOMPARE(normUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
-    QCOMPARE(slug, QStringLiteral("gridlock-stl-inspector"));
-
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("github:bnorthern42/gridlock-stl-inspector"), GitForgeHost::CustomUrl, &normUrl, &slug));
-    QCOMPARE(normUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
-
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("gitlab:hpc-tools/mpi/mesh-inspector"), GitForgeHost::GitHub, &normUrl, &slug));
-    QCOMPARE(normUrl, QStringLiteral("https://gitlab.com/hpc-tools/mpi/mesh-inspector.git"));
-    QCOMPARE(slug, QStringLiteral("mesh-inspector"));
-
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("hpc-tools/sub/probe"), GitForgeHost::GitLab, &normUrl, &slug));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("gitlab:hpc-tools/mpi/mesh-inspector"), GitForgeHost::GitHub, &normUrl, &slug));
+    QVERIFY(normUrl == QStringLiteral("https://gitlab.com/hpc-tools/mpi/mesh-inspector.git") && slug == QStringLiteral("mesh-inspector"));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("hpc-tools/sub/probe"), GitForgeHost::GitLab, &normUrl, &slug));
     QCOMPARE(normUrl, QStringLiteral("https://gitlab.com/hpc-tools/sub/probe.git"));
-
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("codeberg:scicomp/gridlock-probe"), GitForgeHost::GitHub, &normUrl, &slug));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("codeberg:scicomp/gridlock-probe"), GitForgeHost::GitHub, &normUrl, &slug));
     QCOMPARE(normUrl, QStringLiteral("https://codeberg.org/scicomp/gridlock-probe.git"));
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("scicomp/gridlock-probe"), GitForgeHost::Codeberg, &normUrl, &slug));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("scicomp/gridlock-probe"), GitForgeHost::Codeberg, &normUrl, &slug));
     QCOMPARE(normUrl, QStringLiteral("https://codeberg.org/scicomp/gridlock-probe.git"));
-
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("https://gitea.example.org:3000/lab/gridlock-plugin.git"), GitForgeHost::GitHub, &normUrl, &slug));
-    QCOMPARE(normUrl, QStringLiteral("https://gitea.example.org:3000/lab/gridlock-plugin.git"));
-    QCOMPARE(slug, QStringLiteral("gridlock-plugin"));
-
-    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("git@gitea.example.org:lab/gridlock-plugin.git"), GitForgeHost::Codeberg, &normUrl, &slug));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("https://gitea.example.org:3000/lab/gridlock-plugin.git"), GitForgeHost::GitHub, &normUrl, &slug));
+    QVERIFY(normUrl == QStringLiteral("https://gitea.example.org:3000/lab/gridlock-plugin.git") && slug == QStringLiteral("gridlock-plugin"));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(QStringLiteral("git@gitea.example.org:lab/gridlock-plugin.git"), GitForgeHost::Codeberg, &normUrl, &slug));
     QCOMPARE(normUrl, QStringLiteral("git@gitea.example.org:lab/gridlock-plugin.git"));
 
+    for (const QString& bad : {QStringLiteral("--upload-pack=id/repo"), QStringLiteral("-upload-pack=evil"),
+                               QStringLiteral("-evil/repo"), QStringLiteral("owner/-evil"), QStringLiteral("owner/.."),
+                               QStringLiteral("../repo"), QStringLiteral("gitlab:group/../repo"),
+                               QStringLiteral("https://gitea.example.org/lab/../evil.git"), QStringLiteral("owner/.git")}) {
+      QVERIFY(!PluginInstaller::normalizeAndValidateUrl(bad));
+    }
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/repo"), GitForgeHost::CustomUrl));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("--upload-pack=id/repo")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("-upload-pack=evil")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("-evil/repo")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/-evil")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/..")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("../repo")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("gitlab:group/../repo")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("https://gitea.example.org/lab/../evil.git")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/.git")));
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/repo/extra"), GitForgeHost::GitHub));
 
     // 2. Parse declarative [[plugins]] manifest entries across GitHub, GitLab, Codeberg, and Gitea URLs.
     QVector<PluginManifestEntry> parsed;
     QString parseErr;
     const QString sampleToml = QStringLiteral(
-        "[[plugins]]\n"
-        "repo = \"codeberg:bnorthern42/gridlock-stl-inspector\"\n"
-        "ref = \"main\"\n"
-        "build = \"meson\"\n"
-        "\n"
-        "[[plugins]]\n"
-        "repo = \"gitlab:hpc/sub/disabled-probe\"\n"
-        "build = \"single\"\n"
-        "enabled = false\n"
-        "\n"
-        "[[plugins]]\n"
-        "repo = \"https://gitea.example.org/user/custom-probe.git\"\n");
+        "[[plugins]]\nrepo = \"codeberg:bnorthern42/gridlock-stl-inspector\"\nref = \"main\"\nbuild = \"meson\"\n\n"
+        "[[plugins]]\nrepo = \"gitlab:hpc/sub/disabled-probe\"\nbuild = \"single\"\nenabled = false\n\n"
+        "[[plugins]]\nrepo = \"https://gitea.example.org/user/custom-probe.git\"\n");
     QVERIFY2(PluginManifest::parseManifestToml(sampleToml, &parsed, &parseErr), qPrintable(parseErr));
     QCOMPARE(parsed.size(), 3);
     QCOMPARE(parsed.at(0).normalizedUrl, QStringLiteral("https://codeberg.org/bnorthern42/gridlock-stl-inspector.git"));
@@ -706,13 +642,7 @@ class TestPluginManager : public QObject {
 
   void testLockfileMetadataDiagnosticsAndInPlaceUpdate() {
     ScopedPluginEnv env;
-    using gridlock::core::plugins::PluginBuildResult;
-    using gridlock::core::plugins::PluginInstaller;
-    using gridlock::core::plugins::PluginLockEntry;
-    using gridlock::core::plugins::PluginManager;
-    using gridlock::core::plugins::PluginManifest;
-    using gridlock::core::plugins::PluginScope;
-    using gridlock::core::plugins::PluginUpdateTarget;
+    using namespace gridlock::core::plugins;
 
     QTemporaryDir gitSandbox;
     QVERIFY(gitSandbox.isValid());
@@ -736,11 +666,8 @@ class TestPluginManager : public QObject {
     QCOMPARE(mgr.discoverAndLoad(), 1);
     QCOMPARE(mgr.plugins().size(), 1);
     const auto& info1 = mgr.plugins().first();
-    QCOMPARE(info1.version, QStringLiteral("1.0.0"));
-    QCOMPARE(info1.gitCommitSha, sha1);
-    QCOMPARE(info1.gitCommitShort, sha1.left(7));
-    QCOMPARE(info1.gitRepo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
-    QCOMPARE(info1.gitRef, QStringLiteral("main"));
+    QVERIFY(info1.version == QStringLiteral("1.0.0") && info1.gitCommitSha == sha1 && info1.gitCommitShort == sha1.left(7));
+    QVERIFY(info1.gitRepo == QStringLiteral("https://github.com/gridlock-test/local-plugin.git") && info1.gitRef == QStringLiteral("main"));
     QCOMPARE(mgr.loadDiagnostics(),
              QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.0.0 (%1) [ABI 1.0]").arg(sha1.left(7))});
 
@@ -774,6 +701,91 @@ class TestPluginManager : public QObject {
     QCOMPARE(mgr.plugins().first().version, QStringLiteral("1.1.0"));
     QCOMPARE(mgr.loadDiagnostics(),
              QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.1.0 (%1) [ABI 1.0]").arg(sha2.left(7))});
+  }
+
+  void testZeroCallDwarfTypeInfoAndContiguousRanges() {
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(1);
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401000\",func=\"main\",fullname=\"/tmp/t.cpp\",line=\"10\"}\n"));
+    gridlock::core::plugins::PluginManager mgr(&coord);
+    const GridLockHostApi* api = mgr.hostBridge()->hostApi();
+    QSignalSpy userEvalSpy(&coord, &::IBackendCoordinator::expressionEvaluated);
+    bool sawInferiorFnCall = false;
+
+    const auto responder = QObject::connect(
+        &coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord, [&](int r, const QString& cmd) {
+          if (cmd.contains(QStringLiteral(".size(")) || cmd.contains(QStringLiteral(".data("))) sawInferiorFnCall = true;
+          const QString tok = cmd.section(QLatin1Char('-'), 0, 0);
+          if (cmd.contains(QStringLiteral("-var-create"))) {
+            QString t;
+            if (cmd.contains(QStringLiteral("\"c_arr\""))) t = QStringLiteral("double [16]");
+            else if (cmd.contains(QStringLiteral("\"std_arr\""))) t = QStringLiteral("std::array<double, 8ul>");
+            else if (cmd.contains(QStringLiteral("\"gnu_vec\""))) t = QStringLiteral("std::vector<double, std::allocator<double> >");
+            else if (cmd.contains(QStringLiteral("\"llvm_vec\""))) t = QStringLiteral("std::__1::vector<float, std::__1::allocator<float> >");
+            else if (cmd.contains(QStringLiteral("\"dyn_span\""))) t = QStringLiteral("std::span<int32_t, 18446744073709551615ul>");
+            else if (cmd.contains(QStringLiteral("\"raw_ptr\""))) t = QStringLiteral("const double *");
+            coord.processGdbOutput(r, t.isEmpty() ? QStringLiteral("%1^error,msg=\"unknown\"\n").arg(tok)
+                                                  : QStringLiteral("%1^done,name=\"gl_plug_%1\",numchild=\"0\",value=\"{...}\",type=\"%2\"\n").arg(tok, t));
+          } else if (cmd.contains(QStringLiteral("-data-evaluate-expression"))) {
+            QString val;
+            if (cmd.contains(QStringLiteral("sizeof(c_arr)"))) val = QStringLiteral("128");
+            else if (cmd.contains(QStringLiteral("sizeof(std_arr)"))) val = QStringLiteral("64");
+            else if (cmd.contains(QStringLiteral("sizeof(gnu_vec)")) || cmd.contains(QStringLiteral("sizeof(llvm_vec)"))) val = QStringLiteral("24");
+            else if (cmd.contains(QStringLiteral("sizeof(dyn_span)"))) val = QStringLiteral("16");
+            else if (cmd.contains(QStringLiteral("sizeof(raw_ptr)")) || cmd.contains(QStringLiteral("sizeof(double)"))) val = QStringLiteral("8");
+            else if (cmd.contains(QStringLiteral("sizeof(float)")) || cmd.contains(QStringLiteral("sizeof(int32_t)"))) val = QStringLiteral("4");
+            else if (cmd.contains(QStringLiteral("&(c_arr)"))) val = QStringLiteral("(double (*)[16]) 0x7ffd1000");
+            else if (cmd.contains(QStringLiteral("&(std_arr)"))) val = QStringLiteral("0x7ffd2000");
+            else if (cmd.contains(QStringLiteral("(gnu_vec)._M_impl._M_start"))) val = QStringLiteral("(double *) 0x600000");
+            else if (cmd.contains(QStringLiteral("(gnu_vec)._M_impl._M_finish"))) val = QStringLiteral("(double *) 0x600080");
+            else if (cmd.contains(QStringLiteral("(llvm_vec).__begin_"))) val = QStringLiteral("(float *) 0x700000");
+            else if (cmd.contains(QStringLiteral("(llvm_vec).__end_"))) val = QStringLiteral("(float *) 0x700028");
+            else if (cmd.contains(QStringLiteral("(dyn_span)._M_ptr"))) val = QStringLiteral("(int32_t *) 0x800000");
+            else if (cmd.contains(QStringLiteral("(dyn_span)._M_extent"))) val = QStringLiteral("{_M_extent_value = 32}");
+            coord.processGdbOutput(r, val.isEmpty() ? QStringLiteral("%1^error,msg=\"no member\"\n").arg(tok)
+                                                    : QStringLiteral("%1^done,value=\"%2\"\n").arg(tok, val));
+          }
+        });
+
+    auto makeTypeInfo = []() { GridLockTypeInfo i{sizeof(GridLockTypeInfo), 1u, 0u, 0u, 0u, 0, 0, {}}; return i; };
+    auto makeRange = []() { GridLockContiguousRange g{sizeof(GridLockContiguousRange), 1u, 0u, 0u, 0u, 0u, 0u, {}, {}}; return g; };
+
+    GridLockTypeInfo ti = makeTypeInfo();
+    QCOMPARE(api->query_type_info(api->host_ctx, 0, "raw_ptr", &ti), GRIDLOCK_OK);
+    QVERIFY(ti.byte_size == 8u && ti.is_pointer == 1 && ti.is_contiguous_container == 0);
+    QCOMPARE(QString::fromUtf8(ti.type_name_utf8), QStringLiteral("const double *"));
+    GridLockContiguousRange rng = makeRange();
+    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "raw_ptr", &rng), GRIDLOCK_ERR_UNSUPPORTED);
+
+    ti = makeTypeInfo(); rng = makeRange();
+    QCOMPARE(api->query_type_info(api->host_ctx, 0, "c_arr", &ti), GRIDLOCK_OK);
+    QVERIFY(ti.byte_size == 128u && ti.is_pointer == 0 && ti.is_contiguous_container == 1);
+    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "c_arr", &rng), GRIDLOCK_OK);
+    QVERIFY(rng.data_address == 0x7ffd1000ULL && rng.element_count == 16u && rng.element_size == 8u);
+    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("double"));
+
+    rng = makeRange();
+    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "std_arr", &rng), GRIDLOCK_OK);
+    QVERIFY(rng.data_address == 0x7ffd2000ULL && rng.element_count == 8u && rng.element_size == 8u);
+
+    rng = makeRange();
+    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "gnu_vec", &rng), GRIDLOCK_OK);
+    QVERIFY(rng.data_address == 0x600000ULL && rng.element_count == 16u && rng.element_size == 8u);
+    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("double"));
+
+    rng = makeRange();
+    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "llvm_vec", &rng), GRIDLOCK_OK);
+    QVERIFY(rng.data_address == 0x700000ULL && rng.element_count == 10u && rng.element_size == 4u);
+    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("float"));
+
+    rng = makeRange();
+    QCOMPARE(api->resolve_contiguous_range(api->host_ctx, 0, "dyn_span", &rng), GRIDLOCK_OK);
+    QVERIFY(rng.data_address == 0x800000ULL && rng.element_count == 32u && rng.element_size == 4u);
+    QCOMPARE(QString::fromUtf8(rng.element_type_utf8), QStringLiteral("int32_t"));
+
+    QVERIFY(!sawInferiorFnCall);
+    QCOMPARE(userEvalSpy.count(), 0);
+    QObject::disconnect(responder);
   }
 };
 
