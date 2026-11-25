@@ -15,8 +15,9 @@ Non-GUI backend subsystems for debugger protocol coordination, native plugin loa
 - `models/`:
   - `VariableNode` and `VariableTreeModel` backing lazy stack-frame variable expansion and cross-step value diff highlighting.
 - `plugins/`:
-  - `PluginManager` (`PluginManager.hpp`, `PluginManager.cpp`): Discovers shared libraries (`.so`, `.dylib`, `.dll`) in `~/.config/gridlock/plugins/` and `<workspace>/.gridlock/plugins/` via `QLibrary` (`ResolveAllSymbolsHint`), validates the frozen C99 ABI v1.0 header in `include/gridlock/plugin_api.h`, enforces `[plugins] disabled_ids`, and dispatches session, stop, and shutdown callbacks.
-  - `PluginHostBridge` (`PluginHostBridge.hpp`, `PluginHostBridge.cpp`): Implements every function pointer in `GridLockHostApi` against `GdbRankCoordinator` using thread-safe marshaling, bounded `QEventLoop` + `QTimer` timeouts for `eval_expr` and `read_memory`, and per-plugin variable/command action registries.
+  - `PluginManager` (`PluginManager.hpp`, `PluginManager.cpp`): Discovers shared libraries (`.so`, `.dylib`, `.dll`) in `~/.config/gridlock/plugins/` and `<workspace>/.gridlock/plugins/`, verifies SHA-256 workspace trust prior to `QLibrary::load()`, validates the frozen C99 ABI v1.x contract in `include/gridlock/plugin_api.h`, enforces global (`[plugins] disabled_ids`) and per-workspace (`[plugins.workspaces]`) enablement, and dispatches serialized session, stop, and shutdown callbacks.
+  - `PluginHostBridge` (`PluginHostBridge.hpp`, `PluginHostBridge.cpp`): Implements every function pointer in `GridLockHostApi` against `GdbRankCoordinator` using per-plugin binding contexts, thread-safe marshaling, tokenized memory read/write queries, PCRE2 resource limits, and variable/command action registries.
+  - `PluginInstaller` (`PluginInstaller.hpp`, `PluginInstaller.cpp`): Clones validated GitHub HTTPS/SSH plugin repositories into a temporary staging directory via shell-free `QProcess` argument lists, auto-detects Meson, CMake, Make, or single-file C99/C++23 sources, parses compiler warnings and errors, and atomically installs built shared libraries into global or workspace plugin directories.
 - `utils/`:
   - `CliParser`, `ElfBinaryInspector`, `ElfBinaryParser`, `SearchEverywhereEngine`, and `ClangdLspClient` navigation helpers.
 

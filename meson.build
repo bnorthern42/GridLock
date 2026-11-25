@@ -58,7 +58,7 @@ src_files = [
   'src/ui/views/MemView.cpp', 'src/ui/views/MemViewRender.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/MemoryProfilerChart.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
   'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp', 'src/ui/dialogs/preferences/PluginSettingsPage.cpp',
-  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginManager.cpp',
+  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginInstaller.cpp', 'src/core/plugins/PluginManager.cpp',
   'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
@@ -90,7 +90,7 @@ moc_headers = [
   'src/ui/views/MemView.hpp', 'src/ui/views/MemoryProfilerWidget.hpp', 'src/ui/views/RegisterView.hpp',
   'src/ui/dialogs/preferences/PreferencesDialog.hpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.hpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.hpp', 'src/ui/dialogs/preferences/KeybindingsSettingsPage.hpp',
   'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/ui/dialogs/preferences/PluginSettingsPage.hpp',
-  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginManager.hpp', 'src/core/hpc/HpcBackend.hpp',
+  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginInstaller.hpp', 'src/core/plugins/PluginManager.hpp', 'src/core/hpc/HpcBackend.hpp',
   'src/core/hpc/analysis/MockHpcBackend.hpp', 'src/core/managers/SpackManager.hpp',
   'src/core/managers/ShortcutManager.hpp', 'src/core/managers/DocsetManager.hpp',
   'src/core/managers/ThemeManager.hpp', 'src/core/managers/SessionManager.hpp',
@@ -253,7 +253,7 @@ ui_test_src = [
   'src/ui/views/MemView.cpp', 'src/ui/views/MemViewRender.cpp', 'src/ui/views/MemoryProfilerWidget.cpp', 'src/ui/views/MemoryProfilerChart.cpp', 'src/ui/views/RegisterView.cpp',
   'src/ui/dialogs/preferences/PreferencesDialog.cpp', 'src/ui/dialogs/preferences/PreferencesDialogChrome.cpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.cpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.cpp', 'src/ui/dialogs/preferences/ShortcutItemDelegate.cpp',
   'src/ui/dialogs/preferences/KeybindingsSettingsPage.cpp', 'src/ui/dialogs/preferences/DebuggerSettingsPage.cpp', 'src/ui/dialogs/preferences/HpcSettingsPages.cpp', 'src/ui/dialogs/preferences/SlurmBatchParser.cpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.cpp', 'src/ui/dialogs/preferences/PluginSettingsPage.cpp',
-  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginManager.cpp',
+  'src/core/plugins/PluginHostBridge.cpp', 'src/core/plugins/PluginInstaller.cpp', 'src/core/plugins/PluginManager.cpp',
   'src/core/hpc/analysis/MockHpcBackend.cpp', 'src/core/managers/SpackManager.cpp',
   'src/core/commands/DebugCommands.cpp', 'src/core/managers/ShortcutManager.cpp',
   'src/core/managers/DocsetManager.cpp', 'src/core/managers/DocsetManagerIndex.cpp', 'src/core/managers/ThemeManager.cpp',
@@ -282,7 +282,7 @@ ui_test_moc_headers = [
   'src/core/hpc/lsp/LspCoordinator.hpp', 'src/ui/views/MemView.hpp', 'src/ui/views/MemoryProfilerWidget.hpp',
   'src/ui/views/RegisterView.hpp', 'src/ui/dialogs/preferences/PreferencesDialog.hpp', 'src/ui/dialogs/preferences/AppearanceSettingsPage.hpp', 'src/ui/dialogs/preferences/EditingBehaviorPages.hpp', 'src/ui/dialogs/preferences/KeybindingsSettingsPage.hpp',
   'src/ui/dialogs/preferences/DebuggerSettingsPage.hpp', 'src/ui/dialogs/preferences/HpcSettingsPages.hpp', 'src/ui/dialogs/preferences/TerminalDocsetsPages.hpp', 'src/ui/dialogs/preferences/PluginSettingsPage.hpp',
-  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginManager.hpp',
+  'src/core/plugins/PluginHostBridge.hpp', 'src/core/plugins/PluginInstaller.hpp', 'src/core/plugins/PluginManager.hpp',
   'src/core/hpc/HpcBackend.hpp', 'src/core/hpc/analysis/MockHpcBackend.hpp',
   'src/core/managers/SpackManager.hpp', 'src/core/managers/ShortcutManager.hpp',
   'src/core/managers/DocsetManager.hpp', 'src/core/managers/ThemeManager.hpp',
@@ -859,6 +859,7 @@ test('plugin_abi_tests', gridlock_plugin_abi_tests, env: ['QT_QPA_PLATFORM=offsc
 plugin_manager_test_src = [
   'tests/core/test_plugin_manager.cpp',
   'src/core/plugins/PluginHostBridge.cpp',
+  'src/core/plugins/PluginInstaller.cpp',
   'src/core/plugins/PluginManager.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp',
   'src/core/hpc/gdb/GdbMiParser.cpp',
@@ -873,6 +874,7 @@ plugin_manager_test_src = [
 
 plugin_manager_test_moc_headers = [
   'src/core/plugins/PluginHostBridge.hpp',
+  'src/core/plugins/PluginInstaller.hpp',
   'src/core/plugins/PluginManager.hpp',
   'src/core/hpc/gdb/GdbRankCoordinator.hpp',
   'src/core/hpc/IBackendCoordinator.hpp'
