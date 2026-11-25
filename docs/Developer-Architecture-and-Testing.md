@@ -84,7 +84,7 @@ To keep every translation unit under 500 lines while maintaining fast incrementa
 
 ### Native C99 Plugin ABI (`include/gridlock/plugin_api.h`)
 
-GridLock exposes a frozen C99 binary interface (`GRIDLOCK_PLUGIN_ABI_MAJOR = 1`, `GRIDLOCK_PLUGIN_ABI_MINOR = 0`) paired with an optional header-only C++23 wrapper (`include/gridlock/plugin_cpp_helpers.hpp`) so external domain extensions inspect stopped MPI ranks without linking Qt6 or internal debugger libraries:
+GridLock exposes a frozen C99 binary interface (`GRIDLOCK_PLUGIN_ABI_MAJOR = 1`, `GRIDLOCK_PLUGIN_ABI_MINOR = 0`) paired with an optional header-only C++23 wrapper (`include/gridlock/plugin_cpp_helpers.hpp`) so external domain extensions inspect stopped MPI ranks without linking Qt6 or internal debugger libraries. See [Plugin System and C99 ABI](Plugin-System-and-C99-ABI.md) for the complete callback reference, status code table, C99/C++23 examples, and UI integration details:
 
 * **Binary Compatibility Guarantees**:
   * **16-Byte Versioned Struct Header**: Every ABI struct (`GridLockHostApi`, `GridLockPluginDescriptor`, `GridLockStopInfo`, `GridLockVariableContext`, `GridLockCommandSpec`) starts at byte offset `0` with `uint32_t struct_size`, `uint32_t abi_major`, `uint32_t abi_minor`, and `uint32_t reserved_flags`. Both host and plugin verify `abi_major == 1` and validate `struct_size` bounds before dereferencing trailing fields.
