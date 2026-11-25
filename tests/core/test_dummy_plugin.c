@@ -18,14 +18,17 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define DUMMY_MAX_EVAL_BYTES ((size_t)16u * 1024u * 1024u)
+
 typedef struct DummyPluginState {
   int32_t stop_count;
   int32_t session_ranks;
 } DummyPluginState;
 
-static GridLockStatus dummy_on_variable_action(void* plugin_ctx,
-                                               const GridLockHostApi* host,
-                                               const GridLockVariableContext* var_ctx) {
+static GridLockStatus GRIDLOCK_CALL dummy_on_variable_action(
+    void* plugin_ctx,
+    const GridLockHostApi* host,
+    const GridLockVariableContext* var_ctx) {
   char tiny_buf[4];
   size_t required_len = 0u;
   size_t retry_len = 0u;
@@ -49,6 +52,9 @@ static GridLockStatus dummy_on_variable_action(void* plugin_ctx,
   if (st != GRIDLOCK_ERR_BUFFER_TOO_SMALL) {
     return st;
   }
+  if (required_len >= DUMMY_MAX_EVAL_BYTES) {
+    return GRIDLOCK_ERR_BUFFER_TOO_SMALL;
+  }
 
   /* Second pass: allocate exact capacity (required_len + 1 for NUL) via host allocator. */
   exact_buf = (char*)host->alloc_bytes(host->host_ctx, required_len + 1u);
@@ -70,9 +76,10 @@ static GridLockStatus dummy_on_variable_action(void* plugin_ctx,
 }
 
 #if !defined(GRIDLOCK_TEST_BAD_ABI_PLUGIN)
-static GridLockStatus dummy_on_command_action(void* plugin_ctx,
-                                              const GridLockHostApi* host,
-                                              const GridLockCommandSpec* cmd_spec) {
+static GridLockStatus GRIDLOCK_CALL dummy_on_command_action(
+    void* plugin_ctx,
+    const GridLockHostApi* host,
+    const GridLockCommandSpec* cmd_spec) {
   int32_t ranks = 0;
   char payload[96];
 
@@ -87,9 +94,10 @@ static GridLockStatus dummy_on_command_action(void* plugin_ctx,
   return host->emit_structured_event(host->host_ctx, "dummy.cmd", payload);
 }
 
-static GridLockStatus dummy_on_session_start(void* plugin_ctx,
-                                             const GridLockHostApi* host,
-                                             int32_t rank_count) {
+static GridLockStatus GRIDLOCK_CALL dummy_on_session_start(
+    void* plugin_ctx,
+    const GridLockHostApi* host,
+    int32_t rank_count) {
   DummyPluginState* st = (DummyPluginState*)plugin_ctx;
   if (st == NULL || host == NULL) {
     return GRIDLOCK_ERR_INVALID_ARG;
@@ -98,9 +106,10 @@ static GridLockStatus dummy_on_session_start(void* plugin_ctx,
   return host->log_message(host->host_ctx, GRIDLOCK_LOG_INFO, "dummy session started");
 }
 
-static GridLockStatus dummy_on_rank_stopped(void* plugin_ctx,
-                                            const GridLockHostApi* host,
-                                            const GridLockStopInfo* stop_info) {
+static GridLockStatus GRIDLOCK_CALL dummy_on_rank_stopped(
+    void* plugin_ctx,
+    const GridLockHostApi* host,
+    const GridLockStopInfo* stop_info) {
   DummyPluginState* st = (DummyPluginState*)plugin_ctx;
   char payload[128];
 
@@ -114,14 +123,15 @@ static GridLockStatus dummy_on_rank_stopped(void* plugin_ctx,
   return host->emit_structured_event(host->host_ctx, "dummy.stop", payload);
 }
 
-static GridLockStatus dummy_on_session_end(void* plugin_ctx, const GridLockHostApi* host) {
+static GridLockStatus GRIDLOCK_CALL dummy_on_session_end(
+    void* plugin_ctx, const GridLockHostApi* host) {
   if (plugin_ctx == NULL || host == NULL) {
     return GRIDLOCK_ERR_INVALID_ARG;
   }
   return host->emit_structured_event(host->host_ctx, "dummy.lifecycle", "{\"event\":\"ended\"}");
 }
 
-static void dummy_shutdown(void* plugin_ctx, const GridLockHostApi* host) {
+static void GRIDLOCK_CALL dummy_shutdown(void* plugin_ctx, const GridLockHostApi* host) {
   if (host != NULL) {
     (void)host->emit_structured_event(
         host->host_ctx, "dummy.lifecycle", "{\"event\":\"shutdown\"}");
@@ -132,7 +142,7 @@ static void dummy_shutdown(void* plugin_ctx, const GridLockHostApi* host) {
 }
 #endif
 
-GRIDLOCK_PLUGIN_EXPORT GridLockStatus gridlock_plugin_init_v1(
+GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL gridlock_plugin_init_v1(
     const GridLockHostApi* host,
     GridLockPluginDescriptor* out_desc) {
 #if defined(GRIDLOCK_TEST_BAD_ABI_PLUGIN)
@@ -161,7 +171,7 @@ GRIDLOCK_PLUGIN_EXPORT GridLockStatus gridlock_plugin_init_v1(
     return GRIDLOCK_ERR_INVALID_ARG;
   }
   if (host->abi_major != GRIDLOCK_PLUGIN_ABI_MAJOR ||
-      host->struct_size < sizeof(GridLockHostApi)) {
+      host->struct_size < offsetof(GridLockHostApi, reserved)) {
     return GRIDLOCK_ERR_ABI_MISMATCH;
   }
 

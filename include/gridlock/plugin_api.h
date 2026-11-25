@@ -38,26 +38,23 @@ extern "C" {
 /** @brief Canonical symbol name looked up by the host plugin loader for ABI v1.x. */
 #define GRIDLOCK_PLUGIN_INIT_SYMBOL_V1 "gridlock_plugin_init_v1"
 
+/** @brief Explicit C calling convention on Windows to prevent `/Gz` (`__stdcall`) stack corruption. */
+#ifndef GRIDLOCK_CALL
+#if defined(_WIN32)
+#define GRIDLOCK_CALL __cdecl
+#else
+#define GRIDLOCK_CALL
+#endif
+#endif
+
 /** @brief Shared-library symbol export attribute for `gridlock_plugin_init_v1`. */
 #ifndef GRIDLOCK_PLUGIN_EXPORT
-#if defined(_WIN32) || defined(__CYGWIN__)
-#ifdef __cplusplus
-#define GRIDLOCK_PLUGIN_EXPORT extern "C" __declspec(dllexport)
-#else
+#if defined(_WIN32) && !defined(GRIDLOCK_BUILDING_HOST)
 #define GRIDLOCK_PLUGIN_EXPORT __declspec(dllexport)
-#endif
-#elif defined(__GNUC__) || defined(__clang__)
-#ifdef __cplusplus
-#define GRIDLOCK_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
-#else
+#elif !defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
 #define GRIDLOCK_PLUGIN_EXPORT __attribute__((visibility("default")))
-#endif
-#else
-#ifdef __cplusplus
-#define GRIDLOCK_PLUGIN_EXPORT extern "C"
 #else
 #define GRIDLOCK_PLUGIN_EXPORT
-#endif
 #endif
 #endif
 
@@ -112,6 +109,10 @@ typedef struct GridLockCommandSpec GridLockCommandSpec;
 /**
  * @struct GridLockStopInfo
  * @brief Snapshot of an MPI rank stop event delivered to `on_rank_stopped`.
+ *
+ * Pointer Lifetime: `reason_utf8`, `file_utf8`, and `function_utf8` are host-owned
+ * borrows valid strictly for the synchronous duration of the `on_rank_stopped` call.
+ * Plugins must copy any string data they wish to retain after returning.
  */
 struct GridLockStopInfo {
   uint32_t struct_size;      /**< Must equal `sizeof(GridLockStopInfo)`. */
@@ -131,6 +132,10 @@ struct GridLockStopInfo {
 /**
  * @struct GridLockVariableContext
  * @brief Target variable context passed to registered variable-action callbacks.
+ *
+ * Pointer Lifetime: `action_id_utf8`, `name_utf8`, `expression_utf8`, `type_utf8`,
+ * and `value_utf8` are host-owned borrows valid strictly for the synchronous duration
+ * of the `GridLockVariableActionCallback` invocation.
  */
 struct GridLockVariableContext {
   uint32_t struct_size;       /**< Must equal `sizeof(GridLockVariableContext)`. */
@@ -151,6 +156,10 @@ struct GridLockVariableContext {
 /**
  * @struct GridLockCommandSpec
  * @brief Command metadata and execution context passed to command callbacks.
+ *
+ * Pointer Lifetime: `command_id_utf8`, `menu_label_utf8`, `shortcut_hint_utf8`, and
+ * `args_utf8` are host-owned borrows valid strictly for the synchronous duration of
+ * the `GridLockCommandActionCallback` invocation.
  */
 struct GridLockCommandSpec {
   uint32_t struct_size;          /**< Must equal `sizeof(GridLockCommandSpec)`. */
@@ -166,36 +175,36 @@ struct GridLockCommandSpec {
 };
 
 /** @brief Callback invoked when a user or automation triggers a variable action. */
-typedef GridLockStatus (*GridLockVariableActionCallback)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockVariableActionCallback)(
     void* plugin_ctx,
     const GridLockHostApi* host,
     const GridLockVariableContext* var_ctx);
 
 /** @brief Callback invoked when a user or automation triggers a plugin command. */
-typedef GridLockStatus (*GridLockCommandActionCallback)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockCommandActionCallback)(
     void* plugin_ctx,
     const GridLockHostApi* host,
     const GridLockCommandSpec* cmd_spec);
 
 /** @brief Host heap allocation helper paired symmetrically with `GridLockFreeBytesFn`. */
-typedef void* (*GridLockAllocBytesFn)(void* host_ctx, size_t num_bytes);
+typedef void* (GRIDLOCK_CALL *GridLockAllocBytesFn)(void* host_ctx, size_t num_bytes);
 
 /** @brief Host heap deallocation helper releasing memory from `GridLockAllocBytesFn`. */
-typedef void (*GridLockFreeBytesFn)(void* host_ctx, void* ptr);
+typedef void (GRIDLOCK_CALL *GridLockFreeBytesFn)(void* host_ctx, void* ptr);
 
 /** @brief Writes a UTF-8 diagnostic message to GridLock's structured log sink. */
-typedef GridLockStatus (*GridLockLogMessageFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockLogMessageFn)(
     void* host_ctx,
     GridLockLogLevel level,
     const char* utf8_msg);
 
 /** @brief Queries the number of MPI ranks in the active debug session. */
-typedef GridLockStatus (*GridLockGetRankCountFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockGetRankCountFn)(
     void* host_ctx,
     int32_t* out_ranks);
 
 /** @brief Queries the currently selected zero-based MPI rank index. */
-typedef GridLockStatus (*GridLockGetActiveRankFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockGetActiveRankFn)(
     void* host_ctx,
     int32_t* out_rank);
 
@@ -207,7 +216,7 @@ typedef GridLockStatus (*GridLockGetActiveRankFn)(
  * Returns `GRIDLOCK_ERR_BUFFER_TOO_SMALL` and writes the required payload length
  * (excluding NUL) to `*out_len` when `cap` is insufficient.
  */
-typedef GridLockStatus (*GridLockEvalExprFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockEvalExprFn)(
     void* host_ctx,
     int32_t rank,
     const char* expr_utf8,
@@ -216,7 +225,7 @@ typedef GridLockStatus (*GridLockEvalExprFn)(
     size_t* out_len);
 
 /** @brief Reads `num_bytes` from `address` in `rank`'s address space into `out_bytes`. */
-typedef GridLockStatus (*GridLockReadMemoryFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockReadMemoryFn)(
     void* host_ctx,
     int32_t rank,
     uint64_t address,
@@ -225,7 +234,7 @@ typedef GridLockStatus (*GridLockReadMemoryFn)(
     size_t* out_read);
 
 /** @brief Writes `num_bytes` from `in_bytes` into `address` in `rank`'s address space. */
-typedef GridLockStatus (*GridLockWriteMemoryFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockWriteMemoryFn)(
     void* host_ctx,
     int32_t rank,
     uint64_t address,
@@ -234,7 +243,7 @@ typedef GridLockStatus (*GridLockWriteMemoryFn)(
     size_t* out_written);
 
 /** @brief Installs a source breakpoint at `file_utf8:line` with optional `condition_utf8`. */
-typedef GridLockStatus (*GridLockSetBreakpointFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockSetBreakpointFn)(
     void* host_ctx,
     const char* file_utf8,
     int32_t line,
@@ -242,12 +251,12 @@ typedef GridLockStatus (*GridLockSetBreakpointFn)(
     int32_t* out_bp_id);
 
 /** @brief Removes a breakpoint previously created via `set_breakpoint`. */
-typedef GridLockStatus (*GridLockRemoveBreakpointFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockRemoveBreakpointFn)(
     void* host_ctx,
     int32_t bp_id);
 
 /** @brief Registers a context action matched against variable types via `type_regex`. */
-typedef GridLockStatus (*GridLockRegisterVariableActionFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockRegisterVariableActionFn)(
     void* host_ctx,
     const char* action_id,
     const char* menu_label,
@@ -256,7 +265,7 @@ typedef GridLockStatus (*GridLockRegisterVariableActionFn)(
     void* plugin_ctx);
 
 /** @brief Registers a named command action with an optional `shortcut_hint`. */
-typedef GridLockStatus (*GridLockRegisterCommandActionFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockRegisterCommandActionFn)(
     void* host_ctx,
     const char* command_id,
     const char* menu_label,
@@ -270,7 +279,7 @@ typedef GridLockStatus (*GridLockRegisterCommandActionFn)(
  * Enables domain plugins to publish telemetry, mesh metadata, or array snapshots
  * to external tools, sockets, or trace files without coupling to GridLock's UI.
  */
-typedef GridLockStatus (*GridLockEmitStructuredEventFn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockEmitStructuredEventFn)(
     void* host_ctx,
     const char* channel_utf8,
     const char* json_payload_utf8);
@@ -302,30 +311,35 @@ struct GridLockHostApi {
 };
 
 /** @brief Optional plugin lifecycle hook called when a parallel debug session starts. */
-typedef GridLockStatus (*GridLockSessionStartCallback)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockSessionStartCallback)(
     void* plugin_ctx,
     const GridLockHostApi* host,
     int32_t rank_count);
 
 /** @brief Optional plugin lifecycle hook called when an MPI rank stops. */
-typedef GridLockStatus (*GridLockRankStoppedCallback)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockRankStoppedCallback)(
     void* plugin_ctx,
     const GridLockHostApi* host,
     const GridLockStopInfo* stop_info);
 
 /** @brief Optional plugin lifecycle hook called when the active debug session ends. */
-typedef GridLockStatus (*GridLockSessionEndCallback)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockSessionEndCallback)(
     void* plugin_ctx,
     const GridLockHostApi* host);
 
 /** @brief Optional plugin teardown hook called immediately before unloading the plugin. */
-typedef void (*GridLockPluginShutdownCallback)(
+typedef void (GRIDLOCK_CALL *GridLockPluginShutdownCallback)(
     void* plugin_ctx,
     const GridLockHostApi* host);
 
 /**
  * @struct GridLockPluginDescriptor
  * @brief Plugin metadata and lifecycle dispatch table populated by `gridlock_plugin_init_v1`.
+ *
+ * Pointer Lifetime: `plugin_id_utf8`, `plugin_name_utf8`, `plugin_version_utf8`, and
+ * `description_utf8` are plugin-owned strings (typically static `.rodata` literals or
+ * buffers freed at the end of `shutdown`) and MUST remain valid and immutable until
+ * `shutdown` returns (or until the plugin shared library is unloaded if `shutdown` is `NULL`).
  */
 struct GridLockPluginDescriptor {
   uint32_t struct_size;                        /**< `sizeof(GridLockPluginDescriptor)`. */
@@ -345,7 +359,7 @@ struct GridLockPluginDescriptor {
 };
 
 /** @brief Function pointer type for the single exported v1 plugin entry point. */
-typedef GridLockStatus (*GridLockPluginInitV1Fn)(
+typedef GridLockStatus (GRIDLOCK_CALL *GridLockPluginInitV1Fn)(
     const GridLockHostApi* host,
     GridLockPluginDescriptor* out_desc);
 
@@ -355,7 +369,7 @@ typedef GridLockStatus (*GridLockPluginInitV1Fn)(
  * @param out_desc Non-null descriptor initialized by host and populated by the plugin.
  * @return `GRIDLOCK_OK` on success, or a negative `GridLockStatus` error code.
  */
-GRIDLOCK_PLUGIN_EXPORT GridLockStatus gridlock_plugin_init_v1(
+GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL gridlock_plugin_init_v1(
     const GridLockHostApi* host,
     GridLockPluginDescriptor* out_desc);
 

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -152,8 +153,10 @@ struct MockHostState {
   int32_t rankCount = 4;
   int32_t activeRank = 2;
   int32_t liveAllocs = 0;
+  int32_t evalCallCount = 0;
   int32_t nextBreakpointId = 10;
   size_t simulatedShortReadLimit = 0;
+  size_t simulatedOversizedEvalLen = 0;
   std::string evalPayload = "42";
   std::string lastChannel;
   std::string lastJsonPayload;
@@ -165,19 +168,15 @@ struct MockHostState {
   void* cmdPluginCtx = nullptr;
 };
 
-void* mockAllocBytes(void* hostCtx, size_t numBytes) {
+void* GRIDLOCK_CALL mockAllocBytes(void* hostCtx, size_t numBytes) {
   auto* state = static_cast<MockHostState*>(hostCtx);
-  if (state == nullptr || numBytes == 0u) {
-    return nullptr;
-  }
+  if (state == nullptr || numBytes == 0u) return nullptr;
   void* mem = std::malloc(numBytes);
-  if (mem != nullptr) {
-    ++state->liveAllocs;
-  }
+  if (mem != nullptr) ++state->liveAllocs;
   return mem;
 }
 
-void mockFreeBytes(void* hostCtx, void* ptr) {
+void GRIDLOCK_CALL mockFreeBytes(void* hostCtx, void* ptr) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (state != nullptr && ptr != nullptr) {
     --state->liveAllocs;
@@ -185,7 +184,7 @@ void mockFreeBytes(void* hostCtx, void* ptr) {
   }
 }
 
-GridLockStatus mockLogMessage(void* hostCtx, GridLockLogLevel level, const char* msg) {
+GridLockStatus GRIDLOCK_CALL mockLogMessage(void* hostCtx, GridLockLogLevel level, const char* msg) {
   if (hostCtx == nullptr || msg == nullptr || level < GRIDLOCK_LOG_TRACE) {
     return GRIDLOCK_ERR_INVALID_ARG;
   }
@@ -193,55 +192,44 @@ GridLockStatus mockLogMessage(void* hostCtx, GridLockLogLevel level, const char*
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockGetRankCount(void* hostCtx, int32_t* outRanks) {
-  if (hostCtx == nullptr || outRanks == nullptr) {
-    return GRIDLOCK_ERR_INVALID_ARG;
-  }
+GridLockStatus GRIDLOCK_CALL mockGetRankCount(void* hostCtx, int32_t* outRanks) {
+  if (hostCtx == nullptr || outRanks == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
   *outRanks = static_cast<MockHostState*>(hostCtx)->rankCount;
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockGetActiveRank(void* hostCtx, int32_t* outRank) {
-  if (hostCtx == nullptr || outRank == nullptr) {
-    return GRIDLOCK_ERR_INVALID_ARG;
-  }
+GridLockStatus GRIDLOCK_CALL mockGetActiveRank(void* hostCtx, int32_t* outRank) {
+  if (hostCtx == nullptr || outRank == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
   *outRank = static_cast<MockHostState*>(hostCtx)->activeRank;
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockEvalExpr(
+GridLockStatus GRIDLOCK_CALL mockEvalExpr(
     void* hostCtx, int32_t rank, const char* expr, char* outBuf, size_t cap, size_t* outLen) {
   auto* state = static_cast<MockHostState*>(hostCtx);
-  if (state == nullptr || expr == nullptr || outLen == nullptr) {
-    return GRIDLOCK_ERR_INVALID_ARG;
-  }
-  if (rank < 0 || rank >= state->rankCount) {
-    return GRIDLOCK_ERR_INVALID_RANK;
-  }
-  if (std::strcmp(expr, "bad_expr") == 0) {
-    return GRIDLOCK_ERR_EVAL_FAILED;
-  }
-  *outLen = state->evalPayload.size();
-  if (outBuf == nullptr || cap <= state->evalPayload.size()) {
+  if (state == nullptr || expr == nullptr || outLen == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+  ++state->evalCallCount;
+  if (rank < 0 || rank >= state->rankCount) return GRIDLOCK_ERR_INVALID_RANK;
+  if (std::strcmp(expr, "bad_expr") == 0) return GRIDLOCK_ERR_EVAL_FAILED;
+  if (state->simulatedOversizedEvalLen > 0u) {
+    *outLen = state->simulatedOversizedEvalLen;
     return GRIDLOCK_ERR_BUFFER_TOO_SMALL;
   }
+  *outLen = state->evalPayload.size();
+  if (outBuf == nullptr || cap <= state->evalPayload.size()) return GRIDLOCK_ERR_BUFFER_TOO_SMALL;
   std::memcpy(outBuf, state->evalPayload.data(), state->evalPayload.size());
   outBuf[state->evalPayload.size()] = '\0';
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockReadMemory(
+GridLockStatus GRIDLOCK_CALL mockReadMemory(
     void* hostCtx, int32_t rank, uint64_t addr, void* outBytes, size_t numBytes, size_t* outRead) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (state == nullptr || outBytes == nullptr || outRead == nullptr) {
     return GRIDLOCK_ERR_INVALID_ARG;
   }
-  if (rank < 0 || rank >= state->rankCount) {
-    return GRIDLOCK_ERR_INVALID_RANK;
-  }
-  if (addr + numBytes > state->targetMemory.size()) {
-    return GRIDLOCK_ERR_MEMORY_READ_FAILED;
-  }
+  if (rank < 0 || rank >= state->rankCount) return GRIDLOCK_ERR_INVALID_RANK;
+  if (addr + numBytes > state->targetMemory.size()) return GRIDLOCK_ERR_MEMORY_READ_FAILED;
   const size_t toCopy = (state->simulatedShortReadLimit > 0u &&
                          state->simulatedShortReadLimit < numBytes)
                             ? state->simulatedShortReadLimit
@@ -251,12 +239,8 @@ GridLockStatus mockReadMemory(
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockWriteMemory(
-    void* hostCtx,
-    int32_t rank,
-    uint64_t addr,
-    const void* inBytes,
-    size_t numBytes,
+GridLockStatus GRIDLOCK_CALL mockWriteMemory(
+    void* hostCtx, int32_t rank, uint64_t addr, const void* inBytes, size_t numBytes,
     size_t* outWritten) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (state == nullptr || inBytes == nullptr || outWritten == nullptr) {
@@ -270,7 +254,7 @@ GridLockStatus mockWriteMemory(
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockSetBreakpoint(
+GridLockStatus GRIDLOCK_CALL mockSetBreakpoint(
     void* hostCtx, const char* file, int32_t line, const char* cond, int32_t* outBpId) {
   (void)cond;
   auto* state = static_cast<MockHostState*>(hostCtx);
@@ -281,17 +265,13 @@ GridLockStatus mockSetBreakpoint(
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockRemoveBreakpoint(void* hostCtx, int32_t bpId) {
+GridLockStatus GRIDLOCK_CALL mockRemoveBreakpoint(void* hostCtx, int32_t bpId) {
   return (hostCtx != nullptr && bpId > 0) ? GRIDLOCK_OK : GRIDLOCK_ERR_INVALID_ARG;
 }
 
-GridLockStatus mockRegisterVarAction(
-    void* hostCtx,
-    const char* actionId,
-    const char* label,
-    const char* regex,
-    GridLockVariableActionCallback cb,
-    void* pluginCtx) {
+GridLockStatus GRIDLOCK_CALL mockRegisterVarAction(
+    void* hostCtx, const char* actionId, const char* label, const char* regex,
+    GridLockVariableActionCallback cb, void* pluginCtx) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (state == nullptr || actionId == nullptr || label == nullptr || regex == nullptr ||
       cb == nullptr) {
@@ -302,13 +282,9 @@ GridLockStatus mockRegisterVarAction(
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockRegisterCmdAction(
-    void* hostCtx,
-    const char* cmdId,
-    const char* label,
-    const char* shortcut,
-    GridLockCommandActionCallback cb,
-    void* pluginCtx) {
+GridLockStatus GRIDLOCK_CALL mockRegisterCmdAction(
+    void* hostCtx, const char* cmdId, const char* label, const char* shortcut,
+    GridLockCommandActionCallback cb, void* pluginCtx) {
   (void)shortcut;
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (state == nullptr || cmdId == nullptr || label == nullptr || cb == nullptr) {
@@ -319,7 +295,8 @@ GridLockStatus mockRegisterCmdAction(
   return GRIDLOCK_OK;
 }
 
-GridLockStatus mockEmitEvent(void* hostCtx, const char* channel, const char* jsonPayload) {
+GridLockStatus GRIDLOCK_CALL mockEmitEvent(
+    void* hostCtx, const char* channel, const char* jsonPayload) {
   auto* state = static_cast<MockHostState*>(hostCtx);
   if (state == nullptr || channel == nullptr || jsonPayload == nullptr) {
     return GRIDLOCK_ERR_INVALID_ARG;
@@ -358,6 +335,24 @@ struct SamplePodHeader {
   uint32_t extentY;
 };
 
+struct ExtendedHostApiMinorV1 {
+  GridLockHostApi v1;
+  void* extraMinorCallbacks[4];
+};
+
+template <typename T>
+concept CanReadPod = requires(const GridLockHostApi* h) {
+  gridlock::plugin::readPod<T>(h, 0, 0u);
+};
+
+static_assert(noexcept(gridlock::plugin::evalExpr(nullptr, 0, "x")));
+static_assert(CanReadPod<SamplePodHeader>);
+static_assert(CanReadPod<uint32_t>);
+static_assert(!CanReadPod<bool>);
+static_assert(!CanReadPod<void*>);
+static_assert(!CanReadPod<const double*>);
+static_assert(!CanReadPod<uint32_t SamplePodHeader::*>);
+
 }  // namespace
 
 /**
@@ -368,7 +363,7 @@ class TestPluginAbi : public QObject {
   Q_OBJECT
 
  private slots:
-  /** @brief Verifies ABI compatibility checks and descriptor header initialization. */
+  /** @brief Verifies ABI compatibility checks, forward minor versions, and descriptor header init. */
   void testAbiValidationAndDescriptorInit() {
     MockHostState state;
     GridLockHostApi host = makeMockHostApi(&state);
@@ -378,8 +373,17 @@ class TestPluginAbi : public QObject {
     host.abi_major = 2u;
     QCOMPARE(gridlock::plugin::validateHostAbi(&host), GRIDLOCK_ERR_ABI_MISMATCH);
     host.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-    host.struct_size = 16u;
+    host.struct_size = static_cast<uint32_t>(offsetof(GridLockHostApi, reserved) - 1u);
     QCOMPARE(gridlock::plugin::validateHostAbi(&host), GRIDLOCK_ERR_ABI_MISMATCH);
+    host.struct_size = static_cast<uint32_t>(offsetof(GridLockHostApi, reserved));
+    QCOMPARE(gridlock::plugin::validateHostAbi(&host), GRIDLOCK_OK);
+
+    // Hypothetical v1.1 host struct with trailing expansion slots must be accepted.
+    ExtendedHostApiMinorV1 hostMinorV1{};
+    hostMinorV1.v1 = makeMockHostApi(&state);
+    hostMinorV1.v1.abi_minor = 1u;
+    hostMinorV1.v1.struct_size = static_cast<uint32_t>(sizeof(ExtendedHostApiMinorV1));
+    QCOMPARE(gridlock::plugin::validateHostAbi(&hostMinorV1.v1), GRIDLOCK_OK);
 
     GridLockPluginDescriptor desc{};
     QCOMPARE(gridlock::plugin::initPluginDescriptorHeader(&desc), GRIDLOCK_OK);
@@ -388,7 +392,7 @@ class TestPluginAbi : public QObject {
     QCOMPARE(desc.abi_minor, GRIDLOCK_PLUGIN_ABI_MINOR);
   }
 
-  /** @brief Verifies `evalExpr` across fast stack buffers, dynamic retry, and error paths. */
+  /** @brief Verifies `evalExpr` across fast stack buffers, dynamic retry, overflow bounds, and errors. */
   void testEvalExprStackRetryAndErrors() {
     MockHostState state;
     const GridLockHostApi host = makeMockHostApi(&state);
@@ -403,6 +407,22 @@ class TestPluginAbi : public QObject {
     QVERIFY(largeRes.has_value());
     QCOMPARE(largeRes->size(), std::size_t{1024u});
     QCOMPARE(*largeRes, state.evalPayload);
+
+    // Reject outLen == SIZE_MAX and kMaxEvalExprBytes without wrapping outLen + 1u or retrying.
+    state.evalCallCount = 0;
+    state.simulatedOversizedEvalLen = std::numeric_limits<size_t>::max();
+    const auto maxOverflowRes = gridlock::plugin::evalExpr(&host, 0, "huge_expr");
+    QVERIFY(!maxOverflowRes.has_value());
+    QCOMPARE(maxOverflowRes.error(), GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+    QCOMPARE(state.evalCallCount, 1);
+
+    state.evalCallCount = 0;
+    state.simulatedOversizedEvalLen = gridlock::plugin::kMaxEvalExprBytes;
+    const auto capBoundaryRes = gridlock::plugin::evalExpr(&host, 0, "huge_expr");
+    QVERIFY(!capBoundaryRes.has_value());
+    QCOMPARE(capBoundaryRes.error(), GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+    QCOMPARE(state.evalCallCount, 1);
+    state.simulatedOversizedEvalLen = 0u;
 
     const auto badRank = gridlock::plugin::evalExpr(&host, 99, "x");
     QVERIFY(!badRank.has_value());

@@ -27,6 +27,9 @@
 
 namespace gridlock::plugin {
 
+/** @brief Upper bound (16 MiB) for dynamic `evalExpr` buffers to prevent overflow and OOM. */
+inline constexpr size_t kMaxEvalExprBytes = 16u * 1024u * 1024u;
+
 /**
  * @struct HostDeleter
  * @brief Symmetric RAII deleter releasing host-allocated buffers via `free_bytes`.
@@ -49,7 +52,11 @@ struct HostDeleter {
 using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
 
 /**
- * @brief Validates that a `GridLockHostApi` table matches major ABI v1 and minimum size.
+ * @brief Validates that a `GridLockHostApi` table matches major ABI v1 and v1.0 core fields.
+ *
+ * Accepts forward-compatible v1.x host tables whose `struct_size` is at least
+ * `offsetof(GridLockHostApi, reserved)` (including tables larger than v1.0).
+ *
  * @param host Candidate host API table pointer passed to `gridlock_plugin_init_v1`.
  * @return `GRIDLOCK_OK` when compatible, or `GRIDLOCK_ERR_INVALID_ARG` / `GRIDLOCK_ERR_ABI_MISMATCH`.
  */
@@ -58,7 +65,7 @@ using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
     return GRIDLOCK_ERR_INVALID_ARG;
   }
   if (host->abi_major != GRIDLOCK_PLUGIN_ABI_MAJOR ||
-      host->struct_size < sizeof(GridLockHostApi)) {
+      host->struct_size < offsetof(GridLockHostApi, reserved)) {
     return GRIDLOCK_ERR_ABI_MISMATCH;
   }
   return GRIDLOCK_OK;
@@ -110,8 +117,9 @@ using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
 /**
  * @brief Evaluates a C/C++ debugger expression on `rank` and returns its UTF-8 value.
  *
- * Uses a fast 256-byte stack buffer first and automatically retries once with an
- * exact-sized heap buffer when `eval_expr` reports `GRIDLOCK_ERR_BUFFER_TOO_SMALL`.
+ * Uses a fast 256-byte stack buffer first and automatically retries once with a
+ * bounded heap buffer (`< kMaxEvalExprBytes`) when `eval_expr` reports
+ * `GRIDLOCK_ERR_BUFFER_TOO_SMALL`. Never throws across C ABI boundaries.
  *
  * @param host Non-null host API table providing `eval_expr`.
  * @param rank Zero-based MPI rank index to query.
@@ -121,40 +129,50 @@ using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
 [[nodiscard]] inline std::expected<std::string, GridLockStatus> evalExpr(
     const GridLockHostApi* host,
     int32_t rank,
-    std::string_view expr) {
+    std::string_view expr) noexcept {
   if (host == nullptr || host->eval_expr == nullptr || expr.empty()) {
     return std::unexpected(GRIDLOCK_ERR_INVALID_ARG);
   }
 
-  const std::string exprNullTerm(expr);
-  constexpr std::size_t kStackCapacity = 256u;
-  std::array<char, kStackCapacity> stackBuf{};
-  std::size_t outLen = 0u;
+  try {
+    const std::string exprNullTerm(expr);
+    constexpr std::size_t kStackCapacity = 256u;
+    std::array<char, kStackCapacity> stackBuf{};
+    std::size_t outLen = 0u;
 
-  GridLockStatus status = host->eval_expr(
-      host->host_ctx, rank, exprNullTerm.c_str(), stackBuf.data(), stackBuf.size(), &outLen);
-  if (status == GRIDLOCK_OK) {
-    const std::size_t clampedLen =
-        (outLen < stackBuf.size()) ? outLen : (stackBuf.size() - 1u);
-    return std::string(stackBuf.data(), clampedLen);
-  }
-  if (status != GRIDLOCK_ERR_BUFFER_TOO_SMALL) {
-    return std::unexpected(status);
-  }
+    GridLockStatus status = host->eval_expr(
+        host->host_ctx, rank, exprNullTerm.c_str(), stackBuf.data(), stackBuf.size(), &outLen);
+    if (status == GRIDLOCK_OK) {
+      const std::size_t clampedLen =
+          (outLen < stackBuf.size()) ? outLen : (stackBuf.size() - 1u);
+      return std::string(stackBuf.data(), clampedLen);
+    }
+    if (status != GRIDLOCK_ERR_BUFFER_TOO_SMALL) {
+      return std::unexpected(status);
+    }
+    if (outLen >= kMaxEvalExprBytes) {
+      return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+    }
 
-  // Allocate exact required capacity (+1 for trailing NUL) reported in outLen.
-  const std::size_t dynamicCap =
-      (outLen >= stackBuf.size()) ? (outLen + 1u) : (stackBuf.size() * 16u);
-  std::vector<char> dynamicBuf(dynamicCap, '\0');
-  std::size_t retryLen = 0u;
-  status = host->eval_expr(
-      host->host_ctx, rank, exprNullTerm.c_str(), dynamicBuf.data(), dynamicBuf.size(), &retryLen);
-  if (status != GRIDLOCK_OK) {
-    return std::unexpected(status);
+    // Safe against SIZE_MAX wraparound because outLen < kMaxEvalExprBytes.
+    const std::size_t dynamicCap =
+        (outLen >= stackBuf.size()) ? (outLen + 1u) : (stackBuf.size() * 16u);
+    std::vector<char> dynamicBuf(dynamicCap, '\0');
+    if (dynamicBuf.empty()) {
+      return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+    }
+    std::size_t retryLen = 0u;
+    status = host->eval_expr(
+        host->host_ctx, rank, exprNullTerm.c_str(), dynamicBuf.data(), dynamicBuf.size(), &retryLen);
+    if (status != GRIDLOCK_OK) {
+      return std::unexpected(status);
+    }
+    const std::size_t clampedRetryLen =
+        (retryLen < dynamicBuf.size()) ? retryLen : (dynamicBuf.size() - 1u);
+    return std::string(dynamicBuf.data(), clampedRetryLen);
+  } catch (...) {
+    return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
   }
-  const std::size_t clampedRetryLen =
-      (retryLen < dynamicBuf.size()) ? retryLen : (dynamicBuf.size() - 1u);
-  return std::string(dynamicBuf.data(), clampedRetryLen);
 }
 
 /**
@@ -186,19 +204,23 @@ using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
 }
 
 /**
- * @brief Reads a trivially copyable POD value `T` from `rank` at `addr`.
+ * @brief Reads a trivially copyable non-bool, non-pointer POD value `T` from `rank` at `addr`.
  *
  * Rejects partial reads (`bytesRead != sizeof(T)`) with `GRIDLOCK_ERR_MEMORY_READ_FAILED`
  * and reconstructs `T` via `std::bit_cast` without strict-aliasing undefined behavior.
+ * Disallows `bool` and pointer types so trap bit patterns or target addresses are never
+ * materialized as host `bool` or host pointers.
  *
- * @tparam T Non-const trivially copyable value type with `sizeof(T) > 0`.
+ * @tparam T Non-const, non-bool, non-pointer trivially copyable type with `sizeof(T) > 0`.
  * @param host Non-null host API table providing `read_memory`.
  * @param rank Zero-based MPI rank index to read from.
  * @param addr Virtual address of `T` in the target rank's address space.
  * @return Decoded value `T` on full read, or `GridLockStatus` on error.
  */
 template <typename T>
-  requires(std::is_trivially_copyable_v<T> && !std::is_const_v<T> && sizeof(T) > 0u)
+  requires(std::is_trivially_copyable_v<T> && !std::is_const_v<T> &&
+           !std::is_same_v<std::remove_cv_t<T>, bool> && !std::is_pointer_v<T> &&
+           !std::is_member_pointer_v<T> && sizeof(T) > 0u)
 [[nodiscard]] inline std::expected<T, GridLockStatus> readPod(
     const GridLockHostApi* host,
     int32_t rank,
