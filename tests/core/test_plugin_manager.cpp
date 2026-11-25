@@ -27,6 +27,7 @@
 #include "../../src/core/plugins/PluginHostBridge.hpp"
 #include "../../src/core/plugins/PluginInstaller.hpp"
 #include "../../src/core/plugins/PluginManager.hpp"
+#include "../../src/core/plugins/PluginManifest.hpp"
 #include "gridlock/plugin_api.h"
 
 namespace {
@@ -531,6 +532,152 @@ class TestPluginManager : public QObject {
     QVERIFY(bridge->editorAnnotations().isEmpty());
     QVERIFY(bridge->reportPanels().isEmpty());
     QCOMPARE(bridge->liveAllocationCount(), 0);
+  }
+
+  void testOwnerRepoShorthandAndDeclarativeManifestSync() {
+    ScopedPluginEnv env;
+    using gridlock::core::plugins::PluginBuildResult;
+    using gridlock::core::plugins::PluginInstaller;
+    using gridlock::core::plugins::PluginLockEntry;
+    using gridlock::core::plugins::PluginManifest;
+    using gridlock::core::plugins::PluginManifestEntry;
+    using gridlock::core::plugins::PluginScope;
+
+    // 1. Validate owner/repo shorthand normalization and traversal/flag rejections.
+    QString normUrl, slug;
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("bnorthern42/gridlock-stl-inspector"), &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
+    QCOMPARE(slug, QStringLiteral("gridlock-stl-inspector"));
+
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("git@github.com:bnorthern42/gridlock-stl-inspector.git"), &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("git@github.com:bnorthern42/gridlock-stl-inspector.git"));
+
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("-evil/repo")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/-evil")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/..")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("../repo")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/.git")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/repo/extra")));
+
+    // 2. Parse declarative [[plugins]] manifest entries and reject invalid build modes.
+    QVector<PluginManifestEntry> parsed;
+    QString parseErr;
+    const QString sampleToml = QStringLiteral(
+        "[[plugins]]\n"
+        "repo = \"bnorthern42/gridlock-stl-inspector\"\n"
+        "ref = \"main\"\n"
+        "build = \"meson\"\n"
+        "\n"
+        "[[plugins]]\n"
+        "repo = \"https://github.com/bnorthern42/disabled-probe\"\n"
+        "build = \"single\"\n"
+        "enabled = false\n");
+    QVERIFY2(PluginManifest::parseManifestToml(sampleToml, &parsed, &parseErr), qPrintable(parseErr));
+    QCOMPARE(parsed.size(), 2);
+    QCOMPARE(parsed.at(0).normalizedUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
+    QCOMPARE(parsed.at(0).ref, QStringLiteral("main"));
+    QCOMPARE(parsed.at(0).build, QStringLiteral("meson"));
+    QVERIFY(parsed.at(0).enabled);
+    QCOMPARE(parsed.at(1).build, QStringLiteral("single"));
+    QVERIFY(!parsed.at(1).enabled);
+
+    QVERIFY(!PluginManifest::parseManifestToml(
+        QStringLiteral("[[plugins]]\nrepo = \"owner/repo\"\nbuild = \"bazel\"\n"), &parsed, &parseErr));
+
+    // 3. Set up local bare git repository and route GitHub shorthand URLs to file:// via Git config env.
+    QTemporaryDir gitSandbox;
+    QVERIFY(gitSandbox.isValid());
+    const QString bareRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("local-plugin.git"));
+    const QString workRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("work"));
+    QVERIFY(QDir().mkpath(bareRepo) && QDir().mkpath(workRepo));
+    QVERIFY(runGit(bareRepo, {QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("test@gridlock.local")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock Test")}));
+
+    const QString dstSrc = QDir(workRepo).filePath(QStringLiteral("plugin_src.c"));
+    QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SRC), dstSrc));
+    QVERIFY(runGit(workRepo, {QStringLiteral("add"), QStringLiteral("plugin_src.c")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("v1 commit")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), bareRepo}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+    const QString firstCommitSha = PluginManifest::queryLocalHeadSha(workRepo);
+    QCOMPARE(firstCommitSha.size(), 40);
+
+    const QString fileUrl = QStringLiteral("file://") + bareRepo;
+    qputenv("GRIDLOCK_INCLUDE_DIR", QByteArrayLiteral(GRIDLOCK_TEST_INCLUDE_DIR));
+    qputenv("GIT_CONFIG_COUNT", "2");
+    qputenv("GIT_CONFIG_KEY_0", QStringLiteral("url.%1.insteadOf").arg(fileUrl).toUtf8());
+    qputenv("GIT_CONFIG_VALUE_0", "https://github.com/gridlock-test/local-plugin.git");
+    qputenv("GIT_CONFIG_KEY_1", "protocol.file.allow");
+    qputenv("GIT_CONFIG_VALUE_1", "always");
+
+    // 4. Shorthand install appends to user plugins.toml and writes SHA-256 + commit_sha to user-global plugins-lock.toml.
+    PluginInstaller installer;
+    QSignalSpy doneSpy(&installer, &PluginInstaller::installFinished);
+    QVERIFY(installer.startInstallFromGitHub(
+        QStringLiteral("gridlock-test/local-plugin"), QStringLiteral("main"), PluginScope::UserGlobal));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
+    const auto installRes = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
+    QVERIFY2(installRes.success, qPrintable(installRes.fullCompilerLog));
+    QCOMPARE(installRes.commitSha, firstCommitSha);
+
+    QVector<PluginManifestEntry> userManifestEntries;
+    QVERIFY(PluginManifest::loadManifestFile(PluginManifest::userManifestPath(), &userManifestEntries));
+    QCOMPARE(userManifestEntries.size(), 1);
+    QCOMPARE(userManifestEntries.first().repo, QStringLiteral("gridlock-test/local-plugin"));
+
+    QVector<PluginLockEntry> lockEntries;
+    QVERIFY(PluginManifest::loadLockFile(PluginManifest::userLockFilePath(), &lockEntries));
+    QCOMPARE(lockEntries.size(), 1);
+    QCOMPARE(lockEntries.first().repo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
+    QCOMPARE(lockEntries.first().commitSha, firstCommitSha);
+    QCOMPARE(lockEntries.first().binarySha256, sha256OfFile(installRes.installedPath));
+    QVERIFY(!QFileInfo::exists(QDir(env.workspaceRoot()).filePath(QStringLiteral(".gridlock/plugins-lock.toml"))));
+
+    // 5. Write workspace plugins.toml: UserGlobal sync must be up-to-date (0 built) and NOT auto-build/trust workspace.
+    const QString wsManifest = PluginManifest::workspaceManifestPath();
+    QVERIFY(PluginManifest::upsertManifestEntry(
+        wsManifest, PluginManifestEntry{QStringLiteral("gridlock-test/local-plugin"), QString(), QString(),
+                                        firstCommitSha, QStringLiteral("single"), true}));
+    QVERIFY(installer.syncFromManifests(PluginManifest::userManifestPath(), wsManifest, PluginScope::UserGlobal));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
+    const auto noopRes = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
+    QVERIFY(noopRes.success);
+    QCOMPARE(noopRes.installedCount, 0);
+    QVERIFY(QDir(env.workspacePluginDir()).entryList(QDir::Files).isEmpty());
+
+    // 6. Push a new upstream commit on main, then explicitly sync Workspace scope: both outdated global & missing workspace build!
+    {
+      QFile appendComment(dstSrc);
+      QVERIFY(appendComment.open(QIODevice::Append));
+      QVERIFY(appendComment.write("\n/* upstream v2 update */\n") > 0);
+    }
+    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("v2 commit")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+    const QString secondCommitSha = PluginManifest::queryLocalHeadSha(workRepo);
+    QVERIFY(secondCommitSha != firstCommitSha);
+
+    QVERIFY(installer.syncFromManifests(PluginManifest::userManifestPath(), wsManifest, PluginScope::Workspace));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 20000);
+    const auto syncRes = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
+    QVERIFY2(syncRes.success, qPrintable(syncRes.fullCompilerLog));
+    QCOMPARE(syncRes.installedCount, 2);
+    QVERIFY(!syncRes.warnings.isEmpty());
+    QVERIFY(gridlock::core::ConfigManager::instance().isWorkspacePluginTrusted(
+        syncRes.installedPath, sha256OfFile(syncRes.installedPath)));
+
+    QVERIFY(PluginManifest::loadLockFile(PluginManifest::userLockFilePath(), &lockEntries));
+    QCOMPARE(lockEntries.size(), 2);
+
+    qunsetenv("GIT_CONFIG_COUNT");
+    qunsetenv("GIT_CONFIG_KEY_0");
+    qunsetenv("GIT_CONFIG_VALUE_0");
+    qunsetenv("GIT_CONFIG_KEY_1");
+    qunsetenv("GIT_CONFIG_VALUE_1");
+    qunsetenv("GRIDLOCK_INCLUDE_DIR");
   }
 };
 

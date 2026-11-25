@@ -1,6 +1,6 @@
 /**
  * @file PluginSettingsPage.cpp
- * @brief Implementation of the two-tab Preferences -> Plugins page (`Installed` & `Install from GitHub`).
+ * @brief Implementation of the two-tab Preferences -> Plugins page (`Installed`, `Install from GitHub`, and `plugins.toml` sync).
  */
 
 #include "PluginSettingsPage.hpp"
@@ -32,6 +32,7 @@
 #include "../../../core/managers/ConfigManager.hpp"
 #include "../../../core/plugins/PluginInstaller.hpp"
 #include "../../../core/plugins/PluginManager.hpp"
+#include "../../../core/plugins/PluginManifest.hpp"
 #include "../../MainWindow.hpp"
 
 namespace gridlock::ui {
@@ -42,6 +43,7 @@ using gridlock::core::plugins::LoadedPluginInfo;
 using gridlock::core::plugins::PluginBuildResult;
 using gridlock::core::plugins::PluginInstaller;
 using gridlock::core::plugins::PluginManager;
+using gridlock::core::plugins::PluginManifest;
 using gridlock::core::plugins::PluginScope;
 
 class CompilerLogHighlighter final : public QSyntaxHighlighter {
@@ -241,14 +243,17 @@ QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
 
   m_repoUrlEdit = new QLineEdit(tab);
   m_repoUrlEdit->setObjectName(QStringLiteral("pluginGithubUrlEdit"));
-  m_repoUrlEdit->setPlaceholderText(QStringLiteral("https://github.com/owner/gridlock-plugin.git"));
-  form->addRow(tr("GitHub Repository URL:"), m_repoUrlEdit);
+  m_repoUrlEdit->setPlaceholderText(
+      QStringLiteral("bnorthern42/gridlock-stl-inspector or https://github.com/owner/gridlock-plugin.git"));
+  m_repoUrlEdit->setToolTip(
+      tr("Accepts compact owner/repo shorthand, https://github.com/owner/repo[.git], or git@github.com:owner/repo.git."));
+  form->addRow(tr("GitHub Repo / URL:"), m_repoUrlEdit);
 
   auto* refScopeRow = new QHBoxLayout();
   refScopeRow->setSpacing(8);
   m_gitRefEdit = new QLineEdit(tab);
   m_gitRefEdit->setObjectName(QStringLiteral("pluginGithubRefEdit"));
-  m_gitRefEdit->setPlaceholderText(tr("Optional branch or tag (e.g. main, v1.0.0)"));
+  m_gitRefEdit->setPlaceholderText(tr("Optional branch, tag, or commit SHA (e.g. main, v1.0.0)"));
   refScopeRow->addWidget(m_gitRefEdit, 1);
 
   m_installScopeCombo = new QComboBox(tab);
@@ -263,9 +268,29 @@ QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
   m_cloneBuildBtn->setMinimumWidth(132);
   refScopeRow->addWidget(m_cloneBuildBtn);
   form->addRow(tr("Ref & Install Scope:"), refScopeRow);
+
+  auto* manifestRow = new QHBoxLayout();
+  manifestRow->setSpacing(8);
+  auto* manifestHint = new QLabel(
+      tr("Declarative manifest (<code>plugins.toml</code> + user-global <code>plugins-lock.toml</code>):"), tab);
+  manifestHint->setWordWrap(true);
+  manifestRow->addWidget(manifestHint, 1);
+
+  m_openManifestBtn = new QPushButton(tr("Open plugins.toml"), tab);
+  m_openManifestBtn->setObjectName(QStringLiteral("pluginOpenManifestBtn"));
+  m_openManifestBtn->setToolTip(tr("Create (if missing) and open plugins.toml for the selected scope."));
+  manifestRow->addWidget(m_openManifestBtn);
+
+  m_syncManifestBtn = new QPushButton(tr("Sync plugins.toml"), tab);
+  m_syncManifestBtn->setObjectName(QStringLiteral("pluginSyncManifestBtn"));
+  m_syncManifestBtn->setToolTip(
+      tr("Clone and compile any missing or outdated plugins declared in plugins.toml."));
+  manifestRow->addWidget(m_syncManifestBtn);
+  form->addRow(tr("Manifest Sync:"), manifestRow);
   lay->addLayout(form);
 
-  m_buildSummaryBadge = new QLabel(tr("Ready to clone and build a C99/C++23 GridLock plugin from GitHub."), tab);
+  m_buildSummaryBadge = new QLabel(
+      tr("Ready to clone/build from owner/repo shorthand or sync declarative plugins.toml."), tab);
   m_buildSummaryBadge->setObjectName(QStringLiteral("pluginBuildSummaryBadge"));
   m_buildSummaryBadge->setWordWrap(true);
   lay->addWidget(m_buildSummaryBadge);
@@ -285,6 +310,8 @@ QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
   lay->addWidget(m_compilerLogView, 1);
 
   connect(m_cloneBuildBtn, &QPushButton::clicked, this, &PluginSettingsPage::onCloneOrCancelClicked);
+  connect(m_syncManifestBtn, &QPushButton::clicked, this, &PluginSettingsPage::onSyncManifestClicked);
+  connect(m_openManifestBtn, &QPushButton::clicked, this, &PluginSettingsPage::onOpenManifestClicked);
   connect(m_installRestartBtn, &QPushButton::clicked, this, &PluginSettingsPage::triggerRestartNow);
   return tab;
 }
@@ -299,30 +326,71 @@ void PluginSettingsPage::onCloneOrCancelClicked() {
   if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
   const QString url = m_repoUrlEdit ? m_repoUrlEdit->text().trimmed() : QString();
   const QString ref = m_gitRefEdit ? m_gitRefEdit->text().trimmed() : QString();
-  const auto scope = (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
-                         ? PluginScope::Workspace
-                         : PluginScope::UserGlobal;
+  const auto scope =
+      (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
+          ? PluginScope::Workspace
+          : PluginScope::UserGlobal;
   if (m_installer->startInstallFromGitHub(url, ref, scope)) {
     if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel Build"));
+    if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
+  }
+}
+
+void PluginSettingsPage::onSyncManifestClicked() {
+  if (!m_installer || m_installer->isRunning()) return;
+  if (m_tabs) m_tabs->setCurrentIndex(1);
+  if (m_compilerLogView) m_compilerLogView->clear();
+  if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
+  const auto scope =
+      (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
+          ? PluginScope::Workspace
+          : PluginScope::UserGlobal;
+  const bool started = m_installer->syncFromManifests(PluginManifest::userManifestPath(),
+                                                      PluginManifest::workspaceManifestPath(), scope);
+  if (started && m_installer->isRunning()) {
+    if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel Build"));
+    if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
+  }
+}
+
+void PluginSettingsPage::onOpenManifestClicked() {
+  const bool wantWs =
+      m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace);
+  QString path = wantWs ? PluginManifest::workspaceManifestPath() : PluginManifest::userManifestPath();
+  if (path.isEmpty()) path = PluginManifest::userManifestPath();
+  if (!PluginManifest::ensureManifestTemplate(path)) return;
+  if (MainWindow* mw = resolveMainWindow()) {
+    mw->loadSourceFile(path);
+  } else {
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
   }
 }
 
 void PluginSettingsPage::onInstallFinished(const PluginBuildResult& result) {
   if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Clone & Build"));
+  if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(true);
   const int warnCount = static_cast<int>(result.warnings.size());
   const int errCount = static_cast<int>(result.errors.size());
   if (result.success) {
+    const bool builtAny = (result.installedCount > 0) || !result.installedPath.isEmpty();
     if (m_buildSummaryBadge) {
       m_buildSummaryBadge->setText(
-          tr("Installed %1 (%2 warning(s), %3 error(s)).").arg(result.installedPath).arg(warnCount).arg(errCount));
+          builtAny ? tr("Installed %1 (%2 built, %3 warning(s), %4 error(s)).")
+                         .arg(result.installedPath)
+                         .arg(std::max(1, result.installedCount))
+                         .arg(warnCount)
+                         .arg(errCount)
+                   : tr("All declared plugins in plugins.toml are up to date (0 built)."));
     }
-    if (m_installRestartBtn) m_installRestartBtn->setVisible(true);
-    setRestartBannerVisible(true);
-    if (auto* mgr = resolvePluginManager()) {
-      mgr->setProperty("gl_restart_required", true);
-      emit mgr->pluginsChanged();
+    if (builtAny) {
+      if (m_installRestartBtn) m_installRestartBtn->setVisible(true);
+      setRestartBannerVisible(true);
+      if (auto* mgr = resolvePluginManager()) {
+        mgr->setProperty("gl_restart_required", true);
+        emit mgr->pluginsChanged();
+      }
+      emit restartRequiredChanged(true);
     }
-    emit restartRequiredChanged(true);
   } else if (m_buildSummaryBadge) {
     const QString detail = result.errors.isEmpty() ? tr("Build failed.") : result.errors.last();
     m_buildSummaryBadge->setText(

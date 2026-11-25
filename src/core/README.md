@@ -16,8 +16,9 @@ Non-GUI backend subsystems for debugger protocol coordination, native plugin loa
   - `VariableNode` and `VariableTreeModel` backing lazy stack-frame variable expansion and cross-step value diff highlighting.
 - `plugins/`:
   - `PluginManager` (`PluginManager.hpp`, `PluginManager.cpp`): Discovers shared libraries (`.so`, `.dylib`, `.dll`) in `~/.config/gridlock/plugins/` and `<workspace>/.gridlock/plugins/`, verifies SHA-256 workspace trust prior to `QLibrary::load()`, validates the frozen C99 ABI v1.x contract in `include/gridlock/plugin_api.h`, enforces global (`[plugins] disabled_ids`) and per-workspace (`[plugins.workspaces]`) enablement, and dispatches serialized session, stop, and shutdown callbacks.
-  - `PluginHostBridge` (`PluginHostBridge.hpp`, `PluginHostBridge.cpp`): Implements every function pointer in `GridLockHostApi` against `GdbRankCoordinator` using per-plugin binding contexts, thread-safe marshaling, tokenized memory read/write queries, PCRE2 resource limits, and variable/command action registries.
-  - `PluginInstaller` (`PluginInstaller.hpp`, `PluginInstaller.cpp`): Clones validated GitHub HTTPS/SSH plugin repositories into a temporary staging directory via shell-free `QProcess` argument lists, auto-detects Meson, CMake, Make, or single-file C99/C++23 sources, parses compiler warnings and errors, and atomically installs built shared libraries into global or workspace plugin directories.
+  - `PluginHostBridge` (`PluginHostBridge.hpp`, `PluginHostBridge.cpp`, `PluginHostBridgeUi.cpp`, `PluginUiModels.hpp`): Implements every function pointer in `GridLockHostApi` against `GdbRankCoordinator` using per-plugin binding contexts, thread-safe marshaling, tokenized memory read/write queries, PCRE2 resource limits, dialogs, menus, status items, surface context actions, editor annotations, theme queries, and report panels.
+  - `PluginInstaller` (`PluginInstaller.hpp`, `PluginInstaller.cpp`): Normalizes `owner/repo` shorthand and GitHub HTTPS/SSH URLs, clones into temporary staging directories via shell-free `QProcess` argument lists, compiles Meson, CMake, Make, or single-file C99/C++23 sources, synchronizes declarative `plugins.toml` manifests sequentially, and atomically installs shared libraries.
+  - `PluginManifest` (`PluginManifest.hpp`, `PluginManifest.cpp`): Parses and updates `[[plugins]]` declarations in `~/.config/gridlock/plugins.toml` and `<workspace>/.gridlock/plugins.toml`, validates build modes, and maintains user-global commit-SHA and binary `SHA-256` pins in `~/.config/gridlock/plugins-lock.toml`.
 - `utils/`:
   - `CliParser`, `ElfBinaryInspector`, `ElfBinaryParser`, `SearchEverywhereEngine`, and `ClangdLspClient` navigation helpers.
 
@@ -33,6 +34,6 @@ Non-GUI backend subsystems for debugger protocol coordination, native plugin loa
 
 ## Maintainer & Agent Notes
 
-- Keep every `.hpp` and `.cpp` file in `src/core/plugins/` and modified `ConfigManager` translation units under 500 lines.
+- Keep every `.hpp` and `.cpp` file in `src/core/plugins/` under 800 lines (and strictly below the 950-line repository ceiling).
 - Update subdirectory `README.md` files and refresh the codebase graph whenever adding, splitting, or removing core modules.
 - Verify core and plugin changes with `meson test -C builddir plugin_abi_tests plugin_manager_tests coordinator_tests config_tests cliparser_tests --print-errorlogs`.

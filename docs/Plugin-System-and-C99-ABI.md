@@ -236,17 +236,42 @@ GridLockStatus inspectRank(const GridLockHostApi* host, int32_t rank, uint64_t p
   * Checkbox and trust edits are staged in memory without mutating `ConfigManager` on click; **Cancel** discards staged edits and **Apply** / **OK** commits them.
   * When applied changes alter plugin enablement or workspace trust, both `PluginSettingsPage` (`#pluginRestartBanner`) and `MainWindow`'s status bar (`#mainWindowPluginRestartBanner`) display a **Restart GridLock Now** button that saves open workspace/preferences state, launches `QProcess::startDetached`, and exits cleanly.
 * **Preferences -> Plugins (`Install from GitHub` Tab & `PluginInstaller`)**:
-  * Accepts validated `https://github.com/<owner>/<repo>[.git]` or `git@github.com:<owner>/<repo>.git` URLs and an optional branch/tag ref, rejecting leading `-` flags, whitespace, and shell metacharacters.
-  * Clones with `git clone --depth 1` via shell-free `QProcess` argument lists into a temporary staging directory and auto-detects build systems in priority order:
+  * Accepts compact `<owner>/<repo>` shorthand (for example, `bnorthern42/gridlock-stl-inspector`, normalized to `https://github.com/<owner>/<repo>.git`) as well as validated `https://github.com/<owner>/<repo>[.git]` or `git@github.com:<owner>/<repo>.git` URLs and an optional branch, tag, or commit SHA ref, rejecting leading `-` flags, `..` path traversal, whitespace, and shell metacharacters.
+  * Clones via shell-free `QProcess` argument lists into a temporary staging directory and supports explicit `build` overrides (`"auto"`, `"meson"`, `"cmake"`, `"make"`, `"single"`) or automatic detection in priority order:
     1. `meson.build`: `meson setup build -Dgridlock_include_dir=<includePath>` followed by `ninja -C build`
     2. `CMakeLists.txt`: `cmake -B build -DGRIDLOCK_INCLUDE_DIR=<includePath>` followed by `cmake --build build`
     3. `Makefile`: `make GRIDLOCK_INCLUDE_DIR=<includePath>`
     4. Single-file `.cpp` / `.c` fallback: `c++ -std=c++23` or `cc -std=c99` shared-library build with `-fvisibility=hidden -fPIC -shared -I<includePath>`
-  * Streams compiler output into a monospace log view highlighting `warning:` and `error:` lines, installs built `.so`/`.dylib`/`.dll` artifacts atomically into `~/.config/gridlock/plugins` (**Global**) or `<workspace>/.gridlock/plugins` (**This Workspace**, auto-registering `SHA-256` trust), and presents **Restart GridLock to Load Installed Plugin** on completion.
+  * Streams compiler output into `#pluginCompilerLogView` highlighting `warning:` and `error:` lines, installs built `.so`/`.dylib`/`.dll` artifacts atomically into `~/.config/gridlock/plugins` (**Global**) or `<workspace>/.gridlock/plugins` (**This Workspace**, registering `SHA-256` trust), records the plugin in the target scope's `plugins.toml` and user-global `plugins-lock.toml`, and presents **Restart GridLock to Load Installed Plugin** on completion.
 
 ---
 
-## 7. Building & Installing Out-of-Tree Plugins Manually
+## 7. Declarative `plugins.toml` Manifest, `plugins-lock.toml` Pinning & GitHub Topic Convention
+
+GridLock supports decentralized, version-pinned plugin management without a central registry server:
+
+* **Community Discovery Convention (`gridlock-plugin` Topic)**: Out-of-tree plugin authors publish standard Git repositories on GitHub tagged with the `gridlock-plugin` repository topic (`https://github.com/topics/gridlock-plugin`) and declare dependencies using compact `owner/repo` shorthand.
+* **Declarative Manifests (`plugins.toml`)**:
+  * **User-Global Scope**: `~/.config/gridlock/plugins.toml`
+  * **Workspace Scope**: `<workspace>/.gridlock/plugins.toml`
+  * Each `[[plugins]]` table supports `repo` (required shorthand or full GitHub URL), `ref` (optional branch, tag, or 7..40 character hex commit SHA), `build` (optional `"auto"`, `"meson"`, `"cmake"`, `"make"`, or `"single"`, defaulting to `"auto"`), and `enabled` (optional boolean, defaulting to `true`):
+    ```toml
+    [[plugins]]
+    repo = "bnorthern42/gridlock-stl-inspector"
+    ref = "main"
+    build = "auto"
+    enabled = true
+    ```
+* **User-Global Lockfile (`~/.config/gridlock/plugins-lock.toml`)**:
+  * Stored strictly inside user-global `~/.config/gridlock/plugins-lock.toml` (never read from `<workspace>/.gridlock/`, so cloning an untrusted repository cannot forge lock or trust state).
+  * Records each installed plugin's normalized `repo` URL, installation `scope` (`"global"` or `"workspace"`), declared `ref`, resolved 40-character `commit_sha` (`git rev-parse HEAD`), `binary_name`, and lowercase `binary_sha256`.
+* **Synchronizing Manifests (`Sync plugins.toml` & `Open plugins.toml`)**:
+  * In **Preferences -> Plugins -> Install from GitHub**, **Open `plugins.toml`** creates a commented starter manifest if missing and opens it directly in the workstation editor, while **Sync `plugins.toml`** runs `PluginInstaller::syncFromManifests(userManifestPath, workspaceManifestPath, scope)`.
+  * During synchronization, `PluginInstaller` verifies each enabled entry against `~/.config/gridlock/plugins-lock.toml`, local binary `SHA-256` digests, and upstream `git ls-remote` commit SHAs, sequentially cloning and compiling only missing or outdated plugins, registering workspace binary trust on explicit workspace sync, streaming aggregated warnings and errors into `#pluginCompilerLogView`, and surfacing **Restart GridLock Now** when new binaries are built.
+
+---
+
+## 8. Building & Installing Out-of-Tree Plugins Manually
 
 ```bash
 # C99 plugin

@@ -1,14 +1,15 @@
 /**
  * @file PluginInstaller.cpp
- * @brief Implementation of the shell-free GitHub repository clone, build-system auto-detector, and atomic plugin installer.
+ * @brief Implementation of `owner/repo` shorthand normalization, shell-free GitHub builds, and `plugins.toml` manifest sync.
  */
 
 #include "PluginInstaller.hpp"
 
+#include "PluginManifest.hpp"
+
 #include <cstdio>
 
 #include <QCoreApplication>
-#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -28,6 +29,11 @@ bool containsControlOrSpace(const QString& s) {
     if (c.isSpace() || c == QChar('\0') || c.category() == QChar::Other_Control) return true;
   }
   return false;
+}
+
+bool isHexCommitShaRef(const QString& s) {
+  static const QRegularExpression kShaRe(QStringLiteral("^[0-9a-fA-F]{7,40}$"));
+  return kShaRe.match(s).hasMatch();
 }
 
 QString hostSharedLibSuffix() {
@@ -59,14 +65,6 @@ bool isCandidateBuiltPluginArtifact(const QFileInfo& fi) {
 #endif
 }
 
-QString computeSha256Hex(const QString& path) {
-  QFile f(path);
-  if (!f.open(QIODevice::ReadOnly)) return QString();
-  QCryptographicHash hash(QCryptographicHash::Sha256);
-  if (!hash.addData(&f)) return QString();
-  return QString::fromLatin1(hash.result().toHex()).toLower();
-}
-
 bool hasBuildManifestOrSources(const QString& dirPath) {
   const QDir d(dirPath);
   if (!d.exists()) return false;
@@ -85,12 +83,10 @@ PluginInstaller::PluginInstaller(QObject* parent) : QObject(parent) {
   qRegisterMetaType<gridlock::core::plugins::PluginBuildResult>("gridlock::core::plugins::PluginBuildResult");
 }
 
-PluginInstaller::~PluginInstaller() {
-  cancelInstall();
-}
+PluginInstaller::~PluginInstaller() { cancelInstall(); }
 
-bool PluginInstaller::validateGitHubUrl(const QString& rawUrl, QString* normalizedOut,
-                                        QString* repoSlugOut, QString* errorOut) {
+bool PluginInstaller::normalizeAndValidateUrl(const QString& rawUrl, QString* normalizedOut,
+                                              QString* repoSlugOut, QString* errorOut) {
   if (rawUrl.isEmpty()) {
     if (errorOut) *errorOut = QStringLiteral("Repository URL must not be empty.");
     return false;
@@ -104,49 +100,58 @@ bool PluginInstaller::validateGitHubUrl(const QString& rawUrl, QString* normaliz
     return false;
   }
 
-  static const QRegularExpression kHttpsRe(
-      QStringLiteral("^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\\.git)?/?$"));
-  static const QRegularExpression kSshRe(
-      QStringLiteral("^git@github\\.com:([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\\.git)?$"));
+  static const QRegularExpression kHttpsRe(QStringLiteral("^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)/?$"));
+  static const QRegularExpression kSshRe(QStringLiteral("^git@github\\.com:([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$"));
+  static const QRegularExpression kShorthandRe(QStringLiteral("^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$"));
 
+  bool useSshFormat = false;
   QRegularExpressionMatch match = kHttpsRe.match(rawUrl);
-  const bool isHttps = match.hasMatch();
-  if (!isHttps) match = kSshRe.match(rawUrl);
+  if (!match.hasMatch()) {
+    if ((match = kSshRe.match(rawUrl)).hasMatch()) useSshFormat = true;
+    else match = kShorthandRe.match(rawUrl);
+  }
   if (!match.hasMatch()) {
     if (errorOut) {
       *errorOut = QStringLiteral(
-          "URL must match https://github.com/<owner>/<repo>[.git] or git@github.com:<owner>/<repo>.git.");
+          "Repository must match <owner>/<repo>, https://github.com/<owner>/<repo>[.git], or git@github.com:<owner>/<repo>.git.");
     }
     return false;
   }
 
   const QString owner = match.captured(1);
-  const QString repo = match.captured(2);
-  if (owner == QLatin1String(".") || owner == QLatin1String("..") || owner.startsWith(QLatin1Char('-')) ||
-      repo == QLatin1String(".") || repo == QLatin1String("..") || repo.startsWith(QLatin1Char('-'))) {
+  QString repo = match.captured(2);
+  if (repo.endsWith(QStringLiteral(".git"))) repo.chop(4);
+  if (owner.isEmpty() || repo.isEmpty() || owner == QLatin1String(".") || repo == QLatin1String(".") ||
+      owner.contains(QStringLiteral("..")) || repo.contains(QStringLiteral("..")) ||
+      owner.startsWith(QLatin1Char('-')) || repo.startsWith(QLatin1Char('-'))) {
     if (errorOut) *errorOut = QStringLiteral("Invalid GitHub owner or repository path segment.");
     return false;
   }
 
   if (normalizedOut) {
-    *normalizedOut = isHttps ? QStringLiteral("https://github.com/%1/%2.git").arg(owner, repo)
-                             : QStringLiteral("git@github.com:%1/%2.git").arg(owner, repo);
+    *normalizedOut = useSshFormat ? QStringLiteral("git@github.com:%1/%2.git").arg(owner, repo)
+                                  : QStringLiteral("https://github.com/%1/%2.git").arg(owner, repo);
   }
   if (repoSlugOut) *repoSlugOut = repo;
   return true;
 }
 
+bool PluginInstaller::validateGitHubUrl(const QString& rawUrl, QString* normalizedOut,
+                                        QString* repoSlugOut, QString* errorOut) {
+  return normalizeAndValidateUrl(rawUrl, normalizedOut, repoSlugOut, errorOut);
+}
+
 bool PluginInstaller::validateGitRef(const QString& rawRef, QString* errorOut) {
   if (rawRef.isEmpty()) return true;
   if (rawRef.size() > 128) {
-    if (errorOut) *errorOut = QStringLiteral("Branch or tag name exceeds 128 characters.");
+    if (errorOut) *errorOut = QStringLiteral("Branch, tag, or commit SHA exceeds 128 characters.");
     return false;
   }
   if (rawRef.startsWith(QLatin1Char('-')) || rawRef.startsWith(QLatin1Char('/')) ||
-      rawRef.endsWith(QLatin1Char('/')) || rawRef.endsWith(QStringLiteral(".lock")) ||
-      rawRef.contains(QStringLiteral("..")) || rawRef.contains(QStringLiteral("@{")) ||
-      containsControlOrSpace(rawRef)) {
-    if (errorOut) *errorOut = QStringLiteral("Invalid or unsafe git branch/tag reference.");
+       rawRef.endsWith(QLatin1Char('/')) || rawRef.endsWith(QStringLiteral(".lock")) ||
+       rawRef.contains(QStringLiteral("..")) || rawRef.contains(QStringLiteral("@{")) ||
+       containsControlOrSpace(rawRef)) {
+    if (errorOut) *errorOut = QStringLiteral("Invalid or unsafe git branch, tag, or commit reference.");
     return false;
   }
   static const QRegularExpression kSafeRefRe(QStringLiteral("^[A-Za-z0-9._/-]+$"));
@@ -186,97 +191,233 @@ QString PluginInstaller::resolveGridLockIncludeDir() {
   return QDir::current().filePath(QStringLiteral("include"));
 }
 
-QString PluginInstaller::resolveTargetInstallDir() const {
-  if (!m_targetDirOverride.trimmed().isEmpty()) return m_targetDirOverride.trimmed();
-  if (m_scope == PluginScope::Workspace) {
+QString PluginInstaller::resolveScopeInstallDir(PluginScope scope, const QString& manifestPathHint) {
+  if (scope == PluginScope::Workspace) {
     const QString ws = ConfigManager::instance().workspacePath().trimmed();
     if (!ws.isEmpty()) return QDir(ws).filePath(QStringLiteral(".gridlock/plugins"));
+    if (!manifestPathHint.trimmed().isEmpty()) {
+      return QDir(QFileInfo(manifestPathHint).absolutePath()).filePath(QStringLiteral("plugins"));
+    }
   }
   return QDir(ConfigManager::configDirectory()).filePath(QStringLiteral("plugins"));
 }
 
-bool PluginInstaller::startInstallFromGitHub(const QString& repoUrl, const QString& gitRef,
-                                             PluginScope scope, const QString& targetDirOverride) {
-  if (m_running) return false;
+QString PluginInstaller::resolveTargetInstallDir() const {
+  if (!m_targetDirOverride.trimmed().isEmpty()) return m_targetDirOverride.trimmed();
+  return resolveScopeInstallDir(m_scope);
+}
 
+void PluginInstaller::resetRunState(bool batchSync) {
   m_fullLog.clear();
   m_partialLine.clear();
   m_warnings.clear();
   m_errors.clear();
   m_pendingSteps.clear();
+  m_syncQueue.clear();
+  m_currentTask = SyncTask{};
+  m_clonedRepoDir.clear();
+  m_lastInstalledPath.clear();
+  m_lastCommitSha.clear();
+  m_installedCount = 0;
   m_cancelled = false;
+  m_awaitingClone = false;
+  m_isBatchSync = batchSync;
+  m_anySyncError = false;
+}
+
+bool PluginInstaller::startInstallFromGitHub(const QString& repoUrl,
+                                             const QString& gitRef,
+                                             PluginScope scope,
+                                             const QString& targetDirOverride,
+                                             bool recordInManifest,
+                                             const QString& buildMode) {
+  if (m_running) return false;
+  resetRunState(false);
   m_scope = scope;
   m_targetDirOverride = targetDirOverride;
 
-  QString normalizedUrl;
+  SyncTask task;
+  task.rawRepo = repoUrl.trimmed();
+  task.gitRef = gitRef.trimmed();
+  task.scope = scope;
+  task.targetDirOverride = targetDirOverride;
+
   QString validationErr;
-  if (!validateGitHubUrl(repoUrl, &normalizedUrl, &m_repoSlug, &validationErr)) {
-    finishWithFailure(validationErr);
+  if (!normalizeAndValidateUrl(task.rawRepo, &task.normalizedUrl, &task.repoSlug, &validationErr)) {
+    handleTaskFailure(validationErr);
     return false;
   }
-  if (!validateGitRef(gitRef, &validationErr)) {
-    finishWithFailure(validationErr);
+  if (!validateGitRef(task.gitRef, &validationErr)) {
+    handleTaskFailure(validationErr);
     return false;
   }
-  if (scope == PluginScope::Workspace && m_targetDirOverride.trimmed().isEmpty() &&
+  if (!PluginManifest::validateBuildMode(buildMode, &task.buildMode, &validationErr)) {
+    handleTaskFailure(validationErr);
+    return false;
+  }
+  if (scope == PluginScope::Workspace && targetDirOverride.trimmed().isEmpty() &&
       ConfigManager::instance().workspacePath().trimmed().isEmpty()) {
-    finishWithFailure(QStringLiteral("No active workspace directory is open for workspace-scoped installation."));
+    handleTaskFailure(QStringLiteral("No active workspace directory is open for workspace-scoped installation."));
     return false;
   }
-
-  m_stagingDir = std::make_unique<QTemporaryDir>(QDir::tempPath() + QStringLiteral("/gridlock_plug_build_XXXXXX"));
-  if (!m_stagingDir->isValid()) {
-    finishWithFailure(QStringLiteral("Failed to create isolated temporary staging directory."));
-    return false;
+  if (recordInManifest) {
+    task.manifestPathToRecord =
+        (scope == PluginScope::Workspace) ? PluginManifest::workspaceManifestPath() : PluginManifest::userManifestPath();
   }
 
-  const QString cloneDest = QDir(m_stagingDir->path()).filePath(QStringLiteral("repo"));
-  QStringList cloneArgs{QStringLiteral("clone"), QStringLiteral("--depth"), QStringLiteral("1")};
-  if (!gitRef.isEmpty()) {
-    cloneArgs << QStringLiteral("--branch") << gitRef;
-  }
-  cloneArgs << QStringLiteral("--") << normalizedUrl << cloneDest;
-
-  m_activeSourceRoot = cloneDest;
-  m_awaitingClone = true;
+  m_syncQueue.enqueue(task);
   m_running = true;
-  m_pendingSteps.enqueue(BuildStep{QStringLiteral("git"), cloneArgs, m_stagingDir->path(),
-                                   QStringLiteral("Cloning %1...").arg(normalizedUrl)});
-  launchNextStep();
+  launchNextSyncTask();
   return true;
 }
 
-bool PluginInstaller::startBuildFromSourceDirectory(const QString& sourceDir, PluginScope scope,
+bool PluginInstaller::syncFromManifests(const QString& userManifestPath,
+                                        const QString& workspaceManifestPath,
+                                        PluginScope scope) {
+  if (m_running) return false;
+  resetRunState(true);
+
+  if (scope == PluginScope::Workspace && workspaceManifestPath.trimmed().isEmpty() &&
+      ConfigManager::instance().workspacePath().trimmed().isEmpty()) {
+    handleTaskFailure(QStringLiteral("No active workspace directory is open for workspace manifest sync."));
+    return false;
+  }
+
+  QVector<PluginLockEntry> lockEntries;
+  (void)PluginManifest::loadLockFile(PluginManifest::userLockFilePath(), &lockEntries, nullptr);
+
+  auto enqueueManifestForScope = [&](const QString& manifestPath, PluginScope targetScope) -> bool {
+    if (manifestPath.trimmed().isEmpty()) return true;
+    QVector<PluginManifestEntry> entries;
+    QString parseErr;
+    if (!PluginManifest::loadManifestFile(manifestPath, &entries, &parseErr)) {
+      handleTaskFailure(parseErr);
+      return false;
+    }
+    const QString installDir = resolveScopeInstallDir(targetScope, manifestPath);
+    for (const PluginManifestEntry& entry : entries) {
+      if (!entry.enabled) {
+        const QString msg = QStringLiteral("==> Skipping disabled plugin %1\n").arg(entry.repo);
+        m_fullLog.append(msg);
+        emit logOutputReceived(msg);
+        continue;
+      }
+      QString canonBin;
+      QString binSha;
+      if (PluginManifest::isManifestEntryUpToDate(entry, targetScope, installDir, lockEntries, &canonBin, &binSha)) {
+        if (targetScope == PluginScope::Workspace && !canonBin.isEmpty() && !binSha.isEmpty()) {
+          ConfigManager::instance().trustWorkspacePlugin(canonBin, binSha);
+        }
+        const QString msg = QStringLiteral("==> Up to date: %1\n").arg(entry.repo);
+        m_fullLog.append(msg);
+        emit logOutputReceived(msg);
+        continue;
+      }
+      SyncTask task;
+      task.rawRepo = entry.repo;
+      task.normalizedUrl = entry.normalizedUrl;
+      task.repoSlug = entry.repoSlug;
+      task.gitRef = entry.ref;
+      task.buildMode = entry.build;
+      task.scope = targetScope;
+      task.targetDirOverride = installDir;
+      m_syncQueue.enqueue(task);
+    }
+    return true;
+  };
+
+  if (!userManifestPath.trimmed().isEmpty() &&
+      (scope == PluginScope::UserGlobal || QFileInfo::exists(userManifestPath.trimmed()))) {
+    if (!enqueueManifestForScope(userManifestPath, PluginScope::UserGlobal)) return false;
+  }
+  if (scope == PluginScope::Workspace && !workspaceManifestPath.trimmed().isEmpty()) {
+    if (!enqueueManifestForScope(workspaceManifestPath, PluginScope::Workspace)) return false;
+  }
+
+  if (m_syncQueue.isEmpty()) {
+    const QString doneMsg = QStringLiteral("==> Manifest sync complete: all declared plugins are up to date.\n");
+    m_fullLog.append(doneMsg);
+    emit logOutputReceived(doneMsg);
+    emit installFinished(PluginBuildResult{true, QString(), m_warnings, m_errors, m_fullLog, QString(), 0});
+    return true;
+  }
+
+  m_running = true;
+  launchNextSyncTask();
+  return true;
+}
+
+void PluginInstaller::launchNextSyncTask() {
+  if (m_cancelled || m_syncQueue.isEmpty()) return;
+  m_currentTask = m_syncQueue.dequeue();
+  m_pendingSteps.clear();
+  m_scope = m_currentTask.scope;
+  m_targetDirOverride = m_currentTask.targetDirOverride;
+  m_repoSlug = m_currentTask.repoSlug;
+  m_buildMode = m_currentTask.buildMode;
+
+  m_stagingDir = std::make_unique<QTemporaryDir>(QDir::tempPath() + QStringLiteral("/gridlock_plug_build_XXXXXX"));
+  if (!m_stagingDir->isValid()) {
+    handleTaskFailure(QStringLiteral("Failed to create isolated temporary staging directory."));
+    return;
+  }
+
+  m_clonedRepoDir = QDir(m_stagingDir->path()).filePath(QStringLiteral("repo"));
+  m_activeSourceRoot = m_clonedRepoDir;
+  m_awaitingClone = true;
+
+  if (isHexCommitShaRef(m_currentTask.gitRef)) {
+    m_pendingSteps.enqueue(BuildStep{
+        QStringLiteral("git"),
+        {QStringLiteral("clone"), QStringLiteral("--no-checkout"), QStringLiteral("--"),
+         m_currentTask.normalizedUrl, m_clonedRepoDir},
+        m_stagingDir->path(),
+        QStringLiteral("Cloning %1...").arg(m_currentTask.normalizedUrl)});
+    m_pendingSteps.enqueue(BuildStep{
+        QStringLiteral("git"),
+        {QStringLiteral("checkout"), m_currentTask.gitRef},
+        m_clonedRepoDir,
+        QStringLiteral("Checking out pinned commit %1...").arg(m_currentTask.gitRef.left(12))});
+  } else {
+    QStringList cloneArgs{QStringLiteral("clone"), QStringLiteral("--depth"), QStringLiteral("1")};
+    if (!m_currentTask.gitRef.isEmpty()) {
+      cloneArgs << QStringLiteral("--branch") << m_currentTask.gitRef;
+    }
+    cloneArgs << QStringLiteral("--") << m_currentTask.normalizedUrl << m_clonedRepoDir;
+    m_pendingSteps.enqueue(BuildStep{
+        QStringLiteral("git"), cloneArgs, m_stagingDir->path(),
+        QStringLiteral("Cloning %1...").arg(m_currentTask.normalizedUrl)});
+  }
+
+  launchNextStep();
+}
+
+bool PluginInstaller::startBuildFromSourceDirectory(const QString& sourceDir,
+                                                    PluginScope scope,
                                                     const QString& targetDirOverride) {
   if (m_running) return false;
-
-  m_fullLog.clear();
-  m_partialLine.clear();
-  m_warnings.clear();
-  m_errors.clear();
-  m_pendingSteps.clear();
-  m_cancelled = false;
-  m_awaitingClone = false;
+  resetRunState(false);
   m_scope = scope;
   m_targetDirOverride = targetDirOverride;
+  m_buildMode = QStringLiteral("auto");
 
   const QFileInfo srcInfo(sourceDir);
   if (!srcInfo.exists() || !srcInfo.isDir()) {
-    finishWithFailure(QStringLiteral("Source directory does not exist: %1").arg(sourceDir));
+    handleTaskFailure(QStringLiteral("Source directory does not exist: %1").arg(sourceDir));
     return false;
   }
 
   m_stagingDir = std::make_unique<QTemporaryDir>(QDir::tempPath() + QStringLiteral("/gridlock_plug_local_XXXXXX"));
   if (!m_stagingDir->isValid()) {
-    finishWithFailure(QStringLiteral("Failed to create temporary build directory."));
+    handleTaskFailure(QStringLiteral("Failed to create temporary build directory."));
     return false;
   }
 
   m_activeSourceRoot = srcInfo.absoluteFilePath();
   m_repoSlug = srcInfo.fileName().isEmpty() ? QStringLiteral("custom_plugin") : srcInfo.fileName();
   QString detectErr;
-  if (!enqueueDetectedBuildSteps(m_activeSourceRoot, m_repoSlug, &detectErr)) {
-    finishWithFailure(detectErr);
+  if (!enqueueDetectedBuildSteps(m_activeSourceRoot, m_repoSlug, m_buildMode, &detectErr)) {
+    handleTaskFailure(detectErr);
     return false;
   }
 
@@ -285,7 +426,9 @@ bool PluginInstaller::startBuildFromSourceDirectory(const QString& sourceDir, Pl
   return true;
 }
 
-bool PluginInstaller::enqueueDetectedBuildSteps(const QString& rootDir, const QString& fallbackStem,
+bool PluginInstaller::enqueueDetectedBuildSteps(const QString& rootDir,
+                                                const QString& fallbackStem,
+                                                const QString& buildMode,
                                                 QString* errorOut) {
   QString buildRoot = rootDir;
   if (!hasBuildManifestOrSources(buildRoot)) {
@@ -298,8 +441,13 @@ bool PluginInstaller::enqueueDetectedBuildSteps(const QString& rootDir, const QS
   const QString incDir = resolveGridLockIncludeDir();
   const QString outBuildDir = m_stagingDir ? QDir(m_stagingDir->path()).filePath(QStringLiteral("build"))
                                            : dir.filePath(QStringLiteral("build"));
+  const QString mode = buildMode.trimmed().isEmpty() ? QStringLiteral("auto") : buildMode.trimmed().toLower();
 
-  if (dir.exists(QStringLiteral("meson.build"))) {
+  if (mode == QLatin1String("meson") || (mode == QLatin1String("auto") && dir.exists(QStringLiteral("meson.build")))) {
+    if (!dir.exists(QStringLiteral("meson.build"))) {
+      if (errorOut) *errorOut = QStringLiteral("Requested Meson build, but meson.build was not found.");
+      return false;
+    }
     m_pendingSteps.enqueue(BuildStep{
         QStringLiteral("meson"),
         {QStringLiteral("setup"), outBuildDir, QStringLiteral("-Dgridlock_include_dir=%1").arg(incDir)},
@@ -310,7 +458,11 @@ bool PluginInstaller::enqueueDetectedBuildSteps(const QString& rootDir, const QS
     return true;
   }
 
-  if (dir.exists(QStringLiteral("CMakeLists.txt"))) {
+  if (mode == QLatin1String("cmake") || (mode == QLatin1String("auto") && dir.exists(QStringLiteral("CMakeLists.txt")))) {
+    if (!dir.exists(QStringLiteral("CMakeLists.txt"))) {
+      if (errorOut) *errorOut = QStringLiteral("Requested CMake build, but CMakeLists.txt was not found.");
+      return false;
+    }
     m_pendingSteps.enqueue(BuildStep{
         QStringLiteral("cmake"),
         {QStringLiteral("-B"), outBuildDir, QStringLiteral("-DGRIDLOCK_INCLUDE_DIR=%1").arg(incDir)},
@@ -321,7 +473,12 @@ bool PluginInstaller::enqueueDetectedBuildSteps(const QString& rootDir, const QS
     return true;
   }
 
-  if (dir.exists(QStringLiteral("Makefile")) || dir.exists(QStringLiteral("GNUmakefile"))) {
+  const bool hasMake = dir.exists(QStringLiteral("Makefile")) || dir.exists(QStringLiteral("GNUmakefile"));
+  if (mode == QLatin1String("make") || (mode == QLatin1String("auto") && hasMake)) {
+    if (!hasMake) {
+      if (errorOut) *errorOut = QStringLiteral("Requested Make build, but Makefile was not found.");
+      return false;
+    }
     m_pendingSteps.enqueue(BuildStep{QStringLiteral("make"),
                                      {QStringLiteral("GRIDLOCK_INCLUDE_DIR=%1").arg(incDir)},
                                      buildRoot, QStringLiteral("Compiling with Make...")});
@@ -374,8 +531,8 @@ void PluginInstaller::launchNextStep() {
     if (m_awaitingClone) {
       m_awaitingClone = false;
       QString detectErr;
-      if (!enqueueDetectedBuildSteps(m_activeSourceRoot, m_repoSlug, &detectErr)) {
-        finishWithFailure(detectErr);
+      if (!enqueueDetectedBuildSteps(m_activeSourceRoot, m_repoSlug, m_buildMode, &detectErr)) {
+        handleTaskFailure(detectErr);
         return;
       }
     } else {
@@ -386,7 +543,8 @@ void PluginInstaller::launchNextStep() {
 
   const BuildStep step = m_pendingSteps.dequeue();
   emit stepStarted(step.description);
-  const QString banner = QStringLiteral("==> %1 (%2 %3)\n").arg(step.description, step.program, step.args.join(QLatin1Char(' ')));
+  const QString banner =
+      QStringLiteral("==> %1 (%2 %3)\n").arg(step.description, step.program, step.args.join(QLatin1Char(' ')));
   m_fullLog.append(banner);
   emit logOutputReceived(banner);
 
@@ -410,7 +568,7 @@ void PluginInstaller::launchNextStep() {
   connect(m_process, &QProcess::errorOccurred, this, [this, prog = step.program](QProcess::ProcessError err) {
     if (m_cancelled || !m_running) return;
     if (err == QProcess::FailedToStart) {
-      finishWithFailure(QStringLiteral("Failed to launch required tool '%1' (not found or not executable).").arg(prog));
+      handleTaskFailure(QStringLiteral("Failed to launch required tool '%1' (not found or not executable).").arg(prog));
     }
   });
   connect(m_process, &QProcess::finished, this, [this, prog = step.program](int exitCode, QProcess::ExitStatus status) {
@@ -424,7 +582,7 @@ void PluginInstaller::launchNextStep() {
       m_partialLine.clear();
     }
     if (status != QProcess::NormalExit || exitCode != 0) {
-      finishWithFailure(QStringLiteral("Step '%1' exited with status %2.").arg(prog).arg(exitCode));
+      handleTaskFailure(QStringLiteral("Step '%1' exited with status %2.").arg(prog).arg(exitCode));
       return;
     }
     launchNextStep();
@@ -450,7 +608,8 @@ void PluginInstaller::handleProcessOutput(const QByteArray& rawBytes) {
 }
 
 void PluginInstaller::classifyDiagnosticLine(const QString& line) {
-  static const QRegularExpression kWarnRe(QStringLiteral("(?:^|\\s|:)warning:\\s"), QRegularExpression::CaseInsensitiveOption);
+  static const QRegularExpression kWarnRe(QStringLiteral("(?:^|\\s|:)warning:\\s"),
+                                          QRegularExpression::CaseInsensitiveOption);
   static const QRegularExpression kErrRe(
       QStringLiteral("(?:(?:^|\\s|:)(?:fatal )?error:\\s|undefined reference to\\b|CMake Error\\b|meson\\.build:\\d+:\\d+:\\s*ERROR)"),
       QRegularExpression::CaseInsensitiveOption);
@@ -479,18 +638,21 @@ void PluginInstaller::finalizeInstalledArtifacts() {
   }
 
   if (builtLibs.isEmpty()) {
-    finishWithFailure(QStringLiteral("Build completed, but no shared library (%1) artifact was produced.")
+    handleTaskFailure(QStringLiteral("Build completed, but no shared library (%1) artifact was produced.")
                           .arg(hostSharedLibSuffix()));
     return;
   }
 
   const QString destDir = resolveTargetInstallDir();
   if (!QDir().mkpath(destDir)) {
-    finishWithFailure(QStringLiteral("Failed to create target plugin directory: %1").arg(destDir));
+    handleTaskFailure(QStringLiteral("Failed to create target plugin directory: %1").arg(destDir));
     return;
   }
 
+  const QString commitSha = m_clonedRepoDir.isEmpty() ? QString() : PluginManifest::queryLocalHeadSha(m_clonedRepoDir);
   QString primaryInstalled;
+  QString primarySha256;
+
   for (const QString& srcLib : builtLibs) {
     const QFileInfo srcFi(srcLib);
     const QString finalPath = QDir(destDir).filePath(srcFi.fileName());
@@ -498,7 +660,7 @@ void PluginInstaller::finalizeInstalledArtifacts() {
         QStringLiteral(".%1.tmp.%2").arg(srcFi.fileName()).arg(QCoreApplication::applicationPid()));
     QFile::remove(tmpPath);
     if (!QFile::copy(srcLib, tmpPath)) {
-      finishWithFailure(QStringLiteral("Failed to stage built library into %1.").arg(destDir));
+      handleTaskFailure(QStringLiteral("Failed to stage built library into %1.").arg(destDir));
       return;
     }
     QFile::setPermissions(tmpPath, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner |
@@ -507,40 +669,86 @@ void PluginInstaller::finalizeInstalledArtifacts() {
       QFile::remove(finalPath);
       if (!QFile::rename(tmpPath, finalPath)) {
         QFile::remove(tmpPath);
-        finishWithFailure(QStringLiteral("Atomic rename failed for %1.").arg(finalPath));
+        handleTaskFailure(QStringLiteral("Atomic rename failed for %1.").arg(finalPath));
         return;
       }
     }
 
     const QFileInfo destFi(finalPath);
     const QString canonDest = !destFi.canonicalFilePath().isEmpty() ? destFi.canonicalFilePath() : destFi.absoluteFilePath();
-    if (m_scope == PluginScope::Workspace) {
-      const QString sha256 = computeSha256Hex(canonDest);
-      if (!sha256.isEmpty()) ConfigManager::instance().trustWorkspacePlugin(canonDest, sha256);
+    const QString sha256 = PluginManifest::computeFileSha256Hex(canonDest);
+    if (m_scope == PluginScope::Workspace && !sha256.isEmpty()) {
+      ConfigManager::instance().trustWorkspacePlugin(canonDest, sha256);
     }
-    if (primaryInstalled.isEmpty()) primaryInstalled = canonDest;
+    if (primaryInstalled.isEmpty()) {
+      primaryInstalled = canonDest;
+      primarySha256 = sha256;
+    }
+    ++m_installedCount;
     const QString msg = QStringLiteral("==> Installed %1\n").arg(canonDest);
     m_fullLog.append(msg);
     emit logOutputReceived(msg);
   }
 
-  m_running = false;
+  if (!m_currentTask.normalizedUrl.isEmpty() && !primaryInstalled.isEmpty() && !primarySha256.isEmpty()) {
+    PluginLockEntry lock;
+    lock.repo = m_currentTask.normalizedUrl;
+    lock.scope = PluginManifest::scopeToString(m_scope);
+    lock.ref = m_currentTask.gitRef;
+    lock.commitSha = commitSha;
+    lock.binaryName = QFileInfo(primaryInstalled).fileName();
+    lock.binarySha256 = primarySha256;
+    (void)PluginManifest::upsertLockEntry(PluginManifest::userLockFilePath(), lock, nullptr);
+
+    if (!m_currentTask.manifestPathToRecord.isEmpty()) {
+      PluginManifestEntry entry;
+      entry.repo = m_currentTask.rawRepo;
+      entry.normalizedUrl = m_currentTask.normalizedUrl;
+      entry.repoSlug = m_currentTask.repoSlug;
+      entry.ref = m_currentTask.gitRef;
+      entry.build = m_currentTask.buildMode;
+      entry.enabled = true;
+      (void)PluginManifest::upsertManifestEntry(m_currentTask.manifestPathToRecord, entry, nullptr);
+    }
+  }
+
+  m_lastInstalledPath = primaryInstalled;
+  if (!commitSha.isEmpty()) m_lastCommitSha = commitSha;
+  m_clonedRepoDir.clear();
   cleanupStaging();
-  emit installFinished(PluginBuildResult{true, primaryInstalled, m_warnings, m_errors, m_fullLog});
+
+  if (!m_syncQueue.isEmpty()) {
+    launchNextSyncTask();
+    return;
+  }
+
+  m_running = false;
+  emit installFinished(PluginBuildResult{!m_anySyncError, m_lastInstalledPath, m_warnings, m_errors,
+                                         m_fullLog, m_lastCommitSha, m_installedCount});
 }
 
-void PluginInstaller::finishWithFailure(const QString& headlineError) {
+void PluginInstaller::handleTaskFailure(const QString& headlineError) {
   if (!headlineError.isEmpty()) {
     if (!m_errors.contains(headlineError)) m_errors.append(headlineError);
     const QString line = QStringLiteral("error: %1\n").arg(headlineError);
     m_fullLog.append(line);
     emit logOutputReceived(line);
   }
-  m_running = false;
+  m_anySyncError = true;
   m_awaitingClone = false;
   m_pendingSteps.clear();
+  m_clonedRepoDir.clear();
   cleanupStaging();
-  emit installFinished(PluginBuildResult{false, QString(), m_warnings, m_errors, m_fullLog});
+
+  if (m_running && m_isBatchSync && !m_syncQueue.isEmpty()) {
+    launchNextSyncTask();
+    return;
+  }
+
+  m_running = false;
+  m_syncQueue.clear();
+  emit installFinished(PluginBuildResult{false, m_lastInstalledPath, m_warnings, m_errors,
+                                         m_fullLog, m_lastCommitSha, m_installedCount});
 }
 
 void PluginInstaller::cancelInstall() {
@@ -553,6 +761,8 @@ void PluginInstaller::cancelInstall() {
   m_running = false;
   m_awaitingClone = false;
   m_pendingSteps.clear();
+  m_syncQueue.clear();
+  m_clonedRepoDir.clear();
   if (m_process != nullptr) {
     m_process->disconnect(this);
     if (m_process->state() != QProcess::NotRunning) {
@@ -569,7 +779,7 @@ void PluginInstaller::cancelInstall() {
   if (wasRunning) {
     m_errors.append(QStringLiteral("Build cancelled by user."));
     m_fullLog.append(QStringLiteral("==> Build cancelled by user.\n"));
-    emit installFinished(PluginBuildResult{false, QString(), m_warnings, m_errors, m_fullLog});
+    emit installFinished(PluginBuildResult{false, QString(), m_warnings, m_errors, m_fullLog, QString(), 0});
   }
 }
 

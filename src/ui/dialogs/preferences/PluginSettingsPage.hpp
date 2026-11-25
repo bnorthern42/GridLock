@@ -1,15 +1,16 @@
 /**
  * @file PluginSettingsPage.hpp
- * @brief Two-tab Preferences -> Plugins page for installed plugin management and GitHub clone/build installation.
+ * @brief Two-tab Preferences -> Plugins page for installed plugin management, GitHub shorthand builds, and `plugins.toml` sync.
  *
  * Organizes plugin administration into two tabs inside `#pluginSettingsTabs`:
  * 1. **Installed**: Search-directory selector, **Open Folder** / **Reload Plugins**,
  *    staged **Global** / **Workspace** checkboxes, workspace SHA-256 **Trust & Approve**,
  *    and an inline **Restart GridLock Now** notification banner.
- * 2. **Install from GitHub**: Validated GitHub URL + optional git ref inputs, **Global** vs
- *    **This Workspace** scope selector, **Clone & Build** / **Cancel Build**, warning/error
- *    summary badge, **Restart GridLock to Load Installed Plugin** button, and a syntax-highlighted
- *    monospace compiler diagnostics log.
+ * 2. **Install from GitHub**: `owner/repo` shorthand or full GitHub URL + optional git ref inputs,
+ *    **Global** vs **This Workspace** scope selector, **Clone & Build** / **Cancel Build**,
+ *    **Sync `plugins.toml`** and **Open `plugins.toml`** declarative manifest controls,
+ *    warning/error summary badge, **Restart GridLock to Load Installed Plugin** button, and
+ *    a syntax-highlighted monospace compiler diagnostics log.
  */
 
 #pragma once
@@ -39,7 +40,7 @@ class MainWindow;
 
 /**
  * @class PluginSettingsPage
- * @brief Preferences settings panel managing installed C99 ABI plugins and GitHub source builds.
+ * @brief Preferences settings panel managing installed C99 ABI plugins, GitHub builds, and `plugins.toml` sync.
  */
 class PluginSettingsPage : public QWidget {
   Q_OBJECT
@@ -77,10 +78,10 @@ class PluginSettingsPage : public QWidget {
   /** @brief Returns the **Restart GridLock Now** button inside `restartBanner()`. */
   QPushButton* restartNowButton() const noexcept { return m_restartNowBtn; }
 
-  /** @brief Returns the GitHub repository URL input on the `Install from GitHub` tab. */
+  /** @brief Returns the GitHub repository URL or `owner/repo` shorthand input on the `Install from GitHub` tab. */
   QLineEdit* githubUrlEdit() const noexcept { return m_repoUrlEdit; }
 
-  /** @brief Returns the optional git branch/tag input on the `Install from GitHub` tab. */
+  /** @brief Returns the optional git branch/tag/SHA input on the `Install from GitHub` tab. */
   QLineEdit* githubRefEdit() const noexcept { return m_gitRefEdit; }
 
   /** @brief Returns the installation scope selector (`Global` vs `This Workspace`). */
@@ -88,6 +89,12 @@ class PluginSettingsPage : public QWidget {
 
   /** @brief Returns the **Clone & Build** / **Cancel Build** action button. */
   QPushButton* cloneAndBuildButton() const noexcept { return m_cloneBuildBtn; }
+
+  /** @brief Returns the **Sync `plugins.toml`** button triggering declarative manifest synchronization. */
+  QPushButton* syncManifestButton() const noexcept { return m_syncManifestBtn; }
+
+  /** @brief Returns the **Open `plugins.toml`** button opening the target scope's manifest file. */
+  QPushButton* openManifestButton() const noexcept { return m_openManifestBtn; }
 
   /** @brief Returns the warning/error build summary badge label. */
   QLabel* buildSummaryBadge() const noexcept { return m_buildSummaryBadge; }
@@ -98,7 +105,7 @@ class PluginSettingsPage : public QWidget {
   /** @brief Returns the read-only monospace compiler diagnostics log view. */
   QPlainTextEdit* compilerLogView() const noexcept { return m_compilerLogView; }
 
-  /** @brief Returns the owned `PluginInstaller` instance driving GitHub clone/build tasks. */
+  /** @brief Returns the owned `PluginInstaller` instance driving GitHub clone/build and manifest sync tasks. */
   gridlock::core::plugins::PluginInstaller* pluginInstaller() const noexcept { return m_installer; }
 
   /** @brief Returns true when committed plugin enablement, trust, or installation requires a restart. */
@@ -144,6 +151,8 @@ class PluginSettingsPage : public QWidget {
   void updateRowPreview(int row, const QString& rowKey);
   void setRestartBannerVisible(bool visible);
   void onCloneOrCancelClicked();
+  void onSyncManifestClicked();
+  void onOpenManifestClicked();
   void onInstallFinished(const gridlock::core::plugins::PluginBuildResult& result);
 
   QPointer<gridlock::core::plugins::PluginManager> m_pluginManager;
@@ -160,6 +169,8 @@ class PluginSettingsPage : public QWidget {
   QLineEdit* m_gitRefEdit = nullptr;
   QComboBox* m_installScopeCombo = nullptr;
   QPushButton* m_cloneBuildBtn = nullptr;
+  QPushButton* m_syncManifestBtn = nullptr;
+  QPushButton* m_openManifestBtn = nullptr;
   QLabel* m_buildSummaryBadge = nullptr;
   QPushButton* m_installRestartBtn = nullptr;
   QPlainTextEdit* m_compilerLogView = nullptr;
