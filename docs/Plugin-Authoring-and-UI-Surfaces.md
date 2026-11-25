@@ -9,6 +9,33 @@ See also:
 
 ---
 
+## 0. Quick Start: Scaffolding a New Plugin (`scripts/init_plugin.lua`)
+
+GridLock ships an interactive Lua project generator (`scripts/init_plugin.lua`, compatible with Lua 5.1/5.3/5.4 and LuaJIT) that scaffolds a complete out-of-tree plugin repository including `src/plugin.cpp` (or `src/plugin.c`), `plugin.map` linker version script, `meson.build` / `CMakeLists.txt` / `Makefile`, `README.md`, `LICENSE`, and `.gitignore`:
+
+```bash
+# Interactive prompt mode (press Enter to accept bracketed defaults):
+lua scripts/init_plugin.lua
+
+# Non-interactive CI / scripted mode (--yes):
+lua scripts/init_plugin.lua --yes \
+  --name "STL Domain Inspector" \
+  --author "gridlock" \
+  --lang c++23 \
+  --build meson \
+  --license MIT \
+  --dir ./stl-domain-inspector
+
+# Build and run the sandboxed conformance verifier:
+meson setup ./stl-domain-inspector/build ./stl-domain-inspector -Dgridlock_include_dir="$PWD/include"
+ninja -C ./stl-domain-inspector/build
+gridlock --verify-plugin ./stl-domain-inspector/build/libgridlock_stl_domain_inspector.so
+```
+
+Supported flags: `--yes` (`-y`), `--name`, `--slug`, `--id`, `--version`, `--description`, `--author`, `--license` (`MIT`, `Apache-2.0`, `BSD-3-Clause`, `GPL-3.0-or-later`, `Unlicense`), `--lang` (`c++23`, `c99`), `--build` (`meson`, `cmake`, `make`), `--dir`, and `--help` (`-h`).
+
+---
+
 ## 1. Workstation UI Extension Surfaces
 
 ```mermaid

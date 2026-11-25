@@ -172,7 +172,9 @@ gridlock --verify-plugin /path/to/libmy_plugin.so
 
 This command checks the plugin inside an isolated sandbox without opening a window or touching your personal configuration, prints a `PASS` or `FAIL` summary with any warnings or errors, and exits with code `0` on pass or `1` on failure.
 
-### Manual Plugin Placement
+### Manual Plugin Placement & Authoring Your Own Plugin
+
+To scaffold a brand-new plugin repository with build files, symbol visibility rules, and starter UI hooks in seconds, run `lua scripts/init_plugin.lua` (see [Plugin Authoring, UI Surfaces & Build Recipes](Plugin-Authoring-and-UI-Surfaces.md#0-quick-start-scaffolding-a-new-plugin-scriptsinit_pluginlua)).
 
 To install a pre-compiled plugin manually (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows):
 
