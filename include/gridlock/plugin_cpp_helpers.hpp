@@ -3,9 +3,9 @@
  * @brief Optional header-only C++23 convenience wrappers over GridLock's C99 plugin ABI.
  *
  * Provides zero-overhead RAII memory guards, `std::span` byte readers, typed POD
- * memory readers, and `std::expected` expression evaluation helpers built strictly
- * on top of `gridlock/plugin_api.h` without altering the underlying C ABI layout
- * or introducing any UI/Qt dependencies.
+ * memory readers, `std::expected` expression evaluation, interactive user input
+ * prompts, and theme token queries built strictly on top of `gridlock/plugin_api.h`
+ * without altering the underlying C ABI layout or introducing any UI/Qt dependencies.
  */
 
 #ifndef GRIDLOCK_PLUGIN_CPP_HELPERS_HPP
@@ -27,7 +27,7 @@
 
 namespace gridlock::plugin {
 
-/** @brief Upper bound (16 MiB) for dynamic `evalExpr` buffers to prevent overflow and OOM. */
+/** @brief Upper bound (16 MiB) for dynamic string buffers to prevent overflow and OOM. */
 inline constexpr size_t kMaxEvalExprBytes = 16u * 1024u * 1024u;
 
 /**
@@ -173,6 +173,94 @@ using HostByteBuffer = std::unique_ptr<std::byte[], HostDeleter>;
   } catch (...) {
     return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
   }
+}
+
+/**
+ * @brief Prompts the user for a single-line input string with automatic buffer retry.
+ *
+ * Uses a fast 256-byte stack buffer first and automatically retries once with a
+ * bounded heap buffer (`< kMaxEvalExprBytes`) on `GRIDLOCK_ERR_BUFFER_TOO_SMALL`.
+ * Returns `std::unexpected(GRIDLOCK_ERR_CANCELLED)` if the user cancels the dialog.
+ *
+ * @param host Non-null host API table providing `prompt_input`.
+ * @param title Dialog window title text.
+ * @param label Field prompt label text.
+ * @param defaultVal Optional initial input text seeded into the field.
+ * @return User-entered `std::string` on `GRIDLOCK_OK`, or negative `GridLockStatus` on error/cancel.
+ */
+[[nodiscard]] inline std::expected<std::string, GridLockStatus> promptInput(
+    const GridLockHostApi* host,
+    std::string_view title,
+    std::string_view label,
+    std::string_view defaultVal = {}) noexcept {
+  if (host == nullptr || host->prompt_input == nullptr) {
+    return std::unexpected(GRIDLOCK_ERR_INVALID_ARG);
+  }
+
+  try {
+    const std::string titleNullTerm(title);
+    const std::string labelNullTerm(label);
+    const std::string defaultNullTerm(defaultVal);
+    constexpr std::size_t kStackCapacity = 256u;
+    std::array<char, kStackCapacity> stackBuf{};
+    std::size_t outLen = 0u;
+
+    GridLockStatus status = host->prompt_input(
+        host->host_ctx, titleNullTerm.c_str(), labelNullTerm.c_str(), defaultNullTerm.c_str(),
+        stackBuf.data(), stackBuf.size(), &outLen);
+    if (status == GRIDLOCK_OK) {
+      const std::size_t clampedLen =
+          (outLen < stackBuf.size()) ? outLen : (stackBuf.size() - 1u);
+      return std::string(stackBuf.data(), clampedLen);
+    }
+    if (status != GRIDLOCK_ERR_BUFFER_TOO_SMALL) {
+      return std::unexpected(status);
+    }
+    if (outLen >= kMaxEvalExprBytes) {
+      return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+    }
+
+    const std::size_t dynamicCap =
+        (outLen >= stackBuf.size()) ? (outLen + 1u) : (stackBuf.size() * 16u);
+    std::vector<char> dynamicBuf(dynamicCap, '\0');
+    if (dynamicBuf.empty()) {
+      return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+    }
+    std::size_t retryLen = 0u;
+    status = host->prompt_input(
+        host->host_ctx, titleNullTerm.c_str(), labelNullTerm.c_str(), defaultNullTerm.c_str(),
+        dynamicBuf.data(), dynamicBuf.size(), &retryLen);
+    if (status != GRIDLOCK_OK) {
+      return std::unexpected(status);
+    }
+    const std::size_t clampedRetryLen =
+        (retryLen < dynamicBuf.size()) ? retryLen : (dynamicBuf.size() - 1u);
+    return std::string(dynamicBuf.data(), clampedRetryLen);
+  } catch (...) {
+    return std::unexpected(GRIDLOCK_ERR_BUFFER_TOO_SMALL);
+  }
+}
+
+/**
+ * @brief Queries the active workstation `GridLockThemeInfo` token palette.
+ * @param host Non-null host API table providing `get_theme_info`.
+ * @return Populated `GridLockThemeInfo` on `GRIDLOCK_OK`, or negative `GridLockStatus` on error.
+ */
+[[nodiscard]] inline std::expected<GridLockThemeInfo, GridLockStatus> getThemeInfo(
+    const GridLockHostApi* host) noexcept {
+  if (host == nullptr || host->get_theme_info == nullptr) {
+    return std::unexpected(GRIDLOCK_ERR_INVALID_ARG);
+  }
+  GridLockThemeInfo info{};
+  info.struct_size = static_cast<uint32_t>(sizeof(GridLockThemeInfo));
+  info.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
+  info.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+  info.reserved_flags = 0u;
+  const GridLockStatus status = host->get_theme_info(host->host_ctx, &info);
+  if (status != GRIDLOCK_OK) {
+    return std::unexpected(status);
+  }
+  return info;
 }
 
 /**
