@@ -1,6 +1,6 @@
 # GridLock: Multi-Rank MPI Debugger & ELF64 Binary Inspector
 
-![Version](https://img.shields.io/badge/Release-v0.8.81-brightgreen.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/Release-v0.9.0-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -19,12 +19,12 @@
 ### Option 1: Standalone Linux AppImage (`x86_64`, Wayland & X11)
 
 Download either AppImage from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) (bundles Qt6 Wayland and XCB platform plugins plus `libxcb-cursor.so.0`):
-* **`GridLock-0.8.81-x86_64.AppImage`** (Lite Edition)
-* **`GridLock-0.8.81-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
+* **`GridLock-0.9.0-x86_64.AppImage`** (Lite Edition)
+* **`GridLock-0.9.0-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
 
 ```bash
-chmod +x GridLock-0.8.81-Tutorials-x86_64.AppImage
-./GridLock-0.8.81-Tutorials-x86_64.AppImage
+chmod +x GridLock-0.9.0-Tutorials-x86_64.AppImage
+./GridLock-0.9.0-Tutorials-x86_64.AppImage
 ```
 
 ### Option 2: Build From Source (`Meson` + `Ninja`)
@@ -77,7 +77,7 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 
 ---
 
-## Feature Summary (`v0.8.81`)
+## Feature Summary (`v0.9.0`)
 
 * **Execution, Checkpoints & Target Modes**:
   * **Local MPI & ELF64 Launch**: MPMD `mpirun` / `mpiexec` orchestration (`1..256` ranks) over POSIX FIFOs via `GdbRankCoordinator` (`gdb`, `cuda-gdb`, `rocgdb`) or JSON-RPC via `DapCoordinator` (`lldb-dap`), inline `Config` launch popover (per-target/workspace `--args`, working directory, `Stop at main()`), unified `All Ranks` vs. `Rank k` execution scope, `Pause All Ranks (F6)`, OpenMP `OMP_NUM_THREADS` / `OMP_WAIT_POLICY=PASSIVE` auto-tuning, and time-travel reverse execution (`REC`, `Step Back`, `Rev Continue`).
@@ -119,7 +119,7 @@ All documentation in `docs/` is automatically mirrored to the [GridLock GitHub W
   * [**Volume 2: C99 ABI & C++23 Wrapper Specification**](docs/Plugin-C99-ABI-Reference.md): Exact 64-bit byte-offset tables for all 9 ABI structs, enum constants, all 28 `GridLockHostApi` callbacks (`query_type_info`, `resolve_contiguous_range`), and `include/gridlock/plugin_cpp_helpers.hpp` reference.
   * [**Volume 3: Authoring Recipes, UI Surfaces & Build Templates**](docs/Plugin-Authoring-and-UI-Surfaces.md): [`scripts/init_plugin.lua`](scripts/init_plugin.lua) scaffolding generator, zero-call DWARF container inspection, 5 context-menu surfaces, `PluginReportDockWidget`, `plugin.map` version scripts, `domain_mesh_probe` walkthrough, and `--verify-plugin` CI gating.
 * [**Developer Architecture and Testing**](docs/Developer-Architecture-and-Testing.md): Sub-500-line modular codebase structure, CLI flag reference, per-directory `README.md` guides (including [`scripts/README.md`](scripts/README.md)), Graphify AST graph, all 24 Meson test suites, coverage, screenshot generation, and Wiki sync.
-* [**Engineering Roadmap (`v0.8.8` to `v1.0.0`)**](ROADMAP.md): Completed `v0.8.8` deliverables and planned milestones from `v0.8.9` through `v1.0.0`.
+* [**Engineering Roadmap (`v0.9.0` to `v1.0.0`)**](docs/ROADMAP.md): Completed `v0.9.0` deliverables and planned pre-`v1.0.0` target milestones (`v0.10.0`, `v0.11.0`).
 
 ---
 
