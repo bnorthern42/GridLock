@@ -6,6 +6,7 @@
 #include "PluginInstaller.hpp"
 
 #include "PluginManifest.hpp"
+#include "PluginVerifier.hpp"
 
 #include <cstdio>
 
@@ -651,6 +652,28 @@ void PluginInstaller::finalizeInstalledArtifacts() {
 
     const QFileInfo destFi(finalPath);
     const QString canonDest = !destFi.canonicalFilePath().isEmpty() ? destFi.canonicalFilePath() : destFi.absoluteFilePath();
+
+    PluginVerifyReport verifyRep;
+    const bool verifiedOk = PluginVerifier::verifyBinary(canonDest, &verifyRep);
+    for (const QString& w : verifyRep.warnings) {
+      const QString wLine = QStringLiteral("warning: [PluginVerifier] %1").arg(w);
+      if (!m_warnings.contains(wLine)) m_warnings.append(wLine);
+      m_fullLog.append(wLine + QLatin1Char('\n'));
+      emit logOutputReceived(wLine + QLatin1Char('\n'));
+    }
+    if (!verifiedOk) {
+      QFile::remove(canonDest);
+      for (const QString& e : verifyRep.errors) {
+        const QString eLine = QStringLiteral("error: [PluginVerifier] %1").arg(e);
+        if (!m_errors.contains(eLine)) m_errors.append(eLine);
+        m_fullLog.append(eLine + QLatin1Char('\n'));
+        emit logOutputReceived(eLine + QLatin1Char('\n'));
+      }
+      handleTaskFailure(verifyRep.errors.isEmpty() ? QStringLiteral("Sandboxed plugin conformance check failed.")
+                                                   : verifyRep.errors.first());
+      return;
+    }
+
     const QString sha256 = PluginManifest::computeFileSha256Hex(canonDest);
     if (!sha256.isEmpty() && sha256 != prevSha256) m_anyBinaryChanged = true;
     if (m_scope == PluginScope::Workspace && m_currentTask.preserveWorkspaceTrust && !sha256.isEmpty()) {
@@ -661,7 +684,8 @@ void PluginInstaller::finalizeInstalledArtifacts() {
       primarySha256 = sha256;
     }
     ++m_installedCount;
-    const QString msg = QStringLiteral("==> Installed %1\n").arg(canonDest);
+    const QString msg = QStringLiteral("==> Verified & installed %1 (%2 %3)\n")
+                            .arg(canonDest, verifyRep.pluginName, verifyRep.pluginVersion);
     m_fullLog.append(msg);
     emit logOutputReceived(msg);
   }

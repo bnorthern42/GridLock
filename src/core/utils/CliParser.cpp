@@ -42,6 +42,7 @@ CliParser::CliParser()
     , m_verboseOption("verbose", "Enable verbose debug output")
     , m_headlessOption("headless", "Run using the offscreen platform without mapping a visible desktop window")
     , m_snapshotOption("snapshot", "Render the main window workspace and save a PNG snapshot to <file>, then exit.", "file")
+    , m_verifyPluginOption("verify-plugin", "Verify a compiled C99 ABI plugin shared library in an isolated sandbox and exit.", "path")
 {
     // Configure the CLI help banner with the current semantic version string.
     m_parser.setApplicationDescription(
@@ -59,6 +60,7 @@ CliParser::CliParser()
     m_parser.addOption(m_verboseOption);
     m_parser.addOption(m_headlessOption);
     m_parser.addOption(m_snapshotOption);
+    m_parser.addOption(m_verifyPluginOption);
 }
 
 /** @brief Synchronizes `m_options` after `m_parser.parse()` or `m_parser.process()`. */
@@ -72,6 +74,7 @@ void CliParser::syncParsedOptions(const QStringList& explicitProgramArgs, bool h
     m_options.verbose = isVerbose();
     m_options.headless = isHeadless();
     m_options.snapshotPath = snapshotFilePath();
+    m_options.verifyPluginPath = verifyPluginPath();
 }
 
 /**
@@ -106,16 +109,20 @@ bool CliParser::isTestMode() const { return m_parser.isSet(m_testModeOption); }
 /** @brief Returns `true` if `--verbose` was passed. */
 bool CliParser::isVerbose() const { return m_parser.isSet(m_verboseOption); }
 
-/** @brief Returns `true` if `--headless` or `--snapshot` was passed. */
+/** @brief Returns `true` if `--headless`, `--snapshot`, or `--verify-plugin` was passed. */
 bool CliParser::isHeadless() const {
-    return m_parser.isSet(m_headlessOption) || m_parser.isSet(m_snapshotOption);
+    return m_parser.isSet(m_headlessOption) || m_parser.isSet(m_snapshotOption) ||
+           m_parser.isSet(m_verifyPluginOption);
 }
 
 /** @brief Returns the output PNG path passed to `--snapshot <file>`. */
 QString CliParser::snapshotFilePath() const { return m_parser.value(m_snapshotOption); }
 
+/** @brief Returns the plugin binary path passed to `--verify-plugin <path>`. */
+QString CliParser::verifyPluginPath() const { return m_parser.value(m_verifyPluginOption); }
+
 /**
- * @brief Inspects raw `argv` prior to `QApplication` creation for `--headless` or `--snapshot`.
+ * @brief Inspects raw `argv` prior to `QApplication` creation for `--headless`, `--snapshot`, or `--verify-plugin`.
  */
 bool CliParser::shouldUseOffscreenPlatform(int argc, char* argv[]) {
     if (!argv) return false;
@@ -124,7 +131,8 @@ bool CliParser::shouldUseOffscreenPlatform(int argc, char* argv[]) {
         const QString arg = QString::fromLocal8Bit(argv[i]);
         if (arg == QLatin1String("--")) break;
         if (arg == QLatin1String("--headless") || arg == QLatin1String("--snapshot") ||
-            arg.startsWith(QLatin1String("--snapshot="))) {
+            arg.startsWith(QLatin1String("--snapshot=")) || arg == QLatin1String("--verify-plugin") ||
+            arg.startsWith(QLatin1String("--verify-plugin="))) {
             return true;
         }
     }

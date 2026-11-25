@@ -15,7 +15,7 @@ See also:
 flowchart LR
   subgraph HostProcess["GridLock Host Binary (-DGRIDLOCK_BUILDING_HOST, C++23 / Qt6)"]
     PM["PluginManager + PluginBindingContext"]
-    API["GridLockHostApi (296 B, 26 GRIDLOCK_CALL Pointers)"]
+    API["GridLockHostApi (312 B, 28 GRIDLOCK_CALL Pointers)"]
   end
 
   subgraph AbiBoundary["Frozen C99 Binary Boundary (include/gridlock/plugin_api.h)"]
@@ -44,13 +44,13 @@ flowchart LR
 | Rule | Macro / Mechanism | Enforcement & Rationale |
 | :--- | :--- | :--- |
 | **Major / Minor Version Numbers** | `GRIDLOCK_PLUGIN_ABI_MAJOR = 1u`<br>`GRIDLOCK_PLUGIN_ABI_MINOR = 0u` | Host rejects any plugin whose `desc.abi_major != 1u`. Minor increments (`1.1`, `1.2`) only append fields or consume `reserved[]` slots without shifting existing offsets. |
-| **Single Exported Entry Symbol** | `GRIDLOCK_PLUGIN_INIT_SYMBOL_V1`<br>(`"gridlock_plugin_init_v1"`) | Plugins compile with `-fvisibility=hidden` (and `-fvisibility-inlines-hidden` in C++) so internal symbols never collide across loaded `.so`/`.dylib`/`.dll` modules. |
+| **Single Exported Entry Symbol** | `GRIDLOCK_PLUGIN_INIT_SYMBOL_V1`<br>(`"gridlock_plugin_init_v1"`) | Plugins compile with `-fvisibility=hidden` (plus `-fvisibility-inlines-hidden` and `-Wl,--version-script` in C++) so internal and `STB_GNU_UNIQUE` symbols never leak or pin `.so` handles across `dlclose()`. |
 | **Calling Convention** | `GRIDLOCK_CALL` | Expands to `__cdecl` on `_WIN32` and empty on POSIX, preventing stack corruption when Windows plugins are compiled with `/Gz` (`__stdcall`). |
 | **Symbol Export Gating** | `GRIDLOCK_PLUGIN_EXPORT` | Expands to `__declspec(dllexport)` on `_WIN32` **only** when `GRIDLOCK_BUILDING_HOST` is undefined, and `__attribute__((visibility("default")))` on GCC/Clang. Host builds pass `-DGRIDLOCK_BUILDING_HOST`. |
-| **16-Byte Versioned Header at Offset `0`** | `struct_size`, `abi_major`, `abi_minor`, `reserved_flags` (`4 x uint32_t`) | Present at byte offset `0..15` of all 7 ABI structs (`reserved_flags` must be `0u`). Validated prior to dereferencing trailing fields (`struct_size >= offsetof(Type, reserved)`). |
-| **Tail Expansion Padding (`64 B`)** | `void* reserved[8]` | Zero-initialized tail array on both `GridLockHostApi` and `GridLockPluginDescriptor`, permitting minor v1.x extensions without changing base struct sizes if desired, or growing `struct_size` monotonically. |
+| **16-Byte Versioned Header at Offset `0`** | `struct_size`, `abi_major`, `abi_minor`, `reserved_flags` (`4 x uint32_t`) | Present at byte offset `0..15` of all 9 ABI structs (`reserved_flags` must be `0u`). Validated prior to dereferencing trailing fields (`struct_size >= offsetof(Type, reserved)`). |
+| **Tail Expansion Padding (`64 B`)** | `void* reserved[8]` | Zero-initialized tail array on both `GridLockHostApi` and `GridLockPluginDescriptor`, permitting minor v1.x extensions without shifting existing callback slots. |
 | **Caller-Owned Buffer Sizing** | `(char* out_utf8, size_t cap, size_t* out_len)` | Used by `eval_expr` and `prompt_input`. `*out_len` always receives the UTF-8 byte length **excluding** the trailing NUL; when `out_utf8 == NULL` or `cap <= *out_len`, returns `GRIDLOCK_ERR_BUFFER_TOO_SMALL` (`-3`) so the caller can allocate `*out_len + 1` bytes and retry. |
-| **Symmetric Host Heap** | `alloc_bytes` / `free_bytes` | Cross-CRT heap allocations obtained from `host->alloc_bytes` must be released exclusively via `host->free_bytes`, never via the plugin's own `free()` or `delete`. |
+| **Symmetric Host Heap** | `alloc_bytes` / `free_bytes` | Cross-CRT heap allocations obtained from `host->alloc_bytes` must be released exclusively via `host->free_bytes`, never via the plugin's own `free()` or `delete`. Verified by `PluginVerifier` (`outstandingAllocBytes() == 0`). |
 | **Pointer Storage Duration** | Descriptor vs. Callback Structs | Strings on `GridLockPluginDescriptor` (`plugin_id_utf8`, `plugin_name_utf8`, `plugin_version_utf8`, `description_utf8`) are plugin-owned and must remain valid until `shutdown` returns. Strings on `GridLockStopInfo`, `GridLockVariableContext`, `GridLockCommandSpec`, and `GridLockSurfaceContext` are host-owned borrows valid **only** until that callback returns. |
 | **Zero Exceptions Across ABI** | `extern "C"` + `noexcept` | Neither host callbacks nor plugin callbacks may propagate C++ exceptions or `longjmp` across the C99 boundary. |
 
@@ -58,13 +58,13 @@ flowchart LR
 
 ## 2. Exact Struct Layouts & 64-Bit Byte Offsets (`LP64` / `LLP64`)
 
-All seven structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_copyable_v<T>` with zero implicit compiler padding on 64-bit targets (`sizeof(void*) == 8`, `sizeof(size_t) == 8`).
+All nine structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_copyable_v<T>` with zero implicit compiler padding on 64-bit targets (`sizeof(void*) == 8`, `sizeof(size_t) == 8`).
 
-### 2.1 `GridLockHostApi` (`sizeof == 296` bytes)
+### 2.1 `GridLockHostApi` (`sizeof == 312` bytes)
 
 | Offset (64-bit) | Size | C Type | Field Name | Contract / Validation Rule |
 | :---: | :---: | :--- | :--- | :--- |
-| `0` | `4 B` | `uint32_t` | `struct_size` | `sizeof(GridLockHostApi)` (`296` in v1.0; plugins verify `>= 232`). |
+| `0` | `4 B` | `uint32_t` | `struct_size` | `sizeof(GridLockHostApi)` (`312` in v1.0; plugins verify `>= 248`). |
 | `4` | `4 B` | `uint32_t` | `abi_major` | `GRIDLOCK_PLUGIN_ABI_MAJOR` (`1u`). |
 | `8` | `4 B` | `uint32_t` | `abi_minor` | `GRIDLOCK_PLUGIN_ABI_MINOR` (`0u`). |
 | `12` | `4 B` | `uint32_t` | `reserved_flags` | Must be `0u` in ABI v1.0. |
@@ -74,7 +74,7 @@ All seven structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_
 | `40` | `8 B` | `GridLockLogMessageFn` | `log_message` | Emits bounded (`<= 16 KiB`) UTF-8 diagnostic log entry. |
 | `48` | `8 B` | `GridLockGetRankCountFn` | `get_rank_count` | Writes active session MPI rank count (`0` when idle). |
 | `56` | `8 B` | `GridLockGetActiveRankFn` | `get_active_rank` | Writes currently focused zero-based rank index. |
-| `64` | `8 B` | `GridLockEvalExprFn` | `eval_expr` | Evaluates C/C++ expression on stopped `rank` into `out_utf8`. |
+| `64` | `8 B` | `GridLockEvalExprFn` | `eval_expr` | Evaluates C/C++ expression on stopped `rank` via private silent MI tokens. |
 | `72` | `8 B` | `GridLockReadMemoryFn` | `read_memory` | Reads up to `64 MiB` from target `address` on stopped `rank`. |
 | `80` | `8 B` | `GridLockWriteMemoryFn` | `write_memory` | Writes up to `16 MiB` to target `address` on stopped `rank`. |
 | `88` | `8 B` | `GridLockSetBreakpointFn` | `set_breakpoint` | Installs source breakpoint at `file_utf8:line` (optional condition). |
@@ -95,7 +95,9 @@ All seven structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_
 | `208` | `8 B` | `GridLockGetThemeInfoFn` | `get_theme_info` | Populates `GridLockThemeInfo` (`212 B`) from `ThemeManager`. |
 | `216` | `8 B` | `GridLockPublishReportViewFn` | `publish_report_view` | Opens/updates tab in `PluginReportDockWidget`. |
 | `224` | `8 B` | `GridLockCloseReportViewFn` | `close_report_view` | Closes report tab owned by calling plugin. |
-| `232` | `64 B` | `void*[8]` | `reserved` | Zero-initialized future minor-ABI expansion slots. |
+| `232` | `8 B` | `GridLockQueryTypeInfoFn` | `query_type_info` | Zero-call DWARF/MI type & `sizeof` query into `GridLockTypeInfo` (`288 B`). |
+| `240` | `8 B` | `GridLockResolveContiguousRangeFn` | `resolve_contiguous_range` | Zero-call contiguous buffer resolution into `GridLockContiguousRange` (`424 B`). |
+| `248` | `64 B` | `void*[8]` | `reserved` | Zero-initialized future minor-ABI expansion slots. |
 
 ### 2.2 `GridLockPluginDescriptor` (`sizeof == 160` bytes)
 
@@ -107,7 +109,7 @@ All seven structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_
 | `12` | `4 B` | `uint32_t` | `reserved_flags` | Must be `0u`. |
 | `16` | `8 B` | `const char*` | `plugin_id_utf8` | **Required**, non-empty globally unique ID; valid until `shutdown` returns. |
 | `24` | `8 B` | `const char*` | `plugin_name_utf8` | **Required**, non-empty display title; valid until `shutdown` returns. |
-| `32` | `8 B` | `const char*` | `plugin_version_utf8` | Optional `"X.Y.Z"` version string (`NULL` permitted). |
+| `32` | `8 B` | `const char*` | `plugin_version_utf8` | `"X.Y.Z"` version string (required non-empty by `PluginVerifier`). |
 | `40` | `8 B` | `const char*` | `description_utf8` | Optional summary string (`NULL` permitted). |
 | `48` | `8 B` | `void*` | `plugin_ctx` | Optional plugin-owned state pointer passed to lifecycle hooks. |
 | `56` | `8 B` | `GridLockSessionStartCallback` | `on_session_start` | Optional hook invoked with `(plugin_ctx, host, rank_count)`. |
@@ -158,8 +160,8 @@ All seven structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_
 | `32` | `4 B` | `int32_t` | `column` | One-based source column number, or `-1` if not applicable. |
 | `36` | `4 B` | `int32_t` | `bp_id` | Breakpoint ID on `GRIDLOCK_SURFACE_BREAKPOINTS`, or `-1`. |
 | `40` | `8 B` | `uint64_t` | `address` | Associated virtual address (variable, PC, or line address), or `0`. |
-| `48` | `8 B` | `const char*` | `symbol_utf8` | Ephemeral expression, cursor token, or frame function symbol, or `NULL`. |
-| `56` | `8 B` | `const char*` | `type_utf8` | Ephemeral variable type or rank state string, or `NULL`. |
+| `48` | `8 B` | `const char*` | `symbol_utf8` | Ephemeral expression, cursor variable token, or frame function symbol, or `NULL`. |
+| `56` | `8 B` | `const char*` | `type_utf8` | Ephemeral DWARF variable type (Surfaces 1 & 2) or rank state (Surface 5), or `NULL`. |
 | `64` | `8 B` | `const char*` | `file_utf8` | Ephemeral resolved source file path, or `NULL`. |
 | `72` | `8 B` | `const char*` | `selected_text_utf8` | Ephemeral highlighted editor text, variable value, or rank state, or `NULL`. |
 
@@ -191,6 +193,27 @@ All seven structs satisfy `std::is_standard_layout_v<T>` and `std::is_trivially_
 | `180` | `16 B` | `char[16]` | `warning_hex` | Semantic warning color `#RRGGBB`. |
 | `196` | `16 B` | `char[16]` | `error_hex` | Semantic error/fault color `#RRGGBB`. |
 
+### 2.8 `GridLockTypeInfo` (`sizeof == 288` bytes)
+
+| Offset (64-bit) | Size | C Type | Field Name | Contract / Validation Rule |
+| :---: | :---: | :--- | :--- | :--- |
+| `0..15` | `16 B` | `uint32_t[4]` | `struct_size`, `abi_major`, `abi_minor`, `reserved_flags` | Caller sets `struct_size = sizeof(GridLockTypeInfo)` (`288`) or `0`; `< 288` (non-zero) returns `GRIDLOCK_ERR_ABI_MISMATCH`. |
+| `16` | `8 B` | `uint64_t` | `byte_size` | Static `sizeof(<expr>)` in target memory bytes. |
+| `24` | `4 B` | `int32_t` | `is_pointer` | `1` when stripped DWARF type is a raw/function/array pointer, else `0`. |
+| `28` | `4 B` | `int32_t` | `is_contiguous_container` | `1` for `T[N]`, `std::array`, `std::vector` (non-`bool`), `std::span`, or `std::valarray`, else `0`. |
+| `32` | `256 B` | `char[256]` | `type_name_utf8` | NUL-terminated DWARF type string resolved via temporary MI `-var-create`. |
+
+### 2.9 `GridLockContiguousRange` (`sizeof == 424` bytes)
+
+| Offset (64-bit) | Size | C Type | Field Name | Contract / Validation Rule |
+| :---: | :---: | :--- | :--- | :--- |
+| `0..15` | `16 B` | `uint32_t[4]` | `struct_size`, `abi_major`, `abi_minor`, `reserved_flags` | Caller sets `struct_size = sizeof(GridLockContiguousRange)` (`424`) or `0`; `< 424` (non-zero) returns `GRIDLOCK_ERR_ABI_MISMATCH`. |
+| `16` | `8 B` | `uint64_t` | `data_address` | Base virtual address of element `0` in target memory (`0` if empty). |
+| `24` | `8 B` | `uint64_t` | `element_count` | Number of contiguous elements currently stored. |
+| `32` | `8 B` | `uint64_t` | `element_size` | `sizeof(element_type)` in bytes (`> 0`). |
+| `40` | `128 B` | `char[128]` | `element_type_utf8` | NUL-terminated element C/C++ type name (for example `"double"`). |
+| `168` | `256 B` | `char[256]` | `container_type_utf8` | NUL-terminated outer container DWARF type name. |
+
 ---
 
 ## 3. Complete Enumeration Tables (`int32_t`)
@@ -202,14 +225,14 @@ Every ABI enum typedef (`GridLockStatus`, `GridLockLogLevel`, `GridLockDialogSev
 | Constant | Value | Meaning |
 | :--- | :---: | :--- |
 | `GRIDLOCK_OK` | `0` | Operation completed cleanly. |
-| `GRIDLOCK_ERR_INVALID_ARG` | `-1` | Null pointer, control character, invalid enum, regex `> 512 B`, quota exceeded, or address wraparound. |
+| `GRIDLOCK_ERR_INVALID_ARG` | `-1` | Null pointer, control character, unsafe MI input, invalid enum, regex `> 512 B`, quota exceeded, or address wraparound. |
 | `GRIDLOCK_ERR_ABI_MISMATCH` | `-2` | Incompatible `abi_major` or undersized `struct_size`. |
 | `GRIDLOCK_ERR_BUFFER_TOO_SMALL` | `-3` | Caller `cap` is `<= *out_len` (or `allocHostBytes` OOM); `*out_len` contains required payload bytes. |
 | `GRIDLOCK_ERR_NOT_STOPPED` | `-4` | Target rank is running/exited, no coordinator is bound, or target resumed mid-query. |
 | `GRIDLOCK_ERR_INVALID_RANK` | `-5` | `rank < 0` or `rank >= getProcessCount()`. |
-| `GRIDLOCK_ERR_EVAL_FAILED` | `-6` | GDB/MI expression evaluation returned an error. |
+| `GRIDLOCK_ERR_EVAL_FAILED` | `-6` | GDB/MI expression or DWARF type resolution returned an error. |
 | `GRIDLOCK_ERR_MEMORY_READ_FAILED` | `-7` | Target memory read or write failed (unmapped address, ptrace/MI fault, or partial POD read). |
-| `GRIDLOCK_ERR_UNSUPPORTED` | `-8` | Disallowed during `shutdown()`, unhandled UI signal in headless mode without mock, or caught exception. |
+| `GRIDLOCK_ERR_UNSUPPORTED` | `-8` | Disallowed during `shutdown()`, non-contiguous type in `resolve_contiguous_range`, unhandled headless UI signal, or caught exception. |
 | `GRIDLOCK_ERR_TIMEOUT` | `-9` | Coordinator MI request exceeded `requestTimeoutMs()` (`2500 ms` default). |
 | `GRIDLOCK_ERR_CANCELLED` | `-10` | User dismissed or clicked **Cancel** in `prompt_input`. |
 
@@ -244,7 +267,7 @@ Every ABI enum typedef (`GridLockStatus`, `GridLockLogLevel`, `GridLockDialogSev
 
 ---
 
-## 4. Complete `GridLockHostApi` Function-Pointer Reference (All 26 Callbacks)
+## 4. Complete `GridLockHostApi` Function-Pointer Reference (All 28 Callbacks)
 
 | # | Field | Parameters (after `void* host_ctx`) | Threading & Marshaling | Caps & Error Codes |
 | :---: | :--- | :--- | :--- | :--- |
@@ -253,7 +276,7 @@ Every ABI enum typedef (`GridLockStatus`, `GridLockLogLevel`, `GridLockDialogSev
 | 3 | `log_message` | `GridLockLogLevel level, const char* utf8_msg` | Any thread (queued Qt signal). | `utf8_msg` truncated at `16 KiB`; `-1` on null/bad `level`. |
 | 4 | `get_rank_count` | `int32_t* out_ranks` | Marshals via `runOnObjectThread`. | Writes `0` when no coordinator is active; `-1` if `out_ranks == NULL`. |
 | 5 | `get_active_rank` | `int32_t* out_rank` | Any thread (`m_mutex`). | `-1` if `out_rank == NULL`. |
-| 6 | `eval_expr` | `int32_t rank, const char* expr_utf8, char* out_utf8, size_t cap, size_t* out_len` | Marshals via `runOnObjectThread` + `CoordinatorReplyWaiter`. | Returns `0`, `-1`, `-3` (`BUFFER_TOO_SMALL`), `-4` (`NOT_STOPPED`), `-5` (`INVALID_RANK`), `-6` (`EVAL_FAILED`), `-9` (`TIMEOUT`). |
+| 6 | `eval_expr` | `int32_t rank, const char* expr_utf8, char* out_utf8, size_t cap, size_t* out_len` | `runOnObjectThread` + silent `pluginExpressionReady` MI channel. | Never pollutes Evaluator history; returns `0`, `-1`, `-3`, `-4`, `-5`, `-6`, `-9`. |
 | 7 | `read_memory` | `int32_t rank, uint64_t address, void* out_bytes, size_t num_bytes, size_t* out_read` | `runOnObjectThread`; tries Linux `process_vm_readv` then `64 KiB` MI chunks. | `num_bytes <= 64 MiB`; returns `0`, `-1`, `-4`, `-5`, `-7` (`MEMORY_READ_FAILED`), `-9`. |
 | 8 | `write_memory` | `int32_t rank, uint64_t address, const void* in_bytes, size_t num_bytes, size_t* out_written` | `runOnObjectThread`; `16 KiB` tokenized `-data-write-memory-bytes` chunks. | `num_bytes <= 16 MiB`; returns `0`, `-1`, `-4`, `-5`, `-7`, `-9`. |
 | 9 | `set_breakpoint` | `const char* file_utf8, int32_t line, const char* condition_utf8, int32_t* out_bp_id` | `runOnObjectThread`; staged during init, auto-removed on unload. | Rejects control chars & MI injection (`-1`), `-8` during `shutdown()`. |
@@ -274,6 +297,8 @@ Every ABI enum typedef (`GridLockStatus`, `GridLockLogLevel`, `GridLockDialogSev
 | 24 | `get_theme_info` | `GridLockThemeInfo* out_theme` | Marshals to GUI thread (`runOnGuiThread`). | `-1` if `NULL`, `-2` (`ABI_MISMATCH`) if `0 < struct_size < 212`, `-8` in `shutdown()`. |
 | 25 | `publish_report_view` | `panel_id, title_utf8, GridLockReportFormat format, content_utf8` | Any thread (`m_mutex`); staged during init. | `panel_id/title <= 256 B`, `format` in `1..3`, `content <= 1 MiB`; `-1` on foreign `panel_id`, `-8` in `shutdown()`. |
 | 26 | `close_report_view` | `const char* panel_id` | Any thread (`m_mutex`). | Closes owned `panel_id` tab in `PluginReportDockWidget`. |
+| 27 | `query_type_info` | `int32_t rank, const char* expr_utf8, GridLockTypeInfo* out_info` | `runOnObjectThread`; temporary MI `-var-create` + `sizeof` (zero inferior calls). | Returns `0`, `-1`, `-2` (`struct_size < 288`), `-4`, `-5`, `-6`, `-9`. |
+| 28 | `resolve_contiguous_range` | `int32_t rank, const char* expr_utf8, GridLockContiguousRange* out_range` | `runOnObjectThread`; zero-call DWARF/MI member inspection (`libstdc++` & `libc++`). | Supports `T[N]`, `std::array`, `std::vector`, `std::span`, `std::valarray`; `-8` if non-contiguous. |
 
 ---
 
@@ -285,44 +310,44 @@ All symbols reside in `namespace gridlock::plugin` (`<expected>`, `<span>`, `<me
 | :--- | :--- | :--- |
 | `kMaxEvalExprBytes` | `inline constexpr size_t = 16 * 1024 * 1024` | `16 MiB` ceiling preventing OOM or `SIZE_MAX + 1` integer overflow on dynamic string retries. |
 | `HostDeleter` / `HostByteBuffer` | `std::unique_ptr<std::byte[], HostDeleter>` | RAII handle releasing `host->alloc_bytes` memory via `host->free_bytes(host->host_ctx, ptr)`. Must be destroyed **before** `shutdown` returns while `host` remains valid. |
-| `validateHostAbi` | `constexpr GridLockStatus(const GridLockHostApi* host) noexcept` | Verifies `host != nullptr`, `host->abi_major == 1u`, and `host->struct_size >= offsetof(GridLockHostApi, reserved)` (accepts v1.1+ extended tables). |
+| `validateHostAbi` | `constexpr GridLockStatus(const GridLockHostApi* host) noexcept` | Verifies `host != nullptr`, `host->abi_major == 1u`, and `host->struct_size >= offsetof(GridLockHostApi, reserved)` (`248` bytes). |
 | `initPluginDescriptorHeader` | `constexpr GridLockStatus(GridLockPluginDescriptor* outDesc) noexcept` | Rejects `0 < outDesc->struct_size < sizeof(GridLockPluginDescriptor)`, zeroes `*outDesc`, and stamps `struct_size = 160`, `abi_major = 1`, `abi_minor = 0`. |
 | `allocHostBytes` | `std::expected<HostByteBuffer, GridLockStatus>(host, size_t numBytes) noexcept` | Wraps `alloc_bytes` in `HostByteBuffer`; returns `GRIDLOCK_ERR_BUFFER_TOO_SMALL` on OOM. |
 | `evalExpr` | `std::expected<std::string, GridLockStatus>(host, int32_t rank, std::string_view expr) noexcept` | Probes with a `256 B` stack `std::array`, retrying once with `std::vector<char>(outLen + 1)` if `outLen < 16 MiB`. Catches `std::bad_alloc` internally. |
 | `promptInput` | `std::expected<std::string, GridLockStatus>(host, title, label, defaultVal = {}) noexcept` | Same `256 B` stack probe + `< 16 MiB` heap retry protocol paired with `PluginHostBridge`'s `CachedPromptReply`; returns `std::unexpected(GRIDLOCK_ERR_CANCELLED)` on user cancel. |
 | `getThemeInfo` | `std::expected<GridLockThemeInfo, GridLockStatus>(const GridLockHostApi* host) noexcept` | Initializes `GridLockThemeInfo` header (`212 B`) and invokes `host->get_theme_info`. |
+| `queryTypeInfo` | `std::expected<GridLockTypeInfo, GridLockStatus>(host, int32_t rank, std::string_view expr) noexcept` | Initializes `GridLockTypeInfo` (`288 B`), null-terminates `expr` safely, and invokes `host->query_type_info` with zero inferior function calls. |
+| `resolveContiguousRange` | `std::expected<GridLockContiguousRange, GridLockStatus>(host, int32_t rank, std::string_view expr) noexcept` | Initializes `GridLockContiguousRange` (`424 B`) and resolves `(data_address, element_count, element_size, element_type_utf8)` across `libstdc++` and `libc++` contiguous containers. |
 | `readBytes` | `std::expected<size_t, GridLockStatus>(host, int32_t rank, uint64_t addr, std::span<std::byte> out) noexcept` | Reads `out.size()` bytes into caller span (`0` bytes returns `0u` immediately). |
 | `readPod<T>` | `std::expected<T, GridLockStatus>(host, int32_t rank, uint64_t addr) noexcept` | Constrained by C++20 `requires`: `std::is_trivially_copyable_v<T>`, non-`const`, **not `bool`**, **not a pointer**, **not a member pointer**, and `sizeof(T) > 0`. Rejects short reads (`*bytesRes != sizeof(T)`) with `GRIDLOCK_ERR_MEMORY_READ_FAILED` and reconstructs `T` via `std::bit_cast<T>` without strict-aliasing UB. |
 
-### `noexcept` C++23 Callback Boundary Pattern
+### `noexcept` C++23 Zero-Call Contiguous Container Read Pattern
 
 ```cpp
 #include "gridlock/plugin_api.h"
 #include "gridlock/plugin_cpp_helpers.hpp"
+#include <vector>
 
 namespace gp = gridlock::plugin;
 
-struct SolverHeaderPod {
-  uint64_t values_addr;
-  uint32_t rows;
-  uint32_t cols;
-};
-
-static GridLockStatus GRIDLOCK_CALL onInspectMatrix(
+static GridLockStatus GRIDLOCK_CALL onInspectVector(
     void* /*pluginCtx*/,
     const GridLockHostApi* host,
-    const GridLockVariableContext* varCtx) noexcept {
+    const GridLockSurfaceContext* ctx) noexcept {
   try {
-    if (!host || !varCtx || varCtx->address == 0u) return GRIDLOCK_ERR_INVALID_ARG;
+    if (!host || !ctx || !ctx->symbol_utf8) return GRIDLOCK_ERR_INVALID_ARG;
 
-    const auto hdr = gp::readPod<SolverHeaderPod>(host, varCtx->rank, varCtx->address);
-    if (!hdr) return hdr.error();
+    const auto rng = gp::resolveContiguousRange(host, ctx->rank, ctx->symbol_utf8);
+    if (!rng) return rng.error();
+    if (rng->element_size != sizeof(double) || rng->element_count == 0u) return GRIDLOCK_OK;
 
-    const auto tag = gp::promptInput(host, "Matrix Snapshot", "Snapshot label:", "iter_0");
-    if (!tag) return tag.error();  // Propagates GRIDLOCK_ERR_CANCELLED cleanly
+    std::vector<double> values(static_cast<size_t>(rng->element_count));
+    const auto got = gp::readBytes(host, ctx->rank, rng->data_address,
+                                   std::as_writable_bytes(std::span{values}));
+    if (!got) return got.error();
 
     return host->show_toast(host->host_ctx, GRIDLOCK_DIALOG_INFO,
-                            "Matrix Read", tag->c_str(), 3000);
+                            "Contiguous Buffer Read", rng->container_type_utf8, 3000);
   } catch (...) {
     return GRIDLOCK_ERR_UNSUPPORTED;
   }

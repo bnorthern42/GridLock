@@ -9,7 +9,7 @@ Plugins extend GridLock with custom inspection tools, solver-specific visualizat
 GridLock uses a decentralized distribution model so teams and scientific computing communities can publish plugins on any Git server:
 
 * **`gridlock-plugin` Repository Topic**: Browse community extensions tagged with `gridlock-plugin` on GitHub (`https://github.com/topics/gridlock-plugin`), GitLab, Codeberg, or institutional Gitea instances.
-* **Curated `awesome-gridlock` Lists**: Community-maintained `awesome-gridlock` indexes catalog plugins by scientific domain (for example, PETSc/Trilinos vector and matrix viewers, Kokkos field inspectors, mesh refinement exporters, and MPI rank health monitors).
+* **Curated `awesome-gridlock` Lists**: Community-maintained `awesome-gridlock` indexes catalog plugins by scientific domain (for example, PETSc/Trilinos vector and matrix viewers, Kokkos field inspectors, STL container viewers, mesh refinement exporters, and MPI rank health monitors).
 * **Supported Git Hosts**:
   * **GitHub (`github.com`)**: Shorthand `owner/repo` or `github:owner/repo`
   * **GitLab (`gitlab.com`)**: Shorthand `owner/repo`, nested subgroups `group/subgroup/repo`, or `gitlab:group/subgroup/repo`
@@ -20,7 +20,7 @@ GridLock uses a decentralized distribution model so teams and scientific computi
 
 ## 2. Installing Plugins via Preferences
 
-To clone, build, and install a plugin from source inside GridLock:
+To clone, build, verify, and install a plugin from source inside GridLock:
 
 1. Open **Edit -> Preferences** (or press `Ctrl+,`) and select **Plugins** in the left category tree.
 2. Switch to the **Install from Git** tab.
@@ -36,10 +36,10 @@ To clone, build, and install a plugin from source inside GridLock:
 6. Select the target **Install Scope**:
    * **Global (`~/.config/gridlock/plugins`)**: Makes the plugin available across all projects for your user account.
    * **This Workspace (`<workspace>/.gridlock/plugins`)**: Installs the plugin only for the currently open project folder and automatically records trust approval for the built binary.
-7. Click **Clone & Build** (click **Cancel Build** at any time to abort).
-   * GridLock clones the repository into an isolated temporary folder, detects the project build file (`meson.build`, `CMakeLists.txt`, `Makefile`, or standalone source), and streams live build progress into the diagnostics log.
+7. Click **Install** (which switches to **Cancel** while a build is running).
+   * GridLock clones the repository into an isolated temporary folder, detects the project build file (`meson.build`, `CMakeLists.txt`, `Makefile`, or standalone source), compiles the plugin, and automatically runs a sandboxed post-build verification check before completing installation.
    * Warning lines are highlighted in amber, and errors are highlighted in red, with a summary count displayed above the log.
-8. When installation succeeds, click **Restart GridLock to Load Installed Plugin** (or **Restart GridLock Now** on the banner). GridLock saves your open workspace and preferences, relaunches automatically, and activates the new plugin.
+8. When installation succeeds, click **Hot-Reload Now** on the banner to activate the plugin immediately without closing your open workspace or active paused MPI debug session, or click **Restart GridLock Now** for a full application restart.
 
 ---
 
@@ -93,21 +93,27 @@ enabled = false
 ### Editing, Syncing & Lockfile Pinning
 
 * **Open `plugins.toml`**: In **Preferences -> Plugins -> Install from Git**, select **Global** or **This Workspace** and click **Open `plugins.toml`**. GridLock creates a starter template if the file does not exist yet and opens it directly in the editor.
-* **Automatic Recording**: Installing a plugin via **Clone & Build** automatically adds or updates its `[[plugins]]` entry in the selected scope's `plugins.toml`.
-* **Sync `plugins.toml`**: Clicking **Sync `plugins.toml`** checks every enabled entry against `~/.config/gridlock/plugins-lock.toml` and remote Git commits, builds only missing or outdated plugins sequentially, and shows the **Restart GridLock Now** banner only when new or updated binaries were built.
+* **Automatic Recording**: Installing a plugin via **Install** automatically adds or updates its `[[plugins]]` entry in the selected scope's `plugins.toml`.
+* **Sync `plugins.toml`**: Clicking **Sync `plugins.toml`** checks every enabled entry against `~/.config/gridlock/plugins-lock.toml` and remote Git commits, builds and verifies only missing or outdated plugins sequentially, and shows the **Hot-Reload Now** / **Restart GridLock Now** banner when new or updated binaries were built.
 * **User-Global `plugins-lock.toml`**: GridLock writes exact resolved commit hashes (`commit_sha`) and binary `SHA-256` checksums (`binary_sha256`) exclusively to `~/.config/gridlock/plugins-lock.toml`. Lock data is never read from a project directory.
 
 ---
 
-## 4. Managing Installed Plugins: Global & Workspace Checkboxes
+## 4. Managing, Updating & Hot-Reloading Installed Plugins
 
-The **Preferences -> Plugins -> Installed** tab displays every discovered plugin in a 7-column table: **Global**, **Workspace**, **Name**, **Version**, **Scope / ABI**, **Status**, and **Trust**.
+The **Preferences -> Plugins -> Installed** tab displays every discovered plugin in an 8-column table: **Global**, **Workspace**, **Name**, **Version** (showing `<version> (<short_commit>)` with a full provenance tooltip), **Scope / ABI**, **Status**, **Trust**, and **Update**.
+
+### In-Place Updates & Live Hot-Reload
+
+* **Per-Plugin `Update` & Toolbar `Update All`**: Click **Update** on an individual Git-installed plugin row or **Update All** in the toolbar to re-clone, rebuild, and verify the latest upstream revision in its existing scope.
+* **Hot-Reload Now**: After installing, updating, syncing `plugins.toml`, or applying checkbox/trust changes, click **Hot-Reload Now** on the notification banner (available in both **Preferences -> Plugins** and the main window status bar). GridLock unloads previous plugin handles, loads the updated binaries from disk, refreshes menus, status badges, and report panels, and keeps any active paused MPI debug session intact.
+* **When a Full Restart Is Required**: On Linux, certain C++ plugins compiled without a linker version script export pinned symbols that the system loader keeps in memory until the application exits. If GridLock detects those symbols during **Hot-Reload Now**, it displays an inline notice advising you to click **Restart GridLock Now** so the new binary is loaded cleanly.
 
 ### Staged Edits (`Apply` vs `Cancel`)
 
 * Toggling **Global**, **Workspace**, or **Trust & Approve** stages your changes in memory and updates the **Status** preview (`Staged: ... (Apply to save)`) without modifying configuration files immediately.
 * Clicking **Cancel** discards all staged changes.
-* Clicking **Apply** or **OK** saves your changes to `~/.config/gridlock/config.toml` and displays the **Restart GridLock Now** banner in both the Preferences window and the main window status bar.
+* Clicking **Apply** or **OK** saves your changes to `~/.config/gridlock/config.toml` and displays the **Hot-Reload Now** / **Restart GridLock Now** banner.
 
 ### Effective Enablement Matrix
 
@@ -132,7 +138,7 @@ Switching projects via **File -> Open Workspace / Folder** automatically re-eval
 Opening an untrusted repository downloaded from the internet must never execute arbitrary code hidden inside `<workspace>/.gridlock/plugins/` or `<workspace>/.gridlock/plugins.toml`. GridLock enforces three safeguards:
 
 1. **Zero Automatic Execution**: Untrusted shared libraries inside `<workspace>/.gridlock/plugins/` are never loaded into memory until you explicitly approve them. Similarly, `<workspace>/.gridlock/plugins.toml` is never built automatically when opening a folder; it runs only when you explicitly select **This Workspace** and click **Sync `plugins.toml`**.
-2. **User-Owned Trust Registry (`config.toml`)**: When you click **Trust & Approve (<sha8>)** and **Apply** (or build a workspace plugin yourself via **Clone & Build** / **Sync `plugins.toml`**), GridLock stores the canonical file path and `SHA-256` fingerprint in your personal `~/.config/gridlock/config.toml` under `[plugins.trusted_workspace_binaries]`.
+2. **User-Owned Trust Registry (`config.toml`)**: When you click **Trust & Approve (<sha8>)** and **Apply** (or build a workspace plugin yourself via **Install** / **Sync `plugins.toml`**), GridLock stores the canonical file path and `SHA-256` fingerprint in your personal `~/.config/gridlock/config.toml` under `[plugins.trusted_workspace_binaries]`.
 3. **Automatic Tamper Detection**: Before loading any workspace plugin at startup, GridLock recomputes its `SHA-256` checksum. If a binary is replaced, rebuilt outside GridLock, or modified by even a single byte, the checksum no longer matches `[plugins.trusted_workspace_binaries]` and GridLock blocks the binary until you review and approve the new fingerprint.
 
 ---
@@ -143,35 +149,47 @@ Depending on what a plugin provides, its features integrate into six areas of th
 
 * **Tools -> Plugins Menu**: Top-level commands and nested submenus (for example, **Tools -> Plugins -> Mesh Tools -> Refinement -> Export VTK**). Built-in GridLock keyboard shortcuts always take precedence if a plugin suggests a conflicting keybinding.
 * **Right-Click `Plugin Actions` Menus**: Context-sensitive actions appear under **Plugin Actions** when right-clicking rows or lines in:
-  * **Variables** dock (matched against variable C/C++ types such as `PetscVec` or `Kokkos::View<double**>`)
-  * **Source Editor** (current line and selected text)
+  * **Variables** dock (matched against variable C/C++ types such as `PetscVec`, `std::vector<double>`, or `Kokkos::View<double**>`)
+  * **Source Editor** (matched against the variable token under the cursor, its resolved type when paused, or selected text, without triggering on function calls)
   * **Breakpoint Gutter** (right-clicking the editor line-number margin)
   * **Call Stack** dock (stack frames)
   * **Server Rack / Rank List** view (individual MPI ranks)
 * **Status-Bar Badges**: Clickable status pills on the bottom status bar displaying live metrics or quick-trigger actions.
 * **Inline Source Annotations**: Colored line highlights, inline pill badges, and hover tooltips inside the source editor.
-* **Plugin Reports Dock**: Structured tabs displaying Markdown summaries, two-column key-value tables, or expandable JSON trees.
+* **Plugin Reports Dock**: Structured tabs displaying Markdown summaries, two-column key-value tables, or expandable JSON trees. Plugins can also inspect standard C/C++ contiguous arrays and containers (`std::vector`, `std::array`, `std::span`, `std::valarray`) silently without cluttering the **Evaluator** tab.
 
 ---
 
-## 7. Manual Plugin Placement & Troubleshooting
+## 7. Command-Line Verification, Manual Placement & Troubleshooting
+
+### Verifying a Plugin File from the Terminal (`--verify-plugin`)
+
+Before copying a pre-compiled plugin into a plugin folder or publishing a release in CI, you can run GridLock's isolated plugin checker from the command line:
+
+```bash
+gridlock --verify-plugin /path/to/libmy_plugin.so
+```
+
+This command checks the plugin inside an isolated sandbox without opening a window or touching your personal configuration, prints a `PASS` or `FAIL` summary with any warnings or errors, and exits with code `0` on pass or `1` on failure.
+
+### Manual Plugin Placement
 
 To install a pre-compiled plugin manually (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows):
 
 1. Open **Preferences -> Plugins -> Installed**, choose the target folder in **Plugin Directories**, and click **Open Folder**.
 2. Copy the regular shared-library file into `~/.config/gridlock/plugins/` (Global) or `<workspace>/.gridlock/plugins/` (Workspace). Do not use symbolic links pointing outside the plugin directory, and ensure the file is not world-writable (`chmod 755` or `chmod 644`).
-3. Click **Reload Plugins** (and **Trust & Approve** -> **Apply** if placed inside a workspace folder).
+3. Click **Reload Plugins** (and **Trust & Approve** -> **Apply** -> **Hot-Reload Now** if placed inside a workspace folder).
 
 ### Status & Troubleshooting Reference
 
 | Status Shown in `Preferences -> Plugins` | Cause | Resolution |
 | :--- | :--- | :--- |
 | `Loaded` | Plugin passed verification and is active in the current session. | None required. |
-| `Disabled (Global)` | Unchecked in the **Global** column (`[plugins] disabled_ids`). | Check **Global**, click **Apply**, and click **Restart GridLock Now**. |
-| `Disabled (Workspace)` | Unchecked in the **Workspace** column for the open project. | Check **Workspace**, click **Apply**, and click **Restart GridLock Now**. |
-| `Restart Required` | Enablement, trust, or binary installation changed during this session. | Click **Restart GridLock Now** on the banner to apply cleanly. |
-| `Untrusted Workspace Plugin (Approval Required)` | New or modified binary in `<workspace>/.gridlock/plugins/` has no matching `SHA-256` entry in `~/.config/gridlock/config.toml`. | Verify the binary comes from a trusted source, click **Trust & Approve (<sha8>)**, click **Apply**, and restart if prompted. |
-| `ABI Rejected: ABI major mismatch...` | Plugin was compiled for an incompatible major version of GridLock's plugin interface. | Rebuild or update the plugin against the current GridLock release (`Install from Git` or `Sync plugins.toml`). |
+| `Disabled (Global)` | Unchecked in the **Global** column (`[plugins] disabled_ids`). | Check **Global**, click **Apply**, and click **Hot-Reload Now**. |
+| `Disabled (Workspace)` | Unchecked in the **Workspace** column for the open project. | Check **Workspace**, click **Apply**, and click **Hot-Reload Now**. |
+| `Restart Required` | Enablement, trust, or binary installation changed during this session. | Click **Hot-Reload Now** to reload in-place, or **Restart GridLock Now** if prompted by a pinned-symbol warning. |
+| `Untrusted Workspace Plugin (Approval Required)` | New or modified binary in `<workspace>/.gridlock/plugins/` has no matching `SHA-256` entry in `~/.config/gridlock/config.toml`. | Verify the binary comes from a trusted source, click **Trust & Approve (<sha8>)**, click **Apply**, and click **Hot-Reload Now**. |
+| `ABI Rejected: vX.Y` / `ABI Rejected: invalid` | Plugin failed version, descriptor, or entry-point validation. | Run `gridlock --verify-plugin <path>` for detailed diagnostics, or click **Update** / **Install** to rebuild against the current GridLock release. |
 | `ABI Rejected: Duplicate plugin ID...` | Two plugin files export the same unique plugin identifier (for example, installed in both Global and Workspace folders). | Remove the duplicate `.so`/`.dylib`/`.dll` from one of the plugin directories and click **Reload Plugins**. |
 | `ABI Rejected: Rejected symlink escaping plugin directory` | The plugin file is a symbolic link resolving outside the plugin folder. | Replace the symlink with a regular file copy inside the plugin folder. |
 | `ABI Rejected: Rejected world-writable plugin binary` | File or directory permissions allow arbitrary local users to modify the binary (`o+w`). | Restrict permissions with `chmod go-w <path>` and click **Reload Plugins**. |

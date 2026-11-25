@@ -42,6 +42,7 @@
 #include "core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "core/managers/ConfigManager.hpp"
 #include "core/managers/ThemeManager.hpp"
+#include "core/plugins/PluginVerifier.hpp"
 #include "core/utils/ClangdLspClient.hpp"
 #include "core/utils/CliParser.hpp"
 #include "ui/MainWindow.hpp"
@@ -183,9 +184,17 @@ int main(int argc, char* argv[]) {
   QGuiApplication::setDesktopFileName("gridlock");
   QApplication::setWindowIcon(QIcon(":/icon.png"));
 
-  // Parse structured CLI flags (--headless, --snapshot, --tutorial-mode, --test-mode, --verbose) early.
+  // Parse structured CLI flags (--headless, --snapshot, --verify-plugin, --tutorial-mode, --test-mode, --verbose) early.
   gridlock::core::utils::CliParser parser;
   parser.process(app);
+
+  if (!parser.verifyPluginPath().trimmed().isEmpty()) {
+    gridlock::core::plugins::PluginVerifyReport report;
+    const bool ok = gridlock::core::plugins::PluginVerifier::verifyBinary(parser.verifyPluginPath().trimmed(), &report);
+    fprintf(ok ? stdout : stderr, "%s\n", report.formatSummary().toUtf8().constData());
+    fflush(ok ? stdout : stderr);
+    return ok ? 0 : 1;
+  }
 
   // Fail fast with non-zero exit code when an explicit positional target does not exist or is an invalid/non-exec binary.
   const QString rawCliTarget = parser.targetPath().trimmed();

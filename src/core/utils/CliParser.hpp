@@ -31,8 +31,9 @@ struct CliOptions {
     bool tutorialMode = false;///< True when `--tutorial-mode` is set.
     bool testMode = false;    ///< True when `--test-mode` is set.
     bool verbose = false;     ///< True when `--verbose` is set.
-    bool headless = false;    ///< True when `--headless` or `--snapshot` is set.
+    bool headless = false;    ///< True when `--headless`, `--snapshot`, or `--verify-plugin` is set.
     QString snapshotPath;     ///< Output PNG path when `--snapshot <file>` is set.
+    QString verifyPluginPath; ///< Plugin shared library path when `--verify-plugin <path>` is set.
 };
 
 /**
@@ -74,6 +75,9 @@ public:
     /** @brief Returns the target output file path supplied to --snapshot, or empty if unset. */
     QString snapshotFilePath() const;
 
+    /** @brief Returns the plugin shared library path supplied to `--verify-plugin`, or empty if unset. */
+    QString verifyPluginPath() const;
+
     /** @brief Returns the positional binary, source file, or workspace directory path. */
     QString targetPath() const;
 
@@ -106,6 +110,7 @@ private:
     QCommandLineOption m_verboseOption;
     QCommandLineOption m_headlessOption;
     QCommandLineOption m_snapshotOption;
+    QCommandLineOption m_verifyPluginOption;
     CliOptions m_options;
 };
 

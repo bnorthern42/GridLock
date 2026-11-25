@@ -1,6 +1,6 @@
 # Plugin Authoring, UI Surfaces & Build Recipes (Developer Encyclopedia - Volume 3)
 
-This guide covers building out-of-tree C99 and C++23 plugins, wiring every workstation UI surface (`Tools -> Plugins` nested menus, the five `GridLockContextSurface` context menus, status-bar items, inline editor annotations, live theme tokens, and `PluginReportDockWidget`), packaging repositories for multi-forge installation, and testing plugins headlessly.
+This guide covers building out-of-tree C99 and C++23 plugins, inspecting contiguous buffers with zero inferior calls, wiring every workstation UI surface (`Tools -> Plugins` nested menus, the five `GridLockContextSurface` context menus, status-bar items, inline editor annotations, live theme tokens, and `PluginReportDockWidget`), configuring linker version scripts for live hot-reloading, and verifying plugins headlessly with `gridlock --verify-plugin`.
 
 See also:
 * [Using Plugins in GridLock](Plugins.md) (End-User Guide)
@@ -18,6 +18,7 @@ flowchart TD
 
   PLUG -->|"register_command_action / register_menu_action"| PHB
   PLUG -->|"register_variable_action / register_context_action"| PHB
+  PLUG -->|"query_type_info / resolve_contiguous_range / read_memory"| PHB
   PLUG -->|"set_status_item / show_toast / show_message_box / prompt_input"| PHB
   PLUG -->|"navigate_to_location / set_editor_annotation"| PHB
   PLUG -->|"publish_report_view (MARKDOWN / KEY_VALUE_TABLE / JSON_TREE)"| PHB
@@ -41,12 +42,20 @@ When a plugin calls `register_context_action(host_ctx, surface, action_id, menu_
 | `GridLockContextSurface` | Host Widget & Submenu `objectName` | `filter_regex` Target String | Populated `GridLockSurfaceContext` Fields |
 | :--- | :--- | :--- | :--- |
 | `GRIDLOCK_SURFACE_VARIABLES` (`1`) | `VariablesDockWidget`<br>`#variablePluginActionsMenu` | Debugger C/C++ type (`varTyp`, e.g. `"PetscVec"`) | `rank` = focused rank, `frame_level` = active frame, `address` = parsed pointer/hex address, `symbol_utf8` = full evaluable expression path, `type_utf8` = variable type, `selected_text_utf8` = formatted value (`line = column = bp_id = -1`, `file_utf8 = NULL`). |
-| `GRIDLOCK_SURFACE_CODE_EDITOR` (`2`) | `SourceCodeView`<br>`#codeEditorPluginActionsMenu` | `selectedText` if non-empty, else cursor `symbol`, else `filePath` | `rank` = focused rank, `frame_level` = active frame, `line` = 1-based cursor line, `column` = 1-based cursor column, `address` = `sourceLineToAddress(line)`, `symbol_utf8` = token under cursor, `file_utf8` = source path, `selected_text_utf8` = selection (`bp_id = -1`, `type_utf8 = NULL`). |
+| `GRIDLOCK_SURFACE_CODE_EDITOR` (`2`) | `SourceCodeView`<br>`#codeEditorPluginActionsMenu` | `selectedText` if non-empty, else cursor variable `symbol` (plus its resolved DWARF `type_utf8` when stopped), else `filePath` | `rank` = focused rank, `frame_level` = active frame, `line` = 1-based cursor line, `column` = 1-based cursor column, `address` = `sourceLineToAddress(line)`, `symbol_utf8` = variable expression under cursor (stripping trailing `.method(...)` / `->method(...)` calls), `type_utf8` = resolved DWARF variable type when stopped (or `NULL`), `file_utf8` = source path, `selected_text_utf8` = selection (`bp_id = -1`). |
 | `GRIDLOCK_SURFACE_CALL_STACK` (`3`) | `CallStackDockWidget`<br>`#callStackPluginActionsMenu` | Unwound function name (`entry.function`, e.g. `"solveStep"`) | `rank` = focused rank, `frame_level` = `entry.level`, `line` = `entry.line` (or `-1`), `address` = frame PC `entry.address`, `symbol_utf8` = `entry.function`, `file_utf8` = `entry.file` (`column = bp_id = -1`, `type_utf8 = selected_text_utf8 = NULL`). |
 | `GRIDLOCK_SURFACE_BREAKPOINTS` (`4`) | `SourceCodeView` gutter<br>`#breakpointPluginActionsMenu` | `"<filePath>:<lineOneBased>"` | `rank` = focused rank, `frame_level` = active frame, `line` = 1-based gutter line, `bp_id` = breakpoint ID on that line (or `-1`), `address` = `sourceLineToAddress(line)`, `file_utf8` = source path (`column = -1`, `symbol_utf8 = type_utf8 = selected_text_utf8 = NULL`). |
 | `GRIDLOCK_SURFACE_RANK_LIST` (`5`) | `ServerRackView`<br>`#rankListPluginActionsMenu` | `"<currentState> <currentFunction>"` (e.g. `"stopped MPI_Sendrecv"`) | `rank` = clicked `rankId`, `frame_level = 0`, `line` = `currentLine` (or `-1`), `address` = `rankPcAddress(rankId)`, `symbol_utf8` = `currentFunction` (or state), `type_utf8` = `currentState`, `file_utf8` = `currentFile`, `selected_text_utf8` = `currentState` (`column = bp_id = -1`). |
 
-### 1.2 Menus, Status Badges, Annotations, Themes & Declarative Report Formats
+### 1.2 Zero-Call DWARF Type & Contiguous Container Introspection
+
+Plugins inspecting C/C++ buffers should prefer `query_type_info` (`gp::queryTypeInfo`) and `resolve_contiguous_range` (`gp::resolveContiguousRange`) over calling `.size()` or `.data()` via `eval_expr`:
+
+* **Works Without Inferior Calls**: Inlined template methods (such as `std::vector::size()` or `std::span::data()` under `-O2`) are frequently absent from binary symbol tables and cannot be invoked on core files. `PluginHostBridge` resolves DWARF types via temporary MI `-var-create` objects and reads internal struct pointers (`_M_impl._M_start` / `_M_finish` on `libstdc++`, `__begin_` / `__end_` on `libc++`, `_M_ptr` / `_M_extent` / `__data_` / `__size_`, `_M_data` / `_M_size`, and static template extents) with zero inferior execution.
+* **Zero Evaluator Tab Noise**: Both `eval_expr` and DWARF range queries use dedicated silent MI tokens (`m_pendingPluginEvals`) that never emit `expressionEvaluated` into the user's **Evaluator** dock.
+* **Supported Contiguous Types**: Fixed C arrays (`T[N]`), `std::array<T, N>`, `std::vector<T>` (excluding `std::vector<bool>`), `std::span<T, Extent>`, and `std::valarray<T>`.
+
+### 1.3 Menus, Status Badges, Annotations, Themes & Declarative Report Formats
 
 | Capability | Host Callbacks | Behavior & Styling Rules |
 | :--- | :--- | :--- |
@@ -166,9 +175,23 @@ GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL gridlock_plugin_init_v1(
 
 ---
 
-## 3. Out-of-Tree Build Templates & Multi-Forge Publishing
+## 3. Out-of-Tree Build Templates, Version Scripts & Live Hot-Reloading
 
-`PluginInstaller` automatically passes the host's `include/` path to Meson (`-Dgridlock_include_dir=...`), CMake (`-DGRIDLOCK_INCLUDE_DIR=...`), Make (`GRIDLOCK_INCLUDE_DIR=...`), or single-file compiler invocations. Providing one of the templates below at your repository root (or inside a `plugin/` subdirectory) enables one-click installation from **Preferences -> Plugins -> Install from Git** and declarative `plugins.toml` synchronization.
+`PluginInstaller` automatically passes the host's `include/` path to Meson (`-Dgridlock_include_dir=...`), CMake (`-DGRIDLOCK_INCLUDE_DIR=...`), Make (`GRIDLOCK_INCLUDE_DIR=...`), or single-file compiler invocations.
+
+### Why C++ Plugins Should Use `-Wl,--version-script` for **Hot-Reload Now**
+
+On Linux (`glibc`), C++ inline functions containing `static` local variables or template static data members emit `STB_GNU_UNIQUE` (`'u'`) dynamic symbols by default. When `dlopen()` loads a shared object containing `STB_GNU_UNIQUE` symbols, `glibc` marks that library `DF_1_NODELETE` and pins its old code pages in memory even after `dlclose()`. Supplying a 6-line linker version script (`plugin.lds`) hides all internal and vague-linkage C++ symbols so **Hot-Reload Now** (`PluginManager::hotReloadPlugins`) can unmap and reload rebuilt `.so` binaries in-place while an MPI debug session remains paused:
+
+```ld
+/* plugin.lds */
+{
+  global:
+    gridlock_plugin_init_v1;
+  local:
+    *;
+};
+```
 
 ### Build System Comparison
 
@@ -194,11 +217,13 @@ project('my_gridlock_plugin', 'cpp',
   default_options: ['cpp_std=c++23', 'warning_level=3'])
 
 inc = include_directories(get_option('gridlock_include_dir'))
+lds = meson.current_source_dir() / 'plugin.lds'
 
 shared_module('my_gridlock_plugin',
   'my_plugin.cpp',
   include_directories: inc,
   gnu_symbol_visibility: 'hidden',
+  link_args: host_machine.system() == 'linux' ? ['-Wl,--version-script=' + lds] : [],
   name_prefix: 'lib')
 ```
 
@@ -213,6 +238,10 @@ set(GRIDLOCK_INCLUDE_DIR "/usr/local/include" CACHE PATH "Path to gridlock/plugi
 add_library(my_gridlock_plugin MODULE my_plugin.cpp)
 target_compile_features(my_gridlock_plugin PRIVATE cxx_std_23)
 target_include_directories(my_gridlock_plugin PRIVATE "${GRIDLOCK_INCLUDE_DIR}")
+if(UNIX AND NOT APPLE)
+  target_link_options(my_gridlock_plugin PRIVATE
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/plugin.lds")
+endif()
 set_target_properties(my_gridlock_plugin PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN ON
@@ -225,17 +254,10 @@ set_target_properties(my_gridlock_plugin PROPERTIES
 CXX ?= c++
 GRIDLOCK_INCLUDE_DIR ?= /usr/local/include
 CXXFLAGS := -std=c++23 -O2 -Wall -Wextra -Wpedantic -fvisibility=hidden -fvisibility-inlines-hidden -fPIC
+LDFLAGS := -Wl,--version-script=plugin.lds
 
-libmy_gridlock_plugin.so: my_plugin.cpp
-	$(CXX) $(CXXFLAGS) -shared -I"$(GRIDLOCK_INCLUDE_DIR)" $< -o $@
-```
-
-Verify that **only** `gridlock_plugin_init_v1` is exported in the dynamic symbol table before publishing:
-
-```bash
-nm -D --defined-only libmy_gridlock_plugin.so | awk '$2 == "T" { print $3 }'
-# Expected output:
-# gridlock_plugin_init_v1
+libmy_gridlock_plugin.so: my_plugin.cpp plugin.lds
+	$(CXX) $(CXXFLAGS) -shared -I"$(GRIDLOCK_INCLUDE_DIR)" $< $(LDFLAGS) -o $@
 ```
 
 Tag the repository with the `gridlock-plugin` topic on GitHub, GitLab, Codeberg, or Gitea so users can discover it and add `repo = "owner/my-gridlock-plugin"` (or `gitlab:group/my-gridlock-plugin`, `codeberg:owner/my-gridlock-plugin`) to `plugins.toml`.
@@ -275,15 +297,31 @@ Key engineering patterns in `domain_mesh_probe.cpp`:
 
 ---
 
-## 5. Testing Plugins Headlessly (`QtTest` + Mock MI Sessions)
+## 5. Sandboxed Conformance Verification (`--verify-plugin`) & Headless Testing
 
-GridLock tests plugins at three layers without launching external MPI jobs or interactive modal windows:
+### 5.1 Automated CLI & Post-Build Conformance Verifier (`PluginVerifier`)
+
+GridLock includes `PluginVerifier::verifyBinary`, which runs automatically at the end of every `PluginInstaller` build and is exposed directly on the CLI for local development and CI pipelines:
+
+```bash
+gridlock --verify-plugin ./build/libmy_gridlock_plugin.so
+```
+
+`--verify-plugin` loads the shared library inside an isolated temporary `PluginManager` + `PluginHostBridge` sandbox without touching `~/.config/gridlock/` or opening a GUI window, and checks four gates (exiting `0` on `PASS`, `1` on `FAIL`):
+1. **Symbol Export Hygiene**: Confirms `gridlock_plugin_init_v1` resolves under `RTLD_NOW`, and emits warnings if extra global text symbols or `STB_GNU_UNIQUE` (`'u'`) symbols are exported without `-fvisibility=hidden` or `-Wl,--version-script`.
+2. **ABI & Descriptor Validation**: Verifies `struct_size >= 96`, `abi_major == 1`, `reserved_flags == 0`, and non-empty single-line `plugin_id_utf8`, `plugin_name_utf8`, and `plugin_version_utf8`.
+3. **Registration Validation**: Intercepts `register_variable_action`, `register_command_action`, `register_menu_action`, and `register_context_action` during `init` to ensure every action ID, `"/"`-delimited menu path (`<= 4` segments), and PCRE2 regular expression compiles and commits cleanly.
+4. **Dry-Run Lifecycle & Leak Detection**: Executes `gridlock_plugin_init_v1` -> `on_session_start(2)` -> `on_session_end()` -> `shutdown()` and fails if `outstandingAllocBytes() != 0` after `shutdown()` returns.
+
+### 5.2 Multi-Layer `QtTest` Suites
+
+GridLock also tests plugins across three `QtTest` layers without launching external MPI jobs or modal dialogs:
 
 1. **ABI Layout & Mock Host Table (`tests/core/test_plugin_abi.cpp`)**:
-   * Instantiate a stack `GridLockHostApi` pointing at in-memory mock callbacks (`meson test -C builddir plugin_abi_tests`) to unit-test your `gridlock_plugin_init_v1` and action callbacks in isolation.
+   * Instantiate a stack `GridLockHostApi` pointing at in-memory mock callbacks (`meson test -C builddir plugin_abi_tests`) to unit-test `gridlock_plugin_init_v1`, `queryTypeInfo`, `resolveContiguousRange`, and action callbacks in isolation.
 2. **`PluginManager` + Mock `GdbRankCoordinator` (`tests/core/test_plugin_manager.cpp`)**:
    * Isolate config state by setting `qputenv("GRIDLOCK_TEST_CONFIG_DIR", tempDir.path().toUtf8())`.
-   * Call `coord.initializeMockSession(2)`, feed a synthetic stop line via `coord.processGdbOutput(0, "*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401234\",func=\"solve\",fullname=\"/tmp/sim.c\",line=\"77\"}\n")`, intercept `GdbRankCoordinator::commandSentToGdb` to reply to `-data-evaluate-expression` or `-data-read-memory-bytes`, and assert emitted payloads with `QSignalSpy` on `PluginHostBridge::structuredEventEmitted`.
+   * Call `coord.initializeMockSession(2)`, feed a synthetic stop line via `coord.processGdbOutput(...)`, intercept `GdbRankCoordinator::commandSentToGdb` to reply to MI `-var-create`, `-data-evaluate-expression`, or `-data-read-memory-bytes`, and verify live `hotReloadPlugins` session replay.
 3. **Offscreen Workstation UI Integration (`tests/ui/test_ui_plugins.cpp`)**:
    * Run with `QT_QPA_PLATFORM=offscreen`. Pre-seed non-blocking modal dialog answers on `MainWindow` using dynamic properties before triggering a plugin action:
      * `mw.setProperty("gl_plugin_msgbox_auto_result", static_cast<int>(GRIDLOCK_RESULT_YES));`

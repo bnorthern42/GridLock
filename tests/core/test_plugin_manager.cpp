@@ -28,6 +28,7 @@
 #include "../../src/core/plugins/PluginInstaller.hpp"
 #include "../../src/core/plugins/PluginManager.hpp"
 #include "../../src/core/plugins/PluginManifest.hpp"
+#include "../../src/core/plugins/PluginVerifier.hpp"
 #include "gridlock/plugin_api.h"
 
 namespace {
@@ -143,8 +144,7 @@ class TestPluginManager : public QObject {
     bool sawLoadedDummy = false, sawRejectedBadAbi = false, sawRejectedDuplicate = false;
     for (const auto& info : mgr.plugins()) {
       if (info.libraryPath.endsWith(QStringLiteral("01_dummy.so"))) {
-        QVERIFY(info.enabled && info.errorMessage.isEmpty());
-        QCOMPARE(info.id, QStringLiteral("org.gridlock.test_dummy"));
+        QVERIFY(info.enabled && info.errorMessage.isEmpty() && info.id == QStringLiteral("org.gridlock.test_dummy"));
         sawLoadedDummy = true;
       } else if (info.libraryPath.endsWith(QStringLiteral("02_bad_abi.so"))) {
         QVERIFY(!info.enabled && info.errorMessage.contains(QStringLiteral("ABI major mismatch")));
@@ -155,16 +155,14 @@ class TestPluginManager : public QObject {
       }
     }
     QVERIFY(sawLoadedDummy && sawRejectedBadAbi && sawRejectedDuplicate);
-    QCOMPARE(mgr.hostBridge()->variableActions().size(), 1);
-    QCOMPARE(mgr.hostBridge()->matchingVariableActions(QStringLiteral("Kokkos::View<double**>")).size(), 1);
-    QCOMPARE(mgr.hostBridge()->matchingVariableActions(QStringLiteral("int")).size(), 0);
+    QVERIFY(mgr.hostBridge()->variableActions().size() == 1 &&
+            mgr.hostBridge()->matchingVariableActions(QStringLiteral("Kokkos::View<double**>")).size() == 1 &&
+            mgr.hostBridge()->matchingVariableActions(QStringLiteral("int")).isEmpty());
   }
 
   void testHostBridgeEvalMemorySanitizationAndStopLifecycle() {
     ScopedPluginEnv env;
-    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
-                               env.userPluginDir(), QStringLiteral("dummy.so")));
-
+    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO), env.userPluginDir(), QStringLiteral("dummy.so")));
     gridlock::GdbRankCoordinator coord;
     coord.initializeMockSession(2);
     gridlock::core::plugins::PluginManager mgr(&coord);
@@ -179,30 +177,24 @@ class TestPluginManager : public QObject {
     const GridLockHostApi* api = mgr.hostBridge()->hostApi();
     size_t outLen = 0u;
     char smallBuf[8]{};
-
     QCOMPARE(api->eval_expr(api->host_ctx, 0, "x", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_NOT_STOPPED);
     QCOMPARE(api->eval_expr(api->host_ctx, 99, "x", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_INVALID_RANK);
 
     coord.processGdbOutput(
         0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401234\",func=\"solve\",file=\"sim.c\",fullname=\"/tmp/sim.c\",line=\"77\"}\n"));
-    QVERIFY(!events.isEmpty() && events.last().first == QStringLiteral("dummy.stop"));
-    QVERIFY(events.last().second.contains(QStringLiteral("\"line\":77")));
+    QVERIFY(!events.isEmpty() && events.last().first == QStringLiteral("dummy.stop") && events.last().second.contains(QStringLiteral("\"line\":77")));
     QCOMPARE(api->eval_expr(api->host_ctx, 0, "unanswered_expr", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_TIMEOUT);
 
     const auto miResponder = QObject::connect(
         &coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord, [&](int rankId, const QString& cmd) {
           const QString tok = cmd.section(QLatin1Char('-'), 0, 0);
           if (cmd.contains(QStringLiteral("-data-evaluate-expression"))) {
-            if (cmd.contains(QStringLiteral("mesh_field"))) {
-              QTimer::singleShot(5, &coord, [&, rankId, tok]() {
-                coord.processGdbOutput(rankId, QStringLiteral("%1^done,value=\"extent_256x128x64_double_grid\"\n").arg(tok));
-              });
-            } else if (cmd.contains(QStringLiteral("broken_sym"))) {
+            if (cmd.contains(QStringLiteral("mesh_field")))
+              QTimer::singleShot(5, &coord, [&, rankId, tok]() { coord.processGdbOutput(rankId, QStringLiteral("%1^done,value=\"extent_256x128x64_double_grid\"\n").arg(tok)); });
+            else if (cmd.contains(QStringLiteral("broken_sym")))
               coord.processGdbOutput(rankId, QStringLiteral("%1^error,msg=\"No symbol broken_sym\"\n").arg(tok));
-            }
           } else if (cmd.contains(QStringLiteral("-data-read-memory-bytes 0x5000"))) {
-            coord.processGdbOutput(
-                rankId, QStringLiteral("%1^done,memory=[{begin=\"0x00005000\",offset=\"0x00000000\",end=\"0x00005004\",contents=\"deadbeef\"}]\n").arg(tok));
+            coord.processGdbOutput(rankId, QStringLiteral("%1^done,memory=[{begin=\"0x00005000\",offset=\"0x00000000\",end=\"0x00005004\",contents=\"deadbeef\"}]\n").arg(tok));
           } else if (cmd.contains(QStringLiteral("-data-read-memory-bytes 0xbad0"))) {
             coord.processGdbOutput(rankId, QStringLiteral("%1^error,msg=\"Cannot access memory\"\n").arg(tok));
           } else if (cmd.contains(QStringLiteral("-data-write-memory-bytes 0x5000"))) {
@@ -223,31 +215,21 @@ class TestPluginManager : public QObject {
     QCOMPARE(mgr.hostBridge()->invokeVariableAction(QStringLiteral("dummy.inspect_field"), varCtx), GRIDLOCK_OK);
     QCOMPARE(events.last().second, QStringLiteral("extent_256x128x64_double_grid"));
     QCOMPARE(api->eval_expr(api->host_ctx, 0, "broken_sym", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_EVAL_FAILED);
-    // Plugin eval_expr probes MUST route via pluginExpressionReady without polluting Evaluator's expressionEvaluated!
-    QVERIFY(plugEvalSpy.count() >= 2);
-    QCOMPARE(userEvalSpy.count(), 0);
+    QVERIFY(plugEvalSpy.count() >= 2 && userEvalSpy.count() == 0);
 
-    // HIGH-02 / HIGH-03 / HIGH-04 bounds and MI injection checks.
     uint8_t memBytes[4]{};
     size_t bytesRead = 0u, written = 0u;
-    QCOMPARE(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, 64ULL * 1024ULL * 1024ULL + 1ULL, &bytesRead),
-             GRIDLOCK_ERR_INVALID_ARG);
-    QCOMPARE(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &bytesRead), GRIDLOCK_OK);
-    QCOMPARE(bytesRead, size_t{4u});
-    QCOMPARE(memBytes[0], uint8_t{0xde});
+    QCOMPARE(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, 64ULL * 1024ULL * 1024ULL + 1ULL, &bytesRead), GRIDLOCK_ERR_INVALID_ARG);
+    QVERIFY(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &bytesRead) == GRIDLOCK_OK && bytesRead == 4u && memBytes[0] == 0xde);
     QCOMPARE(api->read_memory(api->host_ctx, 0, 0xbad0ULL, memBytes, sizeof(memBytes), &bytesRead), GRIDLOCK_ERR_MEMORY_READ_FAILED);
-
-    QCOMPARE(api->write_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &written), GRIDLOCK_OK);
-    QCOMPARE(written, size_t{4u});
+    QVERIFY(api->write_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &written) == GRIDLOCK_OK && written == 4u);
     QCOMPARE(api->write_memory(api->host_ctx, 0, 0xbad0ULL, memBytes, sizeof(memBytes), &written), GRIDLOCK_ERR_MEMORY_READ_FAILED);
 
     int32_t bpId = -1;
-    QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c\n-interpreter-exec console \"quit\"", 10, nullptr, &bpId),
-             GRIDLOCK_ERR_INVALID_ARG);
+    QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c\n-interpreter-exec console \"quit\"", 10, nullptr, &bpId), GRIDLOCK_ERR_INVALID_ARG);
     QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c", 10, "i == 1\nquit", &bpId), GRIDLOCK_ERR_INVALID_ARG);
-    QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c", 80, "i == 3", &bpId), GRIDLOCK_OK);
-    QCOMPARE(api->remove_breakpoint(api->host_ctx, bpId), GRIDLOCK_OK);
-
+    QVERIFY(api->set_breakpoint(api->host_ctx, "/tmp/sim.c", 80, "i == 3", &bpId) == GRIDLOCK_OK &&
+            api->remove_breakpoint(api->host_ctx, bpId) == GRIDLOCK_OK);
     QObject::disconnect(miResponder);
     mgr.unloadAll();
     QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 0);
@@ -268,41 +250,27 @@ class TestPluginManager : public QObject {
     gridlock::core::plugins::PluginManager mgr(&coord);
 
     // 1. Untrusted workspace plugin MUST NOT call dlopen() or execute ELF .init_array constructors.
-    QCOMPARE(mgr.discoverAndLoad(), 0);
-    QCOMPARE(mgr.plugins().size(), 1);
-    QVERIFY(!mgr.plugins().first().trusted && !mgr.plugins().first().enabled);
-    QVERIFY(!QFileInfo::exists(markerPath));
+    QVERIFY(mgr.discoverAndLoad() == 0 && mgr.plugins().size() == 1);
+    QVERIFY(!mgr.plugins().first().trusted && !mgr.plugins().first().enabled && !QFileInfo::exists(markerPath));
 
     // 2. Approve exact SHA-256 in user-global ConfigManager and verify reload succeeds and constructor runs.
     const QString origSha = mgr.plugins().first().sha256Hex;
     QVERIFY(!origSha.isEmpty());
     gridlock::core::ConfigManager::instance().trustWorkspacePlugin(canonWsPath, origSha);
-    QCOMPARE(mgr.discoverAndLoad(), 1);
-    QVERIFY(mgr.plugins().first().trusted && mgr.plugins().first().enabled);
-    QVERIFY(QFileInfo::exists(markerPath));
+    QVERIFY(mgr.discoverAndLoad() == 1 && mgr.plugins().first().trusted && mgr.plugins().first().enabled && QFileInfo::exists(markerPath));
 
     // 3. Unload, remove canary, append 1 byte to tamper binary, and verify trust is invalidated before dlopen().
     mgr.unloadAll();
     QFile::remove(markerPath);
-    {
-      QFile tamper(canonWsPath);
-      QVERIFY(tamper.open(QIODevice::Append));
-      QCOMPARE(tamper.write("\x00", 1), qint64{1});
-    }
-    QVERIFY(sha256OfFile(canonWsPath) != origSha);
-    QCOMPARE(mgr.discoverAndLoad(), 0);
-    QCOMPARE(mgr.plugins().size(), 1);
-    QVERIFY(!mgr.plugins().first().trusted && !mgr.plugins().first().enabled);
-    QVERIFY(!QFileInfo::exists(markerPath));
-
+    { QFile tamper(canonWsPath); QVERIFY(tamper.open(QIODevice::Append) && tamper.write("\x00", 1) == 1); }
+    QVERIFY(sha256OfFile(canonWsPath) != origSha && mgr.discoverAndLoad() == 0 && mgr.plugins().size() == 1);
+    QVERIFY(!mgr.plugins().first().trusted && !mgr.plugins().first().enabled && !QFileInfo::exists(markerPath));
     qunsetenv("GRIDLOCK_TEST_CTOR_MARKER_FILE");
   }
 
   void testCallbackReentrancyDeferralAndShutdownRegistrationLockout() {
     ScopedPluginEnv env;
-    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
-                               env.userPluginDir(), QStringLiteral("dummy.so")));
-
+    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO), env.userPluginDir(), QStringLiteral("dummy.so")));
     gridlock::GdbRankCoordinator coord;
     gridlock::core::plugins::PluginManager mgr(&coord);
     QCOMPARE(mgr.discoverAndLoad(), 1);
@@ -310,35 +278,20 @@ class TestPluginManager : public QObject {
     QStringList stopPayloads;
     QString shutdownRegPayload;
     bool wasStillLoadedInsideCallback = false;
-
     QObject::connect(mgr.hostBridge(), &gridlock::core::plugins::PluginHostBridge::structuredEventEmitted,
                      &coord, [&](const QString& ch, const QString& payload) {
                        if (ch == QStringLiteral("dummy.stop")) {
                          stopPayloads.append(payload);
-                         if (stopPayloads.size() == 1) {
-                           // Re-entrantly enqueue a second stop; FIFO must finish stop #1 first, then run #2 unless unloaded.
-                           mgr.notifyRankStopped(0, QStringLiteral("/tmp/sim.c"), 22, QStringLiteral("solve"), 0x4010u);
-                         } else if (stopPayloads.size() == 2) {
-                           // Trigger unloadAll() while m_callbackDepth > 0: must defer dlclose until unwind!
-                           mgr.unloadAll();
-                           wasStillLoadedInsideCallback = !mgr.plugins().isEmpty();
-                         }
-                       } else if (ch == QStringLiteral("dummy.shutdown_reg")) {
-                         shutdownRegPayload = payload;
-                       }
+                         if (stopPayloads.size() == 1) mgr.notifyRankStopped(0, QStringLiteral("/tmp/sim.c"), 22, QStringLiteral("solve"), 0x4010u);
+                         else if (stopPayloads.size() == 2) { mgr.unloadAll(); wasStillLoadedInsideCallback = !mgr.plugins().isEmpty(); }
+                       } else if (ch == QStringLiteral("dummy.shutdown_reg")) shutdownRegPayload = payload;
                      });
-
     mgr.notifyRankStopped(0, QStringLiteral("/tmp/sim.c"), 11, QStringLiteral("solve"), 0x4000u);
 
-    QCOMPARE(stopPayloads.size(), 2);
-    QVERIFY(stopPayloads.at(0).contains(QStringLiteral("\"line\":11")));
-    QVERIFY(stopPayloads.at(1).contains(QStringLiteral("\"line\":22")));
-    QVERIFY(wasStillLoadedInsideCallback);
-    // After unwind to depth 0, deferred unloadAll() must have completed and rejected shutdown registration (-8).
-    QVERIFY(mgr.plugins().isEmpty());
+    QVERIFY(stopPayloads.size() == 2 && stopPayloads.at(0).contains(QStringLiteral("\"line\":11")) &&
+            stopPayloads.at(1).contains(QStringLiteral("\"line\":22")) && wasStillLoadedInsideCallback);
+    QVERIFY(mgr.plugins().isEmpty() && mgr.hostBridge()->variableActions().isEmpty() && mgr.hostBridge()->liveAllocationCount() == 0);
     QVERIFY(shutdownRegPayload.contains(QString::number(static_cast<int>(GRIDLOCK_ERR_UNSUPPORTED))));
-    QVERIFY(mgr.hostBridge()->variableActions().isEmpty());
-    QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 0);
   }
 
   void testDualScopeEnablementAndLocalBareGitPluginInstaller() {
@@ -790,6 +743,51 @@ class TestPluginManager : public QObject {
 
     QVERIFY(!sawInferiorFnCall && userEvalSpy.count() == 0);
     QObject::disconnect(responder);
+  }
+
+  void testSandboxedPluginVerifierPassRejectAndLeakDetection() {
+    using gridlock::core::plugins::PluginVerifier;
+    using gridlock::core::plugins::PluginVerifyReport;
+
+    PluginVerifyReport okRep;
+    QVERIFY(PluginVerifier::verifyBinary(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO), &okRep));
+    QVERIFY(okRep.passed && okRep.errors.isEmpty() && okRep.warnings.isEmpty());
+    QCOMPARE(okRep.pluginId, QStringLiteral("org.gridlock.test_dummy"));
+    QCOMPARE(okRep.pluginVersion, QStringLiteral("1.0.0"));
+    QCOMPARE(okRep.outstandingAllocBytes(), size_t{0u});
+    QVERIFY(okRep.registeredActionCount >= 8);
+
+    PluginVerifyReport badRep;
+    QVERIFY(!PluginVerifier::verifyBinary(QStringLiteral(GRIDLOCK_TEST_BAD_ABI_PLUGIN_SO), &badRep));
+    QVERIFY(!badRep.passed && !badRep.errors.isEmpty());
+    QVERIFY(badRep.formatSummary().contains(QStringLiteral("ABI major mismatch")));
+
+#ifdef __linux__
+    QTemporaryDir leakDir;
+    QVERIFY(leakDir.isValid());
+    const QString leakSrc = QDir(leakDir.path()).filePath(QStringLiteral("leak_plug.c"));
+    const QString leakSo = QDir(leakDir.path()).filePath(QStringLiteral("libleak_plug.so"));
+    {
+      QFile lf(leakSrc);
+      QVERIFY(lf.open(QIODevice::WriteOnly));
+      lf.write("#include \"gridlock/plugin_api.h\"\n"
+               "void leaked_unhidden_symbol(void) {}\n"
+               "GRIDLOCK_PLUGIN_EXPORT GridLockStatus GRIDLOCK_CALL "
+               "gridlock_plugin_init_v1(const GridLockHostApi* h, GridLockPluginDescriptor* d) {\n"
+               "  (void)h->alloc_bytes(h->host_ctx, 64u);\n"
+               "  d->struct_size = sizeof(*d); d->abi_major = 1u; d->abi_minor = 0u;\n"
+               "  d->plugin_id_utf8 = \"org.test.leak\"; d->plugin_name_utf8 = \"Leak\"; d->plugin_version_utf8 = \"0.1.0\";\n"
+               "  return GRIDLOCK_OK;\n}\n");
+    }
+    QProcess gcc;
+    gcc.start(QStringLiteral("gcc"), {QStringLiteral("-std=c99"), QStringLiteral("-shared"), QStringLiteral("-fPIC"),
+                                      QStringLiteral("-I") + QStringLiteral(GRIDLOCK_TEST_INCLUDE_DIR), leakSrc, QStringLiteral("-o"), leakSo});
+    QVERIFY(gcc.waitForFinished(10000) && gcc.exitCode() == 0);
+    PluginVerifyReport leakRep;
+    QVERIFY(!PluginVerifier::verifyBinary(leakSo, &leakRep));
+    QCOMPARE(leakRep.outstandingAllocBytes(), size_t{64u});
+    QVERIFY(!leakRep.warnings.isEmpty() && leakRep.warnings.first().contains(QStringLiteral("leaked_unhidden_symbol")));
+#endif
   }
 };
 
