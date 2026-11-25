@@ -1,6 +1,6 @@
 /**
  * @file PluginSettingsPage.cpp
- * @brief Implementation of the two-tab Preferences -> Plugins page (`Installed`, `Install from GitHub`, and `plugins.toml` sync).
+ * @brief Implementation of Preferences -> Plugins (`Installed`, multi-forge `Install from Git`, and `plugins.toml` sync).
  */
 
 #include "PluginSettingsPage.hpp"
@@ -39,6 +39,7 @@ namespace gridlock::ui {
 
 namespace {
 
+using gridlock::core::plugins::GitForgeHost;
 using gridlock::core::plugins::LoadedPluginInfo;
 using gridlock::core::plugins::PluginBuildResult;
 using gridlock::core::plugins::PluginInstaller;
@@ -121,7 +122,7 @@ PluginSettingsPage::PluginSettingsPage(PluginManager* pluginManager, QWidget* pa
   m_tabs = new QTabWidget(this);
   m_tabs->setObjectName(QStringLiteral("pluginSettingsTabs"));
   m_tabs->addTab(createInstalledTab(m_tabs), tr("Installed"));
-  m_tabs->addTab(createGitHubInstallTab(m_tabs), tr("Install from GitHub"));
+  m_tabs->addTab(createGitInstallTab(m_tabs), tr("Install from Git"));
   root->addWidget(m_tabs, 1);
 
   connect(m_installer, &PluginInstaller::stepStarted, this, [this](const QString& desc) {
@@ -231,9 +232,9 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   return tab;
 }
 
-QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
+QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   auto* tab = new QWidget(parent);
-  tab->setObjectName(QStringLiteral("pluginGitHubInstallTab"));
+  tab->setObjectName(QStringLiteral("pluginInstallTab"));
   auto* lay = new QVBoxLayout(tab);
   lay->setContentsMargins(8, 10, 8, 8);
   lay->setSpacing(10);
@@ -241,18 +242,29 @@ QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
   auto* form = new QFormLayout();
   form->setSpacing(8);
 
+  auto* hostRepoRow = new QHBoxLayout();
+  hostRepoRow->setSpacing(8);
+
+  m_gitHostCombo = new QComboBox(tab);
+  m_gitHostCombo->setObjectName(QStringLiteral("pluginGitHostCombo"));
+  m_gitHostCombo->addItem(tr("GitHub (github.com)"), static_cast<int>(GitForgeHost::GitHub));
+  m_gitHostCombo->addItem(tr("GitLab (gitlab.com)"), static_cast<int>(GitForgeHost::GitLab));
+  m_gitHostCombo->addItem(tr("Codeberg (codeberg.org)"), static_cast<int>(GitForgeHost::Codeberg));
+  m_gitHostCombo->addItem(tr("Custom Git URL (https:// / git@)"), static_cast<int>(GitForgeHost::CustomUrl));
+  hostRepoRow->addWidget(m_gitHostCombo);
+
   m_repoUrlEdit = new QLineEdit(tab);
-  m_repoUrlEdit->setObjectName(QStringLiteral("pluginGithubUrlEdit"));
-  m_repoUrlEdit->setPlaceholderText(
-      QStringLiteral("bnorthern42/gridlock-stl-inspector or https://github.com/owner/gridlock-plugin.git"));
+  m_repoUrlEdit->setObjectName(QStringLiteral("pluginGitRepoEdit"));
   m_repoUrlEdit->setToolTip(
-      tr("Accepts compact owner/repo shorthand, https://github.com/owner/repo[.git], or git@github.com:owner/repo.git."));
-  form->addRow(tr("GitHub Repo / URL:"), m_repoUrlEdit);
+      tr("Accepts owner/repo shorthand for the selected forge, github:/gitlab:/codeberg: prefixes, "
+         "or any full https:// / git@ repository URL."));
+  hostRepoRow->addWidget(m_repoUrlEdit, 1);
+  form->addRow(tr("Git Host & Repository:"), hostRepoRow);
 
   auto* refScopeRow = new QHBoxLayout();
   refScopeRow->setSpacing(8);
   m_gitRefEdit = new QLineEdit(tab);
-  m_gitRefEdit->setObjectName(QStringLiteral("pluginGithubRefEdit"));
+  m_gitRefEdit->setObjectName(QStringLiteral("pluginGitRefEdit"));
   m_gitRefEdit->setPlaceholderText(tr("Optional branch, tag, or commit SHA (e.g. main, v1.0.0)"));
   refScopeRow->addWidget(m_gitRefEdit, 1);
 
@@ -283,14 +295,13 @@ QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
 
   m_syncManifestBtn = new QPushButton(tr("Sync plugins.toml"), tab);
   m_syncManifestBtn->setObjectName(QStringLiteral("pluginSyncManifestBtn"));
-  m_syncManifestBtn->setToolTip(
-      tr("Clone and compile any missing or outdated plugins declared in plugins.toml."));
+  m_syncManifestBtn->setToolTip(tr("Clone and compile any missing or outdated plugins declared in plugins.toml."));
   manifestRow->addWidget(m_syncManifestBtn);
   form->addRow(tr("Manifest Sync:"), manifestRow);
   lay->addLayout(form);
 
   m_buildSummaryBadge = new QLabel(
-      tr("Ready to clone/build from owner/repo shorthand or sync declarative plugins.toml."), tab);
+      tr("Ready to clone/build from GitHub, GitLab, Codeberg, Gitea, or custom Git URLs."), tab);
   m_buildSummaryBadge->setObjectName(QStringLiteral("pluginBuildSummaryBadge"));
   m_buildSummaryBadge->setWordWrap(true);
   lay->addWidget(m_buildSummaryBadge);
@@ -309,11 +320,33 @@ QWidget* PluginSettingsPage::createGitHubInstallTab(QWidget* parent) {
   (void)new CompilerLogHighlighter(m_compilerLogView->document());
   lay->addWidget(m_compilerLogView, 1);
 
+  updateGitRepoPlaceholder();
+  connect(m_gitHostCombo, &QComboBox::currentIndexChanged, this, [this](int) { updateGitRepoPlaceholder(); });
   connect(m_cloneBuildBtn, &QPushButton::clicked, this, &PluginSettingsPage::onCloneOrCancelClicked);
   connect(m_syncManifestBtn, &QPushButton::clicked, this, &PluginSettingsPage::onSyncManifestClicked);
   connect(m_openManifestBtn, &QPushButton::clicked, this, &PluginSettingsPage::onOpenManifestClicked);
   connect(m_installRestartBtn, &QPushButton::clicked, this, &PluginSettingsPage::triggerRestartNow);
   return tab;
+}
+
+void PluginSettingsPage::updateGitRepoPlaceholder() {
+  if (!m_repoUrlEdit || !m_gitHostCombo) return;
+  const auto host = static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt());
+  switch (host) {
+    case GitForgeHost::GitHub:
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (e.g. bnorthern42/gridlock-stl-inspector)"));
+      break;
+    case GitForgeHost::GitLab:
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo or group/sub/repo (gitlab.com)"));
+      break;
+    case GitForgeHost::Codeberg:
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (codeberg.org)"));
+      break;
+    case GitForgeHost::CustomUrl:
+      m_repoUrlEdit->setPlaceholderText(
+          QStringLiteral("https://gitea.example.org/owner/repo.git or git@host:owner/repo.git"));
+      break;
+  }
 }
 
 void PluginSettingsPage::onCloneOrCancelClicked() {
@@ -324,13 +357,15 @@ void PluginSettingsPage::onCloneOrCancelClicked() {
   }
   if (m_compilerLogView) m_compilerLogView->clear();
   if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
-  const QString url = m_repoUrlEdit ? m_repoUrlEdit->text().trimmed() : QString();
+  const QString repoSpec = m_repoUrlEdit ? m_repoUrlEdit->text().trimmed() : QString();
   const QString ref = m_gitRefEdit ? m_gitRefEdit->text().trimmed() : QString();
+  const auto forge = m_gitHostCombo ? static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt())
+                                    : GitForgeHost::GitHub;
   const auto scope =
       (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
           ? PluginScope::Workspace
           : PluginScope::UserGlobal;
-  if (m_installer->startInstallFromGitHub(url, ref, scope)) {
+  if (m_installer->startInstallFromGit(repoSpec, ref, scope, forge)) {
     if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel Build"));
     if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
   }

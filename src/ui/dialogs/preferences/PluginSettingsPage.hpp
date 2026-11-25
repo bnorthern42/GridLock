@@ -1,16 +1,15 @@
 /**
  * @file PluginSettingsPage.hpp
- * @brief Two-tab Preferences -> Plugins page for installed plugin management, GitHub shorthand builds, and `plugins.toml` sync.
+ * @brief Two-tab Preferences -> Plugins page for installed plugin management, multi-forge Git builds, and `plugins.toml` sync.
  *
  * Organizes plugin administration into two tabs inside `#pluginSettingsTabs`:
  * 1. **Installed**: Search-directory selector, **Open Folder** / **Reload Plugins**,
  *    staged **Global** / **Workspace** checkboxes, workspace SHA-256 **Trust & Approve**,
  *    and an inline **Restart GridLock Now** notification banner.
- * 2. **Install from GitHub**: `owner/repo` shorthand or full GitHub URL + optional git ref inputs,
- *    **Global** vs **This Workspace** scope selector, **Clone & Build** / **Cancel Build**,
- *    **Sync `plugins.toml`** and **Open `plugins.toml`** declarative manifest controls,
- *    warning/error summary badge, **Restart GridLock to Load Installed Plugin** button, and
- *    a syntax-highlighted monospace compiler diagnostics log.
+ * 2. **Install from Git** (`#pluginInstallTab`): **Git Host** selector (`#pluginGitHostCombo`:
+ *    GitHub, GitLab, Codeberg, or Custom Git URL), **Repository / URL** input (`#pluginGitRepoEdit`),
+ *    optional branch/tag/SHA ref, **Global** vs **This Workspace** scope selector,
+ *    **Clone & Build**, **Sync `plugins.toml`**, **Open `plugins.toml`**, and live compiler diagnostics.
  */
 
 #pragma once
@@ -40,7 +39,7 @@ class MainWindow;
 
 /**
  * @class PluginSettingsPage
- * @brief Preferences settings panel managing installed C99 ABI plugins, GitHub builds, and `plugins.toml` sync.
+ * @brief Preferences settings panel managing installed C99 ABI plugins, multi-forge Git builds, and `plugins.toml` sync.
  */
 class PluginSettingsPage : public QWidget {
   Q_OBJECT
@@ -57,7 +56,7 @@ class PluginSettingsPage : public QWidget {
   /** @brief Destroys the page. */
   ~PluginSettingsPage() override = default;
 
-  /** @brief Returns the two-tab container (`Installed` and `Install from GitHub`). */
+  /** @brief Returns the two-tab container (`Installed` and `Install from Git`). */
   QTabWidget* tabWidget() const noexcept { return m_tabs; }
 
   /** @brief Returns the 7-column `QTableWidget` displaying discovered plugins. */
@@ -78,10 +77,19 @@ class PluginSettingsPage : public QWidget {
   /** @brief Returns the **Restart GridLock Now** button inside `restartBanner()`. */
   QPushButton* restartNowButton() const noexcept { return m_restartNowBtn; }
 
-  /** @brief Returns the GitHub repository URL or `owner/repo` shorthand input on the `Install from GitHub` tab. */
+  /** @brief Returns the **Git Host** selector combo box (`#pluginGitHostCombo`). */
+  QComboBox* gitHostCombo() const noexcept { return m_gitHostCombo; }
+
+  /** @brief Returns the **Repository / URL** input (`#pluginGitRepoEdit`). */
+  QLineEdit* gitRepoEdit() const noexcept { return m_repoUrlEdit; }
+
+  /** @brief Backward-compatible alias returning `gitRepoEdit()`. */
   QLineEdit* githubUrlEdit() const noexcept { return m_repoUrlEdit; }
 
-  /** @brief Returns the optional git branch/tag/SHA input on the `Install from GitHub` tab. */
+  /** @brief Returns the optional git branch/tag/SHA input on the `Install from Git` tab. */
+  QLineEdit* gitRefEdit() const noexcept { return m_gitRefEdit; }
+
+  /** @brief Backward-compatible alias returning `gitRefEdit()`. */
   QLineEdit* githubRefEdit() const noexcept { return m_gitRefEdit; }
 
   /** @brief Returns the installation scope selector (`Global` vs `This Workspace`). */
@@ -105,7 +113,7 @@ class PluginSettingsPage : public QWidget {
   /** @brief Returns the read-only monospace compiler diagnostics log view. */
   QPlainTextEdit* compilerLogView() const noexcept { return m_compilerLogView; }
 
-  /** @brief Returns the owned `PluginInstaller` instance driving GitHub clone/build and manifest sync tasks. */
+  /** @brief Returns the owned `PluginInstaller` instance driving Git clone/build and manifest sync tasks. */
   gridlock::core::plugins::PluginInstaller* pluginInstaller() const noexcept { return m_installer; }
 
   /** @brief Returns true when committed plugin enablement, trust, or installation requires a restart. */
@@ -145,7 +153,8 @@ class PluginSettingsPage : public QWidget {
   };
 
   QWidget* createInstalledTab(QWidget* parent);
-  QWidget* createGitHubInstallTab(QWidget* parent);
+  QWidget* createGitInstallTab(QWidget* parent);
+  void updateGitRepoPlaceholder();
   gridlock::core::plugins::PluginManager* resolvePluginManager();
   MainWindow* resolveMainWindow() const;
   void updateRowPreview(int row, const QString& rowKey);
@@ -165,6 +174,7 @@ class PluginSettingsPage : public QWidget {
   QLabel* m_restartBannerLabel = nullptr;
   QPushButton* m_restartNowBtn = nullptr;
   QTableWidget* m_pluginTable = nullptr;
+  QComboBox* m_gitHostCombo = nullptr;
   QLineEdit* m_repoUrlEdit = nullptr;
   QLineEdit* m_gitRefEdit = nullptr;
   QComboBox* m_installScopeCombo = nullptr;

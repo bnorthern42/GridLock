@@ -1,15 +1,16 @@
 /**
  * @file PluginManifest.hpp
- * @brief Declarative `plugins.toml` manifest parser and user-global `plugins-lock.toml` lockfile manager.
+ * @brief Declarative `plugins.toml` manifest parser, multi-forge URL validator, and `plugins-lock.toml` manager.
  *
  * Parses `[[plugins]]` declarations from `~/.config/gridlock/plugins.toml` and
- * `<workspace>/.gridlock/plugins.toml`, validates repository URLs/shorthands, git refs,
- * and build-system overrides, and maintains user-global SHA-256 and commit-SHA pins in
- * `~/.config/gridlock/plugins-lock.toml`.
+ * `<workspace>/.gridlock/plugins.toml` across GitHub, GitLab, Codeberg, Gitea, and custom
+ * self-hosted Git URLs, validates git refs and build modes, and maintains user-global SHA-256
+ * and commit-SHA pins in `~/.config/gridlock/plugins-lock.toml`.
  */
 
 #pragma once
 
+#include "PluginInstaller.hpp"
 #include "PluginManager.hpp"
 
 #include <QString>
@@ -22,8 +23,8 @@ namespace gridlock::core::plugins {
  * @brief Single `[[plugins]]` declaration parsed from `plugins.toml`.
  */
 struct PluginManifestEntry {
-  QString repo;                              ///< Raw repository spec (`owner/repo` shorthand or full GitHub URL).
-  QString normalizedUrl;                     ///< Canonical validated GitHub `.git` clone URL.
+  QString repo;                              ///< Raw repository spec (`owner/repo`, `gitlab:...`, `codeberg:...`, or full URL).
+  QString normalizedUrl;                     ///< Canonical validated Git clone URL.
   QString repoSlug;                          ///< Repository basename without `.git`.
   QString ref;                               ///< Optional branch, tag, or commit SHA (empty = remote default HEAD).
   QString build = QStringLiteral("auto");    ///< Build mode: `"auto"`, `"meson"`, `"cmake"`, `"make"`, or `"single"`.
@@ -35,7 +36,7 @@ struct PluginManifestEntry {
  * @brief Pinned build provenance stored in user-global `~/.config/gridlock/plugins-lock.toml`.
  */
 struct PluginLockEntry {
-  QString repo;          ///< Canonical normalized GitHub `.git` URL.
+  QString repo;          ///< Canonical normalized Git clone URL.
   QString scope;         ///< Installation scope token (`"global"` or `"workspace"`).
   QString ref;           ///< Declared branch, tag, or commit ref at install time.
   QString commitSha;     ///< Resolved 40-character lowercase Git commit SHA (`git rev-parse HEAD`).
@@ -45,7 +46,7 @@ struct PluginLockEntry {
 
 /**
  * @class PluginManifest
- * @brief Stateless helpers for reading, validating, and atomically updating `plugins.toml` and `plugins-lock.toml`.
+ * @brief Stateless helpers for multi-forge URL normalization, `plugins.toml` parsing, and `plugins-lock.toml` persistence.
  */
 class PluginManifest {
  public:
@@ -62,11 +63,19 @@ class PluginManifest {
   static QString scopeToString(PluginScope scope);
 
   /**
+   * @brief Normalizes and validates forge-prefixed (`github:`, `gitlab:`, `codeberg:`), shorthand, `https://`, `git@`, and `file://` URLs.
+   */
+  static bool normalizeGitUrl(const QString& rawInput,
+                              GitForgeHost defaultForge,
+                              QString* normalizedOut = nullptr,
+                              QString* repoSlugOut = nullptr,
+                              QString* errorOut = nullptr);
+
+  /** @brief Formats @p rawInput with an explicit `gitlab:` or `codeberg:` prefix when needed for `plugins.toml` persistence. */
+  static QString formatManifestRepoSpec(const QString& rawInput, GitForgeHost defaultForge);
+
+  /**
    * @brief Validates a `build` mode string (`"auto" | "meson" | "cmake" | "make" | "single"`).
-   * @param rawBuild Input build mode string (empty defaults to `"auto"`).
-   * @param normalizedOut Optional output receiving the lowercase canonical build token.
-   * @param errorOut Optional output receiving a validation error message.
-   * @return True if valid.
    */
   static bool validateBuildMode(const QString& rawBuild,
                                 QString* normalizedOut = nullptr,
@@ -74,10 +83,6 @@ class PluginManifest {
 
   /**
    * @brief Parses `[[plugins]]` entries from in-memory TOML content.
-   * @param tomlContent Raw UTF-8 TOML document text.
-   * @param outEntries Output vector populated with validated manifest entries.
-   * @param errorOut Optional output receiving syntax or schema validation errors.
-   * @return True when @p tomlContent is valid TOML and all `[[plugins]]` entries pass validation.
    */
   static bool parseManifestToml(const QString& tomlContent,
                                 QVector<PluginManifestEntry>* outEntries,
@@ -85,10 +90,6 @@ class PluginManifest {
 
   /**
    * @brief Loads `[[plugins]]` entries from @p filePath (missing file yields empty list and returns true).
-   * @param filePath Path to `plugins.toml`.
-   * @param outEntries Output vector populated with validated manifest entries.
-   * @param errorOut Optional output receiving I/O or validation errors.
-   * @return True if missing or parsed cleanly.
    */
   static bool loadManifestFile(const QString& filePath,
                                QVector<PluginManifestEntry>* outEntries,
@@ -121,16 +122,7 @@ class PluginManifest {
   /** @brief Queries `git ls-remote` for @p normalizedUrl and @p gitRef via shell-free `QProcess`. */
   static QString queryRemoteRefSha(const QString& normalizedUrl, const QString& gitRef);
 
-  /**
-   * @brief Checks whether @p entry is already installed, SHA-256 verified, and commit-current.
-   * @param entry Validated manifest entry.
-   * @param scope Target installation scope.
-   * @param installDir Target plugin directory containing built shared libraries.
-   * @param lockEntries Loaded user-global lockfile entries.
-   * @param outCanonBinaryPath Optional output receiving the canonical path to the verified binary.
-   * @param outBinarySha256 Optional output receiving the verified lowercase SHA-256 digest.
-   * @return True when no clone or rebuild is needed.
-   */
+  /** @brief Checks whether @p entry is already installed, SHA-256 verified, and commit-current. */
   static bool isManifestEntryUpToDate(const PluginManifestEntry& entry,
                                       PluginScope scope,
                                       const QString& installDir,

@@ -1,17 +1,18 @@
 /**
  * @file PluginInstaller.hpp
- * @brief Asynchronous GitHub repository clone, manifest sync, build-system detection, and atomic plugin installer.
+ * @brief Asynchronous multi-forge Git repository clone, manifest sync, build detection, and atomic plugin installer.
  *
- * Accepts compact `owner/repo` shorthand as well as `https://github.com/<owner>/<repo>[.git]` and
- * `git@github.com:<owner>/<repo>.git` URLs, clones into isolated temporary staging directories without
- * shell interpolation, builds via Meson, CMake, Make, or direct C99/C++23 compilation, updates
- * `plugins.toml` and user-global `plugins-lock.toml`, and supports sequential declarative manifest sync.
+ * Supports GitHub, GitLab (including nested subgroups), Codeberg, Gitea, and custom self-hosted
+ * `https://` or `git@` Git repositories (plus `file://` in unit tests), clones into isolated
+ * temporary staging directories without shell interpolation, compiles via Meson, CMake, Make, or
+ * direct C99/C++23 builds, updates `plugins.toml` and `plugins-lock.toml`, and runs manifest sync.
  */
 
 #pragma once
 
 #include "PluginManager.hpp"
 
+#include <cstdint>
 #include <memory>
 
 #include <QObject>
@@ -22,6 +23,17 @@
 #include <QTemporaryDir>
 
 namespace gridlock::core::plugins {
+
+/**
+ * @enum GitForgeHost
+ * @brief Target Git forge preset used when resolving unprefixed `owner/repo` shorthand strings.
+ */
+enum class GitForgeHost : uint8_t {
+  GitHub = 0,     ///< Resolves `<owner>/<repo>` to `https://github.com/<owner>/<repo>.git`.
+  GitLab = 1,     ///< Resolves `<group>[/<sub...>]/<repo>` to `https://gitlab.com/<path>.git`.
+  Codeberg = 2,   ///< Resolves `<owner>/<repo>` to `https://codeberg.org/<owner>/<repo>.git`.
+  CustomUrl = 3   ///< Requires an explicit `https://`, `git@`, `file://`, or forge-prefixed URL.
+};
 
 /**
  * @struct PluginBuildResult
@@ -55,21 +67,29 @@ class PluginInstaller : public QObject {
   ~PluginInstaller() override;
 
   /**
-   * @brief Validates and normalizes `owner/repo` shorthand or GitHub HTTPS/SSH URLs, rejecting `-` flags and `..`.
-   * @param rawUrl User-supplied `owner/repo`, `https://github.com/<owner>/<repo>[.git]`, or `git@github.com:<owner>/<repo>.git`.
-   * @param normalizedOut Optional output receiving canonical `.git` clone URL (`https://github.com/<owner>/<repo>.git` for shorthand).
+   * @brief Validates and normalizes forge-prefixed (`github:`, `gitlab:`, `codeberg:`), unprefixed shorthand, or full `https://`/`git@` URLs.
+   * @param input User-supplied shorthand or Git repository URL.
+   * @param defaultForge Preset forge used when @p input is unprefixed `<owner>/<repo>`.
+   * @param normalizedOut Optional output receiving the canonical clone URL.
    * @param repoSlugOut Optional output receiving the repository basename without `.git`.
    * @param errorOut Optional output receiving a human-readable rejection reason.
-   * @return True when @p rawUrl is safe and valid.
+   * @return True when @p input passes strict argument-injection and path-traversal checks.
    */
-  static bool normalizeAndValidateUrl(const QString& rawUrl,
+  static bool normalizeAndValidateUrl(const QString& input,
+                                      GitForgeHost defaultForge = GitForgeHost::GitHub,
                                       QString* normalizedOut = nullptr,
                                       QString* repoSlugOut = nullptr,
                                       QString* errorOut = nullptr);
 
   /**
-   * @brief Alias for `normalizeAndValidateUrl()` accepting full GitHub URLs and `owner/repo` shorthand.
+   * @brief Convenience overload resolving unprefixed shorthand against `GitForgeHost::GitHub`.
    */
+  static bool normalizeAndValidateUrl(const QString& input,
+                                      QString* normalizedOut,
+                                      QString* repoSlugOut = nullptr,
+                                      QString* errorOut = nullptr);
+
+  /** @brief Backward-compatible alias forwarding to `normalizeAndValidateUrl()`. */
   static bool validateGitHubUrl(const QString& rawUrl,
                                 QString* normalizedOut = nullptr,
                                 QString* repoSlugOut = nullptr,
@@ -90,15 +110,25 @@ class PluginInstaller : public QObject {
   bool isRunning() const noexcept { return m_running; }
 
   /**
-   * @brief Starts an asynchronous `git clone` + build + atomic install pipeline for @p repoUrl.
-   * @param repoUrl Validated `owner/repo` shorthand or GitHub HTTPS/SSH URL.
+   * @brief Starts an asynchronous `git clone` + build + atomic install pipeline for any supported Git forge or custom URL.
+   * @param repoSpec Shorthand (`owner/repo`, `gitlab:group/sub/repo`, `codeberg:owner/repo`) or full `https://`/`git@` URL.
    * @param gitRef Optional branch, tag, or commit SHA (empty for default branch).
    * @param scope Target installation scope (`PluginScope::UserGlobal` or `PluginScope::Workspace`).
+   * @param defaultForge Preset forge used when @p repoSpec is unprefixed shorthand.
    * @param targetDirOverride Optional explicit destination directory override (used in isolated tests).
    * @param recordInManifest When true, appends/updates the entry in the target scope's `plugins.toml`.
    * @param buildMode Build mode override (`"auto"`, `"meson"`, `"cmake"`, `"make"`, or `"single"`).
    * @return True if the pipeline started; false if already running or validation failed.
    */
+  bool startInstallFromGit(const QString& repoSpec,
+                           const QString& gitRef,
+                           PluginScope scope,
+                           GitForgeHost defaultForge = GitForgeHost::GitHub,
+                           const QString& targetDirOverride = QString(),
+                           bool recordInManifest = true,
+                           const QString& buildMode = QStringLiteral("auto"));
+
+  /** @brief Starts an install pipeline defaulting unprefixed shorthand to `GitForgeHost::GitHub`. */
   bool startInstallFromGitHub(const QString& repoUrl,
                               const QString& gitRef,
                               PluginScope scope,
@@ -119,10 +149,6 @@ class PluginInstaller : public QObject {
 
   /**
    * @brief Runs compilation and atomic installation directly on an existing local source directory.
-   * @param sourceDir Local directory containing `meson.build`, `CMakeLists.txt`, `Makefile`, or `.c`/`.cpp` sources.
-   * @param scope Target installation scope (`PluginScope::UserGlobal` or `PluginScope::Workspace`).
-   * @param targetDirOverride Optional explicit destination directory override.
-   * @return True if the build pipeline started cleanly.
    */
   bool startBuildFromSourceDirectory(const QString& sourceDir,
                                      PluginScope scope,
@@ -162,10 +188,8 @@ class PluginInstaller : public QObject {
 
   void resetRunState(bool batchSync);
   void launchNextSyncTask();
-  bool enqueueDetectedBuildSteps(const QString& rootDir,
-                                 const QString& fallbackStem,
-                                 const QString& buildMode,
-                                 QString* errorOut);
+  bool enqueueDetectedBuildSteps(const QString& rootDir, const QString& fallbackStem,
+                                 const QString& buildMode, QString* errorOut);
   void launchNextStep();
   void handleProcessOutput(const QByteArray& rawBytes);
   void classifyDiagnosticLine(const QString& line);

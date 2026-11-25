@@ -126,7 +126,7 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   auto* page = pd.pluginPage();
   QVERIFY(page->tabWidget() != nullptr && page->tabWidget()->count() == 2);
   QCOMPARE(page->tabWidget()->tabText(0), QStringLiteral("Installed"));
-  QCOMPARE(page->tabWidget()->tabText(1), QStringLiteral("Install from GitHub"));
+  QCOMPARE(page->tabWidget()->tabText(1), QStringLiteral("Install from Git"));
 
   QTableWidget* tbl = page->pluginTable();
   QVERIFY(tbl != nullptr && tbl->rowCount() == 3 && tbl->columnCount() == 7);
@@ -169,10 +169,26 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
 
   pd2.pluginPage()->tabWidget()->setCurrentIndex(1);
   QApplication::processEvents();
-  QVERIFY(pd2.pluginPage()->githubUrlEdit() != nullptr && pd2.pluginPage()->githubRefEdit() != nullptr &&
+  auto* hostCombo = pd2.findChild<QComboBox*>(QStringLiteral("pluginGitHostCombo"));
+  auto* repoEdit = pd2.findChild<QLineEdit*>(QStringLiteral("pluginGitRepoEdit"));
+  QVERIFY(pd2.findChild<QWidget*>(QStringLiteral("pluginInstallTab")) != nullptr);
+  QVERIFY(hostCombo != nullptr && hostCombo->count() == 4 && repoEdit != nullptr);
+  QVERIFY(pd2.pluginPage()->gitRepoEdit() == repoEdit && pd2.pluginPage()->githubRefEdit() != nullptr &&
           pd2.pluginPage()->installScopeCombo() != nullptr && pd2.pluginPage()->cloneAndBuildButton() != nullptr &&
+          pd2.pluginPage()->syncManifestButton() != nullptr && pd2.pluginPage()->openManifestButton() != nullptr &&
           pd2.pluginPage()->compilerLogView() != nullptr);
-  pd2.pluginPage()->githubUrlEdit()->setText(QStringLiteral("-oProxyCommand=evil"));
+  QVERIFY(repoEdit->placeholderText().contains(QStringLiteral("owner/repo")));
+  hostCombo->setCurrentIndex(1);
+  QApplication::processEvents();
+  QVERIFY(repoEdit->placeholderText().contains(QStringLiteral("gitlab.com")));
+  hostCombo->setCurrentIndex(2);
+  QApplication::processEvents();
+  QVERIFY(repoEdit->placeholderText().contains(QStringLiteral("codeberg.org")));
+  hostCombo->setCurrentIndex(3);
+  QApplication::processEvents();
+  QVERIFY(repoEdit->placeholderText().contains(QStringLiteral("gitea.example.org")));
+  hostCombo->setCurrentIndex(0);
+  repoEdit->setText(QStringLiteral("-oProxyCommand=evil"));
   pd2.pluginPage()->cloneAndBuildButton()->click();
   QApplication::processEvents();
   QVERIFY(pd2.pluginPage()->buildSummaryBadge()->text().contains(QStringLiteral("Build Failed")));

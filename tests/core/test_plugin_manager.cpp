@@ -340,11 +340,11 @@ class TestPluginManager : public QObject {
     QVERIFY(mgr.setPluginWorkspaceEnabled(plugId, true));
     mgr.unloadAll();
 
-    // 2. Validate URL security gates against leading '-' flag injection and non-GitHub hosts.
+    // 2. Validate URL security gates against leading '-' flag injection and insecure HTTP schemes.
     using gridlock::core::plugins::PluginInstaller;
     using gridlock::core::plugins::PluginScope;
     QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("-oProxyCommand=id")));
-    QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("https://evil.example.com/a/b.git")));
+    QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("http://insecure.example.com/a/b.git")));
     QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("https://github.com/owner/repo.git --upload-pack=x")));
     QVERIFY(!PluginInstaller::validateGitRef(QStringLiteral("--upload-pack=id")));
     QVERIFY(PluginInstaller::validateGitHubUrl(QStringLiteral("https://github.com/gridlock-test/local-plugin.git")));
@@ -536,6 +536,7 @@ class TestPluginManager : public QObject {
 
   void testOwnerRepoShorthandAndDeclarativeManifestSync() {
     ScopedPluginEnv env;
+    using gridlock::core::plugins::GitForgeHost;
     using gridlock::core::plugins::PluginBuildResult;
     using gridlock::core::plugins::PluginInstaller;
     using gridlock::core::plugins::PluginLockEntry;
@@ -543,45 +544,81 @@ class TestPluginManager : public QObject {
     using gridlock::core::plugins::PluginManifestEntry;
     using gridlock::core::plugins::PluginScope;
 
-    // 1. Validate owner/repo shorthand normalization and traversal/flag rejections.
+    // 1. Validate multi-host forge shorthands (GitHub, GitLab subgroups, Codeberg), Gitea/custom URLs, and rejections.
     QString normUrl, slug;
     QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("bnorthern42/gridlock-stl-inspector"), &normUrl, &slug));
+        QStringLiteral("bnorthern42/gridlock-stl-inspector"), GitForgeHost::GitHub, &normUrl, &slug));
     QCOMPARE(normUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
     QCOMPARE(slug, QStringLiteral("gridlock-stl-inspector"));
 
     QVERIFY(PluginInstaller::normalizeAndValidateUrl(
-        QStringLiteral("git@github.com:bnorthern42/gridlock-stl-inspector.git"), &normUrl, &slug));
-    QCOMPARE(normUrl, QStringLiteral("git@github.com:bnorthern42/gridlock-stl-inspector.git"));
+        QStringLiteral("github:bnorthern42/gridlock-stl-inspector"), GitForgeHost::CustomUrl, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
 
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("gitlab:hpc-tools/mpi/mesh-inspector"), GitForgeHost::GitHub, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://gitlab.com/hpc-tools/mpi/mesh-inspector.git"));
+    QCOMPARE(slug, QStringLiteral("mesh-inspector"));
+
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("hpc-tools/sub/probe"), GitForgeHost::GitLab, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://gitlab.com/hpc-tools/sub/probe.git"));
+
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("codeberg:scicomp/gridlock-probe"), GitForgeHost::GitHub, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://codeberg.org/scicomp/gridlock-probe.git"));
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("scicomp/gridlock-probe"), GitForgeHost::Codeberg, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://codeberg.org/scicomp/gridlock-probe.git"));
+
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("https://gitea.example.org:3000/lab/gridlock-plugin.git"), GitForgeHost::GitHub, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("https://gitea.example.org:3000/lab/gridlock-plugin.git"));
+    QCOMPARE(slug, QStringLiteral("gridlock-plugin"));
+
+    QVERIFY(PluginInstaller::normalizeAndValidateUrl(
+        QStringLiteral("git@gitea.example.org:lab/gridlock-plugin.git"), GitForgeHost::Codeberg, &normUrl, &slug));
+    QCOMPARE(normUrl, QStringLiteral("git@gitea.example.org:lab/gridlock-plugin.git"));
+
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/repo"), GitForgeHost::CustomUrl));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("--upload-pack=id/repo")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("-upload-pack=evil")));
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("-evil/repo")));
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/-evil")));
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/..")));
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("../repo")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("gitlab:group/../repo")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("https://gitea.example.org/lab/../evil.git")));
     QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/.git")));
-    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/repo/extra")));
+    QVERIFY(!PluginInstaller::normalizeAndValidateUrl(QStringLiteral("owner/repo/extra"), GitForgeHost::GitHub));
 
-    // 2. Parse declarative [[plugins]] manifest entries and reject invalid build modes.
+    // 2. Parse declarative [[plugins]] manifest entries across GitHub, GitLab, Codeberg, and Gitea URLs.
     QVector<PluginManifestEntry> parsed;
     QString parseErr;
     const QString sampleToml = QStringLiteral(
         "[[plugins]]\n"
-        "repo = \"bnorthern42/gridlock-stl-inspector\"\n"
+        "repo = \"codeberg:bnorthern42/gridlock-stl-inspector\"\n"
         "ref = \"main\"\n"
         "build = \"meson\"\n"
         "\n"
         "[[plugins]]\n"
-        "repo = \"https://github.com/bnorthern42/disabled-probe\"\n"
+        "repo = \"gitlab:hpc/sub/disabled-probe\"\n"
         "build = \"single\"\n"
-        "enabled = false\n");
+        "enabled = false\n"
+        "\n"
+        "[[plugins]]\n"
+        "repo = \"https://gitea.example.org/user/custom-probe.git\"\n");
     QVERIFY2(PluginManifest::parseManifestToml(sampleToml, &parsed, &parseErr), qPrintable(parseErr));
-    QCOMPARE(parsed.size(), 2);
-    QCOMPARE(parsed.at(0).normalizedUrl, QStringLiteral("https://github.com/bnorthern42/gridlock-stl-inspector.git"));
+    QCOMPARE(parsed.size(), 3);
+    QCOMPARE(parsed.at(0).normalizedUrl, QStringLiteral("https://codeberg.org/bnorthern42/gridlock-stl-inspector.git"));
     QCOMPARE(parsed.at(0).ref, QStringLiteral("main"));
     QCOMPARE(parsed.at(0).build, QStringLiteral("meson"));
     QVERIFY(parsed.at(0).enabled);
+    QCOMPARE(parsed.at(1).normalizedUrl, QStringLiteral("https://gitlab.com/hpc/sub/disabled-probe.git"));
     QCOMPARE(parsed.at(1).build, QStringLiteral("single"));
     QVERIFY(!parsed.at(1).enabled);
+    QCOMPARE(parsed.at(2).normalizedUrl, QStringLiteral("https://gitea.example.org/user/custom-probe.git"));
+    QVERIFY(parsed.at(2).enabled);
 
     QVERIFY(!PluginManifest::parseManifestToml(
         QStringLiteral("[[plugins]]\nrepo = \"owner/repo\"\nbuild = \"bazel\"\n"), &parsed, &parseErr));

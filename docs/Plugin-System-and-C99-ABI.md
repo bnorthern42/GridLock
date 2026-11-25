@@ -223,7 +223,7 @@ GridLockStatus inspectRank(const GridLockHostApi* host, int32_t rank, uint64_t p
 
 ---
 
-## 6. Workstation UI Integration, Staged Preferences, Self-Restart & GitHub Installer
+## 6. Workstation UI Integration, Staged Preferences, Self-Restart & Multi-Forge Git Installer
 
 * **Tools -> Plugins Nested Menus & Shortcut Checks (`MainWindowPlugins.cpp`)**: Materializes flat commands (`register_command_action`) and `"/"`-delimited submenu trees (`register_menu_action`, e.g., `"Mesh Tools/Refinement/Export VTK"`). Shortcuts are checked against `ShortcutManager::registeredBindings()` before assignment so plugin hints never override built-in debugger keybindings.
 * **Multi-Surface Context Menus**: Populates a **Plugin Actions** submenu on right-click across `VariablesDockWidget` (`GRIDLOCK_SURFACE_VARIABLES` + `register_variable_action`), `SourceCodeView` (`GRIDLOCK_SURFACE_CODE_EDITOR` and `GRIDLOCK_SURFACE_BREAKPOINTS` gutter menu), `CallStackDockWidget` (`GRIDLOCK_SURFACE_CALL_STACK`), and `ServerRackView` (`GRIDLOCK_SURFACE_RANK_LIST`).
@@ -235,9 +235,10 @@ GridLockStatus inspectRank(const GridLockHostApi* host, int32_t rank, uint64_t p
   * Displays a 7-column table: **Global** (checkbox), **Workspace** (checkbox), **Name**, **Version**, **Scope / ABI**, **Status**, and **Trust** (**Trust & Approve (<sha8>)** for untrusted workspace binaries).
   * Checkbox and trust edits are staged in memory without mutating `ConfigManager` on click; **Cancel** discards staged edits and **Apply** / **OK** commits them.
   * When applied changes alter plugin enablement or workspace trust, both `PluginSettingsPage` (`#pluginRestartBanner`) and `MainWindow`'s status bar (`#mainWindowPluginRestartBanner`) display a **Restart GridLock Now** button that saves open workspace/preferences state, launches `QProcess::startDetached`, and exits cleanly.
-* **Preferences -> Plugins (`Install from GitHub` Tab & `PluginInstaller`)**:
-  * Accepts compact `<owner>/<repo>` shorthand (for example, `bnorthern42/gridlock-stl-inspector`, normalized to `https://github.com/<owner>/<repo>.git`) as well as validated `https://github.com/<owner>/<repo>[.git]` or `git@github.com:<owner>/<repo>.git` URLs and an optional branch, tag, or commit SHA ref, rejecting leading `-` flags, `..` path traversal, whitespace, and shell metacharacters.
-  * Clones via shell-free `QProcess` argument lists into a temporary staging directory and supports explicit `build` overrides (`"auto"`, `"meson"`, `"cmake"`, `"make"`, `"single"`) or automatic detection in priority order:
+* **Preferences -> Plugins (`Install from Git` Tab `#pluginInstallTab` & `PluginInstaller`)**:
+  * Provides a **Git Host** selector (`#pluginGitHostCombo`: **GitHub (`github.com`)**, **GitLab (`gitlab.com`)**, **Codeberg (`codeberg.org`)**, and **Custom Git URL (`https://` / `git@`)**) paired with `#pluginGitRepoEdit`.
+  * `PluginInstaller::normalizeAndValidateUrl()` accepts forge-prefixed shorthand (`github:<owner>/<repo>`, `gitlab:<group>[/<sub...>]/<repo>`, `codeberg:<owner>/<repo>`), unprefixed `<owner>/<repo>` resolved against the selected `GitForgeHost`, and full `https://<host>/<path>[.git]` or `git@<host>:<path>[.git]` URLs for Gitea or any self-hosted Git server (plus `file:///` in isolated unit tests), rejecting leading `-` option flags, `..` path traversal, empty host/path segments, whitespace, and control characters.
+  * Clones via shell-free `QProcess` argument lists (`GIT_TERMINAL_PROMPT=0`) into a temporary staging directory and supports explicit `build` overrides (`"auto"`, `"meson"`, `"cmake"`, `"make"`, `"single"`) or automatic detection in priority order:
     1. `meson.build`: `meson setup build -Dgridlock_include_dir=<includePath>` followed by `ninja -C build`
     2. `CMakeLists.txt`: `cmake -B build -DGRIDLOCK_INCLUDE_DIR=<includePath>` followed by `cmake --build build`
     3. `Makefile`: `make GRIDLOCK_INCLUDE_DIR=<includePath>`
@@ -246,27 +247,39 @@ GridLockStatus inspectRank(const GridLockHostApi* host, int32_t rank, uint64_t p
 
 ---
 
-## 7. Declarative `plugins.toml` Manifest, `plugins-lock.toml` Pinning & GitHub Topic Convention
+## 7. Declarative `plugins.toml` Manifest, `plugins-lock.toml` Pinning & Multi-Forge Discovery
 
-GridLock supports decentralized, version-pinned plugin management without a central registry server:
+GridLock supports decentralized, version-pinned plugin management across GitHub, GitLab, Codeberg, Gitea, and self-hosted Git servers without a central registry server:
 
-* **Community Discovery Convention (`gridlock-plugin` Topic)**: Out-of-tree plugin authors publish standard Git repositories on GitHub tagged with the `gridlock-plugin` repository topic (`https://github.com/topics/gridlock-plugin`) and declare dependencies using compact `owner/repo` shorthand.
+* **Community Topic Convention (`gridlock-plugin`)**: Out-of-tree plugin authors publish standard Git repositories on GitHub, GitLab, Codeberg, or Gitea tagged with the `gridlock-plugin` topic and declare dependencies using compact forge shorthand or full HTTPS/SSH URLs.
 * **Declarative Manifests (`plugins.toml`)**:
   * **User-Global Scope**: `~/.config/gridlock/plugins.toml`
   * **Workspace Scope**: `<workspace>/.gridlock/plugins.toml`
-  * Each `[[plugins]]` table supports `repo` (required shorthand or full GitHub URL), `ref` (optional branch, tag, or 7..40 character hex commit SHA), `build` (optional `"auto"`, `"meson"`, `"cmake"`, `"make"`, or `"single"`, defaulting to `"auto"`), and `enabled` (optional boolean, defaulting to `true`):
+  * Each `[[plugins]]` table supports `repo` (`owner/repo` defaulting to GitHub, `github:owner/repo`, `gitlab:group/sub/repo`, `codeberg:owner/repo`, or any `https://` / `git@` URL), `ref` (optional branch, tag, or 7..40 character hex commit SHA), `build` (optional `"auto"`, `"meson"`, `"cmake"`, `"make"`, or `"single"`, defaulting to `"auto"`), and `enabled` (optional boolean, defaulting to `true`):
     ```toml
     [[plugins]]
     repo = "bnorthern42/gridlock-stl-inspector"
     ref = "main"
     build = "auto"
     enabled = true
+
+    [[plugins]]
+    repo = "gitlab:hpc-tools/mpi/mesh-inspector"
+    ref = "v1.2.0"
+    build = "meson"
+
+    [[plugins]]
+    repo = "codeberg:scicomp/kokkos-field-view"
+
+    [[plugins]]
+    repo = "https://gitea.example.org/team/custom-solver-probe.git"
+    build = "cmake"
     ```
 * **User-Global Lockfile (`~/.config/gridlock/plugins-lock.toml`)**:
   * Stored strictly inside user-global `~/.config/gridlock/plugins-lock.toml` (never read from `<workspace>/.gridlock/`, so cloning an untrusted repository cannot forge lock or trust state).
   * Records each installed plugin's normalized `repo` URL, installation `scope` (`"global"` or `"workspace"`), declared `ref`, resolved 40-character `commit_sha` (`git rev-parse HEAD`), `binary_name`, and lowercase `binary_sha256`.
 * **Synchronizing Manifests (`Sync plugins.toml` & `Open plugins.toml`)**:
-  * In **Preferences -> Plugins -> Install from GitHub**, **Open `plugins.toml`** creates a commented starter manifest if missing and opens it directly in the workstation editor, while **Sync `plugins.toml`** runs `PluginInstaller::syncFromManifests(userManifestPath, workspaceManifestPath, scope)`.
+  * In **Preferences -> Plugins -> Install from Git**, **Open `plugins.toml`** creates a commented starter manifest if missing and opens it directly in the workstation editor, while **Sync `plugins.toml`** runs `PluginInstaller::syncFromManifests(userManifestPath, workspaceManifestPath, scope)`.
   * During synchronization, `PluginInstaller` verifies each enabled entry against `~/.config/gridlock/plugins-lock.toml`, local binary `SHA-256` digests, and upstream `git ls-remote` commit SHAs, sequentially cloning and compiling only missing or outdated plugins, registering workspace binary trust on explicit workspace sync, streaming aggregated warnings and errors into `#pluginCompilerLogView`, and surfacing **Restart GridLock Now** when new binaries are built.
 
 ---

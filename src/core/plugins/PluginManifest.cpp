@@ -1,11 +1,9 @@
 /**
  * @file PluginManifest.cpp
- * @brief Implementation of `plugins.toml` parsing and user-global `plugins-lock.toml` lockfile persistence.
+ * @brief Multi-forge Git URL normalization, `plugins.toml` parsing, and user-global `plugins-lock.toml` persistence.
  */
 
 #include "PluginManifest.hpp"
-
-#include "PluginInstaller.hpp"
 
 #include <sstream>
 #include <string>
@@ -27,9 +25,82 @@ namespace gridlock::core::plugins {
 
 namespace {
 
+bool hasWhitespaceOrControl(const QString& s) {
+  for (const QChar c : s) {
+    if (c.isSpace() || c == QChar('\0') || c.category() == QChar::Other_Control ||
+        c.category() == QChar::Other_Format) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool isHexCommitRef(const QString& ref) {
   static const QRegularExpression kHexShaRe(QStringLiteral("^[0-9a-fA-F]{7,40}$"));
   return kHexShaRe.match(ref).hasMatch();
+}
+
+bool validateHostAuthority(const QString& rawAuthority, bool allowPort, QString* cleanOut) {
+  if (rawAuthority.isEmpty() || rawAuthority.contains(QLatin1Char('@')) ||
+      rawAuthority.contains(QStringLiteral(".."))) {
+    return false;
+  }
+  QString host = rawAuthority;
+  QString portSuffix;
+  if (const qsizetype colon = rawAuthority.indexOf(QLatin1Char(':')); colon >= 0) {
+    if (!allowPort) return false;
+    host = rawAuthority.left(colon);
+    const QString portStr = rawAuthority.mid(colon + 1);
+    bool ok = false;
+    const int port = portStr.toInt(&ok);
+    if (!ok || port < 1 || port > 65535 || portStr.startsWith(QLatin1Char('0'))) return false;
+    portSuffix = QLatin1Char(':') + portStr;
+  }
+  if (host.isEmpty() || host.startsWith(QLatin1Char('-')) || host.endsWith(QLatin1Char('-')) ||
+      host.startsWith(QLatin1Char('.')) || host.endsWith(QLatin1Char('.'))) {
+    return false;
+  }
+  static const QRegularExpression kHostRe(QStringLiteral("^[A-Za-z0-9.-]+$"));
+  if (!kHostRe.match(host).hasMatch()) return false;
+  if (host.compare(QLatin1String("localhost"), Qt::CaseInsensitive) != 0 && !host.contains(QLatin1Char('.'))) {
+    return false;
+  }
+  if (cleanOut) *cleanOut = host.toLower() + portSuffix;
+  return true;
+}
+
+bool validateRepoSegments(QString rawPath, int minSegs, int maxSegs, QString* joinedOut, QString* slugOut) {
+  if (rawPath.endsWith(QLatin1Char('/'))) rawPath.chop(1);
+  if (rawPath.isEmpty() || rawPath.startsWith(QLatin1Char('/'))) return false;
+
+  QStringList segs = rawPath.split(QLatin1Char('/'), Qt::KeepEmptyParts);
+  if (segs.size() < minSegs || segs.size() > maxSegs) return false;
+  if (segs.last().endsWith(QStringLiteral(".git"))) segs.last().chop(4);
+
+  static const QRegularExpression kSegRe(QStringLiteral("^[A-Za-z0-9_.-]+$"));
+  for (const QString& seg : segs) {
+    if (seg.isEmpty() || seg == QLatin1String(".") || seg == QLatin1String("..") ||
+        seg.contains(QStringLiteral("..")) || seg.startsWith(QLatin1Char('-')) || !kSegRe.match(seg).hasMatch()) {
+      return false;
+    }
+  }
+  if (joinedOut) *joinedOut = segs.join(QLatin1Char('/'));
+  if (slugOut) *slugOut = segs.last();
+  return true;
+}
+
+void boundsForHost(const QString& lowerHostPort, int* minSegs, int* maxSegs) {
+  const QString hostOnly = lowerHostPort.section(QLatin1Char(':'), 0, 0);
+  if (hostOnly == QLatin1String("github.com") || hostOnly == QLatin1String("codeberg.org")) {
+    *minSegs = 2;
+    *maxSegs = 2;
+  } else if (hostOnly == QLatin1String("gitlab.com")) {
+    *minSegs = 2;
+    *maxSegs = 8;
+  } else {
+    *minSegs = 1;
+    *maxSegs = 10;
+  }
 }
 
 bool writeTextAtomically(const QString& filePath, const QByteArray& utf8Bytes, QString* errorOut) {
@@ -70,8 +141,7 @@ QString PluginManifest::userManifestPath() {
 
 QString PluginManifest::workspaceManifestPath() {
   const QString ws = ConfigManager::instance().workspacePath().trimmed();
-  if (ws.isEmpty()) return QString();
-  return QDir(ws).filePath(QStringLiteral(".gridlock/plugins.toml"));
+  return ws.isEmpty() ? QString() : QDir(ws).filePath(QStringLiteral(".gridlock/plugins.toml"));
 }
 
 QString PluginManifest::userLockFilePath() {
@@ -80,6 +150,141 @@ QString PluginManifest::userLockFilePath() {
 
 QString PluginManifest::scopeToString(PluginScope scope) {
   return scope == PluginScope::Workspace ? QStringLiteral("workspace") : QStringLiteral("global");
+}
+
+bool PluginManifest::normalizeGitUrl(const QString& rawInput, GitForgeHost defaultForge,
+                                     QString* normalizedOut, QString* repoSlugOut, QString* errorOut) {
+  if (rawInput.isEmpty()) {
+    if (errorOut) *errorOut = QStringLiteral("Repository URL must not be empty.");
+    return false;
+  }
+  if (rawInput.startsWith(QLatin1Char('-'))) {
+    if (errorOut) *errorOut = QStringLiteral("Repository URL must not begin with '-'.");
+    return false;
+  }
+  if (hasWhitespaceOrControl(rawInput)) {
+    if (errorOut) *errorOut = QStringLiteral("Repository URL must not contain whitespace or control characters.");
+    return false;
+  }
+
+  if (rawInput.startsWith(QStringLiteral("file:///"))) {
+    QString localPath = rawInput.mid(8);
+    if (localPath.endsWith(QLatin1Char('/'))) localPath.chop(1);
+    const QStringList segs = localPath.split(QLatin1Char('/'), Qt::KeepEmptyParts);
+    if (segs.isEmpty()) {
+      if (errorOut) *errorOut = QStringLiteral("Local file:// repository URL has an empty path.");
+      return false;
+    }
+    for (const QString& seg : segs) {
+      if (seg.isEmpty() || seg == QLatin1String(".") || seg == QLatin1String("..") ||
+          seg.contains(QStringLiteral("..")) || seg.startsWith(QLatin1Char('-'))) {
+        if (errorOut) *errorOut = QStringLiteral("Unsafe path segment in file:// repository URL.");
+        return false;
+      }
+    }
+    QString slug = segs.last();
+    if (slug.endsWith(QStringLiteral(".git"))) slug.chop(4);
+    if (slug.isEmpty()) {
+      if (errorOut) *errorOut = QStringLiteral("Invalid repository basename in file:// URL.");
+      return false;
+    }
+    if (normalizedOut) *normalizedOut = QStringLiteral("file:///") + segs.join(QLatin1Char('/'));
+    if (repoSlugOut) *repoSlugOut = slug;
+    return true;
+  }
+
+  if (rawInput.startsWith(QStringLiteral("https://"))) {
+    const QString rest = rawInput.mid(8);
+    const qsizetype slash = rest.indexOf(QLatin1Char('/'));
+    QString cleanAuthority;
+    if (slash <= 0 || !validateHostAuthority(rest.left(slash), true, &cleanAuthority)) {
+      if (errorOut) *errorOut = QStringLiteral("Invalid host in HTTPS Git repository URL.");
+      return false;
+    }
+    int minS = 1, maxS = 10;
+    boundsForHost(cleanAuthority, &minS, &maxS);
+    QString cleanPath, slug;
+    if (!validateRepoSegments(rest.mid(slash + 1), minS, maxS, &cleanPath, &slug)) {
+      if (errorOut) *errorOut = QStringLiteral("Invalid or unsafe repository path in HTTPS Git URL.");
+      return false;
+    }
+    if (normalizedOut) *normalizedOut = QStringLiteral("https://%1/%2.git").arg(cleanAuthority, cleanPath);
+    if (repoSlugOut) *repoSlugOut = slug;
+    return true;
+  }
+
+  if (rawInput.startsWith(QStringLiteral("git@"))) {
+    const QString rest = rawInput.mid(4);
+    const qsizetype colon = rest.indexOf(QLatin1Char(':'));
+    QString cleanHost;
+    if (colon <= 0 || rest.left(colon).contains(QLatin1Char('/')) ||
+        !validateHostAuthority(rest.left(colon), false, &cleanHost)) {
+      if (errorOut) *errorOut = QStringLiteral("Invalid host in SSH git@ repository URL.");
+      return false;
+    }
+    int minS = 1, maxS = 10;
+    boundsForHost(cleanHost, &minS, &maxS);
+    QString cleanPath, slug;
+    if (!validateRepoSegments(rest.mid(colon + 1), minS, maxS, &cleanPath, &slug)) {
+      if (errorOut) *errorOut = QStringLiteral("Invalid or unsafe repository path in SSH Git URL.");
+      return false;
+    }
+    if (normalizedOut) *normalizedOut = QStringLiteral("git@%1:%2.git").arg(cleanHost, cleanPath);
+    if (repoSlugOut) *repoSlugOut = slug;
+    return true;
+  }
+
+  auto resolveForgeShorthand = [&](const QString& host, int maxSegs, const QString& pathSpec) -> bool {
+    QString cleanPath, slug;
+    if (!validateRepoSegments(pathSpec, 2, maxSegs, &cleanPath, &slug)) {
+      if (errorOut) *errorOut = QStringLiteral("Invalid repository shorthand '%1' for %2.").arg(pathSpec, host);
+      return false;
+    }
+    if (normalizedOut) *normalizedOut = QStringLiteral("https://%1/%2.git").arg(host, cleanPath);
+    if (repoSlugOut) *repoSlugOut = slug;
+    return true;
+  };
+
+  if (rawInput.startsWith(QStringLiteral("github:"))) {
+    return resolveForgeShorthand(QStringLiteral("github.com"), 2, rawInput.mid(7));
+  }
+  if (rawInput.startsWith(QStringLiteral("gitlab:"))) {
+    return resolveForgeShorthand(QStringLiteral("gitlab.com"), 8, rawInput.mid(7));
+  }
+  if (rawInput.startsWith(QStringLiteral("codeberg:"))) {
+    return resolveForgeShorthand(QStringLiteral("codeberg.org"), 2, rawInput.mid(9));
+  }
+  if (rawInput.contains(QLatin1Char(':'))) {
+    if (errorOut) {
+      *errorOut = QStringLiteral(
+          "Unsupported Git URL scheme or prefix (use https://, git@, github:, gitlab:, or codeberg:).");
+    }
+    return false;
+  }
+
+  switch (defaultForge) {
+    case GitForgeHost::GitHub:
+      return resolveForgeShorthand(QStringLiteral("github.com"), 2, rawInput);
+    case GitForgeHost::GitLab:
+      return resolveForgeShorthand(QStringLiteral("gitlab.com"), 8, rawInput);
+    case GitForgeHost::Codeberg:
+      return resolveForgeShorthand(QStringLiteral("codeberg.org"), 2, rawInput);
+    case GitForgeHost::CustomUrl:
+      if (errorOut) {
+        *errorOut = QStringLiteral(
+            "Custom Git URL mode requires a full https://<host>/<path>.git or git@<host>:<path>.git URL.");
+      }
+      return false;
+  }
+  return false;
+}
+
+QString PluginManifest::formatManifestRepoSpec(const QString& rawInput, GitForgeHost defaultForge) {
+  const QString trimmed = rawInput.trimmed();
+  if (trimmed.contains(QLatin1Char(':'))) return trimmed;
+  if (defaultForge == GitForgeHost::GitLab) return QStringLiteral("gitlab:") + trimmed;
+  if (defaultForge == GitForgeHost::Codeberg) return QStringLiteral("codeberg:") + trimmed;
+  return trimmed;
 }
 
 bool PluginManifest::validateBuildMode(const QString& rawBuild, QString* normalizedOut, QString* errorOut) {
@@ -108,7 +313,10 @@ bool PluginManifest::parseManifestToml(const QString& tomlContent,
     const QByteArray utf8 = tomlContent.toUtf8();
     tbl = toml::parse(std::string_view(utf8.constData(), static_cast<size_t>(utf8.size())));
   } catch (const toml::parse_error& err) {
-    if (errorOut) *errorOut = QStringLiteral("Invalid TOML in plugins.toml: %1").arg(QString::fromUtf8(err.description().data(), static_cast<qsizetype>(err.description().size())));
+    if (errorOut) {
+      *errorOut = QStringLiteral("Invalid TOML in plugins.toml: %1")
+                      .arg(QString::fromUtf8(err.description().data(), static_cast<qsizetype>(err.description().size())));
+    }
     return false;
   }
 
@@ -138,7 +346,8 @@ bool PluginManifest::parseManifestToml(const QString& tomlContent,
     PluginManifestEntry parsed;
     parsed.repo = QString::fromStdString(*repoOpt).trimmed();
     QString err;
-    if (!PluginInstaller::normalizeAndValidateUrl(parsed.repo, &parsed.normalizedUrl, &parsed.repoSlug, &err)) {
+    if (!PluginInstaller::normalizeAndValidateUrl(parsed.repo, GitForgeHost::GitHub,
+                                                  &parsed.normalizedUrl, &parsed.repoSlug, &err)) {
       if (errorOut) *errorOut = QStringLiteral("[[plugins]] entry #%1 ('%2'): %3").arg(idx).arg(parsed.repo, err);
       return false;
     }
@@ -206,8 +415,8 @@ bool PluginManifest::ensureManifestTemplate(const QString& filePath, QString* er
 
   const QByteArray starter = QByteArrayLiteral(
       "# GridLock Declarative Plugin Manifest (plugins.toml)\n"
-      "# Repositories tagged with GitHub topic 'gridlock-plugin' can be declared using\n"
-      "# compact 'owner/repo' shorthand or full GitHub HTTPS/SSH URLs.\n"
+      "# Supports GitHub ('owner/repo' or 'github:owner/repo'), GitLab ('gitlab:group/repo'),\n"
+      "# Codeberg ('codeberg:user/repo'), Gitea, or any custom 'https://' / 'git@' Git URL.\n"
       "#\n"
       "# [[plugins]]\n"
       "# repo = \"bnorthern42/gridlock-stl-inspector\"\n"
@@ -220,17 +429,15 @@ bool PluginManifest::ensureManifestTemplate(const QString& filePath, QString* er
 bool PluginManifest::upsertManifestEntry(const QString& filePath,
                                          const PluginManifestEntry& entry,
                                          QString* errorOut) {
-  QString normUrl;
-  QString slug;
-  if (!PluginInstaller::normalizeAndValidateUrl(entry.repo, &normUrl, &slug, errorOut)) return false;
+  QString normUrl, slug, normBuild;
+  if (!PluginInstaller::normalizeAndValidateUrl(entry.repo, GitForgeHost::GitHub, &normUrl, &slug, errorOut)) {
+    return false;
+  }
   if (!PluginInstaller::validateGitRef(entry.ref, errorOut)) return false;
-  QString normBuild;
   if (!validateBuildMode(entry.build, &normBuild, errorOut)) return false;
 
   QVector<PluginManifestEntry> entries;
-  if (QFileInfo::exists(filePath)) {
-    if (!loadManifestFile(filePath, &entries, errorOut)) return false;
-  }
+  if (QFileInfo::exists(filePath) && !loadManifestFile(filePath, &entries, errorOut)) return false;
 
   PluginManifestEntry clean = entry;
   clean.normalizedUrl = normUrl;
@@ -286,7 +493,10 @@ bool PluginManifest::loadLockFile(const QString& lockFilePath,
     if (utf8.trimmed().isEmpty()) return true;
     tbl = toml::parse(std::string_view(utf8.constData(), static_cast<size_t>(utf8.size())));
   } catch (const toml::parse_error& err) {
-    if (errorOut) *errorOut = QStringLiteral("Invalid TOML in plugins-lock.toml: %1").arg(QString::fromUtf8(err.description().data(), static_cast<qsizetype>(err.description().size())));
+    if (errorOut) {
+      *errorOut = QStringLiteral("Invalid TOML in plugins-lock.toml: %1")
+                      .arg(QString::fromUtf8(err.description().data(), static_cast<qsizetype>(err.description().size())));
+    }
     return false;
   }
 
@@ -322,13 +532,10 @@ bool PluginManifest::upsertLockEntry(const QString& lockFilePath,
   }
 
   QVector<PluginLockEntry> entries;
-  if (QFileInfo::exists(lockFilePath)) {
-    (void)loadLockFile(lockFilePath, &entries, nullptr);
-  }
+  if (QFileInfo::exists(lockFilePath)) (void)loadLockFile(lockFilePath, &entries, nullptr);
 
-  const QString normScope = entry.scope.trimmed().isEmpty() ? QStringLiteral("global") : entry.scope.trimmed().toLower();
   PluginLockEntry clean = entry;
-  clean.scope = normScope;
+  clean.scope = entry.scope.trimmed().isEmpty() ? QStringLiteral("global") : entry.scope.trimmed().toLower();
   clean.commitSha = entry.commitSha.trimmed().toLower();
   clean.binarySha256 = entry.binarySha256.trimmed().toLower();
 
@@ -393,22 +600,24 @@ QString PluginManifest::queryRemoteRefSha(const QString& normalizedUrl, const QS
   QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   env.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
   proc.setProcessEnvironment(env);
-  proc.start(QStringLiteral("git"), {QStringLiteral("ls-remote"), QStringLiteral("--"), normalizedUrl, target});
+  QStringList args;
+  if (normalizedUrl.startsWith(QStringLiteral("file://"))) {
+    args << QStringLiteral("-c") << QStringLiteral("protocol.file.allow=always");
+  }
+  args << QStringLiteral("ls-remote") << QStringLiteral("--") << normalizedUrl << target;
+  proc.start(QStringLiteral("git"), args);
   if (!proc.waitForFinished(8000) || proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
     return QString();
   }
-  const QString out = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
-  const QString firstLine = out.section(QLatin1Char('\n'), 0, 0).trimmed();
+  const QString firstLine = QString::fromUtf8(proc.readAllStandardOutput()).trimmed().section(QLatin1Char('\n'), 0, 0);
   const QString sha = firstLine.section(QLatin1Char('\t'), 0, 0).trimmed().toLower();
   return sha.size() == 40 ? sha : QString();
 }
 
-bool PluginManifest::isManifestEntryUpToDate(const PluginManifestEntry& entry,
-                                             PluginScope scope,
+bool PluginManifest::isManifestEntryUpToDate(const PluginManifestEntry& entry, PluginScope scope,
                                              const QString& installDir,
                                              const QVector<PluginLockEntry>& lockEntries,
-                                             QString* outCanonBinaryPath,
-                                             QString* outBinarySha256) {
+                                             QString* outCanonBinaryPath, QString* outBinarySha256) {
   const QString wantedScope = scopeToString(scope);
   const PluginLockEntry* matched = nullptr;
   for (const PluginLockEntry& cand : lockEntries) {
@@ -418,11 +627,8 @@ bool PluginManifest::isManifestEntryUpToDate(const PluginManifestEntry& entry,
     }
   }
   if (matched == nullptr || matched->commitSha.isEmpty() || matched->binaryName.isEmpty() ||
-      matched->binarySha256.isEmpty()) {
-    return false;
-  }
-  if (matched->binaryName.contains(QLatin1Char('/')) || matched->binaryName.contains(QLatin1Char('\\')) ||
-      matched->binaryName == QLatin1String("..")) {
+      matched->binarySha256.isEmpty() || matched->binaryName.contains(QLatin1Char('/')) ||
+      matched->binaryName.contains(QLatin1Char('\\')) || matched->binaryName == QLatin1String("..")) {
     return false;
   }
 
