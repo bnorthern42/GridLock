@@ -5,6 +5,8 @@
 
 #include "PluginManager.hpp"
 
+#include "PluginManifest.hpp"
+
 #ifndef _WIN32
 #include <sys/stat.h>
 #endif
@@ -52,6 +54,91 @@ LoadedPluginInfo* findInfoById(QVector<LoadedPluginInfo>& list, const QString& i
   if (id.isEmpty()) return nullptr;
   for (auto& info : list) if (info.id == id) return &info;
   return nullptr;
+}
+
+struct ProvenanceTables {
+  QVector<PluginLockEntry> locks;
+  QVector<PluginManifestEntry> userManifest;
+  QVector<PluginManifestEntry> wsManifest;
+
+  static ProvenanceTables loadFromDisk() {
+    ProvenanceTables t;
+    (void)PluginManifest::loadLockFile(PluginManifest::userLockFilePath(), &t.locks, nullptr);
+    (void)PluginManifest::loadManifestFile(PluginManifest::userManifestPath(), &t.userManifest, nullptr);
+    if (const QString wsPath = PluginManifest::workspaceManifestPath(); !wsPath.isEmpty()) {
+      (void)PluginManifest::loadManifestFile(wsPath, &t.wsManifest, nullptr);
+    }
+    return t;
+  }
+};
+
+void resolveInfoProvenance(LoadedPluginInfo& info, const ProvenanceTables& tables) {
+  info.gitCommitSha.clear();
+  info.gitCommitShort.clear();
+  info.gitRepo.clear();
+  info.gitRef.clear();
+  info.buildSystem.clear();
+  if (info.libraryPath.isEmpty()) return;
+
+  const QFileInfo binFi(info.libraryPath);
+  const QString binName = binFi.fileName();
+  const QString scopeTok = PluginManifest::scopeToString(info.scope);
+  const PluginLockEntry* matchedLock = nullptr;
+
+  for (int pass = 0; pass < 4 && matchedLock == nullptr; ++pass) {
+    for (const PluginLockEntry& cand : tables.locks) {
+      const bool sameScope = (cand.scope == scopeTok);
+      if (pass == 0 && !info.sha256Hex.isEmpty() && cand.binarySha256 == info.sha256Hex && sameScope) {
+        matchedLock = &cand; break;
+      }
+      if (pass == 1 && !info.sha256Hex.isEmpty() && cand.binarySha256 == info.sha256Hex) {
+        matchedLock = &cand; break;
+      }
+      if (pass == 2 && !binName.isEmpty() && cand.binaryName == binName && sameScope) {
+        matchedLock = &cand; break;
+      }
+      if (pass == 3 && !binName.isEmpty() && cand.binaryName == binName) {
+        matchedLock = &cand; break;
+      }
+    }
+  }
+
+  if (matchedLock != nullptr) {
+    info.gitCommitSha = matchedLock->commitSha;
+    info.gitCommitShort = matchedLock->commitSha.left(7);
+    info.gitRepo = matchedLock->repo;
+    info.gitRef = matchedLock->ref;
+    info.buildSystem = QStringLiteral("auto");
+  }
+
+  const auto& primaryManifest = (info.scope == PluginScope::Workspace) ? tables.wsManifest : tables.userManifest;
+  const auto& secondaryManifest = (info.scope == PluginScope::Workspace) ? tables.userManifest : tables.wsManifest;
+  auto matchManifest = [&](const QVector<PluginManifestEntry>& manifest) -> const PluginManifestEntry* {
+    for (const PluginManifestEntry& entry : manifest) {
+      if (matchedLock != nullptr && entry.normalizedUrl == matchedLock->repo) return &entry;
+      if (matchedLock == nullptr && !entry.repoSlug.isEmpty()) {
+        const QString stem = binFi.completeBaseName();
+        if (stem == entry.repoSlug || stem == QStringLiteral("lib") + entry.repoSlug) return &entry;
+      }
+    }
+    return nullptr;
+  };
+
+  if (const PluginManifestEntry* mf = matchManifest(primaryManifest) ? matchManifest(primaryManifest)
+                                                                     : matchManifest(secondaryManifest)) {
+    if (info.gitRepo.isEmpty()) info.gitRepo = !mf->normalizedUrl.isEmpty() ? mf->normalizedUrl : mf->repo;
+    if (!mf->ref.isEmpty()) info.gitRef = mf->ref;
+    info.buildSystem = mf->build.isEmpty() ? QStringLiteral("auto") : mf->build;
+  }
+}
+
+QString formatLoadDiagnostic(const LoadedPluginInfo& info) {
+  const QString title = info.name.isEmpty() ? info.id : info.name;
+  QString diag = QStringLiteral("Loaded %1").arg(title);
+  if (!info.version.isEmpty()) diag += QStringLiteral(" %1").arg(info.version);
+  if (!info.gitCommitShort.isEmpty()) diag += QStringLiteral(" (%1)").arg(info.gitCommitShort);
+  diag += QStringLiteral(" [ABI %1.%2]").arg(info.abiMajor).arg(info.abiMinor);
+  return diag;
 }
 
 }  // namespace
@@ -210,6 +297,31 @@ bool PluginManager::lookupCachedMetadata(const QString& canonicalPath, LoadedPlu
   return true;
 }
 
+void PluginManager::populateProvenance(LoadedPluginInfo& info) const {
+  resolveInfoProvenance(info, ProvenanceTables::loadFromDisk());
+}
+
+bool PluginManager::refreshInstalledLockMetadata() {
+  const ProvenanceTables tables = ProvenanceTables::loadFromDisk();
+  bool anyShaChanged = false;
+  for (LoadedPluginInfo& info : m_pluginInfos) {
+    if (info.libraryPath.isEmpty()) continue;
+    const QString diskSha = computeFileSha256Hex(info.libraryPath);
+    if (!diskSha.isEmpty() && diskSha != info.sha256Hex) {
+      info.sha256Hex = diskSha;
+      info.requiresRestart = true;
+      anyShaChanged = true;
+      if (info.scope == PluginScope::Workspace) {
+        info.trusted = ConfigManager::instance().isWorkspacePluginTrusted(info.libraryPath, diskSha);
+      }
+    }
+    resolveInfoProvenance(info, tables);
+  }
+  if (anyShaChanged) setProperty("gl_restart_required", true);
+  emit pluginsChanged();
+  return anyShaChanged;
+}
+
 bool PluginManager::loadPluginFromPath(const QString& libraryPath) {
   const QFileInfo fi(libraryPath);
   const QString canonical = fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
@@ -219,9 +331,11 @@ bool PluginManager::loadPluginFromPath(const QString& libraryPath) {
 bool PluginManager::loadPluginInternal(const QString& libraryPath, PluginScope scope) {
   const QFileInfo fi(libraryPath);
   const QString canonical = fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
-  auto upsertInfo = [this](const LoadedPluginInfo& info) {
-    for (auto& existing : m_pluginInfos) if (existing.libraryPath == info.libraryPath) { existing = info; return; }
+  auto upsertInfo = [this](LoadedPluginInfo info) {
+    populateProvenance(info);
+    for (auto& existing : m_pluginInfos) if (existing.libraryPath == info.libraryPath) { existing = info; return info; }
     m_pluginInfos.append(info);
+    return info;
   };
   if (isWorldWritablePosix(canonical)) {
     upsertInfo(makeStatusInfo(fi.completeBaseName(), fi.fileName(), canonical, QString(), scope, false,
@@ -327,7 +441,11 @@ bool PluginManager::loadPluginInternal(const QString& libraryPath, PluginScope s
   if (!m_bridge.commitStagedActions(pluginId, pluginApi.get())) {
     return rejectPlugin(QStringLiteral("Plugin '%1' registered a duplicate action or command ID").arg(pluginId), true);
   }
-  info.enabled = true; upsertInfo(info);
+  info.enabled = true;
+  const LoadedPluginInfo committed = upsertInfo(info);
+  const QString loadDiag = formatLoadDiagnostic(committed);
+  m_loadDiagnostics.append(loadDiag);
+  emit m_bridge.pluginLogReceived(pluginId, GRIDLOCK_LOG_INFO, loadDiag);
   m_activePlugins.push_back(ActivePluginHandle{
       pluginId, canonical, sha256Hex, scope, desc, std::move(bindingCtx), std::move(pluginApi), std::move(lib)});
   return true;
@@ -433,7 +551,7 @@ void PluginManager::unloadAll() {
   if (!m_inDestructor && m_callbackDepth > 0) { m_pendingUnloadAll = true; return; }
   m_pendingStops.clear();
   auto retiring = std::move(m_activePlugins);
-  m_activePlugins.clear(); m_pluginInfos.clear();
+  m_activePlugins.clear(); m_pluginInfos.clear(); m_loadDiagnostics.clear();
   ScopedCallbackDepth guard(this);
   for (auto it = retiring.rbegin(); it != retiring.rend(); ++it) shutdownAndUnloadHandle(*it);
   m_sessionActive = false;

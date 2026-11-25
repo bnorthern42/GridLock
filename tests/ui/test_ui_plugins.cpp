@@ -21,6 +21,7 @@
 #include <QMetaObject>
 #include <QPlainTextEdit>
 #include <QPoint>
+#include <QProcess>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QStatusBar>
@@ -38,6 +39,7 @@
 #include "../../src/core/managers/ThemeManager.hpp"
 #include "../../src/core/plugins/PluginInstaller.hpp"
 #include "../../src/core/plugins/PluginManager.hpp"
+#include "../../src/core/plugins/PluginManifest.hpp"
 #include "../../src/ui/EditorTabManager.hpp"
 #include "../../src/ui/MainWindow.hpp"
 #include "../../src/ui/dialogs/preferences/PluginSettingsPage.hpp"
@@ -129,8 +131,14 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QCOMPARE(page->tabWidget()->tabText(1), QStringLiteral("Install from Git"));
 
   QTableWidget* tbl = page->pluginTable();
-  QVERIFY(tbl != nullptr && tbl->rowCount() == 3 && tbl->columnCount() == 7);
+  QVERIFY(tbl != nullptr && tbl->rowCount() == 3 && tbl->columnCount() == 8);
+  QVERIFY(page->updateAllButton() != nullptr && !page->updateAllButton()->isEnabled());
+  QCOMPARE(page->updateAllButton()->text(), QStringLiteral("Update All"));
   QCOMPARE(tbl->item(0, 3)->text(), QStringLiteral("1.0.0"));
+  QVERIFY(tbl->item(0, 2)->toolTip().contains(QStringLiteral("SHA-256:")));
+  auto* localUpdBtn = pd.findChild<QPushButton*>(QStringLiteral("pluginUpdateBtn_org.gridlock.test_dummy"));
+  QVERIFY(localUpdBtn != nullptr && !localUpdBtn->isEnabled());
+  QCOMPARE(localUpdBtn->toolTip(), QStringLiteral("Local binary (no Git source)"));
   QVERIFY(tbl->item(0, 4)->text().contains(QStringLiteral("v1.0")));
   QCOMPARE(tbl->item(0, 5)->text(), QStringLiteral("Loaded"));
   QVERIFY(tbl->item(1, 5)->text().startsWith(QStringLiteral("ABI Rejected:")));
@@ -367,4 +375,152 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(srcView->pluginAnnotations().isEmpty());
   QCOMPARE(reportDock->panelCount(), 0);
   QVERIFY(mw.findChild<QToolButton*>(QStringLiteral("pluginStatusItem_dummy.mesh_status")) == nullptr);
+
+  // 7. Verify Version (Commit) cells, provenance tooltips, per-row Update, and toolbar Update All against a local bare Git repo.
+  QFile::remove(QDir(globalPlugDir).filePath(QStringLiteral("01_dummy.so")));
+  QTemporaryDir gitDir;
+  QVERIFY(gitDir.isValid());
+  const QString bareRepo = QDir(gitDir.path()).filePath(QStringLiteral("ui-plugin.git"));
+  const QString workRepo = QDir(gitDir.path()).filePath(QStringLiteral("work"));
+  const QString dstSrc = QDir(workRepo).filePath(QStringLiteral("plugin_src.c"));
+  QVERIFY(QDir().mkpath(bareRepo) && QDir().mkpath(workRepo));
+  auto runGitUi = [](const QString& wd, const QStringList& args) {
+    QProcess p;
+    p.setWorkingDirectory(wd);
+    p.start(QStringLiteral("git"), args);
+    return p.waitForFinished(10000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+  };
+  QVERIFY(runGitUi(bareRepo, {QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")}));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")}));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("ui@gridlock.local")}));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock UI")}));
+  QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SRC), dstSrc));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("add"), QStringLiteral("plugin_src.c")}));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("ui v1")}));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), bareRepo}));
+  QVERIFY(runGitUi(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+  const QString sha1 = gridlock::core::plugins::PluginManifest::queryLocalHeadSha(workRepo);
+  QCOMPARE(sha1.size(), 40);
+
+  struct ScopedUiGitEnv {
+    ScopedUiGitEnv(const QString& barePath) {
+      qputenv("GRIDLOCK_INCLUDE_DIR", QByteArrayLiteral(GRIDLOCK_TEST_INCLUDE_DIR));
+      qputenv("GIT_CONFIG_COUNT", "2");
+      qputenv("GIT_CONFIG_KEY_0", QStringLiteral("url.file://%1.insteadOf").arg(barePath).toUtf8());
+      qputenv("GIT_CONFIG_VALUE_0", "https://github.com/gridlock-test/ui-plugin.git");
+      qputenv("GIT_CONFIG_KEY_1", "protocol.file.allow");
+      qputenv("GIT_CONFIG_VALUE_1", "always");
+    }
+    ~ScopedUiGitEnv() {
+      for (const char* k : {"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+                            "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1", "GRIDLOCK_INCLUDE_DIR"}) {
+        qunsetenv(k);
+      }
+    }
+  } gitEnv(bareRepo);
+
+  {
+    gridlock::core::plugins::PluginInstaller seedInstaller;
+    QSignalSpy seedSpy(&seedInstaller, &gridlock::core::plugins::PluginInstaller::installFinished);
+    QVERIFY(seedInstaller.startInstallFromGitHub(
+        QStringLiteral("gridlock-test/ui-plugin"), QStringLiteral("main"),
+        gridlock::core::plugins::PluginScope::UserGlobal));
+    QTRY_COMPARE_WITH_TIMEOUT(seedSpy.count(), 1, 15000);
+    const auto seedRes = seedSpy.takeFirst().at(0).value<gridlock::core::plugins::PluginBuildResult>();
+    QVERIFY2(seedRes.success, qPrintable(seedRes.fullCompilerLog));
+  }
+  mw.pluginManager()->setProperty("gl_restart_required", false);
+  QCOMPARE(mw.pluginManager()->discoverAndLoad(), 1);
+  QApplication::processEvents();
+
+  gridlock::ui::PreferencesDialog pd3(&mw);
+  pd3.show();
+  for (int i = 0; i < pd3.categoryTree()->topLevelItemCount(); ++i) {
+    if (pd3.categoryTree()->topLevelItem(i)->text(0) == QStringLiteral("Plugins")) {
+      pd3.categoryTree()->setCurrentItem(pd3.categoryTree()->topLevelItem(i));
+    }
+  }
+  QApplication::processEvents();
+
+  auto* page3 = pd3.pluginPage();
+  QTableWidget* tbl3 = page3->pluginTable();
+  QVERIFY(page3->updateAllButton() != nullptr && page3->updateAllButton()->isEnabled());
+  QVERIFY(page3->restartBanner()->isHidden());
+
+  int gitRow = -1;
+  for (int r = 0; r < tbl3->rowCount(); ++r) {
+    if (tbl3->item(r, 2) && tbl3->item(r, 2)->data(Qt::UserRole).toString() == QStringLiteral("org.gridlock.test_dummy")) {
+      gitRow = r;
+    }
+  }
+  QVERIFY(gitRow >= 0);
+  QCOMPARE(tbl3->item(gitRow, 3)->text(), QStringLiteral("1.0.0 (%1)").arg(sha1.left(7)));
+  const QString tip1 = tbl3->item(gitRow, 3)->toolTip();
+  QVERIFY(tip1.contains(sha1) && tip1.contains(QStringLiteral("https://github.com/gridlock-test/ui-plugin.git")) &&
+          tip1.contains(QStringLiteral("main")));
+
+  auto* rowUpdBtn = pd3.findChild<QPushButton*>(QStringLiteral("pluginUpdateBtn_org.gridlock.test_dummy"));
+  auto* badUpdBtn = pd3.findChild<QPushButton*>(QStringLiteral("pluginUpdateBtn_02_bad_abi"));
+  QVERIFY(rowUpdBtn != nullptr && rowUpdBtn->isEnabled());
+  QVERIFY(badUpdBtn != nullptr && !badUpdBtn->isEnabled());
+  QCOMPARE(badUpdBtn->toolTip(), QStringLiteral("Local binary (no Git source)"));
+
+  const QString lockPath = gridlock::core::plugins::PluginManifest::userLockFilePath();
+  QVector<gridlock::core::plugins::PluginLockEntry> locksBefore;
+  QVERIFY(gridlock::core::plugins::PluginManifest::loadLockFile(lockPath, &locksBefore) && !locksBefore.isEmpty());
+  const QString binShaBefore = locksBefore.first().binarySha256;
+
+  // Push commit #2 modifying constant in C source, then click single-row Update button (#pluginUpdateBtn_<id>).
+  auto bumpSourceConstant = [&](int oldVal, int newVal, const QString& msg) {
+    QFile sf(dstSrc);
+    if (!sf.open(QIODevice::ReadOnly)) return false;
+    QByteArray srcBytes = sf.readAll();
+    sf.close();
+    srcBytes.replace(QByteArrayLiteral("= ") + QByteArray::number(oldVal) + QByteArrayLiteral(";"),
+                     QByteArrayLiteral("= ") + QByteArray::number(newVal) + QByteArrayLiteral(";"));
+    if (!sf.open(QIODevice::WriteOnly | QIODevice::Truncate) || sf.write(srcBytes) != srcBytes.size()) return false;
+    sf.close();
+    return runGitUi(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), msg}) &&
+           runGitUi(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")});
+  };
+  QVERIFY(bumpSourceConstant(42, 77, QStringLiteral("ui v2")));
+  const QString sha2 = gridlock::core::plugins::PluginManifest::queryLocalHeadSha(workRepo);
+  QVERIFY(sha2 != sha1);
+
+  QSignalSpy uiUpdSpy(page3->pluginInstaller(), &gridlock::core::plugins::PluginInstaller::installFinished);
+  rowUpdBtn->click();
+  QTRY_COMPARE_WITH_TIMEOUT(uiUpdSpy.count(), 1, 15000);
+  QVERIFY(uiUpdSpy.takeFirst().at(0).value<gridlock::core::plugins::PluginBuildResult>().success);
+  QApplication::processEvents();
+
+  QCOMPARE(tbl3->item(gitRow, 3)->text(), QStringLiteral("1.0.0 (%1)").arg(sha2.left(7)));
+  QVERIFY(!page3->restartBanner()->isHidden());
+  QVERIFY(!page3->compilerLogView()->toPlainText().isEmpty());
+  QVector<gridlock::core::plugins::PluginLockEntry> locksAfterRow;
+  QVERIFY(gridlock::core::plugins::PluginManifest::loadLockFile(lockPath, &locksAfterRow) && !locksAfterRow.isEmpty());
+  QVERIFY(locksAfterRow.first().binarySha256 != binShaBefore);
+  QCOMPARE(locksAfterRow.first().commitSha, sha2);
+
+  // Reload to clear restart banner, push commit #3, and verify toolbar Update All (#pluginUpdateAllBtn).
+  page3->reloadPlugins();
+  QApplication::processEvents();
+  QVERIFY(page3->restartBanner()->isHidden());
+  QVERIFY(bumpSourceConstant(77, 123, QStringLiteral("ui v3")));
+  const QString sha3 = gridlock::core::plugins::PluginManifest::queryLocalHeadSha(workRepo);
+  QVERIFY(sha3 != sha2);
+
+  page3->updateAllButton()->click();
+  QTRY_COMPARE_WITH_TIMEOUT(uiUpdSpy.count(), 1, 15000);
+  QVERIFY(uiUpdSpy.takeFirst().at(0).value<gridlock::core::plugins::PluginBuildResult>().success);
+  QApplication::processEvents();
+
+  QCOMPARE(tbl3->item(gitRow, 3)->text(), QStringLiteral("1.0.0 (%1)").arg(sha3.left(7)));
+  QVERIFY(!page3->restartBanner()->isHidden());
+  QVector<gridlock::core::plugins::PluginLockEntry> locksAfterAll;
+  QVERIFY(gridlock::core::plugins::PluginManifest::loadLockFile(lockPath, &locksAfterAll) && !locksAfterAll.isEmpty());
+  QVERIFY(locksAfterAll.first().binarySha256 != locksAfterRow.first().binarySha256);
+  QCOMPARE(locksAfterAll.first().commitSha, sha3);
+
+  pd3.reject();
+  mw.pluginManager()->unloadAll();
 }

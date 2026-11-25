@@ -92,6 +92,40 @@ bool runGit(const QString& workDir, const QStringList& args) {
   return p.waitForFinished(10000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
+bool initLocalBarePluginRepo(const QString& rootPath, QString* bareOut, QString* workOut, QString* srcOut) {
+  *bareOut = QDir(rootPath).filePath(QStringLiteral("local-plugin.git"));
+  *workOut = QDir(rootPath).filePath(QStringLiteral("work"));
+  *srcOut = QDir(*workOut).filePath(QStringLiteral("plugin_src.c"));
+  return QDir().mkpath(*bareOut) && QDir().mkpath(*workOut) &&
+         runGit(*bareOut, {QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")}) &&
+         runGit(*workOut, {QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")}) &&
+         runGit(*workOut, {QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("test@gridlock.local")}) &&
+         runGit(*workOut, {QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock Test")}) &&
+         QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SRC), *srcOut) &&
+         runGit(*workOut, {QStringLiteral("add"), QStringLiteral("plugin_src.c")}) &&
+         runGit(*workOut, {QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("v1 commit")}) &&
+         runGit(*workOut, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), *bareOut}) &&
+         runGit(*workOut, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")});
+}
+
+struct ScopedGitRouteEnv {
+  explicit ScopedGitRouteEnv(const QString& bareRepo, const QString& githubUrl) {
+    const QString fileUrl = QStringLiteral("file://") + bareRepo;
+    qputenv("GRIDLOCK_INCLUDE_DIR", QByteArrayLiteral(GRIDLOCK_TEST_INCLUDE_DIR));
+    qputenv("GIT_CONFIG_COUNT", "2");
+    qputenv("GIT_CONFIG_KEY_0", QStringLiteral("url.%1.insteadOf").arg(fileUrl).toUtf8());
+    qputenv("GIT_CONFIG_VALUE_0", githubUrl.toUtf8());
+    qputenv("GIT_CONFIG_KEY_1", "protocol.file.allow");
+    qputenv("GIT_CONFIG_VALUE_1", "always");
+  }
+  ~ScopedGitRouteEnv() {
+    for (const char* k : {"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+                          "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1", "GRIDLOCK_INCLUDE_DIR"}) {
+      qunsetenv(k);
+    }
+  }
+};
+
 }  // namespace
 
 class TestPluginManager : public QObject {
@@ -352,20 +386,8 @@ class TestPluginManager : public QObject {
     // 3. Create a local bare git repository with a valid warning-emitting C99 branch and a broken branch.
     QTemporaryDir gitSandbox;
     QVERIFY(gitSandbox.isValid());
-    const QString bareRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("local-plugin.git"));
-    const QString workRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("work"));
-    QVERIFY(QDir().mkpath(bareRepo) && QDir().mkpath(workRepo));
-    QVERIFY(runGit(bareRepo, {QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("test@gridlock.local")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock Test")}));
-
-    const QString dstSrc = QDir(workRepo).filePath(QStringLiteral("plugin_src.c"));
-    QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SRC), dstSrc));
-    QVERIFY(runGit(workRepo, {QStringLiteral("add"), QStringLiteral("plugin_src.c")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("initial valid plugin")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), bareRepo}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+    QString bareRepo, workRepo, dstSrc;
+    QVERIFY(initLocalBarePluginRepo(gitSandbox.path(), &bareRepo, &workRepo, &dstSrc));
 
     // Create 'broken' branch by truncating physical C source mid-function to trigger a real compiler syntax error.
     QVERIFY(runGit(workRepo, {QStringLiteral("checkout"), QStringLiteral("-b"), QStringLiteral("broken")}));
@@ -377,15 +399,7 @@ class TestPluginManager : public QObject {
     QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("truncate source")}));
     QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("broken")}));
 
-    // Route https://github.com/gridlock-test/local-plugin.git transparently to local file:// bareRepo via Git env config.
-    const QString fileUrl = QStringLiteral("file://") + bareRepo;
-    qputenv("GRIDLOCK_INCLUDE_DIR", QByteArrayLiteral(GRIDLOCK_TEST_INCLUDE_DIR));
-    qputenv("GIT_CONFIG_COUNT", "2");
-    qputenv("GIT_CONFIG_KEY_0", QStringLiteral("url.%1.insteadOf").arg(fileUrl).toUtf8());
-    qputenv("GIT_CONFIG_VALUE_0", "https://github.com/gridlock-test/local-plugin.git");
-    qputenv("GIT_CONFIG_KEY_1", "protocol.file.allow");
-    qputenv("GIT_CONFIG_VALUE_1", "always");
-
+    ScopedGitRouteEnv gitRoute(bareRepo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
     PluginInstaller installer;
     QSignalSpy doneSpy(&installer, &PluginInstaller::installFinished);
 
@@ -409,13 +423,6 @@ class TestPluginManager : public QObject {
     const auto errRes = doneSpy.takeFirst().at(0).value<gridlock::core::plugins::PluginBuildResult>();
     QVERIFY(!errRes.success);
     QVERIFY(!errRes.errors.isEmpty());
-
-    qunsetenv("GIT_CONFIG_COUNT");
-    qunsetenv("GIT_CONFIG_KEY_0");
-    qunsetenv("GIT_CONFIG_VALUE_0");
-    qunsetenv("GIT_CONFIG_KEY_1");
-    qunsetenv("GIT_CONFIG_VALUE_1");
-    qunsetenv("GRIDLOCK_INCLUDE_DIR");
   }
 
   void testUiCallbacksMenusSurfacesAnnotationsReportsAndUnloadPurge() {
@@ -626,30 +633,11 @@ class TestPluginManager : public QObject {
     // 3. Set up local bare git repository and route GitHub shorthand URLs to file:// via Git config env.
     QTemporaryDir gitSandbox;
     QVERIFY(gitSandbox.isValid());
-    const QString bareRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("local-plugin.git"));
-    const QString workRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("work"));
-    QVERIFY(QDir().mkpath(bareRepo) && QDir().mkpath(workRepo));
-    QVERIFY(runGit(bareRepo, {QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("test@gridlock.local")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock Test")}));
-
-    const QString dstSrc = QDir(workRepo).filePath(QStringLiteral("plugin_src.c"));
-    QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SRC), dstSrc));
-    QVERIFY(runGit(workRepo, {QStringLiteral("add"), QStringLiteral("plugin_src.c")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("v1 commit")}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), bareRepo}));
-    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+    QString bareRepo, workRepo, dstSrc;
+    QVERIFY(initLocalBarePluginRepo(gitSandbox.path(), &bareRepo, &workRepo, &dstSrc));
     const QString firstCommitSha = PluginManifest::queryLocalHeadSha(workRepo);
     QCOMPARE(firstCommitSha.size(), 40);
-
-    const QString fileUrl = QStringLiteral("file://") + bareRepo;
-    qputenv("GRIDLOCK_INCLUDE_DIR", QByteArrayLiteral(GRIDLOCK_TEST_INCLUDE_DIR));
-    qputenv("GIT_CONFIG_COUNT", "2");
-    qputenv("GIT_CONFIG_KEY_0", QStringLiteral("url.%1.insteadOf").arg(fileUrl).toUtf8());
-    qputenv("GIT_CONFIG_VALUE_0", "https://github.com/gridlock-test/local-plugin.git");
-    qputenv("GIT_CONFIG_KEY_1", "protocol.file.allow");
-    qputenv("GIT_CONFIG_VALUE_1", "always");
+    ScopedGitRouteEnv gitRoute(bareRepo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
 
     // 4. Shorthand install appends to user plugins.toml and writes SHA-256 + commit_sha to user-global plugins-lock.toml.
     PluginInstaller installer;
@@ -708,13 +696,78 @@ class TestPluginManager : public QObject {
 
     QVERIFY(PluginManifest::loadLockFile(PluginManifest::userLockFilePath(), &lockEntries));
     QCOMPARE(lockEntries.size(), 2);
+  }
 
-    qunsetenv("GIT_CONFIG_COUNT");
-    qunsetenv("GIT_CONFIG_KEY_0");
-    qunsetenv("GIT_CONFIG_VALUE_0");
-    qunsetenv("GIT_CONFIG_KEY_1");
-    qunsetenv("GIT_CONFIG_VALUE_1");
-    qunsetenv("GRIDLOCK_INCLUDE_DIR");
+  void testLockfileMetadataDiagnosticsAndInPlaceUpdate() {
+    ScopedPluginEnv env;
+    using gridlock::core::plugins::PluginBuildResult;
+    using gridlock::core::plugins::PluginInstaller;
+    using gridlock::core::plugins::PluginLockEntry;
+    using gridlock::core::plugins::PluginManager;
+    using gridlock::core::plugins::PluginManifest;
+    using gridlock::core::plugins::PluginScope;
+    using gridlock::core::plugins::PluginUpdateTarget;
+
+    QTemporaryDir gitSandbox;
+    QVERIFY(gitSandbox.isValid());
+    QString bareRepo, workRepo, dstSrc;
+    QVERIFY(initLocalBarePluginRepo(gitSandbox.path(), &bareRepo, &workRepo, &dstSrc));
+    const QString sha1 = PluginManifest::queryLocalHeadSha(workRepo);
+    QCOMPARE(sha1.size(), 40);
+    ScopedGitRouteEnv gitRoute(bareRepo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
+
+    PluginInstaller installer;
+    QSignalSpy doneSpy(&installer, &PluginInstaller::installFinished);
+    QVERIFY(installer.startInstallFromGitHub(
+        QStringLiteral("gridlock-test/local-plugin"), QStringLiteral("main"), PluginScope::UserGlobal));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
+    const auto res1 = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
+    QVERIFY2(res1.success && res1.anyBinaryChanged, qPrintable(res1.fullCompilerLog));
+    const QString binSha1 = sha256OfFile(res1.installedPath);
+
+    gridlock::GdbRankCoordinator coord;
+    PluginManager mgr(&coord);
+    QCOMPARE(mgr.discoverAndLoad(), 1);
+    QCOMPARE(mgr.plugins().size(), 1);
+    const auto& info1 = mgr.plugins().first();
+    QCOMPARE(info1.version, QStringLiteral("1.0.0"));
+    QCOMPARE(info1.gitCommitSha, sha1);
+    QCOMPARE(info1.gitCommitShort, sha1.left(7));
+    QCOMPARE(info1.gitRepo, QStringLiteral("https://github.com/gridlock-test/local-plugin.git"));
+    QCOMPARE(info1.gitRef, QStringLiteral("main"));
+    QCOMPARE(mgr.loadDiagnostics(),
+             QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.0.0 (%1) [ABI 1.0]").arg(sha1.left(7))});
+
+    // Push upstream commit updating plugin_version_utf8 -> 1.1.0, then run startUpdatePlugins + refreshInstalledLockMetadata.
+    {
+      QFile srcFile(dstSrc);
+      QVERIFY(srcFile.open(QIODevice::ReadOnly));
+      QByteArray content = srcFile.readAll();
+      srcFile.close();
+      content.replace("\"1.0.0\"", "\"1.1.0\"");
+      QVERIFY(srcFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+      QVERIFY(srcFile.write(content) == content.size());
+    }
+    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("bump version 1.1.0")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+    const QString sha2 = PluginManifest::queryLocalHeadSha(workRepo);
+    QVERIFY(sha2 != sha1);
+
+    QVERIFY(installer.startUpdatePlugins({PluginUpdateTarget{
+        info1.id, info1.gitRepo, info1.gitRef, info1.buildSystem, info1.scope,
+        env.userPluginDir(), QFileInfo(info1.libraryPath).fileName(), true}}));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
+    const auto res2 = doneSpy.takeFirst().at(0).value<PluginBuildResult>();
+    QVERIFY2(res2.success && res2.anyBinaryChanged, qPrintable(res2.fullCompilerLog));
+    QVERIFY(sha256OfFile(res2.installedPath) != binSha1);
+    QVERIFY(mgr.refreshInstalledLockMetadata());
+    QCOMPARE(mgr.plugins().first().gitCommitShort, sha2.left(7));
+    QVERIFY(mgr.plugins().first().requiresRestart);
+
+    QCOMPARE(mgr.discoverAndLoad(), 1);
+    QCOMPARE(mgr.plugins().first().version, QStringLiteral("1.1.0"));
+    QCOMPARE(mgr.loadDiagnostics(),
+             QStringList{QStringLiteral("Loaded GridLock Test Dummy Plugin 1.1.0 (%1) [ABI 1.0]").arg(sha2.left(7))});
   }
 };
 

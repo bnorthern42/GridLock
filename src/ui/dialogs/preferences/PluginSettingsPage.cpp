@@ -13,6 +13,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -47,6 +48,7 @@ using gridlock::core::plugins::PluginInstaller;
 using gridlock::core::plugins::PluginManager;
 using gridlock::core::plugins::PluginManifest;
 using gridlock::core::plugins::PluginScope;
+using gridlock::core::plugins::PluginUpdateTarget;
 
 class CompilerLogHighlighter final : public QSyntaxHighlighter {
  public:
@@ -85,19 +87,45 @@ QString pluginRowKey(const LoadedPluginInfo& info) {
   return !info.id.isEmpty() ? info.id : info.libraryPath;
 }
 
-void applyPrimaryInstallButtonStyle(QPushButton* btn) {
+QString formatVersionCellText(const LoadedPluginInfo& info) {
+  if (!info.gitCommitShort.isEmpty()) {
+    return info.version.isEmpty() ? QStringLiteral("(%1)").arg(info.gitCommitShort)
+                                  : QStringLiteral("%1 (%2)").arg(info.version, info.gitCommitShort);
+  }
+  return info.version.isEmpty() ? QStringLiteral("-") : info.version;
+}
+
+QString formatRowProvenanceTooltip(const LoadedPluginInfo& info) {
+  const bool hasGit = !info.gitRepo.isEmpty();
+  const QString refStr = !info.gitRef.isEmpty() ? info.gitRef : (hasGit ? QStringLiteral("HEAD") : QStringLiteral("-"));
+  return QStringLiteral("Path: %1\nSHA-256: %2\nGit Source: %3\nRef: %4\nCommit: %5")
+      .arg(info.libraryPath, info.sha256Hex.isEmpty() ? QStringLiteral("unknown") : info.sha256Hex,
+           hasGit ? info.gitRepo : QStringLiteral("Local binary (no Git source)"), refStr,
+           info.gitCommitSha.isEmpty() ? QStringLiteral("-") : info.gitCommitSha);
+}
+
+PluginUpdateTarget makeUpdateTarget(const LoadedPluginInfo& info) {
+  const QFileInfo fi(info.libraryPath);
+  return PluginUpdateTarget{info.id, info.gitRepo, info.gitRef,
+                            info.buildSystem.isEmpty() ? QStringLiteral("auto") : info.buildSystem,
+                            info.scope, fi.absolutePath(), fi.fileName(),
+                            info.scope != PluginScope::Workspace || info.trusted};
+}
+
+void applyPrimaryAccentButtonStyle(QPushButton* btn) {
   if (!btn) return;
   auto& tm = gridlock::core::managers::ThemeManager::instance();
   const auto pal = gridlock::core::managers::ThemeManager::paletteForTheme(tm.activeThemeId());
   const QString fgHex =
       (QColor(pal.accentHex).lightness() < 165) ? QStringLiteral("#ffffff") : QStringLiteral("#16181d");
+  const QString mutedFg = pal.isDark ? QStringLiteral("#6b7280") : QStringLiteral("#9ca3af");
   btn->setStyleSheet(QStringLiteral(
-      "QPushButton, QPushButton#pluginCloneAndBuildBtn { background-color: %1; color: %2; border: 1px solid %1; "
+      "QPushButton { background-color: %1; color: %2; border: 1px solid %1; "
       "font-size: 13px; font-weight: 600; text-transform: none; padding: 2px 16px; border-radius: 4px; "
       "min-height: 22px; max-height: 26px; }"
-      "QPushButton:hover, QPushButton#pluginCloneAndBuildBtn:hover { background-color: %1; color: %2; "
-      "border: 1px solid %3; }")
-                         .arg(pal.accentHex, fgHex, pal.textHex));
+      "QPushButton:hover { background-color: %1; color: %2; border: 1px solid %3; }"
+      "QPushButton:disabled { background-color: %4; color: %5; border: 1px solid %4; }")
+                         .arg(pal.accentHex, fgHex, pal.textHex, pal.headerHex, mutedFg));
 }
 
 QWidget* makeCenteredCheckboxCell(QTableWidget* parent, QCheckBox** outCheck, const QString& objName,
@@ -143,6 +171,7 @@ PluginSettingsPage::PluginSettingsPage(PluginManager* pluginManager, QWidget* pa
 
   connect(m_installer, &PluginInstaller::stepStarted, this, [this](const QString& desc) {
     if (m_buildSummaryBadge) m_buildSummaryBadge->setText(desc);
+    if (m_installedStatusLabel && !m_installedStatusLabel->isHidden()) m_installedStatusLabel->setText(desc);
   });
   connect(m_installer, &PluginInstaller::logOutputReceived, this, [this](const QString& chunk) {
     if (!m_compilerLogView) return;
@@ -189,7 +218,20 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_reloadBtn->setObjectName(QStringLiteral("reloadPluginsBtn"));
   m_reloadBtn->setToolTip(tr("Discard staged edits, unload active plugins, and rescan plugin directories."));
   dirRow->addWidget(m_reloadBtn);
+
+  m_updateAllBtn = new QPushButton(tr("Update All"), tab);
+  m_updateAllBtn->setObjectName(QStringLiteral("pluginUpdateAllBtn"));
+  m_updateAllBtn->setToolTip(tr("Re-clone and rebuild all Git-installed plugins into their existing scopes."));
+  applyPrimaryAccentButtonStyle(m_updateAllBtn);
+  m_updateAllBtn->setEnabled(false);
+  dirRow->addWidget(m_updateAllBtn);
   lay->addLayout(dirRow);
+
+  m_installedStatusLabel = new QLabel(tab);
+  m_installedStatusLabel->setObjectName(QStringLiteral("pluginInstalledStatusLabel"));
+  m_installedStatusLabel->setWordWrap(true);
+  m_installedStatusLabel->setVisible(false);
+  lay->addWidget(m_installedStatusLabel);
 
   m_restartBanner = new QFrame(tab);
   m_restartBanner->setObjectName(QStringLiteral("pluginRestartBanner"));
@@ -213,10 +255,10 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_restartBanner->setVisible(false);
   lay->addWidget(m_restartBanner);
 
-  m_pluginTable = new QTableWidget(0, 7, tab);
+  m_pluginTable = new QTableWidget(0, 8, tab);
   m_pluginTable->setObjectName(QStringLiteral("pluginsTableWidget"));
   m_pluginTable->setHorizontalHeaderLabels({tr("Global"), tr("Workspace"), tr("Name"), tr("Version"),
-                                           tr("Scope / ABI"), tr("Status"), tr("Trust")});
+                                           tr("Scope / ABI"), tr("Status"), tr("Trust"), tr("Update")});
   m_pluginTable->verticalHeader()->setVisible(false);
   m_pluginTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   m_pluginTable->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -225,25 +267,20 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_pluginTable->setMinimumHeight(240);
 
   QHeaderView* hdr = m_pluginTable->horizontalHeader();
-  hdr->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-  hdr->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+  for (int col : {0, 1, 3, 4, 6, 7}) hdr->setSectionResizeMode(col, QHeaderView::ResizeToContents);
   hdr->setSectionResizeMode(2, QHeaderView::Interactive);
-  hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-  hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents);
   hdr->setSectionResizeMode(5, QHeaderView::Stretch);
-  hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents);
   m_pluginTable->setColumnWidth(2, 180);
   lay->addWidget(m_pluginTable, 1);
 
   connect(m_openFolderBtn, &QPushButton::clicked, this, [this]() {
     if (!m_searchDirsCombo) return;
-    const QString targetDir = m_searchDirsCombo->currentText().trimmed();
-    if (!targetDir.isEmpty()) {
-      QDir().mkpath(targetDir);
-      QDesktopServices::openUrl(QUrl::fromLocalFile(targetDir));
+    if (const QString d = m_searchDirsCombo->currentText().trimmed(); !d.isEmpty()) {
+      QDir().mkpath(d); QDesktopServices::openUrl(QUrl::fromLocalFile(d));
     }
   });
   connect(m_reloadBtn, &QPushButton::clicked, this, &PluginSettingsPage::reloadPlugins);
+  connect(m_updateAllBtn, &QPushButton::clicked, this, &PluginSettingsPage::onUpdateAllClicked);
   connect(m_restartNowBtn, &QPushButton::clicked, this, &PluginSettingsPage::triggerRestartNow);
   return tab;
 }
@@ -299,7 +336,7 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
   m_cloneBuildBtn = new QPushButton(tr("Install"), tab);
   m_cloneBuildBtn->setObjectName(QStringLiteral("pluginCloneAndBuildBtn"));
   m_cloneBuildBtn->setMinimumWidth(96);
-  applyPrimaryInstallButtonStyle(m_cloneBuildBtn);
+  applyPrimaryAccentButtonStyle(m_cloneBuildBtn);
   refScopeRow->addWidget(m_cloneBuildBtn);
   form->addRow(tr("Ref & Install Scope:"), refScopeRow);
 
@@ -349,8 +386,10 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
 
   updateGitRepoPlaceholder();
   connect(&gridlock::core::managers::ThemeManager::instance(),
-          &gridlock::core::managers::ThemeManager::themeModeChanged, this,
-          [this](bool) { applyPrimaryInstallButtonStyle(m_cloneBuildBtn); });
+          &gridlock::core::managers::ThemeManager::themeModeChanged, this, [this](bool) {
+            applyPrimaryAccentButtonStyle(m_cloneBuildBtn);
+            applyPrimaryAccentButtonStyle(m_updateAllBtn);
+          });
   connect(m_gitHostCombo, &QComboBox::currentIndexChanged, this, [this](int) { updateGitRepoPlaceholder(); });
   connect(m_cloneBuildBtn, &QPushButton::clicked, this, &PluginSettingsPage::onCloneOrCancelClicked);
   connect(m_syncManifestBtn, &QPushButton::clicked, this, &PluginSettingsPage::onSyncManifestClicked);
@@ -361,43 +400,32 @@ QWidget* PluginSettingsPage::createGitInstallTab(QWidget* parent) {
 
 void PluginSettingsPage::updateGitRepoPlaceholder() {
   if (!m_repoUrlEdit || !m_gitHostCombo) return;
-  const auto host = static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt());
-  switch (host) {
+  switch (static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt())) {
     case GitForgeHost::GitHub:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (e.g. bnorthern42/gridlock-stl-inspector)"));
-      break;
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (e.g. bnorthern42/gridlock-stl-inspector)")); break;
     case GitForgeHost::GitLab:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo or group/sub/repo (gitlab.com)"));
-      break;
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo or group/sub/repo (gitlab.com)")); break;
     case GitForgeHost::Codeberg:
-      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (codeberg.org)"));
-      break;
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("owner/repo (codeberg.org)")); break;
     case GitForgeHost::CustomUrl:
-      m_repoUrlEdit->setPlaceholderText(
-          QStringLiteral("https://gitea.example.org/owner/repo.git or git@host:owner/repo.git"));
-      break;
+      m_repoUrlEdit->setPlaceholderText(QStringLiteral("https://gitea.example.org/owner/repo.git or git@host:owner/repo.git")); break;
   }
 }
 
 void PluginSettingsPage::onCloneOrCancelClicked() {
   if (!m_installer) return;
-  if (m_installer->isRunning()) {
-    m_installer->cancelInstall();
-    return;
-  }
+  if (m_installer->isRunning()) { m_installer->cancelInstall(); return; }
   if (m_compilerLogView) m_compilerLogView->clear();
   if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
   const QString repoSpec = m_repoUrlEdit ? m_repoUrlEdit->text().trimmed() : QString();
   const QString ref = m_gitRefEdit ? m_gitRefEdit->text().trimmed() : QString();
-  const auto forge = m_gitHostCombo ? static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt())
-                                    : GitForgeHost::GitHub;
-  const auto scope =
-      (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
-          ? PluginScope::Workspace
-          : PluginScope::UserGlobal;
+  const auto forge = m_gitHostCombo ? static_cast<GitForgeHost>(m_gitHostCombo->currentData().toInt()) : GitForgeHost::GitHub;
+  const auto scope = (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
+                         ? PluginScope::Workspace : PluginScope::UserGlobal;
   if (m_installer->startInstallFromGit(repoSpec, ref, scope, forge)) {
     if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel"));
     if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
+    if (m_updateAllBtn) m_updateAllBtn->setEnabled(false);
   }
 }
 
@@ -406,61 +434,81 @@ void PluginSettingsPage::onSyncManifestClicked() {
   if (m_tabs) m_tabs->setCurrentIndex(1);
   if (m_compilerLogView) m_compilerLogView->clear();
   if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
-  const auto scope =
-      (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
-          ? PluginScope::Workspace
-          : PluginScope::UserGlobal;
-  const bool started = m_installer->syncFromManifests(PluginManifest::userManifestPath(),
-                                                      PluginManifest::workspaceManifestPath(), scope);
-  if (started && m_installer->isRunning()) {
+  const auto scope = (m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace))
+                         ? PluginScope::Workspace : PluginScope::UserGlobal;
+  if (m_installer->syncFromManifests(PluginManifest::userManifestPath(), PluginManifest::workspaceManifestPath(), scope) &&
+      m_installer->isRunning()) {
     if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel"));
     if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
+    if (m_updateAllBtn) m_updateAllBtn->setEnabled(false);
   }
 }
 
 void PluginSettingsPage::onOpenManifestClicked() {
-  const bool wantWs =
-      m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace);
+  const bool wantWs = m_installScopeCombo && m_installScopeCombo->currentData().toInt() == static_cast<int>(PluginScope::Workspace);
   QString path = wantWs ? PluginManifest::workspaceManifestPath() : PluginManifest::userManifestPath();
   if (path.isEmpty()) path = PluginManifest::userManifestPath();
   if (!PluginManifest::ensureManifestTemplate(path)) return;
-  if (MainWindow* mw = resolveMainWindow()) {
-    mw->loadSourceFile(path);
-  } else {
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+  if (MainWindow* mw = resolveMainWindow()) mw->loadSourceFile(path);
+  else QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+void PluginSettingsPage::onUpdateAllClicked() {
+  auto* mgr = resolvePluginManager();
+  if (!mgr) return;
+  QVector<PluginUpdateTarget> targets;
+  for (const LoadedPluginInfo& info : mgr->plugins()) {
+    if (!info.gitRepo.isEmpty()) targets.append(makeUpdateTarget(info));
+  }
+  startPluginUpdates(targets);
+}
+
+void PluginSettingsPage::startPluginUpdates(const QVector<PluginUpdateTarget>& targets) {
+  if (!m_installer || m_installer->isRunning() || targets.isEmpty()) return;
+  if (m_compilerLogView) m_compilerLogView->clear();
+  if (m_installRestartBtn) m_installRestartBtn->setVisible(false);
+  if (m_installedStatusLabel) {
+    m_installedStatusLabel->setText(tr("Updating %1 plugin(s)...").arg(targets.size()));
+    m_installedStatusLabel->setVisible(true);
+  }
+  if (!m_installer->startUpdatePlugins(targets)) return;
+  if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Cancel"));
+  if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(false);
+  if (m_updateAllBtn) m_updateAllBtn->setEnabled(false);
+  if (m_reloadBtn) m_reloadBtn->setEnabled(false);
+  if (m_pluginTable) {
+    for (int r = 0; r < m_pluginTable->rowCount(); ++r) {
+      if (QWidget* w = m_pluginTable->cellWidget(r, 7)) w->setEnabled(false);
+    }
   }
 }
 
 void PluginSettingsPage::onInstallFinished(const PluginBuildResult& result) {
   if (m_cloneBuildBtn) m_cloneBuildBtn->setText(tr("Install"));
   if (m_syncManifestBtn) m_syncManifestBtn->setEnabled(true);
-  const int warnCount = static_cast<int>(result.warnings.size());
-  const int errCount = static_cast<int>(result.errors.size());
+  if (m_reloadBtn) m_reloadBtn->setEnabled(true);
+  auto* mgr = resolvePluginManager();
+  const bool mgrShaChanged = (mgr != nullptr) ? mgr->refreshInstalledLockMetadata() : false;
+  const int warnCount = static_cast<int>(result.warnings.size()), errCount = static_cast<int>(result.errors.size());
+  QString summary;
   if (result.success) {
     const bool builtAny = (result.installedCount > 0) || !result.installedPath.isEmpty();
-    if (m_buildSummaryBadge) {
-      m_buildSummaryBadge->setText(
-          builtAny ? tr("Installed %1 (%2 built, %3 warning(s), %4 error(s)).")
-                         .arg(result.installedPath)
-                         .arg(std::max(1, result.installedCount))
-                         .arg(warnCount)
-                         .arg(errCount)
-                   : tr("All declared plugins in plugins.toml are up to date (0 built)."));
-    }
-    if (builtAny) {
+    summary = builtAny ? tr("Installed %1 (%2 built, %3 warning(s), %4 error(s)).")
+                             .arg(result.installedPath).arg(std::max(1, result.installedCount)).arg(warnCount).arg(errCount)
+                       : tr("All declared plugins in plugins.toml are up to date (0 built).");
+    if (mgrShaChanged || result.anyBinaryChanged) {
       if (m_installRestartBtn) m_installRestartBtn->setVisible(true);
       setRestartBannerVisible(true);
-      if (auto* mgr = resolvePluginManager()) {
-        mgr->setProperty("gl_restart_required", true);
-        emit mgr->pluginsChanged();
-      }
+      if (mgr != nullptr) { mgr->setProperty("gl_restart_required", true); emit mgr->pluginsChanged(); }
       emit restartRequiredChanged(true);
     }
-  } else if (m_buildSummaryBadge) {
+  } else {
     const QString detail = result.errors.isEmpty() ? tr("Build failed.") : result.errors.last();
-    m_buildSummaryBadge->setText(
-        tr("Build Failed (%1 warning(s), %2 error(s)): %3").arg(warnCount).arg(errCount).arg(detail));
+    summary = tr("Build Failed (%1 warning(s), %2 error(s)): %3").arg(warnCount).arg(errCount).arg(detail);
   }
+  if (m_buildSummaryBadge) m_buildSummaryBadge->setText(summary);
+  if (m_installedStatusLabel && !m_installedStatusLabel->isHidden()) m_installedStatusLabel->setText(summary);
+  refreshTable();
 }
 
 MainWindow* PluginSettingsPage::resolveMainWindow() const {
@@ -554,6 +602,7 @@ void PluginSettingsPage::refreshTable() {
   if (m_pluginTable == nullptr || m_searchDirsCombo == nullptr) return;
   if (mgr == nullptr) {
     m_pluginTable->setRowCount(0);
+    if (m_updateAllBtn) m_updateAllBtn->setEnabled(false);
     return;
   }
 
@@ -574,6 +623,10 @@ void PluginSettingsPage::refreshTable() {
       std::any_of(list.cbegin(), list.cend(), [](const LoadedPluginInfo& i) { return i.requiresRestart; })) {
     setRestartBannerVisible(true);
   }
+  const bool installerBusy = (m_installer != nullptr) && m_installer->isRunning();
+  const bool anyGitPlugin =
+      std::any_of(list.cbegin(), list.cend(), [](const LoadedPluginInfo& i) { return !i.gitRepo.isEmpty(); });
+  if (m_updateAllBtn) m_updateAllBtn->setEnabled(anyGitPlugin && !installerBusy);
 
   m_pluginTable->setRowCount(0);
   m_pluginTable->setRowCount(list.size());
@@ -608,9 +661,10 @@ void PluginSettingsPage::refreshTable() {
                                  !abiRejected && !info.id.isEmpty() && hasWorkspace,
                                  tr("Enable or disable this plugin in the active workspace (staged until Apply).")));
 
+    const QString rowTip = formatRowProvenanceTooltip(info);
     auto makeCell = [&](const QString& text) {
       auto* item = new QTableWidgetItem(text);
-      item->setToolTip(info.libraryPath);
+      item->setToolTip(rowTip);
       return item;
     };
     const QString abiText = (info.abiMajor > 0u || info.abiMinor > 0u)
@@ -619,7 +673,7 @@ void PluginSettingsPage::refreshTable() {
     auto* nameItem = makeCell(info.name.isEmpty() ? info.id : info.name);
     nameItem->setData(Qt::UserRole, rowKey);
     m_pluginTable->setItem(row, 2, nameItem);
-    m_pluginTable->setItem(row, 3, makeCell(info.version.isEmpty() ? QStringLiteral("-") : info.version));
+    m_pluginTable->setItem(row, 3, makeCell(formatVersionCellText(info)));
     m_pluginTable->setItem(row, 4, makeCell(QStringLiteral("%1 · %2").arg(isWs ? tr("Workspace") : tr("Global"), abiText)));
     m_pluginTable->setItem(row, 5, makeCell(QString()));
 
@@ -636,6 +690,20 @@ void PluginSettingsPage::refreshTable() {
       });
     } else {
       m_pluginTable->setItem(row, 6, makeCell(isWs ? tr("Rejected") : tr("User Global")));
+    }
+
+    const QString btnSuffix = !info.id.isEmpty() ? info.id : QFileInfo(info.libraryPath).completeBaseName();
+    auto* updateBtn = new QPushButton(tr("Update"), m_pluginTable);
+    updateBtn->setObjectName(QStringLiteral("pluginUpdateBtn_") + btnSuffix);
+    updateBtn->setMinimumHeight(24);
+    const bool hasGitSource = !info.gitRepo.isEmpty();
+    updateBtn->setEnabled(hasGitSource && !installerBusy);
+    updateBtn->setToolTip(hasGitSource ? tr("Re-clone and rebuild from %1").arg(info.gitRepo)
+                                       : QStringLiteral("Local binary (no Git source)"));
+    m_pluginTable->setCellWidget(row, 7, updateBtn);
+    if (hasGitSource) {
+      connect(updateBtn, &QPushButton::clicked, this,
+              [this, target = makeUpdateTarget(info)]() { startPluginUpdates({target}); });
     }
 
     connect(globalChk, &QCheckBox::toggled, this, [this, row, rowKey](bool checked) {

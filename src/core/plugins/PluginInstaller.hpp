@@ -21,6 +21,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QVector>
 
 namespace gridlock::core::plugins {
 
@@ -40,13 +41,29 @@ enum class GitForgeHost : uint8_t {
  * @brief Final outcome and parsed compiler diagnostics for an asynchronous plugin build or manifest sync run.
  */
 struct PluginBuildResult {
-  bool success = false;      ///< True when all requested clone, build, and install operations succeeded.
-  QString installedPath;     ///< Canonical or absolute path to the most recently installed shared library.
-  QStringList warnings;      ///< Aggregated compiler diagnostic lines matching `warning:`.
-  QStringList errors;        ///< Aggregated compiler, linker, git, or validation error lines.
-  QString fullCompilerLog;   ///< Complete combined stdout/stderr build transcript.
-  QString commitSha;         ///< Resolved 40-character HEAD commit SHA for the latest git build, if any.
-  int installedCount = 0;    ///< Number of plugin shared libraries compiled and installed in this run.
+  bool success = false;          ///< True when all requested clone, build, and install operations succeeded.
+  QString installedPath;         ///< Canonical or absolute path to the most recently installed shared library.
+  QStringList warnings;          ///< Aggregated compiler diagnostic lines matching `warning:`.
+  QStringList errors;            ///< Aggregated compiler, linker, git, or validation error lines.
+  QString fullCompilerLog;       ///< Complete combined stdout/stderr build transcript.
+  QString commitSha;             ///< Resolved 40-character HEAD commit SHA for the latest git build, if any.
+  int installedCount = 0;        ///< Number of plugin shared libraries compiled and installed in this run.
+  bool anyBinaryChanged = false; ///< True when at least one installed binary's SHA-256 changed on disk.
+};
+
+/**
+ * @struct PluginUpdateTarget
+ * @brief Target specification for re-cloning and rebuilding an installed Git-backed plugin in place.
+ */
+struct PluginUpdateTarget {
+  QString pluginId;                              ///< Discovered plugin ID (`LoadedPluginInfo::id`).
+  QString gitRepo;                               ///< Canonical or forge-prefixed Git repository source.
+  QString gitRef;                                ///< Optional branch, tag, or commit SHA (empty = default HEAD).
+  QString buildSystem = QStringLiteral("auto");  ///< Build mode (`"auto"`, `"meson"`, `"cmake"`, `"make"`, `"single"`).
+  PluginScope scope = PluginScope::UserGlobal;   ///< Existing scope (`UserGlobal` or `Workspace`).
+  QString installDir;                            ///< Existing destination directory containing the binary.
+  QString existingBinaryName;                    ///< Existing `.so`/`.dylib`/`.dll` filename to replace atomically.
+  bool preserveWorkspaceTrust = true;            ///< Refresh workspace SHA-256 trust when previously approved.
 };
 
 /**
@@ -148,6 +165,13 @@ class PluginInstaller : public QObject {
                          PluginScope scope = PluginScope::UserGlobal);
 
   /**
+   * @brief Sequentially re-clones and rebuilds one or more Git-installed plugins into their existing scopes.
+   * @param targets Ordered list of installed Git-backed plugins to update in place.
+   * @return True if the update queue started; false if busy, empty, or validation failed.
+   */
+  bool startUpdatePlugins(const QVector<PluginUpdateTarget>& targets);
+
+  /**
    * @brief Runs compilation and atomic installation directly on an existing local source directory.
    */
   bool startBuildFromSourceDirectory(const QString& sourceDir,
@@ -184,6 +208,8 @@ class PluginInstaller : public QObject {
     PluginScope scope = PluginScope::UserGlobal;
     QString targetDirOverride;
     QString manifestPathToRecord;
+    QString existingBinaryName;
+    bool preserveWorkspaceTrust = true;
   };
 
   void resetRunState(bool batchSync);
@@ -222,6 +248,7 @@ class PluginInstaller : public QObject {
   bool m_cancelled = false;
   bool m_isBatchSync = false;
   bool m_anySyncError = false;
+  bool m_anyBinaryChanged = false;
 };
 
 }  // namespace gridlock::core::plugins

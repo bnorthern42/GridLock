@@ -25,12 +25,14 @@
 #include <QString>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QVector>
 #include <QWidget>
 
 namespace gridlock::core::plugins {
 class PluginInstaller;
 class PluginManager;
 struct PluginBuildResult;
+struct PluginUpdateTarget;
 }  // namespace gridlock::core::plugins
 
 namespace gridlock::ui {
@@ -59,7 +61,7 @@ class PluginSettingsPage : public QWidget {
   /** @brief Returns the two-tab container (`Installed` and `Install from Git`). */
   QTabWidget* tabWidget() const noexcept { return m_tabs; }
 
-  /** @brief Returns the 7-column `QTableWidget` displaying discovered plugins. */
+  /** @brief Returns the 8-column `QTableWidget` displaying discovered plugins. */
   QTableWidget* pluginTable() const noexcept { return m_pluginTable; }
 
   /** @brief Returns the search-directory selector combo box. */
@@ -70,6 +72,9 @@ class PluginSettingsPage : public QWidget {
 
   /** @brief Returns the **Reload Plugins** button widget. */
   QPushButton* reloadPluginsButton() const noexcept { return m_reloadBtn; }
+
+  /** @brief Returns the primary **Update All** button (`#pluginUpdateAllBtn`) on the `Installed` tab. */
+  QPushButton* updateAllButton() const noexcept { return m_updateAllBtn; }
 
   /** @brief Returns the inline restart-required notification banner frame on the `Installed` tab. */
   QFrame* restartBanner() const noexcept { return m_restartBanner; }
@@ -162,6 +167,8 @@ class PluginSettingsPage : public QWidget {
   void onCloneOrCancelClicked();
   void onSyncManifestClicked();
   void onOpenManifestClicked();
+  void onUpdateAllClicked();
+  void startPluginUpdates(const QVector<gridlock::core::plugins::PluginUpdateTarget>& targets);
   void onInstallFinished(const gridlock::core::plugins::PluginBuildResult& result);
 
   QPointer<gridlock::core::plugins::PluginManager> m_pluginManager;
@@ -170,6 +177,8 @@ class PluginSettingsPage : public QWidget {
   QComboBox* m_searchDirsCombo = nullptr;
   QPushButton* m_openFolderBtn = nullptr;
   QPushButton* m_reloadBtn = nullptr;
+  QPushButton* m_updateAllBtn = nullptr;
+  QLabel* m_installedStatusLabel = nullptr;
   QFrame* m_restartBanner = nullptr;
   QLabel* m_restartBannerLabel = nullptr;
   QPushButton* m_restartNowBtn = nullptr;

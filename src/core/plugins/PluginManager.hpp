@@ -54,6 +54,11 @@ struct LoadedPluginInfo {
   QString description;  ///< Short capability summary (`desc.description_utf8`).
   QString libraryPath;  ///< Canonical filesystem path to the `.so` / `.dylib` / `.dll`.
   QString sha256Hex;    ///< Lowercase SHA-256 hex digest computed prior to `QLibrary::load()`.
+  QString gitCommitSha;    ///< Full 40-char lowercase Git commit SHA from `plugins-lock.toml` (empty if local).
+  QString gitCommitShort;  ///< 7-char short SHA of `commit_sha` from `plugins-lock.toml` (empty if local).
+  QString gitRepo;         ///< Git repository source URL resolved from `plugins-lock.toml` / `plugins.toml`.
+  QString gitRef;          ///< Declared branch, tag, or commit ref from `plugins.toml` / `plugins-lock.toml`.
+  QString buildSystem;     ///< Build mode (`"auto"`, `"meson"`, `"cmake"`, `"make"`, `"single"`) for updates.
   PluginScope scope = PluginScope::UserGlobal;  ///< Discovery scope (`UserGlobal` vs `Workspace`).
   uint32_t abiMajor = 0u;        ///< Reported `desc.abi_major` (0 if symbol resolution failed).
   uint32_t abiMinor = 0u;        ///< Reported `desc.abi_minor`.
@@ -142,6 +147,15 @@ class PluginManager : public QObject {
   /** @brief Returns status records for all discovered plugins (both active and rejected/disabled/untrusted). */
   const QVector<LoadedPluginInfo>& plugins() const noexcept { return m_pluginInfos; }
 
+  /**
+   * @brief Re-hashes discovered binaries and re-resolves `plugins-lock.toml` / `plugins.toml` metadata without `dlclose`.
+   * @return True when one or more discovered plugin binaries changed `SHA-256` on disk (marking `requiresRestart`).
+   */
+  bool refreshInstalledLockMetadata();
+
+  /** @brief Returns formatted load diagnostic strings (`Loaded <Name> <Version> (<Commit>) [ABI x.y]`) from the latest scan. */
+  const QStringList& loadDiagnostics() const noexcept { return m_loadDiagnostics; }
+
   /** @brief Dispatches `on_session_start` to every active plugin that defines the hook. */
   void notifySessionStarted(int32_t rankCount);
 
@@ -216,11 +230,13 @@ class PluginManager : public QObject {
   void cachePluginMetadata(const QString& canonicalPath, const LoadedPluginInfo& info);
   void flushMetadataCache();
   bool lookupCachedMetadata(const QString& canonicalPath, LoadedPluginInfo* outInfo) const;
+  void populateProvenance(LoadedPluginInfo& info) const;
 
   PluginHostBridge m_bridge;
   QPointer<gridlock::GdbRankCoordinator> m_coordinator;
   QMetaObject::Connection m_stopConn;
   QVector<LoadedPluginInfo> m_pluginInfos;
+  QStringList m_loadDiagnostics;
   std::vector<ActivePluginHandle> m_activePlugins;
   QQueue<PendingStopEvent> m_pendingStops;
   QHash<QString, LoadedPluginInfo> m_pathMetadataCache;

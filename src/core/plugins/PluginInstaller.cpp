@@ -169,21 +169,14 @@ QString PluginInstaller::resolveTargetInstallDir() const {
 }
 
 void PluginInstaller::resetRunState(bool batchSync) {
-  m_fullLog.clear();
-  m_partialLine.clear();
-  m_warnings.clear();
-  m_errors.clear();
-  m_pendingSteps.clear();
-  m_syncQueue.clear();
+  m_fullLog.clear(); m_partialLine.clear();
+  m_warnings.clear(); m_errors.clear();
+  m_pendingSteps.clear(); m_syncQueue.clear();
   m_currentTask = SyncTask{};
-  m_clonedRepoDir.clear();
-  m_lastInstalledPath.clear();
-  m_lastCommitSha.clear();
+  m_clonedRepoDir.clear(); m_lastInstalledPath.clear(); m_lastCommitSha.clear();
   m_installedCount = 0;
-  m_cancelled = false;
-  m_awaitingClone = false;
-  m_isBatchSync = batchSync;
-  m_anySyncError = false;
+  m_cancelled = false; m_awaitingClone = false;
+  m_isBatchSync = batchSync; m_anySyncError = false; m_anyBinaryChanged = false;
 }
 
 bool PluginInstaller::startInstallFromGit(const QString& repoSpec, const QString& gitRef,
@@ -274,7 +267,7 @@ bool PluginInstaller::syncFromManifests(const QString& userManifestPath,
         continue;
       }
       m_syncQueue.enqueue(SyncTask{entry.repo, entry.normalizedUrl, entry.repoSlug, entry.ref,
-                                   entry.build, targetScope, installDir, QString()});
+                                   entry.build, targetScope, installDir, QString(), QString(), true});
     }
     return true;
   };
@@ -291,8 +284,37 @@ bool PluginInstaller::syncFromManifests(const QString& userManifestPath,
     const QString doneMsg = QStringLiteral("==> Manifest sync complete: all declared plugins are up to date.\n");
     m_fullLog.append(doneMsg);
     emit logOutputReceived(doneMsg);
-    emit installFinished(PluginBuildResult{true, QString(), m_warnings, m_errors, m_fullLog, QString(), 0});
+    emit installFinished(PluginBuildResult{true, QString(), m_warnings, m_errors, m_fullLog, QString(), 0, false});
     return true;
+  }
+
+  m_running = true;
+  launchNextSyncTask();
+  return true;
+}
+
+bool PluginInstaller::startUpdatePlugins(const QVector<PluginUpdateTarget>& targets) {
+  if (m_running || targets.isEmpty()) return false;
+  resetRunState(targets.size() > 1);
+
+  for (const PluginUpdateTarget& target : targets) {
+    SyncTask task;
+    task.rawRepo = target.gitRepo.trimmed();
+    task.gitRef = target.gitRef.trimmed();
+    task.scope = target.scope;
+    task.targetDirOverride = target.installDir.trimmed();
+    task.existingBinaryName = target.existingBinaryName.trimmed();
+    task.preserveWorkspaceTrust = target.preserveWorkspaceTrust;
+
+    QString validationErr;
+    if (!normalizeAndValidateUrl(task.rawRepo, GitForgeHost::GitHub, &task.normalizedUrl, &task.repoSlug,
+                                 &validationErr) ||
+        !validateGitRef(task.gitRef, &validationErr) ||
+        !PluginManifest::validateBuildMode(target.buildSystem, &task.buildMode, &validationErr)) {
+      handleTaskFailure(validationErr);
+      return false;
+    }
+    m_syncQueue.enqueue(task);
   }
 
   m_running = true;
@@ -602,9 +624,15 @@ void PluginInstaller::finalizeInstalledArtifacts() {
 
   for (const QString& srcLib : builtLibs) {
     const QFileInfo srcFi(srcLib);
-    const QString finalPath = QDir(destDir).filePath(srcFi.fileName());
+    const QString keepName = m_currentTask.existingBinaryName;
+    const bool useExistingName =
+        (builtLibs.size() == 1 && !keepName.isEmpty() && !keepName.contains(QLatin1Char('/')) &&
+         !keepName.contains(QLatin1Char('\\')) && keepName != QLatin1String(".."));
+    const QString outFileName = useExistingName ? keepName : srcFi.fileName();
+    const QString finalPath = QDir(destDir).filePath(outFileName);
+    const QString prevSha256 = QFileInfo::exists(finalPath) ? PluginManifest::computeFileSha256Hex(finalPath) : QString();
     const QString tmpPath = QDir(destDir).filePath(
-        QStringLiteral(".%1.tmp.%2").arg(srcFi.fileName()).arg(QCoreApplication::applicationPid()));
+        QStringLiteral(".%1.tmp.%2").arg(outFileName).arg(QCoreApplication::applicationPid()));
     QFile::remove(tmpPath);
     if (!QFile::copy(srcLib, tmpPath)) {
       handleTaskFailure(QStringLiteral("Failed to stage built library into %1.").arg(destDir));
@@ -624,7 +652,8 @@ void PluginInstaller::finalizeInstalledArtifacts() {
     const QFileInfo destFi(finalPath);
     const QString canonDest = !destFi.canonicalFilePath().isEmpty() ? destFi.canonicalFilePath() : destFi.absoluteFilePath();
     const QString sha256 = PluginManifest::computeFileSha256Hex(canonDest);
-    if (m_scope == PluginScope::Workspace && !sha256.isEmpty()) {
+    if (!sha256.isEmpty() && sha256 != prevSha256) m_anyBinaryChanged = true;
+    if (m_scope == PluginScope::Workspace && m_currentTask.preserveWorkspaceTrust && !sha256.isEmpty()) {
       ConfigManager::instance().trustWorkspacePlugin(canonDest, sha256);
     }
     if (primaryInstalled.isEmpty()) {
@@ -664,7 +693,7 @@ void PluginInstaller::finalizeInstalledArtifacts() {
 
   m_running = false;
   emit installFinished(PluginBuildResult{!m_anySyncError, m_lastInstalledPath, m_warnings, m_errors,
-                                         m_fullLog, m_lastCommitSha, m_installedCount});
+                                         m_fullLog, m_lastCommitSha, m_installedCount, m_anyBinaryChanged});
 }
 
 void PluginInstaller::handleTaskFailure(const QString& headlineError) {
@@ -688,7 +717,7 @@ void PluginInstaller::handleTaskFailure(const QString& headlineError) {
   m_running = false;
   m_syncQueue.clear();
   emit installFinished(PluginBuildResult{false, m_lastInstalledPath, m_warnings, m_errors,
-                                         m_fullLog, m_lastCommitSha, m_installedCount});
+                                         m_fullLog, m_lastCommitSha, m_installedCount, m_anyBinaryChanged});
 }
 
 void PluginInstaller::cancelInstall() {
@@ -719,7 +748,7 @@ void PluginInstaller::cancelInstall() {
   if (wasRunning) {
     m_errors.append(QStringLiteral("Build cancelled by user."));
     m_fullLog.append(QStringLiteral("==> Build cancelled by user.\n"));
-    emit installFinished(PluginBuildResult{false, QString(), m_warnings, m_errors, m_fullLog, QString(), 0});
+    emit installFinished(PluginBuildResult{false, QString(), m_warnings, m_errors, m_fullLog, QString(), 0, false});
   }
 }
 
