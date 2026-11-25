@@ -493,10 +493,13 @@ void TestMainWindowUI::testProjectExplorerFileCrudAndBuildRegistration() {
     psDlg2.show(); QApplication::processEvents();
     wdEd2->setText(customWd); psDlg2.accept(); QApplication::processEvents();
     QCOMPARE(termDock->workingDirectory(), customWd);
-    QTest::qWait(150);
-    termDock->sendCommand(QStringLiteral("pwd > .pwd_check"));
+    QTest::qWait(250);
     const QString pwdFile = QDir(customWd).filePath(QStringLiteral(".pwd_check"));
-    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(pwdFile), 8000);
+    for (int attempt = 0; attempt < 4 && !QFileInfo::exists(pwdFile); ++attempt) {
+        termDock->sendCommand(QStringLiteral("pwd > .pwd_check"));
+        QTest::qWait(350);
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(pwdFile), 6000);
     { QFile pf(pwdFile); QVERIFY(pf.open(QIODevice::ReadOnly)); QCOMPARE(QString::fromUtf8(pf.readAll()).trimmed(), customWd); }
     // 11c. Verify File -> Save Session writes .gridlock/workspace.toml & settings.toml without opening a file dialog.
     auto* saveSessAct = mw.findChild<QAction*>(QStringLiteral("actionSaveSession"));
@@ -853,86 +856,9 @@ void TestMainWindowUI::testProgressiveDisclosurePerspectivesAndSingleRank() {
     QVERIFY(mw.isDockFloating(regDock) && disasm->isVisible() && disasm->minimumWidth() < 720 && mw.width() <= 1280);
     mw.redockAllFloatingPanels();
 
-    // 5. Verify Preferences -> Plugins page, live enable/disable toggle, Tools -> Plugins menu, and VariablesDockWidget Plugin Actions submenu.
-    {
-        QTemporaryDir plugCfgDir; QVERIFY(plugCfgDir.isValid());
-        const bool hadEnv = qEnvironmentVariableIsSet("GRIDLOCK_TEST_CONFIG_DIR");
-        const QByteArray prevEnv = qgetenv("GRIDLOCK_TEST_CONFIG_DIR");
-        qputenv("GRIDLOCK_TEST_CONFIG_DIR", plugCfgDir.path().toUtf8());
-        auto& cfg = gridlock::core::ConfigManager::instance();
-        cfg.loadConfig(); cfg.setDisabledPluginIds({});
-        const QString pDir = plugCfgDir.path() + QStringLiteral("/plugins");
-        QVERIFY(QDir().mkpath(pDir));
-        QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO), QDir(pDir).filePath(QStringLiteral("01_dummy.so"))));
-        QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_BAD_ABI_PLUGIN_SO), QDir(pDir).filePath(QStringLiteral("02_bad_abi.so"))));
-
-        QVERIFY(mw.pluginManager() != nullptr);
-        QCOMPARE(mw.pluginManager()->discoverAndLoad(), 1);
-        mw.rebuildToolsPluginsMenu();
-        auto* toolsPlugMenu = mw.findChild<QMenu*>(QStringLiteral("menuToolsPlugins"));
-        QVERIFY(toolsPlugMenu != nullptr && mw.findChild<QAction*>(QStringLiteral("pluginCmd_dummy.ping_ranks")) != nullptr);
-
-        gridlock::ui::PreferencesDialog pd(&mw); pd.show(); QApplication::processEvents();
-        QTreeWidgetItem* plugNode = nullptr;
-        for (int i = 0; i < pd.categoryTree()->topLevelItemCount(); ++i)
-            if (pd.categoryTree()->topLevelItem(i)->text(0) == QStringLiteral("Plugins")) plugNode = pd.categoryTree()->topLevelItem(i);
-        QVERIFY(plugNode != nullptr && pd.pluginPage() != nullptr);
-        pd.categoryTree()->setCurrentItem(plugNode); QApplication::processEvents();
-        QTableWidget* tbl = pd.pluginPage()->pluginTable();
-        QVERIFY(tbl != nullptr && tbl->rowCount() == 2 && tbl->columnCount() == 7 && pd.pluginPage()->openFolderButton() && pd.pluginPage()->reloadPluginsButton());
-        QCOMPARE(tbl->item(0, 3)->text(), QStringLiteral("1.0.0"));
-        QVERIFY(tbl->item(0, 4)->text().contains(QStringLiteral("v1.0")));
-        QCOMPARE(tbl->item(0, 5)->text(), QStringLiteral("Loaded"));
-        QVERIFY(tbl->item(1, 5)->text().startsWith(QStringLiteral("ABI Rejected:")));
-
-        // Verify staged Cancel vs Apply semantics, dual Global/Workspace checkboxes, and Restart banner/notification.
-        auto* globalChk = pd.findChild<QCheckBox*>(QStringLiteral("pluginGlobalCheck_org.gridlock.test_dummy"));
-        auto* wsChk = pd.findChild<QCheckBox*>(QStringLiteral("pluginWorkspaceCheck_org.gridlock.test_dummy"));
-        QVERIFY(globalChk != nullptr && wsChk != nullptr && globalChk->isChecked() && wsChk->isChecked());
-        globalChk->setChecked(false); QApplication::processEvents();
-        QVERIFY(!cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")) && tbl->item(0, 5)->text().contains(QStringLiteral("Staged")));
-        pd.reject(); QVERIFY(!cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")));
-
-        gridlock::ui::PreferencesDialog pd2(&mw); pd2.show(); QApplication::processEvents();
-        auto* globalChk2 = pd2.findChild<QCheckBox*>(QStringLiteral("pluginGlobalCheck_org.gridlock.test_dummy"));
-        QVERIFY(globalChk2 != nullptr && globalChk2->isChecked());
-        globalChk2->setChecked(false); QVERIFY(QMetaObject::invokeMethod(&pd2, "apply")); QApplication::processEvents();
-        QVERIFY(cfg.isPluginDisabled(QStringLiteral("org.gridlock.test_dummy")) && !pd2.pluginPage()->restartBanner()->isHidden());
-        auto* mwBanner = mw.findChild<QWidget*>(QStringLiteral("mainWindowPluginRestartBanner"));
-        QVERIFY(mwBanner != nullptr && !mwBanner->isHidden() && pd2.pluginPage()->restartNowButton() != nullptr);
-        globalChk2 = pd2.findChild<QCheckBox*>(QStringLiteral("pluginGlobalCheck_org.gridlock.test_dummy"));
-        QVERIFY(globalChk2 != nullptr); globalChk2->setChecked(true); QVERIFY(QMetaObject::invokeMethod(&pd2, "apply"));
-        pd2.pluginPage()->reloadPluginsButton()->click(); QApplication::processEvents();
-        QCOMPARE(pd2.pluginPage()->pluginTable()->rowCount(), 2); pd2.close();
-
-        // Bind stopped GdbRankCoordinator, populate PetscVec row in VariablesDockWidget, and trigger Plugin Actions -> Inspect Domain Field.
-        gridlock::GdbRankCoordinator coord; coord.initializeMockSession(2);
-        mw.setCoordinator(&coord);
-        coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401120\",func=\"solve\",fullname=\"/tmp/sim.c\",line=\"12\",args=[]}\n"));
-        const auto evalConn = connect(&coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord, [&](int r, const QString& cmd) {
-            if (cmd.contains(QStringLiteral("-data-evaluate-expression"))) {
-                const QString tok = cmd.section(QLatin1Char('-'), 0, 0);
-                coord.processGdbOutput(r, QStringLiteral("%1^done,value=\"petsc_vec_norm_3.14159\"\n").arg(tok));
-            }
-        });
-        QSignalSpy evSpy(&mw, &gridlock::ui::MainWindow::pluginStructuredEventEmitted);
-        auto* varDock = mw.variablesDockWidget(); QVERIFY(varDock != nullptr);
-        varDock->setFocusedRank(0, 2);
-        varDock->applyLocalsForRank(0, QJsonArray{QJsonObject{{"name", "solution_vec"}, {"value", "0x5000"}, {"type", "PetscVec"}}});
-        auto* varTree = varDock->findChild<QTreeView*>(); QVERIFY(varTree && varTree->model()->rowCount() >= 1);
-        std::unique_ptr<QMenu> ctxMenu(varDock->createContextMenuForIndex(varTree->model()->index(0, 0), varDock));
-        QVERIFY(ctxMenu != nullptr);
-        auto* plugSub = ctxMenu->findChild<QMenu*>(QStringLiteral("variablePluginActionsMenu"));
-        auto* varPlugAct = ctxMenu->findChild<QAction*>(QStringLiteral("pluginVarAct_dummy.inspect_field"));
-        QVERIFY(plugSub != nullptr && varPlugAct != nullptr);
-        varPlugAct->trigger(); QApplication::processEvents();
-        QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.var_eval") &&
-                evSpy.last().at(1).toString() == QStringLiteral("petsc_vec_norm_3.14159"));
-        disconnect(evalConn); mw.setCoordinator(nullptr);
-        mw.pluginManager()->unloadAll();
-        if (hadEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", prevEnv); else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
-        cfg.loadConfig();
-    }
+    // 5. Verify Preferences -> Plugins staging, trust approval, GitHub tab, and VariablesDockWidget Plugin Actions.
+    extern void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw);
+    gridlockVerifyPluginSubsystemUi(mw);
     mw.close();
 }
 

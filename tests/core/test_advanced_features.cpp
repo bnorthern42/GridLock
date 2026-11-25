@@ -155,7 +155,7 @@ void TestAdvancedFeatures::testConditionalBreakpoints() {
     
     bool foundCondBreak = false;
     for (int i = 0; i < spy.count(); ++i) {
-        if (spy.at(i).at(1).toString().contains("-break-insert -c \"i == 100 && rank == 0\" main.cpp:42")) {
+        if (spy.at(i).at(1).toString().contains("-break-insert -c \"i == 100 && rank == 0\" \"main.cpp:42\"")) {
             foundCondBreak = true;
             break;
         }

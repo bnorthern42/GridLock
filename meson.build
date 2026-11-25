@@ -209,19 +209,19 @@ test('lsp_tests', gridlock_lsp_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 test_dummy_plugin = shared_module('test_dummy_plugin',
   'tests/core/test_dummy_plugin.c',
   include_directories : inc,
-  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror'],
+  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-DGRIDLOCK_MESON_PLUGIN_BUILD=1'],
   build_by_default : true
 )
 
 test_bad_abi_plugin = shared_module('test_bad_abi_plugin',
   'tests/core/test_dummy_plugin.c',
   include_directories : inc,
-  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN=1'],
+  c_args : ['-std=c99', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-DGRIDLOCK_MESON_PLUGIN_BUILD=1', '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN=1'],
   build_by_default : true
 )
 
 ui_test_src = [
-  'tests/ui/test_ui.cpp', 'tests/ui/test_ui_aux.cpp',
+  'tests/ui/test_ui.cpp', 'tests/ui/test_ui_aux.cpp', 'tests/ui/test_ui_plugins.cpp',
   'tests/ui/test_ui_cohesion.cpp', 'tests/ui/test_ui_capture.cpp',
   'tests/ui/test_ui_debugger.cpp', 'tests/ui/test_ui_viz_and_ux.cpp',
   'src/ui/MainWindow.cpp', 'src/ui/MainWindowLifecycle.cpp', 'src/ui/MainWindowWorkspace.cpp',
@@ -302,7 +302,9 @@ gridlock_ui_tests = executable('gridlock_ui_tests',
   include_directories : inc,
   cpp_args : [
     '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SO="' + test_dummy_plugin.full_path() + '"',
-    '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN_SO="' + test_bad_abi_plugin.full_path() + '"'
+    '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN_SO="' + test_bad_abi_plugin.full_path() + '"',
+    '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SRC="' + meson.current_source_dir() + '/tests/core/test_dummy_plugin.c"',
+    '-DGRIDLOCK_TEST_INCLUDE_DIR="' + meson.current_source_dir() + '/include"'
   ],
   dependencies : [qt6_dep, tomlplusplus_dep, acss_dep, qtermwidget_dep],
   build_by_default : false
@@ -892,7 +894,9 @@ gridlock_plugin_manager_tests = executable('gridlock_plugin_manager_tests',
   include_directories : inc,
   cpp_args : [
     '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SO="' + test_dummy_plugin.full_path() + '"',
-    '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN_SO="' + test_bad_abi_plugin.full_path() + '"'
+    '-DGRIDLOCK_TEST_BAD_ABI_PLUGIN_SO="' + test_bad_abi_plugin.full_path() + '"',
+    '-DGRIDLOCK_TEST_DUMMY_PLUGIN_SRC="' + meson.current_source_dir() + '/tests/core/test_dummy_plugin.c"',
+    '-DGRIDLOCK_TEST_INCLUDE_DIR="' + meson.current_source_dir() + '/include"'
   ],
   dependencies : [qt6_dep, tomlplusplus_dep],
   build_by_default : false

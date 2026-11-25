@@ -8,8 +8,10 @@ Headless QtWidgets integration and UX regression suite (`gridlock_ui_tests` / Me
   - `TestUi` QTest fixture declaring all 64 private test slots alongside shared setup/teardown helpers.
 - `test_ui.cpp` (`857` lines):
   - Core `MainWindow` bootstrapping, splitter/docking geometry, source gutter/bookmarks, CFG minimap, rank badges, and code-style checks.
-- `test_ui_aux.cpp` (`944` lines):
+- `test_ui_aux.cpp` (`865` lines):
   - Preferences, `ThemeManager`, unified `XDG_CONFIG_HOME` persistence, `ProjectExplorerWidget`, `TerminalDockWidget` clipboard shortcuts (`Ctrl+Shift+C`/`Ctrl+Shift+V`), and large CSV/file regression checks.
+- `test_ui_plugins.cpp` (`202` lines):
+  - `Preferences -> Plugins` dual `Global` / `Workspace` checkbox staging (`Cancel` vs `Apply`), workspace SHA-256 trust approval button, inline/status-bar self-restart flow, `Install from GitHub` compiler diagnostics tab, and `VariablesDockWidget` **Plugin Actions** integration.
 - `test_ui_capture.cpp`:
   - Offscreen documentation screenshot generator (`GRIDLOCK_CAPTURE_SCREENSHOTS`), tool dialog renders, and toolbar dropdown captures (`GRIDLOCK_SAVE_TOOLBAR_SHOT`).
 - `test_ui_cohesion.cpp`:

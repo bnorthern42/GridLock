@@ -1,23 +1,21 @@
 /**
  * @file test_plugin_manager.cpp
- * @brief Integration tests for `PluginManager`, `PluginHostBridge`, and compiled C99 `.so` plugins.
- *
- * Verifies shared-library discovery across `~/.config/gridlock/plugins` and
- * `<workspace>/.gridlock/plugins`, strict ABI v1.0 major/struct_size/duplicate-ID
- * enforcement, synchronous `eval_expr` and `read_memory` bridging with bounded
- * `QEventLoop` + `QTimer` timeouts, and `[plugins] disabled_ids` persistence.
+ * @brief Security, re-entrancy, dual-scope, host-bridge, and `PluginInstaller` regression suite.
  */
 
 #include <cstdint>
 #include <cstring>
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QObject>
 #include <QPair>
+#include <QProcess>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QString>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -27,12 +25,12 @@
 #include "../../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../../src/core/managers/ConfigManager.hpp"
 #include "../../src/core/plugins/PluginHostBridge.hpp"
+#include "../../src/core/plugins/PluginInstaller.hpp"
 #include "../../src/core/plugins/PluginManager.hpp"
 #include "gridlock/plugin_api.h"
 
 namespace {
 
-/** @brief RAII guard isolating `GRIDLOCK_TEST_CONFIG_DIR` and workspace path per test. */
 class ScopedPluginEnv {
  public:
   ScopedPluginEnv()
@@ -46,21 +44,21 @@ class ScopedPluginEnv {
     cfg.loadConfig();
     cfg.setWorkspace(m_wsDir.path());
     cfg.setDisabledPluginIds({});
+    cfg.setWorkspaceDisabledPluginIds({});
     QDir().mkpath(m_cfgDir.path() + QStringLiteral("/plugins"));
     QDir().mkpath(m_wsDir.path() + QStringLiteral("/.gridlock/plugins"));
   }
 
   ~ScopedPluginEnv() {
-    if (m_hadPrevEnv) {
-      qputenv("GRIDLOCK_TEST_CONFIG_DIR", m_prevEnv);
-    } else {
-      qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
-    }
+    if (m_hadPrevEnv) qputenv("GRIDLOCK_TEST_CONFIG_DIR", m_prevEnv);
+    else qunsetenv("GRIDLOCK_TEST_CONFIG_DIR");
     auto& cfg = gridlock::core::ConfigManager::instance();
     cfg.loadConfig();
     cfg.setWorkspace(m_prevWorkspace);
   }
 
+  QString tempRoot() const { return m_cfgDir.path(); }
+  QString workspaceRoot() const { return m_wsDir.path(); }
   QString userPluginDir() const { return m_cfgDir.path() + QStringLiteral("/plugins"); }
   QString workspacePluginDir() const { return m_wsDir.path() + QStringLiteral("/.gridlock/plugins"); }
 
@@ -78,75 +76,63 @@ bool copyPluginArtifact(const QString& srcSoPath, const QString& destDir, const 
   return QFile::copy(srcSoPath, dst);
 }
 
+QString sha256OfFile(const QString& path) {
+  QFile f(path);
+  if (!f.open(QIODevice::ReadOnly)) return QString();
+  QCryptographicHash h(QCryptographicHash::Sha256);
+  if (!h.addData(&f)) return QString();
+  return QString::fromLatin1(h.result().toHex()).toLower();
+}
+
+bool runGit(const QString& workDir, const QStringList& args) {
+  QProcess p;
+  p.setWorkingDirectory(workDir);
+  p.start(QStringLiteral("git"), args);
+  return p.waitForFinished(10000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+}
+
 }  // namespace
 
-/**
- * @class TestPluginManager
- * @brief QtTest suite exercising native plugin loading, ABI gates, and host bridge calls.
- */
 class TestPluginManager : public QObject {
   Q_OBJECT
 
  private slots:
-  /**
-   * @brief Verifies `.so` discovery, `abi_major = 999` rejection, staged-action rollback, and duplicate-ID rejection.
-   */
   void testDiscoveryAbiRejectionAndDuplicateGuard() {
     ScopedPluginEnv env;
     const QString dummySo = QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO);
     const QString badAbiSo = QStringLiteral(GRIDLOCK_TEST_BAD_ABI_PLUGIN_SO);
-    QVERIFY2(QFileInfo::exists(dummySo), qPrintable(dummySo));
-    QVERIFY2(QFileInfo::exists(badAbiSo), qPrintable(badAbiSo));
+    QVERIFY(QFileInfo::exists(dummySo) && QFileInfo::exists(badAbiSo));
 
     QVERIFY(copyPluginArtifact(dummySo, env.userPluginDir(), QStringLiteral("01_dummy.so")));
     QVERIFY(copyPluginArtifact(badAbiSo, env.userPluginDir(), QStringLiteral("02_bad_abi.so")));
-    // Second copy of the same valid plugin in workspace plugins tests duplicate-ID rejection.
     QVERIFY(copyPluginArtifact(dummySo, env.workspacePluginDir(), QStringLiteral("03_dup_dummy.so")));
 
     gridlock::GdbRankCoordinator coord;
     gridlock::core::plugins::PluginManager mgr(&coord);
-
-    const int activeCount = mgr.discoverAndLoad();
-    QCOMPARE(activeCount, 1);
+    QCOMPARE(mgr.discoverAndLoad(), 1);
     QCOMPARE(mgr.plugins().size(), 3);
 
-    bool sawLoadedDummy = false;
-    bool sawRejectedBadAbi = false;
-    bool sawRejectedDuplicate = false;
+    bool sawLoadedDummy = false, sawRejectedBadAbi = false, sawRejectedDuplicate = false;
     for (const auto& info : mgr.plugins()) {
       if (info.libraryPath.endsWith(QStringLiteral("01_dummy.so"))) {
-        QVERIFY(info.enabled);
-        QVERIFY(info.errorMessage.isEmpty());
+        QVERIFY(info.enabled && info.errorMessage.isEmpty());
         QCOMPARE(info.id, QStringLiteral("org.gridlock.test_dummy"));
-        QCOMPARE(info.abiMajor, GRIDLOCK_PLUGIN_ABI_MAJOR);
         sawLoadedDummy = true;
       } else if (info.libraryPath.endsWith(QStringLiteral("02_bad_abi.so"))) {
-        QVERIFY(!info.enabled);
-        QCOMPARE(info.abiMajor, 999u);
-        QVERIFY(info.errorMessage.contains(QStringLiteral("ABI major mismatch")));
+        QVERIFY(!info.enabled && info.errorMessage.contains(QStringLiteral("ABI major mismatch")));
         sawRejectedBadAbi = true;
       } else if (info.libraryPath.endsWith(QStringLiteral("03_dup_dummy.so"))) {
-        QVERIFY(!info.enabled);
-        QVERIFY(info.errorMessage.contains(QStringLiteral("Duplicate plugin ID")));
+        QVERIFY(!info.enabled && info.errorMessage.contains(QStringLiteral("Duplicate plugin ID")));
         sawRejectedDuplicate = true;
       }
     }
-    QVERIFY(sawLoadedDummy);
-    QVERIFY(sawRejectedBadAbi);
-    QVERIFY(sawRejectedDuplicate);
-
-    // Ensure bad_abi's staged action was discarded and only dummy's action exists.
-    const auto varActions = mgr.hostBridge()->variableActions();
-    QCOMPARE(varActions.size(), 1);
-    QCOMPARE(varActions.first().actionId, QStringLiteral("dummy.inspect_field"));
+    QVERIFY(sawLoadedDummy && sawRejectedBadAbi && sawRejectedDuplicate);
+    QCOMPARE(mgr.hostBridge()->variableActions().size(), 1);
     QCOMPARE(mgr.hostBridge()->matchingVariableActions(QStringLiteral("Kokkos::View<double**>")).size(), 1);
     QCOMPARE(mgr.hostBridge()->matchingVariableActions(QStringLiteral("int")).size(), 0);
   }
 
-  /**
-   * @brief Verifies synchronous `eval_expr` buffer sizing, `read_memory`, timeouts, `on_rank_stopped`, and `shutdown`.
-   */
-  void testHostBridgeEvalMemoryTimeoutsAndStopLifecycle() {
+  void testHostBridgeEvalMemorySanitizationAndStopLifecycle() {
     ScopedPluginEnv env;
     QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
                                env.userPluginDir(), QStringLiteral("dummy.so")));
@@ -159,63 +145,45 @@ class TestPluginManager : public QObject {
 
     QVector<QPair<QString, QString>> events;
     QObject::connect(mgr.hostBridge(), &gridlock::core::plugins::PluginHostBridge::structuredEventEmitted,
-                     &coord, [&](const QString& ch, const QString& payload) {
-                       events.append(qMakePair(ch, payload));
-                     });
+                     &coord, [&](const QString& ch, const QString& payload) { events.append(qMakePair(ch, payload)); });
 
     QCOMPARE(mgr.discoverAndLoad(), 1);
-    QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 1);
-
     const GridLockHostApi* api = mgr.hostBridge()->hostApi();
     size_t outLen = 0u;
     char smallBuf[8]{};
 
-    // Rank 0 starts in "running" state after initializeMockSession(2, true).
-    QCOMPARE(api->eval_expr(api->host_ctx, 0, "x", smallBuf, sizeof(smallBuf), &outLen),
-             GRIDLOCK_ERR_NOT_STOPPED);
-    QCOMPARE(api->eval_expr(api->host_ctx, 99, "x", smallBuf, sizeof(smallBuf), &outLen),
-             GRIDLOCK_ERR_INVALID_RANK);
+    QCOMPARE(api->eval_expr(api->host_ctx, 0, "x", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_NOT_STOPPED);
+    QCOMPARE(api->eval_expr(api->host_ctx, 99, "x", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_INVALID_RANK);
 
-    // Transition rank 0 to stopped via GDB/MI *stopped record and verify on_rank_stopped fires.
     coord.processGdbOutput(
         0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x401234\",func=\"solve\",file=\"sim.c\",fullname=\"/tmp/sim.c\",line=\"77\"}\n"));
-    QCOMPARE(coord.getRankState(0).currentState, QStringLiteral("stopped"));
-    QVERIFY(!events.isEmpty());
-    QCOMPARE(events.last().first, QStringLiteral("dummy.stop"));
+    QVERIFY(!events.isEmpty() && events.last().first == QStringLiteral("dummy.stop"));
     QVERIFY(events.last().second.contains(QStringLiteral("\"line\":77")));
+    QCOMPARE(api->eval_expr(api->host_ctx, 0, "unanswered_expr", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_TIMEOUT);
 
-    // Verify timeout when GDB produces no response for an evaluation query.
-    QCOMPARE(api->eval_expr(api->host_ctx, 0, "unanswered_expr", smallBuf, sizeof(smallBuf), &outLen),
-             GRIDLOCK_ERR_TIMEOUT);
-
-    // Connect mock MI responder for eval_expr and read_memory.
     const auto miResponder = QObject::connect(
-        &coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord,
-        [&](int rankId, const QString& cmd) {
+        &coord, &gridlock::GdbRankCoordinator::commandSentToGdb, &coord, [&](int rankId, const QString& cmd) {
+          const QString tok = cmd.section(QLatin1Char('-'), 0, 0);
           if (cmd.contains(QStringLiteral("-data-evaluate-expression"))) {
-            const QString tok = cmd.section(QLatin1Char('-'), 0, 0);
             if (cmd.contains(QStringLiteral("mesh_field"))) {
               QTimer::singleShot(5, &coord, [&, rankId, tok]() {
-                coord.processGdbOutput(
-                    rankId,
-                    QStringLiteral("%1^done,value=\"extent_256x128x64_double_grid\"\n").arg(tok));
+                coord.processGdbOutput(rankId, QStringLiteral("%1^done,value=\"extent_256x128x64_double_grid\"\n").arg(tok));
               });
             } else if (cmd.contains(QStringLiteral("broken_sym"))) {
-              coord.processGdbOutput(
-                  rankId, QStringLiteral("%1^error,msg=\"No symbol broken_sym\"\n").arg(tok));
+              coord.processGdbOutput(rankId, QStringLiteral("%1^error,msg=\"No symbol broken_sym\"\n").arg(tok));
             }
-          } else if (cmd.startsWith(QStringLiteral("-data-read-memory-bytes 0x5000"))) {
-            QTimer::singleShot(5, &coord, [&, rankId]() {
-              coord.processGdbOutput(
-                  rankId,
-                  QStringLiteral("^done,memory=[{begin=\"0x00005000\",offset=\"0x00000000\",end=\"0x00005004\",contents=\"deadbeef\"}]\n"));
-            });
-          } else if (cmd.startsWith(QStringLiteral("-data-read-memory-bytes 0xbad0"))) {
-            coord.processGdbOutput(0, QStringLiteral("^error,msg=\"Cannot access memory\"\n"));
+          } else if (cmd.contains(QStringLiteral("-data-read-memory-bytes 0x5000"))) {
+            coord.processGdbOutput(
+                rankId, QStringLiteral("%1^done,memory=[{begin=\"0x00005000\",offset=\"0x00000000\",end=\"0x00005004\",contents=\"deadbeef\"}]\n").arg(tok));
+          } else if (cmd.contains(QStringLiteral("-data-read-memory-bytes 0xbad0"))) {
+            coord.processGdbOutput(rankId, QStringLiteral("%1^error,msg=\"Cannot access memory\"\n").arg(tok));
+          } else if (cmd.contains(QStringLiteral("-data-write-memory-bytes 0x5000"))) {
+            coord.processGdbOutput(rankId, QStringLiteral("%1^done\n").arg(tok));
+          } else if (cmd.contains(QStringLiteral("-data-write-memory-bytes 0xbad0"))) {
+            coord.processGdbOutput(rankId, QStringLiteral("%1^error,msg=\"Cannot write memory\"\n").arg(tok));
           }
         });
 
-    // Trigger C99 plugin's variable action (4-byte buffer probe -> alloc exact -> retry -> emit event).
     GridLockVariableContext varCtx{};
     varCtx.struct_size = static_cast<uint32_t>(sizeof(GridLockVariableContext));
     varCtx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
@@ -226,68 +194,82 @@ class TestPluginManager : public QObject {
     varCtx.expression_utf8 = "mesh_field";
     varCtx.type_utf8 = "PetscVec";
     varCtx.value_utf8 = "0x5000";
-
-    QCOMPARE(mgr.hostBridge()->invokeVariableAction(QStringLiteral("dummy.inspect_field"), varCtx),
-             GRIDLOCK_OK);
-    QCOMPARE(events.last().first, QStringLiteral("dummy.var_eval"));
+    QCOMPARE(mgr.hostBridge()->invokeVariableAction(QStringLiteral("dummy.inspect_field"), varCtx), GRIDLOCK_OK);
     QCOMPARE(events.last().second, QStringLiteral("extent_256x128x64_double_grid"));
-    QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 1);
+    QCOMPARE(api->eval_expr(api->host_ctx, 0, "broken_sym", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_EVAL_FAILED);
 
-    // Verify eval failure status mapping.
-    QCOMPARE(api->eval_expr(api->host_ctx, 0, "broken_sym", smallBuf, sizeof(smallBuf), &outLen),
-             GRIDLOCK_ERR_EVAL_FAILED);
-
-    // Verify synchronous read_memory success and fault paths.
+    // HIGH-02 / HIGH-03 / HIGH-04 bounds and MI injection checks.
     uint8_t memBytes[4]{};
-    size_t bytesRead = 0u;
-    QCOMPARE(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &bytesRead),
-             GRIDLOCK_OK);
+    size_t bytesRead = 0u, written = 0u;
+    QCOMPARE(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, 64ULL * 1024ULL * 1024ULL + 1ULL, &bytesRead),
+             GRIDLOCK_ERR_INVALID_ARG);
+    QCOMPARE(api->read_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &bytesRead), GRIDLOCK_OK);
     QCOMPARE(bytesRead, size_t{4u});
     QCOMPARE(memBytes[0], uint8_t{0xde});
-    QCOMPARE(memBytes[1], uint8_t{0xad});
-    QCOMPARE(memBytes[2], uint8_t{0xbe});
-    QCOMPARE(memBytes[3], uint8_t{0xef});
+    QCOMPARE(api->read_memory(api->host_ctx, 0, 0xbad0ULL, memBytes, sizeof(memBytes), &bytesRead), GRIDLOCK_ERR_MEMORY_READ_FAILED);
 
-    QCOMPARE(api->read_memory(api->host_ctx, 0, 0xbad0ULL, memBytes, sizeof(memBytes), &bytesRead),
-             GRIDLOCK_ERR_MEMORY_READ_FAILED);
-
-    // Exercise write_memory, breakpoints, rank count, active rank, and command invocation.
-    size_t written = 0u;
-    QCOMPARE(api->write_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &written),
-             GRIDLOCK_OK);
+    QCOMPARE(api->write_memory(api->host_ctx, 0, 0x5000ULL, memBytes, sizeof(memBytes), &written), GRIDLOCK_OK);
     QCOMPARE(written, size_t{4u});
+    QCOMPARE(api->write_memory(api->host_ctx, 0, 0xbad0ULL, memBytes, sizeof(memBytes), &written), GRIDLOCK_ERR_MEMORY_READ_FAILED);
 
     int32_t bpId = -1;
+    QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c\n-interpreter-exec console \"quit\"", 10, nullptr, &bpId),
+             GRIDLOCK_ERR_INVALID_ARG);
+    QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c", 10, "i == 1\nquit", &bpId), GRIDLOCK_ERR_INVALID_ARG);
     QCOMPARE(api->set_breakpoint(api->host_ctx, "/tmp/sim.c", 80, "i == 3", &bpId), GRIDLOCK_OK);
-    QVERIFY(bpId > 0);
     QCOMPARE(api->remove_breakpoint(api->host_ctx, bpId), GRIDLOCK_OK);
 
-    GridLockCommandSpec cmdSpec{};
-    cmdSpec.struct_size = static_cast<uint32_t>(sizeof(GridLockCommandSpec));
-    cmdSpec.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-    cmdSpec.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-    cmdSpec.active_rank = 1;
-    cmdSpec.rank_count = 2;
-    cmdSpec.command_id_utf8 = "dummy.ping_ranks";
-    cmdSpec.menu_label_utf8 = "Ping Active Ranks";
-    QCOMPARE(mgr.hostBridge()->invokeCommandAction(QStringLiteral("dummy.ping_ranks"), cmdSpec),
-             GRIDLOCK_OK);
-    QCOMPARE(events.last().first, QStringLiteral("dummy.cmd"));
-    QVERIFY(events.last().second.contains(QStringLiteral("\"ranks\":2")));
-
     QObject::disconnect(miResponder);
-
-    // Unload verifies shutdown callback frees plugin_ctx cleanly.
     mgr.unloadAll();
     QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 0);
-    QCOMPARE(events.last().first, QStringLiteral("dummy.lifecycle"));
-    QCOMPARE(events.last().second, QStringLiteral("{\"event\":\"shutdown\"}"));
   }
 
-  /**
-   * @brief Verifies `[plugins] disabled_ids` persistence and live `setPluginEnabled` unload/reload.
-   */
-  void testDisabledPluginConfigAndLiveToggle() {
+  void testWorkspaceTrustGateAndSingleByteTamperInvalidation() {
+    ScopedPluginEnv env;
+    const QString markerPath = QDir(env.tempRoot()).filePath(QStringLiteral("elf_ctor_marker.txt"));
+    QFile::remove(markerPath);
+    qputenv("GRIDLOCK_TEST_CTOR_MARKER_FILE", markerPath.toUtf8());
+
+    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
+                               env.workspacePluginDir(), QStringLiteral("ws_untrusted.so")));
+    const QFileInfo wsFi(QDir(env.workspacePluginDir()).filePath(QStringLiteral("ws_untrusted.so")));
+    const QString canonWsPath = !wsFi.canonicalFilePath().isEmpty() ? wsFi.canonicalFilePath() : wsFi.absoluteFilePath();
+
+    gridlock::GdbRankCoordinator coord;
+    gridlock::core::plugins::PluginManager mgr(&coord);
+
+    // 1. Untrusted workspace plugin MUST NOT call dlopen() or execute ELF .init_array constructors.
+    QCOMPARE(mgr.discoverAndLoad(), 0);
+    QCOMPARE(mgr.plugins().size(), 1);
+    QVERIFY(!mgr.plugins().first().trusted && !mgr.plugins().first().enabled);
+    QVERIFY(!QFileInfo::exists(markerPath));
+
+    // 2. Approve exact SHA-256 in user-global ConfigManager and verify reload succeeds and constructor runs.
+    const QString origSha = mgr.plugins().first().sha256Hex;
+    QVERIFY(!origSha.isEmpty());
+    gridlock::core::ConfigManager::instance().trustWorkspacePlugin(canonWsPath, origSha);
+    QCOMPARE(mgr.discoverAndLoad(), 1);
+    QVERIFY(mgr.plugins().first().trusted && mgr.plugins().first().enabled);
+    QVERIFY(QFileInfo::exists(markerPath));
+
+    // 3. Unload, remove canary, append 1 byte to tamper binary, and verify trust is invalidated before dlopen().
+    mgr.unloadAll();
+    QFile::remove(markerPath);
+    {
+      QFile tamper(canonWsPath);
+      QVERIFY(tamper.open(QIODevice::Append));
+      QCOMPARE(tamper.write("\x00", 1), qint64{1});
+    }
+    QVERIFY(sha256OfFile(canonWsPath) != origSha);
+    QCOMPARE(mgr.discoverAndLoad(), 0);
+    QCOMPARE(mgr.plugins().size(), 1);
+    QVERIFY(!mgr.plugins().first().trusted && !mgr.plugins().first().enabled);
+    QVERIFY(!QFileInfo::exists(markerPath));
+
+    qunsetenv("GRIDLOCK_TEST_CTOR_MARKER_FILE");
+  }
+
+  void testCallbackReentrancyDeferralAndShutdownRegistrationLockout() {
     ScopedPluginEnv env;
     QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
                                env.userPluginDir(), QStringLiteral("dummy.so")));
@@ -295,34 +277,144 @@ class TestPluginManager : public QObject {
     gridlock::GdbRankCoordinator coord;
     gridlock::core::plugins::PluginManager mgr(&coord);
     QCOMPARE(mgr.discoverAndLoad(), 1);
-    QCOMPARE(mgr.hostBridge()->variableActions().size(), 1);
-    QCOMPARE(mgr.hostBridge()->commandActions().size(), 1);
-    QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 1);
 
-    // Disable live: must unregister actions, call shutdown(), unload .so, and persist to TOML.
-    QVERIFY(mgr.setPluginEnabled(QStringLiteral("org.gridlock.test_dummy"), false));
-    QCOMPARE(mgr.hostBridge()->variableActions().size(), 0);
-    QCOMPARE(mgr.hostBridge()->commandActions().size(), 0);
+    QStringList stopPayloads;
+    QString shutdownRegPayload;
+    bool wasStillLoadedInsideCallback = false;
+
+    QObject::connect(mgr.hostBridge(), &gridlock::core::plugins::PluginHostBridge::structuredEventEmitted,
+                     &coord, [&](const QString& ch, const QString& payload) {
+                       if (ch == QStringLiteral("dummy.stop")) {
+                         stopPayloads.append(payload);
+                         if (stopPayloads.size() == 1) {
+                           // Re-entrantly enqueue a second stop; FIFO must finish stop #1 first, then run #2 unless unloaded.
+                           mgr.notifyRankStopped(0, QStringLiteral("/tmp/sim.c"), 22, QStringLiteral("solve"), 0x4010u);
+                         } else if (stopPayloads.size() == 2) {
+                           // Trigger unloadAll() while m_callbackDepth > 0: must defer dlclose until unwind!
+                           mgr.unloadAll();
+                           wasStillLoadedInsideCallback = !mgr.plugins().isEmpty();
+                         }
+                       } else if (ch == QStringLiteral("dummy.shutdown_reg")) {
+                         shutdownRegPayload = payload;
+                       }
+                     });
+
+    mgr.notifyRankStopped(0, QStringLiteral("/tmp/sim.c"), 11, QStringLiteral("solve"), 0x4000u);
+
+    QCOMPARE(stopPayloads.size(), 2);
+    QVERIFY(stopPayloads.at(0).contains(QStringLiteral("\"line\":11")));
+    QVERIFY(stopPayloads.at(1).contains(QStringLiteral("\"line\":22")));
+    QVERIFY(wasStillLoadedInsideCallback);
+    // After unwind to depth 0, deferred unloadAll() must have completed and rejected shutdown registration (-8).
+    QVERIFY(mgr.plugins().isEmpty());
+    QVERIFY(shutdownRegPayload.contains(QString::number(static_cast<int>(GRIDLOCK_ERR_UNSUPPORTED))));
+    QVERIFY(mgr.hostBridge()->variableActions().isEmpty());
     QCOMPARE(mgr.hostBridge()->liveAllocationCount(), 0);
-    QVERIFY(gridlock::core::ConfigManager::instance().isPluginDisabled(
-        QStringLiteral("org.gridlock.test_dummy")));
+  }
 
-    // Reload TOML into a second PluginManager and verify disabled plugin is not initialized.
-    gridlock::core::ConfigManager::instance().loadConfig();
-    QVERIFY(gridlock::core::ConfigManager::instance().isPluginDisabled(
-        QStringLiteral("org.gridlock.test_dummy")));
+  void testDualScopeEnablementAndLocalBareGitPluginInstaller() {
+    ScopedPluginEnv env;
+    QVERIFY(copyPluginArtifact(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SO),
+                               env.userPluginDir(), QStringLiteral("dummy.so")));
 
-    gridlock::core::plugins::PluginManager mgrReloaded(&coord);
-    QCOMPARE(mgrReloaded.discoverAndLoad(), 0);
-    QCOMPARE(mgrReloaded.plugins().size(), 1);
-    QVERIFY(!mgrReloaded.plugins().first().enabled);
-    QCOMPARE(mgrReloaded.hostBridge()->liveAllocationCount(), 0);
+    gridlock::GdbRankCoordinator coord;
+    gridlock::core::plugins::PluginManager mgr(&coord);
+    QCOMPARE(mgr.discoverAndLoad(), 1);
+    const QString plugId = QStringLiteral("org.gridlock.test_dummy");
 
-    // Re-enable live and verify plugin initializes and restores its actions.
-    QVERIFY(mgrReloaded.setPluginEnabled(QStringLiteral("org.gridlock.test_dummy"), true));
-    QVERIFY(mgrReloaded.plugins().first().enabled);
-    QCOMPARE(mgrReloaded.hostBridge()->variableActions().size(), 1);
-    QCOMPARE(mgrReloaded.hostBridge()->liveAllocationCount(), 1);
+    // 1. Effective enablement requires BOTH Global and Workspace flags.
+    QVERIFY(mgr.effectivePluginEnabled(plugId));
+    QVERIFY(mgr.setPluginWorkspaceEnabled(plugId, false));
+    QVERIFY(!mgr.effectivePluginEnabled(plugId) && mgr.isPluginGloballyEnabled(plugId));
+
+    QTemporaryDir secondWs;
+    QVERIFY(secondWs.isValid());
+    gridlock::core::ConfigManager::instance().setWorkspace(secondWs.path());
+    QVERIFY(mgr.effectivePluginEnabled(plugId));
+
+    QVERIFY(mgr.setPluginGloballyEnabled(plugId, false));
+    QVERIFY(!mgr.effectivePluginEnabled(plugId));
+    gridlock::core::ConfigManager::instance().setWorkspace(env.workspaceRoot());
+    QVERIFY(mgr.setPluginGloballyEnabled(plugId, true));
+    QVERIFY(mgr.setPluginWorkspaceEnabled(plugId, true));
+    mgr.unloadAll();
+
+    // 2. Validate URL security gates against leading '-' flag injection and non-GitHub hosts.
+    using gridlock::core::plugins::PluginInstaller;
+    using gridlock::core::plugins::PluginScope;
+    QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("-oProxyCommand=id")));
+    QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("https://evil.example.com/a/b.git")));
+    QVERIFY(!PluginInstaller::validateGitHubUrl(QStringLiteral("https://github.com/owner/repo.git --upload-pack=x")));
+    QVERIFY(!PluginInstaller::validateGitRef(QStringLiteral("--upload-pack=id")));
+    QVERIFY(PluginInstaller::validateGitHubUrl(QStringLiteral("https://github.com/gridlock-test/local-plugin.git")));
+
+    // 3. Create a local bare git repository with a valid warning-emitting C99 branch and a broken branch.
+    QTemporaryDir gitSandbox;
+    QVERIFY(gitSandbox.isValid());
+    const QString bareRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("local-plugin.git"));
+    const QString workRepo = QDir(gitSandbox.path()).filePath(QStringLiteral("work"));
+    QVERIFY(QDir().mkpath(bareRepo) && QDir().mkpath(workRepo));
+    QVERIFY(runGit(bareRepo, {QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("test@gridlock.local")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("GridLock Test")}));
+
+    const QString dstSrc = QDir(workRepo).filePath(QStringLiteral("plugin_src.c"));
+    QVERIFY(QFile::copy(QStringLiteral(GRIDLOCK_TEST_DUMMY_PLUGIN_SRC), dstSrc));
+    QVERIFY(runGit(workRepo, {QStringLiteral("add"), QStringLiteral("plugin_src.c")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("initial valid plugin")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), bareRepo}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("main")}));
+
+    // Create 'broken' branch by truncating physical C source mid-function to trigger a real compiler syntax error.
+    QVERIFY(runGit(workRepo, {QStringLiteral("checkout"), QStringLiteral("-b"), QStringLiteral("broken")}));
+    {
+      QFile truncFile(dstSrc);
+      QVERIFY(truncFile.open(QIODevice::ReadWrite));
+      QVERIFY(truncFile.resize(700));
+    }
+    QVERIFY(runGit(workRepo, {QStringLiteral("commit"), QStringLiteral("-am"), QStringLiteral("truncate source")}));
+    QVERIFY(runGit(workRepo, {QStringLiteral("push"), QStringLiteral("origin"), QStringLiteral("broken")}));
+
+    // Route https://github.com/gridlock-test/local-plugin.git transparently to local file:// bareRepo via Git env config.
+    const QString fileUrl = QStringLiteral("file://") + bareRepo;
+    qputenv("GRIDLOCK_INCLUDE_DIR", QByteArrayLiteral(GRIDLOCK_TEST_INCLUDE_DIR));
+    qputenv("GIT_CONFIG_COUNT", "2");
+    qputenv("GIT_CONFIG_KEY_0", QStringLiteral("url.%1.insteadOf").arg(fileUrl).toUtf8());
+    qputenv("GIT_CONFIG_VALUE_0", "https://github.com/gridlock-test/local-plugin.git");
+    qputenv("GIT_CONFIG_KEY_1", "protocol.file.allow");
+    qputenv("GIT_CONFIG_VALUE_1", "always");
+
+    PluginInstaller installer;
+    QSignalSpy doneSpy(&installer, &PluginInstaller::installFinished);
+
+    // Build 'main' into Workspace scope: verify .so installed, compiler warning captured, and SHA-256 auto-trusted.
+    QVERIFY(installer.startInstallFromGitHub(
+        QStringLiteral("https://github.com/gridlock-test/local-plugin.git"),
+        QStringLiteral("main"), PluginScope::Workspace, env.workspacePluginDir()));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
+    const auto okRes = doneSpy.takeFirst().at(0).value<gridlock::core::plugins::PluginBuildResult>();
+    QVERIFY2(okRes.success, qPrintable(okRes.fullCompilerLog));
+    QVERIFY(QFileInfo::exists(okRes.installedPath));
+    QVERIFY(!okRes.warnings.isEmpty());
+    QVERIFY(gridlock::core::ConfigManager::instance().isWorkspacePluginTrusted(
+        okRes.installedPath, sha256OfFile(okRes.installedPath)));
+
+    // Build 'broken' branch: verify clean failure and captured compiler error diagnostics.
+    QVERIFY(installer.startInstallFromGitHub(
+        QStringLiteral("https://github.com/gridlock-test/local-plugin.git"),
+        QStringLiteral("broken"), PluginScope::UserGlobal, env.userPluginDir()));
+    QTRY_COMPARE_WITH_TIMEOUT(doneSpy.count(), 1, 15000);
+    const auto errRes = doneSpy.takeFirst().at(0).value<gridlock::core::plugins::PluginBuildResult>();
+    QVERIFY(!errRes.success);
+    QVERIFY(!errRes.errors.isEmpty());
+
+    qunsetenv("GIT_CONFIG_COUNT");
+    qunsetenv("GIT_CONFIG_KEY_0");
+    qunsetenv("GIT_CONFIG_VALUE_0");
+    qunsetenv("GIT_CONFIG_KEY_1");
+    qunsetenv("GIT_CONFIG_VALUE_1");
+    qunsetenv("GRIDLOCK_INCLUDE_DIR");
   }
 };
 

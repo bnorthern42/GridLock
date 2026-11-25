@@ -1,15 +1,12 @@
 /**
  * @file test_dummy_plugin.c
- * @brief Pure C99 test shared-library plugin exercising GridLock ABI v1.0.
+ * @brief Pure C99 test shared-library plugin exercising GridLock ABI v1.0 and security gates.
  *
- * Compiles into two Meson `shared_module` test artifacts:
- * 1. `test_dummy_plugin`: Valid ABI v1.0 plugin exercising `alloc_bytes`/`free_bytes`,
- *    `register_variable_action`, `register_command_action`, `eval_expr` two-pass
- *    buffer sizing (`GRIDLOCK_ERR_BUFFER_TOO_SMALL` -> exact retry), `on_rank_stopped`,
- *    and `shutdown` without mutable global state.
- * 2. `test_bad_abi_plugin` (`-DGRIDLOCK_TEST_BAD_ABI_PLUGIN=1`): Reports `abi_major = 999`
- *    after attempting to stage a variable action, verifying clean rejection and staging
- *    rollback in `PluginManager`.
+ * Compiles into two Meson `shared_module` test artifacts (`test_dummy_plugin` and
+ * `test_bad_abi_plugin`), includes an optional ELF constructor canary gated on
+ * `GRIDLOCK_TEST_CTOR_MARKER_FILE` to prove untrusted workspace binaries never execute
+ * `.init_array` constructors prior to SHA-256 approval, and tests registration lockout
+ * inside `shutdown()`.
  */
 
 #include "gridlock/plugin_api.h"
@@ -17,8 +14,28 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define DUMMY_MAX_EVAL_BYTES ((size_t)16u * 1024u * 1024u)
+
+#if !defined(GRIDLOCK_MESON_PLUGIN_BUILD)
+/* Emits a deterministic -Wunused-variable diagnostic when built out-of-tree by PluginInstaller. */
+static int dummy_installer_warning_probe = 42;
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((constructor))
+static void dummy_elf_constructor_canary(void) {
+  const char* marker_path = getenv("GRIDLOCK_TEST_CTOR_MARKER_FILE");
+  if (marker_path != NULL && marker_path[0] != '\0') {
+    FILE* fp = fopen(marker_path, "wb");
+    if (fp != NULL) {
+      (void)fputs("elf_ctor_executed\n", fp);
+      (void)fclose(fp);
+    }
+  }
+}
+#endif
 
 typedef struct DummyPluginState {
   int32_t stop_count;
@@ -49,11 +66,8 @@ static GridLockStatus GRIDLOCK_CALL dummy_on_variable_action(
   if (st == GRIDLOCK_OK) {
     return host->emit_structured_event(host->host_ctx, "dummy.var_eval", tiny_buf);
   }
-  if (st != GRIDLOCK_ERR_BUFFER_TOO_SMALL) {
+  if (st != GRIDLOCK_ERR_BUFFER_TOO_SMALL || required_len >= DUMMY_MAX_EVAL_BYTES) {
     return st;
-  }
-  if (required_len >= DUMMY_MAX_EVAL_BYTES) {
-    return GRIDLOCK_ERR_BUFFER_TOO_SMALL;
   }
 
   /* Second pass: allocate exact capacity (required_len + 1 for NUL) via host allocator. */
@@ -133,6 +147,12 @@ static GridLockStatus GRIDLOCK_CALL dummy_on_session_end(
 
 static void GRIDLOCK_CALL dummy_shutdown(void* plugin_ctx, const GridLockHostApi* host) {
   if (host != NULL) {
+    char reg_payload[64];
+    /* Attempt registration during shutdown to verify CRIT-03 registration lockout. */
+    GridLockStatus reg_st = host->register_variable_action(
+        host->host_ctx, "dummy.shutdown_leak", "Leaked", ".*", &dummy_on_variable_action, NULL);
+    (void)snprintf(reg_payload, sizeof(reg_payload), "{\"reg_status\":%d}", (int)reg_st);
+    (void)host->emit_structured_event(host->host_ctx, "dummy.shutdown_reg", reg_payload);
     (void)host->emit_structured_event(
         host->host_ctx, "dummy.lifecycle", "{\"event\":\"shutdown\"}");
     if (plugin_ctx != NULL && host->free_bytes != NULL) {
