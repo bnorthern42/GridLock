@@ -225,17 +225,23 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         if (isNonX86Arch && !m_archRegisterNames.contains(frameArch)) writeCmd(rankId, QStringLiteral("214-data-list-register-names\n"));
         writeCmd(rankId, "-data-list-register-values r\n");
         writeCmd(rankId, "201-stack-list-variables --simple-values\n");
-        static const QRegularExpression threadRe("thread-id=\"(\\d+)\"");
-        const auto matchThread = threadRe.match(line);
+        static const QRegularExpression threadRe("thread-id=\"(\\d+)\""), reasonRe("reason=\"([^\"]+)\"");
+        const auto matchThread = threadRe.match(line), matchReason = reasonRe.match(line);
         writeCmd(rankId, matchThread.hasMatch() ? QString("-thread-select %1\n").arg(matchThread.captured(1)) : QStringLiteral("-thread-info\n"));
         for (int varIdx = 0; varIdx < static_cast<int>(m_watchVariables.size()); ++varIdx) {
           const QString& varName = m_watchVariables[varIdx];
           if (!m_varNameMap[rankId].contains(varName)) writeCmd(rankId, QString("30%1-var-create - * %2\n").arg(varIdx).arg(varName));
         }
-        if (matchThread.hasMatch()) m_activeThreadIds[rankId] = matchThread.captured(1).toInt();
+        const int stopTid = matchThread.hasMatch() ? matchThread.captured(1).toInt() : m_activeThreadIds.value(rankId, rankId + 1);
+        if (matchThread.hasMatch()) m_activeThreadIds[rankId] = stopTid;
+        bool pcOk = false;
+        const QString rawHex = matchAddr.hasMatch() ? matchAddr.captured(1).trimmed() : QString();
+        const uint64_t parsedPc = rawHex.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? rawHex.mid(2).toULongLong(&pcOk, 16) : 0u;
+        const QString stopReason = matchReason.hasMatch() ? matchReason.captured(1) : QStringLiteral("stopped");
         requestStackAndThreads(rankId);
         emit rankStateChanged(rankId, rp->state);
         if (rp->state.currentLine > 0) emit locationChanged(rankId, rp->state.currentFile, rp->state.currentLine);
+        emit rankStopped(rankId, stopTid, stopReason, rp->state.currentFile, rp->state.currentLine, rp->state.currentFunction, parsedPc);
       }
     } else if (line.startsWith("=thread-selected,") || line.startsWith("^done,new-thread-id=")) {
       static const QRegularExpression tidRe("(?:^=thread-selected,id|\\bnew-thread-id)=\"(\\d+)\""),

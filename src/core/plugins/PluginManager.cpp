@@ -82,16 +82,25 @@ void PluginManager::setCoordinator(gridlock::GdbRankCoordinator* coordinator) {
   if (m_stopConn) QObject::disconnect(m_stopConn);
   m_coordinator = coordinator; m_bridge.setCoordinator(coordinator);
   if (coordinator == nullptr) return;
-  m_stopConn = QObject::connect(coordinator, &::IBackendCoordinator::locationChanged, this,
-                                [this](int rankId, const QString& file, int line) {
-                                  if (m_coordinator.isNull()) return;
-                                  const auto st = m_coordinator->getRankState(rankId);
-                                  bool ok = false;
-                                  const QString pc = st.registers.value(16);
-                                  notifyRankStopped(rankId, file, line, st.currentFunction,
-                                                    pc.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? pc.mid(2).toULongLong(&ok, 16) : 0u,
-                                                    QStringLiteral("breakpoint-hit"));
-                                });
+  m_stopConn = QObject::connect(
+      coordinator, &::IBackendCoordinator::rankStopped, this,
+      [this](int rankId, int threadId, const QString& reason, const QString& file,
+             int line, const QString& func, uint64_t pc) {
+        const QByteArray reasonUtf8 = reason.isEmpty() ? QByteArrayLiteral("stopped") : reason.toUtf8();
+        const QByteArray fileUtf8 = file.toUtf8(), funcUtf8 = func.toUtf8();
+        GridLockStopInfo info{};
+        info.struct_size = static_cast<uint32_t>(sizeof(GridLockStopInfo));
+        info.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR; info.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+        info.rank = static_cast<int32_t>(rankId);
+        info.thread_id = static_cast<int32_t>(threadId > 0 ? threadId : (rankId + 1));
+        info.line = static_cast<int32_t>(line);
+        info.frame_level = 0;
+        info.pc_address = pc;
+        info.reason_utf8 = reasonUtf8.constData();
+        info.file_utf8 = fileUtf8.isEmpty() ? nullptr : fileUtf8.constData();
+        info.function_utf8 = funcUtf8.isEmpty() ? nullptr : funcUtf8.constData();
+        notifyRankStopped(info);
+      });
 }
 
 bool PluginManager::hasSharedLibrarySuffix(const QString& fileName) {

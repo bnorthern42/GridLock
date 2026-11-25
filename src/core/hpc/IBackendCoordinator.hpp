@@ -458,6 +458,15 @@ class IBackendCoordinator : public QObject {
   /** @brief Emitted when @p rankId stops at @p file and @p line. */
   void locationChanged(int rankId, const QString& file, int line);
 
+  /** @brief Emitted strictly on genuine debugger target stops (`*stopped` / `^connected`), never on frame switches. */
+  void rankStopped(int rank,
+                   int threadId,
+                   const QString& reason,
+                   const QString& file,
+                   int line,
+                   const QString& func,
+                   uint64_t pc);
+
   /** @brief Emitted when an evaluated expression on @p rankId produces @p result. */
   void expressionEvaluated(int rankId, const QString& expr, const QString& result);
 

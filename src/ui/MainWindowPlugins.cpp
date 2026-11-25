@@ -1,14 +1,16 @@
 /**
  * @file MainWindowPlugins.cpp
- * @brief Native plugin lifecycle wiring, structured telemetry routing, and Tools -> Plugins menu.
+ * @brief Native plugin lifecycle wiring, throttled console telemetry routing, and Tools -> Plugins menu.
  *
  * Owns `PluginManager` inside `MainWindow`, synchronizes its `GdbRankCoordinator`
- * binding across engine switches, forwards session start/stop/rank-stopped events,
- * routes `emit_structured_event` payloads to `HpcConsoleWidget` and `MainWindow`
- * signals, and populates **Tools -> Plugins** command actions dynamically.
+ * binding across engine switches, forwards session start/end events, coalesces
+ * plugin log/event console previews on a `50 ms` timer, and populates **Tools -> Plugins**.
  */
 
 #include "MainWindow.hpp"
+
+#include <memory>
+#include <utility>
 
 #include <QAction>
 #include <QByteArray>
@@ -16,6 +18,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QPointer>
+#include <QStringList>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 
@@ -30,9 +34,35 @@
 
 namespace gridlock::ui {
 
-/**
- * @brief Instantiates `PluginManager`, wires telemetry/menu/dock bridges, and discovers plugins.
- */
+namespace {
+
+constexpr qsizetype kMaxPluginConsolePreviewChars = 1024;
+constexpr int kPluginConsoleBatchFlushMs = 50;
+constexpr int kMaxPluginLinesPerWindow = 64;
+
+QString truncatePluginConsoleLine(QString line) {
+  line.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
+  if (line.size() > kMaxPluginConsolePreviewChars) {
+    line.truncate(kMaxPluginConsolePreviewChars - 3);
+    line.append(QStringLiteral("..."));
+  }
+  return line;
+}
+
+struct PendingPluginConsoleBatch {
+  QStringList lines;
+  bool hasError = false;
+  int droppedCount = 0;
+
+  void clear() {
+    lines.clear();
+    hasError = false;
+    droppedCount = 0;
+  }
+};
+
+}  // namespace
+
 void MainWindow::initializePluginSubsystem() {
   if (m_pluginManager != nullptr) return;
 
@@ -50,27 +80,54 @@ void MainWindow::initializePluginSubsystem() {
   connect(this, &MainWindow::focusedRankChanged, bridge,
           &gridlock::core::plugins::PluginHostBridge::setActiveRank, Qt::UniqueConnection);
 
-  // Forward plugin structured events to HpcConsoleWidget (m_spackManager) and external listeners.
+  // Coalesce console preview updates on a 50 ms single-shot timer so tight stop loops never stall UI layout.
+  auto consoleBatch = std::make_shared<PendingPluginConsoleBatch>();
+  auto* consoleFlushTimer = new QTimer(this);
+  consoleFlushTimer->setSingleShot(true);
+  consoleFlushTimer->setInterval(kPluginConsoleBatchFlushMs);
+  connect(consoleFlushTimer, &QTimer::timeout, this, [this, consoleBatch]() {
+    if (m_isShuttingDown || m_isClosing || m_spackManager == nullptr) {
+      consoleBatch->clear();
+      return;
+    }
+    if (consoleBatch->lines.isEmpty() && consoleBatch->droppedCount == 0) return;
+    QStringList out = std::move(consoleBatch->lines);
+    if (consoleBatch->droppedCount > 0) {
+      out.append(QStringLiteral("[Plugin] ... (%1 additional messages coalesced)").arg(consoleBatch->droppedCount));
+    }
+    const bool isErr = consoleBatch->hasError;
+    consoleBatch->clear();
+    m_spackManager->appendMessage(out.join(QLatin1Char('\n')), isErr);
+  });
+
+  auto enqueueConsoleLine = [this, consoleBatch, consoleFlushTimer](const QString& rawLine, bool isError) {
+    if (m_isShuttingDown || m_isClosing || m_spackManager == nullptr) return;
+    if (consoleBatch->lines.size() < kMaxPluginLinesPerWindow) {
+      consoleBatch->lines.append(truncatePluginConsoleLine(rawLine));
+    } else {
+      ++consoleBatch->droppedCount;
+    }
+    if (isError) consoleBatch->hasError = true;
+    if (!consoleFlushTimer->isActive()) consoleFlushTimer->start();
+  };
+
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::structuredEventEmitted, this,
-          [this](const QString& channel, const QString& jsonPayload) {
+          [this, enqueueConsoleLine](const QString& channel, const QString& jsonPayload) {
             if (m_isShuttingDown || m_isClosing) return;
-            if (m_spackManager != nullptr) {
-              m_spackManager->appendMessage(
-                  QStringLiteral("[Plugin:%1] %2").arg(channel, jsonPayload), false);
-            }
+            enqueueConsoleLine(QStringLiteral("[Plugin:%1] %2").arg(channel, jsonPayload), false);
             emit pluginStructuredEventEmitted(channel, jsonPayload);
           });
 
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::pluginLogReceived, this,
-          [this](const QString& pluginId, int level, const QString& message) {
-            if (m_isShuttingDown || m_isClosing || m_spackManager == nullptr) return;
+          [this, enqueueConsoleLine](const QString& pluginId, int level, const QString& message) {
+            if (m_isShuttingDown || m_isClosing) return;
+            if (level <= GRIDLOCK_LOG_DEBUG && qEnvironmentVariableIntValue("GRIDLOCK_PLUGIN_VERBOSE_LOGS") != 1) {
+              return;
+            }
             const QString tag = pluginId.isEmpty() ? QStringLiteral("plugin") : pluginId;
-            m_spackManager->appendMessage(
-                QStringLiteral("[PluginLog:%1] %2").arg(tag, message),
-                level >= GRIDLOCK_LOG_ERROR);
+            enqueueConsoleLine(QStringLiteral("[PluginLog:%1] %2").arg(tag, message), level >= GRIDLOCK_LOG_ERROR);
           });
 
-  // Mount Tools -> Plugins submenu and keep command actions live-synced.
   if (menuBar() != nullptr) {
     for (QAction* topAct : menuBar()->actions()) {
       QMenu* m = topAct ? topAct->menu() : nullptr;
@@ -89,7 +146,6 @@ void MainWindow::initializePluginSubsystem() {
   connect(m_pluginManager, &gridlock::core::plugins::PluginManager::pluginsChanged,
           this, &MainWindow::rebuildToolsPluginsMenu);
 
-  // Track toolbar Run latch transitions to dispatch session start and session end hooks.
   if (m_runAction != nullptr) {
     connect(m_runAction, &QAction::changed, this, [this]() {
       if (m_isShuttingDown || m_isClosing || m_pluginManager == nullptr) return;
@@ -116,9 +172,6 @@ void MainWindow::initializePluginSubsystem() {
   rebuildToolsPluginsMenu();
 }
 
-/**
- * @brief Synchronizes `PluginManager` with @p coord and hooks non-source-line stops and exits.
- */
 void MainWindow::bindPluginCoordinatorSignals(IBackendCoordinator* coord) {
   if (m_pluginManager == nullptr) return;
   for (const auto& c : m_pluginCoordConns) QObject::disconnect(c);
@@ -135,16 +188,11 @@ void MainWindow::bindPluginCoordinatorSignals(IBackendCoordinator* coord) {
   const QPointer<gridlock::GdbRankCoordinator> gdbGuard(gdbCoord);
   m_pluginCoordConns.append(connect(
       gdbCoord, &gridlock::GdbRankCoordinator::rankStateChanged, this,
-      [self, gdbGuard](int rankId, const RankState& st) {
+      [self, gdbGuard](int, const RankState& st) {
         if (!self || !gdbGuard || self->m_isShuttingDown || self->m_isClosing) return;
         if (!self->m_pluginSessionActive && gdbGuard->getProcessCount() > 0 &&
-            (st.currentState == QLatin1String("running") ||
-             st.currentState == QLatin1String("stopped"))) {
+            (st.currentState == QLatin1String("running") || st.currentState == QLatin1String("stopped"))) {
           self->notifySessionStart(gdbGuard->getProcessCount(), gdbGuard->getCurrentBinaryPath());
-        }
-        // PluginManager handles stops with line > 0 via locationChanged; cover line <= 0 here.
-        if (st.currentState == QLatin1String("stopped") && st.currentLine <= 0) {
-          self->notifyRankStopped(rankId, st.currentFile, st.currentLine, QStringLiteral("stopped"));
         }
       }));
 }
@@ -156,10 +204,7 @@ void MainWindow::notifySessionStart(int numRanks, const QString& targetPath) {
   m_pluginManager->notifySessionStarted(static_cast<int32_t>(numRanks));
 }
 
-void MainWindow::notifyRankStopped(int rank,
-                                   const QString& file,
-                                   int line,
-                                   const QString& reason) {
+void MainWindow::notifyRankStopped(int rank, const QString& file, int line, const QString& reason) {
   if (m_pluginManager == nullptr) return;
   uint64_t pc = 0u;
   QString func;
@@ -167,9 +212,7 @@ void MainWindow::notifyRankStopped(int rank,
     func = it->second.currentFunction;
     const QString pcStr = it->second.registers.value(16);
     bool ok = false;
-    if (pcStr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
-      pc = pcStr.mid(2).toULongLong(&ok, 16);
-    }
+    if (pcStr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) pc = pcStr.mid(2).toULongLong(&ok, 16);
   }
   m_pluginManager->notifyRankStopped(rank, file, line, func, pc, reason);
 }
@@ -180,9 +223,6 @@ void MainWindow::notifySessionEnd() {
   m_pluginManager->notifySessionEnded();
 }
 
-/**
- * @brief Populates **Tools -> Plugins** from active `register_command_action` entries.
- */
 void MainWindow::rebuildToolsPluginsMenu() {
   if (m_toolsPluginsMenu == nullptr || m_pluginManager == nullptr) return;
   m_toolsPluginsMenu->clear();
@@ -200,19 +240,14 @@ void MainWindow::rebuildToolsPluginsMenu() {
       if (!cmd.shortcutHint.isEmpty()) {
         act->setShortcut(QKeySequence::fromString(cmd.shortcutHint, QKeySequence::PortableText));
       }
-      const QString cmdId = cmd.commandId;
-      const QString label = cmd.menuLabel;
-      const QString hint = cmd.shortcutHint;
+      const QString cmdId = cmd.commandId, label = cmd.menuLabel, hint = cmd.shortcutHint;
       connect(act, &QAction::triggered, this, [this, cmdId, label, hint]() {
         if (m_pluginManager == nullptr) return;
-        const QByteArray idUtf8 = cmdId.toUtf8();
-        const QByteArray lblUtf8 = label.toUtf8();
-        const QByteArray hintUtf8 = hint.toUtf8();
+        const QByteArray idUtf8 = cmdId.toUtf8(), lblUtf8 = label.toUtf8(), hintUtf8 = hint.toUtf8();
         GridLockCommandSpec spec{};
         spec.struct_size = static_cast<uint32_t>(sizeof(GridLockCommandSpec));
         spec.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
         spec.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-        spec.reserved_flags = 0u;
         spec.active_rank = m_focusedRank;
         spec.rank_count = (m_coordinator != nullptr) ? m_coordinator->getProcessCount() : 0;
         spec.command_id_utf8 = idUtf8.constData();

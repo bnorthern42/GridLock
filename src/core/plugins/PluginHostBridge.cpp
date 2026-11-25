@@ -32,6 +32,9 @@ constexpr size_t kMaxPluginMemoryBytes = 64u * 1024u * 1024u;
 constexpr size_t kMaxPluginWriteBytes = 16u * 1024u * 1024u;
 constexpr size_t kPluginReadChunkBytes = 65536u;
 constexpr size_t kPluginWriteChunkBytes = 16384u;
+constexpr size_t kMaxTypeRegexBytes = 512u;
+constexpr size_t kMaxStructuredEventPayloadBytes = 1024u * 1024u;
+constexpr size_t kMaxLogMessageBytes = 16u * 1024u;
 
 bool hasControlChars(const char* raw, const QString& decoded) noexcept {
   if (raw != nullptr) {
@@ -436,6 +439,93 @@ GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbRemoveBreakpoint(void* hostCtx,
           coord->broadcastBreakpoint(rec.file, rec.line, false);
           return GRIDLOCK_OK;
         }, GRIDLOCK_ERR_UNSUPPORTED);
+  } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+}
+
+QVector<RegisteredVariableAction> PluginHostBridge::matchingVariableActions(const QString& typeName) const {
+  QVector<RegisteredVariableAction> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    snapshot = m_variableActions;
+  }
+  const QString boundedType = (typeName.size() > 2048) ? typeName.left(2048) : typeName;
+  QVector<RegisteredVariableAction> matches;
+  for (const auto& act : snapshot) {
+    if (act.compiledRegex.isValid() && act.compiledRegex.match(boundedType).hasMatch()) {
+      RegisteredVariableAction lite;
+      lite.pluginId = act.pluginId; lite.actionId = act.actionId;
+      lite.menuLabel = act.menuLabel; lite.typeRegex = act.typeRegex;
+      matches.append(std::move(lite));
+    }
+  }
+  return matches;
+}
+
+GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbLogMessage(
+    void* hostCtx, GridLockLogLevel level, const char* utf8Msg) noexcept {
+  try {
+    auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+    if (ctx == nullptr || ctx->bridge == nullptr || utf8Msg == nullptr ||
+        level < GRIDLOCK_LOG_TRACE || level > GRIDLOCK_LOG_ERROR) return GRIDLOCK_ERR_INVALID_ARG;
+    const size_t msgLen = ::strnlen(utf8Msg, kMaxLogMessageBytes);
+    emit ctx->bridge->pluginLogReceived(
+        ctx->pluginId, static_cast<int>(level), QString::fromUtf8(utf8Msg, static_cast<qsizetype>(msgLen)));
+    return GRIDLOCK_OK;
+  } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+}
+
+GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbRegisterVariableAction(
+    void* hostCtx, const char* actionId, const char* menuLabel, const char* typeRegex,
+    GridLockVariableActionCallback cb, void* pluginCtx) noexcept {
+  try {
+    auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+    if (ctx == nullptr || ctx->bridge == nullptr || actionId == nullptr || actionId[0] == '\0' ||
+        menuLabel == nullptr || menuLabel[0] == '\0' || typeRegex == nullptr ||
+        typeRegex[0] == '\0' || cb == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    if (ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
+    const size_t regexLen = ::strnlen(typeRegex, kMaxTypeRegexBytes + 1u);
+    if (regexLen > kMaxTypeRegexBytes) return GRIDLOCK_ERR_INVALID_ARG;
+
+    const QString rawPattern = QString::fromUtf8(typeRegex, static_cast<qsizetype>(regexLen));
+    const QRegularExpression compiled(QStringLiteral("(*LIMIT_MATCH=10000)(*LIMIT_RECURSION=250)") + rawPattern);
+    if (!compiled.isValid()) return GRIDLOCK_ERR_INVALID_ARG;
+    compiled.optimize();
+
+    auto* self = ctx->bridge;
+    const QString idStr = QString::fromUtf8(actionId);
+    bool notify = false;
+    {
+      std::lock_guard<std::mutex> lock(self->m_mutex);
+      const bool dupActive = !self->m_stagingActive && std::any_of(
+          self->m_variableActions.cbegin(), self->m_variableActions.cend(),
+          [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
+      const bool dupStaged = std::any_of(
+          self->m_stagedVariableActions.cbegin(), self->m_stagedVariableActions.cend(),
+          [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
+      if (dupActive || dupStaged) return GRIDLOCK_ERR_INVALID_ARG;
+      RegisteredVariableAction entry{
+          ctx->pluginId, idStr, QString::fromUtf8(menuLabel), rawPattern,
+          compiled, cb, pluginCtx, (ctx->boundApi != nullptr) ? ctx->boundApi : &self->m_hostApi, ctx};
+      if (self->m_stagingActive) self->m_stagedVariableActions.append(std::move(entry));
+      else { self->m_variableActions.append(std::move(entry)); notify = true; }
+    }
+    if (notify) emit self->registeredActionsChanged();
+    return GRIDLOCK_OK;
+  } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
+}
+
+GridLockStatus GRIDLOCK_CALL PluginHostBridge::cbEmitStructuredEvent(
+    void* hostCtx, const char* channelUtf8, const char* jsonPayloadUtf8) noexcept {
+  try {
+    auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
+    if (ctx == nullptr || ctx->bridge == nullptr || channelUtf8 == nullptr ||
+        channelUtf8[0] == '\0' || jsonPayloadUtf8 == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
+    const size_t payloadLen = ::strnlen(jsonPayloadUtf8, kMaxStructuredEventPayloadBytes + 1u);
+    if (payloadLen > kMaxStructuredEventPayloadBytes) return GRIDLOCK_ERR_INVALID_ARG;
+    emit ctx->bridge->structuredEventEmitted(
+        QString::fromUtf8(channelUtf8),
+        QString::fromUtf8(jsonPayloadUtf8, static_cast<qsizetype>(payloadLen)));
+    return GRIDLOCK_OK;
   } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
 }
 

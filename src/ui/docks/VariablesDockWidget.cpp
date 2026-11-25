@@ -7,14 +7,17 @@
  */
 
 #include "VariablesDockWidget.hpp"
+#include "CallStackDockWidget.hpp"
 #include "../../core/hpc/dap/DapCoordinator.hpp"
 #include "../../core/hpc/gdb/GdbRankCoordinator.hpp"
 #include "../../core/hpc/IBackendCoordinator.hpp"
 #include "../../core/managers/ThemeManager.hpp"
 #include "../../core/plugins/PluginHostBridge.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <memory>
+#include <utility>
 
 #include <QApplication>
 #include <QClipboard>
@@ -326,9 +329,12 @@ QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyId
         });
     }
 
-    if (m_pluginBridge != nullptr) {
-        const auto matches = m_pluginBridge->matchingVariableActions(varTyp);
+    if (m_pluginBridge != nullptr && !varTyp.isEmpty()) {
+        const auto matches = m_pluginBridge->matchingVariableActions(varTyp.left(2048));
         if (!matches.isEmpty()) {
+            QVector<QPair<QString, QString>> actionSpecs;
+            actionSpecs.reserve(matches.size());
+            for (const auto& m : matches) actionSpecs.append(qMakePair(m.actionId, m.menuLabel));
             menu->addSeparator();
             QMenu* pluginSub = menu->addMenu(QStringLiteral("Plugin Actions"));
             pluginSub->setObjectName(QStringLiteral("variablePluginActionsMenu"));
@@ -336,13 +342,18 @@ QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyId
             bool addrOk = false;
             const uint64_t parsedAddr = hexTok.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
                                             ? hexTok.mid(2).toULongLong(&addrOk, 16) : 0u;
-            for (const auto& item : matches) {
-                QAction* pAct = pluginSub->addAction(item.menuLabel);
-                pAct->setObjectName(QStringLiteral("pluginVarAct_") + item.actionId);
-                const QString actId = item.actionId;
+            for (const auto& [actId, actLabel] : actionSpecs) {
+                QAction* pAct = pluginSub->addAction(actLabel);
+                pAct->setObjectName(QStringLiteral("pluginVarAct_") + actId);
                 connect(pAct, &QAction::triggered, this,
                         [this, actId, varName, exprPath, varTyp, varVal, parsedAddr]() {
                             if (!m_pluginBridge) return;
+                            int activeFrame = 0;
+                            if (QWidget* topWin = window()) {
+                                if (const auto* csDock = topWin->findChild<gridlock::ui::CallStackDockWidget*>()) {
+                                    activeFrame = std::max(0, csDock->activeFrameLevel());
+                                }
+                            }
                             const QByteArray aUtf8 = actId.toUtf8(), nUtf8 = varName.toUtf8();
                             const QByteArray eUtf8 = exprPath.toUtf8(), tUtf8 = varTyp.toUtf8(), vUtf8 = varVal.toUtf8();
                             GridLockVariableContext ctx{};
@@ -350,6 +361,7 @@ QMenu* VariablesDockWidget::createContextMenuForIndex(const QModelIndex& proxyId
                             ctx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
                             ctx.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
                             ctx.rank = m_currentRankId;
+                            ctx.frame_level = static_cast<int32_t>(activeFrame);
                             ctx.address = parsedAddr;
                             ctx.action_id_utf8 = aUtf8.constData();
                             ctx.name_utf8 = nUtf8.constData();

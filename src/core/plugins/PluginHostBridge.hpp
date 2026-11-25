@@ -158,13 +158,7 @@ class PluginHostBridge : public QObject {
   QVector<RegisteredVariableAction> variableActions() const {
     std::lock_guard<std::mutex> lock(m_mutex); return m_variableActions;
   }
-  QVector<RegisteredVariableAction> matchingVariableActions(const QString& typeName) const {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    QVector<RegisteredVariableAction> matches;
-    for (const auto& act : m_variableActions)
-      if (act.compiledRegex.isValid() && act.compiledRegex.match(typeName).hasMatch()) matches.append(act);
-    return matches;
-  }
+  QVector<RegisteredVariableAction> matchingVariableActions(const QString& typeName) const;
   QVector<RegisteredCommandAction> commandActions() const {
     std::lock_guard<std::mutex> lock(m_mutex); return m_commandActions;
   }
@@ -239,15 +233,7 @@ class PluginHostBridge : public QObject {
     } catch (...) {}
   }
 
-  static GridLockStatus GRIDLOCK_CALL cbLogMessage(void* hostCtx, GridLockLogLevel level, const char* utf8Msg) noexcept {
-    try {
-      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
-      if (ctx == nullptr || ctx->bridge == nullptr || utf8Msg == nullptr ||
-          level < GRIDLOCK_LOG_TRACE || level > GRIDLOCK_LOG_ERROR) return GRIDLOCK_ERR_INVALID_ARG;
-      emit ctx->bridge->pluginLogReceived(ctx->pluginId, static_cast<int>(level), QString::fromUtf8(utf8Msg));
-      return GRIDLOCK_OK;
-    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
-  }
+  static GridLockStatus GRIDLOCK_CALL cbLogMessage(void* hostCtx, GridLockLogLevel level, const char* utf8Msg) noexcept;
 
   static GridLockStatus GRIDLOCK_CALL cbGetRankCount(void* hostCtx, int32_t* outRanks) noexcept;
 
@@ -271,37 +257,7 @@ class PluginHostBridge : public QObject {
   static GridLockStatus GRIDLOCK_CALL cbRemoveBreakpoint(void* hostCtx, int32_t bpId) noexcept;
   static GridLockStatus GRIDLOCK_CALL cbRegisterVariableAction(
       void* hostCtx, const char* actionId, const char* menuLabel, const char* typeRegex,
-      GridLockVariableActionCallback cb, void* pluginCtx) noexcept {
-    try {
-      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
-      if (ctx == nullptr || ctx->bridge == nullptr || actionId == nullptr || actionId[0] == '\0' ||
-          menuLabel == nullptr || menuLabel[0] == '\0' || typeRegex == nullptr ||
-          typeRegex[0] == '\0' || cb == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
-      if (ctx->shuttingDown.load(std::memory_order_acquire)) return GRIDLOCK_ERR_UNSUPPORTED;
-      const QRegularExpression compiled(QString::fromUtf8(typeRegex));
-      if (!compiled.isValid()) return GRIDLOCK_ERR_INVALID_ARG;
-      auto* self = ctx->bridge;
-      const QString idStr = QString::fromUtf8(actionId);
-      bool notify = false;
-      {
-        std::lock_guard<std::mutex> lock(self->m_mutex);
-        const bool dupActive = !self->m_stagingActive && std::any_of(
-            self->m_variableActions.cbegin(), self->m_variableActions.cend(),
-            [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
-        const bool dupStaged = std::any_of(
-            self->m_stagedVariableActions.cbegin(), self->m_stagedVariableActions.cend(),
-            [&](const RegisteredVariableAction& a) { return a.actionId == idStr; });
-        if (dupActive || dupStaged) return GRIDLOCK_ERR_INVALID_ARG;
-        RegisteredVariableAction entry{
-            ctx->pluginId, idStr, QString::fromUtf8(menuLabel), QString::fromUtf8(typeRegex),
-            compiled, cb, pluginCtx, (ctx->boundApi != nullptr) ? ctx->boundApi : &self->m_hostApi, ctx};
-        if (self->m_stagingActive) self->m_stagedVariableActions.append(std::move(entry));
-        else { self->m_variableActions.append(std::move(entry)); notify = true; }
-      }
-      if (notify) emit self->registeredActionsChanged();
-      return GRIDLOCK_OK;
-    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
-  }
+      GridLockVariableActionCallback cb, void* pluginCtx) noexcept;
 
   static GridLockStatus GRIDLOCK_CALL cbRegisterCommandAction(
       void* hostCtx, const char* commandId, const char* menuLabel, const char* shortcutHint,
@@ -336,15 +292,7 @@ class PluginHostBridge : public QObject {
   }
 
   static GridLockStatus GRIDLOCK_CALL cbEmitStructuredEvent(
-      void* hostCtx, const char* channelUtf8, const char* jsonPayloadUtf8) noexcept {
-    try {
-      auto* ctx = static_cast<PluginBindingContext*>(hostCtx);
-      if (ctx == nullptr || ctx->bridge == nullptr || channelUtf8 == nullptr ||
-          channelUtf8[0] == '\0' || jsonPayloadUtf8 == nullptr) return GRIDLOCK_ERR_INVALID_ARG;
-      emit ctx->bridge->structuredEventEmitted(QString::fromUtf8(channelUtf8), QString::fromUtf8(jsonPayloadUtf8));
-      return GRIDLOCK_OK;
-    } catch (...) { return GRIDLOCK_ERR_UNSUPPORTED; }
-  }
+      void* hostCtx, const char* channelUtf8, const char* jsonPayloadUtf8) noexcept;
 
   GridLockStatus runOnObjectThread(
       const PluginBindingContext* ctx,
