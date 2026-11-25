@@ -108,7 +108,13 @@ compiled_resources = qt6.compile_resources(
 )
 
 # Include directories
-inc = include_directories('src')
+inc = include_directories('src', 'include')
+
+install_headers(
+  'include/gridlock/plugin_api.h',
+  'include/gridlock/plugin_cpp_helpers.hpp',
+  subdir : 'gridlock'
+)
 
 # Executable
 executable('gridlock',
@@ -132,6 +138,7 @@ install_data('resources/icon.png',
 # Test executable
 test_src = [
   'tests/hpc/test_coordinator.cpp',
+  'tests/core/test_plugin_abi.cpp',
   'src/core/commands/DebugCommands.cpp',
   'src/core/hpc/gdb/GdbRankCoordinator.cpp', 'src/core/hpc/gdb/GdbMiParser.cpp',
   'src/core/hpc/gdb/GdbRankInspection.cpp', 'src/core/hpc/gdb/GdbRankCommands.cpp',
@@ -151,9 +158,15 @@ processed_test_files = qt6.compile_moc(
   dependencies: qt6_dep
 )
 
+processed_plugin_abi_test_files = qt6.compile_moc(
+  sources : 'tests/core/test_plugin_abi.cpp',
+  dependencies: qt6_dep
+)
+
 gridlock_tests = executable('gridlock_tests',
   test_src,
   processed_test_files,
+  processed_plugin_abi_test_files,
   include_directories : inc,
   dependencies : [qt6_dep, tomlplusplus_dep],
   build_by_default : false
@@ -801,6 +814,21 @@ gridlock_cliparser_tests = executable('gridlock_cliparser_tests',
 )
 
 test('cliparser_tests', gridlock_cliparser_tests, env: ['QT_QPA_PLATFORM=offscreen'])
+
+plugin_abi_test_src = [
+  'tests/core/test_plugin_abi.cpp'
+]
+
+gridlock_plugin_abi_tests = executable('gridlock_plugin_abi_tests',
+  plugin_abi_test_src,
+  processed_plugin_abi_test_files,
+  include_directories : inc,
+  cpp_args : ['-DGRIDLOCK_PLUGIN_ABI_STANDALONE_MAIN'],
+  dependencies : [qt6_dep],
+  build_by_default : false
+)
+
+test('plugin_abi_tests', gridlock_plugin_abi_tests, env: ['QT_QPA_PLATFORM=offscreen'])
 
 
 
