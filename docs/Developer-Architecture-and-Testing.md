@@ -84,7 +84,11 @@ To keep every translation unit under 500 lines while maintaining fast incrementa
 
 ### Native C99 Plugin ABI (`include/gridlock/plugin_api.h`)
 
-GridLock exposes a frozen C99 binary interface (`GRIDLOCK_PLUGIN_ABI_MAJOR = 1`, `GRIDLOCK_PLUGIN_ABI_MINOR = 0`) paired with an optional header-only C++23 wrapper (`include/gridlock/plugin_cpp_helpers.hpp`) so external domain extensions inspect stopped MPI ranks without linking Qt6 or internal debugger libraries. See [Plugin System and C99 ABI](Plugin-System-and-C99-ABI.md) for the complete callback reference, status code table, C99/C++23 examples, and UI integration details:
+GridLock exposes a frozen C99 binary interface (`GRIDLOCK_PLUGIN_ABI_MAJOR = 1`, `GRIDLOCK_PLUGIN_ABI_MINOR = 0`) paired with an optional header-only C++23 wrapper (`include/gridlock/plugin_cpp_helpers.hpp`) so external domain extensions inspect stopped MPI ranks and extend workstation UI surfaces without linking Qt6 or internal debugger libraries. Documentation is organized into four focused guides:
+* [Plugins (User Guide)](Plugins.md): Multi-forge installation (GitHub, GitLab, Codeberg, Gitea, custom Git URLs), `plugins.toml` + `plugins-lock.toml` manifest sync, Global/Workspace checkboxes, and workspace `SHA-256` trust approval.
+* [Plugin Architecture, Lifecycle, Security & Build Pipeline](Plugin-Architecture-and-Lifecycle.md): Architecture diagrams, pre-`dlopen` trust gating, callback depth / FIFO stop queue concurrency, enforced resource quotas, and `PluginInstaller` internals.
+* [C99 Plugin ABI & C++23 Wrapper Specification](Plugin-C99-ABI-Reference.md): Exact 64-bit struct byte offsets, status/UI enums, all 26 `GridLockHostApi` callbacks, and `plugin_cpp_helpers.hpp` wrappers.
+* [Plugin Authoring, UI Surfaces & Build Recipes](Plugin-Authoring-and-UI-Surfaces.md): Context-menu surface field matrix, report dock formats (`MARKDOWN`, `KEY_VALUE_TABLE`, `JSON_TREE`), Meson/CMake/Make templates, `domain_mesh_probe` walkthrough, and headless testing.
 
 * **Binary Compatibility Guarantees**:
   * **16-Byte Versioned Struct Header**: Every ABI struct (`GridLockHostApi`, `GridLockPluginDescriptor`, `GridLockStopInfo`, `GridLockVariableContext`, `GridLockCommandSpec`) starts at byte offset `0` with `uint32_t struct_size`, `uint32_t abi_major`, `uint32_t abi_minor`, and `uint32_t reserved_flags`. Both host and plugin verify `abi_major == 1` and validate `struct_size` bounds before dereferencing trailing fields.
