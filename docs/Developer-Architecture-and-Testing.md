@@ -8,8 +8,10 @@ GridLock (`v0.8.8`) is written in C++23 (`-Wall -Wextra -Wpedantic`) on Qt6 and 
 
 ```text
 GridLock/
-├── meson.build                     # Build definition: gridlock, mpi_mm_bin, and 22 test suites
+├── meson.build                     # Build definition: gridlock, mpi_mm_bin, and 24 test suites
 ├── agent.md                        # Architectural invariants, Graphify workflow, and style rules
+├── include/gridlock/               # Frozen C99 plugin ABI (plugin_api.h) and C++23 helpers
+├── examples/plugins/               # Standalone out-of-tree native plugin examples (domain_mesh_probe)
 ├── external/
 │   ├── Qt-Advanced-Stylesheets/    # Submodule providing dynamic SVG/QSS theming (libqtadvancedcss)
 │   └── tomlplusplus.wrap           # Meson wrap fallback for toml++ 3.4.0
@@ -26,6 +28,7 @@ GridLock/
     │   ├── hpc/                    # Organized into gdb/, dap/, lsp/, memory/, analysis/, system/
     │   ├── managers/               # ConfigManager*, Session, Shortcut, Theme, Docset*, Spack (< 500 lines)
     │   ├── models/                 # VariableNode and lazy-expanding VariableTreeModel
+    │   ├── plugins/                # PluginManager (.so/.dylib/.dll loader) and PluginHostBridge
     │   └── utils/                  # CliParser, SearchEverywhereEngine, ElfBinaryInspector*, ClangdLspClient
     └── ui/
         ├── MainWindow*.cpp         # Cohesive < 500-line units (Toolbar, Perspectives, Execution, BinaryNav, etc.)
@@ -77,12 +80,37 @@ To keep every translation unit under 500 lines while maintaining fast incrementa
 * `MainWindowWorkspace.cpp` & `MainWindowDocks.cpp`: Central editor/disassembly splitters, right-side docks, bottom tool rail, lazy tab activation, floating dock redocking, and theme propagation.
 * `MainWindowDebugger.cpp` & `MainWindowExecution.cpp`: `Debug` actions, non-linear execution (`nexti`, `Ctrl+F10`, PC jump, early return, `rbreak`), master `setFocusedRank()` sync hub, coordinator signal wiring, `/proc` and remote attach, and `+x`/build preflight checks.
 * `MainWindowNavigation.cpp`, `MainWindowBinaryNav.cpp` & `MainWindowCohesion.cpp`: Session I/O, workspace PNG snapshots (`--snapshot`), `AddressSpaceNavBar` history, DWARF line/address sync, `F1` documentation lookup, and UI cohesion.
+* `MainWindowPlugins.cpp`: Owns `PluginManager`, synchronizes `GdbRankCoordinator` lifecycle callbacks (`on_session_start`, `on_rank_stopped`, `on_session_end`), routes `emit_structured_event` payloads to `HpcConsoleWidget`, and populates **Tools -> Plugins**.
+
+### Native C99 Plugin ABI (`include/gridlock/plugin_api.h`)
+
+GridLock exposes a frozen C99 binary interface (`GRIDLOCK_PLUGIN_ABI_MAJOR = 1`, `GRIDLOCK_PLUGIN_ABI_MINOR = 0`) paired with an optional header-only C++23 wrapper (`include/gridlock/plugin_cpp_helpers.hpp`) so external domain extensions inspect stopped MPI ranks without linking Qt6 or internal debugger libraries:
+
+* **Binary Compatibility Guarantees**:
+  * **16-Byte Versioned Struct Header**: Every ABI struct (`GridLockHostApi`, `GridLockPluginDescriptor`, `GridLockStopInfo`, `GridLockVariableContext`, `GridLockCommandSpec`) starts at byte offset `0` with `uint32_t struct_size`, `uint32_t abi_major`, `uint32_t abi_minor`, and `uint32_t reserved_flags`. Both host and plugin verify `abi_major == 1` and validate `struct_size` bounds before dereferencing trailing fields.
+  * **Minor-Version Expansion Slots (`reserved[8]`)**: `GridLockHostApi` and `GridLockPluginDescriptor` reserve `void* reserved[8]` zero-initialized pointers at the tail of each table so future minor v1.x releases can append callbacks while preserving binary layout (`tests/core/test_plugin_abi.cpp` enforces exact `sizeof` and `offsetof` invariants via `static_assert`).
+  * **Versioned Entry Symbol (`_v1`)**: `PluginManager` resolves only `gridlock_plugin_init_v1` (`GRIDLOCK_PLUGIN_EXPORT`), allowing future major ABI breaks to coexist cleanly under `_v2` without symbol collisions.
+  * **Stateless Contexts & Caller-Owned Buffers**: Every callback receives explicit `void* host_ctx` and `void* plugin_ctx` user-data pointers. Variable-length string and memory reads (`eval_expr`, `read_memory`) write into caller-supplied `(out_buf, capacity, out_written)` buffers, returning `GRIDLOCK_ERR_BUFFER_TOO_SMALL` with the required byte count in `*out_len` when `capacity` is insufficient, alongside symmetric `alloc_bytes` / `free_bytes` heap helpers.
+* **Compiling Out-of-Tree C99 or C++23 Plugins**:
+  Compile shared libraries with `-fvisibility=hidden` so internal functions stay private to the module and only `gridlock_plugin_init_v1` is exported:
+  ```bash
+  # C99 plugin build
+  gcc -std=c99 -O2 -Wall -Wextra -Werror -fvisibility=hidden -fPIC -shared \
+      -Iinclude my_plugin.c -o libmy_plugin.so
+
+  # C++23 plugin build (see examples/plugins/domain_mesh_probe/)
+  g++ -std=c++23 -O2 -Wall -Wextra -Werror -fvisibility=hidden -fvisibility-inlines-hidden \
+      -fPIC -shared -Iinclude examples/plugins/domain_mesh_probe/domain_mesh_probe.cpp \
+      -o libdomain_mesh_probe.so
+  ```
+* **Installing & Managing Plugins**:
+  Copy compiled `.so` (Linux), `.dylib` (macOS), or `.dll` (Windows) modules into either the per-user directory (`~/.config/gridlock/plugins/`) or the project directory (`<workspace>/.gridlock/plugins/`). Use **Preferences -> Plugins** to inspect ABI validation status, toggle per-plugin enablement (`[plugins] disabled_ids` in `config.toml`), or click **Reload Plugins** to rescan without restarting GridLock.
 
 ---
 
-## 3. Running the 22 Meson Test Suites and Manual E2E Runner
+## 3. Running the 24 Meson Test Suites and Manual E2E Runner
 
-Delete stale `.gcda` coverage counters (if coverage was previously enabled) and run all 22 suites headlessly (unit test binaries automatically isolate `ConfigManager` into a temporary directory when `GRIDLOCK_TEST_CONFIG_DIR` is unset):
+Delete stale `.gcda` coverage counters (if coverage was previously enabled) and run all 24 suites headlessly (unit test binaries automatically isolate `ConfigManager` into a temporary directory when `GRIDLOCK_TEST_CONFIG_DIR` is unset):
 
 ```bash
 find builddir -name "*.gcda" -delete
@@ -115,6 +143,8 @@ Every test target in `meson.build` runs with `QT_QPA_PLATFORM=offscreen`:
 | 20 | `memory_export_tests` | `gridlock_memory_export_tests` | `MemoryExporter` typed CSV (`Int32`, `Float`, `Double`) and raw `.bin` output |
 | 21 | `mi_parser_tests` | `gridlock_mi_parser_tests` | GDB/MI3 tuple/list parsing, `@entry` filtering, and C++ access-specifier unwrapping |
 | 22 | `cliparser_tests` | `gridlock_cliparser_tests` | `CliParser` flag, positional target, and `-- <args...>` parsing |
+| 23 | `plugin_abi_tests` | `gridlock_plugin_abi_tests` | Compile-time `sizeof`/`offsetof` `static_assert` layout gates for `plugin_api.h` and `plugin_cpp_helpers.hpp` |
+| 24 | `plugin_manager_tests` | `gridlock_plugin_manager_tests` | `PluginManager` `.so` loading, ABI rejection, `ConfigManager` disabling, and `PluginHostBridge` timeouts |
 
 ### Individual UI Tests, Manual CLI/GPU Opt-In Suites, Coverage, Screenshots, and Wiki Sync
 
