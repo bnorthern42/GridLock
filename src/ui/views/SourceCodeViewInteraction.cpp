@@ -37,6 +37,66 @@ bool isCppKeywordToken(const QString& tok) {
         QStringLiteral("virtual"), QStringLiteral("void"), QStringLiteral("volatile"), QStringLiteral("while")};
     return kKw.contains(tok);
 }
+
+QString maskCommentsAndStringsPreservingOffsets(const QString& line) {
+    QString out = line;
+    bool inStr = false, inChr = false;
+    for (int i = 0; i < out.size(); ++i) {
+        const QChar c = out[i];
+        if (!inStr && !inChr && c == QLatin1Char('/') && i + 1 < out.size() && out[i + 1] == QLatin1Char('/')) {
+            for (int j = i; j < out.size(); ++j) out[j] = QLatin1Char(' ');
+            break;
+        }
+        if (!inChr && c == QLatin1Char('"')) { inStr = !inStr; out[i] = QLatin1Char(' '); continue; }
+        if (!inStr && c == QLatin1Char('\'')) { inChr = !inChr; out[i] = QLatin1Char(' '); continue; }
+        if (inStr || inChr) {
+            if (c == QLatin1Char('\\') && i + 1 < out.size()) { out[i] = QLatin1Char(' '); out[++i] = QLatin1Char(' '); }
+            else out[i] = QLatin1Char(' ');
+        }
+    }
+    return out;
+}
+
+// Extracts variable/member expression at colInBlock, stopping before any segment immediately followed by \s*\(.
+QString extractMemberExprAtColumn(const QString& lineText, int colInBlock, bool strictHover) {
+    if (lineText.isEmpty() || colInBlock < 0 || colInBlock > lineText.size()) return QString();
+    const QString clean = maskCommentsAndStringsPreservingOffsets(lineText);
+    if (strictHover && (colInBlock >= clean.size() || clean[colInBlock].isSpace())) return QString();
+
+    static const QRegularExpression kFullChainRe(
+        QStringLiteral(R"(\b[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])*(?:(?:\.|->)[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])*)*)"));
+    static const QRegularExpression kCallSuffixRe(QStringLiteral(R"(^\s*\()"));
+    static const QRegularExpression kLastSegRe(QStringLiteral(R"((?:\.|->)[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])*$)"));
+    static const QRegularExpression kSegRe(
+        QStringLiteral(R"((?:^|\.|->)[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])*)"));
+
+    for (auto it = kFullChainRe.globalMatch(clean); it.hasNext();) {
+        const auto m = it.next();
+        const int start = m.capturedStart(0), end = m.capturedEnd(0);
+        if (colInBlock < start || (strictHover ? (colInBlock >= end) : (colInBlock > end))) continue;
+
+        QString expr = lineText.mid(start, end - start);
+        const bool endsAtCall = kCallSuffixRe.match(clean.mid(end)).hasMatch();
+        if (endsAtCall) {
+            const auto lastSeg = kLastSegRe.match(expr);
+            if (!lastSeg.hasMatch()) return QString();
+            expr.truncate(lastSeg.capturedStart(0));
+        } else if (strictHover) {
+            const int relCol = colInBlock - start;
+            for (auto sit = kSegRe.globalMatch(expr); sit.hasNext();) {
+                const auto sm = sit.next();
+                if (relCol < sm.capturedEnd(0)) { expr.truncate(sm.capturedEnd(0)); break; }
+            }
+        }
+
+        bool isNum = false;
+        expr.toDouble(&isNum);
+        const QString rootIdent = expr.section(QRegularExpression(QStringLiteral(R"([.\-\[])")), 0, 0);
+        if (isNum || expr.isEmpty() || isCppKeywordToken(expr) || isCppKeywordToken(rootIdent)) return QString();
+        return expr;
+    }
+    return QString();
+}
 }  // namespace
 
 /** @brief Determines whether the standard editor context menu may open at pos (suppressing gutter regions). */
@@ -57,14 +117,8 @@ QMenu* SourceCodeView::createEditorContextMenuAt(const QPoint& editorPos) {
     const QString selected = textCursor().hasSelection() ? textCursor().selectedText().replace(QChar::ParagraphSeparator, QLatin1Char(' ')).trimmed() : QString();
     QString exprTok = selected;
     if (exprTok.isEmpty() && !lineText.isEmpty()) {
-        int l = qBound(0, posCur.positionInBlock(), lineText.size()), r = l;
-        auto isExprCh = [](QChar ch) { return ch.isLetterOrNumber() || ch == QLatin1Char('_') || ch == QLatin1Char('.') || ch == QLatin1Char('[') || ch == QLatin1Char(']') || ch == QLatin1Char('-') || ch == QLatin1Char('>') || ch == QLatin1Char('*'); };
-        while (l > 0 && isExprCh(lineText[l - 1])) --l;
-        while (r < lineText.size() && isExprCh(lineText[r])) ++r;
-        exprTok = lineText.mid(l, r - l).trimmed();
+        exprTok = extractMemberExprAtColumn(lineText, posCur.positionInBlock(), false);
     }
-    while (exprTok.startsWith(QLatin1Char('.')) || exprTok.startsWith(QLatin1Char('-')) || exprTok.startsWith(QLatin1Char('>'))) exprTok.remove(0, 1);
-    while (exprTok.endsWith(QLatin1Char('.')) || exprTok.endsWith(QLatin1Char('-')) || exprTok.endsWith(QLatin1Char('>'))) exprTok.chop(1);
     QString structType = detectStructOrClassAtLine(lineText);
     if (structType.isEmpty() && !exprTok.isEmpty()) {
         static const QRegularExpression kAllStructs(QStringLiteral(R"(\b(?:struct|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b)"));
@@ -275,12 +329,10 @@ void SourceCodeView::handleHoverTimeout() {
             break;
         }
     }
-    cursor.select(QTextCursor::WordUnderCursor);
-    const QString word = cursor.selectedText();
-    static const QRegularExpression cVarRegex("^[a-zA-Z_][a-zA-Z0-9_]*$");
-    if (cVarRegex.match(word).hasMatch() && word != m_lastHoveredWord) {
+    const QString word = extractMemberExprAtColumn(cursor.block().text(), cursor.positionInBlock(), true);
+    if (!word.isEmpty() && word != m_lastHoveredWord) {
         m_lastHoveredWord = word; emit hoverVariableRequested(word, m_lastGlobalMousePos);
-    } else if (!cVarRegex.match(word).hasMatch()) {
+    } else if (word.isEmpty()) {
         if (!m_lastHoveredWord.isEmpty()) emit hideHoverTooltip();
         m_lastHoveredWord.clear();
     }
@@ -322,7 +374,8 @@ QString SourceCodeView::inlineGhostTextForLine(int oneBasedLine) const {
     QString line = block.text();
     static const QRegularExpression kStrRe(QStringLiteral("\"([^\"\\\\]|\\\\.)*\""));
     line.replace(kStrRe, QStringLiteral(" ")); if (const int cmt = line.indexOf(QStringLiteral("//")); cmt >= 0) line = line.left(cmt);
-    static const QRegularExpression kExprRe(QStringLiteral("\\b([A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)*)\\b"));
+    static const QRegularExpression kExprRe(
+        QStringLiteral(R"(\b([A-Za-z_][A-Za-z0-9_]*\b(?!\s*\()(?:(?:\.|->)[A-Za-z_][A-Za-z0-9_]*\b(?!\s*\())*))"));
     QStringList parts; QSet<QString> seen; auto it = kExprRe.globalMatch(line);
     while (it.hasNext() && parts.size() < 4) { const QString expr = it.next().captured(1), v = m_inlineVarValues.value(expr).trimmed(); if (seen.contains(expr) || v.isEmpty() || v == QLatin1String("{...}") || v.startsWith(QStringLiteral("{...")) || (v.startsWith(QLatin1Char('@')) && v.contains(QStringLiteral("{...}")))) continue; seen.insert(expr); parts.append(QStringLiteral("%1 = %2").arg(expr, v)); }
     if (parts.isEmpty()) return QString();

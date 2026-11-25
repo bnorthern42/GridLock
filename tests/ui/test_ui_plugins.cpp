@@ -29,7 +29,9 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTextBlock>
 #include <QTextBrowser>
+#include <QTextCursor>
 #include <QToolButton>
 #include <QTreeView>
 #include <QTreeWidget>
@@ -355,6 +357,8 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   varDock->setFocusedRank(0, 2);
   varDock->applyLocalsForRank(
       0, QJsonArray{QJsonObject{{"name", "solution_vec"}, {"value", "0x5000"}, {"type", "PetscVec"}}});
+  QSignalSpy evaluatorTabSpy(&coord, &::IBackendCoordinator::expressionEvaluated);
+  QSignalSpy silentPluginEvalSpy(&coord, &gridlock::GdbRankCoordinator::pluginExpressionReady);
   auto* varTree = varDock->findChild<QTreeView*>();
   QVERIFY(varTree && varTree->model()->rowCount() >= 1);
   std::unique_ptr<QMenu> ctxMenu(varDock->createContextMenuForIndex(varTree->model()->index(0, 0), varDock));
@@ -367,6 +371,45 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QApplication::processEvents();
   QVERIFY(!evSpy.isEmpty() && evSpy.last().at(0).toString() == QStringLiteral("dummy.var_eval") &&
           evSpy.last().at(1).toString() == QStringLiteral("petsc_vec_norm_3.14159"));
+  QVERIFY(silentPluginEvalSpy.count() >= 1);
+  QCOMPARE(evaluatorTabSpy.count(), 0);
+
+  // Verify right-clicking domain.swap(other) in SourceCodeView strips .swap(...) -> "domain" and populates DWARF type_utf8.
+  varDock->applyLocalsForRank(
+      0, QJsonArray{QJsonObject{{"name", "domain"}, {"value", "{...}"}, {"type", "std::vector<double>"}}});
+  struct CapturedSurfaceCtx { QString symbol; QString type; } capturedEd;
+  const GridLockHostApi* rawBridgeApi = mw.pluginManager()->hostBridge()->hostApi();
+  QCOMPARE(rawBridgeApi->register_context_action(
+               rawBridgeApi->host_ctx, GRIDLOCK_SURFACE_CODE_EDITOR, "test.vec_type_probe",
+               "Inspect STL Vector", "^std::vector<.*>$",
+               [](void* pctx, const GridLockHostApi*, const GridLockSurfaceContext* sctx) noexcept -> GridLockStatus {
+                 auto* out = static_cast<CapturedSurfaceCtx*>(pctx);
+                 out->symbol = sctx->symbol_utf8 ? QString::fromUtf8(sctx->symbol_utf8) : QString();
+                 out->type = sctx->type_utf8 ? QString::fromUtf8(sctx->type_utf8) : QString();
+                 return GRIDLOCK_OK;
+               },
+               &capturedEd),
+           GRIDLOCK_OK);
+  const QString origDemoCode = srcView->toPlainText();
+  srcView->setPlainText(QStringLiteral("int main() {\n          domain.swap(other);\n  return 0;\n}\n"));
+  QApplication::processEvents();
+  const QTextBlock swapBlk = srcView->document()->findBlockByNumber(1);
+  QVERIFY(swapBlk.isValid());
+  QTextCursor swapCur(swapBlk);
+  swapCur.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor, swapBlk.text().indexOf(QStringLiteral("swap")) + 2);
+  const QPoint swapClickPos(std::max(srcView->lineNumberAreaWidth() + 4, srcView->cursorRect(swapCur).center().x()),
+                            srcView->cursorRect(swapCur).center().y());
+  QVERIFY(srcView->cursorForPosition(swapClickPos).positionInBlock() >= swapBlk.text().indexOf(QStringLiteral("domain")));
+  std::unique_ptr<QMenu> swapMenu(srcView->createEditorContextMenuAt(swapClickPos));
+  QVERIFY(swapMenu != nullptr);
+  auto* vecProbeAct = swapMenu->findChild<QAction*>(QStringLiteral("pluginCtxAct_test.vec_type_probe"));
+  QVERIFY(vecProbeAct != nullptr);
+  vecProbeAct->trigger();
+  QApplication::processEvents();
+  QCOMPARE(capturedEd.symbol, QStringLiteral("domain"));
+  QCOMPARE(capturedEd.type, QStringLiteral("std::vector<double>"));
+  srcView->setPlainText(origDemoCode);
+  srcView->document()->setModified(false);
 
   // 6. Unload all plugins and verify status items, editor annotations, and report dock panels are purged.
   QObject::disconnect(evalConn);

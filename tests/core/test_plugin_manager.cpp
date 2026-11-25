@@ -219,6 +219,9 @@ class TestPluginManager : public QObject {
           }
         });
 
+    QSignalSpy userEvalSpy(&coord, &::IBackendCoordinator::expressionEvaluated);
+    QSignalSpy plugEvalSpy(&coord, &gridlock::GdbRankCoordinator::pluginExpressionReady);
+
     GridLockVariableContext varCtx{};
     varCtx.struct_size = static_cast<uint32_t>(sizeof(GridLockVariableContext));
     varCtx.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
@@ -232,6 +235,9 @@ class TestPluginManager : public QObject {
     QCOMPARE(mgr.hostBridge()->invokeVariableAction(QStringLiteral("dummy.inspect_field"), varCtx), GRIDLOCK_OK);
     QCOMPARE(events.last().second, QStringLiteral("extent_256x128x64_double_grid"));
     QCOMPARE(api->eval_expr(api->host_ctx, 0, "broken_sym", smallBuf, sizeof(smallBuf), &outLen), GRIDLOCK_ERR_EVAL_FAILED);
+    // Plugin eval_expr probes MUST route via pluginExpressionReady without polluting Evaluator's expressionEvaluated!
+    QVERIFY(plugEvalSpy.count() >= 2);
+    QCOMPARE(userEvalSpy.count(), 0);
 
     // HIGH-02 / HIGH-03 / HIGH-04 bounds and MI injection checks.
     uint8_t memBytes[4]{};

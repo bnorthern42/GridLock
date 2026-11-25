@@ -446,21 +446,27 @@ GridLockStatus PluginHostBridge::evalExprOnCoordinatorThread(
   if (coord->getRankState(rank).currentState != QLatin1String("stopped")) return GRIDLOCK_ERR_NOT_STOPPED;
 
   CoordinatorReplyWaiter waiter(coord, rank);
+  bool evalOk = false;
   QString evalValue;
+  int expectedTok = -1;
   const auto evalConn = QObject::connect(
-      coord, &::IBackendCoordinator::expressionEvaluated, &waiter.loop,
-      [&](int r, const QString& resolvedExpr, const QString& result) {
-        if (!waiter.completed && r == rank && (resolvedExpr == expr || resolvedExpr.isEmpty())) {
-          evalValue = result; waiter.completed = true; waiter.loop.quit();
+      coord, &gridlock::GdbRankCoordinator::pluginExpressionReady, &waiter.loop,
+      [&](int r, int tok, bool ok, const QString& resultOrError) {
+        if (!waiter.completed && r == rank && tok == expectedTok) {
+          evalOk = ok; evalValue = resultOrError; waiter.completed = true; waiter.loop.quit();
         }
       });
-  coord->evaluateExpression(rank, expr);
+  if (coord->requestPluginExpressionEval(rank, expr, &expectedTok) <= 0) {
+    QObject::disconnect(evalConn);
+    return GRIDLOCK_ERR_NOT_STOPPED;
+  }
   waiter.waitIfPending(timeoutMs);
   QObject::disconnect(evalConn);
+  coord->cancelPluginEvalRequest(expectedTok);
 
   if (waiter.aborted || (ctx != nullptr && ctx->shuttingDown.load(std::memory_order_acquire))) return GRIDLOCK_ERR_NOT_STOPPED;
   if (waiter.timedOut) return GRIDLOCK_ERR_TIMEOUT;
-  if (evalValue.startsWith(QStringLiteral("Error: "))) return GRIDLOCK_ERR_EVAL_FAILED;
+  if (!evalOk) return GRIDLOCK_ERR_EVAL_FAILED;
   *outPayload = evalValue.toUtf8();
   return GRIDLOCK_OK;
 }

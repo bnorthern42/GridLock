@@ -356,7 +356,7 @@ void GdbRankCoordinator::stopAll(bool silentShutdown) {
   const bool hadActiveSession = !m_processes.empty() || !m_rankFrames.isEmpty() || !m_rankThreads.isEmpty();
   m_processes.clear(); m_rankPids.clear(); m_varNameMap.clear(); m_varNameRevMap.clear();
   m_rankFrames.clear(); m_rankThreads.clear(); m_activeThreadIds.clear(); m_pendingFrameSelect.clear();
-  m_rankArch.clear(); m_activeLaneIds.clear(); m_pendingPluginMemReads.clear(); m_pendingPluginMemWrites.clear();
+  m_rankArch.clear(); m_activeLaneIds.clear(); m_pendingPluginMemReads.clear(); m_pendingPluginMemWrites.clear(); m_pendingPluginEvals.clear();
   m_pendingConsoleCmdCount.clear(); m_consoleReplyBuffer.clear(); m_watchpointIds.clear();
   if (m_mpirunProcess) {
     if (m_mpirunProcess->state() == QProcess::Starting) m_mpirunProcess->waitForStarted(250);

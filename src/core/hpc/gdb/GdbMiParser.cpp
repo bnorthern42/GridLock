@@ -77,6 +77,19 @@ void GdbRankCoordinator::evaluateExpression(int rankId, const QString& expressio
   writeCmd(rankId, QString("%1-data-evaluate-expression %2\n").arg(tok).arg(detail::escapeGdbMiString(expression)));
 }
 
+int GdbRankCoordinator::requestPluginExpressionEval(int rank, const QString& expr, int* outToken) {
+  if (outToken != nullptr) *outToken = -1;
+  if (rank < 0 || rank >= static_cast<int>(m_processes.size()) || !m_processes[rank] || expr.trimmed().isEmpty()) {
+    return -1;
+  }
+  if (m_processes[rank]->state.currentState != QLatin1String("stopped")) return -1;
+  const int tok = allocatePluginMiToken();
+  if (outToken != nullptr) *outToken = tok;
+  m_pendingPluginEvals.insert(tok);
+  writeCmd(rank, QStringLiteral("%1-data-evaluate-expression %2\n").arg(tok).arg(detail::escapeGdbMiString(expr)));
+  return tok;
+}
+
 void GdbRankCoordinator::readMemory(int rankId, const QString& address, int length) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size())) return;
   auto& rp = m_processes[rankId];
@@ -109,6 +122,18 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
 
     const int caretPos = line[0].isDigit() ? line.indexOf(QLatin1Char('^')) : -1;
     const int lineTok = (caretPos > 0) ? line.left(caretPos).toInt() : -1;
+    if (lineTok > 0 && m_pendingPluginEvals.remove(lineTok)) {
+      const QString rest = line.mid(caretPos + 1);
+      if (rest.startsWith(QLatin1String("done"))) {
+        static const QRegularExpression kPluginValRe(QStringLiteral("value=\"((?:\\\\.|[^\"])*)\""));
+        const auto m = kPluginValRe.match(rest);
+        emit pluginExpressionReady(rankId, lineTok, true,
+                                   m.hasMatch() ? detail::unescapeMiValue(m.captured(1)) : QString());
+      } else {
+        emit pluginExpressionReady(rankId, lineTok, false, extractMiErrorMsg(line));
+      }
+      continue;
+    }
     if (lineTok > 0 && m_pendingPluginMemReads.contains(rankId) && m_pendingPluginMemReads[rankId].removeOne(lineTok)) {
       if (line.mid(caretPos + 1).startsWith(QLatin1String("done,memory=["))) {
         emit pluginMemoryChunkReady(rankId, lineTok, decodeMiMemoryHexBlocks(line), QString());

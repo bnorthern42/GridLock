@@ -92,6 +92,25 @@ QString canonicalOrAbsolutePath(const QString& rawPath) {
   return (!fi.canonicalFilePath().isEmpty()) ? fi.canonicalFilePath() : fi.absoluteFilePath();
 }
 
+QString resolveModelVariableType(const gridlock::VariableTreeModel* model, const QString& rawSym) {
+  const QString sym = rawSym.trimmed();
+  if (!model || sym.isEmpty()) return {};
+  auto walk = [&](const auto& self, const QModelIndex& parent) -> QString {
+    for (int r = 0, rows = model->rowCount(parent); r < rows; ++r) {
+      const QModelIndex nIdx = model->index(r, 0, parent);
+      if (model->expressionPath(nIdx).trimmed() == sym ||
+          (!parent.isValid() && model->data(nIdx, Qt::DisplayRole).toString().trimmed() == sym)) {
+        return model->data(model->index(r, 2, parent), Qt::DisplayRole).toString().trimmed();
+      }
+      if (model->hasChildren(nIdx) && !model->canFetchMore(nIdx)) {
+        if (const QString hit = self(self, nIdx); !hit.isEmpty()) return hit;
+      }
+    }
+    return {};
+  };
+  return walk(walk, QModelIndex());
+}
+
 QColor resolvePluginColorToken(const QString& colorToken,
                                const gridlock::core::ThemeManager::ThemePalette& pal) {
   const QString tok = colorToken.trimmed().toLower();
@@ -241,11 +260,28 @@ void MainWindow::initializePluginSubsystem() {
   };
 
   if (m_editorTabManager != nullptr) {
-    auto editorHook = [this, bridge](QMenu* menu, const QString& filePath, int lineOneBased,
-                                     int colOneBased, const QString& symbol, const QString& selectedText) {
+    auto lookupEditorVarType = [this](const QString& expr) -> QString {
+      if (!m_variablesDockWidget || !m_variablesDockWidget->variableModel() || expr.trimmed().isEmpty()) return {};
+      if (auto* gdb = dynamic_cast<gridlock::GdbRankCoordinator*>(m_coordinator);
+          gdb && gdb->getProcessCount() > 0 && gdb->getRankState(m_focusedRank).currentState != QLatin1String("stopped")) {
+        return {};
+      }
+      return resolveModelVariableType(m_variablesDockWidget->variableModel(), expr);
+    };
+    auto editorHook = [this, bridge, lookupEditorVarType](
+                          QMenu* menu, const QString& filePath, int lineOneBased, int colOneBased,
+                          const QString& symbol, const QString& selectedText) {
       if (!menu || !bridge) return;
+      const QString resolvedSym = !symbol.isEmpty() ? symbol : selectedText.trimmed();
+      const QString resolvedType = lookupEditorVarType(resolvedSym);
       const QString filterTarget = !selectedText.isEmpty() ? selectedText : (!symbol.isEmpty() ? symbol : filePath);
-      const auto matches = bridge->matchingContextActions(GRIDLOCK_SURFACE_CODE_EDITOR, filterTarget.left(2048));
+      auto matches = bridge->matchingContextActions(GRIDLOCK_SURFACE_CODE_EDITOR, filterTarget.left(2048));
+      if (!resolvedType.isEmpty()) {
+        for (const auto& tm : bridge->matchingContextActions(GRIDLOCK_SURFACE_CODE_EDITOR, resolvedType.left(2048))) {
+          if (std::none_of(matches.cbegin(), matches.cend(), [&](const auto& x) { return x.actionId == tm.actionId; }))
+            matches.append(tm);
+        }
+      }
       if (matches.isEmpty()) return;
       menu->addSeparator();
       QMenu* plugSub = menu->addMenu(QStringLiteral("Plugin Actions"));
@@ -255,14 +291,17 @@ void MainWindow::initializePluginSubsystem() {
         QAction* pAct = plugSub->addAction(act.menuLabel);
         pAct->setObjectName(QStringLiteral("pluginCtxAct_") + actId);
         connect(pAct, &QAction::triggered, this,
-                [this, bridge, actId, filePath, lineOneBased, colOneBased, symbol, selectedText]() {
+                [this, bridge, lookupEditorVarType, actId, filePath, lineOneBased, colOneBased, symbol, selectedText]() {
                   const int frameLvl = m_callStackDockWidget ? std::max(0, m_callStackDockWidget->activeFrameLevel()) : 0;
-                  const QByteArray symUtf8 = symbol.toUtf8(), fileUtf8 = filePath.toUtf8(), selUtf8 = selectedText.toUtf8();
+                  const QString symType = lookupEditorVarType(!symbol.isEmpty() ? symbol : selectedText.trimmed());
+                  const QByteArray symUtf8 = symbol.toUtf8(), typeUtf8 = symType.toUtf8();
+                  const QByteArray fileUtf8 = filePath.toUtf8(), selUtf8 = selectedText.toUtf8();
                   GridLockSurfaceContext ctx{static_cast<uint32_t>(sizeof(GridLockSurfaceContext)),
                                              GRIDLOCK_PLUGIN_ABI_MAJOR, GRIDLOCK_PLUGIN_ABI_MINOR, 0u,
                                              GRIDLOCK_SURFACE_CODE_EDITOR, m_focusedRank, frameLvl,
                                              lineOneBased, colOneBased, -1, sourceLineToAddress(lineOneBased),
-                                             symUtf8.isEmpty() ? nullptr : symUtf8.constData(), nullptr,
+                                             symUtf8.isEmpty() ? nullptr : symUtf8.constData(),
+                                             typeUtf8.isEmpty() ? nullptr : typeUtf8.constData(),
                                              fileUtf8.isEmpty() ? nullptr : fileUtf8.constData(),
                                              selUtf8.isEmpty() ? nullptr : selUtf8.constData()};
                   (void)bridge->invokeContextAction(actId, ctx);
@@ -479,41 +518,29 @@ void MainWindow::initializePluginSubsystem() {
           [this](const gridlock::core::plugins::PluginEditorAnnotation& ann) {
             if (m_isShuttingDown || m_isClosing || !m_editorTabManager) return;
             const QString targetCanon = canonicalOrAbsolutePath(ann.filePath);
-            for (SourceCodeView* v : m_editorTabManager->openViews()) {
-              if (v && canonicalOrAbsolutePath(v->currentFile()) == targetCanon) {
-                v->upsertPluginAnnotation({ann.pluginId, ann.annotationId, ann.line,
-                                           ann.badgeText, ann.detailText, ann.colorToken});
-              }
-            }
+            for (SourceCodeView* v : m_editorTabManager->openViews())
+              if (v && canonicalOrAbsolutePath(v->currentFile()) == targetCanon)
+                v->upsertPluginAnnotation({ann.pluginId, ann.annotationId, ann.line, ann.badgeText, ann.detailText, ann.colorToken});
           });
-
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::editorAnnotationsCleared, this,
           [this](const QString& pluginId, const QString& idPrefix) {
-            if (!m_editorTabManager) return;
-            for (SourceCodeView* v : m_editorTabManager->openViews()) {
-              if (v) v->clearPluginAnnotations(pluginId, idPrefix);
-            }
+            if (m_editorTabManager)
+              for (SourceCodeView* v : m_editorTabManager->openViews()) if (v) v->clearPluginAnnotations(pluginId, idPrefix);
           });
-
   connect(bridge, &gridlock::core::plugins::PluginHostBridge::themeInfoRequested, this,
           [](GridLockThemeInfo* outTheme, bool* outHandled) {
-            if (!outTheme || !outHandled) return;
-            *outTheme = buildCurrentPluginThemeInfo();
-            *outHandled = true;
+            if (outTheme && outHandled) { *outTheme = buildCurrentPluginThemeInfo(); *outHandled = true; }
           });
-
   connect(&gridlock::core::ThemeManager::instance(), &gridlock::core::ThemeManager::themeModeChanged,
           this, [this, uiState](bool) {
             if (m_isShuttingDown || m_isClosing || !m_pluginManager) return;
-            for (auto it = uiState->statusButtons.cbegin(); it != uiState->statusButtons.cend(); ++it) {
+            for (auto it = uiState->statusButtons.cbegin(); it != uiState->statusButtons.cend(); ++it)
               if (it.value()) styleStatusButton(it.value(), uiState->statusColorTokens.value(it.key()));
-            }
             if (m_pluginReportDock) m_pluginReportDock->reloadStyle();
             const GridLockThemeInfo theme = buildCurrentPluginThemeInfo();
             const QString newId = QString::fromUtf8(theme.theme_id_utf8);
             if (newId != uiState->lastBroadcastThemeId || theme.is_dark != uiState->lastBroadcastIsDark) {
-              uiState->lastBroadcastThemeId = newId;
-              uiState->lastBroadcastIsDark = theme.is_dark;
+              uiState->lastBroadcastThemeId = newId; uiState->lastBroadcastIsDark = theme.is_dark;
               m_pluginManager->notifyThemeChanged(theme);
             }
           });
@@ -581,60 +608,39 @@ void MainWindow::initializePluginSubsystem() {
   auto reconcilePluginUiState = [this, bridge, uiState, mountOrUpdateStatusItem, syncAnnotationsForView]() {
     if (m_isShuttingDown || m_isClosing || !bridge) return;
     QSet<QString> liveStatusIds;
-    for (const auto& item : bridge->statusItems()) {
-      liveStatusIds.insert(item.itemId);
-      mountOrUpdateStatusItem(item);
-    }
+    for (const auto& item : bridge->statusItems()) { liveStatusIds.insert(item.itemId); mountOrUpdateStatusItem(item); }
     for (const QString& existingId : uiState->statusButtons.keys()) {
-      if (!liveStatusIds.contains(existingId)) {
-        uiState->statusColorTokens.remove(existingId);
-        if (QToolButton* btn = uiState->statusButtons.take(existingId).data()) {
-          if (statusBar()) statusBar()->removeWidget(btn);
-          btn->setObjectName(QString());
-          btn->setParent(nullptr);
-          btn->deleteLater();
-        }
+      if (liveStatusIds.contains(existingId)) continue;
+      uiState->statusColorTokens.remove(existingId);
+      if (QToolButton* btn = uiState->statusButtons.take(existingId).data()) {
+        if (statusBar()) statusBar()->removeWidget(btn);
+        btn->setObjectName(QString()); btn->setParent(nullptr); btn->deleteLater();
       }
     }
     if (m_pluginReportDock) {
       QSet<QString> livePanelIds;
-      for (const auto& p : bridge->reportPanels()) {
-        livePanelIds.insert(p.panelId);
-        m_pluginReportDock->upsertPanel(p);
-      }
-      if (livePanelIds.isEmpty() && m_pluginReportDock->panelCount() > 0) {
-        m_pluginReportDock->removePanelsForPlugin(QString());
-      }
+      for (const auto& p : bridge->reportPanels()) { livePanelIds.insert(p.panelId); m_pluginReportDock->upsertPanel(p); }
+      if (livePanelIds.isEmpty() && m_pluginReportDock->panelCount() > 0) m_pluginReportDock->removePanelsForPlugin(QString());
     }
-    if (m_editorTabManager) {
-      for (SourceCodeView* v : m_editorTabManager->openViews()) syncAnnotationsForView(v);
-    }
+    if (m_editorTabManager) for (SourceCodeView* v : m_editorTabManager->openViews()) syncAnnotationsForView(v);
   };
 
-  connect(bridge, &gridlock::core::plugins::PluginHostBridge::registeredActionsChanged,
-           this, &MainWindow::rebuildToolsPluginsMenu);
-  connect(bridge, &gridlock::core::plugins::PluginHostBridge::menuActionsChanged,
-           this, &MainWindow::rebuildToolsPluginsMenu);
+  connect(bridge, &gridlock::core::plugins::PluginHostBridge::registeredActionsChanged, this, &MainWindow::rebuildToolsPluginsMenu);
+  connect(bridge, &gridlock::core::plugins::PluginHostBridge::menuActionsChanged, this, &MainWindow::rebuildToolsPluginsMenu);
   connect(m_pluginManager, &gridlock::core::plugins::PluginManager::pluginsChanged, this,
           [this, restartNotice, enqueueConsoleLine, reconcilePluginUiState]() {
-            rebuildToolsPluginsMenu();
-            reconcilePluginUiState();
+            rebuildToolsPluginsMenu(); reconcilePluginUiState();
             if (m_isShuttingDown || m_isClosing || m_pluginManager == nullptr) return;
             const auto& list = m_pluginManager->plugins();
-            const bool needRestart =
-                m_pluginManager->property("gl_restart_required").toBool() ||
-                std::any_of(list.cbegin(), list.cend(),
-                            [](const gridlock::core::plugins::LoadedPluginInfo& i) { return i.requiresRestart; });
+            const bool needRestart = m_pluginManager->property("gl_restart_required").toBool() ||
+                                     std::any_of(list.cbegin(), list.cend(), [](const auto& i) { return i.requiresRestart; });
             if (restartNotice != nullptr) {
               const bool wasHidden = restartNotice->isHidden();
               restartNotice->setVisible(needRestart);
               if (needRestart && wasHidden) {
-                if (statusBar() != nullptr) {
-                  statusBar()->showMessage(
-                      tr("Plugin settings updated: click 'Restart GridLock Now' to apply all changes."), 10000);
-                }
-                enqueueConsoleLine(
-                    QStringLiteral("[Plugins] Restart GridLock to apply updated plugin enablement/trust."), false);
+                if (statusBar() != nullptr)
+                  statusBar()->showMessage(tr("Plugin settings updated: click 'Restart GridLock Now' to apply all changes."), 10000);
+                enqueueConsoleLine(QStringLiteral("[Plugins] Restart GridLock to apply updated plugin enablement/trust."), false);
               }
             }
           });
@@ -642,22 +648,15 @@ void MainWindow::initializePluginSubsystem() {
   if (m_runAction != nullptr) {
     connect(m_runAction, &QAction::changed, this, [this]() {
       if (m_isShuttingDown || m_isClosing || m_pluginManager == nullptr) return;
-      const bool active =
-          m_debugSessionActive || (m_coordinator != nullptr && m_coordinator->getProcessCount() > 0);
+      const bool active = m_debugSessionActive || (m_coordinator != nullptr && m_coordinator->getProcessCount() > 0);
       if (active && !m_pluginSessionActive) {
-        const int ranks = (m_coordinator != nullptr && m_coordinator->getProcessCount() > 0)
-                              ? m_coordinator->getProcessCount()
-                              : configuredRankCount();
+        const int ranks = (m_coordinator != nullptr && m_coordinator->getProcessCount() > 0) ? m_coordinator->getProcessCount() : configuredRankCount();
         notifySessionStart(ranks, activeTargetBinaryPath());
-      } else if (!active && m_pluginSessionActive) {
-        notifySessionEnd();
-      }
+      } else if (!active && m_pluginSessionActive) notifySessionEnd();
     });
   }
   if (m_stopAction != nullptr) {
-    connect(m_stopAction, &QAction::triggered, this, [this]() {
-      if (m_pluginSessionActive) notifySessionEnd();
-    });
+    connect(m_stopAction, &QAction::triggered, this, [this]() { if (m_pluginSessionActive) notifySessionEnd(); });
   }
 
   bindPluginCoordinatorSignals(m_coordinator);
@@ -781,12 +780,8 @@ void MainWindow::rebuildToolsPluginsMenu() {
     auto* dlg = new PreferencesDialog(this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     if (QTreeWidget* tree = dlg->categoryTree()) {
-      for (int i = 0; i < tree->topLevelItemCount(); ++i) {
-        if (tree->topLevelItem(i)->text(0) == tr("Plugins")) {
-          tree->setCurrentItem(tree->topLevelItem(i));
-          break;
-        }
-      }
+      for (int i = 0; i < tree->topLevelItemCount(); ++i)
+        if (tree->topLevelItem(i)->text(0) == tr("Plugins")) { tree->setCurrentItem(tree->topLevelItem(i)); break; }
     }
     dlg->exec();
   });

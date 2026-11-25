@@ -21,6 +21,7 @@
 #include <QPoint>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSocketNotifier>
 #include <QString>
 
@@ -54,6 +55,8 @@ class GdbRankCoordinator : public IBackendCoordinator {
   }
 
   int allocatePluginMiToken() noexcept { return m_nextPluginMiToken++; }
+  int requestPluginExpressionEval(int rank, const QString& expr, int* outToken = nullptr);
+  void cancelPluginEvalRequest(int token) { m_pendingPluginEvals.remove(token); }
   void sendPluginMemoryRead(int rankId, int token, uint64_t address, size_t length);
   void sendPluginMemoryWrite(int rankId, int token, uint64_t address, const QByteArray& data);
   void cancelPluginMemoryRequest(int rankId, int token);
@@ -164,6 +167,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   void memoryDataReady(int rankId, qint64 beginAddress, const QString& hexContents);
   void pluginMemoryChunkReady(int rank, int token, const QByteArray& bytes, const QString& error);
   void pluginMemoryWriteDone(int rank, int token, const QString& error);
+  void pluginExpressionReady(int rank, int token, bool ok, const QString& resultOrError);
 
  public slots:
   virtual void stepAll();
@@ -366,6 +370,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
   QMap<int, PendingVarChildQuery> m_varChildQueries;
   QMap<int, int> m_tokenToVarCreateQuery, m_tokenToVarListQuery;
   QMap<int, QList<int>> m_pendingPluginMemReads, m_pendingPluginMemWrites;
+  QSet<int> m_pendingPluginEvals;
   int m_nextVarQueryId = 1, m_nextVarQueryToken = 4000, m_nextPluginMiToken = 500000, m_nextCatchpointId = 1;
   std::vector<QString> m_watchVariables;
   bool m_breakpointsCleared = false, m_shuttingDown = false;
