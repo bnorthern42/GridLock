@@ -9,12 +9,15 @@
 #include "../../../core/managers/DocsetManager.hpp"
 #include "../../../core/managers/ThemeManager.hpp"
 
+#include <algorithm>
+
 #include <QApplication>
 #include <QComboBox>
 #include <QEvent>
 #include <QFont>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -24,6 +27,7 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
+#include <QScreen>
 #include <QScrollArea>
 #include <QSet>
 #include <QSettings>
@@ -36,7 +40,19 @@ namespace gridlock::ui {
 PreferencesDialog::PreferencesDialog(QWidget* parent) : QDialog(parent) {
     setObjectName(QStringLiteral("PreferencesDialog"));
     setWindowTitle(tr("Preferences — GridLock"));
-    setMinimumSize(880, 620); resize(960, 680);
+    int minW = 1080, minH = 640, targetW = 1200, targetH = 720;
+    if (QGuiApplication::platformName() != QLatin1String("offscreen")) {
+        if (const QScreen* scr = parent ? parent->screen() : QGuiApplication::primaryScreen()) {
+            const QRect avail = scr->availableGeometry();
+            if (avail.width() > 0 && avail.height() > 0) {
+                const int maxW = std::max(760, avail.width() - 40);
+                const int maxH = std::max(560, avail.height() - 40);
+                minW = std::min(minW, maxW); minH = std::min(minH, maxH);
+                targetW = std::min(targetW, maxW); targetH = std::min(targetH, maxH);
+            }
+        }
+    }
+    setMinimumSize(minW, minH); resize(targetW, targetH);
     setAttribute(Qt::WA_StyledBackground, true); setAutoFillBackground(true);
 
     auto* rootLayout = new QVBoxLayout(this);
@@ -74,7 +90,8 @@ PreferencesDialog::PreferencesDialog(QWidget* parent) : QDialog(parent) {
     });
 
     splitter->addWidget(m_categoryTree); splitter->addWidget(m_stack);
-    splitter->setStretchFactor(0, 0); splitter->setStretchFactor(1, 1); splitter->setSizes({200, 760});
+    splitter->setStretchFactor(0, 0); splitter->setStretchFactor(1, 1);
+    splitter->setSizes({200, std::max(720, targetW - 200)});
     rootLayout->addWidget(splitter, 1);
 
     auto* line = new QLabel(this); line->setFixedHeight(1); line->setObjectName(QStringLiteral("separator"));

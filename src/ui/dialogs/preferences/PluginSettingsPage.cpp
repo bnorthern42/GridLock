@@ -151,7 +151,7 @@ PluginSettingsPage::PluginSettingsPage(PluginManager* pluginManager, QWidget* pa
   setObjectName(QStringLiteral("preferencesPluginsPage"));
 
   auto* root = new QVBoxLayout(this);
-  root->setContentsMargins(20, 16, 20, 20);
+  root->setContentsMargins(14, 14, 14, 16);
   root->setSpacing(10);
 
   auto* heading = new QLabel(QStringLiteral("<b>Native C99 Debugger Plugins</b>"), this);
@@ -205,7 +205,7 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_searchDirsCombo = new QComboBox(tab);
   m_searchDirsCombo->setObjectName(QStringLiteral("pluginSearchDirsCombo"));
   m_searchDirsCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-  m_searchDirsCombo->setMinimumContentsLength(16);
+  m_searchDirsCombo->setMinimumContentsLength(24);
   m_searchDirsCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   dirRow->addWidget(m_searchDirsCombo, 1);
 
@@ -213,19 +213,24 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_openFolderBtn->setObjectName(QStringLiteral("openPluginFolderBtn"));
   m_openFolderBtn->setToolTip(tr("Create (if missing) and open the selected plugin directory."));
   dirRow->addWidget(m_openFolderBtn);
+  lay->addLayout(dirRow);
 
+  auto* actionRow = new QHBoxLayout();
+  actionRow->setSpacing(8);
+  actionRow->addStretch(1);
   m_reloadBtn = new QPushButton(tr("Reload Plugins"), tab);
   m_reloadBtn->setObjectName(QStringLiteral("reloadPluginsBtn"));
   m_reloadBtn->setToolTip(tr("Discard staged edits, unload active plugins, and rescan plugin directories."));
-  dirRow->addWidget(m_reloadBtn);
+  actionRow->addWidget(m_reloadBtn);
 
   m_updateAllBtn = new QPushButton(tr("Update All"), tab);
   m_updateAllBtn->setObjectName(QStringLiteral("pluginUpdateAllBtn"));
   m_updateAllBtn->setToolTip(tr("Re-clone and rebuild all Git-installed plugins into their existing scopes."));
+  m_updateAllBtn->setMinimumWidth(108);
   applyPrimaryAccentButtonStyle(m_updateAllBtn);
   m_updateAllBtn->setEnabled(false);
-  dirRow->addWidget(m_updateAllBtn);
-  lay->addLayout(dirRow);
+  actionRow->addWidget(m_updateAllBtn);
+  lay->addLayout(actionRow);
 
   m_installedStatusLabel = new QLabel(tab);
   m_installedStatusLabel->setObjectName(QStringLiteral("pluginInstalledStatusLabel"));
@@ -260,17 +265,23 @@ QWidget* PluginSettingsPage::createInstalledTab(QWidget* parent) {
   m_pluginTable->setHorizontalHeaderLabels({tr("Global"), tr("Workspace"), tr("Name"), tr("Version"),
                                            tr("Scope / ABI"), tr("Status"), tr("Trust"), tr("Update")});
   m_pluginTable->verticalHeader()->setVisible(false);
+  m_pluginTable->verticalHeader()->setDefaultSectionSize(32);
   m_pluginTable->setSelectionBehavior(QAbstractItemView::SelectRows);
   m_pluginTable->setSelectionMode(QAbstractItemView::SingleSelection);
   m_pluginTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
   m_pluginTable->setAlternatingRowColors(true);
+  m_pluginTable->setWordWrap(false);
+  m_pluginTable->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+  m_pluginTable->setStyleSheet(QStringLiteral(
+      "QTableWidget#pluginsTableWidget { font-size: 12px; } "
+      "QTableWidget#pluginsTableWidget::item { padding: 2px 5px; } "
+      "QTableWidget#pluginsTableWidget QHeaderView::section { padding: 3px 5px; font-size: 11px; }"));
   m_pluginTable->setMinimumHeight(240);
 
   QHeaderView* hdr = m_pluginTable->horizontalHeader();
-  for (int col : {0, 1, 3, 4, 6, 7}) hdr->setSectionResizeMode(col, QHeaderView::ResizeToContents);
-  hdr->setSectionResizeMode(2, QHeaderView::Interactive);
-  hdr->setSectionResizeMode(5, QHeaderView::Stretch);
-  m_pluginTable->setColumnWidth(2, 180);
+  hdr->setMinimumSectionSize(44);
+  for (int col : {0, 1, 3, 4, 5, 6, 7}) hdr->setSectionResizeMode(col, QHeaderView::ResizeToContents);
+  hdr->setSectionResizeMode(2, QHeaderView::Stretch);
   lay->addWidget(m_pluginTable, 1);
 
   connect(m_openFolderBtn, &QPushButton::clicked, this, [this]() {
@@ -567,7 +578,8 @@ void PluginSettingsPage::updateRowPreview(int row, const QString& rowKey) {
                        (isWs && staged.workspaceTrusted != baseTrusted);
   QString statusText;
   if (abiRejected) {
-    statusText = QStringLiteral("ABI Rejected: %1").arg(info.errorMessage);
+    statusText = (info.abiMajor > 0u) ? QStringLiteral("ABI Rejected: v%1.%2").arg(info.abiMajor).arg(info.abiMinor)
+                                      : QStringLiteral("ABI Rejected: invalid");
   } else if (isDirty) {
     statusText = (isWs && !staged.workspaceTrusted)
                      ? tr("Staged: Untrusted (Apply to save)")
@@ -695,7 +707,8 @@ void PluginSettingsPage::refreshTable() {
     const QString btnSuffix = !info.id.isEmpty() ? info.id : QFileInfo(info.libraryPath).completeBaseName();
     auto* updateBtn = new QPushButton(tr("Update"), m_pluginTable);
     updateBtn->setObjectName(QStringLiteral("pluginUpdateBtn_") + btnSuffix);
-    updateBtn->setMinimumHeight(24);
+    updateBtn->setMinimumSize(82, 24);
+    updateBtn->setStyleSheet(QStringLiteral("QPushButton { padding: 2px 8px; }"));
     const bool hasGitSource = !info.gitRepo.isEmpty();
     updateBtn->setEnabled(hasGitSource && !installerBusy);
     updateBtn->setToolTip(hasGitSource ? tr("Re-clone and rebuild from %1").arg(info.gitRepo)

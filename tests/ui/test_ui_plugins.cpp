@@ -23,6 +23,7 @@
 #include <QPoint>
 #include <QProcess>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSignalSpy>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -464,6 +465,22 @@ void gridlockVerifyPluginSubsystemUi(gridlock::ui::MainWindow& mw) {
   QVERIFY(rowUpdBtn != nullptr && rowUpdBtn->isEnabled());
   QVERIFY(badUpdBtn != nullptr && !badUpdBtn->isEnabled());
   QCOMPARE(badUpdBtn->toolTip(), QStringLiteral("Local binary (no Git source)"));
+
+  // Verify wider PreferencesDialog fits all 8 columns without horizontal scrolling or button text clipping.
+  QVERIFY(pd3.width() >= 1040);
+  QStringList colWidths;
+  for (int c = 0; c < tbl3->columnCount(); ++c) colWidths << QString::number(tbl3->columnWidth(c));
+  QVERIFY2(tbl3->horizontalScrollBar()->maximum() == 0,
+           qPrintable(QStringLiteral("pd3=%1 vp=%2 max=%3 cols=[%4]")
+                          .arg(pd3.width()).arg(tbl3->viewport()->width())
+                          .arg(tbl3->horizontalScrollBar()->maximum()).arg(colWidths.join(QLatin1Char(',')))));
+  const QRect updCellRect = tbl3->visualRect(tbl3->model()->index(gitRow, 7));
+  QVERIFY(tbl3->viewport()->rect().contains(updCellRect));
+  QVERIFY(tbl3->columnWidth(2) >= 160);
+  QVERIFY(rowUpdBtn->minimumWidth() >= 78 && rowUpdBtn->width() >= 78);
+  QVERIFY(rowUpdBtn->width() >= rowUpdBtn->fontMetrics().horizontalAdvance(QStringLiteral("UPDATE")) + 12);
+  QVERIFY(page3->updateAllButton()->width() >=
+          page3->updateAllButton()->fontMetrics().horizontalAdvance(QStringLiteral("UPDATE ALL")) + 16);
 
   const QString lockPath = gridlock::core::plugins::PluginManifest::userLockFilePath();
   QVector<gridlock::core::plugins::PluginLockEntry> locksBefore;
