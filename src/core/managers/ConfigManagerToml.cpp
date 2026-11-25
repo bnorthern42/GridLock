@@ -15,6 +15,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QIODevice>
 #include <QSettings>
 #include <QStandardPaths>
@@ -386,7 +387,9 @@ void ConfigManager::setDisabledPluginIds(const QStringList& ids) {
     const QString trimmed = raw.trimmed();
     if (!trimmed.isEmpty() && !norm.contains(trimmed)) norm.append(trimmed);
   }
-  if (!m_config.contains("plugins")) m_config.insert("plugins", toml::table{});
+  if (!m_config.contains("plugins") || !m_config["plugins"].is_table()) {
+    m_config.insert_or_assign("plugins", toml::table{});
+  }
   toml::array arr;
   for (const QString& id : norm) arr.push_back(id.toStdString());
   m_config["plugins"].as_table()->insert_or_assign("disabled_ids", std::move(arr));
@@ -394,6 +397,91 @@ void ConfigManager::setDisabledPluginIds(const QStringList& ids) {
   QSettings s(kOrg, kApp);
   s.setValue(QStringLiteral("plugins/disabled_ids"), norm);
   s.sync();
+}
+
+namespace {
+QString resolveCanonicalPathKey(const QString& rawPath) {
+  const QString trimmed = rawPath.trimmed();
+  if (trimmed.isEmpty()) return QString();
+  const QFileInfo fi(trimmed);
+  return !fi.canonicalFilePath().isEmpty() ? fi.canonicalFilePath() : QDir::cleanPath(fi.absoluteFilePath());
+}
+
+toml::table& ensureChildTable(toml::table& parent, std::string_view key) {
+  if (!parent.contains(key) || !parent[key].is_table()) {
+    parent.insert_or_assign(key, toml::table{});
+  }
+  return *parent[key].as_table();
+}
+}  // namespace
+
+/** @brief Reads `workspace_disabled_ids` for the active workspace from user-global `config.toml`. */
+QStringList ConfigManager::workspaceDisabledPluginIds() const {
+  QStringList out;
+  const QString wsKey = resolveCanonicalPathKey(m_workspacePath);
+  if (wsKey.isEmpty()) return out;
+  const auto* plugTbl = m_config["plugins"].as_table();
+  const auto* wsMap = plugTbl ? (*plugTbl)["workspaces"].as_table() : nullptr;
+  const auto* wsEntry = wsMap ? (*wsMap)[wsKey.toStdString()].as_table() : nullptr;
+  const auto* arr = wsEntry ? (*wsEntry)["workspace_disabled_ids"].as_array() : nullptr;
+  if (!arr) return out;
+  for (const auto& node : *arr) {
+    if (auto sv = node.value<std::string>()) {
+      const QString id = QString::fromStdString(*sv).trimmed();
+      if (!id.isEmpty() && !out.contains(id)) out.append(id);
+    }
+  }
+  return out;
+}
+
+/** @brief Persists `workspace_disabled_ids` under `[plugins.workspaces."<path>"]` in `config.toml`. */
+void ConfigManager::setWorkspaceDisabledPluginIds(const QStringList& ids) {
+  const QString wsKey = resolveCanonicalPathKey(m_workspacePath);
+  if (wsKey.isEmpty()) return;
+  QStringList norm;
+  for (const QString& raw : ids) {
+    if (const QString t = raw.trimmed(); !t.isEmpty() && !norm.contains(t)) norm.append(t);
+  }
+  toml::array arr;
+  for (const QString& id : norm) arr.push_back(id.toStdString());
+  auto& wsEntry = ensureChildTable(ensureChildTable(ensureChildTable(m_config, "plugins"), "workspaces"),
+                                   wsKey.toStdString());
+  wsEntry.insert_or_assign("workspace_disabled_ids", std::move(arr));
+  saveGlobalConfig();
+}
+
+/** @brief Checks `[plugins.trusted_workspace_binaries]` in user-global `config.toml` for exact SHA-256 match. */
+bool ConfigManager::isWorkspacePluginTrusted(const QString& canonicalPath, const QString& sha256Hex) const {
+  const QString pathKey = resolveCanonicalPathKey(canonicalPath), normSha = sha256Hex.trimmed().toLower();
+  if (pathKey.isEmpty() || normSha.isEmpty()) return false;
+  const auto* plugTbl = m_config["plugins"].as_table();
+  const auto* trustTbl = plugTbl ? (*plugTbl)["trusted_workspace_binaries"].as_table() : nullptr;
+  if (!trustTbl) return false;
+  if (auto sv = (*trustTbl)[pathKey.toStdString()].value<std::string>()) {
+    return QString::fromStdString(*sv).trimmed().toLower() == normSha;
+  }
+  return false;
+}
+
+/** @brief Approves @p canonicalPath with lowercase @p sha256Hex in `[plugins.trusted_workspace_binaries]`. */
+void ConfigManager::trustWorkspacePlugin(const QString& canonicalPath, const QString& sha256Hex) {
+  const QString pathKey = resolveCanonicalPathKey(canonicalPath), normSha = sha256Hex.trimmed().toLower();
+  if (pathKey.isEmpty() || normSha.isEmpty()) return;
+  ensureChildTable(ensureChildTable(m_config, "plugins"), "trusted_workspace_binaries")
+      .insert_or_assign(pathKey.toStdString(), normSha.toStdString());
+  saveGlobalConfig();
+}
+
+/** @brief Revokes workspace plugin trust for @p canonicalPath in user-global `config.toml`. */
+void ConfigManager::revokeWorkspacePluginTrust(const QString& canonicalPath) {
+  const QString pathKey = resolveCanonicalPathKey(canonicalPath);
+  if (pathKey.isEmpty()) return;
+  if (auto* plugTbl = m_config["plugins"].as_table()) {
+    if (auto* trustTbl = (*plugTbl)["trusted_workspace_binaries"].as_table()) {
+      trustTbl->erase(pathKey.toStdString());
+      saveGlobalConfig();
+    }
+  }
 }
 
 }  // namespace gridlock::core

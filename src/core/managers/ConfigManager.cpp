@@ -327,6 +327,41 @@ void ConfigManager::setPluginDisabled(const QString& pluginId, bool disabled) {
   setDisabledPluginIds(ids);
 }
 
+/** @brief Returns true when @p pluginId is enabled globally across workspaces. */
+bool ConfigManager::isPluginGloballyEnabled(const QString& pluginId) const {
+  const QString trimmed = pluginId.trimmed();
+  return !trimmed.isEmpty() && !disabledPluginIds().contains(trimmed);
+}
+
+/** @brief Sets global enablement for @p pluginId by updating `[plugins] disabled_ids`. */
+void ConfigManager::setPluginGloballyEnabled(const QString& pluginId, bool enabled) {
+  setPluginDisabled(pluginId, !enabled);
+}
+
+/** @brief Returns true when @p pluginId is enabled in the active workspace. */
+bool ConfigManager::isPluginWorkspaceEnabled(const QString& pluginId) const {
+  const QString trimmed = pluginId.trimmed();
+  return !trimmed.isEmpty() && !workspaceDisabledPluginIds().contains(trimmed);
+}
+
+/** @brief Updates active-workspace enablement for @p pluginId in user-global `config.toml`. */
+void ConfigManager::setPluginWorkspaceEnabled(const QString& pluginId, bool enabled) {
+  const QString trimmed = pluginId.trimmed();
+  if (trimmed.isEmpty()) return;
+  QStringList ids = workspaceDisabledPluginIds();
+  if (!enabled) {
+    if (!ids.contains(trimmed)) ids.append(trimmed);
+  } else {
+    ids.removeAll(trimmed);
+  }
+  setWorkspaceDisabledPluginIds(ids);
+}
+
+/** @brief Returns true only when @p pluginId is enabled both globally and in the active workspace. */
+bool ConfigManager::effectivePluginEnabled(const QString& pluginId) const {
+  return isPluginGloballyEnabled(pluginId) && isPluginWorkspaceEnabled(pluginId);
+}
+
 /** @brief Returns the canonical default `#MainToolbar` ordered item token list. */
 QStringList ConfigManager::defaultToolbarLayout() {
   return {

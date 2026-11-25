@@ -1,16 +1,24 @@
 /**
  * @file PluginManager.cpp
- * @brief Implementation of shared-library discovery, ABI v1.0 enforcement, and plugin lifecycle dispatch.
+ * @brief Shared-library discovery, SHA-256 workspace trust gating, ABI v1.0 enforcement, and lifecycle dispatch.
  */
 
 #include "PluginManager.hpp"
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #include <algorithm>
 #include <cstddef>
+#include <utility>
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QIODevice>
 #include <QSettings>
 
 #include "../hpc/gdb/GdbRankCoordinator.hpp"
@@ -21,8 +29,35 @@ namespace gridlock::core::plugins {
 namespace {
 
 /** @brief Safely reads a C UTF-8 pointer that may be `nullptr`. */
-QString safeUtf8(const char* raw) {
-  return (raw != nullptr) ? QString::fromUtf8(raw).trimmed() : QString();
+QString safeUtf8(const char* raw) { return (raw != nullptr) ? QString::fromUtf8(raw).trimmed() : QString(); }
+
+/** @brief Returns true when @p path is missing or world-writable (`002`) on POSIX filesystems. */
+bool isWorldWritablePosix(const QString& path) {
+#ifndef _WIN32
+  struct stat st{};
+  return (::stat(QFile::encodeName(path).constData(), &st) != 0) || ((st.st_mode & 002) != 0);
+#else
+  Q_UNUSED(path);
+  return false;
+#endif
+}
+
+/** @brief Builds a non-active `LoadedPluginInfo` record for disabled, untrusted, or rejected binaries. */
+LoadedPluginInfo makeStatusInfo(const QString& id, const QString& name, const QString& path,
+                                const QString& sha256Hex, PluginScope scope, bool trusted,
+                                const QString& error = QString()) {
+  LoadedPluginInfo info{};
+  info.id = id; info.name = name; info.libraryPath = path; info.sha256Hex = sha256Hex;
+  info.scope = scope; info.trusted = trusted; info.enabled = false; info.errorMessage = error;
+  return info;
+}
+
+LoadedPluginInfo* findInfoById(QVector<LoadedPluginInfo>& list, const QString& id) {
+  if (id.isEmpty()) return nullptr;
+  for (auto& info : list) {
+    if (info.id == id) return &info;
+  }
+  return nullptr;
 }
 
 }  // namespace
@@ -32,75 +67,90 @@ PluginManager::PluginManager(gridlock::GdbRankCoordinator* coordinator, QObject*
   setCoordinator(coordinator);
 }
 
-PluginManager::~PluginManager() {
-  unloadAll();
-}
+PluginManager::~PluginManager() { unloadAll(); }
 
 void PluginManager::setCoordinator(gridlock::GdbRankCoordinator* coordinator) {
-  if (m_stopConn) {
-    QObject::disconnect(m_stopConn);
-  }
+  if (m_stopConn) QObject::disconnect(m_stopConn);
   m_coordinator = coordinator;
   m_bridge.setCoordinator(coordinator);
-  if (coordinator != nullptr) {
-    m_stopConn = QObject::connect(
-        coordinator, &::IBackendCoordinator::locationChanged, this,
-        [this](int rankId, const QString& file, int line) {
-          if (m_coordinator.isNull()) return;
-          const auto st = m_coordinator->getRankState(rankId);
-          bool ok = false;
-          const QString pcStr = st.registers.value(16);
-          const uint64_t pc = pcStr.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
-                                  ? pcStr.mid(2).toULongLong(&ok, 16)
-                                  : 0u;
-          notifyRankStopped(rankId, file, line, st.currentFunction, pc,
-                            QStringLiteral("breakpoint-hit"));
-        });
-  }
+  if (coordinator == nullptr) return;
+  m_stopConn = QObject::connect(
+      coordinator, &::IBackendCoordinator::locationChanged, this,
+      [this](int rankId, const QString& file, int line) {
+        if (m_coordinator.isNull()) return;
+        const auto st = m_coordinator->getRankState(rankId);
+        bool ok = false;
+        const QString pc = st.registers.value(16);
+        notifyRankStopped(rankId, file, line, st.currentFunction,
+                          pc.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? pc.mid(2).toULongLong(&ok, 16) : 0u,
+                          QStringLiteral("breakpoint-hit"));
+      });
 }
 
 bool PluginManager::hasSharedLibrarySuffix(const QString& fileName) {
-  return fileName.endsWith(QStringLiteral(".so"), Qt::CaseInsensitive) ||
-         fileName.endsWith(QStringLiteral(".dylib"), Qt::CaseInsensitive) ||
-         fileName.endsWith(QStringLiteral(".dll"), Qt::CaseInsensitive);
+#if defined(Q_OS_WIN)
+  return fileName.endsWith(QStringLiteral(".dll"), Qt::CaseInsensitive);
+#elif defined(Q_OS_MACOS) || defined(Q_OS_DARWIN)
+  return fileName.endsWith(QStringLiteral(".dylib"), Qt::CaseInsensitive);
+#else
+  return fileName.endsWith(QStringLiteral(".so"), Qt::CaseInsensitive);
+#endif
+}
+
+QString PluginManager::computeFileSha256Hex(const QString& filePath) {
+  QFile file(filePath);
+  if (!file.open(QIODevice::ReadOnly)) return QString();
+  QCryptographicHash hash(QCryptographicHash::Sha256);
+  return hash.addData(&file) ? QString::fromLatin1(hash.result().toHex()).toLower() : QString();
 }
 
 QStringList PluginManager::searchDirectories() const {
-  QStringList dirs;
-  const QString userPlugins = ConfigManager::configDirectory() + QStringLiteral("/plugins");
-  dirs.append(QDir::cleanPath(userPlugins));
-
+  QStringList dirs{QDir::cleanPath(ConfigManager::configDirectory() + QStringLiteral("/plugins"))};
   const QString wsRoot = ConfigManager::instance().workspacePath().trimmed();
   if (!wsRoot.isEmpty()) {
     const QString wsPlugins = QDir::cleanPath(wsRoot + QStringLiteral("/.gridlock/plugins"));
-    if (!dirs.contains(wsPlugins)) {
-      dirs.append(wsPlugins);
-    }
+    if (!dirs.contains(wsPlugins)) dirs.append(wsPlugins);
   }
   return dirs;
+}
+
+PluginScope PluginManager::inferScopeForPath(const QString& canonicalPath) const {
+  const QString wsRoot = ConfigManager::instance().workspacePath().trimmed();
+  if (wsRoot.isEmpty()) return PluginScope::UserGlobal;
+  const QFileInfo wsInfo(wsRoot + QStringLiteral("/.gridlock/plugins"));
+  const QString wsCanon = !wsInfo.canonicalFilePath().isEmpty() ? wsInfo.canonicalFilePath() : QDir::cleanPath(wsInfo.absoluteFilePath());
+  const QString prefix = wsCanon.endsWith(QLatin1Char('/')) ? wsCanon : (wsCanon + QLatin1Char('/'));
+  return canonicalPath.startsWith(prefix) ? PluginScope::Workspace : PluginScope::UserGlobal;
 }
 
 int PluginManager::discoverAndLoad() {
   unloadAll();
   QStringList seenCanonicalPaths;
   int activeCount = 0;
-
+  m_deferMetadataSync = true;
+  const QString userRootClean = QDir::cleanPath(ConfigManager::configDirectory() + QStringLiteral("/plugins"));
   for (const QString& dirPath : searchDirectories()) {
     QDir dir(dirPath);
-    if (!dir.exists()) continue;
-    const QFileInfoList entries =
-        dir.entryInfoList(QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
-    for (const QFileInfo& fi : entries) {
+    if (!dir.exists() || isWorldWritablePosix(dirPath)) continue;
+    const QString canonicalRoot = QFileInfo(dirPath).canonicalFilePath();
+    if (canonicalRoot.isEmpty()) continue;
+    const QString rootPrefix = canonicalRoot.endsWith(QLatin1Char('/')) ? canonicalRoot : (canonicalRoot + QLatin1Char('/'));
+    const PluginScope scope = (QDir::cleanPath(dirPath) == userRootClean) ? PluginScope::UserGlobal : PluginScope::Workspace;
+    for (const QFileInfo& fi : dir.entryInfoList(QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase)) {
       if (!hasSharedLibrarySuffix(fi.fileName())) continue;
-      const QString canonical =
-          fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
+      const QString canonical = fi.canonicalFilePath();
+      if (canonical.isEmpty() || !canonical.startsWith(rootPrefix)) {
+        m_pluginInfos.append(makeStatusInfo(fi.completeBaseName(), fi.fileName(), fi.absoluteFilePath(),
+                                            QString(), scope, false, QStringLiteral("Rejected symlink escaping plugin directory")));
+        continue;
+      }
       if (seenCanonicalPaths.contains(canonical)) continue;
       seenCanonicalPaths.append(canonical);
-      if (loadPluginFromPath(canonical)) {
-        ++activeCount;
-      }
+      if (loadPluginInternal(canonical, scope)) ++activeCount;
     }
   }
+  m_deferMetadataSync = false;
+  flushMetadataCache();
   emit pluginsChanged();
   return activeCount;
 }
@@ -108,38 +158,41 @@ int PluginManager::discoverAndLoad() {
 void PluginManager::cachePluginMetadata(const QString& canonicalPath, const LoadedPluginInfo& info) {
   if (canonicalPath.isEmpty() || info.id.isEmpty()) return;
   m_pathMetadataCache.insert(canonicalPath, info);
-  QSettings s(ConfigManager::workstationSettingsPath(), QSettings::IniFormat);
-  const QString keyBase =
-      QStringLiteral("plugin_cache/") +
-      QString::fromLatin1(canonicalPath.toUtf8().toHex());
-  s.setValue(keyBase + QStringLiteral("/id"), info.id);
-  s.setValue(keyBase + QStringLiteral("/name"), info.name);
-  s.setValue(keyBase + QStringLiteral("/version"), info.version);
-  s.setValue(keyBase + QStringLiteral("/description"), info.description);
-  s.setValue(keyBase + QStringLiteral("/abi_major"), info.abiMajor);
-  s.setValue(keyBase + QStringLiteral("/abi_minor"), info.abiMinor);
-  s.sync();
+  m_dirtyMetadataCache.insert(canonicalPath, info);
+  if (!m_deferMetadataSync) flushMetadataCache();
 }
 
-bool PluginManager::lookupCachedMetadata(const QString& canonicalPath,
-                                         LoadedPluginInfo* outInfo) const {
+void PluginManager::flushMetadataCache() {
+  if (m_dirtyMetadataCache.isEmpty()) return;
+  QSettings s(ConfigManager::workstationSettingsPath(), QSettings::IniFormat);
+  for (auto it = m_dirtyMetadataCache.cbegin(); it != m_dirtyMetadataCache.cend(); ++it) {
+    const QString k = QStringLiteral("plugin_cache/") + QString::fromLatin1(it.key().toUtf8().toHex());
+    s.setValue(k + QStringLiteral("/id"), it.value().id);
+    s.setValue(k + QStringLiteral("/name"), it.value().name);
+    s.setValue(k + QStringLiteral("/version"), it.value().version);
+    s.setValue(k + QStringLiteral("/description"), it.value().description);
+    s.setValue(k + QStringLiteral("/abi_major"), it.value().abiMajor);
+    s.setValue(k + QStringLiteral("/abi_minor"), it.value().abiMinor);
+  }
+  s.sync();
+  m_dirtyMetadataCache.clear();
+}
+
+bool PluginManager::lookupCachedMetadata(const QString& canonicalPath, LoadedPluginInfo* outInfo) const {
   if (m_pathMetadataCache.contains(canonicalPath)) {
     *outInfo = m_pathMetadataCache.value(canonicalPath);
     return true;
   }
   QSettings s(ConfigManager::workstationSettingsPath(), QSettings::IniFormat);
-  const QString keyBase =
-      QStringLiteral("plugin_cache/") +
-      QString::fromLatin1(canonicalPath.toUtf8().toHex());
-  const QString cachedId = s.value(keyBase + QStringLiteral("/id")).toString().trimmed();
+  const QString k = QStringLiteral("plugin_cache/") + QString::fromLatin1(canonicalPath.toUtf8().toHex());
+  const QString cachedId = s.value(k + QStringLiteral("/id")).toString().trimmed();
   if (cachedId.isEmpty()) return false;
-  outInfo->id = cachedId;
-  outInfo->name = s.value(keyBase + QStringLiteral("/name")).toString();
-  outInfo->version = s.value(keyBase + QStringLiteral("/version")).toString();
-  outInfo->description = s.value(keyBase + QStringLiteral("/description")).toString();
+  outInfo->id = cachedId; outInfo->name = s.value(k + QStringLiteral("/name")).toString();
+  outInfo->version = s.value(k + QStringLiteral("/version")).toString();
+  outInfo->description = s.value(k + QStringLiteral("/description")).toString();
   outInfo->libraryPath = canonicalPath;
-  outInfo->abiMajor = s.value(keyBase + QStringLiteral("/abi_major"), 1u).toUInt();
-  outInfo->abiMinor = s.value(keyBase + QStringLiteral("/abi_minor"), 0u).toUInt();
+  outInfo->abiMajor = s.value(k + QStringLiteral("/abi_major"), 1u).toUInt();
+  outInfo->abiMinor = s.value(k + QStringLiteral("/abi_minor"), 0u).toUInt();
   return true;
 }
 
@@ -147,49 +200,72 @@ bool PluginManager::loadPluginFromPath(const QString& libraryPath) {
   const QFileInfo fi(libraryPath);
   const QString canonical =
       fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
+  return loadPluginInternal(canonical, inferScopeForPath(canonical));
+}
 
+bool PluginManager::loadPluginInternal(const QString& libraryPath, PluginScope scope) {
+  const QFileInfo fi(libraryPath);
+  const QString canonical =
+      fi.canonicalFilePath().isEmpty() ? fi.absoluteFilePath() : fi.canonicalFilePath();
   auto upsertInfo = [this](const LoadedPluginInfo& info) {
     for (auto& existing : m_pluginInfos) {
-      if (existing.libraryPath == info.libraryPath ||
-          (!info.id.isEmpty() && existing.id == info.id && existing.enabled == info.enabled)) {
-        existing = info;
-        return;
-      }
+      if (existing.libraryPath == info.libraryPath) { existing = info; return; }
     }
     m_pluginInfos.append(info);
   };
 
-  // Skip loading entirely when a cached plugin ID or file stem is marked disabled in ConfigManager.
+  if (isWorldWritablePosix(canonical)) {
+    upsertInfo(makeStatusInfo(fi.completeBaseName(), fi.fileName(), canonical, QString(), scope, false,
+                              QStringLiteral("Rejected world-writable plugin binary")));
+    return false;
+  }
+
+  const QString sha256Hex = computeFileSha256Hex(canonical);
+  auto& cfg = ConfigManager::instance();
+  const bool isTrusted =
+      (scope == PluginScope::UserGlobal) || cfg.isWorkspacePluginTrusted(canonical, sha256Hex);
   LoadedPluginInfo cached{};
-  if (lookupCachedMetadata(canonical, &cached) &&
-      ConfigManager::instance().isPluginDisabled(cached.id)) {
-    cached.libraryPath = canonical;
-    cached.enabled = false;
-    cached.errorMessage.clear();
+  const bool hasCached = lookupCachedMetadata(canonical, &cached);
+
+  // Enforce pre-dlopen SHA-256 trust gate on all workspace-scoped shared libraries.
+  if (scope == PluginScope::Workspace && !isTrusted) {
+    for (const auto& active : m_activePlugins) {
+      if (!sha256Hex.isEmpty() && active.scope == PluginScope::UserGlobal &&
+          active.sha256Hex == sha256Hex) {
+        upsertInfo(makeStatusInfo(active.id, fi.fileName(), canonical, sha256Hex, scope, false,
+                                  QStringLiteral("Duplicate plugin ID '%1' rejected").arg(active.id)));
+        return false;
+      }
+    }
+    LoadedPluginInfo untrusted = makeStatusInfo(
+        hasCached && !cached.id.isEmpty() ? cached.id : fi.completeBaseName(),
+        hasCached && !cached.name.isEmpty() ? cached.name : fi.fileName(),
+        canonical, sha256Hex, scope, false,
+        QStringLiteral("Untrusted Workspace Plugin (Approval Required)"));
+    untrusted.version = cached.version; untrusted.description = cached.description;
+    untrusted.abiMajor = cached.abiMajor; untrusted.abiMinor = cached.abiMinor;
+    upsertInfo(untrusted);
+    return false;
+  }
+
+  if (hasCached && !cfg.effectivePluginEnabled(cached.id)) {
+    cached.libraryPath = canonical; cached.sha256Hex = sha256Hex;
+    cached.scope = scope; cached.trusted = isTrusted;
+    cached.enabled = false; cached.errorMessage.clear();
     upsertInfo(cached);
     return false;
   }
-  if (ConfigManager::instance().isPluginDisabled(fi.completeBaseName()) ||
-      ConfigManager::instance().isPluginDisabled(fi.fileName())) {
-    LoadedPluginInfo skipped{};
-    skipped.id = fi.completeBaseName();
-    skipped.name = fi.fileName();
-    skipped.libraryPath = canonical;
-    skipped.enabled = false;
-    upsertInfo(skipped);
+  if (!cfg.effectivePluginEnabled(fi.completeBaseName()) ||
+      !cfg.effectivePluginEnabled(fi.fileName())) {
+    upsertInfo(makeStatusInfo(fi.completeBaseName(), fi.fileName(), canonical, sha256Hex, scope, isTrusted));
     return false;
   }
 
   auto lib = std::make_unique<QLibrary>(canonical);
   lib->setLoadHints(QLibrary::ResolveAllSymbolsHint);
   if (!lib->load()) {
-    LoadedPluginInfo failed{};
-    failed.id = fi.completeBaseName();
-    failed.name = fi.fileName();
-    failed.libraryPath = canonical;
-    failed.enabled = false;
-    failed.errorMessage = QStringLiteral("Failed to load shared library: %1").arg(lib->errorString());
-    upsertInfo(failed);
+    upsertInfo(makeStatusInfo(fi.completeBaseName(), fi.fileName(), canonical, sha256Hex, scope, isTrusted,
+                              QStringLiteral("Failed to load shared library: %1").arg(lib->errorString())));
     return false;
   }
 
@@ -197,226 +273,205 @@ bool PluginManager::loadPluginFromPath(const QString& libraryPath) {
   if (rawSym == nullptr) {
     const QString err = lib->errorString();
     lib->unload();
-    LoadedPluginInfo failed{};
-    failed.id = fi.completeBaseName();
-    failed.name = fi.fileName();
-    failed.libraryPath = canonical;
-    failed.enabled = false;
-    failed.errorMessage =
-        QStringLiteral("Missing entry point '%1': %2")
-            .arg(QLatin1String(GRIDLOCK_PLUGIN_INIT_SYMBOL_V1), err);
-    upsertInfo(failed);
+    upsertInfo(makeStatusInfo(fi.completeBaseName(), fi.fileName(), canonical, sha256Hex, scope, isTrusted,
+                              QStringLiteral("Missing entry point '%1': %2")
+                                  .arg(QLatin1String(GRIDLOCK_PLUGIN_INIT_SYMBOL_V1), err)));
     return false;
   }
 
-  // Reinterpret POSIX/Qt QFunctionPointer to the frozen C99 entry-point signature.
   const auto initFn = reinterpret_cast<GridLockPluginInitV1Fn>(rawSym);
   GridLockPluginDescriptor desc{};
   desc.struct_size = static_cast<uint32_t>(sizeof(GridLockPluginDescriptor));
   desc.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
   desc.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-  desc.reserved_flags = 0u;
 
   m_bridge.beginInitStaging();
   m_bridge.setCurrentPluginContextId(fi.completeBaseName());
   const GridLockStatus status = initFn(m_bridge.hostApi(), &desc);
-
   const bool abiMajorOk = (desc.abi_major == GRIDLOCK_PLUGIN_ABI_MAJOR);
-  const bool structSizeOk =
-      (desc.struct_size >= offsetof(GridLockPluginDescriptor, reserved)) &&
-      (desc.struct_size <= sizeof(GridLockPluginDescriptor));
+  const bool structSizeOk = (desc.struct_size >= offsetof(GridLockPluginDescriptor, reserved));
 
   auto rejectPlugin = [&](const QString& reason, bool canInvokeShutdown) {
     const QString parsedId = (abiMajorOk && structSizeOk) ? safeUtf8(desc.plugin_id_utf8) : QString();
     const QString parsedName = (abiMajorOk && structSizeOk) ? safeUtf8(desc.plugin_name_utf8) : QString();
     m_bridge.discardStagedActions();
-    if (canInvokeShutdown && desc.shutdown != nullptr) {
-      desc.shutdown(desc.plugin_ctx, m_bridge.hostApi());
-    }
+    if (canInvokeShutdown && desc.shutdown != nullptr) desc.shutdown(desc.plugin_ctx, m_bridge.hostApi());
     m_bridge.setCurrentPluginContextId(QString());
     lib->unload();
-
-    LoadedPluginInfo rejected{};
-    rejected.id = !parsedId.isEmpty() ? parsedId : fi.completeBaseName();
-    rejected.name = !parsedName.isEmpty() ? parsedName : fi.fileName();
-    rejected.libraryPath = canonical;
-    rejected.abiMajor = desc.abi_major;
-    rejected.abiMinor = desc.abi_minor;
-    rejected.enabled = false;
-    rejected.errorMessage = reason;
-    m_pluginInfos.append(rejected);
+    LoadedPluginInfo rejected = makeStatusInfo(
+        !parsedId.isEmpty() ? parsedId : fi.completeBaseName(),
+        !parsedName.isEmpty() ? parsedName : fi.fileName(), canonical, sha256Hex, scope, isTrusted, reason);
+    rejected.abiMajor = desc.abi_major; rejected.abiMinor = desc.abi_minor;
+    upsertInfo(rejected);
     return false;
   };
 
   if (status != GRIDLOCK_OK) {
-    return rejectPlugin(
-        QStringLiteral("gridlock_plugin_init_v1 failed with status %1").arg(status), false);
+    return rejectPlugin(QStringLiteral("gridlock_plugin_init_v1 failed with status %1").arg(status), false);
   }
   if (!abiMajorOk) {
     return rejectPlugin(QStringLiteral("ABI major mismatch: plugin reported v%1.%2, host requires v%3.x")
-                            .arg(desc.abi_major)
-                            .arg(desc.abi_minor)
-                            .arg(GRIDLOCK_PLUGIN_ABI_MAJOR),
-                        false);
+                            .arg(desc.abi_major).arg(desc.abi_minor).arg(GRIDLOCK_PLUGIN_ABI_MAJOR), false);
   }
   if (!structSizeOk) {
-    return rejectPlugin(
-        QStringLiteral("Invalid GridLockPluginDescriptor struct_size (%1 bytes)").arg(desc.struct_size),
-        false);
+    return rejectPlugin(QStringLiteral("Invalid GridLockPluginDescriptor struct_size (%1 bytes)").arg(desc.struct_size), false);
   }
 
-  const QString pluginId = safeUtf8(desc.plugin_id_utf8);
-  const QString pluginName = safeUtf8(desc.plugin_name_utf8);
+  const QString pluginId = safeUtf8(desc.plugin_id_utf8), pluginName = safeUtf8(desc.plugin_name_utf8);
   if (pluginId.isEmpty() || pluginName.isEmpty()) {
-    return rejectPlugin(
-        QStringLiteral("Plugin descriptor must provide non-empty UTF-8 id and name"), true);
+    return rejectPlugin(QStringLiteral("Plugin descriptor must provide non-empty UTF-8 id and name"), true);
+  }
+  if (findActiveHandle(pluginId) != nullptr) {
+    return rejectPlugin(QStringLiteral("Duplicate plugin ID '%1' rejected").arg(pluginId), true);
   }
 
-  const bool duplicateId = std::any_of(
-      m_activePlugins.cbegin(), m_activePlugins.cend(),
-      [&](const ActivePluginHandle& h) { return h.id == pluginId; });
-  if (duplicateId) {
-    return rejectPlugin(
-        QStringLiteral("Duplicate plugin ID '%1' rejected").arg(pluginId), true);
-  }
-
-  LoadedPluginInfo info{};
-  info.id = pluginId;
-  info.name = pluginName;
-  info.version = safeUtf8(desc.plugin_version_utf8);
-  info.description = safeUtf8(desc.description_utf8);
-  info.libraryPath = canonical;
-  info.abiMajor = desc.abi_major;
-  info.abiMinor = desc.abi_minor;
+  LoadedPluginInfo info = makeStatusInfo(pluginId, pluginName, canonical, sha256Hex, scope, isTrusted);
+  info.version = safeUtf8(desc.plugin_version_utf8); info.description = safeUtf8(desc.description_utf8);
+  info.abiMajor = desc.abi_major; info.abiMinor = desc.abi_minor;
   cachePluginMetadata(canonical, info);
 
-  // If ConfigManager marks this resolved plugin ID disabled on first discovery, tear down cleanly.
-  if (ConfigManager::instance().isPluginDisabled(pluginId)) {
+  if (!cfg.effectivePluginEnabled(pluginId)) {
     m_bridge.discardStagedActions();
-    if (desc.shutdown != nullptr) {
-      m_bridge.setCurrentPluginContextId(pluginId);
-      desc.shutdown(desc.plugin_ctx, m_bridge.hostApi());
-    }
+    if (desc.shutdown != nullptr) { m_bridge.setCurrentPluginContextId(pluginId); desc.shutdown(desc.plugin_ctx, m_bridge.hostApi()); }
     m_bridge.setCurrentPluginContextId(QString());
-    lib->unload();
-    info.enabled = false;
-    upsertInfo(info);
+    lib->unload(); upsertInfo(info);
     return false;
   }
 
   if (!m_bridge.commitStagedActions(pluginId)) {
-    return rejectPlugin(
-        QStringLiteral("Plugin '%1' registered a duplicate action or command ID").arg(pluginId), true);
+    return rejectPlugin(QStringLiteral("Plugin '%1' registered a duplicate action or command ID").arg(pluginId), true);
   }
   m_bridge.setCurrentPluginContextId(QString());
-
-  info.enabled = true;
-  upsertInfo(info);
-  m_activePlugins.push_back(ActivePluginHandle{pluginId, canonical, desc, std::move(lib)});
+  info.enabled = true; upsertInfo(info);
+  m_activePlugins.push_back(ActivePluginHandle{pluginId, canonical, sha256Hex, scope, desc, std::move(lib)});
   return true;
 }
 
 PluginManager::ActivePluginHandle* PluginManager::findActiveHandle(const QString& pluginId) {
-  for (auto& handle : m_activePlugins) {
-    if (handle.id == pluginId) return &handle;
-  }
+  for (auto& handle : m_activePlugins) if (handle.id == pluginId) return &handle;
   return nullptr;
 }
 
 void PluginManager::shutdownAndUnloadHandle(ActivePluginHandle& handle) {
-  m_bridge.unregisterPluginActions(handle.id);
   if (handle.descriptor.shutdown != nullptr) {
     m_bridge.setCurrentPluginContextId(handle.id);
     handle.descriptor.shutdown(handle.descriptor.plugin_ctx, m_bridge.hostApi());
     m_bridge.setCurrentPluginContextId(QString());
   }
-  if (handle.library) {
-    handle.library->unload();
-    handle.library.reset();
-  }
+  m_bridge.unregisterPluginActions(handle.id);
+  if (handle.library) { handle.library->unload(); handle.library.reset(); }
 }
 
 bool PluginManager::setPluginEnabled(const QString& pluginId, bool enabled) {
   const QString trimmed = pluginId.trimmed();
-  if (trimmed.isEmpty()) return false;
-
-  auto infoIt = std::find_if(m_pluginInfos.begin(), m_pluginInfos.end(),
-                             [&](const LoadedPluginInfo& i) { return i.id == trimmed; });
-  if (infoIt == m_pluginInfos.end()) return false;
-
+  LoadedPluginInfo* info = findInfoById(m_pluginInfos, trimmed);
+  if (info == nullptr) return false;
   ConfigManager::instance().setPluginDisabled(trimmed, !enabled);
   if (!enabled) {
     for (auto it = m_activePlugins.begin(); it != m_activePlugins.end(); ++it) {
-      if (it->id == trimmed) {
-        shutdownAndUnloadHandle(*it);
-        m_activePlugins.erase(it);
-        break;
-      }
+      if (it->id == trimmed) { shutdownAndUnloadHandle(*it); m_activePlugins.erase(it); break; }
     }
-    infoIt->enabled = false;
+    info->enabled = false;
     emit pluginsChanged();
     return true;
   }
-
-  if (findActiveHandle(trimmed) != nullptr) {
-    infoIt->enabled = true;
-    return true;
-  }
-  const QString path = infoIt->libraryPath;
-  const bool ok = loadPluginFromPath(path);
+  if (info->scope == PluginScope::Workspace && !info->trusted) return false;
+  if (findActiveHandle(trimmed) != nullptr) { info->enabled = true; return true; }
+  const bool ok = loadPluginInternal(info->libraryPath, info->scope);
   emit pluginsChanged();
   return ok;
 }
 
-void PluginManager::unloadAll() {
-  for (auto it = m_activePlugins.rbegin(); it != m_activePlugins.rend(); ++it) {
-    shutdownAndUnloadHandle(*it);
+bool PluginManager::isPluginGloballyEnabled(const QString& pluginId) const {
+  return ConfigManager::instance().isPluginGloballyEnabled(pluginId);
+}
+bool PluginManager::isPluginWorkspaceEnabled(const QString& pluginId) const {
+  return ConfigManager::instance().isPluginWorkspaceEnabled(pluginId);
+}
+
+bool PluginManager::setPluginGloballyEnabled(const QString& pluginId, bool enabled) {
+  const QString trimmed = pluginId.trimmed();
+  if (trimmed.isEmpty()) return false;
+  ConfigManager::instance().setPluginGloballyEnabled(trimmed, enabled);
+  if (LoadedPluginInfo* info = findInfoById(m_pluginInfos, trimmed)) info->requiresRestart = true;
+  emit pluginsChanged();
+  return true;
+}
+
+bool PluginManager::setPluginWorkspaceEnabled(const QString& pluginId, bool enabled) {
+  const QString trimmed = pluginId.trimmed();
+  if (trimmed.isEmpty()) return false;
+  ConfigManager::instance().setPluginWorkspaceEnabled(trimmed, enabled);
+  if (LoadedPluginInfo* info = findInfoById(m_pluginInfos, trimmed)) info->requiresRestart = true;
+  emit pluginsChanged();
+  return true;
+}
+
+bool PluginManager::effectivePluginEnabled(const QString& pluginId) const {
+  const QString trimmed = pluginId.trimmed();
+  if (!ConfigManager::instance().effectivePluginEnabled(trimmed)) return false;
+  for (const auto& i : m_pluginInfos) {
+    if (i.id == trimmed && i.scope == PluginScope::Workspace && !i.trusted) return false;
   }
-  m_activePlugins.clear();
-  m_pluginInfos.clear();
+  return true;
+}
+
+bool PluginManager::trustWorkspacePlugin(const QString& pluginId) {
+  const QString trimmed = pluginId.trimmed();
+  LoadedPluginInfo* info = findInfoById(m_pluginInfos, trimmed);
+  if (info == nullptr || info->libraryPath.isEmpty()) return false;
+  if (info->sha256Hex.isEmpty()) info->sha256Hex = computeFileSha256Hex(info->libraryPath);
+  if (info->sha256Hex.isEmpty()) return false;
+  ConfigManager::instance().trustWorkspacePlugin(info->libraryPath, info->sha256Hex);
+  info->trusted = true; info->errorMessage.clear();
+  if (ConfigManager::instance().effectivePluginEnabled(trimmed) && findActiveHandle(trimmed) == nullptr) {
+    (void)loadPluginInternal(info->libraryPath, PluginScope::Workspace);
+  }
+  emit pluginsChanged();
+  return true;
+}
+
+bool PluginManager::revokeWorkspacePluginTrust(const QString& pluginId) {
+  const QString trimmed = pluginId.trimmed();
+  LoadedPluginInfo* info = findInfoById(m_pluginInfos, trimmed);
+  if (info == nullptr || info->libraryPath.isEmpty()) return false;
+  ConfigManager::instance().revokeWorkspacePluginTrust(info->libraryPath);
+  info->trusted = false;
+  if (findActiveHandle(trimmed) != nullptr) info->requiresRestart = true;
+  emit pluginsChanged();
+  return true;
+}
+
+void PluginManager::unloadAll() {
+  for (auto it = m_activePlugins.rbegin(); it != m_activePlugins.rend(); ++it) shutdownAndUnloadHandle(*it);
+  m_activePlugins.clear(); m_pluginInfos.clear();
 }
 
 void PluginManager::notifySessionStarted(int32_t rankCount) {
-  for (auto& handle : m_activePlugins) {
-    if (handle.descriptor.on_session_start != nullptr) {
-      m_bridge.setCurrentPluginContextId(handle.id);
-      handle.descriptor.on_session_start(handle.descriptor.plugin_ctx, m_bridge.hostApi(), rankCount);
-      m_bridge.setCurrentPluginContextId(QString());
-    }
+  for (auto& h : m_activePlugins) {
+    if (h.descriptor.on_session_start == nullptr) continue;
+    m_bridge.setCurrentPluginContextId(h.id);
+    h.descriptor.on_session_start(h.descriptor.plugin_ctx, m_bridge.hostApi(), rankCount);
+    m_bridge.setCurrentPluginContextId(QString());
   }
 }
 
 void PluginManager::notifyRankStopped(const GridLockStopInfo& stopInfo) {
-  for (auto& handle : m_activePlugins) {
-    if (handle.descriptor.on_rank_stopped != nullptr) {
-      m_bridge.setCurrentPluginContextId(handle.id);
-      handle.descriptor.on_rank_stopped(
-          handle.descriptor.plugin_ctx, m_bridge.hostApi(), &stopInfo);
-      m_bridge.setCurrentPluginContextId(QString());
-    }
+  for (auto& h : m_activePlugins) {
+    if (h.descriptor.on_rank_stopped == nullptr) continue;
+    m_bridge.setCurrentPluginContextId(h.id);
+    h.descriptor.on_rank_stopped(h.descriptor.plugin_ctx, m_bridge.hostApi(), &stopInfo);
+    m_bridge.setCurrentPluginContextId(QString());
   }
 }
 
-void PluginManager::notifyRankStopped(int32_t rank,
-                                      const QString& file,
-                                      int32_t line,
-                                      const QString& function,
-                                      uint64_t pcAddress,
-                                      const QString& reason) {
-  const QByteArray reasonUtf8 = reason.toUtf8();
-  const QByteArray fileUtf8 = file.toUtf8();
-  const QByteArray funcUtf8 = function.toUtf8();
-
+void PluginManager::notifyRankStopped(int32_t rank, const QString& file, int32_t line,
+                                      const QString& function, uint64_t pcAddress, const QString& reason) {
+  const QByteArray reasonUtf8 = reason.toUtf8(), fileUtf8 = file.toUtf8(), funcUtf8 = function.toUtf8();
   GridLockStopInfo info{};
   info.struct_size = static_cast<uint32_t>(sizeof(GridLockStopInfo));
-  info.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR;
-  info.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
-  info.reserved_flags = 0u;
-  info.rank = rank;
-  info.thread_id = rank + 1;
-  info.line = line;
-  info.frame_level = 0;
-  info.pc_address = pcAddress;
+  info.abi_major = GRIDLOCK_PLUGIN_ABI_MAJOR; info.abi_minor = GRIDLOCK_PLUGIN_ABI_MINOR;
+  info.rank = rank; info.thread_id = rank + 1; info.line = line; info.pc_address = pcAddress;
   info.reason_utf8 = reasonUtf8.constData();
   info.file_utf8 = fileUtf8.isEmpty() ? nullptr : fileUtf8.constData();
   info.function_utf8 = funcUtf8.isEmpty() ? nullptr : funcUtf8.constData();
@@ -424,12 +479,11 @@ void PluginManager::notifyRankStopped(int32_t rank,
 }
 
 void PluginManager::notifySessionEnded() {
-  for (auto& handle : m_activePlugins) {
-    if (handle.descriptor.on_session_end != nullptr) {
-      m_bridge.setCurrentPluginContextId(handle.id);
-      handle.descriptor.on_session_end(handle.descriptor.plugin_ctx, m_bridge.hostApi());
-      m_bridge.setCurrentPluginContextId(QString());
-    }
+  for (auto& h : m_activePlugins) {
+    if (h.descriptor.on_session_end == nullptr) continue;
+    m_bridge.setCurrentPluginContextId(h.id);
+    h.descriptor.on_session_end(h.descriptor.plugin_ctx, m_bridge.hostApi());
+    m_bridge.setCurrentPluginContextId(QString());
   }
 }
 

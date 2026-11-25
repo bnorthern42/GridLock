@@ -34,8 +34,17 @@ class GdbRankCoordinator;
 namespace gridlock::core::plugins {
 
 /**
+ * @enum PluginScope
+ * @brief Discovery trust origin for a native plugin shared library.
+ */
+enum class PluginScope : uint8_t {
+  UserGlobal = 0, ///< Installed in user-owned `~/.config/gridlock/plugins/`.
+  Workspace = 1   ///< Discovered inside `<workspace>/.gridlock/plugins/` (requires SHA-256 trust).
+};
+
+/**
  * @struct LoadedPluginInfo
- * @brief Diagnostic and status snapshot for a discovered or rejected native plugin.
+ * @brief Diagnostic, trust, and enablement snapshot for a discovered or rejected native plugin.
  */
 struct LoadedPluginInfo {
   QString id;              ///< Unique plugin ID (`desc.plugin_id_utf8`), or stem if rejected early.
@@ -43,15 +52,19 @@ struct LoadedPluginInfo {
   QString version;         ///< Semantic version string (`desc.plugin_version_utf8`).
   QString description;     ///< Short capability summary (`desc.description_utf8`).
   QString libraryPath;     ///< Canonical filesystem path to the `.so` / `.dylib` / `.dll`.
+  QString sha256Hex;       ///< Lowercase SHA-256 hex digest computed prior to `QLibrary::load()`.
+  PluginScope scope = PluginScope::UserGlobal; ///< Discovery scope (`UserGlobal` vs `Workspace`).
   uint32_t abiMajor = 0u;  ///< Reported `desc.abi_major` (0 if symbol resolution failed).
   uint32_t abiMinor = 0u;  ///< Reported `desc.abi_minor`.
-  bool enabled = false;    ///< True when loaded, validated, and not disabled in `ConfigManager`.
-  QString errorMessage;    ///< Non-empty human-readable diagnostic when load or ABI gate failed.
+  bool trusted = true;     ///< True for `UserGlobal` or SHA-256 approved `Workspace` binaries.
+  bool enabled = false;    ///< True when loaded, ABI-valid, trusted, and effectively enabled.
+  bool requiresRestart = false; ///< True when enablement/trust changed pending IDE restart.
+  QString errorMessage;    ///< Non-empty human-readable diagnostic when load, trust, or ABI gate failed.
 };
 
 /**
  * @class PluginManager
- * @brief Manages native C99 plugin shared libraries, ABI validation, and debugger event routing.
+ * @brief Manages native C99 plugin shared libraries, SHA-256 trust gates, ABI validation, and event routing.
  */
 class PluginManager : public QObject {
   Q_OBJECT
@@ -81,15 +94,15 @@ class PluginManager : public QObject {
   QStringList searchDirectories() const;
 
   /**
-   * @brief Unloads any existing plugins, scans `searchDirectories()`, and loads enabled plugins.
-   * @return Number of plugins that passed ABI validation and remain enabled.
+   * @brief Unloads any existing plugins, scans `searchDirectories()`, and loads trusted enabled plugins.
+   * @return Number of plugins that passed trust/ABI validation and remain enabled.
    */
   int discoverAndLoad();
 
   /**
    * @brief Loads and validates a single plugin shared library from @p libraryPath.
-   * @param libraryPath Path to a `.so`, `.dylib`, or `.dll` plugin artifact.
-   * @return `true` when the plugin initialized cleanly and is active; `false` if disabled or rejected.
+   * @param libraryPath Path to a host-native shared library plugin artifact.
+   * @return `true` when the plugin initialized cleanly and is active; `false` if untrusted, disabled, or rejected.
    */
   bool loadPluginFromPath(const QString& libraryPath);
 
@@ -97,14 +110,35 @@ class PluginManager : public QObject {
    * @brief Enables or disables @p pluginId, updating `[plugins] disabled_ids` and loading/unloading live.
    * @param pluginId Target plugin ID (`LoadedPluginInfo::id`).
    * @param enabled `false` to invoke `shutdown`, unregister actions, and `QLibrary::unload()`; `true` to reload.
-   * @return `true` if the transition succeeded, `false` if not found or reload failed.
+   * @return `true` if the transition succeeded, `false` if not found, untrusted, or reload failed.
    */
   bool setPluginEnabled(const QString& pluginId, bool enabled);
+
+  /** @brief Returns true when @p pluginId is enabled globally across workspaces. */
+  bool isPluginGloballyEnabled(const QString& pluginId) const;
+
+  /** @brief Persists global enablement for @p pluginId and marks `requiresRestart = true` without `dlclose`. */
+  bool setPluginGloballyEnabled(const QString& pluginId, bool enabled);
+
+  /** @brief Returns true when @p pluginId is enabled in the active workspace. */
+  bool isPluginWorkspaceEnabled(const QString& pluginId) const;
+
+  /** @brief Persists active-workspace enablement for @p pluginId and marks `requiresRestart = true`. */
+  bool setPluginWorkspaceEnabled(const QString& pluginId, bool enabled);
+
+  /** @brief Returns true when @p pluginId is globally enabled, workspace enabled, and trusted (if workspace-scoped). */
+  bool effectivePluginEnabled(const QString& pluginId) const;
+
+  /** @brief Approves a workspace plugin's current SHA-256 digest in `ConfigManager` and loads it if enabled. */
+  bool trustWorkspacePlugin(const QString& pluginId);
+
+  /** @brief Revokes SHA-256 trust for a workspace plugin in `ConfigManager` and marks `requiresRestart` if active. */
+  bool revokeWorkspacePluginTrust(const QString& pluginId);
 
   /** @brief Shuts down and unloads all currently active plugins and clears recorded entries. */
   void unloadAll();
 
-  /** @brief Returns status records for all discovered plugins (both active and rejected/disabled). */
+  /** @brief Returns status records for all discovered plugins (both active and rejected/disabled/untrusted). */
   const QVector<LoadedPluginInfo>& plugins() const noexcept { return m_pluginInfos; }
 
   /** @brief Dispatches `on_session_start` to every active plugin that defines the hook. */
@@ -125,21 +159,27 @@ class PluginManager : public QObject {
   void notifySessionEnded();
 
  signals:
-  /** @brief Emitted whenever the discovered/enabled plugin list changes. */
+  /** @brief Emitted whenever the discovered/enabled/trusted plugin list changes. */
   void pluginsChanged();
 
  private:
   struct ActivePluginHandle {
     QString id;
     QString libraryPath;
+    QString sha256Hex;
+    PluginScope scope = PluginScope::UserGlobal;
     GridLockPluginDescriptor descriptor{};
     std::unique_ptr<QLibrary> library;
   };
 
   static bool hasSharedLibrarySuffix(const QString& fileName);
+  static QString computeFileSha256Hex(const QString& filePath);
+  PluginScope inferScopeForPath(const QString& canonicalPath) const;
+  bool loadPluginInternal(const QString& libraryPath, PluginScope scope);
   ActivePluginHandle* findActiveHandle(const QString& pluginId);
   void shutdownAndUnloadHandle(ActivePluginHandle& handle);
   void cachePluginMetadata(const QString& canonicalPath, const LoadedPluginInfo& info);
+  void flushMetadataCache();
   bool lookupCachedMetadata(const QString& canonicalPath, LoadedPluginInfo* outInfo) const;
 
   PluginHostBridge m_bridge;
@@ -148,6 +188,8 @@ class PluginManager : public QObject {
   QVector<LoadedPluginInfo> m_pluginInfos;
   std::vector<ActivePluginHandle> m_activePlugins;
   QHash<QString, LoadedPluginInfo> m_pathMetadataCache;
+  QHash<QString, LoadedPluginInfo> m_dirtyMetadataCache;
+  bool m_deferMetadataSync = false;
 };
 
 }  // namespace gridlock::core::plugins
