@@ -3,10 +3,9 @@
  * @brief Native shared-library discovery, ABI v1.0 validator, and plugin lifecycle manager.
  *
  * Scans user (`~/.config/gridlock/plugins/`) and workspace (`<workspace>/.gridlock/plugins/`)
- * directories for shared libraries (`.so`, `.dylib`, `.dll`), loads symbols with
- * `QLibrary::ResolveAllSymbolsHint`, validates the frozen C99 ABI v1.0 contract,
- * enforces `ConfigManager` `[plugins] disabled_ids`, and dispatches session/stop/shutdown
- * callbacks cleanly.
+ * directories for shared libraries (`.so`, `.dylib`, `.dll`), validates SHA-256 workspace
+ * trust prior to `QLibrary::load()`, enforces the frozen C99 ABI v1.x contract, serializes
+ * re-entrant `on_rank_stopped` events via a FIFO queue, and guards `dlclose` teardown.
  */
 
 #pragma once
@@ -18,11 +17,13 @@
 #include <memory>
 #include <vector>
 
+#include <QByteArray>
 #include <QHash>
 #include <QLibrary>
 #include <QMetaObject>
 #include <QObject>
 #include <QPointer>
+#include <QQueue>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -38,8 +39,8 @@ namespace gridlock::core::plugins {
  * @brief Discovery trust origin for a native plugin shared library.
  */
 enum class PluginScope : uint8_t {
-  UserGlobal = 0, ///< Installed in user-owned `~/.config/gridlock/plugins/`.
-  Workspace = 1   ///< Discovered inside `<workspace>/.gridlock/plugins/` (requires SHA-256 trust).
+  UserGlobal = 0,  ///< Installed in user-owned `~/.config/gridlock/plugins/`.
+  Workspace = 1    ///< Discovered inside `<workspace>/.gridlock/plugins/` (requires SHA-256 trust).
 };
 
 /**
@@ -47,19 +48,19 @@ enum class PluginScope : uint8_t {
  * @brief Diagnostic, trust, and enablement snapshot for a discovered or rejected native plugin.
  */
 struct LoadedPluginInfo {
-  QString id;              ///< Unique plugin ID (`desc.plugin_id_utf8`), or stem if rejected early.
-  QString name;            ///< Human-readable title (`desc.plugin_name_utf8`).
-  QString version;         ///< Semantic version string (`desc.plugin_version_utf8`).
-  QString description;     ///< Short capability summary (`desc.description_utf8`).
-  QString libraryPath;     ///< Canonical filesystem path to the `.so` / `.dylib` / `.dll`.
-  QString sha256Hex;       ///< Lowercase SHA-256 hex digest computed prior to `QLibrary::load()`.
-  PluginScope scope = PluginScope::UserGlobal; ///< Discovery scope (`UserGlobal` vs `Workspace`).
-  uint32_t abiMajor = 0u;  ///< Reported `desc.abi_major` (0 if symbol resolution failed).
-  uint32_t abiMinor = 0u;  ///< Reported `desc.abi_minor`.
-  bool trusted = true;     ///< True for `UserGlobal` or SHA-256 approved `Workspace` binaries.
-  bool enabled = false;    ///< True when loaded, ABI-valid, trusted, and effectively enabled.
-  bool requiresRestart = false; ///< True when enablement/trust changed pending IDE restart.
-  QString errorMessage;    ///< Non-empty human-readable diagnostic when load, trust, or ABI gate failed.
+  QString id;           ///< Unique plugin ID (`desc.plugin_id_utf8`), or stem if rejected early.
+  QString name;         ///< Human-readable title (`desc.plugin_name_utf8`).
+  QString version;      ///< Semantic version string (`desc.plugin_version_utf8`).
+  QString description;  ///< Short capability summary (`desc.description_utf8`).
+  QString libraryPath;  ///< Canonical filesystem path to the `.so` / `.dylib` / `.dll`.
+  QString sha256Hex;    ///< Lowercase SHA-256 hex digest computed prior to `QLibrary::load()`.
+  PluginScope scope = PluginScope::UserGlobal;  ///< Discovery scope (`UserGlobal` vs `Workspace`).
+  uint32_t abiMajor = 0u;        ///< Reported `desc.abi_major` (0 if symbol resolution failed).
+  uint32_t abiMinor = 0u;        ///< Reported `desc.abi_minor`.
+  bool trusted = true;           ///< True for `UserGlobal` or SHA-256 approved `Workspace` binaries.
+  bool enabled = false;          ///< True when loaded, ABI-valid, trusted, and effectively enabled.
+  bool requiresRestart = false;  ///< True when enablement/trust changed pending IDE restart.
+  QString errorMessage;          ///< Human-readable diagnostic when load, trust, or ABI gate failed.
 };
 
 /**
@@ -95,7 +96,7 @@ class PluginManager : public QObject {
 
   /**
    * @brief Unloads any existing plugins, scans `searchDirectories()`, and loads trusted enabled plugins.
-   * @return Number of plugins that passed trust/ABI validation and remain enabled.
+   * @return Number of plugins that passed trust/ABI validation and remain enabled (or `0` if deferred).
    */
   int discoverAndLoad();
 
@@ -135,7 +136,7 @@ class PluginManager : public QObject {
   /** @brief Revokes SHA-256 trust for a workspace plugin in `ConfigManager` and marks `requiresRestart` if active. */
   bool revokeWorkspacePluginTrust(const QString& pluginId);
 
-  /** @brief Shuts down and unloads all currently active plugins and clears recorded entries. */
+  /** @brief Shuts down and unloads all currently active plugins (deferring safely if inside a callback). */
   void unloadAll();
 
   /** @brief Returns status records for all discovered plugins (both active and rejected/disabled/untrusted). */
@@ -144,7 +145,7 @@ class PluginManager : public QObject {
   /** @brief Dispatches `on_session_start` to every active plugin that defines the hook. */
   void notifySessionStarted(int32_t rankCount);
 
-  /** @brief Dispatches `on_rank_stopped` to every active plugin that defines the hook. */
+  /** @brief Dispatches `on_rank_stopped` serially via a FIFO queue to prevent nested `QEventLoop` recursion. */
   void notifyRankStopped(const GridLockStopInfo& stopInfo);
 
   /** @brief Convenience overload building `GridLockStopInfo` and dispatching `on_rank_stopped`. */
@@ -169,7 +170,37 @@ class PluginManager : public QObject {
     QString sha256Hex;
     PluginScope scope = PluginScope::UserGlobal;
     GridLockPluginDescriptor descriptor{};
+    std::unique_ptr<PluginBindingContext> bindingCtx;
+    std::unique_ptr<GridLockHostApi> hostApi;
     std::unique_ptr<QLibrary> library;
+  };
+
+  struct PendingStopEvent {
+    uint32_t reservedFlags = 0u;
+    int32_t rank = 0;
+    int32_t threadId = 0;
+    int32_t line = -1;
+    int32_t frameLevel = 0;
+    uint64_t pcAddress = 0u;
+    QByteArray reasonUtf8;
+    QByteArray fileUtf8;
+    QByteArray functionUtf8;
+    bool hasReason = false;
+    bool hasFile = false;
+    bool hasFunction = false;
+  };
+
+  class ScopedCallbackDepth {
+   public:
+    explicit ScopedCallbackDepth(PluginManager* owner) noexcept : m_owner(owner) {
+      ++m_owner->m_callbackDepth;
+    }
+    ~ScopedCallbackDepth() { m_owner->leaveCallbackScope(); }
+    ScopedCallbackDepth(const ScopedCallbackDepth&) = delete;
+    ScopedCallbackDepth& operator=(const ScopedCallbackDepth&) = delete;
+
+   private:
+    PluginManager* m_owner;
   };
 
   static bool hasSharedLibrarySuffix(const QString& fileName);
@@ -178,6 +209,7 @@ class PluginManager : public QObject {
   bool loadPluginInternal(const QString& libraryPath, PluginScope scope);
   ActivePluginHandle* findActiveHandle(const QString& pluginId);
   void shutdownAndUnloadHandle(ActivePluginHandle& handle);
+  void leaveCallbackScope();
   void cachePluginMetadata(const QString& canonicalPath, const LoadedPluginInfo& info);
   void flushMetadataCache();
   bool lookupCachedMetadata(const QString& canonicalPath, LoadedPluginInfo* outInfo) const;
@@ -187,8 +219,15 @@ class PluginManager : public QObject {
   QMetaObject::Connection m_stopConn;
   QVector<LoadedPluginInfo> m_pluginInfos;
   std::vector<ActivePluginHandle> m_activePlugins;
+  QQueue<PendingStopEvent> m_pendingStops;
   QHash<QString, LoadedPluginInfo> m_pathMetadataCache;
   QHash<QString, LoadedPluginInfo> m_dirtyMetadataCache;
+  int m_callbackDepth = 0;
+  bool m_dispatchingStop = false;
+  bool m_sessionActive = false;
+  bool m_pendingUnloadAll = false;
+  bool m_pendingDiscoverAndLoad = false;
+  bool m_inDestructor = false;
   bool m_deferMetadataSync = false;
 };
 
