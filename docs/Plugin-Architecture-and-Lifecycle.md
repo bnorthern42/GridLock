@@ -162,7 +162,7 @@ stateDiagram-v2
   DeferredReload --> ShuttingDownLockedOut : leaveCallbackScope() unwinds to m_callbackDepth == 0
 
   ActiveIdle --> ShuttingDownLockedOut : unloadAll() / hotReloadPlugins() / setPluginEnabled(false) / ~PluginManager()
-  ShuttingDownLockedOut --> Unloaded : on_session_end then shutdown then unregisterPluginResources then QLibrary::unload()
+  ShuttingDownLockedOut --> Unloaded : on_session_end then shutdown then unregisterPluginResources then QLibrary.unload()
 ```
 
 ### Concurrency, Silent MI Routing & Teardown Invariants
