@@ -8,7 +8,11 @@
 ![Meson/Ninja](https://img.shields.io/badge/Build-Meson%20|%20Ninja-blue.svg?style=for-the-badge)
 ![GDB/MI3 & LLDB-DAP](https://img.shields.io/badge/Backend-GDB--MI3%20|%20LLDB--DAP-purple.svg?style=for-the-badge)
 
-**GridLock** is a C++23 and Qt6 workstation debugger for multi-rank MPI programs, cross-architecture `qemu-user` / `gdbserver` stubs, and ELF64 binaries on Linux. It coordinates up to 256 MPI processes over GDB/MI3 or LLDB-DAP, attaches to live `/proc` OpenMPI/MPICH/SLURM jobs, flags collective mismatches and circular wait-for deadlocks, diffs process memory across ranks via `process_vm_readv`, profiles virtual memory and `LD_PRELOAD` heap call sites, visualizes topological C/C++ pointer graphs and multi-rank scientific arrays, and pairs `clangd` source editing with Search Everywhere, a 2D Control Flow Graph, and a pseudo-C decompiler.
+**GridLock** is a Linux debugger written in C++23 and Qt6, built primarily for MPI development and parallel debugging. It supports GDB/MI3 and LLDB-DAP, manages up to 256 MPI processes, and can attach to running OpenMPI, MPICH, and SLURM jobs. It also supports cross-architecture debugging through `qemu-user` and `gdbserver`, along with ELF64 binary analysis.
+
+Beyond standard debugging, GridLock provides tools for detecting collective mismatches and circular wait-for deadlocks, comparing memory across ranks using `process_vm_readv`, and profiling virtual memory and heap allocations through `LD_PRELOAD`.
+
+Other features include C/C++ pointer graph visualization, multi-rank scientific array visualization, `clangd`-powered source editing, Search Everywhere, 2D control flow graphs, and a pseudo-C decompiler.
 
 ![GridLock Debug Perspective showing deadlock_ring.cpp, labeled toolbar, inline variable values, Variables, and MPI Deadlock Analyzer](docs/screenshots/workspace_overview.png)
 
@@ -133,3 +137,9 @@ All documentation in `docs/` is automatically mirrored to the [GridLock GitHub W
 * [**Contributing Guide (`CONTRIBUTING.md`)**](CONTRIBUTING.md): Coding standards (`< 950` lines per file, C++23, Meson tests) and pull request workflow.
 * [**Security Policy (`SECURITY.md`)**](SECURITY.md): Vulnerability reporting and `MiSanitizer` / `MemoryBoundsValidator` hardening boundaries.
 * [**License (`LICENSE`)**](LICENSE): MIT License.
+
+---
+
+## Why GridLock?
+
+Commercial multi-process HPC debuggers carry enterprise seat licensing that puts them out of reach for individual researchers, students, and smaller labs, while open-source alternatives either target single-process local debugging or require juggling separate terminal windows per MPI rank. GridLock gives you a unified, open-source graphical workstation for multi-rank MPI debugging over local or remote SSH/Slurm launches, with synchronized stepping, cross-rank variable inspection, and a native C99 plugin ABI for domain-specific diagnostics.
