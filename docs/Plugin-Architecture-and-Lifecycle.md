@@ -151,7 +151,7 @@ stateDiagram-v2
   Unloaded --> PreLoadVerify : discoverAndLoad() / loadPluginFromPath() / hotReloadPlugins()
   PreLoadVerify --> BlockedUntrusted : Workspace SHA-256 unapproved or world-writable / symlink escape
   PreLoadVerify --> InitStaging : Regular binary + trusted + enabled
-  InitStaging --> Unloaded : ABI mismatch / duplicate ID -> discardStagedActions() + unload()
+  InitStaging --> Unloaded : ABI mismatch / duplicate ID then discardStagedActions() + unload()
   InitStaging --> ActiveIdle : commitStagedActions() (+ replay on_session_start if hot-reloaded)
 
   ActiveIdle --> InCallback : ScopedCallbackDepth (++m_callbackDepth)
@@ -162,7 +162,7 @@ stateDiagram-v2
   DeferredReload --> ShuttingDownLockedOut : leaveCallbackScope() unwinds to m_callbackDepth == 0
 
   ActiveIdle --> ShuttingDownLockedOut : unloadAll() / hotReloadPlugins() / setPluginEnabled(false) / ~PluginManager()
-  ShuttingDownLockedOut --> Unloaded : on_session_end -> shutdown -> unregisterPluginResources -> QLibrary::unload()
+  ShuttingDownLockedOut --> Unloaded : on_session_end then shutdown then unregisterPluginResources then QLibrary::unload()
 ```
 
 ### Concurrency, Silent MI Routing & Teardown Invariants
