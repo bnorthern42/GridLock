@@ -5,6 +5,27 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+> Planned `0.9.1` patch line.
+
+### Added
+- **Remote Target Dialog Session Persistence (`AttachProcessDialog`, `MainWindow`, `ProcessScanner`)**:
+  - Preserved `Endpoint(s)`, `Local Symbol Binary (ELF)`, `GDB Binary`, `Protocol Mode` (`remote` vs. `extended-remote`), and active tab selection in memory across dialog opens during a running session (`RemoteTargetDialogState`).
+- **Headless Remote Attach & Exited-Rank Regression Coverage (`tests/ui/test_ui_debugger.cpp`)**:
+  - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard`) verifying Remote Target dialog field persistence across reopens, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards (plus optional live QEMU `gdbserver --multi` verification).
+
+### Changed
+- **Documentation, Security Policy & Contributor Guide (`README.md`, `docs/HPC-Remote-and-Slurm.md`, `SECURITY.md`, `CONTRIBUTING.md`)**:
+  - Clarified GridLock's role as an open-source graphical frontend for GDB (`GDB/MI`), added a `Why GridLock?` overview section, and marked Slurm job-step attachment and batch launch integration as experimental and untested on multi-node production clusters.
+  - Updated `SECURITY.md` for the `>= 0.9.0` support line (documenting the native C99 plugin trust boundary, SHA-256 workspace pinning, and `--verify-plugin` checks) and expanded `CONTRIBUTING.md` with Google C++ Style Guide conventions, sub-800-line file limits, Meson/CMake build and headless test commands, and GitHub Wiki links.
+
+### Fixed
+- **Remote Debugging (`gdbserver` / QEMU) Initial Attach Stop (`GdbRankCoordinator`, `GdbMiParser`, `MainWindowBuild`)**:
+  - Kept attached remote ranks paused at their initial stop frame on `-target-select remote` / `extended-remote` (including unknown-source loader frames such as `_start` in `ld-linux.so`) while applying existing user breakpoints instead of auto-resuming fast-exiting targets before inspection, and dismissed unmodified startup welcome/tutorial tabs on attach so active frames and disassembly are visible immediately.
+- **Exited Inferior Diagnostics & Server Rack Retention (`GdbMiParser`, `GdbRankCoordinator`, `GdbRankCommands`, `MainWindowExecution`, `MainWindowPerspectives`)**:
+  - Updated `=thread-group-exited` handling to immediately transition ranks to `Exited`, clear queued post-stop commands, and gate register, stack, and variable polling (`-data-list-register-values`, `-stack-list-frames`, `-stack-list-variables`) on `stopped` state so exited ranks no longer emit `Error: No registers.` or `Error: The program is not being run.` and remain visible as `Exited` in the Server Rack and status bar until explicitly stopped or restarted.
+
 ## [0.9.0] - 2026-11-25
 
 ### Added
