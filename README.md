@@ -35,6 +35,12 @@ chmod +x GridLock-0.9.0-Tutorials-x86_64.AppImage
 
 ### Option 2: Build From Source (`Meson` + `Ninja`)
 
+**Build Prerequisites:**
+* **Meson `>= 1.3.0`** and **Ninja** (required for `cpp_std=c++23` and Intel `icx`/`icpx` compiler support; on HPC clusters with older system Meson modules, install an up-to-date user-local copy via `python3 -m pip install --user --upgrade "meson>=1.3.0" ninja` and ensure `~/.local/bin` precedes system directories on `PATH`).
+* **C++23-capable compiler**: GCC `13+`, Clang `17+`, or Intel oneAPI `icpx` `2024+`.
+* **Qt 6** (`Qt6Core`, `Qt6Gui`, `Qt6Widgets`, `Qt6Network`, plus `Qt6Sql`, `Qt6OpenGLWidgets`, `Qt6Concurrent`, `Qt6Qml`, `Qt6Svg`, `Qt6Test`), **`qtermwidget6`**, and **`Qt-Advanced-Stylesheets`** (bundled submodule).
+* **GDB `>= 10.0`** (`GDB/MI3`) and an **MPI toolchain** (`OpenMPI` or `MPICH`) on `PATH`.
+
 ```bash
 git clone --recurse-submodules https://github.com/bnorthern42/GridLock.git
 cd GridLock
@@ -49,7 +55,7 @@ ninja -C builddir
 ```
 
 > [!IMPORTANT]
-> Source builds require `C++23`, `Qt6`, `qtermwidget6`, `Qt-Advanced-Stylesheets`, and an MPI toolchain (`OpenMPI` or `MPICH`) on `PATH`. Compile debug targets with `-g -O0` so DWARF locals, line stepping, and plugin container introspection work without optimizer inlining.
+> Compile debug targets with `-g -O0` so DWARF locals, line stepping, and plugin container introspection work without optimizer inlining.
 
 For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--snapshot <file>`, `--verify-plugin <path>`, `--tutorial-mode`, `--test-mode`, `--verbose`, and `[target] -- <args...>`), and AppImage packaging flags, see [Installation and Building](docs/Installation-and-Building.md).
 

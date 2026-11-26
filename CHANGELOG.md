@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard`) verifying Remote Target dialog field persistence across reopens, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards (plus optional live QEMU `gdbserver --multi` verification).
 
 ### Changed
+- **Meson `>= 1.3.0` Build Requirement & HPC Prerequisites (`meson.build`, `README.md`)**:
+  - Added `meson_version : '>= 1.3.0'` to `project('GridLock', ...)` in `meson.build` so older system Meson releases fail immediately with a clear version diagnostic rather than `cpp_std=c++23` or `icx`/`icpx` compiler errors, and documented Meson `>= 1.3.0`, C++23 compiler (GCC `13+`, Clang `17+`, Intel `icpx` `2024+`), Qt 6, and GDB `>= 10.0` prerequisites (including user-local `pip` installation on HPC clusters) in `README.md`.
 - **Documentation, Security Policy & Contributor Guide (`README.md`, `docs/HPC-Remote-and-Slurm.md`, `SECURITY.md`, `CONTRIBUTING.md`)**:
   - Clarified GridLock's role as an open-source graphical frontend for GDB (`GDB/MI`), added a `Why GridLock?` overview section, and marked Slurm job-step attachment and batch launch integration as experimental and untested on multi-node production clusters.
   - Updated `SECURITY.md` for the `>= 0.9.0` support line (documenting the native C99 plugin trust boundary, SHA-256 workspace pinning, and `--verify-plugin` checks) and expanded `CONTRIBUTING.md` with Google C++ Style Guide conventions, sub-800-line file limits, Meson/CMake build and headless test commands, and GitHub Wiki links.
