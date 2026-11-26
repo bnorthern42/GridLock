@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <QList>
+#include <QPair>
 #include <QString>
 
 namespace gridlock {
@@ -46,19 +47,23 @@ struct RemoteTargetSpec {
   QString gdbBinary = QStringLiteral("gdb");  ///< Debugger binary (`"gdb"`, `"gdb-multiarch"`, etc.).
   bool extendedRemote = false;  ///< True for `-target-select extended-remote`, false for `remote`.
   int mpiRank = 0;            ///< Zero-based MPI rank index assigned to this endpoint.
+  QList<QPair<QString, QString>> pathSubstitutions;  ///< Optional GDB `substitute-path` (`from`, `to`) pairs.
 };
 
 /**
  * @struct RemoteTargetDialogState
- * @brief In-memory session state preserving Remote Target dialog inputs across reopens.
+ * @brief In-memory and `QSettings` state preserving Remote Target dialog inputs and `remote.toml` presets.
  */
 struct RemoteTargetDialogState {
+  QString targetName;                                    ///< Optional preset display name from `remote.toml`.
   QString endpoints = QStringLiteral("localhost:1234");  ///< Raw endpoint/range input text.
   QString localSymbolBinary;                             ///< Local ELF DWARF symbol path.
   QString gdbBinary = QStringLiteral("gdb");             ///< Selected or custom GDB executable.
   bool extendedRemote = false;                           ///< True when `extended-remote` is selected.
+  bool autoConnect = false;                              ///< Optional `target.auto_connect` flag from `remote.toml`.
   bool remoteTabActive = false;                          ///< True when Tab 2 (Remote Target) was active.
-  bool initialized = false;                              ///< True once populated by user interaction.
+  bool initialized = false;                              ///< True once populated by user interaction or `QSettings`.
+  QList<QPair<QString, QString>> pathSubstitutions;      ///< Optional `paths.substitute` (`from`, `to`) rules.
 };
 
 /**
@@ -92,7 +97,23 @@ class ProcessScanner {
       const QString& specText,
       const QString& localSymbolBinary = QString(),
       const QString& gdbBinary = QStringLiteral("gdb"),
-      bool extendedRemote = false);
+      bool extendedRemote = false,
+      const QList<QPair<QString, QString>>& pathSubstitutions = {});
+
+  /**
+   * @brief Parses and validates a `remote.toml` preset file into @p outState.
+   * @return True on valid config; false with human-readable diagnostic in @p outError otherwise.
+   */
+  static bool parseRemoteTomlFile(const QString& filePath,
+                                  RemoteTargetDialogState* outState,
+                                  QString* outError = nullptr);
+
+  /**
+   * @brief Serializes @p state to @p filePath as a valid `version = 1` `remote.toml` preset file.
+   */
+  static bool exportRemoteTomlFile(const QString& filePath,
+                                   const RemoteTargetDialogState& state,
+                                   QString* outError = nullptr);
 };
 
 namespace core {

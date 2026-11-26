@@ -109,6 +109,18 @@ class AttachProcessDialog : public QDialog {
                              const QString& gdbBinary,
                              bool extendedRemote);
 
+  /** @brief Imports and validates a `remote.toml` preset into Tab 2 controls (returns false on error). */
+  bool importRemoteTomlFile(const QString& filePath);
+
+  /** @brief Exports the current Tab 2 Remote Target settings to @p filePath as `version = 1` `remote.toml`. */
+  bool exportRemoteTomlFile(const QString& filePath) const;
+
+  /** @brief Returns the active validation/error message displayed in `#remoteEndpointValidationLabel`. */
+  QString remoteValidationText() const;
+
+  /** @brief Returns the currently active `paths.substitute` (`from`, `to`) mappings from `remote.toml`. */
+  QList<QPair<QString, QString>> remotePathSubstitutions() const { return m_remotePathSubstitutions; }
+
   /** @brief Returns the number of top-level MPI Job group rows currently in the tree. */
   int mpiJobGroupCount() const { return m_mpiJobGroupCount; }
 
@@ -141,10 +153,15 @@ class AttachProcessDialog : public QDialog {
   QLineEdit* m_remoteEndpointEdit = nullptr;
   QLineEdit* m_remoteSymbolBinaryEdit = nullptr;
   QPushButton* m_remoteSymbolBrowseBtn = nullptr;
+  QPushButton* m_remoteImportTomlBtn = nullptr;
+  QPushButton* m_remoteExportTomlBtn = nullptr;
   QComboBox* m_remoteGdbCombo = nullptr;
   QComboBox* m_remoteProtocolCombo = nullptr;
   QLabel* m_remoteHintLabel = nullptr;
   QLabel* m_remoteValidationLabel = nullptr;
+  QString m_remoteTargetName;
+  bool m_remoteAutoConnect = false;
+  QList<QPair<QString, QString>> m_remotePathSubstitutions;
 
   QPushButton* m_attachBtn = nullptr;
 };

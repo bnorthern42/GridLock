@@ -263,6 +263,13 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     m_processes.push_back(std::move(rp));
     if (!started) { terminateAllSessions(); return false; }
     writeCmd(r, "-gdb-set pagination off\n"); writeCmd(r, "-gdb-set confirm off\n");
+    for (const auto& [fromPrefix, toPrefix] : t.pathSubstitutions) {
+      if (!fromPrefix.trimmed().isEmpty() && !toPrefix.trimmed().isEmpty()) {
+        writeCmd(r, QStringLiteral("-gdb-set substitute-path %1 %2\n")
+                        .arg(detail::escapeGdbMiString(fromPrefix.trimmed()),
+                             detail::escapeGdbMiString(toPrefix.trimmed())));
+      }
+    }
     if (const QString symBin = t.localSymbolBinary.trimmed(); !symBin.isEmpty())
       writeCmd(r, QStringLiteral("-file-exec-and-symbols %1\n").arg(detail::escapeGdbMiString(symBin)));
     writeCmd(r, QStringLiteral("-target-select %1 %2\n").arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"), t.endpoint.trimmed()));

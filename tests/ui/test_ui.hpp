@@ -210,5 +210,8 @@ private slots:
 
     /** @brief Verifies RemoteTargetDialogState QSettings round-trip across MainWindow restarts and single-rank QEMU gdbstub attach/detach. */
     void testRemoteTargetQSettingsAndQemuStubAttach();
+
+    /** @brief Verifies remote.toml preset import/export, array and range endpoints, path substitutions, malformed TOML validation, and examples/remote.toml. */
+    void testRemoteTomlImportAndValidation();
 };
 

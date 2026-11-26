@@ -446,12 +446,21 @@ void MainWindow::loadRemoteTargetDialogState() {
     s.beginGroup(QStringLiteral("RemoteTarget"));
     if (!s.contains(QStringLiteral("endpoints")) && s.childKeys().isEmpty()) { s.endGroup(); return; }
     RemoteTargetDialogState st;
+    st.targetName = s.value(QStringLiteral("target_name"), QString()).toString();
     st.endpoints = s.value(QStringLiteral("endpoints"), QStringLiteral("localhost:1234")).toString();
     st.localSymbolBinary = s.value(QStringLiteral("symbol_binary"), QString()).toString();
     st.gdbBinary = s.value(QStringLiteral("gdb_binary"), QStringLiteral("gdb")).toString();
     const QString proto = s.value(QStringLiteral("protocol_mode"), QStringLiteral("remote")).toString().trimmed().toLower();
     st.extendedRemote = (proto == QStringLiteral("extended-remote") || proto == QStringLiteral("true") || proto == QStringLiteral("1"));
+    st.autoConnect = s.value(QStringLiteral("auto_connect"), false).toBool();
     st.remoteTabActive = s.value(QStringLiteral("remote_tab_active"), false).toBool();
+    const int subCount = s.beginReadArray(QStringLiteral("path_substitutions"));
+    for (int i = 0; i < subCount; ++i) {
+        s.setArrayIndex(i);
+        const QString f = s.value(QStringLiteral("from")).toString().trimmed(), t = s.value(QStringLiteral("to")).toString().trimmed();
+        if (!f.isEmpty() && !t.isEmpty()) st.pathSubstitutions.append({f, t});
+    }
+    s.endArray();
     st.initialized = true;
     s.endGroup();
     m_remoteDialogState = st;
@@ -462,11 +471,20 @@ void MainWindow::saveRemoteTargetDialogState(const RemoteTargetDialogState& stat
     m_remoteDialogState.initialized = true;
     QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
     s.beginGroup(QStringLiteral("RemoteTarget"));
+    s.setValue(QStringLiteral("target_name"), m_remoteDialogState.targetName);
     s.setValue(QStringLiteral("endpoints"), m_remoteDialogState.endpoints);
     s.setValue(QStringLiteral("symbol_binary"), m_remoteDialogState.localSymbolBinary);
     s.setValue(QStringLiteral("gdb_binary"), m_remoteDialogState.gdbBinary);
     s.setValue(QStringLiteral("protocol_mode"), m_remoteDialogState.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"));
+    s.setValue(QStringLiteral("auto_connect"), m_remoteDialogState.autoConnect);
     s.setValue(QStringLiteral("remote_tab_active"), m_remoteDialogState.remoteTabActive);
+    s.beginWriteArray(QStringLiteral("path_substitutions"), static_cast<int>(m_remoteDialogState.pathSubstitutions.size()));
+    for (int i = 0; i < m_remoteDialogState.pathSubstitutions.size(); ++i) {
+        s.setArrayIndex(i);
+        s.setValue(QStringLiteral("from"), m_remoteDialogState.pathSubstitutions[i].first);
+        s.setValue(QStringLiteral("to"), m_remoteDialogState.pathSubstitutions[i].second);
+    }
+    s.endArray();
     s.endGroup();
     s.sync();
 }

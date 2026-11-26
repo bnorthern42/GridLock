@@ -172,6 +172,36 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
   remoteLayout->setContentsMargins(12, 12, 12, 12);
   remoteLayout->setSpacing(10);
 
+  auto* presetRow = new QHBoxLayout();
+  presetRow->setContentsMargins(0, 0, 0, 0);
+  presetRow->setSpacing(8);
+  auto* presetLabel = new QLabel(QStringLiteral("Target Preset:"), remotePage);
+  m_remoteImportTomlBtn = new QPushButton(QStringLiteral("IMPORT REMOTE.TOML..."), remotePage);
+  m_remoteImportTomlBtn->setObjectName(QStringLiteral("remoteImportTomlBtn"));
+  m_remoteImportTomlBtn->setFixedHeight(24);
+  m_remoteExportTomlBtn = new QPushButton(QStringLiteral("EXPORT..."), remotePage);
+  m_remoteExportTomlBtn->setObjectName(QStringLiteral("remoteExportTomlBtn"));
+  m_remoteExportTomlBtn->setFixedHeight(24);
+  presetRow->addWidget(presetLabel);
+  presetRow->addWidget(m_remoteImportTomlBtn);
+  presetRow->addWidget(m_remoteExportTomlBtn);
+  presetRow->addStretch(1);
+  remoteLayout->addLayout(presetRow);
+
+  connect(m_remoteImportTomlBtn, &QPushButton::clicked, this, [this]() {
+    const QString picked = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Import remote.toml Configuration"),
+        QDir::currentPath(), QStringLiteral("TOML Config (*.toml);;All Files (*)"));
+    if (!picked.isEmpty()) importRemoteTomlFile(picked);
+  });
+  connect(m_remoteExportTomlBtn, &QPushButton::clicked, this, [this]() {
+    const QString picked = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Export remote.toml Configuration"),
+        QDir::current().filePath(QStringLiteral("remote.toml")),
+        QStringLiteral("TOML Config (*.toml);;All Files (*)"));
+    if (!picked.isEmpty()) exportRemoteTomlFile(picked);
+  });
+
   auto* formLayout = new QFormLayout();
   formLayout->setSpacing(10);
 
@@ -353,6 +383,9 @@ void AttachProcessDialog::restoreRemoteDialogState() {
   const RemoteTargetDialogState& saved = mw ? mw->remoteTargetDialogState() : fallbackRemoteDialogState();
   if (!saved.initialized) return;
   m_restoringRemoteState = true;
+  m_remoteTargetName = saved.targetName;
+  m_remoteAutoConnect = saved.autoConnect;
+  m_remotePathSubstitutions = saved.pathSubstitutions;
   if (m_remoteEndpointEdit) { QSignalBlocker b(m_remoteEndpointEdit); m_remoteEndpointEdit->setText(saved.endpoints); }
   if (m_remoteSymbolBinaryEdit) { QSignalBlocker b(m_remoteSymbolBinaryEdit); m_remoteSymbolBinaryEdit->setText(saved.localSymbolBinary); }
   if (m_remoteGdbCombo && !saved.gdbBinary.trimmed().isEmpty()) {
@@ -369,12 +402,15 @@ void AttachProcessDialog::restoreRemoteDialogState() {
 void AttachProcessDialog::persistRemoteDialogState(bool flushToQSettings) const {
   if (m_restoringRemoteState || !m_remoteEndpointEdit) return;
   RemoteTargetDialogState st;
+  st.targetName = m_remoteTargetName;
   st.endpoints = remoteEndpointText();
   st.localSymbolBinary = localSymbolBinaryText();
   st.gdbBinary = gdbBinaryText();
   st.extendedRemote = isExtendedRemoteProtocol();
+  st.autoConnect = m_remoteAutoConnect;
   st.remoteTabActive = isRemoteTargetTabActive();
   st.initialized = true;
+  st.pathSubstitutions = m_remotePathSubstitutions;
   if (MainWindow* mw = resolveHostMainWindow(parentWidget())) {
     if (flushToQSettings) mw->saveRemoteTargetDialogState(st);
     else mw->setRemoteTargetDialogState(st);
@@ -383,15 +419,66 @@ void AttachProcessDialog::persistRemoteDialogState(bool flushToQSettings) const 
     if (flushToQSettings) {
       QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
       s.beginGroup(QStringLiteral("RemoteTarget"));
+      s.setValue(QStringLiteral("target_name"), st.targetName);
       s.setValue(QStringLiteral("endpoints"), st.endpoints);
       s.setValue(QStringLiteral("symbol_binary"), st.localSymbolBinary);
       s.setValue(QStringLiteral("gdb_binary"), st.gdbBinary);
       s.setValue(QStringLiteral("protocol_mode"), st.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"));
+      s.setValue(QStringLiteral("auto_connect"), st.autoConnect);
       s.setValue(QStringLiteral("remote_tab_active"), st.remoteTabActive);
       s.endGroup();
       s.sync();
     }
   }
+}
+
+bool AttachProcessDialog::importRemoteTomlFile(const QString& filePath) {
+  RemoteTargetDialogState parsed;
+  QString errMsg;
+  if (!ProcessScanner::parseRemoteTomlFile(filePath, &parsed, &errMsg)) {
+    if (m_remoteValidationLabel) {
+      m_remoteValidationLabel->setText(QStringLiteral("remote.toml error: %1").arg(errMsg));
+      m_remoteValidationLabel->setStyleSheet(QStringLiteral("color: #e06c75; font-weight: bold;"));
+    }
+    return false;
+  }
+  m_remoteTargetName = parsed.targetName;
+  m_remoteAutoConnect = parsed.autoConnect;
+  m_remotePathSubstitutions = parsed.pathSubstitutions;
+  setRemoteTargetTabActive(true);
+  setRemoteTargetFields(parsed.endpoints, parsed.localSymbolBinary, parsed.gdbBinary, parsed.extendedRemote);
+  if (m_remoteValidationLabel) {
+    const QList<RemoteTargetSpec> specs = selectedRemoteTargets();
+    const QString namePrefix = parsed.targetName.isEmpty() ? QStringLiteral("Imported preset") : QStringLiteral("Imported '%1'").arg(parsed.targetName);
+    const QString subSuffix = parsed.pathSubstitutions.isEmpty() ? QString() : QStringLiteral(" (%1 path mapping%2)").arg(parsed.pathSubstitutions.size()).arg(parsed.pathSubstitutions.size() > 1 ? QStringLiteral("s") : QString());
+    m_remoteValidationLabel->setText(QStringLiteral("%1: %2 rank endpoint(s) ready%3").arg(namePrefix).arg(specs.size()).arg(subSuffix));
+    m_remoteValidationLabel->setStyleSheet(QStringLiteral("color: #98c379;"));
+  }
+  return true;
+}
+
+bool AttachProcessDialog::exportRemoteTomlFile(const QString& filePath) const {
+  RemoteTargetDialogState st;
+  st.targetName = m_remoteTargetName;
+  st.endpoints = remoteEndpointText();
+  st.localSymbolBinary = localSymbolBinaryText();
+  st.gdbBinary = gdbBinaryText();
+  st.extendedRemote = isExtendedRemoteProtocol();
+  st.autoConnect = m_remoteAutoConnect;
+  st.pathSubstitutions = m_remotePathSubstitutions;
+  QString errMsg;
+  if (!ProcessScanner::exportRemoteTomlFile(filePath, st, &errMsg)) {
+    if (m_remoteValidationLabel) {
+      m_remoteValidationLabel->setText(QStringLiteral("Export error: %1").arg(errMsg));
+      m_remoteValidationLabel->setStyleSheet(QStringLiteral("color: #e06c75; font-weight: bold;"));
+    }
+    return false;
+  }
+  return true;
+}
+
+QString AttachProcessDialog::remoteValidationText() const {
+  return m_remoteValidationLabel ? m_remoteValidationLabel->text() : QString();
 }
 
 QList<RemoteTargetSpec> AttachProcessDialog::selectedRemoteTargets() const {
@@ -400,7 +487,7 @@ QList<RemoteTargetSpec> AttachProcessDialog::selectedRemoteTargets() const {
   const QString gdbBin = m_remoteGdbCombo ? m_remoteGdbCombo->currentText().trimmed() : QStringLiteral("gdb");
   const bool extRemote = m_remoteProtocolCombo && m_remoteProtocolCombo->currentData().toBool();
   return ProcessScanner::expandRemoteEndpoints(
-      m_remoteEndpointEdit->text(), symBin, gdbBin, extRemote);
+      m_remoteEndpointEdit->text(), symBin, gdbBin, extRemote, m_remotePathSubstitutions);
 }
 
 void AttachProcessDialog::updateRemoteEndpointValidation() {
@@ -441,129 +528,68 @@ void AttachProcessDialog::setProcRoot(const QString& procRoot) {
   setProcPaths(procRoot, m_sysctlPath);
 }
 
-bool AttachProcessDialog::captureDocumentationPreviews(
-    QWidget* parentWindow, const QString& outputDir) {
+bool AttachProcessDialog::captureDocumentationPreviews(QWidget* parentWindow, const QString& outputDir) {
   if (!parentWindow) return false;
   QDir outDir(outputDir);
   if (!outDir.exists() && !outDir.mkpath(QStringLiteral("."))) return false;
-
   QTemporaryDir fakeProcDir;
   if (!fakeProcDir.isValid()) return false;
   const uid_t myUid = ::geteuid();
-
-  auto writeFakeProc = [&](int pid, int ppid, const QString& comm,
-                           const QStringList& argv, const QStringList& env) {
+  auto writeFakeProc = [&](int pid, int ppid, const QString& comm, const QStringList& argv, const QStringList& env) {
     const QString pidDir = fakeProcDir.filePath(QString::number(pid));
     QDir().mkpath(pidDir);
-    QFile commF(pidDir + QStringLiteral("/comm"));
-    if (commF.open(QIODevice::WriteOnly)) {
-      commF.write((comm + QStringLiteral("\n")).toUtf8());
+    if (QFile commF(pidDir + QStringLiteral("/comm")); commF.open(QIODevice::WriteOnly)) commF.write((comm + QLatin1Char('\n')).toUtf8());
+    if (QFile statusF(pidDir + QStringLiteral("/status")); statusF.open(QIODevice::WriteOnly))
+      statusF.write(QStringLiteral("Name:\t%1\nPPid:\t%2\nUid:\t%3\t%3\t%3\t%3\n").arg(comm).arg(ppid).arg(myUid).toUtf8());
+    if (QFile cmdF(pidDir + QStringLiteral("/cmdline")); cmdF.open(QIODevice::WriteOnly)) {
+      QByteArrayList parts; for (const QString& a : argv) parts.append(a.toUtf8()); cmdF.write(parts.join('\0') + '\0');
     }
-    QFile statusF(pidDir + QStringLiteral("/status"));
-    if (statusF.open(QIODevice::WriteOnly)) {
-      statusF.write(QStringLiteral("Name:\t%1\nPPid:\t%2\nUid:\t%3\t%3\t%3\t%3\n")
-                        .arg(comm)
-                        .arg(ppid)
-                        .arg(myUid)
-                        .toUtf8());
-    }
-    QFile cmdF(pidDir + QStringLiteral("/cmdline"));
-    if (cmdF.open(QIODevice::WriteOnly)) {
-      QByteArrayList parts;
-      for (const QString& a : argv) parts.append(a.toUtf8());
-      cmdF.write(parts.join('\0') + '\0');
-    }
-    QFile envF(pidDir + QStringLiteral("/environ"));
-    if (envF.open(QIODevice::WriteOnly)) {
-      QByteArrayList parts;
-      for (const QString& e : env) parts.append(e.toUtf8());
-      envF.write(parts.join('\0') + '\0');
+    if (QFile envF(pidDir + QStringLiteral("/environ")); envF.open(QIODevice::WriteOnly)) {
+      QByteArrayList parts; for (const QString& e : env) parts.append(e.toUtf8()); envF.write(parts.join('\0') + '\0');
     }
   };
-
   for (int r = 0; r < 4; ++r) {
-    writeFakeProc(
-        41010 + r, 41000, QStringLiteral("wave_solver"),
-        {QStringLiteral("/workspace/hpc/build/wave_solver"),
-         QStringLiteral("--grid"), QStringLiteral("512x512"),
-         QStringLiteral("--cfl"), QStringLiteral("0.45")},
-        {QStringLiteral("OMPI_COMM_WORLD_RANK=%1").arg(r),
-         QStringLiteral("OMPI_COMM_WORLD_SIZE=4"),
-         QStringLiteral("OMPI_MCA_ess_base_jobid=41000"),
-         QStringLiteral("USER=researcher")});
+    writeFakeProc(41010 + r, 41000, QStringLiteral("wave_solver"),
+                  {QStringLiteral("/workspace/hpc/build/wave_solver"), QStringLiteral("--grid"), QStringLiteral("512x512"), QStringLiteral("--cfl"), QStringLiteral("0.45")},
+                  {QStringLiteral("OMPI_COMM_WORLD_RANK=%1").arg(r), QStringLiteral("OMPI_COMM_WORLD_SIZE=4"), QStringLiteral("OMPI_MCA_ess_base_jobid=41000"), QStringLiteral("USER=researcher")});
   }
-  writeFakeProc(
-      41088, 39200, QStringLiteral("mesh_partitioner"),
-      {QStringLiteral("/workspace/hpc/build/mesh_partitioner"),
-       QStringLiteral("--domains"), QStringLiteral("4"),
-       QStringLiteral("--input"), QStringLiteral("wing_3d.msh")},
-      {QStringLiteral("USER=researcher")});
-
+  writeFakeProc(41088, 39200, QStringLiteral("mesh_partitioner"),
+                {QStringLiteral("/workspace/hpc/build/mesh_partitioner"), QStringLiteral("--domains"), QStringLiteral("4"), QStringLiteral("--input"), QStringLiteral("wing_3d.msh")},
+                {QStringLiteral("USER=researcher")});
   const QString sysctlPath = fakeProcDir.filePath(QStringLiteral("ptrace_scope"));
-  {
-    QFile sysctlF(sysctlPath);
-    if (sysctlF.open(QIODevice::WriteOnly)) sysctlF.write("1\n");
-  }
+  if (QFile sysctlF(sysctlPath); sysctlF.open(QIODevice::WriteOnly)) sysctlF.write("1\n");
 
   MainWindow* hostMw = resolveHostMainWindow(parentWindow);
-  const RemoteTargetDialogState savedBeforePreview =
-      hostMw ? hostMw->remoteTargetDialogState() : fallbackRemoteDialogState();
+  const RemoteTargetDialogState savedBeforePreview = hostMw ? hostMw->remoteTargetDialogState() : fallbackRemoteDialogState();
   struct PreviewStateGuard {
-    MainWindow* mw;
-    RemoteTargetDialogState prev;
-    ~PreviewStateGuard() {
-      if (mw) mw->setRemoteTargetDialogState(prev);
-      else fallbackRemoteDialogState() = prev;
-    }
+    MainWindow* mw; RemoteTargetDialogState prev;
+    ~PreviewStateGuard() { if (mw) mw->setRemoteTargetDialogState(prev); else fallbackRemoteDialogState() = prev; }
   } previewGuard{hostMw, savedBeforePreview};
 
   AttachProcessDialog dlg(parentWindow, fakeProcDir.path(), sysctlPath);
-  dlg.resize(860, 520);
-  dlg.show();
+  dlg.resize(860, 520); dlg.show();
   if (dlg.m_processTable) {
-    for (int r = 0; r < dlg.m_processTable->rowCount(); ++r) {
-      if (QTableWidgetItem* uItem = dlg.m_processTable->item(r, 2)) {
-        uItem->setText(QStringLiteral("researcher"));
-      }
-    }
+    for (int r = 0; r < dlg.m_processTable->rowCount(); ++r)
+      if (QTableWidgetItem* uItem = dlg.m_processTable->item(r, 2)) uItem->setText(QStringLiteral("researcher"));
   }
   if (dlg.m_processTree && dlg.m_processTree->topLevelItemCount() > 0) {
     QTreeWidgetItem* topGroup = dlg.m_processTree->topLevelItem(0);
     topGroup->setText(3, QStringLiteral("/workspace/hpc/build/wave_solver"));
-    for (int i = 0; i < topGroup->childCount(); ++i) {
-      topGroup->child(i)->setText(3, QStringLiteral("/workspace/hpc/build/wave_solver"));
-    }
-    if (dlg.m_processTree->topLevelItemCount() > 1) {
-      dlg.m_processTree->topLevelItem(1)->setText(
-          3, QStringLiteral("/workspace/hpc/build/mesh_partitioner"));
-    }
-    dlg.m_processTree->setCurrentItem(topGroup);
-    topGroup->setSelected(true);
+    for (int i = 0; i < topGroup->childCount(); ++i) topGroup->child(i)->setText(3, QStringLiteral("/workspace/hpc/build/wave_solver"));
+    if (dlg.m_processTree->topLevelItemCount() > 1) dlg.m_processTree->topLevelItem(1)->setText(3, QStringLiteral("/workspace/hpc/build/mesh_partitioner"));
+    dlg.m_processTree->setCurrentItem(topGroup); topGroup->setSelected(true);
   }
   QApplication::processEvents();
-
   auto compositeAndSave = [&](const QString& fileName) -> bool {
-    QPixmap basePix = parentWindow->grab();
-    const QPixmap dlgPix = dlg.grab();
-    QPainter painter(&basePix);
-    painter.setPen(QColor(QStringLiteral("#3e4451")));
-    const int dx = (parentWindow->width() - dlgPix.width()) / 2;
-    const int dy = (parentWindow->height() - dlgPix.height()) / 2;
-    painter.drawPixmap(dx, dy, dlgPix);
-    painter.drawRect(dx, dy, dlgPix.width() - 1, dlgPix.height() - 1);
-    painter.end();
+    QPixmap basePix = parentWindow->grab(); const QPixmap dlgPix = dlg.grab();
+    QPainter painter(&basePix); painter.setPen(QColor(QStringLiteral("#3e4451")));
+    const int dx = (parentWindow->width() - dlgPix.width()) / 2, dy = (parentWindow->height() - dlgPix.height()) / 2;
+    painter.drawPixmap(dx, dy, dlgPix); painter.drawRect(dx, dy, dlgPix.width() - 1, dlgPix.height() - 1); painter.end();
     return basePix.save(outDir.filePath(fileName), "PNG", 88);
   };
-
-  if (!compositeAndSave(QStringLiteral("attach_process.png"))) {
-    dlg.hide();
-    return false;
-  }
-
+  if (!compositeAndSave(QStringLiteral("attach_process.png"))) { dlg.hide(); return false; }
   dlg.setRemoteTargetTabActive(true);
-  if (dlg.m_remoteEndpointEdit) {
-    dlg.m_remoteEndpointEdit->setText(QStringLiteral("localhost:1234..1237"));
-  }
+  if (dlg.m_remoteEndpointEdit) dlg.m_remoteEndpointEdit->setText(QStringLiteral("localhost:1234..1237"));
   if (dlg.m_remoteSymbolBinaryEdit) {
     dlg.m_remoteSymbolBinaryEdit->setText(
         QStringLiteral("/workspace/hpc/build/wave_solver"));
@@ -654,9 +680,7 @@ void AttachProcessDialog::refreshProcesses() {
     for (const ProcessEntry& r : ranks) {
       auto* rankItem = new QTreeWidgetItem(groupItem);
       rankItem->setText(0, QString::number(r.pid));
-      rankItem->setText(1, r.mpiWorldSize > 0
-                               ? QStringLiteral("Rank %1/%2").arg(r.mpiRank).arg(r.mpiWorldSize)
-                               : QStringLiteral("Rank %1").arg(r.mpiRank));
+      rankItem->setText(1, r.mpiWorldSize > 0 ? QStringLiteral("Rank %1/%2").arg(r.mpiRank).arg(r.mpiWorldSize) : QStringLiteral("Rank %1").arg(r.mpiRank));
       rankItem->setText(2, r.cmdline);
       rankItem->setText(3, r.executablePath);
       rankItem->setData(0, kRolePid, static_cast<qlonglong>(r.pid));
@@ -665,7 +689,6 @@ void AttachProcessDialog::refreshProcesses() {
     }
     groupItem->setExpanded(true);
   }
-
   for (const ProcessEntry& e : standalone) {
     auto* item = new QTreeWidgetItem(m_processTree);
     item->setText(0, QString::number(e.pid));
@@ -675,14 +698,9 @@ void AttachProcessDialog::refreshProcesses() {
     item->setData(0, kRolePid, static_cast<qlonglong>(e.pid));
     item->setData(0, kRoleIsGroup, false);
   }
-
   m_processTree->blockSignals(false);
-  if (m_filterEdit && !m_filterEdit->text().isEmpty()) {
-    filterProcesses(m_filterEdit->text());
-  }
-  if (m_processTree->topLevelItemCount() > 0) {
-    m_processTree->setCurrentItem(m_processTree->topLevelItem(0));
-  }
+  if (m_filterEdit && !m_filterEdit->text().isEmpty()) filterProcesses(m_filterEdit->text());
+  if (m_processTree->topLevelItemCount() > 0) m_processTree->setCurrentItem(m_processTree->topLevelItem(0));
 }
 
 void AttachProcessDialog::filterProcesses(const QString& filterText) {
@@ -690,20 +708,15 @@ void AttachProcessDialog::filterProcesses(const QString& filterText) {
   if (m_processTable) {
     for (int r = 0; r < m_processTable->rowCount(); ++r) {
       bool match = query.isEmpty();
-      for (int c = 0; c < m_processTable->columnCount() && !match; ++c) {
-        if (const QTableWidgetItem* it = m_processTable->item(r, c)) {
-          if (it->text().contains(query, Qt::CaseInsensitive)) match = true;
-        }
-      }
+      for (int c = 0; c < m_processTable->columnCount() && !match; ++c)
+        if (const QTableWidgetItem* it = m_processTable->item(r, c); it && it->text().contains(query, Qt::CaseInsensitive)) match = true;
       m_processTable->setRowHidden(r, !match);
     }
   }
   if (!m_processTree) return;
   auto matchesItem = [&query](const QTreeWidgetItem* item) {
     if (query.isEmpty()) return true;
-    for (int c = 0; c < 4; ++c) {
-      if (item->text(c).contains(query, Qt::CaseInsensitive)) return true;
-    }
+    for (int c = 0; c < 4; ++c) if (item->text(c).contains(query, Qt::CaseInsensitive)) return true;
     return false;
   };
   for (int i = 0; i < m_processTree->topLevelItemCount(); ++i) {
@@ -715,8 +728,7 @@ void AttachProcessDialog::filterProcesses(const QString& filterText) {
       child->setHidden(!cm);
       if (cm) anyChildMatch = true;
     }
-    const bool topMatch = matchesItem(top) || anyChildMatch;
-    top->setHidden(!topMatch);
+    top->setHidden(!(matchesItem(top) || anyChildMatch));
   }
 }
 
@@ -724,19 +736,11 @@ QList<ProcessEntry> AttachProcessDialog::selectedProcesses() const {
   QList<ProcessEntry> result;
   QSet<pid_t> seenPids;
   auto appendByPid = [&](qint64 pid) {
-    for (const ProcessEntry& e : m_entries) {
-      if (static_cast<qint64>(e.pid) == pid && !seenPids.contains(e.pid)) {
-        seenPids.insert(e.pid);
-        result.append(e);
-      }
-    }
+    for (const ProcessEntry& e : m_entries)
+      if (static_cast<qint64>(e.pid) == pid && !seenPids.contains(e.pid)) { seenPids.insert(e.pid); result.append(e); }
   };
-
   if (m_tableExplicitlySelected && m_processTable && m_processTable->currentRow() >= 0) {
-    if (const QTableWidgetItem* it = m_processTable->item(m_processTable->currentRow(), 0)) {
-      appendByPid(it->text().toLongLong());
-      return result;
-    }
+    if (const QTableWidgetItem* it = m_processTable->item(m_processTable->currentRow(), 0)) { appendByPid(it->text().toLongLong()); return result; }
   }
 
   if (m_processTree) {

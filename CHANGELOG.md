@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Planned `0.9.1` patch line.
 
 ### Added
+- **`remote.toml` Target Preset Import/Export & Schema (`AttachProcessDialog`, `ProcessScanner`, `GdbRankCoordinator`, `docs/remote.schema.json`, `examples/remote.toml`)**:
+  - Added `IMPORT REMOTE.TOML...` and `EXPORT...` actions to the **Remote Target (`gdbserver` / QEMU)** dialog tab (`ProcessScanner::parseRemoteTomlFile` / `exportRemoteTomlFile`), supporting string range and array `target.endpoints`, `symbol_binary`, `gdb_binary`, `protocol_mode` (`remote` / `extended-remote`), and `[paths]` `substitute` rules (`-gdb-set substitute-path`), with inline validation diagnostics, JSON Schema Draft 2020-12 (`docs/remote.schema.json`), and a documented example (`examples/remote.toml`).
 - **Remote Target Dialog `QSettings` & Session Persistence (`AttachProcessDialog`, `MainWindow`, `ProcessScanner`)**:
-  - Persisted `Endpoint(s)`, `Local Symbol Binary (ELF)`, `GDB Binary`, `Protocol Mode` (`remote` vs. `extended-remote`), and active tab selection both in memory across dialog reopens and across GridLock restarts under `RemoteTarget/` in `QSettings` (`RemoteTargetDialogState`).
-- **Headless Remote Attach, QEMU `gdbstub` & Exited-Rank Regression Coverage (`tests/ui/test_ui_debugger.cpp`)**:
-  - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard` and `testRemoteTargetQSettingsAndQemuStubAttach`) verifying isolated `QSettings` round-trip persistence across restarts, single-rank QEMU system `gdbstub` (`localhost:1234` without a local ELF symbol binary) attach/detach, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards.
+  - Persisted `Endpoint(s)`, `Local Symbol Binary (ELF)`, `GDB Binary`, `Protocol Mode` (`remote` vs. `extended-remote`), path substitutions, and active tab selection both in memory across dialog reopens and across GridLock restarts under `RemoteTarget/` in `QSettings` (`RemoteTargetDialogState`).
+- **Headless Remote Attach, `remote.toml`, QEMU `gdbstub` & Exited-Rank Regression Coverage (`tests/ui/test_ui_debugger.cpp`)**:
+  - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard`, `testRemoteTargetQSettingsAndQemuStubAttach`, and `testRemoteTomlImportAndValidation`) verifying `remote.toml` import/export and malformed-file error handling, isolated `QSettings` round-trip persistence across restarts, single-rank QEMU system `gdbstub` (`localhost:1234` without a local ELF symbol binary) attach/detach, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards.
 
 ### Changed
 - **Meson `>= 1.3.0` Build Requirement & HPC Prerequisites (`meson.build`, `README.md`)**:

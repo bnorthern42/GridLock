@@ -1,0 +1,24 @@
+# GridLock Remote Target Preset (schema: docs/remote.schema.json)
+# Load via File -> Attach to Process... -> Remote Target -> IMPORT REMOTE.TOML...
+version = 1
+
+[target]
+name = "Debian 13 QEMU 4-Rank MPI"
+# Accepts a host:start..end range, comma-separated list, or TOML string array
+# e.g. endpoints = ["localhost:2345", "localhost:2346", "localhost:2347", "localhost:2348"]
+endpoints = "localhost:2345..2348"
+symbol_binary = "/tmp/gl_remote_host/mpi_probe"
+gdb_binary = "gdb"
+protocol_mode = "extended-remote" # "remote" or "extended-remote"
+auto_connect = false
+
+# Single-target QEMU system gdbstub alternative (no local ELF symbol binary required):
+# endpoints = "localhost:1234"
+# symbol_binary = ""
+# protocol_mode = "remote"
+
+[paths]
+# Optional GDB source path substitution pairs (remote_prefix -> local_prefix)
+substitute = [
+  { from = "/tmp/gl_remote_test", to = "/tmp/gl_remote_test" }
+]

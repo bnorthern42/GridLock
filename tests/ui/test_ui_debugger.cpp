@@ -518,69 +518,43 @@ static void testPreLaunchExecutableGuardAndExtensionlessSiblingCompile() {
     QFile::setPermissions(nonExecFile, QFile::ReadOwner | QFile::WriteOwner);
     { QFile cf(csvFile); QVERIFY(cf.open(QIODevice::WriteOnly)); cf.write("rank,latency_us\n0,12.4\n"); }
     QVERIFY(QDir().mkpath(subDir));
-
     gridlock::ui::MainWindow mw; mw.resize(1280, 800); mw.show(); QApplication::processEvents();
     auto* targetCombo = mw.findChild<QComboBox*>(QStringLiteral("toolbarTargetSelector"));
     auto* progOut = mw.findChild<QPlainTextEdit*>(QStringLiteral("programOutputView"));
     auto* runAct = mw.findChild<QAction*>(QStringLiteral("actionRunTarget"));
     QVERIFY(targetCombo && progOut && runAct);
-
-    // 1. Non-executable file, non-code .csv data file, and directory must fail pre-launch validation cleanly with 0 spawned ranks.
     targetCombo->insertItem(0, QStringLiteral("raw_unexecutable"), nonExecFile);
-    QVERIFY(mw.selectTargetByName(QStringLiteral("raw_unexecutable")));
-    runAct->trigger(); QApplication::processEvents();
-    QVERIFY2(!mw.isDebugSessionActive() && !mw.isRunButtonLatched() && (!mw.coordinator() || mw.coordinator()->getProcessCount() == 0),
-             "Non-executable target must abort pre-launch without spawning MPI ranks");
-    QVERIFY2(progOut->toPlainText().contains(QStringLiteral("Target is not executable")) && !progOut->toPlainText().contains(QStringLiteral("permission denied")),
-             qPrintable(progOut->toPlainText()));
-
+    QVERIFY(mw.selectTargetByName(QStringLiteral("raw_unexecutable"))); runAct->trigger(); QApplication::processEvents();
+    QVERIFY2(!mw.isDebugSessionActive() && !mw.isRunButtonLatched() && (!mw.coordinator() || mw.coordinator()->getProcessCount() == 0), "Non-executable target must abort pre-launch");
+    QVERIFY2(progOut->toPlainText().contains(QStringLiteral("Target is not executable")) && !progOut->toPlainText().contains(QStringLiteral("permission denied")), qPrintable(progOut->toPlainText()));
     targetCombo->insertItem(0, QStringLiteral("metrics_csv"), csvFile);
     QVERIFY(mw.selectTargetByName(QStringLiteral("metrics_csv")) && !QFileInfo::exists(tDir.filePath(QStringLiteral("metrics"))));
     mw.startTargetWorkflow(); QApplication::processEvents();
     QVERIFY(!mw.isDebugSessionActive() && (!mw.coordinator() || mw.coordinator()->getProcessCount() == 0) && progOut->toPlainText().contains(csvFile));
-
     targetCombo->insertItem(0, QStringLiteral("dir_target"), subDir);
-    QVERIFY(mw.selectTargetByName(QStringLiteral("dir_target")));
-    mw.startTargetWorkflow(); QApplication::processEvents();
+    QVERIFY(mw.selectTargetByName(QStringLiteral("dir_target"))); mw.startTargetWorkflow(); QApplication::processEvents();
     QVERIFY2(!mw.isDebugSessionActive() && progOut->toPlainText().contains(QStringLiteral("Target is a directory")), qPrintable(progOut->toPlainText()));
-
-    // 2. Extensionless target path with sibling .cpp source resolves, compiles, and enforces +x permissions cleanly.
     const QString extlessBin = tDir.filePath(QStringLiteral("extless_demo")), extlessCpp = tDir.filePath(QStringLiteral("extless_demo.cpp"));
     { QFile sf(extlessCpp); QVERIFY(sf.open(QIODevice::WriteOnly)); sf.write("int main() { return 0; }\n"); }
-    QVERIFY(!QFileInfo::exists(extlessBin));
-    targetCombo->insertItem(0, QStringLiteral("extless_demo"), extlessBin);
-    QVERIFY2(mw.selectTargetByName(QStringLiteral("extless_demo")) && mw.ensureTargetBinaryCompiled(),
-             "Extensionless target with sibling .cpp must resolve and compile cleanly");
+    QVERIFY(!QFileInfo::exists(extlessBin)); targetCombo->insertItem(0, QStringLiteral("extless_demo"), extlessBin);
+    QVERIFY2(mw.selectTargetByName(QStringLiteral("extless_demo")) && mw.ensureTargetBinaryCompiled(), "Extensionless target with sibling .cpp must compile");
     QCOMPARE(QFileInfo(mw.activeTargetSourcePath()).canonicalFilePath(), QFileInfo(extlessCpp).canonicalFilePath());
     QCOMPARE(QFileInfo(mw.activeTargetBinaryPath()).canonicalFilePath(), QFileInfo(extlessBin).canonicalFilePath());
-    QVERIFY2(QFileInfo(extlessBin).isFile() && QFileInfo(extlessBin).isExecutable(), "Compiled extensionless target binary must have execute permissions");
-
-    // Stripping +x on a binary with a sibling .cpp must trigger rebuild/chmod restoration on ensureTargetBinaryCompiled().
+    QVERIFY(QFileInfo(extlessBin).isFile() && QFileInfo(extlessBin).isExecutable());
     QVERIFY(QFile::setPermissions(extlessBin, QFile::ReadOwner | QFile::WriteOwner) && !QFileInfo(extlessBin).isExecutable());
-    QVERIFY2(mw.ensureTargetBinaryCompiled() && QFileInfo(extlessBin).isExecutable(), "Missing +x on target with sibling .cpp must restore executable binary");
-
-    // 3. Launching an already up-to-date binary must NOT recompile and must complete pre-launch setup in < 500 ms.
-    QTest::qWait(25);
-    const QDateTime warmMtime = QFileInfo(extlessBin).lastModified();
+    QVERIFY(mw.ensureTargetBinaryCompiled() && QFileInfo(extlessBin).isExecutable());
+    QTest::qWait(25); const QDateTime warmMtime = QFileInfo(extlessBin).lastModified();
     QElapsedTimer warmTimer; warmTimer.start();
-    QVERIFY(mw.ensureTargetBinaryCompiled());
-    mw.startDebuggingSession(extlessBin, 1);
-    const qint64 warmLaunchMs = warmTimer.elapsed();
-    mw.stopTargetWorkflow(); QApplication::processEvents();
+    QVERIFY(mw.ensureTargetBinaryCompiled()); mw.startDebuggingSession(extlessBin, 1);
+    const qint64 warmLaunchMs = warmTimer.elapsed(); mw.stopTargetWorkflow(); QApplication::processEvents();
     QCOMPARE(QFileInfo(extlessBin).lastModified(), warmMtime);
-    QVERIFY2(warmLaunchMs < 500, qPrintable(QStringLiteral("Warm binary pre-launch setup took %1 ms (expected < 500 ms)").arg(warmLaunchMs)));
-
-    // Standalone ELF binary without sibling .cpp must also skip redundant ELF reloads and launch in < 500 ms.
+    QVERIFY2(warmLaunchMs < 500, qPrintable(QStringLiteral("Warm binary setup took %1 ms").arg(warmLaunchMs)));
     const QString standaloneDir = tDir.filePath(QStringLiteral("standalone_bin")), standaloneElf = standaloneDir + QStringLiteral("/solver_elf");
     QVERIFY(QDir().mkpath(standaloneDir) && QFile::copy(extlessBin, standaloneElf));
-    targetCombo->insertItem(0, QStringLiteral("solver_elf"), standaloneElf);
-    QVERIFY(mw.selectTargetByName(QStringLiteral("solver_elf")));
-    warmTimer.restart();
-    QVERIFY(mw.ensureTargetBinaryCompiled());
-    mw.startDebuggingSession(standaloneElf, 1);
-    const qint64 standaloneMs = warmTimer.elapsed();
-    mw.stopTargetWorkflow(); mw.shutdownActiveSessionSync(); QApplication::processEvents();
-    QVERIFY2(standaloneMs < 500, qPrintable(QStringLiteral("Standalone ELF pre-launch setup took %1 ms (expected < 500 ms)").arg(standaloneMs)));
+    targetCombo->insertItem(0, QStringLiteral("solver_elf"), standaloneElf); QVERIFY(mw.selectTargetByName(QStringLiteral("solver_elf")));
+    warmTimer.restart(); QVERIFY(mw.ensureTargetBinaryCompiled()); mw.startDebuggingSession(standaloneElf, 1);
+    const qint64 standaloneMs = warmTimer.elapsed(); mw.stopTargetWorkflow(); mw.shutdownActiveSessionSync(); QApplication::processEvents();
+    QVERIFY2(standaloneMs < 500, qPrintable(QStringLiteral("Standalone ELF setup took %1 ms").arg(standaloneMs)));
 }
 
 void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
@@ -615,54 +589,41 @@ void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
 void TestMainWindowUI::testRemoteTargetPersistenceAndExitedRankGuard() {
     gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
     {
-        gridlock::ui::AttachProcessDialog dlg1(&mw);
-        dlg1.setRemoteTargetTabActive(true);
+        gridlock::ui::AttachProcessDialog dlg1(&mw); dlg1.setRemoteTargetTabActive(true);
         dlg1.setRemoteTargetFields(QStringLiteral("localhost:2345..2348"), QStringLiteral("/tmp/gl_remote_host/mpi_probe"), QStringLiteral("gdb-multiarch"), true);
-        QCOMPARE(dlg1.remoteEndpointText(), QStringLiteral("localhost:2345..2348"));
-        QCOMPARE(dlg1.localSymbolBinaryText(), QStringLiteral("/tmp/gl_remote_host/mpi_probe"));
-        QCOMPARE(dlg1.gdbBinaryText(), QStringLiteral("gdb-multiarch"));
-        QVERIFY(dlg1.isExtendedRemoteProtocol() && dlg1.isRemoteTargetTabActive());
+        QVERIFY(dlg1.remoteEndpointText() == QStringLiteral("localhost:2345..2348") && dlg1.localSymbolBinaryText() == QStringLiteral("/tmp/gl_remote_host/mpi_probe") &&
+                dlg1.gdbBinaryText() == QStringLiteral("gdb-multiarch") && dlg1.isExtendedRemoteProtocol() && dlg1.isRemoteTargetTabActive());
         dlg1.reject();
     }
     {
         gridlock::ui::AttachProcessDialog dlg2(&mw);
         QVERIFY2(dlg2.isRemoteTargetTabActive() && dlg2.isExtendedRemoteProtocol(), "Reopened AttachProcessDialog must restore active tab and protocol mode");
-        QCOMPARE(dlg2.remoteEndpointText(), QStringLiteral("localhost:2345..2348"));
-        QCOMPARE(dlg2.localSymbolBinaryText(), QStringLiteral("/tmp/gl_remote_host/mpi_probe"));
-        QCOMPARE(dlg2.gdbBinaryText(), QStringLiteral("gdb-multiarch"));
+        QVERIFY(dlg2.remoteEndpointText() == QStringLiteral("localhost:2345..2348") && dlg2.localSymbolBinaryText() == QStringLiteral("/tmp/gl_remote_host/mpi_probe") &&
+                dlg2.gdbBinaryText() == QStringLiteral("gdb-multiarch"));
         dlg2.reject();
     }
     {
         gridlock::ui::MainWindow separateMw; gridlock::ui::AttachProcessDialog cleanDlg(&separateMw);
-        QVERIFY(!cleanDlg.isRemoteTargetTabActive()); QCOMPARE(cleanDlg.remoteEndpointText(), QStringLiteral("localhost:1234"));
+        QVERIFY(!cleanDlg.isRemoteTargetTabActive() && cleanDlg.remoteEndpointText() == QStringLiteral("localhost:1234"));
     }
-
     auto* editorTabs = mw.editorTabManager(); auto* rackView = mw.serverRackView();
     auto* rackDock = mw.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
     auto* gdbConsole = mw.gdbConsoleWidget();
     auto* consoleView = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
     auto* statusLbl = mw.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetryLabel"));
     QVERIFY(editorTabs && rackView && rackDock && gdbConsole && consoleView);
-
     const auto mockSpecs = gridlock::ProcessScanner::expandRemoteEndpoints(QStringLiteral("127.0.0.1:65431..65434"), QString(), QStringLiteral("gdb"), true);
-    QCOMPARE(mockSpecs.size(), 4); QVERIFY(mw.attachToRemoteTargets(mockSpecs)); QApplication::processEvents();
-    for (int i = 0; i < editorTabs->count(); ++i) {
-        const QString p = editorTabs->widget(i) ? editorTabs->widget(i)->property("absolutePath").toString() : QString();
-        QVERIFY2(!p.contains(QStringLiteral("/tutorial/")), qPrintable(p));
-    }
-    QCOMPARE(mw.workspacePerspective(), QStringLiteral("Debug"));
-    QVERIFY(mw.disassemblyView() && !mw.disassemblyView()->isHidden() && !rackDock->isHidden());
+    QVERIFY(mockSpecs.size() == 4 && mw.attachToRemoteTargets(mockSpecs)); QApplication::processEvents();
+    for (int i = 0; i < editorTabs->count(); ++i)
+        QVERIFY(!editorTabs->widget(i) || !editorTabs->widget(i)->property("absolutePath").toString().contains(QStringLiteral("/tutorial/")));
+    QVERIFY(mw.workspacePerspective() == QStringLiteral("Debug") && mw.disassemblyView() && !mw.disassemblyView()->isHidden() && !rackDock->isHidden());
     mw.stopTargetWorkflow();
-
     gridlock::GdbRankCoordinator mockCoord; mockCoord.initializeMockSession(4); mw.setCoordinator(&mockCoord);
     QStringList postExitCmds, errorConsoleLines; bool exitedPhase = false;
     connect(&mockCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int, const QString& c) { if (exitedPhase) postExitCmds.append(c.trimmed()); });
     connect(&mockCoord, &IBackendCoordinator::debuggerConsoleOutput, [&](int, const QString& line, bool isErr) { if (isErr) errorConsoleLines.append(line); });
     for (int r = 0; r < 4; ++r) {
-        mockCoord.processGdbOutput(r, QStringLiteral(
-            "=thread-group-started,id=\"i1\",pid=\"%1\"\n"
-            "*stopped,reason=\"signal-received\",signal-name=\"SIGTRAP\",frame={addr=\"0x00007ffff7fe4300\",func=\"_start\",args=[],arch=\"i386:x86-64\"},thread-id=\"1\",stopped-threads=\"all\"\n"
-            "^connected\n").arg(2100 + r));
+        mockCoord.processGdbOutput(r, QStringLiteral("=thread-group-started,id=\"i1\",pid=\"%1\"\n*stopped,reason=\"signal-received\",signal-name=\"SIGTRAP\",frame={addr=\"0x00007ffff7fe4300\",func=\"_start\",args=[],arch=\"i386:x86-64\"},thread-id=\"1\",stopped-threads=\"all\"\n^connected\n").arg(2100 + r));
         QCOMPARE(mockCoord.getRankState(r).currentState, QStringLiteral("stopped"));
     }
     QApplication::processEvents();
@@ -672,17 +633,10 @@ void TestMainWindowUI::testRemoteTargetPersistenceAndExitedRankGuard() {
         mockCoord.requestStackAndThreads(r); mockCoord.selectStackFrame(r, 1, 0); mockCoord.evaluateExpression(r, QStringLiteral("rank"));
     }
     QApplication::processEvents();
-    for (const QString& cmd : postExitCmds) {
-        QVERIFY2(!cmd.contains(QStringLiteral("-data-list-register-values")) && !cmd.contains(QStringLiteral("-stack-list-frames")) && !cmd.contains(QStringLiteral("-stack-list-variables")), qPrintable(cmd));
-    }
-    for (const QString& err : errorConsoleLines) {
-        QVERIFY2(!err.contains(QStringLiteral("No registers"), Qt::CaseInsensitive) && !err.contains(QStringLiteral("not being run"), Qt::CaseInsensitive), qPrintable(err));
-    }
+    for (const QString& cmd : postExitCmds) QVERIFY2(!cmd.contains(QStringLiteral("-data-list-register-values")) && !cmd.contains(QStringLiteral("-stack-list-frames")) && !cmd.contains(QStringLiteral("-stack-list-variables")), qPrintable(cmd));
+    for (const QString& err : errorConsoleLines) QVERIFY2(!err.contains(QStringLiteral("No registers"), Qt::CaseInsensitive) && !err.contains(QStringLiteral("not being run"), Qt::CaseInsensitive), qPrintable(err));
     QCOMPARE(rackView->count(), 4);
-    for (int r = 0; r < 4; ++r) {
-        QCOMPARE(rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>().currentState, QStringLiteral("exited"));
-        QVERIFY(!rackView->item(r)->isHidden());
-    }
+    for (int r = 0; r < 4; ++r) QVERIFY(rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>().currentState == QStringLiteral("exited") && !rackView->item(r)->isHidden());
     if (statusLbl) QVERIFY(statusLbl->text().contains(QStringLiteral("EXITED"), Qt::CaseInsensitive));
 
     if (qEnvironmentVariableIntValue("GL_VERIFY_LIVE_QEMU_REMOTE") == 1) {
@@ -785,4 +739,54 @@ void TestMainWindowUI::testRemoteTargetQSettingsAndQemuStubAttach() {
     auto* rackDock = mw3.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
     QVERIFY(rackDock && !rackDock->isHidden() && mw3.serverRackView()->count() >= 1);
     mw3.stopTargetWorkflow(); QVERIFY(!mw3.isDebugSessionActive());
+}
+
+void TestMainWindowUI::testRemoteTomlImportAndValidation() {
+    QTemporaryDir tmpDir; QVERIFY(tmpDir.isValid());
+    auto writeToml = [&](const QString& name, const QByteArray& content) {
+        const QString p = tmpDir.filePath(name); QFile f(p); if (f.open(QIODevice::WriteOnly)) f.write(content); return p;
+    };
+
+    const QString schemaPath = QFileInfo::exists(QStringLiteral("docs/remote.schema.json")) ? QStringLiteral("docs/remote.schema.json") : QStringLiteral("../docs/remote.schema.json");
+    QFile schemaFile(schemaPath); QVERIFY2(schemaFile.open(QIODevice::ReadOnly), "docs/remote.schema.json must exist");
+    QJsonParseError jsonErr{}; const QJsonDocument schemaDoc = QJsonDocument::fromJson(schemaFile.readAll(), &jsonErr);
+    QVERIFY2(jsonErr.error == QJsonParseError::NoError && schemaDoc.isObject(), qPrintable(jsonErr.errorString()));
+
+    gridlock::ui::MainWindow mw; gridlock::ui::AttachProcessDialog dlg(&mw);
+    QVERIFY(dlg.findChild<QPushButton*>(QStringLiteral("remoteImportTomlBtn")) && dlg.findChild<QPushButton*>(QStringLiteral("remoteExportTomlBtn")));
+
+    // 1. Repository examples/remote.toml parses cleanly and resolves 4 MPI rank endpoints + path substitution.
+    const QString exampleToml = QFileInfo::exists(QStringLiteral("examples/remote.toml")) ? QStringLiteral("examples/remote.toml") : QStringLiteral("../examples/remote.toml");
+    QVERIFY2(dlg.importRemoteTomlFile(exampleToml), qPrintable(dlg.remoteValidationText()));
+    QVERIFY(dlg.isRemoteTargetTabActive() && dlg.isExtendedRemoteProtocol());
+    QCOMPARE(dlg.remoteEndpointText(), QStringLiteral("localhost:2345..2348"));
+    QCOMPARE(dlg.localSymbolBinaryText(), QStringLiteral("/tmp/gl_remote_host/mpi_probe"));
+    QCOMPARE(dlg.gdbBinaryText(), QStringLiteral("gdb"));
+    QCOMPARE(dlg.selectedRemoteTargets().size(), 4);
+    QCOMPARE(dlg.remotePathSubstitutions().size(), 1);
+    QCOMPARE(dlg.selectedRemoteTargets().first().pathSubstitutions.first().first, QStringLiteral("/tmp/gl_remote_test"));
+
+    // 2. Array endpoints + custom gdb_binary + export round-trip.
+    const QString arrToml = writeToml(QStringLiteral("array_remote.toml"),
+        "version = 1\n[target]\nname = \"Cluster 3-Rank\"\nendpoints = [\"node0:2345\", \"node1:2345\", \"node2:2345\"]\n"
+        "symbol_binary = \"/opt/sim/solver\"\ngdb_binary = \"gdb-multiarch\"\nprotocol_mode = \"remote\"\n"
+        "[paths]\nsubstitute = [{ from = \"/build/src\", to = \"/home/dev/src\" }]\n");
+    QVERIFY2(dlg.importRemoteTomlFile(arrToml), qPrintable(dlg.remoteValidationText()));
+    QVERIFY(!dlg.isExtendedRemoteProtocol() && dlg.selectedRemoteTargets().size() == 3);
+    QCOMPARE(dlg.selectedRemoteTargets().at(2).endpoint, QStringLiteral("node2:2345"));
+    QCOMPARE(dlg.gdbBinaryText(), QStringLiteral("gdb-multiarch"));
+    const QString exportedToml = tmpDir.filePath(QStringLiteral("exported_remote.toml"));
+    QVERIFY(dlg.exportRemoteTomlFile(exportedToml));
+
+    // 3. Malformed TOML, missing endpoints, and invalid protocol_mode fail cleanly without mutating valid dialog state.
+    const QString badSyntax = writeToml(QStringLiteral("bad_syntax.toml"), "[target\nendpoints = \"localhost:1234\"\n");
+    const QString missingEp = writeToml(QStringLiteral("missing_ep.toml"), "version = 1\n[target]\nsymbol_binary = \"/bin/ls\"\n");
+    const QString badProto = writeToml(QStringLiteral("bad_proto.toml"), "version = 1\n[target]\nendpoints = \"localhost:1234\"\nprotocol_mode = \"invalid-mode\"\n");
+    for (const QString& badPath : {badSyntax, missingEp, badProto}) {
+        QVERIFY(!dlg.importRemoteTomlFile(badPath));
+        QVERIFY2(dlg.remoteValidationText().contains(QStringLiteral("remote.toml error:")), qPrintable(dlg.remoteValidationText()));
+        QCOMPARE(dlg.selectedRemoteTargets().size(), 3);
+        QCOMPARE(dlg.gdbBinaryText(), QStringLiteral("gdb-multiarch"));
+    }
+    QVERIFY(dlg.importRemoteTomlFile(exportedToml) && dlg.selectedRemoteTargets().size() == 3 && dlg.remotePathSubstitutions().size() == 1);
 }
