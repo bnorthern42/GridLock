@@ -159,13 +159,43 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       continue;
     }
     if (line.startsWith("=thread-group-exited")) {
-      rp->inferiorPid = 0; m_rankPids.remove(rankId); continue;
+      static const QRegularExpression exitCodeRe(QStringLiteral("exit-code=\"([^\"]+)\""));
+      const auto ecMatch = exitCodeRe.match(line);
+      const QString exitSuffix = ecMatch.hasMatch() ? QStringLiteral(" (exit-code %1)").arg(ecMatch.captured(1)) : QString();
+      rp->inferiorPid = 0; m_rankPids.remove(rankId);
+      rp->pendingAttach = false; rp->autoContinueAfterPending = false; rp->pendingAfterStopCmds.clear();
+      if (rp->state.executionTimer.isValid()) {
+        rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
+        rp->state.executionTimer.invalidate();
+      }
+      const bool wasExited = (rp->state.currentState == QLatin1String("exited"));
+      rp->state.currentState = QStringLiteral("exited");
+      if (!wasExited) {
+        emit debuggerConsoleOutput(rankId, QStringLiteral("[Rank %1] Target inferior exited%2.").arg(rankId).arg(exitSuffix), false);
+        emit rankStateChanged(rankId, rp->state);
+      }
+      continue;
     }
 
     if (line.startsWith("*stopped") || line.startsWith("^connected")) {
+      if (line.startsWith("^connected") && !line.contains("frame={")) {
+        rp->pendingAttach = false;
+        continue;
+      }
+      const bool wasPendingAttach = rp->pendingAttach;
       rp->pendingAttach = false;
       if (line.contains("reason=\"exited") || line.contains("reason=\"exited-normally\"")) {
-        rp->state.currentState = "exited"; rp->inferiorPid = 0; m_rankPids.remove(rankId);
+        rp->inferiorPid = 0; m_rankPids.remove(rankId);
+        rp->autoContinueAfterPending = false; rp->pendingAfterStopCmds.clear();
+        if (rp->state.executionTimer.isValid()) {
+          rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
+          rp->state.executionTimer.invalidate();
+        }
+        const bool wasExited = (rp->state.currentState == QLatin1String("exited"));
+        rp->state.currentState = QStringLiteral("exited");
+        if (!wasExited) {
+          emit debuggerConsoleOutput(rankId, QStringLiteral("[Rank %1] Target inferior exited.").arg(rankId), false);
+        }
         emit rankStateChanged(rankId, rp->state);
         continue;
       }
@@ -238,8 +268,11 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         }
         if (handledLogpoint) continue;
       }
-      const bool isStepOrSignal = isWatchTrigger || line.startsWith("^connected") || line.contains("reason=\"end-stepping-range\"") ||
-                                  line.contains("reason=\"location-reached\"") || line.contains("reason=\"no-history-boundary\"") ||
+      const bool isInitialAttachStop = wasPendingAttach || (rp->isAttached && !line.contains("reason="));
+      const bool isStepOrSignal = isInitialAttachStop || isWatchTrigger || line.startsWith("^connected") ||
+                                  line.contains("reason=\"end-stepping-range\"") ||
+                                  line.contains("reason=\"location-reached\"") ||
+                                  line.contains("reason=\"no-history-boundary\"") ||
                                   line.contains("reason=\"signal-received\"");
       if ((rp->state.currentFile.isEmpty() || rp->state.currentFile == "??") && !isStepOrSignal) {
         writeCmd(rankId, "-exec-continue\n"); rp->state.currentState = "running";
@@ -459,6 +492,12 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       if (isMockRank(rankId) && m_pendingPluginMemReads.contains(rankId) && !m_pendingPluginMemReads[rankId].isEmpty()) {
         const int tok = m_pendingPluginMemReads[rankId].takeFirst();
         emit pluginMemoryChunkReady(rankId, tok, QByteArray(), msg);
+        continue;
+      }
+      if (rp->state.currentState != QLatin1String("stopped") &&
+          (msg.contains(QStringLiteral("No registers"), Qt::CaseInsensitive) ||
+           msg.contains(QStringLiteral("The program is not being run"), Qt::CaseInsensitive) ||
+           msg.contains(QStringLiteral("Selected thread is running"), Qt::CaseInsensitive))) {
         continue;
       }
       emit debuggerConsoleOutput(rankId, QStringLiteral("Error: ") + msg, true);

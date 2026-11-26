@@ -255,8 +255,8 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     if (gdbPath.isEmpty()) gdbPath = QStandardPaths::findExecutable(QStringLiteral("gdb"));
     if (gdbPath.isEmpty()) { terminateAllSessions(); return false; }
     auto rp = std::make_unique<RankProcess>();
-    rp->id = r; rp->process = std::make_unique<QProcess>(); rp->pendingAttach = true; rp->isAttached = true;
-    rp->state.rankId = r; rp->state.currentState = "stopped"; rp->state.lastFiredTimestamp = "synced";
+    rp->id = r; rp->process = std::make_unique<QProcess>(); rp->pendingAttach = true; rp->isAttached = true; rp->isRemoteAttach = true;
+    rp->state.rankId = r; rp->state.currentState = QStringLiteral("launching"); rp->state.lastFiredTimestamp = QStringLiteral("synced");
     connect(rp->process.get(), &QProcess::readyReadStandardOutput, this, [this, r]() { handleGdbOutput(r); });
     rp->process->start(gdbPath, {QStringLiteral("--quiet"), QStringLiteral("--nx"), QStringLiteral("-iex"), QStringLiteral("set debuginfod enabled off"), QStringLiteral("--interpreter=mi3")});
     const bool started = rp->process->waitForStarted(2000);
@@ -266,7 +266,14 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
     if (const QString symBin = t.localSymbolBinary.trimmed(); !symBin.isEmpty())
       writeCmd(r, QStringLiteral("-file-exec-and-symbols %1\n").arg(detail::escapeGdbMiString(symBin)));
     writeCmd(r, QStringLiteral("-target-select %1 %2\n").arg(t.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"), t.endpoint.trimmed()));
-    flushCachedBreakpoints(r);
+    for (const auto& bp : m_pendingBreakpoints) {
+      if (bp.rankFilter < 0 || bp.rankFilter == r)
+        writeCmd(r, detail::buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount, bp.temporary, !bp.enabled));
+    }
+    const auto cachedBps = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
+    for (auto it = cachedBps.constBegin(); it != cachedBps.constEnd(); ++it) {
+      for (int line : *it) writeCmd(r, detail::buildBreakInsertCmd(it.key(), line, QString()));
+    }
     emit rankStateChanged(r, m_processes[r]->state);
   }
   return true;
@@ -275,6 +282,7 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
 void GdbRankCoordinator::queueOrWriteCmd(int rankId, const QString& cmd) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()) || !m_processes[rankId]) return;
   auto& rp = m_processes[rankId];
+  if (rp->state.currentState == QLatin1String("exited")) return;
   if (rp->state.currentState == "running") {
     rp->pendingAfterStopCmds.append(cmd);
     if (!rp->autoContinueAfterPending) {
@@ -289,8 +297,14 @@ void GdbRankCoordinator::queueOrWriteCmd(int rankId, const QString& cmd) {
 void GdbRankCoordinator::writeCmd(int rankId, const QString& cmd) {
   if (rankId < 0 || rankId >= static_cast<int>(m_processes.size()) || !m_processes[rankId]) return;
   auto& rp = m_processes[rankId];
+  const QString trimmedCmd = cmd.trimmed();
+  if (rp->state.currentState == QLatin1String("exited") &&
+      !trimmedCmd.startsWith(QLatin1String("-gdb-exit")) &&
+      !trimmedCmd.startsWith(QLatin1String("-target-detach"))) {
+    return;
+  }
   static const QRegularExpression kInspectMiRe(QStringLiteral("^\\d*-(?:stack|thread|var|data)-"));
-  if (rp->state.currentState != QLatin1String("stopped") && kInspectMiRe.match(cmd.trimmed()).hasMatch()) return;
+  if (rp->state.currentState != QLatin1String("stopped") && kInspectMiRe.match(trimmedCmd).hasMatch()) return;
   if (rp->fifoInFd >= 0) {
     const QByteArray bytes = cmd.toUtf8();
     const char* ptr = bytes.constData();

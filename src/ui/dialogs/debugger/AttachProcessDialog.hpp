@@ -45,7 +45,10 @@ class AttachProcessDialog : public QDialog {
       const QString& sysctlPath =
           QStringLiteral("/proc/sys/kernel/yama/ptrace_scope"));
 
-  ~AttachProcessDialog() override = default;
+  ~AttachProcessDialog() override;
+
+  /** @brief Persists Remote Target tab fields when closing the dialog via Accept, Reject, or Esc. */
+  void done(int result) override;
 
   /**
    * @brief Overrides `/proc` and `ptrace_scope` paths (used for deterministic test fixtures) and refreshes.
@@ -88,6 +91,24 @@ class AttachProcessDialog : public QDialog {
   /** @brief Expands and returns the configured `RemoteTargetSpec` list from Tab 2 controls (empty if invalid). */
   QList<RemoteTargetSpec> selectedRemoteTargets() const;
 
+  /** @brief Returns the current raw Endpoint(s) field text from Tab 2. */
+  QString remoteEndpointText() const;
+
+  /** @brief Returns the current Local Symbol Binary (ELF) field text from Tab 2. */
+  QString localSymbolBinaryText() const;
+
+  /** @brief Returns the current GDB Binary combo text from Tab 2. */
+  QString gdbBinaryText() const;
+
+  /** @brief Returns true when `extended-remote` protocol mode is selected in Tab 2. */
+  bool isExtendedRemoteProtocol() const;
+
+  /** @brief Populates all Tab 2 Remote Target fields and persists them to the session state. */
+  void setRemoteTargetFields(const QString& endpoints,
+                             const QString& localSymbolBinary,
+                             const QString& gdbBinary,
+                             bool extendedRemote);
+
   /** @brief Returns the number of top-level MPI Job group rows currently in the tree. */
   int mpiJobGroupCount() const { return m_mpiJobGroupCount; }
 
@@ -96,6 +117,9 @@ class AttachProcessDialog : public QDialog {
 
  private:
   void updateRemoteEndpointValidation();
+  void restoreRemoteDialogState();
+  void persistRemoteDialogState() const;
+  bool m_restoringRemoteState = false;
 
   QString m_procRoot;
   QString m_sysctlPath;

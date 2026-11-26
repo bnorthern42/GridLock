@@ -365,15 +365,24 @@ void MainWindow::onRankStateChanged(int rankId, const RankState& state) {
     }
     if (m_differentialGrid) m_differentialGrid->setVariableData(rankId, state.variableWatches);
     if (m_debugSessionActive && m_coordinator && m_coordinator->getProcessCount() > 0) {
+        const int procCount = m_coordinator->getProcessCount();
         bool allExited = true;
-        for (int r = 0; r < m_coordinator->getProcessCount(); ++r)
+        for (int r = 0; r < procCount; ++r)
             if (!m_latestStates.contains(r) || m_latestStates[r].currentState != QLatin1String("exited")) { allExited = false; break; }
         if (allExited) {
             m_debugSessionActive = false; m_cachedStackFrames.clear(); m_cachedThreads.clear(); m_selectedFrameLevel.clear();
             if (m_callStackDockWidget) m_callStackDockWidget->clearFrames();
-            updateDebugToolbarState();
+            if (m_editorTabManager) m_editorTabManager->clearInlineVariableValues();
+            updateDebugToolbarState(); syncRankCountChrome(procCount);
             if (SourceCodeView* sv = getSourceCodeView()) sv->highlightExecutionLine(-1);
-            updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("EXITED (0)"));
+            if (m_remoteAttachSession) {
+                const QString msg = QStringLiteral("[Remote Session] All %1 remote rank(s) exited cleanly.").arg(procCount);
+                if (m_gdbConsoleWidget) m_gdbConsoleWidget->appendDebuggerConsoleOutput(-1, msg, false);
+                appendProgramOutput(-1, msg, false); flushProgramOutputBatch();
+                updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("EXITED (REMOTE — %1 RANK%2)").arg(procCount).arg(procCount > 1 ? QStringLiteral("S") : QString()));
+            } else {
+                updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("EXITED (0)"));
+            }
         }
     }
 }

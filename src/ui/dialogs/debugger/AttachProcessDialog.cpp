@@ -27,12 +27,14 @@
 #include <QMap>
 #include <QPainter>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTabBar>
 #include <QTemporaryDir>
 #include <QVBoxLayout>
 
 #include "../../../core/managers/ConfigManager.hpp"
+#include "../../MainWindow.hpp"
 
 namespace gridlock::ui {
 
@@ -43,6 +45,18 @@ namespace {
 constexpr int kRolePid = Qt::UserRole;
 constexpr int kRoleIsGroup = Qt::UserRole + 1;
 constexpr int kRoleJobTag = Qt::UserRole + 2;
+
+RemoteTargetDialogState& fallbackRemoteDialogState() {
+  static RemoteTargetDialogState s_state;
+  return s_state;
+}
+
+MainWindow* resolveHostMainWindow(QWidget* w) {
+  for (QWidget* cur = w; cur != nullptr; cur = cur->parentWidget()) {
+    if (auto* mw = qobject_cast<MainWindow*>(cur)) return mw;
+  }
+  return nullptr;
+}
 
 }  // namespace
 
@@ -259,13 +273,34 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
   });
   connect(m_remoteEndpointEdit, &QLineEdit::textChanged, this, [this](const QString&) {
     updateRemoteEndpointValidation();
+    persistRemoteDialogState();
+  });
+  connect(m_remoteSymbolBinaryEdit, &QLineEdit::textChanged, this, [this](const QString&) {
+    persistRemoteDialogState();
+  });
+  connect(m_remoteGdbCombo, &QComboBox::currentTextChanged, this, [this](const QString&) {
+    updateRemoteEndpointValidation();
+    persistRemoteDialogState();
+  });
+  connect(m_remoteProtocolCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+    updateRemoteEndpointValidation();
+    persistRemoteDialogState();
   });
   connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int) {
     updateRemoteEndpointValidation();
+    persistRemoteDialogState();
   });
 
+  restoreRemoteDialogState();
   refreshProcesses();
   updateRemoteEndpointValidation();
+}
+
+AttachProcessDialog::~AttachProcessDialog() { persistRemoteDialogState(); }
+
+void AttachProcessDialog::done(int result) {
+  persistRemoteDialogState();
+  QDialog::done(result);
 }
 
 bool AttachProcessDialog::isRemoteTargetTabActive() const {
@@ -274,6 +309,72 @@ bool AttachProcessDialog::isRemoteTargetTabActive() const {
 
 void AttachProcessDialog::setRemoteTargetTabActive(bool active) {
   if (m_tabWidget) m_tabWidget->setCurrentIndex(active ? 1 : 0);
+  persistRemoteDialogState();
+}
+
+QString AttachProcessDialog::remoteEndpointText() const {
+  return m_remoteEndpointEdit ? m_remoteEndpointEdit->text() : QString();
+}
+
+QString AttachProcessDialog::localSymbolBinaryText() const {
+  return m_remoteSymbolBinaryEdit ? m_remoteSymbolBinaryEdit->text() : QString();
+}
+
+QString AttachProcessDialog::gdbBinaryText() const {
+  return m_remoteGdbCombo ? m_remoteGdbCombo->currentText() : QStringLiteral("gdb");
+}
+
+bool AttachProcessDialog::isExtendedRemoteProtocol() const {
+  return m_remoteProtocolCombo && m_remoteProtocolCombo->currentData().toBool();
+}
+
+void AttachProcessDialog::setRemoteTargetFields(const QString& endpoints,
+                                                const QString& localSymbolBinary,
+                                                const QString& gdbBinary,
+                                                bool extendedRemote) {
+  m_restoringRemoteState = true;
+  if (m_remoteEndpointEdit) m_remoteEndpointEdit->setText(endpoints);
+  if (m_remoteSymbolBinaryEdit) m_remoteSymbolBinaryEdit->setText(localSymbolBinary);
+  if (m_remoteGdbCombo && !gdbBinary.trimmed().isEmpty()) {
+    const int idx = m_remoteGdbCombo->findText(gdbBinary.trimmed());
+    if (idx >= 0) m_remoteGdbCombo->setCurrentIndex(idx);
+    else m_remoteGdbCombo->setEditText(gdbBinary.trimmed());
+  }
+  if (m_remoteProtocolCombo) m_remoteProtocolCombo->setCurrentIndex(extendedRemote ? 1 : 0);
+  m_restoringRemoteState = false;
+  updateRemoteEndpointValidation();
+  persistRemoteDialogState();
+}
+
+void AttachProcessDialog::restoreRemoteDialogState() {
+  MainWindow* mw = resolveHostMainWindow(parentWidget());
+  const RemoteTargetDialogState& saved = mw ? mw->remoteTargetDialogState() : fallbackRemoteDialogState();
+  if (!saved.initialized) return;
+  m_restoringRemoteState = true;
+  if (m_remoteEndpointEdit) { QSignalBlocker b(m_remoteEndpointEdit); m_remoteEndpointEdit->setText(saved.endpoints); }
+  if (m_remoteSymbolBinaryEdit) { QSignalBlocker b(m_remoteSymbolBinaryEdit); m_remoteSymbolBinaryEdit->setText(saved.localSymbolBinary); }
+  if (m_remoteGdbCombo && !saved.gdbBinary.trimmed().isEmpty()) {
+    QSignalBlocker b(m_remoteGdbCombo);
+    const int idx = m_remoteGdbCombo->findText(saved.gdbBinary.trimmed());
+    if (idx >= 0) m_remoteGdbCombo->setCurrentIndex(idx);
+    else m_remoteGdbCombo->setEditText(saved.gdbBinary.trimmed());
+  }
+  if (m_remoteProtocolCombo) { QSignalBlocker b(m_remoteProtocolCombo); m_remoteProtocolCombo->setCurrentIndex(saved.extendedRemote ? 1 : 0); }
+  if (m_tabWidget) { QSignalBlocker b(m_tabWidget); m_tabWidget->setCurrentIndex(saved.remoteTabActive ? 1 : 0); }
+  m_restoringRemoteState = false;
+}
+
+void AttachProcessDialog::persistRemoteDialogState() const {
+  if (m_restoringRemoteState || !m_remoteEndpointEdit) return;
+  RemoteTargetDialogState st;
+  st.endpoints = remoteEndpointText();
+  st.localSymbolBinary = localSymbolBinaryText();
+  st.gdbBinary = gdbBinaryText();
+  st.extendedRemote = isExtendedRemoteProtocol();
+  st.remoteTabActive = isRemoteTargetTabActive();
+  st.initialized = true;
+  if (MainWindow* mw = resolveHostMainWindow(parentWidget())) mw->setRemoteTargetDialogState(st);
+  else fallbackRemoteDialogState() = st;
 }
 
 QList<RemoteTargetSpec> AttachProcessDialog::selectedRemoteTargets() const {
@@ -386,6 +487,18 @@ bool AttachProcessDialog::captureDocumentationPreviews(
     QFile sysctlF(sysctlPath);
     if (sysctlF.open(QIODevice::WriteOnly)) sysctlF.write("1\n");
   }
+
+  MainWindow* hostMw = resolveHostMainWindow(parentWindow);
+  const RemoteTargetDialogState savedBeforePreview =
+      hostMw ? hostMw->remoteTargetDialogState() : fallbackRemoteDialogState();
+  struct PreviewStateGuard {
+    MainWindow* mw;
+    RemoteTargetDialogState prev;
+    ~PreviewStateGuard() {
+      if (mw) mw->setRemoteTargetDialogState(prev);
+      else fallbackRemoteDialogState() = prev;
+    }
+  } previewGuard{hostMw, savedBeforePreview};
 
   AttachProcessDialog dlg(parentWindow, fakeProcDir.path(), sysctlPath);
   dlg.resize(860, 520);

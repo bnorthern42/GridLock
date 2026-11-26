@@ -456,7 +456,8 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
         }
     }
     if (targets.isEmpty()) return false;
-    if (m_debugSessionActive) stopTargetWorkflow();
+    if (m_debugSessionActive || m_remoteAttachSession) stopTargetWorkflow();
+    m_remoteAttachSession = false;
     syncCoordinatorWithConfig(); if (!m_coordinator) return false;
     const bool attached = qobject_cast<GdbRankCoordinator*>(m_coordinator) ? qobject_cast<GdbRankCoordinator*>(m_coordinator)->attachToProcesses(targets)
                         : (qobject_cast<DapCoordinator*>(m_coordinator) ? qobject_cast<DapCoordinator*>(m_coordinator)->attachToProcesses(targets) : m_coordinator->attachToProcess(static_cast<qint64>(targets.first().pid)));
@@ -477,20 +478,63 @@ bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
 
 bool MainWindow::attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTargets) {
     if (explicitTargets.isEmpty()) return false;
-    if (m_debugSessionActive) stopTargetWorkflow();
+    if (m_debugSessionActive || m_remoteAttachSession) stopTargetWorkflow();
     gridlock::core::ConfigManager::instance().setDebuggerEngine(QStringLiteral("gdb")); syncCoordinatorWithConfig();
     auto* gdbCoord = qobject_cast<GdbRankCoordinator*>(m_coordinator);
-    if (!gdbCoord || !gdbCoord->attachToRemoteTargets(explicitTargets)) return false;
-    const int rankCount = explicitTargets.size(); m_debugSessionActive = true; m_focusedRank = 0; m_latestStates.clear(); QList<RankState> rankStates;
+    if (!gdbCoord) return false;
+
+    if (m_editorTabManager) {
+        for (int i = m_editorTabManager->count() - 1; i >= 0; --i) {
+            if (m_editorTabManager->isTabModified(i)) continue;
+            const QWidget* w = m_editorTabManager->widget(i);
+            const QString tabPath = w ? w->property("absolutePath").toString() : QString();
+            const QString title = m_editorTabManager->tabText(i);
+            if (tabPath.contains(QStringLiteral("/tutorial/")) || tabPath.startsWith(QStringLiteral("tutorial/")) ||
+                title.contains(QStringLiteral("Welcome"), Qt::CaseInsensitive) ||
+                title.contains(QStringLiteral("Tutorial"), Qt::CaseInsensitive)) {
+                emit m_editorTabManager->tabCloseRequested(i);
+            }
+        }
+    }
+
+    const QString symBin = explicitTargets.first().localSymbolBinary.trimmed();
+    if (!symBin.isEmpty() && QFileInfo::exists(symBin)) {
+        loadBinaryTarget(symBin);
+        if (const QString sibSrc = findSiblingSourceFile(symBin); !sibSrc.isEmpty() && QFileInfo::exists(sibSrc)) {
+            loadSourceFile(sibSrc);
+        }
+    }
+    if (m_editorTabManager) {
+        for (SourceCodeView* sv : m_editorTabManager->openViews()) {
+            if (!sv || sv->currentFile().isEmpty()) continue;
+            for (int bpLine : sv->breakpoints()) {
+                const auto bm = sv->breakpointInfoForLine(bpLine);
+                if (bm.temporary) gdbCoord->insertTemporaryBreakpoint(sv->currentFile(), bpLine, sv->breakpointCondition(bpLine), sv->breakpointRankFilterForLine(bpLine));
+                else gdbCoord->setBreakpoint(sv->currentFile(), bpLine, sv->breakpointCondition(bpLine), sv->breakpointRankFilterForLine(bpLine));
+                if (!bm.enabled) gdbCoord->setBreakpointEnabled(sv->currentFile(), bpLine, false);
+            }
+        }
+    }
+    if (!gdbCoord->attachToRemoteTargets(explicitTargets)) return false;
+
+    const int rankCount = explicitTargets.size();
+    m_debugSessionActive = true; m_remoteAttachSession = true; m_focusedRank = 0; m_latestStates.clear();
+    QList<RankState> rankStates;
     if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->beginLiveSession(rankCount);
     for (int r = 0; r < rankCount; ++r) {
         RankState st; st.rankId = r; st.currentState = QStringLiteral("stopped"); m_latestStates[r] = st; rankStates.append(st);
         if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateLiveRankRow(r, 0, QStringLiteral("PAUSED"), QStringLiteral("remote"), explicitTargets[r].endpoint, QStringLiteral("0x00000000"), rankCount);
     }
-    if (m_serverRackView) m_serverRackView->updateRanks(rankStates);
+    if (m_serverRackView) { m_serverRackView->updateRanks(rankStates); m_serverRackView->selectRank(0); }
+    if (m_workspacePerspective == QStringLiteral("Source")) setWorkspacePerspective(QStringLiteral("Debug"));
+    if (m_disassemblyView) {
+        m_disassemblyView->setVisible(true);
+        if (auto* ms = findChild<QSplitter*>(QStringLiteral("MasterHorizontalSplitter")); ms && ms->count() >= 2 && ms->sizes().value(1) == 0)
+            ms->setSizes({440, 520});
+    }
     if (m_memView) m_memView->setSourceModeLabel(QStringLiteral("REMOTE RANK 0 (%1)").arg(explicitTargets.first().endpoint));
     if (m_gdbConsoleWidget) m_gdbConsoleWidget->ensureRankCount(rankCount);
-    m_coordinator->requestStackAndThreads(0); updateDebugToolbarState();
+    updateDebugToolbarState(); syncRankCountChrome(rankCount); syncExecutionScopeUi();
     updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("REMOTE (%1)").arg(explicitTargets.first().endpoint));
     refreshStatusBarMemoryTelemetry(); return true;
 }

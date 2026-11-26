@@ -641,6 +641,7 @@ void MainWindow::updateDebugToolbarState() {
   syncAct(findChild<QAction*>(QStringLiteral("actionToolbarNexti")), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10) — step machine instruction over CALL"), QStringLiteral("Step Over Instruction (nexti) (Ctrl+Shift+F10)"));
   syncAct(m_pauseAction, QStringLiteral("Pause Focused Rank — interrupt execution on the active MPI rank"), QStringLiteral("Pause Focused Rank"));
   syncAct(m_stopAction, QStringLiteral("Stop Session (Shift+F5) — terminate active debugging session"), QStringLiteral("Stop Session (Shift+F5)"));
+  if (m_stopAction && m_remoteAttachSession) m_stopAction->setEnabled(true);
   auto syncBtn = [&](QWidget* w, const QString& onTip, const QString& name) { if (w) { w->setEnabled(active); w->setToolTip(active ? onTip : (name + idleWhy)); } };
   syncBtn(findChild<QPushButton*>(QStringLiteral("disasmStepiBtn")), QStringLiteral("Step Instruction (stepi) — execute one machine instruction"), QStringLiteral("Step Instruction (stepi)"));
   syncBtn(findChild<QPushButton*>(QStringLiteral("disasmNextiBtn")), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"), QStringLiteral("Next Instruction (nexti) (Ctrl+Shift+F10)"));

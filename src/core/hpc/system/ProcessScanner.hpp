@@ -49,6 +49,19 @@ struct RemoteTargetSpec {
 };
 
 /**
+ * @struct RemoteTargetDialogState
+ * @brief In-memory session state preserving Remote Target dialog inputs across reopens.
+ */
+struct RemoteTargetDialogState {
+  QString endpoints = QStringLiteral("localhost:1234");  ///< Raw endpoint/range input text.
+  QString localSymbolBinary;                             ///< Local ELF DWARF symbol path.
+  QString gdbBinary = QStringLiteral("gdb");             ///< Selected or custom GDB executable.
+  bool extendedRemote = false;                           ///< True when `extended-remote` is selected.
+  bool remoteTabActive = false;                          ///< True when Tab 2 (Remote Target) was active.
+  bool initialized = false;                              ///< True once populated by user interaction.
+};
+
+/**
  * @class ProcessScanner
  * @brief Stateless `/proc` process discovery, remote endpoint expander, and `ptrace_scope` utility.
  */

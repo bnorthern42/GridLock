@@ -222,7 +222,7 @@ class GdbRankCoordinator : public IBackendCoordinator {
     int id = 0; std::unique_ptr<QProcess> process; int fifoInFd = -1, fifoOutFd = -1;
     QSocketNotifier* fifoNotifier = nullptr; pid_t inferiorPid = 0; RankState state; QString buffer;
     QString lastHoverVarName; QPoint lastHoverPos; QString lastEvalExpression; QStringList pendingAfterStopCmds;
-    bool autoContinueAfterPending = false, pendingAttach = false, isAttached = false;
+    bool autoContinueAfterPending = false, pendingAttach = false, isAttached = false, isRemoteAttach = false;
     int pendingInterruptSignals = 0; QString pendingLogpointMessage; QMap<QString, QString> pendingLogpointArgs;
   };
   struct PendingWatchpoint {

@@ -250,14 +250,16 @@ void MainWindow::updateStatusTelemetry(const QString& pcOrSeek, const QString& t
 
 /** @brief Synchronizes ServerRackDock and multi-rank selector visibility for single vs multi-rank runs. */
 void MainWindow::syncRankCountChrome(int rankCount) {
+  const int liveCoordRanks = (m_coordinator && m_coordinator->getProcessCount() > 0) ? m_coordinator->getProcessCount() : 0;
+  const int trackedRanks = static_cast<int>(m_latestStates.size());
   const int ranks = (rankCount > 0) ? rankCount
-                    : ((m_debugSessionActive && m_coordinator && m_coordinator->getProcessCount() > 0)
-                           ? m_coordinator->getProcessCount()
+                    : (((m_debugSessionActive || m_remoteAttachSession) && (liveCoordRanks > 0 || trackedRanks > 0))
+                           ? std::max(liveCoordRanks, trackedRanks)
                            : (m_rankCountSpin ? m_rankCountSpin->value() : 1));
   const bool multi = (ranks > 1);
   const bool isMpiPersp = (m_workspacePerspective == QStringLiteral("MPI"));
-  const bool showMpiChrome = multi || isMpiPersp;
-  const bool hideRight = (m_workspacePerspective == QStringLiteral("Source") && !m_debugSessionActive);
+  const bool showMpiChrome = multi || isMpiPersp || m_remoteAttachSession;
+  const bool hideRight = (m_workspacePerspective == QStringLiteral("Source") && !m_debugSessionActive && !m_remoteAttachSession);
   auto* varsDock = findChild<QDockWidget*>(QStringLiteral("VariablesDock"));
   auto* cstackDock = findChild<QDockWidget*>(QStringLiteral("CallStackDock"));
   auto* rackDock = findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));

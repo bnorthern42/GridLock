@@ -334,7 +334,13 @@ void GdbRankCoordinator::sendDebuggerCommand(int rank, const QString& command) {
     if (targetRank < 0 || targetRank >= static_cast<int>(m_processes.size()) || !m_processes[targetRank]) return;
     const bool isInterrupt = (trimmed == QLatin1String("-exec-interrupt") || trimmed == QLatin1String("interrupt"));
     if (!isInterrupt && m_processes[targetRank]->state.currentState != QLatin1String("stopped")) {
-      emit debuggerConsoleOutput(targetRank, QStringLiteral("Rank %1 is running; pause execution before inspecting state.").arg(targetRank), true);
+      const QString st = m_processes[targetRank]->state.currentState;
+      emit debuggerConsoleOutput(
+          targetRank,
+          st == QLatin1String("exited")
+              ? QStringLiteral("Rank %1 has exited; reconnect or restart before inspecting state.").arg(targetRank)
+              : QStringLiteral("Rank %1 is running; pause execution before inspecting state.").arg(targetRank),
+          true);
       return;
     }
     if (trimmed.startsWith(QLatin1Char('-'))) {

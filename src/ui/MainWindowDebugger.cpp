@@ -358,7 +358,7 @@ void MainWindow::startTargetWorkflow() {
             if (m_mpiDiagnosticsWidget) m_mpiDiagnosticsWidget->updateRankStateRow(r, QStringLiteral("RUNNING"), QStringLiteral("main"), QStringLiteral("ALL RANKS"), 0ULL, rankCount);
         }
         if (m_serverRackView) { m_serverRackView->updateRanks(initialRanks); m_serverRackView->selectRank(preserveRank); }
-        m_debugSessionActive = true;
+        m_debugSessionActive = true; m_remoteAttachSession = false;
         if (m_workspacePerspective == QStringLiteral("Source")) setWorkspacePerspective(QStringLiteral("Debug"));
         updateDebugToolbarState(); syncRankCountChrome(rankCount); updateStatusTelemetry(QStringLiteral("0x00000000"), QStringLiteral("RUNNING"));
         const auto projCfg = gridlock::core::ConfigManager::instance().loadProjectSettings();
@@ -466,7 +466,7 @@ bool MainWindow::continueExecutionWorkflow() {
 
 /** @brief Terminates the active debugging session, reaps child ranks, and restores static ELF inspection. */
 void MainWindow::stopTargetWorkflow() {
-    m_debugSessionActive = false; m_rankLoopCounter.clear();
+    m_debugSessionActive = false; m_remoteAttachSession = false; m_rankLoopCounter.clear();
     if (m_isShuttingDown || m_isClosing) {
         if (m_runAction) m_runAction->setChecked(false);
         if (m_coordinator) m_coordinator->terminateSession();
@@ -478,6 +478,7 @@ void MainWindow::stopTargetWorkflow() {
         st.currentState = QStringLiteral("idle"); st.registers[16] = QStringLiteral("—");
         if (m_serverRackView) m_serverRackView->updateRankState(rankId, st);
     }
+    syncRankCountChrome();
     if (m_disassemblyView) { m_disassemblyView->setDeadlockCycleRanks({}); m_disassemblyView->setActiveSteppingRank(-1, 0ULL); }
     if (SourceCodeView* srcView = sourceCodeView()) srcView->highlightExecutionLine(-1);
     if (m_editorTabManager) m_editorTabManager->clearInlineVariableValues();

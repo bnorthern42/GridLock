@@ -611,3 +611,175 @@ void TestMainWindowUI::testCowCheckpointsAndProcSafety() {
     QVERIFY(pal && pal->isVisible()); pal->setFilterText(QStringLiteral("> Process Checkpoints")); QVERIFY(pal->resultCount() > 0 && pal->resultItemAt(0).title.contains(QStringLiteral("Process Checkpoints"))); QTest::keyClick(pal->inputEdit(), Qt::Key_Escape);
     testCleanExitWhileTargetRunning(); testMultiRankScopePauseAllAndRackFilter(); testLaunchOptionsCliArgsAndUnifiedSessionStart(); testLiveVariableRegisterEditingAndFullValueInspection(); testKeybindingsLightThemeLegibility(); testPreLaunchExecutableGuardAndExtensionlessSiblingCompile();
 }
+
+void TestMainWindowUI::testRemoteTargetPersistenceAndExitedRankGuard() {
+    gridlock::ui::MainWindow mw; mw.resize(1440, 900); mw.show(); QApplication::processEvents();
+
+    // 1. Remote Target dialog inputs persist across close/reopen on the same MainWindow session.
+    {
+        gridlock::ui::AttachProcessDialog dlg1(&mw);
+        dlg1.setRemoteTargetTabActive(true);
+        dlg1.setRemoteTargetFields(QStringLiteral("localhost:2345..2348"),
+                                   QStringLiteral("/tmp/gl_remote_host/mpi_probe"),
+                                   QStringLiteral("gdb-multiarch"), true);
+        QCOMPARE(dlg1.remoteEndpointText(), QStringLiteral("localhost:2345..2348"));
+        QCOMPARE(dlg1.localSymbolBinaryText(), QStringLiteral("/tmp/gl_remote_host/mpi_probe"));
+        QCOMPARE(dlg1.gdbBinaryText(), QStringLiteral("gdb-multiarch"));
+        QVERIFY(dlg1.isExtendedRemoteProtocol() && dlg1.isRemoteTargetTabActive());
+        dlg1.reject();
+    }
+    {
+        gridlock::ui::AttachProcessDialog dlg2(&mw);
+        QVERIFY2(dlg2.isRemoteTargetTabActive(), "Reopened AttachProcessDialog must restore active Remote Target tab");
+        QCOMPARE(dlg2.remoteEndpointText(), QStringLiteral("localhost:2345..2348"));
+        QCOMPARE(dlg2.localSymbolBinaryText(), QStringLiteral("/tmp/gl_remote_host/mpi_probe"));
+        QCOMPARE(dlg2.gdbBinaryText(), QStringLiteral("gdb-multiarch"));
+        QVERIFY2(dlg2.isExtendedRemoteProtocol(), "Reopened AttachProcessDialog must restore extended-remote protocol mode");
+        dlg2.reject();
+    }
+    {
+        gridlock::ui::MainWindow separateMw;
+        gridlock::ui::AttachProcessDialog cleanDlg(&separateMw);
+        QVERIFY(!cleanDlg.isRemoteTargetTabActive());
+        QCOMPARE(cleanDlg.remoteEndpointText(), QStringLiteral("localhost:1234"));
+    }
+
+    // 2. Remote attach dismisses startup tutorial tab, switches to Debug perspective, holds unknown-frame attach paused,
+    //    and guards =thread-group-exited so no No registers / not being run errors occur while keeping ServerRack visible.
+    auto* editorTabs = mw.editorTabManager();
+    auto* rackView = mw.serverRackView();
+    auto* rackDock = mw.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+    auto* gdbConsole = mw.gdbConsoleWidget();
+    auto* consoleView = gdbConsole ? gdbConsole->findChild<QPlainTextEdit*>(QStringLiteral("gdbConsoleViewport")) : nullptr;
+    auto* statusLbl = mw.findChild<QLabel*>(QStringLiteral("cutterStatusTelemetryLabel"));
+    QVERIFY(editorTabs && rackView && rackDock && gdbConsole && consoleView);
+
+    const QList<gridlock::RemoteTargetSpec> mockSpecs = gridlock::ProcessScanner::expandRemoteEndpoints(
+        QStringLiteral("127.0.0.1:65431..65434"), QString(), QStringLiteral("gdb"), true);
+    QCOMPARE(mockSpecs.size(), 4);
+    QVERIFY(mw.attachToRemoteTargets(mockSpecs));
+    QApplication::processEvents();
+    for (int i = 0; i < editorTabs->count(); ++i) {
+        const QString p = editorTabs->widget(i) ? editorTabs->widget(i)->property("absolutePath").toString() : QString();
+        QVERIFY2(!p.contains(QStringLiteral("/tutorial/")), qPrintable(p));
+    }
+    QCOMPARE(mw.workspacePerspective(), QStringLiteral("Debug"));
+    QVERIFY(mw.disassemblyView() && !mw.disassemblyView()->isHidden() && !rackDock->isHidden());
+    mw.stopTargetWorkflow();
+
+    gridlock::GdbRankCoordinator mockCoord;
+    mockCoord.initializeMockSession(4);
+    mw.setCoordinator(&mockCoord);
+    QStringList postAttachCmds, postExitCmds;
+    QStringList errorConsoleLines;
+    bool exitedPhase = false;
+    connect(&mockCoord, &gridlock::GdbRankCoordinator::commandSentToGdb, [&](int, const QString& c) {
+        if (exitedPhase) postExitCmds.append(c.trimmed());
+        else postAttachCmds.append(c.trimmed());
+    });
+    connect(&mockCoord, &IBackendCoordinator::debuggerConsoleOutput, [&](int, const QString& line, bool isErr) {
+        if (isErr) errorConsoleLines.append(line);
+    });
+
+    // Simulate GDB 16.3 remote attach stop inside ld-linux (no fullname, no reason=) followed by bare ^connected.
+    for (int r = 0; r < 4; ++r) {
+        mockCoord.processGdbOutput(r, QStringLiteral(
+            "=thread-group-started,id=\"i1\",pid=\"%1\"\n"
+            "*stopped,frame={addr=\"0x00007ffff7fe4300\",func=\"??\",args=[],from=\"target:/lib64/ld-linux-x86-64.so.2\",arch=\"i386:x86-64\"},thread-id=\"1\",stopped-threads=\"all\"\n"
+            "^connected\n").arg(2100 + r));
+    }
+    QApplication::processEvents();
+    //Note: initializeMockSession sets isAttached=false unless attached; verify =thread-group-exited guard directly on stopped ranks first.
+    for (int r = 0; r < 4; ++r) {
+        mockCoord.processGdbOutput(r, QStringLiteral(
+            "*stopped,reason=\"signal-received\",signal-name=\"SIGTRAP\",frame={addr=\"0x00007ffff7fe4300\",func=\"_start\",args=[],arch=\"i386:x86-64\"},thread-id=\"1\",stopped-threads=\"all\"\n"
+            "^connected\n"));
+        QCOMPARE(mockCoord.getRankState(r).currentState, QStringLiteral("stopped"));
+    }
+    QApplication::processEvents();
+
+    exitedPhase = true;
+    postExitCmds.clear();
+    errorConsoleLines.clear();
+    for (int r = 0; r < 4; ++r) {
+        mockCoord.processGdbOutput(r, QStringLiteral(
+            "=thread-group-exited,id=\"i1\",exit-code=\"0\"\n"
+            "^error,msg=\"No registers.\"\n"
+            "^error,msg=\"The program is not being run.\"\n"));
+        mockCoord.requestStackAndThreads(r);
+        mockCoord.selectStackFrame(r, 1, 0);
+        mockCoord.evaluateExpression(r, QStringLiteral("rank"));
+    }
+    QApplication::processEvents();
+
+    for (const QString& cmd : postExitCmds) {
+        QVERIFY2(!cmd.contains(QStringLiteral("-data-list-register-values")) &&
+                 !cmd.contains(QStringLiteral("-stack-list-frames")) &&
+                 !cmd.contains(QStringLiteral("-stack-list-variables")),
+                 qPrintable(QStringLiteral("Forbidden inspection MI sent to exited rank: %1").arg(cmd)));
+    }
+    for (const QString& err : errorConsoleLines) {
+        QVERIFY2(!err.contains(QStringLiteral("No registers"), Qt::CaseInsensitive) &&
+                 !err.contains(QStringLiteral("not being run"), Qt::CaseInsensitive),
+                 qPrintable(err));
+    }
+    QCOMPARE(rackView->count(), 4);
+    for (int r = 0; r < 4; ++r) {
+        const auto st = rackView->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>();
+        QCOMPARE(st.currentState, QStringLiteral("exited"));
+        QVERIFY(!rackView->item(r)->isHidden());
+    }
+    if (statusLbl) QVERIFY(statusLbl->text().contains(QStringLiteral("EXITED"), Qt::CaseInsensitive));
+
+    // 3. Optional live end-to-end verification against Debian 13 QEMU VM (localhost:2345..2348 + /tmp/gl_remote_host/mpi_probe).
+    if (qEnvironmentVariableIntValue("GL_VERIFY_LIVE_QEMU_REMOTE") == 1) {
+        gridlock::ui::MainWindow liveMw; liveMw.resize(1440, 900); liveMw.show(); QApplication::processEvents();
+        QStringList liveErrors;
+        const auto liveSpecs = gridlock::ProcessScanner::expandRemoteEndpoints(
+            QStringLiteral("localhost:2345..2348"), QStringLiteral("/tmp/gl_remote_host/mpi_probe"), QStringLiteral("gdb"), true);
+        QCOMPARE(liveSpecs.size(), 4);
+        QVERIFY2(liveMw.attachToRemoteTargets(liveSpecs), "Live QEMU remote attach to localhost:2345..2348 must succeed");
+        connect(liveMw.coordinator(), &IBackendCoordinator::debuggerConsoleOutput, [&](int, const QString& m, bool isErr) {
+            if (isErr) liveErrors.append(m);
+        });
+        auto* liveCoord = dynamic_cast<gridlock::GdbRankCoordinator*>(liveMw.coordinator());
+        QVERIFY(liveCoord != nullptr);
+        QTRY_VERIFY_WITH_TIMEOUT(liveCoord->getRankState(0).currentState == QStringLiteral("stopped") &&
+                                 liveCoord->getRankState(1).currentState == QStringLiteral("stopped") &&
+                                 liveCoord->getRankState(2).currentState == QStringLiteral("stopped") &&
+                                 liveCoord->getRankState(3).currentState == QStringLiteral("stopped"), 8000);
+        // Hold 500 ms to prove fast unbreakpointed remote targets do NOT auto-continue and exit!
+        QTest::qWait(500);
+        for (int r = 0; r < 4; ++r) QCOMPARE(liveCoord->getRankState(r).currentState, QStringLiteral("stopped"));
+        auto* csTable = liveMw.findChild<QTableWidget*>(QStringLiteral("callStackTable"));
+        auto* regTbl = liveMw.findChild<QTableWidget*>(QStringLiteral("cutterRegisterTable"));
+        QVERIFY(csTable && regTbl);
+        QTRY_VERIFY_WITH_TIMEOUT(csTable->rowCount() >= 1 && regTbl->rowCount() >= 1, 5000);
+        // Set breakpoint on MPI_Allreduce in /tmp/gl_remote_test/mpi_probe.cpp, continue, verify DWARF frame, then continue to exit.
+        liveCoord->setBreakpoint(QStringLiteral("/tmp/gl_remote_test/mpi_probe.cpp"), 16);
+        QTest::qWait(150);
+        QVERIFY(liveMw.continueExecutionWorkflow());
+        QTRY_VERIFY_WITH_TIMEOUT(liveCoord->getRankState(0).currentState == QStringLiteral("stopped") &&
+                                 liveCoord->getRankState(0).currentFunction == QStringLiteral("main"), 8000);
+        liveCoord->clearBreakpoints();
+        QTest::qWait(100);
+        QVERIFY(liveMw.continueExecutionWorkflow());
+        QTRY_VERIFY_WITH_TIMEOUT(liveCoord->getRankState(0).currentState == QStringLiteral("exited") &&
+                                 liveCoord->getRankState(1).currentState == QStringLiteral("exited") &&
+                                 liveCoord->getRankState(2).currentState == QStringLiteral("exited") &&
+                                 liveCoord->getRankState(3).currentState == QStringLiteral("exited"), 10000);
+        QTest::qWait(300);
+        auto* liveRackDock = liveMw.findChild<QDockWidget*>(QStringLiteral("ServerRackDock"));
+        QVERIFY(liveRackDock && !liveRackDock->isHidden() && liveMw.serverRackView()->count() == 4);
+        for (int r = 0; r < 4; ++r) {
+            const auto st = liveMw.serverRackView()->item(r)->data(Qt::UserRole + 1).value<gridlock::RankState>();
+            QCOMPARE(st.currentState, QStringLiteral("exited"));
+        }
+        for (const QString& e : liveErrors) {
+            QVERIFY2(!e.contains(QStringLiteral("No registers"), Qt::CaseInsensitive) &&
+                     !e.contains(QStringLiteral("not being run"), Qt::CaseInsensitive),
+                     qPrintable(e));
+        }
+        liveMw.stopTargetWorkflow();
+    }
+}

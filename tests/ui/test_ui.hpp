@@ -204,5 +204,8 @@ private slots:
 
     /** @brief Verifies fail-loud build error handling, backend/ptrace preflight recovery, validatePatchBytes + Revert All Patches, confirmation guards, and PointerGraph/ArrayPlot Undo Clear. */
     void testBuildPreflightValidatedPatchingAndSafetyGuards();
+
+    /** @brief Verifies Remote Target dialog field persistence across opens, initial remote attach pause + tutorial tab dismissal, and exited-rank inspection guards with retained ServerRack visibility. */
+    void testRemoteTargetPersistenceAndExitedRankGuard();
 };
 
