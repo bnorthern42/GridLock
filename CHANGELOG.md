@@ -5,6 +5,42 @@ All notable changes to the GridLock project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-11-25
+
+### Added
+- **Frozen C99 Plugin ABI (`v1.0`) & Header-Only C++23 Wrappers (`include/gridlock/plugin_api.h`, `include/gridlock/plugin_cpp_helpers.hpp`, `tests/core/test_plugin_abi.cpp`)**:
+  - Added binary-stable C99 plugin ABI `v1.0` (`GRIDLOCK_PLUGIN_ABI_MAJOR = 1u`, `GRIDLOCK_PLUGIN_ABI_MINOR = 0u`) with 16-byte `(struct_size, abi_major, abi_minor, reserved_flags)` headers on all 9 standard-layout POD structs, explicit `GRIDLOCK_CALL` calling convention, forward-compatible `void* reserved[8]` expansion slots, 28 `GridLockHostApi` callbacks, and compile-time `sizeof` / `offsetof` `static_assert` layout locks.
+  - Added optional header-only `noexcept` C++23 convenience wrappers (`gridlock::plugin`) providing `std::expected` expression evaluation, interactive input prompts, RAII host byte buffers, typed `readPod<T>` / `readBytes` reads, and theme queries with zero Qt dependencies.
+- **Zero-Inferior-Call DWARF / MI Introspection (`PluginHostBridge`, `include/gridlock/plugin_api.h`)**:
+  - Added `query_type_info` (`GridLockTypeInfo`) and `resolve_contiguous_range` (`GridLockContiguousRange`) host callbacks and C++23 helpers (`gp::queryTypeInfo`, `gp::resolveContiguousRange`) to resolve C arrays (`T[N]`), `std::array`, `std::vector`, `std::span`, and `std::valarray` across `libstdc++` and `libc++` without invoking inferior functions.
+- **PluginManager & Host Bridge (`src/core/plugins/PluginManager.*`, `PluginHostBridge*.cpp`, `ConfigManager*`)**:
+  - Added dual `UserGlobal` (`~/.config/gridlock/plugins/`) and `Workspace` (`<workspace>/.gridlock/plugins/`) shared-library discovery, pre-`dlopen` SHA-256 workspace trust gating (`[plugins.trusted_workspace_binaries]`), POSIX world-writable and symlink-escape checks, callback-depth unload deferral (`m_callbackDepth`), FIFO stop-event queueing (`m_pendingStops`), and local `process_vm_readv` target memory reads.
+- **Decentralized Multi-Forge Installer & Manifests (`PluginInstaller`, `PluginManifest`, `PluginSettingsPage`)**:
+  - Added shell-free `QProcess` plugin installation supporting `owner/repo` and `github:` / `gitlab:` (including nested subgroups) / `codeberg:` shorthand as well as custom `https://` and `git@` URLs across GitHub, GitLab, Codeberg, Gitea, and self-hosted Git servers.
+  - Added declarative `plugins.toml` manifest syncing, reproducible user-global `~/.config/gridlock/plugins-lock.toml` commit and `SHA-256` binary pinning, per-row **Update** and toolbar **Update All** actions, and `Version (<commit>)` provenance display with full tooltips.
+- **Live Hot-Reload, Conformance Verifier & Scaffolding Generator (`PluginManager`, `PluginVerifier`, `CliParser`, `scripts/init_plugin.lua`)**:
+  - Added in-place **Hot-Reload Now** (`PluginManager::hotReloadPlugins`) with Linux `STB_GNU_UNIQUE` (`'u'`) symbol detection and active MPI session `on_session_start` replay.
+  - Added sandboxed post-build conformance verification (`PluginVerifier::verifyBinary`) and the headless `gridlock --verify-plugin <path.so>` CLI flag validating dynamic symbol hygiene, ABI headers, action/regex registrations, dry-run lifecycle hooks, and zero leaked `alloc_bytes` heap blocks.
+  - Added interactive and `--yes` CLI Lua plugin scaffolding generator (`scripts/init_plugin.lua`) emitting C++23 or C99 starter sources, `plugin.map` linker version scripts, and Meson, CMake, or Make build files.
+- **Workstation UI Extension Surfaces (`MainWindowPlugins`, `PluginReportDockWidget`, `VariablesDockWidget`, `SourceCodeView`, `CallStackDockWidget`, `ServerRackView`)**:
+  - Added hierarchical `Tools -> Plugins` submenus (up to 4 segments with shortcut collision checks), clickable status-bar badges, context-menu `Plugin Actions` across all 5 surfaces (`Variables`, `CodeEditor`, `CallStack`, `Breakpoints`, `RankList`), inline editor stop annotations, live `ThemeManager` token synchronization (`on_theme_changed`), and declarative `PluginReportDockWidget` tabs (`MARKDOWN`, `KEY_VALUE_TABLE`, `JSON_TREE`).
+- **Plugin Documentation, Guides & Reference Example (`docs/`, `examples/plugins/domain_mesh_probe/`, `scripts/README.md`)**:
+  - Added end-user plugin guide (`docs/Plugins.md`), three-volume C99 ABI developer encyclopedia (`docs/Plugin-Architecture-and-Lifecycle.md`, `docs/Plugin-C99-ABI-Reference.md`, `docs/Plugin-Authoring-and-UI-Surfaces.md`), `scripts/README.md`, semantic GitHub Alerts and palette swatches across `README.md` and `docs/`, and the reference out-of-tree plugin (`examples/plugins/domain_mesh_probe/`).
+
+### Changed
+- **Silent Plugin Expression Channel (`GdbRankCoordinator`, `GdbMiParser`, `PluginHostBridge`)**:
+  - Routed plugin `eval_expr` queries through a dedicated silent MI token channel (`m_pendingPluginEvals` / `pluginExpressionReady`) so internal plugin probes never pollute the user's **Evaluator** tab history.
+- **Preferences & Installed Plugin Table Layout (`PreferencesDialog`, `PluginSettingsPage`)**:
+  - Widened `PreferencesDialog` and refined `PluginSettingsPage` so all 8 **Installed** table columns, `Version (<commit>)` cells, and `Update` / `Update All` / `Install` buttons fit cleanly without horizontal scrolling or label clipping.
+- **Release Version & Post-`v0.9.0` Roadmap Alignment (`meson.build`, `README.md`, `docs/ROADMAP.md`, `scripts/sync_wiki.sh`)**:
+  - Bumped GridLock's application version to `0.9.0`, aligned post-`v0.9.0` roadmap milestones (`v0.10.0`, `v0.11.0`, and pre-`v1.0.0` target framing) in `README.md` and `docs/ROADMAP.md`, and updated `scripts/sync_wiki.sh` to mirror all 14 documentation pages including the plugin guides to the GitHub Wiki.
+
+### Fixed
+- **Code-Editor Symbol Extraction & Variable Type Resolution (`SourceCodeViewInteraction`, `MainWindowPlugins`)**:
+  - Excluded trailing method-call segments (`(?!\s*\()`) from code-editor hover and context-menu symbol extraction so expressions like `domain.swap(next)` resolve to `domain` rather than a member function pointer, and populated `type_utf8` from `VariableTreeModel` when available.
+- **Mermaid Diagram Syntax & Wiki Sync Reliability (`docs/Plugin-Architecture-and-Lifecycle.md`, `.github/workflows/sync-wiki.yml`)**:
+  - Fixed `stateDiagram-v2` Mermaid transition label syntax (replacing unescaped `->` and `::` tokens inside transition descriptions) and hardened `.github/workflows/sync-wiki.yml` with workflow concurrency and pull-rebase retries before pushing wiki updates.
+
 ## [0.8.81] - 2026-11-23
 
 ### Fixed
