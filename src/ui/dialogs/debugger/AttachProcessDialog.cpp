@@ -27,6 +27,7 @@
 #include <QMap>
 #include <QPainter>
 #include <QSet>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QTabBar>
@@ -299,7 +300,7 @@ AttachProcessDialog::AttachProcessDialog(QWidget* parent,
 AttachProcessDialog::~AttachProcessDialog() { persistRemoteDialogState(); }
 
 void AttachProcessDialog::done(int result) {
-  persistRemoteDialogState();
+  persistRemoteDialogState(result == QDialog::Accepted);
   QDialog::done(result);
 }
 
@@ -348,6 +349,7 @@ void AttachProcessDialog::setRemoteTargetFields(const QString& endpoints,
 
 void AttachProcessDialog::restoreRemoteDialogState() {
   MainWindow* mw = resolveHostMainWindow(parentWidget());
+  if (mw && !mw->remoteTargetDialogState().initialized) mw->loadRemoteTargetDialogState();
   const RemoteTargetDialogState& saved = mw ? mw->remoteTargetDialogState() : fallbackRemoteDialogState();
   if (!saved.initialized) return;
   m_restoringRemoteState = true;
@@ -364,7 +366,7 @@ void AttachProcessDialog::restoreRemoteDialogState() {
   m_restoringRemoteState = false;
 }
 
-void AttachProcessDialog::persistRemoteDialogState() const {
+void AttachProcessDialog::persistRemoteDialogState(bool flushToQSettings) const {
   if (m_restoringRemoteState || !m_remoteEndpointEdit) return;
   RemoteTargetDialogState st;
   st.endpoints = remoteEndpointText();
@@ -373,8 +375,23 @@ void AttachProcessDialog::persistRemoteDialogState() const {
   st.extendedRemote = isExtendedRemoteProtocol();
   st.remoteTabActive = isRemoteTargetTabActive();
   st.initialized = true;
-  if (MainWindow* mw = resolveHostMainWindow(parentWidget())) mw->setRemoteTargetDialogState(st);
-  else fallbackRemoteDialogState() = st;
+  if (MainWindow* mw = resolveHostMainWindow(parentWidget())) {
+    if (flushToQSettings) mw->saveRemoteTargetDialogState(st);
+    else mw->setRemoteTargetDialogState(st);
+  } else {
+    fallbackRemoteDialogState() = st;
+    if (flushToQSettings) {
+      QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+      s.beginGroup(QStringLiteral("RemoteTarget"));
+      s.setValue(QStringLiteral("endpoints"), st.endpoints);
+      s.setValue(QStringLiteral("symbol_binary"), st.localSymbolBinary);
+      s.setValue(QStringLiteral("gdb_binary"), st.gdbBinary);
+      s.setValue(QStringLiteral("protocol_mode"), st.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"));
+      s.setValue(QStringLiteral("remote_tab_active"), st.remoteTabActive);
+      s.endGroup();
+      s.sync();
+    }
+  }
 }
 
 QList<RemoteTargetSpec> AttachProcessDialog::selectedRemoteTargets() const {

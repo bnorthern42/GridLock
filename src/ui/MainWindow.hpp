@@ -296,6 +296,10 @@ public:
     const RemoteTargetDialogState& remoteTargetDialogState() const { return m_remoteDialogState; }
     /** @brief Stores the latest Remote Target dialog fields in memory across dialog reopens. */
     void setRemoteTargetDialogState(const RemoteTargetDialogState& state) { m_remoteDialogState = state; }
+    /** @brief Loads persisted `RemoteTarget/` fields from `QSettings` into `m_remoteDialogState`. */
+    void loadRemoteTargetDialogState();
+    /** @brief Saves @p state both in memory (`m_remoteDialogState`) and to `QSettings` (`RemoteTarget/`). */
+    void saveRemoteTargetDialogState(const RemoteTargetDialogState& state);
     /** @brief Populates preview fixtures for automated headless snapshots. */
     void loadPreviewFixture();
     /** @brief Returns the canonical or absolute path of the active workspace directory. */

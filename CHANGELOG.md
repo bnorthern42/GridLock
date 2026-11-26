@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > Planned `0.9.1` patch line.
 
 ### Added
-- **Remote Target Dialog Session Persistence (`AttachProcessDialog`, `MainWindow`, `ProcessScanner`)**:
-  - Preserved `Endpoint(s)`, `Local Symbol Binary (ELF)`, `GDB Binary`, `Protocol Mode` (`remote` vs. `extended-remote`), and active tab selection in memory across dialog opens during a running session (`RemoteTargetDialogState`).
-- **Headless Remote Attach & Exited-Rank Regression Coverage (`tests/ui/test_ui_debugger.cpp`)**:
-  - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard`) verifying Remote Target dialog field persistence across reopens, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards (plus optional live QEMU `gdbserver --multi` verification).
+- **Remote Target Dialog `QSettings` & Session Persistence (`AttachProcessDialog`, `MainWindow`, `ProcessScanner`)**:
+  - Persisted `Endpoint(s)`, `Local Symbol Binary (ELF)`, `GDB Binary`, `Protocol Mode` (`remote` vs. `extended-remote`), and active tab selection both in memory across dialog reopens and across GridLock restarts under `RemoteTarget/` in `QSettings` (`RemoteTargetDialogState`).
+- **Headless Remote Attach, QEMU `gdbstub` & Exited-Rank Regression Coverage (`tests/ui/test_ui_debugger.cpp`)**:
+  - Added headless `QtTest` regression coverage (`testRemoteTargetPersistenceAndExitedRankGuard` and `testRemoteTargetQSettingsAndQemuStubAttach`) verifying isolated `QSettings` round-trip persistence across restarts, single-rank QEMU system `gdbstub` (`localhost:1234` without a local ELF symbol binary) attach/detach, initial remote attach stop retention, tutorial tab dismissal, and exited-inferior inspection guards.
 
 ### Changed
 - **Meson `>= 1.3.0` Build Requirement & HPC Prerequisites (`meson.build`, `README.md`)**:

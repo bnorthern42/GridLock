@@ -118,7 +118,7 @@ class AttachProcessDialog : public QDialog {
  private:
   void updateRemoteEndpointValidation();
   void restoreRemoteDialogState();
-  void persistRemoteDialogState() const;
+  void persistRemoteDialogState(bool flushToQSettings = false) const;
   bool m_restoringRemoteState = false;
 
   QString m_procRoot;

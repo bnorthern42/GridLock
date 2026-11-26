@@ -207,5 +207,8 @@ private slots:
 
     /** @brief Verifies Remote Target dialog field persistence across opens, initial remote attach pause + tutorial tab dismissal, and exited-rank inspection guards with retained ServerRack visibility. */
     void testRemoteTargetPersistenceAndExitedRankGuard();
+
+    /** @brief Verifies RemoteTargetDialogState QSettings round-trip across MainWindow restarts and single-rank QEMU gdbstub attach/detach. */
+    void testRemoteTargetQSettingsAndQemuStubAttach();
 };
 

@@ -40,7 +40,9 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSettings>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QTabWidget>
 
@@ -439,6 +441,36 @@ bool MainWindow::rebuildTargetWorkflow() {
     updateStatusTelemetry(m_currentSeekOrPc, QStringLiteral("BUILDING [%1]").arg(buildSys)); return true;
 }
 
+void MainWindow::loadRemoteTargetDialogState() {
+    QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    s.beginGroup(QStringLiteral("RemoteTarget"));
+    if (!s.contains(QStringLiteral("endpoints")) && s.childKeys().isEmpty()) { s.endGroup(); return; }
+    RemoteTargetDialogState st;
+    st.endpoints = s.value(QStringLiteral("endpoints"), QStringLiteral("localhost:1234")).toString();
+    st.localSymbolBinary = s.value(QStringLiteral("symbol_binary"), QString()).toString();
+    st.gdbBinary = s.value(QStringLiteral("gdb_binary"), QStringLiteral("gdb")).toString();
+    const QString proto = s.value(QStringLiteral("protocol_mode"), QStringLiteral("remote")).toString().trimmed().toLower();
+    st.extendedRemote = (proto == QStringLiteral("extended-remote") || proto == QStringLiteral("true") || proto == QStringLiteral("1"));
+    st.remoteTabActive = s.value(QStringLiteral("remote_tab_active"), false).toBool();
+    st.initialized = true;
+    s.endGroup();
+    m_remoteDialogState = st;
+}
+
+void MainWindow::saveRemoteTargetDialogState(const RemoteTargetDialogState& state) {
+    m_remoteDialogState = state;
+    m_remoteDialogState.initialized = true;
+    QSettings s(QStringLiteral("gridlock"), QStringLiteral("debugger"));
+    s.beginGroup(QStringLiteral("RemoteTarget"));
+    s.setValue(QStringLiteral("endpoints"), m_remoteDialogState.endpoints);
+    s.setValue(QStringLiteral("symbol_binary"), m_remoteDialogState.localSymbolBinary);
+    s.setValue(QStringLiteral("gdb_binary"), m_remoteDialogState.gdbBinary);
+    s.setValue(QStringLiteral("protocol_mode"), m_remoteDialogState.extendedRemote ? QStringLiteral("extended-remote") : QStringLiteral("remote"));
+    s.setValue(QStringLiteral("remote_tab_active"), m_remoteDialogState.remoteTabActive);
+    s.endGroup();
+    s.sync();
+}
+
 bool MainWindow::attachToProcessWorkflow(qint64 explicitPid) { return attachToRunningProcesses(explicitPid > 0 ? QList<qint64>{explicitPid} : QList<qint64>{}); }
 
 bool MainWindow::attachToRunningProcesses(const QList<qint64>& explicitPids) {
@@ -503,8 +535,11 @@ bool MainWindow::attachToRemoteTargets(const QList<RemoteTargetSpec>& explicitTa
         if (const QString sibSrc = findSiblingSourceFile(symBin); !sibSrc.isEmpty() && QFileInfo::exists(sibSrc)) {
             loadSourceFile(sibSrc);
         }
+    } else if (symBin.isEmpty()) {
+        m_useRealBinaryTarget = false;
+        m_loadedBinaryPath.clear();
     }
-    if (m_editorTabManager) {
+    if (!symBin.isEmpty() && m_editorTabManager) {
         for (SourceCodeView* sv : m_editorTabManager->openViews()) {
             if (!sv || sv->currentFile().isEmpty()) continue;
             for (int bpLine : sv->breakpoints()) {

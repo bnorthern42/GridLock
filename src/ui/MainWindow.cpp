@@ -206,6 +206,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setMenuBarWindowControlsVisible(cfg.showMenuBarWindowControls());
     cfg.registerMenuBarWindowControlsListener(this, [this](bool vis) { setMenuBarWindowControlsVisible(vis); });
     applyPreferredScreenRouting(cfg.preferredMonitor(), cfg.openUnfocused());
+    loadRemoteTargetDialogState();
     syncCoordinatorWithConfig();
     initializePluginSubsystem();
     bindLiveMemViewHandlers();

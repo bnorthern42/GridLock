@@ -270,9 +270,11 @@ bool GdbRankCoordinator::attachToRemoteTargets(const QList<RemoteTargetSpec>& ta
       if (bp.rankFilter < 0 || bp.rankFilter == r)
         writeCmd(r, detail::buildBreakInsertCmd(bp.file, bp.line, bp.condition, bp.ignoreCount, bp.temporary, !bp.enabled));
     }
-    const auto cachedBps = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
-    for (auto it = cachedBps.constBegin(); it != cachedBps.constEnd(); ++it) {
-      for (int line : *it) writeCmd(r, detail::buildBreakInsertCmd(it.key(), line, QString()));
+    if (!m_currentBinaryPath.isEmpty()) {
+      const auto cachedBps = core::ConfigManager::instance().getBreakpoints(m_currentBinaryPath);
+      for (auto it = cachedBps.constBegin(); it != cachedBps.constEnd(); ++it) {
+        for (int line : *it) writeCmd(r, detail::buildBreakInsertCmd(it.key(), line, QString()));
+      }
     }
     emit rankStateChanged(r, m_processes[r]->state);
   }
