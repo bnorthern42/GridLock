@@ -11,6 +11,10 @@ on:
       - '.github/workflows/sync-wiki.yml'
   workflow_dispatch:
 
+concurrency:
+  group: sync-wiki-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -25,6 +29,7 @@ jobs:
 
       - name: Clone GitHub Wiki repository
         run: |
+          rm -rf /tmp/gridlock-wiki
           git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" /tmp/gridlock-wiki
 
       - name: Sync documentation and screenshots
@@ -42,4 +47,12 @@ jobs:
             exit 0
           fi
           git commit -m "docs(wiki): sync from master (${GITHUB_SHA::7})"
-          git push origin master
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash -X theirs origin master
+            if git push origin master; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: Failed to push synced Wiki updates after 3 attempts." >&2
+          exit 1
