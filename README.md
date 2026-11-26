@@ -1,4 +1,4 @@
-# GridLock: Multi-Rank MPI Debugger & ELF64 Binary Inspector
+# GridLock: Graphical Frontend for GDB, Multi-Rank MPI Debugger & ELF64 Binary Inspector
 
 ![Version](https://img.shields.io/badge/Release-v0.9.0-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
@@ -13,6 +13,8 @@
 Beyond standard debugging, GridLock provides tools for detecting collective mismatches and circular wait-for deadlocks, comparing memory across ranks using `process_vm_readv`, and profiling virtual memory and heap allocations through `LD_PRELOAD`.
 
 Other features include C/C++ pointer graph visualization, multi-rank scientific array visualization, `clangd`-powered source editing, Search Everywhere, 2D control flow graphs, and a pseudo-C decompiler.
+
+As a **graphical frontend for GDB** (`GDB/MI`), GridLock coordinates per-rank GDB sessions while preserving your existing `.gdbinit` setups, pretty-printers, and local or remote SSH rank launches.
 
 ![GridLock Debug Perspective showing deadlock_ring.cpp, labeled toolbar, inline variable values, Variables, and MPI Deadlock Analyzer](docs/screenshots/workspace_overview.png)
 
@@ -78,7 +80,7 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 | :---: | :---: |
 | ![Conditional Breakpoint Popover anchored to line 34 of deadlock_ring.cpp](docs/screenshots/breakpoint_popover.png) | ![Package Manager showing MPI package search results in Table mode](docs/screenshots/package_manager_mpi_search.png) |
 
-| Bottom Tool-Window Rail (`Debug` Mode) | 16-Directive `#SBATCH` Batch Script Importer |
+| Bottom Tool-Window Rail (`Debug` Mode) | 16-Directive `#SBATCH` Batch Script Importer (Experimental / Untested) |
 | :---: | :---: |
 | ![Bottom Tool Rail in Debug mode showing GDB Console, Memory View, and Evaluator](docs/screenshots/tool_rail_debug_tabs.png) | ![Preferences dialog showing 16 auto-detected SLURM batch directives](docs/screenshots/preferences_slurm_autodetect.png) |
 
@@ -86,11 +88,14 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 
 ## Feature Summary (`v0.9.0`)
 
+> [!WARNING]
+> **Slurm Support is Experimental:** Slurm job-step attachment and batch launch integration have not yet been validated on production Slurm clusters and may break depending on site `srun` / `pmix` / `ptrace` configurations. Local `mpirun` / `mpiexec` and direct SSH rank launches are the primary tested workflows.
+
 * **Execution, Checkpoints & Target Modes**:
   * **Local MPI & ELF64 Launch**: MPMD `mpirun` / `mpiexec` orchestration (`1..256` ranks) over POSIX FIFOs via `GdbRankCoordinator` (`gdb`, `cuda-gdb`, `rocgdb`) or JSON-RPC via `DapCoordinator` (`lldb-dap`), inline `Config` launch popover (per-target/workspace `--args`, working directory, `Stop at main()`), unified `All Ranks` vs. `Rank k` execution scope, `Pause All Ranks (F6)`, OpenMP `OMP_NUM_THREADS` / `OMP_WAIT_POLICY=PASSIVE` auto-tuning, and time-travel reverse execution (`REC`, `Step Back`, `Rev Continue`).
   * **Source, Instruction & Non-Linear Execution**: Source stepping (`Over F10`, `Into F11`, `Out Shift+F11`), `stepi`, `nexti` (`Ctrl+Shift+F10`), `Run to Cursor` (`Ctrl+F10`), draggable gutter PC arrow and `Set Next Statement / Jump...` with lexical scope safety checks, and `Force Early Return...` (`-exec-return`).
   * **Copy-on-Write Fork Checkpoints (`Ctrl+Alt+K`)**: Save, list, restore (`restart <id>`), and delete GDB process snapshots via `CheckpointDialog` with pre-fork `/proc/[pid]/fd` and `/proc/[pid]/maps` IPC/RDMA/GPU safety scanning.
-  * **Attach to Running Process (`Ctrl+Alt+P`) & Remote Targets**: `/proc` process scanner (`ProcessScanner`) grouping live OpenMPI, MPICH/PMI, PMIx, MVAPICH2, and SLURM jobs under `MPI Job (N ranks)` headers, plus `target remote` / `extended-remote` port ranges (`localhost:1234..1237`) for `qemu-user -g` and `gdbserver`.
+  * **Attach to Running Process (`Ctrl+Alt+P`) & Remote Targets**: `/proc` process scanner (`ProcessScanner`) grouping live OpenMPI, MPICH/PMI, PMIx, MVAPICH2, and SLURM (Experimental / Untested) jobs under `MPI Job (N ranks)` headers, plus `target remote` / `extended-remote` port ranges (`localhost:1234..1237`) for `qemu-user -g` and `gdbserver`.
 * **Breakpoints, Signals, Catchpoints & Console Readline**:
   * **Non-Destructive Breakpoint Lifecycle**: Toggle enabled/disabled state (`-break-enable` / `-break-disable`) with hollow gutter markers, one-shot temporary breakpoints (`tbreak`), function regex breakpoints (`rbreak`), multi-line `commands ... end` hit scripts, rank-scoped conditions, ignore counts, non-suspending `{ident}` logpoints, and hardware data watchpoints (`Write`, `Read`, `ReadWrite`).
   * **Signal Disposition Matrix & Catchpoints (`Ctrl+Alt+S`)**: Per-signal `Stop`/`Print`/`Pass` matrix (`handle <SIG>`), C++ `throw`/`rethrow`/`catch` regex catchpoints, Linux syscall catchpoints (`mmap`, `openat`, `clone3`, `ioctl`), and `dlopen`/`dlclose` regex catchpoints.
@@ -142,4 +147,4 @@ All documentation in `docs/` is automatically mirrored to the [GridLock GitHub W
 
 ## Why GridLock?
 
-Commercial multi-process HPC debuggers carry enterprise seat licensing that puts them out of reach for individual researchers, students, and smaller labs, while open-source alternatives either target single-process local debugging or require juggling separate terminal windows per MPI rank. GridLock gives you a unified, open-source graphical workstation for multi-rank MPI debugging over local or remote SSH/Slurm launches, with synchronized stepping, cross-rank variable inspection, and a native C99 plugin ABI for domain-specific diagnostics.
+Commercial multi-process HPC debuggers carry enterprise seat licensing that puts them out of reach for individual researchers, students, and smaller labs, while open-source alternatives either target single-process local debugging or require juggling separate terminal windows per MPI rank. GridLock gives you a unified, open-source graphical workstation for multi-rank MPI debugging over local or remote SSH/Slurm (Experimental / Untested) launches, with synchronized stepping, cross-rank variable inspection, and a native C99 plugin ABI for domain-specific diagnostics.

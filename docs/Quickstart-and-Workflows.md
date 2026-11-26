@@ -123,7 +123,10 @@ The **`Endpoint(s):`** field accepts three forms (ports must satisfy `1 <= start
 
 ---
 
-## 4. Importing `#SBATCH` Scripts and Cluster Configuration
+## 4. Importing `#SBATCH` Scripts and Cluster Configuration (Experimental / Untested)
+
+> [!WARNING]
+> **Slurm Support is Experimental:** Slurm job-step attachment and batch launch integration have not yet been validated on production Slurm clusters and may break depending on site `srun` / `pmix` / `ptrace` configurations. Local `mpirun` / `mpiexec` and direct SSH rank launches are the primary tested workflows.
 
 Open **`Edit -> Preferences`** (`Ctrl+,`) to configure MPI hostfiles, environment variables, SSH credentials, and SLURM batch scripts.
 
