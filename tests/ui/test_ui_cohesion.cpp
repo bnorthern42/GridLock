@@ -8,6 +8,7 @@
  */
 
 #include "test_ui.hpp"
+#include "../../src/core/hpc/gdb/GdbRankCoordinator.hpp"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -706,4 +707,56 @@ void TestMainWindowUI::testSlurmParserPersistenceAndLocalBackendWorkflow() {
         return sf.open(QIODevice::ReadOnly | QIODevice::Text) &&
                QString::fromUtf8(sf.readAll()).trimmed().contains(QStringLiteral("77001"));
     })(), 3000);
+}
+
+void TestMainWindowUI::testGdbMiNestedBraceLocalsAndStoppedFrame() {
+    gridlock::GdbRankCoordinator coord;
+    coord.initializeMockSession(1);
+
+    QJsonArray lastLocals;
+    QString stoppedFile, stoppedFunc;
+    int stoppedLine = -1;
+    uint64_t stoppedPc = 0;
+    connect(&coord, &gridlock::GdbRankCoordinator::localsUpdated, this,
+            [&](int /*rank*/, const QJsonArray& locals) { lastLocals = locals; });
+    connect(&coord, &IBackendCoordinator::rankStopped, this,
+            [&](int /*rank*/, int /*tid*/, const QString& /*reason*/, const QString& file,
+                int line, const QString& func, uint64_t pc) {
+                stoppedFile = file; stoppedLine = line; stoppedFunc = func; stoppedPc = pc;
+            });
+
+    // 1. *stopped record where nested args=[{...}] precedes func/file/fullname/line/addr.
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={"
+                       "args=[{name=\"v\",value=\"{1, 2, 3}\"},{name=\"s\",value=\"\\\"brace}here\\\"\"}],"
+                       "addr=\"0x401234\",func=\"solveStep\",file=\"solver.cpp\","
+                       "fullname=\"/tmp/solver.cpp\",line=\"42\",arch=\"i386:x86-64\"},thread-id=\"1\"\n"));
+    QCOMPARE(stoppedFile, QStringLiteral("/tmp/solver.cpp"));
+    QCOMPARE(stoppedLine, 42);
+    QCOMPARE(stoppedFunc, QStringLiteral("solveStep"));
+    QCOMPARE(stoppedPc, uint64_t{0x401234});
+
+    // 2. GDB 14+ pretty-printed std::vector, nested std::map, brace-quoted string, and Fortran derived type.
+    coord.processGdbOutput(
+        0,
+        QStringLiteral("201^done,variables=["
+                       "{name=\"vec\",type=\"std::vector<int>\",value=\"std::vector of length 3, capacity 4 = {10, 20, 30}\"},"
+                       "{name=\"m\",type=\"std::map<int, Point>\",value=\"std::map with 2 elements = {[1] = {x = 2}, [3] = {x = 4}}\"},"
+                       "{name=\"msg\",type=\"const char *\",value=\"\\\"hello {world}\\\"\"},"
+                       "{name=\"grid\",type=\"Type grid_t\",value=\"( nx = 4, ny = 6, origin = ( 0.0, 0.0 ) )\"}"
+                       "]\n"));
+    QCOMPARE(lastLocals.size(), 4);
+    QCOMPARE(lastLocals[0].toObject().value(QStringLiteral("name")).toString(), QStringLiteral("vec"));
+    QCOMPARE(lastLocals[0].toObject().value(QStringLiteral("value")).toString(),
+             QStringLiteral("std::vector of length 3, capacity 4 = {10, 20, 30}"));
+    QCOMPARE(lastLocals[1].toObject().value(QStringLiteral("value")).toString(),
+             QStringLiteral("std::map with 2 elements = {[1] = {x = 2}, [3] = {x = 4}}"));
+    QCOMPARE(lastLocals[2].toObject().value(QStringLiteral("value")).toString(), QStringLiteral("\"hello {world}\""));
+    QCOMPARE(lastLocals[3].toObject().value(QStringLiteral("value")).toString(),
+             QStringLiteral("( nx = 4, ny = 6, origin = ( 0.0, 0.0 ) )"));
+
+    // 3. Malformed/truncated input must not crash or corrupt state.
+    coord.processGdbOutput(0, QStringLiteral("201^done,variables=[{name=\"trunc\",value=\"unclosed {brace\n"));
+    QCOMPARE(lastLocals.size(), 0);
 }

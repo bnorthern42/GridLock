@@ -10,6 +10,7 @@
 #include <QString>
 #include <QtTest/QtTest>
 
+#include "../../src/core/hpc/gdb/GdbMiParser.hpp"
 #include "../../src/core/hpc/gdb/LanguageExpressionHelper.hpp"
 #include "../../src/ui/GdbConsoleWidget.hpp"
 
@@ -171,6 +172,71 @@ private slots:
         QCOMPARE(base, QStringLiteral("mat"));
         QCOMPARE(rows, 4);
         QCOMPARE(cols, 4);
+    }
+
+    /**
+     * @brief Verifies balanced-brace / quote-aware GDB/MI3 tuple scanning across nested pretty-printed
+     *        locals, multi-arg *stopped frames, and malformed/truncated inputs.
+     */
+    void testBalancedMiTupleAndFrameScanner() {
+        using namespace gridlock::mi;
+
+        // 1. Nested pretty-printed std::vector, std::map, brace-quoted strings, and Fortran derived types.
+        const QString varsLine = QStringLiteral(
+            "201^done,variables=["
+            "{name=\"vec\",type=\"std::vector<int>\",value=\"std::vector of length 3, capacity 4 = {10, 20, 30}\"},"
+            "{name=\"m\",type=\"std::map<int, Point>\",value=\"std::map with 2 elements = {[1] = {x = 2}, [3] = {x = 4}}\"},"
+            "{name=\"msg\",type=\"const char *\",value=\"\\\"hello {world}\\\"\"},"
+            "{name=\"grid\",type=\"Type grid_t\",value=\"( nx = 4, ny = 6, origin = ( 0.0, 0.0 ) )\"}"
+            "]");
+        bool hasList = false;
+        const QString body = extractMiListBody(varsLine, QStringLiteral("variables=["), &hasList);
+        QVERIFY(hasList);
+        const QVector<QString> tuples = extractTopLevelMiTuples(body);
+        QCOMPARE(tuples.size(), 4);
+
+        const auto f0 = parseMiTupleFields(tuples[0]);
+        QCOMPARE(f0.value(QStringLiteral("name")), QStringLiteral("vec"));
+        QCOMPARE(f0.value(QStringLiteral("type")), QStringLiteral("std::vector<int>"));
+        QCOMPARE(f0.value(QStringLiteral("value")), QStringLiteral("std::vector of length 3, capacity 4 = {10, 20, 30}"));
+
+        const auto f1 = parseMiTupleFields(tuples[1]);
+        QCOMPARE(f1.value(QStringLiteral("name")), QStringLiteral("m"));
+        QCOMPARE(f1.value(QStringLiteral("value")), QStringLiteral("std::map with 2 elements = {[1] = {x = 2}, [3] = {x = 4}}"));
+
+        const auto f2 = parseMiTupleFields(tuples[2]);
+        QCOMPARE(f2.value(QStringLiteral("name")), QStringLiteral("msg"));
+        QCOMPARE(f2.value(QStringLiteral("value")), QStringLiteral("\"hello {world}\""));
+
+        const auto f3 = parseMiTupleFields(tuples[3]);
+        QCOMPARE(f3.value(QStringLiteral("name")), QStringLiteral("grid"));
+        QCOMPARE(f3.value(QStringLiteral("value")), QStringLiteral("( nx = 4, ny = 6, origin = ( 0.0, 0.0 ) )"));
+
+        // 2. *stopped frame with nested args=[{...}] BEFORE func, file, fullname, line, addr.
+        const QString stopLine = QStringLiteral(
+            "*stopped,reason=\"breakpoint-hit\",frame={"
+            "args=[{name=\"v\",value=\"{1, 2, 3}\"},{name=\"tag\",value=\"\\\"a}b\\\"\"}],"
+            "addr=\"0x401234\",func=\"jacobi_step\",file=\"solver.f90\",fullname=\"/work/solver.f90\",line=\"42\"},thread-id=\"1\"");
+        bool hasFrame = false;
+        const QString frameBody = extractMiTupleBody(stopLine, QStringLiteral("frame={"), &hasFrame);
+        QVERIFY(hasFrame);
+        const auto ff = parseMiTupleFields(frameBody);
+        QCOMPARE(ff.value(QStringLiteral("addr")), QStringLiteral("0x401234"));
+        QCOMPARE(ff.value(QStringLiteral("func")), QStringLiteral("jacobi_step"));
+        QCOMPARE(ff.value(QStringLiteral("fullname")), QStringLiteral("/work/solver.f90"));
+        QCOMPARE(ff.value(QStringLiteral("line")), QStringLiteral("42"));
+        QVERIFY(!ff.contains(QStringLiteral("name")));  // Inner args fields must never leak to top-level frame fields.
+
+        // 3. Malformed/truncated brace and quote inputs terminate safely in linear time.
+        bool okTrunc = true;
+        QVERIFY(extractMiListBody(QStringLiteral("201^done,variables=[{name=\"a\",value=\"{1, 2"), QStringLiteral("variables=["), &okTrunc).isEmpty());
+        QVERIFY(!okTrunc);
+        const QVector<QString> partialTuples = extractTopLevelMiTuples(QStringLiteral("{name=\"ok\",value=\"7\"},{name=\"bad\",value=\"unclosed {brace"));
+        QCOMPARE(partialTuples.size(), 1);
+        QCOMPARE(parseMiTupleFields(partialTuples[0]).value(QStringLiteral("name")), QStringLiteral("ok"));
+        const auto unterminatedFields = parseMiTupleFields(QStringLiteral("name=\"x\",value=\"dangling\\"));
+        QCOMPARE(unterminatedFields.value(QStringLiteral("name")), QStringLiteral("x"));
+        QVERIFY(!unterminatedFields.contains(QStringLiteral("value")));
     }
 };
 

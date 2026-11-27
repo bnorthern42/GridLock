@@ -3,6 +3,7 @@
  * @brief Incremental GDB/MI3 asynchronous/result record parser and evaluation stream routing.
  */
 
+#include "GdbMiParser.hpp"
 #include "GdbRankCoordinator.hpp"
 #include "../../managers/ConfigManager.hpp"
 
@@ -100,14 +101,17 @@ void GdbRankCoordinator::readMemory(int rankId, const QString& address, int leng
 }
 
 void GdbRankCoordinator::handleWatchpointStopRecord(int rankId, const QString& line) {
-  static const QRegularExpression expRe(QStringLiteral("(?:wpt|hw-awpt|hw-rwpt)=\\{[^}]*exp=\"((?:\\\\.|[^\"])*)\""));
-  static const QRegularExpression oldRe(QStringLiteral("value=\\{[^}]*old=\"((?:\\\\.|[^\"])*)\""));
-  static const QRegularExpression newRe(QStringLiteral("value=\\{[^}]*(?:new|value)=\"((?:\\\\.|[^\"])*)\""));
-  const auto em = expRe.match(line), om = oldRe.match(line), nm = newRe.match(line);
-  emit watchpointHit(rankId,
-                     em.hasMatch() ? detail::unescapeMiValue(em.captured(1)) : QStringLiteral("watchpoint"),
-                     om.hasMatch() ? detail::unescapeMiValue(om.captured(1)) : QString(),
-                     nm.hasMatch() ? detail::unescapeMiValue(nm.captured(1)) : QString());
+  QString wptBody = mi::extractMiTupleBody(line, QStringLiteral("wpt={"));
+  if (wptBody.isEmpty()) wptBody = mi::extractMiTupleBody(line, QStringLiteral("hw-awpt={"));
+  if (wptBody.isEmpty()) wptBody = mi::extractMiTupleBody(line, QStringLiteral("hw-rwpt={"));
+  const auto wptFields = mi::parseMiTupleFields(wptBody);
+  const auto valFields = mi::parseMiTupleFields(mi::extractMiTupleBody(line, QStringLiteral("value={")));
+  const QString expr = wptFields.value(QStringLiteral("exp"), QStringLiteral("watchpoint"));
+  const QString oldVal = valFields.value(QStringLiteral("old"));
+  const QString newVal = valFields.contains(QStringLiteral("new"))
+                             ? valFields.value(QStringLiteral("new"))
+                             : valFields.value(QStringLiteral("value"));
+  emit watchpointHit(rankId, expr, oldVal, newVal);
 }
 
 void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
@@ -221,21 +225,32 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         rp->state.totalRuntimeMs += rp->state.executionTimer.elapsed();
         rp->state.executionTimer.invalidate();
       }
-      static const QRegularExpression rxFile("fullname=\"([^\"]+)\""), rxLine("frame=\\{.*?line=\"(\\d+)\"");
-      static const QRegularExpression rxFunc("frame=\\{[^}]*func=\"([^\"]+)\""), rxAddr("frame=\\{[^}]*addr=\"([^\"]+)\"");
-      static const QRegularExpression rxArch("arch=\"([^\"]+)\""), rxLane("lane-id=\"(\\d+)\"");
-      const auto matchFile = rxFile.match(line), matchLine = rxLine.match(line);
-      rp->state.currentFile = matchFile.hasMatch() ? matchFile.captured(1) : rp->state.currentFile;
-      rp->state.currentLine = matchLine.hasMatch() ? matchLine.captured(1).toInt() : (rp->state.currentLine > 0 ? rp->state.currentLine : -1);
-      if (const auto matchFunc = rxFunc.match(line); matchFunc.hasMatch()) rp->state.currentFunction = matchFunc.captured(1);
-      const auto matchArch = rxArch.match(line);
-      const QString frameArch = matchArch.hasMatch() ? matchArch.captured(1) : m_rankArch.value(rankId);
+      bool hasFrameTuple = false;
+      const QString frameBody = mi::extractMiTupleBody(line, QStringLiteral("frame={"), &hasFrameTuple);
+      const QHash<QString, QString> frameFields = hasFrameTuple ? mi::parseMiTupleFields(frameBody) : QHash<QString, QString>{};
+      const QHash<QString, QString> stopFields = mi::parseMiTupleFields(line.mid(line.indexOf(QLatin1Char(',')) + 1));
+      const QString parsedFile = !frameFields.value(QStringLiteral("fullname")).isEmpty()
+                                     ? frameFields.value(QStringLiteral("fullname"))
+                                     : stopFields.value(QStringLiteral("fullname"));
+      if (!parsedFile.isEmpty()) rp->state.currentFile = parsedFile;
+      bool lineOk = false;
+      const int parsedLine = frameFields.value(QStringLiteral("line")).toInt(&lineOk);
+      rp->state.currentLine = (lineOk && parsedLine > 0) ? parsedLine : (rp->state.currentLine > 0 ? rp->state.currentLine : -1);
+      if (const QString parsedFunc = frameFields.value(QStringLiteral("func")); !parsedFunc.isEmpty()) {
+        rp->state.currentFunction = parsedFunc;
+      }
+      const QString frameArch = !frameFields.value(QStringLiteral("arch")).isEmpty()
+                                    ? frameFields.value(QStringLiteral("arch"))
+                                    : (!stopFields.value(QStringLiteral("arch")).isEmpty()
+                                           ? stopFields.value(QStringLiteral("arch"))
+                                           : m_rankArch.value(rankId));
       if (!frameArch.isEmpty()) m_rankArch[rankId] = frameArch;
-      const auto matchLane = rxLane.match(line);
-      m_activeLaneIds[rankId] = matchLane.hasMatch() ? matchLane.captured(1).toInt() : -1;
-      const auto matchAddr = rxAddr.match(line);
-      const QString stopAddress = matchAddr.hasMatch() ? matchAddr.captured(1) : QStringLiteral("$pc");
-      if (matchAddr.hasMatch()) rp->state.registers[16] = stopAddress;
+      bool laneOk = false;
+      const int parsedLane = stopFields.value(QStringLiteral("lane-id")).toInt(&laneOk);
+      m_activeLaneIds[rankId] = laneOk ? parsedLane : -1;
+      const QString rawFrameAddr = frameFields.value(QStringLiteral("addr"));
+      const QString stopAddress = !rawFrameAddr.isEmpty() ? rawFrameAddr : QStringLiteral("$pc");
+      if (!rawFrameAddr.isEmpty()) rp->state.registers[16] = stopAddress;
       const bool isWatchTrigger = line.contains("watchpoint-trigger");
       if (isWatchTrigger) handleWatchpointStopRecord(rankId, line);
       if (!isWatchTrigger && rp->state.lastFiredTimestamp.isEmpty()) {
@@ -300,7 +315,7 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         const int stopTid = matchThread.hasMatch() ? matchThread.captured(1).toInt() : m_activeThreadIds.value(rankId, rankId + 1);
         if (matchThread.hasMatch()) m_activeThreadIds[rankId] = stopTid;
         bool pcOk = false;
-        const QString rawHex = matchAddr.hasMatch() ? matchAddr.captured(1).trimmed() : QString();
+        const QString rawHex = rawFrameAddr.trimmed();
         const uint64_t parsedPc = rawHex.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive) ? rawHex.mid(2).toULongLong(&pcOk, 16) : 0u;
         const QString stopReason = matchReason.hasMatch() ? matchReason.captured(1) : QStringLiteral("stopped");
         requestStackAndThreads(rankId);
@@ -377,25 +392,28 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         }
       }
     } else if (line.contains("^done,changelist=")) {
-      static const QRegularExpression objRe("\\{([^}]+)\\}"), nameRe("name=\"([^\"]+)\""),
-          valRe("value=\"([^\"]+)\""), inScopeRe("in_scope=\"([^\"]+)\"");
+      bool hasList = false;
+      const QString listBody = mi::extractMiListBody(line, QStringLiteral("changelist=["), &hasList);
       bool updated = false;
-      for (auto it = objRe.globalMatch(line); it.hasNext();) {
-        const QString objStr = it.next().captured(1);
-        const auto nameMatch = nameRe.match(objStr);
-        if (!nameMatch.hasMatch()) continue;
-        const QString varId = nameMatch.captured(1);
-        if (!m_varNameRevMap.contains(rankId) || !m_varNameRevMap[rankId].contains(varId)) continue;
-        const QString varName = m_varNameRevMap[rankId][varId];
-        const auto scopeMatch = inScopeRe.match(objStr);
-        if (!scopeMatch.hasMatch() || scopeMatch.captured(1) == "true") {
-          if (const auto valMatch = valRe.match(objStr); valMatch.hasMatch()) {
-            rp->state.variableWatches[varName] = valMatch.captured(1); updated = true;
+      if (hasList) {
+        for (const QString& objStr : mi::extractTopLevelMiTuples(listBody)) {
+          const auto fields = mi::parseMiTupleFields(objStr);
+          const QString varId = fields.value(QStringLiteral("name"));
+          if (varId.isEmpty() || !m_varNameRevMap.contains(rankId) || !m_varNameRevMap[rankId].contains(varId)) continue;
+          const QString varName = m_varNameRevMap[rankId][varId];
+          const QString inScope = fields.value(QStringLiteral("in_scope"));
+          if (inScope.isEmpty() || inScope == QLatin1String("true")) {
+            if (fields.contains(QStringLiteral("value"))) {
+              rp->state.variableWatches[varName] = fields.value(QStringLiteral("value"));
+              updated = true;
+            }
+          } else {
+            rp->state.variableWatches[varName] = "Out of scope";
+            writeCmd(rankId, QString("-var-delete %1\n").arg(varId));
+            m_varNameMap[rankId].remove(varName);
+            m_varNameRevMap[rankId].remove(varId);
+            updated = true;
           }
-        } else {
-          rp->state.variableWatches[varName] = "Out of scope";
-          writeCmd(rankId, QString("-var-delete %1\n").arg(varId));
-          m_varNameMap[rankId].remove(varName); m_varNameRevMap[rankId].remove(varId); updated = true;
         }
       }
       if (updated) emit rankStateChanged(rankId, rp->state);
@@ -450,9 +468,9 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
       }
     } else if (handleBreakpointMiRecord(rankId, line)) {
     } else if (line.startsWith("100")) {
-      static const QRegularExpression val100Re("100\\^done,value=\"([^\"]+)\""), err100Re("msg=\"([^\"]+)\"");
+      static const QRegularExpression val100Re("100\\^done,value=\"((?:\\\\.|[^\"])*)\""), err100Re("msg=\"((?:\\\\.|[^\"])*)\"");
       if (const auto match = line.contains("^done") ? val100Re.match(line) : err100Re.match(line); match.hasMatch())
-        emit hoverEvaluationComplete(rp->lastHoverVarName, match.captured(1), rp->lastHoverPos);
+        emit hoverEvaluationComplete(rp->lastHoverVarName, mi::unescapeMiString(match.captured(1)), rp->lastHoverPos);
     } else if (line.startsWith("101")) {
       const int caret = line.indexOf('^');
       const QString resolvedExpr = (caret > 0 && evalTokenExprMap().contains(line.left(caret).toInt()))
@@ -473,29 +491,33 @@ void GdbRankCoordinator::processGdbOutput(int rankId, const QString& output) {
         }
       }
       writeCmd(rankId, "-var-update 1 *\n");
-    } else if (line.startsWith("201^done,variables=[")) {
-      static const QRegularExpression varTupleRe("\\{([^{}]+)\\}"), vNameRe("name=\"([^\"]+)\""),
-          vTypeRe("type=\"([^\"]+)\""), vValRe("value=\"((?:\\\\.|[^\"])*)\"");
+    } else if (line.startsWith("201^done,variables=[") || line.startsWith("201^done,locals=[")) {
+      const QString listKey = line.startsWith("201^done,variables=[") ? QStringLiteral("variables=[") : QStringLiteral("locals=[");
+      bool hasList = false;
+      const QString listBody = mi::extractMiListBody(line, listKey, &hasList);
       QJsonArray locals;
       QHash<QString, int> idxByName;
-      for (auto it = varTupleRe.globalMatch(line); it.hasNext();) {
-        const QString tuple = it.next().captured(1);
-        const auto nm = vNameRe.match(tuple);
-        if (!nm.hasMatch()) continue;
-        const QString varName = nm.captured(1);
-        if (varName.endsWith(QStringLiteral("@entry"))) continue;
-        const auto tm = vTypeRe.match(tuple), vm = vValRe.match(tuple);
-        const QString varVal = vm.hasMatch() ? vm.captured(1).replace(QLatin1String("\\\""), QLatin1String("\"")).replace(QLatin1String("\\\\"), QLatin1String("\\"))
-                                             : QStringLiteral("{...}");
-        const QJsonObject entry{{"name", varName}, {"type", tm.hasMatch() ? tm.captured(1) : QStringLiteral("compound")}, {"value", varVal}, {"variablesReference", 0}};
-        if (idxByName.contains(varName)) {
-          const int prevIdx = idxByName.value(varName);
-          const QString prevVal = locals.at(prevIdx).toObject().value("value").toString();
-          if ((prevVal == QLatin1String("{...}") || prevVal.isEmpty()) && varVal != QLatin1String("{...}") && !varVal.isEmpty()) locals[prevIdx] = entry;
-          continue;
+      if (hasList) {
+        for (const QString& tuple : mi::extractTopLevelMiTuples(listBody)) {
+          const auto fields = mi::parseMiTupleFields(tuple);
+          const QString varName = fields.value(QStringLiteral("name"));
+          if (varName.isEmpty() || varName.endsWith(QStringLiteral("@entry"))) continue;
+          const QString varVal = fields.contains(QStringLiteral("value"))
+                                     ? fields.value(QStringLiteral("value"))
+                                     : QStringLiteral("{...}");
+          const QString varType = !fields.value(QStringLiteral("type")).isEmpty()
+                                      ? fields.value(QStringLiteral("type"))
+                                      : QStringLiteral("compound");
+          const QJsonObject entry{{"name", varName}, {"type", varType}, {"value", varVal}, {"variablesReference", 0}};
+          if (idxByName.contains(varName)) {
+            const int prevIdx = idxByName.value(varName);
+            const QString prevVal = locals.at(prevIdx).toObject().value("value").toString();
+            if ((prevVal == QLatin1String("{...}") || prevVal.isEmpty()) && varVal != QLatin1String("{...}") && !varVal.isEmpty()) locals[prevIdx] = entry;
+            continue;
+          }
+          idxByName.insert(varName, locals.size());
+          locals.append(entry);
         }
-        idxByName.insert(varName, locals.size());
-        locals.append(entry);
       }
       emit localsUpdated(rankId, locals);
     } else if (handleMiStackOrThreadRecord(rankId, line)) {

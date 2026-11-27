@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed unused `Qt6::Qml` and `Qt6::OpenGLWidgets` modules from `meson.build` and moved `Qt6::Test` strictly to the test targets so the `gridlock` binary no longer requires test or QML/OpenGL packages on minimal HPC cluster images.
   - Added the `-Dsvg=auto|enabled|disabled` Meson feature option gating `Qt6::Svg` (`GRIDLOCK_HAS_QT_SVG`) with a clean PNG-only fallback in `PointerGraphDialog`, resolved the `Qt-Advanced-Stylesheets` Meson sandbox include warning, and made the `mpicc`/`mpicxx` tutorial targets optional (`required: false`).
 
+### Fixed
+- **Balanced-Brace GDB/MI3 Tuple & Frame Parsing (`GdbMiParser.hpp`, `GdbMiParser.cpp`, `tests/hpc/test_mi_parser.cpp`, `tests/ui/test_ui_cohesion.cpp`)**:
+  - Replaced flat-brace regexes (`\{([^{}]+)\}` and `[^}]*`) across `-stack-list-variables` / `-stack-list-locals`, `*stopped` `frame={...}`, `-var-update` `changelist=[...]`, watchpoint stops, and hover replies (`100^done`) with a quote- and escape-aware balanced-delimiter scanner (`gridlock::mi::*`), preserving GDB 14+ `libstdc++` pretty-printed `std::vector`/`std::map` values, structs with brace-quoted strings, Fortran derived types, and multi-argument `*stopped` frames with nested `args=[{...}]`.
+
 ## [0.9.1] - 2026-11-26
 
 ### Added

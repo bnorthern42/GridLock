@@ -75,10 +75,8 @@ Baseline inventory across `src/`, `include/`, and `tests/` (`agent.md` ceiling: 
 
 ### 3.1 GDB/MI Protocol & Pretty-Printer Fragility
 
-- [ ] **Replace flat regexes with a real recursive-descent GDB/MI3 value parser (`MiValue` AST)**:
-  - `src/core/hpc/gdb/GdbMiParser.cpp:477` (`varTupleRe("\\{([^{}]+)\\}")`) breaks whenever GDB 12/14/16+ emits nested braces inside `value="..."` (for example `std::vector` pretty-printers, C++ aggregates, or Fortran derived types). Replace with the brace/quote-balanced tuple parser already proven in `src/core/hpc/gdb/GdbRankInspection.cpp:104` (`extractTopLevelMiTuples`), or promote a shared `MiRecordParser` class.
-  - `src/core/hpc/gdb/GdbMiParser.cpp:225` (`rxFunc("frame=\\{[^}]*func=...")`, `rxAddr("frame=\\{[^}]*addr=...")`) fails if nested `args=[{name=...,value=...}]` appears before `func`/`addr` in `*stopped`. Parse the `frame={...}` tuple structurally instead of using `[^}]*`.
-  - `src/core/hpc/gdb/GdbMiParser.cpp:453` (`val100Re("100\\^done,value=\"([^\"]+)\"")`) drops everything after the first escaped quote `\"`. Switch to the escaped-string pattern `(?:\\\\.|[^\"])*` plus `detail::unescapeMiValue(...)`.
+- [x] **Replace flat regexes with a real balanced-brace & quote-aware GDB/MI3 tuple scanner (`GdbMiParser.hpp` / `GdbMiParser.cpp`)**:
+  - Replaced `varTupleRe("\\{([^{}]+)\\}")` (`201^done,variables=[...]` / `locals=[...]`), `frame=\{[^}]*...` (`*stopped`), `changelist` `\{([^}]+)\}`, watchpoint `[^}]*`, and hover `100^done` unescaped-quote regexes with quote- and escape-aware linear-time balanced-delimiter scanning in `src/core/hpc/gdb/GdbMiParser.hpp` (`gridlock::mi::*`).
 - [ ] **Eliminate out-of-parser MI traffic**:
   - Route `src/core/hpc/analysis/DeadlockAnalyzer.cpp:152` (`-stack-list-frames 0 3`) through `GdbRankCoordinator::requestStackAndThreads` / `stackTraceUpdated` exclusively so untokenized `-stack-list-frames` replies cannot collide with other stack queries.
   - Route `src/core/plugins/PluginHostBridge.cpp:633-649` (`-var-create` / `-var-delete` type lookup) through a coordinator helper method instead of directly regex-scraping `gdbOutputReceived`.

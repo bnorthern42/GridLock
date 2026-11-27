@@ -225,5 +225,8 @@ private slots:
 
     /** @brief Verifies Fortran frame detection switches ArrayPlotDialog to 1-based bounds, Fortran badge, and column-major layout. */
     void testFortranFrameDetectionAndColumnMajorPlotter();
+
+    /** @brief Verifies GdbMiParser handles GDB 14+ nested-brace locals, multi-arg *stopped frames, watch changelists, and truncated MI input. */
+    void testGdbMiNestedBraceLocalsAndStoppedFrame();
 };
 
