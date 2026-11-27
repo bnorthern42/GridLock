@@ -1,6 +1,6 @@
 # Developer Architecture and Testing
 
-GridLock (`v0.9.0`) is written in C++23 (`-Wall -Wextra -Wpedantic`) on Qt6 and Meson, with modular translation units split under 500 lines (hard repository ceiling `< 950` lines) and per-subdirectory architectural `README.md` guides across `src/`, `tests/`, and `scripts/`.
+GridLock (`v0.9.1`) is written in C++23 (`-Wall -Wextra -Wpedantic`) on Qt6 and Meson (`>= 1.3.0`), with modular translation units split under 500 lines (hard repository ceiling `< 800` lines) and per-subdirectory architectural `README.md` guides across `src/`, `tests/`, and `scripts/`.
 
 ---
 

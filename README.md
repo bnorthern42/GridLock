@@ -1,6 +1,6 @@
 # GridLock: Graphical Frontend for GDB, Multi-Rank MPI Debugger & ELF64 Binary Inspector
 
-![Version](https://img.shields.io/badge/Release-v0.9.0-brightgreen.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/Release-v0.9.1-brightgreen.svg?style=for-the-badge)
 [![CI / AppImage](https://img.shields.io/badge/CI_%2F_AppImage-x86__64_Linux-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/bnorthern42/GridLock/actions/workflows/release.yml)
 ![C++23](https://img.shields.io/badge/C++-23-blue.svg?style=for-the-badge&logo=c%2B%2B)
 ![Qt6](https://img.shields.io/badge/Qt-6-41CD52.svg?style=for-the-badge&logo=qt)
@@ -25,12 +25,12 @@ As a **graphical frontend for GDB** (`GDB/MI`), GridLock coordinates per-rank GD
 ### Option 1: Standalone Linux AppImage (`x86_64`, Wayland & X11)
 
 Download either AppImage from [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) (bundles Qt6 Wayland and XCB platform plugins plus `libxcb-cursor.so.0`):
-* **`GridLock-0.9.0-x86_64.AppImage`** (Lite Edition)
-* **`GridLock-0.9.0-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
+* **`GridLock-0.9.1-x86_64.AppImage`** (Lite Edition)
+* **`GridLock-0.9.1-Tutorials-x86_64.AppImage`** (Includes all 8 MPI tutorial `.cpp` sources and pre-built debug binaries)
 
 ```bash
-chmod +x GridLock-0.9.0-Tutorials-x86_64.AppImage
-./GridLock-0.9.0-Tutorials-x86_64.AppImage
+chmod +x GridLock-0.9.1-Tutorials-x86_64.AppImage
+./GridLock-0.9.1-Tutorials-x86_64.AppImage
 ```
 
 ### Option 2: Build From Source (`Meson` + `Ninja`)
@@ -92,7 +92,7 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
 
 ---
 
-## Feature Summary (`v0.9.0`)
+## Feature Summary (`v0.9.1`)
 
 > [!WARNING]
 > **Slurm Support is Experimental (Opt-In):** Enable **Show "Submit Slurm Job..." in File menu** in `Preferences -> HPC / Cluster` to unlock `File -> Submit Slurm Job...`. GridLock stages a per-rank `gdbserver --multi` wrapper in your shared working directory, submits via `sbatch --parsable`, polls `squeue` until `RUNNING`, resolves compute hostnames via `scontrol show hostnames`, connects directly on Open OnDemand / login nodes (or via SSH `-L` port forwards when `SSH Host` is configured in `Preferences -> HPC Integration`, where custom `sbatch`, `squeue`, and `scontrol` paths can also be set), attaches all ranks paused in `extended-remote` mode, and runs `scancel` when stopped. Site-specific `srun` / `pmix` / firewall policies may still require manual `remote.toml` setup.
@@ -112,7 +112,7 @@ For Arch, Ubuntu/Debian, and Fedora package lists, CLI flags (`--headless`, `--s
   * **`MemView` & `MemoryProfilerWidget`**: `process_vm_readv` hex/ASCII reader (`MemoryBoundsValidator`), cross-rank byte diffing (`Diff Ranks`), typed CSV/`.bin` export, and `/proc/<pid>/smaps` + `LD_PRELOAD` heap-caller treemap profiler with 5 palettes.
   * **`ArrayPlotDialog` (`Ctrl+Alt+G`) & `PointerGraphDialog`**: Multi-rank 1D overlays, `start:end:stride` slicing, `Log10` scale, drag-box zoom, scalar history, `Complex64`/`Complex128` decoding, virtualized 2D/3D C/Fortran tensor tables, and validated `splot`/`pm3d` `gnuplot` export; plus Sugiyama DAG pointer graphs with persistent roots, `"old -> new"` mutation badges, `Shift+Click` node width expansion, full-value hover tooltips, corner minimap, `/x` `/d` `/b` format overrides, and `2x` PNG/SVG export.
   * **`ProgrammerCalculatorDialog` (`Ctrl+Alt+C`)**: Floating base converter (`HEX`/`DEC`/`OCT`/`BIN`, IEEE-754 `float`/`double`, `8/16/32/64-bit`, `BSWAP`, 64-bit interactive bit grid, radix keypad) with exact cursor-offset handoff across views.
-  * **Search Everywhere, Customizable Toolbar & `ClangdLspClient`**: Multi-scope Search Everywhere overlay (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`, 6 scope tabs, 35-line numbered context preview, `S/M/L/XL` size presets), customizable `< 1,040 px` top toolbar (`Appearance -> Toolbar` with `24px` spacers, flex springs, separators), native OS/WM window decorations with optional menu-bar `Minimize`/`Maximize`/`Close` controls, non-destructive `SOURCE | DEBUG | BINARY | MPI` perspectives, ELF64 2D CFG (`Space`) + decompiler + validated `Alt+P` instruction patching, `clangd` LSP (`F12`), exact 4-column soft `Tab`/`Backtab`, `CodeMinimap` toggle, virtualized large-CSV viewer, offline Zeal `.docset`/`man` viewer (`F1`), and 12 dark/light themes led by **GridLock Slate** (`#16181d` / `#528bff` / `#4ec9b0`) and **Daylight Paper** (`#ffffff` / `#0969da`).
+  * **Search Everywhere, Recursive Fuzzy Project Browser, Customizable Toolbar & `ClangdLspClient`**: Multi-scope Search Everywhere overlay (`Double Shift`, `Ctrl+P`, `Ctrl+Shift+P`, 6 scope tabs, 35-line numbered context preview, `S/M/L/XL` size presets), recursive fuzzy file/symbol/string filtering with auto-expanding ancestor folders in **PROJECT / SYMBOLS**, customizable `< 1,040 px` top toolbar (`Appearance -> Toolbar` with `24px` spacers, flex springs, separators), native OS/WM window decorations with optional menu-bar `Minimize`/`Maximize`/`Close` controls, non-destructive `SOURCE | DEBUG | BINARY | MPI` perspectives, ELF64 2D CFG (`Space`) + decompiler + validated `Alt+P` instruction patching, `clangd` LSP (`F12`), exact 4-column soft `Tab`/`Backtab`, `CodeMinimap` toggle, virtualized large-CSV viewer, offline Zeal `.docset`/`man` viewer (`F1`), and 12 dark/light themes led by **GridLock Slate** (`#16181d` / `#528bff` / `#4ec9b0`) and **Daylight Paper** (`#ffffff` / `#0969da`).
 * **Native C99 / C++23 Plugin Ecosystem**:
   * **Frozen C99 ABI v1.0 & Zero-Call DWARF Introspection**: Binary-stable `include/gridlock/plugin_api.h` (`9` standard-layout POD structs, `28` `GridLockHostApi` callbacks) and header-only `include/gridlock/plugin_cpp_helpers.hpp` (`std::expected`, `noexcept`), including zero-inferior-call `query_type_info` and `resolve_contiguous_range` (`T[N]`, `std::array`, `std::vector`, `std::span`, `std::valarray`), silent plugin MI channels, 5 context-menu surfaces, nested menus, status badges, inline editor annotations, and `PluginReportDockWidget`.
   * **Multi-Forge Installer, Live Hot-Reload, Verifier & Scaffolding**: Install from GitHub, GitLab subgroups, Codeberg, Gitea, or custom Git URLs, sync declarative `plugins.toml` + user-global `plugins-lock.toml`, run per-row **Update** / **Update All** and in-place **Hot-Reload Now** without closing paused MPI sessions, validate binaries via `gridlock --verify-plugin <path>`, and scaffold new repositories with [`scripts/init_plugin.lua`](scripts/init_plugin.lua).

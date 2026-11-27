@@ -1,6 +1,6 @@
 # Installation and Building
 
-GridLock (`v0.8.8`) runs on x86_64 Linux systems under both native Wayland compositors (Niri, Sway, Hyprland, KDE Plasma, GNOME) and X11/XWayland servers. You can run a standalone AppImage from GitHub Releases or compile from source with Meson and Ninja.
+GridLock (`v0.9.1`) runs on x86_64 Linux systems under both native Wayland compositors (Niri, Sway, Hyprland, KDE Plasma, GNOME) and X11/XWayland servers. You can run a standalone AppImage from GitHub Releases or compile from source with Meson and Ninja.
 
 ---
 
@@ -8,32 +8,32 @@ GridLock (`v0.8.8`) runs on x86_64 Linux systems under both native Wayland compo
 
 Each release on [GitHub Releases](https://github.com/bnorthern42/GridLock/releases) ships two self-contained AppImage editions:
 
-* **`GridLock-0.8.8-x86_64.AppImage` (Lite Edition)**: Bundles the `gridlock` binary, Qt6 Wayland (`libqwayland*.so`, `wayland-decoration-client`, `wayland-graphics-integration-client`, `wayland-shell-integration`) and XCB (`libqxcb.so`, `xcbglintegrations`, `libxcb-cursor.so.0`) platform plugins, `libqtadvancedcss`, `qtermwidget6` color schemes and keyboard layouts, and SQLite3 docset drivers without tutorial binaries.
-* **`GridLock-0.8.8-Tutorials-x86_64.AppImage` (Tutorials Edition)**: Includes everything in the Lite Edition plus all 8 MPI tutorial source files and pre-compiled debug binaries under `usr/share/gridlock/tutorial/`.
+* **`GridLock-0.9.1-x86_64.AppImage` (Lite Edition)**: Bundles the `gridlock` binary, Qt6 Wayland (`libqwayland*.so`, `wayland-decoration-client`, `wayland-graphics-integration-client`, `wayland-shell-integration`) and XCB (`libqxcb.so`, `xcbglintegrations`, `libxcb-cursor.so.0`) platform plugins, `libqtadvancedcss`, `qtermwidget6` color schemes and keyboard layouts, and SQLite3 docset drivers without tutorial binaries.
+* **`GridLock-0.9.1-Tutorials-x86_64.AppImage` (Tutorials Edition)**: Includes everything in the Lite Edition plus all 8 MPI tutorial source files and pre-compiled debug binaries under `usr/share/gridlock/tutorial/`.
 
 ### Running the AppImage
 
 ```bash
-chmod +x GridLock-0.8.8-Tutorials-x86_64.AppImage
-./GridLock-0.8.8-Tutorials-x86_64.AppImage
+chmod +x GridLock-0.9.1-Tutorials-x86_64.AppImage
+./GridLock-0.9.1-Tutorials-x86_64.AppImage
 ```
 
-* **Wayland and X11 Selection**: `AppRun` configures `QT_PLUGIN_PATH="$APPDIR/usr/plugins"` and `usr/bin/qt.conf`. When both `WAYLAND_DISPLAY` and `DISPLAY` are active and `QT_QPA_PLATFORM` is unset, `AppRun` exports `QT_QPA_PLATFORM="wayland;xcb"` so Qt6 connects over Wayland first and falls back to X11/XCB if needed. On native (non-WSLg) Wayland compositors, `src/main.cpp` sets `QT_WAYLAND_DISABLE_WINDOWDECORATION=1`.
+* **Wayland and X11 Selection**: `AppRun` configures `QT_PLUGIN_PATH="$APPDIR/usr/plugins"` and `usr/bin/qt.conf`. When both `WAYLAND_DISPLAY` and `DISPLAY` are active and `QT_QPA_PLATFORM` is unset, `AppRun` exports `QT_QPA_PLATFORM="wayland;xcb"` so Qt6 connects over Wayland first and falls back to X11/XCB if needed.
 * **Running Without `libfuse2`**: On containers or minimal hosts without FUSE, extract and run on the fly:
   ```bash
-  ./GridLock-0.8.8-x86_64.AppImage --appimage-extract-and-run
+  ./GridLock-0.9.1-x86_64.AppImage --appimage-extract-and-run
   # or export APPIMAGE_EXTRACT_AND_RUN=1
   ```
 * **External Host Tools Used at Runtime**: The AppImage bundles the GUI and Qt6 runtime. Host debugging, compilation, and LSP features invoke tools from your system `PATH` when present: `gdb` (or `gdb-multiarch`, `lldb-dap`, `cuda-gdb`, `rocgdb`), `mpirun` / `mpiexec`, `mpicxx` / `mpicc` / `g++`, `objdump` (`binutils`), `clangd`, and `man`.
 
 > [!IMPORTANT]
-> **Wayland vs. X11 Platform Selection**: When both `WAYLAND_DISPLAY` and `DISPLAY` are active and `QT_QPA_PLATFORM` is unset, `AppRun` exports `QT_QPA_PLATFORM="wayland;xcb"` while `src/main.cpp` disables client-side decorations (`QT_WAYLAND_DISABLE_WINDOWDECORATION=1`) outside WSLg so tiling Wayland compositors manage frames natively. Set `QT_QPA_PLATFORM=xcb` if you need to force X11/XWayland.
+> **Wayland vs. X11 Platform Selection**: When both `WAYLAND_DISPLAY` and `DISPLAY` are active and `QT_QPA_PLATFORM` is unset, `AppRun` exports `QT_QPA_PLATFORM="wayland;xcb"`. Set `QT_QPA_PLATFORM=xcb` if you need to force X11/XWayland.
 
 ---
 
 ## 2. System Dependencies for Source Builds
 
-GridLock requires a C++23 compiler (`GCC 13+` or `Clang 16+`), `Meson >= 1.1`, `Ninja`, `CMake` (when building `Qt-Advanced-Stylesheets` or `qtermwidget6`), `Qt6` (`Core`, `Gui`, `Widgets`, `Network`, `Sql`, `Concurrent`, `Svg`, `OpenGLWidgets`, `Qml`, `Test`), `qtermwidget6`, `tomlplusplus` (auto-fetched via `external/tomlplusplus.wrap` if absent), and an MPI implementation (`OpenMPI` or `MPICH`).
+GridLock requires a C++23 compiler (`GCC 13+`, `Clang 17+`, or Intel oneAPI `icpx 2024+`), `Meson >= 1.3.0`, `Ninja`, `CMake` (when building `Qt-Advanced-Stylesheets` or `qtermwidget6`), `Qt6` (`Core`, `Gui`, `Widgets`, `Network`, `Sql`, `Concurrent`, `Svg`, `OpenGLWidgets`, `Qml`, `Test`), `qtermwidget6`, `tomlplusplus` (auto-fetched via `external/tomlplusplus.wrap` if absent), and an MPI implementation (`OpenMPI` or `MPICH`).
 
 ### Arch Linux (`pacman`)
 

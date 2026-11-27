@@ -6,7 +6,7 @@ The following table indicates which versions of GridLock currently receive secur
 
 | Version | Supported | Notes |
 | :--- | :---: | :--- |
-| `>= 0.9.0` | ✅ | Current `0.x` release line (best-effort pre-`1.0.0` security fixes) |
+| `0.9.x` (`>= 0.9.0`) | ✅ | Current `0.x` release line (`0.9.1`, best-effort pre-`1.0.0` security fixes) |
 | `< 0.9.0` | ❌ | Unsupported |
 
 > [!NOTE]

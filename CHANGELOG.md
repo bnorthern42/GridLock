@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> Planned `0.9.1` patch line.
+## [0.9.1] - 2026-11-26
 
 ### Added
 - **`LocalSlurmBackend` Submission, Node Discovery & Multi-Rank `gdbserver` Auto-Attach (`LocalSlurmBackend`, `MainWindow`, `MainWindowBuild`, `MainWindowDebugger`, `MainWindowToolbar`, `SpackManager`)**:
@@ -325,3 +325,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace State Refresh:** Fixed a critical state bug where loading a new session or workspace failed to visually update the `ProjectExplorerWidget`. The file tree now correctly re-roots upon the `sessionLoaded` signal.
 - **Vulkan CI Crash:** Completely purged lingering `QVulkanInstance` boilerplate from `src/main.cpp` that was causing `SIGABRT` compilation failures in environments lacking Vulkan headers.
 - **Test Suite Linker Errors:** Fixed a Meson dependency issue where `gridlock_lsp_tests` failed to link against the newly implemented `ConfigManager.cpp`.
+
+[Unreleased]: https://github.com/bnorthern42/GridLock/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/bnorthern42/GridLock/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/bnorthern42/GridLock/releases/tag/v0.9.0

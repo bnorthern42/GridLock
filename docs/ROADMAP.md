@@ -1,11 +1,11 @@
 # GridLock Engineering Roadmap
 
-This document tracks completed **`v0.9.0` (Current)** milestones and planned post-`v0.9.0` engineering targets through **`v1.0.0`**.
+This document tracks completed **`v0.9.1` (Current)** milestones and planned post-`v0.9.x` engineering targets through **`v1.0.0`**.
 
-For capabilities shipped through **`v0.9.0`** (including the frozen C99 Plugin ABI `v1.0`, multi-forge `plugins.toml` / `plugins-lock.toml` installer, live MPMD GDB/MI3 and LLDB-DAP multi-rank debugging, local `/proc` MPI job attach, remote `qemu-user -g` and `gdbserver` target support, `DeadlockAnalyzer`, `MemView` `process_vm_readv` diffing, `MemoryProfilerWidget` `LD_PRELOAD` heap attribution, topological `PointerGraphDialog`, multi-rank `ArrayPlotDialog`, `ProgrammerCalculatorDialog`, multi-scope Search Everywhere, customizable toolbar chrome, 2D CFG + Decompiler, `ClangdLspClient`, non-suspending logpoints, CoW fork checkpoints, reverse execution, and 12 dark/light themes), see [CHANGELOG.md](https://github.com/bnorthern42/GridLock/blob/master/CHANGELOG.md) and the user guides in `docs/`.
+For capabilities shipped through **`v0.9.1`** (including the frozen C99 Plugin ABI `v1.0`, multi-forge `plugins.toml` / `plugins-lock.toml` installer, live MPMD GDB/MI3 and LLDB-DAP multi-rank debugging, local `/proc` MPI job attach, remote `qemu-user -g` / `gdbserver` / `remote.toml` preset support, opt-in `LocalSlurmBackend` batch submission and auto-attach, recursive fuzzy project search, `DeadlockAnalyzer`, `MemView` `process_vm_readv` diffing, `MemoryProfilerWidget` `LD_PRELOAD` heap attribution, topological `PointerGraphDialog`, multi-rank `ArrayPlotDialog`, `ProgrammerCalculatorDialog`, multi-scope Search Everywhere, customizable toolbar chrome, 2D CFG + Decompiler, `ClangdLspClient`, non-suspending logpoints, CoW fork checkpoints, reverse execution, and 12 dark/light themes), see [CHANGELOG.md](https://github.com/bnorthern42/GridLock/blob/master/CHANGELOG.md) and the user guides in `docs/`.
 
 > [!IMPORTANT]
-> **Scope Boundary**: GridLock focuses on local workstation MPI debugging, remote `gdbserver` / `qemu-user` target attachment, and offline `#SBATCH` batch script generation; live remote SLURM queue submission over SSH is out of scope.
+> **Scope Boundary**: GridLock focuses on local workstation MPI debugging, remote `gdbserver` / `qemu-user` target attachment (`remote.toml`), and opt-in `LocalSlurmBackend` batch submission (`sbatch` / `squeue` / `scontrol` -> per-rank `gdbserver --multi` auto-attach, experimental on production clusters).
 
 ---
 

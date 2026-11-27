@@ -1,6 +1,6 @@
 # Contributing to GridLock
 
-Thank you for your interest in contributing to GridLock (`v0.9.0`). GridLock is an open-source C++23 and Qt6 graphical debugger frontend for GDB (`GDB/MI3`) and LLDB (`DAP`) built for multi-rank MPI debugging and ELF64 binary inspection.
+Thank you for your interest in contributing to GridLock (`v0.9.1`). GridLock is an open-source C++23 and Qt6 graphical debugger frontend for GDB (`GDB/MI3`) and LLDB (`DAP`) built for multi-rank MPI debugging and ELF64 binary inspection.
 
 ---
 
@@ -19,7 +19,9 @@ Before making changes, review the architecture and extension guides on the [Grid
 
 ## 2. Building & Running Tests
 
-### Build From Source (`Meson` + `Ninja`)
+### Build From Source (`Meson >= 1.3.0` + `Ninja`, C++23 Compiler)
+
+Requires **Meson `>= 1.3.0`**, **Ninja**, **Qt 6**, and a C++23 compiler (**GCC `13+`**, **Clang `17+`**, or Intel oneAPI **`icpx` `2024+`**).
 
 ```bash
 git clone --recurse-submodules https://github.com/bnorthern42/GridLock.git
