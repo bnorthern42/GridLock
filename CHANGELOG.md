@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `LanguageExpressionHelper.hpp` for Fortran 1-based inclusive slice formatting (`vec(1:16)`, `mat(2:5, 1:4)`), Fortran base-address evaluation (`&(arr)` without C `[0]` subscripting), GDB Fortran array type/bounds parsing (`real(kind=8) (10,20)`, `integer(kind=4) (0:9,1:5)`), generalized N-D column-major vs. row-major indexing, and contiguous-range resolution in `PluginHostBridge`.
   - Updated `ArrayPlotDialog`, `ArrayPlotCanvas`, and `TensorSliceTableModel` to display a live `Fortran (1-based, column-major)` / `C/C++ (0-based, row-major)` badge, switch offset spinboxes and table headers to 1-based bounds on Fortran frames, parse Fortran `(start:end)` and `(r1:r2, c1:c2)` slices, and render 2D heatmaps and tensor tables in column-major order.
 
+### Changed
+- **Pruned Qt6 Dependencies, Optional `Qt6::Svg` Feature & Optional MPI Tutorial Targets (`meson.build`, `meson_options.txt`, `PointerGraphDialog`, `docs/Stability-Audit.md`)**:
+  - Removed unused `Qt6::Qml` and `Qt6::OpenGLWidgets` modules from `meson.build` and moved `Qt6::Test` strictly to the test targets so the `gridlock` binary no longer requires test or QML/OpenGL packages on minimal HPC cluster images.
+  - Added the `-Dsvg=auto|enabled|disabled` Meson feature option gating `Qt6::Svg` (`GRIDLOCK_HAS_QT_SVG`) with a clean PNG-only fallback in `PointerGraphDialog`, resolved the `Qt-Advanced-Stylesheets` Meson sandbox include warning, and made the `mpicc`/`mpicxx` tutorial targets optional (`required: false`).
+
 ## [0.9.1] - 2026-11-26
 
 ### Added

@@ -19,7 +19,9 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#ifdef GRIDLOCK_HAS_QT_SVG
 #include <QSvgGenerator>
+#endif
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <algorithm>
@@ -276,6 +278,11 @@ void PointerGraphDialog::setupUi() {
   m_undoClearBtn = new QPushButton(QStringLiteral("Undo Clear"), this); m_undoClearBtn->setObjectName(QStringLiteral("pointerGraphUndoClearBtn"));
   m_undoClearBtn->setEnabled(false);
   m_exportSvgBtn = new QPushButton(QStringLiteral("Export SVG..."), this); m_exportSvgBtn->setObjectName(QStringLiteral("pointerGraphExportSvgBtn"));
+#ifndef GRIDLOCK_HAS_QT_SVG
+  m_exportSvgBtn->setEnabled(false);
+  m_exportSvgBtn->setVisible(false);
+  m_exportSvgBtn->setToolTip(QStringLiteral("SVG export unavailable (built with -Dsvg=disabled)"));
+#endif
   m_exportPngBtn = new QPushButton(QStringLiteral("Export PNG..."), this); m_exportPngBtn->setObjectName(QStringLiteral("pointerGraphExportPngBtn"));
   auto* zoomOutBtn = new QPushButton(QStringLiteral("Zoom -"), this);
   m_resetZoomBtn = new QPushButton(QStringLiteral("100%"), this); m_resetZoomBtn->setObjectName(QStringLiteral("pointerGraphResetZoomBtn"));
@@ -720,6 +727,7 @@ bool PointerGraphDialog::exportGraphToPng(const QString& filePath) {
 }
 
 bool PointerGraphDialog::exportGraphToSvg(const QString& filePath) {
+#ifdef GRIDLOCK_HAS_QT_SVG
   if (!m_scene || filePath.trimmed().isEmpty()) return false;
   QRectF bounds = m_scene->itemsBoundingRect();
   if (bounds.isEmpty()) bounds = QRectF(0.0, 0.0, 640.0, 400.0);
@@ -742,6 +750,10 @@ bool PointerGraphDialog::exportGraphToSvg(const QString& filePath) {
   m_scene->render(&painter, QRectF(0.0, 0.0, svgSize.width(), svgSize.height()), bounds);
   painter.end();
   return QFileInfo::exists(filePath) && QFileInfo(filePath).size() > 0;
+#else
+  Q_UNUSED(filePath);
+  return false;
+#endif
 }
 
 }  // namespace gridlock::ui

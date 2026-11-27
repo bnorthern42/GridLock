@@ -400,8 +400,12 @@ static void testPointerGraphControlsAndExport() {
     QApplication::sendEvent(gv->viewport(), &wheelIn); QVERIFY(pg.zoomFactor() > 1.05); pg.setZoomFactor(9.0); QVERIFY(std::abs(pg.zoomFactor() - 2.5) < 1e-3); pg.setZoomFactor(0.05); QVERIFY(std::abs(pg.zoomFactor() - 0.25) < 1e-3); pg.resetZoom(); QVERIFY(std::abs(pg.zoomFactor() - 1.0) < 1e-3);
     QTest::mouseClick(gv->viewport(), Qt::LeftButton, Qt::NoModifier, pg.minimapViewportRect().center().toPoint());
     QTemporaryDir expDir; QVERIFY(expDir.isValid()); const QString pngOut = expDir.filePath(QStringLiteral("graph.png")), svgOut = expDir.filePath(QStringLiteral("graph.svg"));
-    QVERIFY(pg.exportGraphToPng(pngOut) && pg.exportGraphToSvg(svgOut) && QImage(pngOut).width() >= 400); QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg")));
-
+    QVERIFY(pg.exportGraphToPng(pngOut) && QImage(pngOut).width() >= 400);
+#ifdef GRIDLOCK_HAS_QT_SVG
+    QVERIFY(pg.exportGraphToSvg(svgOut)); QFile sf(svgOut); QVERIFY(sf.open(QIODevice::ReadOnly) && QString::fromUtf8(sf.readAll()).contains(QStringLiteral("<svg")));
+#else
+    QVERIFY(!pg.exportGraphToSvg(svgOut));
+#endif
     // Regression coverage: (1) un-elided per-row hover tooltips, (2) Shift+Click width expansion without neighbor overlap, (3) double-click pointer deref expansion.
     pg.clearGraph(); pg.resetZoom(); QApplication::processEvents();
     const QString longEnumVal = QStringLiteral("mfem::Operator::Complex_Hypre_ParCSR");
@@ -754,45 +758,27 @@ void TestMainWindowUI::testFortranFrameDetectionAndColumnMajorPlotter() {
     QCOMPARE(badge->text(), QStringLiteral("Fortran (1-based, column-major)"));
 
     // Verify 1-based Fortran headers and column-major indexing in TensorSliceTableModel.
-    auto* tm = dlg.tensorTableModel();
-    QVERIFY(tm != nullptr);
-    QCOMPARE(tm->indexBase(), 1);
+    auto* tm = dlg.tensorTableModel(); QVERIFY(tm != nullptr); QCOMPARE(tm->indexBase(), 1);
     dlg.setElementTypeFromString(QStringLiteral("real(kind=8) (2,3)"));
-    QCOMPARE(dlg.elementType(), ArrayPlotDialog::ElementType::Float64);
-    QCOMPARE(dlg.rows(), 2);
-    QCOMPARE(dlg.cols(), 3);
+    QVERIFY(dlg.elementType() == ArrayPlotDialog::ElementType::Float64 && dlg.rows() == 2 && dlg.cols() == 3);
     // Column-major memory for a 2x3 matrix: col 1 = [10, 20], col 2 = [30, 40], col 3 = [50, 60].
     dlg.setSamples({10.0, 20.0, 30.0, 40.0, 50.0, 60.0}, 2, 3);
-    QCOMPARE(tm->headerData(0, Qt::Horizontal).toString(), QStringLiteral("(1)"));
-    QCOMPARE(tm->headerData(1, Qt::Vertical).toString(), QStringLiteral("(2)"));
-    QCOMPARE(tm->cellValue(0, 0), 10.0);
-    QCOMPARE(tm->cellValue(1, 0), 20.0);
-    QCOMPARE(tm->cellValue(0, 1), 30.0);
-    QCOMPARE(tm->cellValue(1, 2), 60.0);
+    QVERIFY(tm->headerData(0, Qt::Horizontal).toString() == QStringLiteral("(1)") && tm->headerData(1, Qt::Vertical).toString() == QStringLiteral("(2)"));
+    QVERIFY(tm->cellValue(0, 0) == 10.0 && tm->cellValue(1, 0) == 20.0 && tm->cellValue(0, 1) == 30.0 && tm->cellValue(1, 2) == 60.0);
 
     // Verify Fortran 1-based slice parsing (`vec(2:5)`) and Fortran base-address expression `&(vec)`.
     sentCmds.clear();
     dlg.setDimensions(1, 4); dlg.setExpression(QStringLiteral("vec(2:5)"));
-    QCOMPARE(dlg.baseExpression(), QStringLiteral("vec"));
-    QCOMPARE(dlg.sliceOffset(), 1);
-    QCOMPARE(offsetSpin->value(), 2);
-    QCOMPARE(dlg.cols(), 4);
+    QVERIFY(dlg.baseExpression() == QStringLiteral("vec") && dlg.sliceOffset() == 1 && offsetSpin->value() == 2 && dlg.cols() == 4);
     dlg.refreshPlot();
     QVERIFY(sentCmds.contains(QStringLiteral("-data-read-memory-bytes &(vec) 40")));
 
     // Verify resuming clears cached language and switching to a C++ frame restores 0-based row-major mode.
     coord.processGdbOutput(0, QStringLiteral("*running,thread-id=\"all\"\n"));
     QCOMPARE(coord.activeLanguageForRank(0), SourceLanguage::Unknown);
-    coord.processGdbOutput(
-        0,
-        QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x402000\",func=\"main\","
-                       "fullname=\"/tmp/main.cpp\",line=\"18\",args=[]}\n"));
+    coord.processGdbOutput(0, QStringLiteral("*stopped,reason=\"breakpoint-hit\",frame={addr=\"0x402000\",func=\"main\",fullname=\"/tmp/main.cpp\",line=\"18\",args=[]}\n"));
     coord.processGdbOutput(0, QStringLiteral("215^done,value=\"c++\"\n"));
     QApplication::processEvents();
-    QCOMPARE(dlg.sourceLanguage(), SourceLanguage::Cpp);
-    QCOMPARE(dlg.memoryOrder(), TensorSliceTableModel::MemoryOrder::CRowMajor);
-    QCOMPARE(offsetSpin->minimum(), 0);
-    QCOMPARE(tm->indexBase(), 0);
-    QCOMPARE(badge->text(), QStringLiteral("C/C++ (0-based, row-major)"));
+    QVERIFY(dlg.sourceLanguage() == SourceLanguage::Cpp && dlg.memoryOrder() == TensorSliceTableModel::MemoryOrder::CRowMajor && offsetSpin->minimum() == 0 && tm->indexBase() == 0 && badge->text() == QStringLiteral("C/C++ (0-based, row-major)"));
     dlg.close();
 }

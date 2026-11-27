@@ -8,7 +8,14 @@ add_project_arguments('-DGRIDLOCK_BUILDING_HOST', '-Wall', '-Wextra', '-Wpedanti
 
 # Dependencies
 qt6 = import('qt6')
-qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Test', 'Sql', 'Network', 'OpenGLWidgets', 'Concurrent', 'Qml', 'Svg'])
+qt6_core_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Gui', 'Sql', 'Network', 'Concurrent'])
+qt6_svg_dep = dependency('qt6', modules: ['Svg'], required: get_option('svg'))
+have_qt6_svg = qt6_svg_dep.found()
+if have_qt6_svg
+  add_project_arguments('-DGRIDLOCK_HAS_QT_SVG=1', language: 'cpp')
+endif
+qt6_app_deps = [qt6_core_dep] + (have_qt6_svg ? [qt6_svg_dep] : [])
+qt6_test_dep = dependency('qt6', modules: ['Test'], required: false)
 tomlplusplus_dep = dependency('tomlplusplus', fallback: ['tomlplusplus', 'tomlplusplus_dep'])
 qterm_opt = get_option('qtermwidget')
 qtermwidget_deps = []
@@ -24,12 +31,18 @@ if not qterm_opt.disabled()
   endif
 endif
 add_project_arguments(have_qtermwidget6 ? '-DHAVE_QTERMWIDGET6=1' : '-DHAVE_QTERMWIDGET6=0', language: 'cpp')
-summary({'Terminal backend': have_qtermwidget6 ? 'qtermwidget6 (PTY)' : 'Qt6 built-in fallback'}, section: 'Features')
+summary({
+  'Terminal backend': have_qtermwidget6 ? 'qtermwidget6 (PTY)' : 'Qt6 built-in fallback',
+  'Qt6::Svg export': have_qt6_svg,
+  'Qt6::Test suites': qt6_test_dep.found(),
+}, section: 'Features')
 acss_dep = dependency('QtAdvancedStylesheets', method: 'cmake', modules: 'QtAdvancedStylesheets::qtadvancedcss', required: false)
 if not acss_dep.found()
   cpp = meson.get_compiler('cpp')
   acss_lib = cpp.find_library('qtadvancedcss', dirs: [meson.current_source_dir() + '/external/Qt-Advanced-Stylesheets/build/lib'])
-  acss_dep = declare_dependency(dependencies: acss_lib, include_directories: include_directories('external/Qt-Advanced-Stylesheets/src'))
+  acss_dep = declare_dependency(
+    dependencies: acss_lib,
+    compile_args: ['-isystem', meson.current_source_dir() / 'external/Qt-Advanced-Stylesheets/src'])
 endif
 # Version generation
 conf_data = configuration_data()
@@ -116,7 +129,7 @@ moc_headers = [
 # Process Qt6 files
 processed_qt_files = qt6.compile_moc(
   headers : moc_headers,
-  dependencies: qt6_dep
+  dependencies: qt6_core_dep
 )
 
 compiled_resources = qt6.compile_resources(
@@ -139,7 +152,7 @@ executable('gridlock',
   processed_qt_files,
   compiled_resources,
   include_directories : inc,
-  dependencies : [qt6_dep, tomlplusplus_dep, acss_dep] + qtermwidget_deps,
+  dependencies : qt6_app_deps + [tomlplusplus_dep, acss_dep] + qtermwidget_deps,
   build_rpath : '$ORIGIN/../lib:' + meson.current_source_dir() + '/external/Qt-Advanced-Stylesheets/build/lib',
   install_rpath : '$ORIGIN/../lib',
   install : true)
@@ -151,6 +164,9 @@ install_data('resources/icon.png',
              rename: 'gridlock.png',
              install_dir: get_option('datadir') / 'icons/hicolor/512x512/apps')
 
+
+if qt6_test_dep.found()
+qt6_dep = qt6_app_deps + [qt6_test_dep]
 
 # Test executable
 test_src = [
@@ -927,22 +943,27 @@ test('plugin_manager_tests', gridlock_plugin_manager_tests,
   depends : [test_dummy_plugin, test_bad_abi_plugin],
   env: ['QT_QPA_PLATFORM=offscreen']
 )
+endif
 
+mpicc_prog = find_program('mpicc', required: false)
+if mpicc_prog.found()
+  custom_target('mpi_mm_bin',
+    input: 'tutorial/mpi_mm.c',
+    output: 'mpi_mm',
+    command: [mpicc_prog, '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
+    build_by_default: true
+  )
+endif
 
-
-custom_target('mpi_mm_bin',
-  input: 'tutorial/mpi_mm.c',
-  output: 'mpi_mm',
-  command: ['mpicc', '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
-  build_by_default: true
-)
-
-custom_target('catchpoint_exceptions_bin',
-  input: 'tutorial/catchpoint_exceptions.cpp',
-  output: 'catchpoint_exceptions',
-  command: ['mpicxx', '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
-  build_by_default: true
-)
+mpicxx_prog = find_program('mpicxx', required: false)
+if mpicxx_prog.found()
+  custom_target('catchpoint_exceptions_bin',
+    input: 'tutorial/catchpoint_exceptions.cpp',
+    output: 'catchpoint_exceptions',
+    command: [mpicxx_prog, '-g', '-O0', '@INPUT@', '-o', '@OUTPUT@'],
+    build_by_default: true
+  )
+endif
 
 mpif90_prog = find_program('mpif90', required: false)
 if mpif90_prog.found()

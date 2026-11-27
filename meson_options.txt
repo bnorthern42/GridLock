@@ -1,2 +1,4 @@
 option('qtermwidget', type: 'feature', value: 'auto',
        description: 'Use external qtermwidget6 for the embedded terminal (falls back to built-in Qt6 terminal if unavailable)')
+option('svg', type: 'feature', value: 'auto',
+       description: 'Enable optional Qt6::Svg export support')
